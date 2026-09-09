@@ -6,7 +6,7 @@
  */
 #include "code/native/object/internal.h"
 #include "base/parallel.h"
-#include "code/native/ir/machine.h"
+#include "code/ir/machine.h"
 
 #include <errno.h>
 #include <inttypes.h>
@@ -34,6 +34,7 @@ typedef struct {
 typedef struct {
   char symbol[256];
   size_t off;
+  unsigned type;
 } ny_a64_reloc_t;
 
 typedef struct {
@@ -67,27 +68,44 @@ typedef struct {
   size_t err_len;
 } ny_a64_obj_ctx_t;
 
+static bool ny_a64_debug_line_push(ny_native_debug_line_t **lines,
+                                   size_t *count, size_t *cap,
+                                   ny_native_debug_line_t line);
+static bool ny_a64_mach_build_bundle_debug(
+    const ny_mach_func_t *rt_main_mir, const ny_mach_func_t *func_mirs,
+    const char *const *func_names, size_t func_count,
+    const ny_native_target_info_t *target, const char *entry_symbol,
+    bool tag_return, ny_obj_buf_t *code, ny_x64_obj_symbol_def_t *defs,
+    size_t *def_count, ny_x64_obj_reloc_t *relocs, size_t *reloc_count,
+    const nyir_func_t *rt_main_source, const nyir_func_t *func_sources,
+    ny_native_debug_line_t **debug_lines, size_t *debug_line_count,
+    size_t *debug_line_cap, char *err, size_t err_len);
+
 /*
- * Relocations are program-owned transport, not a property of a single
- * encoder stack frame.  Keep the bound explicit so a malformed/generated
- * input cannot turn object emission into unbounded allocation.
+ * Relocations use a geometrically growing transport buffer. The caller still
+ * owns the total bundle budget and allocation failures remain fatal.
  */
 static bool ny_a64_reserve_relocs(ny_a64_reloc_t **data, size_t *cap,
                                   size_t want, char *err, size_t err_len) {
-  if (!data || !cap || want > NY_NATIVE_MAX_RELOCS) {
+  if (!data || !cap) {
     ny_native_set_err(err, err_len,
-                      "AArch64 ELF object writer: relocation limit is 4096");
+                      "AArch64 ELF object writer: invalid relocation buffer");
     return false;
   }
   if (want <= *cap)
     return true;
   size_t next = *cap ? *cap : 256;
   while (next < want) {
-    if (next > NY_NATIVE_MAX_RELOCS / 2) {
-      next = NY_NATIVE_MAX_RELOCS;
+    if (next > SIZE_MAX / 2) {
+      next = want;
       break;
     }
     next *= 2;
+  }
+  if (next > SIZE_MAX / sizeof(**data)) {
+    ny_native_set_err(err, err_len,
+                      "AArch64 ELF object writer: relocation buffer too large");
+    return false;
   }
   ny_a64_reloc_t *grown = realloc(*data, next * sizeof(*grown));
   if (!grown) {
@@ -113,6 +131,21 @@ static bool ny_a64_u32(ny_a64_obj_ctx_t *c, uint32_t word) {
     return false;
   }
   return true;
+}
+
+/*
+ * ADD/SUB (immediate) has a 12-bit immediate. Split large frame adjustments
+ * into encodable chunks while keeping all locals anchored at x29.
+ */
+static bool ny_a64_adjust_sp(ny_a64_obj_ctx_t *c, bool subtract,
+                             unsigned amount) {
+  const uint32_t base = subtract ? 0xd10003ffu : 0x910003ffu;
+  while (amount > 4095u) {
+    if (!ny_a64_u32(c, base | (4095u << 10)))
+      return false;
+    amount -= 4095u;
+  }
+  return amount == 0 || ny_a64_u32(c, base | (amount << 10));
 }
 
 static bool ny_a64_reg_mem_base(ny_a64_obj_ctx_t *c, bool load,
@@ -380,7 +413,8 @@ static bool ny_a64_patch_branch(ny_a64_obj_ctx_t *c, size_t off,
   return true;
 }
 
-static bool ny_a64_add_reloc(ny_a64_obj_ctx_t *c, const char *symbol) {
+static bool ny_a64_record_reloc(ny_a64_obj_ctx_t *c, const char *symbol,
+                                unsigned type) {
   if (!symbol || !*symbol ||
       !ny_a64_reserve_relocs(&c->relocs, &c->reloc_cap,
                              c->reloc_count + 1, c->err, c->err_len)) {
@@ -391,7 +425,18 @@ static bool ny_a64_add_reloc(ny_a64_obj_ctx_t *c, const char *symbol) {
   ny_a64_reloc_t *r = &c->relocs[c->reloc_count++];
   snprintf(r->symbol, sizeof(r->symbol), "%s", symbol);
   r->off = c->code.len;
-  return ny_a64_u32(c, 0x94000000u);
+  r->type = type;
+  return true;
+}
+
+static bool ny_a64_add_reloc_type(ny_a64_obj_ctx_t *c, const char *symbol,
+                                  unsigned type) {
+  return ny_a64_record_reloc(c, symbol, type) &&
+         ny_a64_u32(c, 0x94000000u);
+}
+
+static bool ny_a64_add_reloc(ny_a64_obj_ctx_t *c, const char *symbol) {
+  return ny_a64_add_reloc_type(c, symbol, NY_RELOC_AARCH64_CALL26);
 }
 
 static bool ny_a64_emit_inst(ny_a64_obj_ctx_t *c,
@@ -415,6 +460,7 @@ static bool ny_a64_emit_inst(ny_a64_obj_ctx_t *c,
   case NYIR_XOR_I64: return ny_a64_binop(c, in, 0xca000000u);
   case NYIR_SHL_I64: return ny_a64_binop(c, in, 0x9ac02000u);
   case NYIR_SAR_I64: return ny_a64_binop(c, in, 0x9ac02800u);
+  case NYIR_ROR32_I64: return ny_a64_binop(c, in, 0x1ac02c00u);
   case NYIR_DIV_I64: return ny_a64_binop(c, in, 0x9ac00c00u);
   case NYIR_MOD_I64:
     return ny_a64_load_value(c, 0, in->a) &&
@@ -451,6 +497,22 @@ static bool ny_a64_emit_inst(ny_a64_obj_ctx_t *c,
     if (off > 4095) return false;
     return ny_a64_u32(c, 0x910003e0u | ((uint32_t)off << 10)) &&
            ny_a64_store_value(c, in->dst, 0);
+  }
+  case NYIR_ADDR_SYMBOL: {
+    if (!in->symbol || !*in->symbol)
+      return false;
+    /*
+     * adrp x0, symbol@PAGE; add x0, x0, symbol@PAGEOFF
+     */
+    if (!ny_a64_record_reloc(c, in->symbol,
+                             NY_RELOC_AARCH64_ADR_PREL_PG_HI21) ||
+        !ny_a64_u32(c, 0x90000000u))
+      return false;
+    if (!ny_a64_record_reloc(c, in->symbol,
+                             NY_RELOC_AARCH64_ADD_ABS_LO12_NC) ||
+        !ny_a64_u32(c, 0x91000000u))
+      return false;
+    return ny_a64_store_value(c, in->dst, 0);
   }
   case NYIR_LOAD_I64:
     return ny_a64_load_value(c, 0, in->a) &&
@@ -743,13 +805,8 @@ static bool ny_a64_emit_inst(ny_a64_obj_ctx_t *c,
     unsigned stack_size = (stack_used + 15u) & ~15u;
     unsigned frame_base = 31;
     if (stack_size) {
-      if (stack_size >= 4096) {
-        ny_native_set_err(c->err, c->err_len,
-                          "AArch64 object writer: outgoing call frame too large");
-        return false;
-      }
       if (!ny_a64_u32(c, 0x910003efu) ||
-          !ny_a64_u32(c, 0xd10003ffu | (stack_size << 10)))
+          !ny_a64_adjust_sp(c, true, stack_size))
         return false;
       frame_base = 15;
     }
@@ -876,8 +933,7 @@ static bool ny_a64_emit_inst(ny_a64_obj_ctx_t *c,
              (in->flags & NYIR_INST_F_EXTERN) ? "" : "ny_fn_",
              in->symbol ? in->symbol : "");
     if (!ny_a64_add_reloc(c, symbol)) return false;
-    if (stack_size &&
-        !ny_a64_u32(c, 0x910003ffu | (stack_size << 10)))
+    if (stack_size && !ny_a64_adjust_sp(c, false, stack_size))
       return false;
     if (in->dst < 0)
       return true;
@@ -1009,7 +1065,33 @@ static bool ny_a64_emit_inst(ny_a64_obj_ctx_t *c,
     }
     return ny_a64_store_value(c, in->dst, reg);
   }
-  case NYIR_ADDR_SYMBOL:
+  case NYIR_BOUNDS_CHECK: {
+    /*
+     * Inline unsigned trap: cmp x9(value), limit; b.lo ok; brk #0.
+     */
+    if (!ny_a64_load_value(c, 9, in->b))
+      return false;
+    if (in->c >= 0) {
+      if (!ny_a64_load_value(c, 10, in->c))
+        return false;
+    } else if (!ny_a64_mov_imm(c, 10, in->imm)) {
+      return false;
+    }
+    /*
+     * subs xzr, x9, x10
+     */
+    if (!ny_a64_u32(c, 0xEB0A013Fu))
+      return false;
+    /*
+     * b.lo +8 (skip brk) : cond=3, imm19=1
+     */
+    if (!ny_a64_u32(c, 0x54000023u))
+      return false;
+    /*
+     * brk #0
+     */
+    return ny_a64_u32(c, 0xD4200000u);
+  }
   case NYIR_OP_COUNT:
     ny_native_set_err(c->err, c->err_len,
                       "AArch64 object writer: unsupported op %s",
@@ -1020,6 +1102,19 @@ static bool ny_a64_emit_inst(ny_a64_obj_ctx_t *c,
                       "AArch64 object writer: unsupported op %s",
                       nyir_op_name(in->op));
     return false;
+  }
+}
+
+static unsigned ny_a64_elf_reloc_type(unsigned type) {
+  switch (type) {
+  case NY_RELOC_AARCH64_CALL26:
+    return 283u; /* R_AARCH64_CALL26 */
+  case NY_RELOC_AARCH64_ADR_PREL_PG_HI21:
+    return 275u; /* R_AARCH64_ADR_PREL_PG_HI21 */
+  case NY_RELOC_AARCH64_ADD_ABS_LO12_NC:
+    return 277u; /* R_AARCH64_ADD_ABS_LO12_NC */
+  default:
+    return type;
   }
 }
 
@@ -1161,15 +1256,8 @@ static bool ny_a64_emit_code(ny_a64_obj_ctx_t *c, bool user_function,
     cursor += ny_a64_align(size, 16);
   }
   c->frame_bytes = ny_a64_align(cursor, 16);
-  if (c->frame_bytes > 4095) {
-    ny_native_set_err(c->err, c->err_len,
-                      "AArch64 object writer: frame %d exceeds immediate slice",
-                      c->frame_bytes);
-    return false;
-  }
   if (!ny_a64_u32(c, 0xa9bf7bfdu) || !ny_a64_u32(c, 0x910003fdu) ||
-      (c->frame_bytes &&
-       !ny_a64_u32(c, 0xd10003ffu | ((uint32_t)c->frame_bytes << 10))))
+      (c->frame_bytes && !ny_a64_adjust_sp(c, true, (unsigned)c->frame_bytes)))
     return false;
   if (user_function && !ny_a64_emit_param_spills(c))
     return false;
@@ -1179,8 +1267,7 @@ static bool ny_a64_emit_code(ny_a64_obj_ctx_t *c, bool user_function,
   if (tag_return &&
       (!ny_a64_u32(c, 0xd37ff800u) || !ny_a64_u32(c, 0x91000400u)))
     return false;
-  if ((c->frame_bytes &&
-       !ny_a64_u32(c, 0x910003ffu | ((uint32_t)c->frame_bytes << 10))) ||
+  if ((c->frame_bytes && !ny_a64_adjust_sp(c, false, (unsigned)c->frame_bytes)) ||
       !ny_a64_u32(c, 0xa8c17bfdu) || !ny_a64_u32(c, 0xd65f03c0u))
     return false;
   for (size_t i = 0; i < c->patch_count; ++i) {
@@ -1406,10 +1493,14 @@ bool ny_a64_obj_build_bundle(
   if (!rt_main || !target || !entry_symbol || !*entry_symbol || !code ||
       !out_defs || !out_def_count || !out_relocs || !out_reloc_count)
     return false;
-  ny_a64_def_t defs[NY_NATIVE_MAX_DEFS];
+  ny_a64_def_t *defs = calloc(NY_NATIVE_MAX_DEFS, sizeof(*defs));
   ny_a64_reloc_t *relocs = NULL;
   size_t def_count = 0, reloc_count = 0;
   size_t reloc_cap = 0;
+  if (!defs) {
+    ny_native_set_err(err, err_len, "AArch64 object definition allocation failed");
+    return false;
+  }
   if (!ny_a64_append_functions_parallel(code, defs, &def_count, &relocs,
                                          &reloc_count, &reloc_cap, funcs, func_names,
                                          func_count, target, err, err_len))
@@ -1430,18 +1521,25 @@ bool ny_a64_obj_build_bundle(
     out_defs[i].off = defs[i].off;
     out_defs[i].size = defs[i].size;
   }
+  if (!ny_native_globaltab_append_defs(code, out_defs, &def_count, err,
+                                       err_len))
+    goto fail;
+  if (!ny_native_arraytab_append_defs(code, out_defs, &def_count, err, err_len))
+    goto fail;
   for (size_t i = 0; i < reloc_count; ++i) {
     snprintf(out_relocs[i].symbol, sizeof(out_relocs[i].symbol), "%s",
              relocs[i].symbol);
     out_relocs[i].disp_off = relocs[i].off;
-    out_relocs[i].type = NY_RELOC_AARCH64_CALL26;
+    out_relocs[i].type = relocs[i].type;
   }
   *out_def_count = def_count;
   *out_reloc_count = reloc_count;
   free(relocs);
+  free(defs);
   return true;
 fail:
   free(relocs);
+  free(defs);
   return false;
 }
 
@@ -1463,15 +1561,30 @@ bool ny_native_emit_elf64_aarch64_object_from_nirs(
     const char *entry_symbol, bool tag_return, char *err, size_t err_len) {
   if (!rt_main || !target || !path || !entry_symbol || !*entry_symbol) return false;
   ny_obj_buf_t code = {0}, file = {0}, strtab = {0};
-  ny_a64_def_t defs[NY_NATIVE_MAX_DEFS];
+  ny_a64_def_t *defs = calloc(NY_NATIVE_MAX_DEFS, sizeof(*defs));
   ny_a64_reloc_t *relocs = NULL;
   size_t def_count = 0, reloc_count = 0;
   size_t reloc_cap = 0;
   bool ok = false;
   bool built = false;
+  ny_native_debug_line_t *debug_lines = NULL;
+  size_t debug_line_count = 0;
+  size_t debug_line_cap = 0;
+  ny_obj_buf_t debug_line = {0};
+  size_t debug_base_reloc = 0;
+  size_t debug_base_def = 0;
   ny_mach_func_t top_mach = {0};
   ny_mach_func_t *func_mach = NULL;
+  uint32_t *def_names = NULL;
+  uint32_t *ext_names = NULL;
   char mach_err[256] = {0};
+  ny_x64_obj_symbol_def_t *mach_defs = NULL;
+  ny_x64_obj_reloc_t *mach_relocs = NULL;
+  if (!defs) {
+    ny_native_set_err(err, err_len,
+                      "AArch64 ELF object definition allocation failed");
+    goto done;
+  }
   bool mach_ok = ny_mach_lower_nir(rt_main, &top_mach, (1u << 8), mach_err,
                                    sizeof(mach_err));
   if (mach_ok && func_count) {
@@ -1496,13 +1609,21 @@ bool ny_native_emit_elf64_aarch64_object_from_nirs(
     }
   }
   if (mach_ok) {
-    ny_x64_obj_symbol_def_t mach_defs[NY_NATIVE_MAX_DEFS];
-    ny_x64_obj_reloc_t mach_relocs[NY_X64_OBJ_MAX_RELOCS];
+    mach_defs = calloc(NY_NATIVE_MAX_DEFS, sizeof(*mach_defs));
+    mach_relocs = calloc(NY_X64_OBJ_MAX_RELOCS, sizeof(*mach_relocs));
     size_t mach_def_count = 0, mach_reloc_count = 0;
-    if (ny_a64_mach_build_bundle(
+    if (!mach_defs || !mach_relocs) {
+      free(mach_defs);
+      free(mach_relocs);
+      mach_defs = NULL;
+      mach_relocs = NULL;
+    }
+    if (mach_defs && mach_relocs &&
+        ny_a64_mach_build_bundle_debug(
             &top_mach, func_mach, func_names, func_count, target, entry_symbol,
             tag_return, &code, mach_defs, &mach_def_count, mach_relocs,
-            &mach_reloc_count, mach_err, sizeof(mach_err))) {
+            &mach_reloc_count, rt_main, funcs, &debug_lines,
+            &debug_line_count, &debug_line_cap, mach_err, sizeof(mach_err))) {
       if (mach_def_count <= NY_NATIVE_MAX_DEFS &&
           mach_reloc_count <= NY_X64_OBJ_MAX_RELOCS) {
         relocs = malloc((mach_reloc_count ? mach_reloc_count : 1) *
@@ -1533,6 +1654,10 @@ bool ny_native_emit_elf64_aarch64_object_from_nirs(
     free(func_mach);
   }
   if (!built) {
+    free(debug_lines);
+    debug_lines = NULL;
+    debug_line_count = 0;
+    debug_line_cap = 0;
     ny_obj_free(&code);
     code = (ny_obj_buf_t){0};
     def_count = reloc_count = 0;
@@ -1549,6 +1674,51 @@ bool ny_native_emit_elf64_aarch64_object_from_nirs(
       goto done;
   }
 
+  if (!debug_lines) {
+    debug_line_cap = func_count + 1;
+    if (debug_line_cap < 32)
+      debug_line_cap = 32;
+    debug_lines = calloc(debug_line_cap, sizeof(*debug_lines));
+    if (!debug_lines)
+      goto done;
+  }
+  for (size_t i = 0; i < func_count; ++i) {
+    const char *name = func_names && func_names[i] ? func_names[i] : "unknown_fn";
+    char symbol[256];
+    snprintf(symbol, sizeof(symbol), "%sny_fn_%s",
+             target->symbol_prefix ? target->symbol_prefix : "", name);
+    int def_i = ny_a64_def_index(defs, def_count, symbol);
+    if (def_i < 0)
+      continue;
+    for (size_t j = 0; funcs && j < funcs[i].len; ++j) {
+      const nyir_debug_loc_t *loc = &funcs[i].data[j].debug;
+      if (!loc->line)
+        continue;
+      if (!ny_a64_debug_line_push(
+              &debug_lines, &debug_line_count, &debug_line_cap,
+              (ny_native_debug_line_t){(size_t)def_i, defs[def_i].off,
+                                       loc->file, loc->line, loc->column}))
+        goto done;
+      break;
+    }
+  }
+  char entry_name[256];
+  snprintf(entry_name, sizeof(entry_name), "%s%s",
+           target->symbol_prefix ? target->symbol_prefix : "", entry_symbol);
+  int entry_i = ny_a64_def_index(defs, def_count, entry_name);
+  if (entry_i >= 0)
+    for (size_t j = 0; j < rt_main->len; ++j) {
+      const nyir_debug_loc_t *loc = &rt_main->data[j].debug;
+      if (!loc->line)
+        continue;
+      if (!ny_a64_debug_line_push(
+              &debug_lines, &debug_line_count, &debug_line_cap,
+              (ny_native_debug_line_t){(size_t)entry_i, defs[entry_i].off,
+                                       loc->file, loc->line, loc->column}))
+        goto done;
+      break;
+    }
+
   char externs[256][256];
   size_t extern_count = 0;
   for (size_t i = 0; i < reloc_count; ++i) {
@@ -1558,8 +1728,24 @@ bool ny_native_emit_elf64_aarch64_object_from_nirs(
     if (extern_count >= 256) goto done;
     snprintf(externs[extern_count++], 256, "%s", relocs[i].symbol);
   }
-  uint32_t def_names[256] = {0}, ext_names[256] = {0};
-  if (!ny_obj_u8(&strtab, 0)) goto done;
+  /*
+   * def_count is bounded by NY_NATIVE_MAX_DEFS (4096), not 256 -- the old
+   * fixed arrays were a ~15 KB stack smash on any bundle with more than
+   * 256 defined symbols. Heap-allocate to the real bounds.
+   */
+  if (def_count > 4096 || extern_count > 256) goto done;
+  def_names = calloc(def_count ? def_count : 1, sizeof(*def_names));
+  ext_names = calloc(extern_count ? extern_count : 1, sizeof(*ext_names));
+  if ((def_count && !def_names) || (extern_count && !ext_names)) {
+    free(def_names);
+    free(ext_names);
+    goto done;
+  }
+  if (!ny_obj_u8(&strtab, 0)) {
+    free(def_names);
+    free(ext_names);
+    goto done;
+  }
   for (size_t i = 0; i < def_count; ++i) {
     def_names[i] = (uint32_t)strtab.len;
     if (!ny_obj_emit(&strtab, defs[i].name, strlen(defs[i].name) + 1)) goto done;
@@ -1568,10 +1754,34 @@ bool ny_native_emit_elf64_aarch64_object_from_nirs(
     ext_names[i] = (uint32_t)strtab.len;
     if (!ny_obj_emit(&strtab, externs[i], strlen(externs[i]) + 1)) goto done;
   }
-  const char shstr[] = "\0.text\0.rela.text\0.symtab\0.strtab\0.shstrtab\0";
+  const char shstr[] =
+      "\0.text\0.rela.text\0.debug_line\0.rela.debug_line\0.symtab\0.strtab\0.shstrtab\0";
+  const uint32_t sh_text = 1;
+  const uint32_t sh_rela_text = 7;
+  const uint32_t sh_debug_line = 18;
+  const uint32_t sh_rela_debug_line = 30;
+  const uint32_t sh_symtab = 47;
+  const uint32_t sh_strtab = 55;
+  const uint32_t sh_shstrtab = 63;
+  const uint32_t sec_debug = 3;
+  const uint32_t sec_symtab = 5;
+  const uint32_t sec_strtab = 6;
+  const uint32_t sec_shstrtab = 7;
+  if (debug_line_count &&
+      !ny_native_build_debug_line(debug_lines, debug_line_count, code.len,
+                                  &debug_line, &debug_base_reloc,
+                                  &debug_base_def, err, err_len))
+    goto done;
+  if (debug_line_count && debug_base_def >= def_count)
+    goto done;
   if (!ny_obj_zero(&file, 64) || !ny_obj_pad_to(&file, 16)) goto done;
   size_t text_off = file.len;
   if (!ny_obj_emit(&file, code.data, code.len) || !ny_obj_pad_to(&file, 8)) goto done;
+  size_t debug_off = file.len;
+  if (debug_line_count &&
+      (!ny_obj_emit(&file, debug_line.data, debug_line.len) ||
+       !ny_obj_pad_to(&file, 8)))
+    goto done;
   size_t rela_off = file.len;
   for (size_t i = 0; i < reloc_count; ++i) {
     int di = ny_a64_def_index(defs, def_count, relocs[i].symbol);
@@ -1579,11 +1789,20 @@ bool ny_native_emit_elf64_aarch64_object_from_nirs(
     if (di < 0 && ei < 0) goto done;
     uint32_t sym = di >= 0 ? (uint32_t)(1 + di)
                            : (uint32_t)(1 + def_count + (size_t)ei);
-    uint64_t info = ((uint64_t)sym << 32) | 283u; /* R_AARCH64_CALL26 */
+    uint64_t info = ((uint64_t)sym << 32) |
+                    ny_a64_elf_reloc_type(relocs[i].type);
     if (!ny_obj_u64(&file, relocs[i].off) || !ny_obj_u64(&file, info) ||
         !ny_obj_u64(&file, 0)) goto done;
   }
   size_t rela_size = file.len - rela_off;
+  size_t rela_debug_off = file.len;
+  if (debug_line_count) {
+    uint64_t info = ((uint64_t)(1u + (uint32_t)debug_base_def) << 32) | 257u;
+    if (!ny_obj_u64(&file, debug_base_reloc) || !ny_obj_u64(&file, info) ||
+        !ny_obj_u64(&file, 0))
+      goto done;
+  }
+  size_t rela_debug_size = file.len - rela_debug_off;
   size_t symtab_off = file.len;
   if (!ny_a64_elf_sym(&file, 0, 0, 0, 0, 0)) goto done;
   for (size_t i = 0; i < def_count; ++i)
@@ -1599,11 +1818,18 @@ bool ny_native_emit_elf64_aarch64_object_from_nirs(
   if (!ny_obj_emit(&file, shstr, sizeof(shstr)) || !ny_obj_pad_to(&file, 8)) goto done;
   size_t shoff = file.len;
   if (!ny_a64_elf_sh(&file, 0, 0, 0, 0, 0, 0, 0, 0, 0) ||
-      !ny_a64_elf_sh(&file, 1, 1, 0x6, text_off, code.len, 0, 0, 16, 0) ||
-      !ny_a64_elf_sh(&file, 7, 4, 0, rela_off, rela_size, 3, 1, 8, 24) ||
-      !ny_a64_elf_sh(&file, 18, 2, 0, symtab_off, symtab_size, 4, 1, 8, 24) ||
-      !ny_a64_elf_sh(&file, 26, 3, 0, strtab_off, strtab_size, 0, 0, 1, 0) ||
-      !ny_a64_elf_sh(&file, 34, 3, 0, shstr_off, sizeof(shstr), 0, 0, 1, 0))
+      !ny_a64_elf_sh(&file, sh_text, 1, 0x6, text_off, code.len, 0, 0, 16, 0) ||
+      !ny_a64_elf_sh(&file, sh_rela_text, 4, 0, rela_off, rela_size,
+                     sec_symtab, 1, 8, 24) ||
+      (debug_line_count &&
+       (!ny_a64_elf_sh(&file, sh_debug_line, 1, 0, debug_off,
+                       debug_line.len, 0, 0, 1, 0) ||
+        !ny_a64_elf_sh(&file, sh_rela_debug_line, 4, 0, rela_debug_off,
+                       rela_debug_size, sec_symtab, sec_debug, 8, 24))) ||
+      !ny_a64_elf_sh(&file, sh_symtab, 2, 0, symtab_off, symtab_size,
+                     sec_strtab, 1, 8, 24) ||
+      !ny_a64_elf_sh(&file, sh_strtab, 3, 0, strtab_off, strtab_size, 0, 0, 1, 0) ||
+      !ny_a64_elf_sh(&file, sh_shstrtab, 3, 0, shstr_off, sizeof(shstr), 0, 0, 1, 0))
     goto done;
   file.data[0] = 0x7f; file.data[1] = 'E'; file.data[2] = 'L'; file.data[3] = 'F';
   file.data[4] = 2; file.data[5] = 1; file.data[6] = 1;
@@ -1613,11 +1839,18 @@ bool ny_native_emit_elf64_aarch64_object_from_nirs(
   ny_obj_patch_u64(&file, 40, shoff);
   ny_obj_patch_u16(&file, 52, 64);
   ny_obj_patch_u16(&file, 58, 64);
-  ny_obj_patch_u16(&file, 60, 6);
-  ny_obj_patch_u16(&file, 62, 5);
+  ny_obj_patch_u16(&file, 60, sec_shstrtab + 1);
+  ny_obj_patch_u16(&file, 62, sec_shstrtab);
   ok = ny_a64_write_file(path, &file, err, err_len);
 done:
+  free(def_names);
+  free(ext_names);
+  free(mach_defs);
+  free(mach_relocs);
+  free(defs);
   free(relocs);
+  free(debug_lines);
+  ny_obj_free(&debug_line);
   ny_obj_free(&strtab); ny_obj_free(&file); ny_obj_free(&code);
   if (!ok && err && err_len && !err[0])
     ny_native_set_err(err, err_len, "AArch64 ELF object writer failed");
@@ -1669,10 +1902,17 @@ static bool a64_ret(ny_obj_buf_t *code) {
  * block layout; calls, floating point, vectors, and true uncolored spills
  * remain explicit fallback cases. x16 and x17 stay available as encoder
  * scratch registers, so the allocator uses x0 through x15 only.
+ *
+ * Caller-saved ONLY. The pool previously used x19..x28 (the entire AAPCS64
+ * callee-saved GPR set) without any prologue saves -- every host caller
+ * holding live values there was silently corrupted. This fast path rejects
+ * calls, so caller-saved scratch is both safe and free of save/restore cost.
+ * x0/x1 avoided (primary/secondary return), x8 reserved for sret,
+ * x16/x17 are encoder scratch, x18 is the platform register.
  */
 #define A64_MACH_COLOR_N 10
 static const unsigned a64_mach_color_reg[A64_MACH_COLOR_N] =
-    {19, 20, 21, 22, 23, 24, 25, 26, 27, 28};
+    {2, 3, 4, 5, 6, 7, 9, 10, 11, 12};
 
 static int a64_slot_off(const ny_mach_func_t *mach,
                         const ny_mach_operand_t *op);
@@ -1911,6 +2151,7 @@ static bool a64_mach_store_spills(const ny_mach_func_t *mach,
 static bool a64_mach_scalar_regalloc_encode(const ny_mach_func_t *mach,
                                             const ny_mach_regalloc_t *alloc,
                                             ny_obj_buf_t *code, bool user,
+                                            size_t *inst_offsets,
                                             char *err, size_t err_len) {
   int frame = a64_mach_frame_size(mach);
   if (!a64_u32(code, 0xA9BF7BFDu) || !a64_u32(code, 0x910003FDu))
@@ -1934,6 +2175,8 @@ static bool a64_mach_scalar_regalloc_encode(const ny_mach_func_t *mach,
     block_off[bi] = code->len;
     for (size_t n = 0; n < block->inst_count; ++n) {
       size_t i = block->first_inst + n;
+      if (inst_offsets && i < mach->inst_len)
+        inst_offsets[i] = code->len;
       const ny_mach_inst_t *in = &mach->insts[i];
       int dst = in->dst.kind == NY_MACH_OPERAND_VREG
                     ? a64_mach_scalar_reg(alloc, in->dst.as.reg, i)
@@ -2006,6 +2249,11 @@ static bool a64_mach_scalar_regalloc_encode(const ny_mach_func_t *mach,
         goto fail;
       break;
     }
+    case NY_MACH_SELECT:
+      if (err && err_len)
+        snprintf(err, err_len,
+                 "AArch64 machine encoder: select.i64 is not supported");
+      goto fail;
     case NY_MACH_CMP: {
       if (dst < 0 || a < 0 || b < 0 ||
           !a64_u32(code, 0xEB00001Fu | ((uint32_t)b << 16) |
@@ -2104,7 +2352,7 @@ fail:
   free(block_off);
   free(patch_at);
   free(patch_blk);
-  if (err && err_len)
+  if (err && err_len && !err[0])
     snprintf(err, err_len, "a64 scalar register allocation encode failed");
   return false;
 }
@@ -2116,8 +2364,11 @@ fail:
  * A comparison may produce one integer result, which is materialized in its
  * canonical home before the return; mixed CFG/call forms continue through the
  * proven stack encoder until their cross-class edge protocol is added.
+ *
+ * v0..v7 ONLY. v8..v15 are AAPCS64 callee-saved (low 64 bits) and this
+ * path emits no saves; colors previously mapped straight to vN.
  */
-#define A64_MACH_FPR_COLOR_N 16
+#define A64_MACH_FPR_COLOR_N 8
 
 typedef struct {
   ny_mach_regalloc_t alloc;
@@ -2345,7 +2596,8 @@ static bool a64_mach_fpr_prepare(const ny_mach_func_t *mach,
 
 static bool a64_mach_fpr_encode(const ny_mach_func_t *mach,
                                 a64_mach_fpr_state_t *state,
-                                ny_obj_buf_t *code, bool user, char *err,
+                                ny_obj_buf_t *code, bool user,
+                                size_t *inst_offsets, char *err,
                                 size_t err_len) {
   (void)err;
   (void)err_len;
@@ -2357,6 +2609,8 @@ static bool a64_mach_fpr_encode(const ny_mach_func_t *mach,
   if (user && !a64_mach_emit_param_spills(mach, code))
     return false;
   for (size_t i = 0; i < mach->inst_len; ++i) {
+    if (inst_offsets)
+      inst_offsets[i] = code->len;
     const ny_mach_inst_t *in = &mach->insts[i];
     if (!a64_mach_fpr_begin(state, i))
       return false;
@@ -2481,8 +2735,11 @@ static bool a64_mach_fpr_encode(const ny_mach_func_t *mach,
  * registers; Q0..Q15 are available to the allocator.  This is deliberately a
  * small fast path: calls, control flow, mixed scalar/vector values,
  * broadcasts, and uncolored ranges remain on the stack-backed encoder.
+ *
+ * Q0..Q7 ONLY. Q16/Q17 stay encoder scratch; v8../Q8..Q15 are AAPCS64
+ * callee-saved and this path emits no saves.
  */
-#define A64_MACH_VECTOR_COLOR_N 16
+#define A64_MACH_VECTOR_COLOR_N 8
 
 
 /*
@@ -3275,13 +3532,17 @@ static bool a64_mach_vector_encode_call(const ny_mach_func_t *mach,
       snprintf(call_sym, sizeof(call_sym), NY_FMT_FN, pref, raw);
     if (!a64_u32(code, 0x94000000u))
       return false;
-    if (relocs && reloc_count && *reloc_count < reloc_cap) {
-      snprintf(relocs[*reloc_count].symbol,
-               sizeof(relocs[*reloc_count].symbol), "%s", call_sym);
-      relocs[*reloc_count].disp_off = code->len - 4;
-      relocs[*reloc_count].type = NY_RELOC_AARCH64_CALL26;
-      (*reloc_count)++;
-    }
+    /*
+     * An unrelocated BL+0 is a self-loop at runtime; overflow is a hard
+     * error, not a silent skip.
+     */
+    if (!relocs || !reloc_count || *reloc_count >= reloc_cap)
+      return false;
+    snprintf(relocs[*reloc_count].symbol,
+             sizeof(relocs[*reloc_count].symbol), "%s", call_sym);
+    relocs[*reloc_count].disp_off = code->len - 4;
+    relocs[*reloc_count].type = NY_RELOC_AARCH64_CALL26;
+    (*reloc_count)++;
     return true;
   } else if (in->src0.kind == NY_MACH_OPERAND_VREG) {
     int reg = a64_mach_vector_reg(state, in->src0.as.reg, inst);
@@ -3298,6 +3559,7 @@ static bool a64_mach_vector_encode_call(const ny_mach_func_t *mach,
 static bool a64_mach_vector_encode(const ny_mach_func_t *mach,
                                     a64_mach_vector_state_t *state,
                                     ny_obj_buf_t *code, bool user,
+                                    size_t *inst_offsets,
                                     ny_x64_obj_reloc_t *relocs,
                                     size_t *reloc_count,
                                     size_t reloc_cap,
@@ -3327,6 +3589,8 @@ static bool a64_mach_vector_encode(const ny_mach_func_t *mach,
     block_off[bi] = code->len;
     for (size_t n = 0; n < block->inst_count; ++n) {
       size_t inst = block->first_inst + n;
+      if (inst_offsets && inst < mach->inst_len)
+        inst_offsets[inst] = code->len;
       const ny_mach_inst_t *in = &mach->insts[inst];
       if (!a64_mach_vector_begin(state, inst))
         goto fail;
@@ -3371,15 +3635,16 @@ static bool a64_mach_vector_encode(const ny_mach_func_t *mach,
         }
         break;
       case NY_MACH_BR_IF:
-        if (patch_len >= mach->inst_len ||
-            !a64_mach_vector_flush(state, mach, code, inst) ||
-            !a64_u32(code, 0xB5000000u))
-          ok = false;
-        else {
-          patch_at[patch_len] = code->len - 4;
-          patch_blk[patch_len++] = in->src1.as.block_index;
-          ok = true;
-        }
+        /*
+         * The shared patch loop rewrites every site as an UNCONDITIONAL B,
+         * so a CBNZ placeholder would lose its condition entirely and
+         * become an always-taken branch. The prepare gate already rejects
+         * conditional vector forms; keep it that way.
+         */
+        ok = false;
+        if (err && err_len)
+          snprintf(err, err_len,
+                   "aarch64 vector encode: conditional branch unsupported");
         break;
       case NY_MACH_CALL:
         if (!a64_mach_vector_flush(state, mach, code, inst))
@@ -3626,18 +3891,30 @@ static bool a64_mach_emit_param_spills(const ny_mach_func_t *mach,
 }
 
 static bool a64_encode_func(const ny_mach_func_t *mach, ny_obj_buf_t *code,
-                            size_t **block_off_out, bool user_function,
+                            size_t **block_off_out, size_t **inst_off_out,
+                            bool user_function,
                             ny_x64_obj_reloc_t *relocs, size_t *reloc_count,
                             size_t reloc_cap, size_t code_base,
                             const ny_native_target_info_t *target, char *err,
                             size_t err_len) {
   if (!mach || !code) return false;
+  if (block_off_out)
+    *block_off_out = NULL;
+  if (inst_off_out)
+    *inst_off_out = NULL;
+  size_t *inst_offsets = calloc(mach->inst_len ? mach->inst_len : 1,
+                                sizeof(*inst_offsets));
+  if (!inst_offsets && mach->inst_len)
+    return false;
+  for (size_t i = 0; i < mach->inst_len; ++i)
+    inst_offsets[i] = SIZE_MAX;
   if (err && err_len)
     err[0] = '\0';
   a64_mach_fpr_state_t fpr_state = {0};
   if (a64_mach_fpr_prepare(mach, &fpr_state)) {
     bool fpr_ok = a64_mach_fpr_encode(mach, &fpr_state, code,
-                                      user_function, err, err_len);
+                                      user_function, inst_offsets, err,
+                                      err_len);
     size_t colored = 0;
     size_t spilled = 0;
     size_t reloads = 0;
@@ -3654,14 +3931,18 @@ static bool a64_encode_func(const ny_mach_func_t *mach, ny_obj_buf_t *code,
         ny_mach_regalloc_peak_live(&fpr_state.alloc, mach->inst_len));
     free(fpr_state.seeded);
     ny_mach_regalloc_free(&fpr_state.alloc);
+    if (inst_off_out)
+      *inst_off_out = inst_offsets;
+    else
+      free(inst_offsets);
     return fpr_ok;
   }
   a64_mach_vector_state_t vector_state = {0};
   if (a64_mach_vector_prepare(mach, &vector_state)) {
     bool vector_ok = a64_mach_vector_encode(mach, &vector_state, code,
-                                            user_function, relocs, reloc_count,
-                                            reloc_cap, code_base, target,
-                                            err, err_len);
+                                            user_function, inst_offsets,
+                                            relocs, reloc_count, reloc_cap,
+                                            code_base, target, err, err_len);
     size_t colored = 0, spilled = 0, reloads = 0;
     for (size_t i = 0; i < vector_state.alloc.segment_len; ++i) {
       if (vector_state.alloc.segments[i].color >= 0)
@@ -3676,12 +3957,17 @@ static bool a64_encode_func(const ny_mach_func_t *mach, ny_obj_buf_t *code,
         ny_mach_regalloc_peak_live(&vector_state.alloc, mach->inst_len));
     free(vector_state.seeded);
     ny_mach_regalloc_free(&vector_state.alloc);
+    if (inst_off_out)
+      *inst_off_out = inst_offsets;
+    else
+      free(inst_offsets);
     return vector_ok;
   }
   ny_mach_regalloc_t scalar_alloc = {0};
-  if (a64_mach_scalar_regalloc_prepare(mach, &scalar_alloc)) {
+  if (mach->block_len == 1 &&
+      a64_mach_scalar_regalloc_prepare(mach, &scalar_alloc)) {
     bool scalar_ok = a64_mach_scalar_regalloc_encode(
-        mach, &scalar_alloc, code, user_function, err, err_len);
+        mach, &scalar_alloc, code, user_function, inst_offsets, err, err_len);
     size_t colored = 0, spilled = 0, reloads = 0;
     for (size_t i = 0; i < scalar_alloc.segment_len; ++i) {
       if (scalar_alloc.segments[i].color >= 0)
@@ -3695,6 +3981,10 @@ static bool a64_encode_func(const ny_mach_func_t *mach, ny_obj_buf_t *code,
         scalar_alloc.segment_len, colored, spilled, reloads,
         ny_mach_regalloc_peak_live(&scalar_alloc, mach->inst_len));
     ny_mach_regalloc_free(&scalar_alloc);
+    if (inst_off_out)
+      *inst_off_out = inst_offsets;
+    else
+      free(inst_offsets);
     return scalar_ok;
   }
   size_t current_inst = SIZE_MAX;
@@ -3703,26 +3993,36 @@ static bool a64_encode_func(const ny_mach_func_t *mach, ny_obj_buf_t *code,
   /*
    * stp x29,x30,[sp,#-16]!; mov x29,sp; sub sp,#frame
    */
-  if (!a64_u32(code, 0xA9BF7BFD) || !a64_u32(code, 0x910003FD))
+  if (!a64_u32(code, 0xA9BF7BFD) || !a64_u32(code, 0x910003FD)) {
+    free(inst_offsets);
     return false;
+  }
   if (frame) {
     /*
      * sub sp, sp, #frame (imm12 must fit)
      */
     if (frame >= 4096) {
       if (err && err_len) snprintf(err, err_len, "a64 machine form: frame too large");
+      free(inst_offsets);
       return false;
     }
     uint32_t sub = 0xD10003FF | ((uint32_t)frame << 10);
-    if (!a64_u32(code, sub)) return false;
+    if (!a64_u32(code, sub)) {
+      free(inst_offsets);
+      return false;
+    }
   }
   if (user_function && !a64_mach_emit_param_spills(mach, code)) {
     if (err && err_len)
       snprintf(err, err_len, "parameter spill failed");
+    free(inst_offsets);
     return false;
   }
   size_t *block_off = calloc(mach->block_len ? mach->block_len : 1, sizeof(size_t));
-  if (!block_off && mach->block_len) return false;
+  if (!block_off && mach->block_len) {
+    free(inst_offsets);
+    return false;
+  }
   size_t *patch_at = NULL, *patch_blk = NULL, npatch = 0, pcap = 0;
 
   for (size_t bi = 0; bi < mach->block_len; ++bi) {
@@ -3730,6 +4030,7 @@ static bool a64_encode_func(const ny_mach_func_t *mach, ny_obj_buf_t *code,
     const ny_mach_block_t *blk = &mach->blocks[bi];
     for (size_t n = 0; n < blk->inst_count; ++n) {
       current_inst = blk->first_inst + n;
+      inst_offsets[current_inst] = code->len;
       const ny_mach_inst_t *in = &mach->insts[current_inst];
       current_opcode = (unsigned)in->opcode;
       int dst = a64_slot_off(mach, &in->dst);
@@ -4463,13 +4764,16 @@ static bool a64_encode_func(const ny_mach_func_t *mach, ny_obj_buf_t *code,
           snprintf(call_sym, sizeof(call_sym), NY_FMT_FN, pref, raw);
         if (!a64_u32(code, 0x94000000u))
           goto fail;
-        if (relocs && reloc_count && *reloc_count < reloc_cap) {
-          snprintf(relocs[*reloc_count].symbol,
-                   sizeof(relocs[*reloc_count].symbol), "%s", call_sym);
-          relocs[*reloc_count].disp_off = code->len - 4;
-          relocs[*reloc_count].type = NY_RELOC_AARCH64_CALL26;
-          (*reloc_count)++;
-        }
+        /*
+         * Unrelocated BL+0 = self-loop; treat cap overflow as failure.
+         */
+        if (!relocs || !reloc_count || *reloc_count >= reloc_cap)
+          goto fail;
+        snprintf(relocs[*reloc_count].symbol,
+                 sizeof(relocs[*reloc_count].symbol), "%s", call_sym);
+        relocs[*reloc_count].disp_off = code->len - 4;
+        relocs[*reloc_count].type = NY_RELOC_AARCH64_CALL26;
+        (*reloc_count)++;
         if (stack_size &&
             !a64_u32(code, 0x910003FFu | (stack_size << 10)))
           goto fail;
@@ -4632,6 +4936,10 @@ static bool a64_encode_func(const ny_mach_func_t *mach, ny_obj_buf_t *code,
     *block_off_out = block_off;
   else
     free(block_off);
+  if (inst_off_out)
+    *inst_off_out = inst_offsets;
+  else
+    free(inst_offsets);
   return true;
 fail:
   if (err && err_len && !err[0])
@@ -4640,16 +4948,65 @@ fail:
   free(patch_at);
   free(patch_blk);
   free(block_off);
+  free(inst_offsets);
   return false;
 }
 
-bool ny_a64_mach_build_bundle(
+static bool ny_a64_debug_line_push(ny_native_debug_line_t **lines,
+                                   size_t *count, size_t *cap,
+                                   ny_native_debug_line_t line) {
+  if (!lines || !count || !cap)
+    return false;
+  if (*count == *cap) {
+    if (*count == SIZE_MAX)
+      return false;
+    size_t next = *cap > SIZE_MAX / 2 ? *count + 1
+                                      : (*cap ? *cap * 2 : 32);
+    if (next < *count + 1)
+      next = *count + 1;
+    if (next > SIZE_MAX / sizeof(**lines))
+      return false;
+    ny_native_debug_line_t *grown =
+        realloc(*lines, next * sizeof(**lines));
+    if (!grown)
+      return false;
+    *lines = grown;
+    *cap = next;
+  }
+  (*lines)[(*count)++] = line;
+  return true;
+}
+
+static bool ny_a64_debug_machine_function(
+    const ny_mach_func_t *mach, const nyir_func_t *source, size_t def_index,
+    const size_t *inst_offsets, ny_native_debug_line_t **lines,
+    size_t *count, size_t *cap) {
+  if (!mach || !source || !inst_offsets || !lines || !count || !cap)
+    return true;
+  for (size_t i = 0; i < mach->inst_len; ++i) {
+    uint32_t source_pc = mach->insts[i].source_pc;
+    if (inst_offsets[i] == SIZE_MAX || source_pc >= source->len ||
+        !source->data[source_pc].debug.line)
+      continue;
+    const nyir_debug_loc_t *loc = &source->data[source_pc].debug;
+    if (!ny_a64_debug_line_push(
+            lines, count, cap,
+            (ny_native_debug_line_t){def_index, inst_offsets[i], loc->file,
+                                     loc->line, loc->column}))
+      return false;
+  }
+  return true;
+}
+
+static bool ny_a64_mach_build_bundle_debug(
     const ny_mach_func_t *rt_main_mir, const ny_mach_func_t *func_mirs,
     const char *const *func_names, size_t func_count,
     const ny_native_target_info_t *target, const char *entry_symbol,
     bool tag_return, ny_obj_buf_t *code, ny_x64_obj_symbol_def_t *defs,
     size_t *def_count, ny_x64_obj_reloc_t *relocs, size_t *reloc_count,
-    char *err, size_t err_len) {
+    const nyir_func_t *rt_main_source, const nyir_func_t *func_sources,
+    ny_native_debug_line_t **debug_lines, size_t *debug_line_count,
+    size_t *debug_line_cap, char *err, size_t err_len) {
   (void)tag_return;
   if (!rt_main_mir || !target || !code || !defs || !def_count || !reloc_count ||
       !entry_symbol) {
@@ -4660,6 +5017,12 @@ bool ny_a64_mach_build_bundle(
   *def_count = 0;
   *reloc_count = 0;
   code->len = 0;
+  if (debug_lines)
+    *debug_lines = NULL;
+  if (debug_line_count)
+    *debug_line_count = 0;
+  if (debug_line_cap)
+    *debug_line_cap = 0;
   size_t reloc_cap = NY_X64_OBJ_MAX_RELOCS;
 
   /*
@@ -4684,34 +5047,78 @@ bool ny_a64_mach_build_bundle(
     snprintf(symbol, sizeof(symbol), NY_FMT_FN,
              target->symbol_prefix ? target->symbol_prefix : "", nm);
     size_t start = code->len;
+    size_t *inst_offsets = NULL;
     char ebuf[128];
-    if (!a64_encode_func(&func_mirs[i], code, NULL, true, relocs, reloc_count,
+    if (!a64_encode_func(&func_mirs[i], code, NULL, &inst_offsets, true,
+                         relocs, reloc_count,
                          reloc_cap, start, target, ebuf, sizeof(ebuf))) {
+      free(inst_offsets);
       if (err && err_len)
         snprintf(err, err_len, "a64 machine form: %s", ebuf[0] ? ebuf : "encode fail");
       return false;
     }
-    if (*def_count >= NY_NATIVE_MAX_DEFS) return false;
+    if (*def_count >= NY_NATIVE_MAX_DEFS) {
+      free(inst_offsets);
+      return false;
+    }
     snprintf(defs[*def_count].name, sizeof(defs[*def_count].name), "%s", symbol);
     defs[*def_count].off = start;
     defs[*def_count].size = code->len - start;
+    if (!ny_a64_debug_machine_function(
+            &func_mirs[i], func_sources ? &func_sources[i] : NULL,
+            *def_count, inst_offsets, debug_lines, debug_line_count,
+            debug_line_cap)) {
+      free(inst_offsets);
+      if (err && err_len)
+        snprintf(err, err_len, "a64 machine form: source map allocation failed");
+      return false;
+    }
     (*def_count)++;
+    free(inst_offsets);
   }
   {
     size_t start = code->len;
+    size_t *inst_offsets = NULL;
     char ebuf[128] = {0};
-    if (!a64_encode_func(rt_main_mir, code, NULL, false, relocs, reloc_count,
+    if (!a64_encode_func(rt_main_mir, code, NULL, &inst_offsets, false,
+                         relocs, reloc_count,
                          reloc_cap, start, target, ebuf, sizeof(ebuf))) {
+      free(inst_offsets);
       if (err && err_len)
         snprintf(err, err_len, "a64 machine form: %s", ebuf[0] ? ebuf : "encode fail");
       return false;
     }
-    if (*def_count >= NY_NATIVE_MAX_DEFS) return false;
+    if (*def_count >= NY_NATIVE_MAX_DEFS) {
+      free(inst_offsets);
+      return false;
+    }
     snprintf(defs[*def_count].name, sizeof(defs[*def_count].name), "%s",
              entry_symbol);
     defs[*def_count].off = start;
     defs[*def_count].size = code->len - start;
+    if (!ny_a64_debug_machine_function(
+            rt_main_mir, rt_main_source, *def_count, inst_offsets,
+            debug_lines, debug_line_count, debug_line_cap)) {
+      free(inst_offsets);
+      if (err && err_len)
+        snprintf(err, err_len, "a64 machine form: source map allocation failed");
+      return false;
+    }
     (*def_count)++;
+    free(inst_offsets);
   }
   return true;
+}
+
+bool ny_a64_mach_build_bundle(
+    const ny_mach_func_t *rt_main_mir, const ny_mach_func_t *func_mirs,
+    const char *const *func_names, size_t func_count,
+    const ny_native_target_info_t *target, const char *entry_symbol,
+    bool tag_return, ny_obj_buf_t *code, ny_x64_obj_symbol_def_t *defs,
+    size_t *def_count, ny_x64_obj_reloc_t *relocs, size_t *reloc_count,
+    char *err, size_t err_len) {
+  return ny_a64_mach_build_bundle_debug(
+      rt_main_mir, func_mirs, func_names, func_count, target, entry_symbol,
+      tag_return, code, defs, def_count, relocs, reloc_count, NULL, NULL,
+      NULL, NULL, NULL, err, err_len);
 }

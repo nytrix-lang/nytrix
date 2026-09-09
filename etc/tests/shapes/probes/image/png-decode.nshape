@@ -1,5 +1,5 @@
 shape png-decode {
-  family "probe-suite"
+  family "probe-image/png-decode"
   generator "stress"
   features ["ny", "image"]
   template ny-test-case
@@ -8,6 +8,7 @@ shape png-decode {
   source ny <<'NY'
 use std.os
 use std.math.parse.data.zlib as zlib
+use std.math.parse.img.png as png
 use std.os.path as ospath
 def res = file_read(ospath.resolve_repo_asset("etc/assets/images/test.png"))
 if(is_err(res)){
@@ -36,6 +37,13 @@ if(is_err(res)){
    while(y < 16){
       print("ROW", y, "FILTER", load8(raw, y * 65))
       y += 1
+   }
+   ; Keep the structured decoder check in this single family fixture too.
+   def img = png.decode(data)
+   if(img){
+      print("PNG_OK", dict_get(img, "width", 0), dict_get(img, "height", 0), len(dict_get(img, "data", "")))
+   } else {
+      print("PNG_BAD")
    }
 }
 NY

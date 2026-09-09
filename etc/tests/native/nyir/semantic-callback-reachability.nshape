@@ -1,0 +1,32 @@
+shape semantic_callback_reachability {
+  family "runtime-native"
+  generator "native"
+  features [native nyir x86_64 semantic closure reachability]
+  template ny-test-case
+  flags "--native-only --native-backend=x86_64 --native-tier=baseline -O0 --nyir-verify --native-result-oracle=0 --no-progress --color=never"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+
+fn invoke(fnptr callback) int { callback() }
+fn answer() int { 0 }
+
+invoke(answer)
+NY
+}
+
+shape semantic_lambda_reachability {
+  family "runtime-native"
+  generator "native"
+  features [native nyir x86_64 semantic lambda reachability]
+  template ny-test-case
+  flags "--native-only --native-backend=x86_64 --native-tier=baseline -O0 --nyir-verify --native-result-oracle=0 --no-progress --color=never"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+
+fn invoke(fnptr callback) int { callback() }
+
+invoke(fn() { 0 })
+NY
+}

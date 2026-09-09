@@ -2,9 +2,9 @@
 #define NY_NATIVE_BACKEND_H
 
 #include "base/options.h"
-#include "code/native/ir.h"
-#include "code/native/ir/machine.h"
-#include "parse/ast.h"
+#include "code/ir/ir.h"
+#include "code/ir/machine.h"
+#include "code/parse/ast.h"
 #include <stdbool.h>
 #include <stddef.h>
 
@@ -62,6 +62,8 @@ typedef struct ny_native_target_info_t {
   size_t stack_align;
   unsigned caps;
   bool red_zone;
+  /* Size tier: outline byte-identical machine functions through local thunks. */
+  bool outline_machine_functions;
 } ny_native_target_info_t;
 
 typedef struct ny_native_tier_plan_t {
@@ -89,6 +91,9 @@ typedef struct ny_native_jit_image_t {
   void *memory;
   size_t size;
   void *entry;
+  /* Writable data pool (.Lnyarr literal lists); kept RW while code is RX. */
+  void *data_memory;
+  size_t data_size;
 } ny_native_jit_image_t;
 
 typedef void (*ny_native_link_visitor_t)(const char *library, void *ctx);

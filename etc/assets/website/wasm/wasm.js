@@ -679,7 +679,7 @@
     } catch (_) { setStatus("webglStatus", "WebGL lost", "warn"); }
   }
 
-  // Mirror of rt_runtime_tag_raw_name (src/rt/shared.h) — maps Ny type name strings to
+  // Mirror of rt_runtime_tag_raw_name (src/code/runtime/shared.h) — maps Ny type name strings to
   // their integer tag values used by the runtime. Must stay in sync with shared.h constants.
   function nyRuntimeTagRaw(name) {
     switch (name) {
@@ -1571,7 +1571,7 @@
       "std.core.primitives.runtime_tag_raw": (v) => {
         // Surface-level runtime_tag_raw — called from module-init for global def constants
         // like _CORE_TAG_LIST = runtime_tag_raw("list"). Receives tagged Ny string, returns
-        // tagged integer matching rt_runtime_tag_raw_name in src/rt/shared.h.
+        // tagged integer matching rt_runtime_tag_raw_name in src/code/runtime/shared.h.
         const name = ny.text(memoryRef, v, 0);
         return ny.tag(nyRuntimeTagRaw(name));
       },

@@ -3,7 +3,6 @@
 ;; Keywords: cli terminal automata langton ant example
 ;; Langton's Ant - https://en.wikipedia.org/wiki/Langton%27s_ant
 use std.core
-use std.core.term
 use std.os.args as cli
 
 def CH_BLACK = "█"
@@ -112,3 +111,4 @@ while true {
    steps += 1
    if max_steps > 0 && steps >= max_steps { break }
 }
+0

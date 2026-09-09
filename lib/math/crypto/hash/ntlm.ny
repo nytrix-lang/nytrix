@@ -53,7 +53,9 @@ fn _sha1_bytes(list data) list {
    mut h0, h1 = 0x67452301, 0xefcdab89
    mut h2, h3 = 0x98badcfe, 0x10325476
    mut h4 = 0xc3d2e1f0
-   mut w = zero_list(80)
+   ;; Use a typed int list so 32-bit schedule words store and retrieve
+   ;; correctly; zero_list is byte-backed and silently truncates values.
+   mut list<int> w = list(80)
    mut off = 0
    while off < msg.len {
       i = 0

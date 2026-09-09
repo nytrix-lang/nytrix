@@ -7,15 +7,15 @@ module std.core.tbuf(f32buf_new, f32buf_load, f32buf_store, f32buf_load_raw, f32
 use std.core
 
 fn _tbuf_new(int n, int elem_size) ptr {
+   "Allocates via the runtime's 24-byte-header tbuf so std.core buffers are
+   interchangeable with compiler-pooled lists and raw tbuf helpers."
    if n < 0 { n = 0 }
    if elem_size <= 0 { elem_size = 1 }
-   def total = 16 + n * elem_size
-   def base = malloc(total)
-   if !base { panic("typed buffer allocation failed") }
-   store64(base, n, 0)
-   store64(base, elem_size, 8)
-   memset(base + 16, 0, n * elem_size)
-   base + 16
+   rt_tbuf_new_raw(n, elem_size)
+}
+
+extern "" {
+   fn rt_tbuf_new_raw(int count, int elem_size) ptr
 }
 
 fn f32buf_new(int n) ptr { _tbuf_new(n, 4) }
@@ -68,7 +68,7 @@ fn f32buf_store_raw(ptr buf, int i, int bits) ptr {
 fn tbuf_len(ptr buf) int {
    "Returns the logical element count for typed buffer `buf`."
    if !buf { return 0 }
-   load64(buf - 16, 0)
+   load64(buf - 24, 0)
 }
 
 @inline

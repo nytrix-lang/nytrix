@@ -11,7 +11,7 @@
  *   wasm     — WebAssembly text (local slots, no classic stack frame)
  *
  * Primary production backends remain x86-64 and AArch64 under
- * code/native/backend and code/native/object. Portable emitters are for
+ * code/native/machine and code/native/object. Portable emitters are for
  * bring-up, cross-checks, and future object writers — they must not be
  * presented as full native-only substitutes for host x86-64/AArch64.
  *
@@ -321,31 +321,35 @@ static bool ny_port_call(ny_port_ctx_t *c, const nyir_inst_t *in) {
       return false;
   const char *sym = in->symbol ? in->symbol : "";
   bool is_ext = (in->flags & NYIR_INST_F_EXTERN) != 0;
+  const char *fn_pfx =
+      (is_ext || strncmp(sym, "ny_fn_", 6) == 0 || strncmp(sym, "rt_", 3) == 0)
+          ? ""
+          : "ny_fn_";
   (void)is_ext;
   switch (c->kind) {
   case NY_PORT_BPF:
     if (!ny_native_printf(c->w, "\tcall\t%s%s%s\n", c->target->symbol_prefix,
-                          is_ext ? "" : "ny_fn_", sym))
+                          fn_pfx, sym))
       return false;
     return in->dst < 0 || ny_port_store_value(c, in->dst, "r0");
   case NY_PORT_MIPS:
     if (!ny_native_printf(c->w, "\tjal\t%s%s%s\n\tnop\n",
-                          c->target->symbol_prefix, is_ext ? "" : "ny_fn_", sym))
+                          c->target->symbol_prefix, fn_pfx, sym))
       return false;
     return in->dst < 0 || ny_port_store_value(c, in->dst, "$v0");
   case NY_PORT_POWERPC:
     if (!ny_native_printf(c->w, "\tbl\t%s%s%s\n", c->target->symbol_prefix,
-                          is_ext ? "" : "ny_fn_", sym))
+                          fn_pfx, sym))
       return false;
     return in->dst < 0 || ny_port_store_value(c, in->dst, "r3");
   case NY_PORT_AVR:
     if (!ny_native_printf(c->w, "\tcall\t%s%s%s\n", c->target->symbol_prefix,
-                          is_ext ? "" : "ny_fn_", sym))
+                          fn_pfx, sym))
       return false;
     return in->dst < 0 || ny_port_store_value(c, in->dst, "r24:r31");
   case NY_PORT_WASM:
     if (!ny_native_printf(c->w, "\tcall $%s%s%s\n", c->target->symbol_prefix,
-                          is_ext ? "" : "ny_fn_", sym))
+                          fn_pfx, sym))
       return false;
     return in->dst < 0 || ny_port_store_value(c, in->dst, "$ret");
   }
@@ -402,6 +406,8 @@ static bool ny_port_emit_inst(ny_port_ctx_t *c, const nyir_inst_t *in) {
   case NYIR_ROR_I64:
     return ny_port_binop(c, in, ">>", "dsrav", "srad", "__ny_avr_i64_ror",
                          "i64.rotr");
+  case NYIR_ROR32_I64:
+    return false;
   case NYIR_CMP_I64:
     return ny_port_cmp(c, in);
   case NYIR_LABEL:
@@ -454,6 +460,8 @@ static bool ny_port_emit_inst(ny_port_ctx_t *c, const nyir_inst_t *in) {
   case NYIR_SIN_F64:
   case NYIR_COS_F64:
   case NYIR_I64_TO_F64:
+  case NYIR_F64_TO_I64:
+  case NYIR_F32_TO_I64:
   case NYIR_CMP_F64:
   case NYIR_CONST_F32:
   case NYIR_ADD_F32:
@@ -510,6 +518,7 @@ static bool ny_port_emit_inst(ny_port_ctx_t *c, const nyir_inst_t *in) {
   case NYIR_VEC8_XOR_I64:
   case NYIR_VEC4_REDUCE_ADD_I64:
   case NYIR_VEC8_REDUCE_ADD_I64:
+  case NYIR_SELECT_I64:
   case NYIR_OP_COUNT:
     break;
   }
@@ -667,7 +676,7 @@ static bool ny_port_emit_nir(ny_native_writer_t *w,
   for (size_t i = 0; i < nyir->len; ++i) {
     if (!ny_port_emit_inst(&ctx, &nyir->data[i])) {
       fprintf(stderr, "native NYIR repro (%s emit failed):\n", pretty);
-      nyir_dump(stderr, nyir, name);
+      nyir_dump_compact(stderr, nyir, name);
       return false;
     }
   }

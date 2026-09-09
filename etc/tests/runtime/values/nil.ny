@@ -9,6 +9,11 @@ fn classify(any v) str {
    else { "other" }
 }
 
+fn choose_nil(bool take_nil) any {
+   if take_nil { return nil }
+   0
+}
+
 assert(is_nil(nil), "direct is_nil(nil)")
 assert(!is_nil(0), "integer 0 is not nil")
 assert(nil != 0, "nil is distinct from integer 0")
@@ -19,6 +24,7 @@ def nil_alias = nil
 assert(nil_alias != 0 && !(nil_alias == 0), "bound nil keeps identity")
 assert(nil == nil, "nil equals nil")
 assert(to_str(nil) == "nil", "to_str(nil)")
+assert(to_str(choose_nil(true)) == "nil", "dynamic any nil formatting")
 assert(type(nil) == "nil", "type(nil)")
 
 if nil { assert(false, "nil must be falsy") }

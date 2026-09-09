@@ -1,0 +1,12 @@
+shape list_get_supports_fallback {
+  family "runtime-native"
+  generator "native"
+  features [native nyir x86_64 lists get fallback]
+  template ny-test-case
+flags "--native-only --native-backend=x86_64 -O3 --nyir-verify --native-result-oracle=0 --no-progress --color=never"
+  expect compile_and_run
+  source ny <<'NY'
+def values = [4, 8]
+(values.get(7, 12) == 12) ? 0 : 1
+NY
+}

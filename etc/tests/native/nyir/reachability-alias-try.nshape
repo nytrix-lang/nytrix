@@ -1,0 +1,26 @@
+shape reachability_module_alias_try {
+  family "runtime-native"
+  generator "native"
+  features [native nyir x86_64 reachability module_alias try]
+  template ny-test-case
+  flags "--native-only --native-backend=x86_64 --native-tier=baseline -O0 --nyir-verify --native-result-oracle=0 --no-progress --color=never"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.core.str as text
+
+fn alias_calls_in_try(bool fail) int {
+  try {
+    if fail { panic("expected") }
+    if text.lower("ABC") != "abc" { return 1 }
+  } catch _ {
+    if text.upper("xyz") != "XYZ" { return 2 }
+  }
+  0
+}
+
+if alias_calls_in_try(false) != 0 { 1 }
+elif alias_calls_in_try(true) != 0 { 2 }
+else { 0 }
+NY
+}

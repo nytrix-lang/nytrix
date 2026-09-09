@@ -38,6 +38,28 @@ assert(require_positive(positive) == 5, "witness accepted")
 `prove(P)` creates a witness only when `P` is established during compilation.
 The `proof<P>` parameter makes the required fact visible in the API signature.
 
+## Use a bounded integer
+
+Use `Fin<N>` when an integer is intrinsically an index below a compile-time
+bound. Construction is checked and the runtime representation stays an
+ordinary integer.
+
+```ny
+use std.core
+
+fn select(Fin<3> index) int {
+   def values = [11, 22, 33]
+   values[index]
+}
+
+def Fin<3> middle = 1
+assert(select(middle) == 22, "bounded selection")
+```
+
+An out-of-range literal is a compile-time error. Mutation invalidates the
+previous exact-value fact, so reassignment must independently satisfy the
+bound.
+
 ## Name a reusable proposition
 
 ```ny

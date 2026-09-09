@@ -1,0 +1,25 @@
+shape oracle_ror32_masked_sha_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle peephole ror32 masked-sha boundaries]
+  template ny-test-case
+  flags "-O1 --native-backend x86_64 --native-result-oracle=8686571352"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+
+fn ror32_constant(i64 x) i64 {
+  mut word = x & 0xffffffff
+  ((word >> 7) | (word << (32 - 7))) & 0xffffffff
+}
+
+fn ror32_dynamic(i64 x, i64 n) i64 {
+  mut word = x & 0xffffffff
+  mut count = n & 31
+  ((word >> count) | (word << (32 - count))) & 0xffffffff
+}
+
+mut x = 0x0123456789abcdef
+ror32_constant(x) + ror32_dynamic(x, 0) + ror32_dynamic(x, 31) + ror32_dynamic(x, 32)
+NY
+}

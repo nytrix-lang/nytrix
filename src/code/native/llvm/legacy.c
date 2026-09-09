@@ -1,0 +1,982 @@
+/*
+ * LLVM bridge: target-machine initialization, pass-manager setup,
+ * module creation, and the primary LLVM-C API wrapping layer.
+ */
+#include "code/native/llvm/legacy.h"
+#include "base/common.h"
+#include "base/util.h"
+#include <llvm-c/Analysis.h>
+#include <llvm-c/Target.h>
+#include <llvm-c/TargetMachine.h>
+#include <llvm-c/Transforms/PassBuilder.h>
+#include <ctype.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+typedef enum {
+  NY_ARM_FLOAT_ABI_DEFAULT = 0,
+  NY_ARM_FLOAT_ABI_SOFT = 1,
+  NY_ARM_FLOAT_ABI_SOFTFP = 2,
+  NY_ARM_FLOAT_ABI_HARD = 3,
+} ny_arm_float_abi_t;
+
+typedef enum {
+  NY_LLVM_OPT_PROFILE_DEFAULT = 0,
+  NY_LLVM_OPT_PROFILE_SPEED,
+  NY_LLVM_OPT_PROFILE_PEAK,
+  NY_LLVM_OPT_PROFILE_BALANCED,
+  NY_LLVM_OPT_PROFILE_COMPILE,
+  NY_LLVM_OPT_PROFILE_NONE,
+  NY_LLVM_OPT_PROFILE_SIZE,
+} ny_llvm_opt_profile_t;
+
+static char *g_cached_layout_key = NULL;
+static char *g_cached_target_triple = NULL;
+static char *g_cached_data_layout = NULL;
+
+static ny_arm_float_abi_t parse_arm_float_abi(const char *abi) {
+  if (!abi || !*abi)
+    return NY_ARM_FLOAT_ABI_DEFAULT;
+  if (strcmp(abi, "hard") == 0)
+    return NY_ARM_FLOAT_ABI_HARD;
+  if (strcmp(abi, "softfp") == 0)
+    return NY_ARM_FLOAT_ABI_SOFTFP;
+  if (strcmp(abi, "soft") == 0)
+    return NY_ARM_FLOAT_ABI_SOFT;
+  return NY_ARM_FLOAT_ABI_DEFAULT;
+}
+
+static ny_arm_float_abi_t host_arm_float_abi(void) {
+  const char *abi = getenv("NYTRIX_ARM_FLOAT_ABI");
+  ny_arm_float_abi_t parsed = parse_arm_float_abi(abi);
+  if (parsed != NY_ARM_FLOAT_ABI_DEFAULT)
+    return parsed;
+  const char *env = getenv("NYTRIX_HOST_CFLAGS");
+  if (env && *env) {
+    if (strstr(env, "-mfloat-abi=hard"))
+      return NY_ARM_FLOAT_ABI_HARD;
+    if (strstr(env, "-mfloat-abi=softfp"))
+      return NY_ARM_FLOAT_ABI_SOFTFP;
+    if (strstr(env, "-mfloat-abi=soft"))
+      return NY_ARM_FLOAT_ABI_SOFT;
+  }
+#if defined(__ARM_PCS_VFP)
+  return NY_ARM_FLOAT_ABI_HARD;
+#endif
+#if defined(__arm__) && !defined(__aarch64__)
+  if (ny_access("/lib/arm-linux-gnueabihf", F_OK) == 0)
+    return NY_ARM_FLOAT_ABI_HARD;
+  if (ny_access("/usr/lib/arm-linux-gnueabihf", F_OK) == 0)
+    return NY_ARM_FLOAT_ABI_HARD;
+  if (ny_access("/lib/ld-linux-armhf.so.3", F_OK) == 0)
+    return NY_ARM_FLOAT_ABI_HARD;
+  if (ny_access("/usr/lib/ld-linux-armhf.so.3", F_OK) == 0)
+    return NY_ARM_FLOAT_ABI_HARD;
+  return NY_ARM_FLOAT_ABI_HARD;
+#endif
+  return NY_ARM_FLOAT_ABI_DEFAULT;
+}
+
+static ny_llvm_opt_profile_t ny_llvm_opt_profile_from_env(void) {
+  const char *profile = getenv("NYTRIX_OPT_PROFILE");
+  if (!profile || !*profile)
+    return NY_LLVM_OPT_PROFILE_DEFAULT;
+  if (strcasecmp(profile, "speed") == 0)
+    return NY_LLVM_OPT_PROFILE_SPEED;
+  if (strcasecmp(profile, "peak") == 0)
+    return NY_LLVM_OPT_PROFILE_PEAK;
+  if (strcasecmp(profile, "balanced") == 0)
+    return NY_LLVM_OPT_PROFILE_BALANCED;
+  if (strcasecmp(profile, "compile") == 0)
+    return NY_LLVM_OPT_PROFILE_COMPILE;
+  if (strcasecmp(profile, "none") == 0)
+    return NY_LLVM_OPT_PROFILE_NONE;
+  if (strcasecmp(profile, "size") == 0)
+    return NY_LLVM_OPT_PROFILE_SIZE;
+  return NY_LLVM_OPT_PROFILE_DEFAULT;
+}
+
+static LLVMCodeGenOptLevel ny_llvm_effective_codegen_level(int opt_level) {
+  switch (ny_llvm_opt_profile_from_env()) {
+  case NY_LLVM_OPT_PROFILE_NONE:
+    return LLVMCodeGenLevelNone;
+  case NY_LLVM_OPT_PROFILE_COMPILE:
+    return LLVMCodeGenLevelNone;
+  case NY_LLVM_OPT_PROFILE_SIZE:
+    return LLVMCodeGenLevelLess;
+  case NY_LLVM_OPT_PROFILE_PEAK:
+    if (opt_level <= 0)
+      return LLVMCodeGenLevelLess;
+    return LLVMCodeGenLevelAggressive;
+  case NY_LLVM_OPT_PROFILE_SPEED:
+    if (opt_level <= 0)
+      return LLVMCodeGenLevelNone;
+    if (opt_level >= 3)
+      return LLVMCodeGenLevelAggressive;
+    return (opt_level >= 2) ? LLVMCodeGenLevelDefault : LLVMCodeGenLevelLess;
+  case NY_LLVM_OPT_PROFILE_DEFAULT:
+    if (opt_level >= 3)
+      return LLVMCodeGenLevelAggressive;
+    if (opt_level >= 2)
+      return LLVMCodeGenLevelLess;
+    if (opt_level > 0)
+      return LLVMCodeGenLevelLess;
+    break;
+  case NY_LLVM_OPT_PROFILE_BALANCED:
+    break;
+  default:
+    break;
+  }
+  if (opt_level <= 0)
+    return LLVMCodeGenLevelNone;
+  if (opt_level == 1)
+    return LLVMCodeGenLevelLess;
+  if (opt_level >= 3)
+    return LLVMCodeGenLevelAggressive;
+  return LLVMCodeGenLevelDefault;
+}
+
+static void ny_llvm_configure_emit_target_machine(LLVMTargetMachineRef tm,
+                                                  LLVMCodeGenOptLevel cgo) {
+  if (!tm)
+    return;
+  const char *fast_isel = getenv("NYTRIX_AOT_FAST_ISEL");
+  if (fast_isel && *fast_isel) {
+    LLVMSetTargetMachineFastISel(tm, ny_env_truthy(fast_isel) ? 1 : 0);
+    return;
+  }
+  if (cgo == LLVMCodeGenLevelNone)
+    LLVMSetTargetMachineFastISel(tm, 0);
+}
+
+static const char *ny_llvm_default_pass_pipeline(int opt_level) {
+  switch (ny_llvm_opt_profile_from_env()) {
+  case NY_LLVM_OPT_PROFILE_NONE:
+    return NULL;
+  case NY_LLVM_OPT_PROFILE_COMPILE:
+    return (opt_level <= 0) ? NULL : "default<O1>";
+  case NY_LLVM_OPT_PROFILE_SIZE:
+    return (opt_level <= 0) ? NULL : "default<O1>";
+  case NY_LLVM_OPT_PROFILE_PEAK:
+    return (opt_level <= 0) ? "default<O1>" : "default<O3>";
+  case NY_LLVM_OPT_PROFILE_SPEED:
+    if (opt_level <= 0)
+      return NULL;
+    return (opt_level >= 3) ? "default<O3>" : "default<O2>";
+  case NY_LLVM_OPT_PROFILE_BALANCED:
+    if (opt_level <= 0)
+      return NULL;
+    return (opt_level >= 2) ? "default<O2>" : "default<O1>";
+  case NY_LLVM_OPT_PROFILE_DEFAULT:
+  default:
+    break;
+  }
+  if (opt_level <= 0) {
+    return NULL;
+  }
+  if (opt_level == 1)
+    return "default<O1>";
+  if (opt_level == 2)
+    return "default<O2>";
+  return "default<O3>";
+}
+
+static const char *ny_llvm_peak_default_pass_pipeline(LLVMModuleRef module) {
+  (void)module;
+  return "default<O3>";
+}
+
+static void ny_llvm_configure_pass_options(LLVMPassBuilderOptionsRef opts, int opt_level,
+                                           int opt_loops, const char *opt_pipeline) {
+  if (!opts)
+    return;
+  bool enable_loop_vectorize = (opt_loops > 0);
+  bool enable_slp_vectorize = (opt_loops > 0);
+  int inliner_threshold = -1;
+  switch (ny_llvm_opt_profile_from_env()) {
+  case NY_LLVM_OPT_PROFILE_NONE:
+    return;
+  case NY_LLVM_OPT_PROFILE_COMPILE:
+    enable_loop_vectorize = false;
+    enable_slp_vectorize = false;
+    inliner_threshold = 25;
+    break;
+  case NY_LLVM_OPT_PROFILE_SIZE:
+    enable_loop_vectorize = false;
+    enable_slp_vectorize = false;
+    inliner_threshold = 75;
+    break;
+  case NY_LLVM_OPT_PROFILE_PEAK:
+    enable_loop_vectorize = true;
+    enable_slp_vectorize = true;
+    if (!opt_pipeline || !*opt_pipeline)
+      inliner_threshold = 900;
+    break;
+  case NY_LLVM_OPT_PROFILE_SPEED:
+    if (!opt_pipeline || !*opt_pipeline) {
+      enable_loop_vectorize = true;
+      enable_slp_vectorize = true;
+      if (opt_level >= 2)
+        inliner_threshold = 600;
+    }
+    break;
+  case NY_LLVM_OPT_PROFILE_BALANCED:
+    if (opt_level >= 2 && (!opt_pipeline || !*opt_pipeline))
+      inliner_threshold = 300;
+    break;
+  case NY_LLVM_OPT_PROFILE_DEFAULT:
+  default:
+    if (opt_level >= 1 && (!opt_pipeline || !*opt_pipeline)) {
+      enable_loop_vectorize = true;
+      enable_slp_vectorize = true;
+      inliner_threshold = 300;
+    }
+    break;
+  }
+  LLVMPassBuilderOptionsSetLoopVectorization(opts, enable_loop_vectorize);
+  LLVMPassBuilderOptionsSetSLPVectorization(opts, enable_slp_vectorize);
+  if (inliner_threshold >= 0)
+    LLVMPassBuilderOptionsSetInlinerThreshold(opts, inliner_threshold);
+}
+
+static char *normalize_triple(char *triple, bool *needs_free) {
+  if (!triple)
+    return NULL;
+  if (needs_free)
+    *needs_free = false;
+  if (!strstr(triple, "arm"))
+    return triple;
+  if (strstr(triple, "aarch64") || strstr(triple, "arm64"))
+    return triple;
+  ny_arm_float_abi_t abi = host_arm_float_abi();
+  if (abi != NY_ARM_FLOAT_ABI_HARD) {
+    const char *hf = "gnueabihf";
+    const char *hpos = strstr(triple, hf);
+    if (!hpos)
+      return triple;
+    size_t pre = (size_t)(hpos - triple);
+    size_t post = strlen(hpos + strlen(hf));
+    size_t out_len = pre + strlen("gnueabi") + post + 1;
+    char *out = (char *)malloc(out_len);
+    if (!out)
+      return triple;
+    memcpy(out, triple, pre);
+    memcpy(out + pre, "gnueabi", strlen("gnueabi"));
+    memcpy(out + pre + strlen("gnueabi"), hpos + strlen(hf), post);
+    out[out_len - 1] = '\0';
+    if (needs_free)
+      *needs_free = true;
+    return out;
+  }
+  if (strstr(triple, "gnueabihf"))
+    return triple;
+  const char *needle = "gnueabi";
+  const char *pos = strstr(triple, needle);
+  if (!pos)
+    goto try_gnu;
+  size_t pre = (size_t)(pos - triple);
+  size_t post = strlen(pos + strlen(needle));
+  size_t out_len = pre + strlen("gnueabihf") + post + 1;
+  char *out = (char *)malloc(out_len);
+  if (!out)
+    return triple;
+  memcpy(out, triple, pre);
+  memcpy(out + pre, "gnueabihf", strlen("gnueabihf"));
+  memcpy(out + pre + strlen("gnueabihf"), pos + strlen(needle), post);
+  out[out_len - 1] = '\0';
+  if (needs_free)
+    *needs_free = true;
+  return out;
+try_gnu: {
+  const char *gnu = "linux-gnu";
+  const char *gpos = strstr(triple, gnu);
+  if (gpos) {
+    size_t pre2 = (size_t)(gpos - triple);
+    size_t post2 = strlen(gpos + strlen(gnu));
+    size_t out_len2 = pre2 + strlen("linux-gnueabihf") + post2 + 1;
+    char *out2 = (char *)malloc(out_len2);
+    if (!out2)
+      return triple;
+    memcpy(out2, triple, pre2);
+    memcpy(out2 + pre2, "linux-gnueabihf", strlen("linux-gnueabihf"));
+    memcpy(out2 + pre2 + strlen("linux-gnueabihf"), gpos + strlen(gnu), post2);
+    out2[out_len2 - 1] = '\0';
+    if (needs_free)
+      *needs_free = true;
+    return out2;
+  }
+  {
+    const char *fallback = "armv7-unknown-linux-gnueabihf";
+    size_t out_len3 = strlen(fallback) + 1;
+    char *out3 = (char *)malloc(out_len3);
+    if (!out3)
+      return triple;
+    memcpy(out3, fallback, out_len3);
+    if (needs_free)
+      *needs_free = true;
+    return out3;
+  }
+}
+}
+
+static void triple_arch_token(const char *triple, char *out, size_t out_cap) {
+  if (!out || out_cap == 0)
+    return;
+  out[0] = '\0';
+  if (!triple)
+    return;
+  size_t i = 0;
+  while (triple[i] && triple[i] != '-' && i + 1 < out_cap) {
+    out[i] = (char)tolower((unsigned char)triple[i]);
+    i++;
+  }
+  out[i] = '\0';
+}
+
+static bool triple_arch_alias_eq(const char *a, const char *b) {
+  if (!a || !b)
+    return false;
+  if (strcmp(a, b) == 0)
+    return true;
+  if ((strcmp(a, "x86_64") == 0 && strcmp(b, "amd64") == 0) ||
+      (strcmp(a, "amd64") == 0 && strcmp(b, "x86_64") == 0))
+    return true;
+  if ((strcmp(a, "aarch64") == 0 && strcmp(b, "arm64") == 0) ||
+      (strcmp(a, "arm64") == 0 && strcmp(b, "aarch64") == 0))
+    return true;
+  return false;
+}
+
+static bool target_matches_host_arch(const char *triple) {
+  char target_arch[32];
+  char host_arch[32];
+  triple_arch_token(triple, target_arch, sizeof(target_arch));
+  char *host_triple = LLVMGetDefaultTargetTriple();
+  triple_arch_token(host_triple, host_arch, sizeof(host_arch));
+  if (host_triple)
+    LLVMDisposeMessage(host_triple);
+  return triple_arch_alias_eq(target_arch, host_arch);
+}
+
+static void append_feature(char *buf, size_t *len, size_t cap, const char *feature) {
+  size_t fl = strlen(feature);
+  if (*len + fl + 1 >= cap)
+    return;
+  if (*len)
+    buf[(*len)++] = ',';
+  memcpy(buf + *len, feature, fl);
+  *len += fl;
+  buf[*len] = '\0';
+}
+
+static void derive_host_target(const char *triple, char *cpu, size_t cpu_cap, char *features,
+                               size_t feat_cap) {
+  bool arm32 =
+      triple && strstr(triple, "arm") && !strstr(triple, "aarch64") && !strstr(triple, "arm64");
+  const char *env = getenv("NYTRIX_HOST_CFLAGS");
+  bool cpu_set = cpu && *cpu != '\0';
+  size_t feat_len = 0;
+  int float_abi_hard = 0;
+  int float_abi_soft = 0;
+  int saw_fpu = 0;
+  ny_arm_float_abi_t arm_float_abi = host_arm_float_abi();
+  if (!env)
+    env = "";
+  char *copy = ny_strdup(env);
+  if (copy) {
+    char *tok = strtok(copy, " \t");
+    while (tok) {
+      if (strstr(tok, "-mcpu=") == tok) {
+        if (cpu && !cpu_set) {
+          strncpy(cpu, tok + 6, cpu_cap - 1);
+          cpu[cpu_cap - 1] = '\0';
+          cpu_set = true;
+        }
+      } else if (strstr(tok, "-mfpu=") == tok) {
+        const char *val = tok + 6;
+        saw_fpu = 1;
+        if (strstr(val, "vfpv4")) {
+          append_feature(features, &feat_len, feat_cap, "+vfp4");
+        } else if (strstr(val, "vfpv3")) {
+          append_feature(features, &feat_len, feat_cap, "+vfp3");
+        } else if (strstr(val, "vfp")) {
+          append_feature(features, &feat_len, feat_cap, "+vfp2");
+        }
+        if (strstr(val, "neon") || strstr(val, "asimd"))
+          append_feature(features, &feat_len, feat_cap, "+neon");
+      }
+      tok = strtok(NULL, " \t");
+    }
+    free(copy);
+  }
+  if (arm32) {
+    if (arm_float_abi == NY_ARM_FLOAT_ABI_HARD) {
+      float_abi_hard = 1;
+    } else if (arm_float_abi == NY_ARM_FLOAT_ABI_SOFT || arm_float_abi == NY_ARM_FLOAT_ABI_SOFTFP) {
+      float_abi_soft = 1;
+    } else if (triple && strstr(triple, "gnueabihf")) {
+      float_abi_hard = 1;
+    }
+  }
+  if (arm32) {
+    if (float_abi_hard) {
+      append_feature(features, &feat_len, feat_cap, "-soft-float");
+      if (!saw_fpu)
+        append_feature(features, &feat_len, feat_cap, "+vfp2");
+    } else if (float_abi_soft) {
+      append_feature(features, &feat_len, feat_cap, "+soft-float");
+    }
+  }
+  if (cpu && !cpu_set && !arm32 && target_matches_host_arch(triple)) {
+    char *host_cpu = LLVMGetHostCPUName();
+    if (host_cpu) {
+      strncpy(cpu, host_cpu, cpu_cap - 1);
+      cpu[cpu_cap - 1] = '\0';
+      LLVMDisposeMessage(host_cpu);
+    }
+  }
+}
+
+static void apply_target_attrs(LLVMModuleRef module, const char *cpu, const char *features) {
+  if (!module)
+    return;
+  if ((!cpu || !*cpu) && (!features || !*features))
+    return;
+  for (LLVMValueRef fn = LLVMGetFirstFunction(module); fn; fn = LLVMGetNextFunction(fn)) {
+    if (features && *features)
+      LLVMAddTargetDependentFunctionAttr(fn, "target-features", features);
+    if (cpu && *cpu)
+      LLVMAddTargetDependentFunctionAttr(fn, "target-cpu", cpu);
+  }
+}
+
+static LLVMCodeModel host_code_model(void) {
+  const char *cm = getenv("NYTRIX_LLVM_CODE_MODEL");
+  if (cm && *cm) {
+    if (strcmp(cm, "small") == 0)
+      return LLVMCodeModelSmall;
+    if (strcmp(cm, "medium") == 0)
+      return LLVMCodeModelMedium;
+    if (strcmp(cm, "large") == 0)
+      return LLVMCodeModelLarge;
+  }
+  return LLVMCodeModelDefault;
+}
+
+bool ny_llvm_init_native(void) {
+  static bool initialized = false;
+  if (initialized)
+    return true;
+#if defined(__arm__) && !defined(__aarch64__)
+  if (!getenv("NYTRIX_ARM_FLOAT_ABI")) {
+    ny_setenv("NYTRIX_ARM_FLOAT_ABI", "hard", 1);
+  }
+#endif
+  LLVMInitializeNativeTarget();
+  LLVMInitializeNativeAsmPrinter();
+  LLVMInitializeNativeAsmParser();
+  initialized = true;
+  return true;
+}
+
+/*
+ * Full target registry init for cross-compilation/AOT. Only call when a
+ * non-native target triple is actually requested.
+ */
+bool ny_llvm_init_all_targets(void) {
+  static bool initialized = false;
+  if (initialized)
+    return true;
+  LLVMInitializeAllTargetInfos();
+  LLVMInitializeAllTargets();
+  LLVMInitializeAllTargetMCs();
+  LLVMInitializeAllAsmPrinters();
+  LLVMInitializeAllAsmParsers();
+  initialized = true;
+  return true;
+}
+
+static bool ny_llvm_get_cached_module_target(const char **out_triple, const char **out_layout) {
+  if (out_triple)
+    *out_triple = NULL;
+  if (out_layout)
+    *out_layout = NULL;
+  if (!ny_llvm_init_native())
+    return false;
+
+  const char *env_triple = getenv("NYTRIX_HOST_TRIPLE");
+  const char *cache_key = (env_triple && *env_triple) ? env_triple : "";
+  if (g_cached_layout_key && strcmp(g_cached_layout_key, cache_key) == 0 &&
+      g_cached_target_triple && g_cached_data_layout) {
+    if (out_triple)
+      *out_triple = g_cached_target_triple;
+    if (out_layout)
+      *out_layout = g_cached_data_layout;
+    return true;
+  }
+
+  char *raw_triple = NULL;
+  if (env_triple && *env_triple)
+    raw_triple = ny_strdup(env_triple);
+  if (!raw_triple)
+    raw_triple = LLVMGetDefaultTargetTriple();
+  if (!raw_triple)
+    return false;
+
+  bool triple_needs_free = false;
+  char *triple = normalize_triple(raw_triple, &triple_needs_free);
+  LLVMTargetRef target;
+  char *err = NULL;
+  if (LLVMGetTargetFromTriple(triple, &target, &err) != 0) {
+    if (err)
+      LLVMDisposeMessage(err);
+    if (env_triple && *env_triple) {
+      if (triple_needs_free)
+        free(triple);
+      free(raw_triple);
+    } else {
+      if (triple_needs_free)
+        free(triple);
+      LLVMDisposeMessage(raw_triple);
+    }
+    return false;
+  }
+
+  char cpu_buf[128] = {0};
+  char feat_buf[256] = {0};
+  derive_host_target(triple, cpu_buf, sizeof(cpu_buf), feat_buf, sizeof(feat_buf));
+  char *host_features = NULL;
+  const char *cpu = cpu_buf[0] ? cpu_buf : "";
+  const char *features = feat_buf;
+  bool arm32 =
+      triple && strstr(triple, "arm") && !strstr(triple, "aarch64") && !strstr(triple, "arm64");
+  if (!feat_buf[0] && !arm32 && target_matches_host_arch(triple)) {
+    host_features = LLVMGetHostCPUFeatures();
+    if (host_features)
+      features = host_features;
+  } else if (!feat_buf[0] && arm32) {
+    features = "";
+  }
+
+  LLVMTargetMachineRef tm =
+      LLVMCreateTargetMachine(target, triple, cpu, features ? features : "",
+                              LLVMCodeGenLevelDefault, LLVMRelocPIC, host_code_model());
+  char *layout_copy = NULL;
+  if (tm) {
+    LLVMTargetDataRef td = LLVMCreateTargetDataLayout(tm);
+    char *layout = LLVMCopyStringRepOfTargetData(td);
+    if (layout) {
+      layout_copy = ny_strdup(layout);
+      LLVMDisposeMessage(layout);
+    }
+    LLVMDisposeTargetData(td);
+    LLVMDisposeTargetMachine(tm);
+  }
+  if (host_features)
+    LLVMDisposeMessage(host_features);
+
+  char *triple_copy = triple ? ny_strdup(triple) : NULL;
+  if (env_triple && *env_triple) {
+    if (triple_needs_free)
+      free(triple);
+    free(raw_triple);
+  } else {
+    if (triple_needs_free)
+      free(triple);
+    LLVMDisposeMessage(raw_triple);
+  }
+  if (!triple_copy || !layout_copy) {
+    free(triple_copy);
+    free(layout_copy);
+    return false;
+  }
+
+  free(g_cached_layout_key);
+  free(g_cached_target_triple);
+  free(g_cached_data_layout);
+  g_cached_layout_key = ny_strdup(cache_key);
+  g_cached_target_triple = triple_copy;
+  g_cached_data_layout = layout_copy;
+  if (out_triple)
+    *out_triple = g_cached_target_triple;
+  if (out_layout)
+    *out_layout = g_cached_data_layout;
+  return true;
+}
+
+void ny_llvm_optimize_module(LLVMModuleRef module, int opt_level, int opt_loops,
+                             const char *opt_pipeline) {
+  ny_llvm_opt_profile_t profile = ny_llvm_opt_profile_from_env();
+  bool has_custom_pipeline = (opt_pipeline && *opt_pipeline);
+  const char *passes = NULL;
+  if (has_custom_pipeline) {
+    passes = opt_pipeline;
+  } else if (profile == NY_LLVM_OPT_PROFILE_PEAK && opt_level > 0) {
+    passes = ny_llvm_peak_default_pass_pipeline(module);
+  } else {
+    passes = ny_llvm_default_pass_pipeline(opt_level);
+  }
+  if (!passes || !*passes)
+    return;
+
+  const char *module_triple = module ? LLVMGetTarget(module) : NULL;
+  char *raw_triple = (module_triple && *module_triple)
+                         ? ny_strdup(module_triple)
+                         : LLVMGetDefaultTargetTriple();
+  if (!raw_triple)
+    return;
+  LLVMTargetRef target;
+  char *err = NULL;
+  if (LLVMGetTargetFromTriple(raw_triple, &target, &err) != 0) {
+    if (err)
+      LLVMDisposeMessage(err);
+    if (module_triple && *module_triple)
+      free(raw_triple);
+    else
+      LLVMDisposeMessage(raw_triple);
+    return;
+  }
+
+  char cpu_buf[128] = {0};
+  char feat_buf[256] = {0};
+  derive_host_target(raw_triple, cpu_buf, sizeof(cpu_buf), feat_buf, sizeof(feat_buf));
+
+  LLVMCodeGenOptLevel cgo = ny_llvm_effective_codegen_level(opt_level);
+
+  LLVMTargetMachineRef tm = LLVMCreateTargetMachine(target, raw_triple, cpu_buf, feat_buf, cgo,
+                                                    LLVMRelocPIC, host_code_model());
+
+  if (!tm) {
+    if (module_triple && *module_triple)
+      free(raw_triple);
+    else
+      LLVMDisposeMessage(raw_triple);
+    return;
+  }
+
+  LLVMPassBuilderOptionsRef opts = LLVMCreatePassBuilderOptions();
+  ny_llvm_configure_pass_options(opts, opt_level, opt_loops, opt_pipeline);
+  LLVMErrorRef error = LLVMRunPasses(module, passes, tm, opts);
+  if (error) {
+    char *msg = LLVMGetErrorMessage(error);
+    NY_LOG_ERR("LLVM optimization failed: %s\n", msg);
+    LLVMDisposeErrorMessage(msg);
+  }
+
+  LLVMDisposePassBuilderOptions(opts);
+  LLVMDisposeTargetMachine(tm);
+  if (module_triple && *module_triple)
+    free(raw_triple);
+  else
+    LLVMDisposeMessage(raw_triple);
+}
+
+bool ny_llvm_apply_sanitize(LLVMModuleRef module, const char *sanitize_kind) {
+  if (!module || !sanitize_kind || !*sanitize_kind)
+    return true;
+
+  const char *pass = NULL;
+  if (strcmp(sanitize_kind, "address") == 0)
+    pass = "asan";
+  else if (strcmp(sanitize_kind, "undefined") == 0)
+    /*
+     * UBSan checks are normally inserted by a typed frontend, not by a
+     * generic LLVM new-pass-manager pipeline. The C runtime is still compiled
+     * and linked with -fsanitize=undefined; do not claim a nonexistent pass.
+     */
+    return true;
+  else if (strcmp(sanitize_kind, "thread") == 0)
+    pass = "tsan";
+  else if (strcmp(sanitize_kind, "leak") == 0)
+    return true; /* leak detection is runtime-only, no LLVM pass needed */
+  else
+    return false;
+
+  const char *module_triple = module ? LLVMGetTarget(module) : NULL;
+  char *raw_triple = (module_triple && *module_triple)
+                         ? ny_strdup(module_triple)
+                         : LLVMGetDefaultTargetTriple();
+  if (!raw_triple)
+    return false;
+
+  LLVMTargetRef target;
+  char *err = NULL;
+  if (LLVMGetTargetFromTriple(raw_triple, &target, &err) != 0) {
+    if (err)
+      LLVMDisposeMessage(err);
+    if (module_triple && *module_triple)
+      free(raw_triple);
+    else
+      LLVMDisposeMessage(raw_triple);
+    return false;
+  }
+
+  char cpu_buf[128] = {0};
+  char feat_buf[256] = {0};
+  derive_host_target(raw_triple, cpu_buf, sizeof(cpu_buf), feat_buf, sizeof(feat_buf));
+
+  LLVMCodeGenOptLevel cgo = ny_llvm_effective_codegen_level(2);
+  LLVMTargetMachineRef tm = LLVMCreateTargetMachine(target, raw_triple, cpu_buf,
+                                                    feat_buf, cgo,
+                                                    LLVMRelocPIC, host_code_model());
+  if (!tm) {
+    if (module_triple && *module_triple)
+      free(raw_triple);
+    else
+      LLVMDisposeMessage(raw_triple);
+    return false;
+  }
+
+  LLVMPassBuilderOptionsRef opts = LLVMCreatePassBuilderOptions();
+  LLVMErrorRef error = LLVMRunPasses(module, pass, tm, opts);
+  bool ok = !error;
+  if (error) {
+    char *msg = LLVMGetErrorMessage(error);
+    NY_LOG_ERR("Sanitizer pass '%s' failed: %s\n", pass, msg);
+    LLVMDisposeErrorMessage(msg);
+  }
+  LLVMDisposePassBuilderOptions(opts);
+  LLVMDisposeTargetMachine(tm);
+  if (module_triple && *module_triple)
+    free(raw_triple);
+  else
+    LLVMDisposeMessage(raw_triple);
+  return ok;
+}
+
+void ny_llvm_prepare_module(LLVMModuleRef module, int opt_level) {
+  (void)opt_level;
+  const char *triple = NULL;
+  const char *layout = NULL;
+  if (!ny_llvm_get_cached_module_target(&triple, &layout))
+    return;
+  LLVMSetTarget(module, triple);
+  LLVMSetDataLayout(module, layout);
+}
+
+void ny_llvm_apply_host_attrs(LLVMModuleRef module) {
+  if (!module)
+    return;
+  if (!ny_llvm_init_native())
+    return;
+  char *raw_triple = NULL;
+  const char *env_triple = getenv("NYTRIX_HOST_TRIPLE");
+  if (env_triple && *env_triple)
+    raw_triple = ny_strdup(env_triple);
+  if (!raw_triple)
+    raw_triple = LLVMGetDefaultTargetTriple();
+  if (!raw_triple)
+    return;
+  bool triple_needs_free = false;
+  char *triple = normalize_triple(raw_triple, &triple_needs_free);
+  char cpu_buf[128] = {0};
+  char feat_buf[256] = {0};
+  derive_host_target(triple, cpu_buf, sizeof(cpu_buf), feat_buf, sizeof(feat_buf));
+  char *host_features = NULL;
+  const char *cpu = cpu_buf[0] ? cpu_buf : "";
+  const char *features = feat_buf;
+  bool arm32 =
+      triple && strstr(triple, "arm") && !strstr(triple, "aarch64") && !strstr(triple, "arm64");
+  if (!feat_buf[0] && !arm32 && target_matches_host_arch(triple)) {
+    host_features = LLVMGetHostCPUFeatures();
+    if (host_features)
+      features = host_features;
+  } else if (!feat_buf[0] && arm32) {
+    features = "";
+  }
+  apply_target_attrs(module, cpu, features);
+  if (host_features)
+    LLVMDisposeMessage(host_features);
+  if (env_triple && env_triple[0]) {
+    if (triple_needs_free)
+      free(triple);
+    free(raw_triple);
+  } else {
+    if (triple_needs_free)
+      free(triple);
+    LLVMDisposeMessage(raw_triple);
+  }
+}
+
+bool ny_llvm_emit_object(LLVMModuleRef module, const char *path, int opt_level) {
+  if (!module || !path)
+    return false;
+  if (!ny_llvm_init_native())
+    return false;
+  char *raw_triple = NULL;
+  const char *env_triple = getenv("NYTRIX_HOST_TRIPLE");
+  if (env_triple && *env_triple)
+    raw_triple = ny_strdup(env_triple);
+  if (!raw_triple)
+    raw_triple = LLVMGetDefaultTargetTriple();
+  if (!raw_triple)
+    return false;
+  bool triple_needs_free = false;
+  char *triple = normalize_triple(raw_triple, &triple_needs_free);
+  LLVMTargetRef target;
+  char *err = NULL;
+  if (LLVMGetTargetFromTriple(triple, &target, &err)) {
+    NY_LOG_ERR("Invalid target triple: %s\n", err);
+    LLVMDisposeMessage(err);
+    if (triple_needs_free)
+      free(triple);
+    else
+      LLVMDisposeMessage(raw_triple);
+    return false;
+  }
+  char cpu_buf[128] = {0};
+  char feat_buf[256] = {0};
+  derive_host_target(triple, cpu_buf, sizeof(cpu_buf), feat_buf, sizeof(feat_buf));
+  char *host_features = NULL;
+  const char *cpu = cpu_buf[0] ? cpu_buf : "";
+  const char *features = feat_buf;
+  bool arm32 =
+      triple && strstr(triple, "arm") && !strstr(triple, "aarch64") && !strstr(triple, "arm64");
+  if (!feat_buf[0] && !arm32 && target_matches_host_arch(triple)) {
+    host_features = LLVMGetHostCPUFeatures();
+    if (host_features)
+      features = host_features;
+  } else if (!feat_buf[0] && arm32) {
+    features = "";
+  }
+  apply_target_attrs(module, cpu, features);
+  LLVMCodeGenOptLevel cgo = ny_llvm_effective_codegen_level(opt_level);
+  LLVMTargetMachineRef tm = LLVMCreateTargetMachine(target, triple, cpu, features ? features : "",
+                                                    cgo, LLVMRelocPIC, host_code_model());
+  ny_llvm_configure_emit_target_machine(tm, cgo);
+  if (!tm) {
+    NY_LOG_ERR("%s", "Failed to create target machine\n");
+    if (triple_needs_free)
+      free(triple);
+    else
+      LLVMDisposeMessage(raw_triple);
+    if (host_features)
+      LLVMDisposeMessage(host_features);
+    return false;
+  }
+  LLVMTargetDataRef td = LLVMCreateTargetDataLayout(tm);
+  char *layout = LLVMCopyStringRepOfTargetData(td);
+  if (layout) {
+
+    LLVMSetDataLayout(module, layout);
+    LLVMDisposeMessage(layout);
+  }
+  LLVMDisposeTargetData(td);
+  LLVMSetTarget(module, triple);
+  char *emit_err = NULL;
+  int res = LLVMTargetMachineEmitToFile(tm, module, (char *)path, LLVMObjectFile, &emit_err);
+  if (emit_err) {
+    NY_LOG_ERR("Object emission failed: %s\n", emit_err);
+    LLVMDisposeMessage(emit_err);
+  }
+  if (env_triple && env_triple[0]) {
+    if (triple_needs_free)
+      free(triple);
+    free(raw_triple);
+  } else {
+    if (triple_needs_free)
+      free(triple);
+    LLVMDisposeMessage(raw_triple);
+  }
+  if (host_features)
+    LLVMDisposeMessage(host_features);
+  LLVMDisposeTargetMachine(tm);
+  return res == 0;
+}
+
+bool ny_llvm_emit_file(LLVMModuleRef module, const char *path, LLVMCodeGenFileType kind,
+                       int opt_level) {
+  if (!module || !path)
+    return false;
+  if (!ny_llvm_init_native())
+    return false;
+  char *raw_triple = NULL;
+  const char *env_triple = getenv("NYTRIX_HOST_TRIPLE");
+  if (env_triple && *env_triple)
+    raw_triple = ny_strdup(env_triple);
+  if (!raw_triple)
+    raw_triple = LLVMGetDefaultTargetTriple();
+  if (!raw_triple)
+    return false;
+  bool triple_needs_free = false;
+  char *triple = normalize_triple(raw_triple, &triple_needs_free);
+  LLVMTargetRef target;
+  char *err = NULL;
+  if (LLVMGetTargetFromTriple(triple, &target, &err)) {
+    NY_LOG_ERR("Invalid target triple: %s\n", err);
+    LLVMDisposeMessage(err);
+    if (triple_needs_free)
+      free(triple);
+    else
+      LLVMDisposeMessage(raw_triple);
+    return false;
+  }
+  char cpu_buf[128] = {0};
+  char feat_buf[256] = {0};
+  derive_host_target(triple, cpu_buf, sizeof(cpu_buf), feat_buf, sizeof(feat_buf));
+  char *host_features = NULL;
+  const char *cpu = cpu_buf[0] ? cpu_buf : "";
+  const char *features = feat_buf;
+  bool arm32 =
+      triple && strstr(triple, "arm") && !strstr(triple, "aarch64") && !strstr(triple, "arm64");
+  if (!feat_buf[0] && !arm32 && target_matches_host_arch(triple)) {
+    host_features = LLVMGetHostCPUFeatures();
+    if (host_features)
+      features = host_features;
+  } else if (!feat_buf[0] && arm32) {
+    features = "";
+  }
+  apply_target_attrs(module, cpu, features);
+  LLVMCodeGenOptLevel cgo = ny_llvm_effective_codegen_level(opt_level);
+  LLVMTargetMachineRef tm = LLVMCreateTargetMachine(target, triple, cpu, features ? features : "",
+                                                    cgo, LLVMRelocPIC, host_code_model());
+  ny_llvm_configure_emit_target_machine(tm, cgo);
+  if (!tm) {
+    NY_LOG_ERR("%s", "Failed to create target machine\n");
+    if (triple_needs_free)
+      free(triple);
+    else
+      LLVMDisposeMessage(raw_triple);
+    if (host_features)
+      LLVMDisposeMessage(host_features);
+    return false;
+  }
+  char *emit_err = NULL;
+  int res = LLVMTargetMachineEmitToFile(tm, module, (char *)path, kind, &emit_err);
+  if (emit_err) {
+    NY_LOG_ERR("Emission failed: %s\n", emit_err);
+    LLVMDisposeMessage(emit_err);
+  }
+  if (env_triple && env_triple[0]) {
+    if (triple_needs_free)
+      free(triple);
+    free(raw_triple);
+  } else {
+    if (triple_needs_free)
+      free(triple);
+    LLVMDisposeMessage(raw_triple);
+  }
+  if (host_features)
+    LLVMDisposeMessage(host_features);
+  LLVMDisposeTargetMachine(tm);
+  return res == 0;
+}
+
+LLVMTypeRef ny_llvm_ptr_type(LLVMContextRef ctx) { return LLVMPointerTypeInContext(ctx, 0); }
+
+LLVMValueRef ny_llvm_const_gep2(LLVMTypeRef elem_ty, LLVMValueRef base, LLVMValueRef *indices,
+                                unsigned count) {
+  return LLVMConstGEP2(elem_ty, base, indices, count);
+}
+
+void ny_llvm_clear_function(LLVMValueRef f) {
+  if (!f)
+    return;
+  LLVMBasicBlockRef bb = LLVMGetFirstBasicBlock(f);
+  while (bb) {
+    LLVMBasicBlockRef next = LLVMGetNextBasicBlock(bb);
+    LLVMDeleteBasicBlock(bb);
+    bb = next;
+  }
+}

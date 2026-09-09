@@ -1,6 +1,5 @@
 use std.core
 use std.core.syntax as syntax
-use std.core.test as test
 
 fn __list_has(xs, want) {
    mut i = 0

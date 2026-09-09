@@ -1,8 +1,15 @@
 /*
  * Object-file writer: produces ELF64, ELF32, COFF, and Mach-O object
  * files from machine-form with relocations and section management.
+ *
+ * References:
+ *  System V ABI (x86-64): ELF64 object format, relocation types,
+ *   section layout conventions.
+ *  PE/COFF Specification (Microsoft): COFF and PE32+ object formats.
+ *  OS X ABI Mach-O Reference (Apple): Mach-O object format.
  */
 #include "code/native/object/internal.h"
+#include "base/trace.h"
 
 #include <limits.h>
 #include <stdint.h>
@@ -40,6 +47,10 @@ void ny_x64_obj_ctx_free(ny_x64_obj_ctx_t *c) {
   free(c->value_reg);
   free(c->value_xmm);
   free(c->value_spill);
+  free(c->labels);
+  free(c->patches);
+  free(c->relocs);
+  free(c->inst_offsets);
   c->value_f64 = NULL;
   c->value_f32 = NULL;
   c->local_f64 = NULL;
@@ -48,6 +59,32 @@ void ny_x64_obj_ctx_free(ny_x64_obj_ctx_t *c) {
   c->value_reg = NULL;
   c->value_xmm = NULL;
   c->value_spill = NULL;
+  c->labels = NULL;
+  c->patches = NULL;
+  c->relocs = NULL;
+  c->inst_offsets = NULL;
+}
+
+bool ny_native_debug_line_append(ny_native_debug_line_t **lines,
+                                 size_t *count, size_t *cap,
+                                 ny_native_debug_line_t line) {
+  if (!lines || !count || !cap || *count > *cap)
+    return false;
+  if (*count == *cap) {
+    if (*count == SIZE_MAX)
+      return false;
+    size_t next = *cap > SIZE_MAX / 2 ? *count + 1
+                                      : (*cap ? *cap * 2 : 32);
+    if (next < *count + 1 || next > SIZE_MAX / sizeof(**lines))
+      return false;
+    ny_native_debug_line_t *grown = realloc(*lines, next * sizeof(**lines));
+    if (!grown)
+      return false;
+    *lines = grown;
+    *cap = next;
+  }
+  (*lines)[(*count)++] = line;
+  return true;
 }
 
 static bool ny_obj_reserve(ny_obj_buf_t *b, size_t add) {
@@ -163,6 +200,7 @@ void ny_i386_obj_ctx_free(ny_i386_obj_ctx_t *c) {
     free(c->value_f32);
     free(c->local_f64);
     free(c->local_f32);
+    free(c->relocs);
   }
 }
 
@@ -382,10 +420,15 @@ static bool ny_obj_reloc_symbol(char *out, size_t out_len,
     return false;
   /*
    * Lowering emits pooled literals as local object symbols (for example
-   * .Lnystr.0).  They already name a definition in this object and must not
+   * pooled ny_str_0).  They already name a definition in this object and must not
    * pass through the Nytrix function-name formatter.
    */
-  if (symbol[0] == '.') {
+  if (symbol[0] == '.' || strncmp(symbol, "ny_str_", 7) == 0) {
+    int n = snprintf(out, out_len, "%s", symbol);
+    return n > 0 && (size_t)n < out_len;
+  }
+  if (ny_native_globaltab_has(symbol) || ny_native_consttab_has(symbol) ||
+      strncmp(symbol, "ny_fn_", 6) == 0 || strncmp(symbol, "rt_", 3) == 0) {
     int n = snprintf(out, out_len, "%s", symbol);
     return n > 0 && (size_t)n < out_len;
   }
@@ -404,10 +447,22 @@ static bool ny_i386_obj_reloc_symbol(char *out, size_t out_len,
 
 static bool ny_i386_obj_add_reloc(ny_i386_obj_ctx_t *c, const char *symbol,
                                   size_t disp_off) {
-  if (c->reloc_count >= sizeof(c->relocs) / sizeof(c->relocs[0])) {
-    ny_native_set_err(c->err, c->err_len,
-                      "i386 ELF object writer: too many relocations");
-    return false;
+  if (c->reloc_count == c->reloc_cap) {
+    size_t cap = c->reloc_cap ? c->reloc_cap * 2u : 64u;
+    if (cap < c->reloc_cap || cap > NY_X64_OBJ_MAX_RELOCS) {
+      ny_native_set_err(c->err, c->err_len,
+                        "i386 ELF object writer: relocation transport too large");
+      return false;
+    }
+    ny_i386_obj_reloc_t *grown =
+        realloc(c->relocs, cap * sizeof(*grown));
+    if (!grown) {
+      ny_native_set_err(c->err, c->err_len,
+                        "i386 ELF object writer: relocation allocation failed");
+      return false;
+    }
+    c->relocs = grown;
+    c->reloc_cap = cap;
   }
   ny_i386_obj_reloc_t *r = &c->relocs[c->reloc_count++];
   snprintf(r->symbol, sizeof(r->symbol), "%s", symbol ? symbol : "");
@@ -1362,22 +1417,18 @@ static bool ny_x64_obj_load_xmm_reg(ny_x64_obj_ctx_t *c, int xmm, int base) {
   if (xmm < 0 || xmm > 15 || base < 0 || base > 15)
     return false;
   unsigned char modrm = (unsigned char)(((xmm & 7) << 3) | (base & 7));
-  if (xmm >= 8) {
-    unsigned char op[] = {0xf2, 0x41, 0x0f, 0x10, modrm};
-    return ny_x64_obj_bytes(c, op, sizeof(op));
-  }
-  unsigned char op[] = {0xf2, 0x0f, 0x10, modrm};
+  unsigned char rex = (unsigned char)(0x40 | (xmm >= 8 ? 0x04 : 0) |
+                                      (base >= 8 ? 0x01 : 0));
+  unsigned char op[] = {0xf2, rex, 0x0f, 0x10, modrm};
   return ny_x64_obj_bytes(c, op, sizeof(op));
 }
 static bool ny_x64_obj_store_xmm_reg(ny_x64_obj_ctx_t *c, int xmm, int base) {
   if (xmm < 0 || xmm > 15 || base < 0 || base > 15)
     return false;
   unsigned char modrm = (unsigned char)(((xmm & 7) << 3) | (base & 7));
-  if (xmm >= 8) {
-    unsigned char op[] = {0xf2, 0x41, 0x0f, 0x11, modrm};
-    return ny_x64_obj_bytes(c, op, sizeof(op));
-  }
-  unsigned char op[] = {0xf2, 0x0f, 0x11, modrm};
+  unsigned char rex = (unsigned char)(0x40 | (xmm >= 8 ? 0x04 : 0) |
+                                      (base >= 8 ? 0x01 : 0));
+  unsigned char op[] = {0xf2, rex, 0x0f, 0x11, modrm};
   return ny_x64_obj_bytes(c, op, sizeof(op));
 }
 
@@ -1713,12 +1764,65 @@ static bool ny_x64_obj_binop(ny_x64_obj_ctx_t *c, const nyir_inst_t *in,
          ny_x64_obj_store_value_rax(c, in->dst);
 }
 
-static bool ny_x64_obj_add_label(ny_x64_obj_ctx_t *c, int64_t label) {
-  if (c->label_count >= sizeof(c->labels) / sizeof(c->labels[0])) {
+static bool ny_x64_obj_reserve_labels(ny_x64_obj_ctx_t *c, size_t want) {
+  if (want <= c->label_cap)
+    return true;
+  size_t cap = c->label_cap ? c->label_cap : 64;
+  while (cap < want) {
+    if (cap > SIZE_MAX / 2) {
+      cap = want;
+      break;
+    }
+    cap *= 2;
+  }
+  if (cap > SIZE_MAX / sizeof(*c->labels)) {
     ny_native_set_err(c->err, c->err_len,
-                      "x86-64 ELF object writer: too many labels");
+                      "x86-64 ELF object writer: label storage too large");
     return false;
   }
+  ny_x64_obj_label_t *labels =
+      realloc(c->labels, cap * sizeof(*labels));
+  if (!labels) {
+    ny_native_set_err(c->err, c->err_len,
+                      "x86-64 ELF object writer: label allocation failed");
+    return false;
+  }
+  c->labels = labels;
+  c->label_cap = cap;
+  return true;
+}
+
+static bool ny_x64_obj_reserve_patches(ny_x64_obj_ctx_t *c, size_t want) {
+  if (want <= c->patch_cap)
+    return true;
+  size_t cap = c->patch_cap ? c->patch_cap : 64;
+  while (cap < want) {
+    if (cap > SIZE_MAX / 2) {
+      cap = want;
+      break;
+    }
+    cap *= 2;
+  }
+  if (cap > SIZE_MAX / sizeof(*c->patches)) {
+    ny_native_set_err(c->err, c->err_len,
+                      "x86-64 ELF object writer: patch storage too large");
+    return false;
+  }
+  ny_x64_obj_patch_t *patches =
+      realloc(c->patches, cap * sizeof(*patches));
+  if (!patches) {
+    ny_native_set_err(c->err, c->err_len,
+                      "x86-64 ELF object writer: patch allocation failed");
+    return false;
+  }
+  c->patches = patches;
+  c->patch_cap = cap;
+  return true;
+}
+
+static bool ny_x64_obj_add_label(ny_x64_obj_ctx_t *c, int64_t label) {
+  if (!ny_x64_obj_reserve_labels(c, c->label_count + 1))
+    return false;
   for (size_t i = 0; i < c->label_count; ++i) {
     if (c->labels[i].label == label) {
       ny_native_set_err(c->err, c->err_len,
@@ -1734,11 +1838,8 @@ static bool ny_x64_obj_add_label(ny_x64_obj_ctx_t *c, int64_t label) {
 
 static bool ny_x64_obj_add_patch(ny_x64_obj_ctx_t *c, int64_t label,
                                  size_t disp_off) {
-  if (c->patch_count >= sizeof(c->patches) / sizeof(c->patches[0])) {
-    ny_native_set_err(c->err, c->err_len,
-                      "x86-64 ELF object writer: too many branches");
+  if (!ny_x64_obj_reserve_patches(c, c->patch_count + 1))
     return false;
-  }
   c->patches[c->patch_count++] =
       (ny_x64_obj_patch_t){.label = label, .disp_off = disp_off};
   return true;
@@ -1755,10 +1856,22 @@ static bool ny_x64_obj_reloc_symbol(char *out, size_t out_len,
 
 static bool ny_x64_obj_add_reloc(ny_x64_obj_ctx_t *c, const char *symbol,
                                  size_t disp_off, int type) {
-  if (c->reloc_count >= sizeof(c->relocs) / sizeof(c->relocs[0])) {
-    ny_native_set_err(c->err, c->err_len,
-                      "x86-64 object writer: too many relocations");
-    return false;
+  if (c->reloc_count == c->reloc_cap) {
+    size_t cap = c->reloc_cap ? c->reloc_cap * 2u : 64u;
+    if (cap < c->reloc_cap || cap > NY_X64_OBJ_MAX_RELOCS) {
+      ny_native_set_err(c->err, c->err_len,
+                        "x86-64 object writer: relocation transport too large");
+      return false;
+    }
+    ny_x64_obj_reloc_t *grown =
+        realloc(c->relocs, cap * sizeof(*grown));
+    if (!grown) {
+      ny_native_set_err(c->err, c->err_len,
+                        "x86-64 object writer: relocation allocation failed");
+      return false;
+    }
+    c->relocs = grown;
+    c->reloc_cap = cap;
   }
   snprintf(c->relocs[c->reloc_count].symbol,
            sizeof(c->relocs[0].symbol), "%s", symbol ? symbol : "");
@@ -1887,7 +2000,7 @@ bool ny_x64_obj_collect_external_reloc_symbols(
   return true;
 }
 
-bool ny_x64_obj_append_function(ny_obj_buf_t *code,
+bool ny_x64_obj_append_function_debug(ny_obj_buf_t *code,
                                        ny_x64_obj_symbol_def_t *defs,
                                        size_t *def_count,
                                        ny_x64_obj_reloc_t *relocs,
@@ -1896,6 +2009,10 @@ bool ny_x64_obj_append_function(ny_obj_buf_t *code,
                                        const ny_native_target_info_t *target,
                                        const char *symbol_name,
                                        bool tag_return,
+                                       const nyir_func_t *source,
+                                       ny_native_debug_line_t **debug_lines,
+                                       size_t *debug_line_count,
+                                       size_t *debug_line_cap,
                                        char *err, size_t err_len) {
   if (!code || !defs || !def_count || !relocs || !reloc_count || !nyir ||
       !target || !symbol_name || !symbol_name[0]) {
@@ -1941,8 +2058,43 @@ bool ny_x64_obj_append_function(ny_obj_buf_t *code,
     relocs[*reloc_count].disp_off += base;
     (*reloc_count)++;
   }
+  if (source && debug_lines && debug_line_count && debug_line_cap) {
+    size_t map_len = ctx.inst_offsets ? source->len : 0;
+    if (map_len > nyir->len)
+      map_len = nyir->len;
+    for (size_t i = 0; i < map_len; ++i) {
+      const nyir_debug_loc_t *loc = &source->data[i].debug;
+      if (!loc->line || ctx.inst_offsets[i] == SIZE_MAX)
+        continue;
+      if (!ny_native_debug_line_append(
+              debug_lines, debug_line_count, debug_line_cap,
+              (ny_native_debug_line_t){*def_count - 1,
+                                       base + ctx.inst_offsets[i], loc->file,
+                                       loc->line, loc->column})) {
+        ny_native_set_err(err, err_len,
+                          "x86-64 source map allocation failed");
+        ny_x64_obj_ctx_free(&ctx);
+        return false;
+      }
+    }
+  }
   ny_x64_obj_ctx_free(&ctx);
   return true;
+}
+
+bool ny_x64_obj_append_function(ny_obj_buf_t *code,
+                                ny_x64_obj_symbol_def_t *defs,
+                                size_t *def_count,
+                                ny_x64_obj_reloc_t *relocs,
+                                size_t *reloc_count,
+                                const nyir_func_t *nyir,
+                                const ny_native_target_info_t *target,
+                                const char *symbol_name,
+                                bool tag_return,
+                                char *err, size_t err_len) {
+  return ny_x64_obj_append_function_debug(
+      code, defs, def_count, relocs, reloc_count, nyir, target, symbol_name,
+      tag_return, NULL, NULL, NULL, NULL, err, err_len);
 }
 
 bool ny_x64_obj_collect_reloc_symbols(const ny_x64_obj_reloc_t *relocs,
@@ -2084,6 +2236,87 @@ static bool ny_x64_obj_emit_pow2_divmod(ny_x64_obj_ctx_t *c,
          ny_x64_obj_store_value_rax(c, in->dst);
 }
 
+static void ny_x64_obj_sdiv_magic(uint64_t ad, int64_t *magic_out,
+                                  unsigned *shift_out) {
+  const uint64_t two63 = (uint64_t)1 << 63;
+  uint64_t anc = two63 - 1 - (two63 % ad);
+  unsigned p = 63;
+  uint64_t q1 = two63 / anc;
+  uint64_t r1 = two63 - q1 * anc;
+  uint64_t q2 = two63 / ad;
+  uint64_t r2 = two63 - q2 * ad;
+  uint64_t delta;
+  do {
+    p++;
+    q1 <<= 1;
+    r1 <<= 1;
+    if (r1 >= anc) { q1++; r1 -= anc; }
+    q2 <<= 1;
+    r2 <<= 1;
+    if (r2 >= ad)  { q2++; r2 -= ad; }
+    delta = ad - r2;
+  } while (q1 < delta || (q1 == delta && r1 == 0));
+  *magic_out = (int64_t)(q2 + 1);
+  *shift_out = p - 64;
+}
+
+static bool ny_x64_obj_emit_sdiv_magic(ny_x64_obj_ctx_t *c,
+                                       const nyir_inst_t *in,
+                                       int64_t divisor, bool want_rem) {
+  uint64_t ad = divisor >= 0 ? (uint64_t)divisor
+                             : (uint64_t)(-(divisor + 1)) + 1;
+  int64_t magic = 0;
+  unsigned s = 0;
+  ny_x64_obj_sdiv_magic(ad, &magic, &s);
+  bool negate = divisor < 0;
+
+  if (!ny_x64_obj_load_value_rax(c, in->a))
+    return false;
+  if (!ny_x64_obj_bytes(c, (const unsigned char[]){0x49, 0x89, 0xc1}, 3))
+    return false;
+  if (!ny_x64_obj_bytes(c, (const unsigned char[]){0x49, 0xba}, 2) ||
+      !ny_x64_obj_i64(c, magic))
+    return false;
+  if (!ny_x64_obj_bytes(c, (const unsigned char[]){0x49, 0xf7, 0xea, 0x48, 0x89, 0xd0}, 6))
+    return false;
+  if (magic < 0) {
+    if (!ny_x64_obj_bytes(c, (const unsigned char[]){0x4c, 0x01, 0xc8}, 3))
+      return false;
+  }
+  if (s > 0) {
+    if (!ny_x64_obj_bytes(c, (const unsigned char[]){0x48, 0xc1, 0xf8}, 3) ||
+        !ny_x64_obj_u8(c, (unsigned char)s))
+      return false;
+  }
+  if (!ny_x64_obj_bytes(c, (const unsigned char[]){
+        0x4c, 0x89, 0xc9,
+        0x48, 0xc1, 0xf9, 0x3f,
+        0x48, 0x29, 0xc8
+      }, 10))
+    return false;
+  if (negate) {
+    if (!ny_x64_obj_bytes(c, (const unsigned char[]){0x48, 0xf7, 0xd8}, 3))
+      return false;
+  }
+  if (want_rem) {
+    if (!ny_x64_obj_bytes(c, (const unsigned char[]){0x49, 0x89, 0xc2, 0x4c, 0x89, 0xc8}, 6))
+      return false;
+    if ((int64_t)(int32_t)ad == (int64_t)ad) {
+      if (!ny_x64_obj_bytes(c, (const unsigned char[]){0x4d, 0x69, 0xd2}, 3) ||
+          !ny_x64_obj_i32(c, (int32_t)ad))
+        return false;
+    } else {
+      if (!ny_x64_obj_bytes(c, (const unsigned char[]){0x49, 0xbb}, 2) ||
+          !ny_x64_obj_i64(c, (int64_t)ad) ||
+          !ny_x64_obj_bytes(c, (const unsigned char[]){0x4d, 0x0f, 0xaf, 0xd3}, 4))
+        return false;
+    }
+    if (!ny_x64_obj_bytes(c, (const unsigned char[]){0x4c, 0x29, 0xd0}, 3))
+      return false;
+  }
+  return ny_x64_obj_store_value_rax(c, in->dst);
+}
+
 static bool ny_x64_obj_emit_inst(ny_x64_obj_ctx_t *c,
                                  const nyir_inst_t *in) {
   static const unsigned char add[] = {0x4c, 0x01, 0xd0};
@@ -2148,6 +2381,12 @@ static bool ny_x64_obj_emit_inst(ny_x64_obj_ctx_t *c,
     unsigned shift = 0;
     if (ny_x64_obj_try_pow2_divisor(c, in->b, &shift))
       return ny_x64_obj_emit_pow2_divmod(c, in, shift);
+    int64_t d = 0;
+    if (ny_x64_obj_try_const_i64(c, in->b, &d) && d != 0 && d != 1 && d != -1) {
+      uint64_t ad = d >= 0 ? (uint64_t)d : (uint64_t)(-(d + 1)) + 1;
+      if ((ad & (ad - 1)) != 0)
+        return ny_x64_obj_emit_sdiv_magic(c, in, d, in->op == NYIR_MOD_I64);
+    }
     if (!ny_x64_obj_load_value_rax(c, in->a) ||
         !ny_x64_obj_load_value_r10(c, in->b))
       return false;
@@ -2260,6 +2499,41 @@ static bool ny_x64_obj_emit_inst(ny_x64_obj_ctx_t *c,
            ny_x64_obj_bytes(c, (const unsigned char[]){0xf2, 0x0f, 0x51, 0xc1},
                             4) &&
            ny_x64_obj_store_value_xmm(c, in->dst, 0);
+  case NYIR_SIN_F64:
+  case NYIR_COS_F64:
+    return ny_x64_obj_load_value_xmm(c, in->a, 0) &&
+           ny_x64_obj_sub_rsp(c, c->target->shadow_space_bytes) &&
+           ny_x64_obj_u8(c, 0xe8) &&
+           ny_x64_obj_i32(c, 0) &&
+           ny_x64_obj_add_reloc(c,
+                              in->op == NYIR_SIN_F64 ? "sin" : "cos",
+                              c->code.len - 4, NY_RELOC_PLT32) &&
+           ny_x64_obj_add_rsp(c, c->target->shadow_space_bytes) &&
+           ny_x64_obj_store_value_xmm(c, in->dst, 0);
+  case NYIR_BOUNDS_CHECK: {
+    if (!ny_x64_obj_load_value_rax(c, in->b))
+      return false;
+    if (!ny_x64_obj_bytes(c, (const unsigned char[]){0x48, 0x89, 0xc7}, 3))
+      return false;
+    if (in->c >= 0) {
+      if (!ny_x64_obj_load_value_r10(c, in->c))
+        return false;
+      if (!ny_x64_obj_bytes(c, (const unsigned char[]){0x4c, 0x89, 0xd6}, 3))
+        return false;
+    } else {
+      if (!ny_x64_obj_bytes(c, (const unsigned char[]){0x48, 0xbe}, 2) ||
+          !ny_x64_obj_i64(c, in->imm))
+        return false;
+    }
+    /*
+     * Inline unsigned trap: cmp rdi(value), rsi(limit); jae ok; ud2.
+     * A call would clobber caller-saved registers holding live values.
+     */
+    return ny_x64_obj_bytes(c, (const unsigned char[]){0x48, 0x39, 0xf7,
+                                                       0x72, 0x02, 0x0f,
+                                                       0x0b},
+                            7);
+  }
   case NYIR_ADD_F32:
   case NYIR_SUB_F32:
   case NYIR_MUL_F32:
@@ -2865,7 +3139,8 @@ static bool ny_x64_obj_classify_values(ny_x64_obj_ctx_t *c,
       }
       if (in->op == NYIR_ADD_F64 || in->op == NYIR_SUB_F64 ||
           in->op == NYIR_MUL_F64 || in->op == NYIR_DIV_F64 ||
-          in->op == NYIR_CMP_F64) {
+          in->op == NYIR_CMP_F64 || in->op == NYIR_SIN_F64 ||
+          in->op == NYIR_COS_F64) {
         if (in->a >= 0 && in->a < c->value_slots && !c->value_f64[in->a]) {
           c->value_f64[in->a] = true;
           changed = true;
@@ -2951,7 +3226,9 @@ static bool ny_x64_obj_allocate_registers(ny_x64_obj_ctx_t *c,
   next_call[nyir->len] = INT_MAX;
   next_struct[nyir->len] = INT_MAX;
   for (size_t i = nyir->len; i > 0; --i) {
-    next_call[i - 1] = nyir->data[i - 1].op == NYIR_CALL
+    unsigned op = nyir->data[i - 1].op;
+    next_call[i - 1] = (op == NYIR_CALL || op == NYIR_SIN_F64 ||
+                        op == NYIR_COS_F64 || op == NYIR_BOUNDS_CHECK)
                            ? (int)(i - 1)
                            : next_call[i];
     /*
@@ -3153,6 +3430,8 @@ static bool ny_x64_obj_layout_spills(ny_x64_obj_ctx_t *c) {
   c->callee_save_slots = 0;
   for (int reg = 0; reg < 16; ++reg)
     c->callee_save_slot[reg] = -1;
+  for (int reg = 0; reg < 16; ++reg)
+    c->callee_save_xmm[reg] = -1;
   for (int v = 0; v < c->value_slots; ++v) {
     if ((c->value_reg && c->value_reg[v] >= 0) ||
         (c->value_xmm && c->value_xmm[v] >= 0) ||
@@ -3162,6 +3441,9 @@ static bool ny_x64_obj_layout_spills(ny_x64_obj_ctx_t *c) {
       if ((reg == 3 || (reg >= 12 && reg <= 15)) &&
           c->callee_save_slot[reg] < 0)
         c->callee_save_slot[reg] = c->callee_save_slots++;
+      int xmm = c->value_xmm ? c->value_xmm[v] : -1;
+      if (xmm >= 6 && xmm <= 15 && c->callee_save_xmm[xmm] < 0)
+        c->callee_save_xmm[xmm] = c->callee_save_slots++;
     } else {
       c->value_spill[v] = c->spill_slots++;
     }
@@ -3176,10 +3458,19 @@ static int ny_x64_obj_callee_off(const ny_x64_obj_ctx_t *c, int reg) {
   return -8 * (c->spill_slots + c->callee_save_slot[reg] + 1);
 }
 
+static int ny_x64_obj_callee_xmm_off(const ny_x64_obj_ctx_t *c, int xmm) {
+  return -8 * (c->spill_slots + c->callee_save_xmm[xmm] + 1);
+}
+
 static bool ny_x64_obj_save_callee(ny_x64_obj_ctx_t *c) {
   for (int reg = 0; reg < 16; ++reg) {
     if (c->callee_save_slot[reg] >= 0 &&
         !ny_x64_obj_store_reg(c, reg, ny_x64_obj_callee_off(c, reg)))
+      return false;
+  }
+  for (int xmm = 6; xmm <= 15; ++xmm) {
+    if (c->callee_save_xmm[xmm] >= 0 &&
+        !ny_x64_obj_store_xmm(c, ny_x64_obj_callee_xmm_off(c, xmm), xmm))
       return false;
   }
   return true;
@@ -3189,6 +3480,11 @@ static bool ny_x64_obj_emit_epilogue(ny_x64_obj_ctx_t *c) {
   for (int reg = 15; reg >= 0; --reg) {
     if (c->callee_save_slot[reg] >= 0 &&
         !ny_x64_obj_load_reg(c, reg, ny_x64_obj_callee_off(c, reg)))
+      return false;
+  }
+  for (int xmm = 15; xmm >= 6; --xmm) {
+    if (c->callee_save_xmm[xmm] >= 0 &&
+        !ny_x64_obj_load_xmm(c, ny_x64_obj_callee_xmm_off(c, xmm), xmm))
       return false;
   }
   return ny_x64_obj_bytes(c, (const unsigned char[]){0xc9, 0xc3}, 2);
@@ -3269,14 +3565,25 @@ bool ny_x64_obj_emit_code(ny_x64_obj_ctx_t *c, const nyir_func_t *nyir,
   c->nyir = nyir;
   ny_x64_obj_valmap_init(&c->valmap, nyir);
   ny_x64_obj_scan_frame(c, nyir);
+  if (ny_trace_enabled("NY_TRACE_EMIT"))
+    fprintf(stderr, "[obj emit] len=%zu vals=%d\n", nyir ? nyir->len : 0,
+            nyir ? nyir->next_value : 0);
   if (!ny_x64_obj_classify_values(c, nyir))
     return false;
+  if (ny_trace_enabled("NY_TRACE_EMIT"))
+    fprintf(stderr, "[obj emit] classify_values done\n");
   if (!ny_x64_obj_classify_immediates(c, nyir))
     return false;
+  if (ny_trace_enabled("NY_TRACE_EMIT"))
+    fprintf(stderr, "[obj emit] classify_immediates done\n");
   if (!ny_x64_obj_allocate_registers(c, nyir))
     return false;
+  if (ny_trace_enabled("NY_TRACE_EMIT"))
+    fprintf(stderr, "[obj emit] allocate_registers done\n");
   if (!ny_x64_obj_layout_spills(c))
     return false;
+  if (ny_trace_enabled("NY_TRACE_EMIT"))
+    fprintf(stderr, "[obj emit] layout_spills done\n");
   if (!ny_x64_obj_bytes(c, (const unsigned char[]){0x55, 0x48, 0x89, 0xe5}, 4))
     return false;
   if (c->frame_bytes > 0) {
@@ -3288,8 +3595,25 @@ bool ny_x64_obj_emit_code(ny_x64_obj_ctx_t *c, const nyir_func_t *nyir,
     return false;
   if (!ny_x64_obj_emit_param_spill(c, nyir))
     return false;
+  if (nyir && nyir->len > 0) {
+    if (nyir->len > SIZE_MAX / sizeof(*c->inst_offsets)) {
+      ny_native_set_err(c->err, c->err_len,
+                        "x86-64 object writer: instruction map too large");
+      return false;
+    }
+    c->inst_offsets = malloc(nyir->len * sizeof(*c->inst_offsets));
+    if (!c->inst_offsets) {
+      ny_native_set_err(c->err, c->err_len,
+                        "x86-64 object writer: instruction map allocation failed");
+      return false;
+    }
+    for (size_t i = 0; i < nyir->len; ++i)
+      c->inst_offsets[i] = SIZE_MAX;
+  }
   for (size_t i = 0; nyir && i < nyir->len; ++i) {
     const nyir_inst_t *in = &nyir->data[i];
+    if (c->inst_offsets)
+      c->inst_offsets[i] = c->code.len;
     if (tag_return && in->op == NYIR_RET && in->a >= 0) {
       if (c->value_f64 && in->a < c->value_slots && c->value_f64[in->a]) {
         if (!ny_x64_obj_load_value_xmm(c, in->a, 0) ||

@@ -1,0 +1,14 @@
+shape dict_large_integer_key {
+  family "runtime-native"
+  generator "native"
+  features [native nyir x86_64 dict integer-keys]
+  template ny-test-case
+  flags "--native-only --native-backend=x86_64 -O3 --nyir-verify --native-result-oracle=0 --no-progress --color=never"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+mut d = {}
+d.set(5000000000, 42)
+if d.get(5000000000, 0) == 42 && d.get("missing", 7) == 7 { 0 } else { 1 }
+NY
+}

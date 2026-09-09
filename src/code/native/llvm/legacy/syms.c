@@ -1,0 +1,2736 @@
+/*
+ * Symbol table: manages the codegen-level symbol namespace, mapping
+ * Nytrix identifiers to LLVM values, types, and metadata entries.
+ */
+#include "base/util.h"
+#include "base/trace.h"
+#include "code/priv.h"
+#ifndef _WIN32
+#include <alloca.h>
+#else
+#include <malloc.h>
+#endif
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+
+#include "code/parse/ast.h"
+
+static int ny_trace_resolve_enabled(void);
+
+#define NY_LOOKUP_CACHE_SLOTS 8192u
+#define NY_LOOKUP_KEY_MAX 96u
+#define NY_LOOKUP_EXACT_INDEX_SLOTS 65536u
+#define NY_MODULE_USED_INDEX_SLOTS 1024u
+#define NY_OVERLOAD_NAME_INDEX_SLOTS 16384u
+
+typedef struct ny_fun_lookup_cache_entry_t {
+  const codegen_t *cg;
+  uint64_t stamp;
+  uint64_t hash;
+  uint16_t len;
+  uint8_t state;
+  char key[NY_LOOKUP_KEY_MAX];
+  fun_sig *value;
+} ny_fun_lookup_cache_entry_t;
+
+typedef struct ny_global_lookup_cache_entry_t {
+  const codegen_t *cg;
+  uint64_t stamp;
+  uint64_t hash;
+  uint16_t len;
+  uint8_t state;
+  char key[NY_LOOKUP_KEY_MAX];
+  binding *value;
+} ny_global_lookup_cache_entry_t;
+
+typedef struct ny_alias_lookup_cache_entry_t {
+  const codegen_t *cg;
+  uint64_t stamp;
+  uint64_t hash;
+  uint16_t len;
+  uint8_t state;
+  char key[NY_LOOKUP_KEY_MAX];
+  const char *value;
+} ny_alias_lookup_cache_entry_t;
+
+typedef struct ny_overload_lookup_cache_entry_t {
+  const codegen_t *cg;
+  uint64_t stamp;
+  uint64_t hash;
+  uint16_t len;
+  uint32_t argc;
+  uint8_t state;
+  char key[NY_LOOKUP_KEY_MAX];
+  fun_sig *value;
+} ny_overload_lookup_cache_entry_t;
+
+typedef struct ny_fun_exact_index_entry_t {
+  uint64_t hash;
+  uint32_t len;
+  const char *name;
+  fun_sig *value;
+  uint8_t state;
+} ny_fun_exact_index_entry_t;
+
+typedef struct ny_global_exact_index_entry_t {
+  uint64_t hash;
+  uint32_t len;
+  const char *name;
+  binding *value;
+  uint8_t state;
+} ny_global_exact_index_entry_t;
+
+typedef struct ny_fun_tail_index_entry_t {
+  uint64_t hash;
+  uint32_t len;
+  uint32_t mod_len;
+  const char *tail_name;
+  fun_sig *value;
+  uint8_t state;
+} ny_fun_tail_index_entry_t;
+
+typedef struct ny_global_tail_index_entry_t {
+  uint64_t hash;
+  uint32_t len;
+  uint32_t mod_len;
+  const char *tail_name;
+  binding *value;
+  uint8_t state;
+} ny_global_tail_index_entry_t;
+
+typedef struct ny_module_used_index_entry_t {
+  uint64_t hash;
+  uint32_t len;
+  const char *name;
+  uint8_t state;
+} ny_module_used_index_entry_t;
+
+typedef struct ny_lookup_stamp_cache_t {
+  const void *module;
+  const void *ctx;
+  const void *fun_data;
+  const void *global_data;
+  const void *alias_data;
+  const void *import_alias_data;
+  const void *user_import_alias_data;
+  const void *use_modules_data;
+  const void *user_use_modules_data;
+  size_t fun_len;
+  size_t global_len;
+  size_t alias_len;
+  size_t import_alias_len;
+  size_t user_import_alias_len;
+  size_t use_modules_len;
+  size_t user_use_modules_len;
+  const char *current_module_name;
+  uint64_t stamp;
+  bool ready;
+} ny_lookup_stamp_cache_t;
+
+typedef struct ny_module_used_cache_t {
+  const char *name;
+  size_t len;
+  uint64_t stamp;
+  uint64_t hash;
+  bool user_only;
+  bool value;
+  bool valid;
+} ny_module_used_cache_t;
+
+typedef struct ny_sym_state_t {
+  ny_lookup_stamp_cache_t stamp_cache;
+  ny_module_used_cache_t module_used_cache;
+
+  ny_fun_lookup_cache_entry_t fun_lookup_cache[NY_LOOKUP_CACHE_SLOTS];
+  ny_global_lookup_cache_entry_t global_lookup_cache[NY_LOOKUP_CACHE_SLOTS];
+  ny_alias_lookup_cache_entry_t alias_lookup_cache[NY_LOOKUP_CACHE_SLOTS];
+  ny_overload_lookup_cache_entry_t overload_lookup_cache[NY_LOOKUP_CACHE_SLOTS];
+
+  ny_fun_exact_index_entry_t fun_exact[NY_LOOKUP_EXACT_INDEX_SLOTS];
+  ny_global_exact_index_entry_t global_exact[NY_LOOKUP_EXACT_INDEX_SLOTS];
+  ny_fun_tail_index_entry_t fun_tail[NY_LOOKUP_EXACT_INDEX_SLOTS];
+  ny_global_tail_index_entry_t global_tail[NY_LOOKUP_EXACT_INDEX_SLOTS];
+  ny_module_used_index_entry_t use_module[NY_MODULE_USED_INDEX_SLOTS];
+  ny_module_used_index_entry_t user_use_module[NY_MODULE_USED_INDEX_SLOTS];
+  int32_t overload_name_heads[NY_OVERLOAD_NAME_INDEX_SLOTS];
+  int32_t *overload_name_next;
+  size_t overload_name_next_cap;
+
+  uint64_t fun_exact_stamp;
+  uint64_t global_exact_stamp;
+  const void *fun_exact_data;
+  size_t fun_exact_len;
+  const void *global_exact_data;
+  size_t global_exact_len;
+  uint64_t fun_tail_stamp;
+  uint64_t global_tail_stamp;
+  const void *fun_tail_data;
+  size_t fun_tail_len;
+  const void *global_tail_data;
+  size_t global_tail_len;
+  uint64_t use_module_stamp;
+  uint64_t user_use_module_stamp;
+  uint64_t overload_name_stamp;
+  bool fun_exact_ready;
+  bool global_exact_ready;
+  bool fun_tail_ready;
+  bool global_tail_ready;
+  bool use_module_ready;
+  bool user_use_module_ready;
+  bool overload_name_ready;
+} ny_sym_state_t;
+
+typedef struct ny_lookup_prof_t {
+  bool enabled;
+  bool atexit_registered;
+  uint64_t fun_tail_rebuilds;
+  uint64_t fun_tail_full_rebuilds;
+  uint64_t fun_tail_incremental_rebuilds;
+  uint64_t fun_tail_stale_rebuilds;
+  uint64_t fun_exact_rebuilds;
+  uint64_t fun_exact_full_rebuilds;
+  uint64_t fun_exact_incremental_rebuilds;
+  uint64_t fun_exact_stale_rebuilds;
+  double fun_tail_rebuild_ms;
+  double fun_exact_rebuild_ms;
+  double pipeline_ms;
+  uint64_t global_tail_rebuilds;
+  uint64_t global_tail_full_rebuilds;
+  uint64_t global_tail_incremental_rebuilds;
+  double global_tail_rebuild_ms;
+  uint64_t global_exact_rebuilds;
+  uint64_t global_exact_full_rebuilds;
+  uint64_t global_exact_incremental_rebuilds;
+  double global_exact_rebuild_ms;
+} ny_lookup_prof_t;
+
+static ny_lookup_prof_t g_ny_lookup_prof = {0};
+
+static bool ny_lookup_prof_enabled(void) {
+  if (g_ny_lookup_prof.enabled)
+    return true;
+  static int checked = 0;
+  if (checked)
+    return false;
+  checked = 1;
+  const char *env = getenv("NYTRIX_PROFILE_LOOKUPS");
+  if (!env || !*env)
+    return false;
+  if (strcmp(env, "0") == 0 || strcmp(env, "false") == 0 ||
+      strcmp(env, "off") == 0)
+    return false;
+  g_ny_lookup_prof.enabled = true;
+  return true;
+}
+
+static void ny_lookup_prof_dump(void) {
+  if (!g_ny_lookup_prof.enabled)
+    return;
+  fprintf(
+      stderr,
+      "[lookup-prof] pipeline_ms=%.3f fun_tail_rebuilds=%llu full=%llu "
+      "incr=%llu stale=%llu "
+      "fun_tail_ms=%.3f global_tail_rebuilds=%llu full=%llu incr=%llu "
+      "global_tail_ms=%.3f "
+      "fun_exact_rebuilds=%llu full=%llu incr=%llu stale=%llu "
+      "fun_exact_ms=%.3f "
+      "global_exact_rebuilds=%llu full=%llu incr=%llu global_exact_ms=%.3f\n",
+      g_ny_lookup_prof.pipeline_ms,
+      (unsigned long long)g_ny_lookup_prof.fun_tail_rebuilds,
+      (unsigned long long)g_ny_lookup_prof.fun_tail_full_rebuilds,
+      (unsigned long long)g_ny_lookup_prof.fun_tail_incremental_rebuilds,
+      (unsigned long long)g_ny_lookup_prof.fun_tail_stale_rebuilds,
+      g_ny_lookup_prof.fun_tail_rebuild_ms,
+      (unsigned long long)g_ny_lookup_prof.global_tail_rebuilds,
+      (unsigned long long)g_ny_lookup_prof.global_tail_full_rebuilds,
+      (unsigned long long)g_ny_lookup_prof.global_tail_incremental_rebuilds,
+      g_ny_lookup_prof.global_tail_rebuild_ms,
+      (unsigned long long)g_ny_lookup_prof.fun_exact_rebuilds,
+      (unsigned long long)g_ny_lookup_prof.fun_exact_full_rebuilds,
+      (unsigned long long)g_ny_lookup_prof.fun_exact_incremental_rebuilds,
+      (unsigned long long)g_ny_lookup_prof.fun_exact_stale_rebuilds,
+      g_ny_lookup_prof.fun_exact_rebuild_ms,
+      (unsigned long long)g_ny_lookup_prof.global_exact_rebuilds,
+      (unsigned long long)g_ny_lookup_prof.global_exact_full_rebuilds,
+      (unsigned long long)g_ny_lookup_prof.global_exact_incremental_rebuilds,
+      g_ny_lookup_prof.global_exact_rebuild_ms);
+}
+
+void ny_lookup_prof_register_atexit(void) {
+  if (!ny_lookup_prof_enabled() || g_ny_lookup_prof.atexit_registered)
+    return;
+  atexit(ny_lookup_prof_dump);
+  g_ny_lookup_prof.atexit_registered = true;
+}
+
+void ny_lookup_prof_note_pipeline_ms(double ms) {
+  if (!ny_lookup_prof_enabled())
+    return;
+  g_ny_lookup_prof.pipeline_ms += ms;
+}
+
+static ny_sym_state_t *ny_get_sym_state(const codegen_t *cg) {
+  if (!cg)
+    return NULL;
+  if (!cg->sym_state) {
+    ny_sym_state_t *s = calloc(1, sizeof(ny_sym_state_t));
+    if (!s) {
+      fprintf(stderr, "oom\n");
+      exit(1);
+    }
+    ((codegen_t *)cg)->sym_state = s;
+  }
+  return (ny_sym_state_t *)cg->sym_state;
+}
+
+void ny_sym_state_free(codegen_t *cg) {
+  if (!cg || !cg->sym_state)
+    return;
+  ny_sym_state_t *s = (ny_sym_state_t *)cg->sym_state;
+  if (s->overload_name_next)
+    free(s->overload_name_next);
+  free(s);
+  cg->sym_state = NULL;
+}
+
+static inline uint64_t ny_mix64(uint64_t h, uint64_t v) {
+  h ^= v + 0x9e3779b97f4a7c15ULL + (h << 6) + (h >> 2);
+  return h;
+}
+
+static inline uint64_t ny_hash_name_cached(codegen_t *cg, const char *name,
+                                           size_t len) {
+  (void)cg;
+  return ny_hash_name(name, len);
+}
+
+static bool ny_user_ctx_is_non_std(const codegen_t *cg) {
+  if (!cg->current_module_name)
+    return true;
+  return strncmp(cg->current_module_name, "std.", 4) != 0;
+}
+
+static bool ny_current_ctx_is_std(const codegen_t *cg) {
+  return cg && cg->current_module_name &&
+         strncmp(cg->current_module_name, "std.", 4) == 0;
+}
+
+static bool ny_global_is_root_user_var(const binding *b) {
+  return b && b->name && !strchr(b->name, '.') && b->stmt_t &&
+         b->stmt_t->kind == NY_S_VAR && !ny_is_stdlib_tok(b->stmt_t->tok);
+}
+
+static bool ny_block_implicit_std_symbol(const codegen_t *cg, const char *query,
+                                         const char *candidate_name) {
+  if (!ny_user_ctx_is_non_std(cg))
+    return false;
+  if (!query || strchr(query, '.'))
+    return false;
+  if (!candidate_name || !*candidate_name)
+    return false;
+  return strncmp(candidate_name, "std.", 4) == 0;
+}
+
+static inline uint64_t ny_fun_index_version(const codegen_t *cg) {
+  uint64_t h = 0x9ae16a3b2f90404fULL;
+  h = ny_mix64(h, (uint64_t)(uintptr_t)cg);
+  h = ny_mix64(h, (uint64_t)(uintptr_t)cg->fun_sigs.data);
+  h = ny_mix64(h, (uint64_t)cg->fun_sigs.len);
+  return h;
+}
+
+static inline uint64_t ny_global_index_version(const codegen_t *cg) {
+  uint64_t h = 0x517cc1b727220a95ULL;
+  h = ny_mix64(h, (uint64_t)(uintptr_t)cg);
+  h = ny_mix64(h, (uint64_t)(uintptr_t)cg->global_vars.data);
+  h = ny_mix64(h, (uint64_t)cg->global_vars.len);
+  return h;
+}
+
+static inline uint64_t ny_fun_tail_index_version(const codegen_t *cg) {
+  uint64_t h = 0xa0761d6478bd642fULL;
+  h = ny_mix64(h, (uint64_t)(uintptr_t)cg);
+  h = ny_mix64(h, (uint64_t)(uintptr_t)cg->fun_sigs.data);
+  h = ny_mix64(h, (uint64_t)cg->fun_sigs.len);
+  h = ny_mix64(h, (uint64_t)(uintptr_t)cg->use_modules.data);
+  h = ny_mix64(h, (uint64_t)cg->use_modules.len);
+  h = ny_mix64(h, (uint64_t)(uintptr_t)cg->user_use_modules.data);
+  h = ny_mix64(h, (uint64_t)cg->user_use_modules.len);
+  h = ny_mix64(h, (uint64_t)(uintptr_t)cg->current_module_name);
+  return h;
+}
+
+static inline uint64_t ny_global_tail_index_version(const codegen_t *cg) {
+  uint64_t h = 0xe7037ed1a0b428dbULL;
+  h = ny_mix64(h, (uint64_t)(uintptr_t)cg);
+  h = ny_mix64(h, (uint64_t)(uintptr_t)cg->global_vars.data);
+  h = ny_mix64(h, (uint64_t)cg->global_vars.len);
+  h = ny_mix64(h, (uint64_t)(uintptr_t)cg->use_modules.data);
+  h = ny_mix64(h, (uint64_t)cg->use_modules.len);
+  h = ny_mix64(h, (uint64_t)(uintptr_t)cg->user_use_modules.data);
+  h = ny_mix64(h, (uint64_t)cg->user_use_modules.len);
+  h = ny_mix64(h, (uint64_t)(uintptr_t)cg->current_module_name);
+  return h;
+}
+
+static inline uint64_t ny_module_used_index_version(const codegen_t *cg,
+                                                    bool user_only) {
+  uint64_t h = user_only ? 0x6f4f6b7d3159635bULL : 0x6e40f31a0e31f26bULL;
+  h = ny_mix64(h, (uint64_t)(uintptr_t)cg);
+  if (user_only) {
+    h = ny_mix64(h, (uint64_t)(uintptr_t)cg->user_use_modules.data);
+    h = ny_mix64(h, (uint64_t)cg->user_use_modules.len);
+  } else {
+    h = ny_mix64(h, (uint64_t)(uintptr_t)cg->use_modules.data);
+    h = ny_mix64(h, (uint64_t)cg->use_modules.len);
+  }
+  return h;
+}
+
+static inline uint32_t ny_fun_name_len(fun_sig *fs) {
+  return ny_cached_fun_name_len(fs);
+}
+
+static inline uint64_t ny_fun_name_hash(fun_sig *fs) {
+  if (!fs || !fs->name)
+    return 0;
+  if (!fs->name_hash) {
+    fs->name_hash = ny_hash_name(fs->name, ny_fun_name_len(fs));
+  }
+  return fs->name_hash;
+}
+
+static inline size_t ny_fun_tail_len(fun_sig *fs) {
+  if (!fs || !fs->name)
+    return 0;
+  if (fs->tail_cached)
+    return fs->tail_len;
+  size_t name_len = (size_t)ny_fun_name_len(fs);
+  if (name_len == 0) {
+    fs->tail_len = 0;
+    fs->tail_hash = 0;
+    fs->tail_cached = true;
+    return 0;
+  }
+  size_t dot = name_len;
+  for (size_t i = name_len; i > 0; --i) {
+    if (fs->name[i - 1] == '.') {
+      dot = i - 1;
+      break;
+    }
+  }
+  if (dot >= name_len - 1) {
+    fs->tail_len = 0;
+    fs->tail_hash = 0;
+    fs->tail_cached = true;
+    return 0;
+  }
+  size_t tail_len = name_len - dot - 1;
+  fs->tail_len = (uint32_t)tail_len;
+  fs->tail_hash = ny_hash_name(fs->name + dot + 1, tail_len);
+  fs->tail_cached = true;
+  return tail_len;
+}
+
+static inline size_t ny_binding_tail_len(binding *b) {
+  if (!b || !b->name)
+    return 0;
+  if (b->tail_cached)
+    return b->tail_len;
+  size_t name_len = (size_t)ny_binding_name_len(b);
+  if (name_len == 0) {
+    b->tail_len = 0;
+    b->tail_hash = 0;
+    b->tail_cached = true;
+    return 0;
+  }
+  size_t dot = name_len;
+  for (size_t i = name_len; i > 0; --i) {
+    if (b->name[i - 1] == '.') {
+      dot = i - 1;
+      break;
+    }
+  }
+  if (dot >= name_len - 1) {
+    b->tail_len = 0;
+    b->tail_hash = 0;
+    b->tail_cached = true;
+    return 0;
+  }
+  size_t tail_len = name_len - dot - 1;
+  b->tail_len = (uint32_t)tail_len;
+  b->tail_hash = ny_hash_name(b->name + dot + 1, tail_len);
+  b->tail_cached = true;
+  return tail_len;
+}
+
+static uint64_t ny_lookup_stamp(const codegen_t *cg) {
+  ny_sym_state_t *s = ny_get_sym_state(cg);
+  ny_lookup_stamp_cache_t *c = &s->stamp_cache;
+  if (c->ready && c->module == (const void *)cg->module &&
+      c->ctx == (const void *)cg->ctx &&
+      c->fun_data == (const void *)cg->fun_sigs.data &&
+      c->global_data == (const void *)cg->global_vars.data &&
+      c->alias_data == (const void *)cg->aliases.data &&
+      c->import_alias_data == (const void *)cg->import_aliases.data &&
+      c->user_import_alias_data == (const void *)cg->user_import_aliases.data &&
+      c->use_modules_data == (const void *)cg->use_modules.data &&
+      c->user_use_modules_data == (const void *)cg->user_use_modules.data &&
+      c->fun_len == cg->fun_sigs.len && c->global_len == cg->global_vars.len &&
+      c->alias_len == cg->aliases.len &&
+      c->import_alias_len == cg->import_aliases.len &&
+      c->user_import_alias_len == cg->user_import_aliases.len &&
+      c->use_modules_len == cg->use_modules.len &&
+      c->user_use_modules_len == cg->user_use_modules.len &&
+      c->current_module_name == cg->current_module_name) {
+    return c->stamp;
+  }
+
+  uint64_t h = 0xcbf29ce484222325ULL;
+  h = ny_mix64(h, (uint64_t)(uintptr_t)cg);
+  h = ny_mix64(h, (uint64_t)(uintptr_t)cg->module);
+  h = ny_mix64(h, (uint64_t)(uintptr_t)cg->ctx);
+  h = ny_mix64(h, (uint64_t)(uintptr_t)cg->fun_sigs.data);
+  h = ny_mix64(h, (uint64_t)(uintptr_t)cg->global_vars.data);
+  h = ny_mix64(h, (uint64_t)(uintptr_t)cg->aliases.data);
+  h = ny_mix64(h, (uint64_t)(uintptr_t)cg->import_aliases.data);
+  h = ny_mix64(h, (uint64_t)(uintptr_t)cg->user_import_aliases.data);
+  h = ny_mix64(h, (uint64_t)(uintptr_t)cg->use_modules.data);
+  h = ny_mix64(h, (uint64_t)(uintptr_t)cg->user_use_modules.data);
+  h = ny_mix64(h, (uint64_t)cg->fun_sigs.len);
+  h = ny_mix64(h, (uint64_t)cg->global_vars.len);
+  h = ny_mix64(h, (uint64_t)cg->aliases.len);
+  h = ny_mix64(h, (uint64_t)cg->import_aliases.len);
+  h = ny_mix64(h, (uint64_t)cg->user_import_aliases.len);
+  h = ny_mix64(h, (uint64_t)cg->use_modules.len);
+  h = ny_mix64(h, (uint64_t)cg->user_use_modules.len);
+  h = ny_mix64(h, (uint64_t)(uintptr_t)cg->current_module_name);
+
+  c->module = (const void *)cg->module;
+  c->ctx = (const void *)cg->ctx;
+  c->fun_data = (const void *)cg->fun_sigs.data;
+  c->global_data = (const void *)cg->global_vars.data;
+  c->alias_data = (const void *)cg->aliases.data;
+  c->import_alias_data = (const void *)cg->import_aliases.data;
+  c->user_import_alias_data = (const void *)cg->user_import_aliases.data;
+  c->use_modules_data = (const void *)cg->use_modules.data;
+  c->user_use_modules_data = (const void *)cg->user_use_modules.data;
+  c->fun_len = cg->fun_sigs.len;
+  c->global_len = cg->global_vars.len;
+  c->alias_len = cg->aliases.len;
+  c->import_alias_len = cg->import_aliases.len;
+  c->user_import_alias_len = cg->user_import_aliases.len;
+  c->use_modules_len = cg->use_modules.len;
+  c->user_use_modules_len = cg->user_use_modules.len;
+  c->current_module_name = cg->current_module_name;
+  c->stamp = h;
+  c->ready = true;
+  return h;
+}
+
+static fun_sig *ny_fun_tail_find(codegen_t *cg, const char *tail);
+static binding *ny_global_tail_find(codegen_t *cg, const char *tail);
+static void ny_overload_name_index_rebuild(codegen_t *cg, uint64_t stamp);
+static int32_t ny_overload_name_bucket_head(codegen_t *cg, uint64_t want_hash);
+
+typedef void *(*ny_recurse_lookup_fn)(codegen_t *cg, const char *name,
+                                      void *ctx);
+
+static void *ny_lookup_fun_recurse(codegen_t *cg, const char *name, void *ctx) {
+  (void)ctx;
+  return lookup_fun(cg, name, 0);
+}
+
+static void *ny_lookup_global_recurse(codegen_t *cg, const char *name,
+                                      void *ctx) {
+  (void)ctx;
+  return lookup_global(cg, name);
+}
+
+static void *ny_lookup_try_scoped_or_alias(codegen_t *cg, const char *name,
+                                           bool qualified,
+                                           ny_recurse_lookup_fn recurse,
+                                           void *ctx) {
+  if (!cg || !name || !*name || qualified || !recurse)
+    return NULL;
+
+  if (cg->current_module_name && *cg->current_module_name) {
+    char scoped[256];
+    int nw = snprintf(scoped, sizeof(scoped), "%s.%s", cg->current_module_name,
+                      name);
+    if (nw > 0 && (size_t)nw < sizeof(scoped)) {
+      if (ny_trace_resolve_enabled()) {
+        fprintf(stderr, "[resolve] scoped '%s' -> try '%s'\n", name, scoped);
+      }
+      void *scoped_res = recurse(cg, scoped, ctx);
+      if (scoped_res)
+        return scoped_res;
+    }
+    const char *scoped_alias_full = resolve_import_alias(cg, scoped);
+    if (scoped_alias_full && *scoped_alias_full &&
+        strcmp(scoped_alias_full, scoped) != 0) {
+      if (ny_trace_resolve_enabled()) {
+        fprintf(stderr, "[resolve] scoped alias '%s' -> try '%s'\n", scoped,
+                scoped_alias_full);
+      }
+      void *scoped_alias_res = recurse(cg, scoped_alias_full, ctx);
+      if (scoped_alias_res)
+        return scoped_alias_res;
+    }
+  }
+
+  const char *alias_full = resolve_import_alias(cg, name);
+  if (!alias_full || !*alias_full)
+    return NULL;
+  if (strcmp(alias_full, name) == 0)
+    return NULL;
+  if (ny_trace_resolve_enabled()) {
+    fprintf(stderr, "[resolve] alias '%s' -> try '%s'\n", name, alias_full);
+  }
+  return recurse(cg, alias_full, ctx);
+}
+
+static bool ny_module_used_lookup_hash(codegen_t *cg, bool user_only,
+                                       const char *mod, size_t mod_len,
+                                       uint64_t hash);
+
+static bool module_is_used(codegen_t *cg, const char *mod, size_t mod_len) {
+  bool user_only = ny_user_ctx_is_non_std(cg);
+  return ny_module_used_lookup_hash(cg, user_only, mod, mod_len, 0);
+}
+
+static inline bool module_is_used_hash(codegen_t *cg, const char *mod,
+                                       size_t mod_len, uint64_t hash) {
+  bool user_only = ny_user_ctx_is_non_std(cg);
+  return ny_module_used_lookup_hash(cg, user_only, mod, mod_len, hash);
+}
+
+static void ny_module_used_index_rebuild(codegen_t *cg, bool user_only,
+                                         uint64_t stamp) {
+  ny_sym_state_t *s = ny_get_sym_state(cg);
+  ny_module_used_index_entry_t *index =
+      user_only ? s->user_use_module : s->use_module;
+  memset(index, 0,
+         sizeof(ny_module_used_index_entry_t) * NY_MODULE_USED_INDEX_SLOTS);
+  char *const *mods_data =
+      user_only ? cg->user_use_modules.data : cg->use_modules.data;
+  size_t mods_len = user_only ? cg->user_use_modules.len : cg->use_modules.len;
+  for (size_t i = 0; i < mods_len; ++i) {
+    const char *used = mods_data[i];
+    if (!used || !*used)
+      continue;
+    size_t used_len = strlen(used);
+    uint64_t hash = ny_hash_name_cached(cg, used, used_len);
+    size_t pos = (size_t)(hash & (NY_MODULE_USED_INDEX_SLOTS - 1u));
+    for (size_t probe = 0; probe < NY_MODULE_USED_INDEX_SLOTS; ++probe) {
+      ny_module_used_index_entry_t *e = &index[pos];
+      if (!e->state) {
+        e->state = 1u;
+        e->hash = hash;
+        e->len = (uint32_t)used_len;
+        e->name = used;
+        break;
+      }
+      if (e->hash == hash && e->len == (uint32_t)used_len &&
+          memcmp(e->name, used, used_len) == 0 && e->name[used_len] == '\0') {
+        break;
+      }
+      pos = (pos + 1u) & (NY_MODULE_USED_INDEX_SLOTS - 1u);
+    }
+  }
+  if (user_only) {
+    s->user_use_module_stamp = stamp;
+    s->user_use_module_ready = true;
+  } else {
+    s->use_module_stamp = stamp;
+    s->use_module_ready = true;
+  }
+}
+
+static bool ny_module_used_lookup_hash(codegen_t *cg, bool user_only,
+                                       const char *mod, size_t mod_len,
+                                       uint64_t hash) {
+  if (!mod || !*mod)
+    return false;
+  uint64_t stamp = ny_module_used_index_version(cg, user_only);
+  ny_sym_state_t *s = ny_get_sym_state(cg);
+  ny_module_used_index_entry_t *index =
+      user_only ? s->user_use_module : s->use_module;
+  bool ready = user_only ? s->user_use_module_ready : s->use_module_ready;
+  uint64_t idx_stamp =
+      user_only ? s->user_use_module_stamp : s->use_module_stamp;
+  if (!ready || idx_stamp != stamp) {
+    ny_module_used_index_rebuild(cg, user_only, stamp);
+    s = ny_get_sym_state(cg);
+    index = user_only ? s->user_use_module : s->use_module;
+  }
+  if (s->module_used_cache.valid &&
+      s->module_used_cache.user_only == user_only &&
+      s->module_used_cache.stamp == stamp &&
+      s->module_used_cache.len == mod_len && s->module_used_cache.name == mod) {
+    return s->module_used_cache.value;
+  }
+
+  if (!hash)
+    hash = ny_hash_name_cached(cg, mod, mod_len);
+  size_t pos = (size_t)(hash & (NY_MODULE_USED_INDEX_SLOTS - 1u));
+  for (size_t probe = 0; probe < NY_MODULE_USED_INDEX_SLOTS; ++probe) {
+    ny_module_used_index_entry_t *e = &index[pos];
+    if (!e->state)
+      break;
+    if (e->hash == hash && e->len == (uint32_t)mod_len &&
+        memcmp(e->name, mod, mod_len) == 0 && e->name[mod_len] == '\0') {
+      s->module_used_cache = (ny_module_used_cache_t){
+          .name = mod,
+          .len = mod_len,
+          .stamp = stamp,
+          .hash = hash,
+          .user_only = user_only,
+          .value = true,
+          .valid = true,
+      };
+      return true;
+    }
+    pos = (pos + 1u) & (NY_MODULE_USED_INDEX_SLOTS - 1u);
+  }
+  char *const *mods_data =
+      user_only ? cg->user_use_modules.data : cg->use_modules.data;
+  size_t mods_len = user_only ? cg->user_use_modules.len : cg->use_modules.len;
+  for (size_t i = 0; i < mods_len; ++i) {
+    const char *used = mods_data[i];
+    if (!used || !*used)
+      continue;
+    size_t used_len = strlen(used);
+    if (used_len == 0 || used_len >= mod_len)
+      continue;
+    if (mod[used_len] == '.' && memcmp(mod, used, used_len) == 0) {
+      s->module_used_cache = (ny_module_used_cache_t){
+          .name = mod,
+          .len = mod_len,
+          .stamp = stamp,
+          .hash = hash,
+          .user_only = user_only,
+          .value = true,
+          .valid = true,
+      };
+      return true;
+    }
+  }
+  s->module_used_cache = (ny_module_used_cache_t){
+      .name = mod,
+      .len = mod_len,
+      .stamp = stamp,
+      .hash = hash,
+      .user_only = user_only,
+      .value = false,
+      .valid = true,
+  };
+  return false;
+}
+
+static inline bool ny_fun_hidden_from_unqualified(const fun_sig *fs) {
+  return fs && fs->is_attached_method;
+}
+
+#define NY_DEFINE_EXACT_INDEX_REBUILD(                                         \
+    fn_name, index_field, stamp_field, ready_field, data_field, len_field,     \
+    vec_field, item_type, item_name_expr, item_len_expr, item_hash_expr,       \
+    item_skip_expr, entry_type, entry_name_field, entry_value_field,           \
+    item_value_expr, prof_total_field, prof_full_field, prof_incr_field,       \
+    prof_ms_field)                                                             \
+  static void fn_name(codegen_t *cg, uint64_t stamp) {                         \
+    ny_tick_t prof_t0 = ny_lookup_prof_enabled() ? ny_ticks_now() : 0;         \
+    ny_sym_state_t *s = ny_get_sym_state(cg);                                  \
+    const void *cur_data = (const void *)cg->vec_field.data;                   \
+    size_t cur_len = (size_t)cg->vec_field.len;                                \
+    bool full_rebuild = (!s->ready_field || s->data_field != cur_data ||       \
+                         s->len_field > cur_len);                              \
+    if (ny_lookup_prof_enabled()) {                                            \
+      g_ny_lookup_prof.prof_total_field++;                                     \
+      if (full_rebuild)                                                        \
+        g_ny_lookup_prof.prof_full_field++;                                    \
+      else                                                                     \
+        g_ny_lookup_prof.prof_incr_field++;                                    \
+    }                                                                          \
+    if (full_rebuild) {                                                        \
+      memset(s->index_field, 0, sizeof(s->index_field));                       \
+      for (ssize_t i = (ssize_t)cg->vec_field.len - 1; i >= 0; --i) {          \
+        item_type *item = &cg->vec_field.data[i];                              \
+        if (item_skip_expr)                                                    \
+          continue;                                                            \
+        const char *name = (item_name_expr);                                   \
+        if (!name || !*name)                                                   \
+          continue;                                                            \
+        size_t len = (size_t)(item_len_expr);                                  \
+        uint64_t hash = (item_hash_expr);                                      \
+        size_t pos = (size_t)(hash & (NY_LOOKUP_EXACT_INDEX_SLOTS - 1u));      \
+        for (size_t probe = 0; probe < NY_LOOKUP_EXACT_INDEX_SLOTS; ++probe) { \
+          entry_type *e = &s->index_field[pos];                                \
+          if (!e->state) {                                                     \
+            e->state = 1u;                                                     \
+            e->hash = hash;                                                    \
+            e->len = (uint32_t)len;                                            \
+            e->entry_name_field = name;                                        \
+            e->entry_value_field = (item_value_expr);                          \
+            break;                                                             \
+          }                                                                    \
+          if (e->hash == hash && e->len == (uint32_t)len &&                    \
+              memcmp(e->entry_name_field, name, len) == 0 &&                   \
+              e->entry_name_field[len] == '\0') {                              \
+            break;                                                             \
+          }                                                                    \
+          pos = (pos + 1u) & (NY_LOOKUP_EXACT_INDEX_SLOTS - 1u);               \
+          }                                                                    \
+      }                                                                        \
+      s->data_field = cur_data;                                                \
+      s->len_field = cur_len;                                                  \
+      s->stamp_field = stamp;                                                  \
+      s->ready_field = true;                                                   \
+      if (ny_lookup_prof_enabled())                                            \
+        g_ny_lookup_prof.prof_ms_field += ny_ticks_elapsed_ms(prof_t0);        \
+      return;                                                                  \
+    }                                                                          \
+    if (s->len_field >= cur_len) {                                             \
+      s->stamp_field = stamp;                                                  \
+      s->ready_field = true;                                                   \
+      if (ny_lookup_prof_enabled())                                            \
+        g_ny_lookup_prof.prof_ms_field += ny_ticks_elapsed_ms(prof_t0);        \
+      return;                                                                  \
+    }                                                                          \
+    size_t start = s->len_field;                                               \
+    for (ssize_t i = (ssize_t)cur_len - 1; i >= (ssize_t)start; --i) {         \
+      item_type *item = &cg->vec_field.data[i];                                \
+      if (item_skip_expr)                                                      \
+        continue;                                                              \
+      const char *name = (item_name_expr);                                     \
+      if (!name || !*name)                                                     \
+        continue;                                                              \
+      size_t len = (size_t)(item_len_expr);                                    \
+      uint64_t hash = (item_hash_expr);                                        \
+      size_t pos = (size_t)(hash & (NY_LOOKUP_EXACT_INDEX_SLOTS - 1u));        \
+      for (size_t probe = 0; probe < NY_LOOKUP_EXACT_INDEX_SLOTS; ++probe) {   \
+        entry_type *e = &s->index_field[pos];                                  \
+        if (!e->state) {                                                       \
+          e->state = 1u;                                                       \
+          e->hash = hash;                                                      \
+          e->len = (uint32_t)len;                                              \
+          e->entry_name_field = name;                                          \
+          e->entry_value_field = (item_value_expr);                            \
+          break;                                                               \
+        }                                                                      \
+        if (e->hash == hash && e->len == (uint32_t)len &&                      \
+            memcmp(e->entry_name_field, name, len) == 0 &&                     \
+            e->entry_name_field[len] == '\0') {                                \
+          e->entry_name_field = name;                                          \
+          e->entry_value_field = (item_value_expr);                            \
+          break;                                                               \
+        }                                                                      \
+        pos = (pos + 1u) & (NY_LOOKUP_EXACT_INDEX_SLOTS - 1u);                 \
+      }                                                                        \
+    }                                                                          \
+    s->data_field = cur_data;                                                  \
+    s->len_field = cur_len;                                                    \
+    s->stamp_field = stamp;                                                    \
+    s->ready_field = true;                                                     \
+    if (ny_lookup_prof_enabled())                                              \
+      g_ny_lookup_prof.prof_ms_field += ny_ticks_elapsed_ms(prof_t0);          \
+  }
+
+NY_DEFINE_EXACT_INDEX_REBUILD(ny_fun_exact_index_rebuild, fun_exact,
+                              fun_exact_stamp, fun_exact_ready, fun_exact_data,
+                              fun_exact_len, fun_sigs, fun_sig, item->name,
+                              ny_fun_name_len(item), ny_fun_name_hash(item),
+                              false,
+                              ny_fun_exact_index_entry_t, name, value, item,
+                              fun_exact_rebuilds, fun_exact_full_rebuilds,
+                              fun_exact_incremental_rebuilds,
+                              fun_exact_rebuild_ms)
+
+NY_DEFINE_EXACT_INDEX_REBUILD(ny_global_exact_index_rebuild, global_exact,
+                              global_exact_stamp, global_exact_ready,
+                              global_exact_data, global_exact_len, global_vars,
+                              binding, item->name, ny_binding_name_len(item),
+                              ny_binding_name_hash(item), false,
+                              ny_global_exact_index_entry_t, name, value, item,
+                              global_exact_rebuilds, global_exact_full_rebuilds,
+                              global_exact_incremental_rebuilds,
+                              global_exact_rebuild_ms)
+
+#undef NY_DEFINE_EXACT_INDEX_REBUILD
+
+fun_sig *lookup_fun_exact(codegen_t *cg, const char *name) {
+  if (!name || !*name)
+    return NULL;
+  size_t len = strlen(name);
+  bool rebuilt_after_stale = false;
+  uint64_t stamp = 0;
+  uint64_t hash = 0;
+  size_t pos = 0;
+retry:
+  stamp = ny_fun_index_version(cg);
+  ny_sym_state_t *s = ny_get_sym_state(cg);
+  if (!s->fun_exact_ready || s->fun_exact_stamp != stamp) {
+    ny_fun_exact_index_rebuild(cg, stamp);
+    s = ny_get_sym_state(cg);
+  }
+  hash = ny_hash_name_cached(cg, name, len);
+  pos = (size_t)(hash & (NY_LOOKUP_EXACT_INDEX_SLOTS - 1u));
+  for (size_t probe = 0; probe < NY_LOOKUP_EXACT_INDEX_SLOTS; ++probe) {
+    ny_fun_exact_index_entry_t *e = &s->fun_exact[pos];
+    if (!e->state)
+      return NULL;
+    if (e->hash == hash && e->len == (uint32_t)len &&
+        memcmp(e->name, name, len) == 0 && e->name[len] == '\0') {
+      if (!ny_sig_in_current_sigs(cg, e->value)) {
+        if (!rebuilt_after_stale) {
+          if (ny_lookup_prof_enabled())
+            g_ny_lookup_prof.fun_exact_stale_rebuilds++;
+          ny_fun_exact_index_rebuild(cg, stamp);
+          rebuilt_after_stale = true;
+          goto retry;
+        }
+        return NULL;
+      }
+      return e->value;
+    }
+    pos = (pos + 1u) & (NY_LOOKUP_EXACT_INDEX_SLOTS - 1u);
+  }
+  return NULL;
+}
+
+binding *lookup_global_exact(codegen_t *cg, const char *name) {
+  if (!name || !*name)
+    return NULL;
+  size_t len = strlen(name);
+  uint64_t stamp = ny_global_index_version(cg);
+  ny_sym_state_t *s = ny_get_sym_state(cg);
+  if (!s->global_exact_ready || s->global_exact_stamp != stamp) {
+    ny_global_exact_index_rebuild(cg, stamp);
+    s = ny_get_sym_state(cg);
+  }
+  uint64_t hash = ny_hash_name_cached(cg, name, len);
+  size_t pos = (size_t)(hash & (NY_LOOKUP_EXACT_INDEX_SLOTS - 1u));
+  for (size_t probe = 0; probe < NY_LOOKUP_EXACT_INDEX_SLOTS; ++probe) {
+    ny_global_exact_index_entry_t *e = &s->global_exact[pos];
+    if (!e->state)
+      return NULL;
+    if (e->hash == hash && e->len == (uint32_t)len &&
+        memcmp(e->name, name, len) == 0 && e->name[len] == '\0') {
+      if (!ny_binding_is_valid(cg, e->value)) {
+        ny_global_exact_index_rebuild(cg, stamp);
+        s = ny_get_sym_state(cg);
+        e = &s->global_exact[pos];
+        if (!e->state || e->hash != hash || e->len != (uint32_t)len ||
+            memcmp(e->name, name, len) != 0)
+          return NULL;
+      }
+      return e->value;
+    }
+    pos = (pos + 1u) & (NY_LOOKUP_EXACT_INDEX_SLOTS - 1u);
+  }
+  return NULL;
+}
+
+static bool ny_cacheable_name(const char *name, size_t *out_len) {
+  if (!name || !*name)
+    return false;
+  size_t len = strlen(name);
+  if (len == 0 || len >= NY_LOOKUP_KEY_MAX)
+    return false;
+  *out_len = len;
+  return true;
+}
+
+static inline uint64_t ny_overload_cache_hash(codegen_t *cg, const char *name,
+                                              size_t len, size_t argc) {
+  return ny_hash_name_cached(cg, name, len) ^
+         ((uint64_t)argc * 11400714819323198485ULL);
+}
+
+#define NY_CACHE_ENTRY_MATCH(e, cg, stamp, hash, len, name)                    \
+  ((e)->state && (e)->cg == (cg) && (e)->stamp == (stamp) &&                   \
+   (e)->hash == (hash) && (e)->len == (uint16_t)(len) &&                       \
+   memcmp((e)->key, (name), (len)) == 0)
+
+#define NY_CACHE_ENTRY_FILL(e, cg, name, len, hash, value_expr)                \
+  do {                                                                         \
+    (e)->cg = (cg);                                                            \
+    (e)->stamp = ny_lookup_stamp(cg);                                          \
+    (e)->hash = (hash);                                                        \
+    (e)->len = (uint16_t)(len);                                                \
+    memcpy((e)->key, (name), (len));                                           \
+    (e)->key[(len)] = '\0';                                                    \
+    (e)->value = (value_expr);                                                 \
+    (e)->state = (value_expr) ? 2u : 1u;                                       \
+  } while (0)
+
+static int ny_fun_cache_get(codegen_t *cg, const char *name, uint64_t hash,
+                            fun_sig **out) {
+  size_t len = 0;
+  if (!ny_cacheable_name(name, &len))
+    return -1;
+  if (!hash)
+    hash = ny_hash_name_cached(cg, name, len);
+  uint64_t stamp = ny_lookup_stamp(cg);
+  ny_sym_state_t *s = ny_get_sym_state(cg);
+  ny_fun_lookup_cache_entry_t *e =
+      &s->fun_lookup_cache[hash & (NY_LOOKUP_CACHE_SLOTS - 1u)];
+  if (!NY_CACHE_ENTRY_MATCH(e, cg, stamp, hash, len, name))
+    return -1;
+  if (e->state == 2u) {
+    if (!ny_sig_in_current_sigs(cg, e->value)) {
+      e->state = 0u;
+      e->value = NULL;
+      return -1;
+    }
+    *out = e->value;
+    return 1;
+  }
+  return 0;
+}
+
+static void ny_fun_cache_put(codegen_t *cg, const char *name, uint64_t hash,
+                             fun_sig *value) {
+  size_t len = 0;
+  if (!ny_cacheable_name(name, &len))
+    return;
+  if (!hash)
+    hash = ny_hash_name_cached(cg, name, len);
+  ny_sym_state_t *s = ny_get_sym_state(cg);
+  ny_fun_lookup_cache_entry_t *e =
+      &s->fun_lookup_cache[hash & (NY_LOOKUP_CACHE_SLOTS - 1u)];
+  if (value && !ny_sig_in_current_sigs(cg, value)) {
+    e->state = 0u;
+    e->value = NULL;
+    return;
+  }
+  NY_CACHE_ENTRY_FILL(e, cg, name, len, hash, value);
+}
+
+static int ny_global_cache_get(codegen_t *cg, const char *name, uint64_t hash,
+                               binding **out) {
+  size_t len = 0;
+  if (!ny_cacheable_name(name, &len))
+    return -1;
+  if (!hash)
+    hash = ny_hash_name_cached(cg, name, len);
+  uint64_t stamp = ny_lookup_stamp(cg);
+  ny_sym_state_t *s = ny_get_sym_state(cg);
+  ny_global_lookup_cache_entry_t *e =
+      &s->global_lookup_cache[hash & (NY_LOOKUP_CACHE_SLOTS - 1u)];
+  if (!NY_CACHE_ENTRY_MATCH(e, cg, stamp, hash, len, name))
+    return -1;
+  if (e->state == 2u) {
+    if (!ny_binding_is_valid(cg, e->value)) {
+      e->state = 0u;
+      e->value = NULL;
+      return -1;
+    }
+    *out = e->value;
+    return 1;
+  }
+  return 0;
+}
+
+static void ny_global_cache_put(codegen_t *cg, const char *name, uint64_t hash,
+                                binding *value) {
+  size_t len = 0;
+  if (!ny_cacheable_name(name, &len))
+    return;
+  if (!hash)
+    hash = ny_hash_name_cached(cg, name, len);
+  ny_sym_state_t *s = ny_get_sym_state(cg);
+  ny_global_lookup_cache_entry_t *e =
+      &s->global_lookup_cache[hash & (NY_LOOKUP_CACHE_SLOTS - 1u)];
+  if (value && !ny_binding_is_valid(cg, value)) {
+    e->state = 0u;
+    e->value = NULL;
+    return;
+  }
+  NY_CACHE_ENTRY_FILL(e, cg, name, len, hash, value);
+}
+
+static int ny_alias_cache_get(codegen_t *cg, const char *name,
+                              const char **out) {
+  size_t len = 0;
+  if (!ny_cacheable_name(name, &len))
+    return -1;
+  uint64_t hash = ny_hash_name_cached(cg, name, len);
+  uint64_t stamp = ny_lookup_stamp(cg);
+  ny_sym_state_t *s = ny_get_sym_state(cg);
+  ny_alias_lookup_cache_entry_t *e =
+      &s->alias_lookup_cache[hash & (NY_LOOKUP_CACHE_SLOTS - 1u)];
+  if (!NY_CACHE_ENTRY_MATCH(e, cg, stamp, hash, len, name))
+    return -1;
+  if (e->state == 2u) {
+    *out = e->value;
+    return 1;
+  }
+  return 0;
+}
+
+static void ny_alias_cache_put(codegen_t *cg, const char *name,
+                               const char *value) {
+  size_t len = 0;
+  if (!ny_cacheable_name(name, &len))
+    return;
+  uint64_t hash = ny_hash_name_cached(cg, name, len);
+  ny_sym_state_t *s = ny_get_sym_state(cg);
+  ny_alias_lookup_cache_entry_t *e =
+      &s->alias_lookup_cache[hash & (NY_LOOKUP_CACHE_SLOTS - 1u)];
+  NY_CACHE_ENTRY_FILL(e, cg, name, len, hash, value);
+}
+
+void ny_alias_lookup_cache_clear(codegen_t *cg) {
+  if (!cg)
+    return;
+  ny_sym_state_t *s = ny_get_sym_state(cg);
+  memset(s->alias_lookup_cache, 0, sizeof(s->alias_lookup_cache));
+  s->stamp_cache.ready = false;
+}
+
+static int ny_overload_cache_get(codegen_t *cg, const char *name, size_t argc,
+                                 uint64_t hash, fun_sig **out) {
+  size_t len = 0;
+  if (!ny_cacheable_name(name, &len))
+    return -1;
+  if (!hash)
+    hash = ny_overload_cache_hash(cg, name, len, argc);
+  else
+    hash ^= ((uint64_t)argc * 11400714819323198485ULL);
+  uint64_t stamp = ny_lookup_stamp(cg);
+  ny_sym_state_t *s = ny_get_sym_state(cg);
+  ny_overload_lookup_cache_entry_t *e =
+      &s->overload_lookup_cache[hash & (NY_LOOKUP_CACHE_SLOTS - 1u)];
+  if (!NY_CACHE_ENTRY_MATCH(e, cg, stamp, hash, len, name) ||
+      e->argc != (uint32_t)argc)
+    return -1;
+  if (e->state == 2u) {
+    if (!ny_sig_in_current_sigs(cg, e->value)) {
+      e->state = 0u;
+      e->value = NULL;
+      return -1;
+    }
+    *out = e->value;
+    return 1;
+  }
+  return 0;
+}
+
+static void ny_overload_cache_put(codegen_t *cg, const char *name, size_t argc,
+                                  uint64_t hash, fun_sig *value) {
+  size_t len = 0;
+  if (!ny_cacheable_name(name, &len))
+    return;
+  if (!hash)
+    hash = ny_overload_cache_hash(cg, name, len, argc);
+  else
+    hash ^= ((uint64_t)argc * 11400714819323198485ULL);
+  ny_sym_state_t *s = ny_get_sym_state(cg);
+  ny_overload_lookup_cache_entry_t *e =
+      &s->overload_lookup_cache[hash & (NY_LOOKUP_CACHE_SLOTS - 1u)];
+  if (value && !ny_sig_in_current_sigs(cg, value)) {
+    e->state = 0u;
+    e->value = NULL;
+    return;
+  }
+  NY_CACHE_ENTRY_FILL(e, cg, name, len, hash, value);
+  e->argc = (uint32_t)argc;
+}
+
+#undef NY_CACHE_ENTRY_MATCH
+#undef NY_CACHE_ENTRY_FILL
+
+static void ny_overload_name_index_rebuild(codegen_t *cg, uint64_t stamp) {
+  ny_sym_state_t *s = ny_get_sym_state(cg);
+  memset(s->overload_name_heads, 0xff, sizeof(s->overload_name_heads));
+  size_t len = cg->fun_sigs.len;
+  if (s->overload_name_next_cap < len) {
+    size_t new_cap = s->overload_name_next_cap * 2;
+    if (new_cap < len)
+      new_cap = len;
+    if (new_cap < 1024)
+      new_cap = 1024;
+    int32_t *grown = realloc(s->overload_name_next, sizeof(int32_t) * new_cap);
+    if (!grown) {
+      s->overload_name_ready = false;
+      s->overload_name_stamp = 0;
+      return;
+    }
+    s->overload_name_next = grown;
+    s->overload_name_next_cap = new_cap;
+  }
+  for (size_t i = 0; i < len; ++i) {
+    s->overload_name_next[i] = -1;
+  }
+  for (ssize_t i = (ssize_t)len - 1; i >= 0; --i) {
+    fun_sig *fs = &cg->fun_sigs.data[i];
+    if (!fs->name || !*fs->name)
+      continue;
+    uint64_t hash = ny_fun_name_hash(fs);
+    size_t bucket = (size_t)(hash & (NY_OVERLOAD_NAME_INDEX_SLOTS - 1u));
+    s->overload_name_next[i] = s->overload_name_heads[bucket];
+    s->overload_name_heads[bucket] = (int32_t)i;
+  }
+  s->overload_name_stamp = stamp;
+  s->overload_name_ready = true;
+}
+
+static int32_t ny_overload_name_bucket_head(codegen_t *cg, uint64_t want_hash) {
+  uint64_t stamp = ny_fun_index_version(cg);
+  ny_sym_state_t *s = ny_get_sym_state(cg);
+  if (!s->overload_name_ready || s->overload_name_stamp != stamp) {
+    ny_overload_name_index_rebuild(cg, stamp);
+    s = ny_get_sym_state(cg);
+  }
+  if (!s->overload_name_ready)
+    return -1;
+  return s
+      ->overload_name_heads[want_hash & (NY_OVERLOAD_NAME_INDEX_SLOTS - 1u)];
+}
+
+#define NY_DEFINE_TAIL_INDEX_REBUILD(                                          \
+    fn_name, index_field, stamp_field, ready_field, vec_field, data_field,     \
+    len_field, item_type, item_name_expr, item_name_len, item_tail_len_expr,   \
+    item_tail_hash_expr, item_skip_expr, entry_type, entry_tail_field,         \
+    entry_value_field, item_value_expr, prof_total_field, prof_full_field,     \
+    prof_incr_field, prof_ms_field)                                            \
+  static void fn_name(codegen_t *cg, uint64_t stamp) {                         \
+    ny_tick_t prof_t0 = ny_lookup_prof_enabled() ? ny_ticks_now() : 0;         \
+    ny_sym_state_t *s = ny_get_sym_state(cg);                                  \
+    const void *cur_data = (const void *)cg->vec_field.data;                   \
+    size_t cur_len = (size_t)cg->vec_field.len;                                \
+    bool full_rebuild = (!s->ready_field || s->data_field != cur_data ||       \
+                         s->len_field > cur_len);                              \
+    if (ny_lookup_prof_enabled()) {                                            \
+      g_ny_lookup_prof.prof_total_field++;                                     \
+      if (full_rebuild)                                                        \
+        g_ny_lookup_prof.prof_full_field++;                                    \
+      else                                                                     \
+        g_ny_lookup_prof.prof_incr_field++;                                    \
+    }                                                                          \
+    if (full_rebuild)                                                          \
+      memset(s->index_field, 0, sizeof(s->index_field));                       \
+    size_t start = full_rebuild ? 0u : s->len_field;                           \
+    size_t current_mod_len =                                                   \
+        cg->current_module_name ? strlen(cg->current_module_name) : 0u;        \
+    const char *last_mod = NULL;                                               \
+    size_t last_mod_len = 0;                                                   \
+    bool last_mod_used = false;                                                \
+    bool last_mod_user_used = false;                                           \
+    for (ssize_t i = (ssize_t)cg->vec_field.len - 1; i >= (ssize_t)start;      \
+         --i) {                                                                \
+      item_type *item = &cg->vec_field.data[i];                                \
+      if (item_skip_expr)                                                      \
+        continue;                                                              \
+      const char *sig_name = (item_name_expr);                                 \
+      if (!sig_name || !*sig_name)                                             \
+        continue;                                                              \
+      const char *dot = strrchr(sig_name, '.');                                \
+      if (!dot)                                                                \
+        continue;                                                              \
+      size_t mod_len = (size_t)(dot - sig_name);                               \
+      bool mod_used = false;                                                   \
+      bool mod_user_used = false;                                              \
+      uint64_t mod_hash = 0;                                                   \
+      if (last_mod && last_mod_len == mod_len &&                               \
+          memcmp(last_mod, sig_name, mod_len) == 0) {                          \
+        mod_used = last_mod_used;                                              \
+        mod_user_used = last_mod_user_used;                                    \
+      } else {                                                                 \
+        mod_hash = ny_hash_name(sig_name, mod_len);                            \
+        mod_used = module_is_used_hash(cg, sig_name, mod_len, mod_hash);       \
+        mod_user_used =                                                        \
+            ny_module_used_lookup_hash(cg, true, sig_name, mod_len, mod_hash); \
+        last_mod = sig_name;                                                   \
+        last_mod_len = mod_len;                                                \
+        last_mod_used = mod_used;                                              \
+        last_mod_user_used = mod_user_used;                                    \
+      }                                                                        \
+      if (!mod_used)                                                           \
+        continue;                                                              \
+      const char *tail = dot + 1;                                              \
+      if (!*tail)                                                              \
+        continue;                                                              \
+      size_t sig_len = (size_t)(item_name_len);                                \
+      size_t len = sig_len - mod_len - 1u;                                     \
+      size_t tail_len = (size_t)(item_tail_len_expr);                          \
+      uint64_t hash = (uint64_t)(item_tail_hash_expr);                         \
+      if (tail_len != len || !hash) {                                          \
+        tail_len = len;                                                        \
+        hash = ny_hash_name_cached(cg, tail, len);                             \
+      }                                                                        \
+      size_t pos = (size_t)(hash & (NY_LOOKUP_EXACT_INDEX_SLOTS - 1u));        \
+      for (size_t probe = 0; probe < NY_LOOKUP_EXACT_INDEX_SLOTS; ++probe) {   \
+        entry_type *e = &s->index_field[pos];                                  \
+        uint8_t new_state = mod_user_used ? 3u : 1u;                           \
+        if (cg->current_module_name && current_mod_len == mod_len &&           \
+            memcmp(cg->current_module_name, sig_name, mod_len) == 0)           \
+          new_state = 10u;                                                     \
+        else if (mod_len >= 8 && memcmp(sig_name, "std.core", 8) == 0 &&       \
+                 (sig_name[8] == '.' || sig_name[8] == '\0'))                  \
+          new_state = 5u;                                                      \
+        if (!e->state) {                                                       \
+          e->state = new_state;                                                \
+          e->hash = hash;                                                      \
+          e->len = (uint32_t)len;                                              \
+          e->mod_len = (uint32_t)mod_len;                                      \
+          e->entry_tail_field = tail;                                          \
+          e->entry_value_field = (item_value_expr);                            \
+          break;                                                               \
+        }                                                                      \
+        if (e->hash == hash && e->len == (uint32_t)len &&                      \
+            memcmp(e->entry_tail_field, tail, len) == 0 &&                     \
+            e->entry_tail_field[len] == '\0') {                                \
+          bool replace = false;                                                \
+          if (new_state > e->state)                                            \
+            replace = true;                                                    \
+          else if (new_state == e->state && mod_len < (size_t)e->mod_len)      \
+            replace = true;                                                    \
+          if (replace) {                                                       \
+            e->entry_tail_field = tail;                                        \
+            e->entry_value_field = (item_value_expr);                          \
+            e->state = new_state;                                              \
+            e->mod_len = (uint32_t)mod_len;                                    \
+          }                                                                    \
+          break;                                                               \
+        }                                                                      \
+        pos = (pos + 1u) & (NY_LOOKUP_EXACT_INDEX_SLOTS - 1u);                 \
+      }                                                                        \
+    }                                                                          \
+    s->data_field = cur_data;                                                  \
+    s->len_field = cur_len;                                                    \
+    s->stamp_field = stamp;                                                    \
+    s->ready_field = true;                                                     \
+    if (ny_lookup_prof_enabled())                                              \
+      g_ny_lookup_prof.prof_ms_field += ny_ticks_elapsed_ms(prof_t0);          \
+  }
+
+NY_DEFINE_TAIL_INDEX_REBUILD(ny_fun_tail_index_rebuild, fun_tail,
+                             fun_tail_stamp, fun_tail_ready, fun_sigs,
+                             fun_tail_data, fun_tail_len, fun_sig, item->name,
+                             ny_fun_name_len(item), ny_fun_tail_len(item),
+                             item->tail_hash,
+                             ny_fun_hidden_from_unqualified(item),
+                             ny_fun_tail_index_entry_t, tail_name, value, item,
+                             fun_tail_rebuilds, fun_tail_full_rebuilds,
+                             fun_tail_incremental_rebuilds, fun_tail_rebuild_ms)
+
+NY_DEFINE_TAIL_INDEX_REBUILD(
+    ny_global_tail_index_rebuild, global_tail, global_tail_stamp,
+    global_tail_ready, global_vars, global_tail_data, global_tail_len, binding,
+    item->name, ny_binding_name_len(item), ny_binding_tail_len(item),
+    item->tail_hash, false, ny_global_tail_index_entry_t, tail_name, value,
+    item, global_tail_rebuilds, global_tail_full_rebuilds,
+    global_tail_incremental_rebuilds, global_tail_rebuild_ms)
+
+#undef NY_DEFINE_TAIL_INDEX_REBUILD
+
+static fun_sig *ny_fun_tail_find(codegen_t *cg, const char *tail) {
+  if (!tail || !*tail)
+    return NULL;
+  size_t len = strlen(tail);
+  bool rebuilt_after_stale = false;
+  uint64_t stamp = 0;
+  uint64_t hash = 0;
+  size_t pos = 0;
+retry:
+  stamp = ny_fun_tail_index_version(cg);
+  ny_sym_state_t *s = ny_get_sym_state(cg);
+  if (!s->fun_tail_ready || s->fun_tail_stamp != stamp) {
+    ny_fun_tail_index_rebuild(cg, stamp);
+    s = ny_get_sym_state(cg);
+  }
+  hash = ny_hash_name_cached(cg, tail, len);
+  pos = (size_t)(hash & (NY_LOOKUP_EXACT_INDEX_SLOTS - 1u));
+  for (size_t probe = 0; probe < NY_LOOKUP_EXACT_INDEX_SLOTS; ++probe) {
+    ny_fun_tail_index_entry_t *e = &s->fun_tail[pos];
+    if (!e->state)
+      return NULL;
+    if (e->hash == hash && e->len == (uint32_t)len &&
+        memcmp(e->tail_name, tail, len) == 0 && e->tail_name[len] == '\0') {
+      if (!ny_sig_in_current_sigs(cg, e->value)) {
+        if (!rebuilt_after_stale) {
+          if (ny_lookup_prof_enabled())
+            g_ny_lookup_prof.fun_tail_stale_rebuilds++;
+          ny_fun_tail_index_rebuild(cg, stamp);
+          rebuilt_after_stale = true;
+          goto retry;
+        }
+        return NULL;
+      }
+      return e->value;
+    }
+    pos = (pos + 1u) & (NY_LOOKUP_EXACT_INDEX_SLOTS - 1u);
+  }
+  return NULL;
+}
+
+static bool ny_tail_result_blocked_by_export_profile(codegen_t *cg,
+                                                     const char *full_name,
+                                                     const char *tail) {
+  if (!cg || !cg->prog || !full_name || !tail || !strchr(full_name, '.'))
+    return false;
+  if (resolve_import_alias(cg, tail))
+    return false;
+  for (size_t i = 0; i < cg->prog->body.len; ++i) {
+    stmt_t *root = cg->prog->body.data[i];
+    if (!root || root->kind != NY_S_MODULE || !root->as.module.name ||
+        !module_has_export_list(root))
+      continue;
+    size_t n = strlen(root->as.module.name);
+    if (strncmp(full_name, root->as.module.name, n) == 0 && full_name[n] == '.')
+      return true;
+  }
+  for (size_t p = 0; p < cg->extra_progs.len; ++p) {
+    program_t *prog = cg->extra_progs.data[p];
+    if (!prog)
+      continue;
+    for (size_t i = 0; i < prog->body.len; ++i) {
+      stmt_t *root = prog->body.data[i];
+      if (!root || root->kind != NY_S_MODULE || !root->as.module.name ||
+          !module_has_export_list(root))
+        continue;
+      size_t n = strlen(root->as.module.name);
+      if (strncmp(full_name, root->as.module.name, n) == 0 &&
+          full_name[n] == '.')
+        return true;
+    }
+  }
+  return false;
+}
+
+static binding *ny_global_tail_find(codegen_t *cg, const char *tail) {
+  if (!tail || !*tail)
+    return NULL;
+  size_t len = strlen(tail);
+  uint64_t stamp = ny_global_tail_index_version(cg);
+  ny_sym_state_t *s = ny_get_sym_state(cg);
+  if (!s->global_tail_ready || s->global_tail_stamp != stamp) {
+    ny_global_tail_index_rebuild(cg, stamp);
+    s = ny_get_sym_state(cg);
+  }
+  uint64_t hash = ny_hash_name_cached(cg, tail, len);
+  size_t pos = (size_t)(hash & (NY_LOOKUP_EXACT_INDEX_SLOTS - 1u));
+  for (size_t probe = 0; probe < NY_LOOKUP_EXACT_INDEX_SLOTS; ++probe) {
+    ny_global_tail_index_entry_t *e = &s->global_tail[pos];
+    if (!e->state)
+      return NULL;
+    if (e->hash == hash && e->len == (uint32_t)len &&
+        memcmp(e->tail_name, tail, len) == 0 && e->tail_name[len] == '\0') {
+      if (!ny_binding_is_valid(cg, e->value)) {
+        ny_global_tail_index_rebuild(cg, stamp);
+        s = ny_get_sym_state(cg);
+        e = &s->global_tail[pos];
+        if (!e->state || e->hash != hash || e->len != (uint32_t)len ||
+            memcmp(e->tail_name, tail, len) != 0)
+          return NULL;
+      }
+      return e->value;
+    }
+    pos = (pos + 1u) & (NY_LOOKUP_EXACT_INDEX_SLOTS - 1u);
+  }
+  return NULL;
+}
+
+bool builtin_allowed_comptime(const char *name) {
+
+  static const char *deny[] = {
+      "__syscall",
+      "__execve",
+      "__dlopen",
+      "__dlsym",
+      "__dlclose",
+      "__dlerror",
+      "__thread_spawn",
+      "__thread_spawn_call",
+      "__thread_launch_call",
+      "__thread_join",
+      "__async_task_new",
+      "__async_value",
+      "__async_await_blocking",
+      "__async_run",
+      "__async_yield",
+      "__async_sleep_ms",
+      "__async_wait_fd",
+      "__async_recv",
+      "__async_send",
+      "__async_accept",
+      "__async_connect",
+      "__async_read_socket",
+      "__async_write_socket_part",
+      "__async_write_socket_all",
+      "__async_read_socket_until",
+      "__rand64",
+      "__srand",
+      "__globals",
+      "__set_globals",
+      "__set_args",
+      "__parse_ast",
+      NULL,
+  };
+  for (int i = 0; deny[i]; ++i) {
+    if (strcmp(name, deny[i]) == 0)
+      return false;
+  }
+  return true;
+}
+
+void add_builtins(codegen_t *cg) {
+  if (!cg) {
+    fprintf(stderr, "add_builtins: cg is NULL\n");
+    return;
+  }
+  if (!cg->ctx) {
+    fprintf(stderr, "add_builtins: cg->ctx is NULL\n");
+    return;
+  }
+  if (!cg->module) {
+    fprintf(stderr, "add_builtins: cg->module is NULL\n");
+    return;
+  }
+  if (!cg->type_i64) {
+    fprintf(stderr, "add_builtins: cg->type_i64 is NULL\n");
+    return;
+  }
+
+  LLVMTypeRef fn_types[32];
+  for (int i = 0; i < 32; i++) {
+    LLVMTypeRef *pts = alloca(sizeof(LLVMTypeRef) * (size_t)i);
+    for (int j = 0; j < i; j++)
+      pts[j] = cg->type_i64;
+    fn_types[i] = LLVMFunctionType(cg->type_i64, pts, (unsigned)i, 0);
+    if (!fn_types[i])
+      fprintf(stderr, "add_builtins: failed to create fn_type for arity %d\n",
+              i);
+  }
+
+#define RT_DEF(rt_name, implementation, args, sig, doc)                        \
+  do {                                                                         \
+    if (cg->comptime && !builtin_allowed_comptime(rt_name))                    \
+      break;                                                                   \
+    LLVMTypeRef ty = NULL;                                                     \
+    if (strcmp(rt_name, "__copy_mem") == 0) {                                  \
+      ty = LLVMFunctionType(                                                   \
+          cg->type_i64,                                                        \
+          (LLVMTypeRef[]){cg->type_i64, cg->type_i64, cg->type_i64}, 3, 0);    \
+    } else if (strcmp(rt_name, "__dict_set_raw") == 0 ||                       \
+               strcmp(rt_name, "__dict_set_i64_raw") == 0 ||                   \
+               strcmp(rt_name, "__dict_set_str_raw") == 0) {                   \
+      /* Legacy LLVM expands each any key/value as value/length/tag. */        \
+      ty = fn_types[7];                                                        \
+    } else {                                                                   \
+      ty = fn_types[args];                                                     \
+    }                                                                          \
+    const char *impl_name = #implementation;                                   \
+    LLVMValueRef f = ny_get_named_fn(cg, impl_name);                           \
+    if (!f)                                                                    \
+      f = LLVMAddFunction(cg->module, impl_name, ty);                          \
+    fun_sig *sig_obj = arena_alloc(cg->arena, sizeof(fun_sig));                \
+    ny_fun_sig_init(sig_obj, rt_name, ty, f, NULL, (int)args, false, false);   \
+    sig_obj->is_stable = true;                                                 \
+    sig_obj->owned = false;                                                    \
+    vec_push(&cg->fun_sigs, *sig_obj);                                         \
+    ny_apply_rt_fn_attrs(cg, f);                                               \
+    if (!strcmp(rt_name, "__panic")) {                                         \
+      unsigned nr_kind = LLVMGetEnumAttributeKindForName("noreturn", 8);       \
+      if (nr_kind != 0) {                                                      \
+        LLVMAttributeRef nr_attr =                                             \
+            LLVMCreateEnumAttribute(cg->ctx, nr_kind, 0);                      \
+        LLVMAddAttributeAtIndex(f, LLVMAttributeFunctionIndex, nr_attr);       \
+      }                                                                        \
+    }                                                                          \
+  } while (0);
+
+#define RT_GV(rt_name, p, t, doc)                                              \
+  do {                                                                         \
+    LLVMValueRef g = ny_get_global(cg, rt_name);                               \
+    if (!g) {                                                                  \
+      g = LLVMAddGlobal(cg->module, cg->type_i64, rt_name);                    \
+      LLVMSetLinkage(g, LLVMExternalLinkage);                                  \
+    }                                                                          \
+    binding b = {0};                                                           \
+    b.name = ny_strdup(rt_name);                                               \
+    b.value = g;                                                               \
+    b.is_slot = true;                                                          \
+    b.is_stable = true;                                                        \
+    b.owned = true;                                                            \
+    vec_push(&cg->global_vars, b);                                             \
+  } while (0);
+
+#ifdef _WIN32
+#ifdef rt_argc
+#undef rt_argc
+#endif
+#ifdef rt_argv
+#undef rt_argv
+#endif
+#endif
+
+#include "code/runtime/defs.h"
+
+#undef RT_DEF
+#undef RT_GV
+}
+
+enum_member_def_t *lookup_enum_member(codegen_t *cg, const char *name) {
+  if (!name || !*name) {
+    return NULL;
+  }
+
+  const char *dot = strrchr(name, '.');
+
+  if (dot) {
+
+    size_t enum_name_len = dot - name;
+    const char *member_name = dot + 1;
+
+    for (size_t i = 0; i < cg->enums.len; ++i) {
+      enum_def_t *enum_def = cg->enums.data[i];
+      if (enum_def->name && strncmp(enum_def->name, name, enum_name_len) == 0 &&
+          enum_def->name[enum_name_len] == '\0') {
+
+        for (size_t j = 0; j < enum_def->members.len; ++j) {
+          enum_member_def_t *member_def = &enum_def->members.data[j];
+          if (member_def->name && strcmp(member_def->name, member_name) == 0) {
+            return member_def;
+          }
+        }
+      }
+    }
+  } else {
+
+    for (size_t i = 0; i < cg->enums.len; ++i) {
+      enum_def_t *enum_def = cg->enums.data[i];
+      for (size_t j = 0; j < enum_def->members.len; ++j) {
+        enum_member_def_t *member_def = &enum_def->members.data[j];
+        if (member_def->name && strcmp(member_def->name, name) == 0) {
+          return member_def;
+        }
+      }
+    }
+  }
+
+  return NULL;
+}
+
+enum_member_def_t *lookup_enum_member_owner(codegen_t *cg, const char *name,
+                                            enum_def_t **out_enum) {
+  if (out_enum)
+    *out_enum = NULL;
+  if (!name || !*name)
+    return NULL;
+
+  const char *dot = strrchr(name, '.');
+  if (dot) {
+    size_t enum_name_len = (size_t)(dot - name);
+    const char *member_name = dot + 1;
+    for (size_t i = 0; i < cg->enums.len; ++i) {
+      enum_def_t *enum_def = cg->enums.data[i];
+      if (enum_def->name && strncmp(enum_def->name, name, enum_name_len) == 0 &&
+          enum_def->name[enum_name_len] == '\0') {
+        for (size_t j = 0; j < enum_def->members.len; ++j) {
+          enum_member_def_t *member_def = &enum_def->members.data[j];
+          if (member_def->name && strcmp(member_def->name, member_name) == 0) {
+            if (out_enum)
+              *out_enum = enum_def;
+            return member_def;
+          }
+        }
+      }
+    }
+    return NULL;
+  }
+
+  enum_member_def_t *found = NULL;
+  enum_def_t *owner = NULL;
+  int hits = 0;
+  for (size_t i = 0; i < cg->enums.len; ++i) {
+    enum_def_t *enum_def = cg->enums.data[i];
+    for (size_t j = 0; j < enum_def->members.len; ++j) {
+      enum_member_def_t *member_def = &enum_def->members.data[j];
+      if (member_def->name && strcmp(member_def->name, name) == 0) {
+        hits++;
+        found = member_def;
+        owner = enum_def;
+      }
+    }
+  }
+  if (hits == 1 && out_enum)
+    *out_enum = owner;
+  return (hits == 1) ? found : NULL;
+}
+
+char *codegen_full_name(codegen_t *cg, expr_t *e, arena_t *a) {
+  if (!e)
+    return NULL;
+  if (e->kind == NY_E_IDENT) {
+    const char *resolved_alias = resolve_import_alias(cg, e->as.ident.name);
+    if (resolved_alias)
+      return a ? arena_strndup(a, resolved_alias, strlen(resolved_alias))
+               : ny_strndup(resolved_alias, strlen(resolved_alias));
+    return a ? arena_strndup(a, e->as.ident.name, strlen(e->as.ident.name))
+             : ny_strndup(e->as.ident.name, strlen(e->as.ident.name));
+  }
+  if (e->kind == NY_E_MEMBER) {
+    char *target_name = codegen_full_name(cg, e->as.member.target, a);
+    if (!target_name)
+      return NULL;
+    size_t len = strlen(target_name) + 1 + strlen(e->as.member.name);
+    char *full_name = a ? arena_alloc(a, len + 1) : malloc(len + 1);
+    if (!full_name) {
+      if (!a)
+        free(target_name);
+      return NULL;
+    }
+    snprintf(full_name, len + 1, "%s.%s", target_name, e->as.member.name);
+    if (!a)
+      free(target_name);
+    return full_name;
+  }
+  return NULL;
+}
+
+static int g_lookup_depth = 0;
+#define MAX_LOOKUP_DEPTH 1024
+static const char *g_lookup_name_stack[MAX_LOOKUP_DEPTH];
+static codegen_t *g_lookup_cg_stack[MAX_LOOKUP_DEPTH];
+
+fun_sig *lookup_fun(codegen_t *cg, const char *name, uint64_t hash) {
+  if (!name || !*name)
+    return NULL;
+  if (ny_trace_resolve_enabled()) {
+    fprintf(stderr, "[resolve] lookup_fun name='%s'\n", name);
+  }
+  bool builtin_runtime_name = (name[0] == '_' && name[1] == '_');
+  bool qualified = strchr(name, '.') != NULL;
+  bool cacheable =
+      qualified || !cg->current_module_name || builtin_runtime_name;
+  fun_sig *cached = NULL;
+  if (cacheable) {
+    int cache_state = ny_fun_cache_get(cg, name, hash, &cached);
+    if (cache_state == 1)
+      return cached;
+    if (cache_state == 0)
+      return NULL;
+  }
+
+  for (int i = g_lookup_depth - 1; i >= 0; --i) {
+    if (g_lookup_cg_stack[i] == cg && g_lookup_name_stack[i] &&
+        strcmp(g_lookup_name_stack[i], name) == 0) {
+      return NULL;
+    }
+  }
+
+  if (g_lookup_depth >= MAX_LOOKUP_DEPTH) {
+    if (verbose_enabled >= 1) {
+      token_t fake = {0};
+      ny_diag_warning(fake,
+                      "max lookup depth reached for '%s' — possible recursion "
+                      "in symbol resolution",
+                      name);
+    }
+    return NULL;
+  }
+  g_lookup_name_stack[g_lookup_depth] = name;
+  g_lookup_cg_stack[g_lookup_depth] = cg;
+  g_lookup_depth++;
+
+  fun_sig *res = NULL;
+  bool tried_scoped_or_alias = false;
+
+  if (!builtin_runtime_name && !qualified && cg->current_module_name) {
+    if (ny_trace_resolve_enabled()) {
+      fprintf(stderr, "[resolve] 0 scoped/alias-first '%s'\n", name);
+    }
+    tried_scoped_or_alias = true;
+    res = ny_lookup_try_scoped_or_alias(
+        cg, name, qualified, ny_lookup_fun_recurse, hash ? &hash : NULL);
+    if (res)
+      goto end;
+  }
+
+  res = lookup_fun_exact(cg, name);
+  if (ny_trace_resolve_enabled()) {
+    fprintf(stderr, "[resolve] 1 exact '%s' -> %s\n", name,
+            res ? "hit" : "miss");
+  }
+  if (res && !ny_block_implicit_std_symbol(cg, name, res->name))
+    goto end;
+  res = NULL;
+
+  const char *alias_full = resolve_import_alias(cg, name);
+  if (alias_full && *alias_full && strcmp(alias_full, name) != 0) {
+    if (ny_trace_resolve_enabled()) {
+      fprintf(stderr, "[resolve] qualified/import alias '%s' -> try '%s'\n",
+              name, alias_full);
+    }
+    res = lookup_fun(cg, alias_full, 0);
+    if (res)
+      goto end;
+  }
+
+  if (builtin_runtime_name)
+    goto end;
+
+  if (!tried_scoped_or_alias) {
+    if (ny_trace_resolve_enabled()) {
+      fprintf(stderr, "[resolve] 2 scoped/alias '%s' qualified=%d\n", name,
+              qualified ? 1 : 0);
+    }
+    res = ny_lookup_try_scoped_or_alias(
+        cg, name, qualified, ny_lookup_fun_recurse, hash ? &hash : NULL);
+    if (res)
+      goto end;
+  }
+
+  if (ny_trace_resolve_enabled()) {
+    fprintf(stderr, "[resolve] 3 member-alias '%s'\n", name);
+  }
+  const char *dot = qualified ? strchr(name, '.') : NULL;
+  if (dot) {
+    size_t prefix_len = dot - name;
+    char prefix_stack[256];
+    char *prefix = prefix_len < sizeof(prefix_stack) ? prefix_stack
+                                                     : malloc(prefix_len + 1);
+    if (prefix) {
+      memcpy(prefix, name, prefix_len);
+      prefix[prefix_len] = '\0';
+      const char *real_mod_name =
+          ny_lookup_module_alias(cg, NULL, 0, prefix, prefix_len, 0);
+      if (prefix != prefix_stack)
+        free(prefix);
+      if (real_mod_name && *real_mod_name) {
+        if (!(strncmp(name, real_mod_name, prefix_len) == 0 &&
+              real_mod_name[prefix_len] == '\0')) {
+          size_t mod_len = strlen(real_mod_name);
+          size_t dot_len = strlen(dot);
+          size_t full_len = mod_len + dot_len;
+          char stack_buf[256];
+          char *resolved =
+              full_len < sizeof(stack_buf) ? stack_buf : malloc(full_len + 1);
+          if (resolved) {
+            memcpy(resolved, real_mod_name, mod_len);
+            memcpy(resolved + mod_len, dot, dot_len + 1);
+            fun_sig *recursive_res = lookup_fun(cg, resolved, 0);
+            if (resolved != stack_buf)
+              free(resolved);
+            if (recursive_res) {
+              res = recursive_res;
+              goto end;
+            }
+          }
+        }
+      }
+    }
+  } else {
+    for (size_t i = 0; i < cg->aliases.len; ++i) {
+      if (strcmp(cg->aliases.data[i].name, name) == 0) {
+        const char *real_mod_name = (const char *)cg->aliases.data[i].stmt_t;
+        char buf[256];
+        snprintf(buf, sizeof(buf), "%s.%s", real_mod_name, name);
+        fun_sig *s = lookup_fun(cg, buf, 0);
+        if (s) {
+          res = s;
+          goto end;
+        }
+      }
+    }
+  }
+
+  if (!res && !qualified && cg->current_module_name) {
+    if (ny_trace_resolve_enabled()) {
+      fprintf(stderr, "[resolve] 4 current-module '%s'\n", name);
+    }
+    char mod_buf[256];
+    snprintf(mod_buf, sizeof(mod_buf), "%s.%s", cg->current_module_name, name);
+    res = lookup_fun_exact(cg, mod_buf);
+    if (res)
+      goto end;
+  }
+  if (!res && !qualified) {
+    if (ny_trace_resolve_enabled()) {
+      fprintf(stderr, "[resolve] 5 tail-find '%s'\n", name);
+    }
+    res = ny_fun_tail_find(cg, name);
+    if (res && ny_tail_result_blocked_by_export_profile(cg, res->name, name))
+      res = NULL;
+    if (res)
+      goto end;
+  }
+  if (!res && cg->parent) {
+    if (ny_trace_resolve_enabled()) {
+      fprintf(stderr, "[resolve] 6 parent '%s'\n", name);
+    }
+    fun_sig *p = lookup_fun(cg->parent, name, hash);
+    if (p && p->value) {
+      const char *fn_link_name = LLVMGetValueName(p->value);
+      LLVMValueRef my_fn = ny_get_named_fn(cg, fn_link_name);
+      if (my_fn) {
+        fun_sig *n = arena_alloc(cg->arena, sizeof(fun_sig));
+        *n = *p;
+        n->value = my_fn;
+        n->is_stable = true;
+        res = n;
+        goto end;
+      }
+    }
+  }
+end:
+  if (ny_trace_resolve_enabled()) {
+    fprintf(stderr, "[resolve] lookup_fun name='%s' => %s\n", name,
+            res ? "hit" : "miss");
+  }
+  if (res && !ny_sig_in_current_sigs(cg, res) && !cg->parent) {
+    res = NULL;
+  }
+  g_lookup_depth--;
+  g_lookup_name_stack[g_lookup_depth] = NULL;
+  g_lookup_cg_stack[g_lookup_depth] = NULL;
+  if (cacheable)
+    ny_fun_cache_put(cg, name, hash, res);
+  return res;
+}
+
+fun_sig *lookup_use_module_fun(codegen_t *cg, const char *name, size_t argc) {
+  if (!name || !*name)
+    return NULL;
+  const char *alias_full = resolve_import_alias(cg, name);
+  if (ny_trace_resolve_enabled()) {
+    fprintf(stderr,
+            "[resolve] use-module-fun name='%s' argc=%zu alias=%s%s%s\n", name,
+            argc, alias_full ? "'" : "(nil)", alias_full ? alias_full : "",
+            alias_full ? "'" : "");
+  }
+  if (alias_full) {
+    fun_sig *aliased = resolve_overload(cg, alias_full, argc, 0);
+    if (aliased)
+      return aliased;
+  }
+  return NULL;
+}
+
+const char *resolve_import_alias(codegen_t *cg, const char *name) {
+  if (!name || !*name)
+    return NULL;
+  bool cacheable = true;
+  const char *cached = NULL;
+  if (cacheable) {
+    int cache_state = ny_alias_cache_get(cg, name, &cached);
+    if (ny_trace_resolve_enabled()) {
+      fprintf(stderr,
+              "[resolve] alias name='%s' cache_state=%d cached=%s%s%s\n", name,
+              cache_state, cached ? "'" : "(nil)", cached ? cached : "",
+              cached ? "'" : "");
+    }
+    if (cache_state == 1)
+      return cached;
+    if (cache_state == 0)
+      return NULL;
+  }
+
+  const char *res = NULL;
+  bool user_only = ny_user_ctx_is_non_std(cg);
+  size_t name_len = strlen(name);
+  uint64_t name_hash = ny_hash_name(name, name_len);
+  res =
+      ny_lookup_import_alias_indexed(cg, user_only, name, name_len, name_hash);
+  if (!res && !strchr(name, '.'))
+    res = ny_resolve_used_module_export_alias(cg, name);
+  if (ny_trace_resolve_enabled()) {
+    fprintf(stderr, "[resolve] alias name='%s' -> %s%s%s\n", name,
+            res ? "'" : "(nil)", res ? res : "", res ? "'" : "");
+  }
+  if (cacheable)
+    ny_alias_cache_put(cg, name, res);
+  return res;
+}
+
+binding *lookup_global_hash(codegen_t *cg, const char *name, uint64_t hash) {
+  if (!name || !*name)
+    return NULL;
+  binding *cached = NULL;
+  int cache_state = ny_global_cache_get(cg, name, hash, &cached);
+  if (cache_state == 1) {
+    cached->is_used = true;
+    return cached;
+  }
+  if (cache_state == 0)
+    return NULL;
+
+  if (g_lookup_depth > MAX_LOOKUP_DEPTH)
+    return NULL;
+  g_lookup_depth++;
+
+  binding *res = NULL;
+  bool qualified = strchr(name, '.') != NULL;
+  if (!cg->global_vars.data)
+    goto end;
+
+  res = lookup_global_exact(cg, name);
+  if (res && ny_current_ctx_is_std(cg) && !qualified &&
+      ny_global_is_root_user_var(res))
+    res = NULL;
+  if (res && !ny_block_implicit_std_symbol(cg, name, res->name))
+    goto end;
+  if (!qualified && cg->current_module_name &&
+      cg->current_module_name[0]) {
+    char scoped[512];
+    int n = snprintf(scoped, sizeof(scoped), "%s.%s",
+                     cg->current_module_name, name);
+    if (n > 0 && (size_t)n < sizeof(scoped)) {
+      res = lookup_global_exact(cg, scoped);
+      if (res)
+        goto end;
+    }
+  }
+  const char *alias_full = resolve_import_alias(cg, name);
+  if (alias_full && *alias_full && strcmp(alias_full, name) != 0) {
+    res = lookup_global_hash(cg, alias_full, 0);
+    if (res)
+      goto end;
+  }
+
+  res = ny_lookup_try_scoped_or_alias(cg, name, qualified,
+                                      ny_lookup_global_recurse, NULL);
+  if (res)
+    goto end;
+
+  const char *dot = qualified ? strchr(name, '.') : NULL;
+  if (dot) {
+    size_t prefix_len = dot - name;
+    char prefix_stack[256];
+    char *prefix = prefix_len < sizeof(prefix_stack) ? prefix_stack
+                                                     : malloc(prefix_len + 1);
+    if (prefix) {
+      memcpy(prefix, name, prefix_len);
+      prefix[prefix_len] = '\0';
+      const char *real_mod_name =
+          ny_lookup_module_alias(cg, NULL, 0, prefix, prefix_len, 0);
+      if (prefix != prefix_stack)
+        free(prefix);
+      if (real_mod_name && *real_mod_name) {
+        if (!(strncmp(name, real_mod_name, prefix_len) == 0 &&
+              real_mod_name[prefix_len] == '\0')) {
+          size_t mod_len = strlen(real_mod_name);
+          size_t dot_len = strlen(dot);
+          size_t full_len = mod_len + dot_len;
+          char stack_buf[256];
+          char *resolved =
+              full_len < sizeof(stack_buf) ? stack_buf : malloc(full_len + 1);
+          if (resolved) {
+            memcpy(resolved, real_mod_name, mod_len);
+            memcpy(resolved + mod_len, dot, dot_len + 1);
+            binding *recursive_res =
+                lookup_global_hash(cg, resolved, ny_hash64(resolved, full_len));
+            if (resolved != stack_buf)
+              free(resolved);
+            if (recursive_res) {
+              res = recursive_res;
+              goto end;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  if (!qualified) {
+    res = ny_global_tail_find(cg, name);
+    if (res && ny_current_ctx_is_std(cg) && ny_global_is_root_user_var(res))
+      res = NULL;
+    if (res && ny_tail_result_blocked_by_export_profile(cg, res->name, name))
+      res = NULL;
+    if (res)
+      goto end;
+  }
+  goto end;
+
+end:
+  g_lookup_depth--;
+  if (res)
+    res->is_used = true;
+  ny_global_cache_put(cg, name, hash, res);
+  return res;
+}
+
+binding *lookup_global(codegen_t *cg, const char *name) {
+  return lookup_global_hash(cg, name, 0);
+}
+
+static int ny_required_arity_for_sig(const fun_sig *fs) {
+  if (!fs)
+    return 0;
+  return (int)ny_sig_min_arity(fs);
+}
+
+static bool ny_sig_accepts_argc(const fun_sig *fs, size_t argc) {
+  if (!fs)
+    return false;
+  int min_arity = ny_required_arity_for_sig(fs);
+  if (fs->is_variadic)
+    return (int)argc >= min_arity;
+  return (int)argc >= min_arity && (int)argc <= fs->arity;
+}
+
+static fun_sig *resolve_overload_exact_name(codegen_t *cg, const char *name,
+                                            size_t argc, uint64_t hash,
+                                            bool qualified) {
+  if (!cg || !name || !*name)
+    return NULL;
+  fun_sig *best = NULL;
+  int best_score = -1;
+  size_t name_len = strlen(name);
+  uint64_t want_hash = hash ? hash : ny_hash_name_cached(cg, name, name_len);
+  int32_t idx = ny_overload_name_bucket_head(cg, want_hash);
+  ny_sym_state_t *s = ny_get_sym_state(cg);
+  while (idx >= 0) {
+    if ((size_t)idx >= cg->fun_sigs.len)
+      break;
+    fun_sig *fs = &cg->fun_sigs.data[idx];
+    idx = s->overload_name_next[idx];
+    if (!qualified && ny_fun_hidden_from_unqualified(fs))
+      continue;
+    if (ny_fun_name_hash(fs) != want_hash)
+      continue;
+    if ((size_t)ny_fun_name_len(fs) != name_len)
+      continue;
+    if (!(fs->name == name || (memcmp(fs->name, name, name_len) == 0 &&
+                               fs->name[name_len] == '\0')))
+      continue;
+    if (ny_block_implicit_std_symbol(cg, name, fs->name))
+      continue;
+    int min_arity = ny_required_arity_for_sig(fs);
+    int score = -1;
+    if (!fs->is_variadic) {
+      if (fs->arity == (int)argc)
+        return fs;
+      if ((int)argc >= min_arity && (int)argc <= fs->arity)
+        score = 90 - (fs->arity - (int)argc);
+      else if ((int)argc < min_arity)
+        score = 50 - (min_arity - (int)argc);
+      else
+        score = 40;
+    } else {
+      int fixed = min_arity;
+      if ((int)argc >= fixed)
+        score = 60 + (int)fixed;
+    }
+    if (score > best_score) {
+      best_score = score;
+      best = fs;
+    }
+  }
+  return best;
+}
+
+fun_sig *resolve_overload(codegen_t *cg, const char *name, size_t argc,
+                          uint64_t hash) {
+  if (!name || !*name)
+    return NULL;
+  bool qualified = strchr(name, '.') != NULL;
+  bool cacheable = qualified || !cg->current_module_name;
+  fun_sig *cached = NULL;
+  if (cacheable) {
+    int cache_state = ny_overload_cache_get(cg, name, argc, hash, &cached);
+    if (cache_state == 1)
+      return cached;
+    if (cache_state == 0)
+      return NULL;
+  }
+
+  if (g_lookup_depth > MAX_LOOKUP_DEPTH)
+    return NULL;
+  g_lookup_depth++;
+
+  fun_sig *best = NULL;
+
+  if (!qualified && cg->current_module_name && *cg->current_module_name) {
+    char scoped[256];
+    int nw = snprintf(scoped, sizeof(scoped), "%s.%s", cg->current_module_name,
+                      name);
+    if (nw > 0 && (size_t)nw < sizeof(scoped)) {
+      best = resolve_overload(cg, scoped, argc, 0);
+      if (best)
+        goto end;
+      const char *scoped_alias_full = resolve_import_alias(cg, scoped);
+      if (scoped_alias_full && *scoped_alias_full &&
+          strcmp(scoped_alias_full, scoped) != 0) {
+        best = resolve_overload(cg, scoped_alias_full, argc, 0);
+        if (best && ny_sig_accepts_argc(best, argc))
+          goto end;
+        best = NULL;
+      }
+    }
+  }
+
+  if (!qualified) {
+    best = resolve_overload_exact_name(cg, name, argc, hash, qualified);
+    if (best)
+      goto end;
+  }
+
+  const char *alias_full = resolve_import_alias(cg, name);
+  if (alias_full && *alias_full && strcmp(alias_full, name) != 0) {
+    best = resolve_overload(cg, alias_full, argc, 0);
+    if (best && ny_sig_accepts_argc(best, argc))
+      goto end;
+    best = NULL;
+  }
+
+  const char *dot = qualified ? strchr(name, '.') : NULL;
+  if (dot) {
+    size_t prefix_len = dot - name;
+    char prefix_stack[256];
+    char *prefix = prefix_len < sizeof(prefix_stack) ? prefix_stack
+                                                     : malloc(prefix_len + 1);
+    if (prefix) {
+      memcpy(prefix, name, prefix_len);
+      prefix[prefix_len] = '\0';
+      const char *real_mod_name =
+          ny_lookup_module_alias(cg, NULL, 0, prefix, prefix_len, 0);
+      if (prefix != prefix_stack)
+        free(prefix);
+      if (real_mod_name && *real_mod_name) {
+        if (!(strncmp(name, real_mod_name, prefix_len) == 0 &&
+              real_mod_name[prefix_len] == '\0')) {
+          size_t mod_len = strlen(real_mod_name);
+          size_t dot_len = strlen(dot);
+          size_t full_len = mod_len + dot_len;
+          char stack_buf[256];
+          char *resolved =
+              full_len < sizeof(stack_buf) ? stack_buf : malloc(full_len + 1);
+          if (resolved) {
+            memcpy(resolved, real_mod_name, mod_len);
+            memcpy(resolved + mod_len, dot, dot_len + 1);
+            fun_sig *recursive_res = resolve_overload(cg, resolved, argc, 0);
+            if (resolved != stack_buf)
+              free(resolved);
+            if (recursive_res) {
+              best = recursive_res;
+              goto end;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  best = resolve_overload_exact_name(cg, name, argc, hash, qualified);
+
+  if (!best) {
+    best = ny_fun_tail_find(cg, name);
+    if (best && ny_tail_result_blocked_by_export_profile(cg, best->name, name))
+      best = NULL;
+
+    if (best) {
+      int best_min_arity = ny_required_arity_for_sig(best);
+      if (!best->is_variadic &&
+          ((int)argc < best_min_arity || (int)argc > best->arity)) {
+        for (size_t i = 0; i < cg->fun_sigs.len; ++i) {
+          fun_sig *fs = &cg->fun_sigs.data[i];
+          if (ny_fun_hidden_from_unqualified(fs))
+            continue;
+          const char *dot_ptr = strrchr(fs->name, '.');
+          const char *tail = dot_ptr ? dot_ptr + 1 : fs->name;
+          if (strcmp(tail, name) == 0) {
+            if (ny_tail_result_blocked_by_export_profile(cg, fs->name, name))
+              continue;
+            int fs_min_arity = ny_required_arity_for_sig(fs);
+            if (((int)argc >= fs_min_arity && (int)argc <= fs->arity) ||
+                (fs->is_variadic && (int)argc >= fs_min_arity)) {
+              best = fs;
+              break;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  if (!best && cg->parent) {
+    best = resolve_overload(cg->parent, name, argc, hash);
+  }
+
+end:
+  if (best && !ny_sig_in_current_sigs(cg, best) && !cg->parent) {
+    best = NULL;
+  }
+  g_lookup_depth--;
+  if (cacheable)
+    ny_overload_cache_put(cg, name, argc, hash, best);
+  return best;
+}
+
+static int typo_distance_if_relevant(const char *want, const char *cand) {
+  size_t wl = strlen(want);
+  size_t cl = strlen(cand);
+  size_t diff = (wl > cl) ? (wl - cl) : (cl - wl);
+  if (diff > 2)
+    return 99;
+  return ny_levenshtein(want, cand);
+}
+
+static void maybe_add_suggestion(const char **s1, int *d1, const char **s2,
+                                 int *d2, const char *cand, int dist) {
+  if (dist >= 3 || !cand)
+    return;
+  if (*s1 && strcmp(*s1, cand) == 0)
+    return;
+  if (*s2 && strcmp(*s2, cand) == 0)
+    return;
+  if (dist < *d1) {
+    *s2 = *s1;
+    *d2 = *d1;
+    *s1 = cand;
+    *d1 = dist;
+  } else if (dist < *d2) {
+    *s2 = cand;
+    *d2 = dist;
+  }
+}
+
+
+static int levenshtein(const char *s, const char *t) {
+  int ls = (int)strlen(s), lt = (int)strlen(t);
+  int *d = (int *)alloca(sizeof(int) * (ls + 1) * (lt + 1));
+  for (int i = 0; i <= ls; i++)
+    d[i * (lt + 1)] = i;
+  for (int j = 0; j <= lt; j++)
+    d[j] = j;
+  for (int j = 1; j <= lt; j++) {
+    for (int i = 1; i <= ls; i++) {
+      if (s[i - 1] == t[j - 1])
+        d[i * (lt + 1) + j] = d[(i - 1) * (lt + 1) + (j - 1)];
+      else {
+        int a = d[(i - 1) * (lt + 1) + j] + 1;
+        int b = d[i * (lt + 1) + (j - 1)] + 1;
+        int c = d[(i - 1) * (lt + 1) + (j - 1)] + 1;
+        if (b < a)
+          a = b;
+        if (c < a)
+          a = c;
+        d[i * (lt + 1) + j] = a;
+      }
+    }
+  }
+  return d[ls * (lt + 1) + lt];
+}
+
+static int ny_diag_undef_enabled(void) {
+  static int cached = -1;
+  if (cached >= 0)
+    return cached;
+  const char *env = getenv("NYTRIX_DIAG_UNDEF");
+  if (!env || !*env) {
+    cached = 0;
+    return 0;
+  }
+  if (strcmp(env, "0") == 0 || strcmp(env, "false") == 0) {
+    cached = 0;
+    return 0;
+  }
+  cached = 1;
+  return 1;
+}
+
+static int ny_trace_resolve_enabled(void) {
+  static int cached = -1;
+  if (cached >= 0)
+    return cached;
+  cached = ny_trace_enabled("NYTRIX_TRACE_RESOLVE") ? 1 : 0;
+  return cached;
+}
+
+static const char *tail_name(const char *full) {
+  if (!full)
+    return "";
+  const char *dot = strrchr(full, '.');
+  return dot ? dot + 1 : full;
+}
+
+static void diag_dump_use_stmt(token_t tok, const stmt_t *s,
+                               const char *owner) {
+  if (!s || s->kind != NY_S_USE)
+    return;
+  const char *mod = s->as.use.module ? s->as.use.module : "";
+  const char *alias = s->as.use.alias ? s->as.use.alias : "";
+  int imports_len = (int)s->as.use.imports.len;
+  ny_diag_note_tok(
+      tok, "imports[%s]: use %s%s%s%s%s (items=%d)%s",
+      owner ? owner : "<entry>", mod, (alias && *alias) ? " as " : "",
+      (alias && *alias) ? alias : "", s->as.use.is_local ? " [local]" : "",
+      s->as.use.import_all ? " *" : "", imports_len, "");
+}
+
+static void diag_dump_import_graph_stmt_list(token_t tok, const char *root_file,
+                                             const stmt_t *owner_mod,
+                                             const ny_stmt_list *body,
+                                             int *budget) {
+  if (!body || !budget || *budget <= 0)
+    return;
+  const char *owner =
+      owner_mod && owner_mod->kind == NY_S_MODULE && owner_mod->as.module.name
+          ? owner_mod->as.module.name
+          : "<entry>";
+  for (size_t i = 0; i < body->len && *budget > 0; i++) {
+    const stmt_t *s = body->data[i];
+    if (!s)
+      continue;
+    bool is_user_file = (root_file && s->tok.filename &&
+                         strcmp(s->tok.filename, root_file) == 0);
+    bool is_local_use = (s->kind == NY_S_USE && s->as.use.is_local);
+    bool allow = is_user_file || is_local_use;
+    if (!allow && ny_is_stdlib_tok(s->tok)) {
+
+      continue;
+    }
+    if (s->kind == NY_S_USE) {
+      if (allow) {
+        diag_dump_use_stmt(tok, s, owner);
+        (*budget)--;
+      }
+      continue;
+    }
+    if (s->kind == NY_S_MODULE) {
+
+      if (!ny_is_stdlib_tok(s->tok) ||
+          (root_file && s->tok.filename &&
+           strcmp(s->tok.filename, root_file) == 0))
+        diag_dump_import_graph_stmt_list(tok, root_file, s, &s->as.module.body,
+                                         budget);
+      continue;
+    }
+    if (s->kind == NY_S_BLOCK) {
+      diag_dump_import_graph_stmt_list(tok, root_file, owner_mod,
+                                       &s->as.block.body, budget);
+      continue;
+    }
+    if (s->kind == NY_S_IF) {
+      diag_dump_import_graph_stmt_list(
+          tok, root_file, owner_mod, &s->as.iff.conseq->as.block.body, budget);
+      if (s->as.iff.alt)
+        diag_dump_import_graph_stmt_list(tok, root_file, owner_mod,
+                                         &s->as.iff.alt->as.block.body, budget);
+      continue;
+    }
+  }
+}
+
+static void diag_dump_undef_context(codegen_t *cg, const char *name,
+                                    token_t tok) {
+  if (!cg)
+    return;
+  int full = ny_diag_undef_enabled() || verbose_enabled >= 2;
+
+  ny_diag_note_tok(tok, "context: file=%s",
+                   tok.filename ? tok.filename : "<unknown>");
+  if (cg->prog && cg->prog->body.len > 0) {
+    int budget = full ? 200 : 32;
+    ny_diag_note_tok(tok, "imports:%s", full ? " (full graph)" : "");
+    diag_dump_import_graph_stmt_list(tok, tok.filename, NULL, &cg->prog->body,
+                                     &budget);
+    if (!full)
+      ny_diag_note_tok(
+          tok, "set NYTRIX_DIAG_UNDEF=1 for full import graph + symbol tails");
+  } else {
+    ny_diag_note_tok(tok, "imports: unavailable (no AST attached)");
+  }
+
+  if (full) {
+    int shown = 0;
+    for (size_t i = 0; i < cg->fun_sigs.len && shown < 12; ++i) {
+      const char *fn = cg->fun_sigs.data[i].name;
+      if (!fn)
+        continue;
+      if (strcmp(tail_name(fn), name) == 0) {
+        if (shown == 0)
+          ny_diag_note_tok(tok, "symbols with same tail name:");
+        ny_diag_note_tok(tok, "  %s", fn);
+        shown++;
+      }
+    }
+  }
+}
+
+static bool diag_hint_module_exports(codegen_t *cg, const char *name) {
+  const char *dot = name ? strrchr(name, '.') : NULL;
+  if (!cg || !dot || dot == name)
+    return false;
+  size_t mod_len = (size_t)(dot - name);
+  char exports[512];
+  size_t used = 0;
+  int shown = 0;
+#define NY_ADD_EXPORT(cand_name)                                               \
+  do {                                                                         \
+    const char *ny_cand = (cand_name);                                         \
+    if (!ny_cand || strncmp(ny_cand, name, mod_len) != 0 ||                    \
+        ny_cand[mod_len] != '.')                                               \
+      break;                                                                   \
+    const char *ny_tail = ny_cand + mod_len + 1;                               \
+    if (!*ny_tail || strchr(ny_tail, '.'))                                     \
+      break;                                                                   \
+    bool ny_dup = false;                                                       \
+    for (const char *ny_scan = exports; shown > 0 && ny_scan && *ny_scan;) {   \
+      const char *ny_next = strstr(ny_scan, ", ");                             \
+      size_t ny_len = ny_next ? (size_t)(ny_next - ny_scan) : strlen(ny_scan); \
+      if (strlen(ny_tail) == ny_len &&                                         \
+          memcmp(ny_scan, ny_tail, ny_len) == 0) {                             \
+        ny_dup = true;                                                         \
+        break;                                                                 \
+      }                                                                        \
+      ny_scan = ny_next ? ny_next + 2 : NULL;                                  \
+    }                                                                          \
+    if (ny_dup)                                                                \
+      break;                                                                   \
+    int ny_n = snprintf(exports + used, sizeof(exports) - used, "%s%s",        \
+                        shown ? ", " : "", ny_tail);                           \
+    if (ny_n < 0 || (size_t)ny_n >= sizeof(exports) - used)                    \
+      break;                                                                   \
+    used += (size_t)ny_n;                                                      \
+    shown++;                                                                   \
+  } while (0)
+  exports[0] = '\0';
+  for (size_t i = 0; i < cg->fun_sigs.len && shown < 24; ++i)
+    NY_ADD_EXPORT(cg->fun_sigs.data[i].name);
+  for (size_t i = 0; i < cg->global_vars.len && shown < 24; ++i)
+    NY_ADD_EXPORT(cg->global_vars.data[i].name);
+#undef NY_ADD_EXPORT
+  if (shown > 0) {
+    ny_diag_hint("exports from '%.*s': %s%s", (int)mod_len, name, exports,
+                 shown >= 24 ? ", ..." : "");
+    return true;
+  }
+  return false;
+}
+
+void report_undef_symbol(codegen_t *cg, const char *name, token_t tok) {
+  ny_diag_error(tok, "undefined symbol %s'%s'%s", clr(NY_CLR_BOLD), name,
+                clr(NY_CLR_RESET));
+  if (verbose_enabled >= 2) {
+    ny_diag_hint("searched %zu functions and %zu globals", cg->fun_sigs.len,
+                 cg->global_vars.len);
+  }
+  cg->had_error = 1;
+  diag_dump_undef_context(cg, name, tok);
+  const char *query = tail_name(name);
+  bool dotted_query = strchr(name, '.') != NULL;
+  bool showed_module_exports = false;
+  if (dotted_query)
+    showed_module_exports = diag_hint_module_exports(cg, name);
+
+  if (strcmp(name, "array.new") == 0 ||
+      strcmp(name, "std.core.array.new") == 0) {
+    ny_diag_hint("use [] for an empty list literal");
+    return;
+  }
+  if (strcmp(query, "push") == 0) {
+    ny_diag_hint("lists use append and append returns a new list");
+    ny_diag_fix("write xs = xs.append(value)");
+    return;
+  }
+  if (strcmp(query, "sleep_ms") == 0) {
+    ny_diag_hint("std.os.time exports msleep(ms); sleep_ms is not an API name");
+    return;
+  }
+  if (strcmp(name, "print") == 0) {
+    ny_diag_fix("add %suse std.core%s at the top of your file",
+                clr(NY_CLR_BOLD), clr(NY_CLR_RESET));
+    return;
+  }
+  if (strcmp(name, "len") == 0 || strcmp(name, "get") == 0 ||
+      strcmp(name, "append") == 0 || strcmp(name, "range") == 0 ||
+      strcmp(name, "sort") == 0 || strcmp(name, "sorted") == 0 ||
+      strcmp(name, "map") == 0 || strcmp(name, "filter") == 0 ||
+      strcmp(name, "contains") == 0 || strcmp(name, "values") == 0 ||
+      strcmp(name, "keys") == 0 || strcmp(name, "items") == 0 ||
+      strcmp(name, "put") == 0 || strcmp(name, "delete") == 0 ||
+      strcmp(name, "clear") == 0 || strcmp(name, "swap") == 0 ||
+      strcmp(name, "breakpoint") == 0) {
+    ny_diag_fix("add %suse std.core%s — '%s' is in the core module",
+                clr(NY_CLR_BOLD), clr(NY_CLR_RESET), name);
+    return;
+  }
+  if (strcmp(name, "proc") == 0 || strcmp(name, "dial") == 0 ||
+      strcmp(name, "recv_until") == 0 || strcmp(name, "sendline_after") == 0) {
+    ny_diag_fix(
+        "add %suse std.os.interact%s — '%s' is in the interaction module",
+        clr(NY_CLR_BOLD), clr(NY_CLR_RESET), name);
+    return;
+  }
+  if (strcmp(name, "progress") == 0 || strcmp(name, "advance") == 0 ||
+      strcmp(name, "finish") == 0 || strcmp(name, "note") == 0) {
+    ny_diag_fix(
+        "add %suse std.core.progress%s — '%s' is in the progress module",
+        clr(NY_CLR_BOLD), clr(NY_CLR_RESET), name);
+    return;
+  }
+  if (showed_module_exports)
+    return;
+
+  const char *best = NULL;
+  int best_d = 100;
+  const char *alt1 = NULL, *alt2 = NULL;
+  int alt1_d = 100, alt2_d = 100;
+
+  const char *best_f = NULL;
+  int best_fd = 3;
+  for (size_t i = 0; i < cg->fun_sigs.len; ++i) {
+    const char *fn = cg->fun_sigs.data[i].name;
+    const char *dot = strrchr(fn, '.');
+    const char *tail = dot ? dot + 1 : fn;
+    if (strcasecmp(query, tail) == 0) {
+      ny_diag_hint("did you mean '%s'? (case mismatch)", fn);
+      ny_diag_fix("use the exact spelling '%s'", fn);
+      return;
+    }
+    int d = levenshtein(query, tail);
+    if (d < best_fd) {
+      best_fd = d;
+      best_f = fn;
+    }
+  }
+  if (best_f) {
+    ny_diag_hint("did you mean '%s'?", best_f);
+  }
+
+  struct {
+    const char *sym;
+    const char *hint;
+  } common[] = {
+      {"write", "did you mean 'sys_write' from std.os.sys or 'print'?"},
+      {"open", "try 'use std.os.sys' and call 'sys_open'"},
+      {"socket", "try 'use std.os.net.socket'"},
+      {"json_encode", "try 'use std.core.parse.data.json'"},
+      {"json_decode", "try 'use std.core.parse.data.json'"},
+      {"Thread", "try 'use std.os.thread'"},
+      {"sleep", "try 'use std.os.time'"},
+      {"msleep", "try 'use std.os.time'"},
+      {"ticks", "try 'use std.os.time'"},
+      {"monotonic_ns", "try 'use std.os.time'"},
+      {"env", "try 'use std.os' or 'use std.os.prim'"},
+      {"printf", "Nytrix uses 'print' or std.core.str Builder helpers"},
+      {"malloc", "try 'alloc' or 'std.core.mem.alloc'"},
+      {"free", "try 'std.core.mem.free'"},
+      {"VkInstance", "try 'use std.os.ui.render.vk.vulkan'"},
+      {"image_load", "try 'use std.core.parse.img'"},
+      {"SoundSource", "try 'use std.os.sound'"},
+      {"split", "try 'use std.core.str' and use '.split()' on a string"},
+      {"join", "try 'use std.core.str' and use '.join()'"},
+      {"replace", "try 'use std.core.str' and use '.replace()'"},
+      {"abs", "try 'std.math.abs'"},
+      {"sin", "try 'std.math.sin'"},
+      {"cos", "try 'std.math.cos'"},
+      {"tan", "try 'std.math.tan'"},
+      {"sqrt", "try 'std.math.sqrt'"},
+      {"floor", "try 'std.math.floor'"},
+      {"ceil", "try 'std.math.ceil'"},
+      {"round", "try 'std.math.round'"},
+      {"pow", "try 'std.math.pow'"},
+      {"log", "try 'std.math.log'"},
+      {"min", "try 'std.math.min'"},
+      {"max", "try 'std.math.max'"},
+      {"clamp", "try 'std.math.clamp'"},
+      {"map", "try 'std.core.map' or '.map()' on a list"},
+      {"filter", "try 'std.core.filter' or '.filter()' on a list"},
+      {"reduce", "try 'std.core.reduce'"},
+      {"any", "try 'std.core.any'"},
+      {"all", "try 'std.core.all'"},
+      {NULL, NULL}};
+  for (int i = 0; common[i].sym; i++) {
+    if (strcmp(name, common[i].sym) == 0) {
+      ny_diag_hint("%s", common[i].hint);
+      ny_diag_fix("import the suggested module or replace '%s' with the Nytrix "
+                  "equivalent",
+                  name);
+      return;
+    }
+  }
+
+  const char *keyword = ny_keyword_typo_suggestion(name);
+  if (keyword) {
+    ny_diag_hint("did you mean keyword '%s'?", keyword);
+    ny_diag_fix("replace '%s' with '%s'", name, keyword);
+    return;
+  }
+
+  if (strchr(name, '.') == NULL) {
+    for (size_t i = 0; i < cg->fun_sigs.len; ++i) {
+      const char *cand = cg->fun_sigs.data[i].name;
+      const char *dot = strrchr(cand, '.');
+      if (!dot || strcmp(dot + 1, name) != 0)
+        continue;
+      size_t mod_len = (size_t)(dot - cand);
+      if (module_is_used(cg, cand, mod_len))
+        continue;
+      ny_diag_hint("'%s' exists in module '%.*s'", name, (int)mod_len, cand);
+      ny_diag_hint("add 'use %.*s' or call '%s' explicitly", (int)mod_len, cand,
+                   cand);
+      ny_diag_fix("add at file top: use %.*s", (int)mod_len, cand);
+      return;
+    }
+    for (size_t i = 0; i < cg->global_vars.len; ++i) {
+      const char *cand = cg->global_vars.data[i].name;
+      const char *dot = strrchr(cand, '.');
+      if (!dot || strcmp(dot + 1, name) != 0)
+        continue;
+      size_t mod_len = (size_t)(dot - cand);
+      if (module_is_used(cg, cand, mod_len))
+        continue;
+      ny_diag_hint("'%s' exists in module '%.*s'", name, (int)mod_len, cand);
+      ny_diag_hint("add 'use %.*s' or reference '%s'", (int)mod_len, cand,
+                   cand);
+      ny_diag_fix("add at file top: use %.*s", (int)mod_len, cand);
+      return;
+    }
+  }
+
+  for (size_t i = 0; i < cg->fun_sigs.len; ++i) {
+    const char *cand = cg->fun_sigs.data[i].name;
+    const char *dot = strrchr(cand, '.');
+    const char *base = dot ? dot + 1 : cand;
+    int dist = typo_distance_if_relevant(query, base);
+    if (dist < best_d && dist < 3) {
+      maybe_add_suggestion(&alt1, &alt1_d, &alt2, &alt2_d, best, best_d);
+      best_d = dist;
+      best = cand;
+    } else {
+      maybe_add_suggestion(&alt1, &alt1_d, &alt2, &alt2_d, cand, dist);
+    }
+  }
+  for (size_t i = 0; i < cg->global_vars.len; ++i) {
+    const char *cand = cg->global_vars.data[i].name;
+    const char *dot = strrchr(cand, '.');
+    const char *base = dot ? dot + 1 : cand;
+    int dist = typo_distance_if_relevant(query, base);
+    if (dist < best_d && dist < 3) {
+      maybe_add_suggestion(&alt1, &alt1_d, &alt2, &alt2_d, best, best_d);
+      best_d = dist;
+      best = cand;
+    } else {
+      maybe_add_suggestion(&alt1, &alt1_d, &alt2, &alt2_d, cand, dist);
+    }
+  }
+
+  if (best) {
+    ny_diag_hint("did you mean '%s'?", best);
+    if (alt1)
+      ny_diag_hint("other close match: '%s'", alt1);
+    if (alt2)
+      ny_diag_hint("other close match: '%s'", alt2);
+    ny_diag_fix("replace '%s' with the correct symbol name", name);
+  } else if (strcmp(name, "int") == 0 || strcmp(name, "float") == 0) {
+    ny_diag_hint("types are dynamic; use 'is_int'/'is_float' checks");
+    ny_diag_fix("remove the static type name and keep the value dynamic");
+  } else if (strcmp(name, "char") == 0) {
+    ny_diag_hint("use strings for characters");
+    ny_diag_fix("replace 'char' with a single-character string, e.g. \"a\"");
+  } else if (strchr(name, '.') == NULL) {
+    ny_diag_fix("if '%s' is from stdlib, add 'use std.<module>' at file top",
+                name);
+  }
+}

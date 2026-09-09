@@ -74,16 +74,15 @@ assert(str_contains("nytrix", "tri"), "contains")
 ## List size surprise
 
 `list(n)` reserves capacity. It does not initialize `n` elements. Append values
-before indexing them as elements. Assign append results back:
+before indexing them as elements:
 
 ```ny
-mut xs = []
-xs = xs.append(1)
+mut xs = list(4)
+xs.append("first")
 ```
 
-Do not mix list-growth styles in one block. `xs.append(v)` returns an updated
-list, so assign it back. `add(xs, v)` mutates the existing list and can stand
-as its own statement.
+Both `xs.append(v)` and `add(xs, v)` mutate an existing list in place and
+return that list. Use one form consistently in a block.
 
 ## String and byte boundary
 

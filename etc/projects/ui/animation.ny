@@ -501,6 +501,9 @@ fn draw_label(list xs, list ys, list ids, int total, int visible,
    0
 }
 
+gfx.apply_backend_env()
+gfx.apply_backend_argv()
+
 def win = gfx.init_window(
    WIN_W, WIN_H, "Made with Nytrix", key.WINDOW_CENTER, true, false, 1
 )

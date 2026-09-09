@@ -2,7 +2,61 @@
 
 Nytrix uses dated milestones. Use `ny --version` for snapshots.
 
-## [0.9] - 2026-07-21 → 2026-08-21 - Language security, native tooling, and runtime reliability
+## [0.10] - 2026-08-22 → 2026-09-06 - Reliability and build portability
+
+### Changed
+- Native lowering now keeps statically scalar `__and`/`__or`/`__xor`
+  operands in the raw i64 domain, preventing tagged interpreter encoding from
+  corrupting Vulkan feature masks; dynamic operands retain the tagged path.
+- Native module functions now prefer their qualified constant binding before
+  consulting process-wide leaf-name tables, preventing same-named imported
+  constants from changing a module's flag arithmetic.
+- Module `def` constants are collected with qualified names as well as module
+  mutable values, removing another source of cross-module leaf collisions.
+- Started the tbuf runtime naming migration with canonical `rt_tbuf_get`
+  lowering and LLVM/JIT registration; `rt_native_tbuf_get` remains as the
+  compatibility implementation and alias.
+- Native float list literals now use descriptor storage with explicit float
+  tags when they cross dynamic list reads; the benchmark matrix remains green.
+- Added cold dictionary-f64 coverage for zero comparisons and raw mask
+  accumulation across `any` boundaries; the native regression passes.
+- The complete 56-fixture benchmark matrix now passes on the native and LLVM
+  backends, including fannkuch, havlak, intops, sha256, and thread-ring; the
+  benchmark-correctness TODO is therefore closed.
+- Added the canonical `rt_f64_round` runtime bridge while retaining
+  `rt_native_f64_round` as a compatibility alias for generated code.
+- Added canonical `rt_f64_pow`, `rt_f64_floor`, and `rt_f64_ceil` bridges;
+  native floating-power lowering now uses `rt_f64_pow`.
+- Added canonical `rt_fmod_f64`; native floating-remainder lowering uses it
+  while the former bridge name remains available for compatibility.
+- Process-tube regressions now cover empty and multi-argument argv creation,
+  including spaced arguments and clean child reaping on the native path.
+- X11 UTF-8 encoding now constructs raw bytes with representation-safe integer
+  arithmetic, and direct-Unicode X11 keysyms no longer use the dynamic bitwise
+  bridge. Added a focused cold regression probe for both contracts.
+- Native escape-loop lowering now scalarizes private one-element descriptor
+  reads and uses a fixed integer tag for statically scalar locals; the cold
+  correctness gate passes with sub-10µs native and LLVM runtime.
+- Compile-time layout reflection now exposes fixed-array, default-source, and
+  explicit-alignment metadata, with an explicit `array_len_known` discriminator
+  for symbolic extents.
+- Native POSIX lowering uses the canonical `rt_getlogin` and
+  `rt_gettimeofday` runtime bridge names; compatibility exports preserve cached
+  objects using the former `rt_native_*` spellings.
+- Parallel test deadlines now terminate all simultaneously expired fixture
+  process groups in one scheduler pass and retain timeout status per worker,
+  avoiding cumulative timeout/reap delays in compile-heavy sweeps.
+- Native `ctlz.i64`/`cttz.i64` lowering now targets the existing canonical raw
+  SIMD bridges instead of emitting stale `rt_native_*` symbols.
+- The default build enables the strict warning policy.
+- macOS LLVM discovery accepts current and versioned Homebrew LLVM prefixes
+  instead of depending on one fixed formula version.
+- Functional CI jobs opt out of timed benchmarks; benchmark parity remains a
+  separate explicit gate.
+- The LLVM-free native build is documented as not including `ny-lsp`, whose
+  current type-analysis implementation still depends on LLVM types.
+
+## [0.9] - 2026-07-21 → 2026-08-21 - Native tooling, and runtime reliability
 
 ### Added
 - Repaired SSA PHI and parameter promotion in `nyir_mem2reg`: parameters preserved as initial reaching definitions instead of uninitialized zero rewrites, and added safe rollback on failure.
@@ -29,6 +83,23 @@ Nytrix uses dated milestones. Use `ny --version` for snapshots.
   solving, and string analysis.
 
 ### Changed
+- Reorganized compiler sources around explicit subsystem boundaries: command
+  helpers live in `src/base`, the `ny` REPL in `src/cmd/ny/repl`, parsing,
+  runtime, and build wiring under `src/code`, and frontend analysis, typing,
+  canonical NYIR, native emission, and LLVM integration now have dedicated
+  directories. Build manifests, cache dependency lists, tests, tooling, and
+  documentation use the canonical paths.
+- Folded optional LLVM emission and JIT support into the unified native backend;
+  `src/code/native/llvm` now owns LLVM terminals, and the remaining direct AST→LLVM
+  implementation is explicitly quarantined pending its semantic parity gate.
+- Native/self-build linking now defaults to the compiler's system linker instead
+  of auto-selecting mold. `NYTRIX_LINKER=lld|mold` remains an explicit optional
+  acceleration, linker capability checks are re-evaluated when selection
+  changes, and duplicate native data symbols are eliminated for strict GNU ld.
+- The default NYIR route now checks constant `prove`, `static_assert`,
+  `assert_compile`, and compile-time range obligations before erasing them;
+  known-false proofs preserve their source diagnostic instead of compiling as
+  successful no-ops.
 - Expanded native performance diagnostics, regalloc attribution,
   runtime/static counters, and enforceable benchmark budgets.
 - Canonical benchmarks can opt into runtime allocation/reallocation sampling with `--bench-runtime-counters`; the report artifact is sampled outside timed runs and the counts are exported to console, CSV, JSON, and Markdown.
@@ -107,6 +178,21 @@ Nytrix uses dated milestones. Use `ny --version` for snapshots.
 - Panic traces now include the active source location.
 
 ### Fixed
+- Boxed typed floating-point values stored by native dictionary literals and
+  floating `.get` fallbacks at the dynamic-value boundary, with cold coverage
+  for direct reads and values forwarded through `any` parameters.
+- Restored lexical source scope before indirect-call argument lowering so an
+  early-returning imported call cannot leak its filename into later module
+  alias resolution.
+- Revalidated the complete 56-fixture cold benchmark matrix after the shared
+  ABI repairs; all native/LLVM checksums pass, including `fannkuch` and
+  `thread-ring`.
+- Added cold native NYIR byte-order coverage for odd/even 16-, 32-, and
+  64-bit typed stores, including the socket-address construction path.
+- Fixed native socket ephemeral-port decoding by reading sockaddr port bytes
+  directly instead of treating the dynamic `load16` result as raw data.
+- Native `socket_accept` now returns the raw descriptor directly from the C
+  accept call, avoiding a dynamic dictionary extraction at the fd boundary.
 - Hardened GVN/CSE/LICM around audited call effects and complete
   call-argument semantics.
 - Unified natural-loop discovery across loop analyses/transforms; fixed SCEV
@@ -270,7 +356,7 @@ Nytrix uses dated milestones. Use `ny --version` for snapshots.
  gradient/`<use>` support, and terminal 256-color output.
 - `--borrow-check` decoupled from `--ownership-strict`; Z3 enabled by default;
  proven-nonzero `f64` division checks elided.
-- glTF hot paths moved from `src/rt/gltf.c` into Ny code.
+- glTF hot paths moved from `src/code/runtime/gltf.c` into Ny code.
 - CMake dependency probing hardened for LLVM, libclang, Z3, Windows UCRT/MSYS2.
 
 ### Fixed

@@ -6,7 +6,12 @@ shape asm_native_only_lowered {
   flags "--native-only --native-backend=x86_64 -O2 --no-progress --color=never"
   expect compile_and_run
   source ny <<'NY'
-mut x = asm("sub $0, $1, $2", "=r,r,r", 50, 8)
+mut x = asm {
+  in reg lhs = 50
+  in reg rhs = 8
+  out reg result
+  sub result, lhs, rhs
+}
 x = asm("and $0, $1, $2", "=r,r,r", x, 63)
 x = asm("eor $0, $1, $2", "=r,r,r", x, 0)
 x = asm("lsl $0, $1, $2", "=r,r,I", x, 1)

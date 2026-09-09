@@ -13,7 +13,7 @@
 #include "base/process.h"
 #include "base/util.h"
 #include "cmd/tools/tool.h"
-#include "wire/build.h"
+#include "code/wire/build.h"
 
 #include <ctype.h>
 #ifndef _WIN32

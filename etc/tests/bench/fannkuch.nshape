@@ -9,14 +9,14 @@ use std.core
 use std.os.time
 ;; Fannkuch-redux: permutation flipping (classic CLBG benchmark).
 fn fannkuch(int n) int {
-   mut perm = []
-   mut perm1 = []
-   mut count = []
+   mut perm = list(n)
+   mut perm1 = list(n)
+   mut count = list(n)
    mut i = 0
    while i < n {
-      perm = append(perm, i)
-      perm1 = append(perm1, i)
-      count = append(count, i)
+      perm[i] = i
+      perm1[i] = i
+      count[i] = i
       i += 1
    }
    mut maxflips = 0

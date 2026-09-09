@@ -12,6 +12,7 @@
 #include <stdint.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <pthread.h>
 
 #include "base/util.h"
 #include "cscan.h"
@@ -225,6 +226,8 @@ typedef struct {
   CallSeq *items;
   size_t len;
   size_t cap;
+  uint32_t *buckets;
+  size_t bucket_cap;
 } CallSeqVec;
 
 typedef struct {
@@ -2756,7 +2759,65 @@ static void fpress_push(FunctionPressureVec *v, const FunctionPressure *f) {
   v->items[v->len++] = *f;
 }
 
+static inline uint64_t callseq_fnv1a(const char *s) {
+  uint64_t h = UINT64_C(14695981039346656037);
+  if (!s) return h;
+  while (*s) {
+    h ^= (uint8_t)*s++;
+    h *= UINT64_C(1099511628211);
+  }
+  return h;
+}
+
+static void callseq_rehash(CallSeqVec *v, size_t new_cap) {
+  uint32_t *nb = (uint32_t *)calloc(new_cap, sizeof(uint32_t));
+  if (!nb) return;
+  free(v->buckets);
+  v->buckets = nb;
+  v->bucket_cap = new_cap;
+  size_t mask = new_cap - 1;
+  for (size_t i = 0; i < v->len; i++) {
+    uint64_t h = callseq_fnv1a(v->items[i].seq);
+    size_t slot = (size_t)(h & mask);
+    while (v->buckets[slot] != 0) {
+      slot = (slot + 1) & mask;
+    }
+    v->buckets[slot] = (uint32_t)(i + 1);
+  }
+}
+
 static void callseq_push(CallSeqVec *v, const char *seq, const char *file, int line) {
+  if (!seq) seq = "";
+  if (v->bucket_cap == 0) {
+    callseq_rehash(v, 4096);
+  }
+  if (v->bucket_cap > 0) {
+    size_t mask = v->bucket_cap - 1;
+    uint64_t h = callseq_fnv1a(seq);
+    size_t slot = (size_t)(h & mask);
+    while (v->buckets[slot] != 0) {
+      uint32_t idx = v->buckets[slot] - 1;
+      if (strcmp(v->items[idx].seq, seq) == 0) {
+        v->items[idx].count++;
+        return;
+      }
+      slot = (slot + 1) & mask;
+    }
+    VEC_GROW_OR(v, 128, return);
+    size_t new_idx = v->len++;
+    CallSeq *it = &v->items[new_idx];
+    memset(it, 0, sizeof(*it));
+    snprintf(it->seq, sizeof(it->seq), "%s", seq);
+    snprintf(it->file, sizeof(it->file), "%s", file ? file : "");
+    it->line = line;
+    it->count = 1;
+
+    v->buckets[slot] = (uint32_t)(new_idx + 1);
+    if (v->len * 2 > v->bucket_cap) {
+      callseq_rehash(v, v->bucket_cap * 2);
+    }
+    return;
+  }
   for (size_t i = 0; i < v->len; i++) {
     if (strcmp(v->items[i].seq, seq) == 0) {
       v->items[i].count++;
@@ -2766,7 +2827,7 @@ static void callseq_push(CallSeqVec *v, const char *seq, const char *file, int l
   VEC_GROW_OR(v, 128, return);
   CallSeq *it = &v->items[v->len++];
   memset(it, 0, sizeof(*it));
-  snprintf(it->seq, sizeof(it->seq), "%s", seq ? seq : "");
+  snprintf(it->seq, sizeof(it->seq), "%s", seq);
   snprintf(it->file, sizeof(it->file), "%s", file ? file : "");
   it->line = line;
   it->count = 1;
@@ -8377,6 +8438,33 @@ static void print_audit_json(const AuditStats *s, IssueVec *issues, FilePressure
   printf("}\n");
 }
 
+typedef struct {
+  const StrVec *scan;
+  const char *mode;
+  size_t start_idx;
+  size_t end_idx;
+  FnVec fns;
+  FilePressureVec files;
+  FunctionPressureVec functions;
+  IssueVec issues;
+  CallSeqVec calls;
+  AuditStats stats;
+  AnalyzeStats astats;
+} AuditWorkerCtx;
+
+static void *audit_worker_run(void *arg) {
+  AuditWorkerCtx *w = (AuditWorkerCtx *)arg;
+  IssueVec local_throwaway = {0};
+  for (size_t i = w->start_idx; i < w->end_idx; i++) {
+    analyze_file(w->scan->items[i], &w->fns, &local_throwaway, &w->astats);
+    audit_scan_file(w->scan->items[i], &w->fns, &w->files, &w->functions, &w->issues, &w->stats, w->mode);
+    if (audit_wants(w->mode, "calls"))
+      audit_scan_calls_file(w->scan->items[i], &w->fns, &w->calls);
+  }
+  free(local_throwaway.items);
+  return NULL;
+}
+
 static void print_issues(IssueVec *issues, int limit, const char *min_sev);
 
 static int run_audit_simple(StrVec *paths, const char *mode, int json_mode, int limit,
@@ -8404,14 +8492,97 @@ static int run_audit_simple(StrVec *paths, const char *mode, int json_mode, int 
   sv_sort(&scan);
   sv_dedup_sorted(&scan);
 
-  for (size_t i = 0; i < scan.len; i++)
-    analyze_file(scan.items[i], &fns, &throwaway, &astats);
-  for (size_t i = 0; i < scan.len; i++)
-    audit_scan_file(scan.items[i], &fns, &files, &functions, &issues, &stats, mode);
-  if (audit_wants(mode, "calls")) {
-    for (size_t i = 0; i < scan.len; i++)
-      audit_scan_calls_file(scan.items[i], &fns, &calls);
+  long nprocs = sysconf(_SC_NPROCESSORS_ONLN);
+  if (nprocs < 1) nprocs = 1;
+  if (nprocs > 32) nprocs = 32;
+  size_t num_threads = (size_t)nprocs;
+  if (scan.len < num_threads * 2)
+    num_threads = scan.len > 0 ? (scan.len + 1) / 2 : 1;
+  if (num_threads < 1) num_threads = 1;
+
+  if (num_threads == 1) {
+    for (size_t i = 0; i < scan.len; i++) {
+      analyze_file(scan.items[i], &fns, &throwaway, &astats);
+      audit_scan_file(scan.items[i], &fns, &files, &functions, &issues, &stats, mode);
+      if (audit_wants(mode, "calls"))
+        audit_scan_calls_file(scan.items[i], &fns, &calls);
+    }
+  } else {
+    AuditWorkerCtx *workers = (AuditWorkerCtx *)calloc(num_threads, sizeof(AuditWorkerCtx));
+    pthread_t *tids = (pthread_t *)malloc(num_threads * sizeof(pthread_t));
+    size_t chunk = (scan.len + num_threads - 1) / num_threads;
+
+    for (size_t t = 0; t < num_threads; t++) {
+      workers[t].scan = &scan;
+      workers[t].mode = mode;
+      workers[t].start_idx = t * chunk;
+      workers[t].end_idx = (t + 1) * chunk;
+      if (workers[t].start_idx > scan.len) workers[t].start_idx = scan.len;
+      if (workers[t].end_idx > scan.len) workers[t].end_idx = scan.len;
+      pthread_create(&tids[t], NULL, audit_worker_run, &workers[t]);
+    }
+    for (size_t t = 0; t < num_threads; t++) {
+      pthread_join(tids[t], NULL);
+
+      stats.files += workers[t].stats.files;
+      stats.hot_files += workers[t].stats.hot_files;
+      stats.hot_functions += workers[t].stats.hot_functions;
+      stats.repeated_lines += workers[t].stats.repeated_lines;
+      stats.findings += workers[t].stats.findings;
+      stats.trim_targets += workers[t].stats.trim_targets;
+      stats.bug_findings += workers[t].stats.bug_findings;
+      stats.legacy_calls += workers[t].stats.legacy_calls;
+      stats.receiver_rewrites += workers[t].stats.receiver_rewrites;
+      stats.method_syntax += workers[t].stats.method_syntax;
+      stats.untyped_params += workers[t].stats.untyped_params;
+      stats.missing_returns += workers[t].stats.missing_returns;
+      stats.type_suggestions += workers[t].stats.type_suggestions;
+      stats.append_builders += workers[t].stats.append_builders;
+      stats.literal_tables += workers[t].stats.literal_tables;
+      stats.repeated_get_shapes += workers[t].stats.repeated_get_shapes;
+      stats.trivial_main_wrappers += workers[t].stats.trivial_main_wrappers;
+      stats.accepted_findings += workers[t].stats.accepted_findings;
+
+      for (size_t k = 0; k < workers[t].files.len; k++) {
+        fpv_push(&files, &workers[t].files.items[k]);
+      }
+      for (size_t k = 0; k < workers[t].functions.len; k++) {
+        fpress_push(&functions, &workers[t].functions.items[k]);
+      }
+      for (size_t k = 0; k < workers[t].issues.len; k++) {
+        VEC_GROW_OR(&issues, 256, (void)0);
+        issues.items[issues.len++] = workers[t].issues.items[k];
+      }
+      for (size_t k = 0; k < workers[t].calls.len; k++) {
+        const CallSeq *cs = &workers[t].calls.items[k];
+        callseq_push(&calls, cs->seq, cs->file, cs->line);
+        if (cs->count > 1 && calls.buckets && calls.bucket_cap > 0) {
+          uint64_t h = callseq_fnv1a(cs->seq);
+          size_t mask = calls.bucket_cap - 1;
+          size_t slot = (size_t)(h & mask);
+          while (calls.buckets[slot] != 0) {
+            uint32_t idx = calls.buckets[slot] - 1;
+            if (strcmp(calls.items[idx].seq, cs->seq) == 0) {
+              calls.items[idx].count += (cs->count - 1);
+              break;
+            }
+            slot = (slot + 1) & mask;
+          }
+        }
+      }
+
+      free(workers[t].fns.items);
+      free(workers[t].files.items);
+      free(workers[t].functions.items);
+      free(workers[t].issues.items);
+      free(workers[t].calls.items);
+      free(workers[t].calls.buckets);
+    }
+    free(workers);
+    free(tids);
   }
+
+
 
   qsort(files.items, files.len, sizeof(FilePressure), cmp_file_score);
   qsort(functions.items, functions.len, sizeof(FunctionPressure), cmp_fn_score);
@@ -8523,6 +8694,7 @@ static int run_audit_simple(StrVec *paths, const char *mode, int json_mode, int 
   free(files.items);
   free(functions.items);
   free(calls.items);
+  free(calls.buckets);
   sv_free(&scan);
   if (types_strict && audit_wants(mode, "types") &&
       (stats.untyped_params > 0 || stats.missing_returns > 0 || stats.type_suggestions > 0))

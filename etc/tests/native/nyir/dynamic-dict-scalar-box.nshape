@@ -1,0 +1,25 @@
+shape dynamic-dict-scalar-box {
+  family "native-nyir"
+  generator "regression"
+  features ["ny", "native", "dict"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+
+fn wrap_fd(int fd) dict {
+   mut d = dict(4)
+   set(d, "fd", fd)
+   set(d, "ready", fd >= 0)
+   d
+}
+
+def d = wrap_fd(5)
+assert(d.get("fd", -1) == 5, "typed integer survives dynamic dict setter")
+assert(d.get("ready", false) == true, "typed boolean survives dynamic dict setter")
+def e = wrap_fd(-1)
+assert(e.get("fd", 0) == -1, "negative typed integer survives dynamic dict setter")
+assert(e.get("ready", true) == false, "false predicate survives dynamic dict setter")
+print("dynamic_dict_scalar_box ok")
+NY
+}

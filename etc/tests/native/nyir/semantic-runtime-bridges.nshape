@@ -1,0 +1,25 @@
+shape semantic_runtime_bridges {
+  family "runtime-native"
+  generator "native"
+  features [native nyir x86_64 semantic terminal float memory]
+  template ny-test-case
+  flags "--native-only --native-backend=x86_64 --native-tier=baseline -O0 --nyir-verify --native-result-oracle=0 --no-progress --color=never"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.core.term
+
+fn near(any a, any b) bool {
+  def d = float(a) - float(b)
+  d > -0.0001 && d < 0.0001
+}
+
+def p = own(malloc(8))
+store32_f32(p, 3.5, 0)
+def f = load32_f32(p, 0)
+def size = get_terminal_size()
+free(p)
+(near(f, 3.5) && size.len == 2 && size.get(0, 0) > 0 &&
+ size.get(1, 0) > 0) ? 0 : 1
+NY
+}

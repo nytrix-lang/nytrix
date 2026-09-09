@@ -7,8 +7,8 @@ shape licm-math {
   source ny <<'NY'
 use std.core
 use std.os.time
-;; Loop-invariant computation (a*b + c/d) that LICM should hoist.
-def N = 1000000 * argc()
+;; Loop-invariant computation and a large immediate inside the counted loop.
+def N = 1000 * argc()
 def a = 123 + argc()
 def b = 456 + argc()
 def c = 1000 + argc()
@@ -17,7 +17,8 @@ def t0 = ticks()
 mut acc = 0
 mut i = 0
 while i < N {
-   acc += (a * b + c / d) + i
+   def remat = 1234567890123 * 37 + 11
+   acc += (a * b + c / d) + remat + i
    i += 1
 }
 def t1 = ticks()
@@ -38,10 +39,13 @@ static int64_t now_ns(void) {
 int main(int argc, char **argv) {
     (void)argv;
     int64_t a = 123 + argc, b = 456 + argc, c = 1000 + argc, d = 7 + argc;
-    int64_t N = 1000000LL * argc;
+    int64_t N = 1000LL * argc;
     int64_t start = now_ns();
     volatile int64_t acc = 0;
-    for (int64_t i = 0; i < N; i++) acc += (a * b + c / d) + i;
+    for (int64_t i = 0; i < N; i++) {
+        int64_t remat = 1234567890123LL * 37 + 11;
+        acc += (a * b + c / d) + remat + i;
+    }
     int64_t end = now_ns();
     printf("checksum=%lld\n", (long long)acc);
     if (end <= start) end = start + 1;

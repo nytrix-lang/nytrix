@@ -3,7 +3,7 @@ shape optcheck_loop_idiom {
   generator "native"
   features [native x86_64 oracle optcheck loop idiom pass-fires negative-path]
   template ny-test-case
-  flags "-O3 --native-backend x86_64 --native-oracle-per-pass --native-result-oracle=112 --nyir-pass-stats"
+  flags "-O3 --native-backend x86_64 --native-oracle-per-pass --native-result-oracle=144 --nyir-pass-stats"
   expect compile_and_run
   source ny <<'NY'
 fn fires() i64 {

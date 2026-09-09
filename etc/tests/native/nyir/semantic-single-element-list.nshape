@@ -1,0 +1,24 @@
+shape semantic_single_element_list {
+  family "runtime-native"
+  generator "native"
+  features [native nyir x86_64 semantic list literal def]
+  template ny-test-case
+  flags "--native-only --native-backend=x86_64 --native-tier=baseline -O0 --nyir-verify --native-result-oracle=0 --no-progress --color=never"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+
+fn one() int {
+  def list raw = [1]
+  raw.len == 1 && raw[0] == 1 ? 1 : 0
+}
+fn multi() int {
+  def list raw = [7, 8, 9]
+  raw.len == 3 ? 1 : 0
+}
+def list d = [42]
+def y = [5]
+
+one() == 1 && multi() == 1 && d.len == 1 && d[0] == 42 ? 0 : 1
+NY
+}

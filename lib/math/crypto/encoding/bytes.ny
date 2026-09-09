@@ -14,7 +14,7 @@ fn bytes(int n) bytes {
    if n < 0 { n = 0 }
    def p = __bytes_new(n)
    if !p { panic("bytes allocation failed") }
-   p
+   return p
 }
 
 fn bytes_set(bytes b, int i, int v) bytes {
@@ -24,7 +24,7 @@ fn bytes_set(bytes b, int i, int v) bytes {
    def n = b.len
    if i < 0 || i >= n { return b }
    store8(b, v, i)
-   b
+   return b
 }
 
 fn bytes_get(bytes b, int i) int {
@@ -33,7 +33,7 @@ fn bytes_get(bytes b, int i) int {
    if !is_int(i) { return 0 }
    def n = b.len
    if i < 0 || i >= n { return 0 }
-   load8(b, i)
+   return load8(b, i)
 }
 
 #main {

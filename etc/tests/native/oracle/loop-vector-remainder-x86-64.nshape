@@ -1,0 +1,37 @@
+shape oracle_loop_vector_remainder_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle loop vector remainder epilogue verifier]
+  template ny-test-case
+  flags_matrix "-O2 --native-result-oracle; -O3 --native-result-oracle"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+
+fn remainder_loop() i64 {
+  def src = malloc(72)
+  def dst = malloc(72)
+  store64_i(src, 1, 0)
+  store64_i(src, 2, 8)
+  store64_i(src, 3, 16)
+  store64_i(src, 4, 24)
+  store64_i(src, 5, 32)
+  store64_i(src, 6, 40)
+  store64_i(src, 7, 48)
+  store64_i(src, 8, 56)
+  store64_i(src, 9, 64)
+  mut i = 0
+  while i < 9 {
+    def value = load64_i(src, i * 8)
+    store64_i(dst, value, i * 8)
+    i = i + 1
+  }
+  def out = load64_i(dst, 64)
+  free(src)
+  free(dst)
+  out
+}
+
+remainder_loop()
+NY
+}

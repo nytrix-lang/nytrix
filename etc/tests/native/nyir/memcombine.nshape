@@ -1,0 +1,23 @@
+shape nyir_memcombine {
+  family "runtime-native"
+  generator "native"
+  features ["native", "nyir", "optimizer", "memory", "memcombine"]
+  template ny-test-case
+  flags "--native-only --native-backend=x86_64 -O3 --nyir-verify --native-result-oracle=0 --no-progress --color=never"
+  expect compile_and_run
+  source ny <<'NY'
+def p = malloc(32)
+if p == nil { 0 } else {
+  store64_i(p, 11)
+  store64_i(p, 22, 8)
+  def a = load64_i(p)
+  def b = load64_i(p, 8)
+  store64_i(p, 33, 4)
+  def c = load64_i(p)
+  free(p)
+  ; The third store starts four bytes into the first 64-bit word; the
+  ; overlapping load observes the low word plus the overwritten high word.
+  if a == 11 && b == 22 && c == ((33 << 32) + 11) { 0 } else { 1 }
+}
+NY
+}

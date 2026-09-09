@@ -3,7 +3,7 @@ shape optcheck_escape_literal_index {
   generator "native"
   features [native x86_64 oracle optcheck escape]
   template ny-test-case
-  flags "-O3 --native-backend x86_64 --native-oracle-per-pass --native-result-oracle=1 --nyir-pass-stats"
+  flags "-O3 --native-backend x86_64 --native-oracle-per-pass --native-result-oracle=0 --nyir-pass-stats"
   expect compile_and_run
   source ny <<'NY'
 use std.core

@@ -1,0 +1,5 @@
+#!/bin/sh
+set -eu
+
+# A merge commit is still a commit: apply the same staged-diff protections.
+exec "$(git rev-parse --show-toplevel)/.githooks/pre-commit"

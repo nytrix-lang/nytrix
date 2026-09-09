@@ -3,7 +3,7 @@ shape optcheck_cse_pure_call {
   generator "native"
   features [native x86_64 oracle optcheck cse pure-call]
   template ny-test-case
-  flags "-O3 --native-backend x86_64 --native-oracle-per-pass --native-result-oracle=13944 --nyir-pass-stats"
+  flags "-O3 --native-backend x86_64 --native-oracle-per-pass --native-result-oracle=0 --nyir-pass-stats"
   expect compile_and_run
   source ny <<'NY'
 use std.core

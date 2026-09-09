@@ -1,0 +1,36 @@
+shape fin-symbolic-bound {
+  family "native-nyir"
+  generator "regression"
+  features ["ny", "native", "fin", "bounds"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+
+def N = 4
+def M = N
+
+fn get(Fin<N> i) f64 {
+  def p = malloc(32)
+  f64buf_store(p, 0, 1.5)
+  f64buf_store(p, 1, 2.5)
+  f64buf_store(p, 2, 3.5)
+  f64buf_store(p, 3, 4.5)
+  f64buf_load(p, i)
+}
+
+fn get_chained(Fin<M> i) f64 {
+  def p = malloc(32)
+  f64buf_store(p, 0, 1.5)
+  f64buf_store(p, 1, 2.5)
+  f64buf_store(p, 2, 3.5)
+  f64buf_store(p, 3, 4.5)
+  f64buf_load(p, i)
+}
+
+assert(get(0) == 1.5, "symbolic fin bound first slot")
+assert(get(3) == 4.5, "symbolic fin bound last slot")
+assert(get_chained(2) == 3.5, "chained symbolic fin bound")
+print("fin_symbolic_bound ok")
+NY
+}

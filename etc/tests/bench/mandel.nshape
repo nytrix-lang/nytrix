@@ -1,0 +1,51 @@
+shape mandel {
+  family "algorithm"
+  features ["c-vs-ny", "checksum", "headless"]
+  template ny-test-case
+  expect compile_and_run
+  ;; Translated from the QBE minic test: minic/test/mandel.c (headless kernel).
+  source ny <<'NY'
+mut checksum = 0
+mut x = 0
+while x < 80 {
+   mut y = 0
+   while y < 80 {
+      mut zx = (x - 40) * 100
+      mut zy = (y - 40) * 100
+      mut n = 0
+      while n < 50 && zx * zx + zy * zy <= 4000000 {
+         def nx = (zx * zx) / 1000 - (zy * zy) / 1000 + (x - 40) * 100
+         zy = (zx * zy) / 500 + (y - 40) * 100
+         zx = nx
+         n += 1
+      }
+      checksum += n
+      y += 1
+   }
+   x += 1
+}
+print(checksum)
+NY
+  source c <<'C'
+#include <stdio.h>
+
+int main(void) {
+  long checksum = 0;
+  for (int x = 0; x < 80; ++x) {
+    for (int y = 0; y < 80; ++y) {
+      int zx = (x - 40) * 100;
+      int zy = (y - 40) * 100;
+      int iterations = 0;
+      while (iterations < 50 && zx * zx + zy * zy <= 4000000) {
+        int next_zx = zx * zx / 1000 - zy * zy / 1000 + (x - 40) * 100;
+        zy = zx * zy / 500 + (y - 40) * 100;
+        zx = next_zx;
+        ++iterations;
+      }
+      checksum += iterations;
+    }
+  }
+  printf("%ld\n", checksum);
+}
+C
+}

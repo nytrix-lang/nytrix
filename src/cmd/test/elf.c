@@ -97,6 +97,10 @@ typedef struct {
   uint16_t st_shndx;
 } ny_test_elf32_sym_t;
 
+static bool ny_test_elf_range_u64(uint64_t offset, uint64_t size,
+                                  uint64_t file_size) {
+  return offset <= file_size && size <= file_size - offset;
+}
 typedef struct {
   uint32_t r_offset;
   uint32_t r_info;
@@ -119,6 +123,11 @@ typedef struct {
   uint16_t shndx;
   bool defined;
 } ny_test_link_sym_t;
+enum {
+  TEST_LINK_SH_TEXT = 1,
+  TEST_LINK_SH_DATA = 2,
+  TEST_LINK_SH_ABS = 0xfff1u,
+};
 
 typedef enum {
   NY_TEST_LINK_RET_I64,
@@ -132,6 +141,17 @@ typedef enum {
   NY_TEST_LINK_RET_U8,
   NY_TEST_LINK_RET_BOOL,
 } ny_test_link_ret_kind_t;
+
+static int shape_expects_compile_failure(const char *path) {
+  if (!path || !shape_path_is_nshape(path))
+    return 0;
+  char *expect = shape_meta_string(path, "expect");
+  int failed = expect &&
+               (!strcmp(expect, "compile_fail") ||
+                !strcmp(expect, "compile_failure"));
+  free(expect);
+  return failed;
+}
 
 typedef struct {
   char ar_name[16];
@@ -147,6 +167,7 @@ typedef struct {
   uint32_t *offsets;
   char     *names;
   uint32_t  count;
+  size_t    names_len;
 } ny_test_ar_symtab_t;
 
 static bool test_link_ret_is_f64(ny_test_link_ret_kind_t kind) {
@@ -177,22 +198,37 @@ static unsigned test_link_ret_bits(ny_test_link_ret_kind_t kind) {
   }
 }
 
-static ny_test_proc_t run_one_start(const char *bin, const char *path, const char *std_path,
-                                    const char *std_bc, const char *output_path) {
+static ny_test_proc_t run_one_start(const char *bin, const char *path,
+                                    const char *exec_path,
+                                    const char *std_path, const char *std_bc,
+                                    const char *output_path) {
   char flags_buf[1024];
   char *flags = NULL;
   char *expect = NULL;
   read_error_meta(path, &flags, &expect);
+  char *matrix = shape_path_is_nshape(path)
+                     ? shape_meta_string(path, "flags_matrix")
+                     : NULL;
+  char matrix_buf[4096] = {0};
+  char *matrix_rows[64];
+  int matrix_count = 0;
+  if (matrix && *matrix) {
+    snprintf(matrix_buf, sizeof(matrix_buf), "%s", matrix);
+    matrix_count = split_flag_matrix_rows(matrix_buf, matrix_rows, 64);
+  }
   flags_buf[0] = '\0';
   char *flagv[32];
   int flagc = 0;
   int has_native_backend = 0;
-  if (flags && *flags) {
-    snprintf(flags_buf, sizeof(flags_buf), "%s", flags);
+  if ((flags && *flags) || matrix_count > 0) {
+    snprintf(flags_buf, sizeof(flags_buf), "%s%s%s", flags ? flags : "",
+             flags && *flags ? " " : "",
+             matrix_count > 0 ? matrix_rows[0] : "");
     trim_inplace(flags_buf);
     has_native_backend = native_backend_explicit(flags_buf);
     flagc = split_words(flags_buf, flagv, 32);
   }
+  free(matrix);
 
   /*
    * Object-link fixtures declare their emitted object in the shape flags.
@@ -230,9 +266,19 @@ static ny_test_proc_t run_one_start(const char *bin, const char *path, const cha
   }
   for (int i = 0; i < flagc && argc < 76; i++)
     argv[argc++] = flagv[i];
-  argv[argc++] = (char *)path;
+  /*
+   * Native nshape fixtures select an encoder with --native-backend, but
+   * ordinary execution would otherwise fall through to the legacy LLVM JIT.
+   * Keep the initial parallel run on the same deterministic native executor
+   * as the blocking retry path; explicit LLVM fixtures remain untouched.
+   */
+  if (path_is_native_test(path) && !shape_expects_compile_failure(path) &&
+      !native_only_explicit(flags_buf) &&
+      !native_backend_is_llvm(flags_buf) &&
+      !flags_contain_native_backend_word(flags_buf, "--emit-asm") && argc < 78)
+    argv[argc++] = "--native-only";
+  argv[argc++] = (char *)(exec_path && *exec_path ? exec_path : path);
   argv[argc] = NULL;
-
 #ifdef _WIN32
   ny_test_proc_t proc = ny_test_spawn_argv(argv, output_path, output_path ? 0 : 1);
   error_meta_free(flags, expect);
@@ -240,6 +286,11 @@ static ny_test_proc_t run_one_start(const char *bin, const char *path, const cha
 #else
   ny_test_proc_t pid = fork();
   if (pid == 0) {
+    /*
+     * Keep fixtures isolated from the scheduler process group.  Runtime
+     * signal tests must not be able to terminate ny-test with kill(0, sig).
+     */
+    (void)setpgid(0, 0);
     apply_test_child_env();
     if (output_path) {
         int fd = open(output_path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
@@ -259,6 +310,8 @@ static ny_test_proc_t run_one_start(const char *bin, const char *path, const cha
     execv(bin, argv);
     _exit(127);
   }
+  if (pid > 0)
+    (void)setpgid(pid, pid);
   error_meta_free(flags, expect);
   return pid;
 #endif
@@ -362,7 +415,12 @@ static bool test_has_unsupported_external_runtime_symbol(const char *obj_path) {
   char *buf = read_small_file(obj_path);
   if (!buf)
     return true;
-  bool has = strstr(buf, "printf") || strstr(buf, "fabs");
+  /*
+   * Standalone native objects may reference runtime helpers that are not
+   * part of the tiny C harness.  Let the internal linker own those cases;
+   * the external fallback is reserved for genuinely self-contained objects.
+   */
+  bool has = strstr(buf, "rt_") || strstr(buf, "printf") || strstr(buf, "fabs");
   free(buf);
   return has;
 }
@@ -1399,7 +1457,7 @@ static bool test_ar_read_symtab(const unsigned char *data, size_t size, ny_test_
     return false;
   size_t off = 8;
   uint32_t first_sym_off = 0;
-  while (off + sizeof(ny_test_ar_hdr_t) <= size) {
+  while (off <= size && sizeof(ny_test_ar_hdr_t) <= size - off) {
     ny_test_ar_hdr_t hdr;
     memcpy(&hdr, data + off, sizeof(hdr));
     if (hdr.ar_fmag[0] != 0x60 || hdr.ar_fmag[1] != 0x0a)
@@ -1411,7 +1469,7 @@ static bool test_ar_read_symtab(const unsigned char *data, size_t size, ny_test_
       return false;
     size_t member_size = (size_t)raw_size;
     size_t data_off = off + sizeof(ny_test_ar_hdr_t);
-    if (data_off + member_size > size)
+    if (member_size > size - data_off)
       return false;
     if (hdr.ar_name[0] == '/' && hdr.ar_name[1] == ' ' && !first_sym_off) {
       first_sym_off = (uint32_t)off;
@@ -1428,27 +1486,32 @@ static bool test_ar_read_symtab(const unsigned char *data, size_t size, ny_test_
   long sym_size = atol(ssz);
   if (sym_size < 4)
     return false;
-  unsigned char *sym_data = (unsigned char *)(data + first_sym_off + sizeof(ny_test_ar_hdr_t));
+  size_t sym_payload = (size_t)sym_size;
+  size_t sym_data_off = first_sym_off + sizeof(ny_test_ar_hdr_t);
+  if (!ny_test_elf_range_u64(sym_data_off, sym_payload, size))
+    return false;
+  unsigned char *sym_data = (unsigned char *)(data + sym_data_off);
   uint32_t count = 0;
   memcpy(&count, sym_data, 4);
   count = __builtin_bswap32(count);
-  if ((uint32_t)sym_size < 4 + count * 4)
+  if ((size_t)count > (sym_payload - 4) / 4)
     return false;
-  uint32_t *offsets = (uint32_t *)malloc(count * sizeof(uint32_t));
+  size_t names_len = sym_payload - 4 - (size_t)count * 4;
+  uint32_t *offsets = (uint32_t *)malloc((size_t)count * sizeof(uint32_t));
   if (!offsets)
     return false;
   for (uint32_t i = 0; i < count; ++i)
     offsets[i] = __builtin_bswap32(*(uint32_t *)(sym_data + 4 + i * 4));
-  char *names = (char *)malloc((size_t)sym_size - 4 - count * 4);
+  char *names = (char *)malloc(names_len);
   if (!names) {
     free(offsets);
     return false;
   }
-  size_t names_len = (size_t)sym_size - 4 - count * 4;
   memcpy(names, sym_data + 4 + count * 4, names_len);
   out->offsets = offsets;
   out->names = names;
   out->count = count;
+  out->names_len = names_len;
   return true;
 }
 
@@ -1459,25 +1522,32 @@ static void test_ar_free_symtab(ny_test_ar_symtab_t *st) {
     st->offsets = NULL;
     st->names = NULL;
     st->count = 0;
+    st->names_len = 0;
   }
 }
 
-static uint32_t test_ar_find_symbol(const ny_test_ar_symtab_t *st, const char *name) {
-  if (!st || !name)
+static uint32_t test_ar_find_symbol(const ny_test_ar_symtab_t *st,
+                                    const char *name) {
+  if (!st || !name || !st->names)
     return 0;
-  const char *p = st->names;
-  for (uint32_t i = 0; i < st->count; ++i) {
-    size_t len = strlen(p);
+  size_t offset = 0;
+  for (uint32_t i = 0; i < st->count && offset < st->names_len; ++i) {
+    const char *p = st->names + offset;
+    size_t remaining = st->names_len - offset;
+    const char *end = (const char *)memchr(p, '\0', remaining);
+    if (!end)
+      return 0;
     if (strcmp(p, name) == 0)
       return st->offsets[i];
-    p += len + 1;
+    offset += (size_t)(end - p) + 1;
   }
   return 0;
 }
 
 static unsigned char *test_ar_extract_member(const unsigned char *data, size_t size,
                                               uint32_t member_off, size_t *out_size) {
-  if (!data || member_off + sizeof(ny_test_ar_hdr_t) > size) {
+  if (!data || member_off > size ||
+      sizeof(ny_test_ar_hdr_t) > size - member_off) {
     if (out_size) *out_size = 0;
     return NULL;
   }
@@ -1496,7 +1566,7 @@ static unsigned char *test_ar_extract_member(const unsigned char *data, size_t s
   }
   size_t member_size = (size_t)raw_size;
   size_t data_off = member_off + sizeof(ny_test_ar_hdr_t);
-  if (data_off + member_size > size) {
+  if (member_size > size - data_off) {
     if (out_size) *out_size = 0;
     return NULL;
   }
@@ -1534,11 +1604,14 @@ static bool test_link_extract_elf64_archive_member(const unsigned char *archive_
       meh.e_ident[3] != 'F' || meh.e_ident[4] != 2 || meh.e_ident[5] != 1 ||
       meh.e_type != 1 || meh.e_machine != 62 ||
       meh.e_shentsize != sizeof(ny_test_elf64_shdr_t) ||
-      meh.e_shoff + (uint64_t)meh.e_shnum * sizeof(ny_test_elf64_shdr_t) > member_size)
+      !ny_test_elf_range_u64(meh.e_shoff,
+                             (uint64_t)meh.e_shnum * sizeof(ny_test_elf64_shdr_t),
+                             member_size))
     goto done;
   ny_test_elf64_shdr_t *msh = (ny_test_elf64_shdr_t *)(void *)(member + meh.e_shoff);
   if (meh.e_shstrndx >= meh.e_shnum ||
-      msh[meh.e_shstrndx].sh_offset + msh[meh.e_shstrndx].sh_size > member_size)
+      !ny_test_elf_range_u64(msh[meh.e_shstrndx].sh_offset,
+                             msh[meh.e_shstrndx].sh_size, member_size))
     goto done;
   const char *mshstr = (const char *)(member + msh[meh.e_shstrndx].sh_offset);
   int mtext_i = -1, mrodata_i = -1, mdata_i = -1, msym_i = -1, mstr_i = -1;
@@ -1551,11 +1624,18 @@ static bool test_link_extract_elf64_archive_member(const unsigned char *archive_
     else if (strcmp(mn, ".strtab") == 0) mstr_i = mi;
   }
   if (mtext_i < 0 || msym_i < 0 || mstr_i < 0 ||
-      msh[mtext_i].sh_offset + msh[mtext_i].sh_size > member_size ||
-      msh[msym_i].sh_offset + msh[msym_i].sh_size > member_size ||
-      msh[mstr_i].sh_offset + msh[mstr_i].sh_size > member_size ||
-      (mrodata_i >= 0 && msh[mrodata_i].sh_offset + msh[mrodata_i].sh_size > member_size) ||
-      (mdata_i >= 0 && msh[mdata_i].sh_offset + msh[mdata_i].sh_size > member_size))
+      !ny_test_elf_range_u64(msh[mtext_i].sh_offset, msh[mtext_i].sh_size,
+                             member_size) ||
+      !ny_test_elf_range_u64(msh[msym_i].sh_offset, msh[msym_i].sh_size,
+                             member_size) ||
+      !ny_test_elf_range_u64(msh[mstr_i].sh_offset, msh[mstr_i].sh_size,
+                             member_size) ||
+      (mrodata_i >= 0 &&
+       !ny_test_elf_range_u64(msh[mrodata_i].sh_offset, msh[mrodata_i].sh_size,
+                              member_size)) ||
+      (mdata_i >= 0 &&
+       !ny_test_elf_range_u64(msh[mdata_i].sh_offset, msh[mdata_i].sh_size,
+                              member_size)))
     goto done;
 
   size_t append_off = *linked_text_len_io;
@@ -1634,11 +1714,14 @@ static bool test_link_extract_elf32_archive_member(const unsigned char *archive_
       meh.e_ident[3] != 'F' || meh.e_ident[4] != 1 || meh.e_ident[5] != 1 ||
       meh.e_type != 1 || meh.e_machine != 3 ||
       meh.e_shentsize != sizeof(ny_test_elf32_shdr_t) ||
-      meh.e_shoff + (uint64_t)meh.e_shnum * sizeof(ny_test_elf32_shdr_t) > member_size)
+      !ny_test_elf_range_u64(
+          meh.e_shoff, (uint64_t)meh.e_shnum * sizeof(ny_test_elf32_shdr_t),
+          member_size))
     goto done;
   ny_test_elf32_shdr_t *msh = (ny_test_elf32_shdr_t *)(void *)(member + meh.e_shoff);
   if (meh.e_shstrndx >= meh.e_shnum ||
-      msh[meh.e_shstrndx].sh_offset + msh[meh.e_shstrndx].sh_size > member_size)
+      !ny_test_elf_range_u64(msh[meh.e_shstrndx].sh_offset,
+                             msh[meh.e_shstrndx].sh_size, member_size))
     goto done;
   const char *mshstr = (const char *)(member + msh[meh.e_shstrndx].sh_offset);
   int mtext_i = -1, mrodata_i = -1, mdata_i = -1, msym_i = -1, mstr_i = -1;
@@ -1651,11 +1734,18 @@ static bool test_link_extract_elf32_archive_member(const unsigned char *archive_
     else if (strcmp(mn, ".strtab") == 0) mstr_i = mi;
   }
   if (mtext_i < 0 || msym_i < 0 || mstr_i < 0 ||
-      msh[mtext_i].sh_offset + msh[mtext_i].sh_size > member_size ||
-      msh[msym_i].sh_offset + msh[msym_i].sh_size > member_size ||
-      msh[mstr_i].sh_offset + msh[mstr_i].sh_size > member_size ||
-      (mrodata_i >= 0 && msh[mrodata_i].sh_offset + msh[mrodata_i].sh_size > member_size) ||
-      (mdata_i >= 0 && msh[mdata_i].sh_offset + msh[mdata_i].sh_size > member_size))
+      !ny_test_elf_range_u64(msh[mtext_i].sh_offset, msh[mtext_i].sh_size,
+                             member_size) ||
+      !ny_test_elf_range_u64(msh[msym_i].sh_offset, msh[msym_i].sh_size,
+                             member_size) ||
+      !ny_test_elf_range_u64(msh[mstr_i].sh_offset, msh[mstr_i].sh_size,
+                             member_size) ||
+      (mrodata_i >= 0 &&
+       !ny_test_elf_range_u64(msh[mrodata_i].sh_offset,
+                              msh[mrodata_i].sh_size, member_size)) ||
+      (mdata_i >= 0 &&
+       !ny_test_elf_range_u64(msh[mdata_i].sh_offset,
+                              msh[mdata_i].sh_size, member_size)))
     goto done;
 
   size_t append_off = *linked_text_len_io;
@@ -1770,31 +1860,38 @@ static int test_internal_elf32_link_run(const char *obj_path,
       eh.e_ident[3] != 'F' || eh.e_ident[4] != 1 || eh.e_ident[5] != 1 ||
       eh.e_type != 1 || eh.e_machine != 3 ||
       eh.e_shentsize != sizeof(ny_test_elf32_shdr_t) ||
-      (uint64_t)eh.e_shoff + (uint64_t)eh.e_shnum * sizeof(ny_test_elf32_shdr_t) >
-          (uint64_t)st.st_size) {
+      !ny_test_elf_range_u64(
+          eh.e_shoff, (uint64_t)eh.e_shnum * sizeof(ny_test_elf32_shdr_t),
+          (uint64_t)st.st_size)) {
     free(obj); free(archive_data); test_ar_free_symtab(&ar_st);
     return 2;
   }
-  ny_test_elf32_shdr_t *sh = (ny_test_elf32_shdr_t *)(void *)(obj + eh.e_shoff);
+  ny_test_elf32_shdr_t *sh =
+      (ny_test_elf32_shdr_t *)(void *)(obj + eh.e_shoff);
   if (eh.e_shstrndx >= eh.e_shnum ||
-      (uint64_t)sh[eh.e_shstrndx].sh_offset + sh[eh.e_shstrndx].sh_size >
-          (uint64_t)st.st_size) {
+      !ny_test_elf_range_u64(sh[eh.e_shstrndx].sh_offset,
+                             sh[eh.e_shstrndx].sh_size,
+                             (uint64_t)st.st_size)) {
     free(obj); free(archive_data); test_ar_free_symtab(&ar_st);
     return 2;
   }
   const char *shstr = (const char *)(obj + sh[eh.e_shstrndx].sh_offset);
   int text_i = -1, sym_i = -1, str_i = -1, rel_i = -1;
   for (int i = 0; i < eh.e_shnum; ++i) {
-    const char *name = sh[i].sh_name < sh[eh.e_shstrndx].sh_size ? shstr + sh[i].sh_name : "";
+    const char *name = sh[i].sh_name < sh[eh.e_shstrndx].sh_size
+                           ? shstr + sh[i].sh_name : "";
     if (strcmp(name, ".text") == 0) text_i = i;
     else if (strcmp(name, ".symtab") == 0) sym_i = i;
     else if (strcmp(name, ".strtab") == 0) str_i = i;
     else if (strcmp(name, ".rel.text") == 0) rel_i = i;
   }
   if (text_i < 0 || sym_i < 0 || str_i < 0 ||
-      (uint64_t)sh[text_i].sh_offset + sh[text_i].sh_size > (uint64_t)st.st_size ||
-      (uint64_t)sh[sym_i].sh_offset + sh[sym_i].sh_size > (uint64_t)st.st_size ||
-      (uint64_t)sh[str_i].sh_offset + sh[str_i].sh_size > (uint64_t)st.st_size) {
+      !ny_test_elf_range_u64(sh[text_i].sh_offset, sh[text_i].sh_size,
+                             (uint64_t)st.st_size) ||
+      !ny_test_elf_range_u64(sh[sym_i].sh_offset, sh[sym_i].sh_size,
+                             (uint64_t)st.st_size) ||
+      !ny_test_elf_range_u64(sh[str_i].sh_offset, sh[str_i].sh_size,
+                             (uint64_t)st.st_size)) {
     free(obj); free(archive_data); test_ar_free_symtab(&ar_st);
     return 2;
   }
@@ -1840,14 +1937,16 @@ static int test_internal_elf32_link_run(const char *obj_path,
   size_t linked_text_len = text_len;
 #define ELF32_AR_FAIL do { free(text); free(obj); free(archive_data); test_ar_free_symtab(&ar_st); return 2; } while(0)
   if (rel_i >= 0) {
-    if ((uint64_t)sh[rel_i].sh_offset + sh[rel_i].sh_size > (uint64_t)st.st_size)
+    if (!ny_test_elf_range_u64(sh[rel_i].sh_offset, sh[rel_i].sh_size,
+                               (uint64_t)st.st_size))
       ELF32_AR_FAIL;
     ny_test_elf32_rel_t *rel = (ny_test_elf32_rel_t *)(void *)(obj + sh[rel_i].sh_offset);
     size_t rel_count = sh[rel_i].sh_entsize ? (size_t)(sh[rel_i].sh_size / sh[rel_i].sh_entsize) : 0;
     for (size_t i = 0; i < rel_count; ++i) {
       uint32_t type = rel[i].r_info & 0xffu;
       uint32_t si = rel[i].r_info >> 8;
-      if (type != 2 || si >= sym_count || rel[i].r_offset + 4 > text_len ||
+      if (type != 2 || si >= sym_count ||
+          !ny_test_elf_range_u64(rel[i].r_offset, 4, text_len) ||
           sym[si].st_name >= strtab_len)
         ELF32_AR_FAIL;
       const char *name = strtab + sym[si].st_name;
@@ -1868,14 +1967,24 @@ static int test_internal_elf32_link_run(const char *obj_path,
                   meh.e_ident[3] == 'F' && meh.e_ident[4] == 1 && meh.e_ident[5] == 1 &&
                   meh.e_type == 1 && meh.e_machine == 3 &&
                   meh.e_shentsize == sizeof(ny_test_elf32_shdr_t) &&
-                  meh.e_shoff + (uint64_t)meh.e_shnum * sizeof(ny_test_elf32_shdr_t) <= member_size) {
-                ny_test_elf32_shdr_t *msh = (ny_test_elf32_shdr_t *)(void *)(member + meh.e_shoff);
+                  ny_test_elf_range_u64(
+                      meh.e_shoff,
+                      (uint64_t)meh.e_shnum * sizeof(ny_test_elf32_shdr_t),
+                      member_size)) {
+                ny_test_elf32_shdr_t *msh =
+                    (ny_test_elf32_shdr_t *)(void *)(member + meh.e_shoff);
                 if (meh.e_shstrndx < meh.e_shnum &&
-                    msh[meh.e_shstrndx].sh_offset + msh[meh.e_shstrndx].sh_size <= member_size) {
-                  const char *mshstr = (const char *)(member + msh[meh.e_shstrndx].sh_offset);
-                  int mtext_i = -1, mrodata_i = -1, mdata_i = -1, msym_i = -1, mstr_i = -1, mrel_i = -1;
+                    ny_test_elf_range_u64(msh[meh.e_shstrndx].sh_offset,
+                                           msh[meh.e_shstrndx].sh_size,
+                                           member_size)) {
+                  const char *mshstr =
+                      (const char *)(member + msh[meh.e_shstrndx].sh_offset);
+                  int mtext_i = -1, mrodata_i = -1, mdata_i = -1,
+                      msym_i = -1, mstr_i = -1, mrel_i = -1;
                   for (int mi = 0; mi < meh.e_shnum; ++mi) {
-                    const char *mn = msh[mi].sh_name < msh[meh.e_shstrndx].sh_size ? mshstr + msh[mi].sh_name : "";
+                    const char *mn =
+                        msh[mi].sh_name < msh[meh.e_shstrndx].sh_size
+                            ? mshstr + msh[mi].sh_name : "";
                     if (strcmp(mn, ".text") == 0) mtext_i = mi;
                     else if (strcmp(mn, ".rodata") == 0) mrodata_i = mi;
                     else if (strcmp(mn, ".data") == 0) mdata_i = mi;
@@ -1884,11 +1993,18 @@ static int test_internal_elf32_link_run(const char *obj_path,
                     else if (strcmp(mn, ".rel.text") == 0) mrel_i = mi;
                   }
                   if (mtext_i >= 0 && msym_i >= 0 && mstr_i >= 0 &&
-                      msh[mtext_i].sh_size <= member_size &&
-                      msh[msym_i].sh_offset + msh[msym_i].sh_size <= member_size &&
-                      msh[mstr_i].sh_offset + msh[mstr_i].sh_size <= member_size &&
-                      (mrodata_i < 0 || msh[mrodata_i].sh_offset + msh[mrodata_i].sh_size <= member_size) &&
-                      (mdata_i < 0 || msh[mdata_i].sh_offset + msh[mdata_i].sh_size <= member_size)) {
+                      ny_test_elf_range_u64(msh[mtext_i].sh_offset,
+                                             msh[mtext_i].sh_size, member_size) &&
+                      ny_test_elf_range_u64(msh[msym_i].sh_offset,
+                                             msh[msym_i].sh_size, member_size) &&
+                      ny_test_elf_range_u64(msh[mstr_i].sh_offset,
+                                             msh[mstr_i].sh_size, member_size) &&
+                      (mrodata_i < 0 ||
+                       ny_test_elf_range_u64(msh[mrodata_i].sh_offset,
+                                             msh[mrodata_i].sh_size, member_size)) &&
+                      (mdata_i < 0 ||
+                       ny_test_elf_range_u64(msh[mdata_i].sh_offset,
+                                             msh[mdata_i].sh_size, member_size))) {
                     size_t append_off = linked_text_len;
                     size_t mtext_len = (size_t)msh[mtext_i].sh_size;
                     size_t mrodata_len = mrodata_i >= 0 ? (size_t)msh[mrodata_i].sh_size : 0;
@@ -1946,15 +2062,26 @@ static int test_internal_elf32_link_run(const char *obj_path,
                      */
                     if (linked_text_len < member_linked_len)
                       linked_text_len = member_linked_len;
-                    if (mrel_i >= 0 && msh[mrel_i].sh_offset + msh[mrel_i].sh_size <= member_size) {
-                      ny_test_elf32_rel_t *mrel = (ny_test_elf32_rel_t *)(void *)(member + msh[mrel_i].sh_offset);
-                      size_t mrel_count = msh[mrel_i].sh_entsize ? (size_t)(msh[mrel_i].sh_size / msh[mrel_i].sh_entsize) : 0;
+                    if (mrel_i >= 0 &&
+                        ny_test_elf_range_u64(msh[mrel_i].sh_offset,
+                                              msh[mrel_i].sh_size,
+                                              member_size)) {
+                      ny_test_elf32_rel_t *mrel =
+                          (ny_test_elf32_rel_t *)(void *)(member + msh[mrel_i].sh_offset);
+                      size_t mrel_count = msh[mrel_i].sh_entsize
+                                              ? (size_t)(msh[mrel_i].sh_size /
+                                                         msh[mrel_i].sh_entsize)
+                                              : 0;
                       for (size_t mj = 0; mj < mrel_count; ++mj) {
                         uint32_t mtype = mrel[mj].r_info & 0xffu;
                         uint32_t msi = mrel[mj].r_info >> 8;
-                        if ((mtype != 1 && mtype != 2 && mtype != 4) || msi >= msym_count ||
+                        if ((mtype != 1 && mtype != 2 && mtype != 4) ||
+                            msi >= msym_count ||
                             msym[msi].st_name >= mstrtab_len ||
-                            mrel[mj].r_offset + 4 > mtext_len) { free(member); ELF32_AR_FAIL; }
+                            !ny_test_elf_range_u64(mrel[mj].r_offset, 4,
+                                                   mtext_len)) {
+                          free(member); ELF32_AR_FAIL;
+                        }
                         uint16_t sym_ndx = (uint16_t)msym[msi].st_shndx;
                         uint64_t msaddr = 0;
                         bool msec_sym = false;
@@ -2097,7 +2224,8 @@ static int test_internal_elf32_link_run(const char *obj_path,
     for (size_t i = 0; i < rel_count; ++i) {
       uint32_t type = rel[i].r_info & 0xffu;
       uint32_t si = rel[i].r_info >> 8;
-      if (type != 2 || si >= sym_count || rel[i].r_offset + 4 > text_len ||
+      if (type != 2 || si >= sym_count ||
+          !ny_test_elf_range_u64(rel[i].r_offset, 4, text_len) ||
           sym[si].st_name >= strtab_len) ELF32_AR_FAIL;
       const char *name = strtab + sym[si].st_name;
       int di = test_link_sym_index(defs, def_count, name);
@@ -2183,9 +2311,10 @@ static void test_a64_mov_imm(unsigned char *dst, size_t *len, unsigned reg,
 }
 
 /*
- * Minimal internal AArch64 ELF linker/runtime gate. The object must contain
- * only locally resolved CALL26 relocations; execution uses QEMU only as the
- * CPU, never as an assembler or linker.
+ * Dependency-light internal AArch64 ELF linker/runtime gate. It resolves the
+ * direct-call and page-relative address relocations emitted by the native
+ * object writer; execution uses QEMU only as the CPU, never as an assembler
+ * or linker.
  */
 static int test_internal_aarch64_elf64_link_run(
     const char *obj_path, ny_test_link_ret_kind_t ret_kind,
@@ -2211,17 +2340,18 @@ static int test_internal_aarch64_elf64_link_run(
   memcpy(&eh, obj, sizeof(eh));
   if (eh.e_ident[0] != 0x7f || eh.e_ident[1] != 'E' ||
       eh.e_ident[2] != 'L' || eh.e_ident[3] != 'F' ||
-      eh.e_ident[4] != 2 || eh.e_ident[5] != 1 || eh.e_type != 1 ||
       eh.e_machine != 183 || eh.e_shentsize != sizeof(ny_test_elf64_shdr_t) ||
-      eh.e_shoff + (uint64_t)eh.e_shnum * sizeof(ny_test_elf64_shdr_t) >
-          (uint64_t)st.st_size) {
+      !ny_test_elf_range_u64(
+          eh.e_shoff, (uint64_t)eh.e_shnum * sizeof(ny_test_elf64_shdr_t),
+          (uint64_t)st.st_size)) {
     free(obj); return 2;
   }
   ny_test_elf64_shdr_t *sh =
       (ny_test_elf64_shdr_t *)(void *)(obj + eh.e_shoff);
   if (eh.e_shstrndx >= eh.e_shnum ||
-      sh[eh.e_shstrndx].sh_offset + sh[eh.e_shstrndx].sh_size >
-          (uint64_t)st.st_size) {
+      !ny_test_elf_range_u64(sh[eh.e_shstrndx].sh_offset,
+                             sh[eh.e_shstrndx].sh_size,
+                             (uint64_t)st.st_size)) {
     free(obj); return 2;
   }
   const char *shstr = (const char *)(obj + sh[eh.e_shstrndx].sh_offset);
@@ -2235,15 +2365,25 @@ static int test_internal_aarch64_elf64_link_run(
     else if (strcmp(name, ".rela.text") == 0) rela_i = i;
   }
   if (text_i < 0 || sym_i < 0 || str_i < 0 ||
-      sh[text_i].sh_offset + sh[text_i].sh_size > (uint64_t)st.st_size ||
-      sh[sym_i].sh_offset + sh[sym_i].sh_size > (uint64_t)st.st_size ||
-      sh[str_i].sh_offset + sh[str_i].sh_size > (uint64_t)st.st_size) {
+      !ny_test_elf_range_u64(sh[text_i].sh_offset, sh[text_i].sh_size,
+                             (uint64_t)st.st_size) ||
+      !ny_test_elf_range_u64(sh[sym_i].sh_offset, sh[sym_i].sh_size,
+                             (uint64_t)st.st_size) ||
+      !ny_test_elf_range_u64(sh[str_i].sh_offset, sh[str_i].sh_size,
+                             (uint64_t)st.st_size)) {
     free(obj); return 2;
   }
   size_t text_len = (size_t)sh[text_i].sh_size;
   unsigned char *text = (unsigned char *)malloc(text_len + 256);
   if (!text) { free(obj); return 2; }
   memcpy(text, obj + sh[text_i].sh_offset, text_len);
+  if (sh[sym_i].sh_entsize != sizeof(ny_test_elf64_sym_t) ||
+      (rela_i >= 0 &&
+       (sh[rela_i].sh_entsize != sizeof(ny_test_elf64_rela_t) ||
+        !ny_test_elf_range_u64(sh[rela_i].sh_offset, sh[rela_i].sh_size,
+                               (uint64_t)st.st_size)))) {
+    free(text); free(obj); return 2;
+  }
   ny_test_elf64_sym_t *sym =
       (ny_test_elf64_sym_t *)(void *)(obj + sh[sym_i].sh_offset);
   size_t sym_count = sh[sym_i].sh_entsize
@@ -2265,24 +2405,51 @@ static int test_internal_aarch64_elf64_link_run(
   size_t rela_count = rela_i >= 0 && sh[rela_i].sh_entsize
                           ? (size_t)(sh[rela_i].sh_size / sh[rela_i].sh_entsize)
                           : 0;
+  const uint64_t base = 0x401000u;
   for (size_t i = 0; i < rela_count; ++i) {
     ny_test_elf64_rela_t *r =
         (ny_test_elf64_rela_t *)(void *)(obj + sh[rela_i].sh_offset) + i;
     uint32_t type = (uint32_t)(r->r_info & 0xffffffffu);
     uint32_t si = (uint32_t)(r->r_info >> 32);
-    if (type != 283 || si >= sym_count || r->r_offset + 4 > text_len ||
+    if (si >= sym_count || text_len < 4 ||
+        r->r_offset > text_len - 4 ||
         sym[si].st_shndx != (uint16_t)text_i) {
       free(text); free(obj); return 2;
     }
-    int64_t delta = (int64_t)sym[si].st_value + r->r_addend -
-                    (int64_t)r->r_offset;
-    if ((delta & 3) || delta / 4 < -(1 << 25) || delta / 4 >= (1 << 25)) {
-      free(text); free(obj); return 1;
-    }
     uint32_t insn = 0;
     memcpy(&insn, text + r->r_offset, sizeof(insn));
-    insn = (insn & 0xfc000000u) |
-           ((uint32_t)(delta / 4) & 0x03ffffffu);
+    uint64_t symbol_addr = base + sym[si].st_value;
+    uint64_t place_addr = base + r->r_offset;
+    switch (type) {
+    case 283: { /* R_AARCH64_CALL26 */
+      int64_t delta = (int64_t)symbol_addr + r->r_addend -
+                      (int64_t)place_addr;
+      if ((delta & 3) || delta / 4 < -(1 << 25) || delta / 4 >= (1 << 25)) {
+        free(text); free(obj); return 2;
+      }
+      insn = (insn & 0xfc000000u) |
+             ((uint32_t)(delta / 4) & 0x03ffffffu);
+      break;
+    }
+    case 275: { /* R_AARCH64_ADR_PREL_PG_HI21 */
+      int64_t page_delta =
+          ((int64_t)(symbol_addr & ~UINT64_C(0xfff)) -
+           (int64_t)(place_addr & ~UINT64_C(0xfff))) >> 12;
+      if (page_delta < -(1 << 20) || page_delta >= (1 << 20)) {
+        free(text); free(obj); return 2;
+      }
+      uint32_t imm = (uint32_t)page_delta;
+      insn = (insn & 0x9f00001fu) |
+             ((imm & 0x3u) << 29) | ((imm & 0x1ffffcu) << 3);
+      break;
+    }
+    case 277: /* R_AARCH64_ADD_ABS_LO12_NC */
+      insn = (insn & 0xffc003ffu) |
+             ((uint32_t)(symbol_addr & 0xfffu) << 10);
+      break;
+    default:
+      free(text); free(obj); return 2;
+    }
     memcpy(text + r->r_offset, &insn, sizeof(insn));
   }
   size_t harness_off = (text_len + 15u) & ~15u;
@@ -2291,7 +2458,7 @@ static int test_internal_aarch64_elf64_link_run(
   size_t hlen = 0;
   int64_t call_words = ((int64_t)rt_main_off - (int64_t)harness_off) / 4;
   if (call_words < -(1 << 25) || call_words >= (1 << 25)) {
-    free(text); free(obj); return 1;
+    free(text); free(obj); return 2; /* unsupported -> fallback */
   }
   test_a64_put32(harness, &hlen,
                  0x94000000u | ((uint32_t)call_words & 0x03ffffffu));
@@ -2326,7 +2493,6 @@ static int test_internal_aarch64_elf64_link_run(
   test_a64_put32(harness, &hlen, 0xd4000001u); /* svc #0 */
   memcpy(text + harness_off, harness, hlen);
   size_t code_len = harness_off + hlen;
-  const uint64_t base = 0x401000u;
   const size_t file_off = 0x1000;
   size_t file_len = file_off + code_len;
   unsigned char *exe = (unsigned char *)calloc(1, file_len);
@@ -2422,35 +2588,61 @@ static int test_internal_elf64_link_run(const char *obj_path,
   memcpy(&eh, obj, sizeof(eh));
   if (eh.e_ident[0] != 0x7f || eh.e_ident[1] != 'E' || eh.e_ident[2] != 'L' ||
       eh.e_ident[3] != 'F' || eh.e_ident[4] != 2 || eh.e_ident[5] != 1 ||
-      eh.e_type != 1 || eh.e_machine != 62 || eh.e_shentsize != sizeof(ny_test_elf64_shdr_t) ||
-      eh.e_shoff + (uint64_t)eh.e_shnum * sizeof(ny_test_elf64_shdr_t) > (uint64_t)st.st_size)
+      eh.e_type != 1 || eh.e_machine != 62 ||
+      eh.e_shentsize != sizeof(ny_test_elf64_shdr_t) ||
+      eh.e_shoff > (uint64_t)st.st_size ||
+      eh.e_shnum > ((uint64_t)st.st_size - eh.e_shoff) /
+                       sizeof(ny_test_elf64_shdr_t))
     { free(obj); free(archive_data); test_ar_free_symtab(&ar_st); return 2; }
   ny_test_elf64_shdr_t *sh = (ny_test_elf64_shdr_t *)(void *)(obj + eh.e_shoff);
-  if (eh.e_shstrndx >= eh.e_shnum || sh[eh.e_shstrndx].sh_offset + sh[eh.e_shstrndx].sh_size > (uint64_t)st.st_size)
+  if (eh.e_shstrndx >= eh.e_shnum ||
+      sh[eh.e_shstrndx].sh_offset > (uint64_t)st.st_size ||
+      sh[eh.e_shstrndx].sh_size >
+          (uint64_t)st.st_size - sh[eh.e_shstrndx].sh_offset)
     { free(obj); free(archive_data); test_ar_free_symtab(&ar_st); return 2; }
   const char *shstr = (const char *)(obj + sh[eh.e_shstrndx].sh_offset);
-  int text_i = -1, sym_i = -1, str_i = -1, rela_i = -1;
+  int text_i = -1, data_i = -1, sym_i = -1, str_i = -1, rela_i = -1;
   for (int i = 0; i < eh.e_shnum; ++i) {
     const char *name = sh[i].sh_name < sh[eh.e_shstrndx].sh_size ? shstr + sh[i].sh_name : "";
     if (strcmp(name, ".text") == 0) text_i = i;
+    else if (strcmp(name, ".data") == 0) data_i = i;
     else if (strcmp(name, ".symtab") == 0) sym_i = i;
     else if (strcmp(name, ".strtab") == 0) str_i = i;
     else if (strcmp(name, ".rela.text") == 0) rela_i = i;
   }
   if (text_i < 0 || sym_i < 0 || str_i < 0 ||
-      sh[text_i].sh_offset + sh[text_i].sh_size > (uint64_t)st.st_size ||
-      sh[sym_i].sh_offset + sh[sym_i].sh_size > (uint64_t)st.st_size ||
-      sh[str_i].sh_offset + sh[str_i].sh_size > (uint64_t)st.st_size)
+      !ny_test_elf_range_u64(sh[text_i].sh_offset, sh[text_i].sh_size,
+                             (uint64_t)st.st_size) ||
+      !ny_test_elf_range_u64(sh[sym_i].sh_offset, sh[sym_i].sh_size,
+                             (uint64_t)st.st_size) ||
+      !ny_test_elf_range_u64(sh[str_i].sh_offset, sh[str_i].sh_size,
+                             (uint64_t)st.st_size) ||
+      (data_i >= 0 &&
+       !ny_test_elf_range_u64(sh[data_i].sh_offset, sh[data_i].sh_size,
+                              (uint64_t)st.st_size)))
     { free(obj); free(archive_data); test_ar_free_symtab(&ar_st); return 2; }
   size_t text_len = (size_t)sh[text_i].sh_size;
+  size_t data_len = data_i >= 0 ? (size_t)sh[data_i].sh_size : 0;
+  unsigned char *data = data_len ? (unsigned char *)malloc(data_len) : NULL;
+  if (data_len && !data) {
+    free(obj); free(archive_data); test_ar_free_symtab(&ar_st); return 2;
+  }
+  if (data_len)
+    memcpy(data, obj + sh[data_i].sh_offset, data_len);
   size_t text_cap = text_len + 4096;
   unsigned char *text = (unsigned char *)malloc(text_cap);
-  if (!text) { free(obj); free(archive_data); test_ar_free_symtab(&ar_st); return 2; }
+  if (!text) {
+    free(data); free(obj); free(archive_data); test_ar_free_symtab(&ar_st);
+    return 2;
+  }
   memcpy(text, obj + sh[text_i].sh_offset, text_len);
   ny_test_elf64_sym_t *sym = (ny_test_elf64_sym_t *)(void *)(obj + sh[sym_i].sh_offset);
   size_t sym_count = sh[sym_i].sh_entsize ? (size_t)(sh[sym_i].sh_size / sh[sym_i].sh_entsize) : 0;
   const char *strtab = (const char *)(obj + sh[str_i].sh_offset);
   size_t strtab_len = (size_t)sh[str_i].sh_size;
+#define TEST_AR_FAIL \
+  do { free(text); free(data); free(obj); free(archive_data); \
+       test_ar_free_symtab(&ar_st); return 2; } while (0)
   ny_test_link_sym_t defs[256];
   size_t def_count = 0;
   uint64_t rt_main_off = 0;
@@ -2459,24 +2651,41 @@ static int test_internal_elf64_link_run(const char *obj_path,
     if (sym[i].st_name >= strtab_len) continue;
     const char *name = strtab + sym[i].st_name;
     if (!name[0]) continue;
-    if (sym[i].st_shndx == (uint16_t)text_i) {
-      if (def_count >= sizeof(defs) / sizeof(defs[0]))
-        { free(text); free(obj); free(archive_data); test_ar_free_symtab(&ar_st); return 2; }
-      snprintf(defs[def_count].name, sizeof(defs[def_count].name), "%s", name);
-      defs[def_count].off = sym[i].st_value;
-      defs[def_count].shndx = sym[i].st_shndx;
-      defs[def_count].defined = true;
-      if (strcmp(name, "rt_main") == 0) { rt_main_off = sym[i].st_value; have_rt_main = true; }
-      def_count++;
+    bool is_text = sym[i].st_shndx == (uint16_t)text_i;
+    bool is_data = data_i >= 0 && sym[i].st_shndx == (uint16_t)data_i;
+    bool is_abs = sym[i].st_shndx == TEST_LINK_SH_ABS;
+    if (!is_text && !is_data && !is_abs)
+      continue;
+    size_t section_len = is_data ? data_len : text_len;
+    if (!is_abs &&
+        !ny_test_elf_range_u64(sym[i].st_value, sym[i].st_size,
+                               section_len))
+      TEST_AR_FAIL;
+    if (def_count >= sizeof(defs) / sizeof(defs[0]))
+      TEST_AR_FAIL;
+    snprintf(defs[def_count].name, sizeof(defs[def_count].name), "%s", name);
+    defs[def_count].off = sym[i].st_value;
+    defs[def_count].shndx = is_data ? TEST_LINK_SH_DATA : sym[i].st_shndx;
+    defs[def_count].defined = true;
+    if (strcmp(name, "rt_main") == 0) {
+      rt_main_off = sym[i].st_value;
+      have_rt_main = true;
     }
+    def_count++;
   }
   if (!have_rt_main)
-    { free(text); free(obj); free(archive_data); test_ar_free_symtab(&ar_st); return 2; }
+    TEST_AR_FAIL;
   const uint64_t base = 0x400000u + 0x1000u;
   size_t linked_text_len = text_len;
-  size_t max_rela = rela_i >= 0 ? (sh[rela_i].sh_entsize ? (size_t)(sh[rela_i].sh_size / sh[rela_i].sh_entsize) : 0) : 0;
-#define TEST_AR_FAIL \
-  do { free(text); free(obj); free(archive_data); test_ar_free_symtab(&ar_st); return 2; } while(0)
+  if (rela_i >= 0 &&
+      (sh[rela_i].sh_entsize != sizeof(ny_test_elf64_rela_t) ||
+       !ny_test_elf_range_u64(sh[rela_i].sh_offset, sh[rela_i].sh_size,
+                              (uint64_t)st.st_size))) {
+    TEST_AR_FAIL;
+  }
+  char extracted_symbols[256][256];
+  size_t max_rela =
+      rela_i >= 0 ? (size_t)(sh[rela_i].sh_size / sh[rela_i].sh_entsize) : 0;
 
   uint32_t extracted_offsets[256];
   size_t extracted_count = 0;
@@ -2490,7 +2699,8 @@ static int test_internal_elf64_link_run(const char *obj_path,
         uint32_t rtype = (uint32_t)(r->r_info & 0xffffffffu);
         uint32_t rsi = (uint32_t)(r->r_info >> 32);
         if ((rtype != 2 && rtype != 4) || rsi >= sym_count ||
-            r->r_offset + 4 > text_len || sym[rsi].st_name >= strtab_len) TEST_AR_FAIL;
+            !ny_test_elf_range_u64(r->r_offset, 4, text_len) ||
+            sym[rsi].st_name >= strtab_len) TEST_AR_FAIL;
         const char *rname = strtab + sym[rsi].st_name;
         if (test_link_sym_index(defs, def_count, rname) >= 0)
           continue;
@@ -2513,16 +2723,24 @@ static int test_internal_elf64_link_run(const char *obj_path,
                       meh.e_ident[3] == 'F' && meh.e_ident[4] == 2 && meh.e_ident[5] == 1 &&
                       meh.e_type == 1 && meh.e_machine == 62 &&
                       meh.e_shentsize == sizeof(ny_test_elf64_shdr_t) &&
-                      meh.e_shoff + (uint64_t)meh.e_shnum * sizeof(ny_test_elf64_shdr_t) <= member_size) {
-                    ny_test_elf64_shdr_t *msh = (ny_test_elf64_shdr_t *)(void *)(member + meh.e_shoff);
+                      ny_test_elf_range_u64(
+                          meh.e_shoff,
+                          (uint64_t)meh.e_shnum * sizeof(ny_test_elf64_shdr_t),
+                          member_size)) {
+                    ny_test_elf64_shdr_t *msh =
+                        (ny_test_elf64_shdr_t *)(void *)(member + meh.e_shoff);
                     if (meh.e_shstrndx < meh.e_shnum &&
-                        msh[meh.e_shstrndx].sh_offset + msh[meh.e_shstrndx].sh_size <= member_size) {
-                      const char *mshstr = (const char *)(member + msh[meh.e_shstrndx].sh_offset);
+                        ny_test_elf_range_u64(msh[meh.e_shstrndx].sh_offset,
+                                               msh[meh.e_shstrndx].sh_size,
+                                               member_size)) {
+                      const char *mshstr =
+                          (const char *)(member + msh[meh.e_shstrndx].sh_offset);
                       int mtext_i = -1, mrodata_i = -1, mdata_i = -1,
                           msym_i = -1, mstr_i = -1;
                       for (int mi = 0; mi < meh.e_shnum; ++mi) {
-                        const char *mn = msh[mi].sh_name < msh[meh.e_shstrndx].sh_size
-                                             ? mshstr + msh[mi].sh_name : "";
+                        const char *mn =
+                            msh[mi].sh_name < msh[meh.e_shstrndx].sh_size
+                                ? mshstr + msh[mi].sh_name : "";
                         if (strcmp(mn, ".text") == 0) mtext_i = mi;
                         else if (strcmp(mn, ".rodata") == 0) mrodata_i = mi;
                         else if (strcmp(mn, ".data") == 0) mdata_i = mi;
@@ -2530,11 +2748,18 @@ static int test_internal_elf64_link_run(const char *obj_path,
                         else if (strcmp(mn, ".strtab") == 0) mstr_i = mi;
                       }
                       if (mtext_i >= 0 && msym_i >= 0 && mstr_i >= 0 &&
-                          msh[mtext_i].sh_offset + msh[mtext_i].sh_size <= member_size &&
-                          msh[msym_i].sh_offset + msh[msym_i].sh_size <= member_size &&
-                          msh[mstr_i].sh_offset + msh[mstr_i].sh_size <= member_size &&
-                          (mrodata_i < 0 || msh[mrodata_i].sh_offset + msh[mrodata_i].sh_size <= member_size) &&
-                          (mdata_i < 0 || msh[mdata_i].sh_offset + msh[mdata_i].sh_size <= member_size)) {
+                          ny_test_elf_range_u64(msh[mtext_i].sh_offset,
+                                                 msh[mtext_i].sh_size, member_size) &&
+                          ny_test_elf_range_u64(msh[msym_i].sh_offset,
+                                                 msh[msym_i].sh_size, member_size) &&
+                          ny_test_elf_range_u64(msh[mstr_i].sh_offset,
+                                                 msh[mstr_i].sh_size, member_size) &&
+                          (mrodata_i < 0 ||
+                           ny_test_elf_range_u64(msh[mrodata_i].sh_offset,
+                                                 msh[mrodata_i].sh_size, member_size)) &&
+                          (mdata_i < 0 ||
+                           ny_test_elf_range_u64(msh[mdata_i].sh_offset,
+                                                 msh[mdata_i].sh_size, member_size))) {
                         size_t append_off = linked_text_len;
                         size_t mtext_len = (size_t)msh[mtext_i].sh_size;
                         size_t mrodata_len = mrodata_i >= 0 ? (size_t)msh[mrodata_i].sh_size : 0;
@@ -2582,6 +2807,9 @@ static int test_internal_elf64_link_run(const char *obj_path,
                             def_count++;
                           }
                         }
+                        if (extracted_count >= 256) { free(member); TEST_AR_FAIL; }
+                        snprintf(extracted_symbols[extracted_count], 256, "%s",
+                                 rname);
                         extracted_offsets[extracted_count++] = member_off;
                         linked_text_len = data_off + mdata_len;
                         linked_text_len = append_off + ((linked_text_len - append_off + 15u) & ~15u);
@@ -2612,18 +2840,24 @@ static int test_internal_elf64_link_run(const char *obj_path,
           meh.e_ident[3] != 'F' || meh.e_ident[4] != 2 || meh.e_ident[5] != 1 ||
           meh.e_type != 1 || meh.e_machine != 62 ||
           meh.e_shentsize != sizeof(ny_test_elf64_shdr_t) ||
-          meh.e_shoff + (uint64_t)meh.e_shnum * sizeof(ny_test_elf64_shdr_t) > member_size) {
+          !ny_test_elf_range_u64(meh.e_shoff,
+                                 (uint64_t)meh.e_shnum * sizeof(ny_test_elf64_shdr_t),
+                                 member_size)) {
         free(member); TEST_AR_FAIL;
       }
-      ny_test_elf64_shdr_t *msh = (ny_test_elf64_shdr_t *)(void *)(member + meh.e_shoff);
+      ny_test_elf64_shdr_t *msh =
+          (ny_test_elf64_shdr_t *)(void *)(member + meh.e_shoff);
       if (meh.e_shstrndx >= meh.e_shnum ||
-          msh[meh.e_shstrndx].sh_offset + msh[meh.e_shstrndx].sh_size > member_size) {
+          !ny_test_elf_range_u64(msh[meh.e_shstrndx].sh_offset,
+                                 msh[meh.e_shstrndx].sh_size, member_size)) {
         free(member); TEST_AR_FAIL;
       }
-      const char *mshstr = (const char *)(member + msh[meh.e_shstrndx].sh_offset);
+      const char *mshstr =
+          (const char *)(member + msh[meh.e_shstrndx].sh_offset);
       int mtext_i = -1, mrodata_i = -1, mdata_i = -1, msym_i = -1, mstr_i = -1, mrela_i = -1;
       for (int mi = 0; mi < meh.e_shnum; ++mi) {
-        const char *mn = msh[mi].sh_name < msh[meh.e_shstrndx].sh_size ? mshstr + msh[mi].sh_name : "";
+        const char *mn = msh[mi].sh_name < msh[meh.e_shstrndx].sh_size
+                             ? mshstr + msh[mi].sh_name : "";
         if (strcmp(mn, ".text") == 0) mtext_i = mi;
         else if (strcmp(mn, ".rodata") == 0) mrodata_i = mi;
         else if (strcmp(mn, ".data") == 0) mdata_i = mi;
@@ -2632,11 +2866,11 @@ static int test_internal_elf64_link_run(const char *obj_path,
         else if (strcmp(mn, ".rela.text") == 0) mrela_i = mi;
       }
       if (mtext_i < 0 || msym_i < 0 || mstr_i < 0 ||
-          msh[mtext_i].sh_offset + msh[mtext_i].sh_size > member_size ||
-          msh[msym_i].sh_offset + msh[msym_i].sh_size > member_size ||
-          msh[mstr_i].sh_offset + msh[mstr_i].sh_size > member_size ||
-          (mrodata_i >= 0 && msh[mrodata_i].sh_offset + msh[mrodata_i].sh_size > member_size) ||
-          (mdata_i >= 0 && msh[mdata_i].sh_offset + msh[mdata_i].sh_size > member_size)) {
+          !ny_test_elf_range_u64(msh[mtext_i].sh_offset, msh[mtext_i].sh_size, member_size) ||
+          !ny_test_elf_range_u64(msh[msym_i].sh_offset, msh[msym_i].sh_size, member_size) ||
+          !ny_test_elf_range_u64(msh[mstr_i].sh_offset, msh[mstr_i].sh_size, member_size) ||
+          (mrodata_i >= 0 && !ny_test_elf_range_u64(msh[mrodata_i].sh_offset, msh[mrodata_i].sh_size, member_size)) ||
+          (mdata_i >= 0 && !ny_test_elf_range_u64(msh[mdata_i].sh_offset, msh[mdata_i].sh_size, member_size))) {
         free(member); TEST_AR_FAIL;
       }
       size_t mtext_len = (size_t)msh[mtext_i].sh_size;
@@ -2650,7 +2884,7 @@ static int test_internal_elf64_link_run(const char *obj_path,
       for (size_t mj = 0; mj < msym_count && append_off == UINTPTR_MAX; ++mj) {
         if (msym[mj].st_name >= mstrtab_len) continue;
         const char *mn = mstrtab + msym[mj].st_name;
-        if (!mn[0]) continue;
+        if (!mn[0] || strcmp(mn, extracted_symbols[ei]) != 0) continue;
         int mdi = test_link_sym_index(defs, def_count, mn);
         if (mdi < 0) continue;
         uint16_t sym_sec = (uint16_t)msym[mj].st_shndx;
@@ -2667,23 +2901,31 @@ static int test_internal_elf64_link_run(const char *obj_path,
       size_t data_off = rodata_off + mrodata_len;
       size_t member_linked_len = data_off + mdata_len;
       member_linked_len = append_off + ((member_linked_len - append_off + 15u) & ~15u);
-      if (mrela_i >= 0 && msh[mrela_i].sh_offset + msh[mrela_i].sh_size <= member_size) {
-        ny_test_elf64_rela_t *mrela = (ny_test_elf64_rela_t *)(void *)(member + msh[mrela_i].sh_offset);
+      if (mrela_i >= 0 &&
+          ny_test_elf_range_u64(msh[mrela_i].sh_offset, msh[mrela_i].sh_size,
+                                member_size)) {
+        ny_test_elf64_rela_t *mrela =
+            (ny_test_elf64_rela_t *)(void *)(member + msh[mrela_i].sh_offset);
         size_t mrela_count = msh[mrela_i].sh_entsize
-                                 ? (size_t)(msh[mrela_i].sh_size / msh[mrela_i].sh_entsize) : 0;
+                                 ? (size_t)(msh[mrela_i].sh_size /
+                                            msh[mrela_i].sh_entsize)
+                                 : 0;
         for (size_t mj = 0; mj < mrela_count; ++mj) {
           uint32_t mtype = (uint32_t)(mrela[mj].r_info & 0xffffffffu);
           uint32_t msi = (uint32_t)(mrela[mj].r_info >> 32);
-          if ((mtype != 2 && mtype != 4 && mtype != 11) || msi >= msym_count ||
-              msym[msi].st_name >= mstrtab_len ||
-              mrela[mj].r_offset + 4 > mtext_len) { free(member); TEST_AR_FAIL; }
+          if ((mtype != 2 && mtype != 4 && mtype != 11) ||
+              msi >= msym_count || msym[msi].st_name >= mstrtab_len ||
+              !ny_test_elf_range_u64(mrela[mj].r_offset, 4, mtext_len)) {
+            free(member); TEST_AR_FAIL;
+          }
           uint16_t sym_ndx = (uint16_t)msym[msi].st_shndx;
           uint64_t msaddr = 0;
           bool msec_sym = false;
-          if (mrela[mj].r_offset < mtext_len && sym_ndx == (uint16_t)mtext_i) {
+          if (sym_ndx == (uint16_t)mtext_i) {
             msaddr = base + append_off + msym[msi].st_value;
             msec_sym = true;
-          } else if (mrodata_i >= 0 && sym_ndx == (uint16_t)mrodata_i) {
+          } else if (mrodata_i >= 0 &&
+                     sym_ndx == (uint16_t)mrodata_i) {
             msaddr = base + rodata_off + msym[msi].st_value;
             msec_sym = true;
           } else if (mdata_i >= 0 && sym_ndx == (uint16_t)mdata_i) {
@@ -2703,6 +2945,8 @@ static int test_internal_elf64_link_run(const char *obj_path,
                                                               defs, &def_count)) {
                     free(member); TEST_AR_FAIL;
                   }
+                  snprintf(extracted_symbols[extracted_count], 256, "%s",
+                           mtarget);
                   extracted_offsets[extracted_count++] = dep_off;
                   member_linked_len = linked_text_len;
                   mdi = test_link_sym_index(defs, def_count, mtarget);
@@ -2771,7 +3015,8 @@ static int test_internal_elf64_link_run(const char *obj_path,
     uint32_t type = (uint32_t)(r->r_info & 0xffffffffu);
     uint32_t si = (uint32_t)(r->r_info >> 32);
     if ((type != 2 && type != 4) || si >= sym_count ||
-        r->r_offset + 4 > text_len || sym[si].st_name >= strtab_len) TEST_AR_FAIL;
+        !ny_test_elf_range_u64(r->r_offset, 4, text_len) ||
+        sym[si].st_name >= strtab_len) TEST_AR_FAIL;
     const char *name = strtab + sym[si].st_name;
     if (test_link_sym_index(defs, def_count, name) >= 0)
       continue;
@@ -2805,23 +3050,34 @@ static int test_internal_elf64_link_run(const char *obj_path,
       TEST_AR_FAIL;
     linked_text_len = stub_off + stub_len;
   }
+  const size_t file_off = 0x1000;
+  const size_t harness_off = (linked_text_len + 15u) & ~15u;
+  const size_t data_file_off =
+      (file_off + harness_off + 256u + 0xfffu) & ~(size_t)0xfffu;
+  const uint64_t data_base = base + (data_file_off - file_off);
   for (size_t i = 0; i < max_rela; ++i) {
     ny_test_elf64_rela_t *r = (ny_test_elf64_rela_t *)(void *)(obj + sh[rela_i].sh_offset) + i;
     uint32_t type = (uint32_t)(r->r_info & 0xffffffffu);
     uint32_t si = (uint32_t)(r->r_info >> 32);
     if ((type != 2 && type != 4) || si >= sym_count ||
-        r->r_offset + 4 > text_len || sym[si].st_name >= strtab_len) TEST_AR_FAIL;
+        !ny_test_elf_range_u64(r->r_offset, 4, text_len) ||
+        sym[si].st_name >= strtab_len) TEST_AR_FAIL;
     const char *name = strtab + sym[si].st_name;
     int di = test_link_sym_index(defs, def_count, name);
     if (di < 0) TEST_AR_FAIL;
-    uint64_t saddr = base + defs[di].off;
+    uint64_t saddr;
+    if (defs[di].shndx == TEST_LINK_SH_ABS)
+      saddr = defs[di].off;
+    else if (defs[di].shndx == TEST_LINK_SH_DATA)
+      saddr = data_base + defs[di].off;
+    else
+      saddr = base + defs[di].off;
     uint64_t paddr = base + r->r_offset;
     int64_t val = (int64_t)saddr + r->r_addend - (int64_t)paddr;
     if (val < INT32_MIN || val > INT32_MAX) TEST_AR_FAIL;
     int32_t v32 = (int32_t)val;
     memcpy(text + r->r_offset, &v32, 4);
   }
-  size_t harness_off = (linked_text_len + 15u) & ~15u;
   if (harness_off + 256 > text_cap) {
     size_t new_cap = text_cap;
     while (new_cap < harness_off + 4096) new_cap *= 2;
@@ -2835,8 +3091,7 @@ static int test_internal_elf64_link_run(const char *obj_path,
                                          ret_kind, expected, base, harness_off, rt_main_off);
   if (harness_len == 0) TEST_AR_FAIL;
   size_t code_len = harness_off + harness_len;
-  size_t file_off = 0x1000;
-  size_t file_len = file_off + code_len;
+  size_t file_len = data_len ? data_file_off + data_len : file_off + code_len;
   unsigned char *exe = (unsigned char *)calloc(1, file_len);
   if (!exe) TEST_AR_FAIL;
   ny_test_elf64_ehdr_t oh = {0};
@@ -2844,17 +3099,28 @@ static int test_internal_elf64_link_run(const char *obj_path,
   oh.e_ident[4] = 2; oh.e_ident[5] = 1; oh.e_ident[6] = 1;
   oh.e_type = 2; oh.e_machine = 62; oh.e_version = 1;
   oh.e_entry = base + harness_off; oh.e_phoff = sizeof(oh);
-  oh.e_ehsize = sizeof(oh); oh.e_phentsize = sizeof(ny_test_elf64_phdr_t); oh.e_phnum = 1;
+  oh.e_ehsize = sizeof(oh); oh.e_phentsize = sizeof(ny_test_elf64_phdr_t);
+  oh.e_phnum = data_len ? 2 : 1;
   ny_test_elf64_phdr_t ph = {0};
   ph.p_type = 1; ph.p_flags = 5; ph.p_offset = file_off; ph.p_vaddr = base;
   ph.p_paddr = base; ph.p_filesz = code_len; ph.p_memsz = code_len; ph.p_align = 0x1000;
   memcpy(exe, &oh, sizeof(oh));
   memcpy(exe + oh.e_phoff, &ph, sizeof(ph));
+  if (data_len) {
+    ny_test_elf64_phdr_t data_ph = {0};
+    data_ph.p_type = 1; data_ph.p_flags = 6;
+    data_ph.p_offset = data_file_off; data_ph.p_vaddr = data_base;
+    data_ph.p_paddr = data_base; data_ph.p_filesz = data_len;
+    data_ph.p_memsz = data_len; data_ph.p_align = 0x1000;
+    memcpy(exe + oh.e_phoff + sizeof(ph), &data_ph, sizeof(data_ph));
+  }
   memcpy(exe + file_off, text, code_len);
+  if (data_len)
+    memcpy(exe + data_file_off, data, data_len);
   char exe_path[PATH_MAX];
   ok = test_write_unique_executable(exe_path, "ny-internal-link-run", exe,
                                     file_len);
-  free(exe); free(text); free(obj); free(archive_data); test_ar_free_symtab(&ar_st);
+  free(exe); free(text); free(data); free(obj); free(archive_data); test_ar_free_symtab(&ar_st);
   if (!ok) return 2;
   char *run_argv[] = {exe_path, NULL};
   int rc = run_debug_argv(run_argv, 30, 0);

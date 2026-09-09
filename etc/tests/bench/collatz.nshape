@@ -1,0 +1,51 @@
+shape collatz {
+  family "algorithm"
+  features ["c-vs-ny", "checksum"]
+  template ny-test-case
+  expect compile_and_run
+  ;; Translated from the QBE minic test: minic/test/collatz.c.
+  source ny <<'NY'
+def steps = i64buf_new(1000)
+mut best = 0
+mut nv = 1
+while nv < 1000 {
+   mut n = nv
+   mut c = 0
+   while n != 1 {
+      if n < nv {
+         c += i64buf_load(steps, n)
+         break
+      }
+      if n % 2 == 1 { n = 3 * n + 1 } else { n = n / 2 }
+      c += 1
+   }
+   i64buf_store(steps, nv, c)
+   if c > best { best = c }
+   nv += 1
+}
+print("should print 178: ", best)
+NY
+  source c <<'C'
+#include <stdio.h>
+
+int main(void) {
+  int steps[1000] = {0};
+  int best = 0;
+  for (int value = 1; value < 1000; ++value) {
+    int n = value;
+    int count = 0;
+    while (n != 1) {
+      if (n < value) {
+        count += steps[n];
+        break;
+      }
+      n = (n & 1) ? 3 * n + 1 : n / 2;
+      ++count;
+    }
+    steps[value] = count;
+    if (count > best) best = count;
+  }
+  printf("should print 178: %d\n", best);
+}
+C
+}

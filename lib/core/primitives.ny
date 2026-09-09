@@ -99,11 +99,17 @@ comptime emit _prim_bin_bool(lt, __lt, "Returns **true** if `a < b` (untagged)."
 comptime emit _prim_bin_bool(le, __le, "Returns **true** if `a <= b` (untagged).")
 comptime emit _prim_bin_bool(gt, __gt, "Returns **true** if `a > b` (untagged).")
 comptime emit _prim_bin_bool(ge, __ge, "Returns **true** if `a >= b` (untagged).")
-comptime emit _prim_un_bool(is_nil, __is_nil, "Returns **true** only if `x` is nil. Integer 0 is not nil.")
+
+@jit
+@inline
+fn is_nil(any x) bool {
+   "Returns **true** only if `x` is nil. Integer 0 is not nil."
+   if __is_int(x) { return false }
+   x == nil
+}
+
 comptime emit _prim_un_bool(is_int, __is_int, "Returns **true** if `x` is a tagged integer.")
-
-comptime emit _prim_zero(globals, ptr, __globals, "Returns the pointer to the global variable table.")
-
+comptime emit _prim_zero(globals, dict, __globals, "Returns the global variable dictionary.")
 comptime emit _prim_zero(argc, int, __argc, "Returns the number of command-line arguments.")
 comptime emit _prim_zero(envc, int, __envc, "Returns the number of environment variables.")
 comptime emit _prim_zero(errno, int, __errno, "Returns the last error number from the system.")

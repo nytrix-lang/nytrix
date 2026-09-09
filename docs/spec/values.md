@@ -90,13 +90,20 @@ out = out.append(4)
 add(out, 5)
 ```
 
-`append` returns the updated list. Assign the result back to keep the new
-value.
+`append` and `add` both mutate the list in place and return that same list.
+Use receiver form when it reads better:
 
-`add(xs, value)` mutates lists and sets in place and returns the container.
-Code may use it as a statement when the binding already points at the mutable
-container. Prefer one style inside a function: receiver `append` with
-assignment, or free `add` for in-place mutation.
+```ny
+xs.append(value)
+```
+
+Use free-function form for generic container code:
+
+```ny
+add(xs, value)
+```
+
+Neither form requires reassignment for list mutation.
 
 Indexing a reserved-but-empty slot is not valid. Use `append`, a literal, or a
 standard-library helper that fills the list before reading by index.
@@ -159,13 +166,13 @@ a stable program contract across insertions and resizes.
 
 ## List mutability
 
-Lists are value-typed. `list.append` and `list.extend` return new lists. They
-do not modify the source. Always reassign:
+Lists mutate in place. `list.append` and `list.extend` return the same list,
+which allows chaining without forcing reassignment:
 
 ```ny
 mut xs = []
-xs = xs.append(1)
-xs = xs.extend([2, 3])
+xs.append(1)
+xs.extend([2, 3])
 ```
 
 ## Core idioms
@@ -178,8 +185,8 @@ xs = xs.extend([2, 3])
 | `value?.member` | Optional chaining - returns `nil` when receiver is `nil`. |
 | `dict.get(key, default)` | Safe lookup with fallback for missing keys. |
 | `dict.set(key, value)` | Mutates dict in place, returns the same dict. |
-| `list.append(item)` | Returns a new list; reassign the result. |
-| `list.extend(other)` | Returns a new list; reassign the result. |
+| `list.append(item)` | Mutates the list in place and returns it. |
+| `list.extend(other)` | Mutates the list in place and returns it. |
 | `clone(value)` | Detached mutable copy of a dict or list. |
 | `is_dict(v)`, `is_list(v)`, `is_int(v)`,... | Runtime type predicates. |
 

@@ -317,11 +317,11 @@ void ny_write_text_file(const char *path, const char *contents) {
 
 static bool nytrix_has_sources(const char *root) {
   char probe[8192];
-  snprintf(probe, sizeof(probe), "%s/src/rt/runtime.h", root);
+  snprintf(probe, sizeof(probe), "%s/src/code/runtime/runtime.h", root);
   return ny_access(probe, R_OK) == 0;
 }
 
-char *ny_get_executable_path(void) {
+const char *ny_get_executable_path(void) {
   static char buf[PATH_MAX];
   if (buf[0])
     return buf;
@@ -347,7 +347,7 @@ char *ny_get_executable_path(void) {
 }
 
 char *ny_get_executable_dir(void) {
-  char *path = ny_get_executable_path();
+  const char *path = ny_get_executable_path();
   if (!path)
     return NULL;
   static char dir[PATH_MAX];
@@ -636,29 +636,27 @@ int ny_env_int_range(const char *name, int fallback, int minv, int maxv) {
   return v;
 }
 
-void ny_str_list_append(char ***list, size_t *len, size_t *cap, const char *str) {
+bool ny_str_list_append(char ***list, size_t *len, size_t *cap, const char *str) {
   if (!list || !len || !cap)
-    return;
+    return false;
   if (*len == *cap) {
-    if (*cap > SIZE_MAX / 2) {
-      fprintf(stderr, "OOM in str_list_append\n");
-      exit(1);
-    }
+    if (*cap > SIZE_MAX / 2)
+      return false;
     size_t new_cap = *cap ? (*cap * 2) : 8;
     size_t bytes = 0;
-    if (!ny_size_mul_ok(new_cap, sizeof(char *), &bytes)) {
-      fprintf(stderr, "OOM in str_list_append\n");
-      exit(1);
-    }
+    if (!ny_size_mul_ok(new_cap, sizeof(char *), &bytes))
+      return false;
     char **tmp = realloc(*list, bytes);
-    if (!tmp) {
-      fprintf(stderr, "OOM in str_list_append\n");
-      exit(1);
-    }
+    if (!tmp)
+      return false;
     *list = tmp;
     *cap = new_cap;
   }
-  (*list)[(*len)++] = ny_strdup(str);
+  char *copy = ny_strdup(str);
+  if (!copy)
+    return false;
+  (*list)[(*len)++] = copy;
+  return true;
 }
 
 void ny_str_list_free(char **list, size_t count) {

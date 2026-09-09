@@ -1,0 +1,48 @@
+shape knight {
+  family "algorithm"
+  features ["c-vs-ny", "checksum"]
+  template ny-test-case
+  expect compile_and_run
+  ;; Translated from the QBE minic test: minic/test/knight.c.
+  source ny <<'NY'
+def board = i64buf_new(64)
+fn moves(int depth, int x, int y) int {
+   if depth == 0 { return 1 }
+   mut total = 0
+   mut i = 0
+   while i < 8 {
+      def dx = [-2, -2, -1, -1, 1, 1, 2, 2][i]
+      def dy = [-1, 1, -2, 2, -2, 2, -1, 1][i]
+      def nx = x + dx
+      def ny = y + dy
+      if nx >= 0 && nx < 8 && ny >= 0 && ny < 8 { total += moves(depth - 1, nx, ny) }
+      i += 1
+   }
+   total
+}
+print(moves(4, 2, 0))
+NY
+  source c <<'C'
+#include <stdio.h>
+
+static int moves(int depth, int x, int y) {
+  static const int dx[8] = {-2, -2, -1, -1, 1, 1, 2, 2};
+  static const int dy[8] = {-1, 1, -2, 2, -2, 2, -1, 1};
+  if (depth == 0) return 1;
+
+  int total = 0;
+  for (int i = 0; i < 8; ++i) {
+    int next_x = x + dx[i];
+    int next_y = y + dy[i];
+    if (next_x >= 0 && next_x < 8 && next_y >= 0 && next_y < 8) {
+      total += moves(depth - 1, next_x, next_y);
+    }
+  }
+  return total;
+}
+
+int main(void) {
+  printf("%d\n", moves(4, 2, 0));
+}
+C
+}

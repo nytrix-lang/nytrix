@@ -1,0 +1,5 @@
+#!/bin/sh
+set -eu
+
+# `git am` does not run pre-commit automatically.
+exec "$(git rev-parse --show-toplevel)/.githooks/pre-commit"

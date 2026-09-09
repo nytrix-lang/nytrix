@@ -1,8 +1,8 @@
-;; Keywords: simmd simd vectorized math
+;; Keywords: simmd simd vectorized math sha256 sha-256
 ;; Explicit SIMD and instruction-control operations for vectorized numeric code.
 ;; References:
 ;; - std.math
-module std.math.simmd(has_feature, has_sse2, has_sse3, has_ssse3, has_sse41, has_sse42, has_avx, has_avx2, has_avx512f, has_avx512bw, has_avx512vl, has_bmi1, has_bmi2, has_lzcnt, has_fma, has_popcnt, has_aes, has_pclmul, has_crc32, has_crc32c, has_sha, has_neon, popcnt32, ctz32, clz32, bswap32, rotl32, rotr32, popcnt64, ctz64, clz64, bswap64, rotl64, rotr64, pext64, pdep64, clmul64_lo, clmul64_hi, u8x16_xor_ptr, u8x16_and_ptr, u8x16_or_ptr, u8x16_add_ptr, u8x16_sub_ptr, u8x16_cmpeq_mask_ptr, u8x16_shuffle_ptr, u16x8_add_ptr, u16x8_sub_ptr, u16x8_mullo_ptr, i32x4_add_ptr, i32x4_sub_ptr, i32x4_mullo_ptr, i32x4_xor_ptr, i32x4_and_ptr, i32x4_or_ptr, u32x4_add_ptr, u32x4_sub_ptr, u32x4_xor_ptr, u32x4_and_ptr, u32x4_or_ptr, u64x2_add_ptr, u64x2_xor_ptr, u64x2_and_ptr, u64x2_or_ptr, f32x4_add_ptr, f32x4_sub_ptr, f32x4_mul_ptr, f32x4_div_ptr, f32x4_min_ptr, f32x4_max_ptr, f32x4_sqrt_ptr, f32x4_fma_ptr, f64x2_add_ptr, f64x2_sub_ptr, f64x2_mul_ptr, f64x2_div_ptr, f64x2_sqrt_ptr, f64x2_fma_ptr, prefetch_read, prefetch_write, pause, lfence, sfence, mfence, rdtsc, crc32c_u8, crc32_u8, crc32c_u64, ascii_class_mask, ascii_class_reduce, ascii_class_reduce_ptr, ascii_vowel_reduce, ascii_vowel_reduce_ptr, jsonscan_ascii, i32_hash_put_ptr, i32_hash_probe_sum_ptr, i32_sqlscan_sum_ptr, mat4_mul, mat4_mul_ptr)
+module std.math.simmd(has_feature, has_sse2, has_sse3, has_ssse3, has_sse41, has_sse42, has_avx, has_avx2, has_avx512f, has_avx512bw, has_avx512vl, has_bmi1, has_bmi2, has_lzcnt, has_fma, has_popcnt, has_aes, has_pclmul, has_crc32, has_crc32c, has_sha, has_neon, popcnt32, ctz32, clz32, bswap32, rotl32, rotr32, popcnt64, ctz64, clz64, bswap64, rotl64, rotr64, pext64, pdep64, clmul64_lo, clmul64_hi, sha256_block, sha256_blocks, u8x16_xor_ptr, u8x16_and_ptr, u8x16_or_ptr, u8x16_add_ptr, u8x16_sub_ptr, u8x16_cmpeq_mask_ptr, u8x16_shuffle_ptr, u16x8_add_ptr, u16x8_sub_ptr, u16x8_mullo_ptr, i32x4_add_ptr, i32x4_sub_ptr, i32x4_mullo_ptr, i32x4_xor_ptr, i32x4_and_ptr, i32x4_or_ptr, u32x4_add_ptr, u32x4_sub_ptr, u32x4_xor_ptr, u32x4_and_ptr, u32x4_or_ptr, u64x2_add_ptr, u64x2_xor_ptr, u64x2_and_u64x2_or_ptr, f32x4_add_ptr, f32x4_sub_ptr, f32x4_mul_ptr, f32x4_div_ptr, f32x4_min_ptr, f32x4_max_ptr, f32x4_sqrt_ptr, f32x4_fma_ptr, f64x2_add_ptr, f64x2_sub_ptr, f64x2_mul_ptr, f64x2_div_ptr, f64x2_sqrt_ptr, f64x2_fma_ptr, prefetch_read, prefetch_write, pause, lfence, sfence, mfence, rdtsc, crc32c_u8, crc32_u8, crc32c_u64, ascii_class_mask, ascii_class_reduce, ascii_class_reduce_ptr, ascii_vowel_reduce, ascii_vowel_reduce_ptr, jsonscan_ascii, i32_hash_put_ptr, i32_hash_probe_sum_ptr, i32_sqlscan_sum_ptr, mat4_mul, mat4_mul_ptr)
 use std.core
 
 def _ASCII_VOWEL_MASK = 9150281795239936
@@ -94,6 +94,18 @@ fn clmul64_lo(int x, int y) int {
 fn clmul64_hi(int x, int y) int {
    "High 64 bits of carry-less GF(2) multiplication. Uses PCLMUL where available."
    __simmd_clmul64_hi(x, y)
+}
+
+fn sha256_block(ptr state, ptr block) bool {
+   "Processes one 64-byte SHA-256 block, updating the 32-byte state in place.
+   Uses Intel SHA-NI / ARMv8 SHA intrinsics when available, otherwise falls back to software."
+   __simmd_sha256_block(state, block)
+}
+
+fn sha256_blocks(ptr state, ptr blocks, int count) int {
+   "Processes multiple 64-byte SHA-256 blocks, updating the 32-byte state in place.
+   Returns the number of blocks processed."
+   __simmd_sha256_blocks(state, blocks, count)
 }
 
 fn u8x16_xor_ptr(ptr a, ptr b, ptr out) ptr {
@@ -402,6 +414,134 @@ fn mat4_mul(list a, list b, any out=0) list {
 fn mat4_mul_ptr(ptr a, ptr b, ptr out) ptr {
    "SIMD-backed 4x4 matrix multiply for raw f32 pointer buffers."
    __simd_mat4_mul_ptr(a, b, out)
+}
+
+;; ---------------------------------------------------------------------------
+;; Pointer Compression Utilities
+;;
+;; Compress 64-bit heap pointers to 32-bit indices relative to a base
+;; address, and decompress back.  This halves cache-line pointer density
+;; (2× more nodes per cache line) for tree, list, and graph data structures.
+;;
+;; Limitations:
+;; - All pointers must lie within a 4 GB region (base to base + 2^32).
+;; - The base address must be page-aligned and stable for the lifetime
+;;   of the compressed indices.
+;; - A zero compressed index (nil) encodes a null pointer.
+;;
+;; Usage:
+;;   def pool = malloc(1 << 30)  ;; 1 GB arena
+;;   def cm = ptrcomp_new(pool)
+;;   def idx = ptrcomp_compress(cm, ptr_val)  ;; → 32-bit index
+;;   def ptr = ptrcomp_decompress(cm, idx)    ;; → 64-bit pointer
+;;
+;; References:
+;;  Russell et al. — "Reducing DRAM Power Consumption with Efficient
+;;   Memory Partitioning" (ISCA 2001). Pointer compression for DRAM
+;;   address width reduction.
+;;  Fog — Optimizing software in C++ (Vol.1), Ch.14: data layout.
+fn ptrcomp_new(ptr base) list {
+   "Create a pointer compression context from a base address.
+   State layout: [base, shift_or_mask].  The base must be page-aligned
+   and all compressed pointers must lie within 4 GB."
+   ;; Store base in low 32 bits and a right-shift (0) in high bits.
+   ;; For simplicity, use direct 32-bit truncation: idx = (ptr - base) >> 2
+   ;; since all NYtrix heap allocations are at least 8-byte aligned.
+   def shift = 2
+   [base, shift]
+}
+
+fn ptrcomp_compress(list ctx, ptr p) int {
+   "Compress a pointer to a 32-bit index.  Returns 0 for null."
+   if !p { return 0 }
+   def base = ctx[0]
+   def shift = ctx[1]
+   def raw = p - base
+   (raw >> shift) & 0xffffffff
+}
+
+fn ptrcomp_decompress(list ctx, int idx) ptr {
+   "Decompress a 32-bit index back to a pointer.  Returns 0 for idx=0."
+   if !idx { return 0 }
+   def base = ctx[0]
+   def shift = ctx[1]
+   base + (idx << shift)
+}
+
+fn ptrcomp_base(list ctx) ptr {
+   "Returns the base address of the compression context."
+   ctx[0]
+}
+
+fn ptrcomp_max_entries(list ctx) int {
+   "Returns the maximum number of entries that can be compressed(≈2^30)."
+   1 << 30
+}
+
+;; ---------------------------------------------------------------------------
+;; Bump-Allocator Aware Pool Allocator
+;;
+;; High-level pool that combines bump allocation with pointer compression
+;; for tree/list/graph structures.  All node pointers are stored as 32-bit
+;; indices, giving 2× cache density for pointer-heavy data structures.
+;;
+;; Usage:
+;;   def pool = ptrpool_new(1 << 20)  ;; 1 MB pool
+;;   def node_a = ptrpool_alloc(pool, 64)  ;; 64-byte node
+;;   def node_b = ptrpool_alloc(pool, 64)
+;;   def idx_a = ptrpool_index(pool, node_a)
+;;   def idx_b = ptrpool_index(pool, node_b)
+;;   def a_ptr = ptrpool_deref(pool, idx_a)  ;; back to pointer
+;;   ptrpool_reset(pool)  ;; reclaim all at once
+fn ptrpool_new(int cap) list {
+   "Create a pointer-compressed pool allocator with `cap` bytes capacity."
+   def buf = malloc(cap)
+   if !buf && cap > 0 { panic("ptrpool allocation failed") }
+   def cm = ptrcomp_new(buf)
+   ;; [bump_state, compress_ctx, capacity]
+   [buf, cap, 0, buf, 2]
+}
+
+fn ptrpool_alloc(list pool, int n) ptr {
+   "Allocate `n` bytes from the pool.  Returns 0 when exhausted."
+   if n <= 0 { return 0 }
+   def base = pool[0]  cap = pool[1]  mut off = pool[2]
+   ;; Align to 8 bytes
+   def rem = off % 8
+   if rem != 0 { off += 8 - rem }
+   if off + n > cap { return 0 }
+   def p = base + off
+   pool[2] = off + n
+   p
+}
+
+fn ptrpool_index(list pool, ptr p) int {
+   "Compress a pointer from this pool to a 32-bit index."
+   def cm = [pool[3], pool[4]]
+   ptrcomp_compress(cm, p)
+}
+
+fn ptrpool_deref(list pool, int idx) ptr {
+   "Decompress a 32-bit index back to a pointer in this pool."
+   def cm = [pool[3], pool[4]]
+   ptrcomp_decompress(cm, idx)
+}
+
+fn ptrpool_reset(list pool) {
+   "Reset the pool offset to zero(reclaim all memory)."
+   pool[2] = 0
+}
+
+fn ptrpool_used(list pool) int {
+   "Returns currently used bytes in the pool."
+   pool[2]
+}
+
+fn ptrpool_available(list pool) int {
+   "Returns remaining free bytes in the pool."
+   def cap = pool[1]  off = pool[2]
+   if off >= cap { return 0 }
+   cap - off
 }
 
 #main {

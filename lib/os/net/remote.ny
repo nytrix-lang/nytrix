@@ -95,33 +95,33 @@ fn _record(dict io, str op, str data) int {
    mut rows = io.get("transcript", 0)
    if !is_list(rows) { rows = list(8) }
    rows = rows.append({"op": op, "data": data, "size": data.len})
-   io.set("transcript", rows)
+   set(io, "transcript", rows)
    0
 }
 
 fn tube_fd(int fd, any host="", any port=0, any level="", int timeout_ms=-1, int chunk_size=0) dict {
    "Wraps an existing TCP socket fd in a buffered remote tube."
    mut io = dict(20)
-   io = io.set("kind", "tcp")
-   io = io.set("fd", fd)
-   io = io.set("pid", -1)
-   io = io.set("proc", 0)
-   io = io.set("host", host)
-   io = io.set("port", port)
-   io = io.set("buf", "")
-   io = io.set("chunk", 4096)
-   io = io.set("closed", fd < 0)
-   io = io.set("offline", false)
-   io = io.set("script", "")
-   io = io.set("sent", "")
-   io = io.set("transcript", list(8))
+   io = set(io, "kind", "tcp")
+   io = set(io, "fd", fd)
+   io = set(io, "pid", -1)
+   io = set(io, "proc", 0)
+   io = set(io, "host", host)
+   io = set(io, "port", port)
+   io = set(io, "buf", "")
+   io = set(io, "chunk", 4096)
+   io = set(io, "closed", fd < 0)
+   io = set(io, "offline", false)
+   io = set(io, "script", "")
+   io = set(io, "sent", "")
+   io = set(io, "transcript", list(8))
    def lvl = (is_str(level) && strip(level).len > 0) ? netctx.level_name(level) : netctx.default_level()
-   io = io.set("level", lvl)
-   io = io.set("verbose", netctx.level_value(lvl) >= netctx.level_value("debug"))
+   io = set(io, "level", lvl)
+   io = set(io, "verbose", netctx.level_value(lvl) >= netctx.level_value("debug"))
    def timeout_eff = (timeout_ms >= 0) ? timeout_ms : netctx.timeout_ms(5000)
-   io = io.set("timeout_ms", timeout_eff)
+   io = set(io, "timeout_ms", timeout_eff)
    def chunk_eff = (chunk_size > 0) ? chunk_size : netctx.chunk_size()
-   if chunk_eff > 0 { io = io.set("chunk", max(1, min(chunk_eff, 1048576))) }
+   if chunk_eff > 0 { io = set(io, "chunk", max(1, min(chunk_eff, 1048576))) }
    if fd >= 0 && timeout_eff > 0 { sock.socket_set_timeout_ms(fd, timeout_eff) }
    _log(io, "trace", "created")
    return io
@@ -133,10 +133,10 @@ fn tube_process(any p, any name="process", any level="", int timeout_ms=-1, int 
    "Wraps a `std.os.io.spawn` process object as a buffered tube."
    if !is_dict(p) { return tube_fd(-1, name, 0, level, timeout_ms, chunk_size) }
    mut io = tube_fd(-1, name, 0, level, timeout_ms, chunk_size)
-   io.set("kind", "process")
-   io.set("closed", false)
-   io.set("proc", p)
-   io.set("pid", p.get("pid", -1))
+   set(io, "kind", "process")
+   set(io, "closed", false)
+   set(io, "proc", p)
+   set(io, "pid", p.get("pid", -1))
    _log(io, "trace", "process tube created")
    io
 }
@@ -145,11 +145,11 @@ fn tube_fixture(any data="", any level="", int chunk_size=0) dict {
    "Creates an offline tube backed by scripted receive bytes."
    if !is_str(data) { data = to_str(data) }
    mut io = tube_fd(-1, "fixture", 0, level, 0, chunk_size)
-   io.set("closed", false)
-   io.set("offline", true)
-   io.set("script", data)
-   io.set("sent", "")
-   io.set("transcript", list(8))
+   set(io, "closed", false)
+   set(io, "offline", true)
+   set(io, "script", data)
+   set(io, "sent", "")
+   set(io, "transcript", list(8))
    _log(io, "trace", "fixture " + to_str(data.len) + "B")
    io
 }
@@ -345,8 +345,8 @@ fn set_level(any io, any level="debug") any {
    "Sets the logging level on an existing tube."
    if !is_dict(io) { return io }
    def lvl = netctx.level_name(level)
-   io.set("level", lvl)
-   io.set("verbose", netctx.level_value(lvl) >= netctx.level_value("debug"))
+   set(io, "level", lvl)
+   set(io, "verbose", netctx.level_value(lvl) >= netctx.level_value("debug"))
    _log(io, "info", "level=" + lvl)
    return io
 }
@@ -372,7 +372,7 @@ fn set_chunk_size(any io, int n) any {
    if !is_dict(io) { return io }
    if n < 1 { n = 1 }
    if n > 1048576 { n = 1048576 }
-   io.set("chunk", n)
+   set(io, "chunk", n)
    return io
 }
 
@@ -380,7 +380,7 @@ fn set_timeout(any io, int timeout_ms) any {
    "Sets socket recv/send timeout for this tube in milliseconds."
    if !is_dict(io) { return io }
    if timeout_ms < 0 { timeout_ms = 0 }
-   io.set("timeout_ms", timeout_ms)
+   set(io, "timeout_ms", timeout_ms)
    def fd = fileno(io)
    if fd >= 0 { sock.socket_set_timeout_ms(fd, timeout_ms) }
    return io
@@ -393,7 +393,7 @@ fn _buf(any io) str {
 }
 
 fn _set_buf(any io, str b) any {
-   if is_dict(io) { io.set("buf", b) }
+   if is_dict(io) { set(io, "buf", b) }
    return io
 }
 
@@ -424,7 +424,7 @@ fn _read_more(dict io, int want) str {
       if !is_str(script) || script.len == 0 { return "" }
       def take = (script.len < want) ? script.len : want
       def got = slice(script, 0, take)
-      io.set("script", slice(script, take, script.len))
+      set(io, "script", slice(script, take, script.len))
       _record(io, "recv", got)
       _trace(io, "[<]", "recv", got)
       return got
@@ -432,7 +432,7 @@ fn _read_more(dict io, int want) str {
    if io.get("kind", "tcp") == "process" {
       def p = io.get("proc", 0)
       if !is_dict(p) { return "" }
-      def gotp = pio.recv(p, want)
+      def gotp = pio.recv(p, int(want))
       if is_str(gotp) && gotp.len > 0 {
          _record(io, "recv", gotp)
          _trace(io, "[<]", "recv", gotp)
@@ -465,12 +465,14 @@ fn _send_all(any io, any data) int {
    def _trace_ignore = (data.len > 0) ? _trace(io, "[>]", "send", data) : 0
    _record(io, "send", data)
    if io.get("offline", false) {
-      io.set("sent", io.get("sent", "") + data)
+      set(io, "sent", get(io, "sent", "") + data)
       return data.len
    }
    if io.get("kind", "tcp") == "process" {
       def sent = pio.send(io.get("proc", 0), data)
-      if is_ok(sent) { return unwrap(sent) }
+      if is_ok(sent) {
+         return data.len
+      }
       return -1
    }
    def fd = fileno(io)
@@ -488,7 +490,11 @@ fn send(any io, any data) int { return _send_all(io, data) }
 fn sendline(any io, any data="") int {
    "Sends `data` followed by `\\n`."
    if !is_str(data) { data = to_str(data) }
-   return _send_all(io, data + "\n")
+   def first = _send_all(io, data)
+   if first < 0 { return -1 }
+   def tail = _send_all(io, chr(10))
+   if tail < 0 { return -1 }
+   return first + tail
 }
 
 fn _recv_take(any io, any n=4096) str {
@@ -526,14 +532,21 @@ fn recvn(any io, int n) str {
 fn recv_until(any io, any needle, bool drop=false, int max_bytes=65536) str {
    "Receives until `needle` appears. Extra bytes after the needle remain buffered."
    if !is_dict(io) || !is_str(needle) { return "" }
-   if max_bytes <= 0 { max_bytes = 65536 }
+   ; Dynamic default arguments can arrive as the tagged sentinel value 1;
+   ; restore the documented ceiling before scanning.
+   if max_bytes <= 1 { max_bytes = 65536 }
    _log(io, "trace", "recvuntil needle=" + repr(needle) + " drop=" + to_str(drop) + " max=" + to_str(max_bytes))
    mut acc = clean(io)
    while acc.len < max_bytes {
-      def at = (needle.len == 0) ? 0 : find(acc, needle)
+      ; Guard the short-prefix case: the dynamic string bridge may report a
+      ; false match when the needle is longer than the accumulated bytes.
+      def at = (needle.len == 0) ? 0 : ((needle.len > acc.len) ? -1 : find(acc, needle))
       if at >= 0 {
          def end = at + needle.len
          def out_end = drop ? at : end
+         ; Exact reads end at the delimiter; avoid passing the dynamic
+         ; arithmetic result through the slice-index bridge.
+         if end == acc.len { return drop ? "" : acc }
          def out = slice(acc, 0, out_end)
          if end < acc.len { unrecv(io, slice(acc, end, acc.len)) }
          _log(io, "trace", "recvuntil hit len=" + to_str(out.len))
@@ -617,7 +630,7 @@ fn expect(any io, any needles, int max_bytes=65536) list {
    return [-1, buf]
 }
 
-fn expect_map(any io, any mapping, int max_bytes=65536) list {
+fn expect_map(any io, dict mapping, int max_bytes=65536) list {
    "Like `expect`, but maps matched needle to a caller-provided tag."
    if !is_dict(mapping) { return [nil, ""] }
    def ks = mapping.keys()
@@ -665,10 +678,14 @@ fn close(any io) int {
    if !is_dict(io) { return -1 }
    def fd = io.get("fd", -1)
    _log(io, "info", "close")
-   io.set("fd", -1)
-   io.set("closed", true)
+   set(io, "fd", -1)
+   set(io, "closed", true)
    if io.get("offline", false) { return 0 }
    if io.get("kind", "tcp") == "process" {
+      ; A child such as `cat` waits for EOF on stdin before exiting. Close
+      ; the sending side before reaping so `close` cannot block forever after
+      ; a successful receive.
+      def shut = pio.shutdown_send(io.get("proc", 0))
       def res = pio.close(io.get("proc", 0))
       if is_ok(res) { return unwrap(res) }
       return -1

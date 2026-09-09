@@ -1,0 +1,28 @@
+shape dynamic-index-raw {
+  family "native-nyir"
+  generator "regression"
+  features ["ny", "native", "dynamic", "index"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.math.logic.prolog as prolog
+use std.math.logic.solve as solve
+use std.core.iter as iter
+
+def expression = prolog.term("mul", [
+   prolog.term("add", [2, 3]), 4])
+def result = solve.arithmetic(expression)
+assert(result.get("decided") == true, "dynamic arithmetic is decided")
+assert(result.get("value") == 20,
+   "raw native indices preserve odd dynamic list positions")
+def chunks = iter.chunk([1, 2, 3, 4, 5], 2)
+def first = chunks[0]
+def first_value = first[0]
+def second_value = first[1]
+assert(first_value == 1, "bound nested dynamic index preserves first scalar")
+assert(second_value == 2, "bound nested dynamic index preserves odd scalar")
+assert(first[0] == 1, "direct dynamic index comparison preserves first scalar")
+assert(first[1] == 2, "direct dynamic index comparison preserves odd scalar")
+print("dynamic_index_raw ok")
+NY
+}

@@ -5,6 +5,7 @@
 module std.core.iter(range, range2, enumerate, map, filter, repeat, take, drop, reverse, zip2, any, all, fold, reduce, sum, each, count, count_if, first, last, find_if, find_index_if, chain, flatten, filter_map, compact, zip_with, cycle, partition, chunk, windowed, mapcat)
 use std.core
 use std.core.primitives as prim
+use std.core.str as str
 
 @inline
 @jit
@@ -43,7 +44,7 @@ fn any(seq xs, fnptr pred) bool {
    def n = _iter_seq_len(xs, "any")
    mut i = 0
    while i < n {
-      if pred(xs.get(i)) { return true }
+      if pred(xs[i]) { return true }
       i += 1
    }
    false
@@ -54,7 +55,7 @@ fn all(seq xs, fnptr pred) bool {
    def n = _iter_seq_len(xs, "all")
    mut i = 0
    while i < n {
-      if !pred(xs.get(i)) { return false }
+      if !pred(xs[i]) { return false }
       i += 1
    }
    true
@@ -66,7 +67,7 @@ fn fold(seq xs, any init, fnptr fn2) any {
    def n = _iter_seq_len(xs, "fold")
    mut i = 0
    while i < n {
-      acc = fn2(acc, xs.get(i))
+      acc = fn2(acc, xs[i])
       i += 1
    }
    acc
@@ -77,7 +78,7 @@ fn find_if(seq xs, fnptr pred, any default=0) any {
    def n = _iter_seq_len(xs, "find_if")
    mut i = 0
    while i < n {
-      def v = xs.get(i)
+      def v = xs[i]
       if pred(v) { return v }
       i += 1
    }
@@ -89,7 +90,7 @@ fn find_index_if(seq xs, fnptr pred) int {
    def n = _iter_seq_len(xs, "find_index_if")
    mut i = 0
    while i < n {
-      if pred(xs.get(i)) { return i }
+      if pred(xs[i]) { return i }
       i += 1
    }
    -1
@@ -106,7 +107,7 @@ fn sum(seq xs, any start=0) any {
    def n = _iter_seq_len(xs, "sum")
    mut i = 0
    while i < n {
-      total = total + xs.get(i)
+      total = total + xs[i]
       i += 1
    }
    total
@@ -117,7 +118,7 @@ fn each(seq xs, fnptr fn1) any {
    def n = _iter_seq_len(xs, "each")
    mut i = 0
    while i < n {
-      fn1(xs.get(i))
+      fn1(xs[i])
       i += 1
    }
    xs
@@ -134,7 +135,7 @@ fn count_if(seq xs, fnptr pred) int {
    mut total = 0
    mut i = 0
    while i < n {
-      if pred(xs.get(i)) { total += 1 }
+      if pred(xs[i]) { total += 1 }
       i += 1
    }
    total
@@ -144,14 +145,14 @@ fn first(seq xs, any default=0) any {
    "Returns the first item in `xs`, or `default` for an empty sequence."
    def n = _iter_seq_len(xs, "first")
    if n <= 0 { return default }
-   xs.get(0, default)
+   __tbuf_index_any(xs, 0)
 }
 
 fn last(seq xs, any default=0) any {
    "Returns the last item in `xs`, or `default` for an empty sequence."
    def n = _iter_seq_len(xs, "last")
    if n <= 0 { return default }
-   xs.get(n - 1, default)
+   __tbuf_index_any(xs, (n - 1) * 2 + 1)
 }
 
 @returns_owned
@@ -171,12 +172,12 @@ fn chain(seq xs, seq ys) any {
    mut out = list(n + m)
    mut i = 0
    while i < n {
-      _list_set(out, i, xs.get(i))
+      _list_set(out, i, xs[i])
       i += 1
    }
    mut j = 0
    while j < m {
-      _list_set(out, n + j, ys.get(j))
+      _list_set(out, n + j, ys[j])
       j += 1
    }
    _list_finish(out, n + m)
@@ -191,7 +192,7 @@ fn flatten(seq xss) list {
    def n = _iter_seq_len(xss, "flatten")
    mut i = 0
    while i < n {
-      def inner = xss.get(i)
+      def inner = xss[i]
       if _iter_is_seq(inner) { total += inner.len }
       else { total += 1 }
       i += 1
@@ -200,12 +201,12 @@ fn flatten(seq xss) list {
    mut pos = 0
    i = 0
    while i < n {
-      def inner = xss.get(i)
+      def inner = xss[i]
       if _iter_is_seq(inner) {
          def m = inner.len
          mut j = 0
          while j < m {
-            _list_set(out, pos, inner.get(j))
+            _list_set(out, pos, inner[j])
             pos += 1
             j += 1
          }
@@ -226,7 +227,7 @@ fn filter_map(seq xs, fnptr fn1) list {
    mut i = 0
    mut pos = 0
    while i < n {
-      def res = fn1(xs.get(i))
+      def res = fn1(xs[i])
       if res != nil {
          _list_set(out, pos, res)
          pos += 1
@@ -244,8 +245,16 @@ fn compact(seq xs) list {
    mut i = 0
    mut pos = 0
    while i < n {
-      def v = xs.get(i)
-      if is_truthy(v) {
+      def v = xs[i]
+      ;; Generic sequence slots carry raw numeric payloads. Truthiness must
+      ;; inspect those payloads before any dynamic unboxing; object/string
+      ;; values still use their ordinary length semantics.
+      def keep = if is_str(v) || is_list(v) || is_dict(v) || is_set(v) || is_tuple(v) {
+         is_truthy(v)
+      } else {
+         v != 0
+      }
+      if keep {
          _list_set(out, pos, v)
          pos += 1
       }
@@ -262,7 +271,7 @@ fn mapcat(fnptr fn1, seq xs) list {
    mut total = 0
    mut i = 0
    while i < n {
-      def r = fn1(xs.get(i))
+      def r = fn1(xs[i])
       _list_set(mapped, i, r)
       if _iter_is_seq(r) { total += r.len } else { total += 1 }
       i += 1
@@ -272,12 +281,12 @@ fn mapcat(fnptr fn1, seq xs) list {
    mut pos = 0
    i = 0
    while i < n {
-      def r = mapped.get(i)
+      def r = mapped[i]
       if _iter_is_seq(r) {
          def m = r.len
          mut j = 0
          while j < m {
-            _list_set(out, pos, r.get(j))
+            _list_set(out, pos, r[j])
             pos += 1
             j += 1
          }
@@ -299,7 +308,7 @@ fn zip_with(seq a, seq b, fnptr fn2) list {
    mut out = list(n)
    mut i = 0
    while i < n {
-      _list_set(out, i, fn2(a.get(i), b.get(i)))
+      _list_set(out, i, fn2(a[i], b[i]))
       i += 1
    }
    _list_finish(out, n)
@@ -313,10 +322,36 @@ fn chunk(seq xs, int size) list {
    mut out = list((n + size - 1) / size)
    mut pos = 0
    mut i = 0
+   if is_str(xs) {
+      while i < n {
+         mut stop = i + size
+         if stop > n { stop = n }
+         mut part = ""
+         mut j = i
+         while j < stop {
+            part = part + xs[j]
+            j += 1
+         }
+         _list_set(out, pos, part)
+         pos += 1
+         i = stop
+      }
+      return _list_finish(out, pos)
+   }
    while i < n {
       mut stop = i + size
       if stop > n { stop = n }
-      _list_set(out, pos, slice(xs, i, stop, 1))
+      ; Keep bounds in the native integer ABI: an odd raw stop crossing the
+      ; generic `any` slice boundary can look tagged (stop=5 becomes 2).
+      ; Materialize the chunk directly and preserve nested values.
+      mut part = list(stop - i)
+      mut j = i
+      while j < stop {
+         _list_set(part, j - i, xs[j])
+         j += 1
+      }
+      _list_finish(part, stop - i)
+      _list_set(out, pos, part)
       pos += 1
       i = stop
    }
@@ -332,8 +367,29 @@ fn windowed(seq xs, int size, int step=1) list {
    mut out = list(n)
    mut pos = 0
    mut i = 0
+   if is_str(xs) {
+      while i + size <= n {
+         mut part = ""
+         mut j = 0
+         while j < size {
+            part = part + xs[i + j]
+            j += 1
+         }
+         _list_set(out, pos, part)
+         pos += 1
+         i += step
+      }
+      return _list_finish(out, pos)
+   }
    while i + size <= n {
-      _list_set(out, pos, slice(xs, i, i + size, 1))
+      mut part = list(size)
+      mut j = 0
+      while j < size {
+         _list_set(part, j, xs[i + j])
+         j += 1
+      }
+      _list_finish(part, size)
+      _list_set(out, pos, part)
       pos += 1
       i += step
    }
@@ -350,7 +406,7 @@ fn cycle(seq xs, int count) list {
    while i < count {
       mut j = 0
       while j < n {
-         _list_set(out, i * n + j, xs.get(j))
+         _list_set(out, i * n + j, xs[j])
          j += 1
       }
       i += 1
@@ -366,7 +422,7 @@ fn partition(seq xs, fnptr pred) list {
    mut ti, fi = 0, 0
    mut i = 0
    while i < n {
-      def v = xs.get(i)
+      def v = xs[i]
       if pred(v) {
          _list_set(t, ti, v)
          ti += 1
@@ -381,13 +437,13 @@ fn partition(seq xs, fnptr pred) list {
 
 @jit
 @inline
-fn _list_set(list out, int idx, any value) any { store64(out, value, 16 + idx * 8) }
+fn _list_set(list out, int idx, any value) any { store64(out, value, idx * 8) }
 
 @jit
 @inline
 @returns_owned
 fn _list_finish(list out, int len) list {
-   store64(out, len, 0)
+   __list_set_len(out, len)
    out
 }
 
@@ -405,9 +461,9 @@ fn range2(int start, int stop, int step=1) range {
 fn range(...args) range {
    "Returns `range(0, stop)`, `range(start, stop)`, or `range(start, stop, step)`."
    def n = args.len
-   if n == 1 { return range2(0, args.get(0), 1) }
-   if n == 2 { return range2(args.get(0), args.get(1), 1) }
-   if n == 3 { return range2(args.get(0), args.get(1), args.get(2)) }
+   if n == 1 { return range2(0, args[0], 1) }
+   if n == 2 { return range2(args[0], args[1], 1) }
+   if n == 3 { return range2(args[0], args[1], args[2]) }
    panic("range expects 1, 2, or 3 argument(s)")
 }
 
@@ -415,13 +471,15 @@ fn range(...args) range {
 fn enumerate(seq xs, int start=0) list {
    "Returns `[index, value]` pairs starting at `start`."
    def n = _iter_seq_len(xs, "enumerate")
-   mut out = list(n)
+   ;; Build nested pairs through append so native buffers preserve nested
+   ;; value descriptors.
+   mut out = list(0)
    mut i = 0
    while i < n {
-      _list_set(out, i, [start + i, xs.get(i)])
+      out = append(out, [start + i, xs[i]])
       i += 1
    }
-   _list_finish(out, n)
+   out
 }
 
 @returns_owned
@@ -442,10 +500,10 @@ fn map(seq xs, fnptr fn1) any {
       builder_free(out)
       return s
    }
-   mut out = list(n)
+   mut out = list(0)
    mut i = 0
    while i < n {
-      _list_set(out, i, fn1(xs.get(i)))
+      out = append(out, fn1(xs[i]))
       i += 1
    }
    _iter_finish_like(xs, out, n)
@@ -474,7 +532,7 @@ fn filter(seq xs, fnptr pred) any {
    mut i = 0
    mut idx = 0
    while i < n {
-      def v = xs.get(i)
+      def v = xs[i]
       if pred(v) {
          _list_set(out, idx, v)
          idx += 1
@@ -507,11 +565,11 @@ fn take(seq xs, int count) any {
    def n = _iter_seq_len(xs, "take")
    mut lim = count
    if lim > n { lim = n }
-   if is_str(xs) { return slice(xs, 0, lim) }
+   if is_str(xs) { return str.utf8_slice(xs, 0, lim, 1) }
    mut out = list(lim)
    mut i = 0
    while i < lim {
-      _list_set(out, i, xs.get(i))
+      _list_set(out, i, xs[i])
       i += 1
    }
    _iter_finish_like(xs, out, lim)
@@ -525,12 +583,12 @@ fn drop(seq xs, int count) any {
       return clone(xs)
    }
    if count >= n { return _iter_empty_like(xs) }
-   if is_str(xs) { return slice(xs, count, n) }
+   if is_str(xs) { return str.utf8_slice(xs, count, n, 1) }
    def out_n = n - count
    mut out = list(out_n)
    mut i = 0
    while i < out_n {
-      _list_set(out, i, xs.get(count + i))
+      _list_set(out, i, xs[count + i])
       i += 1
    }
    _iter_finish_like(xs, out, out_n)
@@ -561,7 +619,7 @@ fn reverse(seq xs) any {
    mut out = list(n)
    mut i = 0
    while i < n {
-      _list_set(out, i, xs.get(n - 1 - i))
+      _list_set(out, i, xs[n - 1 - i])
       i += 1
    }
    _iter_finish_like(xs, out, n)
@@ -577,7 +635,7 @@ fn zip2(seq a, seq b) list {
    mut out = list(n)
    mut i = 0
    while i < n {
-      _list_set(out, i, [a.get(i), b.get(i)])
+      _list_set(out, i, [a[i], b[i]])
       i += 1
    }
    _list_finish(out, n)

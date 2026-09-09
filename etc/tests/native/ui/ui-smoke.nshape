@@ -1,0 +1,71 @@
+defaults {
+  family "runtime-native"
+  generator "native"
+  template ny-test-case
+  flags "--native-only --native-backend=x86_64 --native-tier=baseline -emit-only --no-progress --color=never"
+  expect compile_and_run
+}
+
+shape ui_native_animation {
+  features [native ui animation x86_64]
+  flags "--native-only --native-backend=x86_64 --native-tier=baseline -emit-only -o /tmp/nytrix-ui-animation.o --no-progress --color=never"
+  source ny generate awk <<'AWK'
+BEGIN { while ((getline line < "etc/projects/ui/animation.ny") > 0) print line; close("etc/projects/ui/animation.ny") }
+AWK
+}
+
+shape ui_native_editor {
+  features [native ui editor x86_64]
+  flags "--native-only --native-backend=x86_64 --native-tier=baseline -emit-only -o /tmp/nytrix-ui-editor.o --no-progress --color=never"
+  source ny generate awk <<'AWK'
+BEGIN { while ((getline line < "etc/projects/ui/editor.ny") > 0) print line; close("etc/projects/ui/editor.ny") }
+AWK
+}
+
+shape ui_native_engine {
+  features [native ui engine x86_64]
+  flags "--native-only --native-backend=x86_64 --native-tier=baseline -emit-only -o /tmp/nytrix-ui-engine.o --no-progress --color=never"
+  source ny generate awk <<'AWK'
+BEGIN { while ((getline line < "etc/projects/ui/engine.ny") > 0) print line; close("etc/projects/ui/engine.ny") }
+AWK
+}
+
+shape ui_native_input {
+  features [native ui input x86_64]
+  flags "--native-only --native-backend=x86_64 --native-tier=baseline -emit-only -o /tmp/nytrix-ui-input.o --no-progress --color=never"
+  source ny generate awk <<'AWK'
+BEGIN { while ((getline line < "etc/projects/ui/input.ny") > 0) print line; close("etc/projects/ui/input.ny") }
+AWK
+}
+
+shape ui_native_monitor {
+  features [native ui monitor x86_64]
+  flags "--native-only --native-backend=x86_64 --native-tier=baseline -emit-only -o /tmp/nytrix-ui-monitor.o --no-progress --color=never"
+  source ny generate awk <<'AWK'
+BEGIN { while ((getline line < "etc/projects/ui/monitor.ny") > 0) print line; close("etc/projects/ui/monitor.ny") }
+AWK
+}
+
+shape ui_native_pong {
+  features [native ui pong x86_64]
+  flags "--native-only --native-backend=x86_64 --native-tier=baseline -emit-only -o /tmp/nytrix-ui-pong.o --no-progress --color=never"
+  source ny generate awk <<'AWK'
+BEGIN { while ((getline line < "etc/projects/ui/pong.ny") > 0) print line; close("etc/projects/ui/pong.ny") }
+AWK
+}
+
+shape ui_native_synth {
+  features [native ui synth x86_64]
+  flags "--native-only --native-backend=x86_64 --native-tier=baseline -emit-only -o /tmp/nytrix-ui-synth.o --no-progress --color=never"
+  source ny generate awk <<'AWK'
+BEGIN { while ((getline line < "etc/projects/ui/synth.ny") > 0) print line; close("etc/projects/ui/synth.ny") }
+AWK
+}
+
+shape ui_native_term {
+  features [native ui term x86_64]
+  flags "--native-only --native-backend=x86_64 --native-tier=baseline -emit-only -o /tmp/nytrix-ui-term.o --no-progress --color=never"
+  source ny generate awk <<'AWK'
+BEGIN { while ((getline line < "etc/projects/ui/term.ny") > 0) print line; close("etc/projects/ui/term.ny") }
+AWK
+}

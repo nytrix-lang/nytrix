@@ -9,7 +9,7 @@
 #include "base/loader.h"
 #include "base/options.h"
 #include "base/util.h"
-#include "code/jit.h"
+#include "code/native/llvm/jit.h"
 #include "code/incremental/incremental.h"
 #include "code/native/native.h"
 #include "code/priv.h"
@@ -19,9 +19,9 @@
 #include "cmd/perf/perf.h"
 #include "cmd/test/test.h"
 #include "cmd/web/web.h"
-#include "parse/parser.h"
-#include "rt/shared.h"
-#include "wire/pipe.h"
+#include "code/parse/parser.h"
+#include "code/runtime/shared.h"
+#include "code/wire/pipe.h"
 #ifndef _WIN32
 #include <sys/mman.h>
 #include <sys/resource.h>
@@ -663,6 +663,7 @@ static void ny_clear_policy_env_overrides(void) {
                                      "NYTRIX_DWARF_VERSION",
                                      "NYTRIX_DWARF_SPLIT_INLINING",
                                      "NYTRIX_DWARF_PROFILE_INFO",
+                                     "NYTRIX_FAST_MATH",
                                      NULL};
   ny_unsetenv_keys(keys);
 }
@@ -1307,6 +1308,8 @@ static void ny_apply_cli_env_config(ny_env_config_t *env, ny_options *opt, bool 
     ny_env_config_set_bool(env, "NYTRIX_GPU_ASYNC", opt->gpu_async != 0);
   if (opt->gpu_fast_math >= 0)
     ny_env_config_set_bool(env, "NYTRIX_GPU_FAST_MATH", opt->gpu_fast_math != 0);
+  if (opt->fast_math >= 0)
+    ny_env_config_set_bool(env, "NYTRIX_FAST_MATH", opt->fast_math != 0);
   if (opt->accel_target)
     ny_env_config_set(env, "NYTRIX_ACCEL_TARGET", opt->accel_target);
   if (opt->accel_object)

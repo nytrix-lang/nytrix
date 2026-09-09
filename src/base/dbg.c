@@ -5,7 +5,7 @@
 #include "dbg.h"
 #include "base/common.h"
 #include "code/code.h"
-#include "parse/parser.h"
+#include "code/parse/parser.h"
 #include <llvm-c/DebugInfo.h>
 
 void ny_dbg_loc(codegen_t *cg, token_t tok) {

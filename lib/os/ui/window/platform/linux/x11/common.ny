@@ -63,25 +63,25 @@ fn encodeUTF8(any s, int codepoint) int {
       store8(s, codepoint, count)
       count += 1
    } elif codepoint < 0x800 {
-      store8(s, bor(bshr(codepoint, 6), 0xc0), count)
+      store8(s, 0xc0 + (codepoint / 64), count)
       count += 1
-      store8(s, bor(band(codepoint, 0x3f), 0x80), count)
+      store8(s, 0x80 + (codepoint % 64), count)
       count += 1
    } elif codepoint < 0x10000 {
-      store8(s, bor(bshr(codepoint, 12), 0xe0), count)
+      store8(s, 0xe0 + (codepoint / 4096), count)
       count += 1
-      store8(s, bor(band(bshr(codepoint, 6), 0x3f), 0x80), count)
+      store8(s, 0x80 + ((codepoint / 64) % 64), count)
       count += 1
-      store8(s, bor(band(codepoint, 0x3f), 0x80), count)
+      store8(s, 0x80 + (codepoint % 64), count)
       count += 1
    } elif codepoint < 0x110000 {
-      store8(s, bor(bshr(codepoint, 18), 0xf0), count)
+      store8(s, 0xf0 + (codepoint / 262144), count)
       count += 1
-      store8(s, bor(band(bshr(codepoint, 12), 0x3f), 0x80), count)
+      store8(s, 0x80 + ((codepoint / 4096) % 64), count)
       count += 1
-      store8(s, bor(band(bshr(codepoint, 6), 0x3f), 0x80), count)
+      store8(s, 0x80 + ((codepoint / 64) % 64), count)
       count += 1
-      store8(s, bor(band(codepoint, 0x3f), 0x80), count)
+      store8(s, 0x80 + (codepoint % 64), count)
       count += 1
    }
    count

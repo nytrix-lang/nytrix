@@ -5,7 +5,7 @@ shape nyir_metadata_bin_bad_phi_predecessor {
   template ny-test-case
   flags "--nyir-metadata-bin=etc/tests/native/fixtures/nyir-bad-phi-predecessor.nyir"
   expect compile_fail
-  expect_message "phi incoming label is not a CFG predecessor"
+  expect_message "invalid value operands"
   source ny <<'NY'
 1 + 2
 NY

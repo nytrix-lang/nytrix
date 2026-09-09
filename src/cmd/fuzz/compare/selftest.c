@@ -1238,7 +1238,7 @@ static void selftest_validate_fuzz_reporting(const char *json,
        status_crt_next_count != status_crt_top_family_count ||
        !status_crt_next_exports || !strstr(status_crt_next_exports, "\"__") ||
        !status_crt_next_definition_file ||
-       !strstr(status_crt_next_definition_file, "src/rt/defs.h") ||
+       !strstr(status_crt_next_definition_file, "src/code/runtime/defs.h") ||
        !status_crt_next_definition_locations ||
        !strstr(status_crt_next_definition_locations, "\"line\"") ||
        !strstr(status_crt_next_definition_locations, "\"signature\"") ||
@@ -7129,7 +7129,7 @@ static void selftest_validate_compiler_std_audit(const char *json,
       (void)string_list_push_copy(errors,
                                   "compiler std audit trace next exports missing");
     if (!crt_next_definition_file ||
-        !strstr(crt_next_definition_file, "src/rt/defs.h") ||
+        !strstr(crt_next_definition_file, "src/code/runtime/defs.h") ||
         !crt_next_definition_locations ||
         !strstr(crt_next_definition_locations, "\"line\"") ||
         !strstr(crt_next_definition_locations, "\"arity\"") ||
@@ -7138,7 +7138,7 @@ static void selftest_validate_compiler_std_audit(const char *json,
         !crt_next_inspect_command ||
         !strstr(crt_next_inspect_command, "sed -n") ||
         !strstr(crt_next_inspect_command, "rg -n") ||
-        !strstr(crt_next_inspect_command, "../nytrix/src/rt/defs.h"))
+        !strstr(crt_next_inspect_command, "../nytrix/src/code/runtime/defs.h"))
       (void)string_list_push_copy(errors,
                                   "compiler std audit CRT next definition details missing");
   } else {
@@ -9304,7 +9304,7 @@ static void selftest_validate_fuzz_all_progress(const char *json,
        !progress_crt_next_exports ||
        !strstr(progress_crt_next_exports, "\"__") ||
        !progress_crt_next_definition_file ||
-       !strstr(progress_crt_next_definition_file, "src/rt/defs.h") ||
+       !strstr(progress_crt_next_definition_file, "src/code/runtime/defs.h") ||
        !progress_crt_next_definition_locations ||
        !strstr(progress_crt_next_definition_locations, "\"line\"") ||
        !strstr(progress_crt_next_definition_locations, "\"signature\"") ||

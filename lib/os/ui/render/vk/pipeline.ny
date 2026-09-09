@@ -47,7 +47,7 @@ fn _vk_shader_stage_fragment() int { 0x00000010 }
 
 fn shader_pc_bytes() int {
    "Return the Vulkan shader push-constant byte size."
-   _SHADER_PC_BYTES
+   std.os.ui.render.vk.pipeline._SHADER_PC_BYTES
 }
 
 fn _pipe_alloc(int size) ?ptr {

@@ -103,13 +103,13 @@ assert(total == 10, "reduce")
 use std.core
 
 mut xs = []
-xs = xs.append(1)
-xs = xs.extend([2, 3])
+xs.append(1)
+xs.extend([2, 3])
 assert(xs == [1, 2, 3], "append then extend")
 ```
 
-`list(n)` reserves capacity but starts with zero elements. Always reassign the
-result of `append`/`extend`.
+`list(n)` reserves capacity but starts with zero elements. `append` and
+`extend` mutate lists in place and also return the list for chaining.
 
 ## Accumulate into a dict
 

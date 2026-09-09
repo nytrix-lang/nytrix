@@ -1,39 +1,54 @@
 <div align="center">
-  <img src="etc/assets/website/logo.svg" alt="Nytrix" width="150">
 
-  # Nytrix
+<img src="etc/assets/website/logo.svg" alt="Nytrix" width="150">
 
-  <p>Native language, toolchain, and standard library.</p>
+# Nytrix
 
-  [![Version](https://img.shields.io/badge/version-0.9.0-2f6fed)](docs/CHANGELOG.md)
-  [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-  [![Platforms](https://img.shields.io/badge/Linux%20%7C%20macOS%20%7C%20Windows-x86__64%20%7C%20arm64-lightgrey)](#install)
+**Think freely. Control precisely.**
 
-  [Website](https://nytrix.x3ric.com/) · [Changelog](https://nytrix.x3ric.com/#CHANGELOG)
+Native · Explicit · Ownership · Interop · Paradigms
+
+[![Version](https://img.shields.io/badge/version-0.10.0-2f6fed)](docs/CHANGELOG.md)
+[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![Platforms](https://img.shields.io/badge/Linux%20%7C%20macOS%20%7C%20Windows-x86__64%20%7C%20arm64-lightgrey)](#install)
+
+[Website](https://nytrix.x3ric.com/) · [Manual](docs/README.md) · [Changelog](docs/CHANGELOG.md)
+
 </div>
 
-Nytrix is for programs that benefit from expressive source code and direct
-control of their machine boundaries. The same workflow covers ordinary files,
-reusable modules, compile-time generation, C interfaces, and native binaries.
+Nytrix is a statically typed native language that keeps high-level abstractions transparent, guarantees checked, costs visible, and the machine within reach.
 
-The [Nytrix Manual](docs/README.md) covers the language overview, practical
-guides, specification, and source-linked API reference.
+See the [Nytrix Manual](docs/README.md) for guides, specification, and API reference.
 
 ## First program
 
 ```ny
 use std.core
+
 fn greet(str name) str {
     "Hello, " + name + "!"
 }
+
 print(greet("Nytrix"))
 assert(greet("Nytrix") == "Hello, Nytrix!", "greet")
 ```
 
+Run it:
+
 ```bash
 ./make ny -run hello.ny
+```
+
+Or build a native executable:
+
+```bash
 ./make ny -o hello hello.ny
 ./hello
+```
+
+Source can also be run directly from a URL:
+
+```bash
 ./make ny https://raw.githubusercontent.com/x3ric/xtool/refs/heads/main/xtool
 ```
 
@@ -46,7 +61,11 @@ chmod +x make
 ny --version
 ```
 
-Use `python3 ./make` if your shell does not execute `./make` directly.
+If `./make` cannot be executed directly:
+
+```bash
+python3 ./make
+```
 
 ## Language
 
@@ -54,27 +73,32 @@ Use `python3 ./make` if your shell does not execute `./make` directly.
 
 ```ny
 use std.core
+
 enum Shape {
     Circle(int radius),
     Empty
 }
+
 fn area(shape) int {
     match shape {
         Shape.Circle(r) -> r * r
         Shape.Empty -> 0
     }
 }
+
 assert(area(Shape.Circle(4)) == 16, "area")
 ```
 
 ADT payloads use `Type name` in declarations and positional values in constructors and match patterns.
 
-### Comptime
+### Compile-time
 
 ```ny
 use std.core
+
 def base = comptime{ 2^5 }
 def shifted = comptime{ range(4).map(fn(i){ i + base }) }
+
 assert(base == 32, "comptime value")
 assert(to_str(shifted) == "[32, 33, 34, 35]", "comptime list")
 ```
@@ -83,40 +107,42 @@ assert(to_str(shifted) == "[32, 33, 34, 35]", "comptime list")
 
 ```ny
 use std.core
+
 layout Vec2 pack(4) {
     f32 x,
     f32 y
 }
+
 #include <math.h>
+
 assert(cos(0.0) == 1.0, "cos")
 ```
 
-Layouts use `Type name` fields. A colon may still parse as an implicit separator only where the grammar would otherwise be unambiguous.
+Layouts use `Type name` fields. A colon may still parse as an implicit separator where the grammar is otherwise unambiguous.
 
-## Project
+## Project layout
 
-| Path            | Purpose                       |
-| --------------- | ----------------------------- |
-| `src/`          | Compiler, runtime, and tools. |
-| `lib/`          | Standard library.             |
-| `etc/tests/`    | Tests.                        |
-| `etc/projects/` | Examples and demos.           |
-
-## Community
-
-Use [Discord](https://discord.gg/XQDR6DZWb), GitHub issues, or
-[nytrixlang@gmail.com](mailto:nytrixlang@gmail.com) for questions, bugs, and
-documentation feedback.
-
-Send security reports privately by email with the affected commit, platform,
-command, and proof of concept. Reports are voluntary.
-
-Discuss feature direction on Discord or by email.
+| Path            | Purpose                                              |
+| --------------- | ---------------------------------------------------- |
+| `src/`          | Compiler, runtime, native backend, and tools         |
+| `lib/`          | Standard library                                     |
+| `etc/tests/`    | Tests, fixtures, and benchmarks                      |
+| `etc/projects/` | Examples and larger projects                         |
+| `docs/`         | Manual, guides, specification, and API documentation |
 
 ## Status
 
-Pin a commit for reproducible builds and check
-[Changelog](docs/CHANGELOG.md) before upgrading.
+> Work in progress. The compiler is still experimental. The native backend is being pushed toward a full jit/aot LLVM-free path. The LSP currently remains an LLVM-enabled build target.
+
+Pin a commit for reproducible builds and check the [Changelog](docs/CHANGELOG.md) before upgrading.
+
+## Community
+
+Use [Discord](https://discord.gg/XQDR6DZWb), GitHub issues, or [nytrixlang@gmail.com](mailto:nytrixlang@gmail.com) for questions, bug reports, ideas, and documentation feedback.
+
+Send security reports privately by email with the affected commit, platform, command, and a minimal proof of concept.
+
+Feature direction can be discussed on Discord or by email.
 
 ## License
 

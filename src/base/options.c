@@ -37,6 +37,29 @@ int debug_enabled = 0;
 int verbose_enabled = 0;
 int color_mode = -1;
 
+static void ny_enable_debug_everything_env(void) {
+  ny_setenv("NY_TRACE_ALL", "1", 0);
+  static const char *const names[] = {
+      "NYTRIX_TRACE", "NYTRIX_TRACE_CALLS", "NYTRIX_TRACE_VALUES",
+      "NYTRIX_TRACE_VERBOSE", "NYTRIX_TRACE_IMPORTS",
+      "NYTRIX_TRACE_RESOLVE", "NYTRIX_DEBUG_INFER", "NYTRIX_HM_DEBUG",
+      "NYTRIX_PROOF_DEBUG", "NYTRIX_MEM_TRACE", "NY_TRACE_LOWER",
+      "NY_TRACE_ALIAS", "NY_TRACE_DEVIRT", "NY_TRACE_NCE", "NY_TRACE_BCE",
+      "NY_TRACE_ADCE", "NY_TRACE_OCE", "NY_TRACE_TCO", "NY_TRACE_PF",
+      "NY_TRACE_IPA_CP", "NY_TRACE_INLINE", "NY_TRACE_VECTORIZE",
+      "NY_TRACE_PASS_FAIL", "NY_TRACE_MACHINE_FAIL", "NY_TRACE_EMIT",
+      "NY_TRACE_NATIVE_REACHABLE", "NY_TRACE_PURE_CALLS",
+      "NY_NATIVE_TRACE",
+      "NY_TRACE_CONSTTAB", "NY_TRACE_O3", "NY_EGRAPH_TRACE",
+      "NY_DEBUG_DOM", "NY_DUMP_MACH", "NY_DUMP_OBJ_NYIR"};
+  for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); ++i)
+    ny_setenv(names[i], "1", 0);
+  /*
+   * Keep lazy-stdlib diagnostics useful without flooding multi-megabyte logs.
+   */
+  ny_setenv("NYTRIX_TRACE_LAZY_STDLIB_USE_LIMIT", "200", 0);
+}
+
 static bool ny_parse_nonneg_int(const char *s, int *out) {
   if (!s || !*s || !out)
     return false;
@@ -1341,6 +1364,20 @@ static bool ny_options_apply_common_codegen_option(ny_options *opt,
         ny_parse_nonneg_int_or_die(value, "native tier budget", argv0);
     return true;
   }
+  if ((value = ny_option_value_or_die(a, "--comptime-limit", i, argc, argv,
+                                      argv0)) != NULL) {
+    int limit = ny_parse_nonneg_int_or_die(value, "comptime limit", argv0);
+    if (limit <= 0) {
+      fprintf(stderr, "invalid comptime limit: %s (expected a positive integer)\n",
+              value);
+      ny_options_usage(argv0);
+      exit(1);
+    }
+    char fuel[32];
+    snprintf(fuel, sizeof(fuel), "%d", limit);
+    ny_setenv("NYTRIX_COMPTIME_FUEL", fuel, 1);
+    return true;
+  }
   if ((value = ny_option_value_or_die(a, "--native-hot-threshold", i, argc,
                                       argv, argv0)) != NULL) {
     opt->native_hot_threshold =
@@ -1557,6 +1594,19 @@ static bool ny_options_apply_common_codegen_option(ny_options *opt,
     opt->trace_hm = true;
     return true;
   }
+  if (strcmp(a, "--explain") == 0) {
+    opt->explain = true;
+    opt->explain_any = true;
+    opt->dump_proofs = true;
+    opt->dump_escapes = true;
+    return true;
+  }
+  if (strncmp(a, "--explain=", 10) == 0) {
+    opt->explain = true;
+    opt->explain_topic = a + 10;
+    opt->explain_any = true;
+    return true;
+  }
   if (strcmp(a, "--explain-any") == 0) {
     opt->explain_any = true;
     return true;
@@ -1590,6 +1640,7 @@ static bool ny_options_apply_common_codegen_option(ny_options *opt,
     return true;
   }
   if (strcmp(a, "--debug-everything") == 0) {
+    ny_enable_debug_everything_env();
     opt->debug_everything = true;
     opt->trace_tokens = true;
     opt->trace_parse = true;
@@ -1604,6 +1655,15 @@ static bool ny_options_apply_common_codegen_option(ny_options *opt,
     opt->trace_regalloc = true;
     opt->dump_obj_full = true;
     opt->compile_profile_fn = true;
+    opt->native_dump_ir = true;
+    opt->nyir_dump_text = true;
+    opt->nyir_dump_raw = true;
+    opt->nyir_dump_cfg = true;
+    opt->nyir_dump_stats = true;
+    opt->nyir_pass_stats = true;
+    opt->nyir_verify = true;
+    if (opt->timeout <= 0.0)
+      opt->timeout = 30.0;
     return true;
   }
   if (strcmp(a, "--native-result-oracle") == 0) {
@@ -1708,12 +1768,27 @@ static bool ny_options_apply_common_codegen_option(ny_options *opt,
     opt->emit_ir_path = a + 10;
     return true;
   }
+  if ((value = ny_option_value_or_die(a, "--emit-ir", i, argc, argv,
+                                      argv0)) != NULL) {
+    opt->emit_ir_path = value;
+    return true;
+  }
   if (strncmp(a, "--emit-bc=", 10) == 0) {
     opt->emit_bc_path = a + 10;
     return true;
   }
+  if ((value = ny_option_value_or_die(a, "--emit-bc", i, argc, argv,
+                                      argv0)) != NULL) {
+    opt->emit_bc_path = value;
+    return true;
+  }
   if (strncmp(a, "--emit-asm=", 11) == 0) {
     opt->emit_asm_path = a + 11;
+    return true;
+  }
+  if ((value = ny_option_value_or_die(a, "--emit-asm", i, argc, argv,
+                                      argv0)) != NULL) {
+    opt->emit_asm_path = value;
     return true;
   }
   if (strncmp(a, "--emit-wasm=", 12) == 0) {
@@ -1867,6 +1942,10 @@ static bool ny_options_apply_toggle(ny_options *opt, const char *a) {
        NY_OPT_TOGGLE_INT},
       {"--no-gpu-fast-math", offsetof(ny_options, gpu_fast_math), 0,
        NY_OPT_TOGGLE_INT},
+      {"--fast-math", offsetof(ny_options, fast_math), 1,
+       NY_OPT_TOGGLE_INT},
+      {"--no-fast-math", offsetof(ny_options, fast_math), 0,
+       NY_OPT_TOGGLE_INT},
       {"-strip", offsetof(ny_options, strip_override), 1, NY_OPT_TOGGLE_INT},
       {"--strip", offsetof(ny_options, strip_override), 1, NY_OPT_TOGGLE_INT},
       {"-no-strip", offsetof(ny_options, strip_override), 0, NY_OPT_TOGGLE_INT},
@@ -1901,6 +1980,8 @@ static bool ny_options_apply_toggle(ny_options *opt, const char *a) {
        NY_OPT_TOGGLE_BOOL},
       {"--nyir-run", offsetof(ny_options, nyir_run), 1, NY_OPT_TOGGLE_BOOL},
       {"--nyir-run-profile", offsetof(ny_options, nyir_run_profile), 1,
+       NY_OPT_TOGGLE_BOOL},
+      {"--legacy-llvm", offsetof(ny_options, legacy_llvm), 1,
        NY_OPT_TOGGLE_BOOL},
       {"--warn-all", offsetof(ny_options, warn_level), 2, NY_OPT_TOGGLE_INT},
       {"--warn-useful", offsetof(ny_options, warn_level), 1, NY_OPT_TOGGLE_INT},
@@ -1963,6 +2044,7 @@ void ny_options_init(ny_options *opt) {
   opt->color_mode = -1;
   opt->gpu_async = -1;
   opt->gpu_fast_math = -1;
+  opt->fast_math = -1;
   opt->gprof = -1;
   opt->std_builtin_ops = 1;
   opt->compiler_asserts = -1;
@@ -2029,6 +2111,7 @@ void ny_options_init(ny_options *opt) {
   opt->gc_flag_seen = false;
   opt->runtime_mode = NY_RUNTIME_MODE_DEFAULT;
   opt->runtime_mode_raw = "default";
+  opt->no_progress = ny_env_enabled("NYTRIX_NO_PROGRESS");
 }
 
 typedef struct ny_usage_entry_t {
@@ -2143,6 +2226,7 @@ static void ny_options_usage_impl(const char *prog, bool show_env) {
        "Minimum work-items before GPU offload"},
       {NY_CLR_GREEN, "--gpu-async", "Prefer async GPU dispatch"},
       {NY_CLR_GREEN, "--gpu-fast-math", "Allow relaxed GPU math optimizations"},
+      {NY_CLR_GREEN, "--fast-math", "Allow relaxed CPU math optimizations (reassoc, no-nans, no-infs)"},
       {NY_CLR_GREEN, "--accel-target=T",
        "Device target: auto | none | nvptx | amdgpu | spirv | hsaco"},
       {NY_CLR_GREEN, "--accel-object=K",
@@ -2164,6 +2248,10 @@ static void ny_options_usage_impl(const char *prog, bool show_env) {
        "Native tier: auto | baseline | stencil | fast | opt | llvm (default: auto, currently baseline)"},
       {NY_CLR_GREEN, "--native-only",
        "Run through NYIR/native object code without LLVM code generation"},
+      {NY_CLR_GREEN, "--legacy-llvm",
+       "Use the compatibility AST-to-LLVM backend for differential debugging"},
+      {NY_CLR_GREEN, "--legacy-llvm-dump=PATH",
+       "Use legacy AST-to-LLVM and write its LLVM IR to PATH"},
       {NY_CLR_GREEN, "--native-precompile=PATH",
        "Write an LLVM-free NYIR binary for later native/VM loading"},
       {NY_CLR_GREEN, "--native-abi=A", "Native ABI: auto | sysv | win64 | aapcs"},
@@ -2238,6 +2326,8 @@ static void ny_options_usage_impl(const char *prog, bool show_env) {
        "Recompile and rerun on detected source changes"},
       {NY_CLR_GREEN, "--watch-poll=N",
        "File-watch polling interval in ms (default: 250)"},
+      {NY_CLR_GREEN, "--comptime-limit=N",
+       "Limit compile-time evaluator instructions (default: 1000000)"},
       {NULL, NULL, NULL}});
   ny_usage_section("STDLIB");
   ny_usage_items((const ny_usage_entry_t[]){
@@ -2268,6 +2358,8 @@ static void ny_options_usage_impl(const char *prog, bool show_env) {
       {NY_CLR_BLUE, "-v, --verbose", "Show high-level phases and decisions"},
       {NY_CLR_BLUE, "--debug",
        "Max verbosity, keep symbols, keep binary unstripped"},
+      {NY_CLR_BLUE, "--debug-everything",
+       "Enable full-stack tracing with a 30s safety timeout (override with --timeout)"},
       {NY_CLR_BLUE, "-v/-vv/-vvv",
        "Verbosity tiers: steps | commands | internals (or --verbose=N)"},
       {NY_CLR_BLUE, "-time", "Show timing for each phase"},
@@ -2554,6 +2646,17 @@ void ny_options_parse(ny_options *opt, int argc, char **argv) {
       if (strcmp(a, "-safe-mode") == 0 || strcmp(a, "--safe-mode") == 0 ||
           strcmp(a, "--safe") == 0) {
         opt->safe_mode = true;
+      } else if (strcmp(a, "--legacy-llvm") == 0) {
+        opt->legacy_llvm = true;
+        opt->native_only = false;
+        opt->run_aot = false;
+        opt->run_jit = true;
+      } else if (strncmp(a, "--legacy-llvm-dump=", 19) == 0) {
+        opt->legacy_llvm = true;
+        opt->emit_ir_path = a + 19;
+        opt->run_aot = false;
+        opt->run_jit = false;
+        opt->emit_only = true;
       } else if (strcmp(a, "--native-only") == 0) {
         /*
          * Preserve an explicitly selected backend regardless of flag order.
@@ -2878,11 +2981,17 @@ void ny_options_parse(ny_options *opt, int argc, char **argv) {
         opt->emit_only = true;
         opt->run_aot = false;
       } else if (ny_options_apply_exec_option(opt, a, &i, argc, argv, argv[0])) {
-      } else if (strcmp(a, "--debug") == 0) {
+      } else if (strcmp(a, "--debug") == 0 || strcmp(a, "-debug") == 0) {
         opt->verbose = 3;
         opt->debug_symbols = true;
         opt->strip_override = 0;
         opt->dump_on_error = true;
+        opt->debug_locals = 1;
+        ny_setenv("NYTRIX_TRACE", "1", 0);
+        ny_setenv("NYTRIX_TRACE_CALLS", "1", 0);
+        ny_setenv("NYTRIX_TRACE_VALUES", "1", 0);
+        ny_setenv("NYTRIX_TRACE_VERBOSE", "1", 0);
+        ny_setenv("NYTRIX_DEBUG_LOCALS", "1", 0);
         debug_enabled = 1;
       } else if (strcmp(a, "-verbose") == 0 || strcmp(a, "--verbose") == 0) {
         if (opt->verbose < 1)

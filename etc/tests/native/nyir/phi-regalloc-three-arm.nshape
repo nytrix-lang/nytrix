@@ -1,0 +1,17 @@
+shape phi_regalloc_three_arm_constants {
+  family "runtime-native"
+  generator "native"
+  features [native nyir x86_64 regalloc phi constants control-flow]
+  template ny-test-case
+  flags "--native-only --native-backend=x86_64 -O3 --nyir-verify --native-result-oracle=0 --no-progress --color=never"
+  expect compile_and_run
+  source ny <<'NY'
+fn choose(int branch) int {
+  if branch == 0 { 7 }
+  elif branch == 1 { 11 }
+  else { 13 }
+}
+
+if choose(0) == 7 && choose(1) == 11 && choose(2) == 13 { 0 } else { 1 }
+NY
+}

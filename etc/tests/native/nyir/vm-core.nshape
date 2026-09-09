@@ -1,10 +1,10 @@
 shape nyir_vm_core {
   family "runtime-native"
   generator "native"
-  features ["native", "nyir", "vm", "call", "recursion", "function"]
+  features [native nyir vm call recursion function]
   template ny-test-case
   ; Merges former vm / vm-funcall / vm-recursion smoke into one run.
-  flags "--nyir-run"
+  flags "--nyir-run -no-std"
   expect compile_and_run
   source ny <<'NY'
 fn add(i64 a, i64 b) i64 { a + b }

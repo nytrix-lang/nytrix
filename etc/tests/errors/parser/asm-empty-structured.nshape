@@ -1,0 +1,16 @@
+shape parser-asm-empty-structured {
+  family "compiler-errors/parser"
+  generator "error"
+  features [error parser negative diagnostic asm]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "structured asm requires an instruction"
+  source ny <<'NY'
+use std.core
+
+def value = asm {
+   in reg input = 7
+}
+NY
+}

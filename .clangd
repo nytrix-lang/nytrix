@@ -4,14 +4,18 @@ CompileFlags:
     - -std=c11
     - -Ibuild
     - -Isrc
-    - -Isrc/ast
     - -Isrc/base
     - -Isrc/code
-    - -Isrc/lex
-    - -Isrc/parse
-    - -Isrc/repl
-    - -Isrc/rt
-    - -Isrc/wire
+    - -Isrc/code/native/llvm
+    - -Isrc/code/native
+    - -Isrc/code/ffi
+    - -Isrc/code/frontend
+    - -Isrc/code/ir
+    - -Isrc/code/parse
+    - -Isrc/code/typing
+    - -Isrc/cmd/ny/repl
+    - -Isrc/code/runtime
+    - -Isrc/code/wire
     - -D_GNU_SOURCE
     - -DNYTRIX_STD_PATH="/usr/share/nytrix/std.ny"
 

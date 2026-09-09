@@ -1,0 +1,24 @@
+shape x11-utf8 {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "sys"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.core.str as str
+use std.os.ui.window.platform.linux.x11.common as xc
+use std.os.ui.window.platform.linux.x11.keymap as km
+
+def euro = xc.encodeUTF8String(0x20ac)
+assert(euro.len == 3, "utf8 euro length")
+assert(load8(euro, 0) == 0xe2, "utf8 euro byte 0")
+assert(load8(euro, 1) == 0x82, "utf8 euro byte 1")
+assert(load8(euro, 2) == 0xac, "utf8 euro byte 2")
+assert(euro == str.chr(0x20ac), "utf8 euro equality")
+def decoded = xc.decodeUTF8(euro, 0)
+assert(decoded.get(0) == 0x20ac && decoded.get(1) == 3, "utf8 euro decode")
+assert(km.keysym_to_unicode(0x010020ac) == 0x20ac, "direct unicode keysym")
+print("x11 utf8 probe ok")
+NY
+}

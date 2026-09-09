@@ -1,0 +1,30 @@
+shape semantic_dynamic_containers {
+  family "runtime-native"
+  generator "native"
+  features [native nyir x86_64 semantic any containers function_alias]
+  template ny-test-case
+  flags "--native-only --native-backend=x86_64 --native-tier=baseline -O0 --nyir-verify --native-result-oracle=0 --no-progress --color=never"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+
+fn classify(any value) bool { is_set(value) }
+fn sum(a, b) { a + b }
+
+mut values = set()
+add(values, 1721)
+add(values, 979)
+if !classify(values) { 1 }
+elif !values.contains(1721) { 2 }
+elif sum(10, 20) != 30 { 3 }
+else {
+  def sum_ref = sum
+  if sum_ref(7, 8) != 15 { 4 }
+  else {
+    mut chars = []
+    for ch, i in "test" { chars = chars.append(f"{ch}:{i}") }
+    chars == ["t:0", "e:1", "s:2", "t:3"] ? 0 : 5
+  }
+}
+NY
+}

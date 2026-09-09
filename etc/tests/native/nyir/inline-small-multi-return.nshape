@@ -1,0 +1,16 @@
+shape inline_small_preserves_multi_return_callees {
+  family "runtime-native"
+  generator "native"
+  features [native nyir x86_64 inline control-flow]
+  template ny-test-case
+  flags "--native-only --native-backend=x86_64 -O3 --nyir-verify --native-result-oracle=0 --no-progress --color=never"
+  expect compile_and_run
+  source ny <<'NY'
+fn select(bool pick_first) int {
+  if pick_first { return 1 }
+  return 2
+}
+
+if select(false) == 2 { 0 } else { 1 }
+NY
+}

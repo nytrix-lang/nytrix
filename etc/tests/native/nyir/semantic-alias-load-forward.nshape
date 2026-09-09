@@ -1,0 +1,20 @@
+shape semantic_alias_load_forward {
+  family "runtime-native"
+  generator "native"
+  features [native nyir x86_64 semantic alias load_forward]
+  template ny-test-case
+  flags "--native-only --native-backend=x86_64 -O3 --nyir-verify --native-result-oracle=0 --no-progress --color=never"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+
+def ptr left = malloc(8)
+def ptr right = malloc(8)
+store64(left, 17, 0)
+store64(right, 29, 0)
+def result = load64(left, 0)
+free(left)
+free(right)
+if result == 17 { 0 } else { 1 }
+NY
+}

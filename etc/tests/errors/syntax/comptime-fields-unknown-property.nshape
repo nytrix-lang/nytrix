@@ -1,0 +1,20 @@
+shape comptime-fields-unknown-property {
+  family "compiler-errors/syntax"
+  generator "error"
+  features ["error", "comptime", "reflection", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "unknown comptime field reflection property"
+  source ny <<'NY'
+use std.core
+
+layout Header {
+   u32 tag
+}
+
+comptime fields(Header) as field {
+   emit print(field.compiler_pointer)
+}
+NY
+}

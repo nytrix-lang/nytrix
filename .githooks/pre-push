@@ -1,0 +1,6 @@
+#!/bin/sh
+set -eu
+
+# All pre-push policy belongs to the canonical, fail-closed repository gate.
+cd "$(git rev-parse --show-toplevel)"
+exec ./make check --no-progress --color=auto

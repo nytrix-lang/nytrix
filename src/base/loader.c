@@ -3,13 +3,14 @@
  * manages stdlib discovery, and owns the compilation-unit lifecycle.
  */
 #include "base/loader.h"
-#include "parse/ast.h"
+#include "code/parse/ast.h"
 #include "base/common.h"
+#include "base/trace.h"
 #ifdef _WIN32
 #include "base/compat.h"
 #endif
 #include "base/util.h"
-#include "parse/parser.h"
+#include "code/parse/parser.h"
 
 #include <ctype.h>
 #include <dirent.h>
@@ -634,7 +635,6 @@ static void ny_std_save_cache(long long current_mtime) {
     return;
   char dir[1024];
   if (snprintf(dir, sizeof(dir), "%s", cp) >= (int)sizeof(dir)) {
-    free(cp);
     return;
   }
   char *slash = strrchr(dir, '/');
@@ -1701,7 +1701,7 @@ static void mod_list_visit_deps(mod_list *list, size_t idx, unsigned char *state
     return;
   if (state[idx] == 1) {
     size_t report = cycle_count ? ++*cycle_count : 1;
-    if (!getenv("NYTRIX_TRACE_IMPORTS") || report > 16)
+    if (!ny_trace_enabled("NYTRIX_TRACE_IMPORTS") || report > 16)
       return;
     size_t begin = 0;
     while (begin < depth && stack[begin] != idx)
@@ -1747,7 +1747,7 @@ static void mod_list_sort_for_bundle(mod_list *list) {
   for (size_t i = 0; i < list->len; ++i)
     mod_list_visit_deps(list, i, state, stack, 0, order, &order_len,
                         &cycle_count);
-  if (getenv("NYTRIX_TRACE_IMPORTS") && cycle_count > 16)
+  if (ny_trace_enabled("NYTRIX_TRACE_IMPORTS") && cycle_count > 16)
     fprintf(stderr, "warning: %zu additional module dependency cycles omitted\n",
             cycle_count - 16);
   /*

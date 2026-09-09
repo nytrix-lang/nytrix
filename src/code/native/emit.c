@@ -6,8 +6,9 @@
 #include "code/native/object/internal.h"
 #include "base/common.h"
 #include "base/time.h"
+#include "base/trace.h"
 #include "base/util.h"
-#include "wire/build.h"
+#include "code/wire/build.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -56,7 +57,7 @@ bool ny_native_ensure_parent_dir_for_path(const char *path) {
   return true;
 }
 
-#include "code/native/backend_interface.h"
+#include "code/native/interface.h"
 
 static const ny_backend_emitter_t g_backend_emitters[] = {
     {"x86-64", NY_NATIVE_TARGET_X86_64, ny_native_x86_64_emit_nir, ny_native_x86_64_emit_mach_scalar},
@@ -119,7 +120,11 @@ bool ny_native_emit_nir_func(ny_native_writer_t *w,
 
   if (emitter && emitter->emit_nir) {
     nyir_phi_elim((nyir_func_t *)nyir);
-    return emitter->emit_nir(w, target, nyir, label, tag_return, err, err_len);
+    bool ok = emitter->emit_nir(w, target, nyir, label, tag_return, err, err_len);
+    if (!ok && getenv("NY_DUMP_MACH"))
+      fprintf(stderr, "native NIR emitter failed for %s: %s\n",
+              label ? label : "<entry>", err && err[0] ? err : "<no detail>");
+    return ok;
   }
 
   ny_native_set_err(err, err_len,
@@ -155,18 +160,27 @@ bool ny_native_emit_asm_entry(const program_t *prog, const ny_options *opt,
    * Try the NYIR-first codegen path: build, optimize, verify, emit from IR.
    */
   nyir_func_t rt_main_nir = {0};
-  nyir_func_t func_nirs[NY_NATIVE_LIVE_MAX_FUNCS];
-  const char *func_names[NY_NATIVE_LIVE_MAX_FUNCS] = {0};
+  size_t func_cap = NY_NATIVE_NIR_BUNDLE_MAX_FUNCS;
+  nyir_func_t *func_nirs = calloc(func_cap, sizeof(*func_nirs));
+  const char **func_names = calloc(func_cap, sizeof(*func_names));
+  if (!func_nirs || !func_names) {
+    free(func_nirs);
+    free(func_names);
+    ny_native_set_err(err, err_len, "native function pool allocation failed");
+    return false;
+  }
   size_t func_count = 0;
   char nir_err[512] = {0};
   bool nir_ok = ny_native_build_nir(prog, opt, &rt_main_nir, func_nirs,
                                      &func_count, func_names,
-                                     NY_NATIVE_LIVE_MAX_FUNCS, nir_err,
+                                     func_cap, nir_err,
                                      sizeof(nir_err));
-
   if (nir_ok &&
-      !ny_native_dump_ir_for_program(prog, opt, err, err_len))
+      !ny_native_dump_ir_for_program(prog, opt, err, err_len)) {
+    free(func_nirs);
+    free(func_names);
     return false;
+  }
 
   /*
    * Keep PHI instructions intact so machine lowerer (ny_mach_lower_nir) lowers
@@ -250,6 +264,8 @@ bool ny_native_emit_asm_entry(const program_t *prog, const ny_options *opt,
     for (size_t i = 0; i < func_count; ++i)
       nyir_func_free(&func_nirs[i]);
   }
+  free(func_nirs);
+  free(func_names);
 
   if (!nir_ok || !ok) {
     /*
@@ -257,9 +273,6 @@ bool ny_native_emit_asm_entry(const program_t *prog, const ny_options *opt,
      */
     if (!nir_ok && nir_err[0] && err && err_len > 0 && err[0] == '\0')
       ny_native_set_err(err, err_len, "%s", nir_err);
-    nyir_func_free(&rt_main_nir);
-    for (size_t i = 0; i < func_count; ++i)
-      nyir_func_free(&func_nirs[i]);
     free(w.data);
     w = (ny_native_writer_t){0};
     if (!target_has_ast_fallback) {
@@ -320,20 +333,15 @@ static bool ny_native_try_emit_x64_machine_object(
   char machine_err[256] = {0};
   bool ok = true;
   for (size_t i = 0; ok && i < func_count; ++i) {
-    ny_mach_func_t mach = {0};
     char label[256];
-    snprintf(label, sizeof(label), "ny_fn_%s", names[i] ? names[i] : "unknown_fn");
-    ok = ny_mach_lower_nir(&funcs[i], &mach, target->caps, machine_err, sizeof(machine_err)) &&
-         ny_native_x86_64_emit_mach_scalar(&text, target, &mach, label, false,
-                                           machine_err, sizeof(machine_err));
-    ny_mach_func_free(&mach);
+    snprintf(label, sizeof(label), "ny_fn_%s",
+             names[i] ? names[i] : "unknown_fn");
+    ok = ny_native_emit_nir_func(&text, target, &funcs[i], label, false,
+                                 machine_err, sizeof(machine_err));
   }
-  ny_mach_func_t top_mach = {0};
   if (ok)
-    ok = ny_mach_lower_nir(top, &top_mach, target->caps, machine_err, sizeof(machine_err)) &&
-         ny_native_x86_64_emit_mach_scalar(&text, target, &top_mach,
-                                           entry_symbol, tag_return, machine_err,
-                                           sizeof(machine_err));
+    ok = ny_native_emit_nir_func(&text, target, top, entry_symbol, tag_return,
+                                 machine_err, sizeof(machine_err));
   if (ok &&
       (!ny_native_strtab_append_asm(&text, machine_err, sizeof(machine_err)) ||
        !ny_native_arraytab_append_asm(&text, machine_err, sizeof(machine_err))))
@@ -355,7 +363,10 @@ static bool ny_native_try_emit_x64_machine_object(
   if (!ok) return false;
   const char *argv[] = {ny_builder_choose_cc(), "-c", asm_path, "-o", path, NULL};
   int rc = ny_exec_spawn(argv);
-  unlink(asm_path);
+  if (!getenv("NY_KEEP_ASM"))
+    unlink(asm_path);
+  else
+    fprintf(stderr, "[asm kept] %s\n", asm_path);
   return rc == 0;
 }
 
@@ -389,16 +400,24 @@ bool ny_native_emit_object(const program_t *prog, const ny_options *opt,
       ny_native_target_has(&target, NY_NATIVE_CAP_COFF_OBJECT) ||
       ny_native_target_has(&target, NY_NATIVE_CAP_MACHO_OBJECT)) {
     nyir_func_t rt_main_nir = {0};
-    nyir_func_t func_nirs[NY_NATIVE_LIVE_MAX_FUNCS] = {{0}};
-    const char *func_names[NY_NATIVE_LIVE_MAX_FUNCS] = {0};
+    size_t func_cap = NY_NATIVE_NIR_BUNDLE_MAX_FUNCS;
+    nyir_func_t *func_nirs = calloc(func_cap, sizeof(*func_nirs));
+    const char **func_names = calloc(func_cap, sizeof(*func_names));
     size_t func_count = 0;
     char nir_err[512] = {0};
+    if (!func_nirs || !func_names) {
+      free(func_nirs);
+      free(func_names);
+      ny_native_set_err(err, err_len,
+                        "native object function pool allocation failed");
+      return false;
+    }
     bool nir_built = ny_native_build_nir(
         prog, opt, &rt_main_nir, func_nirs, &func_count, func_names,
-        NY_NATIVE_LIVE_MAX_FUNCS, nir_err, sizeof(nir_err));
+        func_cap, nir_err, sizeof(nir_err));
     if (nir_built && rt_main_nir.len > 0) {
       if (getenv("NY_DUMP_OBJ_NYIR"))
-        nyir_dump(stderr, &rt_main_nir, "obj-rt_main");
+        nyir_dump_compact(stderr, &rt_main_nir, "obj-rt_main");
       const char *obj_symbol =
           entry_name && entry_name[0] ? entry_name : "rt_main";
       char obj_err[512] = {0};
@@ -426,6 +445,9 @@ bool ny_native_emit_object(const program_t *prog, const ny_options *opt,
             &rt_main_nir, func_nirs, func_names, func_count, &target, path,
             obj_symbol, tag_return, obj_err, sizeof(obj_err));
       }
+      if (!obj_ok && getenv("NY_DUMP_MACH"))
+        fprintf(stderr, "native object writer failed: %s\n",
+                obj_err[0] ? obj_err : "<no detail>");
       if (obj_ok) {
         if (opt && opt->nyir_dump_stats) {
           unsigned long long mach_ok = 0, nir_fb = 0;
@@ -485,6 +507,8 @@ bool ny_native_emit_object(const program_t *prog, const ny_options *opt,
     for (size_t i = 0; i < func_count; ++i)
       nyir_func_free(&func_nirs[i]);
     nyir_func_free(&rt_main_nir);
+    free(func_nirs);
+    free(func_names);
     if (!nir_built && nir_err[0]) {
       /*
        * A clean NYIR lowering error (R3: body-less stdlib/module calls) is
@@ -509,7 +533,10 @@ bool ny_native_emit_object(const program_t *prog, const ny_options *opt,
   const char *cc = ny_builder_choose_cc();
   const char *argv[] = {cc, "-c", asm_path, "-o", path, NULL};
   int rc = ny_exec_spawn(argv);
-  unlink(asm_path);
+  if (!getenv("NY_KEEP_ASM"))
+    unlink(asm_path);
+  else
+    fprintf(stderr, "[asm kept] %s\n", asm_path);
   if (rc != 0) {
     ny_native_set_err(err, err_len,
                       "native object emission: assembler failed with rc=%d", rc);

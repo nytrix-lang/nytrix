@@ -33,7 +33,11 @@ fn syscall(any num, any a=0, any b=0, any c=0, any d=0, any e=0, any f=0) int {
             _ -> int(num)
          }
       } #endif
-      return __syscall(n, a, b, c, d, e, f)
+      ; __syscall receives boxed Nytrix values.  Re-tag the normalized
+      ; syscall number explicitly: odd Linux syscall numbers (notably
+      ; fork=57) otherwise look like an already-tagged value and are
+      ; incorrectly shifted by the C runtime boundary.
+      return __syscall(__tag(n), a, b, c, d, e, f)
    } #else {
       return -1
    } #endif

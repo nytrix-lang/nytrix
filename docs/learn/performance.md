@@ -179,16 +179,18 @@ must emit the same `checksum=` marker. The runner records every backend checksum
 and fails a mismatch, so the exact semantic-equivalence check is visible in each
 result rather than being an informal timing assumption.
 
-## Optimization loop
+## Cross-Cutting Optimization Techniques
 
-1. Record a reproducible baseline.
-2. Identify one dominant owned cost.
-3. Apply the smallest clear change.
-4. Rerun the result check and the same benchmark.
-5. Keep complexity only after repeated improvement.
-
-Typed helpers, direct indexed access after a proven bound, smaller allocations,
-and compile-time tables are often more useful than a target-specific rewrite.
+| Technique | Origin / Analogue | Target Subsystem | Invariants & Primary Risks |
+| :--- | :--- | :--- | :--- |
+| **Amortized Buffer Growth** | CPython / Go / Rust / LuaJIT | `src/code/runtime/string.c`, `src/code/runtime/core.c` | Allocation limits, stale-pointer invalidation. |
+| **IV / Range / Trip Count + BCE** | LLVM IndVarSimplify / SCEV | `ir/opt/irce.c`, `scev_lite.c` | Canonical loop preheaders, integer overflow safety. |
+| **LICM + Address Strength Reduction** | LLVM LICM / LSR | `ir/opt/licm.c` | Pointer aliasing and side-effect safety. |
+| **Loop Idiom Recognition** | LLVM LoopIdiomRecognize | `ir/opt/loop_idiom.c` | Non-overlapping slices, memory alignment. |
+| **Division / Modulo by Constant** | Reciprocal Division (Granlund/Montgomery) | `ir/opt/advanced.c` | Exact integer arithmetic, `INT64_MIN / -1` guard. |
+| **Global Value Numbering (GVN) / EarlyCSE** | EarlyCSE / GVN | Expression table in NYIR | Dominance tree consistency, side-effect boundaries. |
+| **Correlated Value Propagation & Jump Threading** | LLVM CVP / JumpThreading | CFG edge facts | Dominance consistency, PHI preservation. |
+| **Greedy Register Allocation** | Graph Coloring / Linear Scan | Machine form encoder | Clobber masks, caller/callee-saved registers. |
 
 ## Related
 
@@ -196,3 +198,4 @@ and compile-time tables are often more useful than a target-specific rewrite.
 - [Testing](testing.md)
 - [SIMD and acceleration](simd.md)
 - [Native compilation](native.md)
+- [Nytrix IR (NYIR)](../spec/ir.md)

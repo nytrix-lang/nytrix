@@ -3,7 +3,6 @@
 ;; Keywords: cli terminal automata rule110 example
 ;; Rule 110 - https://en.wikipedia.org/wiki/Rule_110
 use std.core
-use std.core.term
 
 def SX = 2
 
@@ -62,3 +61,5 @@ while gen < target_gens {
    u = step(u, w)
    gen += 1
 }
+
+0

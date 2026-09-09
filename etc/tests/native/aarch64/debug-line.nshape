@@ -1,0 +1,16 @@
+shape aarch64_elf64_debug_line_table {
+  family "runtime-native"
+  generator "native"
+  features [native object elf64 aarch64 debug dwarf-line]
+  template ny-test-case
+  flags "--native-backend aarch64 -g -emit-only -o /tmp/nytrix-aarch64-debug-line.o"
+  expect compile_and_run
+  source ny <<'NY'
+fn add(i64 a, i64 b) i64 {
+  def sum = a + b
+  sum
+}
+
+add(20, 22)
+NY
+}

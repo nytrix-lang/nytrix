@@ -2,8 +2,8 @@
 
 #include "base/intern.h"
 #include "base/util.h"
-#include "code/types.h"
-#include "parse/ast.h"
+#include "code/parse/ast.h"
+#include "code/typing/types.h"
 #include <llvm-c/Core.h>
 #include <llvm-c/DebugInfo.h>
 #include <llvm-c/ExecutionEngine.h>
@@ -103,7 +103,8 @@ static inline void ny_fun_sig_set_min_arity(fun_sig *sig,
                                             const ny_param_list *params) {
   if (!sig)
     return;
-  sig->min_arity = ny_param_required_arity(params, sig->arity, sig->is_variadic);
+  sig->min_arity =
+      ny_param_required_arity(params, sig->arity, sig->is_variadic);
   sig->min_arity_known = true;
 }
 
@@ -445,6 +446,7 @@ typedef struct codegen_flow_t {
   bool thread_detach_stmt_call;
   size_t active_panic_envs;
   LLVMValueRef result_store_val;
+  LLVMBasicBlockRef match_end_block;
   size_t func_root_idx;
   const char **assigned_names_data;
   size_t assigned_names_len;
@@ -708,6 +710,7 @@ struct codegen_t {
       bool thread_detach_stmt_call;
       size_t active_panic_envs;
       LLVMValueRef result_store_val;
+      LLVMBasicBlockRef match_end_block;
       size_t func_root_idx;
       const char **assigned_names_data;
       size_t assigned_names_len;

@@ -1,0 +1,17 @@
+shape list_mutation_is_in_place {
+  family "runtime-native"
+  generator "native"
+  features [native nyir x86_64 lists mutation]
+  template ny-test-case
+  flags "--native-only --native-backend=x86_64 -O3 --nyir-verify --native-result-oracle=0 --no-progress --color=never"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+
+mut receiver = [1]
+receiver.append(2)
+mut free_form = [1]
+add(free_form, 2)
+if receiver.len == 2 && free_form.len == 2 { 0 } else { 1 }
+NY
+}

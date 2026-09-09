@@ -313,11 +313,12 @@ fn free_buffer(p) int {
 The compiler uses unity builds (single translation units that `#include`
 other `.c` files) for faster compilation:
 
-- **Runtime** (`src/rt/init.c`): 13 modules - `ast.c`, `bigint.c`,
+- **Runtime** (`src/code/runtime/init.c`): 13 modules - `ast.c`, `bigint.c`,
  `core.c`, `simmd.c`, `ffi.c`, `ffigates.c`, `gc.c`, `math.c`,
  `bigfloat.c`, `memory.c`, `os.c`, `proof.c`, `string.c`.
-- **Pipeline** (`src/wire/pipe/init.c`): compilation and bundling stages.
-- **C frontend** (`src/code/fficlang.c`): includes `lex.c` and `parse.c`.
+- **Pipeline** (`src/code/wire/pipe/init.c`): compilation and bundling stages.
+- **FFI frontend** (`src/code/ffi/`): the Clang bridge and the in-tree C
+  lexer/parser in `src/code/ffi/c/` are compiled as one owned subsystem.
 
 Each module must be self-contained. Changes to a module must not break other
 modules in the same unity build.

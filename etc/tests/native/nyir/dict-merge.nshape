@@ -1,0 +1,14 @@
+shape dict_merge_native {
+  family "runtime-native"
+  generator "native"
+  features [native nyir x86_64 dict]
+  template ny-test-case
+  flags "--native-only --native-backend=x86_64 -O3 --nyir-verify --native-result-oracle=0 --no-progress --color=never"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+mut left = {"a": 1}
+left = left.merge({"b": 2})
+if left.get("a", 0) == 1 && left.get("b", 0) == 2 { 0 } else { 1 }
+NY
+}

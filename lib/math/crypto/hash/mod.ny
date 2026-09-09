@@ -304,6 +304,60 @@ fn _hash_native_hmac_bytes(list names, any key, any data) any {
    res
 }
 
+fn _hash_simmd_digest_bytes(any data) any {
+   mut msg_len = 0
+   if is_str(data) || is_bytes(data) || is_list(data) { msg_len = data.len }
+   mut padded_len = msg_len + 1
+   while (padded_len % 64) != 56 { padded_len += 1 }
+   def total_len = padded_len + 8
+   def msg = zalloc(total_len)
+   if !msg { return nil }
+   mut copy_i = 0
+   if is_str(data) || is_bytes(data) {
+      while copy_i < msg_len {
+         store8(msg, load8(data, copy_i), copy_i)
+         copy_i += 1
+      }
+   } else if is_list(data) {
+      while copy_i < msg_len {
+         store8(msg, int(data[copy_i]) & 255, copy_i)
+         copy_i += 1
+      }
+   }
+   store8(msg, 128, msg_len)
+   def bit_len = msg_len * 8
+   mut i = 7
+   while i >= 0 {
+      store8(msg, (bit_len >> (i * 8)) & 255, total_len - 8 + (7 - i))
+      i -= 1
+   }
+   def state = zalloc(32)
+   if !state { free(msg) return nil }
+   store32(state, 0x6a09e667, 0)
+   store32(state, 0xbb67ae85, 4)
+   store32(state, 0x3c6ef372, 8)
+   store32(state, 0xa54ff53a, 12)
+   store32(state, 0x510e527f, 16)
+   store32(state, 0x9b05688c, 20)
+   store32(state, 0x1f83d9ab, 24)
+   store32(state, 0x5be0cd19, 28)
+   simmd.sha256_blocks(state, msg, total_len / 64)
+   mut result = list(32)
+   __list_set_len(result, 32)
+   mut k = 0
+   while k < 8 {
+      def hi = load32(state, k * 4)
+      def base = k * 4
+      __store_item_fast(result, base, (hi >> 24) & 255)
+      __store_item_fast(result, base + 1, (hi >> 16) & 255)
+      __store_item_fast(result, base + 2, (hi >> 8) & 255)
+      __store_item_fast(result, base + 3, hi & 255)
+      k += 1
+   }
+   free(msg, state)
+   result
+}
+
 def _U64_MASK = bigint_from_str("18446744073709551615")
 def _U64_ZERO = bigint_from_str("0")
 
@@ -586,7 +640,10 @@ fn sha1(any s, int start=0, int count=0) str {
    store8(m, ((bitlen >> 16) & 255), p_len - 3)
    store8(m, ((bitlen >> 8) & 255), p_len - 2)
    store8(m, (bitlen & 255), p_len - 1)
-   mut w = zero_list(80)
+   ;; SHA-1 expands 32-bit words: use a typed int list so words at w[0..79]
+   ;; store and retrieve their full 32-bit values rather than being truncated
+   ;; to a single byte by the byte-backed zero_list.
+   mut list<int> w = list(80)
    mut off = 0
    while off < p_len {
       mut t = 0
@@ -745,6 +802,10 @@ fn sha256(any data) list {
    "Compute SHA-256 hash of message(string or bytes). Returns bytes list."
    if _hash_native_load() {
       def native = _hash_native_digest_bytes(["SHA256", "sha256", "SHA-256"], data, 0, 0)
+      if native != nil { return native }
+   }
+   if simmd.has_sha() {
+      def native = _hash_simmd_digest_bytes(data)
       if native != nil { return native }
    }
    mut msg_len = 0

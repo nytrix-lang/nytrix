@@ -41,8 +41,7 @@ fn _byte_list_store(list out, int i, int value) any { __store_item_fast(out, i, 
 
 @inline
 fn _bytes_like_len(any x) int {
-   if is_str(x) || is_bytes(x) { return load64(x, -16) }
-   if is_list(x) { return x.len }
+   if is_str(x) || is_bytes(x) || is_list(x) { return x.len }
    0
 }
 

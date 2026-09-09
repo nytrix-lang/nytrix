@@ -45,9 +45,11 @@ static pthread_t g_progress_thread;
 static int g_progress_thread_started = 0;
 #endif
 
+#ifndef _WIN32
 static const char *bar_fill[] = {
     "░", "▏", "▎", "▍", "▌", "▋", "▊", "▉", "█"
 };
+#endif
 
 bool ny_progress_enabled_from_env(void) {
   return ny_env_enabled("NYTRIX_PROGRESS");
@@ -73,6 +75,7 @@ static void fmt_duration(char *buf, size_t size, double sec, int ms) {
   }
 }
 
+#ifndef _WIN32
 static void fmt_rate(char *buf, size_t size, double rate) {
   if (rate < 0.001)
     snprintf(buf, size, "?/s");
@@ -83,6 +86,7 @@ static void fmt_rate(char *buf, size_t size, double rate) {
   else
     snprintf(buf, size, "%.0f/s", rate);
 }
+#endif
 
 #ifndef _WIN32
 static void ny_progress_draw_locked(void) {

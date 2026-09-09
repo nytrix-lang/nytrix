@@ -1,0 +1,48 @@
+shape queen {
+  family "algorithm"
+  features ["c-vs-ny", "checksum"]
+  template ny-test-case
+  expect compile_and_run
+  ;; Translated from the QBE minic test: minic/test/queen.c.
+  source ny <<'NY'
+fn queens(int row, int cols, int diag_l, int diag_r) int {
+   if row == 8 { return 1 }
+   mut total = 0
+   mut x = 0
+   while x < 8 {
+      def bit = 1 << x
+      def dl = 1 << (row + x)
+      def dr = 1 << (row - x + 7)
+      if (cols & bit) == 0 && (diag_l & dl) == 0 && (diag_r & dr) == 0 {
+         total += queens(row + 1, cols | bit, diag_l | dl, diag_r | dr)
+      }
+      x += 1
+   }
+   total
+}
+print("found ", queens(0, 0, 0, 0), " solutions")
+NY
+  source c <<'C'
+#include <stdio.h>
+
+static int queens(int row, int cols, int diag_l, int diag_r) {
+  if (row == 8) return 1;
+
+  int total = 0;
+  for (int col = 0; col < 8; ++col) {
+    int bit = 1 << col;
+    int left = 1 << (row + col);
+    int right = 1 << (row - col + 7);
+    if ((cols & bit) == 0 && (diag_l & left) == 0 &&
+        (diag_r & right) == 0) {
+      total += queens(row + 1, cols | bit, diag_l | left, diag_r | right);
+    }
+  }
+  return total;
+}
+
+int main(void) {
+  printf("found %d solutions\n", queens(0, 0, 0, 0));
+}
+C
+}

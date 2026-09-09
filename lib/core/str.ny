@@ -67,7 +67,7 @@ fn _match_at_ascii_ci(str s, str sub, int at) bool {
 
 fn len(any s) int {
    "Returns the number of bytes for strings, otherwise forwards to the value length."
-   if __is_str_obj(s) { return __load64_idx(s, -16) }
+   if __is_str_obj(s) { return __str_len(s) }
    return s.len
 }
 
@@ -123,24 +123,18 @@ fn _str_eq(any a, any b) bool {
 @returns_owned
 fn cstr_to_str(any p, int offset=0) any {
    "Converts a C-string pointer to a Nytrix string. Optional offset skips bytes."
-   if !p { return 0 }
+   if !p { return "" }
    if is_str(p) {
       if !is_int(offset) || offset < 0 { offset = 0 }
       return _substr(p, offset, p.len)
    }
-   if !is_int(offset) { offset = 0 }
-   mut n = 0
-   while load8(p, offset + n) != 0 { n += 1 }
-   mut out = malloc(n + 1)
-   if !out { return "" }
-   init_str(out, n)
-   mut i = 0
-   while i < n {
-      store8(out, load8(p, offset + i), i)
-      i += 1
-   }
-   store8(out, 0, n)
-   out
+   if !is_int(offset) || offset < 0 { offset = 0 }
+   ;; Preserve raw C pointers at the native ABI boundary.  Dynamic `p + 0`
+   ;; otherwise treats an unboxed pointer as a tagged scalar before conversion.
+   if offset == 0 { return __cstr_to_str(p) }
+   def res = __cstr_to_str(p + offset)
+   if !res { return "" }
+   res
 }
 
 @returns_owned
@@ -173,9 +167,9 @@ fn pad_start(str s, int width, str pad=" ") str {
 fn startswith(any s, any prefix) bool {
    "Returns true if string `s` starts with `prefix`."
    if !is_str(s) || !is_str(prefix) { return false }
-   mut n = prefix.len
-   if s.len < n { return false }
-   _match_at(s, prefix, 0)
+   mut n = __str_len(prefix)
+   if __str_len(s) < n { return false }
+   return _match_at(s, prefix, 0) ? true : false
 }
 
 fn atoi(any s) int {
@@ -205,7 +199,7 @@ fn parse_int(any s, int base=10) int {
    "Parses an integer from string `s` using base 2..36."
    if !is_str(s) { return 0 }
    if base < 2 || base > 36 { return 0 }
-   def n = s.len
+   def n = __str_len(s)
    if n == 0 { return 0 }
    mut sign = 1
    mut i = 0
@@ -235,7 +229,7 @@ fn _atof_unsigned_from(str s, int i0) f64 {
    while i < n {
       def d = _ascii_decimal_value(load8(s, i))
       if d < 0 { break }
-      val = val * 10.0 + __flt_box_val(__flt_from_int(d))
+      val = val * 10.0 + d
       i += 1
    }
    if i < n && load8(s, i) == 46 {
@@ -244,7 +238,7 @@ fn _atof_unsigned_from(str s, int i0) f64 {
       while i < n {
          def d = _ascii_decimal_value(load8(s, i))
          if d < 0 { break }
-         val = val + __flt_box_val(__flt_from_int(d)) * frac
+         val = val + d * frac
          frac = frac * 0.1
          i += 1
       }
@@ -298,12 +292,10 @@ fn atof(any s) f64 {
 }
 
 fn _list_push_reserved(list lst, any v) int {
-   if !is_list(lst) { return 0 }
-   def n = load64(lst, 0)
-   def cap = load64(lst, 8)
-   if n >= cap { return 0 }
-   store64(lst, v, 16 + n * 8)
-   store64(lst, n + 1, 0)
+   ; Keep the returned buffer even when the initial capacity is sufficient:
+   ; native append is allowed to return a replacement handle, and discarding
+   ; it makes this helper silently lose writes across the native/VM ABIs.
+   lst = __append(lst, v)
    1
 }
 
@@ -314,15 +306,15 @@ fn _substr(str s, int start, int stop) str {
    if stop > n { stop = n }
    if start >= stop { return "" }
    def len = stop - start
-   mut out = malloc(len + 1)
+   mut out = __malloc(len + 1)
    if !out { return "" }
-   init_str(out, len)
+   __init_str(out, len)
    mut i = 0
    while i < len {
-      store8(out, load8(s, start + i), i)
+      __store8_idx(out, __load8_idx(s, start + i), i)
       i += 1
    }
-   store8(out, 0, len)
+   __store8_idx(out, 0, len)
    return out
 }
 
@@ -466,16 +458,38 @@ fn lower(any s) any {
 fn endswith(any s, any suffix) bool {
    "Returns true if string `s` ends with `suffix`."
    if !is_str(s) || !is_str(suffix) { return false }
-   mut n = s.len
-   def m = suffix.len
+   mut n = __str_len(s)
+   def m = __str_len(suffix)
    if n < m { return false }
-   _match_at(s, suffix, n - m)
+   return _match_at(s, suffix, n - m) ? true : false
 }
 
 @inline
-fn str_contains(str s, str sub) bool {
+fn str_contains(any s, any sub) bool {
    "Returns true if string `s` contains `sub`."
-   find(s, sub) != -1
+   if type(s) != "str" || type(sub) != "str" { return false }
+   ;; Keep this loop on the dynamic string ABI.  Passing an exception payload
+   ;; through the typed `find(str,str)` signature can reinterpret a tagged
+   ;; string as a raw pointer, making an equal substring compare false.
+   def n = s.len
+   def m = sub.len
+   if m == 0 { return true }
+   if n < m { return false }
+   mut i = 0
+   while i + m <= n {
+      mut j = 0
+      mut same = true
+      while j < m {
+         if load8(s, i + j) != load8(sub, j) {
+            same = false
+            break
+         }
+         j += 1
+      }
+      if same { return true }
+      i += 1
+   }
+   false
 }
 
 @returns_owned
@@ -796,7 +810,7 @@ fn utf8_valid(any s) bool {
 
 fn utf8_len(any s) int {
    "Returns the number of UTF-8 code points in `s` (invalid bytes count as one)."
-   if !is_str(s) { return 0 }
+   if !is_str(s) && !__is_str_obj(s) { return 0 }
    def n = s.len
    mut i = 0
    mut count = 0
@@ -811,7 +825,7 @@ fn utf8_len(any s) int {
 
 fn ord_at(any s, int idx=0) int {
    "Returns Unicode code point at code-point index `idx` (supports negative indices)."
-   if !is_str(s) { return 0 }
+   if !is_str(s) && !__is_str_obj(s) { return 0 }
    if !is_int(idx) { idx = 0 }
    mut total = utf8_len(s)
    if idx < 0 { idx = total + idx }
@@ -840,7 +854,7 @@ fn ord(any s) int {
 
 fn byte_at(any s, int idx=0, any default=0) int {
    "Returns raw byte at byte index `idx`, supporting negative indices."
-   def n = s.len
+   def n = __str_len(s)
    if idx < 0 { idx = n + idx }
    if idx < 0 || idx >= n { return default }
    load8(s, idx)
@@ -1019,6 +1033,8 @@ impl str {
    @inline
    fn find_last(self s, str sub) int { find_last(s, sub) }
    @inline
+   fn contains(self s, str sub) bool { str_contains(s, sub) }
+   @inline
    fn startswith(self s, str prefix) bool { startswith(s, prefix) }
    @inline
    fn endswith(self s, str suffix) bool { endswith(s, suffix) }
@@ -1055,9 +1071,9 @@ impl str {
    @inline
    fn utf8_len(self s) int { utf8_len(s) }
    @inline
-   fn str_slice(self s, int start, int stop, int step=1) str { str_slice(s, start, stop, step) }
+   fn str_slice(self s, int start, int stop, int step=1) str { _str_slice(s, start, stop, step) }
    @inline
-   fn utf8_slice(self s, int start, int stop, int step=1) str { utf8_slice(s, start, stop, step) }
+   fn utf8_slice(self s, int start, int stop, int step=1) str { _utf8_slice(s, start, stop, step) }
    @inline
    fn ascii_only(self s) bool { ascii_only(s) }
    @inline
@@ -1075,52 +1091,13 @@ impl str {
 
 fn str_slice(str s, int start, int stop, int step=1) str {
    "Returns a slice of string `s` from `start` to `stop` with optional `step`."
-   if !is_str(s) { return "" }
-   if step == 0 { step = 1 }
-   slice(s, start, stop, step)
+   return _str_slice(s, start, stop, step)
 }
 
 @returns_owned
 fn utf8_slice(str s, int start, int stop, int step=1) str {
    "Returns a UTF-8 code-point slice of string `s`."
-   if !is_str(s) { return "" }
-   if !is_int(step) { step = 1 }
-   if step == 0 { step = 1 }
-   def n = utf8_len(s)
-   if start < 0 { start = n + start }
-   if stop < 0 { stop = n + stop }
-   if step > 0 {
-      if start < 0 { start = 0 }
-      if stop > n { stop = n }
-      if start >= stop { return "" }
-      if step == 1 && start == 0 && stop == n { return s }
-   } else {
-      if start >= n { start = n - 1 }
-      if stop < -1 { stop = -1 }
-      if start <= stop { return "" }
-   }
-   mut count = 0
-   mut t = start
-   if step > 0 {
-      while t < stop {
-         count += 1
-         t = t + step
-      }
-   } else {
-      while t > stop {
-         count += 1
-         t = t + step
-      }
-   }
-   mut b, i = Builder(count * 4 + 8), start
-   if step > 0 {
-      while i < stop { b, i = builder_append(b, chr(ord_at(s, i))), i + step }
-   } else {
-      while i > stop { b, i = builder_append(b, chr(ord_at(s, i))), i + step }
-   }
-   def out = builder_to_str(b)
-   builder_free(b)
-   return out
+   return _utf8_slice(s, start, stop, step)
 }
 
 @returns_owned
@@ -1150,8 +1127,10 @@ fn builder_append(any b, any s) any {
       b[0] = buf
       b[2] = cap
    }
-   if is_ptr(s) { s = cstr_to_str(s) }
-   elif !is_str(s) { s = to_str(s) }
+   if !is_str(s) {
+      if is_ptr(s) { s = cstr_to_str(s) }
+      else { s = to_str(s) }
+   }
    if !is_str(s) { return b }
    def slen = s.len
    if slen <= 0 { return b }
@@ -1165,7 +1144,11 @@ fn builder_append(any b, any s) any {
       b[0] = buf
       b[2] = cap
    }
-   memcpy(buf + l, s, slen)
+   mut si = 0
+   while si < slen {
+      store8(buf, byte_at(s, si), l + si)
+      si += 1
+   }
    l += slen
    store8(buf, 0, l)
    b[1] = l
@@ -1213,12 +1196,8 @@ fn builder_to_str(any b) str {
    def buf = b[0]
    mut l = int(b[1])
    if !buf || l <= 0 { return "" }
-   mut out = malloc(l + 1)
-   if !out { return "" }
-   init_str(out, l)
-   memcpy(out, buf, l)
-   store8(out, 0, l)
-   out
+   store8(buf, 0, l)
+   cstr_to_str(buf)
 }
 
 fn builder_free(any b) int {
@@ -1226,6 +1205,56 @@ fn builder_free(any b) int {
    if !is_list(b) || b.len < 3 { return 0 }
    if b[0] { free(b[0]) b[0] = 0 }
    0
+}
+
+fn _str_slice(str s, int start, int stop, int step=1) str {
+   "Returns a slice of string `s` from `start` to `stop` with optional `step`."
+   if !is_str(s) { return "" }
+   if step == 0 { step = 1 }
+   slice(s, start, stop, step)
+}
+
+@returns_owned
+fn _utf8_slice(str s, int start, int stop, int step=1) str {
+   "Returns a UTF-8 code-point slice of string `s`."
+   if !is_str(s) { return "" }
+   if !is_int(step) { step = 1 }
+   if step == 0 { step = 1 }
+   def n = utf8_len(s)
+   if start < 0 { start = n + start }
+   if stop < 0 { stop = n + stop }
+   if step > 0 {
+      if start < 0 { start = 0 }
+      if stop > n { stop = n }
+      if start >= stop { return "" }
+      if step == 1 && start == 0 && stop == n { return clone(s) }
+   } else {
+      if start >= n { start = n - 1 }
+      if stop < -1 { stop = -1 }
+      if start <= stop { return "" }
+   }
+   mut count = 0
+   mut t = start
+   if step > 0 {
+      while t < stop {
+         count += 1
+         t = t + step
+      }
+   } else {
+      while t > stop {
+         count += 1
+         t = t + step
+      }
+   }
+   mut b, i = Builder(count * 4 + 8), start
+   if step > 0 {
+      while i < stop { b, i = builder_append(b, chr(ord_at(s, i))), i + step }
+   } else {
+      while i > stop { b, i = builder_append(b, chr(ord_at(s, i))), i + step }
+   }
+   def out = builder_to_str(b)
+   builder_free(b)
+   return out
 }
 
 #main {

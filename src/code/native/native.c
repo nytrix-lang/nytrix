@@ -3,13 +3,14 @@
  * emission, object writing, and linking into a single compilation path.
  */
 #include "code/native/internal.h"
-#include "code/native/ir.h"
-#include "code/c/c.h"
+#include "code/ir/internal.h"
+#include "code/ir/ir.h"
+#include "code/ffi/c/c.h"
 #include "code/priv.h"
 #include "base/common.h"
 #include "base/util.h"
 #include "base/time.h"
-#include "wire/build.h"
+#include "code/wire/build.h"
 #include <ctype.h>
 #include <errno.h>
 #include <inttypes.h>
@@ -20,6 +21,15 @@
 #include <sys/stat.h>
 
 extern int64_t rt_bigint_add(int64_t a, int64_t b);
+extern int64_t rt_bigint_to_str(int64_t value);
+extern int64_t rt_bigint_to_cstr_raw(int64_t value);
+extern int64_t rt_bigint_to_int(int64_t value);
+extern int64_t rt_bigfloat_to_str(int64_t value);
+extern int64_t rt_to_str(int64_t value);
+extern int64_t rt_long(int64_t value);
+extern int64_t rt_any_to_i64(int64_t value);
+extern int64_t rt_bigint_neg_raw(int64_t value);
+extern int64_t rt_sequence_len_raw(int64_t value);
 extern int64_t rt_ticks_ns(void);
 
 /*
@@ -308,14 +318,70 @@ static bool ny_native_vm_call_resolve(void *opaque, const char *symbol,
       *out = rt_bigint_from_i64_raw(args ? args[0] : 0);
     return true;
   }
+  if (strcmp(symbol, "rt_long") == 0 && arg_count == 1) {
+    if (out)
+      *out = rt_long(args ? args[0] : 0);
+    return true;
+  }
   if (strcmp(symbol, "rt_bigint_to_i64_raw") == 0 && arg_count == 1) {
     if (out)
       *out = rt_bigint_to_i64_raw(args ? args[0] : 0);
     return true;
   }
+  if (strcmp(symbol, "rt_bigint_to_int") == 0 && arg_count == 1) {
+    if (out)
+      *out = rt_bigint_to_int(args ? args[0] : 0);
+    return true;
+  }
   if (strcmp(symbol, "rt_bigint_add") == 0 && arg_count == 2) {
     if (out)
       *out = rt_bigint_add(args ? args[0] : 0, args ? args[1] : 0);
+    return true;
+  }
+  if (strcmp(symbol, "rt_bigint_to_str") == 0 && arg_count == 1) {
+    if (out)
+      *out = rt_bigint_to_str(args ? args[0] : 0);
+    return true;
+  }
+  if (strcmp(symbol, "rt_bigint_to_cstr_raw") == 0 && arg_count == 1) {
+    if (out)
+      *out = rt_bigint_to_cstr_raw(args ? args[0] : 0);
+    return true;
+  }
+  if (strcmp(symbol, "rt_bigfloat_to_str") == 0 && arg_count == 1) {
+    if (out)
+      *out = rt_bigfloat_to_str(args ? args[0] : 0);
+    return true;
+  }
+  if (strcmp(symbol, "rt_to_str") == 0 && arg_count == 1) {
+    if (out)
+      *out = rt_to_str(args ? args[0] : 0);
+    return true;
+  }
+  if (strcmp(symbol, "rt_bigint_neg_raw") == 0 && arg_count == 1) {
+    if (out)
+      *out = rt_bigint_neg_raw(args ? args[0] : 0);
+    return true;
+  }
+  if (strcmp(symbol, "rt_any_to_i64") == 0 && arg_count == 1) {
+    if (out)
+      *out = rt_any_to_i64(args ? args[0] : 0);
+    return true;
+  }
+  if (strcmp(symbol, "rt_call_any1") == 0 && arg_count == 2) {
+    if (out)
+      *out = rt_call_any1(args ? args[0] : 0, args ? args[1] : 0);
+    return true;
+  }
+  if (strcmp(symbol, "rt_call_any2") == 0 && arg_count == 3) {
+    if (out)
+      *out = rt_call_any2(args ? args[0] : 0, args ? args[1] : 0,
+                                 args ? args[2] : 0);
+    return true;
+  }
+  if (strcmp(symbol, "rt_sequence_len_raw") == 0 && arg_count == 1) {
+    if (out)
+      *out = rt_sequence_len_raw(args ? args[0] : 0);
     return true;
   }
   if (strcmp(symbol, "rt_native_is_int") == 0 && arg_count == 1) {
@@ -328,40 +394,253 @@ static bool ny_native_vm_call_resolve(void *opaque, const char *symbol,
       *out = rt_native_has_tag(args ? args[0] : 0, args ? args[1] : 0);
     return true;
   }
-  if (strcmp(symbol, "rt_native_tbuf_new") == 0 && arg_count == 2) {
+  if (strcmp(symbol, "rt_value_tag") == 0 && arg_count == 1) {
+    if (out)
+      *out = rt_value_tag(args ? args[0] : 0);
+    return true;
+  }
+  if (strcmp(symbol, "rt_zalloc_raw") == 0 && arg_count == 1) {
+    if (out)
+      *out = rt_zalloc_raw(args ? args[0] : 0);
+    return true;
+  }
+  if (strcmp(symbol, "rt_zfree_raw") == 0 && arg_count == 1) {
+    if (out)
+      *out = rt_zfree_raw(args ? args[0] : 0);
+    return true;
+  }
+  if (strcmp(symbol, "rt_list_new_raw") == 0 && arg_count == 1) {
+    if (out)
+      *out = rt_list_new_raw(args ? args[0] : 0);
+    return true;
+  }
+  if (strcmp(symbol, "rt_list_new_sized") == 0 && arg_count == 1) {
+    if (out)
+      *out = rt_list_new_sized(args ? args[0] : 0);
+    return true;
+  }
+  if (strcmp(symbol, "rt_simmd_popcnt64_i64") == 0 && arg_count == 1) {
+    if (out) *out = rt_simmd_popcnt64_i64(args ? args[0] : 0);
+    return true;
+  }
+  if (strcmp(symbol, "rt_simmd_popcnt64_i64") == 0 && arg_count == 1) {
+    if (out) *out = rt_simmd_popcnt64_i64(args ? args[0] : 0);
+    return true;
+  }
+  if (strcmp(symbol, "rt_simmd_ctz64_i64") == 0 && arg_count == 1) {
+    if (out) *out = rt_simmd_ctz64_i64(args ? args[0] : 0);
+    return true;
+  }
+  if (strcmp(symbol, "rt_simmd_ctz64_i64") == 0 && arg_count == 1) {
+    if (out) *out = rt_simmd_ctz64_i64(args ? args[0] : 0);
+    return true;
+  }
+  if (strcmp(symbol, "rt_simmd_clz64_i64") == 0 && arg_count == 1) {
+    if (out) *out = rt_simmd_clz64_i64(args ? args[0] : 0);
+    return true;
+  }
+  if (strcmp(symbol, "rt_simmd_clz64_i64") == 0 && arg_count == 1) {
+    if (out) *out = rt_simmd_clz64_i64(args ? args[0] : 0);
+    return true;
+  }
+  if (strcmp(symbol, "rt_simmd_bswap64_i64") == 0 && arg_count == 1) {
+    if (out) *out = rt_simmd_bswap64_i64(args ? args[0] : 0);
+    return true;
+  }
+  if (strcmp(symbol, "rt_simmd_bswap64_i64") == 0 && arg_count == 1) {
+    if (out) *out = rt_simmd_bswap64_i64(args ? args[0] : 0);
+    return true;
+  }
+  if (strcmp(symbol, "rt_simmd_popcnt32_i64") == 0 && arg_count == 1) {
+    if (out) *out = rt_simmd_popcnt32_i64(args ? args[0] : 0);
+    return true;
+  }
+  if (strcmp(symbol, "rt_simmd_popcnt32_i64") == 0 && arg_count == 1) {
+    if (out) *out = rt_simmd_popcnt32_i64(args ? args[0] : 0);
+    return true;
+  }
+  if (strcmp(symbol, "rt_simmd_ctz32_i64") == 0 && arg_count == 1) {
+    if (out) *out = rt_simmd_ctz32_i64(args ? args[0] : 0);
+    return true;
+  }
+  if (strcmp(symbol, "rt_simmd_ctz32_i64") == 0 && arg_count == 1) {
+    if (out) *out = rt_simmd_ctz32_i64(args ? args[0] : 0);
+    return true;
+  }
+  if (strcmp(symbol, "rt_simmd_clz32_i64") == 0 && arg_count == 1) {
+    if (out) *out = rt_simmd_clz32_i64(args ? args[0] : 0);
+    return true;
+  }
+  if (strcmp(symbol, "rt_simmd_clz32_i64") == 0 && arg_count == 1) {
+    if (out) *out = rt_simmd_clz32_i64(args ? args[0] : 0);
+    return true;
+  }
+  if (strcmp(symbol, "rt_simmd_bswap32_i64") == 0 && arg_count == 1) {
+    if (out) *out = rt_simmd_bswap32_i64(args ? args[0] : 0);
+    return true;
+  }
+  if (strcmp(symbol, "rt_simmd_bswap32_i64") == 0 && arg_count == 1) {
+    if (out) *out = rt_simmd_bswap32_i64(args ? args[0] : 0);
+    return true;
+  }
+  if (strcmp(symbol, "rt_simmd_rotl32_i64") == 0 && arg_count == 2) {
+    if (out) *out = rt_simmd_rotl32_i64(args ? args[0] : 0, args ? args[1] : 0);
+    return true;
+  }
+  if (strcmp(symbol, "rt_simmd_rotr32_i64") == 0 && arg_count == 2) {
+    if (out) *out = rt_simmd_rotr32_i64(args ? args[0] : 0, args ? args[1] : 0);
+    return true;
+  }
+  if (strcmp(symbol, "rt_simmd_rotl64_i64") == 0 && arg_count == 2) {
+    if (out) *out = rt_simmd_rotl64_i64(args ? args[0] : 0, args ? args[1] : 0);
+    return true;
+  }
+  if (strcmp(symbol, "rt_simmd_rotr64_i64") == 0 && arg_count == 2) {
+    if (out) *out = rt_simmd_rotr64_i64(args ? args[0] : 0, args ? args[1] : 0);
+    return true;
+  }
+  if (strcmp(symbol, "rt_tbuf_new_raw") == 0 && arg_count == 2) {
     int64_t count = args ? args[0] : 0;
     int64_t elem_size = args ? args[1] : 0;
     if (out)
-      *out = rt_native_tbuf_new(count, elem_size);
+      *out = rt_tbuf_new_raw(count, elem_size);
     return true;
   }
-  if (strcmp(symbol, "rt_native_cstr_builder_new") == 0 && arg_count == 1) {
-    if (out) *out = rt_native_cstr_builder_new(args ? args[0] : 0);
+  if (strcmp(symbol, "rt_tbuf_len_raw") == 0 && arg_count == 1) {
+    if (out)
+      *out = rt_tbuf_len_raw(args ? args[0] : 0);
     return true;
   }
-  if (strcmp(symbol, "rt_native_cstr_builder_append") == 0 && arg_count == 2) {
-    if (out) *out = rt_native_cstr_builder_append(args ? args[0] : 0, args ? args[1] : 0);
+  if (strcmp(symbol, "rt_tbuf_clear_raw") == 0 && arg_count == 1) {
+    if (out)
+      *out = rt_tbuf_clear_raw(args ? args[0] : 0);
     return true;
   }
-  if (strcmp(symbol, "rt_native_cstr_builder_finalize") == 0 && arg_count == 1) {
-    if (out) *out = rt_native_cstr_builder_finalize(args ? args[0] : 0);
+  if ((strcmp(symbol, "rt_tbuf_index_any") == 0 ||
+       strcmp(symbol, "rt_tbuf_index_any_raw") == 0) && arg_count == 2) {
+    if (out)
+      *out = strcmp(symbol, "rt_tbuf_index_any_raw") == 0
+                 ? rt_tbuf_index_any_raw(args ? args[0] : 0,
+                                         args ? args[1] : 0)
+                 : rt_tbuf_index_any(args ? args[0] : 0,
+                                     args ? args[1] : 0);
     return true;
   }
-  if ((strcmp(symbol, "malloc") == 0 || strcmp(symbol, "__malloc") == 0) &&
+  if (strcmp(symbol, "rt_tbuf_get_any") == 0 && arg_count == 3) {
+    if (out)
+      *out = rt_tbuf_get_any(args ? args[0] : 0,
+                                    args ? args[1] : 0,
+                                    args ? args[2] : 0);
+    return true;
+  }
+  if (strcmp(symbol, "rt_tbuf_to_cstr") == 0 && arg_count == 1) {
+    if (out)
+      *out = rt_tbuf_to_cstr(args ? args[0] : 0);
+    return true;
+  }
+  if (strcmp(symbol, "rt_shl_raw") == 0 && arg_count == 2) {
+    if (out)
+      *out = rt_shl_raw(args ? args[0] : 0, args ? args[1] : 0);
+    return true;
+  }
+  if (strcmp(symbol, "rt_result_unwrap_or_raw") == 0 && arg_count == 2) {
+    if (out)
+      *out = rt_result_unwrap_or_raw(args ? args[0] : 0, args ? args[1] : 0);
+    return true;
+  }
+  if (strcmp(symbol, "rt_bigfloat_zero") == 0 && arg_count == 1) {
+    if (out) *out = rt_bigfloat_zero(args ? args[0] : 0);
+    return true;
+  }
+  if (strcmp(symbol, "rt_bigfloat_one") == 0 && arg_count == 1) {
+    if (out) *out = rt_bigfloat_one(args ? args[0] : 0);
+    return true;
+  }
+  if (strcmp(symbol, "rt_bigfloat_add") == 0 && arg_count == 2) {
+    if (out) *out = rt_bigfloat_add(args ? args[0] : 0, args ? args[1] : 0);
+    return true;
+  }
+  if (strcmp(symbol, "rt_bigfloat_sub") == 0 && arg_count == 2) {
+    if (out) *out = rt_bigfloat_sub(args ? args[0] : 0, args ? args[1] : 0);
+    return true;
+  }
+  if (strcmp(symbol, "rt_bigfloat_mul") == 0 && arg_count == 2) {
+    if (out) *out = rt_bigfloat_mul(args ? args[0] : 0, args ? args[1] : 0);
+    return true;
+  }
+  if (strcmp(symbol, "rt_bigfloat_div") == 0 && arg_count == 2) {
+    if (out) *out = rt_bigfloat_div(args ? args[0] : 0, args ? args[1] : 0);
+    return true;
+  }
+  if (strcmp(symbol, "rt_bigfloat_neg") == 0 && arg_count == 1) {
+    if (out) *out = rt_bigfloat_neg(args ? args[0] : 0);
+    return true;
+  }
+  if (strcmp(symbol, "rt_bigfloat_abs") == 0 && arg_count == 1) {
+    if (out) *out = rt_bigfloat_abs(args ? args[0] : 0);
+    return true;
+  }
+  if (strcmp(symbol, "rt_bigfloat_sqrt") == 0 && arg_count == 1) {
+    if (out) *out = rt_bigfloat_sqrt(args ? args[0] : 0);
+    return true;
+  }
+  if (strcmp(symbol, "rt_bigfloat_is") == 0 && arg_count == 1) {
+    if (out) *out = rt_bigfloat_is(args ? args[0] : 0);
+    return true;
+  }
+  if (strcmp(symbol, "rt_tbuf_swap") == 0 && arg_count == 3) {
+    if (out)
+      *out = rt_tbuf_swap(args ? args[0] : 0, args ? args[1] : 0,
+                          args ? args[2] : 0);
+    return true;
+  }
+  if (strcmp(symbol, "rt_set_new") == 0 && arg_count == 1) {
+    if (out) *out = rt_set_new(args ? args[0] : 0);
+    return true;
+  }
+  if (strcmp(symbol, "rt_set_remove") == 0 && arg_count == 2) {
+    if (out) *out = rt_set_remove(args ? args[0] : 0, args ? args[1] : 0);
+    return true;
+  }
+  if (strcmp(symbol, "rt_cstr_builder_new") == 0 && arg_count == 1) {
+    if (out) *out = rt_cstr_builder_new(args ? args[0] : 0);
+    return true;
+  }
+  if (strcmp(symbol, "rt_cstr_builder_append") == 0 && arg_count == 2) {
+    if (out) *out = rt_cstr_builder_append(args ? args[0] : 0, args ? args[1] : 0);
+    return true;
+  }
+  if (strcmp(symbol, "rt_cstr_builder_finalize") == 0 && arg_count == 1) {
+    if (out) *out = rt_cstr_builder_finalize(args ? args[0] : 0);
+    return true;
+  }
+  if ((strcmp(symbol, "rt_malloc") == 0 || strcmp(symbol, "malloc") == 0 ||
+       strcmp(symbol, "__malloc") == 0) &&
       arg_count == 1) {
-    void *p = malloc((size_t)(args ? args[0] : 0));
+    int64_t p = rt_malloc(args ? args[0] : 0);
     if (!p)
       return ny_native_set_err(err, err_len, "native NYIR VM: malloc failed"),
              false;
     if (out)
-      *out = (int64_t)(uintptr_t)p;
+      *out = p;
     return true;
   }
-  if ((strcmp(symbol, "free") == 0 || strcmp(symbol, "__free") == 0) &&
+  if ((strcmp(symbol, "rt_free") == 0 || strcmp(symbol, "free") == 0 ||
+       strcmp(symbol, "__free") == 0) &&
       arg_count == 1) {
-    free((void *)(uintptr_t)(args ? args[0] : 0));
+    rt_free(args ? args[0] : 0);
     if (out)
       *out = 0;
+    return true;
+  }
+  if (strcmp(symbol, "rt_ptr_add_i64") == 0 && arg_count == 2) {
+    if (out)
+      *out = rt_ptr_add_i64(args ? args[0] : 0, args ? args[1] : 0);
+    return true;
+  }
+  if (strcmp(symbol, "rt_ptr_sub_i64") == 0 && arg_count == 2) {
+    if (out)
+      *out = rt_ptr_sub_i64(args ? args[0] : 0, args ? args[1] : 0);
     return true;
   }
   for (size_t i = 0; i < ctx->count; ++i) {
@@ -397,6 +676,29 @@ static bool ny_native_vm_call_resolve(void *opaque, const char *symbol,
     if (out)
       *out = r.result;
     nyir_eval_result_free(&r);
+    return true;
+  }
+  void *sym_ptr = ny_process_symbol(symbol);
+  if (sym_ptr) {
+    typedef int64_t (*fn0_t)(void);
+    typedef int64_t (*fn1_t)(int64_t);
+    typedef int64_t (*fn2_t)(int64_t, int64_t);
+    typedef int64_t (*fn3_t)(int64_t, int64_t, int64_t);
+    typedef int64_t (*fn4_t)(int64_t, int64_t, int64_t, int64_t);
+    typedef int64_t (*fn5_t)(int64_t, int64_t, int64_t, int64_t, int64_t);
+    typedef int64_t (*fn6_t)(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t);
+    int64_t res = 0;
+    switch (arg_count) {
+    case 0: res = ((fn0_t)sym_ptr)(); break;
+    case 1: res = ((fn1_t)sym_ptr)(args ? args[0] : 0); break;
+    case 2: res = ((fn2_t)sym_ptr)(args ? args[0] : 0, args ? args[1] : 0); break;
+    case 3: res = ((fn3_t)sym_ptr)(args ? args[0] : 0, args ? args[1] : 0, args ? args[2] : 0); break;
+    case 4: res = ((fn4_t)sym_ptr)(args ? args[0] : 0, args ? args[1] : 0, args ? args[2] : 0, args ? args[3] : 0); break;
+    case 5: res = ((fn5_t)sym_ptr)(args ? args[0] : 0, args ? args[1] : 0, args ? args[2] : 0, args ? args[3] : 0, args ? args[4] : 0); break;
+    case 6: res = ((fn6_t)sym_ptr)(args ? args[0] : 0, args ? args[1] : 0, args ? args[2] : 0, args ? args[3] : 0, args ? args[4] : 0, args ? args[5] : 0); break;
+    default: return ny_native_set_err(err, err_len, "native NYIR VM: too many args for dlsym call"), false;
+    }
+    if (out) *out = res;
     return true;
   }
   return ny_native_set_err(err, err_len,
@@ -690,12 +992,24 @@ bool ny_native_eval_ir_for_program(const program_t *prog,
     return ny_native_eval_ir_binary_file(opt->nyir_run_bin_path, opt, err,
                                          err_len);
   nyir_func_t rt_main = {0};
-  nyir_func_t funcs[NY_NATIVE_LIVE_MAX_FUNCS] = {{0}};
-  const char *names[NY_NATIVE_LIVE_MAX_FUNCS] = {0};
+  size_t func_cap = NY_NATIVE_NIR_BUNDLE_MAX_FUNCS;
+  nyir_func_t *funcs = calloc(func_cap, sizeof(*funcs));
+  const char **names = calloc(func_cap, sizeof(*names));
   size_t count = 0;
-  if (!ny_native_build_nir(prog, opt, &rt_main, funcs, &count, names,
-                           NY_NATIVE_LIVE_MAX_FUNCS, err, err_len))
+  if (!funcs || !names) {
+    free(funcs);
+    free(names);
+    ny_native_set_err(err, err_len,
+                      "native evaluator function pool allocation failed");
     return false;
+  }
+  if (!ny_native_build_nir(prog, opt, &rt_main, funcs, &count, names,
+                           func_cap, err, err_len)) {
+    free(funcs);
+    free(names);
+    return false;
+  }
+  nyir_eval_globals_clear();
   nyir_eval_result_t profile = {0};
   bool ok = ny_native_collect_vm_profile(
       &rt_main, funcs, names, count, opt, &profile, err, err_len);
@@ -703,6 +1017,8 @@ bool ny_native_eval_ir_for_program(const program_t *prog,
   nyir_func_free(&rt_main);
   for (size_t i = 0; i < count; ++i)
     nyir_func_free(&funcs[i]);
+  free(funcs);
+  free(names);
   return ok;
 }
 

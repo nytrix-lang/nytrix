@@ -55,7 +55,7 @@ may derive a stronger fact for its own layer, but it must not write that result
 back as a source-level guarantee.
 
 After HM/type checking, the structured source type graph is `ny_type_t`
-(`src/code/types.h` / `src/code/typeinfer.c`). ABI-facing lowering resolves
+(`src/code/typing/types.h` / `src/code/typing/typeinfer.c`). ABI-facing lowering resolves
 source type names through `resolve_type_name` / `resolve_abi_type_name` and
 caches the resulting carrier types in semantic function/variable records. NYIR
 then uses its own typed opcodes and `nyir_type_map_t`; machine lowering consumes
@@ -115,8 +115,8 @@ cannot be reused. Set `NYTRIX_TRACE_CACHE=1` to see `module cache hit` and
 use its whole-program cache.
 
 Runtime artifacts are rebuilt by the build driver when their owned runtime
-sources change. In particular, a change under `src/rt/` such as
-`src/rt/core.c` invalidates the runtime build input; this is build-time
+sources change. In particular, a change under `src/code/runtime/` such as
+`src/code/runtime/core.c` invalidates the runtime build input; this is build-time
 dependency tracking, not a runtime recompilation of a shared library.
 
 ## Worked trace
