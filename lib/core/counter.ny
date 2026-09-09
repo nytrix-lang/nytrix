@@ -12,7 +12,7 @@ fn counter(seq xs) dict {
    mut d, i = dict(16), 0
    def n = xs.len
    while i < n {
-      def v = xs.get(i)
+      def v = xs[i]
       d[v] = d.get(v, 0) + 1
       i += 1
    }
@@ -33,9 +33,9 @@ fn _counter_merge_common(list left, list right) list {
    mut out = list(ln + rn)
    mut i, j = 0, 0
    while i < ln && j < rn {
-      def li = left.get(i)
-      def rj = right.get(j)
-      if li.get(1, 0) >= rj.get(1, 0) {
+      def li = left[i]
+      def rj = right[j]
+      if li[1] >= rj[1] {
          out = out.append(li)
          i += 1
       } else {
@@ -44,11 +44,11 @@ fn _counter_merge_common(list left, list right) list {
       }
    }
    while i < ln {
-      out = out.append(left.get(i))
+      out = out.append(left[i])
       i += 1
    }
    while j < rn {
-      out = out.append(right.get(j))
+      out = out.append(right[j])
       j += 1
    }
    out

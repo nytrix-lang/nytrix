@@ -1,0 +1,21 @@
+shape result_zero_loop {
+  family "native-nyir"
+  generator "regression"
+  features [nyir result match eof]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+mut steps = 0
+while true {
+   match ok(0) {
+      ok(e) -> {
+         steps += 1
+         if e <= 0 { break }
+      }
+      _ -> { break }
+   }
+}
+assert(steps == 1, "ok(0) payload terminates loop")
+NY
+}

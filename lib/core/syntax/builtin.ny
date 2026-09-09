@@ -3,7 +3,7 @@
 ;; References:
 ;; - std.core.syntax
 ;; - std.core
-module std.core.syntax.builtin(register_defaults)
+module std.core.syntax.builtin(register_defaults, attr_extern, attr_naked, attr_jit, attr_thread, attr_pure, attr_cache, attr_effects, attr_backend)
 use std.core
 use std.core.dict_mod
 use std.core.reflect as core_ref
@@ -76,6 +76,9 @@ fn attr_backend(any node, list args) any {
 
 fn register_defaults(dict reg) dict {
    "Registers default std syntax handlers in `reg`."
+   ; Keep the handlers as top-level function values.  Native lowering can
+   ; represent those directly; nested wrapper closures may be materialized as
+   ; nil when this module is loaded through the stdlib cache.
    reg = syntax_impl.register_attribute(reg, "extern", attr_extern)
    reg = syntax_impl.register_attribute(reg, "naked", attr_naked)
    reg = syntax_impl.register_attribute(reg, "jit", attr_jit)

@@ -2,11 +2,13 @@
 */**
 !.gitattributes
 !.github/
+!.githooks/
 !docs/
 !etc/
 !lib/
 !src/
 !.github/**
+!.githooks/**
 !docs/**
 !etc/**
 !lib/**

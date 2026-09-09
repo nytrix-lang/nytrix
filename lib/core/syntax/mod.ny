@@ -3,6 +3,7 @@
 ;; References:
 ;; - std.core
 module std.core.syntax(new_registry, registry, reset_registry, clone_registry, clone_registry_in, merge_registry, merge_registry_in, register_macro, register_macro_in, unregister_macro, unregister_macro_in, register_attribute, register_attribute_in, unregister_attribute, unregister_attribute_in, get_macro_handler, get_macro_handler_in, get_attr_handler, get_attr_handler_in, is_macro_registered, is_macro_registered_in, is_attr_registered, is_attr_registered_in, list_macros, list_macros_in, list_attributes, list_attributes_in, form, is_form, form_head, form_tail, expand_macro, expand_macro_in, expand_macro_fixpoint, expand_macro_fixpoint_in, expand_form, expand_form_in, expand_form_deep, expand_form_deep_in, new_rewriter, clear_rewriter, register_rewrite, list_rewrites, rewrite_once, rewrite_fixpoint, apply_attribute, apply_attribute_in)
+use std.core.syntax.builtin (register_defaults)
 use std.core
 use std.core.syntax.syntax as syntax_impl
 use std.core.reflect
@@ -78,7 +79,7 @@ fn _builtin_attr_handler(str name) any {
    if name == "cache" { return _attr_cache }
    if name == "effects" { return _attr_effects }
    if name == "backend" { return _attr_backend }
-   nil
+   return nil
 }
 
 fn _seed_defaults(dict reg) dict {
@@ -106,13 +107,15 @@ fn new_registry(int cap=8) dict {
 
 fn registry() dict {
    "Returns the process-wide syntax registry."
+   if !__registry { reset_registry() }
    return __registry
 }
 
 fn reset_registry() dict {
    "Clears and re-initializes the process-wide syntax registry."
-   __registry = _new_registry_raw()
-   __registry = _seed_defaults(__registry)
+   mut reg = syntax_impl.new_registry(8)
+   reg = register_defaults(reg)
+   __registry = reg
    return __registry
 }
 
@@ -193,7 +196,7 @@ fn get_macro_handler_in(dict reg, str name) any {
 
 fn get_attr_handler(str name) any {
    "Returns an attribute handler from the process-wide registry."
-   def handler = syntax_impl.get_attr_handler(__registry, name)
+   def handler = syntax_impl.get_attr_handler(registry(), name)
    if handler { return handler }
    return _builtin_attr_handler(name)
 }
@@ -215,7 +218,7 @@ fn is_macro_registered_in(dict reg, str name) bool {
 
 fn is_attr_registered(str name) bool {
    "Returns true when an attribute handler is registered."
-   syntax_impl.is_attr_registered(__registry, name) || !!_builtin_attr_handler(name)
+   syntax_impl.is_attr_registered(registry(), name) || !!_builtin_attr_handler(name)
 }
 
 fn is_attr_registered_in(dict reg, str name) bool {

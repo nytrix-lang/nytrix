@@ -1,0 +1,21 @@
+shape dynamic-container-write {
+  family "native-nyir"
+  generator "regression"
+  features ["ny", "native", "dynamic", "container", "write"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core.iter as iter
+
+def chunks = iter.chunk([1, 2, 3, 4, 5], 2)
+def first = chunks.get(0, nil)
+assert(first[0] == 1, "dynamic chunk write preserves first value")
+assert(first[1] == 2, "dynamic chunk write preserves odd value")
+
+def nested = [[1, 2], [3, 4], [5, 6], [7, 8]]
+def filtered = nested.filter(fn(v) { v.get(0, nil) > 2 })
+assert(filtered.len == 3, "dynamic filter retains all matching values")
+assert(filtered[0][0] == 3, "dynamic filter preserves nested value")
+print("dynamic_container_write ok")
+NY
+}

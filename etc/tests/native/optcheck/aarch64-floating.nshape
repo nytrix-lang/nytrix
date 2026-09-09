@@ -28,5 +28,6 @@ mut hits = 0
 }
 return hits
 }
+score()
 NY
 }

@@ -21,6 +21,18 @@ fn guard_skip() {
   }
 }
 
-classify(4) + classify(5) + classify(12) + guard_skip()
+fn dense(v) {
+  case v {
+    0 -> 11
+    1 -> 22
+    2 -> 33
+    3 -> 44
+    4 -> 55
+  else { 66 }
+  }
+}
+
+dense(-1) + dense(0) + dense(2) + dense(4) + dense(5) +
+  classify(4) + classify(5) + classify(12) + guard_skip()
 NY
 }

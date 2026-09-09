@@ -1,5 +1,5 @@
 shape revcomp {
-  family "perf-real"
+  family "probe"
   generator "stress"
   features ["perf", "c-vs-ny", "checksum"]
   template ny-test-case

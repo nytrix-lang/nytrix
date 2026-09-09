@@ -28,6 +28,14 @@ fn round_trip(int chunk) int {
 
 round_trip(4096)
 round_trip(1)
+
+; Keep argv construction covered independently of the stdin/stdout echo path:
+; `net.process` must prepend its executable once, retain spaced arguments, and
+; terminate the native argv vector for exec.
+def argv_io = net.process("/bin/sh", ["-c", "printf '%s:%s\\n' \"$0\" \"$1\"", "label", "two words"], "quiet", 1000, 16)
+assert(argv_io != 0, "argv process starts")
+assert(net.recvuntil(argv_io, "\n") == "label:two words\n", "argv preserves multi argument")
+assert(net.close(argv_io) >= 0, "argv process closes")
 print("ok remote_process_recvuntil")
 NY
 }

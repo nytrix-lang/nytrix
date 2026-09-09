@@ -2,7 +2,7 @@ use std.core
 use std.core.error
 
 ; Regression: native concat/f-string formatting previously converted bool
-; operands through rt_native_i64_to_cstr, printing the raw 0/1 bits, and
+; operands through rt_i64_to_cstr_raw, printing the raw 0/1 bits, and
 ; routed f64 operands through the i64 formatter ("0").  JIT printed the
 ; spelled value; native printed garbage.  All of these must agree.
 assert_eq("x" + (1 < 2), "xtrue")

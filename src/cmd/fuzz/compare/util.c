@@ -10116,7 +10116,7 @@ static int cmd_public_fuzz_gc_run(int argc, char **argv) {
       (void)asprintf(&direct_bin, "%s/gc_direct_fuzzer%s", bin_dir ? bin_dir : "/tmp",
                      sanitize ? "_asan" : (tsan ? "_tsan" : ""));
     }
-    (void)asprintf(&gc_c_path, "%s/src/rt/gc.c", root);
+    (void)asprintf(&gc_c_path, "%s/src/code/runtime/gc.c", root);
     (void)asprintf(&gc_c_define, "-DNYTRIX_GC_C=\"%s\"", gc_c_path ? gc_c_path : "");
     const char *cc = getenv("CC");
     if (!cc || !*cc) cc = "cc";

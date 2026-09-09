@@ -1,0 +1,18 @@
+shape cross_module_mutable_global {
+  family "runtime-native"
+  generator "native"
+  features [native nyir x86_64 modules mut globals]
+  template ny-test-case
+  flags "--native-only --native-backend=x86_64 -O3 --no-progress --color=never"
+  expect compile_and_run
+  source ny <<'NY'
+module demo(counter, bump) {
+  mut counter = 1
+  fn bump() int {
+    counter = counter + 2
+    counter
+  }
+}
+print(demo.bump())
+NY
+}

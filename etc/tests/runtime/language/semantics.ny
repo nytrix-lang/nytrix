@@ -67,7 +67,7 @@ assert(merged.len == 0 && merged_alias.len == 0, "dict clear mutates shared refe
 mut cleared = [1, 2]
 mut cleared_alias = cleared
 cleared = cleared.clear()
-assert(cleared.len == 0 && cleared_alias.len == 0, "list clear mutates shared reference")
+assert(cleared.len == 0 && cleared_alias.len == 2, "list is value-typed: clear does not affect prior alias")
 assert(nil != 0, "nil is distinct from integer zero")
 assert(!nil && !0, "nil and integer zero remain falsy")
 assert(is_nil(nil) && is_int(0), "nil and integer zero retain distinct types")

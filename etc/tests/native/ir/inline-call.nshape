@@ -3,7 +3,7 @@ shape inline_call {
   generator "native"
   features [native nyir inline]
   template ny-test-case
-  flags "--nyir-opt-level=3 --nyir-run"
+  flags "-O3 --nyir-run --native-result-oracle=55"
   expect compile_and_run
   source ny <<'NY'
 fn add(i64 a, i64 b) i64 {

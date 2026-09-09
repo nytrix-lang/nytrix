@@ -1779,7 +1779,7 @@ static char *expand_markdown_code_includes(const char *root, const char *md) {
 
 static int append_markdown_doc_json_item(sb_t *json, const char *base_dir,
                                          const char *root, const char *path,
-                                         int *first,
+                                         const char *overview_path, int *first,
                                          char **seen, int *seen_n,
                                          int seen_cap) {
   const char *dot = strrchr(path, '.');
@@ -1788,6 +1788,17 @@ static int append_markdown_doc_json_item(sb_t *json, const char *base_dir,
   char *name = doc_route_name(base_dir, path);
   if (!name)
     return 0;
+  /*
+   * The repository README and docs/README.md intentionally share a filename
+   * but have different jobs. Keep both records: the docs copy owns the
+   * website overview, while the root copy is appended as the project guide.
+   */
+  if (overview_path && strcmp(path, overview_path) == 0) {
+    free(name);
+    name = strdup("Overview");
+    if (!name)
+      return 0;
+  }
   for (int i = 0; i < *seen_n; i++) {
     if (strcmp(seen[i], name) == 0) {
       free(name);
@@ -1819,6 +1830,9 @@ static int append_markdown_doc_json_item(sb_t *json, const char *base_dir,
   sb_add_json_str(json, title ? title : name);
   sb_add(json, ",\"format\":");
   sb_add_json_str(json, fmt);
+  sb_add(json, ",\"overview\":");
+  sb_add(json, overview_path && strcmp(path, overview_path) == 0 ? "true"
+                                                                  : "false");
   sb_add(json, ",\"html\":");
   sb_add_json_str(json, body ? body : "");
   sb_add(json, "}");
@@ -1832,7 +1846,7 @@ static int append_markdown_doc_json_item(sb_t *json, const char *base_dir,
 
 static void append_markdown_docs_from_dir(sb_t *json, const char *base_dir,
                                           const char *root, const char *dir,
-                                          int *first,
+                                          const char *overview_path, int *first,
                                           char **seen, int *seen_n,
                                           int seen_cap, int recursive) {
   DIR *d = opendir(dir);
@@ -1860,11 +1874,13 @@ static void append_markdown_docs_from_dir(sb_t *json, const char *base_dir,
     char path[PATH_MAX];
     if (join_path(path, sizeof(path), dir, names[i])) {
       if (recursive && path_is_dir(path))
-        append_markdown_docs_from_dir(json, base_dir, root, path, first, seen,
-                                      seen_n, seen_cap, recursive);
+        append_markdown_docs_from_dir(json, base_dir, root, path,
+                                      overview_path, first, seen, seen_n,
+                                      seen_cap, recursive);
       else
-        append_markdown_doc_json_item(json, base_dir, root, path, first, seen,
-                                      seen_n, seen_cap);
+        append_markdown_doc_json_item(json, base_dir, root, path,
+                                      overview_path, first, seen, seen_n,
+                                      seen_cap);
     }
     free(names[i]);
   }
@@ -1872,9 +1888,14 @@ static void append_markdown_docs_from_dir(sb_t *json, const char *base_dir,
 }
 
 static void append_markdown_docs_json(sb_t *json, const char *root) {
-  char docs_dir[PATH_MAX], env_dir[PATH_MAX];
+  char docs_dir[PATH_MAX], env_dir[PATH_MAX], root_readme[PATH_MAX],
+      docs_readme[PATH_MAX];
   if (!join_path(docs_dir, sizeof(docs_dir), root, "docs"))
     docs_dir[0] = '\0';
+  if (!join_path(root_readme, sizeof(root_readme), root, "README.md"))
+    root_readme[0] = '\0';
+  if (!join_path(docs_readme, sizeof(docs_readme), docs_dir, "README.md"))
+    docs_readme[0] = '\0';
   const char *info_dir = getenv("NYTRIX_DOC_INFO_DIR");
   if (!info_dir || !*info_dir)
     info_dir = getenv("NYTRIX_WEBDOC_INFO_DIR");
@@ -1886,18 +1907,23 @@ static void append_markdown_docs_json(sb_t *json, const char *root) {
   char *seen[1024];
   int seen_n = 0;
   sb_add(json, "[");
+  if (root_readme[0])
+    append_markdown_doc_json_item(json, root, root, root_readme, NULL, &first,
+                                  seen, &seen_n,
+                                  (int)(sizeof(seen) / sizeof(seen[0])));
   if (docs_dir[0])
-    append_markdown_docs_from_dir(json, docs_dir, root, docs_dir, &first, seen,
-                                  &seen_n,
-                                  (int)(sizeof(seen) / sizeof(seen[0])), 1);
+    append_markdown_docs_from_dir(
+        json, docs_dir, root, docs_dir, docs_readme[0] ? docs_readme : NULL,
+        &first, seen, &seen_n, (int)(sizeof(seen) / sizeof(seen[0])), 1);
   if (env_dir[0])
-    append_markdown_docs_from_dir(json, env_dir, root, env_dir, &first, seen,
-                                  &seen_n,
+    append_markdown_docs_from_dir(json, env_dir, root, env_dir, NULL, &first,
+                                  seen, &seen_n,
                                   (int)(sizeof(seen) / sizeof(seen[0])), 0);
   for (int i = 0; i < seen_n; i++)
     free(seen[i]);
   sb_add(json, "]");
 }
+
 
 static int read_file_bytes(const char *path, char **out, size_t *out_n);
 

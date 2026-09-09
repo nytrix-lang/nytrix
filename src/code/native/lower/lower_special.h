@@ -111,7 +111,14 @@ static bool ny_native_asm_parse_constraints(ny_native_nir_builder_t *b,
     if (op->input) {
       if (arg >= e->as.as_asm.args.len)
         return ny_native_nir_fail(b, "native NYIR asm: constraint/input count mismatch");
-      int value = ny_native_nir_lower_expr(b, e->as.as_asm.args.data[arg++]);
+      const expr_t *input = e->as.as_asm.args.data[arg++];
+      /* Inline-asm operands are raw machine words.  In particular, an
+       * unsigned 64-bit literal above the language's tagged-int range must
+       * not be lowered as a bigint object pointer. */
+      int value = (input && input->kind == NY_E_LITERAL &&
+                   input->as.literal.kind == NY_LIT_INT)
+                      ? ny_native_nir_emit_const(b, input->as.literal.as.i)
+                      : ny_native_nir_lower_expr(b, input);
       if (value < 0)
         return false;
       op->value = value;

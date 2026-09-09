@@ -29,7 +29,7 @@ if (DEFINED ENV{NYTRIX_USE_LLVM})
 endif()
 option(NYTRIX_BUILD_SHARED "Build shared runtime library" ON)
 option(NYTRIX_BUILD_LSP "Build ny-lsp" ON)
-option(NYTRIX_STRICT_WARNINGS "Enable strict warning policy (pedantic + shadow + truncation diagnostics)" OFF)
+option(NYTRIX_STRICT_WARNINGS "Enable strict warning policy (pedantic + shadow + truncation diagnostics)" ON)
 option(NYTRIX_RELEASE_DEBUG_INFO "Emit DWARF/CodeView info for Release builds" OFF)
 option(NYTRIX_USE_ASAN "Enable AddressSanitizer and UBSanitizer" OFF)
 option(NYTRIX_USE_GPROF "Enable gprof profiling (-pg)" OFF)
@@ -47,7 +47,7 @@ set(NYTRIX_DWARF_VERSION "5" CACHE STRING "DWARF version for Unix-like debug bui
 set_property(CACHE NYTRIX_DWARF_VERSION PROPERTY STRINGS 2 3 4 5)
 
 set(NYTRIX_VERSION_MAJOR "0")
-set(NYTRIX_VERSION_MINOR "9")
+set(NYTRIX_VERSION_MINOR "10")
 set(NYTRIX_VERSION_PATCH "0")
 set(NYTRIX_VERSION_REF "" CACHE STRING
     "Git ref used for version metadata; empty prefers the upstream remote ref")
@@ -298,10 +298,21 @@ if (NYTRIX_USE_LLVM)
     # llvm-config on PATH while the dependency installer just added a newer LLVM.
     if (DEFINED ENV{LLVM_CONFIG} AND EXISTS "$ENV{LLVM_CONFIG}")
       set(LLVM_CONFIG_EXE "$ENV{LLVM_CONFIG}")
-    elseif(APPLE AND EXISTS "/opt/homebrew/opt/llvm@20/bin/llvm-config")
-      set(LLVM_CONFIG_EXE "/opt/homebrew/opt/llvm@20/bin/llvm-config")
-    elseif(APPLE AND EXISTS "/usr/local/opt/llvm@20/bin/llvm-config")
-      set(LLVM_CONFIG_EXE "/usr/local/opt/llvm@20/bin/llvm-config")
+    elseif(APPLE)
+      foreach(_brew_llvm_version 22 21 20 19 18)
+        if(EXISTS "/opt/homebrew/opt/llvm@${_brew_llvm_version}/bin/llvm-config")
+          set(LLVM_CONFIG_EXE "/opt/homebrew/opt/llvm@${_brew_llvm_version}/bin/llvm-config")
+          break()
+        elseif(EXISTS "/usr/local/opt/llvm@${_brew_llvm_version}/bin/llvm-config")
+          set(LLVM_CONFIG_EXE "/usr/local/opt/llvm@${_brew_llvm_version}/bin/llvm-config")
+          break()
+        endif()
+      endforeach()
+      if(NOT LLVM_CONFIG_EXE AND EXISTS "/opt/homebrew/opt/llvm/bin/llvm-config")
+        set(LLVM_CONFIG_EXE "/opt/homebrew/opt/llvm/bin/llvm-config")
+      elseif(NOT LLVM_CONFIG_EXE AND EXISTS "/usr/local/opt/llvm/bin/llvm-config")
+        set(LLVM_CONFIG_EXE "/usr/local/opt/llvm/bin/llvm-config")
+      endif()
     else()
       find_program(LLVM_CONFIG_EXE
                    NAMES llvm-config-22 llvm-config-21 llvm-config-20 llvm-config-19
@@ -472,6 +483,10 @@ int main(void) { return (int)LLVMConstantPtrAuthValueKind; }
     list(APPEND _nytrix_llvm_lib_paths "${_nytrix_llvm_prefix}/lib")
   endif()
   list(APPEND _nytrix_llvm_lib_paths
+    "/opt/homebrew/opt/llvm@22/lib"
+    "/usr/local/opt/llvm@22/lib"
+    "/opt/homebrew/opt/llvm@21/lib"
+    "/usr/local/opt/llvm@21/lib"
     "/opt/homebrew/opt/llvm@20/lib"
     "/usr/local/opt/llvm@20/lib"
     "/opt/homebrew/opt/llvm/lib"
@@ -561,6 +576,39 @@ if (NYTRIX_USE_GMP)
     set(NYTRIX_GMP_LIBRARY "$ENV{GMP_LIBRARY}")
   endif()
 
+  # Debian/Ubuntu may keep GMP in a multiarch directory that is not covered
+  # by a plain /usr/include or /usr/lib probe.  Prefer pkg-config when it is
+  # available, while retaining the explicit override and path fallbacks.
+  find_package(PkgConfig QUIET)
+  if (PkgConfig_FOUND)
+    pkg_check_modules(NYTRIX_GMP_PKG QUIET gmp)
+    if (NYTRIX_GMP_PKG_FOUND)
+      pkg_get_variable(NYTRIX_GMP_PKG_INCLUDEDIR gmp includedir)
+      pkg_get_variable(NYTRIX_GMP_PKG_LIBDIR gmp libdir)
+      if (NOT NYTRIX_GMP_INCLUDE AND NYTRIX_GMP_PKG_INCLUDE_DIRS)
+        list(GET NYTRIX_GMP_PKG_INCLUDE_DIRS 0 NYTRIX_GMP_INCLUDE)
+      endif()
+    endif()
+  endif()
+
+  # Some Ubuntu images expose the multiarch triplet only through the
+  # filesystem layout (and not through CMAKE_LIBRARY_ARCHITECTURE or the GMP
+  # pkg-config metadata). Resolve those canonical development files directly.
+  if (NOT NYTRIX_GMP_INCLUDE)
+    file(GLOB NYTRIX_GMP_MULTIARCH_HEADERS "/usr/include/*/gmp.h")
+    if (NYTRIX_GMP_MULTIARCH_HEADERS)
+      list(GET NYTRIX_GMP_MULTIARCH_HEADERS 0 NYTRIX_GMP_MULTIARCH_HEADER)
+      get_filename_component(NYTRIX_GMP_INCLUDE
+                             "${NYTRIX_GMP_MULTIARCH_HEADER}" DIRECTORY)
+    endif()
+  endif()
+  if (NOT NYTRIX_GMP_LIBRARY)
+    file(GLOB NYTRIX_GMP_MULTIARCH_LIBRARIES "/usr/lib/*/libgmp.so")
+    if (NYTRIX_GMP_MULTIARCH_LIBRARIES)
+      list(GET NYTRIX_GMP_MULTIARCH_LIBRARIES 0 NYTRIX_GMP_LIBRARY)
+    endif()
+  endif()
+
   if (NYTRIX_GMP_INCLUDE AND EXISTS "${NYTRIX_GMP_INCLUDE}/gmp.h")
     set(NYTRIX_GMP_INCLUDE_DIR "${NYTRIX_GMP_INCLUDE}")
   elseif(EXISTS "/usr/include/gmp.h")
@@ -569,6 +617,7 @@ if (NYTRIX_USE_GMP)
     find_path(NYTRIX_GMP_INCLUDE_DIR
       NAMES gmp.h
       HINTS "${NYTRIX_GMP_INCLUDE}"
+            "${NYTRIX_GMP_PKG_INCLUDEDIR}"
       PATHS
         "/opt/homebrew/include"
         "/usr/local/include"
@@ -584,16 +633,21 @@ if (NYTRIX_USE_GMP)
         "C:/tools/msys64/clangarm64/include"
         "$ENV{MSYSTEM_PREFIX}/include"
         "$ENV{MINGW_PREFIX}/include"
+      PATH_SUFFIXES
+        "${CMAKE_LIBRARY_ARCHITECTURE}"
     )
   endif()
   if (NYTRIX_GMP_LIBRARY AND EXISTS "${NYTRIX_GMP_LIBRARY}")
     set(NYTRIX_GMP_LIBRARY_FOUND "${NYTRIX_GMP_LIBRARY}")
   elseif(EXISTS "/usr/lib/libgmp.so")
     set(NYTRIX_GMP_LIBRARY_FOUND "/usr/lib/libgmp.so")
+  elseif(NYTRIX_GMP_LIBRARY AND EXISTS "${NYTRIX_GMP_LIBRARY}")
+    set(NYTRIX_GMP_LIBRARY_FOUND "${NYTRIX_GMP_LIBRARY}")
   else()
     find_library(NYTRIX_GMP_LIBRARY_FOUND
       NAMES gmp libgmp
       HINTS "${NYTRIX_GMP_LIBRARY}"
+            "${NYTRIX_GMP_PKG_LIBDIR}"
       PATHS
         "/opt/homebrew/lib"
         "/usr/local/lib"
@@ -610,6 +664,8 @@ if (NYTRIX_USE_GMP)
         "C:/tools/msys64/clangarm64/lib"
         "$ENV{MSYSTEM_PREFIX}/lib"
         "$ENV{MINGW_PREFIX}/lib"
+      PATH_SUFFIXES
+        "${CMAKE_LIBRARY_ARCHITECTURE}"
     )
   endif()
   if (NOT NYTRIX_GMP_INCLUDE_DIR OR NOT NYTRIX_GMP_LIBRARY_FOUND)
@@ -628,6 +684,8 @@ set(NYTRIX_WINSDK_LDFLAGS "" CACHE STRING "Windows SDK lib flags list")
 
 set(NYTRIX_HOST_CFLAGS "" CACHE STRING "Host-specific C flags (semicolon-separated)")
 set(NYTRIX_HOST_LDFLAGS "" CACHE STRING "Host-specific linker flags (semicolon-separated)")
+set(NYTRIX_LINKER "system" CACHE STRING "Build linker: system|lld|mold")
+set_property(CACHE NYTRIX_LINKER PROPERTY STRINGS system lld mold)
 set(NYTRIX_LTO_MODE "off" CACHE STRING "LTO mode: off|thin|full")
 set_property(CACHE NYTRIX_LTO_MODE PROPERTY STRINGS off thin full)
 set(NYTRIX_PGO_MODE "off" CACHE STRING "PGO mode: off|gen|use")
@@ -813,15 +871,20 @@ file(GLOB SRC_BASE CONFIGURE_DEPENDS "${NYTRIX_ROOT}/src/base/*.c")
 file(GLOB SRC_SEMA CONFIGURE_DEPENDS "${NYTRIX_ROOT}/src/sema/*.c")
 file(GLOB SRC_CODE CONFIGURE_DEPENDS
   "${NYTRIX_ROOT}/src/code/*.c"
+  "${NYTRIX_ROOT}/src/code/frontend/*.c"
+  "${NYTRIX_ROOT}/src/code/ffi/*.c"
   "${NYTRIX_ROOT}/src/code/incremental/*.c"
+  "${NYTRIX_ROOT}/src/code/typing/*.c"
+  "${NYTRIX_ROOT}/src/code/native/llvm/*.c"
+  "${NYTRIX_ROOT}/src/code/native/llvm/legacy/*.c"
   "${NYTRIX_ROOT}/src/code/native/*.c"
-  "${NYTRIX_ROOT}/src/code/native/ir/*.c"
-  "${NYTRIX_ROOT}/src/code/native/ir/opt/*.c"
+  "${NYTRIX_ROOT}/src/code/ir/*.c"
+  "${NYTRIX_ROOT}/src/code/ir/opt/*.c"
   "${NYTRIX_ROOT}/src/code/native/object/*.c"
-  "${NYTRIX_ROOT}/src/code/native/backend/*.c"
-  "${NYTRIX_ROOT}/src/code/c/*.c")
-file(GLOB SRC_REPL CONFIGURE_DEPENDS "${NYTRIX_ROOT}/src/repl/*.c")
-file(GLOB SRC_WIRE CONFIGURE_DEPENDS "${NYTRIX_ROOT}/src/wire/*.c")
+  "${NYTRIX_ROOT}/src/code/native/machine/*.c"
+  "${NYTRIX_ROOT}/src/code/ffi/c/*.c")
+file(GLOB SRC_REPL CONFIGURE_DEPENDS "${NYTRIX_ROOT}/src/cmd/ny/repl/*.c")
+file(GLOB SRC_WIRE CONFIGURE_DEPENDS "${NYTRIX_ROOT}/src/code/wire/*.c")
 
 set(SRC_COMPILER
   ${SRC_BASE}
@@ -829,21 +892,21 @@ set(SRC_COMPILER
   ${SRC_CODE}
   ${SRC_REPL}
   ${SRC_WIRE}
-  "${NYTRIX_ROOT}/src/parse/ast.c"
-  "${NYTRIX_ROOT}/src/parse/lexer.c"
-  "${NYTRIX_ROOT}/src/parse/shared.c"
-  "${NYTRIX_ROOT}/src/code/gencall/init.c"
-  "${NYTRIX_ROOT}/src/code/typepipeline/init.c"
-  "${NYTRIX_ROOT}/src/code/expr/init.c"
-  "${NYTRIX_ROOT}/src/wire/pipe/init.c"
+  "${NYTRIX_ROOT}/src/code/parse/ast.c"
+  "${NYTRIX_ROOT}/src/code/parse/lexer.c"
+  "${NYTRIX_ROOT}/src/code/parse/shared.c"
+  "${NYTRIX_ROOT}/src/code/native/llvm/legacy/gencall/init.c"
+  "${NYTRIX_ROOT}/src/code/typing/pipeline/init.c"
+  "${NYTRIX_ROOT}/src/code/native/llvm/legacy/expr/init.c"
+  "${NYTRIX_ROOT}/src/code/wire/pipe/init.c"
 )
 
-set(RT_INIT "${NYTRIX_ROOT}/src/rt/init.c")
-file(GLOB RT_SOURCES CONFIGURE_DEPENDS "${NYTRIX_ROOT}/src/rt/*.c")
-file(GLOB RT_HEADERS CONFIGURE_DEPENDS "${NYTRIX_ROOT}/src/rt/*.h")
+set(RT_INIT "${NYTRIX_ROOT}/src/code/runtime/init.c")
+file(GLOB RT_SOURCES CONFIGURE_DEPENDS "${NYTRIX_ROOT}/src/code/runtime/*.c")
+file(GLOB RT_HEADERS CONFIGURE_DEPENDS "${NYTRIX_ROOT}/src/code/runtime/*.h")
 list(REMOVE_ITEM RT_SOURCES "${RT_INIT}")
 
-# Runtime is compiled via src/rt/init.c (which #includes the other rt/*.c
+# Runtime is compiled via src/code/runtime/init.c (which #includes the other runtime/*.c
 # files). Mark all runtime sources/headers as dependencies so Ninja rebuilds
 # ny/ny_debug when any runtime unit changes.
 set_source_files_properties("${RT_INIT}" PROPERTIES
@@ -904,15 +967,19 @@ if (MSVC)
 else()
   add_compile_options($<$<CONFIG:Debug>:-O0> $<$<CONFIG:Release>:-O2>)
   add_compile_options(-fno-omit-frame-pointer)
-  if (NOT APPLE)
-    find_program(MOLD_EXECUTABLE NAMES mold)
-    if(MOLD_EXECUTABLE)
-        message(STATUS "Found mold linker, using it for faster linking: ${MOLD_EXECUTABLE}")
-        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fuse-ld=mold")
-        set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -fuse-ld=mold")
+  if (NOT APPLE AND NOT NYTRIX_LINKER STREQUAL "system")
+    if (NYTRIX_LINKER STREQUAL "mold")
+      find_program(NYTRIX_SELECTED_LINKER NAMES mold REQUIRED)
+    elseif (NYTRIX_LINKER STREQUAL "lld")
+      find_program(NYTRIX_SELECTED_LINKER NAMES ld.lld lld REQUIRED)
     else()
-        message(STATUS "mold linker not found, using default linker.")
+      message(FATAL_ERROR "NYTRIX_LINKER must be system, lld, or mold")
     endif()
+    message(STATUS "Using requested ${NYTRIX_LINKER} linker: ${NYTRIX_SELECTED_LINKER}")
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fuse-ld=${NYTRIX_LINKER}")
+    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -fuse-ld=${NYTRIX_LINKER}")
+  elseif (NOT APPLE)
+    message(STATUS "Using the compiler's default system linker")
   endif()
 endif()
 add_compile_definitions($<$<CONFIG:Debug>:DEBUG>)
@@ -948,6 +1015,9 @@ else()
       add_link_options(-Wl,--build-id)
     endif()
     if (UNIX AND NOT APPLE)
+      # Linker selection may change in an existing build tree. Never reuse a
+      # capability result obtained from mold/lld for the system linker.
+      unset(NYTRIX_LINKER_HAS_GDB_INDEX CACHE)
       check_linker_flag(C "-Wl,--gdb-index" NYTRIX_LINKER_HAS_GDB_INDEX)
       if (NYTRIX_LINKER_HAS_GDB_INDEX)
         add_link_options(-Wl,--gdb-index)
@@ -973,7 +1043,7 @@ if (NYTRIX_USE_LLVM)
   nytrix_apply_size_flags(nytrix_compiler)
   target_include_directories(nytrix_compiler PRIVATE
     "${NYTRIX_ROOT}/src"
-    "${NYTRIX_ROOT}/src/rt"
+    "${NYTRIX_ROOT}/src/code/runtime"
     "${CMAKE_BINARY_DIR}"
   )
   if (NYTRIX_LLVM_INCLUDE)
@@ -1038,7 +1108,7 @@ nytrix_apply_compile_perf_flags(nytrix_runtime)
 nytrix_apply_size_flags(nytrix_runtime)
 target_include_directories(nytrix_runtime PRIVATE
   "${NYTRIX_ROOT}/src"
-  "${NYTRIX_ROOT}/src/rt"
+  "${NYTRIX_ROOT}/src/code/runtime"
   "${CMAKE_BINARY_DIR}"
 )
 if (NYTRIX_USE_GMP AND NYTRIX_GMP_INCLUDE_DIR)
@@ -1078,6 +1148,7 @@ if (CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
   target_compile_options(nytrix_runtime PRIVATE -fno-strict-aliasing)
   if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_compile_options(nytrix_runtime PRIVATE -fno-semantic-interposition -fno-plt)
+    target_compile_options(nytrix_runtime PRIVATE -msha)
   endif()
 elseif (MSVC)
   target_compile_options(nytrix_runtime PRIVATE ${NYTRIX_WARNING_FLAGS})
@@ -1113,7 +1184,7 @@ if (NYTRIX_USE_LLVM)
   target_include_directories(ny-full PRIVATE
     "${NYTRIX_ROOT}/src"
     "${NYTRIX_ROOT}/src/cmd/tools"
-    "${NYTRIX_ROOT}/src/rt"
+    "${NYTRIX_ROOT}/src/code/runtime"
     "${CMAKE_BINARY_DIR}"
   )
   if (WIN32)
@@ -1129,6 +1200,7 @@ if (NYTRIX_USE_LLVM)
     target_link_libraries(ny-full PRIVATE "${NYTRIX_Z3_LIBRARY}")
   endif()
   set_target_properties(ny-full PROPERTIES
+    ENABLE_EXPORTS ON
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
     OUTPUT_NAME "ny-full"
     OUTPUT_NAME_DEBUG "ny-full_debug"
@@ -1241,7 +1313,7 @@ function(nytrix_add_tool tool_target tool_name)
   endif()
   target_include_directories(${tool_target} PRIVATE
     "${NYTRIX_ROOT}/src"
-    "${NYTRIX_ROOT}/src/rt"
+    "${NYTRIX_ROOT}/src/code/runtime"
     "${CMAKE_BINARY_DIR}"
   )
   if (MSVC)
@@ -1282,7 +1354,7 @@ if (NOT WIN32)
   target_include_directories(ny-fuzz PRIVATE
     "${NYTRIX_ROOT}/src"
     "${NYTRIX_ROOT}/src/cmd/tools"
-    "${NYTRIX_ROOT}/src/rt"
+    "${NYTRIX_ROOT}/src/code/runtime"
     "${CMAKE_BINARY_DIR}"
   )
   set_target_properties(ny-fuzz PROPERTIES
@@ -1299,7 +1371,7 @@ if (NYTRIX_BUILD_LSP AND NYTRIX_USE_LLVM)
   add_dependencies(ny-lsp nytrix_version_header)
   target_include_directories(ny-lsp PRIVATE
     "${NYTRIX_ROOT}/src"
-    "${NYTRIX_ROOT}/src/rt"
+    "${NYTRIX_ROOT}/src/code/runtime"
     "${CMAKE_BINARY_DIR}"
   )
   if (WIN32)
@@ -1352,7 +1424,7 @@ add_executable(ny-dap
 add_dependencies(ny-dap nytrix_version_header)
 target_include_directories(ny-dap PRIVATE
   "${NYTRIX_ROOT}/src"
-  "${NYTRIX_ROOT}/src/rt"
+  "${NYTRIX_ROOT}/src/code/runtime"
   "${CMAKE_BINARY_DIR}"
 )
 set_target_properties(ny-dap PROPERTIES
@@ -1628,6 +1700,15 @@ if (NYTRIX_BUILD_SHARED AND NOT WIN32 AND NYTRIX_USE_LLVM)
   add_dependencies(nytrixrt nytrix_version_header)
   add_dependencies(nytrixrt std)
   nytrix_apply_size_flags(nytrixrt)
+  if (UNIX AND NOT APPLE)
+    # Bind the shared library's internal `rt_*` references to its own
+    # definitions.  The executable (ny-full) embeds a static runtime copy,
+    # and without -Bsymbolic the JIT's dlsym/lazy PLT resolution can route
+    # runtime helper calls through the executable's copy, which is built
+    # with a different macro set and silently misbehaves (intermittent
+    # SIGSEGVs in rt_native_tag_of / rt_native_tbuf_new).
+    target_link_options(nytrixrt PRIVATE -Wl,-Bsymbolic)
+  endif()
   # CFLAGS
   set(_all_cflags ${NYTRIX_LLVM_CFLAGS_LIST} ${NYTRIX_HOST_CFLAGS})
   foreach(_flag IN LISTS _all_cflags)
@@ -1636,7 +1717,7 @@ if (NYTRIX_BUILD_SHARED AND NOT WIN32 AND NYTRIX_USE_LLVM)
 
   target_include_directories(nytrixrt PRIVATE
     "${NYTRIX_ROOT}/src"
-    "${NYTRIX_ROOT}/src/rt"
+    "${NYTRIX_ROOT}/src/code/runtime"
     "${CMAKE_BINARY_DIR}"
   )
   if (NYTRIX_USE_GMP AND NYTRIX_GMP_INCLUDE_DIR)

@@ -1,0 +1,24 @@
+shape semantic_lambda_values {
+  family "runtime-native"
+  generator "native"
+  features [native nyir x86_64 semantic lambda closure fnref]
+  template ny-test-case
+  flags "--native-only --native-backend=x86_64 --native-tier=baseline -O0 --nyir-verify --native-result-oracle=0 --no-progress --color=never"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+
+fn main() {
+  def f = fn(x) { x * 2 }
+  def g = fn(a, b) { a + b }
+  def h = fn(v) { v > 10 ? v : 0 }
+
+  (f(3) == 6 &&
+   g(10, 20) == 30 &&
+   h(15) == 15 &&
+   h(5) == 0 &&
+   (fn(q) { q - 1 })(7) == 6) ? 0 : 1
+}
+main()
+NY
+}

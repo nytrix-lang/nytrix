@@ -18,31 +18,7 @@ fn ppid() int {
 
 fn env(str key) any {
    "Returns the value of environment variable `key`."
-   def ep = __envp()
-   if !ep { return 0 }
-   else {
-      def key_len = key.len
-      mut i = 0
-      mut res = 0
-      while load64(ep, i*8) {
-         def env_entry = load64(ep, i*8)
-         mut matches = 1
-         mut j = 0
-         while j < key_len {
-            if load8(env_entry, j) != load8(key, j) {
-               matches = 0
-               break
-            }
-            j += 1
-         }
-         if matches && load8(env_entry, key_len) == 61 {
-            res = core_str.cstr_to_str(env_entry, key_len + 1)
-            break
-         }
-         i += 1
-      }
-      res
-   }
+   __env_get(key)
 }
 
 fn environ() list {

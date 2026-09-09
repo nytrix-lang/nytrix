@@ -24,7 +24,7 @@ def CAP_CURSOR = 128
 def CAP_CLIPBOARD = 256
 def CAP_JOYSTICK = 512
 def REQUIRED_WINDOW = CAP_CREATE | CAP_DESTROY | CAP_POLL | CAP_TITLE | CAP_SIZE
-def REQUIRED_RENDER_WINDOW = REQUIRED_WINDOW | CAP_SWAP | CAP_SURFACE
+def REQUIRED_RENDER_WINDOW = 127
 def REQUIRED_INPUT = CAP_POLL | CAP_CURSOR | CAP_CLIPBOARD | CAP_JOYSTICK
 
 comptime table WindowCapName {
@@ -40,7 +40,10 @@ comptime table WindowCapName {
    CAP_JOYSTICK -> "joystick"
 }
 
-fn make(i32 backend, i32 mask, i32 required=REQUIRED_WINDOW) ptr {
+;; Keep the default literal at the ABI boundary.  Defaults are lowered in the
+;; importing module's context, where an unqualified module constant can be
+;; mistaken for a missing global symbol.
+fn make(i32 backend, i32 mask, i32 required=31) ptr {
    "Builds make."
    def out = malloc(__layout_size("WindowBackendContract"))
    store_layout(out, "WindowBackendContract", backend, mask, required)

@@ -1,0 +1,20 @@
+shape oracle_if_convert_select_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle if-convert select cmov]
+  template ny-test-case
+  flags_matrix "-O2 --native-enable-cf-mem2reg --native-result-oracle=30; -O3 --native-enable-cf-mem2reg --native-result-oracle=30"
+  expect compile_and_run
+  source ny <<'NY'
+fn choose(int x) int {
+  mut result = 0
+  if x < 0 {
+    result = x + 5
+  } else {
+    result = x + 3
+  }
+  return result
+}
+choose(-3) * 10 + choose(7)
+NY
+}

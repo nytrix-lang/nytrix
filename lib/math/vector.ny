@@ -38,11 +38,11 @@ fn _is_dim(any v, int n) bool {
 fn _typed_vec(str t, any x0, any y0, any z0=0, any w0=0) dict {
    mut d = dict(8)
    def n = _type_dim(t)
-   d["__type"] = t
-   d["x"] = x0
-   d["y"] = y0
-   if n >= 3 { d["z"] = z0 }
-   if n >= 4 { d["w"] = w0 }
+   dict_set(d, "__type", t)
+   dict_set(d, "x", x0)
+   dict_set(d, "y", y0)
+   if n >= 3 { dict_set(d, "z", z0) }
+   if n >= 4 { dict_set(d, "w", w0) }
    d
 }
 

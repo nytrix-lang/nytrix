@@ -327,12 +327,27 @@ fn socket_bound_port(int fd) int {
    defer { free(len) }
    store32(len, 16)
    if _c_getsockname(fd, addr, len) < 0 { return -1 }
-   htons(load16(addr, 2))
+   ;; `load16` returns a tagged dynamic integer on the native path.  Decode
+   ;; the network-order bytes directly so an ephemeral port is not reinterpreted
+   ;; as a tagged value before byte-order conversion.
+   load8(addr, 2) * 256 + load8(addr, 3)
 }
 
 fn socket_accept(int server_fd) int {
    "Accepts an incoming connection on a listening socket. Returns the client file descriptor."
-   socket_accept_info(server_fd).get("fd", -1)
+   if server_fd < 0 { return -1 }
+   def addr = malloc(16)
+   def len = malloc(4)
+   if addr == 0 || len == 0 {
+      if addr != 0 { free(addr) }
+      if len != 0 { free(len) }
+      return -1
+   }
+   store32(len, 16)
+   def int res = _c_accept(server_fd, addr, len)
+   free(addr)
+   free(len)
+   res
 }
 
 fn socket_accept_info(int server_fd) dict {
@@ -350,7 +365,7 @@ fn socket_accept_info(int server_fd) dict {
    def res = _c_accept(server_fd, addr, len)
    if res < 0 { return {"ok": false, "fd": -1, "host": "", "ip": 0, "port": 0, "addr": ""} }
    def ip = load32(addr, 4)
-   def port = htons(load16(addr, 2))
+   def port = load8(addr, 2) * 256 + load8(addr, 3)
    def host = ipv4_format(ip)
    return {"ok": true, "fd": res, "host": host, "ip": ip, "port": port, "addr": host + ":" + to_str(port)}
 }
@@ -409,6 +424,8 @@ fn read_socket(int fd, any max_len) any {
       free(base)
       return ""
    }
+   ;; Keep the received payload intact; terminate after the bytes so the
+   ;; string bridge never overwrites the first network byte.
    store8(buf, 0, n)
    return init_str(buf, n)
 }

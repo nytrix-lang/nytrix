@@ -14,6 +14,42 @@ fn is_dict(any x) bool {
    got == tag || got == __tag(tag)
 }
 
+;; Runtime dictionaries come in two internal layouts:
+;;   managed — _dict_new (d[8]=cap, d[16]=table) used by the stdlib reflect code;
+;;   native  — rt_native_dict_* (d[0]=magic, SwissTable slots) created by `{}`
+;;             literals in native lowering.
+;; Values cross both: a native-magic dict dispatched through an `any` attached
+;; method reaches these readers, so each reader must branch on the layout.
+@inline
+fn _is_native_dict(any d) bool {
+   if !is_dict(d) { return false }
+   __load64_idx(d, -16) == 0x4e59444943544d47
+}
+
+@inline
+fn _dict_native_get(any d, any key, any default) any {
+   if is_str(key) { return __dict_get_str_raw(d, key, default) }
+   return __dict_get_raw(d, key, default)
+}
+
+@inline
+fn _dict_native_has(any d, any key) bool {
+   if is_str(key) { return __dict_has_str_raw(d, key) != 0 }
+   return __dict_has_raw(d, key) != 0
+}
+
+@inline
+fn _dict_native_set(any d, any key, any val) any {
+   if is_str(key) { return __dict_set_str_raw(d, key, val) }
+   return __dict_set_raw(d, key, val)
+}
+
+@inline
+fn _dict_native_delete(any d, any key) any {
+   if is_str(key) { return __dict_delete_str_raw(d, key) }
+   return __dict_delete_raw(d, key)
+}
+
 @inline
 fn is_str(any x) bool {
    "Internal: returns **true** when `x` is a Nytrix string object."
@@ -88,6 +124,7 @@ fn dict(int cap=8) dict {
 fn dict_len(dict d) int {
    "Returns the number of entries in dictionary `d`."
    if !is_dict(d) { return 0 }
+   if _is_native_dict(d) { return __dict_len_raw(d) }
    __load64_idx(d, 0)
 }
 
@@ -153,6 +190,10 @@ fn _dict_resize(dict d) dict {
 fn dict_set(dict d, any key, any val) dict {
    "Inserts or updates a key/value pair in dictionary `d`."
    if !is_dict(d) { return d }
+   if _is_native_dict(d) {
+      _dict_native_set(d, key, val)
+      return d
+   }
    def tc = __load64_idx(d, 0)
    def tca = __load64_idx(d, 8)
    def t = __load64_idx(d, 16)
@@ -176,6 +217,7 @@ fn dict_set(dict d, any key, any val) dict {
 fn dict_get(dict d, any key, any default=0) any {
    "Retrieves the value for `key` in `d`, or returns `default` if not found."
    if !is_dict(d) { return default }
+   if _is_native_dict(d) { return _dict_native_get(d, key, default) }
    def t = __load64_idx(d, 16)
    def off = _dict_find_off_raw(t, __load64_idx(d, 8), key)
    if off < 0 || __load64_idx(t, off + 16) != 1 { return default }
@@ -186,6 +228,7 @@ fn dict_get(dict d, any key, any default=0) any {
 fn dict_exists(dict d, any key) bool {
    "Returns **true** if `key` exists in dictionary `d`."
    if !is_dict(d) { return false }
+   if _is_native_dict(d) { return _dict_native_has(d, key) }
    def t = __load64_idx(d, 16)
    def off = _dict_find_off_raw(t, __load64_idx(d, 8), key)
    if off < 0 || __load64_idx(t, off + 16) != 1 { return false }
@@ -202,6 +245,10 @@ fn dict_has(dict d, any key) bool {
 fn dict_remove(dict d, any key) dict {
    "Removes `key` from dictionary `d`. Returns the dictionary."
    if !is_dict(d) { return d }
+   if _is_native_dict(d) {
+      _dict_native_delete(d, key)
+      return d
+   }
    def t = __load64_idx(d, 16)
    def off = _dict_find_off_raw(t, __load64_idx(d, 8), key)
    if off >= 0 && __load64_idx(t, off + 16) == 1 {
@@ -222,6 +269,12 @@ fn dict_del(dict d, any key) dict {
 fn dict_pop(dict d, any key, any default=0) any {
    "Removes and returns the value for `key`, or `default` if not found."
    if !is_dict(d) { return default }
+   if _is_native_dict(d) {
+      if !_dict_native_has(d, key) { return default }
+      def val = _dict_native_get(d, key, default)
+      _dict_native_delete(d, key)
+      return val
+   }
    def t = __load64_idx(d, 16)
    def off = _dict_find_off_raw(t, __load64_idx(d, 8), key)
    if off >= 0 && __load64_idx(t, off + 16) == 1 {
@@ -238,6 +291,15 @@ fn dict_pop(dict d, any key, any default=0) any {
 fn dict_popitem(dict d) any {
    "Removes and returns the last inserted [key, value] pair, or 0 if empty."
    if !is_dict(d) { return 0 }
+   if _is_native_dict(d) {
+      def n = __dict_len_raw(d)
+      if n <= 0 { return 0 }
+      def keys = __dict_keys_raw(d)
+      def key = __load_item(keys, 0)
+      def val = _dict_native_get(d, key, 0)
+      _dict_native_delete(d, key)
+      return [key, val]
+   }
    def cap = __load64_idx(d, 8)
    def t = __load64_idx(d, 16)
    mut i = cap - 1
@@ -269,27 +331,14 @@ fn dict_setdefault(dict d, any key, any default=0) any {
 fn dict_clone(dict d) dict {
    "Creates a shallow copy of dictionary `d`."
    if !is_dict(d) { return d }
-   def cap = __load64_idx(d, 8)
-   mut nd = _dict_new(cap)
-   def src_t = __load64_idx(d, 16)
-   def dst_t = __load64_idx(nd, 16)
-   __store64_idx(nd, 0, __load64_idx(d, 0))
-   mut i = 0
-   while i < cap {
-      def off = i * 24
-      if __load64_idx(src_t, off + 16) == 1 {
-         __store64_idx(dst_t, off, __load64_idx(src_t, off))
-         __store64_idx(dst_t, off + 8, __load64_idx(src_t, off + 8))
-         __store64_idx(dst_t, off + 16, 1)
-      }
-      i += 1
-   }
-   nd
+   if _is_native_dict(d) { return __dict_clone_raw(d) }
+   return dict_merge(dict(dict_len(d) * 2 + 1), d)
 }
 
 fn dict_clear(dict d) dict {
    "Removes all entries from dictionary `d`."
    if !is_dict(d) { return d }
+   if _is_native_dict(d) { return __dict_clear_raw(d) }
    def cap = __load64_idx(d, 8)
    def t = __load64_idx(d, 16)
    mut i = 0
@@ -307,6 +356,31 @@ fn dict_clear(dict d) dict {
 fn dict_merge(dict dst, dict src) dict {
    "Merges `src` into `dst` (overwriting duplicate keys). Returns merged dictionary."
    if !is_dict(dst) || !is_dict(src) { return dst }
+   if _is_native_dict(src) {
+      if _is_native_dict(dst) { return __dict_merge_raw(dst, src) }
+      ;; dst is managed — iterate native src via keys/values
+      def src_keys = __dict_keys_raw(src)
+      def src_n = __list_len(src_keys)
+      mut i = 0
+      while i < src_n {
+         def k = __load_item(src_keys, i)
+         dst = dict_set(dst, k, _dict_native_get(src, k, 0))
+         i += 1
+      }
+      return dst
+   }
+   ;; src is managed
+   if _is_native_dict(dst) {
+      def cap = __load64_idx(src, 8)
+      def t = __load64_idx(src, 16)
+      mut i = 0
+      while i < cap {
+         def off = i * 24
+         if __load64_idx(t, off + 16) == 1 { _dict_native_set(dst, __load64_idx(t, off), __load64_idx(t, off + 8)) }
+         i += 1
+      }
+      return dst
+   }
    def cap = __load64_idx(src, 8)
    def t = __load64_idx(src, 16)
    mut i = 0
@@ -332,6 +406,19 @@ fn _dict_pair(any a, any b) list {
 fn dict_items(dict d) list {
    "Returns a list of [key, value] pairs."
    if !is_dict(d) { return list() }
+   if _is_native_dict(d) {
+      def n = __dict_len_raw(d)
+      mut out = list(n)
+      def keys = __dict_keys_raw(d)
+      mut i = 0
+      while i < n {
+         def k = __load_item(keys, i)
+         _dict_store_item(out, i, _dict_pair(k, _dict_native_get(d, k, 0)))
+         i += 1
+      }
+      __store64_idx(out, 0, n)
+      return out
+   }
    def n = __load64_idx(d, 0)
    mut out = list(n)
    def cap = __load64_idx(d, 8)
@@ -354,28 +441,14 @@ fn dict_items(dict d) list {
 fn dict_keys(dict d) list {
    "Returns a list of keys."
    if !is_dict(d) { return list() }
-   def n = __load64_idx(d, 0)
-   mut out = list(n)
-   def cap = __load64_idx(d, 8)
-   def t = __load64_idx(d, 16)
-   mut i = 0
-   mut pos = 0
-   while i < cap {
-      def off = i * 24
-      if __load64_idx(t, off + 16) == 1 {
-         _dict_store_item(out, pos, __load64_idx(t, off))
-         pos += 1
-      }
-      i += 1
-   }
-   __store64_idx(out, 0, pos)
-   out
+   __dict_keys_raw(d)
 }
 
 @returns_owned
 fn dict_values(dict d) list {
    "Returns a list of values."
    if !is_dict(d) { return list() }
+   if _is_native_dict(d) { return __dict_values_raw(d) }
    def n = __load64_idx(d, 0)
    mut out = list(n)
    def cap = __load64_idx(d, 8)

@@ -1,0 +1,15 @@
+shape x86_64_elf64_debug_line_table {
+  family "runtime-native"
+  generator "native"
+  features ["native", "object", "elf", "x86_64", "debug", "dwarf-line"]
+  template ny-test-case
+  flags "--native-backend x86_64 -g -emit-only -o /tmp/nytrix-native-elf64-debug-line.o"
+  expect compile_and_run
+  source ny <<'NY'
+fn add(int a, int b) int {
+  def sum = a + b
+  sum
+}
+assert(add(20, 22) == 42, "debug line object function")
+NY
+}

@@ -42,6 +42,9 @@ concurrency:
 
 env:
   NYTRIX_TEST_COLD: "1"
+  # Keep functional CI independent from timed benchmark variance.
+  # Benchmark parity remains available through ./make bench and dedicated runs.
+  NYTRIX_TEST_NO_BENCH: "1"
 
 jobs:
   test-ubuntu:
@@ -49,11 +52,27 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
-      NYTRIX_TEST_JOBS: "2"
+      # The hosted Ubuntu runner exposes only 1–2 CPUs. Keep the fixture
+      # scheduler deterministic until the standard suite is green; parallel
+      # stress remains available locally with NYTRIX_TEST_JOBS=2+.
+      NYTRIX_TEST_JOBS: "1"
+      # pidigits requires the GMP-backed BigInt path on the minimal hosted
+      # image; make the choice explicit instead of relying on a stale cache.
+      NYTRIX_USE_GMP: "ON"
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: Build and verify Ubuntu runtime dependencies
+        run: |
+          gmp_header="$(dpkg -L libgmp-dev | awk '/\/gmp\.h$/ {print; exit}')"
+          gmp_library="$(dpkg -L libgmp-dev | awk '/\/libgmp\.so$/ {print; exit}')"
+          test -n "$gmp_header"
+          test -n "$gmp_library"
+          NYTRIX_GMP_INCLUDE="$(dirname "$gmp_header")" \
+          NYTRIX_GMP_LIBRARY="$gmp_library" ./make bin
+          grep -q 'NYTRIX_USE_GMP:BOOL=ON' build/release/CMakeCache.txt
+          ldd build/release/ny-full | grep -q 'libgmp'
       - run: |
           if [ "${{ inputs.suite }}" = "full-stdlib" ]; then
             ./make test --with-stdlib
@@ -68,6 +87,7 @@ jobs:
           else
             ./make asan
           fi
+          ./make asan fuzz
       - name: Run UBSan suite
         if: ${{ github.event_name == 'workflow_dispatch' && (inputs.checks == 'memory-safety' || inputs.checks == 'all') }}
         run: |
@@ -76,6 +96,7 @@ jobs:
           else
             ./make ubsan
           fi
+          ./make ubsan fuzz
       - name: Run Valgrind smoke
         if: ${{ github.event_name == 'workflow_dispatch' && (inputs.checks == 'memory-safety' || inputs.checks == 'all') }}
         run: |
@@ -108,7 +129,8 @@ jobs:
             coverage-html/
 
   test-macos:
-    if: ${{ github.event_name != 'workflow_dispatch' || inputs.target == 'all' || inputs.target == 'macos' }}
+    # Keep pushes staged on Ubuntu; run macOS explicitly after Ubuntu is green.
+    if: ${{ github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && (inputs.target == 'all' || inputs.target == 'macos')) }}
     runs-on: macos-latest
     timeout-minutes: 90
     env:
@@ -123,9 +145,20 @@ jobs:
           else
             ./make test
           fi
+      - name: Run ASan and UBSan suite
+        if: ${{ github.event_name == 'workflow_dispatch' && (inputs.checks == 'memory-safety' || inputs.checks == 'all') }}
+        run: |
+          if [ "${{ inputs.suite }}" = "full-stdlib" ]; then
+            ./make asan --with-stdlib
+            ./make ubsan --with-stdlib
+          else
+            ./make asan
+            ./make ubsan
+          fi
 
   test-windows:
-    if: ${{ github.event_name != 'workflow_dispatch' || inputs.target == 'all' || inputs.target == 'windows' }}
+    # Keep pushes staged on Ubuntu; run Windows explicitly after Ubuntu is green.
+    if: ${{ github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && (inputs.target == 'all' || inputs.target == 'windows')) }}
     runs-on: windows-latest
     timeout-minutes: 90
     # Native test artifacts share Windows temp paths and compiler state.
@@ -144,4 +177,14 @@ jobs:
             ./make test --with-stdlib
           else
             ./make test
+          fi
+      - name: Run ASan and UBSan suite
+        if: ${{ github.event_name == 'workflow_dispatch' && (inputs.checks == 'memory-safety' || inputs.checks == 'all') }}
+        run: |
+          if [ "${{ inputs.suite }}" = "full-stdlib" ]; then
+            ./make asan --with-stdlib
+            ./make ubsan --with-stdlib
+          else
+            ./make asan
+            ./make ubsan
           fi

@@ -1,0 +1,17 @@
+shape oracle_gpr_residency_alu_chain_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle machine-ir regalloc residency gpr alu-chain]
+  template ny-test-case
+  flags "-O0 --native-result-oracle=59"
+  expect compile_and_run
+  source ny <<'NY'
+fn chain(i64 x) i64 {
+  def a = x + 7
+  def b = a + 11
+  b + a
+}
+
+chain(17)
+NY
+}

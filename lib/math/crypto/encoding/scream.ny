@@ -1,8 +1,8 @@
 ;; Keywords: encoding scream math crypto
 ;; Encoding routines for Unicode steganography encoding and decoding.
-;; Reference:
-;; - https://www.rfc-editor.org/rfc/rfc7468
 ;; References:
+;; - XKCD #3054, "Scream Cipher": https://xkcd.com/3054/
+;; - Unicode combining-mark rendering: https://www.unicode.org/notes/tn2/
 ;; - std.math.crypto.encoding
 ;; - std.math.crypto
 module std.math.crypto.encoding.scream(scream_mark_decode, scream_mark_from_codepoint, scream_extract_marks, scream_decode_marks, scream_decode_text)

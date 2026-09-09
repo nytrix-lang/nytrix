@@ -1,0 +1,30 @@
+shape typed-store-byte-order {
+  family "native-nyir"
+  generator "regression"
+  features ["ny", "native", "memory"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+
+def p = malloc(32)
+assert(p != 0, "store buffer allocation")
+
+store16(p, 0x0101, 0)
+store16(p, 0x0102, 2)
+store32(p, 0x01010101, 4)
+store32(p, 0x01010102, 8)
+store64_i(p, 0x0101010101010101, 12)
+store64_i(p, 0x0101010101010102, 20)
+
+assert(load8(p, 0) == 1 && load8(p, 1) == 1, "store16 even payload")
+assert(load8(p, 2) == 2 && load8(p, 3) == 1, "store16 odd payload")
+assert(load8(p, 4) == 1 && load8(p, 7) == 1, "store32 even payload")
+assert(load8(p, 8) == 2 && load8(p, 11) == 1, "store32 odd payload")
+assert(load8(p, 12) == 1 && load8(p, 19) == 1, "store64 even payload")
+assert(load8(p, 20) == 2 && load8(p, 27) == 1, "store64 odd payload")
+
+free(p)
+print("typed_store_byte_order ok")
+NY
+}

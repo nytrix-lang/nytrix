@@ -1,0 +1,21 @@
+shape semantic_any_attached_methods {
+  family "runtime-native"
+  generator "native"
+  features [native nyir x86_64 semantic any attached_methods]
+  template ny-test-case
+  flags "--native-only --native-backend=x86_64 --native-tier=baseline -O0 --nyir-verify --native-result-oracle=0 --no-progress --color=never"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+
+fn exercise(any value) int {
+  value.set("answer", 42)
+  if !value.contains("answer") { return 1 }
+  if value.get("answer", 0) != 42 { return 2 }
+  if value.len != 1 { return 3 }
+  0
+}
+
+exercise({})
+NY
+}

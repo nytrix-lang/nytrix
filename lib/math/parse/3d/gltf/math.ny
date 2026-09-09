@@ -74,12 +74,25 @@ fn mat4_apply_dir(any m, any x, any y, any z) list {
 
 fn mat4_from_trs(any t, any r, any s) list {
    "Builds a tagged column-major mat4 from translation, rotation(quat xyzw) and scale lists."
-   def tx = 0.0 + t.get(0, 0.0) def ty = 0.0 + t.get(1, 0.0) def tz = 0.0 + t.get(2, 0.0)
-   def sx = 0.0 + s.get(0, 1.0) def sy = 0.0 + s.get(1, 1.0) def sz = 0.0 + s.get(2, 1.0)
-   def qx = 0.0 + r.get(0, 0.0) def qy = 0.0 + r.get(1, 0.0) def qz = 0.0 + r.get(2, 0.0) def qw = 0.0 + r.get(3, 1.0)
-   def xx = qx*qx def yy = qy*qy def zz = qz*qz
-   def xy = qx*qy def xz = qx*qz def yz = qy*qz
-   def wx = qw*qx def wy = qw*qy def wz = qw*qz
+   def tx = 0.0 + t.get(0, 0.0)
+   def ty = 0.0 + t.get(1, 0.0)
+   def tz = 0.0 + t.get(2, 0.0)
+   def sx = 0.0 + s.get(0, 1.0)
+   def sy = 0.0 + s.get(1, 1.0)
+   def sz = 0.0 + s.get(2, 1.0)
+   def qx = 0.0 + r.get(0, 0.0)
+   def qy = 0.0 + r.get(1, 0.0)
+   def qz = 0.0 + r.get(2, 0.0)
+   def qw = 0.0 + r.get(3, 1.0)
+   def xx = qx*qx
+   def yy = qy*qy
+   def zz = qz*qz
+   def xy = qx*qy
+   def xz = qx*qz
+   def yz = qy*qz
+   def wx = qw*qx
+   def wy = qw*qy
+   def wz = qw*qz
    [
       (1.0 - 2.0*(yy+zz))*sx, (2.0*(xy+wz))*sx,       (2.0*(xz-wy))*sx,       0.0,
       (2.0*(xy-wz))*sy,       (1.0 - 2.0*(xx+zz))*sy, (2.0*(yz+wx))*sy,       0.0,
@@ -125,14 +138,18 @@ fn mat4_inverse_affine(any m) list {
 fn mat4_transform_point(any m, any p) list {
    "Runs the mat4 transform point operation."
    if !is_list(m) || m.len < 16 { return [0.0 + p.get(0,0.0), 0.0 + p.get(1,0.0), 0.0 + p.get(2,0.0)] }
-   def x = 0.0 + p.get(0,0.0) def y = 0.0 + p.get(1,0.0) def z = 0.0 + p.get(2,0.0)
+   def x = 0.0 + p.get(0,0.0)
+   def y = 0.0 + p.get(1,0.0)
+   def z = 0.0 + p.get(2,0.0)
    mat4_apply_pos(m, x, y, z)
 }
 
 fn mat4_transform_dir(any m, any d) list {
    "Runs the mat4 transform dir operation."
    if !is_list(m) || m.len < 16 { return [0.0 + d.get(0,0.0), 0.0 + d.get(1,0.0), 0.0 + d.get(2,-1.0)] }
-   def x = 0.0 + d.get(0,0.0) def y = 0.0 + d.get(1,0.0) def z = 0.0 + d.get(2,-1.0)
+   def x = 0.0 + d.get(0,0.0)
+   def y = 0.0 + d.get(1,0.0)
+   def z = 0.0 + d.get(2,-1.0)
    mut out = mat4_apply_dir(m, x, y, z)
    def ox, oy = 0.0 + out.get(0,0.0), 0.0 + out.get(1,0.0)
    def oz = 0.0 + out.get(2,0.0)

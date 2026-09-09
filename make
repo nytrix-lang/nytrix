@@ -482,11 +482,11 @@ def color_ninja_progress(cur: str, total: str) -> str:
 def color_source_dir(path: str) -> str:
     palette = (
         ("src/code/", "34"),
-        ("src/parse/", "35"),
-        ("src/repl/", "36"),
+        ("src/code/parse/", "35"),
+        ("src/cmd/ny/repl/", "36"),
         ("src/base/", "32"),
-        ("src/wire/", "33"),
-        ("src/rt/", "31"),
+        ("src/code/wire/", "33"),
+        ("src/code/runtime/", "31"),
         ("src/cmd/", "36"),
     )
     for prefix, color in palette:
@@ -1577,7 +1577,11 @@ def ensure_deps(force_optional_prompt: bool = False, require_git: bool = False) 
         distro, like = info.get("ID", "").lower(), info.get("ID_LIKE", "").lower()
         if distro in ("debian", "ubuntu", "linuxmint", "pop", "raspbian") or "debian" in like:
             v = apt_best_llvm_ver()
-            pkgs = ["build-essential", "python3", "cmake", "ninja-build", "git", "gdb", "pkg-config", "zlib1g-dev"]
+            # The standard benchmark suite includes a 50-digit arbitrary-
+            # precision workload.  Keep GMP in the baseline toolchain so a
+            # minimal Ubuntu runner does not silently fall back to the much
+            # slower native BigInt implementation and time out in pidigits.
+            pkgs = ["build-essential", "python3", "cmake", "ninja-build", "git", "gdb", "pkg-config", "zlib1g-dev", "libgmp-dev"]
             if v > 0:
                 pkgs += [f"clang-{v}", f"llvm-{v}", f"llvm-{v}-dev", f"llvm-{v}-runtime"]
                 if apt_has_pkg(f"libclang-{v}-dev"):
@@ -1616,7 +1620,9 @@ def ensure_deps(force_optional_prompt: bool = False, require_git: bool = False) 
         if "git" in missing:
             pkgs.append("git")
         if "llvm" in missing or "clang" in missing:
-            pkgs[:0] = ["llvm@20", "lld@20"]
+            # Prefer the rolling formula; configure_macos_llvm_env still
+            # selects an already-installed versioned prefix first.
+            pkgs[:0] = ["llvm", "lld"]
         if pkgs:
             run(["brew", "install", *_dedupe(pkgs)])
         configure_macos_llvm_env()
@@ -1721,12 +1727,14 @@ def resolve_test_jobs(cli_jobs: int) -> int:
     if cpu >= 2:
         auto = max(2, auto)
     mem_gib = host_mem_gib()
-    # A large stdlib LLVM compile can peak above 2.5 GiB, and several phases
-    # overlap. Reserve 6 GiB per automatic worker so a sweep cannot consume the
-    # whole machine. Explicit job settings remain available for controlled CI.
+    # A large stdlib/graphics compile can peak well above 12 GiB, and native,
+    # LLVM, and diagnostic replay phases overlap inside a fixture. Reserve
+    # 32 GiB per automatic worker and cap the default at two workers so an
+    # unqualified `./make test` remains bounded on 64 GiB hosts. Explicit
+    # Explicit -j/NYTRIX_TEST_JOBS settings remain available for controlled CI.
     if mem_gib > 0.0:
-        auto = min(auto, max(1, int(mem_gib / 6.0)))
-    auto = min(auto, 8)
+        auto = min(auto, max(1, int(mem_gib / 32.0)))
+    auto = min(auto, 2)
     return auto
 
 def configure_macos_llvm_env() -> None:
@@ -1736,6 +1744,10 @@ def configure_macos_llvm_env() -> None:
     if os.environ.get("LLVM_CONFIG"):
         return
     prefixes = [
+        Path("/opt/homebrew/opt/llvm@22"),
+        Path("/usr/local/opt/llvm@22"),
+        Path("/opt/homebrew/opt/llvm@21"),
+        Path("/usr/local/opt/llvm@21"),
         Path("/opt/homebrew/opt/llvm@20"),
         Path("/usr/local/opt/llvm@20"),
         Path("/opt/homebrew/opt/llvm@19"),
@@ -3837,15 +3849,29 @@ def run_test(build_root: Path, kind: str, jobs: int, extra: list[str]) -> int:
     # NYTRIX_TEST_TIMEOUT belongs to ny-test and limits each fixture.  Keep the
     # outer suite deadline independent so a large, healthy suite is not killed
     # after one fixture's allowance (notably on slower Windows runners).
+    # The fixture ceiling is intentionally fixed at 20s; do not inherit a
+    # stale 90s value from a caller or an older test binary.
+    os.environ["NYTRIX_TEST_TIMEOUT"] = "20"
     suite_timeout_s = int(os.environ.get("NYTRIX_TEST_SUITE_TIMEOUT") or "1800")
     step(f"run tests: bin=ny jobs={test_jobs} suite_timeout={suite_timeout_s}s")
-    rc = run_tool(build_root, kind, "ny-test", ["--bin", str(ny_bin), "--jobs", str(test_jobs), *extra], timeout=float(suite_timeout_s))
+    # `--no-progress` controls this Python bootstrapper.  ny-test deliberately
+    # has no corresponding flag, so keep this global presentation option out
+    # of its fixture-runner argv.
+    test_extra = [arg for arg in extra if arg != "--no-progress"]
+    rc = run_tool(build_root, kind, "ny-test", ["--bin", str(ny_bin), "--jobs", str(test_jobs), *test_extra], timeout=float(suite_timeout_s))
+    # ny-fuzz owns POSIX process groups and is intentionally not built on
+    # Windows. Keep the Windows functional gate on ny-test until a native
+    # shape-validation worker exists.
     if rc == 0 and host_os() != "windows":
         rc = run_tool(build_root, kind, "ny-fuzz", ["validate-shapes", "etc/tests/shapes"], timeout=float(suite_timeout_s))
     suite_rc = rc
     if not _env_flag("NYTRIX_TEST_NO_BENCH", False):
-        step("run bench: appending the C-vs-Ny benchmark table (NYTRIX_TEST_NO_BENCH=1 to skip)")
-        bench_rc = run_tool(build_root, kind, "ny-test", ["--bin", str(ny_bin), "--bench"], timeout=float(suite_timeout_s))
+        step("run benchmarks: C/Ny parity and performance (set NYTRIX_TEST_NO_BENCH=1 to skip)")
+        # Keep benchmark workers under the same memory-aware limit as the
+        # fixture suite.  ny-test otherwise defaults to 20 parallel benchmark
+        # processes, which can exhaust a 64 GiB host even when the suite is
+        # correctly capped.
+        bench_rc = run_tool(build_root, kind, "ny-test", ["--bin", str(ny_bin), "--bench", "--jobs", str(test_jobs)], timeout=float(suite_timeout_s))
     else:
         bench_rc = 0
     elapsed_ms = int((time.perf_counter() - started) * 1000.0)
@@ -3854,6 +3880,48 @@ def run_test(build_root: Path, kind: str, jobs: int, extra: list[str]) -> int:
     else:
         log("TEST", f"test suite failed after {elapsed_ms}ms (suite={suite_rc}, bench={bench_rc})")
     return suite_rc or bench_rc
+
+def check_source_hygiene() -> int:
+    """Reject accidental binary source and temporary print-debugging probes."""
+    source_roots = (ROOT / "src", ROOT / "lib", ROOT / "etc" / "tests")
+    suffixes = {".c", ".h", ".ny"}
+    debug_print = re.compile(
+        r'\b(?:printf|fprintf)\s*\(\s*"(?:DEBUG|XXX|TODO DEBUG)'
+        r'|\bprint\s*\(\s*"DEBUG'
+    )
+    nul_files: list[Path] = []
+    debug_files: list[tuple[Path, int, str]] = []
+    for root in source_roots:
+        if not root.exists():
+            continue
+        for path in root.rglob("*"):
+            if not path.is_file() or path.suffix not in suffixes:
+                continue
+            try:
+                data = path.read_bytes()
+            except OSError as exc:
+                err(f"CHECK unable to read {path.relative_to(ROOT)}: {exc}")
+                return 1
+            if b"\x00" in data:
+                nul_files.append(path)
+                continue
+            lines = data.decode("utf-8", errors="replace").splitlines()
+            for line_no, line in enumerate(lines, 1):
+                if debug_print.search(line):
+                    debug_files.append((path, line_no, line.strip()))
+    if nul_files:
+        err("CHECK source hygiene failed: NUL byte(s) found in")
+        for path in nul_files:
+            err(f"  {path.relative_to(ROOT)}")
+        return 1
+    if debug_files:
+        err("CHECK source hygiene failed: temporary print debugging found")
+        for path, line_no, line in debug_files:
+            err(f"  {path.relative_to(ROOT)}:{line_no}: {line}")
+        err("Use NY_TRACE_* or compiler diagnostic switches instead.")
+        return 1
+    ok("source hygiene")
+    return 0
 
 def run_optcheck(build_root: Path, kind: str, args: list[str]) -> int:
     """Run native optimization correctness nshape tests."""
@@ -3883,8 +3951,8 @@ def run_optcheck(build_root: Path, kind: str, args: list[str]) -> int:
     return 0
 
 def parse(argv: list[str]) -> tuple[list[str], list[str], int, bool, bool, bool, bool, str | None, bool | None]:
-    known = {"all", "bin", "bin-static", "tar", "vendor", "fmt", "std", "std_bc", "test", "repl", "fuzz", "bench", "docs", "web", "web-demos", "web-check", "web-test", "wasm", "c2ny", "py2ny", "install", "uninstall", "clean", "debug", "tidy", "audit", "perf", "profile", "gprof", "asan", "ubsan", "optcheck", "analyze", "check", "fb", "ny", "run", "release", "static", "deps", "cross", "cross-run", "env", "targets", "doctor"}
-    _PASSTHROUGH = {"fmt", "analyze", "check", "tidy", "audit", "test", "perf", "profile", "docs", "web", "web-demos", "web-check", "web-test", "wasm", "ny", "repl", "gprof", "asan", "ubsan", "fuzz", "bench", "cross", "cross-run", "static", "bin-static", "tar", "vendor", "env", "targets", "doctor"}
+    known = {"all", "bin", "bin-static", "tar", "vendor", "fmt", "std", "std_bc", "test", "repl", "fuzz", "bench", "docs", "web", "web-demos", "web-check", "web-test", "wasm", "c2ny", "py2ny", "install", "uninstall", "clean", "debug", "tidy", "audit", "perf", "profile", "gprof", "asan", "ubsan", "optcheck", "analyze", "check", "hooks", "fb", "ny", "run", "release", "static", "deps", "cross", "cross-run", "env", "targets", "doctor"}
+    _PASSTHROUGH = {"fmt", "analyze", "tidy", "audit", "test", "perf", "profile", "docs", "web", "web-demos", "web-check", "web-test", "wasm", "ny", "repl", "gprof", "asan", "ubsan", "fuzz", "bench", "cross", "cross-run", "static", "bin-static", "tar", "vendor", "env", "targets", "doctor"}
 
     def looks_like_ny_source(arg: str) -> bool:
         if not arg or arg == "--" or arg.startswith("-"):
@@ -4146,12 +4214,20 @@ _COMMAND_USAGE: dict[str, tuple[str, str, list[tuple[str, list[tuple[str, str]]]
         ],
     ),
     "check": (
-        "Usage: ./make check [path]",
-        "run ny-fmt in check (parse/verification) mode",
+        "Usage: ./make check [test options]",
+        "run the fail-closed repository quality gate (hygiene, tidy, format, audit, build, and tests)",
         [
+            ("What it does", [
+                ("1", "reject NUL bytes and temporary print-debugging probes"),
+                ("2", "run ny-fmt --tidy"),
+                ("3", "verify formatting and parser checks"),
+                ("4", "run the source audit"),
+                ("5", "build ny, ny-full, ny-test, and ny-fmt"),
+                ("6", "run the test suite; any failure stops the command"),
+            ]),
             ("Examples", [
-                ("./make check", "verify the whole tree parses"),
-                ("./make check lib/math", "verify a subtree only"),
+                ("./make check", "run the complete pre-push quality gate"),
+                ("./make check --failures-only", "run the gate with compact test output"),
             ]),
         ],
     ),
@@ -4179,7 +4255,7 @@ _COMMAND_USAGE: dict[str, tuple[str, str, list[tuple[str, list[tuple[str, str]]]
         [
             ("What it does", [
                 ("Suite", "runs ny-test over etc/tests/runtime|errors|bench|native|interop|shapes and lib"),
-                ("Bench", "after a green suite, appends the timed C-vs-Ny benchmark table (NYTRIX_TEST_NO_BENCH=1 to skip)"),
+                ("Bench", "runs the timed C/Ny parity and performance suite (set NYTRIX_TEST_NO_BENCH=1 to skip)"),
                 ("Native", "forces native fixtures/REPL/stdll runs (NYTRIX_TEST_NATIVE=1)"),
                 ("Shapes", "after the suite, runs ny-fuzz validate-shapes over etc/tests/shapes"),
             ]),
@@ -4425,6 +4501,19 @@ _COMMAND_USAGE: dict[str, tuple[str, str, list[tuple[str, list[tuple[str, str]]]
             ("Examples", [
                 ("./make doctor", "report setup issues"),
                 ("./make doctor --help", "show ny --doctor help"),
+            ]),
+        ],
+    ),
+    "hooks": (
+        "Usage: ./make hooks",
+        "install the repository-managed Git hooks for this checkout",
+        [
+            ("What it does", [
+                ("Git config", "sets local core.hooksPath to .githooks"),
+                ("Portable", "uses Git's POSIX hook runner, including Git Bash on Windows"),
+                ("Pre-commit", "checks staged whitespace, source hygiene, and formatting"),
+                ("Commit message", "checks Conventional Commit type and a 72-character subject limit"),
+                ("Pre-push", "runs the fail-closed ./make check quality gate"),
             ]),
         ],
     ),
@@ -4850,7 +4939,7 @@ def _write_bundle_env(bundle_dir: Path, lib_dir: Path) -> None:
             "_nytrix_here=$(CDPATH= cd -- \"$(dirname -- \"${BASH_SOURCE:-$0}\")\" && pwd)\n"
             "export NYTRIX_BUNDLE_ROOT=\"$_nytrix_here\"\n"
             "export NYTRIX_ROOT=\"$_nytrix_here\"\n"
-            "if [ -f \"$_nytrix_here/src/rt/init.c\" ]; then export NYTRIX_RT_SRC=\"$_nytrix_here/src/rt/init.c\"; fi\n"
+            "if [ -f \"$_nytrix_here/src/code/runtime/init.c\" ]; then export NYTRIX_RT_SRC=\"$_nytrix_here/src/code/runtime/init.c\"; fi\n"
             "if [ -z \"${CC:-}\" ]; then\n"
             "  if command -v clang >/dev/null 2>&1; then export CC=clang;\n"
             "  elif command -v cc >/dev/null 2>&1; then export CC=cc;\n"
@@ -5930,7 +6019,7 @@ def main() -> int:
     kind = "debug" if debug_kind else "release"
     build_root, notice = resolve_build_dir()
     first_repl_bootstrap = bootstrap_needed_for_repl(build_root, kind, cmds)
-    inspect_cmds = {"env", "targets", "doctor"}
+    inspect_cmds = {"env", "targets", "doctor", "hooks"}
     tool_style_cmds = {"fmt", "analyze", "check", "tidy", "audit", "test", "perf", "profile", "docs", "web", "web-demos", "web-check", "web-test", "wasm", "ny", "repl", "gprof", "asan", "ubsan", "fuzz", "bench", "cross", "cross-run", "static", "bin-static", "tar", "vendor", *inspect_cmds}
     all_tool_style = all(c in tool_style_cmds for c in cmds)
     if all_tool_style and not first_repl_bootstrap:
@@ -6010,6 +6099,25 @@ def main() -> int:
             if rc != 0:
                 return rc
             continue
+        if cmd == "hooks":
+            hook_dir = ROOT / ".githooks"
+            hook_names = ("pre-commit", "commit-msg", "pre-merge-commit",
+                          "pre-applypatch", "pre-push")
+            hooks = [hook_dir / name for name in hook_names]
+            missing = [str(hook.relative_to(ROOT)) for hook in hooks if not hook.is_file()]
+            if missing:
+                raise SystemExit("make hooks: missing " + ", ".join(missing))
+            if host_os() != "windows":
+                for hook in hooks:
+                    chmod_executable(hook)
+            rc = subprocess.run(
+                ["git", "config", "--local", "core.hooksPath", ".githooks"],
+                cwd=str(ROOT), env=os.environ,
+            ).returncode
+            if rc != 0:
+                return rc
+            ok("Git hooks installed: core.hooksPath=.githooks")
+            continue
         if cmd == "clean":
             shutil.rmtree(build_root, ignore_errors=True)
             log("CLEAN", f"removed {build_root}")
@@ -6020,8 +6128,10 @@ def main() -> int:
         targets = ["ny"]
         if cmd in ("all", "bin"):
             targets = ["ny", "std", "ny-fmt", "ny-perf", "ny-test", "ny-doc", "ny-make", "ny-lsp"]
-        elif cmd in ("fmt", "analyze", "check", "tidy", "audit"):
+        elif cmd in ("fmt", "analyze", "tidy", "audit"):
             targets = ["ny-fmt"]
+        elif cmd == "check":
+            targets = ["ny", "ny-full", "ny-test", "ny-fmt"]
         elif cmd in ("test", "asan", "ubsan"):
             targets = ["ny", "ny-full", "ny-test"]
             if host_os() != "windows":
@@ -6086,7 +6196,19 @@ def main() -> int:
         elif cmd == "analyze":
             rc = run_tool(build_root, active_kind, "ny-fmt", ["--analyze", *extra])
         elif cmd == "check":
-            rc = run_tool(build_root, active_kind, "ny-fmt", ["--check", *extra])
+            # This is the single fail-closed quality gate used by pre-push and
+            # documented for contributors. Keep every stage explicit: a clean
+            # formatter pass alone must not be mistaken for a tested build.
+            step("check source hygiene")
+            rc = check_source_hygiene()
+            if rc == 0:
+                rc = run_tool(build_root, active_kind, "ny-fmt", ["--tidy"])
+            if rc == 0:
+                rc = run_tool(build_root, active_kind, "ny-fmt", ["--check"])
+            if rc == 0:
+                rc = run_tool(build_root, active_kind, "ny-fmt", ["--audit"])
+            if rc == 0:
+                rc = run_test(build_root, active_kind, requested_jobs, extra)
         elif cmd == "tidy":
             # Strip only NUL bytes from C/H sources so Clang does not
             # crash with "null character ignored".  Keep all valid UTF-8

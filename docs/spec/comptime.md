@@ -91,7 +91,24 @@ comptime exports(ModuleName) as name {
 }
 ```
 
-`fields` exposes `f.name`, `f.offset`, `f.index`, and `f.type` for each layout field. `exports` exposes each exported module name as a string.
+`fields` exposes stable metadata for each layout field:
+
+| Property | Value |
+| --- | --- |
+| `f.name` | Field name string. |
+| `f.type` / `f.type_name` | Declared type-name string. |
+| `f.offset` | ABI byte offset. |
+| `f.index` | Zero-based declaration index. |
+| `f.is_array` | Whether the field uses `[T, N]` syntax. |
+| `f.array_len_known` | Whether `N` is an integer literal available to reflection. |
+| `f.array_len` | Literal array extent, or `0` when it is not statically represented. |
+| `f.has_default` | Whether the field declares a default. |
+| `f.default_src` | Stable source spelling of that default, or `""`. |
+| `f.align` | Explicit field alignment, or `0` for natural alignment. |
+
+Use `array_len_known` before consuming `array_len`, since a symbolic extent
+and the literal extent zero must not be conflated. `exports` exposes each
+exported module name as a string.
 
 ## Diagnostic rules
 
@@ -154,7 +171,11 @@ The comptime evaluator guarantees termination through:
 - **Range length limit:** 65,536 elements.
 - **Overflow checks:** every arithmetic operation in the fast evaluator uses checked (`__builtin_*_overflow`) or bounded arithmetic.
 
-There is currently **no fuel/step-count mechanism**. This is acceptable for standalone comptime blocks (which the user controls), but it is a prerequisite for using the comptime evaluator as a type-level normalizer for dependent types - an unbounded evaluator in the type checker would make type-checking non-terminating. See [Types](types.md) for the dependent-types design.
+The evaluator also has a deterministic compilation-wide fuel budget. It
+defaults to 1,000,000 evaluation steps and can be set with
+`--comptime-limit=N` (or `NYTRIX_COMPTIME_FUEL=N`). Exhaustion produces a
+diagnostic instead of allowing type checking or generation to diverge. The
+recursion and range limits above remain independent hard bounds.
 
 ### When compile-time code re-runs
 

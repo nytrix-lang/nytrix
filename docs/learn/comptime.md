@@ -48,6 +48,23 @@ metadata. Generate checks, adapters, or tables from those loops. Keep a
 runtime assertion that proves the generated declaration has the required
 behavior.
 
+Field metadata includes `name`, `type`, `offset`, `index`, array extent,
+default-source, and explicit-alignment information. Check
+`f.array_len_known` before using `f.array_len`; symbolic layout parameters do
+not pretend to be a literal extent.
+
+```ny
+comptime fields(Packet) as f {
+   emit assert(__layout_offset("Packet", f.name) == f.offset, "field offset")
+   emit if f.is_array && f.array_len_known {
+      assert(f.array_len > 0, "fixed array extent")
+   }
+}
+```
+
+Bound large evaluation jobs explicitly with `--comptime-limit=N`. The default
+compilation-wide budget is 1,000,000 evaluator steps.
+
 ## Generated modules and embedded files
 
 Generated modules follow the same module and export rules as handwritten

@@ -2332,7 +2332,7 @@ static int cmd_public_compiler_std_audit(int argc, char **argv) {
   string_list_t language_private = {0}, unreferenced_defs = {0}, scan_errors = {0};
   string_list_t simmd_defs = {0}, simmd_refs = {0}, simmd_missing_wrappers = {0}, simmd_unknown_refs = {0};
   char *defs_path = NULL, *lib_dir = NULL, *rt_dir = NULL;
-  (void)asprintf(&defs_path, "%s/src/rt/defs.h", root);
+  (void)asprintf(&defs_path, "%s/src/code/runtime/defs.h", root);
   (void)asprintf(&lib_dir, "%s/lib", root);
   (void)asprintf(&rt_dir, "%s/etc/tests/runtime", root);
   file_buf_t defs_file = {0};
@@ -2340,7 +2340,7 @@ static int cmd_public_compiler_std_audit(int argc, char **argv) {
   if (ok) {
     audit_extract_runtime_defs(defs_file.data, &defs, &duplicate_defs);
   } else {
-    (void)string_list_push_copy(&scan_errors, "src/rt/defs.h");
+    (void)string_list_push_copy(&scan_errors, "src/code/runtime/defs.h");
   }
   if (lib_dir && !collect_regular_files_recursive(lib_dir, &files))
     (void)string_list_push_copy(&scan_errors, "lib");

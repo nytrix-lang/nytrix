@@ -4,7 +4,7 @@
  */
 #include "code/native/internal.h"
 #include "code/native/object/internal.h"
-#include "code/native/ir/opt/util.h"
+#include "code/ir/opt/util.h"
 #include "base/common.h"
 
 #include <errno.h>
@@ -75,8 +75,8 @@ static bool ny_native_symbol_is_box_conversion(const char *symbol) {
   return strstr(symbol, "_any_to_") != NULL ||
          strcmp(symbol, "rt_bigint_from_i64_raw") == 0 ||
          strcmp(symbol, "rt_bigint_to_i64_raw") == 0 ||
-         strcmp(symbol, "rt_native_bigfloat_from_value") == 0 ||
-         strcmp(symbol, "rt_native_bigfloat_to_f64") == 0;
+         strcmp(symbol, "rt_bigfloat_from_value_raw") == 0 ||
+         strcmp(symbol, "rt_bigfloat_to_f64_raw") == 0;
 }
 
 static void ny_native_json_string(FILE *out, const char *s) {
@@ -668,6 +668,12 @@ bool ny_native_write_tier_report_for_program(const program_t *prog,
           facts.fenv_effect_ops, facts.alias_unresolved_ops, facts.vectorize_attempted_loops,
           facts.vectorize_rejected_loops,
           facts.vectorized_loops);
+  {
+    unsigned long long egraph_runs = 0, egraph_fuel = 0;
+    nyir_egraph_stats(&egraph_runs, &egraph_fuel);
+    fprintf(out, "egraph runs=%llu fuel_exhausted=%llu\n", egraph_runs,
+            egraph_fuel);
+  }
   fprintf(out,
           "handoffs entries=%zu returns=%zu calls=%zu branches=%zu labels=%zu "
           "deopt_safe=%zu\n",
@@ -706,6 +712,7 @@ bool ny_native_write_tier_report_for_program(const program_t *prog,
   {
     size_t supported = 0, total = 0;
     unsigned long long mach_ok = 0, nir_fb = 0;
+    unsigned long long div_magic = 0, div_idiv = 0;
     unsigned long long ra_segments = 0, ra_colored = 0, ra_spilled = 0;
     unsigned long long ra_reloads = 0, ra_peak_live = 0;
     unsigned long long fp_segments = 0, fp_colored = 0, fp_spilled = 0;
@@ -717,6 +724,7 @@ bool ny_native_write_tier_report_for_program(const program_t *prog,
     ny_native_mach_encode_stats(&mach_ok, &nir_fb);
     ny_native_mach_encode_fallback_detail(fallback_detail,
                                           sizeof(fallback_detail));
+    ny_native_mach_div_stats(&div_magic, &div_idiv);
     ny_native_mach_regalloc_stats(&ra_segments, &ra_colored, &ra_spilled,
                                   &ra_reloads, &ra_peak_live);
     ny_native_mach_fpr_stats(&fp_segments, &fp_colored, &fp_spilled,
@@ -729,6 +737,8 @@ bool ny_native_write_tier_report_for_program(const program_t *prog,
             "mach_encode mach_functions=%llu nir_fallback_functions=%llu "
             "first_fallback=%s\n",
             mach_ok, nir_fb, fallback_detail);
+    fprintf(out, "mach_div_encoding magic=%llu idiv=%llu\n",
+            div_magic, div_idiv);
     fprintf(out,
             "mach_regalloc segments=%llu colored=%llu spilled=%llu "
             "reloads=%llu peak_live=%llu\n",

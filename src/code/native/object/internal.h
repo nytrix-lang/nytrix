@@ -14,6 +14,8 @@ typedef struct {
 #define NY_RELOC_PC32 1
 #define NY_RELOC_PLT32 2
 #define NY_RELOC_AARCH64_CALL26 3
+#define NY_RELOC_AARCH64_ADR_PREL_PG_HI21 4
+#define NY_RELOC_AARCH64_ADD_ABS_LO12_NC 5
 
 /* A single straight-line Nytrix function can legitimately contain hundreds
  * of calls. Keep the program-level relocation transport larger than the
@@ -25,6 +27,10 @@ typedef struct {
 void ny_native_mach_encode_stats(unsigned long long *mach_ok,
                                 unsigned long long *nir_fallback);
 void ny_native_mach_encode_fallback_detail(char *out, size_t out_len);
+/* Scalar DIV/MOD encodings selected by the x64 machine object encoder. */
+void ny_native_mach_div_record(bool magic);
+void ny_native_mach_div_stats(unsigned long long *magic,
+                              unsigned long long *idiv);
 void ny_native_mach_regalloc_record(size_t segments, size_t colored,
                                     size_t spilled, size_t reloads,
                                     size_t peak_live);
@@ -77,7 +83,34 @@ bool ny_mach_regalloc_build_class(const ny_mach_func_t *mach,
 typedef struct { int64_t label; size_t off; } ny_x64_obj_label_t;
 typedef struct { int64_t label; size_t disp_off; } ny_x64_obj_patch_t;
 typedef struct { char symbol[256]; size_t disp_off; int type; } ny_x64_obj_reloc_t;
-typedef struct { char name[256]; size_t off; size_t size; } ny_x64_obj_symbol_def_t;
+typedef struct {
+  char name[256];
+  size_t off;
+  size_t size;
+  bool is_data;
+} ny_x64_obj_symbol_def_t;
+
+typedef struct {
+  size_t def_index;
+  size_t offset;
+  const char *file;
+  uint32_t line;
+  uint32_t column;
+} ny_native_debug_line_t;
+
+/* Append one source-map record, growing the caller-owned vector safely. */
+bool ny_native_debug_line_append(ny_native_debug_line_t **lines,
+                                 size_t *count, size_t *cap,
+                                 ny_native_debug_line_t line);
+
+bool ny_native_build_debug_line(
+    const ny_native_debug_line_t *lines, size_t line_count, size_t text_len,
+    ny_obj_buf_t *out, size_t *base_reloc_offset, size_t *base_def_index,
+    char *err, size_t err_len);
+bool ny_native_globaltab_append_defs(ny_obj_buf_t *code,
+                                     ny_x64_obj_symbol_def_t *defs,
+                                     size_t *def_count, char *err,
+                                     size_t err_len);
 typedef struct { const nyir_inst_t **defs; int count; } ny_x64_obj_valmap_t;
 
 /* Append interned pure-native C strings into the code blob as local defs. */
@@ -109,9 +142,11 @@ typedef struct {
   int8_t *value_reg, *value_xmm;
   int *value_spill;
   int callee_save_slot[16];
-  ny_x64_obj_label_t labels[1024]; size_t label_count;
-  ny_x64_obj_patch_t patches[1024]; size_t patch_count;
-  ny_x64_obj_reloc_t relocs[NY_X64_OBJ_MAX_RELOCS]; size_t reloc_count;
+  int callee_save_xmm[16];
+  ny_x64_obj_label_t *labels; size_t label_count; size_t label_cap;
+  ny_x64_obj_patch_t *patches; size_t patch_count; size_t patch_cap;
+  ny_x64_obj_reloc_t *relocs; size_t reloc_count; size_t reloc_cap;
+  size_t *inst_offsets;
   char *err; size_t err_len;
 } ny_x64_obj_ctx_t;
 
@@ -128,7 +163,7 @@ typedef struct {
   ny_i386_obj_label_t labels[1024]; size_t label_count;
   ny_i386_obj_patch_t patches[1024]; size_t patch_count;
   size_t epilogue_patches[1024]; size_t epilogue_patch_count;
-  ny_i386_obj_reloc_t relocs[NY_X64_OBJ_MAX_RELOCS]; size_t reloc_count;
+  ny_i386_obj_reloc_t *relocs; size_t reloc_count; size_t reloc_cap;
   char *err; size_t err_len;
 } ny_i386_obj_ctx_t;
 
@@ -157,6 +192,8 @@ int ny_x64_obj_symbol_index(char symbols[][256], size_t count,
                             const char *name);
 int ny_x64_obj_def_index(const ny_x64_obj_symbol_def_t *defs, size_t count,
                          const char *name);
+bool ny_x64_mach_is_f64_operand(const ny_mach_func_t *mach,
+                                const ny_mach_operand_t *op);
 bool ny_x64_obj_collect_external_reloc_symbols(
     const ny_x64_obj_reloc_t *relocs, size_t reloc_count,
     const ny_x64_obj_symbol_def_t *defs, size_t def_count,
@@ -171,6 +208,13 @@ bool ny_x64_obj_append_function(
     ny_x64_obj_reloc_t *relocs, size_t *reloc_count,
     const nyir_func_t *nyir, const ny_native_target_info_t *target,
     const char *symbol, bool tag_return, char *err, size_t err_len);
+bool ny_x64_obj_append_function_debug(
+    ny_obj_buf_t *code, ny_x64_obj_symbol_def_t *defs, size_t *def_count,
+    ny_x64_obj_reloc_t *relocs, size_t *reloc_count,
+    const nyir_func_t *nyir, const ny_native_target_info_t *target,
+    const char *symbol, bool tag_return, const nyir_func_t *source,
+    ny_native_debug_line_t **debug_lines, size_t *debug_line_count,
+    size_t *debug_line_cap, char *err, size_t err_len);
 bool ny_x64_obj_build_bundle(
     const nyir_func_t *rt_main, const nyir_func_t *funcs,
     const char *const *func_names, size_t func_count,
@@ -180,7 +224,14 @@ bool ny_x64_obj_build_bundle(
     char *err, size_t err_len);
 
 /* Independence path: encode finalized machine form to bytes (no NYIR encoder). */
-#include "code/native/ir/machine.h"
+#include "code/ir/machine.h"
+bool ny_native_x64_build_mixed_bundle(
+    const nyir_func_t *rt_main, const nyir_func_t *funcs,
+    const char *const *func_names, size_t func_count,
+    const ny_native_target_info_t *target, const char *entry_symbol,
+    bool tag_return, ny_obj_buf_t *code, ny_x64_obj_symbol_def_t *defs,
+    size_t *def_count, ny_x64_obj_reloc_t *relocs, size_t *reloc_count,
+    char *err, size_t err_len);
 bool ny_x64_mach_build_bundle(
     const ny_mach_func_t *rt_main_mir, const ny_mach_func_t *func_mirs,
     const char *const *func_names, size_t func_count,
@@ -193,6 +244,13 @@ bool ny_x64_mach_append_function(
     ny_x64_obj_reloc_t *relocs, size_t *reloc_count,
     const ny_mach_func_t *mach, const ny_native_target_info_t *target,
     const char *symbol, bool tag_return, char *err, size_t err_len);
+bool ny_x64_mach_append_function_debug(
+    ny_obj_buf_t *code, ny_x64_obj_symbol_def_t *defs, size_t *def_count,
+    ny_x64_obj_reloc_t *relocs, size_t *reloc_count,
+    const ny_mach_func_t *mach, const ny_native_target_info_t *target,
+    const char *symbol, bool tag_return, const nyir_func_t *source,
+    ny_native_debug_line_t **debug_lines, size_t *debug_line_count,
+    size_t *debug_line_cap, char *err, size_t err_len);
 bool ny_x64_try_stencil_bundle(const nyir_func_t *rt_main,
                                const ny_native_target_info_t *target,
                                ny_obj_buf_t *code, ny_x64_obj_symbol_def_t *defs,

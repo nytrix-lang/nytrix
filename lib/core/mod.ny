@@ -21,7 +21,7 @@
 ;; Use aliases when a flat export surface would hide its owner, for example
 ;; `use std.core.str as str`. Recoverable failures are explicit values;
 ;; compiler diagnostics handle invalid Nytrix programs.
-module std.core(bool, init_str, load8, load16, load32, load64, load32_h, load64_h, load64_i, load32_f32, load64_f64, store8, store16, store32, store64, store32_h, store64_h, store64_i, store32_f32, store64_f64, memcpy, memset, memcmp, memchr, ptr_add, ptr_sub, addr_of, malloc, free, malloc_raw, free_raw, realloc, zalloc, list, vec2, vec3, vec4, bytes, bytes_get, bytes_set, Vector2, Vector3, Vector4, is_ptr, is_nil, is_none, is_int, is_nytrix_obj, is_list, is_dict, is_set, is_tuple, is_range, is_str, is_bytes, is_float, to_int, from_int, is_kwargs, __kwarg, kwarg, get_kwarg_key, get_kwarg_val, len, clone, load_item, store_item, swap, swapped, get, set_idx, index_read, slice, put, delete, clear, append, pop, extend, sort, sorted, replace, join, to_str, str, dict, dict_has, dict_del, dict_get, dict_set, dict_pop, dict_popitem, dict_setdefault, dict_clone, dict_merge, dict_items, dict_keys, dict_values, dict_clear, items, keys, values, set, contains, startswith, endswith, type, type_shape, is_shape, require_shape, assert_shape, hash, repr, debug_print_val, debug_print, breakpoint, print_history_drain, print_history_clear, print_to_stdout, add, sub, mul, div, mod, pow, band, bor, bxor, bshl, bshr, bnot, eq, ne, lt, le, gt, ge, argc, argv, __argv, envc, envp, errno, atoi, globals, set_globals, OS, ARCH, IS_LINUX, IS_MACOS, IS_WINDOWS, IS_X86_64, IS_AARCH64, IS_ARM, is_truthy, is_falsy, not_none, min, max, sqrt, abs, round, divmod, ok, err, is_ok, is_err, unwrap, unwrap_or, panic, panic_if, assert, assert_eq, print, eprint, chr, retain, rc_count, _pow2, _clone_list, mapcat, flatten, map, filter, take, drop, reverse, range, range2, reduce, sum, each, count, count_if, first, last, compact, chunk, windowed, Counter, counter, counter_add, counter_inc, counter_update, count_by, most_common, group_by, default_get, Queue, queue, queue_push, queue_pop, queue_try_pop, queue_peek, queue_len, queue_empty, queue_clear, Channel, channel, chan, chan_send, chan_try_send, chan_recv, chan_try_recv, chan_close, chan_closed, chan_len)
+module std.core(bool, init_str, load8, load16, load32, load64, load32_h, load64_h, load64_i, load32_f32, load64_f64, store8, store16, store32, store64, store32_h, store64_h, store64_i, store32_f32, store64_f64, memcpy, memset, memcmp, memchr, ptr_add, ptr_sub, addr_of, malloc, free, malloc_raw, free_raw, realloc, zalloc, release, list, vec2, vec3, vec4, bytes, bytes_get, bytes_set, Vector2, Vector3, Vector4, is_ptr, is_nil, is_none, is_int, is_nytrix_obj, is_list, is_dict, is_set, is_tuple, is_range, is_str, is_bytes, is_float, to_int, from_int, is_kwargs, __kwarg, kwarg, get_kwarg_key, get_kwarg_val, len, clone, load_item, store_item, swap, swapped, get, set_idx, index_read, slice, put, delete, clear, append, pop, extend, sort, sorted, replace, join, to_str, str, dict, dict_has, dict_del, dict_get, dict_set, dict_pop, dict_popitem, dict_setdefault, dict_clone, dict_merge, dict_items, dict_keys, dict_values, dict_clear, items, keys, values, set, contains, startswith, endswith, type, type_shape, is_shape, require_shape, assert_shape, hash, repr, debug_print_val, debug_print, breakpoint, print_history_drain, print_history_clear, print_to_stdout, add, sub, mul, div, mod, pow, band, bor, bxor, bshl, bshr, bnot, eq, ne, lt, le, gt, ge, argc, argv, __argv, envc, envp, errno, atoi, globals, set_globals, OS, ARCH, IS_LINUX, IS_MACOS, IS_WINDOWS, IS_X86_64, IS_AARCH64, IS_ARM, is_truthy, is_falsy, not_none, min, max, sqrt, abs, round, divmod, ok, err, is_ok, is_err, unwrap, unwrap_or, panic, panic_if, assert, assert_eq, print, eprint, chr, retain, rc_count, _pow2, _core_bigint_to_bytes, _clone_list, mapcat, flatten, map, filter, take, drop, reverse, range, range2, reduce, sum, each, count, count_if, first, last, compact, chunk, windowed, Counter, counter, counter_add, counter_inc, counter_update, count_by, most_common, group_by, default_get, Queue, queue, queue_push, queue_pop, queue_try_pop, queue_peek, queue_len, queue_empty, queue_clear, Channel, channel, chan, chan_send, chan_try_send, chan_recv, chan_try_recv, chan_close, chan_closed, chan_len)
 use std.core.primitives
 use std.core.reflect as core_ref
 use std.core.dict_mod
@@ -180,7 +180,7 @@ fn values(any x) list {
 
 fn set(any obj=8, any key=nil, any val=nil) any {
    "Creates a set with set()/set(cap), or stores val with obj.set(key, val)."
-   if key == nil && val == nil && is_int(obj) { return core_set.set(obj) }
+   if key == nil && val == nil { return core_set._set_new(obj) }
    core_ref.set(obj, key, val)
 }
 
@@ -211,7 +211,7 @@ fn replace(any x, any old, any new) any {
       mut i = 0
       def n = out.len
       while i < n {
-         if eq(out.get(i, 0), old) { out[i] = new }
+         if eq(out[i], old) { out[i] = new }
          i += 1
       }
       return out
@@ -526,7 +526,7 @@ fn print(...args) int {
    mut line = ""
    mut wrote = false
    while i < n {
-      def v = args.get(i)
+      def v = args[i]
       if !is_none(v) {
          def s = to_str(v)
          if print_to_stdout {
@@ -557,7 +557,7 @@ fn eprint(...args) int {
    def n = args.len
    mut line = ""
    while i < n {
-      def s = to_str(args.get(i))
+      def s = to_str(args[i])
       _eprint_raw(s)
       line = (i > 0) ? (line + " " + s) : s
       if i < n - 1 { _eprint_raw(" ") }
@@ -737,13 +737,13 @@ fn memchr(any p, int c, int n) any {
 @jit
 fn ptr_add(any p, int n) any {
    "Returns address `p + n`."
-   __add(p, n)
+   __ptr_add(p, n)
 }
 
 @jit
 fn ptr_sub(any p, int n) any {
    "Returns address `p - n`."
-   __sub(p, n)
+   __ptr_sub(p, n)
 }
 
 @returns_owned
@@ -760,7 +760,7 @@ fn free(...ptrs) any {
    }
    mut i = 0
    while i < ptrs.len {
-      def p = ptrs.get(i)
+      def p = ptrs[i]
       if p { __free(p) }
       i += 1
    }
@@ -807,7 +807,7 @@ fn own(any x) any {
 fn release(any x) int {
    "Ownership mode helper: drop `x` now and disable later automatic cleanup."
    __drop_owned(x)
-   0
+   return 0
 }
 
 @consumes(x)
@@ -837,14 +837,14 @@ fn bytes(int n) bytes {
    if n < 0 { n = 0 }
    def p = bytes_new_raw(n)
    if !p { panic("bytes allocation failed") }
-   p
+   return p
 }
 
-fn bytes_get(bytes b, int i) int {
-   "Returns byte at index `i`, or 0 for invalid access."
-   if !is_bytes(b) { return 0 }
-   if i < 0 || i >= b.len { return 0 }
-   load8(b, i)
+fn bytes_get(bytes b, int i, int fallback=0) int {
+   "Returns byte at index `i`, or fallback for invalid access."
+   if !is_bytes(b) { return fallback }
+   if i < 0 || i >= b.len { return fallback }
+   return load8(b, i)
 }
 
 @borrows(b)
@@ -854,7 +854,7 @@ fn bytes_set(bytes b, int i, int v) bytes {
    if !is_bytes(b) { return b }
    if i < 0 || i >= b.len { return b }
    store8(b, v, i)
-   b
+   return b
 }
 
 @returns_owned
@@ -865,58 +865,74 @@ fn list(int cap=8) list {
    p
 }
 
-comptime template _core_ref_ctor2(name){ fn ${name}(x=0, y=nil) { core_ref.${name}(x, y) } }
+comptime template _core_ref_ctor2(name){ fn ${name}(x=0, y=nil) any { core_ref.${name}(x, y) } }
 
-comptime template _core_ref_ctor3(name){ fn ${name}(x=0, y=nil, z=nil) { core_ref.${name}(x, y, z) } }
+comptime template _core_ref_ctor3(name){ fn ${name}(x=0, y=nil, z=nil) any { core_ref.${name}(x, y, z) } }
 
-comptime template _core_ref_ctor4(name){ fn ${name}(x=0, y=nil, z=nil, w=nil) { core_ref.${name}(x, y, z, w) } }
+comptime template _core_ref_ctor4(name){ fn ${name}(x=0, y=nil, z=nil, w=nil) any { core_ref.${name}(x, y, z, w) } }
 
-comptime emit _core_ref_ctor2(Vector2)
-comptime emit _core_ref_ctor3(Vector3)
-comptime emit _core_ref_ctor4(Vector4)
-comptime emit _core_ref_ctor2(vec2)
-comptime emit _core_ref_ctor3(vec3)
-comptime emit _core_ref_ctor4(vec4)
+;; Keep these forwarding declarations explicit so module ownership survives
+;; stdlib collection. Comptime-generated same-name declarations can be
+;; coalesced with another imported vector provider, losing the dynamic return
+;; ABI for zero-valued constructors.
+fn _core_vector(int n, any x, any y=0, any z=0, any w=0) any {
+   mut out = dict(8)
+   out = dict_set(out, "__type", case n { 2 -> "vec2" 4 -> "vec4" _ -> "vec3" })
+   out = dict_set(out, "x", x)
+   out = dict_set(out, "y", y)
+   if n >= 3 { out = dict_set(out, "z", z) }
+   if n >= 4 { out = dict_set(out, "w", w) }
+   out
+}
+fn Vector2(any x=0, any y=nil) any { _core_vector(2, x, y == nil ? 0 : y) }
+fn Vector3(any x=0, any y=nil, any z=nil) any {
+   _core_vector(3, x, y == nil ? 0 : y, z == nil ? 0 : z)
+}
+fn Vector4(any x=0, any y=nil, any z=nil, any w=nil) any {
+   _core_vector(4, x, y == nil ? 0 : y, z == nil ? 0 : z, w == nil ? 0 : w)
+}
+fn vec2(any x=0, any y=nil) any { Vector2(x, y) }
+fn vec3(any x=0, any y=nil, any z=nil) any { Vector3(x, y, z) }
+fn vec4(any x=0, any y=nil, any z=nil, any w=nil) any { Vector4(x, y, z, w) }
 
 fn is_nytrix_obj(any x) bool {
    "Returns **true** if `x` is a Nytrix-managed heap object."
-   __is_ny_obj(x)
-}
-
-comptime template _core_tag_pred(name, tag){
-   @jit
-   fn ${name}(any x) bool { _core_has_tag(x, ${tag}) }
+   return __is_ny_obj(x)
 }
 
 @inline
 fn _core_has_tag(any x, any tag) bool {
-   def got = __tagof(x)
-   got == tag || got == __tag(tag)
+   return __has_tag(x, tag)
 }
 
-def _CORE_TAG_LIST = runtime_tag_raw("list")
-def _CORE_TAG_DICT = runtime_tag_raw("dict")
-def _CORE_TAG_SET = runtime_tag_raw("set")
-def _CORE_TAG_TUPLE = runtime_tag_raw("tuple")
-def _CORE_TAG_RANGE = runtime_tag_raw("range")
-def _CORE_TAG_BYTES = runtime_tag_raw("bytes")
-comptime emit _core_tag_pred(is_list, _CORE_TAG_LIST)
-comptime emit _core_tag_pred(is_dict, _CORE_TAG_DICT)
-comptime emit _core_tag_pred(is_set, _CORE_TAG_SET)
-comptime emit _core_tag_pred(is_tuple, _CORE_TAG_TUPLE)
-comptime emit _core_tag_pred(is_range, _CORE_TAG_RANGE)
-comptime emit _core_tag_pred(is_bytes, _CORE_TAG_BYTES)
+;; Template interpolation emits token text. Quote the tag at the generated
+;; call site so a comptime string argument remains a Ny string literal rather
+;; than becoming an unresolved identifier (for example, `tuple`).
+comptime template _core_tag_pred(name, tag){
+   @jit
+   fn ${name}(any x) bool { return _core_has_tag(x, runtime_tag_raw("${tag}")) }
+}
+
+;; Keep the tag expression in each generated predicate.  Capturing these in
+;; top-level values made the native JIT read them before module initialization,
+;; so otherwise-valid heap objects were misclassified as every container type.
+comptime emit _core_tag_pred(is_list, "list")
+comptime emit _core_tag_pred(is_dict, "dict")
+comptime emit _core_tag_pred(is_set, "set")
+comptime emit _core_tag_pred(is_tuple, "tuple")
+comptime emit _core_tag_pred(is_range, "range")
+comptime emit _core_tag_pred(is_bytes, "bytes")
 
 @jit
 fn is_str(any x) bool {
    "Returns **true** if `x` is a string."
-   __is_str_obj(x)
+   return __is_str_obj(x)
 }
 
 @jit
 fn is_float(any x) bool {
    "Returns **true** if `x` is a float object."
-   __is_float_obj(x)
+   return __is_float_obj(x)
 }
 
 @inline
@@ -939,15 +955,20 @@ fn to_str(any v) str {
 }
 
 @inline
-fn _core_bytes_like_len(any x) int { load64(x, -16) }
+fn _core_bytes_like_len(any x) int {
+   if is_str(x) { return __str_len(x) }
+   if is_bytes(x) { return len(x) }
+   if is_list(x) { return len(x) }
+   0
+}
 
 @returns_owned
 fn _core_bytes_like_to_list(any x) list<int> {
    def n = _core_bytes_like_len(x)
-   mut out = list(n)
+   mut out = []
    mut i = 0
    while i < n {
-      out[i] = load8(x, i) & 255
+      out = append(out, load8(x, i) & 255)
       i += 1
    }
    out
@@ -966,18 +987,15 @@ fn _core_hex_nibble(int c) int {
 fn _core_unhex(str hex) list<int> {
    def n = _core_bytes_like_len(hex)
    if n <= 0 { return [] }
-   def out_len = (n + 1) / 2
-   mut out = list(out_len)
-   mut i, oi = 0, 0
+   mut out = []
+   mut i = 0
    if (n % 2) == 1 {
-      out[oi] = _core_hex_nibble(load8(hex, 0))
-      oi += 1
+      out = append(out, _core_hex_nibble(load8(hex, 0)))
       i = 1
    }
    while i < n {
       def hi, lo = _core_hex_nibble(load8(hex, i)), _core_hex_nibble(load8(hex, i + 1))
-      out[oi] = (hi << 4) | lo
-      oi += 1
+      out = append(out, (hi << 4) | lo)
       i += 2
    }
    out
@@ -1112,7 +1130,9 @@ fn len(any x) int {
    "Returns the number of elements in a collection or the length of a string."
    if is_list(x) || is_set(x) || is_tuple(x) { return __load64_idx(x, 0) }
    if is_dict(x) { return core_ref.len(x) }
-   if is_str(x) || is_bytes(x) { return __load64_idx(x, -16) }
+   ; Length metadata is tagged in managed objects. Reading it as raw scalar
+   ; leaks the encoding for statically typed str/bytes receivers.
+   if is_str(x) || is_bytes(x) { return core_ref.len(x) }
    core_ref.len(x)
 }
 
@@ -1149,55 +1169,55 @@ impl any {
       core_ref.len(self)
    }
    @inline
-   fn get(any self, any key, any default=0) any { core_ref.get(self, key, default) }
+   fn get(any self, any key, any default=0) any { return core_ref.get(self, key, default) }
    @inline
-   fn set(any self, any key, any val) any { core_ref.set(self, key, val) }
+   fn set(any self, any key, any val) any { return core_ref.set(self, key, val) }
    @inline
-   fn put(any self, any key, any val) any { core_ref.set(self, key, val) }
+   fn put(any self, any key, any val) any { return core_ref.set(self, key, val) }
    @inline
    fn add(any self, any val) any {
       if is_set(self) { return _set_add(self, val) }
       if is_list(self) { return core_ref.append(self, val) }
-      core_ref.add(self, val)
+      return core_ref.add(self, val)
    }
    @inline
    fn append(any self, any val) any { return core_ref.append(self, val) }
    @inline
-   fn pop(any self) any { core_ref.pop(self) }
+   fn pop(any self) any { return core_ref.pop(self) }
    @inline
    fn extend(any self, any other) any { return core_ref.extend(self, other) }
    @inline
-   fn contains(any self, any item) bool { core_ref.contains(self, item) }
+   fn contains(any self, any item) bool { return core_ref.contains(self, item) }
    @inline
-   fn slice(any self, int start, any stop, int step=1) any { core_ref.slice(self, start, stop, step) }
+   fn slice(any self, int start, any stop, int step=1) any { return core_ref.slice(self, start, stop, step) }
    @inline
-   fn keys(any self) list { core_ref.keys(self) }
+   fn keys(any self) list { return core_ref.keys(self) }
    @inline
-   fn values(any self) list { core_ref.values(self) }
+   fn values(any self) list { return core_ref.values(self) }
    @inline
-   fn items(any self) list { core_ref.items(self) }
+   fn items(any self) list { return core_ref.items(self) }
    @inline
-   fn merge(any self, any other) any { dict_merge(self, other) }
+   fn merge(any self, any other) any { return dict_merge(self, other) }
    @inline
-   fn map(any self, fnptr f) any { core_iter.map(self, f) }
+   fn map(any self, fnptr f) any { return core_iter.map(self, f) }
    @inline
-   fn filter(any self, fnptr pred) any { core_iter.filter(self, pred) }
+   fn filter(any self, fnptr pred) any { return core_iter.filter(self, pred) }
    @inline
-   fn reduce(any self, any init, fnptr f) any { core_iter.reduce(self, init, f) }
+   fn reduce(any self, any init, fnptr f) any { return core_iter.reduce(self, init, f) }
    @inline
-   fn each(any self, fnptr f) any { core_iter.each(self, f) }
+   fn each(any self, fnptr f) any { return core_iter.each(self, f) }
    @inline
-   fn count(any self) int { core_iter.count(self) }
+   fn count(any self) int { return core_iter.count(self) }
    @inline
-   fn count_if(any self, fnptr pred) int { core_iter.count_if(self, pred) }
+   fn count_if(any self, fnptr pred) int { return core_iter.count_if(self, pred) }
    @inline
-   fn first(any self, any default=0) any { core_iter.first(self, default) }
+   fn first(any self, any default=0) any { return core_iter.first(self, default) }
    @inline
-   fn last(any self, any default=0) any { core_iter.last(self, default) }
+   fn last(any self, any default=0) any { return core_iter.last(self, default) }
    @inline
-   fn take(any self, int n) any { core_iter.take(self, n) }
+   fn take(any self, int n) any { return core_iter.take(self, n) }
    @inline
-   fn drop(any self, int n) any { core_iter.drop(self, n) }
+   fn drop(any self, int n) any { return core_iter.drop(self, n) }
    @inline
    fn reverse(any self) any { core_iter.reverse(self) }
    @inline
@@ -1222,6 +1242,7 @@ impl any {
          store64(self, 0, 0)
          return self
       }
+      if is_str(self) { return "" }
       self
    }
 }
@@ -1235,247 +1256,245 @@ impl bigint {
 
 impl str {
    @inline
-   fn long(str self) bigint { __long(self) }
+   fn long(str self) bigint { return __long(self) }
    @inline
-   fn to_bytes(str self) list<int> { _core_bytes_like_to_list(self) }
+   fn to_bytes(str self) list<int> { return _core_bytes_like_to_list(self) }
    @inline
-   fn as_bytes(str self) list<int> { _core_bytes_like_to_list(self) }
+   fn as_bytes(str self) list<int> { return _core_bytes_like_to_list(self) }
    @inline
-   fn unhex(str self) list<int> { _core_unhex(self) }
+   fn unhex(str self) list<int> { return _core_unhex(self) }
    @inline
-   fn len(str self) int { core_ref.len(self) }
+   fn len(str self) int { return __str_len(self) }
    @inline
-   fn get(str self, any key, any default=0) any { core_ref.get(self, key, default) }
+   fn get(str self, any key, any default=0) any { return core_ref.get(self, key, default) }
    @inline
-   fn contains(str self, any item) bool { core_ref.contains(self, item) }
+   fn slice(str self, int start, any stop, int step=1) any { return core_ref.slice(self, start, stop, step) }
    @inline
-   fn slice(str self, int start, any stop, int step=1) any { core_ref.slice(self, start, stop, step) }
+   fn map(str self, fnptr f) any { return core_iter.map(self, f) }
    @inline
-   fn map(str self, fnptr f) any { core_iter.map(self, f) }
+   fn filter(str self, fnptr pred) any { return core_iter.filter(self, pred) }
    @inline
-   fn filter(str self, fnptr pred) any { core_iter.filter(self, pred) }
+   fn reduce(str self, any init, fnptr f) any { return core_iter.reduce(self, init, f) }
    @inline
-   fn reduce(str self, any init, fnptr f) any { core_iter.reduce(self, init, f) }
+   fn each(str self, fnptr f) any { return core_iter.each(self, f) }
    @inline
-   fn each(str self, fnptr f) any { core_iter.each(self, f) }
+   fn count(str self) int { return core_iter.count(self) }
    @inline
-   fn count(str self) int { core_iter.count(self) }
+   fn count_if(str self, fnptr pred) int { return core_iter.count_if(self, pred) }
    @inline
-   fn count_if(str self, fnptr pred) int { core_iter.count_if(self, pred) }
+   fn first(str self, any default=0) any { return core_iter.first(self, default) }
    @inline
-   fn first(str self, any default=0) any { core_iter.first(self, default) }
+   fn last(str self, any default=0) any { return core_iter.last(self, default) }
    @inline
-   fn last(str self, any default=0) any { core_iter.last(self, default) }
+   fn take(str self, int n) any { return core_iter.take(self, n) }
    @inline
-   fn take(str self, int n) any { core_iter.take(self, n) }
+   fn drop(str self, int n) any { return core_iter.drop(self, n) }
    @inline
-   fn drop(str self, int n) any { core_iter.drop(self, n) }
+   fn reverse(str self) any { return core_iter.reverse(self) }
    @inline
-   fn reverse(str self) any { core_iter.reverse(self) }
+   fn chunk(str self, int size) list { return core_iter.chunk(self, size) }
    @inline
-   fn chunk(str self, int size) list { core_iter.chunk(self, size) }
-   @inline
-   fn windowed(str self, int size, int step=1) list { core_iter.windowed(self, size, step) }
+   fn windowed(str self, int size, int step=1) list { return core_iter.windowed(self, size, step) }
 }
 
 impl dict {
    @inline
-   fn len(dict self) int { core_ref.len(self) }
+   fn len(dict self) int { return core_ref.len(self) }
    @inline
-   fn clone(dict self) dict { dict_clone(self) }
+   fn clone(dict self) dict { return dict_clone(self) }
    @inline
-   fn get(dict self, any key, any default=0) any { core_ref.get(self, key, default) }
+   fn get(dict self, any key, any default=0) any { return core_ref.get(self, key, default) }
    @inline
-   fn set(dict self, any key, any val) dict { core_ref.set(self, key, val) }
+   fn set(dict self, any key, any val) dict { return core_ref.set(self, key, val) }
    @inline
-   fn put(dict self, any key, any val) dict { core_ref.set(self, key, val) }
+   fn put(dict self, any key, any val) dict { return core_ref.set(self, key, val) }
    @inline
-   fn contains(dict self, any key) bool { dict_exists(self, key) }
+   fn contains(dict self, any key) bool { return dict_exists(self, key) }
    @inline
-   fn delete(dict self, any key) dict { dict_remove(self, key) }
+   fn delete(dict self, any key) dict { return dict_remove(self, key) }
    @inline
-   fn clear(dict self) dict { dict_clear(self) }
+   fn clear(dict self) dict { return dict_clear(self) }
    @inline
-   fn keys(dict self) list { dict_keys(self) }
+   fn keys(dict self) list { return dict_keys(self) }
    @inline
-   fn values(dict self) list { dict_values(self) }
+   fn values(dict self) list { return dict_values(self) }
    @inline
-   fn items(dict self) list { dict_items(self) }
+   fn items(dict self) list { return dict_items(self) }
    @inline
-   fn merge(dict self, dict other) dict { dict_merge(self, other) }
+   fn merge(dict self, dict other) dict { return dict_merge(self, other) }
 }
 
 impl list {
    @inline
-   fn long(list self) bigint { __long(self) }
+   fn long(list self) bigint { return __long(self) }
    @inline
-   fn to_bytes(list self) list { self }
+   fn to_bytes(list self) list { return self }
    @inline
-   fn as_bytes(list self) list { self }
+   fn as_bytes(list self) list { return self }
    @inline
-   fn bytes(list self) list { self }
+   fn bytes(list self) list { return self }
    @inline
-   fn len(list self) int { core_ref.len(self) }
+   fn len(list self) int { return core_ref.len(self) }
    @inline
    fn get(list self, any key, any default=0) any {
       if __is_int(key) {
          mut k = key
          def n = __load64_idx(self, 0)
-         if __lt(k, 0) { k = __add(k, n) }
-         if __lt(k, 0) || __ge(k, n) { return default }
+         if k < 0 { k = k + n }
+         if k < 0 || k >= n { return default }
          return __load_item(self, k)
       }
-      core_ref.get(self, key, default)
+      return core_ref.get(self, key, default)
    }
    @inline
-   fn set(list self, any key, any val) list { core_ref.set(self, key, val) }
+   fn set(list self, any key, any val) list { return core_ref.set(self, key, val) }
    @inline
-   fn put(list self, any key, any val) list { core_ref.set(self, key, val) }
+   fn put(list self, any key, any val) list { return core_ref.set(self, key, val) }
    @inline
    fn add(list self, any val) list { return core_ref.append(self, val) }
    @inline
    fn append(list self, any val) list { return core_ref.append(self, val) }
    @inline
-   fn pop(list self) any { core_ref.pop(self) }
+   fn pop(list self) any { return core_ref.pop(self) }
    @inline
    fn extend(list self, any other) list { return core_ref.extend(self, other) }
    @inline
    fn clear(list self) list {
       store64(self, 0, 0)
-      self
+      return self
    }
    @inline
-   fn contains(list self, any item) bool { core_ref.contains(self, item) }
+   fn contains(list self, any item) bool { return core_ref.contains(self, item) }
    @inline
-   fn join(list self, str sep="") str { core_str.join(self, sep) }
+   fn join(list self, str sep="") str { return core_str.join(self, sep) }
    @inline
-   fn slice(list self, int start, any stop, int step=1) any { core_ref.slice(self, start, stop, step) }
+   fn slice(list self, int start, any stop, int step=1) any { return core_ref.slice(self, start, stop, step) }
    @inline
-   fn map(list self, fnptr f) any { core_iter.map(self, f) }
+   fn map(list self, fnptr f) any { return core_iter.map(self, f) }
    @inline
-   fn filter(list self, fnptr pred) any { core_iter.filter(self, pred) }
+   fn filter(list self, fnptr pred) any { return core_iter.filter(self, pred) }
    @inline
-   fn reduce(list self, any init, fnptr f) any { core_iter.reduce(self, init, f) }
+   fn reduce(list self, any init, fnptr f) any { return core_iter.reduce(self, init, f) }
    @inline
-   fn each(list self, fnptr f) any { core_iter.each(self, f) }
+   fn each(list self, fnptr f) any { return core_iter.each(self, f) }
    @inline
-   fn count(list self) int { core_iter.count(self) }
+   fn count(list self) int { return core_iter.count(self) }
    @inline
-   fn count_if(list self, fnptr pred) int { core_iter.count_if(self, pred) }
+   fn count_if(list self, fnptr pred) int { return core_iter.count_if(self, pred) }
    @inline
-   fn first(list self, any default=0) any { core_iter.first(self, default) }
+   fn first(list self, any default=0) any { return core_iter.first(self, default) }
    @inline
-   fn last(list self, any default=0) any { core_iter.last(self, default) }
+   fn last(list self, any default=0) any { return core_iter.last(self, default) }
    @inline
-   fn take(list self, int n) any { core_iter.take(self, n) }
+   fn take(list self, int n) any { return core_iter.take(self, n) }
    @inline
-   fn drop(list self, int n) any { core_iter.drop(self, n) }
+   fn drop(list self, int n) any { return core_iter.drop(self, n) }
    @inline
-   fn reverse(list self) any { core_iter.reverse(self) }
+   fn reverse(list self) any { return core_iter.reverse(self) }
    @inline
-   fn compact(list self) list { core_iter.compact(self) }
+   fn compact(list self) list { return core_iter.compact(self) }
    @inline
-   fn chunk(list self, int size) list { core_iter.chunk(self, size) }
+   fn chunk(list self, int size) list { return core_iter.chunk(self, size) }
    @inline
-   fn windowed(list self, int size, int step=1) list { core_iter.windowed(self, size, step) }
+   fn windowed(list self, int size, int step=1) list { return core_iter.windowed(self, size, step) }
 }
 
 impl tuple {
    @inline
-   fn len(tuple self) int { core_ref.len(self) }
+   fn len(tuple self) int { return core_ref.len(self) }
    @inline
-   fn get(tuple self, any key, any default=0) any { core_ref.get(self, key, default) }
+   fn get(tuple self, any key, any default=0) any { return core_ref.get(self, key, default) }
    @inline
-   fn contains(tuple self, any item) bool { core_ref.contains(self, item) }
+   fn contains(tuple self, any item) bool { return core_ref.contains(self, item) }
    @inline
-   fn map(tuple self, fnptr f) any { core_iter.map(self, f) }
+   fn map(tuple self, fnptr f) any { return core_iter.map(self, f) }
    @inline
-   fn filter(tuple self, fnptr pred) any { core_iter.filter(self, pred) }
+   fn filter(tuple self, fnptr pred) any { return core_iter.filter(self, pred) }
    @inline
-   fn reduce(tuple self, any init, fnptr f) any { core_iter.reduce(self, init, f) }
+   fn reduce(tuple self, any init, fnptr f) any { return core_iter.reduce(self, init, f) }
    @inline
-   fn count(tuple self) int { core_iter.count(self) }
+   fn count(tuple self) int { return core_iter.count(self) }
    @inline
-   fn count_if(tuple self, fnptr pred) int { core_iter.count_if(self, pred) }
+   fn count_if(tuple self, fnptr pred) int { return core_iter.count_if(self, pred) }
    @inline
-   fn first(tuple self, any default=0) any { core_iter.first(self, default) }
+   fn first(tuple self, any default=0) any { return core_iter.first(self, default) }
    @inline
-   fn last(tuple self, any default=0) any { core_iter.last(self, default) }
+   fn last(tuple self, any default=0) any { return core_iter.last(self, default) }
    @inline
-   fn take(tuple self, int n) any { core_iter.take(self, n) }
+   fn take(tuple self, int n) any { return core_iter.take(self, n) }
    @inline
-   fn drop(tuple self, int n) any { core_iter.drop(self, n) }
+   fn drop(tuple self, int n) any { return core_iter.drop(self, n) }
    @inline
-   fn reverse(tuple self) any { core_iter.reverse(self) }
+   fn reverse(tuple self) any { return core_iter.reverse(self) }
    @inline
-   fn compact(tuple self) list { core_iter.compact(self) }
+   fn compact(tuple self) list { return core_iter.compact(self) }
    @inline
-   fn chunk(tuple self, int size) list { core_iter.chunk(self, size) }
+   fn chunk(tuple self, int size) list { return core_iter.chunk(self, size) }
    @inline
-   fn windowed(tuple self, int size, int step=1) list { core_iter.windowed(self, size, step) }
+   fn windowed(tuple self, int size, int step=1) list { return core_iter.windowed(self, size, step) }
 }
 
 impl set {
    @inline
-   fn len(set self) int { core_ref.len(self) }
+   fn len(set self) int { return core_ref.len(self) }
    @inline
-   fn add(set self, any key) set { _set_add(self, key) }
+   fn add(set self, any key) set { return _set_add(self, key) }
    @inline
-   fn sub(set self, any key) set { _set_remove(self, key) }
+   fn sub(set self, any key) set { return _set_remove(self, key) }
    @inline
-   fn remove(set self, any key) set { _set_remove(self, key) }
+   fn remove(set self, any key) set { return _set_remove(self, key) }
    @inline
-   fn delete(set self, any key) set { _set_remove(self, key) }
+   fn delete(set self, any key) set { return _set_remove(self, key) }
    @inline
-   fn contains(set self, any key) bool { _set_contains(self, key) }
+   fn contains(set self, any key) bool { return _set_contains(self, key) }
    @inline
-   fn clear(set self) set { _set_clear(self) }
+   fn clear(set self) set { return _set_clear(self) }
    @inline
-   fn values(set self) list { _set_values(self) }
+   fn values(set self) list { return _set_values(self) }
 }
 
 impl bytes {
    @inline
-   fn long(bytes self) bigint { __long(self) }
+   fn long(bytes self) bigint { return __long(self) }
    @inline
-   fn to_list(bytes self) list<int> { _core_bytes_like_to_list(self) }
+   fn to_list(bytes self) list<int> { return _core_bytes_like_to_list(self) }
    @inline
-   fn to_bytes(bytes self) list<int> { _core_bytes_like_to_list(self) }
+   fn to_bytes(bytes self) list<int> { return _core_bytes_like_to_list(self) }
    @inline
-   fn as_bytes(bytes self) list<int> { _core_bytes_like_to_list(self) }
+   fn as_bytes(bytes self) list<int> { return _core_bytes_like_to_list(self) }
    @inline
-   fn bytes(bytes self) list<int> { _core_bytes_like_to_list(self) }
+   fn bytes(bytes self) list<int> { return _core_bytes_like_to_list(self) }
    @inline
-   fn len(bytes self) int { core_ref.len(self) }
+   fn len(bytes self) int { return __load64_idx(self, -16) >> 1 }
    @inline
-   fn get(bytes self, int key, any default=0) any { core_ref.get(self, key, default) }
-   @inline
-   @borrows(self)
-   @returns_borrow(self)
-   fn set(bytes self, int key, int val) bytes { bytes_set(self, key, val) }
+   fn get(bytes self, int key, any default=0) any { return bytes_get(self, key, default) }
    @inline
    @borrows(self)
    @returns_borrow(self)
-   fn put(bytes self, int key, int val) bytes { self.set(key, val) }
+   fn set(bytes self, int key, int val) bytes { return bytes_set(self, key, val) }
+   @inline
+   @borrows(self)
+   @returns_borrow(self)
+   fn put(bytes self, int key, int val) bytes { return bytes_set(self, key, val) }
 }
 
 impl range {
    @inline
-   fn len(range self) int { core_ref.len(self) }
+   fn len(range self) int { return core_ref.len(self) }
    @inline
-   fn get(range self, any key, any default=0) any { core_ref.get(self, key, default) }
+   fn get(range self, any key, any default=0) any { return core_ref.get(self, key, default) }
    @inline
-   fn keys(range self) list { core_ref.keys(self) }
+   fn keys(range self) list { return core_ref.keys(self) }
    @inline
-   fn values(range self) list { core_ref.values(self) }
+   fn values(range self) list { return core_ref.values(self) }
    @inline
-   fn items(range self) list { core_ref.items(self) }
+   fn items(range self) list { return core_ref.items(self) }
    @inline
-   fn map(range self, fnptr f) any { core_iter.map(self, f) }
+   fn map(range self, fnptr f) any { return core_iter.map(self, f) }
    @inline
-   fn filter(range self, fnptr pred) any { core_iter.filter(self, pred) }
+   fn filter(range self, fnptr pred) any { return core_iter.filter(self, pred) }
    @inline
-   fn reduce(range self, any init, fnptr f) any { core_iter.reduce(self, init, f) }
+   fn reduce(range self, any init, fnptr f) any { return core_iter.reduce(self, init, f) }
    @inline
    fn count(range self) int { core_iter.count(self) }
    @inline
@@ -1528,13 +1547,13 @@ fn clone(any x) any {
 @jit
 fn load_item(any lst, int i) any {
    "Loads the item at index `i` from list `lst`."
-   load64(lst, 16 + i * 8)
+   __load_item(lst, i)
 }
 
 @jit
 fn store_item(any lst, int i, any v) any {
    "Stores value `v` at index `i` in list `lst`."
-   store64(lst, v, 16 + i * 8) v
+   __store_item(lst, i, v) v
 }
 
 fn swap_items(any lst, int i, int j) any {
@@ -1598,10 +1617,9 @@ fn _sorted_list_copy(any xs) list {
    mut out = list(n)
    mut i = 0
    while i < n {
-      out[i] = xs.get(i)
+      out = append(out, xs[i])
       i += 1
    }
-   __store64_idx(out, 0, n)
    out
 }
 
@@ -1612,7 +1630,7 @@ fn _char_list_to_str(list chars) str {
    mut out = Builder(n + 8)
    mut i = 0
    while i < n {
-      out = builder_append(out, chars.get(i))
+      out = builder_append(out, chars[i])
       i += 1
    }
    def s = builder_to_str(out)

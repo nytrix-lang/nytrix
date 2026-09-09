@@ -134,7 +134,7 @@ static inline bool ny_symbol_path_char(int c) {
 bool ny_compiler_asserts_enabled(void);
 void ny_compiler_assert_fail(const char *file, int line, const char *func, const char *cond,
                              const char *fmt, ...);
-void ny_str_list_append(char ***list, size_t *len, size_t *cap, const char *str);
+bool ny_str_list_append(char ***list, size_t *len, size_t *cap, const char *str);
 void ny_str_list_free(char **list, size_t count);
 
 #define NY_FNV1A64_OFFSET_BASIS UINT64_C(14695981039346656037)
@@ -326,7 +326,7 @@ void ny_complexity_note(const char *file, int line, const char *func,
 
 const char *ny_src_root(void);
 const char *ny_default_cache_root_dir(void);
-char *ny_get_executable_path(void);
+const char *ny_get_executable_path(void);
 char *ny_get_executable_dir(void);
 
 void ny_print_snippet(const char *src, int line, int col, int len, const char *color);

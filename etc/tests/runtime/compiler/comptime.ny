@@ -175,11 +175,17 @@ layout CtReflectRecord {
    i32 a
    f64 b
    bool c
+   [u8, 8] payload
+   i32 tagged align(8) = 7
 }
 
 mut reflect_field_count = 0
 mut reflect_field_index_sum = 0
 mut reflect_field_type_hits = 0
+mut reflect_array_len = 0
+mut reflect_default_hits = 0
+mut reflect_default_text_hits = 0
+mut reflect_explicit_align = 0
 
 comptime fields(CtReflectRecord) as f {
    emit assert(__layout_offset("CtReflectRecord", f.name) == f.offset, "comptime fields offset")
@@ -188,11 +194,21 @@ comptime fields(CtReflectRecord) as f {
    emit if f.type == "i32" || f.type == "f64" || f.type == "bool" {
       reflect_field_type_hits += 1
    }
+   emit if f.is_array && f.array_len_known { reflect_array_len += f.array_len }
+   emit if f.has_default {
+      reflect_default_hits += 1
+      if f.default_src == "7" { reflect_default_text_hits += 1 }
+   }
+   emit if f.align > 0 { reflect_explicit_align += f.align }
 }
 
-assert(reflect_field_count == 3, "comptime fields count")
-assert(reflect_field_index_sum == 3, "comptime fields index sum")
-assert(reflect_field_type_hits == 3, "comptime fields type names")
+assert(reflect_field_count == 5, "comptime fields count")
+assert(reflect_field_index_sum == 10, "comptime fields index sum")
+assert(reflect_field_type_hits == 4, "comptime fields type names")
+assert(reflect_array_len == 8, "comptime fields array extent")
+assert(reflect_default_hits == 1, "comptime fields default metadata")
+assert(reflect_default_text_hits == 1, "comptime fields default source")
+assert(reflect_explicit_align == 8, "comptime fields explicit alignment")
 
 module CtReflectExports(alpha, beta){
    fn alpha() int { return 1 }

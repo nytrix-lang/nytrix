@@ -1,0 +1,14 @@
+shape list_capacity_is_not_length {
+  family "runtime-native"
+  generator "native"
+  features [native nyir x86_64 lists capacity]
+  template ny-test-case
+  flags "--native-only --native-backend=x86_64 -O3 --nyir-verify --native-result-oracle=0 --no-progress --color=never"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+
+def reserved = list(4)
+if reserved.len == 0 { 0 } else { 1 }
+NY
+}

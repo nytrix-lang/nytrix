@@ -2,7 +2,7 @@
 ;; Set construction, membership, mutation, and set algebra operations.
 ;; References:
 ;; - std.core
-module std.core.set_mod(set, add, sub, contains, len, clear, values, is_empty, _set_add, _set_remove, _set_contains, _set_len, _set_values, _set_clear)
+module std.core.set_mod(set, _set_new, add, sub, contains, len, clear, values, is_empty, _set_add, _set_remove, _set_contains, _set_len, _set_values, _set_clear)
 use std.core
 use std.core.primitives as prim
 
@@ -22,7 +22,6 @@ fn _set_key_eq(any a, any b) bool {
 
 @inline
 fn _set_hash(any x) int {
-   if is_int(x) { return x }
    if is_str(x) {
       mut h, i = 2166136261, 0
       def n = x.len
@@ -32,6 +31,7 @@ fn _set_hash(any x) int {
       }
       return h
    }
+   if is_int(x) { return x }
    return x
 }
 
@@ -75,14 +75,14 @@ fn _set_new(int cap) set {
       store64(p, 0, off + 16)
       i += 1
    }
-   p
+   return p
 }
 
 @inline
 @returns_owned
 fn set(int cap=8) set {
    "Creates a new empty set."
-   _set_new(cap)
+   return _set_new(cap)
 }
 
 @inline
@@ -265,32 +265,32 @@ fn _set_clear(any s) any {
 @returns_owned
 fn add(any s, any key) set {
    "Adds `key` to set `s`."
-   _set_add(s, key)
+   return _set_add(s, key)
 }
 
 @inline
 @returns_owned
 fn sub(any s, any key) any {
    "Removes `key` from set `s`."
-   _set_remove(s, key)
+   return _set_remove(s, key)
 }
 
 @inline
 fn contains(any s, any key) bool {
    "Returns true if `key` is in set `s`."
-   _set_contains(s, key)
+   return _set_contains(s, key)
 }
 
 @inline
 @returns_owned
 fn clear(any s) any {
    "Removes all elements from set `s`."
-   _set_clear(s)
+   return _set_clear(s)
 }
 
 @inline
 @returns_owned
 fn values(any s) list {
    "Returns the values of set `s` as a list."
-   _set_values(s)
+   return _set_values(s)
 }

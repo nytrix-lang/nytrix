@@ -3,10 +3,18 @@ shape nyir_target_extern_active_branch {
   generator "native"
   features [native nyir extern target conditional platform regression]
   template ny-test-case
-  flags_matrix "--host-triple=x86_64-unknown-linux-gnu --emit-object=/tmp/nytrix-target-extern-linux.o --native-only; --host-triple=x86_64-pc-windows-msvc --emit-object=/tmp/nytrix-target-extern-windows.obj --native-only"
+  flags_matrix "--host-triple=x86_64-unknown-linux-gnu --native-only -emit-only -o /tmp/nytrix-target-extern-linux.o; --host-triple=x86_64-pc-windows-msvc --native-only -emit-only -o /tmp/nytrix-target-extern-windows.obj"
   expect compile_and_run
   source ny <<'NY'
-use std.os.net.socket
-close_socket(-1)
+#windows {
+   extern "" {
+      fn _target_probe(i64 value) i64 as "rt_value_tag"
+   }
+} #else {
+   extern "" {
+      fn _target_probe(i64 value) i64 as "rt_len"
+   }
+} #endif
+0
 NY
 }

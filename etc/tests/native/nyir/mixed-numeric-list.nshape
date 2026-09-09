@@ -1,0 +1,16 @@
+shape mixed_numeric_list_descriptors {
+  family "runtime-native"
+  generator "native"
+  features [native nyir x86_64 lists dynamic float]
+  template ny-test-case
+  flags "--native-only --native-backend=x86_64 -O3 --nyir-verify --native-result-oracle=0 --no-progress --color=never"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+
+def values = [4, 4, 1.5]
+def first = values.get(0, 0)
+def third = float(values.get(2, 0.0))
+if first == 4 && third == 1.5 { 0 } else { 1 }
+NY
+}

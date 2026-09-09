@@ -19,7 +19,7 @@ def K = [0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1,
          0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2]
 
 ;; list of n zeros
-fn zeros(int n) list {
+fn zeros(int n) list<int> {
    mut r = []
    mut i = 0
    while i < n {
@@ -33,7 +33,7 @@ fn rotr(int x, int n) int {
    return ((x >> n) | (x << (32 - n))) & 0xFFFFFFFF
 }
 
-fn be32(list buf, int off) int {
+fn be32(list<int> buf, int off) int {
    return (((buf[off] & 0xFF) << 24) |
            ((buf[off + 1] & 0xFF) << 16) |
            ((buf[off + 2] & 0xFF) << 8) |
@@ -41,7 +41,7 @@ fn be32(list buf, int off) int {
 }
 
 ;; pad/w/hout are allocated once by the caller and reused.
-fn sha256(list msg, list pad, list w, list hout) {
+fn sha256(list<int> msg, list<int> pad, list<int> w, list<int> hout) {
    mut i = 0
    while i < 55 {
       pad[i] = msg[i]

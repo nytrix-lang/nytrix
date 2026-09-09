@@ -46,6 +46,7 @@
 #include <windows.h>
 #else
 #include <unistd.h>
+#include <dlfcn.h>
 #ifdef __APPLE__
 #include <mach/mach_time.h>
 #endif
@@ -65,6 +66,20 @@ extern int sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void *new
 
 typedef SSIZE_T ssize_t;
 #endif
+
+/* Resolve a symbol exported by the current process without making callers
+ * depend on POSIX dlfcn headers.  Windows builds use the executable module;
+ * POSIX builds preserve RTLD_DEFAULT semantics. */
+static inline void *ny_process_symbol(const char *name) {
+  if (!name || !*name)
+    return NULL;
+#ifdef _WIN32
+  HMODULE module = GetModuleHandleA(NULL);
+  return module ? (void *)GetProcAddress(module, name) : NULL;
+#else
+  return dlsym(RTLD_DEFAULT, name);
+#endif
+}
 static inline bool ny_size_add_ok(size_t a, size_t b, size_t *out) {
   if (b > SIZE_MAX - a)
     return false;

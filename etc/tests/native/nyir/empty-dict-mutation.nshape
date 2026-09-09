@@ -1,0 +1,13 @@
+shape empty_dict_is_mutable {
+  family "runtime-native"
+  generator "native"
+  features [native nyir x86_64 dictionaries mutation]
+  template ny-test-case
+  flags "--native-only --native-backend=x86_64 -O3 --nyir-verify --native-result-oracle=0 --no-progress --color=never"
+  expect compile_and_run
+  source ny <<'NY'
+mut values = {}
+values.set("answer", 1)
+if values.get("answer", 0) == 1 { 0 } else { 1 }
+NY
+}

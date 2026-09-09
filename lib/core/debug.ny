@@ -23,13 +23,13 @@ fn debug_print(...args) any {
    "Prints a detailed debug representation of one or more values."
    mut xs = args
    if args.len == 1 {
-      def first = args.get(0)
+      def first = args[0]
       if is_list(first) { xs = first }
    }
    def n = xs.len
    mut i = 0
    while i < n {
-      def v = xs.get(i)
+      def v = xs[i]
       debug_print_val(v)
       i += 1
    }

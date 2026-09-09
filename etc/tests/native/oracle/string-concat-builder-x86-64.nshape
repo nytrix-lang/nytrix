@@ -1,0 +1,41 @@
+shape oracle_string_concat_builder_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle string concat builder regression]
+  template ny-test-case
+  flags "--native-result-oracle=131072 -O3"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+
+; The native loop lowering promotes this private mutable literal to a
+; capacity-doubling builder.  The high trip count makes per-append exact-size
+; concatenation impractical while checking the final content and print path.
+mut s = ""
+for i in 0..65535 {
+  s = s + "ab"
+}
+assert(s.len == 131072, "builder keeps appended length")
+assert(s[0] == "a" && s[1] == "b", "builder keeps prefix")
+assert(s[-2] == "a" && s[-1] == "b", "builder keeps suffix")
+print(s)
+
+; A read before the loop makes the original string observable, so it must keep
+; ordinary immutable concat semantics instead of sharing a mutable buffer.
+mut escaped = ""
+def observed = escaped
+for i in 0..3 {
+  escaped = escaped + "x"
+}
+assert(observed == "", "observed string stays immutable")
+assert(escaped == "xxxx", "escaped concat still appends")
+
+; Empty appends retain a valid terminated string.
+mut empty = ""
+for i in 0..1 {
+  empty = empty + ""
+}
+assert(empty == "", "empty append remains empty")
+s.len
+NY
+}

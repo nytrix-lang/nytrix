@@ -1,0 +1,47 @@
+shape native_scalar_container_arithmetic {
+  family "runtime-native"
+  generator "native"
+  features ["native", "nyir", "representation", "list", "dict"]
+  template ny-test-case
+  flags "--native-only --native-backend=x86_64 -O3 --nyir-verify --no-progress --color=never"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+mut xs = []
+mut i = 0
+while i < 8 {
+   xs = append(xs, i)
+   i += 1
+}
+mut total = 0
+i = 0
+while i < 8 {
+   total += xs[i] * (3 - xs[i])
+   i += 1
+}
+assert(total == -56, "raw indexed arithmetic")
+def d = dict()
+i = 0
+while i < 8 {
+   d.set(to_str(i), i)
+   i += 1
+}
+mut sum = 0
+i = 0
+while i < 8 {
+   sum += d.get(to_str(i), 0)
+   i += 1
+}
+assert(sum == 28, "dictionary scalar accumulator")
+def feature_mask = bor(bor(0, 1), bor(2, 8))
+assert(feature_mask == 11, "raw bitwise mask")
+fn mask_builder() int {
+   mut m = 0
+   m = bor(m, 1)
+   m = bor(m, 2)
+   m = bor(m, 8)
+   m
+}
+assert(mask_builder() == 11, "raw bitwise function mask")
+NY
+}

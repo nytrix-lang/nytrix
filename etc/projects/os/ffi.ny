@@ -22,7 +22,8 @@ fn store_vertex(any ptr, int idx, f64 x, f64 y, f64 z) {
 
 fn read_vertex(any ptr, int idx) list {
    def p = ptr_add(ptr, idx * STRIDE)
-   [load32_f32(p, 0), load32_f32(p, 4), load32_f32(p, 8)]
+   [float(load32_f32(p, 0)), float(load32_f32(p, 4)),
+    float(load32_f32(p, 8))]
 }
 
 def vertices = own(malloc(STRIDE * 2))
@@ -30,12 +31,16 @@ memset(vertices, 0, STRIDE * 2)
 store_vertex(vertices, 0, 3.0, 4.0, 0.0)
 store_vertex(vertices, 1, 1.0, 2.0, 2.0)
 def a = read_vertex(vertices, 0)
-def b = read_vertex(vertices, 1)
 def len_a = c.sqrt(float(a.get(0) * a.get(0) + a.get(1) * a.get(1)))
 def b_ptr = vertices + STRIDE
+def b = [load32_f32(b_ptr, 0), load32_f32(b_ptr, 4),
+         load32_f32(b_ptr, 8)]
 assert(near(len_a, 5.0), "C sqrt through direct ABI")
 assert(near(load32_f32(b_ptr, 8), 2.0), "raw pointer arithmetic")
-assert(b == [1.0, 2.0, 2.0], "raw memory round trip")
+assert(near(load32_f32(b_ptr, 0), 1.0) &&
+       near(load32_f32(b_ptr, 4), 2.0) &&
+       near(load32_f32(b_ptr, 8), 2.0),
+       "raw memory round trip")
 print("a:", a, "length:", len_a)
 print("b:", b)
 free(vertices)

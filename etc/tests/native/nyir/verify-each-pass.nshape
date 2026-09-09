@@ -3,7 +3,7 @@ shape nyir_verify_each_optimization_pass {
   generator "native"
   features [native nyir verifier optimizer cfg ssa]
   template ny-test-case
-  flags "--native-backend=x86_64 --native-only --nyir-verify -O3 --native-result-oracle=43"
+  flags "--native-backend=x86_64 --native-only --nyir-verify -O3 --native-result-oracle=0"
   expect compile_and_run
   source ny <<'NY'
 mut x = 6
@@ -13,6 +13,6 @@ if x < y {
 } else {
   x = x - y
 }
-x + 1
+if x + 1 == 43 { 0 } else { 1 }
 NY
 }

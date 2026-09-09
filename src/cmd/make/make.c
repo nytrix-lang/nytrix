@@ -1039,7 +1039,7 @@ static void ny_make_init_env_defaults(const char *root) {
   if (!getenv("NYTRIX_ROOT"))
     ny_setenv("NYTRIX_ROOT", root, 0);
   char rt_path[PATH_MAX];
-  snprintf(rt_path, sizeof(rt_path), "%s/src/rt/init.c", root);
+  snprintf(rt_path, sizeof(rt_path), "%s/src/code/runtime/init.c", root);
   struct stat st;
   if (stat(rt_path, &st) == 0)
     ny_setenv("NYTRIX_RT_SRC", rt_path, 0);

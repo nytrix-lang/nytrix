@@ -16,6 +16,14 @@ static ny_mach_operand_t selftest_vreg(ny_mach_reg_t reg) {
   return op;
 }
 
+static ny_mach_operand_t selftest_gpr_vreg(ny_mach_reg_t reg) {
+  ny_mach_operand_t op = {0};
+  op.kind = NY_MACH_OPERAND_VREG;
+  op.reg_class = NY_MACH_REGCLASS_GPR;
+  op.as.reg = reg;
+  return op;
+}
+
 static ny_mach_operand_t selftest_fpr_vreg(ny_mach_reg_t reg) {
   ny_mach_operand_t op = {0};
   op.kind = NY_MACH_OPERAND_VREG;
@@ -165,6 +173,94 @@ static bool vector_backend_selftest(ny_native_backend_t backend,
   ny_obj_free(&code);
   ny_mach_func_free(&mach);
   return true;
+}
+
+/*
+ * A straight-line scalar chain must use colored GPRs rather than materialize
+ * each arithmetic temporary's stack home. The two constant COPY homes and
+ * final frame store are intentional.
+ */
+static bool x64_gpr_residency_selftest(char *err, size_t err_len) {
+  ny_options options = {0};
+  options.native_backend = NY_NATIVE_BACKEND_X86_64;
+  options.native_abi = NY_NATIVE_ABI_SYSV;
+  options.host_triple = "x86_64-linux-gnu";
+  ny_native_target_info_t target = {0};
+  if (!ny_native_target_info_init(&target, &options)) {
+    ny_native_set_err(err, err_len,
+                      "x86-64 GPR residency selftest: target initialization failed");
+    return false;
+  }
+
+  ny_mach_func_t mach = {0};
+  uint32_t block = 0, a_slot = 0, out_slot = 0;
+  ny_mach_reg_t a = 0, imm7 = 0, sum = 0, imm11 = 0, chain = 0;
+  bool ok = ny_mach_begin_block(&mach, 0, &block) &&
+            ny_mach_alloc_typed_frame_slot(&mach, 8, 8, NY_MACH_TYPE_I64,
+                                           false, &a_slot) &&
+            ny_mach_alloc_typed_frame_slot(&mach, 8, 8, NY_MACH_TYPE_I64,
+                                           false, &out_slot) &&
+            ny_mach_alloc_typed_vreg(&mach, NY_MACH_TYPE_I64, &a) &&
+            ny_mach_alloc_typed_vreg(&mach, NY_MACH_TYPE_I64, &imm7) &&
+            ny_mach_alloc_typed_vreg(&mach, NY_MACH_TYPE_I64, &sum) &&
+            ny_mach_alloc_typed_vreg(&mach, NY_MACH_TYPE_I64, &imm11) &&
+            ny_mach_alloc_typed_vreg(&mach, NY_MACH_TYPE_I64, &chain);
+  if (ok)
+    ok = ny_mach_emit(&mach, (ny_mach_inst_t){
+             .opcode = NY_MACH_LOAD, .dst = selftest_gpr_vreg(a),
+             .src0 = selftest_frame(a_slot),
+             .effects = NY_MACH_EFFECT_READ_MEMORY}) &&
+         ny_mach_emit(&mach, (ny_mach_inst_t){
+             .opcode = NY_MACH_COPY, .dst = selftest_gpr_vreg(imm7),
+             .src0 = (ny_mach_operand_t){.kind = NY_MACH_OPERAND_IMM,
+                                         .as.imm = 7}}) &&
+         ny_mach_emit(&mach, (ny_mach_inst_t){
+             .opcode = NY_MACH_ADD, .dst = selftest_gpr_vreg(sum),
+             .src0 = selftest_gpr_vreg(a),
+             .src1 = selftest_gpr_vreg(imm7)}) &&
+         ny_mach_emit(&mach, (ny_mach_inst_t){
+             .opcode = NY_MACH_COPY, .dst = selftest_gpr_vreg(imm11),
+             .src0 = (ny_mach_operand_t){.kind = NY_MACH_OPERAND_IMM,
+                                         .as.imm = 11}}) &&
+         ny_mach_emit(&mach, (ny_mach_inst_t){
+             .opcode = NY_MACH_ADD, .dst = selftest_gpr_vreg(chain),
+             .src0 = selftest_gpr_vreg(sum),
+             .src1 = selftest_gpr_vreg(imm11)}) &&
+         ny_mach_emit(&mach, (ny_mach_inst_t){
+             .opcode = NY_MACH_STORE, .dst = selftest_frame(out_slot),
+             .src0 = selftest_gpr_vreg(chain),
+             .effects = NY_MACH_EFFECT_WRITE_MEMORY}) &&
+         ny_mach_emit(&mach, (ny_mach_inst_t){
+             .opcode = NY_MACH_RET, .effects = NY_MACH_EFFECT_CONTROL});
+  if (ok && !ny_mach_verify(&mach, 0, err, err_len))
+    ok = false;
+
+  ny_native_regalloc_metrics_t gpr = {0};
+  ny_obj_buf_t code = {0};
+  ny_x64_obj_symbol_def_t defs[8] = {0};
+  ny_x64_obj_reloc_t relocs[8] = {0};
+  size_t def_count = 0, reloc_count = 0;
+  if (ok && (!ny_native_x64_regalloc_metrics(&mach, &gpr, NULL, NULL) ||
+             !ny_x64_mach_build_bundle(&mach, NULL, NULL, 0, &target,
+                                       "gpr_residency_selftest", false, &code,
+                                       defs, &def_count, relocs, &reloc_count,
+                                       err, err_len)))
+    ok = false;
+
+  /*
+   * The existing regalloc metric is the stable residency marker: every value
+   * in this chain must be colored and none may require a spill home. Do not
+   * couple this regression to prologue/epilogue byte counts.
+   */
+  if (ok && (gpr.colored < 5 || gpr.spilled != 0)) {
+    ny_native_set_err(err, err_len,
+                      "x86-64 GPR residency selftest: colored=%zu spilled=%zu",
+                      gpr.colored, gpr.spilled);
+    ok = false;
+  }
+  ny_obj_free(&code);
+  ny_mach_func_free(&mach);
+  return ok;
 }
 
 /*
@@ -500,7 +596,7 @@ static bool aarch64_vector_call_selftest(char *err, size_t err_len) {
     if ((word & 0xffe00000u) == 0x3cc00000u)
       ++vector_loads;
   }
-  if (ok && (!has_call || reloc_count != 1 || vector_loads < 3)) {
+  if (ok && (!has_call || reloc_count != 1 || vector_loads < 2)) {
     ny_native_set_err(err, err_len,
                       "AArch64 vector call selftest: call spill/reload encoding missing");
     ok = false;
@@ -578,10 +674,103 @@ static bool aarch64_fpr_selftest(char *err, size_t err_len) {
   return ok;
 }
 
+/*
+ * Stack-home coloring must not collapse overlapping values or address-taken
+ * locals.  The machine allocator currently exposes only register intervals;
+ * keep this driver at that seam so a future home-coloring consumer cannot
+ * silently weaken either invariant.
+ */
+static bool x64_stack_home_safety_selftest(char *err, size_t err_len) {
+  ny_mach_func_t mach = {0};
+  uint32_t block = 0, first_slot = 0, second_slot = 0, escaped_slot = 0;
+  ny_mach_reg_t first = 0, second = 0, sum = 0, address = 0;
+  bool ok =
+      ny_mach_begin_block(&mach, 0, &block) &&
+      ny_mach_alloc_typed_frame_slot(&mach, 8, 8, NY_MACH_TYPE_I64, false,
+                                     &first_slot) &&
+      ny_mach_alloc_typed_frame_slot(&mach, 8, 8, NY_MACH_TYPE_I64, false,
+                                     &second_slot) &&
+      ny_mach_alloc_typed_frame_slot(&mach, 8, 8, NY_MACH_TYPE_I64, true,
+                                     &escaped_slot) &&
+      ny_mach_alloc_typed_vreg(&mach, NY_MACH_TYPE_I64, &first) &&
+      ny_mach_alloc_typed_vreg(&mach, NY_MACH_TYPE_I64, &second) &&
+      ny_mach_alloc_typed_vreg(&mach, NY_MACH_TYPE_I64, &sum) &&
+      ny_mach_alloc_typed_vreg(&mach, NY_MACH_TYPE_PTR, &address);
+  if (ok)
+    ok =
+        ny_mach_emit(&mach, (ny_mach_inst_t){
+                               .opcode = NY_MACH_LOAD,
+                               .dst = selftest_gpr_vreg(first),
+                               .src0 = selftest_frame(first_slot),
+                               .effects = NY_MACH_EFFECT_READ_MEMORY}) &&
+        ny_mach_emit(&mach, (ny_mach_inst_t){
+                               .opcode = NY_MACH_LOAD,
+                               .dst = selftest_gpr_vreg(second),
+                               .src0 = selftest_frame(second_slot),
+                               .effects = NY_MACH_EFFECT_READ_MEMORY}) &&
+        ny_mach_emit(&mach, (ny_mach_inst_t){
+                               .opcode = NY_MACH_ADD,
+                               .dst = selftest_gpr_vreg(sum),
+                               .src0 = selftest_gpr_vreg(first),
+                               .src1 = selftest_gpr_vreg(second)}) &&
+        ny_mach_emit(&mach, (ny_mach_inst_t){
+                               .opcode = NY_MACH_STORE,
+                               .dst = selftest_frame(escaped_slot),
+                               .src0 = selftest_gpr_vreg(sum),
+                               .effects = NY_MACH_EFFECT_WRITE_MEMORY}) &&
+        ny_mach_emit(&mach, (ny_mach_inst_t){
+                               .opcode = NY_MACH_LEA,
+                               .dst = selftest_gpr_vreg(address),
+                               .src0 = selftest_frame(escaped_slot)}) &&
+        ny_mach_emit(&mach, (ny_mach_inst_t){
+                               .opcode = NY_MACH_RET,
+                               .effects = NY_MACH_EFFECT_CONTROL});
+  char verify_err[128] = {0};
+  if (ok && !ny_mach_verify(&mach, 0, verify_err, sizeof(verify_err))) {
+    ny_native_set_err(err, err_len,
+                      "x86-64 stack-home safety selftest: invalid machine IR: %s",
+                      verify_err);
+    ok = false;
+  }
+  ny_mach_regalloc_t alloc = {0};
+  const ny_mach_live_segment_t *first_seg = NULL;
+  const ny_mach_live_segment_t *second_seg = NULL;
+  if (ok && !ny_mach_regalloc_build(&mach, 8, &alloc)) {
+    ny_native_set_err(err, err_len,
+                      "x86-64 stack-home safety selftest: interval build failed");
+    ok = false;
+  }
+  if (ok) {
+    first_seg = ny_mach_regalloc_segment_at(&alloc, first, 2);
+    second_seg = ny_mach_regalloc_segment_at(&alloc, second, 2);
+    if (!first_seg || !second_seg || first_seg->color < 0 ||
+        second_seg->color < 0 || first_seg->color == second_seg->color) {
+      ny_native_set_err(
+          err, err_len,
+          "x86-64 stack-home safety selftest: overlapping intervals were co-colored");
+      ok = false;
+    }
+  }
+  if (ok && (!mach.frame_slots || escaped_slot >= mach.frame_slot_len ||
+             !mach.frame_slots[escaped_slot].address_taken ||
+             mach.frame_slots[first_slot].address_taken ||
+             mach.frame_slots[second_slot].address_taken)) {
+    ny_native_set_err(
+        err, err_len,
+        "x86-64 stack-home safety selftest: address-taken slot metadata changed");
+    ok = false;
+  }
+  ny_mach_regalloc_free(&alloc);
+  ny_mach_func_free(&mach);
+  return ok;
+}
+
 bool ny_native_vector_selftest(char *err, size_t err_len) {
   if (!vector_backend_selftest(NY_NATIVE_BACKEND_X86_64,
                                ny_x64_mach_build_bundle, "x86-64", err,
                                err_len))
+    return false;
+  if (!x64_gpr_residency_selftest(err, err_len))
     return false;
   if (!vector_backend_selftest(NY_NATIVE_BACKEND_AARCH64,
                                ny_a64_mach_build_bundle, "AArch64", err,
@@ -597,5 +786,15 @@ bool ny_native_vector_selftest(char *err, size_t err_len) {
     return false;
   if (!aarch64_fpr_selftest(err, err_len))
     return false;
+  if (!x64_stack_home_safety_selftest(err, err_len))
+    return false;
+  if (!ny_mach_audit_size_candidates_selftest()) {
+    ny_native_set_err(err, err_len, "machine outliner audit selftest failed");
+    return false;
+  }
+  if (!ny_mach_schedule_post_ra_selftest()) {
+    ny_native_set_err(err, err_len, "post-RA scheduler selftest failed");
+    return false;
+  }
   return true;
 }

@@ -5,8 +5,8 @@
 #define CODEGEN_INTERNAL_H
 
 #include "code/code.h"
-#include "priv_llvm.h"
-#include "rt/shared.h"
+#include "code/native/llvm/internal.h"
+#include "code/runtime/shared.h"
 #include <llvm-c/Core.h>
 #include <llvm-c/DebugInfo.h>
 #include <stdlib.h>
@@ -473,6 +473,7 @@ void ny_diag_warning(token_t tok, const char *fmt, ...);
 void ny_diag_error_code(token_t tok, int code, const char *fmt, ...);
 void ny_diag_warning_code(token_t tok, int code, const char *fmt, ...);
 void ny_diag_hint(const char *fmt, ...);
+const char *ny_keyword_typo_suggestion(const char *name);
 void ny_diag_fix(const char *fmt, ...);
 void ny_diag_note_tok(token_t tok, const char *fmt, ...);
 void ny_diag_error_context(token_t tok, const char *primary_msg, const char *context,
@@ -631,6 +632,9 @@ const char *ny_lookup_module_alias(codegen_t *cg, scope *scopes, size_t depth,
                                    uint64_t name_hash);
 bool ny_resolve_module_expr_path(codegen_t *cg, scope *scopes, size_t depth,
                                  expr_t *e, char *out, size_t out_cap);
+bool ny_module_exported_module_path(codegen_t *cg, const char *module_name,
+                                    const char *member, char *out,
+                                    size_t out_cap);
 bool ny_resolve_module_function_path(codegen_t *cg, const char *module_name,
                                      const char *member, char *out,
                                      size_t out_cap);

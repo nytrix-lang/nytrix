@@ -1,0 +1,12 @@
+shape strict_condition_requires_bool {
+  family "strict-types"
+  generator "type-error"
+  features [strict conditions bool]
+  template ny-compile-fail
+  flags "--strict-types --color=never"
+  expect compile_fail
+  expect_message "strict condition must be bool, got int"
+  source ny <<'NY'
+if 1 { 0 } else { 1 }
+NY
+}

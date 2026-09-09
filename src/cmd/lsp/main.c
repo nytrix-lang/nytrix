@@ -8,7 +8,7 @@
 #include "base/intern.h"
 #include "base/loader.h"
 #include "base/util.h"
-#include "parse/parser.h"
+#include "code/parse/parser.h"
 #include <ctype.h>
 #include <fcntl.h>
 #include <limits.h>
@@ -931,7 +931,7 @@ static const lsp_builtin_t g_core_builtins[] = {
 static const lsp_builtin_t g_rt_builtins[] = {
 #define RT_DEF(name, p, args, sig, doc) {name, sig, doc, LSP_SK_FUNCTION},
 #define RT_GV(name, p, t, doc) {name, "global", doc, LSP_SK_VARIABLE},
-#include "rt/defs.h"
+#include "code/runtime/defs.h"
 #undef RT_DEF
 #undef RT_GV
 };

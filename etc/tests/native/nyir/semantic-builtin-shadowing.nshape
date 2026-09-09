@@ -1,0 +1,26 @@
+shape semantic_builtin_shadowing {
+  family "runtime-native"
+  generator "native"
+  features [native nyir x86_64 semantic shadowing any]
+  template ny-test-case
+  flags "--native-only --native-backend=x86_64 --native-tier=baseline -O0 --nyir-verify --native-result-oracle=0 --no-progress --color=never"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+
+fn len(x) { return 99 }
+fn int(x) { return 123 }
+fn get(a, b) { return 88 }
+fn set_idx(a, b, c) { return 77 }
+fn set(a, b, c) { return 66 }
+fn runtime_tag_raw(x) { return 55 }
+
+len([1, 2, 3]) == 99
+&& int("7") == 123
+&& get([1, 2, 3], 1) == 88
+&& set_idx([1, 2, 3], 1, 9) == 77
+&& set([1, 2, 3], 1, 9) == 66
+&& runtime_tag_raw("list") == 55
+? 0 : 1
+NY
+}

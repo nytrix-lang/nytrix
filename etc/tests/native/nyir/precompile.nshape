@@ -6,6 +6,6 @@ shape native_nyir_precompile {
   flags "--native-backend=x86_64 --emit-bc=/tmp/nytrix-native-precompile.bc"
   expect compile_and_run
   source ny <<'NY'
-20 + 22
+if 20 + 22 == 42 { 0 } else { 1 }
 NY
 }

@@ -3,7 +3,7 @@ shape optcheck_typed_scalar_list {
   generator "native"
   features [native x86_64 oracle optcheck]
   template ny-test-case
-  flags "-O3 --native-backend x86_64 --native-result-oracle=1"
+  flags "-O3 --native-backend x86_64 --native-result-oracle=0"
   expect compile_and_run
   source ny <<'NY'
 use std.core

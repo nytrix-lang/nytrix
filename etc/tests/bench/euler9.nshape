@@ -1,0 +1,41 @@
+shape euler9 {
+  family "algorithm"
+  features ["c-vs-ny", "checksum"]
+  template ny-test-case
+  expect compile_and_run
+  ;; Translated from the QBE minic test: minic/test/euler9.c.
+  source ny <<'NY'
+mut result = 0
+mut a = 1
+while a < 1000 {
+   mut b = a + 1
+   while b < 1000 {
+      mut c = b + 1
+      while c < 1000 {
+         if a + b + c == 1000 && a * a + b * b == c * c { result = a * b * c }
+         c += 1
+      }
+      b += 1
+   }
+   a += 1
+}
+print(result)
+NY
+  source c <<'C'
+#include <stdio.h>
+
+int main(void) {
+  int result = 0;
+  for (int a = 1; a < 1000; ++a) {
+    for (int b = a + 1; b < 1000; ++b) {
+      for (int c = b + 1; c < 1000; ++c) {
+        if (a + b + c == 1000 && a * a + b * b == c * c) {
+          result = a * b * c;
+        }
+      }
+    }
+  }
+  printf("%d\n", result);
+}
+C
+}

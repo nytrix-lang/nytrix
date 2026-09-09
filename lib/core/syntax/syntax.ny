@@ -14,8 +14,10 @@ fn _ensure_registry(dict reg) dict {
 }
 
 fn _ensure_name(str name) str {
-   if !is_str(name) { panic("syntax name must be a string") }
-   if name.len == 0 { panic("syntax name cannot be empty") }
+   ; Typed `str` parameters may be raw constant pointers in native code;
+   ; `is_str` only recognizes managed objects.  The string ABI already
+   ; validated this parameter, so validate the content through its length.
+   if !name || __str_len(name) == 0 { panic("syntax name cannot be empty") }
    name
 }
 
@@ -49,7 +51,11 @@ fn _list_without(list xs, any want) list {
    mut i = 0
    while i < n {
       def x = xs.get(i, 0)
-      if !core_ref.eq(x, want) { out = out.append(x) }
+      ; Registry names are immutable C-string values in native lists.  Keep
+      ; the equality in the positive branch: the native `!=` lowering has a
+      ; different boolean ABI for raw string pointers and can invert the
+      ; filter at this dynamic boundary.
+      if x == want { } else { out = out.append(x) }
       i += 1
    }
    out
@@ -122,7 +128,7 @@ fn register_macro(dict reg, str name, any handler) dict {
    handler = _ensure_handler(handler)
    mut macros = _registry_dict(reg, "macros")
    mut order = _registry_list(reg, "macro_order")
-   def existed = macros.contains(name)
+   def existed = __dict_has_str_raw(macros, name) != 0
    macros = dict_set(macros, name, handler)
    reg = dict_set(reg, "macros", macros)
    if !existed {
@@ -139,8 +145,10 @@ fn unregister_macro(dict reg, str name) dict {
    name = _ensure_name(name)
    mut macros = _registry_dict(reg, "macros")
    mut order = _registry_list(reg, "macro_order")
-   if !macros.contains(name) { return reg }
-   macros = macros.delete(name)
+   ; `name` is validated as a string above.  Call the string-key bridge
+   ; directly so packed native C-string pointers cannot fall through the
+   ; dynamic `is_str` classifier and be hashed as integers.
+   macros = __dict_delete_str_raw(macros, name)
    order = _list_without(order, name)
    reg = dict_set(reg, "macros", macros)
    reg = dict_set(reg, "macro_order", order)
@@ -154,7 +162,7 @@ fn register_attribute(dict reg, str name, any handler) dict {
    handler = _ensure_handler(handler)
    mut attrs = _registry_dict(reg, "attrs")
    mut order = _registry_list(reg, "attr_order")
-   def existed = attrs.contains(name)
+   def existed = __dict_has_str_raw(attrs, name) != 0
    attrs = dict_set(attrs, name, handler)
    reg = dict_set(reg, "attrs", attrs)
    if !existed {
@@ -171,8 +179,7 @@ fn unregister_attribute(dict reg, str name) dict {
    name = _ensure_name(name)
    mut attrs = _registry_dict(reg, "attrs")
    mut order = _registry_list(reg, "attr_order")
-   if !attrs.contains(name) { return reg }
-   attrs = attrs.delete(name)
+   attrs = __dict_delete_str_raw(attrs, name)
    order = _list_without(order, name)
    reg = dict_set(reg, "attrs", attrs)
    reg = dict_set(reg, "attr_order", order)
@@ -185,9 +192,16 @@ fn _merge_macros(dict dst, dict src, bool overwrite=true) dict {
    mut i = 0
    while i < src_order.len {
       def name = src_order.get(i, "")
-      if is_str(name) && name.len > 0 {
-         def handler = src_macros.get(name, 0)
-         if handler { if !is_macro_registered(dst, name) || overwrite { dst = register_macro(dst, name, handler) } }
+      if name && name.len > 0 {
+         def handler = __dict_get_str_raw(src_macros, name, nil)
+         ; A callable handler can be a raw closure pointer whose dynamic
+         ; truthiness is not a reliable presence test.  The string-key map is
+         ; authoritative; only a missing key means there is nothing to merge.
+         if __dict_has_str_raw(src_macros, name) != 0 {
+            if !__dict_has_str_raw(_registry_dict(dst, "macros"), name) || overwrite {
+               dst = register_macro(dst, name, handler)
+            }
+         }
       }
       i += 1
    }
@@ -200,9 +214,13 @@ fn _merge_attributes(dict dst, dict src, bool overwrite=true) dict {
    mut i = 0
    while i < src_order.len {
       def name = src_order.get(i, "")
-      if is_str(name) && name.len > 0 {
-         def handler = src_attrs.get(name, 0)
-         if handler { if !is_attr_registered(dst, name) || overwrite { dst = register_attribute(dst, name, handler) } }
+      if name && name.len > 0 {
+         def handler = __dict_get_str_raw(src_attrs, name, nil)
+         if __dict_has_str_raw(src_attrs, name) != 0 {
+            if !__dict_has_str_raw(_registry_dict(dst, "attrs"), name) || overwrite {
+               dst = register_attribute(dst, name, handler)
+            }
+         }
       }
       i += 1
    }
@@ -223,7 +241,7 @@ fn get_macro_handler(dict reg, str name) any {
    reg = _ensure_registry(reg)
    name = _ensure_name(name)
    def macros = _registry_dict(reg, "macros")
-   macros.get(name, nil)
+   __dict_get_str_raw(macros, name, nil)
 }
 
 fn get_attr_handler(dict reg, str name) any {
@@ -231,7 +249,7 @@ fn get_attr_handler(dict reg, str name) any {
    reg = _ensure_registry(reg)
    name = _ensure_name(name)
    def attrs = _registry_dict(reg, "attrs")
-   attrs.get(name, nil)
+   __dict_get_str_raw(attrs, name, nil)
 }
 
 fn is_macro_registered(dict reg, str name) bool {
@@ -239,7 +257,7 @@ fn is_macro_registered(dict reg, str name) bool {
    reg = _ensure_registry(reg)
    name = _ensure_name(name)
    def macros = _registry_dict(reg, "macros")
-   macros.contains(name)
+   __dict_has_str_raw(macros, name) != 0
 }
 
 fn is_attr_registered(dict reg, str name) bool {
@@ -247,7 +265,7 @@ fn is_attr_registered(dict reg, str name) bool {
    reg = _ensure_registry(reg)
    name = _ensure_name(name)
    def attrs = _registry_dict(reg, "attrs")
-   attrs.contains(name)
+   __dict_has_str_raw(attrs, name) != 0
 }
 
 fn list_macros(dict reg) list {
@@ -275,7 +293,8 @@ fn _macro_node(str name, any args, any body, any tok) dict {
 
 fn _is_macro_node(any node) bool {
    if type(node) != "dict" { return false }
-   is_str(node.get("name", 0))
+   def name = node.get("name", 0)
+   name && __str_len(name) > 0
 }
 
 fn _macro_node_name(dict node) str {
@@ -290,7 +309,21 @@ fn _macro_node_args(dict node) list {
 
 fn _to_macro_node(any value, any tok=0) any {
    if _is_macro_node(value) { return value }
-   if is_form(value) { return _macro_node(form_head(value), form_tail(value), 0, tok) }
+   ; Macro handlers conventionally return `[name, ...args]`. Use the list
+   ; representation directly here: the native ABI may carry a valid list
+   ; without enough dynamic metadata for the broader `is_form` predicate.
+   if is_list(value) {
+      def n = value.len
+      if n > 0 {
+         mut args = list(0)
+         mut i = 1
+         while i < n {
+            args = args.append(value.get(i, 0))
+            i += 1
+         }
+         return _macro_node(value.get(0, 0), args, 0, tok)
+      }
+   }
    0
 }
 
@@ -335,7 +368,16 @@ fn form_head(any value, any default=0) any {
 fn form_tail(any value) list {
    "Returns tail elements from a form."
    if !is_form(value) { return list(0) }
-   slice(value, 1, value.len, 1)
+   ; Copy explicitly through indexed reads so a polymorphic slice result does
+   ; not lose the native tbuf payload metadata at this concrete list boundary.
+   def n = value.len
+   mut out = list(n)
+   mut i = 1
+   while i < n {
+      out = out.append(value.get(i, 0))
+      i += 1
+   }
+   out
 }
 
 fn expand_macro(dict reg, str name, any args=0, any body=0, any tok=0) any {
@@ -356,7 +398,7 @@ fn expand_macro_fixpoint(dict reg, str name, any args=0, any body=0, any tok=0, 
    mut steps = 0
    while steps < max_steps {
       def cur_name = _macro_node_name(current)
-      if !is_str(cur_name) || cur_name.len == 0 { return current }
+      if !cur_name || __str_len(cur_name) == 0 { return current }
       def handler = get_macro_handler(reg, cur_name)
       if !handler { return current }
       def out = handler(current)
@@ -374,9 +416,10 @@ fn expand_form(dict reg, any value, any tok=0, int max_steps=64) any {
    reg = _ensure_registry(reg)
    if !is_form(value) { return value }
    def name = form_head(value, "")
-   if !is_str(name) || name.len == 0 { return value }
+   if !name || __str_len(name) == 0 { return value }
    def args = form_tail(value)
    def out = expand_macro_fixpoint(reg, name, args, 0, tok, max_steps)
+   if !is_form(out) { return out }
    def node = _to_macro_node(out, tok)
    if !node { return out }
    _macro_node_to_form(node)
@@ -396,12 +439,25 @@ fn expand_form_deep(dict reg, any value, any tok=0, int max_steps=64) any {
    "Recursively expands forms in nested lists until stable."
    reg = _ensure_registry(reg)
    if max_steps <= 0 { return value }
-   if is_form(value) {
-      def expanded = expand_form(reg, value, tok, max_steps)
-      if !core_ref.eq(expanded, value) { return expand_form_deep(reg, expanded, tok, max_steps - 1) }
+   if is_list(value) {
+      ; A list whose head is itself a form is a nested sequence, not a macro
+      ; form. Traverse it instead of treating the pointer as a string name.
+      def head = form_head(value, 0)
+      if is_form(head) {
+         return _expand_form_list(reg, value, tok, max_steps)
+      }
+      ; Unknown heads are ordinary list data. Only invoke the macro pipeline
+      ; when the registry actually owns the head, otherwise `expand_form`
+      ; would expose its internal macro-node dictionary to callers.
+      if is_str(head) {
+         if is_macro_registered(reg, head) {
+            def expanded = expand_form(reg, value, tok, max_steps)
+            if !core_ref.eq(expanded, value) { return expand_form_deep(reg, expanded, tok, max_steps - 1) }
+         }
+      }
+      return _expand_form_list(reg, value, tok, max_steps)
    }
-   if !is_list(value) { return value }
-   _expand_form_list(reg, value, tok, max_steps)
+   value
 }
 
 fn new_rewriter(int cap=8) dict {

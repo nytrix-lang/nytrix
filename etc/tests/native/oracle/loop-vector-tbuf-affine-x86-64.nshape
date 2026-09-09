@@ -1,0 +1,44 @@
+shape oracle_loop_vector_tbuf_affine_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle loop vector tbuf affine matrix scalar regression]
+  template ny-test-case
+  flags_matrix "-O2 --native-result-oracle; -O3 --native-result-oracle"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core.tbuf
+
+def src = i64buf_new(512)
+def dst = i64buf_new(512)
+def noncanonical = i64buf_new(64)
+mut i = 0
+while i < 512 {
+  i64buf_store(src, i, i)
+  i += 1
+}
+
+;; The inner byte offset is ((row * 64) + column) * 8.  Its row term is
+;; invariant for this loop but remains dynamic across the enclosing loop.
+mut row = 0
+while row < 8 {
+  mut column = 0
+  while column < 64 {
+    def value = i64buf_load(src, row * 64 + column)
+    i64buf_store(dst, row * 64 + column, value)
+    column += 1
+  }
+  row += 1
+}
+
+;; This stream deliberately has no affine induction offset and must stay scalar.
+mut j = 0
+while j < 64 {
+  def index = (j * j) % 64
+  def value = i64buf_load(noncanonical, index)
+  i64buf_store(noncanonical, index, value + 1)
+  j += 1
+}
+
+i64buf_load(dst, 127) + i64buf_load(noncanonical, 0)
+NY
+}

@@ -28,29 +28,36 @@ fn _term_key(any value) str {
 }
 
 fn _consume(dict state, int depth) bool {
-   if depth > state.get("max_depth") {
-      state["decided"] = false
-      state["reason"] = "depth limit"
+   def max_depth = to_int(state.get("max_depth"))
+   def nodes = to_int(state.get("nodes"))
+   def max_nodes = to_int(state.get("max_nodes"))
+   def steps = to_int(state.get("steps"))
+   def max_steps = to_int(state.get("max_steps"))
+   def memory = to_int(state.get("memory", 0))
+   def max_memory = to_int(state.get("max_memory", 1000000))
+   if depth > max_depth {
+      state.set("decided", false)
+      state.set("reason", "depth limit")
       return false
    }
-   if state.get("nodes") >= state.get("max_nodes") {
-      state["decided"] = false
-      state["reason"] = "node limit"
+   if nodes >= max_nodes {
+      state.set("decided", false)
+      state.set("reason", "node limit")
       return false
    }
-   if state.get("steps") >= state.get("max_steps") {
-      state["decided"] = false
-      state["reason"] = "step limit"
+   if steps >= max_steps {
+      state.set("decided", false)
+      state.set("reason", "step limit")
       return false
    }
-   if state.get("memory", 0) >= state.get("max_memory", 1000000) {
-      state["decided"] = false
-      state["reason"] = "memory limit"
+   if memory >= max_memory {
+      state.set("decided", false)
+      state.set("reason", "memory limit")
       return false
    }
-   state["nodes"] = state.get("nodes") + 1
-   state["steps"] = state.get("steps") + 1
-   state["memory"] = state.get("memory", 0) + 1
+   state.set("nodes", state.get("nodes") + 1)
+   state.set("steps", state.get("steps") + 1)
+   state.set("memory", state.get("memory", 0) + 1)
    true
 }
 

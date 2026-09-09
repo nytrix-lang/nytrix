@@ -1373,6 +1373,10 @@ function selectedSymbol(mod, symbolNameOrId) {
 function resolveRouteName(name) {
   const raw = String(name ?? "").trim();
   if (raw === "Overview") return raw;
+  /* README is the compatibility route used by the repository badge and by
+   * older links. The website's README is the overview page; the practical
+   * root README is included there as an appendix, not a separate page. */
+  if (raw === "README") return "Overview";
   if (raw === "Tags" || raw === "tags") return "Tags";
   const doc = markdownDocByName.get(raw);
   if (doc) return doc.name;
@@ -1425,6 +1429,13 @@ function docRouteFromHref(rawHref, baseRoute) {
   cleanPath = cleanPath.replace(/\.(?:md|html?)$/i, "");
   if (!cleanPath) return { route: baseRoute || "Overview", anchor };
 
+  /* Repository Markdown links are authored relative to the checkout, while
+   * the generated manual is a single-page app. Keep the two README spellings
+   * on the landing route so old badges and manual links cannot escape the
+   * site or open the duplicate root README page. */
+  if (cleanPath === "README" || cleanPath === "docs/README")
+    return { route: "Overview", anchor };
+
   const rootDocPath = /^(?:learn|spec)\//.test(cleanPath);
   const absolute =
     path.startsWith("/") || path.startsWith("docs/") || rootDocPath;
@@ -1450,29 +1461,39 @@ function docRouteFromHref(rawHref, baseRoute) {
 }
 
 function rewriteMarkdownDocLinks() {
-  document.querySelectorAll(".md-section").forEach((section) => {
-    const baseRoute = section.dataset.docRoute || current || "";
-    section
-      .querySelectorAll(".markdown-content a[href], .html-content a[href]")
-      .forEach((link) => {
-        const rawHref = link.getAttribute("href") || "";
-        const resolved = docRouteFromHref(rawHref, baseRoute);
-        if (resolved && resolved.route) {
-          link.dataset.docRoute = resolved.route;
-          if (resolved.anchor) link.dataset.docAnchor = resolved.anchor;
-          link.setAttribute("href", routeHash(resolved.route));
-          return;
-        }
-        if (rawHref.startsWith("#")) {
-          link.dataset.docAnchor = decodeRouteHash(rawHref.slice(1));
-          return;
-        }
-        if (isExternalHref(rawHref)) {
-          link.setAttribute("target", "_blank");
-          link.setAttribute("rel", "noopener noreferrer");
-        }
-      });
-  });
+  document
+    .querySelectorAll(".markdown-content a[href], .html-content a[href]")
+    .forEach((link) => {
+      const section = link.closest(".md-section");
+      const baseRoute = (section && section.dataset.docRoute) || current || "";
+      const rawHref = link.getAttribute("href") || "";
+      const { path } = splitDocHref(rawHref);
+      const projectPath = path.replace(/^\.\//, "").replace(/^\//, "");
+      if (projectPath.toLowerCase() === "license") {
+        link.setAttribute(
+          "href",
+          "https://github.com/nytrix-lang/nytrix/blob/main/LICENSE",
+        );
+        link.setAttribute("target", "_blank");
+        link.setAttribute("rel", "noopener noreferrer");
+        return;
+      }
+      const resolved = docRouteFromHref(rawHref, baseRoute);
+      if (resolved && resolved.route) {
+        link.dataset.docRoute = resolved.route;
+        if (resolved.anchor) link.dataset.docAnchor = resolved.anchor;
+        link.setAttribute("href", routeHash(resolved.route));
+        return;
+      }
+      if (rawHref.startsWith("#")) {
+        link.dataset.docAnchor = decodeRouteHash(rawHref.slice(1));
+        return;
+      }
+      if (isExternalHref(rawHref)) {
+        link.setAttribute("target", "_blank");
+        link.setAttribute("rel", "noopener noreferrer");
+      }
+    });
 }
 
 function copyText(t, btn) {
@@ -1691,7 +1712,7 @@ function primaryTagEntries() {
 }
 
 function isOverviewDoc(doc) {
-  return String(doc && doc.name || "").toLowerCase() === "readme";
+  return Boolean(doc && doc.overview === true);
 }
 
 function renderTagSection(depth = 0) {
@@ -2036,6 +2057,9 @@ function renderReferenceSection(title, desc) {
 }
 
 function renderOverviewBody(source, sections) {
+  const rootReadmeMarker = /<!--\s*overview:root-readme\s*-->/;
+  const includeRootReadme = rootReadmeMarker.test(source);
+  source = source.replace(rootReadmeMarker, "");
   const marker = /<!--\s*overview:cards\s+({[\s\S]*?})\s*-->/g;
   let html = "";
   let start = 0;
@@ -2062,6 +2086,16 @@ function renderOverviewBody(source, sections) {
   }
   const tail = source.slice(start);
   if (tail.trim()) html += `<section class="overview-body markdown-content">${DOMPurify.sanitize(marked.parse(tail))}</section>`;
+  if (includeRootReadme && sections.rootReadmeHtml) {
+    /* The root README is already the repository's canonical project narrative.
+     * Reuse everything after its centered hero. The overview page owns the
+     * hero presentation, but the README introduction and practical sections
+     * should remain visible below the overview cards. */
+    let readme = marked.parse(String(sections.rootReadmeHtml));
+    const heroEnd = readme.indexOf("</div>");
+    if (heroEnd >= 0) readme = readme.slice(heroEnd + "</div>".length);
+    html += `<section class="overview-body markdown-content overview-root-readme">${DOMPurify.sanitize(readme)}</section>`;
+  }
   return html;
 }
 
@@ -2073,6 +2107,9 @@ function renderDocsHome(overviewMod) {
   const learnDocs = docs.filter((doc) => OVERVIEW_DOC_ROUTES.learn.has(doc.name));
   const specDocs = docs.filter((doc) => OVERVIEW_DOC_ROUTES.spec.has(doc.name));
   const projectDocs = docs.filter((doc) => doc.name === "CHANGELOG");
+  const rootReadme = (overviewMod && overviewMod.markdown_docs || []).find(
+    (doc) => doc.name === "README" && !isOverviewDoc(doc),
+  );
   const overviewDoc =
     (overviewMod && overviewMod.markdown_docs || []).find(
       (doc) => isOverviewDoc(doc),
@@ -2096,6 +2133,7 @@ function renderDocsHome(overviewMod) {
     learn: learnDocs,
     spec: specDocs,
     project: projectDocs,
+    rootReadmeHtml: rootReadme ? rootReadme.html : "",
   });
   const heroLines = String((overviewMod && overviewMod.hero_source) || "").split("\n");
   const heroSource = heroLines

@@ -1,5 +1,5 @@
 shape png-info {
-  family "probe-suite"
+  family "probe-image/png-info"
   generator "stress"
   features ["ny", "image"]
   template ny-test-case

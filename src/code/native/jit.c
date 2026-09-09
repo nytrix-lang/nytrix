@@ -4,9 +4,9 @@
  */
 #include "code/native/native.h"
 #include "code/native/object/internal.h"
-#include "code/native/ir/machine.h"
-#include "code/jit.h"
-#include "wire/cache.h"
+#include "code/ir/machine.h"
+#include "code/native/llvm/jit.h"
+#include "code/wire/cache.h"
 
 #include <limits.h>
 #include <stdint.h>
@@ -16,6 +16,7 @@
 #ifdef _WIN32
 #include <windows.h>
 #else
+#include <dlfcn.h>
 #include <sys/mman.h>
 #include <unistd.h>
 #endif
@@ -45,6 +46,47 @@ static void *ny_native_jit_alloc(size_t size) {
 #endif
 }
 
+static void *ny_native_jit_alloc_data(size_t size) {
+#ifdef _WIN32
+  return VirtualAlloc(NULL, size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+#else
+  void *p = mmap(NULL, size, PROT_READ | PROT_WRITE,
+                 MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  return p == MAP_FAILED ? NULL : p;
+#endif
+}
+
+/*
+ * Native C imports must bind to the process ABI before consulting the LLVM
+ * symbol table.  Unqualified names such as `div` can also exist as Nytrix
+ * functions in an LLVM module; resolving LLVM first silently selects the
+ * wrong calling convention and corrupts aggregate returns.
+ */
+static void *ny_native_jit_resolve_external(const char *name) {
+#ifndef _WIN32
+  if (name && *name) {
+    void *ptr = dlsym(RTLD_DEFAULT, name);
+    if (ptr)
+      return ptr;
+  }
+#endif
+  return ny_jit_resolve_symbol(name);
+}
+
+static bool ny_native_jit_def_is_data(const char *name) {
+  return name && (strncmp(name, ".Lnyarr.", 8) == 0 ||
+                  ny_native_globaltab_has(name) ||
+                  /*
+                   * String literals are emitted by the native object
+                   * builder into the same trailing data pool as arrays and
+                   * globals.  Keep their relocations in that RW mapping;
+                   * resolving them against the executable text mapping
+                   * loses the literal's actual address (and commonly turns
+                   * `"err"` into `"e"`).
+                   */
+                  ny_native_strtab_get(name, NULL) != NULL);
+}
+
 static bool ny_native_jit_seal(void *memory, size_t size) {
 #ifdef _WIN32
   DWORD old_protect = 0;
@@ -61,23 +103,81 @@ static bool ny_native_jit_seal(void *memory, size_t size) {
 }
 
 void ny_native_jit_image_free(ny_native_jit_image_t *image) {
-  if (!image || !image->memory)
+  if (!image)
+    return;
+  if (image->data_memory && image->data_size) {
+#ifdef _WIN32
+    VirtualFree(image->data_memory, 0, MEM_RELEASE);
+#else
+    munmap(image->data_memory, image->data_size);
+#endif
+  }
+  if (!image->memory)
     return;
 #ifdef _WIN32
   VirtualFree(image->memory, 0, MEM_RELEASE);
 #else
   munmap(image->memory, image->size);
 #endif
-  *image = (ny_native_jit_image_t){0};
 }
 
 static void *ny_native_jit_symbol(
     unsigned char *base, const ny_x64_obj_symbol_def_t *defs,
     size_t def_count, const char *name) {
   int index = ny_x64_obj_def_index(defs, def_count, name);
-  if (index >= 0)
+  if (index >= 0) {
     return base + defs[index].off;
-  return ny_jit_resolve_symbol(name);
+  }
+  /*
+   * Re-export alias resolution: a caller may reference a re-exported
+   * function under its alias (std.core.set) while the definition is
+   * registered under its canonical module name (std.core.set_mod.set).
+   * When exactly one definition matches either exactly or with one
+   * trailing `_mod` module segment dropped, link it.
+   */
+  if (name && strncmp(name, "ny_fn_", 6) == 0) {
+    const char *fully = name + 6;
+    int match = -1;
+    size_t matches = 0;
+    for (size_t z = 0; z < def_count; ++z) {
+      const char *cand = defs[z].name;
+      if (strncmp(cand, "ny_fn_", 6) != 0)
+        continue;
+      cand += 6;
+      if (strcmp(cand, fully) == 0) {
+        match = (int)z;
+        matches++;
+        continue;
+      }
+      const char *last_dot = strrchr(cand, '.');
+      if (!last_dot || last_dot == cand)
+        continue;
+      const char *seg_start = last_dot;
+      while (seg_start > cand && seg_start[-1] != '.')
+        --seg_start;
+      size_t seg_len = (size_t)(last_dot - seg_start);
+      if (seg_len >= 4 &&
+          strncmp(seg_start + seg_len - 4, "_mod", 4) == 0) {
+        size_t prefix_len = (size_t)(seg_start - cand);
+        if (prefix_len >= 1 && prefix_len < 256) {
+          char munged[256];
+          size_t k = 0;
+          if (prefix_len > 1) {
+            memcpy(munged, cand, prefix_len - 1);
+            k = prefix_len - 1;
+          }
+          munged[k] = '\0';
+          if (strcmp(munged, fully) == 0) {
+            match = (int)z;
+            matches++;
+          }
+        }
+      }
+    }
+    if (matches == 1 && match >= 0)
+      return base + defs[match].off;
+  }
+  return ny_native_jit_resolve_external(name);
 }
 
 static void ny_native_visit_stmt_links(const stmt_t *stmt, const ny_options *opt,
@@ -170,37 +270,100 @@ static bool ny_native_jit_compile_aarch64_bundle(
     const ny_native_target_info_t *target, ny_native_jit_image_t *image,
     char *err, size_t err_len) {
   ny_obj_buf_t code = {0};
-  ny_x64_obj_symbol_def_t defs[NY_NATIVE_MAX_DEFS];
-  ny_x64_obj_reloc_t relocs[NY_X64_OBJ_MAX_RELOCS];
+  ny_x64_obj_symbol_def_t *defs =
+      calloc(NY_NATIVE_MAX_DEFS, sizeof(*defs));
+  ny_x64_obj_reloc_t *relocs =
+      calloc(NY_X64_OBJ_MAX_RELOCS, sizeof(*relocs));
   size_t def_count = 0, reloc_count = 0;
+  if (!defs || !relocs) {
+    free(defs);
+    free(relocs);
+    defs = NULL;
+    relocs = NULL;
+    ny_native_set_err(err, err_len,
+                      "native AArch64 JIT definition allocation failed");
+    return false;
+  }
   if (!ny_a64_obj_build_bundle(top, funcs, names, func_count, target,
                                "rt_main", false, &code, defs, &def_count,
                                relocs, &reloc_count, err, err_len)) {
     ny_obj_free(&code);
+    free(defs);
+    free(relocs);
     return false;
   }
   const size_t stub_size = 16;
-  size_t used = ny_native_jit_align(code.len, 16);
-  size_t alloc_size = ny_native_jit_align(used + reloc_count * stub_size, 4096);
+  size_t data_start = code.len, data_end = code.len;
+  bool have_data = false;
+  for (size_t i = 0; i < def_count; ++i) {
+    if (!ny_native_jit_def_is_data(defs[i].name))
+      continue;
+    if (!have_data || defs[i].off < data_start)
+      data_start = defs[i].off;
+    size_t end = defs[i].off + defs[i].size;
+    if (!have_data || end > data_end)
+      data_end = end;
+    have_data = true;
+  }
+  size_t text_len = have_data ? data_start : code.len;
+  size_t data_len =
+      have_data ? ny_native_jit_align(data_end - data_start, 16) : 0;
+  size_t used = ny_native_jit_align(text_len, 16);
+  size_t alloc_size =
+      ny_native_jit_align(used + reloc_count * stub_size, 4096);
   unsigned char *memory = (unsigned char *)ny_native_jit_alloc(alloc_size);
   if (!memory) {
     ny_native_set_err(err, err_len,
                       "native AArch64 JIT: executable allocation failed");
     ny_obj_free(&code);
+    free(defs);
+    free(relocs);
     return false;
   }
   memset(memory, 0, alloc_size);
-  memcpy(memory, code.data, code.len);
+  memcpy(memory, code.data, text_len);
+
+  unsigned char *data_memory = NULL;
+  if (data_len > 0) {
+    data_memory = (unsigned char *)ny_native_jit_alloc_data(data_len);
+    if (!data_memory) {
+      ny_native_set_err(err, err_len,
+                        "native AArch64 JIT: data pool allocation failed");
+      ny_obj_free(&code);
+      image->memory = memory;
+      image->size = alloc_size;
+      ny_native_jit_image_free(image);
+      *image = (ny_native_jit_image_t){0};
+      free(defs);
+      free(relocs);
+      return false;
+    }
+    memset(data_memory, 0, data_len);
+    memcpy(data_memory, code.data + data_start, data_end - data_start);
+    image->data_memory = data_memory;
+    image->data_size = data_len;
+  }
   ny_obj_free(&code);
   for (size_t i = 0; i < reloc_count; ++i) {
-    void *resolved = ny_native_jit_symbol(memory, defs, def_count,
-                                          relocs[i].symbol);
+    void *resolved;
+    if (data_memory && ny_native_jit_def_is_data(relocs[i].symbol)) {
+      int index = ny_x64_obj_def_index(defs, def_count, relocs[i].symbol);
+      resolved = index >= 0 ? data_memory + (defs[index].off - data_start)
+                            : ny_native_jit_resolve_external(relocs[i].symbol);
+    } else {
+      resolved = ny_native_jit_symbol(memory, defs, def_count,
+                                      relocs[i].symbol);
+    }
     if (!resolved) {
       ny_native_set_err(err, err_len,
                         "native AArch64 JIT: unresolved symbol '%s'",
                         relocs[i].symbol);
-      image->memory = memory; image->size = alloc_size;
+      image->memory = memory;
+      image->size = alloc_size;
       ny_native_jit_image_free(image);
+      *image = (ny_native_jit_image_t){0};
+      free(defs);
+      free(relocs);
       return false;
     }
     unsigned char *branch_target = (unsigned char *)resolved;
@@ -219,11 +382,16 @@ static bool ny_native_jit_compile_aarch64_bundle(
     intptr_t delta = branch_target - patch;
     if ((delta & 3) != 0 || delta / 4 < -(1 << 25) ||
         delta / 4 >= (1 << 25)) {
-      ny_native_set_err(err, err_len,
-                        "native AArch64 JIT: CALL26 relocation for '%s' is out of range",
-                        relocs[i].symbol);
-      image->memory = memory; image->size = alloc_size;
+      ny_native_set_err(
+          err, err_len,
+          "native AArch64 JIT: CALL26 relocation for '%s' is out of range",
+          relocs[i].symbol);
+      image->memory = memory;
+      image->size = alloc_size;
       ny_native_jit_image_free(image);
+      *image = (ny_native_jit_image_t){0};
+      free(defs);
+      free(relocs);
       return false;
     }
     uint32_t insn = 0;
@@ -238,19 +406,28 @@ static bool ny_native_jit_compile_aarch64_bundle(
   if (entry_index < 0 || !ny_native_jit_seal(memory, alloc_size)) {
     ny_native_set_err(err, err_len,
                       "native AArch64 JIT: executable finalization failed");
-    image->memory = memory; image->size = alloc_size;
+    image->memory = memory;
+    image->size = alloc_size;
     ny_native_jit_image_free(image);
+    *image = (ny_native_jit_image_t){0};
+    free(defs);
+    free(relocs);
     return false;
   }
   image->memory = memory;
   image->size = alloc_size;
   image->entry = memory + defs[entry_index].off;
+  free(defs);
+  free(relocs);
   return true;
 }
 
 bool ny_native_jit_compile(const program_t *prog, const ny_options *opt,
                            ny_native_jit_image_t *image, char *err,
                            size_t err_len) {
+  ny_obj_buf_t code = {0};
+  ny_x64_obj_symbol_def_t *defs = NULL;
+  ny_x64_obj_reloc_t *relocs = NULL;
   nyir_set_cf_mem2reg_enabled(!opt || opt->native_enable_cf_mem2reg);
   nyir_set_pass_controls(opt ? opt->nyir_disable_pass : NULL,
                            opt ? opt->nyir_stop_after : NULL);
@@ -292,11 +469,18 @@ bool ny_native_jit_compile(const program_t *prog, const ny_options *opt,
 #endif
 
   nyir_func_t top = {0};
-  nyir_func_t funcs[NY_NATIVE_LIVE_MAX_FUNCS] = {{0}};
-  const char *names[NY_NATIVE_LIVE_MAX_FUNCS] = {0};
+  size_t func_cap = NY_NATIVE_NIR_BUNDLE_MAX_FUNCS;
+  nyir_func_t *funcs = calloc(func_cap, sizeof(*funcs));
+  const char **names = calloc(func_cap, sizeof(*names));
   size_t func_count = 0;
+  if (!funcs || !names) {
+    free(funcs);
+    free(names);
+    ny_native_set_err(err, err_len, "native JIT function pool allocation failed");
+    return false;
+  }
   if (!ny_native_build_nir(prog, opt, &top, funcs, &func_count, names,
-                           NY_NATIVE_LIVE_MAX_FUNCS, err, err_len) ||
+                           func_cap, err, err_len) ||
       top.len == 0)
     goto fail_nir;
   /*
@@ -323,10 +507,18 @@ bool ny_native_jit_compile(const program_t *prog, const ny_options *opt,
                           "native JIT: machine form gate failed for function %zu: %s",
                           i, mach_err[0] ? mach_err : "verify");
         ny_mach_func_free(&mach);
-        goto fail_nir;
-      }
-      ny_mach_func_free(&mach);
     }
+  }
+  }
+  defs = calloc(NY_NATIVE_MAX_DEFS, sizeof(*defs));
+  relocs = calloc(NY_X64_OBJ_MAX_RELOCS, sizeof(*relocs));
+  size_t def_count = 0, reloc_count = 0;
+  if (!defs || !relocs) {
+    free(defs);
+    free(relocs);
+    ny_native_set_err(err, err_len,
+                      "native JIT definition allocation failed");
+    goto fail_nir;
   }
 
   ny_jit_add_runtime_symbols();
@@ -341,19 +533,18 @@ bool ny_native_jit_compile(const program_t *prog, const ny_options *opt,
     for (size_t i = 0; i < func_count; ++i)
       nyir_func_free(&funcs[i]);
     nyir_func_free(&top);
+    free(funcs);
+    free(names);
+    free(defs);
+    free(relocs);
     return true;
   }
 
-  ny_obj_buf_t code = {0};
-  ny_x64_obj_symbol_def_t defs[NY_NATIVE_MAX_DEFS];
-  ny_x64_obj_reloc_t relocs[NY_X64_OBJ_MAX_RELOCS];
-  size_t def_count = 0, reloc_count = 0;
   /*
    * Primary independence path: machine form → bytes. Fall back to the legacy
    * NYIR object encoder only when machine form encode rejects the shape.
    */
   bool used_mir = false;
-  const char *encode_path = "machine";
   /*
    * Tier-0 stencil: const/local shell; also fold pure helper calls.
    */
@@ -361,44 +552,32 @@ bool ny_native_jit_compile(const program_t *prog, const ny_options *opt,
       ny_x64_try_stencil_bundle(&top, &target, &code, defs, &def_count, relocs,
                                 &reloc_count, err, err_len)) {
     used_mir = true;
-    encode_path = "stencil";
   } else if (func_count > 0 &&
              ny_x64_try_stencil_bundle_calls(&top, funcs, names, func_count,
                                              &target, &code, defs, &def_count,
                                              relocs, &reloc_count, err,
                                              err_len)) {
     used_mir = true;
-    encode_path = "stencil";
   }
   if (!used_mir) {
-    ny_mach_func_t top_mach = {0};
-    ny_mach_func_t *fm = NULL;
+    /*
+     * Primary path: machine form per function with per-function NYIR-object
+     * fallback.  A single machine-form incompatibility (for example the
+     * i64->f64 CONVERT of an uncolored immediate) must not sink the whole
+     * image, so encode each function through the mixed bundle and only
+     * reject when even the legacy NYIR writer cannot emit it.
+     */
     char mach_err[256] = {0};
-    bool mach_ok = ny_mach_lower_nir(&top, &top_mach, target.caps, mach_err, sizeof(mach_err));
-    if (mach_ok && func_count) {
-      fm = calloc(func_count, sizeof(*fm));
-      if (!fm)
-        mach_ok = false;
-      for (size_t i = 0; mach_ok && i < func_count; ++i)
-        mach_ok = ny_mach_lower_nir(&funcs[i], &fm[i], target.caps, mach_err, sizeof(mach_err));
-    }
-    if (mach_ok &&
-        ny_x64_mach_build_bundle(&top_mach, fm, names, func_count, &target,
-                                "rt_main", false, &code, defs, &def_count,
-                                relocs, &reloc_count, mach_err,
-                                sizeof(mach_err))) {
+    if (ny_native_x64_build_mixed_bundle(
+            &top, funcs, names, func_count, &target, "rt_main", false,
+            &code, defs, &def_count, relocs, &reloc_count, mach_err,
+            sizeof(mach_err))) {
       used_mir = true;
-      encode_path = "machine";
     } else {
       ny_obj_free(&code);
       code = (ny_obj_buf_t){0};
       def_count = reloc_count = 0;
-    }
-    ny_mach_func_free(&top_mach);
-    if (fm) {
-      for (size_t i = 0; i < func_count; ++i)
-        ny_mach_func_free(&fm[i]);
-      free(fm);
+      snprintf(mach_err, sizeof(mach_err), "native JIT: mixed bundle failed");
     }
   }
   if (!used_mir &&
@@ -408,14 +587,58 @@ bool ny_native_jit_compile(const program_t *prog, const ny_options *opt,
     ny_obj_free(&code);
     goto fail_nir;
   }
-  if (!used_mir)
-    encode_path = "nyir";
-  if (opt && opt->verbose >= 2)
-    fprintf(stderr, "native jit encoder=%s\n", encode_path);
-
+  /*
+   * A top-level mutable binding can survive optimization as an address
+   * symbol even when the early global-registration walk did not see the
+   * synthetic binding node.  Give unresolved data relocations a private
+   * eight-byte cell; call relocations and named externals still fail normally.
+   */
+  for (size_t i = 0; i < reloc_count; ++i) {
+    const char *symbol = relocs[i].symbol;
+    if (relocs[i].type != NY_RELOC_PC32 || !symbol || !symbol[0] ||
+        symbol[0] == '.' || strncmp(symbol, "ny_fn_", 6) == 0 ||
+        strncmp(symbol, "rt_", 3) == 0 ||
+        ny_x64_obj_def_index(defs, def_count, symbol) >= 0 ||
+        ny_native_jit_resolve_external(symbol))
+      continue;
+    if (def_count >= NY_NATIVE_MAX_DEFS)
+      break;
+    while (code.len & 7u)
+      if (!ny_obj_u8(&code, 0))
+        break;
+    size_t off = code.len;
+    if (!ny_obj_u64(&code, 0))
+      break;
+    snprintf(defs[def_count].name, sizeof(defs[def_count].name), "%s", symbol);
+    defs[def_count].off = off;
+    defs[def_count].size = 8;
+    defs[def_count].is_data = true;
+    ++def_count;
+  }
   const size_t stub_size = 16;
   size_t used = ny_native_jit_align(code.len, 16);
   size_t alloc_size = ny_native_jit_align(used + reloc_count * stub_size, 4096);
+
+  /*
+   * The array pool (.Lnyarr.*) rides at the tail of the code bundle.  List
+   * literals are mutable storage, so those bytes must live in a separate
+   * region that stays RW after the code region is sealed RX.
+   */
+  size_t data_start = code.len, data_end = code.len;
+  bool have_data = false;
+  for (size_t i = 0; i < def_count; ++i) {
+    if (!ny_native_jit_def_is_data(defs[i].name))
+      continue;
+    if (!have_data || defs[i].off < data_start)
+      data_start = defs[i].off;
+    size_t end = defs[i].off + defs[i].size;
+    if (!have_data || end > data_end)
+      data_end = end;
+    have_data = true;
+  }
+  size_t text_len = have_data ? data_start : code.len;
+  size_t data_len = have_data ? ny_native_jit_align(data_end - data_start, 16) : 0;
+
   unsigned char *memory = (unsigned char *)ny_native_jit_alloc(alloc_size);
   if (!memory) {
     ny_native_set_err(err, err_len, "native JIT: executable allocation failed");
@@ -423,7 +646,22 @@ bool ny_native_jit_compile(const program_t *prog, const ny_options *opt,
     goto fail_nir;
   }
   memset(memory, 0x90, alloc_size);
-  memcpy(memory, code.data, code.len);
+  memcpy(memory, code.data, text_len);
+
+  unsigned char *data_memory = NULL;
+  if (have_data && data_len > 0) {
+    data_memory = (unsigned char *)ny_native_jit_alloc_data(data_len);
+    if (!data_memory) {
+      ny_native_set_err(err, err_len, "native JIT: data pool allocation failed");
+      ny_obj_free(&code);
+      munmap(memory, alloc_size);
+      goto fail_nir;
+    }
+    memset(data_memory, 0, data_len);
+    memcpy(data_memory, code.data + data_start, data_end - data_start);
+    image->data_memory = data_memory;
+    image->data_size = data_len;
+  }
   /*
    * Stencil cache: persist self-contained code (zero relocs) so subsequent
    * runs skip parse + lower + encode entirely.  The cache is an ELF shared
@@ -449,8 +687,15 @@ bool ny_native_jit_compile(const program_t *prog, const ny_options *opt,
   ny_obj_free(&code);
 
   for (size_t i = 0; i < reloc_count; ++i) {
-    void *target_ptr = ny_native_jit_symbol(memory, defs, def_count,
-                                            relocs[i].symbol);
+    void *target_ptr;
+    if (data_memory && ny_native_jit_def_is_data(relocs[i].symbol)) {
+      int di = ny_x64_obj_def_index(defs, def_count, relocs[i].symbol);
+      target_ptr = di >= 0 ? data_memory + (defs[di].off - data_start)
+                           : ny_native_jit_resolve_external(relocs[i].symbol);
+    } else {
+      target_ptr = ny_native_jit_symbol(memory, defs, def_count,
+                                        relocs[i].symbol);
+    }
     if (!target_ptr) {
       ny_native_set_err(err, err_len, "native JIT: unresolved symbol '%s'",
                         relocs[i].symbol);
@@ -520,14 +765,22 @@ bool ny_native_jit_compile(const program_t *prog, const ny_options *opt,
   image->memory = memory;
   image->size = alloc_size;
   image->entry = memory + defs[entry_index].off;
+  free(defs);
+  free(relocs);
   for (size_t i = 0; i < func_count; ++i)
     nyir_func_free(&funcs[i]);
   nyir_func_free(&top);
+  free(funcs);
+  free(names);
   return true;
 
 fail_nir:
   for (size_t i = 0; i < func_count; ++i)
     nyir_func_free(&funcs[i]);
   nyir_func_free(&top);
+  free(funcs);
+  free(names);
+  free(defs);
+  free(relocs);
   return false;
 }

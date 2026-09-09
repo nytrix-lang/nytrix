@@ -102,6 +102,7 @@ bool ny_native_target_info_init(ny_native_target_info_t *info,
   if (!info || !opt)
     return false;
   memset(info, 0, sizeof(*info));
+  info->outline_machine_functions = opt->opt_size;
   const char *triple = opt->host_triple;
   ny_native_backend_t backend = opt->native_backend;
   if (backend == NY_NATIVE_BACKEND_LLVM)

@@ -1,8 +1,5 @@
 use std.core
-use std.core.error
-use std.core.reflect
 use std.core.dict
-use std.core.io
 use std.core.str
 
 def p = malloc(10)

@@ -42,7 +42,7 @@ fn counter_update(dict d, any xs) dict {
    if _collection_missing(xs) { return d }
    mut i = 0
    while i < xs.len {
-      d = counter_add(d, xs.get(i), 1)
+      d = counter_add(d, xs[i], 1)
       i += 1
    }
    d
@@ -55,7 +55,7 @@ fn count_by(any xs, fnptr key_fn) dict {
    if _collection_missing(xs) { return out }
    mut i = 0
    while i < xs.len {
-      def k = key_fn(xs.get(i))
+      def k = key_fn(xs[i])
       out = counter_add(out, k, 1)
       i += 1
    }
@@ -77,8 +77,8 @@ fn group_by(any xs, fnptr key_fn) dict {
    if _collection_missing(xs) { return out }
    mut i = 0
    while i < xs.len {
-      def v, k = xs.get(i), key_fn(v)
-      mut bucket = out.get(k, [])
+      def v, k = xs[i], key_fn(v)
+      mut bucket = dict_get(out, k, [])
       bucket = bucket.append(v)
       out[k] = bucket
       i += 1
@@ -89,7 +89,7 @@ fn group_by(any xs, fnptr key_fn) dict {
 fn default_get(dict d, any key, any default) any {
    "Returns `d[key]`, installing `default` into `d` first when missing."
    if !d.contains(key) { d[key] = default }
-   d.get(key, default)
+   dict_get(d, key, default)
 }
 
 @returns_owned
@@ -99,7 +99,7 @@ fn Queue(any xs=[]) dict {
    if !_collection_missing(xs) {
       mut i = 0
       while i < xs.len {
-         items = items.append(xs.get(i))
+         items = items.append(xs[i])
          i += 1
       }
    }
@@ -112,19 +112,19 @@ fn queue(any xs=[]) dict {
    Queue(xs)
 }
 
-fn _queue_items(dict q) list { q.get("items", list()) }
+fn _queue_items(dict q) list { dict_get(q, "items", list()) }
 
 fn _queue_apply(dict dst, dict src) dict {
    "Copies queue storage fields from `src` back into `dst` for APIs that must mutate in place."
-   dst["items"] = src.get("items", list())
-   dst["head"] = src.get("head", 0)
+   dst["items"] = dict_get(src, "items", list())
+   dst["head"] = dict_get(src, "head", 0)
    dst
 }
 
 fn queue_len(dict q) int {
    "Returns the number of queued items."
    def items = _queue_items(q)
-   def head = q.get("head", 0)
+   def head = dict_get(q, "head", 0)
    def n = items.len - head
    if n < 0 { return 0 }
    n
@@ -139,12 +139,12 @@ fn queue_empty(dict q) bool {
 @consumes(q)
 fn _queue_compact(dict q) dict {
    def items = _queue_items(q)
-   def head = q.get("head", 0)
+   def head = dict_get(q, "head", 0)
    if head <= 64 || head * 2 < items.len { return q }
    mut out = list(items.len - head)
    mut i = head
    while i < items.len {
-      out = out.append(items.get(i))
+      out = out.append(items[i])
       i += 1
    }
    q = q.set("items", out)
@@ -166,15 +166,16 @@ fn queue_push(dict q, any value) dict {
 fn queue_peek(dict q, any default=0) any {
    "Returns the next queued value without removing it."
    if queue_empty(q) { return default }
-   _queue_items(q).get(q.get("head", 0), default)
+   def items = _queue_items(q)
+   items[dict_get(q, "head", 0)]
 }
 
 fn queue_pop(dict q, any default=0) any {
    "Removes and returns the next queued value, or `default` when empty."
    if queue_empty(q) { return default }
    def items = _queue_items(q)
-   def head = q.get("head", 0)
-   def value = items.get(head, default)
+   def head = dict_get(q, "head", 0)
+   def value = items[head]
    q["head"] = head + 1
    def updated = _queue_compact(q)
    _queue_apply(q, updated)
@@ -218,7 +219,7 @@ fn chan(int capacity=0) dict {
 
 fn chan_closed(dict ch) bool {
    "Returns true when a channel is closed."
-   ch.get("closed", false)
+   dict_get(ch, "closed", false)
 }
 
 fn chan_len(dict ch) int {
@@ -229,7 +230,7 @@ fn chan_len(dict ch) int {
 fn chan_send(dict ch, any value) bool {
    "Sends `value` if the channel is open and capacity permits; returns success."
    if chan_closed(ch) { return false }
-   def cap = ch.get("capacity", 0)
+   def cap = dict_get(ch, "capacity", 0)
    if cap > 0 && chan_len(ch) >= cap { return false }
    def updated = queue_push(ch, value)
    _queue_apply(ch, updated)

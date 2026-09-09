@@ -9,8 +9,8 @@ shape optcheck_vector_f64 {
 use std.core
 mut sum = 0.0
 for i in 1..1000 {
-   def a = f64(i) * 0.001
-   def b = f64(i % 37) * 0.027
+   def a = float(i) * 0.001
+   def b = float(i % 37) * 0.027
    sum = sum + a * b - a / (b + 1.0)
 }
 sum

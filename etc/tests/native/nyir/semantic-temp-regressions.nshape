@@ -1,0 +1,91 @@
+;; Distilled from one-off /tmp/ny_* and /tmp/opencode probes.  Keep these
+;; deterministic: regression tests assert semantics, never debug output.
+
+shape semantic_pointer_roundtrip {
+  family "runtime-native"
+  generator "native"
+  features [native nyir x86_64 semantic pointer memory]
+  template ny-test-case
+  flags "--native-only --native-backend=x86_64 --native-tier=baseline -O0 --nyir-verify --native-result-oracle=0 --no-progress --color=never"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+
+fn pointer_roundtrip() i64 {
+  def *int p = malloc(8)
+  if p == nil { return -1 }
+  store64_i(p, 41)
+  def ptr same = addr_of(*p)
+  store64_i(same, load64_i(same) + 1)
+  def i64 answer = load64_i(p)
+  free(p)
+  answer
+}
+
+pointer_roundtrip() == 42 ? 0 : 1
+NY
+}
+
+shape semantic_list_growth_and_indexed_update {
+  family "runtime-native"
+  generator "native"
+  features [native nyir x86_64 semantic list mutation loop]
+  template ny-test-case
+  flags "--native-only --native-backend=x86_64 --native-tier=baseline -O0 --nyir-verify --native-result-oracle=0 --no-progress --color=never"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+
+fn zeros(int n) list {
+  mut result = []
+  mut i = 0
+  while i < n {
+    result = append(result, 0)
+    i += 1
+  }
+  result
+}
+
+mut values = zeros(20)
+values[16] = 7
+values[19] = values[16] + 5
+(len(values) == 20 && values[0] == 0 && values[19] == 12) ? 0 : 1
+NY
+}
+
+shape semantic_wrapping_shift_expression {
+  family "runtime-native"
+  generator "native"
+  features [native nyir x86_64 semantic integer shift]
+  template ny-test-case
+  flags "--native-only --native-backend=x86_64 --native-tier=baseline -O0 --nyir-verify --native-result-oracle=0 --no-progress --color=never"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+
+def x = 0x12345678
+def rotated = (x >> 8) | (x << 56)
+rotated == 0x7800000000123456 ? 0 : 1
+NY
+}
+
+shape semantic_boxed_predicate_branch {
+  family "runtime-native"
+  generator "native"
+  features [native nyir x86_64 semantic any bool string branch]
+  template ny-test-case
+  flags "--native-only --native-backend=x86_64 --native-tier=baseline -O0 --nyir-verify --native-result-oracle=0 --no-progress --color=never"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+
+fn classify(any value) str {
+  if __is_nil(value) { return "nil" }
+  if __is_int(value) { return "int" }
+  "unknown"
+}
+
+def t = classify(5)
+t == "int" && to_str(t) == "int" ? 0 : 1
+NY
+}

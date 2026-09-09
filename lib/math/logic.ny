@@ -176,23 +176,24 @@ fn prop_variables(dict proposition) list {
 }
 
 fn _prop_measure(dict proposition, dict state, int depth) bool {
-   if depth > state.get("max_depth") {
-      state["decided"] = false
-      state["reason"] = "depth limit"
+   def max_depth = to_int(state.get("max_depth"))
+   if depth > max_depth {
+      state.set("decided", false)
+      state.set("reason", "depth limit")
       return false
    }
-   if state.get("nodes") >= state.get("max_nodes") {
-      state["decided"] = false
-      state["reason"] = "node limit"
+   if to_int(state.get("nodes")) >= to_int(state.get("max_nodes")) {
+      state.set("decided", false)
+      state.set("reason", "node limit")
       return false
    }
-   if state.get("memory") >= state.get("max_memory") {
-      state["decided"] = false
-      state["reason"] = "memory limit"
+   if to_int(state.get("memory")) >= to_int(state.get("max_memory")) {
+      state.set("decided", false)
+      state.set("reason", "memory limit")
       return false
    }
-   state["nodes"] = state.get("nodes") + 1
-   state["memory"] = state.get("memory") + 1
+   state.set("nodes", to_int(state.get("nodes")) + 1)
+   state.set("memory", to_int(state.get("memory")) + 1)
    def kind = proposition.get("kind")
    if kind == "not" {
       return _prop_measure(proposition.get("value"), state, depth + 1)
@@ -206,17 +207,18 @@ fn _prop_measure(dict proposition, dict state, int depth) bool {
 
 fn _prop_eval_bounded(dict proposition, dict environment, dict state,
    int depth) bool {
-   if depth > state.get("max_depth") {
-      state["decided"] = false
-      state["reason"] = "depth limit"
+   def max_depth = to_int(state.get("max_depth"))
+   if depth > max_depth {
+      state.set("decided", false)
+      state.set("reason", "depth limit")
       return false
    }
-   if state.get("steps") >= state.get("max_steps") {
-      state["decided"] = false
-      state["reason"] = "step limit"
+   if to_int(state.get("steps")) >= to_int(state.get("max_steps")) {
+      state.set("decided", false)
+      state.set("reason", "step limit")
       return false
    }
-   state["steps"] = state.get("steps") + 1
+   state.set("steps", to_int(state.get("steps")) + 1)
    def kind = proposition.get("kind")
    if kind == "true" { return true }
    if kind == "false" { return false }
@@ -399,8 +401,15 @@ fn prop_check_certificate(any value) bool {
       value.get("max_steps"), value.get("max_depth"),
       value.get("max_nodes"), value.get("max_memory"))
    def claimed = value.get("decision")
-   checked.get("decided") && checked.get("valid") &&
+   ;; Dynamic dictionary booleans are Ny immediates (2/8), while this
+   ;; function's declared bool return uses the predicate ABI.  Normalize the
+   ;; final conjunction explicitly at the boundary.
+   def final_ok = checked.get("decided") && checked.get("valid") &&
    claimed.get("decided", false) && claimed.get("valid", false)
+   if final_ok {
+      return 1
+   }
+   return 0
 }
 
 ;; Compact public vocabulary. The prop_* names remain available when explicit
@@ -454,4 +463,8 @@ fn certificate(dict proposition, int max_variables=16,
       max_nodes, max_memory)
 }
 
-fn check_certificate(any value) bool { prop_check_certificate(value) }
+fn check_certificate(any value) bool {
+   def result = prop_check_certificate(value)
+   if result { return true }
+   return false
+}

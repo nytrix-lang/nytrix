@@ -1,0 +1,13 @@
+shape mutable_scalar_global {
+  family "runtime-native"
+  generator "native"
+  features [native nyir x86_64 mut globals]
+  template ny-test-case
+  flags "--native-only --native-backend=x86_64 -O3 --no-progress --color=never"
+  expect compile_and_run
+  source ny <<'NY'
+mut counter = 1
+counter = counter + 2
+print(counter)
+NY
+}

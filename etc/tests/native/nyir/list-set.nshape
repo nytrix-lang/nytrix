@@ -1,0 +1,14 @@
+shape list_set_native {
+  family "runtime-native"
+  generator "native"
+  features [native nyir x86_64 lists mutation]
+  template ny-test-case
+  flags "--native-only --native-backend=x86_64 -O3 --nyir-verify --native-result-oracle=0 --no-progress --color=never"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+mut values = [1, 2, 3]
+values.set(1, 9)
+if values.get(1, 0) == 9 { 0 } else { 1 }
+NY
+}

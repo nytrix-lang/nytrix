@@ -1,0 +1,12 @@
+shape trailing_dot_is_rejected {
+  family "syntax"
+  generator "error"
+  features [error syntax negative diagnostic]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "member access expects identifier"
+  source ny <<'NY'
+def value = 1
+value.
+NY
+}

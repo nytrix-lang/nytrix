@@ -35,6 +35,27 @@ alignment-is in [Native](native.md).
 
 ## Proof and refinement types
 
+`Fin<N>` is the bounded integer type whose values satisfy `0 <= value < N`.
+`N` must normalize to a positive compile-time integer. It uses the integer ABI,
+so passing a `Fin<N>` to an `int` parameter is representation-preserving, but
+constructing or passing an integer as `Fin<N>` requires a proven bound.
+
+```ny
+fn load_slot(Fin<4> index) int {
+   def values = [10, 20, 30, 40]
+   values[index]
+}
+
+def Fin<4> selected = 2
+assert(load_slot(selected) == 30, "bounded index")
+```
+
+Different bounds remain different static types: `Fin<4>` is not silently
+reinterpreted as `Fin<8>`. Literal and immutable compile-time bounds may be
+used in generic specialization keys. The current value-indexed core is
+deliberately bounded to `Fin<N>`; user-defined value-indexed constructors and
+dependent result types are not yet accepted.
+
 `proof<P>` is erased compile-time evidence that proposition `P` was proved.
 It is not a runtime boolean and ordinary values cannot stand in for it.
 

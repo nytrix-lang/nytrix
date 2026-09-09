@@ -141,7 +141,7 @@ fn popen(str path, list args) any {
          sys_close_quiet(stdout_read)
          return 0
       }
-      return [pid, stdin_write, stdout_read]
+      return [pid, __tag(stdin_write), __tag(stdout_read)]
    }
    #endif
    def fds = malloc(8)
@@ -156,7 +156,7 @@ fn popen(str path, list args) any {
       sys_close_quiet(stdout_read)
       return 0
    }
-   [pid, stdin_write, stdout_read]
+   [pid, __tag(stdin_write), __tag(stdout_read)]
 }
 
 #main {

@@ -474,7 +474,12 @@ fn keysym_to_unicode(int keysym) int {
    (keysym >= 0x00a0 && keysym <= 0x00ff){
       return keysym
    }
-   if band(keysym, 0xff000000) == 0x01000000 { return band(keysym, 0x00ffffff) }
+   ; Direct Unicode keysyms are encoded as 0x01000000 + codepoint.  Avoid the
+   ; dynamic bitwise bridge here: on the native path it may receive a tagged
+   ; integer and compare the representation bits rather than the keysym.
+   if keysym >= 0x01000000 && keysym < 0x02000000 {
+      return keysym % 0x01000000
+   }
    _keysym_table_lookup(keysym)
 }
 

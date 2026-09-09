@@ -3,7 +3,6 @@
 ;; Keywords: cli terminal automata conway life example
 ;; Conway's Game of Life - https://en.wikipedia.org/wiki/Conway%27s_Game_of_Life
 use std.core
-use std.core.term
 use std.math.random as rng
 use std.os.args as cli
 use std.os.time as time
@@ -134,3 +133,4 @@ while true {
    frames += 1
    if max_frames > 0 && frames >= max_frames { break }
 }
+0

@@ -11,7 +11,7 @@
 
 #include "base/options.h"
 #include "base/util.h"
-#include "wire/build.h"
+#include "code/wire/build.h"
 #include <errno.h>
 #include <stdio.h>
 #include <string.h>

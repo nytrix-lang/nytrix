@@ -1,0 +1,543 @@
+/*
+ * Compiler diagnostics: error/warning/note emission with source
+ * snippets, ANSI colorization, category routing, and max-error capping.
+ */
+
+#include "base/common.h"
+#include "base/intern.h"
+#include "base/util.h"
+#include "code/priv.h"
+#include <stdarg.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+
+const char *ny_keyword_typo_suggestion(const char *name) {
+  if (!name || !*name)
+    return NULL;
+  static const char *const keywords[] = {
+      "fn",    "def",      "mut",   "if",      "else",     "elif",     "while",
+      "for",   "return",   "use",   "import",  "export",   "module",   "case",
+      "break", "continue", "asm",   "struct",  "layout",   "enum",     "match",
+      "type",  "defer",    "in",    "as",      "and",      "or",       "not",
+      "try",   "catch",    "throw", "finally", "lambda",   "comptime", "nil",
+      "true",  "false",    "self",  "impl",    "operator", NULL};
+  const char *best = NULL;
+  int best_d = 99;
+  size_t nl = strlen(name);
+  for (int i = 0; keywords[i]; ++i) {
+    const char *kw = keywords[i];
+    size_t kl = strlen(kw);
+    size_t diff = nl > kl ? nl - kl : kl - nl;
+    if (diff > 2)
+      continue;
+    int d = ny_levenshtein(name, kw);
+    if (d >= best_d)
+      continue;
+    if (kl <= 3 && !(d == 1 && nl <= kl + 1))
+      continue;
+    best = kw;
+    best_d = d;
+  }
+  return (best && best_d <= 2) ? best : NULL;
+}
+
+/*
+ * Diagnostic codes come in two ranges:
+ *   E1xxx / W2xxx-with-low-id — explicit semantic codes passed through
+ *     ny_diag_error_code / ny_diag_warning_code (see diag_code_t above).
+ *   E2xxx / W3xxx — stable codes derived from the diagnostic format string for
+ *     callers that go through ny_diag_error / ny_diag_warning, which do not name
+ *     a category.  Each distinct format string is assigned one stable number on
+ *     first use, so the same error kind always produces the same code across a
+ *     run.  This keeps the AGENTS.md §4 "stable category" guarantee without
+ *     retagging every call site, and it stops mislabeling every generic error
+ *     as E_SYNTAX (E1001).
+ */
+enum { NY_DIAG_FMT_CAP = 512, NY_DIAG_FMT_MASK = NY_DIAG_FMT_CAP - 1 };
+
+typedef struct {
+  const char *fmt;
+  int code;
+} diag_fmt_code_t;
+
+static diag_fmt_code_t g_diag_err_fmt_codes[NY_DIAG_FMT_CAP];
+static diag_fmt_code_t g_diag_warn_fmt_codes[NY_DIAG_FMT_CAP];
+static int g_diag_next_err_code = 2001;
+static int g_diag_next_warn_code = 3001;
+
+typedef struct {
+  char *key;
+  int count;
+} diag_entry_t;
+
+static diag_entry_t *g_diag_seen_tbl = NULL;
+static size_t g_diag_seen_cap = 0;
+static size_t g_diag_seen_len = 0;
+
+static bool g_last_primary_emitted = false;
+static int g_warn_level = 1;
+static bool g_diag_compact_mode = false;
+static bool g_warn_as_error = false;
+static bool g_shadow_warnings = false;
+static int g_warn_error_count = 0;
+
+static char *g_diag_cached_file = NULL;
+static char *g_diag_cached_src = NULL;
+
+static const char *diag_token_filename(token_t tok) {
+  const char *filename = tok.filename;
+  if (!filename)
+    return NULL;
+  return ny_intern_contains_ptr(filename) ? filename : NULL;
+}
+
+static const char *diag_token_filename_or_unknown(token_t tok) {
+  const char *filename = diag_token_filename(tok);
+  return filename ? filename : "unknown";
+}
+
+void ny_diag_configure(int warn_level, bool compact_mode) {
+  if (warn_level < 0)
+    warn_level = 0;
+  if (warn_level > 2)
+    warn_level = 2;
+  g_warn_level = warn_level;
+  g_diag_compact_mode = compact_mode;
+}
+
+int ny_diag_warn_level(void) { return g_warn_level; }
+
+/*
+ * --warn-all: every emitted warning counts as an error for the exit code
+ * (CI mode).  --warn-shadow: un-suppress the W2002 shadowing linter, which is
+ * otherwise classified as "noisy" at the default warn level.
+ */
+void ny_diag_set_warn_as_error(bool value) { g_warn_as_error = value; }
+
+void ny_diag_set_shadow_warnings(bool value) { g_shadow_warnings = value; }
+
+int ny_diag_warn_as_error_count(void) { return g_warn_error_count; }
+
+static void ny_diag_count_warn_as_error(void) {
+  if (g_warn_as_error)
+    g_warn_error_count++;
+}
+
+static const char *diag_load_source(const char *filename) {
+  if (!filename || filename[0] == '<')
+    return NULL;
+  if (g_diag_cached_file && strcmp(g_diag_cached_file, filename) == 0)
+    return g_diag_cached_src;
+  free(g_diag_cached_file);
+  free(g_diag_cached_src);
+  g_diag_cached_file = ny_strdup(filename);
+  g_diag_cached_src = ny_read_file(filename);
+  return g_diag_cached_src;
+}
+
+static void diag_print_snippet(token_t tok, const char *color) {
+  const char *filename = diag_token_filename(tok);
+  if (!filename || filename[0] == '<' || tok.line <= 0 || tok.col <= 0)
+    return;
+  const char *src = diag_load_source(filename);
+  if (!src)
+    return;
+  ny_print_snippet(src, tok.line, tok.col, tok.len, color);
+}
+
+static uint64_t diag_hash(const char *s) { return ny_hash64_cstr(s); }
+
+static bool diag_tbl_grow(void) {
+  size_t old_cap = g_diag_seen_cap;
+  diag_entry_t *old_tbl = g_diag_seen_tbl;
+  g_diag_seen_cap = g_diag_seen_cap ? g_diag_seen_cap * 2 : 2048;
+  g_diag_seen_tbl = calloc(g_diag_seen_cap, sizeof(diag_entry_t));
+  if (!g_diag_seen_tbl)
+    return false;
+  size_t mask = g_diag_seen_cap - 1;
+  for (size_t i = 0; i < old_cap; ++i) {
+    if (!old_tbl[i].key)
+      continue;
+    uint64_t h = diag_hash(old_tbl[i].key);
+    size_t idx = (size_t)h & mask;
+    while (g_diag_seen_tbl[idx].key)
+      idx = (idx + 1) & mask;
+    g_diag_seen_tbl[idx] = old_tbl[i];
+  }
+  free(old_tbl);
+  return true;
+}
+
+static bool diag_mark_seen(const char *key) {
+  if (!key)
+    return false;
+  if (g_diag_seen_cap == 0 || (g_diag_seen_len + 1) * 3 >= g_diag_seen_cap * 2) {
+    if (!diag_tbl_grow())
+      return true;
+  }
+  uint64_t h = diag_hash(key);
+  size_t mask = g_diag_seen_cap - 1;
+  size_t idx = (size_t)h & mask;
+  while (g_diag_seen_tbl[idx].key) {
+    if (strcmp(g_diag_seen_tbl[idx].key, key) == 0) {
+      g_diag_seen_tbl[idx].count++;
+      return g_diag_seen_tbl[idx].count <= 4;
+    }
+    idx = (idx + 1) & mask;
+  }
+  g_diag_seen_tbl[idx].key = ny_strdup(key);
+  g_diag_seen_tbl[idx].count = 1;
+  g_diag_seen_len++;
+  return true;
+}
+
+bool ny_diag_should_emit(const char *kind, token_t tok, const char *name) {
+  char key[512];
+  const char *file = diag_token_filename_or_unknown(tok);
+  snprintf(key, sizeof(key), "%s|%s|%d|%d|%s", kind ? kind : "diag", file, tok.line, tok.col,
+           name ? name : "");
+  return diag_mark_seen(key);
+}
+
+#define NY_STDLIB_TOK_CACHE_SLOTS 4096u
+
+typedef struct {
+  const char *filename;
+  bool value;
+  bool valid;
+} stdlib_tok_cache_entry_t;
+
+static stdlib_tok_cache_entry_t g_stdlib_tok_cache[NY_STDLIB_TOK_CACHE_SLOTS];
+
+static size_t stdlib_tok_cache_slot(const char *ptr) {
+  uintptr_t x = (uintptr_t)ptr;
+  x >>= 3;
+  x ^= x >> 33;
+  x *= (uintptr_t)0xff51afd7ed558ccdULL;
+  x ^= x >> 33;
+  return (size_t)x & (NY_STDLIB_TOK_CACHE_SLOTS - 1u);
+}
+
+static void ny_diag_norm_path(char *dst, size_t dst_len, const char *src) {
+  if (!dst || dst_len == 0)
+    return;
+  dst[0] = '\0';
+  if (!src)
+    return;
+  size_t i = 0;
+  for (; src[i] && i + 1 < dst_len; ++i)
+    dst[i] = src[i] == '\\' ? '/' : src[i];
+  dst[i] = '\0';
+}
+
+static bool ny_diag_path_has_prefix(const char *path, const char *prefix) {
+  if (!path || !prefix || !*prefix)
+    return false;
+  size_t n = strlen(prefix);
+  if (strncmp(path, prefix, n) != 0)
+    return false;
+  return path[n] == '\0' || path[n] == '/';
+}
+
+static const char *ny_diag_root_lib_path(void) {
+  static bool initialized = false;
+  static char root_lib[4096];
+  if (initialized)
+    return root_lib[0] ? root_lib : NULL;
+  initialized = true;
+  const char *root = ny_src_root();
+  if (!root || !*root)
+    return NULL;
+  char norm_root[4096];
+  ny_diag_norm_path(norm_root, sizeof(norm_root), root);
+  snprintf(root_lib, sizeof(root_lib), "%s/lib", norm_root);
+  return root_lib[0] ? root_lib : NULL;
+}
+
+static bool ny_is_stdlib_filename_uncached(const char *filename) {
+  if (!filename)
+    return false;
+  if (filename[0] == '<')
+    return strcmp(filename, "<stdlib>") == 0 || strcmp(filename, "<repl_std>") == 0;
+  if (strncmp(filename, "lib/", 4) == 0 || strncmp(filename, "lib\\", 4) == 0)
+    return true;
+  if (strstr(filename, "/nytrix/lib/") != NULL ||
+      strstr(filename, "/nytrix/nytrix/lib/") != NULL ||
+      strstr(filename, "/share/nytrix/") != NULL ||
+      strstr(filename, "/lib/nytrix/std/") != NULL ||
+      strstr(filename, "std.ny") != NULL) {
+    return true;
+  }
+
+  char norm[4096];
+  ny_diag_norm_path(norm, sizeof(norm), filename);
+  const char *root_lib = ny_diag_root_lib_path();
+  return (root_lib && ny_diag_path_has_prefix(norm, root_lib)) ||
+         strstr(norm, "/lib/core/") != NULL ||
+         strstr(norm, "/lib/math/") != NULL ||
+         strstr(norm, "/lib/os/") != NULL ||
+         strstr(norm, "/lib/math/parse/") != NULL ||
+         strstr(norm, "/nytrix/lib/") != NULL ||
+         strstr(norm, "/nytrix/nytrix/lib/") != NULL ||
+         strstr(norm, "std.ny") != NULL ||
+         strstr(norm, "/share/nytrix/") != NULL ||
+         strstr(norm, "/lib/nytrix/std/") != NULL;
+}
+
+bool ny_is_stdlib_tok(token_t tok) {
+  const char *filename = diag_token_filename(tok);
+  if (!filename)
+    return false;
+  stdlib_tok_cache_entry_t *entry =
+      &g_stdlib_tok_cache[stdlib_tok_cache_slot(filename)];
+  if (entry->valid && entry->filename == filename)
+    return entry->value;
+  bool res = ny_is_stdlib_filename_uncached(filename);
+  entry->filename = filename;
+  entry->value = res;
+  entry->valid = true;
+  return res;
+}
+
+bool ny_strict_error_enabled(codegen_t *cg, token_t tok) {
+  return cg->strict_diagnostics && !ny_is_stdlib_tok(tok);
+}
+
+static bool ny_warning_code_is_noisy(int code) {
+  if (code == (int)W_SHADOWING && g_shadow_warnings)
+    return false;
+  return code == (int)W_SHADOWING;
+}
+
+static bool ny_diag_emit_unique(const char *level, token_t tok, const char *rendered) {
+  char key[1536];
+  const char *file = diag_token_filename_or_unknown(tok);
+  int line = tok.line < 0 ? 0 : tok.line;
+  int col = tok.col < 0 ? 0 : tok.col;
+  snprintf(key, sizeof(key), "line|%s|%s|%d|%d|%s", level, file, line, col,
+           rendered ? rendered : "");
+  return diag_mark_seen(key);
+}
+
+static void ny_diag_primary(const char *label, const char *code, const char *label_color,
+                            const char *code_color, token_t tok, const char *fmt, va_list ap) {
+  va_list cp;
+  va_copy(cp, ap);
+  char rendered[1024];
+  vsnprintf(rendered, sizeof(rendered), fmt, cp);
+  va_end(cp);
+
+  if (!ny_diag_emit_unique(label, tok, rendered)) {
+    g_last_primary_emitted = false;
+    return;
+  }
+
+  const char *file = diag_token_filename_or_unknown(tok);
+  int line = tok.line < 0 ? 0 : tok.line;
+  int col = tok.col < 0 ? 0 : tok.col;
+
+  if (g_diag_compact_mode) {
+    fprintf(stderr, "%s:%d:%d: [%s] %s: %s\n", file, line, col, code, label, rendered);
+  } else {
+
+    fprintf(stderr, "%s:%d:%d:  %s[%s]%s %s%s:%s %s\n", file, line, col, clr(code_color), code,
+            clr(NY_CLR_RESET), clr(label_color), label, clr(NY_CLR_RESET), rendered);
+    diag_print_snippet(tok, label_color);
+  }
+
+  g_last_primary_emitted = true;
+}
+
+static void ny_secondary(const char *label, const char *label_color, const char *rendered) {
+  if (!g_last_primary_emitted)
+    return;
+  if (g_diag_compact_mode)
+    fprintf(stderr, "       %s %s\n", label, rendered);
+  else
+    fprintf(stderr, "       %s%s%s  %s\n", clr(label_color), label, clr(NY_CLR_RESET), rendered);
+}
+
+/*
+ * Assign a stable code to a diagnostic format string.  The same format always
+ * maps to the same code within a process, so error categories are stable without
+ * each call site having to name one.  Codes are drawn from the caller-supplied
+ * counter so the E2xxx (error) and W3xxx (warning) ranges stay distinct.
+ */
+static int ny_diag_code_for_fmt(diag_fmt_code_t *table, int *next_code,
+                                const char *fmt) {
+  if (!fmt)
+    fmt = "";
+  uint64_t hash = diag_hash(fmt);
+  size_t idx = (size_t)hash & NY_DIAG_FMT_MASK;
+  for (;;) {
+    if (table[idx].fmt == NULL) {
+      int code = (*next_code)++;
+      table[idx].fmt = fmt;
+      table[idx].code = code;
+      return code;
+    }
+    /*
+     * Identical format strings may come from different translation units or
+     * generated buffers; classify by content, not pointer identity.
+     */
+    if (strcmp(table[idx].fmt, fmt) == 0)
+      return table[idx].code;
+    idx = (idx + 1u) & NY_DIAG_FMT_MASK;
+  }
+}
+
+void ny_diag_error(token_t tok, const char *fmt, ...) {
+  char code_buf[16];
+  int code = ny_diag_code_for_fmt(g_diag_err_fmt_codes, &g_diag_next_err_code, fmt);
+  snprintf(code_buf, sizeof(code_buf), "E%04d", code);
+  va_list ap;
+  va_start(ap, fmt);
+  ny_diag_primary("error", code_buf, NY_CLR_BRIGHT_RED, NY_CLR_BRIGHT_CYAN,
+                  tok, fmt, ap);
+  va_end(ap);
+}
+
+void ny_diag_warning(token_t tok, const char *fmt, ...) {
+  if (g_warn_level <= 0) {
+    g_last_primary_emitted = false;
+    return;
+  }
+  if (g_warn_level <= 1 && ny_is_stdlib_tok(tok)) {
+    g_last_primary_emitted = false;
+    return;
+  }
+  ny_diag_count_warn_as_error();
+  char code_buf[16];
+  int code = ny_diag_code_for_fmt(g_diag_warn_fmt_codes, &g_diag_next_warn_code, fmt);
+  snprintf(code_buf, sizeof(code_buf), "W%04d", code);
+  va_list ap;
+  va_start(ap, fmt);
+  ny_diag_primary("warning", code_buf, NY_CLR_BRIGHT_YELLOW,
+                  NY_CLR_BRIGHT_CYAN, tok, fmt, ap);
+  va_end(ap);
+}
+
+void ny_diag_error_code(token_t tok, int code, const char *fmt, ...) {
+  char code_buf[16];
+  if (code <= 0)
+    code = (int)E_SYNTAX;
+  snprintf(code_buf, sizeof(code_buf), "E%04d", code);
+  va_list ap;
+  va_start(ap, fmt);
+  ny_diag_primary("error", code_buf, NY_CLR_BRIGHT_RED, NY_CLR_BRIGHT_CYAN,
+                  tok, fmt, ap);
+  va_end(ap);
+}
+
+void ny_diag_warning_code(token_t tok, int code, const char *fmt, ...) {
+  if (g_warn_level <= 0) {
+    g_last_primary_emitted = false;
+    return;
+  }
+  if (g_warn_level <= 1 && (ny_warning_code_is_noisy(code) || ny_is_stdlib_tok(tok))) {
+    g_last_primary_emitted = false;
+    return;
+  }
+  ny_diag_count_warn_as_error();
+  char code_buf[16];
+  if (code <= 0)
+    code = (int)W_UNUSED;
+  snprintf(code_buf, sizeof(code_buf), "W%04d", code);
+  va_list ap;
+  va_start(ap, fmt);
+  ny_diag_primary("warning", code_buf, NY_CLR_BRIGHT_YELLOW,
+                  NY_CLR_BRIGHT_CYAN, tok, fmt, ap);
+  va_end(ap);
+}
+
+void ny_diag_hint(const char *fmt, ...) {
+  if (!g_last_primary_emitted)
+    return;
+  va_list ap;
+  va_start(ap, fmt);
+  char rendered[1024];
+  vsnprintf(rendered, sizeof(rendered), fmt, ap);
+  va_end(ap);
+  char key[1200];
+  snprintf(key, sizeof(key), "hint|%s", rendered);
+  if (!diag_mark_seen(key))
+    return;
+  ny_secondary("hint:", NY_CLR_YELLOW, rendered);
+}
+
+void ny_diag_fix(const char *fmt, ...) {
+  if (!g_last_primary_emitted)
+    return;
+  va_list ap;
+  va_start(ap, fmt);
+  char rendered[1024];
+  vsnprintf(rendered, sizeof(rendered), fmt, ap);
+  va_end(ap);
+  char key[1200];
+  snprintf(key, sizeof(key), "fix|%s", rendered);
+  if (!diag_mark_seen(key))
+    return;
+  ny_secondary("fix:", NY_CLR_GREEN, rendered);
+}
+
+void ny_diag_note_tok(token_t tok, const char *fmt, ...) {
+  va_list ap;
+  va_start(ap, fmt);
+  char rendered[1024];
+  vsnprintf(rendered, sizeof(rendered), fmt, ap);
+  va_end(ap);
+  const char *file = diag_token_filename_or_unknown(tok);
+  int line = tok.line < 0 ? 0 : tok.line;
+  int col = tok.col < 0 ? 0 : tok.col;
+  char key[1536];
+  snprintf(key, sizeof(key), "note|%s|%d|%d|%s", file, line, col, rendered);
+  if (!diag_mark_seen(key))
+    return;
+  fprintf(stderr, "%s:%d:%d: %s[%s]%s %s\n", file, line, col, clr(NY_CLR_CYAN), "note",
+          clr(NY_CLR_RESET), rendered);
+}
+
+void ny_diag_error_context(token_t tok, const char *primary_msg, const char *context,
+                           const char *suggestion) {
+  ny_diag_error(tok, "%s", primary_msg);
+  if (context && *context)
+    ny_diag_hint("%s", context);
+  if (suggestion && *suggestion)
+    ny_diag_fix("%s", suggestion);
+}
+
+void ny_diag_type_mismatch(token_t tok, const char *expected, const char *got,
+                           const char *context) {
+  ny_diag_error(tok, "type mismatch: expected %s'%s'%s, got %s'%s'%s", clr(NY_CLR_BOLD), expected,
+                clr(NY_CLR_RESET), clr(NY_CLR_BOLD), got, clr(NY_CLR_RESET));
+  if (context && *context)
+    ny_diag_hint("in %s", context);
+
+  if (strcmp(expected, "int") == 0 && strcmp(got, "f64") == 0) {
+    ny_diag_fix("Use %strunc(x)%s or %sfloor(x)%s to convert f64 → int", clr(NY_CLR_BOLD),
+                clr(NY_CLR_RESET), clr(NY_CLR_BOLD), clr(NY_CLR_RESET));
+  } else if (strcmp(expected, "f64") == 0 && strcmp(got, "int") == 0) {
+    ny_diag_fix("Use %sf64(x)%s to convert int → f64", clr(NY_CLR_BOLD), clr(NY_CLR_RESET));
+  } else if (strstr(expected, "list") && strstr(got, "dict")) {
+    ny_diag_fix("Use %slist(d)%s (keys) or %svalues(d)%s to convert dict → list", clr(NY_CLR_BOLD),
+                clr(NY_CLR_RESET), clr(NY_CLR_BOLD), clr(NY_CLR_RESET));
+  } else if (strcmp(expected, "str") == 0 && strcmp(got, "int") == 0) {
+    ny_diag_fix("Use %sto_str(x)%s to convert int → string", clr(NY_CLR_BOLD), clr(NY_CLR_RESET));
+  } else if (strcmp(expected, "int") == 0 && strcmp(got, "str") == 0) {
+    ny_diag_fix("Use %satoi(s)%s to convert string → int", clr(NY_CLR_BOLD), clr(NY_CLR_RESET));
+  } else {
+    ny_diag_hint("Consider whether a type conversion or different variable is needed");
+  }
+}
+
+void ny_diag_error_with_context(token_t tok, const char *primary_msg, const char *common_cause,
+                                const char *fix_suggestion) {
+  ny_diag_error(tok, "%s", primary_msg);
+  if (common_cause && *common_cause)
+    ny_diag_hint("%s", common_cause);
+  if (fix_suggestion && *fix_suggestion)
+    ny_diag_fix("%s", fix_suggestion);
+}

@@ -1,0 +1,37 @@
+shape prime {
+  family "algorithm"
+  features ["c-vs-ny", "checksum"]
+  template ny-test-case
+  expect compile_and_run
+  ;; Translated from the QBE minic test: minic/test/prime.c.
+  source ny <<'NY'
+mut count = 0
+mut n = 2
+while n < 5000 {
+   mut p = 1
+   mut d = 2
+   while d * d <= n {
+      if n % d == 0 { p = 0 }
+      d += 1
+   }
+   if p { count += 1 }
+   n += 1
+}
+print(count)
+NY
+  source c <<'C'
+#include <stdio.h>
+
+int main(void) {
+  int count = 0;
+  for (int n = 2; n < 5000; ++n) {
+    int prime = 1;
+    for (int divisor = 2; divisor * divisor <= n; ++divisor) {
+      if (n % divisor == 0) prime = 0;
+    }
+    if (prime) ++count;
+  }
+  printf("%d\n", count);
+}
+C
+}

@@ -8,24 +8,24 @@ shape vec3_normalize {
 use std.core
 use std.math
 use std.math.vector
-fn normalize(vec3: src) vec3 {
-   def len = sqrt(src * src)
+fn normalize(vec3 src) any {
+   def len = sqrt(src.x * src.x + src.y * src.y + src.z * src.z)
    if(len == 0.0) { return Vector3(0.0, 0.0, 0.0) }
-   Vector3(src / len)
+   Vector3(src.x / len, src.y / len, src.z / len)
 }
 ;; Raw layout surface: this is the current low-level typed-memory form.
 layout Vec3 {
-   f64: x,
-   f64: y,
-   f64: z
+   f64 x,
+   f64 y,
+   f64 z
 }
-fn set_vec3(ptr: dst, f64: x, f64: y, f64: z) ptr {
+fn set_vec3(ptr dst, f64 x, f64 y, f64 z) ptr {
    store64_f64(dst, x, __layout_offset("Vec3", "x"))
    store64_f64(dst, y, __layout_offset("Vec3", "y"))
    store64_f64(dst, z, __layout_offset("Vec3", "z"))
    return dst
 }
-fn normalize_ptr(ptr: src, ptr: dst) ptr {
+fn normalize_ptr(ptr src, ptr dst) ptr {
    def sx = load64_f64(src, __layout_offset("Vec3", "x"))
    def sy = load64_f64(src, __layout_offset("Vec3", "y"))
    def sz = load64_f64(src, __layout_offset("Vec3", "z"))
@@ -33,13 +33,13 @@ fn normalize_ptr(ptr: src, ptr: dst) ptr {
    if(len == 0.0){ return set_vec3(dst, 0.0, 0.0, 0.0) }
    return set_vec3(dst, sx / len, sy / len, sz / len)
 }
-def vec3: a = Vector3(1.0, 2.0, 2.0)
-def vec3: n = normalize(a)
+def vec3 a = Vector3(1.0, 2.0, 2.0)
+def n = normalize(a)
 assert(runtime_type(n) == "vec3", "normalize returns runtime vec3")
 assert(n.x > 0.333 && n.x < 0.334, "normalize x")
 assert(n.y > 0.666 && n.y < 0.667, "normalize y")
 assert(n.z > 0.666 && n.z < 0.667, "normalize z")
-def vec3: zed = normalize(Vector3(0.0, 0.0, 0.0))
+def vec3 zed = normalize(Vector3(0.0, 0.0, 0.0))
 assert(zed.x == 0.0 && zed.y == 0.0 && zed.z == 0.0, "guard if expression returns early")
 def raw = malloc(__layout_size("Vec3"))
 def out = malloc(__layout_size("Vec3"))

@@ -22,10 +22,13 @@ fn spawn(any path, any args) any {
    def res = popen(path, args)
    if res == 0 { return 0 }
    mut p = dict(4)
+   ; popen returns canonical dynamic scalar fields. Preserve their tags when
+   ; moving them into the process dictionary; retagging here double-encodes
+   ; descriptors and turns odd fds into invalid reads.
    p["pid"] = res.get(0)
-   p["in"] = res.get(1)
-   p["out"] = res.get(2)
-   p["alive"] = 1
+   p["in"] = __tag(res.get(1))
+   p["out"] = __tag(res.get(2))
+   p["alive"] = __tag(1)
    p
 }
 
@@ -39,10 +42,11 @@ fn send(any p, any data) any {
    if n <= 0 { return ok(0) }
    mut off = 0
    while off < n {
-      match sys_write(fd, to_int(data) + off, n - off) {
+      match sys_write(fd, to_int(data) + __tag(off), __tag(n - off)) {
          ok(w) -> {
-            if w <= 0 { return err("short write") }
-            off += w
+            def wr = is_int(w) ? __untag(w) : w
+            if wr <= 0 { return err("short write") }
+            off += wr
          }
          err(e) -> { return err(e) }
       }
@@ -68,17 +72,20 @@ fn recv(any p, any n=1024) any {
    "Receives up to `n` bytes from process `p`'s stdout."
    def fd = _pfd(p, "out")
    if fd < 0 { return 0 }
-   if !is_int(n) || n <= 0 { n = 1024 }
+   if !is_int(n) { n = 1024 }
+   def cap = int(n)
+   if cap <= 0 { n = 1024 } else { n = cap }
    if n > 8 * 1024 * 1024 { n = 8 * 1024 * 1024 }
    mut buf = malloc(n + 1)
    if buf == 0 { return "" }
-   match sys_read(fd, buf, n) {
+   match sys_read(fd, buf, __tag(n)) {
       ok(r) -> {
-         if r <= 0 {
+         def rr = is_int(r) ? __untag(r) : r
+         if rr <= 0 {
             free(buf)
             return ""
          }
-         init_str(buf, r)
+         init_str(buf, rr)
          buf
       }
       err(ignorederr) -> { ignorederr
@@ -97,7 +104,7 @@ fn recv_line(any p) str {
    init_str(c_buf, 1)
    mut b = Builder(128)
    while 1 {
-      def got = sys_read(fd, c_buf, 1)
+      def got = sys_read(fd, c_buf, __tag(1))
       mut res = 0
       match got {
          ok(r) -> { res = r }

@@ -1,7 +1,7 @@
 <!-- nytrix-doc: {"audience":"user","featured":false,"group":"overview","order":0,"summary":"A statically typed native language with explicit machine boundaries."} -->
-# Think freely.
+# Think freely. Control precisely.
 
-Native · Portable · Explicit · Comptime · Ownership · Interop · Batteries
+Native · Explicit · Ownership · Interop · Paradigms
 
 <!-- overview:quick-start -->
 
@@ -16,7 +16,7 @@ Native · Portable · Explicit · Comptime · Ownership · Interop · Batteries
 
 <!-- overview:body -->
 
-> Concise by default, explicit at boundaries, and precise when control matters, with abstractions that stay transparent, guarantees checked rather than assumed, and the machine always within reach.
+> Concise by default. Flexible by design. Explicit when it matters.
 
 <!-- overview:cards {"kind":"learn","title":"Learn","summary":"Build and run a program, then choose a focused workflow."} -->
 
@@ -25,3 +25,5 @@ Native · Portable · Explicit · Comptime · Ownership · Interop · Batteries
 <!-- overview:cards {"kind":"project","title":"Project","summary":"Release notes and tracked public work."} -->
 
 <!-- overview:cards {"kind":"reference","title":"Reference","summary":"Source-linked standard-library entry points."} -->
+
+<!-- overview:root-readme -->

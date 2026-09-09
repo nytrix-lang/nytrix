@@ -8,113 +8,122 @@ use std.core.str
 use std.core.primitives
 use std.core.primitives as prim
 use std.core.dict_mod
+use std.core.set_mod as core_set
 use std.core.syntax.type
 
 @inline
 fn _has_tag(any x, any tag) bool {
-   def got = __tagof(x)
-   got == tag || got == __tag(tag)
+   return __has_tag(x, tag)
 }
 
 @inline
-fn _is_dict(any x) bool { _has_tag(x, runtime_tag_raw("dict")) }
+fn _is_dict(any x) bool { return _has_tag(x, runtime_tag_raw("dict")) }
 
 @inline
-fn _is_list(any x) bool { _has_tag(x, runtime_tag_raw("list")) }
+fn _is_list(any x) bool { return _has_tag(x, runtime_tag_raw("list")) }
 
 @inline
-fn _is_set(any x) bool { _has_tag(x, runtime_tag_raw("set")) }
+fn _is_set(any x) bool { return _has_tag(x, runtime_tag_raw("set")) }
 
 @inline
-fn _is_tuple(any x) bool { _has_tag(x, runtime_tag_raw("tuple")) }
+fn _is_tuple(any x) bool { return _has_tag(x, runtime_tag_raw("tuple")) }
 
 @inline
-fn _is_range(any x) bool { _has_tag(x, runtime_tag_raw("range")) }
+fn _is_range(any x) bool { return _has_tag(x, runtime_tag_raw("range")) }
 
 @inline
-fn _is_bytes(any x) bool { _has_tag(x, runtime_tag_raw("bytes")) }
+fn _is_bytes(any x) bool { return _has_tag(x, runtime_tag_raw("bytes")) }
 
 @inline
 fn _is_raw_ptr_like(any x) bool {
-   if __is_int(x) { return false }
-   if !x { return false }
+   if __is_int(x) || !x { return false }
    def tag = __tagof(x)
-   if __eq(tag, runtime_tag_raw("ptr")) || __eq(tag, runtime_tag_raw("ffi_ptr")) { return true }
+   def seq = _is_seq_tag(tag)
+   if tag == runtime_tag_raw("ptr") || tag == runtime_tag_raw("ffi_ptr") { return true }
    if tag == 0 && prim.is_ptr(x) { return true }
-   prim.is_ptr(x) && !_has_tag(x, runtime_tag_raw("set")) && !_is_bigint(x) && !_is_bigfloat(x)
-   && !_is_str_tag(tag) && !_is_seq_tag(tag) && !_has_tag(x, runtime_tag_raw("dict"))
+   if seq { return false }
+   if _is_str_tag(tag) { return false }
+   if _has_tag(x, runtime_tag_raw("dict")) { return false }
+   if _has_tag(x, runtime_tag_raw("set")) { return false }
+   if _has_tag(x, runtime_tag_raw("bytes")) { return false }
+   if _is_bigint(x) { return false }
+   if _is_bigfloat(x) { return false }
+   return prim.is_ptr(x) != 0
 }
 
 @inline
 fn _is_seq_tag(any tag) bool {
    if !__is_int(tag) { return false }
-   __eq(tag, runtime_tag_raw("list")) || __eq(tag, runtime_tag_raw("tuple")) || __eq(tag, runtime_tag_raw("range"))
+   def t = if tag > 127 { tag >> 1 } else { tag }
+   return t == runtime_tag_raw("list") || t == runtime_tag_raw("tuple") || t == runtime_tag_raw("range")
 }
 
 @inline
 fn _is_list_tuple_tag(any tag) bool {
    if !__is_int(tag) { return false }
-   __eq(tag, runtime_tag_raw("list")) || __eq(tag, runtime_tag_raw("tuple"))
+   def t = if tag > 127 { tag >> 1 } else { tag }
+   return t == runtime_tag_raw("list") || t == runtime_tag_raw("tuple")
 }
 
 @inline
 fn _is_str_tag(any tag) bool {
    if !__is_int(tag) { return false }
-   __eq(tag, runtime_tag_raw("str")) || __eq(tag, runtime_tag_raw("str_const"))
+   def t = if tag > 127 { tag >> 1 } else { tag }
+   return t == runtime_tag_raw("str") || t == runtime_tag_raw("str_const")
 }
 
 @inline
-fn _is_seq(any x) bool { _is_seq_tag(__tagof(x)) }
+fn _is_seq(any x) bool { return _is_seq_tag(__tagof(x)) }
 
 @inline
-fn _is_bigint(any x) bool { _has_tag(x, runtime_tag_raw("bigint")) }
+fn _is_bigint(any x) bool { return _has_tag(x, runtime_tag_raw("bigint")) }
 
 @inline
-fn _is_bigfloat(any x) bool { _has_tag(x, runtime_tag_raw("bigfloat")) }
+fn _is_bigfloat(any x) bool { return _has_tag(x, runtime_tag_raw("bigfloat")) }
 
 @inline
-fn _is_str(any x) bool { _is_str_tag(__tagof(x)) }
+fn _is_str(any x) bool { return _is_str_tag(__tagof(x)) }
 
 @inline
-fn _is_float(any x) bool { __is_float_obj(x) }
+fn _is_float(any x) bool { return __is_float_obj(x) }
 
 @inline
-fn _dict_get_raw(any d, any key, any default=0) any { dict_get(d, key, default) }
+fn _dict_get_raw(any d, any key, any default=0) any { return dict_get(d, key, default) }
 
 @inline
-fn _dict_put_raw(any d, any key, any value) any { dict_set(d, key, value) }
+fn _dict_put_raw(any d, any key, any value) any { return dict_set(d, key, value) }
 
 @inline
-fn _dict_has_raw(any d, any key) bool { dict_exists(d, key) }
+fn _dict_has_raw(any d, any key) bool { return dict_exists(d, key) }
 
 @inline
-fn _dict_items_raw(any d) list { dict_items(d) }
+fn _dict_items_raw(any d) list { return dict_items(d) }
 
 @inline
-fn _dict_keys_raw(any d) list { dict_keys(d) }
+fn _dict_keys_raw(any d) list { return dict_keys(d) }
 
 @inline
-fn _dict_values_raw(any d) list { dict_values(d) }
+fn _dict_values_raw(any d) list { return dict_values(d) }
 
 @inline
 fn _set_seq_count(any xs, int count) any {
-   store64(xs, count, 0)
-   xs
+   __list_set_len(xs, count)
+   return xs
 }
 
 @inline
-fn _raw_len(any obj) int { __load64_idx(prim.sub(obj, 16), 0) }
+fn _raw_len(any obj) int { return __str_len(obj) }
 
 @inline
-fn _float_one() any { __flt_box_val(__flt_from_int(1)) }
+fn _float_one() any { return __flt_box_val(__flt_from_int(1)) }
 
 @inline
-fn _as_float(any x) any { __mul(x, _float_one()) }
+fn _as_float(any x) any { return __mul(x, _float_one()) }
 
 @inline
 fn _store_item_raw(list xs, int index, any value) list {
    __store_item_fast(xs, index, value)
-   xs
+   return xs
 }
 
 fn _type_error(str op, str want, any got) any {
@@ -123,7 +132,7 @@ fn _type_error(str op, str want, any got) any {
 }
 
 fn _vec_dim_type(any t) int {
-   case t {
+   return case t {
       "vec2", "Vector2" -> 2
       "vec3", "Vector3" -> 3
       "vec4", "Vector4" -> 4
@@ -141,15 +150,15 @@ fn _vec_kind_name(int n) str {
 
 fn _is_vecdict(any x) bool {
    if !_is_dict(x) { return false }
-   _vec_dim_type(_dict_get_raw(x, "__type", "")) > 0
+   return _vec_dim_type(_dict_get_raw(x, "__type", "")) > 0
 }
 
-fn _vec_dim(any x) int { _vec_dim_type(_dict_get_raw(x, "__type", "")) }
+fn _vec_dim(any x) int { return _vec_dim_type(_dict_get_raw(x, "__type", "")) }
 
 fn _seq_at(any x, int i, any default=0) any {
    def n = __load64_idx(x, 0)
    if i < 0 || i >= n { return default }
-   __load_item(x, i)
+   return __load_item(x, i)
 }
 
 fn _vec_at(any x, int i, any default=0) any {
@@ -393,24 +402,21 @@ fn len(any x) int {
    - For **list/tuple/dict/set**: number of items.
    - For **bytes**: buffer size.
    Panics for unsupported types."
-   if __is_str_obj(x) { return _raw_len(x) }
-   if _is_vecdict(x) { return _vec_dim(x) }
-   if _is_list(x) || _is_tuple(x) || _is_dict(x) || _is_set(x) { return __load64_idx(x, 0) }
+   if _is_list(x) || _is_tuple(x) { return __load64_idx(x, 0) }
+   if _is_dict(x) { return dict_len(x) }
+   if _is_set(x) { return core_set.len(x) }
+   if _is_str(x) { return __str_len(x) }
+   if _is_bytes(x) { return __load64_idx(x, -16) >> 1 }
    if _is_range(x) {
       def start = __load64_idx(x, 0)
       def stop = __load64_idx(x, 8)
       def step = __load64_idx(x, 16)
-      if step == 0 { return 0 }
-      if step > 0 {
-         if start >= stop { return 0 }
-         return ((stop - start - 1) / step) + 1
-      }
-      if start <= stop { return 0 }
-      return ((start - stop - 1) / (0 - step)) + 1
+      if step > 0 && start < stop { return (stop - start + step - 1) / step }
+      if step < 0 && start > stop { return (start - stop - step - 1) / (-step) }
+      return 0
    }
-   if _is_bytes(x) { return _raw_len(x) }
-   if _is_float(x) { return 0 }
-   _type_error("len", "a string, bytes, list, tuple, dict, set, or range", x)
+   __panic("len expects sequence or collection, got " + type(x))
+   0
 }
 
 fn _range_contains(any container, any item) bool {
@@ -459,7 +465,7 @@ fn contains(any container, any item) bool {
    }
    if _is_list(container) || _is_tuple(container) {
       mut i = 0
-      def n = __load64_idx(container, 0)
+      def n = len(container)
       while i < n {
          if eq(__load_item(container, i), item) { return true }
          i += 1
@@ -477,9 +483,9 @@ fn type(any x) str {
    "Returns a string representing the **tag-type** of Nytrix value `x`.
    Return values: `nil`, `int`, `float`, `str`, `list`, `dict`, `set`,
    `tuple`, `bytes`, `bigint`, `bool`, `ptr`, `unknown`."
-   if type.is_nil(x) { return "nil" }
+   if prim.is_nil(x) { return "nil" }
    if __is_int(x) { return "int" }
-   if __eq(x, true) || __eq(x, false) { return "bool" }
+   if x == true || x == false { return "bool" }
    if _is_float(x) { return "float" }
    if _is_bigint(x) { return "bigint" }
    if _is_bigfloat(x) { return "bigfloat" }
@@ -491,58 +497,79 @@ fn type(any x) str {
    if _is_range(x) { return "range" }
    if _is_bytes(x) { return "bytes" }
    if _has_tag(x, runtime_tag_raw("complex")) { return "complex" }
-   if __eq(__tagof(x), runtime_tag_raw("ffi_ptr")) { return "ffi_ptr" }
+   if __tagof(x) == runtime_tag_raw("ffi_ptr") { return "ffi_ptr" }
    if is_ptr(x) { return "ptr" }
    return "unknown"
 }
 
 fn _type_shape_union_add(list shapes, str shape) list {
+   ;; Dynamic list storage may expose an uninitialized slot while a literal is
+   ;; being inspected.  Do not widen an otherwise concrete shape to `unknown`.
+   if shape == "unknown" { return shapes }
    mut i = 0
    while i < shapes.len {
-      if shapes.get(i) == shape { return shapes }
+      if __load_item(shapes, i) == shape { return shapes }
       i += 1
    }
    return shapes.append(shape)
 }
 
+;; Keep shape/repr joining on the local dynamic path.  Calling the imported
+;; typed `str.join` from this reflection module can cross the list ABI with
+;; nested dynamic values while the type graph is still being inspected.
+fn _join_parts(any parts, str sep="") str {
+   mut out = ""
+   mut i = 0
+   def n = parts.len
+   while i < n {
+      if i > 0 { out = out + sep }
+      def part = __load_item(parts, i)
+      out = out + part
+      i += 1
+   }
+   return out
+}
+
 fn _type_shape_union_from_seq(any xs, int depth) str {
    def n = xs.len
    if n == 0 { return "empty" }
-   mut shapes = list(n)
+   mut shapes = list()
    mut i = 0
    while i < n {
-      shapes = _type_shape_union_add(shapes, _type_shape(xs.get(i), depth - 1))
+      shapes = _type_shape_union_add(shapes, _type_shape(__load_item(xs, i), depth - 1))
       i += 1
    }
-   join(shapes, "|")
+   if shapes.len == 0 { return "unknown" }
+   _join_parts(shapes, "|")
 }
 
 fn _type_shape_tuple(any xs, int depth) str {
    def n = xs.len
    if n == 0 { return "tuple<>" }
-   mut shapes = list(n)
+   mut shapes = list()
    mut i = 0
    while i < n {
-      shapes = shapes.append(_type_shape(xs.get(i), depth - 1))
+      shapes = shapes.append(_type_shape(__load_item(xs, i), depth - 1))
       i += 1
    }
-   "tuple<" + join(shapes, ", ") + ">"
+   "tuple<" + _join_parts(shapes, ", ") + ">"
 }
 
 fn _type_shape_dict(dict d, int depth) str {
    def its = items(d)
    def n = its.len
    if n == 0 { return "dict<empty, empty>" }
-   mut key_shapes = list(n)
-   mut val_shapes = list(n)
+   mut key_shapes = list()
+   mut val_shapes = list()
    mut i = 0
    while i < n {
-      def pair = its.get(i)
-      key_shapes = _type_shape_union_add(key_shapes, _type_shape(pair.get(0), depth - 1))
-      val_shapes = _type_shape_union_add(val_shapes, _type_shape(pair.get(1), depth - 1))
+      def pair = __load_item(its, i)
+      key_shapes = _type_shape_union_add(key_shapes, _type_shape(__load_item(pair, 0), depth - 1))
+      val_shapes = _type_shape_union_add(val_shapes, _type_shape(__load_item(pair, 1), depth - 1))
       i += 1
    }
-   "dict<" + join(key_shapes, "|") + ", " + join(val_shapes, "|") + ">"
+   "dict<" + _join_parts(key_shapes, "|") + ", " +
+   _join_parts(val_shapes, "|") + ">"
 }
 
 fn _type_shape(any x, int depth) str {
@@ -572,7 +599,7 @@ fn is_shape(any x, any spec, int max_depth=6) bool {
    if _is_list(spec) || _is_tuple(spec) {
       mut i = 0
       while i < spec.len {
-         if is_shape(x, spec.get(i), max_depth) { return true }
+         if is_shape(x, __load_item(spec, i), max_depth) { return true }
          i += 1
       }
       return false
@@ -582,7 +609,9 @@ fn is_shape(any x, any spec, int max_depth=6) bool {
 }
 
 fn _shape_spec_to_str(any spec) str {
-   if _is_list(spec) || _is_tuple(spec) { return join(spec, "|") }
+   if _is_list(spec) || _is_tuple(spec) {
+      return _join_parts(spec, "|")
+   }
    to_str(spec)
 }
 
@@ -601,7 +630,9 @@ fn add(any a, any b) any {
    "Generic addition.
    - **string + string**: concatenation.
    - **list/tuple + list/tuple**: concatenation.
+   - **set**: adds element to set.
    - Other types: delegates to builtin `__add` (ints, floats, ptr math)."
+   if _is_set(a) { return core_set._set_add(a, b) }
    if __is_int(a) {
       if __is_int(b) || _is_float(b) { return __add(a, b) }
    } elif _is_float(a) {
@@ -617,8 +648,10 @@ fn add(any a, any b) any {
 
 fn sub(any a, any b) any {
    "Generic subtraction with list support.
+   - **set**: removes element from set.
    - **list/tuple - list/tuple**: element-wise difference(min length).
    - Other types: delegates to builtin `__sub`."
+   if _is_set(a) { return core_set._set_remove(a, b) }
    if __is_int(a) {
       if __is_int(b) || _is_float(b) { return __sub(a, b) }
    } elif _is_float(a) {
@@ -767,7 +800,7 @@ fn _mat4_mul(any a, any b) list {
       while c < 4 {
          mut s, k = 0, 0
          while k < 4 {
-            s = s + a.get(r * 4 + k, 0) * b.get(k * 4 + c, 0)
+            s = s + __load_item(a, r * 4 + k) * __load_item(b, k * 4 + c)
             k += 1
          }
          out = out.append(s)
@@ -785,7 +818,7 @@ fn _mat4_mul_vec4(any m, any v) list {
    while r < 4 {
       mut s, c = 0, 0
       while c < 4 {
-         s = s + m.get(r * 4 + c, 0) * v.get(c, 0)
+         s = s + __load_item(m, r * 4 + c) * __load_item(v, c)
          c += 1
       }
       out = out.append(s)
@@ -812,7 +845,7 @@ fn _seq_eq(any a, any b) bool {
    if !(na == nb) { return false }
    mut i = 0
    while i < na {
-      if !eq(a.get(i), b.get(i)) { return false }
+      if !eq(__load_item(a, i), __load_item(b, i)) { return false }
       i += 1
    }
    return true
@@ -825,9 +858,9 @@ fn dict_eq(any a, any b) bool {
    mut i = 0
    def n = its.len
    while i < n {
-      def p, k = its.get(i), p.get(0)
-      if !b.contains(k) { return false }
-      if !eq(b.get(k, 0), p.get(1)) { return false }
+      def p, k = __load_item(its, i), __load_item(p, 0)
+      if !_dict_has_raw(b, k) { return false }
+      if !eq(_dict_get_raw(b, k, 0), __load_item(p, 1)) { return false }
       i += 1
    }
    return true
@@ -840,7 +873,7 @@ fn set_eq(any a, any b) bool {
    mut i = 0
    def n = its.len
    while i < n {
-      if !(b.contains(its.get(i))) { return false }
+      if !core_set.contains(b, __load_item(its, i)) { return false }
       i += 1
    }
    return true
@@ -862,8 +895,8 @@ fn eq(any a, any b) bool {
    if a_list_tuple && !b_list_tuple { return false }
    if !a_list_tuple && b_list_tuple { return false }
    if a_seq { if b_seq { return _seq_eq(a, b) } }
-   if __eq(ta, runtime_tag_raw("dict")) {
-      if __eq(tb, runtime_tag_raw("dict")) {
+   if ta == runtime_tag_raw("dict") {
+      if tb == runtime_tag_raw("dict") {
          def av, bv = _is_vecdict(a), _is_vecdict(b)
          if av {
             if bv { return _vec_eq(a, b) }
@@ -872,15 +905,15 @@ fn eq(any a, any b) bool {
          if bv { return false }
       }
    }
-   if __lt(ta, 100) || __gt(ta, 255) || __lt(tb, 100) || __gt(tb, 255) { return false }
-   if __eq(ta, tb) {
-      if __eq(ta, runtime_tag_raw("list")) || __eq(ta, runtime_tag_raw("tuple")) { return list_eq(a, b) }
-      if __eq(ta, runtime_tag_raw("dict")) { return dict_eq(a, b) }
-      if __eq(ta, runtime_tag_raw("set")) { return set_eq(a, b) }
-      if __eq(ta, runtime_tag_raw("range")) { return _seq_eq(a, b) }
-      if __eq(ta, runtime_tag_raw("float")) { return __flt_eq(a, b) }
-      if __eq(ta, runtime_tag_raw("bigint")) { return __eq(__bigint_cmp(a, b), 0) }
-      if __eq(ta, runtime_tag_raw("bigfloat")) { return __eq(__bigfloat_cmp(a, b), 0) }
+   if ta < 100 || ta > 255 || tb < 100 || tb > 255 { return false }
+   if ta == tb {
+      if ta == runtime_tag_raw("list") || ta == runtime_tag_raw("tuple") { return list_eq(a, b) }
+      if ta == runtime_tag_raw("dict") { return dict_eq(a, b) }
+      if ta == runtime_tag_raw("set") { return set_eq(a, b) }
+      if ta == runtime_tag_raw("range") { return _seq_eq(a, b) }
+      if ta == runtime_tag_raw("float") { return __flt_eq(a, b) }
+      if ta == runtime_tag_raw("bigint") { return __bigint_cmp(a, b) == 0 }
+      if ta == runtime_tag_raw("bigfloat") { return __bigfloat_cmp(a, b) == 0 }
       return false
    } else {
       return false
@@ -895,7 +928,7 @@ fn _repr_seq(any xs, str open, str close, int depth=0) str {
    mut i = 0
    mut pos = 1
    while i < n {
-      _store_item_raw(parts, pos, _repr_depth(xs.get(i), depth + 1))
+      _store_item_raw(parts, pos, _repr_depth(__load_item(xs, i), depth + 1))
       pos += 1
       if i < n - 1 {
          _store_item_raw(parts, pos, ", ")
@@ -905,7 +938,7 @@ fn _repr_seq(any xs, str open, str close, int depth=0) str {
    }
    _store_item_raw(parts, pos, close)
    _set_seq_count(parts, pos + 1)
-   join(parts, "")
+   _join_parts(parts, "")
 }
 
 fn _repr_items(any its, bool pairs, str open="{", str close="}", int depth=0) str {
@@ -917,10 +950,10 @@ fn _repr_items(any its, bool pairs, str open="{", str close="}", int depth=0) st
    mut pos = 1
    while i < n {
       if pairs {
-         def p = its.get(i)
-         _store_item_raw(parts, pos, _repr_depth(p.get(0), depth + 1) + ": " + _repr_depth(p.get(1), depth + 1))
+         def p = __load_item(its, i)
+         _store_item_raw(parts, pos, _repr_depth(__load_item(p, 0), depth + 1) + ": " + _repr_depth(__load_item(p, 1), depth + 1))
       } else {
-         _store_item_raw(parts, pos, _repr_depth(its.get(i), depth + 1))
+         _store_item_raw(parts, pos, _repr_depth(__load_item(its, i), depth + 1))
       }
       pos += 1
       if i < n - 1 {
@@ -931,7 +964,7 @@ fn _repr_items(any its, bool pairs, str open="{", str close="}", int depth=0) st
    }
    _store_item_raw(parts, pos, close)
    _set_seq_count(parts, pos + 1)
-   join(parts, "")
+   _join_parts(parts, "")
 }
 
 fn _repr_depth(any x, int depth) str {
@@ -967,8 +1000,8 @@ fn _repr_depth(any x, int depth) str {
       if depth >= 4 { return "{...}" }
       return _repr_items(items(x), false, "{", "}", depth)
    }
-   if __eq(kind, runtime_tag_raw("float")) { return to_str(x) }
-   if __eq(kind, runtime_tag_raw("complex")) { return __to_str(x) }
+   if kind == runtime_tag_raw("float") { return to_str(x) }
+   if kind == runtime_tag_raw("complex") { return __to_str(x) }
    if _is_bytes(x) { return f"<bytes {_raw_len(x)}>" }
    if _is_bigint(x) { return __bigint_to_str(x) }
    if _is_bigfloat(x) { return __bigfloat_to_str(x) }
@@ -1005,7 +1038,7 @@ fn hash(any x) int {
    if _is_list(x) || _is_tuple(x) {
       mut h, i = 2166136261, 0
       while i < x.len {
-         h = _hash_mix(h, x.get(i))
+         h = _hash_mix(h, __load_item(x, i))
          i += 1
       }
       if _is_tuple(x) { h = _hash_mix(h, 0x5455504c) }
@@ -1016,9 +1049,9 @@ fn hash(any x) int {
       def its = items(x)
       mut i = 0
       while i < its.len {
-         def p = its.get(i)
-         h = _hash_mix(h, p.get(0))
-         h = _hash_mix(h, p.get(1))
+         def p = __load_item(its, i)
+         h = _hash_mix(h, __load_item(p, 0))
+         h = _hash_mix(h, __load_item(p, 1))
          i += 1
       }
       return h
@@ -1028,7 +1061,7 @@ fn hash(any x) int {
       def its = items(x)
       mut i = 0
       while i < its.len {
-         h = h ^^ hash(its.get(i))
+         h = h ^^ hash(__load_item(its, i))
          i += 1
       }
       return h & 2147483647
@@ -1067,12 +1100,30 @@ fn items(any x) list {
       }
       return out
    }
+   if _is_range(x) {
+      def start = __load64_idx(x, 0)
+      def stop = __load64_idx(x, 8)
+      def step = __load64_idx(x, 16)
+      mut n = 0
+      if step > 0 && start < stop { n = (stop - start + step - 1) / step }
+      elif step < 0 && start > stop { n = (start - stop - step - 1) / (0 - step) }
+      mut out = list(n)
+      mut cur = start
+      mut i = 0
+      while i < n {
+         _store_item_raw(out, i, [i, cur])
+         cur = cur + step
+         i += 1
+      }
+      _set_seq_count(out, n)
+      return out
+   }
    if _is_seq(x) || _is_str(x) {
       def n = x.len
       mut out = list(n)
       mut i = 0
       while i < n {
-         _store_item_raw(out, i, [i, x.get(i)])
+         _store_item_raw(out, i, [i, __load_item(x, i)])
          i += 1
       }
       _set_seq_count(out, n)
@@ -1097,6 +1148,22 @@ fn keys(any x) list {
    }
    if _is_dict(x) { return _dict_keys_raw(x) }
    if _is_set(x) { return items(x) }
+   if _is_range(x) {
+      def start = __load64_idx(x, 0)
+      def stop = __load64_idx(x, 8)
+      def step = __load64_idx(x, 16)
+      mut n = 0
+      if step > 0 && start < stop { n = (stop - start + step - 1) / step }
+      elif step < 0 && start > stop { n = (start - stop - step - 1) / (0 - step) }
+      mut out = list(n)
+      mut i = 0
+      while i < n {
+         _store_item_raw(out, i, i)
+         i += 1
+      }
+      _set_seq_count(out, n)
+      return out
+   }
    if _is_seq(x) || _is_str(x) {
       def n = x.len
       mut out = list(n)
@@ -1128,9 +1195,13 @@ fn values(any x) list {
    if _is_dict(x) { return _dict_values_raw(x) }
    if _is_set(x) { return items(x) }
    if _is_range(x) {
-      def n = x.len
+      def start = __load64_idx(x, 0)
+      def stop = __load64_idx(x, 8)
       def step = __load64_idx(x, 16)
-      mut cur = __load64_idx(x, 0)
+      mut n = 0
+      if step > 0 && start < stop { n = (stop - start + step - 1) / step }
+      elif step < 0 && start > stop { n = (start - stop - step - 1) / (0 - step) }
+      mut cur = start
       mut out = list(n)
       mut i = 0
       while i < n {
@@ -1146,7 +1217,7 @@ fn values(any x) list {
       mut out = list(n)
       mut i = 0
       while i < n {
-         _store_item_raw(out, i, x.get(i))
+         _store_item_raw(out, i, __load_item(x, i))
          i += 1
       }
       _set_seq_count(out, n)
@@ -1165,10 +1236,10 @@ fn index_read(any obj, any key) any {
       else { return _index_read_key_error(key) }
       if !__is_int(k) { return _index_read_key_error(key) }
       def n = __load64_idx(obj, 0)
-      if __lt(k, 0) { k = __add(k, n) }
-      if __lt(k, 0) || __ge(k, n) { return _index_read_oob_error(k, n) }
+      if k < 0 { k = k + n }
+      if k < 0 || k >= n { return _index_read_oob_error(k, n) }
       _index_read_probe(tag, k, 0)
-      return __load_item(obj, k)
+      return __load_item_any(obj, k)
    }
    if _is_dict(obj) {
       if _is_vecdict(obj) {
@@ -1178,8 +1249,8 @@ fn index_read(any obj, any key) any {
          else { return _index_read_key_error(key) }
          if !__is_int(k) { return _index_read_key_error(key) }
          def n = _vec_dim(obj)
-         if __lt(k, 0) { k = __add(k, n) }
-         if __lt(k, 0) || __ge(k, n) { return _index_read_oob_error(k, n) }
+         if k < 0 { k = k + n }
+         if k < 0 || k >= n { return _index_read_oob_error(k, n) }
          _index_read_probe(tag, k, 0)
          return _vec_at(obj, k, 0)
       }
@@ -1194,8 +1265,8 @@ fn index_read(any obj, any key) any {
       if !__is_int(k) { return _index_read_key_error(key) }
       use std.core.str
       def total = utf8_len(obj)
-      if __lt(k, 0) { k = __add(k, total) }
-      if __lt(k, 0) || __ge(k, total) { return _index_read_oob_error(k, total) }
+      if k < 0 { k = k + total }
+      if k < 0 || k >= total { return _index_read_oob_error(k, total) }
       _index_read_probe(tag, k, 0)
       return chr(ord_at(obj, k))
    }
@@ -1206,8 +1277,8 @@ fn index_read(any obj, any key) any {
       else { return _index_read_key_error(key) }
       if !__is_int(k) { return _index_read_key_error(key) }
       def n = obj.len
-      if __lt(k, 0) { k = __add(k, n) }
-      if __lt(k, 0) || __ge(k, n) { return _index_read_oob_error(k, n) }
+      if k < 0 { k = k + n }
+      if k < 0 || k >= n { return _index_read_oob_error(k, n) }
       _index_read_probe(tag, k, 0)
       return load8(obj, k)
    }
@@ -1218,8 +1289,8 @@ fn index_read(any obj, any key) any {
       else { return _index_read_key_error(key) }
       if !__is_int(k) { return _index_read_key_error(key) }
       def n = obj.len
-      if __lt(k, 0) { k = __add(k, n) }
-      if __lt(k, 0) || __ge(k, n) { return _index_read_oob_error(k, n) }
+      if k < 0 { k = k + n }
+      if k < 0 || k >= n { return _index_read_oob_error(k, n) }
       _index_read_probe(tag, k, 0)
       def start = __load64_idx(obj, 0)
       def step = __load64_idx(obj, 16)
@@ -1242,8 +1313,8 @@ fn get(any obj, any key, any default=0) any {
       else { return default }
       if !__is_int(k) { return default }
       def n = __load64_idx(obj, 0)
-      if __lt(k, 0) { k = __add(k, n) }
-      if __lt(k, 0) || __ge(k, n) { return default }
+      if k < 0 { k = k + n }
+      if k < 0 || k >= n { return default }
       else { return __load_item(obj, k) }
    }
    if _is_dict(obj) {
@@ -1261,8 +1332,8 @@ fn get(any obj, any key, any default=0) any {
       if !__is_int(k) { return default }
       use std.core.str
       def total = utf8_len(obj)
-      if __lt(k, 0) { k = __add(k, total) }
-      if __lt(k, 0) || __ge(k, total) { return default }
+      if k < 0 { k = k + total }
+      if k < 0 || k >= total { return default }
       else {
          return chr(ord_at(obj, k))
       }
@@ -1274,8 +1345,8 @@ fn get(any obj, any key, any default=0) any {
       else { return default }
       if !__is_int(k) { return default }
       def n = obj.len
-      if __lt(k, 0) { k = __add(k, n) }
-      if __lt(k, 0) || __ge(k, n) { return default }
+      if k < 0 { k = k + n }
+      if k < 0 || k >= n { return default }
       else { return load8(obj, k) }
    }
    if _is_range(obj) {
@@ -1285,8 +1356,8 @@ fn get(any obj, any key, any default=0) any {
       else { return default }
       if !__is_int(k) { return default }
       def n = obj.len
-      if __lt(k, 0) { k = __add(k, n) }
-      if __lt(k, 0) || __ge(k, n) { return default }
+      if k < 0 { k = k + n }
+      if k < 0 || k >= n { return default }
       else {
          def start = __load64_idx(obj, 0)
          def step = __load64_idx(obj, 16)
@@ -1312,8 +1383,8 @@ fn _set_impl(any obj, any key, any val) any {
       else { _type_error("set", "an integer index", key) }
       if !__is_int(k) { _type_error("set", "an integer index", key) }
       def n = obj.len
-      if __lt(k, 0) { k = __add(k, n) }
-      if __lt(k, 0) || __ge(k, n) {
+      if k < 0 { k = k + n }
+      if k < 0 || k >= n {
          def cap = __load64_idx(obj, 8)
          if k == n && k < cap {
             __store_item_fast(obj, k, val)
@@ -1334,8 +1405,8 @@ fn _set_impl(any obj, any key, any val) any {
       else { _type_error("set", "an integer index", key) }
       if !__is_int(k) { _type_error("set", "an integer index", key) }
       def n = obj.len
-      if __lt(k, 0) { k = __add(k, n) }
-      if __lt(k, 0) || __ge(k, n) { _index_error("set", k, n) }
+      if k < 0 { k = k + n }
+      if k < 0 || k >= n { _index_error("set", k, n) }
       store8(obj, val, k)
       return obj
    }
@@ -1344,18 +1415,23 @@ fn _set_impl(any obj, any key, any val) any {
 
 fn set_idx(any obj, any key, any val) any {
    "Generic element setter. Supported for dicts, lists, bytes, and vectors. Returns the object or 0 on failure."
-   _set_impl(obj, key, val)
+   return _set_impl(obj, key, val)
 }
 
 fn set(any obj, any key, any val) any {
    "Generic setter for dicts, lists, bytes, and vectors. Returns the mutated object for method chaining."
-   _set_impl(obj, key, val)
+   return _set_impl(obj, key, val)
 }
 
 @returns_owned
-fn slice(any obj, int start, int stop, int step=1) any {
+fn slice(any obj, int start, any stop=nil, int step=1) any {
    "Generic **slice** operation for strings, lists, and tuples."
-   if _is_str(obj) { return utf8_slice(obj, start, stop, step) }
+   if is_nil(stop) {
+      stop = obj.len
+   }
+   if _is_str(obj) || __is_str_obj(obj) || is_str(obj) {
+      return utf8_slice(obj, int(start), int(stop), int(step))
+   }
    elif _is_list(obj) || _is_tuple(obj) {
       def want_tuple = _is_tuple(obj)
       def n = obj.len
@@ -1382,12 +1458,12 @@ fn slice(any obj, int start, int stop, int step=1) any {
       mut i = start
       if step > 0 {
          while i < stop {
-            out = out.append(obj.get(i))
+            out = out.append(__load_item(obj, i))
             i = i + step
          }
       } else {
          while i > stop {
-            out = out.append(obj.get(i))
+            out = out.append(__load_item(obj, i))
             i = i + step
          }
       }
@@ -1410,7 +1486,7 @@ fn pop(any lst) any {
       def n = __load64_idx(lst, 0)
       if n == 0 { return 0 }
       else {
-         def v = lst.get(n - 1)
+         def v = __load_item(lst, n - 1)
          __store64_idx(lst, 0, n - 1)
          return v
       }
@@ -1424,7 +1500,7 @@ fn _extend_str_owned(str lst, any other) str {
    b = builder_append(b, lst)
    mut i = 0
    while i < n {
-      b = builder_append(b, other.get(i))
+      b = builder_append(b, __load_item(other, i))
       i += 1
    }
    def out = builder_to_str(b)
@@ -1437,12 +1513,12 @@ fn _extend_list_realloc(any lst, any other, int ln, int on) list {
    mut out = list(ln + on)
    mut i = 0
    while i < ln {
-      _store_item_raw(out, i, lst.get(i))
+      _store_item_raw(out, i, __load_item(lst, i))
       i += 1
    }
    i = 0
    while i < on {
-      _store_item_raw(out, ln + i, other.get(i))
+      _store_item_raw(out, ln + i, __load_item(other, i))
       i += 1
    }
    _set_seq_count(out, ln + on)
@@ -1460,7 +1536,7 @@ fn extend(any lst, any other) any {
    if ln + on <= cap {
       mut i = 0
       while i < on {
-         _store_item_raw(lst, ln + i, other.get(i))
+         _store_item_raw(lst, ln + i, __load_item(other, i))
          i += 1
       }
       _set_seq_count(lst, ln + on)
@@ -1477,7 +1553,7 @@ fn _str_seq_depth(any xs, str open, str close, int depth) str {
    mut i = 0
    mut pos = 1
    while i < n {
-      _store_item_raw(parts, pos, _to_str_depth(xs.get(i), depth + 1))
+      _store_item_raw(parts, pos, _to_str_depth(__load_item(xs, i), depth + 1))
       pos += 1
       if i < n - 1 {
          _store_item_raw(parts, pos, ", ")
@@ -1487,7 +1563,7 @@ fn _str_seq_depth(any xs, str open, str close, int depth) str {
    }
    _store_item_raw(parts, pos, close)
    _set_seq_count(parts, pos + 1)
-   join(parts, "")
+   _join_parts(parts, "")
 }
 
 fn _str_items_depth(any its, bool pairs, int depth, str open="{", str close="}") str {
@@ -1499,11 +1575,11 @@ fn _str_items_depth(any its, bool pairs, int depth, str open="{", str close="}")
    mut pos = 1
    while i < n {
       if pairs {
-         def p = its.get(i)
+         def p = __load_item(its, i)
          _store_item_raw(parts, pos,
-            _to_str_depth(p.get(0), depth + 1) + ": " + _to_str_depth(p.get(1), depth + 1))
+            _to_str_depth(__load_item(p, 0), depth + 1) + ": " + _to_str_depth(__load_item(p, 1), depth + 1))
       } else {
-         _store_item_raw(parts, pos, _to_str_depth(its.get(i), depth + 1))
+         _store_item_raw(parts, pos, _to_str_depth(__load_item(its, i), depth + 1))
       }
       pos += 1
       if i < n - 1 {
@@ -1514,12 +1590,12 @@ fn _str_items_depth(any its, bool pairs, int depth, str open="{", str close="}")
    }
    _store_item_raw(parts, pos, close)
    _set_seq_count(parts, pos + 1)
-   join(parts, "")
+   _join_parts(parts, "")
 }
 
 fn _to_str_depth(any v, int depth) str {
-   if __eq(v, true) { return "true" }
-   if __eq(v, false) { return "false" }
+   if v == true { return "true" }
+   if v == false { return "false" }
    if __is_int(v) { return __to_str(v) }
    if !v { return "nil" }
    if _is_str(v) { return v }
@@ -1551,8 +1627,8 @@ fn _to_str_depth(any v, int depth) str {
       return _str_items_depth(items(v), false, depth)
    }
    if _is_bytes(v) { return f"<bytes {_raw_len(v)}>" }
-   if __eq(kind, runtime_tag_raw("float")) { return __to_str(v) }
-   if __eq(kind, runtime_tag_raw("complex")) { return __to_str(v) }
+   if kind == runtime_tag_raw("float") { return __to_str(v) }
+   if kind == runtime_tag_raw("complex") { return __to_str(v) }
    if _is_bigint(v) { return __bigint_to_str(v) }
    if _is_bigfloat(v) { return __bigfloat_to_str(v) }
    "<ptr " + __ptr_key(v) + " tag=" + __ptr_key(__tagof(v)) + ">"
@@ -1595,7 +1671,7 @@ fn to_str(any v) str {
    _reflect_check(repr(deep_dict).contains("{...}") && to_str(deep_dict).contains("{...}"), "reflect deep dict rendering")
    def writable = [1, 2, 3]
    writable[1] = 9
-   _reflect_check(writable.get(1) == 9, "reflect set_idx raw store")
+   _reflect_check(writable[1] == 9, "reflect set_idx raw store")
    _reflect_check(slice((1, 2, 3), 1, 3) == (2, 3), "reflect tuple slice")
    def v2, v3, v4 = Vector2([3, 4]), Vector3([1, 2, 3]), Vector4([5, 6, 7, 8])
    _reflect_check(len(v2) == 2 && len(v3) == 3 && len(v4) == 4, "reflect vector dimensions")

@@ -13,9 +13,9 @@ fn sum(ptr p, int n) int {
   s
 }
 mut p = zalloc(24)
-store64_i(p, 0, 1)
-store64_i(p, 8, 2)
-store64_i(p, 16, 3)
+store64_i(p, 1, 0)
+store64_i(p, 2, 8)
+store64_i(p, 3, 16)
 sum(p, 3)
 NY
 }

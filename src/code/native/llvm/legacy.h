@@ -1,0 +1,38 @@
+#ifndef NY_CODEGEN_EMIT_H
+#define NY_CODEGEN_EMIT_H
+
+#include <llvm-c/Core.h>
+#include <llvm-c/TargetMachine.h>
+#include <stdbool.h>
+
+bool ny_llvm_init_native(void);
+bool ny_llvm_init_all_targets(void);
+void ny_llvm_prepare_module(LLVMModuleRef module, int opt_level);
+void ny_llvm_optimize_module(LLVMModuleRef module, int opt_level, int opt_loops,
+                             const char *opt_pipeline);
+bool ny_llvm_apply_sanitize(LLVMModuleRef module, const char *sanitize_kind);
+void ny_llvm_apply_host_attrs(LLVMModuleRef module);
+bool ny_llvm_emit_object(LLVMModuleRef module, const char *path, int opt_level);
+bool ny_llvm_emit_file(LLVMModuleRef module, const char *path, LLVMCodeGenFileType kind,
+                        int opt_level);
+LLVMTypeRef ny_llvm_ptr_type(LLVMContextRef ctx);
+LLVMValueRef ny_llvm_const_gep2(LLVMTypeRef elem_ty, LLVMValueRef base, LLVMValueRef *indices,
+                                unsigned count);
+void ny_llvm_clear_function(LLVMValueRef f);
+
+#include "code/ir/ir.h"
+#include "base/options.h"
+
+struct codegen_t;
+
+bool ny_llvm_emit_nyir_func(struct codegen_t *cg, const nyir_func_t *f,
+                            const char *name, bool tag_return,
+                            char *err, size_t err_len);
+
+struct program_t;
+
+bool ny_llvm_emit_nyir_program(struct codegen_t *cg, const struct program_t *prog,
+                               const ny_options *opt,
+                               char *err, size_t err_len);
+
+#endif

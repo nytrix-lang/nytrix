@@ -7,14 +7,14 @@ use std.core
 
 ;; Returns the result of the `variable` operation.
 fn variable(str name) dict {
-   assert(name.len > 0, "variable expects a non-empty name")
+   assert(__str_len(name) > 0, "variable expects a non-empty name")
    return {"kind":"variable", "name":name}
 }
 
 ;; Returns the result of the `term` operation.
-fn term(str name, list args=[]) dict {
-   assert(name.len > 0, "term expects a non-empty predicate name")
-   return {"kind":"term", "name":name, "args":args}
+fn term(str name, list term_args=[]) dict {
+   assert(__str_len(name) > 0, "term expects a non-empty predicate name")
+   return {"kind":"term", "name":name, "args":term_args}
 }
 
 ;; Returns the result of the `fact` operation.
@@ -36,16 +36,22 @@ fn rule(dict head, list body) dict {
 
 ;; Returns true when is variable.
 fn is_variable(any value) bool {
-   is_dict(value) && value.get("kind", "") == "variable" &&
-   is_str(value.get("name", 0)) && value.get("name", "").len > 0
+   if !is_dict(value) || __dict_get_str_raw(value, "kind", "") != "variable" {
+      return false
+   }
+   def name = __dict_get_str_raw(value, "name", 0)
+   name && __str_len(name) > 0
 }
 
 ;; Returns true when is term.
 fn is_term(any value) bool {
-   if !is_dict(value) || value.get("kind", "") != "term" ||
-   !is_str(value.get("name", 0)) || !is_list(value.get("args", 0)) {
+   if !is_dict(value) ||
+   __dict_get_str_raw(value, "kind", "") != "term" ||
+   !is_list(__dict_get_str_raw(value, "args", 0)) {
       return false
    }
+   def name = __dict_get_str_raw(value, "name", 0)
+   if !name || __str_len(name) == 0 { return false }
    true
 }
 
@@ -67,8 +73,10 @@ fn is_clause(any value) bool {
 fn _walk(any value, dict substitution) any {
    mut current = value
    mut depth = 0
-   while is_variable(current) && substitution.contains(current.get("name")) {
-      current = substitution.get(current.get("name"))
+   while is_variable(current) {
+      def cname = __dict_get_str_raw(current, "name", "")
+      if __dict_has_str_raw(substitution, cname) == 0 { break }
+      current = __dict_get_str_raw(substitution, cname, current)
       depth += 1
       assert(depth <= 1024, "cyclic substitution")
    }
@@ -80,24 +88,24 @@ fn substitute(any value, dict substitution) any {
    def walked = _walk(value, substitution)
    if is_variable(walked) { return walked }
    if !is_term(walked) { return walked }
-   mut args = []
+   mut out_args = []
    mut i = 0
    def source = walked.get("args")
    while i < source.len {
-      args = args.append(substitute(source[i], substitution))
+      out_args = out_args.append(substitute(source[i], substitution))
       i += 1
    }
-   term(walked.get("name"), args)
+   term(walked.get("name"), out_args)
 }
 
 fn _occurs(str name, any value, dict substitution) bool {
    def walked = _walk(value, substitution)
    if is_variable(walked) { return walked.get("name") == name }
    if !is_term(walked) { return false }
-   def args = walked.get("args")
+   def term_args = walked.get("args")
    mut i = 0
-   while i < args.len {
-      if _occurs(name, args[i], substitution) { return true }
+   while i < term_args.len {
+      if _occurs(name, term_args[i], substitution) { return true }
       i += 1
    }
    false
@@ -114,7 +122,8 @@ fn _unify(any left, any right, dict substitution) dict {
          return {"ok":false, "substitution":substitution, "reason":"occurs check"}
       }
       return {"ok":true,
-         "substitution":substitution.set(a.get("name"), b)}
+         "substitution":__dict_set_str_raw(substitution,
+            __dict_get_str_raw(a, "name", ""), b)}
    }
    if is_variable(b) { return _unify(b, a, substitution) }
    if is_term(a) || is_term(b) {
@@ -144,14 +153,14 @@ fn unify(any left, any right, dict substitution={}) dict {
 fn _fresh(any value, str suffix) any {
    if is_variable(value) { return variable(value.get("name") + suffix) }
    if !is_term(value) { return value }
-   mut args = []
+   mut fresh_args = []
    mut i = 0
    def source = value.get("args")
    while i < source.len {
-      args = args.append(_fresh(source[i], suffix))
+      fresh_args = fresh_args.append(_fresh(source[i], suffix))
       i += 1
    }
-   term(value.get("name"), args)
+   term(value.get("name"), fresh_args)
 }
 
 fn _fresh_clause(dict clause, int stamp) dict {
@@ -243,7 +252,8 @@ fn bindings(list variables, dict substitution) dict {
    while i < variables.len {
       def v = variables[i]
       assert(is_variable(v), "bindings expects variables")
-      out = out.set(v.get("name"), substitute(v, substitution))
+      out = __dict_set_str_raw(out, __dict_get_str_raw(v, "name", ""),
+         substitute(v, substitution))
       i += 1
    }
    out
@@ -256,7 +266,7 @@ fn _variables_add(list variables, dict value) list {
       i += 1
    }
    variables = variables.append(value)
-   variables
+   return variables
 }
 
 fn _variables_into(any value, list variables) list {
@@ -268,16 +278,19 @@ fn _variables_into(any value, list variables) list {
       variables = _variables_into(args[i], variables)
       i += 1
    }
-   variables
+   return variables
 }
 
 ;; Returns the result of the `query` operation.
 fn query(list knowledge, any goals, int max_steps=10000,
    int max_solutions=256, int max_depth=256, int max_variables=256,
    int max_memory_cells=1000000, int max_nodes=100000) dict {
-   assert(max_steps > 0 && max_solutions > 0 && max_depth > 0 &&
-      max_variables > 0 && max_memory_cells > 0 && max_nodes > 0,
-      "query budgets must be positive")
+   if max_steps <= 0 { max_steps = 10000 }
+   if max_solutions <= 0 { max_solutions = 256 }
+   if max_depth <= 0 { max_depth = 256 }
+   if max_variables <= 0 { max_variables = 256 }
+   if max_memory_cells <= 0 { max_memory_cells = 1000000 }
+   if max_nodes <= 0 { max_nodes = 100000 }
    mut i = 0
    while i < knowledge.len {
       assert(is_clause(knowledge[i]), "query knowledge entries must be clauses")
@@ -295,7 +308,7 @@ fn query(list knowledge, any goals, int max_steps=10000,
       query_variables = _variables_into(goal_list[i], query_variables)
       i += 1
    }
-   if query_variables.len > max_variables {
+   if max_variables > 0 && query_variables.len > max_variables {
       return {"decided":false, "reason":"variable limit", "steps":0,
          "nodes":0, "peak_depth":0, "memory_cells":0, "peak_memory_cells":0,
          "answers":[], "solutions":[]}

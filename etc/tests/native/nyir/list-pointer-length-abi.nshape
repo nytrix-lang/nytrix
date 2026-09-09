@@ -11,8 +11,11 @@ fn inspect(list paths) int {
   copy.len * 100 + copy[1]
 }
 
+fn typed_sum(list<int> values) int {
+  values[0] + values[1] + values[2]
+}
+
 mut paths = [10, 20, 30]
 paths = [7, 8]
-inspect(paths) - 208
-NY
+inspect(paths) + typed_sum([1, 2, 3]) - 214
 }

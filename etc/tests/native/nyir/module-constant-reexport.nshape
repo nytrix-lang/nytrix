@@ -1,0 +1,25 @@
+shape module-constant-reexport {
+  family "native-nyir"
+  generator "regression"
+  features ["ny", "native", "std"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+use std.core.str as str
+use std.os.ui.window.event as ev
+use std.os.ui.render.vk.buffers as bufs
+use std.os.ui.render.compute as base_compute
+use std.os.ui.render.vk.compute as comp
+use std.os.ui.render.vk.state as st
+use std.os.ui.window.platform.api as api
+use std.os.ui.window.platform.linux.x11.common as xc
+use std.os.ui.window.platform.linux.x11.keymap as km
+use std.math.parse.img.gif as gif
+
+assert(base_compute.COMPUTE_FEATURE_REFRACTION == 1, "direct module constant")
+assert(comp.COMPUTE_FEATURE_REFRACTION == 1, "re-exported module constant")
+assert(comp.COMPUTE_FEATURE_MESH_INSTANCING == 32, "re-exported module constant tail")
+print("module_constant_reexport ok")
+NY
+}

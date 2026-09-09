@@ -1,0 +1,36 @@
+shape asm_spellings {
+  family "runtime-native"
+  generator "native"
+  features [native nyir constraints templates]
+  template ny-test-case
+  flags "--native-only --native-backend=x86_64 -O2 --no-progress --color=never"
+  expect compile_and_run
+  source ny <<'NY'
+def structured = asm {
+  in reg lhs = 50
+  in reg rhs = 8
+  out reg result
+  clobber cc
+  sub result, lhs, rhs
+}
+def compact = asm("sub $0, $1, $2", "=r,r,r", 50, 8)
+if structured == 42 && compact == 42 { 0 } else { 1 }
+NY
+}
+
+shape asm_spellings_llvm {
+  family "runtime-llvm"
+  generator "native"
+  features [native]
+  template ny-test-case
+  flags "--native-backend=llvm -O0 --no-progress --color=never"
+  expect compile_and_run
+  source ny <<'NY'
+asm {
+  clobber memory
+  nop
+}
+asm("nop", "~{memory}")
+0
+NY
+}

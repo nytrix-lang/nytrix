@@ -2,7 +2,7 @@
 #define NY_NATIVE_INTERNAL_H
 
 #include "code/native/native.h"
-#include "code/native/ir.h"
+#include "code/ir/ir.h"
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -32,29 +32,22 @@ typedef struct ny_native_writer_t {
  * limit in step with the u32 member count written by the bundle format and the
  * loader's bounded allocation policy.
  */
-#define NY_NATIVE_NIR_BUNDLE_MAX_FUNCS 4096u
+#define NY_NATIVE_NIR_BUNDLE_MAX_FUNCS 16384u
 
 /*
- * Live native work-buffer capacity.
+ * Live native work-buffer allocation bound.
  *
- * JIT and object paths currently use fixed function, symbol, and relocation
- * work arrays. This independent limit protects those arrays and must stay no
- * larger than every owning object encoder's definition table. A request above
- * it is rejected before lowering. Do not describe this implementation bound as
- * a NYIP or language limit; making it dynamic requires changing all of those
- * owners together.
+ * JIT and object paths allocate their definition and relocation work tables on
+ * the heap. The bound remains a diagnostic guard against hostile bundles and
+ * oversized object files, not a source-language function limit.
  */
 #define NY_NATIVE_LIVE_MAX_FUNCS 4095u
 
-/* Shared native transport capacities. Architecture encoders, live JIT, and
- * object writers use these bounds so an accepted bundle is not rejected by a
- * later backend with a smaller private table. */
-#define NY_NATIVE_MAX_SYMBOLS 4096u
-#define NY_NATIVE_MAX_RELOCS 4096u
-#define NY_NATIVE_MAX_STRINGS 4096u
-#define NY_NATIVE_MAX_CONSTANTS 256u
-#define NY_NATIVE_MAX_ARRAYS 256u
-#define NY_NATIVE_MAX_ARRAY_ELEMS 128u
+/* Shared native transport capacities. Builders grow heap storage up to these
+ * hostile-input guards, preserving bounded diagnostics without stack tables.
+ * Large UI bundles need a wider relocation transport than small fixtures. */
+#define NY_NATIVE_MAX_SYMBOLS 16384u
+#define NY_NATIVE_MAX_RELOCS 262144u
 
 bool ny_native_put(ny_native_writer_t *w, const char *s);
 bool ny_native_printf(ny_native_writer_t *w, const char *fmt, ...)
@@ -119,15 +112,25 @@ bool ny_native_x86_64_emit_mach_scalar(ny_native_writer_t *w,
 void ny_native_strtab_clear(void);
 const char *ny_native_strtab_intern(const char *s, size_t len, char *name_out,
                                     size_t name_cap);
+const char *ny_native_strtab_get(const char *name, size_t *len_out);
 
 /* Session-local pool of foldable top-level def constants emitted as
  * 8-byte .data definitions in object files. */
 void ny_native_consttab_clear(void);
 bool ny_native_consttab_add(const char *name, int64_t value);
 bool ny_native_consttab_has(const char *name);
+bool ny_native_consttab_get(const char *name, int64_t *value);
+bool ny_native_consttab_get_tail(const char *name, int64_t *value);
+bool ny_native_globaltab_add(const char *name);
+bool ny_native_globaltab_has(const char *name);
+const char *ny_native_globaltab_name(const char *name);
+const char *ny_native_globaltab_name_tail(const char *name);
+void ny_native_globaltab_clear(void);
+
 
 typedef struct {
   int64_t value;
+  int64_t tag;
   const char *str;
   size_t str_len;
 } ny_native_array_elem_t;
@@ -139,6 +142,9 @@ void ny_native_arraytab_clear(void);
 const char *ny_native_arraytab_intern(const ny_native_array_elem_t *values,
                                       size_t count, size_t stride,
                                       char *name_out, size_t name_cap);
+bool ny_native_arraytab_get(const char *name,
+                            const ny_native_array_elem_t **elems_out,
+                            size_t *count_out, size_t *stride_out);
 
 bool ny_native_aarch64_emit_nir(ny_native_writer_t *w,
                                 const ny_native_target_info_t *target,

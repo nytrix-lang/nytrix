@@ -1,5 +1,5 @@
 shape png-decode_one {
-  family "probe-suite"
+  family "probe-image/png-decode"
   generator "stress"
   features ["ny", "image"]
   template ny-test-case

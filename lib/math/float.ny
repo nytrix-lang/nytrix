@@ -4,7 +4,7 @@
 ;; - https://en.wikipedia.org/wiki/IEEE_754
 ;; References:
 ;; - std.math
-module std.math.float(_box, float, int, trunc, is_float, fadd, fsub, fmul, fdiv, flt, fgt, feq, floor, ceil, round, abs, nan_val, inf, is_nan, is_inf)
+module std.math.float(_box, float, evaluate, int, trunc, is_float, fadd, fsub, fmul, fdiv, flt, fgt, feq, floor, ceil, round, abs, nan_val, inf, is_nan, is_inf)
 use std.core
 use std.core.str (atof)
 
@@ -19,6 +19,11 @@ fn float(any x) any {
    if __is_float_obj(x) { return x }
    if __is_str_obj(x) { return atof(x) }
    __flt_box_val(0)
+}
+
+fn evaluate(any x) any {
+   "Evaluates a numeric value through the canonical boxed-float conversion."
+   float(x)
 }
 
 fn int(any x) int {

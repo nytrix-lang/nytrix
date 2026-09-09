@@ -2,7 +2,6 @@
 ;; operators, and layouts.
 use std.core
 use std.core.set_mod as set_mod
-use std.core.iter as it
 use std.core.syntax.type as ty
 use std.math.vector as vec
 use std.math.bin
@@ -11,7 +10,6 @@ use std.math.ring
 use std.os.ui.window.platform.contract as contract
 use std.core.str
 use std.math.crypto.encoding.bytes
-use std.core.io
 use std.core.tbuf
 
 fn test_add(int a, int b) int {
@@ -119,7 +117,7 @@ fn typed_f32_f64_mix(f32 a, f64 b) f64 {
 }
 
 fn typed_f64_tail(f64 a, f64 b) f64 {
-   a * b + 1.0
+   return a * b + 1.0
 }
 
 fn typed_list_size(list xs) int {
@@ -315,7 +313,7 @@ fn test_typed_float_abi() {
    def f64 e = a < b ? a : b
    assert(int(a * 100.0) == 400, "typed f64 params/result failed")
    assert(int(b * 100.0) == 375, "typed f32/f64 params failed")
-   assert(int(c * 100.0) == 900, "typed f64 implicit tail failed")
+   assert(int(typed_f64_tail(2.0, 4.0) * 100.0) == 900, "typed f64 implicit tail failed")
    assert(int(d * 100.0) == 400, "typed f64 ternary true arm failed")
    assert(int(e * 100.0) == 375, "typed f64 ternary false arm failed")
    assert(need_int(dynamic_float_size()) == 15, "dynamic float to typed int param failed")
@@ -1357,7 +1355,6 @@ fn test_mono_masked_wrap_examples() int {
    acc
 }
 
-print("test_add(10, 20) =", test_add(10, 20))
 assert(test_add(10, 20) == 30, "add failed")
 assert(get_name() == "John", "get_name failed")
 assert(process("hello") == "hello", "process failed")

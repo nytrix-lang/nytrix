@@ -222,6 +222,8 @@ typedef struct {
   bool native_prefer_vm;
   bool native_prefer_asm;
   bool native_only;
+  /* Diagnostic compatibility path: emit the pre-NYIR AST-to-LLVM backend. */
+  bool legacy_llvm;
   /* Run LLVM optimization after independently compiled module bitcode is
    * linked. This is an explicit whole-program/LTO build mode. */
   bool llvm_lto;
@@ -283,6 +285,7 @@ typedef struct {
   int gpu_min_work;
   int gpu_async;
   int gpu_fast_math;
+  int fast_math;
   const char *accel_target;
   const char *accel_object;
   const char *parallel_mode;
@@ -317,6 +320,8 @@ typedef struct {
   bool trace_scope;        /* --trace-scope: binding resolution trace */
   bool dump_ast_typed;     /* --dump-ast-typed: AST dump with inferred types */
   bool trace_hm;           /* --trace-hm: HM type inference trace */
+  bool explain;            /* --explain: semantic explanations of compiler decisions */
+  const char *explain_topic; /* --explain=topic: specific explanation topic */
   bool explain_any;        /* --explain-any: explain types degrading to any */
   bool dump_escapes;       /* --dump-escapes: escape analysis verdict */
   bool dump_proofs;        /* --dump-proofs: proven bounds and properties */

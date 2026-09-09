@@ -6,7 +6,7 @@
 #include "base/common.h"
 #include "base/time.h"
 #include "base/util.h"
-#include "wire/build.h"
+#include "code/wire/build.h"
 
 #include <errno.h>
 #include <inttypes.h>
@@ -44,20 +44,100 @@ static bool ny_native_result_oracle_emit_asm(
   if (!ny_native_printf(&w, "# Nytrix native result oracle (NYIR only)\n") ||
       !ny_native_put(&w, "\t.text\n"))
     goto done;
+  /*
+   * Materialize pooled literals before code so local-label relocations are
+   * resolved by the assembler as real cross-section references.
+   */
+  if (!ny_native_strtab_append_asm(&w, err, err_len) ||
+      !ny_native_arraytab_append_asm(&w, err, err_len))
+    goto done;
   for (size_t i = 0; i < count; ++i) {
     char label[256];
     snprintf(label, sizeof(label), "ny_fn_%s",
              names && names[i] && names[i][0] ? names[i] : "unknown_fn");
+    if (!ny_native_printf(&w, "\t.section .text.%s,\"ax\",@progbits\n",
+                          label))
+      goto done;
     if (!ny_native_emit_nir_func(&w, target, &funcs[i], label, false, err,
                                  err_len))
       goto done;
   }
+  if (!ny_native_put(&w, "\t.section .text.rt_main,\"ax\",@progbits\n"))
+    goto done;
   if (!ny_native_emit_nir_func(&w, target, rt_main, "rt_main", false, err,
                                err_len))
     goto done;
-  if (!ny_native_strtab_append_asm(&w, err, err_len) ||
-      !ny_native_arraytab_append_asm(&w, err, err_len))
-    goto done;
+  /*
+   * Reachability records function names by their local AST spelling, while
+   * calls from imported modules carry the canonical qualified spelling.  The
+   * normal object writer resolves that relationship internally; this small
+   * standalone assembly harness must publish the equivalent aliases.
+   */
+  for (size_t pass = 0; pass <= count; ++pass) {
+    const nyir_func_t *f = pass < count ? &funcs[pass] : rt_main;
+    if (!f)
+      continue;
+    for (size_t j = 0; j < f->len; ++j) {
+      const nyir_inst_t *in = &f->data[j];
+      if (in->op != NYIR_CALL || !in->symbol || !strchr(in->symbol, '.'))
+        continue;
+      const char *tail = strrchr(in->symbol, '.');
+      if (!tail || !tail[1])
+        continue;
+      for (size_t k = 0; k < count; ++k) {
+        const char *bare = names && names[k] ? names[k] : NULL;
+        if (!bare || strcmp(bare, tail + 1) != 0)
+          continue;
+        char qualified[768];
+        char local[512];
+        int qn = snprintf(qualified, sizeof(qualified), "ny_fn_%s",
+                          in->symbol);
+        int ln = snprintf(local, sizeof(local), "ny_fn_%s", bare);
+        if (qn <= 0 || (size_t)qn >= sizeof(qualified) || ln <= 0 ||
+            (size_t)ln >= sizeof(local) ||
+            !ny_native_printf(&w, "\t.globl\t%s\n\t.set\t%s,%s\n",
+                              qualified, qualified, local))
+          goto done;
+        break;
+      }
+    }
+  }
+  /*
+   * Early optimization checkpoints legitimately retain top-level mutable
+   * cells as ADDR_SYMBOL/LOAD/STORE operations.  The normal object writer
+   * appends those cells as data definitions; the standalone oracle assembly
+   * must provide the equivalent common symbols or its temporary harness link
+   * fails on names such as `sum` and `i`.
+   */
+  const char *globals[256] = {0};
+  size_t global_count = 0;
+  for (size_t pass = 0; pass <= count; ++pass) {
+    const nyir_func_t *f = pass < count ? &funcs[pass] : rt_main;
+    if (!f)
+      continue;
+    for (size_t j = 0; j < f->len; ++j) {
+      const nyir_inst_t *in = &f->data[j];
+      if (in->op != NYIR_ADDR_SYMBOL || !in->symbol ||
+          !ny_native_globaltab_has(in->symbol))
+        continue;
+      bool seen = false;
+      for (size_t k = 0; k < global_count; ++k)
+        if (strcmp(globals[k], in->symbol) == 0) {
+          seen = true;
+          break;
+        }
+      if (seen)
+        continue;
+      if (global_count == sizeof(globals) / sizeof(globals[0])) {
+        ny_native_set_err(err, err_len, "native oracle: too many global cells");
+        goto done;
+      }
+      globals[global_count++] = in->symbol;
+    }
+  }
+  for (size_t i = 0; i < global_count; ++i)
+    if (!ny_native_printf(&w, "\t.comm\t%s,8,8\n", globals[i]))
+      goto done;
   ok = ny_write_file(path, w.data ? w.data : "", w.len) == 0;
   if (!ok)
     ny_native_set_err(err, err_len, "native oracle: failed to write %s: %s",
@@ -382,7 +462,7 @@ bool ny_native_result_oracle_for_nir(nyir_func_t *rt_main,
     char *exe_dir = ny_get_executable_dir();
     if (!exe_dir ||
         snprintf(runtime_obj, sizeof(runtime_obj),
-                 "%s/CMakeFiles/nytrix_runtime.dir/src/rt/init.c.o", exe_dir) < 0 ||
+                 "%s/CMakeFiles/nytrix_runtime.dir/src/code/runtime/init.c.o", exe_dir) < 0 ||
         ny_access(runtime_obj, R_OK) != 0) {
       ny_native_set_err(
           err, err_len,
@@ -661,7 +741,7 @@ bool ny_native_oracle_fuzz(const ny_options *opt, int count, char *err,
                                          local_err, sizeof(local_err))) {
       fprintf(stderr, "native oracle fuzz seed=%d failed: %s\n", seed,
               local_err[0] ? local_err : NY_NATIVE_UNKNOWN_ERR);
-      nyir_dump(stderr, &rt_main, "<fuzz-failure>");
+      nyir_dump_compact(stderr, &rt_main, "<fuzz-failure>");
       ++failures;
       ok = false;
     }

@@ -1,0 +1,49 @@
+shape dict-f64-dynamic {
+  family "native-nyir"
+  generator "regression"
+  features ["ny", "native"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+
+fn read_factor(any value) f64 {
+   float(value.get("one", 9.0))
+}
+
+fn forward_factor(any value) f64 {
+   read_factor(value)
+}
+
+fn check_zero(any value) int {
+   if float(value.get("zero", 9.0)) > 0.0 { return 1 }
+   0
+}
+
+fn build_mask(any value) int {
+   mut m = 0
+   if float(value.get("one", 0.0)) > 0.0 { m = bor(m, 1) }
+   if float(value.get("zero", 0.0)) > 0.0 { m = bor(m, 4) }
+   m
+}
+
+def values = {
+   "one": 1.0,
+   "quarter": 0.25,
+   "zero": 0.0,
+   "negative": -2.5
+}
+
+assert(values.get("one", 9.0) == 1.0, "dictionary literal f64 one")
+assert(values.get("quarter", 9.0) == 0.25, "dictionary literal f64 fraction")
+assert(values.get("zero", 9.0) == 0.0, "dictionary literal f64 zero")
+assert(values.get("negative", 9.0) == -2.5, "dictionary literal f64 negative")
+assert(values.get("missing", 1.5) == 1.5, "dictionary f64 fallback")
+assert(read_factor(values) == 1.0, "dictionary f64 across any parameter")
+assert(forward_factor(values) == 1.0, "dictionary f64 across forwarded any parameter")
+assert(check_zero(values) == 0, "dictionary dynamic f64 zero comparison")
+assert(build_mask(values) == 1, "dictionary dynamic f64 mask accumulation")
+
+print("dict_f64_dynamic ok")
+NY
+}

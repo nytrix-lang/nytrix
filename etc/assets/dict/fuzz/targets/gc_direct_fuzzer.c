@@ -15,7 +15,7 @@
 #include <unistd.h>
 
 #ifndef NYTRIX_GC_C
-#error "compile with -DNYTRIX_GC_C=\\\"/path/to/nytrix/src/rt/gc.c\\\""
+#error "compile with -DNYTRIX_GC_C=\\\"/path/to/nytrix/src/code/runtime/gc.c\\\""
 #endif
 
 __thread uintptr_t rt_heap_ptr_cache_keys[1u << 13] = {0};

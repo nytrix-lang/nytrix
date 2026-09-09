@@ -8,8 +8,6 @@ module std.math.nt(Z, ZZ, Int, Integer, nt_bigint, is_bigint, bigint, bigint_fro
    bigint_neg, bigint_abs, bigint_clone, bigint_pow, bigint_divmod,
    bigint_bit_length, bigint_to_int, bigint_random, bigint_random_bits,
    bigint_lshift, bigint_or, bigint_xor, bigint_popcount, bigint_nth_root,
-   __add, __sub, __mul, __div, __mod, __pow, __neg, __eq, __neq, __lt, __le,
-   __gt, __ge, __str, __len,
    gcd, lcm, xgcd, egcd,
    mod, power_mod, inverse_mod,
    is_prime, is_prime_power, next_prime, prev_prime, prime, prime_range, primes_first_n,
@@ -77,81 +75,6 @@ fn nt_bigint(any x) bigint {
       return bigint_from_str(s0)
    }
    bigint_from_int(0)
-}
-
-fn __add(any a, any b) any {
-   if !is_bigint(a) || !is_bigint(b) { return nil }
-   bigint_add(a, b)
-}
-
-fn __sub(any a, any b) any {
-   if !is_bigint(a) || !is_bigint(b) { return nil }
-   bigint_sub(a, b)
-}
-
-fn __mul(any a, any b) any {
-   if !is_bigint(a) || !is_bigint(b) { return nil }
-   bigint_mul(a, b)
-}
-
-fn __div(any a, any b) any {
-   if !is_bigint(a) || !is_bigint(b) { return nil }
-   bigint_div(a, b)
-}
-
-fn __mod(any a, any b) any {
-   if !is_bigint(a) || !is_bigint(b) { return nil }
-   bigint_mod(a, b)
-}
-
-fn __pow(any a, any b) any {
-   if !is_bigint(a) || !is_bigint(b) { return nil }
-   bigint_pow(a, b)
-}
-
-fn __neg(any a) any {
-   if !is_bigint(a) { return nil }
-   bigint_neg(a)
-}
-
-fn __eq(any a, any b) bool {
-   if !is_bigint(a) || !is_bigint(b) { return false }
-   bigint_eq(a, b)
-}
-
-fn __neq(any a, any b) bool {
-   if !is_bigint(a) || !is_bigint(b) { return true }
-   !bigint_eq(a, b)
-}
-
-fn __lt(any a, any b) bool {
-   if !is_bigint(a) || !is_bigint(b) { return false }
-   bigint_lt(a, b)
-}
-
-fn __le(any a, any b) bool {
-   if !is_bigint(a) || !is_bigint(b) { return false }
-   bigint_le(a, b)
-}
-
-fn __gt(any a, any b) bool {
-   if !is_bigint(a) || !is_bigint(b) { return false }
-   bigint_gt(a, b)
-}
-
-fn __ge(any a, any b) bool {
-   if !is_bigint(a) || !is_bigint(b) { return false }
-   bigint_ge(a, b)
-}
-
-fn __str(any a) any {
-   if !is_bigint(a) { return nil }
-   bigint_to_str(a)
-}
-
-fn __len(any a) int {
-   if !is_bigint(a) { return 0 }
-   bigint_bit_length(a)
 }
 
 fn gcd(any a, any b) bigint {
@@ -898,7 +821,7 @@ fn moebius(any n) int {
 
 fn legendre(any a, any p) int {
    "Legendre symbol(a/p)."
-   __bigint_legendre(Z(a), Z(p))
+   __untag(__bigint_legendre(Z(a), Z(p)))
 }
 
 fn jacobi(any a, any n) int {

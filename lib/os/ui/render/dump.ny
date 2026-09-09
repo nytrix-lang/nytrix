@@ -726,6 +726,7 @@ fn mark(any label, int t0, any detail="") bool {
    def start = int(t0)
    if start <= 0 { return false }
    log(label, float(__ticks_ns() - start) / 1e6, detail)
+   true
 }
 
 fn mark_next(bool on, any label, int t0, any detail="") int {
