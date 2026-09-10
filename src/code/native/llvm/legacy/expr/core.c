@@ -5199,11 +5199,13 @@ static LLVMValueRef gen_expr_index(codegen_t *cg, scope *scopes, size_t depth,
     }
   }
 
-  /* An any-valued container carries a raw index at this ABI boundary.  Keep
+  /*
+   * An any-valued container carries a raw index at this ABI boundary.  Keep
    * literal integer subscripts on the explicit raw bridge instead of passing
    * the unboxed value to the legacy tagged accessor (where 1 would be read as
    * tagged zero).  Restrict this fast path to literals; dynamic keys continue
-   * through index_read so its type and bounds diagnostics remain intact. */
+   * through index_read so its type and bounds diagnostics remain intact.
+   */
   const char *target_type =
       infer_expr_type(cg, scopes, depth, e->as.index.target);
   bool dynamic_target =

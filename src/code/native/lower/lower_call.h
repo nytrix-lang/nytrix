@@ -626,7 +626,8 @@ ordinary_call:
   ny_native_leaf_kind_t leaf_kind = ny_native_leaf_kind(leaf);
   const char *dot = name ? strrchr(name, '.') : NULL;
 
-  if (leaf && strcmp(leaf, "sub") == 0 && e->as.call.args.len == 2 &&
+  if (canon_leaf && strcmp(canon_leaf, "sub") == 0 &&
+      e->as.call.args.len == 2 &&
       !e->as.call.args.data[0].name && !e->as.call.args.data[1].name) {
     const expr_t *target = e->as.call.args.data[0].val;
     if (ny_native_nir_expr_is_list(b, target) &&
@@ -850,13 +851,13 @@ ordinary_call:
    * forms here and leave genuinely dynamic obligations as compile-time no-ops
    * (the typing/proof pipeline remains the authority for flow-sensitive
    * checks). */
-  if (!ny_native_nir_user_defined_fn(b, name) && leaf &&
-      (strcmp(leaf, "range_proven") == 0 ||
-       strcmp(leaf, "assert_compile_range") == 0)) {
-    bool assertion = strcmp(leaf, "assert_compile_range") == 0;
+  if (!ny_native_nir_user_defined_fn(b, name) && canon_leaf &&
+      (strcmp(canon_leaf, "range_proven") == 0 ||
+       strcmp(canon_leaf, "assert_compile_range") == 0)) {
+    bool assertion = strcmp(canon_leaf, "assert_compile_range") == 0;
     if (e->as.call.args.len < 3 || (assertion && e->as.call.args.len > 4) ||
         (!assertion && e->as.call.args.len != 3)) {
-      ny_native_nir_fail(b, "native NYIR: %s expects value, min, max%s", leaf,
+      ny_native_nir_fail(b, "native NYIR: %s expects value, min, max%s", canon_leaf,
                          assertion ? ", and optional message" : "");
       return -1;
     }
@@ -884,13 +885,13 @@ ordinary_call:
     return ny_native_nir_emit_const(
         b, assertion ? 0 : (proven ? NY_IMM_TRUE : NY_IMM_FALSE));
   }
-  if (!ny_native_nir_user_defined_fn(b, name) && leaf &&
-      (strcmp(leaf, "index_proven") == 0 ||
-       strcmp(leaf, "assert_compile_index") == 0)) {
-    bool assertion = strcmp(leaf, "assert_compile_index") == 0;
+  if (!ny_native_nir_user_defined_fn(b, name) && canon_leaf &&
+      (strcmp(canon_leaf, "index_proven") == 0 ||
+       strcmp(canon_leaf, "assert_compile_index") == 0)) {
+    bool assertion = strcmp(canon_leaf, "assert_compile_index") == 0;
     if (e->as.call.args.len < 2 || (assertion && e->as.call.args.len > 3) ||
         (!assertion && e->as.call.args.len != 2)) {
-      ny_native_nir_fail(b, "native NYIR: %s expects container, index%s", leaf,
+      ny_native_nir_fail(b, "native NYIR: %s expects container, index%s", canon_leaf,
                          assertion ? ", and optional message" : "");
       return -1;
     }
@@ -986,12 +987,6 @@ ordinary_call:
     }
     if (target_v < 0 || key_v < 0 || fallback < 0)
       return -1;
-    bool registry_string_key =
-        target && target->kind == NY_E_IDENT && target->as.ident.name &&
-        (!strcmp(target->as.ident.name, "TYPE_ALIASES") ||
-         !strcmp(target->as.ident.name, "TYPE_GROUPS"));
-    bool string_key = ny_native_nir_expr_is_cstr(b, key_expr) ||
-                      registry_string_key;
     if (ny_native_nir_expr_is_bytes(b, target))
       return ny_native_nir_emit_runtime_call(b, "rt_bytes_get_raw", target_v,
                                              key_v, fallback, 3, 0);
@@ -1023,9 +1018,9 @@ ordinary_call:
     /* Dynamic results (for example `dict.get("items").get(0)`) are
      * intentionally dispatched by the runtime instead of being guessed as
      * dictionaries or scalar lists at compile time. */
-    int got = ny_native_nir_emit_runtime_call(
-        b, string_key ? "rt_dict_get_str_raw" : "rt_value_get_tagged", target_v,
-        key_v, fallback, 3, 0);
+    const char *get_runtime = "rt_value_get_tagged";
+    int got = ny_native_nir_emit_runtime_call(b, get_runtime, target_v, key_v,
+                                              fallback, 3, 0);
     if (got >= 0 && ny_native_nir_expr_is_f64(b, e)) {
       return ny_native_nir_emit_runtime_call(b, "rt_any_to_f64", got, -1,
                                              -1, 1, NYIR_INST_F_RET_F64);
@@ -1208,9 +1203,9 @@ ordinary_call:
    * still a string; treating it as an ordinary native identifier creates a
    * bogus relocation such as `sym set`.  Fold the closed built-in tag set at
    * the call boundary, just as we already fold literal tag calls. */
-  if (leaf &&
-      (strcmp(leaf, "runtime_tag_raw") == 0 ||
-       strcmp(leaf, "__runtime_tag") == 0) &&
+  if (canon_leaf &&
+      (strcmp(canon_leaf, "runtime_tag_raw") == 0 ||
+       strcmp(canon_leaf, "__runtime_tag") == 0) &&
       !ny_native_nir_user_defined_fn(b, name) && e->as.call.args.len == 1 &&
       !e->as.call.args.data[0].name && e->as.call.args.data[0].val &&
       e->as.call.args.data[0].val->kind == NY_E_IDENT &&
@@ -1233,7 +1228,7 @@ ordinary_call:
       return ny_native_nir_emit_const(b, raw);
     }
   }
-  if (leaf && strcmp(leaf, "__flt_unbox_val") == 0 &&
+  if (canon_leaf && strcmp(canon_leaf, "__flt_unbox_val") == 0 &&
       e->as.call.args.len == 1 && !e->as.call.args.data[0].name &&
       ny_native_nir_expr_is_f64(b, e->as.call.args.data[0].val)) {
     int value = ny_native_nir_lower_expr(b, e->as.call.args.data[0].val);
@@ -1241,9 +1236,9 @@ ordinary_call:
                      : ny_native_nir_emit_runtime_call(b, "rt_f64_bits",
                                                        value, -1, -1, 1, 0);
   }
-  if (leaf &&
-      (strcmp(leaf, "__complex_new_bits") == 0 ||
-       strcmp(leaf, "__complex_new") == 0) &&
+  if (canon_leaf &&
+      (strcmp(canon_leaf, "__complex_new_bits") == 0 ||
+       strcmp(canon_leaf, "__complex_new") == 0) &&
       e->as.call.args.len == 2 && !e->as.call.args.data[0].name &&
       !e->as.call.args.data[1].name) {
     int re = ny_native_nir_lower_expr(b, e->as.call.args.data[0].val);
@@ -1251,7 +1246,7 @@ ordinary_call:
     int out = re < 0 || im < 0 ? -1
                                : ny_native_nir_emit_runtime_call(
                                      b,
-                                     strcmp(leaf, "__complex_new_bits") == 0
+                                     strcmp(canon_leaf, "__complex_new_bits") == 0
                                          ? "rt_complex_new_bits"
                                          : "rt_complex_new",
                                      re, im, -1, 2, 0);
@@ -1262,7 +1257,7 @@ ordinary_call:
                ? -1
                : out;
   }
-  if (leaf && strcmp(leaf, "type") == 0 && e->as.call.args.len == 1 &&
+  if (canon_leaf && strcmp(canon_leaf, "type") == 0 && e->as.call.args.len == 1 &&
       !e->as.call.args.data[0].name) {
     const expr_t *arg_expr = e->as.call.args.data[0].val;
     int value = ny_native_nir_lower_expr(b, arg_expr);
@@ -1301,22 +1296,25 @@ ordinary_call:
                                            -1, 1, 0);
   }
   /* Ownership wrappers are semantic no-ops at the native ABI boundary. */
-  if (leaf && (strcmp(leaf, "own") == 0 || strcmp(leaf, "borrow") == 0) &&
+  if (canon_leaf && (strcmp(canon_leaf, "own") == 0 ||
+                     strcmp(canon_leaf, "borrow") == 0) &&
       e->as.call.args.len == 1 && !e->as.call.args.data[0].name)
     return ny_native_nir_lower_expr(b, e->as.call.args.data[0].val);
   /* Native NYIR is the typed/raw ABI: from_int is an interpreter boxing
    * boundary, so preserve the raw integer when it is used by native code. */
-  if (leaf && strcmp(leaf, "from_int") == 0 && e->as.call.args.len == 1 &&
+  if (canon_leaf && strcmp(canon_leaf, "from_int") == 0 &&
+      e->as.call.args.len == 1 &&
       !e->as.call.args.data[0].name)
     return ny_native_nir_lower_expr(b, e->as.call.args.data[0].val);
-  if (leaf && strcmp(leaf, "atoi") == 0 && e->as.call.args.len == 1 &&
+  if (canon_leaf && strcmp(canon_leaf, "atoi") == 0 &&
+      e->as.call.args.len == 1 &&
       !e->as.call.args.data[0].name) {
     int value = ny_native_nir_lower_expr(b, e->as.call.args.data[0].val);
     return value < 0 ? -1
                      : ny_native_nir_emit_runtime_call(b, "rt_atoi",
                                                        value, -1, -1, 1, 0);
   }
-  if (leaf && strcmp(leaf, "atof") == 0 &&
+  if (canon_leaf && strcmp(canon_leaf, "atof") == 0 &&
       !ny_native_nir_user_defined_fn(b, name) && e->as.call.args.len == 1 &&
       !e->as.call.args.data[0].name) {
     int value = ny_native_nir_lower_expr(b, e->as.call.args.data[0].val);
@@ -1328,7 +1326,7 @@ ordinary_call:
   /* C `getenv` returns a borrowed C string.  Materialize it through the
    * runtime's native bridge so the result is a managed Nytrix string and can
    * safely cross the typed/dynamic boundary. */
-  if (leaf && strcmp(leaf, "getenv") == 0 &&
+  if (canon_leaf && strcmp(canon_leaf, "getenv") == 0 &&
       !ny_native_nir_user_defined_fn(b, name) && e->as.call.args.len == 1 &&
       !e->as.call.args.data[0].name) {
     int key = ny_native_nir_lower_expr(b, e->as.call.args.data[0].val);
@@ -1339,13 +1337,18 @@ ordinary_call:
   /* The portable runtime wrappers return VM-tagged integers.  Native NYIR
    * keeps scalar integers raw, so unwrap these zero-argument POSIX queries at
    * the boundary instead of linking an ABI-incompatible libc declaration. */
-  if (leaf && !ny_native_nir_user_defined_fn(b, name) &&
-      (strcmp(leaf, "getpid") == 0 || strcmp(leaf, "getppid") == 0 ||
-       strcmp(leaf, "getuid") == 0 || strcmp(leaf, "getgid") == 0) &&
+  if (canon_leaf && !ny_native_nir_user_defined_fn(b, name) &&
+      (strcmp(canon_leaf, "getpid") == 0 ||
+       strcmp(canon_leaf, "getppid") == 0 ||
+       strcmp(canon_leaf, "getuid") == 0 ||
+       strcmp(canon_leaf, "getgid") == 0) &&
       e->as.call.args.len == 0) {
-    const char *runtime = strcmp(leaf, "getpid") == 0    ? "rt_getpid"
-                          : strcmp(leaf, "getppid") == 0 ? "rt_getppid"
-                          : strcmp(leaf, "getuid") == 0  ? "rt_getuid"
+    const char *runtime = strcmp(canon_leaf, "getpid") == 0
+                              ? "rt_getpid"
+                          : strcmp(canon_leaf, "getppid") == 0
+                              ? "rt_getppid"
+                          : strcmp(canon_leaf, "getuid") == 0
+                              ? "rt_getuid"
                                                          : "rt_getgid";
     int tagged = ny_native_nir_emit_runtime_call(b, runtime, -1, -1, -1, 0, 0);
     int one = tagged < 0 ? -1 : ny_native_nir_emit_const(b, 1);
@@ -1355,7 +1358,7 @@ ordinary_call:
                                                        .a = tagged,
                                                        .b = one});
   }
-  if (leaf && strcmp(leaf, "getlogin") == 0 &&
+  if (canon_leaf && strcmp(canon_leaf, "getlogin") == 0 &&
       !ny_native_nir_user_defined_fn(b, name) && e->as.call.args.len == 0) {
     return ny_native_nir_emit_runtime_call(b, "rt_getlogin", -1, -1, -1,
                                            0, 0);
@@ -1365,7 +1368,7 @@ ordinary_call:
    * prototype.  The source-level `&local_tv` is represented as borrow(tv);
    * a timeval constructor already returns the allocated C object, so pass
    * that value rather than the address of its scalar local slot. */
-  if (leaf && strcmp(leaf, "gettimeofday") == 0 &&
+  if (canon_leaf && strcmp(canon_leaf, "gettimeofday") == 0 &&
       !ny_native_nir_user_defined_fn(b, name) && e->as.call.args.len == 2 &&
       !e->as.call.args.data[0].name && !e->as.call.args.data[1].name) {
     const expr_t *tv_expr = e->as.call.args.data[0].val;
@@ -1385,19 +1388,21 @@ ordinary_call:
   }
   /* Float memory helpers box values for the interpreter.  NYIR keeps native
    * floats unboxed, so lower them directly to the ABI-safe native helpers. */
-  if (leaf && !ny_native_nir_user_defined_fn(b, name) &&
-      (strcmp(leaf, "load32_f32") == 0 || strcmp(leaf, "store32_f32") == 0 ||
-       strcmp(leaf, "load64_f64") == 0 || strcmp(leaf, "store64_f64") == 0)) {
-    bool store = leaf[0] == 's';
+  if (canon_leaf && !ny_native_nir_user_defined_fn(b, name) &&
+      (strcmp(canon_leaf, "load32_f32") == 0 ||
+       strcmp(canon_leaf, "store32_f32") == 0 ||
+       strcmp(canon_leaf, "load64_f64") == 0 ||
+       strcmp(canon_leaf, "store64_f64") == 0)) {
+    bool store = canon_leaf[0] == 's';
     size_t min_args = store ? 2u : 1u;
     size_t max_args = store ? 3u : 2u;
     if (e->as.call.args.len < min_args || e->as.call.args.len > max_args)
       return ny_native_nir_fail(
-          b, "native NYIR lower: %s argument count mismatch", leaf);
+        b, "native NYIR lower: %s argument count mismatch", canon_leaf);
     for (size_t i = 0; i < e->as.call.args.len; ++i)
       if (e->as.call.args.data[i].name)
         return ny_native_nir_fail(
-            b, "native NYIR lower: %s expects positional arguments", leaf);
+            b, "native NYIR lower: %s expects positional arguments", canon_leaf);
     int addr = ny_native_nir_lower_expr(b, e->as.call.args.data[0].val);
     int idx = e->as.call.args.len == (store ? 3u : 2u)
                   ? ny_native_nir_lower_expr(
@@ -1406,7 +1411,7 @@ ordinary_call:
     if (addr < 0 || idx < 0)
       return -1;
     if (!store) {
-      if (strcmp(leaf, "load32_f32") == 0)
+      if (strcmp(canon_leaf, "load32_f32") == 0)
         return ny_native_nir_emit_runtime_call(b, "rt_load32_f64", addr,
                                                idx, -1, 2, NYIR_INST_F_RET_F64);
       int effective = ny_native_nir_emit_add_i64(b, addr, idx);
@@ -1422,7 +1427,7 @@ ordinary_call:
       if (value < 0)
         return -1;
     }
-    if (strcmp(leaf, "store32_f32") == 0)
+    if (strcmp(canon_leaf, "store32_f32") == 0)
       return ny_native_nir_emit_runtime_call(b, "rt_store32_f64", addr,
                                              idx, value, 3, 0);
     int effective = ny_native_nir_emit_add_i64(b, addr, idx);
@@ -1431,21 +1436,23 @@ ordinary_call:
                : value;
   }
   /* Terminal primitives return VM-tagged integers from the shared runtime. */
-  if (leaf && !ny_native_nir_user_defined_fn(b, name) &&
-      (strcmp(leaf, "__tty_size") == 0 || strcmp(leaf, "__tty_raw") == 0 ||
-       strcmp(leaf, "__tty_sane_fd") == 0 ||
-       strcmp(leaf, "__tty_pending") == 0)) {
-    size_t expected = strcmp(leaf, "__tty_pending") == 0 ? 0 : 1;
+  if (canon_leaf && !ny_native_nir_user_defined_fn(b, name) &&
+      (strcmp(canon_leaf, "__tty_size") == 0 ||
+       strcmp(canon_leaf, "__tty_raw") == 0 ||
+       strcmp(canon_leaf, "__tty_sane_fd") == 0 ||
+       strcmp(canon_leaf, "__tty_pending") == 0)) {
+    size_t expected = strcmp(canon_leaf, "__tty_pending") == 0 ? 0 : 1;
     if (e->as.call.args.len != expected) {
       ny_native_nir_fail(b, "native NYIR lower: %s expects %zu argument(s)",
-                         leaf, expected);
+                         canon_leaf, expected);
       return -1;
     }
     int arg = -1;
     if (expected) {
       if (e->as.call.args.data[0].name)
         return ny_native_nir_fail(
-            b, "native NYIR lower: %s expects a positional argument", leaf);
+            b, "native NYIR lower: %s expects a positional argument",
+            canon_leaf);
       arg = ny_native_nir_lower_expr(b, e->as.call.args.data[0].val);
       if (arg < 0)
         return -1;
@@ -1816,9 +1823,9 @@ ordinary_call:
                                                  "rt_thread_spawn_raw",
                                                  callback, argument, -1, 2, 0);
   }
-  if (leaf &&
-      (strcmp(leaf, "__load_item") == 0 ||
-       strcmp(leaf, "__load_item_fast") == 0) &&
+  if (canon_leaf &&
+      (strcmp(canon_leaf, "__load_item") == 0 ||
+       strcmp(canon_leaf, "__load_item_fast") == 0) &&
       !ny_native_nir_user_defined_fn(b, name) && e->as.call.args.len == 2 &&
       !e->as.call.args.data[0].name && !e->as.call.args.data[1].name) {
     int target = ny_native_nir_lower_expr(b, e->as.call.args.data[0].val);
@@ -1828,9 +1835,9 @@ ordinary_call:
     return ny_native_nir_emit_runtime_call(b, "rt_load_item", target, index,
                                            -1, 2, 0);
   }
-  if (leaf &&
-      (strcmp(leaf, "__store_item") == 0 ||
-       strcmp(leaf, "__store_item_fast") == 0) &&
+  if (canon_leaf &&
+      (strcmp(canon_leaf, "__store_item") == 0 ||
+       strcmp(canon_leaf, "__store_item_fast") == 0) &&
       !ny_native_nir_user_defined_fn(b, name) && e->as.call.args.len == 3 &&
       !e->as.call.args.data[0].name && !e->as.call.args.data[1].name &&
       !e->as.call.args.data[2].name) {
@@ -1842,12 +1849,14 @@ ordinary_call:
     int value = ny_native_nir_lower_expr(b, value_expr);
     if (target < 0 || key < 0 || value < 0)
       return -1;
-    if (ny_native_nir_emit_runtime_call(b, "rt_tbuf_set_i64_raw", target,
-                                        key, value, 3, 0) < 0)
+    /* Native NYIR carries a raw index.  The public tagged setter would
+     * untag odd native indices (1 -> 0), so use the raw-index bridge here. */
+    if (ny_native_nir_emit_runtime_call(b, "rt_tbuf_set_i64_raw", target, key,
+                                        value, 3, 0) < 0)
       return -1;
     return value;
   }
-  if (leaf && strcmp(leaf, "__list_sum_int_range") == 0 &&
+  if (canon_leaf && strcmp(canon_leaf, "__list_sum_int_range") == 0 &&
       !ny_native_nir_user_defined_fn(b, name) && e->as.call.args.len == 3 &&
       !e->as.call.args.data[0].name && !e->as.call.args.data[1].name &&
       !e->as.call.args.data[2].name) {
@@ -1856,10 +1865,17 @@ ordinary_call:
     int stop = ny_native_nir_lower_expr(b, e->as.call.args.data[2].val);
     if (target < 0 || start < 0 || stop < 0)
       return -1;
-    return ny_native_nir_emit_runtime_call(b, "rt_list_sum_int_range", target,
-                                           start, stop, 3, 0);
+    int result = ny_native_nir_emit_runtime_call(
+        b, "rt_list_sum_int_range", target, start, stop, 3, 0);
+    if (result < 0)
+      return -1;
+    /* The shared helper retains the boxed legacy return ABI.  Its semantic
+     * declaration is scalar, so native callers decode that value exactly
+     * once at this boundary. */
+    return ny_native_nir_emit_runtime_call(b, "rt_any_to_i64", result, -1,
+                                           -1, 1, 0);
   }
-  if (leaf && strcmp(leaf, "set_idx") == 0 &&
+  if (canon_leaf && strcmp(canon_leaf, "set_idx") == 0 &&
       !ny_native_nir_user_defined_fn(b, name) && e->as.call.args.len == 3 &&
       !e->as.call.args.data[0].name && !e->as.call.args.data[1].name &&
       !e->as.call.args.data[2].name) {
@@ -2037,7 +2053,7 @@ ordinary_call:
    * reflection helpers, while the helper's contract is exactly the managed
    * string/bytes header length at payload - 16.
    */
-  if (leaf && strcmp(leaf, "_raw_len") == 0 &&
+  if (canon_leaf && strcmp(canon_leaf, "_raw_len") == 0 &&
       !ny_native_nir_user_defined_fn(b, name) && e->as.call.args.len == 1 &&
       !e->as.call.args.data[0].name) {
     const expr_t *obj_expr = e->as.call.args.data[0].val;
@@ -2065,8 +2081,13 @@ ordinary_call:
    * lowering must use the raw tbuf representation directly; otherwise the
    * omitted stdlib helper leaves an unresolved ny_fn symbol.
    */
-  if (canon_leaf && strcmp(canon_leaf, "append") == 0 &&
-      !ny_native_nir_user_defined_fn(b, name) && e->as.call.args.len == 2 &&
+  if (((canon_leaf && strcmp(canon_leaf, "append") == 0) ||
+       (canon_leaf && strcmp(canon_leaf, "append") == 0 && name &&
+        (strncmp(name, "std.", 4) == 0 || strstr(name, "core_ref.") != NULL))) &&
+      (!ny_native_nir_user_defined_fn(b, name) ||
+       (name && (strncmp(name, "std.", 4) == 0 ||
+                 strstr(name, "core_ref.") != NULL))) &&
+      e->as.call.args.len == 2 &&
       !e->as.call.args.data[0].name && !e->as.call.args.data[1].name) {
     const expr_t *target = e->as.call.args.data[0].val;
     int list = ny_native_nir_lower_expr(b, target);
@@ -2079,6 +2100,7 @@ ordinary_call:
         !ny_native_nir_expr_is_list(b, e->as.call.args.data[1].val) &&
         !ny_native_nir_expr_is_dict(b, e->as.call.args.data[1].val) &&
         !ny_native_nir_expr_is_bytes(b, e->as.call.args.data[1].val) &&
+        !ny_native_nir_expr_is_cstr(b, e->as.call.args.data[1].val) &&
         !ny_native_nir_expr_is_any(b, e->as.call.args.data[1].val) &&
         e->as.call.args.data[1].val->kind != NY_E_CALL &&
         e->as.call.args.data[1].val->kind != NY_E_MEMCALL;
@@ -2093,6 +2115,20 @@ ordinary_call:
           e->as.call.args.data[1].val->kind == NY_E_MEMCALL) &&
          !ny_native_nir_expr_is_raw_dynamic_read(
              b, e->as.call.args.data[1].val));
+    bool use_tagged_append =
+        (ny_native_nir_expr_is_any(b, e->as.call.args.data[1].val) ||
+         e->as.call.args.data[1].val->kind == NY_E_CALL ||
+         e->as.call.args.data[1].val->kind == NY_E_MEMCALL) &&
+        !ny_native_nir_expr_is_raw_dynamic_read(
+            b, e->as.call.args.data[1].val);
+    if (use_tagged_append && e->as.call.args.data[1].val->kind == NY_E_LITERAL &&
+        e->as.call.args.data[1].val->as.literal.kind == NY_LIT_INT &&
+        e->as.call.args.data[1].val->tok.kind != NY_T_NIL) {
+      value = ny_native_nir_emit_runtime_call(b, "rt_tag", value, -1, -1, 1,
+                                               0);
+      if (value < 0)
+        return -1;
+    }
     /* f64 NYIR values are IEEE bits, while descriptor slots use the tagged
      * dynamic ABI. Box them before append_any stores the value and tag. */
     if (dynamic_append && value_is_f64) {
@@ -2110,11 +2146,7 @@ ordinary_call:
                                               list, value, -1, 2, 0)
             : ny_native_nir_emit_runtime_call(
                   b,
-                  ((ny_native_nir_expr_is_any(b, e->as.call.args.data[1].val) ||
-                    e->as.call.args.data[1].val->kind == NY_E_CALL ||
-                    e->as.call.args.data[1].val->kind == NY_E_MEMCALL) &&
-                   !ny_native_nir_expr_is_raw_dynamic_read(
-                       b, e->as.call.args.data[1].val))
+                  use_tagged_append
                       ? "rt_tbuf_append_tagged"
                       : "rt_tbuf_append_raw",
                   list, value,
@@ -2128,7 +2160,8 @@ ordinary_call:
   /* The native list-length setter consumes a raw count.  Do not route its
    * second argument through the generic dynamic-call boxing rule: 3 must stay
    * 3, not become the tagged integer 7 in the tbuf header. */
-  if (leaf && strcmp(leaf, "__list_set_len") == 0 && e->as.call.args.len == 2 &&
+  if (canon_leaf && strcmp(canon_leaf, "__list_set_len") == 0 &&
+      e->as.call.args.len == 2 &&
       !e->as.call.args.data[0].name && !e->as.call.args.data[1].name) {
     int list = ny_native_nir_lower_expr(b, e->as.call.args.data[0].val);
     int length = ny_native_nir_lower_expr(b, e->as.call.args.data[1].val);
@@ -2138,7 +2171,7 @@ ordinary_call:
                                                  length, -1, 2, 0);
   }
   /* Flat std.core collection helpers share the dynamic native ABI. */
-  if (leaf && !ny_native_nir_user_defined_fn(b, name) &&
+  if (canon_leaf && !ny_native_nir_user_defined_fn(b, name) &&
       strcmp(canon_leaf, "add") == 0 && e->as.call.args.len == 2 &&
       !e->as.call.args.data[0].name && !e->as.call.args.data[1].name) {
     int left = ny_native_nir_lower_expr(b, e->as.call.args.data[0].val);
@@ -2148,7 +2181,7 @@ ordinary_call:
                : ny_native_nir_emit_runtime_call(b, "rt_any_add", left,
                                                  right, -1, 2, 0);
   }
-  if (leaf && !ny_native_nir_user_defined_fn(b, name) &&
+  if (canon_leaf && !ny_native_nir_user_defined_fn(b, name) &&
       strcmp(canon_leaf, "contains") == 0 && e->as.call.args.len == 2 &&
       !e->as.call.args.data[0].name && !e->as.call.args.data[1].name) {
     int container = ny_native_nir_lower_expr(b, e->as.call.args.data[0].val);
@@ -2601,7 +2634,8 @@ ordinary_call:
        strcmp(name, "std.os.ui.render.end_frame") == 0 ||
        strcmp(name, "std.os.ui.window.set_should_close") == 0))
     return ny_native_nir_emit_const(b, 0);
-  if (strcmp(leaf, "dict") == 0 && !ny_native_nir_user_defined_fn(b, name)) {
+  if (canon_leaf && strcmp(canon_leaf, "dict") == 0 &&
+      !ny_native_nir_user_defined_fn(b, name)) {
     if (e->as.call.args.len > 1 ||
         (e->as.call.args.len == 1 && e->as.call.args.data[0].name)) {
       ny_native_nir_fail(
@@ -2616,7 +2650,8 @@ ordinary_call:
                         : ny_native_nir_emit_runtime_call(
                               b, "rt_dict_new_raw", capacity, -1, -1, 1, 0);
   }
-  if (strcmp(leaf, "set") == 0 && !ny_native_nir_user_defined_fn(b, name) &&
+  if (canon_leaf && strcmp(canon_leaf, "set") == 0 &&
+      !ny_native_nir_user_defined_fn(b, name) &&
       e->as.call.args.len <= 1) {
     if (e->as.call.args.len == 1 && e->as.call.args.data[0].name) {
       ny_native_nir_fail(b,
@@ -3011,30 +3046,33 @@ ordinary_call:
     return ny_native_nir_emit_runtime_call(b, runtime, value, -1, -1, 1,
                                            NYIR_INST_F_RET_F64);
   }
-  if (leaf && !ny_native_nir_user_defined_fn(b, name)) {
+  if (canon_leaf && !ny_native_nir_user_defined_fn(b, name)) {
     const char *c_symbol = NULL;
     int c_argc = 0;
-    if (strcmp(leaf, "memcpy") == 0 || strcmp(leaf, "memmove") == 0 ||
-        strcmp(leaf, "memset") == 0 || strcmp(leaf, "memcmp") == 0 ||
-        strcmp(leaf, "memchr") == 0) {
-      c_symbol = leaf;
+    if (strcmp(canon_leaf, "memcpy") == 0 ||
+        strcmp(canon_leaf, "memmove") == 0 ||
+        strcmp(canon_leaf, "memset") == 0 ||
+        strcmp(canon_leaf, "memcmp") == 0 ||
+        strcmp(canon_leaf, "memchr") == 0) {
+      c_symbol = canon_leaf;
       c_argc = 3;
-    } else if (strcmp(leaf, "strchr") == 0 || strcmp(leaf, "strcmp") == 0) {
-      c_symbol = leaf;
+    } else if (strcmp(canon_leaf, "strchr") == 0 ||
+               strcmp(canon_leaf, "strcmp") == 0) {
+      c_symbol = canon_leaf;
       c_argc = 2;
     }
     if (c_symbol) {
       if (e->as.call.args.len != (size_t)c_argc) {
         ny_native_nir_fail(b,
                            "native NYIR lower: %s expects %d positional values",
-                           leaf, c_argc);
+                           canon_leaf, c_argc);
         return -1;
       }
       int c_args[3] = {-1, -1, -1};
       for (int i = 0; i < c_argc; ++i) {
         if (e->as.call.args.data[i].name) {
           ny_native_nir_fail(
-              b, "native NYIR lower: %s expects positional values", leaf);
+              b, "native NYIR lower: %s expects positional values", canon_leaf);
           return -1;
         }
         c_args[i] = ny_native_nir_lower_expr(b, e->as.call.args.data[i].val);
@@ -3087,7 +3125,8 @@ ordinary_call:
           (named_global && named_global->kind == NY_E_CALL)))
       return ny_native_nir_emit_const(b, 0);
   }
-  if (!ny_native_nir_user_defined_fn(b, name) && strcmp(leaf, "panic") == 0) {
+  if (!ny_native_nir_user_defined_fn(b, name) && canon_leaf &&
+      strcmp(canon_leaf, "panic") == 0) {
     if (e->as.call.args.len != 1 || e->as.call.args.data[0].name)
       return ny_native_nir_fail(
           b, "native NYIR lower: panic expects one positional argument");
@@ -3100,12 +3139,13 @@ ordinary_call:
       return -1;
     return ny_native_nir_emit_const(b, 0);
   }
-  if (!ny_native_nir_user_defined_fn(b, name) && leaf &&
-      (strcmp(leaf, "prove") == 0 || strcmp(leaf, "static_assert") == 0 ||
-       strcmp(leaf, "assert_compile") == 0)) {
+  if (!ny_native_nir_user_defined_fn(b, name) && canon_leaf &&
+      (strcmp(canon_leaf, "prove") == 0 ||
+       strcmp(canon_leaf, "static_assert") == 0 ||
+       strcmp(canon_leaf, "assert_compile") == 0)) {
     if (e->as.call.args.len == 0) {
       ny_native_nir_fail(b, "native NYIR: %s expects a compile-time condition",
-                         leaf);
+                         canon_leaf);
       return -1;
     }
     const expr_t *condition = e->as.call.args.data[0].val;
@@ -3123,7 +3163,7 @@ ordinary_call:
           unresolved_local = true;
       }
     }
-    if (strcmp(leaf, "prove") == 0 && !exact_proof_value && condition &&
+    if (strcmp(canon_leaf, "prove") == 0 && !exact_proof_value && condition &&
         (condition->kind == NY_E_IDENT || unresolved_local) &&
         b->current_fn_name) {
       if (unresolved_local) {
@@ -3146,7 +3186,7 @@ ordinary_call:
      * compile-time witness. Keep the native proof path aligned with the
      * legacy checker instead of hashing the unresolved proposition as if it
      * were already established. */
-    if (strcmp(leaf, "prove") == 0 && condition &&
+    if (strcmp(canon_leaf, "prove") == 0 && condition &&
         condition->kind == NY_E_CALL && condition->as.call.callee &&
         condition->as.call.args.len > 0) {
       for (size_t ai = 0; ai < condition->as.call.args.len; ++ai) {
@@ -3160,7 +3200,7 @@ ordinary_call:
       }
     }
     if (exact_proof_value && proof_value == 0) {
-      const char *message = strcmp(leaf, "prove") == 0
+      const char *message = strcmp(canon_leaf, "prove") == 0
                                 ? "proof obligation failed"
                                 : "static assertion failed";
       if (e->as.call.args.len >= 2 && e->as.call.args.data[1].val &&
@@ -3174,7 +3214,7 @@ ordinary_call:
     /* A proof witness is represented by the same canonical proposition digest
      * used by the legacy backend.  This keeps proof_matches meaningful in
      * native code while static_assert/assert_compile remain erased. */
-    if (strcmp(leaf, "prove") == 0 && e->as.call.args.len >= 1 &&
+    if (strcmp(canon_leaf, "prove") == 0 && e->as.call.args.len >= 1 &&
         e->as.call.args.data[0].val) {
       char *proof_type =
           ny_proof_type_from_expr((expr_t *)e->as.call.args.data[0].val);
@@ -3291,7 +3331,11 @@ ordinary_call:
        string, closure, etc.).  Only small ints and floats are known at
        compile time above; the !is_any fallback was wrong for tuples,
        lists, sets, and dicts whose NYIR type is not 'any'. */
-    const char *tag_symbol = ny_native_runtime_symbol(leaf);
+    const char *tag_symbol = ny_native_runtime_symbol_for_expr(
+        e->as.call.callee && e->as.call.callee->kind == NY_E_IDENT
+            ? e->as.call.callee->as.ident.name
+            : NULL,
+        leaf, e);
     if (!tag_symbol)
       return -1;
     return ny_native_nir_emit_runtime_call(b, tag_symbol, value, -1, -1, 1, 0);
@@ -5308,7 +5352,8 @@ ordinary_call:
                      : ny_native_nir_emit_runtime_call(b, "rt_msleep_ms", value,
                                                        -1, -1, 1, 0);
   }
-  if (leaf && strcmp(leaf, "load_layout") == 0 && e->as.call.args.len == 3 &&
+  if (leaf && strcmp(leaf, "load_layout") == 0 &&
+      e->as.call.args.len == 3 &&
       e->as.call.args.data[1].val &&
       e->as.call.args.data[1].val->kind == NY_E_LITERAL &&
       e->as.call.args.data[1].val->as.literal.kind == NY_LIT_STR &&
@@ -5851,6 +5896,11 @@ ordinary_call:
      */
     if (!raw_integer_argument && arg_expr &&
         arg_expr->kind == NY_E_IDENT && arg_expr->as.ident.name) {
+      const ny_native_nir_local_t *arg_local =
+          ny_native_nir_find_local(b, arg_expr->as.ident.name);
+      if (arg_local && !arg_local->is_any &&
+          ny_native_type_name_is_int(arg_local->type_name))
+        raw_integer_argument = true;
       const expr_t *defined =
           ny_native_nir_find_top_level_value_in_source(
               b, arg_expr->as.ident.name, arg_expr->tok.filename);
@@ -5901,13 +5951,17 @@ ordinary_call:
       const char *value_type = value_fn ? value_fn->as.fn.return_type : NULL;
       /* A conservative `any.method(...)` semantic annotation must not hide
        * the concrete raw-integer return type of a resolved user method. */
-      if (value_type && !ny_native_type_name_is_any(value_type) &&
+    if (value_type && !ny_native_type_name_is_any(value_type) &&
           !ny_native_type_name_is_str(value_type) &&
           !ny_native_type_name_is_list(value_type) &&
           !ny_native_type_name_is_f64(value_type) &&
           !ny_native_type_name_is_f32(value_type))
         raw_integer_argument = true;
     }
+    /* An explicitly declared `any` formal owns the dynamic ABI even when
+     * body inference also proves scalar arithmetic. */
+    if (ny_native_type_name_is_any(param_type))
+      box_dynamic_argument = true;
     if (box_dynamic_argument && raw_integer_argument && !raw_object_argument) {
       int one = ny_native_nir_emit_const(b, 1);
       int shifted = one < 0

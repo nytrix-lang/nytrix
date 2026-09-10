@@ -15,13 +15,12 @@ if [ "$length" -gt 72 ]; then
 fi
 
 case "$subject" in
-  build:*|chore:*|ci:*|docs:*|feat:*|fix:*|perf:*|refactor:*|style:*|test:*|\
   build\(*\):*|chore\(*\):*|ci\(*\):*|docs\(*\):*|feat\(*\):*|fix\(*\):*|\
   perf\(*\):*|refactor\(*\):*|style\(*\):*|test\(*\):*)
     ;;
   *)
-    printf '%s\n' "commit-msg: use '<type>(optional-scope): concise imperative summary'." >&2
-    printf '%s\n' "Allowed types: build, chore, ci, docs, feat, fix, perf, refactor, style, test." >&2
+    printf '%s\n' "commit-msg: use '<type>(scope): concise imperative summary'." >&2
+    printf '%s\n' "Scope is required. Allowed types: build, chore, ci, docs, feat, fix, perf, refactor, style, test." >&2
     exit 1
     ;;
 esac

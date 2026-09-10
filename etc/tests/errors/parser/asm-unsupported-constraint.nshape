@@ -1,0 +1,14 @@
+shape parser-asm-unsupported-constraint {
+  family "compiler-errors/parser"
+  generator "error"
+  features [error parser negative diagnostic asm]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "unsupported asm constraint"
+  source ny <<'NY'
+use std.core
+
+def value = asm("nop", "=z")
+NY
+}

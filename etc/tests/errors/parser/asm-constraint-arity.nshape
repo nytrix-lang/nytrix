@@ -1,0 +1,14 @@
+shape parser-asm-constraint-arity {
+  family "compiler-errors/parser"
+  generator "error"
+  features [error parser negative diagnostic asm]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "asm constraint/input count mismatch"
+  source ny <<'NY'
+use std.core
+
+def value = asm("mov $1, $0", "=r", 7, 8)
+NY
+}

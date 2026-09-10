@@ -191,16 +191,27 @@ static int64_t rt_any_tag(int64_t value) {
   return rt_value_tag(value);
 }
 
-static int64_t rt_dynamic_callback_arg(int64_t value) {
+static int64_t rt_dynamic_callback_arg(int64_t value, bool raw_scalars) {
   /*
    * Native tbuf reads may box a raw string pointer as an integer-tagged
    * pointer. Dynamic string operations consume the pointer form, while
    * ordinary integers must remain tagged for any arithmetic.
    */
-  if (is_int(value)) {
+  if (NY_NATIVE_IS(value) && NY_NATIVE_DECODE(value) != NULL) {
+    int64_t decoded = (int64_t)(uintptr_t)NY_NATIVE_DECODE(value);
+    if (rt_magic_tbuf_elem_size(decoded) > 0)
+      return decoded;
+  }
+  if (raw_scalars && is_int(value)) {
     int64_t raw = rt_untag_v(value);
     if (rt_native_is_str(raw))
       return raw;
+    /*
+     * Native lambda bodies still use the raw scalar ABI for inferred
+     * parameters.  Dynamic callable marking describes the callable edge,
+     * not a request to double-tag its integer argument.
+     */
+    return raw;
   }
   return value;
 }
@@ -229,7 +240,11 @@ static int64_t rt_dynamic_callback_result(int64_t value, bool returns_bool) {
   /*
    * Dynamic lambda bodies already return Ny values.  In particular, a
    * tagged integer must not be tagged a second time at the callback edge.
+   * A callback returning a native C-string must be promoted before it is
+   * consumed by a managed string builder or concatenation routine.
    */
+  if (!returns_bool && rt_native_is_str(value))
+    return rt_cstr_to_str(value);
   if (returns_bool && (value == 0 || value == 1))
     /*
      * Native control-flow lowering consumes callback predicates as raw 0/1;
@@ -270,7 +285,7 @@ int64_t rt_call_any1(int64_t f, int64_t value) {
       int64_t code = rt_prepare_raw_callable(*(int64_t *)base);
       int64_t env = *(int64_t *)(base + 8);
       return rt_dynamic_callback_result(
-          ((rt_any_fn7)code)(env, rt_dynamic_callback_arg(value),
+          ((rt_any_fn7)code)(env, rt_dynamic_callback_arg(value, dynamic_bool_callable),
                                     len, tag, 0, 0, 0),
           dynamic_bool_callable);
     }
@@ -286,7 +301,7 @@ int64_t rt_call_any1(int64_t f, int64_t value) {
    */
   if (dynamic_callable)
     return rt_dynamic_callback_result(
-        ((rt_any_fn6)(uintptr_t)f)(rt_dynamic_callback_arg(value),
+        ((rt_any_fn6)(uintptr_t)f)(rt_dynamic_callback_arg(value, dynamic_bool_callable),
                                           len, tag, 0, 0, 0),
         dynamic_bool_callable);
   return rt_any_callback_result(
@@ -317,9 +332,9 @@ int64_t rt_call_any2(int64_t f, int64_t left, int64_t right) {
       int64_t code = rt_prepare_raw_callable(*(int64_t *)base);
       int64_t env = *(int64_t *)(base + 8);
       return rt_dynamic_callback_result(
-          ((rt_any_fn7)code)(env, rt_dynamic_callback_arg(left),
+          ((rt_any_fn7)code)(env, rt_dynamic_callback_arg(left, false),
                                     left_len, left_tag,
-                                    rt_dynamic_callback_arg(right),
+                                    rt_dynamic_callback_arg(right, false),
                                     right_len, right_tag),
           dynamic_bool_callable);
     }
@@ -331,8 +346,8 @@ int64_t rt_call_any2(int64_t f, int64_t left, int64_t right) {
   if (dynamic_callable)
     return rt_dynamic_callback_result(
         ((rt_any_fn6)(uintptr_t)f)(
-            rt_dynamic_callback_arg(left), left_len, left_tag,
-            rt_dynamic_callback_arg(right), right_len, right_tag),
+            rt_dynamic_callback_arg(left, false), left_len, left_tag,
+            rt_dynamic_callback_arg(right, false), right_len, right_tag),
         dynamic_bool_callable);
   return rt_any_callback_result(
       ((rt_any_fn6)(uintptr_t)f)(rt_any_to_i64(left), left_len,

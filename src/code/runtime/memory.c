@@ -238,6 +238,7 @@ static int64_t rt_malloc_impl(int64_t size, int zero_fill) {
   *(uint64_t *)((char *)p + 8) = (uint64_t)((body << 1) | 1);
 
   int64_t res = (int64_t)(uintptr_t)((char *)p + 32);
+  rt_map_oracle_add((uintptr_t)p, (size_t)total);
   rt_heap_ptr_cache_store((uintptr_t)res);
   rt_rc_adopt_new(res);
   if (mem_trace_enabled() && total > 1024 * 1024) {
@@ -330,6 +331,7 @@ int64_t rt_malloc_raw(int64_t size) {
   void *p = malloc((size_t)n);
   if (!p)
     return 0;
+  rt_map_oracle_add((uintptr_t)p, (size_t)n);
   rt_heap_ptr_neg_cache_store((uintptr_t)p);
   raw_ptr_register((uintptr_t)p);
   return (int64_t)(uintptr_t)p;
@@ -705,6 +707,17 @@ int64_t rt_load16_idx(int64_t addr, int64_t idx) {
 int64_t rt_load32_idx(int64_t addr, int64_t idx) {
   if (is_int(idx))
     idx >>= 1;
+  /*
+   * Decode a packed two-i32 aggregate returned in a register (for example
+   * libc div_t) before treating the value as a memory address.
+   */
+  if (is_int(addr) && (idx == 0 || idx == 4)) {
+    uint64_t packed = (uint64_t)addr;
+    if ((packed >> 32) != 0) {
+      uint32_t word = (uint32_t)(packed >> (idx == 4 ? 32 : 0));
+      return (((int64_t)word) << 1) | 1;
+    }
+  }
   bool hdr = (idx < 0);
   bool heap = is_heap_ptr(addr);
   if (hdr) {

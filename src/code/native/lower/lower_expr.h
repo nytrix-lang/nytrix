@@ -457,8 +457,8 @@ static int ny_native_nir_lower_expr_impl(ny_native_nir_builder_t *b,
       bool compiled_fn =
           referenced_fn && !referenced_fn->as.fn.is_extern &&
           !referenced_fn->as.fn.link_name &&
-          ny_native_runtime_symbol(e->as.ident.name) == NULL &&
-          (!leaf || ny_native_runtime_symbol(leaf) == NULL) &&
+          ny_native_runtime_symbol_for_expr(e->as.ident.name, leaf, e) == NULL &&
+          (!leaf || ny_native_runtime_symbol_for_expr(NULL, leaf, e) == NULL) &&
           (!leaf || ny_native_leaf_kind(leaf) == NY_NATIVE_LEAF_NONE) &&
           (!leaf || ny_builtin_alloc_kind(leaf) == NY_BUILTIN_ALLOC_NONE);
       bool user_function =
@@ -488,8 +488,8 @@ static int ny_native_nir_lower_expr_impl(ny_native_nir_builder_t *b,
           return ny_native_nir_emit_const_f64(b, constant);
       }
       if (!referenced_fn && !user_function &&
-          ny_native_runtime_symbol(e->as.ident.name) == NULL &&
-          (!leaf || ny_native_runtime_symbol(leaf) == NULL) &&
+          ny_native_runtime_symbol_for_expr(e->as.ident.name, leaf, e) == NULL &&
+          (!leaf || ny_native_runtime_symbol_for_expr(NULL, leaf, e) == NULL) &&
           (!leaf || ny_native_leaf_kind(leaf) == NY_NATIVE_LEAF_NONE) &&
           (!leaf || ny_builtin_alloc_kind(leaf) == NY_BUILTIN_ALLOC_NONE)) {
         ny_native_nir_fail(b, "undefined symbol '%s'", e->as.ident.name);
@@ -1287,7 +1287,8 @@ static int ny_native_nir_lower_expr_impl(ny_native_nir_builder_t *b,
           tag = ny_native_nir_emit_const(b, 121);
         else if (is_dict)
           tag = ny_native_nir_emit_const(b, 101);
-        else if (is_list_elem)
+        else if (is_list_elem || el->kind == NY_E_LIST ||
+                 el->kind == NY_E_TUPLE)
           tag = ny_native_nir_emit_const(b, 100);
         else if (count == 1 && !is_string && !is_f64 && !dynamic_value &&
                  el->kind == NY_E_IDENT) {
@@ -1695,7 +1696,18 @@ static int ny_native_nir_lower_expr_impl(ny_native_nir_builder_t *b,
      * expression is not an explicit `any` call.  Decode back to raw i64 only
      * for statically scalar list consumers; pointer/container values remain
      * unchanged through rt_any_to_i64. */
-    bool dynamic_index_result = b->index_for_any_call || runtime_tbuf_access;
+    /* A call-result receiver with no proven sequence representation may be a
+     * legacy managed list or a native descriptor tbuf.  The fixed-width raw
+     * path below assumes the latter and can read past the managed list's
+     * payload.  Cross this boundary through the representation-aware decoder
+     * exactly as an explicit `any` call does. */
+    bool unknown_call_receiver =
+        e->as.index.target &&
+        (e->as.index.target->kind == NY_E_CALL ||
+         e->as.index.target->kind == NY_E_MEMCALL) &&
+        !typed_static_target;
+    bool dynamic_index_result = b->index_for_any_call || runtime_tbuf_access ||
+                                unknown_call_receiver;
     if (dynamic_index_result) {
       int value = ny_native_nir_emit_runtime_call(b, "rt_tbuf_index_any_raw",
                                                   base, idx, -1, 2, 0);
@@ -1704,8 +1716,6 @@ static int ny_native_nir_lower_expr_impl(ny_native_nir_builder_t *b,
                                                    value, -1, -1, 1, 0)
                  : value;
     }
-    return ny_native_nir_emit_runtime_call(b, "rt_tbuf_index_read_raw", base,
-                                           idx, -1, 2, 0);
     /* Native list/tuple values use the data pointer as their base.  The
      * ordinary byte-offset path is correct for non-negative indices, but a
      * negative index would address the typed-buffer header.  Route negative
@@ -1821,10 +1831,10 @@ static int ny_native_nir_lower_expr_impl(ny_native_nir_builder_t *b,
       /* `.get` is an `any`-surface operation even when the list was inferred
        * as a scalar/f64 sequence.  Use the provenance-aware accessor so raw
        * f64 slots are boxed instead of leaking IEEE bits as integers. */
-      const char *get_runtime =
-          ny_native_nir_expr_is_dyn_list(b, e->as.memcall.target)
-              ? "rt_tbuf_get_any"
-              : "rt_tbuf_get";
+      /* `.get` has an any-valued contract regardless of the inferred element
+       * type.  Keep decoding at this boundary; typed callers can unbox the
+       * result explicitly below. */
+      const char *get_runtime = "rt_tbuf_get_any";
       int value = ny_native_nir_emit_runtime_call(b, get_runtime, list, index,
                                                   fallback, 3, 0);
       bool wants_f64 = ny_native_nir_expr_is_f64(b, e) ||
@@ -1882,12 +1892,37 @@ static int ny_native_nir_lower_expr_impl(ny_native_nir_builder_t *b,
               ? ny_native_nir_find_local(b, append_value->as.ident.name)
               : NULL;
       const char *append_symbol =
-          ((append_value_local && append_value_local->is_any) ||
+           ((append_value_local && append_value_local->is_any) ||
            ny_native_nir_expr_is_any(b, append_value) ||
            (append_local && append_local->is_dyn_list)) &&
            !ny_native_nir_expr_is_raw_dynamic_read(b, append_value)
               ? "rt_tbuf_append_tagged"
               : "rt_tbuf_append_raw";
+      if (strcmp(append_symbol, "rt_tbuf_append_tagged") == 0) {
+        bool raw_integer =
+            append_value &&
+            ((append_value->kind == NY_E_LITERAL &&
+              append_value->as.literal.kind == NY_LIT_INT &&
+              append_value->tok.kind != NY_T_NIL) ||
+             (append_value->semantic.resolved &&
+              append_value->semantic.rep == NY_SEM_REP_RAW_INT) ||
+             (append_value_local &&
+              append_value_local->semantic_rep == NY_SEM_REP_RAW_INT));
+        if (raw_integer) {
+          value = ny_native_nir_emit_runtime_call(b, "rt_tag", value, -1,
+                                                   -1, 1, 0);
+        } else if (ny_native_nir_expr_is_f64(b, append_value) ||
+                   ny_native_nir_expr_is_f32(b, append_value)) {
+          int bits = ny_native_nir_emit_runtime_call(
+              b, "rt_f64_bits", value, -1, -1, 1, 0);
+          value = bits < 0
+                      ? -1
+                      : ny_native_nir_emit_runtime_call(
+                            b, "rt_flt_box_val", bits, -1, -1, 1, 0);
+        }
+        if (value < 0)
+          return -1;
+      }
       int out = is_string < 0
                     ? -1
                     : ny_native_nir_emit_runtime_call(b, append_symbol, list,

@@ -1,0 +1,12 @@
+shape store_item_return {
+  family "runtime-native"
+  generator "native"
+  features [native nyir dynamic abi]
+  template ny-test-case
+  source ny <<'NY'
+use std.core
+mut xs = [4, 1, 9]
+def stored = __store_item(xs, 1, 7)
+if stored == 7 && xs == [4, 7, 9] { 0 } else { 1 }
+NY
+}

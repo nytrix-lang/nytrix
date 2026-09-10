@@ -82,6 +82,23 @@ ny_type_t *ny_type_apply(ny_type_arena_t *arena, const char *name, ny_type_t *ar
   t->as.apply.arg0 = arg0;
   t->as.apply.arg1 = arg1;
   t->as.apply.arity = arity;
+  t->as.apply.value_arg = 0;
+  t->as.apply.value_resolved = false;
+  t->as.apply.value_symbol = NULL;
+  return t;
+}
+
+ny_type_t *ny_type_apply_bounded(ny_type_arena_t *arena, const char *name,
+                                 ny_type_t *arg0, ny_type_t *arg1, int arity,
+                                 int64_t value_arg, bool value_resolved,
+                                 const char *value_symbol) {
+  ny_type_t *t = ny_type_apply(arena, name, arg0, arg1, arity);
+  if (!t)
+    return NULL;
+  t->as.apply.value_arg = value_arg;
+  t->as.apply.value_resolved = value_resolved;
+  t->as.apply.value_symbol =
+      value_symbol ? ny_type_arena_strdup(arena, value_symbol) : NULL;
   return t;
 }
 
@@ -154,6 +171,12 @@ bool ny_type_unify(ny_type_t *a, ny_type_t *b) {
     return a->as.apply.name && b->as.apply.name &&
            strcmp(a->as.apply.name, b->as.apply.name) == 0 &&
            a->as.apply.arity == b->as.apply.arity &&
+           a->as.apply.value_resolved == b->as.apply.value_resolved &&
+           (!a->as.apply.value_resolved ||
+            a->as.apply.value_arg == b->as.apply.value_arg) &&
+           ((!a->as.apply.value_symbol && !b->as.apply.value_symbol) ||
+            (a->as.apply.value_symbol && b->as.apply.value_symbol &&
+             strcmp(a->as.apply.value_symbol, b->as.apply.value_symbol) == 0)) &&
            ny_type_unify(a->as.apply.arg0, b->as.apply.arg0) &&
            ny_type_unify(a->as.apply.arg1, b->as.apply.arg1);
   case NY_TYPE_VAR:
@@ -216,7 +239,24 @@ char *ny_type_to_string(ny_type_t *type) {
     char *a = ny_type_to_string(type->as.apply.arg0);
     char *b = ny_type_to_string(type->as.apply.arg1);
     char *out = NULL;
-    if (type->as.apply.arity <= 0) {
+    if (type->as.apply.value_resolved) {
+      int n = snprintf(NULL, 0, "%s<%" PRId64 ">", name,
+                       type->as.apply.value_arg);
+      if (n >= 0) {
+        out = (char *)malloc((size_t)n + 1);
+        if (out)
+          snprintf(out, (size_t)n + 1, "%s<%" PRId64 ">", name,
+                   type->as.apply.value_arg);
+      }
+    } else if (type->as.apply.value_symbol) {
+      int n = snprintf(NULL, 0, "%s<%s>", name, type->as.apply.value_symbol);
+      if (n >= 0) {
+        out = (char *)malloc((size_t)n + 1);
+        if (out)
+          snprintf(out, (size_t)n + 1, "%s<%s>", name,
+                   type->as.apply.value_symbol);
+      }
+    } else if (type->as.apply.arity <= 0) {
       out = ny_strdup(name);
     } else if (type->as.apply.arity == 1) {
       int n = snprintf(NULL, 0, "%s<%s>", name, a ? a : "any");

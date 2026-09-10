@@ -165,11 +165,136 @@ static inline bool rt_env_enabled_default_on(const char *name) {
   return rt_env_is_truthy(v);
 }
 
+extern volatile uint64_t g_dbg_mincore_calls;
+extern volatile uint64_t g_dbg_readable_entries;
+extern volatile uint64_t g_dbg_readable_fast;
+extern volatile uint64_t g_dbg_readable_array_hit;
+extern volatile uint64_t g_dbg_enabled;
+void dbg_maybe_register(void);
+
+#define DBG_CALLER_SLOTS 64
+extern volatile uint64_t g_dbg_caller_ret[DBG_CALLER_SLOTS];
+extern volatile uintptr_t g_dbg_caller_ips[DBG_CALLER_SLOTS];
+#define RT_DBG_NOTE_CALLER()                                        \
+  do {                                                              \
+    uintptr_t dbg_ra = (uintptr_t)__builtin_return_address(0);      \
+    uintptr_t dbg_lo = (uintptr_t)dbg_ra & 0xfff;                   \
+    for (unsigned dbg_i = 0; dbg_i < DBG_CALLER_SLOTS; ++dbg_i) {   \
+      if (g_dbg_caller_ips[dbg_i] == dbg_ra) {                      \
+        g_dbg_caller_ret[dbg_i]++;                                  \
+        break;                                                      \
+      }                                                             \
+      if (g_dbg_caller_ips[dbg_i] == 0) {                           \
+        g_dbg_caller_ips[dbg_i] = dbg_ra;                           \
+        g_dbg_caller_ret[dbg_i] = 1;                                \
+        (void)dbg_lo;                                               \
+        break;                                                      \
+      }                                                             \
+    }                                                               \
+  } while (0)
+
+/*
+ * Known-address-space oracle.  A lazy snapshot of /proc/self/maps plus ranges
+ * registered by every runtime allocation provides a syscall-free answer to
+ * "is [p, p+n) mapped and readable?"  Genuine objects are always inside a
+ * registered range, so a probe that lands nowhere near any known mapping can
+ * only be an arbitrary integer masquerading as a pointer (the mincore storm in
+ * `acc += a[i]` loops).  Rejecting those without a syscall is safe: their old
+ * path failed mincore (unmapped) or failed the magic checks (garbage) and
+ * converged on the same non-object classification.  Anything indecisive still
+ * falls through to the real mincore probe for correctness.  Linux only.
+ */
+#define RT_ORACLE_SNAPSHOT_MAX 4096
+#define RT_ORACLE_EXTRA_MAX 256
+#define RT_ORACLE_DEDUP 8
+#define RT_ORACLE_GAP_DEFAULT ((uintptr_t)1 << 30)
+
+typedef struct rt_oracle_range {
+  uintptr_t start; /* inclusive */
+  uintptr_t end;   /* exclusive */
+} rt_oracle_range_t;
+
+extern rt_oracle_range_t g_rt_oracle_snapshot[RT_ORACLE_SNAPSHOT_MAX];
+extern uint32_t g_rt_oracle_snapshot_count;
+extern rt_oracle_range_t g_rt_oracle_extra[RT_ORACLE_EXTRA_MAX];
+extern _Atomic uint32_t g_rt_oracle_extra_count;
+extern _Atomic uintptr_t g_rt_oracle_lo;
+extern _Atomic uintptr_t g_rt_oracle_hi;
+extern _Atomic uint32_t g_rt_oracle_ready;
+extern _Atomic uint32_t g_rt_oracle_full;
+extern uintptr_t g_rt_oracle_gap;
+
+void rt_map_oracle_init(void);
+void rt_map_oracle_add(uintptr_t start, size_t size);
+
+/* 1 = mapped+readable (authoritative), -1 = not mapped (authoritative),
+ * 0 = unknown, caller must verify with a real probe. */
+static inline int rt_map_oracle_check(uintptr_t p, size_t n) {
+  if (p < 0x1000 || n == 0)
+    return 0;
+  if (p > UINTPTR_MAX - n)
+    return 0;
+  uintptr_t e = p + n - 1;
+  if (!atomic_load_explicit(&g_rt_oracle_ready, memory_order_relaxed))
+    rt_map_oracle_init();
+  int reject_ok =
+      !atomic_load_explicit(&g_rt_oracle_full, memory_order_relaxed);
+  uintptr_t gap = reject_ok ? g_rt_oracle_gap : 0;
+  uintptr_t lo = atomic_load_explicit(&g_rt_oracle_lo, memory_order_acquire);
+  uintptr_t hi = atomic_load_explicit(&g_rt_oracle_hi, memory_order_acquire);
+  if (reject_ok) {
+    if (e < lo && lo - e > gap)
+      return -1;
+    if (p > hi && p - hi > gap)
+      return -1;
+  }
+  uint32_t extra_n =
+      atomic_load_explicit(&g_rt_oracle_extra_count, memory_order_acquire);
+  for (uint32_t i = 0; i < extra_n; ++i) {
+    if (p >= g_rt_oracle_extra[i].start && e <= g_rt_oracle_extra[i].end)
+      return 1;
+  }
+  uint32_t cnt = g_rt_oracle_snapshot_count;
+  if (cnt == 0)
+    return 0;
+  uint32_t lo2 = 0, hi2 = cnt;
+  while (lo2 < hi2) {
+    uint32_t mid = lo2 + (hi2 - lo2) / 2;
+    if (g_rt_oracle_snapshot[mid].start <= p)
+      lo2 = mid + 1;
+    else
+      hi2 = mid;
+  }
+  if (lo2 > 0) {
+    const rt_oracle_range_t *r = &g_rt_oracle_snapshot[lo2 - 1];
+    if (e <= r->end)
+      return 1;
+    if (!reject_ok || lo2 >= cnt || p <= r->end)
+      return 0;
+    uintptr_t gap_prev = p - r->end;
+    uintptr_t gap_next = g_rt_oracle_snapshot[lo2].start - e;
+    if (gap_prev > gap && gap_next > gap)
+      return -1;
+  }
+  return 0;
+}
+
 static inline int rt_addr_mapped(uintptr_t p, size_t n) {
   if (p < 0x1000 || n == 0)
     return 0;
   if (p > UINTPTR_MAX - n)
     return 0;
+#if !defined(_WIN32) && !defined(__APPLE__)
+  int oracle = rt_map_oracle_check(p, n);
+  if (oracle == 1)
+    return 1;
+  if (oracle == -1)
+    return 0;
+#endif
+  if (g_dbg_enabled) {
+    g_dbg_mincore_calls++;
+    RT_DBG_NOTE_CALLER();
+  }
 #ifdef _WIN32
   MEMORY_BASIC_INFORMATION mbi = {0};
   if (!VirtualQuery((LPCVOID)p, &mbi, sizeof(mbi)))
@@ -250,6 +375,8 @@ static inline int rt_addr_mapped(uintptr_t p, size_t n) {
 extern __thread uintptr_t rt_heap_ptr_cache_keys[RT_HEAP_PTR_CACHE_SIZE];
 extern __thread uint64_t rt_heap_ptr_cache_epoch;
 extern _Atomic uint64_t rt_heap_ptr_global_epoch;
+extern int64_t rt_cstr_to_str(int64_t p);
+extern int64_t rt_magic_tbuf_elem_size(int64_t v);
 static __thread uintptr_t
     rt_heap_ptr_neg_cache_keys[RT_HEAP_PTR_NEG_CACHE_SIZE];
 static __thread uintptr_t rt_const_str_cache_keys[RT_CONST_STR_CACHE_SIZE];
@@ -380,6 +507,8 @@ static inline uintptr_t rt_page_cache_slot(uintptr_t pg, uintptr_t mask) {
 static inline int rt_addr_readable(uintptr_t p, size_t n) {
   static __thread uintptr_t last_pg = 0;
   static __thread uintptr_t cache[RT_PAGE_CACHE_SIZE];
+  if (g_dbg_enabled)
+    g_dbg_readable_entries++;
   if (p < 0x1000 || n == 0)
     return 0;
   if (p > UINTPTR_MAX - n)
@@ -398,6 +527,8 @@ static inline int rt_addr_readable(uintptr_t p, size_t n) {
 
   uintptr_t h1 = rt_page_cache_slot(pg1, RT_PAGE_CACHE_MASK);
   if (cache[h1] == pg1) {
+    if (g_dbg_enabled)
+      g_dbg_readable_fast++;
     if (pg1 == pg2) {
       last_pg = pg1;
       return 1;
@@ -452,12 +583,17 @@ static inline int rt_try_read_i64(uintptr_t p, int64_t *out) {
 static inline int rt_readable_hdr_cache_hit(uintptr_t p, size_t n) {
   static __thread uintptr_t last_pg1 = 0;
   static __thread uintptr_t last_pg2 = 0;
+  if (g_dbg_enabled)
+    g_dbg_readable_entries++;
   if (p < 0x1000 || n == 0 || p > UINTPTR_MAX - n)
     return 0;
   uintptr_t pg1 = rt_page_base_4k(p);
   uintptr_t pg2 = rt_page_base_4k(p + n - 1);
-  if (pg1 == last_pg1 && pg2 == last_pg2)
+  if (pg1 == last_pg1 && pg2 == last_pg2) {
+    if (g_dbg_enabled)
+      g_dbg_readable_fast++;
     return 1;
+  }
   uintptr_t h1 = rt_page_cache_slot(pg1, RT_READABLE_HDR_PAGE_CACHE_MASK);
   if (rt_readable_hdr_page_cache[h1] != pg1)
     return 0;
@@ -466,6 +602,8 @@ static inline int rt_readable_hdr_cache_hit(uintptr_t p, size_t n) {
     if (rt_readable_hdr_page_cache[h2] != pg2)
       return 0;
   }
+  if (g_dbg_enabled)
+    g_dbg_readable_array_hit++;
   last_pg1 = pg1;
   last_pg2 = pg2;
   return 1;
@@ -851,6 +989,7 @@ int64_t rt_str_builder_free(int64_t builder_v);
 int64_t rt_dict_reserve(int64_t d, int64_t additional);
 
 int64_t rt_has_tag(int64_t v, int64_t tag_v);
+int64_t rt_raw_truthy(int64_t v);
 int64_t rt_store_item_fast(int64_t lst, int64_t i_v, int64_t val);
 
 int64_t rt_eq(int64_t a, int64_t b);

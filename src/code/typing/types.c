@@ -2142,6 +2142,36 @@ static bool ny_fin_extract_bound(const char *type_name, int64_t *out_bound) {
 }
 
 /*
+ * Generic value-indexed constructor support.  Any user-defined constructor
+ * written as `Name<N>` participates in the same literal-bound checking as
+ * Fin<N>; ordinary type constructors (list<int>, Result<T>, ...) are ignored
+ * because their argument is not a positive integer.
+ */
+static bool ny_indexed_extract_bound(const char *type_name, int64_t *out_bound) {
+  if (!type_name || !out_bound)
+    return false;
+  const char *leaf = ny_name_leaf(type_name);
+  if (!leaf)
+    leaf = type_name;
+  const char *lt = strchr(leaf, '<');
+  const char *gt = strrchr(leaf, '>');
+  if (!lt || !gt || gt <= lt + 1 || lt == leaf)
+    return false;
+  char buf[32];
+  size_t len = (size_t)(gt - lt - 1);
+  if (len >= sizeof(buf))
+    return false;
+  memcpy(buf, lt + 1, len);
+  buf[len] = '\0';
+  char *end = NULL;
+  int64_t bound = (int64_t)strtoll(buf, &end, 10);
+  if (!end || *end || bound <= 0)
+    return false;
+  *out_bound = bound;
+  return true;
+}
+
+/*
  * Resolves a Fin<N> bound, first via strtoll (literal), then via
  * def-binding lookup for symbolic names.  Returns false when neither
  * path yields a positive integer.
@@ -2233,6 +2263,22 @@ bool ensure_expr_type_compatible(codegen_t *cg, scope *scopes, size_t depth,
     const char *got_type = infer_expr_type(cg, scopes, depth, expr);
     if (got_type && is_int_type_name(got_type))
       return true;
+  }
+  /*
+   * User-defined value-indexed constructors erase to their declared ABI but
+   * still reject out-of-range compile-time literals.
+   */
+  int64_t indexed_bound = 0;
+  const char *want_leaf = ny_name_leaf(type_skip_nullable(want));
+  if (want_leaf && strcmp(want_leaf, "Fin") != 0 &&
+      classify_builtin_type_tail(want_leaf) == NY_BT_UNKNOWN &&
+      ny_indexed_extract_bound(want_leaf, &indexed_bound) &&
+      expr->kind == NY_E_LITERAL && expr->as.literal.kind == NY_LIT_INT) {
+    int64_t value = expr->as.literal.as.i;
+    if (value < 0 || value >= indexed_bound)
+      ny_diag_error(tok, "value-indexed bound requires 0 <= value < %" PRId64 ", got %" PRId64,
+                    indexed_bound, value);
+    return true;
   }
   if (is_void_type_name(want)) {
     if (expr->kind == NY_E_LITERAL && expr->as.literal.kind == NY_LIT_INT) {

@@ -251,6 +251,15 @@ assert(it.compact([0, 1, "", "x", nil, 4]) == [1, "x", 4], "compact")
 assert(it.zip_with([1, 2], [10, 20], fn(a, b) { a + b }) == [11, 22], "zip with")
 assert(it.cycle([1, 2], 3) == [1, 2, 1, 2, 1, 2], "cycle")
 assert(it.chunk([1, 2, 3, 4, 5], 2) == [[1, 2], [3, 4], [5]], "chunk list")
+assert(it.chunk([1, 2, 3, 4, 5], 2).get(0, nil) == [1, 2],
+   "chunk preserves nested list values")
+assert([[1, 2], [3, 4], [5, 6], [7, 8]].filter(fn(v) {
+         v.get(0, 0) > 2
+      }) == [[3, 4], [5, 6], [7, 8]], "filter preserves nested list values")
+mut nested_value_dict = {}
+nested_value_dict.set("items", [3, 4])
+assert(nested_value_dict.get("items", nil) == [3, 4],
+   "dictionary preserves nested list values")
 assert(it.chunk("abcde", 2) == ["ab", "cd", "e"], "chunk string")
 assert(it.windowed([1, 2, 3, 4], 3) == [[1, 2, 3], [2, 3, 4]], "windowed list")
 assert(it.windowed("abcd", 2, 2) == ["ab", "cd"], "windowed string")

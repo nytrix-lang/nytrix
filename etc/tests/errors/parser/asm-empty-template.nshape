@@ -1,0 +1,14 @@
+shape parser-asm-empty-template {
+  family "compiler-errors/parser"
+  generator "error"
+  features [error parser negative diagnostic asm]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "asm template must not be empty"
+  source ny <<'NY'
+use std.core
+
+def value = asm("   ", "=r")
+NY
+}

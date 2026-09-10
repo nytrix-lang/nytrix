@@ -132,7 +132,7 @@ Layouts use `Type name` fields. A colon may still parse as an implicit separator
 
 ## Status
 
-> Work in progress. The compiler is still experimental. The native backend is being pushed toward a full jit/aot LLVM-free path. The LSP currently remains an LLVM-enabled build target.
+> Work in progress. The compiler is still experimental. The native backend is being developed toward a full JIT/AOT path without LLVM.
 
 Pin a commit for reproducible builds and check the [Changelog](docs/CHANGELOG.md) before upgrading.
 

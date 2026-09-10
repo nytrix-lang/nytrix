@@ -884,15 +884,21 @@ fn _core_vector(int n, any x, any y=0, any z=0, any w=0) any {
    if n >= 4 { out = dict_set(out, "w", w) }
    out
 }
+
 fn Vector2(any x=0, any y=nil) any { _core_vector(2, x, y == nil ? 0 : y) }
+
 fn Vector3(any x=0, any y=nil, any z=nil) any {
    _core_vector(3, x, y == nil ? 0 : y, z == nil ? 0 : z)
 }
+
 fn Vector4(any x=0, any y=nil, any z=nil, any w=nil) any {
    _core_vector(4, x, y == nil ? 0 : y, z == nil ? 0 : z, w == nil ? 0 : w)
 }
+
 fn vec2(any x=0, any y=nil) any { Vector2(x, y) }
+
 fn vec3(any x=0, any y=nil, any z=nil) any { Vector3(x, y, z) }
+
 fn vec4(any x=0, any y=nil, any z=nil, any w=nil) any { Vector4(x, y, z, w) }
 
 fn is_nytrix_obj(any x) bool {

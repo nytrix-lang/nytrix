@@ -3236,10 +3236,12 @@ static bool ny_native_nir_expr_is_bigint(ny_native_nir_builder_t *b,
   return false;
 }
 
-/* BigFloat values are heap handles carried through the dynamic ABI.  Keep a
+/*
+ * BigFloat values are heap handles carried through the dynamic ABI.  Keep a
  * small semantic classifier alongside the bigint classifier so formatting and
  * other value consumers can select the handle-preserving bridge without
- * relying on source spelling at the call site. */
+ * relying on source spelling at the call site.
+ */
 static bool ny_native_nir_expr_is_bigfloat(ny_native_nir_builder_t *b,
                                            const expr_t *e) {
   if (!b || !e)
@@ -3438,6 +3440,33 @@ static bool ny_native_nir_expr_is_any(ny_native_nir_builder_t *b,
   if (!e)
     return false;
   /*
+   * Numeric modulo is lowered to the raw NYIR integer domain.  Even when its
+   * operand is dynamic, the result is not a tagged value; advertising it as
+   * `any` routes a following equality through rt_any_eq and makes raw zero
+   * compare equal to the tagged integer-zero immediate.
+   */
+  if (e->kind == NY_E_BINARY && e->as.binary.op &&
+      strcmp(e->as.binary.op, "%") == 0)
+    return false;
+  /*
+   * Prefer the resolved ABI fact; retain the intrinsic spelling only when
+   * semantic resolution has no declaration to consult.
+   */
+  if ((e->kind == NY_E_CALL || e->kind == NY_E_MEMCALL) &&
+      e->semantic.canonical_callee_stmt &&
+      e->semantic.canonical_callee_stmt->kind == NY_S_FUNC) {
+    const stmt_t *fn = e->semantic.canonical_callee_stmt;
+    if (fn->as.fn.return_semantic.resolved &&
+        fn->as.fn.return_semantic.rep == NY_SEM_REP_RAW_INT)
+      return false;
+  } else if (e->kind == NY_E_CALL && e->as.call.callee &&
+             e->as.call.callee->kind == NY_E_IDENT &&
+             e->as.call.callee->as.ident.name &&
+             strcmp(e->as.call.callee->as.ident.name,
+                    "__list_sum_int_range") == 0) {
+    return false;
+  }
+  /*
    * Module values lower through their initializer, including re-exports.
    * Use the same representation here: a conservative dynamic annotation on
    * the member must not turn its raw integer constant into a tagged value.
@@ -3457,6 +3486,15 @@ static bool ny_native_nir_expr_is_any(ny_native_nir_builder_t *b,
     const stmt_t *fn = ny_native_nir_find_attached_method(b, receiver, method);
     if (fn && fn->as.fn.return_type)
       return ny_native_type_name_is_any(fn->as.fn.return_type);
+  }
+  if ((e->kind == NY_E_CALL || e->kind == NY_E_MEMCALL) &&
+      e->semantic.canonical_callee_stmt &&
+      e->semantic.canonical_callee_stmt->kind == NY_S_FUNC) {
+    const stmt_t *fn = e->semantic.canonical_callee_stmt;
+    if (fn->as.fn.return_type)
+      return ny_native_type_name_is_any(fn->as.fn.return_type);
+    if (fn->as.fn.return_semantic.resolved)
+      return fn->as.fn.return_semantic.rep == NY_SEM_REP_TAGGED_DYNAMIC;
   }
   /*
    * A resolved floating representation is a raw IEEE value in NYIR.  Do not
@@ -3489,6 +3527,20 @@ static bool ny_native_nir_expr_is_any(ny_native_nir_builder_t *b,
       e->as.call.callee->kind == NY_E_IDENT &&
       e->as.call.callee->as.ident.name) {
     const char *cname = e->as.call.callee->as.ident.name;
+    /*
+     * Native scalar container stores return their payload in the raw NYIR
+     * ABI.  The stdlib declaration is intentionally dynamic for the VM, but
+     * letting that annotation win here causes the native caller to tag the
+     * raw return a second time (and breaks `__store_item(...) == value`).
+     */
+    const char *store_leaf =
+        e->semantic.canonical_callee
+            ? ny_native_leaf_name(e->semantic.canonical_callee)
+            : ny_native_call_leaf(e);
+    if (store_leaf &&
+        (strcmp(store_leaf, "__store_item") == 0 ||
+         strcmp(store_leaf, "__store_item_fast") == 0))
+      return false;
     const stmt_t *fn = ny_native_nir_find_user_function(b, cname);
     if (!fn)
       fn = ny_native_nir_find_imported_function(b, cname);
@@ -6047,11 +6099,13 @@ static bool ny_native_nir_expr_is_dict(const ny_native_nir_builder_t *b,
     return true;
   if (e->kind == NY_E_CALL) {
     const char *leaf = ny_native_call_leaf(e);
-    /* `dict(cap)` is the language container constructor.  Module flattening
+    /*
+     * `dict(cap)` is the language container constructor.  Module flattening
      * can hide its user-function declaration from the local symbol lookup,
      * but its result representation is still unambiguously a dictionary;
      * keep indexed writes on the dictionary ABI rather than typed-buffer
-     * storage. */
+     * storage.
+     */
     if (leaf && strcmp(leaf, "dict") == 0)
       return true;
     if (leaf && (strcmp(leaf, "borrow") == 0 || strcmp(leaf, "own") == 0) &&
@@ -7485,9 +7539,6 @@ static int ny_native_nir_lower_dict_key(ny_native_nir_builder_t *b,
 
 #include "lower/lower_call.h"
 
-/*
- * Keep the expression lowering unit timestamped with its inline implementation.
- */
 #include "lower/lower_expr.h"
 
 #include "lower/lower_stmt.h"
