@@ -85,6 +85,28 @@ static int ny_exec_full(int argc, char **argv) {
   char full[PATH_MAX];
   full[0] = '\0';
 
+  /*
+   * 0) Explicit override: the test runner (and anyone else who already
+   * knows the exact build) sets NYTRIX_NY_FULL_BIN to the ny-full sibling
+   * of the --bin it was configured with. Honor that before guessing from
+   * argv[0]/proc-self-exe or falling back to a PATH search, so fixture
+   * children always exec the build the caller actually asked for instead
+   * of whatever "ny-full" happens to resolve to on the host.
+   */
+  {
+    const char *override = getenv("NYTRIX_NY_FULL_BIN");
+    if (override && override[0]) {
+#ifndef _WIN32
+      execv(override, argv);
+#else
+      errno = 0;
+      int rc = _spawnv(_P_WAIT, override, (const char *const *)argv);
+      if (rc >= 0 || errno == 0)
+        return rc;
+#endif
+    }
+  }
+
 #ifndef _WIN32
   /*
    * 1) dirname(argv[0])/ny-full

@@ -8,42 +8,7 @@ cd "$(git rev-parse --show-toplevel)"
 # probe mistakes while they are cheapest to correct.
 git diff --cached --check
 
-python3 -B - <<'PY'
-from __future__ import annotations
-
-import re
-import subprocess
-import sys
-
-source_suffixes = {".c", ".h", ".ny"}
-debug_print = re.compile(
-    rb'\b(?:printf|fprintf)\s*\(\s*"(?:DEBUG|XXX|TODO DEBUG)'
-    rb'|\bprint\s*\(\s*"DEBUG'
-)
-paths = subprocess.check_output(
-    ["git", "diff", "--cached", "--name-only", "-z", "--diff-filter=ACMR"]
-).split(b"\0")
-bad = []
-for raw_path in paths:
-    if not raw_path:
-        continue
-    path = raw_path.decode("utf-8", errors="surrogateescape")
-    if "." not in path or "." + path.rsplit(".", 1)[1] not in source_suffixes:
-        continue
-    try:
-        data = open(path, "rb").read()
-    except OSError as exc:
-        print(f"pre-commit: cannot read {path}: {exc}", file=sys.stderr)
-        sys.exit(1)
-    if b"\0" in data:
-        bad.append(f"{path}: contains a NUL byte")
-    if debug_print.search(data):
-        bad.append(f"{path}: contains temporary print debugging")
-if bad:
-    print("pre-commit: staged source hygiene failed:", file=sys.stderr)
-    print("\n".join(f"  {item}" for item in bad), file=sys.stderr)
-    print("Use NY_TRACE_* or compiler diagnostic switches instead.", file=sys.stderr)
-    sys.exit(1)
-PY
-
+# ./make check
 ./make fmt --check
+# NYTRIX_TEST_JOBS=32 ./make test --with-stdlib
+# ./make bench

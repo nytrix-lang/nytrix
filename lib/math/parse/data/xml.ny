@@ -40,7 +40,10 @@ fn _parse_attr(str s, int p, int n) list {
    mut attrs = dict(8)
    while p < n {
       p = _skip_ws(s, p, n)
-      if p >= n || load8(s, p) == 62 || load8(s, p) == 47 { break }
+      if p >= n { break }
+      def stopc = load8(s, p)
+      if stopc == 62 { break }
+      if stopc == 47 { break }
       mut kb = Builder(32)
       while p < n {
          def c = load8(s, p)
@@ -70,7 +73,9 @@ fn _parse_attr(str s, int p, int n) list {
             mut vb = Builder(32)
             while p < n {
                def c = load8(s, p)
-               if c <= 32 || c == 47 || c == 62 { break }
+               if c == 47 { break }
+               if c == 62 { break }
+               if c <= 32 { break }
                vb = builder_append(vb, chr(c))
                p += 1
             }
@@ -118,15 +123,19 @@ fn parse(any data) any {
             mut nb = Builder(16)
             while p < n {
                def c = load8(data, p)
-               if c == 62 || c == 47 || c <= 32 { break }
+               if c == 47 { break }
+               if c == 62 { break }
+               if c <= 32 { break }
                nb = builder_append(nb, chr(c))
                p += 1
             }
             def name = builder_to_str(nb)
             builder_free(nb)
             def attr_res = _parse_attr(data, p, n)
-            def attrs = attr_res.get(0)
-            p = attr_res.get(1)
+            def attrs = __load_item_any(attr_res, 0)
+            ; `__load_item_any` returns a tagged dynamic integer; parser
+            ; offsets are raw native indices and must be unboxed once here.
+            p = __any_to_i64(__load_item_any(attr_res, 1))
             mut self_closing = false
             if p < n && load8(data, p) == 47 {
                self_closing = true
@@ -139,7 +148,13 @@ fn parse(any data) any {
                def parent = stack.get(stack.len - 1)
                mut children = parent.get("children")
                children = children.append(node)
-               parent["children"] = children
+               ; `parent` comes from a dynamic list read. Use the dictionary
+               ; mutator so the update applies to the shared node.
+               parent.set("children", children)
+               ; Keep the root binding synchronized when the direct child is
+               ; attached. This avoids losing the mutation through a dynamic
+               ; stack element copy in native lowering.
+               if stack.len == 1 { root.set("children", children) }
             }
             if !self_closing { stack = stack.append(node) }
          }

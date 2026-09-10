@@ -421,8 +421,10 @@ verify that both can recover the original state. Work on a separate branch or
 isolated checkout. Group commits by coherent behavior; use calendar-day groups
 and normalized author/committer timestamps only when the task requests them.
 
-Use Conventional Commit subjects strictly under 68 characters, plain ASCII,
-and no generated/co-author trailers. Before publishing a rewritten branch,
+Use Conventional Commit subjects with a mandatory scope and strictly under 68
+characters: `<type>(<scope>): concise imperative summary` (for example
+`fix(native): preserve typed BigFloat call ABIs`). Plain ASCII and no
+generated/co-author trailers. Before publishing a rewritten branch,
 compare its tree with the backup and account for every intentional addition:
 
 ```bash
@@ -447,8 +449,8 @@ The hooks are intentionally small and layered:
 
 * `pre-commit` checks staged whitespace, source hygiene, temporary print
   debugging, and formatting without changing files.
-* `commit-msg` requires the existing Conventional Commit style, such as
-  `fix: preserve raw string tags`, with the repository convention of subjects strictly under 68 characters (the hook may allow a wider limit).
+* `commit-msg` requires the mandatory-scope Conventional Commit style, such as
+  `fix(native): preserve raw string tags`, with subjects strictly under 68 characters (the hook may allow a wider limit).
 * `pre-applypatch` and `pre-merge-commit` reuse the same staged protections.
 * `pre-push` runs `./make check`, the complete fail-closed repository gate.
 

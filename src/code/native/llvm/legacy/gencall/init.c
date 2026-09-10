@@ -1344,6 +1344,23 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
       lst_v = ny_cast_to_i64(cg, lst_v, "store_item_lst");
       idx_v = ny_cast_to_i64(cg, idx_v, "store_item_idx");
       val_v = ny_cast_to_i64(cg, val_v, "store_item_val");
+      /*
+       * Dynamic/unknown containers store canonical tagged values.  The
+       * legacy fast path receives integer literals in the raw scalar domain;
+       * tag those values at this boundary while leaving proven scalar lists
+       * on their raw ABI.
+       */
+      if (want_store_item_fast) {
+        const char *target_type =
+            infer_expr_type(cg, scopes, depth, c->args.data[0].val);
+        bool dynamic_target = !target_type || ny_type_is(target_type, "any") ||
+                              ny_type_is(target_type, "unknown");
+        expr_t *value_expr = c->args.data[2].val;
+        if (dynamic_target && value_expr && value_expr->kind == NY_E_LITERAL &&
+            value_expr->as.literal.kind == NY_LIT_INT &&
+            value_expr->tok.kind != NY_T_NIL)
+          val_v = ny_tag_int(cg, val_v);
+      }
       ny_dbg_loc(cg, e->tok);
       if (want_store_item_fast) {
         LLVMValueRef idx_raw =

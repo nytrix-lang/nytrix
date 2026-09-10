@@ -1,0 +1,35 @@
+shape append_mixed_list_representation {
+  family "runtime-native"
+  generator "native"
+  features [native nyir dynamic append list]
+  template ny-test-case
+  flags "--native-only --native-backend=x86_64 -O2 --no-progress --color=never"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+
+mut xs = [1, 2, 3, 4]
+xs = append(xs, "x")
+def ok = xs.len == 5 && to_str(xs) == "[1, 2, 3, 4, x]"
+if ok { 0 }
+else { 1 }
+NY
+}
+
+shape append_mixed_list_representation_llvm {
+  family "runtime-llvm"
+  generator "native"
+  features [native llvm dynamic append list]
+  template ny-test-case
+  flags "--native-backend=llvm -O0 --no-progress --color=never"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+
+mut xs = [1, 2, 3, 4]
+xs = append(xs, "x")
+def ok = xs.len == 5 && to_str(xs) == "[1, 2, 3, 4, x]"
+if ok { 0 }
+else { 1 }
+NY
+}

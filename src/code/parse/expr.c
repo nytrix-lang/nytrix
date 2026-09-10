@@ -47,6 +47,81 @@ static const char *ny_asm_constraint_for_class(parser_t *p, token_t tok) {
   return "r";
 }
 
+/*
+ * Keep compact asm constraints within the target-independent subset that the
+ * NYIR lowering understands.  Without this check an unknown GCC constraint
+ * is silently treated as a register and only fails (or miscompiles) in one
+ * backend.  Structured asm already reaches this subset through its class
+ * parser; compact asm must get the same source-level diagnostic.
+ */
+static bool ny_asm_compact_constraint_valid(const char *constraints,
+                                            size_t *input_count) {
+  const char *p = constraints ? constraints : "";
+  size_t inputs = 0;
+  while (*p) {
+    while (*p == ',' || isspace((unsigned char)*p))
+      p++;
+    bool output = false;
+    bool readwrite = false;
+    while (*p == '=' || *p == '+' || *p == '&' || *p == '%' || *p == '*' ||
+           *p == '?' || *p == '!') {
+      output |= *p == '=';
+      readwrite |= *p == '+';
+      p++;
+    }
+    if (!*p)
+      break;
+    bool clobber = *p == '~' && p[1] == '{';
+    if (clobber) {
+      const char *end = strchr(p + 2, '}');
+      if (!end)
+        return false;
+      p = end + 1;
+    } else if (*p == '{') {
+      const char *end = strchr(p + 1, '}');
+      if (!end || end == p + 1)
+        return false;
+      p = end + 1;
+    } else if (isdigit((unsigned char)*p)) {
+      while (isdigit((unsigned char)*p))
+        p++;
+    } else {
+      char c = *p++;
+      if (!(c == 'r' || c == 'g' || c == 'f' || c == 'x' || c == 'v' ||
+            c == 'w' || c == 'q' || c == 'a' || c == 'b' || c == 'c' ||
+            c == 'd' || c == 'D' || c == 'm' || c == 'Q' || c == 'U' ||
+            c == 'i' || c == 'n' || (c >= 'I' && c <= 'P') || c == 'S'))
+        return false;
+    }
+    if (!clobber && (!output || readwrite))
+      inputs++;
+    while (*p && *p != ',') {
+      if (*p == '|') {
+        p++;
+        break;
+      }
+      if (isspace((unsigned char)*p)) {
+        p++;
+        continue;
+      }
+      if (*p == '~' || *p == '{' || isdigit((unsigned char)*p))
+        break;
+      return false;
+    }
+  }
+  if (input_count)
+    *input_count = inputs;
+  return true;
+}
+
+static bool ny_asm_template_valid(const char *code) {
+  if (!code)
+    return false;
+  while (*code && isspace((unsigned char)*code))
+    code++;
+  return *code != '\0';
+}
+
 static bool ny_asm_append(char *buf, size_t cap, size_t *len,
                           const char *text, size_t text_len) {
   if (!buf || !len || !text || *len + text_len + 1 > cap)
@@ -1327,10 +1402,17 @@ static expr_t *parse_primary(parser_t *p) {
     expr_t *e = expr_new(p->arena, NY_E_ASM, tok);
     e->as.as_asm.code = code;
     e->as.as_asm.constraints = constraints;
+    if (!ny_asm_template_valid(code))
+      parser_error(p, tok, "asm template must not be empty", NULL);
+    size_t asm_inputs = 0;
+    if (!ny_asm_compact_constraint_valid(constraints, &asm_inputs))
+      parser_error(p, tok, "unsupported asm constraint", NULL);
     while (parser_match(p, NY_T_COMMA)) {
       vec_push_arena(p->arena, &e->as.as_asm.args, p_parse_expr(p, 0));
     }
     parser_expect(p, NY_T_RPAREN, NULL, NULL);
+    if (asm_inputs != e->as.as_asm.args.len)
+      parser_error(p, tok, "asm constraint/input count mismatch", NULL);
     return e;
   }
   case NY_T_EMBED: {

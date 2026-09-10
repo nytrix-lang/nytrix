@@ -197,7 +197,11 @@ fn flatten(seq xss) list {
       else { total += 1 }
       i += 1
    }
-   mut out = list(total)
+   ; Values read from heterogeneous sequence families may be either raw
+   ; element slots or tagged dynamic values. Append performs the canonical
+   ; value normalization; a preallocated raw store cannot distinguish 1 from
+   ; tagged zero without carrying an element descriptor.
+   mut out = []
    mut pos = 0
    i = 0
    while i < n {
@@ -206,17 +210,15 @@ fn flatten(seq xss) list {
          def m = inner.len
          mut j = 0
          while j < m {
-            _list_set(out, pos, inner[j])
-            pos += 1
+            out = out.append(__tbuf_index_any_raw(inner, j))
             j += 1
          }
       } else {
-         _list_set(out, pos, inner)
-         pos += 1
+         out = out.append(inner)
       }
       i += 1
    }
-   _list_finish(out, total)
+   out
 }
 
 @returns_owned
@@ -241,44 +243,31 @@ fn filter_map(seq xs, fnptr fn1) list {
 fn compact(seq xs) list {
    "Returns truthy values from `xs`."
    def n = _iter_seq_len(xs, "compact")
-   mut out = list(n)
+   mut out = []
    mut i = 0
-   mut pos = 0
    while i < n {
-      def v = xs[i]
-      ;; Generic sequence slots carry raw numeric payloads. Truthiness must
-      ;; inspect those payloads before any dynamic unboxing; object/string
-      ;; values still use their ordinary length semantics.
-      def keep = if is_str(v) || is_list(v) || is_dict(v) || is_set(v) || is_tuple(v) {
-         is_truthy(v)
-      } else {
-         v != 0
-      }
-      if keep {
-         _list_set(out, pos, v)
-         pos += 1
-      }
+      ; Canonicalize the raw element slot before applying ordinary truthiness.
+      def v = __load_item_any(xs, i)
+      if is_truthy(v) { out = out.append(v) }
       i += 1
    }
-   _list_finish(out, pos)
+   out
 }
 
 @returns_owned
 fn mapcat(fnptr fn1, seq xs) list {
    "Maps `xs` and concatenates sequence results."
    def n = _iter_seq_len(xs, "mapcat")
-   mut mapped = list(n)
+   mut mapped = []
    mut total = 0
    mut i = 0
    while i < n {
       def r = fn1(xs[i])
-      _list_set(mapped, i, r)
+      mapped = mapped.append(r)
       if _iter_is_seq(r) { total += r.len } else { total += 1 }
       i += 1
    }
-   _list_finish(mapped, n)
-   mut out = list(total)
-   mut pos = 0
+   mut out = []
    i = 0
    while i < n {
       def r = mapped[i]
@@ -286,17 +275,15 @@ fn mapcat(fnptr fn1, seq xs) list {
          def m = r.len
          mut j = 0
          while j < m {
-            _list_set(out, pos, r[j])
-            pos += 1
+            out = out.append(__tbuf_index_any_raw(r, j))
             j += 1
          }
       } else {
-         _list_set(out, pos, r)
-         pos += 1
+         out = out.append(r)
       }
       i += 1
    }
-   _list_finish(out, total)
+   out
 }
 
 @returns_owned
@@ -319,8 +306,7 @@ fn chunk(seq xs, int size) list {
    "Splits `xs` into non-overlapping chunks of at most `size`."
    def n = _iter_seq_len(xs, "chunk")
    if size <= 0 || n <= 0 { return list(0) }
-   mut out = list((n + size - 1) / size)
-   mut pos = 0
+   mut out = []
    mut i = 0
    if is_str(xs) {
       while i < n {
@@ -332,11 +318,10 @@ fn chunk(seq xs, int size) list {
             part = part + xs[j]
             j += 1
          }
-         _list_set(out, pos, part)
-         pos += 1
+         out = out.append(part)
          i = stop
       }
-      return _list_finish(out, pos)
+      return out
    }
    while i < n {
       mut stop = i + size
@@ -347,15 +332,15 @@ fn chunk(seq xs, int size) list {
       mut part = list(stop - i)
       mut j = i
       while j < stop {
-         _list_set(part, j - i, xs[j])
+         _list_set(part, j - i,
+            __any_to_i64(__load_item_any(xs, j * 2 + 1)))
          j += 1
       }
       _list_finish(part, stop - i)
-      _list_set(out, pos, part)
-      pos += 1
+      out = out.append(part)
       i = stop
    }
-   _list_finish(out, pos)
+   out
 }
 
 @returns_owned
@@ -364,8 +349,7 @@ fn windowed(seq xs, int size, int step=1) list {
    def n = _iter_seq_len(xs, "windowed")
    if size <= 0 || n <= 0 { return list(0) }
    if step <= 0 { step = 1 }
-   mut out = list(n)
-   mut pos = 0
+   mut out = []
    mut i = 0
    if is_str(xs) {
       while i + size <= n {
@@ -375,25 +359,22 @@ fn windowed(seq xs, int size, int step=1) list {
             part = part + xs[i + j]
             j += 1
          }
-         _list_set(out, pos, part)
-         pos += 1
+         out = out.append(part)
          i += step
       }
-      return _list_finish(out, pos)
+      return out
    }
    while i + size <= n {
-      mut part = list(size)
+      mut part = []
       mut j = 0
       while j < size {
-         _list_set(part, j, xs[i + j])
+         part = part.append(xs[i + j])
          j += 1
       }
-      _list_finish(part, size)
-      _list_set(out, pos, part)
-      pos += 1
+      out = out.append(part)
       i += step
    }
-   _list_finish(out, pos)
+   out
 }
 
 @returns_owned
@@ -437,7 +418,14 @@ fn partition(seq xs, fnptr pred) list {
 
 @jit
 @inline
-fn _list_set(list out, int idx, any value) any { store64(out, value, idx * 8) }
+fn _list_set(list out, int idx, any value) any {
+   ; Keep list writes on the same raw-index/value bridge as `__store_item`.
+   ; The low-level store64 spelling has no dynamic-slot normalization and
+   ; corrupts odd integers and nested values in JIT/native lowering.
+   ; Scalar callback results are canonical tagged values; the raw list store
+   ; needs their payload, while containers/strings pass through unchanged.
+   __store_item(out, idx, __any_to_i64(value))
+}
 
 @jit
 @inline
@@ -493,17 +481,18 @@ fn map(seq xs, fnptr fn1) any {
       mut out = Builder(n * 2 + 8)
       mut i = 0
       while i < cp_n {
-         out = builder_append(out, fn1(chr(ord_at(xs, i))))
+         def mapped = fn1(chr(ord_at(xs, i)))
+         out = builder_append(out, to_str(mapped))
          i += 1
       }
       def s = builder_to_str(out)
       builder_free(out)
       return s
    }
-   mut out = list(0)
+   mut out = list(n)
    mut i = 0
    while i < n {
-      out = append(out, fn1(xs[i]))
+      _list_set(out, i, fn1(xs[i]))
       i += 1
    }
    _iter_finish_like(xs, out, n)
@@ -532,7 +521,10 @@ fn filter(seq xs, fnptr pred) any {
    mut i = 0
    mut idx = 0
    while i < n {
-      def v = xs[i]
+      ; Cross the sequence boundary through the canonical decoder. Direct
+      ; raw loads can turn an odd native container handle into an integer when
+      ; it is passed through an indirect callback.
+      def v = __tbuf_index_any_raw(xs, i)
       if pred(v) {
          _list_set(out, idx, v)
          idx += 1

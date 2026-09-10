@@ -1707,10 +1707,12 @@ ny_emit_fast_indexable_get(codegen_t *cg, scope *scopes, size_t depth,
       ny_load(cg, target_ptr, NY_LLVM_NAME(cg, "fast_get_len"));
   LLVMValueRef len_raw =
       ny_build_untagged_or_raw_i64(cg, len_tagged, "fast_get_len_raw");
-  /* Preserve the source representation at this boundary.  A raw integer
+  /*
+   * Preserve the source representation at this boundary.  A raw integer
    * index of 1 is indistinguishable from tagged zero by low-bit inspection;
    * the expression-aware helper handles literals and typed values without
-   * guessing from parity. */
+   * guessing from parity.
+   */
   LLVMValueRef key_raw = ny_gencall_index_raw_i64(
       cg, scopes, depth, key, key_v, "fast_get_key_raw");
 
@@ -1749,9 +1751,11 @@ ny_emit_fast_indexable_get(codegen_t *cg, scope *scopes, size_t depth,
   }
 
   ny_pos(cg, fast_load_bb);
-  /* Dynamic get must canonicalize legacy raw list slots exactly once.  The
+  /*
+   * Dynamic get must canonicalize legacy raw list slots exactly once.  The
    * former inline GEP returned payload bits directly (0, 1, 2), so `get`
-   * exposed false/zero instead of 1/2/3 and confused descriptor values. */
+   * exposed false/zero instead of 1/2/3 and confused descriptor values.
+   */
   LLVMTypeRef load_args_ty[2] = {cg->type_i64, cg->type_i64};
   LLVMTypeRef load_fn_ty = LLVMFunctionType(cg->type_i64, load_args_ty, 2, 0);
   LLVMValueRef load_fn = ny_get_named_fn(cg, "rt_load_item_any");
@@ -2873,10 +2877,12 @@ static LLVMValueRef emit_layout_query(codegen_t *cg, token_t tok,
   }
   size_t val = def->size;
   if (want_align) {
-    /* Layout metadata is normally finalized by register_layout_def.  Keep
+    /*
+     * Layout metadata is normally finalized by register_layout_def.  Keep
      * the query total for declarations produced by a late semantic pass as
      * well: an aggregate always has at least byte alignment, and packed
-     * fields constrain (rather than erase) the derived alignment. */
+     * fields constrain (rather than erase) the derived alignment.
+     */
     size_t align = def->align;
     if (align == 0) {
       align = 1;

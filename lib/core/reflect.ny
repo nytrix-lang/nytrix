@@ -1306,6 +1306,13 @@ fn get(any obj, any key, any default=0) any {
    - `key`: Index or Key
    - `default`: Value to return if key/index not found(default 0).
    "
+   ; Native tbuf lists use raw NYIR indices.  The generic `__is_int` test
+   ; interprets odd raw indices as tagged values (1 becomes 0), so dispatch
+   ; before the legacy list branch.
+   if (_is_list(obj) || _is_tuple(obj)) &&
+   __load64_idx(obj, -32) == 0x4e59544255464d47 {
+      return __dict_get_raw(obj, key, default)
+   }
    if _is_list(obj) || _is_tuple(obj) {
       mut k = 0
       if __is_int(key) { k = key }

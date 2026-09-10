@@ -167,8 +167,11 @@ fn pad_start(str s, int width, str pad=" ") str {
 fn startswith(any s, any prefix) bool {
    "Returns true if string `s` starts with `prefix`."
    if !is_str(s) || !is_str(prefix) { return false }
-   mut n = __str_len(prefix)
-   if __str_len(s) < n { return false }
+   ;; __str_len returns a raw machine integer; keep it in typed-int locals so
+   ;; dynamic consumers do not decode the raw word as a tagged value.
+   mut int n = __str_len(prefix)
+   def int sl = __str_len(s)
+   if sl < n { return false }
    return _match_at(s, prefix, 0) ? true : false
 }
 
@@ -199,7 +202,7 @@ fn parse_int(any s, int base=10) int {
    "Parses an integer from string `s` using base 2..36."
    if !is_str(s) { return 0 }
    if base < 2 || base > 36 { return 0 }
-   def n = __str_len(s)
+   def int n = __str_len(s)
    if n == 0 { return 0 }
    mut sign = 1
    mut i = 0
@@ -458,8 +461,9 @@ fn lower(any s) any {
 fn endswith(any s, any suffix) bool {
    "Returns true if string `s` ends with `suffix`."
    if !is_str(s) || !is_str(suffix) { return false }
-   mut n = __str_len(s)
-   def m = __str_len(suffix)
+   ;; Raw __str_len results stay in typed-int locals (see startswith).
+   mut int n = __str_len(s)
+   def int m = __str_len(suffix)
    if n < m { return false }
    return _match_at(s, suffix, n - m) ? true : false
 }
@@ -854,7 +858,7 @@ fn ord(any s) int {
 
 fn byte_at(any s, int idx=0, any default=0) int {
    "Returns raw byte at byte index `idx`, supporting negative indices."
-   def n = __str_len(s)
+   def int n = __str_len(s)
    if idx < 0 { idx = n + idx }
    if idx < 0 || idx >= n { return default }
    load8(s, idx)

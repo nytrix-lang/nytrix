@@ -412,6 +412,53 @@ scalar_multiply:
   bool right_cstr = ny_native_nir_expr_is_cstr(b, e->as.binary.right);
   bool left_any = ny_native_nir_expr_is_any(b, e->as.binary.left);
   bool right_any = ny_native_nir_expr_is_any(b, e->as.binary.right);
+  bool left_scalar_get =
+      e->as.binary.left && e->as.binary.left->kind == NY_E_CALL &&
+      ny_native_call_leaf(e->as.binary.left) &&
+      strcmp(ny_native_call_leaf(e->as.binary.left), "get") == 0 &&
+      e->as.binary.left->as.call.args.len >= 2 &&
+      ny_native_nir_expr_is_list(b, e->as.binary.left->as.call.args.data[0].val);
+  bool right_scalar_get =
+      e->as.binary.right && e->as.binary.right->kind == NY_E_CALL &&
+      ny_native_call_leaf(e->as.binary.right) &&
+      strcmp(ny_native_call_leaf(e->as.binary.right), "get") == 0 &&
+      e->as.binary.right->as.call.args.len >= 2 &&
+      ny_native_nir_expr_is_list(b, e->as.binary.right->as.call.args.data[0].val);
+  /* The method spelling `list.get(i, d)` lowers to the same tagged dynamic
+   * ABI as the free `get(...)` call, but semantic inference resolves its
+   * result to the scalar element type, so the comparison path below treats
+   * the boxed payload as a raw integer.  Detect it explicitly and unbox it
+   * with the scalar `get` fix above.  Excluded when the method get itself
+   * converts to f64 (`rt_any_to_f64` in its own boundary) because that path
+   * returns raw float bits, not a tagged value. */
+  bool left_scalar_get_mem =
+      e->as.binary.left && e->as.binary.left->kind == NY_E_MEMCALL &&
+      e->as.binary.left->as.memcall.name &&
+      strcmp(e->as.binary.left->as.memcall.name, "get") == 0 &&
+      (e->as.binary.left->as.memcall.args.len == 1 ||
+       e->as.binary.left->as.memcall.args.len == 2) &&
+      e->as.binary.left->as.memcall.target &&
+      ny_native_nir_expr_is_list(b, e->as.binary.left->as.memcall.target) &&
+      !ny_native_nir_expr_is_dyn_list(b, e->as.binary.left->as.memcall.target) &&
+      !ny_native_nir_expr_is_f64(b, e->as.binary.left) &&
+      !(e->as.binary.left->as.memcall.args.len == 2 &&
+        e->as.binary.left->as.memcall.args.data[1].val &&
+        ny_native_nir_expr_is_f64(
+            b, e->as.binary.left->as.memcall.args.data[1].val));
+  bool right_scalar_get_mem =
+      e->as.binary.right && e->as.binary.right->kind == NY_E_MEMCALL &&
+      e->as.binary.right->as.memcall.name &&
+      strcmp(e->as.binary.right->as.memcall.name, "get") == 0 &&
+      (e->as.binary.right->as.memcall.args.len == 1 ||
+       e->as.binary.right->as.memcall.args.len == 2) &&
+      e->as.binary.right->as.memcall.target &&
+      ny_native_nir_expr_is_list(b, e->as.binary.right->as.memcall.target) &&
+      !ny_native_nir_expr_is_dyn_list(b, e->as.binary.right->as.memcall.target) &&
+      !ny_native_nir_expr_is_f64(b, e->as.binary.right) &&
+      !(e->as.binary.right->as.memcall.args.len == 2 &&
+        e->as.binary.right->as.memcall.args.data[1].val &&
+        ny_native_nir_expr_is_f64(
+            b, e->as.binary.right->as.memcall.args.data[1].val));
   /* Arithmetic on an `any` value produces a tagged dynamic result even when
    * HM refines the enclosing expression to int. Preserve that provenance so
    * comparisons use the dynamic ABI (for example `v % 2 == 0`). */
@@ -434,6 +481,21 @@ scalar_multiply:
       e->as.binary.right->as.memcall.target &&
       ny_native_nir_expr_is_dyn_list(
           b, e->as.binary.right->as.memcall.target))
+    right_dynamic_result = true;
+  /* Dictionary `.get` also returns a tagged dynamic value.  Preserve that
+   * provenance even when semantic inference narrows the result to a scalar;
+   * otherwise equality compares its tag against an unboxed literal. */
+  if (e->as.binary.left && e->as.binary.left->kind == NY_E_MEMCALL &&
+      e->as.binary.left->as.memcall.name &&
+      strcmp(e->as.binary.left->as.memcall.name, "get") == 0 &&
+      e->as.binary.left->as.memcall.target &&
+      ny_native_nir_expr_is_dict(b, e->as.binary.left->as.memcall.target))
+    left_dynamic_result = true;
+  if (e->as.binary.right && e->as.binary.right->kind == NY_E_MEMCALL &&
+      e->as.binary.right->as.memcall.name &&
+      strcmp(e->as.binary.right->as.memcall.name, "get") == 0 &&
+      e->as.binary.right->as.memcall.target &&
+      ny_native_nir_expr_is_dict(b, e->as.binary.right->as.memcall.target))
     right_dynamic_result = true;
   /* Direct indexing is the same dynamic boundary as `.get`.  Keep the
    * provenance on the expression itself so `seq[1] == 2` uses the tagged
@@ -474,11 +536,23 @@ scalar_multiply:
         left_dynamic_result ||
         ny_native_nir_expr_is_any(b, e->as.binary.left->as.binary.left) ||
         ny_native_nir_expr_is_any(b, e->as.binary.left->as.binary.right);
+  if (e->as.binary.left && e->as.binary.left->kind == NY_E_BINARY &&
+      e->as.binary.left->as.binary.op &&
+      strcmp(e->as.binary.left->as.binary.op, "%") == 0 &&
+      (ny_native_nir_expr_is_any(b, e->as.binary.left->as.binary.left) ||
+       ny_native_nir_expr_is_any(b, e->as.binary.left->as.binary.right)))
+    left_dynamic_result = true;
   if (e->as.binary.right && e->as.binary.right->kind == NY_E_BINARY)
     right_dynamic_result =
         right_dynamic_result ||
         ny_native_nir_expr_is_any(b, e->as.binary.right->as.binary.left) ||
         ny_native_nir_expr_is_any(b, e->as.binary.right->as.binary.right);
+  if (e->as.binary.right && e->as.binary.right->kind == NY_E_BINARY &&
+      e->as.binary.right->as.binary.op &&
+      strcmp(e->as.binary.right->as.binary.op, "%") == 0 &&
+      (ny_native_nir_expr_is_any(b, e->as.binary.right->as.binary.left) ||
+       ny_native_nir_expr_is_any(b, e->as.binary.right->as.binary.right)))
+    right_dynamic_result = true;
   bool left_bigint = ny_native_nir_expr_is_bigint(b, e->as.binary.left);
   bool right_bigint = ny_native_nir_expr_is_bigint(b, e->as.binary.right);
   bool left_user_call = e->as.binary.left &&
@@ -521,6 +595,21 @@ scalar_multiply:
                 : ny_native_nir_lower_expr(b, e->as.binary.right);
   if (a < 0 || rhs < 0)
     return -1;
+  /* Free get() returns the tagged dynamic ABI for ordinary consumers.  A
+   * statically scalar list read entering raw arithmetic must be unboxed once;
+   * doing it here preserves both `print(get(...))` and integer accumulation. */
+  if (left_scalar_get || left_scalar_get_mem) {
+    a = ny_native_nir_emit_runtime_call(b, "rt_any_to_i64", a, -1, -1, 1, 0);
+    left_any = false;
+    left_dynamic_result = false;
+  }
+  if (right_scalar_get || right_scalar_get_mem) {
+    rhs = ny_native_nir_emit_runtime_call(b, "rt_any_to_i64", rhs, -1, -1, 1, 0);
+    right_any = false;
+    right_dynamic_result = false;
+  }
+  if (a < 0 || rhs < 0)
+    return -1;
   /* Nil is a dynamic sentinel, never a numeric zero.  A comparison such as
    * `any_float == nil` must cross the boxed-value boundary; letting the
    * numeric f64 path handle it turns nil into 0.0 and makes zero-valued
@@ -556,6 +645,35 @@ scalar_multiply:
                                          .b = true_imm,
                                          .cmp = cmp});
   }
+  /* Untyped runtime/extern bridges (`__str_builder_append(0, "x") == 0`)
+   * return raw machine words, not tagged dynamics.  When such a call is
+   * compared against an integer or nil literal, both sides must stay raw:
+   * the dynamic path would read the raw word as a dynamic value (where 0 is
+   * nil) and tag the literal, so plain scalar identities fail.  Comparisons
+   * against string/container operands keep the dynamic comparator. */
+  if ((e->as.binary.left && e->as.binary.left->kind == NY_E_CALL &&
+       e->as.binary.left->as.call.callee &&
+       e->as.binary.left->as.call.callee->kind == NY_E_IDENT &&
+       e->as.binary.left->as.call.callee->as.ident.name &&
+       !ny_native_nir_user_defined_fn(
+           b, e->as.binary.left->as.call.callee->as.ident.name) &&
+       e->as.binary.right && e->as.binary.right->kind == NY_E_LITERAL &&
+       (e->as.binary.right->as.literal.kind == NY_LIT_INT ||
+        ny_expr_is_nil_literal(e->as.binary.right))) ||
+      (e->as.binary.right && e->as.binary.right->kind == NY_E_CALL &&
+       e->as.binary.right->as.call.callee &&
+       e->as.binary.right->as.call.callee->kind == NY_E_IDENT &&
+       e->as.binary.right->as.call.callee->as.ident.name &&
+       !ny_native_nir_user_defined_fn(
+           b, e->as.binary.right->as.call.callee->as.ident.name) &&
+       e->as.binary.left && e->as.binary.left->kind == NY_E_LITERAL &&
+       (e->as.binary.left->as.literal.kind == NY_LIT_INT ||
+        ny_expr_is_nil_literal(e->as.binary.left)))) {
+    left_any = false;
+    right_any = false;
+    left_dynamic_result = false;
+    right_dynamic_result = false;
+  }
   /* Any-valued operators consume the tagged dynamic ABI.  Integer literals
    * are normally emitted as raw NYIR scalars, so normalize a literal when it
    * is paired with an `any` operand before dispatching to the runtime helper
@@ -571,6 +689,11 @@ scalar_multiply:
   }
   if (tag_operand && left_any && !right_any && !right_f64 && !right_f32 &&
       !right_cstr &&
+      !(e->as.binary.left && e->as.binary.left->kind == NY_E_MEMCALL &&
+        e->as.binary.left->as.memcall.name &&
+        strcmp(e->as.binary.left->as.memcall.name, "get") == 0 &&
+        e->as.binary.left->as.memcall.target &&
+        ny_native_nir_expr_is_dict(b, e->as.binary.left->as.memcall.target)) &&
       !ny_native_nir_expr_is_raw_dynamic_read(b, e->as.binary.left) &&
       e->as.binary.right->semantic.rep == NY_SEM_REP_RAW_INT) {
     rhs = ny_native_nir_emit_runtime_call(b, "rt_tag", rhs, -1, -1, 1, 0);
@@ -586,13 +709,37 @@ scalar_multiply:
   }
   if (tag_operand && e->as.binary.right && e->as.binary.right->kind == NY_E_LITERAL &&
       e->as.binary.right->as.literal.kind == NY_LIT_INT &&
+      !right_any &&
+      !left_any &&
       left_dynamic_result &&
+      !(e->as.binary.left && e->as.binary.left->kind == NY_E_MEMCALL &&
+        e->as.binary.left->as.memcall.name &&
+        strcmp(e->as.binary.left->as.memcall.name, "get") == 0 &&
+        e->as.binary.left->as.memcall.target &&
+        ny_native_nir_expr_is_dict(b, e->as.binary.left->as.memcall.target)) &&
       !ny_native_nir_expr_is_raw_dynamic_read(b, e->as.binary.left) &&
+      !(e->as.binary.left && e->as.binary.left->kind == NY_E_BINARY &&
+        e->as.binary.left->as.binary.op &&
+        strcmp(e->as.binary.left->as.binary.op, "%") == 0) &&
       !ny_expr_is_nil_literal(e->as.binary.right)) {
     rhs = ny_native_nir_emit_runtime_call(b, "rt_tag", rhs, -1, -1, 1, 0);
     if (rhs < 0)
       return -1;
   }
+  /* Dynamic modulo consumes the tagged-value runtime ABI, but this expression
+   * is still a numeric NYIR result.  Unbox the helper result at this boundary
+   * so a following comparison/branch does not mistake the tagged integer 1
+   * (3) for the raw integer 3. */
+  if (!is_cmp && e->as.binary.op && strcmp(e->as.binary.op, "%") == 0 &&
+      (left_any || right_any || left_dynamic_result || right_dynamic_result) &&
+      !left_f64 && !right_f64 && !left_f32 && !right_f32) {
+    int mod = ny_native_nir_emit_runtime_call(b, "rt_any_mod", a, rhs, -1,
+                                              2, 0);
+    return mod < 0 ? -1
+                   : ny_native_nir_emit_runtime_call(b, "rt_any_to_i64", mod,
+                                                      -1, -1, 1, 0);
+  }
+
   /* Boolean literals normally use raw 0/1 for branch conditions.  When an
    * operator consumes an `any` value, compare against the canonical Ny
    * immediates instead; otherwise a stored `true` (8) is compared with raw
@@ -686,8 +833,47 @@ scalar_multiply:
     bool right_dict_index = e->as.binary.right &&
                             e->as.binary.right->kind == NY_E_INDEX &&
                             e->as.binary.right->as.index.target &&
-                            ny_native_nir_expr_is_dict(
-                                b, e->as.binary.right->as.index.target);
+                           ny_native_nir_expr_is_dict(
+                               b, e->as.binary.right->as.index.target);
+    bool left_dict_get = e->as.binary.left &&
+                         e->as.binary.left->kind == NY_E_MEMCALL &&
+                         e->as.binary.left->as.memcall.name &&
+                         strcmp(e->as.binary.left->as.memcall.name, "get") == 0 &&
+                         e->as.binary.left->as.memcall.target &&
+                         ny_native_nir_expr_is_dict(
+                             b, e->as.binary.left->as.memcall.target);
+    bool right_dict_get = e->as.binary.right &&
+                          e->as.binary.right->kind == NY_E_MEMCALL &&
+                          e->as.binary.right->as.memcall.name &&
+                          strcmp(e->as.binary.right->as.memcall.name, "get") == 0 &&
+                          e->as.binary.right->as.memcall.target &&
+                          ny_native_nir_expr_is_dict(
+                              b, e->as.binary.right->as.memcall.target);
+    /* A scalar dictionary lookup is already a tagged value at the runtime
+     * boundary.  For a proven integer comparison, decode it once and stay in
+     * the raw integer domain; this avoids passing an already-tagged value
+     * through the LLVM any-argument adapter a second time. */
+    if ((left_dict_get && e->as.binary.right &&
+         e->as.binary.right->kind == NY_E_LITERAL &&
+         e->as.binary.right->as.literal.kind == NY_LIT_INT) ||
+        (right_dict_get && e->as.binary.left &&
+         e->as.binary.left->kind == NY_E_LITERAL &&
+         e->as.binary.left->as.literal.kind == NY_LIT_INT)) {
+      if (left_dict_get) {
+        a = ny_native_nir_emit_runtime_call(b, "rt_any_to_i64", a, -1, -1,
+                                            1, 0);
+        left_any = false;
+        left_dynamic_result = false;
+      }
+      if (right_dict_get) {
+        rhs = ny_native_nir_emit_runtime_call(b, "rt_any_to_i64", rhs, -1, -1,
+                                              1, 0);
+        right_any = false;
+        right_dynamic_result = false;
+      }
+      if (a < 0 || rhs < 0)
+        return -1;
+    }
     if (left_dict_index || right_dict_index) {
       int equal = ny_native_nir_emit_runtime_call(
           b, "rt_any_eq", a, rhs, -1, 2, 0);
@@ -784,12 +970,6 @@ scalar_multiply:
     if ((left_any || right_any) && !left_f64 && !right_f64 && !left_f32 && !right_f32) {
       return ny_native_nir_emit_runtime_call(
           b, "rt_any_div", a, rhs, -1, 2, 0);
-    }
-  }
-  if (!is_cmp && e->as.binary.op && strcmp(e->as.binary.op, "%") == 0) {
-    if ((left_any || right_any) && !left_f64 && !right_f64 && !left_f32 && !right_f32) {
-      return ny_native_nir_emit_runtime_call(
-          b, "rt_any_mod", a, rhs, -1, 2, 0);
     }
   }
   if ((left_cstr || right_cstr) && !numeric_literal_sub) {
@@ -1014,10 +1194,3 @@ scalar_multiply:
     ny_native_nir_fail(b, NY_NATIVE_ALLOC_FAIL);
   return v;
 }
-
-/*
- * Lower a call expression into NYIR.  Handles intrinsics, builtins,
- * user functions, and extern ABI.  Extracted from
- * ny_native_nir_lower_expr.  The main switch still has ~1000 lines of
- * inline lowering for intrinsics, vector ops, and special forms.
- */

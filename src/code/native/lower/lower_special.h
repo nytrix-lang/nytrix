@@ -66,6 +66,10 @@ static bool ny_native_asm_constraint_class(const char *s, bool *memory,
     *memory = true;
   else if (*s == 'i' || *s == 'n' || (*s >= 'I' && *s <= 'P') || *s == 'S')
     *immediate = true;
+  else if (*s != 'r' && *s != 'g' && *s != 'f' && *s != 'x' &&
+           *s != 'v' && *s != 'w' && *s != 'q' && *s != 'a' &&
+           *s != 'b' && *s != 'c' && *s != 'd' && *s != 'D')
+    return false;
   if (*s == 'w')
     *bits = 32;
   return true;
@@ -539,12 +543,3 @@ static int ny_native_nir_lower_aarch64_asm(ny_native_nir_builder_t *b,
     return ny_native_nir_fail(b, "native NYIR asm: output operand %d was not written", state.result), -1;
   return result->value;
 }
-
-
-/*
- * Lower a binary expression (arithmetic, comparison, power, string ops)
- * into NYIR.  Extracted from ny_native_nir_lower_expr.
- * See also: the remaining monolithic switch in ny_native_nir_lower_expr
- * still dispatches ~20 expression kinds inline.
- * Further extraction targets: ternary, logical, unary, match.
- */

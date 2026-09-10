@@ -226,6 +226,12 @@ struct ny_type_t {
       ny_type_t *arg0;
       ny_type_t *arg1;
       int arity;
+      /* Value-indexed constructors keep their value argument as semantic
+       * data.  The old Fin<N> implementation encoded it in `name`, which
+       * forced every consumer to parse source spelling again. */
+      int64_t value_arg;
+      bool value_resolved;
+      const char *value_symbol;
     } apply;
   } as;
 };
@@ -237,6 +243,10 @@ ny_type_t *ny_type_var(ny_type_arena_t *arena);
 ny_type_t *ny_type_arrow(ny_type_arena_t *arena, ny_type_t *param, ny_type_t *ret);
 ny_type_t *ny_type_apply(ny_type_arena_t *arena, const char *name, ny_type_t *arg0,
                          ny_type_t *arg1, int arity);
+ny_type_t *ny_type_apply_bounded(ny_type_arena_t *arena, const char *name,
+                                 ny_type_t *arg0, ny_type_t *arg1, int arity,
+                                 int64_t value_arg, bool value_resolved,
+                                 const char *value_symbol);
 ny_type_t *ny_type_find(ny_type_t *type);
 bool ny_type_occurs(ny_type_t *needle, ny_type_t *haystack);
 bool ny_type_unify(ny_type_t *a, ny_type_t *b);

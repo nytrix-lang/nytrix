@@ -604,6 +604,8 @@ RT_DEF("__dict_items_raw", rt_dict_items_raw, 1,
        "Returns key/value pairs from a native-layout dictionary.")
 RT_DEF("__any_to_i64", rt_any_to_i64, 1, "fn __any_to_i64(value)",
        "Decodes a tagged dynamic scalar at an explicit native ABI boundary.")
+RT_DEF("__raw_truthy", rt_raw_truthy, 1, "fn __raw_truthy(value)",
+       "Tests truthiness of a raw native sequence slot.")
 RT_DEF("__list_len", rt_list_len, 1, "fn __list_len(lst)",
        "Fast read of the element count (tagged) from a list header.")
 RT_DEF("__list_set_len", rt_list_set_len, 2, "fn __list_set_len(lst, n)",

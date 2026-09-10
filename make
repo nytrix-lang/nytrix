@@ -1731,7 +1731,7 @@ def resolve_test_jobs(cli_jobs: int) -> int:
     # LLVM, and diagnostic replay phases overlap inside a fixture. Reserve
     # 32 GiB per automatic worker and cap the default at two workers so an
     # unqualified `./make test` remains bounded on 64 GiB hosts. Explicit
-    # Explicit -j/NYTRIX_TEST_JOBS settings remain available for controlled CI.
+    # -j/NYTRIX_TEST_JOBS settings remain available for controlled CI.
     if mem_gib > 0.0:
         auto = min(auto, max(1, int(mem_gib / 32.0)))
     auto = min(auto, 2)
@@ -3865,7 +3865,14 @@ def run_test(build_root: Path, kind: str, jobs: int, extra: list[str]) -> int:
     if rc == 0 and host_os() != "windows":
         rc = run_tool(build_root, kind, "ny-fuzz", ["validate-shapes", "etc/tests/shapes"], timeout=float(suite_timeout_s))
     suite_rc = rc
-    if not _env_flag("NYTRIX_TEST_NO_BENCH", False):
+    # A failed/expired fixture suite is not a valid benchmark baseline.  Do
+    # not start the expensive benchmark matrix after it; this also prevents a
+    # compile-timeout sweep from consuming another suite-sized budget and
+    # evicting useful diagnostics under memory pressure.
+    if suite_rc != 0:
+        bench_rc = 0
+        log("TEST", "skipping benchmarks because the fixture suite failed or timed out")
+    elif not _env_flag("NYTRIX_TEST_NO_BENCH", False):
         step("run benchmarks: C/Ny parity and performance (set NYTRIX_TEST_NO_BENCH=1 to skip)")
         # Keep benchmark workers under the same memory-aware limit as the
         # fixture suite.  ny-test otherwise defaults to 20 parallel benchmark

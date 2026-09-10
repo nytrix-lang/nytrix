@@ -930,6 +930,45 @@ static void print_test_progress_line(int pct, const char *a, const char *a_color
   fflush(stdout);
 }
 
+/*
+ * Compute the ny-full binary that sits beside the resolved --bin launcher
+ * and export it as NYTRIX_NY_FULL_BIN so the "ny" launcher execs that exact
+ * path directly for every fixture, instead of re-deriving it per-process
+ * from argv[0]/proc-self-exe (which can fail for a materialized/relocated
+ * fixture path) or falling through to a PATH search that may resolve to an
+ * unrelated ny-full on the host. This is set once, from the same --bin the
+ * runner was actually configured with, and inherited by every forked
+ * fixture child.
+ */
+static void export_ny_full_bin_for(const char *bin) {
+  if (!bin || !*bin)
+    return;
+  char resolved[PATH_MAX];
+  const char *abs_bin = ny_realpath(bin, resolved) ? resolved : bin;
+  char dir[PATH_MAX];
+  snprintf(dir, sizeof(dir), "%s", abs_bin);
+  char *slash = strrchr(dir, '/');
+#ifdef _WIN32
+  char *bslash = strrchr(dir, '\\');
+  if (bslash && (!slash || bslash > slash))
+    slash = bslash;
+#endif
+  const char *base = slash ? slash + 1 : dir;
+  int debug = strstr(base, "_debug") != NULL;
+  if (slash)
+    *slash = '\0';
+  else
+    snprintf(dir, sizeof(dir), ".");
+  char full[PATH_MAX];
+#ifdef _WIN32
+  snprintf(full, sizeof(full), "%s\\ny-full%s.exe", dir, debug ? "_debug" : "");
+#else
+  snprintf(full, sizeof(full), "%s/ny-full%s", dir, debug ? "_debug" : "");
+#endif
+  if (ny_access(full, 0) == 0)
+    ny_setenv("NYTRIX_NY_FULL_BIN", full, 1);
+}
+
 static void apply_test_child_env(void) {
   if (test_env_falsey("NYTRIX_TEST_CACHE") || test_env_truthy("NYTRIX_TEST_NO_NATIVE_CACHE")) {
     ny_setenv("NYTRIX_JIT_CACHE", "0", 1);
@@ -3847,10 +3886,13 @@ static int auto_test_jobs(void) {
     jobs = 1;
   double ram_gib = host_ram_gib();
   if (ram_gib > 0.0) {
-    /* Large graphics/stdlib fixtures can peak above 12 GiB while LLVM and
-     * native lowering overlap. Keep automatic runs bounded; explicit
-     * --jobs remains available for controlled CI. */
-    int ram_jobs = (int)(ram_gib / 32.0);
+    /*
+     * A cold LLVM/native fixture can briefly retain compiler graphs, IR, and
+     * child processes at the same time. Budget 40 GiB per automatic worker so
+     * a nominal 64 GiB host does not swap or OOM when two heavy fixtures
+     * overlap. Explicit --jobs remains available for controlled CI.
+     */
+    int ram_jobs = (int)(ram_gib / 40.0);
     if (ram_jobs < 1)
       ram_jobs = 1;
     if (jobs > ram_jobs)
@@ -5140,9 +5182,11 @@ int ny_test_main(int argc, char **argv) {
   const char *bench_cache = NULL;
   int bench_runs = 1;
   int bench_warmup = 0;
-  /* Large correctness benchmarks (notably heapsort) legitimately exceed
+  /*
+   * Large correctness benchmarks (notably heapsort) legitimately exceed
    * the old 15-second cap on the LLVM/JIT path.  Keep timeout failures for
-   * hung processes, but give valid fixtures enough room to finish. */
+   * hung processes, but give valid fixtures enough room to finish.
+   */
   int bench_timeout = 60;
   int bench_verbose = 0;
   int bench_show_ir = 0;
@@ -5443,6 +5487,7 @@ int ny_test_main(int argc, char **argv) {
     snprintf(jb, sizeof(jb), "%d", jobs);
     ny_setenv("NYTRIX_TEST_JOBS", jb, 1);
   }
+  export_ny_full_bin_for(bin);
   configure_test_cache_defaults();
 
   (void)bench_cache;
@@ -5558,6 +5603,13 @@ int ny_test_main(int argc, char **argv) {
          native_cache_on ? "on" : "off", jit_cache_on ? "on" : "off",
          aot_cache_on ? "on" : "off", std_cache_on ? "on" : "off");
   print_host_line(jobs);
+  {
+    const char *self_check_bin = bin && *bin ? bin : "(unset)";
+    const char *self_check_full = getenv("NYTRIX_NY_FULL_BIN");
+    printf("%s[bin]%s launcher=%s ny-full=%s\n",
+           nyt_clr(NYT_GRAY), nyt_clr(NYT_RESET), self_check_bin,
+           self_check_full && *self_check_full ? self_check_full : "(no sibling ny-full; PATH fallback)");
+  }
   const char *pj = getenv("NYTRIX_TEST_PROFILE_JSON");
   const char *td = getenv("NYTRIX_TEST_TRACE_DIR");
   if (pj && *pj)
@@ -5571,9 +5623,11 @@ int ny_test_main(int argc, char **argv) {
   size_t skipped_native_platform = 0;
   size_t skipped_ci = 0;
   size_t skipped_web_browser = 0;
-  /* `ci skip` marks hosted-device/GUI probes, not CPU coverage.  Keep them
+  /*
+   * `ci skip` marks hosted-device/GUI probes, not CPU coverage.  Keep them
    * out of the default suite even when a local DISPLAY is present; callers
-   * that intentionally provide the required device can opt in explicitly. */
+   * that intentionally provide the required device can opt in explicitly.
+   */
   const int include_ci_probes = test_env_truthy("NYTRIX_TEST_INCLUDE_CI");
   const int skip_system_stdlib =
       test_env_truthy("NYTRIX_TEST_SKIP_SYSTEM_STDLIB");
@@ -5585,10 +5639,12 @@ int ny_test_main(int argc, char **argv) {
     cache_load(&cache, cache_path);
   for (size_t i = 0; i < limit; i++) {
     const char *p = files.items[i];
-    /* Honour fixtures explicitly marked ci skip/optional when running
+    /*
+     * Honour fixtures explicitly marked ci skip/optional when running
      * headless locally as well.  These probes require a hosted display or
      * device; compiling them in the default CPU suite only burns the fixture
-     * timeout.  Unmarked CPU-only probes remain covered by the normal run. */
+     * timeout.  Unmarked CPU-only probes remain covered by the normal run.
+     */
     if ((shape_skips_ci(p) && !include_ci_probes) ||
         shape_skips_headless(p)) {
       skipped_ci++;

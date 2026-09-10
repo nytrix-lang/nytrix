@@ -147,9 +147,11 @@ int64_t rt_simmd_ctz64(int64_t v) {
 }
 
 int64_t rt_simmd_clz64_i64(int64_t v) {
-  /* The `_i64` entry point is the raw native ABI.  Do not run the value
+  /*
+   * The `_i64` entry point is the raw native ABI.  Do not run the value
    * through tagged-immediate decoding: raw bit patterns such as 1 would be
-   * interpreted as Ny integer zero and produce 64 instead of 63. */
+   * interpreted as Ny integer zero and produce 64 instead of 63.
+   */
   uint64_t x = (uint64_t)v;
   return x ? (int64_t)__builtin_clzll(x) : 64;
 }
