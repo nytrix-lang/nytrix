@@ -135,7 +135,8 @@ static int ny_native_nir_lower_expr_impl(ny_native_nir_builder_t *b,
     return addr;
   }
   case NY_E_IDENT: {
-    ny_native_nir_local_t *l = ny_native_nir_find_local(b, e->as.ident.name);
+    ny_native_nir_local_t *l =
+        ny_native_nir_find_local_ctx(b, e->as.ident.name, e->as.ident.syntax_ctx);
     /* Enum members are source-level constants and must win over short-name
      * globals collected from imported `#main` blocks (for example `Red` from
      * an unrelated module). Resolve the exact enum declaration before any
@@ -767,11 +768,66 @@ static int ny_native_nir_lower_expr_impl(ny_native_nir_builder_t *b,
       return ny_native_nir_emit_const(b, value ? 1 : 0);
     return ny_native_nir_emit_const(b, 0);
   }
+  case NY_E_QUOTE: {
+    uint32_t prev_ctx = b->current_syntax_ctx;
+    if (e->as.quote.syntax_ctx != 0)
+      b->current_syntax_ctx = e->as.quote.syntax_ctx;
+    int res = -1;
+    if (e->as.quote.expr) {
+      res = ny_native_nir_lower_expr(b, e->as.quote.expr);
+    } else if (e->as.quote.body) {
+      const stmt_t *body = e->as.quote.body;
+      if (body->kind == NY_S_BLOCK) {
+        int last_v = -1;
+        for (size_t i = 0; i < body->as.block.body.len; ++i) {
+          const stmt_t *item = body->as.block.body.data[i];
+          if (!item)
+            continue;
+          if (item->kind == NY_S_RETURN && item->as.ret.value) {
+            res = ny_native_nir_lower_expr(b, item->as.ret.value);
+            break;
+          }
+          if (item->kind == NY_S_EXPR && item->as.expr.expr) {
+            int v = ny_native_nir_lower_expr(b, item->as.expr.expr);
+            if (v >= 0)
+              last_v = v;
+          } else {
+            if (!ny_native_nir_lower_stmt(b, item)) {
+              res = -1;
+              break;
+            }
+          }
+        }
+        if (res < 0)
+          res = last_v >= 0 ? last_v : ny_native_nir_emit_const(b, 0);
+      } else if (body->kind == NY_S_RETURN && body->as.ret.value) {
+        res = ny_native_nir_lower_expr(b, body->as.ret.value);
+      } else if (body->kind == NY_S_EXPR && body->as.expr.expr) {
+        res = ny_native_nir_lower_expr(b, body->as.expr.expr);
+      } else {
+        if (!ny_native_nir_lower_stmt(b, body))
+          res = -1;
+        else
+          res = b->last_value >= 0 ? b->last_value : ny_native_nir_emit_const(b, 0);
+      }
+    } else {
+      res = ny_native_nir_emit_const(b, 0);
+    }
+    b->current_syntax_ctx = prev_ctx;
+    return res;
+  }
+  case NY_E_SPLICE: {
+    return e->as.splice.expr ? ny_native_nir_lower_expr(b, e->as.splice.expr)
+                             : ny_native_nir_emit_const(b, 0);
+  }
   case NY_E_MATCH: {
     stmt_t match = {.kind = NY_S_MATCH, .tok = e->tok};
     match.as.match = e->as.match;
+    bool saved_match_any = b->match_result_any;
+    b->match_result_any = ny_native_nir_expr_is_any(b, e);
     if (!ny_native_nir_lower_match(b, &match))
       return -1;
+    b->match_result_any = saved_match_any;
     /* Match arms already lower through the common value ABI.  Re-tagging the
      * joined result here corrupts pointer/string arms by treating their
      * address as an integer; dynamic consumers decode the arm representation
@@ -1027,36 +1083,40 @@ static int ny_native_nir_lower_expr_impl(ny_native_nir_builder_t *b,
        * native dictionary payloads are raw scalar slots.  Normalize only
        * values proven dynamic; raw integer literals must remain untouched
        * because odd raw values are valid native integers too. */
-      bool dynamic_value = ny_native_nir_expr_is_any(b, value);
+      bool is_bool_val = ny_native_nir_expr_is_bool(b, value);
       bool integer_literal = value && value->kind == NY_E_LITERAL &&
                              value->as.literal.kind == NY_LIT_INT &&
                              value->tok.kind != NY_T_NIL;
       bool raw_integer = integer_literal ||
-                         (value && value->semantic.resolved &&
+                         (!is_bool_val && value && value->semantic.resolved &&
                           value->semantic.rep == NY_SEM_REP_RAW_INT);
       if (value->kind == NY_E_IDENT && value->as.ident.name) {
         const ny_native_nir_local_t *value_local =
             ny_native_nir_find_local(b, value->as.ident.name);
-        dynamic_value = dynamic_value || (value_local && value_local->is_any);
+        if (value_local && value_local->is_bool)
+          is_bool_val = true;
         raw_integer = raw_integer ||
-                      (value_local &&
+                      (!is_bool_val && value_local &&
                        value_local->semantic_rep == NY_SEM_REP_RAW_INT);
       }
       /* Dictionary values are public `any` values.  Box every value proven
        * raw-integer before storing it, including odd integers from typed
        * locals.  Leaving those raw makes a later dynamic read indistinguish-
        * able from a tagged integer and corrupts equality/callback results. */
-      if (raw_integer && !ny_native_nir_expr_is_cstr(b, value)) {
+      if (is_bool_val) {
+        value_reg = ny_native_nir_box_bool(b, value_reg);
+        if (value_reg < 0)
+          return -1;
+      } else if (raw_integer && !ny_native_nir_expr_is_cstr(b, value)) {
         value_reg = ny_native_nir_emit_runtime_call(b, "rt_tag", value_reg, -1,
                                                     -1, 1, 0);
         if (value_reg < 0)
           return -1;
-      } else if (dynamic_value && !ny_native_nir_expr_is_cstr(b, value)) {
-        value_reg = ny_native_nir_emit_runtime_call(b, "rt_any_to_i64",
-                                                    value_reg, -1, -1, 1, 0);
-        if (value_reg < 0)
-          return -1;
       }
+      /* A proven-dynamic value already carries the canonical dynamic word
+       * and is stored as-is.  Unboxing it through rt_any_to_i64 turned int 0
+       * into a raw 0 payload, which the getter must read back as nil (raw 0
+       * is reserved), so {"a": any_param} returned nil for the int 0 case. */
       int saved_dict = ny_native_nir_load_local_value(b, dict_slot);
       bool key_is_string =
           ny_native_nir_expr_is_cstr(b, key) ||
@@ -1265,6 +1325,17 @@ static int ny_native_nir_lower_expr_impl(ny_native_nir_builder_t *b,
         bool is_dict = ny_native_nir_expr_is_dict(b, el);
         bool is_list_elem = ny_native_nir_expr_is_list(b, el);
         bool is_f64 = ny_native_nir_expr_is_f64(b, el);
+        /* A pooled C-string literal stored raw is indistinguishable from any
+         * other .rodata pointer once it leaves the descriptor (is_str probes
+         * the bytes before the pointer for a TAG header).  Materialize a
+         * managed handle at construction so downstream is_str/iteration see
+         * a real string ([(1, 2), range(2), "ab"] flattened lost the split). */
+        if (is_string && el->kind == NY_E_LITERAL) {
+          value = ny_native_nir_emit_runtime_call(b, "rt_cstr_to_str", value,
+                                                  -1, -1, 1, 0);
+          if (value < 0)
+            return -1;
+        }
         /* Inferred `any` parameters arrive as value/length/tag triples and
          * their value slot is normally the tagged VM representation.  Native
          * descriptor lists store raw payloads, so unbox dynamic integer-like
@@ -1276,14 +1347,28 @@ static int ny_native_nir_lower_expr_impl(ny_native_nir_builder_t *b,
               ny_native_nir_find_local(b, el->as.ident.name);
           dynamic_value = dynamic_value || (value_local && value_local->is_any);
         }
+        bool unboxed_dynamic = false;
         if (dynamic_value && !is_string && !is_f64) {
           value = ny_native_nir_emit_runtime_call(b, "rt_any_to_i64",
                                                   value, -1, -1, 1, 0);
+          unboxed_dynamic = value >= 0;
           if (value < 0)
             return -1;
         }
         int tag = -1;
-        if (is_string)
+        if (unboxed_dynamic) {
+          /*
+           * The payload was unboxed to a raw machine word, so its slot tag
+           * must classify the raw word at runtime — the static
+           * expression-level classification can be wrong here (an untyped
+           * parameter inferred as a list tagged a scalar 1 as TAG_LIST, so
+           * mapcat's fn1(1) dispatched the raw word and println read 0).
+           * rt_raw_word_tag still returns the container tag for genuine
+           * handles, which rt_any_to_i64 passes through unchanged.
+           */
+          tag = ny_native_nir_emit_runtime_call(b, "rt_raw_word_tag", value,
+                                                -1, -1, 1, 0);
+        } else if (is_string)
           tag = ny_native_nir_emit_const(b, 121);
         else if (is_dict)
           tag = ny_native_nir_emit_const(b, 101);
@@ -1296,6 +1381,16 @@ static int ny_native_nir_lower_expr_impl(ny_native_nir_builder_t *b,
            * generic tag bridge performs a heap/tag probe on every iteration;
            * descriptor reads return slot 0 unchanged for integer elements, so
            * the fixed integer tag is both sufficient and substantially cheaper. */
+          tag = ny_native_nir_emit_const(b, 3);
+        }
+        if (tag < 0 && el->kind == NY_E_LITERAL &&
+            el->as.literal.kind == NY_LIT_INT && el->tok.kind != NY_T_NIL) {
+          /*
+           * A literal slot payload is the raw machine word by construction.
+           * rt_value_tag classifies odd words as tagged-int (tag 1), which
+           * tells raw consumers to untag — [ptr, 17] then handed the int
+           * param 8 (untag 17) instead of 17 at thread-arg reads.
+           */
           tag = ny_native_nir_emit_const(b, 3);
         }
         if (tag < 0)
@@ -1711,10 +1806,21 @@ static int ny_native_nir_lower_expr_impl(ny_native_nir_builder_t *b,
     if (dynamic_index_result) {
       int value = ny_native_nir_emit_runtime_call(b, "rt_tbuf_index_any_raw",
                                                   base, idx, -1, 2, 0);
-      return typed_static_target
-                 ? ny_native_nir_emit_runtime_call(b, "rt_any_to_i64",
-                                                   value, -1, -1, 1, 0)
-                 : value;
+      if (value < 0)
+        return -1;
+      if (typed_static_target)
+        return ny_native_nir_emit_runtime_call(b, "rt_any_to_i64", value, -1,
+                                               -1, 1, 0);
+      /*
+       * An unknown call-result receiver crosses the tagged dynamic boundary
+       * (canonical value out), but a proven-scalar consumer must not see the
+       * tagged word: decode exactly here, mirroring the dictionary literal
+       * rule above (f(9)[0] printed the tagged encoding instead of 9).
+       */
+      if (e->semantic.resolved && e->semantic.rep == NY_SEM_REP_RAW_INT)
+        return ny_native_nir_emit_runtime_call(b, "rt_any_to_i64", value, -1,
+                                               -1, 1, 0);
+      return value;
     }
     /* Native list/tuple values use the data pointer as their base.  The
      * ordinary byte-offset path is correct for non-negative indices, but a
@@ -1899,26 +2005,33 @@ static int ny_native_nir_lower_expr_impl(ny_native_nir_builder_t *b,
               ? "rt_tbuf_append_tagged"
               : "rt_tbuf_append_raw";
       if (strcmp(append_symbol, "rt_tbuf_append_tagged") == 0) {
-        bool raw_integer =
-            append_value &&
-            ((append_value->kind == NY_E_LITERAL &&
-              append_value->as.literal.kind == NY_LIT_INT &&
-              append_value->tok.kind != NY_T_NIL) ||
-             (append_value->semantic.resolved &&
-              append_value->semantic.rep == NY_SEM_REP_RAW_INT) ||
-             (append_value_local &&
-              append_value_local->semantic_rep == NY_SEM_REP_RAW_INT));
-        if (raw_integer) {
-          value = ny_native_nir_emit_runtime_call(b, "rt_tag", value, -1,
-                                                   -1, 1, 0);
-        } else if (ny_native_nir_expr_is_f64(b, append_value) ||
-                   ny_native_nir_expr_is_f32(b, append_value)) {
-          int bits = ny_native_nir_emit_runtime_call(
-              b, "rt_f64_bits", value, -1, -1, 1, 0);
-          value = bits < 0
-                      ? -1
-                      : ny_native_nir_emit_runtime_call(
-                            b, "rt_flt_box_val", bits, -1, -1, 1, 0);
+        bool is_bool_val = ny_native_nir_expr_is_bool(b, append_value);
+        if (append_value_local && append_value_local->is_bool)
+          is_bool_val = true;
+        if (is_bool_val) {
+          value = ny_native_nir_box_bool(b, value);
+        } else {
+          bool raw_integer =
+              append_value &&
+              ((append_value->kind == NY_E_LITERAL &&
+                append_value->as.literal.kind == NY_LIT_INT &&
+                append_value->tok.kind != NY_T_NIL) ||
+               (append_value->semantic.resolved &&
+                append_value->semantic.rep == NY_SEM_REP_RAW_INT) ||
+               (append_value_local &&
+                append_value_local->semantic_rep == NY_SEM_REP_RAW_INT));
+          if (raw_integer) {
+            value = ny_native_nir_emit_runtime_call(b, "rt_tag", value, -1,
+                                                     -1, 1, 0);
+          } else if (ny_native_nir_expr_is_f64(b, append_value) ||
+                     ny_native_nir_expr_is_f32(b, append_value)) {
+            int bits = ny_native_nir_emit_runtime_call(
+                b, "rt_f64_bits", value, -1, -1, 1, 0);
+            value = bits < 0
+                        ? -1
+                        : ny_native_nir_emit_runtime_call(
+                              b, "rt_flt_box_val", bits, -1, -1, 1, 0);
+          }
         }
         if (value < 0)
           return -1;
@@ -2040,9 +2153,22 @@ static int ny_native_nir_lower_expr_impl(ny_native_nir_builder_t *b,
       /* `rt_value_get_tagged` accepts the legacy tagged index ABI for dynamic
        * values, while NYIR lowers a raw native integer index.  Tag only this
        * dynamic boundary; typed tbuf/list access must keep its raw index. */
-      if (dynamic_target &&
-          !ny_native_nir_expr_is_any(b, e->as.memcall.args.data[0].val) &&
-          !ny_native_nir_expr_is_cstr(b, e->as.memcall.args.data[0].val)) {
+      const expr_t *key_arg = e->as.memcall.args.data[0].val;
+      bool key_is_lit_int = key_arg && key_arg->kind == NY_E_LITERAL &&
+                            key_arg->as.literal.kind == NY_LIT_INT &&
+                            key_arg->tok.kind != NY_T_NIL;
+      bool key_is_raw_int =
+          key_is_lit_int ||
+          (key_arg && key_arg->semantic.rep == NY_SEM_REP_RAW_INT);
+      if (!key_is_raw_int && key_arg && key_arg->kind == NY_E_IDENT) {
+        ny_native_nir_local_t *kl =
+            ny_native_nir_find_local(b, key_arg->as.ident.name);
+        if (kl && kl->semantic_rep == NY_SEM_REP_RAW_INT)
+          key_is_raw_int = true;
+      }
+      if (dynamic_target && key_is_raw_int &&
+          !ny_native_nir_expr_is_any(b, key_arg) &&
+          !ny_native_nir_expr_is_cstr(b, key_arg)) {
         int one = ny_native_nir_emit_const(b, 1);
         int shifted =
             one < 0 ? -1
@@ -2455,10 +2581,16 @@ static int ny_native_nir_lower_expr_impl(ny_native_nir_builder_t *b,
          * dictionary slots are dynamic values.  Preserve the canonical Ny
          * bool immediates at this container boundary. */
         const expr_t *value_expr = e->as.memcall.args.data[1].val;
-        if (value_expr && value_expr->kind == NY_E_LITERAL &&
-            value_expr->as.literal.kind == NY_LIT_BOOL) {
-          value = ny_native_nir_emit_const(
-              b, value_expr->as.literal.as.b ? NY_IMM_TRUE : NY_IMM_FALSE);
+        bool is_bool_val = ny_native_nir_expr_is_bool(b, value_expr);
+        if (value_expr && value_expr->kind == NY_E_IDENT &&
+            value_expr->as.ident.name) {
+          const ny_native_nir_local_t *value_local =
+              ny_native_nir_find_local(b, value_expr->as.ident.name);
+          if (value_local && value_local->is_bool)
+            is_bool_val = true;
+        }
+        if (is_bool_val) {
+          value = ny_native_nir_box_bool(b, value);
           if (value < 0)
             return -1;
         } else if (value_expr &&
@@ -3015,7 +3147,7 @@ static int ny_native_nir_lower_expr(ny_native_nir_builder_t *b,
   ny_expr_semantic_t semantic = e ? e->semantic : (ny_expr_semantic_t){0};
   if (e && !semantic.resolved && e->kind == NY_E_IDENT && e->as.ident.name) {
     ny_native_nir_local_t *local =
-        ny_native_nir_find_local(b, e->as.ident.name);
+        ny_native_nir_find_local_ctx(b, e->as.ident.name, e->as.ident.syntax_ctx);
     if (local && local->semantic_rep != NY_SEM_REP_UNKNOWN) {
       semantic.rep = local->semantic_rep;
       semantic.ownership = local->semantic_ownership;

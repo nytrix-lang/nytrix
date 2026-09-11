@@ -1435,6 +1435,11 @@ static bool literal_int_fits(int64_t val, const char *want) {
   }
 }
 
+bool ny_indexed_extract_ctor_and_bound(const char *type_name, char *out_ctor,
+                                       size_t ctor_cap, int64_t *out_bound);
+bool ny_indexed_resolve_bound(codegen_t *cg, scope *scopes, size_t depth,
+                              const char *type_name, char *out_ctor,
+                              size_t ctor_cap, int64_t *out_bound);
 static bool ny_fin_extract_bound(const char *type_name, int64_t *out_bound);
 bool ny_fin_resolve_bound(codegen_t *cg, scope *scopes, size_t depth,
                           const char *type_name, int64_t *out_bound);
@@ -1507,16 +1512,18 @@ static bool type_compatible_simple(const char *want, const char *got) {
     return false;
   if (strcmp(want_base, "proof") == 0 && strncmp(got_base, "proof<", 6) == 0)
     return true;
-  if (strcmp(want_base, "Fin") == 0 && strncmp(got_base, "Fin<", 4) == 0)
-    return true;
-  if (strncmp(want_base, "Fin<", 4) == 0 && strncmp(got_base, "Fin<", 4) == 0) {
-    int64_t wb = 0, gb = 0;
-    bool wok = ny_fin_extract_bound(want_base, &wb);
-    bool gok = ny_fin_extract_bound(got_base, &gb);
-    return wok && gok && wb == gb;
+  char w_ctor[64] = {0}, g_ctor[64] = {0};
+  int64_t wb = 0, gb = 0;
+  bool wok = ny_indexed_extract_ctor_and_bound(want_base, w_ctor, sizeof(w_ctor), &wb);
+  bool gok = ny_indexed_extract_ctor_and_bound(got_base, g_ctor, sizeof(g_ctor), &gb);
+  if (wok && gok)
+    return strcmp(w_ctor, g_ctor) == 0 && wb == gb;
+  if (!wok && gok) {
+    if (strcmp(want_base, g_ctor) == 0)
+      return true;
+    if (strcmp(want_base, "int") == 0 && strcmp(g_ctor, "Fin") == 0)
+      return true;
   }
-  if (strcmp(want_base, "int") == 0 && strncmp(got_base, "Fin<", 4) == 0)
-    return true;
   return type_compatible_non_nullable(want_base, got_base);
 }
 
@@ -2067,6 +2074,10 @@ static const char *infer_expr_type_uncached(codegen_t *cg, scope *scopes,
   case NY_E_COMPTIME:
     return infer_comptime_stmt_type(cg, scopes, depth,
                                     e->as.comptime_expr.body);
+  case NY_E_QUOTE:
+    return "ast";
+  case NY_E_SPLICE:
+    return infer_expr_type(cg, scopes, depth, e->as.splice.expr);
   default:
     return NULL;
   }
@@ -2111,43 +2122,13 @@ const char *infer_expr_type(codegen_t *cg, scope *scopes, size_t depth,
 }
 
 /*
- * Extracts the integer bound from a Fin<N> type name.  Currently handles
- * only literal integers (e.g. Fin<4>) via strtoll.  Symbolic bounds
- * (e.g. Fin<n> where n is a def constant) require the comptime evaluator.
- */
-static bool ny_fin_extract_bound(const char *type_name, int64_t *out_bound) {
-  if (!type_name || !out_bound)
-    return false;
-  const char *leaf = ny_name_leaf(type_name);
-  if (!leaf)
-    leaf = type_name;
-  if (strncmp(leaf, "Fin<", 4) != 0)
-    return false;
-  const char *start = leaf + 4;
-  const char *end = strrchr(start, '>');
-  if (!end || end == start)
-    return false;
-  char buf[32];
-  size_t len = (size_t)(end - start);
-  if (len >= sizeof(buf))
-    return false;
-  memcpy(buf, start, len);
-  buf[len] = '\0';
-  char *parsed_end = NULL;
-  int64_t val = (int64_t)strtoll(buf, &parsed_end, 10);
-  if (!parsed_end || *parsed_end != '\0' || val <= 0)
-    return false;
-  *out_bound = val;
-  return true;
-}
-
-/*
  * Generic value-indexed constructor support.  Any user-defined constructor
- * written as `Name<N>` participates in the same literal-bound checking as
- * Fin<N>; ordinary type constructors (list<int>, Result<T>, ...) are ignored
+ * written as `Name<N>` participates in literal-bound checking and monomorphization;
+ * ordinary type constructors (list<int>, Result<T>, ...) are ignored
  * because their argument is not a positive integer.
  */
-static bool ny_indexed_extract_bound(const char *type_name, int64_t *out_bound) {
+bool ny_indexed_extract_ctor_and_bound(const char *type_name, char *out_ctor,
+                                       size_t ctor_cap, int64_t *out_bound) {
   if (!type_name || !out_bound)
     return false;
   const char *leaf = ny_name_leaf(type_name);
@@ -2164,33 +2145,65 @@ static bool ny_indexed_extract_bound(const char *type_name, int64_t *out_bound) 
   memcpy(buf, lt + 1, len);
   buf[len] = '\0';
   char *end = NULL;
-  int64_t bound = (int64_t)strtoll(buf, &end, 10);
-  if (!end || *end || bound <= 0)
+  int64_t val = (int64_t)strtoll(buf, &end, 10);
+  if (!end || *end != '\0' || val <= 0)
     return false;
-  *out_bound = bound;
+  *out_bound = val;
+  if (out_ctor && ctor_cap > 0) {
+    size_t clen = (size_t)(lt - leaf);
+    if (clen >= ctor_cap)
+      clen = ctor_cap - 1;
+    memcpy(out_ctor, leaf, clen);
+    out_ctor[clen] = '\0';
+  }
   return true;
 }
 
+static bool ny_fin_extract_bound(const char *type_name, int64_t *out_bound) {
+  char ctor[64] = {0};
+  if (!ny_indexed_extract_ctor_and_bound(type_name, ctor, sizeof(ctor), out_bound))
+    return false;
+  return strcmp(ctor, "Fin") == 0;
+}
+
+static bool ny_indexed_extract_bound(const char *type_name, int64_t *out_bound) {
+  return ny_indexed_extract_ctor_and_bound(type_name, NULL, 0, out_bound);
+}
+
 /*
- * Resolves a Fin<N> bound, first via strtoll (literal), then via
+ * Resolves any value-indexed bound (Name<N>), first via strtoll (literal), then via
  * def-binding lookup for symbolic names.  Returns false when neither
  * path yields a positive integer.
  */
-bool ny_fin_resolve_bound(codegen_t *cg, scope *scopes, size_t depth,
-                          const char *type_name, int64_t *out_bound) {
-  if (ny_fin_extract_bound(type_name, out_bound))
+bool ny_indexed_resolve_bound(codegen_t *cg, scope *scopes, size_t depth,
+                              const char *type_name, char *out_ctor,
+                              size_t ctor_cap, int64_t *out_bound) {
+  if (ny_indexed_extract_ctor_and_bound(type_name, out_ctor, ctor_cap, out_bound))
     return true;
-  if (!cg || !scopes)
+  if (!cg || !scopes || !type_name)
     return false;
   const char *leaf = ny_name_leaf(type_name);
-  if (!leaf || strncmp(leaf, "Fin<", 4) != 0)
+  if (!leaf)
+    leaf = type_name;
+  const char *lt = strchr(leaf, '<');
+  const char *gt = strrchr(leaf, '>');
+  if (!lt || !gt || gt <= lt + 1 || lt == leaf)
     return false;
-  const char *start = leaf + 4;
-  const char *end = strrchr(start, '>');
-  if (!end || end == start)
-    return false;
+  if (out_ctor && ctor_cap > 0) {
+    size_t clen = (size_t)(lt - leaf);
+    if (clen >= ctor_cap)
+      clen = ctor_cap - 1;
+    memcpy(out_ctor, leaf, clen);
+    out_ctor[clen] = '\0';
+  }
+  const char *start = lt + 1;
+  const char *end = gt;
+  while (start < end && (*start == ' ' || *start == '\t'))
+    start++;
+  while (end > start && (end[-1] == ' ' || end[-1] == '\t'))
+    end--;
   size_t name_len = (size_t)(end - start);
-  if (name_len >= 64)
+  if (name_len == 0 || name_len >= 64)
     return false;
   char name_buf[64];
   memcpy(name_buf, start, name_len);
@@ -2210,6 +2223,16 @@ bool ny_fin_resolve_bound(codegen_t *cg, scope *scopes, size_t depth,
     return false;
   *out_bound = val;
   return true;
+}
+
+bool ny_fin_resolve_bound(codegen_t *cg, scope *scopes, size_t depth,
+                          const char *type_name, int64_t *out_bound) {
+  if (ny_fin_extract_bound(type_name, out_bound))
+    return true;
+  char ctor[64] = {0};
+  if (!ny_indexed_resolve_bound(cg, scopes, depth, type_name, ctor, sizeof(ctor), out_bound))
+    return false;
+  return strcmp(ctor, "Fin") == 0;
 }
 
 /*

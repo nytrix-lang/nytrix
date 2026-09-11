@@ -409,13 +409,21 @@ bool ny_llvm_emit_nyir_func(codegen_t *cg, const nyir_func_t *f,
 
   /*
    * 3. Allocate local variable storage in entry block
+   *
+   * Every slot is zero-initialized: the language defines uninitialized
+   * locals as zero (the baseline stack emitter's zeroed frame provides
+   * this for free).  Leaving the allocas undef let LLVM fold loop-head
+   * loads of not-yet-stored slots into arbitrary constants, and mapcat
+   * read its element 1 as 0.
    */
   size_t local_count = ny_native_nir_local_count(f);
   LLVMValueRef *local_allocas = calloc(local_count + 1, sizeof(LLVMValueRef));
+  LLVMValueRef slot_zero = LLVMConstInt(cg->type_i64, 0, false);
   for (size_t i = 0; i < local_count; ++i) {
     char slot_name[32];
     snprintf(slot_name, sizeof(slot_name), "local_slot_%zu", i);
     local_allocas[i] = LLVMBuildAlloca(cg->builder, cg->type_i64, slot_name);
+    LLVMBuildStore(cg->builder, slot_zero, local_allocas[i]);
   }
 
   /*
@@ -1483,6 +1491,9 @@ bool ny_llvm_emit_nyir_program(codegen_t *cg, const program_t *prog,
   if (ok && rt_main_nir.len > 0) {
     ok = ny_llvm_emit_nyir_func(cg, &rt_main_nir, "_ny_top_entry", false,
                                 err, err_len);
+  }
+  if (ok && getenv("NY_DUMP_LLVM")) {
+    fprintf(stderr, "%s", LLVMPrintModuleToString(cg->module));
   }
 
   nyir_func_free(&rt_main_nir);

@@ -417,13 +417,19 @@ scalar_multiply:
       ny_native_call_leaf(e->as.binary.left) &&
       strcmp(ny_native_call_leaf(e->as.binary.left), "get") == 0 &&
       e->as.binary.left->as.call.args.len >= 2 &&
-      ny_native_nir_expr_is_list(b, e->as.binary.left->as.call.args.data[0].val);
+      (ny_native_nir_expr_is_list(
+           b, e->as.binary.left->as.call.args.data[0].val) ||
+       ny_native_nir_expr_is_dict(
+           b, e->as.binary.left->as.call.args.data[0].val));
   bool right_scalar_get =
       e->as.binary.right && e->as.binary.right->kind == NY_E_CALL &&
       ny_native_call_leaf(e->as.binary.right) &&
       strcmp(ny_native_call_leaf(e->as.binary.right), "get") == 0 &&
       e->as.binary.right->as.call.args.len >= 2 &&
-      ny_native_nir_expr_is_list(b, e->as.binary.right->as.call.args.data[0].val);
+      (ny_native_nir_expr_is_list(
+           b, e->as.binary.right->as.call.args.data[0].val) ||
+       ny_native_nir_expr_is_dict(
+           b, e->as.binary.right->as.call.args.data[0].val));
   /* The method spelling `list.get(i, d)` lowers to the same tagged dynamic
    * ABI as the free `get(...)` call, but semantic inference resolves its
    * result to the scalar element type, so the comparison path below treats
@@ -438,7 +444,8 @@ scalar_multiply:
       (e->as.binary.left->as.memcall.args.len == 1 ||
        e->as.binary.left->as.memcall.args.len == 2) &&
       e->as.binary.left->as.memcall.target &&
-      ny_native_nir_expr_is_list(b, e->as.binary.left->as.memcall.target) &&
+      (ny_native_nir_expr_is_list(b, e->as.binary.left->as.memcall.target) ||
+       ny_native_nir_expr_is_dict(b, e->as.binary.left->as.memcall.target)) &&
       !ny_native_nir_expr_is_dyn_list(b, e->as.binary.left->as.memcall.target) &&
       !ny_native_nir_expr_is_f64(b, e->as.binary.left) &&
       !(e->as.binary.left->as.memcall.args.len == 2 &&
@@ -452,7 +459,8 @@ scalar_multiply:
       (e->as.binary.right->as.memcall.args.len == 1 ||
        e->as.binary.right->as.memcall.args.len == 2) &&
       e->as.binary.right->as.memcall.target &&
-      ny_native_nir_expr_is_list(b, e->as.binary.right->as.memcall.target) &&
+      (ny_native_nir_expr_is_list(b, e->as.binary.right->as.memcall.target) ||
+       ny_native_nir_expr_is_dict(b, e->as.binary.right->as.memcall.target)) &&
       !ny_native_nir_expr_is_dyn_list(b, e->as.binary.right->as.memcall.target) &&
       !ny_native_nir_expr_is_f64(b, e->as.binary.right) &&
       !(e->as.binary.right->as.memcall.args.len == 2 &&
@@ -598,12 +606,12 @@ scalar_multiply:
   /* Free get() returns the tagged dynamic ABI for ordinary consumers.  A
    * statically scalar list read entering raw arithmetic must be unboxed once;
    * doing it here preserves both `print(get(...))` and integer accumulation. */
-  if (left_scalar_get || left_scalar_get_mem) {
+  if (!is_cmp && (left_scalar_get || left_scalar_get_mem)) {
     a = ny_native_nir_emit_runtime_call(b, "rt_any_to_i64", a, -1, -1, 1, 0);
     left_any = false;
     left_dynamic_result = false;
   }
-  if (right_scalar_get || right_scalar_get_mem) {
+  if (!is_cmp && (right_scalar_get || right_scalar_get_mem)) {
     rhs = ny_native_nir_emit_runtime_call(b, "rt_any_to_i64", rhs, -1, -1, 1, 0);
     right_any = false;
     right_dynamic_result = false;
@@ -657,6 +665,12 @@ scalar_multiply:
        e->as.binary.left->as.call.callee->as.ident.name &&
        !ny_native_nir_user_defined_fn(
            b, e->as.binary.left->as.call.callee->as.ident.name) &&
+       !ny_native_nir_find_imported_function(
+           b, e->as.binary.left->as.call.callee->as.ident.name) &&
+       !ny_native_nir_find_local(
+           b, e->as.binary.left->as.call.callee->as.ident.name) &&
+       !ny_native_nir_find_top_level_value(
+           b, e->as.binary.left->as.call.callee->as.ident.name) &&
        e->as.binary.right && e->as.binary.right->kind == NY_E_LITERAL &&
        (e->as.binary.right->as.literal.kind == NY_LIT_INT ||
         ny_expr_is_nil_literal(e->as.binary.right))) ||
@@ -665,6 +679,12 @@ scalar_multiply:
        e->as.binary.right->as.call.callee->kind == NY_E_IDENT &&
        e->as.binary.right->as.call.callee->as.ident.name &&
        !ny_native_nir_user_defined_fn(
+           b, e->as.binary.right->as.call.callee->as.ident.name) &&
+       !ny_native_nir_find_imported_function(
+           b, e->as.binary.right->as.call.callee->as.ident.name) &&
+       !ny_native_nir_find_local(
+           b, e->as.binary.right->as.call.callee->as.ident.name) &&
+       !ny_native_nir_find_top_level_value(
            b, e->as.binary.right->as.call.callee->as.ident.name) &&
        e->as.binary.left && e->as.binary.left->kind == NY_E_LITERAL &&
        (e->as.binary.left->as.literal.kind == NY_LIT_INT ||
@@ -746,7 +766,8 @@ scalar_multiply:
    * one and dynamic dictionary/list values appear unequal. */
   if (tag_operand && e->as.binary.left &&
       e->as.binary.left->kind == NY_E_LITERAL &&
-      e->as.binary.left->as.literal.kind == NY_LIT_BOOL && right_any) {
+      e->as.binary.left->as.literal.kind == NY_LIT_BOOL &&
+      (right_any || right_dynamic_result)) {
     a = ny_native_nir_emit_const(
         b, e->as.binary.left->as.literal.as.b ? NY_IMM_TRUE : NY_IMM_FALSE);
     if (a < 0)
@@ -754,7 +775,8 @@ scalar_multiply:
   }
   if (tag_operand && e->as.binary.right &&
       e->as.binary.right->kind == NY_E_LITERAL &&
-      e->as.binary.right->as.literal.kind == NY_LIT_BOOL && left_any) {
+      e->as.binary.right->as.literal.kind == NY_LIT_BOOL &&
+      (left_any || left_dynamic_result)) {
     rhs = ny_native_nir_emit_const(
         b, e->as.binary.right->as.literal.as.b ? NY_IMM_TRUE : NY_IMM_FALSE);
     if (rhs < 0)
@@ -799,7 +821,8 @@ scalar_multiply:
                          ny_native_nir_expr_is_dyn_list(b, e->as.binary.right);
     bool left_seq = left_is_list || ny_native_nir_expr_is_range(b, e->as.binary.left);
     bool right_seq = right_is_list || ny_native_nir_expr_is_range(b, e->as.binary.right);
-    if ((left_seq && right_seq) || (left_seq && right_is_list) || (right_seq && left_is_list)) {
+    if (!left_any && !right_any && !left_dynamic_result && !right_dynamic_result &&
+        ((left_seq && right_seq) || (left_seq && right_is_list) || (right_seq && left_is_list))) {
       /* Ranges are heap sequence objects; the tbuf comparator cannot inspect
        * them directly.  The dynamic comparator materializes the range and
        * preserves interpreter sequence equality semantics. */

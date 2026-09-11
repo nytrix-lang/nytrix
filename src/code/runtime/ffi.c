@@ -155,10 +155,16 @@ static inline int64_t rt_prepare_raw_callable(int64_t f) {
 static int64_t rt_dynamic_callable_base(int64_t fn) {
   if (!fn)
     return 0;
+  /*
+   * Only strip an existing dynamic-callable encoding here.  The former
+   * NY_NATIVE_DECODE branch fired on plain code addresses whose low three
+   * bits equal NY_NATIVE_TAG (a raw lambda symbol like ...f76), so marking
+   * halved the pointer and the callback dispatch jumped into address/64.
+   * Native-encoded callables still work untouched: the call-time decode
+   * path handles them after the dynamic-callable decode.
+   */
   if (NY_DYNAMIC_CALLABLE_IS(fn))
     return (int64_t)(uintptr_t)NY_DYNAMIC_CALLABLE_DECODE(fn);
-  if (NY_NATIVE_IS(fn))
-    fn = (int64_t)(uintptr_t)NY_NATIVE_DECODE(fn);
   return fn;
 }
 
@@ -170,6 +176,13 @@ int64_t rt_mark_dynamic_callable(int64_t fn) {
 int64_t rt_mark_dynamic_bool_callable(int64_t fn) {
   fn = rt_dynamic_callable_base(fn);
   return fn ? NY_DYNAMIC_CALLABLE_BOOL_ENCODE((void *)(uintptr_t)fn) : 0;
+}
+
+int64_t rt_mark_dynamic_bool_callable_tagged_args(int64_t fn) {
+  fn = rt_dynamic_callable_base(fn);
+  return fn ? NY_DYNAMIC_CALLABLE_ENCODE((void *)(uintptr_t)fn) |
+                  NY_DYNAMIC_CALLABLE_BOOL_MARK | NY_DYNAMIC_CALLABLE_TAGGED_ARGS_MARK
+            : 0;
 }
 
 /*
@@ -263,6 +276,14 @@ int64_t rt_call_any1(int64_t f, int64_t value) {
     return 0;
   bool dynamic_callable = NY_DYNAMIC_CALLABLE_IS(f);
   bool dynamic_bool_callable = NY_DYNAMIC_CALLABLE_BOOL_IS(f);
+  /*
+   * The bool mark drives the raw 0/1 result ABI; only the plain bool mark
+   * also unboxes integer arguments.  A tagged-args body consumes its
+   * parameters through rt_any_* helpers and needs the canonical tagged
+   * word (an unboxed 1 would re-classify as integer zero).
+   */
+  bool raw_scalar_callback_args =
+      dynamic_bool_callable && !NY_DYNAMIC_CALLABLE_TAGGED_ARGS_IS(f);
   if (dynamic_callable)
     f = (int64_t)(uintptr_t)NY_DYNAMIC_CALLABLE_DECODE(f);
   /*
@@ -290,7 +311,14 @@ int64_t rt_call_any1(int64_t f, int64_t value) {
           dynamic_bool_callable);
     }
   }
-  if (NY_NATIVE_IS(f))
+  /*
+   * A dynamic-callable value decodes to a RAW code address (the lowering
+   * only marks plain `sym` pointers).  A raw address whose low three bits
+   * equal NY_NATIVE_TAG must not take the native-encoded branch below:
+   * decoding it again halved the pointer (map string jumped into
+   * address/8) instead of calling the callback.
+   */
+  if (NY_NATIVE_IS(f) && !dynamic_callable)
     return rt_any_callback_result(
         ((rt_any_fn6)NY_NATIVE_DECODE(f))(value, len, tag, 0, 0, 0));
   /*
@@ -301,7 +329,7 @@ int64_t rt_call_any1(int64_t f, int64_t value) {
    */
   if (dynamic_callable)
     return rt_dynamic_callback_result(
-        ((rt_any_fn6)(uintptr_t)f)(rt_dynamic_callback_arg(value, dynamic_bool_callable),
+        ((rt_any_fn6)(uintptr_t)f)(rt_dynamic_callback_arg(value, raw_scalar_callback_args),
                                           len, tag, 0, 0, 0),
         dynamic_bool_callable);
   return rt_any_callback_result(
@@ -339,7 +367,7 @@ int64_t rt_call_any2(int64_t f, int64_t left, int64_t right) {
           dynamic_bool_callable);
     }
   }
-  if (NY_NATIVE_IS(f))
+  if (NY_NATIVE_IS(f) && !dynamic_callable)
     return rt_any_callback_result(
         ((rt_any_fn6)NY_NATIVE_DECODE(f))(left, left_len, left_tag,
                                                  right, right_len, right_tag));

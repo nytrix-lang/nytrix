@@ -39,8 +39,9 @@ fn _text_debug_enabled() bool {
 
 @inline
 fn _match_at(str s, str sub, int at) bool {
+   def bound = sub.len
    mut j = 0
-   while j < sub.len {
+   while j < bound {
       if load8(s, at + j) != load8(sub, j) { return false }
       j += 1
    }
@@ -294,12 +295,11 @@ fn atof(any s) f64 {
    sign < 0 ? 0.0 - val : val
 }
 
-fn _list_push_reserved(list lst, any v) int {
-   ; Keep the returned buffer even when the initial capacity is sufficient:
-   ; native append is allowed to return a replacement handle, and discarding
-   ; it makes this helper silently lose writes across the native/VM ABIs.
-   lst = __append(lst, v)
-   1
+fn _list_push_reserved(list lst, any v) list {
+   ; Native append may return a replacement handle (capacity growth).  The
+   ; caller must rebind it: a callee-local reassignment is invisible to the
+   ; caller's binding, which silently lost every split/utf8 push.
+   return __append(lst, v)
 }
 
 @returns_owned
@@ -347,7 +347,7 @@ fn split(any s, any sep) list {
       mut out = list(chars)
       mut ci = 0
       while ci < chars {
-         _list_push_reserved(out, chr(ord_at(s, ci)))
+         out = _list_push_reserved(out, chr(ord_at(s, ci)))
          ci += 1
       }
       return out
@@ -367,15 +367,17 @@ fn split(any s, any sep) list {
    mut i = 0
    mut start = 0
    while i <= n - sep_len {
-      if _match_at(s, sep, i) {
-         _list_push_reserved(out, _substr(s, start, i))
+      def m = _match_at(s, sep, i)
+      print("res:", i, m)
+      if m {
+         out = _list_push_reserved(out, _substr(s, start, i))
          i = i + sep_len
          start = i
       } else {
          i += 1
       }
    }
-   _list_push_reserved(out, _substr(s, start, n))
+   out = _list_push_reserved(out, _substr(s, start, n))
    if _text_debug_enabled() { print("Text: split returning count=" + to_str(out.len)) }
    return out
 }
@@ -390,7 +392,7 @@ fn split_words(any s) list {
    mut i = 0
    while i < n {
       def p = strip(raw.get(i, ""))
-      if p.len > 0 { _list_push_reserved(out, p) }
+      if p.len > 0 { out = _list_push_reserved(out, p) }
       i += 1
    }
    out
@@ -515,7 +517,7 @@ fn join(list items, str sep="") str {
    while i < n {
       mut part = items.get(i)
       if !is_str(part) { part = to_str(part) }
-      _list_push_reserved(parts, part)
+      parts = _list_push_reserved(parts, part)
       total += part.len
       i += 1
    }
@@ -550,7 +552,7 @@ fn join_words(list items, str sep=" ", int start=0) str {
    mut i = start
    while i < n {
       def part = to_str(items.get(i, ""))
-      if part.len > 0 { _list_push_reserved(parts, part) }
+      if part.len > 0 { parts = _list_push_reserved(parts, part) }
       i += 1
    }
    join(parts, sep)

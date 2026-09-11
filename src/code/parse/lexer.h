@@ -94,6 +94,9 @@ typedef enum token_kind {
   NY_T_PIPE,
   NY_T_QUESTION_QUESTION,
   NY_T_QUESTION_DOT,
+  NY_T_QUOTE,
+  NY_T_DOLLAR,
+  NY_T_DOLLAR_LBRACE,
   NY_T_ERROR,
 } token_kind;
 
@@ -125,6 +128,10 @@ typedef struct lexer_t {
   bool quiet;
   bool had_error;
   int error_count;
+  int quote_depth;
+  /* Inside a `comptime template` body, `${param}` stays a literal
+   * placeholder identifier; only quote splices switch to DOLLAR_LBRACE. */
+  int template_depth;
 } lexer_t;
 
 void lexer_init(lexer_t *lx, const char *src, const char *filename);

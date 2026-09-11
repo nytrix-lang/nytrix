@@ -537,31 +537,112 @@ static bool effect_attr_name_mask(const char *name, size_t len,
 
 static bool parse_effect_attr_args(codegen_t *cg, const stmt_t *fn_stmt,
                                    const attribute_t *attr,
-                                   uint32_t *mask_out) {
+                                   uint32_t *mask_out,
+                                   ny_type_t **effect_type_out) {
   if (!cg || !fn_stmt || !attr || !mask_out)
     return false;
   uint32_t mask = NY_FX_NONE;
   bool saw_any = false;
   for (size_t i = 0; i < attr->args.len; i++) {
+    expr_t *arg_expr = attr->args.data[i];
+    if (arg_expr && arg_expr->kind == NY_E_CALL && arg_expr->as.call.callee &&
+        arg_expr->as.call.callee->kind == NY_E_IDENT &&
+        arg_expr->as.call.callee->as.ident.name) {
+      const char *cname = arg_expr->as.call.callee->as.ident.name;
+      if (strcmp(cname, "cap") == 0 || strcmp(cname, "capability") == 0) {
+        for (size_t a = 0; a < arg_expr->as.call.args.len; ++a) {
+          expr_t *subarg = arg_expr->as.call.args.data[a].val;
+          const char *subname = NULL;
+          size_t sublen = 0;
+          if (attr_arg_text_view(subarg, &subname, &sublen) && sublen > 0) {
+            char cap_buf[64] = {0};
+            if (sublen < sizeof(cap_buf)) {
+              memcpy(cap_buf, subname, sublen);
+              cap_buf[sublen] = '\0';
+              if (effect_type_out) {
+                ny_type_t *cap = ny_type_capability(NULL, cap_buf);
+                *effect_type_out = *effect_type_out
+                                       ? ny_type_row(NULL, "cap", cap, *effect_type_out)
+                                       : cap;
+              }
+              saw_any = true;
+            }
+          }
+        }
+        if (saw_any)
+          continue;
+      } else if (strcmp(cname, "typestate") == 0 || strcmp(cname, "state") == 0) {
+        const char *from_state = NULL;
+        const char *to_state = NULL;
+        size_t slen = 0;
+        if (arg_expr->as.call.args.len >= 1 &&
+            attr_arg_text_view(arg_expr->as.call.args.data[0].val, &from_state, &slen)) {
+          if (arg_expr->as.call.args.len >= 2)
+            attr_arg_text_view(arg_expr->as.call.args.data[1].val, &to_state, &slen);
+          if (effect_type_out) {
+            ny_type_t *ts = ny_type_typestate(NULL, "state", from_state, to_state, NULL);
+            *effect_type_out = *effect_type_out
+                                   ? ny_type_row(NULL, "state", ts, *effect_type_out)
+                                   : ts;
+          }
+          saw_any = true;
+          continue;
+        }
+      }
+    }
     const char *name = NULL;
     size_t len = 0;
     if (!attr_arg_text_view(attr->args.data[i], &name, &len)) {
       ny_diag_error(attr_diag_tok(fn_stmt, attr, i),
                     "expected effect name in @effects(...)");
-      ny_diag_hint("supported: io, alloc, ffi, thread, all, none");
+      ny_diag_hint("supported: io, alloc, ffi, thread, all, none, capability, or effect variable");
       cg->had_error = 1;
       continue;
     }
     uint32_t tok_mask = NY_FX_NONE;
-    if (!effect_attr_name_mask(name, len, &tok_mask)) {
-      ny_diag_error(attr_diag_tok(fn_stmt, attr, i),
-                    "unknown effect name in @effects(...)");
-      ny_diag_hint("supported: io, alloc, ffi, thread, all, none");
-      cg->had_error = 1;
+    if (effect_attr_name_mask(name, len, &tok_mask)) {
+      mask |= tok_mask;
+      saw_any = true;
       continue;
     }
-    mask |= tok_mask;
-    saw_any = true;
+    /* Effect variable: single letter, 'var, or eff */
+    if ((len == 1 && (name[0] >= 'a' && name[0] <= 'z')) ||
+        (len > 1 && name[0] == '\'') ||
+        (len >= 3 && strncmp(name, "eff", 3) == 0)) {
+      if (effect_type_out && !*effect_type_out) {
+        *effect_type_out = ny_type_effect_var(NULL);
+      }
+      saw_any = true;
+      continue;
+    }
+    /* Capability name: e.g. read, write, fs, net, console, or cap(...) */
+    if (len > 0) {
+      char cap_name[64] = {0};
+      if (len >= 5 && strncmp(name, "cap(", 4) == 0 && name[len - 1] == ')') {
+        size_t c_len = len - 5;
+        if (c_len < sizeof(cap_name)) {
+          memcpy(cap_name, name + 4, c_len);
+          cap_name[c_len] = '\0';
+        }
+      } else if (len < sizeof(cap_name)) {
+        memcpy(cap_name, name, len);
+        cap_name[len] = '\0';
+      }
+      if (cap_name[0]) {
+        if (effect_type_out) {
+          ny_type_t *cap = ny_type_capability(NULL, cap_name);
+          *effect_type_out = *effect_type_out
+                                 ? ny_type_row(NULL, "cap", cap, *effect_type_out)
+                                 : cap;
+        }
+        saw_any = true;
+        continue;
+      }
+    }
+    ny_diag_error(attr_diag_tok(fn_stmt, attr, i),
+                  "unknown effect name in @effects(...)");
+    ny_diag_hint("supported: io, alloc, ffi, thread, all, none, capability, or effect variable");
+    cg->had_error = 1;
   }
   if (!saw_any) {
     ny_diag_error(attr_diag_tok(fn_stmt, attr, 0),
@@ -677,6 +758,7 @@ static void fun_sig_copy_contracts(fun_sig *sig, const stmt_func_t *fn) {
     vec_push(&sig->releases, ny_strdup(fn->attr_releases.data[i]));
   for (size_t i = 0; i < fn->attr_forgets.len; i++)
     vec_push(&sig->forgets, ny_strdup(fn->attr_forgets.data[i]));
+  sig->effect_type = fn->effect_type;
 }
 
 static void mark_simple_flag_attr(codegen_t *cg, const stmt_t *fn_stmt,
@@ -710,6 +792,7 @@ static void resolve_fn_attrs(codegen_t *cg, stmt_t *fn_stmt) {
   const char *link_name = NULL;
   bool has_effect_contract = false;
   uint32_t effect_contract_mask = NY_FX_NONE;
+  ny_type_t *effect_type = NULL;
   for (size_t i = 0; i < fn_stmt->attributes.len; i++) {
     attribute_t *attr = &fn_stmt->attributes.data[i];
     if (attr_name_eq(attr, "naked")) {
@@ -934,7 +1017,8 @@ static void resolve_fn_attrs(codegen_t *cg, stmt_t *fn_stmt) {
         cg->had_error = 1;
         continue;
       }
-      if (parse_effect_attr_args(cg, fn_stmt, attr, &effect_contract_mask))
+      if (parse_effect_attr_args(cg, fn_stmt, attr, &effect_contract_mask,
+                                 &effect_type))
         has_effect_contract = true;
       continue;
     }
@@ -1021,6 +1105,7 @@ static void resolve_fn_attrs(codegen_t *cg, stmt_t *fn_stmt) {
     decl->effect_contract_known = has_effect_contract;
     decl->effect_contract_mask =
         has_effect_contract ? effect_contract_mask : NY_FX_ALL;
+    decl->effect_type = effect_type;
   }
   if (decl->attr_jit) {
     decl->attr_inline = true;

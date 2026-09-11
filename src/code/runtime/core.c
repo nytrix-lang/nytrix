@@ -488,16 +488,42 @@ int64_t rt_tbuf_append_tagged(int64_t buffer, int64_t value,
       buffer = out;
     }
   }
+  int64_t original = value;
+  bool untagged_int = false;
   if (!is_string && is_int(value) && !rt_native_is_str(value) &&
       !is_v_str(value) && !rt_magic_tbuf_elem_size(value) &&
-      !rt_heap_object_ptr(value))
+      !rt_heap_object_ptr(value)) {
     value = rt_untag_v(value);
+    untagged_int = true;
+  }
   if (buffer &&
       rt_header_readable_cached((uintptr_t)buffer - RT_NATIVE_TBUF_HEADER,
                                 RT_NATIVE_TBUF_HEADER)) {
     int64_t *hdr = (int64_t *)((uintptr_t)buffer - RT_NATIVE_TBUF_HEADER);
     if ((uint64_t)hdr[0] == NY_NATIVE_TBUF_MAGIC && hdr[2] >= 24) {
-      return rt_tbuf_append_raw(buffer, value, is_string);
+      int64_t out = rt_tbuf_append_raw(buffer, value, is_string);
+      /*
+       * append_raw stamps tag 1 ("untagged raw integer from a tagged int")
+       * so index reads re-tag the payload.  A dynamic append of a
+       * non-integer value (a list, dict, or string handle) must keep its
+       * identity instead: re-tagging the handle doubled it and mapped[i]
+       * returned raw addresses as decimals.
+       */
+      if (out && !untagged_int &&
+          rt_header_readable_cached((uintptr_t)out - RT_NATIVE_TBUF_HEADER,
+                                    RT_NATIVE_TBUF_HEADER)) {
+        int64_t *ohdr = (int64_t *)((uintptr_t)out - RT_NATIVE_TBUF_HEADER);
+        if ((uint64_t)ohdr[0] == NY_NATIVE_TBUF_MAGIC && ohdr[2] >= 24 &&
+            ohdr[1] > 0) {
+          unsigned char *slot = (unsigned char *)(uintptr_t)out +
+                                (size_t)(ohdr[1] - 1) * (size_t)ohdr[2];
+          int64_t tag = is_string ? TAG_STR_CONST : rt_value_tag(original);
+          if (tag == 1)
+            tag = rt_value_tag(value);
+          memcpy(slot + 16, &tag, sizeof(tag));
+        }
+      }
+      return out;
     }
   }
   return rt_tbuf_append_raw(buffer, value, is_string);
@@ -582,6 +608,13 @@ int64_t rt_tbuf_append_i64_raw(int64_t buffer, int64_t value) {
     int64_t tag = 1;
     memcpy(slot + 16, &tag, sizeof(tag));
   }
+  /*
+   * realloc may move the buffer.  Every other growth site re-registers the
+   * new data pointer; skipping it here left grown buffers unknown to
+   * rt_tbuf_known_handle, so the next mapped[i]-style read missed the tbuf
+   * path and panicked with "index_read out of range".
+   */
+  rt_tbuf_replace_handle((uintptr_t)buffer, (uintptr_t)data);
   return (int64_t)(uintptr_t)data;
 }
 
@@ -1001,6 +1034,13 @@ int64_t rt_tbuf_eq_raw(int64_t left, int64_t right) {
     return NY_IMM_TRUE;
   if (!left || !right)
     return NY_IMM_FALSE;
+  if (rt_native_is_str(left) || rt_native_is_str(right) || is_v_str(left) ||
+      is_v_str(right)) {
+    if ((rt_native_is_str(left) || is_v_str(left)) &&
+        (rt_native_is_str(right) || is_v_str(right)))
+      return rt_cstr_eq(left, right) ? NY_IMM_TRUE : NY_IMM_FALSE;
+    return NY_IMM_FALSE;
+  }
   if (rt_value_tag(left) == TAG_RANGE)
     left = rt_range_values_raw(left);
   if (rt_value_tag(right) == TAG_RANGE)
@@ -1405,6 +1445,49 @@ int64_t rt_value_get_tagged(int64_t value, int64_t key, int64_t fallback);
 static int64_t ny_native_box_tbuf_any(int64_t value);
 static int64_t rt_sequence_tag(int64_t v);
 
+/* Dynamic-ABI element read for thread/async argument packing: elem-8
+ * lists hold raw machine words, so scalar ints are tagged exactly once;
+ * 24-byte descriptor slots already carry the tagged payload and are
+ * returned as-is. */
+int64_t rt_tbuf_dyn_elem(int64_t buffer, int64_t index,
+                         int64_t want_dynamic) {
+  if (!buffer)
+    return 0;
+  if (rt_tbuf_known_handle((uintptr_t)buffer) &&
+      rt_header_readable_cached((uintptr_t)buffer - RT_NATIVE_TBUF_HEADER,
+                                RT_NATIVE_TBUF_HEADER)) {
+    int64_t *hdr = (int64_t *)((uintptr_t)buffer - RT_NATIVE_TBUF_HEADER);
+    if ((uint64_t)hdr[0] == NY_NATIVE_TBUF_MAGIC) {
+      int64_t count = hdr[1], elem_size = hdr[2];
+      if (index < 0)
+        index += count;
+      if (index < 0 || index >= count)
+        return 0;
+      int64_t value = 0;
+      memcpy(&value, (void *)((uintptr_t)buffer + (size_t)index *
+                              (size_t)elem_size), sizeof(value));
+      if (elem_size >= 24) {
+        int64_t tag = 0;
+        memcpy(&tag, (void *)((uintptr_t)buffer + (size_t)index *
+                              (size_t)elem_size + 16), sizeof(tag));
+        if (tag == 0)
+          return 0;
+        if (tag == TAG_FLOAT)
+          return is_v_flt(value) ? value : rt_flt_box_val(value);
+        if (tag == 1 && !want_dynamic)
+          return rt_untag_v(value);
+        return value;
+      }
+      if (rt_native_is_str(value) || is_v_str(value) ||
+          rt_heap_object_ptr(value))
+        return value;
+      if (want_dynamic)
+        return rt_tag_v(value);
+      return value;
+    }
+  }
+  return 0;
+}
 int64_t rt_tbuf_get_any(int64_t buffer, int64_t index, int64_t fallback) {
   if (!buffer)
     return ny_native_box_tbuf_any(fallback);
@@ -1680,6 +1763,18 @@ int64_t rt_tbuf_to_cstr(int64_t buffer) {
   int64_t count = rt_tbuf_len_raw(buffer);
   if (count < 0 || count > (INT64_MAX - 3) / 4)
     return 0;
+  /*
+   * Descriptor lists (elem_size 24) carry a per-slot runtime tag at +16.
+   * Format each slot by that tag: a tagged-int payload must be untagged
+   * before printing, otherwise a list built through the dynamic append ABI
+   * renders its encoded words ([3, 5, 7] for [1, 2, 3]).
+   */
+  int64_t elem_size = 8;
+  {
+    int64_t *hdr = (int64_t *)((uintptr_t)buffer - RT_NATIVE_TBUF_HEADER);
+    if (buffer && (uint64_t)hdr[0] == NY_NATIVE_TBUF_MAGIC)
+      elem_size = hdr[2];
+  }
   size_t cap = (size_t)count * 4 + 3;
   char *out = (char *)malloc(cap);
   if (!out)
@@ -1692,11 +1787,25 @@ int64_t rt_tbuf_to_cstr(int64_t buffer) {
     if (i)
       out[used++] = ' ';
     int64_t value = rt_tbuf_get(buffer, i, 0);
+    int64_t slot_tag = 0;
+    int is_string_slot = 0;
+    if (elem_size >= 24) {
+      memcpy(&slot_tag,
+             (void *)((uintptr_t)buffer + (size_t)i * (size_t)elem_size + 16),
+             sizeof(slot_tag));
+      value = *(int64_t *)((uintptr_t)buffer + (size_t)i * (size_t)elem_size);
+      if (slot_tag == 121 || rt_native_is_str(value) || is_v_str(value))
+        is_string_slot = 1;
+      else if (slot_tag == 1 && is_int(value))
+        value = rt_untag_v(value);
+      else if (slot_tag == TAG_FLOAT)
+        value = rt_flt_box_val(value);
+    }
     char item[64];
     int n;
-    if (rt_native_is_str(value)) {
-      const char *s = (const char *)(uintptr_t)value;
-      size_t len = strnlen(s, 4096);
+    if (is_string_slot || rt_native_is_str(value) || is_v_str(value)) {
+      const char *s = (const char *)(uintptr_t)rt_any_to_cstr(value);
+      size_t len = s ? strnlen(s, 4096) : 0;
       if (used + len + 2 >= cap) {
         size_t next = cap;
         while (used + len + 2 >= next)
@@ -1713,6 +1822,14 @@ int64_t rt_tbuf_to_cstr(int64_t buffer) {
       memcpy(out + used, s, len);
       used += len;
       out[used++] = '"';
+    } else if (elem_size < 24 && is_v_flt(value)) {
+      n = snprintf(item, sizeof(item), "%g", rt_flt_unbox_double(value));
+      if (n < 0 || used + (size_t)n + 1 >= cap) {
+        free(out);
+        return 0;
+      }
+      memcpy(out + used, item, (size_t)n);
+      used += (size_t)n;
     } else {
       n = snprintf(item, sizeof(item), "%lld", (long long)value);
       if (n < 0 || used + (size_t)n + 1 >= cap) {
@@ -2281,10 +2398,7 @@ int64_t rt_value_get_tagged(int64_t value, int64_t key, int64_t fallback) {
    * before rejecting an integer receiver.
    */
   if (rt_magic_tbuf_elem_size(value) > 0) {
-    int64_t count = rt_tbuf_len_raw(value);
-    int64_t idx = (key >= 0 && key < count)
-                      ? key
-                      : (is_int(key) ? rt_untag_v(key) : key);
+    int64_t idx = is_int(key) ? rt_untag_v(key) : key;
     return rt_tbuf_get_any(value, idx, fallback);
   }
   /*
@@ -2298,7 +2412,7 @@ int64_t rt_value_get_tagged(int64_t value, int64_t key, int64_t fallback) {
     if (tag == TAG_LIST || tag == TAG_TUPLE) {
       int64_t len_v = *(int64_t *)((char *)(uintptr_t)heap_value + 0);
       int64_t count = is_int(len_v) ? rt_untag_v(len_v) : len_v;
-      int64_t idx = key;
+      int64_t idx = is_int(key) ? rt_untag_v(key) : key;
       if (idx < 0)
         idx += count;
       if (idx < 0 || idx >= count)
@@ -2400,26 +2514,12 @@ int64_t rt_value_get_tagged(int64_t value, int64_t key, int64_t fallback) {
   }
   return fallback;
 }
-int64_t rt_dict_set_raw(int64_t value, int64_t key, int64_t key_len,
-                           int64_t key_tag, int64_t item, int64_t value_len,
-                           int64_t value_tag) {
-  (void)key_len;
-  (void)key_tag;
-  (void)value_len;
-  (void)value_tag;
+int64_t rt_dict_set_raw(int64_t value, int64_t key, int64_t item) {
   return ny_native_dict_set_impl(value, key, item,
                                  rt_native_is_str(key) != 0 || is_v_str(key));
 }
-int64_t rt_dict_set_i64_raw(int64_t value, int64_t key, int64_t key_len,
-                               int64_t key_tag, int64_t item, int64_t value_len,
-                               int64_t value_tag) {
-  (void)key_len;
-  (void)key_tag;
-  (void)value_len;
-  (void)value_tag;
-  return ny_native_dict_set_impl(value, key, item,
-                                 key_tag == 121 || rt_native_is_str(key) ||
-                                     is_v_str(key));
+int64_t rt_dict_set_i64_raw(int64_t value, int64_t key, int64_t item) {
+  return ny_native_dict_set_impl(value, key, item, false);
 }
 int64_t rt_native_dict_set_raw_i64(int64_t value, int64_t key, int64_t key_len,
                                    int64_t key_tag, int64_t item,
@@ -2538,13 +2638,7 @@ int64_t rt_native_dict_set_str_compact(int64_t value, int64_t key,
   return ny_native_dict_set_impl(value, key, item, true);
 }
 
-int64_t rt_dict_set_str_raw(int64_t value, int64_t key, int64_t key_len,
-                               int64_t key_tag, int64_t item, int64_t value_len,
-                               int64_t value_tag) {
-  (void)key_len;
-  (void)key_tag;
-  (void)value_len;
-  (void)value_tag;
+int64_t rt_dict_set_str_raw(int64_t value, int64_t key, int64_t item) {
   return rt_native_dict_set_str_compact(value, key, item);
 }
 
@@ -2934,7 +3028,7 @@ static int64_t ny_native_dict_has_impl(int64_t value, int64_t key,
       key = ny_native_managed_string_key(key);
     if (!key)
       return 0;
-    return ny_native_managed_dict_has(value, key) ? NY_IMM_TRUE : NY_IMM_FALSE;
+    return ny_native_managed_dict_has(value, key) ? 1 : 0;
   }
   bool found = false;
   (void)ny_native_dict_find(dict, key, key_is_string, &found);
@@ -4205,6 +4299,27 @@ int64_t rt_trace_func(int64_t name) {
   return rt_tag_v(0);
 }
 
+/*
+ * Raw NYIR adapters for the diagnostics builtins.  The native path compares
+ * their results against plain integers ("__trace_func(...) == 0"), while the
+ * VM consumes the tagged variants above; untagging keeps both ABIs honest.
+ */
+int64_t rt_trace_func_raw(int64_t name) {
+  return rt_untag_v(rt_trace_func(name));
+}
+
+int64_t rt_trace_loc_raw(int64_t file, int64_t line, int64_t col) {
+  return rt_untag_v(rt_trace_loc(file, line, col));
+}
+
+int64_t rt_trace_enter(int64_t func, int64_t file, int64_t line);
+
+int64_t rt_trace_enter_raw(int64_t func, int64_t file, int64_t line) {
+  return rt_untag_v(rt_trace_enter(func, file, line));
+}
+
+int64_t rt_print_flush_raw(void) { return rt_untag_v(rt_print_flush()); }
+
 int64_t rt_trace_last_file(void) { return g_trace_file; }
 int64_t rt_trace_last_line(void) { return g_trace_line; }
 int64_t rt_trace_last_col(void) { return g_trace_col; }
@@ -4349,6 +4464,17 @@ int64_t rt_trace_ret_void(void) {
   return rt_tag_v(0);
 }
 
+/* Raw NYIR adapters for the zero-argument trace diagnostics: the native
+ * path compares their results against plain integers while the VM consumes
+ * the tagged variants above. */
+int64_t rt_trace_ret_void_raw(void) { return rt_untag_v(rt_trace_ret_void()); }
+
+int64_t rt_trace_exit_raw(void) { return rt_untag_v(rt_trace_exit()); }
+
+int64_t rt_trace_dump_raw(int64_t count) {
+  return rt_untag_v(rt_trace_dump(count));
+}
+
 int64_t rt_trace_ret_tagged(int64_t v) {
   if (g_trace_suspended)
     return v;
@@ -4362,6 +4488,10 @@ int64_t rt_trace_ret_tagged(int64_t v) {
 }
 
 int64_t rt_trace_ret_i64(int64_t v) {
+  /* The builtin signature is untyped, so the native call boundary delivers
+   * the tagged scalar; decode once so identity returns the plain value. */
+  if (is_int(v))
+    v = rt_untag_v(v);
   if (g_trace_suspended)
     return v;
   int64_t func = g_cs_depth > 0 ? g_cs_funcs[g_cs_depth - 1] : g_trace_func;
@@ -4374,6 +4504,8 @@ int64_t rt_trace_ret_i64(int64_t v) {
 }
 
 int64_t rt_trace_ret_u64(int64_t v) {
+  if (is_int(v))
+    v = rt_untag_v(v);
   if (g_trace_suspended)
     return v;
   int64_t func = g_cs_depth > 0 ? g_cs_funcs[g_cs_depth - 1] : g_trace_func;
@@ -4398,6 +4530,10 @@ int64_t rt_trace_ret_bool(int64_t v) {
 }
 
 int64_t rt_trace_ret_ptr(int64_t v) {
+  /* Untyped builtin signature: the native boundary tags scalar literals, so
+   * decode once (a boxed integer zero would read as 1, not NULL). */
+  if (is_int(v))
+    v = rt_untag_v(v);
   if (g_trace_suspended)
     return v;
   int64_t func = g_cs_depth > 0 ? g_cs_funcs[g_cs_depth - 1] : g_trace_func;
@@ -4410,6 +4546,8 @@ int64_t rt_trace_ret_ptr(int64_t v) {
 }
 
 int64_t rt_trace_ret_f64_bits(int64_t bits) {
+  if (is_int(bits))
+    bits = rt_untag_v(bits);
   if (g_trace_suspended)
     return bits;
   int64_t func = g_cs_depth > 0 ? g_cs_funcs[g_cs_depth - 1] : g_trace_func;
@@ -4991,6 +5129,28 @@ int64_t rt_value_tag(int64_t v) {
 int64_t rt_tag_or_raw_int(int64_t value) {
   int64_t tag = rt_value_tag(value);
   return tag == 0 ? 1 : tag;
+}
+
+/*
+ * Classify a raw machine word for a descriptor slot whose payload was
+ * already unboxed (rt_any_to_i64) at the store.  rt_value_tag cannot be
+ * reused here: an odd raw integer satisfies the tagged-int probe and gets
+ * tag 1 ("payload is tagged"), so a later raw consumer untapped the value
+ * (1 -> 0, 17 -> 8) and mapcat-style flattening lost scalar leaves.
+ */
+int64_t rt_raw_word_tag(int64_t value) {
+  if (value == 0)
+    return 0;
+  if (rt_native_is_str(value) || is_v_str(value))
+    return TAG_STR;
+  if (rt_magic_tbuf_elem_size(value) > 0)
+    return TAG_LIST;
+  if (is_ptr(value) && is_heap_ptr(value)) {
+    int64_t tag = *(int64_t *)((char *)(uintptr_t)value - 8);
+    if (tag >= 100 && tag <= 255)
+      return tag;
+  }
+  return 3;
 }
 
 int64_t rt_type_name(int64_t value) {

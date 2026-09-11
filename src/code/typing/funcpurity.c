@@ -715,6 +715,8 @@ static bool ny_expr_check_safe_internal(codegen_t *cg, expr_t *e, assigned_name_
   case NY_E_TRY:
   case NY_E_ASM:
   case NY_E_COMPTIME:
+  case NY_E_QUOTE:
+  case NY_E_SPLICE:
   case NY_E_INFERRED_MEMBER:
   case NY_E_EMBED:
   case NY_E_LAMBDA:
@@ -935,6 +937,14 @@ static bool ny_expr_refs_params(expr_t *e, const assigned_name_list *param_names
     return false;
   case NY_E_COMPTIME:
     return ny_stmt_refs_params(e->as.comptime_expr.body, param_names, param_hashes, param_bloom);
+  case NY_E_QUOTE:
+    if (e->as.quote.body)
+      return ny_stmt_refs_params(e->as.quote.body, param_names, param_hashes, param_bloom);
+    if (e->as.quote.expr)
+      return ny_expr_refs_params(e->as.quote.expr, param_names, param_hashes, param_bloom);
+    return false;
+  case NY_E_SPLICE:
+    return ny_expr_refs_params(e->as.splice.expr, param_names, param_hashes, param_bloom);
   case NY_E_FSTRING:
     for (size_t i = 0; i < e->as.fstring.parts.len; i++) {
       fstring_part_t *part = &e->as.fstring.parts.data[i];
@@ -1235,6 +1245,23 @@ static void ny_collect_escape_expr(codegen_t *cg, expr_t *e, const assigned_name
   case NY_E_COMPTIME:
     ny_collect_escape_stmt(cg, e->as.comptime_expr.body, param_names, param_hashes, param_bloom,
                            local_names, local_hashes, local_bloom, out);
+    if (ny_expr_refs_params(e, param_names, param_hashes, param_bloom))
+      out->args_escape = true;
+    break;
+  case NY_E_QUOTE:
+    if (e->as.quote.body)
+      ny_collect_escape_stmt(cg, e->as.quote.body, param_names, param_hashes, param_bloom,
+                             local_names, local_hashes, local_bloom, out);
+    if (e->as.quote.expr)
+      ny_collect_escape_expr(cg, e->as.quote.expr, param_names, param_hashes, param_bloom,
+                             local_names, local_hashes, local_bloom, out);
+    if (ny_expr_refs_params(e, param_names, param_hashes, param_bloom))
+      out->args_escape = true;
+    break;
+  case NY_E_SPLICE:
+    if (e->as.splice.expr)
+      ny_collect_escape_expr(cg, e->as.splice.expr, param_names, param_hashes, param_bloom,
+                             local_names, local_hashes, local_bloom, out);
     if (ny_expr_refs_params(e, param_names, param_hashes, param_bloom))
       out->args_escape = true;
     break;
@@ -2170,8 +2197,21 @@ void infer_pure_functions(codegen_t *cg) {
     sig->effects = effects;
     sig->effects_known = effects_known;
     if (sig->stmt_t->as.fn.effect_contract_known) {
-      uint32_t declared_mask = sig->stmt_t->as.fn.effect_contract_mask;
-      if (!effects_known) {
+      bool is_polymorphic = false;
+      ny_type_t *eff = sig->effect_type ? sig->effect_type : sig->stmt_t->as.fn.effect_type;
+      if (eff) {
+        if (eff->kind == NY_TYPE_EFFECT_VAR)
+          is_polymorphic = true;
+        else if (eff->kind == NY_TYPE_ROW)
+          is_polymorphic = true;
+        else if (eff->kind == NY_TYPE_EFFECT && eff->as.effect.capability)
+          is_polymorphic = true;
+      }
+      if (is_polymorphic) {
+        sig->effects = effects;
+      } else {
+        uint32_t declared_mask = sig->stmt_t->as.fn.effect_contract_mask;
+        if (!effects_known) {
         ny_diag_error(sig->stmt_t->tok,
                       "effect contract violation in '%s': inferred effects are unknown",
                       sig->name ? sig->name : "<anon>");
@@ -2198,6 +2238,7 @@ void infer_pure_functions(codegen_t *cg) {
           cg->had_error = 1;
           effect_contract_violations++;
         }
+      }
       }
     }
     if (effects_known && (effects & NY_FX_IO) != 0 &&

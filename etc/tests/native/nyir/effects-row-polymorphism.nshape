@@ -1,0 +1,83 @@
+shape effects-row-polymorphism {
+  family "native-nyir"
+  generator "regression"
+  features ["ny" "native" "effects" "shape" "row" "capability" "typestate"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+
+shape Point2D {
+  int x
+  int y
+}
+
+shape ColoredPoint : Point2D {
+  int color
+}
+
+shape Named {
+  int id
+}
+
+shape ComposedEntity {
+  +Point2D
+  +Named
+  int extra
+}
+
+def p = Point2D(10, 20)
+assert(Point2D_load_x(p) == 10, "Point2D x load")
+assert(Point2D_load_y(p) == 20, "Point2D y load")
+assert(__layout_size("Point2D") == 16, "Point2D size")
+
+def cp = ColoredPoint(1, 2, 0xff00)
+assert(ColoredPoint_load_x(cp) == 1, "ColoredPoint inherited x load")
+assert(ColoredPoint_load_y(cp) == 2, "ColoredPoint inherited y load")
+assert(ColoredPoint_load_color(cp) == 0xff00, "ColoredPoint color load")
+assert(__layout_size("ColoredPoint") == 24, "ColoredPoint size")
+
+def ce = ComposedEntity(100, 200, 999, 42)
+assert(ComposedEntity_load_x(ce) == 100, "ComposedEntity x load")
+assert(ComposedEntity_load_y(ce) == 200, "ComposedEntity y load")
+assert(ComposedEntity_load_id(ce) == 999, "ComposedEntity id load")
+assert(ComposedEntity_load_extra(ce) == 42, "ComposedEntity extra load")
+assert(__layout_size("ComposedEntity") == 32, "ComposedEntity size")
+
+@effects(e)
+fn run_eff(fnptr f) int {
+  return f()
+}
+
+@effects(cap(read))
+fn op_read() int {
+  return 10
+}
+
+@effects(cap(write))
+fn op_write() int {
+  return 20
+}
+
+@effects(cap(read, write))
+fn op_rw() int {
+  return op_read() + op_write()
+}
+
+@effects(state(Closed, Open))
+fn op_open() int {
+  return 1
+}
+
+@effects(state(Open, Closed))
+fn op_close() int {
+  return 0
+}
+
+assert(run_eff(op_read) == 10, "effect variable unification at call site")
+assert(op_rw() == 30, "capability composition")
+assert(op_open() == 1, "typestate transition closed->open")
+assert(op_close() == 0, "typestate transition open->closed")
+print("effects_row_polymorphism ok")
+NY
+}

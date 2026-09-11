@@ -25,6 +25,7 @@ typedef struct typeinfer_ctx {
   size_t hash_cap;      /* Capacity of the hash table */
   bool changed;         /* Track if any proofs changed in the current pass */
   bool formal_hm_enabled;
+  ny_subst_t *subst;
   scope *scopes;
   size_t func_depth;
   codegen_t *cg;

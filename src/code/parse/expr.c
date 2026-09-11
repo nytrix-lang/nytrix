@@ -691,8 +691,13 @@ static const char *expr_parse_type_ref(parser_t *p, const char *err_msg) {
     bool first = true;
     while (p->cur.kind != NY_T_GT && p->cur.kind != NY_T_RSHIFT &&
            p->cur.kind != NY_T_EOF) {
-      const char *arg =
-          expr_parse_type_ref(p, "expected generic type argument");
+      const char *arg;
+      if (p->cur.kind == NY_T_NUMBER) {
+        arg = arena_strndup(p->arena, p->cur.lexeme, p->cur.len);
+        parser_advance(p);
+      } else {
+        arg = expr_parse_type_ref(p, "expected generic type argument");
+      }
       if (!arg)
         break;
       size_t arg_len = strlen(arg);
@@ -1140,6 +1145,60 @@ static expr_t *parse_primary(parser_t *p) {
     e->as.comptime_expr.body = body;
     return e;
   }
+  case NY_T_QUOTE: {
+    p->lex.quote_depth++;
+    parser_advance(p);
+    token_t tok = p->prev;
+    uint32_t q_ctx = p->next_syntax_ctx++;
+    if (p->syntax_ctx_depth < sizeof(p->syntax_ctx_stack) / sizeof(p->syntax_ctx_stack[0])) {
+      p->syntax_ctx_stack[p->syntax_ctx_depth++] = p->current_syntax_ctx;
+    }
+    p->current_syntax_ctx = q_ctx;
+    stmt_t *body = NULL;
+    expr_t *body_expr = NULL;
+    if (p->cur.kind == NY_T_DOLLAR) {
+      parser_advance(p);
+    }
+    if (p->cur.kind == NY_T_DOLLAR_LBRACE) {
+      p->cur.kind = NY_T_LBRACE;
+    }
+    if (p->cur.kind == NY_T_LBRACE) {
+      body = p_parse_block(p);
+    } else {
+      body_expr = p_parse_expr(p, 0);
+    }
+    p->lex.quote_depth--;
+    if (p->syntax_ctx_depth > 0) {
+      p->current_syntax_ctx = p->syntax_ctx_stack[--p->syntax_ctx_depth];
+    } else {
+      p->current_syntax_ctx = 0;
+    }
+    expr_t *e = expr_new(p->arena, NY_E_QUOTE, tok);
+    e->as.quote.body = body;
+    e->as.quote.expr = body_expr;
+    e->as.quote.syntax_ctx = q_ctx;
+    return e;
+  }
+  case NY_T_DOLLAR_LBRACE: {
+    if (p->lex.quote_depth > 0)
+      p->lex.quote_depth--;
+    parser_advance(p);
+    token_t tok = p->prev;
+    uint32_t saved_ctx = p->current_syntax_ctx;
+    if (p->syntax_ctx_depth > 0) {
+      p->current_syntax_ctx = p->syntax_ctx_stack[p->syntax_ctx_depth - 1];
+    } else {
+      p->current_syntax_ctx = 0;
+    }
+    expr_t *inner = p_parse_expr(p, 0);
+    parser_expect(p, NY_T_RBRACE, "'}' after splice", NULL);
+    p->lex.quote_depth++;
+    p->current_syntax_ctx = saved_ctx;
+    expr_t *e = expr_new(p->arena, NY_E_SPLICE, tok);
+    e->as.splice.expr = inner;
+    e->as.splice.syntax_ctx = p->current_syntax_ctx;
+    return e;
+  }
   case NY_T_IDENT: {
     parser_advance(p);
     if (tok.len == 4 && strncmp(tok.lexeme, "null", 4) == 0) {
@@ -1149,10 +1208,33 @@ static expr_t *parse_primary(parser_t *p) {
       parser_error(p, tok, "unrecognised identifier 'None'",
                    "did you mean '0' or 'nil'?");
     }
+    if (tok.len == 6 && strncmp(tok.lexeme, "gensym", 6) == 0 && p->cur.kind == NY_T_LPAREN) {
+      parser_advance(p);
+      const char *pfx = "g";
+      if (p->cur.kind == NY_T_STRING) {
+        if (p->cur.len >= 2 && p->cur.lexeme[0] == '"') {
+          pfx = arena_strndup(p->arena, p->cur.lexeme + 1, p->cur.len - 2);
+        } else {
+          pfx = arena_strndup(p->arena, p->cur.lexeme, p->cur.len);
+        }
+        parser_advance(p);
+      } else if (p->cur.kind == NY_T_IDENT) {
+        pfx = arena_strndup(p->arena, p->cur.lexeme, p->cur.len);
+        parser_advance(p);
+      }
+      parser_expect(p, NY_T_RPAREN, "')' after gensym", NULL);
+      const char *sym_name = ny_parser_gensym(p, pfx);
+      expr_t *lit = expr_new(p->arena, NY_E_LITERAL, tok);
+      lit->as.literal.kind = NY_LIT_STR;
+      lit->as.literal.as.s.data = sym_name;
+      lit->as.literal.as.s.len = strlen(sym_name);
+      return lit;
+    }
     expr_t *id = expr_new(p->arena, NY_E_IDENT, tok);
     id->as.ident.name = parser_intern_hash(p, tok.lexeme, tok.len, tok.hash);
     id->as.ident.sym_id = tok.sym_id;
     id->as.ident.hash = tok.hash;
+    id->as.ident.syntax_ctx = p->current_syntax_ctx;
     if (tok.len == 6 && strncmp(tok.lexeme, "expand", 6) == 0) {
       expr_t *call = expr_new(p->arena, NY_E_CALL, tok);
       call_arg_t arg = {0};

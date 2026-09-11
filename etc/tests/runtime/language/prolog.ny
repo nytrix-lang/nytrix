@@ -24,6 +24,10 @@ assert(result.get("decided") && result.get("answers").len == 2,
 assert(result.get("answers")[0].get("Who") == "bob" &&
    result.get("answers")[1].get("Who") == "carol",
    "query exposes user-variable answers")
+def no_result = query(family,
+   term("ancestor", ["carol", Who]), 1000, 10)
+assert(no_result.get("decided") && no_result.get("answers").len == 0,
+   "query for non-existent relation completes with zero answers")
 def V = variable("V")
 def cycle = unify(V, term("loop", [V]))
 assert(!cycle.get("ok") && cycle.get("reason") == "occurs check",

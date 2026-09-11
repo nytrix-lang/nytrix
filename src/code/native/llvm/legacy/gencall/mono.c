@@ -523,6 +523,32 @@ static uint64_t ny_mono_key_hash_with_list_lens(
   return h;
 }
 
+static uint64_t ny_mono_key_hash_with_indexed_vals(
+    uint64_t h, const bool *val_known, const int64_t *val_raw,
+    const char *const *ctors, int arity) {
+  bool any_known = false;
+  for (int i = 0; i < arity && i < NY_MONO_MAX_ARITY; i++) {
+    if (val_known && val_known[i]) {
+      any_known = true;
+      break;
+    }
+  }
+  if (!any_known)
+    return h;
+  h = ny_hash64_u64(h, UINT64_C(0x4e594d4f4e4f4958));
+  for (int i = 0; i < arity && i < NY_MONO_MAX_ARITY; i++) {
+    bool known = val_known && val_known[i];
+    h = ny_hash64_u64(h, (uint64_t)known);
+    if (known) {
+      if (val_raw)
+        h = ny_hash64_u64(h, (uint64_t)val_raw[i]);
+      if (ctors && ctors[i])
+        h = ny_hash64_cstr(ctors[i]);
+    }
+  }
+  return h;
+}
+
 static bool ny_mono_list_lens_equal(const ny_mono_specialization_t *spec,
                                     const bool *list_len_known,
                                     const int64_t *list_len_raw, int arity) {
@@ -539,10 +565,35 @@ static bool ny_mono_list_lens_equal(const ny_mono_specialization_t *spec,
   return true;
 }
 
+static bool ny_mono_indexed_vals_equal(const ny_mono_specialization_t *spec,
+                                       const bool *val_known,
+                                       const int64_t *val_raw,
+                                       const char *const *ctors, int arity) {
+  if (!spec)
+    return false;
+  for (int i = 0; i < arity && i < NY_MONO_MAX_ARITY; i++) {
+    bool known = val_known && val_known[i];
+    if (spec->arg_val_known[i] != known)
+      return false;
+    if (known) {
+      if (val_raw && spec->arg_val[i] != val_raw[i])
+        return false;
+      if (ctors && ctors[i]) {
+        if (!spec->arg_ctor[i] || strcmp(spec->arg_ctor[i], ctors[i]) != 0)
+          return false;
+      }
+    }
+  }
+  return true;
+}
+
 static fun_sig *ny_mono_lookup_existing(codegen_t *cg, stmt_t *base_stmt,
                                         uint64_t key_hash, const uint8_t *types,
                                         const bool *list_len_known,
                                         const int64_t *list_len_raw,
+                                        const bool *val_known,
+                                        const int64_t *val_raw,
+                                        const char *const *ctors,
                                         int arity) {
   if (!cg || !base_stmt)
     return NULL;
@@ -551,7 +602,8 @@ static fun_sig *ny_mono_lookup_existing(codegen_t *cg, stmt_t *base_stmt,
     if (spec->base_stmt == base_stmt && spec->key_hash == key_hash &&
         spec->arity == arity &&
         ny_mono_types_equal(spec->types, types, arity) &&
-        ny_mono_list_lens_equal(spec, list_len_known, list_len_raw, arity)) {
+        ny_mono_list_lens_equal(spec, list_len_known, list_len_raw, arity) &&
+        ny_mono_indexed_vals_equal(spec, val_known, val_raw, ctors, arity)) {
       return lookup_fun_exact(cg, spec->specialized_name);
     }
   }
@@ -569,15 +621,26 @@ static size_t ny_mono_count_for_base(codegen_t *cg, stmt_t *base_stmt) {
 }
 
 static const char *ny_mono_make_name(codegen_t *cg, const char *base_name,
-                                     const uint8_t *types, int arity,
+                                     const uint8_t *types,
+                                     const bool *val_known,
+                                     const int64_t *val_raw,
+                                     const char *const *ctors,
+                                     int arity,
                                      uint64_t key_hash) {
   if (!cg || !base_name)
     return NULL;
-  char type_buf[NY_MONO_MAX_ARITY + 1];
+  char type_buf[NY_MONO_MAX_ARITY * 16 + 1];
+  int at = 0;
   int n = arity < NY_MONO_MAX_ARITY ? arity : NY_MONO_MAX_ARITY;
-  for (int i = 0; i < n; i++)
-    type_buf[i] = ny_mono_type_suffix(types[i]);
-  type_buf[n] = '\0';
+  for (int i = 0; i < n; i++) {
+    if (val_known && val_known[i] && ctors && ctors[i]) {
+      at += snprintf(type_buf + at, sizeof(type_buf) - at, "_%s%" PRId64,
+                     ctors[i], val_raw ? val_raw[i] : 0);
+    } else {
+      type_buf[at++] = ny_mono_type_suffix(types[i]);
+    }
+  }
+  type_buf[at] = '\0';
   char hash_buf[32];
   snprintf(hash_buf, sizeof(hash_buf), "%08llx",
            (unsigned long long)(key_hash & 0xffffffffu));
@@ -892,6 +955,9 @@ static fun_sig *ny_try_monomorphize_call(codegen_t *cg, scope *scopes,
   uint8_t types[NY_MONO_MAX_ARITY] = {0};
   bool arg_list_len_min_known[NY_MONO_MAX_ARITY] = {0};
   int64_t arg_list_len_min_raw[NY_MONO_MAX_ARITY] = {0};
+  bool arg_val_known[NY_MONO_MAX_ARITY] = {0};
+  int64_t arg_val[NY_MONO_MAX_ARITY] = {0};
+  const char *arg_ctor[NY_MONO_MAX_ARITY] = {0};
   bool useful = false;
   bool has_keyword = false;
   call_arg_t *user_args = c ? c->args.data : (mc ? mc->args.data : NULL);
@@ -926,18 +992,25 @@ static fun_sig *ny_try_monomorphize_call(codegen_t *cg, scope *scopes,
   for (int i = 0; i < sig->arity && i < NY_MONO_MAX_ARITY; i++) {
     const char *ptype = fn->as.fn.params.data[i].type;
     if (!ptype) continue;
-    if (!ny_type_is_fin(ptype)) continue;
+    char p_ctor[64] = {0};
+    int64_t bound_param = 0;
+    if (!ny_indexed_resolve_bound(cg, scopes, depth, ptype, p_ctor, sizeof(p_ctor), &bound_param))
+      continue;
     expr_t *arg_expr = ny_mono_call_arg_for_param(c, mc, skip_target, (size_t)i);
     const char *atype = arg_expr ? infer_expr_type(cg, scopes, depth, arg_expr) : NULL;
-    if (!atype || !ny_type_is_fin(atype)) continue;
-    int64_t bound_arg = 0, bound_param = 0;
-    if (!ny_fin_resolve_bound(cg, scopes, depth, ptype, &bound_param)) continue;
-    if (!ny_fin_resolve_bound(cg, scopes, depth, atype, &bound_arg)) continue;
-    if (bound_arg != bound_param) {
-      ny_mono_trace_reject(call, sig, "Fin bound mismatch", 0, 0);
+    if (!atype) continue;
+    char a_ctor[64] = {0};
+    int64_t bound_arg = 0;
+    if (!ny_indexed_resolve_bound(cg, scopes, depth, atype, a_ctor, sizeof(a_ctor), &bound_arg))
+      continue;
+    if (strcmp(p_ctor, a_ctor) != 0 || bound_arg != bound_param) {
+      ny_mono_trace_reject(call, sig, "indexed bound mismatch", 0, 0);
       return NULL;
     }
     types[i] = (uint8_t)NY_MONO_TYPE_FIN;
+    arg_val_known[i] = true;
+    arg_val[i] = bound_arg;
+    arg_ctor[i] = arena_strndup(cg->arena, p_ctor, strlen(p_ctor));
     useful = true;
   }
   if (!useful) {
@@ -968,9 +1041,12 @@ static fun_sig *ny_try_monomorphize_call(codegen_t *cg, scope *scopes,
   uint64_t key_hash = ny_mono_key_hash(sig->name, types, sig->arity);
   key_hash = ny_mono_key_hash_with_list_lens(
       key_hash, arg_list_len_min_known, arg_list_len_min_raw, sig->arity);
+  key_hash = ny_mono_key_hash_with_indexed_vals(
+      key_hash, arg_val_known, arg_val, arg_ctor, sig->arity);
   fun_sig *existing =
       ny_mono_lookup_existing(cg, fn, key_hash, types,
                               arg_list_len_min_known, arg_list_len_min_raw,
+                              arg_val_known, arg_val, arg_ctor,
                               sig->arity);
   if (existing)
     return existing;
@@ -987,7 +1063,7 @@ static fun_sig *ny_try_monomorphize_call(codegen_t *cg, scope *scopes,
   }
 
   const char *mono_name =
-      ny_mono_make_name(cg, sig->name, types, sig->arity, key_hash);
+      ny_mono_make_name(cg, sig->name, types, arg_val_known, arg_val, arg_ctor, sig->arity, key_hash);
   if (!mono_name)
     return NULL;
   ny_mono_type_kind_t return_kind =
@@ -1035,6 +1111,10 @@ static fun_sig *ny_try_monomorphize_call(codegen_t *cg, scope *scopes,
          sizeof(spec.arg_list_len_min_known));
   memcpy(spec.arg_list_len_min_raw, arg_list_len_min_raw,
          sizeof(spec.arg_list_len_min_raw));
+  memcpy(spec.arg_val_known, arg_val_known, sizeof(spec.arg_val_known));
+  memcpy(spec.arg_val, arg_val, sizeof(spec.arg_val));
+  for (int i = 0; i < sig->arity && i < NY_MONO_MAX_ARITY; i++)
+    spec.arg_ctor[i] = arg_ctor[i];
   vec_push(&cg->mono_specs, spec);
 
   bool old_emitting = cg->mono_emitting;

@@ -1,0 +1,35 @@
+shape value-indexed-types {
+  family "native-nyir"
+  generator "regression"
+  features ["ny" "native" "indexed" "mono" "types"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+
+def VEC_LEN = 3
+def ARR_LEN = 4
+
+fn vec_dot_3(Vec<3> a, Vec<3> b) int {
+  return 42
+}
+
+fn vec_dot_sym(Vec<VEC_LEN> a) int {
+  return 99
+}
+
+fn array_sum(Array<ARR_LEN> a) int {
+  return 100
+}
+
+fn generic_ctor_arg(Vec v) int {
+  return 7
+}
+
+assert(vec_dot_3(1, 2) == 42, "vec3 literal bound")
+assert(vec_dot_sym(1) == 99, "vec symbolic bound")
+assert(array_sum(1) == 100, "array4 symbolic bound")
+assert(generic_ctor_arg(1) == 7, "unindexed ctor compatibility")
+print("value_indexed_types ok")
+NY
+}

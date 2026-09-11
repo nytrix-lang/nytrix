@@ -1518,11 +1518,6 @@ void add_builtins(codegen_t *cg) {
       ty = LLVMFunctionType(                                                   \
           cg->type_i64,                                                        \
           (LLVMTypeRef[]){cg->type_i64, cg->type_i64, cg->type_i64}, 3, 0);    \
-    } else if (strcmp(rt_name, "__dict_set_raw") == 0 ||                       \
-               strcmp(rt_name, "__dict_set_i64_raw") == 0 ||                   \
-               strcmp(rt_name, "__dict_set_str_raw") == 0) {                   \
-      /* Legacy LLVM expands each any key/value as value/length/tag. */        \
-      ty = fn_types[7];                                                        \
     } else {                                                                   \
       ty = fn_types[args];                                                     \
     }                                                                          \

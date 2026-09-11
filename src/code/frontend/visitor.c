@@ -80,6 +80,16 @@ void ny_visit_expr(ny_visitor_t *v, expr_t *e) {
     case NY_E_COMPTIME:
       ny_visit_stmt(v, e->as.comptime_expr.body);
       break;
+    case NY_E_QUOTE:
+      if (e->as.quote.body)
+        ny_visit_stmt(v, e->as.quote.body);
+      if (e->as.quote.expr)
+        ny_visit_expr(v, e->as.quote.expr);
+      break;
+    case NY_E_SPLICE:
+      if (e->as.splice.expr)
+        ny_visit_expr(v, e->as.splice.expr);
+      break;
     case NY_E_FSTRING:
       for (size_t i = 0; i < e->as.fstring.parts.len; i++) {
         if (e->as.fstring.parts.data[i].kind == NY_FSP_EXPR) {

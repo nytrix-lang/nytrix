@@ -4,6 +4,37 @@
  */
 static char *parse_dotted_ident_owned(parser_t *p, const char *first_err,
                                       const char *after_dot_err) {
+  if (p->cur.kind == NY_T_DOLLAR_LBRACE) {
+    token_t start_tok = p->cur;
+    parser_advance(p);
+    token_t id_tok = p->cur;
+    if (p->cur.kind == NY_T_IDENT) {
+      parser_advance(p);
+      parser_expect(p, NY_T_RBRACE, "'}' after template parameter", NULL);
+      size_t cap = id_tok.len + 32;
+      char *buf = malloc(cap);
+      if (!buf) {
+        parser_error(p, start_tok, "out of memory", NULL);
+        return NULL;
+      }
+      int n = snprintf(buf, cap, "${%.*s}", (int)id_tok.len, id_tok.lexeme);
+      size_t len = (size_t)n;
+      while (p->cur.kind == NY_T_IDENT &&
+             p->cur.col == (int)(p->prev.col + p->prev.len)) {
+        if (len + p->cur.len + 1 > cap) {
+          cap = (len + p->cur.len + 1) * 2;
+          char *nb = realloc(buf, cap);
+          if (!nb) { free(buf); return NULL; }
+          buf = nb;
+        }
+        memcpy(buf + len, p->cur.lexeme, p->cur.len);
+        len += p->cur.len;
+        parser_advance(p);
+      }
+      buf[len] = '\0';
+      return buf;
+    }
+  }
   if (p->cur.kind != NY_T_IDENT && p->cur.kind != NY_T_NUMBER) {
     parser_error(p, p->cur, first_err ? first_err : "expected identifier",
                  NULL);
@@ -2110,10 +2141,10 @@ static stmt_t *layout_wrap_generated(parser_t *p, stmt_t *layout_stmt,
   if (is_record || layout_derive_has(derives, "default"))
     layout_emit_default_constructor(&b, owner, fields, true);
   if (is_shape) {
-    layout_emit_default_constructor(&b, owner, fields, false);
+    layout_emit_default_constructor(&b, owner, fields, true);
     layout_emit_shape_from(&b, owner, fields);
   }
-  if (layout_derive_has(derives, "load"))
+  if (layout_derive_has(derives, "load") || is_shape)
     layout_emit_load_derives(&b, owner, fields);
   if (layout_derive_has(derives, "store"))
     layout_emit_store_derive(&b, owner, fields);
@@ -2186,9 +2217,18 @@ static stmt_t *parse_layout_guard_stmt(parser_t *p) {
 static stmt_t *parse_struct(parser_t *p) {
   token_t tok = p->cur;
   bool is_layout = (tok.len == 6 && strncmp(tok.lexeme, "layout", 6) == 0);
-  parser_expect(p, NY_T_STRUCT, is_layout ? "'layout'" : "'struct'", NULL);
+  bool is_shape = (tok.len == 5 && strncmp(tok.lexeme, "shape", 5) == 0);
+  if (is_shape)
+    is_layout = true;
+  if (tok.kind == NY_T_IDENT && is_shape) {
+    parser_advance(p);
+  } else {
+    parser_expect(p, NY_T_STRUCT, is_layout ? "'layout'" : "'struct'", NULL);
+  }
   const char *flavor = NULL;
-  if (is_layout && tok_is_ident_text(p->cur, "record")) {
+  if (is_shape) {
+    flavor = parser_intern(p, "shape", 5);
+  } else if (is_layout && tok_is_ident_text(p->cur, "record")) {
     flavor = parser_intern(p, "record", 6);
     parser_advance(p);
   } else if (is_layout && tok_is_ident_text(p->cur, "shape")) {
@@ -2198,6 +2238,10 @@ static stmt_t *parse_struct(parser_t *p) {
   const char *name = parse_qualified_name(p);
   if (!name) {
     return NULL;
+  }
+  const char *composed_base = NULL;
+  if (parser_match(p, NY_T_COLON)) {
+    composed_base = parse_qualified_name(p);
   }
   stmt_t *s = stmt_new(p->arena, is_layout ? NY_S_LAYOUT : NY_S_STRUCT, tok);
   if (is_layout)
@@ -2278,7 +2322,29 @@ static stmt_t *parse_struct(parser_t *p) {
   const char *owner = is_layout ? s->as.layout.name : s->as.struc.name;
   const char *prev_impl_owner = p->current_impl_owner;
   p->current_impl_owner = owner;
+  if (composed_base) {
+    parser_ct_layout_meta *bmeta = parser_find_layout_meta(p, composed_base);
+    if (bmeta) {
+      for (size_t i = 0; i < bmeta->fields.len; i++) {
+        vec_push_arena(p->arena, fields, bmeta->fields.data[i]);
+      }
+    }
+  }
   while (p->cur.kind != NY_T_RBRACE && p->cur.kind != NY_T_EOF) {
+    if (parser_match(p, NY_T_PLUS)) {
+      const char *bname = parse_qualified_name(p);
+      if (bname) {
+        parser_ct_layout_meta *bmeta = parser_find_layout_meta(p, bname);
+        if (bmeta) {
+          for (size_t i = 0; i < bmeta->fields.len; i++) {
+            vec_push_arena(p->arena, fields, bmeta->fields.data[i]);
+          }
+        }
+      }
+      parser_match(p, NY_T_COMMA);
+      parser_match(p, NY_T_SEMI);
+      continue;
+    }
     if (p->cur.kind == NY_T_IDENT && p->cur.len == 8 &&
         strncmp(p->cur.lexeme, "operator", 8) == 0) {
       stmt_t *oper = parse_operator_stmt_with_left(p, owner, owner);
@@ -2624,36 +2690,4 @@ static attribute_t parse_attr(parser_t *p) {
     parser_expect(p, NY_T_RPAREN, "')' after attribute", NULL);
   }
   return attr;
-}
-
-static stmt_t *parse_macro_stmt(parser_t *p) {
-  token_t tok = p->cur;
-  if (p->cur.kind != NY_T_IDENT) {
-    parser_error(p, p->cur, "expected macro name", NULL);
-    return NULL;
-  }
-  const char *name = arena_strndup(p->arena, p->cur.lexeme, p->cur.len);
-  parser_advance(p);
-  ny_expr_list args = {0};
-  if (parser_match(p, NY_T_LPAREN)) {
-    while (p->cur.kind != NY_T_RPAREN && p->cur.kind != NY_T_EOF) {
-      expr_t *e = p_parse_expr(p, 0);
-      if (e)
-        vec_push_arena(p->arena, &args, e);
-      if (!parser_match(p, NY_T_COMMA))
-        break;
-    }
-    parser_expect(p, NY_T_RPAREN, "')'", NULL);
-  }
-  stmt_t *body = NULL;
-  if (p->cur.kind == NY_T_LBRACE) {
-    body = p_parse_block(p);
-  } else {
-    parser_match(p, NY_T_SEMI);
-  }
-  stmt_t *s = stmt_new(p->arena, NY_S_MACRO, tok);
-  s->as.macro.name = name;
-  s->as.macro.args = args;
-  s->as.macro.body = body;
-  return s;
 }
