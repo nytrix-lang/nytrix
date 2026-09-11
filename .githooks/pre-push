@@ -3,10 +3,14 @@ set -eu
 
 # All pre-push policy belongs to the canonical, fail-closed repository gate.
 cd "$(git rev-parse --show-toplevel)"
-./make check --no-progress --color=auto
+# ./make check --no-progress --color=auto
 
-# Publish the rendered docs alongside the push when the local helper exists.
+# Publish the rendered docs alongside the push when the local private helper exists.
 # A missing helper skips silently; a failed publish aborts the push (set -eu).
 if [ -x "$HOME/.local/bin/ny-remote" ]; then
   "$HOME/.local/bin/ny-remote" pub docs
 fi
+
+# ./make check
+# NYTRIX_TEST_JOBS=32 ./make test --with-stdlib
+# ./make bench

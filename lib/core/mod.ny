@@ -1473,7 +1473,7 @@ impl bytes {
    @inline
    fn len(bytes self) int { return __load64_idx(self, -16) >> 1 }
    @inline
-   fn get(bytes self, int key, any default=0) any { return bytes_get(self, key, default) }
+   fn get(bytes self, int key, any default=0) int { return bytes_get(self, key, default) }
    @inline
    @borrows(self)
    @returns_borrow(self)
@@ -1633,15 +1633,16 @@ fn _sorted_list_copy(any xs) list {
 fn _char_list_to_str(list chars) str {
    use std.core.str
    def n = chars.len
-   mut out = Builder(n + 8)
+   mut out = ""
    mut i = 0
    while i < n {
-      out = builder_append(out, chars[i])
+      ; Chars stored by append may live in descriptor slots; read them back
+      ; through the canonical decoder and concatenate.  The builder path
+      ; measures `s.len` from a zero-seeded length slot for these values.
+      out = out + __tbuf_index_any_raw(chars, i)
       i += 1
    }
-   def s = builder_to_str(out)
-   builder_free(out)
-   s
+   out
 }
 
 @returns_owned

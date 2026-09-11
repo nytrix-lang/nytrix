@@ -707,7 +707,7 @@ int64_t rt_websocket_open(int64_t rurl) {
   char req[512];
   snprintf(req, sizeof(req),
            "GET / HTTP/1.1\r\nHost: %s\r\nUpgrade: websocket\r\nConnection: "
-           "Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n",
+           "Upgrade\r\nSec-WebSocket-Key: Tnl0cml4Tm9uY2U=\r\n\r\n",
            host);
   if (send(fd, req, strlen(req), 0) < 0) {
     close(fd);
@@ -2360,7 +2360,26 @@ static bool rt_thread_prepare_call_args(int64_t argc, int64_t argv_ptr, int64_t 
     argv_copy = (int64_t *)malloc((size_t)argc_raw * sizeof(int64_t));
     if (!argv_copy)
       return false;
-    memcpy(argv_copy, (const void *)(uintptr_t)src_ptr, (size_t)argc_raw * sizeof(int64_t));
+    /*
+     * Lists whose elements were stored through the dynamic ABI are 24-byte
+     * descriptor buffers (payload, pad, tag per slot).  A contiguous memcpy
+     * would hand the callee padding and tag words instead of the argument
+     * values; read each payload for that layout.
+     */
+    {
+      int64_t *hdr = (int64_t *)((uintptr_t)src_ptr - RT_NATIVE_TBUF_HEADER);
+      if ((uint64_t)argc_raw <= 15 && rt_header_readable_cached(
+              (uintptr_t)hdr, RT_NATIVE_TBUF_HEADER) &&
+          (uint64_t)hdr[0] == NY_NATIVE_TBUF_MAGIC && hdr[2] == 24 &&
+          hdr[1] >= argc_raw) {
+        for (int64_t i = 0; i < argc_raw; ++i)
+          argv_copy[i] = *((const int64_t *)(uintptr_t)src_ptr +
+                           (size_t)i * 3);
+      } else {
+        memcpy(argv_copy, (const void *)(uintptr_t)src_ptr,
+               (size_t)argc_raw * sizeof(int64_t));
+      }
+    }
   }
   *argc_raw_out = argc_raw;
   *argv_copy_out = argv_copy;

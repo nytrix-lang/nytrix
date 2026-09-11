@@ -514,8 +514,11 @@ static stmt_t *parse_comptime_table_stmt(parser_t *p) {
    * second time before range comparisons.
    */
   param_t raw = {.name = parser_intern(p, "raw", 3), .type = "i32", .def = NULL};
+  /* The fallback is a scalar in the same domain as `raw`; typing it keeps
+     the native call boundary from tagging it (and decoding `-7` to `-4`
+     across a module boundary). */
   param_t fallback = {
-      .name = parser_intern(p, "default", 7), .type = NULL, .def = NULL};
+      .name = parser_intern(p, "default", 7), .type = "i32", .def = NULL};
   vec_push_arena(p->arena, &fn->as.fn.params, raw);
   vec_push_arena(p->arena, &fn->as.fn.params, fallback);
 
@@ -534,7 +537,7 @@ static stmt_t *parse_comptime_table_stmt(parser_t *p) {
       .name = parser_intern(p, "raw", 3), .type = "i32", .def = NULL};
   param_t wrapper_fallback = {
       .name = parser_intern(p, "default", 7),
-      .type = NULL,
+      .type = "i32",
       .def = ct_int_expr(p, tok, 0),
   };
   vec_push_arena(p->arena, &wrapper->as.fn.params, wrapper_raw);
@@ -705,8 +708,8 @@ static stmt_t *parse_comptime_diagnostic_rule_stmt(parser_t *p) {
   return stmt_new(p->arena, NY_S_BLOCK, tok);
 }
 
-static parser_ct_layout_meta *parser_find_layout_meta(parser_t *p,
-                                                      const char *name) {
+parser_ct_layout_meta *parser_find_layout_meta(parser_t *p,
+                                               const char *name) {
   if (!name)
     return NULL;
   for (size_t i = 0; i < p->ct_layouts.len; i++) {
@@ -776,6 +779,8 @@ typedef enum ct_value_kind_t {
   CT_VALUE_IDENT,
   CT_VALUE_INT,
   CT_VALUE_BOOL,
+  CT_VALUE_AST_BLOCK,
+  CT_VALUE_AST_EXPR,
 } ct_value_kind_t;
 
 typedef struct ct_value_t {
@@ -783,6 +788,9 @@ typedef struct ct_value_t {
   const char *s;
   int64_t i;
   bool b;
+  stmt_t *block;
+  expr_t *expr;
+  uint32_t syntax_ctx;
 } ct_value_t;
 
 typedef struct ct_bind_t {
@@ -866,6 +874,14 @@ static expr_t *ct_value_expr(parser_t *p, token_t tok, const ct_value_t *v) {
     return ct_int_expr(p, tok, v->i);
   case CT_VALUE_BOOL:
     return ct_bool_expr(p, tok, v->b);
+  case CT_VALUE_AST_EXPR:
+    return v->expr ? v->expr : ct_string_expr(p, tok, "");
+  case CT_VALUE_AST_BLOCK: {
+    expr_t *q = expr_new(p->arena, NY_E_QUOTE, tok);
+    q->as.quote.body = v->block;
+    q->as.quote.syntax_ctx = v->syntax_ctx;
+    return q;
+  }
   }
   return NULL;
 }
@@ -1059,6 +1075,7 @@ static expr_t *ct_clone_expr(parser_t *p, expr_t *e, ct_reflect_ctx_t *ctx) {
   *out = *e;
   switch (e->kind) {
   case NY_E_IDENT:
+    out->as.ident.syntax_ctx = e->as.ident.syntax_ctx;
     out->as.ident.name = ct_substitute_name(p, e->as.ident.name, ctx);
     out->as.ident.hash =
         out->as.ident.name
@@ -1160,6 +1177,26 @@ static expr_t *ct_clone_expr(parser_t *p, expr_t *e, ct_reflect_ctx_t *ctx) {
     out->as.match.default_conseq =
         ct_clone_stmt(p, e->as.match.default_conseq, ctx);
     break;
+  case NY_E_QUOTE:
+    out->as.quote.syntax_ctx = e->as.quote.syntax_ctx;
+    if (e->as.quote.body)
+      out->as.quote.body = ct_clone_stmt(p, e->as.quote.body, ctx);
+    if (e->as.quote.expr)
+      out->as.quote.expr = ct_clone_expr(p, e->as.quote.expr, ctx);
+    break;
+  case NY_E_SPLICE:
+    if (e->as.splice.expr && e->as.splice.expr->kind == NY_E_IDENT && ctx &&
+        ctx->kind == CT_REFLECT_TEMPLATE && e->as.splice.expr->as.ident.name) {
+      const ct_value_t *v = ct_find_bind(ctx, e->as.splice.expr->as.ident.name);
+      if (v) {
+        if (v->kind == CT_VALUE_AST_EXPR && v->expr)
+          return ct_clone_expr(p, v->expr, ctx);
+        return ct_value_expr(p, e->tok, v);
+      }
+    }
+    out->as.splice.expr = ct_clone_expr(p, e->as.splice.expr, ctx);
+    out->as.splice.syntax_ctx = e->as.splice.syntax_ctx;
+    break;
   default:
     break;
   }
@@ -1174,9 +1211,30 @@ static stmt_t *ct_clone_stmt(parser_t *p, stmt_t *s, ct_reflect_ctx_t *ctx) {
   switch (s->kind) {
   case NY_S_BLOCK:
     out->as.block.body = (ny_stmt_list){0};
-    for (size_t i = 0; i < s->as.block.body.len; i++)
+    for (size_t i = 0; i < s->as.block.body.len; i++) {
+      stmt_t *stmt_item = s->as.block.body.data[i];
+      if (stmt_item && stmt_item->kind == NY_S_EXPR && stmt_item->as.expr.expr &&
+          stmt_item->as.expr.expr->kind == NY_E_SPLICE) {
+        expr_t *spl = stmt_item->as.expr.expr;
+        if (spl->as.splice.expr && spl->as.splice.expr->kind == NY_E_IDENT && ctx &&
+            ctx->kind == CT_REFLECT_TEMPLATE && spl->as.splice.expr->as.ident.name) {
+          const ct_value_t *v = ct_find_bind(ctx, spl->as.splice.expr->as.ident.name);
+          if (v && v->kind == CT_VALUE_AST_BLOCK && v->block) {
+            stmt_t *cloned_blk = ct_clone_stmt(p, v->block, ctx);
+            if (cloned_blk && cloned_blk->kind == NY_S_BLOCK) {
+              for (size_t k = 0; k < cloned_blk->as.block.body.len; k++)
+                vec_push_arena(p->arena, &out->as.block.body, cloned_blk->as.block.body.data[k]);
+              continue;
+            } else if (cloned_blk) {
+              vec_push_arena(p->arena, &out->as.block.body, cloned_blk);
+              continue;
+            }
+          }
+        }
+      }
       vec_push_arena(p->arena, &out->as.block.body,
                      ct_clone_stmt(p, s->as.block.body.data[i], ctx));
+    }
     break;
   case NY_S_EXPR:
     out->as.expr.expr = ct_clone_expr(p, s->as.expr.expr, ctx);
@@ -1670,6 +1728,12 @@ static stmt_t *parse_comptime_template_stmt(parser_t *p) {
   parser_expect(p, NY_T_RPAREN, "')' after comptime template parameters", NULL);
   parser_expect(p, NY_T_LBRACE, "'{' after comptime template header", NULL);
 
+  /*
+   * Template bodies keep `${param}` as a literal placeholder identifier.
+   * Without this depth flag the lexer emits DOLLAR_LBRACE inside the body
+   * and every `module.${param}` member access fails to parse.
+   */
+  p->lex.template_depth++;
   while (p->cur.kind != NY_T_RBRACE && p->cur.kind != NY_T_EOF) {
     stmt_t *s = p_parse_stmt(p);
     if (s) {
@@ -1678,6 +1742,7 @@ static stmt_t *parse_comptime_template_stmt(parser_t *p) {
       parser_sync_stmt_boundary(p);
     }
   }
+  p->lex.template_depth--;
   parser_expect(p, NY_T_RBRACE, "'}' after comptime template body", NULL);
   vec_push_arena(p->arena, &p->ct_templates, tmpl);
   return stmt_new_transparent_block(p, tok);
@@ -1745,6 +1810,13 @@ static bool ct_value_from_template_arg(parser_t *p, expr_t *e,
   if (e->kind == NY_E_IDENT && loop_var && loop_value && e->as.ident.name &&
       strcmp(e->as.ident.name, loop_var) == 0) {
     *out = *loop_value;
+    return true;
+  }
+  if (e->kind == NY_E_QUOTE) {
+    out->kind = e->as.quote.body ? CT_VALUE_AST_BLOCK : CT_VALUE_AST_EXPR;
+    out->block = e->as.quote.body;
+    out->expr = e->as.quote.expr;
+    out->syntax_ctx = e->as.quote.syntax_ctx;
     return true;
   }
   return ct_value_from_literal_expr(p, e, out) ||
@@ -1827,6 +1899,22 @@ static stmt_t *parse_comptime_emit_stmt(parser_t *p) {
   expr_t *call = p_parse_expr(p, 0);
   parser_match(p, NY_T_SEMI);
   stmt_t *block = stmt_new_transparent_block(p, tok);
+  if (call && call->kind == NY_E_QUOTE) {
+    if (call->as.quote.body) {
+      stmt_t *b = call->as.quote.body;
+      if (b->kind == NY_S_BLOCK) {
+        for (size_t i = 0; i < b->as.block.body.len; i++)
+          stmt_list_push_flat(p, &block->as.block.body, b->as.block.body.data[i]);
+      } else {
+        stmt_list_push_flat(p, &block->as.block.body, b);
+      }
+    } else if (call->as.quote.expr) {
+      stmt_t *es = stmt_new(p->arena, NY_S_EXPR, call->tok);
+      es->as.expr.expr = call->as.quote.expr;
+      stmt_list_push_flat(p, &block->as.block.body, es);
+    }
+    return block;
+  }
   ct_expand_template_call(p, block, call, NULL, NULL);
   return block;
 }

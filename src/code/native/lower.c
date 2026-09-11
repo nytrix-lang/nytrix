@@ -332,6 +332,9 @@ static const char *ny_native_runtime_symbol(const char *name) {
       strcmp(name, "__dict_set_raw") == 0 ||
       strcmp(name, "__dict_set_i64_raw") == 0)
     return "rt_native_dict_set_nir_i64";
+  if (strcmp(name, "dict_set_str") == 0 || strcmp(name, "__dict_set_str") == 0 ||
+      strcmp(name, "__dict_set_str_raw") == 0)
+    return "rt_native_dict_set_str_compact";
   if (strcmp(name, "dict_set_i64") == 0 || strcmp(name, "__dict_set_i64") == 0)
     return "rt_dict_set_i64_raw";
   if (strcmp(name, "dict_exists") == 0 || strcmp(name, "__dict_exists") == 0 ||
@@ -618,6 +621,20 @@ static const char *ny_native_runtime_symbol(const char *name) {
     return "rt_tbuf_to_cstr";
   if (strcmp(name, "__shl") == 0)
     return "rt_shl_raw";
+  if (strcmp(name, "__trace_func") == 0)
+    return "rt_trace_func_raw";
+  if (strcmp(name, "__trace_loc") == 0)
+    return "rt_trace_loc_raw";
+  if (strcmp(name, "__trace_enter") == 0)
+    return "rt_trace_enter_raw";
+  if (strcmp(name, "__print_flush") == 0)
+    return "rt_print_flush_raw";
+  if (strcmp(name, "__trace_ret_void") == 0)
+    return "rt_trace_ret_void_raw";
+  if (strcmp(name, "__trace_exit") == 0)
+    return "rt_trace_exit_raw";
+  if (strcmp(name, "__trace_dump") == 0)
+    return "rt_trace_dump_raw";
   if (strcmp(name, "rt_result_unwrap_or_raw") == 0)
     return "rt_result_unwrap_or_raw";
   if (strcmp(name, "rt_index_key_error") == 0)
@@ -726,6 +743,7 @@ typedef struct {
   int dyn_tag_arg_slot;     /* incoming argument index for str/any tag */
   int64_t buffer_byte_len;  /* comptime-known allocation size in bytes, or 0 */
   int64_t fin_bound;        /* literal Fin<N> bound, or 0 when not known */
+  uint32_t syntax_ctx;
 
 } ny_native_nir_local_t;
 typedef struct {
@@ -1478,6 +1496,9 @@ typedef struct {
    * payloads to native NYIR callers.
    */
   bool return_any;
+  /* Set while lowering a `case` expression whose result feeds a dynamic
+   * consumer: raw scalar arm values must be boxed once at the join. */
+  bool match_result_any;
   const char *return_type;
   const ny_extern_table_t *externs;
   const program_t *prog;
@@ -1518,6 +1539,7 @@ typedef struct {
   const stmt_t *tail_body;
   bool tail_recur_enabled;
   int opt_level;
+  uint32_t current_syntax_ctx;
   char *err;
   size_t err_len;
 } ny_native_nir_builder_t;
@@ -1535,24 +1557,40 @@ static bool ny_native_nir_fn_has_thread_attr(const stmt_t *fn) {
 }
 
 /*
- * Parse a Fin<N> type name and extract the bound.
- * Handles "Fin<42>" (literal); "Fin<N>" symbolic names are not resolved here.
+ * Parse a value-indexed type name and extract constructor and bound.
+ * Handles "Ctor<42>" (literal); symbolic bounds are resolved via ny_native_resolve_indexed_bound.
  */
-static int64_t ny_native_parse_fin_bound(const char *type_name) {
+static int64_t ny_native_parse_indexed_bound(const char *type_name, char *out_ctor, size_t ctor_cap) {
   if (!type_name)
     return -1;
-  const char *start = strstr(type_name, "Fin<");
-  if (!start)
+  const char *start = strchr(type_name, '<');
+  if (!start || start == type_name)
     return -1;
-  start += 4;
-  const char *end = strchr(start, '>');
-  if (!end || end == start)
+  const char *end = strrchr(start, '>');
+  if (!end || end == start + 1)
     return -1;
   char *check = NULL;
-  long long val = strtoll(start, &check, 10);
+  long long val = strtoll(start + 1, &check, 10);
   if (check != end || val < 0)
     return -1;
+  if (out_ctor && ctor_cap > 0) {
+    size_t ctor_len = (size_t)(start - type_name);
+    if (ctor_len >= ctor_cap)
+      ctor_len = ctor_cap - 1;
+    memcpy(out_ctor, type_name, ctor_len);
+    out_ctor[ctor_len] = '\0';
+  }
   return (int64_t)val;
+}
+
+static int64_t ny_native_parse_fin_bound(const char *type_name) {
+  char ctor[64] = {0};
+  int64_t val = ny_native_parse_indexed_bound(type_name, ctor, sizeof(ctor));
+  if (val < 0)
+    return -1;
+  const char *leaf = strrchr(ctor, '.');
+  leaf = leaf ? leaf + 1 : ctor;
+  return strcmp(leaf, "Fin") == 0 ? val : -1;
 }
 
 /*
@@ -1647,27 +1685,32 @@ static int64_t ny_native_resolve_fin_sym_depth(
 }
 
 /*
- * Resolve a Fin<N> bound to a positive integer, generalizing the literal
- * case one step toward user-defined bounded constructors: `Fin<42>`
- * resolves directly; `Fin<NAME>` resolves through an immutable top-level
- * `def NAME = <positive int>` (mirroring ny_fin_resolve_bound in typing;
- * chained `def M = N` follows hop by hop, depth-capped). Returns -1 when
- * the bound is not compile-time known.
+ * Resolve a value-indexed bound (Ctor<N>) to a positive integer:
+ * `Ctor<42>` resolves directly; `Ctor<NAME>` resolves through an immutable top-level
+ * `def NAME = <positive int>`. Returns -1 when the bound is not compile-time known.
  */
-static int64_t ny_native_resolve_fin_bound(
-    const ny_native_nir_builder_t *b, const char *type_name) {
-  int64_t lit = ny_native_parse_fin_bound(type_name);
+static int64_t ny_native_resolve_indexed_bound(
+    const ny_native_nir_builder_t *b, const char *type_name, char *out_ctor, size_t ctor_cap) {
+  int64_t lit = ny_native_parse_indexed_bound(type_name, out_ctor, ctor_cap);
   if (lit >= 0)
     return lit;
   if (!b || !type_name)
     return -1;
-  const char *start = strstr(type_name, "Fin<");
-  if (!start)
+  const char *lt = strchr(type_name, '<');
+  if (!lt || lt == type_name)
     return -1;
-  start += 4;
-  const char *end = strchr(start, '>');
-  if (!end || end == start)
+  const char *gt = strrchr(lt, '>');
+  if (!gt || gt == lt + 1)
     return -1;
+  if (out_ctor && ctor_cap > 0) {
+    size_t clen = (size_t)(lt - type_name);
+    if (clen >= ctor_cap)
+      clen = ctor_cap - 1;
+    memcpy(out_ctor, type_name, clen);
+    out_ctor[clen] = '\0';
+  }
+  const char *start = lt + 1;
+  const char *end = gt;
   while (start < end && (*start == ' ' || *start == '\t'))
     ++start;
   while (end > start && (end[-1] == ' ' || end[-1] == '\t'))
@@ -1689,6 +1732,20 @@ static int64_t ny_native_resolve_fin_bound(
   memcpy(sym, start, name_len);
   sym[name_len] = '\0';
   return ny_native_resolve_fin_sym_depth(b, sym, 0);
+}
+
+static int64_t ny_native_resolve_fin_bound(
+    const ny_native_nir_builder_t *b, const char *type_name) {
+  int64_t lit = ny_native_parse_fin_bound(type_name);
+  if (lit >= 0)
+    return lit;
+  char ctor[64] = {0};
+  int64_t bound = ny_native_resolve_indexed_bound(b, type_name, ctor, sizeof(ctor));
+  if (bound < 0)
+    return -1;
+  const char *leaf = strrchr(ctor, '.');
+  leaf = leaf ? leaf + 1 : ctor;
+  return strcmp(leaf, "Fin") == 0 ? bound : -1;
 }
 
 /*
@@ -1976,15 +2033,23 @@ static bool ny_native_nir_ignored_stmt(const stmt_t *s) {
 }
 
 static ny_native_nir_local_t *
-ny_native_nir_find_local(ny_native_nir_builder_t *b, const char *name) {
+ny_native_nir_find_local_ctx(ny_native_nir_builder_t *b, const char *name,
+                             uint32_t syntax_ctx) {
   if (!b || !name)
     return NULL;
   for (size_t i = b->local_count; i > 0; --i) {
     ny_native_nir_local_t *l = &b->locals[i - 1];
-    if (l->name && strcmp(l->name, name) == 0)
-      return l;
+    if (l->name && strcmp(l->name, name) == 0) {
+      if (l->syntax_ctx == syntax_ctx)
+        return l;
+    }
   }
   return NULL;
+}
+
+static ny_native_nir_local_t *
+ny_native_nir_find_local(ny_native_nir_builder_t *b, const char *name) {
+  return ny_native_nir_find_local_ctx(b, name, b ? b->current_syntax_ctx : 0);
 }
 
 /*
@@ -2005,12 +2070,16 @@ static bool ny_native_nir_expr_is_bigfloat(ny_native_nir_builder_t *b,
 static bool ny_native_nir_fold_top_level_int(const program_t *prog,
                                              const expr_t *e, int64_t *out,
                                              unsigned depth);
+static const stmt_t *
+ny_native_nir_find_imported_function(const ny_native_nir_builder_t *b,
+                                     const char *name);
 static bool ny_native_nir_expr_is_cstr(ny_native_nir_builder_t *b,
                                        const expr_t *e);
 static bool ny_native_nir_expr_is_bytes(const ny_native_nir_builder_t *b,
                                         const expr_t *e);
 static bool ny_native_nir_expr_is_bool(ny_native_nir_builder_t *b,
                                        const expr_t *e);
+static int ny_native_nir_box_bool(ny_native_nir_builder_t *b, int reg);
 static bool ny_native_nir_expr_is_any(ny_native_nir_builder_t *b,
                                       const expr_t *e);
 static const stmt_t *
@@ -2090,7 +2159,7 @@ static bool ny_native_nir_expr_is_dyn_list(ny_native_nir_builder_t *b,
     if (local && local->is_list && !local->is_any)
       return false;
   }
-  if (ny_native_nir_expr_is_any(b, e))
+  if (ny_native_nir_expr_is_list(b, e) && ny_native_nir_expr_is_any(b, e))
     return true;
   if (e->kind == NY_E_MEMCALL) {
     if (e->as.memcall.name && strcmp(e->as.memcall.name, "get") == 0 &&
@@ -2161,7 +2230,7 @@ static bool ny_native_nir_expr_is_dyn_list(ny_native_nir_builder_t *b,
   if (e->kind == NY_E_IDENT) {
     ny_native_nir_local_t *l = ny_native_nir_find_local(b, e->as.ident.name);
     if (l)
-      return l->is_dyn_list || l->is_any;
+      return l->is_dyn_list || (l->is_list && l->is_any);
     const expr_t *g = ny_native_nir_find_top_level_value(b, e->as.ident.name);
     if (g && g != e)
       return ny_native_nir_expr_is_dyn_list(b, g);
@@ -2490,7 +2559,8 @@ ny_native_nir_bind_local_typed(ny_native_nir_builder_t *b, const char *name,
       .arg_slot = -1,
       .list_len_arg_slot = -1,
       .dyn_str_len_arg_slot = -1,
-      .dyn_tag_arg_slot = -1};
+      .dyn_tag_arg_slot = -1,
+      .syntax_ctx = b ? b->current_syntax_ctx : 0};
   b->local_count++;
   return l;
 }
@@ -2554,14 +2624,51 @@ static inline int ny_native_nir_emit_cmp_i64(ny_native_nir_builder_t *b,
   return v;
 }
 
-static bool ny_native_nir_value_is_call(const ny_native_nir_builder_t *b,
-                                        int value) {
+static int ny_native_nir_box_bool(ny_native_nir_builder_t *b, int reg) {
+  if (!b || reg < 0)
+    return -1;
+  for (size_t i = b->nyir.len; i > 0; --i) {
+    const nyir_inst_t *in = &b->nyir.data[i - 1];
+    if (in->dst == reg) {
+      if (in->op == NYIR_CONST_I64) {
+        bool truthy = in->imm != 0 && in->imm != NY_IMM_FALSE;
+        return ny_native_nir_emit_const(b, truthy ? NY_IMM_TRUE : NY_IMM_FALSE);
+      }
+      break;
+    }
+  }
+  int zero = ny_native_nir_emit_const(b, 0);
+  int false_imm = ny_native_nir_emit_const(b, NY_IMM_FALSE);
+  int six = ny_native_nir_emit_const(b, 6);
+  if (zero < 0 || false_imm < 0 || six < 0)
+    return -1;
+  int got = ny_native_nir_emit_cmp_i64(b, NYIR_CMP_NE, reg, zero);
+  int not_false = ny_native_nir_emit_cmp_i64(b, NYIR_CMP_NE, reg, false_imm);
+  int truthy = ny_native_nir_emit_binop(b, NYIR_AND_I64, got, not_false);
+  int mul = ny_native_nir_emit_binop(b, NYIR_MUL_I64, truthy, six);
+  return ny_native_nir_emit_binop(b, NYIR_ADD_I64, mul, false_imm);
+}
+
+static bool ny_native_nir_value_is_dynamic(const ny_native_nir_builder_t *b,
+                                           int value) {
   if (!b || value < 0)
     return false;
   for (size_t i = b->nyir.len; i > 0; --i) {
     const nyir_inst_t *in = &b->nyir.data[i - 1];
-    if (in->dst == value)
-      return in->op == NYIR_CALL;
+    if (in->dst == value) {
+      if (in->op == NYIR_CALL)
+        return true;
+      if (in->op == NYIR_CONST_I64 &&
+          (in->imm == NY_IMM_FALSE || in->imm == NY_IMM_TRUE))
+        return true;
+      if (in->op == NYIR_LOAD_LOCAL && in->imm >= 0) {
+        for (size_t j = b->local_count; j > 0; --j) {
+          if (b->locals[j - 1].slot == in->imm)
+            return b->locals[j - 1].is_any || b->locals[j - 1].is_bool;
+        }
+      }
+      return false;
+    }
   }
   return false;
 }
@@ -2569,14 +2676,14 @@ static bool ny_native_nir_value_is_call(const ny_native_nir_builder_t *b,
 static bool ny_native_nir_emit_br_if(ny_native_nir_builder_t *b, int value,
                                      int label) {
   /*
-   * Runtime predicates (rt_is_nil, rt_has_tag, ...) return the boxed
-   * boolean immediates NY_IMM_TRUE=8 / NY_IMM_FALSE=2, whereas NYIR result
-   * values from comparisons are 0/1.  A raw != 0 test would treat the false
-   * boxed bool (2) as truthy.  Normalize call-produced conditions to a real
-   * 0/1 truthiness so branch semantics agree for both encodings.  Non-call
-   * defs (comparisons, range probes) are already 0/1 and are left alone.
+   * Runtime predicates (rt_is_nil, rt_has_tag, ...), dynamic locals, and
+   * boxed bools return/hold the boxed boolean immediates NY_IMM_TRUE=8 /
+   * NY_IMM_FALSE=2, whereas NYIR result values from comparisons are 0/1.
+   * A raw != 0 test would treat the false boxed bool (2) as truthy.
+   * Normalize dynamic/call/boxed conditions to a real 0/1 truthiness so
+   * branch semantics agree for both encodings.
    */
-  if (ny_native_nir_value_is_call(b, value)) {
+  if (ny_native_nir_value_is_dynamic(b, value)) {
     int got = ny_native_nir_emit_cmp_i64(b, NYIR_CMP_NE, value,
                                          ny_native_nir_emit_const(b, 0));
     if (got < 0)
@@ -3342,6 +3449,9 @@ static bool ny_native_nir_expr_is_cstr(ny_native_nir_builder_t *b,
      * Calls through module aliases carry a member callee.  Resolve both
      * direct and member calls through the same leaf-name path used by native
      * call lowering, then classify from the function's declared return.
+     * Deliberately limited to same-file functions: an imported `str` return
+     * may still materialize as a managed handle (not a raw C string), and
+     * routing that word into strlen-based concat crashes.
      */
     const char *leaf = ny_native_call_leaf(e);
     if (leaf && strcmp(leaf, "type") == 0)
@@ -3459,6 +3569,18 @@ static bool ny_native_nir_expr_is_any(ny_native_nir_builder_t *b,
     if (fn->as.fn.return_semantic.resolved &&
         fn->as.fn.return_semantic.rep == NY_SEM_REP_RAW_INT)
       return false;
+    /*
+     * The raw memory loads return the machine word at the address.  Their
+     * stdlib declaration says `any` for the VM's dynamic layer, but the
+     * native ABI hands back an untagged word; classifying it as `any` makes
+     * the next consumer untag it (17 loaded, printed as 8, and compared
+     * unequal to the literal 17 in the thread fixtures).
+     */
+    if (fn->as.fn.return_type && strcmp(fn->as.fn.return_type, "any") == 0) {
+      const char *leaf = ny_native_leaf_name(fn->as.fn.name);
+      if (leaf && strcmp(leaf, "load64") == 0)
+        return false;
+    }
   } else if (e->kind == NY_E_CALL && e->as.call.callee &&
              e->as.call.callee->kind == NY_E_IDENT &&
              e->as.call.callee->as.ident.name &&
@@ -3483,6 +3605,17 @@ static bool ny_native_nir_expr_is_any(ny_native_nir_builder_t *b,
         e->kind == NY_E_MEMBER ? e->as.member.target : e->as.memcall.target;
     const char *method =
         e->kind == NY_E_MEMBER ? e->as.member.name : e->as.memcall.name;
+    /*
+     * Element access on bytes/range returns the raw slot payload (a byte or
+     * a range step); a conservatively-`any` attached declaration must not
+     * re-tag it.  List elements are tagged dynamics and keep the any ABI;
+     * dict.get has its own dynamic rule further down.
+     */
+    if (receiver && method &&
+        (strcmp(method, "get") == 0 || strcmp(method, "pop") == 0) &&
+        (ny_native_nir_expr_is_bytes(b, receiver) ||
+         ny_native_nir_expr_is_range(b, receiver)))
+      return false;
     const stmt_t *fn = ny_native_nir_find_attached_method(b, receiver, method);
     if (fn && fn->as.fn.return_type)
       return ny_native_type_name_is_any(fn->as.fn.return_type);
@@ -3518,6 +3651,18 @@ static bool ny_native_nir_expr_is_any(ny_native_nir_builder_t *b,
        ny_native_nir_expr_is_bytes(b, e->as.index.target)))
     return false;
   /*
+   * Indexing an `any`-classified call result crosses the representation-aware
+   * accessor (no proven stride), so the read yields the canonical dynamic
+   * value.  Consumers must decode rather than print/compare the raw word:
+   * keeping this any here lets println(f(9)[0]) route through rt_any_to_cstr
+   * instead of rendering the tagged encoding 19 as an integer.
+   */
+  if (e->kind == NY_E_INDEX && e->as.index.target &&
+      (e->as.index.target->kind == NY_E_CALL ||
+       e->as.index.target->kind == NY_E_MEMCALL) &&
+      ny_native_nir_expr_is_any(b, e->as.index.target))
+    return true;
+  /*
    * A concrete function ABI is more precise than a propagated expression
    * fallback.  This is especially important for `extern "c"` calls in
    * -no-std objects: lowering an explicitly-i64 result as tagged `any` both
@@ -3527,6 +3672,37 @@ static bool ny_native_nir_expr_is_any(ny_native_nir_builder_t *b,
       e->as.call.callee->kind == NY_E_IDENT &&
       e->as.call.callee->as.ident.name) {
     const char *cname = e->as.call.callee->as.ident.name;
+    /*
+     * The canonical sequence accessor deliberately yields the dynamic
+     * value/len/tag word.  Its untyped builtin declaration otherwise lets a
+     * conservative RAW_INT semantic win, seeding every def-bound result with
+     * a zero length slot (builder_append then measured slen=0 and
+     * _char_list_to_str returned empty strings).
+     */
+    {
+      const char *canon_sym = ny_native_runtime_symbol_for_expr(cname, NULL, e);
+      if (canon_sym && strcmp(canon_sym, "rt_tbuf_index_any_raw") == 0)
+        return true;
+    }
+    /*
+     * Runtime bridges with a raw-machine-word result (lengths, counts,
+     * opaque handles) are not tagged dynamics.  Their untyped declarations
+     * otherwise classify every call as `any`, and the next dynamic consumer
+     * halves an odd raw word (rt_cstr_len("hello world") = 11 printed as 5).
+     */
+    {
+      const char *sym = ny_native_runtime_symbol_for_expr(cname, NULL, e);
+      if (sym &&
+          (strcmp(sym, "rt_cstr_len") == 0 || strcmp(sym, "rt_len") == 0 ||
+           strcmp(sym, "rt_dict_len_raw") == 0 ||
+           strcmp(sym, "rt_tbuf_len_raw") == 0 ||
+           strcmp(sym, "rt_str_builder_new") == 0 ||
+           strcmp(sym, "rt_str_builder_append") == 0 ||
+           strcmp(sym, "rt_str_builder_free") == 0 ||
+           strcmp(sym, "rt_cstr_builder_new") == 0 ||
+           strcmp(sym, "rt_bytes_len_raw") == 0))
+        return false;
+    }
     /*
      * Native scalar container stores return their payload in the raw NYIR
      * ABI.  The stdlib declaration is intentionally dynamic for the VM, but
@@ -3544,10 +3720,33 @@ static bool ny_native_nir_expr_is_any(ny_native_nir_builder_t *b,
     const stmt_t *fn = ny_native_nir_find_user_function(b, cname);
     if (!fn)
       fn = ny_native_nir_find_imported_function(b, cname);
-    if (fn && fn->as.fn.return_type)
+    if (fn && fn->as.fn.return_type) {
+      /*
+       * Same raw-load bridge as the canonical-callee check above: the
+       * stdlib `any` annotation must not classify the native machine-word
+       * result of load64 as a tagged dynamic.
+       */
+      if (strcmp(fn->as.fn.return_type, "any") == 0) {
+        const char *leaf = ny_native_leaf_name(fn->as.fn.name);
+        if (leaf && strcmp(leaf, "load64") == 0)
+          return false;
+      }
       return strcmp(fn->as.fn.return_type, "any") == 0;
-    if (fn && fn->as.fn.return_semantic.resolved)
-      return fn->as.fn.return_semantic.rep == NY_SEM_REP_TAGGED_DYNAMIC;
+    }
+    if (fn && fn->as.fn.return_semantic.resolved) {
+      /*
+       * A proven raw-integer return stays raw; but an UNTYPED declaration
+       * whose inference landed on any other representation (object, string,
+       * tagged dynamic) still compiles to the canonical dynamic return ABI.
+       * Treating that call as non-any made inline consumers print list
+       * handles as decimal addresses and index reads re-tag slot payloads
+       * (println(f(9)) printed a pointer, f(9)[0] printed the tagged word).
+       */
+      if (fn->as.fn.return_semantic.rep == NY_SEM_REP_RAW_INT)
+        return false;
+      return !fn->as.fn.return_type ||
+             fn->as.fn.return_semantic.rep == NY_SEM_REP_TAGGED_DYNAMIC;
+    }
     ny_native_nir_local_t *local = ny_native_nir_find_local(b, cname);
     if (local)
       return true;
@@ -3596,6 +3795,28 @@ static bool ny_native_nir_expr_is_any(ny_native_nir_builder_t *b,
     if (init && init->kind == NY_E_LITERAL &&
         init->as.literal.kind == NY_LIT_INT && init->tok.kind != NY_T_NIL)
       return false;
+    /*
+     * A global initialized from an untyped user function holds that
+     * function's tagged dynamic return in its slot.  Inference may still
+     * refine the use-site identifier to a raw integer, but the storage
+     * representation is the initializer's: consult the callee's return
+     * fact before the refined semantic can misclassify the slot (raw
+     * consumers then decoded the tagged word, printing 99 for 49).
+     * Runtime-bridge calls (no user declaration) keep the refined fact.
+     */
+    if (init && init->kind == NY_E_CALL && init->as.call.callee &&
+        init->as.call.callee->kind == NY_E_IDENT &&
+        init->as.call.callee->as.ident.name) {
+      const stmt_t *gfn = ny_native_nir_find_user_function(
+          b, init->as.call.callee->as.ident.name);
+      if (!gfn)
+        gfn = ny_native_nir_find_imported_function(
+            b, init->as.call.callee->as.ident.name);
+      if (gfn && !gfn->as.fn.return_type &&
+          gfn->as.fn.return_semantic.resolved &&
+          gfn->as.fn.return_semantic.rep == NY_SEM_REP_TAGGED_DYNAMIC)
+        return true;
+    }
   }
   /*
    * Length is always a raw scalar count.  In particular, a dynamically
@@ -3625,21 +3846,30 @@ static bool ny_native_nir_expr_is_any(ny_native_nir_builder_t *b,
        ny_native_nir_expr_is_bytes(b, e->as.call.callee->as.member.target) ||
        ny_native_nir_expr_is_range(b, e->as.call.callee->as.member.target)))
     return false;
+  /*
+   * Element access on bytes/range yields a raw slot value even when the
+   * receiver itself is conservatively tagged (`def b = bytes(3)` records the
+   * bytes ABI from its initializer while inference also marks the slot
+   * dynamic).  The concrete-container fact wins, otherwise every consumer
+   * re-decodes an already-raw byte (`b.get(0)` prints 32).  List/dict
+   * elements are tagged dynamics and keep the any ABI.
+   */
   if (e->kind == NY_E_MEMCALL && e->as.memcall.name &&
       (strcmp(e->as.memcall.name, "get") == 0 ||
        strcmp(e->as.memcall.name, "pop") == 0) &&
       e->as.memcall.target &&
-      ny_native_nir_expr_is_any(b, e->as.memcall.target))
-    return true;
+      (ny_native_nir_expr_is_bytes(b, e->as.memcall.target) ||
+       ny_native_nir_expr_is_range(b, e->as.memcall.target)))
+    return false;
   if (e->kind == NY_E_MEMCALL && e->as.memcall.name &&
       (strcmp(e->as.memcall.name, "get") == 0 ||
        strcmp(e->as.memcall.name, "pop") == 0) &&
       e->as.memcall.target &&
       (ny_native_nir_expr_is_list(b, e->as.memcall.target) ||
        ny_native_nir_expr_is_dyn_list(b, e->as.memcall.target) ||
-       ny_native_nir_expr_is_bytes(b, e->as.memcall.target) ||
-       ny_native_nir_expr_is_range(b, e->as.memcall.target)))
-    return false;
+       ny_native_nir_expr_is_dict(b, e->as.memcall.target) ||
+       ny_native_nir_expr_is_any(b, e->as.memcall.target)))
+    return true;
   if (e->kind == NY_E_BINARY &&
       !ny_native_nir_expr_is_any(b, e->as.binary.left) &&
       !ny_native_nir_expr_is_any(b, e->as.binary.right))
@@ -3814,12 +4044,53 @@ static const char *ny_native_nir_dict_get_symbol(ny_native_nir_builder_t *b,
                                                  const expr_t *key) {
   if (ny_native_nir_expr_is_cstr(b, key))
     return "rt_dict_get_str_raw";
+  /* Mirror the set-side rule: a str-typed call result (to_str(i)) is a
+   * string key by type.  Probing with the i64 variant hashed the pointer
+   * word instead of the bytes, so half the lookups missed. */
+  if (key && key->kind == NY_E_CALL) {
+    const stmt_t *fn = NULL;
+    if (key->semantic.canonical_callee_stmt &&
+        key->semantic.canonical_callee_stmt->kind == NY_S_FUNC)
+      fn = key->semantic.canonical_callee_stmt;
+    const char *leaf = ny_native_call_leaf(key);
+    if (!fn && leaf)
+      fn = ny_native_nir_find_user_function(b, leaf);
+    if (!fn && leaf)
+      fn = ny_native_nir_find_imported_function(b, leaf);
+    if (fn && fn->as.fn.return_type &&
+        strcmp(fn->as.fn.return_type, "str") == 0)
+      return "rt_dict_get_str_raw";
+  }
+  if (key && key->semantic.resolved &&
+      key->semantic.rep != NY_SEM_REP_RAW_INT)
+    return "rt_dict_get_str_raw";
   return "rt_dict_get_raw";
 }
 
 static const char *ny_native_nir_dict_set_symbol(ny_native_nir_builder_t *b,
                                                  const expr_t *key) {
   if (ny_native_nir_expr_is_cstr(b, key))
+    return "rt_native_dict_set_str_compact";
+  /* A str-typed call result (to_str(i)) is a string key by type even when
+   * the value is a managed handle rather than a raw literal.  Choosing the
+   * i64 variant stored to_str's reused buffer word, so half the inserted
+   * keys aliased later numbers (dict MISMATCH checksum 90674). */
+  if (key && key->kind == NY_E_CALL) {
+    const stmt_t *fn = NULL;
+    if (key->semantic.canonical_callee_stmt &&
+        key->semantic.canonical_callee_stmt->kind == NY_S_FUNC)
+      fn = key->semantic.canonical_callee_stmt;
+    const char *leaf = ny_native_call_leaf(key);
+    if (!fn && leaf)
+      fn = ny_native_nir_find_user_function(b, leaf);
+    if (!fn && leaf)
+      fn = ny_native_nir_find_imported_function(b, leaf);
+    if (fn && fn->as.fn.return_type &&
+        strcmp(fn->as.fn.return_type, "str") == 0)
+      return "rt_native_dict_set_str_compact";
+  }
+  if (key && key->semantic.resolved &&
+      key->semantic.rep != NY_SEM_REP_RAW_INT)
     return "rt_native_dict_set_str_compact";
   return "rt_native_dict_set_nir_i64";
 }
@@ -7135,7 +7406,6 @@ static bool ny_native_nir_ast_layout_query(const ny_native_nir_builder_t *b,
       bound = def->as.literal.as.i;
   }
   size_t offset = 0, aggregate_align = forced ? forced : 1;
-  bool found = !field_name;
   for (size_t i = 0; i < fields->len; ++i) {
     const layout_field_t *f = &fields->data[i];
     size_t elem_size = 0, elem_align = 0;
@@ -7158,19 +7428,25 @@ static bool ny_native_nir_ast_layout_query(const ny_native_nir_builder_t *b,
     if (field_name && f->name && !strcmp(f->name, field_name)) {
       if (offset_out)
         *offset_out = offset;
-      found = true;
+      if (size_out)
+        *size_out = elem_size * count;
+      if (align_out)
+        *align_out = fa;
+      return true;
     }
     offset += elem_size * count;
     if (fa > aggregate_align)
       aggregate_align = fa;
   }
+  if (field_name)
+    return false;
   if (forced)
     aggregate_align = forced;
   if (size_out)
     *size_out = ny_native_nir_align_up(offset, aggregate_align);
   if (align_out)
     *align_out = aggregate_align;
-  return found;
+  return true;
 }
 
 static bool ny_native_find_enum_item_in_stmt(

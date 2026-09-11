@@ -1429,6 +1429,16 @@ static void ny_safe_raw_validate_expr(ny_safe_raw_ctx_t *ctx, expr_t *e) {
   case NY_E_COMPTIME:
     ny_safe_raw_validate_stmt(ctx, e->as.comptime_expr.body);
     break;
+  case NY_E_QUOTE:
+    if (e->as.quote.body)
+      ny_safe_raw_validate_stmt(ctx, e->as.quote.body);
+    if (e->as.quote.expr)
+      ny_safe_raw_validate_expr(ctx, e->as.quote.expr);
+    break;
+  case NY_E_SPLICE:
+    if (e->as.splice.expr)
+      ny_safe_raw_validate_expr(ctx, e->as.splice.expr);
+    break;
   case NY_E_FSTRING:
     for (size_t i = 0; i < e->as.fstring.parts.len; ++i) {
       if (e->as.fstring.parts.data[i].kind == NY_FSP_EXPR)

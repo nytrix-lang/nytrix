@@ -32,6 +32,8 @@ typedef enum expr_kind_t {
   NY_E_DEREF,
   NY_E_SIZEOF,
   NY_E_TRY,
+  NY_E_QUOTE,
+  NY_E_SPLICE,
 } expr_kind_t;
 
 typedef enum lit_kind_t { NY_LIT_INT, NY_LIT_FLOAT, NY_LIT_BOOL, NY_LIT_STR } lit_kind_t;
@@ -217,6 +219,7 @@ struct expr_t {
       const char *name;
       ny_sym_id sym_id;
       uint64_t hash;
+      uint32_t syntax_ctx;
     } ident;
     literal_t literal;
     struct {
@@ -274,6 +277,15 @@ struct expr_t {
       const char *path;
     } embed;
     stmt_match_t match;
+    struct {
+      struct stmt_t *body;
+      expr_t *expr;
+      uint32_t syntax_ctx;
+    } quote;
+    struct {
+      expr_t *expr;
+      uint32_t syntax_ctx;
+    } splice;
   } as;
 };
 
@@ -455,6 +467,7 @@ typedef struct stmt_func_t {
   bool attrs_resolved;
   bool effect_contract_known;
   uint32_t effect_contract_mask;
+  ny_type_t *effect_type;
   bool body_summary_known;
   bool body_has_try;
   bool body_has_label_or_goto;
@@ -563,6 +576,7 @@ struct stmt_t {
   void *sema;
   stmt_sema_kind_t sema_kind;
   ny_attribute_list attributes;
+  uint32_t syntax_ctx;
   union {
     stmt_block_t block;
     struct {

@@ -335,6 +335,12 @@ const char *parser_token_name(token_kind k) {
     return "??";
   case NY_T_QUESTION_DOT:
     return "?.";
+  case NY_T_QUOTE:
+    return "quote";
+  case NY_T_DOLLAR:
+    return "$";
+  case NY_T_DOLLAR_LBRACE:
+    return "${";
   case NY_T_ERROR:
     return "error";
   default:
@@ -566,7 +572,20 @@ static void parser_init_with_arena_opts(parser_t *p, const char *src,
   p->last_error_hint[0] = '\0';
   p->block_depth = 0;
   p->loop_depth = 0;
+  p->current_syntax_ctx = 0;
+  p->next_syntax_ctx = 1;
+  p->gensym_counter = 0;
+  p->syntax_ctx_depth = 0;
   parser_advance(p);
+}
+
+const char *ny_parser_gensym(parser_t *p, const char *prefix) {
+  if (!p)
+    return NULL;
+  char buf[128];
+  snprintf(buf, sizeof(buf), "__ny_gensym_%u_%s", ++p->gensym_counter,
+           (prefix && *prefix) ? prefix : "g");
+  return parser_intern(p, buf, strlen(buf));
 }
 
 void parser_init_with_arena(parser_t *p, const char *src, const char *filename,

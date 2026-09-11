@@ -127,11 +127,20 @@ extern char **environ;
 /* All callable encodings remain even. An odd callable tag would overlap
  * negative tagged integers, whose high bits are set by sign extension. */
 #define NY_DYNAMIC_CALLABLE_BOOL_MARK (UINT64_C(1) << 62)
+/* A bool-marked callable whose body consumes its parameters through the
+ * dynamic (tagged) ABI must not have its integer arguments unboxed at the
+ * dispatch.  The mark keeps the raw 0/1 result handling while opting out of
+ * the raw-scalar argument untagging that plain bool marking implies. */
+#define NY_DYNAMIC_CALLABLE_TAGGED_ARGS_MARK (UINT64_C(1) << 61)
 #define NY_DYNAMIC_CALLABLE_MARKS                                              \
-  (NY_DYNAMIC_CALLABLE_MARK | NY_DYNAMIC_CALLABLE_BOOL_MARK)
+  (NY_DYNAMIC_CALLABLE_MARK | NY_DYNAMIC_CALLABLE_BOOL_MARK |                 \
+   NY_DYNAMIC_CALLABLE_TAGGED_ARGS_MARK)
 #define NY_DYNAMIC_CALLABLE_BOOL_IS(v)                                         \
   (NY_DYNAMIC_CALLABLE_IS(v) &&                                                \
    (((uint64_t)(v) & NY_DYNAMIC_CALLABLE_BOOL_MARK) != 0))
+#define NY_DYNAMIC_CALLABLE_TAGGED_ARGS_IS(v)                                  \
+  (NY_DYNAMIC_CALLABLE_BOOL_IS(v) &&                                           \
+   (((uint64_t)(v) & NY_DYNAMIC_CALLABLE_TAGGED_ARGS_MARK) != 0))
 
 #define is_int(v) ((((uint64_t)(v)) & NY_VALUE_INT_TAG_BIT) != 0)
 #define is_ptr(v)                                                              \
@@ -978,6 +987,7 @@ int64_t rt_runtime_cleanup(void);
 int64_t rt_fix_fn_ptr(int64_t fn);
 int64_t rt_mark_dynamic_callable(int64_t fn);
 int64_t rt_mark_dynamic_bool_callable(int64_t fn);
+int64_t rt_mark_dynamic_bool_callable_tagged_args(int64_t fn);
 int64_t rt_flt_box_val(int64_t bits);
 double rt_flt_unbox_double(int64_t v);
 int64_t rt_flt_box_double(double d);
@@ -1083,6 +1093,7 @@ int64_t rt_native_has_tag(int64_t value, int64_t tag);
 int64_t rt_value_tag(int64_t value);
 int64_t rt_is_str(int64_t value);
 int64_t rt_tag_or_raw_int(int64_t value);
+int64_t rt_raw_word_tag(int64_t value);
 int64_t rt_result_unwrap_raw(int64_t value);
 int64_t rt_result_unwrap_or_raw(int64_t value, int64_t fallback);
 int64_t rt_native_is_str(int64_t value);
@@ -1167,12 +1178,8 @@ int64_t rt_set_new(int64_t capacity);
 int64_t rt_set_remove(int64_t set, int64_t key);
 int64_t rt_dict_get_raw(int64_t dict, int64_t key, int64_t fallback);
 int64_t rt_dict_get_i64_raw(int64_t dict, int64_t key, int64_t fallback);
-int64_t rt_dict_set_raw(int64_t dict, int64_t key, int64_t key_len,
-                           int64_t key_tag, int64_t value, int64_t value_len,
-                           int64_t value_tag);
-int64_t rt_dict_set_i64_raw(int64_t dict, int64_t key, int64_t key_len,
-                               int64_t key_tag, int64_t value,
-                               int64_t value_len, int64_t value_tag);
+int64_t rt_dict_set_raw(int64_t dict, int64_t key, int64_t value);
+int64_t rt_dict_set_i64_raw(int64_t dict, int64_t key, int64_t value);
 int64_t rt_native_dict_set_raw_i64(int64_t dict, int64_t key, int64_t key_len,
                                    int64_t key_tag, int64_t value,
                                    int64_t value_len, int64_t value_tag);
@@ -1191,9 +1198,7 @@ int64_t rt_call_any1(int64_t fn, int64_t value);
 int64_t rt_call_any2(int64_t fn, int64_t left, int64_t right);
 int64_t rt_native_dict_set_str_compact(int64_t dict, int64_t key,
                                        int64_t value);
-int64_t rt_dict_set_str_raw(int64_t dict, int64_t key, int64_t key_len,
-                               int64_t key_tag, int64_t value,
-                               int64_t value_len, int64_t value_tag);
+int64_t rt_dict_set_str_raw(int64_t dict, int64_t key, int64_t value);
 int64_t rt_dict_has_str_raw(int64_t dict, int64_t key);
 int64_t rt_dict_delete_str_raw(int64_t dict, int64_t key);
 int64_t rt_dict_merge_raw(int64_t dict, int64_t other);
@@ -1222,6 +1227,13 @@ int64_t rt_tbuf_set_i64_raw(int64_t buffer, int64_t index, int64_t value);
 int64_t rt_tbuf_set_f64_bits(int64_t buffer, int64_t index, int64_t bits);
 int64_t rt_tbuf_to_cstr(int64_t buffer);
 int64_t rt_shl_raw(int64_t a, int64_t b);
+int64_t rt_trace_func_raw(int64_t name);
+int64_t rt_trace_loc_raw(int64_t file, int64_t line, int64_t col);
+int64_t rt_trace_enter_raw(int64_t func, int64_t file, int64_t line);
+int64_t rt_print_flush_raw(void);
+int64_t rt_trace_ret_void_raw(void);
+int64_t rt_trace_exit_raw(void);
+int64_t rt_trace_dump_raw(int64_t count);
 int64_t rt_tbuf_append_i64_raw(int64_t buffer, int64_t value);
 int64_t rt_tbuf_repeat(int64_t buffer, int64_t repeat_count);
 int64_t rt_tbuf_extend(int64_t buffer, int64_t other);
@@ -1233,6 +1245,8 @@ int64_t rt_tbuf_clone_raw(int64_t buffer);
 int64_t rt_tbuf_swap(int64_t buffer, int64_t left, int64_t right);
 int64_t rt_tbuf_get(int64_t buffer, int64_t index, int64_t fallback);
 int64_t rt_tbuf_get_any(int64_t buffer, int64_t index, int64_t fallback);
+int64_t rt_tbuf_dyn_elem(int64_t buffer, int64_t index,
+                         int64_t want_dynamic);
 int64_t rt_tbuf_tag(int64_t buffer, int64_t index);
 int64_t rt_tbuf_contains(int64_t buffer, int64_t item, int64_t is_string);
 int64_t rt_contains_raw(int64_t container, int64_t item);

@@ -198,6 +198,9 @@ typedef enum ny_type_kind_t {
   NY_TYPE_VAR,
   NY_TYPE_ARROW,
   NY_TYPE_APPLY,
+  NY_TYPE_EFFECT,
+  NY_TYPE_EFFECT_VAR,
+  NY_TYPE_ROW,
 } ny_type_kind_t;
 
 typedef struct ny_type_t ny_type_t;
@@ -220,6 +223,7 @@ struct ny_type_t {
     struct {
       ny_type_t *param;
       ny_type_t *ret;
+      ny_type_t *effects;
     } arrow;
     struct {
       const char *name;
@@ -233,6 +237,20 @@ struct ny_type_t {
       bool value_resolved;
       const char *value_symbol;
     } apply;
+    struct {
+      uint32_t mask;
+      const char *capability;
+    } effect;
+    struct {
+      int var_id;
+      ny_type_t *parent;
+      ny_type_t *bound;
+    } effect_var;
+    struct {
+      const char *label;
+      ny_type_t *field_type;
+      ny_type_t *tail;
+    } row;
   } as;
 };
 
@@ -241,12 +259,25 @@ void ny_type_arena_reset(ny_type_arena_t *arena);
 ny_type_t *ny_type_concrete(ny_type_arena_t *arena, const char *name);
 ny_type_t *ny_type_var(ny_type_arena_t *arena);
 ny_type_t *ny_type_arrow(ny_type_arena_t *arena, ny_type_t *param, ny_type_t *ret);
+ny_type_t *ny_type_arrow_effects(ny_type_arena_t *arena, ny_type_t *param,
+                                 ny_type_t *ret, ny_type_t *effects);
 ny_type_t *ny_type_apply(ny_type_arena_t *arena, const char *name, ny_type_t *arg0,
                          ny_type_t *arg1, int arity);
 ny_type_t *ny_type_apply_bounded(ny_type_arena_t *arena, const char *name,
                                  ny_type_t *arg0, ny_type_t *arg1, int arity,
                                  int64_t value_arg, bool value_resolved,
                                  const char *value_symbol);
+ny_type_t *ny_type_effect(ny_type_arena_t *arena, uint32_t mask, const char *capability);
+ny_type_t *ny_type_effect_var(ny_type_arena_t *arena);
+ny_type_t *ny_type_row(ny_type_arena_t *arena, const char *label,
+                       ny_type_t *field_type, ny_type_t *tail);
+ny_type_t *ny_type_row_compose(ny_type_arena_t *arena, ny_type_t *row_a, ny_type_t *row_b);
+ny_type_t *ny_type_capability(ny_type_arena_t *arena, const char *cap_name);
+ny_type_t *ny_type_typestate(ny_type_arena_t *arena, const char *state_label,
+                             const char *from_state, const char *to_state,
+                             ny_type_t *tail);
+bool ny_type_row_has_label(ny_type_t *row, const char *label);
+ny_type_t *ny_type_row_get_label(ny_type_t *row, const char *label);
 ny_type_t *ny_type_find(ny_type_t *type);
 bool ny_type_occurs(ny_type_t *needle, ny_type_t *haystack);
 bool ny_type_unify(ny_type_t *a, ny_type_t *b);
@@ -270,6 +301,7 @@ ny_type_t *ny_subst_find(ny_subst_t *s, int var_id);
 void ny_subst_bind(ny_subst_t *s, int var_id, ny_type_t *t);
 void ny_subst_union(ny_subst_t *s, int a, int b);
 void ny_subst_apply(ny_subst_t *s, ny_type_t *t);
+bool ny_type_unify_with_subst(ny_subst_t *s, ny_type_t *a, ny_type_t *b);
 
 typedef struct ny_constraint_t {
   ny_type_t *a;
@@ -296,6 +328,7 @@ struct fun_sig {
   bool is_memo_safe;
   bool is_stable;
   uint32_t effects;
+  ny_type_t *effect_type;
   bool args_escape;
   bool args_mutated;
   bool returns_alias;
@@ -358,6 +391,9 @@ typedef struct ny_mono_specialization_t {
   int64_t arg_max_raw[NY_MONO_MAX_ARITY];
   bool arg_list_len_min_known[NY_MONO_MAX_ARITY];
   int64_t arg_list_len_min_raw[NY_MONO_MAX_ARITY];
+  bool arg_val_known[NY_MONO_MAX_ARITY];
+  int64_t arg_val[NY_MONO_MAX_ARITY];
+  const char *arg_ctor[NY_MONO_MAX_ARITY];
   uint8_t types[NY_MONO_MAX_ARITY];
 } ny_mono_specialization_t;
 

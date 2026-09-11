@@ -366,6 +366,16 @@ static void ny_ast_verify_expr(expr_t *e, const char *phase) {
     ny_ast_require(e->as.try_expr.target != NULL, phase, e->tok, "try missing target");
     ny_ast_verify_expr(e->as.try_expr.target, phase);
     return;
+  case NY_E_QUOTE:
+    if (e->as.quote.body)
+      ny_ast_verify_stmt(e->as.quote.body, phase);
+    if (e->as.quote.expr)
+      ny_ast_verify_expr(e->as.quote.expr, phase);
+    return;
+  case NY_E_SPLICE:
+    ny_ast_require(e->as.splice.expr != NULL, phase, e->tok, "splice missing expr");
+    ny_ast_verify_expr(e->as.splice.expr, phase);
+    return;
   }
 }
 
@@ -1005,6 +1015,14 @@ static void dump_expr(expr_t *e, json_writer_t *out) {
   case NY_E_COMPTIME:
     json_append(out, "{\"type\":\"comptime\",\"body\":");
     dump_stmt(e->as.comptime_expr.body, out);
+    json_append(out, "}");
+    break;
+  case NY_E_QUOTE:
+    json_append(out, "{\"type\":\"quote\",\"syntax_ctx\":%u}", (unsigned)e->as.quote.syntax_ctx);
+    break;
+  case NY_E_SPLICE:
+    json_append(out, "{\"type\":\"splice\",\"syntax_ctx\":%u,\"expr\":", (unsigned)e->as.splice.syntax_ctx);
+    dump_expr(e->as.splice.expr, out);
     json_append(out, "}");
     break;
   case NY_E_FSTRING:
@@ -1986,6 +2004,14 @@ static void ny_expand_count_expr(expr_t *e, ny_expand_stats_t *stats) {
   case NY_E_TRY:
     ny_expand_count_expr(e->as.try_expr.target, stats);
     break;
+  case NY_E_QUOTE:
+    if (e->as.quote.expr)
+      ny_expand_count_expr(e->as.quote.expr, stats);
+    break;
+  case NY_E_SPLICE:
+    if (e->as.splice.expr)
+      ny_expand_count_expr(e->as.splice.expr, stats);
+    break;
   default:
     break;
   }
@@ -2225,6 +2251,14 @@ static void ny_expand_report_expr(expr_t *e, char **buf, size_t *len, size_t *ca
     break;
   case NY_E_TRY:
     ny_expand_report_expr(e->as.try_expr.target, buf, len, cap, filter, meta_trace, stats);
+    break;
+  case NY_E_QUOTE:
+    if (e->as.quote.expr)
+      ny_expand_report_expr(e->as.quote.expr, buf, len, cap, filter, meta_trace, stats);
+    break;
+  case NY_E_SPLICE:
+    if (e->as.splice.expr)
+      ny_expand_report_expr(e->as.splice.expr, buf, len, cap, filter, meta_trace, stats);
     break;
   default:
     break;

@@ -278,6 +278,7 @@ static inline bool ny_expr_init_replay_safe_depth(expr_t *e, unsigned depth) {
   case NY_E_LITERAL:
     return true;
   case NY_E_COMPTIME:
+  case NY_E_QUOTE:
     return true;
   case NY_E_UNARY:
     return ny_expr_init_replay_safe_depth(e->as.unary.right, depth + 1);
@@ -501,6 +502,11 @@ bool ensure_expr_type_compatible(codegen_t *cg, scope *scopes, size_t depth, con
 layout_def_t *lookup_layout(codegen_t *cg, const char *name);
 layout_def_t *ny_layout_instantiate(codegen_t *cg, const char *inst_name,
                                     const char *generic_name, int64_t bound);
+bool ny_indexed_extract_ctor_and_bound(const char *type_name, char *out_ctor,
+                                       size_t ctor_cap, int64_t *out_bound);
+bool ny_indexed_resolve_bound(codegen_t *cg, scope *scopes, size_t depth,
+                              const char *type_name, char *out_ctor,
+                              size_t ctor_cap, int64_t *out_bound);
 bool ny_fin_resolve_bound(codegen_t *cg, scope *scopes, size_t depth,
                           const char *type_name, int64_t *out_bound);
 bool ny_type_is_fin(const char *type_name);

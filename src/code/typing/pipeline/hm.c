@@ -3067,6 +3067,10 @@ static ny_hm_type_t *hm_infer_expr_impl(ny_hm_state_t *hm, ny_hm_env_list *env,
     return hm_infer_lambda(hm, env, e, self_name);
   case NY_E_COMPTIME:
     return hm_infer_comptime_expr(hm, env, e, self_name);
+  case NY_E_QUOTE:
+    return hm_name(hm, "ast");
+  case NY_E_SPLICE:
+    return e->as.splice.expr ? hm_infer_expr(hm, env, e->as.splice.expr, self_name) : hm_name(hm, "any");
   case NY_E_MATCH:
   case NY_E_TRY:
   case NY_E_ASM:

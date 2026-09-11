@@ -1,0 +1,73 @@
+shape quote-hygiene {
+  family "native-nyir"
+  generator "regression"
+  features ["ny" "native" "quote" "hygiene" "ast"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+
+fn test_quote_basic() {
+  def a = 12
+  def b = 30
+  def q = quote { ${a} + ${b} }
+  assert(q != nil, "quote is non-null ast")
+}
+
+fn test_quote_hygiene() {
+  def x = 10
+  def q = quote {
+    def x = 20
+    assert(x == 20, "inner x has quote syntax context")
+    assert(${x} == 10, "spliced x has outer syntax context")
+  }
+  assert(x == 10, "outer x preserved")
+}
+
+fn test_nested_quotes() {
+  def x = 1
+  def q1 = quote {
+    def x = 2
+    def q2 = quote {
+      def x = 3
+      assert(x == 3, "level 2 x is 3")
+      assert(${x} == 2, "spliced level 1 x is 2")
+    }
+    assert(x == 2, "level 1 x is 2")
+    assert(${x} == 1, "spliced level 0 x is 1")
+  }
+  assert(x == 1, "level 0 x is 1")
+}
+
+fn test_gensym() {
+  def g1 = gensym("temp")
+  def g2 = gensym("temp")
+  assert(g1 != g2, "gensym produces distinct symbols")
+  def q = quote {
+    def a = 100
+    assert(a == 100, "quote local binding works")
+  }
+}
+
+fn test_quote_dollar_syntax() {
+  def a = 5
+  def b = 7
+  def q_space = quote $ { ${a} * ${b} }
+  def q_nospace = quote ${ ${a} * ${b} }
+  assert(q_space != nil, "quote $ { ... } is valid ast")
+  assert(q_nospace != nil, "quote ${ ... } is valid ast")
+  def x = 99
+  def q = quote $ {
+    def x = 42
+    assert(x == 42, "inner x is 42")
+    assert(${x} == 99, "spliced x is 99")
+  }
+}
+
+test_quote_basic()
+test_quote_dollar_syntax()
+test_quote_hygiene()
+test_nested_quotes()
+test_gensym()
+NY
+}

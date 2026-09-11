@@ -379,6 +379,29 @@ static bool ny_native_nir_lower_var(ny_native_nir_builder_t *b, const stmt_t *s)
           value = ny_native_nir_emit_runtime_call(
               b, "rt_any_to_i64", value, -1, -1, 1, 0);
       }
+      /*
+       * Element reads return the tagged dynamic payload.  A global declared
+       * with an integer literal is a raw slot: decode once here, otherwise
+       * `mut a = 0; a = pair.get(0)` stores the encoded word (23) where the
+       * source element is 11.
+       */
+      if (value >= 0 && global_init && global_init->kind == NY_E_MEMCALL &&
+          global_init->as.memcall.name &&
+          (strcmp(global_init->as.memcall.name, "get") == 0 ||
+           strcmp(global_init->as.memcall.name, "pop") == 0) &&
+          !ny_native_nir_expr_is_f64(b, global_init) &&
+          !ny_native_nir_expr_is_f32(b, global_init) &&
+          !ny_native_nir_expr_is_cstr(b, global_init) &&
+          !ny_native_nir_expr_is_bytes(b, global_init) &&
+          !ny_native_nir_expr_is_range(b, global_init) &&
+          !ny_native_nir_expr_is_bool(b, global_init)) {
+        const expr_t *target_init = ny_native_nir_find_top_level_value(b, name);
+        if (target_init && target_init->kind == NY_E_LITERAL &&
+            target_init->as.literal.kind == NY_LIT_INT &&
+            target_init->tok.kind != NY_T_NIL)
+          value = ny_native_nir_emit_runtime_call(
+              b, "rt_any_to_i64", value, -1, -1, 1, 0);
+      }
       if (value >= 0 && global_init && global_init->kind == NY_E_IDENT) {
         ny_native_nir_local_t *source_local =
             ny_native_nir_find_local(b, global_init->as.ident.name);
@@ -425,6 +448,22 @@ static bool ny_native_nir_lower_var(ny_native_nir_builder_t *b, const stmt_t *s)
                   strcmp(v->types.data[i], "any") == 0;
     ny_native_nir_local_t *prior_local =
         !v->is_decl ? ny_native_nir_find_local(b, name) : NULL;
+    /*
+     * Resolve a call initializer's callee once: its declared return type
+     * classifies the receiving local (list/bytes container ABI) below.
+     */
+    const stmt_t *init_call_fn = NULL;
+    if (i < v->exprs.len && v->exprs.data[i] &&
+        v->exprs.data[i]->kind == NY_E_CALL &&
+        v->exprs.data[i]->as.call.callee &&
+        v->exprs.data[i]->as.call.callee->kind == NY_E_IDENT &&
+        v->exprs.data[i]->as.call.callee->as.ident.name) {
+      init_call_fn = ny_native_nir_find_user_function(
+          b, v->exprs.data[i]->as.call.callee->as.ident.name);
+      if (!init_call_fn)
+        init_call_fn = ny_native_nir_find_imported_function(
+            b, v->exprs.data[i]->as.call.callee->as.ident.name);
+    }
     if (!is_f64 && !is_f32 && i < v->exprs.len)
       is_f64 = ny_native_nir_expr_is_f64(b, v->exprs.data[i]);
     if (!is_f64 && !is_f32 && i < v->exprs.len)
@@ -496,7 +535,9 @@ static bool ny_native_nir_lower_var(ny_native_nir_builder_t *b, const stmt_t *s)
       l->is_cstr = true;
     if (l && ((i < v->types.len &&
                ny_native_type_name_is_bytes(v->types.data[i])) ||
-              ny_native_nir_expr_is_bytes(b, v->exprs.data[i])))
+              ny_native_nir_expr_is_bytes(b, v->exprs.data[i]) ||
+              (init_call_fn && init_call_fn->as.fn.return_type &&
+               ny_native_type_name_is_bytes(init_call_fn->as.fn.return_type))))
       l->is_bytes = true;
     if (l && is_bool)
       l->is_bool = true;
@@ -586,6 +627,15 @@ static bool ny_native_nir_lower_var(ny_native_nir_builder_t *b, const stmt_t *s)
         (i < v->types.len && ny_native_type_name_is_list(v->types.data[i])) ||
         ny_native_nir_expr_is_list(b, v->exprs.data[i]) ||
         (source_list_local && source_list_local->is_list);
+    if (!is_list && init_call_fn && init_call_fn->as.fn.return_type &&
+        ny_native_type_name_is_list(init_call_fn->as.fn.return_type))
+      is_list = true;
+    if (getenv("NYDBG6") && init_call_fn)
+      fprintf(stderr, "DBG initfn name=%s callee_rt=%s is_list=%d\n",
+              name ? name : "?",
+              init_call_fn->as.fn.return_type ? init_call_fn->as.fn.return_type
+                                              : "-",
+              (int)is_list);
     bool proven_list_shape =
         (i < v->types.len && ny_native_type_name_is_list(v->types.data[i])) ||
         (v->exprs.data[i] && v->exprs.data[i]->kind == NY_E_LIST) ||
@@ -643,6 +693,32 @@ static bool ny_native_nir_lower_var(ny_native_nir_builder_t *b, const stmt_t *s)
             : 0;
     if (pre_vals) {
       val = pre_vals[i];
+      /*
+       * A comma-bound scalar local stores the raw representation (`mut a, b =
+       * 0, 0` then `a, b = pair.get(0), pair.get(1)`).  A dynamic right-hand
+       * side (any-classified call such as a dict/list `.get`) yields the
+       * tagged value; decode once so the raw slot holds the true scalar
+       * (otherwise the bound name reads 23 where the source said 11).
+       */
+      if (getenv("NYDBG9") && v->exprs.data[i])
+        fprintf(stderr, "DBG pv name=%s isany=%d eany=%d kind=%d\n", name,
+                (int)is_any,
+                (int)ny_native_nir_expr_is_any(b, v->exprs.data[i]),
+                (int)v->exprs.data[i]->kind);
+      if (val >= 0 && !is_any && v->exprs.data[i] &&
+          v->exprs.data[i]->kind == NY_E_CALL &&
+          ny_native_nir_expr_is_any(b, v->exprs.data[i]) &&
+          !ny_native_nir_expr_is_f64(b, v->exprs.data[i]) &&
+          !ny_native_nir_expr_is_f32(b, v->exprs.data[i]) &&
+          !ny_native_nir_expr_is_cstr(b, v->exprs.data[i]) &&
+          !ny_native_nir_expr_is_list(b, v->exprs.data[i]) &&
+          !ny_native_nir_expr_is_dict(b, v->exprs.data[i]) &&
+          !ny_native_nir_expr_is_bool(b, v->exprs.data[i])) {
+        val = ny_native_nir_emit_runtime_call(b, "rt_any_to_i64", val, -1, -1,
+                                              1, 0);
+        if (val < 0)
+          return false;
+      }
     } else if (is_f32 && init && init->kind == NY_E_LITERAL &&
         init->as.literal.kind == NY_LIT_FLOAT)
       val = ny_native_nir_emit_const_f32(b, init->as.literal.as.f);
@@ -679,6 +755,58 @@ else if (v->is_decl && !v->is_mut && !is_list && init &&
       b->index_for_any_call = saved_index_for_any;
       if (val >= 0) {
         /*
+         * An untyped callee returns the tagged dynamic ABI, but inference can
+         * refine this initializer (and therefore the receiving scalar local)
+         * to a raw integer.  Decode exactly once at the store boundary so the
+         * local's raw storage holds the true scalar (def r = square(7) then
+         * keeps 49, not the tagged encoding 99).
+         */
+        if (!is_any && init && init->kind == NY_E_CALL) {
+          const stmt_t *init_callee = init->semantic.canonical_callee_stmt;
+          if ((!init_callee || init_callee->kind != NY_S_FUNC) &&
+              init->as.call.callee &&
+              init->as.call.callee->kind == NY_E_IDENT &&
+              init->as.call.callee->as.ident.name)
+            init_callee = ny_native_nir_find_user_function(
+                b, init->as.call.callee->as.ident.name);
+          if (init_callee && init_callee->kind == NY_S_FUNC &&
+              init_callee->as.fn.return_semantic.resolved &&
+              init_callee->as.fn.return_semantic.rep ==
+                  NY_SEM_REP_TAGGED_DYNAMIC &&
+              !ny_native_nir_expr_is_f64(b, init) &&
+              !ny_native_nir_expr_is_f32(b, init) &&
+              !ny_native_nir_expr_is_cstr(b, init) &&
+              !ny_native_nir_expr_is_list(b, init) &&
+              !ny_native_nir_expr_is_dict(b, init) &&
+              !ny_native_nir_expr_is_bool(b, init)) {
+            val = ny_native_nir_emit_runtime_call(b, "rt_any_to_i64", val, -1,
+                                                  -1, 1, 0);
+            if (val < 0)
+              return false;
+          }
+        }
+        /*
+         * Element reads (.get/.pop on a list, dict, or any receiver) return
+         * the tagged dynamic payload.  A scalar local receiving one must
+         * store the decoded value, otherwise `a = pair.get(0)` binds the
+         * encoded word (23) where the source element is 11.
+         */
+        if (!is_any && val >= 0 && init && init->kind == NY_E_MEMCALL &&
+            init->as.memcall.name &&
+            (strcmp(init->as.memcall.name, "get") == 0 ||
+             strcmp(init->as.memcall.name, "pop") == 0) &&
+            !ny_native_nir_expr_is_f64(b, init) &&
+            !ny_native_nir_expr_is_f32(b, init) &&
+            !ny_native_nir_expr_is_cstr(b, init) &&
+            !ny_native_nir_expr_is_bytes(b, init) &&
+            !ny_native_nir_expr_is_range(b, init) &&
+            !ny_native_nir_expr_is_bool(b, init)) {
+          val = ny_native_nir_emit_runtime_call(b, "rt_any_to_i64", val, -1,
+                                                -1, 1, 0);
+          if (val < 0)
+            return false;
+        }
+        /*
          * Coerce an initializer whose expression type differs from the
          * declared scalar type.  `def f64 y = <f32 expr>` widens via
          * f32->f64; `def f32 y = <f64 expr>` narrows via f64->f32.  A float
@@ -705,6 +833,16 @@ else if (v->is_decl && !v->is_mut && !is_list && init &&
           (index_local->is_dyn_list ||
            (index_local->type_name &&
             strcmp(index_local->type_name, "seq") == 0)))
+        l->raw_dynamic_index = true;
+    }
+    /* The canonical sequence bridge yields the dynamic value/len/tag word
+     * even when its use-site semantic refines to RAW_INT.  Mark such defs so
+     * callback arguments seed a real length and skip the second tag. */
+    if (is_any && init && init->kind == NY_E_CALL &&
+        init->as.call.callee && init->as.call.callee->as.ident.name) {
+      const char *init_sym = ny_native_runtime_symbol_for_expr(
+          init->as.call.callee->as.ident.name, NULL, init);
+      if (init_sym && strcmp(init_sym, "rt_tbuf_index_any_raw") == 0)
         l->raw_dynamic_index = true;
     }
     if (is_any && init && init->kind == NY_E_INDEX &&
@@ -1866,6 +2004,41 @@ static bool ny_native_nir_match_arm_statically_dead(
   return false;
 }
 
+/* A `case` expression feeding a dynamic consumer must hand it the tagged
+ * ABI.  Arm bodies whose tail is an unboxed raw scalar (int literal, native
+ * scalar arithmetic over scalar operands, or a raw local) are the producers
+ * this predicate recognizes; pointers/strings/any-valued tails already carry
+ * their ABI value and must not be tagged a second time. */
+static bool ny_native_nir_arm_tail_is_raw_scalar(ny_native_nir_builder_t *b,
+                                                 const stmt_t *body) {
+  const stmt_t *s = body;
+  if (s && s->kind == NY_S_BLOCK && s->as.block.body.len > 0)
+    s = s->as.block.body.data[s->as.block.body.len - 1];
+  if (!s)
+    return false;
+  const expr_t *e = NULL;
+  if (s->kind == NY_S_EXPR)
+    e = s->as.expr.expr;
+  else if (s->kind == NY_S_RETURN)
+    e = s->as.ret.value;
+  if (!e)
+    return false;
+  if (e->kind == NY_E_LITERAL && e->as.literal.kind == NY_LIT_INT &&
+      e->tok.kind != NY_T_NIL)
+    return true;
+  if (e->kind == NY_E_BINARY && e->as.binary.op &&
+      !ny_native_nir_expr_is_f64(b, e) && !ny_native_nir_expr_is_f32(b, e) &&
+      !ny_native_nir_expr_is_any(b, e) && !ny_native_nir_expr_is_bool(b, e))
+    return true;
+  if (e->kind == NY_E_IDENT && e->as.ident.name) {
+    const ny_native_nir_local_t *l =
+        ny_native_nir_find_local(b, e->as.ident.name);
+    return l && !l->is_any && !l->is_cstr && !l->is_bytes && !l->is_dict &&
+           !l->is_list && !l->is_bigint && !l->is_f64 && !l->is_f32;
+  }
+  return false;
+}
+
 static bool ny_native_nir_lower_match(ny_native_nir_builder_t *b,
                                       const stmt_t *s) {
   if (!s || s->kind != NY_S_MATCH || !s->as.match.test)
@@ -1937,6 +2110,14 @@ static bool ny_native_nir_lower_match(ny_native_nir_builder_t *b,
     bool arm_returns = b->emitted_return;
     if (!arm_returns) {
       all_taken_paths_return = false;
+      if (b->last_value >= 0 && b->match_result_any &&
+          ny_native_nir_arm_tail_is_raw_scalar(b, arm->conseq)) {
+        int boxed = ny_native_nir_emit_runtime_call(b, "rt_tag", b->last_value,
+                                                    -1, -1, 1, 0);
+        if (boxed < 0)
+          return false;
+        b->last_value = boxed;
+      }
       if (b->last_value >= 0 &&
           !ny_native_nir_store_local_value(b, result_slot, b->last_value))
         return false;
@@ -1957,6 +2138,14 @@ static bool ny_native_nir_lower_match(ny_native_nir_builder_t *b,
     bool default_returns = b->emitted_return;
     if (!default_returns) {
       all_taken_paths_return = false;
+      if (b->last_value >= 0 && b->match_result_any &&
+          ny_native_nir_arm_tail_is_raw_scalar(b, s->as.match.default_conseq)) {
+        int boxed = ny_native_nir_emit_runtime_call(b, "rt_tag", b->last_value,
+                                                    -1, -1, 1, 0);
+        if (boxed < 0)
+          return false;
+        b->last_value = boxed;
+      }
       if (b->last_value >= 0 &&
           !ny_native_nir_store_local_value(b, result_slot, b->last_value))
         return false;
@@ -2053,16 +2242,37 @@ static int ny_native_nir_normalize_return(ny_native_nir_builder_t *b,
         expr->as.literal.kind == NY_LIT_INT &&
         expr->tok.kind != NY_T_NIL)
       return ny_native_nir_emit_runtime_call(b, "rt_tag", value, -1, -1, 1, 0);
+    /* Raw scalar arithmetic (int-typed operands) lowers to native i64 ops;
+     * the untyped ABI contract is a tagged value, so box exactly once here.
+     * Dynamic arithmetic (any operands) already returns tagged from the
+     * rt_any_* helper and is excluded, as are floats, bools, and bitwise
+     * results (raw two's-complement domain).  A dynamic + cstr concatenation
+     * resolves semantically to `str`, so it is not `any` here, but its
+     * lowering also routes through rt_any_add and returns a canonical
+     * dynamic handle; tagging that word a second time corrupts the string
+     * into a bogus tagged integer ("map string"). */
+    if (expr->kind == NY_E_BINARY && expr->as.binary.op &&
+        !ny_native_nir_expr_is_f64(b, expr) &&
+        !ny_native_nir_expr_is_f32(b, expr) &&
+        !ny_native_nir_expr_is_any(b, expr) &&
+        !ny_native_nir_expr_is_cstr(b, expr) &&
+        !ny_native_nir_is_bitwise_operator(expr->as.binary.op) &&
+        !ny_native_nir_expr_is_bool(b, expr))
+      return ny_native_nir_emit_runtime_call(b, "rt_tag", value, -1, -1, 1, 0);
     if (expr->kind == NY_E_IDENT && expr->as.ident.name) {
       const ny_native_nir_local_t *local =
           ny_native_nir_find_local(b, expr->as.ident.name);
-      if (local && local->is_capture && !local->is_any &&
+      if (local && !local->is_any &&
           !local->is_cstr && !local->is_bytes && !local->is_dict &&
           !local->is_list && !local->is_bigint && !local->is_f64 &&
-          !local->is_f32)
+          !local->is_f32 && !local->is_bool)
         return ny_native_nir_emit_runtime_call(b, "rt_tag", value, -1, -1, 1,
                                                0);
+      if (local && local->is_bool)
+        return ny_native_nir_box_bool(b, value);
     }
+    if (ny_native_nir_expr_is_bool(b, expr))
+      return ny_native_nir_box_bool(b, value);
     return value;
   }
   if (b->return_type && !ny_native_type_name_is_int(b->return_type))
@@ -2082,11 +2292,23 @@ static int ny_native_nir_normalize_return(ny_native_nir_builder_t *b,
     const ny_native_nir_local_t *local =
         ny_native_nir_find_local(b, expr->as.ident.name);
     dynamic = dynamic || (local && local->is_any);
+    /* A local bound from a case expression carries the tagged result the
+     * match join produced (inference falls back to any for `case`, W2101);
+     * its declared-int return context must decode exactly once. */
+    dynamic = dynamic ||
+              (local && local->semantic_rep == NY_SEM_REP_TAGGED_DYNAMIC);
+    /* The tail identifier's own semantic is the authority on dynamic
+     * provenance even when the local table lost the fact. */
+    dynamic = dynamic || (expr->semantic.resolved &&
+                          expr->semantic.rep == NY_SEM_REP_TAGGED_DYNAMIC);
   }
   /* Native container reads already return their scalar slot payload in the
    * raw NYIR ABI.  Do not propagate their source-level `any` annotation to a
    * function return: doing so unboxes raw odd values a second time (notably
    * 32-bit words returned from a typed buffer). */
+  if (getenv("NYDBGN") && b->return_type)
+    fprintf(stderr, "DBG nrm rt=%s kind=%d dyn=%d\n", b->return_type,
+            expr ? (int)expr->kind : -1, (int)dynamic);
   if (!dynamic)
     return value;
   return ny_native_nir_emit_runtime_call(b, "rt_any_to_i64", value,
@@ -2121,7 +2343,7 @@ static bool ny_native_nir_direct_thread_call(ny_native_nir_builder_t *b,
   return fn && ny_native_nir_fn_has_thread_attr(fn);
 }
 
-static bool ny_native_nir_lower_stmt(ny_native_nir_builder_t *b, const stmt_t *s) {
+static bool ny_native_nir_lower_stmt_impl(ny_native_nir_builder_t *b, const stmt_t *s) {
   if (s && s->kind == NY_S_MODULE && b->profile_name &&
       strcmp(b->profile_name, "rt_main") == 0) {
     if (ny_native_stmt_is_stdlib(s))
@@ -2461,6 +2683,16 @@ try_fail:
   }
 }
 
+static bool ny_native_nir_lower_stmt(ny_native_nir_builder_t *b, const stmt_t *s) {
+  uint32_t prev_ctx = b ? b->current_syntax_ctx : 0;
+  if (b && s && s->syntax_ctx != 0)
+    b->current_syntax_ctx = s->syntax_ctx;
+  bool ok = ny_native_nir_lower_stmt_impl(b, s);
+  if (b)
+    b->current_syntax_ctx = prev_ctx;
+  return ok;
+}
+
 /*
  * Shared NYIR optimization + verification step.  After calling this the
  * builder's NYIR is ready for codegen or diagnostics.
@@ -2764,9 +2996,19 @@ static bool ny_native_nir_build_function(const program_t *prog, const stmt_t *fn
                    (fn->as.fn.is_variadic && i == fn->as.fn.params.len - 1);
     bool is_str = ny_native_type_name_is_str(param_type) ||
                   (!param_type && sem->resolved && sem->rep == NY_SEM_REP_STRING);
+    /*
+     * An untyped parameter whose semantics resolved to RAW_INT is compiled
+     * as a raw scalar register (set_param_types counts one slot).  The local
+     * must carry the same fact: keeping is_any true made every consumer skip
+     * the boxing pass and untag the already-raw word (println(x) turned the
+     * element 1 into 0 inside mapcat callbacks).  Every other resolution
+     * keeps the legacy truth table.
+     */
     bool is_any = ny_native_type_name_is_any(param_type) ||
-                  (!param_type && sem->resolved && sem->rep == NY_SEM_REP_TAGGED_DYNAMIC) ||
-                  (!param_type && !sem->resolved);
+                  (!param_type &&
+                   !(sem->resolved && sem->rep == NY_SEM_REP_RAW_INT) &&
+                   (!sem->resolved ||
+                    sem->rep == NY_SEM_REP_TAGGED_DYNAMIC));
     ny_native_nir_local_t *param = ny_native_nir_bind_local_typed(
         &b, fn->as.fn.params.data[i].name,
         ny_native_type_name_is_f64(param_type),

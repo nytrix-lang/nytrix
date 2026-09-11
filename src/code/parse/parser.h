@@ -68,7 +68,15 @@ typedef struct parser_t {
   parser_ct_module_meta_list ct_modules;
   parser_ct_template_meta_list ct_templates;
   ny_diag_rule_list ct_diag_rules;
+  uint32_t current_syntax_ctx;
+  uint32_t next_syntax_ctx;
+  uint32_t gensym_counter;
+  uint32_t syntax_ctx_stack[64];
+  size_t syntax_ctx_depth;
 } parser_t;
+
+const char *ny_parser_gensym(parser_t *p, const char *prefix);
+parser_ct_layout_meta *parser_find_layout_meta(parser_t *p, const char *name);
 
 void parser_init(parser_t *p, const char *src, const char *filename);
 void parser_init_with_arena(parser_t *p, const char *src, const char *filename,

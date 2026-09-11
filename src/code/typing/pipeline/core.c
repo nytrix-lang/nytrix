@@ -366,6 +366,8 @@ static const char *tp_expr_kind_name(expr_kind_t kind) {
       [NY_E_DEREF] = "deref",
       [NY_E_SIZEOF] = "sizeof",
       [NY_E_TRY] = "try_expr",
+      [NY_E_QUOTE] = "quote",
+      [NY_E_SPLICE] = "splice",
   };
   return kind >= 0 && (size_t)kind < sizeof(names) / sizeof(names[0]) &&
                  names[kind]
@@ -1695,6 +1697,10 @@ static char *tp_expr_type(ny_tp_ctx_t *ctx, ny_tp_env_t *env, expr_t *e,
         return tp_expr_type(ctx, env, body->as.expr.expr, depth + 1);
     }
     return ny_strdup("any");
+  case NY_E_QUOTE:
+    return ny_strdup("ast");
+  case NY_E_SPLICE:
+    return e->as.splice.expr ? tp_expr_type(ctx, env, e->as.splice.expr, depth + 1) : ny_strdup("any");
   default:
     return ny_strdup("any");
   }

@@ -99,7 +99,7 @@ static bool stmt_comma_starts_next_var_binding(parser_t *p) {
   return p->cur.kind == NY_T_IDENT && parser_peek(p).kind == NY_T_ASSIGN;
 }
 
-stmt_t *p_parse_stmt(parser_t *p) {
+static stmt_t *p_parse_stmt_raw(parser_t *p) {
   if (p && p->cur.kind == NY_T_STAR) {
     stmt_t *deref_assign = parse_leading_deref_assign_stmt(p);
     if (deref_assign)
@@ -372,6 +372,10 @@ stmt_t *p_parse_stmt(parser_t *p) {
     if (id_len == 4 && strncmp(id, "impl", 4) == 0) {
       return parse_impl_stmt(p);
     }
+    if (id_len == 5 && strncmp(id, "shape", 5) == 0 &&
+        (next.kind == NY_T_IDENT || next.kind == NY_T_LT)) {
+      return parse_struct(p);
+    }
     if (next.kind == NY_T_LBRACE) {
       if (stmt_token_looks_type_name(ident_tok) &&
           stmt_ident_lbrace_starts_named_fields(p)) {
@@ -380,7 +384,9 @@ stmt_t *p_parse_stmt(parser_t *p) {
         stmt_skip_named_field_literal(p);
         return NULL;
       }
-      return parse_macro_stmt(p);
+      parser_error(p, ident_tok, "macro statement syntax is retired",
+                   "use quote { ... } and ${...} splicing instead");
+      return NULL;
     }
     if (id_len == 4 && strncmp(id, "func", 4) == 0) {
       parser_error(p, ident_tok, "unrecognised keyword 'func'",
@@ -414,19 +420,9 @@ stmt_t *p_parse_stmt(parser_t *p) {
     }
     if (lhs->kind == NY_E_CALL && lhs->as.call.callee &&
         lhs->as.call.callee->kind == NY_E_IDENT && p->cur.kind == NY_T_LBRACE) {
-      stmt_t *s = stmt_new(p->arena, NY_S_MACRO, ident_tok);
-      s->as.macro.name = lhs->as.call.callee->as.ident.name;
-      for (size_t i = 0; i < lhs->as.call.args.len; i++) {
-        call_arg_t *arg = &lhs->as.call.args.data[i];
-        if (arg->name) {
-          parser_error(p, arg->val ? arg->val->tok : ident_tok,
-                       "named arguments are not supported in macro statements",
-                       NULL);
-        }
-        vec_push_arena(p->arena, &s->as.macro.args, arg->val);
-      }
-      s->as.macro.body = p_parse_block(p);
-      return s;
+      parser_error(p, ident_tok, "macro statement syntax is retired",
+                   "use quote { ... } and ${...} splicing instead");
+      return NULL;
     }
     if (p->cur.kind == NY_T_COMMA && lhs->kind == NY_E_IDENT) {
       stmt_t *s = stmt_new(p->arena, NY_S_VAR, ident_tok);
@@ -783,4 +779,11 @@ program_t parse_program(parser_t *p) {
   }
   prog.diagnostic_rules = p->ct_diag_rules;
   return prog;
+}
+
+stmt_t *p_parse_stmt(parser_t *p) {
+  stmt_t *s = p_parse_stmt_raw(p);
+  if (s && s->syntax_ctx == 0)
+    s->syntax_ctx = p ? p->current_syntax_ctx : 0;
+  return s;
 }

@@ -155,6 +155,8 @@ void lexer_init(lexer_t *lx, const char *src, const char *filename) {
   lx->had_error = false;
   lx->error_count = 0;
   lx->quiet = false;
+  lx->quote_depth = 0;
+  lx->template_depth = 0;
 }
 
 static inline char advance(lexer_t *lx) {
@@ -571,6 +573,25 @@ static token_kind identifier_type(lexer_t *lx, const char *start, size_t len) {
       return NY_T_IDENT;
     }
     break;
+  case 'q':
+    /*
+     * `quote` is contextual: it is the quote keyword only when a block
+     * follows.  A plain variable named `quote` (svg path parsing, user
+     * code) must stay an identifier.
+     */
+    if (len == 5 && memcmp(start, "quote", 5) == 0) {
+      const char *q = start + 5;
+      while (*q == ' ' || *q == '\t' || *q == '\r' || *q == '\n')
+        q++;
+      if (*q == '$') {
+        q++;
+        while (*q == ' ' || *q == '\t' || *q == '\r' || *q == '\n')
+          q++;
+      }
+      if (*q == '{' || *q == '(')
+        return NY_T_QUOTE;
+    }
+    break;
   case 'r':
     if (len == 6 && memcmp(start, "return", 6) == 0)
       return NY_T_RETURN;
@@ -678,26 +699,34 @@ token_t lexer_next(lexer_t *lx) {
     return tok;
   }
   if (c == '$' && peek(lx) == '{') {
-    const unsigned char *p = (const unsigned char *)(src + start + 2);
-    if (IS_ALPHA(*p)) {
-      while (IS_ALNUM(*p))
-        p++;
-      if (*p == '}') {
-        p++;
+    /* Only a quote splice emits DOLLAR_LBRACE; a comptime template body
+     * (template_depth > 0) and plain top-level `${...}` keep the literal
+     * placeholder-identifier form the template expander rewrites. */
+    if (lx->quote_depth == 0 || lx->template_depth > 0) {
+      const unsigned char *p = (const unsigned char *)(src + start + 2);
+      if (IS_ALPHA(*p)) {
         while (IS_ALNUM(*p))
           p++;
-        p = scan_template_ident_tail(p);
-        size_t token_len = (size_t)((const char *)p - (src + start));
-        lx->pos = start + token_len;
-        lx->col += (int)token_len - 1;
-        token_t tok = make_token(lx, NY_T_IDENT, start);
-        tok.hash = ny_hash64(tok.lexeme, tok.len);
-        if (lx->intern_identifiers)
-          tok.sym_id = ny_intern_str_hashed(tok.lexeme, tok.len, tok.hash);
-        tok.kind = identifier_type(lx, tok.lexeme, tok.len);
-        return tok;
+        if (*p == '}') {
+          p++;
+          while (IS_ALNUM(*p))
+            p++;
+          p = scan_template_ident_tail(p);
+          size_t token_len = (size_t)((const char *)p - (src + start));
+          lx->pos = start + token_len;
+          lx->col += (int)token_len - 1;
+          token_t tok = make_token(lx, NY_T_IDENT, start);
+          tok.hash = ny_hash64(tok.lexeme, tok.len);
+          if (lx->intern_identifiers)
+            tok.sym_id = ny_intern_str_hashed(tok.lexeme, tok.len, tok.hash);
+          tok.kind = identifier_type(lx, tok.lexeme, tok.len);
+          return tok;
+        }
       }
     }
+    lx->pos++;
+    lx->col++;
+    return make_token(lx, NY_T_DOLLAR_LBRACE, start);
   }
   if (IS_DIGIT(c)) {
     if (c == '0' && (src[lx->pos] == 'x' || src[lx->pos] == 'X')) {
@@ -944,6 +973,10 @@ token_t lexer_next(lexer_t *lx) {
     return make_token(lx, NY_T_QUESTION, start);
   case '@':
     return make_token(lx, NY_T_AT, start);
+  case '$':
+    if (match(lx, '{'))
+      return make_token(lx, NY_T_DOLLAR_LBRACE, start);
+    return make_token(lx, NY_T_DOLLAR, start);
   }
   char emsg[128];
   snprintf(emsg, sizeof(emsg), "unrecognised character '%c' (ascii %d)", c,

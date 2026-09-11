@@ -957,8 +957,15 @@ int64_t rt_shl_raw(int64_t a, int64_t b) {
     int64_t shift = rt_is_bigint_obj(b) ? b : rt_tag_v(b);
     return rt_bigint_shl(a, shift);
   }
-  if (b < 0)
-    return ny_value_box_i64(a);
+  if (b < 0) {
+    /*
+     * A negative shift count leaves the value unchanged, and this raw NYIR
+     * entry point must return the RAW scalar: boxing here handed callers
+     * tagged 3 where the program compared against raw 1
+     * ("negative shift count leaves value unchanged").
+     */
+    return a;
+  }
   if (b < 64) {
     __int128 shifted = (__int128)a << (unsigned)b;
     if (shifted >= (__int128)NY_SMALL_INT_MIN &&
