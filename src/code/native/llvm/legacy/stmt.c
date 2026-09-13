@@ -6729,6 +6729,15 @@ static LLVMValueRef stmt_gen_return_value(codegen_t *cg, scope *scopes,
     return fv;
   }
   LLVMValueRef v = gen_expr(cg, scopes, depth, e);
+  /*
+   * An omitted return annotation is still a language-value boundary.  The
+   * legacy backend used to return an inferred integer as raw i64 here, while
+   * callers of an untyped function treated it as `any` and untagged it once
+   * more (11 became 5 in syntax macro expansion).  Keep raw values inside
+   * the function and create the dynamic representation at this boundary.
+   */
+  if (!ret_type && v && ny_type_is(infer_expr_type(cg, scopes, depth, e), "int"))
+    v = ny_tag_int(cg, v);
   if (stmt_type_is_native_abi_value(cg, ret_type)) {
     bool proven_int = ny_is_proven_int(cg, scopes, depth, e, v);
     v = ny_coerce_to_abi_proven_int(cg, v, ret_type, proven_int);
@@ -9318,6 +9327,11 @@ static void gen_stmt_expr_stmt(codegen_t *cg, scope *scopes, size_t *depth,
       stmt_type_is_native_abi_value(cg, cg->current_fn_ret_type)) {
     bool proven_int = ny_is_proven_int(cg, scopes, *depth, e, v);
     v = ny_coerce_to_abi_proven_int(cg, v, cg->current_fn_ret_type, proven_int);
+  }
+  if (is_tail && !cg->result_store_val && !cg->current_fn_ret_type &&
+      ny_type_is(infer_expr_type(cg, scopes, *depth, e), "int")) {
+    /* Untyped tail expressions return a dynamic language value. */
+    v = ny_tag_int(cg, v);
   }
   if (is_tail && !cg->current_fn_attr_naked) {
     if (cg->result_store_val) {

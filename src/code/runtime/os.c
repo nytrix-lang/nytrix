@@ -304,6 +304,18 @@ int64_t rt_write_off(int64_t fd, int64_t buf, int64_t len, int64_t off) {
   return rt_tag_v((int64_t)r);
 }
 
+/* Native NYIR passes typed integer arguments unboxed. Keep the historical
+ * tagged entry points above for interpreter/LLVM callers, and expose an
+ * explicit raw ABI for source wrappers that operate on raw counters. */
+int64_t rt_read_off_raw(int64_t fd, int64_t buf, int64_t len, int64_t off) {
+  return rt_any_to_i64(rt_read_off(fd, buf, len, off));
+}
+
+int64_t rt_write_off_raw(int64_t fd, int64_t buf, int64_t len, int64_t off) {
+  int64_t r = rt_write_off(fd, buf, len, off);
+  return rt_any_to_i64(r);
+}
+
 int64_t rt_save_tga_rgba(int64_t path, int64_t data, int64_t width, int64_t height,
                          int64_t channels) {
   const char *path_p = (const char *)(uintptr_t)(is_int(path) ? rt_untag_v(path) : path);

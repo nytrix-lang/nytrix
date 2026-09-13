@@ -16,6 +16,11 @@ struct PackedPair pack(1) {
    i64 right
 }
 
+struct Point {
+   f64 x,
+   f64 y
+}
+
 assert(__layout_size("Vec2") == 8, "Vec2 size")
 assert(__layout_align("Vec2") == 4, "Vec2 align")
 assert(__layout_offset("Vec2", "x") == 0, "Vec2.x offset")
@@ -29,4 +34,6 @@ assert(__layout_size("PackedPair") == 12, "PackedPair size")
 assert(__layout_align("PackedPair") == 1, "PackedPair align")
 assert(__layout_offset("PackedPair", "left") == 0, "PackedPair.left offset")
 assert(__layout_offset("PackedPair", "right") == 4, "PackedPair.right offset")
+def point = Point(3.0, 4.0)
+assert(point.x == 3.0 && point.y == 4.0, "struct positional constructor")
 print("✓ struct runtime test passed")

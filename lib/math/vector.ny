@@ -256,6 +256,15 @@ fn xyz(any v) vec3 {
 @jit
 @inline
 fn _zip2_op(any av, any bv, int op) any {
+   ;; Dynamic vector fields may carry boxed f64 values.  Route that case
+   ;; through the typed floating-point operator so the generic integer-shaped
+   ;; `core.add` bridge cannot reinterpret a float handle as an i64.
+   if is_float(av) && is_float(bv) {
+      if op == 0 { return __flt_add(av, bv) }
+      if op == 1 { return __flt_sub(av, bv) }
+      if op == 2 { return __flt_mul(av, bv) }
+      if op == 3 { return __flt_div(av, bv) }
+   }
    case op {
       0 -> core.add(av, bv)
       1 -> core.sub(av, bv)
@@ -275,6 +284,7 @@ fn _vector_shape_out(list out, int n, bool typed) any {
    out
 }
 
+@inline
 fn _zip2(any a, any b, int op) any {
    if !is_vector(a) { return [] }
    if !is_vector(b) { return [] }
