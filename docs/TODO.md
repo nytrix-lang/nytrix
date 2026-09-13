@@ -10,44 +10,60 @@ CI image stays at `NYTRIX_TEST_JOBS=1` for scheduler determinism.
 Focused correctness-suite command (results change as concurrent fixes land):
 
 ```bash
-NYTRIX_TEST_JOBS=32 NYTRIX_TEST_NO_BENCH=1 NYTRIX_TRACE=1 NYTRIX_TRACE_CALLS=1 NYTRIX_TRACE_VALUES=1 NYTRIX_TRACE_VERBOSE=1 ./make test etc/tests/{runtime/{language/{extensible,type,proof-logic}.ny,execution/{errors,concurrency}.ny,values/{collections,iter}.ny,modules/import.ny},shapes/probes/sys/gltf-index-modes.nshape}
+NYTRIX_TEST_JOBS=32 NYTRIX_TEST_NO_BENCH=1 NYTRIX_TRACE=1 NYTRIX_TRACE_CALLS=1 NYTRIX_TRACE_VALUES=1 NYTRIX_TRACE_VERBOSE=1 ./make test etc/tests/runtime/{language/{extensible,type,proof-logic}.ny,modules/import.ny}
 ```
+
+---
+
+## Bug Group T — Trace-mode compile regression (blocks 8+ suite fixtures)
+
+**Fixtures:** `case.ny` ("list last"), `defer.ny` ("Defer unwind order"),
+`attr.ny`, `control.ny`, `primitives.ny` ("load8 0"), `rewrite.ny`,
+`resource.ny`, `memcall-get-inline.ny` — all rc=134/1 in the suite, all
+passing solo without trace env.
+
+**Repro** (LLVM default backend):
+```bash
+NYTRIX_TRACE=1 ./make ny -run /dev/stdin <<'NY'
+use std.core
+mut l = []
+mut i = 0
+while i < 100 { l = l.append(i); i += 1 }
+assert(l.get(99) == 99, "list last")
+NY
+# → assertion failed (passes without NYTRIX_TRACE)
+```
+
+**Facts:**
+- The runner executes runtime fixtures on the LLVM path with the trace env
+  set at COMPILE time; the trace-compiled binary fails regardless of the
+  runtime env (the corruption is baked in).
+- Compiling the same source with and without `NYTRIX_TRACE=1` produces
+  byte-identical IR except for `ct_rt_result` trampolines —
+  `call i64 inttoptr (i64 <compiler-process-address> to ptr)(...)` baked by
+  `ny_jit_define_runtime_trampoline` (src/code/native/llvm/jit.c:1010).
+  Those addresses are only valid inside the compiler/JIT process; an AOT
+  ELF (`-o` / the `-run` harness) calling them executes arbitrary bytes.
+- Pristine `HEAD` (86fafb4) passes the same repro with trace; the
+  regression arrived with the in-flight const-fold/arraytab work
+  (`nyir_eval_with_calls` resolving ADDR_SYMBOL through
+  `ny_native_arraytab_data`), which widens compile-time evaluation to
+  runtime-shaped expressions (loop-grown lists) whose results then leak
+  into emitted code.
+
+**Fix direction:** the comptime evaluator must never (a) evaluate
+expressions over runtime-constructed aggregates, or (b) leave host-address
+`inttoptr` call targets in AOT output — fold to VALUES only, and emit a
+real symbol call when a fold is impossible. Then re-run the 8 fixtures.
+
+---
 
 ---
 
 ## Bug Group B — `any`-typed dict/nil handle corrupted at `len`/`get` boundary
 
-**Remaining fixtures:** `proof-logic.ny`, `type.ny`.
-
-### B4 — Premature constant folding of `mut` global list (blocks `proof-logic.ny`)
-
-**Symptom:**
-`PanicError: index_read out of range` in `_linear_predicate()` when calling `linear(constraints, bounds)`.
-
-**Root cause isolated:**
-In `src/code/native/lower.c:6818-6825` (`ny_native_nir_resolve_list_literal`):
-```c
-ny_native_nir_local_t *local = ny_native_nir_find_local(b, e->as.ident.name);
-if (local && !local->semantic_mutable && local->list_literal)
-  return local->list_literal;
-const expr_t *v = ny_native_nir_find_top_level_value(b, e->as.ident.name);
-if (v && v != e)
-  return ny_native_nir_resolve_list_literal(b, v, depth + 1);
-```
-- For locals, `!local->semantic_mutable` is checked.
-- For top-level values, `ny_native_nir_find_top_level_value` does NOT check if the declaration was mutable (`s->as.var.is_mut`).
-- Global `mut _linear_constraints = []` is initialized as empty.
-- `ny_native_nir_resolve_list_literal` resolves `_linear_constraints` to `[]` (len 0) and in `src/code/native/lower/lower_expr.h:1718` emits a hardcoded static bounds check against len 0: `rt_bounds_check(offset, 0)`.
-- When `linear()` mutates `_linear_constraints = constraints` at runtime with 10 elements, indexing in `_linear_predicate()` triggers `PanicError: index_read out of range` on the hardcoded 0-element bounds check.
-
-**Action Blueprint:**
-In `src/code/native/lower.c:6822-6825`:
-Verify that top-level variable declarations are immutable before folding:
-```c
-const stmt_t *top_stmt = ny_native_nir_find_top_level_stmt(b, e->as.ident.name);
-if (top_stmt && top_stmt->kind == NY_S_VAR && top_stmt->as.var.is_mut)
-  return NULL;
-```
+The original raw `any` boundary is fixed; remaining fixture failures are
+tracked in the prioritised list below.
 
 ### B5 — Variadic argument packing missing in native NYIR `lower_call.h` (blocks `type.ny`)
 
@@ -157,93 +173,70 @@ Unbox untyped/scalar parameters with `rt_any_to_i64` for all anonymous lambdas (
 
 ---
 
-### F2 — Double-tagging of fallback in `rt_value_get_tagged` (blocks `errors.ny`)
+### F3 — Native BigInt arithmetic return ABI (blocks `import.ny`)
 
-**Symptom:**
-`assert(get(any_id(raw_probe), 0, 77) == 77)` fails with assertion error.
-
-**Root cause isolated:**
-In `src/code/runtime/core.c:2510-2511` and `2517-2518`:
-```c
-int64_t rt_value_get_tagged(int64_t value, int64_t key, int64_t fallback) {
-  ...
-  if (rt_raw_ptr_registered(value))
-    return rt_tag_v(fallback);
-  ...
-  if (!value)
-    return rt_tag_v(fallback);
-```
-In `rt_value_get_tagged`, `fallback` is already passed in tagged dynamic representation (e.g. `77` is passed as `(77 << 1) | 1 = 155`).
-Lines 2511 and 2518 erroneously call `rt_tag_v(fallback)` again, tagging `155` into `311` (`77` becomes corrupted).
-All other return points in this function (lines 2503, 2515, 2530) return `fallback` directly without double-tagging.
-
-**Action Blueprint:**
-In `src/code/runtime/core.c`:
-Change line 2511 from `return rt_tag_v(fallback);` to `return fallback;`.
-Change line 2518 from `return rt_tag_v(fallback);` to `return fallback;`.
+The JIT-symbol and HM import-resolution failures are fixed: `import.ny` now
+compiles and runs through its earlier `all(...)` import assertion. The next
+reproducer is independent of re-exports: `bigint_cmp(bigint(-3), bigint(0))`
+returns `-1`, while `bigint_neg(bigint(-3))` returns a malformed value and
+`bigint_abs(bigint(-3))` consequently returns zero. Trace the native ABI of
+`__bigint_sub` / `bigint_neg` from typed `bigint` parameters through its return
+value; do not special-case `bigint_abs` or the import resolver.
 
 ---
 
-### F3 — Unresolved JIT Runtime Symbols Emitting `call 0x0` / SIGSEGV (blocks `import.ny`)
+## Bug Group G — Live probe failures (2026-09-13)
 
-**Symptom:**
-`import.ny` crashes with `SegmentationFault: signal 11` at address `0x0000000000000000` (`movabs rax, 0x0; call rax`).
+A fresh hands-on probe against the current tree (`build/release/ny -run`) found
+the following failures. The typed scalar core works (`fib(20)`=6765, enum ADT
+match, `2^10`, `proof<P>`/`prove`, `assert_compile`, native `-o` ELF). Every
+failure below sits on the dynamic/any boundary or a value-return ABI, matching
+the F-group and return-ABI families already tracked here. Re-probe with the
+single repro file command given per item; expected value in parentheses.
 
-**Root cause isolated:**
-In `import.ny:48`: `OS.len > 0` lowers via `ny_native_nir_emit_runtime_call(b, "rt_len_strict", sequence)`.
-However, `rt_len_strict` is absent from `src/code/runtime/defs.h` and has no `LLVMAddSymbol` entry in `src/code/native/llvm/jit.c`.
-Because it is not registered in the JIT symbol map, LLVM MCJIT leaves its function address as `0x0`, emitting:
-```asm
-movabs rax, 0x0
-call   rax
+### G1 — `.map` over a list literal still broken (F1 confirmed live)
+
+**Symptom:** the documented F1 repro still asserts live.
+
+```ny
+use std.core
+assert([1, 2, 3].map(fn(v) { v + 1 }) == [2, 3, 4], "list map method")
 ```
-Passing string `"linux"` in `rdi` to address `0x0` triggers immediate SIGSEGV.
 
-**Full Audit of Missing JIT Symbols:**
-A comprehensive scan of all runtime symbols emitted by `ny_native_nir_emit_runtime_call` across `src/code/native/` identified **21 runtime symbols** missing from `defs.h` and `jit.c`:
-1. `rt_len_strict` (crashes `OS.len` in `import.ny:48`)
-2. `rt_adt_alloc`
-3. `rt_adt_tag`
-4. `rt_alloc_string` (only legacy `__alloc_string` was registered)
-5. `rt_any_to_cstr`
-6. `rt_any_to_f64`
-7. `rt_assert_cstr`
-8. `rt_contains_raw`
-9. `rt_cstr_cmp`
-10. `rt_cstr_concat`
-11. `rt_cstr_eq`
-12. `rt_f64_to_cstr_raw`
-13. `rt_fmod_f64`
-14. `rt_getlogin`
-15. `rt_gettimeofday`
-16. `rt_i64_to_cstr_raw`
-17. `rt_raw_word_tag`
-18. `rt_tbuf_dyn_elem`
-19. `rt_tbuf_extend`
-20. `rt_tbuf_repeat`
-21. `_setjmp`
+`Nytrix assertion failed: list map method` (signal 6). The zero-capture lambda
+parameter is not unboxed (F1). Variant manifestation:
 
-Additionally, `import.ny:46` defines `fn flag_from(vals)` which shadows the module-local helper in `std.os.args`. Top-level symbol export must preserve module qualification for imported stdlib helpers.
+```ny
+print([1, 2, 3, 4].map(fn(v){ v * 2 }))   ; → [11, 19, 27, 35]  (want [2, 4, 6, 8])
+```
 
-**Action Blueprint:**
-1. In `src/code/native/llvm/jit.c`: Add `LLVMAddSymbol` entries for all 21 missing runtime symbols in `ny_jit_add_runtime_symbols()`.
-2. In `src/code/runtime/defs.h`: Add matching `RT_DEF` entries so interpreter and JIT share identical symbol resolution.
+The output differs from naive tagging (`(2v+1)*2 = 4v+2`), so this variant is
+worth tracing past the F1 fix to confirm the whole map/read chain is raw after
+F1 lands.
 
----
+### G2 — `reduce` returns `nil`
 
-## Cross-cutting: compiler invariant / assertion hardening
+```ny
+sum([1, 2, 3, 4].map(fn(v){ v * 2 }))     ; or reduce(fn(a,b){ a + b }, 0)
+print(sum)                                  ; → nil (want int)
+```
 
-- [ ] **Compiler invariant/assertion hardening before fuzz/deploy runs.** Add
-  always-on, actionable assertions at parser/AST ownership boundaries,
-  semantic-resolution output, HM representation changes, NYIR instruction
-  construction/CFG joins, native ABI argument and return shapes, runtime
-  handle validation, and backend emission. Every assertion should report the
-  source span, function/module, invariant name, and the relevant type/rep/ABI
-  state; convert recoverable compiler inconsistencies into structured
-  diagnostics instead of crashes or silent zero/nil values. Add a dedicated
-  compiler-assertion test matrix covering malformed ASTs, impossible semantic
-  reps, invalid NYIR operands/labels, mismatched call arity, stale handles,
-  and divergent interpreter/LLVM/JIT/native results.
+`reduce`/`sum` over a mapped list evaluates to `nil`, consistent with the
+untyped/any accumulator return ABI losing the value at the boundary.
+
+### G5 — comptime list map returns `nil`
+
+```ny
+use std.core
+def base = comptime{ 2^5 }
+def shifted = comptime{ range(4).map(fn(i){ i + base }) }
+print(base)                                 ; → 32 (works)
+print(to_str(shifted))                      ; → nil (want "[32, 33, 34, 35]")
+```
+
+This is the README's own comptime example (`README.md:99-104`). Scalar comptime
+fold works; `range(4).map(...)` crossing the comptime evaluator boundary loses
+its value. The README example is currently non-functional in the tree.
 
 ---
 
@@ -397,17 +390,6 @@ Recent optimizations completed:
 
 ---
 
-#### Bottleneck 5: `gltf-index-modes.nshape` Compiler Budget Timeout (Bug Group A)
-
-- **Fixture:** `etc/tests/shapes/probes/sys/gltf-index-modes.nshape` (exceeds 20s compile timeout).
-- **Root Cause:**
-  During AST lowering in `src/code/native/lower.c`, functions like `ny_native_nir_find_top_level_value_in_stmt` linearly scan `prog->body.data[i]` for every single identifier lookup.
-  In glTF's large generated AST with hundreds of top-level definitions, every identifier lookup performs an $O(N)$ scan, making lowering $O(N^2)$ in statement count.
-- **Action Blueprint for Next Agent:**
-  At the entry of `ny_native_nir_lower_prog` in `src/code/native/lower.c`, build a flat hash table or symbol map of top-level names:
-  `ht_set(&b->top_level_syms, name, stmt_expr)`.
-  Replace the $O(N)$ loop with an $O(1)$ hash table lookup. This will speed up compilation of large programs by 10x-50x and comfortably bring `gltf-index-modes` within the 20s budget.
-
 ---
 
 #### Bottleneck 6: Small String Optimization (SSO) & Swiss-Table Dicts (`dict`: 7x-9x vs C, `json-parser`: 2.5x vs C)
@@ -479,11 +461,27 @@ Recent optimizations completed:
 - [ ] **[B5] `type.ny` variadic float ABI** — packing is implemented; fix f64 bit-pattern locals being passed to `rt_f64_bits` with an i64 argument, then verify vector components and the full fixture.
 - [ ] **[E] `extensible.ny` macro integer return representation** — in `lower_arith.h:1014-1024`, box raw machine integer when returning from untyped macro context so `11` is not untagged to `5`.
 - [ ] **[F1] `collections.ny` & `iter.ny` zero-capture lambda unboxing** — in `lower_stmt.h:3137`, unbox tagged dynamic integer arguments for zero-capture anonymous lambdas (`__ny_lambda_`).
-- [ ] **[F3] `import.ny` missing JIT runtime symbols** — add `LLVMAddSymbol` entries in `jit.c` and `RT_DEF` entries in `defs.h` for all 21 missing runtime functions (`rt_len_strict`, `rt_adt_alloc`, `rt_getlogin`, etc.), eliminating `call 0x0` / SIGSEGV.
+- [ ] **`errors.ny` AOT crash after dynamic fallback handling** — fallback values now preserve their representation; isolate the remaining native crash without weakening the error assertions.
+- [ ] **[G1] list-literal `.map` unboxing (live)** — F1 repro still asserts and `[1,2,3,4].map(fn(v){ v*2 })` prints `[11,19,27,35]`; verify the whole map/read chain is raw after F1.
+- [ ] **[G2] `reduce`/`sum` over a mapped list returns `nil`** — accumulator result lost at the untyped/any return boundary.
+- [ ] **[G5] README comptime example broken** — `comptime{ range(4).map(fn(i){ i + base }) }` prints `nil`; scalar fold works, the lambda/map path across the evaluator boundary loses the value.
+---
 
-### B. Benchmark Integrity & Correctness Fixes
-- [ ] **[BENCH-CORRECT-1] `fasta` Checksum Mismatch Fix** — in `lower_call.h` / `lower_expr.h`, prevent `rt_any_to_i64` from running on unboxed element-8 list `.get()` reads (eliminates corrupting `65 >> 1 = 32`).
-- [ ] **[BENCH-CORRECT-2] `dict` Checksum Mismatch Fix** — ensure `acc += d.get(...)` uses native integer addition (`NYIR_ADD_I64`), not `rt_any_add`.
+## Cross-cutting: compiler invariant / assertion hardening
+
+- [ ] **Compiler invariant/assertion hardening before fuzz/deploy runs.** Add
+  always-on, actionable assertions at parser/AST ownership boundaries,
+  semantic-resolution output, HM representation changes, NYIR instruction
+  construction/CFG joins, native ABI argument and return shapes, runtime
+  handle validation, and backend emission. Every assertion should report the
+  source span, function/module, invariant name, and the relevant type/rep/ABI
+  state; convert recoverable compiler inconsistencies into structured
+  diagnostics instead of crashes or silent zero/nil values. Add a dedicated
+  compiler-assertion test matrix covering malformed ASTs, impossible semantic
+  reps, invalid NYIR operands/labels, mismatched call arity, stale handles,
+  and divergent interpreter/LLVM/JIT/native results.
+
+---
 
 ### C. Performance Epics to 1000x the Language
 - [ ] **[PERF-1] `pbkdf2` Buffer Allocation Hoisting / Stack Promotion (`alloca`)** — hoist `zeros(64)` out of the block loop or promote fixed-size non-escaping `i64buf_new` to stack `alloca`. Targets 100x speedup (<3ms).

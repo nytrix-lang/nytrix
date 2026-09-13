@@ -15,8 +15,11 @@ mut _json_error = ""
 
 ;; Parser offsets live as raw scalar payloads in a heterogeneous state list.
 ;; Keep arithmetic on the scalar ABI before writing a new offset back.
-fn _json_pos(list st) int { st[2] }
-fn _json_size(list st) int { st[1] }
+;; Access parser scalars through the raw slot API. Dynamic list accessors
+;; return language-tagged integers for values that came through `any`, while
+;; the parser's offsets are deliberately raw counters.
+fn _json_pos(list st) int { __load64_idx(st, 32) }
+fn _json_size(list st) int { __load64_idx(st, 24) }
 
 fn json_last_error() str {
    "Returns the error from the last decode attempt(empty string on success)."
@@ -61,7 +64,7 @@ fn _json_skip_ws(list st) any {
    while pos < n {
       if _json_is_ws(load8(s, pos)) { pos += 1 } else { break }
    }
-   if pos != start { st[2] = pos }
+   if pos != start { __store64_idx(st, 32, pos) }
 }
 
 fn _json_expect(list st, int want, str msg) any {
@@ -69,7 +72,7 @@ fn _json_expect(list st, int want, str msg) any {
    def int n = _json_size(st)
    def c = (pos >= 0 && pos < n) ? load8(st.get(0), pos) : -1
    if c != want { return _json_set_error(st, msg) }
-   st[2] = pos + 1
+   __store64_idx(st, 32, pos + 1)
    true
 }
 
@@ -98,7 +101,7 @@ fn _json_parse_literal(list st, str lit, any value) any {
       if load8(s, pos + i) != load8(lit, i) { return _json_set_error(st, "invalid literal") }
       i += 1
    }
-   st[2] = pos + m
+   __store64_idx(st, 32, pos + m)
    value
 }
 
@@ -127,7 +130,7 @@ fn _json_parse_obj(list st) any {
    mut d = dict(8)
    _json_skip_ws(st)
    if _json_peek(st) == 125 {
-      st[2] = _json_pos(st) + 1
+      __store64_idx(st, 32, _json_pos(st) + 1)
       return d
    }
    while 1 {
@@ -143,11 +146,11 @@ fn _json_parse_obj(list st) any {
       _json_skip_ws(st)
       def c = _json_peek(st)
       if c == 44 {
-         st[2] = _json_pos(st) + 1
+         __store64_idx(st, 32, _json_pos(st) + 1)
          continue
       }
       if c == 125 {
-         st[2] = _json_pos(st) + 1
+         __store64_idx(st, 32, _json_pos(st) + 1)
          return d
       }
       return _json_set_error(st, "expected ',' or '}' in object")
@@ -159,7 +162,7 @@ fn _json_parse_arr(list st) any {
    mut l = list(8)
    _json_skip_ws(st)
    if _json_peek(st) == 93 {
-      st[2] = _json_pos(st) + 1
+      __store64_idx(st, 32, _json_pos(st) + 1)
       return l
    }
    while 1 {
@@ -168,11 +171,11 @@ fn _json_parse_arr(list st) any {
       _json_skip_ws(st)
       def c = _json_peek(st)
       if c == 44 {
-         st[2] = _json_pos(st) + 1
+         __store64_idx(st, 32, _json_pos(st) + 1)
          continue
       }
       if c == 93 {
-         st[2] = _json_pos(st) + 1
+         __store64_idx(st, 32, _json_pos(st) + 1)
          return l
       }
       return _json_set_error(st, "expected ',' or ']' in array")
@@ -204,9 +207,12 @@ fn _json_parse_str(list st) any {
       def out = malloc(out_len + 1)
       if !out { return _json_set_error(st, "string allocation failed") }
       init_str(out, out_len)
+      ;; __copy_mem crosses the tagged runtime ABI. Keep odd byte lengths
+      ;; explicitly tagged; an inferred dynamic/raw word would otherwise be
+      ;; mistaken for a tagged zero-length count by the intrinsic.
       if out_len > 0 { __copy_mem(out, ptr_add(s, pos), __tag(out_len)) }
       store8(ptr_add(out, out_len), 0, 0)
-      st[2] = end + 1
+      __store64_idx(st, 32, end + 1)
       return out
    }
    def out = malloc(end - pos + 1)
@@ -294,7 +300,7 @@ fn _json_parse_str(list st) any {
       cur += 1
    }
    def result = init_str(out, out_len)
-   st[2] = end + 1
+   __store64_idx(st, 32, end + 1)
    result
 }
 
@@ -337,7 +343,7 @@ fn _json_parse_num(list st) any {
       while pos < n && _json_is_digit(load8(s, pos)) { pos += 1 }
    }
    if !has_frac && !has_exp {
-st[2] = pos
+__store64_idx(st, 32, pos)
       return __tag(neg ? (0 - int_val) : int_val)
    }
    def len = pos - start
@@ -350,7 +356,7 @@ st[2] = pos
    mut res = 0
    if has_frac || has_exp { res = _json_parse_float_text(tmp) }
    else { res = str.atoi(tmp) }
-   st[2] = pos
+   __store64_idx(st, 32, pos)
    free(raw)
    return res
 }
@@ -361,7 +367,9 @@ fn json_try_decode(any s) dict {
       _json_error = "json input must be a string"
       return _json_make_result(false, 0, _json_error, 0)
    }
-   def st = [s, s.len, 0, ""]
+   def st = [s, 0, 0, ""]
+   __store64_idx(st, 24, len(s))
+   __store64_idx(st, 32, 0)
    def val = _json_parse_val(st)
    _json_skip_ws(st)
    mut err = st.get(3, "")

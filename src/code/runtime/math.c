@@ -591,6 +591,13 @@ void rt_bounds_check(uint64_t offset, uint64_t len) {
 }
 
 int64_t rt_add(int64_t a, int64_t b) {
+  /* Float handles are pointer-shaped values and may have the integer tag bit
+   * set.  Test the semantic float representation before the low-bit integer
+   * fast path, otherwise boxed f64 operands are shifted as integers. */
+  if (is_v_flt(a) || is_v_flt(b)) {
+    MATH_STAT_INC(add_float);
+    return rt_flt_add(a, b);
+  }
   if ((a & 1) && (b & 1)) {
     int64_t av = a >> 1;
     int64_t bv = b >> 1;
@@ -619,10 +626,6 @@ int64_t rt_add(int64_t a, int64_t b) {
     if (is_v_flt_mapped(b))
       return rt_flt_add(a, b);
     return b + (a >> 1);
-  }
-  if (is_v_flt(a) || is_v_flt(b)) {
-    MATH_STAT_INC(add_float);
-    return rt_flt_add(a, b);
   }
   if (is_v_str(a) && is_v_str(b)) {
     MATH_STAT_INC(add_str);

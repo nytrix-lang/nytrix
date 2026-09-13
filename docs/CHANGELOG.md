@@ -7,6 +7,12 @@ Nytrix uses dated milestones. Use `ny --version` for snapshots.
 Reliability, build portability, and dynamic ABI correctness
 
 ### Fixed
+- Native slice lowering now preserves the full requested string range for
+  ASCII and UTF-8 code-point slices, including open-ended bounds.
+- Native NYIR now materializes positional `struct`/`layout` constructors from
+  their declared field layouts and lowers scalar member reads with the field's
+  ABI (`f32`/`f64`/integer), covering user-defined records without type-name
+  hardcoding.
 - Native dictionary `.len` now reads the native table count before probing
   the managed-dictionary layout. The typed-dict assertion in `type.ny` passes;
   that fixture remains open on nested-list indexing. Fresh uncached runs of

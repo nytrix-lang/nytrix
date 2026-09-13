@@ -1727,6 +1727,16 @@ static const char *infer_expr_type_uncached(codegen_t *cg, scope *scopes,
           builtin_shadowed ? NULL : vector_constructor_return_type(n);
       if (vec_type)
         return vec_type;
+      /* Struct/layout declarations are callable value constructors even
+       * though they do not have a fun_sig entry.  Returning the declared
+       * layout name here preserves the record type for native member
+       * lowering (`Point(1.0, 2.0).x`) instead of degrading the result to an
+       * unknown dynamic value. */
+      if (!builtin_shadowed && n) {
+        layout_def_t *layout = lookup_layout(cg, n);
+        if (layout && layout->name)
+          return layout->name;
+      }
       if (!builtin_shadowed &&
           (call_name_tail_is(n, "malloc") ||
            call_name_tail_is(n, "malloc_raw") ||
