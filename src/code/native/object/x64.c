@@ -3186,6 +3186,7 @@ static bool mach_encode_function(ny_x64_mach_enc_t *e, const char *name,
         (strcmp(in->src0.as.symbol, "rt_list_new") == 0 ||
          strcmp(in->src0.as.symbol, "rt_list_new_sized") == 0 ||
          strcmp(in->src0.as.symbol, "rt_malloc") == 0 ||
+         strcmp(in->src0.as.symbol, "rt_malloc_i64") == 0 ||
          strcmp(in->src0.as.symbol, "rt_zalloc_raw") == 0 ||
          strcmp(in->src0.as.symbol, "rt_tbuf_new_raw") == 0)) {
       has_pointer_constructor_call = true;

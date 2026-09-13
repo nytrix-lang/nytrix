@@ -500,7 +500,9 @@ bool nyir_eval_with_calls(const nyir_func_t *f, int64_t *locals,
       if (str_bytes) {
         addr = (uintptr_t)str_bytes;
       } else if (in->symbol) {
-        void *sym = ny_process_symbol(in->symbol);
+        void *sym = ny_native_arraytab_data(in->symbol);
+        if (!sym)
+          sym = ny_process_symbol(in->symbol);
         if (sym)
           addr = (uintptr_t)sym;
         else if (ny_native_globaltab_has(in->symbol))

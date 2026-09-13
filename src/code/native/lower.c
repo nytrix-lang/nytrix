@@ -298,7 +298,7 @@ static const char *ny_native_runtime_symbol(const char *name) {
   if (strcmp(name, "rt_tag_or_raw_int") == 0)
     return "rt_tag_or_raw_int";
   if (strcmp(name, "__unwrap") == 0)
-    return "rt_result_unwrap_raw";
+    return "rt_unwrap";
   if (strcmp(name, "__result_ok") == 0)
     return "rt_result_ok";
   if (strcmp(name, "__result_err") == 0)
@@ -763,6 +763,7 @@ static bool ny_native_type_name_is_int(const char *name);
 static bool ny_native_type_name_is_list(const char *name);
 static bool ny_native_type_name_is_str(const char *name);
 static bool ny_native_type_name_is_any(const char *name);
+static bool ny_native_type_name_is_ptr(const char *name);
 
 static ny_native_lambda_entry_t *ny_native_lambda_find(const expr_t *expr) {
   for (size_t i = 0; i < ny_native_lambda_count; ++i)
@@ -825,8 +826,12 @@ static stmt_t *ny_native_lambda_create(const expr_t *e) {
   if (!fn)
     return NULL;
   char name[96];
-  int n = snprintf(name, sizeof(name), "__ny_lambda_%d_%d", e->tok.line,
-                   e->tok.col);
+  /* Source coordinates are diagnostic information, not expression identity:
+   * imported files and expanded syntax can contain distinct lambdas at the
+   * same position.  The registry already interns each AST expression once;
+   * use its program-wide ordinal to keep their emitted symbols distinct. */
+  int n = snprintf(name, sizeof(name), "__ny_lambda_%d_%d_%zu", e->tok.line,
+                   e->tok.col, ny_native_lambda_count);
   if (n <= 0 || (size_t)n >= sizeof(name)) {
     free(fn);
     return NULL;
@@ -2077,9 +2082,14 @@ static bool ny_native_nir_expr_is_cstr(ny_native_nir_builder_t *b,
                                        const expr_t *e);
 static bool ny_native_nir_expr_is_bytes(const ny_native_nir_builder_t *b,
                                         const expr_t *e);
+static bool ny_native_nir_expr_is_ptr(const ny_native_nir_builder_t *b,
+                                      const expr_t *e);
 static bool ny_native_nir_expr_is_bool(ny_native_nir_builder_t *b,
                                        const expr_t *e);
 static int ny_native_nir_box_bool(ny_native_nir_builder_t *b, int reg);
+static const char *
+ny_native_nir_resolve_use_alias(const ny_native_nir_builder_t *b,
+                                const char *alias);
 static bool ny_native_nir_expr_is_any(ny_native_nir_builder_t *b,
                                       const expr_t *e);
 static const stmt_t *
@@ -2377,6 +2387,34 @@ static bool ny_native_nir_stmt_uses_list_surface(const stmt_t *s,
                                                depth + 1))
         return true;
     return false;
+  case NY_S_WHILE:
+    return ny_native_nir_expr_uses_list_surface(s->as.whl.test, name, depth + 1) ||
+           ny_native_nir_stmt_uses_list_surface(s->as.whl.body, name, depth + 1) ||
+           ny_native_nir_stmt_uses_list_surface(s->as.whl.update, name, depth + 1) ||
+           ny_native_nir_stmt_uses_list_surface(s->as.whl.init, name, depth + 1);
+  case NY_S_IF:
+    return ny_native_nir_expr_uses_list_surface(s->as.iff.test, name, depth + 1) ||
+           ny_native_nir_stmt_uses_list_surface(s->as.iff.conseq, name, depth + 1) ||
+           ny_native_nir_stmt_uses_list_surface(s->as.iff.alt, name, depth + 1) ||
+           ny_native_nir_stmt_uses_list_surface(s->as.iff.init, name, depth + 1);
+  case NY_S_FOR:
+    return ny_native_nir_expr_uses_list_surface(s->as.fr.iterable, name, depth + 1) ||
+           ny_native_nir_expr_uses_list_surface(s->as.fr.cond, name, depth + 1) ||
+           ny_native_nir_stmt_uses_list_surface(s->as.fr.init, name, depth + 1) ||
+           ny_native_nir_stmt_uses_list_surface(s->as.fr.update, name, depth + 1) ||
+           ny_native_nir_stmt_uses_list_surface(s->as.fr.body, name, depth + 1);
+  case NY_S_GUARD:
+    return ny_native_nir_expr_uses_list_surface(s->as.guard.value, name, depth + 1) ||
+           ny_native_nir_stmt_uses_list_surface(s->as.guard.fallback, name, depth + 1);
+  case NY_S_TRY:
+    return ny_native_nir_stmt_uses_list_surface(s->as.tr.body, name, depth + 1) ||
+           ny_native_nir_stmt_uses_list_surface(s->as.tr.handler, name, depth + 1);
+  case NY_S_MODULE:
+    for (size_t i = 0; i < s->as.module.body.len; ++i)
+      if (ny_native_nir_stmt_uses_list_surface(s->as.module.body.data[i], name,
+                                               depth + 1))
+        return true;
+    return false;
   default:
     return false;
   }
@@ -2443,6 +2481,15 @@ static bool ny_native_type_name_is_any(const char *name) {
          strcmp(name, "seq") == 0 || strcmp(name, "iterable") == 0 ||
          strcmp(name, "indexable") == 0 || strcmp(name, "collection") == 0 ||
          strcmp(name, "container") == 0;
+}
+
+static bool ny_native_type_name_is_ptr(const char *name) {
+  if (!name)
+    return false;
+  const char *leaf = strrchr(name, '.');
+  leaf = leaf ? leaf + 1 : name;
+  return strcmp(leaf, "ptr") == 0 || strcmp(leaf, "pointer") == 0 ||
+         strcmp(leaf, "raw_ptr") == 0;
 }
 
 static bool ny_native_nir_set_param_types(ny_native_nir_builder_t *b,
@@ -3020,24 +3067,26 @@ ny_native_nir_resolve_member_expr(const ny_native_nir_builder_t *b,
 static const expr_t *
 ny_native_nir_resolve_list_literal(const ny_native_nir_builder_t *b,
                                    const expr_t *e, unsigned depth);
+static bool ny_native_nir_expr_is_f32_depth(ny_native_nir_builder_t *b,
+                                            const expr_t *e, unsigned depth);
+static bool ny_native_nir_expr_is_f64_depth(ny_native_nir_builder_t *b,
+                                            const expr_t *e, unsigned depth);
 static bool ny_native_nir_expr_is_f32(ny_native_nir_builder_t *b,
                                       const expr_t *e);
 static const stmt_t *
 ny_native_nir_find_imported_function(const ny_native_nir_builder_t *b,
                                      const char *name);
 
-static bool ny_native_nir_expr_is_f64(ny_native_nir_builder_t *b,
-                                      const expr_t *e) {
-  if (!e)
+static bool ny_native_nir_expr_is_f64_depth(ny_native_nir_builder_t *b,
+                                            const expr_t *e, unsigned depth) {
+  if (!e || depth > 8)
     return false;
   if (e->semantic.resolved && e->semantic.rep == NY_SEM_REP_F64)
     return true;
-  /*
-   * A C math declaration may carry a conservative dynamic semantic
-   * representation.  Its native leaf is nevertheless an exact raw-f64
-   * result, and this must be decided before consulting that stale annotation
-   * so the value remains f64 when stored in a local.
-   */
+  if (e->semantic.resolved && e->semantic.rep != NY_SEM_REP_TAGGED_DYNAMIC)
+    return false;
+  if (e->kind == NY_E_LITERAL)
+    return e->as.literal.kind == NY_LIT_FLOAT;
   if (e->kind == NY_E_CALL) {
     const char *leaf = ny_native_call_leaf(e);
     if (leaf && (strcmp(leaf, "__flt_sin") == 0 ||
@@ -3081,10 +3130,10 @@ static bool ny_native_nir_expr_is_f64(ny_native_nir_builder_t *b,
       return !ny_native_nir_fold_const_pow(e->as.binary.left,
                                            e->as.binary.right, &folded);
     }
-    bool f32 = ny_native_nir_expr_is_f32(b, e->as.binary.left) ||
-               ny_native_nir_expr_is_f32(b, e->as.binary.right);
-    bool f64 = ny_native_nir_expr_is_f64(b, e->as.binary.left) ||
-               ny_native_nir_expr_is_f64(b, e->as.binary.right);
+    bool f32 = ny_native_nir_expr_is_f32_depth(b, e->as.binary.left, depth + 1) ||
+               ny_native_nir_expr_is_f32_depth(b, e->as.binary.right, depth + 1);
+    bool f64 = ny_native_nir_expr_is_f64_depth(b, e->as.binary.left, depth + 1) ||
+               ny_native_nir_expr_is_f64_depth(b, e->as.binary.right, depth + 1);
     if (f32 && !f64)
       return false;
   }
@@ -3099,7 +3148,7 @@ static bool ny_native_nir_expr_is_f64(ny_native_nir_builder_t *b,
       return l->semantic_rep == NY_SEM_REP_F64 || l->is_f64;
     const expr_t *g = ny_native_nir_find_top_level_value(b, e->as.ident.name);
     return g && g != e && g->kind != NY_E_IDENT &&
-           ny_native_nir_expr_is_f64(b, g);
+           ny_native_nir_expr_is_f64_depth(b, g, depth + 1);
   }
   case NY_E_BINARY: {
     nyir_cmp_t ignored;
@@ -3110,15 +3159,15 @@ static bool ny_native_nir_expr_is_f64(ny_native_nir_builder_t *b,
           ny_native_nir_expr_is_dict(b, e->as.binary.right))
         return true;
     }
-    return ny_native_nir_expr_is_f64(b, e->as.binary.left) ||
-           ny_native_nir_expr_is_f64(b, e->as.binary.right);
+    return ny_native_nir_expr_is_f64_depth(b, e->as.binary.left, depth + 1) ||
+           ny_native_nir_expr_is_f64_depth(b, e->as.binary.right, depth + 1);
   }
   case NY_E_UNARY:
-    return ny_native_nir_expr_is_f64(b, e->as.unary.right);
+    return ny_native_nir_expr_is_f64_depth(b, e->as.unary.right, depth + 1);
   case NY_E_CALL: {
     const char *leaf = ny_native_call_leaf(e);
     if (leaf && strcmp(leaf, "get") == 0 && e->as.call.args.len >= 3) {
-      if (ny_native_nir_expr_is_f64(b, e->as.call.args.data[2].val))
+      if (ny_native_nir_expr_is_f64_depth(b, e->as.call.args.data[2].val, depth + 1))
         return true;
     }
     ny_native_leaf_kind_t kind = ny_native_leaf_kind(leaf);
@@ -3140,7 +3189,7 @@ static bool ny_native_nir_expr_is_f64(ny_native_nir_builder_t *b,
                  strcmp(leaf, "max") == 0 || strcmp(leaf, "clamp") == 0 ||
                  strcmp(leaf, "lerp") == 0)) {
       for (size_t i = 0; i < e->as.call.args.len; ++i)
-        if (ny_native_nir_expr_is_f64(b, e->as.call.args.data[i].val))
+        if (ny_native_nir_expr_is_f64_depth(b, e->as.call.args.data[i].val, depth + 1))
           return true;
     }
     if (e->as.call.callee && e->as.call.callee->kind == NY_E_IDENT) {
@@ -3163,12 +3212,12 @@ static bool ny_native_nir_expr_is_f64(ny_native_nir_builder_t *b,
                                strcmp(e->as.memcall.name, "clamp") == 0 ||
                                strcmp(e->as.memcall.name, "lerp") == 0)) {
       for (size_t i = 0; i < e->as.memcall.args.len; ++i)
-        if (ny_native_nir_expr_is_f64(b, e->as.memcall.args.data[i].val))
+        if (ny_native_nir_expr_is_f64_depth(b, e->as.memcall.args.data[i].val, depth + 1))
           return true;
     }
     if (e->as.memcall.name && strcmp(e->as.memcall.name, "get") == 0 &&
         e->as.memcall.args.len >= 2) {
-      if (ny_native_nir_expr_is_f64(b, e->as.memcall.args.data[1].val))
+      if (ny_native_nir_expr_is_f64_depth(b, e->as.memcall.args.data[1].val, depth + 1))
         return true;
     }
     return false;
@@ -3176,15 +3225,15 @@ static bool ny_native_nir_expr_is_f64(ny_native_nir_builder_t *b,
     if (e->as.list_like.len == 0)
       return false;
     for (size_t i = 0; i < e->as.list_like.len; ++i)
-      if (!ny_native_nir_expr_is_f64(b, e->as.list_like.data[i]))
+      if (!ny_native_nir_expr_is_f64_depth(b, e->as.list_like.data[i], depth + 1))
         return false;
     return true;
   case NY_E_INDEX:
-    return ny_native_nir_expr_is_f64(b, e->as.index.target);
+    return ny_native_nir_expr_is_f64_depth(b, e->as.index.target, depth + 1);
   case NY_E_MEMBER: {
     const expr_t *v = ny_native_nir_resolve_member_expr(b, e);
     if (v && v != e)
-      return ny_native_nir_expr_is_f64(b, v);
+      return ny_native_nir_expr_is_f64_depth(b, v, depth + 1);
     return false;
   }
   default:
@@ -3192,9 +3241,20 @@ static bool ny_native_nir_expr_is_f64(ny_native_nir_builder_t *b,
   }
 }
 
-static bool ny_native_nir_expr_is_f32(ny_native_nir_builder_t *b,
+static bool ny_native_nir_expr_is_f64(ny_native_nir_builder_t *b,
                                       const expr_t *e) {
-  if (!e)
+  return ny_native_nir_expr_is_f64_depth(b, e, 0);
+}
+
+static bool ny_native_nir_expr_is_f32_depth(ny_native_nir_builder_t *b,
+                                            const expr_t *e, unsigned depth) {
+  if (!e || depth > 8)
+    return false;
+  if (e->semantic.resolved && e->semantic.rep == NY_SEM_REP_F32)
+    return true;
+  if (e->semantic.resolved && e->semantic.rep != NY_SEM_REP_TAGGED_DYNAMIC)
+    return false;
+  if (e->kind == NY_E_LITERAL)
     return false;
   /*
    * Keep explicit local/parameter types ahead of stale semantic annotations.
@@ -3205,10 +3265,10 @@ static bool ny_native_nir_expr_is_f32(ny_native_nir_builder_t *b,
       return l->semantic_rep == NY_SEM_REP_F32 || l->is_f32;
   }
   if (e->kind == NY_E_BINARY) {
-    bool f32 = ny_native_nir_expr_is_f32(b, e->as.binary.left) ||
-               ny_native_nir_expr_is_f32(b, e->as.binary.right);
-    bool f64 = ny_native_nir_expr_is_f64(b, e->as.binary.left) ||
-               ny_native_nir_expr_is_f64(b, e->as.binary.right);
+    bool f32 = ny_native_nir_expr_is_f32_depth(b, e->as.binary.left, depth + 1) ||
+               ny_native_nir_expr_is_f32_depth(b, e->as.binary.right, depth + 1);
+    bool f64 = ny_native_nir_expr_is_f64_depth(b, e->as.binary.left, depth + 1) ||
+               ny_native_nir_expr_is_f64_depth(b, e->as.binary.right, depth + 1);
     if (f32 && !f64)
       return true;
   }
@@ -3221,17 +3281,17 @@ static bool ny_native_nir_expr_is_f32(ny_native_nir_builder_t *b,
       return l->semantic_rep == NY_SEM_REP_F32 || l->is_f32;
     const expr_t *g = ny_native_nir_find_top_level_value(b, e->as.ident.name);
     return g && g != e && g->kind != NY_E_IDENT &&
-           ny_native_nir_expr_is_f32(b, g);
+           ny_native_nir_expr_is_f32_depth(b, g, depth + 1);
   }
   case NY_E_BINARY: {
     nyir_cmp_t ignored;
     if (ny_native_nir_cmp(e->as.binary.op, &ignored))
       return false;
-    return ny_native_nir_expr_is_f32(b, e->as.binary.left) ||
-           ny_native_nir_expr_is_f32(b, e->as.binary.right);
+    return ny_native_nir_expr_is_f32_depth(b, e->as.binary.left, depth + 1) ||
+           ny_native_nir_expr_is_f32_depth(b, e->as.binary.right, depth + 1);
   }
   case NY_E_UNARY:
-    return ny_native_nir_expr_is_f32(b, e->as.unary.right);
+    return ny_native_nir_expr_is_f32_depth(b, e->as.unary.right, depth + 1);
   case NY_E_CALL:
     if (e->as.call.callee && e->as.call.callee->kind == NY_E_IDENT) {
       const stmt_t *fn =
@@ -3248,6 +3308,11 @@ static bool ny_native_nir_expr_is_f32(ny_native_nir_builder_t *b,
   default:
     return false;
   }
+}
+
+static bool ny_native_nir_expr_is_f32(ny_native_nir_builder_t *b,
+                                      const expr_t *e) {
+  return ny_native_nir_expr_is_f32_depth(b, e, 0);
 }
 
 /*
@@ -3401,15 +3466,15 @@ static bool ny_native_nir_expr_is_cstr(ny_native_nir_builder_t *b,
       return false;
   }
   /*
-   * `list.get(index, default)` has the type of its default at this dynamic
-   * boundary.  Semantic resolution often records the generic list result as
-   * `any`, which used to return early below and route a raw string pointer to
-   * integer formatting.  Keep this deliberately limited to list receivers:
-   * dictionary get has different key/default semantics.
+   * A sequence `get(index, string_default)` can yield a raw C string even
+   * when semantic resolution records the generic method result as `any`.
+   * Preserve the string ABI for proven list/string receivers; dictionary
+   * lookup has separate key/value semantics.
    */
   if (e->kind == NY_E_MEMCALL && e->as.memcall.name &&
       strcmp(e->as.memcall.name, "get") == 0 && e->as.memcall.args.len == 2 &&
-      ny_native_nir_expr_is_list(b, e->as.memcall.target))
+      (ny_native_nir_expr_is_list(b, e->as.memcall.target) ||
+       ny_native_nir_expr_is_cstr(b, e->as.memcall.target)))
     return ny_native_nir_expr_is_cstr(b, e->as.memcall.args.data[1].val);
   if (e->semantic.resolved)
     return e->semantic.rep == NY_SEM_REP_STRING;
@@ -3874,6 +3939,40 @@ static bool ny_native_nir_expr_is_any(ny_native_nir_builder_t *b,
       !ny_native_nir_expr_is_any(b, e->as.binary.left) &&
       !ny_native_nir_expr_is_any(b, e->as.binary.right))
     return false;
+  /*
+   * A namespace call's DECLARED return type outranks the inferred semantic
+   * rep: syntax.expand_macro declares `any`, but HM refines the use site to
+   * the macro body's int, so the tagged dynamic result crossed into raw
+   * locals (println 85 instead of 42, type() "unknown") and comparisons
+   * against literals failed.
+   */
+  if (e->kind == NY_E_MEMCALL && e->as.memcall.target &&
+      e->as.memcall.target->kind == NY_E_IDENT && e->as.memcall.name) {
+    const char *ns_alias = e->as.memcall.target->as.ident.name;
+    const stmt_t *ns_fn = e->semantic.canonical_callee_stmt;
+    const char *ns_module =
+        ns_alias ? ny_native_nir_resolve_use_alias(b, ns_alias) : NULL;
+    if (!ns_module && ns_alias && !ny_native_nir_find_local(b, ns_alias)) {
+      ny_native_nir_builder_t probe = *b;
+      probe.source_file = NULL;
+      probe.locals = NULL;
+      probe.local_count = probe.local_cap = 0;
+      ns_module = ny_native_nir_resolve_use_alias(&probe, ns_alias);
+    }
+    if (!ns_fn && ns_module) {
+      char qualified[512];
+      int qn = snprintf(qualified, sizeof(qualified), "%s.%s", ns_module,
+                        e->as.memcall.name);
+      if (qn > 0 && (size_t)qn < sizeof(qualified)) {
+        ns_fn = ny_native_nir_find_user_function(b, qualified);
+        if (!ns_fn)
+          ns_fn = ny_native_nir_find_imported_function(b, qualified);
+      }
+    }
+    if (ns_fn && ns_fn->kind == NY_S_FUNC)
+      return !ns_fn->as.fn.return_type ||
+             strcmp(ns_fn->as.fn.return_type, "any") == 0;
+  }
   if (e->semantic.resolved)
     return e->semantic.rep == NY_SEM_REP_TAGGED_DYNAMIC;
   switch (e->kind) {
@@ -3940,6 +4039,38 @@ static bool ny_native_nir_expr_is_any(ny_native_nir_builder_t *b,
                   ny_native_nir_expr_is_range(
                       b, e->as.call.callee->as.member.target)));
     }
+    if (e->as.call.callee && e->as.call.callee->kind == NY_E_MEMBER &&
+        e->as.call.callee->as.member.name &&
+        e->as.call.callee->as.member.target &&
+        e->as.call.callee->as.member.target->kind == NY_E_IDENT) {
+      /*
+       * A module-qualified call (`syntax.expand_macro(...)`) carries a
+       * MEMBER callee, so the ident branch below never fires and the call
+       * fell through to "not any": its tagged dynamic return then flowed
+       * into raw locals (println printed the tagged word 85 instead of 42
+       * and type() answered "unknown").  Resolve the alias to the
+       * module-qualified function and classify from its declared return.
+       */
+      const stmt_t *qfn = e->semantic.canonical_callee_stmt;
+      if (!qfn) {
+        const char *alias = e->as.call.callee->as.member.target->as.ident.name;
+        const char *module =
+            alias ? ny_native_nir_resolve_use_alias(b, alias) : NULL;
+        if (module) {
+          char qualified[512];
+          int qn = snprintf(qualified, sizeof(qualified), "%s.%s", module,
+                            e->as.call.callee->as.member.name);
+          if (qn > 0 && (size_t)qn < sizeof(qualified)) {
+            qfn = ny_native_nir_find_user_function(b, qualified);
+            if (!qfn)
+              qfn = ny_native_nir_find_imported_function(b, qualified);
+          }
+        }
+      }
+      if (qfn && qfn->kind == NY_S_FUNC)
+        return !qfn->as.fn.return_type ||
+               strcmp(qfn->as.fn.return_type, "any") == 0;
+    }
     if (e->as.call.callee && e->as.call.callee->kind == NY_E_IDENT &&
         e->as.call.callee->as.ident.name) {
       const char *cname = e->as.call.callee->as.ident.name;
@@ -3962,6 +4093,41 @@ static bool ny_native_nir_expr_is_any(ny_native_nir_builder_t *b,
                (ny_native_nir_expr_is_list(b, e->as.memcall.target) ||
                 ny_native_nir_expr_is_bytes(b, e->as.memcall.target) ||
                 ny_native_nir_expr_is_range(b, e->as.memcall.target)));
+    /*
+     * `module_alias.fn(...)` is a namespace call: resolve the alias exactly
+     * like the lowerer's canonicalization (fresh probe when the first
+     * lookup is defeated by bound locals) and classify from the target
+     * function's declared return.  Without this, an `any`-returning
+     * qualified helper (syntax.expand_macro) classified as raw and its
+     * tagged dynamic result reached println/type as a decimal word.
+     */
+    if (e->as.memcall.target && e->as.memcall.name &&
+        e->as.memcall.target->kind == NY_E_IDENT) {
+      const char *alias = e->as.memcall.target->as.ident.name;
+      const stmt_t *qfn = e->semantic.canonical_callee_stmt;
+      const char *module = alias ? ny_native_nir_resolve_use_alias(b, alias)
+                                 : NULL;
+      if (!module && alias && !ny_native_nir_find_local(b, alias)) {
+        ny_native_nir_builder_t probe = *b;
+        probe.source_file = NULL;
+        probe.locals = NULL;
+        probe.local_count = probe.local_cap = 0;
+        module = ny_native_nir_resolve_use_alias(&probe, alias);
+      }
+      if (!qfn && module) {
+        char qualified[512];
+        int qn = snprintf(qualified, sizeof(qualified), "%s.%s", module,
+                          e->as.memcall.name);
+        if (qn > 0 && (size_t)qn < sizeof(qualified)) {
+          qfn = ny_native_nir_find_user_function(b, qualified);
+          if (!qfn)
+            qfn = ny_native_nir_find_imported_function(b, qualified);
+        }
+      }
+      if (qfn && qfn->kind == NY_S_FUNC)
+        return !qfn->as.fn.return_type ||
+               strcmp(qfn->as.fn.return_type, "any") == 0;
+    }
     break;
   default:
     break;
@@ -4190,32 +4356,49 @@ typedef struct {
   size_t count;
   size_t cap;
 } ny_native_fn_cache_t;
-
 static ny_native_fn_cache_t ny_native_fn_cache;
+
+#define NY_FN_RESOLVE_HASH_SIZE 16384
 typedef struct {
   const char *source_file;
-  char name[512];
+  char name[256];
   const stmt_t *fn;
   bool resolved;
 } ny_native_fn_resolve_cache_entry_t;
-static ny_native_fn_resolve_cache_entry_t *ny_native_fn_resolve_cache;
-static size_t ny_native_fn_resolve_cache_len;
-static size_t ny_native_fn_resolve_cache_cap;
+static ny_native_fn_resolve_cache_entry_t ny_native_fn_resolve_hash[NY_FN_RESOLVE_HASH_SIZE];
+
+static inline uint32_t ny_resolve_hash(const char *name, const char *source_file) {
+  uint32_t h = 2166136261u;
+  for (const char *p = name; *p; ++p)
+    h = (h ^ (uint8_t)*p) * 16777619u;
+  if (source_file) {
+    uintptr_t ptr = (uintptr_t)source_file;
+    h ^= (uint32_t)(ptr ^ (ptr >> 16));
+  }
+  return h;
+}
 
 static const stmt_t *ny_native_fn_resolve_cache_get(const char *name,
                                                     const char *source_file,
                                                     bool *known) {
   if (known)
     *known = false;
-  for (size_t i = 0; i < ny_native_fn_resolve_cache_len; ++i) {
-    ny_native_fn_resolve_cache_entry_t *entry = &ny_native_fn_resolve_cache[i];
-    bool same_file = entry->source_file == source_file ||
-                     (!entry->source_file && !source_file) ||
-                     (entry->source_file && source_file &&
-                      strcmp(entry->source_file, source_file) == 0);
-    if (same_file && strcmp(entry->name, name) == 0) {
+  if (!name || !*name)
+    return NULL;
+  uint32_t slot = ny_resolve_hash(name, source_file) & (NY_FN_RESOLVE_HASH_SIZE - 1);
+  for (size_t probe = 0; probe < 4; ++probe) {
+    ny_native_fn_resolve_cache_entry_t *entry =
+        &ny_native_fn_resolve_hash[(slot + probe) & (NY_FN_RESOLVE_HASH_SIZE - 1)];
+    if (!entry->resolved)
+      return NULL;
+    if (entry->name[0] == name[0] &&
+        strcmp(entry->name, name) == 0 &&
+        (entry->source_file == source_file ||
+         (!entry->source_file && !source_file) ||
+         (entry->source_file && source_file &&
+          strcmp(entry->source_file, source_file) == 0))) {
       if (known)
-        *known = entry->resolved;
+        *known = true;
       return entry->fn;
     }
   }
@@ -4225,33 +4408,22 @@ static const stmt_t *ny_native_fn_resolve_cache_get(const char *name,
 static void ny_native_fn_resolve_cache_put(const char *name,
                                            const char *source_file,
                                            const stmt_t *fn) {
-  if (!name || strlen(name) >= sizeof(ny_native_fn_resolve_cache[0].name))
+  if (!name || !*name || strlen(name) >= sizeof(ny_native_fn_resolve_hash[0].name))
     return;
-  for (size_t i = 0; i < ny_native_fn_resolve_cache_len; ++i) {
-    ny_native_fn_resolve_cache_entry_t *entry = &ny_native_fn_resolve_cache[i];
-    bool same_file = entry->source_file == source_file ||
-                     (!entry->source_file && !source_file) ||
-                     (entry->source_file && source_file &&
-                      strcmp(entry->source_file, source_file) == 0);
-    if (same_file && strcmp(entry->name, name) == 0) {
+  uint32_t slot = ny_resolve_hash(name, source_file) & (NY_FN_RESOLVE_HASH_SIZE - 1);
+  for (size_t probe = 0; probe < 4; ++probe) {
+    ny_native_fn_resolve_cache_entry_t *entry =
+        &ny_native_fn_resolve_hash[(slot + probe) & (NY_FN_RESOLVE_HASH_SIZE - 1)];
+    if (!entry->resolved ||
+        (entry->name[0] == name[0] && strcmp(entry->name, name) == 0)) {
+      entry->source_file = source_file;
+      snprintf(entry->name, sizeof(entry->name), "%s", name);
       entry->fn = fn;
       entry->resolved = true;
       return;
     }
   }
-  if (ny_native_fn_resolve_cache_len == ny_native_fn_resolve_cache_cap) {
-    size_t cap = ny_native_fn_resolve_cache_cap
-                     ? ny_native_fn_resolve_cache_cap * 2
-                     : 256;
-    ny_native_fn_resolve_cache_entry_t *grown =
-        realloc(ny_native_fn_resolve_cache, cap * sizeof(*grown));
-    if (!grown)
-      return;
-    ny_native_fn_resolve_cache = grown;
-    ny_native_fn_resolve_cache_cap = cap;
-  }
-  ny_native_fn_resolve_cache_entry_t *entry =
-      &ny_native_fn_resolve_cache[ny_native_fn_resolve_cache_len++];
+  ny_native_fn_resolve_cache_entry_t *entry = &ny_native_fn_resolve_hash[slot];
   entry->source_file = source_file;
   snprintf(entry->name, sizeof(entry->name), "%s", name);
   entry->fn = fn;
@@ -4271,19 +4443,37 @@ ny_native_fn_resolve_cache_put_both(const ny_native_nir_builder_t *b,
   return fn;
 }
 
+#define NY_FN_CACHE_HASH_SIZE 4096
+static const stmt_t *ny_native_fn_cache_hash[NY_FN_CACHE_HASH_SIZE];
+
+static uint32_t ny_fn_name_hash(const char *name) {
+  uint32_t h = 2166136261u;
+  for (const char *p = name; *p; ++p)
+    h = (h ^ (uint8_t)*p) * 16777619u;
+  return h;
+}
+
 static const stmt_t *ny_native_fn_cache_lookup_exact(const char *name) {
   if (!name)
     return NULL;
-  for (size_t i = 0; i < ny_native_fn_cache.count; ++i) {
-    const stmt_t *fn = ny_native_fn_cache.funcs[i];
-    if (fn && fn->as.fn.name && strcmp(fn->as.fn.name, name) == 0 &&
-        !ny_is_stdlib_tok(fn->tok))
+  uint32_t slot = ny_fn_name_hash(name) & (NY_FN_CACHE_HASH_SIZE - 1);
+  for (size_t probe = 0; probe < 32; ++probe) {
+    const stmt_t *fn = ny_native_fn_cache_hash[(slot + probe) & (NY_FN_CACHE_HASH_SIZE - 1)];
+    if (!fn)
+      break;
+    if (fn->as.fn.name && strcmp(fn->as.fn.name, name) == 0)
       return fn;
   }
-  for (size_t i = 0; i < ny_native_fn_cache.count; ++i) {
-    const stmt_t *fn = ny_native_fn_cache.funcs[i];
-    if (fn && fn->as.fn.name && strcmp(fn->as.fn.name, name) == 0)
-      return fn;
+  if (strncmp(name, "std.core.", 9) == 0) {
+    const char *short_name = name + 9;
+    uint32_t slot2 = ny_fn_name_hash(short_name) & (NY_FN_CACHE_HASH_SIZE - 1);
+    for (size_t probe = 0; probe < 32; ++probe) {
+      const stmt_t *fn = ny_native_fn_cache_hash[(slot2 + probe) & (NY_FN_CACHE_HASH_SIZE - 1)];
+      if (!fn)
+        break;
+      if (fn->as.fn.name && strcmp(fn->as.fn.name, short_name) == 0)
+        return fn;
+    }
   }
   return NULL;
 }
@@ -4336,6 +4526,41 @@ static void ny_native_fn_cache_add(const stmt_t *s) {
     ny_native_fn_cache.cap = next;
   }
   ny_native_fn_cache.funcs[ny_native_fn_cache.count++] = s;
+  uint32_t slot = ny_fn_name_hash(s->as.fn.name) & (NY_FN_CACHE_HASH_SIZE - 1);
+  for (size_t probe = 0; probe < 32; ++probe) {
+    size_t idx = (slot + probe) & (NY_FN_CACHE_HASH_SIZE - 1);
+    if (!ny_native_fn_cache_hash[idx] || ny_native_fn_cache_hash[idx] == s) {
+      ny_native_fn_cache_hash[idx] = s;
+      break;
+    }
+  }
+}
+
+typedef struct {
+  const program_t *prog;
+  const stmt_t **modules;
+  size_t count;
+  size_t cap;
+} ny_native_module_cache_t;
+static ny_native_module_cache_t ny_native_module_cache;
+
+static void ny_native_module_cache_add(const stmt_t *s) {
+  if (!s || s->kind != NY_S_MODULE || !s->as.module.name)
+    return;
+  for (size_t i = 0; i < ny_native_module_cache.count; ++i) {
+    if (ny_native_module_cache.modules[i] == s)
+      return;
+  }
+  if (ny_native_module_cache.count == ny_native_module_cache.cap) {
+    size_t next = ny_native_module_cache.cap ? ny_native_module_cache.cap * 2 : 64;
+    const stmt_t **grown = realloc(ny_native_module_cache.modules,
+                                   next * sizeof(*ny_native_module_cache.modules));
+    if (!grown)
+      return;
+    ny_native_module_cache.modules = grown;
+    ny_native_module_cache.cap = next;
+  }
+  ny_native_module_cache.modules[ny_native_module_cache.count++] = s;
 }
 
 static void ny_native_fn_cache_collect(const stmt_t *s, unsigned depth) {
@@ -4356,6 +4581,7 @@ static void ny_native_fn_cache_collect(const stmt_t *s, unsigned depth) {
     return;
   }
   if (s->kind == NY_S_MODULE) {
+    ny_native_module_cache_add(s);
     for (size_t i = 0; i < s->as.module.body.len; ++i)
       ny_native_fn_cache_collect(s->as.module.body.data[i], depth + 1);
     return;
@@ -4429,15 +4655,43 @@ static bool ny_native_nir_stmt_has_defer(const stmt_t *s, unsigned depth) {
   }
 }
 
+#define NY_ALIAS_CACHE_SIZE 2048
+typedef struct {
+  const program_t *prog;
+  const char *source_file;
+  const char *module_name;
+  char alias[64];
+  char result[256];
+  bool resolved;
+  bool is_null;
+} ny_resolve_alias_cache_entry_t;
+static ny_resolve_alias_cache_entry_t ny_resolve_alias_cache[NY_ALIAS_CACHE_SIZE];
+
+static uint32_t ny_alias_cache_hash(const char *source_file, const char *module_name, const char *alias) {
+  uint32_t h = 2166136261u;
+  if (source_file) {
+    for (const char *p = source_file; *p; ++p)
+      h = (h ^ (uint8_t)*p) * 16777619u;
+  }
+  if (module_name) {
+    for (const char *p = module_name; *p; ++p)
+      h = (h ^ (uint8_t)*p) * 16777619u;
+  }
+  for (const char *p = alias; *p; ++p)
+    h = (h ^ (uint8_t)*p) * 16777619u;
+  return h;
+}
+
 static void ny_native_fn_cache_build(const program_t *prog) {
   if (ny_native_fn_cache.prog == prog)
     return;
-  free(ny_native_fn_resolve_cache);
-  ny_native_fn_resolve_cache = NULL;
-  ny_native_fn_resolve_cache_len = 0;
-  ny_native_fn_resolve_cache_cap = 0;
+  memset(ny_native_fn_resolve_hash, 0, sizeof(ny_native_fn_resolve_hash));
+  memset(ny_native_fn_cache_hash, 0, sizeof(ny_native_fn_cache_hash));
   ny_native_fn_cache.prog = prog;
   ny_native_fn_cache.count = 0;
+  ny_native_module_cache.prog = prog;
+  ny_native_module_cache.count = 0;
+  memset(ny_resolve_alias_cache, 0, sizeof(ny_resolve_alias_cache));
   if (!prog)
     return;
   for (size_t i = 0; i < prog->body.len; ++i)
@@ -4450,6 +4704,52 @@ static const stmt_t *ny_native_nir_find_nested_module(const stmt_t *s,
                                                       const char *prefix,
                                                       const char *leaf,
                                                       unsigned depth);
+
+static const stmt_t *ny_native_nir_find_module_in_prog(const program_t *prog, const char *name) {
+  if (!prog || !name)
+    return NULL;
+  if (ny_native_module_cache.prog == prog) {
+    for (size_t i = 0; i < ny_native_module_cache.count; ++i) {
+      const stmt_t *m = ny_native_module_cache.modules[i];
+      if (m && m->as.module.name && ny_native_name_matches(m->as.module.name, name))
+        return m;
+    }
+    return NULL;
+  }
+  for (size_t i = 0; i < prog->body.len; ++i) {
+    const stmt_t *found = ny_native_nir_find_module(prog->body.data[i], name, 0);
+    if (found)
+      return found;
+  }
+  return NULL;
+}
+
+static const stmt_t *ny_native_nir_find_nested_module_in_prog(const program_t *prog,
+                                                              const char *prefix,
+                                                              const char *leaf) {
+  if (!prog || !prefix || !leaf)
+    return NULL;
+  if (ny_native_module_cache.prog == prog) {
+    size_t prefix_len = strlen(prefix);
+    for (size_t i = 0; i < ny_native_module_cache.count; ++i) {
+      const stmt_t *m = ny_native_module_cache.modules[i];
+      if (m && m->as.module.name) {
+        if (strncmp(m->as.module.name, prefix, prefix_len) == 0) {
+          const char *dot = strrchr(m->as.module.name, '.');
+          if (dot && strcmp(dot + 1, leaf) == 0)
+            return m;
+        }
+      }
+    }
+    return NULL;
+  }
+  for (size_t i = 0; i < prog->body.len; ++i) {
+    const stmt_t *found = ny_native_nir_find_nested_module(prog->body.data[i], prefix, leaf, 0);
+    if (found)
+      return found;
+  }
+  return NULL;
+}
 /*
  * A package module's exports can surface its child modules' public functions
  * one level up without a call-site spelling change (`module implicitpkg`
@@ -4530,15 +4830,12 @@ ny_native_nir_find_user_function(ny_native_nir_builder_t *b, const char *name) {
    * the same names repeatedly.
    */
   if (ny_native_fn_cache.prog == b->prog && !strchr(name, '.')) {
-    for (size_t i = 0; i < ny_native_fn_cache.count; ++i) {
-      const stmt_t *indexed = ny_native_fn_cache.funcs[i];
-      if (indexed && indexed->as.fn.name &&
-          strcmp(indexed->as.fn.name, name) == 0 &&
-          (!ny_is_stdlib_tok(indexed->tok) ||
-           !ny_native_runtime_symbol(name))) {
-        ny_native_fn_resolve_cache_put(name, b->source_file, indexed);
-        return indexed;
-      }
+    const stmt_t *indexed = ny_native_fn_cache_lookup_exact(name);
+    if (indexed && indexed->as.fn.name &&
+        (!ny_is_stdlib_tok(indexed->tok) ||
+         !ny_native_runtime_symbol(name))) {
+      ny_native_fn_resolve_cache_put(name, b->source_file, indexed);
+      return indexed;
     }
   }
   /*
@@ -4590,8 +4887,11 @@ ny_native_nir_find_user_function(ny_native_nir_builder_t *b, const char *name) {
     bool ambiguous = false;
     for (size_t i = 0; i < ny_native_fn_cache.count; ++i) {
       const stmt_t *candidate = ny_native_fn_cache.funcs[i];
-      if (!candidate || !candidate->as.fn.name ||
-          strcmp(candidate->as.fn.name, lookup_name) != 0)
+      if (!candidate || !candidate->as.fn.name)
+        continue;
+      if (strcmp(candidate->as.fn.name, lookup_name) != 0 &&
+          !(strncmp(lookup_name, "std.core.", 9) == 0 &&
+            strcmp(candidate->as.fn.name, lookup_name + 9) == 0))
         continue;
       if (unique) {
         ambiguous = true;
@@ -4633,6 +4933,23 @@ ny_native_nir_find_user_function(ny_native_nir_builder_t *b, const char *name) {
       return ny_native_fn_resolve_cache_put_both(b, name, lookup_name, unique);
     }
   }
+  bool resolve_cache_known = false;
+  const stmt_t *cached_resolved = ny_native_fn_resolve_cache_get(
+      lookup_name, b->source_file, &resolve_cache_known);
+  if (resolve_cache_known)
+    return cached_resolved;
+  if (!resolve_cache_known && name && strcmp(name, lookup_name) != 0) {
+    cached_resolved = ny_native_fn_resolve_cache_get(name, b->source_file,
+                                                     &resolve_cache_known);
+    if (resolve_cache_known)
+      return cached_resolved;
+  }
+  if (ny_native_fn_cache.prog == b->prog) {
+    const stmt_t *found = ny_native_fn_cache_lookup(lookup_name);
+    if (found) {
+      return ny_native_fn_resolve_cache_put_both(b, name, lookup_name, found);
+    }
+  }
   /*
    * Prefer the branch selected for the current target. Platform modules
    * intentionally provide extern implementations in one branch and local
@@ -4649,23 +4966,6 @@ ny_native_nir_find_user_function(ny_native_nir_builder_t *b, const char *name) {
   for (size_t i = 0; i < b->prog->body.len; ++i) {
     const stmt_t *found = ny_native_nir_find_user_function_target(
         b->prog->body.data[i], lookup_name, b->options, 0);
-    if (found) {
-      return ny_native_fn_resolve_cache_put_both(b, name, lookup_name, found);
-    }
-  }
-  bool resolve_cache_known = false;
-  const stmt_t *cached_resolved = ny_native_fn_resolve_cache_get(
-      lookup_name, b->source_file, &resolve_cache_known);
-  if (resolve_cache_known)
-    return cached_resolved;
-  if (!resolve_cache_known && name && strcmp(name, lookup_name) != 0) {
-    cached_resolved = ny_native_fn_resolve_cache_get(name, b->source_file,
-                                                     &resolve_cache_known);
-    if (resolve_cache_known)
-      return cached_resolved;
-  }
-  if (ny_native_fn_cache.prog == b->prog) {
-    const stmt_t *found = ny_native_fn_cache_lookup(lookup_name);
     if (found) {
       return ny_native_fn_resolve_cache_put_both(b, name, lookup_name, found);
     }
@@ -4690,11 +4990,9 @@ ny_native_nir_find_user_function(ny_native_nir_builder_t *b, const char *name) {
       char module_prefix[256];
       memcpy(module_prefix, lookup_name, module_len);
       module_prefix[module_len] = '\0';
-      for (size_t i = 0; i < b->prog->body.len; ++i) {
-        const stmt_t *module =
-            ny_native_nir_find_module(b->prog->body.data[i], module_prefix, 0);
-        if (!module)
-          continue;
+      const stmt_t *module =
+          ny_native_nir_find_module_in_prog(b->prog, module_prefix);
+      if (module) {
         const stmt_t *found =
             ny_native_nir_find_user_function_in_stmt(module, leaf, 0);
         if (!found)
@@ -5326,9 +5624,19 @@ static bool ny_native_nir_user_defined_fn(ny_native_nir_builder_t *b,
   return res;
 }
 
+#define NY_TOP_VAL_CACHE_SIZE 2048
+typedef struct {
+  const program_t *prog;
+  const char *source_file;
+  char name[128];
+  const expr_t *result;
+  bool resolved;
+} ny_top_val_cache_entry_t;
+static ny_top_val_cache_entry_t ny_top_val_cache[NY_TOP_VAL_CACHE_SIZE];
+
 static const expr_t *
-ny_native_nir_find_top_level_value(const ny_native_nir_builder_t *b,
-                                   const char *name) {
+ny_native_nir_find_top_level_value_uncached(const ny_native_nir_builder_t *b,
+                                            const char *name) {
   if (!b || !b->prog || !name)
     return NULL;
   const expr_t *fallback = NULL;
@@ -5364,6 +5672,30 @@ ny_native_nir_find_top_level_value(const ny_native_nir_builder_t *b,
   if (fallback)
     return fallback;
   return ny_native_nir_find_imported_value(b, name);
+}
+
+static const expr_t *
+ny_native_nir_find_top_level_value(const ny_native_nir_builder_t *b,
+                                   const char *name) {
+  if (!b || !b->prog || !name)
+    return NULL;
+  uint32_t h = 2166136261u;
+  for (const char *p = name; *p; ++p)
+    h = (h ^ (uint8_t)*p) * 16777619u;
+  uint32_t idx = h % NY_TOP_VAL_CACHE_SIZE;
+  if (ny_top_val_cache[idx].prog == b->prog &&
+      ny_top_val_cache[idx].resolved &&
+      ny_top_val_cache[idx].source_file == b->source_file &&
+      strcmp(ny_top_val_cache[idx].name, name) == 0)
+    return ny_top_val_cache[idx].result;
+
+  const expr_t *res = ny_native_nir_find_top_level_value_uncached(b, name);
+  ny_top_val_cache[idx].prog = b->prog;
+  ny_top_val_cache[idx].source_file = b->source_file;
+  snprintf(ny_top_val_cache[idx].name, sizeof(ny_top_val_cache[idx].name), "%s", name);
+  ny_top_val_cache[idx].result = res;
+  ny_top_val_cache[idx].resolved = true;
+  return res;
 }
 
 static const expr_t *
@@ -5459,6 +5791,92 @@ ny_native_nir_find_top_level_value_in_stmt(const stmt_t *s, const char *name,
                                                               name, depth + 1);
   }
   return NULL;
+}
+
+static const stmt_t *
+ny_native_nir_find_top_level_var_in_stmt(const stmt_t *s, const char *name,
+                                         unsigned depth) {
+  if (!s || !name || depth > 64)
+    return NULL;
+  if (s->kind == NY_S_VAR) {
+    for (size_t n = 0; n < s->as.var.names.len; ++n)
+      if (s->as.var.names.data[n] && strcmp(s->as.var.names.data[n], name) == 0)
+        return s;
+    return NULL;
+  }
+  if (s->kind == NY_S_MODULE) {
+    for (size_t i = 0; i < s->as.module.body.len; ++i) {
+      const stmt_t *found = ny_native_nir_find_top_level_var_in_stmt(
+          s->as.module.body.data[i], name, depth + 1);
+      if (found)
+        return found;
+    }
+    return NULL;
+  }
+  if (s->kind == NY_S_BLOCK) {
+    for (size_t i = 0; i < s->as.block.body.len; ++i) {
+      const stmt_t *found = ny_native_nir_find_top_level_var_in_stmt(
+          s->as.block.body.data[i], name, depth + 1);
+      if (found)
+        return found;
+    }
+    return NULL;
+  }
+  if (s->kind == NY_S_IF) {
+    const stmt_t *found = ny_native_nir_find_top_level_var_in_stmt(
+        s->as.iff.conseq, name, depth + 1);
+    return found ? found
+                 : ny_native_nir_find_top_level_var_in_stmt(s->as.iff.alt,
+                                                            name, depth + 1);
+  }
+  return NULL;
+}
+
+static const stmt_t *
+ny_native_nir_find_top_level_var_stmt(const ny_native_nir_builder_t *b,
+                                      const char *name) {
+  if (!b || !b->prog || !name)
+    return NULL;
+  for (size_t i = 0; i < b->prog->body.len; ++i) {
+    const stmt_t *found = ny_native_nir_find_top_level_var_in_stmt(
+        b->prog->body.data[i], name, 0);
+    if (found)
+      return found;
+  }
+  return NULL;
+}
+
+/* A flattened program can contain same-named globals from several modules.
+ * The first declaration is not enough to prove that a list is immutable. */
+static bool ny_native_nir_has_mutable_top_var(const stmt_t *s,
+                                               const char *name,
+                                               unsigned depth) {
+  if (!s || !name || depth > 64)
+    return false;
+  if (s->kind == NY_S_VAR) {
+    if (!s->as.var.is_mut)
+      return false;
+    for (size_t i = 0; i < s->as.var.names.len; ++i)
+      if (s->as.var.names.data[i] &&
+          strcmp(s->as.var.names.data[i], name) == 0)
+        return true;
+    return false;
+  }
+  if (s->kind == NY_S_MODULE) {
+    for (size_t i = 0; i < s->as.module.body.len; ++i)
+      if (ny_native_nir_has_mutable_top_var(s->as.module.body.data[i], name,
+                                            depth + 1))
+        return true;
+  } else if (s->kind == NY_S_BLOCK) {
+    for (size_t i = 0; i < s->as.block.body.len; ++i)
+      if (ny_native_nir_has_mutable_top_var(s->as.block.body.data[i], name,
+                                            depth + 1))
+        return true;
+  } else if (s->kind == NY_S_IF) {
+    return ny_native_nir_has_mutable_top_var(s->as.iff.conseq, name, depth + 1) ||
+           ny_native_nir_has_mutable_top_var(s->as.iff.alt, name, depth + 1);
+  }
+  return false;
 }
 
 /*
@@ -5641,24 +6059,12 @@ static const char *ny_native_nir_use_alias_in_stmt(const stmt_t *s,
 }
 
 static const char *
-ny_native_nir_resolve_use_alias(const ny_native_nir_builder_t *b,
-                                const char *alias) {
+ny_native_nir_resolve_use_alias_uncached(const ny_native_nir_builder_t *b,
+                                         const char *alias) {
   if (!b || !b->prog || !alias)
     return NULL;
-  /*
-   * A parameter/local shadows every imported module basename.  The expanded
-   * stdlib can contain an unrelated `use ... as f` while a method in another
-   * module legitimately uses `f` as its receiver; treating that local as a
-   * module alias rewrites `f.evaluate(...)` into a non-existent qualified
-   * symbol such as `std.math.float.evaluate`.
-   */
-  if (ny_native_nir_find_local((ny_native_nir_builder_t *)b, alias))
-    return NULL;
   if (b->module_name && *b->module_name) {
-    const stmt_t *owner = NULL;
-    for (size_t i = 0; i < b->prog->body.len && !owner; ++i)
-      owner =
-          ny_native_nir_find_module(b->prog->body.data[i], b->module_name, 0);
+    const stmt_t *owner = ny_native_nir_find_module_in_prog(b->prog, b->module_name);
     if (owner && owner->kind == NY_S_MODULE) {
       for (size_t i = 0; i < owner->as.module.body.len; ++i) {
         const stmt_t *use = owner->as.module.body.data[i];
@@ -5683,16 +6089,14 @@ ny_native_nir_resolve_use_alias(const ny_native_nir_builder_t *b,
           char prefix[512];
           int pn = snprintf(prefix, sizeof(prefix), "%s.", use->as.use.module);
           if (pn > 0 && (size_t)pn < sizeof(prefix)) {
-            for (size_t j = 0; j < b->prog->body.len; ++j) {
-              const stmt_t *m = ny_native_nir_find_nested_module(
-                  b->prog->body.data[j], prefix, alias, 0);
-              if (m && m->as.module.name) {
-                static char out[8][512];
-                static size_t next_out = 0;
-                char *res = out[next_out++ % 8];
-                snprintf(res, sizeof(out[0]), "%s", m->as.module.name);
-                return res;
-              }
+            const stmt_t *m = ny_native_nir_find_nested_module_in_prog(
+                b->prog, prefix, alias);
+            if (m && m->as.module.name) {
+              static char out[8][512];
+              static size_t next_out = 0;
+              char *res = out[next_out++ % 8];
+              snprintf(res, sizeof(out[0]), "%s", m->as.module.name);
+              return res;
             }
           }
         }
@@ -5727,35 +6131,67 @@ ny_native_nir_resolve_use_alias(const ny_native_nir_builder_t *b,
     int n = snprintf(candidate, sizeof(candidate), "%s.%s", stmt->as.use.module,
                      alias);
     if (n > 0 && (size_t)n < sizeof(candidate)) {
-      for (size_t j = 0; j < b->prog->body.len; ++j) {
-        const stmt_t *m =
-            ny_native_nir_find_module(b->prog->body.data[j], candidate, 0);
-        if (m) {
-          static char out[8][512];
-          static size_t next_out = 0;
-          char *res = out[next_out++ % 8];
-          snprintf(res, sizeof(out[0]), "%s", candidate);
-          return res;
-        }
+      const stmt_t *m =
+          ny_native_nir_find_module_in_prog(b->prog, candidate);
+      if (m) {
+        static char out[8][512];
+        static size_t next_out = 0;
+        char *res = out[next_out++ % 8];
+        snprintf(res, sizeof(out[0]), "%s", candidate);
+        return res;
       }
     }
     char prefix[512];
     int pn = snprintf(prefix, sizeof(prefix), "%s.", stmt->as.use.module);
     if (pn > 0 && (size_t)pn < sizeof(prefix)) {
-      for (size_t j = 0; j < b->prog->body.len; ++j) {
-        const stmt_t *m = ny_native_nir_find_nested_module(
-            b->prog->body.data[j], prefix, alias, 0);
-        if (m && m->as.module.name) {
-          static char out[8][512];
-          static size_t next_out = 0;
-          char *res = out[next_out++ % 8];
-          snprintf(res, sizeof(out[0]), "%s", m->as.module.name);
-          return res;
-        }
+      const stmt_t *m = ny_native_nir_find_nested_module_in_prog(
+          b->prog, prefix, alias);
+      if (m && m->as.module.name) {
+        static char out[8][512];
+        static size_t next_out = 0;
+        char *res = out[next_out++ % 8];
+        snprintf(res, sizeof(out[0]), "%s", m->as.module.name);
+        return res;
       }
     }
   }
   return NULL;
+}
+
+static const char *
+ny_native_nir_resolve_use_alias(const ny_native_nir_builder_t *b,
+                                const char *alias) {
+  if (!b || !b->prog || !alias)
+    return NULL;
+  if (ny_native_nir_find_local((ny_native_nir_builder_t *)b, alias))
+    return NULL;
+  uint32_t slot = ny_alias_cache_hash(b->source_file, b->module_name, alias) &
+                  (NY_ALIAS_CACHE_SIZE - 1);
+  ny_resolve_alias_cache_entry_t *entry = &ny_resolve_alias_cache[slot];
+  if (entry->resolved && entry->prog == b->prog &&
+      ((entry->source_file == b->source_file) ||
+       (entry->source_file && b->source_file &&
+        strcmp(entry->source_file, b->source_file) == 0)) &&
+      ((entry->module_name == b->module_name) ||
+       (entry->module_name && b->module_name &&
+        strcmp(entry->module_name, b->module_name) == 0)) &&
+      strcmp(entry->alias, alias) == 0) {
+    return entry->is_null ? NULL : entry->result;
+  }
+  const char *res = ny_native_nir_resolve_use_alias_uncached(b, alias);
+  entry->prog = b->prog;
+  entry->source_file = b->source_file;
+  entry->module_name = b->module_name;
+  snprintf(entry->alias, sizeof(entry->alias), "%s", alias);
+  if (res) {
+    snprintf(entry->result, sizeof(entry->result), "%s", res);
+    entry->is_null = false;
+  } else {
+    entry->result[0] = '\0';
+    entry->is_null = true;
+  }
+  entry->resolved = true;
+  return res;
 }
 
 static const stmt_t *
@@ -6351,6 +6787,52 @@ static bool ny_native_nir_expr_is_bytes(const ny_native_nir_builder_t *b,
   return false;
 }
 
+static bool ny_native_nir_expr_is_ptr(const ny_native_nir_builder_t *b,
+                                      const expr_t *e) {
+  if (!b || !e)
+    return false;
+  if (e->semantic.resolved && e->semantic.rep == NY_SEM_REP_POINTER)
+    return true;
+  if (e->kind == NY_E_CALL) {
+    const char *leaf = ny_native_call_leaf(e);
+    if (leaf &&
+        (strcmp(leaf, "malloc") == 0 || strcmp(leaf, "malloc_raw") == 0 ||
+         strcmp(leaf, "__malloc") == 0 || strcmp(leaf, "__malloc_raw") == 0 ||
+         strcmp(leaf, "rt_malloc") == 0 || strcmp(leaf, "rt_zalloc_raw") == 0 ||
+         strcmp(leaf, "realloc") == 0 || strcmp(leaf, "__realloc") == 0 ||
+         strcmp(leaf, "__ptr_add") == 0 || strcmp(leaf, "__ptr_sub") == 0))
+      return true;
+    const stmt_t *fn = leaf ? ny_native_nir_find_user_function(
+                                  (ny_native_nir_builder_t *)b, leaf)
+                            : NULL;
+    return fn && ny_native_type_name_is_ptr(fn->as.fn.return_type);
+  }
+  if (e->kind == NY_E_MEMCALL) {
+    const stmt_t *fn =
+        e->as.memcall.name
+            ? ny_native_nir_find_user_function((ny_native_nir_builder_t *)b,
+                                               e->as.memcall.name)
+            : NULL;
+    return fn && ny_native_type_name_is_ptr(fn->as.fn.return_type);
+  }
+  if (e->kind == NY_E_IDENT) {
+    ny_native_nir_local_t *local = ny_native_nir_find_local(
+        (ny_native_nir_builder_t *)b, e->as.ident.name);
+    if (local)
+      return local->semantic_rep == NY_SEM_REP_POINTER ||
+             ny_native_type_name_is_ptr(local->type_name);
+    const expr_t *global =
+        ny_native_nir_find_top_level_value(b, e->as.ident.name);
+    return global && global != e && global->kind != NY_E_IDENT &&
+           ny_native_nir_expr_is_ptr(b, global);
+  }
+  if (e->kind == NY_E_MEMBER) {
+    const expr_t *global = ny_native_nir_resolve_member_expr(b, e);
+    return global && global != e && ny_native_nir_expr_is_ptr(b, global);
+  }
+  return false;
+}
+
 static bool ny_native_nir_expr_is_dict(const ny_native_nir_builder_t *b,
                                        const expr_t *e) {
   if (!b || !e)
@@ -6437,6 +6919,16 @@ ny_native_nir_resolve_list_literal(const ny_native_nir_builder_t *b,
         (ny_native_nir_builder_t *)b, e->as.ident.name);
     if (local && !local->semantic_mutable && local->list_literal)
       return local->list_literal;
+    if (b->prog) {
+      for (size_t i = 0; i < b->prog->body.len; ++i)
+        if (ny_native_nir_has_mutable_top_var(b->prog->body.data[i],
+                                              e->as.ident.name, 0))
+          return NULL;
+    }
+    const stmt_t *top_stmt =
+        ny_native_nir_find_top_level_var_stmt(b, e->as.ident.name);
+    if (top_stmt && top_stmt->kind == NY_S_VAR && top_stmt->as.var.is_mut)
+      return NULL;
     const expr_t *v = ny_native_nir_find_top_level_value(b, e->as.ident.name);
     if (v && v != e)
       return ny_native_nir_resolve_list_literal(b, v, depth + 1);
@@ -7555,21 +8047,44 @@ static bool ny_native_find_impl_in_stmt(const stmt_t *s,
  * carry a callable target.  Keep that dispatch decision backend-local and
  * use the declared nominal type captured on each local binding.
  */
+static bool ny_native_type_alias_eq(const char *a, const char *b) {
+  if (!a || !b)
+    return false;
+  if (strcmp(a, b) == 0)
+    return true;
+  if ((strcmp(a, "Vector2") == 0 && strcmp(b, "vec2") == 0) ||
+      (strcmp(a, "vec2") == 0 && strcmp(b, "Vector2") == 0))
+    return true;
+  if ((strcmp(a, "Vector3") == 0 && strcmp(b, "vec3") == 0) ||
+      (strcmp(a, "vec3") == 0 && strcmp(b, "Vector3") == 0))
+    return true;
+  if ((strcmp(a, "Vector4") == 0 && strcmp(b, "vec4") == 0) ||
+      (strcmp(a, "vec4") == 0 && strcmp(b, "Vector4") == 0))
+    return true;
+  return false;
+}
+
 static const stmt_t *
 ny_native_find_impl_operator_in_stmt(const stmt_t *s, const char *owner,
                                      const char *op, const char *right_type) {
   if (!s || !op)
     return NULL;
   if (s->kind == NY_S_IMPL && s->as.impl.type_name &&
-      (!owner || strcmp(s->as.impl.type_name, owner) == 0)) {
+      (!owner || ny_native_type_alias_eq(s->as.impl.type_name, owner))) {
     for (size_t i = 0; i < s->as.impl.methods.len; ++i) {
       const stmt_t *m = s->as.impl.methods.data[i];
       if (!m || m->kind != NY_S_OPERATOR || !m->as.oper.op ||
           strcmp(m->as.oper.op, op) != 0)
         continue;
-      if (!right_type || !m->as.oper.right_type ||
-          strcmp(m->as.oper.right_type, right_type) != 0)
+      if (right_type && m->as.oper.right_type) {
+        const char *expected = strcmp(m->as.oper.right_type, "self") == 0
+                                   ? s->as.impl.type_name
+                                   : m->as.oper.right_type;
+        if (!ny_native_type_alias_eq(expected, right_type))
+          continue;
+      } else if (right_type || m->as.oper.right_type) {
         continue;
+      }
       return m;
     }
   }
@@ -7584,20 +8099,61 @@ ny_native_find_impl_operator_in_stmt(const stmt_t *s, const char *owner,
   return NULL;
 }
 
+static const stmt_t *
+ny_native_nir_find_operator(const ny_native_nir_builder_t *b, const expr_t *e);
+
 static const char *
 ny_native_nir_expr_type_name(const ny_native_nir_builder_t *b,
                              const expr_t *e) {
   if (!b || !e)
     return NULL;
+  if (e->tok.kind == NY_T_NIL)
+    return "nil";
+  if (e->kind == NY_E_LITERAL) {
+    switch (e->as.literal.kind) {
+    case NY_LIT_INT: return "int";
+    case NY_LIT_FLOAT: return "f64";
+    case NY_LIT_STR: return "str";
+    case NY_LIT_BOOL: return "bool";
+    }
+  }
   if (e->kind == NY_E_IDENT && e->as.ident.name) {
     const ny_native_nir_local_t *local = ny_native_nir_find_local(
         (ny_native_nir_builder_t *)b, e->as.ident.name);
-    return local ? local->type_name : NULL;
+    if (local) {
+      if (local->type_name)
+        return local->type_name;
+      if (local->is_list)
+        return "list";
+      if (local->is_dict)
+        return "dict";
+      if (local->is_cstr)
+        return "str";
+    }
   }
+  if (e->kind == NY_E_LIST || ny_native_nir_expr_is_list(b, e))
+    return "list";
+  if (e->kind == NY_E_DICT || ny_native_nir_expr_is_dict(b, e))
+    return "dict";
+  if (ny_native_nir_expr_is_cstr((ny_native_nir_builder_t *)b, (expr_t *)e))
+    return "str";
+  if (e->semantic.canonical_callee) {
+    const stmt_t *fn = ny_native_fn_cache_lookup_exact(e->semantic.canonical_callee);
+    if (!fn)
+      fn = ny_native_nir_find_user_function((ny_native_nir_builder_t *)b,
+                                            e->semantic.canonical_callee);
+    if (fn && fn->as.fn.return_type)
+      return fn->as.fn.return_type;
+  }
+  if (e->semantic.canonical_callee_stmt &&
+      e->semantic.canonical_callee_stmt->as.fn.return_type)
+    return e->semantic.canonical_callee_stmt->as.fn.return_type;
   if (e->kind == NY_E_CALL && e->as.call.callee &&
       e->as.call.callee->kind == NY_E_IDENT) {
     const char *name = e->as.call.callee->as.ident.name;
     const stmt_t *fn = ny_native_fn_cache_lookup_exact(name);
+    if (!fn)
+      fn = ny_native_nir_find_user_function((ny_native_nir_builder_t *)b, name);
     if (fn && fn->as.fn.return_type)
       return fn->as.fn.return_type;
     if (b->prog) {
@@ -7617,11 +8173,31 @@ ny_native_nir_expr_type_name(const ny_native_nir_builder_t *b,
     method = e->as.memcall.name;
   }
   if (receiver && method) {
+    if (receiver->kind == NY_E_IDENT && receiver->as.ident.name) {
+      const char *mod = ny_native_nir_resolve_use_alias(b, receiver->as.ident.name);
+      if (mod) {
+        char qual[512];
+        snprintf(qual, sizeof(qual), "%s.%s", mod, method);
+        const stmt_t *fn = ny_native_fn_cache_lookup_exact(qual);
+        if (!fn)
+          fn = ny_native_nir_find_user_function((ny_native_nir_builder_t *)b, qual);
+        if (fn && fn->as.fn.return_type)
+          return fn->as.fn.return_type;
+      }
+    }
     const stmt_t *fn = ny_native_nir_find_attached_method(b, receiver, method);
     if (fn && fn->as.fn.return_type)
       return strcmp(fn->as.fn.return_type, "self") == 0
                  ? ny_native_nir_expr_type_name(b, receiver)
                  : fn->as.fn.return_type;
+  }
+  if (e->kind == NY_E_BINARY) {
+    const stmt_t *op_stmt = ny_native_nir_find_operator(b, e);
+    if (op_stmt && op_stmt->as.oper.return_type) {
+      if (strcmp(op_stmt->as.oper.return_type, "self") == 0)
+        return ny_native_nir_expr_type_name(b, e->as.binary.left);
+      return op_stmt->as.oper.return_type;
+    }
   }
   return NULL;
 }
@@ -7652,8 +8228,10 @@ ny_native_find_attached_method_in_stmt(const stmt_t *s, const char *owner,
       strcmp(s->as.impl.type_name, owner) == 0) {
     for (size_t i = 0; i < s->as.impl.methods.len; ++i) {
       const stmt_t *m = s->as.impl.methods.data[i];
+      const char *mleaf = m && m->as.fn.name ? ny_native_leaf_name(m->as.fn.name) : NULL;
       if (m && m->kind == NY_S_FUNC && m->as.fn.name &&
-          strcmp(m->as.fn.name, method) == 0)
+          (strcmp(m->as.fn.name, method) == 0 ||
+           (mleaf && strcmp(mleaf, method) == 0)))
         return m;
     }
   }
@@ -7813,7 +8391,7 @@ static int ny_native_nir_lower_dict_key(ny_native_nir_builder_t *b,
       (nyir_inst_t){.op = NYIR_OR_I64, .dst = -1, .a = shifted, .b = one});
 }
 
-#include "lower/lower_call.h"
+#include "lower/lower_call.h" /* call ABI lowering */
 
 #include "lower/lower_expr.h"
 

@@ -2458,6 +2458,14 @@ static const char *ny_resolve_export_source(codegen_t *cg, const char *source,
     return source;
   if (lookup_fun_exact(cg, source) || lookup_global_exact(cg, source))
     return source;
+  /*
+   * A declared MODULE path is its own export source.  Without this check
+   * "std.os.io" was treated as the export "io" of the parent std.os facade,
+   * and the facade's own `use std.core.io` rewrote the target to
+   * std.core.io, so osio.spawn failed with "no exported member 'spawn'".
+   */
+  if (find_module_stmt_any(cg, source))
+    return source;
   const char *dot = strrchr(source, '.');
   if (!dot || dot == source || !dot[1])
     return source;

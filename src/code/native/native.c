@@ -404,6 +404,11 @@ static bool ny_native_vm_call_resolve(void *opaque, const char *symbol,
       *out = rt_zalloc_raw(args ? args[0] : 0);
     return true;
   }
+  if (strcmp(symbol, "rt_malloc_i64") == 0 && arg_count == 1) {
+    if (out)
+      *out = rt_malloc_i64(args ? args[0] : 0);
+    return true;
+  }
   if (strcmp(symbol, "rt_zfree_raw") == 0 && arg_count == 1) {
     if (out)
       *out = rt_zfree_raw(args ? args[0] : 0);

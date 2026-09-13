@@ -965,9 +965,9 @@ static const nyir_func_t *nyir_find_inline_callee(const char *name) {
 }
 
 static bool nyir_func_is_inline_candidate(const nyir_func_t *f) {
-  if (!f || f->len == 0 || f->len > 32)
+  if (!f || f->len == 0 || f->len > 48)
     return false;
-  if (f->len > 12 && !ny_native_profile_should_inline(f->len))
+  if (f->len > 24 && !ny_native_profile_should_inline(f->len))
     return false;
   for (size_t i = 0; i < f->len; ++i) {
     const nyir_inst_t *in = &f->data[i];
@@ -2469,7 +2469,7 @@ bool nyir_inline_general(nyir_func_t *f) {
    * which is always semantically safe.
    */
   const size_t initial_len = f->len;
-  const size_t splice_budget = initial_len * 4u + 256u;
+  const size_t splice_budget = initial_len * 16u + 2048u;
   size_t spliced_total = 0;
   for (size_t iter = 0; iter < max_rounds; ++iter) {
     if (ny_trace_enabled("NY_TRACE_LOWER"))
@@ -2527,7 +2527,10 @@ bool nyir_inline_general(nyir_func_t *f) {
       if (inserted > 0) {
         nyir_inline_expansion_splice(expansions, old_len, i, inserted, child);
         changed = true;
-        spliced_total += inserted;
+        bool is_tiny_leaf =
+            (callee->len <= 24 && !nyir_func_has_control_flow(callee));
+        if (!is_tiny_leaf)
+          spliced_total += inserted;
         if (spliced_total > splice_budget) {
           /*
            * Budget exhausted: keep the remaining calls as calls.  The body

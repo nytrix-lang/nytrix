@@ -1109,24 +1109,43 @@ bool ny_llvm_emit_nyir_func(codegen_t *cg, const nyir_func_t *f,
        * Keep the LLVM path's bounds contract identical to the native
        * encoders: `b` is the byte offset and `c` is an optional dynamic
        * exclusive bound; when `c` is absent, `imm` is the fixed bound.
+       * Emit an inline unsigned comparison (ULT) branching to a cold trap block
+       * so loop bodies stay free of opaque external calls and can vectorize.
        */
-      LLVMTypeRef params[] = {cg->type_i64, cg->type_i64};
-      LLVMTypeRef check_ty = LLVMFunctionType(
-          LLVMVoidTypeInContext(cg->ctx), params, 2, false);
-      LLVMValueRef check = LLVMGetNamedFunction(
-          cg->module, "rt_bounds_check");
-      if (!check) {
-        check = LLVMAddFunction(cg->module, "rt_bounds_check", check_ty);
-        LLVMSetLinkage(check, LLVMExternalLinkage);
-      }
       LLVMValueRef offset =
           (in->b >= 0 && (size_t)in->b < val_count) ? vals[in->b] : NULL;
       LLVMValueRef limit =
           (in->c >= 0 && (size_t)in->c < val_count) ? vals[in->c] : NULL;
       if (!limit)
         limit = LLVMConstInt(cg->type_i64, (uint64_t)in->imm, false);
-      LLVMValueRef args[] = {ny_as_i64(cg, offset), ny_as_i64(cg, limit)};
+      if (!offset || !limit)
+        break;
+
+      LLVMValueRef off_val = ny_as_i64(cg, offset);
+      LLVMValueRef lim_val = ny_as_i64(cg, limit);
+      LLVMValueRef ok = LLVMBuildICmp(cg->builder, LLVMIntULT, off_val, lim_val, "bcheck_ok");
+
+      LLVMBasicBlockRef cur_bb = LLVMGetInsertBlock(cg->builder);
+      LLVMValueRef cur_fn = LLVMGetBasicBlockParent(cur_bb);
+      LLVMBasicBlockRef fail_bb = LLVMAppendBasicBlockInContext(cg->ctx, cur_fn, "bcheck_fail");
+      LLVMBasicBlockRef cont_bb = LLVMAppendBasicBlockInContext(cg->ctx, cur_fn, "bcheck_cont");
+
+      LLVMBuildCondBr(cg->builder, ok, cont_bb, fail_bb);
+
+      LLVMPositionBuilderAtEnd(cg->builder, fail_bb);
+      LLVMTypeRef params[] = {cg->type_i64, cg->type_i64};
+      LLVMTypeRef check_ty = LLVMFunctionType(
+          LLVMVoidTypeInContext(cg->ctx), params, 2, false);
+      LLVMValueRef check = LLVMGetNamedFunction(cg->module, "rt_bounds_check");
+      if (!check) {
+        check = LLVMAddFunction(cg->module, "rt_bounds_check", check_ty);
+        LLVMSetLinkage(check, LLVMExternalLinkage);
+      }
+      LLVMValueRef args[] = {off_val, lim_val};
       LLVMBuildCall2(cg->builder, check_ty, check, args, 2, "");
+      LLVMBuildUnreachable(cg->builder);
+
+      LLVMPositionBuilderAtEnd(cg->builder, cont_bb);
       break;
     }
 
@@ -1162,7 +1181,7 @@ bool ny_llvm_emit_nyir_func(codegen_t *cg, const nyir_func_t *f,
             LLVMSetLinkage(sym, LLVMPrivateLinkage);
             LLVMSetAlignment(sym, 16);
           } else if (ny_native_arraytab_get(in->symbol, &elems, &count, &stride)) {
-            size_t total_bytes = 24 + count * stride;
+            size_t total_bytes = 32 + count * stride;
             if (stride == 24) {
               for (size_t k = 0; k < count; ++k)
                 if (elems[k].str)
@@ -1171,10 +1190,11 @@ bool ny_llvm_emit_nyir_func(codegen_t *cg, const nyir_func_t *f,
             uint8_t *buf = calloc(1, total_bytes);
             if (buf) {
               uint64_t *hdr = (uint64_t *)buf;
-              hdr[0] = count;
-              hdr[1] = stride;
-              hdr[2] = count;
-              size_t off = 24;
+              hdr[0] = (uint64_t)NY_NATIVE_TBUF_MAGIC;
+              hdr[1] = count;
+              hdr[2] = stride;
+              hdr[3] = count;
+              size_t off = 32;
               size_t string_base = count * stride;
               size_t string_cursor = 0;
               for (size_t k = 0; k < count; ++k) {
@@ -1208,7 +1228,7 @@ bool ny_llvm_emit_nyir_func(codegen_t *cg, const nyir_func_t *f,
               LLVMSetGlobalConstant(base_global, false);
               LLVMSetLinkage(base_global, LLVMPrivateLinkage);
               LLVMSetAlignment(base_global, 16);
-              LLVMValueRef indices[] = {LLVMConstInt(cg->type_i64, 0, false), LLVMConstInt(cg->type_i64, 24, false)};
+              LLVMValueRef indices[] = {LLVMConstInt(cg->type_i64, 0, false), LLVMConstInt(cg->type_i64, 32, false)};
               LLVMValueRef gep = LLVMConstInBoundsGEP2(LLVMTypeOf(bytes_const), base_global, indices, 2);
               sym = LLVMAddAlias2(cg->module, cg->type_i64, 0, gep, in->symbol);
               LLVMSetLinkage(sym, LLVMPrivateLinkage);
@@ -1257,6 +1277,11 @@ bool ny_llvm_emit_nyir_func(codegen_t *cg, const nyir_func_t *f,
         callee_name = user_callee_name;
       }
       LLVMValueRef callee = LLVMGetNamedFunction(cg->module, callee_name);
+      if (!callee && strncmp(callee_name, "ny_fn_std.core.", 15) == 0) {
+        char stripped[512];
+        snprintf(stripped, sizeof(stripped), "ny_fn_%s", callee_name + 15);
+        callee = LLVMGetNamedFunction(cg->module, stripped);
+      }
       LLVMTypeRef *arg_tys = malloc(sizeof(LLVMTypeRef) * (call_argc + 1));
       for (int k = 0; k < call_argc; ++k) {
         int v = call_args[k];

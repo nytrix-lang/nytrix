@@ -46,26 +46,41 @@ fn lookup(dict index, str canonical, int max_variables=16,
    int max_memory=100000) any {
    def probe = _probe(index, canonical)
    def value = index.get("entries").get(cert.key(probe), nil)
-   if value == nil || !cert.check(value, max_variables, max_nodes,
-      max_depth, max_steps, max_memory) {
+   if value == nil || cert.check(value, max_variables, max_nodes, max_depth,
+      max_steps, max_memory) == false {
       return nil
    }
    value
+}
+
+fn _put_impl(dict index, dict certificate, int max_variables=16,
+   int max_nodes=100000, int max_depth=128, int max_steps=1000000,
+   int max_memory=100000) bool {
+   def module_match = certificate.get("module_version", "") ==
+      index.get("module_version")
+   def dependency_match = certificate.get("dependency_digest", "") ==
+      index.get("dependency_digest")
+   def checker_match = certificate.get("checker_version", "") ==
+      index.get("checker_version")
+   def checked = cert.check(certificate, max_variables, max_nodes, max_depth,
+      max_steps, max_memory)
+   if module_match == false || dependency_match == false ||
+   checker_match == false || checked == false {
+      return false
+   }
+   def entries = index.get("entries", dict(0))
+   def key = cert.key(certificate)
+   entries = dict_set(entries, key, certificate)
+   index = dict_set(index, "entries", entries)
+   true
 }
 
 ;; Returns the result of the `put` operation.
 fn put(dict index, dict certificate, int max_variables=16,
    int max_nodes=100000, int max_depth=128, int max_steps=1000000,
    int max_memory=100000) bool {
-   if certificate.get("module_version", "") != index.get("module_version") ||
-   certificate.get("dependency_digest", "") != index.get("dependency_digest") ||
-   certificate.get("checker_version", "") != index.get("checker_version") ||
-   !cert.check(certificate, max_variables, max_nodes, max_depth, max_steps,
-      max_memory) {
-      return false
-   }
-   index.get("entries")[cert.key(certificate)] = certificate
-   true
+   return _put_impl(index, certificate, max_variables, max_nodes, max_depth,
+      max_steps, max_memory)
 }
 
 ;; Returns true when save.
@@ -91,4 +106,6 @@ fn save(dict index) bool {
 }
 
 ;; Returns the result of the `size` operation.
-fn size(dict index) int { index.get("entries", {}).len }
+fn size(dict index) int {
+   dict_len(index.get("entries", dict(0)))
+}

@@ -185,6 +185,13 @@ int64_t rt_mark_dynamic_bool_callable_tagged_args(int64_t fn) {
             : 0;
 }
 
+int64_t rt_mark_dynamic_callable_tagged_args(int64_t fn) {
+  fn = rt_dynamic_callable_base(fn);
+  return fn ? NY_DYNAMIC_CALLABLE_ENCODE((void *)(uintptr_t)fn) |
+                  NY_DYNAMIC_CALLABLE_TAGGED_ARGS_MARK
+            : 0;
+}
+
 /*
  * Native NYIR functions represent each `any` parameter as three i64 ABI
  * slots: value, dynamic length, and raw runtime tag.  The ordinary rt_callN
@@ -249,10 +256,9 @@ static int64_t rt_any_callback_result(int64_t value) {
   return rt_tag_v(value);
 }
 
-static int64_t rt_dynamic_callback_result(int64_t value, bool returns_bool) {
+static int64_t rt_dynamic_callback_result(int64_t value, bool returns_bool,
+                                          bool raw_scalars) {
   /*
-   * Dynamic lambda bodies already return Ny values.  In particular, a
-   * tagged integer must not be tagged a second time at the callback edge.
    * A callback returning a native C-string must be promoted before it is
    * consumed by a managed string builder or concatenation routine.
    */
@@ -264,9 +270,28 @@ static int64_t rt_dynamic_callback_result(int64_t value, bool returns_bool) {
      * keep the predicate ABI distinct from an `any` boolean immediate.
      */
     return value ? 1 : 0;
-  if (value == NY_IMM_NIL || rt_is_bool_imm(value) || is_int(value) ||
-      is_ptr(value) || is_heap_ptr(value) || rt_native_is_str(value) ||
-      NY_NATIVE_IS(value))
+  if (!raw_scalars) {
+    /*
+     * Dynamic lambda bodies already return Ny values.  In particular, a
+     * tagged integer must not be tagged a second time at the callback edge.
+     */
+    if (value == NY_IMM_NIL || rt_is_bool_imm(value) || is_int(value) ||
+        is_ptr(value) || is_heap_ptr(value) || rt_native_is_str(value) ||
+        NY_NATIVE_IS(value))
+      return value;
+    return rt_tag_v(value);
+  }
+  if (value == NY_IMM_NIL || rt_is_bool_imm(value) || is_v_flt(value))
+    return value;
+  int64_t tag = rt_value_tag(value);
+  /*
+   * Native callback bodies return raw scalar integers. `is_int` alone is
+   * not a sufficient discriminator here: raw odd values look like tagged
+   * integers to the low-bit predicate. Preserve real heap/string handles,
+   * and box every remaining scalar result for the caller's any ABI.
+   */
+  if (is_ptr(value) || is_heap_ptr(value) || tag >= 100 ||
+      rt_native_is_str(value) || NY_NATIVE_IS(value))
     return value;
   return rt_tag_v(value);
 }
@@ -282,8 +307,7 @@ int64_t rt_call_any1(int64_t f, int64_t value) {
    * parameters through rt_any_* helpers and needs the canonical tagged
    * word (an unboxed 1 would re-classify as integer zero).
    */
-  bool raw_scalar_callback_args =
-      dynamic_bool_callable && !NY_DYNAMIC_CALLABLE_TAGGED_ARGS_IS(f);
+  bool raw_scalar_callback_args = !NY_DYNAMIC_CALLABLE_TAGGED_ARGS_IS(f);
   if (dynamic_callable)
     f = (int64_t)(uintptr_t)NY_DYNAMIC_CALLABLE_DECODE(f);
   /*
@@ -308,7 +332,7 @@ int64_t rt_call_any1(int64_t f, int64_t value) {
       return rt_dynamic_callback_result(
           ((rt_any_fn7)code)(env, rt_dynamic_callback_arg(value, dynamic_bool_callable),
                                     len, tag, 0, 0, 0),
-          dynamic_bool_callable);
+          dynamic_bool_callable, false);
     }
   }
   /*
@@ -331,7 +355,7 @@ int64_t rt_call_any1(int64_t f, int64_t value) {
     return rt_dynamic_callback_result(
         ((rt_any_fn6)(uintptr_t)f)(rt_dynamic_callback_arg(value, raw_scalar_callback_args),
                                           len, tag, 0, 0, 0),
-        dynamic_bool_callable);
+        dynamic_bool_callable, raw_scalar_callback_args);
   return rt_any_callback_result(
       ((rt_any_fn6)(uintptr_t)f)(rt_any_to_i64(value), len, tag, 0, 0, 0));
 }
@@ -341,6 +365,7 @@ int64_t rt_call_any2(int64_t f, int64_t left, int64_t right) {
     return 0;
   bool dynamic_callable = NY_DYNAMIC_CALLABLE_IS(f);
   bool dynamic_bool_callable = NY_DYNAMIC_CALLABLE_BOOL_IS(f);
+  bool raw_scalar_callback_args = !NY_DYNAMIC_CALLABLE_TAGGED_ARGS_IS(f);
   if (dynamic_callable)
     f = (int64_t)(uintptr_t)NY_DYNAMIC_CALLABLE_DECODE(f);
   bool is_closure = false;
@@ -364,19 +389,20 @@ int64_t rt_call_any2(int64_t f, int64_t left, int64_t right) {
                                     left_len, left_tag,
                                     rt_dynamic_callback_arg(right, false),
                                     right_len, right_tag),
-          dynamic_bool_callable);
+          dynamic_bool_callable, false);
     }
   }
   if (NY_NATIVE_IS(f) && !dynamic_callable)
     return rt_any_callback_result(
         ((rt_any_fn6)NY_NATIVE_DECODE(f))(left, left_len, left_tag,
                                                  right, right_len, right_tag));
-  if (dynamic_callable)
+  if (dynamic_callable) {
     return rt_dynamic_callback_result(
         ((rt_any_fn6)(uintptr_t)f)(
-            rt_dynamic_callback_arg(left, false), left_len, left_tag,
-            rt_dynamic_callback_arg(right, false), right_len, right_tag),
-        dynamic_bool_callable);
+            rt_dynamic_callback_arg(left, raw_scalar_callback_args), left_len, left_tag,
+            rt_dynamic_callback_arg(right, raw_scalar_callback_args), right_len, right_tag),
+        dynamic_bool_callable, raw_scalar_callback_args);
+  }
   return rt_any_callback_result(
       ((rt_any_fn6)(uintptr_t)f)(rt_any_to_i64(left), left_len,
                                         left_tag, right, right_len, right_tag));

@@ -260,6 +260,15 @@ static ny_test_proc_t run_one_start(const char *bin, const char *path,
     argv[argc++] = "--std-bc";
     argv[argc++] = (char *)std_bc;
   }
+  /* Probe-suite metadata identifies an embedded source contract.  Use the
+   * same native executor in the parallel pass that replay uses after source
+   * materialization; do not infer this from fixture names. */
+  if (shape_path_is_nshape(path) && argc < 78) {
+    char *family = shape_meta_string(path, "family");
+    if (family && strcmp(family, "probe-suite") == 0)
+      argv[argc++] = "--native-only";
+    free(family);
+  }
   if (path_is_native_test(path) && !has_native_backend && argc < 78) {
     argv[argc++] = "--native-backend";
     argv[argc++] = "x86_64";

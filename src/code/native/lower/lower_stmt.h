@@ -13,6 +13,44 @@ static bool ny_native_stmt_is_stdlib(const stmt_t *s) {
           strcmp(s->as.module.name, "std") == 0);
 }
 
+static int ny_native_nir_normalize_return(ny_native_nir_builder_t *b,
+                                          const expr_t *expr, int value);
+
+/* Return the expression a block contributes as its implicit value. Try/catch
+ * joins are lowered as statements, so they do not pass through the ordinary
+ * function-tail return normalizer. */
+static const expr_t *ny_native_nir_stmt_tail_expr(const stmt_t *s) {
+  if (!s)
+    return NULL;
+  if (s->kind == NY_S_EXPR)
+    return s->as.expr.expr;
+  if (s->kind != NY_S_BLOCK || s->as.block.body.len == 0)
+    return NULL;
+  const stmt_t *last = s->as.block.body.data[s->as.block.body.len - 1];
+  return last && last->kind == NY_S_EXPR ? last->as.expr.expr : NULL;
+}
+
+static int ny_native_nir_try_normalize_value(ny_native_nir_builder_t *b,
+                                              const expr_t *expr, int value) {
+  if (!b || value < 0 || !expr || !b->return_any)
+    return value;
+  int out = ny_native_nir_normalize_return(b, expr, value);
+  if (out < 0)
+    return out;
+  /* Raw native accessors such as `.len` are memcalls and fall outside the
+   * normal literal/binary/identifier return cases. Box scalar results once
+   * before they enter an any-valued try/catch join. */
+  if ((expr->kind == NY_E_MEMCALL || expr->kind == NY_E_MEMBER) &&
+      !ny_native_nir_expr_is_any(b, expr) &&
+      !ny_native_nir_expr_is_cstr(b, expr) &&
+      !ny_native_nir_expr_is_f64(b, expr) &&
+      !ny_native_nir_expr_is_f32(b, expr) &&
+      !ny_native_nir_expr_is_list(b, expr) &&
+      !ny_native_nir_expr_is_dict(b, expr))
+    return ny_native_nir_emit_runtime_call(b, "rt_tag", out, -1, -1, 1, 0);
+  return out;
+}
+
 static const char *ny_native_nir_global_symbol(
     const ny_native_nir_builder_t *b, const char *name) {
   if (!b || !name)
@@ -329,7 +367,15 @@ static bool ny_native_nir_lower_var(ny_native_nir_builder_t *b, const stmt_t *s)
     }
     const expr_t *global_init = v->exprs.data[i];
     const char *global_symbol = NULL;
-    if (!ny_native_nir_find_local(b, name) &&
+    /* Top-level `mut` bindings in the executable entry point are ordinary
+     * main-frame locals. The global table also records their source names,
+     * but there is no emitted global definition for those mutable slots;
+     * selecting that name here produced an undefined symbol for the common
+     * `mut d = dict(); d.set(...)` loop. */
+    bool main_mut_local =
+        v->is_mut && b->scope_depth == 0 && b->profile_name &&
+        strcmp(b->profile_name, "rt_main") == 0;
+    if (!ny_native_nir_find_local(b, name) && !main_mut_local &&
         (!v->is_decl || (b->scope_depth == 0 && b->profile_name &&
                          strcmp(b->profile_name, "rt_main") == 0)))
       global_symbol = ny_native_nir_global_symbol(b, name);
@@ -546,6 +592,8 @@ static bool ny_native_nir_lower_var(ny_native_nir_builder_t *b, const stmt_t *s)
     if (l && i < v->types.len && v->types.data[i] &&
         v->types.data[i][0])
       l->type_name = v->types.data[i];
+    if (l && (!l->type_name || !l->type_name[0]) && i < v->exprs.len && v->exprs.data[i])
+      l->type_name = ny_native_nir_expr_type_name(b, v->exprs.data[i]);
     if (l && i < v->exprs.len && v->exprs.data[i])
       l->is_bigint = ny_native_nir_expr_is_bigint(b, v->exprs.data[i]);
     if (l && i < v->exprs.len && v->exprs.data[i] &&
@@ -630,12 +678,6 @@ static bool ny_native_nir_lower_var(ny_native_nir_builder_t *b, const stmt_t *s)
     if (!is_list && init_call_fn && init_call_fn->as.fn.return_type &&
         ny_native_type_name_is_list(init_call_fn->as.fn.return_type))
       is_list = true;
-    if (getenv("NYDBG6") && init_call_fn)
-      fprintf(stderr, "DBG initfn name=%s callee_rt=%s is_list=%d\n",
-              name ? name : "?",
-              init_call_fn->as.fn.return_type ? init_call_fn->as.fn.return_type
-                                              : "-",
-              (int)is_list);
     bool proven_list_shape =
         (i < v->types.len && ny_native_type_name_is_list(v->types.data[i])) ||
         (v->exprs.data[i] && v->exprs.data[i]->kind == NY_E_LIST) ||
@@ -700,11 +742,6 @@ static bool ny_native_nir_lower_var(ny_native_nir_builder_t *b, const stmt_t *s)
        * tagged value; decode once so the raw slot holds the true scalar
        * (otherwise the bound name reads 23 where the source said 11).
        */
-      if (getenv("NYDBG9") && v->exprs.data[i])
-        fprintf(stderr, "DBG pv name=%s isany=%d eany=%d kind=%d\n", name,
-                (int)is_any,
-                (int)ny_native_nir_expr_is_any(b, v->exprs.data[i]),
-                (int)v->exprs.data[i]->kind);
       if (val >= 0 && !is_any && v->exprs.data[i] &&
           v->exprs.data[i]->kind == NY_E_CALL &&
           ny_native_nir_expr_is_any(b, v->exprs.data[i]) &&
@@ -722,16 +759,7 @@ static bool ny_native_nir_lower_var(ny_native_nir_builder_t *b, const stmt_t *s)
     } else if (is_f32 && init && init->kind == NY_E_LITERAL &&
         init->as.literal.kind == NY_LIT_FLOAT)
       val = ny_native_nir_emit_const_f32(b, init->as.literal.as.f);
-else if (v->is_decl && !v->is_mut && !is_list && init &&
-         init->kind == NY_E_LIST &&
-         init->as.list_like.len == 1) {
-      /*
-       * `def y = [v]` unpacks a single-element list into scalar y.  A
-       * list-typed declaration must receive the list itself: unwrapping the
-       * element here turned `def list xs = [1]` into the raw int 1.
-       */
-      val = ny_native_nir_lower_expr(b, init->as.list_like.data[0]);
-    } else if (typed_scalar_list && init && init->kind == NY_E_CALL &&
+    else if (typed_scalar_list && init && init->kind == NY_E_CALL &&
                init->as.call.callee &&
                init->as.call.callee->kind == NY_E_IDENT &&
                init->as.call.callee->as.ident.name &&
@@ -795,6 +823,8 @@ else if (v->is_decl && !v->is_mut && !is_list && init &&
             init->as.memcall.name &&
             (strcmp(init->as.memcall.name, "get") == 0 ||
              strcmp(init->as.memcall.name, "pop") == 0) &&
+            (!ny_native_nir_expr_is_list(b, init->as.memcall.target) ||
+             ny_native_nir_expr_is_dyn_list(b, init->as.memcall.target)) &&
             !ny_native_nir_expr_is_f64(b, init) &&
             !ny_native_nir_expr_is_f32(b, init) &&
             !ny_native_nir_expr_is_cstr(b, init) &&
@@ -1720,7 +1750,14 @@ static bool ny_native_nir_bind_result_pattern(ny_native_nir_builder_t *b,
         continue;
       ny_native_nir_local_t *local =
           ny_native_nir_bind_local(b, arg->as.ident.name);
-      if (!local || !ny_native_nir_store_local_value(b, local->slot, payload))
+      if (!local)
+        return false;
+      /* Result payloads use the dynamic tagged ABI.  A pattern binding is
+       * created after ordinary parameter/local classification, so explicitly
+       * preserve that representation or a later guard can tag it twice. */
+      local->is_any = true;
+      local->semantic_rep = NY_SEM_REP_TAGGED_DYNAMIC;
+      if (!ny_native_nir_store_local_value(b, local->slot, payload))
         return false;
     }
     return true;
@@ -2256,6 +2293,7 @@ static int ny_native_nir_normalize_return(ny_native_nir_builder_t *b,
         !ny_native_nir_expr_is_f32(b, expr) &&
         !ny_native_nir_expr_is_any(b, expr) &&
         !ny_native_nir_expr_is_cstr(b, expr) &&
+        !ny_native_nir_expr_is_ptr(b, expr) &&
         !ny_native_nir_is_bitwise_operator(expr->as.binary.op) &&
         !ny_native_nir_expr_is_bool(b, expr))
       return ny_native_nir_emit_runtime_call(b, "rt_tag", value, -1, -1, 1, 0);
@@ -2265,7 +2303,9 @@ static int ny_native_nir_normalize_return(ny_native_nir_builder_t *b,
       if (local && !local->is_any &&
           !local->is_cstr && !local->is_bytes && !local->is_dict &&
           !local->is_list && !local->is_bigint && !local->is_f64 &&
-          !local->is_f32 && !local->is_bool)
+          !local->is_f32 && !local->is_bool &&
+          local->semantic_rep != NY_SEM_REP_POINTER &&
+          !ny_native_type_name_is_ptr(local->type_name))
         return ny_native_nir_emit_runtime_call(b, "rt_tag", value, -1, -1, 1,
                                                0);
       if (local && local->is_bool)
@@ -2306,9 +2346,6 @@ static int ny_native_nir_normalize_return(ny_native_nir_builder_t *b,
    * raw NYIR ABI.  Do not propagate their source-level `any` annotation to a
    * function return: doing so unboxes raw odd values a second time (notably
    * 32-bit words returned from a typed buffer). */
-  if (getenv("NYDBGN") && b->return_type)
-    fprintf(stderr, "DBG nrm rt=%s kind=%d dyn=%d\n", b->return_type,
-            expr ? (int)expr->kind : -1, (int)dynamic);
   if (!dynamic)
     return value;
   return ny_native_nir_emit_runtime_call(b, "rt_any_to_i64", value,
@@ -2507,6 +2544,7 @@ static bool ny_native_nir_lower_stmt_impl(ny_native_nir_builder_t *b, const stmt
         return false;
       bool body_return = b->emitted_return;
       int body_value = b->last_value;
+      const expr_t *body_expr = ny_native_nir_stmt_tail_expr(s->as.tr.body);
       size_t captured_count = b->defer_count - try_defer_mark;
       stmt_t **captured_defers = NULL;
       if (captured_count) {
@@ -2525,6 +2563,7 @@ static bool ny_native_nir_lower_stmt_impl(ny_native_nir_builder_t *b, const stmt
       if (!body_return) {
         if (body_value < 0)
           body_value = zero;
+        body_value = ny_native_nir_try_normalize_value(b, body_expr, body_value);
         if (body_value < 0 ||
             !ny_native_nir_store_local_value(b, result_slot, body_value))
           goto try_fail;
@@ -2574,9 +2613,13 @@ static bool ny_native_nir_lower_stmt_impl(ny_native_nir_builder_t *b, const stmt
         return false;
       bool handler_return = b->emitted_return;
       int handler_value = b->last_value;
+      const expr_t *handler_expr =
+          ny_native_nir_stmt_tail_expr(s->as.tr.handler);
       if (!handler_return) {
         if (handler_value < 0)
           handler_value = zero;
+        handler_value =
+            ny_native_nir_try_normalize_value(b, handler_expr, handler_value);
         if (handler_value < 0 ||
             !ny_native_nir_store_local_value(b, result_slot, handler_value) ||
             !ny_native_nir_emit_br(b, end_label))
@@ -4354,6 +4397,21 @@ static void ny_native_scan_expr_for_calls(const expr_t *e,
       bool is_fn = false;
       if (e->semantic.resolved) {
         is_fn = (e->semantic.rep == NY_SEM_REP_CLOSURE);
+        /*
+         * A bare function-value ident can carry a stale/conservative
+         * semantic rep (module-level value tables leak across modules and
+         * a handler named _induction resolves to an object rep).  When the
+         * name still resolves to a real program function, the body must
+         * stay reachable: the emitted ADDR_SYMBOL references it.
+         */
+        if (!is_fn && e->as.ident.name) {
+          bool known = false;
+          const stmt_t *cached = ny_native_fn_resolve_cache_get(
+              e->as.ident.name, NULL, &known);
+          if (!known)
+            cached = ny_native_fn_cache_lookup_exact(e->as.ident.name);
+          is_fn = (cached != NULL);
+        }
       } else {
         bool known = false;
         const stmt_t *cached =
@@ -4366,27 +4424,30 @@ static void ny_native_scan_expr_for_calls(const expr_t *e,
           is_fn = (fn != NULL);
         }
       }
-      /* A named `use` import can be explicitly widened to `any` before it
-       * is stored as a callback.  Its identifier then no longer advertises a
-       * closure representation, but the import resolver still knows the
-       * canonical source function whose address is being materialized. */
-      ny_native_nir_builder_t probe = {
-          .prog = col->prog,
-          .options = col->opt,
-          .module_name = col->scope_fn
-                             ? ny_native_fn_module(col->prog, col->scope_fn)
-                             : NULL,
-          .source_file = col->scope_fn ? col->scope_fn->tok.filename : NULL};
-      const char *imported =
-          ny_native_nir_resolve_use_alias(&probe, e->as.ident.name);
-      if (imported && strcmp(imported, e->as.ident.name) != 0)
-        ny_native_add_reachable_fn(col, imported);
-      const stmt_t *sibling =
-          ny_native_nir_find_user_function(&probe, e->as.ident.name);
-      if (sibling && sibling->kind == NY_S_FUNC && sibling->as.fn.name)
-        ny_native_add_reachable_fn(col, sibling->as.fn.name);
-      if (is_fn)
+      if (is_fn) {
         ny_native_add_reachable_fn(col, e->as.ident.name);
+      } else if (e->as.ident.name) {
+        /*
+         * A bare handler ident inside a module (standard_registry passing
+         * _induction to register) can carry a conservative object semantic
+         * rep while the lowerer still resolves it through the module-aware
+         * user-function finder and emits the qualified ny_fn_ symbol.  Use
+         * the same resolver here so the referenced body is collected.
+         */
+        ny_native_nir_builder_t probe = {
+            .prog = col->prog,
+            .options = col->opt,
+            .module_name = col->scope_fn
+                               ? ny_native_fn_module(col->prog, col->scope_fn)
+                               : NULL,
+            .source_file = col->scope_fn ? col->scope_fn->tok.filename
+                                         : NULL};
+        const stmt_t *target =
+            ny_native_nir_find_user_function(&probe, e->as.ident.name);
+        if (target && target->kind == NY_S_FUNC && target->as.fn.name &&
+            !target->as.fn.is_extern && !target->as.fn.link_name)
+          ny_native_add_reachable_fn(col, target->as.fn.name);
+      }
     }
     break;
   case NY_E_CALL: {
@@ -4396,6 +4457,8 @@ static void ny_native_scan_expr_for_calls(const expr_t *e,
             : NULL;
     if (semantic_callee) {
       ny_native_add_reachable_fn(col, semantic_callee);
+      if (strncmp(semantic_callee, "std.core.", 9) == 0)
+        ny_native_add_reachable_fn(col, semantic_callee + 9);
     }
     if (e->as.call.callee) {
       if (e->as.call.callee->kind == NY_E_IDENT) {
@@ -4424,6 +4487,22 @@ static void ny_native_scan_expr_for_calls(const expr_t *e,
           }
         }
       } else if (e->as.call.callee->kind == NY_E_MEMBER) {
+        ny_native_nir_builder_t probe = {
+            .prog = col->prog,
+            .options = col->opt,
+            .module_name = col->scope_fn
+                               ? ny_native_fn_module(col->prog, col->scope_fn)
+                               : NULL,
+            .source_file = col->scope_fn ? col->scope_fn->tok.filename : NULL};
+        const char *owner = ny_native_nir_expr_type_name(
+            &probe, e->as.call.callee->as.member.target);
+        const char *mname = e->as.call.callee->as.member.name;
+        if (owner && mname) {
+          char qual[512];
+          int n = snprintf(qual, sizeof(qual), "%s.%s", owner, mname);
+          if (n > 0 && (size_t)n < sizeof(qual))
+            ny_native_add_reachable_fn(col, qual);
+        }
         if (!semantic_callee) {
           bool qualified = ny_native_scan_qualified_call(
               col, e->as.call.callee->as.member.target,
@@ -4457,8 +4536,11 @@ static void ny_native_scan_expr_for_calls(const expr_t *e,
     break;
   }
   case NY_E_MEMCALL:
-    if (e->semantic.canonical_callee)
+    if (e->semantic.canonical_callee) {
       ny_native_add_reachable_fn(col, e->semantic.canonical_callee);
+      if (strncmp(e->semantic.canonical_callee, "std.core.", 9) == 0)
+        ny_native_add_reachable_fn(col, e->semantic.canonical_callee + 9);
+    }
     if (e->as.memcall.name) {
       bool qualified = ny_native_scan_qualified_call(
           col, e->as.memcall.target, e->as.memcall.name);
@@ -4576,6 +4658,16 @@ static void ny_native_scan_expr_for_calls(const expr_t *e,
     ny_native_scan_stmt_for_calls(e->as.lambda.body, col);
     break;
   }
+  case NY_E_FSTRING:
+    /*
+     * Callees referenced only inside an f-string interpolation are real
+     * calls: assert_type formats {_type_spec_to_str(spec)} and
+     * {type_name(x)}, and both bodies must stay reachable for linking.
+     */
+    for (size_t fi = 0; fi < e->as.fstring.parts.len; ++fi)
+      if (e->as.fstring.parts.data[fi].kind == NY_FSP_EXPR)
+        ny_native_scan_expr_for_calls(e->as.fstring.parts.data[fi].as.e, col);
+    break;
   default:
     break;
   }
@@ -4744,6 +4836,33 @@ static void ny_native_scan_stmt_for_calls(const stmt_t *s,
   }
 }
 
+static void ny_native_seed_impl_operators_in_stmt(ny_native_fn_collector_t *col,
+                                                  const stmt_t *s) {
+  if (!s)
+    return;
+  if (s->kind == NY_S_IMPL && s->as.impl.type_name) {
+    for (size_t i = 0; i < s->as.impl.methods.len; ++i) {
+      const stmt_t *m = s->as.impl.methods.data[i];
+      if (m && m->kind == NY_S_OPERATOR && m->as.oper.target &&
+          m->as.oper.target[0]) {
+        char qual[512];
+        const char *owner =
+            (m->as.oper.left_type &&
+             strcmp(m->as.oper.left_type, "self") != 0)
+                ? m->as.oper.left_type
+                : s->as.impl.type_name;
+        int n = snprintf(qual, sizeof(qual), "%s.%s", owner, m->as.oper.target);
+        if (n > 0 && (size_t)n < sizeof(qual))
+          ny_native_add_reachable_fn(col, qual);
+        ny_native_add_reachable_fn(col, m->as.oper.target);
+      }
+    }
+  } else if (s->kind == NY_S_MODULE) {
+    for (size_t i = 0; i < s->as.module.body.len; ++i)
+      ny_native_seed_impl_operators_in_stmt(col, s->as.module.body.data[i]);
+  }
+}
+
 static size_t ny_native_collect_reachable_fns(const program_t *prog,
                                               const ny_options *opt,
                                               const stmt_t **out_funcs,
@@ -4756,6 +4875,9 @@ static size_t ny_native_collect_reachable_fns(const program_t *prog,
       .funcs = out_funcs,
       .max_funcs = max_funcs,
   };
+  for (size_t i = 0; i < prog->body.len; ++i) {
+    ny_native_seed_impl_operators_in_stmt(&col, prog->body.data[i]);
+  }
   /* The expanded program contains test/main blocks from imported packages.
    * Seed the call graph only from the root source block; imported-module
    * bodies become reachable when an actually called function is scanned. */

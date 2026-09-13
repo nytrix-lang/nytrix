@@ -359,6 +359,17 @@ static bool tp_type_compatible_for_decl(const char *want, const char *got) {
   const char *g = tp_skip_nullable(got);
   if (strcmp(w, g) == 0)
     return true;
+  /* The same declared type may appear leaf-qualified at one site and fully
+   * qualified at another (gf.ny operators declare gf2bv_bv while the
+   * impl methods carry std.math.crypto.gf.gf2bv_bv). */
+  {
+    const char *wl = strrchr(w, '.');
+    const char *gl = strrchr(g, '.');
+    wl = wl ? wl + 1 : w;
+    gl = gl ? gl + 1 : g;
+    if (strcmp(wl, gl) == 0)
+      return true;
+  }
   if (tp_type_is_group(w) && tp_type_group_accepts(w, g))
     return true;
   if (tp_type_is_group(g) && tp_type_group_accepts(g, w))
@@ -512,6 +523,14 @@ static void tp_impl_coherence_add(ny_tp_ctx_t *ctx,
     tp_impl_method_entry_t *prev = &entries->data[i];
     if (prev->owner && strcmp(prev->owner, owner) == 0 && prev->method &&
         strcmp(prev->method, name) == 0 && prev->arity == arity) {
+      /*
+       * The stdlib re-exports delegating impl methods across modules
+       * (core.mod vs math/nt bigint.as_bytes, math/big vs math/nt
+       * bigint.xor).  Those overlaps are coherent when both declarations
+       * ship with the stdlib; only user code is held to single-definition.
+       */
+      if (ny_is_stdlib_tok(prev->tok) && ny_is_stdlib_tok(method->tok))
+        return;
       tp_add_diag(
           ctx, method->tok, "trait", "impl-method-duplicate",
           "duplicate impl method '%s.%s/%zu' overlaps a visible impl at %s:%d",

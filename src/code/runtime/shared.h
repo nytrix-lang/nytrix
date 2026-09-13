@@ -139,7 +139,7 @@ extern char **environ;
   (NY_DYNAMIC_CALLABLE_IS(v) &&                                                \
    (((uint64_t)(v) & NY_DYNAMIC_CALLABLE_BOOL_MARK) != 0))
 #define NY_DYNAMIC_CALLABLE_TAGGED_ARGS_IS(v)                                  \
-  (NY_DYNAMIC_CALLABLE_BOOL_IS(v) &&                                           \
+  (NY_DYNAMIC_CALLABLE_IS(v) &&                                                \
    (((uint64_t)(v) & NY_DYNAMIC_CALLABLE_TAGGED_ARGS_MARK) != 0))
 
 #define is_int(v) ((((uint64_t)(v)) & NY_VALUE_INT_TAG_BIT) != 0)
@@ -966,6 +966,10 @@ double rt_atof(int64_t value);
 int64_t rt_getlogin(void);
 int64_t rt_gettimeofday(int64_t tv, int64_t tz);
 int64_t rt_malloc(int64_t n);
+int64_t rt_malloc_i64(int64_t n);
+bool rt_raw_ptr_registered(int64_t ptr);
+void rt_raw_ptr_register(int64_t ptr);
+bool rt_raw_ptr_unregister(int64_t ptr);
 int64_t rt_malloc_uninit(int64_t n);
 int64_t rt_free(int64_t ptr);
 int64_t rt_ptr_add(int64_t ptr, int64_t offset);
@@ -988,6 +992,7 @@ int64_t rt_fix_fn_ptr(int64_t fn);
 int64_t rt_mark_dynamic_callable(int64_t fn);
 int64_t rt_mark_dynamic_bool_callable(int64_t fn);
 int64_t rt_mark_dynamic_bool_callable_tagged_args(int64_t fn);
+int64_t rt_mark_dynamic_callable_tagged_args(int64_t fn);
 int64_t rt_flt_box_val(int64_t bits);
 double rt_flt_unbox_double(int64_t v);
 int64_t rt_flt_box_double(double d);
@@ -1092,6 +1097,7 @@ int64_t rt_native_has_tag(int64_t value, int64_t tag);
  * ABI compatibility exports for older generated modules only. */
 int64_t rt_value_tag(int64_t value);
 int64_t rt_is_str(int64_t value);
+int64_t rt_async_is_handle(int64_t value);
 int64_t rt_tag_or_raw_int(int64_t value);
 int64_t rt_raw_word_tag(int64_t value);
 int64_t rt_result_unwrap_raw(int64_t value);
@@ -1256,6 +1262,7 @@ int64_t rt_load8_raw(int64_t addr, int64_t idx);
 int64_t rt_store8_raw(int64_t addr, int64_t idx, int64_t value);
 int64_t rt_cstr_len(int64_t value);
 int64_t rt_len(int64_t value);
+int64_t rt_len_strict(int64_t value);
 int64_t rt_sequence_len_raw(int64_t value);
 int64_t rt_sequence_len_safe(int64_t value);
 int64_t rt_cstr_builder_new(int64_t initial);
@@ -1292,6 +1299,9 @@ int64_t rt_cstr_index_read_raw(int64_t str_v, int64_t idx_v);
 int64_t rt_value_is_ptr(int64_t v);
 int64_t rt_native_is_ptr(int64_t v); /* compatibility alias */
 double rt_vec_dot_raw(int64_t left, int64_t right);
+int64_t rt_vec_add_raw(int64_t left, int64_t right);
+int64_t rt_vec_sub_raw(int64_t left, int64_t right);
+int64_t rt_vec_div_component_raw(int64_t left, int64_t right);
 int64_t rt_vec_mul_scalar_raw(int64_t v, double s);
 int64_t rt_vec_div_scalar_raw(int64_t v, double s);
 int64_t rt_any_mul(int64_t left, int64_t right);

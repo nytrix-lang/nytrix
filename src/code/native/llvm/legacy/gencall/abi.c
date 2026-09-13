@@ -511,7 +511,17 @@ bool ny_expr_is_literal_int_list(expr_t *e) {
 }
 
 expr_t *ny_binding_flow_static_int_list_init(binding *b) {
-  if (!b || b->static_indexable_invalid || !b->is_int_list_storage)
+  if (!b || !b->is_int_list_storage)
+    return NULL;
+  /*
+   * static_indexable_invalid protects the ELIDED object representation
+   * (single-element lists lowered to a bare value); a binding whose object
+   * was never elided still owns its pooled literal global, so the flag must
+   * not disqualify it.  Without this, `def tab = [65, 67, 71, 84]` fell out
+   * of the static-get fast path into rt_tbuf_get_any, which probed the bare
+   * pooled .data pointer without a tbuf header (fasta read garbage).
+   */
+  if (b->static_indexable_object_elided && b->static_indexable_invalid)
     return NULL;
   if (b->escapes && !b->static_indexable_object_elided)
     return NULL;
@@ -1445,29 +1455,6 @@ static LLVMValueRef ny_try_emit_fast_receiver_get(codegen_t *cg, scope *scopes,
    * callback's arithmetic; explicit/direct typed lists retain their raw fast
    * path below.
    */
-  if ((target_is_known_list_like || target_is_dynamic || target_is_direct_list) &&
-      !target_is_raw_int_list && !target_is_raw_f64_list) {
-    LLVMValueRef target_v = ny_cast_to_i64(
-        cg, gen_expr(cg, scopes, depth, target), "dynamic_get_target");
-    LLVMValueRef key_v = ny_cast_to_i64(
-        cg, gen_expr(cg, scopes, depth, key), "dynamic_get_key");
-    LLVMValueRef default_v =
-        default_expr
-            ? ny_cast_to_i64(cg, gen_expr(cg, scopes, depth, default_expr),
-                             "dynamic_get_default")
-            : ny_c1(cg);
-    LLVMValueRef key_raw = ny_gencall_index_raw_i64(
-        cg, scopes, depth, key, key_v, "dynamic_get_key_raw");
-    LLVMTypeRef args_ty[3] = {cg->type_i64, cg->type_i64, cg->type_i64};
-    LLVMTypeRef fn_ty = LLVMFunctionType(cg->type_i64, args_ty, 3, 0);
-    LLVMValueRef fn = ny_get_named_fn(cg, "rt_tbuf_get_any");
-    if (!fn)
-      fn = LLVMAddFunction(cg->module, "rt_tbuf_get_any", fn_ty);
-    if (target_v && key_raw && default_v && fn)
-      return LLVMBuildCall2(cg->builder, fn_ty, fn,
-                            (LLVMValueRef[]){target_v, key_raw, default_v}, 3,
-                            NY_LLVM_NAME(cg, "dynamic_get_any"));
-  }
   bool assume_nonnegative =
       ny_gencall_expr_is_safe_fast_set_index(cg, scopes, depth, key);
   bool assume_in_bounds =
@@ -1518,6 +1505,37 @@ static LLVMValueRef ny_try_emit_fast_receiver_get(codegen_t *cg, scope *scopes,
       assume_in_bounds);
   if (static_int_list_get)
     return static_int_list_get;
+  if ((target_is_known_list_like || target_is_dynamic || target_is_direct_list) &&
+      !target_is_raw_int_list && !target_is_raw_f64_list) {
+    LLVMValueRef target_v = ny_cast_to_i64(
+        cg, gen_expr(cg, scopes, depth, target), "dynamic_get_target");
+    LLVMValueRef key_v = ny_cast_to_i64(
+        cg, gen_expr(cg, scopes, depth, key), "dynamic_get_key");
+    LLVMValueRef default_v =
+        default_expr
+            ? ny_cast_to_i64(cg, gen_expr(cg, scopes, depth, default_expr),
+                             "dynamic_get_default")
+            : ny_c1(cg);
+    LLVMValueRef key_raw = ny_gencall_index_raw_i64(
+        cg, scopes, depth, key, key_v, "dynamic_get_key_raw");
+    LLVMTypeRef args_ty[3] = {cg->type_i64, cg->type_i64, cg->type_i64};
+    LLVMTypeRef fn_ty = LLVMFunctionType(cg->type_i64, args_ty, 3, 0);
+    /* A receiver whose type crosses an `any` boundary is not necessarily a
+     * typed native buffer.  The tbuf helper intentionally assumes its input
+     * is a buffer and can therefore probe arbitrary foreign pointers.  Route
+     * the dynamic form through the canonical value dispatcher, which knows
+     * how to handle managed sequences, dictionaries, strings, nil, and
+     * opaque pointers while preserving the fallback value. */
+    const char *runtime_name = target_is_dynamic ? "rt_value_get_index_raw"
+                                                 : "rt_tbuf_get_any";
+    LLVMValueRef fn = ny_get_named_fn(cg, runtime_name);
+    if (!fn)
+      fn = LLVMAddFunction(cg->module, runtime_name, fn_ty);
+    if (target_v && key_raw && default_v && fn)
+      return LLVMBuildCall2(cg->builder, fn_ty, fn,
+                            (LLVMValueRef[]){target_v, key_raw, default_v}, 3,
+                            NY_LLVM_NAME(cg, "dynamic_get_any"));
+  }
   if (target_is_direct_list && !ny_env_enabled("NYTRIX_INDEX_READ_PARITY") &&
       !ny_env_enabled("NYTRIX_GUARDED_FAST_GET") &&
       ny_env_enabled_default_on("NYTRIX_TRUSTED_FAST_GET")) {

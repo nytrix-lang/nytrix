@@ -613,6 +613,9 @@ RT_DEF("__list_set_len", rt_list_set_len, 2, "fn __list_set_len(lst, n)",
 RT_DEF("__tbuf_set_tagged", rt_tbuf_set_tagged, 3,
        "fn __tbuf_set_tagged(buffer, index, value)",
        "Stores an any value in a native typed buffer slot.")
+RT_DEF("__tbuf_set_i64_raw", rt_tbuf_set_i64_raw, 3,
+       "fn __tbuf_set_i64_raw(buffer, index, value)",
+       "Stores an unboxed integer in a native typed buffer slot.")
 RT_DEF("__tbuf_index_any", rt_tbuf_index_any, 2,
        "fn __tbuf_index_any(buffer, index)",
        "Reads one sequence element using the dynamic-value ABI.")
@@ -621,6 +624,61 @@ RT_DEF("__tbuf_index_any_raw", rt_tbuf_index_any_raw, 2,
        "Reads one sequence element using a raw native index.")
 RT_DEF("__tbuf_swap", rt_tbuf_swap, 3, "fn __tbuf_swap(buffer, left, right)",
        "Swaps two slots in a native typed buffer and returns the buffer.")
+RT_DEF("__len_strict", rt_len_strict, 1, "fn __len_strict(v)",
+       "Strict length for strings and containers.")
+RT_DEF("__tbuf_dyn_elem", rt_tbuf_dyn_elem, 3,
+       "fn __tbuf_dyn_elem(buffer, index, want_dynamic)",
+       "Reads one sequence element dynamically.")
+RT_DEF("__tbuf_extend", rt_tbuf_extend, 2,
+       "fn __tbuf_extend(buffer, other)",
+       "Extends a native buffer with another sequence.")
+RT_DEF("__tbuf_repeat", rt_tbuf_repeat, 2,
+       "fn __tbuf_repeat(buffer, count)",
+       "Repeats a native buffer count times.")
+RT_DEF("__mark_dynamic_callable", rt_mark_dynamic_callable, 1,
+       "fn __mark_dynamic_callable(fn)",
+       "Marks a function pointer as a dynamic callable.")
+RT_DEF("__mark_dynamic_bool_callable", rt_mark_dynamic_bool_callable, 1,
+       "fn __mark_dynamic_bool_callable(fn)",
+       "Marks a function pointer as a dynamic bool callable.")
+RT_DEF("__mark_dynamic_bool_callable_tagged_args",
+       rt_mark_dynamic_bool_callable_tagged_args, 1,
+       "fn __mark_dynamic_bool_callable_tagged_args(fn)",
+       "Marks a function pointer as a dynamic bool callable with tagged args.")
+RT_DEF("__mark_dynamic_callable_tagged_args",
+       rt_mark_dynamic_callable_tagged_args, 1,
+       "fn __mark_dynamic_callable_tagged_args(fn)",
+       "Marks a function pointer as a dynamic callable with tagged args.")
+RT_DEF("__adt_alloc", rt_adt_alloc, 2, "fn __adt_alloc(nfields, tag)",
+       "Allocates an ADT object.")
+RT_DEF("__adt_tag", rt_adt_tag, 1, "fn __adt_tag(v)",
+       "Reads an ADT object tag.")
+RT_DEF("__alloc_string", rt_alloc_string, 1, "fn __alloc_string(s)",
+       "Allocates a managed string.")
+RT_DEF("__any_to_cstr", rt_any_to_cstr, 1, "fn __any_to_cstr(v)",
+       "Converts an any value to a C string.")
+RT_DEF("__assert_cstr", rt_assert_cstr, 2, "fn __assert_cstr(cond, msg)",
+       "Asserts condition with C string message.")
+RT_DEF("__contains_raw", rt_contains_raw, 2, "fn __contains_raw(coll, item)",
+       "Raw contains check.")
+RT_DEF("__cstr_cmp", rt_cstr_cmp, 2, "fn __cstr_cmp(a, b)",
+       "Compares two C strings.")
+RT_DEF("__cstr_concat", rt_cstr_concat, 2, "fn __cstr_concat(a, b)",
+       "Concatenates two C strings.")
+RT_DEF("__cstr_eq", rt_cstr_eq, 2, "fn __cstr_eq(a, b)",
+       "Compares two C strings for equality.")
+RT_DEF("__f64_to_cstr_raw", rt_f64_to_cstr_raw, 1,
+       "fn __f64_to_cstr_raw(v)",
+       "Converts float to C string.")
+RT_DEF("__i64_to_cstr_raw", rt_i64_to_cstr_raw, 1,
+       "fn __i64_to_cstr_raw(v)",
+       "Converts int to C string.")
+RT_DEF("__getlogin", rt_getlogin, 0, "fn __getlogin()",
+       "Gets login name.")
+RT_DEF("__gettimeofday", rt_gettimeofday, 0, "fn __gettimeofday()",
+       "Gets time of day.")
+RT_DEF("__raw_word_tag", rt_raw_word_tag, 1, "fn __raw_word_tag(v)",
+       "Classifies raw word tag.")
 
 RT_DEF("__flt_box_val", rt_flt_box_val, 1, "fn __flt_box_val(f)",
        "Boxes a raw float into a Nytrix object.")

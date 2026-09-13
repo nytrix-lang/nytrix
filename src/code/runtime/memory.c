@@ -252,6 +252,43 @@ int64_t rt_malloc(int64_t size) { return rt_malloc_impl(size, 1); }
 
 int64_t rt_malloc_uninit(int64_t size) { return rt_malloc_impl(size, 0); }
 
+int64_t rt_malloc_i64(int64_t size) {
+  if (size < 0)
+    return 0;
+  size_t body = (size_t)size;
+  body = (body + 15) & ~15ULL;
+  size_t total = body + 32;
+
+  int slot = ny_mem_pool_slot(total);
+  void *p = NULL;
+  if (slot >= 0 && g_mem_pools[slot]) {
+    p = g_mem_pools[slot];
+    g_mem_pools[slot] = g_mem_pools[slot]->next;
+  } else {
+    p = ny_aligned_alloc(16, (slot >= 0) ? g_pool_sizes[slot] : total);
+  }
+
+  if (__builtin_expect(!p, 0))
+    return 0;
+
+  size_t fill_size = (slot >= 0) ? g_pool_sizes[slot] : total;
+  if (rt_zero_init_enabled())
+    memset(p, 0, fill_size);
+
+  *(uint64_t *)p = NY_MAGIC1;
+  *(uint64_t *)((char *)p + 8) = (uint64_t)((body << 1) | 1);
+
+  int64_t res = (int64_t)(uintptr_t)((char *)p + 32);
+  rt_map_oracle_add((uintptr_t)p, (size_t)total);
+  rt_heap_ptr_cache_store((uintptr_t)res);
+  rt_rc_adopt_new(res);
+  if (mem_trace_enabled() && total > 1024 * 1024) {
+    fprintf(stderr, "[mem] large alloc %p (body=%zu, total=%zu)\n", (void *)(uintptr_t)res, body,
+            total);
+  }
+  return res;
+}
+
 /*
  * The interpreter passes tagged integer offsets to runtime primitives.
  */
@@ -304,6 +341,10 @@ static void raw_ptr_register(uintptr_t p) {
   raw_ptr_unlock();
 }
 
+void rt_raw_ptr_register(int64_t ptr) {
+  raw_ptr_register((uintptr_t)ptr);
+}
+
 static bool raw_ptr_unregister(uintptr_t p) {
   if (!p)
     return false;
@@ -322,6 +363,27 @@ static bool raw_ptr_unregister(uintptr_t p) {
   }
   raw_ptr_unlock();
   return false;
+}
+
+bool rt_raw_ptr_unregister(int64_t ptr) {
+  return raw_ptr_unregister((uintptr_t)ptr);
+}
+
+bool rt_raw_ptr_registered(int64_t ptr) {
+  uintptr_t p = (uintptr_t)ptr;
+  if (!p)
+    return false;
+  size_t b = raw_ptr_bucket(p);
+  bool found = false;
+  raw_ptr_lock();
+  for (raw_ptr_node_t *node = g_raw_ptr_table[b]; node; node = node->next) {
+    if (node->ptr == p) {
+      found = true;
+      break;
+    }
+  }
+  raw_ptr_unlock();
+  return found;
 }
 
 int64_t rt_malloc_raw(int64_t size) {
