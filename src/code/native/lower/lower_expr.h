@@ -499,6 +499,9 @@ static int ny_native_nir_lower_expr_impl(ny_native_nir_builder_t *b,
       const char *symbol = e->as.ident.name;
       if (compiled_fn && referenced_fn->as.fn.name)
         symbol = referenced_fn->as.fn.name;
+      if (e->semantic.canonical_callee &&
+          strncmp(e->semantic.canonical_callee, "std.core.", 9) == 0)
+        symbol = e->semantic.canonical_callee;
       if (user_function) {
         int n = snprintf(function_symbol, sizeof(function_symbol), "ny_fn_%s",
                          symbol);
@@ -1574,6 +1577,31 @@ static int ny_native_nir_lower_expr_impl(ny_native_nir_builder_t *b,
     return addr;
   }
   case NY_E_INDEX: {
+    /* Slice syntax is represented as an index node with a stop/step.  A
+     * string is a raw C-string at this lowering boundary, so do not let it
+     * fall through to the scalar index path (which correctly returns one
+     * character, but silently discards the stop and produced `s[0:5] == "h"`). */
+    if (e->as.index.target &&
+        ny_native_nir_expr_is_cstr(b, e->as.index.target) &&
+        (!e->as.index.step ||
+         (e->as.index.step->kind == NY_E_LITERAL &&
+          e->as.index.step->as.literal.kind == NY_LIT_INT &&
+          e->as.index.step->as.literal.as.i == 1))) {
+      int string = ny_native_nir_lower_expr(b, e->as.index.target);
+      int start = e->as.index.start
+                      ? ny_native_nir_lower_expr(b, e->as.index.start)
+                      : ny_native_nir_emit_const(b, 0);
+      int stop = e->as.index.stop
+                     ? ny_native_nir_lower_expr(b, e->as.index.stop)
+                     : (string < 0 ? -1
+                                    : ny_native_nir_emit_runtime_call(
+                                          b, "rt_cstr_len", string, -1, -1,
+                                          1, 0));
+      if (string < 0 || start < 0 || stop < 0)
+        return -1;
+      return ny_native_nir_emit_runtime_call(b, "rt_cstr_slice", string,
+                                             start, stop, 3, 0);
+    }
     bool target_is_dict = ny_native_nir_expr_is_dict(b, e->as.index.target);
     if (!target_is_dict && e->as.index.target &&
         e->as.index.target->kind == NY_E_IDENT) {
@@ -2447,16 +2475,34 @@ static int ny_native_nir_lower_expr_impl(ny_native_nir_builder_t *b,
       const char *attached_owner =
           ny_native_nir_expr_type_name(b, e->as.memcall.target);
       if (attached_method && attached_owner && attached_method->as.fn.name) {
+        if (strncmp(attached_method->as.fn.name, "std.core.", 9) == 0) {
+          canonical = attached_method->as.fn.name;
+        } else {
+          int qn = snprintf(attached_name, sizeof(attached_name), "std.core.%s",
+                            attached_method->as.fn.name);
+          if (qn > 0 && (size_t)qn < sizeof(attached_name))
+            canonical = attached_name;
+        }
         const char *mleaf = ny_native_leaf_name(attached_method->as.fn.name);
         const char *fn_leaf = mleaf ? mleaf : attached_method->as.fn.name;
         int n = snprintf(attached_name, sizeof(attached_name), "%s.%s",
                          attached_owner, fn_leaf);
-        if (n > 0 && (size_t)n < sizeof(attached_name))
-          canonical = attached_name;
+        /*
+         * The reconstructed owner.method spelling is only usable when it
+         * resolves to a declared function; otherwise it emits an undefined
+         * ny_fn_owner.method symbol while the semantic canonical carries
+         * the collected qualified name (std.core.list.first).
+         */
+        const stmt_t *resolved_attached =
+            n > 0 && (size_t)n < sizeof(attached_name)
+                ? ny_native_nir_find_user_function(b, attached_name)
+                : NULL;
+        (void)resolved_attached;
       }
       if (canonical && strncmp(canonical, "std.core.", 9) == 0) {
         const stmt_t *fn = ny_native_nir_find_user_function(b, canonical);
-        if (fn && fn->as.fn.name)
+        if (fn && fn->as.fn.name &&
+            strncmp(fn->as.fn.name, "std.core.", 9) == 0)
           canonical = fn->as.fn.name;
       }
       if (!canonical) {
@@ -3027,6 +3073,30 @@ static int ny_native_nir_lower_expr_impl(ny_native_nir_builder_t *b,
           b, e->as.member.target->as.ident.name);
       if (target_local)
         target_type = target_local->type_name;
+      if (!target_type) {
+        const expr_t *global = ny_native_nir_find_top_level_value(
+            b, e->as.member.target->as.ident.name);
+        if (global && global != e->as.member.target)
+          target_type = ny_native_nir_expr_type_name(b, global);
+      }
+    }
+    if ((!target_type || strcmp(target_type, "any") == 0) &&
+        e->as.member.target->kind == NY_E_CALL &&
+        e->as.member.target->as.call.callee &&
+        e->as.member.target->as.call.callee->kind == NY_E_IDENT &&
+        e->as.member.target->as.call.callee->as.ident.name && b->prog) {
+      const char *ctor_name =
+          e->as.member.target->as.call.callee->as.ident.name;
+      const stmt_t *ctor_layout = NULL;
+      for (size_t li = 0; b->prog && li < b->prog->body.len && !ctor_layout;
+           ++li)
+        ctor_layout = ny_native_nir_find_layout_stmt(b->prog->body.data[li],
+                                                     ctor_name);
+      if (ctor_layout && (ctor_layout->kind == NY_S_STRUCT ||
+                          ctor_layout->kind == NY_S_LAYOUT))
+        target_type = ctor_layout->kind == NY_S_STRUCT
+                          ? ctor_layout->as.struc.name
+                          : ctor_layout->as.layout.name;
     }
     bool typed_vector = target_type &&
                         (strcmp(target_type, "vec2") == 0 ||
@@ -3049,6 +3119,68 @@ static int ny_native_nir_lower_expr_impl(ny_native_nir_builder_t *b,
       return boxed < 0 ? -1 : ny_native_nir_emit_runtime_call(
                                  b, "rt_any_to_f64", boxed, -1, -1, 1,
                                  NYIR_INST_F_RET_F64);
+    }
+    /* User-defined layouts are raw, owned records rather than dictionaries.
+     * Their constructor returns the data pointer, so resolve a member from
+     * the declaration and load it at the declared byte offset.  Falling
+     * through to rt_dict_get_str_raw made a valid `Vec2(...).x` look like a
+     * dynamic record and discarded the field value. */
+    if (target_type && e->as.member.name) {
+      const stmt_t *layout = NULL;
+      if (b->prog) {
+        for (size_t li = 0; li < b->prog->body.len && !layout; ++li)
+          layout = ny_native_nir_find_layout_stmt(b->prog->body.data[li],
+                                                  target_type);
+      }
+      if (layout &&
+          (layout->kind == NY_S_STRUCT || layout->kind == NY_S_LAYOUT)) {
+        const ny_layout_field_list *fields =
+            layout->kind == NY_S_STRUCT ? &layout->as.struc.fields
+                                        : &layout->as.layout.fields;
+        const layout_field_t *field = NULL;
+        for (size_t fi = 0; fi < fields->len; ++fi) {
+          if (fields->data[fi].name &&
+              strcmp(fields->data[fi].name, e->as.member.name) == 0) {
+            field = &fields->data[fi];
+            break;
+          }
+        }
+        if (field && !field->is_array) {
+          size_t field_size = 0, field_align = 0, field_offset = 0;
+          if (!ny_native_nir_ast_layout_query(
+                  b, target_type, field->name, &field_size, &field_align,
+                  &field_offset)) {
+            ny_native_nir_fail(b, "native member '%s.%s' has no layout",
+                               target_type, field->name);
+            return -1;
+          }
+          int target = ny_native_nir_lower_expr(b, e->as.member.target);
+          int offset = ny_native_nir_emit_const(b, (int64_t)field_offset);
+          int address = target < 0 || offset < 0
+                            ? -1
+                            : ny_native_nir_emit_add_i64(b, target, offset);
+          if (address < 0)
+            return -1;
+          if (ny_native_type_name_is_f64(field->type_name))
+            return ny_native_nir_emit_load_f64(b, address);
+          if (ny_native_type_name_is_f32(field->type_name))
+            return ny_native_nir_emit_runtime_call(
+                b, "rt_load32_f64", target, offset, -1, 2,
+                NYIR_INST_F_RET_F64);
+          if (field_size <= 4) {
+            int loaded = ny_native_nir_emit_runtime_call(
+                b, field_size == 1 ? "rt_load8_idx"
+                   : field_size == 2 ? "rt_load16_idx"
+                                     : "rt_load32_idx",
+                target, offset, -1, 2, 0);
+            return loaded < 0
+                       ? -1
+                       : ny_native_nir_emit_runtime_call(b, "rt_any_to_i64",
+                                                         loaded, -1, -1, 1, 0);
+          }
+          return ny_native_nir_emit_load_i64(b, address);
+        }
+      }
     }
     /* An unresolved/dynamic receiver may still be a vector dictionary.  The
      * attached `x/y/z/w` helpers index through the dynamic container ABI and

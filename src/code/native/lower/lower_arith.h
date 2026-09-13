@@ -135,6 +135,22 @@ static int ny_native_nir_lower_binary(ny_native_nir_builder_t *b,
     int n = (strchr(target, '.') || !owner)
                 ? snprintf(symbol, sizeof(symbol), "%s", target)
                 : snprintf(symbol, sizeof(symbol), "%s.%s", owner, target);
+    if (n > 0 && (size_t)n < sizeof(symbol) && owner) {
+      /* Short-name lookup and expanded operator metadata can both select an
+       * impl wrapper (for example `std.core.str.str.repeat`) instead of the
+       * source helper `std.core.str.repeat`.  Prefer the canonical owner plus
+       * leaf spelling when the function table contains it; this keeps
+       * operator lowering on the same symbol as ordinary attached calls. */
+      const char *target_leaf = ny_native_leaf_name(target);
+      char qualified[512];
+      int qn = target_leaf
+                   ? snprintf(qualified, sizeof(qualified), "std.core.%s.%s",
+                              owner, target_leaf)
+                   : -1;
+      if (qn > 0 && (size_t)qn < sizeof(qualified) &&
+          ny_native_nir_find_user_function(b, qualified))
+        snprintf(symbol, sizeof(symbol), "%s", qualified);
+    }
     if (n <= 0 || (size_t)n >= sizeof(symbol)) {
       ny_native_nir_fail(b, "native NYIR: attached operator target is too long");
       return -1;
@@ -1000,7 +1016,9 @@ scalar_multiply:
       return ny_native_nir_emit_runtime_call(
           b, "rt_vec_add_raw", a, rhs, -1, 2, 0);
     }
-    if (e->as.binary.left && e->as.binary.left->semantic.rep == NY_SEM_REP_RAW_INT &&
+    if (e->as.binary.left &&
+        (e->as.binary.left->semantic.rep == NY_SEM_REP_RAW_INT ||
+         left_int_literal) &&
         (right_any || right_dynamic_result) &&
         !left_f64 && !right_f64 && !left_f32 && !right_f32) {
       if (!right_is_raw_list_get &&
@@ -1009,12 +1027,18 @@ scalar_multiply:
         if (rhs < 0)
           return -1;
       }
+      if (left_int_literal)
+        a = ny_native_nir_emit_const(b, e->as.binary.left->as.literal.as.i);
+      if (a < 0)
+        return -1;
       int sum = nyir_emit(&b->nyir, (nyir_inst_t){.op = NYIR_ADD_I64, .dst = -1, .a = a, .b = rhs});
       if (b->return_any && sum >= 0)
         return ny_native_nir_emit_runtime_call(b, "rt_tag", sum, -1, -1, 1, 0);
       return sum;
     }
-    if (e->as.binary.right && e->as.binary.right->semantic.rep == NY_SEM_REP_RAW_INT &&
+    if (e->as.binary.right &&
+        (e->as.binary.right->semantic.rep == NY_SEM_REP_RAW_INT ||
+         right_int_literal) &&
         (left_any || left_dynamic_result) &&
         !left_f64 && !right_f64 && !left_f32 && !right_f32) {
       if (!left_is_raw_list_get &&
@@ -1023,6 +1047,10 @@ scalar_multiply:
         if (a < 0)
           return -1;
       }
+      if (right_int_literal)
+        rhs = ny_native_nir_emit_const(b, e->as.binary.right->as.literal.as.i);
+      if (rhs < 0)
+        return -1;
       int sum = nyir_emit(&b->nyir, (nyir_inst_t){.op = NYIR_ADD_I64, .dst = -1, .a = a, .b = rhs});
       if (b->return_any && sum >= 0)
         return ny_native_nir_emit_runtime_call(b, "rt_tag", sum, -1, -1, 1, 0);

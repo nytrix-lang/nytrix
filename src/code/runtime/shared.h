@@ -132,15 +132,22 @@ extern char **environ;
  * dispatch.  The mark keeps the raw 0/1 result handling while opting out of
  * the raw-scalar argument untagging that plain bool marking implies. */
 #define NY_DYNAMIC_CALLABLE_TAGGED_ARGS_MARK (UINT64_C(1) << 61)
+/* The callback body receives canonical arguments but returns a raw scalar
+ * i64. Result normalization must box even odd values; parity alone cannot
+ * distinguish those from tagged integers. */
+#define NY_DYNAMIC_CALLABLE_RAW_RESULT_MARK (UINT64_C(1) << 60)
 #define NY_DYNAMIC_CALLABLE_MARKS                                              \
   (NY_DYNAMIC_CALLABLE_MARK | NY_DYNAMIC_CALLABLE_BOOL_MARK |                 \
-   NY_DYNAMIC_CALLABLE_TAGGED_ARGS_MARK)
+   NY_DYNAMIC_CALLABLE_TAGGED_ARGS_MARK | NY_DYNAMIC_CALLABLE_RAW_RESULT_MARK)
 #define NY_DYNAMIC_CALLABLE_BOOL_IS(v)                                         \
   (NY_DYNAMIC_CALLABLE_IS(v) &&                                                \
    (((uint64_t)(v) & NY_DYNAMIC_CALLABLE_BOOL_MARK) != 0))
 #define NY_DYNAMIC_CALLABLE_TAGGED_ARGS_IS(v)                                  \
   (NY_DYNAMIC_CALLABLE_IS(v) &&                                                \
    (((uint64_t)(v) & NY_DYNAMIC_CALLABLE_TAGGED_ARGS_MARK) != 0))
+#define NY_DYNAMIC_CALLABLE_RAW_RESULT_IS(v)                                   \
+  (NY_DYNAMIC_CALLABLE_IS(v) &&                                                \
+   (((uint64_t)(v) & NY_DYNAMIC_CALLABLE_RAW_RESULT_MARK) != 0))
 
 #define is_int(v) ((((uint64_t)(v)) & NY_VALUE_INT_TAG_BIT) != 0)
 #define is_ptr(v)                                                              \
@@ -993,6 +1000,8 @@ int64_t rt_mark_dynamic_callable(int64_t fn);
 int64_t rt_mark_dynamic_bool_callable(int64_t fn);
 int64_t rt_mark_dynamic_bool_callable_tagged_args(int64_t fn);
 int64_t rt_mark_dynamic_callable_tagged_args(int64_t fn);
+int64_t rt_mark_dynamic_callable_raw_result(int64_t fn);
+int64_t rt_mark_dynamic_callable_tagged_args_raw_result(int64_t fn);
 int64_t rt_flt_box_val(int64_t bits);
 double rt_flt_unbox_double(int64_t v);
 int64_t rt_flt_box_double(double d);
@@ -1283,6 +1292,7 @@ int64_t rt_cstr_eq(int64_t a_ptr, int64_t b_ptr);
 int64_t rt_cstr_cmp(int64_t a_ptr, int64_t b_ptr);
 int64_t rt_cstr_concat(int64_t a_ptr, int64_t b_ptr);
 int64_t rt_cstr_repeat(int64_t str_ptr, int64_t count);
+int64_t rt_cstr_slice(int64_t str_ptr, int64_t start, int64_t stop);
 int64_t rt_any_to_cstr(int64_t v);
 int64_t rt_bigint_to_cstr_raw(int64_t v);
 int64_t rt_any_add(int64_t left, int64_t right);

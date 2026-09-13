@@ -904,6 +904,7 @@ void ny_jit_add_runtime_symbols(void) {
   LLVMAddSymbol("rt_tbuf_to_cstr", (void *)(uintptr_t)rt_tbuf_to_cstr);
   LLVMAddSymbol("rt_shl_raw", (void *)(uintptr_t)rt_shl_raw);
   LLVMAddSymbol("rt_cstr_repeat", (void *)(uintptr_t)rt_cstr_repeat);
+  LLVMAddSymbol("rt_cstr_slice", (void *)(uintptr_t)rt_cstr_slice);
   LLVMAddSymbol("rt_load8_raw", (void *)(uintptr_t)rt_load8_raw);
   LLVMAddSymbol("rt_store8_raw", (void *)(uintptr_t)rt_store8_raw);
   LLVMAddSymbol("rt_cstr_len", (void *)(uintptr_t)rt_cstr_len);
@@ -1456,6 +1457,8 @@ void ny_jit_define_runtime_trampolines(LLVMModuleRef mod) {
                                    (void *)(uintptr_t)rt_cstr_concat);
   ny_jit_define_runtime_trampoline(mod, "rt_cstr_repeat",
                                    (void *)(uintptr_t)rt_cstr_repeat);
+  ny_jit_define_runtime_trampoline(mod, "rt_cstr_slice",
+                                   (void *)(uintptr_t)rt_cstr_slice);
   ny_jit_define_runtime_trampoline(mod, "rt_any_to_cstr",
                                    (void *)(uintptr_t)rt_any_to_cstr);
   ny_jit_define_runtime_trampoline(mod, "rt_i64_to_cstr_raw",

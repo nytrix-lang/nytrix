@@ -922,6 +922,10 @@ int64_t rt_any_add(int64_t left, int64_t right) {
   if (rt_value_tag(left) == TAG_BIGINT ||
       rt_value_tag(right) == TAG_BIGINT)
     return rt_bigint_add(rt_bigint_operand(left), rt_bigint_operand(right));
+  /* Boxed floats can be pointer-shaped values with the low bit set.  They
+   * must reach the float implementation before the tagged-integer test. */
+  if (is_v_flt(left) || is_v_flt(right))
+    return rt_add_raw_impl(left, right);
   if (is_int(left) && is_int(right)) {
     int64_t l = rt_untag_v(left);
     int64_t r = rt_untag_v(right);
@@ -2307,6 +2311,14 @@ static int64_t ny_native_managed_dict_set(int64_t d, int64_t key,
   return d;
 }
 
+static bool ny_native_key_is_raw_string(int64_t key) {
+  if (!key || is_int(key) || NY_NATIVE_IS(key) || rt_native_is_str(key) ||
+      is_v_str(key) || !rt_addr_readable_safe((uintptr_t)key, 1))
+    return false;
+  unsigned char first = *(const unsigned char *)(uintptr_t)key;
+  return first == 0 || (first >= 0x20 && first < 0x7f);
+}
+
 static int64_t ny_native_dict_get_impl(int64_t value, int64_t key,
                                        int64_t fallback, bool key_is_string) {
   ny_native_dict_t *dict = ny_native_dict_ptr(value);
@@ -2421,8 +2433,10 @@ int64_t rt_dict_get_raw(int64_t value, int64_t key, int64_t fallback) {
       return rt_load_item_any(value, rt_tag_v(idx));
     }
   }
-  return ny_native_dict_get_impl(value, key, fallback,
-                                 rt_native_is_str(key) != 0 || is_v_str(key));
+  return ny_native_dict_get_impl(
+      value, key, fallback,
+      rt_native_is_str(key) != 0 || is_v_str(key) ||
+          ny_native_key_is_raw_string(key));
 }
 int64_t rt_dict_get_i64_raw(int64_t value, int64_t key, int64_t fallback) {
   return ny_native_dict_get_impl(value, key, fallback, false);
@@ -2628,7 +2642,8 @@ int64_t rt_value_get_tagged(int64_t value, int64_t key, int64_t fallback) {
 
 int64_t rt_dict_set_raw(int64_t value, int64_t key, int64_t item) {
   return ny_native_dict_set_impl(value, key, item,
-                                 rt_native_is_str(key) != 0 || is_v_str(key));
+                                 rt_native_is_str(key) != 0 || is_v_str(key) ||
+                                     ny_native_key_is_raw_string(key));
 }
 int64_t rt_dict_set_i64_raw(int64_t value, int64_t key, int64_t item) {
   return ny_native_dict_set_impl(value, key, item, false);
@@ -6313,6 +6328,65 @@ int64_t rt_cstr_index_read_raw(int64_t str_v, int64_t idx_v) {
   }
   unsigned char c = (unsigned char)s[idx];
   return (int64_t)(uintptr_t)g_single_char_table[c];
+}
+
+static size_t rt_utf8_width(const unsigned char *s, size_t remaining) {
+  if (!s || remaining == 0 || s[0] < 0x80)
+    return 1;
+  if (s[0] >= 0xc2 && s[0] <= 0xdf && remaining >= 2 &&
+      (s[1] & 0xc0) == 0x80)
+    return 2;
+  if (s[0] >= 0xe0 && s[0] <= 0xef && remaining >= 3 &&
+      (s[1] & 0xc0) == 0x80 && (s[2] & 0xc0) == 0x80)
+    return 3;
+  if (s[0] >= 0xf0 && s[0] <= 0xf4 && remaining >= 4 &&
+      (s[1] & 0xc0) == 0x80 && (s[2] & 0xc0) == 0x80 &&
+      (s[3] & 0xc0) == 0x80)
+    return 4;
+  return 1;
+}
+
+int64_t rt_cstr_slice(int64_t str_ptr, int64_t start, int64_t stop) {
+  if (!str_ptr)
+    return rt_alloc_string_len("", 0);
+  const char *src = (const char *)(uintptr_t)str_ptr;
+  size_t bytes = is_v_str(str_ptr) ? rt_tagged_str_len(str_ptr) : strlen(src);
+  const unsigned char *raw = (const unsigned char *)src;
+  int64_t count = 0;
+  for (size_t pos = 0; pos < bytes;) {
+    size_t width = rt_utf8_width(raw + pos, bytes - pos);
+    pos += width <= bytes - pos ? width : 1;
+    count++;
+  }
+  if (start < 0)
+    start += count;
+  if (stop < 0)
+    stop += count;
+  if (start < 0)
+    start = 0;
+  if (stop < 0)
+    stop = 0;
+  if (start > count)
+    start = count;
+  if (stop > count)
+    stop = count;
+  if (start >= stop)
+    return rt_alloc_string_len("", 0);
+
+  size_t begin_byte = 0, end_byte = 0;
+  int64_t cp = 0;
+  for (size_t pos = 0; pos < bytes && cp < stop;) {
+    if (cp == start)
+      begin_byte = pos;
+    size_t width = rt_utf8_width(raw + pos, bytes - pos);
+    pos += width <= bytes - pos ? width : 1;
+    cp++;
+    if (cp == stop)
+      end_byte = pos;
+  }
+  if (end_byte < begin_byte)
+    return rt_alloc_string_len("", 0);
+  return rt_alloc_string_len(src + begin_byte, end_byte - begin_byte);
 }
 
 int64_t rt_cstr_repeat(int64_t str_ptr, int64_t count) {

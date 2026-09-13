@@ -84,6 +84,10 @@ RT_DEF("__read_off", rt_read_off, 4, "fn __read_off(fd, p, n, i)",
        "Reads n bytes from fd into address p + i.")
 RT_DEF("__write_off", rt_write_off, 4, "fn __write_off(fd, p, n, i)",
        "Writes n bytes to fd from address p + i.")
+RT_DEF("__read_off_raw", rt_read_off_raw, 4, "fn __read_off_raw(fd, p, n, i)",
+       "Reads n raw-count bytes from fd into address p + i.")
+RT_DEF("__write_off_raw", rt_write_off_raw, 4, "fn __write_off_raw(fd, p, n, i)",
+       "Writes n raw-count bytes to fd from address p + i.")
 RT_DEF("__save_tga_rgba", rt_save_tga_rgba, 5,
        "fn __save_tga_rgba(path, data, w, h, channels)",
        "Writes an uncompressed top-left 32-bit TGA from an RGBA/RGB/gray byte "
@@ -649,6 +653,13 @@ RT_DEF("__mark_dynamic_callable_tagged_args",
        rt_mark_dynamic_callable_tagged_args, 1,
        "fn __mark_dynamic_callable_tagged_args(fn)",
        "Marks a function pointer as a dynamic callable with tagged args.")
+RT_DEF("__mark_dynamic_callable_raw_result", rt_mark_dynamic_callable_raw_result,
+       1, "fn __mark_dynamic_callable_raw_result(fn)",
+       "Marks a callable whose scalar result must be boxed at the dynamic boundary.")
+RT_DEF("__mark_dynamic_callable_tagged_args_raw_result",
+       rt_mark_dynamic_callable_tagged_args_raw_result, 1,
+       "fn __mark_dynamic_callable_tagged_args_raw_result(fn)",
+       "Marks a callable with tagged args and a raw scalar result.")
 RT_DEF("__adt_alloc", rt_adt_alloc, 2, "fn __adt_alloc(nfields, tag)",
        "Allocates an ADT object.")
 RT_DEF("__adt_tag", rt_adt_tag, 1, "fn __adt_tag(v)",

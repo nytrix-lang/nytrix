@@ -132,7 +132,13 @@ fn set_globals(ptr p) ptr {
 @inline
 fn envp(int i) ptr {
    "Returns the raw pointer to the environment entry at index `i`."
-   return __load64_idx(__envp(), i * 8)
+   ;; Compute the byte offset before the environment-pointer call. Besides
+   ;; making evaluation order explicit, this keeps the parameter value live
+   ;; across the ABI call on native backends whose call clobber analysis does
+   ;; not yet model the nested intrinsic expression correctly.
+   def offset = i * 8
+   def base = __envp()
+   return __load64_idx(base, offset)
 }
 
 @jit

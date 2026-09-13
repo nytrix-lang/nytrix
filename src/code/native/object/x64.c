@@ -923,6 +923,16 @@ static bool mach_save_live_out(ny_x64_mach_enc_t *e, size_t block) {
 static bool mach_flush_colored_to_home(ny_x64_mach_enc_t *e) {
   if (!e || !e->color_seeded)
     return true;
+  /*
+   * In stack-read mode every value is consumed from its canonical home.
+   * There must be no register residency to flush; retaining this pass lets
+   * stale segment seed bits emit stores from a physical register that was
+   * never loaded for the current value.  That is especially visible after a
+   * pointer constructor followed by a call: the constructor result's home
+   * can be overwritten by the preceding tag-test result.
+   */
+  if (e->force_stack_reads)
+    return true;
   bool saved = false;
   for (uint32_t v = 0; v < e->colors_len; ++v) {
     if (!e->color_seeded[v])
@@ -1722,8 +1732,16 @@ static bool mach_sync_carried_consumers(ny_x64_mach_enc_t *e,
   if (!e || !e->mach || !block || !e->color_seeded)
     return true;
   for (uint32_t v = 0; v < e->colors_len; ++v) {
+    /*
+     * A carried segment elsewhere in the function is not evidence that this
+     * block currently has the value in its physical register.  Synchronize
+     * only an actually seeded resident value; otherwise a later segment can
+     * cause an unrelated register to overwrite this vreg's canonical home.
+     */
+    if (!e->color_seeded[v])
+      continue;
     const ny_mach_live_segment_t *seg =
-        mach_segment_at(e, v, block->first_inst);
+      mach_segment_at(e, v, block->first_inst);
     if (seg && seg->carried)
       continue;
     bool used = false;

@@ -3,9 +3,9 @@
 module std.math.logic.index(
    open, lookup, put, save, size)
 use std.core
-use std.os
+use std.os as os
 use std.os.fs as fs
-use std.math.parse.data.json as json
+use std.math.parse.data.json (json_decode, json_try_decode, json_encode)
 use std.math.logic.certificate as cert
 
 fn _fresh(str path, str module_version, str dependency_digest,
@@ -29,9 +29,13 @@ fn open(str path, str module_version, str dependency_digest,
    str checker_version="logic-kernel-v1") dict {
    mut index = _fresh(path, module_version, dependency_digest, checker_version)
    if !fs.is_file(path) { return index }
-   def loaded = json.json_decode(unwrap(file_read(path)))
+   def decoded = json_try_decode(unwrap(os.file_read(path)))
+   if !decoded.get("ok", false) { return index }
+   def loaded = decoded.get("value", 0)
    if !_matches(index, loaded) { return index }
-   index["entries"] = loaded.get("entries")
+   ;; Use the dictionary primitive for the replacement so the loaded table
+   ;; is retained across managed/native dictionary layouts.
+   index = dict_set(index, "entries", loaded.get("entries", dict(0)))
    index
 }
 
@@ -71,7 +75,10 @@ fn _put_impl(dict index, dict certificate, int max_variables=16,
    def entries = index.get("entries", dict(0))
    def key = cert.key(certificate)
    entries = dict_set(entries, key, certificate)
-   index = dict_set(index, "entries", entries)
+   ;; `put` promises an in-place update of the caller-owned index. Rebinding
+   ;; this local dictionary only changed the callee's handle, so `save(index)`
+   ;; serialized the original empty entries table after a successful put.
+   index["entries"] = entries
    true
 }
 
@@ -88,7 +95,7 @@ fn save(dict index) bool {
    def path = index.get("path", "")
    if path.len == 0 { return false }
    def tmp = path + ".tmp-" + to_str(pid()) + "-" + to_str(ticks())
-   match file_write(tmp, json.json_encode({
+   match file_write(tmp, json_encode({
             "format":index.get("format"),
             "module_version":index.get("module_version"),
             "dependency_digest":index.get("dependency_digest"),
