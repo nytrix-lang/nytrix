@@ -2422,6 +2422,8 @@ typedef struct rt_async_task {
   int64_t fn;
   int64_t argc;
   int64_t *argv;
+  bool raw_fn;
+  bool tagged_result;
   int64_t fd;
   int64_t flags;
   int64_t events;
@@ -2521,6 +2523,10 @@ static rt_async_task *rt_async_find_task(int64_t handle) {
       return t;
   }
   return NULL;
+}
+
+int64_t rt_async_is_handle(int64_t handle) {
+  return rt_async_find_task(handle) != NULL;
 }
 
 static void rt_async_task_free(rt_async_task *t) {
@@ -2763,7 +2769,12 @@ static bool rt_async_progress_task(rt_async_task *t, int block, int wait_ms) {
   switch (t->kind) {
   case RT_ASYNC_CALL:
     t->state = RT_ASYNC_RUNNING;
-    t->result = rt_thread_call_dispatch(t->fn, t->argc, t->argv);
+    t->result = t->raw_fn
+                    ? (t->tagged_result
+                           ? rt_thread_call_dispatch_raw(t->fn, t->argc, t->argv)
+                           : rt_tag_v(rt_thread_call_dispatch_raw(t->fn, t->argc,
+                                                                  t->argv)))
+                    : rt_thread_call_dispatch(t->fn, t->argc, t->argv);
     t->state = RT_ASYNC_DONE;
     return true;
   case RT_ASYNC_TIMER:
@@ -3050,7 +3061,11 @@ static int rt_async_scheduler_step(int block) {
 int64_t rt_async_task_new(int64_t fn, int64_t argc, int64_t argv_ptr) {
   int64_t argc_raw = 0;
   int64_t *argv_copy = NULL;
-  if (!rt_thread_prepare_call_args(argc, argv_ptr, &argc_raw, &argv_copy, NULL))
+  bool raw_fn = false;
+  bool tagged_result = ((uint64_t)argc & (UINT64_C(1) << 62)) != 0;
+  argc = (int64_t)((uint64_t)argc & ~(UINT64_C(1) << 62));
+  if (!rt_thread_prepare_call_args(argc, argv_ptr, &argc_raw, &argv_copy,
+                                   &raw_fn))
     return 0;
   rt_async_task *t = rt_async_task_alloc(RT_ASYNC_CALL);
   if (!t) {
@@ -3060,6 +3075,8 @@ int64_t rt_async_task_new(int64_t fn, int64_t argc, int64_t argv_ptr) {
   t->fn = fn;
   t->argc = argc_raw;
   t->argv = argv_copy;
+  t->raw_fn = raw_fn;
+  t->tagged_result = tagged_result;
   rt_async_ready_push(t);
   return (int64_t)(uintptr_t)t;
 }
@@ -3083,8 +3100,9 @@ int64_t rt_async_await_blocking(int64_t handle) {
     rt_async_scheduler_step(1);
   }
   int64_t result = t->result;
-  rt_async_all_remove(t);
-  rt_async_task_free(t);
+  /* Handles are ordinary values and may remain in user containers after
+   * await. Keep the completed task record alive so runtime classification and
+   * a repeated await cannot dereference freed storage. */
   return result;
 }
 

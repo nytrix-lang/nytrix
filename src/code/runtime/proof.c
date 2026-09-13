@@ -197,9 +197,6 @@ int64_t rt_proof_cert_check(int64_t canonical_v, int64_t digest_v,
                             int64_t max_variables_v, int64_t max_nodes_v,
                             int64_t max_depth_v, int64_t max_steps_v,
                             int64_t max_memory_v) {
-  if (!is_int(digest_v) || !is_int(max_variables_v) || !is_int(max_nodes_v) ||
-      !is_int(max_depth_v) || !is_int(max_steps_v) || !is_int(max_memory_v))
-    return NY_IMM_FALSE;
   int64_t expected = rt_proof_digest_value(
       canonical_v, module_version_v, dependency_digest_v, checker_version_v);
   /*
@@ -207,14 +204,19 @@ int64_t rt_proof_cert_check(int64_t canonical_v, int64_t digest_v,
    * while the native path normally carries a tagged integer.  Accept both
    * representations at this ABI boundary; reject every other value.
    */
-  if (expected < 0 ||
-      (digest_v != expected && rt_untag_v(digest_v) != expected))
+  int64_t digest = is_int(digest_v) ? rt_untag_v(digest_v) : digest_v;
+  if (expected < 0 || digest != expected)
     return NY_IMM_FALSE;
-  int64_t max_variables = rt_untag_v(max_variables_v);
-  int64_t max_nodes = rt_untag_v(max_nodes_v);
-  int64_t max_depth = rt_untag_v(max_depth_v);
-  int64_t max_steps = rt_untag_v(max_steps_v);
-  int64_t max_memory = rt_untag_v(max_memory_v);
+  int64_t max_variables =
+      is_int(max_variables_v) ? rt_untag_v(max_variables_v) : max_variables_v;
+  int64_t max_nodes =
+      is_int(max_nodes_v) ? rt_untag_v(max_nodes_v) : max_nodes_v;
+  int64_t max_depth =
+      is_int(max_depth_v) ? rt_untag_v(max_depth_v) : max_depth_v;
+  int64_t max_steps =
+      is_int(max_steps_v) ? rt_untag_v(max_steps_v) : max_steps_v;
+  int64_t max_memory =
+      is_int(max_memory_v) ? rt_untag_v(max_memory_v) : max_memory_v;
   if (max_variables < 0 || max_variables > 20 || max_nodes <= 0 ||
       max_nodes > 1000000 || max_depth <= 0 || max_depth > 4096 ||
       max_steps <= 0 || max_memory <= 0 || max_nodes > max_memory)

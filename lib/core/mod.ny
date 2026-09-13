@@ -1348,7 +1348,10 @@ impl list {
          def n = __load64_idx(self, 0)
          if k < 0 { k = k + n }
          if k < 0 || k >= n { return default }
-         return __load_item(self, k)
+         ; Cross the dynamic list.get boundary through the canonical decoder;
+         ; returning the raw slot made odd integers acquire a second tag in
+         ; JIT callers (`3` became `7`).
+         return __load_item_any(self, k)
       }
       return core_ref.get(self, key, default)
    }

@@ -975,17 +975,28 @@ fn tonelli_shanks(any n, any p) bigint {
    if legendre(n_big, p_big) != 1 { return bigint_from_int(-1) }
    def p_mod4 = bigint_to_int(bigint_mod(p_big, Z(4)))
    if p_mod4 == 3 { return power_mod(n_big, bigint_div(bigint_add(p_big, one), Z(4)), p_big) }
-   mut Q, S = bigint_sub(p_big, one), 0
+   ; Keep bigint temporaries in distinct bindings. The tuple-style mutable
+   ; declaration widened R to a dynamic slot in the JIT return path, which
+   ; left the final Tonelli root pointing at an invalid tagged payload.
+   mut Q = bigint_sub(p_big, one)
+   mut S = 0
    while bigint_to_int(bigint_mod(Q, Z(2))) == 0 {
       Q = bigint_div(Q, Z(2))
       S += 1
    }
    mut z = Z(2)
    while legendre(z, p_big) != -1 { z = bigint_add(z, one) }
-   mut M, c = S, power_mod(z, Q, p_big)
-   mut t, R = power_mod(n_big, Q, p_big), power_mod(n_big, bigint_div(bigint_add(Q, one), Z(2)), p_big)
+   mut M = S
+   mut c = power_mod(z, Q, p_big)
+   mut t = power_mod(n_big, Q, p_big)
+   mut R = power_mod(n_big, bigint_div(bigint_add(Q, one), Z(2)), p_big)
    while true {
-      if bigint_eq(t, one) { return R }
+      if bigint_eq(t, one) {
+         ; Re-materialize the root at the public bigint boundary. In the JIT
+         ; path the loop-carried R slot can retain a transient dynamic handle;
+         ; bigint_add gives callers an owned, canonical bigint object.
+         return bigint_add(R, zero)
+      }
       mut i = 1
       mut tmp = bigint_mul(t, t)
       tmp = bigint_mod(tmp, p_big)

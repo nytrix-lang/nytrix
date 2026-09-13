@@ -13,6 +13,11 @@ use std.math.float as f
 
 mut _json_error = ""
 
+;; Parser offsets live as raw scalar payloads in a heterogeneous state list.
+;; Keep arithmetic on the scalar ABI before writing a new offset back.
+fn _json_pos(list st) int { st[2] }
+fn _json_size(list st) int { st[1] }
+
 fn json_last_error() str {
    "Returns the error from the last decode attempt(empty string on success)."
    _json_error
@@ -34,8 +39,8 @@ fn _json_make_result(bool ok, any value, str err, int pos) dict {
 }
 
 fn _json_peek(list st) int {
-   def pos = st.get(2)
-   def n = st.get(1)
+   def int pos = _json_pos(st)
+   def int n = _json_size(st)
    if pos < 0 || pos >= n { return -1 }
    load8(st.get(0), pos)
 }
@@ -49,8 +54,9 @@ fn _json_is_ws(int c) bool {
 }
 
 fn _json_skip_ws(list st) any {
-   def s, n = st.get(0), st.get(1)
-   mut pos = st.get(2)
+   def s = st.get(0)
+   def int n = _json_size(st)
+   mut int pos = _json_pos(st)
    def start = pos
    while pos < n {
       if _json_is_ws(load8(s, pos)) { pos += 1 } else { break }
@@ -59,8 +65,8 @@ fn _json_skip_ws(list st) any {
 }
 
 fn _json_expect(list st, int want, str msg) any {
-   def pos = st.get(2)
-   def n = st.get(1)
+   def int pos = _json_pos(st)
+   def int n = _json_size(st)
    def c = (pos >= 0 && pos < n) ? load8(st.get(0), pos) : -1
    if c != want { return _json_set_error(st, msg) }
    st[2] = pos + 1
@@ -82,8 +88,9 @@ fn _json_hex4(str s, int start) int {
 }
 
 fn _json_parse_literal(list st, str lit, any value) any {
-   def s, n = st.get(0), st.get(1)
-   def pos = st.get(2)
+   def s = st.get(0)
+   def int n = _json_size(st)
+   def int pos = _json_pos(st)
    def m = lit.len
    if pos + m > n { return _json_set_error(st, "unexpected end while parsing literal") }
    mut i = 0
@@ -99,8 +106,8 @@ fn _json_parse_float_text(str s) f64 { str.atof(s) }
 
 fn _json_parse_val(list st) any {
    _json_skip_ws(st)
-   def pos = st.get(2)
-   def n = st.get(1)
+   def int pos = _json_pos(st)
+   def int n = _json_size(st)
    def c = (pos >= 0 && pos < n) ? load8(st.get(0), pos) : -1
    if c < 0 { return _json_set_error(st, "unexpected end of input") }
    return case c {
@@ -120,7 +127,7 @@ fn _json_parse_obj(list st) any {
    mut d = dict(8)
    _json_skip_ws(st)
    if _json_peek(st) == 125 {
-      st[2] = st.get(2) + 1
+      st[2] = _json_pos(st) + 1
       return d
    }
    while 1 {
@@ -132,15 +139,15 @@ fn _json_parse_obj(list st) any {
       if !_json_expect(st, 58, "expected ':' after object key") { return 0 }
       def val = _json_parse_val(st)
       if len(st.get(3, "")) > 0 { return 0 }
-      d[key] = val
+      d = dict_set(d, key, val)
       _json_skip_ws(st)
       def c = _json_peek(st)
       if c == 44 {
-         st[2] = st.get(2) + 1
+         st[2] = _json_pos(st) + 1
          continue
       }
       if c == 125 {
-         st[2] = st.get(2) + 1
+         st[2] = _json_pos(st) + 1
          return d
       }
       return _json_set_error(st, "expected ',' or '}' in object")
@@ -152,7 +159,7 @@ fn _json_parse_arr(list st) any {
    mut l = list(8)
    _json_skip_ws(st)
    if _json_peek(st) == 93 {
-      st[2] = st.get(2) + 1
+      st[2] = _json_pos(st) + 1
       return l
    }
    while 1 {
@@ -161,11 +168,11 @@ fn _json_parse_arr(list st) any {
       _json_skip_ws(st)
       def c = _json_peek(st)
       if c == 44 {
-         st[2] = st.get(2) + 1
+         st[2] = _json_pos(st) + 1
          continue
       }
       if c == 93 {
-         st[2] = st.get(2) + 1
+         st[2] = _json_pos(st) + 1
          return l
       }
       return _json_set_error(st, "expected ',' or ']' in array")
@@ -173,8 +180,9 @@ fn _json_parse_arr(list st) any {
 }
 
 fn _json_parse_str(list st) any {
-   mut pos = st.get(2)
-   def s, n = st.get(0), st.get(1)
+   mut int pos = _json_pos(st)
+   def s = st.get(0)
+   def int n = _json_size(st)
    if pos >= n || load8(s, pos) != 34 { return _json_set_error(st, "expected string") }
    pos += 1
    mut end = pos
@@ -196,7 +204,8 @@ fn _json_parse_str(list st) any {
       def out = malloc(out_len + 1)
       if !out { return _json_set_error(st, "string allocation failed") }
       init_str(out, out_len)
-      if out_len > 0 { __copy_mem(out, s + pos, out_len) }
+      if out_len > 0 { __copy_mem(out, ptr_add(s, pos), __tag(out_len)) }
+      store8(ptr_add(out, out_len), 0, 0)
       st[2] = end + 1
       return out
    }
@@ -290,8 +299,9 @@ fn _json_parse_str(list st) any {
 }
 
 fn _json_parse_num(list st) any {
-   mut pos = st.get(2)
-   def s, n = st.get(0), st.get(1)
+   mut int pos = _json_pos(st)
+   def s = st.get(0)
+   def int n = _json_size(st)
    mut start = pos
    mut neg = false
    if pos < n && load8(s, pos) == 45 {
@@ -327,8 +337,8 @@ fn _json_parse_num(list st) any {
       while pos < n && _json_is_digit(load8(s, pos)) { pos += 1 }
    }
    if !has_frac && !has_exp {
-      st[2] = pos
-      return neg ? (0 - int_val) : int_val
+st[2] = pos
+      return __tag(neg ? (0 - int_val) : int_val)
    }
    def len = pos - start
    def raw = malloc(len + 1)
@@ -355,13 +365,13 @@ fn json_try_decode(any s) dict {
    def val = _json_parse_val(st)
    _json_skip_ws(st)
    mut err = st.get(3, "")
-   if err.len == 0 && st.get(2) != st.get(1) {
+   if err.len == 0 && _json_pos(st) != _json_size(st) {
       err = "trailing characters after JSON value"
       st[3] = err
    }
    _json_error = st.get(3, "")
-   if _json_error.len == 0 { return _json_make_result(true, val, "", st.get(2)) }
-   _json_make_result(false, 0, _json_error, st.get(2))
+   if _json_error.len == 0 { return _json_make_result(true, val, "", _json_pos(st)) }
+   _json_make_result(false, 0, _json_error, _json_pos(st))
 }
 
 fn json_decode(any s) any {
@@ -444,9 +454,12 @@ fn json_encode(any obj) str {
       mut out = Builder(max(16, n * 12 + 8))
       out = builder_append(out, "{")
       while i < n {
-         def pair = items.get(i)
-         def k = pair.get(0)
-         def v = pair.get(1)
+         ; `dict_items` is a dynamic nested buffer. Decode both levels through
+         ; the canonical any accessor; typed `.get` would expose the nested
+         ; pair pointer as an untagged scalar in native callers.
+         def pair = __tbuf_index_any_raw(items, i)
+         def k = __tbuf_index_any_raw(pair, 0)
+         def v = __tbuf_index_any_raw(pair, 1)
          mut key = ""
          if is_str(k) { key = k }
          else { key = to_str(k) }

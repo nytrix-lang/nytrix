@@ -368,7 +368,6 @@ fn split(any s, any sep) list {
    mut start = 0
    while i <= n - sep_len {
       def m = _match_at(s, sep, i)
-      print("res:", i, m)
       if m {
          out = _list_push_reserved(out, _substr(s, start, i))
          i = i + sep_len

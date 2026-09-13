@@ -188,7 +188,7 @@ const char *ny_gencall_attached_owner(const char *type_name) {
   do {                                                                         \
     size_t len = sizeof(name) - 1;                                             \
     if (strncmp(leaf, name, len) == 0 &&                                       \
-        (leaf[len] == '\0' || leaf[len] == '<'))                               \
+        (leaf[len] == '\0' || leaf[len] == '<' || leaf[len] == '['))           \
       return name;                                                             \
   } while (0)
   NY_OWNER_IF_BASE("any");

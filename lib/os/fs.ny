@@ -28,7 +28,7 @@ fn is_dir(any path) bool {
    if !is_str(path) { return false }
    if path == "." || path == ".." { return true }
    def p = ospath.normalize(path)
-   __is_dir(p) == 1
+   __untag(__is_dir(p)) == 1
 }
 
 fn list_dir(any path) list {

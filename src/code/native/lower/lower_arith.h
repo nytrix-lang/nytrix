@@ -125,11 +125,11 @@ static int ny_native_nir_lower_binary(ny_native_nir_builder_t *b,
   const stmt_t *attached = ny_native_nir_find_operator(b, e);
   if (attached && attached->as.oper.target &&
       attached->as.oper.target[0]) {
-    int left = ny_native_nir_lower_expr(b, e->as.binary.left);
-    int right = ny_native_nir_lower_expr(b, e->as.binary.right);
-    if (left < 0 || right < 0)
-      return -1;
-    const char *owner = ny_native_nir_expr_type_name(b, e->as.binary.left);
+    const char *owner =
+        (attached->as.oper.left_type &&
+         strcmp(attached->as.oper.left_type, "self") != 0)
+            ? attached->as.oper.left_type
+            : ny_native_nir_expr_type_name(b, e->as.binary.left);
     char symbol[512];
     const char *target = attached->as.oper.target;
     int n = (strchr(target, '.') || !owner)
@@ -139,15 +139,20 @@ static int ny_native_nir_lower_binary(ny_native_nir_builder_t *b,
       ny_native_nir_fail(b, "native NYIR: attached operator target is too long");
       return -1;
     }
-    return nyir_emit(&b->nyir,
-                     (nyir_inst_t){.op = NYIR_CALL,
-                                   .dst = -1,
-                                   .a = left,
-                                   .b = right,
-                                   .c = -1,
-                                   .imm = 2,
-                                   .flags = 0,
-                                   .symbol = symbol});
+    call_arg_t args[2];
+    args[0] = (call_arg_t){.val = (expr_t *)e->as.binary.left};
+    args[1] = (call_arg_t){.val = (expr_t *)e->as.binary.right};
+    expr_t callee = {.kind = NY_E_IDENT, .tok = e->tok};
+    callee.as.ident.name = symbol;
+    expr_t call = {.kind = NY_E_CALL, .tok = e->tok};
+    call.semantic = e->semantic;
+    call.semantic.member_call_kind = NY_SEM_CALL_NONE;
+    call.semantic.canonical_callee = symbol;
+    call.semantic.canonical_callee_stmt = NULL;
+    call.as.call.callee = &callee;
+    call.as.call.args.data = args;
+    call.as.call.args.len = call.as.call.args.cap = 2;
+    return ny_native_nir_lower_expr(b, &call);
   }
   if (e->as.binary.op && strcmp(e->as.binary.op, "*") == 0) {
     bool left_list = ny_native_nir_expr_is_list(b, e->as.binary.left);
@@ -417,19 +422,15 @@ scalar_multiply:
       ny_native_call_leaf(e->as.binary.left) &&
       strcmp(ny_native_call_leaf(e->as.binary.left), "get") == 0 &&
       e->as.binary.left->as.call.args.len >= 2 &&
-      (ny_native_nir_expr_is_list(
-           b, e->as.binary.left->as.call.args.data[0].val) ||
-       ny_native_nir_expr_is_dict(
-           b, e->as.binary.left->as.call.args.data[0].val));
+      ny_native_nir_expr_is_list(
+          b, e->as.binary.left->as.call.args.data[0].val);
   bool right_scalar_get =
       e->as.binary.right && e->as.binary.right->kind == NY_E_CALL &&
       ny_native_call_leaf(e->as.binary.right) &&
       strcmp(ny_native_call_leaf(e->as.binary.right), "get") == 0 &&
       e->as.binary.right->as.call.args.len >= 2 &&
-      (ny_native_nir_expr_is_list(
-           b, e->as.binary.right->as.call.args.data[0].val) ||
-       ny_native_nir_expr_is_dict(
-           b, e->as.binary.right->as.call.args.data[0].val));
+      ny_native_nir_expr_is_list(
+          b, e->as.binary.right->as.call.args.data[0].val);
   /* The method spelling `list.get(i, d)` lowers to the same tagged dynamic
    * ABI as the free `get(...)` call, but semantic inference resolves its
    * result to the scalar element type, so the comparison path below treats
@@ -444,9 +445,8 @@ scalar_multiply:
       (e->as.binary.left->as.memcall.args.len == 1 ||
        e->as.binary.left->as.memcall.args.len == 2) &&
       e->as.binary.left->as.memcall.target &&
-      (ny_native_nir_expr_is_list(b, e->as.binary.left->as.memcall.target) ||
-       ny_native_nir_expr_is_dict(b, e->as.binary.left->as.memcall.target)) &&
-      !ny_native_nir_expr_is_dyn_list(b, e->as.binary.left->as.memcall.target) &&
+      ny_native_nir_expr_is_list(b, e->as.binary.left->as.memcall.target) &&
+      ny_native_nir_expr_is_dyn_list(b, e->as.binary.left->as.memcall.target) &&
       !ny_native_nir_expr_is_f64(b, e->as.binary.left) &&
       !(e->as.binary.left->as.memcall.args.len == 2 &&
         e->as.binary.left->as.memcall.args.data[1].val &&
@@ -459,9 +459,8 @@ scalar_multiply:
       (e->as.binary.right->as.memcall.args.len == 1 ||
        e->as.binary.right->as.memcall.args.len == 2) &&
       e->as.binary.right->as.memcall.target &&
-      (ny_native_nir_expr_is_list(b, e->as.binary.right->as.memcall.target) ||
-       ny_native_nir_expr_is_dict(b, e->as.binary.right->as.memcall.target)) &&
-      !ny_native_nir_expr_is_dyn_list(b, e->as.binary.right->as.memcall.target) &&
+      ny_native_nir_expr_is_list(b, e->as.binary.right->as.memcall.target) &&
+      ny_native_nir_expr_is_dyn_list(b, e->as.binary.right->as.memcall.target) &&
       !ny_native_nir_expr_is_f64(b, e->as.binary.right) &&
       !(e->as.binary.right->as.memcall.args.len == 2 &&
         e->as.binary.right->as.memcall.args.data[1].val &&
@@ -472,6 +471,22 @@ scalar_multiply:
    * comparisons use the dynamic ABI (for example `v % 2 == 0`). */
   bool left_dynamic_result = left_any;
   bool right_dynamic_result = right_any;
+  /* Free get on an any receiver lowers through rt_value_get_tagged, even
+   * when a scalar fallback makes its semantic result look like a raw int. */
+  if (e->as.binary.left && e->as.binary.left->kind == NY_E_CALL &&
+      ny_native_call_leaf(e->as.binary.left) &&
+      strcmp(ny_native_call_leaf(e->as.binary.left), "get") == 0 &&
+      e->as.binary.left->as.call.args.len >= 2 &&
+      ny_native_nir_expr_is_any(
+          b, e->as.binary.left->as.call.args.data[0].val))
+    left_dynamic_result = true;
+  if (e->as.binary.right && e->as.binary.right->kind == NY_E_CALL &&
+      ny_native_call_leaf(e->as.binary.right) &&
+      strcmp(ny_native_call_leaf(e->as.binary.right), "get") == 0 &&
+      e->as.binary.right->as.call.args.len >= 2 &&
+      ny_native_nir_expr_is_any(
+          b, e->as.binary.right->as.call.args.data[0].val))
+    right_dynamic_result = true;
   /* A list `.get` is an any-valued boundary even when its receiver's
    * unparameterized list type made semantic inference look container-like.
    * Preserve that provenance so nested lists use structural equality instead
@@ -606,12 +621,36 @@ scalar_multiply:
   /* Free get() returns the tagged dynamic ABI for ordinary consumers.  A
    * statically scalar list read entering raw arithmetic must be unboxed once;
    * doing it here preserves both `print(get(...))` and integer accumulation. */
-  if (!is_cmp && (left_scalar_get || left_scalar_get_mem)) {
+  bool right_int_literal = e->as.binary.right &&
+                           e->as.binary.right->kind == NY_E_LITERAL &&
+                           e->as.binary.right->as.literal.kind == NY_LIT_INT &&
+                           !ny_expr_is_nil_literal(e->as.binary.right);
+  bool left_int_literal = e->as.binary.left &&
+                          e->as.binary.left->kind == NY_E_LITERAL &&
+                          e->as.binary.left->as.literal.kind == NY_LIT_INT &&
+                          !ny_expr_is_nil_literal(e->as.binary.left);
+  bool left_is_raw_list_get =
+      e->as.binary.left && e->as.binary.left->kind == NY_E_MEMCALL &&
+      e->as.binary.left->as.memcall.name &&
+      strcmp(e->as.binary.left->as.memcall.name, "get") == 0 &&
+      e->as.binary.left->as.memcall.target &&
+      ny_native_nir_expr_is_list(b, e->as.binary.left->as.memcall.target) &&
+      !ny_native_nir_expr_is_dyn_list(b, e->as.binary.left->as.memcall.target);
+  bool right_is_raw_list_get =
+      e->as.binary.right && e->as.binary.right->kind == NY_E_MEMCALL &&
+      e->as.binary.right->as.memcall.name &&
+      strcmp(e->as.binary.right->as.memcall.name, "get") == 0 &&
+      e->as.binary.right->as.memcall.target &&
+      ny_native_nir_expr_is_list(b, e->as.binary.right->as.memcall.target) &&
+      !ny_native_nir_expr_is_dyn_list(b, e->as.binary.right->as.memcall.target);
+  if ((!is_cmp || right_int_literal) &&
+      (left_scalar_get || left_scalar_get_mem) && !left_is_raw_list_get) {
     a = ny_native_nir_emit_runtime_call(b, "rt_any_to_i64", a, -1, -1, 1, 0);
     left_any = false;
     left_dynamic_result = false;
   }
-  if (!is_cmp && (right_scalar_get || right_scalar_get_mem)) {
+  if ((!is_cmp || left_int_literal) &&
+      (right_scalar_get || right_scalar_get_mem) && !right_is_raw_list_get) {
     rhs = ny_native_nir_emit_runtime_call(b, "rt_any_to_i64", rhs, -1, -1, 1, 0);
     right_any = false;
     right_dynamic_result = false;
@@ -662,6 +701,8 @@ scalar_multiply:
   if ((e->as.binary.left && e->as.binary.left->kind == NY_E_CALL &&
        e->as.binary.left->as.call.callee &&
        e->as.binary.left->as.call.callee->kind == NY_E_IDENT &&
+       !(ny_native_call_leaf(e->as.binary.left) &&
+         strcmp(ny_native_call_leaf(e->as.binary.left), "get") == 0) &&
        e->as.binary.left->as.call.callee->as.ident.name &&
        !ny_native_nir_user_defined_fn(
            b, e->as.binary.left->as.call.callee->as.ident.name) &&
@@ -677,6 +718,8 @@ scalar_multiply:
       (e->as.binary.right && e->as.binary.right->kind == NY_E_CALL &&
        e->as.binary.right->as.call.callee &&
        e->as.binary.right->as.call.callee->kind == NY_E_IDENT &&
+       !(ny_native_call_leaf(e->as.binary.right) &&
+         strcmp(ny_native_call_leaf(e->as.binary.right), "get") == 0) &&
        e->as.binary.right->as.call.callee->as.ident.name &&
        !ny_native_nir_user_defined_fn(
            b, e->as.binary.right->as.call.callee->as.ident.name) &&
@@ -702,41 +745,46 @@ scalar_multiply:
   if (tag_operand && !left_any && right_any && !left_f64 && !left_f32 &&
       !left_cstr && e->as.binary.left->kind == NY_E_IDENT &&
       !ny_native_nir_expr_is_raw_dynamic_read(b, e->as.binary.right) &&
-      e->as.binary.left->semantic.rep == NY_SEM_REP_RAW_INT) {
+      e->as.binary.left->semantic.rep == NY_SEM_REP_RAW_INT &&
+      !(e->as.binary.op && strcmp(e->as.binary.op, "+") == 0)) {
     a = ny_native_nir_emit_runtime_call(b, "rt_tag", a, -1, -1, 1, 0);
     if (a < 0)
       return -1;
   }
   if (tag_operand && left_any && !right_any && !right_f64 && !right_f32 &&
-      !right_cstr &&
-      !(e->as.binary.left && e->as.binary.left->kind == NY_E_MEMCALL &&
-        e->as.binary.left->as.memcall.name &&
-        strcmp(e->as.binary.left->as.memcall.name, "get") == 0 &&
-        e->as.binary.left->as.memcall.target &&
-        ny_native_nir_expr_is_dict(b, e->as.binary.left->as.memcall.target)) &&
+      !right_cstr && e->as.binary.right->kind == NY_E_IDENT &&
       !ny_native_nir_expr_is_raw_dynamic_read(b, e->as.binary.left) &&
       e->as.binary.right->semantic.rep == NY_SEM_REP_RAW_INT) {
     rhs = ny_native_nir_emit_runtime_call(b, "rt_tag", rhs, -1, -1, 1, 0);
     if (rhs < 0)
       return -1;
   }
-  if (tag_operand && e->as.binary.left && e->as.binary.left->kind == NY_E_LITERAL &&
-      e->as.binary.left->as.literal.kind == NY_LIT_INT && right_any &&
+  bool cmp_dict_get_literal =
+      is_cmp && (cmp == NYIR_CMP_EQ || cmp == NYIR_CMP_NE) &&
+      ((e->as.binary.left && e->as.binary.left->kind == NY_E_MEMCALL &&
+        e->as.binary.left->as.memcall.name &&
+        strcmp(e->as.binary.left->as.memcall.name, "get") == 0 &&
+        e->as.binary.left->as.memcall.target &&
+        ny_native_nir_expr_is_dict(b, e->as.binary.left->as.memcall.target)) ||
+       (e->as.binary.right && e->as.binary.right->kind == NY_E_MEMCALL &&
+        e->as.binary.right->as.memcall.name &&
+        strcmp(e->as.binary.right->as.memcall.name, "get") == 0 &&
+        e->as.binary.right->as.memcall.target &&
+        ny_native_nir_expr_is_dict(b, e->as.binary.right->as.memcall.target)));
+  if (tag_operand && !cmp_dict_get_literal && e->as.binary.left &&
+      e->as.binary.left->kind == NY_E_LITERAL &&
+      e->as.binary.left->as.literal.kind == NY_LIT_INT &&
+      !left_any && (right_any || right_dynamic_result) &&
       !ny_expr_is_nil_literal(e->as.binary.left)) {
     a = ny_native_nir_emit_runtime_call(b, "rt_tag", a, -1, -1, 1, 0);
     if (a < 0)
       return -1;
   }
-  if (tag_operand && e->as.binary.right && e->as.binary.right->kind == NY_E_LITERAL &&
+  if (tag_operand && !cmp_dict_get_literal && e->as.binary.right &&
+      e->as.binary.right->kind == NY_E_LITERAL &&
       e->as.binary.right->as.literal.kind == NY_LIT_INT &&
       !right_any &&
-      !left_any &&
-      left_dynamic_result &&
-      !(e->as.binary.left && e->as.binary.left->kind == NY_E_MEMCALL &&
-        e->as.binary.left->as.memcall.name &&
-        strcmp(e->as.binary.left->as.memcall.name, "get") == 0 &&
-        e->as.binary.left->as.memcall.target &&
-        ny_native_nir_expr_is_dict(b, e->as.binary.left->as.memcall.target)) &&
+      (left_any || left_dynamic_result) &&
       !ny_native_nir_expr_is_raw_dynamic_read(b, e->as.binary.left) &&
       !(e->as.binary.left && e->as.binary.left->kind == NY_E_BINARY &&
         e->as.binary.left->as.binary.op &&
@@ -835,15 +883,19 @@ scalar_multiply:
             (nyir_inst_t){.op = NYIR_CMP_I64, .dst = -1, .a = equal, .b = true_imm,
                           .cmp = cmp});
       }
-      int equal = ny_native_nir_emit_runtime_call(
-          b, "rt_tbuf_eq_raw", a, rhs, -1, 2, 0);
+      /* Sequence operands may be raw native buffers, legacy managed lists, or
+       * a mixture after an `any` receiver read.  The raw comparator only
+       * understands the first representation; use the canonical structural
+       * comparator at this semantic boundary. */
+      int equal = ny_native_nir_emit_runtime_call(b, "rt_any_eq", a, rhs, -1,
+                                                  2, 0);
       int true_imm = ny_native_nir_emit_const(b, NY_IMM_TRUE);
       return (equal < 0 || true_imm < 0) ? -1 : nyir_emit(&b->nyir,
           (nyir_inst_t){.op = NYIR_CMP_I64, .dst = -1, .a = equal, .b = true_imm,
                         .cmp = cmp});
     }
-    bool left_call_scalar = left_user_call && !left_any;
-    bool right_call_scalar = right_user_call && !right_any;
+    bool left_call_scalar = left_user_call && !left_any && !left_dynamic_result;
+    bool right_call_scalar = right_user_call && !right_any && !right_dynamic_result;
     /* Dictionary indexing always crosses the tagged-value boundary, even
      * when type inference records the scalar payload as RAW_INT.  Compare
      * its canonical value through the dynamic equality helper rather than
@@ -941,7 +993,41 @@ scalar_multiply:
                    ny_native_nir_expr_is_dyn_list(b, e->as.binary.left);
   bool right_list = ny_native_nir_expr_is_list(b, e->as.binary.right) ||
                     ny_native_nir_expr_is_dyn_list(b, e->as.binary.right);
+  bool left_dict = ny_native_nir_expr_is_dict(b, e->as.binary.left);
+  bool right_dict = ny_native_nir_expr_is_dict(b, e->as.binary.right);
   if (!is_cmp && e->as.binary.op && strcmp(e->as.binary.op, "+") == 0) {
+    if (left_dict && right_dict) {
+      return ny_native_nir_emit_runtime_call(
+          b, "rt_vec_add_raw", a, rhs, -1, 2, 0);
+    }
+    if (e->as.binary.left && e->as.binary.left->semantic.rep == NY_SEM_REP_RAW_INT &&
+        (right_any || right_dynamic_result) &&
+        !left_f64 && !right_f64 && !left_f32 && !right_f32) {
+      if (!right_is_raw_list_get &&
+          !ny_native_nir_expr_is_raw_dynamic_read(b, e->as.binary.right)) {
+        rhs = ny_native_nir_emit_runtime_call(b, "rt_any_to_i64", rhs, -1, -1, 1, 0);
+        if (rhs < 0)
+          return -1;
+      }
+      int sum = nyir_emit(&b->nyir, (nyir_inst_t){.op = NYIR_ADD_I64, .dst = -1, .a = a, .b = rhs});
+      if (b->return_any && sum >= 0)
+        return ny_native_nir_emit_runtime_call(b, "rt_tag", sum, -1, -1, 1, 0);
+      return sum;
+    }
+    if (e->as.binary.right && e->as.binary.right->semantic.rep == NY_SEM_REP_RAW_INT &&
+        (left_any || left_dynamic_result) &&
+        !left_f64 && !right_f64 && !left_f32 && !right_f32) {
+      if (!left_is_raw_list_get &&
+          !ny_native_nir_expr_is_raw_dynamic_read(b, e->as.binary.left)) {
+        a = ny_native_nir_emit_runtime_call(b, "rt_any_to_i64", a, -1, -1, 1, 0);
+        if (a < 0)
+          return -1;
+      }
+      int sum = nyir_emit(&b->nyir, (nyir_inst_t){.op = NYIR_ADD_I64, .dst = -1, .a = a, .b = rhs});
+      if (b->return_any && sum >= 0)
+        return ny_native_nir_emit_runtime_call(b, "rt_tag", sum, -1, -1, 1, 0);
+      return sum;
+    }
     if ((left_any || right_any || left_dynamic_result || right_dynamic_result) &&
         !left_f64 && !right_f64 && !left_f32 && !right_f32) {
       if (ny_native_nir_expr_is_raw_dynamic_read(b, e->as.binary.left) ||
@@ -962,19 +1048,23 @@ scalar_multiply:
           b, "rt_raw_add", a, rhs, -1, 2, 0);
     }
   }
-  bool left_dict = ny_native_nir_expr_is_dict(b, e->as.binary.left);
-  bool right_dict = ny_native_nir_expr_is_dict(b, e->as.binary.right);
+  if (!is_cmp && e->as.binary.op && strcmp(e->as.binary.op, "-") == 0) {
+    if (left_dict && right_dict) {
+      return ny_native_nir_emit_runtime_call(
+          b, "rt_vec_sub_raw", a, rhs, -1, 2, 0);
+    }
+  }
   if (!is_cmp && e->as.binary.op && strcmp(e->as.binary.op, "*") == 0) {
     if (left_dict && right_dict) {
       return ny_native_nir_emit_runtime_call(
           b, "rt_vec_dot_raw", a, rhs, -1, 2, NYIR_INST_F_RET_F64);
     }
-    if (left_dict && (right_f64 || right_f32)) {
+    if (left_dict && !left_f64 && !left_f32 && (right_f64 || right_f32)) {
       int s_f64 = right_f32 ? ny_native_nir_emit_f32_to_f64(b, rhs) : rhs;
       return ny_native_nir_emit_runtime_call(
           b, "rt_vec_mul_scalar_raw", a, s_f64, -1, 2, 0);
     }
-    if (right_dict && (left_f64 || left_f32)) {
+    if (right_dict && !right_f64 && !right_f32 && (left_f64 || left_f32)) {
       int s_f64 = left_f32 ? ny_native_nir_emit_f32_to_f64(b, a) : a;
       return ny_native_nir_emit_runtime_call(
           b, "rt_vec_mul_scalar_raw", rhs, s_f64, -1, 2, 0);
@@ -985,6 +1075,10 @@ scalar_multiply:
     }
   }
   if (!is_cmp && e->as.binary.op && strcmp(e->as.binary.op, "/") == 0) {
+    if (left_dict && right_dict) {
+      return ny_native_nir_emit_runtime_call(
+          b, "rt_vec_div_component_raw", a, rhs, -1, 2, 0);
+    }
     if (left_dict && (right_f64 || right_f32)) {
       int s_f64 = right_f32 ? ny_native_nir_emit_f32_to_f64(b, rhs) : rhs;
       return ny_native_nir_emit_runtime_call(
@@ -1096,7 +1190,7 @@ scalar_multiply:
   /* Bitwise NYIR instructions operate on raw i64 values.  A bigint operand is
    * a heap handle, so route shifts through the representation-aware bridge
    * instead of shifting the pointer bits. */
-  if (!is_cmp && op == NYIR_SHL_I64)
+  if (!is_cmp && op == NYIR_SHL_I64 && (left_bigint || right_bigint))
     return ny_native_nir_emit_runtime_call(
         b, "rt_shl_raw", a, rhs, -1, 2, 0);
   /*

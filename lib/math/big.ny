@@ -51,7 +51,7 @@ fn _big_zero() bigint { __bigint_from_int(0) }
 fn is_bigint(any x) bool {
    "Returns true if `x` is a BigInt object."
    if _big_is_rt(x) { return true }
-   is_ptr(x) && __tagof(x) == std.math.big._TAG_LIST && x.get(0) == 107
+   is_ptr(x) && __tagof(x) == _TAG_LIST && x.get(0) == 107
 }
 
 fn _big_make(int sign, list digits, bool owned=false) any {
@@ -428,8 +428,10 @@ fn bigint_bit_length(bigint a) int {
 
 fn bigint_to_int(any a) int {
    "Convert BigInt to int(may overflow for large values)."
-   if is_int(a) { return a }
-   __bigint_to_int(bigint(a))
+   if is_int(a) { return to_int(a) }
+   ; __bigint_to_int returns a tagged integer at the runtime boundary, while
+   ; this public helper promises a raw `int` for arithmetic and loop tests.
+   __untag(__bigint_to_int(bigint(a)))
 }
 
 fn bigint_random(any n) bigint {

@@ -89,14 +89,28 @@ static const char *type_attached_owner(const char *name) {
     return NULL;
   const char *leaf = strrchr(name, '.');
   leaf = leaf ? leaf + 1 : name;
-  if (strcmp(leaf, "any") == 0 || strcmp(leaf, "str") == 0 ||
-      strcmp(leaf, "list") == 0 || strcmp(leaf, "dict") == 0 ||
-      strcmp(leaf, "set") == 0 || strcmp(leaf, "tuple") == 0 ||
-      strcmp(leaf, "bytes") == 0 || strcmp(leaf, "range") == 0 ||
-      strcmp(leaf, "bigint") == 0 || strcmp(leaf, "int") == 0 ||
-      strcmp(leaf, "float") == 0 || strcmp(leaf, "f32") == 0 ||
-      strcmp(leaf, "f64") == 0 || strcmp(leaf, "bool") == 0)
-    return leaf;
+#define NY_OWNER_IF_BASE(bname)                                                \
+  do {                                                                         \
+    size_t len = sizeof(bname) - 1;                                            \
+    if (strncmp(leaf, bname, len) == 0 &&                                      \
+        (leaf[len] == '\0' || leaf[len] == '<' || leaf[len] == '['))           \
+      return bname;                                                            \
+  } while (0)
+  NY_OWNER_IF_BASE("any");
+  NY_OWNER_IF_BASE("str");
+  NY_OWNER_IF_BASE("list");
+  NY_OWNER_IF_BASE("dict");
+  NY_OWNER_IF_BASE("set");
+  NY_OWNER_IF_BASE("tuple");
+  NY_OWNER_IF_BASE("bytes");
+  NY_OWNER_IF_BASE("range");
+  NY_OWNER_IF_BASE("bigint");
+  NY_OWNER_IF_BASE("int");
+  NY_OWNER_IF_BASE("float");
+  NY_OWNER_IF_BASE("f32");
+  NY_OWNER_IF_BASE("f64");
+  NY_OWNER_IF_BASE("bool");
+#undef NY_OWNER_IF_BASE
   return name;
 }
 
@@ -108,7 +122,8 @@ static const char *type_builtin_generic_owner(const char *owner) {
 #define NY_GENERIC_OWNER_IF_BASE(name)                                         \
   do {                                                                         \
     size_t len = sizeof(name) - 1;                                             \
-    if (strncmp(leaf, name, len) == 0 && leaf[len] == '<')                     \
+    if (strncmp(leaf, name, len) == 0 &&                                       \
+        (leaf[len] == '<' || leaf[len] == '['))                                \
       return name;                                                             \
   } while (0)
   NY_GENERIC_OWNER_IF_BASE("list");
@@ -1626,6 +1641,16 @@ static const char *infer_expr_type_uncached(codegen_t *cg, scope *scopes,
           return b->type_name;
         if (!b->is_mut) {
           expr_t *init = ny_binding_var_init_expr(b, e->as.ident.name);
+          if (!init && b->stmt_t && b->stmt_t->kind == NY_S_VAR) {
+            stmt_var_t *var = &b->stmt_t->as.var;
+            for (size_t vi = 0; vi < var->names.len && vi < var->exprs.len; ++vi) {
+              if (var->names.data[vi] &&
+                  strcmp(var->names.data[vi], e->as.ident.name) == 0) {
+                init = var->exprs.data[vi];
+                break;
+              }
+            }
+          }
           const char *init_type = infer_expr_type(cg, scopes, depth, init);
           if (init_type)
             return init_type;

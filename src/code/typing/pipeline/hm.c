@@ -337,6 +337,25 @@ static bool hm_name_compatible(const char *want, const char *got) {
   if ((strncmp(want, "Fin<", 4) == 0 && tp_is_int_type(got)) ||
       (strncmp(got, "Fin<", 4) == 0 && tp_is_int_type(want)))
     return true;
+  /*
+   * A bare generic name ("Result") is the fully dynamic parameterization of
+   * the same generic ("Result<int, int>"); it accepts every instance, the
+   * same way an any type argument does.
+   */
+  if (strchr(want, '<') && !strchr(got, '<')) {
+    char *wb = hm_generic_base_owned(want);
+    bool ok = wb && strcmp(wb, got) == 0;
+    free(wb);
+    if (ok)
+      return true;
+  }
+  if (!strchr(want, '<') && strchr(got, '<')) {
+    char *gb = hm_generic_base_owned(got);
+    bool ok = gb && strcmp(gb, want) == 0;
+    free(gb);
+    if (ok)
+      return true;
+  }
   if (hm_generic_name_compatible(want, got))
     return true;
   if ((hm_is_callable_name(want) && hm_is_callable_name(got)))
@@ -407,8 +426,23 @@ static void hm_check_fin_initializer(ny_hm_state_t *hm, const char *decl,
                  bound, bound, value);
 }
 
-static bool hm_name_accepts_kind(const char *name, ny_hm_kind_t kind) {
+/* Builtin kind/ primitive names keep their exact-kind unification; any
+ * other declared name is a nominal user/impl type. */
+static bool hm_name_is_builtin_kind(const char *name) {
   if (!name)
+    return false;
+  static const char *builtins[] = {"list", "tuple", "set", "dict", "str",
+                                   "ptr",  "fnptr", "any", "nil",  "proof",
+                                   "empty"};
+  for (size_t i = 0; i < sizeof(builtins) / sizeof(builtins[0]); ++i)
+    if (strcmp(name, builtins[i]) == 0)
+      return true;
+  return tp_is_int_type(name) || hm_numeric_name(name) ||
+         strcmp(name, "bool") == 0 || strcmp(name, "range") == 0 ||
+         strcmp(name, "bytes") == 0;
+}
+
+static bool hm_name_accepts_kind(const char *name, ny_hm_kind_t kind) {  if (!name)
     return false;
   const char *kind_name = NULL;
   switch (kind) {
@@ -713,6 +747,32 @@ static bool hm_unify(ny_hm_state_t *hm, ny_hm_type_t *want, ny_hm_type_t *got,
     return hm_unify_indexable(hm, want, got, tok, context);
   if (got->kind == NY_HM_INDEXABLE)
     return hm_unify_indexable(hm, got, want, tok, context);
+  /*
+   * A union on the received side unifies when either member fits: a
+   * heterogeneous `[-1, buf]` element merged to int|str must satisfy the
+   * int element slot recorded by an earlier return of the same function
+   * (remote.ny expect: "expected int, got int|str").
+   */
+  if (got->kind == NY_HM_UNION && want->kind != NY_HM_UNION) {
+    if (hm_unify(hm, want, got->a, tok, context) ||
+        hm_unify(hm, want, got->b, tok, context))
+      return true;
+    hm_unify_diag(hm, tok, "hm-type-mismatch", context, want, got);
+    return false;
+  }
+  /*
+   * Mirror case: the recorded type is the union and the received value is
+   * one member (return res after return [-1, ""] with a collapsed any
+   * element: "expected int|str, got int").  The in-switch union case only
+   * runs when both kinds match, so handle the mixed-kind pair here.
+   */
+  if (want->kind == NY_HM_UNION && got->kind != NY_HM_UNION) {
+    if (hm_unify(hm, want->a, got, tok, context) ||
+        hm_unify(hm, want->b, got, tok, context))
+      return true;
+    hm_unify_diag(hm, tok, "hm-type-mismatch", context, want, got);
+    return false;
+  }
   if (want->kind == NY_HM_NAME && got->kind == NY_HM_NAME) {
     if (hm_generic_base_same(want->name, got->name)) {
       if (!hm_generic_name_compatible(want->name, got->name)) {
@@ -731,6 +791,15 @@ static bool hm_unify(ny_hm_state_t *hm, ny_hm_type_t *want, ny_hm_type_t *got,
     hm_unify_diag(hm, tok, "hm-type-mismatch", context, want, got);
     return false;
   }
+  /*
+   * Nominal impl types are runtime views over tagged dict literals
+   * ({"__type": "name", ...}); unify a declared impl name with a dict
+   * literal's dict<str, any> unless the name is a builtin kind with its own
+   * exact rule (gf.ny GF2BVLinearSystem returns gf2bv_linear).
+   */
+  if (want->kind == NY_HM_NAME && got->kind == NY_HM_DICT &&
+      !hm_name_is_builtin_kind(want->name))
+    return true;
   if (want->kind != got->kind) {
     hm_unify_diag(hm, tok, "hm-type-mismatch", context, want, got);
     return false;
@@ -1828,7 +1897,7 @@ static char *hm_attached_owner_name(const char *type_name) {
   while (*type_name == '?' || *type_name == '*')
     type_name++;
   const char *end = type_name;
-  while (*end && *end != '<' && *end != '|' && *end != ' ')
+  while (*end && *end != '<' && *end != '[' && *end != '|' && *end != ' ')
     end++;
   if (end == type_name)
     return ny_strdup("any");
@@ -2189,7 +2258,8 @@ static ny_hm_type_t *hm_call_named(ny_hm_state_t *hm, ny_hm_env_list *env,
       return hm_adt_constructor_type(hm, env, owner, member, args, self_name);
   }
   if (!target && leaf && args) {
-    if (strcmp(leaf, "require_shape") == 0 && args->len == 2) {
+    if ((strcmp(leaf, "require_shape") == 0 ||
+         strcmp(leaf, "assert_shape") == 0) && args->len >= 2) {
       if (args->data[1].val && args->data[1].val->kind == NY_E_LITERAL &&
           args->data[1].val->as.literal.kind == NY_LIT_STR &&
           args->data[1].val->as.literal.as.s.data) {
@@ -2245,7 +2315,24 @@ static ny_hm_type_t *hm_call_named(ny_hm_state_t *hm, ny_hm_env_list *env,
           hm, env, args->data[i].val, self_name, allow_dynamic_literal_args);
     return hm_name(hm, name);
   }
-  ny_hm_scheme_t *scheme = hm_find_scheme(hm, name);
+  /*
+   * A bare-name call made from inside module M must resolve to M's own
+   * declaration before any other module's same-leaf function.  The plain
+   * name lookup returns the most recently registered scheme, so
+   * `shell(...)` inside the os facade type-checked against
+   * os.interact.shell (int timeout) instead of os.shell (bool, bool) and
+   * every call failed with "expected int, got bool".
+   */
+  ny_hm_scheme_t *scheme = NULL;
+  if (self_name && *self_name && leaf && name && !strchr(name, '.') &&
+      strcmp(leaf, name) == 0) {
+    char owned[512];
+    int qn = snprintf(owned, sizeof(owned), "%s.%s", self_name, leaf);
+    if (qn > 0 && (size_t)qn < sizeof(owned))
+      scheme = hm_find_scheme(hm, owned);
+  }
+  if (!scheme)
+    scheme = hm_find_scheme(hm, name);
   if (!scheme) {
     if (target && leaf && name && strchr(name, '.')) {
       if (hm_member_root_is_unresolved_ident(hm, env, target)) {
@@ -2642,9 +2729,39 @@ static ny_hm_type_t *hm_infer_expr_impl(ny_hm_state_t *hm, ny_hm_env_list *env,
     if (e->as.call.callee && e->as.call.callee->kind == NY_E_IDENT) {
       const char *name = e->as.call.callee->as.ident.name;
       ny_hm_type_t *local = hm_env_get(hm, env, name);
-      if (local)
+      /*
+       * Module-level VALUES from every compiled module share this
+       * environment, so a bare call whose name collides with a module-level
+       * dict/list (std.math.vector's sample vectors x/y/z) must not take
+       * the value path when a function of that name exists.  Only
+       * actually-callable locals dispatch as "local call" directly; for
+       * non-callable locals a same-leaf function scheme wins first.
+       */
+      ny_hm_type_t *pruned = local ? hm_prune(local) : NULL;
+      bool callable_local =
+          pruned && (pruned->kind == NY_HM_FN ||
+                     (pruned->kind == NY_HM_NAME && pruned->name &&
+                      hm_is_callable_name(pruned->name)));
+      if (local && callable_local)
         return hm_call_function_type(hm, env, local, &e->as.call.args, e->tok,
                                      self_name, "local call");
+      if (local) {
+        const char *leaf = ny_name_leaf(name);
+        bool named_fn =
+            hm_find_scheme(hm, name) != NULL ||
+            (leaf && self_name && *self_name && strcmp(leaf, name) == 0);
+        if (!named_fn && leaf && self_name && *self_name &&
+            strcmp(leaf, name) == 0) {
+          char owned[512];
+          int qn =
+              snprintf(owned, sizeof(owned), "%s.%s", self_name, leaf);
+          if (qn > 0 && (size_t)qn < sizeof(owned))
+            named_fn = hm_find_scheme(hm, owned) != NULL;
+        }
+        if (!named_fn)
+          return hm_call_function_type(hm, env, local, &e->as.call.args,
+                                       e->tok, self_name, "local call");
+      }
       return hm_call_named(hm, env, name, NULL, &e->as.call.args, e->tok,
                            self_name);
     } else if (e->as.call.callee) {
@@ -3154,7 +3271,8 @@ static void hm_persist_member_target(ny_hm_state_t *hm, ny_hm_env_list *env,
     return;
   ny_hm_type_t *target_t = hm_infer_expr(hm, env, target, self_name);
   char *target_name = hm_type_string(target_t);
-  const char *lookup_type = target_name && *target_name ? target_name : "any";
+  char *owner_name = hm_attached_owner_name(target_name);
+  const char *lookup_type = owner_name && *owner_name ? owner_name : "any";
   fun_sig *sig = hm->ctx->cg
                      ? ny_gencall_lookup_attached_method(hm->ctx->cg,
                                                          lookup_type, method)
@@ -3206,6 +3324,7 @@ static void hm_persist_member_target(ny_hm_state_t *hm, ny_hm_env_list *env,
     e->semantic.member_call_kind = NY_SEM_CALL_ERROR;
   }
   free(target_name);
+  free(owner_name);
 }
 
 typedef struct hm_call_arg_fact_ctx_t {
@@ -3219,6 +3338,16 @@ static void hm_complete_leaf_fact(ny_visitor_t *visitor, expr_t *e) {
   if (!ctx || !e || e->semantic.resolved)
     return;
   if (e->kind == NY_E_IDENT && e->as.ident.name) {
+    if (!ctx->owner) {
+      /* In module-global completion pass, do not resolve bare lowercase
+       * identifiers against the global environment, as they may be function
+       * parameters or locals. Only uppercase constants or qualified identifiers
+       * are admitted as module constants. */
+      const char *leaf = strrchr(e->as.ident.name, '.');
+      leaf = leaf ? leaf + 1 : e->as.ident.name;
+      if (leaf[0] && !(leaf[0] >= 'A' && leaf[0] <= 'Z'))
+        return;
+    }
     ny_hm_env_entry_t *entry = hm_env_entry(ctx->env, e->as.ident.name);
     if (!entry)
       return;
@@ -3260,6 +3389,12 @@ static void hm_visit_semantic_completion(ny_visitor_t *visitor, stmt_t *s) {
     for (size_t i = 0; i < s->as.module.body.len; ++i)
       hm_visit_semantic_completion(visitor, s->as.module.body.data[i]);
     return;
+  }
+  if (s->kind == NY_S_FUNC) {
+    hm_call_arg_fact_ctx_t *ctx = visitor ? visitor->ctx : NULL;
+    if (ctx && ctx->hm && ctx->hm->ctx && !ctx->hm->ctx->include_std &&
+        s->as.fn.return_semantic.resolved)
+      return;
   }
   ny_visit_stmt(visitor, s);
 }
@@ -3411,12 +3546,25 @@ static void hm_infer_stmt_mode(ny_hm_state_t *hm, ny_hm_env_list *env,
       (void)hm_infer_expr(hm, env, s->as.expr.expr, self_name);
     break;
   case NY_S_RETURN:
-    if (ret)
-      hm_unify(hm, ret,
-               s->as.ret.value
-                   ? hm_infer_expr(hm, env, s->as.ret.value, self_name)
-                   : hm_name(hm, "nil"),
-               s->as.ret.value ? s->as.ret.value->tok : s->tok, "return value");
+    if (ret) {
+      ny_hm_type_t *vt = s->as.ret.value
+                             ? hm_infer_expr(hm, env, s->as.ret.value,
+                                             self_name)
+                             : hm_name(hm, "nil");
+      /*
+       * Bool predicates deliberately return the 1/0 scalar literals of the
+       * native predicate ABI (math/logic.ny proof conjunctions).  A 0/1
+       * int literal satisfies a declared bool return.
+       */
+      if (!(hm_is_name(ret, "bool") && hm_is_name(vt, "int") &&
+            s->as.ret.value && s->as.ret.value->kind == NY_E_LITERAL &&
+            s->as.ret.value->as.literal.kind == NY_LIT_INT &&
+            (s->as.ret.value->as.literal.as.i == 0 ||
+             s->as.ret.value->as.literal.as.i == 1)))
+        hm_unify(hm, ret, vt,
+                 s->as.ret.value ? s->as.ret.value->tok : s->tok,
+                 "return value");
+    }
     break;
   case NY_S_IF:
     hm_infer_stmt_mode(hm, env, s->as.iff.init, self_name, ret, false);

@@ -4,6 +4,7 @@
  */
 #include "code/native/internal.h"
 #include "code/native/object/internal.h"
+#include "code/runtime/shared.h"
 #include "base/util.h"
 
 #include <inttypes.h>
@@ -460,6 +461,7 @@ typedef struct {
   char **strings;
   size_t count;
   size_t stride;
+  void *data_ptr;
 } ny_arraytab_ent_t;
 
 static ny_arraytab_ent_t *ny_arraytab;
@@ -492,6 +494,7 @@ void ny_native_arraytab_clear(void) {
       free(ny_arraytab[i].strings[k]);
     free(ny_arraytab[i].strings);
     free(ny_arraytab[i].values);
+    free(ny_arraytab[i].data_ptr);
   }
   free(ny_arraytab);
   ny_arraytab = NULL;
@@ -584,6 +587,41 @@ bool ny_native_arraytab_get(const char *name,
   return false;
 }
 
+void *ny_native_arraytab_data(const char *name) {
+  if (!name)
+    return NULL;
+  for (size_t i = 0; i < ny_arraytab_len; ++i) {
+    if (strcmp(ny_arraytab[i].name, name) == 0) {
+      ny_arraytab_ent_t *e = &ny_arraytab[i];
+      if (!e->data_ptr) {
+        size_t total = 32 + e->count * e->stride;
+        uint8_t *raw = calloc(1, total);
+        if (!raw)
+          return NULL;
+        int64_t *hdr = (int64_t *)raw;
+        hdr[0] = (int64_t)NY_NATIVE_TBUF_MAGIC;
+        hdr[1] = (int64_t)e->count;
+        hdr[2] = (int64_t)e->stride;
+        hdr[3] = (int64_t)e->count;
+        uint8_t *data = raw + 32;
+        for (size_t k = 0; k < e->count; ++k) {
+          if (e->stride == 8) {
+            ((int64_t *)data)[k] = e->values[k].value;
+          } else if (e->stride == 24) {
+            int64_t *slot = (int64_t *)(data + k * 24);
+            slot[0] = e->values[k].value;
+            slot[1] = 0;
+            slot[2] = e->values[k].tag;
+          }
+        }
+        e->data_ptr = raw;
+      }
+      return (void *)((uintptr_t)e->data_ptr + 32);
+    }
+  }
+  return NULL;
+}
+
 bool ny_native_arraytab_append_defs(ny_obj_buf_t *code,
                                     ny_x64_obj_symbol_def_t *defs,
                                     size_t *def_count, char *err,
@@ -598,6 +636,10 @@ bool ny_native_arraytab_append_defs(ny_obj_buf_t *code,
     }
     while (code->len & 7u)
       if (!ny_obj_u8(code, 0))
+        goto oom;
+    uint64_t magic = NY_NATIVE_TBUF_MAGIC;
+    for (int b = 0; b < 8; ++b)
+      if (!ny_obj_u8(code, (unsigned char)((magic >> (b * 8)) & 255)))
         goto oom;
     for (int b = 0; b < 8; ++b)
       if (!ny_obj_u8(code, (unsigned char)(((uint64_t)e->count >> (b * 8)) & 255)))
@@ -684,8 +726,11 @@ bool ny_native_arraytab_append_asm(ny_native_writer_t *w, char *err,
     return false;
   for (size_t i = 0; i < ny_arraytab_len; ++i) {
     ny_arraytab_ent_t *e = &ny_arraytab[i];
-    if (!ny_native_printf(w, "\t.quad\t%zu\n\t.quad\t%zu\n\t.quad\t%zu\n%s:\n",
-                          e->count, e->stride, e->count, e->name))
+    if (!ny_native_printf(
+            w,
+            "\t.quad\t%" PRIu64 "\n\t.quad\t%zu\n\t.quad\t%zu\n\t.quad\t%zu\n%s:\n",
+            (uint64_t)NY_NATIVE_TBUF_MAGIC, e->count, e->stride, e->count,
+            e->name))
       return false;
     size_t so = e->count * e->stride;
     size_t sc = 0;

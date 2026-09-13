@@ -699,9 +699,10 @@ fn file_read(str path) Result<str, int> {
          while true {
             match sys_read(fd, tmp, 4096) {
                ok(r) -> {
-                  if r <= 0 { break }
-                  if tlen + r >= cap {
-                     while tlen + r >= cap { cap = cap * 2 }
+                  def int count = __untag(r)
+                  if count <= 0 { break }
+                  if tlen + count >= cap {
+                     while tlen + count >= cap { cap = cap * 2 }
                      def nbase = realloc(base, cap + 16)
                      if nbase == 0 {
                         free(tmp, base)
@@ -711,8 +712,8 @@ fn file_read(str path) Result<str, int> {
                      base = nbase
                      buf = base + 16
                   }
-                  __copy_mem(ptr_add(buf, tlen), tmp, r)
-                  tlen = tlen + r
+                  __copy_mem(ptr_add(buf, tlen), tmp, __tag(count))
+                  tlen = tlen + count
                }
                err(e) -> {
                   free(tmp, base)

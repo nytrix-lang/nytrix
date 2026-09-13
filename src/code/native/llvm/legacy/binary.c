@@ -2460,7 +2460,15 @@ static LLVMValueRef ny_try_emit_scoped_operator(codegen_t *cg, scope *scopes, si
       continue;
     if (!ny_operator_module_active(cg, def))
       continue;
-    if (!ny_bin_type_alias_eq(def->left_type, lt) || !ny_bin_type_alias_eq(def->right_type, rt))
+    const char *def_left =
+        (def->left_type && strcmp(def->left_type, "self") == 0)
+            ? (def->stmt && def->stmt->as.oper.left_type ? def->stmt->as.oper.left_type : def->left_type)
+            : def->left_type;
+    const char *def_right =
+        (def->right_type && strcmp(def->right_type, "self") == 0)
+            ? def_left
+            : def->right_type;
+    if (!ny_bin_type_alias_eq(def_left, lt) || !ny_bin_type_alias_eq(def_right, rt))
       continue;
     fun_sig *target = lookup_fun(cg, def->target_name, 0);
     if (!target) {

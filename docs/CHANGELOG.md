@@ -7,6 +7,66 @@ Nytrix uses dated milestones. Use `ny --version` for snapshots.
 Reliability, build portability, and dynamic ABI correctness
 
 ### Fixed
+- Native dictionary `.len` now reads the native table count before probing
+  the managed-dictionary layout. The typed-dict assertion in `type.ny` passes;
+  that fixture remains open on nested-list indexing. Fresh uncached runs of
+  `errors.ny`, `iter.ny`, and `collections.ny` pass.
+- The `std.math.crypto` alias no longer reproduces the stale `std.core.iter`
+  callback crash; the minimal regression now passes with caches disabled.
+- Dynamic `get` comparisons retain the tagged-value ABI instead of treating
+  the builtin as an unknown raw extern call. Raw allocations now carry
+  explicit pointer provenance, so `get` rejects their contents as sequences
+  even when zeroed memory resembles a C string. The nil and raw-pointer
+  fallback reproducers pass with caches off.
+- A single-element list initializer now remains a list; only an explicit
+  destructuring pattern should unpack it into a scalar.
+- Sliding-window construction now reads `seq` elements through the dynamic
+  slot accessor before appending, avoiding a second integer tag. Native
+  string `.get` with a string fallback keeps its string result ABI. Clean
+  `iter.ny` and `collections.ny` fixture runs pass with result caching off.
+- Bigint modular square roots now complete the Tonelli–Shanks p ≡ 1
+  (mod 4) branch. Bigint-to-int boundaries return raw scalar values, and
+  bigint `clz`/`ctz` calls use the raw runtime ABI.
+- Typed native-list `.get` now preserves raw scalar values while dynamic
+  element lists retain tagged decoding; odd byte values such as `3` no longer
+  become a second tag (`7`).
+- X11 UTF-8 decoding now accepts the native string ABI directly and handles
+  1-, 2-, 3-, and 4-byte sequences without losing the module-qualified call's
+  string value.
+- Dynamic `.len` now uses the strict sequence error contract, and try/catch
+  joins normalize raw scalar arm results before returning through an `any`
+  function boundary.
+- Dynamic string-key dictionary reads no longer run odd raw integer payloads
+  through `rt_any_to_i64` a second time when an integer fallback is present;
+  values such as `7` remain `7` across an `any` receiver.
+- Top-level mutable bindings in the native entry point now stay in the main
+  frame instead of being emitted as undeclared global symbols. This restores
+  loop-shaped dictionary construction and lookup, including 10,000 distinct
+  `to_str(i)` keys.
+- Recursive `mapcat` now decodes dynamic sequence elements before appending
+  them, preventing one extra integer tag per recursion level in inline
+  flattening helpers.
+- JIT/native list descriptors now preserve raw integer expressions (including
+  `from_int(...)`) with the integer slot tag instead of classifying odd raw
+  payloads as already-tagged values. This fixes nested list reads.
+- The iterator empty/drop path and nested dynamic `.get` comparisons now keep
+  their machine-form scalar representation through early-return and callback
+  lowering; `iter.ny` and the nested collection filter coverage pass.
+- Dynamic iterator predicates now receive values through the canonical
+  sequence-element decoder in `find_if` and `partition`, preserving odd
+  integer payloads and nested handles across native `any` boundaries.
+- X11 UTF-8 decoding now has a concrete string input contract and derives its
+  encoded byte width from the leading octet, so multibyte characters advance
+  by bytes even when string length metadata reports codepoints.
+- Strict source validation now resolves callable names before colliding
+  module-level list/dict values, eliminating the E1010 callable-resolution
+  storm; remaining strict diagnostics are reported at their actual dynamic
+  operation sites.
+- Result-pattern bindings now retain the tagged dynamic payload ABI, fixing
+  `ok(v)`/`err(v)` guards that previously double-tagged scalar payloads in the
+  LLVM/JIT path.
+- Dynamic descriptor string values are now stable under repeated JIT and GC
+  runs; the prior `_char_list_to_str`/`swap_items` rooting failure is closed.
 - Untyped scalar ABI: callee parameter semantics now drive call-site
   boxing, untyped returns box raw scalar producers exactly once
   (`return_any`), and raw consumers decode at their store boundary

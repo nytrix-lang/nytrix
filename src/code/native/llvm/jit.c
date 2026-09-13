@@ -839,6 +839,10 @@ void ny_jit_add_runtime_symbols(void) {
   LLVMAddSymbol("rt_value_is_ptr", (void *)(uintptr_t)rt_value_is_ptr);
   LLVMAddSymbol("rt_native_is_ptr", (void *)(uintptr_t)rt_native_is_ptr);
   LLVMAddSymbol("rt_vec_dot_raw", (void *)(uintptr_t)rt_vec_dot_raw);
+  LLVMAddSymbol("rt_vec_add_raw", (void *)(uintptr_t)rt_vec_add_raw);
+  LLVMAddSymbol("rt_vec_sub_raw", (void *)(uintptr_t)rt_vec_sub_raw);
+  LLVMAddSymbol("rt_vec_div_component_raw",
+                (void *)(uintptr_t)rt_vec_div_component_raw);
   LLVMAddSymbol("rt_vec_mul_scalar_raw",
                 (void *)(uintptr_t)rt_vec_mul_scalar_raw);
   LLVMAddSymbol("rt_vec_div_scalar_raw",
@@ -848,6 +852,7 @@ void ny_jit_add_runtime_symbols(void) {
   LLVMAddSymbol("rt_any_mod", (void *)(uintptr_t)rt_any_mod);
   LLVMAddSymbol("rt_tbuf_tag", (void *)(uintptr_t)rt_tbuf_tag);
   LLVMAddSymbol("rt_zalloc_raw", (void *)(uintptr_t)rt_zalloc_raw);
+  LLVMAddSymbol("rt_malloc_i64", (void *)(uintptr_t)rt_malloc_i64);
   LLVMAddSymbol("rt_zfree_raw", (void *)(uintptr_t)rt_zfree_raw);
   LLVMAddSymbol("rt_list_new_raw", (void *)(uintptr_t)rt_list_new_raw);
   LLVMAddSymbol("rt_list_new_sized", (void *)(uintptr_t)rt_list_new_sized);
@@ -904,6 +909,15 @@ void ny_jit_add_runtime_symbols(void) {
   LLVMAddSymbol("rt_cstr_len", (void *)(uintptr_t)rt_cstr_len);
   LLVMAddSymbol("rt_cstr_get_raw", (void *)(uintptr_t)rt_cstr_get_raw);
   LLVMAddSymbol("rt_len", (void *)(uintptr_t)rt_len);
+  LLVMAddSymbol("rt_len_strict", (void *)(uintptr_t)rt_len_strict);
+  LLVMAddSymbol("rt_raw_word_tag", (void *)(uintptr_t)rt_raw_word_tag);
+  LLVMAddSymbol("rt_tbuf_dyn_elem", (void *)(uintptr_t)rt_tbuf_dyn_elem);
+  LLVMAddSymbol("rt_tbuf_extend", (void *)(uintptr_t)rt_tbuf_extend);
+  LLVMAddSymbol("rt_tbuf_repeat", (void *)(uintptr_t)rt_tbuf_repeat);
+  LLVMAddSymbol("rt_adt_alloc", (void *)(uintptr_t)rt_adt_alloc);
+  LLVMAddSymbol("rt_adt_tag", (void *)(uintptr_t)rt_adt_tag);
+  LLVMAddSymbol("rt_getlogin", (void *)(uintptr_t)rt_getlogin);
+  LLVMAddSymbol("rt_gettimeofday", (void *)(uintptr_t)rt_gettimeofday);
   LLVMAddSymbol("rt_sequence_len_raw",
                 (void *)(uintptr_t)rt_sequence_len_raw);
   LLVMAddSymbol("rt_cstr_builder_new", (void *)(uintptr_t)rt_cstr_builder_new);
@@ -966,6 +980,13 @@ void ny_jit_add_runtime_symbols(void) {
   LLVMAddSymbol("rt_i64_max", (void *)(uintptr_t)rt_i64_max);
   LLVMAddSymbol("rt_f64_min", (void *)(uintptr_t)rt_f64_min);
   LLVMAddSymbol("rt_f64_max", (void *)(uintptr_t)rt_f64_max);
+  LLVMAddSymbol("rt_any_to_f64", (void *)(uintptr_t)rt_any_to_f64);
+  LLVMAddSymbol("rt_fmod_f64", (void *)(uintptr_t)rt_fmod_f64);
+#ifndef _WIN32
+  void *setjmp_ptr = dlsym(RTLD_DEFAULT, "_setjmp");
+  if (setjmp_ptr)
+    LLVMAddSymbol("_setjmp", setjmp_ptr);
+#endif
 #ifdef _WIN32
   LLVMAddSymbol("snprintf", (void *)(uintptr_t)ny_jit_snprintf);
   LLVMAddSymbol("_snprintf", (void *)(uintptr_t)ny_jit_snprintf);
@@ -1179,6 +1200,12 @@ void ny_jit_define_runtime_trampolines(LLVMModuleRef mod) {
                                    (void *)(uintptr_t)rt_native_is_ptr);
   ny_jit_define_runtime_trampoline(mod, "rt_vec_dot_raw",
                                    (void *)(uintptr_t)rt_vec_dot_raw);
+  ny_jit_define_runtime_trampoline(mod, "rt_vec_add_raw",
+                                   (void *)(uintptr_t)rt_vec_add_raw);
+  ny_jit_define_runtime_trampoline(mod, "rt_vec_sub_raw",
+                                   (void *)(uintptr_t)rt_vec_sub_raw);
+  ny_jit_define_runtime_trampoline(mod, "rt_vec_div_component_raw",
+                                   (void *)(uintptr_t)rt_vec_div_component_raw);
   ny_jit_define_runtime_trampoline(mod, "rt_vec_mul_scalar_raw",
                                    (void *)(uintptr_t)rt_vec_mul_scalar_raw);
   ny_jit_define_runtime_trampoline(mod, "rt_vec_div_scalar_raw",
@@ -1205,6 +1232,8 @@ void ny_jit_define_runtime_trampolines(LLVMModuleRef mod) {
                                    (void *)(uintptr_t)rt_any_eq);
   ny_jit_define_runtime_trampoline(mod, "rt_zalloc_raw",
                                    (void *)(uintptr_t)rt_zalloc_raw);
+  ny_jit_define_runtime_trampoline(mod, "rt_malloc_i64",
+                                   (void *)(uintptr_t)rt_malloc_i64);
   ny_jit_define_runtime_trampoline(mod, "rt_zfree_raw",
                                    (void *)(uintptr_t)rt_zfree_raw);
   ny_jit_define_runtime_trampoline(mod, "rt_list_new_raw",
@@ -1306,6 +1335,24 @@ void ny_jit_define_runtime_trampolines(LLVMModuleRef mod) {
   ny_jit_define_runtime_trampoline(mod, "rt_cstr_get_raw",
                                    (void *)(uintptr_t)rt_cstr_get_raw);
   ny_jit_define_runtime_trampoline(mod, "rt_len", (void *)(uintptr_t)rt_len);
+  ny_jit_define_runtime_trampoline(mod, "rt_len_strict",
+                                   (void *)(uintptr_t)rt_len_strict);
+  ny_jit_define_runtime_trampoline(mod, "rt_raw_word_tag",
+                                   (void *)(uintptr_t)rt_raw_word_tag);
+  ny_jit_define_runtime_trampoline(mod, "rt_tbuf_dyn_elem",
+                                   (void *)(uintptr_t)rt_tbuf_dyn_elem);
+  ny_jit_define_runtime_trampoline(mod, "rt_tbuf_extend",
+                                   (void *)(uintptr_t)rt_tbuf_extend);
+  ny_jit_define_runtime_trampoline(mod, "rt_tbuf_repeat",
+                                   (void *)(uintptr_t)rt_tbuf_repeat);
+  ny_jit_define_runtime_trampoline(mod, "rt_adt_alloc",
+                                   (void *)(uintptr_t)rt_adt_alloc);
+  ny_jit_define_runtime_trampoline(mod, "rt_adt_tag",
+                                   (void *)(uintptr_t)rt_adt_tag);
+  ny_jit_define_runtime_trampoline(mod, "rt_getlogin",
+                                   (void *)(uintptr_t)rt_getlogin);
+  ny_jit_define_runtime_trampoline(mod, "rt_gettimeofday",
+                                   (void *)(uintptr_t)rt_gettimeofday);
   ny_jit_define_runtime_trampoline(mod, "rt_sequence_len_raw",
                                    (void *)(uintptr_t)rt_sequence_len_raw);
   ny_jit_define_runtime_trampoline(mod, "rt_cstr_builder_new",
@@ -1435,6 +1482,11 @@ void ny_jit_define_runtime_trampolines(LLVMModuleRef mod) {
                                    (void *)(uintptr_t)rt_f64_min);
   ny_jit_define_runtime_trampoline(mod, "rt_f64_max",
                                    (void *)(uintptr_t)rt_f64_max);
+#ifndef _WIN32
+  void *setjmp_fn = dlsym(RTLD_DEFAULT, "_setjmp");
+  if (setjmp_fn)
+    ny_jit_define_runtime_trampoline(mod, "_setjmp", setjmp_fn);
+#endif
 }
 
 static void register_extern_symbols(LLVMExecutionEngineRef ee,

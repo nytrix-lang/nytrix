@@ -78,7 +78,10 @@ fn find_if(seq xs, fnptr pred, any default=0) any {
    def n = _iter_seq_len(xs, "find_if")
    mut i = 0
    while i < n {
-      def v = xs[i]
+      ; Predicates are dynamic callables.  Decode native sequence slots at
+      ; this boundary so odd scalar payloads and nested handles keep their
+      ; canonical any representation.
+      def v = __tbuf_index_any_raw(xs, i)
       if pred(v) { return v }
       i += 1
    }
@@ -275,7 +278,10 @@ fn mapcat(fnptr fn1, seq xs) list {
          def m = r.len
          mut j = 0
          while j < m {
-            out = out.append(__tbuf_index_any_raw(r, j))
+            ; mapcat's result list is a native scalar/list boundary. Decode
+            ; tagged integer elements before appending so recursive calls do
+            ; not accumulate one extra tag per nesting level.
+            out = out.append(__any_to_i64(__tbuf_index_any_raw(r, j)))
             j += 1
          }
       } else {
@@ -368,7 +374,7 @@ fn windowed(seq xs, int size, int step=1) list {
       mut part = []
       mut j = 0
       while j < size {
-         part = part.append(xs[i + j])
+         part = part.append(__tbuf_index_any_raw(xs, i + j))
          j += 1
       }
       out = out.append(part)
@@ -396,14 +402,17 @@ fn cycle(seq xs, int count) list {
 }
 
 @returns_owned
-fn partition(seq xs, fnptr pred) list {
+fn partition(seq xs, fnptr pred) any {
    "Splits `xs` into matching and non-matching values."
    def n = _iter_seq_len(xs, "partition")
    mut t, f = list(n), list(n)
    mut ti, fi = 0, 0
    mut i = 0
    while i < n {
-      def v = xs[i]
+      ; Predicates are dynamic callables. Decode native sequence slots at
+      ; this boundary so odd scalar payloads and nested handles keep their
+      ; canonical any representation.
+      def v = __tbuf_index_any_raw(xs, i)
       if pred(v) {
          _list_set(t, ti, v)
          ti += 1

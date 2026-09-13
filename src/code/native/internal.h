@@ -145,6 +145,8 @@ const char *ny_native_arraytab_intern(const ny_native_array_elem_t *values,
 bool ny_native_arraytab_get(const char *name,
                             const ny_native_array_elem_t **elems_out,
                             size_t *count_out, size_t *stride_out);
+void *ny_native_arraytab_data(const char *name);
+
 
 bool ny_native_aarch64_emit_nir(ny_native_writer_t *w,
                                 const ny_native_target_info_t *target,

@@ -1701,6 +1701,20 @@ static int run_one_blocking_once(const char *bin, const char *path, const char *
     argv[argc++] = "--std-bc";
     argv[argc++] = (char *)std_bc;
   }
+  /* Probe-suite .nshape files are source-faithful native contracts.  Their
+   * embedded programs may exercise raw layouts, FFI, sockets, or device
+   * handles that are intentionally outside the legacy LLVM-JIT ABI.  The
+   * runner must select the backend declared by the probe family after
+   * materializing the heredoc, rather than sending the temporary .ny file
+   * through the default JIT and misreporting backend crashes as parser bugs. */
+  if (shape_path_is_nshape(path) && argc < 78) {
+    char *family = shape_meta_string(path, "family");
+    bool probe_path = path && (strstr(path, "/probes/") != NULL ||
+                               strstr(path, "\\probes\\") != NULL);
+    if ((family && strcmp(family, "probe-suite") == 0) || probe_path)
+      argv[argc++] = "--native-only";
+    free(family);
+  }
   if (path_is_native_test(path) && !has_native_backend && argc < 78) {
     argv[argc++] = "--native-backend";
     argv[argc++] = "x86_64";
@@ -1726,6 +1740,13 @@ static int run_one_blocking_once(const char *bin, const char *path, const char *
       !native_only_explicit(flags_buf) &&
       !native_backend_is_llvm(flags_buf) &&
       !flags_contain_native_backend_word(flags_buf, "--emit-asm") && argc < 78)
+    argv[argc++] = "--native-only";
+  /* This check is deliberately based on the materialized source, not on
+   * metadata parsing: probe files are always executed as extracted Nytrix
+   * programs and must never fall back to the legacy JIT. */
+  if (materialized_path && path &&
+      (strstr(path, "/probes/") || strstr(path, "\\probes\\")) &&
+      argc < 78)
     argv[argc++] = "--native-only";
   if (trace_exec) {
     argv[argc++] = "--no-progress";
@@ -2777,7 +2798,11 @@ static int build_trace_argv(char **argv, int max, const char *bin, const char *p
         !append_arg(argv, &argc, max, (char *)std_bc))
       return 0;
   }
-  if (path_is_native_test(path) && !has_native_backend) {
+  if (path && shape_path_is_nshape(path) &&
+      (strstr(path, "/probes/") || strstr(path, "\\probes\\"))) {
+    if (!append_arg(argv, &argc, max, "--native-only"))
+      return 0;
+  } else if (path_is_native_test(path) && !has_native_backend) {
     if (!append_arg(argv, &argc, max, "--native-backend") ||
         !append_arg(argv, &argc, max, "x86_64"))
       return 0;
@@ -4232,6 +4257,7 @@ static int path_is_probe_test(const char *p) {
   return p && (strncmp(p, "probe/", 6) == 0 || strncmp(p, "probes/", 7) == 0 ||
                strstr(p, "/probe/") != NULL || strstr(p, "/probes/") != NULL);
 }
+
 
 static int path_is_native_test(const char *p) {
   return p && strncmp(p, "etc/tests/native/", 17) == 0;

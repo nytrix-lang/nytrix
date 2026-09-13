@@ -438,6 +438,8 @@ static expr_t *parse_table_call_expr(parser_t *p, token_t tok,
   return call;
 }
 
+static expr_t *ct_string_expr(parser_t *p, token_t tok, const char *value);
+
 static stmt_t *parse_comptime_table_stmt(parser_t *p) {
   token_t tok = p->cur;
   parser_expect(p, NY_T_COMPTIME, "'comptime'", NULL);
@@ -456,6 +458,13 @@ static stmt_t *parse_comptime_table_stmt(parser_t *p) {
   const char *matcher_name = parse_table_matcher_name(p, decl_owned);
   const char *legacy_name = parse_table_legacy_helper_name(p, decl_owned);
   free(decl_owned);
+
+  /* The generated matcher's fallback parameter must match the table's VALUE
+   * domain: string tables take a str default, numeric tables an i32 one.
+   * Hardcoding i32 type-checked `return default` (i32) against the str
+   * entries and rejected the user's str default at the call site. */
+  const char *fallback_type = "i32";
+  bool fallback_type_locked = false;
 
   parser_expect(p, NY_T_LBRACE, "'{' after comptime table name", NULL);
 
@@ -482,6 +491,21 @@ static stmt_t *parse_comptime_table_stmt(parser_t *p) {
     parser_expect(p, NY_T_ARROW, "'->' in comptime table entry", NULL);
     token_t value_tok = p->cur;
     expr_t *value = p_parse_expr(p, 0);
+    if (!fallback_type_locked && value) {
+      if (value->kind == NY_E_LITERAL &&
+          value->as.literal.kind == NY_LIT_STR) {
+        fallback_type = "str";
+        fallback_type_locked = true;
+      } else if (value->kind == NY_E_LITERAL &&
+                 value->as.literal.kind == NY_LIT_INT) {
+        fallback_type = "i32";
+        fallback_type_locked = true;
+      } else if (value->kind == NY_E_LITERAL &&
+                 value->as.literal.kind == NY_LIT_FLOAT) {
+        fallback_type = "f64";
+        fallback_type_locked = true;
+      }
+    }
     stmt_t *ret_blk = parse_table_return_block(p, value_tok, value);
     if (arm.patterns.len == 1 && !arm.guard &&
         ny_expr_is_wildcard_ident(first)) {
@@ -518,7 +542,7 @@ static stmt_t *parse_comptime_table_stmt(parser_t *p) {
      the native call boundary from tagging it (and decoding `-7` to `-4`
      across a module boundary). */
   param_t fallback = {
-      .name = parser_intern(p, "default", 7), .type = "i32", .def = NULL};
+      .name = parser_intern(p, "default", 7), .type = fallback_type, .def = NULL};
   vec_push_arena(p->arena, &fn->as.fn.params, raw);
   vec_push_arena(p->arena, &fn->as.fn.params, fallback);
 
@@ -537,8 +561,9 @@ static stmt_t *parse_comptime_table_stmt(parser_t *p) {
       .name = parser_intern(p, "raw", 3), .type = "i32", .def = NULL};
   param_t wrapper_fallback = {
       .name = parser_intern(p, "default", 7),
-      .type = "i32",
-      .def = ct_int_expr(p, tok, 0),
+      .type = fallback_type,
+      .def = strcmp(fallback_type, "str") == 0 ? ct_string_expr(p, tok, "")
+                                               : ct_int_expr(p, tok, 0),
   };
   vec_push_arena(p->arena, &wrapper->as.fn.params, wrapper_raw);
   vec_push_arena(p->arena, &wrapper->as.fn.params, wrapper_fallback);

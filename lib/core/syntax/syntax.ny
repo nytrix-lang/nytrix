@@ -22,7 +22,7 @@ fn _ensure_name(str name) str {
 }
 
 fn _ensure_handler(any handler) any {
-   if !handler { panic("syntax handler cannot be nil") }
+   if type(handler) == "nil" { panic("syntax handler cannot be nil") }
    handler
 }
 
@@ -385,7 +385,7 @@ fn expand_macro(dict reg, str name, any args=0, any body=0, any tok=0) any {
    reg = _ensure_registry(reg)
    name = _ensure_name(name)
    def handler = get_macro_handler(reg, name)
-   if !handler { return 0 }
+   if type(handler) == "nil" { return 0 }
    def node = _macro_node(name, args, body, tok)
    handler(node)
 }
