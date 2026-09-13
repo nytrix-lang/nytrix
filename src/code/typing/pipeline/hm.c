@@ -2746,6 +2746,21 @@ static ny_hm_type_t *hm_infer_expr_impl(ny_hm_state_t *hm, ny_hm_env_list *env,
         return hm_call_function_type(hm, env, local, &e->as.call.args, e->tok,
                                      self_name, "local call");
       if (local) {
+        /*
+         * Bare names imported into a module are resolved by the compiler's
+         * function table to their qualified declaration (for example,
+         * `all` -> `std.core.iter.all`).  HM's hash index intentionally
+         * retains only the qualified key when imported schemes collide, so
+         * consult that authoritative resolution before letting an unrelated
+         * module-global value of the same leaf name become the callee.
+         */
+        fun_sig *resolved_sig =
+            hm && hm->ctx && hm->ctx->cg ? lookup_fun(hm->ctx->cg, name, 0)
+                                         : NULL;
+        if (resolved_sig && resolved_sig->name &&
+            hm_find_scheme(hm, resolved_sig->name))
+          return hm_call_named(hm, env, resolved_sig->name, NULL,
+                               &e->as.call.args, e->tok, self_name);
         const char *leaf = ny_name_leaf(name);
         bool named_fn =
             hm_find_scheme(hm, name) != NULL ||

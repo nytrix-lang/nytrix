@@ -411,13 +411,43 @@ static int ny_native_nir_lower_call(ny_native_nir_builder_t *b,
         const char *fn_leaf = mleaf ? mleaf : method->as.fn.name;
         int n = snprintf(attached_name, sizeof(attached_name), "%s.%s", owner,
                          fn_leaf);
-        if (n > 0 && (size_t)n < sizeof(attached_name))
-          canonical = attached_name;
+        /*
+         * Only adopt the reconstructed owner.method spelling when it
+         * resolves to a declared function; an unresolvable spelling emits
+         * an undefined ny_fn_owner.method reference while the semantic
+         * canonical carries the collected qualified name.
+         */
+        const stmt_t *resolved_attached =
+            n > 0 && (size_t)n < sizeof(attached_name)
+                ? ny_native_nir_find_user_function(b, attached_name)
+                : NULL;
+        if (resolved_attached && resolved_attached->as.fn.name) {
+          canonical = resolved_attached->as.fn.name;
+        } else if (strncmp(method->as.fn.name, "std.core.", 9) == 0) {
+          /*
+           * Attached impl methods are sometimes indexed as
+           * `std.core.<owner>.<owner>.<method>` (the first owner is the
+           * module, the second is the impl type).  Resolve the canonical
+           * owner/method spelling before falling back to the semantic
+           * callee.  This keeps `str.repeat` on the real
+           * `std.core.str.repeat` body instead of emitting an uncollected
+           * `std.core.str.str.repeat` declaration.
+           */
+          int qn = snprintf(attached_name, sizeof(attached_name),
+                            "std.core.%s.%s", owner, fn_leaf);
+          if (qn > 0 && (size_t)qn < sizeof(attached_name)) {
+            const stmt_t *canonical_fn =
+                ny_native_nir_find_user_function(b, attached_name);
+            if (canonical_fn && canonical_fn->as.fn.name)
+              canonical = canonical_fn->as.fn.name;
+          }
+        }
       }
     }
     if (canonical && strncmp(canonical, "std.core.", 9) == 0) {
       const stmt_t *fn = ny_native_nir_find_user_function(b, canonical);
-      if (fn && fn->as.fn.name)
+      if (fn && fn->as.fn.name &&
+          strncmp(fn->as.fn.name, "std.core.", 9) == 0)
         canonical = fn->as.fn.name;
     }
     if (canonical && e->as.call.args.len + 1 <= NYIR_CALL_MAX_ARGS) {
@@ -5667,13 +5697,23 @@ ordinary_call:
   bool declared_external =
       (b->externs && ny_extern_table_lookup(b->externs, name)) ||
       callee_ext_decl != NULL;
+  /* A source struct/layout is a constructor declaration, not a function
+   * symbol.  Resolve it before the unresolved-call diagnostic so the native
+   * lowering block below gets a chance to materialize the record. */
+  const stmt_t *struct_layout_ctor = NULL;
+  if (!callee_fn && name && b->prog) {
+    for (size_t li = 0; li < b->prog->body.len && !struct_layout_ctor; ++li)
+      struct_layout_ctor = ny_native_nir_find_layout_stmt(
+          b->prog->body.data[li], name);
+  }
   /* User-defined `impl` types are nominal views over their runtime value.
    * Their one-argument constructor is an identity operation (for example
    * `SelfBox({"value": 5})`), so do not emit a fictitious function symbol. */
   if (!callee_fn && e->as.call.args.len == 1 && !e->as.call.args.data[0].name &&
       ny_native_nir_find_impl_type(b, name))
     return ny_native_nir_lower_expr(b, e->as.call.args.data[0].val);
-  if (!callee_fn && !runtime_builtin && !ffi_builtin && !declared_external &&
+  if (!callee_fn && !struct_layout_ctor && !runtime_builtin && !ffi_builtin &&
+      !declared_external &&
       ny_builtin_alloc_kind(leaf) == NY_BUILTIN_ALLOC_NONE) {
     const char *keyword = ny_keyword_typo_suggestion(name);
     ny_native_nir_fail(
@@ -5816,6 +5856,121 @@ ordinary_call:
   }
   if (ext || callee_ext_decl)
     ext = &synthetic_ext;
+
+  /*
+   * A Nytrix `struct`/`layout` declaration is a value constructor even
+   * though it is not represented by a function declaration.  The legacy
+   * LLVM path materializes the declared layout here; native NYIR must do the
+   * same instead of falling through to an `ADDR_SYMBOL` for the type name.
+   * Keep this driven by the AST layout and its field types so every declared
+   * record gets the same ABI, including user-defined layouts.
+   */
+  const stmt_t *layout_ctor = NULL;
+  if (!callee_fn && name && b->prog) {
+    for (size_t li = 0; li < b->prog->body.len && !layout_ctor; ++li)
+      layout_ctor = ny_native_nir_find_layout_stmt(b->prog->body.data[li],
+                                                   name);
+  }
+  if (!callee_fn && layout_ctor &&
+      (layout_ctor->kind == NY_S_STRUCT || layout_ctor->kind == NY_S_LAYOUT)) {
+    const ny_layout_field_list *fields =
+        layout_ctor->kind == NY_S_STRUCT ? &layout_ctor->as.struc.fields
+                                         : &layout_ctor->as.layout.fields;
+    if (e->as.call.args.len != fields->len) {
+      ny_native_nir_fail(b,
+                         "native layout constructor '%s' expects %zu field(s), "
+                         "got %zu",
+                         name, fields->len, e->as.call.args.len);
+      return -1;
+    }
+    size_t size = 0, align = 0;
+    if (!ny_native_nir_ast_layout_query(b, name, NULL, &size, &align, NULL) ||
+        size == 0) {
+      ny_native_nir_fail(b, "native layout constructor '%s' has no layout", name);
+      return -1;
+    }
+    (void)align;
+    int size_v = ny_native_nir_emit_const(b, (int64_t)size);
+    int object = size_v < 0
+                     ? -1
+                     : ny_native_nir_emit_runtime_call(b, "rt_malloc_i64",
+                                                       size_v, -1, -1, 1, 0);
+    if (object < 0)
+      return -1;
+    for (size_t fi = 0; fi < fields->len; ++fi) {
+      const layout_field_t *field = &fields->data[fi];
+      if (!field->name || field->is_array) {
+        ny_native_nir_fail(b,
+                           "native layout constructor '%s' has unsupported "
+                           "field %zu",
+                           name, fi);
+        return -1;
+      }
+      const call_arg_t *source = &e->as.call.args.data[fi];
+      if (source->name && strcmp(source->name, field->name) != 0) {
+        ny_native_nir_fail(b,
+                           "native layout constructor '%s' requires positional "
+                           "fields or matching field '%s'",
+                           name, field->name);
+        return -1;
+      }
+      int value = ny_native_nir_lower_expr(b, source->val);
+      size_t field_size = 0, field_align = 0, field_offset = 0;
+      if (value < 0 ||
+          !ny_native_nir_ast_layout_query(b, name, field->name, &field_size,
+                                          &field_align, &field_offset)) {
+        ny_native_nir_fail(b, "native layout constructor '%s.%s' cannot resolve "
+                              "field layout",
+                           name, field->name);
+        return -1;
+      }
+      int offset = ny_native_nir_emit_const(b, (int64_t)field_offset);
+      int address = offset < 0
+                        ? -1
+                        : ny_native_nir_emit_add_i64(b, object, offset);
+      if (address < 0)
+        return -1;
+      if (ny_native_type_name_is_f64(field->type_name)) {
+        if (!ny_native_nir_emit_store_f64(b, address, value))
+          return -1;
+      } else if (ny_native_type_name_is_f32(field->type_name)) {
+        int f64 = ny_native_nir_expr_is_f32(b, source->val)
+                      ? ny_native_nir_emit_f32_to_f64(b, value)
+                      : value;
+        if (f64 < 0 ||
+            ny_native_nir_emit_runtime_call(b, "rt_store32_f64", object,
+                                            offset, f64, 3, 0) < 0)
+          return -1;
+      } else if (field_size <= 4) {
+        /* Narrow layout fields use the tagged indexed-memory ABI. */
+        int one = ny_native_nir_emit_const(b, 1);
+        int shifted = one < 0
+                          ? -1
+                          : nyir_emit(&b->nyir,
+                                      (nyir_inst_t){.op = NYIR_SHL_I64,
+                                                    .dst = -1,
+                                                    .a = value,
+                                                    .b = one});
+        int tagged = shifted < 0
+                         ? -1
+                         : nyir_emit(&b->nyir,
+                                     (nyir_inst_t){.op = NYIR_OR_I64,
+                                                   .dst = -1,
+                                                   .a = shifted,
+                                                   .b = one});
+        if (tagged < 0 ||
+            ny_native_nir_emit_runtime_call(
+                b, field_size == 1 ? "rt_store8_idx"
+                   : field_size == 2 ? "rt_store16_idx"
+                                     : "rt_store32_idx",
+                object, offset, tagged, 3, 0) < 0)
+          return -1;
+      } else if (!ny_native_nir_emit_store_i64(b, address, value)) {
+        return -1;
+      }
+    }
+    return object;
+  }
   ny_builtin_alloc_kind_t builtin_kind = ny_builtin_alloc_kind(leaf);
   bool builtin_c_call = builtin_kind != NY_BUILTIN_ALLOC_NONE;
   bool user_defined_call = ny_native_nir_user_defined_fn(b, name);
@@ -6128,6 +6283,13 @@ ordinary_call:
       /* Same body-shape analysis as a lambda value: a boolean result keeps
        * the raw predicate ABI expected by filter-style loops. */
       bool returns_bool = false;
+      bool raw_scalar_result =
+          (named_callback_fn->as.fn.return_type &&
+           ny_native_type_name_is_int(named_callback_fn->as.fn.return_type)) ||
+          (!named_callback_fn->as.fn.return_type &&
+           named_callback_fn->as.fn.return_semantic.resolved &&
+           named_callback_fn->as.fn.return_semantic.rep ==
+               NY_SEM_REP_RAW_INT);
       stmt_t *fn_body = named_callback_fn->as.fn.body;
       expr_t *fn_result = NULL;
       if (fn_body && fn_body->kind == NY_S_EXPR) {
@@ -6142,10 +6304,16 @@ ordinary_call:
       if (!named_callback_fn->as.fn.return_type ||
           strcmp(named_callback_fn->as.fn.return_type, "bool") == 0)
         returns_bool = fn_result && ny_native_nir_expr_is_bool(b, fn_result);
+      if (returns_bool)
+        raw_scalar_result = false;
+      const char *mark_symbol =
+          returns_bool
+              ? "rt_mark_dynamic_bool_callable"
+              : (raw_scalar_result
+                     ? "rt_mark_dynamic_callable_raw_result"
+                     : "rt_mark_dynamic_callable");
       arg = ny_native_nir_emit_runtime_call(
-          b,
-          returns_bool ? "rt_mark_dynamic_bool_callable"
-                       : "rt_mark_dynamic_callable",
+          b, mark_symbol,
           arg, -1, -1, 1, 0);
       if (arg < 0)
         return -1;
@@ -6196,13 +6364,29 @@ ordinary_call:
           cb_result = last->as.expr.expr;
       }
       predicate_callback = cb_result && ny_native_nir_expr_is_bool(b, cb_result);
+      bool raw_scalar_result =
+          lambda_value_expr->as.lambda.return_type &&
+              ny_native_type_name_is_int(lambda_value_expr->as.lambda.return_type);
+      if (!lambda_value_expr->as.lambda.return_type && cb_result &&
+          !predicate_callback && !ny_native_nir_expr_is_any(b, cb_result) &&
+          !ny_native_nir_expr_is_f64(b, cb_result) &&
+          !ny_native_nir_expr_is_f32(b, cb_result) &&
+          !ny_native_nir_expr_is_cstr(b, cb_result) &&
+          !ny_native_nir_expr_is_list(b, cb_result) &&
+          !ny_native_nir_expr_is_dict(b, cb_result) &&
+          !ny_native_nir_expr_is_ptr(b, cb_result))
+        raw_scalar_result = true;
       const char *mark_symbol =
           predicate_callback ? (callback_params_raw
                                     ? "rt_mark_dynamic_bool_callable"
                                     : "rt_mark_dynamic_bool_callable_tagged_args")
-                             : (callback_params_raw
-                                    ? "rt_mark_dynamic_callable"
-                                    : "rt_mark_dynamic_callable_tagged_args");
+                             : (raw_scalar_result
+                                    ? (callback_params_raw
+                                          ? "rt_mark_dynamic_callable_raw_result"
+                                          : "rt_mark_dynamic_callable_tagged_args_raw_result")
+                                    : (callback_params_raw
+                                          ? "rt_mark_dynamic_callable"
+                                          : "rt_mark_dynamic_callable_tagged_args"));
       arg = ny_native_nir_emit_runtime_call(b, mark_symbol, arg, -1, -1, 1, 0);
       if (arg < 0)
         return -1;
@@ -6747,6 +6931,14 @@ ordinary_call:
                                           : (callee_fn && callee_fn->as.fn.name
                                                  ? callee_fn->as.fn.name
                                                  : name))));
+  /* Keep attached stdlib calls aligned with the qualified declaration that
+   * reachability collection records.  A short impl name here would emit
+   * `ny_fn_list.first` even though the collected body is qualified. */
+  if (e->semantic.canonical_callee &&
+      strncmp(e->semantic.canonical_callee, "std.core.", 9) == 0 &&
+      callee_fn && callee_fn->as.fn.name &&
+      strcmp(symbol, callee_fn->as.fn.name) == 0)
+    symbol = e->semantic.canonical_callee;
   if (!ext && builtin_c_call) {
     switch (builtin_kind) {
     /* Native allocations receive raw i64 byte counts.  `rt_malloc` accepts

@@ -636,7 +636,11 @@ fn _file_write_impl(str path, any content, int flags) Result<int, int> {
    def n = content.len
    mut off = 0
    while off < n {
-      def w = __write_off(fd, content, n - off, off)
+      ;; The low-level syscall adapter consumes Nytrix integer values. The
+      ;; loop counters are raw typed ints, so tag them at this ABI boundary;
+      ;; otherwise an odd raw count (5) is interpreted as tagged 2 by the
+      ;; runtime and a five-byte write is silently truncated.
+      def w = __write_off_raw(fd, content, n - off, off)
       if w < 0 {
          sys_close_quiet(fd)
          return err(w)
@@ -697,8 +701,12 @@ fn file_read(str path) Result<str, int> {
          }
          mut tlen = 0
          while true {
-            match sys_read(fd, tmp, 4096) {
+            def read_word = __read_off_raw(fd, tmp, 4096, 0)
+            match ok(__tag(read_word)) {
                ok(r) -> {
+                  ;; Result integer payloads are tagged language values.
+                  ;; Decode exactly once before using the count as a raw
+                  ;; buffer length; an odd byte count such as 5 must remain 5.
                   def int count = __untag(r)
                   if count <= 0 { break }
                   if tlen + count >= cap {
@@ -712,6 +720,9 @@ fn file_read(str path) Result<str, int> {
                      base = nbase
                      buf = base + 16
                   }
+                  ;; __copy_mem consumes a raw byte count. Tagging `count`
+                  ;; doubled the copy span plus one, corrupting file content
+                  ;; and every consumer such as proof-index JSON reload.
                   __copy_mem(ptr_add(buf, tlen), tmp, __tag(count))
                   tlen = tlen + count
                }
@@ -725,7 +736,8 @@ fn file_read(str path) Result<str, int> {
          free(tmp)
          store8(buf, 0, tlen)
          sys_close_quiet(fd)
-         return ok(init_str(buf, tlen))
+         def final = init_str(buf, tlen)
+         return ok(final)
       }
       err(e) -> { return err(e) }
    }

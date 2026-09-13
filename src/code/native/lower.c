@@ -284,6 +284,10 @@ static const char *ny_native_runtime_symbol(const char *name) {
     return "rt_read_off";
   if (strcmp(name, "__write_off") == 0)
     return "rt_write_off";
+  if (strcmp(name, "__read_off_raw") == 0)
+    return "rt_read_off_raw";
+  if (strcmp(name, "__write_off_raw") == 0)
+    return "rt_write_off_raw";
   /*
    * Direct NYIR carries unboxed scalar values.  Runtime entry points whose
    * public ABI boxes ints/floats therefore need the native bridge rather than
@@ -2095,6 +2099,8 @@ static bool ny_native_nir_expr_is_any(ny_native_nir_builder_t *b,
 static const stmt_t *
 ny_native_nir_find_attached_method(const ny_native_nir_builder_t *b,
                                    const expr_t *receiver, const char *method);
+static const stmt_t *
+ny_native_nir_find_operator(const ny_native_nir_builder_t *b, const expr_t *e);
 static bool ny_native_nir_expr_is_raw_dynamic_read(ny_native_nir_builder_t *b,
                                                    const expr_t *e);
 static bool ny_native_nir_stmt_uses_ident(const stmt_t *s, const char *name);
@@ -2111,6 +2117,8 @@ ny_native_nir_resolve_member_expr(const ny_native_nir_builder_t *b,
                                   const expr_t *e);
 static const stmt_t *
 ny_native_nir_find_user_function(ny_native_nir_builder_t *b, const char *name);
+static const stmt_t *
+ny_native_nir_find_layout_stmt(const stmt_t *s, const char *name);
 static const char *ny_native_call_leaf(const expr_t *e);
 static bool ny_native_nir_record_dyn_fact(ny_native_nir_builder_t *b, int value,
                                           ny_native_nir_fact_kind_t kind,
@@ -3067,6 +3075,12 @@ ny_native_nir_resolve_member_expr(const ny_native_nir_builder_t *b,
 static const expr_t *
 ny_native_nir_resolve_list_literal(const ny_native_nir_builder_t *b,
                                    const expr_t *e, unsigned depth);
+static const char *
+ny_native_nir_expr_type_name(const ny_native_nir_builder_t *b,
+                             const expr_t *e);
+static const char *
+ny_native_nir_layout_member_type(const ny_native_nir_builder_t *b,
+                                 const expr_t *member);
 static bool ny_native_nir_expr_is_f32_depth(ny_native_nir_builder_t *b,
                                             const expr_t *e, unsigned depth);
 static bool ny_native_nir_expr_is_f64_depth(ny_native_nir_builder_t *b,
@@ -3231,6 +3245,9 @@ static bool ny_native_nir_expr_is_f64_depth(ny_native_nir_builder_t *b,
   case NY_E_INDEX:
     return ny_native_nir_expr_is_f64_depth(b, e->as.index.target, depth + 1);
   case NY_E_MEMBER: {
+    if (ny_native_type_name_is_f64(
+            ny_native_nir_layout_member_type(b, e)))
+      return true;
     const expr_t *v = ny_native_nir_resolve_member_expr(b, e);
     if (v && v != e)
       return ny_native_nir_expr_is_f64_depth(b, v, depth + 1);
@@ -3305,6 +3322,9 @@ static bool ny_native_nir_expr_is_f32_depth(ny_native_nir_builder_t *b,
                ny_native_type_name_is_f32(fn->as.fn.return_type);
     }
     return false;
+  case NY_E_MEMBER:
+    return ny_native_type_name_is_f32(
+        ny_native_nir_layout_member_type(b, e));
   default:
     return false;
   }
@@ -3451,6 +3471,52 @@ static bool ny_native_nir_expr_is_cstr(ny_native_nir_builder_t *b,
    */
   if (e->kind == NY_E_LITERAL)
     return e->as.literal.kind == NY_LIT_STR;
+  /*
+   * The semantic pass can retain the dynamic representation of the
+   * implementation selected for an attached method (`str.upper` is backed
+   * by an `any`-parameter helper).  The selected method's declared return is
+   * the ABI fact that matters here: a `str` result is a raw C-string pointer
+   * in native lowering.  Consult the resolved target before the generic
+   * semantic fallback so a local initialized from `"x".upper()` is printed
+   * through the string path instead of as an integer address.
+   */
+  if (e->kind == NY_E_MEMCALL && e->as.memcall.name) {
+    const stmt_t *fn = ny_native_nir_find_attached_method(
+        b, e->as.memcall.target, e->as.memcall.name);
+    if (!fn && e->as.memcall.target &&
+        e->as.memcall.target->kind == NY_E_IDENT &&
+        e->as.memcall.target->as.ident.name) {
+      const char *module = ny_native_nir_resolve_use_alias(
+          b, e->as.memcall.target->as.ident.name);
+      if (module) {
+        char qualified[512];
+        int n = snprintf(qualified, sizeof(qualified), "%s.%s", module,
+                         e->as.memcall.name);
+        if (n > 0 && (size_t)n < sizeof(qualified))
+          fn = ny_native_nir_find_user_function(b, qualified);
+      }
+    }
+    if (fn && fn->as.fn.return_type &&
+        strcmp(fn->as.fn.return_type, "str") == 0)
+      return true;
+  }
+  if (e->kind == NY_E_CALL) {
+    const stmt_t *fn = e->semantic.canonical_callee_stmt;
+    if (!fn && e->as.call.callee &&
+        e->as.call.callee->kind == NY_E_IDENT &&
+        e->as.call.callee->as.ident.name)
+      fn = ny_native_nir_find_user_function(b,
+                                             e->as.call.callee->as.ident.name);
+    if (fn && fn->kind == NY_S_FUNC && fn->as.fn.return_type &&
+        strcmp(fn->as.fn.return_type, "str") == 0)
+      return true;
+  }
+  if (e->kind == NY_E_BINARY) {
+    const stmt_t *op = ny_native_nir_find_operator(b, e);
+    if (op && op->as.oper.return_type &&
+        strcmp(op->as.oper.return_type, "str") == 0)
+      return true;
+  }
   if (e->kind == NY_E_INDEX)
     return e->as.index.target &&
            !ny_native_nir_expr_is_bytes(b, e->as.index.target) &&
@@ -7795,6 +7861,61 @@ static const stmt_t *ny_native_nir_find_layout_stmt(const stmt_t *s,
   return NULL;
 }
 
+/* Return the declared scalar type of a user-layout member.  This is kept
+ * separate from the load lowering so representation queries (f64/f32) and
+ * the actual memory access use the same source-level contract. */
+static const char *
+ny_native_nir_layout_member_type(const ny_native_nir_builder_t *b,
+                                 const expr_t *member) {
+  if (!b || !member || member->kind != NY_E_MEMBER ||
+      !member->as.member.target || !member->as.member.name)
+    return NULL;
+
+  const expr_t *target = member->as.member.target;
+  const char *type_name = ny_native_nir_expr_type_name(b, target);
+  if ((!type_name || strcmp(type_name, "any") == 0) &&
+      target->kind == NY_E_IDENT && target->as.ident.name) {
+    const ny_native_nir_local_t *local = ny_native_nir_find_local(
+        (ny_native_nir_builder_t *)b, target->as.ident.name);
+    if (local && local->type_name)
+      type_name = local->type_name;
+    if (!type_name || strcmp(type_name, "any") == 0) {
+      const expr_t *value = ny_native_nir_find_top_level_value(
+          b, target->as.ident.name);
+      if (value && value != target)
+        type_name = ny_native_nir_expr_type_name(b, value);
+    }
+  }
+  if ((!type_name || strcmp(type_name, "any") == 0) &&
+      target->kind == NY_E_CALL && target->as.call.callee &&
+      target->as.call.callee->kind == NY_E_IDENT &&
+      target->as.call.callee->as.ident.name && b->prog) {
+    const stmt_t *ctor = NULL;
+    for (size_t i = 0; i < b->prog->body.len && !ctor; ++i)
+      ctor = ny_native_nir_find_layout_stmt(
+          b->prog->body.data[i], target->as.call.callee->as.ident.name);
+    if (ctor)
+      type_name = ctor->kind == NY_S_STRUCT ? ctor->as.struc.name
+                                             : ctor->as.layout.name;
+  }
+  if (!type_name || !b->prog)
+    return NULL;
+
+  const stmt_t *layout = NULL;
+  for (size_t i = 0; i < b->prog->body.len && !layout; ++i)
+    layout = ny_native_nir_find_layout_stmt(b->prog->body.data[i], type_name);
+  if (!layout)
+    return NULL;
+  const ny_layout_field_list *fields =
+      layout->kind == NY_S_STRUCT ? &layout->as.struc.fields
+                                  : &layout->as.layout.fields;
+  for (size_t i = 0; i < fields->len; ++i)
+    if (fields->data[i].name &&
+        strcmp(fields->data[i].name, member->as.member.name) == 0)
+      return fields->data[i].type_name;
+  return NULL;
+}
+
 static bool ny_native_nir_primitive_layout(const char *type, size_t *size,
                                            size_t *align) {
   if (!type || !size || !align)
@@ -8160,6 +8281,17 @@ ny_native_nir_expr_type_name(const ny_native_nir_builder_t *b,
       for (size_t i = 0; i < b->prog->body.len; ++i)
         if (ny_native_find_impl_in_stmt(b->prog->body.data[i], name))
           return name;
+      /* Type/layout constructors have no function-cache entry.  Resolve
+       * their result from the declaration so a local initialized with
+       * `Point(3.0, 4.0)` retains the record type for subsequent `.x`/`.y`
+       * lowering. */
+      const stmt_t *layout = NULL;
+      for (size_t i = 0; i < b->prog->body.len && !layout; ++i)
+        layout = ny_native_nir_find_layout_stmt(b->prog->body.data[i], name);
+      if (layout && (layout->kind == NY_S_STRUCT ||
+                     layout->kind == NY_S_LAYOUT))
+        return layout->kind == NY_S_STRUCT ? layout->as.struc.name
+                                           : layout->as.layout.name;
     }
   }
   const expr_t *receiver = NULL;

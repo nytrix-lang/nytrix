@@ -4459,6 +4459,24 @@ static void ny_native_scan_expr_for_calls(const expr_t *e,
       ny_native_add_reachable_fn(col, semantic_callee);
       if (strncmp(semantic_callee, "std.core.", 9) == 0)
         ny_native_add_reachable_fn(col, semantic_callee + 9);
+      else if (strchr(semantic_callee, '.')) {
+        char qualified[512];
+        int qn = snprintf(qualified, sizeof(qualified), "std.core.%s",
+                          semantic_callee);
+        if (qn > 0 && (size_t)qn < sizeof(qualified))
+          ny_native_add_reachable_fn(col, qualified);
+      }
+      /* Attached methods can be indexed under their short impl name while
+       * the semantic call carries the module-qualified spelling.  Resolve
+       * the declaration here so collection and emission use the same body. */
+      ny_native_nir_builder_t probe = {.prog = col->prog,
+                                       .options = col->opt,
+                                       .module_name = NULL,
+                                       .source_file = NULL};
+      const stmt_t *target =
+          ny_native_nir_find_user_function(&probe, semantic_callee);
+      if (target && target->kind == NY_S_FUNC && target->as.fn.name)
+        ny_native_add_reachable_fn(col, target->as.fn.name);
     }
     if (e->as.call.callee) {
       if (e->as.call.callee->kind == NY_E_IDENT) {
@@ -4556,6 +4574,30 @@ static void ny_native_scan_expr_for_calls(const expr_t *e,
           strcmp(e->as.memcall.name, "remove") == 0;
       if (!e->semantic.canonical_callee && !qualified && !runtime_method)
         ny_native_add_reachable_fn(col, e->as.memcall.name);
+    }
+    /*
+     * The call site may dispatch a receiver method through the
+     * attached-method lookup with an owner-qualified spelling (tuple
+     * literals are list-backed, so `(1, 2, 3).first()` emits
+     * list.first while the semantic canonical names the tuple overload).
+     * Collect the same attached-method target the emitter can choose so
+     * the body exists under the emitted symbol.
+     */
+    if (e->as.memcall.target && e->as.memcall.name &&
+        !ny_native_scan_qualified_call(col, e->as.memcall.target,
+                                       e->as.memcall.name)) {
+      ny_native_nir_builder_t probe = {
+          .prog = col->prog,
+          .options = col->opt,
+          .module_name = col->scope_fn
+                             ? ny_native_fn_module(col->prog, col->scope_fn)
+                             : NULL,
+          .source_file = col->scope_fn ? col->scope_fn->tok.filename : NULL};
+      const stmt_t *attached =
+          ny_native_nir_find_attached_method(&probe, e->as.memcall.target,
+                                             e->as.memcall.name);
+      if (attached && attached->as.fn.name)
+        ny_native_add_reachable_fn(col, attached->as.fn.name);
     }
     ny_native_scan_expr_for_calls(e->as.memcall.target, col);
     for (size_t i = 0; i < e->as.memcall.args.len; ++i)

@@ -175,19 +175,20 @@ fn prop_variables(dict proposition) list {
    _prop_variables_into(proposition, [])
 }
 
-fn _prop_measure(dict proposition, dict state, int depth) bool {
-   def max_depth = to_int(state.get("max_depth"))
+@noinline
+fn _prop_measure(dict proposition, dict state, int depth, int max_depth,
+   int max_nodes, int max_memory) bool {
    if depth > max_depth {
       state.set("decided", false)
       state.set("reason", "depth limit")
       return false
    }
-   if to_int(state.get("nodes")) >= to_int(state.get("max_nodes")) {
+   if to_int(state.get("nodes")) >= max_nodes {
       state.set("decided", false)
       state.set("reason", "node limit")
       return false
    }
-   if to_int(state.get("memory")) >= to_int(state.get("max_memory")) {
+   if to_int(state.get("memory")) >= max_memory {
       state.set("decided", false)
       state.set("reason", "memory limit")
       return false
@@ -196,42 +197,45 @@ fn _prop_measure(dict proposition, dict state, int depth) bool {
    state.set("memory", to_int(state.get("memory")) + 1)
    def kind = proposition.get("kind")
    if kind == "not" {
-      return _prop_measure(proposition.get("value"), state, depth + 1)
+      return _prop_measure(proposition.get("value"), state, depth + 1,
+         max_depth, max_nodes, max_memory)
    }
    if kind == "and" || kind == "or" || kind == "implies" || kind == "iff" {
-      return _prop_measure(proposition.get("left"), state, depth + 1) &&
-      _prop_measure(proposition.get("right"), state, depth + 1)
+      return _prop_measure(proposition.get("left"), state, depth + 1,
+         max_depth, max_nodes, max_memory) &&
+      _prop_measure(proposition.get("right"), state, depth + 1,
+         max_depth, max_nodes, max_memory)
    }
    true
 }
 
+@noinline
 fn _prop_eval_bounded(dict proposition, dict environment, dict state,
-   int depth) bool {
-   def max_depth = to_int(state.get("max_depth"))
+   int depth, int max_depth, int max_steps) bool {
    if depth > max_depth {
       state.set("decided", false)
       state.set("reason", "depth limit")
       return false
    }
-   if to_int(state.get("steps")) >= to_int(state.get("max_steps")) {
+   if to_int(state.get("steps")) >= max_steps {
       state.set("decided", false)
       state.set("reason", "step limit")
       return false
    }
    state.set("steps", to_int(state.get("steps")) + 1)
-   def kind = proposition.get("kind")
+   def str kind = proposition.get("kind")
    if kind == "true" { return true }
    if kind == "false" { return false }
    if kind == "atom" { return bool(environment.get(proposition.get("name"), false)) }
    if kind == "not" {
       return !_prop_eval_bounded(proposition.get("value"), environment,
-         state, depth + 1)
+         state, depth + 1, max_depth, max_steps)
    }
    def left = _prop_eval_bounded(proposition.get("left"), environment,
-      state, depth + 1)
+      state, depth + 1, max_depth, max_steps)
    if !state.get("decided") { return false }
    def right = _prop_eval_bounded(proposition.get("right"), environment,
-      state, depth + 1)
+      state, depth + 1, max_depth, max_steps)
    if kind == "and" { return left && right }
    if kind == "or" { return left || right }
    if kind == "implies" { return !left || right }
@@ -239,9 +243,12 @@ fn _prop_eval_bounded(dict proposition, dict environment, dict state,
 }
 
 ;; Decides a bounded proposition and returns its proof report.
-fn prop_tautology_report(dict proposition, int max_variables=16,
-   int max_steps=1000000, int max_depth=128, int max_nodes=100000,
-   int max_memory=100000) dict {
+fn _prop_tautology_report_impl(dict proposition, dict budget) dict {
+   def int max_variables = to_int(budget.get("max_variables"))
+   def int max_steps = to_int(budget.get("max_steps"))
+   def int max_depth = to_int(budget.get("max_depth"))
+   def int max_nodes = to_int(budget.get("max_nodes"))
+   def int max_memory = to_int(budget.get("max_memory"))
    assert(prop_is(proposition), "prop_tautology_report expects a proposition")
    if max_variables < 0 || max_variables > 20 || max_steps <= 0 ||
    max_depth <= 0 || max_nodes <= 0 || max_memory <= 0 {
@@ -250,11 +257,29 @@ fn prop_tautology_report(dict proposition, int max_variables=16,
          "assignments_checked":0, "assignments_required":-1,
          "steps":0, "nodes":0, "memory":0}
    }
+   ;; Reject the zero-variable budget before recursive resource accounting.
+   ;; This keeps the diagnostic deterministic even when the evaluator has
+   ;; already been specialized for an earlier call in the same module.
+   if max_variables == 0 {
+      def early_names = prop_variables(proposition)
+      return {"decided": false, "valid": false, "variables": early_names,
+         "reason": "variable limit", "counterexample": {},
+         "assignments_checked":0,
+         "assignments_required":early_names.len <= 20 ? 1 << early_names.len : -1,
+         "steps":0, "nodes":0, "memory":0}
+   }
    mut state = {"decided":true, "reason":"complete", "steps":0,
-      "nodes":0, "memory":0, "max_steps":max_steps,
-      "max_depth":max_depth, "max_nodes":max_nodes,
-      "max_memory":max_memory}
-   _prop_measure(proposition, state, 0)
+      "nodes":0, "memory":0}
+   ;; Reinitialize every mutable field explicitly.  State dictionaries may be
+   ;; materialized through pooled literal storage by optimized native code;
+   ;; relying only on literal construction made a later budget call inherit
+   ;; the previous evaluator's depth/decision state.
+   state.set("decided", true)
+   state.set("reason", "complete")
+   state.set("steps", 0)
+   state.set("nodes", 0)
+   state.set("memory", 0)
+   _prop_measure(proposition, state, 0, max_depth, max_nodes, max_memory)
    if !state.get("decided") {
       return {"decided":false, "valid":false, "variables":[],
          "reason":state.get("reason"), "counterexample":{},
@@ -287,7 +312,8 @@ fn prop_tautology_report(dict proposition, int max_variables=16,
          environment = environment.set(names[i], ((mask >> i) & 1) == 1)
          i += 1
       }
-      if !_prop_eval_bounded(proposition, environment, state, 0) {
+      if !_prop_eval_bounded(proposition, environment, state, 0,
+         max_depth, max_steps) {
          if !state.get("decided") {
             return {"decided":false, "valid":false, "variables":names,
                "reason":state.get("reason"), "counterexample":{},
@@ -311,6 +337,19 @@ fn prop_tautology_report(dict proposition, int max_variables=16,
       "assignments_required":assignments,
       "steps":state.get("steps"), "nodes":state.get("nodes"),
       "memory":state.get("memory")}
+}
+
+;; Keep default-argument expansion in a small ABI-stable wrapper.  The
+;; evaluator itself has six required scalar parameters, so repeated calls
+;; with different omitted-tail defaults cannot reuse a partially normalized
+;; call frame.
+fn prop_tautology_report(dict proposition, int max_variables=16,
+   int max_steps=1000000, int max_depth=128, int max_nodes=100000,
+   int max_memory=100000) dict {
+   def budget = {"max_variables":max_variables, "max_steps":max_steps,
+      "max_depth":max_depth, "max_nodes":max_nodes,
+      "max_memory":max_memory}
+   _prop_tautology_report_impl(proposition, budget)
 }
 
 ;; Returns true when bounded evaluation proves the proposition valid.

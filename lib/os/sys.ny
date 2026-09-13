@@ -51,6 +51,8 @@ fn sys_open(any path, any flags, any mode) Result<int, int> {
 }
 
 fn _sys_io_result(any res) Result<int, int> {
+   ;; Result integer payloads use the language's tagged-value ABI.  Preserve
+   ;; the syscall word so callers can unwrap it exactly once.
    if res < 0 { return err(res) }
    return ok(res)
 }
