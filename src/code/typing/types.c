@@ -22,6 +22,8 @@
 #include <string.h>
 #include <sys/types.h>
 
+static bool type_name_eq(const char *a, const char *b);
+
 typedef enum ny_builtin_type_kind_t {
   NY_BT_UNKNOWN = 0,
   NY_BT_INT,
@@ -200,6 +202,28 @@ static fun_sig *type_lookup_attached_method(codegen_t *cg,
       fun_sig *sig = lookup_fun(cg, imported, 0);
       if (sig)
         return sig;
+    }
+  }
+  /* An imported impl can be present in the shared signature table without
+   * its provider module being listed in this function's use-module vectors.
+   * Prefer the declaration whose structural owner/method suffix matches the
+   * inferred receiver before falling back to a fabricated std.core path. */
+  char suffix[512];
+  int suffix_n = snprintf(suffix, sizeof(suffix), ".%s.%s", owner,
+                          method_name);
+  if (suffix_n > 0 && (size_t)suffix_n < sizeof(suffix)) {
+    for (size_t i = cg->fun_sigs.len; i > 0; --i) {
+      fun_sig *sig = &cg->fun_sigs.data[i - 1];
+      if (!sig->is_attached_method || !sig->name)
+        continue;
+      size_t name_len = strlen(sig->name);
+      if (name_len < (size_t)suffix_n ||
+          strcmp(sig->name + name_len - (size_t)suffix_n, suffix) != 0)
+        continue;
+      if (sig->param_types.len > 0 && sig->param_types.data[0] &&
+          !type_name_eq(sig->param_types.data[0], owner))
+        continue;
+      return sig;
     }
   }
   char core_builtin[512];

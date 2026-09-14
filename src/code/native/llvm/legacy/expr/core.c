@@ -320,6 +320,32 @@ static bool expr_target_is_known_list_like(codegen_t *cg, scope *scopes,
   return false;
 }
 
+static bool expr_target_is_known_string_like(codegen_t *cg, scope *scopes,
+                                             size_t depth, expr_t *target) {
+  if (!target)
+    return false;
+  if (target->kind == NY_E_LITERAL && target->as.literal.kind == NY_LIT_STR)
+    return true;
+  const char *type_name = infer_expr_type(cg, scopes, depth, target);
+  if (type_name && expr_type_base_is(type_name, "str"))
+    return true;
+  if (target->kind == NY_E_IDENT && target->as.ident.name) {
+    size_t name_len = (size_t)target->tok.len;
+    if (name_len == 0)
+      name_len = strlen(target->as.ident.name);
+    binding *b = expr_lookup_binding(cg, scopes, depth,
+                                     target->as.ident.name, name_len,
+                                     target->as.ident.hash);
+    if (b && b->type_name && expr_type_base_is(b->type_name, "str"))
+      return true;
+    expr_t *init = b ? ny_binding_var_init_expr(b,
+                                                 target->as.ident.name) : NULL;
+    return init && init->kind == NY_E_LITERAL &&
+           init->as.literal.kind == NY_LIT_STR;
+  }
+  return false;
+}
+
 static bool expr_negative_literal_i64(expr_t *e, int64_t *out) {
   if (!e || e->kind != NY_E_UNARY || !e->as.unary.op ||
       strcmp(e->as.unary.op, "-") != 0 || !e->as.unary.right)
@@ -2751,7 +2777,12 @@ LLVMValueRef gen_closure(codegen_t *cg, scope *scopes, size_t depth,
   stmt_t *sfn = arena_alloc(cg->arena, sizeof(*sfn));
   memset(sfn, 0, sizeof(*sfn));
   ny_param_list callable_params = params;
-  const char *callable_return_type = return_type;
+  /* An unannotated lambda still returns a language value.  Keep its
+   * generated function on the tagged NyValue ABI so a dynamic arithmetic
+   * expression is not tagged once by the expression and again by the
+   * untyped-tail return path.  Explicit annotations continue to select the
+   * corresponding raw/native ABI. */
+  const char *callable_return_type = return_type ? return_type : "any";
   bool needs_tagged_adapter_abi = callable_return_type != NULL;
   for (size_t i = 0; i < params.len; ++i) {
     if (params.data[i].type) {
@@ -5175,6 +5206,25 @@ static LLVMValueRef gen_expr_index(codegen_t *cg, scope *scopes, size_t depth,
                          stop, step},
         4, "");
   }
+  /* String indexing is a character lookup, not a raw native-buffer lookup.
+   * An inferred/unknown string local can otherwise enter the dynamic index
+   * fast path below; that path is valid for tbuf-backed sequences but can
+   * interpret a C-string payload as a suffix slice.  Keep the ordinary
+   * checked index contract for every statically identifiable string. */
+  if (e->as.index.target && e->as.index.start &&
+      expr_target_is_known_string_like(cg, scopes, depth,
+                                       e->as.index.target)) {
+    fun_sig *string_index = ny_helper_index_read(cg);
+    if (string_index) {
+      LLVMValueRef target = gen_expr(cg, scopes, depth, e->as.index.target);
+      LLVMValueRef key = gen_expr(cg, scopes, depth, e->as.index.start);
+      if (target && key)
+        return LLVMBuildCall2(cg->builder, string_index->type,
+                              string_index->value,
+                              (LLVMValueRef[]){target, key}, 2,
+                              NY_LLVM_NAME(cg, "string_index_read"));
+    }
+  }
   if (expr_target_is_known_list_like(cg, scopes, depth,
                                      e->as.index.target) &&
       expr_index_is_int_key(cg, scopes, depth, e->as.index.start)) {
@@ -5211,7 +5261,10 @@ static LLVMValueRef gen_expr_index(codegen_t *cg, scope *scopes, size_t depth,
   bool dynamic_target =
       !target_type || ny_gencall_type_is(target_type, "any") ||
       ny_gencall_type_is(target_type, "unknown");
-  if (dynamic_target && e->as.index.start->kind == NY_E_LITERAL &&
+  bool string_target = expr_target_is_known_string_like(
+      cg, scopes, depth, e->as.index.target);
+  if (dynamic_target && !string_target &&
+      e->as.index.start->kind == NY_E_LITERAL &&
       e->as.index.start->as.literal.kind == NY_LIT_INT &&
       e->as.index.start->as.literal.as.i >= 0) {
     LLVMValueRef target_v = gen_expr(cg, scopes, depth, e->as.index.target);

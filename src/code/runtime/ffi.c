@@ -378,10 +378,10 @@ int64_t rt_call_any1(int64_t f, int64_t value) {
    */
   if (dynamic_callable)
     return rt_dynamic_callback_result(
-        ((rt_any_fn6)(uintptr_t)f)(rt_dynamic_callback_arg(value, raw_scalar_callback_args),
-                                          len, tag, 0, 0, 0),
-        dynamic_bool_callable, raw_scalar_callback_args,
-        raw_result_callable);
+        ((rt_any_fn6)(uintptr_t)f)(
+            rt_dynamic_callback_arg(value, raw_scalar_callback_args), len, tag,
+            0, 0, 0),
+        dynamic_bool_callable, raw_scalar_callback_args, raw_result_callable);
   return rt_any_callback_result(
       ((rt_any_fn6)(uintptr_t)f)(rt_any_to_i64(value), len, tag, 0, 0, 0));
 }

@@ -863,6 +863,14 @@ static stmt_t *ny_native_lambda_create(const expr_t *e) {
       fn->as.fn.return_semantic.rep = NY_SEM_REP_TYPED_BUFFER;
     else
       fn->as.fn.return_semantic.rep = NY_SEM_REP_RAW_INT;
+  } else {
+    /* An unannotated lambda is still a dynamic language-value producer.
+     * Mark the synthetic function accordingly so its native return
+     * normalizer boxes raw literal/arithmetic results exactly once.  Leaving
+     * this unresolved made `fn(v) { v + 1 }` return raw 5 through a callback
+     * that treated it as a tagged value, producing 5/7/9 instead of 2/3/4. */
+    fn->as.fn.return_semantic.resolved = true;
+    fn->as.fn.return_semantic.rep = NY_SEM_REP_TAGGED_DYNAMIC;
   }
   fn->as.fn.body = e->as.lambda.body;
   if (e->as.lambda.params.len == 0) {

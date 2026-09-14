@@ -1632,6 +1632,11 @@ static LLVMValueRef gen_expr_binary_case(codegen_t *cg, scope *scopes, size_t de
       expr_t call = {0};
       call.kind = NY_E_CALL;
       call.tok = e->tok;
+      /* Preserve the source comparison's semantic contract on the
+       * synthesized equality call.  The legacy lowering path otherwise
+       * treats the synthetic call as unresolved and may pass a tagged
+       * dynamic operand through the raw integer ABI. */
+      call.semantic = e->semantic;
       call.as.call.callee = &callee;
       call.as.call.args.data = args;
       call.as.call.args.len = 2;

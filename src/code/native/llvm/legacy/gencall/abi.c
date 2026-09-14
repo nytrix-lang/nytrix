@@ -2101,13 +2101,30 @@ static LLVMValueRef ny_try_fast_len_builtin(codegen_t *cg, scope *scopes,
   obj_v = ny_cast_to_i64(cg, obj_v, "fast_len_obj");
   ny_dbg_loc(cg, tok);
 
+  /*
+   * Native sequence values are tbuf data pointers.  Their count is the
+   * second header word, 24 bytes before the data pointer; loading at the
+   * data pointer reads element zero and makes a four-element list look like
+   * a one-element list.  Strings/bytes retain their side-header layout and
+   * store the count 16 bytes before the value.  Keep this direct lowering so
+   * AOT code does not accidentally call a compiler-process runtime
+   * trampoline; the surrounding static/type checks already restrict this
+   * path to the corresponding concrete layouts.
+   */
   LLVMValueRef addr = obj_v;
-  if (side_header_len)
+  if (header_len)
+    addr = ny_sub(cg, obj_v, LLVMConstInt(cg->type_i64, 24, false),
+                  "fast_tbuf_len_addr");
+  else if (side_header_len)
     addr = ny_sub(cg, obj_v, LLVMConstInt(cg->type_i64, 16, false),
                   "fast_strlen_addr");
   LLVMValueRef ptr = LLVMBuildIntToPtr(cg->builder, addr, ny_ptr_i64_ty(cg),
                                        "fast_len_ptr_i64");
-  return ny_load(cg, ptr, NY_LLVM_NAME(cg, "fast_len"));
+  LLVMValueRef loaded = ny_load(cg, ptr, NY_LLVM_NAME(cg, "fast_len"));
+  /* Native tbuf headers store a raw count, while the language-level `int`
+   * ABI used by this emitter is tagged.  The side-header string/bytes path
+   * already stores a tagged count and must remain unchanged. */
+  return header_len ? ny_tag_int(cg, loaded) : loaded;
 }
 
 static fun_sig *ny_gencall_lookup_len_func(codegen_t *cg) {

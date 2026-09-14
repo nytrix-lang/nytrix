@@ -393,56 +393,17 @@ static int ny_native_nir_lower_call(ny_native_nir_builder_t *b,
       (e->semantic.member_call_kind == NY_SEM_CALL_DIRECT_ATTACHED ||
        e->semantic.member_call_kind == NY_SEM_CALL_DYNAMIC_CONTRACT)) {
     const char *canonical = e->semantic.canonical_callee;
-    char attached_name[512];
-    /* Semantic lookup can choose an unrelated same-named stdlib method when
-     * the receiver is the result of a nominal `self` call.  Recover the
-     * concrete impl owner from the local declaration and prefer its attached
-     * method before constructing the direct call. */
+    /* The declaration selected by attached-method lookup is authoritative:
+     * it already contains the defining module and exact emitted symbol. */
     if (e->as.call.callee->kind == NY_E_MEMBER &&
         e->as.call.callee->as.member.target &&
         e->as.call.callee->as.member.name) {
       const stmt_t *method = ny_native_nir_find_attached_method(
           b, e->as.call.callee->as.member.target,
           e->as.call.callee->as.member.name);
-      const char *owner = ny_native_nir_expr_type_name(
-          b, e->as.call.callee->as.member.target);
-      if (method && owner && method->as.fn.name) {
-        const char *mleaf = ny_native_leaf_name(method->as.fn.name);
-        const char *fn_leaf = mleaf ? mleaf : method->as.fn.name;
-        int n = snprintf(attached_name, sizeof(attached_name), "%s.%s", owner,
-                         fn_leaf);
-        /*
-         * Only adopt the reconstructed owner.method spelling when it
-         * resolves to a declared function; an unresolvable spelling emits
-         * an undefined ny_fn_owner.method reference while the semantic
-         * canonical carries the collected qualified name.
-         */
-        const stmt_t *resolved_attached =
-            n > 0 && (size_t)n < sizeof(attached_name)
-                ? ny_native_nir_find_user_function(b, attached_name)
-                : NULL;
-        if (resolved_attached && resolved_attached->as.fn.name) {
-          canonical = resolved_attached->as.fn.name;
-        } else if (strncmp(method->as.fn.name, "std.core.", 9) == 0) {
-          /*
-           * Attached impl methods are sometimes indexed as
-           * `std.core.<owner>.<owner>.<method>` (the first owner is the
-           * module, the second is the impl type).  Resolve the canonical
-           * owner/method spelling before falling back to the semantic
-           * callee.  This keeps `str.repeat` on the real
-           * `std.core.str.repeat` body instead of emitting an uncollected
-           * `std.core.str.str.repeat` declaration.
-           */
-          int qn = snprintf(attached_name, sizeof(attached_name),
-                            "std.core.%s.%s", owner, fn_leaf);
-          if (qn > 0 && (size_t)qn < sizeof(attached_name)) {
-            const stmt_t *canonical_fn =
-                ny_native_nir_find_user_function(b, attached_name);
-            if (canonical_fn && canonical_fn->as.fn.name)
-              canonical = canonical_fn->as.fn.name;
-          }
-        }
-      }
+      if (method && method->as.fn.name)
+        /* The resolved declaration already carries its defining module. */
+        canonical = method->as.fn.name;
     }
     if (canonical && strncmp(canonical, "std.core.", 9) == 0) {
       const stmt_t *fn = ny_native_nir_find_user_function(b, canonical);
@@ -6367,15 +6328,11 @@ ordinary_call:
       bool raw_scalar_result =
           lambda_value_expr->as.lambda.return_type &&
               ny_native_type_name_is_int(lambda_value_expr->as.lambda.return_type);
-      if (!lambda_value_expr->as.lambda.return_type && cb_result &&
-          !predicate_callback && !ny_native_nir_expr_is_any(b, cb_result) &&
-          !ny_native_nir_expr_is_f64(b, cb_result) &&
-          !ny_native_nir_expr_is_f32(b, cb_result) &&
-          !ny_native_nir_expr_is_cstr(b, cb_result) &&
-          !ny_native_nir_expr_is_list(b, cb_result) &&
-          !ny_native_nir_expr_is_dict(b, cb_result) &&
-          !ny_native_nir_expr_is_ptr(b, cb_result))
-        raw_scalar_result = true;
+      /* An unannotated lambda has the dynamic NyValue result ABI.  Its
+       * body may be scalar arithmetic, but that does not make the returned
+       * word raw: the generated lambda still returns the canonical tagged
+       * value consumed by the callback edge.  Only an explicit integer
+       * result annotation opts into the raw-result adapter. */
       const char *mark_symbol =
           predicate_callback ? (callback_params_raw
                                     ? "rt_mark_dynamic_bool_callable"

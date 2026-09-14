@@ -1578,11 +1578,12 @@ static int ny_native_nir_lower_expr_impl(ny_native_nir_builder_t *b,
   }
   case NY_E_INDEX: {
     /* Slice syntax is represented as an index node with a stop/step.  A
-     * string is a raw C-string at this lowering boundary, so do not let it
-     * fall through to the scalar index path (which correctly returns one
-     * character, but silently discards the stop and produced `s[0:5] == "h"`). */
+     * string is a raw C-string at this lowering boundary, so lower only
+     * actual slices here.  The previous `!stop` condition classified plain
+     * `s[i]` as `s[i:]`, returning a suffix instead of one character. */
     if (e->as.index.target &&
         ny_native_nir_expr_is_cstr(b, e->as.index.target) &&
+        (e->as.index.stop || e->as.index.step) &&
         (!e->as.index.step ||
          (e->as.index.step->kind == NY_E_LITERAL &&
           e->as.index.step->as.literal.kind == NY_LIT_INT &&
@@ -2469,36 +2470,13 @@ static int ny_native_nir_lower_expr_impl(ny_native_nir_builder_t *b,
       const char *canonical = e->semantic.canonical_callee;
       if (!canonical && e->semantic.canonical_callee_stmt)
         canonical = e->semantic.canonical_callee_stmt->as.fn.name;
-      char attached_name[512];
       const stmt_t *attached_method = ny_native_nir_find_attached_method(
           b, e->as.memcall.target, method);
-      const char *attached_owner =
-          ny_native_nir_expr_type_name(b, e->as.memcall.target);
-      if (attached_method && attached_owner && attached_method->as.fn.name) {
-        if (strncmp(attached_method->as.fn.name, "std.core.", 9) == 0) {
-          canonical = attached_method->as.fn.name;
-        } else {
-          int qn = snprintf(attached_name, sizeof(attached_name), "std.core.%s",
-                            attached_method->as.fn.name);
-          if (qn > 0 && (size_t)qn < sizeof(attached_name))
-            canonical = attached_name;
-        }
-        const char *mleaf = ny_native_leaf_name(attached_method->as.fn.name);
-        const char *fn_leaf = mleaf ? mleaf : attached_method->as.fn.name;
-        int n = snprintf(attached_name, sizeof(attached_name), "%s.%s",
-                         attached_owner, fn_leaf);
-        /*
-         * The reconstructed owner.method spelling is only usable when it
-         * resolves to a declared function; otherwise it emits an undefined
-         * ny_fn_owner.method symbol while the semantic canonical carries
-         * the collected qualified name (std.core.list.first).
-         */
-        const stmt_t *resolved_attached =
-            n > 0 && (size_t)n < sizeof(attached_name)
-                ? ny_native_nir_find_user_function(b, attached_name)
-                : NULL;
-        (void)resolved_attached;
-      }
+      /* Keep the exact declaration selected by attached-method lookup.  The
+       * owner.method spelling is only a source-level convenience and can
+       * disagree with the module-qualified symbol collected by lowering. */
+      if (attached_method && attached_method->as.fn.name)
+        canonical = attached_method->as.fn.name;
       if (canonical && strncmp(canonical, "std.core.", 9) == 0) {
         const stmt_t *fn = ny_native_nir_find_user_function(b, canonical);
         if (fn && fn->as.fn.name &&
@@ -3207,19 +3185,10 @@ static int ny_native_nir_lower_expr_impl(ny_native_nir_builder_t *b,
       const char *canonical = e->semantic.canonical_callee;
       if (!canonical && e->semantic.canonical_callee_stmt)
         canonical = e->semantic.canonical_callee_stmt->as.fn.name;
-      char attached_name[512];
       const stmt_t *attached_method = ny_native_nir_find_attached_method(
           b, e->as.member.target, e->as.member.name);
-      const char *attached_owner =
-          ny_native_nir_expr_type_name(b, e->as.member.target);
-      if (attached_method && attached_owner && attached_method->as.fn.name) {
-        const char *mleaf = ny_native_leaf_name(attached_method->as.fn.name);
-        const char *fn_leaf = mleaf ? mleaf : attached_method->as.fn.name;
-        int n = snprintf(attached_name, sizeof(attached_name), "%s.%s",
-                         attached_owner, fn_leaf);
-        if (n > 0 && (size_t)n < sizeof(attached_name))
-          canonical = attached_name;
-      }
+      if (attached_method && attached_method->as.fn.name)
+        canonical = attached_method->as.fn.name;
       if (!canonical) {
         ny_native_nir_fail(
             b,
