@@ -2819,7 +2819,16 @@ skip_compilation:
    * them only after the cache has been written, so serialized LLVM bitcode
    * never contains stale pointers from a previous compiler process.
    */
-  if (opt->native_backend == NY_NATIVE_BACKEND_LLVM && cg.module)
+  /*
+   * Runtime trampolines contain addresses in this compiler process and are
+   * valid only while executing the LLVM JIT.  AOT output is linked and run
+   * in a different process, where those addresses are meaningless; leave
+   * the runtime declarations intact so the AOT runtime library resolves
+   * them normally.  In particular, installing these for `-run` made list
+   * length/index calls jump into stale compiler memory.
+   */
+  if (opt->native_backend == NY_NATIVE_BACKEND_LLVM && cg.module &&
+      opt->run_jit && !opt->run_aot)
     ny_jit_define_runtime_trampolines(cg.module);
   if (opt->native_backend != NY_NATIVE_BACKEND_LLVM)
     ny_type_pipeline_persist_native_facts(&prog, &cg, parse_name);

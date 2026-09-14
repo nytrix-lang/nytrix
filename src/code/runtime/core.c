@@ -1200,6 +1200,10 @@ int64_t rt_tbuf_swap(int64_t buffer, int64_t left, int64_t right) {
                                 RT_NATIVE_TBUF_HEADER)) {
     int64_t *hdr = (int64_t *)((uintptr_t)buffer - RT_NATIVE_TBUF_HEADER);
     if ((uint64_t)hdr[0] == NY_NATIVE_TBUF_MAGIC) {
+      if (getenv("NYDBG_TBUF"))
+        fprintf(stderr, "DBG_TBUF get data=%p index=%ld count=%ld elem=%ld\n",
+                (void *)(uintptr_t)buffer, (long)index, (long)hdr[1],
+                (long)hdr[2]);
       int64_t count = hdr[1], elem_size = hdr[2];
       if (count < 0 || elem_size <= 0 ||
           (uint64_t)count > SIZE_MAX / (uint64_t)elem_size)
@@ -2476,6 +2480,12 @@ int64_t rt_value_get_index_raw(int64_t value, int64_t index,
   /*
    * The result is a dynamic value even though the index is raw.
    */
+  /* A string is a sequence at the source level, but its pointer payload can
+   * happen to resemble a native-buffer header.  Classify it before the
+   * header probe so `s[2]` reads one UTF-8 character instead of treating the
+   * suffix `s[2:]` as a buffer slice. */
+  if (rt_native_is_str(value) || is_v_str(value))
+    return rt_cstr_index_read_raw(value, index);
   if (rt_magic_tbuf_elem_size(value) > 0)
     return rt_tbuf_get_any(value, index, fallback);
   return rt_value_get_tagged(value, rt_tag_v(index), fallback);
@@ -6525,7 +6535,11 @@ int64_t rt_list_set_len(int64_t lst, int64_t n) {
                                 RT_NATIVE_TBUF_HEADER)) {
     int64_t *hdr = (int64_t *)((uintptr_t)lst - RT_NATIVE_TBUF_HEADER);
     if ((uint64_t)hdr[0] == NY_NATIVE_TBUF_MAGIC) {
-      hdr[1] = n;
+      /* The public helper receives a language integer, while the native
+       * tbuf header deliberately stores its count as a raw machine value.
+       * Keeping the conversion at this ABI boundary prevents list.len from
+       * tagging an already-tagged count a second time. */
+      hdr[1] = is_int(n) ? rt_untag_v(n) : n;
       return lst;
     }
   }

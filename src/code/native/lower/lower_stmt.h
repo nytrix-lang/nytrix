@@ -2295,7 +2295,14 @@ static int ny_native_nir_normalize_return(ny_native_nir_builder_t *b,
         !ny_native_nir_expr_is_cstr(b, expr) &&
         !ny_native_nir_expr_is_ptr(b, expr) &&
         !ny_native_nir_is_bitwise_operator(expr->as.binary.op) &&
-        !ny_native_nir_expr_is_bool(b, expr))
+        !ny_native_nir_expr_is_bool(b, expr) &&
+        /* A dynamic operand makes the arithmetic helper produce the
+         * canonical tagged result even when HM classifies the whole binary
+         * expression as an integer.  Inspect the operands before applying a
+         * raw-result box; otherwise `fn(v) { v + 1 }` becomes tagged(tagged
+         * (2)) at the lambda return boundary. */
+        !ny_native_nir_expr_is_any(b, expr->as.binary.left) &&
+        !ny_native_nir_expr_is_any(b, expr->as.binary.right))
       return ny_native_nir_emit_runtime_call(b, "rt_tag", value, -1, -1, 1, 0);
     if (expr->kind == NY_E_IDENT && expr->as.ident.name) {
       const ny_native_nir_local_t *local =

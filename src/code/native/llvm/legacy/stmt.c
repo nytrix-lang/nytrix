@@ -6736,7 +6736,10 @@ static LLVMValueRef stmt_gen_return_value(codegen_t *cg, scope *scopes,
    * more (11 became 5 in syntax macro expansion).  Keep raw values inside
    * the function and create the dynamic representation at this boundary.
    */
-  if (!ret_type && v && ny_type_is(infer_expr_type(cg, scopes, depth, e), "int"))
+  if (!ret_type && v &&
+      !(e->semantic.resolved &&
+        e->semantic.rep == NY_SEM_REP_TAGGED_DYNAMIC) &&
+      ny_type_is(infer_expr_type(cg, scopes, depth, e), "int"))
     v = ny_tag_int(cg, v);
   if (stmt_type_is_native_abi_value(cg, ret_type)) {
     bool proven_int = ny_is_proven_int(cg, scopes, depth, e, v);
@@ -9329,6 +9332,8 @@ static void gen_stmt_expr_stmt(codegen_t *cg, scope *scopes, size_t *depth,
     v = ny_coerce_to_abi_proven_int(cg, v, cg->current_fn_ret_type, proven_int);
   }
   if (is_tail && !cg->result_store_val && !cg->current_fn_ret_type &&
+      !(e->semantic.resolved &&
+        e->semantic.rep == NY_SEM_REP_TAGGED_DYNAMIC) &&
       ny_type_is(infer_expr_type(cg, scopes, *depth, e), "int")) {
     /* Untyped tail expressions return a dynamic language value. */
     v = ny_tag_int(cg, v);

@@ -148,14 +148,14 @@ fn first(seq xs, any default=0) any {
    "Returns the first item in `xs`, or `default` for an empty sequence."
    def n = _iter_seq_len(xs, "first")
    if n <= 0 { return default }
-   __tbuf_index_any(xs, 0)
+   __tbuf_index_any_raw(xs, 0)
 }
 
 fn last(seq xs, any default=0) any {
    "Returns the last item in `xs`, or `default` for an empty sequence."
    def n = _iter_seq_len(xs, "last")
    if n <= 0 { return default }
-   __tbuf_index_any(xs, (n - 1) * 2 + 1)
+   __tbuf_index_any_raw(xs, n - 1)
 }
 
 @returns_owned
@@ -338,8 +338,11 @@ fn chunk(seq xs, int size) list {
       mut part = list(stop - i)
       mut j = i
       while j < stop {
-         _list_set(part, j - i,
-            __any_to_i64(__load_item_any(xs, j * 2 + 1)))
+         ; `__tbuf_index_any_raw` takes the native index directly.  The old
+         ; `__load_item_any(..., j * 2 + 1)` spelling mixed the tagged public
+         ; ABI with this raw loop index, so chunking read the next element and
+         ; eventually probed past the end of the source list.
+         _list_set(part, j - i, __tbuf_index_any_raw(xs, j))
          j += 1
       }
       _list_finish(part, stop - i)

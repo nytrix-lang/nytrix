@@ -302,6 +302,30 @@ fun_sig *ny_gencall_lookup_attached_method(codegen_t *cg,
         return sig;
     }
   }
+  /* Imported impls are not always present in the module-use lists: the
+   * semantic loader can retain their signatures in the global table while
+   * the legacy code generator is compiling a provider reached indirectly.
+   * Resolve that representation by the structural suffix and verify the
+   * receiver parameter, rather than fabricating a std.core owner path. */
+  char suffix[512];
+  int suffix_n = snprintf(suffix, sizeof(suffix), ".%s.%s", owner,
+                          method_name);
+  if (suffix_n > 0 && (size_t)suffix_n < sizeof(suffix)) {
+    for (size_t i = cg->fun_sigs.len; i > 0; --i) {
+      fun_sig *sig = &cg->fun_sigs.data[i - 1];
+      if (!sig->is_attached_method || !sig->name ||
+          !ny_sig_in_current_sigs(cg, sig))
+        continue;
+      size_t name_len = strlen(sig->name);
+      if (name_len < (size_t)suffix_n ||
+          strcmp(sig->name + name_len - (size_t)suffix_n, suffix) != 0)
+        continue;
+      if (sig->param_types.len > 0 && sig->param_types.data[0] &&
+          !ny_gencall_type_is(sig->param_types.data[0], owner))
+        continue;
+      return sig;
+    }
+  }
   char core_builtin[512];
   int core_n = snprintf(core_builtin, sizeof(core_builtin), "std.core.%s.%s",
                         owner, method_name);

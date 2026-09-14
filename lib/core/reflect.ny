@@ -1231,10 +1231,9 @@ fn index_read(any obj, any key) any {
    def tag = __tagof(obj)
    if _is_list(obj) || _is_tuple(obj) {
       mut k = 0
-      if __is_int(key) { k = key }
+      if __is_int(key) { k = __untag(key) }
       elif _is_bigint(key) { k = __bigint_to_int(key) }
       else { return _index_read_key_error(key) }
-      if !__is_int(k) { return _index_read_key_error(key) }
       def n = __load64_idx(obj, 0)
       if k < 0 { k = k + n }
       if k < 0 || k >= n { return _index_read_oob_error(k, n) }
@@ -1244,10 +1243,9 @@ fn index_read(any obj, any key) any {
    if _is_dict(obj) {
       if _is_vecdict(obj) {
          mut k = 0
-         if __is_int(key) { k = key }
+         if __is_int(key) { k = __untag(key) }
          elif _is_bigint(key) { k = __bigint_to_int(key) }
          else { return _index_read_key_error(key) }
-         if !__is_int(k) { return _index_read_key_error(key) }
          def n = _vec_dim(obj)
          if k < 0 { k = k + n }
          if k < 0 || k >= n { return _index_read_oob_error(k, n) }
@@ -1259,10 +1257,9 @@ fn index_read(any obj, any key) any {
    }
    if _is_str(obj) || __is_str_obj(obj) {
       mut k = 0
-      if __is_int(key) { k = key }
+      if __is_int(key) { k = __untag(key) }
       elif _is_bigint(key) { k = __bigint_to_int(key) }
       else { return _index_read_key_error(key) }
-      if !__is_int(k) { return _index_read_key_error(key) }
       use std.core.str
       def total = utf8_len(obj)
       if k < 0 { k = k + total }
@@ -1272,10 +1269,9 @@ fn index_read(any obj, any key) any {
    }
    if _is_bytes(obj) {
       mut k = 0
-      if __is_int(key) { k = key }
+      if __is_int(key) { k = __untag(key) }
       elif _is_bigint(key) { k = __bigint_to_int(key) }
       else { return _index_read_key_error(key) }
-      if !__is_int(k) { return _index_read_key_error(key) }
       def n = obj.len
       if k < 0 { k = k + n }
       if k < 0 || k >= n { return _index_read_oob_error(k, n) }
@@ -1284,10 +1280,9 @@ fn index_read(any obj, any key) any {
    }
    if _is_range(obj) {
       mut k = 0
-      if __is_int(key) { k = key }
+      if __is_int(key) { k = __untag(key) }
       elif _is_bigint(key) { k = __bigint_to_int(key) }
       else { return _index_read_key_error(key) }
-      if !__is_int(k) { return _index_read_key_error(key) }
       def n = obj.len
       if k < 0 { k = k + n }
       if k < 0 || k >= n { return _index_read_oob_error(k, n) }
@@ -1315,10 +1310,9 @@ fn get(any obj, any key, any default=0) any {
    }
    if _is_list(obj) || _is_tuple(obj) {
       mut k = 0
-      if __is_int(key) { k = key }
+      if __is_int(key) { k = __untag(key) }
       elif _is_bigint(key) { k = __bigint_to_int(key) }
       else { return default }
-      if !__is_int(k) { return default }
       def n = __load64_idx(obj, 0)
       if k < 0 { k = k + n }
       if k < 0 || k >= n { return default }
@@ -1326,17 +1320,16 @@ fn get(any obj, any key, any default=0) any {
    }
    if _is_dict(obj) {
       if _is_vecdict(obj) {
-         if __is_int(key) { return _vec_at(obj, key, default) }
+         if __is_int(key) { return _vec_at(obj, __untag(key), default) }
          if _is_bigint(key) { return _vec_at(obj, __bigint_to_int(key), default) }
       }
       return _dict_get_raw(obj, key, default)
    }
    if _is_str(obj) || __is_str_obj(obj) {
       mut k = 0
-      if __is_int(key) { k = key }
+      if __is_int(key) { k = __untag(key) }
       elif _is_bigint(key) { k = __bigint_to_int(key) }
       else { return default }
-      if !__is_int(k) { return default }
       use std.core.str
       def total = utf8_len(obj)
       if k < 0 { k = k + total }
@@ -1347,10 +1340,9 @@ fn get(any obj, any key, any default=0) any {
    }
    if _is_bytes(obj) {
       mut k = 0
-      if __is_int(key) { k = key }
+      if __is_int(key) { k = __untag(key) }
       elif _is_bigint(key) { k = __bigint_to_int(key) }
       else { return default }
-      if !__is_int(k) { return default }
       def n = obj.len
       if k < 0 { k = k + n }
       if k < 0 || k >= n { return default }
@@ -1358,10 +1350,9 @@ fn get(any obj, any key, any default=0) any {
    }
    if _is_range(obj) {
       mut k = 0
-      if __is_int(key) { k = key }
+      if __is_int(key) { k = __untag(key) }
       elif _is_bigint(key) { k = __bigint_to_int(key) }
       else { return default }
-      if !__is_int(k) { return default }
       def n = obj.len
       if k < 0 { k = k + n }
       if k < 0 || k >= n { return default }
@@ -1379,16 +1370,15 @@ fn get(any obj, any key, any default=0) any {
 fn _set_impl(any obj, any key, any val) any {
    if !obj || _is_raw_ptr_like(obj) { return 0 }
    if _is_vecdict(obj) {
-      if __is_int(key) { return _vec_set(obj, key, val) }
+      if __is_int(key) { return _vec_set(obj, __untag(key), val) }
       if _is_bigint(key) { return _vec_set(obj, __bigint_to_int(key), val) }
    }
    if _is_dict(obj) { return _dict_put_raw(obj, key, val) }
    elif _is_list(obj) {
       mut k = 0
-      if __is_int(key) { k = key }
+      if __is_int(key) { k = __untag(key) }
       elif _is_bigint(key) { k = __bigint_to_int(key) }
       else { _type_error("set", "an integer index", key) }
-      if !__is_int(k) { _type_error("set", "an integer index", key) }
       def n = obj.len
       if k < 0 { k = k + n }
       if k < 0 || k >= n {
@@ -1407,10 +1397,9 @@ fn _set_impl(any obj, any key, any val) any {
    }
    elif _is_bytes(obj) {
       mut k = 0
-      if __is_int(key) { k = key }
+      if __is_int(key) { k = __untag(key) }
       elif _is_bigint(key) { k = __bigint_to_int(key) }
       else { _type_error("set", "an integer index", key) }
-      if !__is_int(k) { _type_error("set", "an integer index", key) }
       def n = obj.len
       if k < 0 { k = k + n }
       if k < 0 || k >= n { _index_error("set", k, n) }

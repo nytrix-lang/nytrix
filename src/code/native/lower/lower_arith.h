@@ -136,18 +136,27 @@ static int ny_native_nir_lower_binary(ny_native_nir_builder_t *b,
                 ? snprintf(symbol, sizeof(symbol), "%s", target)
                 : snprintf(symbol, sizeof(symbol), "%s.%s", owner, target);
     if (n > 0 && (size_t)n < sizeof(symbol) && owner) {
+      /* Operator targets are declarations in an impl, not names in the
+       * std.core namespace.  Resolve the exact method first so imported
+       * providers such as std.math.big keep their module-qualified symbol. */
+      const char *target_leaf = ny_native_leaf_name(target);
+      const stmt_t *target_fn = target_leaf
+                                    ? ny_native_nir_find_attached_method(
+                                          b, e->as.binary.left, target_leaf)
+                                    : NULL;
+      if (target_fn && target_fn->as.fn.name)
+        snprintf(symbol, sizeof(symbol), "%s", target_fn->as.fn.name);
       /* Short-name lookup and expanded operator metadata can both select an
        * impl wrapper (for example `std.core.str.str.repeat`) instead of the
        * source helper `std.core.str.repeat`.  Prefer the canonical owner plus
        * leaf spelling when the function table contains it; this keeps
        * operator lowering on the same symbol as ordinary attached calls. */
-      const char *target_leaf = ny_native_leaf_name(target);
       char qualified[512];
       int qn = target_leaf
                    ? snprintf(qualified, sizeof(qualified), "std.core.%s.%s",
                               owner, target_leaf)
                    : -1;
-      if (qn > 0 && (size_t)qn < sizeof(qualified) &&
+      if (!target_fn && qn > 0 && (size_t)qn < sizeof(qualified) &&
           ny_native_nir_find_user_function(b, qualified))
         snprintf(symbol, sizeof(symbol), "%s", qualified);
     }
