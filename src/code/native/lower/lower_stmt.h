@@ -140,7 +140,6 @@ static const char *ny_native_fn_module(const program_t *prog,
   return NULL;
 }
 
-
 static bool ny_native_nir_expr_uses_ident(const ny_native_nir_builder_t *b,
                                           const expr_t *e, const char *name);
 static bool ny_native_nir_stmt_uses_ident(const stmt_t *s, const char *name);
@@ -354,6 +353,11 @@ static bool ny_native_nir_lower_var(ny_native_nir_builder_t *b, const stmt_t *s)
     if (i >= v->exprs.len || !v->exprs.data[i])
       return ny_native_nir_fail(
           b, "native NYIR lower: local '%s' needs an initializer", name);
+    if (i < v->types.len && v->types.data[i]) {
+      const char *decl_type = v->types.data[i];
+      if (!ny_native_nir_check_refine_obligation(b, s->tok, decl_type, (expr_t *)v->exprs.data[i]))
+        return false;
+    }
     /* The native lowering path must preserve the source linter contract too.
      * Its compact local table otherwise bypasses scope_bind(), so nested
      * declarations could silently lose W2002 under --warn-all. */
@@ -598,10 +602,29 @@ static bool ny_native_nir_lower_var(ny_native_nir_builder_t *b, const stmt_t *s)
       l->is_bigint = ny_native_nir_expr_is_bigint(b, v->exprs.data[i]);
     if (l && i < v->exprs.len && v->exprs.data[i] &&
         v->exprs.data[i]->semantic.resolved) {
-      l->semantic_rep = v->exprs.data[i]->semantic.rep;
+      /* A mutable local owns one physical ABI for its lifetime.  Do not let
+       * a later dynamic RHS rewrite an already-proven raw scalar slot before
+       * that RHS is lowered: compound assignments such as
+       * `acc += dict.get(k, 0)` would otherwise feed a raw accumulator into
+       * rt_any_add, then store a tagged result back into a raw slot.  Dynamic
+       * or as-yet-unknown locals may still refine normally. */
+      if (v->is_decl || !prior_local || prior_local->is_any ||
+          prior_local->semantic_rep == NY_SEM_REP_UNKNOWN)
+        l->semantic_rep = v->exprs.data[i]->semantic.rep;
       l->semantic_ownership = v->exprs.data[i]->semantic.ownership;
       l->alias_class = v->exprs.data[i]->semantic.alias_class;
       l->semantic_mutable = v->exprs.data[i]->semantic.mutable_value;
+    }
+    /* Integer literals are emitted as raw NYIR scalars even when the source
+     * declaration is unannotated and HM keeps a conservative dynamic rep.
+     * Record the physical slot ABI explicitly so later compound arithmetic
+     * can stay raw and normalize only the dynamic operand. */
+    if (l && !is_any && i < v->exprs.len && v->exprs.data[i] &&
+        v->exprs.data[i]->kind == NY_E_LITERAL &&
+        v->exprs.data[i]->as.literal.kind == NY_LIT_INT &&
+        v->exprs.data[i]->tok.kind != NY_T_NIL) {
+      l->is_any = false;
+      l->semantic_rep = NY_SEM_REP_RAW_INT;
     }
     /* A sequence index is materialized as a raw slot payload.  Keep that
      * fact on an inferred local so an indirect dynamic callback can box the
@@ -674,7 +697,8 @@ static bool ny_native_nir_lower_var(ny_native_nir_builder_t *b, const stmt_t *s)
     bool is_list =
         (i < v->types.len && ny_native_type_name_is_list(v->types.data[i])) ||
         ny_native_nir_expr_is_list(b, v->exprs.data[i]) ||
-        (source_list_local && source_list_local->is_list);
+        (source_list_local && source_list_local->is_list) ||
+        (!v->is_decl && prior_local && prior_local->is_list);
     if (!is_list && init_call_fn && init_call_fn->as.fn.return_type &&
         ny_native_type_name_is_list(init_call_fn->as.fn.return_type))
       is_list = true;
@@ -716,6 +740,8 @@ static bool ny_native_nir_lower_var(ny_native_nir_builder_t *b, const stmt_t *s)
         l->is_dyn_list = true;
       l->list_literal =
           v->is_mut ? NULL : ny_native_nir_resolve_list_literal(b, v->exprs.data[i], 0);
+      l->dict_literal =
+          v->is_mut ? NULL : ny_native_nir_resolve_dict_literal(b, v->exprs.data[i], 0);
     }
     if (typed_scalar_list)
       l->list_literal = NULL;
@@ -797,7 +823,7 @@ static bool ny_native_nir_lower_var(ny_native_nir_builder_t *b, const stmt_t *s)
               init->as.call.callee->as.ident.name)
             init_callee = ny_native_nir_find_user_function(
                 b, init->as.call.callee->as.ident.name);
-          if (init_callee && init_callee->kind == NY_S_FUNC &&
+          if (!is_list && init_callee && init_callee->kind == NY_S_FUNC &&
               init_callee->as.fn.return_semantic.resolved &&
               init_callee->as.fn.return_semantic.rep ==
                   NY_SEM_REP_TAGGED_DYNAMIC &&
@@ -1085,6 +1111,866 @@ static bool ny_native_nir_lower_guard(ny_native_nir_builder_t *b,
   return true;
 }
 
+/*
+ * Recognize the canonical bounded builder loop
+ *
+ *   mut xs = []
+ *   mut i = 0
+ *   while i < N {
+ *      xs = append(xs, value(i))
+ *      i += 1
+ *   }
+ *
+ * when N is an immutable integer bound and value(i) is a raw scalar that
+ * does not observe xs.  The source loop writes every slot exactly once, so a
+ * sized scalar tbuf plus direct stores is representation-equivalent while
+ * avoiding the append capacity/header protocol on every iteration.  Keeping
+ * this proof in statement lowering also means the generated list length is
+ * correct before any following consumer sees the value.
+ */
+static bool ny_native_nir_bounded_fill_bound_expr(
+    ny_native_nir_builder_t *b, const expr_t *e) {
+  if (!b || !e)
+    return false;
+  if (e->kind == NY_E_LITERAL)
+    return e->as.literal.kind == NY_LIT_INT && e->tok.kind != NY_T_NIL;
+  if (e->kind != NY_E_IDENT || !e->as.ident.name)
+    return false;
+  const ny_native_nir_local_t *local =
+      ny_native_nir_find_local(b, e->as.ident.name);
+  if (local)
+    return !local->semantic_mutable && !local->is_any && !local->is_f64 &&
+           !local->is_f32 && !local->is_cstr && !local->is_list &&
+           !local->is_dict;
+  const expr_t *resolved = ny_native_nir_find_top_level_value(b,
+                                                               e->as.ident.name);
+  return resolved && resolved != e && resolved->kind == NY_E_LITERAL &&
+         resolved->as.literal.kind == NY_LIT_INT && resolved->tok.kind != NY_T_NIL;
+}
+
+static bool ny_native_nir_bounded_fill_i64_expr(const expr_t *e,
+                                                   const char *index_name) {
+  if (!e || !index_name)
+    return false;
+  if (e->kind == NY_E_LITERAL)
+    return e->as.literal.kind == NY_LIT_INT && e->tok.kind != NY_T_NIL;
+  if (e->kind == NY_E_IDENT)
+    return e->as.ident.name && strcmp(e->as.ident.name, index_name) == 0;
+  if (e->kind == NY_E_UNARY && e->as.unary.op &&
+      (strcmp(e->as.unary.op, "+") == 0 ||
+       strcmp(e->as.unary.op, "-") == 0 ||
+       strcmp(e->as.unary.op, "~") == 0))
+    return ny_native_nir_bounded_fill_i64_expr(e->as.unary.right, index_name);
+  if (e->kind != NY_E_BINARY || !e->as.binary.op)
+    return false;
+  const char *op = e->as.binary.op;
+  bool raw_op = strcmp(op, "+") == 0 || strcmp(op, "-") == 0 ||
+                strcmp(op, "*") == 0 || strcmp(op, "%") == 0 ||
+                strcmp(op, "&") == 0 || strcmp(op, "|") == 0 ||
+                strcmp(op, "^^") == 0 || strcmp(op, "<<") == 0 ||
+                strcmp(op, ">>") == 0;
+  return raw_op &&
+         ny_native_nir_bounded_fill_i64_expr(e->as.binary.left, index_name) &&
+         ny_native_nir_bounded_fill_i64_expr(e->as.binary.right, index_name);
+}
+
+static bool ny_native_nir_match_bounded_scalar_append(
+    ny_native_nir_builder_t *b, const stmt_t *list_decl,
+    const stmt_t *index_decl, const stmt_t *loop, const char **list_name_out,
+    const char **index_name_out, const expr_t **item_out,
+    const expr_t **bound_expr_out) {
+  if (!b || !list_decl || !index_decl || !loop || !list_name_out ||
+      !index_name_out || !item_out || !bound_expr_out ||
+      list_decl->kind != NY_S_VAR || index_decl->kind != NY_S_VAR ||
+      loop->kind != NY_S_WHILE)
+    return false;
+
+  const stmt_var_t *lv = &list_decl->as.var;
+  const stmt_var_t *iv = &index_decl->as.var;
+  if (!lv->is_decl || !lv->is_mut || lv->names.len != 1 || lv->exprs.len != 1 ||
+      !lv->names.data[0] || !lv->exprs.data[0] ||
+      lv->exprs.data[0]->kind != NY_E_LIST ||
+      lv->exprs.data[0]->as.list_like.len != 0 ||
+      !iv->is_decl || !iv->is_mut || iv->names.len != 1 || iv->exprs.len != 1 ||
+      !iv->names.data[0] || !iv->exprs.data[0] ||
+      iv->exprs.data[0]->kind != NY_E_LITERAL ||
+      iv->exprs.data[0]->as.literal.kind != NY_LIT_INT ||
+      iv->exprs.data[0]->as.literal.as.i != 0)
+    return false;
+
+  const char *list_name = lv->names.data[0];
+  const char *index_name = iv->names.data[0];
+  const expr_t *test = loop->as.whl.test;
+  if (loop->as.whl.init || loop->as.whl.update || !test ||
+      test->kind != NY_E_BINARY || !test->as.binary.op ||
+      strcmp(test->as.binary.op, "<") != 0 || !test->as.binary.left ||
+      test->as.binary.left->kind != NY_E_IDENT ||
+      !test->as.binary.left->as.ident.name ||
+      strcmp(test->as.binary.left->as.ident.name, index_name) != 0 ||
+      !ny_native_nir_bounded_fill_bound_expr(b, test->as.binary.right))
+    return false;
+
+  const stmt_t *body = loop->as.whl.body;
+  if (!body || body->kind != NY_S_BLOCK || body->as.block.body.len != 2)
+    return false;
+  const stmt_t *append_stmt = body->as.block.body.data[0];
+  const stmt_t *inc_stmt = body->as.block.body.data[1];
+  if (!append_stmt || append_stmt->kind != NY_S_VAR ||
+      append_stmt->as.var.is_decl || append_stmt->as.var.names.len != 1 ||
+      append_stmt->as.var.exprs.len != 1 ||
+      !append_stmt->as.var.names.data[0] ||
+      strcmp(append_stmt->as.var.names.data[0], list_name) != 0 ||
+      !append_stmt->as.var.exprs.data[0] ||
+      append_stmt->as.var.exprs.data[0]->kind != NY_E_CALL)
+    return false;
+
+  const expr_t *append = append_stmt->as.var.exprs.data[0];
+  const char *leaf = ny_native_call_leaf(append);
+  if (!leaf || strcmp(leaf, "append") != 0 || append->as.call.args.len != 2 ||
+      append->as.call.args.data[0].name || append->as.call.args.data[1].name)
+    return false;
+  const expr_t *recv = append->as.call.args.data[0].val;
+  const expr_t *item = append->as.call.args.data[1].val;
+  if (!recv || recv->kind != NY_E_IDENT || !recv->as.ident.name ||
+      strcmp(recv->as.ident.name, list_name) != 0 || !item ||
+      ny_native_nir_expr_uses_ident(b, item, list_name) ||
+      !ny_native_nir_bounded_fill_i64_expr(item, index_name))
+    return false;
+
+  if (!inc_stmt || inc_stmt->kind != NY_S_VAR || inc_stmt->as.var.is_decl ||
+      inc_stmt->as.var.names.len != 1 || inc_stmt->as.var.exprs.len != 1 ||
+      !inc_stmt->as.var.names.data[0] ||
+      strcmp(inc_stmt->as.var.names.data[0], index_name) != 0)
+    return false;
+  const expr_t *inc = inc_stmt->as.var.exprs.data[0];
+  if (!inc || inc->kind != NY_E_BINARY || !inc->as.binary.op ||
+      strcmp(inc->as.binary.op, "+") != 0 || !inc->as.binary.left ||
+      inc->as.binary.left->kind != NY_E_IDENT ||
+      !inc->as.binary.left->as.ident.name ||
+      strcmp(inc->as.binary.left->as.ident.name, index_name) != 0 ||
+      !inc->as.binary.right || inc->as.binary.right->kind != NY_E_LITERAL ||
+      inc->as.binary.right->as.literal.kind != NY_LIT_INT ||
+      inc->as.binary.right->as.literal.as.i != 1)
+    return false;
+
+  *list_name_out = list_name;
+  *index_name_out = index_name;
+  *item_out = item;
+  *bound_expr_out = test->as.binary.right;
+  return true;
+}
+
+static bool ny_native_nir_lower_bounded_scalar_append(
+    ny_native_nir_builder_t *b, const stmt_t *list_decl,
+    const stmt_t *index_decl, const stmt_t *loop) {
+  const char *list_name = NULL;
+  const char *index_name = NULL;
+  const expr_t *item = NULL;
+  const expr_t *bound_expr = NULL;
+  if (!ny_native_nir_match_bounded_scalar_append(
+          b, list_decl, index_decl, loop, &list_name, &index_name, &item,
+          &bound_expr))
+    return false;
+
+  ny_native_nir_local_t *list_local = ny_native_nir_bind_local(b, list_name);
+  ny_native_nir_local_t *index_local = ny_native_nir_bind_local(b, index_name);
+  if (!list_local || !index_local)
+    return false;
+  list_local->is_list = true;
+  list_local->is_dyn_list = false;
+  list_local->is_any = false;
+  list_local->semantic_rep = NY_SEM_REP_TYPED_BUFFER;
+  index_local->is_any = false;
+  index_local->semantic_rep = NY_SEM_REP_RAW_INT;
+
+  int bound = ny_native_nir_lower_expr(b, bound_expr);
+  int list = bound < 0 ? -1 : ny_native_nir_emit_runtime_call(
+                                  b, "rt_list_new_sized", bound, -1, -1, 1, 0);
+  if (list < 0 || !ny_native_nir_record_list_len_fact(b, list, bound) ||
+      !ny_native_nir_store_local_value(b, list_local->slot, list))
+    return false;
+  int zero = ny_native_nir_emit_const(b, 0);
+  if (zero < 0 || !ny_native_nir_store_local_value(b, index_local->slot, zero))
+    return false;
+
+  int entry_last_value = zero;
+  bool entry_return = b->emitted_return;
+  int head_label = b->next_label++;
+  int body_label = b->next_label++;
+  int end_label = b->next_label++;
+  if (!ny_native_nir_emit_label(b, head_label))
+    return false;
+  int index = ny_native_nir_load_local_value(b, index_local->slot);
+  int cond = index < 0
+                 ? -1
+                 : nyir_emit(&b->nyir, (nyir_inst_t){.op = NYIR_CMP_I64,
+                                                      .dst = -1,
+                                                      .a = index,
+                                                      .b = bound,
+                                                      .cmp = NYIR_CMP_LT});
+  if (cond < 0 || !ny_native_nir_emit_br_if(b, cond, body_label) ||
+      !ny_native_nir_emit_br(b, end_label) ||
+      !ny_native_nir_emit_label(b, body_label))
+    return false;
+
+  int value = ny_native_nir_lower_expr(b, item);
+  list = ny_native_nir_load_local_value(b, list_local->slot);
+  index = ny_native_nir_load_local_value(b, index_local->slot);
+  int shift = ny_native_nir_emit_const(b, 3);
+  int offset = index < 0 || shift < 0
+                   ? -1
+                   : nyir_emit(&b->nyir, (nyir_inst_t){.op = NYIR_SHL_I64,
+                                                        .dst = -1,
+                                                        .a = index,
+                                                        .b = shift});
+  int address = list < 0 || offset < 0
+                    ? -1
+                    : ny_native_nir_emit_add_i64(b, list, offset);
+  if (value < 0 || address < 0 ||
+      !ny_native_nir_emit_store_i64(b, address, value))
+    return false;
+  int one = ny_native_nir_emit_const(b, 1);
+  int next = index < 0 || one < 0
+                 ? -1
+                 : ny_native_nir_emit_add_i64(b, index, one);
+  if (next < 0 || !ny_native_nir_store_local_value(b, index_local->slot, next) ||
+      !ny_native_nir_emit_br(b, head_label) ||
+      !ny_native_nir_emit_label(b, end_label))
+    return false;
+  b->emitted_return = entry_return;
+  b->last_value = entry_last_value;
+  return true;
+}
+
+/*
+ * Multi-list form of the bounded builder optimization.  This intentionally
+ * runs at the while statement because the target lists need not be declared
+ * immediately beside the loop (iterator pipelines commonly declare several
+ * output lists together).  We only accept loops made entirely from independent
+ * self-appends followed by `i = i + 1`; every target must still be an empty,
+ * scalar list at this point and no item may observe a target under
+ * construction.
+ */
+typedef struct {
+  ny_native_nir_local_t *local;
+  const char *name;
+  const expr_t *item;
+} ny_native_nir_multi_fill_t;
+
+static bool ny_native_nir_reg_is_const_i64(const nyir_func_t *f, int reg,
+                                            int64_t want) {
+  if (!f || reg < 0)
+    return false;
+  for (size_t i = f->len; i > 0; --i) {
+    const nyir_inst_t *in = &f->data[i - 1];
+    if (in->dst != reg)
+      continue;
+    return in->op == NYIR_CONST_I64 && in->imm == want;
+  }
+  return false;
+}
+
+static bool ny_native_nir_local_list_len_is_zero(
+    const ny_native_nir_builder_t *b, const ny_native_nir_local_t *local) {
+  if (!b || !local || !local->is_list || local->list_len_slot < 0)
+    return false;
+  for (size_t i = b->nyir.len; i > 0; --i) {
+    const nyir_inst_t *in = &b->nyir.data[i - 1];
+    if (in->op != NYIR_STORE_LOCAL || in->imm != local->list_len_slot)
+      continue;
+    return ny_native_nir_reg_is_const_i64(&b->nyir, in->a, 0);
+  }
+  return false;
+}
+
+static bool ny_native_nir_multi_fill_raw_i64_expr(
+    ny_native_nir_builder_t *b, const expr_t *e, const char *index_name) {
+  if (!b || !e || !index_name)
+    return false;
+  if (ny_native_nir_expr_is_any(b, e) || ny_native_nir_expr_is_f64(b, e) ||
+      ny_native_nir_expr_is_f32(b, e) || ny_native_nir_expr_is_cstr(b, e) ||
+      ny_native_nir_expr_is_list(b, e) || ny_native_nir_expr_is_dict(b, e))
+    return false;
+  if (e->kind == NY_E_LITERAL)
+    return e->as.literal.kind == NY_LIT_INT && e->tok.kind != NY_T_NIL;
+  if (e->kind == NY_E_IDENT) {
+    if (!e->as.ident.name)
+      return false;
+    ny_native_nir_local_t *l = ny_native_nir_find_local(b, e->as.ident.name);
+    return l && !l->is_any && !l->is_f64 && !l->is_f32 && !l->is_cstr &&
+           !l->is_list && !l->is_dict;
+  }
+  if (e->kind == NY_E_UNARY && e->as.unary.op &&
+      (strcmp(e->as.unary.op, "+") == 0 ||
+       strcmp(e->as.unary.op, "-") == 0 ||
+       strcmp(e->as.unary.op, "~") == 0))
+    return ny_native_nir_multi_fill_raw_i64_expr(b, e->as.unary.right,
+                                                  index_name);
+  if (e->kind == NY_E_BINARY && e->as.binary.op) {
+    const char *op = e->as.binary.op;
+    bool raw_op = strcmp(op, "+") == 0 || strcmp(op, "-") == 0 ||
+                  strcmp(op, "*") == 0 || strcmp(op, "%") == 0 ||
+                  strcmp(op, "&") == 0 || strcmp(op, "|") == 0 ||
+                  strcmp(op, "^^") == 0 || strcmp(op, "<<") == 0 ||
+                  strcmp(op, ">>") == 0;
+    return raw_op &&
+           ny_native_nir_multi_fill_raw_i64_expr(b, e->as.binary.left,
+                                                  index_name) &&
+           ny_native_nir_multi_fill_raw_i64_expr(b, e->as.binary.right,
+                                                  index_name);
+  }
+  if (e->kind == NY_E_INDEX && e->as.index.target && e->as.index.start &&
+      e->as.index.target->kind == NY_E_IDENT &&
+      e->as.index.target->as.ident.name) {
+    ny_native_nir_local_t *list =
+        ny_native_nir_find_local(b, e->as.index.target->as.ident.name);
+    return list && list->is_list && !list->is_dyn_list &&
+           ny_native_nir_multi_fill_raw_i64_expr(b, e->as.index.start,
+                                                  index_name);
+  }
+  return false;
+}
+
+
+/*
+ * Bounded append pipeline optimization.
+ *
+ * This is the continuation form of the empty-list multi-fill transform above:
+ * a loop may append one scalar value per iteration to one or more already
+ * materialized scalar tbufs, optionally after computing immutable scalar
+ * temporaries.  We reserve each target once, write at base_len + i, and commit
+ * the final length once after the loop.  The transform is deliberately narrow:
+ * i must currently be zero, all non-append statements are immutable scalar
+ * declarations that precede the appends, each target is appended exactly once
+ * per iteration, and neither a temporary nor an appended value may observe a
+ * target list while it is under construction.
+ */
+typedef struct {
+  ny_native_nir_local_t *local;
+  const char *name;
+  const expr_t *item;
+  int base_len;
+  bool replace_empty_dynamic;
+  bool base_is_bound;
+} ny_native_nir_append_fill_t;
+
+
+static bool ny_native_nir_bounded_fill_bound_nonnegative(
+    ny_native_nir_builder_t *b, const expr_t *e) {
+  if (!b || !e)
+    return false;
+  if (e->kind == NY_E_LITERAL && e->as.literal.kind == NY_LIT_INT &&
+      e->tok.kind != NY_T_NIL)
+    return e->as.literal.as.i >= 0;
+  if (e->kind != NY_E_IDENT || !e->as.ident.name)
+    return false;
+  const expr_t *resolved = ny_native_nir_find_top_level_value(b,
+                                                               e->as.ident.name);
+  return resolved && resolved != e &&
+         ny_native_nir_bounded_fill_bound_nonnegative(b, resolved);
+}
+
+static const nyir_inst_t *ny_native_nir_reg_def_inst(
+    const ny_native_nir_builder_t *b, int reg) {
+  if (!b || reg < 0)
+    return NULL;
+  for (size_t i = b->nyir.len; i > 0; --i)
+    if (b->nyir.data[i - 1].dst == reg)
+      return &b->nyir.data[i - 1];
+  return NULL;
+}
+
+static int ny_native_nir_latest_local_store_value(
+    const ny_native_nir_builder_t *b, int64_t slot) {
+  if (!b || slot < 0)
+    return -1;
+  for (size_t i = b->nyir.len; i > 0; --i) {
+    const nyir_inst_t *in = &b->nyir.data[i - 1];
+    if (in->op == NYIR_STORE_LOCAL && in->imm == slot)
+      return in->a;
+  }
+  return -1;
+}
+
+static bool ny_native_nir_simple_values_same(const ny_native_nir_builder_t *b,
+                                              int a, int c) {
+  if (!b || a < 0 || c < 0)
+    return false;
+  if (a == c)
+    return true;
+  const nyir_inst_t *da = ny_native_nir_reg_def_inst(b, a);
+  const nyir_inst_t *dc = ny_native_nir_reg_def_inst(b, c);
+  if (!da || !dc)
+    return false;
+  if (da->op == NYIR_CONST_I64 && dc->op == NYIR_CONST_I64)
+    return da->imm == dc->imm;
+  if (da->op == NYIR_LOAD_LOCAL && dc->op == NYIR_LOAD_LOCAL)
+    return da->imm == dc->imm;
+  return false;
+}
+
+static bool ny_native_nir_local_value_is_const_i64(
+    const ny_native_nir_builder_t *b, const ny_native_nir_local_t *local,
+    int64_t want) {
+  if (!b || !local || local->slot < 0)
+    return false;
+  for (size_t i = b->nyir.len; i > 0; --i) {
+    const nyir_inst_t *in = &b->nyir.data[i - 1];
+    if (in->op != NYIR_STORE_LOCAL || in->imm != local->slot)
+      continue;
+    return ny_native_nir_reg_is_const_i64(&b->nyir, in->a, want);
+  }
+  return false;
+}
+
+static bool ny_native_nir_name_in_set(const char *name,
+                                       const char *const *names, size_t n) {
+  if (!name)
+    return false;
+  for (size_t i = 0; i < n; ++i)
+    if (names[i] && strcmp(name, names[i]) == 0)
+      return true;
+  return false;
+}
+
+static bool ny_native_nir_append_fill_raw_i64_expr(
+    ny_native_nir_builder_t *b, const expr_t *e, const char *index_name,
+    const char *const *temps, size_t temp_count) {
+  if (!b || !e || !index_name)
+    return false;
+  if (e->kind == NY_E_IDENT && e->as.ident.name &&
+      ny_native_nir_name_in_set(e->as.ident.name, temps, temp_count))
+    return true;
+  if (ny_native_nir_expr_is_any(b, e) || ny_native_nir_expr_is_f64(b, e) ||
+      ny_native_nir_expr_is_f32(b, e) || ny_native_nir_expr_is_cstr(b, e) ||
+      ny_native_nir_expr_is_list(b, e) || ny_native_nir_expr_is_dict(b, e))
+    return false;
+  if (e->kind == NY_E_LITERAL)
+    return e->as.literal.kind == NY_LIT_INT && e->tok.kind != NY_T_NIL;
+  if (e->kind == NY_E_IDENT) {
+    if (!e->as.ident.name)
+      return false;
+    ny_native_nir_local_t *l = ny_native_nir_find_local(b, e->as.ident.name);
+    return l && !l->is_any && !l->is_f64 && !l->is_f32 && !l->is_cstr &&
+           !l->is_list && !l->is_dict;
+  }
+  if (e->kind == NY_E_UNARY && e->as.unary.op &&
+      (strcmp(e->as.unary.op, "+") == 0 ||
+       strcmp(e->as.unary.op, "-") == 0 ||
+       strcmp(e->as.unary.op, "~") == 0))
+    return ny_native_nir_append_fill_raw_i64_expr(
+        b, e->as.unary.right, index_name, temps, temp_count);
+  if (e->kind == NY_E_BINARY && e->as.binary.op) {
+    const char *op = e->as.binary.op;
+    bool raw_op = strcmp(op, "+") == 0 || strcmp(op, "-") == 0 ||
+                  strcmp(op, "*") == 0 || strcmp(op, "%") == 0 ||
+                  strcmp(op, "&") == 0 || strcmp(op, "|") == 0 ||
+                  strcmp(op, "^^") == 0 || strcmp(op, "<<") == 0 ||
+                  strcmp(op, ">>") == 0;
+    return raw_op &&
+           ny_native_nir_append_fill_raw_i64_expr(
+               b, e->as.binary.left, index_name, temps, temp_count) &&
+           ny_native_nir_append_fill_raw_i64_expr(
+               b, e->as.binary.right, index_name, temps, temp_count);
+  }
+  if (e->kind == NY_E_INDEX && e->as.index.target && e->as.index.start &&
+      e->as.index.target->kind == NY_E_IDENT &&
+      e->as.index.target->as.ident.name) {
+    ny_native_nir_local_t *list =
+        ny_native_nir_find_local(b, e->as.index.target->as.ident.name);
+    return list && list->is_list && !list->is_dyn_list &&
+           ny_native_nir_append_fill_raw_i64_expr(
+               b, e->as.index.start, index_name, temps, temp_count);
+  }
+  return false;
+}
+
+static bool ny_native_nir_try_lower_bounded_append_fill(
+    ny_native_nir_builder_t *b, const stmt_t *s, bool *matched) {
+  if (matched)
+    *matched = false;
+  if (!b || !s || s->kind != NY_S_WHILE || s->as.whl.init ||
+      s->as.whl.update || !s->as.whl.test ||
+      s->as.whl.test->kind != NY_E_BINARY || !s->as.whl.test->as.binary.op ||
+      strcmp(s->as.whl.test->as.binary.op, "<") != 0)
+    return true;
+
+  const expr_t *lhs = s->as.whl.test->as.binary.left;
+  const expr_t *bound_expr = s->as.whl.test->as.binary.right;
+  if (!lhs || lhs->kind != NY_E_IDENT || !lhs->as.ident.name ||
+      !ny_native_nir_bounded_fill_bound_expr(b, bound_expr))
+    return true;
+  const char *index_name = lhs->as.ident.name;
+  ny_native_nir_local_t *index_local = ny_native_nir_find_local(b, index_name);
+  if (!index_local || index_local->is_any || index_local->is_f64 ||
+      index_local->is_f32 || index_local->is_list || index_local->is_dict ||
+      !ny_native_nir_local_value_is_const_i64(b, index_local, 0))
+    return true;
+
+  const stmt_t *body = s->as.whl.body;
+  if (!body || body->kind != NY_S_BLOCK || body->as.block.body.len < 3 ||
+      body->as.block.body.len > 25)
+    return true;
+
+  size_t last = body->as.block.body.len - 1;
+  const stmt_t *inc_stmt = body->as.block.body.data[last];
+  if (!inc_stmt || inc_stmt->kind != NY_S_VAR || inc_stmt->as.var.is_decl ||
+      inc_stmt->as.var.names.len != 1 || inc_stmt->as.var.exprs.len != 1 ||
+      !inc_stmt->as.var.names.data[0] ||
+      strcmp(inc_stmt->as.var.names.data[0], index_name) != 0)
+    return true;
+  const expr_t *inc = inc_stmt->as.var.exprs.data[0];
+  if (!inc || inc->kind != NY_E_BINARY || !inc->as.binary.op ||
+      strcmp(inc->as.binary.op, "+") != 0 || !inc->as.binary.left ||
+      inc->as.binary.left->kind != NY_E_IDENT ||
+      !inc->as.binary.left->as.ident.name ||
+      strcmp(inc->as.binary.left->as.ident.name, index_name) != 0 ||
+      !inc->as.binary.right || inc->as.binary.right->kind != NY_E_LITERAL ||
+      inc->as.binary.right->as.literal.kind != NY_LIT_INT ||
+      inc->as.binary.right->as.literal.as.i != 1)
+    return true;
+
+  const stmt_t *temps_stmt[8] = {0};
+  const char *temps[8] = {0};
+  size_t temp_count = 0;
+  ny_native_nir_append_fill_t fills[16] = {{0}};
+  size_t fill_count = 0;
+  bool saw_append = false;
+
+  for (size_t si = 0; si < last; ++si) {
+    const stmt_t *st = body->as.block.body.data[si];
+    if (!st || st->kind != NY_S_VAR || st->as.var.names.len != 1 ||
+        st->as.var.exprs.len != 1 || !st->as.var.names.data[0] ||
+        !st->as.var.exprs.data[0])
+      return true;
+
+    if (st->as.var.is_decl) {
+      if (saw_append || st->as.var.is_mut || temp_count >= 8)
+        return true;
+      temps_stmt[temp_count] = st;
+      temps[temp_count++] = st->as.var.names.data[0];
+      continue;
+    }
+
+    saw_append = true;
+    if (fill_count >= 16 || st->as.var.exprs.data[0]->kind != NY_E_CALL)
+      return true;
+    const char *name = st->as.var.names.data[0];
+    const expr_t *call = st->as.var.exprs.data[0];
+    const char *leaf = ny_native_call_leaf(call);
+    if (!leaf || strcmp(leaf, "append") != 0 || call->as.call.args.len != 2 ||
+        call->as.call.args.data[0].name || call->as.call.args.data[1].name)
+      return true;
+    const expr_t *recv = call->as.call.args.data[0].val;
+    const expr_t *item = call->as.call.args.data[1].val;
+    if (!recv || recv->kind != NY_E_IDENT || !recv->as.ident.name ||
+        strcmp(recv->as.ident.name, name) != 0 || !item)
+      return true;
+    ny_native_nir_local_t *local = ny_native_nir_find_local(b, name);
+    if (!local || !local->is_list || local->list_len_slot < 0)
+      return true;
+    bool replace_empty_dynamic = local->is_dyn_list;
+    if (replace_empty_dynamic && !ny_native_nir_local_list_len_is_zero(b, local))
+      return true;
+    for (size_t j = 0; j < fill_count; ++j)
+      if (strcmp(fills[j].name, name) == 0)
+        return true;
+    fills[fill_count++] =
+        (ny_native_nir_append_fill_t){.local = local, .name = name,
+                                      .item = item, .base_len = -1,
+                                      .replace_empty_dynamic = replace_empty_dynamic,
+                                      .base_is_bound = false};
+  }
+  if (!saw_append || fill_count == 0)
+    return true;
+
+  /* Temporary expressions and append values must not observe any target. */
+  for (size_t ti = 0; ti < temp_count; ++ti) {
+    const expr_t *e = temps_stmt[ti]->as.var.exprs.data[0];
+    for (size_t j = 0; j < fill_count; ++j)
+      if (ny_native_nir_expr_uses_ident(b, e, fills[j].name))
+        return true;
+    if (!ny_native_nir_append_fill_raw_i64_expr(
+            b, e, index_name, temps, ti))
+      return true;
+  }
+  for (size_t i = 0; i < fill_count; ++i) {
+    for (size_t j = 0; j < fill_count; ++j)
+      if (ny_native_nir_expr_uses_ident(b, fills[i].item, fills[j].name))
+        return true;
+    if (!ny_native_nir_append_fill_raw_i64_expr(
+            b, fills[i].item, index_name, temps, temp_count))
+      return true;
+  }
+
+  int bound = ny_native_nir_lower_expr(b, bound_expr);
+  if (bound < 0)
+    return false;
+
+  /* Reserve once while preserving each target's current logical length.
+   * A dynamic empty-list literal can be replaced outright by an 8-byte scalar
+   * builder because no element (and therefore no descriptor tag) exists yet. */
+  for (size_t i = 0; i < fill_count; ++i) {
+    int list = ny_native_nir_load_local_value(b, fills[i].local->slot);
+    int base = ny_native_nir_load_local_value(b, fills[i].local->list_len_slot);
+    int prior_len_value = ny_native_nir_latest_local_store_value(
+        b, fills[i].local->list_len_slot);
+    bool base_is_bound =
+        ny_native_nir_simple_values_same(b, prior_len_value, bound);
+    int reserved = -1;
+    if (fills[i].replace_empty_dynamic) {
+      int zero = ny_native_nir_emit_const(b, 0);
+      reserved = bound < 0 ? -1 : ny_native_nir_emit_runtime_call(
+          b, "rt_list_new_raw", bound, -1, -1, 1, 0);
+      base = zero;
+    } else {
+      int capacity = list < 0 || base < 0
+                         ? -1
+                         : ny_native_nir_emit_add_i64(b, base, bound);
+      reserved = capacity < 0
+                     ? -1
+                     : ny_native_nir_emit_runtime_call(
+                           b, "rt_tbuf_reserve", list, capacity, -1, 2, 0);
+    }
+    if (reserved < 0 || base < 0 ||
+        !ny_native_nir_record_list_len_fact(b, reserved, base) ||
+        !ny_native_nir_store_local_value(b, fills[i].local->slot, reserved))
+      return false;
+    fills[i].base_is_bound = base_is_bound;
+    fills[i].base_len = base;
+    fills[i].local->is_dyn_list = false;
+    fills[i].local->is_any = false;
+    fills[i].local->semantic_rep = NY_SEM_REP_TYPED_BUFFER;
+  }
+
+  int head_label = b->next_label++;
+  int body_label = b->next_label++;
+  int end_label = b->next_label++;
+  bool entry_return = b->emitted_return;
+  int entry_last_value = b->last_value;
+  if (!ny_native_nir_emit_label(b, head_label))
+    return false;
+  int index = ny_native_nir_load_local_value(b, index_local->slot);
+  int cond = index < 0 ? -1 : nyir_emit(
+      &b->nyir, (nyir_inst_t){.op = NYIR_CMP_I64, .dst = -1,
+                              .a = index, .b = bound, .cmp = NYIR_CMP_LT});
+  if (cond < 0 || !ny_native_nir_emit_br_if(b, cond, body_label) ||
+      !ny_native_nir_emit_br(b, end_label) ||
+      !ny_native_nir_emit_label(b, body_label))
+    return false;
+
+  /* Lower immutable scalar temporaries in source order. */
+  for (size_t ti = 0; ti < temp_count; ++ti)
+    if (!ny_native_nir_lower_stmt(b, temps_stmt[ti]))
+      return false;
+
+  for (size_t i = 0; i < fill_count; ++i) {
+    int value = ny_native_nir_lower_expr(b, fills[i].item);
+    int list = ny_native_nir_load_local_value(b, fills[i].local->slot);
+    index = ny_native_nir_load_local_value(b, index_local->slot);
+    int pos = index < 0 || fills[i].base_len < 0
+                  ? -1
+                  : ny_native_nir_emit_add_i64(b, fills[i].base_len, index);
+    int shift = ny_native_nir_emit_const(b, 3);
+    int offset = pos < 0 || shift < 0 ? -1 : nyir_emit(
+        &b->nyir, (nyir_inst_t){.op = NYIR_SHL_I64, .dst = -1,
+                                .a = pos, .b = shift});
+    int address = list < 0 || offset < 0
+                      ? -1 : ny_native_nir_emit_add_i64(b, list, offset);
+    if (value < 0 || address < 0 ||
+        !ny_native_nir_emit_store_i64(b, address, value))
+      return false;
+  }
+
+  index = ny_native_nir_load_local_value(b, index_local->slot);
+  int one = ny_native_nir_emit_const(b, 1);
+  int next = index < 0 || one < 0
+                 ? -1 : ny_native_nir_emit_add_i64(b, index, one);
+  if (next < 0 || !ny_native_nir_store_local_value(b, index_local->slot, next) ||
+      !ny_native_nir_emit_br(b, head_label) ||
+      !ny_native_nir_emit_label(b, end_label))
+    return false;
+
+  /* Commit exactly the number of elements actually produced.  For a proven
+   * non-negative bound this structured loop has no early exit, so its final
+   * induction value equals `bound`.  Keeping that SSA identity improves later
+   * BCE (list lengths remain visibly tied to the guard expression). */
+  int produced = ny_native_nir_load_local_value(b, index_local->slot);
+  bool exact_bound = ny_native_nir_bounded_fill_bound_nonnegative(b, bound_expr);
+  int produced_exact = exact_bound ? bound : produced;
+  for (size_t i = 0; i < fill_count; ++i) {
+    int final_len = -1;
+    if (ny_native_nir_reg_is_const_i64(&b->nyir, fills[i].base_len, 0)) {
+      final_len = produced_exact;
+    } else if (exact_bound && fills[i].base_is_bound) {
+      int one_shift = ny_native_nir_emit_const(b, 1);
+      final_len = one_shift < 0 ? -1 : nyir_emit(
+          &b->nyir, (nyir_inst_t){.op = NYIR_SHL_I64, .dst = -1,
+                                  .a = bound, .b = one_shift});
+    } else if (produced_exact >= 0 && fills[i].base_len >= 0) {
+      final_len = ny_native_nir_emit_add_i64(b, fills[i].base_len,
+                                             produced_exact);
+    }
+    int list = ny_native_nir_load_local_value(b, fills[i].local->slot);
+    int updated = final_len < 0 || list < 0
+                      ? -1
+                      : ny_native_nir_emit_runtime_call(
+                            b, "rt_list_set_len_raw", list, final_len, -1, 2, 0);
+    if (updated < 0 ||
+        !ny_native_nir_record_list_len_fact(b, updated, final_len) ||
+        !ny_native_nir_store_local_value(b, fills[i].local->slot, updated))
+      return false;
+  }
+
+  b->emitted_return = entry_return;
+  b->last_value = entry_last_value;
+  if (matched)
+    *matched = true;
+  return true;
+}
+
+static bool ny_native_nir_try_lower_multi_bounded_fill(
+    ny_native_nir_builder_t *b, const stmt_t *s, bool *matched) {
+  if (matched)
+    *matched = false;
+  if (!b || !s || s->kind != NY_S_WHILE || s->as.whl.init ||
+      s->as.whl.update || !s->as.whl.test ||
+      s->as.whl.test->kind != NY_E_BINARY || !s->as.whl.test->as.binary.op ||
+      strcmp(s->as.whl.test->as.binary.op, "<") != 0)
+    return true;
+  const expr_t *lhs = s->as.whl.test->as.binary.left;
+  const expr_t *bound_expr = s->as.whl.test->as.binary.right;
+  if (!lhs || lhs->kind != NY_E_IDENT || !lhs->as.ident.name ||
+      !ny_native_nir_bounded_fill_bound_expr(b, bound_expr))
+    return true;
+  const char *index_name = lhs->as.ident.name;
+  ny_native_nir_local_t *index_local = ny_native_nir_find_local(b, index_name);
+  if (!index_local || index_local->is_any || index_local->is_f64 ||
+      index_local->is_f32 || index_local->is_list || index_local->is_dict)
+    return true;
+
+  const stmt_t *body = s->as.whl.body;
+  if (!body || body->kind != NY_S_BLOCK || body->as.block.body.len < 2 ||
+      body->as.block.body.len > 17)
+    return true;
+  size_t append_count = body->as.block.body.len - 1;
+  ny_native_nir_multi_fill_t fills[16] = {{0}};
+  if (append_count == 0 || append_count > 16)
+    return true;
+
+  for (size_t i = 0; i < append_count; ++i) {
+    const stmt_t *st = body->as.block.body.data[i];
+    if (!st || st->kind != NY_S_VAR || st->as.var.is_decl ||
+        st->as.var.names.len != 1 || st->as.var.exprs.len != 1 ||
+        !st->as.var.names.data[0] || !st->as.var.exprs.data[0] ||
+        st->as.var.exprs.data[0]->kind != NY_E_CALL)
+      return true;
+    const char *name = st->as.var.names.data[0];
+    const expr_t *call = st->as.var.exprs.data[0];
+    const char *leaf = ny_native_call_leaf(call);
+    if (!leaf || strcmp(leaf, "append") != 0 || call->as.call.args.len != 2 ||
+        call->as.call.args.data[0].name || call->as.call.args.data[1].name)
+      return true;
+    const expr_t *recv = call->as.call.args.data[0].val;
+    const expr_t *item = call->as.call.args.data[1].val;
+    if (!recv || recv->kind != NY_E_IDENT || !recv->as.ident.name ||
+        strcmp(recv->as.ident.name, name) != 0 || !item)
+      return true;
+    ny_native_nir_local_t *local = ny_native_nir_find_local(b, name);
+    if (!local || !local->is_list ||
+        !ny_native_nir_local_list_len_is_zero(b, local))
+      return true;
+    for (size_t j = 0; j < i; ++j)
+      if (strcmp(fills[j].name, name) == 0)
+        return true;
+    fills[i] = (ny_native_nir_multi_fill_t){local, name, item};
+  }
+
+  const stmt_t *inc_stmt = body->as.block.body.data[append_count];
+  if (!inc_stmt || inc_stmt->kind != NY_S_VAR || inc_stmt->as.var.is_decl ||
+      inc_stmt->as.var.names.len != 1 || inc_stmt->as.var.exprs.len != 1 ||
+      !inc_stmt->as.var.names.data[0] ||
+      strcmp(inc_stmt->as.var.names.data[0], index_name) != 0)
+    return true;
+  const expr_t *inc = inc_stmt->as.var.exprs.data[0];
+  if (!inc || inc->kind != NY_E_BINARY || !inc->as.binary.op ||
+      strcmp(inc->as.binary.op, "+") != 0 || !inc->as.binary.left ||
+      inc->as.binary.left->kind != NY_E_IDENT ||
+      !inc->as.binary.left->as.ident.name ||
+      strcmp(inc->as.binary.left->as.ident.name, index_name) != 0 ||
+      !inc->as.binary.right || inc->as.binary.right->kind != NY_E_LITERAL ||
+      inc->as.binary.right->as.literal.kind != NY_LIT_INT ||
+      inc->as.binary.right->as.literal.as.i != 1)
+    return true;
+
+  for (size_t i = 0; i < append_count; ++i) {
+    for (size_t j = 0; j < append_count; ++j)
+      if (ny_native_nir_expr_uses_ident(b, fills[i].item, fills[j].name))
+        return true;
+    if (!ny_native_nir_multi_fill_raw_i64_expr(b, fills[i].item, index_name))
+      return true;
+  }
+
+  int bound = ny_native_nir_lower_expr(b, bound_expr);
+  if (bound < 0)
+    return false;
+  for (size_t i = 0; i < append_count; ++i) {
+    int list = ny_native_nir_emit_runtime_call(b, "rt_list_new_sized", bound,
+                                                -1, -1, 1, 0);
+    if (list < 0 || !ny_native_nir_record_list_len_fact(b, list, bound) ||
+        !ny_native_nir_store_local_value(b, fills[i].local->slot, list))
+      return false;
+    fills[i].local->is_dyn_list = false;
+    fills[i].local->is_any = false;
+    fills[i].local->semantic_rep = NY_SEM_REP_TYPED_BUFFER;
+  }
+
+  int head_label = b->next_label++;
+  int body_label = b->next_label++;
+  int end_label = b->next_label++;
+  bool entry_return = b->emitted_return;
+  int entry_last_value = b->last_value;
+  if (!ny_native_nir_emit_label(b, head_label))
+    return false;
+  int index = ny_native_nir_load_local_value(b, index_local->slot);
+  int cond = index < 0 ? -1 : nyir_emit(
+      &b->nyir, (nyir_inst_t){.op = NYIR_CMP_I64, .dst = -1,
+                              .a = index, .b = bound, .cmp = NYIR_CMP_LT});
+  if (cond < 0 || !ny_native_nir_emit_br_if(b, cond, body_label) ||
+      !ny_native_nir_emit_br(b, end_label) ||
+      !ny_native_nir_emit_label(b, body_label))
+    return false;
+
+  for (size_t i = 0; i < append_count; ++i) {
+    int value = ny_native_nir_lower_expr(b, fills[i].item);
+    int list = ny_native_nir_load_local_value(b, fills[i].local->slot);
+    index = ny_native_nir_load_local_value(b, index_local->slot);
+    int shift = ny_native_nir_emit_const(b, 3);
+    int offset = index < 0 || shift < 0 ? -1 : nyir_emit(
+        &b->nyir, (nyir_inst_t){.op = NYIR_SHL_I64, .dst = -1,
+                                .a = index, .b = shift});
+    int address = list < 0 || offset < 0
+                      ? -1 : ny_native_nir_emit_add_i64(b, list, offset);
+    if (value < 0 || address < 0 ||
+        !ny_native_nir_emit_store_i64(b, address, value))
+      return false;
+  }
+
+  index = ny_native_nir_load_local_value(b, index_local->slot);
+  int one = ny_native_nir_emit_const(b, 1);
+  int next = index < 0 || one < 0 ? -1
+             : ny_native_nir_emit_add_i64(b, index, one);
+  if (next < 0 || !ny_native_nir_store_local_value(b, index_local->slot, next) ||
+      !ny_native_nir_emit_br(b, head_label) ||
+      !ny_native_nir_emit_label(b, end_label))
+    return false;
+  b->emitted_return = entry_return;
+  b->last_value = entry_last_value;
+  if (matched)
+    *matched = true;
+  return true;
+}
+
 static bool ny_native_nir_lower_while(ny_native_nir_builder_t *b,
                                       const stmt_t *s) {
   if (s->as.whl.init && !ny_native_nir_lower_stmt(b, s->as.whl.init))
@@ -1097,6 +1983,19 @@ static bool ny_native_nir_lower_while(ny_native_nir_builder_t *b,
         !s->as.whl.test->as.literal.as.b)
       return true;
   }
+
+  bool append_fill_matched = false;
+  if (!ny_native_nir_try_lower_bounded_append_fill(b, s,
+                                                    &append_fill_matched))
+    return false;
+  if (append_fill_matched)
+    return true;
+
+  bool multi_fill_matched = false;
+  if (!ny_native_nir_try_lower_multi_bounded_fill(b, s, &multi_fill_matched))
+    return false;
+  if (multi_fill_matched)
+    return true;
 
   int head_label = b->next_label++;
   int update_label = s->as.whl.update ? b->next_label++ : head_label;
@@ -1224,11 +2123,21 @@ static bool ny_native_nir_lower_for_range(ny_native_nir_builder_t *b,
   ny_native_nir_local_t *iter = ny_native_nir_bind_local(b, s->as.fr.iter_var);
   if (!iter)
     return false;
+  /* A range loop induction variable is always a raw integer in NYIR.
+   * Record that representation on the local itself so calls made from inside
+   * the loop can normalize it correctly at tagged/dynamic ABI boundaries.
+   * Without this fact, a typed generated lambda such as `fn(int x){...}`
+   * receives raw odd loop values as if they were already tagged and halves
+   * them while decoding its parameter. */
+  iter->type_name = "int";
+  iter->semantic_rep = NY_SEM_REP_RAW_INT;
   ny_native_nir_local_t *index = NULL;
   if (s->as.fr.iter_index_var) {
     index = ny_native_nir_bind_local(b, s->as.fr.iter_index_var);
     if (!index)
       return false;
+    index->type_name = "int";
+    index->semantic_rep = NY_SEM_REP_RAW_INT;
   }
 
   int lo = ny_native_nir_lower_expr(b, lo_expr);
@@ -1449,7 +2358,6 @@ static bool ny_native_nir_lower_for_list(ny_native_nir_builder_t *b,
   return ok;
 }
 
-
 static bool ny_native_nir_lower_for(ny_native_nir_builder_t *b, const stmt_t *s) {
   if (s->as.fr.init || s->as.fr.cond || s->as.fr.update) {
     /* C-style `for (init; cond; update)` shares the while-loop CFG, but its
@@ -1622,8 +2530,18 @@ static int ny_native_nir_lower_match_pattern(ny_native_nir_builder_t *b,
                                                  .cmp = NYIR_CMP_LE});
       return ny_native_nir_emit_bool_binop(b, NYIR_AND_I64, ge, le);
     }
-    int ge = ny_native_nir_emit_cmp(b, test_value, lo, NYIR_CMP_GE);
-    int le = ny_native_nir_emit_cmp(b, test_value, hi, NYIR_CMP_LE);
+    /* A dynamic match subject carries the tagged NyValue encoding.  Literal
+     * arms box their constants before comparing; range arms must untag the
+     * subject instead, since ordered compares need the raw integer. */
+    int cmp_subject = test_value;
+    if (test_any) {
+      cmp_subject = ny_native_nir_emit_runtime_call(b, "rt_untag", test_value,
+                                                    -1, -1, 1, 0);
+      if (cmp_subject < 0)
+        return -1;
+    }
+    int ge = ny_native_nir_emit_cmp(b, cmp_subject, lo, NYIR_CMP_GE);
+    int le = ny_native_nir_emit_cmp(b, cmp_subject, hi, NYIR_CMP_LE);
     if (ge < 0 || le < 0)
       return -1;
     return ny_native_nir_emit_bool_binop(b, NYIR_AND_I64, ge, le);
@@ -1740,7 +2658,7 @@ static bool ny_native_nir_bind_result_pattern(ny_native_nir_builder_t *b,
     if (pat->as.call.args.len == 0)
       return true;
     int payload = ny_native_nir_emit_runtime_call(
-        b, "rt_unwrap", test_value, -1, -1, 1, 0);
+        b, "rt_result_unwrap_raw", test_value, -1, -1, 1, 0);
     if (payload < 0)
       return false;
     for (size_t i = 0; i < pat->as.call.args.len; ++i) {
@@ -1752,11 +2670,13 @@ static bool ny_native_nir_bind_result_pattern(ny_native_nir_builder_t *b,
           ny_native_nir_bind_local(b, arg->as.ident.name);
       if (!local)
         return false;
-      /* Result payloads use the dynamic tagged ABI.  A pattern binding is
-       * created after ordinary parameter/local classification, so explicitly
-       * preserve that representation or a later guard can tag it twice. */
-      local->is_any = true;
-      local->semantic_rep = NY_SEM_REP_TAGGED_DYNAMIC;
+      /* `rt_unwrap` returns the payload in its stored representation.  Result
+       * constructors keep scalar payloads raw, so treating every pattern
+       * binding as a tagged `any` value double-tags integer arms (42 -> 171).
+       * Keep the payload raw here; pointer/string payloads are still passed
+       * through unchanged and retain their source semantics at use sites. */
+      local->is_any = false;
+      local->semantic_rep = NY_SEM_REP_RAW_INT;
       if (!ny_native_nir_store_local_value(b, local->slot, payload))
         return false;
     }
@@ -2295,7 +3215,14 @@ static int ny_native_nir_normalize_return(ny_native_nir_builder_t *b,
         !ny_native_nir_expr_is_cstr(b, expr) &&
         !ny_native_nir_expr_is_ptr(b, expr) &&
         !ny_native_nir_is_bitwise_operator(expr->as.binary.op) &&
-        !ny_native_nir_expr_is_bool(b, expr))
+        !ny_native_nir_expr_is_bool(b, expr) &&
+        /* A dynamic operand makes the arithmetic helper produce the
+         * canonical tagged result even when HM classifies the whole binary
+         * expression as an integer.  Inspect the operands before applying a
+         * raw-result box; otherwise `fn(v) { v + 1 }` becomes tagged(tagged
+         * (2)) at the lambda return boundary. */
+        !ny_native_nir_expr_is_any(b, expr->as.binary.left) &&
+        !ny_native_nir_expr_is_any(b, expr->as.binary.right))
       return ny_native_nir_emit_runtime_call(b, "rt_tag", value, -1, -1, 1, 0);
     if (expr->kind == NY_E_IDENT && expr->as.ident.name) {
       const ny_native_nir_local_t *local =
@@ -2321,6 +3248,14 @@ static int ny_native_nir_normalize_return(ny_native_nir_builder_t *b,
    * rt_any_*; only an unmodified any local still carries the tagged
    * VM integer encoding at this boundary. */
   bool dynamic = false;
+  /* A `case`/match expression may conservatively infer `any`, causing its
+   * scalar arms to be boxed at the join.  An explicitly integer-returning
+   * function owns a raw i64 ABI, so decode that joined value exactly once.
+   * Without this, `case c { 48..57 -> c - 48 }` returns 1,3,... for 0,1,...
+   * and corrupts consumers such as hexadecimal decoding. */
+  if (b->return_type && ny_native_type_name_is_int(b->return_type) &&
+      expr->kind == NY_E_MATCH && ny_native_nir_expr_is_any(b, expr))
+    dynamic = true;
   /* Dictionary accessors expose tagged values, unlike typed-buffer reads.
    * Decode that explicit ABI when returning a declared integer. */
   if (b->return_type && ny_native_type_name_is_int(b->return_type) &&
@@ -2425,6 +3360,24 @@ static bool ny_native_nir_lower_stmt_impl(ny_native_nir_builder_t *b, const stmt
     size_t defer_mark = b->defer_count;
     for (size_t i = 0; i < s->as.block.body.len; ++i) {
       const stmt_t *item = s->as.block.body.data[i];
+      if (i + 2 < s->as.block.body.len &&
+          ny_native_nir_match_bounded_scalar_append(
+              b, item, s->as.block.body.data[i + 1],
+              s->as.block.body.data[i + 2], &(const char *){0},
+              &(const char *){0}, &(const expr_t *){0},
+              &(const expr_t *){0})) {
+        if (!ny_native_nir_lower_bounded_scalar_append(
+                b, item, s->as.block.body.data[i + 1],
+                s->as.block.body.data[i + 2])) {
+          if (nested_scope)
+            b->scope_depth--;
+          if (!s->as.block.transparent)
+            ny_native_nir_scope_restore(b, mark);
+          return false;
+        }
+        i += 2;
+        continue;
+      }
       if (b->emitted_return && (!item || item->kind != NY_S_LABEL))
         continue;
       if (i + 1 == s->as.block.body.len && s == b->tail_body &&
@@ -3033,12 +3986,18 @@ static bool ny_native_nir_build_function(const program_t *prog, const stmt_t *fn
   for (size_t i = 0; i < fn->as.fn.params.len; ++i) {
     const char *param_type = fn->as.fn.params.data[i].type;
     const ny_expr_semantic_t *sem = &fn->as.fn.params.data[i].semantic;
-    bool is_list = ny_native_type_name_is_list(param_type) ||
-                   ny_native_nir_param_is_inferred_list(fn, i) ||
-                   (!param_type && sem->resolved && sem->rep == NY_SEM_REP_TYPED_BUFFER) ||
-                   (fn->as.fn.is_variadic && i == fn->as.fn.params.len - 1);
-    bool is_str = ny_native_type_name_is_str(param_type) ||
-                  (!param_type && sem->resolved && sem->rep == NY_SEM_REP_STRING);
+    bool try_dynamic = ny_native_nir_param_is_try_dynamic(fn, i);
+    ny_sem_rep_t effective_rep =
+        try_dynamic ? NY_SEM_REP_TAGGED_DYNAMIC
+                    : (sem->resolved ? sem->rep : NY_SEM_REP_UNKNOWN);
+    bool is_list = !try_dynamic &&
+                   (ny_native_type_name_is_list(param_type) ||
+                    ny_native_nir_param_is_inferred_list(fn, i) ||
+                    (!param_type && effective_rep == NY_SEM_REP_TYPED_BUFFER) ||
+                    (fn->as.fn.is_variadic && i == fn->as.fn.params.len - 1));
+    bool is_str = !try_dynamic &&
+                  (ny_native_type_name_is_str(param_type) ||
+                   (!param_type && effective_rep == NY_SEM_REP_STRING));
     /*
      * An untyped parameter whose semantics resolved to RAW_INT is compiled
      * as a raw scalar register (set_param_types counts one slot).  The local
@@ -3047,15 +4006,19 @@ static bool ny_native_nir_build_function(const program_t *prog, const stmt_t *fn
      * element 1 into 0 inside mapcat callbacks).  Every other resolution
      * keeps the legacy truth table.
      */
-    bool is_any = ny_native_type_name_is_any(param_type) ||
-                  (!param_type &&
-                   !(sem->resolved && sem->rep == NY_SEM_REP_RAW_INT) &&
-                   (!sem->resolved ||
-                    sem->rep == NY_SEM_REP_TAGGED_DYNAMIC));
+    bool is_f64 = ny_native_type_name_is_f64(param_type) ||
+                  (!try_dynamic && !param_type && effective_rep == NY_SEM_REP_F64);
+    bool is_f32 = ny_native_type_name_is_f32(param_type) ||
+                  (!try_dynamic && !param_type && effective_rep == NY_SEM_REP_F32);
+    bool is_any = try_dynamic || ny_native_type_name_is_any(param_type) ||
+                  (!param_type && effective_rep != NY_SEM_REP_RAW_INT &&
+                   !is_f64 && !is_f32 &&
+                   (effective_rep == NY_SEM_REP_TAGGED_DYNAMIC ||
+                    effective_rep == NY_SEM_REP_UNKNOWN));
     ny_native_nir_local_t *param = ny_native_nir_bind_local_typed(
         &b, fn->as.fn.params.data[i].name,
-        ny_native_type_name_is_f64(param_type),
-        ny_native_type_name_is_f32(param_type),
+        is_f64,
+        is_f32,
         is_str);
     if (!param) {
       nyir_func_free(&b.nyir);
@@ -3064,8 +4027,19 @@ static bool ny_native_nir_build_function(const program_t *prog, const stmt_t *fn
     }
     param->is_any = is_any;
     param->type_name = param_type;
+    if (!param->type_name) {
+      if (is_f64)
+        param->type_name = "f64";
+      else if (is_f32)
+        param->type_name = "f32";
+      else if (effective_rep == NY_SEM_REP_RAW_INT)
+        param->type_name = "int";
+    }
     param->is_bigint = param_type && strcmp(param_type, "bigint") == 0;
-    param->semantic_rep = sem->resolved ? sem->rep : param->semantic_rep;
+    param->semantic_rep = try_dynamic
+                              ? NY_SEM_REP_TAGGED_DYNAMIC
+                              : (sem->resolved ? sem->rep
+                                               : param->semantic_rep);
     param->semantic_ownership = sem->ownership;
     param->alias_class = sem->alias_class;
     param->semantic_mutable = sem->mutable_value;
@@ -3131,10 +4105,12 @@ static bool ny_native_nir_build_function(const program_t *prog, const stmt_t *fn
       }
       int arg_val = nyir_emit(&b.nyir, param_ld);
       if (arg_val >= 0) {
-        /* Captured closures enter through their closure trampoline with a
-         * tagged dynamic value.  Zero-capture functions instead use the raw
-         * callback adapter, so decoding those here would turn raw 1 into 0. */
-        if (lambda_entry && lambda_entry->capture_count > 0 && fn->as.fn.name &&
+        /* Anonymous lambdas passed through a dynamic callable slot receive
+         * canonical tagged values, including zero-capture lambdas.  The
+         * indirect caller cannot select the typed scalar adapter because it
+         * only sees a function value, so decode scalar lambda parameters at
+         * this boundary.  Named/direct functions retain their normal ABI. */
+        if (lambda_entry && fn->as.fn.name &&
             strncmp(fn->as.fn.name, "__ny_lambda_", 12) == 0 &&
             !param->is_any && !param->is_list && !param->is_cstr &&
             !param->is_f64 && !param->is_f32) {
@@ -3923,6 +4899,21 @@ static bool ny_native_nir_build_rt_main(const program_t *prog, nyir_func_t *out,
     if (ny_trace_enabled("NY_TRACE_LOWER"))
       fprintf(stderr, "[lower rt_main stmt %zu] kind=%d\n", i,
               (int)prog->body.data[i]->kind);
+    if (i + 2 < prog->body.len &&
+        ny_native_nir_match_bounded_scalar_append(
+            &b, prog->body.data[i], prog->body.data[i + 1],
+            prog->body.data[i + 2], &(const char *){0}, &(const char *){0},
+            &(const expr_t *){0}, &(const expr_t *){0})) {
+      if (!ny_native_nir_lower_bounded_scalar_append(
+              &b, prog->body.data[i], prog->body.data[i + 1],
+              prog->body.data[i + 2])) {
+        nyir_func_free(&b.nyir);
+        ny_native_nir_builder_dispose(&b);
+        return false;
+      }
+      i += 2;
+      continue;
+    }
     if (!ny_native_nir_lower_stmt(&b, prog->body.data[i])) {
       nyir_func_free(&b.nyir);
       ny_native_nir_builder_dispose(&b);
@@ -4174,7 +5165,6 @@ static bool ny_native_nir_expr_has_dyn_list_shape(
   return false;
 }
 
-
 static void ny_native_add_reachable_fn(ny_native_fn_collector_t *col,
                                        const char *name);
 static bool ny_native_nir_qualified_expr(const expr_t *e, char *out,
@@ -4223,7 +5213,6 @@ static void ny_native_scan_stmt_for_calls(const stmt_t *s,
                                           ny_native_fn_collector_t *col);
 static void ny_native_dynlist_note_call(const char *callee_name,
                                         size_t arg_index);
-
 
 static bool ny_native_nir_stdlib_call_lowered_inline(const char *name) {
   if (!name || !*name)
@@ -4323,8 +5312,13 @@ static void ny_native_add_reachable_fn(ny_native_fn_collector_t *col,
     return;
   /* Public names with a raw runtime bridge do not need their stdlib bodies.
    * A source function is different: it deliberately shadows that bridge and
-   * must be collected under the normal native-function symbol. */
-  if (ny_native_runtime_symbol(name) && ny_is_stdlib_tok(fn->tok))
+   * must be collected under the normal native-function symbol.  Inert
+   * TUI/audio stubs are the exception in the other direction: the stdlib
+   * defines the real implementation, so its body must be collected instead
+   * of silently calling the no-op bridge. */
+  if (ny_native_runtime_symbol(name) && ny_is_stdlib_tok(fn->tok) &&
+      !ny_native_runtime_stub_yields_to_source(
+          ny_native_runtime_symbol(name)))
     return;
   /*
    * Native leaf / builtin-alloc names (print, addr_of, borrow, float,
@@ -4695,11 +5689,76 @@ static void ny_native_scan_expr_for_calls(const expr_t *e,
             break;
         }
       }
+      /*
+       * Top-level `def`/`mut` bindings live in rt_main locals, not in the
+       * global symbol table.  Discover those captures during reachability,
+       * before generated lambda functions are lowered.  Waiting until the
+       * closure value is materialized in rt_main is too late: the synthetic
+       * lambda would already have been compiled without its hidden env
+       * parameter, so the closure trampoline shifts every real argument by
+       * one slot (the classic `range(4).map(fn(i){ i + base })` failure).
+       */
+      if (entry && !col->scope_fn && col->prog) {
+        ny_native_nir_builder_t probe = {
+            .prog = col->prog,
+            .options = col->opt,
+            .source_file = col->query_scope ? col->query_scope->tok.filename
+                                            : e->tok.filename};
+        for (size_t si = 0; si < col->prog->body.len; ++si) {
+          const stmt_t *decl = col->prog->body.data[si];
+          if (!decl || decl->kind != NY_S_VAR)
+            continue;
+          for (size_t vi = 0; vi < decl->as.var.names.len; ++vi) {
+            const char *name = decl->as.var.names.data[vi];
+            if (!name || !*name || ny_native_lambda_param_named(e, name) ||
+                !ny_native_nir_stmt_uses_ident(e->as.lambda.body, name))
+              continue;
+            if (!ny_native_lambda_capture_add(entry, name))
+              break;
+            size_t ci = 0;
+            while (ci < entry->capture_count &&
+                   strcmp(entry->capture_names[ci], name) != 0)
+              ++ci;
+            if (ci >= entry->capture_count)
+              continue;
+            const expr_t *init = vi < decl->as.var.exprs.len
+                                     ? decl->as.var.exprs.data[vi]
+                                     : ny_native_nir_find_top_level_value(&probe,
+                                                                           name);
+            if (!init)
+              continue;
+            ny_native_nir_local_t *dst = &entry->capture_types[ci];
+            memset(dst, 0, sizeof(*dst));
+            dst->is_list = ny_native_nir_expr_is_list(&probe, init);
+            dst->is_dyn_list = ny_native_nir_expr_is_dyn_list(&probe, init);
+            dst->is_cstr = ny_native_nir_expr_is_cstr(&probe, (expr_t *)init);
+            dst->is_bytes = ny_native_nir_expr_is_bytes(&probe, init);
+            dst->is_dict = ny_native_nir_expr_is_dict(&probe, init);
+            dst->is_any = ny_native_nir_expr_is_any(&probe, (expr_t *)init);
+            dst->is_f64 = ny_native_nir_expr_is_f64(&probe, init);
+            dst->is_f32 = ny_native_nir_expr_is_f32(&probe, init);
+            dst->is_bool = ny_native_nir_expr_is_bool(&probe, (expr_t *)init);
+            if (init->semantic.resolved) {
+              dst->semantic_rep = init->semantic.rep;
+              dst->semantic_ownership = init->semantic.ownership;
+              dst->alias_class = init->semantic.alias_class;
+              dst->semantic_mutable = init->semantic.mutable_value;
+            }
+          }
+        }
+      }
       ny_native_collector_add_fn(col, lambda);
     }
     ny_native_scan_stmt_for_calls(e->as.lambda.body, col);
     break;
   }
+  case NY_E_COMPTIME:
+    /* Comptime blocks can contain ordinary calls and lambdas whose code is
+     * still emitted by the native backend.  Reachability must descend into
+     * the block before synthetic lambda functions are lowered; otherwise a
+     * `comptime{ xs.map(fn(v){ ... }) }` silently loses its callback. */
+    ny_native_scan_stmt_for_calls(e->as.comptime_expr.body, col);
+    break;
   case NY_E_FSTRING:
     /*
      * Callees referenced only inside an f-string interpolation are real
@@ -5151,6 +6210,7 @@ bool ny_native_build_nir(const program_t *prog, const ny_options *opt,
   ny_native_consttab_clear();
   ny_native_globaltab_clear();
   ny_native_dynlist_cache_clear();
+  ny_native_try_dynamic_cache_clear();
   {
     /*
      * One whole-program pass records every (callee, arg-index) with a
@@ -5564,9 +6624,13 @@ bool ny_native_nir_dump_function(FILE *out, const program_t *prog,
       (fn->as.fn.return_type && ny_native_type_name_is_any(fn->as.fn.return_type)) ||
       (!fn->as.fn.return_type && fn->as.fn.return_semantic.resolved &&
        fn->as.fn.return_semantic.rep == NY_SEM_REP_TAGGED_DYNAMIC);
-  if (ny_native_type_name_is_f64(fn->as.fn.return_type))
+  if (ny_native_type_name_is_f64(fn->as.fn.return_type) ||
+      (!fn->as.fn.return_type && fn->as.fn.return_semantic.resolved &&
+       fn->as.fn.return_semantic.rep == NY_SEM_REP_F64))
     b.return_flags = NYIR_INST_F_RET_F64;
-  else if (ny_native_type_name_is_f32(fn->as.fn.return_type))
+  else if (ny_native_type_name_is_f32(fn->as.fn.return_type) ||
+           (!fn->as.fn.return_type && fn->as.fn.return_semantic.resolved &&
+            fn->as.fn.return_semantic.rep == NY_SEM_REP_F32))
     b.return_flags = NYIR_INST_F_RET_F32;
   if (!ny_native_nir_set_param_types(&b, fn)) {
     nyir_func_free(&b.nyir);
@@ -5574,10 +6638,18 @@ bool ny_native_nir_dump_function(FILE *out, const program_t *prog,
     return false;
   }
   for (size_t i = 0; i < fn->as.fn.params.len; ++i) {
+    const ny_expr_semantic_t *sem = &fn->as.fn.params.data[i].semantic;
+    bool try_dynamic = ny_native_nir_param_is_try_dynamic(fn, i);
+    bool is_f64 = ny_native_type_name_is_f64(fn->as.fn.params.data[i].type) ||
+                  (!try_dynamic && !fn->as.fn.params.data[i].type && sem->resolved &&
+                   sem->rep == NY_SEM_REP_F64);
+    bool is_f32 = ny_native_type_name_is_f32(fn->as.fn.params.data[i].type) ||
+                  (!try_dynamic && !fn->as.fn.params.data[i].type && sem->resolved &&
+                   sem->rep == NY_SEM_REP_F32);
     ny_native_nir_local_t *param = ny_native_nir_bind_local_typed(
         &b, fn->as.fn.params.data[i].name,
-        ny_native_type_name_is_f64(fn->as.fn.params.data[i].type),
-        ny_native_type_name_is_f32(fn->as.fn.params.data[i].type),
+        is_f64,
+        is_f32,
         fn->as.fn.params.data[i].type &&
             strcmp(fn->as.fn.params.data[i].type, "str") == 0);
     if (!param) {
@@ -5585,12 +6657,15 @@ bool ny_native_nir_dump_function(FILE *out, const program_t *prog,
       ny_native_nir_builder_dispose(&b);
       return false;
     }
-    const ny_expr_semantic_t *sem = &fn->as.fn.params.data[i].semantic;
-    param->semantic_rep = sem->resolved ? sem->rep : param->semantic_rep;
+    param->semantic_rep = try_dynamic
+                              ? NY_SEM_REP_TAGGED_DYNAMIC
+                              : (sem->resolved ? sem->rep
+                                               : param->semantic_rep);
     param->semantic_ownership = sem->ownership;
     param->alias_class = sem->alias_class;
     param->semantic_mutable = sem->mutable_value;
-    param->is_any = (sem->resolved && sem->rep == NY_SEM_REP_TAGGED_DYNAMIC) ||
+    param->is_any = try_dynamic ||
+                    (sem->resolved && sem->rep == NY_SEM_REP_TAGGED_DYNAMIC) ||
                     ny_native_type_name_is_any(fn->as.fn.params.data[i].type);
     param->type_name = fn->as.fn.params.data[i].type;
     param->is_bigint = fn->as.fn.params.data[i].type &&
@@ -5601,10 +6676,11 @@ bool ny_native_nir_dump_function(FILE *out, const program_t *prog,
                        strcmp(fn->as.fn.params.data[i].type, "vec2") == 0 ||
                        strcmp(fn->as.fn.params.data[i].type, "vec3") == 0 ||
                        strcmp(fn->as.fn.params.data[i].type, "vec4") == 0));
-    param->is_list = (sem->resolved && sem->rep == NY_SEM_REP_TYPED_BUFFER) ||
-        ny_native_type_name_is_list(fn->as.fn.params.data[i].type) ||
-        ny_native_nir_param_is_inferred_list(fn, i) ||
-        (fn->as.fn.is_variadic && i == fn->as.fn.params.len - 1);
+    param->is_list = !try_dynamic &&
+        ((sem->resolved && sem->rep == NY_SEM_REP_TYPED_BUFFER) ||
+         ny_native_type_name_is_list(fn->as.fn.params.data[i].type) ||
+         ny_native_nir_param_is_inferred_list(fn, i) ||
+         (fn->as.fn.is_variadic && i == fn->as.fn.params.len - 1));
     param->is_dyn_list =
         param->is_list &&
         (ny_native_type_name_is_dyn_list(fn->as.fn.params.data[i].type) ||

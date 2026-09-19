@@ -39,6 +39,7 @@ scope earlier, clone, or return an owned value instead.
 | `@mutates(x)` | Function changes the argument. |
 | `@releases(x)` | Function releases the owned argument. |
 | `@forgets(x)` | Function intentionally abandons automatic cleanup. |
+| `@allowance(x, limit)` | Limits observed parameter uses over `ℕ ∪ {omega}`. |
 
 ```ny
 use std.core
@@ -50,6 +51,34 @@ fn identity(any x) any { borrow(x) }
 assert(identity(7) == 7, "borrowed result")
 ```
 
+## Grade-aware ownership (`@allowance`)
+
+Usage allowances constrain the maximum number of times a parameter may be accessed
+within the function body:
+
+- Limits are non-negative integers (`0`, `1`, `2`, ...) or `omega` / `inf` (unlimited).
+- Exclusive branches (`if/else`, `match`, ternary) join by `max`.
+- Sequential statements join by addition.
+- Closure construction demand only charges capturing the variable once (latent invocation demand is distinct).
+- `mut` reassignment satisfies its allowance independently: rebinding a variable begins a fresh scope for subsequent uses.
+
+```ny
+use std.core
+
+@consumes(x)
+@allowance(x, 1)
+fn first(any x, list xs) any {
+   def h = borrow(x)      ; observed 1 use <= allowance 1 ✓
+   xs[0]
+}
+
+@consumes(y)
+@allowance(y, 1)
+fn twice(any y) any {
+   y + y                  ; observed 2 > allowance 1 -> rejected
+}
+```
+
 ## Common diagnostics
 
 | Diagnostic | Fix direction |
@@ -58,6 +87,7 @@ assert(identity(7) == 7, "borrowed result")
 | `use after move of owned slot` | Borrow before moving, clone, or create a new owned value. |
 | `returning owned slot ... requires @returns_owned` | Add `@returns_owned` or return a borrow or clone. |
 | `returning borrow of local owner would outlive its slot` | Return an owned value or tie the borrow to a parameter with `@returns_borrow(name)`. |
+| `ownership allowance exceeded for 'x': observed N > allowance L` | Reduce uses of the parameter or increase the `@allowance(x, limit)` bound. |
 
 ## Check ownership
 

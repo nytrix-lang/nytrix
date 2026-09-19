@@ -13,6 +13,15 @@ use std.os.ui.render.dump as ui_profile
 use std.os.ui.render.matrix as matrix
 use std.os.ui.render.shared as render_shared
 
+;; Keep the packed-vertex layout local to this module.  The underscored
+;; constants are intentionally exported by gl.constants for compatibility,
+;; but native-only lowering does not reliably import private-looking names
+;; through a module alias.
+def _STRIDE = render_shared.VERTEX_STRIDE
+def _OFF_X = render_shared.OFF_X
+def _OFF_C = render_shared.OFF_C
+def _OFF_NX = render_shared.OFF_NX
+
 fn _is_debug() bool { ui_profile.debug_enabled() }
 
 fn _check_gl_error(str where) bool {

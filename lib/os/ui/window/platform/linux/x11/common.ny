@@ -111,13 +111,13 @@ fn decodeUTF8(str s, int start=0) list {
       def int b1 = load8(s, start + 1)
       def int b2 = load8(s, start + 2)
       return [((first - 0xe0) * 4096) + ((b1 - 0x80) * 64) +
-              (b2 - 0x80), from_int(start + 3)]
+         (b2 - 0x80), from_int(start + 3)]
    }
    def int b1 = load8(s, start + 1)
    def int b2 = load8(s, start + 2)
    def int b3 = load8(s, start + 3)
    [((first - 0xf0) * 262144) + ((b1 - 0x80) * 4096) +
-    ((b2 - 0x80) * 64) + (b3 - 0x80), from_int(start + 4)]
+      ((b2 - 0x80) * 64) + (b3 - 0x80), from_int(start + 4)]
 }
 
 fn convertLatin1toUTF8(any source) any {

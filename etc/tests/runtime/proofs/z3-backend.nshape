@@ -1,0 +1,15 @@
+shape z3_proof_backend {
+  family "runtime/proofs"
+  generator "program"
+  features ["proof", "solver", "z3", "type-solver"]
+  template ny-test-case
+  flags "--type-solver=z3 --proof-solver=z3 --color=never"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+
+assert_compile(5 < 6, "Z3 proof backend proves a comparison")
+assert_compile(5 >= 5, "Z3 proof backend proves equality bounds")
+print("z3 proof backend ok")
+NY
+}

@@ -34,6 +34,7 @@ typedef enum expr_kind_t {
   NY_E_TRY,
   NY_E_QUOTE,
   NY_E_SPLICE,
+  NY_E_EXISTS,
 } expr_kind_t;
 
 typedef enum lit_kind_t { NY_LIT_INT, NY_LIT_FLOAT, NY_LIT_BOOL, NY_LIT_STR } lit_kind_t;
@@ -74,6 +75,27 @@ typedef enum ny_sem_rep_t {
   NY_SEM_REP_CLOSURE,
   NY_SEM_REP_AGGREGATE,
 } ny_sem_rep_t;
+
+static inline bool ny_sem_rep_is_valid(ny_sem_rep_t rep) {
+  return rep >= NY_SEM_REP_UNKNOWN && rep <= NY_SEM_REP_AGGREGATE;
+}
+
+static inline const char *ny_sem_rep_name(ny_sem_rep_t rep) {
+  switch (rep) {
+  case NY_SEM_REP_UNKNOWN: return "unknown";
+  case NY_SEM_REP_RAW_INT: return "raw_int";
+  case NY_SEM_REP_F32: return "f32";
+  case NY_SEM_REP_F64: return "f64";
+  case NY_SEM_REP_TAGGED_DYNAMIC: return "tagged_dynamic";
+  case NY_SEM_REP_STRING: return "string";
+  case NY_SEM_REP_TYPED_BUFFER: return "typed_buffer";
+  case NY_SEM_REP_OBJECT: return "object";
+  case NY_SEM_REP_POINTER: return "pointer";
+  case NY_SEM_REP_CLOSURE: return "closure";
+  case NY_SEM_REP_AGGREGATE: return "aggregate";
+  default: return "<invalid>";
+  }
+}
 
 typedef enum ny_sem_ownership_t {
   NY_SEM_OWN_UNKNOWN = 0,
@@ -126,7 +148,6 @@ typedef struct param_t {
 } param_t;
 
 typedef VEC(param_t) ny_param_list;
-typedef VEC(expr_t *) ny_expr_list;
 typedef VEC(match_arm_t) ny_match_arm_list;
 
 typedef struct attribute_t {
@@ -286,6 +307,10 @@ struct expr_t {
       expr_t *expr;
       uint32_t syntax_ctx;
     } splice;
+    struct {
+      const char *var;
+      expr_t *body;
+    } exists;
   } as;
 };
 
@@ -309,6 +334,8 @@ typedef struct stmt_enum_t {
   const char *name;
   ny_type_param_list type_params;
   ny_stmt_enum_item_list items;
+  bool is_indexed_family;
+  const char *index_param_name;
 } stmt_enum_t;
 
 typedef enum stmt_kind_t {
@@ -342,6 +369,8 @@ typedef enum stmt_kind_t {
   NY_S_DEFINE,
   NY_S_OPERATOR,
   NY_S_IMPL,
+  NY_S_REFINE,
+  NY_S_TRAIT,
 } stmt_kind_t;
 
 typedef struct stmt_export_t {
@@ -353,8 +382,6 @@ typedef struct stmt_export_t {
 typedef struct stmt_defer_t {
   struct stmt_t *body;
 } stmt_defer_t;
-
-typedef VEC(stmt_t *) ny_stmt_list;
 
 typedef struct stmt_block_t {
   ny_stmt_list body;
@@ -462,6 +489,7 @@ typedef struct stmt_func_t {
   ny_str_list attr_mutates;
   ny_str_list attr_releases;
   ny_str_list attr_forgets;
+  ny_allowance_list attr_allowances;
   bool is_extern;
   const char *link_name;
   bool attrs_resolved;
@@ -471,6 +499,9 @@ typedef struct stmt_func_t {
   bool body_summary_known;
   bool body_has_try;
   bool body_has_label_or_goto;
+  expr_t *requires_cond;
+  expr_t *decreases_expr;
+  bool attr_total;
 } stmt_func_t;
 
 typedef struct stmt_lemma_t {
@@ -509,9 +540,23 @@ typedef struct stmt_operator_t {
   const char *target;
 } stmt_operator_t;
 
+typedef struct stmt_refine_t {
+  const char *name;
+  const char *base_type;
+  const char *param;
+  expr_t *predicate;
+} stmt_refine_t;
+
+typedef struct stmt_trait_t {
+  const char *name;
+  ny_stmt_list methods;
+} stmt_trait_t;
+
 typedef struct stmt_impl_t {
   const char *type_name;
   ny_stmt_list methods;
+  const char *trait_name;
+  ny_expr_list laws;
 } stmt_impl_t;
 
 typedef struct stmt_return_t {
@@ -627,6 +672,8 @@ struct stmt_t {
     stmt_include_t inc;
     stmt_define_t def;
     stmt_operator_t oper;
+    stmt_refine_t refine;
+    stmt_trait_t trait;
     stmt_impl_t impl;
   } as;
 };

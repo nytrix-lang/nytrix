@@ -195,6 +195,9 @@ static inline void ny_fun_sig_free_members(fun_sig *sig) {
   for (size_t i = 0; i < sig->forgets.len; i++)
     free(sig->forgets.data[i]);
   vec_free(&sig->forgets);
+  for (size_t i = 0; i < sig->allowances.len; i++)
+    free(sig->allowances.data[i].name);
+  vec_free(&sig->allowances);
   memset(sig, 0, sizeof(*sig));
 }
 
@@ -442,6 +445,7 @@ typedef struct codegen_flow_t {
   bool current_fn_attr_naked;
   bool current_fn_attr_tailcall;
   LLVMValueRef current_fn_value;
+  fun_sig *current_fun_sig;
   unsigned tail_call_depth;
   bool thread_detach_stmt_call;
   size_t active_panic_envs;
@@ -506,6 +510,8 @@ typedef struct codegen_registry_t {
   VEC(enum_def_t *) enums;
   VEC(layout_def_t *) layouts;
   lemma_def_list lemmas;
+  refine_def_list refines;
+  trait_def_list traits;
   ny_mono_specialization_list mono_specs;
   bool mono_emitting;
   bool mono_raw_expr_disabled;
@@ -706,6 +712,7 @@ struct codegen_t {
       bool current_fn_attr_naked;
       bool current_fn_attr_tailcall;
       LLVMValueRef current_fn_value;
+      fun_sig *current_fun_sig;
       unsigned tail_call_depth;
       bool thread_detach_stmt_call;
       size_t active_panic_envs;
@@ -773,6 +780,9 @@ struct codegen_t {
       ny_operator_def_list operators;
       VEC(enum_def_t *) enums;
       VEC(layout_def_t *) layouts;
+      lemma_def_list lemmas;
+      refine_def_list refines;
+      trait_def_list traits;
       ny_mono_specialization_list mono_specs;
       bool mono_emitting;
       bool mono_raw_expr_disabled;

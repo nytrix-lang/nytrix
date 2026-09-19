@@ -20,6 +20,8 @@ typedef struct token_t token_t;
 typedef struct expr_t expr_t;
 typedef struct program_t program_t;
 typedef struct fun_sig fun_sig;
+typedef VEC(stmt_t *) ny_stmt_list;
+typedef VEC(expr_t *) ny_expr_list;
 
 typedef enum ny_ct_fast_kind_t {
   NY_CT_FAST_NONE,
@@ -183,6 +185,13 @@ typedef VEC(binding) binding_list;
 
 typedef VEC(char *) ny_str_list;
 typedef VEC(char *) str_list;
+
+typedef struct ny_allowance_t {
+  char *name;
+  int64_t limit; /* -1 for omega / inf */
+} ny_allowance_t;
+
+typedef VEC(ny_allowance_t) ny_allowance_list;
 
 enum ny_effect_bits_t {
   NY_FX_NONE = 0u,
@@ -352,6 +361,10 @@ struct fun_sig {
   ny_str_list mutates;
   ny_str_list releases;
   ny_str_list forgets;
+  ny_allowance_list allowances;
+  expr_t *requires_cond;
+  expr_t *decreases_expr;
+  bool is_total;
   bool owned;
   uint64_t name_hash;
   uint32_t name_len;
@@ -434,6 +447,8 @@ typedef struct enum_def_t {
   ny_enum_type_param_list type_params;
   ny_enum_member_list members;
   bool has_payload;
+  bool is_indexed_family;
+  const char *index_param_name;
   int64_t adt_tag_base;
   stmt_t *stmt;
 } enum_def_t;
@@ -486,6 +501,24 @@ typedef struct lemma_def_t {
 } lemma_def_t;
 
 typedef VEC(lemma_def_t *) lemma_def_list;
+
+typedef struct refine_def_t {
+  const char *name;
+  const char *base_type;
+  const char *param;
+  expr_t *predicate;
+  stmt_t *stmt;
+} refine_def_t;
+
+typedef VEC(refine_def_t *) refine_def_list;
+
+typedef struct trait_def_t {
+  const char *name;
+  ny_stmt_list methods;
+  stmt_t *stmt;
+} trait_def_t;
+
+typedef VEC(trait_def_t *) trait_def_list;
 
 typedef struct sema_func_t {
   LLVMTypeRef resolved_return_type;

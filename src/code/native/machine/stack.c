@@ -280,7 +280,7 @@ static bool sm_call(ny_sm_ctx_t *c, const nyir_inst_t *in) {
   if (!nyir_call_args(in, c->nyir->next_value, args, NYIR_CALL_MAX_ARGS,
                         &argc, c->err, c->err_len))
     return false;
-  if ((size_t)argc > c->target->gp_arg_reg_count) {
+  if (c->kind != NY_SM_I386 && (size_t)argc > c->target->gp_arg_reg_count) {
     ny_native_set_err(c->err, c->err_len,
                       "%s NYIR emit: %d args exceed %zu regs", c->pretty, argc,
                       c->target->gp_arg_reg_count);

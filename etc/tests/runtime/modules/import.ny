@@ -1,3 +1,4 @@
+;; flags: --native-only
 use std.core
 use std
 use std math as loose_math

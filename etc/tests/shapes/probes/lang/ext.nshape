@@ -6,11 +6,12 @@ shape ext {
   expect compile_and_run
   source ny <<'NY'
 use std.core
-use std.os.ui.assets.viewer as scene
 use std.os.path as ospath
 use std.core.str as str
-def p = scene.resolve_gltf_asset_path("RiggedSimple")
+def p = "RiggedSimple.GLTF"
 print("p=" + to_str(p))
-print("ext=" + to_str(ospath.extname(p)) + " lower=" + to_str(str.lower(ospath.extname(p))))
+def ext = str.lower(ospath.extname(p))
+assert(ext == ".gltf", "extension lowercases to .gltf")
+print("ext=" + to_str(ospath.extname(p)) + " lower=" + to_str(ext))
 NY
 }

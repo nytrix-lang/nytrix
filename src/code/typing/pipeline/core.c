@@ -2268,6 +2268,8 @@ typedef struct ny_hm_state_t {
   size_t type_nodes;
   int allow_dynamic_literal_depth;
   int fact_completion_depth;
+  int comptime_depth;
+  size_t comptime_outer_env_len;
   uint32_t next_alias_class;
   ny_hm_scheme_list schemes;
   ny_hm_scheme_index_entry_t *scheme_index;

@@ -1,0 +1,19 @@
+shape nyir_range_fact_verification {
+  family "runtime-native"
+  generator "native"
+  features [native nyir verifier range proof]
+  template ny-test-case
+  flags "--native-backend=x86_64 --native-only --nyir-verify -O3 --native-result-oracle=0"
+  expect compile_and_run
+  source ny <<'NY'
+use std.core
+
+fn compute_bounded(int a, int b) int {
+  def x = (a & 15) + (b & 15)
+  x
+}
+
+def r = compute_bounded(5, 7)
+if r == 12 { 0 } else { 1 }
+NY
+}

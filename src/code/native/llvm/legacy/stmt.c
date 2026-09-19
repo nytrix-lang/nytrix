@@ -4223,80 +4223,6 @@ static const char *stmt_type_generic_arg(codegen_t *cg, const char *type_name,
   return NULL;
 }
 
-static const char *stmt_match_subject_known_type(codegen_t *cg, scope *scopes,
-                                                 size_t depth, expr_t *test) {
-  if (!test)
-    return NULL;
-  if (test->kind == NY_E_CALL && test->as.call.callee &&
-      test->as.call.callee->kind == NY_E_IDENT) {
-    const char *name = test->as.call.callee->as.ident.name;
-    fun_sig *sig = lookup_fun(cg, name, test->as.call.callee->as.ident.hash);
-    if (sig) {
-      if (stmt_type_generic_base_is(sig->return_type, "Result"))
-        return sig->return_type;
-      if (stmt_type_generic_base_is(sig->inferred_return_type, "Result"))
-        return sig->inferred_return_type;
-    }
-    size_t name_len = name ? strlen(name) : 0;
-    size_t argc = test->as.call.args.len;
-    for (size_t i = 0; cg && i < cg->fun_sigs.len; ++i) {
-      fun_sig *cand = &cg->fun_sigs.data[i];
-      if (!cand->name || strlen(cand->name) != name_len ||
-          memcmp(cand->name, name, name_len) != 0)
-        continue;
-      if (!cand->is_variadic && cand->arity != (int)argc)
-        continue;
-      if (stmt_type_generic_base_is(cand->return_type, "Result"))
-        return cand->return_type;
-      if (stmt_type_generic_base_is(cand->inferred_return_type, "Result"))
-        return cand->inferred_return_type;
-    }
-    if (sig) {
-      if (sig->return_type)
-        return sig->return_type;
-      if (sig->inferred_return_type)
-        return sig->inferred_return_type;
-    }
-  }
-  if (test->kind == NY_E_IDENT && test->as.ident.name) {
-    size_t name_len = (size_t)test->tok.len;
-    if (name_len == 0)
-      name_len = strlen(test->as.ident.name);
-    binding *b = stmt_lookup_binding(cg, scopes, depth, test->as.ident.name,
-                                     name_len, test->as.ident.hash);
-    if (b) {
-      if (b->type_name)
-        return b->type_name;
-      if (!b->is_mut) {
-        expr_t *init = ny_binding_var_init_expr(b, test->as.ident.name);
-        const char *init_type = infer_expr_type(cg, scopes, depth, init);
-        if (init_type)
-          return init_type;
-      }
-    }
-  }
-  return NULL;
-}
-
-static const char *stmt_match_result_payload_type(codegen_t *cg, scope *scopes,
-                                                  size_t depth,
-                                                  stmt_t *owner_stmt,
-                                                  bool want_ok) {
-  if (!owner_stmt || owner_stmt->kind != NY_S_MATCH)
-    return NULL;
-  const char *subject_type =
-      infer_expr_type(cg, scopes, depth, owner_stmt->as.match.test);
-  if (!stmt_type_generic_base_is(subject_type, "Result")) {
-    const char *known = stmt_match_subject_known_type(
-        cg, scopes, depth, owner_stmt->as.match.test);
-    if (stmt_type_generic_base_is(known, "Result"))
-      subject_type = known;
-    else
-      return NULL;
-  }
-  return stmt_type_generic_arg(cg, subject_type, want_ok ? 0u : 1u);
-}
-
 static const char *
 stmt_match_substitute_adt_field_type(codegen_t *cg, scope *scopes, size_t depth,
                                      stmt_t *owner_stmt, enum_def_t *owner,
@@ -4457,13 +4383,29 @@ static LLVMValueRef match_pattern_result_cond(codegen_t *cg, scope *scopes,
     expr_t *arg0 = pat->as.call.args.data[0].val;
     if (arg0 && arg0->kind == NY_E_IDENT &&
         strcmp(arg0->as.ident.name ? arg0->as.ident.name : "", "_") != 0) {
-      fun_sig *unwrap_sig = lookup_fun(cg, "__unwrap", 0);
+      fun_sig *unwrap_sig = lookup_fun(cg, "__result_unwrap_raw", 0);
       if (unwrap_sig) {
         LLVMValueRef val =
             LLVMBuildCall2(cg->builder, unwrap_sig->type, unwrap_sig->value,
                            (LLVMValueRef[]){testv}, 1, "");
-        const char *payload_type = stmt_match_result_payload_type(
-            cg, scopes, depth, owner_stmt, is_ok_pat);
+        /*
+         * Result constructors receive dynamic arguments, so scalar payloads
+         * are commonly stored tagged.  Pattern bindings are native values;
+         * cross that representation boundary once, just like ordinary
+         * `unwrap`, before exposing the binding to the arm.
+         */
+        fun_sig *decode_sig = lookup_fun(cg, "__any_to_i64", 0);
+        if (decode_sig)
+          val = LLVMBuildCall2(cg->builder, decode_sig->type,
+                               decode_sig->value, (LLVMValueRef[]){val}, 1,
+                               "result_payload_raw");
+        /*
+         * __unwrap returns the stored payload representation.  Keep the
+         * pattern variable dynamic here: inferring `int` makes an untyped
+         * match arm tag the already-language-valued payload a second time
+         * (42 becomes 171) when the arm returns the binding.
+         */
+        const char *payload_type = "any";
         scope_bind(cg, scopes, depth, arg0->as.ident.name, val, owner_stmt,
                    false, payload_type, false);
       }
@@ -6736,7 +6678,10 @@ static LLVMValueRef stmt_gen_return_value(codegen_t *cg, scope *scopes,
    * more (11 became 5 in syntax macro expansion).  Keep raw values inside
    * the function and create the dynamic representation at this boundary.
    */
-  if (!ret_type && v && ny_type_is(infer_expr_type(cg, scopes, depth, e), "int"))
+  if (!ret_type && v && cg->opt_sys_mode &&
+      !(e->semantic.resolved &&
+        e->semantic.rep == NY_SEM_REP_TAGGED_DYNAMIC) &&
+      ny_type_is(infer_expr_type(cg, scopes, depth, e), "int"))
     v = ny_tag_int(cg, v);
   if (stmt_type_is_native_abi_value(cg, ret_type)) {
     bool proven_int = ny_is_proven_int(cg, scopes, depth, e, v);
@@ -8482,6 +8427,12 @@ static void gen_stmt_var(codegen_t *cg, scope *scopes, size_t *depth,
         !s->as.var.is_del && !dest && s->as.var.names.len == 1 &&
         s->as.var.exprs.len == 1 && slot && LLVMIsAGlobalVariable(slot) &&
         !top_level_existing_global) {
+      if (decl_type && expr_for_check) {
+        if (!ensure_expr_type_compatible(cg, scopes, *depth, decl_type,
+                                         expr_for_check, expr_for_check->tok,
+                                         "declaration"))
+          continue;
+      }
       LLVMValueRef const_init =
           stmt_const_top_level_expr_value(cg, expr_for_check);
       if (const_init) {
@@ -9329,8 +9280,15 @@ static void gen_stmt_expr_stmt(codegen_t *cg, scope *scopes, size_t *depth,
     v = ny_coerce_to_abi_proven_int(cg, v, cg->current_fn_ret_type, proven_int);
   }
   if (is_tail && !cg->result_store_val && !cg->current_fn_ret_type &&
+      cg->opt_sys_mode &&
+      !(e->semantic.resolved &&
+        e->semantic.rep == NY_SEM_REP_TAGGED_DYNAMIC) &&
       ny_type_is(infer_expr_type(cg, scopes, *depth, e), "int")) {
-    /* Untyped tail expressions return a dynamic language value. */
+    /*
+     * System-mode lowering may expose raw scalar tails.  Ordinary legacy
+     * gen_expr() paths already return tagged NyValue integers and must not
+     * be tagged a second time here.
+     */
     v = ny_tag_int(cg, v);
   }
   if (is_tail && !cg->current_fn_attr_naked) {

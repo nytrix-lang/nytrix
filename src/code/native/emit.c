@@ -416,7 +416,10 @@ bool ny_native_emit_object(const program_t *prog, const ny_options *opt,
         prog, opt, &rt_main_nir, func_nirs, &func_count, func_names,
         func_cap, nir_err, sizeof(nir_err));
     if (nir_built && rt_main_nir.len > 0) {
-      if (getenv("NY_DUMP_OBJ_NYIR"))
+      const char *dump_obj_nyir = getenv("NY_DUMP_OBJ_NYIR");
+      if (dump_obj_nyir && strcmp(dump_obj_nyir, "full") == 0)
+        nyir_dump(stderr, &rt_main_nir, "obj-rt_main");
+      else if (dump_obj_nyir)
         nyir_dump_compact(stderr, &rt_main_nir, "obj-rt_main");
       const char *obj_symbol =
           entry_name && entry_name[0] ? entry_name : "rt_main";

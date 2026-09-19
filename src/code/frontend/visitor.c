@@ -116,7 +116,10 @@ void ny_visit_expr(ny_visitor_t *v, expr_t *e) {
       break;
     case NY_E_LAMBDA:
     case NY_E_FN:
-
+      break;
+    case NY_E_EXISTS:
+      if (e->as.exists.body)
+        ny_visit_expr(v, e->as.exists.body);
       break;
     case NY_E_IDENT:
     case NY_E_LITERAL:
@@ -215,10 +218,22 @@ void ny_visit_stmt(ny_visitor_t *v, stmt_t *s) {
       ny_visit_stmt(v, s->as.macro.body);
       break;
     case NY_S_FUNC:
+      if (s->as.fn.requires_cond)
+        ny_visit_expr(v, s->as.fn.requires_cond);
+      if (s->as.fn.decreases_expr)
+        ny_visit_expr(v, s->as.fn.decreases_expr);
       ny_visit_stmt(v, s->as.fn.body);
       break;
     case NY_S_LEMMA:
       ny_visit_expr(v, s->as.lemma.proposition);
+      break;
+    case NY_S_REFINE:
+      if (s->as.refine.predicate)
+        ny_visit_expr(v, s->as.refine.predicate);
+      break;
+    case NY_S_TRAIT:
+      for (size_t i = 0; i < s->as.trait.methods.len; i++)
+        ny_visit_stmt(v, s->as.trait.methods.data[i]);
       break;
     case NY_S_LAYOUT:
       for (size_t i = 0; i < s->as.layout.methods.len; i++)
@@ -231,6 +246,8 @@ void ny_visit_stmt(ny_visitor_t *v, stmt_t *s) {
     case NY_S_IMPL:
       for (size_t i = 0; i < s->as.impl.methods.len; i++)
         ny_visit_stmt(v, s->as.impl.methods.data[i]);
+      for (size_t i = 0; i < s->as.impl.laws.len; i++)
+        ny_visit_expr(v, s->as.impl.laws.data[i]);
       break;
     case NY_S_USE:
     case NY_S_EXTERN:

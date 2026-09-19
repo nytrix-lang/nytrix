@@ -108,6 +108,8 @@ use std.os.ui.render.vk.state (
 use std.os.ui.render.vk.vulkan
 use std.os.ui.render.shader as lib_shader
 use std.os.ui.render.camera as camera
+use std.os.ui.render.camera_contract as render_camera_contract
+use std.os.ui.render.contract as render_contract
 use std.os.ui.render.atlas as lib_atlas
 use std.os.ui.render.env as render_env
 use std.os.ui.font.truetype as lib_ttf
@@ -3243,10 +3245,7 @@ fn get_active_window() any {
 
 fn get_active_backend_name() str {
    "Returns a human-readable name for the active backend."
-   if _backend == BACKEND_GL { return "opengl" }
-   if _backend == BACKEND_VK { return "vulkan" }
-   if _backend == BACKEND_MOCK { return "mock" }
-   return "none"
+   render_contract.backend_name(_backend)
 }
 
 fn vk_available() bool {
@@ -3282,16 +3281,7 @@ fn backend_capabilities() dict {
 
 fn portable_contract() dict {
    "Returns the stable rendering subset shared by native OpenGL/Vulkan and browser WebGL2 paths."
-   {
-      "version": 1,
-      "coordinate_system": "2d-top-left-pixels-3d-right-handed",
-      "frame": {"begin": true, "clear": true, "draw": true, "present": true},
-      "primitives": {"rect": true, "line": true, "triangle": true, "texture": true, "text": true},
-      "depth_3d": true,
-      "alpha_blend": "source-alpha",
-      "backend_specific": ["vulkan", "opengl", "webgl2"],
-      "not_guaranteed": ["raw-vulkan", "compute", "advanced-materials", "desktop-font-parity"]
-   }
+   render_contract.portable_contract()
 }
 
 fn renderer_vertex_offset() int {
@@ -5952,60 +5942,21 @@ fn shutdown() bool {
 
 fn camera_init(list pos, f64 yaw, f64 pitch, f64 aspect=1.33) list {
    "Initializes a 3D camera object with position and orientation."
-   def ryaw = yaw * PI / 180.0
-   def rpitch = pitch * PI / 180.0
-   def front = vec3(sin(ryaw) * cos(rpitch), sin(rpitch), -cos(ryaw) * cos(rpitch))
-   def target = [pos.get(0, 0.0) + at(front, 0, 0.0), pos.get(1, 0.0) + at(front, 1, 0.0), pos.get(2, 0.0) + at(front, 2, 0.0)]
-   mut cam = list()
-   cam = cam.append(pos)
-   cam = cam.append(target)
-   cam = cam.append(vec3(0.0, 1.0, 0.0))
-   cam = cam.append(120.0)
-   cam = cam.append(yaw)
-   cam = cam.append(pitch)
-   cam = cam.append(aspect)
-   cam
+   render_camera_contract.camera_init(pos, yaw, pitch, aspect)
 }
 
 fn camera_update(list camera) list {
    "Updates the camera's target position based on its orientation."
-   def yaw = camera.get(4)
-   def pitch = camera.get(5)
-   def pos = camera.get(0)
-   def ryaw = yaw * PI / 180.0
-   def rpitch = pitch * PI / 180.0
-   mut target = camera.get(1)
-   def fx, fy = sin(ryaw) * cos(rpitch), sin(rpitch)
-   def fz = -cos(ryaw) * cos(rpitch)
-   if is_list(target) {
-      target[0] = pos.get(0) + fx
-      target[1] = pos.get(1) + fy
-      target[2] = pos.get(2) + fz
-   } else {
-      target = vec3(pos.get(0) + fx, pos.get(1) + fy, pos.get(2) + fz)
-      camera[1] = target
-   }
-   camera
+   render_camera_contract.camera_update(camera)
 }
 
 fn __cam_compute_vectors(f64 yaw, f64 pitch, any out) any {
-   def y, p = float(yaw), float(pitch)
-   def cp = cos(p)
-   def fx = sin(y) * cp
-   def fy = sin(p)
-   def fz = -cos(y) * cp
-   if is_list(out) || is_dict(out) {
-      out[2] = fx
-      out[3] = fy
-      out[4] = fz
-   }
-   out
+   render_camera_contract.__cam_compute_vectors(yaw, pitch, out)
 }
 
 fn camera_set_look_at(any camera, list target) any {
    "Explicitly sets the camera's look-at target."
-   camera[1] = target
-   camera
+   render_camera_contract.camera_set_look_at(camera, target)
 }
 
 fn set_model_matrix(any mat) bool {

@@ -13,7 +13,6 @@
 #include "../tools/repo.h"
 #include "../tools/tool.h"
 
-
 #include "core.c"
 
 /*
@@ -164,14 +163,14 @@ static char *str_replace_all(const char *in, const char *pat, const char *rep) {
     const char *p = strstr(cur, pat);
     if (!p) {
       size_t tail = strlen(cur);
-      memcpy(dst, cur, tail);
+      memmove(dst, cur, tail);
       dst += tail;
       break;
     }
     size_t chunk = (size_t)(p - cur);
-    memcpy(dst, cur, chunk);
+    memmove(dst, cur, chunk);
     dst += chunk;
-    memcpy(dst, rep, r_n);
+    memmove(dst, rep, r_n);
     dst += r_n;
     cur = p + p_n;
   }
@@ -240,7 +239,6 @@ static char *convert_texi_basic(const char *input, const char *name, const char 
   free(s);
   return out;
 }
-
 
 #include "c2ny.c"
 #include "py2ny.c"
@@ -609,7 +607,7 @@ static int run_align_macros_mode(const FmtOpts *opts) {
         const char *bs = memchr(next, '\\', next_nl ? (size_t)(next_nl - next) : (n - (next - src)));
         if (bs && strncmp(next_trim, "do {", 4) == 0) {
 
-          memcpy(dst + di, line_start, line_len);
+          memmove(dst + di, line_start, line_len);
           di += line_len; si += line_len + 1;
           if (dst[di - 1] != '\n') dst[di++] = '\n';
 
@@ -617,7 +615,7 @@ static int run_align_macros_mode(const FmtOpts *opts) {
             const char *bl = src + si;
             const char *bnl = memchr(bl, '\n', n - si);
             size_t bl_len = bnl ? (size_t)(bnl - bl) : n - si;
-            memcpy(dst + di, bl, bl_len);
+            memmove(dst + di, bl, bl_len);
             di += bl_len; si += bl_len + 1;
             if (!bnl) break;
 
@@ -630,7 +628,7 @@ static int run_align_macros_mode(const FmtOpts *opts) {
         }
       }
 
-      memcpy(dst + di, line_start, line_len);
+      memmove(dst + di, line_start, line_len);
       di += line_len;
       si += line_len + 1;
       if (si < n && dst[di - 1] != '\n') dst[di++] = '\n';

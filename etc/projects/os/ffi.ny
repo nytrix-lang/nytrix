@@ -31,7 +31,9 @@ memset(vertices, 0, STRIDE * 2)
 store_vertex(vertices, 0, 3.0, 4.0, 0.0)
 store_vertex(vertices, 1, 1.0, 2.0, 2.0)
 def a = read_vertex(vertices, 0)
-def len_a = c.sqrt(float(a.get(0) * a.get(0) + a.get(1) * a.get(1)))
+def ax = float(a.get(0))
+def ay = float(a.get(1))
+def len_a = c.sqrt(ax * ax + ay * ay)
 def b_ptr = vertices + STRIDE
 def b = [load32_f32(b_ptr, 0), load32_f32(b_ptr, 4),
          load32_f32(b_ptr, 8)]

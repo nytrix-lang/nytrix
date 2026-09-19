@@ -722,6 +722,9 @@ static bool ny_expr_check_safe_internal(codegen_t *cg, expr_t *e, assigned_name_
   case NY_E_LAMBDA:
   case NY_E_FN:
     return false;
+  case NY_E_EXISTS:
+    CHECK_PURE_EXPR(e->as.exists.body);
+    return true;
   }
   return false;
 }
@@ -844,6 +847,8 @@ static bool ny_stmt_check_safe_internal(codegen_t *cg, stmt_t *s, assigned_name_
   case NY_S_OPERATOR:
   case NY_S_IMPL:
     return false;
+  case NY_S_REFINE:
+  case NY_S_TRAIT:
   case NY_S_BREAK:
   case NY_S_CONTINUE:
     return true;
@@ -2239,6 +2244,21 @@ void infer_pure_functions(codegen_t *cg) {
           effect_contract_violations++;
         }
       }
+      }
+    }
+    if (sig->stmt_t && sig->stmt_t->as.fn.attr_total) {
+      if (!is_pure || effects != NY_FX_NONE) {
+        ny_diag_error(sig->stmt_t->tok,
+                      "@total claim refused for '%s': function has side effects or is impure",
+                      sig->name ? sig->name : "<anon>");
+        cg->had_error = 1;
+      } else if (sema && sema->is_recursive && !sig->decreases_expr) {
+        ny_diag_error(sig->stmt_t->tok,
+                      "@total claim refused for '%s': recursive function requires decreases(...) measure for termination proof",
+                      sig->name ? sig->name : "<anon>");
+        cg->had_error = 1;
+      } else {
+        sig->is_total = true;
       }
     }
     if (effects_known && (effects & NY_FX_IO) != 0 &&

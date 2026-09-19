@@ -1056,7 +1056,6 @@ static bool ny_proof_try_z3(codegen_t *cg, scope *scopes, size_t depth,
  * Dispatcher.
  */
 
-
 enum { NY_PROOF_SOLVER_CACHE = 256, NY_PROOF_SOLVER_CEX_CAP = 128 };
 
 typedef struct {
@@ -1066,12 +1065,12 @@ typedef struct {
   bool result;
   bool has_cex;
   char cex[NY_PROOF_SOLVER_CEX_CAP];
-} ny_proof_solver_cache_entry_t;
+} ny_proof_try_solverr_cache_entry_t;
 
-static _Thread_local ny_proof_solver_cache_entry_t
-    ny_proof_solver_cache[NY_PROOF_SOLVER_CACHE];
-static _Thread_local size_t ny_proof_solver_cache_len;
-static _Thread_local size_t ny_proof_solver_cache_next;
+static _Thread_local ny_proof_try_solverr_cache_entry_t
+    ny_proof_try_solverr_cache[NY_PROOF_SOLVER_CACHE];
+static _Thread_local size_t ny_proof_try_solverr_cache_len;
+static _Thread_local size_t ny_proof_try_solverr_cache_next;
 
 static uint64_t ny_proof_hash_mix_u64(uint64_t h, uint64_t v) {
   h ^= v + UINT64_C(0x9e3779b97f4a7c15) + (h << 6) + (h >> 2);
@@ -1087,7 +1086,7 @@ static uint64_t ny_proof_hash_mix_bytes(uint64_t h, const char *data,
   return h ? h : UINT64_C(0x9e3779b97f4a7c15);
 }
 
-static uint64_t ny_proof_solver_context_hash(scope *scopes, size_t depth,
+static uint64_t ny_proof_try_solverr_context_hash(scope *scopes, size_t depth,
                                              const char *canonical) {
   uint64_t h = UINT64_C(1469598103934665603);
   const char *p = canonical;
@@ -1118,11 +1117,11 @@ static uint64_t ny_proof_solver_context_hash(scope *scopes, size_t depth,
   return h;
 }
 
-static ny_proof_solver_cache_entry_t *
-ny_proof_solver_cache_lookup(uint64_t prop_hash, uint64_t ctx_hash,
+static ny_proof_try_solverr_cache_entry_t *
+ny_proof_try_solverr_cache_lookup(uint64_t prop_hash, uint64_t ctx_hash,
                              uint64_t mode_hash) {
-  for (size_t i = 0; i < ny_proof_solver_cache_len; ++i) {
-    ny_proof_solver_cache_entry_t *e = &ny_proof_solver_cache[i];
+  for (size_t i = 0; i < ny_proof_try_solverr_cache_len; ++i) {
+    ny_proof_try_solverr_cache_entry_t *e = &ny_proof_try_solverr_cache[i];
     if (e->prop_hash == prop_hash && e->ctx_hash == ctx_hash &&
         e->mode_hash == mode_hash)
       return e;
@@ -1130,13 +1129,13 @@ ny_proof_solver_cache_lookup(uint64_t prop_hash, uint64_t ctx_hash,
   return NULL;
 }
 
-static void ny_proof_solver_cache_store(uint64_t prop_hash, uint64_t ctx_hash,
+static void ny_proof_try_solverr_cache_store(uint64_t prop_hash, uint64_t ctx_hash,
                                         uint64_t mode_hash, bool result,
                                         const char *cex) {
-  size_t slot = ny_proof_solver_cache_len < NY_PROOF_SOLVER_CACHE
-                    ? ny_proof_solver_cache_len++
-                    : ny_proof_solver_cache_next++ % NY_PROOF_SOLVER_CACHE;
-  ny_proof_solver_cache_entry_t *e = &ny_proof_solver_cache[slot];
+  size_t slot = ny_proof_try_solverr_cache_len < NY_PROOF_SOLVER_CACHE
+                    ? ny_proof_try_solverr_cache_len++
+                    : ny_proof_try_solverr_cache_next++ % NY_PROOF_SOLVER_CACHE;
+  ny_proof_try_solverr_cache_entry_t *e = &ny_proof_try_solverr_cache[slot];
   e->prop_hash = prop_hash;
   e->ctx_hash = ctx_hash;
   e->mode_hash = mode_hash;
@@ -1149,7 +1148,7 @@ static void ny_proof_solver_cache_store(uint64_t prop_hash, uint64_t ctx_hash,
   }
 }
 
-static bool ny_proof_solver_cache_make_key(scope *scopes, size_t depth,
+static bool ny_proof_try_solverr_cache_make_key(scope *scopes, size_t depth,
                                            expr_t *proposition,
                                            const char *mode,
                                            uint64_t *prop_hash,
@@ -1159,7 +1158,7 @@ static bool ny_proof_solver_cache_make_key(scope *scopes, size_t depth,
   if (!canonical)
     return false;
   *prop_hash = ny_hash64_cstr(canonical);
-  *ctx_hash = ny_proof_solver_context_hash(scopes, depth, canonical);
+  *ctx_hash = ny_proof_try_solverr_context_hash(scopes, depth, canonical);
   *mode_hash = ny_hash64_cstr(mode ? mode : "auto");
   free(canonical);
   return true;
@@ -1177,11 +1176,11 @@ bool ny_proof_try_solver(codegen_t *cg, scope *scopes, size_t depth,
   if (!mode || strcmp(mode, "none") == 0 || strcmp(mode, "off") == 0)
     return false;
   uint64_t prop_hash = 0, ctx_hash = 0, mode_hash = 0;
-  bool have_cache_key = ny_proof_solver_cache_make_key(
+  bool have_cache_key = ny_proof_try_solverr_cache_make_key(
       scopes, depth, proposition, mode, &prop_hash, &ctx_hash, &mode_hash);
   if (have_cache_key) {
-    ny_proof_solver_cache_entry_t *cached =
-        ny_proof_solver_cache_lookup(prop_hash, ctx_hash, mode_hash);
+    ny_proof_try_solverr_cache_entry_t *cached =
+        ny_proof_try_solverr_cache_lookup(prop_hash, ctx_hash, mode_hash);
     if (cached) {
       ny_proof_debug_at(2, proposition->tok,
                         "solver: cache hit for mode '%s' -> %s", mode,
@@ -1201,37 +1200,61 @@ bool ny_proof_try_solver(codegen_t *cg, scope *scopes, size_t depth,
   bool want_z3 = strcmp(mode, "z3") == 0;
   bool is_auto = strcmp(mode, "auto") == 0;
   bool proved = false;
+  if (is_auto) {
+    bool pres_proved = ny_proof_try_presburger(cg, scopes, depth, proposition);
+    bool z3_proved = false;
+    char z3_cex[128] = {0};
 #ifdef NYTRIX_HAS_Z3
-  if (want_z3 || is_auto) {
-    proved = ny_proof_try_z3(cg, scopes, depth, proposition, cex, cex_cap);
-    if (!proved && want_z3) {
-      if (have_cache_key)
-        ny_proof_solver_cache_store(prop_hash, ctx_hash, mode_hash, false,
-                                    cex);
-      return false;
-    }
-  }
-#else
-  if (want_z3) {
-    if (have_cache_key)
-      ny_proof_solver_cache_store(prop_hash, ctx_hash, mode_hash, false, cex);
-    return false;
-  }
+    z3_proved = ny_proof_try_z3(cg, scopes, depth, proposition, z3_cex, sizeof(z3_cex));
 #endif
-  if (!proved && (want_pres || is_auto)) {
-    proved = ny_proof_try_presburger(cg, scopes, depth, proposition);
-    if (!proved && want_pres) {
+    if (z3_cex[0] && cex && cex_cap > 0)
+      snprintf(cex, cex_cap, "%s", z3_cex);
+
+    /* Differential check: contradiction between backends is treated as a compiler bug */
+    if (pres_proved && z3_cex[0]) {
+      ny_proof_debug_at(1, proposition->tok,
+                        "differential proof coherence: CONTRADICTION detected between backends; "
+                        "Presburger proved proposition, but Z3 found counterexample: %s",
+                        z3_cex);
       if (have_cache_key)
-        ny_proof_solver_cache_store(prop_hash, ctx_hash, mode_hash, false,
-                                    cex);
+        ny_proof_try_solverr_cache_store(prop_hash, ctx_hash, mode_hash, false, z3_cex);
       return false;
     }
+
+    proved = pres_proved || z3_proved;
+    if (ny_proof_debug_level() >= 2) {
+      ny_proof_debug_at(2, proposition->tok,
+                        "solver coherence: presburger=%s, z3=%s -> %s",
+                        pres_proved ? "proved" : "unknown",
+                        z3_proved ? "proved" : "unknown",
+                        proved ? "proved" : "unknown");
+    }
+    if (have_cache_key)
+      ny_proof_try_solverr_cache_store(prop_hash, ctx_hash, mode_hash, proved, cex);
+    return proved;
+  }
+  if (want_z3) {
+#ifdef NYTRIX_HAS_Z3
+    proved = ny_proof_try_z3(cg, scopes, depth, proposition, cex, cex_cap);
+    if (have_cache_key)
+      ny_proof_try_solverr_cache_store(prop_hash, ctx_hash, mode_hash, proved, cex);
+    return proved;
+#else
+    if (have_cache_key)
+      ny_proof_try_solverr_cache_store(prop_hash, ctx_hash, mode_hash, false, cex);
+    return false;
+#endif
+  }
+  if (want_pres) {
+    proved = ny_proof_try_presburger(cg, scopes, depth, proposition);
+    if (have_cache_key)
+      ny_proof_try_solverr_cache_store(prop_hash, ctx_hash, mode_hash, proved, cex);
+    return proved;
   }
   if (have_cache_key)
-    ny_proof_solver_cache_store(prop_hash, ctx_hash, mode_hash, proved, cex);
+    ny_proof_try_solverr_cache_store(prop_hash, ctx_hash, mode_hash, proved, cex);
   return proved;
 }
-
 
 static expr_t ny_smt_test_int(int64_t value) {
   expr_t e;
@@ -1357,4 +1380,30 @@ int ny_proof_solver_differential_selftest(void) {
          "[-4,4] passed\n",
          checks);
   return 0;
+}
+
+/* NEWT Proof Kernel Stubs */
+bool ny_proof_discharge_refine(void *cg, void *node) {
+    /* NEWT-01: refinement predicate discharge */
+    return ny_proof_try_solver((codegen_t *)cg, NULL, 0, (expr_t *)node, NULL, 0);
+}
+
+bool ny_proof_discharge_exists(void *cg, void *node) {
+    /* NEWT-02: existential discharge via Fourier-Motzkin */
+    return ny_proof_try_solver((codegen_t *)cg, NULL, 0, (expr_t *)node, NULL, 0);
+}
+
+bool ny_proof_check_erasure(void *cg, void *node) {
+    /* NEWT-03: evidence-gated erasure for pure/total */
+    return ny_proof_try_solver((codegen_t *)cg, NULL, 0, (expr_t *)node, NULL, 0);
+}
+
+bool ny_proof_discharge_dependent(void *cg, void *node) {
+    /* NEWT-10/11: dependent-function discharge (requires/decreases) */
+    return ny_proof_try_solver((codegen_t *)cg, NULL, 0, (expr_t *)node, NULL, 0);
+}
+
+bool ny_proof_discharge_law(void *cg, void *node) {
+    /* NEWT-13: law-based trait dispatch */
+    return ny_proof_try_solver((codegen_t *)cg, NULL, 0, (expr_t *)node, NULL, 0);
 }

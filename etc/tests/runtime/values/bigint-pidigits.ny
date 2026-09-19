@@ -9,6 +9,14 @@ assert(__tagof(small_sum) == __runtime_tag("bigint"), "small add remains BigInt"
 assert(__tagof(small_product) == __runtime_tag("bigint"), "small mul remains BigInt")
 assert(__bigint_to_str(small_sum) == "3", "small add value")
 assert(__bigint_to_str(small_product) == "12", "small mul value")
+
+;; Public BigInt arithmetic may demote a result to the tagged small-int
+;; representation while retaining the static `bigint` type.  bigint(x) must
+;; remain a real normalization boundary so bigint_to_str can consume either
+;; representation.
+def demoted_mod = bigint_mod(bigint_from_int(17), bigint_from_int(10))
+assert(bigint_to_str(demoted_mod) == "7",
+   "bigint_to_str normalizes demoted small BigInt results")
 def max_small = bigint_from_str("4611686018427387903")
 def min_small = bigint_from_str("-4611686018427387904")
 def promoted_add = __bigint_add(max_small, 1)

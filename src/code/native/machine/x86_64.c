@@ -2094,6 +2094,14 @@ static bool ny_x64_nir_emit_inst(ny_x64_nir_ctx_t *c,
            ny_native_put(c->w, "\tmovl\t%eax, %eax\n\tmovb\t%r10b, %cl\n\trorl\t%cl, %eax\n") &&
            ny_x64_nir_store(c, ny_x64_nir_slot(c, in->dst));
   }
+  case NYIR_BSWAP_I64:
+    return ny_x64_nir_load_value(c, in->a) &&
+           ny_native_put(c->w, "\tbswapq\t%rax\n") &&
+           ny_x64_nir_store(c, ny_x64_nir_slot(c, in->dst));
+  case NYIR_BSWAP32_I64:
+    return ny_x64_nir_load_value(c, in->a) &&
+           ny_native_put(c->w, "\tbswapl\t%eax\n") &&
+           ny_x64_nir_store(c, ny_x64_nir_slot(c, in->dst));
   case NYIR_ADD_F64:
   case NYIR_SUB_F64:
   case NYIR_MUL_F64:
@@ -2118,10 +2126,10 @@ static bool ny_x64_nir_emit_inst(ny_x64_nir_ctx_t *c,
            ny_x64_nir_store_xmm(c, ny_x64_nir_slot(c, in->dst), 0);
   case NYIR_SIN_F64:
   case NYIR_COS_F64: {
-    char addr[64];
-    ny_x64_nir_slot_str(c, ny_x64_nir_slot(c, in->a), addr, sizeof(addr));
+    char trig_addr[64];
+    ny_x64_nir_slot_str(c, ny_x64_nir_slot(c, in->a), trig_addr, sizeof(trig_addr));
     return ny_native_printf(c->w, "\tfldl\t%s\n\tf%s\n\tfstpl\t-%d(%%rbp)\n",
-                            addr, in->op == NYIR_SIN_F64 ? "sin" : "cos",
+                            trig_addr, in->op == NYIR_SIN_F64 ? "sin" : "cos",
                             ny_x64_nir_slot(c, in->dst));
   }
   case NYIR_ADD_F32:
@@ -2172,12 +2180,12 @@ static bool ny_x64_nir_emit_inst(ny_x64_nir_ctx_t *c,
            ny_x64_nir_store(c, ny_x64_nir_slot(c, in->dst));
   }
   case NYIR_CMP_F64: {
-    char unordered[96];
-    char done[96];
-    snprintf(unordered, sizeof(unordered), ".Lnyir_%s_fcmp_unordered_%d",
-             c->label_prefix, in->dst);
-    snprintf(done, sizeof(done), ".Lnyir_%s_fcmp_done_%d",
-             c->label_prefix, in->dst);
+    char unordered[256];
+    char done[256];
+    snprintf(unordered, sizeof(unordered), ".Lnyir_%s_fcmp_unordered_%zu",
+             c->label_prefix, idx);
+    snprintf(done, sizeof(done), ".Lnyir_%s_fcmp_done_%zu",
+             c->label_prefix, idx);
     int unordered_result = in->cmp == NYIR_CMP_NE ? 1 : 0;
     return ny_x64_nir_load_xmm(c, ny_x64_nir_slot(c, in->a), 0) &&
            ny_x64_nir_load_xmm(c, ny_x64_nir_slot(c, in->b), 1) &&
@@ -2189,12 +2197,12 @@ static bool ny_x64_nir_emit_inst(ny_x64_nir_ctx_t *c,
            ny_x64_nir_store(c, ny_x64_nir_slot(c, in->dst));
   }
   case NYIR_CMP_F32: {
-    char unordered[96];
-    char done[96];
-    snprintf(unordered, sizeof(unordered), ".Lnyir_%s_fcmp_unordered_%d",
-             c->label_prefix, in->dst);
-    snprintf(done, sizeof(done), ".Lnyir_%s_fcmp_done_%d",
-             c->label_prefix, in->dst);
+    char unordered[256];
+    char done[256];
+    snprintf(unordered, sizeof(unordered), ".Lnyir_%s_fcmp_unordered_%zu",
+             c->label_prefix, idx);
+    snprintf(done, sizeof(done), ".Lnyir_%s_fcmp_done_%zu",
+             c->label_prefix, idx);
     int unordered_result = in->cmp == NYIR_CMP_NE ? 1 : 0;
     return ny_x64_nir_load_xmm_f32(c, ny_x64_nir_slot(c, in->a), 0) &&
            ny_x64_nir_load_xmm_f32(c, ny_x64_nir_slot(c, in->b), 1) &&
@@ -2860,6 +2868,12 @@ static bool ny_x64_mach_scalar_supported(const ny_mach_func_t *mach,
           !ny_x64_mach_is_f64_operand(mach, &in->src0))
         return false;
       break;
+    case NY_MACH_BSWAP64:
+    case NY_MACH_BSWAP32:
+      if (!ny_x64_mach_is_i64(mach, &in->dst) ||
+          !ny_x64_mach_is_i64(mach, &in->src0))
+        return false;
+      break;
     case NY_MACH_LOAD:
       if ((!ny_x64_mach_is_i64(mach, &in->dst) &&
            !ny_x64_mach_is_float(mach, &in->dst)) ||
@@ -3308,6 +3322,14 @@ bool ny_native_x86_64_emit_mach_scalar(
                               a, b_off, dst)) return false;
         rax_cached_off = in->dst.kind == NY_MACH_OPERAND_VREG ? dst : -1;
         break;
+      case NY_MACH_BSWAP64:
+      case NY_MACH_BSWAP32:
+        if (!ny_x64_scalar_emit_rax_load(w, &in->src0, a, rax_cached_off)) return false;
+        if (!ny_native_printf(w, "\t%s\t%%%s\n\tmovq\t%%rax, -%d(%%rbp)\n",
+                              in->opcode == NY_MACH_BSWAP64 ? "bswapq" : "bswapl",
+                              in->opcode == NY_MACH_BSWAP64 ? "rax" : "eax", dst)) return false;
+        rax_cached_off = in->dst.kind == NY_MACH_OPERAND_VREG ? dst : -1;
+        break;
       case NY_MACH_SELECT: {
         int false_off = ny_x64_mach_offset(mach, &in->src2);
         if (!ny_native_printf(w,
@@ -3323,8 +3345,8 @@ bool ny_native_x86_64_emit_mach_scalar(
           const char *cmp = ny_x64_mach_is_f32(mach, &in->src0) ? "ucomiss" : "ucomisd";
           const char *move = ny_x64_mach_is_f32(mach, &in->src0) ? "movss" : "movsd";
           int unordered_result = in->condition == NY_MACH_COND_NE ? 1 : 0;
-          char unordered[192];
-          char done[192];
+          char unordered[384];
+          char done[384];
           snprintf(unordered, sizeof(unordered), ".Lny_mach_fcmp_unordered_%s_%u",
                    name, in->dst.as.reg);
           snprintf(done, sizeof(done), ".Lny_mach_fcmp_done_%s_%u", name,

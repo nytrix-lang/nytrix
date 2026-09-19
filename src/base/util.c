@@ -68,7 +68,13 @@ bool ny_compiler_asserts_enabled(void) {
   static int cached = -1;
   if (cached >= 0)
     return cached != 0;
-  cached = ny_env_enabled("NYTRIX_COMPILER_ASSERTS") ? 1 : 0;
+  const char *env = getenv("NYTRIX_COMPILER_ASSERTS");
+  if (env && *env) {
+    cached = ny_env_enabled("NYTRIX_COMPILER_ASSERTS") ? 1 : 0;
+  } else {
+    /* Always-on by default unless NYTRIX_NO_COMPILER_ASSERTS is set */
+    cached = ny_env_enabled("NYTRIX_NO_COMPILER_ASSERTS") ? 0 : 1;
+  }
   return cached != 0;
 }
 
@@ -89,7 +95,45 @@ void ny_compiler_assert_fail(const char *file, int line, const char *func, const
   }
   fprintf(stderr, "  hint: rerun with --dump-on-error or keep NYTRIX_COMPILER_ASSERTS=1 under stress\n");
   fflush(stderr);
-  abort();
+  if (getenv("NYTRIX_COMPILER_ASSERT_ABORT") &&
+      strcmp(getenv("NYTRIX_COMPILER_ASSERT_ABORT"), "0") != 0) {
+    abort();
+  }
+  exit(1);
+}
+
+void ny_compiler_invariant_fail(const char *file, int line, const char *func,
+                                const char *invariant_name,
+                                const char *src_file, int src_line, int src_col,
+                                const char *module_or_fn,
+                                const char *state_detail,
+                                const char *fmt, ...) {
+  char detail[512] = {0};
+  if (fmt && *fmt) {
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(detail, sizeof(detail), fmt, ap);
+    va_end(ap);
+  }
+  fprintf(stderr, "%s[E9001] Internal compiler invariant failed:%s %s\n",
+          clr(NY_CLR_RED), clr(NY_CLR_RESET),
+          invariant_name ? invariant_name : "unspecified invariant");
+  if (src_file && src_line > 0)
+    fprintf(stderr, "  source: %s:%d:%d\n", src_file, src_line, src_col > 0 ? src_col : 1);
+  if (module_or_fn && *module_or_fn)
+    fprintf(stderr, "  context: %s\n", module_or_fn);
+  if (state_detail && *state_detail)
+    fprintf(stderr, "  state: %s\n", state_detail);
+  if (detail[0])
+    fprintf(stderr, "  detail: %s\n", detail);
+  fprintf(stderr, "  location: %s:%d in %s\n",
+          file ? file : "<unknown>", line, func ? func : "<unknown>");
+  fflush(stderr);
+  if (getenv("NYTRIX_COMPILER_ASSERT_ABORT") &&
+      strcmp(getenv("NYTRIX_COMPILER_ASSERT_ABORT"), "0") != 0) {
+    abort();
+  }
+  exit(1);
 }
 
 bool ny_extract_line(const char *src, int line, const char **out_start, size_t *out_len) {

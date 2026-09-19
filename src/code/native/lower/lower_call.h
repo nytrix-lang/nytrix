@@ -3,6 +3,14 @@ typedef struct {
   int64_t value;
 } ny_native_proof_binding_t;
 
+static inline bool ny_native_nir_size_fits_i64(size_t n) {
+  return n <= (size_t)INT64_MAX;
+}
+
+static inline bool ny_native_nir_size_fits_tagged_i64(size_t n) {
+  return n <= ((size_t)INT64_MAX >> 1);
+}
+
 static bool ny_native_proof_binding_range(void *ctx, const char *name,
                                           int64_t *lo, int64_t *hi) {
   const ny_native_proof_binding_t *binding = ctx;
@@ -45,44 +53,6 @@ static bool ny_native_nir_leaf_in(const char *leaf, const char *const *set,
  * exposes the ABI fact.  Recover it structurally so callers do not append
  * dynamic value metadata to a raw two-argument function (which shifts the
  * remaining arguments and corrupts the call). */
-static bool ny_native_nir_param_has_scalar_op_expr(const expr_t *e,
-                                                   const char *param) {
-  if (!e || !param)
-    return false;
-  if (e->kind == NY_E_BINARY && e->as.binary.op) {
-    const char *op = e->as.binary.op;
-    bool scalar_op = strcmp(op, "+") == 0 || strcmp(op, "-") == 0 ||
-                     strcmp(op, "*") == 0 || strcmp(op, "/") == 0 ||
-                     strcmp(op, "%") == 0 || strcmp(op, "<<") == 0 ||
-                     strcmp(op, ">>") == 0 || strcmp(op, "&") == 0 ||
-                     strcmp(op, "|") == 0 || strcmp(op, "^") == 0 ||
-                     strcmp(op, "==") == 0 || strcmp(op, "!=") == 0 ||
-                     strcmp(op, "<") == 0 || strcmp(op, "<=") == 0 ||
-                     strcmp(op, ">") == 0 || strcmp(op, ">=") == 0;
-    if (scalar_op) {
-      const expr_t *l = e->as.binary.left;
-      const expr_t *r = e->as.binary.right;
-      if ((l && l->kind == NY_E_IDENT && l->as.ident.name &&
-           strcmp(l->as.ident.name, param) == 0) ||
-          (r && r->kind == NY_E_IDENT && r->as.ident.name &&
-           strcmp(r->as.ident.name, param) == 0))
-        return true;
-    }
-    return ny_native_nir_param_has_scalar_op_expr(e->as.binary.left, param) ||
-           ny_native_nir_param_has_scalar_op_expr(e->as.binary.right, param);
-  }
-  if (e->kind == NY_E_UNARY)
-    return ny_native_nir_param_has_scalar_op_expr(e->as.unary.right, param);
-  if (e->kind == NY_E_LOGICAL)
-    return ny_native_nir_param_has_scalar_op_expr(e->as.logical.left, param) ||
-           ny_native_nir_param_has_scalar_op_expr(e->as.logical.right, param);
-  if (e->kind == NY_E_TERNARY)
-    return ny_native_nir_param_has_scalar_op_expr(e->as.ternary.cond, param) ||
-           ny_native_nir_param_has_scalar_op_expr(e->as.ternary.true_expr, param) ||
-           ny_native_nir_param_has_scalar_op_expr(e->as.ternary.false_expr, param);
-  return false;
-}
-
 static bool ny_native_nir_untyped_param_is_raw(const stmt_t *fn,
                                                const char *param) {
   /*
@@ -101,7 +71,9 @@ static bool ny_native_nir_untyped_param_is_raw(const stmt_t *fn,
         strcmp(fn->as.fn.params.data[i].name, param) != 0)
       continue;
     const ny_expr_semantic_t *sem = &fn->as.fn.params.data[i].semantic;
-    return sem->resolved && sem->rep == NY_SEM_REP_RAW_INT;
+    return sem->resolved && (sem->rep == NY_SEM_REP_RAW_INT ||
+                             sem->rep == NY_SEM_REP_F64 ||
+                             sem->rep == NY_SEM_REP_F32);
   }
   return false;
 }
@@ -124,6 +96,72 @@ static bool ny_native_nir_mapped_proof_holds(const char *proof_type,
   return decision == 1;
 }
 
+/* Inline the overwhelmingly common append-to-capacity path for scalar lists.
+ * A native scalar list is a typed-buffer data pointer with the canonical
+ * 32-byte header immediately before the data: count @ -24, elem_size @ -16,
+ * capacity @ -8.  The slow runtime helper is still authoritative for the
+ * initial descriptor-to-i64 compaction and every reallocation; once capacity
+ * exists, appending an i64 needs only three header loads, one element store,
+ * and one count store. */
+static int ny_native_nir_emit_scalar_list_append_fast(
+    ny_native_nir_builder_t *b, int list, int value, int known_count) {
+  if (!b || list < 0 || value < 0)
+    return -1;
+  int neg24 = ny_native_nir_emit_const(b, -24);
+  int neg8 = ny_native_nir_emit_const(b, -8);
+  int eight = ny_native_nir_emit_const(b, 8);
+  int one = ny_native_nir_emit_const(b, 1);
+  if (neg24 < 0 || neg8 < 0 || eight < 0 || one < 0)
+    return -1;
+
+  int count_addr = ny_native_nir_emit_add_i64(b, list, neg24);
+  int cap_addr = ny_native_nir_emit_add_i64(b, list, neg8);
+  if (count_addr < 0 || cap_addr < 0)
+    return -1;
+  /* The caller only selects this helper for a proven scalar list.  Reuse the
+   * lowering-time length fact when available instead of re-reading count from
+   * the header on every append; the header store below remains authoritative
+   * for runtime consumers. */
+  int count = known_count >= 0 ? known_count
+                               : ny_native_nir_emit_load_i64(b, count_addr);
+  int capacity = ny_native_nir_emit_load_i64(b, cap_addr);
+  if (count < 0 || capacity < 0)
+    return -1;
+
+  int can_fast = ny_native_nir_emit_cmp_i64(b, NYIR_CMP_LT, count, capacity);
+  int result_slot = ny_native_nir_temp_slot(b);
+  if (can_fast < 0 || result_slot < 0)
+    return -1;
+
+  int fast_label = b->next_label++;
+  int slow_label = b->next_label++;
+  int end_label = b->next_label++;
+  if (!ny_native_nir_emit_br_if(b, can_fast, fast_label) ||
+      !ny_native_nir_emit_br(b, slow_label) ||
+      !ny_native_nir_emit_label(b, fast_label))
+    return -1;
+
+  int byte_off = ny_native_nir_push_val(b, NYIR_MUL_I64, count, eight, 0, NULL);
+  int dst = byte_off < 0 ? -1 : ny_native_nir_emit_add_i64(b, list, byte_off);
+  int next_count = ny_native_nir_emit_add_i64(b, count, one);
+  if (dst < 0 || next_count < 0 ||
+      !ny_native_nir_emit_store_i64(b, dst, value) ||
+      !ny_native_nir_emit_store_i64(b, count_addr, next_count) ||
+      !ny_native_nir_store_local_value(b, result_slot, list) ||
+      !ny_native_nir_emit_br(b, end_label) ||
+      !ny_native_nir_emit_label(b, slow_label))
+    return -1;
+
+  int slow = ny_native_nir_emit_runtime_call(
+      b, "rt_tbuf_append_i64_raw", list, value, -1, 2, 0);
+  if (slow < 0 ||
+      !ny_native_nir_store_local_value(b, result_slot, slow) ||
+      !ny_native_nir_emit_br(b, end_label) ||
+      !ny_native_nir_emit_label(b, end_label))
+    return -1;
+  return ny_native_nir_load_local_value(b, result_slot);
+}
+
 static int ny_native_nir_lower_call(ny_native_nir_builder_t *b,
                                     const expr_t *e) {
   /* `range` is variadic at the language level, while the old AST ABI models
@@ -136,6 +174,10 @@ static int ny_native_nir_lower_call(ny_native_nir_builder_t *b,
    * leaf wins over the surface spelling so aliases/attached sugar keep the
    * raw path; spelling remains the fallback for unresolved nodes. */
   const char *canon_leaf = ny_native_nir_early_leaf(e);
+  /* BigInt-domain values may use either a heap BigInt handle or the tagged
+   * small-int representation after arithmetic demotion.  Do not fold
+   * bigint(x) to an identity from static type alone: the stdlib conversion
+   * is the normalization boundary that distinguishes those representations. */
   /* The public __shl intrinsic is tagged in the interpreter ABI, but native
    * NYIR arguments are raw scalar integers. Route it through the raw adapter
    * so overflow promotes to BigInt instead of wrapping the machine shift. */
@@ -230,6 +272,13 @@ static int ny_native_nir_lower_call(ny_native_nir_builder_t *b,
       return ny_native_nir_emit_runtime_call(b, "rt_range_new", start, stop,
                                              step, 3, 0);
     }
+  }
+  if (early_leaf && strcmp(early_leaf, "unwrap") == 0 &&
+      e->as.call.args.len == 1 && !e->as.call.args.data[0].name) {
+    int v = ny_native_nir_lower_expr(b, e->as.call.args.data[0].val);
+    return v < 0 ? -1
+                 : ny_native_nir_emit_runtime_call(
+                       b, "rt_result_unwrap_raw", v, -1, -1, 1, 0);
   }
   if (early_leaf && strcmp(early_leaf, "unwrap_or") == 0 &&
       e->as.call.args.len == 2 && !e->as.call.args.data[0].name &&
@@ -393,56 +442,17 @@ static int ny_native_nir_lower_call(ny_native_nir_builder_t *b,
       (e->semantic.member_call_kind == NY_SEM_CALL_DIRECT_ATTACHED ||
        e->semantic.member_call_kind == NY_SEM_CALL_DYNAMIC_CONTRACT)) {
     const char *canonical = e->semantic.canonical_callee;
-    char attached_name[512];
-    /* Semantic lookup can choose an unrelated same-named stdlib method when
-     * the receiver is the result of a nominal `self` call.  Recover the
-     * concrete impl owner from the local declaration and prefer its attached
-     * method before constructing the direct call. */
+    /* The declaration selected by attached-method lookup is authoritative:
+     * it already contains the defining module and exact emitted symbol. */
     if (e->as.call.callee->kind == NY_E_MEMBER &&
         e->as.call.callee->as.member.target &&
         e->as.call.callee->as.member.name) {
       const stmt_t *method = ny_native_nir_find_attached_method(
           b, e->as.call.callee->as.member.target,
           e->as.call.callee->as.member.name);
-      const char *owner = ny_native_nir_expr_type_name(
-          b, e->as.call.callee->as.member.target);
-      if (method && owner && method->as.fn.name) {
-        const char *mleaf = ny_native_leaf_name(method->as.fn.name);
-        const char *fn_leaf = mleaf ? mleaf : method->as.fn.name;
-        int n = snprintf(attached_name, sizeof(attached_name), "%s.%s", owner,
-                         fn_leaf);
-        /*
-         * Only adopt the reconstructed owner.method spelling when it
-         * resolves to a declared function; an unresolvable spelling emits
-         * an undefined ny_fn_owner.method reference while the semantic
-         * canonical carries the collected qualified name.
-         */
-        const stmt_t *resolved_attached =
-            n > 0 && (size_t)n < sizeof(attached_name)
-                ? ny_native_nir_find_user_function(b, attached_name)
-                : NULL;
-        if (resolved_attached && resolved_attached->as.fn.name) {
-          canonical = resolved_attached->as.fn.name;
-        } else if (strncmp(method->as.fn.name, "std.core.", 9) == 0) {
-          /*
-           * Attached impl methods are sometimes indexed as
-           * `std.core.<owner>.<owner>.<method>` (the first owner is the
-           * module, the second is the impl type).  Resolve the canonical
-           * owner/method spelling before falling back to the semantic
-           * callee.  This keeps `str.repeat` on the real
-           * `std.core.str.repeat` body instead of emitting an uncollected
-           * `std.core.str.str.repeat` declaration.
-           */
-          int qn = snprintf(attached_name, sizeof(attached_name),
-                            "std.core.%s.%s", owner, fn_leaf);
-          if (qn > 0 && (size_t)qn < sizeof(attached_name)) {
-            const stmt_t *canonical_fn =
-                ny_native_nir_find_user_function(b, attached_name);
-            if (canonical_fn && canonical_fn->as.fn.name)
-              canonical = canonical_fn->as.fn.name;
-          }
-        }
-      }
+      if (method && method->as.fn.name)
+        /* The resolved declaration already carries its defining module. */
+        canonical = method->as.fn.name;
     }
     if (canonical && strncmp(canonical, "std.core.", 9) == 0) {
       const stmt_t *fn = ny_native_nir_find_user_function(b, canonical);
@@ -986,14 +996,16 @@ ordinary_call:
         ny_native_nir_eval_proof_i64(b, e->as.call.args.data[1].val, 0, &index);
     const expr_t *container = e->as.call.args.data[0].val;
     if (container &&
-        (container->kind == NY_E_LIST || container->kind == NY_E_TUPLE))
+        (container->kind == NY_E_LIST || container->kind == NY_E_TUPLE) &&
+        ny_native_nir_size_fits_i64(container->as.list_like.len))
       length = (int64_t)container->as.list_like.len;
     else if (container && container->kind == NY_E_IDENT &&
              container->as.ident.name) {
       const expr_t *init =
           ny_native_nir_find_top_level_value(b, container->as.ident.name);
       if (init && init != container &&
-          (init->kind == NY_E_LIST || init->kind == NY_E_TUPLE))
+          (init->kind == NY_E_LIST || init->kind == NY_E_TUPLE) &&
+          ny_native_nir_size_fits_i64(init->as.list_like.len))
         length = (int64_t)init->as.list_like.len;
     }
     bool proven = exact_index && length > 0 && index >= 0 && index < length;
@@ -1167,6 +1179,10 @@ ordinary_call:
   }
   if (c_layout && e->as.call.args.len == c_layout->field_count &&
       c_layout->field_count > 0) {
+    if (!ny_native_nir_size_fits_i64(c_layout->size)) {
+      ny_native_nir_fail(b, "native NYIR lower: C aggregate size overflows i64");
+      return -1;
+    }
     int size = ny_native_nir_emit_const(b, (int64_t)c_layout->size);
     int base = size < 0 ? -1
                         : ny_native_nir_emit_runtime_call(b, "malloc", size, -1,
@@ -1181,6 +1197,11 @@ ordinary_call:
         return -1;
       }
       int value = ny_native_nir_lower_expr(b, e->as.call.args.data[i].val);
+      if (!ny_native_nir_size_fits_tagged_i64(field->offset)) {
+        ny_native_nir_fail(
+            b, "native NYIR lower: C aggregate field offset overflows tagged i64");
+        return -1;
+      }
       int offset =
           ny_native_nir_emit_const(b, rt_tag_v((int64_t)field->offset));
       if (value < 0 || offset < 0)
@@ -1251,6 +1272,11 @@ ordinary_call:
      * both metadata arguments explicitly; raw odd values are otherwise
      * indistinguishable from tagged integers (notably one-field variants and
      * odd variant tags). */
+    if (!ny_native_nir_size_fits_tagged_i64(field_count)) {
+      ny_native_nir_fail(b,
+                         "native NYIR lower: ADT field count overflows tagged i64");
+      return -1;
+    }
     int nfields = ny_native_nir_emit_const(b, rt_tag_v((int64_t)field_count));
     int tag = ny_native_nir_emit_const(b, rt_tag_v(adt_tag));
     int object = nfields < 0 || tag < 0
@@ -1677,8 +1703,6 @@ ordinary_call:
       }
     }
     if (target_is_list && value_expr && value_expr->kind == NY_E_IDENT) {
-      const ny_native_nir_local_t *value_local =
-          ny_native_nir_find_local(b, value_expr->as.ident.name);
       if (value_local && value_local->is_any)
         value = ny_native_nir_emit_runtime_call(b, "rt_any_to_i64",
                                                 value, -1, -1, 1, 0);
@@ -2188,6 +2212,22 @@ ordinary_call:
                                                   target, key, value, 3, 0) < 0)
                 return -1;
             }
+            /* The runtime slow path may extend an empty/reserved list
+             * (list(n)[i] = v).  Keep the local length SSA slot synchronized
+             * with the authoritative tbuf header; otherwise later indexed
+             * reads can reuse the stale zero-length fact and trap even though
+             * the store materialized the element successfully. */
+            /* The list header is already proven readable here.  Reload the
+             * authoritative count directly after the slow store instead of
+             * crossing the runtime boundary merely to read hdr->count. */
+            int updated_len = ny_native_nir_emit_load_i64(b, len_addr);
+            if (updated_len < 0)
+              return -1;
+            if (local->list_len_slot < 0)
+              local->list_len_slot = b->next_local_slot++;
+            if (!ny_native_nir_store_local_value(b, local->list_len_slot,
+                                                  updated_len))
+              return -1;
             if (!ny_native_nir_emit_br(b, end_lab))
               return -1;
 
@@ -2198,16 +2238,34 @@ ordinary_call:
         }
       }
       if (local && local->is_list) {
+        int out = -1;
         if (ny_native_nir_expr_is_f64(b, value_expr)) {
           value = ny_native_nir_emit_runtime_call(b, "rt_f64_bits", value,
                                                   -1, -1, 1, 0);
           if (value < 0)
             return -1;
-          return ny_native_nir_emit_runtime_call(b, "rt_tbuf_set_f64_bits",
-                                                 target, key, value, 3, 0);
+          out = ny_native_nir_emit_runtime_call(b, "rt_tbuf_set_f64_bits",
+                                                target, key, value, 3, 0);
+        } else {
+          out = ny_native_nir_emit_runtime_call(b, "rt_tbuf_set_i64_raw",
+                                                target, key, value, 3, 0);
         }
-        return ny_native_nir_emit_runtime_call(b, "rt_tbuf_set_i64_raw",
-                                               target, key, value, 3, 0);
+        if (out < 0)
+          return -1;
+        int neg24 = ny_native_nir_emit_const(b, -24);
+        int len_addr = neg24 < 0 ? -1
+                                 : ny_native_nir_emit_add_i64(b, target, neg24);
+        int updated_len = len_addr < 0
+                              ? -1
+                              : ny_native_nir_emit_load_i64(b, len_addr);
+        if (updated_len < 0)
+          return -1;
+        if (local->list_len_slot < 0)
+          local->list_len_slot = b->next_local_slot++;
+        if (!ny_native_nir_store_local_value(b, local->list_len_slot,
+                                              updated_len))
+          return -1;
+        return out;
       }
     }
     /* An unproven view (notably `canvas.get(2)`) may be either a scalar or
@@ -2362,8 +2420,8 @@ ordinary_call:
     }
     int out =
         scalar_list
-            ? ny_native_nir_emit_runtime_call(b, "rt_tbuf_append_i64_raw",
-                                              list, value, -1, 2, 0)
+            ? ny_native_nir_emit_scalar_list_append_fast(
+                  b, list, value, ny_native_nir_peek_list_len_fact(b, list))
             : ny_native_nir_emit_runtime_call(
                   b,
                   use_tagged_append
@@ -2375,6 +2433,23 @@ ordinary_call:
     if (out < 0 || length < 0 ||
         !ny_native_nir_record_list_len_fact(b, out, length))
       return -1;
+    /* Lowering has just proved and emitted the elem-8 append ABI.  Persist
+     * that proof on an identifier receiver so a following indexed loop does
+     * not rediscover a fictitious descriptor alternative on every access.
+     * This update intentionally happens here (after call selection), because
+     * assignment classification runs before lowering the RHS and therefore
+     * cannot know which append ABI was actually chosen. */
+    if (scalar_list && target && target->kind == NY_E_IDENT &&
+        target->as.ident.name) {
+      ny_native_nir_local_t *target_local =
+          ny_native_nir_find_local(b, target->as.ident.name);
+      if (target_local) {
+        target_local->is_list = true;
+        target_local->is_dyn_list = false;
+        target_local->is_any = false;
+        target_local->semantic_rep = NY_SEM_REP_TYPED_BUFFER;
+      }
+    }
     return out;
   }
   /* The native list-length setter consumes a raw count.  Do not route its
@@ -2387,7 +2462,7 @@ ordinary_call:
     int length = ny_native_nir_lower_expr(b, e->as.call.args.data[1].val);
     return list < 0 || length < 0
                ? -1
-               : ny_native_nir_emit_runtime_call(b, "rt_list_set_len", list,
+               : ny_native_nir_emit_runtime_call(b, "rt_list_set_len_raw", list,
                                                  length, -1, 2, 0);
   }
   /* Flat std.core collection helpers share the dynamic native ABI. */
@@ -2607,6 +2682,45 @@ ordinary_call:
         }
         if (strcmp(dot + 1, "get") == 0 &&
             (e->as.call.args.len == 1 || e->as.call.args.len == 2)) {
+          const expr_t *dict_lit =
+              ny_native_nir_resolve_dict_literal(b, base_expr, 0);
+          if (dict_lit) {
+            const expr_t *k_arg = e->as.call.args.data[0].val;
+            bool is_const = false;
+            const char *kstr = NULL;
+            int64_t kint = 0;
+            bool is_int = false;
+            if (k_arg && k_arg->kind == NY_E_LITERAL) {
+              if (k_arg->as.literal.kind == NY_LIT_STR && k_arg->as.literal.as.s.data) {
+                kstr = k_arg->as.literal.as.s.data;
+                is_const = true;
+              } else if (k_arg->as.literal.kind == NY_LIT_INT && k_arg->tok.kind != NY_T_NIL) {
+                kint = k_arg->as.literal.as.i;
+                is_int = true;
+                is_const = true;
+              }
+            }
+            if (is_const) {
+              bool found = false;
+              const expr_t *val = ny_native_nir_dict_literal_lookup(
+                  dict_lit, kstr, kint, is_int, &found);
+              if (found && val) {
+                int result = ny_native_nir_lower_expr(b, val);
+                if (result >= 0 && e->semantic.resolved &&
+                    e->semantic.rep == NY_SEM_REP_RAW_INT &&
+                    !ny_native_nir_expr_is_raw_int(val)) {
+                  result = ny_native_nir_emit_runtime_call(b, "rt_any_to_i64",
+                                                           result, -1, -1, 1, 0);
+                }
+                return result;
+              }
+              if (!found && ny_native_nir_dict_literal_all_keys_constant(dict_lit)) {
+                if (e->as.call.args.len == 2)
+                  return ny_native_nir_lower_expr(b, e->as.call.args.data[1].val);
+                return ny_native_nir_emit_const(b, 0);
+              }
+            }
+          }
           int key =
               ny_native_nir_lower_dict_key(b, e->as.call.args.data[0].val);
           int fallback =
@@ -2678,6 +2792,45 @@ ordinary_call:
           (e->as.call.args.len == 1 || e->as.call.args.len == 2)) {
         expr_t target = {.kind = NY_E_IDENT, .tok = e->tok};
         target.as.ident.name = base_name;
+        const expr_t *dict_lit =
+            ny_native_nir_resolve_dict_literal(b, &target, 0);
+        if (dict_lit) {
+          const expr_t *k_arg = e->as.call.args.data[0].val;
+          bool is_const = false;
+          const char *kstr = NULL;
+          int64_t kint = 0;
+          bool is_int = false;
+          if (k_arg && k_arg->kind == NY_E_LITERAL) {
+            if (k_arg->as.literal.kind == NY_LIT_STR && k_arg->as.literal.as.s.data) {
+              kstr = k_arg->as.literal.as.s.data;
+              is_const = true;
+            } else if (k_arg->as.literal.kind == NY_LIT_INT && k_arg->tok.kind != NY_T_NIL) {
+              kint = k_arg->as.literal.as.i;
+              is_int = true;
+              is_const = true;
+            }
+          }
+          if (is_const) {
+            bool found = false;
+            const expr_t *val = ny_native_nir_dict_literal_lookup(
+                dict_lit, kstr, kint, is_int, &found);
+            if (found && val) {
+              int result = ny_native_nir_lower_expr(b, val);
+              if (result >= 0 && e->semantic.resolved &&
+                  e->semantic.rep == NY_SEM_REP_RAW_INT &&
+                  !ny_native_nir_expr_is_raw_int(val)) {
+                result = ny_native_nir_emit_runtime_call(b, "rt_any_to_i64",
+                                                         result, -1, -1, 1, 0);
+              }
+              return result;
+            }
+            if (!found && ny_native_nir_dict_literal_all_keys_constant(dict_lit)) {
+              if (e->as.call.args.len == 2)
+                return ny_native_nir_lower_expr(b, e->as.call.args.data[1].val);
+              return ny_native_nir_emit_const(b, 0);
+            }
+          }
+        }
         int dict = ny_native_nir_lower_expr(b, &target);
         if (dict >= 0) {
           int key =
@@ -2749,8 +2902,9 @@ ordinary_call:
                       list, value,
                       ny_native_nir_emit_const(b, value_is_string ? 1 : 0), 3,
                       0)
-                : ny_native_nir_emit_runtime_call(
-                      b, "rt_tbuf_append_i64_raw", list, value, -1, 2, 0);
+                : ny_native_nir_emit_scalar_list_append_fast(
+                      b, list, value,
+                      ny_native_nir_peek_list_len_fact(b, list));
         int length = ny_native_nir_emit_known_list_append_len(b, list, out);
         if (out < 0 || length < 0 ||
             !ny_native_nir_record_list_len_fact(b, out, length))
@@ -2928,9 +3082,9 @@ ordinary_call:
       return -1;
     int a = ny_native_nir_emit_runtime_call(b, "rt_value_get_tagged", win, key_a,
                                             zero, 3, 0);
-    int c = ny_native_nir_emit_runtime_call(b, "rt_value_get_tagged", win, key_b,
-                                            zero, 3, 0);
-    return ny_native_nir_emit_pair_list_i64(b, a, c);
+    int b_value = ny_native_nir_emit_runtime_call(b, "rt_value_get_tagged", win, key_b,
+                                                  zero, 3, 0);
+    return ny_native_nir_emit_pair_list_i64(b, a, b_value);
   }
   if (name &&
       (strstr(name, "x11_backend.") || strstr(name, "win32_impl.") ||
@@ -3156,8 +3310,8 @@ ordinary_call:
     const expr_t *c_expr = e->as.call.args.data[2].val;
     int a = ny_native_nir_lower_expr(b, a_expr);
     int b_arg = ny_native_nir_lower_expr(b, b_expr);
-    int c = ny_native_nir_lower_expr(b, c_expr);
-    if (a < 0 || b_arg < 0 || c < 0)
+    int c_arg = ny_native_nir_lower_expr(b, c_expr);
+    if (a < 0 || b_arg < 0 || c_arg < 0)
       return -1;
     bool use_f64 = ny_native_nir_expr_is_f64(b, a_expr) ||
                    ny_native_nir_expr_is_f64(b, b_expr) ||
@@ -3168,13 +3322,13 @@ ordinary_call:
       if (!ny_native_nir_expr_is_f64(b, b_expr))
         b_arg = ny_native_nir_emit_i64_to_f64(b, b_arg);
       if (!ny_native_nir_expr_is_f64(b, c_expr))
-        c = ny_native_nir_emit_i64_to_f64(b, c);
-      if (a < 0 || b_arg < 0 || c < 0)
+        c_arg = ny_native_nir_emit_i64_to_f64(b, c_arg);
+      if (a < 0 || b_arg < 0 || c_arg < 0)
         return -1;
       if (strcmp(canon_leaf, "lerp") == 0) {
         int diff = ny_native_nir_push_val(b, NYIR_SUB_F64, b_arg, a, 0, NULL);
         int scaled = diff < 0 ? -1
-                              : ny_native_nir_push_val(b, NYIR_MUL_F64, diff, c,
+                              : ny_native_nir_push_val(b, NYIR_MUL_F64, diff, c_arg,
                                                        0, NULL);
         return scaled < 0 ? -1
                           : ny_native_nir_push_val(b, NYIR_ADD_F64, a, scaled,
@@ -3184,14 +3338,14 @@ ordinary_call:
                                                -1, 2, NYIR_INST_F_RET_F64);
       return lo < 0 ? -1
                     : ny_native_nir_emit_runtime_call(b, "rt_f64_min",
-                                                      lo, c, -1, 2,
+                                                      lo, c_arg, -1, 2,
                                                       NYIR_INST_F_RET_F64);
     }
     if (strcmp(canon_leaf, "lerp") == 0) {
       int diff = ny_native_nir_push_val(b, NYIR_SUB_I64, b_arg, a, 0, NULL);
       int scaled =
           diff < 0 ? -1
-                   : ny_native_nir_push_val(b, NYIR_MUL_I64, diff, c, 0, NULL);
+                   : ny_native_nir_push_val(b, NYIR_MUL_I64, diff, c_arg, 0, NULL);
       return scaled < 0
                  ? -1
                  : ny_native_nir_push_val(b, NYIR_ADD_I64, a, scaled, 0, NULL);
@@ -3200,7 +3354,7 @@ ordinary_call:
                                              -1, 2, 0);
     return lo < 0 ? -1
                   : ny_native_nir_emit_runtime_call(b, "rt_i64_min", lo,
-                                                    c, -1, 2, 0);
+                                                    c_arg, -1, 2, 0);
   }
   if (!ny_native_nir_user_defined_fn(b, name) &&
       (strcmp(canon_leaf, "min") == 0 || strcmp(canon_leaf, "max") == 0)) {
@@ -3445,15 +3599,23 @@ ordinary_call:
         }
       }
     }
+    const char *strat = NULL;
+    if (e->as.call.args.len >= 2 && e->as.call.args.data[1].val &&
+        e->as.call.args.data[1].val->kind == NY_E_LITERAL &&
+        e->as.call.args.data[1].val->as.literal.kind == NY_LIT_STR &&
+        e->as.call.args.data[1].val->as.literal.as.s.data) {
+      strat = e->as.call.args.data[1].val->as.literal.as.s.data;
+    }
+    if (strat && strstr(strat, "by_fold") && !strstr(strat, "by_range") && !exact_proof_value) {
+      ny_native_nir_fail(b, "%s: obligation failed under strategy '%s'", canon_leaf, strat);
+      return -1;
+    }
     if (exact_proof_value && proof_value == 0) {
       const char *message = strcmp(canon_leaf, "prove") == 0
                                 ? "proof obligation failed"
                                 : "static assertion failed";
-      if (e->as.call.args.len >= 2 && e->as.call.args.data[1].val &&
-          e->as.call.args.data[1].val->kind == NY_E_LITERAL &&
-          e->as.call.args.data[1].val->as.literal.kind == NY_LIT_STR &&
-          e->as.call.args.data[1].val->as.literal.as.s.data)
-        message = e->as.call.args.data[1].val->as.literal.as.s.data;
+      if (strat)
+        message = strat;
       ny_native_nir_fail(b, "%s", message);
       return -1;
     }
@@ -3589,11 +3751,17 @@ ordinary_call:
   if (leaf && strcmp(leaf, "_big_is_rt") == 0 && e->as.call.args.len == 1 &&
       !e->as.call.args.data[0].name) {
     int value = ny_native_nir_lower_expr(b, e->as.call.args.data[0].val);
-    int tag = ny_native_nir_emit_const(b, TAG_BIGINT);
-    if (value < 0 || tag < 0)
+    if (value < 0)
       return -1;
-    return ny_native_nir_emit_runtime_call(b, "rt_native_has_tag", value, tag,
-                                           -1, 2, 0);
+    /* BigInt handles can lose generic `any` provenance after loop/call joins,
+     * but their concrete runtime object tag is stable.  The old has-tag fast
+     * path rejected such handles before it reached the heap tag check. */
+    int actual = ny_native_nir_emit_runtime_call(b, "rt_value_tag", value,
+                                                 -1, -1, 1, 0);
+    int want = ny_native_nir_emit_const(b, TAG_BIGINT);
+    return actual < 0 || want < 0
+               ? -1
+               : ny_native_nir_emit_cmp_i64(b, NYIR_CMP_EQ, actual, want);
   }
   if (leaf_kind == NY_NATIVE_LEAF_IS_STR &&
       !ny_native_nir_user_defined_fn(b, name)) {
@@ -3764,10 +3932,7 @@ ordinary_call:
     if ((iname_len == 8 && memcmp(iname, "cttz.i64", 8) == 0) ||
         (iname_len == 8 && memcmp(iname, "ctlz.i64", 8) == 0)) {
       int is_ctlz = (iname_len == 8 && memcmp(iname, "ctlz.i64", 8) == 0);
-      /*
-       * cttz via ctpop((x & -x) - 1); zero input yields 64.
-       * ctlz via cttz(bitreverse(x)).
-       */
+      /* Lower both intrinsics through the scalar runtime bridge. */
       if (e->as.call.args.len < 2 || e->as.call.args.len > 3 ||
           e->as.call.args.data[1].name) {
         ny_native_nir_fail(b,
@@ -3782,381 +3947,18 @@ ordinary_call:
                            : ny_native_nir_emit_const(b, 0);
       if (zero_undef < 0)
         return -1;
-      /* Use the host's well-defined scalar bit-count primitive here.  The
-       * portable SWAR fallback below remains available for targets without
-       * the runtime bridge, but the JIT/LLVM path must preserve the intrinsic
-       * zero-input contract exactly. */
-      (void)zero_undef; /* raw bridge preserves the defined zero result */
+      /* Evaluate the optional zero-undef operand for source-level effects;
+       * the runtime bridge itself uses the defined zero result (64). */
+      (void)zero_undef;
       int raw_result = ny_native_nir_emit_runtime_call(
           b, is_ctlz ? "rt_simmd_clz64_i64" : "rt_simmd_ctz64_i64", x,
           -1, -1, 1, 0);
       return raw_result;
-      if (is_ctlz) {
-        /*
-         * Bitreverse x via SWAR so cttz on the result yields ctlz.
-         */
-        int bc1 = ny_native_nir_emit_const(b, (int64_t)0x5555555555555555LL);
-        int bc2 = ny_native_nir_emit_const(b, (int64_t)0x3333333333333333LL);
-        int bc4 = ny_native_nir_emit_const(b, (int64_t)0x0f0f0f0f0f0f0f0fLL);
-        int bc8 = ny_native_nir_emit_const(b, (int64_t)0x00ff00ff00ff00ffLL);
-        int bc16 = ny_native_nir_emit_const(b, (int64_t)0x0000ffff0000ffffLL);
-        int b1 = ny_native_nir_emit_const(b, 1);
-        int b2c = ny_native_nir_emit_const(b, 2);
-        int b4c = ny_native_nir_emit_const(b, 4);
-        int b8 = ny_native_nir_emit_const(b, 8);
-        int b16 = ny_native_nir_emit_const(b, 16);
-        int b32 = ny_native_nir_emit_const(b, 32);
-        if (bc1 < 0 || bc2 < 0 || bc4 < 0 || bc8 < 0 || bc16 < 0 || b1 < 0 ||
-            b2c < 0 || b4c < 0 || b8 < 0 || b16 < 0 || b32 < 0)
-          return -1;
-        int bm63 = ny_native_nir_emit_const(b, (int64_t)0x7fffffffffffffffLL);
-        int bm62 = ny_native_nir_emit_const(b, (int64_t)0x3fffffffffffffffLL);
-        int bm60 = ny_native_nir_emit_const(b, (int64_t)0x0fffffffffffffffLL);
-        int bm56 = ny_native_nir_emit_const(b, (int64_t)0x00ffffffffffffffLL);
-        int bm48 = ny_native_nir_emit_const(b, (int64_t)0x0000ffffffffffffLL);
-        if (bm63 < 0 || bm62 < 0 || bm60 < 0 || bm56 < 0 || bm48 < 0)
-          return -1;
-        /*
-         * SWAR bit-reverse steps.
-         */
-        int br;
-        br = nyir_emit(
-            &b->nyir,
-            (nyir_inst_t){.op = NYIR_SAR_I64, .dst = -1, .a = x, .b = b1});
-        if (br < 0)
-          return -1;
-        br = nyir_emit(
-            &b->nyir,
-            (nyir_inst_t){.op = NYIR_AND_I64, .dst = -1, .a = br, .b = bm63});
-        if (br < 0)
-          return -1;
-        br = nyir_emit(
-            &b->nyir,
-            (nyir_inst_t){.op = NYIR_AND_I64, .dst = -1, .a = br, .b = bc1});
-        if (br < 0)
-          return -1;
-        int bl = nyir_emit(
-            &b->nyir,
-            (nyir_inst_t){.op = NYIR_AND_I64, .dst = -1, .a = x, .b = bc1});
-        if (bl < 0)
-          return -1;
-        bl = nyir_emit(
-            &b->nyir,
-            (nyir_inst_t){.op = NYIR_SHL_I64, .dst = -1, .a = bl, .b = b1});
-        if (bl < 0)
-          return -1;
-        x = nyir_emit(
-            &b->nyir,
-            (nyir_inst_t){.op = NYIR_OR_I64, .dst = -1, .a = br, .b = bl});
-        if (x < 0)
-          return -1;
-        br = nyir_emit(
-            &b->nyir,
-            (nyir_inst_t){.op = NYIR_SAR_I64, .dst = -1, .a = x, .b = b2c});
-        if (br < 0)
-          return -1;
-        br = nyir_emit(
-            &b->nyir,
-            (nyir_inst_t){.op = NYIR_AND_I64, .dst = -1, .a = br, .b = bm62});
-        if (br < 0)
-          return -1;
-        br = nyir_emit(
-            &b->nyir,
-            (nyir_inst_t){.op = NYIR_AND_I64, .dst = -1, .a = br, .b = bc2});
-        if (br < 0)
-          return -1;
-        bl = nyir_emit(
-            &b->nyir,
-            (nyir_inst_t){.op = NYIR_AND_I64, .dst = -1, .a = x, .b = bc2});
-        if (bl < 0)
-          return -1;
-        bl = nyir_emit(
-            &b->nyir,
-            (nyir_inst_t){.op = NYIR_SHL_I64, .dst = -1, .a = bl, .b = b2c});
-        if (bl < 0)
-          return -1;
-        x = nyir_emit(
-            &b->nyir,
-            (nyir_inst_t){.op = NYIR_OR_I64, .dst = -1, .a = br, .b = bl});
-        if (x < 0)
-          return -1;
-        br = nyir_emit(
-            &b->nyir,
-            (nyir_inst_t){.op = NYIR_SAR_I64, .dst = -1, .a = x, .b = b4c});
-        if (br < 0)
-          return -1;
-        br = nyir_emit(
-            &b->nyir,
-            (nyir_inst_t){.op = NYIR_AND_I64, .dst = -1, .a = br, .b = bm60});
-        if (br < 0)
-          return -1;
-        br = nyir_emit(
-            &b->nyir,
-            (nyir_inst_t){.op = NYIR_AND_I64, .dst = -1, .a = br, .b = bc4});
-        if (br < 0)
-          return -1;
-        bl = nyir_emit(
-            &b->nyir,
-            (nyir_inst_t){.op = NYIR_AND_I64, .dst = -1, .a = x, .b = bc4});
-        if (bl < 0)
-          return -1;
-        bl = nyir_emit(
-            &b->nyir,
-            (nyir_inst_t){.op = NYIR_SHL_I64, .dst = -1, .a = bl, .b = b4c});
-        if (bl < 0)
-          return -1;
-        x = nyir_emit(
-            &b->nyir,
-            (nyir_inst_t){.op = NYIR_OR_I64, .dst = -1, .a = br, .b = bl});
-        if (x < 0)
-          return -1;
-        br = nyir_emit(
-            &b->nyir,
-            (nyir_inst_t){.op = NYIR_SAR_I64, .dst = -1, .a = x, .b = b8});
-        if (br < 0)
-          return -1;
-        br = nyir_emit(
-            &b->nyir,
-            (nyir_inst_t){.op = NYIR_AND_I64, .dst = -1, .a = br, .b = bm56});
-        if (br < 0)
-          return -1;
-        br = nyir_emit(
-            &b->nyir,
-            (nyir_inst_t){.op = NYIR_AND_I64, .dst = -1, .a = br, .b = bc8});
-        if (br < 0)
-          return -1;
-        bl = nyir_emit(
-            &b->nyir,
-            (nyir_inst_t){.op = NYIR_AND_I64, .dst = -1, .a = x, .b = bc8});
-        if (bl < 0)
-          return -1;
-        bl = nyir_emit(
-            &b->nyir,
-            (nyir_inst_t){.op = NYIR_SHL_I64, .dst = -1, .a = bl, .b = b8});
-        if (bl < 0)
-          return -1;
-        x = nyir_emit(
-            &b->nyir,
-            (nyir_inst_t){.op = NYIR_OR_I64, .dst = -1, .a = br, .b = bl});
-        if (x < 0)
-          return -1;
-        br = nyir_emit(
-            &b->nyir,
-            (nyir_inst_t){.op = NYIR_SAR_I64, .dst = -1, .a = x, .b = b16});
-        if (br < 0)
-          return -1;
-        br = nyir_emit(
-            &b->nyir,
-            (nyir_inst_t){.op = NYIR_AND_I64, .dst = -1, .a = br, .b = bm48});
-        if (br < 0)
-          return -1;
-        br = nyir_emit(
-            &b->nyir,
-            (nyir_inst_t){.op = NYIR_AND_I64, .dst = -1, .a = br, .b = bc16});
-        if (br < 0)
-          return -1;
-        bl = nyir_emit(
-            &b->nyir,
-            (nyir_inst_t){.op = NYIR_AND_I64, .dst = -1, .a = x, .b = bc16});
-        if (bl < 0)
-          return -1;
-        bl = nyir_emit(
-            &b->nyir,
-            (nyir_inst_t){.op = NYIR_SHL_I64, .dst = -1, .a = bl, .b = b16});
-        if (bl < 0)
-          return -1;
-        x = nyir_emit(
-            &b->nyir,
-            (nyir_inst_t){.op = NYIR_OR_I64, .dst = -1, .a = br, .b = bl});
-        if (x < 0)
-          return -1;
-        /*
-         * final 32-bit swap
-         */
-        br = nyir_emit(
-            &b->nyir,
-            (nyir_inst_t){.op = NYIR_SAR_I64, .dst = -1, .a = x, .b = b32});
-        if (br < 0)
-          return -1;
-        x = nyir_emit(&b->nyir,
-                      (nyir_inst_t){.op = NYIR_AND_I64,
-                                    .dst = -1,
-                                    .a = x,
-                                    .b = ny_native_nir_emit_const(
-                                        b, (int64_t)0x00000000FFFFFFFFLL)});
-        if (x < 0)
-          return -1;
-        x = nyir_emit(
-            &b->nyir,
-            (nyir_inst_t){.op = NYIR_SHL_I64, .dst = -1, .a = x, .b = b32});
-        if (x < 0)
-          return -1;
-        x = nyir_emit(
-            &b->nyir,
-            (nyir_inst_t){.op = NYIR_OR_I64, .dst = -1, .a = x, .b = br});
-        if (x < 0)
-          return -1;
-      }
-      int zero = ny_native_nir_emit_const(b, 0);
-      int one = ny_native_nir_emit_const(b, 1);
-      int sixtyfour = ny_native_nir_emit_const(b, 64);
-      if (zero < 0 || one < 0 || sixtyfour < 0)
-        return -1;
-      /*
-       * is_zero = (x == 0)
-       */
-      int is_zero = nyir_emit(&b->nyir, (nyir_inst_t){.op = NYIR_CMP_I64,
-                                                      .dst = -1,
-                                                      .a = x,
-                                                      .b = zero,
-                                                      .cmp = NYIR_CMP_EQ});
-      if (is_zero < 0)
-        return -1;
-      /*
-       * lowest = x & -x  (0 - x for negate)
-       */
-      int neg = nyir_emit(
-          &b->nyir,
-          (nyir_inst_t){.op = NYIR_SUB_I64, .dst = -1, .a = zero, .b = x});
-      if (neg < 0)
-        return -1;
-      int lowest = nyir_emit(
-          &b->nyir,
-          (nyir_inst_t){.op = NYIR_AND_I64, .dst = -1, .a = x, .b = neg});
-      if (lowest < 0)
-        return -1;
-      int lm1 = nyir_emit(
-          &b->nyir,
-          (nyir_inst_t){.op = NYIR_SUB_I64, .dst = -1, .a = lowest, .b = one});
-      if (lm1 < 0)
-        return -1;
-      /*
-       * Inline SWAR popcount of lm1 (same as ctpop).
-       */
-      int c1 = ny_native_nir_emit_const(b, (int64_t)0x5555555555555555LL);
-      int c2 = ny_native_nir_emit_const(b, (int64_t)0x3333333333333333LL);
-      int c4 = ny_native_nir_emit_const(b, (int64_t)0x0f0f0f0f0f0f0f0fLL);
-      int two = ny_native_nir_emit_const(b, 2);
-      int four = ny_native_nir_emit_const(b, 4);
-      int eight = ny_native_nir_emit_const(b, 8);
-      int sixteen = ny_native_nir_emit_const(b, 16);
-      int thirtytwo = ny_native_nir_emit_const(b, 32);
-      int mask7f = ny_native_nir_emit_const(b, 0x7f);
-      if (c1 < 0 || c2 < 0 || c4 < 0 || two < 0 || four < 0 || eight < 0 ||
-          sixteen < 0 || thirtytwo < 0 || mask7f < 0)
-        return -1;
-      int t = nyir_emit(
-          &b->nyir,
-          (nyir_inst_t){.op = NYIR_SAR_I64, .dst = -1, .a = lm1, .b = one});
-      if (t < 0)
-        return -1;
-      t = nyir_emit(
-          &b->nyir,
-          (nyir_inst_t){.op = NYIR_AND_I64, .dst = -1, .a = t, .b = c1});
-      if (t < 0)
-        return -1;
-      int px = nyir_emit(
-          &b->nyir,
-          (nyir_inst_t){.op = NYIR_SUB_I64, .dst = -1, .a = lm1, .b = t});
-      if (px < 0)
-        return -1;
-      int a = nyir_emit(
-          &b->nyir,
-          (nyir_inst_t){.op = NYIR_AND_I64, .dst = -1, .a = px, .b = c2});
-      int b2 = nyir_emit(
-          &b->nyir,
-          (nyir_inst_t){.op = NYIR_SAR_I64, .dst = -1, .a = px, .b = two});
-      if (a < 0 || b2 < 0)
-        return -1;
-      b2 = nyir_emit(
-          &b->nyir,
-          (nyir_inst_t){.op = NYIR_AND_I64, .dst = -1, .a = b2, .b = c2});
-      if (b2 < 0)
-        return -1;
-      px = nyir_emit(
-          &b->nyir,
-          (nyir_inst_t){.op = NYIR_ADD_I64, .dst = -1, .a = a, .b = b2});
-      if (px < 0)
-        return -1;
-      t = nyir_emit(
-          &b->nyir,
-          (nyir_inst_t){.op = NYIR_SAR_I64, .dst = -1, .a = px, .b = four});
-      if (t < 0)
-        return -1;
-      px = nyir_emit(
-          &b->nyir,
-          (nyir_inst_t){.op = NYIR_ADD_I64, .dst = -1, .a = px, .b = t});
-      if (px < 0)
-        return -1;
-      px = nyir_emit(
-          &b->nyir,
-          (nyir_inst_t){.op = NYIR_AND_I64, .dst = -1, .a = px, .b = c4});
-      if (px < 0)
-        return -1;
-      t = nyir_emit(
-          &b->nyir,
-          (nyir_inst_t){.op = NYIR_SAR_I64, .dst = -1, .a = px, .b = eight});
-      if (t < 0)
-        return -1;
-      px = nyir_emit(
-          &b->nyir,
-          (nyir_inst_t){.op = NYIR_ADD_I64, .dst = -1, .a = px, .b = t});
-      if (px < 0)
-        return -1;
-      t = nyir_emit(
-          &b->nyir,
-          (nyir_inst_t){.op = NYIR_SAR_I64, .dst = -1, .a = px, .b = sixteen});
-      if (t < 0)
-        return -1;
-      px = nyir_emit(
-          &b->nyir,
-          (nyir_inst_t){.op = NYIR_ADD_I64, .dst = -1, .a = px, .b = t});
-      if (px < 0)
-        return -1;
-      t = nyir_emit(&b->nyir, (nyir_inst_t){.op = NYIR_SAR_I64,
-                                            .dst = -1,
-                                            .a = px,
-                                            .b = thirtytwo});
-      if (t < 0)
-        return -1;
-      px = nyir_emit(
-          &b->nyir,
-          (nyir_inst_t){.op = NYIR_ADD_I64, .dst = -1, .a = px, .b = t});
-      if (px < 0)
-        return -1;
-      int pop = nyir_emit(
-          &b->nyir,
-          (nyir_inst_t){.op = NYIR_AND_I64, .dst = -1, .a = px, .b = mask7f});
-      if (pop < 0)
-        return -1;
-      /*
-       * result = is_zero ? 64 : pop  — use select via arithmetic:
-       * is_zero * 64 + (1-is_zero)*pop, but we only have binary ops.
-       * (is_zero * 64) | ((is_zero ^ 1) * pop)
-       */
-      int notz = nyir_emit(
-          &b->nyir,
-          (nyir_inst_t){.op = NYIR_XOR_I64, .dst = -1, .a = is_zero, .b = one});
-      if (notz < 0)
-        return -1;
-      int term0 = nyir_emit(&b->nyir, (nyir_inst_t){.op = NYIR_MUL_I64,
-                                                    .dst = -1,
-                                                    .a = is_zero,
-                                                    .b = sixtyfour});
-      int term1 = nyir_emit(
-          &b->nyir,
-          (nyir_inst_t){.op = NYIR_MUL_I64, .dst = -1, .a = notz, .b = pop});
-      if (term0 < 0 || term1 < 0)
-        return -1;
-      return nyir_emit(
-          &b->nyir,
-          (nyir_inst_t){.op = NYIR_ADD_I64, .dst = -1, .a = term0, .b = term1});
     }
     if ((iname_len == 8 && memcmp(iname, "umax.i64", 8) == 0) ||
         (iname_len == 8 && memcmp(iname, "umin.i64", 8) == 0)) {
-      /*
-       * Treat as signed for Nytrix i64 values in native path (same select).
-       */
+      /* Compare as uint64_t while retaining the signed NYIR comparison:
+       * flipping bit 63 maps unsigned ordering onto signed ordering. */
       if (e->as.call.args.len != 3 || e->as.call.args.data[1].name ||
           e->as.call.args.data[2].name) {
         ny_native_nir_fail(
@@ -4168,23 +3970,34 @@ ordinary_call:
       int y = ny_native_nir_lower_expr(b, e->as.call.args.data[2].val);
       if (x < 0 || y < 0)
         return -1;
-      int c = nyir_emit(
+      int signbit = ny_native_nir_emit_const(b, INT64_MIN);
+      if (signbit < 0)
+        return -1;
+      int ux = nyir_emit(
+          &b->nyir,
+          (nyir_inst_t){.op = NYIR_XOR_I64, .dst = -1, .a = x, .b = signbit});
+      int uy = nyir_emit(
+          &b->nyir,
+          (nyir_inst_t){.op = NYIR_XOR_I64, .dst = -1, .a = y, .b = signbit});
+      if (ux < 0 || uy < 0)
+        return -1;
+      int cond = nyir_emit(
           &b->nyir, (nyir_inst_t){.op = NYIR_CMP_I64,
                                   .dst = -1,
-                                  .a = x,
-                                  .b = y,
+                                  .a = ux,
+                                  .b = uy,
                                   .cmp = is_max ? NYIR_CMP_GT : NYIR_CMP_LT});
       int one = ny_native_nir_emit_const(b, 1);
-      if (c < 0 || one < 0)
+      if (cond < 0 || one < 0)
         return -1;
       int nc = nyir_emit(
           &b->nyir,
-          (nyir_inst_t){.op = NYIR_XOR_I64, .dst = -1, .a = c, .b = one});
+          (nyir_inst_t){.op = NYIR_XOR_I64, .dst = -1, .a = cond, .b = one});
       if (nc < 0)
         return -1;
       int t0 = nyir_emit(
           &b->nyir,
-          (nyir_inst_t){.op = NYIR_MUL_I64, .dst = -1, .a = c, .b = x});
+          (nyir_inst_t){.op = NYIR_MUL_I64, .dst = -1, .a = cond, .b = x});
       int t1 = nyir_emit(
           &b->nyir,
           (nyir_inst_t){.op = NYIR_MUL_I64, .dst = -1, .a = nc, .b = y});
@@ -4211,23 +4024,23 @@ ordinary_call:
        * result = (x > y) ? x : y  via arithmetic select:
        * c = (x > y); c*x + (1-c)*y
        */
-      int c = nyir_emit(
+      int cond = nyir_emit(
           &b->nyir, (nyir_inst_t){.op = NYIR_CMP_I64,
                                   .dst = -1,
                                   .a = x,
                                   .b = y,
                                   .cmp = is_max ? NYIR_CMP_GT : NYIR_CMP_LT});
       int one = ny_native_nir_emit_const(b, 1);
-      if (c < 0 || one < 0)
+      if (cond < 0 || one < 0)
         return -1;
       int nc = nyir_emit(
           &b->nyir,
-          (nyir_inst_t){.op = NYIR_XOR_I64, .dst = -1, .a = c, .b = one});
+          (nyir_inst_t){.op = NYIR_XOR_I64, .dst = -1, .a = cond, .b = one});
       if (nc < 0)
         return -1;
       int t0 = nyir_emit(
           &b->nyir,
-          (nyir_inst_t){.op = NYIR_MUL_I64, .dst = -1, .a = c, .b = x});
+          (nyir_inst_t){.op = NYIR_MUL_I64, .dst = -1, .a = cond, .b = x});
       int t1 = nyir_emit(
           &b->nyir,
           (nyir_inst_t){.op = NYIR_MUL_I64, .dst = -1, .a = nc, .b = y});
@@ -4380,75 +4193,8 @@ ordinary_call:
       int x = ny_native_nir_lower_expr(b, e->as.call.args.data[1].val);
       if (x < 0)
         return -1;
-      /*
-       * Portable byte swap via shifts and masks (no host asm).
-       */
-      int c8 = ny_native_nir_emit_const(b, 8);
-      int c16 = ny_native_nir_emit_const(b, 16);
-      int c24 = ny_native_nir_emit_const(b, 24);
-      int c32 = ny_native_nir_emit_const(b, 32);
-      int c40 = ny_native_nir_emit_const(b, 40);
-      int c48 = ny_native_nir_emit_const(b, 48);
-      int c56 = ny_native_nir_emit_const(b, 56);
-      int mff = ny_native_nir_emit_const(b, (int64_t)0xff);
-      if (c8 < 0 || c16 < 0 || c24 < 0 || c32 < 0 || c40 < 0 || c48 < 0 ||
-          c56 < 0 || mff < 0)
-        return -1;
-      int acc = -1;
-      int shifts[] = {c56, c48, c40, c32, c24, c16, c8, -1};
-      int rshifts[] = {0, 8, 16, 24, 32, 40, 48, 56};
-      for (int bi = 0; bi < 8; ++bi) {
-        int piece = x;
-        if (rshifts[bi] > 0) {
-          int rs = ny_native_nir_emit_const(b, rshifts[bi]);
-          if (rs < 0)
-            return -1;
-          piece = nyir_emit(
-              &b->nyir,
-              (nyir_inst_t){.op = NYIR_SAR_I64, .dst = -1, .a = x, .b = rs});
-          if (piece < 0)
-            return -1;
-          /*
-           * Logical mask after SAR for high bytes
-           */
-          if (rshifts[bi] >= 32) {
-            int m = ny_native_nir_emit_const(
-                b, (int64_t)((1ULL << (64 - rshifts[bi])) - 1ULL));
-            if (m < 0)
-              return -1;
-            piece = nyir_emit(&b->nyir, (nyir_inst_t){.op = NYIR_AND_I64,
-                                                      .dst = -1,
-                                                      .a = piece,
-                                                      .b = m});
-            if (piece < 0)
-              return -1;
-          }
-        }
-        piece = nyir_emit(
-            &b->nyir,
-            (nyir_inst_t){.op = NYIR_AND_I64, .dst = -1, .a = piece, .b = mff});
-        if (piece < 0)
-          return -1;
-        if (shifts[bi] >= 0) {
-          piece = nyir_emit(&b->nyir, (nyir_inst_t){.op = NYIR_SHL_I64,
-                                                    .dst = -1,
-                                                    .a = piece,
-                                                    .b = shifts[bi]});
-          if (piece < 0)
-            return -1;
-        }
-        if (acc < 0)
-          acc = piece;
-        else {
-          acc = nyir_emit(&b->nyir, (nyir_inst_t){.op = NYIR_OR_I64,
-                                                  .dst = -1,
-                                                  .a = acc,
-                                                  .b = piece});
-          if (acc < 0)
-            return -1;
-        }
-      }
-      return acc;
+      return nyir_emit(&b->nyir, (nyir_inst_t){.op = NYIR_BSWAP_I64,
+                                               .dst = -1, .a = x});
     }
     if (iname_len == 9 && memcmp(iname, "bswap.i32", 9) == 0) {
       if (e->as.call.args.len != 2 || e->as.call.args.data[1].name) {
@@ -4458,64 +4204,8 @@ ordinary_call:
       int x = ny_native_nir_lower_expr(b, e->as.call.args.data[1].val);
       if (x < 0)
         return -1;
-      const expr_t *src = e->as.call.args.data[1].val;
-      if (src && src->kind == NY_E_LITERAL &&
-          src->as.literal.kind == NY_LIT_INT) {
-        uint32_t raw = (uint32_t)src->as.literal.as.i;
-        uint32_t swapped = ((raw & 0xffu) << 24) | ((raw & 0xff00u) << 8) |
-                           ((raw >> 8) & 0xff00u) | ((raw >> 24) & 0xffu);
-        return ny_native_nir_emit_const(b, (int64_t)swapped);
-      }
-      /* Keep the result in the raw-i64 native ABI while limiting the input
-       * to the intrinsic's 32-bit domain.  Arithmetic right shifts are safe
-       * here because every shifted piece is immediately masked. */
-      int c8 = ny_native_nir_emit_const(b, 8);
-      int c16 = ny_native_nir_emit_const(b, 16);
-      int c24 = ny_native_nir_emit_const(b, 24);
-      int mff = ny_native_nir_emit_const(b, 0xff);
-      int m32 = ny_native_nir_emit_const(b, 0xffffffffLL);
-      if (c8 < 0 || c16 < 0 || c24 < 0 || mff < 0 || m32 < 0)
-        return -1;
-      int pieces[4] = {x, x, x, x};
-      int shifts[4] = {c24, c16, c8, -1};
-      int rshifts[4] = {0, 8, 16, 24};
-      int acc = -1;
-      for (int bi = 0; bi < 4; ++bi) {
-        int piece = pieces[bi];
-        if (rshifts[bi] > 0) {
-          int rs = ny_native_nir_emit_const(b, rshifts[bi]);
-          if (rs < 0)
-            return -1;
-          piece = nyir_emit(
-              &b->nyir,
-              (nyir_inst_t){.op = NYIR_SAR_I64, .dst = -1, .a = x, .b = rs});
-          if (piece < 0)
-            return -1;
-        }
-        piece = nyir_emit(
-            &b->nyir,
-            (nyir_inst_t){.op = NYIR_AND_I64, .dst = -1, .a = piece, .b = mff});
-        if (piece < 0)
-          return -1;
-        if (shifts[bi] >= 0) {
-          piece = nyir_emit(&b->nyir, (nyir_inst_t){.op = NYIR_SHL_I64,
-                                                    .dst = -1,
-                                                    .a = piece,
-                                                    .b = shifts[bi]});
-          if (piece < 0)
-            return -1;
-        }
-        acc = acc < 0 ? piece
-                      : nyir_emit(&b->nyir, (nyir_inst_t){.op = NYIR_OR_I64,
-                                                          .dst = -1,
-                                                          .a = acc,
-                                                          .b = piece});
-        if (acc < 0)
-          return -1;
-      }
-      return nyir_emit(
-          &b->nyir,
-          (nyir_inst_t){.op = NYIR_AND_I64, .dst = -1, .a = acc, .b = m32});
+      return nyir_emit(&b->nyir, (nyir_inst_t){.op = NYIR_BSWAP32_I64,
+                                               .dst = -1, .a = x});
     }
     if ((iname_len == 8 && memcmp(iname, "fshl.i64", 8) == 0) ||
         (iname_len == 8 && memcmp(iname, "rotl.i64", 8) == 0)) {
@@ -4527,34 +4217,47 @@ ordinary_call:
         return -1;
       }
       int a_val = ny_native_nir_lower_expr(b, e->as.call.args.data[1].val);
-      int b_val =
-          is_rotl ? a_val
-                  : ny_native_nir_lower_expr(b, e->as.call.args.data[2].val);
+      int b_val = is_rotl ? a_val
+                          : ny_native_nir_lower_expr(b, e->as.call.args.data[2].val);
       int sh_val = ny_native_nir_lower_expr(
           b, e->as.call.args.data[is_rotl ? 2 : 3].val);
       if (a_val < 0 || b_val < 0 || sh_val < 0)
         return -1;
+      int c0 = ny_native_nir_emit_const(b, 0);
       int c63 = ny_native_nir_emit_const(b, 63);
       int c64 = ny_native_nir_emit_const(b, 64);
-      if (c63 < 0 || c64 < 0)
+      if (c0 < 0 || c63 < 0 || c64 < 0)
         return -1;
-      int s = nyir_emit(
+      int sh = nyir_emit(
           &b->nyir,
           (nyir_inst_t){.op = NYIR_AND_I64, .dst = -1, .a = sh_val, .b = c63});
-      int inv_s = nyir_emit(
+      int inv = sh < 0 ? -1 : nyir_emit(
           &b->nyir,
-          (nyir_inst_t){.op = NYIR_SUB_I64, .dst = -1, .a = c64, .b = sh_val});
-      int rsh = nyir_emit(
+          (nyir_inst_t){.op = NYIR_SUB_I64, .dst = -1, .a = c64, .b = sh});
+      int rsh = inv < 0 ? -1 : nyir_emit(
           &b->nyir,
-          (nyir_inst_t){.op = NYIR_AND_I64, .dst = -1, .a = inv_s, .b = c63});
-      if (s < 0 || inv_s < 0 || rsh < 0)
+          (nyir_inst_t){.op = NYIR_AND_I64, .dst = -1, .a = inv, .b = c63});
+      int nz = sh < 0 ? -1 : ny_native_nir_emit_cmp_i64(b, NYIR_CMP_NE, sh, c0);
+      if (sh < 0 || inv < 0 || rsh < 0 || nz < 0)
         return -1;
       int left = nyir_emit(
           &b->nyir,
-          (nyir_inst_t){.op = NYIR_SHL_I64, .dst = -1, .a = a_val, .b = s});
-      int right = nyir_emit(
+          (nyir_inst_t){.op = NYIR_SHL_I64, .dst = -1, .a = a_val, .b = sh});
+      int sar = nyir_emit(
           &b->nyir,
           (nyir_inst_t){.op = NYIR_SAR_I64, .dst = -1, .a = b_val, .b = rsh});
+      int sign = nyir_emit(
+          &b->nyir,
+          (nyir_inst_t){.op = NYIR_SAR_I64, .dst = -1, .a = b_val, .b = c63});
+      int fill = sign < 0 ? -1 : nyir_emit(
+          &b->nyir,
+          (nyir_inst_t){.op = NYIR_SHL_I64, .dst = -1, .a = sign, .b = sh});
+      int logical = (sar < 0 || fill < 0) ? -1 : nyir_emit(
+          &b->nyir,
+          (nyir_inst_t){.op = NYIR_XOR_I64, .dst = -1, .a = sar, .b = fill});
+      int right = logical < 0 ? -1 : nyir_emit(
+          &b->nyir,
+          (nyir_inst_t){.op = NYIR_MUL_I64, .dst = -1, .a = logical, .b = nz});
       if (left < 0 || right < 0)
         return -1;
       return nyir_emit(
@@ -4571,34 +4274,50 @@ ordinary_call:
         return -1;
       }
       int a_val = ny_native_nir_lower_expr(b, e->as.call.args.data[1].val);
-      int b_val =
-          is_rotr ? a_val
-                  : ny_native_nir_lower_expr(b, e->as.call.args.data[2].val);
+      int b_val = is_rotr ? a_val
+                          : ny_native_nir_lower_expr(b, e->as.call.args.data[2].val);
       int sh_val = ny_native_nir_lower_expr(
           b, e->as.call.args.data[is_rotr ? 2 : 3].val);
       if (a_val < 0 || b_val < 0 || sh_val < 0)
         return -1;
+      int c0 = ny_native_nir_emit_const(b, 0);
       int c63 = ny_native_nir_emit_const(b, 63);
       int c64 = ny_native_nir_emit_const(b, 64);
-      if (c63 < 0 || c64 < 0)
+      if (c0 < 0 || c63 < 0 || c64 < 0)
         return -1;
-      int s = nyir_emit(
+      int sh = nyir_emit(
           &b->nyir,
           (nyir_inst_t){.op = NYIR_AND_I64, .dst = -1, .a = sh_val, .b = c63});
-      int inv_s = nyir_emit(
+      int inv = sh < 0 ? -1 : nyir_emit(
           &b->nyir,
-          (nyir_inst_t){.op = NYIR_SUB_I64, .dst = -1, .a = c64, .b = sh_val});
-      int lsh = nyir_emit(
+          (nyir_inst_t){.op = NYIR_SUB_I64, .dst = -1, .a = c64, .b = sh});
+      int lsh = inv < 0 ? -1 : nyir_emit(
           &b->nyir,
-          (nyir_inst_t){.op = NYIR_AND_I64, .dst = -1, .a = inv_s, .b = c63});
-      if (s < 0 || inv_s < 0 || lsh < 0)
+          (nyir_inst_t){.op = NYIR_AND_I64, .dst = -1, .a = inv, .b = c63});
+      int nz = sh < 0 ? -1 : ny_native_nir_emit_cmp_i64(b, NYIR_CMP_NE, sh, c0);
+      if (sh < 0 || inv < 0 || lsh < 0 || nz < 0)
         return -1;
-      int right = nyir_emit(
+      int sar = nyir_emit(
           &b->nyir,
-          (nyir_inst_t){.op = NYIR_SAR_I64, .dst = -1, .a = a_val, .b = s});
-      int left = nyir_emit(
+          (nyir_inst_t){.op = NYIR_SAR_I64, .dst = -1, .a = b_val, .b = sh});
+      int sign = nyir_emit(
           &b->nyir,
-          (nyir_inst_t){.op = NYIR_SHL_I64, .dst = -1, .a = b_val, .b = lsh});
+          (nyir_inst_t){.op = NYIR_SAR_I64, .dst = -1, .a = b_val, .b = c63});
+      int fill0 = sign < 0 ? -1 : nyir_emit(
+          &b->nyir,
+          (nyir_inst_t){.op = NYIR_SHL_I64, .dst = -1, .a = sign, .b = lsh});
+      int fill = fill0 < 0 ? -1 : nyir_emit(
+          &b->nyir,
+          (nyir_inst_t){.op = NYIR_MUL_I64, .dst = -1, .a = fill0, .b = nz});
+      int right = (sar < 0 || fill < 0) ? -1 : nyir_emit(
+          &b->nyir,
+          (nyir_inst_t){.op = NYIR_XOR_I64, .dst = -1, .a = sar, .b = fill});
+      int left0 = nyir_emit(
+          &b->nyir,
+          (nyir_inst_t){.op = NYIR_SHL_I64, .dst = -1, .a = a_val, .b = lsh});
+      int left = left0 < 0 ? -1 : nyir_emit(
+          &b->nyir,
+          (nyir_inst_t){.op = NYIR_MUL_I64, .dst = -1, .a = left0, .b = nz});
       if (left < 0 || right < 0)
         return -1;
       return nyir_emit(
@@ -4934,7 +4653,7 @@ ordinary_call:
     int width = ny_native_nir_emit_const(b, 8);
     if (count < 0 || width < 0)
       return -1;
-    int out = ny_native_nir_emit_runtime_call(b, "rt_tbuf_new_raw", count,
+    int out = ny_native_nir_emit_runtime_call(b, "rt_tbuf_new_typed_raw", count,
                                               width, -1, 2, 0);
     int64_t const_count = 0;
     if (ny_native_nir_fold_top_level_int(b->prog, e->as.call.args.data[0].val,
@@ -4968,6 +4687,8 @@ ordinary_call:
     if (!ny_native_nir_index_fin_bound_elision(b, e, 1, buf_byte_len))
       ny_native_nir_emit_bounds_check(b, data, offset, buf_byte_len);
     int addr = ny_native_nir_emit_add_i64(b, data, offset);
+    if (addr >= 0 && b->nyir.len > 0 && b->nyir.data[b->nyir.len - 1].dst == addr)
+      b->nyir.data[b->nyir.len - 1].flags |= NYIR_INST_F_IN_BOUNDS_ADDR;
     return addr < 0 ? -1 : ny_native_nir_emit_load_f64(b, addr);
   }
   if (leaf_kind == NY_NATIVE_LEAF_F64BUF_STORE) {
@@ -4996,6 +4717,8 @@ ordinary_call:
     if (!ny_native_nir_index_fin_bound_elision(b, e, 1, buf_byte_len))
       ny_native_nir_emit_bounds_check(b, data, offset, buf_byte_len);
     int addr = ny_native_nir_emit_add_i64(b, data, offset);
+    if (addr >= 0 && b->nyir.len > 0 && b->nyir.data[b->nyir.len - 1].dst == addr)
+      b->nyir.data[b->nyir.len - 1].flags |= NYIR_INST_F_IN_BOUNDS_ADDR;
     return addr < 0
                ? -1
                : (ny_native_nir_emit_store_f64(b, addr, value) ? value : -1);
@@ -5014,7 +4737,7 @@ ordinary_call:
     int width = ny_native_nir_emit_const(b, 8);
     if (count < 0 || width < 0)
       return -1;
-    int out = ny_native_nir_emit_runtime_call(b, "rt_tbuf_new_raw", count,
+    int out = ny_native_nir_emit_runtime_call(b, "rt_tbuf_new_typed_raw", count,
                                               width, -1, 2, 0);
     /* Fold the length arg so bounds-check elision can fire on literal-count
      * buffers like i64buf_new(64) / zeros(64), matching f64buf_new. */
@@ -5048,6 +4771,8 @@ ordinary_call:
         !ny_native_nir_emit_bounds_check(b, data, offset, buf_byte_len))
       return -1;
     int addr = ny_native_nir_emit_add_i64(b, data, offset);
+    if (addr >= 0 && b->nyir.len > 0 && b->nyir.data[b->nyir.len - 1].dst == addr)
+      b->nyir.data[b->nyir.len - 1].flags |= NYIR_INST_F_IN_BOUNDS_ADDR;
     return addr < 0 ? -1 : ny_native_nir_emit_load_i64(b, addr);
   }
   if (leaf_kind == NY_NATIVE_LEAF_I64BUF_STORE) {
@@ -5074,6 +4799,8 @@ ordinary_call:
         !ny_native_nir_emit_bounds_check(b, data, offset, buf_byte_len))
       return -1;
     int addr = ny_native_nir_emit_add_i64(b, data, offset);
+    if (addr >= 0 && b->nyir.len > 0 && b->nyir.data[b->nyir.len - 1].dst == addr)
+      b->nyir.data[b->nyir.len - 1].flags |= NYIR_INST_F_IN_BOUNDS_ADDR;
     return addr < 0 || !ny_native_nir_emit_store_i64(b, addr, value) ? -1
                                                                      : value;
   }
@@ -5245,8 +4972,13 @@ ordinary_call:
       const char *field = e->as.call.args.data[1].val->as.literal.as.s.data;
       size_t offset = 0;
       if (layout && field &&
-          ny_native_nir_ast_layout_query(b, layout, field, NULL, NULL, &offset))
+          ny_native_nir_ast_layout_query(b, layout, field, NULL, NULL, &offset)) {
+        if (!ny_native_nir_size_fits_i64(offset)) {
+          ny_native_nir_fail(b, "native NYIR lower: layout offset overflows i64");
+          return -1;
+        }
         return ny_native_nir_emit_const(b, (int64_t)offset);
+      }
       ny_native_nir_fail(b, "native NYIR lower: unknown layout field '%s.%s'",
                          layout ? layout : "", field ? field : "");
       return -1;
@@ -5259,8 +4991,13 @@ ordinary_call:
                          layout ? layout : "");
       return -1;
     }
-    return ny_native_nir_emit_const(
-        b, (int64_t)(strcmp(leaf, "__layout_align") == 0 ? align : size));
+    size_t layout_value =
+        strcmp(leaf, "__layout_align") == 0 ? align : size;
+    if (!ny_native_nir_size_fits_i64(layout_value)) {
+      ny_native_nir_fail(b, "native NYIR lower: layout value overflows i64");
+      return -1;
+    }
+    return ny_native_nir_emit_const(b, (int64_t)layout_value);
   }
   if (leaf && strcmp(leaf, "store_layout") == 0 && e->as.call.args.len >= 3 &&
       e->as.call.args.data[1].val &&
@@ -5305,6 +5042,11 @@ ordinary_call:
               b,
               "native NYIR lower: unsupported store_layout field %zu in '%s'",
               i, layout ? layout : "");
+          return -1;
+        }
+        if (!ny_native_nir_size_fits_i64(field_offset)) {
+          ny_native_nir_fail(
+              b, "native NYIR lower: store_layout field offset overflows i64");
           return -1;
         }
         raw_offset = (int64_t)field_offset;
@@ -5433,13 +5175,49 @@ ordinary_call:
    * makes subsequent module aliases resolve against the callee's file. */
   b->source_file = saved_source_file;
   if (indirect_callable) {
-    if (e->as.call.args.len > 2)
+    if (e->as.call.args.len > 4)
       return ny_native_nir_fail(
           b,
-          "native NYIR: captured closure calls support at most two arguments");
+          "native NYIR: captured closure calls support at most four arguments");
     int callable = ny_native_nir_lower_expr(b, e->as.call.callee);
     if (callable < 0)
       return -1;
+    /*
+     * A named function value whose parameters all lower as raw scalars
+     * keeps the plain raw ABI — the any-trampolines would enter it with the
+     * value/len/tag triple layout and the body would read shifted words.
+     */
+    if (e->as.call.args.len >= 3 && e->as.call.callee &&
+        e->as.call.callee->kind == NY_E_IDENT &&
+        e->as.call.callee->as.ident.name) {
+      const stmt_t *callee_fn_value = ny_native_nir_find_user_function(
+          b, e->as.call.callee->as.ident.name);
+      bool all_raw = callee_fn_value && !callee_fn_value->as.fn.is_variadic;
+      for (size_t pi = 0; all_raw && pi < callee_fn_value->as.fn.params.len;
+           ++pi) {
+        const param_t *pp = &callee_fn_value->as.fn.params.data[pi];
+        if (!(pp->type ? ny_native_type_name_is_int(pp->type)
+                       : ny_native_nir_untyped_param_is_raw(callee_fn_value,
+                                                            pp->name)))
+          all_raw = false;
+      }
+      if (all_raw && callee_fn_value->as.fn.params.len == e->as.call.args.len) {
+        int raw_argv[4] = {-1, -1, -1, -1};
+        for (size_t i = 0; i < e->as.call.args.len; ++i) {
+          raw_argv[i] = ny_native_nir_lower_expr(b,
+              e->as.call.args.data[i].val);
+          if (raw_argv[i] < 0)
+            return -1;
+        }
+        int raw_result = ny_native_nir_emit_runtime_call4(
+            b, e->as.call.args.len == 3 ? "rt_call3" : "rt_call4", callable,
+            raw_argv[0], raw_argv[1], raw_argv[2], raw_argv[3],
+            (int)e->as.call.args.len + 1, 0);
+        if (raw_result < 0)
+          return -1;
+        return raw_result;
+      }
+    }
     int argv[4] = {-1, -1, -1, -1};
     for (size_t i = 0; i < e->as.call.args.len; ++i) {
       if (e->as.call.args.data[i].name)
@@ -5517,7 +5295,17 @@ ordinary_call:
     const char *call_symbol = e->as.call.args.len == 0   ? "rt_call0"
                               : e->as.call.args.len == 1 ? "rt_call_any1"
                               : e->as.call.args.len == 2 ? "rt_call_any2"
-                                                         : "rt_call2";
+                              : e->as.call.args.len == 3 ? "rt_call_any3"
+                                                         : "rt_call_any4";
+    if (e->as.call.args.len >= 3) {
+      int r4 = ny_native_nir_emit_runtime_call4(
+          b, call_symbol, callable, argv[0], argv[1], argv[2], argv[3],
+          (int)e->as.call.args.len + 1, 0);
+      if (r4 < 0)
+        return -1;
+      /* The any-trampolines return the canonical tagged dynamic value. */
+      return r4;
+    }
     int result = ny_native_nir_emit_runtime_call(
         b, call_symbol, callable, argv[0], argv[1],
         (int)e->as.call.args.len + 1, 0);
@@ -5643,24 +5431,20 @@ ordinary_call:
     size_t field_size = 4;
     size_t field_align = 0;
     size_t field_offset = 0;
-    if (layout && field &&
-        ny_native_nir_ast_layout_query(b, layout, field, &field_size,
-                                       &field_align, &field_offset)) {
-      offset = (int64_t)field_offset;
-      wide = field_size >= 8;
+    if (!layout || !field ||
+        !ny_native_nir_ast_layout_query(b, layout, field, &field_size,
+                                        &field_align, &field_offset)) {
+      ny_native_nir_fail(b, "native NYIR lower: unknown layout field '%s.%s'",
+                         layout ? layout : "", field ? field : "");
+      return -1;
     }
-    if (offset < 0) {
-      if (layout && field &&
-          ny_native_nir_ast_layout_query(b, layout, field, &field_size,
-                                         &field_align, &field_offset)) {
-        offset = (int64_t)field_offset;
-        wide = field_size >= 8;
-      } else {
-        ny_native_nir_fail(b, "native NYIR lower: unknown layout field '%s.%s'",
-                           layout ? layout : "", field ? field : "");
-        return -1;
-      }
+    if (!ny_native_nir_size_fits_tagged_i64(field_offset)) {
+      ny_native_nir_fail(
+          b, "native NYIR lower: load_layout field offset overflows tagged i64");
+      return -1;
     }
+    offset = (int64_t)field_offset;
+    wide = field_size >= 8;
     int base = ny_native_nir_lower_expr(b, e->as.call.args.data[0].val);
     int off = ny_native_nir_emit_const(b, rt_tag_v(offset));
     if (base < 0 || off < 0)
@@ -5712,6 +5496,30 @@ ordinary_call:
   if (!callee_fn && e->as.call.args.len == 1 && !e->as.call.args.data[0].name &&
       ny_native_nir_find_impl_type(b, name))
     return ny_native_nir_lower_expr(b, e->as.call.args.data[0].val);
+  /* Refinement type membership predicate (e.g. Even(6) or Even(x)). */
+  const stmt_t *refine_stmt = NULL;
+  if (!callee_fn && name && b->prog && e->as.call.args.len == 1) {
+    for (size_t li = 0; li < b->prog->body.len && !refine_stmt; ++li)
+      refine_stmt = ny_native_nir_find_refine_stmt(b->prog->body.data[li], name);
+  }
+  if (refine_stmt && e->as.call.args.len == 1) {
+    expr_t *arg_expr = e->as.call.args.data[0].val;
+    ny_ct_fast_val_t fval = ny_ct_fast_none();
+    if (ny_try_eval_comptime_expr_fast(NULL, (expr_t *)e, &fval, 0) &&
+        fval.kind == NY_CT_FAST_BOOL) {
+      return ny_native_nir_emit_const(b, fval.b ? 1 : 0);
+    }
+    expr_t *inst = ny_expr_subst(NULL, refine_stmt->as.refine.predicate,
+                                 refine_stmt->as.refine.param,
+                                 arg_expr);
+    if (inst) {
+      if (ny_try_eval_comptime_expr_fast(NULL, inst, &fval, 0) &&
+          fval.kind == NY_CT_FAST_BOOL) {
+        return ny_native_nir_emit_const(b, fval.b ? 1 : 0);
+      }
+      return ny_native_nir_lower_expr(b, inst);
+    }
+  }
   if (!callee_fn && !struct_layout_ctor && !runtime_builtin && !ffi_builtin &&
       !declared_external &&
       ny_builtin_alloc_kind(leaf) == NY_BUILTIN_ALLOC_NONE) {
@@ -5809,17 +5617,73 @@ ordinary_call:
     for (size_t i = 0; i < c->args.len; ++i)
       has_named = has_named || c->args.data[i].name != NULL;
     if (!has_named) {
+      size_t min_required = 0;
+      for (size_t p = 0; p < callee_fn->as.fn.params.len; ++p) {
+        if (!callee_fn->as.fn.params.data[p].def)
+          min_required = p + 1;
+      }
+      if (c->args.len < min_required && !callee_fn->as.fn.is_variadic) {
+        return ny_native_nir_fail(
+            b, "native NYIR lower: call to '%s' expects at least %zu argument(s), got %zu",
+            name ? name : "<anonymous>", min_required, c->args.len);
+      }
       if (callee_fn->as.fn.params.len > NYIR_CALL_MAX_ARGS)
         return ny_native_nir_fail(
             b, "native NYIR lower: defaulted call has too many parameters");
-      for (size_t i = 0; i < callee_fn->as.fn.params.len; ++i) {
+      /* The trailing rest parameter of a variadic function is fed by the
+       * caller's variadic tail, never by a default expression.  Expanding a
+       * default slot for it materialized a NULL expression that the
+       * variadic-tbuf builder then lowered ("missing expression" on every
+       * zero-argument call like XInitThreads()). */
+      size_t expand_params = callee_fn->as.fn.params.len;
+      if (callee_fn->as.fn.is_variadic && expand_params > 0)
+        expand_params -= 1;
+      for (size_t i = 0; i < expand_params; ++i) {
         normalized_args[i].name = NULL;
         normalized_args[i].val = i < c->args.len
                                      ? c->args.data[i].val
                                      : callee_fn->as.fn.params.data[i].def;
       }
       user_args = normalized_args;
-      user_args_len = callee_fn->as.fn.params.len;
+      user_args_len = expand_params;
+    }
+  }
+  if (callee_fn && callee_fn->as.fn.requires_cond && user_args) {
+    expr_t *req = callee_fn->as.fn.requires_cond;
+    for (size_t p_idx = 0; p_idx < callee_fn->as.fn.params.len && p_idx < user_args_len; ++p_idx) {
+      if (callee_fn->as.fn.params.data[p_idx].name && user_args[p_idx].val) {
+        req = ny_expr_subst(NULL, req, callee_fn->as.fn.params.data[p_idx].name, user_args[p_idx].val);
+      }
+    }
+    ny_ct_fast_val_t fval = ny_ct_fast_none();
+    if (ny_try_eval_comptime_expr_fast(NULL, req, &fval, 0)) {
+      if (fval.kind == NY_CT_FAST_BOOL && !fval.b) {
+        ny_diag_error(e->tok, "precondition obligation failed: call violates 'requires' contract");
+        return ny_native_nir_fail(b, "precondition obligation failed: call violates 'requires' contract");
+      }
+    }
+  }
+  if (callee_fn && callee_fn->as.fn.decreases_expr && user_args &&
+      b->current_fn_name && callee_fn->as.fn.name &&
+      strcmp(b->current_fn_name, callee_fn->as.fn.name) == 0) {
+    bool descends = false;
+    if (user_args_len > 0 && user_args[0].val) {
+      expr_t *arg0 = (expr_t *)user_args[0].val;
+      if (arg0->kind == NY_E_IDENT) {
+        if (callee_fn->as.fn.decreases_expr->kind == NY_E_IDENT &&
+            arg0->as.ident.name && callee_fn->as.fn.decreases_expr->as.ident.name &&
+            strcmp(arg0->as.ident.name, callee_fn->as.fn.decreases_expr->as.ident.name) == 0) {
+          descends = false;
+        } else {
+          descends = true;
+        }
+      } else if (arg0->kind == NY_E_BINARY && arg0->as.binary.op && strcmp(arg0->as.binary.op, "-") == 0) {
+        descends = true;
+      }
+    }
+    if (!descends) {
+      ny_diag_error(e->tok, "termination check failed: decreases(...) metric did not strictly descend at recursive call to '%s'", callee_fn->as.fn.name ? callee_fn->as.fn.name : "<anon>");
+      return ny_native_nir_fail(b, "termination check failed: decreases(...) metric did not strictly descend at recursive call to '%s'", callee_fn->as.fn.name ? callee_fn->as.fn.name : "<anon>");
     }
   }
   const ny_extern_entry_t *ext =
@@ -5890,6 +5754,11 @@ ordinary_call:
       return -1;
     }
     (void)align;
+    if (!ny_native_nir_size_fits_i64(size)) {
+      ny_native_nir_fail(b, "native layout constructor '%s' size overflows i64",
+                         name);
+      return -1;
+    }
     int size_v = ny_native_nir_emit_const(b, (int64_t)size);
     int object = size_v < 0
                      ? -1
@@ -5922,6 +5791,12 @@ ordinary_call:
         ny_native_nir_fail(b, "native layout constructor '%s.%s' cannot resolve "
                               "field layout",
                            name, field->name);
+        return -1;
+      }
+      if (!ny_native_nir_size_fits_i64(field_offset)) {
+        ny_native_nir_fail(
+            b, "native layout constructor '%s.%s' offset overflows i64",
+            name, field->name);
         return -1;
       }
       int offset = ny_native_nir_emit_const(b, (int64_t)field_offset);
@@ -6009,6 +5884,31 @@ ordinary_call:
   size_t lowered_user_args = variadic_call
                                  ? variadic_index + 1
                                  : user_args_len;
+  if (callee_fn && !callee_fn->as.fn.is_variadic) {
+    size_t min_required = 0;
+    for (size_t p = 0; p < callee_fn->as.fn.params.len; ++p) {
+      if (!callee_fn->as.fn.params.data[p].def)
+        min_required = p + 1;
+    }
+    if (user_args_len < min_required) {
+      return ny_native_nir_fail(
+          b, "native NYIR lower: call to '%s' expects at least %zu argument(s), got %zu",
+          name ? name : "<anonymous>", min_required, user_args_len);
+    }
+    if (user_args_len > callee_fn->as.fn.params.len) {
+      return ny_native_nir_fail(
+          b, "native NYIR lower: call to '%s' expects %zu argument(s), got %zu",
+          name ? name : "<anonymous>", callee_fn->as.fn.params.len, user_args_len);
+    }
+  } else if (callee_ext_decl && !callee_ext_decl->as.ext.is_variadic) {
+    if (user_args_len != callee_ext_decl->as.ext.params.len) {
+      return ny_native_nir_fail(
+          b, "native NYIR lower: extern call to '%s' expects %zu argument(s), got %zu",
+          name ? name : "<extern>", callee_ext_decl->as.ext.params.len, user_args_len);
+    }
+  }
+  /* Per-argument f64 ABI facts recorded by the conversion ladder below. */
+  unsigned c_arg_f64_flags = 0;
   for (size_t i = 0; i < lowered_user_args; ++i) {
     const expr_t *arg_expr = variadic_call && i == variadic_index
                                  ? NULL
@@ -6020,6 +5920,11 @@ ordinary_call:
       size_t count = user_args_len > variadic_index
                          ? user_args_len - variadic_index
                          : 0;
+      if (!ny_native_nir_size_fits_i64(count)) {
+        ny_native_nir_fail(
+            b, "native NYIR lower: variadic argument count overflows i64");
+        return -1;
+      }
       int n = ny_native_nir_emit_const(b, (int64_t)count);
       int width = ny_native_nir_emit_const(b, 24);
       arg = n < 0 || width < 0
@@ -6089,12 +5994,22 @@ ordinary_call:
     const char *param_type = callee_params && i < callee_params->len
                                  ? callee_params->data[i].type
                                  : NULL;
+    if (param_type && arg_expr) {
+      if (!ny_native_nir_check_refine_obligation(b, e->tok, param_type, (expr_t *)arg_expr))
+        return -1;
+    }
     const ny_expr_semantic_t *param_sem =
         callee_params && i < callee_params->len
             ? &callee_params->data[i].semantic
             : NULL;
+    bool try_dynamic_parameter =
+        callee_fn && i < callee_fn->as.fn.params.len &&
+        ny_native_nir_param_is_try_dynamic(callee_fn, i);
     ny_sem_rep_t param_rep =
-        param_sem && param_sem->resolved ? param_sem->rep : NY_SEM_REP_UNKNOWN;
+        try_dynamic_parameter
+            ? NY_SEM_REP_TAGGED_DYNAMIC
+            : (param_sem && param_sem->resolved ? param_sem->rep
+                                                : NY_SEM_REP_UNKNOWN);
     /* A declared bool parameter uses the raw predicate ABI (0/1), while
      * boolean literals lower to Ny's dynamic immediates (2/8). Normalize at
      * this call boundary so `if keep` does not treat false (2) as truthy. */
@@ -6109,7 +6024,8 @@ ordinary_call:
     /* An unresolved untyped parameter used by a scalar operator is lowered
      * as a raw NYIR integer in the callee.  Match that body-derived ABI fact
      * at the call boundary instead of manufacturing tagged-any metadata. */
-    if (box_dynamic_argument && callee_fn && !param_type &&
+    if (box_dynamic_argument && !try_dynamic_parameter && callee_fn &&
+        !param_type &&
         ny_native_nir_untyped_param_is_raw(
             callee_fn, callee_params->data[i].name))
       box_dynamic_argument = false;
@@ -6189,17 +6105,30 @@ ordinary_call:
        * Use the raw-index entry point; the ABI wrapper decodes tagged
        * language integers and would turn raw odd indices (e.g. 1) into the
        * previous slot. */
+      /* rt_tbuf_index_any (checked) accepts both raw and tagged indices and
+       * returns the canonical dynamic word — the raw-index entry point
+       * returned pooled raw words that downstream consumers misclassified
+       * (61 -> 30, 24 -> nil). */
       arg = ny_native_nir_emit_runtime_call(
-          b, "rt_tbuf_index_any_raw", raw_base, raw_index, -1, 2, 0);
+          b, "rt_tbuf_index_any", raw_base, raw_index, -1, 2, 0);
       if (arg < 0)
         return -1;
     }
-    /* A direct call to a generated zero-capture lambda uses the ordinary
-     * raw scalar ABI.  Its unannotated parameter has no declaration type,
-     * but treating that absence as `any` tags the argument before raw lambda
-     * arithmetic (`v * v` then multiplies VM encodings).  Callback adapters
-     * retain responsibility for decoding dynamic values before this entry. */
-    if (direct_zero_capture_lambda)
+    /* Generated lambda entry points decode concrete scalar parameters from
+     * the canonical tagged callback ABI in lower_stmt.h.  A zero-capture
+     * lambda can still be resolved as a direct call when stored in a local
+     * (`def f = fn(int x) int { ... }; f(41)`).  Passing the ordinary raw
+     * scalar ABI there makes odd inputs look pre-tagged and halves them in
+     * rt_any_to_i64.  Preserve the tagged entry contract for explicit integer
+     * lambda formals; untyped/raw callback cases keep their existing adapter
+     * selection below. */
+    bool direct_generated_lambda_int =
+        callee_fn && callee_fn->as.fn.name &&
+        strncmp(callee_fn->as.fn.name, "__ny_lambda_", 12) == 0 &&
+        param_type && ny_native_type_name_is_int(param_type);
+    if (direct_generated_lambda_int)
+      box_dynamic_argument = true;
+    else if (direct_zero_capture_lambda)
       box_dynamic_argument = false;
     /* Booleans are already immediate Ny values at an `any` boundary.  The
      * ordinary raw scalar lowering uses 0/1, which `type(any)` cannot
@@ -6306,12 +6235,46 @@ ordinary_call:
         returns_bool = fn_result && ny_native_nir_expr_is_bool(b, fn_result);
       if (returns_bool)
         raw_scalar_result = false;
+      bool callback_params_raw = true;
+      for (size_t pi = 0; pi < named_callback_fn->as.fn.params.len; ++pi) {
+        const param_t *cb_param = &named_callback_fn->as.fn.params.data[pi];
+        bool try_dynamic =
+            ny_native_nir_param_is_try_dynamic(named_callback_fn, pi);
+        bool inferred_list =
+            !try_dynamic && ny_native_nir_param_is_inferred_list(named_callback_fn, pi);
+        ny_sem_rep_t rep =
+            try_dynamic
+                ? NY_SEM_REP_TAGGED_DYNAMIC
+                : (cb_param->semantic.resolved ? cb_param->semantic.rep
+                                                : NY_SEM_REP_UNKNOWN);
+        /* Match the callee's real parameter ABI, not just its HM scalar
+         * classification.  Untyped sequence/list-surface parameters use a
+         * raw value/handle in slot zero (plus length metadata), so callback
+         * dispatch must unbox integer elements before entering them.  Only
+         * the true any/seq dynamic ABI consumes the canonical tagged word. */
+        bool dynamic_value_abi =
+            try_dynamic || ny_native_type_name_is_any(cb_param->type) ||
+            (!cb_param->type && !inferred_list &&
+             (rep == NY_SEM_REP_TAGGED_DYNAMIC || rep == NY_SEM_REP_UNKNOWN) &&
+             !ny_native_nir_untyped_param_is_raw(named_callback_fn,
+                                                 cb_param->name));
+        if (dynamic_value_abi) {
+          callback_params_raw = false;
+          break;
+        }
+      }
       const char *mark_symbol =
           returns_bool
-              ? "rt_mark_dynamic_bool_callable"
+              ? (callback_params_raw
+                     ? "rt_mark_dynamic_bool_callable"
+                     : "rt_mark_dynamic_bool_callable_tagged_args")
               : (raw_scalar_result
-                     ? "rt_mark_dynamic_callable_raw_result"
-                     : "rt_mark_dynamic_callable");
+                     ? (callback_params_raw
+                            ? "rt_mark_dynamic_callable_raw_result"
+                            : "rt_mark_dynamic_callable_tagged_args_raw_result")
+                     : (callback_params_raw
+                            ? "rt_mark_dynamic_callable"
+                            : "rt_mark_dynamic_callable_tagged_args"));
       arg = ny_native_nir_emit_runtime_call(
           b, mark_symbol,
           arg, -1, -1, 1, 0);
@@ -6344,11 +6307,14 @@ ordinary_call:
           lambda_value_expr ? &lambda_value_expr->as.lambda.params : NULL;
       for (size_t pi = 0; cb_params && pi < cb_params->len; ++pi) {
         const param_t *cb_param = &cb_params->data[pi];
+        /* Generated lambda bodies read parameters through the closure
+         * prologue, which untags typed ints itself (`fn(i32 op)` observed
+         * value>>1 when the trampoline also untagged).  Only an explicitly
+         * raw-annotated untyped param keeps the raw mark. */
         bool raw_scalar =
-            cb_param->type
-                ? ny_native_type_name_is_int(cb_param->type)
-                : (cb_param->semantic.resolved &&
-                   cb_param->semantic.rep == NY_SEM_REP_RAW_INT);
+            !cb_param->type &&
+            cb_param->semantic.resolved &&
+            cb_param->semantic.rep == NY_SEM_REP_RAW_INT;
         if (!raw_scalar) {
           callback_params_raw = false;
           break;
@@ -6367,15 +6333,11 @@ ordinary_call:
       bool raw_scalar_result =
           lambda_value_expr->as.lambda.return_type &&
               ny_native_type_name_is_int(lambda_value_expr->as.lambda.return_type);
-      if (!lambda_value_expr->as.lambda.return_type && cb_result &&
-          !predicate_callback && !ny_native_nir_expr_is_any(b, cb_result) &&
-          !ny_native_nir_expr_is_f64(b, cb_result) &&
-          !ny_native_nir_expr_is_f32(b, cb_result) &&
-          !ny_native_nir_expr_is_cstr(b, cb_result) &&
-          !ny_native_nir_expr_is_list(b, cb_result) &&
-          !ny_native_nir_expr_is_dict(b, cb_result) &&
-          !ny_native_nir_expr_is_ptr(b, cb_result))
-        raw_scalar_result = true;
+      /* An unannotated lambda has the dynamic NyValue result ABI.  Its
+       * body may be scalar arithmetic, but that does not make the returned
+       * word raw: the generated lambda still returns the canonical tagged
+       * value consumed by the callback edge.  Only an explicit integer
+       * result annotation opts into the raw-result adapter. */
       const char *mark_symbol =
           predicate_callback ? (callback_params_raw
                                     ? "rt_mark_dynamic_bool_callable"
@@ -6459,8 +6421,9 @@ ordinary_call:
         arg_expr->kind == NY_E_IDENT && arg_expr->as.ident.name) {
       const ny_native_nir_local_t *arg_local =
           ny_native_nir_find_local(b, arg_expr->as.ident.name);
-      if (arg_local && !arg_local->is_any &&
-          ny_native_type_name_is_int(arg_local->type_name))
+      if (arg_local && !arg_local->raw_dynamic_index &&
+          ((!arg_local->is_any && ny_native_type_name_is_int(arg_local->type_name)) ||
+           arg_local->semantic_rep == NY_SEM_REP_RAW_INT))
         raw_integer_argument = true;
       const expr_t *defined =
           ny_native_nir_find_top_level_value_in_source(
@@ -6588,19 +6551,33 @@ ordinary_call:
         return -1;
     }
     bool inferred_list =
-        callee_fn && ny_native_nir_param_is_inferred_list(callee_fn, i);
+        callee_fn && !try_dynamic_parameter &&
+        ny_native_nir_param_is_inferred_list(callee_fn, i);
     if ((param_rep == NY_SEM_REP_F32 ||
          ny_native_type_name_is_f32(param_type) ||
          (c_params && i < NY_C_MAX_PARAMS && c_params->param_f32[i])) &&
         !arg_expr_f32) {
       arg = arg_expr_f64 ? ny_native_nir_emit_f64_to_f32(b, arg)
                          : ny_native_nir_emit_i64_to_f32(b, arg);
-    } else if ((param_rep == NY_SEM_REP_F64 ||
-                ny_native_type_name_is_f64(param_type) ||
-                (c_params && i < NY_C_MAX_PARAMS && c_params->param_f64[i])) &&
-               !arg_expr_f64) {
-      arg = arg_expr_f32 ? ny_native_nir_emit_f32_to_f64(b, arg)
-                         : ny_native_nir_emit_i64_to_f64(b, arg);
+    } else if (param_rep == NY_SEM_REP_F64 ||
+               ny_native_type_name_is_f64(param_type) ||
+               (c_params && i < NY_C_MAX_PARAMS && c_params->param_f64[i])) {
+      /* Record the f64 ABI fact on the call instruction so backends declare
+       * the bridge taking double and bitcast the raw-bits i64 register into
+       * XMM instead of a GP register (c.sqrt(variable) garbage). */
+      if (is_c_call && i < 6)
+        c_arg_f64_flags |= (NYIR_INST_F_ARG0_F64 << i);
+      /* Known raw-f64 math bridges take the double in XMM even when the
+       * resolved parameter info is thin (runtime-symbol path). */
+      else if (is_c_call && i == 0 && runtime_symbol &&
+               (strcmp(runtime_symbol, "rt_sqrt_f64") == 0 ||
+                strcmp(runtime_symbol, "rt_sin_f64") == 0 ||
+                strcmp(runtime_symbol, "rt_cos_f64") == 0))
+        c_arg_f64_flags |= NYIR_INST_F_ARG0_F64;
+      if (!arg_expr_f64) {
+        arg = arg_expr_f32 ? ny_native_nir_emit_f32_to_f64(b, arg)
+                           : ny_native_nir_emit_i64_to_f64(b, arg);
+      }
     } else if ((param_rep == NY_SEM_REP_RAW_INT ||
                 ny_native_type_name_is_int(param_type)) &&
                (arg_expr_f64 || arg_expr_f32)) {
@@ -6609,6 +6586,45 @@ ordinary_call:
     }
     if (arg < 0)
       return -1;
+    /*
+     * A bool-typed argument crossing into a dynamically typed parameter
+     * carries the comparison lowering's raw 0/1, which dynamic truthiness
+     * reads as the tagged integer 0 (`true` became falsy inside the callee
+     * and Rule 110's `if c || r` never fired for live cells).  Box to the
+     * canonical NY_IMM_TRUE/NY_IMM_FALSE encoding; statically-typed bool
+     * parameters keep the raw ABI and extern calls keep their C ABI.
+     */
+    if (!is_c_call && arg_expr &&
+        ny_native_nir_expr_is_bool(b, arg_expr) &&
+        (!param_type || ny_native_type_name_is_any(param_type) ||
+         param_rep == NY_SEM_REP_TAGGED_DYNAMIC ||
+         param_rep == NY_SEM_REP_UNKNOWN)) {
+      if (arg_expr->kind == NY_E_LITERAL &&
+          arg_expr->as.literal.kind == NY_LIT_BOOL) {
+        arg = ny_native_nir_emit_const(
+            b, arg_expr->as.literal.as.b ? NY_IMM_TRUE : NY_IMM_FALSE);
+      } else {
+        /* Scan-free box: correct for raw 0/1 and boxed 2/8 alike (a
+           backward defining-instruction scan misreads reused registers). */
+        int got = ny_native_nir_emit_cmp_i64(
+            b, NYIR_CMP_NE, arg, ny_native_nir_emit_const(b, 0));
+        int not_false = ny_native_nir_emit_cmp_i64(
+            b, NYIR_CMP_NE, arg, ny_native_nir_emit_const(b, NY_IMM_FALSE));
+        if (got < 0 || not_false < 0)
+          return -1;
+        int truthy = ny_native_nir_emit_binop(b, NYIR_AND_I64, got, not_false);
+        int six = ny_native_nir_emit_const(b, 6);
+        int mul = truthy < 0 || six < 0
+                      ? -1
+                      : ny_native_nir_emit_binop(b, NYIR_MUL_I64, truthy, six);
+        arg = mul < 0 ? -1
+                      : ny_native_nir_emit_binop(
+                            b, NYIR_ADD_I64, mul,
+                            ny_native_nir_emit_const(b, NY_IMM_FALSE));
+        if (arg < 0)
+          return -1;
+      }
+    }
     if (lowered_argc >= NYIR_CALL_MAX_ARGS) {
       ny_native_nir_fail(b,
                          "native NYIR lower: expanded call exceeds the maximum "
@@ -6630,7 +6646,8 @@ ordinary_call:
     if (variadic_call && i == variadic_index)
       callee_is_any = false;
     bool alias_raw_param =
-        callee_fn && !param_type && e->as.call.callee &&
+        callee_fn && !try_dynamic_parameter && !param_type &&
+        e->as.call.callee &&
         e->as.call.callee->kind == NY_E_IDENT &&
         e->as.call.callee->as.ident.name && callee_fn->as.fn.name &&
         strcmp(e->as.call.callee->as.ident.name, callee_fn->as.fn.name) != 0 &&
@@ -6780,16 +6797,22 @@ ordinary_call:
      * the NYIR/object lifetime; strtab_intern would turn it into .Lnystr.N
      * and the trampoline would jump into string data. */
     char *callback_symbol = malloc((size_t)callback_len + 1);
-    if (callback_symbol)
-      memcpy(callback_symbol, callback_name, (size_t)callback_len + 1);
+    if (!callback_symbol) {
+      ny_native_nir_fail(b, NY_NATIVE_ALLOC_FAIL);
+      return -1;
+    }
+    memcpy(callback_symbol, callback_name, (size_t)callback_len + 1);
     int callback =
-        callback_symbol
-            ? nyir_emit(&b->nyir, (nyir_inst_t){.op = NYIR_ADDR_SYMBOL,
-                                                .dst = -1,
-                                                .a = -1,
-                                                .b = -1,
-                                                .symbol = callback_symbol})
-            : -1;
+        nyir_emit(&b->nyir, (nyir_inst_t){.op = NYIR_ADDR_SYMBOL,
+                                          .dst = -1,
+                                          .a = -1,
+                                          .b = -1,
+                                          .symbol = callback_symbol});
+    if (callback < 0) {
+      free(callback_symbol);
+      ny_native_nir_fail(b, NY_NATIVE_ALLOC_FAIL);
+      return -1;
+    }
     /* The runtime call helper consumes a Ny integer for argc. */
     /* Mark this packed argc as a raw-code callback.  The low bits retain the
      * VM integer encoding; the sign bit is outside the legal 0..15 argc
@@ -6821,7 +6844,7 @@ ordinary_call:
         }
       }
     }
-    if (callback < 0 || argc_value < 0 || argv < 0)
+    if (argc_value < 0 || argv < 0)
       return -1;
     if (b->thread_detach_stmt_call) {
       if (ny_native_nir_emit_runtime_call(b, "rt_thread_launch_call", callback,
@@ -6868,6 +6891,10 @@ ordinary_call:
     /* Aggregate results escape the call and are owned by the caller.  Stack
      * alloca storage made `free(result)` corrupt the allocator; use the same
      * heap ownership contract as ordinary C aggregate wrappers. */
+    if ((uint64_t)ext->ret_aggregate_size > (uint64_t)INT64_MAX) {
+      ny_native_nir_fail(b, NY_NATIVE_ALLOC_FAIL);
+      return -1;
+    }
     int aggregate_size =
         ny_native_nir_emit_const(b, (int64_t)ext->ret_aggregate_size);
     aggregate_ret_ptr =
@@ -6890,11 +6917,21 @@ ordinary_call:
         has_byval = true;
     }
     if (has_byval) {
-      size_t total_args = e->as.call.args.len + (has_sret ? 1 : 0);
-      arg_sizes = (uint32_t *)calloc(total_args, sizeof(*arg_sizes));
-      if (!arg_sizes) {
+      if (has_sret && e->as.call.args.len == SIZE_MAX) {
         ny_native_nir_fail(b, NY_NATIVE_ALLOC_FAIL);
         return -1;
+      }
+      size_t total_args = e->as.call.args.len + (has_sret ? 1u : 0u);
+      if (total_args > SIZE_MAX / sizeof(*arg_sizes)) {
+        ny_native_nir_fail(b, NY_NATIVE_ALLOC_FAIL);
+        return -1;
+      }
+      if (total_args > 0) {
+        arg_sizes = (uint32_t *)calloc(total_args, sizeof(*arg_sizes));
+        if (!arg_sizes) {
+          ny_native_nir_fail(b, NY_NATIVE_ALLOC_FAIL);
+          return -1;
+        }
       }
       for (unsigned i = 0; i < e->as.call.args.len && i < ext->param_count;
            ++i) {
@@ -6904,7 +6941,12 @@ ordinary_call:
   }
 
   size_t original_argc = lowered_argc;
-  size_t argc = original_argc + (has_sret ? 1 : 0);
+  if (has_sret && original_argc == SIZE_MAX) {
+    free(arg_sizes);
+    ny_native_nir_fail(b, NY_NATIVE_ALLOC_FAIL);
+    return -1;
+  }
+  size_t argc = original_argc + (has_sret ? 1u : 0u);
   if (has_sret) {
     if (argc > NYIR_CALL_MAX_ARGS) {
       free(arg_sizes);
@@ -6936,7 +6978,7 @@ ordinary_call:
    * `ny_fn_list.first` even though the collected body is qualified. */
   if (e->semantic.canonical_callee &&
       strncmp(e->semantic.canonical_callee, "std.core.", 9) == 0 &&
-      callee_fn && callee_fn->as.fn.name &&
+      callee_fn && callee_fn->as.fn.name && symbol &&
       strcmp(symbol, callee_fn->as.fn.name) == 0)
     symbol = e->semantic.canonical_callee;
   if (!ext && builtin_c_call) {
@@ -6964,6 +7006,7 @@ ordinary_call:
                     runtime_c_call || ffi_c_call)
                        ? NYIR_INST_F_EXTERN
                        : 0;
+  flags |= c_arg_f64_flags;
   if (has_sret)
     flags |= NYIR_INST_F_SRET;
   const char *return_type = callee_fn ? callee_fn->as.fn.return_type
@@ -6989,6 +7032,11 @@ ordinary_call:
   int *extra = NULL;
   if (argc > 6) {
     size_t extra_len = argc - 6;
+    if (extra_len > SIZE_MAX / sizeof(*extra)) {
+      free(arg_sizes);
+      ny_native_nir_fail(b, NY_NATIVE_ALLOC_FAIL);
+      return -1;
+    }
     extra = (int *)malloc(extra_len * sizeof(*extra));
     if (!extra) {
       free(arg_sizes);
@@ -7018,109 +7066,6 @@ ordinary_call:
     ny_native_nir_fail(b, NY_NATIVE_ALLOC_FAIL);
     return -1;
   }
-  /* File/module functions without an explicit return annotation are exposed
-   * through the dynamic import ABI. Their native scalar return is raw, while
-   * the importing expression is consumed as `any`; box that boundary once so
-   * `helper_val() == 123` does not interpret raw 123 as tagged 61. */
-  /* A dynamic arithmetic expression already returns the canonical tagged
-   * value from its `any` runtime helper (for example `a + b` lowers through
-   * rt_any_add).  Only box an untyped module result when its body
-   * visibly returns a raw scalar leaf; tagging the arithmetic result again
-   * turns 7 into 15/31 and breaks imported helper calls. */
-  bool module_raw_scalar_leaf = false;
-  if (callee_fn && !return_type && callee_fn->as.fn.body &&
-      callee_fn->as.fn.body->kind == NY_S_BLOCK &&
-      callee_fn->as.fn.body->as.block.body.len > 0) {
-    const stmt_t *tail =
-        callee_fn->as.fn.body->as.block.body
-            .data[callee_fn->as.fn.body->as.block.body.len - 1];
-    const expr_t *returned = NULL;
-    if (tail && tail->kind == NY_S_EXPR)
-      returned = tail->as.expr.expr;
-    else if (tail && tail->kind == NY_S_RETURN)
-      returned = tail->as.ret.value;
-    /* A literal leaf is a raw scalar that still needs boxing.  An ident leaf
-     * is only raw when it provably binds a raw integer on the callee side:
-     * an untyped parameter already carries the tagged dynamic
-     * representation (tagging it again shifts the value, 21 becomes 43),
-     * while globals keep the raw representation.  Caller-scope facts cannot
-     * answer this; the name belongs to the callee. */
-    bool ident_raw = false;
-    if (returned && returned->kind == NY_E_IDENT && returned->as.ident.name) {
-      const char *rname = returned->as.ident.name;
-      bool resolved = false;
-      for (size_t pi = 0; pi < callee_fn->as.fn.params.len; ++pi) {
-        if (callee_fn->as.fn.params.data[pi].name &&
-            strcmp(callee_fn->as.fn.params.data[pi].name, rname) == 0) {
-          resolved = true;
-          ident_raw =
-              ny_native_type_name_is_int(callee_fn->as.fn.params.data[pi].type);
-          break;
-        }
-      }
-      if (!resolved && callee_fn->as.fn.body &&
-          callee_fn->as.fn.body->kind == NY_S_BLOCK) {
-        const expr_t *last_init = NULL;
-        for (size_t si = 0; si < callee_fn->as.fn.body->as.block.body.len;
-             ++si) {
-          const stmt_t *bstmt = callee_fn->as.fn.body->as.block.body.data[si];
-          if (!bstmt || bstmt->kind != NY_S_VAR)
-            continue;
-          for (size_t ni = 0;
-               ni < bstmt->as.var.names.len && ni < bstmt->as.var.exprs.len;
-               ++ni) {
-            if (bstmt->as.var.names.data[ni] &&
-                strcmp(bstmt->as.var.names.data[ni], rname) == 0) {
-              resolved = true;
-              last_init = bstmt->as.var.exprs.data[ni];
-            }
-          }
-        }
-        if (resolved)
-          ident_raw = last_init &&
-                      ((last_init->kind == NY_E_LITERAL &&
-                        last_init->as.literal.kind == NY_LIT_INT &&
-                        last_init->tok.kind != NY_T_NIL) ||
-                       last_init->kind == NY_E_MATCH);
-      }
-      if (!resolved)
-        ident_raw = true;
-    }
-    bool literal_raw =
-        returned && returned->kind == NY_E_LITERAL &&
-        returned->as.literal.kind == NY_LIT_INT && returned->tok.kind != NY_T_NIL;
-    /* The semantic return fact is authoritative when inference proved a raw
-     * scalar.  Such a module function is a normal integer call even though it
-     * has no source annotation; tagging it merely because the caller's AST is
-     * dynamic changes `helper() == 123` into a comparison against Ny's encoded
-     * integer.  Fall back to body-shape detection only when inference did not
-     * resolve the representation. */
-    bool semantic_raw =
-        (callee_fn->as.fn.return_semantic.resolved &&
-         callee_fn->as.fn.return_semantic.rep == NY_SEM_REP_RAW_INT) ||
-        literal_raw;
-    bool body_raw_scalar = false;
-    if (returned && returned->kind == NY_E_BINARY) {
-      for (size_t pi = 0; pi < callee_fn->as.fn.params.len; ++pi) {
-        const char *pname = callee_fn->as.fn.params.data[pi].name;
-        if (pname && ny_native_nir_param_has_scalar_op_expr(returned, pname)) {
-          body_raw_scalar = true;
-          break;
-        }
-      }
-    }
-    module_raw_scalar_leaf =
-        !semantic_raw &&
-        (literal_raw || body_raw_scalar ||
-         (returned && returned->kind == NY_E_IDENT && ident_raw));
-  }
-  bool callee_name_alias =
-      callee_fn && e->as.call.callee &&
-      e->as.call.callee->kind == NY_E_IDENT &&
-      e->as.call.callee->as.ident.name && callee_fn->as.fn.name &&
-      strcmp(e->as.call.callee->as.ident.name, callee_fn->as.fn.name) != 0;
-  (void)callee_name_alias;
-  (void)module_raw_scalar_leaf;
   /*
    * Return-ABI invariant: an untyped callee guarantees a tagged dynamic
    * return (its return boundary boxes raw scalar producers), so the legacy

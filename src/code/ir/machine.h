@@ -112,6 +112,8 @@ typedef enum {
   NY_MACH_SAR,
   NY_MACH_ROR,
   NY_MACH_ROR32,
+  NY_MACH_BSWAP64,
+  NY_MACH_BSWAP32,
   NY_MACH_FMA,     /* dst = src0 * src1 + src2 (scalar or packed) */
   NY_MACH_SQRT,    /* dst = sqrt(src0) — scalar f64 */
   NY_MACH_SIN,     /* dst = sin(src0) — scalar f64 */
@@ -292,6 +294,9 @@ typedef struct {
  * boundaries; single-predecessor forward edges may keep the same register. */
 bool ny_mach_regalloc_build(const ny_mach_func_t *mach, size_t color_count,
                             ny_mach_regalloc_t *out);
+bool ny_mach_regalloc_build_callee_saved_gpr(const ny_mach_func_t *mach,
+                                              size_t color_count,
+                                              ny_mach_regalloc_t *out);
 bool ny_mach_regalloc_build_class(const ny_mach_func_t *mach,
                                   ny_mach_reg_class_t reg_class,
                                   size_t color_count,

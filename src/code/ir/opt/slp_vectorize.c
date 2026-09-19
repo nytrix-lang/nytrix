@@ -165,11 +165,17 @@ static bool slp_value_only_used_at(const nyir_use_def_t *uses, int value,
 static bool slp_no_observable_between(const nyir_func_t *f, size_t a, size_t b) {
   if (!f) return false;
   if (a > b) { size_t t = a; a = b; b = t; }
+  uint32_t a_alias = f->data[a].alias_class;
   for (size_t i = a + 1; i < b; ++i) {
     const nyir_inst_t *in = &f->data[i];
     unsigned effects = in->effects | nyir_inst_effects(in);
-    if (effects & (NYIR_EFFECT_WRITE_MEMORY | NYIR_EFFECT_CALL |
-                   NYIR_EFFECT_MAY_TRAP | NYIR_EFFECT_VOLATILE |
+    if (effects & NYIR_EFFECT_WRITE_MEMORY) {
+      /* Alias metadata disambiguation: disjoint memory store does not alias load */
+      if (a_alias != 0 && in->alias_class != 0 && in->alias_class != a_alias)
+        continue;
+      return false;
+    }
+    if (effects & (NYIR_EFFECT_CALL | NYIR_EFFECT_MAY_TRAP | NYIR_EFFECT_VOLATILE |
                    NYIR_EFFECT_UNKNOWN_SIDE_EFFECT))
       return false;
   }
@@ -179,10 +185,17 @@ static bool slp_no_observable_between(const nyir_func_t *f, size_t a, size_t b) 
 static bool slp_no_effect_between(const nyir_func_t *f, size_t a, size_t b) {
   if (!f) return false;
   if (a > b) { size_t t = a; a = b; b = t; }
+  uint32_t a_alias = f->data[a].alias_class;
   for (size_t i = a + 1; i < b; ++i) {
     const nyir_inst_t *in = &f->data[i];
     if (in->op == NYIR_NOP)
       continue;
+    if (in->op == NYIR_LOAD_I64) {
+      /* Disjoint read between stores is safe when alias classes are proven distinct */
+      if (a_alias != 0 && in->alias_class != 0 && in->alias_class != a_alias)
+        continue;
+      return false;
+    }
     if ((in->effects | nyir_inst_effects(in)) != NYIR_EFFECT_NONE ||
         in->op == NYIR_BR || in->op == NYIR_BR_IF || in->op == NYIR_RET)
       return false;
@@ -231,6 +244,7 @@ static bool slp_pack_pair(nyir_func_t *f, const int *defs,
                                              : NYIR_VEC4_LOAD_I64,
                                   .dst = v0, .a = i0.a, .b = -1, .c = -1,
                                   .d = -1, .e = -1, .f = -1,
+                                  .alias_class = i0.alias_class,
                                   .effects = NYIR_EFFECT_READ_MEMORY | NYIR_EFFECT_MAY_TRAP};
     *out_vec = v0;
     return true;
@@ -308,7 +322,6 @@ static bool slp_pack_pair(nyir_func_t *f, const int *defs,
   *out_vec = v0;
   return true;
 }
-
 
 static bool slp_quad_load_group_safe(const nyir_func_t *f,
                                      const size_t at[4]) {
@@ -517,6 +530,7 @@ static bool slp_try_store_pair(nyir_func_t *f, size_t s0, size_t s1,
     f->data[keep] = (nyir_inst_t){.op = f64 ? NYIR_VEC4_STORE_F64 : NYIR_VEC4_STORE_I64,
                                   .dst = -1, .a = st0.a, .b = packed, .c = -1,
                                   .d = -1, .e = -1, .f = -1,
+                                  .alias_class = st0.alias_class,
                                   .effects = NYIR_EFFECT_WRITE_MEMORY | NYIR_EFFECT_MAY_TRAP};
   }
   nyir_use_def_free(&uses);
@@ -528,16 +542,22 @@ static bool slp_try_store_pair(nyir_func_t *f, size_t s0, size_t s1,
  * Find the next scalar store while allowing only movable pure work in
  * between.  Delaying the first store to the second store's position is safe
  * across such instructions; any memory, trap, call, volatile, or control
- * effect terminates the search.
+ * effect terminates the search unless alias metadata proves disjointness.
  */
 static size_t slp_next_store_in_block(const nyir_func_t *f, size_t at,
                                       size_t end) {
-  for (; at < end; ++at) {
+  uint32_t st_alias = (f && at < f->len) ? f->data[at].alias_class : 0;
+  for (++at; at < end; ++at) {
     const nyir_inst_t *in = &f->data[at];
     if (in->op == NYIR_NOP)
       continue;
     if (in->op == NYIR_STORE_I64)
       return at;
+    if (in->op == NYIR_LOAD_I64) {
+      if (st_alias != 0 && in->alias_class != 0 && in->alias_class != st_alias)
+        continue;
+      return end;
+    }
     if ((in->effects | nyir_inst_effects(in)) != NYIR_EFFECT_NONE ||
         in->op == NYIR_BR || in->op == NYIR_BR_IF || in->op == NYIR_RET ||
         in->op == NYIR_LABEL)

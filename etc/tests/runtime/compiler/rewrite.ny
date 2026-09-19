@@ -1,3 +1,4 @@
+;; flags: --native-only
 use std.math.logic.prolog as prolog
 use std.math.logic.rewrite as rewrite
 

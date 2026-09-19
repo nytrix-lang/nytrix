@@ -55,13 +55,16 @@ fn _print_join3(str a, str b, str c) str { __str_concat(__str_concat(a, b), c) }
 
 @returns_owned
 fn _print_list_repr(any v, str open, str close) str {
-   def n = load64(v, 0)
+   ;; Lists/tuples may be native tbuf sequences.  The old managed-object
+   ;; offsets (length at +0, payload at +16) read tbuf metadata/data with the
+   ;; wrong ABI.  Use the representation-aware sequence helpers instead.
+   def n = v.len
    use std.core.str
    mut b = Builder(64)
    b = builder_append(b, open)
    mut i = 0
    while i < n {
-      def item = load64(v, 16 + i * 8)
+      def item = __load_item_any(v, i)
       b = builder_append(b, _print_to_str(item))
       if i + 1 < n { b = builder_append(b, ", ") }
       i += 1
@@ -137,6 +140,7 @@ fn print(...args) int {
 fn _io_self_test() bool {
    assert(_print_to_str(true) == "true" && _print_to_str(false) == "false", "io bool text")
    assert(_print_to_str("x") == "x", "io string text")
+   assert(_print_to_str([1, 2, 3]) == "[1, 2, 3]", "io native list text")
    assert(_write_str("") == 0 && _print_write("") == 0, "io empty writes")
    true
 }

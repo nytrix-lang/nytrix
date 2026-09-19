@@ -455,6 +455,13 @@ bool ny_proof_try_solver(codegen_t *cg, scope *scopes, size_t depth,
                          expr_t *proposition, char *cex, size_t cex_cap);
 bool ny_proof_check_lemma_definition(codegen_t *cg, stmt_t *lemma_stmt);
 int ny_proof_solver_differential_selftest(void);
+/* NEWT proof-kernel entry points (src/code/typing/proof_smt.c). Thin
+ * dispatchers over ny_proof_try_solver kept as named API surfaces. */
+bool ny_proof_discharge_refine(void *cg, void *node);
+bool ny_proof_discharge_exists(void *cg, void *node);
+bool ny_proof_check_erasure(void *cg, void *node);
+bool ny_proof_discharge_dependent(void *cg, void *node);
+bool ny_proof_discharge_law(void *cg, void *node);
 void ny_scope_bloom_add(scope *sc, uint64_t hash);
 bool ny_scope_bloom_maybe_has(const scope *sc, uint64_t hash);
 void report_undef_symbol(codegen_t *cg, const char *name, token_t tok);
@@ -499,6 +506,13 @@ bool ny_expr_type_compatible(codegen_t *cg, scope *scopes, size_t depth, const c
                              expr_t *expr);
 bool ensure_expr_type_compatible(codegen_t *cg, scope *scopes, size_t depth, const char *want,
                                  expr_t *expr, token_t tok, const char *ctx);
+refine_def_t *ny_lookup_refine(codegen_t *cg, const char *name);
+const char *ny_refine_base_type(codegen_t *cg, const char *name);
+trait_def_t *ny_lookup_trait(codegen_t *cg, const char *name);
+bool ny_refine_eval_predicate(codegen_t *cg, scope *scopes, size_t depth,
+                              refine_def_t *ref, expr_t *expr, int *result);
+expr_t *ny_expr_subst(arena_t *arena, expr_t *e, const char *var, expr_t *replacement);
+void ny_proof_check_impl_laws(codegen_t *cg, scope *scopes, size_t depth, stmt_t *impl_stmt);
 layout_def_t *lookup_layout(codegen_t *cg, const char *name);
 layout_def_t *ny_layout_instantiate(codegen_t *cg, const char *inst_name,
                                     const char *generic_name, int64_t bound);
@@ -598,6 +612,7 @@ LLVMValueRef gen_closure(codegen_t *cg, scope *scopes, size_t depth, ny_param_li
                          stmt_t *body, bool is_variadic, const char *return_type,
                          const char *name_hint);
 LLVMValueRef gen_comptime_eval(codegen_t *cg, stmt_t *body);
+bool ny_try_eval_comptime_expr_fast(codegen_t *cg, expr_t *e, ny_ct_fast_val_t *out, int depth);
 bool ny_eval_comptime_if(codegen_t *cg, stmt_t *s, bool *truthy);
 LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e);
 void ny_lazy_emit_prepare_reachable(codegen_t *cg);

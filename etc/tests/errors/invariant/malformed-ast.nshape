@@ -1,0 +1,15 @@
+shape invariant-malformed-ast {
+  family "compiler-errors/parser"
+  generator "error"
+  features ["error", "invariant", "ast", "malformed", "negative"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "expected ( (got {)"
+  source ny <<'NY'
+use std.core
+
+fn malformed_decl {
+   42
+}
+NY
+}

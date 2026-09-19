@@ -116,30 +116,27 @@ static char **ny_argv_view(intptr_t rargv, bool *needs_free) {
   return dst;
 }
 
-
 /*
  * platform syscall boundary
  */
 #if defined(__linux__) && (defined(__x86_64__) || defined(rt_x86_64__))
 int64_t rt_syscall(int64_t n, int64_t a, int64_t b, int64_t c, int64_t d, int64_t e, int64_t f) {
-  long rn = (n & 1) ? (n >> 1) : n;
-  long ra = a;
-  long rb = b;
-  long rc = c;
-  long rd = (d & 1) ? (d >> 1) : d;
-  long re = (e & 1) ? (e >> 1) : e;
-  long rf = (f & 1) ? (f >> 1) : f;
-  if (rn != 59) {
-    ra = (a & 1) ? (a >> 1) : a;
-    rb = (b & 1) ? (b >> 1) : b;
-    rc = (c & 1) ? (c >> 1) : c;
-  }
+  /*
+   * Runtime arguments use the normal two-bit tagged integer ABI.
+   */
+  long rn = rt_untag_v(n);
+  long ra = rt_untag_v(a);
+  long rb = rt_untag_v(b);
+  long rc = rt_untag_v(c);
+  long rd = rt_untag_v(d);
+  long re = rt_untag_v(e);
+  long rf = rt_untag_v(f);
   switch (rn) {
   case 10:  /* mprotect */
   case 56:  /* clone */
   case 57:  /* fork */
   case 58:  /* vfork */
-    return (int64_t)(((uint64_t)(long)(-EPERM) << 1) | 1);
+    return rt_tag_v(-EPERM);
   }
   register long _num __asm__("rax") = rn;
   register long _arg1 __asm__("rdi") = ra;
@@ -150,7 +147,7 @@ int64_t rt_syscall(int64_t n, int64_t a, int64_t b, int64_t c, int64_t d, int64_
   register long _arg6 __asm__("r9") = rf;
   __asm__ __volatile__("syscall\n" : "+r"(_num) : "r"(_arg1), "r"(_arg2), "r"(_arg3), "r"(_arg4),
                        "r"(_arg5), "r"(_arg6) : "rcx", "r11", "memory");
-  return (int64_t)(((uint64_t)_num << 1) | 1);
+  return rt_tag_v((int64_t)_num);
 }
 #else
 int64_t rt_syscall(int64_t n, int64_t a, int64_t b, int64_t c, int64_t d, int64_t e, int64_t f) {
@@ -164,15 +161,15 @@ int64_t rt_syscall(int64_t n, int64_t a, int64_t b, int64_t c, int64_t d, int64_
   (void)f;
   return (int64_t)-1;
 #else
-  long rn = (n & 1) ? (n >> 1) : n;
-  long ra = (a & 1) ? (a >> 1) : a;
-  long rb = (b & 1) ? (b >> 1) : b;
-  long rc = (c & 1) ? (c >> 1) : c;
-  long rd = (d & 1) ? (d >> 1) : d;
-  long re = (e & 1) ? (e >> 1) : e;
-  long rf = (f & 1) ? (f >> 1) : f;
+  long rn = rt_untag_v(n);
+  long ra = rt_untag_v(a);
+  long rb = rt_untag_v(b);
+  long rc = rt_untag_v(c);
+  long rd = rt_untag_v(d);
+  long re = rt_untag_v(e);
+  long rf = rt_untag_v(f);
   long res = syscall(rn, ra, rb, rc, rd, re, rf);
-  return (int64_t)(((uint64_t)res << 1) | 1);
+  return rt_tag_v((int64_t)res);
 #endif
 }
 #endif
@@ -304,9 +301,11 @@ int64_t rt_write_off(int64_t fd, int64_t buf, int64_t len, int64_t off) {
   return rt_tag_v((int64_t)r);
 }
 
-/* Native NYIR passes typed integer arguments unboxed. Keep the historical
+/*
+ * Native NYIR passes typed integer arguments unboxed. Keep the historical
  * tagged entry points above for interpreter/LLVM callers, and expose an
- * explicit raw ABI for source wrappers that operate on raw counters. */
+ * explicit raw ABI for source wrappers that operate on raw counters.
+ */
 int64_t rt_read_off_raw(int64_t fd, int64_t buf, int64_t len, int64_t off) {
   return rt_any_to_i64(rt_read_off(fd, buf, len, off));
 }
@@ -3112,9 +3111,11 @@ int64_t rt_async_await_blocking(int64_t handle) {
     rt_async_scheduler_step(1);
   }
   int64_t result = t->result;
-  /* Handles are ordinary values and may remain in user containers after
+  /*
+   * Handles are ordinary values and may remain in user containers after
    * await. Keep the completed task record alive so runtime classification and
-   * a repeated await cannot dereference freed storage. */
+   * a repeated await cannot dereference freed storage.
+   */
   return result;
 }
 
@@ -3298,7 +3299,6 @@ int64_t rt_async_state_of(int64_t handle) {
   return rt_tag_v((int64_t)t->state);
 }
 
-
 #ifdef _WIN32
 typedef struct rt_thread_state {
   HANDLE h;
@@ -3400,7 +3400,6 @@ int64_t rt_thread_spawn_raw(int64_t fn, int64_t arg) {
   st->h = h;
   return (int64_t)(uintptr_t)st;
 }
-
 
 int64_t rt_thread_spawn_call(int64_t fn, int64_t argc, int64_t argv_ptr) {
   int64_t argc_raw = 0;
@@ -3598,7 +3597,6 @@ int64_t rt_thread_spawn_raw(int64_t fn, int64_t arg) {
   }
   return (int64_t)tid;
 }
-
 
 int64_t rt_thread_spawn_call(int64_t fn, int64_t argc, int64_t argv_ptr) {
   int64_t argc_raw = 0;

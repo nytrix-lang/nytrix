@@ -81,7 +81,6 @@ static void free_segment_by_block(const ny_mach_func_t *mach,
   free(by_block);
 }
 
-
 static bool is_alloc_type(ny_mach_type_t t, ny_mach_reg_class_t reg_class) {
   if (reg_class == NY_MACH_REGCLASS_GPR)
     return t == NY_MACH_TYPE_I64 || t == NY_MACH_TYPE_PTR;
@@ -130,10 +129,13 @@ static size_t inst_uses(const ny_mach_inst_t *in, uint32_t *out, size_t cap) {
  * retain the conservative all-colors contract for hand-built machine IR.
  */
 static uint64_t inst_fixed_clobbers(const ny_mach_inst_t *in,
-                                    ny_mach_reg_class_t reg_class) {
+                                    ny_mach_reg_class_t reg_class,
+                                    bool preserve_gpr_calls) {
   if (!in)
     return 0;
   if (in->opcode == NY_MACH_CALL) {
+    if (preserve_gpr_calls && reg_class == NY_MACH_REGCLASS_GPR)
+      return ~((1ULL << 5) - 1);
     if (in->call_clobbers)
       return in->call_clobbers;
     return UINT64_MAX;
@@ -897,7 +899,8 @@ static void coalesce_segments(const ny_mach_func_t *mach,
                               ny_mach_regalloc_t *a,
                               const size_vec_t *succ,
                               const size_vec_t *pred,
-                              const size_vec_t *by_block) {
+                              const size_vec_t *by_block,
+                              bool preserve_gpr_calls) {
   /*
    * Block membership is fixed after coloring, so the caller builds this
    * index once and shares it with the loop-edge coalescer.
@@ -919,6 +922,23 @@ static void coalesce_segments(const ny_mach_func_t *mach,
     if (y->start != x->end + 1)
       continue;
     if (x->block == y->block) {
+      /*
+       * A fixed-register instruction is a semantic home barrier.  Segment
+       * construction deliberately ends the old range on the barrier with
+       * spill=true and starts the successor with reload=true.  Coalescing
+       * those adjacent chunks merely because they received the same color
+       * would erase that contract; calls then reload stale stack homes after
+       * the barrier.  Preserve the split even when the physical color is
+       * identical.
+       */
+      ny_mach_reg_class_t cls =
+          (mach->vreg_classes && x->vreg < mach->vreg_len)
+              ? mach->vreg_classes[x->vreg]
+              : NY_MACH_REGCLASS_GPR;
+      if (x->end < mach->inst_len &&
+          inst_fixed_clobbers(&mach->insts[x->end], cls,
+                              preserve_gpr_calls) != 0)
+        continue;
       if (!block_has_color_conflict(a, y, x->color, by_block)) {
         y->color = x->color;
         x->spill = false;
@@ -953,14 +973,9 @@ static void coalesce_segments(const ny_mach_func_t *mach,
   }
 }
 
-bool ny_mach_regalloc_build_class(const ny_mach_func_t *mach,
-                                   ny_mach_reg_class_t reg_class,
-                                   size_t color_count,
-                                   ny_mach_regalloc_t *out);
-__attribute__((used)) bool ny_mach_regalloc_build_class(const ny_mach_func_t *mach,
-                                   ny_mach_reg_class_t reg_class,
-                                   size_t color_count,
-                                   ny_mach_regalloc_t *out) {
+static bool ny_mach_regalloc_build_class_mode(
+    const ny_mach_func_t *mach, ny_mach_reg_class_t reg_class,
+    size_t color_count, bool preserve_gpr_calls, ny_mach_regalloc_t *out) {
   if (!mach || !out)
     return false;
   ny_mach_regalloc_t a = {.vreg_len = mach->vreg_len,
@@ -1093,7 +1108,8 @@ __attribute__((used)) bool ny_mach_regalloc_build_class(const ny_mach_func_t *ma
           e = end;
         bool clobber = false;
         for (size_t pc = s; pc <= e; ++pc) {
-          if (inst_fixed_clobbers(&mach->insts[pc], reg_class) != 0) {
+          if (inst_fixed_clobbers(&mach->insts[pc], reg_class,
+                                  preserve_gpr_calls) != 0) {
             e = pc;
             clobber = true;
             break;
@@ -1139,7 +1155,7 @@ __attribute__((used)) bool ny_mach_regalloc_build_class(const ny_mach_func_t *ma
   if (a.segment_len > 1)
     qsort(a.segments, a.segment_len, sizeof(*a.segments), cmp_seg_vreg);
   size_vec_t *by_block = build_segment_by_block(mach, &a);
-  coalesce_segments(mach, &a, succ, pred, by_block);
+  coalesce_segments(mach, &a, succ, pred, by_block, preserve_gpr_calls);
   coalesce_loop_edges(mach, &a, pred, by_block);
   free_segment_by_block(mach, by_block);
   by_block = NULL;
@@ -1186,10 +1202,30 @@ fail:
   return false;
 }
 
+bool ny_mach_regalloc_build_class(const ny_mach_func_t *mach,
+                                  ny_mach_reg_class_t reg_class,
+                                  size_t color_count,
+                                  ny_mach_regalloc_t *out) {
+  return ny_mach_regalloc_build_class_mode(mach, reg_class, color_count, false,
+                                           out);
+}
+
 bool ny_mach_regalloc_build(const ny_mach_func_t *mach, size_t color_count,
                             ny_mach_regalloc_t *out) {
   return ny_mach_regalloc_build_class(mach, NY_MACH_REGCLASS_GPR,
                                       color_count, out);
+}
+
+bool ny_mach_regalloc_build_callee_saved_gpr(const ny_mach_func_t *mach,
+                                              size_t color_count,
+                                              ny_mach_regalloc_t *out) {
+  /*
+   * Target encoders may opt into this only when every allocated GPR color
+   * maps to an ABI callee-saved physical register.  Calls then cease to be
+   * artificial split points; DIV/MOD and variable shifts remain barriers.
+   */
+  return ny_mach_regalloc_build_class_mode(
+      mach, NY_MACH_REGCLASS_GPR, color_count, true, out);
 }
 
 void ny_mach_regalloc_free(ny_mach_regalloc_t *a) {

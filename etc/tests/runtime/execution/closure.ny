@@ -16,6 +16,13 @@ def typed_fn = fn(int x) int { x + 1 }
 def typed_lambda = lambda(int x) int { x + 1 }
 assert(typed_fn(41) == 42, "typed fn expression callable")
 assert(typed_lambda(41) == 42, "typed lambda expression callable")
+mut loop_lambda_total = 0
+for x in 1..5 {
+   loop_lambda_total += typed_fn(x)
+}
+
+assert(loop_lambda_total == 20,
+   "typed fn expression receives raw range-loop locals through tagged entry ABI")
 
 fn make_adder(int n) fnptr {
    def add = fn(int x) int { x + n }

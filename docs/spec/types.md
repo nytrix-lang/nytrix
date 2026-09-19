@@ -35,6 +35,31 @@ alignment-is in [Native](native.md).
 
 ## Proof and refinement types
 
+User-defined refinements name a base type plus a compile-time predicate over
+the value:
+
+```ny
+refine Even = int where (v) { v % 2 == 0 }
+refine PositiveEven = Even where (v) { Positive(v) }   ; refinement of a refinement
+```
+
+`refine X = Base where (v) { pred }` introduces a new nominal type `X` whose
+representation is exactly `Base` (ABI-preserving), carrying the predicate as a
+compile-time obligation on construction. A refinement of a refinement
+substitutes the inner bindings into the outer predicate, forming an
+intersection (`PositiveEven` is both `> 0` and even). Comptime-only predicates
+use the bracketed form `exists(k) { pred }`:
+
+```ny
+refine EvensUpToPowerTwo = int where (v) { exists(k) { v == 2 * k } }
+```
+
+The proof kernel discharges refinement predicates at compile time: constant
+initializers and call arguments are verified against the predicate via compile-time
+evaluation or the Presburger/Fourier-Motzkin solver. Refinements are subtyped
+covariantly (`Even <: int`), preserving the underlying ABI, and membership can be
+evaluated as a compile-time value (`assert(Even(6))`).
+
 `Fin<N>` is the bounded integer type whose values satisfy `0 <= value < N`.
 `N` must normalize to a positive compile-time integer. It uses the integer ABI,
 so passing a `Fin<N>` to an `int` parameter is representation-preserving, but
@@ -52,9 +77,9 @@ assert(load_slot(selected) == 30, "bounded index")
 
 Different bounds remain different static types: `Fin<4>` is not silently
 reinterpreted as `Fin<8>`. Literal and immutable compile-time bounds may be
-used in generic specialization keys. The current value-indexed core is
-deliberately bounded to `Fin<N>`; user-defined value-indexed constructors and
-dependent result types are not yet accepted.
+used in generic specialization keys. Functions may specify parameter-dependent
+`requires <expr>` preconditions and `decreases(expr)` termination measures for
+recursive descent.
 
 `proof<P>` is erased compile-time evidence that proposition `P` was proved.
 It is not a runtime boolean and ordinary values cannot stand in for it.
@@ -86,10 +111,15 @@ Proposition matching is structural: equivalent equality/order spellings are
 normalized, while unrelated propositions are rejected. `prove` accepts only a
 condition the compiler can establish; false and unknown conditions fail.
 
-This is refinement-proof support, not full dependent typing. Some
+This is refinement-proof support, not full dependent typing. Nytrix does not
+implement liquid-type or refinement-qualifier synthesis: nullable, range,
+index, and discriminant facts in the compiler's `refined.v1` artifact are
+heuristic flow facts, not user-defined inferred refinements. Some
 parameter-dependent propositions cannot yet be resolved through calls, and
 proofs do not survive mutation of their referenced values. Unsupported forms
-are rejected rather than accepted as evidence. See [Comptime](comptime.md) for
+are rejected rather than accepted as evidence. MQTT is not part of the runtime
+or standard library; the networking layer currently documents HTTP, sockets,
+tubes, and the browser WebSocket facade. See [Comptime](comptime.md) for
 compile-time assertions and proof construction rules.
 
 ## Related

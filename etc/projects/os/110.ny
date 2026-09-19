@@ -7,8 +7,11 @@ use std.core
 def SX = 2
 
 fn rule(l, c, r) {
-   if l && c && r { return 0 }
-   if c || r { return 1 }
+   ;; Rule 110 over raw 0/1 cell words.  Arithmetic on ints, not bool
+   ;; truthiness: boxed bool words crossing a call boundary are not
+   ;; guaranteed to normalize (2 must read as false here).
+   if l + c + r == 3 { return 0 }
+   if c + r > 0 { return 1 }
    0
 }
 
@@ -16,9 +19,9 @@ fn step(cur, w) {
    def nxt = bytes(w)
    mut i = 0
    while i < w {
-      def l = (i > 0) && (bytes_get(cur, i - 1) == 1)
-      def c = (bytes_get(cur, i) == 1)
-      def r = (i < w - 1) && (bytes_get(cur, i + 1) == 1)
+      def l = (i > 0) ? bytes_get(cur, i - 1) : 0
+      def c = bytes_get(cur, i)
+      def r = (i < w - 1) ? bytes_get(cur, i + 1) : 0
       if rule(l, c, r) { bytes_set(nxt, i, 1) }
       else { bytes_set(nxt, i, 0) }
       i += 1

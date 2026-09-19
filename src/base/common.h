@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -158,75 +159,65 @@ bool ny_log_should_emit(const char *fmt);
 void ny_progress_stderr_lock(void);
 void ny_progress_stderr_unlock(void);
 
-#define NY_LOG_WITH_PROGRESS_LOCK(body)                                                            \
+static inline void ny_log_emit_checked(const char *label, const char *color,
+                                       const char *fmt, ...) {
+  if (!fmt || !ny_log_should_emit(fmt))
+    return;
+  ny_progress_stderr_lock();
+  fprintf(stderr, "%s%s%s ", clr(color), label, clr(NY_CLR_RESET));
+  va_list ap;
+  va_start(ap, fmt);
+  vfprintf(stderr, fmt, ap);
+  va_end(ap);
+  ny_progress_stderr_unlock();
+}
+
+static inline void ny_log_emit_unchecked(const char *label, const char *color,
+                                         const char *fmt, ...) {
+  if (!fmt)
+    return;
+  ny_progress_stderr_lock();
+  fprintf(stderr, "%s%s%s ", clr(color), label, clr(NY_CLR_RESET));
+  va_list ap;
+  va_start(ap, fmt);
+  vfprintf(stderr, fmt, ap);
+  va_end(ap);
+  ny_progress_stderr_unlock();
+}
+
+#define NY_LOG_V1(...)                                                                            \
   do {                                                                                             \
-    ny_progress_stderr_lock();                                                                     \
-    do {                                                                                           \
-      body                                                                                         \
-    } while (0);                                                                                   \
-    ny_progress_stderr_unlock();                                                                   \
+    if (verbose_enabled >= 1)                                                                      \
+      ny_log_emit_checked("[*]", NY_CLR_CYAN, __VA_ARGS__);                                      \
   } while (0)
 
-#define NY_LOG_V1(fmt, ...)                                                                        \
+#define NY_LOG_V2(...)                                                                            \
   do {                                                                                             \
-    if (verbose_enabled >= 1 && ny_log_should_emit(fmt)) {                                         \
-      NY_LOG_WITH_PROGRESS_LOCK(                                                                   \
-          fprintf(stderr, "%s[*]%s " fmt, clr(NY_CLR_CYAN), clr(NY_CLR_RESET), ##__VA_ARGS__););   \
-    }                                                                                              \
+    if (verbose_enabled >= 2)                                                                      \
+      ny_log_emit_checked("[**]", NY_CLR_MAGENTA, __VA_ARGS__);                                  \
   } while (0)
 
-#define NY_LOG_V2(fmt, ...)                                                                        \
+#define NY_LOG_V3(...)                                                                            \
   do {                                                                                             \
-    if (verbose_enabled >= 2 && ny_log_should_emit(fmt)) {                                         \
-      NY_LOG_WITH_PROGRESS_LOCK(fprintf(stderr, "%s[**]%s " fmt, clr(NY_CLR_MAGENTA),              \
-                                        clr(NY_CLR_RESET), ##__VA_ARGS__););                       \
-    }                                                                                              \
+    if (verbose_enabled >= 3)                                                                      \
+      ny_log_emit_checked("[***]", NY_CLR_YELLOW, __VA_ARGS__);                                  \
   } while (0)
 
-#define NY_LOG_V3(fmt, ...)                                                                        \
-  do {                                                                                             \
-    if (verbose_enabled >= 3 && ny_log_should_emit(fmt)) {                                         \
-      NY_LOG_WITH_PROGRESS_LOCK(fprintf(stderr, "%s[***]%s " fmt, clr(NY_CLR_YELLOW),              \
-                                        clr(NY_CLR_RESET), ##__VA_ARGS__););                       \
-    }                                                                                              \
-  } while (0)
-
-#define NY_LOG_INFO(fmt, ...) NY_LOG_V1(fmt, ##__VA_ARGS__)
-
-#define NY_LOG_ERR(fmt, ...)                                                                       \
-  do {                                                                                             \
-    if (ny_log_should_emit(fmt)) {                                                                 \
-      NY_LOG_WITH_PROGRESS_LOCK(                                                                   \
-          fprintf(stderr, "%sError:%s " fmt, clr(NY_CLR_RED), clr(NY_CLR_RESET), ##__VA_ARGS__);); \
-    }                                                                                              \
-  } while (0)
-
-#define NY_LOG_WARN(fmt, ...)                                                                      \
-  do {                                                                                             \
-    if (ny_log_should_emit(fmt)) {                                                                 \
-      NY_LOG_WITH_PROGRESS_LOCK(fprintf(stderr, "%sWarning:%s " fmt, clr(NY_CLR_YELLOW),           \
-                                        clr(NY_CLR_RESET), ##__VA_ARGS__););                       \
-    }                                                                                              \
-  } while (0)
-
-#define NY_LOG_SUCCESS(fmt, ...)                                                                   \
-  do {                                                                                             \
-    NY_LOG_WITH_PROGRESS_LOCK(fprintf(stderr, "%sSuccess:%s " fmt, clr(NY_CLR_GREEN),              \
-                                      clr(NY_CLR_RESET), ##__VA_ARGS__););                         \
-  } while (0)
+#define NY_LOG_INFO(...) NY_LOG_V1(__VA_ARGS__)
+#define NY_LOG_ERR(...) ny_log_emit_checked("Error:", NY_CLR_RED, __VA_ARGS__)
+#define NY_LOG_WARN(...) ny_log_emit_checked("Warning:", NY_CLR_YELLOW, __VA_ARGS__)
+#define NY_LOG_SUCCESS(...) ny_log_emit_unchecked("Success:", NY_CLR_GREEN, __VA_ARGS__)
 
 extern int debug_enabled;
 
 #ifdef DEBUG
-#define NY_LOG_DEBUG(fmt, ...)                                                                     \
+#define NY_LOG_DEBUG(...)                                                                          \
   do {                                                                                             \
-    if (debug_enabled) {                                                                           \
-      NY_LOG_WITH_PROGRESS_LOCK(fprintf(stderr, "%s[DEBUG]%s " fmt, clr(NY_CLR_GRAY),              \
-                                        clr(NY_CLR_RESET), ##__VA_ARGS__););                       \
-    }                                                                                              \
+    if (debug_enabled)                                                                             \
+      ny_log_emit_unchecked("[DEBUG]", NY_CLR_GRAY, __VA_ARGS__);                                \
   } while (0)
 #else
-#define NY_LOG_DEBUG(fmt, ...)                                                                     \
+#define NY_LOG_DEBUG(...)                                                                          \
   do {                                                                                             \
     (void)0;                                                                                       \
   } while (0)
@@ -548,7 +539,6 @@ static inline bool ny_vec_reserve_arena_try(
   *cap = new_cap;
   return true;
 }
-
 
 static inline bool ny_arena_strndup_try(arena_t *a, const char *s, size_t n,
                                         char **out) {

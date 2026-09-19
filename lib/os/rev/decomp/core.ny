@@ -11410,7 +11410,10 @@ fn _clean_call_args(str inner) list {
             continue
          }
          if ch == quote { quote = 0 }
-      } elif ch == 34 || ch == 39 {
+         i += 1
+         continue
+      }
+      if ch == 34 || ch == 39 {
          quote = ch
       } elif ch == 40 {
          depth += 1
@@ -24576,12 +24579,32 @@ fn _clean_rendered_string_literal_value(str rhs0) dict {
       def ch = load8(rhs, i)
       if ch == 92 && i + 1 < rhs.len - 1 {
          def n = load8(rhs, i + 1)
-         if n == quote { out = out + chr(quote) }
-         elif n == 92 { out = out + "\\" }
-         elif n == 110 { out = out + "\n" }
-         elif n == 114 { out = out + "\r" }
-         elif n == 116 { out = out + "\t" }
-         else { out = out + chr(n) }
+         if n == quote {
+            out = out + chr(quote)
+            i += 2
+            continue
+         }
+         if n == 92 {
+            out = out + "\\"
+            i += 2
+            continue
+         }
+         if n == 110 {
+            out = out + "\n"
+            i += 2
+            continue
+         }
+         if n == 114 {
+            out = out + "\r"
+            i += 2
+            continue
+         }
+         if n == 116 {
+            out = out + "\t"
+            i += 2
+            continue
+         }
+         out = out + chr(n)
          i += 2
          continue
       }

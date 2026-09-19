@@ -20,11 +20,13 @@ mut _alt_enabled = 0
 mut _refresh_buf = 0
 mut _refresh_size = 0
 
-fn _term_bytes(int n) ptr {
+fn _term_bytes(int n) bytes {
    "Allocates zeroed byte storage for terminal buffers."
    if n <= 0 { n = 1 }
-   def p = malloc(n + 1)
-   if p { memset(p, 0, n + 1) }
+   ;; Managed bytes carry the runtime heap header that bytes_get/bytes_set
+   ;; require; a raw malloc pointer makes every buffered write a silent no-op.
+   def p = bytes(n + 1)
+   if !p { panic("terminal buffer allocation failed") }
    p
 }
 
@@ -250,11 +252,9 @@ fn get_key() int {
    def b = _term_bytes(1)
    def res = unwrap(sys_read(0, b, 1))
    if res <= 0 {
-      free(b)
       return 0
    }
    def k = __load8_idx(b, 0)
-   free(b)
    k
 }
 
@@ -742,9 +742,12 @@ fn get_terminal_size() list {
    if !_term_buf { _term_buf = malloc(8) }
    def buf = _term_buf
    if __tty_size(buf) == 0 {
+      ;; The list stores ints canonically tagged (v<<1|1): raw words in a
+      ;; list slot read back halved/nil through dynamic consumers, which
+      ;; zeroed width/height for every TUI module (w=nil, h=-1 downstream).
       def cols = load32(buf, 0)
       def rows = load32(buf, 4)
-      if rows > 0 && cols > 0 { return [cols, rows] }
+      if rows > 0 && cols > 0 { return [cols * 2 + 1, rows * 2 + 1] }
    }
    def env_c, env_l = env("COLUMNS"), env("LINES")
    if is_str(env_c) && is_str(env_l) {
@@ -1001,6 +1004,5 @@ fn canvas_refresh(any canv) int {
    bytes_set(r_buf, p + 3, 109)
    p += 4
    unwrap(sys_write(1, r_buf, p))
-   free(r_buf)
    0
 }

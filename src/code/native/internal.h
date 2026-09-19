@@ -127,7 +127,6 @@ const char *ny_native_globaltab_name(const char *name);
 const char *ny_native_globaltab_name_tail(const char *name);
 void ny_native_globaltab_clear(void);
 
-
 typedef struct {
   int64_t value;
   int64_t tag;
@@ -146,7 +145,6 @@ bool ny_native_arraytab_get(const char *name,
                             const ny_native_array_elem_t **elems_out,
                             size_t *count_out, size_t *stride_out);
 void *ny_native_arraytab_data(const char *name);
-
 
 bool ny_native_aarch64_emit_nir(ny_native_writer_t *w,
                                 const ny_native_target_info_t *target,

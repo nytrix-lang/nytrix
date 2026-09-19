@@ -1,7 +1,7 @@
 /*
  * VRP: value range propagation through SSA.
  *
- * ── Literature ──
+ * Literature
  *  Patterson — "Accurate Static Branch Prediction by Value Range
  *   Propagation" (PLDI 1995). Interval lattice with forward/
  *   backward propagation. §3 transfer functions; §4 narrowing.
@@ -9,14 +9,13 @@
  *  GCC tree-vrp.c: range lattice [min,max] feeding branch
  *   prediction, BCE, and overflow elimination.
  *
- * ── Nytrix implementation ──
+ * Nytrix implementation
  *  Forward CFG propagation with narrowing at conditionals.
  *  Consumed by IRCE, BCE, overflow/null check elimination.
  */
 #include "code/ir/opt/util.h"
 #include <stdlib.h>
 #include <limits.h>
-
 
 typedef struct {
   int64_t min;
@@ -42,7 +41,6 @@ static void vrp_range_const(vrp_range_t *r, int64_t v) {
   r->min = v;
   r->max = v;
 }
-
 
 /*
  * Compute range for binary operation.

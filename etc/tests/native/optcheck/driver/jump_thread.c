@@ -44,7 +44,6 @@ static int64_t first_branch_target(const nyir_func_t *f) {
   return -1;
 }
 
-
 static void build_unknown(nyir_func_t *f, int64_t *branch_target) {
   ny_begin(f);
   int cond = nyir_emit(f, (nyir_inst_t){.op = NYIR_LOAD_LOCAL, .dst = -1,

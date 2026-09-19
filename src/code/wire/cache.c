@@ -1072,7 +1072,6 @@ bool ny_jit_stencil_cache_load(const char *so_path, void **out_handle,
   return true;
 }
 
-
 /*
  * Toolless native ELF64 .so writer — no ld, objcopy, or external tools.
  * Writes a minimal ELF64 shared object directly from raw machine code bytes.

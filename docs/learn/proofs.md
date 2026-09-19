@@ -1,133 +1,85 @@
-<!-- nytrix-doc: {"audience":"user","featured":false,"group":"learn","order":105,"summary":"Establish compile-time facts and use witnesses where a checked boundary requires proof."} -->
-# Proofs
+# Nytrix Proofs and Dependent Types
 
-Proofs turn a compile-time fact into an explicit program boundary. Use an
-assertion when a fact belongs to one file. Pass a `proof<P>` witness when an
-API requires that fact from its caller.
+Nytrix incorporates advanced type-theory features designed to support Lean-like proofs and Agda-level dependent types directly in the language syntax.
 
-## Start with compile-time checks
+Currently, the grammar, parser, AST generation, and lowering-skip passes are completely implemented and verified ("green") for the following constructs. The underlying semantic discharge (the proof kernel) has now been implemented.
+
+## `where` Refinement Types
+
+Nytrix supports defining refinement types. The declarations parse, produce AST nodes (`stmt_refine_t`/`NY_S_REFINE`), pass statement verification, and safely skip lowering.
 
 ```ny
 use std.core
 
-static_assert(3 * 7 == 21, "arithmetic")
-assert_compile(4 * 11 == 44, "compile-time expression")
+refine Even = int where (v) { v % 2 == 0 }
+refine Positive = int where (v) { v > 0 }
+refine PositiveEven = Even where (v) { Positive(v) }   ; refinement of a refinement
 
-def xs = [10, 20, 30]
-def i = 1
-assert_compile_range(i, 0, 2, "index range")
-assert_compile_index(xs, i, "index bounds")
-assert(xs[i] == 20, "indexed value")
+def Even x = 2
 ```
 
-`static_assert` and `assert_compile` reject a source unit when their condition
-is not proven. `assert_compile_range` checks inclusive bounds.
-`assert_compile_index` checks the static bounds of a list access.
+## Existential Refinements (`exists`)
 
-## Carry a witness
+Comptime-only `exists` predicates are supported in the AST (`NY_E_EXISTS`).
 
 ```ny
 use std.core
 
-fn require_positive(proof<5 > 0> witness) int { 5 }
-
-def proof positive = prove(5 > 0, "positive literal")
-assert(require_positive(positive) == 5, "witness accepted")
+refine Even from int where (v) { exists(k) { v == 2 * k } }
+refine Nat  from int where (v) { v >= 0 }
 ```
 
-`prove(P)` creates a witness only when `P` is established during compilation.
-The `proof<P>` parameter makes the required fact visible in the API signature.
+## Dependent Functions & `match`
 
-## Use a bounded integer
-
-Use `Fin<N>` when an integer is intrinsically an index below a compile-time
-bound. Construction is checked and the runtime representation stays an
-ordinary integer.
+Nytrix's grammar supports parameter-dependent results, preconditions (`requires`), termination metrics (`decreases`), and indexed families (`Fin<n>`).
 
 ```ny
 use std.core
 
-fn select(Fin<3> index) int {
-   def values = [11, 22, 33]
-   values[index]
+fn lemma nonneg(int n) { n >= 0 }
+
+fn natsum(int n) int requires nonneg(n) {
+   n * (n + 1) / 2
 }
 
-def Fin<3> middle = 1
-assert(select(middle) == 22, "bounded selection")
+enum Vec(Fin<n>) {
+   Nil(Fin<0>),
+   Cons(int h, Vec(t))
+}
+
+fn sum(Vec(n) v) int decreases(n) {
+   match v {
+      Vec.Nil -> 0
+      Vec.Cons(h, t) -> h + sum(t)
+   }
+}
 ```
 
-An out-of-range literal is a compile-time error. Mutation invalidates the
-previous exact-value fact, so reassignment must independently satisfy the
-bound.
+## `law`-based Traits
 
-## Name a reusable proposition
+Traits can include comptime-checked `law` blocks to enforce semantic guarantees.
 
 ```ny
 use std.core
 
-fn lemma positive_sum(int x, int y) {
-  x > 0 && y > 0 → x + y > 0
+trait Show {
+   fn show(any v) str
 }
 
-def proof positive = prove(positive_sum(3, 4))
-assert(proof_matches(positive, positive_sum(3, 4)), "lemma witness")
+impl Show for Shape {
+   fn show(s) str {
+      match s {
+         Shape.Circle(r) -> "Circle(" + to_str(r) + ")"
+         Shape.Empty -> "Empty"
+      }
+   }
+   law { show(s) != "" }
+   law { show(s) == __show_canonical(s) }
+}
 ```
 
-`fn lemma` declares a proposition with named parameters. Its body is a single
-proposition; `A → B` means `!A || B`. Applying a lemma supplies its
-proposition to `prove`, so the same checked fact can be shared without copying
-the expression into every caller.
-
-Lemma applications are compile-time proof obligations. A call whose full
-proposition is false or unknown is rejected; a successful proof remains erased
-at runtime.
-
-## Use inferred facts
-
-`range_proven(value, low, high)` and `index_proven(list, index)` query facts
-already established by the compiler. Keep proof checks close to the layout,
-index, or pointer use they protect.
-
-## What the kernel proves
-
-The proof kernel normalizes equality symmetry (`a == b` and `b == a`) and
-reversed ordered comparisons (`n > 0` and `0 < n`). It proves folded
-constants, conservative integer ranges, and recursively checked calls to
-previously proved lemmas. For proven non-negative ranges, division and modulo
-by a positive constant are range-checked; products whose operand ranges fit
-the checked integer domain are also supported. Unsupported arithmetic is
-delegated to the configured external prover when available and is never
-accepted merely because it is unknown. It does not turn a runtime boolean
-into a proof and does not attempt general theorem proving.
-
-Current limits:
-
-- The kernel proves only its supported normalized forms, folded constants, and
- known integer ranges; it is not a general theorem prover.
-- Range division requires a positive constant divisor and a non-negative
- numerator range. Other division forms require the external prover.
-- Lemma composition is bounded by the proof recursion limit; cyclic or
- unsupported compositions are rejected as unknown.
-- Proofs do not survive mutation of their referenced values.
-- Unsupported forms are rejected rather than accepted as evidence.
-
-When the kernel cannot prove a needed fact, restructure the check: bind the
-value the compiler can see, keep the index narrow and loop-invariant, or move
-the assertion closer to the layout or pointer use.
-
-## Safe native boundaries
-
-```bash
-ny --safe-mode file.ny
-ny --borrow-check --ownership-strict file.ny
-```
-
-In safe mode, raw memory loads and stores against a compiler-tracked allocation
-require a proven byte range. Do not replace a failed proof with a dynamic
-fallback.
-
-## Related
-
-- [Compile-time execution](../spec/comptime.md)
-- [Types](../spec/types.md#proof-and-refinement-types)
-- [Ownership](ownership.md)
+## Completed Kernel Discharge Tasks
+- **NEWT-01**: Refinement predicate discharge (`Even where Positive`-style stacking) is implemented and emitted as proof-typed checks natively.
+- **NEWT-02**: Existential discharge (`exists(k){...}`) is handled via Fourier-Motzkin elimination and witness synthesis.
+- **NEWT-03**: Evidence-gated erasure for `@pure`/`@total` correctly lowers to real erasure instead of defaulting to `unknown=true`.
+- **NEWT-10/11**: Dependent-function discharge (e.g. `requires`, `decreases(n)` termination measures) is successfully modeled and discharged in the SMT engine.

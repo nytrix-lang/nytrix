@@ -65,6 +65,8 @@ jobs:
           fetch-depth: 0
       - name: Build and verify Ubuntu runtime dependencies
         run: |
+          sudo apt-get update
+          sudo apt-get install -y libz3-dev
           gmp_header="$(dpkg -L libgmp-dev | awk '/\/gmp\.h$/ {print; exit}')"
           gmp_library="$(dpkg -L libgmp-dev | awk '/\/libgmp\.so$/ {print; exit}')"
           test -n "$gmp_header"
@@ -72,7 +74,12 @@ jobs:
           NYTRIX_GMP_INCLUDE="$(dirname "$gmp_header")" \
           NYTRIX_GMP_LIBRARY="$gmp_library" ./make bin
           grep -q 'NYTRIX_USE_GMP:BOOL=ON' build/release/CMakeCache.txt
+          grep -q 'NYTRIX_HAS_Z3=1' build/release/compile_commands.json
           ldd build/release/ny-full | grep -q 'libgmp'
+      - name: Verify Z3 type and proof solver lane
+        run: |
+          ./build/release/ny-test --bin ./build/release/ny --timeout 45 \
+            etc/tests/runtime/proofs/z3-backend.nshape
       - run: |
           if [ "${{ inputs.suite }}" = "full-stdlib" ]; then
             ./make test --with-stdlib

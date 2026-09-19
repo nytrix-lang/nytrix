@@ -1766,9 +1766,6 @@ static void ny_run_wasm_info(const char *path) {
   if (rc != 0) fprintf(stderr, "ny: wasm-objdump exited %d\n", rc);
 }
 
-
-
-
 int main(int argc, char **argv, char **envp) {
 #ifndef _WIN32
   /*

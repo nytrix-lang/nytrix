@@ -86,7 +86,7 @@ static char *json_string(const char *json, const char *key) {
   char *out = (char *)malloc((size_t)(e - p) + 1);
   if (!out)
     return NULL;
-  memcpy(out, p, (size_t)(e - p));
+  memmove(out, p, (size_t)(e - p));
   out[e - p] = '\0';
   return out;
 }

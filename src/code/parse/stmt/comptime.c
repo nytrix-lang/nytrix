@@ -459,10 +459,12 @@ static stmt_t *parse_comptime_table_stmt(parser_t *p) {
   const char *legacy_name = parse_table_legacy_helper_name(p, decl_owned);
   free(decl_owned);
 
-  /* The generated matcher's fallback parameter must match the table's VALUE
+  /*
+   * The generated matcher's fallback parameter must match the table's VALUE
    * domain: string tables take a str default, numeric tables an i32 one.
    * Hardcoding i32 type-checked `return default` (i32) against the str
-   * entries and rejected the user's str default at the call site. */
+   * entries and rejected the user's str default at the call site.
+   */
   const char *fallback_type = "i32";
   bool fallback_type_locked = false;
 
@@ -538,9 +540,11 @@ static stmt_t *parse_comptime_table_stmt(parser_t *p) {
    * second time before range comparisons.
    */
   param_t raw = {.name = parser_intern(p, "raw", 3), .type = "i32", .def = NULL};
-  /* The fallback is a scalar in the same domain as `raw`; typing it keeps
-     the native call boundary from tagging it (and decoding `-7` to `-4`
-     across a module boundary). */
+  /*
+   * The fallback is a scalar in the same domain as `raw`; typing it keeps
+   * the native call boundary from tagging it (and decoding `-7` to `-4`
+   * across a module boundary).
+   */
   param_t fallback = {
       .name = parser_intern(p, "default", 7), .type = fallback_type, .def = NULL};
   vec_push_arena(p->arena, &fn->as.fn.params, raw);

@@ -133,7 +133,6 @@ static bool run_non_speculatable_case(void) {
   return true;
 }
 
-
 int main(void) {
   return run_case(4, true) && run_case(1, true) && run_case(8, true) &&
                  run_case(0, false) && run_non_speculatable_case()

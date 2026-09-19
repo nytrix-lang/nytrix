@@ -163,7 +163,6 @@ static bool ny_native_parse_i64(const char *s, int64_t *out) {
   return true;
 }
 
-
 static bool ny_native_oracle_has_runtime_call(const nyir_func_t *f) {
   if (!f)
     return false;

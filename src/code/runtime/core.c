@@ -19,6 +19,10 @@
 #ifdef _WIN32
 #include <io.h>
 #endif
+#if defined(__x86_64__) || defined(__i386__) || defined(_M_X64) || defined(_M_IX86)
+#include <immintrin.h>
+#define NY_DICT_USE_SSE2 1
+#endif
 
 extern int64_t rt_lt(int64_t a, int64_t b);
 extern int64_t rt_bigint_add(int64_t a, int64_t b);
@@ -349,7 +353,8 @@ int64_t rt_zfree_raw(int64_t ptr) {
   return 0;
 }
 
-int64_t rt_tbuf_new_raw(int64_t count, int64_t elem_size) {
+static int64_t rt_tbuf_new_impl(int64_t count, int64_t elem_size,
+                                int tracked) {
   if (count < 0)
     count = 0;
   if (elem_size <= 0)
@@ -366,8 +371,95 @@ int64_t rt_tbuf_new_raw(int64_t count, int64_t elem_size) {
   hdr[1] = count;
   hdr[2] = elem_size;
   hdr[3] = capacity;
-  rt_map_oracle_add((uintptr_t)base, bytes);
-  rt_tbuf_register_handle((uintptr_t)(base + RT_NATIVE_TBUF_HEADER));
+  if (tracked) {
+    rt_map_oracle_add((uintptr_t)base, bytes);
+    rt_tbuf_register_handle((uintptr_t)(base + RT_NATIVE_TBUF_HEADER));
+  }
+  return (int64_t)(uintptr_t)(base + RT_NATIVE_TBUF_HEADER);
+}
+
+int64_t rt_tbuf_new_raw(int64_t count, int64_t elem_size) {
+  return rt_tbuf_new_impl(count, elem_size, 1);
+}
+
+/*
+ * Typed buffers have a statically-known ptr ABI and are addressed directly by
+ * load/store lowering.  They still carry the normal tbuf header (so tbuf_len
+ * and tbuf_ptr remain valid), but do not need registration in the dynamic
+ * handle oracle.  Avoiding those global tracking structures matters for
+ * allocation-heavy numeric kernels such as HMAC/PBKDF2.
+ */
+/*
+ * Small typed buffers are compiler-facing raw workspaces.  They are not
+ * registered with the dynamic handle oracle and the public tbuf API has no
+ * per-buffer destructor, so their existing lifetime is already the lifetime
+ * of the process/thread arena.  Serving the common small allocations from a
+ * zero-filled TLS slab avoids repeated calloc metadata/locking in numeric
+ * kernels (PBKDF2/HMAC is particularly allocation dense) without changing the
+ * tracked/dynamic tbuf allocator or its realloc semantics.
+ *
+ * The slab is append-only: bytes are never recycled, which preserves the
+ * previous allocation identity/lifetime.  Oversized or overflow-prone
+ * requests continue through the ordinary calloc path.
+ */
+#define RT_TYPED_TBUF_SLAB_BYTES (1024u * 1024u)
+#define RT_TYPED_TBUF_SLAB_MAX_ALLOC (64u * 1024u)
+
+typedef struct rt_typed_tbuf_slab_chunk {
+  struct rt_typed_tbuf_slab_chunk *next;
+  size_t used;
+  size_t capacity;
+  max_align_t _align;
+  unsigned char data[];
+} rt_typed_tbuf_slab_chunk_t;
+
+static _Thread_local rt_typed_tbuf_slab_chunk_t *rt_typed_tbuf_slab;
+
+static void *rt_typed_tbuf_slab_alloc(size_t bytes) {
+  const size_t align = _Alignof(max_align_t);
+  if (bytes == 0 || bytes > RT_TYPED_TBUF_SLAB_MAX_ALLOC)
+    return NULL;
+  if (bytes > SIZE_MAX - (align - 1u))
+    return NULL;
+  bytes = (bytes + align - 1u) & ~(align - 1u);
+  rt_typed_tbuf_slab_chunk_t *chunk = rt_typed_tbuf_slab;
+  if (!chunk || chunk->capacity - chunk->used < bytes) {
+    size_t capacity = RT_TYPED_TBUF_SLAB_BYTES;
+    if (capacity < bytes)
+      capacity = bytes;
+    if (capacity > SIZE_MAX - sizeof(*chunk))
+      return NULL;
+    /* calloc is intentional: every newly exposed typed-buffer byte must be
+     * zero, matching i64buf_new/f64buf_new's public contract. */
+    chunk = (rt_typed_tbuf_slab_chunk_t *)calloc(1, sizeof(*chunk) + capacity);
+    if (!chunk)
+      return NULL;
+    chunk->capacity = capacity;
+    chunk->next = rt_typed_tbuf_slab;
+    rt_typed_tbuf_slab = chunk;
+  }
+  void *out = chunk->data + chunk->used;
+  chunk->used += bytes;
+  return out;
+}
+
+int64_t rt_tbuf_new_typed_raw(int64_t count, int64_t elem_size) {
+  if (count < 0)
+    count = 0;
+  if (elem_size <= 0)
+    elem_size = 1;
+  int64_t capacity = count < 4 ? 4 : count;
+  if (!rt_tbuf_capacity_fits(capacity, elem_size))
+    return 0;
+  size_t bytes = RT_NATIVE_TBUF_HEADER + (size_t)capacity * (size_t)elem_size;
+  unsigned char *base = (unsigned char *)rt_typed_tbuf_slab_alloc(bytes);
+  if (!base)
+    return rt_tbuf_new_impl(count, elem_size, 0);
+  int64_t *hdr = (int64_t *)base;
+  hdr[0] = (int64_t)NY_NATIVE_TBUF_MAGIC;
+  hdr[1] = count;
+  hdr[2] = elem_size;
+  hdr[3] = capacity;
   return (int64_t)(uintptr_t)(base + RT_NATIVE_TBUF_HEADER);
 }
 
@@ -495,13 +587,13 @@ int64_t rt_tbuf_append_tagged(int64_t buffer, int64_t value,
       for (int64_t i = 0; i < count; ++i) {
         int64_t raw = ((int64_t *)(uintptr_t)buffer)[i];
         unsigned char *slot = (unsigned char *)(uintptr_t)out + (size_t)i * 24;
-        int64_t tag = rt_value_tag(raw);
-        if (tag == 1 || tag == 0) {
-          memcpy(slot, &raw, sizeof(raw));
-          tag = tag == 1 ? 1 : 0;
-        } else {
-          memcpy(slot, &raw, sizeof(raw));
-        }
+        /*
+         * An elem-8 list reached through append_i64_raw contains raw native
+         * integers by construction.  Do not infer the descriptor tag from
+         * the payload's low bit: raw 1/3/5 are data, not tagged 0/1/2.
+         */
+        int64_t tag = 1;
+        memcpy(slot, &raw, sizeof(raw));
         memcpy(slot + 16, &tag, sizeof(tag));
       }
       buffer = out;
@@ -919,11 +1011,17 @@ int64_t rt_raw_truthy(int64_t value) {
 }
 
 int64_t rt_any_add(int64_t left, int64_t right) {
+  if (!is_int(left) && rt_value_tag(left) == TAG_FLOAT)
+    return rt_flt_box_double(rt_any_to_f64(left) + rt_any_to_f64(right));
+  if (!is_int(right) && rt_value_tag(right) == TAG_FLOAT)
+    return rt_flt_box_double(rt_any_to_f64(left) + rt_any_to_f64(right));
   if (rt_value_tag(left) == TAG_BIGINT ||
       rt_value_tag(right) == TAG_BIGINT)
     return rt_bigint_add(rt_bigint_operand(left), rt_bigint_operand(right));
-  /* Boxed floats can be pointer-shaped values with the low bit set.  They
-   * must reach the float implementation before the tagged-integer test. */
+  /*
+   * Boxed floats can be pointer-shaped values with the low bit set.  They
+   * must reach the float implementation before the tagged-integer test.
+   */
   if (is_v_flt(left) || is_v_flt(right))
     return rt_add_raw_impl(left, right);
   if (is_int(left) && is_int(right)) {
@@ -1200,6 +1298,10 @@ int64_t rt_tbuf_swap(int64_t buffer, int64_t left, int64_t right) {
                                 RT_NATIVE_TBUF_HEADER)) {
     int64_t *hdr = (int64_t *)((uintptr_t)buffer - RT_NATIVE_TBUF_HEADER);
     if ((uint64_t)hdr[0] == NY_NATIVE_TBUF_MAGIC) {
+      if (getenv("NYDBG_TBUF"))
+        fprintf(stderr, "DBG_TBUF get data=%p index=%ld count=%ld elem=%ld\n",
+                (void *)(uintptr_t)buffer, (long)index, (long)hdr[1],
+                (long)hdr[2]);
       int64_t count = hdr[1], elem_size = hdr[2];
       if (count < 0 || elem_size <= 0 ||
           (uint64_t)count > SIZE_MAX / (uint64_t)elem_size)
@@ -1385,9 +1487,12 @@ int64_t rt_tbuf_set_tagged(int64_t buffer, int64_t index, int64_t value) {
       /*
        * Descriptor slots carry a raw payload plus explicit metadata.  Keep
        * booleans as their immediate payloads; ordinary tagged integers are
-       * untagged exactly once at this boundary.
+       * untagged exactly once at this boundary.  Dynamic float boxes are
+       * unboxed to their raw IEEE bits inline.
        */
-      if (tag == 1 && is_int(value) && value != NY_IMM_TRUE &&
+      if (tag == TAG_FLOAT)
+        payload = rt_f64_bits(rt_flt_unbox_double(value));
+      else if (tag == 1 && is_int(value) && value != NY_IMM_TRUE &&
           value != NY_IMM_FALSE)
         payload = rt_untag_v(value);
       if (tag == 0)
@@ -1496,10 +1601,12 @@ int64_t rt_value_get_tagged(int64_t value, int64_t key, int64_t fallback);
 static int64_t ny_native_box_tbuf_any(int64_t value);
 static int64_t rt_sequence_tag(int64_t v);
 
-/* Dynamic-ABI element read for thread/async argument packing: elem-8
+/*
+ * Dynamic-ABI element read for thread/async argument packing: elem-8
  * lists hold raw machine words, so scalar ints are tagged exactly once;
  * 24-byte descriptor slots already carry the tagged payload and are
- * returned as-is. */
+ * returned as-is.
+ */
 int64_t rt_tbuf_dyn_elem(int64_t buffer, int64_t index,
                          int64_t want_dynamic) {
   if (!buffer)
@@ -1540,10 +1647,12 @@ int64_t rt_tbuf_dyn_elem(int64_t buffer, int64_t index,
   return 0;
 }
 int64_t rt_tbuf_get_any(int64_t buffer, int64_t index, int64_t fallback) {
-  /* Native values crossing an `any` boundary may be compact encoded
+  /*
+   * Native values crossing an `any` boundary may be compact encoded
    * pointers (tag 6), while the raw tbuf helpers expect the decoded address.
    * Decode only after validating the private header so ordinary tagged values
-   * retain their normal semantics. */
+   * retain their normal semantics.
+   */
   if (NY_NATIVE_IS(buffer) && NY_NATIVE_DECODE(buffer) != NULL) {
     int64_t decoded = (int64_t)(uintptr_t)NY_NATIVE_DECODE(buffer);
     if (rt_header_readable_cached((uintptr_t)decoded - RT_NATIVE_TBUF_HEADER,
@@ -1601,9 +1710,11 @@ int64_t rt_tbuf_get_any(int64_t buffer, int64_t index, int64_t fallback) {
    * managed sequences. Delegate those cases to the generic accessor.
    */
   int64_t result = rt_value_get_tagged(buffer, index, fallback);
-  /* Unknown receivers are a miss, but the public any accessor still returns
+  /*
+   * Unknown receivers are a miss, but the public any accessor still returns
    * the fallback in dynamic representation.  Normalize only the miss so
-   * valid pointer/string/container results are left untouched. */
+   * valid pointer/string/container results are left untouched.
+   */
   return result == fallback ? ny_native_box_tbuf_any(result) : result;
 }
 
@@ -1672,7 +1783,7 @@ int64_t rt_tbuf_index_read_raw(int64_t buffer, int64_t index) {
     }
   }
   if (rt_sequence_tag(buffer) == TAG_RANGE) {
-    return rt_range_index_read_raw(buffer, index);
+    return rt_tag_v(rt_range_index_read_raw(buffer, index));
   }
   rt_panic(rt_alloc_string("index_read out of range"));
   return 0;
@@ -1733,7 +1844,22 @@ static int64_t rt_tbuf_index_any_impl(int64_t buffer, int64_t index) {
     return rt_cstr_index_read_raw(buffer, index);
   if (is_ptr(buffer) && is_heap_ptr(buffer)) {
     int64_t tag = *(int64_t *)((char *)(uintptr_t)buffer - 8);
-    if (tag == TAG_LIST || tag == TAG_TUPLE || tag == TAG_RANGE) {
+    if (tag == TAG_LIST || tag == TAG_TUPLE) {
+      /*
+       * Managed lists/tuples do not have the native-tbuf header, so the
+       * historical fast load below cannot validate the subscript.  Enforce
+       * the same strict checked-index contract as native tbufs before touching
+       * the payload; otherwise an out-of-range read silently observes adjacent
+       * heap memory (often zero) instead of raising a catchable panic.
+       */
+      int64_t len_v = *(int64_t *)((char *)(uintptr_t)buffer + 0);
+      int64_t count = is_int(len_v) ? rt_untag_v(len_v) : len_v;
+      if (index < 0 && count >= 0 && index >= -count)
+        index += count;
+      if (index < 0 || index >= count) {
+        rt_panic(rt_alloc_string("index_read out of range"));
+        return 0;
+      }
       /*
        * Managed sequence slots use the raw legacy payload layout. Convert
        * through the single any decoder so raw integers are tagged exactly
@@ -1741,6 +1867,8 @@ static int64_t rt_tbuf_index_any_impl(int64_t buffer, int64_t index) {
        */
       return ny_native_box_tbuf_any(rt_load_item_fast(buffer, index));
     }
+    if (tag == TAG_RANGE)
+      return rt_tag_v(rt_range_index_read_raw(buffer, index));
   }
   rt_panic(rt_alloc_string("index_read out of range"));
   return 0;
@@ -2035,7 +2163,18 @@ typedef struct {
   int64_t length;
   int64_t capacity;
   ny_native_dict_slot_t *slots;
+  uint8_t *ctrl;
 } ny_native_dict_t;
+
+static inline void ny_native_dict_set_ctrl(ny_native_dict_t *dict, size_t idx, uint8_t val) {
+  dict->ctrl[idx] = val;
+  if (idx < 16) {
+    dict->ctrl[(size_t)dict->capacity + idx] = val;
+    if (dict->capacity < 16 && (size_t)dict->capacity * 2 + idx < (size_t)dict->capacity + 16) {
+      dict->ctrl[(size_t)dict->capacity * 2 + idx] = val;
+    }
+  }
+}
 
 #define NY_NATIVE_DICT_MAGIC UINT64_C(0x4e59444943544d47)
 
@@ -2078,6 +2217,20 @@ static ny_native_dict_t *ny_native_dict_ptr(int64_t value) {
   return dict;
 }
 
+int64_t rt_handle_valid(int64_t handle) {
+  if (!handle)
+    return 0;
+  if (rt_tbuf_known_handle((uintptr_t)handle))
+    return 1;
+  if (ny_native_dict_ptr(handle) != NULL)
+    return 1;
+  if (is_ptr(handle) && is_heap_ptr(handle)) {
+    if (rt_header_readable_cached((uintptr_t)handle - 8, 8))
+      return 1;
+  }
+  return 0;
+}
+
 static uint64_t ny_native_dict_hash(int64_t key, bool is_string) {
   if (is_string && key != 0) {
     const unsigned char *s = (const unsigned char *)(uintptr_t)key;
@@ -2096,27 +2249,33 @@ static uint64_t ny_native_dict_hash(int64_t key, bool is_string) {
 static bool ny_native_dict_resize(ny_native_dict_t *dict, int64_t capacity) {
   if (!dict || capacity < 8 || (capacity & (capacity - 1)) != 0)
     return false;
-  ny_native_dict_slot_t *slots =
-      (ny_native_dict_slot_t *)calloc((size_t)capacity, sizeof(*slots));
-  if (!slots)
+  size_t slot_bytes = (size_t)capacity * sizeof(ny_native_dict_slot_t);
+  size_t ctrl_bytes = (size_t)capacity + 16;
+  char *buf = (char *)calloc(1, slot_bytes + ctrl_bytes);
+  if (!buf)
     return false;
-  ny_native_dict_slot_t *old = dict->slots;
+  ny_native_dict_slot_t *slots = (ny_native_dict_slot_t *)buf;
+  uint8_t *ctrl = (uint8_t *)(buf + slot_bytes);
+  ny_native_dict_slot_t *old_slots = dict->slots;
   int64_t old_cap = dict->capacity;
   dict->slots = slots;
+  dict->ctrl = ctrl;
   dict->capacity = capacity;
   dict->length = 0;
-  if (old) {
+  if (old_slots) {
     uint64_t mask = (uint64_t)capacity - 1;
     for (int64_t i = 0; i < old_cap; ++i) {
-      if (old[i].control < 0x80u)
+      if (old_slots[i].control < 0x80u)
         continue;
-      uint64_t pos = old[i].hash & mask;
-      while (slots[pos].control >= 0x80u)
+      uint64_t pos = old_slots[i].hash & mask;
+      while (ctrl[pos] >= 0x80u)
         pos = (pos + 1) & mask;
-      slots[pos] = old[i];
+      slots[pos] = old_slots[i];
+      uint8_t h2 = old_slots[i].control;
+      ny_native_dict_set_ctrl(dict, (size_t)pos, h2);
       dict->length++;
     }
-    free(old);
+    free(old_slots);
   }
   return true;
 }
@@ -2213,30 +2372,104 @@ static ny_native_dict_slot_t *ny_native_dict_find(ny_native_dict_t *dict,
                                                   bool *found) {
   if (found)
     *found = false;
-  if (!dict || !dict->slots || dict->capacity <= 0)
+  if (!dict || !dict->slots || !dict->ctrl || dict->capacity <= 0)
     return NULL;
   uint64_t mask = (uint64_t)dict->capacity - 1;
   uint64_t hash = ny_native_dict_hash(key, key_is_string);
   uint8_t h2 = NY_NATIVE_DICT_H2(hash);
   uint64_t pos = hash & mask;
   ny_native_dict_slot_t *first_tomb = NULL;
-  for (int64_t i = 0; i < dict->capacity; ++i) {
-    ny_native_dict_slot_t *slot = &dict->slots[pos];
-    if (slot->control == NY_NATIVE_DICT_EMPTY)
-      return first_tomb ? first_tomb : slot;
-    if (slot->control >= 0x80u) {
-      if (slot->control == h2 && slot->hash == hash &&
+
+#if defined(NY_DICT_USE_SSE2)
+  __m128i target = _mm_set1_epi8((char)h2);
+  __m128i empty_vec = _mm_setzero_si128();
+  __m128i tomb_vec = _mm_set1_epi8((char)NY_NATIVE_DICT_TOMBSTONE);
+
+  for (int64_t step = 0; step < dict->capacity; step += 16) {
+    __m128i ctrl16 = _mm_loadu_si128((const __m128i *)(dict->ctrl + pos));
+
+    __m128i match_vec = _mm_cmpeq_epi8(ctrl16, target);
+    uint32_t match_mask = (uint32_t)_mm_movemask_epi8(match_vec);
+    while (match_mask != 0) {
+      int offset = __builtin_ctz(match_mask);
+      uint64_t slot_idx = (pos + (uint64_t)offset) & mask;
+      ny_native_dict_slot_t *slot = &dict->slots[slot_idx];
+      if (slot->hash == hash &&
           ny_native_dict_key_equal(slot->key, slot->key_is_string, key,
                                    key_is_string)) {
         if (found)
           *found = true;
         return slot;
       }
-    } else if (slot->control == NY_NATIVE_DICT_TOMBSTONE && !first_tomb) {
-      first_tomb = slot;
+      match_mask &= match_mask - 1;
     }
-    pos = (pos + 1) & mask;
+
+    __m128i empty_match = _mm_cmpeq_epi8(ctrl16, empty_vec);
+    uint32_t empty_mask = (uint32_t)_mm_movemask_epi8(empty_match);
+    if (empty_mask != 0) {
+      if (first_tomb)
+        return first_tomb;
+      int offset = __builtin_ctz(empty_mask);
+      uint64_t slot_idx = (pos + (uint64_t)offset) & mask;
+      return &dict->slots[slot_idx];
+    }
+
+    if (!first_tomb) {
+      __m128i tomb_match = _mm_cmpeq_epi8(ctrl16, tomb_vec);
+      uint32_t tomb_mask = (uint32_t)_mm_movemask_epi8(tomb_match);
+      if (tomb_mask != 0) {
+        int offset = __builtin_ctz(tomb_mask);
+        first_tomb = &dict->slots[(pos + (uint64_t)offset) & mask];
+      }
+    }
+
+    pos = (pos + 16) & mask;
   }
+#else
+  uint64_t rep_h2 = 0x0101010101010101ULL * (uint64_t)h2;
+  uint64_t rep_tomb = 0x0101010101010101ULL * (uint64_t)NY_NATIVE_DICT_TOMBSTONE;
+
+  for (int64_t step = 0; step < dict->capacity; step += 8) {
+    uint64_t ctrl8 = *(const uint64_t *)(dict->ctrl + pos);
+
+    uint64_t x_match = ctrl8 ^ rep_h2;
+    uint64_t m_match = (x_match - 0x0101010101010101ULL) & ~x_match & 0x8080808080808080ULL;
+    while (m_match != 0) {
+      int bit = __builtin_ctzll(m_match);
+      int offset = bit >> 3;
+      uint64_t slot_idx = (pos + (uint64_t)offset) & mask;
+      ny_native_dict_slot_t *slot = &dict->slots[slot_idx];
+      if (slot->hash == hash &&
+          ny_native_dict_key_equal(slot->key, slot->key_is_string, key,
+                                   key_is_string)) {
+        if (found)
+          *found = true;
+        return slot;
+      }
+      m_match &= ~(0x80ULL << bit);
+    }
+
+    uint64_t m_empty = (ctrl8 - 0x0101010101010101ULL) & ~ctrl8 & 0x8080808080808080ULL;
+    if (m_empty != 0) {
+      if (first_tomb)
+        return first_tomb;
+      int offset = __builtin_ctzll(m_empty) >> 3;
+      return &dict->slots[(pos + (uint64_t)offset) & mask];
+    }
+
+    if (!first_tomb) {
+      uint64_t x_tomb = ctrl8 ^ rep_tomb;
+      uint64_t m_tomb = (x_tomb - 0x0101010101010101ULL) & ~x_tomb & 0x8080808080808080ULL;
+      if (m_tomb != 0) {
+        int offset = __builtin_ctzll(m_tomb) >> 3;
+        first_tomb = &dict->slots[(pos + (uint64_t)offset) & mask];
+      }
+    }
+
+    pos = (pos + 8) & mask;
+  }
+#endif
+
   return first_tomb;
 }
 
@@ -2319,8 +2552,54 @@ static bool ny_native_key_is_raw_string(int64_t key) {
   return first == 0 || (first >= 0x20 && first < 0x7f);
 }
 
+typedef enum {
+  NY_GET_IC_NONE = 0,
+  NY_GET_IC_DICT,
+  NY_GET_IC_TBUF,
+  NY_GET_IC_LIST,
+} ny_get_ic_kind_t;
+
+typedef struct {
+  uintptr_t caller;
+  uint8_t kind;
+  uint8_t key_is_string;
+  uint16_t slot_idx;
+  int64_t capacity;
+  int64_t cached_key;
+  uint64_t cached_hash;
+} ny_get_ic_entry_t;
+
+#define NY_GET_IC_SIZE 2048
+static _Thread_local ny_get_ic_entry_t g_get_ic_table[NY_GET_IC_SIZE];
+
 static int64_t ny_native_dict_get_impl(int64_t value, int64_t key,
                                        int64_t fallback, bool key_is_string) {
+  uintptr_t caller = (uintptr_t)__builtin_return_address(0);
+  size_t ic_idx = ((caller ^ (caller >> 4)) & (NY_GET_IC_SIZE - 1));
+  ny_get_ic_entry_t *ic = &g_get_ic_table[ic_idx];
+
+  /* Monomorphic receiver layout cache fast path: bypass hashing and probing */
+  if (ic->caller == caller && ic->kind == NY_GET_IC_DICT &&
+      ic->key_is_string == (uint8_t)key_is_string) {
+    if (value && (uint64_t)value >= 4096 && (((uintptr_t)value & 7) == 0)) {
+      ny_native_dict_t *dict = (ny_native_dict_t *)(uintptr_t)(value - 16);
+      if (dict->magic == NY_NATIVE_DICT_MAGIC && dict->capacity == ic->capacity &&
+          (size_t)ic->slot_idx < (size_t)dict->capacity) {
+        ny_native_dict_slot_t *slot = &dict->slots[ic->slot_idx];
+        if ((slot->control & 0x80) &&
+            (slot->key == key ||
+             (key_is_string && slot->key_is_string && slot->hash == ic->cached_hash &&
+              ny_native_dict_key_equal(slot->key, 1, key, 1)))) {
+          if (slot->value != 0 && !NY_DYNAMIC_CALLABLE_IS(slot->value) &&
+              !is_int(slot->value) &&
+              rt_native_is_int(slot->value) && !rt_is_bool_imm(slot->value))
+            return rt_tag_v(slot->value);
+          return slot->value;
+        }
+      }
+    }
+  }
+
   ny_native_dict_t *dict = ny_native_dict_ptr(value);
   if (!dict && ny_native_managed_dict_ptr(value)) {
     if (key_is_string)
@@ -2348,6 +2627,18 @@ static int64_t ny_native_dict_get_impl(int64_t value, int64_t key,
       ny_native_dict_find(dict, key, key_is_string, &found);
   if (!found || !slot)
     return fallback;
+
+  /* Record stable layout/slot offset in monomorphic inline cache */
+  if (dict && dict->capacity > 0) {
+    ic->caller = caller;
+    ic->kind = NY_GET_IC_DICT;
+    ic->key_is_string = (uint8_t)key_is_string;
+    ic->slot_idx = (uint16_t)(slot - dict->slots);
+    ic->capacity = dict->capacity;
+    ic->cached_key = key;
+    ic->cached_hash = slot->hash;
+  }
+
   /*
    * Native lowering keeps typed integer results raw in the slot, while the
    * public dictionary API returns dynamic values.  Box only scalar integers
@@ -2390,6 +2681,7 @@ static int64_t ny_native_dict_set_impl(int64_t value, int64_t key, int64_t item,
     slot->key_is_string = key_is_string ? 1 : 0;
     slot->hash = ny_native_dict_hash(key, key_is_string);
     slot->control = NY_NATIVE_DICT_H2(slot->hash);
+    ny_native_dict_set_ctrl(dict, (size_t)(slot - dict->slots), slot->control);
     dict->length++;
   }
   slot->value = item;
@@ -2475,13 +2767,60 @@ int64_t rt_value_get_index_raw(int64_t value, int64_t index,
                                int64_t fallback) {
   /*
    * The result is a dynamic value even though the index is raw.
+   * A string is a sequence at the source level, but its pointer payload can
+   * happen to resemble a native-buffer header.  Classify it before the
+   * header probe so `s[2]` reads one UTF-8 character instead of treating the
+   * suffix `s[2:]` as a buffer slice.
    */
+  if (rt_native_is_str(value) || is_v_str(value))
+    return rt_cstr_index_read_raw(value, index);
   if (rt_magic_tbuf_elem_size(value) > 0)
     return rt_tbuf_get_any(value, index, fallback);
   return rt_value_get_tagged(value, rt_tag_v(index), fallback);
 }
 
 int64_t rt_value_get_tagged(int64_t value, int64_t key, int64_t fallback) {
+  uintptr_t caller = (uintptr_t)__builtin_return_address(0);
+  size_t ic_idx = ((caller ^ (caller >> 4)) & (NY_GET_IC_SIZE - 1));
+  ny_get_ic_entry_t *ic = &g_get_ic_table[ic_idx];
+
+  /* Monomorphic receiver layout cache fast path */
+  if (ic->caller == caller) {
+    if (ic->kind == NY_GET_IC_DICT) {
+      if (value && (uint64_t)value >= 4096 && (((uintptr_t)value & 7) == 0)) {
+        ny_native_dict_t *dict = (ny_native_dict_t *)(uintptr_t)(value - 16);
+        if (dict->magic == NY_NATIVE_DICT_MAGIC && dict->capacity == ic->capacity &&
+            (size_t)ic->slot_idx < (size_t)dict->capacity) {
+          ny_native_dict_slot_t *slot = &dict->slots[ic->slot_idx];
+          if ((slot->control & 0x80) &&
+              (slot->key == key ||
+               (ic->key_is_string && slot->key_is_string && slot->hash == ic->cached_hash &&
+                ny_native_dict_key_equal(slot->key, 1, key, 1)))) {
+            if (slot->value != 0 && !NY_DYNAMIC_CALLABLE_IS(slot->value) &&
+                !is_int(slot->value) &&
+                rt_native_is_int(slot->value) && !rt_is_bool_imm(slot->value))
+              return rt_tag_v(slot->value);
+            return slot->value;
+          }
+        }
+      }
+    } else if (ic->kind == NY_GET_IC_TBUF) {
+      if (value && (uint64_t)value >= 4096 && rt_magic_tbuf_elem_size(value) > 0) {
+        int64_t idx = is_int(key) ? rt_untag_v(key) : key;
+        return rt_tbuf_get_any(value, idx, fallback);
+      }
+    }
+  }
+
+  /* Fast path: monomorphic native dictionary receiver bypasses multi-type probe ladder */
+  if (value && (uint64_t)value >= 4096 && (((uintptr_t)value & 7) == 0)) {
+    ny_native_dict_t *nd = ny_native_dict_ptr(value);
+    if (nd) {
+      bool is_s = rt_native_is_str(key) != 0 || is_v_str(key) || ny_native_key_is_raw_string(key);
+      return ny_native_dict_get_impl(value, key, fallback, is_s);
+    }
+  }
+
   /*
    * Native tbuf handles may have an odd address and therefore look like a
    * tagged integer to the legacy predicate.  Resolve their representation
@@ -2496,6 +2835,8 @@ int64_t rt_value_get_tagged(int64_t value, int64_t key, int64_t fallback) {
       value = decoded;
   }
   if (rt_magic_tbuf_elem_size(value) > 0) {
+    ic->caller = caller;
+    ic->kind = NY_GET_IC_TBUF;
     int64_t idx = is_int(key) ? rt_untag_v(key) : key;
     return rt_tbuf_get_any(value, idx, fallback);
   }
@@ -2518,9 +2859,11 @@ int64_t rt_value_get_tagged(int64_t value, int64_t key, int64_t fallback) {
       return rt_load_item_any(value, rt_tag_v(idx));
     }
   }
-  /* Registered malloc handles are opaque storage, even when their first
+  /*
+   * Registered malloc handles are opaque storage, even when their first
    * bytes happen to form a readable C string. Check provenance before the
-   * low-bit integer and heuristic string tests. */
+   * low-bit integer and heuristic string tests.
+   */
   if (rt_raw_ptr_registered(value))
     return fallback;
   if (is_int(value)) {
@@ -2530,9 +2873,11 @@ int64_t rt_value_get_tagged(int64_t value, int64_t key, int64_t fallback) {
   }
   if (!value)
     return fallback;
-  /* A raw malloc pointer is not a sequence just because bytes before it
+  /*
+   * A raw malloc pointer is not a sequence just because bytes before it
    * happen to resemble a tbuf header. Reject it before heuristic length
-   * probing and preserve the dynamic fallback ABI. */
+   * probing and preserve the dynamic fallback ABI.
+   */
   if ((is_ptr(value) ||
        ((uint64_t)value > NY_VALUE_PTR_MIN_ADDR &&
         ((uint64_t)value & NY_VALUE_PTR_TAG_MASK) == 0)) &&
@@ -2540,9 +2885,11 @@ int64_t rt_value_get_tagged(int64_t value, int64_t key, int64_t fallback) {
       !rt_native_is_str(value) && !ny_native_dict_ptr(value) &&
       !rt_tbuf_known_handle((uintptr_t)value))
     return fallback;
-  /* Some foreign/opaque pointers arrive with a non-canonical low-bit
+  /*
+   * Some foreign/opaque pointers arrive with a non-canonical low-bit
    * spelling.  They are still never valid Ny sequences; the dynamic get
-   * contract must treat them as a miss when a fallback was supplied. */
+   * contract must treat them as a miss when a fallback was supplied.
+   */
   if ((uint64_t)value > NY_VALUE_PTR_MIN_ADDR &&
       is_int(value) && !rt_heap_object_ptr(value) &&
       !rt_native_is_str(value) && !ny_native_dict_ptr(value) &&
@@ -2633,10 +2980,12 @@ int64_t rt_value_get_tagged(int64_t value, int64_t key, int64_t fallback) {
       return fallback;
     }
   }
-  /* Unknown/raw pointer receivers use the same miss ABI as the dynamic
+  /*
+   * Unknown/raw pointer receivers use the same miss ABI as the dynamic
    * caller.  The native lowering has already normalized literal defaults at
    * this boundary, so preserve that representation instead of tagging it a
-   * second time. */
+   * second time.
+   */
   return fallback;
 }
 
@@ -2671,7 +3020,13 @@ int64_t rt_native_dict_set_native_i64(int64_t value, int64_t key,
   return ny_native_dict_set_impl(value, key, item, false);
 }
 int64_t rt_native_dict_set_nir_i64(int64_t value, int64_t key, int64_t item) {
-  return ny_native_dict_set_impl(value, key, item, rt_native_is_str(key) != 0);
+  /* Native-only lowering represents transient to_str()/literal keys as raw
+   * NUL-terminated pointers.  Classify them in the same string hash domain
+   * as rt_dict_get_raw; otherwise inserts hash the pointer address while
+   * lookups hash the bytes and only accidental/final entries can be found. */
+  bool string_key = rt_native_is_str(key) != 0 || is_v_str(key) ||
+                    ny_native_key_is_raw_string(key);
+  return ny_native_dict_set_impl(value, key, item, string_key);
 }
 int64_t rt_value_set_tagged(int64_t value, int64_t key, int64_t item) {
   /*
@@ -2745,7 +3100,7 @@ int64_t rt_value_set_tagged(int64_t value, int64_t key, int64_t item) {
     int64_t *hdr = (int64_t *)((uintptr_t)value - RT_NATIVE_TBUF_HEADER);
     if ((uint64_t)hdr[0] == NY_NATIVE_TBUF_MAGIC)
       return rt_tbuf_set_i64_raw(value, is_int(key) ? rt_untag_v(key) : key,
-                                 rt_any_to_i64(item));
+                                 item);
   }
   return rt_tbuf_set_i64_raw(value, key, item);
 }
@@ -2796,6 +3151,8 @@ int64_t rt_dict_clone_raw(int64_t value) {
     return dst_val;
   memcpy(dst->slots, src->slots,
          (size_t)src->capacity * sizeof(ny_native_dict_slot_t));
+  if (dst->ctrl && src->ctrl)
+    memcpy(dst->ctrl, src->ctrl, (size_t)src->capacity + 16);
   dst->length = src->length;
   return dst_val;
 }
@@ -2924,6 +3281,10 @@ int64_t rt_vec_div_component_raw(int64_t left, int64_t right) {
 }
 
 int64_t rt_any_mul(int64_t left, int64_t right) {
+  if (!is_int(left) && rt_value_tag(left) == TAG_FLOAT)
+    return rt_flt_box_double(rt_any_to_f64(left) * rt_any_to_f64(right));
+  if (!is_int(right) && rt_value_tag(right) == TAG_FLOAT)
+    return rt_flt_box_double(rt_any_to_f64(left) * rt_any_to_f64(right));
   if (rt_value_tag(left) == TAG_BIGINT ||
       rt_value_tag(right) == TAG_BIGINT)
     return rt_bigint_mul(rt_bigint_operand(left), rt_bigint_operand(right));
@@ -2953,6 +3314,10 @@ int64_t rt_any_mul(int64_t left, int64_t right) {
 }
 
 int64_t rt_any_div(int64_t left, int64_t right) {
+  if (!is_int(left) && rt_value_tag(left) == TAG_FLOAT)
+    return rt_flt_box_double(rt_any_to_f64(left) / rt_any_to_f64(right));
+  if (!is_int(right) && rt_value_tag(right) == TAG_FLOAT)
+    return rt_flt_box_double(rt_any_to_f64(left) / rt_any_to_f64(right));
   if (rt_value_tag(left) == TAG_BIGINT ||
       rt_value_tag(right) == TAG_BIGINT)
     return rt_bigint_div(rt_bigint_operand(left), rt_bigint_operand(right));
@@ -2989,7 +3354,6 @@ int64_t rt_any_mod(int64_t left, int64_t right) {
   }
   return 0;
 }
-
 
 /*
  * The native representation keeps sequence values as raw magic-tbuf handles,
@@ -3086,8 +3450,10 @@ int64_t rt_any_eq(int64_t left, int64_t right) {
     return NY_IMM_TRUE;
   if (!left || !right)
     return NY_IMM_FALSE;
-  /* Structural equality must compare the payloads of compact native handles,
-   * not their tagged pointer spellings. */
+  /*
+   * Structural equality must compare the payloads of compact native handles,
+   * not their tagged pointer spellings.
+   */
   if (NY_NATIVE_IS(left) && NY_NATIVE_DECODE(left) != NULL) {
     int64_t decoded = (int64_t)(uintptr_t)NY_NATIVE_DECODE(left);
     if (rt_header_readable_cached((uintptr_t)decoded - RT_NATIVE_TBUF_HEADER,
@@ -3272,8 +3638,10 @@ int64_t rt_len(int64_t value) {
       if (strcmp(s, "vec4") == 0 || strcmp(s, "Vector4") == 0)
         return 4;
     }
-    /* Native dictionaries can also carry the generic dict tag.  Read their
-     * SwissTable count before the managed-dictionary header probe below. */
+    /*
+     * Native dictionaries can also carry the generic dict tag.  Read their
+     * SwissTable count before the managed-dictionary header probe below.
+     */
     return rt_dict_len_raw(value);
   }
   if (ny_native_managed_dict_ptr(value)) {
@@ -3311,15 +3679,19 @@ int64_t rt_len(int64_t value) {
 }
 
 int64_t rt_len_strict(int64_t value) {
-  /* Match the public len error contract for dynamic member access. */
+  /*
+   * Match the public len error contract for dynamic member access.
+   */
   if (value == 0) {
     rt_panic(rt_alloc_string("len expects a sequence, got int"));
     return 0;
   }
-  /* `any` erases the dictionary/list representation before this bridge is
+  /*
+   * `any` erases the dictionary/list representation before this bridge is
    * selected.  Test authoritative container layouts before the low-bit
    * immediate-integer predicate; managed dictionaries are commonly odd
-   * addresses and were being rejected as integers. */
+   * addresses and were being rejected as integers.
+   */
   if (ny_native_dict_ptr(value))
     return rt_len(value);
   if (ny_native_managed_dict_ptr(value)) {
@@ -3417,6 +3789,7 @@ static int64_t ny_native_dict_delete_impl(int64_t value, int64_t key,
     slot->key = 0;
     slot->value = 0;
     slot->key_is_string = 0;
+    ny_native_dict_set_ctrl(dict, (size_t)(slot - dict->slots), NY_NATIVE_DICT_TOMBSTONE);
     dict->length--;
   }
   return value;
@@ -3434,6 +3807,8 @@ int64_t rt_dict_clear_raw(int64_t value) {
   if (!dict || !dict->slots)
     return value;
   memset(dict->slots, 0, (size_t)dict->capacity * sizeof(*dict->slots));
+  if (dict->ctrl)
+    memset(dict->ctrl, 0, (size_t)dict->capacity + 16);
   dict->length = 0;
   return value;
 }
@@ -4722,9 +5097,11 @@ int64_t rt_trace_ret_void(void) {
   return rt_tag_v(0);
 }
 
-/* Raw NYIR adapters for the zero-argument trace diagnostics: the native
+/*
+ * Raw NYIR adapters for the zero-argument trace diagnostics: the native
  * path compares their results against plain integers while the VM consumes
- * the tagged variants above. */
+ * the tagged variants above.
+ */
 int64_t rt_trace_ret_void_raw(void) { return rt_untag_v(rt_trace_ret_void()); }
 
 int64_t rt_trace_exit_raw(void) { return rt_untag_v(rt_trace_exit()); }
@@ -4746,8 +5123,10 @@ int64_t rt_trace_ret_tagged(int64_t v) {
 }
 
 int64_t rt_trace_ret_i64(int64_t v) {
-  /* The builtin signature is untyped, so the native call boundary delivers
-   * the tagged scalar; decode once so identity returns the plain value. */
+  /*
+   * The builtin signature is untyped, so the native call boundary delivers
+   * the tagged scalar; decode once so identity returns the plain value.
+   */
   if (is_int(v))
     v = rt_untag_v(v);
   if (g_trace_suspended)
@@ -4788,8 +5167,10 @@ int64_t rt_trace_ret_bool(int64_t v) {
 }
 
 int64_t rt_trace_ret_ptr(int64_t v) {
-  /* Untyped builtin signature: the native boundary tags scalar literals, so
-   * decode once (a boxed integer zero would read as 1, not NULL). */
+  /*
+   * Untyped builtin signature: the native boundary tags scalar literals, so
+   * decode once (a boxed integer zero would read as 1, not NULL).
+   */
   if (is_int(v))
     v = rt_untag_v(v);
   if (g_trace_suspended)
@@ -5162,6 +5543,22 @@ int64_t rt_native_is_int(int64_t v) {
   return 1;
 }
 int64_t rt_is_ny_obj(int64_t v) {
+  /*
+   * Native dictionaries and native tbuf-backed sequences are first-class
+   * Nytrix values even though they do not use the legacy traced-heap header.
+   * Reflection/printing gates structural formatting on __is_ny_obj; treating
+   * these handles as foreign pointers sends them to __to_str as if they were
+   * C strings, which can scan arbitrary container payload memory indefinitely.
+   */
+  if (ny_native_dict_ptr(v) != NULL)
+    return NY_IMM_TRUE;
+  if (v &&
+      rt_header_readable_cached((uintptr_t)v - RT_NATIVE_TBUF_HEADER,
+                                RT_NATIVE_TBUF_HEADER)) {
+    int64_t *hdr = (int64_t *)((uintptr_t)v - RT_NATIVE_TBUF_HEADER);
+    if ((uint64_t)hdr[0] == NY_NATIVE_TBUF_MAGIC)
+      return NY_IMM_TRUE;
+  }
   return is_ny_obj(v) ? NY_IMM_TRUE : NY_IMM_FALSE;
 }
 int64_t rt_is_str_obj(int64_t v) {
@@ -5179,8 +5576,12 @@ int64_t rt_is_str_obj(int64_t v) {
     return NY_IMM_TRUE;
   if (is_int(v))
     return NY_IMM_FALSE;
-  if (is_ptr(v) && !is_heap_ptr(v))
-    return NY_IMM_TRUE;
+  /*
+   * rt_native_is_str() already performs the guarded headerless-C-string
+   * probe after excluding native tbufs, dicts, floats, and heap objects.
+   * Treating every remaining non-heap pointer as a string misclassified
+   * native list handles as strings in the REPL/JIT path.
+   */
   return NY_IMM_FALSE;
 }
 int64_t rt_is_float_obj(int64_t v) {
@@ -5329,8 +5730,10 @@ int64_t rt_native_has_tag(int64_t v, int64_t tag) {
 int64_t rt_value_tag(int64_t v) {
   if (v == 0)
     return 0;
-  /* Async tasks are opaque runtime handles, not strings or scalar immediates.
-   * Their addresses can satisfy both heuristic predicates. */
+  /*
+   * Async tasks are opaque runtime handles, not strings or scalar immediates.
+   * Their addresses can satisfy both heuristic predicates.
+   */
   if (rt_async_is_handle(v))
     return TAG_CLOSURE;
   /*
@@ -5730,6 +6133,21 @@ int64_t rt_result_unwrap_or_raw(int64_t v, int64_t fallback) {
   }
   return fallback;
 }
+int64_t rt_varargs_new(int64_t n_v) {
+  int64_t n = is_int(n_v) ? (n_v >> 1) : n_v;
+  if (n < 0)
+    n = 0;
+  if (n > (INT64_MAX - 16) / 8)
+    return 0;
+  int64_t out = rt_malloc(rt_tag_v(16 + n * 8));
+  if (!out)
+    return 0;
+  *(int64_t *)((char *)(uintptr_t)out - 8) = TAG_LIST;
+  *(int64_t *)((char *)(uintptr_t)out + 0) = rt_tag_v(0);
+  memset((char *)(uintptr_t)out + 8, 0, (size_t)n * 8 + 8);
+  return out;
+}
+
 int64_t rt_list_new(int64_t n_v) {
   int64_t n = is_int(n_v) ? (n_v >> 1) : n_v;
   if (n < 0)
@@ -6499,37 +6917,81 @@ int64_t rt_sorted_any(int64_t xs) {
 }
 
 int64_t rt_list_len(int64_t lst) {
+  if (lst && rt_header_readable_cached((uintptr_t)lst - RT_NATIVE_TBUF_HEADER,
+                                       RT_NATIVE_TBUF_HEADER)) {
+    int64_t *hdr = (int64_t *)((uintptr_t)lst - RT_NATIVE_TBUF_HEADER);
+    if ((uint64_t)hdr[0] == NY_NATIVE_TBUF_MAGIC)
+      return rt_tag_v(hdr[1]);
+  }
   if (!is_ptr(lst))
     return 0;
   if (rt_header_readable_cached((uintptr_t)lst - RT_NATIVE_TBUF_HEADER,
                                 RT_NATIVE_TBUF_HEADER)) {
     int64_t *hdr = (int64_t *)((uintptr_t)lst - RT_NATIVE_TBUF_HEADER);
     if ((uint64_t)hdr[0] == NY_NATIVE_TBUF_MAGIC)
-      return hdr[1];
+      return rt_tag_v(hdr[1]);
   }
   if (is_heap_ptr(lst)) {
     int64_t tag = *(int64_t *)((char *)(uintptr_t)lst - 8);
     if (tag == TAG_LIST || tag == TAG_TUPLE) {
       int64_t len_v = *(int64_t *)((char *)(uintptr_t)lst + 0);
-      return is_int(len_v) ? (len_v >> 1) : len_v;
+      return is_int(len_v) ? len_v : rt_tag_v(len_v);
     }
   }
   int64_t tagged = *(int64_t *)((char *)(uintptr_t)lst + 0);
-  return (tagged & 1) ? (tagged >> 1) : tagged;
+  return (tagged & 1) ? tagged : rt_tag_v(tagged);
 }
 
-int64_t rt_list_set_len(int64_t lst, int64_t n) {
+int64_t rt_list_set_len_raw(int64_t lst, int64_t n) {
   if (!is_ptr(lst))
     return 0;
   if (rt_header_readable_cached((uintptr_t)lst - RT_NATIVE_TBUF_HEADER,
                                 RT_NATIVE_TBUF_HEADER)) {
     int64_t *hdr = (int64_t *)((uintptr_t)lst - RT_NATIVE_TBUF_HEADER);
     if ((uint64_t)hdr[0] == NY_NATIVE_TBUF_MAGIC) {
-      hdr[1] = n;
+      hdr[1] = n < 0 ? 0 : n;
       return lst;
     }
   }
-  int64_t tagged = rt_tag_v(n);
+  /*
+   * Legacy managed lists store a tagged length.
+   */
+  *(int64_t *)((char *)(uintptr_t)lst + 0) = rt_tag_v(n < 0 ? 0 : n);
+  return lst;
+}
+
+int64_t rt_list_set_len(int64_t lst, int64_t n) {
+  if (lst && rt_header_readable_cached((uintptr_t)lst - RT_NATIVE_TBUF_HEADER,
+                                       RT_NATIVE_TBUF_HEADER)) {
+    int64_t *hdr = (int64_t *)((uintptr_t)lst - RT_NATIVE_TBUF_HEADER);
+    if ((uint64_t)hdr[0] == NY_NATIVE_TBUF_MAGIC) {
+      hdr[1] = is_int(n) ? rt_untag_v(n) : n;
+      return lst;
+    }
+  }
+  if (!is_ptr(lst))
+    return 0;
+  if (rt_header_readable_cached((uintptr_t)lst - RT_NATIVE_TBUF_HEADER,
+                                RT_NATIVE_TBUF_HEADER)) {
+    int64_t *hdr = (int64_t *)((uintptr_t)lst - RT_NATIVE_TBUF_HEADER);
+    if ((uint64_t)hdr[0] == NY_NATIVE_TBUF_MAGIC) {
+      /*
+       * The public helper receives a language integer, while the native
+       * tbuf header deliberately stores its count as a raw machine value.
+       * Keeping the conversion at this ABI boundary prevents list.len from
+       * tagging an already-tagged count a second time.
+       */
+      hdr[1] = is_int(n) ? rt_untag_v(n) : n;
+      return lst;
+    }
+  }
+  /*
+   * Managed lists store their length in the language integer ABI.  Calls from
+   * generated Nytrix code already pass a tagged integer, while a few native
+   * callers may pass a raw count.  Preserve an existing tag instead of
+   * tagging it a second time.
+   */
+  int64_t tagged = is_int(n) ? n : rt_tag_v(n);
   *(int64_t *)((char *)(uintptr_t)lst + 0) = tagged;
   return tagged;
 }

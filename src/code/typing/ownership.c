@@ -766,3 +766,364 @@ void stmt_ownership_end_return_transfer(binding *b,
   if (b)
     b->owner_state = old_state;
 }
+
+static size_t stmt_ownership_count_uses_expr(const expr_t *e,
+                                             const char *param_name);
+static size_t stmt_ownership_count_uses_stmt_internal(const stmt_t *s,
+                                                      const char *param_name,
+                                                      bool *out_reassigned);
+
+static size_t stmt_ownership_count_uses_block(const stmt_block_t *blk,
+                                              const char *param_name,
+                                              bool *out_reassigned) {
+  if (!blk)
+    return 0;
+  size_t total = 0;
+  for (size_t i = 0; i < blk->body.len; i++) {
+    const stmt_t *st = blk->body.data[i];
+    if (!st)
+      continue;
+    bool st_reassigned = false;
+    total += stmt_ownership_count_uses_stmt_internal(st, param_name,
+                                                     &st_reassigned);
+    if (st_reassigned) {
+      if (out_reassigned)
+        *out_reassigned = true;
+      break;
+    }
+  }
+  return total;
+}
+
+static size_t stmt_ownership_count_uses_expr(const expr_t *e,
+                                             const char *param_name) {
+  if (!e || !param_name)
+    return 0;
+  switch (e->kind) {
+  case NY_E_IDENT:
+    if (e->as.ident.name && strcmp(e->as.ident.name, param_name) == 0)
+      return 1;
+    return 0;
+  case NY_E_LITERAL:
+  case NY_E_PTR_TYPE:
+  case NY_E_SIZEOF:
+    return 0;
+  case NY_E_UNARY:
+    return stmt_ownership_count_uses_expr(e->as.unary.right, param_name);
+  case NY_E_BINARY:
+    return stmt_ownership_count_uses_expr(e->as.binary.left, param_name) +
+           stmt_ownership_count_uses_expr(e->as.binary.right, param_name);
+  case NY_E_LOGICAL:
+    return stmt_ownership_count_uses_expr(e->as.logical.left, param_name) +
+           stmt_ownership_count_uses_expr(e->as.logical.right, param_name);
+  case NY_E_TERNARY: {
+    size_t c = stmt_ownership_count_uses_expr(e->as.ternary.cond, param_name);
+    size_t t = stmt_ownership_count_uses_expr(e->as.ternary.true_expr,
+                                             param_name);
+    size_t f = stmt_ownership_count_uses_expr(e->as.ternary.false_expr,
+                                             param_name);
+    return c + (t > f ? t : f);
+  }
+  case NY_E_CALL: {
+    size_t total =
+        stmt_ownership_count_uses_expr(e->as.call.callee, param_name);
+    for (size_t i = 0; i < e->as.call.args.len; i++)
+      total += stmt_ownership_count_uses_expr(e->as.call.args.data[i].val,
+                                              param_name);
+    return total;
+  }
+  case NY_E_MEMCALL: {
+    size_t total =
+        stmt_ownership_count_uses_expr(e->as.memcall.target, param_name);
+    for (size_t i = 0; i < e->as.memcall.args.len; i++)
+      total += stmt_ownership_count_uses_expr(e->as.memcall.args.data[i].val,
+                                              param_name);
+    return total;
+  }
+  case NY_E_INDEX: {
+    size_t total =
+        stmt_ownership_count_uses_expr(e->as.index.target, param_name);
+    total += stmt_ownership_count_uses_expr(e->as.index.start, param_name);
+    if (e->as.index.stop)
+      total += stmt_ownership_count_uses_expr(e->as.index.stop, param_name);
+    if (e->as.index.step)
+      total += stmt_ownership_count_uses_expr(e->as.index.step, param_name);
+    return total;
+  }
+  case NY_E_MEMBER:
+    return stmt_ownership_count_uses_expr(e->as.member.target, param_name);
+  case NY_E_DEREF:
+    return stmt_ownership_count_uses_expr(e->as.deref.target, param_name);
+  case NY_E_TRY:
+    return stmt_ownership_count_uses_expr(e->as.try_expr.target, param_name);
+  case NY_E_LIST:
+  case NY_E_TUPLE:
+  case NY_E_SET: {
+    size_t total = 0;
+    for (size_t i = 0; i < e->as.list_like.len; i++)
+      total += stmt_ownership_count_uses_expr(e->as.list_like.data[i],
+                                              param_name);
+    return total;
+  }
+  case NY_E_DICT: {
+    size_t total = 0;
+    for (size_t i = 0; i < e->as.dict.pairs.len; i++) {
+      total += stmt_ownership_count_uses_expr(e->as.dict.pairs.data[i].key,
+                                              param_name);
+      total += stmt_ownership_count_uses_expr(e->as.dict.pairs.data[i].value,
+                                              param_name);
+    }
+    return total;
+  }
+  case NY_E_FSTRING: {
+    size_t total = 0;
+    for (size_t i = 0; i < e->as.fstring.parts.len; i++) {
+      if (e->as.fstring.parts.data[i].kind == NY_FSP_EXPR)
+        total += stmt_ownership_count_uses_expr(
+            e->as.fstring.parts.data[i].as.e, param_name);
+    }
+    return total;
+  }
+  case NY_E_MATCH: {
+    size_t total = stmt_ownership_count_uses_expr(e->as.match.test, param_name);
+    size_t max_arm = 0;
+    for (size_t i = 0; i < e->as.match.arms.len; i++) {
+      const match_arm_t *arm = &e->as.match.arms.data[i];
+      size_t arm_uses = 0;
+      if (arm->guard)
+        arm_uses += stmt_ownership_count_uses_expr(arm->guard, param_name);
+      if (arm->conseq)
+        arm_uses += stmt_ownership_count_uses_stmt_internal(arm->conseq,
+                                                            param_name, NULL);
+      if (arm_uses > max_arm)
+        max_arm = arm_uses;
+    }
+    if (e->as.match.default_conseq) {
+      size_t def_uses = stmt_ownership_count_uses_stmt_internal(
+          e->as.match.default_conseq, param_name, NULL);
+      if (def_uses > max_arm)
+        max_arm = def_uses;
+    }
+    return total + max_arm;
+  }
+  case NY_E_LAMBDA: {
+    /* Closure construction demand != latent invocation demand:
+     * If the closure captures param_name, construction demand is 1. */
+    bool shadowed = false;
+    for (size_t i = 0; i < e->as.lambda.params.len; i++) {
+      if (e->as.lambda.params.data[i].name &&
+          strcmp(e->as.lambda.params.data[i].name, param_name) == 0) {
+        shadowed = true;
+        break;
+      }
+    }
+    if (!shadowed && e->as.lambda.body) {
+      size_t inner = stmt_ownership_count_uses_stmt_internal(
+          e->as.lambda.body, param_name, NULL);
+      if (inner > 0)
+        return 1;
+    }
+    return 0;
+  }
+  case NY_E_COMPTIME:
+    if (e->as.comptime_expr.body)
+      return stmt_ownership_count_uses_stmt_internal(
+          e->as.comptime_expr.body, param_name, NULL);
+    return 0;
+  case NY_E_QUOTE: {
+    size_t total = 0;
+    if (e->as.quote.body)
+      total += stmt_ownership_count_uses_stmt_internal(e->as.quote.body,
+                                                       param_name, NULL);
+    if (e->as.quote.expr)
+      total += stmt_ownership_count_uses_expr(e->as.quote.expr, param_name);
+    return total;
+  }
+  case NY_E_SPLICE:
+    if (e->as.splice.expr)
+      return stmt_ownership_count_uses_expr(e->as.splice.expr, param_name);
+    return 0;
+  case NY_E_ASM: {
+    size_t total = 0;
+    for (size_t i = 0; i < e->as.as_asm.args.len; i++)
+      total += stmt_ownership_count_uses_expr(e->as.as_asm.args.data[i],
+                                              param_name);
+    return total;
+  }
+  default:
+    return 0;
+  }
+}
+
+static size_t stmt_ownership_count_uses_stmt_internal(const stmt_t *s,
+                                                      const char *param_name,
+                                                      bool *out_reassigned) {
+  if (!s || !param_name)
+    return 0;
+  switch (s->kind) {
+  case NY_S_BLOCK:
+    return stmt_ownership_count_uses_block(&s->as.block, param_name,
+                                           out_reassigned);
+  case NY_S_EXPR:
+    return stmt_ownership_count_uses_expr(s->as.expr.expr, param_name);
+  case NY_S_RETURN:
+    if (s->as.ret.value)
+      return stmt_ownership_count_uses_expr(s->as.ret.value, param_name);
+    return 0;
+  case NY_S_VAR: {
+    bool modifies_param = false;
+    for (size_t i = 0; i < s->as.var.names.len; i++) {
+      if (s->as.var.names.data[i] &&
+          strcmp(s->as.var.names.data[i], param_name) == 0) {
+        modifies_param = true;
+        break;
+      }
+    }
+    size_t total = 0;
+    for (size_t i = 0; i < s->as.var.exprs.len; i++) {
+      total += stmt_ownership_count_uses_expr(s->as.var.exprs.data[i],
+                                              param_name);
+    }
+    if (modifies_param && out_reassigned)
+      *out_reassigned = true;
+    return total;
+  }
+  case NY_S_IF: {
+    bool then_reassigned = false;
+    bool else_reassigned = false;
+    size_t init_u = s->as.iff.init
+                        ? stmt_ownership_count_uses_stmt_internal(
+                              s->as.iff.init, param_name, NULL)
+                        : 0;
+    size_t test_u = stmt_ownership_count_uses_expr(s->as.iff.test, param_name);
+    size_t conseq_u =
+        s->as.iff.conseq ? stmt_ownership_count_uses_stmt_internal(
+                               s->as.iff.conseq, param_name, &then_reassigned)
+                         : 0;
+    size_t alt_u = s->as.iff.alt
+                       ? stmt_ownership_count_uses_stmt_internal(
+                             s->as.iff.alt, param_name, &else_reassigned)
+                       : 0;
+    if (then_reassigned && else_reassigned && out_reassigned)
+      *out_reassigned = true;
+    return init_u + test_u + (conseq_u > alt_u ? conseq_u : alt_u);
+  }
+  case NY_S_MATCH: {
+    size_t total = stmt_ownership_count_uses_expr(s->as.match.test, param_name);
+    size_t max_arm = 0;
+    for (size_t i = 0; i < s->as.match.arms.len; i++) {
+      const match_arm_t *arm = &s->as.match.arms.data[i];
+      size_t arm_uses = 0;
+      if (arm->guard)
+        arm_uses += stmt_ownership_count_uses_expr(arm->guard, param_name);
+      if (arm->conseq)
+        arm_uses += stmt_ownership_count_uses_stmt_internal(arm->conseq,
+                                                            param_name, NULL);
+      if (arm_uses > max_arm)
+        max_arm = arm_uses;
+    }
+    if (s->as.match.default_conseq) {
+      size_t def_uses = stmt_ownership_count_uses_stmt_internal(
+          s->as.match.default_conseq, param_name, NULL);
+      if (def_uses > max_arm)
+        max_arm = def_uses;
+    }
+    return total + max_arm;
+  }
+  case NY_S_WHILE: {
+    size_t init_u = s->as.whl.init
+                        ? stmt_ownership_count_uses_stmt_internal(
+                              s->as.whl.init, param_name, NULL)
+                        : 0;
+    size_t test_u = stmt_ownership_count_uses_expr(s->as.whl.test, param_name);
+    size_t body_u = s->as.whl.body
+                        ? stmt_ownership_count_uses_stmt_internal(
+                              s->as.whl.body, param_name, NULL)
+                        : 0;
+    size_t update_u = s->as.whl.update
+                          ? stmt_ownership_count_uses_stmt_internal(
+                                s->as.whl.update, param_name, NULL)
+                          : 0;
+    return init_u + test_u + body_u + update_u;
+  }
+  case NY_S_FOR: {
+    size_t init_u = s->as.fr.init
+                        ? stmt_ownership_count_uses_stmt_internal(
+                              s->as.fr.init, param_name, NULL)
+                        : 0;
+    size_t cond_u =
+        s->as.fr.cond ? stmt_ownership_count_uses_expr(s->as.fr.cond, param_name)
+                      : 0;
+    size_t iter_u = s->as.fr.iterable
+                        ? stmt_ownership_count_uses_expr(s->as.fr.iterable,
+                                                         param_name)
+                        : 0;
+    size_t body_u = s->as.fr.body
+                        ? stmt_ownership_count_uses_stmt_internal(
+                              s->as.fr.body, param_name, NULL)
+                        : 0;
+    size_t update_u = s->as.fr.update
+                          ? stmt_ownership_count_uses_stmt_internal(
+                                s->as.fr.update, param_name, NULL)
+                          : 0;
+    return init_u + cond_u + iter_u + body_u + update_u;
+  }
+  case NY_S_GUARD: {
+    size_t val_u = s->as.guard.value
+                       ? stmt_ownership_count_uses_expr(s->as.guard.value,
+                                                        param_name)
+                       : 0;
+    size_t fall_u = s->as.guard.fallback
+                        ? stmt_ownership_count_uses_stmt_internal(
+                              s->as.guard.fallback, param_name, NULL)
+                        : 0;
+    return val_u + fall_u;
+  }
+  case NY_S_TRY: {
+    size_t body_u = s->as.tr.body
+                        ? stmt_ownership_count_uses_stmt_internal(
+                              s->as.tr.body, param_name, NULL)
+                        : 0;
+    size_t hand_u = s->as.tr.handler
+                        ? stmt_ownership_count_uses_stmt_internal(
+                              s->as.tr.handler, param_name, NULL)
+                        : 0;
+    return body_u > hand_u ? body_u : hand_u;
+  }
+  case NY_S_DEFER:
+    if (s->as.de.body)
+      return stmt_ownership_count_uses_stmt_internal(s->as.de.body, param_name,
+                                                     NULL);
+    return 0;
+  default:
+    return 0;
+  }
+}
+
+size_t stmt_ownership_count_uses(const stmt_t *body, const char *param_name) {
+  return stmt_ownership_count_uses_stmt_internal(body, param_name, NULL);
+}
+
+void stmt_ownership_check_allowances(codegen_t *cg, const stmt_t *fn_stmt) {
+  if (!cg || !fn_stmt || fn_stmt->kind != NY_S_FUNC)
+    return;
+  const stmt_func_t *fn = &fn_stmt->as.fn;
+  if (fn->attr_allowances.len == 0 || !fn->body)
+    return;
+  for (size_t i = 0; i < fn->attr_allowances.len; i++) {
+    const ny_allowance_t *a = &fn->attr_allowances.data[i];
+    if (!a->name || a->limit < 0)
+      continue;
+    size_t observed = stmt_ownership_count_uses(fn->body, a->name);
+    if (observed > (size_t)a->limit) {
+      stmt_ownership_diag(
+          cg, fn_stmt->tok,
+          "ownership allowance exceeded for '%s': observed %zu > allowance %zu",
+          a->name, observed, (size_t)a->limit);
+      ny_diag_fix(
+          "reduce uses of '%s' to at most %zu, or increase @allowance(%s, %zu)",
+          a->name, (size_t)a->limit, a->name, observed);
+    }
+  }
+}
+

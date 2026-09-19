@@ -98,7 +98,7 @@ static bool cse_same_key(const cse_entry_t *e, const nyir_inst_t *in) {
       !cse_symbol_equal(e->symbol, in->symbol) ||
       e->extra_args_len != in->extra_args_len)
     return false;
-  
+
   bool op_match = (e->a == in->a && e->b == in->b) || 
                   (cse_is_commutative(in->op) && e->a == in->b && e->b == in->a);
   if (!op_match)
@@ -160,7 +160,6 @@ static void cse_insert(cse_entry_t *table, const nyir_inst_t *in,
   }
 }
 
-
 static void cse_clear(cse_entry_t *table, size_t cap) {
   for (size_t i = 0; i < cap; ++i)
     table[i].dst = -1;
@@ -207,7 +206,6 @@ static bool cse_is_foldable(const nyir_inst_t *in) {
     return false;
   }
 }
-
 
 typedef struct {
   nyir_func_t *f;

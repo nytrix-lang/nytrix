@@ -20,6 +20,8 @@ typedef struct {
   bool *known;
   int64_t *vector_values; /* Up to four i64 lanes per vector SSA value. */
   uint8_t *vector_width;
+  uint8_t *stack_bytes;   /* Reused storage for NYIR_ALLOCA sites. */
+  size_t stack_cap;
   size_t value_cap;
 } nyir_eval_pool_slot_t;
 
@@ -124,6 +126,47 @@ static void nyir_eval_pool_end(size_t depth, nyir_eval_pool_slot_t *slot) {
     nyir_eval_pool.depth--;
 
 }
+static bool nyir_eval_pool_stack(nyir_eval_pool_slot_t *slot,
+                                 const nyir_func_t *f) {
+  if (!slot || !f)
+    return false;
+  size_t total = 0;
+  for (size_t i = 0; i < f->len; ++i) {
+    const nyir_inst_t *in = &f->data[i];
+    if (in->op != NYIR_ALLOCA)
+      continue;
+    size_t bytes = in->imm > 0 ? (size_t)in->imm : 8u;
+    size_t aligned = (bytes + 15u) & ~(size_t)15u;
+    if (aligned < bytes || total > SIZE_MAX - aligned)
+      return false;
+    total += aligned;
+  }
+  if (total > slot->stack_cap) {
+    uint8_t *grown = realloc(slot->stack_bytes, total);
+    if (!grown && total)
+      return false;
+    slot->stack_bytes = grown;
+    slot->stack_cap = total;
+  }
+  return true;
+}
+
+static uintptr_t nyir_eval_alloca_addr(const nyir_eval_pool_slot_t *slot,
+                                        const nyir_func_t *f,
+                                        size_t inst_index) {
+  if (!slot || !f || inst_index >= f->len || !slot->stack_bytes)
+    return 0;
+  size_t off = 0;
+  for (size_t i = 0; i < inst_index; ++i) {
+    const nyir_inst_t *in = &f->data[i];
+    if (in->op != NYIR_ALLOCA)
+      continue;
+    size_t bytes = in->imm > 0 ? (size_t)in->imm : 8u;
+    off += (bytes + 15u) & ~(size_t)15u;
+  }
+  return (uintptr_t)(slot->stack_bytes + off);
+}
+
 static bool nyir_eval_pool_values(nyir_eval_pool_slot_t *slot, size_t count,
                                   int64_t **values, bool **known) {
   if (!slot || !values || !known)
@@ -321,7 +364,8 @@ bool nyir_eval_with_calls(const nyir_func_t *f, int64_t *locals,
   int64_t *values = NULL;
   bool *known = NULL;
   if (!nyir_eval_pool_values(&eval_slot, (size_t)f->next_value, &values,
-                            &known)) {
+                            &known) ||
+      !nyir_eval_pool_stack(&eval_slot, f)) {
     nyir_eval_pool_end(eval_depth, &eval_slot);
     return nyir_err(err, err_len, NY_NATIVE_OOM);
   }
@@ -530,7 +574,17 @@ bool nyir_eval_with_calls(const nyir_func_t *f, int64_t *locals,
       known[in->dst] = true;
       break;
     }
-    case NYIR_ALLOCA:
+    case NYIR_ALLOCA: {
+      if (in->dst < 0 || in->imm <= 0)
+        goto unsupported;
+      uintptr_t addr = nyir_eval_alloca_addr(&eval_slot, f, inst_index);
+      if (!addr)
+        goto unsupported;
+      nyir_eval_note_value(result, in->dst);
+      values[in->dst] = (int64_t)addr;
+      known[in->dst] = true;
+      break;
+    }
     case NYIR_COPY_STRUCT:
     case NYIR_CAPTURE_RET:
       goto unsupported;
@@ -630,6 +684,16 @@ bool nyir_eval_with_calls(const nyir_func_t *f, int64_t *locals,
         goto unsupported;
       nyir_eval_note_value(result, in->dst);
       values[in->dst] = out;
+      known[in->dst] = true;
+      break;
+    case NYIR_BSWAP_I64:
+    case NYIR_BSWAP32_I64:
+      if (!nyir_eval_read_value(values, known, in->a, &a))
+        goto missing_value;
+      nyir_eval_note_value(result, in->dst);
+      values[in->dst] = in->op == NYIR_BSWAP_I64
+                            ? (int64_t)__builtin_bswap64((uint64_t)a)
+                            : (int64_t)(uint32_t)__builtin_bswap32((uint32_t)a);
       known[in->dst] = true;
       break;
     case NYIR_SQRT_F64:
@@ -1087,6 +1151,8 @@ bool nyir_is_pure_i64_straightline(const nyir_func_t *f) {
     case NYIR_SAR_I64:
     case NYIR_ROR_I64:
     case NYIR_ROR32_I64:
+    case NYIR_BSWAP_I64:
+    case NYIR_BSWAP32_I64:
     case NYIR_SELECT_I64:
     case NYIR_CMP_I64:
     case NYIR_ADD_F64:

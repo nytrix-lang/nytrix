@@ -13,7 +13,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-
 const char *ny_keyword_typo_suggestion(const char *name) {
   if (!name || !*name)
     return NULL;

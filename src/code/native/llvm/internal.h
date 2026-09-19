@@ -15,7 +15,7 @@ static inline LLVMBasicBlockRef ny_llvm_append_block(LLVMValueRef fn,
       LLVMGetModuleContext(LLVMGetGlobalParent(fn)), fn, name);
 }
 
-/* ── LLVM helpers ─────────────────────────────────────────── */
+/* LLVM helpers */
 static inline LLVMBasicBlockRef ny_cur_block(codegen_t *cg) {
   return LLVMGetInsertBlock(cg->builder);
 }
@@ -38,7 +38,7 @@ static inline LLVMTypeRef ny_ptr_i64_ty(codegen_t *cg) {
   return LLVMPointerType(cg->type_i64, 0);
 }
 
-/* ── Position & branching ───────────────────────────────────── */
+/* Position & branching */
 static inline void ny_pos(codegen_t *cg, LLVMBasicBlockRef bb) {
   LLVMPositionBuilderAtEnd(cg->builder, bb);
 }
@@ -51,7 +51,7 @@ static inline LLVMValueRef ny_cond_br(codegen_t *cg, LLVMValueRef cond,
   return LLVMBuildCondBr(cg->builder, cond, tb, fb);
 }
 
-/* ── Loads & Stores ─────────────────────────────────────────── */
+/* Loads & Stores */
 static inline LLVMValueRef ny_load(codegen_t *cg, LLVMValueRef ptr,
                                    const char *name) {
   return LLVMBuildLoad2(cg->builder, cg->type_i64, ptr,
@@ -67,12 +67,12 @@ static inline LLVMValueRef ny_store(codegen_t *cg, LLVMValueRef ptr,
   return LLVMBuildStore(cg->builder, val, ptr);
 }
 
-/* ── Globals ────────────────────────────────────────────────── */
+/* Globals */
 static inline LLVMValueRef ny_get_global(codegen_t *cg, const char *name) {
   return LLVMGetNamedGlobal(cg->module, name);
 }
 
-/* ── Constants ──────────────────────────────────────────────── */
+/* Constants */
 static inline LLVMValueRef ny_c0(codegen_t *cg) {
   return LLVMConstInt(cg->type_i64, 0, false);
 }
@@ -95,7 +95,7 @@ static inline LLVMValueRef ny_ci(codegen_t *cg, uint64_t v) {
   return LLVMConstInt(cg->type_i64, v, false);
 }
 
-/* ── Type helpers ───────────────────────────────────────────── */
+/* Type helpers */
 static inline int ny_is_i64(codegen_t *cg, LLVMValueRef v) {
   return LLVMTypeOf(v) == cg->type_i64;
 }
@@ -110,7 +110,7 @@ static inline LLVMTypeRef ny_ptr_i64(codegen_t *cg) {
   return LLVMPointerType(cg->type_i64, 0);
 }
 
-/* ── Comparisons & Arithmetic ────────────────────────────────── */
+/* Comparisons & Arithmetic */
 static inline LLVMValueRef ny_icmp(codegen_t *cg, LLVMIntPredicate pred,
                                    LLVMValueRef lhs, LLVMValueRef rhs,
                                    const char *name) {
@@ -174,7 +174,7 @@ static inline LLVMValueRef ny_select(codegen_t *cg, LLVMValueRef cond,
                          (cg && cg->llvm_value_names && n) ? n : "");
 }
 
-/* ── PHI nodes ──────────────────────────────────────────────── */
+/* PHI nodes */
 static inline LLVMValueRef ny_phi(codegen_t *cg, LLVMTypeRef t, const char *n) {
   return LLVMBuildPhi(cg->builder, t,
                       (cg && cg->llvm_value_names && n) ? n : "");
@@ -184,7 +184,7 @@ static inline void ny_phi_add(LLVMValueRef p, LLVMValueRef v,
   LLVMAddIncoming(p, &v, &b, 1);
 }
 
-/* ── Calls ──────────────────────────────────────────────────── */
+/* Calls */
 static inline LLVMValueRef ny_call0(codegen_t *cg, LLVMTypeRef ft,
                                     LLVMValueRef fn) {
   return LLVMBuildCall2(cg->builder, ft, fn, NULL, 0, "");
@@ -206,7 +206,7 @@ static inline LLVMValueRef ny_call3(codegen_t *cg, LLVMTypeRef ft,
   return LLVMBuildCall2(cg->builder, ft, fn, args, 3, "");
 }
 
-/* ── Block creation ─────────────────────────────────────────── */
+/* Block creation */
 static inline LLVMBasicBlockRef ny_bb(codegen_t *cg, const char *name) {
   return ny_llvm_append_block(
       LLVMGetBasicBlockParent(LLVMGetInsertBlock(cg->builder)), name);
@@ -217,7 +217,7 @@ static inline LLVMBasicBlockRef ny_bb_fn(LLVMValueRef fn, const char *name) {
   return ny_llvm_append_block(fn, name);
 }
 
-/* ── Loop Metadata ──────────────────────────────────────────── */
+/* Loop Metadata */
 static inline void ny_loop_metadata_set(codegen_t *cg, LLVMValueRef branch,
                                         LLVMMetadataRef *attrs,
                                         size_t attr_count) {

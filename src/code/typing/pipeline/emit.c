@@ -359,9 +359,11 @@ static bool tp_type_compatible_for_decl(const char *want, const char *got) {
   const char *g = tp_skip_nullable(got);
   if (strcmp(w, g) == 0)
     return true;
-  /* The same declared type may appear leaf-qualified at one site and fully
+  /*
+   * The same declared type may appear leaf-qualified at one site and fully
    * qualified at another (gf.ny operators declare gf2bv_bv while the
-   * impl methods carry std.math.crypto.gf.gf2bv_bv). */
+   * impl methods carry std.math.crypto.gf.gf2bv_bv).
+   */
   {
     const char *wl = strrchr(w, '.');
     const char *gl = strrchr(g, '.');

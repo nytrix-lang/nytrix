@@ -312,4 +312,6 @@ def comptime_dict = comptime{
 assert(comptime_dict.get("ok"), "comptime dictionary boolean")
 assert(comptime_dict.get("nested").get("answer") == 42,
    "comptime nested dictionary")
+def ok_pow = comptime{ 2^8 }
+assert(ok_pow == 256, "NEWT-09 modal staging law immutable fold")
 print("✓ comptime ops tests passed")

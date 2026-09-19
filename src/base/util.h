@@ -134,6 +134,12 @@ static inline bool ny_symbol_path_char(int c) {
 bool ny_compiler_asserts_enabled(void);
 void ny_compiler_assert_fail(const char *file, int line, const char *func, const char *cond,
                              const char *fmt, ...);
+void ny_compiler_invariant_fail(const char *file, int line, const char *func,
+                                const char *invariant_name,
+                                const char *src_file, int src_line, int src_col,
+                                const char *module_or_fn,
+                                const char *state_detail,
+                                const char *fmt, ...);
 bool ny_str_list_append(char ***list, size_t *len, size_t *cap, const char *str);
 void ny_str_list_free(char **list, size_t count);
 
@@ -170,6 +176,15 @@ static inline uint64_t ny_hash64_u64(uint64_t seed, uint64_t v) {
   do {                                                                                            \
     if (ny_compiler_asserts_enabled() && !(cond))                                                \
       ny_compiler_assert_fail(__FILE__, __LINE__, __func__, #cond, (fmt), ##__VA_ARGS__);       \
+  } while (0)
+
+#define NY_INVARIANT_ASSERT(cond, inv_name, src_file, src_line, src_col, mod_fn, state, fmt, ...) \
+  do {                                                                                              \
+    if (ny_compiler_asserts_enabled() && !(cond)) {                                                 \
+      ny_compiler_invariant_fail(__FILE__, __LINE__, __func__, (inv_name), (src_file),              \
+                                 (int)(src_line), (int)(src_col), (mod_fn), (state),                \
+                                 (fmt), ##__VA_ARGS__);                                             \
+    }                                                                                               \
   } while (0)
 
 static inline bool ny_add_range_ok(int64_t a, int64_t b, int64_t *out) {

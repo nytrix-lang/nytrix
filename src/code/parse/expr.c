@@ -1148,7 +1148,7 @@ static expr_t *parse_primary(parser_t *p) {
   case NY_T_QUOTE: {
     p->lex.quote_depth++;
     parser_advance(p);
-    token_t tok = p->prev;
+    token_t quote_tok = p->prev;
     uint32_t q_ctx = p->next_syntax_ctx++;
     if (p->syntax_ctx_depth < sizeof(p->syntax_ctx_stack) / sizeof(p->syntax_ctx_stack[0])) {
       p->syntax_ctx_stack[p->syntax_ctx_depth++] = p->current_syntax_ctx;
@@ -1173,7 +1173,7 @@ static expr_t *parse_primary(parser_t *p) {
     } else {
       p->current_syntax_ctx = 0;
     }
-    expr_t *e = expr_new(p->arena, NY_E_QUOTE, tok);
+    expr_t *e = expr_new(p->arena, NY_E_QUOTE, quote_tok);
     e->as.quote.body = body;
     e->as.quote.expr = body_expr;
     e->as.quote.syntax_ctx = q_ctx;
@@ -1183,7 +1183,7 @@ static expr_t *parse_primary(parser_t *p) {
     if (p->lex.quote_depth > 0)
       p->lex.quote_depth--;
     parser_advance(p);
-    token_t tok = p->prev;
+    token_t splice_tok = p->prev;
     uint32_t saved_ctx = p->current_syntax_ctx;
     if (p->syntax_ctx_depth > 0) {
       p->current_syntax_ctx = p->syntax_ctx_stack[p->syntax_ctx_depth - 1];
@@ -1194,13 +1194,45 @@ static expr_t *parse_primary(parser_t *p) {
     parser_expect(p, NY_T_RBRACE, "'}' after splice", NULL);
     p->lex.quote_depth++;
     p->current_syntax_ctx = saved_ctx;
-    expr_t *e = expr_new(p->arena, NY_E_SPLICE, tok);
+    expr_t *e = expr_new(p->arena, NY_E_SPLICE, splice_tok);
     e->as.splice.expr = inner;
     e->as.splice.syntax_ctx = p->current_syntax_ctx;
     return e;
   }
   case NY_T_IDENT: {
     parser_advance(p);
+    if (tok.len == 6 && strncmp(tok.lexeme, "exists", 6) == 0 &&
+        p->cur.kind == NY_T_LPAREN) {
+      parser_advance(p);
+      char bound[64];
+      if (p->cur.kind != NY_T_IDENT) {
+        parser_error(p, p->cur, "expected exists binder variable", NULL);
+        return NULL;
+      }
+      size_t blen = p->cur.len < sizeof(bound) - 1 ? p->cur.len : sizeof(bound) - 1;
+      memcpy(bound, p->cur.lexeme, blen);
+      bound[blen] = 0;
+      parser_advance(p);
+      parser_expect(p, NY_T_RPAREN, "')' after exists binder", NULL);
+      expr_t *body = NULL;
+      if (p->cur.kind == NY_T_LBRACE) {
+        parser_advance(p);
+        body = p_parse_expr(p, 0);
+        parser_match(p, NY_T_SEMI);
+        parser_expect(p, NY_T_RBRACE, "'}' after exists body", NULL);
+      } else {
+        body = p_parse_expr(p, 0);
+      }
+      if (!body) {
+        parser_error(p, p->cur, "expected exists body expression",
+                     "write 'exists(k) { v == 2 * k }'");
+        return NULL;
+      }
+      expr_t *e = expr_new(p->arena, NY_E_EXISTS, tok);
+      e->as.exists.var = arena_strndup(p->arena, bound, blen);
+      e->as.exists.body = body;
+      return e;
+    }
     if (tok.len == 4 && strncmp(tok.lexeme, "null", 4) == 0) {
       parser_error(p, tok, "unrecognised identifier 'null'",
                    "did you mean '0' or 'nil'?");

@@ -40,4 +40,7 @@ bool stmt_expr_is_mutating_name(const char *name);
 bool stmt_expr_is_int_list_literal(codegen_t *cg, scope *scopes, size_t depth, expr_t *e);
 bool stmt_expr_int_range(codegen_t *cg, scope *scopes, size_t depth, expr_t *e, int64_t *out_min, int64_t *out_max);
 
+size_t stmt_ownership_count_uses(const stmt_t *body, const char *param_name);
+void stmt_ownership_check_allowances(codegen_t *cg, const stmt_t *fn_stmt);
+
 #endif /* NYTRIX_OWNERSHIP_H */

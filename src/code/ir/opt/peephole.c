@@ -22,14 +22,12 @@
 #include <stdlib.h>
 #include <string.h>
 
-
 typedef struct {
   nyir_func_t *f;
   const bool *known;
   const int64_t *value;
   const nyir_value_fact_t *facts;
 } nir_peephole_parallel_ctx_t;
-
 
 /*
  * A def-map entry is only trusted while it still points at the instruction
@@ -54,7 +52,6 @@ static bool nir_is_const_value(const nyir_func_t *f, const int *defs,
   const nyir_inst_t *def = nir_def_inst(f, defs, value);
   return def && def->op == NYIR_CONST_I64 && def->imm == expected;
 }
-
 
 static bool nir_is_ror32_count(const nyir_func_t *f, const int *defs,
                                const bool *known, const int64_t *value,

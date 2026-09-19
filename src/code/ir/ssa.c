@@ -593,7 +593,6 @@ bool nyir_cfg_is_backedge(const nyir_cfg_t *cfg, size_t predecessor,
   return false;
 }
 
-
 bool nyir_cfg_natural_loop_blocks(const nyir_cfg_t *cfg, size_t latch,
                                   size_t header, bool *member,
                                   size_t member_count) {

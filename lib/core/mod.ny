@@ -521,8 +521,8 @@ fn panic_if(any cond, str msg) any {
 
 fn print(...args) int {
    "Prints one or more values to stdout, separated by spaces and ending with a newline(buffered)."
-   mut i = 0
-   def n = args.len
+   mut int i = 0
+   def int n = args.len
    mut line = ""
    mut wrote = false
    while i < n {
@@ -553,8 +553,8 @@ fn _eprint_raw(any s) int {
 
 fn eprint(...args) int {
    "Prints one or more values to stderr, separated by spaces and ending with a newline."
-   mut i = 0
-   def n = args.len
+   mut int i = 0
+   def int n = args.len
    mut line = ""
    while i < n {
       def s = to_str(args[i])
@@ -911,23 +911,40 @@ fn _core_has_tag(any x, any tag) bool {
    return __has_tag(x, tag)
 }
 
-;; Template interpolation emits token text. Quote the tag at the generated
-;; call site so a comptime string argument remains a Ny string literal rather
-;; than becoming an unresolved identifier (for example, `tuple`).
-comptime template _core_tag_pred(name, tag){
-   @jit
-   fn ${name}(any x) bool { return _core_has_tag(x, runtime_tag_raw("${tag}")) }
+;; Keep public container predicates explicit.  The REPL's lazy stdlib
+;; collector used to lower the comptime-generated `__runtime_tag("...")`
+;; argument to the integer sentinel 1, so every generated container predicate
+;; returned false even though `__tagof` and `runtime_tag_raw` agreed.  Resolving
+;; the named tag at the call site avoids that stale comptime/global state.
+@jit
+fn is_list(any x) bool {
+   return _core_has_tag(x, runtime_tag_raw("list"))
 }
 
-;; Keep the tag expression in each generated predicate.  Capturing these in
-;; top-level values made the native JIT read them before module initialization,
-;; so otherwise-valid heap objects were misclassified as every container type.
-comptime emit _core_tag_pred(is_list, "list")
-comptime emit _core_tag_pred(is_dict, "dict")
-comptime emit _core_tag_pred(is_set, "set")
-comptime emit _core_tag_pred(is_tuple, "tuple")
-comptime emit _core_tag_pred(is_range, "range")
-comptime emit _core_tag_pred(is_bytes, "bytes")
+@jit
+fn is_dict(any x) bool {
+   return _core_has_tag(x, runtime_tag_raw("dict"))
+}
+
+@jit
+fn is_set(any x) bool {
+   return _core_has_tag(x, runtime_tag_raw("set"))
+}
+
+@jit
+fn is_tuple(any x) bool {
+   return _core_has_tag(x, runtime_tag_raw("tuple"))
+}
+
+@jit
+fn is_range(any x) bool {
+   return _core_has_tag(x, runtime_tag_raw("range"))
+}
+
+@jit
+fn is_bytes(any x) bool {
+   return _core_has_tag(x, runtime_tag_raw("bytes"))
+}
 
 @jit
 fn is_str(any x) bool {
@@ -1134,7 +1151,13 @@ fn extend(any lst, any other) any {
 @jit
 fn len(any x) int {
    "Returns the number of elements in a collection or the length of a string."
-   if is_list(x) || is_set(x) || is_tuple(x) { return __load64_idx(x, 0) }
+   ;; Lists/tuples can be legacy managed objects or native tbufs.  Read the
+   ;; count through the representation-aware helper instead of treating byte
+   ;; offset zero as the length (which is the first native-tbuf element).
+   if is_list(x) || is_set(x) || is_tuple(x) {
+      if is_list(x) || is_tuple(x) { return __list_len(x) }
+      return core_set.len(x)
+   }
    if is_dict(x) { return core_ref.len(x) }
    ; Length metadata is tagged in managed objects. Reading it as raw scalar
    ; leaks the encoding for statically typed str/bytes receivers.
@@ -1169,7 +1192,10 @@ impl any {
    fn require_shape(any self, any spec, str msg="shape check failed", int max_depth=6) any { core_ref.require_shape(self, spec, msg, max_depth) }
    @inline
    fn len(any self) int {
-      if is_list(self) || is_set(self) || is_tuple(self) { return __load64_idx(self, 0) }
+      if is_list(self) || is_set(self) || is_tuple(self) {
+         if is_list(self) || is_tuple(self) { return __list_len(self) }
+         return core_set.len(self)
+      }
       if is_dict(self) { return core_ref.len(self) }
       if is_str(self) || is_bytes(self) { return __load64_idx(self, -16) }
       core_ref.len(self)

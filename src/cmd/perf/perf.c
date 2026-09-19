@@ -195,6 +195,9 @@ static int perf_capture_first_line(char *const argv[], char *out,
     dup2(pfd[1], STDOUT_FILENO);
     dup2(pfd[1], STDERR_FILENO);
     close(pfd[1]);
+    for (int i = 0; argv[i]; i++) {
+      if (strpbrk(argv[i], ";|&$`\n")) _exit(127);
+    }
     execvp(argv[0], argv);
     _exit(127);
   }
@@ -578,6 +581,9 @@ static int run_cmd(char *const argv[], const char *out_file, const char *err_fil
         close(fd);
       }
     }
+    for (int i = 0; argv[i]; i++) {
+      if (strpbrk(argv[i], ";|&$`\n")) _exit(127);
+    }
     execvp(argv[0], argv);
     _exit(127);
   }
@@ -609,6 +615,9 @@ static int run_cmd_timeout(char *const argv[], const char *out_file, const char 
         dup2(fd, STDERR_FILENO);
         close(fd);
       }
+    }
+    for (int i = 0; argv[i]; i++) {
+      if (strpbrk(argv[i], ";|&$`\n")) _exit(127);
     }
     execvp(argv[0], argv);
     _exit(127);
@@ -731,6 +740,7 @@ static int run_one_compare_ny(const char *bin, const char *path, const PerfCompa
           char *cc_argv[] = {"cc", "-O3", c_path, "-o", bin_path, NULL};
           if (run_cmd(cc_argv, "/dev/null", err_file) == 0) {
             char *run_argv[] = {bin_path, NULL};
+            if (strpbrk(bin_path, ";|&$`\n")) _exit(127);
             execv(bin_path, run_argv);
           }
         }
@@ -758,6 +768,9 @@ static int run_one_compare_ny(const char *bin, const char *path, const PerfCompa
     run_argv[k++] = "-run";
     run_argv[k++] = (char *)run_path;
     run_argv[k] = NULL;
+    for (int i = 0; run_argv[i]; i++) {
+      if (strpbrk(run_argv[i], ";|&$`\n")) _exit(127);
+    }
     execvp(run_argv[0], run_argv);
     _exit(127);
   }

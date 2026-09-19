@@ -24,7 +24,6 @@ static int idiom_root_copy(const nyir_func_t *f, const int *defs, int value) {
   return value;
 }
 
-
 static bool const_i64_val(const nyir_func_t *f, const int *defs, int value,
                            int64_t *out) {
   value = idiom_root_copy(f, defs, value);
@@ -432,7 +431,6 @@ bool nyir_loop_interchange(nyir_func_t *f) {
  * Transactional: operates on a clone and commits only after nyir_verify.
  */
 
-
 static size_t jam_last_non_nop(const nyir_func_t *f, const nyir_cfg_t *cfg,
                                size_t block) {
   size_t end = cfg->block_end[block];
@@ -827,7 +825,6 @@ bool nyir_unroll_jam(nyir_func_t *f) {
  *   P -> PEEL(init-substituted clone of L) -> H
  *   H(phi first value from PEEL, backedge from L)
  */
-
 
 static size_t peel_last_non_nop(const nyir_func_t *f, const nyir_cfg_t *cfg,
                                 size_t block) {
@@ -1515,7 +1512,6 @@ bool nyir_loop_unswitch(nyir_func_t *f) {
       }
     }
   }
-
 
   for (size_t li = 0; li < loop_count; ++li) {
     loop_t *lp = &loops[li];

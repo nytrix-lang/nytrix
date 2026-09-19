@@ -1244,9 +1244,45 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
                               3, NY_LLVM_NAME(cg, "set_idx_generic"));
       }
     }
-    bool want_load_item_checked = (strcmp(n, "__load_item") == 0);
+    if (strcmp(n, "__tbuf_index_any_raw") == 0 && c->args.len == 2) {
+      LLVMValueRef buffer_v =
+          gen_expr(cg, scopes, depth, c->args.data[0].val);
+      LLVMValueRef index_v =
+          gen_expr(cg, scopes, depth, c->args.data[1].val);
+      if (!buffer_v || !index_v) {
+        ny_diag_error(e->tok,
+                      "failed to evaluate arguments for __tbuf_index_any_raw");
+        cg->had_error = 1;
+        return ny_c0(cg);
+      }
+      buffer_v = ny_cast_to_i64(cg, buffer_v, "tbuf_any_buffer");
+      index_v = ny_cast_to_i64(cg, index_v, "tbuf_any_index");
+      LLVMValueRef index_raw = ny_gencall_index_raw_i64(
+          cg, scopes, depth, c->args.data[1].val, index_v,
+          "tbuf_any_index_raw");
+      LLVMValueRef rt =
+          ny_get_raw_i64_runtime_fn(cg, "rt_tbuf_index_any_raw", 2);
+      if (!rt || !index_raw) {
+        ny_diag_error(e->tok,
+                      "runtime helper rt_tbuf_index_any_raw is unavailable");
+        cg->had_error = 1;
+        return ny_c0(cg);
+      }
+      ny_dbg_loc(cg, e->tok);
+      LLVMTypeRef rt_ty = LLVMGlobalGetValueType(rt);
+      return LLVMBuildCall2(
+          cg->builder, rt_ty, rt,
+          (LLVMValueRef[]){buffer_v, index_raw}, 2,
+          NY_LLVM_NAME(cg, "tbuf_index_any_raw"));
+    }
+
     bool want_load_item_fast = (strcmp(n, "__load_item_fast") == 0);
-    if ((want_load_item_checked || want_load_item_fast) && c->args.len == 2) {
+    /*
+     * __load_item must go through the representation-aware runtime helper.
+     * Only the explicitly-fast form keeps this local lowering; its native-tbuf
+     * branch already delegates to rt_tbuf_get.
+     */
+    if (want_load_item_fast && c->args.len == 2) {
       LLVMValueRef lst_v = gen_expr(cg, scopes, depth, c->args.data[0].val);
       LLVMValueRef idx_v = gen_expr(cg, scopes, depth, c->args.data[1].val);
       if (!lst_v || !idx_v) {
@@ -1362,6 +1398,20 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
           val_v = ny_tag_int(cg, val_v);
       }
       ny_dbg_loc(cg, e->tok);
+      /*
+       * Lists now use the native tbuf representation in normal code, while
+       * legacy vararg lists still use the managed +16 payload layout.  The
+       * old inline store below assumed the latter unconditionally.  Route
+       * both __store_item variants through the runtime helper, which selects
+       * the correct representation and normalizes tagged/raw indices.
+       */
+      fun_sig *store_runtime = lookup_fun(cg, n, 0);
+      if (store_runtime) {
+        LLVMValueRef store_args[3] = {lst_v, idx_v, val_v};
+        return LLVMBuildCall2(cg->builder, store_runtime->type,
+                              store_runtime->value, store_args, 3,
+                              NY_LLVM_NAME(cg, "store_item_runtime"));
+      }
       if (want_store_item_fast) {
         LLVMValueRef idx_raw =
             ny_gencall_index_raw_i64(cg, scopes, depth, c->args.data[1].val,
@@ -2118,6 +2168,54 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
     cg->had_error = 1;
     goto call_fail;
   }
+  if (has_sig && sig_meta && sig_meta->requires_cond && func_params) {
+    expr_t *req = sig_meta->requires_cond;
+    for (size_t p_idx = 0; p_idx < func_params->len && p_idx < user_args_len; p_idx++) {
+      if (func_params->data[p_idx].name && user_args[p_idx].val) {
+        req = ny_expr_subst(cg->arena, req, func_params->data[p_idx].name, user_args[p_idx].val);
+      }
+    }
+    ny_ct_fast_val_t fval = ny_ct_fast_none();
+    bool proved = false;
+    if (ny_try_eval_comptime_expr_fast(cg, req, &fval, 0)) {
+      if (fval.kind == NY_CT_FAST_BOOL)
+        proved = fval.b;
+      else if (fval.kind == NY_CT_FAST_INT)
+        proved = (fval.i != 0);
+    }
+    if (!proved) {
+      char cex[128] = {0};
+      proved = ny_proof_try_solver(cg, scopes, depth, req, cex, sizeof(cex));
+    }
+    if (!proved) {
+      ny_diag_error(e->tok, "precondition violated: 'requires' condition failed for call to '%s'", sig_meta->name ? sig_meta->name : "<anon>");
+      cg->had_error = 1;
+      goto call_fail;
+    }
+  }
+  if (cg->current_fun_sig && cg->current_fun_sig->decreases_expr && sig_meta &&
+      (sig_meta == cg->current_fun_sig || (sig_meta->name && cg->current_fun_sig->name && strcmp(sig_meta->name, cg->current_fun_sig->name) == 0))) {
+    bool descends = false;
+    if (user_args_len > 0 && user_args[0].val) {
+      expr_t *arg0 = user_args[0].val;
+      if (arg0->kind == NY_E_IDENT) {
+        if (cg->current_fun_sig->decreases_expr->kind == NY_E_IDENT &&
+            arg0->as.ident.name && cg->current_fun_sig->decreases_expr->as.ident.name &&
+            strcmp(arg0->as.ident.name, cg->current_fun_sig->decreases_expr->as.ident.name) == 0) {
+          descends = false;
+        } else {
+          descends = true;
+        }
+      } else if (arg0->kind == NY_E_BINARY && arg0->as.binary.op && strcmp(arg0->as.binary.op, "-") == 0) {
+        descends = true;
+      }
+    }
+    if (!descends) {
+      ny_diag_error(e->tok, "termination check failed: decreases(...) metric did not strictly descend at recursive call to '%s'", sig_meta->name ? sig_meta->name : "<anon>");
+      cg->had_error = 1;
+      goto call_fail;
+    }
+  }
   for (size_t i = 0; i < final_argc; i++) {
     size_t user_idx = (mc && !skip_target) ? (i - 1) : i;
     const char *param_type = (func_params && i < func_params->len)
@@ -2147,12 +2245,12 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
     } else if (has_sig && is_variadic && !native_variadic &&
                i == (size_t)sig_arity - 1) {
 
-      fun_sig *ls_s = lookup_fun(cg, "__list_new", 0);
+      fun_sig *ls_s = lookup_fun(cg, "__varargs_new", 0);
       fun_sig *st_s = lookup_fun(cg, "__store64_idx", 0);
-      if (!ls_s || !st_s) {
+      fun_sig *len_s = lookup_fun(cg, "__list_set_len", 0);
+      if (!ls_s || !st_s || !len_s) {
         ny_diag_error(e->tok,
-                      "variadic arguments require __list_new/rt_store64_idx "
-                      "helpers");
+                      "variadic arguments require list construction helpers");
         cg->had_error = 1;
         goto call_fail;
       }
@@ -2199,12 +2297,18 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
         out_i++;
       }
 
+      /*
+       * Variadic arguments are stored in the native tbuf representation.
+       * Writing the managed-list length at byte offset zero with
+       * __store64_idx corrupts the first tbuf element and leaves the native
+       * count unchanged.  Use the representation-aware helper instead.
+       */
       (void)LLVMBuildCall2(
-          cg->builder, st_s->type, st_s->value,
+          cg->builder, len_s->type, len_s->value,
           (LLVMValueRef[]){
-              vl, ny_c1(cg),
-              LLVMConstInt(cg->type_i64, (((uint64_t)out_i << 1) | 1u), false)},
-          3, "");
+              vl, LLVMConstInt(cg->type_i64,
+                               (((uint64_t)out_i << 1) | 1u), false)},
+          2, "");
       args[i] = vl;
       break;
     } else if (user_idx < user_args_len) {

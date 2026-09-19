@@ -112,6 +112,8 @@ typedef enum {
   /* Evaluated i64 boolean: dst = a ? b : c. */
   NYIR_SELECT_I64,
   NYIR_ROR32_I64,
+  NYIR_BSWAP_I64,
+  NYIR_BSWAP32_I64,
   NYIR_OP_COUNT,
 } nyir_op_t;
 
@@ -173,6 +175,24 @@ typedef enum {
  * the operation cannot overflow. Allows codegen to emit non-checking variants.
  */
 #define NYIR_INST_F_NO_OVERFLOW 256u
+/* Address value produced by a compiler-lowered typed-buffer index after the
+ * index has been checked/proved in bounds.  The proof survives later BCE so
+ * escape/SROA passes can distinguish payload addressing from arbitrary raw
+ * pointer arithmetic without retaining the runtime check. */
+#define NYIR_INST_F_IN_BOUNDS_ADDR 512u
+
+/* Per-argument f64 ABI facts for NYIR_CALL (extern/runtime bridges).  The
+ * lowerer records these from the callee's declared signature (extern table
+ * param_f64 / f64 param types) so backends declare the bridge taking double
+ * and bitcast the raw-bits i64 register into XMM instead of passing the bits
+ * in a GP register. */
+#define NYIR_INST_F_ARG0_F64 1024u
+#define NYIR_INST_F_ARG1_F64 2048u
+#define NYIR_INST_F_ARG2_F64 4096u
+#define NYIR_INST_F_ARG3_F64 8192u
+#define NYIR_INST_F_ARG4_F64 16384u
+#define NYIR_INST_F_ARG5_F64 32768u
+#define NYIR_INST_F_ARG_K_F64(k) ((unsigned)1024u << (k))
 
 /* Packed NYIR_CALL aggregate-argument metadata. */
 #define NYIR_ARG_AGG_SIZE_MASK 0x00ffffffu
@@ -630,7 +650,6 @@ bool nyir_dead_arg_elim(nyir_func_t *f);
 bool nyir_vrp(nyir_func_t *f);
 bool nyir_prefetch_insert(nyir_func_t *f);
 bool nyir_polyhedral_tiling(nyir_func_t *f);
-
 
 size_t ny_isle_rule_count(void);
 const char *ny_isle_rule_name(size_t i);

@@ -533,9 +533,9 @@ static bool closed_form_constant_sum(nyir_func_t *f, const nyir_cfg_t *cfg,
    *   i <= N / N >= i -> floor((N-i0)/k) + 1
    * clamped to zero when the counter starts past the bound.
    */
-  int64_t trips = 0;
+  int64_t trip_count = 0;
   int64_t i0 = index->init;
-  int64_t k = index->step;
+  int64_t step = index->step;
   if (runtime_bound && i0 < 0)
     return false;
   if (!runtime_bound) {
@@ -543,24 +543,24 @@ static bool closed_form_constant_sum(nyir_func_t *f, const nyir_cfg_t *cfg,
       return false;
     switch (cont_cmp) {
     case NYIR_CMP_LT:
-      trips = index_on_a ? iv_div_ceil(cmp_const - i0, k) : 0;
+      trip_count = index_on_a ? iv_div_ceil(cmp_const - i0, step) : 0;
       break;
     case NYIR_CMP_LE:
-      trips = index_on_a ? iv_div_floor(cmp_const - i0, k) + 1 : 0;
+      trip_count = index_on_a ? iv_div_floor(cmp_const - i0, step) + 1 : 0;
       break;
     case NYIR_CMP_GT:
-      trips = index_on_a ? 0 : iv_div_ceil(cmp_const - i0, k);
+      trip_count = index_on_a ? 0 : iv_div_ceil(cmp_const - i0, step);
       break;
     case NYIR_CMP_GE:
-      trips = index_on_a ? 0 : iv_div_floor(cmp_const - i0, k) + 1;
+      trip_count = index_on_a ? 0 : iv_div_floor(cmp_const - i0, step) + 1;
       break;
     default:
       return false;
     }
-    if (trips <= 0)
+    if (trip_count <= 0)
       return false;
   }
-  int64_t bound = trips;
+  int64_t bound = trip_count;
 
   int acc_value = -1;
   int64_t acc_init = 0;
@@ -721,7 +721,7 @@ static bool closed_form_constant_sum(nyir_func_t *f, const nyir_cfg_t *cfg,
   int64_t i0_for_trips = i0;
   if (acc_power == 1) {
     i0 = wrap_add(wrap_mul64(i0, acc_scale), acc_offset);
-    k = wrap_mul64(k, acc_scale);
+    step = wrap_mul64(step, acc_scale);
   }
 
   nyir_inst_t formula[32] = {0};
@@ -761,21 +761,21 @@ static bool closed_form_constant_sum(nyir_func_t *f, const nyir_cfg_t *cfg,
         f3 /= 3;
       int64_t sum_j2 = wrap_mul64(wrap_mul64(f1, f2), f3);
       int64_t i0_sq = wrap_mul64(i0, i0);
-      int64_t k_sq = wrap_mul64(k, k);
+      int64_t k_sq = wrap_mul64(step, step);
       total = acc_init;
       if (acc_power == 2) {
         total = wrap_add(total, wrap_mul64(T, i0_sq));
         total = wrap_add(total,
                          wrap_mul64(wrap_mul64(i0, 2),
-                                    wrap_mul64(k, sum_j)));
+                                    wrap_mul64(step, sum_j)));
         total = wrap_add(total, wrap_mul64(k_sq, sum_j2));
       } else {
         int64_t sum_j3 = wrap_mul64(sum_j, sum_j);
         int64_t i0_cube = wrap_mul64(i0_sq, i0);
-        int64_t k_cube = wrap_mul64(k_sq, k);
+        int64_t k_cube = wrap_mul64(k_sq, step);
         total = wrap_add(total, wrap_mul64(T, i0_cube));
         total = wrap_add(
-            total, wrap_mul64(wrap_mul64(wrap_mul64(i0_sq, k), 3),
+            total, wrap_mul64(wrap_mul64(wrap_mul64(i0_sq, step), 3),
                               sum_j));
         total = wrap_add(
             total, wrap_mul64(wrap_mul64(wrap_mul64(i0, k_sq), 3),
@@ -788,7 +788,7 @@ static bool closed_form_constant_sum(nyir_func_t *f, const nyir_cfg_t *cfg,
        */
       total = acc_init;
       total = wrap_add(total, wrap_mul64(T, i0));
-      total = wrap_add(total, wrap_mul64(k, sum_j));
+      total = wrap_add(total, wrap_mul64(step, sum_j));
     }
     result_value = f->next_value++;
     formula[formula_count++] =
@@ -840,7 +840,7 @@ static bool closed_form_constant_sum(nyir_func_t *f, const nyir_cfg_t *cfg,
     formula[formula_count++] =
         (nyir_inst_t){.op = NYIR_CONST_I64, .dst = step_value,
                       .a = -1, .b = -1, .c = -1, .d = -1, .e = -1, .f = -1,
-                      .imm = k};
+                      .imm = step};
     formula[formula_count++] =
         (nyir_inst_t){.op = NYIR_CONST_I64, .dst = init_value_for_trips,
                       .a = -1, .b = -1, .c = -1, .d = -1, .e = -1, .f = -1,

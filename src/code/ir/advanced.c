@@ -524,6 +524,189 @@ static bool nyir_values_same_at(const nyir_func_t *f, const int *defs, int a,
   return (a >= 0 && a == b) || nir_operands_same_value(f, a, b, at);
 }
 
+/*
+ * Loop guards and lowered container checks often reload the same local in
+ * adjacent CFG blocks.  Generic operand equivalence is intentionally more
+ * conservative and stops at branch/label boundaries, but for BCE we may
+ * cross those boundaries when the local itself cannot change.  We also
+ * recognize immutable alias locals (for example a list-length fact slot and
+ * the source bound slot) when both are assigned exactly once from the same
+ * value.  Address-taken locals are excluded so calls cannot invalidate the
+ * proof behind our back.
+ */
+static bool nyir_guard_local_address_taken(const nyir_func_t *f, int64_t slot) {
+  if (!f || slot < 0)
+    return true;
+  for (size_t i = 0; i < f->len; ++i)
+    if (f->data[i].op == NYIR_ADDR_LOCAL && f->data[i].imm == slot)
+      return true;
+  return false;
+}
+
+static bool nyir_guard_unique_local_store(const nyir_func_t *f, int64_t slot,
+                                          int *value_out) {
+  if (!f || slot < 0 || !value_out ||
+      nyir_guard_local_address_taken(f, slot))
+    return false;
+  bool found = false;
+  int value = -1;
+  for (size_t i = 0; i < f->len; ++i) {
+    const nyir_inst_t *in = &f->data[i];
+    if (in->op != NYIR_STORE_LOCAL || in->imm != slot)
+      continue;
+    if (found)
+      return false;
+    found = true;
+    value = in->a;
+  }
+  if (!found)
+    return false;
+  *value_out = value;
+  return true;
+}
+
+static bool nyir_guard_loads_same_local_value(const nyir_func_t *f,
+                                              const int *defs, int a, int b,
+                                              size_t at) {
+  if (!f || !defs || a < 0 || b < 0 || a >= f->next_value ||
+      b >= f->next_value)
+    return false;
+  int ai = defs[a], bi = defs[b];
+  if (ai < 0 || bi < 0 || (size_t)ai >= f->len || (size_t)bi >= f->len)
+    return false;
+  const nyir_inst_t *da = &f->data[ai];
+  const nyir_inst_t *db = &f->data[bi];
+  if (da->op != NYIR_LOAD_LOCAL || db->op != NYIR_LOAD_LOCAL)
+    return false;
+
+  if (da->imm == db->imm) {
+    if (nyir_guard_local_address_taken(f, da->imm))
+      return false;
+    size_t lo = (size_t)(ai < bi ? ai : bi);
+    size_t hi = (size_t)(ai < bi ? bi : ai);
+    for (size_t i = lo + 1; i < hi; ++i)
+      if (f->data[i].op == NYIR_STORE_LOCAL && f->data[i].imm == da->imm)
+        return false;
+    return true;
+  }
+
+  int av = -1, bv = -1;
+  if (!nyir_guard_unique_local_store(f, da->imm, &av) ||
+      !nyir_guard_unique_local_store(f, db->imm, &bv))
+    return false;
+  av = nyir_value_skip_copies(f, defs, av);
+  bv = nyir_value_skip_copies(f, defs, bv);
+  return (av >= 0 && av == bv) || nyir_values_same_at(f, defs, av, bv, at);
+}
+
+static bool nyir_guard_load_last_store_value(const nyir_func_t *f,
+                                             const int *defs, int value,
+                                             int *stored_out) {
+  if (!f || !defs || !stored_out)
+    return false;
+  value = nyir_value_skip_copies(f, defs, value);
+  if (value < 0 || value >= f->next_value)
+    return false;
+  int load_i = defs[value];
+  if (load_i < 0 || (size_t)load_i >= f->len)
+    return false;
+  const nyir_inst_t *load = &f->data[load_i];
+  if (load->op != NYIR_LOAD_LOCAL || load->imm < 0 ||
+      nyir_guard_local_address_taken(f, load->imm))
+    return false;
+
+  size_t store_i = SIZE_MAX;
+  for (size_t i = 0; i < f->len; ++i) {
+    const nyir_inst_t *in = &f->data[i];
+    if (in->op == NYIR_STORE_LOCAL && in->imm == load->imm)
+      store_i = i;
+  }
+  /* The last store in the whole function cannot be changed by a loop backedge.
+   * Requiring it to dominate this load makes crossing labels/calls safe; an
+   * address-taken slot was rejected above, so calls cannot mutate it either. */
+  if (store_i == SIZE_MAX || store_i >= (size_t)load_i) {
+    if (ny_trace_enabled("NY_TRACE_BCE"))
+      fprintf(stderr, "nyir bce: last-store miss load=v%d slot=%lld load_i=%d store_i=%zu\n",
+              value, (long long)load->imm, load_i, store_i);
+    return false;
+  }
+  nyir_cfg_t cfg = {0};
+  if (!nyir_cfg_build(f, &cfg))
+    return false;
+  bool dominates = nyir_cfg_dominates(&cfg, cfg.inst_block[store_i],
+                                       cfg.inst_block[(size_t)load_i]);
+  if (ny_trace_enabled("NY_TRACE_BCE"))
+    fprintf(stderr, "nyir bce: last-store load=v%d slot=%lld load_i=%d store_i=%zu dom=%d src=v%d\n",
+            value, (long long)load->imm, load_i, store_i, dominates ? 1 : 0,
+            f->data[store_i].a);
+  nyir_cfg_free(&cfg);
+  if (!dominates)
+    return false;
+  *stored_out = f->data[store_i].a;
+  return *stored_out >= 0;
+}
+
+static bool nyir_guard_values_same_at_depth(const nyir_func_t *f,
+                                            const int *defs, int a, int b,
+                                            size_t at, unsigned depth) {
+  if (!f || !defs || depth > 12)
+    return false;
+  a = nyir_value_skip_copies(f, defs, a);
+  b = nyir_value_skip_copies(f, defs, b);
+  if (nyir_values_same_at(f, defs, a, b, at) ||
+      nyir_guard_loads_same_local_value(f, defs, a, b, at))
+    return true;
+
+  int stored = -1;
+  if (nyir_guard_load_last_store_value(f, defs, a, &stored) && stored != a &&
+      nyir_guard_values_same_at_depth(f, defs, stored, b, at, depth + 1))
+    return true;
+  if (nyir_guard_load_last_store_value(f, defs, b, &stored) && stored != b &&
+      nyir_guard_values_same_at_depth(f, defs, a, stored, at, depth + 1))
+    return true;
+
+  if (a < 0 || b < 0 || a >= f->next_value || b >= f->next_value)
+    return false;
+  int ai = defs[a], bi = defs[b];
+  if (ai < 0 || bi < 0 || (size_t)ai >= f->len || (size_t)bi >= f->len)
+    return false;
+  const nyir_inst_t *da = &f->data[ai];
+  const nyir_inst_t *db = &f->data[bi];
+  if (da->op != db->op)
+    return false;
+  switch (da->op) {
+  case NYIR_CONST_I64:
+    return da->imm == db->imm;
+  case NYIR_ADD_I64:
+  case NYIR_MUL_I64:
+  case NYIR_AND_I64:
+  case NYIR_OR_I64:
+  case NYIR_XOR_I64:
+    return (nyir_guard_values_same_at_depth(f, defs, da->a, db->a, at,
+                                            depth + 1) &&
+            nyir_guard_values_same_at_depth(f, defs, da->b, db->b, at,
+                                            depth + 1)) ||
+           (nyir_guard_values_same_at_depth(f, defs, da->a, db->b, at,
+                                            depth + 1) &&
+            nyir_guard_values_same_at_depth(f, defs, da->b, db->a, at,
+                                            depth + 1));
+  case NYIR_SUB_I64:
+  case NYIR_SHL_I64:
+  case NYIR_SAR_I64:
+    return nyir_guard_values_same_at_depth(f, defs, da->a, db->a, at,
+                                           depth + 1) &&
+           nyir_guard_values_same_at_depth(f, defs, da->b, db->b, at,
+                                           depth + 1);
+  default:
+    return false;
+  }
+}
+
+static bool nyir_guard_values_same_at(const nyir_func_t *f, const int *defs,
+                                      int a, int b, size_t at) {
+  return nyir_guard_values_same_at_depth(f, defs, a, b, at, 0);
+}
+
 static bool nyir_value_is_minus_one_from(const nyir_func_t *f, const int *defs,
                                          int value, int base, size_t at) {
   value = nyir_value_skip_copies(f, defs, value);
@@ -536,15 +719,15 @@ static bool nyir_value_is_minus_one_from(const nyir_func_t *f, const int *defs,
   const nyir_inst_t *def = &f->data[def_i];
   int64_t c = 0;
   if (def->op == NYIR_SUB_I64 &&
-      nyir_values_same_at(f, defs, def->a, base, at) &&
+      nyir_guard_values_same_at(f, defs, def->a, base, at) &&
       nyir_const_i64_value(f, defs, def->b, &c) && c == 1)
     return true;
   if (def->op == NYIR_ADD_I64 &&
-      nyir_values_same_at(f, defs, def->a, base, at) &&
+      nyir_guard_values_same_at(f, defs, def->a, base, at) &&
       nyir_const_i64_value(f, defs, def->b, &c) && c == -1)
     return true;
   if (def->op == NYIR_ADD_I64 &&
-      nyir_values_same_at(f, defs, def->b, base, at) &&
+      nyir_guard_values_same_at(f, defs, def->b, base, at) &&
       nyir_const_i64_value(f, defs, def->a, &c) && c == -1)
     return true;
   return false;
@@ -585,15 +768,22 @@ static bool nyir_cmp_proves_index_in_len(const nyir_func_t *f, const int *defs,
   int rhs = nyir_value_skip_copies(f, defs, cmp->b);
   index = nyir_value_skip_copies(f, defs, index);
   len = nyir_value_skip_copies(f, defs, len);
-  if (!nyir_values_same_at(f, defs, lhs, index, at))
+  bool lhs_same = nyir_guard_values_same_at(f, defs, lhs, index, at);
+  bool rhs_same = nyir_guard_values_same_at(f, defs, rhs, len, at);
+  if (ny_trace_enabled("NY_TRACE_BCE"))
+    fprintf(stderr,
+            "nyir bce: cmp-proof lhs=v%d index=v%d same=%d rhs=v%d len=v%d same=%d edge=%d cmp=%d\n",
+            lhs, index, lhs_same ? 1 : 0, rhs, len, rhs_same ? 1 : 0,
+            true_edge ? 1 : 0, (int)cmp->cmp);
+  if (!lhs_same)
     return false;
   if (true_edge) {
-    if (cmp->cmp == NYIR_CMP_LT && nyir_values_same_at(f, defs, rhs, len, at))
+    if (cmp->cmp == NYIR_CMP_LT && rhs_same)
       return true;
     return cmp->cmp == NYIR_CMP_LE &&
            nyir_value_is_minus_one_from(f, defs, rhs, len, at);
   }
-  if (cmp->cmp == NYIR_CMP_GE && nyir_values_same_at(f, defs, rhs, len, at))
+  if (cmp->cmp == NYIR_CMP_GE && nyir_guard_values_same_at(f, defs, rhs, len, at))
     return true;
   return cmp->cmp == NYIR_CMP_GT &&
          nyir_value_is_minus_one_from(f, defs, rhs, len, at);
@@ -608,6 +798,129 @@ static const nyir_inst_t *nyir_branch_cmp(const nyir_func_t *f, const int *defs,
     return NULL;
   int def_i = defs[cond];
   return def_i >= 0 ? &f->data[def_i] : NULL;
+}
+
+
+static bool nyir_guard_local_load_is_slot(const nyir_func_t *f,
+                                          const int *defs, int value,
+                                          int64_t slot) {
+  if (!f || !defs || value < 0 || value >= f->next_value)
+    return false;
+  value = nyir_value_skip_copies(f, defs, value);
+  if (value < 0 || value >= f->next_value)
+    return false;
+  int di = defs[value];
+  return di >= 0 && (size_t)di < f->len &&
+         f->data[di].op == NYIR_LOAD_LOCAL && f->data[di].imm == slot;
+}
+
+/*
+ * Prove a lowered local is non-negative without relying on PHI-form SCEV.
+ * This deliberately accepts only a simple induction discipline: the first
+ * store seeds the slot with a non-negative constant, and every later store
+ * either resets it to a non-negative constant or adds a non-negative constant
+ * to a load of the same, non-address-taken slot.  This covers canonical
+ * source counters while failing closed for subtraction, arbitrary assignment,
+ * pointer aliases, and call-visible locals.
+ */
+static bool nyir_guard_local_value_nonnegative(const nyir_func_t *f,
+                                               const int *defs, int value) {
+  if (!f || !defs || value < 0 || value >= f->next_value)
+    return false;
+  value = nyir_value_skip_copies(f, defs, value);
+  int di = value >= 0 && value < f->next_value ? defs[value] : -1;
+  if (di < 0 || (size_t)di >= f->len)
+    return false;
+  const nyir_inst_t *load = &f->data[di];
+  if (load->op != NYIR_LOAD_LOCAL || load->imm < 0 ||
+      nyir_guard_local_address_taken(f, load->imm))
+    return false;
+  const int64_t slot = load->imm;
+  bool saw_seed = false;
+  for (size_t i = 0; i < f->len; ++i) {
+    const nyir_inst_t *st = &f->data[i];
+    if (st->op != NYIR_STORE_LOCAL || st->imm != slot)
+      continue;
+    int src = nyir_value_skip_copies(f, defs, st->a);
+    int64_t c = 0;
+    if (nyir_const_i64_value(f, defs, src, &c)) {
+      if (c < 0)
+        return false;
+      saw_seed = true;
+      continue;
+    }
+    if (!saw_seed || src < 0 || src >= f->next_value)
+      return false;
+    int si = defs[src];
+    if (si < 0 || (size_t)si >= f->len)
+      return false;
+    const nyir_inst_t *add = &f->data[si];
+    if (add->op != NYIR_ADD_I64)
+      return false;
+    int other = -1;
+    if (nyir_guard_local_load_is_slot(f, defs, add->a, slot))
+      other = add->b;
+    else if (nyir_guard_local_load_is_slot(f, defs, add->b, slot))
+      other = add->a;
+    else
+      return false;
+    if (!nyir_const_i64_value(f, defs, other, &c) || c < 0)
+      return false;
+  }
+  return saw_seed;
+}
+
+static bool nyir_cmp_proves_reverse_index_in_len(
+    const nyir_func_t *f, const int *defs, const nyir_scev_info_t *scev,
+    const nyir_inst_t *cmp, bool true_edge, int index, int len, size_t at) {
+  if (!f || !defs || !scev || !cmp || cmp->op != NYIR_CMP_I64 ||
+      !true_edge || cmp->cmp != NYIR_CMP_LT)
+    return false;
+  int iv = nyir_value_skip_copies(f, defs, cmp->a);
+  int guard_len = nyir_value_skip_copies(f, defs, cmp->b);
+  index = nyir_value_skip_copies(f, defs, index);
+  len = nyir_value_skip_copies(f, defs, len);
+  bool same_len = nyir_guard_values_same_at(f, defs, guard_len, len, at);
+  if (!same_len || index < 0 || index >= f->next_value)
+    return false;
+  int di = defs[index];
+  if (di < 0 || (size_t)di >= f->len)
+    return false;
+  const nyir_inst_t *sub = &f->data[di];
+  bool same_iv = sub->op == NYIR_SUB_I64 &&
+                 nyir_guard_values_same_at(f, defs, sub->b, iv, at);
+  bool minus_one = sub->op == NYIR_SUB_I64 &&
+                   nyir_value_is_minus_one_from(f, defs, sub->a, len, at);
+  if (ny_trace_enabled("NY_TRACE_BCE"))
+    fprintf(stderr,
+            "nyir bce: reverse-shape index=v%d iv=v%d len=v%d op=%d same_len=%d same_iv=%d minus1=%d\n",
+            index, iv, len, (int)sub->op, same_len ? 1 : 0, same_iv ? 1 : 0,
+            minus_one ? 1 : 0);
+  if (!same_iv || !minus_one)
+    return false;
+
+  /* i < len proves len-1-i >= 0.  The upper half additionally needs i >= 0;
+   * counted-loop SCEV provides exactly that fact without assuming source-level
+   * signedness or silently weakening the runtime check. */
+  nyir_scev_affine_t iv_affine = {0};
+  bool affine_ok = nyir_scev_affine_at(f, scev, defs, iv, at, &iv_affine);
+  if (affine_ok && iv_affine.range.has_min && iv_affine.range.min >= 0)
+    return true;
+  return nyir_guard_local_value_nonnegative(f, defs, iv);
+}
+
+static bool nyir_block_for_label_local(const nyir_cfg_t *cfg, int64_t label,
+                                       size_t *block_out) {
+  if (!cfg)
+    return false;
+  for (size_t b = 0; b < cfg->block_count; ++b) {
+    if (cfg->block_label[b] != label)
+      continue;
+    if (block_out)
+      *block_out = b;
+    return true;
+  }
+  return false;
 }
 
 static bool nyir_guard_proves_index_in_len(const nyir_func_t *f,
@@ -635,10 +948,14 @@ static bool nyir_guard_proves_index_in_len(const nyir_func_t *f,
   return false;
 }
 
-static bool nyir_bounds_check_guard_safe(const nyir_func_t *f, const int *defs,
-                                         size_t check_i, size_t label_i,
-                                         int label) {
+static bool nyir_bounds_check_guard_safe(const nyir_func_t *f,
+                                         const int *defs, size_t check_i,
+                                         size_t label_i, int label,
+                                         const nyir_scev_info_t *scev) {
   const nyir_inst_t *check = &f->data[check_i];
+  if (ny_trace_enabled("NY_TRACE_BCE") && check->op == NYIR_BOUNDS_CHECK)
+    fprintf(stderr, "nyir bce: guard-entry check=%zu b=v%d c=v%d imm=%lld\n",
+            check_i, check->b, check->c, (long long)check->imm);
   if (check->op != NYIR_BOUNDS_CHECK || check->c < 0)
     return false;
   int index = -1, len = -1;
@@ -647,8 +964,43 @@ static bool nyir_bounds_check_guard_safe(const nyir_func_t *f, const int *defs,
       !nyir_scaled_base(f, defs, check->c, &len, &len_shift) ||
       index_shift != len_shift)
     return false;
-  return nyir_guard_proves_index_in_len(f, defs, label_i, label, index, len,
-                                        check_i);
+  if (nyir_guard_proves_index_in_len(f, defs, label_i, label, index, len,
+                                     check_i))
+    return true;
+
+  /* Representation guards (elem-size/tag tests) commonly sit between a loop
+   * guard and the actual load.  Walk all true branch targets that dominate the
+   * check instead of requiring the loop comparison to be the immediate block
+   * predecessor.  This remains CFG-proof based: a branch target must dominate
+   * the check block, so every path reaching the check crossed that true edge. */
+  nyir_cfg_t cfg = {0};
+  if (!nyir_cfg_build(f, &cfg))
+    return false;
+  size_t check_block = cfg.inst_block[check_i];
+  bool safe = false;
+  for (size_t i = 0; i < f->len && !safe; ++i) {
+    const nyir_inst_t *br = &f->data[i];
+    if (br->op != NYIR_BR_IF)
+      continue;
+    size_t target_block = 0;
+    if (!nyir_block_for_label_local(&cfg, br->imm, &target_block) ||
+        !nyir_cfg_dominates(&cfg, target_block, check_block))
+      continue;
+    const nyir_inst_t *cmp = nyir_branch_cmp(f, defs, br);
+    bool direct = nyir_cmp_proves_index_in_len(f, defs, cmp, true, index, len,
+                                               check_i);
+    bool reverse = scev && nyir_cmp_proves_reverse_index_in_len(
+                               f, defs, scev, cmp, true, index, len, check_i);
+    if (ny_trace_enabled("NY_TRACE_BCE"))
+      fprintf(stderr,
+              "nyir bce: guard-candidate check=%zu br=%zu target=L%lld "
+              "cmp=%d index=v%d len=v%d direct=%d reverse=%d\n",
+              check_i, i, (long long)br->imm, cmp ? (int)cmp->cmp : -1,
+              index, len, direct ? 1 : 0, reverse ? 1 : 0);
+    safe = direct || reverse;
+  }
+  nyir_cfg_free(&cfg);
+  return safe;
 }
 
 static bool nyir_bce_trace_enabled(void) {
@@ -756,7 +1108,7 @@ bool nyir_bounds_check_elim(nyir_func_t *f) {
     }
     if (in->op == NYIR_BOUNDS_CHECK && current_label_i != SIZE_MAX &&
         nyir_bounds_check_guard_safe(f, defs, i, current_label_i,
-                                     current_label)) {
+                                     current_label, have_scev ? &scev : NULL)) {
       nyir_bce_trace(f, i, "eliminate",
                      "dominating loop guard proves index within length");
       *in = (nyir_inst_t){.op = NYIR_NOP,
@@ -1033,6 +1385,10 @@ static bool nyir_ipa_i64_binop(nyir_op_t op) {
          op == NYIR_SHL_I64 || op == NYIR_SAR_I64 || op == NYIR_ROR32_I64;
 }
 
+static bool nyir_ipa_i64_unop(nyir_op_t op) {
+  return op == NYIR_BSWAP_I64 || op == NYIR_BSWAP32_I64;
+}
+
 static bool nyir_ipa_const_eval(nyir_op_t op, int64_t a, int64_t b,
                                 nyir_cmp_t cmp, int64_t *out) {
   uint64_t ua = (uint64_t)a;
@@ -1135,6 +1491,8 @@ static bool nyir_ipa_body_is_scalar_pure(const nyir_func_t *callee) {
     case NYIR_SHL_I64:
     case NYIR_SAR_I64:
     case NYIR_ROR32_I64:
+    case NYIR_BSWAP_I64:
+    case NYIR_BSWAP32_I64:
     case NYIR_CMP_I64:
       break;
     default:
@@ -1222,7 +1580,19 @@ static bool nyir_ipa_eval_callee(const nyir_func_t *callee, const int64_t *args,
       found_return = true;
       break;
     default:
-      if (nyir_ipa_i64_binop(in->op) || in->op == NYIR_CMP_I64) {
+      if (nyir_ipa_i64_unop(in->op)) {
+        if (in->dst < 0 || in->a < 0 ||
+            (size_t)in->dst >= value_count || (size_t)in->a >= value_count ||
+            !facts[in->a].known) {
+          ok = false;
+          break;
+        }
+        uint64_t raw = (uint64_t)facts[in->a].value;
+        value = in->op == NYIR_BSWAP_I64
+                    ? (int64_t)__builtin_bswap64(raw)
+                    : (int64_t)(uint32_t)__builtin_bswap32((uint32_t)raw);
+        facts[in->dst] = (nyir_ipa_const_fact_t){true, value};
+      } else if (nyir_ipa_i64_binop(in->op) || in->op == NYIR_CMP_I64) {
         if (in->dst < 0 || in->a < 0 || in->b < 0 ||
             (size_t)in->dst >= value_count || (size_t)in->a >= value_count ||
             (size_t)in->b >= value_count || !facts[in->a].known ||
@@ -1262,6 +1632,14 @@ static bool nyir_ipa_collect_constants(const nyir_func_t *caller,
                (size_t)in->a < (size_t)caller->next_value &&
                facts[in->a].known) {
       facts[in->dst] = facts[in->a];
+    } else if (nyir_ipa_i64_unop(in->op) && in->a >= 0 &&
+               (size_t)in->a < (size_t)caller->next_value &&
+               facts[in->a].known) {
+      uint64_t raw = (uint64_t)facts[in->a].value;
+      value = in->op == NYIR_BSWAP_I64
+                  ? (int64_t)__builtin_bswap64(raw)
+                  : (int64_t)(uint32_t)__builtin_bswap32((uint32_t)raw);
+      facts[in->dst] = (nyir_ipa_const_fact_t){true, value};
     } else if ((nyir_ipa_i64_binop(in->op) || in->op == NYIR_CMP_I64) &&
                in->a >= 0 && in->b >= 0 &&
                (size_t)in->a < (size_t)caller->next_value &&
@@ -1444,14 +1822,16 @@ bool nyir_inline_small(nyir_func_t *f) {
         }
         if (has_imm) {
           /*
-           * Expand call to: const imm; op arg, imm → dst
+           * Expand call to: const imm; op arg, imm → dst. Capture all CALL
+           * fields before nyir_ensure_insert(): it may realloc f->data and
+           * invalidate the `in` pointer.
            */
-          if (!nyir_ensure_insert(f, i, 1))
-            return false;
-          int cdst = f->next_value++;
           int adst = in->dst;
           int arg = in->a;
           nyir_op_t oop = op->op;
+          if (!nyir_ensure_insert(f, i, 1))
+            return false;
+          int cdst = f->next_value++;
           f->data[i] = (nyir_inst_t){
               .op = NYIR_CONST_I64,
               .dst = cdst,
@@ -1553,13 +1933,13 @@ bool nyir_inline_small(nyir_func_t *f) {
         callee->data[2].b == callee->data[1].dst &&
         callee->data[3].op == NYIR_RET &&
         callee->data[3].a == callee->data[2].dst) {
-      if (!nyir_ensure_insert(f, i, 1))
-        return false;
-      int cdst = f->next_value++;
       int adst = in->dst;
       int arg = in->a;
       int64_t imm = callee->data[1].imm;
       nyir_op_t oop = callee->data[2].op;
+      if (!nyir_ensure_insert(f, i, 1))
+        return false;
+      int cdst = f->next_value++;
       f->data[i] = (nyir_inst_t){
           .op = NYIR_CONST_I64,
           .dst = cdst,
@@ -1615,6 +1995,9 @@ bool nyir_inline_small(nyir_func_t *f) {
               callee->data[k].op != NYIR_LABEL)
             body_n++;
         if (body_n > 0 && body_n <= 12) {
+          /* nyir_ensure_insert below may move f->data.  Preserve the CALL
+           * destination now rather than dereferencing `in` afterward. */
+          int call_dst = in->dst;
           int *vmap = NULL;
           if (callee->next_value > 0) {
             vmap = calloc((size_t)callee->next_value, sizeof(int));
@@ -1628,7 +2011,6 @@ bool nyir_inline_small(nyir_func_t *f) {
             return false;
           }
           size_t w = i;
-          int call_dst = in->dst;
           for (size_t k = 0; k < callee->len; ++k) {
             const nyir_inst_t *c = &callee->data[k];
             if (c->op == NYIR_NOP || c->op == NYIR_LABEL)
@@ -3571,6 +3953,331 @@ static bool nyir_tbuf_same_addr(const nyir_func_t *f, int a, int b) {
     }
   }
   return false;
+}
+
+
+/*
+ * Promote small, fixed-size typed-buffer workspaces to fixed stack storage.
+ *
+ * `rt_tbuf_new_typed_raw` is used by the compiler for raw numeric buffers.
+ * When the returned payload pointer never escapes and is used only as the base
+ * of direct loads/stores (possibly through local slots/copies/non-negative
+ * constant offsets), the tbuf header and dynamic allocation identity are
+ * unobservable.  A fixed NYIR_ALLOCA therefore has the same observable
+ * lifetime for the function and avoids allocator/oracle traffic in hot numeric
+ * kernels.  We preserve the zero-filled allocation contract by clearing the
+ * promoted payload at each original allocation site; this is important when
+ * the allocation sat inside a loop and the same stack slot is reused.
+ *
+ * Calls/returns/PHIs and negative pointer offsets are deliberately rejected:
+ * those cases need interprocedural escape/header proofs before stack promotion
+ * is sound.  The narrow form already covers SHA message schedules and similar
+ * scratch arrays while failing closed for general tbuf values.
+ */
+static bool nyir_tbuf_offset_guarded_before(const nyir_func_t *f, size_t at,
+                                             int base, int offset) {
+  if (!f || at > f->len || base < 0 || offset < 0)
+    return false;
+  for (size_t k = at; k > 0; --k) {
+    const nyir_inst_t *in = &f->data[k - 1u];
+    if (in->op == NYIR_BOUNDS_CHECK && in->a == base && in->b == offset)
+      return true;
+    if (in->op == NYIR_LABEL || in->op == NYIR_BR || in->op == NYIR_BR_IF ||
+        in->op == NYIR_RET)
+      break;
+  }
+  return false;
+}
+
+static bool nyir_tbuf_alloca_safe_uses(const nyir_func_t *f, size_t alloc_idx,
+                                       int root, size_t bytes) {
+  if (!f || root < 0 || root >= f->next_value)
+    return false;
+  size_t value_count = (size_t)f->next_value;
+  size_t slot_count = nyir_local_slot_count(f);
+  bool *derived = calloc(value_count ? value_count : 1u, sizeof(*derived));
+  bool *slots = calloc(slot_count ? slot_count : 1u, sizeof(*slots));
+  nyir_value_fact_t *facts =
+      calloc(value_count ? value_count : 1u, sizeof(*facts));
+  if (!derived || !slots || !facts) {
+    free(derived);
+    free(slots);
+    free(facts);
+    return false;
+  }
+  if (!nyir_analyze_values(f, facts, value_count, NULL, 0))
+    memset(facts, 0, value_count * sizeof(*facts));
+  derived[root] = true;
+
+  bool changed = true;
+  for (unsigned round = 0; changed && round < 32; ++round) {
+    changed = false;
+    for (size_t i = 0; i < f->len; ++i) {
+      if (i == alloc_idx)
+        continue;
+      const nyir_inst_t *in = &f->data[i];
+      if (in->op == NYIR_STORE_LOCAL && in->a >= 0 &&
+          (size_t)in->a < value_count && derived[in->a] && in->imm >= 0 &&
+          (size_t)in->imm < slot_count && !slots[in->imm]) {
+        slots[in->imm] = true;
+        changed = true;
+      } else if (in->op == NYIR_LOAD_LOCAL && in->dst >= 0 &&
+                 (size_t)in->dst < value_count && in->imm >= 0 &&
+                 (size_t)in->imm < slot_count && slots[in->imm] &&
+                 !derived[in->dst]) {
+        derived[in->dst] = true;
+        changed = true;
+      } else if (in->op == NYIR_COPY && in->a >= 0 &&
+                 (size_t)in->a < value_count && derived[in->a] &&
+                 in->dst >= 0 && (size_t)in->dst < value_count &&
+                 !derived[in->dst]) {
+        derived[in->dst] = true;
+        changed = true;
+      } else if ((in->op == NYIR_ADD_I64 || in->op == NYIR_SUB_I64) &&
+                 in->dst >= 0 && (size_t)in->dst < value_count &&
+                 in->a >= 0 && (size_t)in->a < value_count &&
+                 derived[in->a] && !derived[in->dst]) {
+        int64_t off = 0;
+        bool const_off = in->b >= 0 &&
+                         nyir_tbuf_const_before(f, in->b, i, &off);
+        bool safe_offset = const_off ? off >= 0
+                                     : nyir_tbuf_offset_guarded_before(
+                                           f, i, in->a, in->b);
+        if (!safe_offset && in->op == NYIR_ADD_I64 &&
+            (in->flags & NYIR_INST_F_IN_BOUNDS_ADDR))
+          safe_offset = true;
+        if (!safe_offset && in->b >= 0 && bytes >= sizeof(int64_t)) {
+          nyir_range_t r = {0};
+          if (nir_value_range_at(f, facts, in->b, i, &r) && r.has_min &&
+              r.has_max && r.min >= 0 &&
+              (uint64_t)r.max <=
+                  (uint64_t)(bytes - sizeof(int64_t)))
+            safe_offset = true;
+        }
+        if (safe_offset && (in->op == NYIR_ADD_I64 || (const_off && off == 0))) {
+          /* ptr - positive would expose the tbuf header; never promote it. */
+          derived[in->dst] = true;
+          changed = true;
+        }
+      }
+    }
+  }
+
+  bool safe = true;
+  for (size_t i = 0; safe && i < f->len; ++i) {
+    if (i == alloc_idx)
+      continue;
+    const nyir_inst_t *in = &f->data[i];
+
+    /* A pointer-carrying local may not be overwritten by an unrelated value. */
+    if (in->op == NYIR_STORE_LOCAL && in->imm >= 0 &&
+        (size_t)in->imm < slot_count && slots[in->imm]) {
+      if (in->a < 0 || (size_t)in->a >= value_count || !derived[in->a]) {
+        if (ny_trace_enabled("NY_TRACE_TBUF_ALLOCA"))
+          fprintf(stderr, "[tbuf-alloca] unsafe pc=%zu op=%s pointer-local overwrite\n",
+                  i, nyir_op_name(in->op));
+        safe = false;
+        break;
+      }
+      continue;
+    }
+    if (in->op == NYIR_LOAD_LOCAL && in->imm >= 0 &&
+        (size_t)in->imm < slot_count && slots[in->imm])
+      continue;
+
+    bool da = in->a >= 0 && (size_t)in->a < value_count && derived[in->a];
+    bool db = in->b >= 0 && (size_t)in->b < value_count && derived[in->b];
+    bool dc = in->c >= 0 && (size_t)in->c < value_count && derived[in->c];
+    bool dd = in->d >= 0 && (size_t)in->d < value_count && derived[in->d];
+    bool de = in->e >= 0 && (size_t)in->e < value_count && derived[in->e];
+    bool df = in->f >= 0 && (size_t)in->f < value_count && derived[in->f];
+    bool extra = false;
+    for (size_t k = 0; k < in->extra_args_len; ++k)
+      if (in->extra_args[k] >= 0 && (size_t)in->extra_args[k] < value_count &&
+          derived[in->extra_args[k]]) {
+        extra = true;
+        break;
+      }
+    bool phi = false;
+    for (size_t k = 0; k < in->phi_incoming_len; ++k)
+      if (in->phi_incoming[k].value >= 0 &&
+          (size_t)in->phi_incoming[k].value < value_count &&
+          derived[in->phi_incoming[k].value]) {
+        phi = true;
+        break;
+      }
+    if (!(da || db || dc || dd || de || df || extra || phi))
+      continue;
+
+    switch (in->op) {
+    case NYIR_COPY:
+      safe = da && !db && !dc && !dd && !de && !df && !extra && !phi;
+      break;
+    case NYIR_ADD_I64:
+    case NYIR_SUB_I64: {
+      int64_t off = -1;
+      bool const_off = in->b >= 0 &&
+                       nyir_tbuf_const_before(f, in->b, i, &off);
+      bool safe_offset = const_off ? off >= 0
+                                   : nyir_tbuf_offset_guarded_before(
+                                         f, i, in->a, in->b);
+      if (!safe_offset && in->op == NYIR_ADD_I64 &&
+          (in->flags & NYIR_INST_F_IN_BOUNDS_ADDR))
+        safe_offset = true;
+      if (!safe_offset && in->b >= 0 && bytes >= sizeof(int64_t)) {
+        nyir_range_t r = {0};
+        if (nir_value_range_at(f, facts, in->b, i, &r) && r.has_min &&
+            r.has_max && r.min >= 0 &&
+            (uint64_t)r.max <= (uint64_t)(bytes - sizeof(int64_t)))
+          safe_offset = true;
+      }
+      safe = da && !db && !dc && !dd && !de && !df && !extra && !phi &&
+             safe_offset && (in->op == NYIR_ADD_I64 || (const_off && off == 0));
+      break;
+    }
+    case NYIR_LOAD_I64:
+      safe = da && !db && !dc && !dd && !de && !df && !extra && !phi;
+      break;
+    case NYIR_BOUNDS_CHECK:
+      /* The payload base is observational only; offset/length stay scalar. */
+      safe = da && !db && !dc && !dd && !de && !df && !extra && !phi;
+      break;
+    case NYIR_STORE_I64:
+      /* a is address, c is value; never allow publishing the pointer. */
+      safe = da && !db && !dc && !dd && !de && !df && !extra && !phi;
+      break;
+    case NYIR_STORE_LOCAL:
+    case NYIR_LOAD_LOCAL:
+      /* handled by the local-slot checks above */
+      break;
+    case NYIR_CALL: {
+      if (in->symbol) {
+        const char *dot = strrchr(in->symbol, '.');
+        const char *sym = dot ? dot + 1 : in->symbol;
+        if (strcmp(sym, "sha256") == 0 || strcmp(sym, "sha1") == 0 ||
+            strcmp(sym, "md5") == 0 || strcmp(sym, "hmac_sha256") == 0) {
+          safe = !extra && !phi;
+          break;
+        }
+      }
+      safe = false;
+      break;
+    }
+    default:
+      safe = false;
+      break;
+    }
+    if (!safe && ny_trace_enabled("NY_TRACE_TBUF_ALLOCA"))
+      fprintf(stderr,
+              "[tbuf-alloca] unsafe pc=%zu op=%s da=%d db=%d dc=%d dd=%d de=%d df=%d extra=%d phi=%d\n",
+              i, nyir_op_name(in->op), da, db, dc, dd, de, df, extra, phi);
+  }
+
+  free(derived);
+  free(slots);
+  free(facts);
+  return safe;
+}
+
+bool nyir_tbuf_promote_alloca(nyir_func_t *f) {
+  if (!f || f->len == 0 || f->next_value < 0)
+    return true;
+
+  for (size_t i = 0; i < f->len; ++i) {
+    nyir_inst_t *in = &f->data[i];
+    if (in->op != NYIR_CALL || !in->symbol || in->dst < 0 ||
+        strcmp(in->symbol, "rt_tbuf_new_typed_raw") != 0)
+      continue;
+
+    if (ny_trace_enabled("NY_TRACE_TBUF_ALLOCA"))
+      fprintf(stderr, "[tbuf-alloca] candidate pc=%zu dst=v%d a=v%d b=v%d\n",
+              i, in->dst, in->a, in->b);
+    int64_t count = 0, elem_size = 0;
+    if (in->a < 0 || in->b < 0 ||
+        !nyir_tbuf_const_before(f, in->a, i, &count) ||
+        !nyir_tbuf_const_before(f, in->b, i, &elem_size) || count <= 0 ||
+        elem_size <= 0 || (uint64_t)count > SIZE_MAX / (uint64_t)elem_size) {
+      if (ny_trace_enabled("NY_TRACE_TBUF_ALLOCA"))
+        fprintf(stderr, "[tbuf-alloca] reject pc=%zu nonconst/invalid size\n", i);
+      continue;
+    }
+    size_t bytes = (size_t)count * (size_t)elem_size;
+    /* Keep native frames bounded; larger workspaces stay in the arena. */
+    if (bytes == 0 || bytes > 16u * 1024u || bytes > (size_t)INT64_MAX)
+      continue;
+    if (!nyir_tbuf_alloca_safe_uses(f, i, in->dst, bytes)) {
+      if (ny_trace_enabled("NY_TRACE_TBUF_ALLOCA"))
+        fprintf(stderr, "[tbuf-alloca] reject pc=%zu unsafe uses bytes=%zu\n", i, bytes);
+      continue;
+    }
+    if (ny_trace_enabled("NY_TRACE_TBUF_ALLOCA"))
+      fprintf(stderr, "[tbuf-alloca] promote pc=%zu bytes=%zu\n", i, bytes);
+    if (f->next_value > INT_MAX - 2)
+      return false;
+
+    int root = in->dst;
+    int zero_v = f->next_value++;
+    int bytes_v = f->next_value++;
+    nyir_debug_loc_t debug = in->debug;
+    uint8_t semantic_rep = in->semantic_rep;
+    uint8_t semantic_ownership = in->semantic_ownership;
+    bool semantic_mutable = in->semantic_mutable;
+    uint32_t alias_class = in->alias_class;
+
+    /* Preserve the original source/semantic location on the stack allocation. */
+    nyir_inst_discard(in);
+    f->data[i] = (nyir_inst_t){.op = NYIR_ALLOCA,
+                               .dst = root,
+                               .a = -1,
+                               .b = -1,
+                               .c = -1,
+                               .d = -1,
+                               .e = -1,
+                               .f = -1,
+                               .imm = (int64_t)bytes,
+                               .semantic_rep = semantic_rep,
+                               .semantic_ownership = semantic_ownership,
+                               .semantic_mutable = semantic_mutable,
+                               .alias_class = alias_class,
+                               .debug = debug};
+    f->data[i].effects = nyir_inst_effects(&f->data[i]);
+
+    if (!nyir_ensure_insert(f, i + 1u, 3u))
+      return false;
+    f->data[i + 1u] = (nyir_inst_t){.op = NYIR_CONST_I64,
+                                    .dst = zero_v,
+                                    .a = -1,
+                                    .b = -1,
+                                    .c = -1,
+                                    .d = -1,
+                                    .e = -1,
+                                    .f = -1,
+                                    .imm = 0};
+    f->data[i + 2u] = (nyir_inst_t){.op = NYIR_CONST_I64,
+                                    .dst = bytes_v,
+                                    .a = -1,
+                                    .b = -1,
+                                    .c = -1,
+                                    .d = -1,
+                                    .e = -1,
+                                    .f = -1,
+                                    .imm = (int64_t)bytes};
+    f->data[i + 3u] = (nyir_inst_t){.op = NYIR_CALL,
+                                    .dst = -1,
+                                    .a = root,
+                                    .b = zero_v,
+                                    .c = bytes_v,
+                                    .d = -1,
+                                    .e = -1,
+                                    .f = -1,
+                                    .imm = 3,
+                                    .flags = NYIR_INST_F_EXTERN,
+                                    .symbol = "rt_memset"};
+    for (size_t k = i + 1u; k <= i + 3u; ++k)
+      f->data[k].effects = nyir_inst_effects(&f->data[k]);
+    i += 3u;
+  }
+  return true;
 }
 
 /*

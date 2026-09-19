@@ -377,9 +377,6 @@ static bool sp_try_one(nyir_func_t *work, const nyir_scev_loop_t *loop) {
   if (pl < 0)
     goto out;
 
-  /*
-   * ------------------------------------------------------------------
-   */
   size_t out_cap = work->len * 4 + 64;
   out = malloc(out_cap * sizeof(*out));
   if (!out)

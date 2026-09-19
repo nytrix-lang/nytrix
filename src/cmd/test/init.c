@@ -62,10 +62,10 @@
 #define PATH_MAX 4096
 #endif
 
-
-#define NY_TEST_DEFAULT_TIMEOUT_SEC 20
-#define NY_TEST_MAX_TIMEOUT_SEC 20
+#define NY_TEST_DEFAULT_TIMEOUT_SEC 300
+#define NY_TEST_MAX_TIMEOUT_SEC 45
 #define NY_TEST_PARALLEL_TIMEOUT_GRACE_MS 1000.0
+#define NY_TEST_WAIT_HEARTBEAT_MS 10000.0
 #define NY_TEST_TIMEOUT_RC 124
 
 #define NY_BENCH_MAX_RUNS 5
@@ -512,7 +512,7 @@ static size_t shape_names_in_file(const char *path, StrVec *names) {
         if (r < end && *r == '{') {
           char *name = (char *)malloc(name_len + 1);
           if (name) {
-            memcpy(name, ns, name_len);
+            memmove(name, ns, name_len);
             name[name_len] = '\0';
             sv_push(names, name);
             count++;
@@ -614,7 +614,7 @@ static int ny_cmd_append(char **buf, size_t *len, size_t *cap, const char *s, si
     *buf = p;
     *cap = nc;
   }
-  memcpy(*buf + *len, s, n);
+  memmove(*buf + *len, s, n);
   *len += n;
   (*buf)[*len] = '\0';
   return 1;
@@ -808,7 +808,6 @@ static int run_debug_argv(char *const argv[], int timeout_sec, int use_path_look
 static int test_env_truthy(const char *name);
 
 #include "elf.c"
-
 
 static int test_env_truthy(const char *name) {
   return ny_env_is_truthy(getenv(name)) ? 1 : 0;
@@ -1026,7 +1025,6 @@ static void poll_sleep(void) {
 #endif
 }
 
-
 static int test_archive_source_needs_m32(const char *src_path) {
   if (!src_path)
     return 0;
@@ -1082,7 +1080,7 @@ static void test_collect_archive_sibling_sources(const char *archive_path, StrVe
     size_t dlen = (size_t)(base - archive_path);
     if (dlen >= sizeof(dir))
       return;
-    memcpy(dir, archive_path, dlen);
+    memmove(dir, archive_path, dlen);
     dir[dlen] = '\0';
     base++;
   } else {
@@ -1092,7 +1090,7 @@ static void test_collect_archive_sibling_sources(const char *archive_path, StrVe
   size_t blen = strlen(base);
   if (blen <= 2 || blen - 2 >= sizeof(stem))
     return;
-  memcpy(stem, base, blen - 2);
+  memmove(stem, base, blen - 2);
   stem[blen - 2] = '\0';
   for (char *p = stem; *p; ++p) {
     if (*p == '_')
@@ -1701,12 +1699,14 @@ static int run_one_blocking_once(const char *bin, const char *path, const char *
     argv[argc++] = "--std-bc";
     argv[argc++] = (char *)std_bc;
   }
-  /* Probe-suite .nshape files are source-faithful native contracts.  Their
+  /*
+   * Probe-suite .nshape files are source-faithful native contracts.  Their
    * embedded programs may exercise raw layouts, FFI, sockets, or device
    * handles that are intentionally outside the legacy LLVM-JIT ABI.  The
    * runner must select the backend declared by the probe family after
    * materializing the heredoc, rather than sending the temporary .ny file
-   * through the default JIT and misreporting backend crashes as parser bugs. */
+   * through the default JIT and misreporting backend crashes as parser bugs.
+   */
   if (shape_path_is_nshape(path) && argc < 78) {
     char *family = shape_meta_string(path, "family");
     bool probe_path = path && (strstr(path, "/probes/") != NULL ||
@@ -1741,9 +1741,11 @@ static int run_one_blocking_once(const char *bin, const char *path, const char *
       !native_backend_is_llvm(flags_buf) &&
       !flags_contain_native_backend_word(flags_buf, "--emit-asm") && argc < 78)
     argv[argc++] = "--native-only";
-  /* This check is deliberately based on the materialized source, not on
+  /*
+   * This check is deliberately based on the materialized source, not on
    * metadata parsing: probe files are always executed as extracted Nytrix
-   * programs and must never fall back to the legacy JIT. */
+   * programs and must never fall back to the legacy JIT.
+   */
   if (materialized_path && path &&
       (strstr(path, "/probes/") || strstr(path, "\\probes\\")) &&
       argc < 78)
@@ -1939,7 +1941,7 @@ static const char *shape_path_split(const char *p, char *file_out,
         (flen >= 7 && memcmp(p + flen - 7, ".nshape", 7) == 0) ||
         (flen >= 3 && memcmp(p + flen - 3, ".ny", 3) == 0);
     if (file_is_shape && flen + 1 < file_cap) {
-      memcpy(file_out, p, flen);
+      memmove(file_out, p, flen);
       file_out[flen] = '\0';
       *shape_out = colon + 1;
       return file_out;
@@ -2084,7 +2086,7 @@ static char *shape_meta_in_region(const char *data, size_t start, size_t end,
       }
       char *out = (char *)malloc((size_t)(line + line_len - vp) + 1);
       if (out) {
-        memcpy(out, vp, (size_t)(line + line_len - vp));
+        memmove(out, vp, (size_t)(line + line_len - vp));
         out[(size_t)(line + line_len - vp)] = '\0';
         trim_inplace(out);
       }
@@ -2180,7 +2182,7 @@ static char *shape_source_block(const char *shape_path, const char *name) {
       size_t n = (size_t)(line - body);
       char *out = (char *)malloc(n + 1);
       if (out) {
-        memcpy(out, body, n);
+        memmove(out, body, n);
         out[n] = '\0';
       }
       free(data);
@@ -2333,7 +2335,7 @@ static char *shape_embedded_awk_block(const char *shape_path, int *declared,
           size_t n = (size_t)(body_line - body);
           char *out = malloc(n + 1);
           if (out) {
-            memcpy(out, body, n);
+            memmove(out, body, n);
             out[n] = '\0';
           }
           free(data);
@@ -2748,7 +2750,6 @@ static int test_is_unsupported_native_platform(const char *path) {
   return 0;
 }
 
-
 static void gh_group_begin(const char *kind, const char *path) {
   if (test_env_truthy("GITHUB_ACTIONS"))
     printf("::group::%s: %s\n", kind ? kind : "debug", disp_path(path));
@@ -3060,7 +3061,7 @@ static char *repl_fixture_expect(const char *src) {
       char *out = (char *)malloc(n + 1);
       if (!out)
         return NULL;
-      memcpy(out, start, n);
+      memmove(out, start, n);
       out[n] = '\0';
       return out;
     }
@@ -3085,7 +3086,7 @@ static char *repl_fixture_paste_body(const char *src) {
     const char *line_end = next ? next : p + strlen(p);
     size_t line_len = (size_t)(line_end - p);
     if (!(line_len >= 8 && strncmp(p, ";; repl-", 8) == 0)) {
-      memcpy(out + used, p, line_len);
+      memmove(out + used, p, line_len);
       used += line_len;
       if (next)
         out[used++] = '\n';
@@ -3291,7 +3292,7 @@ static void repl_append_output(char **out, size_t *len, size_t *cap,
   }
   if (n == 0)
     return;
-  memcpy(*out + *len, buf, n);
+  memmove(*out + *len, buf, n);
   *len += n;
   (*out)[*len] = '\0';
 }
@@ -4258,7 +4259,6 @@ static int path_is_probe_test(const char *p) {
                strstr(p, "/probe/") != NULL || strstr(p, "/probes/") != NULL);
 }
 
-
 static int path_is_native_test(const char *p) {
   return p && strncmp(p, "etc/tests/native/", 17) == 0;
 }
@@ -4536,7 +4536,7 @@ static int run_suite(const char *suite_name, StrVec *files, const char *bin, con
   print_section(suite_name);
   size_t total = selected.len;
   size_t completed = 0;
-  double last_heartbeat_ms = 0.0;
+  double last_heartbeat_ms = now_ms();
   for (size_t i = 0; i < selected.len; i++) {
     const char *p = selected.items[i];
     uint64_t sig = test_sig(p, bin, std_path, std_bc);
@@ -4711,14 +4711,22 @@ static int run_suite(const char *suite_name, StrVec *files, const char *bin, con
 #endif
     if (!ny_test_proc_valid(done)) {
       double t = now_ms();
-      if (last_heartbeat_ms == 0.0 || t - last_heartbeat_ms >= 10000.0) {
+      if (t - last_heartbeat_ms >= NY_TEST_WAIT_HEARTBEAT_MS) {
         int reported = 0;
         for (int i = 0; i < jobs; i++) {
           if (!run[i].active)
             continue;
+          double elapsed_ms = t - run[i].start_ms;
+          /*
+           * A worker may have started just before the suite-wide heartbeat.
+           * Do not report a misleading elapsed=0s/1s wait line for a fixture
+           * that has not itself crossed the heartbeat threshold yet.
+           */
+          if (elapsed_ms < NY_TEST_WAIT_HEARTBEAT_MS)
+            continue;
           fprintf(stdout, "[wait] fixture=%s elapsed=%lds timeout=%ds\n",
                   disp_path(run[i].path),
-                  (long)((t - run[i].start_ms) / 1000.0), timeout_sec);
+                  (long)(elapsed_ms / 1000.0), timeout_sec);
           reported++;
         }
         if (reported > 0)
@@ -5036,7 +5044,7 @@ static int run_reader_atoms_nshape(const char *bin, const char *path) {
     size_t nlen = (size_t)(name_end - atom_line);
     if (nlen >= sizeof(name))
       nlen = sizeof(name) - 1;
-    memcpy(name, atom_line, nlen);
+    memmove(name, atom_line, nlen);
     name[nlen] = '\0';
     char *body = strchr(name_end, '{');
     if (!body || body >= atoms_end)
@@ -5233,6 +5241,21 @@ int ny_test_main(int argc, char **argv) {
       timeout_sec = normalize_test_timeout(v);
   }
 
+  /*
+   * Full runtime tracing can multiply compile/run time substantially.  The
+   * top-level ./make wrapper intentionally installs a conservative 45-second
+   * default, but that becomes a false-failure source when call/value/verbose
+   * tracing is explicitly requested.  Preserve explicit larger timeouts and
+   * raise only the short default for traced diagnostic runs.
+   */
+  if (timeout_sec <= NY_TEST_DEFAULT_TIMEOUT_SEC &&
+      (test_env_truthy("NYTRIX_TRACE") ||
+       test_env_truthy("NYTRIX_TRACE_CALLS") ||
+       test_env_truthy("NYTRIX_TRACE_VALUES") ||
+       test_env_truthy("NYTRIX_TRACE_VERBOSE"))) {
+    timeout_sec = 90;
+  }
+
   for (int i = 1; i < argc; i++) {
     const char *a = argv[i];
     if (ny_arg_match(a, "--help", "-h")) {
@@ -5287,6 +5310,13 @@ int ny_test_main(int argc, char **argv) {
         return 2;
       }
       bin = v;
+    } else if (ny_arg_match_with_value(a, "--timeout")) {
+      const char *v = NULL;
+      if (!ny_arg_take_value(a, &i, argc, argv, &v, err, sizeof(err))) {
+        nyt_err("ny-test", "%s", err);
+        return 2;
+      }
+      timeout_sec = atoi(v);
     } else if (ny_arg_match_with_value(a, "--pattern")) {
       const char *v = NULL;
       if (!ny_arg_take_value(a, &i, argc, argv, &v, err, sizeof(err))) {
@@ -5697,6 +5727,8 @@ int ny_test_main(int argc, char **argv) {
     }
     else if (strncmp(p, "etc/tests/interop/", 18) == 0)
       sv_push(&interop, p);
+    else if (strncmp(p, "etc/tests/repl/", 15) == 0)
+      sv_push(&repl, p);
     else if (path_is_probe_test(p))
       sv_push(&probe, p);
     else if (strncmp(p, "etc/tests/errors/", 17) == 0)
@@ -5870,7 +5902,6 @@ int ny_test_main(int argc, char **argv) {
 
   return failed ? 1 : 0;
 }
-
 
 /*
  * Benchmark Comparison infrastructure
@@ -6072,7 +6103,7 @@ static int bench_parse_marker(const char *out, const char *label, char *dst, siz
   size_t len = (size_t)(end - p);
   if (len == 0 || len >= cap)
     return 0;
-  memcpy(dst, p, len);
+  memmove(dst, p, len);
   dst[len] = '\0';
   return 1;
 }
@@ -6114,7 +6145,6 @@ static double bench_parse_phase_ms(const char *out, const char *label) {
   return seconds * 1000.0;
 }
 
-
 static double bench_median(double *xs, int n) {
   if (n <= 0)
     return -1.0;
@@ -6146,6 +6176,82 @@ static double bench_noise_limit_pct(void) {
  * Returns child status rc (NY_TEST_TIMEOUT_RC on timeout).  Works on POSIX via
  * fork and on Windows via the spawn helper.
  */
+/*
+ * Capture-path validation for child CREATE sites.  Normalize the path
+ * lexically (the file usually does not exist yet, so realpath() is not
+ * usable) and reject any form that escapes toward a parent directory:
+ * absolute paths must stay absolute without ".." components, relative
+ * paths must not climb above their base.  This is the single traversal
+ * gate for bench/failure/replay capture files (static-analysis HIGH).
+ */
+static int ny_test_capture_path_ok(const char *path, char *resolved,
+                                   size_t resolved_len) {
+  if (!path || !*path)
+    return 0;
+  char base[PATH_MAX];
+  const char *src = path;
+  size_t used = 0;
+  /* Floor for the lexical cursor: the root slash for absolute inputs, or
+   * the cwd prefix for relative ones — a ".." may never climb past it. */
+  size_t floor_len = 1;
+  if (path[0] != '/') {
+    if (!getcwd(base, sizeof(base)))
+      return 0;
+    int n = snprintf(resolved, resolved_len, "%s", base);
+    if (n < 0 || (size_t)n >= resolved_len)
+      return 0;
+    used = (size_t)n;
+    floor_len = used;
+  } else {
+    resolved[0] = '/';
+    resolved[1] = '\0';
+    used = 1;
+  }
+  /* Component-wise copy, resolving "." and ".." lexically. */
+  const char *p = src;
+  while (*p) {
+    while (*p == '/')
+      ++p;
+    if (!*p)
+      break;
+    const char *seg = p;
+    while (*p && *p != '/')
+      ++p;
+    size_t seg_len = (size_t)(p - seg);
+    if (seg_len == 1 && seg[0] == '.')
+      continue;
+    if (seg_len == 2 && seg[0] == '.' && seg[1] == '.') {
+      /* Pop one component; a climb past the floor (cwd prefix or the
+       * absolute root) is the traversal rejection. */
+      while (used > 0 && resolved[used - 1] != '/')
+        --used;
+      if (used == 0)
+        return 0;
+      --used; /* remove the slash */
+      if (used < floor_len) {
+        if (path[0] == '/' && used == 0) {
+          used = 1;
+          continue;
+        }
+        return 0;
+      }
+      if (used == 0 && resolved[0] == '/')
+        used = 1;
+      continue;
+    }
+    if (used + seg_len + 2 >= resolved_len)
+      return 0;
+    if (used > 0 && resolved[used - 1] != '/')
+      resolved[used++] = '/';
+    memmove(resolved + used, seg, seg_len);
+    used += seg_len;
+    resolved[used] = '\0';
+  }
+  if (used == 0)
+    return 0;
+  return 1;
+}
+
 static int bench_run_capture_usage(char *const argv[], int timeout_sec,
                                    const char *output_path,
                                    size_t *peak_rss_kb) {
@@ -6166,7 +6272,11 @@ static int bench_run_capture_usage(char *const argv[], int timeout_sec,
     ny_test_isolate_child_group();
     apply_test_child_env();
     if (output_path) {
-      int fd = open(output_path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+      char resolved_path[PATH_MAX];
+      if (!ny_test_capture_path_ok(output_path, resolved_path,
+                                   sizeof(resolved_path)))
+        _exit(126);
+      int fd = open(resolved_path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
       if (fd >= 0) {
         dup2(fd, STDOUT_FILENO);
         dup2(fd, STDERR_FILENO);
@@ -6332,8 +6442,25 @@ static void bench_finalize_samples(bench_stats_t *s) {
     if (rank > s->count)
       rank = s->count;
     s->p95 = s->values[rank - 1];
+
+    /*
+     * Instability must describe the typical sample spread, not a single
+     * scheduler interruption.  With the usual 5-run benchmark, nearest-rank
+     * p95 is literally the maximum sample; one involuntary deschedule could
+     * therefore fail an otherwise stable benchmark.  Use scaled median
+     * absolute deviation for the noise verdict while retaining p95/max for
+     * reporting and diagnostics.  MAD is robust to isolated host jitter but
+     * still grows when the benchmark itself is consistently variable.
+     */
+    double deviations[64];
+    size_t dev_count = s->count < 64 ? s->count : 64;
+    for (size_t i = 0; i < dev_count; ++i) {
+      double delta = s->values[i] - s->median;
+      deviations[i] = delta < 0.0 ? -delta : delta;
+    }
+    double mad = bench_median(deviations, (int)dev_count);
     if (s->median > 0.0)
-      s->noise_pct = ((s->p95 - s->median) / s->median) * 100.0;
+      s->noise_pct = (1.4826 * mad / s->median) * 100.0;
     s->unstable = s->noise_pct > bench_noise_limit_pct();
   } else {
     s->p95 = -1.0;
@@ -6487,7 +6614,6 @@ static int bench_find_cc(char *out, size_t cap) {
   }
   return 0;
 }
-
 
 typedef struct {
   char os[32];
@@ -6962,7 +7088,6 @@ static void bench_measure_ny_code_size(const char *bin, const char *ny_path,
   remove(output_path);
   remove(capture_path);
 }
-
 
 static bool bench_shape_has_static_budget(const char *shape_path) {
   static const char *const keys[] = {
@@ -7782,7 +7907,6 @@ static void bench_print_hotspots(const BenchTable *t) {
     printf("%slargest native/LLVM gap:%s n/a (low-signal or missing LLVM baseline)\n",
            nyt_clr(NYT_BOLD), nyt_clr(NYT_RESET));
 }
-
 
 static void bench_write_csv(FILE *f, const BenchTable *t) {
   fprintf(f, "benchmark,backend,engine,cache,status,checksum,ny_checksum,llvm_checksum,c_checksum,checksum_ok,ny_native_ms,ny_compile_ms,ny_opt_ms,ny_total_ms,ny_code_bytes,ny_code_bytes_seen,ny_specialization_code_bytes,ny_specialization_code_functions,ny_specialization_max_function_bytes,ny_specialization_metrics_seen,ny_peak_compiler_rss_kb,ny_peak_compiler_rss_seen,ny_llvm_ms,llvm_total_ms,c_ms,c_total_ms,driver_wall_ms,native_ratio,llvm_ratio,ny_rc,llvm_rc,c_rc,ny_failures,llvm_failures,c_failures,ny_runs,llvm_runs,c_runs,ny_min,ny_max,ny_p95,ny_dispersion_pct,ny_noise_pct,ny_unstable,llvm_min,llvm_max,llvm_p95,llvm_dispersion_pct,llvm_noise_pct,llvm_unstable,c_min,c_max,c_p95,c_dispersion_pct,c_noise_pct,c_unstable,native_c_budget,native_llvm_budget,compile_ms_budget,code_bytes_budget,specialization_code_bytes_budget,specialization_function_bytes_budget,compiler_rss_budget_kb,ny_static_metrics_seen,ny_runtime_calls,ny_dynamic_ops,ny_tag_checks,ny_box_unbox,ny_heap_allocations,ny_bounds_checks,ny_direct_calls,ny_indirect_calls,ny_unknown_effects,ny_alias_unresolved,ny_vector_attempted,ny_vector_rejected,ny_vectorized,ny_spills,ny_reloads,ny_hw_counters_seen,ny_hw_cycles,ny_hw_instructions,ny_hw_branches,ny_hw_branch_misses,ny_hw_cache_misses,ny_runtime_counters_seen,ny_runtime_alloc_count,ny_runtime_realloc_count,static_budget_mask,heap_allocations_budget,runtime_calls_budget,bounds_checks_budget,indirect_calls_budget,unknown_effects_budget,alias_unresolved_budget,spills_budget,reloads_budget,budget_failed\n");

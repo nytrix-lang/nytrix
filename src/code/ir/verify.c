@@ -85,7 +85,12 @@ static bool nir_flags_valid(const nyir_inst_t *in) {
   case NYIR_CALL:
     allowed = NYIR_INST_F_EXTERN | NYIR_INST_F_RET_F64 |
               NYIR_INST_F_RET_F32 | NYIR_INST_F_SRET |
-              NYIR_INST_F_EFFECTS_KNOWN;
+              NYIR_INST_F_EFFECTS_KNOWN |
+              /* Per-argument f64 ABI facts recorded by the native
+               * lowering (NYIR_INST_F_ARG0_F64..ARG5_F64). */
+              NYIR_INST_F_ARG0_F64 | NYIR_INST_F_ARG1_F64 |
+              NYIR_INST_F_ARG2_F64 | NYIR_INST_F_ARG3_F64 |
+              NYIR_INST_F_ARG4_F64 | NYIR_INST_F_ARG5_F64;
     break;
   case NYIR_RET:
     allowed = NYIR_INST_F_RET_F64 | NYIR_INST_F_RET_F32;
@@ -95,6 +100,9 @@ static bool nir_flags_valid(const nyir_inst_t *in) {
     allowed = NYIR_INST_F_MEM_F64 | NYIR_INST_F_MEM_BYTE;
     break;
   case NYIR_ADD_I64:
+    allowed = NYIR_INST_F_NARROW32 | NYIR_INST_F_NO_OVERFLOW |
+              NYIR_INST_F_IN_BOUNDS_ADDR;
+    break;
   case NYIR_SUB_I64:
   case NYIR_MUL_I64:
   case NYIR_AND_I64:
@@ -347,6 +355,8 @@ static bool nir_verify_dominance(const nyir_func_t *f, char *err,
     case NYIR_SQRT_F64:
     case NYIR_SIN_F64:
     case NYIR_COS_F64:
+    case NYIR_BSWAP_I64:
+    case NYIR_BSWAP32_I64:
     case NYIR_LOAD_I64:
     case NYIR_VEC4_LOAD_I64:
     case NYIR_VEC8_LOAD_I64:
@@ -570,6 +580,8 @@ bool nyir_verify(const nyir_func_t *f, char *err, size_t err_len) {
     case NYIR_I64_TO_F32:
     case NYIR_F64_TO_F32:
     case NYIR_F32_TO_F64:
+    case NYIR_BSWAP_I64:
+    case NYIR_BSWAP32_I64:
     case NYIR_LOAD_I64:
     case NYIR_VEC4_LOAD_I64:
     case NYIR_VEC8_LOAD_I64:
@@ -1233,6 +1245,9 @@ static bool nyir_fact_binary_range(nyir_op_t op,
     *out = r;
     return true;
   }
+  case NYIR_BSWAP_I64:
+    return false;
+  case NYIR_BSWAP32_I64:
   case NYIR_ROR32_I64:
     *out = (nyir_range_t){.has_min = true,
                            .has_max = true,
@@ -1483,8 +1498,16 @@ bool nyir_analyze_values(const nyir_func_t *f, nyir_value_fact_t *facts,
       if (in->a >= 0 && in->b >= 0 && (size_t)in->a < fact_count &&
           (size_t)in->b < fact_count) {
         nyir_range_t r = {0};
-        if (nyir_fact_binary_range(in->op, &facts[in->a], &facts[in->b], &r))
+        if (nyir_fact_binary_range(in->op, &facts[in->a], &facts[in->b], &r)) {
+          if (in->range.has_min && in->range.has_max && r.has_min && r.has_max &&
+              (in->range.min > r.max || in->range.max < r.min)) {
+            free(facts);
+            return nir_verify_inst_err(
+                f, err, err_len, in, i,
+                "instruction range fact contradicts derived range");
+          }
           dst->range = r;
+        }
       }
       break;
     }

@@ -82,7 +82,13 @@ fn _is_bigint(any x) bool { return _has_tag(x, runtime_tag_raw("bigint")) }
 fn _is_bigfloat(any x) bool { return _has_tag(x, runtime_tag_raw("bigfloat")) }
 
 @inline
-fn _is_str(any x) bool { return _is_str_tag(__tagof(x)) }
+fn _is_str(any x) bool {
+   ;; __tagof returns a raw runtime tag; routing it through the generic
+   ;; _is_str_tag(any) helper makes the legacy REPL/JIT treat that raw tag as
+   ;; a language value.  Ask the representation-aware runtime predicate
+   ;; directly instead (it also distinguishes native tbuf containers safely).
+   return __is_str_obj(x)
+}
 
 @inline
 fn _is_float(any x) bool { return __is_float_obj(x) }
@@ -402,7 +408,10 @@ fn len(any x) int {
    - For **list/tuple/dict/set**: number of items.
    - For **bytes**: buffer size.
    Panics for unsupported types."
-   if _is_list(x) || _is_tuple(x) { return __load64_idx(x, 0) }
+   ;; Lists/tuples may use either the legacy managed header or the native
+   ;; tbuf layout.  __list_len handles both; reading byte offset zero directly
+   ;; reads the first element of a native tbuf instead of its count.
+   if _is_list(x) || _is_tuple(x) { return __list_len(x) }
    if _is_dict(x) { return dict_len(x) }
    if _is_set(x) { return core_set.len(x) }
    if _is_str(x) { return __str_len(x) }
@@ -523,7 +532,10 @@ fn _join_parts(any parts, str sep="") str {
    def n = parts.len
    while i < n {
       if i > 0 { out = out + sep }
-      def part = __load_item(parts, i)
+      ;; `parts` is a native list in JIT mode.  The legacy `__load_item`
+      ;; inline path assumes the old managed +16 payload offset; the dynamic
+      ;; accessor understands both layouts and preserves string handles.
+      def part = __load_item_any(parts, i)
       out = out + part
       i += 1
    }
@@ -928,7 +940,7 @@ fn _repr_seq(any xs, str open, str close, int depth=0) str {
    mut i = 0
    mut pos = 1
    while i < n {
-      _store_item_raw(parts, pos, _repr_depth(__load_item(xs, i), depth + 1))
+      _store_item_raw(parts, pos, _repr_depth(__load_item_any(xs, i), depth + 1))
       pos += 1
       if i < n - 1 {
          _store_item_raw(parts, pos, ", ")
@@ -973,11 +985,8 @@ fn _repr_depth(any x, int depth) str {
    if __eq(x, false) { return "false" }
    if !__is_ptr(x) && !_is_str(x) { return "nil" }
    if _is_str(x) { return f"\"{x}\"" }
-   if !__is_ny_obj(x) { return to_str(x) }
-   def kind = __tagof(x)
-   if _is_bigint(x) { return __bigint_to_str(x) }
-   if _is_bigfloat(x) { return __bigfloat_to_str(x) }
-   if _is_vecdict(x) { return _vec_to_str(x) }
+   ;; Keep native sequence formatting on the sequence ABI before any generic
+   ;; object/string fallback, matching _to_str_depth above.
    if _is_list(x) {
       if depth >= 4 { return "[...]" }
       return _repr_seq(x, "[", "]", depth)
@@ -986,6 +995,11 @@ fn _repr_depth(any x, int depth) str {
       if depth >= 4 { return "(...)" }
       return _repr_seq(x, "(", ")", depth)
    }
+   if !__is_ny_obj(x) { return to_str(x) }
+   def kind = __tagof(x)
+   if _is_bigint(x) { return __bigint_to_str(x) }
+   if _is_bigfloat(x) { return __bigfloat_to_str(x) }
+   if _is_vecdict(x) { return _vec_to_str(x) }
    if _is_range(x) {
       def start = __load64_idx(x, 0)
       def stop = __load64_idx(x, 8)
@@ -1230,12 +1244,16 @@ fn index_read(any obj, any key) any {
    "Strict indexed read used by `obj[key]` lowering."
    def tag = __tagof(obj)
    if _is_list(obj) || _is_tuple(obj) {
+      ;; Keep list indices in the language integer ABI.  `key` and
+      ;; `__list_len` are tagged values here; untagging `key` into an `int`
+      ;; local made odd raw indices (notably 1) look tagged a second time at
+      ;; `__load_item_any`, so interactive/JIT reads repeatedly selected slot
+      ;; zero.
       mut k = 0
       if __is_int(key) { k = key }
       elif _is_bigint(key) { k = __bigint_to_int(key) }
       else { return _index_read_key_error(key) }
-      if !__is_int(k) { return _index_read_key_error(key) }
-      def n = __load64_idx(obj, 0)
+      def n = __list_len(obj)
       if k < 0 { k = k + n }
       if k < 0 || k >= n { return _index_read_oob_error(k, n) }
       _index_read_probe(tag, k, 0)
@@ -1244,10 +1262,9 @@ fn index_read(any obj, any key) any {
    if _is_dict(obj) {
       if _is_vecdict(obj) {
          mut k = 0
-         if __is_int(key) { k = key }
+         if __is_int(key) { k = __untag(key) }
          elif _is_bigint(key) { k = __bigint_to_int(key) }
          else { return _index_read_key_error(key) }
-         if !__is_int(k) { return _index_read_key_error(key) }
          def n = _vec_dim(obj)
          if k < 0 { k = k + n }
          if k < 0 || k >= n { return _index_read_oob_error(k, n) }
@@ -1259,10 +1276,9 @@ fn index_read(any obj, any key) any {
    }
    if _is_str(obj) || __is_str_obj(obj) {
       mut k = 0
-      if __is_int(key) { k = key }
+      if __is_int(key) { k = __untag(key) }
       elif _is_bigint(key) { k = __bigint_to_int(key) }
       else { return _index_read_key_error(key) }
-      if !__is_int(k) { return _index_read_key_error(key) }
       use std.core.str
       def total = utf8_len(obj)
       if k < 0 { k = k + total }
@@ -1272,10 +1288,9 @@ fn index_read(any obj, any key) any {
    }
    if _is_bytes(obj) {
       mut k = 0
-      if __is_int(key) { k = key }
+      if __is_int(key) { k = __untag(key) }
       elif _is_bigint(key) { k = __bigint_to_int(key) }
       else { return _index_read_key_error(key) }
-      if !__is_int(k) { return _index_read_key_error(key) }
       def n = obj.len
       if k < 0 { k = k + n }
       if k < 0 || k >= n { return _index_read_oob_error(k, n) }
@@ -1284,10 +1299,9 @@ fn index_read(any obj, any key) any {
    }
    if _is_range(obj) {
       mut k = 0
-      if __is_int(key) { k = key }
+      if __is_int(key) { k = __untag(key) }
       elif _is_bigint(key) { k = __bigint_to_int(key) }
       else { return _index_read_key_error(key) }
-      if !__is_int(k) { return _index_read_key_error(key) }
       def n = obj.len
       if k < 0 { k = k + n }
       if k < 0 || k >= n { return _index_read_oob_error(k, n) }
@@ -1315,10 +1329,9 @@ fn get(any obj, any key, any default=0) any {
    }
    if _is_list(obj) || _is_tuple(obj) {
       mut k = 0
-      if __is_int(key) { k = key }
+      if __is_int(key) { k = __untag(key) }
       elif _is_bigint(key) { k = __bigint_to_int(key) }
       else { return default }
-      if !__is_int(k) { return default }
       def n = __load64_idx(obj, 0)
       if k < 0 { k = k + n }
       if k < 0 || k >= n { return default }
@@ -1326,17 +1339,16 @@ fn get(any obj, any key, any default=0) any {
    }
    if _is_dict(obj) {
       if _is_vecdict(obj) {
-         if __is_int(key) { return _vec_at(obj, key, default) }
+         if __is_int(key) { return _vec_at(obj, __untag(key), default) }
          if _is_bigint(key) { return _vec_at(obj, __bigint_to_int(key), default) }
       }
       return _dict_get_raw(obj, key, default)
    }
    if _is_str(obj) || __is_str_obj(obj) {
       mut k = 0
-      if __is_int(key) { k = key }
+      if __is_int(key) { k = __untag(key) }
       elif _is_bigint(key) { k = __bigint_to_int(key) }
       else { return default }
-      if !__is_int(k) { return default }
       use std.core.str
       def total = utf8_len(obj)
       if k < 0 { k = k + total }
@@ -1347,10 +1359,9 @@ fn get(any obj, any key, any default=0) any {
    }
    if _is_bytes(obj) {
       mut k = 0
-      if __is_int(key) { k = key }
+      if __is_int(key) { k = __untag(key) }
       elif _is_bigint(key) { k = __bigint_to_int(key) }
       else { return default }
-      if !__is_int(k) { return default }
       def n = obj.len
       if k < 0 { k = k + n }
       if k < 0 || k >= n { return default }
@@ -1358,10 +1369,9 @@ fn get(any obj, any key, any default=0) any {
    }
    if _is_range(obj) {
       mut k = 0
-      if __is_int(key) { k = key }
+      if __is_int(key) { k = __untag(key) }
       elif _is_bigint(key) { k = __bigint_to_int(key) }
       else { return default }
-      if !__is_int(k) { return default }
       def n = obj.len
       if k < 0 { k = k + n }
       if k < 0 || k >= n { return default }
@@ -1379,16 +1389,15 @@ fn get(any obj, any key, any default=0) any {
 fn _set_impl(any obj, any key, any val) any {
    if !obj || _is_raw_ptr_like(obj) { return 0 }
    if _is_vecdict(obj) {
-      if __is_int(key) { return _vec_set(obj, key, val) }
+      if __is_int(key) { return _vec_set(obj, __untag(key), val) }
       if _is_bigint(key) { return _vec_set(obj, __bigint_to_int(key), val) }
    }
    if _is_dict(obj) { return _dict_put_raw(obj, key, val) }
    elif _is_list(obj) {
       mut k = 0
-      if __is_int(key) { k = key }
+      if __is_int(key) { k = __untag(key) }
       elif _is_bigint(key) { k = __bigint_to_int(key) }
       else { _type_error("set", "an integer index", key) }
-      if !__is_int(k) { _type_error("set", "an integer index", key) }
       def n = obj.len
       if k < 0 { k = k + n }
       if k < 0 || k >= n {
@@ -1407,10 +1416,9 @@ fn _set_impl(any obj, any key, any val) any {
    }
    elif _is_bytes(obj) {
       mut k = 0
-      if __is_int(key) { k = key }
+      if __is_int(key) { k = __untag(key) }
       elif _is_bigint(key) { k = __bigint_to_int(key) }
       else { _type_error("set", "an integer index", key) }
-      if !__is_int(k) { _type_error("set", "an integer index", key) }
       def n = obj.len
       if k < 0 { k = k + n }
       if k < 0 || k >= n { _index_error("set", k, n) }
@@ -1560,7 +1568,7 @@ fn _str_seq_depth(any xs, str open, str close, int depth) str {
    mut i = 0
    mut pos = 1
    while i < n {
-      _store_item_raw(parts, pos, _to_str_depth(__load_item(xs, i), depth + 1))
+      _store_item_raw(parts, pos, _to_str_depth(__load_item_any(xs, i), depth + 1))
       pos += 1
       if i < n - 1 {
          _store_item_raw(parts, pos, ", ")
@@ -1606,11 +1614,10 @@ fn _to_str_depth(any v, int depth) str {
    if __is_int(v) { return __to_str(v) }
    if !v { return "nil" }
    if _is_str(v) { return v }
-   def kind = __tagof(v)
-   if !__is_ny_obj(v) { return __to_str(v) }
-   if _is_bigint(v) { return __bigint_to_str(v) }
-   if _is_bigfloat(v) { return __bigfloat_to_str(v) }
-   if _is_vecdict(v) { return _vec_to_str(v) }
+   ;; Native lists/tuples are valid Nytrix objects but are represented by the
+   ;; tbuf ABI rather than the legacy heap-object header.  Dispatch structural
+   ;; sequences before the generic object fallback so REPL/JIT code cannot
+   ;; accidentally stringify a native sequence as an opaque pointer.
    if _is_list(v) {
       if depth >= 4 { return "[...]" }
       return _str_seq_depth(v, "[", "]", depth)
@@ -1619,6 +1626,11 @@ fn _to_str_depth(any v, int depth) str {
       if depth >= 4 { return "(...)" }
       return _str_seq_depth(v, "(", ")", depth)
    }
+   def kind = __tagof(v)
+   if !__is_ny_obj(v) { return __to_str(v) }
+   if _is_bigint(v) { return __bigint_to_str(v) }
+   if _is_bigfloat(v) { return __bigfloat_to_str(v) }
+   if _is_vecdict(v) { return _vec_to_str(v) }
    if _is_range(v) {
       def start = __load64_idx(v, 0)
       def stop = __load64_idx(v, 8)

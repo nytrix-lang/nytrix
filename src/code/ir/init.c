@@ -7,6 +7,7 @@
 #include "code/native/object/internal.h"
 #include "base/compat.h"
 #include "base/common.h"
+#include "base/util.h"
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -673,6 +674,10 @@ const char *nyir_op_name(nyir_op_t op) {
     return "ror.i64";
   case NYIR_ROR32_I64:
     return "ror32.i64";
+  case NYIR_BSWAP_I64:
+    return "bswap.i64";
+  case NYIR_BSWAP32_I64:
+    return "bswap32.i64";
   case NYIR_CMP_I64:
     return "cmp.i64";
   case NYIR_LABEL:
@@ -963,6 +968,8 @@ static void nyir_normalize_operands(nyir_inst_t *inst) {
   case NYIR_SQRT_F64:
   case NYIR_SIN_F64:
   case NYIR_COS_F64:
+  case NYIR_BSWAP_I64:
+  case NYIR_BSWAP32_I64:
   case NYIR_LOAD_I64:
   case NYIR_RET:
   case NYIR_BR_IF:
@@ -1115,6 +1122,13 @@ void nyir_refresh_metadata(nyir_func_t *f) {
 int nyir_emit(nyir_func_t *f, nyir_inst_t inst) {
   if (!f)
     return -1;
+  NY_INVARIANT_ASSERT(inst.op >= 0 && inst.op < NYIR_OP_COUNT, "valid nyir opcode",
+                      inst.debug.file, inst.debug.line, inst.debug.column,
+                      "nyir_emit",
+                      "instruction construction",
+                      "invalid opcode %d emitted in nyir", (int)inst.op);
+  if (inst.op < 0 || inst.op >= NYIR_OP_COUNT)
+    return -1;
   nyir_normalize_operands(&inst);
   if (f->len >= f->cap) {
     size_t cap = f->cap ? f->cap * 2 : 64;
@@ -1217,6 +1231,8 @@ static const char *nyir_op_short(const nyir_inst_t *in) {
   case NYIR_SAR_I64: return "sar";
   case NYIR_ROR_I64: return "ror";
   case NYIR_ROR32_I64: return "ror32";
+  case NYIR_BSWAP_I64: return "bswap";
+  case NYIR_BSWAP32_I64: return "bswap32";
   case NYIR_SELECT_I64: return "select";
   case NYIR_CMP_I64: return nyir_cmp_i64_name(in->cmp);
   case NYIR_LABEL: return "L";

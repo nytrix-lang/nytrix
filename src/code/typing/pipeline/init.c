@@ -10,6 +10,7 @@
 #include "code/parse/ast.h"
 #include "code/parse/proof.h"
 #include "code/priv.h"
+#include "code/typing/ownership.h"
 #include <stdint.h>
 #include <stdarg.h>
 #include <stdio.h>

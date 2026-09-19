@@ -5,13 +5,10 @@
 #include "code/native/object/internal.h"
 #include "base/parallel.h"
 
-
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-
 
 static bool ny_i386_obj_reserve_relocs(ny_i386_obj_reloc_t **data,
                                        size_t *cap, size_t want,
@@ -47,7 +44,6 @@ static bool ny_i386_obj_reserve_relocs(ny_i386_obj_reloc_t **data,
   return true;
 }
 
-
 /*
  * ELF32/ELF64, COFF, and Mach-O packaging over encoded code, symbols, and
  * relocation records produced by the architecture encoders.
@@ -79,7 +75,6 @@ unsigned long long ny_native_stat_vector_colored = 0;
 unsigned long long ny_native_stat_vector_spilled = 0;
 unsigned long long ny_native_stat_vector_reloads = 0;
 unsigned long long ny_native_stat_vector_peak_live = 0;
-
 
 static void ny_native_atomic_max_ull(unsigned long long *dst,
                                      unsigned long long value) {

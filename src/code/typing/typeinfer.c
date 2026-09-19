@@ -1152,7 +1152,9 @@ static void typeinfer_unify_call_site(typeinfer_ctx_t *ctx, expr_t *e) {
   if (callee_type->kind == NY_TYPE_ARROW) {
     ny_type_t *effects = ny_type_find(callee_type->as.arrow.effects);
     if (effects && (effects->kind == NY_TYPE_EFFECT_VAR || effects->kind == NY_TYPE_VAR)) {
-      /* Higher-order call effect unification */
+      /*
+       * Higher-order call effect unification
+       */
       for (size_t i = 0; i < e->as.call.args.len; i++) {
         expr_t *arg_expr = e->as.call.args.data[i].val;
         if (!arg_expr)
@@ -1178,7 +1180,9 @@ static void typeinfer_unify_call_site(typeinfer_ctx_t *ctx, expr_t *e) {
       }
     }
 
-    /* Row-polymorphic shape arguments unification */
+    /*
+     * Row-polymorphic shape arguments unification
+     */
     if (callee_type->as.arrow.param &&
         callee_type->as.arrow.param->kind == NY_TYPE_ROW) {
       for (size_t i = 0; i < e->as.call.args.len; i++) {
@@ -1336,6 +1340,10 @@ static void typeinfer_walk_expr(typeinfer_ctx_t *ctx, expr_t *e) {
   case NY_E_INFERRED_MEMBER:
   case NY_E_LOGICAL:
   case NY_E_TERNARY:
+    break;
+  case NY_E_EXISTS:
+    if (e->as.exists.body)
+      typeinfer_walk_expr(ctx, e->as.exists.body);
     break;
   case NY_E_QUOTE:
     if (e->as.quote.body)

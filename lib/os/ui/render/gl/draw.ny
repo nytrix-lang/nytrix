@@ -9,6 +9,8 @@ use std.os.ui.render.gl.state as gl_state
 use std.os.ui.render.gl.texture as gl_tex
 use std.os.ui.render.matrix
 
+def _STRIDE = render_shared.VERTEX_STRIDE
+
 fn draw_vertices(any p, int count, int tex_id=-1, bool use_material=false) bool {
    "Draws packed 64-byte vertices through optimized OpenGL calls."
    if !p || count <= 0 { return false }

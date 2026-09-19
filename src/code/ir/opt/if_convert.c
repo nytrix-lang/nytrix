@@ -78,6 +78,8 @@ static bool ifc_safe_arm_op(const nyir_inst_t *in) {
   case NYIR_SAR_I64:
   case NYIR_ROR_I64:
   case NYIR_ROR32_I64:
+  case NYIR_BSWAP_I64:
+  case NYIR_BSWAP32_I64:
   case NYIR_CMP_I64:
     return true;
   default:

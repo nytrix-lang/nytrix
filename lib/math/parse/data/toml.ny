@@ -31,7 +31,10 @@ fn _toml_strip_comment(str line) str {
       def c = load8(line, i)
       if quote != 0 {
          if c == quote { quote = 0 }
-      } elif c == 34 || c == 39 {
+         i += 1
+         continue
+      }
+      if c == 34 || c == 39 {
          quote = c
       } elif c == 35 {
          return str.str_slice(line, 0, i)
