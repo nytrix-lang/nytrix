@@ -420,7 +420,6 @@ static bool gvn_pass(nyir_func_t *f, int *vn_of_val, nyir_cfg_t *cfg) {
     if (in->op == NYIR_LOAD_I64 && gvn_load_pre(f, cfg, i))
       continue;
 
-
     if (!gvn_can_number(in))
       continue;
 

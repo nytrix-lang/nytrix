@@ -11,7 +11,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-
 typedef struct {
   nyir_func_t *f;
   const bool *known;

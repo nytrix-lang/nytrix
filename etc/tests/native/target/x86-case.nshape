@@ -3,7 +3,7 @@ shape x86_case_target {
   generator "native"
   features [native nyir case x86 target]
   template ny-test-case
-  flags "--emit-asm=/tmp/nytrix-native-x86-case-target.s --native-backend x86"
+  flags "--emit-asm=/tmp/nytrix-native-x86-case-target.s --native-backend x86 -no-std"
   expect compile_and_run
   source ny <<'NY'
 fn classify(v) {

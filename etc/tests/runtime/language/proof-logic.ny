@@ -1,3 +1,4 @@
+;; flags: --native-only
 use std.math.logic as logic
 use std.math.logic.prolog as prolog
 use std.math.logic.solve as solve

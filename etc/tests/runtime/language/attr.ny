@@ -206,7 +206,7 @@ fn swap(a, b) {
    set(b, 0, t)
 }
 
-def s1 = [1] def s2 = [2]
+mut s1 = [1] mut s2 = [2]
 swap(s1, s2)
 assert(s1[0] == 2 && s2[0] == 1, "@argmemonly function failed")
 
@@ -234,7 +234,7 @@ assert(error_path() == "error", "@cold function failed")
 @flatten
 fn nested_calc(a, b) {
    @jit
-   fn inner(x) { return x * 2 }
+   fn inner(int x) int { return x * 2 }
    return inner(a) + inner(b)
 }
 

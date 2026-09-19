@@ -256,7 +256,7 @@ static void build_env_block(char *const envp[], char *buf, size_t buf_sz) {
   for (int i = 0; envp && envp[i]; ++i) {
     size_t len = strlen(envp[i]);
     if (pos + len + 2 >= buf_sz) break;
-    memcpy(buf + pos, envp[i], len);
+    memmove(buf + pos, envp[i], len);
     pos += len;
     buf[pos++] = '\0';
   }

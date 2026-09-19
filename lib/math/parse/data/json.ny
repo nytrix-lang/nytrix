@@ -19,6 +19,7 @@ mut _json_error = ""
 ;; return language-tagged integers for values that came through `any`, while
 ;; the parser's offsets are deliberately raw counters.
 fn _json_pos(list st) int { __load64_idx(st, 32) }
+
 fn _json_size(list st) int { __load64_idx(st, 24) }
 
 fn json_last_error() str {
@@ -343,7 +344,7 @@ fn _json_parse_num(list st) any {
       while pos < n && _json_is_digit(load8(s, pos)) { pos += 1 }
    }
    if !has_frac && !has_exp {
-__store64_idx(st, 32, pos)
+      __store64_idx(st, 32, pos)
       return __tag(neg ? (0 - int_val) : int_val)
    }
    def len = pos - start

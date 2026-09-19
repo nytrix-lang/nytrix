@@ -276,7 +276,6 @@ static bool ny_a64_store_fp_value(ny_a64_obj_ctx_t *c, int value,
          ny_a64_fp_mem(c, false, f32, reg, ny_a64_value_off(c, value));
 }
 
-
 static bool ny_a64_load_vec_value(ny_a64_obj_ctx_t *c, unsigned reg, int value) {
   return ny_a64_check_value(c, value, "vector source") &&
          ny_a64_value_is_v128(c, value) &&
@@ -461,6 +460,14 @@ static bool ny_a64_emit_inst(ny_a64_obj_ctx_t *c,
   case NYIR_SHL_I64: return ny_a64_binop(c, in, 0x9ac02000u);
   case NYIR_SAR_I64: return ny_a64_binop(c, in, 0x9ac02800u);
   case NYIR_ROR32_I64: return ny_a64_binop(c, in, 0x1ac02c00u);
+  case NYIR_BSWAP_I64:
+    return ny_a64_load_value(c, 0, in->a) &&
+           ny_a64_u32(c, 0xdac00c00u) && /* rev x0,x0 */
+           ny_a64_store_value(c, in->dst, 0);
+  case NYIR_BSWAP32_I64:
+    return ny_a64_load_value(c, 0, in->a) &&
+           ny_a64_u32(c, 0x5ac00800u) && /* rev w0,w0; zero-extends x0 */
+           ny_a64_store_value(c, in->dst, 0);
   case NYIR_DIV_I64: return ny_a64_binop(c, in, 0x9ac00c00u);
   case NYIR_MOD_I64:
     return ny_a64_load_value(c, 0, in->a) &&
@@ -1357,7 +1364,6 @@ static bool ny_a64_append(ny_obj_buf_t *code, ny_a64_def_t *defs,
   return true;
 }
 
-
 typedef struct {
   ny_obj_buf_t code;
   ny_a64_reloc_t *relocs;
@@ -1501,6 +1507,16 @@ bool ny_a64_obj_build_bundle(
     ny_native_set_err(err, err_len, "AArch64 object definition allocation failed");
     return false;
   }
+  /*
+   * The scalar AArch64 NYIR encoder does not encode SSA PHIs directly.
+   * Machine lowering can consume preserved PHIs, but this direct NYIR bundle
+   * path cannot.  Destroy them before the parallel emit pass, just like the
+   * x86-64 NYIR object fallback does.  Doing this here (before workers start)
+   * also avoids mutating individual functions concurrently.
+   */
+  nyir_phi_elim((nyir_func_t *)rt_main);
+  for (size_t i = 0; i < func_count; ++i)
+    nyir_phi_elim((nyir_func_t *)&funcs[i]);
   if (!ny_a64_append_functions_parallel(code, defs, &def_count, &relocs,
                                          &reloc_count, &reloc_cap, funcs, func_names,
                                          func_count, target, err, err_len))
@@ -1663,6 +1679,14 @@ bool ny_native_emit_elf64_aarch64_object_from_nirs(
     def_count = reloc_count = 0;
     if (err && err_len)
       err[0] = '\0';
+    /*
+     * The machine-form attempt preserves SSA PHIs.  If it falls back to the
+     * direct AArch64 NYIR encoder, lower those PHIs to edge copies first; the
+     * direct encoder intentionally has no NYIR_PHI instruction case.
+     */
+    nyir_phi_elim((nyir_func_t *)rt_main);
+    for (size_t i = 0; i < func_count; ++i)
+      nyir_phi_elim((nyir_func_t *)&funcs[i]);
     if (!ny_a64_append_functions_parallel(&code, defs, &def_count, &relocs,
                                            &reloc_count, &reloc_cap, funcs, func_names,
                                            func_count, target, err, err_len))
@@ -2740,7 +2764,6 @@ static bool a64_mach_fpr_encode(const ny_mach_func_t *mach,
  * callee-saved and this path emits no saves.
  */
 #define A64_MACH_VECTOR_COLOR_N 8
-
 
 /*
  * Target-tier reporting uses the same physical-color budgets as the AArch64

@@ -268,6 +268,9 @@ typedef struct {
 } DupStats;
 
 static char *format_c_text(const char *in);
+static char *tidy_c_text(const char *in);
+static int c_tidy_separator_only(const char *s);
+static int c_tidy_heading(const char *line, char **title_out);
 static int audit_patterns_selftest(void);
 
 static int cscan_selftest(void) {
@@ -316,6 +319,68 @@ static int cscan_selftest(void) {
   }
   free(comment_once);
   free(comment_twice);
+  const char *tidy_in =
+      "/*\n"
+      " * ----------------------------\n"
+      " * \xe2\x94\x80\xe2\x94\x80 Ideas \xe2\x94\x80\xe2\x94\x80\n"
+      " * text\n"
+      " * ----------------------------\n"
+      " */\n"
+      "int x;\n"
+      "\n"
+      "\n"
+      "/*\n"
+      " *\n"
+      " */\n"
+      "int y;\n";
+  const char *tidy_expect =
+      "/*\n"
+      " * Ideas\n"
+      " * text\n"
+      " */\n"
+      "int x;\n"
+      "\n"
+      "int y;\n";
+  char *tidy_once = format_c_text(tidy_in);
+  char *tidy_twice = tidy_once ? format_c_text(tidy_once) : NULL;
+  if (!tidy_once || strcmp(tidy_once, tidy_expect) != 0 ||
+      !tidy_twice || strcmp(tidy_twice, tidy_once) != 0) {
+    fprintf(stderr, "ny-fmt C comment tidy selftest: failed\n");
+    free(tidy_once);
+    free(tidy_twice);
+    return 1;
+  }
+  free(tidy_once);
+  free(tidy_twice);
+  const char *hdr_in =
+      "/* \xe2\x94\x80\xe2\x94\x80 Loads & Stores \xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80*/\n"
+      "static inline LLVMValueRef ny_load(codegen_t *cg, LLVMValueRef ptr,\n"
+      "                                   const char *name) {\n"
+      "  return LLVMBuildLoad2(cg->builder, cg->type_i64, ptr, name);\n"
+      "}\n"
+      "\n"
+      "\n"
+      "\n"
+      "int y;\n";
+  const char *hdr_expect =
+      "/* Loads & Stores */\n"
+      "static inline LLVMValueRef ny_load(codegen_t *cg, LLVMValueRef ptr,\n"
+      "                                   const char *name) {\n"
+      "  return LLVMBuildLoad2(cg->builder, cg->type_i64, ptr, name);\n"
+      "}\n"
+      "\n"
+      "int y;\n";
+  char *hdr_once = tidy_c_text(hdr_in);
+  char *hdr_twice = hdr_once ? tidy_c_text(hdr_once) : NULL;
+  if (!hdr_once || strcmp(hdr_once, hdr_expect) != 0 ||
+      !hdr_twice || strcmp(hdr_twice, hdr_once) != 0) {
+    fprintf(stderr, "ny-fmt C tidy-only header selftest: failed\n");
+    free(hdr_once);
+    free(hdr_twice);
+    return 1;
+  }
+  free(hdr_once);
+  free(hdr_twice);
   if (audit_patterns_selftest() != 0)
     return 1;
   printf("ny-fmt selftest: C scanner, comments, and semantic pattern checks: ok\n");
@@ -360,7 +425,7 @@ static void sv_push_n(StrVec *v, const char *s, size_t n) {
   char *copy = (char *)malloc(n + 1);
   if (!copy)
     return;
-  memcpy(copy, s ? s : "", n);
+  memmove(copy, s ? s : "", n);
   copy[n] = '\0';
   v->items[v->len++] = copy;
 }
@@ -692,7 +757,6 @@ static void collect_c_files_rec(const char *path, StrVec *out) {
 static void collect_cloc_files_rec(const char *path, StrVec *out) {
   collect_matching_rec(path, out, is_cloc_ext, is_cloc_skip_dir);
 }
-
 
 static void buf_append_char(char **buf, size_t *len, size_t *cap, char c) {
   if (*len + 1 >= *cap) {
@@ -1305,7 +1369,7 @@ static int repeated_append_chain_col(const char *s) {
       while (start > 0 && (isalnum((unsigned char)s[start - 1]) || s[start - 1] == '_'))
         start--;
       if (start < i && i - start < sizeof(receiver)) {
-        memcpy(receiver, s + start, i - start);
+        memmove(receiver, s + start, i - start);
         receiver[i - start] = '\0';
       }
       hits++;
@@ -1842,7 +1906,7 @@ static void copy_trim_span(char *dst, size_t cap, const char *start, const char 
   size_t n = (size_t)(end - start);
   if (n >= cap)
     n = cap - 1;
-  memcpy(dst, start, n);
+  memmove(dst, start, n);
   dst[n] = '\0';
 }
 
@@ -2303,6 +2367,136 @@ static void c_comment_body_append(StrVec *body, const char *start, const char *e
     sv_push_n(body, "", 0);
 }
 
+static int c_tidy_deco_len(const unsigned char *p) {
+  if (!p)
+    return 0;
+  if (p[0] == '-' || p[0] == '_' || p[0] == '~')
+    return 1;
+  if (p[0] == 0xE2 && p[1] == 0x94 && (p[2] == 0x80 || p[2] == 0x81))
+    return 3; /* U+2500 BOX DRAWINGS LIGHT HORIZONTAL, U+2501 HEAVY */
+  if (p[0] == 0xE2 && p[1] == 0x95 && p[2] == 0x90)
+    return 3; /* U+2550 DOUBLE HORIZONTAL */
+  return 0;
+}
+
+/*
+ * A comment-body line that is nothing but decorative punctuation.
+ */
+static int c_tidy_separator_only(const char *s) {
+  size_t count = 0;
+  while (s && *s) {
+    if (*s == ' ' || *s == '\t') {
+      s++;
+      continue;
+    }
+    int l = c_tidy_deco_len((const unsigned char *)s);
+    if (!l)
+      return 0;
+    s += l;
+    count++;
+  }
+  return count >= 4;
+}
+
+/*
+ * Normalize a decorative heading entry: "──── Title ────" -> "Title".
+ */
+static int c_tidy_heading(const char *line, char **title_out) {
+  if (!line || !*line || !title_out)
+    return 0;
+  const unsigned char *p = (const unsigned char *)line;
+  size_t lead = 0;
+  while (*p) {
+    int l = c_tidy_deco_len(p);
+    if (!l)
+      break;
+    p += l;
+    lead++;
+  }
+  if (lead < 2)
+    return 0;
+  while (*p == ' ' || *p == '\t')
+    p++;
+  const char *title_start = (const char *)p;
+  const char *run = NULL;
+  size_t run_len = 0;
+  const char *scan = title_start;
+  while (*scan) {
+    size_t cnt = 0;
+    const unsigned char *q = (const unsigned char *)scan;
+    while (*q) {
+      int l = c_tidy_deco_len(q);
+      if (!l)
+        break;
+      q += l;
+      cnt++;
+    }
+    if (cnt > 0) {
+      const char *t = (const char *)q;
+      while (*t == ' ' || *t == '\t')
+        t++;
+      if (!*t) {
+        run = scan;
+        run_len = cnt;
+      }
+      scan = (const char *)q;
+    } else {
+      scan++;
+    }
+  }
+  if (run_len < 2 || !run)
+    return 0;
+  const char *end = run;
+  while (end > title_start && (end[-1] == ' ' || end[-1] == '\t'))
+    end--;
+  size_t tlen = (size_t)(end - title_start);
+  if (!tlen)
+    return 0;
+  char *title = (char *)malloc(tlen + 1);
+  if (!title)
+    return 0;
+  memmove(title, title_start, tlen);
+  title[tlen] = '\0';
+  *title_out = title;
+  return 1;
+}
+
+/*
+ * Tidy a comment body: drop separator-only rows, strip decorative slashes
+ * from headings, trim leading/trailing blank rows. An emptied body means the
+ * whole comment block is deleted (len becomes 0).
+ */
+static void c_comment_tidy(StrVec *body) {
+  if (!body)
+    return;
+  size_t keep = 0;
+  for (size_t i = 0; i < body->len; i++) {
+    const char *item = body->items[i];
+    if (c_tidy_separator_only(item)) {
+      free(body->items[i]);
+      continue;
+    }
+    char *title = NULL;
+    if (c_tidy_heading(item, &title)) {
+      free(body->items[i]);
+      body->items[keep] = title;
+    } else {
+      body->items[keep] = body->items[i];
+    }
+    keep++;
+  }
+  body->len = keep;
+  while (body->len > 0 && body->items[0][0] == '\0') {
+    free(body->items[0]);
+    memmove(body->items, body->items + 1, (body->len - 1) * sizeof(body->items[0]));
+    body->len--;
+  }
+  while (body->len > 0 && body->items[body->len - 1][0] == '\0') {
+    free(body->items[body->len - 1]);
+    body->len--;
+  }
+}
+
 static void c_comment_body_trim_edges(StrVec *body, int trim_first, int trim_last) {
   if (!body)
     return;
@@ -2357,7 +2551,7 @@ static int c_comment_group(const char *src, size_t n, size_t start, size_t *next
   char *indent = (char *)malloc(indent_len + 1);
   if (!indent)
     return 0;
-  memcpy(indent, src + start, indent_len);
+  memmove(indent, src + start, indent_len);
   indent[indent_len] = '\0';
   size_t cursor = start + indent_len;
   if (strncmp(trimmed, "//", 2) == 0) {
@@ -2405,24 +2599,32 @@ static char *format_c_text(const char *in) {
   size_t n = strlen(in), out_len = 0, out_cap = 0;
   char *out = NULL;
   size_t pos = 0;
+  size_t pending_blank = 0;
   while (pos < n) {
     char *indent = NULL;
     StrVec body = {0};
     size_t next = pos;
     if (c_comment_group(in, n, pos, &next, &indent, &body)) {
-      buf_append_str(&out, &out_len, &out_cap, indent);
-      buf_append_str(&out, &out_len, &out_cap, "/*\n");
-      for (size_t i = 0; i < body.len; i++) {
-        buf_append_str(&out, &out_len, &out_cap, indent);
-        buf_append_str(&out, &out_len, &out_cap, " *");
-        if (body.items[i][0]) {
-          buf_append_char(&out, &out_len, &out_cap, ' ');
-          buf_append_str(&out, &out_len, &out_cap, body.items[i]);
+      c_comment_tidy(&body);
+      if (body.len) {
+        if (pending_blank) {
+          buf_append_char(&out, &out_len, &out_cap, '\n');
+          pending_blank = 0;
         }
-        buf_append_char(&out, &out_len, &out_cap, '\n');
+        buf_append_str(&out, &out_len, &out_cap, indent);
+        buf_append_str(&out, &out_len, &out_cap, "/*\n");
+        for (size_t i = 0; i < body.len; i++) {
+          buf_append_str(&out, &out_len, &out_cap, indent);
+          buf_append_str(&out, &out_len, &out_cap, " *");
+          if (body.items[i][0]) {
+            buf_append_char(&out, &out_len, &out_cap, ' ');
+            buf_append_str(&out, &out_len, &out_cap, body.items[i]);
+          }
+          buf_append_char(&out, &out_len, &out_cap, '\n');
+        }
+        buf_append_str(&out, &out_len, &out_cap, indent);
+        buf_append_str(&out, &out_len, &out_cap, " */\n");
       }
-      buf_append_str(&out, &out_len, &out_cap, indent);
-      buf_append_str(&out, &out_len, &out_cap, " */\n");
       free(indent);
       sv_free(&body);
       pos = next;
@@ -2431,11 +2633,30 @@ static char *format_c_text(const char *in) {
     size_t line_end = pos;
     while (line_end < n && in[line_end] != '\n')
       line_end++;
-    for (size_t i = pos; i < line_end; i++)
-      buf_append_char(&out, &out_len, &out_cap, in[i]);
-    if (line_end < n)
-      buf_append_char(&out, &out_len, &out_cap, '\n');
+    if (pos == line_end) {
+      pending_blank++;
+    } else {
+      int only_ws = 1;
+      for (size_t i = pos; i < line_end; i++)
+        if (in[i] != ' ' && in[i] != '\t')
+          only_ws = 0;
+      if (only_ws) {
+        pending_blank++;
+      } else {
+        if (pending_blank) {
+          buf_append_char(&out, &out_len, &out_cap, '\n');
+          pending_blank = 0;
+        }
+        for (size_t i = pos; i < line_end; i++)
+          buf_append_char(&out, &out_len, &out_cap, in[i]);
+        if (line_end < n)
+          buf_append_char(&out, &out_len, &out_cap, '\n');
+      }
+    }
     pos = line_end < n ? line_end + 1 : n;
+  }
+  if (pending_blank && out_len) {
+    buf_append_char(&out, &out_len, &out_cap, '\n');
   }
   if (!out)
     return strdup("");
@@ -2482,6 +2703,272 @@ static void fmt_emit_unified_diff(const char *path, const char *before,
   fmt_emit_diff_lines('+', after);
 }
 
+static void tidy_c_block(const char *in, size_t pos, const char *open,
+                         const char *close, char **out, size_t *out_len,
+                         size_t *out_cap);
+
+/*
+ * Tidy-only pass for C-family files (headers, .cc, .cpp, ...). Mirrors the
+ * reference python cleaner: comments are cleaned in place, preserving layout.
+ * Single-line decorative headings stay on one line (the slashes are dropped,
+ * the drawn dashes are stripped); ordinary single-line comments are
+ * untouched. Multi-line blocks that contain decorative rows (separators /
+ * drawn headings) are canonicalized into opening-slash / ' * ' / closing-slash
+ * form; ordinary multi-line blocks are otherwise copied byte-for-byte
+ * (rstripped). Runs of 2+ blank lines collapse to a single blank line.
+ */
+static char *tidy_c_text(const char *in) {
+  size_t n = strlen(in), out_len = 0, out_cap = 0;
+  char *out = NULL;
+  size_t pos = 0;
+  while (pos < n) {
+    const char *open = strstr(in + pos, "/*");
+    if (!open)
+      break;
+    const char *close = strstr(open + 2, "*/");
+    if (!close) {
+      for (size_t i = pos; i < n; i++)
+        buf_append_char(&out, &out_len, &out_cap, in[i]);
+      pos = n;
+      break;
+    }
+    /*
+     * Is this a single-line comment (no newline between markers)?
+     */
+    const char *nl = memchr(open + 2, '\n', (size_t)(close - (open + 2)));
+    if (nl) {
+      tidy_c_block(in, pos, open, close, &out, &out_len, &out_cap);
+      pos = (size_t)(close + 2 - in);
+      continue;
+    }
+    const char *inner = open + 2;
+    const char *inner_end = close;
+    while (inner < inner_end && (*inner == ' ' || *inner == '\t'))
+      inner++;
+    while (inner_end > inner &&
+           (inner_end[-1] == ' ' || inner_end[-1] == '\t'))
+      inner_end--;
+    size_t content_len = (size_t)(inner_end - inner);
+    char *content_tmp = (char *)malloc(content_len + 1);
+    if (!content_tmp)
+      return NULL;
+    memmove(content_tmp, inner, content_len);
+    content_tmp[content_len] = '\0';
+    int drop_comment = !content_len || c_tidy_separator_only(content_tmp);
+    char *title = NULL;
+    int is_heading = drop_comment ? 0 : c_tidy_heading(content_tmp, &title);
+    if (drop_comment) {
+      /*
+       * Empty or all-decoration comment: drop it, keep surrounding text.
+       */
+      free(content_tmp);
+      for (size_t i = pos; i < (size_t)(open - in); i++)
+        buf_append_char(&out, &out_len, &out_cap, in[i]);
+      pos = (size_t)(close + 2 - in);
+      continue;
+    }
+    if (is_heading) {
+      /*
+       * Decorative heading on a single line stays compact.
+       */
+      free(content_tmp);
+      for (size_t i = pos; i < (size_t)(open - in); i++)
+        buf_append_char(&out, &out_len, &out_cap, in[i]);
+      buf_append_str(&out, &out_len, &out_cap, "/* ");
+      buf_append_str(&out, &out_len, &out_cap, title);
+      buf_append_str(&out, &out_len, &out_cap, " */");
+      free(title);
+    } else {
+      /*
+       * Ordinary single-line comment: keep byte-for-byte.
+       */
+      free(content_tmp);
+      for (size_t i = pos; i < (size_t)(close + 2 - in); i++)
+        buf_append_char(&out, &out_len, &out_cap, in[i]);
+    }
+    pos = (size_t)(close + 2 - in);
+  }
+  if (pos < n) {
+    for (size_t i = pos; i < n; i++)
+      buf_append_char(&out, &out_len, &out_cap, in[i]);
+  }
+  /*
+   * Collapse runs of 2+ blank lines to a single blank line (python parity).
+   */
+  size_t c_len = 0, c_cap = 0;
+  char *collapsed = NULL;
+  size_t line = 0;
+  size_t pending = 0;
+  while (line < out_len) {
+    size_t end = line;
+    while (end < out_len && out[end] != '\n')
+      end++;
+    int blank = 1;
+    for (size_t i = line; i < end; i++) {
+      if (out[i] != ' ' && out[i] != '\t') {
+        blank = 0;
+        break;
+      }
+    }
+    if (blank) {
+      pending++;
+    } else {
+      if (pending && c_len) {
+        buf_append_char(&collapsed, &c_len, &c_cap, '\n');
+      }
+      pending = 0;
+      for (size_t i = line; i < end; i++)
+        buf_append_char(&collapsed, &c_len, &c_cap, out[i]);
+      if (end < out_len)
+        buf_append_char(&collapsed, &c_len, &c_cap, '\n');
+    }
+    line = end < out_len ? end + 1 : out_len;
+  }
+  if (pending && c_len) {
+    buf_append_char(&collapsed, &c_len, &c_cap, '\n');
+  }
+  free(out);
+  if (!collapsed)
+    collapsed = strdup("");
+  collapsed[c_len] = '\0';
+  return collapsed;
+}
+
+/*
+ * Clean a multi-line C comment block, emitting bytes starting at `pos`.
+ * Block contains no decorative rows -> byte-for-byte copy (rstripped).
+ * Contains separator rows or drawn headings -> canonical multiline form,
+ * separator rows dropped, headings normalized, emptied blocks deleted.
+ */
+static void tidy_c_block(const char *in, size_t pos, const char *open,
+                         const char *close, char **out, size_t *out_len,
+                         size_t *out_cap) {
+  const char *block_end = close + 2;
+
+  /*
+   * Find the start of the line containing the comment.
+   */
+  const char *b = open;
+  while (b > in && b[-1] != '\n' && b[-1] != '\r')
+    b--;
+  const char *line_start = b;
+  if (line_start < in + pos)
+    line_start = in + pos;
+  int begins_line = 1;
+  for (const char *q = line_start; q < open; q++) {
+    if (*q != ' ' && *q != '\t') {
+      begins_line = 0;
+      break;
+    }
+  }
+  size_t indent_len = begins_line ? (size_t)(open - line_start) : 0;
+
+  int decorative = 0;
+  const char *p = open + 2;
+  while (p < close) {
+    const char *nl = memchr(p, '\n', (size_t)(close - p));
+    const char *lend = nl ? nl : close;
+    size_t begin = 0;
+    while (begin < (size_t)(lend - p) &&
+           (p[begin] == ' ' || p[begin] == '\t'))
+      begin++;
+    const char *content = p + begin;
+    size_t content_len = (size_t)(lend - content);
+    if (begin < (size_t)(lend - p) && content[0] == '*') {
+      size_t c = 1;
+      if (c < content_len && content[c] == ' ')
+        c++;
+      content += c;
+      content_len -= c;
+    }
+    size_t t = content_len;
+    while (t > 0 && (content[t - 1] == ' ' || content[t - 1] == '\t'))
+      t--;
+    content_len = t;
+    if (content_len) {
+      char *tmp = (char *)malloc(content_len + 1);
+      if (!tmp)
+        return;
+      memmove(tmp, content, content_len);
+      tmp[content_len] = '\0';
+      char *heading = NULL;
+      if (c_tidy_separator_only(tmp) || c_tidy_heading(tmp, &heading))
+        decorative = 1;
+      free(tmp);
+      free(heading);
+    }
+    p = nl ? nl + 1 : close;
+  }
+  if (!decorative) {
+    /*
+     * Non-decorative multi-line block: copy verbatim (rstrip lines).
+     */
+    for (const char *s = in + pos; s < line_start; s++)
+      buf_append_char(out, out_len, out_cap, *s);
+    p = line_start;
+    while (p < block_end) {
+      const char *nl = memchr(p, '\n', (size_t)(block_end - p));
+      const char *lend = nl ? nl : block_end;
+      size_t t = (size_t)(lend - p);
+      while (t > 0 && (p[t - 1] == ' ' || p[t - 1] == '\t'))
+        t--;
+      for (size_t i = 0; i < t; i++)
+        buf_append_char(out, out_len, out_cap, p[i]);
+      if (nl)
+        buf_append_char(out, out_len, out_cap, '\n');
+      p = nl ? nl + 1 : block_end;
+    }
+    return;
+  }
+  {
+    StrVec body = {0};
+    c_comment_body_append(&body, open + 2, close);
+    c_comment_tidy(&body);
+    char *ind = (char *)malloc(indent_len + 1);
+    if (!ind) {
+      sv_free(&body);
+      return;
+    }
+    memmove(ind, line_start, indent_len);
+    ind[indent_len] = '\0';
+    /*
+     * Preserve code between `pos` and the comment's line start.
+     */
+    for (const char *s = in + pos; s < line_start; s++)
+      buf_append_char(out, out_len, out_cap, *s);
+    /*
+     * Preserve any code that precedes the comment on the same line.
+     */
+    if (!begins_line)
+      for (const char *s = line_start; s < open; s++)
+        buf_append_char(out, out_len, out_cap, *s);
+    if (body.len) {
+      buf_append_str(out, out_len, out_cap, ind);
+      buf_append_str(out, out_len, out_cap, "/*\n");
+      for (size_t i = 0; i < body.len; i++) {
+        buf_append_str(out, out_len, out_cap, ind);
+        buf_append_str(out, out_len, out_cap, " *");
+        if (body.items[i][0]) {
+          buf_append_char(out, out_len, out_cap, ' ');
+          buf_append_str(out, out_len, out_cap, body.items[i]);
+        }
+        buf_append_char(out, out_len, out_cap, '\n');
+      }
+      buf_append_str(out, out_len, out_cap, ind);
+      buf_append_str(out, out_len, out_cap, " */\n");
+    }
+    free(ind);
+    sv_free(&body);
+  }
+}
+
+static int is_c_family(const char *p) {
+  return nyt_ends_with(p, ".c") || nyt_ends_with(p, ".cc") ||
+         nyt_ends_with(p, ".cpp") || nyt_ends_with(p, ".cxx") ||
+         nyt_ends_with(p, ".h") || nyt_ends_with(p, ".hh") ||
+         nyt_ends_with(p, ".hpp") || nyt_ends_with(p, ".hxx");
+}
+
 static int format_file_mode(const char *path, int *changed, int write_back,
                             int show_diff) {
   *changed = 0;
@@ -2498,9 +2985,12 @@ static int format_file_mode(const char *path, int *changed, int write_back,
   char *after = NULL;
   if (is_ny(path))
     after = format_ny_text(norm);
-  else if (nyt_ends_with(path, ".c"))
-    after = format_c_text(norm);
-  else
+  else if (is_c_family(path)) {
+    if (nyt_ends_with(path, ".c"))
+      after = format_c_text(norm);
+    else
+      after = tidy_c_text(norm);
+  } else
     after = strdup(norm);
   free(norm);
   if (!after) {
@@ -3105,7 +3595,7 @@ static void ny_collect_fn_signature(StrVec *lines, size_t idx, char *out, size_t
       out[used++] = ' ';
     if (n > out_sz - used - 1)
       n = out_sz - used - 1;
-    memcpy(out + used, line, n);
+    memmove(out + used, line, n);
     used += n;
     out[used] = '\0';
     if (strncmp(line, "fn ", 3) == 0 && strstr(line, " as \""))
@@ -3180,7 +3670,7 @@ static int ny_fn_is_forwarding_wrapper(const char *line) {
   size_t n = (size_t)(close - open - 1);
   if (n >= sizeof(body))
     return 0;
-  memcpy(body, open + 1, n);
+  memmove(body, open + 1, n);
   body[n] = '\0';
   trim_trailing_ws(body);
   const char *p = lstrip_ws(body);
@@ -3384,7 +3874,7 @@ static void scan_c_file_dupes(const char *path, DupFnVec *out, int min_len,
     char *fn_src = (char *)malloc(span + 1);
     if (!fn_src)
       continue;
-    memcpy(fn_src, txt + found->start_offset, span);
+    memmove(fn_src, txt + found->start_offset, span);
     fn_src[span] = '\0';
     int norm_len = 0;
     char *norm = dupe_normalize_c_body(fn_src, &norm_len);
@@ -3716,7 +4206,7 @@ static int audit_wants(const char *mode, const char *section) {
     char token[64];
     if (len >= sizeof(token))
       len = sizeof(token) - 1;
-    memcpy(token, start, len);
+    memmove(token, start, len);
     token[len] = '\0';
     if (audit_wants_one(token, section))
       return 1;
@@ -3905,7 +4395,7 @@ static int audit_line_legacy_calls(const char *line) {
     size_t n = end - start;
     if (n >= sizeof(name))
       n = sizeof(name) - 1;
-    memcpy(name, line + start, n);
+    memmove(name, line + start, n);
     name[n] = '\0';
     for (int k = 0; names[k]; k++) {
       if (strcmp(name, names[k]) == 0) {
@@ -3996,7 +4486,7 @@ static int audit_line_zero_arg_method_properties(const char *line) {
     size_t name_n = end - start;
     if (name_n >= sizeof(name))
       name_n = sizeof(name) - 1;
-    memcpy(name, line + start, name_n);
+    memmove(name, line + start, name_n);
     name[name_n] = '\0';
     if (!audit_method_property_name(name)) {
       i = end ? end - 1 : start;
@@ -4365,7 +4855,7 @@ static int audit_fn_family_key(const char *name, char *key, size_t key_sz) {
       continue;
     if (n + 3 >= key_sz)
       n = key_sz - 4;
-    memcpy(key, name, n);
+    memmove(key, name, n);
     key[n++] = '_';
     key[n++] = '*';
     key[n] = '\0';
@@ -4768,7 +5258,7 @@ static int audit_repeated_line(StrVec *seen, const char *raw) {
     return 0;
   if (n >= sizeof(tmp))
     n = sizeof(tmp) - 1;
-  memcpy(tmp, s, n);
+  memmove(tmp, s, n);
   tmp[n] = '\0';
   for (size_t i = 0; i < seen->len; i++) {
     if (strcmp(seen->items[i], tmp) == 0)
@@ -4930,7 +5420,7 @@ static int audit_simple_free_arg(const char *raw, char *arg, size_t arg_sz, int 
   size_t n = (size_t)(b - a);
   if (n >= arg_sz)
     n = arg_sz - 1;
-  memcpy(arg, a, n);
+  memmove(arg, a, n);
   arg[n] = '\0';
   if (col_out) {
     const char *raw_s = lstrip_ws(raw);
@@ -5337,7 +5827,7 @@ static void audit_copy_cstr(char *dst, size_t dst_sz, const char *src) {
   size_t n = strlen(src);
   if (n >= dst_sz)
     n = dst_sz - 1;
-  memcpy(dst, src, n);
+  memmove(dst, src, n);
   dst[n] = '\0';
 }
 
@@ -7970,7 +8460,7 @@ static void audit_collect_calls_line(StrVec *out, const char *line) {
     size_t n = end - start;
     if (n >= sizeof(name))
       n = sizeof(name) - 1;
-    memcpy(name, line + start, n);
+    memmove(name, line + start, n);
     name[n] = '\0';
     const char *dot = strrchr(name, '.');
     const char *base = dot ? dot + 1 : name;
@@ -8582,8 +9072,6 @@ static int run_audit_simple(StrVec *paths, const char *mode, int json_mode, int 
     free(tids);
   }
 
-
-
   qsort(files.items, files.len, sizeof(FilePressure), cmp_file_score);
   qsort(functions.items, functions.len, sizeof(FunctionPressure), cmp_fn_score);
   qsort(calls.items, calls.len, sizeof(CallSeq), cmp_callseq_count);
@@ -8630,7 +9118,7 @@ static int run_audit_simple(StrVec *paths, const char *mode, int json_mode, int 
       if (files.len) {
         copy = (FilePressure *)malloc(files.len * sizeof(FilePressure));
         if (copy) {
-          memcpy(copy, files.items, files.len * sizeof(FilePressure));
+          memmove(copy, files.items, files.len * sizeof(FilePressure));
           size_rank.items = copy;
           qsort(size_rank.items, size_rank.len, sizeof(FilePressure), cmp_file_size);
           nyt_subheading("Top Files By Size");
@@ -8643,7 +9131,7 @@ static int run_audit_simple(StrVec *paths, const char *mode, int json_mode, int 
       if (functions.len) {
         FunctionPressure *copy_fn = (FunctionPressure *)malloc(functions.len * sizeof(FunctionPressure));
         if (copy_fn) {
-          memcpy(copy_fn, functions.items, functions.len * sizeof(FunctionPressure));
+          memmove(copy_fn, functions.items, functions.len * sizeof(FunctionPressure));
           FunctionPressureVec line_rank = {copy_fn, functions.len, functions.len};
           qsort(line_rank.items, line_rank.len, sizeof(FunctionPressure), cmp_fn_lines);
           nyt_subheading("Longest Functions");
@@ -8657,7 +9145,7 @@ static int run_audit_simple(StrVec *paths, const char *mode, int json_mode, int 
       if (files.len) {
         copy_files = (FilePressure *)malloc(files.len * sizeof(FilePressure));
         if (copy_files) {
-          memcpy(copy_files, files.items, files.len * sizeof(FilePressure));
+          memmove(copy_files, files.items, files.len * sizeof(FilePressure));
           FilePressureVec type_files = {copy_files, files.len, files.len};
           qsort(type_files.items, type_files.len, sizeof(FilePressure), cmp_file_types);
           nyt_subheading("Top Files By Type Pressure");
@@ -8668,7 +9156,7 @@ static int run_audit_simple(StrVec *paths, const char *mode, int json_mode, int 
       if (functions.len) {
         FunctionPressure *copy_fn = (FunctionPressure *)malloc(functions.len * sizeof(FunctionPressure));
         if (copy_fn) {
-          memcpy(copy_fn, functions.items, functions.len * sizeof(FunctionPressure));
+          memmove(copy_fn, functions.items, functions.len * sizeof(FunctionPressure));
           FunctionPressureVec type_fns = {copy_fn, functions.len, functions.len};
           qsort(type_fns.items, type_fns.len, sizeof(FunctionPressure), cmp_fn_types);
           nyt_subheading("Top Functions By Type Pressure");
@@ -9306,7 +9794,7 @@ static void cloc_fmt_prefix_char(char prefix, int value, char *out, size_t out_s
   size_t copy_n = nn;
   if (copy_n > out_sz - 2)
     copy_n = out_sz - 2;
-  memcpy(out + 1, n, copy_n);
+  memmove(out + 1, n, copy_n);
   out[1 + copy_n] = '\0';
 }
 

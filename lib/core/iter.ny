@@ -106,14 +106,10 @@ fn reduce(seq xs, any init, fnptr fn2) any {
 
 fn sum(seq xs, any start=0) any {
    "Returns the sum of all elements in `xs`, optionally starting with `start`."
-   mut total = start
-   def n = _iter_seq_len(xs, "sum")
-   mut i = 0
-   while i < n {
-      total = total + xs[i]
-      i += 1
-   }
-   total
+   ; Reuse fold's dynamic callback bridge so raw list slots are normalized at
+   ; exactly one ABI boundary. Direct `any + raw-slot` arithmetic can treat an
+   ; odd raw integer as an already-tagged value.
+   fold(xs, start, fn(acc, value) { acc + value })
 }
 
 fn each(seq xs, fnptr fn1) any {
@@ -148,14 +144,14 @@ fn first(seq xs, any default=0) any {
    "Returns the first item in `xs`, or `default` for an empty sequence."
    def n = _iter_seq_len(xs, "first")
    if n <= 0 { return default }
-   __tbuf_index_any(xs, 0)
+   __tbuf_index_any_raw(xs, 0)
 }
 
 fn last(seq xs, any default=0) any {
    "Returns the last item in `xs`, or `default` for an empty sequence."
    def n = _iter_seq_len(xs, "last")
    if n <= 0 { return default }
-   __tbuf_index_any(xs, (n - 1) * 2 + 1)
+   __tbuf_index_any_raw(xs, n - 1)
 }
 
 @returns_owned
@@ -265,7 +261,7 @@ fn mapcat(fnptr fn1, seq xs) list {
    mut total = 0
    mut i = 0
    while i < n {
-      def r = fn1(xs[i])
+      def r = fn1(__tbuf_index_any_raw(xs, i))
       mapped = mapped.append(r)
       if _iter_is_seq(r) { total += r.len } else { total += 1 }
       i += 1
@@ -338,8 +334,11 @@ fn chunk(seq xs, int size) list {
       mut part = list(stop - i)
       mut j = i
       while j < stop {
-         _list_set(part, j - i,
-            __any_to_i64(__load_item_any(xs, j * 2 + 1)))
+         ; `__tbuf_index_any_raw` takes the native index directly.  The old
+         ; `__load_item_any(..., j * 2 + 1)` spelling mixed the tagged public
+         ; ABI with this raw loop index, so chunking read the next element and
+         ; eventually probed past the end of the source list.
+         _list_set(part, j - i, __tbuf_index_any_raw(xs, j))
          j += 1
       }
       _list_finish(part, stop - i)
@@ -501,7 +500,8 @@ fn map(seq xs, fnptr fn1) any {
    mut out = list(n)
    mut i = 0
    while i < n {
-      _list_set(out, i, fn1(xs[i]))
+      ; Dynamic callbacks receive canonical values; ranges store raw indices.
+      _list_set(out, i, fn1(__tbuf_index_any_raw(xs, i)))
       i += 1
    }
    _iter_finish_like(xs, out, n)

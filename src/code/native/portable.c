@@ -235,6 +235,46 @@ static const char *ny_port_cmp_name(nyir_cmp_t cmp) {
   return "eq";
 }
 
+static bool ny_port_bswap(ny_port_ctx_t *c, const nyir_inst_t *in,
+                           bool is32) {
+  if (!ny_port_load_value(c, c->tmp0, in->a))
+    return false;
+  switch (c->kind) {
+  case NY_PORT_BPF:
+    if (!ny_native_printf(c->w, "\t%s = be%d %s\n", c->tmp0,
+                          is32 ? 32 : 64, c->tmp0))
+      return false;
+    break;
+  case NY_PORT_MIPS:
+    if (is32) {
+      if (!ny_native_printf(c->w, "\twsbh\t%s, %s\n\trotr\t%s, %s, 16\n",
+                            c->tmp0, c->tmp0, c->tmp0, c->tmp0))
+        return false;
+    } else if (!ny_native_printf(c->w,
+                                 "\tdsbh\t%s, %s\n\tdshd\t%s, %s\n",
+                                 c->tmp0, c->tmp0, c->tmp0, c->tmp0))
+      return false;
+    break;
+  case NY_PORT_POWERPC:
+    if (!ny_native_printf(c->w, "\t%s\t%s, %s\n", is32 ? "brw" : "brd",
+                          c->tmp0, c->tmp0))
+      return false;
+    break;
+  case NY_PORT_AVR:
+    if (!ny_native_printf(c->w, "\tcall\t__ny_avr_bswap%d\n",
+                          is32 ? 32 : 64))
+      return false;
+    break;
+  case NY_PORT_WASM:
+    /* The portable WAT backend uses a helper until scalar bswap is in core wasm. */
+    if (!ny_native_printf(c->w, "\tcall $__ny_wasm_bswap%d\n",
+                          is32 ? 32 : 64))
+      return false;
+    break;
+  }
+  return ny_port_store_value(c, in->dst, c->tmp0);
+}
+
 static bool ny_port_cmp(ny_port_ctx_t *c, const nyir_inst_t *in) {
   if (!ny_port_load_value(c, c->tmp0, in->a) ||
       !ny_port_load_value(c, c->tmp1, in->b))
@@ -408,6 +448,10 @@ static bool ny_port_emit_inst(ny_port_ctx_t *c, const nyir_inst_t *in) {
                          "i64.rotr");
   case NYIR_ROR32_I64:
     return false;
+  case NYIR_BSWAP_I64:
+    return ny_port_bswap(c, in, false);
+  case NYIR_BSWAP32_I64:
+    return ny_port_bswap(c, in, true);
   case NYIR_CMP_I64:
     return ny_port_cmp(c, in);
   case NYIR_LABEL:

@@ -241,7 +241,7 @@ static bool mach_i64(ny_x64_mach_enc_t *e, int64_t v) {
  * them live avoids unnecessary spill homes.  Functions containing a call use
  * only the ABI-stable first five colors.
  */
-static const int mach_color_preg[] = {12, 13, 14, 15, 3, 6, 7};
+static const int mach_color_preg[] = {12, 13, 14, 15, 3, 6, 7, 8, 9, 10, 11};
 #define MIR_CALLEE_COLOR_N 5
 #define MIR_COLOR_N ((int)(sizeof(mach_color_preg) / sizeof(mach_color_preg[0])))
 /*
@@ -530,7 +530,6 @@ static int mach_vreg_preg(const ny_x64_mach_enc_t *e, uint32_t vreg) {
     return -1;
   return mach_color_preg[seg->color];
 }
-
 
 static const ny_mach_live_segment_t *mach_segment_at(
     const ny_x64_mach_enc_t *e, uint32_t vreg, size_t inst) {
@@ -937,10 +936,15 @@ static bool mach_flush_colored_to_home(ny_x64_mach_enc_t *e) {
   for (uint32_t v = 0; v < e->colors_len; ++v) {
     if (!e->color_seeded[v])
       continue;
-    if (mach_vreg_used_in_later_block(e, v))
-      continue;
-    if (mach_vreg_has_ret_use(e, v))
-      continue;
+    /*
+     * A call/fixed-register barrier may split a live range and mark the
+     * successor segment for reload even when the value is also live in a
+     * later CFG block (or eventually returned).  In that case the canonical
+     * home is exactly the hand-off between segments.  Skipping the store here
+     * leaves the successor reload reading stale data.  Flush every resident
+     * colored value; callee-saved physical registers may survive the call, but
+     * the allocator's reload contract still requires the home to be current.
+     */
     const ny_mach_live_segment_t *seg = mach_segment_at(e, v, e->cur_inst);
     if (!seg || seg->color < 0) {
       e->color_seeded[v] = false;
@@ -956,7 +960,6 @@ static bool mach_flush_colored_to_home(ny_x64_mach_enc_t *e) {
     mach_rax_invalidate(e);
   return true;
 }
-
 
 static bool mach_commit_vreg(ny_x64_mach_enc_t *e, const ny_mach_operand_t *dst,
                             int off) {
@@ -1649,6 +1652,8 @@ static bool mach_use_requires_home(const ny_mach_func_t *m,
     case NY_MACH_SAR:
     case NY_MACH_ROR:
     case NY_MACH_ROR32:
+    case NY_MACH_BSWAP64:
+    case NY_MACH_BSWAP32:
     case NY_MACH_CMP:
     case NY_MACH_RET:
       /*
@@ -1870,7 +1875,7 @@ static bool mach_store_xmm0_v128(ny_x64_mach_enc_t *e, int off) {
 }
 
 /*
- * ── ymm (256-bit VEX) helpers for V256_I64 fast path ───────────────
+ * ymm (256-bit VEX) helpers for V256_I64 fast path
  */
 
 /*
@@ -2411,7 +2416,7 @@ static bool mach_vector_binop(ny_x64_mach_enc_t *e, const ny_mach_inst_t *in,
 }
 
 /*
- * ── V256_I64 ymm fast path wrappers ─────────────────────────────────
+ * V256_I64 ymm fast path wrappers
  */
 
 /*
@@ -3026,7 +3031,6 @@ static bool mach_sse_op_mem(ny_x64_mach_enc_t *e, int off, bool f32, unsigned op
          mach_u8(e, 0x85) && mach_i32(e, off);
 }
 
-
 static bool ny_mach_profile_hot_loop_block(const ny_mach_func_t *mach,
                                            uint32_t block) {
   if (!mach || block >= mach->block_len)
@@ -3108,15 +3112,10 @@ bool ny_native_x64_regalloc_metrics(const ny_mach_func_t *mach,
     return false;
 
   size_t gp_color_count = MIR_COLOR_N;
-  for (size_t i = 0; i < mach->inst_len; ++i) {
-    if (mach->insts[i].opcode == NY_MACH_CALL) {
-      gp_color_count = MIR_CALLEE_COLOR_N;
-      break;
-    }
-  }
 
   ny_mach_regalloc_t a = {0};
-  if (mach->vreg_len && !ny_mach_regalloc_build(mach, gp_color_count, &a))
+  if (mach->vreg_len && !ny_mach_regalloc_build_callee_saved_gpr(
+                           mach, gp_color_count, &a))
     return false;
   ny_mach_regalloc_summarize(mach, &a, mach->inst_len, gpr);
   ny_mach_regalloc_free(&a);
@@ -3211,14 +3210,7 @@ static bool mach_encode_function(ny_x64_mach_enc_t *e, const char *name,
     }
   }
   e->force_stack_reads = e->vec_fast_path || has_pointer_constructor_call;
-  int gp_color_count = MIR_CALLEE_COLOR_N;
-  for (size_t i = 0; i < mach->inst_len; ++i) {
-    if (mach->insts[i].opcode == NY_MACH_CALL) {
-      gp_color_count = MIR_CALLEE_COLOR_N;
-      break;
-    }
-    gp_color_count = MIR_COLOR_N;
-  }
+  int gp_color_count = MIR_COLOR_N;
   e->colors_len = mach->vreg_len;
   if (mach->vreg_len) {
     if (mach->vreg_len <= MACH_SEEDED_STACK_MAX) {
@@ -3228,7 +3220,8 @@ static bool mach_encode_function(ny_x64_mach_enc_t *e, const char *name,
       e->color_seeded = calloc(mach->vreg_len, sizeof(*e->color_seeded));
     }
     if (!e->color_seeded ||
-        !ny_mach_regalloc_build(mach, gp_color_count, &e->regalloc)) {
+        !ny_mach_regalloc_build_callee_saved_gpr(
+            mach, gp_color_count, &e->regalloc)) {
       if (e->color_seeded && e->color_seeded != color_seeded_stack)
         free(e->color_seeded);
       e->color_seeded = NULL;
@@ -3239,6 +3232,18 @@ static bool mach_encode_function(ny_x64_mach_enc_t *e, const char *name,
       int c = e->regalloc.segments[i].color;
       if (c >= 0 && c < MIR_CALLEE_COLOR_N)
         save_mask |= 1u << c;
+    }
+    if (getenv("NY_DUMP_REGALLOC")) {
+      fprintf(stderr, "[x64-regalloc] %s vregs=%zu segments=%zu\n",
+              name ? name : "fn", mach->vreg_len, e->regalloc.segment_len);
+      for (size_t i = 0; i < e->regalloc.segment_len; ++i) {
+        const ny_mach_live_segment_t *seg = &e->regalloc.segments[i];
+        fprintf(stderr,
+                "  v%u b%u [%zu,%zu] color=%d reload=%d spill=%d carried=%d home?\n",
+                seg->vreg, seg->block, seg->start, seg->end, seg->color,
+                (int)seg->reload, (int)seg->spill, (int)seg->carried);
+      }
+      ny_mach_dump(mach, stderr);
     }
   }
   e->fp_colors_len = mach->vreg_len;
@@ -3978,7 +3983,7 @@ static bool mach_encode_function(ny_x64_mach_enc_t *e, const char *name,
           return false;
         if (src_reg != d && !mach_sse_mov_reg(e, d, src_reg, is_f32))
           return false;
-        
+
         if (!mach_sse_op_reg(e, d, d, is_f32, 0x51))
           return false;
 
@@ -3997,6 +4002,21 @@ static bool mach_encode_function(ny_x64_mach_enc_t *e, const char *name,
             !mach_u8(e, 0xd9) ||
             !mach_u8(e, in->opcode == NY_MACH_SIN ? 0xfe : 0xff) ||
             !mach_u8(e, 0xdd) || !mach_u8(e, 0x9d) || !mach_i32(e, dst))
+          return false;
+        break;
+      case NY_MACH_BSWAP64:
+      case NY_MACH_BSWAP32:
+        if (!mach_is_i64(mach, &in->dst) || !mach_is_i64(mach, &in->src0))
+          return mach_err(e, "x64 machine form encode: bswap needs i64 operands");
+        if (!mach_load_op_rax(e, &in->src0))
+          return false;
+        if (in->opcode == NY_MACH_BSWAP64) {
+          if (!mach_rex(e, true, false, false, false))
+            return false;
+        }
+        /* bswap rax/eax; the 32-bit form zero-extends into rax. */
+        if (!mach_u8(e, 0x0f) || !mach_u8(e, 0xc8) ||
+            !mach_store_rax(e, dst))
           return false;
         break;
       case NY_MACH_ADD:
@@ -4507,7 +4527,7 @@ static bool mach_encode_function(ny_x64_mach_enc_t *e, const char *name,
         ny_mach_type_t vt = mach_v128_type(mach, &in->dst);
         unsigned imm = (unsigned)(in->src1.as.imm & 0xff);
         if (e->vec_fast_path) {
-          ny_mach_type_t vt = mach_v128_type(mach, &in->dst);
+          ny_mach_type_t fast_vt = mach_v128_type(mach, &in->dst);
           int assigned = in->dst.kind == NY_MACH_OPERAND_VREG
                              ? mach_vreg_vpreg(e, in->dst.as.reg)
                              : -1;
@@ -4517,7 +4537,7 @@ static bool mach_encode_function(ny_x64_mach_enc_t *e, const char *name,
             return false;
           if (s != d && !mach_vec_mov_reg(e, d, s))
             return false;
-          if (vt == NY_MACH_TYPE_V128_F64) {
+          if (fast_vt == NY_MACH_TYPE_V128_F64) {
             if (!mach_u8(e, 0x66) || !mach_u8(e, 0x0f) || !mach_u8(e, 0xc6) ||
                 !mach_u8(e, 0xc0 | ((d & 7) << 3) | (d & 7)) ||
                 !mach_u8(e, imm & 3))
@@ -4972,8 +4992,12 @@ static bool mach_encode_function(ny_x64_mach_enc_t *e, const char *name,
       case NY_MACH_CALL: {
         if (in->src0.kind != NY_MACH_OPERAND_SYMBOL || !in->src0.as.symbol)
           return mach_err(e, "x64 machine form encode: call needs symbol");
-        if (!mach_flush_colored_to_home(e))
-          return false;
+        /*
+         * GPR colors in call-containing x86-64 functions are restricted to
+         * r12-r15/rbx and saved in the prologue, so ABI calls preserve them.
+         * Keeping them resident avoids a spill/reload pair around every
+         * runtime helper.  FP/vector colors are caller-saved and still flush.
+         */
         if (!mach_flush_float_to_home(e) || !mach_flush_vector_to_home(e))
           return false;
         /*
@@ -5755,7 +5779,6 @@ outline_fail:
   free(results);
   return false;
 
-
 outlined_functions_done:;
   char entry[256];
   snprintf(entry, sizeof(entry), "%s%s",
@@ -6019,6 +6042,8 @@ static bool ny_x64_stencil_fold_helper(const nyir_func_t *fn, const int64_t *arg
       case NYIR_AND_I64: r = a & b; break;
       case NYIR_OR_I64: r = a | b; break;
       case NYIR_XOR_I64: r = a ^ b; break;
+      case NYIR_BSWAP_I64: r = (int64_t)__builtin_bswap64((uint64_t)a); break;
+      case NYIR_BSWAP32_I64: r = (int64_t)(uint32_t)__builtin_bswap32((uint32_t)a); break;
       case NYIR_SHL_I64:
       case NYIR_SAR_I64:
       case NYIR_ROR32_I64:
@@ -6213,6 +6238,8 @@ static bool ny_x64_try_stencil_bundle_impl(
       case NYIR_AND_I64: r = a & b; break;
       case NYIR_OR_I64: r = a | b; break;
       case NYIR_XOR_I64: r = a ^ b; break;
+      case NYIR_BSWAP_I64: r = (int64_t)__builtin_bswap64((uint64_t)a); break;
+      case NYIR_BSWAP32_I64: r = (int64_t)(uint32_t)__builtin_bswap32((uint32_t)a); break;
       case NYIR_SHL_I64:
       case NYIR_SAR_I64:
       case NYIR_ROR32_I64:

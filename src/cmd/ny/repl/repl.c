@@ -837,7 +837,7 @@ void repl_ensure_docs_for_query(doc_list_t *docs, const char *query) {
   if (prefix_len == 0 || prefix_len >= 512)
     return;
   char prefix[512];
-  memcpy(prefix, query, prefix_len);
+  memmove(prefix, query, prefix_len);
   prefix[prefix_len] = '\0';
   for (size_t i = 0; i < g_repl_cg.user_use_modules.len; ++i) {
     const char *used = g_repl_cg.user_use_modules.data[i];
@@ -1000,7 +1000,7 @@ static int repl_lazy_append_bytes(char **out, size_t *len, size_t *cap,
   if (!repl_reserve_char_capacity(out, cap, need, 256))
     return 0;
   if (src_len)
-    memcpy(*out + *len, src, src_len);
+    memmove(*out + *len, src, src_len);
   *len += src_len;
   (*out)[*len] = '\0';
   return 1;
@@ -1014,9 +1014,9 @@ static int repl_lazy_append_use(char **out, size_t *len, size_t *cap,
   size_t need = *len + 4 + module_len + 1 + 1;
   if (!repl_reserve_char_capacity(out, cap, need, 128))
     return 0;
-  memcpy(*out + *len, "use ", 4);
+  memmove(*out + *len, "use ", 4);
   *len += 4;
-  memcpy(*out + *len, module, module_len);
+  memmove(*out + *len, module, module_len);
   *len += module_len;
   (*out)[(*len)++] = '\n';
   (*out)[*len] = '\0';
@@ -1076,7 +1076,7 @@ static int repl_lazy_read_ident_chain(const char *start, char *out,
       return 0;
     if (segments > 0)
       out[out_len++] = '.';
-    memcpy(out + out_len, seg, seg_len);
+    memmove(out + out_len, seg, seg_len);
     out_len += seg_len;
     out[out_len] = '\0';
     segments++;
@@ -1358,7 +1358,7 @@ static int repl_lazy_import_std_for_source(const char *src, std_mode_t std_mode,
     if (*after != '(')
       continue;
     char name[64];
-    memcpy(name, start, len);
+    memmove(name, start, len);
     name[len] = '\0';
     if (repl_lazy_ident_ignored(name) ||
         repl_seen_name((const char *)seen, sizeof(seen[0]), seen_len, name))
@@ -1542,7 +1542,7 @@ static bool repl_snapshot_identity_matches(const char *src, const char *payload)
   if (strlen(fingerprint) < 17 || fingerprint[16] != '\n')
     return false;
   char hex[17];
-  memcpy(hex, fingerprint, sizeof(hex) - 1);
+  memmove(hex, fingerprint, sizeof(hex) - 1);
   hex[sizeof(hex) - 1] = '\0';
   char *end = NULL;
   errno = 0;
@@ -1585,9 +1585,9 @@ static char *repl_build_snapshot_image(std_mode_t std_mode) {
   char *out = malloc(header_len + payload_len + (add_newline ? 1 : 0) + 1);
   if (!out)
     return NULL;
-  memcpy(out, header, header_len);
+  memmove(out, header, header_len);
   if (payload_len)
-    memcpy(out + header_len, payload, payload_len);
+    memmove(out + header_len, payload, payload_len);
   if (add_newline)
     out[header_len + payload_len++] = '\n';
   out[header_len + payload_len] = '\0';
@@ -2204,8 +2204,8 @@ static char *repl_body_with_auto_main(const char *body) {
   if (!out)
     return NULL;
   if (body_len)
-    memcpy(out, body, body_len);
-  memcpy(out + body_len, call, call_len + 1);
+    memmove(out, body, body_len);
+  memmove(out + body_len, call, call_len + 1);
   return out;
 }
 
@@ -2254,9 +2254,9 @@ static int repl_eval_snippet(const char *full_input, int is_stmt, char *an,
       free(eval_input_owned);
       return 1;
     }
-    memcpy(combined, g_repl_user_source, prior_len);
+    memmove(combined, g_repl_user_source, prior_len);
     combined[prior_len] = '\n';
-    memcpy(combined + prior_len + 1, full_input, input_len + 1);
+    memmove(combined + prior_len + 1, full_input, input_len + 1);
     if (!repl_native_only()) {
       repl_shutdown_engine();
       repl_init_engine(std_mode, docs);
@@ -3279,7 +3279,7 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
       }
       input_buffer = grown;
       input_buffer[old_len] = '\n';
-      memcpy(input_buffer + old_len + 1, line, line_len + 1);
+      memmove(input_buffer + old_len + 1, line, line_len + 1);
       free(line);
     } else {
       input_buffer = line;

@@ -18,7 +18,7 @@ static char *parse_dotted_ident_owned(parser_t *p, const char *first_err,
         return NULL;
       }
       int n = snprintf(buf, cap, "${%.*s}", (int)id_tok.len, id_tok.lexeme);
-      size_t len = (size_t)n;
+      if (n < 0) n = 0; size_t len = (size_t)n;
       while (p->cur.kind == NY_T_IDENT &&
              p->cur.col == (int)(p->prev.col + p->prev.len)) {
         if (len + p->cur.len + 1 > cap) {
@@ -1015,6 +1015,24 @@ static size_t parse_align_attr(parser_t *p, const char *kind) {
   return (size_t)val;
 }
 
+static const char *parse_func_return_type(parser_t *p) {
+  if (!parser_token_can_start_type_ref(p->cur))
+    return NULL;
+  parser_t probe = *p;
+  probe.quiet = true;
+  const char *type = parse_type_ref(&probe, NULL);
+  if (!type)
+    return NULL;
+  token_kind k = probe.cur.kind;
+  if (parser_kind_after_return_type(k))
+    return parse_type_ref(p, "expected return type");
+  if (k == NY_T_IDENT &&
+      ((probe.cur.len == 8 && strncmp(probe.cur.lexeme, "requires", 8) == 0) ||
+       (probe.cur.len == 9 && strncmp(probe.cur.lexeme, "decreases", 9) == 0)))
+    return parse_type_ref(p, "expected return type");
+  return NULL;
+}
+
 static stmt_t *parse_func(parser_t *p, ny_attribute_list attrs) {
   token_t tok = p->cur;
   parser_expect(p, NY_T_FN, "'fn'", NULL);
@@ -1105,7 +1123,7 @@ static stmt_t *parse_func(parser_t *p, ny_attribute_list attrs) {
       (void)parse_type_ref(p, "expected return type");
   } else
     fn_stmt->as.fn.return_type =
-        parser_parse_return_type_suffix(p, parse_type_ref, "expected return type");
+        parse_func_return_type(p);
   if (p->cur.kind == NY_T_ARROW) {
     parser_error(p, p->cur, "function return types do not use '->'",
                  "write 'fn name(params) RetType { ... }'");
@@ -1129,6 +1147,40 @@ static stmt_t *parse_func(parser_t *p, ny_attribute_list attrs) {
   }
   fn_stmt->as.fn.is_extern = is_ext;
   fn_stmt->as.fn.link_name = link_name;
+  for (size_t i = 0; i < attrs.len; i++) {
+    if (strcmp(attrs.data[i].name, "total") == 0) {
+      fn_stmt->as.fn.attr_total = true;
+      break;
+    }
+  }
+  for (;;) {
+    if (p->cur.kind == NY_T_IDENT && p->cur.len == 8 &&
+        strncmp(p->cur.lexeme, "requires", 8) == 0) {
+      parser_advance(p);
+      if (fn_stmt->as.fn.requires_cond) {
+        parser_error(p, p->cur, "duplicate 'requires' precondition", NULL);
+        return NULL;
+      }
+      fn_stmt->as.fn.requires_cond = p_parse_expr(p, 0);
+      continue;
+    }
+    if (p->cur.kind == NY_T_IDENT && p->cur.len == 9 &&
+        strncmp(p->cur.lexeme, "decreases", 9) == 0) {
+      parser_advance(p);
+      if (fn_stmt->as.fn.decreases_expr) {
+        parser_error(p, p->cur, "duplicate 'decreases' measure", NULL);
+        return NULL;
+      }
+      if (parser_match(p, NY_T_LPAREN)) {
+        fn_stmt->as.fn.decreases_expr = p_parse_expr(p, 0);
+        parser_expect(p, NY_T_RPAREN, "')' after decreases measure", NULL);
+      } else {
+        fn_stmt->as.fn.decreases_expr = p_parse_expr(p, 0);
+      }
+      continue;
+    }
+    break;
+  }
   if (parser_match(p, NY_T_ASSIGN)) {
     token_t body_tok = p->prev;
     expr_t *e = p_parse_expr(p, 0);
@@ -1149,7 +1201,8 @@ static stmt_t *parse_func(parser_t *p, ny_attribute_list attrs) {
     s->as.fn.src_end = p->prev.lexeme + p->prev.len;
     return s;
   }
-  if (parser_match(p, NY_T_SEMI) || (is_ext && p->cur.kind != NY_T_LBRACE)) {
+  if (parser_match(p, NY_T_SEMI) || (is_ext && p->cur.kind != NY_T_LBRACE) ||
+      p->cur.kind == NY_T_RBRACE || p->cur.kind == NY_T_EOF) {
     stmt_t *s = fn_stmt;
     s->as.fn.name = name;
     s->as.fn.params = params;
@@ -1303,7 +1356,14 @@ static stmt_t *parse_impl_stmt(parser_t *p) {
   token_t tok = p->cur;
   parser_advance(p);
   ny_type_param_list owners = {0};
-  const char *type_name = parse_type_ref(p, "expected type name after 'impl'");
+  const char *first_ref = parse_type_ref(p, "expected type name after 'impl'");
+  const char *trait_name = NULL;
+  if (p->cur.kind == NY_T_FOR) {
+    trait_name = arena_strndup(p->arena, first_ref, strlen(first_ref));
+    parser_advance(p);
+    first_ref = parse_type_ref(p, "expected type name after 'impl' trait 'for'");
+  }
+  const char *type_name = first_ref;
   const char *owner = attached_owner_name(p, type_name);
   if (!type_name || !owner)
     return NULL;
@@ -1319,9 +1379,23 @@ static stmt_t *parse_impl_stmt(parser_t *p) {
   parser_expect(p, NY_T_LBRACE, "'{' after impl type", NULL);
   stmt_t *s = stmt_new(p->arena, NY_S_IMPL, tok);
   s->as.impl.type_name = owner;
+  s->as.impl.trait_name = trait_name;
   const char *prev_impl_owner = p->current_impl_owner;
   p->current_impl_owner = owner;
   while (p->cur.kind != NY_T_RBRACE && p->cur.kind != NY_T_EOF) {
+    if (p->cur.kind == NY_T_IDENT && p->cur.len == 3 &&
+        strncmp(p->cur.lexeme, "law", 3) == 0) {
+      parser_advance(p);
+      parser_expect(p, NY_T_LBRACE, "'{' after 'law'", NULL);
+      expr_t *law = p_parse_expr(p, 0);
+      parser_match(p, NY_T_SEMI);
+      parser_expect(p, NY_T_RBRACE, "'}' after law expr", NULL);
+      if (law)
+        vec_push_arena(p->arena, &s->as.impl.laws, law);
+      parser_match(p, NY_T_COMMA);
+      parser_match(p, NY_T_SEMI);
+      continue;
+    }
     bool is_operator = (p->cur.kind == NY_T_IDENT && p->cur.len == 8 &&
                         strncmp(p->cur.lexeme, "operator", 8) == 0);
     if (is_operator) {
@@ -1334,9 +1408,9 @@ static stmt_t *parse_impl_stmt(parser_t *p) {
     }
     if (p->cur.kind != NY_T_FN && p->cur.kind != NY_T_AT) {
       parser_error(p, p->cur,
-                   "impl blocks only accept attached functions or operators",
+                   "impl blocks only accept attached functions, laws, or operators",
                    "example: impl Vec3 { fn len(self value) f64 { ... } "
-                   "operator + self: self = add }");
+                   "operator + self: self = add; law { add(a, b) == add(b, a) } }");
       parser_sync_stmt_boundary(p);
       if (p->cur.kind == NY_T_RBRACE)
         break;
@@ -2470,7 +2544,12 @@ static stmt_t *parse_enum(parser_t *p) {
   }
   stmt_t *s = stmt_new(p->arena, NY_S_ENUM, tok);
   s->as.enu.name = name;
-  if (parser_match(p, NY_T_LT)) {
+  if (parser_match(p, NY_T_LPAREN)) {
+    s->as.enu.is_indexed_family = true;
+    const char *idx_type = parse_type_ref(p, "expected index parameter type in enum family");
+    s->as.enu.index_param_name = idx_type;
+    parser_expect(p, NY_T_RPAREN, "')' after enum index parameter", NULL);
+  } else if (parser_match(p, NY_T_LT)) {
     while (p->cur.kind != NY_T_GT && p->cur.kind != NY_T_EOF) {
       if (p->cur.kind != NY_T_IDENT) {
         parser_error(p, p->cur, "expected enum type parameter name", NULL);
@@ -2505,13 +2584,14 @@ static stmt_t *parse_enum(parser_t *p) {
         field.type_name = parse_type_ref(p, "expected enum payload field type");
 
         parser_match(p, NY_T_COLON);
-        if (p->cur.kind != NY_T_IDENT) {
-          parser_error(p, p->cur, "expected enum payload field name",
-                       "write enum payload fields as `Type name`, for example `Circle(int radius)`");
-          break;
+        if (p->cur.kind == NY_T_IDENT) {
+          field.name = arena_strndup(p->arena, p->cur.lexeme, p->cur.len);
+          parser_advance(p);
+        } else {
+          char auto_name[32];
+          snprintf(auto_name, sizeof(auto_name), "_%zu", item.fields.len);
+          field.name = arena_strndup(p->arena, auto_name, strlen(auto_name));
         }
-        field.name = arena_strndup(p->arena, p->cur.lexeme, p->cur.len);
-        parser_advance(p);
         for (size_t i = 0; i < item.fields.len; i++) {
           if (strcmp(item.fields.data[i].name, field.name) == 0) {
             parser_error(p, tok, "duplicate enum payload field", field.name);
@@ -2536,6 +2616,80 @@ static stmt_t *parse_enum(parser_t *p) {
       break;
   }
   parser_expect(p, NY_T_RBRACE, "'}'", NULL);
+  return s;
+}
+
+static stmt_t *parse_refine_stmt(parser_t *p) {
+  token_t tok = p->cur;
+  parser_expect(p, NY_T_IDENT, "'refine'", NULL);
+  const char *name = parse_qualified_name(p);
+  if (!name)
+    return NULL;
+  if (p->cur.kind == NY_T_ASSIGN) {
+    parser_advance(p);
+  } else if (tok_is_ident_text(p->cur, "from")) {
+    parser_advance(p);
+  } else {
+    parser_error(p, p->cur, "expected '=' or 'from' after refine name",
+                 "write 'refine Even = int where (v) { ... }' or 'refine Even from int where (v) { ... }'");
+    return NULL;
+  }
+  const char *base_type = parse_type_ref(p, "expected base type after '=' or 'from'");
+  if (!tok_is_ident_text(p->cur, "where")) {
+    parser_error(p, p->cur, "expected 'where' after refine base type",
+                 "write 'refine Even = int where (v) { v % 2 == 0 }'");
+    return NULL;
+  }
+  parser_advance(p);
+  parser_expect(p, NY_T_LPAREN, "'(' after where", NULL);
+  const char *param = NULL;
+  if (p->cur.kind != NY_T_IDENT) {
+    parser_error(p, p->cur, "expected refinement predicate variable",
+                 "write 'refine Even = int where (v) { v % 2 == 0 }'");
+    return NULL;
+  }
+  param = arena_strndup(p->arena, p->cur.lexeme, p->cur.len);
+  parser_advance(p);
+  parser_expect(p, NY_T_RPAREN, "')' after predicate variable", NULL);
+  parser_expect(p, NY_T_LBRACE, "'{' before refinement predicate", NULL);
+  expr_t *predicate = p_parse_expr(p, 0);
+  parser_match(p, NY_T_SEMI);
+  parser_expect(p, NY_T_RBRACE, "'}' after refinement predicate", NULL);
+  if (!base_type || !predicate)
+    return NULL;
+  stmt_t *s = stmt_new(p->arena, NY_S_REFINE, tok);
+  s->as.refine.name = name;
+  s->as.refine.base_type = base_type;
+  s->as.refine.param = param;
+  s->as.refine.predicate = predicate;
+  return s;
+}
+
+static stmt_t *parse_trait(parser_t *p) {
+  token_t tok = p->cur;
+  parser_advance(p);
+  const char *name = parse_qualified_name(p);
+  if (!name)
+    return NULL;
+  parser_expect(p, NY_T_LBRACE, "'{' after trait name", NULL);
+  stmt_t *s = stmt_new(p->arena, NY_S_TRAIT, tok);
+  s->as.trait.name = name;
+  while (p->cur.kind != NY_T_RBRACE && p->cur.kind != NY_T_EOF) {
+    if (p->cur.kind != NY_T_FN && p->cur.kind != NY_T_AT) {
+      parser_error(p, p->cur, "trait bodies only accept method signatures",
+                   "example: trait Eq { fn eq(self value, self other) bool }");
+      parser_sync_stmt_boundary(p);
+      if (p->cur.kind == NY_T_RBRACE)
+        break;
+      continue;
+    }
+    stmt_t *method = parse_attached_method(p, NULL);
+    if (method)
+      vec_push_arena(p->arena, &s->as.trait.methods, method);
+    parser_match(p, NY_T_COMMA);
+    parser_match(p, NY_T_SEMI);
+  }
+  parser_expect(p, NY_T_RBRACE, "'}' after trait body", NULL);
   return s;
 }
 

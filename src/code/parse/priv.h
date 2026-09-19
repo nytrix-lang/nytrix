@@ -167,7 +167,12 @@ static inline bool parser_token_can_start_type_ref(token_t tok) {
 }
 
 static inline bool parser_kind_after_return_type(token_kind kind) {
+  /* `match`, `if`, and `comptime` are unambiguous expression-body starters.
+   * Accept them after a return type just like `{`/`=` so forms such as
+   * `fn decode(i32 op) str match op { ... }` do not misparse `str` as the
+   * function body and leave `match op` at module scope. */
   return kind == NY_T_LBRACE || kind == NY_T_ASSIGN || kind == NY_T_SEMI ||
+         kind == NY_T_MATCH || kind == NY_T_IF || kind == NY_T_COMPTIME ||
          kind == NY_T_AS || kind == NY_T_FN || kind == NY_T_RBRACE ||
          kind == NY_T_EOF;
 }

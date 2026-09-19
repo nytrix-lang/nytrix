@@ -81,10 +81,10 @@ static void ny_ast_require(bool cond, const char *phase, token_t tok, const char
   va_start(ap, fmt);
   vsnprintf(detail, sizeof(detail), fmt, ap);
   va_end(ap);
-  ny_compiler_assert_fail(__FILE__, __LINE__, __func__, "ast invariant",
-                          "%s:%d:%d ast[%s]: %s",
-                          tok.filename ? tok.filename : "<unknown>", tok.line, tok.col,
-                          phase ? phase : "unknown", detail);
+  ny_compiler_invariant_fail(__FILE__, __LINE__, __func__, "ast invariant",
+                             tok.filename, tok.line, tok.col,
+                             phase ? phase : "parser/ast", "malformed ast",
+                             "%s", detail);
 }
 
 static void ny_ast_verify_vec_storage(const void *data, size_t len, size_t cap,
@@ -200,7 +200,7 @@ static void ny_ast_verify_expr(expr_t *e, const char *phase) {
   ny_ast_require(e != NULL, phase, (token_t){0}, "null expression");
   if (!e)
     return;
-  ny_ast_require(e->kind >= NY_E_IDENT && e->kind <= NY_E_TRY, phase, e->tok,
+  ny_ast_require(e->kind >= NY_E_IDENT && e->kind <= NY_E_EXISTS, phase, e->tok,
                  "expr kind out of range: %d", (int)e->kind);
   switch (e->kind) {
   case NY_E_IDENT:
@@ -376,6 +376,13 @@ static void ny_ast_verify_expr(expr_t *e, const char *phase) {
     ny_ast_require(e->as.splice.expr != NULL, phase, e->tok, "splice missing expr");
     ny_ast_verify_expr(e->as.splice.expr, phase);
     return;
+  case NY_E_EXISTS:
+    ny_ast_require(e->as.exists.var && *e->as.exists.var, phase, e->tok,
+                   "exists missing binder");
+    ny_ast_require(e->as.exists.body != NULL, phase, e->tok,
+                   "exists missing body");
+    ny_ast_verify_expr(e->as.exists.body, phase);
+    return;
   }
 }
 
@@ -393,7 +400,7 @@ static void ny_ast_verify_stmt(stmt_t *s, const char *phase) {
   ny_ast_require(s != NULL, phase, (token_t){0}, "null statement");
   if (!s)
     return;
-  ny_ast_require(s->kind >= NY_S_BLOCK && s->kind <= NY_S_IMPL, phase, s->tok,
+  ny_ast_require(s->kind >= NY_S_BLOCK && s->kind <= NY_S_TRAIT, phase, s->tok,
                  "stmt kind out of range: %d", (int)s->kind);
   ny_ast_verify_vec_storage(s->attributes.data, s->attributes.len, s->attributes.cap,
                             phase, s->tok, "attributes");
@@ -511,6 +518,10 @@ static void ny_ast_verify_stmt(stmt_t *s, const char *phase) {
       ny_ast_require(*s->as.fn.link_name, phase, s->tok, "fn has empty link name");
     ny_ast_verify_params(&s->as.fn.params, phase, s->tok, "fn");
     ny_ast_verify_stmt(s->as.fn.body, phase);
+    if (s->as.fn.requires_cond)
+      ny_ast_verify_expr(s->as.fn.requires_cond, phase);
+    if (s->as.fn.decreases_expr)
+      ny_ast_verify_expr(s->as.fn.decreases_expr, phase);
     return;
   case NY_S_LEMMA:
     ny_ast_require(s->as.lemma.name && *s->as.lemma.name, phase, s->tok, "lemma missing name");
@@ -627,6 +638,20 @@ static void ny_ast_verify_stmt(stmt_t *s, const char *phase) {
   case NY_S_IMPL:
     ny_ast_require(s->as.impl.type_name && *s->as.impl.type_name, phase, s->tok, "impl missing type");
     ny_ast_verify_stmt_list(&s->as.impl.methods, phase, s->tok);
+    ny_ast_verify_expr_list(&s->as.impl.laws, phase, s->tok);
+    return;
+  case NY_S_REFINE:
+    ny_ast_require(s->as.refine.name && *s->as.refine.name, phase, s->tok, "refine missing name");
+    ny_ast_require(s->as.refine.base_type && *s->as.refine.base_type, phase, s->tok,
+                   "refine missing base type");
+    ny_ast_require(s->as.refine.param && *s->as.refine.param, phase, s->tok,
+                   "refine missing param");
+    ny_ast_require(s->as.refine.predicate != NULL, phase, s->tok, "refine missing predicate");
+    ny_ast_verify_expr(s->as.refine.predicate, phase);
+    return;
+  case NY_S_TRAIT:
+    ny_ast_require(s->as.trait.name && *s->as.trait.name, phase, s->tok, "trait missing name");
+    ny_ast_verify_stmt_list(&s->as.trait.methods, phase, s->tok);
     return;
   }
 }

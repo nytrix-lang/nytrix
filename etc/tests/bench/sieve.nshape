@@ -13,7 +13,7 @@ shape sieve {
   source ny <<'NY'
 use std.core
 use std.os.time
-def N = 60000
+def N = 6000000
 fn sieve(int n) int {
  if n < 2 { return 0 }
  def size = (n >> 1) + 1
@@ -76,7 +76,7 @@ static int sieve(int n) {
 }
 int main(void) {
     int64_t start = now_ns();
-    int r = sieve(60000);
+    int r = sieve(6000000);
     int64_t end = now_ns();
     printf("checksum=%lld\n", (long long)r);
     if (end <= start) end = start + 1;
@@ -87,7 +87,7 @@ C
   source py <<'PY'
 import time
 
-N = 60000
+N = 6000000
 
 def sieve(n):
     if n < 2:

@@ -201,7 +201,7 @@ static char *ny_pkg_strndup(const char *s, size_t n) {
   char *out = (char *)malloc(n + 1);
   if (!out)
     return NULL;
-  memcpy(out, s, n);
+  for (size_t i = 0; i < n; ++i) out[i] = s[i];
   out[n] = '\0';
   return out;
 }
@@ -1689,7 +1689,6 @@ static char *ny_pkg_resolve_repo_source(const char *source, const ny_pkg_opts_t 
   free(repo_root);
   return candidate;
 }
-
 
 static bool ny_pkg_lock_entry_cache_path(const ny_pkg_lock_entry_t *e,
                                          char *out, size_t out_len) {

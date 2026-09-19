@@ -92,6 +92,41 @@ fn returned_append_list() list {
    out
 }
 
+@consumes(x)
+@allowance(x, 1)
+fn contract_allowance_single(any x, list xs) any {
+   def h = borrow(x)
+   xs[0]
+}
+
+@allowance(x, 0)
+fn contract_allowance_zero(x) int {
+   42
+}
+
+@allowance(x, omega)
+fn contract_allowance_omega(x) int {
+   x + x + x
+}
+
+@allowance(x, 1)
+fn contract_allowance_branch(bool cond, int x) int {
+   if cond {
+      x + 1
+   } else {
+      x + 2
+   }
+}
+
+@allowance(x, 1)
+fn contract_allowance_reassign(x) int {
+   def a = x
+   x = 100
+   def b = x
+   def c = x
+   a + b + c
+}
+
 assert_eq(borrow_keeps_source_live(), 3, "borrow helper preserves source")
 assert_eq(borrow_index_keeps_owner_live(), 8, "indexed borrow helper preserves source")
 assert_eq(borrow_operator_keeps_source_live(), 2, "borrow operator preserves source")
@@ -101,4 +136,10 @@ assert_eq(contract_adopt_moves_owner(), 3, "contract consume helper moves source
 assert_eq(contract_release_is_explicit(), 1, "contract release helper returns value")
 assert_eq(contract_forget_is_explicit(), 1, "contract forget helper returns value")
 assert_eq(to_str(returned_append_list()), "[1, 2, 3]", "returned appended list remains live")
+assert_eq(contract_allowance_single([1, 2], [10, 20]), 10, "allowance single use")
+assert_eq(contract_allowance_zero(123), 42, "allowance zero use")
+assert_eq(contract_allowance_omega(5), 15, "allowance omega use")
+assert_eq(contract_allowance_branch(true, 10), 11, "allowance branch use")
+assert_eq(contract_allowance_branch(false, 10), 12, "allowance branch use alt")
+assert_eq(contract_allowance_reassign(1), 201, "allowance mut reassign")
 print("✓ ownership helpers test passed")

@@ -9,6 +9,8 @@ use std.os.ui.render.gl.constants as gl_constants
 use std.os.ui.render.gl.state as gl_state
 use std.os.ui.render.gl.texture as gl_tex
 
+def _STRIDE = render_shared.VERTEX_STRIDE
+
 fn create_static_buffer(?ptr src_ptr, int count) any {
    "Uploads a packed vertex buffer to an OpenGL VBO."
    if _soft_enabled() {

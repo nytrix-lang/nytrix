@@ -178,7 +178,6 @@ static bool licm_trap_equivalent_read(const nyir_cfg_t *cfg,
   return true;
 }
 
-
 static bool licm_addr_from_tbuf_data(const nyir_func_t *f,
                                      const nyir_value_fact_t *facts,
                                      const int *defs, int addr, int base,
@@ -338,7 +337,6 @@ static bool licm_order_moves(nyir_licm_move_t *moves, size_t move_count) {
   free(ordered);
   return true;
 }
-
 
 /*
  * Hoist one natural loop's currently provable invariants.  Returning after a

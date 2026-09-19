@@ -336,6 +336,12 @@ static bool mach_verify_opcode_shape(const ny_mach_func_t *func,
     return inst->effects == NY_MACH_EFFECT_NONE && mach_is_scalar_value_or_frame(func, &inst->dst) &&
            mach_is_scalar_value_or_frame(func, &inst->src0) && mach_is_none(&inst->src1) &&
            mach_is_none(&inst->src2);
+  case NY_MACH_BSWAP64:
+  case NY_MACH_BSWAP32:
+    return inst->effects == NY_MACH_EFFECT_NONE &&
+           mach_value_type(func, &inst->dst) == NY_MACH_TYPE_I64 &&
+           mach_value_type(func, &inst->src0) == NY_MACH_TYPE_I64 &&
+           mach_is_none(&inst->src1) && mach_is_none(&inst->src2);
   case NY_MACH_LOAD:
     return inst->effects == NY_MACH_EFFECT_READ_MEMORY && mach_is_value(&inst->dst) &&
            (inst->src0.kind == NY_MACH_OPERAND_FRAME ||
@@ -385,6 +391,11 @@ static bool mach_verify_opcode_shape(const ny_mach_func_t *func,
   case NY_MACH_ROR32:
     if (inst->effects != NY_MACH_EFFECT_NONE || !mach_is_none(&inst->src2))
       return false;
+    if ((inst->opcode == NY_MACH_SHL || inst->opcode == NY_MACH_SAR ||
+         inst->opcode == NY_MACH_ROR || inst->opcode == NY_MACH_ROR32) &&
+        inst->src1.kind == NY_MACH_OPERAND_IMM)
+      return mach_value_type(func, &inst->dst) == NY_MACH_TYPE_I64 &&
+             mach_value_type(func, &inst->src0) == NY_MACH_TYPE_I64;
     if (inst->opcode == NY_MACH_ROR32)
       return mach_value_type(func, &inst->dst) == NY_MACH_TYPE_I64 &&
              mach_value_type(func, &inst->src0) == NY_MACH_TYPE_I64 &&
@@ -516,6 +527,8 @@ const char *ny_mach_opcode_name(ny_mach_opcode_t op) {
   case NY_MACH_SAR:        return "sar";
   case NY_MACH_ROR:        return "ror";
   case NY_MACH_ROR32:      return "ror32";
+  case NY_MACH_BSWAP64:     return "bswap64";
+  case NY_MACH_BSWAP32:     return "bswap32";
   case NY_MACH_FMA:        return "fma";
   case NY_MACH_SQRT:       return "sqrt";
   case NY_MACH_SIN:        return "sin";
@@ -839,7 +852,6 @@ static int mach_find_nir_block(const mach_label_block_t *labels, size_t len,
   return -1;
 }
 
-
 typedef struct {
   uint32_t pred;
   uint32_t succ;
@@ -1138,6 +1150,8 @@ static bool mach_opcode_from_nir(nyir_op_t op, ny_mach_opcode_t *out) {
   case NYIR_SAR_I64: *out = NY_MACH_SAR; return true;
   case NYIR_ROR_I64: *out = NY_MACH_ROR; return true;
   case NYIR_ROR32_I64: *out = NY_MACH_ROR32; return true;
+  case NYIR_BSWAP_I64: *out = NY_MACH_BSWAP64; return true;
+  case NYIR_BSWAP32_I64: *out = NY_MACH_BSWAP32; return true;
   case NYIR_CMP_I64: *out = NY_MACH_CMP; return true;
   case NYIR_SELECT_I64: *out = NY_MACH_SELECT; return true;
   case NYIR_I64_TO_F64:
@@ -1218,7 +1232,6 @@ static ny_mach_type_t mach_nir_value_type(const nyir_type_map_t *types,
   return NY_MACH_TYPE_I64;
 }
 
-
 bool ny_mach_opcode_supported(nyir_op_t op) {
   switch (op) {
   case NYIR_NOP:
@@ -1238,6 +1251,8 @@ bool ny_mach_opcode_supported(nyir_op_t op) {
   case NYIR_SAR_I64:
   case NYIR_ROR_I64:
   case NYIR_ROR32_I64:
+  case NYIR_BSWAP_I64:
+  case NYIR_BSWAP32_I64:
   case NYIR_SELECT_I64:
   case NYIR_CMP_I64:
   case NYIR_LABEL:
@@ -1685,8 +1700,6 @@ bool ny_mach_lower_nir(const nyir_func_t *nyir, ny_mach_func_t *out,
       /*
        * x87 trig functions require memory operands; spill src to frame if needed
        */
-      ny_mach_inst_t inst = {0};
-      inst.source_pc = (uint32_t)i;
       ny_mach_operand_t src0 = mach_vreg(&lowered, values[in->a]);
       bool src0_is_vreg = (src0.kind == NY_MACH_OPERAND_VREG);
       uint32_t src0_frame = 0;
@@ -1746,54 +1759,25 @@ bool ny_mach_lower_nir(const nyir_func_t *nyir, ny_mach_func_t *out,
       if (inst.opcode == NY_MACH_CONVERT &&
           mach_same_value_type(&lowered, &inst.dst, &inst.src0))
         inst.opcode = NY_MACH_COPY;
-      if (in->op != NYIR_COPY && in->op != NYIR_I64_TO_F64 &&
-          in->op != NYIR_I64_TO_F32 && in->op != NYIR_F64_TO_F32 &&
-          in->op != NYIR_F32_TO_F64 && in->op != NYIR_SQRT_F64 &&
-          in->op != NYIR_SIN_F64 && in->op != NYIR_COS_F64)
-        inst.src1 = mach_vreg(&lowered, values[in->b]);
-      if (inst.opcode == NY_MACH_CMP) {
-        inst.dst = mach_vreg(&lowered, values[in->dst]);
-        if (in->a >= 0 && in->a < nyir->next_value) {
-          int di = definitions ? definitions[in->a] : -1;
-          bool cmp_result = di >= 0 &&
-              (nyir->data[di].op == NYIR_CMP_I64 ||
-               nyir->data[di].op == NYIR_CMP_F64 ||
-               nyir->data[di].op == NYIR_CMP_F32);
-          if (cmp_result) {
-            lowered.vreg_classes[values[in->a]] = NY_MACH_REGCLASS_GPR;
-            lowered.vreg_types[values[in->a]] = NY_MACH_TYPE_I64;
-          }
-          inst.src0 = mach_vreg(&lowered, values[in->a]);
-        }
-        if (in->b >= 0 && in->b < nyir->next_value) {
-          int di = definitions ? definitions[in->b] : -1;
-          bool cmp_result = di >= 0 &&
-              (nyir->data[di].op == NYIR_CMP_I64 ||
-               nyir->data[di].op == NYIR_CMP_F64 ||
-               nyir->data[di].op == NYIR_CMP_F32);
-          if (cmp_result) {
-            lowered.vreg_classes[values[in->b]] = NY_MACH_REGCLASS_GPR;
-            lowered.vreg_types[values[in->b]] = NY_MACH_TYPE_I64;
-          }
+
+      bool unary = in->op == NYIR_COPY || in->op == NYIR_I64_TO_F64 ||
+                   in->op == NYIR_I64_TO_F32 || in->op == NYIR_F64_TO_F32 ||
+                   in->op == NYIR_F32_TO_F64 || in->op == NYIR_SQRT_F64 ||
+                   in->op == NYIR_SIN_F64 || in->op == NYIR_COS_F64 ||
+                   in->op == NYIR_BSWAP_I64 || in->op == NYIR_BSWAP32_I64;
+      if (!unary) {
+        bool shift_like = in->op == NYIR_SHL_I64 || in->op == NYIR_SAR_I64 ||
+                          in->op == NYIR_ROR_I64 || in->op == NYIR_ROR32_I64;
+        int bdef = (in->b >= 0 && definitions) ? definitions[in->b] : -1;
+        if (shift_like && bdef >= 0 &&
+            nyir->data[bdef].op == NYIR_CONST_I64) {
+          inst.src1 = (ny_mach_operand_t){.kind = NY_MACH_OPERAND_IMM,
+                                         .as.imm = nyir->data[bdef].imm};
+        } else {
           inst.src1 = mach_vreg(&lowered, values[in->b]);
         }
       }
-      inst.dst = mach_vreg(&lowered, values[in->dst]);
-      inst.src0 = mach_vreg(&lowered, values[in->a]);
-      inst.narrow32 = (in->flags & NYIR_INST_F_NARROW32) != 0;
-      /*
-       * Untyped source parameters may already acquire the destination's
-       * floating type through their call sites.  A conversion between equal
-       * machine types is a move, not an invalid f64-to-f64 conversion.
-       */
-      if (inst.opcode == NY_MACH_CONVERT &&
-          mach_same_value_type(&lowered, &inst.dst, &inst.src0))
-        inst.opcode = NY_MACH_COPY;
-      if (in->op != NYIR_COPY && in->op != NYIR_I64_TO_F64 &&
-          in->op != NYIR_I64_TO_F32 && in->op != NYIR_F64_TO_F32 &&
-          in->op != NYIR_F32_TO_F64 && in->op != NYIR_SQRT_F64 &&
-          in->op != NYIR_SIN_F64 && in->op != NYIR_COS_F64)
-        inst.src1 = mach_vreg(&lowered, values[in->b]);
+
       if (inst.opcode == NY_MACH_CMP) {
         if (in->a >= 0 && in->a < nyir->next_value) {
           int di = definitions ? definitions[in->a] : -1;
@@ -1819,11 +1803,10 @@ bool ny_mach_lower_nir(const nyir_func_t *nyir, ny_mach_func_t *out,
             inst.src1 = mach_vreg(&lowered, values[in->b]);
           }
         }
-      }
-      if (inst.opcode == NY_MACH_CMP &&
-          !mach_condition_from_nir(in->cmp, &inst.condition)) {
-        nyir_err(err, err_len, "machine lower: invalid comparison condition");
-        goto done;
+        if (!mach_condition_from_nir(in->cmp, &inst.condition)) {
+          nyir_err(err, err_len, "machine lower: invalid comparison condition");
+          goto done;
+        }
       }
     } else if (in->op == NYIR_VEC4_REDUCE_ADD_F64 ||
                in->op == NYIR_VEC4_REDUCE_ADD_I64 ||
@@ -2135,6 +2118,8 @@ static bool mach_schedule_opcode_allowed(ny_mach_opcode_t opcode) {
   case NY_MACH_AND:
   case NY_MACH_OR:
   case NY_MACH_XOR:
+  case NY_MACH_BSWAP64:
+  case NY_MACH_BSWAP32:
   case NY_MACH_FMA:
   case NY_MACH_SQRT:
   case NY_MACH_SIN:
@@ -2362,6 +2347,8 @@ static bool mach_outline_inst_ok(const ny_mach_func_t *func,
   case NY_MACH_SAR:
   case NY_MACH_ROR:
   case NY_MACH_ROR32:
+  case NY_MACH_BSWAP64:
+  case NY_MACH_BSWAP32:
   case NY_MACH_FMA:
   case NY_MACH_SQRT:
   case NY_MACH_SIN:

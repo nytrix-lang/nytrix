@@ -189,7 +189,7 @@ static char *json_extract_id(const char *json) {
     char *out = malloc(len + 1);
     if (!out)
       return NULL;
-    memcpy(out, start, len);
+    memmove(out, start, len);
     out[len] = '\0';
     return out;
   }
@@ -200,7 +200,7 @@ static char *json_extract_id(const char *json) {
   char *out = malloc(len + 1);
   if (!out)
     return NULL;
-  memcpy(out, start, len);
+  memmove(out, start, len);
   out[len] = '\0';
   return out;
 }
@@ -263,7 +263,7 @@ static void sb_append_n(sbuf_t *b, const char *s, size_t n) {
   sb_reserve(b, n);
   if (!b->data)
     return;
-  memcpy(b->data + b->len, s, n);
+  memmove(b->data + b->len, s, n);
   b->len += n;
   b->data[b->len] = '\0';
 }
@@ -1142,7 +1142,7 @@ static void analyze_style_hints(const char *text, lsp_diag_vec_t *out) {
     size_t raw_len = (size_t)(line_end - cur);
     char buf[4096];
     size_t use_len = raw_len < sizeof(buf) - 1 ? raw_len : sizeof(buf) - 1;
-    memcpy(buf, cur, use_len);
+    memmove(buf, cur, use_len);
     buf[use_len] = '\0';
     int comment = split_comment_index(buf);
     if (comment >= 0)
@@ -1399,7 +1399,7 @@ static char *trimmed_copy(const char *start, size_t len) {
   char *out = malloc(len + 1);
   if (!out)
     return NULL;
-  memcpy(out, start, len);
+  memmove(out, start, len);
   out[len] = '\0';
   return out;
 }
@@ -1927,7 +1927,7 @@ static void handle_inlay_hints(const char *id, const char *body) {
     size_t len = line_end ? (size_t)(line_end - line) : strlen(line);
     char buf[2048];
     size_t n = len < sizeof(buf) - 1 ? len : sizeof(buf) - 1;
-    memcpy(buf, line, n);
+    memmove(buf, line, n);
     buf[n] = '\0';
     char *s = buf;
     while (*s && isspace((unsigned char)*s))

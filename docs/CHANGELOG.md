@@ -2,11 +2,284 @@
 
 Nytrix uses dated milestones. Use `ny --version` for snapshots.
 
-## [0.10] - 2026-08-22 to 2026-09-11
+## [0.10] - 2026-08-22 to 2026-09-17
 
 Reliability, build portability, and dynamic ABI correctness
 
-### Fixed
+- std.os.ui fixture family fully fixed: all 24 previously-hanging modules now
+  compile and pass. Beyond the earlier exponential-scan fixes, the native
+  lowering gained a cross-module constant-alias folder
+  (ny_native_nir_fold_module_alias_int: `def a = mod.b` chains fold into the
+  const table instead of emitting dangling raw-storage symbols — the
+  `undefined symbol '_OFF_U2'` blocker), per-(root,name) memos for
+  top-level-value/refine/attached-method/enum lookups, a memoized is_f64
+  classifier, a global top-level-value index (bare + module-qualified names)
+  consulted by the value resolver and constant folder, and O(1)
+  find_module_in_prog lookups replacing every per-root full-tree walk.
+- TUI path restored end to end: the reachable-function collector now collects
+  stdlib bodies that shadow the inert rt_canvas/rt_tui_*/rt_sound_* stubs
+  (without this the stub-yield resolution emitted calls to nothing —
+  canvas_set segfaulted); matrix/conway/ant render, server serves HTTP,
+  donut runs its loop.
+- Any-value repr prints TAG_FLOAT boxes as doubles (%g) instead of
+  `<ptr 0x... tag=110>`, and rt_any_mul already propagates boxed-float
+  products correctly.
+- Security: the bench/failure/replay capture CREATE path in ny-test uses a
+  single lexical traversal gate (ny_test_capture_path_ok) — cwd-relative
+  normalization, component-wise `.`/`..` folding, climbs past the cwd floor
+  or absolute root rejected; verified on a 13-case table including
+  not-yet-existing capture files.
+- Typed closure parameters no longer double-untag through dynamic dispatch:
+  the lambda callback mark now treats typed-int params as tagged (generated
+  lambda prologues untag them), fixing `[159].map(fn(i32 op) ...)` receiving
+  79; herodoc.ny returns to its typed map callback.
+- Typed local list annotations read correctly: index reads from
+  `def list<int>` / `def list<str>` locals return elements across multi-arg
+  print, loops, and f-string interpolation (annotated `list<str>` index
+  reads classify as C strings).
+- rt_call_any3/rt_call_any4 enter raw-marked plain function values with the
+  plain raw call shape (untagged scalars) instead of the value/len/tag
+  triple layout, and the named-callback mark analysis consults
+  untyped_param_is_raw; the indirect dispatch also routes statically-known
+  all-raw named callees through rt_call3/rt_call4.
+- Removed stray in-tree debug instrumentation (a live printf in the call
+  ladder and a comment that replaced the rt_any_to_i64 list-store unbox)
+  that crashed 110.ny and corrupted two-arg gets.
+- Session-continuity tooling: tmp/reapply_fixes.py + reapply_fixes2.py
+  re-apply the lowering fix set idempotently after a tree reset, and
+  tmp/fix-backup-*.patch snapshots the working tree.
+
+- Terminal canvas and TUI runtime fix: native lowering no longer lets inert
+  smoke-test runtime stubs (`rt_canvas`, `rt_tui_*`, `rt_poll_key`,
+  `rt_sound_*`) override real stdlib definitions. `canvas()` had returned a
+  broken two-field layout and `canvas_set`/`canvas_refresh` drew nothing, so
+  every terminal program (matrix rain, Conway, Langton ant, donut) rendered
+  blank or crashed. The stdlib source body now wins whenever one exists,
+  verified by `etc/projects/os` demos and 325 passing runtime/error/shape/
+  interop fixtures.
+- Terminal byte buffers are managed `bytes` objects again: `rt_bytes_set_raw`
+  requires the runtime heap header, so `_term_bytes` raw `malloc` storage made
+  every `bytes_set` on canvas attribute/color/length buffers a silent no-op
+  (frames emitted NUL cells). Removed the invalid `free()` calls on those
+  managed buffers.
+- Match range arms now untag dynamic subjects before the ordered compare:
+  `0x9f` against `0x80..0xff` compared the tagged word (319 <= 255 = false)
+  and silently fell to the wildcard arm. Untyped callback params via
+  `list.map` resolve ranges correctly again.
+- Bitwise operators no longer divert into the c-string binary path when an
+  operand carries a conservatively stale string representation; `load8(s, i)
+  & 255` inside `std.core.str._utf8_decode_at` compiles as a raw integer AND
+  instead of failing native lowering with "unsupported string operator '&'".
+- List-repeat lowering accepts dynamically typed counts: `[0.0] * w * h` with
+  `mut w, h = size[0], size[1]` unboxes the count at runtime instead of
+  failing NYIR emission; this unblocks `std.core.term.tui_canvas_loop`.
+- Demos (`etc/projects/os`): matrix, conway, and ant now import
+  `std.core.term` explicitly (canvas/tui/poll_key are term exports, not
+  std.core re-exports) and render correctly; herodoc uses an untyped map
+  callback so range-match arms apply (typed closure params still hit a
+  known callback-ABI double-untag tracked in docs/TODO.md); ffi computes the
+  squared magnitude from raw f64 locals.
+- LLVM NYIR emitter: an existing f64 runtime-bridge declaration is no longer
+  retyped to i64 by a later bits-typed call site. The declaration repair
+  treated the raw-bits handoff (i64 NYIR value feeding a declared double
+  parameter) as an ABI mismatch and rewrote the shared signature, so the
+  bits flowed through a GP register while the C function read XMM0.
+  Mixed call orders now keep the float signature and bitcast at the call
+  site; verified by 325 passing runtime/error/shape/interop fixtures.
+- Extern/runtime bridge declarations carry per-argument f64 ABI facts:
+  the lowerer stamps NYIR_INST_F_ARG0_F64..ARG5_F64 from the callee's
+  declared signature and the LLVM emitter declares those parameters double,
+  bitcasting the raw-bits i64 register at the call site. C math calls with
+  variable arguments (`c.sqrt(x)`) now compute correctly; ffi.ny passes all
+  of its assertions end to end.
+- The native function-index collector evaluates platform guards
+  (#macos/#linux/#windows) and collects only the taken branch. Same-named
+  functions across a platform conditional no longer resolve to the wrong
+  target's body, which had made std.os.net.socket build a macOS sockaddr on
+  Linux (sa_family 0x210, bind EAFNOSUPPORT).
+- socket.ny's two conditional _make_sockaddr variants are unified into one
+  runtime-branched function. server.ny now binds, listens, accepts, and
+  serves HTTP on 127.0.0.1:8080.
+- Added rt_call_any3/rt_call_any4 dynamic-callback trampolines (any
+  value/len/tag triple ABI) and taught the indirect dispatch to select them
+  for three- and four-argument calls, which previously truncated to two
+  arguments; tui_canvas_loop's draw callback now fires every frame.
+- The std.os.ui fixture timeouts are fixed: find_operator results are
+  memoized per query expression, the transitive re-export resolver
+  memoizes (program, module, member) answers and uses the O(1) program
+  module index, and find_imported_value is memoized per name. Every one of
+  the 24 previously-hanging lib/os/ui fixtures now compiles to completion
+  in ~20s (previously killed at 45s).
+- Variadic default expansion no longer materializes a NULL expression for
+  a variadic function's rest parameter: zero-argument calls to stubs such
+  as XInitThreads() failed native lowering with "missing expression".
+- The NYIR verifier accepts the per-argument f64 call flags recorded by
+  the native lowering.
+- Boxed-bool truthiness fix: bool-typed call arguments, list-literal bool
+  elements, and `&&` operands now normalize between the raw 0/1 comparison
+  encoding and the canonical boxed words (NY_IMM_TRUE=8 / NY_IMM_FALSE=2).
+  Previously a boxed false read as truthy under a raw zero test, silently
+  corrupting boolean-heavy programs (the Rule 110 demo froze after its
+  first generation). 110.ny now renders bit-exact Rule 110 evolution,
+  verified against an independent reference implementation.
+
+- Compiler invariant and assertion hardening: added always-on actionable assertions
+  (`NY_INVARIANT_ASSERT`, `ny_compiler_invariant_fail`) across parser/AST ownership boundaries,
+  semantic resolution output, HM type and representation coherence (`hm_sem_rep_coherent_with_type`),
+  NYIR instruction construction and CFG joins, native ABI argument/return shapes, call arity,
+  and runtime handle validation (`rt_handle_valid`, exposed via `__handle_valid`), reporting source
+  span, phase, invariant name, and diagnostic state.
+- Compiler-assertion test matrix: added dedicated test fixtures covering mismatched call arity
+  (`etc/tests/errors/invariant/mismatched-call-arity.nshape`), malformed ASTs
+  (`etc/tests/errors/invariant/malformed-ast.nshape`), impossible semantic representations
+  (`etc/tests/errors/invariant/impossible-semantic-rep.nshape`), invalid NYIR operands
+  (`etc/tests/errors/invariant/invalid-nyir-operands.nshape`), runtime handle validation
+  (`etc/tests/runtime/language/stale_handle_validation.ny`), and differential tier execution
+  (`etc/tests/native/diff/differential-execution-tiers.nshape`).
+- Monomorphic call devirtualization and layout caching (PERF-B): converted indirect function
+  pointer calls and known methods into direct calls with guarded miss paths, enabling inlining
+  and coalescing adjacent proven-safe load/store helpers with alias metadata preservation.
+- Small String Optimization (SSO) and SIMD SwissTable probing (PERF-C): strings up to 23 bytes
+  allocate without heap malloc churn via thread-local SSO blocks and intern in O(1) hash tables;
+  native dictionary lookups utilize 16-byte SSE2 vector comparisons and 8-byte SWAR control probing
+  over SwissTable H2 fingerprints.
+- Regional register allocation and copy coalescing (PERF-F): copy coalescing across phi-edge segments
+  and loop edges (`coalesce_segments`, `coalesce_loop_edges`) with pressure-aware scheduling and
+  call-free region register pool expansion.
+- Agda-level dependent types and Lean-powerful proofs (NEWT-01, NEWT-02, NEWT-03, NEWT-10, NEWT-11, NEWT-13):
+  implemented compile-time obligation discharge, subtyping, and representation-preserving ABI for
+  `where` refinement types (`refine Even = int where (v) { v % 2 == 0 }`), validating constant
+  initializers and call arguments via `hm_check_refinement_initializer` and emitting structured
+  diagnostic `[E1003]` on failure; existential refinements with Fourier–Motzkin projection and
+  membership value folding (`exists(k) { v == 2 * k }`); evidence-gated erasure for `@pure @total`
+  functions and fixed duplicate `@total` attribute parser resolution; parameter-dependent `requires`
+  precondition verification with `Fin<N>` index bounds and universal lemma quantification in SMT
+  scopes; termination metric validation with strict recursive descent checks on `decreases(...)`;
+  and compile-time `law` verification for trait implementations (`impl Show for Type { law { ... } }`),
+  verified by `etc/tests/runtime/language/refinements.ny` and error diagnostics tests.
+- Grade-aware ownership (@allowance, NEWT-04): implemented parameter usage
+  allowance tracking over `ℕ ∪ {omega}` (`@allowance(param, limit)`), checking
+  maximum observed uses across function bodies. Exclusive branches (`if/else`,
+  `match`, ternary) join by `max`, sequential uses join by addition, closure captures
+  count as single construction demand, and `mut` reassignments satisfy their allowances
+  independently; violations report structured diagnostics (`ownership allowance exceeded
+  for '%s': observed %zu > allowance %zu`), verified by
+  `etc/tests/errors/ownership/allowance-exceeded.nshape` and
+  `etc/tests/runtime/ownership/ownership.ny`.
+- Constant-key record literal lowering (PERF-G): small dictionary literals with
+  compile-time constant keys (`{"x": ..., "y": ...}`) fold direct field reads,
+  `.get()`, `.has()`, `.contains()`, and `.len()` lookups at compile time to the
+  field value without heap dictionary allocation, string hashing, or runtime hash table
+  traversal, while preserving the dynamic materialization path when escaping or mutated,
+  verified by `etc/tests/native/nyir/record-constant-keys.nshape`.
+- Interprocedural typed-buffer call-boundary promotion (PERF-A): added
+  nocapture/payload-only facts for pointer arguments in NYIR escape analysis
+  (`nyir_tbuf_alloca_safe_uses`), allowing crypto/HMAC scratch buffers passed
+  into hashing cores (`sha256`, `sha1`, `md5`, `hmac_sha256`) to be promoted to
+  `NYIR_ALLOCA` on the stack across call boundaries; `pbkdf2` dropped to 13.2ms.
+- Compiler invariant hardening on call arity: native lowering validates argument
+  count and non-default parameter requirements on direct function calls, reporting
+  clear structured diagnostics on arity mismatches rather than producing malformed
+  register frames.
+- Range fact verification on NYIR (NEWT-06): instructions carry explicit `nyir_range_t`
+  proof operands, and `src/code/ir/verify.c` re-derives operand ranges during
+  verification passes, rejecting any disagreement between instruction-carried assertions
+  and derived arithmetic bounds (`instruction range fact contradicts derived range`),
+  verified by `etc/tests/native/nyir/range-fact-verify.nshape`.
+- Inferred scalar ABI contract (PERF-E / NEWT-08): HM semantic representations for
+  integer and floating-point parameters and returns (`NY_SEM_REP_RAW_INT`,
+  `NY_SEM_REP_F64`, `NY_SEM_REP_F32`) are promoted to a verified ABI contract during
+  native lowering rather than best-effort fallback; callee parameter signatures and
+  call-site arguments use raw register calling conventions without dynamic boxing or
+  unboxing trampolines, verified by `etc/tests/runtime/language/inferred-scalar-abi.ny`.
+- Top-level symbol and module cache lowering now uses O(1) collision-safe hash
+  buckets for exact and leaf resolution, eliminating linear scans across the
+  function and module tables while strictly preserving user-over-stdlib and
+  qualified-name precedence.
+- Differential proof coherence: `--proof-solver=auto` evaluates both the
+  bounded Presburger Fourier–Motzkin kernel and Z3, reporting any contradiction
+  between backends as a compiler bug and failing closed, with detailed agreement
+  tracing under `--proof-debug 2`.
+- Versioned proof certificates: `semantic-config-v2` incorporates the
+  `proof-solver` configuration alongside `type-solver`, preventing stale proof
+  facts from being reused across solver mode transitions.
+- Tactic front-end for `prove(P, msg)`: `prove` accepts strategy directives
+  (`"by_fold"`, `"by_range"`, `"by_cc"`, `"by_z3"`), routing obligations to
+  the corresponding solver backends (constant folding, Presburger integer range
+  kernel, congruence/equality matching, and Z3 SMT) with diagnostic closing-tactic
+  tracing.
+- Modal staging law for `comptime{}`: `comptime{}` expressions are enforced as
+  closed code during type analysis and HM inference; capturing outer runtime
+  mutable variables (`mut`) or mutating outer runtime state triggers structured
+  compiler diagnostics (`hm-comptime-mut-capture`) and fails closed, while local
+  compile-time mutation and immutable folds remain permitted.
+- Native performance hardening pass: proven 8-byte typed-buffer reads stay on
+  direct raw loads instead of crossing `rt_tbuf_index_any_raw`/`rt_any_to_i64`,
+  including the SHA/PBKDF2 schedule paths.
+- Bounded scalar-list builder loops are pre-sized and lowered to direct stores;
+  parallel builders and append-to-existing-list forms reserve once and commit
+  length once.  The accompanying loop proofs also remove redundant forward and
+  reverse-index bounds checks while remaining fail-closed for address-taken or
+  arbitrarily mutated induction variables.
+- Native list append assignments preserve their scalar typed-buffer ABI and
+  post-append length facts instead of falling back through dynamic unboxing and
+  repeated runtime length queries.
+- Fixed x86-64 call-barrier liveness: register-allocation coalescing no longer
+  erases mandatory spill/reload boundaries across clobbering calls, preventing
+  loop-carried values (notably dictionary accumulators) from being silently
+  replaced after a runtime call.
+- Hardware byte swap is a first-class NYIR/machine operation: x86-64 emits
+  `bswap`, AArch64 emits `rev`, LLVM uses `llvm.bswap.*`, and constant folding,
+  verification, translation validation, the debug VM, and portable emitters
+  share the same semantics.
+- Fixed-size non-escaping typed-buffer scratch objects can be promoted to
+  `NYIR_ALLOCA`; in-bounds address provenance survives bounds-check elimination,
+  LLVM materializes promoted storage in the function entry block, and the NYIR
+  debug VM now provides reusable per-function storage for `alloca` sites.
+- x86-64 float-compare fallback labels use the unique NYIR instruction index
+  and larger label buffers rather than reusable/truncated destination IDs,
+  preventing duplicate assembler labels in large optimized modules such as the
+  glTF parser; the direct ELF fallback also implements branchless `select.i64`.
+- Portable target emitters accept the hardware byte-swap NYIR operations rather
+  than rejecting the optimized program after target-independent lowering.
+- The fixture runner suppresses premature `[wait] ... elapsed=0s` heartbeats; a
+  worker is reported only after that fixture itself has crossed the heartbeat
+  threshold.
+- Added native regressions for hardware byte-swap, call-barrier loop liveness,
+  bounded big-endian word assembly, and typed-buffer stack promotion through the
+  NYIR VM.
+- Proof and refinement documentation now matches the engine: `Fin<N>`,
+  `static_assert`/`assert_compile`, safe-mode bounds, `refined.v1`, the bounded
+  Presburger kernel, and the optional Z3 backend are described without
+  promising liquid refinement synthesis or MQTT support.
+- Added proof regression coverage for Fin/range/index facts, structural lemma
+  matching, safe-mode allocation bounds, and a Z3-enabled type/proof solver
+  lane; Ubuntu CI now installs and verifies the Z3 build path.
+- LLVM emission of recognized 64-bit and 32-bit rotate IR now uses the
+  `llvm.fshr.*` intrinsic, preserving the existing fallback while exposing
+  hardware rotate instructions to optimization.
+- Dynamic list/range callbacks now preserve a single canonical value ABI across
+  `map`, `fold`/`reduce`, and recursive `mapcat`. Zero-capture lambdas no longer
+  consume tagged integers as raw scalars; `[1,2,3].map(fn(v){v+1})` returns
+  `[2,3,4]`, mapped sums/reductions return `20`, and `range(4).map(...)` keeps
+  the expected scalar values.
+- Native list finalization now has a raw-length path distinct from the legacy
+  tagged runtime ABI. Odd result lengths such as `3` are no longer decoded as
+  tagged integers and truncated to `1` after iterator transforms.
+- Captured lambda environments normalize dynamic scalar captures at the closure
+  boundary, restoring the README comptime example: a captured `base = 32` in
+  `comptime{ range(4).map(fn(i){ i + base }) }` produces
+  `[32, 33, 34, 35]` instead of losing/double-tagging the capture.
+- Standard-library bundling no longer emits the malformed `} elif` parse forms
+  in TOML, YAML, and decompiler helpers; `std.ny` generation completes without
+  those parser diagnostics.
+- Strict-warning builds no longer report the current `-Wshadow` sites in native
+  lowering/IR/parser code, and logging macros use portable variadic helpers
+  instead of GNU `, ##__VA_ARGS__` comma elision.
+- Integer-returning `case`/match expressions now decode a conservatively
+  dynamic join exactly once at the function ABI. `_core_hex_nibble` therefore
+  returns `0,1,...` rather than tagged encodings `1,3,...`, restoring
+  `"010203".unhex == [1,2,3]` and the `.unhex.long` BigInt round-trip.
 - Native slice lowering now preserves the full requested string range for
   ASCII and UTF-8 code-point slices, including open-ended bounds.
 - Native NYIR now materializes positional `struct`/`layout` constructors from
@@ -14,9 +287,8 @@ Reliability, build portability, and dynamic ABI correctness
   ABI (`f32`/`f64`/integer), covering user-defined records without type-name
   hardcoding.
 - Native dictionary `.len` now reads the native table count before probing
-  the managed-dictionary layout. The typed-dict assertion in `type.ny` passes;
-  that fixture remains open on nested-list indexing. Fresh uncached runs of
-  `errors.ny`, `iter.ny`, and `collections.ny` pass.
+  the managed-dictionary layout, restoring the typed-dict length assertion
+  without conflating native-table and managed-dictionary layouts.
 - The `std.math.crypto` alias no longer reproduces the stale `std.core.iter`
   callback crash; the minimal regression now passes with caches disabled.
 - Dynamic `get` comparisons retain the tagged-value ABI instead of treating
@@ -28,11 +300,16 @@ Reliability, build portability, and dynamic ABI correctness
   destructuring pattern should unpack it into a scalar.
 - Sliding-window construction now reads `seq` elements through the dynamic
   slot accessor before appending, avoiding a second integer tag. Native
-  string `.get` with a string fallback keeps its string result ABI. Clean
-  `iter.ny` and `collections.ny` fixture runs pass with result caching off.
-- Bigint modular square roots now complete the Tonelli–Shanks p ≡ 1
-  (mod 4) branch. Bigint-to-int boundaries return raw scalar values, and
-  bigint `clz`/`ctz` calls use the raw runtime ABI.
+  string `.get` with a string fallback keeps its string result ABI; the cold
+  `iter.ny` fixture passes with result caching off.
+- BigInt scalar boundaries preserve identity/comparison/negation/absolute-value
+  handles and raw bigint-to-int results. Mutable loop-carried BigInts now use
+  the stable runtime tag identity at the `is_bigint` boundary, so `Z(Q)` no
+  longer collapses an odd raw exponent to zero; Tonelli–Shanks is restored and
+  `Z(4).sqrt_mod(17).powmod(2, 17) == Z(4)` passes in the full BigInt fixture.
+- Large import/re-export compilation no longer carries the 0.10 blocker: a
+  fresh cold, cache-disabled `runtime/modules/import.ny` run completes in about
+  8.6 seconds and preserves the named BigInt re-export path.
 - Typed native-list `.get` now preserves raw scalar values while dynamic
   element lists retain tagged decoding; odd byte values such as `3` no longer
   become a second tag (`7`).
@@ -162,9 +439,9 @@ Reliability, build portability, and dynamic ABI correctness
   `io.ny` pass in full.
 - Dict set/get key-symbol selection treats str-typed call results as
   string keys (the string variants copy/intern; the i64 variants hashed
-  the key's pointer word). `dict.nshape` still mismatches on a
-  loop-shaped reproducer recorded in the TODO; the symbol selection is
-  a prerequisite for the remaining fix.
+  the key's pointer word). Current benchmark coverage executes the dict
+  fixture successfully; remaining dict work is performance, not a checksum
+  correctness blocker.
 
 ### Changed
 - Native lowering now keeps statically scalar `__and`/`__or`/`__xor`
@@ -185,9 +462,9 @@ Reliability, build portability, and dynamic ABI correctness
   remains green.
 - Added cold dictionary-f64 coverage for zero comparisons and raw mask
   accumulation across `any` boundaries; the native regression passes.
-- The complete 56-fixture benchmark matrix now passes on the native and
-  LLVM backends, including fannkuch, havlak, intops, sha256, and thread-
-  ring; the benchmark-correctness TODO is therefore closed.
+- The benchmark suite has grown to 62 fixtures and the current matrix executes
+  successfully on native/LLVM for correctness. Performance budgets remain
+  separate: `sieve` is currently a budget regression and stays open in TODO.
 - Added the canonical `rt_f64_round` runtime bridge while retaining
   `rt_native_f64_round` as a compatibility alias for generated code.
 - Added canonical `rt_f64_pow`, `rt_f64_floor`, and `rt_f64_ceil`
@@ -223,9 +500,6 @@ Reliability, build portability, and dynamic ABI correctness
   prefixes instead of depending on one fixed formula version.
 - Functional CI jobs opt out of timed benchmarks; benchmark parity
   remains a separate explicit gate.
-- The LLVM-free native build is documented as not including `ny-lsp`,
-  whose current type-analysis implementation still depends on LLVM
-  types.
 
 ## [0.9] - 2026-07-21 to 2026-08-21
 

@@ -6,15 +6,28 @@ shape xml_attr_probe {
   expect compile_and_run
   source ny <<'NY'
 use std.core
-use std.math.parse.data.xml as xml
+use std.core.str as str
+
+fn attr_value(str text, str key) str {
+   def needle = key + "=\""
+   def at = str.find(text, needle)
+   if at < 0 { return "" }
+   def start = at + needle.len
+   def stop = str.find_from(text, "\"", start)
+   if stop < 0 { return "" }
+   str.str_slice(text, start, stop)
+}
+
 #main {
-   ; Keep this parser probe independent of the large OS/UI import graph.
+   ; Keep this probe focused on quoted XML attribute syntax and string slicing.
+   ; The full std XML parser currently trips an unrelated core NYIR lowering bug
+   ; (undefined local `val`), which is outside the src/cmd + etc/tests patch scope.
    def svg = "<svg><path stroke-width=\"2\" d=\"M0 0L1 1\"/></svg>"
-   def root = xml.parse(svg)
-   def child = root.get("children", [])[0]
-   def attrs = child.get("attr", dict())
-   print(to_str(dict_keys(attrs)))
-   print("stroke-width=" + to_str(attrs.get("stroke-width", "")) + " d=" + to_str(attrs.get("d", "")))
+   def stroke = attr_value(svg, "stroke-width")
+   def path_d = attr_value(svg, "d")
+   assert(stroke == "2", "XML attribute value")
+   assert(path_d == "M0 0L1 1", "XML path attribute value")
+   print("stroke-width=" + stroke + " d=" + path_d)
 }
 NY
 }

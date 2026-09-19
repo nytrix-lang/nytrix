@@ -3,6 +3,7 @@
 ;; Keywords: cli terminal matrix rain digital example
 ;; Matrix rain - https://en.wikipedia.org/wiki/Digital_rain
 use std.core
+use std.core.term
 use std.math.random as rng
 use std.os.args as cli
 use std.os.time as time

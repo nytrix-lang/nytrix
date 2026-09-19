@@ -61,11 +61,11 @@ fn _put_impl(dict index, dict certificate, int max_variables=16,
    int max_nodes=100000, int max_depth=128, int max_steps=1000000,
    int max_memory=100000) bool {
    def module_match = certificate.get("module_version", "") ==
-      index.get("module_version")
+   index.get("module_version")
    def dependency_match = certificate.get("dependency_digest", "") ==
-      index.get("dependency_digest")
+   index.get("dependency_digest")
    def checker_match = certificate.get("checker_version", "") ==
-      index.get("checker_version")
+   index.get("checker_version")
    def checked = cert.check(certificate, max_variables, max_nodes, max_depth,
       max_steps, max_memory)
    if module_match == false || dependency_match == false ||

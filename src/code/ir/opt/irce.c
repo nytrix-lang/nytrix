@@ -80,7 +80,6 @@ static bool scaled_iv(const nyir_func_t *f, const int *defs, int value, int iv,
   return scaled_value(f, defs, value, iv, scale);
 }
 
-
 static bool irce_insert_inst(nyir_func_t *f, size_t at, nyir_inst_t inst) {
   if (!f || at > f->len)
     return false;
@@ -335,7 +334,6 @@ static bool relational_check_safe(const nyir_func_t *f,
   }
   return length.has_min && index.max < length.min;
 }
-
 
 static bool irce_value_nonnegative(const nyir_func_t *f, const int *defs,
                                    const nyir_value_fact_t *facts, int value,

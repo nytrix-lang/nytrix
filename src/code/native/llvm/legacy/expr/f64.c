@@ -363,7 +363,6 @@ static bool ny_is_numeric_expr_like(codegen_t *cg, scope *scopes, size_t depth,
   return ny_is_numeric_expr_like_limited(cg, scopes, depth, e, 8);
 }
 
-
 static bool ny_is_f64_arith_op(const char *op) {
    return strcmp(op, "+") == 0 || strcmp(op, "-") == 0 || strcmp(op, "*") == 0 ||
           strcmp(op, "/") == 0;
@@ -1632,6 +1631,13 @@ static LLVMValueRef gen_expr_binary_case(codegen_t *cg, scope *scopes, size_t de
       expr_t call = {0};
       call.kind = NY_E_CALL;
       call.tok = e->tok;
+      /*
+       * Preserve the source comparison's semantic contract on the
+       * synthesized equality call.  The legacy lowering path otherwise
+       * treats the synthetic call as unresolved and may pass a tagged
+       * dynamic operand through the raw integer ABI.
+       */
+      call.semantic = e->semantic;
       call.as.call.callee = &callee;
       call.as.call.args.data = args;
       call.as.call.args.len = 2;
@@ -2018,6 +2024,16 @@ static LLVMValueRef gen_expr_inner(codegen_t *cg, scope *scopes, size_t depth, e
         return gen_ownership_helper_expr(cg, scopes, depth, e, own_helper);
       if (e->as.call.callee && e->as.call.callee->kind == NY_E_IDENT) {
         const char *fn_name = e->as.call.callee->as.ident.name;
+        refine_def_t *ref = ny_lookup_refine(cg, fn_name);
+        if (ref && e->as.call.args.len == 1) {
+          int res = 0;
+          if (ny_refine_eval_predicate(cg, scopes, depth, ref, e->as.call.args.data[0].val, &res)) {
+            return (res == 1) ? ny_ctrue(cg) : ny_cfalse(cg);
+          }
+          expr_t *inst = ny_expr_subst(cg->arena, ref->predicate, ref->param, e->as.call.args.data[0].val);
+          if (inst)
+            return gen_expr(cg, scopes, depth, inst);
+        }
         fun_sig *sig = fn_name ? resolve_overload(cg, fn_name,
                                                   e->as.call.args.len, 0)
                                : NULL;

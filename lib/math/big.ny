@@ -44,7 +44,11 @@ fn _big_randint(int a, int b) int {
    a + (_big_rand() % range)
 }
 
-fn _big_is_rt(any x) bool { __has_tag(x, _TAG_BIGINT) }
+fn _big_is_rt(any x) bool {
+   ; Loop- and call-carried runtime BigInt handles keep their concrete object
+   ; tag even when generic any provenance is unavailable to __has_tag.
+   __tagof(x) == _TAG_BIGINT
+}
 
 fn _big_zero() bigint { __bigint_from_int(0) }
 

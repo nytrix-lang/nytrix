@@ -343,8 +343,6 @@ bool ny_native_consttab_append_defs(ny_obj_buf_t *code,
   return true;
 }
 
-
-
 typedef struct {
   char name[NY_CONSTTAB_NAME];
 } ny_globaltab_ent_t;
@@ -406,7 +404,6 @@ const char *ny_native_globaltab_name_tail(const char *name) {
   return match;
 }
 
-
 bool ny_native_globaltab_has(const char *name) {
   return ny_native_globaltab_name(name) != NULL;
 }
@@ -446,7 +443,6 @@ bool ny_native_globaltab_append_defs(ny_obj_buf_t *code,
   }
   return true;
 }
-
 
 /*
  * Session-local pool of constant arrays (list literals with all-constant

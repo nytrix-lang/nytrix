@@ -163,9 +163,7 @@ static int64_t eg_class_first_const(const ny_egraph_t *g, int c) {
 }
 
 /*
- * ------------------------------------------------------------------
  * Rule pool
- * ------------------------------------------------------------------
  */
 
 enum { EG_RH_LIT = 1, EG_RH_COPY, EG_RH_OP };
@@ -336,11 +334,8 @@ static void eg_block_scev_hint(const nyir_cfg_t *cfg,
     *trip_out = trip;
 }
 
-
 /*
- * ------------------------------------------------------------------
  * Extraction bookkeeping
- * ------------------------------------------------------------------
  */
 
 typedef struct {
@@ -527,9 +522,7 @@ static int eg_extract(const ny_egraph_t *g, const ny_eg_vm_t *vm, int goal,
 }
 
 /*
- * ------------------------------------------------------------------
  * Pass
- * ------------------------------------------------------------------
  */
 
 bool nyir_egraph_rewrite(nyir_func_t *f) {

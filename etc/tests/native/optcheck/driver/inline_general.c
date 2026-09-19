@@ -99,7 +99,6 @@ static bool ny_check_wrapper_chain(void) {
   return ok;
 }
 
-
 static bool ny_check_deep_acyclic_chain(void) {
   enum { DEPTH = 12 };
   static const char *names[DEPTH] = {

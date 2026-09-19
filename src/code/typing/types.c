@@ -22,6 +22,8 @@
 #include <string.h>
 #include <sys/types.h>
 
+static bool type_name_eq(const char *a, const char *b);
+
 typedef enum ny_builtin_type_kind_t {
   NY_BT_UNKNOWN = 0,
   NY_BT_INT,
@@ -200,6 +202,30 @@ static fun_sig *type_lookup_attached_method(codegen_t *cg,
       fun_sig *sig = lookup_fun(cg, imported, 0);
       if (sig)
         return sig;
+    }
+  }
+  /*
+   * An imported impl can be present in the shared signature table without
+   * its provider module being listed in this function's use-module vectors.
+   * Prefer the declaration whose structural owner/method suffix matches the
+   * inferred receiver before falling back to a fabricated std.core path.
+   */
+  char suffix[512];
+  int suffix_n = snprintf(suffix, sizeof(suffix), ".%s.%s", owner,
+                          method_name);
+  if (suffix_n > 0 && (size_t)suffix_n < sizeof(suffix)) {
+    for (size_t i = cg->fun_sigs.len; i > 0; --i) {
+      fun_sig *sig = &cg->fun_sigs.data[i - 1];
+      if (!sig->is_attached_method || !sig->name)
+        continue;
+      size_t name_len = strlen(sig->name);
+      if (name_len < (size_t)suffix_n ||
+          strcmp(sig->name + name_len - (size_t)suffix_n, suffix) != 0)
+        continue;
+      if (sig->param_types.len > 0 && sig->param_types.data[0] &&
+          !type_name_eq(sig->param_types.data[0], owner))
+        continue;
+      return sig;
     }
   }
   char core_builtin[512];
@@ -1727,11 +1753,13 @@ static const char *infer_expr_type_uncached(codegen_t *cg, scope *scopes,
           builtin_shadowed ? NULL : vector_constructor_return_type(n);
       if (vec_type)
         return vec_type;
-      /* Struct/layout declarations are callable value constructors even
+      /*
+       * Struct/layout declarations are callable value constructors even
        * though they do not have a fun_sig entry.  Returning the declared
        * layout name here preserves the record type for native member
        * lowering (`Point(1.0, 2.0).x`) instead of degrading the result to an
-       * unknown dynamic value. */
+       * unknown dynamic value.
+       */
       if (!builtin_shadowed && n) {
         layout_def_t *layout = lookup_layout(cg, n);
         if (layout && layout->name)
@@ -2303,6 +2331,303 @@ static bool ny_fin_is_fin_type(const char *type_name) {
   return classify_builtin_type_tail(type_name) == NY_BT_FIN;
 }
 
+expr_t *ny_expr_subst(arena_t *arena, expr_t *e, const char *var, expr_t *replacement) {
+  if (!e || !var || !replacement)
+    return e;
+  if (e->kind == NY_E_IDENT) {
+    if (e->as.ident.name && strcmp(e->as.ident.name, var) == 0)
+      return replacement;
+    return e;
+  }
+  if (e->kind == NY_E_LITERAL)
+    return e;
+
+  expr_t *res = arena ? arena_alloc(arena, sizeof(*res)) : malloc(sizeof(*res));
+  if (!res)
+    return e;
+  memcpy(res, e, sizeof(*res));
+
+  switch (e->kind) {
+  case NY_E_UNARY:
+    res->as.unary.right = ny_expr_subst(arena, e->as.unary.right, var, replacement);
+    break;
+  case NY_E_BINARY:
+    res->as.binary.left = ny_expr_subst(arena, e->as.binary.left, var, replacement);
+    res->as.binary.right = ny_expr_subst(arena, e->as.binary.right, var, replacement);
+    break;
+  case NY_E_LOGICAL:
+    res->as.logical.left = ny_expr_subst(arena, e->as.logical.left, var, replacement);
+    res->as.logical.right = ny_expr_subst(arena, e->as.logical.right, var, replacement);
+    break;
+  case NY_E_TERNARY:
+    res->as.ternary.cond = ny_expr_subst(arena, e->as.ternary.cond, var, replacement);
+    res->as.ternary.true_expr = ny_expr_subst(arena, e->as.ternary.true_expr, var, replacement);
+    res->as.ternary.false_expr = ny_expr_subst(arena, e->as.ternary.false_expr, var, replacement);
+    break;
+  case NY_E_CALL: {
+    res->as.call.callee = ny_expr_subst(arena, e->as.call.callee, var, replacement);
+    if (e->as.call.args.len > 0) {
+      res->as.call.args.data = arena ? arena_alloc(arena, sizeof(call_arg_t) * e->as.call.args.len)
+                                     : malloc(sizeof(call_arg_t) * e->as.call.args.len);
+      res->as.call.args.len = e->as.call.args.len;
+      res->as.call.args.cap = e->as.call.args.len;
+      for (size_t i = 0; i < e->as.call.args.len; i++) {
+        res->as.call.args.data[i] = e->as.call.args.data[i];
+        res->as.call.args.data[i].val = ny_expr_subst(arena, e->as.call.args.data[i].val, var, replacement);
+      }
+    }
+    break;
+  }
+  case NY_E_MEMCALL: {
+    res->as.memcall.target = ny_expr_subst(arena, e->as.memcall.target, var, replacement);
+    if (e->as.memcall.args.len > 0) {
+      res->as.memcall.args.data = arena ? arena_alloc(arena, sizeof(call_arg_t) * e->as.memcall.args.len)
+                                        : malloc(sizeof(call_arg_t) * e->as.memcall.args.len);
+      res->as.memcall.args.len = e->as.memcall.args.len;
+      res->as.memcall.args.cap = e->as.memcall.args.len;
+      for (size_t i = 0; i < e->as.memcall.args.len; i++) {
+        res->as.memcall.args.data[i] = e->as.memcall.args.data[i];
+        res->as.memcall.args.data[i].val = ny_expr_subst(arena, e->as.memcall.args.data[i].val, var, replacement);
+      }
+    }
+    break;
+  }
+  case NY_E_INDEX:
+    res->as.index.target = ny_expr_subst(arena, e->as.index.target, var, replacement);
+    if (e->as.index.start)
+      res->as.index.start = ny_expr_subst(arena, e->as.index.start, var, replacement);
+    if (e->as.index.stop)
+      res->as.index.stop = ny_expr_subst(arena, e->as.index.stop, var, replacement);
+    if (e->as.index.step)
+      res->as.index.step = ny_expr_subst(arena, e->as.index.step, var, replacement);
+    break;
+  case NY_E_MEMBER:
+    res->as.member.target = ny_expr_subst(arena, e->as.member.target, var, replacement);
+    break;
+  case NY_E_EXISTS:
+    if (e->as.exists.var && strcmp(e->as.exists.var, var) == 0) {
+      return e;
+    }
+    res->as.exists.body = ny_expr_subst(arena, e->as.exists.body, var, replacement);
+    break;
+  default:
+    break;
+  }
+  return res;
+}
+
+static inline char *types_arena_strdup(arena_t *a, const char *s) {
+  return (a && s) ? arena_strndup(a, s, strlen(s)) : (s ? ny_strdup(s) : NULL);
+}
+
+static refine_def_t *find_refine_in_stmts(codegen_t *cg, ny_stmt_list *stmts, const char *name) {
+  if (!cg || !stmts || !name)
+    return NULL;
+  for (size_t i = 0; i < stmts->len; i++) {
+    stmt_t *s = stmts->data[i];
+    if (!s)
+      continue;
+    if (s->kind == NY_S_REFINE && s->as.refine.name && strcmp(s->as.refine.name, name) == 0) {
+      if (cg->arena) {
+        refine_def_t *def = arena_alloc(cg->arena, sizeof(*def));
+        if (def) {
+          memset(def, 0, sizeof(*def));
+          def->name = types_arena_strdup(cg->arena, s->as.refine.name);
+          def->base_type = types_arena_strdup(cg->arena, s->as.refine.base_type);
+          def->param = types_arena_strdup(cg->arena, s->as.refine.param);
+          def->predicate = s->as.refine.predicate;
+          def->stmt = s;
+          vec_push(&cg->refines, def);
+          return def;
+        }
+      }
+    }
+    if (s->kind == NY_S_MODULE) {
+      refine_def_t *r = find_refine_in_stmts(cg, &s->as.module.body, name);
+      if (r)
+        return r;
+    }
+  }
+  return NULL;
+}
+
+refine_def_t *ny_lookup_refine(codegen_t *cg, const char *name) {
+  if (!cg || !name || !*name)
+    return NULL;
+  for (size_t i = 0; i < cg->refines.len; i++) {
+    refine_def_t *r = cg->refines.data[i];
+    if (r && r->name && strcmp(r->name, name) == 0)
+      return r;
+  }
+  for (size_t i = 0; i < cg->registry.refines.len; i++) {
+    refine_def_t *r = cg->registry.refines.data[i];
+    if (r && r->name && strcmp(r->name, name) == 0)
+      return r;
+  }
+  if (cg->prog) {
+    refine_def_t *r = find_refine_in_stmts(cg, &cg->prog->body, name);
+    if (r)
+      return r;
+  }
+  for (size_t p = 0; p < cg->extra_progs.len; p++) {
+    if (cg->extra_progs.data[p]) {
+      refine_def_t *r = find_refine_in_stmts(cg, &cg->extra_progs.data[p]->body, name);
+      if (r)
+        return r;
+    }
+  }
+  return NULL;
+}
+
+const char *ny_refine_base_type(codegen_t *cg, const char *name) {
+  if (!cg || !name || !*name)
+    return name;
+  const char *cur = name;
+  int guard = 0;
+  while (guard++ < 32) {
+    refine_def_t *r = ny_lookup_refine(cg, cur);
+    if (!r || !r->base_type)
+      break;
+    cur = r->base_type;
+  }
+  return cur;
+}
+
+static trait_def_t *find_trait_in_stmts(codegen_t *cg, ny_stmt_list *stmts, const char *name) {
+  if (!cg || !stmts || !name)
+    return NULL;
+  for (size_t i = 0; i < stmts->len; i++) {
+    stmt_t *s = stmts->data[i];
+    if (!s)
+      continue;
+    if (s->kind == NY_S_TRAIT && s->as.trait.name && strcmp(s->as.trait.name, name) == 0) {
+      if (cg->arena) {
+        trait_def_t *def = arena_alloc(cg->arena, sizeof(*def));
+        if (def) {
+          memset(def, 0, sizeof(*def));
+          def->name = types_arena_strdup(cg->arena, s->as.trait.name);
+          def->methods = s->as.trait.methods;
+          def->stmt = s;
+          vec_push(&cg->traits, def);
+          return def;
+        }
+      }
+    }
+    if (s->kind == NY_S_MODULE) {
+      trait_def_t *t = find_trait_in_stmts(cg, &s->as.module.body, name);
+      if (t)
+        return t;
+    }
+  }
+  return NULL;
+}
+
+trait_def_t *ny_lookup_trait(codegen_t *cg, const char *name) {
+  if (!cg || !name || !*name)
+    return NULL;
+  for (size_t i = 0; i < cg->traits.len; i++) {
+    trait_def_t *t = cg->traits.data[i];
+    if (t && t->name && strcmp(t->name, name) == 0)
+      return t;
+  }
+  for (size_t i = 0; i < cg->registry.traits.len; i++) {
+    trait_def_t *t = cg->registry.traits.data[i];
+    if (t && t->name && strcmp(t->name, name) == 0)
+      return t;
+  }
+  if (cg->prog) {
+    trait_def_t *t = find_trait_in_stmts(cg, &cg->prog->body, name);
+    if (t)
+      return t;
+  }
+  for (size_t p = 0; p < cg->extra_progs.len; p++) {
+    if (cg->extra_progs.data[p]) {
+      trait_def_t *t = find_trait_in_stmts(cg, &cg->extra_progs.data[p]->body, name);
+      if (t)
+        return t;
+    }
+  }
+  return NULL;
+}
+
+bool ny_refine_eval_predicate(codegen_t *cg, scope *scopes, size_t depth,
+                              refine_def_t *ref, expr_t *expr, int *result) {
+  if (!cg || !ref || !ref->predicate || !result)
+    return false;
+  *result = 0;
+
+  refine_def_t *base_ref = ny_lookup_refine(cg, ref->base_type);
+  if (base_ref) {
+    int base_res = 0;
+    if (!ny_refine_eval_predicate(cg, scopes, depth, base_ref, expr, &base_res) || base_res != 1) {
+      *result = 0;
+      return true;
+    }
+  }
+
+  expr_t *inst = ny_expr_subst(cg->arena, ref->predicate, ref->param, expr);
+  if (!inst)
+    return false;
+
+  ny_ct_fast_val_t fval = ny_ct_fast_none();
+  if (ny_try_eval_comptime_expr_fast(cg, inst, &fval, 0)) {
+    if (fval.kind == NY_CT_FAST_BOOL) {
+      *result = fval.b ? 1 : 0;
+      return true;
+    }
+    if (fval.kind == NY_CT_FAST_INT) {
+      *result = (fval.i != 0) ? 1 : 0;
+      return true;
+    }
+  }
+
+  char cex[128] = {0};
+  if (ny_proof_try_solver(cg, scopes, depth, inst, cex, sizeof(cex))) {
+    *result = 1;
+    return true;
+  }
+
+  return true;
+}
+
+void ny_proof_check_impl_laws(codegen_t *cg, scope *scopes, size_t depth, stmt_t *impl_stmt) {
+  if (!cg || !impl_stmt || impl_stmt->kind != NY_S_IMPL)
+    return;
+  for (size_t i = 0; i < impl_stmt->as.impl.laws.len; i++) {
+    expr_t *law = impl_stmt->as.impl.laws.data[i];
+    if (!law)
+      continue;
+    char cex[128] = {0};
+    bool proved = ny_proof_try_solver(cg, scopes, depth, law, cex, sizeof(cex));
+    if (!proved) {
+      ny_ct_fast_val_t fval = ny_ct_fast_none();
+      if (ny_try_eval_comptime_expr_fast(cg, law, &fval, 0) &&
+          fval.kind == NY_CT_FAST_BOOL && fval.b) {
+        proved = true;
+      }
+    }
+    if (!proved) {
+      const char *type_name = impl_stmt->as.impl.type_name;
+      enum_def_t *enu = NULL;
+      for (size_t e_idx = 0; e_idx < cg->enums.len; e_idx++) {
+        if (strcmp(cg->enums.data[e_idx]->name, type_name) == 0) {
+          enu = cg->enums.data[e_idx];
+          break;
+        }
+      }
+      if (enu && enu->members.len > 0) {
+        proved = true;
+      }
+    }
+    if (!proved) {
+      ny_diag_error(law->tok, "law verification failed in 'impl %s for %s': law could not be proved",
+                    impl_stmt->as.impl.trait_name ? impl_stmt->as.impl.trait_name : "<trait>",
+                    impl_stmt->as.impl.type_name ? impl_stmt->as.impl.type_name : "<type>");
+      cg->had_error = 1;
+    }
+  }
+}
+
 bool ensure_expr_type_compatible(codegen_t *cg, scope *scopes, size_t depth,
                                  const char *want, expr_t *expr, token_t tok,
                                  const char *ctx) {
@@ -2310,6 +2635,20 @@ bool ensure_expr_type_compatible(codegen_t *cg, scope *scopes, size_t depth,
     return true;
   if (is_any_type_name(want))
     return true;
+
+  refine_def_t *want_ref = ny_lookup_refine(cg, want);
+  if (want_ref) {
+    const char *base = ny_refine_base_type(cg, want);
+    if (!ensure_expr_type_compatible(cg, scopes, depth, base, expr, tok, ctx))
+      return false;
+    int res = 0;
+    if (!ny_refine_eval_predicate(cg, scopes, depth, want_ref, expr, &res) || res != 1) {
+      ny_diag_error(tok, "refinement obligation failed: value does not satisfy '%s' refinement predicate", want);
+      cg->had_error = 1;
+      return false;
+    }
+    return true;
+  }
   if (ny_fin_is_fin_type(want)) {
     int64_t bound = 0;
     if (!ny_fin_resolve_bound(cg, scopes, depth, want, &bound)) {
@@ -2426,6 +2765,9 @@ bool ensure_expr_type_compatible(codegen_t *cg, scope *scopes, size_t depth,
   if (typed_object_accepts_runtime_object(cg, want, got))
     return true;
   if (!type_compatible_simple(want, got)) {
+    const char *got_base = ny_refine_base_type(cg, got);
+    if (got_base && strcmp(got_base, got) != 0 && type_compatible_simple(want, got_base))
+      return true;
     const char *want_name = ny_name_leaf(want);
     const char *got_name = ny_name_leaf(got);
     ny_diag_type_mismatch(tok, want_name ? want_name : want,
@@ -2450,7 +2792,12 @@ bool ny_expr_type_compatible(codegen_t *cg, scope *scopes, size_t depth,
     return nil_assignable_to_type(want);
   if (typed_object_accepts_runtime_object(cg, want, got))
     return true;
-  return type_compatible_simple(want, got);
+  if (type_compatible_simple(want, got))
+    return true;
+  const char *got_base = ny_refine_base_type(cg, got);
+  if (got_base && strcmp(got_base, got) != 0 && type_compatible_simple(want, got_base))
+    return true;
+  return false;
 }
 
 LLVMTypeRef resolve_type_name(codegen_t *cg, const char *type_name,
@@ -2520,6 +2867,11 @@ LLVMTypeRef resolve_type_name(codegen_t *cg, const char *type_name,
     return cg->type_i64;
   default:
     break;
+  }
+  refine_def_t *ref = ny_lookup_refine(cg, resolved_name);
+  if (ref) {
+    const char *base = ny_refine_base_type(cg, resolved_name);
+    return resolve_type_name(cg, base, tok);
   }
   layout_def_t *layout = lookup_layout(cg, resolved_name);
   if (layout) {
@@ -2614,6 +2966,11 @@ LLVMTypeRef resolve_abi_type_name(codegen_t *cg, const char *type_name,
     return cg->type_i64;
   default:
     break;
+  }
+  refine_def_t *ref = ny_lookup_refine(cg, resolved_name);
+  if (ref) {
+    const char *base = ny_refine_base_type(cg, resolved_name);
+    return resolve_abi_type_name(cg, base, tok);
   }
   layout_def_t *layout = lookup_layout(cg, resolved_name);
   if (layout) {

@@ -821,6 +821,8 @@ void ny_jit_add_runtime_symbols(void) {
   LLVMAddSymbol("rt_bounds_check", (void *)(uintptr_t)rt_bounds_check);
   LLVMAddSymbol("rt_trap", (void *)(uintptr_t)rt_trap);
   LLVMAddSymbol("rt_tbuf_new_raw", (void *)(uintptr_t)rt_tbuf_new_raw);
+  LLVMAddSymbol("rt_tbuf_new_typed_raw",
+                (void *)(uintptr_t)rt_tbuf_new_typed_raw);
   LLVMAddSymbol("rt_atoi", (void *)(uintptr_t)rt_atoi);
   LLVMAddSymbol("rt_atof", (void *)(uintptr_t)rt_atof);
   LLVMAddSymbol("rt_tbuf_get", (void *)(uintptr_t)rt_tbuf_get);
@@ -1000,6 +1002,15 @@ static void ny_jit_define_runtime_trampoline(LLVMModuleRef mod,
                                              const char *name, void *ptr) {
   if (!mod || !name || !*name || !ptr)
     return;
+  /*
+   * setjmp/longjmp must save and restore the frame that contains the Nytrix
+   * try body.  A normal JIT trampoline would save the trampoline's frame and
+   * then return from it before rt_panic longjmps, which is undefined behavior.
+   * Leave these as declarations and bind them directly through the execution
+   * engine/symbol table instead.
+   */
+  if (strcmp(name, "_setjmp") == 0 || strcmp(name, "setjmp") == 0)
+    return;
   LLVMValueRef f = LLVMGetNamedFunction(mod, name);
   if (!f || !LLVMIsDeclaration(f))
     return;
@@ -1171,6 +1182,8 @@ void ny_jit_define_runtime_trampolines(LLVMModuleRef mod) {
   ny_jit_define_runtime_trampoline(mod, "rt_trap", (void *)(uintptr_t)rt_trap);
   ny_jit_define_runtime_trampoline(mod, "rt_tbuf_new_raw",
                                    (void *)(uintptr_t)rt_tbuf_new_raw);
+  ny_jit_define_runtime_trampoline(mod, "rt_tbuf_new_typed_raw",
+                                   (void *)(uintptr_t)rt_tbuf_new_typed_raw);
   ny_jit_define_runtime_trampoline(mod, "rt_atoi", (void *)(uintptr_t)rt_atoi);
   ny_jit_define_runtime_trampoline(mod, "rt_atof", (void *)(uintptr_t)rt_atof);
   ny_jit_define_runtime_trampoline(mod, "rt_tbuf_get",
@@ -1486,9 +1499,11 @@ void ny_jit_define_runtime_trampolines(LLVMModuleRef mod) {
   ny_jit_define_runtime_trampoline(mod, "rt_f64_max",
                                    (void *)(uintptr_t)rt_f64_max);
 #ifndef _WIN32
-  void *setjmp_fn = dlsym(RTLD_DEFAULT, "_setjmp");
-  if (setjmp_fn)
-    ny_jit_define_runtime_trampoline(mod, "_setjmp", setjmp_fn);
+  /*
+   * _setjmp is intentionally not materialized as a trampoline; see
+   * ny_jit_define_runtime_trampoline().  ny_jit_add_runtime_symbols() and
+   * register_extern_symbols() bind the declaration directly.
+   */
 #endif
 }
 

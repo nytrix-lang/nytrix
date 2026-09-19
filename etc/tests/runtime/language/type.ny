@@ -1,3 +1,4 @@
+;; flags: --native-only
 ;; Runtime type surface: typed bindings, language type groups, impl self,
 ;; operators, and layouts.
 use std.core

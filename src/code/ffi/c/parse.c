@@ -76,7 +76,6 @@ const char *ny_cdecl_kind_name(ny_cdecl_kind_t kind) {
   return "unknown";
 }
 
-
 static int ny_c_abi_is_32(const char *abi) {
   return abi && (strstr(abi, "i386") || strstr(abi, "i686") ||
                  strstr(abi, "x86-32") || strstr(abi, "wasm32") ||
@@ -4111,7 +4110,6 @@ int ny_parse_decl(ny_parser_t *p, ny_cdecl_t *out) {
   }
   return p->fatal_error ? -1 : 1;
 }
-
 
 static bool ny_c_preproc_word_is(const char *src, size_t len, size_t pos,
                                  const char *word) {

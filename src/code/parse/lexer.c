@@ -699,9 +699,11 @@ token_t lexer_next(lexer_t *lx) {
     return tok;
   }
   if (c == '$' && peek(lx) == '{') {
-    /* Only a quote splice emits DOLLAR_LBRACE; a comptime template body
+    /*
+     * Only a quote splice emits DOLLAR_LBRACE; a comptime template body
      * (template_depth > 0) and plain top-level `${...}` keep the literal
-     * placeholder-identifier form the template expander rewrites. */
+     * placeholder-identifier form the template expander rewrites.
+     */
     if (lx->quote_depth == 0 || lx->template_depth > 0) {
       const unsigned char *p = (const unsigned char *)(src + start + 2);
       if (IS_ALPHA(*p)) {

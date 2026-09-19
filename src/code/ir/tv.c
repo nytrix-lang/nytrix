@@ -44,6 +44,16 @@ static Z3_ast nyir_smt_ror32(Z3_context z3, Z3_ast a, Z3_ast b) {
   return Z3_mk_zero_ext(z3, 32, Z3_mk_bvor(z3, right, left));
 }
 
+static Z3_ast nyir_smt_bswap(Z3_context z3, Z3_ast a, unsigned bits) {
+  unsigned bytes = bits / 8u;
+  Z3_ast out = Z3_mk_extract(z3, 7, 0, a);
+  for (unsigned i = 1; i < bytes; ++i) {
+    Z3_ast byte = Z3_mk_extract(z3, i * 8u + 7u, i * 8u, a);
+    out = Z3_mk_concat(z3, out, byte);
+  }
+  return bits == 32 ? Z3_mk_zero_ext(z3, 32, out) : out;
+}
+
 static bool nyir_smt_eval_straightline(Z3_context z3, Z3_sort bv,
                                          const nyir_func_t *f,
                                          Z3_ast *locals, size_t nloc,
@@ -113,6 +123,12 @@ static bool nyir_smt_eval_straightline(Z3_context z3, Z3_sort bv,
       break;
     case NYIR_ROR32_I64:
       r = nyir_smt_ror32(z3, a, b);
+      break;
+    case NYIR_BSWAP_I64:
+      r = nyir_smt_bswap(z3, a, 64);
+      break;
+    case NYIR_BSWAP32_I64:
+      r = nyir_smt_bswap(z3, a, 32);
       break;
     case NYIR_CMP_I64: {
       Z3_ast c = Z3_mk_true(z3);
@@ -335,6 +351,12 @@ static bool nyir_smt_walk_cfg(Z3_context z3, Z3_sort bv,
     case NYIR_ROR32_I64:
       r = nyir_smt_ror32(z3, a, b);
       break;
+    case NYIR_BSWAP_I64:
+      r = nyir_smt_bswap(z3, a, 64);
+      break;
+    case NYIR_BSWAP32_I64:
+      r = nyir_smt_bswap(z3, a, 32);
+      break;
     case NYIR_CMP_I64: {
       Z3_ast c = Z3_mk_true(z3);
       switch (in->cmp) {
@@ -433,7 +455,6 @@ static bool nyir_smt_eval_cfg(Z3_context z3, Z3_sort bv,
   return ok && out->paths > 0;
 }
 #endif
-
 
 bool nyir_tv_smt_equiv(const nyir_func_t *before, const nyir_func_t *after,
                          char *err, size_t err_len) {

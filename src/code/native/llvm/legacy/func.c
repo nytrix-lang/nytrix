@@ -8,6 +8,7 @@
 #include "code/native/llvm/legacy.h"
 #include "code/parse/proof.h"
 #include "code/priv.h"
+#include "code/typing/ownership.h"
 #include "code/typing/typeinfer.h"
 #ifndef _WIN32
 #include <alloca.h>
@@ -605,7 +606,9 @@ static bool parse_effect_attr_args(codegen_t *cg, const stmt_t *fn_stmt,
       saw_any = true;
       continue;
     }
-    /* Effect variable: single letter, 'var, or eff */
+    /*
+     * Effect variable: single letter, 'var, or eff
+     */
     if ((len == 1 && (name[0] >= 'a' && name[0] <= 'z')) ||
         (len > 1 && name[0] == '\'') ||
         (len >= 3 && strncmp(name, "eff", 3) == 0)) {
@@ -615,7 +618,9 @@ static bool parse_effect_attr_args(codegen_t *cg, const stmt_t *fn_stmt,
       saw_any = true;
       continue;
     }
-    /* Capability name: e.g. read, write, fs, net, console, or cap(...) */
+    /*
+     * Capability name: e.g. read, write, fs, net, console, or cap(...)
+     */
     if (len > 0) {
       char cap_name[64] = {0};
       if (len >= 5 && strncmp(name, "cap(", 4) == 0 && name[len - 1] == ')') {
@@ -743,6 +748,83 @@ static void parse_param_contract_list_attr(codegen_t *cg, const stmt_t *fn_stmt,
   }
 }
 
+static void parse_allowance_attr(codegen_t *cg, const stmt_t *fn_stmt,
+                                 const attribute_t *attr,
+                                 ny_allowance_list *out) {
+  if (!cg || !fn_stmt || !attr || !out)
+    return;
+  if (attr->args.len != 2) {
+    ny_diag_error(attr_diag_tok(fn_stmt, attr, 0),
+                  "@allowance requires (parameter, limit)");
+    cg->had_error = 1;
+    return;
+  }
+  const char *name = NULL;
+  size_t len = 0;
+  if (!attr_arg_text_view(attr->args.data[0], &name, &len) || len == 0) {
+    ny_diag_error(attr_diag_tok(fn_stmt, attr, 0),
+                  "expected parameter name in @allowance");
+    cg->had_error = 1;
+    return;
+  }
+  if (!fn_has_param_named(fn_stmt, name, len)) {
+    ny_diag_error(attr_diag_tok(fn_stmt, attr, 0),
+                  "@allowance references unknown parameter '%.*s'", (int)len,
+                  name);
+    cg->had_error = 1;
+    return;
+  }
+  for (size_t i = 0; i < out->len; i++) {
+    if (out->data[i].name && strlen(out->data[i].name) == len &&
+        strncmp(out->data[i].name, name, len) == 0) {
+      ny_diag_error(attr_diag_tok(fn_stmt, attr, 0),
+                    "duplicate @allowance for parameter '%.*s'", (int)len, name);
+      cg->had_error = 1;
+      return;
+    }
+  }
+  expr_t *limit_expr = attr->args.data[1];
+  int64_t limit = -1;
+  bool valid_limit = false;
+  if (limit_expr) {
+    if (limit_expr->kind == NY_E_LITERAL &&
+        limit_expr->as.literal.kind == NY_LIT_INT) {
+      limit = limit_expr->as.literal.as.i;
+      if (limit >= 0)
+        valid_limit = true;
+    } else if (limit_expr->kind == NY_E_IDENT && limit_expr->as.ident.name) {
+      const char *id = limit_expr->as.ident.name;
+      if (strcmp(id, "omega") == 0 || strcmp(id, "inf") == 0 ||
+          strcmp(id, "infinity") == 0) {
+        limit = -1;
+        valid_limit = true;
+      }
+    } else if (limit_expr->kind == NY_E_UNARY && limit_expr->as.unary.op &&
+               strcmp(limit_expr->as.unary.op, "-") == 0) {
+      if (limit_expr->as.unary.right &&
+          limit_expr->as.unary.right->kind == NY_E_LITERAL &&
+          limit_expr->as.unary.right->as.literal.kind == NY_LIT_INT &&
+          limit_expr->as.unary.right->as.literal.as.i == 1) {
+        limit = -1;
+        valid_limit = true;
+      }
+    }
+  }
+  if (!valid_limit) {
+    ny_diag_error(attr_diag_tok(fn_stmt, attr, 1),
+                  "expected non-negative integer or 'omega'/'inf' limit in @allowance");
+    cg->had_error = 1;
+    return;
+  }
+  ny_allowance_t item;
+  item.name = codegen_strndup(cg, name, len);
+  item.limit = limit;
+  if (cg && cg->arena)
+    vec_push_arena(cg->arena, out, item);
+  else
+    vec_push(out, item);
+}
+
 static void fun_sig_copy_contracts(fun_sig *sig, const stmt_func_t *fn) {
   if (!sig || !fn)
     return;
@@ -758,6 +840,15 @@ static void fun_sig_copy_contracts(fun_sig *sig, const stmt_func_t *fn) {
     vec_push(&sig->releases, ny_strdup(fn->attr_releases.data[i]));
   for (size_t i = 0; i < fn->attr_forgets.len; i++)
     vec_push(&sig->forgets, ny_strdup(fn->attr_forgets.data[i]));
+  for (size_t i = 0; i < fn->attr_allowances.len; i++) {
+    ny_allowance_t a;
+    a.name = ny_strdup(fn->attr_allowances.data[i].name);
+    a.limit = fn->attr_allowances.data[i].limit;
+    vec_push(&sig->allowances, a);
+  }
+  sig->requires_cond = fn->requires_cond;
+  sig->decreases_expr = fn->decreases_expr;
+  sig->is_total = fn->attr_total;
   sig->effect_type = fn->effect_type;
 }
 
@@ -788,6 +879,7 @@ static void resolve_fn_attrs(codegen_t *cg, stmt_t *fn_stmt) {
   bool is_naked = false, is_jit = false, is_thread = false,
        is_async_effects = false;
   bool is_pure = false, is_cache = false;
+  bool is_total = false;
   bool is_extern = false;
   const char *link_name = NULL;
   bool has_effect_contract = false;
@@ -814,6 +906,10 @@ static void resolve_fn_attrs(codegen_t *cg, stmt_t *fn_stmt) {
     }
     if (attr_name_eq(attr, "pure")) {
       mark_simple_flag_attr(cg, fn_stmt, attr, "@pure", &is_pure);
+      continue;
+    }
+    if (attr_name_eq(attr, "total")) {
+      mark_simple_flag_attr(cg, fn_stmt, attr, "@total", &is_total);
       continue;
     }
     if (attr_name_eq(attr, "cache")) {
@@ -1001,6 +1097,10 @@ static void resolve_fn_attrs(codegen_t *cg, stmt_t *fn_stmt) {
                                      &decl->attr_forgets);
       continue;
     }
+    if (attr_name_eq(attr, "allowance")) {
+      parse_allowance_attr(cg, fn_stmt, attr, &decl->attr_allowances);
+      continue;
+    }
     if (attr_name_eq(attr, "extern")) {
       is_extern = true;
       if (attr->args.len > 0) {
@@ -1091,6 +1191,7 @@ static void resolve_fn_attrs(codegen_t *cg, stmt_t *fn_stmt) {
   decl->attr_thread = is_thread;
   decl->attr_async_effects = is_async_effects;
   decl->attr_pure = is_pure;
+  decl->attr_total = is_total;
   decl->attr_cache = is_cache;
   decl->is_extern = is_extern;
   decl->link_name = link_name ? codegen_strdup(cg, link_name) : NULL;
@@ -1144,7 +1245,7 @@ static void resolve_fn_attrs(codegen_t *cg, stmt_t *fn_stmt) {
       decl->attr_returns_owned || decl->attr_returns_borrow ||
       decl->attr_borrows.len != 0 || decl->attr_consumes.len != 0 ||
       decl->attr_mutates.len != 0 || decl->attr_releases.len != 0 ||
-      decl->attr_forgets.len != 0;
+      decl->attr_forgets.len != 0 || decl->attr_allowances.len != 0;
   const char *warn_ownership_contracts =
       getenv("NYTRIX_WARN_OWNERSHIP_CONTRACTS");
   if (has_ownership_contract && !cg->ownership_enabled &&
@@ -3188,6 +3289,8 @@ void gen_func(codegen_t *cg, stmt_t *fn, const char *name, scope *scopes,
     }
     cg->current_module_name = attached_in_lexical_module ? prev_mod : temp_mod;
   }
+  fun_sig *prev_fun_sig = cg->current_fun_sig;
+  cg->current_fun_sig = lookup_fun(cg, name, 0);
   const char *prev_ret = cg->current_fn_ret_type;
   const char *prev_returns_borrow = cg->current_fn_returns_borrow;
   bool prev_returns_owned = cg->current_fn_returns_owned;
@@ -3229,6 +3332,8 @@ void gen_func(codegen_t *cg, stmt_t *fn, const char *name, scope *scopes,
   gen_stmt(cg, scopes, &fd, fn->as.fn.body, root, true);
   if (fn->as.fn.attr_proves)
     ny_proof_check_fn_proves(cg, scopes, depth, fn);
+  if (fn->as.fn.attr_allowances.len > 0)
+    stmt_ownership_check_allowances(cg, fn);
   for (size_t i = 0; i < cg->labels.len; ++i)
     free((void *)cg->labels.data[i].name);
   free(cg->labels.data);
@@ -3248,6 +3353,7 @@ void gen_func(codegen_t *cg, stmt_t *fn, const char *name, scope *scopes,
   cg->current_fn_attr_naked = prev_naked;
   cg->current_fn_attr_tailcall = prev_tailcall;
   cg->current_fn_value = prev_fn_value;
+  cg->current_fun_sig = prev_fun_sig;
   cg->current_module_name = prev_mod;
   if (temp_mod)
     free(temp_mod);
@@ -3550,6 +3656,8 @@ void collect_sigs(codegen_t *cg, stmt_t *s) {
     memset(enu, 0, sizeof(enum_def_t));
     enu->name = codegen_strdup(cg, s->as.enu.name);
     enu->stmt = s;
+    enu->is_indexed_family = s->as.enu.is_indexed_family;
+    enu->index_param_name = s->as.enu.index_param_name ? codegen_strdup(cg, s->as.enu.index_param_name) : NULL;
     enu->adt_tag_base = 200000 + (int64_t)cg->enums.len * 1024;
     for (size_t i = 0; i < s->as.enu.type_params.len; i++)
       vec_push_arena(cg->arena, &enu->type_params,
@@ -3572,6 +3680,17 @@ void collect_sigs(codegen_t *cg, stmt_t *s) {
             .name = codegen_strdup(cg, item->fields.data[j].name),
             .type_name = codegen_strdup(cg, item->fields.data[j].type_name),
         };
+        if (field.type_name) {
+          const char *arr = strstr(field.type_name, "->");
+          if (arr) {
+            const char *occ = strstr(field.type_name, enu->name);
+            if (occ && occ < arr) {
+              ny_diag_error(s->tok, "strict positivity violation: recursive enum '%s' appears in negative position in variant '%s' field '%s'",
+                            enu->name, member.name, field.name ? field.name : "<anon>");
+              cg->had_error = 1;
+            }
+          }
+        }
         for (size_t k = 0; k < member.fields.len; k++) {
           if (strcmp(member.fields.data[k].name, field.name) == 0) {
             ny_diag_error(s->tok,
@@ -3636,6 +3755,40 @@ void collect_sigs(codegen_t *cg, stmt_t *s) {
     ny_register_tagged_type(cg, s->as.impl.type_name);
     for (size_t i = 0; i < s->as.impl.methods.len; i++)
       collect_attached_method_sig(cg, s->as.impl.methods.data[i]);
+    if (s->as.impl.laws.len > 0)
+      ny_proof_check_impl_laws(cg, NULL, 0, s);
+  } else if (s->kind == NY_S_REFINE) {
+    refine_def_t *def = arena_alloc(cg->arena, sizeof(*def));
+    if (def) {
+      memset(def, 0, sizeof(*def));
+      def->name = codegen_strdup(cg, s->as.refine.name);
+      def->base_type = codegen_strdup(cg, s->as.refine.base_type);
+      def->param = codegen_strdup(cg, s->as.refine.param);
+      def->predicate = s->as.refine.predicate;
+      def->stmt = s;
+      for (size_t i = 0; i < cg->refines.len; i++) {
+        if (cg->refines.data[i] && cg->refines.data[i]->name &&
+            strcmp(cg->refines.data[i]->name, def->name) == 0)
+          goto skip_refine;
+      }
+      vec_push(&cg->refines, def);
+    }
+  skip_refine:;
+  } else if (s->kind == NY_S_TRAIT) {
+    trait_def_t *def = arena_alloc(cg->arena, sizeof(*def));
+    if (def) {
+      memset(def, 0, sizeof(*def));
+      def->name = codegen_strdup(cg, s->as.trait.name);
+      def->methods = s->as.trait.methods;
+      def->stmt = s;
+      for (size_t i = 0; i < cg->traits.len; i++) {
+        if (cg->traits.data[i] && cg->traits.data[i]->name &&
+            strcmp(cg->traits.data[i]->name, def->name) == 0)
+          goto skip_trait;
+      }
+      vec_push(&cg->traits, def);
+    }
+  skip_trait:;
   } else if (s->kind == NY_S_MODULE) {
     const char *prev = cg->current_module_name;
     cg->current_module_name = s->as.module.name;

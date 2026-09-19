@@ -32,9 +32,7 @@
 #include <string.h>
 
 /*
- * ------------------------------------------------------------------
  * Union-find with path compression and union-by-rank.
- * ------------------------------------------------------------------
  */
 
 typedef struct {
@@ -82,12 +80,10 @@ static void uf_union(uf_t *uf, int a, int b) {
 }
 
 /*
- * ------------------------------------------------------------------
  * Alias class assignment:
  * 0            = unknown / may-alias-anything
  * 1 .. nslots  = local slot address class
  * nslots+1 ..  = allocation site class (one per ALLOCA/ADDR_SYMBOL)
- * ------------------------------------------------------------------
  */
 
 static bool nyir_alias_trace_enabled(void) {

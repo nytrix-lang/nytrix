@@ -159,6 +159,9 @@ void codegen_dispose(codegen_t *cg) {
   vec_free(&cg->labels);
   vec_free(&cg->operators);
   vec_free(&cg->enums);
+  vec_free(&cg->refines);
+  vec_free(&cg->traits);
+  vec_free(&cg->registry.lemmas);
   for (size_t i = 0; i < cg->layouts.len; i++)
     codegen_free_layout_def(cg->layouts.data[i]);
   vec_free(&cg->layouts);

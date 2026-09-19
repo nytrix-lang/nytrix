@@ -136,18 +136,27 @@ static int ny_native_nir_lower_binary(ny_native_nir_builder_t *b,
                 ? snprintf(symbol, sizeof(symbol), "%s", target)
                 : snprintf(symbol, sizeof(symbol), "%s.%s", owner, target);
     if (n > 0 && (size_t)n < sizeof(symbol) && owner) {
+      /* Operator targets are declarations in an impl, not names in the
+       * std.core namespace.  Resolve the exact method first so imported
+       * providers such as std.math.big keep their module-qualified symbol. */
+      const char *target_leaf = ny_native_leaf_name(target);
+      const stmt_t *target_fn = target_leaf
+                                    ? ny_native_nir_find_attached_method(
+                                          b, e->as.binary.left, target_leaf)
+                                    : NULL;
+      if (target_fn && target_fn->as.fn.name)
+        snprintf(symbol, sizeof(symbol), "%s", target_fn->as.fn.name);
       /* Short-name lookup and expanded operator metadata can both select an
        * impl wrapper (for example `std.core.str.str.repeat`) instead of the
        * source helper `std.core.str.repeat`.  Prefer the canonical owner plus
        * leaf spelling when the function table contains it; this keeps
        * operator lowering on the same symbol as ordinary attached calls. */
-      const char *target_leaf = ny_native_leaf_name(target);
       char qualified[512];
       int qn = target_leaf
                    ? snprintf(qualified, sizeof(qualified), "std.core.%s.%s",
                               owner, target_leaf)
                    : -1;
-      if (qn > 0 && (size_t)qn < sizeof(qualified) &&
+      if (!target_fn && qn > 0 && (size_t)qn < sizeof(qualified) &&
           ny_native_nir_find_user_function(b, qualified))
         snprintf(symbol, sizeof(symbol), "%s", qualified);
     }
@@ -206,16 +215,25 @@ static int ny_native_nir_lower_binary(ny_native_nir_builder_t *b,
         goto scalar_multiply;
       if (ny_native_nir_expr_is_f64(b, count_expr) ||
           ny_native_nir_expr_is_f32(b, count_expr) ||
-          ny_native_nir_expr_is_cstr(b, count_expr) ||
-          ny_native_nir_expr_is_any(b, count_expr)) {
+          ny_native_nir_expr_is_cstr(b, count_expr)) {
         ny_native_nir_fail(
             b, "native NYIR lower: list repeat count must be an integer");
         return -1;
       }
+      /* A dynamically typed count (`mut w, h = size[0], size[1]` feeding
+       * `[0.0] * w * h` in std.core.term) is legal Nytrix: unbox it at
+       * runtime instead of rejecting a program the VM accepts. */
+      bool count_is_dynamic = ny_native_nir_expr_is_any(b, count_expr);
       int list = ny_native_nir_lower_expr(b, list_expr);
       int count = ny_native_nir_lower_expr(b, count_expr);
       if (list < 0 || count < 0)
         return -1;
+      if (count_is_dynamic) {
+        count = ny_native_nir_emit_runtime_call(b, "rt_untag", count, -1, -1,
+                                                1, 0);
+        if (count < 0)
+          return -1;
+      }
       int out = ny_native_nir_emit_runtime_call(
           b, "rt_tbuf_repeat", list, count, -1, 2, 0);
       if (out < 0)
@@ -645,6 +663,30 @@ scalar_multiply:
                           e->as.binary.left->kind == NY_E_LITERAL &&
                           e->as.binary.left->as.literal.kind == NY_LIT_INT &&
                           !ny_expr_is_nil_literal(e->as.binary.left);
+  bool left_raw_i64 = left_int_literal ||
+                      (e->as.binary.left &&
+                       e->as.binary.left->semantic.rep == NY_SEM_REP_RAW_INT);
+  bool right_raw_i64 = right_int_literal ||
+                       (e->as.binary.right &&
+                        e->as.binary.right->semantic.rep == NY_SEM_REP_RAW_INT);
+  if (!left_raw_i64 && e->as.binary.left &&
+      e->as.binary.left->kind == NY_E_IDENT &&
+      e->as.binary.left->as.ident.name) {
+    const ny_native_nir_local_t *local =
+        ny_native_nir_find_local(b, e->as.binary.left->as.ident.name);
+    left_raw_i64 = local && !local->is_f64 && !local->is_f32 &&
+                   !local->is_list && !local->is_dict && !local->is_cstr &&
+                   local->semantic_rep == NY_SEM_REP_RAW_INT;
+  }
+  if (!right_raw_i64 && e->as.binary.right &&
+      e->as.binary.right->kind == NY_E_IDENT &&
+      e->as.binary.right->as.ident.name) {
+    const ny_native_nir_local_t *local =
+        ny_native_nir_find_local(b, e->as.binary.right->as.ident.name);
+    right_raw_i64 = local && !local->is_f64 && !local->is_f32 &&
+                    !local->is_list && !local->is_dict && !local->is_cstr &&
+                    local->semantic_rep == NY_SEM_REP_RAW_INT;
+  }
   bool left_is_raw_list_get =
       e->as.binary.left && e->as.binary.left->kind == NY_E_MEMCALL &&
       e->as.binary.left->as.memcall.name &&
@@ -770,7 +812,8 @@ scalar_multiply:
   if (tag_operand && left_any && !right_any && !right_f64 && !right_f32 &&
       !right_cstr && e->as.binary.right->kind == NY_E_IDENT &&
       !ny_native_nir_expr_is_raw_dynamic_read(b, e->as.binary.left) &&
-      e->as.binary.right->semantic.rep == NY_SEM_REP_RAW_INT) {
+      e->as.binary.right->semantic.rep == NY_SEM_REP_RAW_INT &&
+      !(e->as.binary.op && strcmp(e->as.binary.op, "+") == 0)) {
     rhs = ny_native_nir_emit_runtime_call(b, "rt_tag", rhs, -1, -1, 1, 0);
     if (rhs < 0)
       return -1;
@@ -1016,9 +1059,7 @@ scalar_multiply:
       return ny_native_nir_emit_runtime_call(
           b, "rt_vec_add_raw", a, rhs, -1, 2, 0);
     }
-    if (e->as.binary.left &&
-        (e->as.binary.left->semantic.rep == NY_SEM_REP_RAW_INT ||
-         left_int_literal) &&
+    if (left_raw_i64 &&
         (right_any || right_dynamic_result) &&
         !left_f64 && !right_f64 && !left_f32 && !right_f32) {
       if (!right_is_raw_list_get &&
@@ -1032,13 +1073,11 @@ scalar_multiply:
       if (a < 0)
         return -1;
       int sum = nyir_emit(&b->nyir, (nyir_inst_t){.op = NYIR_ADD_I64, .dst = -1, .a = a, .b = rhs});
-      if (b->return_any && sum >= 0)
+      if ((b->return_any || ny_native_nir_expr_is_any(b, e)) && sum >= 0)
         return ny_native_nir_emit_runtime_call(b, "rt_tag", sum, -1, -1, 1, 0);
       return sum;
     }
-    if (e->as.binary.right &&
-        (e->as.binary.right->semantic.rep == NY_SEM_REP_RAW_INT ||
-         right_int_literal) &&
+    if (right_raw_i64 &&
         (left_any || left_dynamic_result) &&
         !left_f64 && !right_f64 && !left_f32 && !right_f32) {
       if (!left_is_raw_list_get &&
@@ -1052,7 +1091,7 @@ scalar_multiply:
       if (rhs < 0)
         return -1;
       int sum = nyir_emit(&b->nyir, (nyir_inst_t){.op = NYIR_ADD_I64, .dst = -1, .a = a, .b = rhs});
-      if (b->return_any && sum >= 0)
+      if ((b->return_any || ny_native_nir_expr_is_any(b, e)) && sum >= 0)
         return ny_native_nir_emit_runtime_call(b, "rt_tag", sum, -1, -1, 1, 0);
       return sum;
     }
@@ -1117,7 +1156,14 @@ scalar_multiply:
           b, "rt_any_div", a, rhs, -1, 2, 0);
     }
   }
-  if ((left_cstr || right_cstr) && !numeric_literal_sub) {
+  /*
+   * Bitwise operators never apply to strings, so a conservatively
+   * string-typed operand (an int local stamped NY_SEM_REP_STRING by the
+   * multi-assign typing in std.core.str) must not divert `&` into the
+   * c-string path; it lowers as a raw integer operation.
+   */
+  bool cstr_path_bitwise = ny_native_nir_is_bitwise_operator(e->as.binary.op);
+  if ((left_cstr || right_cstr) && !numeric_literal_sub && !cstr_path_bitwise) {
     if (!left_cstr) {
       int conv = -1;
       if (left_any)

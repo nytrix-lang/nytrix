@@ -901,6 +901,40 @@ set(SRC_COMPILER
   "${NYTRIX_ROOT}/src/code/wire/pipe/init.c"
 )
 
+# Several compiler subsystems are intentionally built as amalgamated translation
+# units: their init.c file textually includes sibling .c files.  CMake only
+# tracks the top-level source by default, so incremental builds could silently
+# keep stale lowering/type/wire code after an included file changed.  Make the
+# include relationship explicit just as we do for runtime/init.c below.
+file(GLOB LEGACY_GENCALL_SOURCES CONFIGURE_DEPENDS
+  "${NYTRIX_ROOT}/src/code/native/llvm/legacy/gencall/*.c")
+file(GLOB LEGACY_EXPR_SOURCES CONFIGURE_DEPENDS
+  "${NYTRIX_ROOT}/src/code/native/llvm/legacy/expr/*.c")
+file(GLOB TYPING_PIPELINE_SOURCES CONFIGURE_DEPENDS
+  "${NYTRIX_ROOT}/src/code/typing/pipeline/*.c")
+file(GLOB WIRE_PIPE_SOURCES CONFIGURE_DEPENDS
+  "${NYTRIX_ROOT}/src/code/wire/pipe/*.c")
+list(REMOVE_ITEM LEGACY_GENCALL_SOURCES
+  "${NYTRIX_ROOT}/src/code/native/llvm/legacy/gencall/init.c")
+list(REMOVE_ITEM LEGACY_EXPR_SOURCES
+  "${NYTRIX_ROOT}/src/code/native/llvm/legacy/expr/init.c")
+list(REMOVE_ITEM TYPING_PIPELINE_SOURCES
+  "${NYTRIX_ROOT}/src/code/typing/pipeline/init.c")
+list(REMOVE_ITEM WIRE_PIPE_SOURCES
+  "${NYTRIX_ROOT}/src/code/wire/pipe/init.c")
+set_source_files_properties(
+  "${NYTRIX_ROOT}/src/code/native/llvm/legacy/gencall/init.c"
+  PROPERTIES OBJECT_DEPENDS "${LEGACY_GENCALL_SOURCES}")
+set_source_files_properties(
+  "${NYTRIX_ROOT}/src/code/native/llvm/legacy/expr/init.c"
+  PROPERTIES OBJECT_DEPENDS "${LEGACY_EXPR_SOURCES}")
+set_source_files_properties(
+  "${NYTRIX_ROOT}/src/code/typing/pipeline/init.c"
+  PROPERTIES OBJECT_DEPENDS "${TYPING_PIPELINE_SOURCES}")
+set_source_files_properties(
+  "${NYTRIX_ROOT}/src/code/wire/pipe/init.c"
+  PROPERTIES OBJECT_DEPENDS "${WIRE_PIPE_SOURCES}")
+
 set(RT_INIT "${NYTRIX_ROOT}/src/code/runtime/init.c")
 file(GLOB RT_SOURCES CONFIGURE_DEPENDS "${NYTRIX_ROOT}/src/code/runtime/*.c")
 file(GLOB RT_HEADERS CONFIGURE_DEPENDS "${NYTRIX_ROOT}/src/code/runtime/*.h")
@@ -1099,7 +1133,48 @@ if (NYTRIX_USE_LLVM)
     target_compile_options(nytrix_compiler PRIVATE ${NYTRIX_WINSDK_CFLAGS})
   endif()
 else()
-  add_library(nytrix_compiler INTERFACE)
+  set(_nytrix_nollvm_src ${SRC_COMPILER})
+  list(FILTER _nytrix_nollvm_src EXCLUDE REGEX "native/llvm")
+  list(FILTER _nytrix_nollvm_src EXCLUDE REGEX "ffi/clang\\.c$")
+  list(FILTER _nytrix_nollvm_src EXCLUDE REGEX "cmd/ny/repl")
+  list(FILTER _nytrix_nollvm_src EXCLUDE REGEX "runtime/")
+  list(FILTER _nytrix_nollvm_src EXCLUDE REGEX "wire/cache\\.c$")
+
+  add_library(nytrix_compiler OBJECT ${_nytrix_nollvm_src})
+  set_property(TARGET nytrix_compiler PROPERTY POSITION_INDEPENDENT_CODE ON)
+  add_dependencies(nytrix_compiler nytrix_version_header)
+  nytrix_apply_compile_perf_flags(nytrix_compiler)
+  nytrix_apply_size_flags(nytrix_compiler)
+  target_include_directories(nytrix_compiler PRIVATE
+    "${NYTRIX_ROOT}/src"
+    "${NYTRIX_ROOT}/src/code"
+    "${NYTRIX_ROOT}/src/code/typing"
+    "${NYTRIX_ROOT}/src/code/runtime"
+    "${NYTRIX_ROOT}/src/base"
+    "${CMAKE_BINARY_DIR}"
+  )
+  target_compile_definitions(nytrix_compiler PRIVATE
+    NYTRIX_RUNTIME_ONLY=1
+    NYTRIX_USE_LLVM=0
+    __STDC_CONSTANT_MACROS
+    __STDC_FORMAT_MACROS
+    __STDC_LIMIT_MACROS
+    NYTRIX_STD_PATH="${NYTRIX_STD_PATH}"
+  )
+  if (UNIX AND NOT APPLE)
+    target_compile_definitions(nytrix_compiler PRIVATE _GNU_SOURCE)
+  endif()
+  if (WIN32)
+    target_compile_definitions(nytrix_compiler PRIVATE WIN32_LEAN_AND_MEAN
+      _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_WARNINGS PATH_MAX=4096)
+  endif()
+  if (CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
+    target_compile_options(nytrix_compiler PRIVATE ${NYTRIX_WARNING_FLAGS})
+    if (CMAKE_C_COMPILER_ID MATCHES "Clang")
+      target_compile_options(nytrix_compiler PRIVATE ${NYTRIX_CLANG_WARNING_FLAGS})
+    endif()
+    target_compile_options(nytrix_compiler PRIVATE -fno-strict-aliasing -ffunction-sections -fdata-sections)
+  endif()
 endif()
 
 add_library(nytrix_runtime OBJECT "${RT_INIT}")
@@ -1206,7 +1281,13 @@ if (NYTRIX_USE_LLVM)
     OUTPUT_NAME_DEBUG "ny-full_debug"
   )
   if(UNIX AND NOT APPLE AND EXISTS "${NYTRIX_ROOT}/build/vendor/lib/host")
+    # Some vendored compiler libraries (notably libclang) have their own
+    # shared-library dependencies such as libedit/libxml2.  DT_RUNPATH is not
+    # used for transitive dependency lookup, so prefer the legacy DT_RPATH for
+    # build-tree tools: it lets a freshly built ny-full run directly without
+    # requiring the ./make wrapper to inject LD_LIBRARY_PATH.
     set_property(TARGET ny-full PROPERTY BUILD_RPATH "$ORIGIN/../vendor/lib/host")
+    target_link_options(ny-full PRIVATE "-Wl,--disable-new-dtags")
   endif()
   if (WIN32)
     # Set PDB properties for Windows builds
@@ -1362,7 +1443,7 @@ if (NOT WIN32)
   )
 endif()
 
-if (NYTRIX_BUILD_LSP AND NYTRIX_USE_LLVM)
+if (NYTRIX_BUILD_LSP)
   add_executable(ny-lsp
     "${NYTRIX_ROOT}/src/cmd/lsp/main.c"
     $<TARGET_OBJECTS:nytrix_compiler>
@@ -1389,6 +1470,10 @@ if (NYTRIX_BUILD_LSP AND NYTRIX_USE_LLVM)
   set_target_properties(ny-lsp PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
   )
+  if(UNIX AND NOT APPLE AND EXISTS "${NYTRIX_ROOT}/build/vendor/lib/host")
+    set_property(TARGET ny-lsp PROPERTY BUILD_RPATH "$ORIGIN/../vendor/lib/host")
+    target_link_options(ny-lsp PRIVATE "-Wl,--disable-new-dtags")
+  endif()
   if (WIN32)
     # Set PDB properties for Windows builds
     set_target_properties(ny-lsp PROPERTIES
@@ -1692,6 +1777,21 @@ else()
       endif()
       target_link_options(ny-lsp PRIVATE -rdynamic)
     endif()
+  else()
+    if (NYTRIX_BUILD_LSP)
+      target_link_libraries(ny-lsp PRIVATE m pthread util)
+      if (NYTRIX_USE_GMP AND NYTRIX_GMP_LIBRARY_FOUND)
+        target_link_libraries(ny-lsp PRIVATE "${NYTRIX_GMP_LIBRARY_FOUND}")
+      endif()
+      if (UNIX AND NOT APPLE)
+        target_link_libraries(ny-lsp PRIVATE dl ZLIB::ZLIB)
+        target_link_options(ny-lsp PRIVATE -Wl,--unresolved-symbols=ignore-all)
+      elseif (APPLE)
+        target_link_libraries(ny-lsp PRIVATE ZLIB::ZLIB)
+        target_link_options(ny-lsp PRIVATE -undefined dynamic_lookup)
+      endif()
+      target_link_options(ny-lsp PRIVATE -rdynamic)
+    endif()
   endif()
 endif()
 
@@ -1811,7 +1911,7 @@ if (UNIX AND NOT APPLE AND NYTRIX_INSTALL_BIN_ALIAS)
 endif()
 # Standalone tool targets remain buildable for developer compatibility.
 # Installed tooling is exposed through `ny fmt|perf|test|doc|make|pkg`.
-if (NYTRIX_BUILD_LSP AND NYTRIX_USE_LLVM)
+if (NYTRIX_BUILD_LSP)
   install(TARGETS ny-lsp
     RUNTIME DESTINATION bin
   )

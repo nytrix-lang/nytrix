@@ -1,0 +1,21 @@
+shape ownership-allowance-exceeded {
+  family "compiler-errors/ownership"
+  generator "error"
+  features ["error", "ownership", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "ownership allowance exceeded for 'y': observed 2 > allowance 1"
+  flags "--ownership-strict"
+  source ny <<'NY'
+use std.core
+
+@consumes(y)
+@allowance(y, 1)
+fn twice(any y) any {
+   y + y
+}
+
+twice([1])
+NY
+}

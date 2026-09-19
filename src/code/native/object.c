@@ -2428,6 +2428,18 @@ static bool ny_x64_obj_emit_inst(ny_x64_obj_ctx_t *c,
       return false;
     return ny_x64_obj_store_value_rax(c, in->dst);
   }
+  case NYIR_SELECT_I64:
+    /*
+     * Branchless scalar select.  TEST establishes the condition flags; MOV
+     * loads do not change them, so load false->rax and true->r10 before the
+     * final cmovne r10, rax.
+     */
+    return ny_x64_obj_load_value_rax(c, in->a) &&
+           ny_x64_obj_bytes(c, (const unsigned char[]){0x48, 0x85, 0xc0}, 3) &&
+           ny_x64_obj_load_value_rax(c, in->c) &&
+           ny_x64_obj_load_value_r10(c, in->b) &&
+           ny_x64_obj_bytes(c, (const unsigned char[]){0x49, 0x0f, 0x45, 0xc2}, 4) &&
+           ny_x64_obj_store_value_rax(c, in->dst);
   case NYIR_CMP_I64: {
     int64_t imm = 0;
     /*

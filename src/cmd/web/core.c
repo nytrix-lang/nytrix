@@ -57,7 +57,6 @@ static int mkdir_p(const char *path) {
   return ny_mkdir_compat(tmp) == 0 || ny_access(tmp, F_OK) == 0;
 }
 
-
 static int copy_file_bytes(const char *src, const char *dst) {
   FILE *in = fopen(src, "rb");
   if (!in)
@@ -130,11 +129,11 @@ static int join_path(char *out, size_t out_n, const char *a, const char *b) {
   int need_slash = al > 0 && a[al - 1] != '/';
   if (al + (size_t)need_slash + bl + 1 > out_n)
     return 0;
-  memcpy(out, a, al);
+  memmove(out, a, al);
   size_t p = al;
   if (need_slash)
     out[p++] = '/';
-  memcpy(out + p, b, bl);
+  memmove(out + p, b, bl);
   out[p + bl] = '\0';
   return 1;
 }
@@ -291,7 +290,7 @@ static int sb_reserve(sb_t *sb, size_t need) {
 static int sb_addn(sb_t *sb, const char *s, size_t n) {
   if (!sb_reserve(sb, sb->len + n + 1))
     return 0;
-  memcpy(sb->data + sb->len, s, n);
+  memmove(sb->data + sb->len, s, n);
   sb->len += n;
   sb->data[sb->len] = '\0';
   return 1;
@@ -586,7 +585,7 @@ static char *strndup0(const char *s, size_t n) {
   char *p = (char *)malloc(n + 1);
   if (!p)
     return NULL;
-  memcpy(p, s, n);
+  memmove(p, s, n);
   p[n] = '\0';
   return p;
 }
@@ -1388,7 +1387,7 @@ static int append_system_source_roots(sb_t *bundle, const char *asset_root,
       const char *colon = strchr(p, ':');
       size_t n = colon ? (size_t)(colon - p) : strlen(p);
       if (n > 0 && n < sizeof(lib_path)) {
-        memcpy(lib_path, p, n);
+        memmove(lib_path, p, n);
         lib_path[n] = '\0';
         if (path_is_dir(lib_path) &&
             (!input_root || !paths_overlap(input_root, lib_path)))
@@ -1578,7 +1577,7 @@ static char *github_source_href_for_markdown(const char *href, size_t href_n) {
   char path[PATH_MAX];
   if (path_n == 0 || path_n >= sizeof(path))
     return NULL;
-  memcpy(path, href, path_n);
+  memmove(path, href, path_n);
   path[path_n] = '\0';
   for (char *p = path; *p; p++)
     if (*p == '\\')
@@ -1924,7 +1923,6 @@ static void append_markdown_docs_json(sb_t *json, const char *root) {
   sb_add(json, "]");
 }
 
-
 static int read_file_bytes(const char *path, char **out, size_t *out_n);
 
 static void append_project_examples_json(sb_t *json, const char *root) {
@@ -2162,7 +2160,6 @@ static void append_symbol_json(sb_t *json, const char *id_src, const char *name,
   free(id);
 }
 
-
 static char *module_doc_with_generated_summary(const char *mod_name,
                                                const char *mod_doc,
                                                const char *decl_tail,
@@ -2207,7 +2204,7 @@ static char *parse_docs_json(const char *bundle, const char *root,
             size_t n = (size_t)(q2 - q1 - 1);
             if (n >= sizeof(orig))
               n = sizeof(orig) - 1;
-            memcpy(orig, q1 + 1, n);
+            memmove(orig, q1 + 1, n);
             orig[n] = '\0';
           }
         } else {
@@ -2215,7 +2212,7 @@ static char *parse_docs_json(const char *bundle, const char *root,
           size_t n = (size_t)(bundle + line_end - p);
           if (n >= sizeof(orig))
             n = sizeof(orig) - 1;
-          memcpy(orig, p, n);
+          memmove(orig, p, n);
           orig[n] = '\0';
         }
         chunk_start = line_end < len ? line_end + 1 : line_end;
@@ -3058,7 +3055,7 @@ static void append_symbol_entries_from_bundle(doc_search_index_t *idx,
             size_t n = (size_t)(q2 - q1 - 1);
             if (n >= sizeof(orig))
               n = sizeof(orig) - 1;
-            memcpy(orig, q1 + 1, n);
+            memmove(orig, q1 + 1, n);
             orig[n] = '\0';
           }
         } else {
@@ -3066,7 +3063,7 @@ static void append_symbol_entries_from_bundle(doc_search_index_t *idx,
           size_t n = (size_t)(bundle + line_end - p);
           if (n >= sizeof(orig))
             n = sizeof(orig) - 1;
-          memcpy(orig, p, n);
+          memmove(orig, p, n);
           orig[n] = '\0';
         }
         chunk_start = line_end < len ? line_end + 1 : line_end;
@@ -4438,7 +4435,7 @@ static char *doc_route_from_href_static(const char *base_route,
 
   char path[PATH_MAX];
   size_t copy_n = path_n < sizeof(path) - 1 ? path_n : sizeof(path) - 1;
-  memcpy(path, href, copy_n);
+  memmove(path, href, copy_n);
   path[copy_n] = '\0';
   for (char *p = path; *p; p++)
     if (*p == '\\')

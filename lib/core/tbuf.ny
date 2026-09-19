@@ -11,11 +11,11 @@ fn _tbuf_new(int n, int elem_size) ptr {
    interchangeable with compiler-pooled lists and raw tbuf helpers."
    if n < 0 { n = 0 }
    if elem_size <= 0 { elem_size = 1 }
-   rt_tbuf_new_raw(n, elem_size)
+   rt_tbuf_new_typed_raw(n, elem_size)
 }
 
 extern "" {
-   fn rt_tbuf_new_raw(int count, int elem_size) ptr
+   fn rt_tbuf_new_typed_raw(int count, int elem_size) ptr
 }
 
 fn f32buf_new(int n) ptr { _tbuf_new(n, 4) }

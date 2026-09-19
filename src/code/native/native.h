@@ -41,7 +41,6 @@ typedef enum {
   NY_NATIVE_CAP_MACH_TRAP = 1u << 8
 } ny_native_target_cap_t;
 
-
 typedef struct ny_native_target_info_t {
   ny_native_target_t target;
   ny_native_abi_t abi;

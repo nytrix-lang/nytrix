@@ -35,7 +35,6 @@ static void ny_ensure_parent_dir_for_path(const char *path) {
   ny_ensure_dir_recursive(tmp);
 }
 
-
 static void ny_write_ir_stats_file(const ny_options *opt, const char *name,
                                    LLVMModuleRef module) {
   if (!module || !name || !*name)
@@ -246,15 +245,18 @@ static uint64_t ny_stage_semantic_config_fingerprint(const ny_options *opt) {
   const char *solver = getenv("NYTRIX_TYPE_SOLVER");
   if (!solver || !*solver)
     solver = (opt && opt->type_solver_raw) ? opt->type_solver_raw : "auto";
+  const char *proof_solver = getenv("NYTRIX_PROOF_SOLVER");
+  if (!proof_solver || !*proof_solver)
+    proof_solver = (opt && opt->proof_solver_raw) ? opt->proof_solver_raw : "auto";
   const char *frontend =
       (opt && opt->c_frontend_raw) ? opt->c_frontend_raw : "auto";
-  char config[640];
+  char config[700];
   snprintf(config, sizeof(config),
-           "semantic-config-v2|solver=%s|strict-types=%u|safe=%u|"
+           "semantic-config-v2|solver=%s|proof-solver=%s|strict-types=%u|safe=%u|"
            "ownership-strict=%u|borrow-check=%u|dump-scope=%u|"
            "native-backend=%u|native-only=%u|native-abi=%u|native-tier=%u|"
            "native-cf-mem2reg=%u|profile=%s|target=%s|c-frontend=%s",
-           solver, opt && opt->strict_types ? 1u : 0u,
+           solver, proof_solver, opt && opt->strict_types ? 1u : 0u,
            opt && opt->safe_mode ? 1u : 0u,
            opt && opt->ownership_strict ? 1u : 0u,
            opt && opt->borrow_check ? 1u : 0u,
@@ -270,7 +272,6 @@ static uint64_t ny_stage_semantic_config_fingerprint(const ny_options *opt) {
 }
 
 /*
- *
  * Validate an emitted semantic snapshot before a later stage consumes it.
  *
  * The artifact is deliberately pointer-free.  This bounded reader only accepts
@@ -342,7 +343,6 @@ static bool ny_stage_artifact_matches_source_file(const char *path,
 }
 
 /*
- *
  * Confirm that a semantic-reuse artifact was produced by this compiler
  * source/build identity.  Source-only verification intentionally does not
  * require this field so older snapshots remain inspectable; replaying typed
@@ -453,7 +453,6 @@ static bool ny_stage_artifact_is_completed_semantic_snapshot(const char *json) {
 }
 
 /*
- *
  * Accept only successful ABI-or-later snapshots for compiler reuse.
  *
  * The source identity check prevents applying facts to another expanded
@@ -1474,6 +1473,10 @@ static void ny_safe_raw_validate_expr(ny_safe_raw_ctx_t *ctx, expr_t *e) {
   case NY_E_INFERRED_MEMBER:
   case NY_E_EMBED:
     break;
+  case NY_E_EXISTS:
+    if (e->as.exists.body)
+      ny_safe_raw_validate_expr(ctx, e->as.exists.body);
+    break;
   }
 }
 
@@ -1620,6 +1623,8 @@ static void ny_safe_raw_validate_stmt(ny_safe_raw_ctx_t *ctx, stmt_t *s) {
   case NY_S_INCLUDE:
   case NY_S_DEFINE:
   case NY_S_OPERATOR:
+  case NY_S_REFINE:
+  case NY_S_TRAIT:
     break;
   }
 }

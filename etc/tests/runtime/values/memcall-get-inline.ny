@@ -1,3 +1,4 @@
+;; flags: --native-only
 use std.core
 
 def a = [0, 99, 2]

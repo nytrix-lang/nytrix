@@ -516,8 +516,6 @@ static bool ny_gencall_list_len_min(codegen_t *cg, scope *scopes, size_t depth,
  * Canonical proof evaluation functions are declared in code/parse/proof.h
  */
 
-
-
 /*
  * 5.1: proof<P> parameter satisfaction at call sites
  */
@@ -1797,7 +1795,6 @@ static stmt_t *ny_resolve_lemma_callee(codegen_t *cg, scope *scopes,
    return result;
  }
 
-
 static LLVMValueRef ny_try_lemma_proof(codegen_t *cg, scope *scopes,
                                        size_t depth, expr_t *cond,
                                        token_t tok) {
@@ -1889,7 +1886,6 @@ static LLVMValueRef ny_try_lemma_proof(codegen_t *cg, scope *scopes,
                     name, (unsigned long long)digest);
   return LLVMConstInt(cg->type_i64, digest, false);
 }
-
 
 /*
  * Range-backed comparison decision. Returns:
@@ -2083,11 +2079,33 @@ static LLVMValueRef ny_try_static_assert_builtin(codegen_t *cg, scope *scopes,
   }
 
   expr_t *cond = c->args.data[0].val;
-  LLVMValueRef lemma_proof =
-      ny_try_lemma_proof(cg, scopes, depth, cond, e->tok);
-  if (lemma_proof) {
-    ny_proof_debug_at(1, e->tok, "%s: accepted via lemma instantiation", name);
-    return lemma_proof;
+
+  bool has_tactic = false;
+  bool allow_cc = false;
+  bool allow_range = false;
+  bool allow_z3 = false;
+  bool allow_fold = false;
+
+  if (msg) {
+    if (strstr(msg, "by_cc")) { allow_cc = true; has_tactic = true; }
+    if (strstr(msg, "by_range")) { allow_range = true; has_tactic = true; }
+    if (strstr(msg, "by_z3")) { allow_z3 = true; has_tactic = true; }
+    if (strstr(msg, "by_fold")) { allow_fold = true; has_tactic = true; }
+  }
+  if (!has_tactic) {
+    allow_cc = true;
+    allow_range = true;
+    allow_z3 = true;
+    allow_fold = true;
+  }
+
+  if (allow_cc) {
+    LLVMValueRef lemma_proof =
+        ny_try_lemma_proof(cg, scopes, depth, cond, e->tok);
+    if (lemma_proof) {
+      ny_proof_debug_at(1, e->tok, "%s: accepted via lemma instantiation (by_cc)", name);
+      return lemma_proof;
+    }
   }
 
   /*
@@ -2095,13 +2113,15 @@ static LLVMValueRef ny_try_static_assert_builtin(codegen_t *cg, scope *scopes,
    * ranges before falling through to LLVM constant evaluation. This makes
    * prove(n > 0) and static_assert(i < n) work on range-tracked values.
    */
-  const char *trivial_reason = NULL;
-  if (ny_proof_is_trivial_truth(cg, scopes, depth, cond, &trivial_reason)) {
-    ny_proof_debug_at(1, e->tok, "%s: accepted via known integer ranges", name);
-    return want_proof
-               ? LLVMConstInt(cg->type_i64,
-                              ny_proof_proposition_digest(cond), false)
-               : ny_gencall_const_bool(cg, true, "static_assert_trivial");
+  if (allow_range) {
+    const char *trivial_reason = NULL;
+    if (ny_proof_is_trivial_truth(cg, scopes, depth, cond, &trivial_reason)) {
+      ny_proof_debug_at(1, e->tok, "%s: accepted via known integer ranges (by_range)", name);
+      return want_proof
+                 ? LLVMConstInt(cg->type_i64,
+                                ny_proof_proposition_digest(cond), false)
+                 : ny_gencall_const_bool(cg, true, "static_assert_trivial");
+    }
   }
 
   /*
@@ -2111,16 +2131,54 @@ static LLVMValueRef ny_try_static_assert_builtin(codegen_t *cg, scope *scopes,
    * is proven unsatisfiable, so it can only accept a genuine proof; unknown
    * results fall through to constant evaluation below.
    */
-  {
+  if (allow_range || allow_z3) {
     char solver_cex[128] = {0};
-    if (ny_proof_try_solver(cg, scopes, depth, cond, solver_cex,
-                            sizeof(solver_cex))) {
-      ny_proof_debug_at(1, e->tok, "%s: accepted via solver", name);
+    const char *saved_solver = cg->proof_solver;
+    if (has_tactic) {
+      if (allow_range && allow_z3)
+        cg->proof_solver = "auto";
+      else if (allow_z3)
+        cg->proof_solver = "z3";
+      else
+        cg->proof_solver = "presburger";
+    }
+    bool proved = ny_proof_try_solver(cg, scopes, depth, cond, solver_cex,
+                                      sizeof(solver_cex));
+    cg->proof_solver = saved_solver;
+    if (proved) {
+      const char *closing = (has_tactic && allow_z3 && !allow_range) ? "by_z3" : "by_range";
+      ny_proof_debug_at(1, e->tok, "%s: accepted via solver (%s)", name, closing);
       return want_proof
                  ? LLVMConstInt(cg->type_i64,
                                 ny_proof_proposition_digest(cond), false)
                  : ny_gencall_const_bool(cg, true, "static_assert_solver");
     }
+  }
+
+  if (allow_fold) {
+    LLVMValueRef v = gen_expr(cg, scopes, depth, cond);
+    bool truthy = false;
+    if (ny_gencall_const_truthy(v, &truthy)) {
+      if (truthy) {
+        ny_proof_debug_at(1, e->tok, "%s: accepted via constant evaluation (by_fold)", name);
+        return want_proof
+                   ? LLVMConstInt(cg->type_i64,
+                                  ny_proof_proposition_digest(cond), false)
+                   : ny_gencall_const_bool(cg, true, "static_assert_ok");
+      } else {
+        ny_proof_debug_at(1, e->tok, "%s: condition constant-false", name);
+        ny_diag_error(cond ? cond->tok : e->tok, "%s", msg);
+        cg->had_error = 1;
+        return ny_gencall_const_bool(cg, false, "static_assert_failed");
+      }
+    }
+  }
+
+  if (has_tactic) {
+    ny_proof_debug_at(1, e->tok, "%s: condition could not be proved under strategy '%s'", name, msg);
+    ny_diag_error(cond ? cond->tok : e->tok, "%s: condition could not be proved under strategy '%s'", name, msg);
+    cg->had_error = 1;
+    return ny_gencall_const_bool(cg, false, "static_assert_failed");
   }
 
   LLVMValueRef v = gen_expr(cg, scopes, depth, cond);
@@ -2167,9 +2225,27 @@ bool ny_proof_check_lemma_definition(codegen_t *cg, stmt_t *lemma_stmt) {
   if (!cg || !lemma_stmt || lemma_stmt->kind != NY_S_LEMMA ||
       !lemma_stmt->as.lemma.proposition)
     return false;
+  scope sc[1] = {0};
+  vec_init(&sc[0].vars);
+  for (size_t i = 0; i < lemma_stmt->as.lemma.params.len; i++) {
+    const char *pname = lemma_stmt->as.lemma.params.data[i].name;
+    const char *ptype = lemma_stmt->as.lemma.params.data[i].type;
+    if (pname && ptype) {
+      scope_bind(cg, sc, 0, pname, NULL, lemma_stmt, false, ptype, false);
+      binding *b = lookup_binding_hash(cg, sc, 0, pname, strlen(pname), ny_hash_name(pname, strlen(pname)));
+      int64_t bound = 0;
+      if (b && ny_fin_resolve_bound(cg, NULL, 0, ptype, &bound)) {
+        b->has_int_range = true;
+        b->int_min_raw = 0;
+        b->int_max_raw = bound > 0 ? bound - 1 : 0;
+      }
+    }
+  }
   char cex[128] = {0};
-  if (ny_proof_try_solver(cg, NULL, 0, lemma_stmt->as.lemma.proposition,
-                          cex, sizeof(cex)))
+  bool proved = ny_proof_try_solver(cg, sc, 0, lemma_stmt->as.lemma.proposition,
+                                    cex, sizeof(cex));
+  vec_free(&sc[0].vars);
+  if (proved)
     return true;
   ny_diag_error(lemma_stmt->tok, "lemma '%s' is not universally provable",
                 lemma_stmt->as.lemma.name ? lemma_stmt->as.lemma.name

@@ -215,28 +215,26 @@ fn _resolve_bind_host(str host) int {
    _resolve_host(host)
 }
 
-#macos {
-   fn _make_sockaddr(int ip, int port) any {
-      def sa = malloc(16)
-      if sa == 0 { return 0 }
+fn _make_sockaddr(int ip, int port) any {
+   "Builds a 16-byte sockaddr_in for the compilation host's socket ABI."
+   ;; One function with a runtime branch instead of two same-named
+   ;; conditional definitions: duplicate names across a platform
+   ;; conditional resolve ambiguously and the macOS layout won on Linux
+   ;; (sa_family arrived as 0x210 and every bind failed with
+   ;; EAFNOSUPPORT).
+   def sa = malloc(16)
+   if sa == 0 { return 0 }
+   if OS == "macos" {
       store8(sa, 16, 0)
       store8(sa, AF_INET, 1)
-      store16(sa, htons(port), 2)
-      store32(sa, ip, 4)
-      store64(sa, 0, 8)
-      return sa
-   }
-} #else {
-   fn _make_sockaddr(int ip, int port) any {
-      def sa = malloc(16)
-      if sa == 0 { return 0 }
+   } else {
       store16(sa, AF_INET, 0)
-      store16(sa, htons(port), 2)
-      store32(sa, ip, 4)
-      store64(sa, 0, 8)
-      return sa
    }
-} #endif
+   store16(sa, htons(port), 2)
+   store32(sa, ip, 4)
+   store64(sa, 0, 8)
+   return sa
+}
 
 fn socket_connect(str host, int port) int {
    "Connect to host:port(TCP). Returns fd or -1."
@@ -424,8 +422,7 @@ fn read_socket(int fd, any max_len) any {
       free(base)
       return ""
    }
-   ;; Keep the received payload intact; terminate after the bytes so the
-   ;; string bridge never overwrites the first network byte.
+   ;; store8(p, v, i): write the NUL terminator one past the payload.
    store8(buf, 0, n)
    return init_str(buf, n)
 }
@@ -468,7 +465,12 @@ fn write_socket_part(int fd, any data, any off, any size=-1) int {
    mut count = size
    if !is_int(count) || count < 0 || off + count > n { count = n - off }
    if count <= 0 { return 0 }
-   return _c_send(fd, to_int(data) + off, count, 0)
+   ;; off/count arrive as dynamic words; unbox both so the extern receives
+   ;; the raw pointer and raw length (a boxed `off` shifted the buffer).
+   def base_ptr = to_int(data)
+   def off_i = to_int(off)
+   def count_i = to_int(count)
+   _c_send(fd, base_ptr + off_i, count_i, 0)
 }
 
 fn write_socket_part_async(int fd, any data, any off, any size=-1) any {

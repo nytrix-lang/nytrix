@@ -15,8 +15,7 @@
 #define NYGC_TENURED_SIZE (1024 * 1024 * 1024) /* 1 GB tenured */
 #define NYGC_PROMOTION_AGE 3                   /* Promote after 3 collections */
 #define NYGC_DEFAULT_LOS_THRESHOLD                                             \
-  (1024 * 1024) /* 1 MB large-object cutoff                                    \
-                 */
+  (1024 * 1024) /* 1 MB large-object cutoff */
 
 /* Object header flags */
 #define NYGC_MARKED (1 << 0)

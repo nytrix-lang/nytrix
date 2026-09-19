@@ -260,7 +260,6 @@ int64_t rt_simmd_rotr64_i64(int64_t v, int64_t k_v) {
   return (int64_t)(k ? ((x >> k) | (x << (64u - k))) : x);
 }
 
-
 int64_t rt_simmd_prefetch(int64_t ptr_v, int64_t rw_v, int64_t locality_v) {
   const void *p = (const void *)(uintptr_t)(is_int(ptr_v) ? rt_untag_v(ptr_v) : ptr_v);
   int rw = rt_simmd_u64(rw_v) ? 1 : 0;
@@ -554,12 +553,12 @@ static const uint32_t rt_simmd_sha256_k[64] = {
 static void rt_simmd_sha256_block_ni(uint32_t state[8], const uint8_t block[64]) {
   __m128i state_0123 = _mm_loadu_si128((const __m128i*)(state + 0));
   __m128i state_4567 = _mm_loadu_si128((const __m128i*)(state + 4));
-  
+
   __m128i msg0 = _mm_loadu_si128((const __m128i*)(block + 0));
   __m128i msg1 = _mm_loadu_si128((const __m128i*)(block + 16));
   __m128i msg2 = _mm_loadu_si128((const __m128i*)(block + 32));
   __m128i msg3 = _mm_loadu_si128((const __m128i*)(block + 48));
-  
+
   __m128i k0 = _mm_loadu_si128((const __m128i*)(rt_simmd_sha256_k + 0));
   __m128i k1 = _mm_loadu_si128((const __m128i*)(rt_simmd_sha256_k + 4));
   __m128i k2 = _mm_loadu_si128((const __m128i*)(rt_simmd_sha256_k + 8));
@@ -576,69 +575,69 @@ static void rt_simmd_sha256_block_ni(uint32_t state[8], const uint8_t block[64])
   __m128i k13 = _mm_loadu_si128((const __m128i*)(rt_simmd_sha256_k + 52));
   __m128i k14 = _mm_loadu_si128((const __m128i*)(rt_simmd_sha256_k + 56));
   __m128i k15 = _mm_loadu_si128((const __m128i*)(rt_simmd_sha256_k + 60));
-  
+
   __m128i tmp0 = _mm_sha256msg1_epu32(msg0, msg1);
   state_0123 = _mm_sha256rnds2_epu32(state_0123, _mm_add_epi32(k0, msg0), _mm_setzero_si128());
   msg0 = _mm_sha256msg2_epu32(tmp0, msg2);
-  
+
   __m128i tmp1 = _mm_sha256msg1_epu32(msg1, msg2);
   state_4567 = _mm_sha256rnds2_epu32(state_4567, _mm_add_epi32(k1, msg1), _mm_setzero_si128());
   msg1 = _mm_sha256msg2_epu32(tmp1, msg3);
-  
+
   __m128i tmp2 = _mm_sha256msg1_epu32(msg2, msg3);
   state_0123 = _mm_sha256rnds2_epu32(state_0123, _mm_add_epi32(k2, msg2), _mm_setzero_si128());
   msg2 = _mm_sha256msg2_epu32(tmp2, msg0);
-  
+
   __m128i tmp3 = _mm_sha256msg1_epu32(msg3, msg0);
   state_4567 = _mm_sha256rnds2_epu32(state_4567, _mm_add_epi32(k3, msg3), _mm_setzero_si128());
   msg3 = _mm_sha256msg2_epu32(tmp3, msg1);
-  
+
   __m128i tmp4 = _mm_sha256msg1_epu32(msg0, msg1);
   state_0123 = _mm_sha256rnds2_epu32(state_0123, _mm_add_epi32(k4, msg0), _mm_setzero_si128());
   msg0 = _mm_sha256msg2_epu32(tmp4, msg2);
-  
+
   __m128i tmp5 = _mm_sha256msg1_epu32(msg1, msg2);
   state_4567 = _mm_sha256rnds2_epu32(state_4567, _mm_add_epi32(k5, msg1), _mm_setzero_si128());
   msg1 = _mm_sha256msg2_epu32(tmp5, msg3);
-  
+
   __m128i tmp6 = _mm_sha256msg1_epu32(msg2, msg3);
   state_0123 = _mm_sha256rnds2_epu32(state_0123, _mm_add_epi32(k6, msg2), _mm_setzero_si128());
   msg2 = _mm_sha256msg2_epu32(tmp6, msg0);
-  
+
   __m128i tmp7 = _mm_sha256msg1_epu32(msg3, msg0);
   state_4567 = _mm_sha256rnds2_epu32(state_4567, _mm_add_epi32(k7, msg3), _mm_setzero_si128());
   msg3 = _mm_sha256msg2_epu32(tmp7, msg1);
-  
+
   __m128i tmp8 = _mm_sha256msg1_epu32(msg0, msg1);
   state_0123 = _mm_sha256rnds2_epu32(state_0123, _mm_add_epi32(k8, msg0), _mm_setzero_si128());
   msg0 = _mm_sha256msg2_epu32(tmp8, msg2);
-  
+
   __m128i tmp9 = _mm_sha256msg1_epu32(msg1, msg2);
   state_4567 = _mm_sha256rnds2_epu32(state_4567, _mm_add_epi32(k9, msg1), _mm_setzero_si128());
   msg1 = _mm_sha256msg2_epu32(tmp9, msg3);
-  
+
   __m128i tmp10 = _mm_sha256msg1_epu32(msg2, msg3);
   state_0123 = _mm_sha256rnds2_epu32(state_0123, _mm_add_epi32(k10, msg2), _mm_setzero_si128());
   msg2 = _mm_sha256msg2_epu32(tmp10, msg0);
-  
+
   __m128i tmp11 = _mm_sha256msg1_epu32(msg3, msg0);
   state_4567 = _mm_sha256rnds2_epu32(state_4567, _mm_add_epi32(k11, msg3), _mm_setzero_si128());
   msg3 = _mm_sha256msg2_epu32(tmp11, msg1);
-  
+
   __m128i tmp12 = _mm_sha256msg1_epu32(msg0, msg1);
   state_0123 = _mm_sha256rnds2_epu32(state_0123, _mm_add_epi32(k12, msg0), _mm_setzero_si128());
   msg0 = _mm_sha256msg2_epu32(tmp12, msg2);
-  
+
   __m128i tmp13 = _mm_sha256msg1_epu32(msg1, msg2);
   state_4567 = _mm_sha256rnds2_epu32(state_4567, _mm_add_epi32(k13, msg1), _mm_setzero_si128());
   msg1 = _mm_sha256msg2_epu32(tmp13, msg3);
-  
+
   __m128i tmp14 = _mm_sha256msg1_epu32(msg2, msg3);
   state_0123 = _mm_sha256rnds2_epu32(state_0123, _mm_add_epi32(k14, msg2), _mm_setzero_si128());
   msg2 = _mm_sha256msg2_epu32(tmp14, msg0);
-  
+
   state_4567 = _mm_sha256rnds2_epu32(state_4567, _mm_add_epi32(k15, msg3), _mm_setzero_si128());
-  
+
   _mm_storeu_si128((__m128i*)(state + 0), state_0123);
   _mm_storeu_si128((__m128i*)(state + 4), state_4567);
 }
@@ -685,10 +684,10 @@ static void rt_simmd_sha256_block_sw(uint32_t state[8], const uint8_t block[64])
     uint32_t s1 = ((w[i-2] >> 17) | (w[i-2] << 15)) ^ ((w[i-2] >> 19) | (w[i-2] << 13)) ^ (w[i-2] >> 10);
     w[i] = w[i-16] + s0 + w[i-7] + s1;
   }
-  
+
   uint32_t a = state[0], b = state[1], c = state[2], d = state[3];
   uint32_t e = state[4], f = state[5], g = state[6], h = state[7];
-  
+
   for (int i = 0; i < 64; ++i) {
     uint32_t S1 = ((e >> 6) | (e << 26)) ^ ((e >> 11) | (e << 21)) ^ ((e >> 25) | (e << 7));
     uint32_t ch = (e & f) ^ ((~e) & g);
@@ -698,7 +697,7 @@ static void rt_simmd_sha256_block_sw(uint32_t state[8], const uint8_t block[64])
     uint32_t t2 = S0 + maj;
     h = g; g = f; f = e; e = d + t1; d = c; c = b; b = a; a = t1 + t2;
   }
-  
+
   state[0] += a; state[1] += b; state[2] += c; state[3] += d;
   state[4] += e; state[5] += f; state[6] += g; state[7] += h;
 }
@@ -709,9 +708,9 @@ static void rt_simmd_sha256_block_sw(uint32_t state[8], const uint8_t block[64])
 int64_t rt_simmd_sha256_block(int64_t state_v, int64_t block_v) {
   uint32_t *state = (uint32_t*)(uintptr_t)state_v;
   const uint8_t *block = (const uint8_t*)(uintptr_t)block_v;
-  
+
   if (!state || !block) return 0;
-  
+
 #if (defined(__x86_64__) || defined(__i386__) || defined(_M_X64) || defined(_M_IX86)) && \
     (defined(__GNUC__) || defined(__clang__)) && defined(__SHA__)
   if (rt_simmd_x86_has_sha()) {
@@ -724,7 +723,7 @@ int64_t rt_simmd_sha256_block(int64_t state_v, int64_t block_v) {
   return 1;
 #endif
 #endif
-  
+
   rt_simmd_sha256_block_sw(state, block);
   return 1;
 }
@@ -736,13 +735,13 @@ int64_t rt_simmd_sha256_blocks(int64_t state_v, int64_t block_v, int64_t count_v
   uint32_t *state = (uint32_t*)(uintptr_t)state_v;
   const uint8_t *block = (const uint8_t*)(uintptr_t)block_v;
   uint64_t count = (uint64_t)count_v;
-  
+
   if (!state || !block || count == 0) return 0;
-  
+
   for (uint64_t i = 0; i < count; ++i) {
     rt_simmd_sha256_block(state_v, (int64_t)(block + i * 64));
   }
-  
+
   return (int64_t)count;
 }
 

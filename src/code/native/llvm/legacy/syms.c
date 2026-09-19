@@ -2289,7 +2289,6 @@ static void maybe_add_suggestion(const char **s1, int *d1, const char **s2,
   }
 }
 
-
 static int levenshtein(const char *s, const char *t) {
   int ls = (int)strlen(s), lt = (int)strlen(t);
   int *d = (int *)alloca(sizeof(int) * (ls + 1) * (lt + 1));

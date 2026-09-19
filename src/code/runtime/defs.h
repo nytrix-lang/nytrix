@@ -31,6 +31,9 @@ RT_DEF("__release_owned", rt_release_owned, 1, "fn __release_owned(p)",
 RT_DEF(
     "__rc_count", rt_rc_count, 1, "fn __rc_count(p)",
     "Returns the current RC count for a heap value, for tests and debugging.")
+RT_DEF(
+    "__handle_valid", rt_handle_valid, 1, "fn __handle_valid(h)",
+    "Returns 1 if the runtime handle points to a valid live object/buffer/dict, 0 otherwise.")
 RT_DEF("__realloc", rt_realloc, 2, "fn __realloc(p, n)",
        "Reallocates memory to a new size.")
 RT_DEF("__runtime_cleanup", rt_runtime_cleanup, 0, "fn __runtime_cleanup()",
@@ -531,6 +534,8 @@ RT_DEF("__ge", rt_ge, 2, "fn __ge(a, b)", "Integer greater than or equal.")
 
 RT_DEF("__list_new", rt_list_new, 1, "fn __list_new(n)",
        "Allocates an empty list with capacity n.")
+RT_DEF("__varargs_new", rt_varargs_new, 1, "fn __varargs_new(n)",
+       "Allocates a managed list for legacy variadic-call arguments.")
 RT_DEF("__load_item", rt_load_item, 2, "fn __load_item(lst, i)",
        "Loads element i from list lst.")
 RT_DEF("__store_item", rt_store_item, 3, "fn __store_item(lst, i, v)",
@@ -998,6 +1003,9 @@ RT_DEF("__is_err", rt_is_err, 1, "fn __is_err(v)",
        "Checks if value is an Err result.")
 RT_DEF("__unwrap", rt_unwrap, 1, "fn __unwrap(v)",
        "Unwraps a Result or returns the value.")
+RT_DEF("__result_unwrap_raw", rt_result_unwrap_raw, 1,
+       "fn __result_unwrap_raw(v)",
+       "Unwraps a Result and decodes a scalar payload at the native boundary.")
 
 RT_DEF("__thread_spawn_raw", rt_thread_spawn_raw, 2,
        "fn __thread_spawn_raw(fn, arg)",

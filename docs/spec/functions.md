@@ -153,6 +153,32 @@ fn work(){ 0 }
 contracts. It rejects inferred `io`, `alloc`, `ffi`, or `thread` effects
 outside the declared mask.
 
+`@total` marks a function's preconditions as exhaustive: the function is
+expected to be total over its declared domain. The compiler parses `@total` as
+an attribute; it does not yet require the proof kernel to discharge it before
+comptime/`def` erasure.
+
+Precondition and termination clauses attach to the signature:
+
+```ny
+fn sha_block_len() int { 64 }
+
+@pure @total
+fn fill_fast(byte[] dst, byte[] src) int requires(dst.length == src.length) {
+   ...
+}
+
+fn count_down(Fin<10> n) int decreases(n) {   ; termination measure over n
+   ...
+}
+```
+
+`requires(expr)` states a value precondition, `decreases(expr)` a
+strict-descent termination measure. Both are parsed and verified as signature
+clauses; the compiler does not yet discharge them into proof obligations.
+Body-less signatures with the same clause forms are accepted so that
+`lemma`/trait/law families can be declared before a body exists.
+
 `@async_effects` marks eligible `io`-effect functions for the stackless async
 lowering path after their effect contract passes.
 
@@ -176,7 +202,7 @@ attributes are metadata with an implemented compiler effect, not comments.
 | Goal | Attribute | Compiler contract |
 | --- | --- | --- |
 | Declare allowed effects | `@effects(...)`, `@pure` | The effect checker validates calls against the declared set. |
-| Describe ownership | `@returns_owned`, `@borrows(x)`, `@consumes(x)`, `@mutates(x)` | Ownership and alias analysis receive an explicit contract. |
+| Describe ownership | `@returns_owned`, `@borrows(x)`, `@consumes(x)`, `@mutates(x)`, `@allowance(x, limit)` | Ownership, alias analysis, and grade-aware usage bounds receive an explicit contract. |
 | Evaluate during compilation | `@consteval` | Requires a compile-time-safe function contract. |
 | Request async lowering | `@async_effects` | Applies only after the declared effect contract passes. |
 | Run work in a worker | `@thread` | Statement calls detach; value calls join. |
@@ -237,6 +263,10 @@ check these attributes. Without ownership checking, the compiler parses them
 and warns that it will not enforce them. In strict mode, owned tracked returns
 need `@returns_owned`; local-owner borrows cannot escape unless they borrow a
 declared parameter; live borrows block moves, releases, and mutations.
+The `@allowance(param, limit)` attribute enforces grade-aware usage limits over
+`ℕ ∪ {omega}` (with `omega` / `inf` meaning unbounded), joining exclusive branches
+by `max`, summing sequential uses, treating closure captures as single construction
+demand, and allowing `mut` reassignments to satisfy their allowances independently.
 
 ## Docstrings
 

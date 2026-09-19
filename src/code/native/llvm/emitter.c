@@ -445,6 +445,30 @@ bool ny_llvm_emit_nyir_func(codegen_t *cg, const nyir_func_t *f,
   LLVMValueRef *vals = calloc(val_count + 1, sizeof(LLVMValueRef));
 
   /*
+   * Fixed NYIR stack objects have function lifetime even when the NYIR
+   * instruction sits in a loop/conditional. Native object backends reserve
+   * them in the fixed frame; mirror that contract by materializing every
+   * NYIR_ALLOCA in the LLVM entry block up front. This prevents repeated
+   * dynamic stack growth when an allocation site is executed in a loop.
+   */
+  if (vals) {
+    LLVMTypeRef i8_type = LLVMInt8TypeInContext(cg->ctx);
+    for (size_t i = 0; i < f->len; ++i) {
+      const nyir_inst_t *in = &f->data[i];
+      if (in->op != NYIR_ALLOCA || in->dst < 0 ||
+          (size_t)in->dst >= val_count || vals[in->dst])
+        continue;
+      LLVMValueRef bytes = LLVMConstInt(
+          cg->type_i64, (uint64_t)(in->imm > 0 ? in->imm : 1), false);
+      LLVMValueRef storage =
+          LLVMBuildArrayAlloca(cg->builder, i8_type, bytes, "nyir_alloca");
+      LLVMSetAlignment(storage, 16);
+      vals[in->dst] =
+          LLVMBuildPtrToInt(cg->builder, storage, cg->type_i64, "");
+    }
+  }
+
+  /*
    * Map parameters into locals and value slots
    */
   for (size_t i = 0; i < f->param_count && i < val_count; ++i) {
@@ -625,10 +649,21 @@ bool ny_llvm_emit_nyir_func(codegen_t *cg, const nyir_func_t *f,
       if (in->dst >= 0 && (size_t)in->dst < val_count) {
         LLVMValueRef va = (in->a >= 0 && (size_t)in->a < val_count) ? ny_as_i64(cg, vals[in->a]) : ny_c0(cg);
         LLVMValueRef vb = (in->b >= 0 && (size_t)in->b < val_count) ? ny_as_i64(cg, vals[in->b]) : ny_c0(cg);
-        LLVMValueRef sh1 = LLVMBuildLShr(cg->builder, va, vb, "");
-        LLVMValueRef diff = LLVMBuildSub(cg->builder, LLVMConstInt(cg->type_i64, 64, false), vb, "");
-        LLVMValueRef sh2 = LLVMBuildShl(cg->builder, va, diff, "");
-        vals[in->dst] = LLVMBuildOr(cg->builder, sh1, sh2, "");
+        const char *ror_name = "llvm.fshr.i64";
+        unsigned ror_id = LLVMLookupIntrinsicID(ror_name, strlen(ror_name));
+        LLVMTypeRef overload = cg->type_i64;
+        LLVMTypeRef ror_fn_ty = LLVMIntrinsicGetType(cg->ctx, ror_id, &overload, 1);
+        LLVMValueRef ror_fn = LLVMGetIntrinsicDeclaration(cg->module, ror_id, &overload, 1);
+        LLVMValueRef argv[3] = {va, va, vb};
+        vals[in->dst] = (ror_id != 0 && ror_fn_ty && ror_fn)
+                            ? LLVMBuildCall2(cg->builder, ror_fn_ty, ror_fn, argv, 3, "")
+                            : NULL;
+        if (!vals[in->dst]) {
+          LLVMValueRef sh1 = LLVMBuildLShr(cg->builder, va, vb, "");
+          LLVMValueRef diff = LLVMBuildSub(cg->builder, LLVMConstInt(cg->type_i64, 64, false), vb, "");
+          LLVMValueRef sh2 = LLVMBuildShl(cg->builder, va, diff, "");
+          vals[in->dst] = LLVMBuildOr(cg->builder, sh1, sh2, "");
+        }
       }
       break;
 
@@ -642,12 +677,28 @@ bool ny_llvm_emit_nyir_func(codegen_t *cg, const nyir_func_t *f,
         va = LLVMBuildAnd(cg->builder, va, mask, "");
         vb = LLVMBuildAnd(cg->builder, vb,
                           LLVMConstInt(cg->type_i64, 31, false), "");
-        LLVMValueRef sh1 = LLVMBuildLShr(cg->builder, va, vb, "");
-        LLVMValueRef diff = LLVMBuildSub(
-            cg->builder, LLVMConstInt(cg->type_i64, 32, false), vb, "");
-        LLVMValueRef sh2 = LLVMBuildShl(cg->builder, va, diff, "");
-        vals[in->dst] = LLVMBuildAnd(
-            cg->builder, LLVMBuildOr(cg->builder, sh1, sh2, ""), mask, "");
+        LLVMTypeRef i32 = LLVMInt32TypeInContext(cg->ctx);
+        LLVMValueRef va32 = LLVMBuildTrunc(cg->builder, va, i32, "");
+        LLVMValueRef vb32 = LLVMBuildTrunc(cg->builder, vb, i32, "");
+        const char *ror_name = "llvm.fshr.i32";
+        unsigned ror_id = LLVMLookupIntrinsicID(ror_name, strlen(ror_name));
+        LLVMTypeRef overload = i32;
+        LLVMTypeRef ror_fn_ty = LLVMIntrinsicGetType(cg->ctx, ror_id, &overload, 1);
+        LLVMValueRef ror_fn = LLVMGetIntrinsicDeclaration(cg->module, ror_id, &overload, 1);
+        LLVMValueRef argv[3] = {va32, va32, vb32};
+        LLVMValueRef rotated = (ror_id != 0 && ror_fn_ty && ror_fn)
+                                   ? LLVMBuildCall2(cg->builder, ror_fn_ty, ror_fn, argv, 3, "")
+                                   : NULL;
+        if (rotated) {
+          vals[in->dst] = LLVMBuildZExt(cg->builder, rotated, cg->type_i64, "");
+        } else {
+          LLVMValueRef sh1 = LLVMBuildLShr(cg->builder, va, vb, "");
+          LLVMValueRef diff = LLVMBuildSub(
+              cg->builder, LLVMConstInt(cg->type_i64, 32, false), vb, "");
+          LLVMValueRef sh2 = LLVMBuildShl(cg->builder, va, diff, "");
+          vals[in->dst] = LLVMBuildAnd(
+              cg->builder, LLVMBuildOr(cg->builder, sh1, sh2, ""), mask, "");
+        }
       }
       break;
 
@@ -658,6 +709,41 @@ bool ny_llvm_emit_nyir_func(codegen_t *cg, const nyir_func_t *f,
         LLVMValueRef vc = (in->c >= 0 && (size_t)in->c < val_count) ? vals[in->c] : NULL;
         LLVMValueRef cond = LLVMBuildICmp(cg->builder, LLVMIntNE, ny_as_i64(cg, va), ny_c0(cg), "");
         vals[in->dst] = LLVMBuildSelect(cg->builder, cond, ny_as_i64(cg, vb), ny_as_i64(cg, vc), "");
+      }
+      break;
+
+    case NYIR_BSWAP_I64:
+      if (in->dst >= 0 && (size_t)in->dst < val_count) {
+        LLVMValueRef va = (in->a >= 0 && (size_t)in->a < val_count)
+                              ? ny_as_i64(cg, vals[in->a]) : ny_c0(cg);
+        const char *bswap_name = "llvm.bswap.i64";
+        unsigned id = LLVMLookupIntrinsicID(bswap_name, strlen(bswap_name));
+        LLVMTypeRef overload = cg->type_i64;
+        LLVMTypeRef bswap_fn_ty = LLVMIntrinsicGetType(cg->ctx, id, &overload, 1);
+        LLVMValueRef bswap_fn = LLVMGetIntrinsicDeclaration(cg->module, id, &overload, 1);
+        LLVMValueRef argv[1] = {va};
+        vals[in->dst] = (id != 0 && bswap_fn_ty && bswap_fn)
+                            ? LLVMBuildCall2(cg->builder, bswap_fn_ty, bswap_fn, argv, 1, "")
+                            : va;
+      }
+      break;
+
+    case NYIR_BSWAP32_I64:
+      if (in->dst >= 0 && (size_t)in->dst < val_count) {
+        LLVMValueRef va = (in->a >= 0 && (size_t)in->a < val_count)
+                              ? ny_as_i64(cg, vals[in->a]) : ny_c0(cg);
+        LLVMTypeRef i32 = LLVMInt32TypeInContext(cg->ctx);
+        LLVMValueRef va32 = LLVMBuildTrunc(cg->builder, va, i32, "");
+        const char *bswap32_name = "llvm.bswap.i32";
+        unsigned id = LLVMLookupIntrinsicID(bswap32_name, strlen(bswap32_name));
+        LLVMTypeRef overload = i32;
+        LLVMTypeRef bswap32_fn_ty = LLVMIntrinsicGetType(cg->ctx, id, &overload, 1);
+        LLVMValueRef bswap32_fn = LLVMGetIntrinsicDeclaration(cg->module, id, &overload, 1);
+        LLVMValueRef argv[1] = {va32};
+        LLVMValueRef swapped = (id != 0 && bswap32_fn_ty && bswap32_fn)
+                                   ? LLVMBuildCall2(cg->builder, bswap32_fn_ty, bswap32_fn, argv, 1, "")
+                                   : va32;
+        vals[in->dst] = LLVMBuildZExt(cg->builder, swapped, cg->type_i64, "");
       }
       break;
 
@@ -870,24 +956,9 @@ bool ny_llvm_emit_nyir_func(codegen_t *cg, const nyir_func_t *f,
       }
       break;
 
-    case NYIR_ALLOCA: {
-      /*
-       * NYIR_ALLOCA returns a raw byte pointer, not a language value.  Keep
-       * the allocation in LLVM's stack model so the LLVM/JIT path has the
-       * same lifetime and address contract as the native object emitter.
-       */
-      if (in->dst >= 0 && (size_t)in->dst < val_count) {
-        LLVMTypeRef i8_type = LLVMInt8TypeInContext(cg->ctx);
-        LLVMValueRef bytes = LLVMConstInt(
-            cg->type_i64, (uint64_t)(in->imm > 0 ? in->imm : 1), false);
-        LLVMValueRef storage = LLVMBuildArrayAlloca(
-            cg->builder, i8_type, bytes, "nyir_alloca");
-        LLVMSetAlignment(storage, 16);
-        vals[in->dst] = LLVMBuildPtrToInt(cg->builder, storage,
-                                          cg->type_i64, "");
-      }
+    case NYIR_ALLOCA:
+      /* Already materialized in the entry block above. */
       break;
-    }
 
     case NYIR_LOAD_I64:
       if (in->dst >= 0 && (size_t)in->dst < val_count) {
@@ -1290,14 +1361,31 @@ bool ny_llvm_emit_nyir_func(codegen_t *cg, const nyir_func_t *f,
         arg_tys[k] = (ty == cg->type_f64) ? cg->type_f64
                      : (ty == cg->type_f32) ? cg->type_f32
                                             : cg->type_i64;
+        /*
+         * The lowerer records per-argument f64 ABI facts (from the callee's
+         * declared signature) on the call flags.  A flagged argument carries
+         * raw IEEE bits in an i64 register and must be declared/treated as
+         * double so the call passes it in XMM; declaring it i64 fed the bits
+         * through a GP register while the C function read XMM0
+         * (c.sqrt(variable) returned garbage while c.sqrt(25.0) was exact).
+         */
+        if (k < 6 && (in->flags & (NYIR_INST_F_ARG0_F64 << k)))
+          arg_tys[k] = cg->type_f64;
       }
       if (!callee) {
-        LLVMTypeRef ret_ty = (in->flags & NYIR_INST_F_RET_F64)
-                                 ? cg->type_f64
-                                 : (in->flags & NYIR_INST_F_RET_F32)
-                                       ? cg->type_f32
-                                       : cg->type_i64;
-        LLVMTypeRef callee_ty = LLVMFunctionType(ret_ty, arg_tys, (unsigned)call_argc, false);
+        LLVMTypeRef decl_ret_ty = (in->flags & NYIR_INST_F_RET_F64)
+                                      ? cg->type_f64
+                                      : (in->flags & NYIR_INST_F_RET_F32)
+                                            ? cg->type_f32
+                                            : cg->type_i64;
+        /*
+         * Per-argument f64 ABI facts: flagged parameters are declared
+         * double so raw-bits i64 words land in XMM (bitcast at the call).
+         */
+        for (int k = 0; k < call_argc && k < 6; ++k)
+          if (in->flags & (NYIR_INST_F_ARG0_F64 << k))
+            arg_tys[k] = cg->type_f64;
+        LLVMTypeRef callee_ty = LLVMFunctionType(decl_ret_ty, arg_tys, (unsigned)call_argc, false);
         callee = LLVMAddFunction(cg->module, callee_name, callee_ty);
         LLVMSetLinkage(callee, LLVMExternalLinkage);
       }
@@ -1317,14 +1405,28 @@ bool ny_llvm_emit_nyir_func(codegen_t *cg, const nyir_func_t *f,
        * exist in the module with the expanded `any` ABI.  NYIR calls carry
        * their canonical raw argument list, so repair a declaration whenever
        * either its return type or arity differs.
+       *
+       * Exception: an i64 NYIR value feeding a declared f64/f32 parameter is
+       * the raw-bits handoff (f64 expressions travel as IEEE bits in i64
+       * registers).  The call site bitcasts via ny_as_f64 below, so the
+       * shared declaration must keep its float signature.  Retyping it to
+       * i64 made the bits flow in a GP register while the C function read
+       * XMM0 (c.sqrt(variable) returned garbage while c.sqrt(25.0) was
+       * exact).
        */
       bool arg_types_differ =
           callee_argc != (unsigned)call_argc;
       if (!arg_types_differ) {
         for (int k = 0; k < call_argc; ++k) {
           if (callee_arg_tys[k] != arg_tys[k]) {
-            arg_types_differ = true;
-            break;
+            bool bits_to_float =
+                (callee_arg_tys[k] == cg->type_f64 ||
+                 callee_arg_tys[k] == cg->type_f32) &&
+                arg_tys[k] == cg->type_i64;
+            if (!bits_to_float) {
+              arg_types_differ = true;
+              break;
+            }
           }
         }
       }
@@ -1355,7 +1457,29 @@ bool ny_llvm_emit_nyir_func(codegen_t *cg, const nyir_func_t *f,
         else
           call_vals[k] = ny_as_i64(cg, value);
       }
+      /*
+       * setjmp is a returns-twice primitive.  Without this attribute LLVM's
+       * optimizer is allowed to treat values/allocas after the first return
+       * as if control can never re-enter the call site, which corrupts
+       * try/catch join slots after rt_panic longjmps back into NYIR code.
+       */
+      bool returns_twice = strcmp(callee_name, "_setjmp") == 0 ||
+                           strcmp(callee_name, "setjmp") == 0;
+      if (returns_twice) {
+        unsigned kind = LLVMGetEnumAttributeKindForName("returns_twice", 13);
+        if (kind != 0) {
+          LLVMAttributeRef attr = LLVMCreateEnumAttribute(cg->ctx, kind, 0);
+          LLVMAddAttributeAtIndex(callee, LLVMAttributeFunctionIndex, attr);
+        }
+      }
       LLVMValueRef call_res = LLVMBuildCall2(cg->builder, callee_fn_ty, callee, call_vals, (unsigned)call_argc, "");
+      if (returns_twice && call_res && LLVMIsAInstruction(call_res)) {
+        unsigned kind = LLVMGetEnumAttributeKindForName("returns_twice", 13);
+        if (kind != 0) {
+          LLVMAttributeRef attr = LLVMCreateEnumAttribute(cg->ctx, kind, 0);
+          LLVMAddCallSiteAttribute(call_res, LLVMAttributeFunctionIndex, attr);
+        }
+      }
       if (in->dst >= 0 && (size_t)in->dst < val_count)
         vals[in->dst] = call_res;
       free(call_vals);

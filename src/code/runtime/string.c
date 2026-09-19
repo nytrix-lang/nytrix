@@ -71,6 +71,13 @@ static void rt_val_to_str_info(int64_t v, char *buf, size_t bsize,
     }
     if (is_v_flt(v)) {
       int64_t tag = *(int64_t *)((char *)(uintptr_t)v - 8);
+      if (tag == TAG_FLOAT) {
+        double d = 0.0;
+        memcpy(&d, (const void *)(uintptr_t)v, 8);
+        *out_len = snprintf(buf, bsize, "%g", d);
+        *out_s = buf;
+        return;
+      }
       if (tag == TAG_COMPLEX) {
         double re = 0.0, im = 0.0;
         memcpy(&re, (const void *)(uintptr_t)v, 8);
@@ -256,12 +263,27 @@ int64_t rt_i64_max(int64_t a, int64_t b) { return a > b ? a : b; }
 double rt_f64_min(double a, double b) { return a < b ? a : b; }
 double rt_f64_max(double a, double b) { return a > b ? a : b; }
 
+#define NY_INT_STR_CACHE_SIZE 65536
+static int64_t s_cached_int_strs[NY_INT_STR_CACHE_SIZE];
+
 /*
  * Format a raw signed 64-bit integer as a freshly-allocated C string.
  * Used by the native-only path for f-string interpolation of integer
  * expressions (mirrors rt_print_i64_raw's formatting but returns a string).
  */
 int64_t rt_i64_to_cstr_raw(int64_t v) {
+  if (v >= 0 && v < NY_INT_STR_CACHE_SIZE) {
+    int64_t cached = s_cached_int_strs[v];
+    if (cached)
+      return cached;
+    char buf[32];
+    int n = snprintf(buf, sizeof(buf), "%lld", (long long)v);
+    if (n < 0 || (size_t)n >= sizeof(buf))
+      return 0;
+    int64_t s = rt_alloc_string_len(buf, (size_t)n);
+    s_cached_int_strs[v] = s;
+    return s;
+  }
   if (rt_value_tag(v) == TAG_BIGINT)
     return rt_bigint_to_cstr_raw(v);
   char buf[32];
@@ -685,9 +707,6 @@ static struct {
 } _str_nil = {((3ULL << 1) | 1), TAG_STR_CONST, "nil"},
   _str_true = {((4ULL << 1) | 1), TAG_STR_CONST, "true"},
   _str_false = {((5ULL << 1) | 1), TAG_STR_CONST, "false"};
-
-#define NY_INT_STR_CACHE_SIZE 65536
-static int64_t s_cached_int_strs[NY_INT_STR_CACHE_SIZE];
 
 int64_t rt_to_str(int64_t v) {
   if (is_v_str(v))

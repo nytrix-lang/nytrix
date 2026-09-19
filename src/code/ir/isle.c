@@ -126,6 +126,10 @@ static ny_mach_opcode_t ny_isle_nir_to_mir_op(nyir_op_t op) {
     return NY_MACH_SAR;
   case NYIR_ROR32_I64:
     return NY_MACH_ROR32;
+  case NYIR_BSWAP_I64:
+    return NY_MACH_BSWAP64;
+  case NYIR_BSWAP32_I64:
+    return NY_MACH_BSWAP32;
   case NYIR_COPY:
     return NY_MACH_COPY;
   case NYIR_SQRT_F64:

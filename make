@@ -363,6 +363,59 @@ def restore_tty_visuals() -> None:
     except Exception:
         pass
 
+def _running_as_root() -> bool:
+    """Return True when this process already has administrative/root privileges."""
+    if host_os() == "windows":
+        return False
+    geteuid = getattr(os, "geteuid", None)
+    if geteuid is None:
+        return False
+    try:
+        return geteuid() == 0
+    except Exception:
+        return False
+
+
+def _privileged_command(cmd: list[str], *, action: str = "install dependencies") -> list[str]:
+    """
+    Return a command suitable for an operation that needs root privileges.
+
+    Root containers commonly do not ship sudo, so never require sudo when
+    euid == 0.  For an unprivileged user prefer sudo, then doas.  If neither
+    is available, fail with an actionable error rather than a traceback.
+    """
+    if not cmd:
+        raise ValueError("empty privileged command")
+
+    if host_os() == "windows" or _running_as_root():
+        return cmd
+
+    sudo = which("sudo")
+    if sudo:
+        return [sudo, *cmd]
+
+    doas = which("doas")
+    if doas:
+        return [doas, *cmd]
+
+    err(f"{action} requires administrator/root privileges.")
+    err("Re-run as root, install sudo/doas, or set NYTRIX_AUTO_DEPS=0 and install dependencies manually.")
+    raise SystemExit(1)
+
+
+def _run_privileged(cmd: list[str], *, action: str = "install dependencies", quiet: bool = False) -> None:
+    run(_privileged_command(cmd, action=action), quiet=quiet)
+
+
+def _require_program(name: str, *, context: str) -> str:
+    """Resolve a required executable or stop with a concise diagnostic."""
+    path = which(name)
+    if path:
+        return path
+    err(f"{context}: required command not found: {name}")
+    raise SystemExit(127)
+
+
 def run(cmd: list[str] | str, *, shell: bool = False, env: dict[str, str] | None = None, quiet: bool = False) -> None:
     merged = os.environ.copy()
     if env:
@@ -376,15 +429,20 @@ def run(cmd: list[str] | str, *, shell: bool = False, env: dict[str, str] | None
         merged.setdefault("FORCE_COLOR", "1")
         merged.setdefault("CLICOLOR_FORCE", "1")
     if quiet:
-        res = subprocess.run(
-            cmd,
-            cwd=str(ROOT),
-            shell=shell,
-            env=merged,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-        )
+        try:
+            res = subprocess.run(
+                cmd,
+                cwd=str(ROOT),
+                shell=shell,
+                env=merged,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+            )
+        except FileNotFoundError as exc:
+            program = cmd[0] if isinstance(cmd, list) and cmd else str(cmd)
+            err(f"command not found: {program}")
+            raise SystemExit(127) from exc
         if res.returncode != 0:
             if res.stdout:
                 sys.stderr.write(res.stdout)
@@ -392,16 +450,21 @@ def run(cmd: list[str] | str, *, shell: bool = False, env: dict[str, str] | None
         if show_cmd:
             ok("done in " + _fmt_elapsed(time.perf_counter() - started))
         return
-    proc = subprocess.Popen(
-        cmd,
-        cwd=str(ROOT),
-        shell=shell,
-        env=merged,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        bufsize=1,
-    )
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            cwd=str(ROOT),
+            shell=shell,
+            env=merged,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            bufsize=1,
+        )
+    except FileNotFoundError as exc:
+        program = cmd[0] if isinstance(cmd, list) and cmd else str(cmd)
+        err(f"command not found: {program}")
+        raise SystemExit(127) from exc
     assert proc.stdout is not None
     for line in proc.stdout:
         print(color_build_line(line.rstrip("\n")), file=sys.stderr, flush=True)
@@ -848,17 +911,17 @@ def _install_optional_std_deps(force_prompt: bool = False) -> None:
             raise SystemExit(1)
         if distro in ("debian", "ubuntu", "linuxmint", "pop", "raspbian") or "debian" in like:
             step("std deps: apt update")
-            run(["sudo", "apt", "update"])
+            _run_privileged(["apt", "update"], action="update apt package metadata")
             step("std deps: apt install")
-            run(["sudo", "apt", "install", "-y", *pkgs])
+            _run_privileged(["apt", "install", "-y", *pkgs], action="install optional Nytrix dependencies")
             return
         if distro in ("arch", "manjaro") or "arch" in like:
             step("std deps: pacman install")
-            run(["sudo", "pacman", "-Sy", "--noconfirm", *pkgs])
+            _run_privileged(["pacman", "-S", "--needed", "--noconfirm", *pkgs], action="install optional Nytrix dependencies")
             return
         if distro in ("fedora", "rhel", "centos", "rocky") or "fedora" in like or "rhel" in like:
             step("std deps: dnf install")
-            run(["sudo", "dnf", "install", "-y", *pkgs])
+            _run_privileged(["dnf", "install", "-y", *pkgs], action="install optional Nytrix dependencies")
             return
     if os_name == "macos":
         if not which("brew"):
@@ -1516,6 +1579,79 @@ def _check_llvm_headers() -> tuple[bool, str | None]:
     
     return False, None
 
+def _linux_required_packages(distro: str, like: str, missing: list[str]) -> list[str]:
+    """Translate the detected missing tools into the smallest distro package set."""
+    m = set(missing)
+    pkgs: list[str] = []
+
+    is_debian = distro in ("debian", "ubuntu", "linuxmint", "pop", "raspbian") or "debian" in like
+    is_arch = distro in ("arch", "manjaro") or "arch" in like
+    is_fedora = distro in ("fedora", "rhel", "centos", "rocky") or "fedora" in like or "rhel" in like
+
+    if is_debian:
+        if "cmake" in m:
+            pkgs.append("cmake")
+        if "ninja" in m:
+            pkgs.append("ninja-build")
+        if "pkg-config" in m:
+            pkgs.append("pkg-config")
+        if "git" in m:
+            pkgs.append("git")
+
+        if "clang" in m or "llvm" in m:
+            v = apt_best_llvm_ver()
+            if v > 0:
+                if "clang" in m or "llvm" in m:
+                    pkgs.append(f"clang-{v}")
+                if "llvm" in m:
+                    pkgs += [f"llvm-{v}", f"llvm-{v}-dev", f"llvm-{v}-runtime"]
+                    if apt_has_pkg(f"libclang-{v}-dev"):
+                        pkgs.append(f"libclang-{v}-dev")
+                    elif apt_has_pkg("libclang-dev"):
+                        pkgs.append("libclang-dev")
+            else:
+                if "clang" in m or "llvm" in m:
+                    pkgs.append("clang")
+                if "llvm" in m:
+                    pkgs += ["llvm-dev", "libclang-dev"]
+        return _dedupe(pkgs)
+
+    if is_arch:
+        mapping = {
+            "cmake": "cmake",
+            "ninja": "ninja",
+            "pkg-config": "pkgconf",
+            "git": "git",
+            "clang": "clang",
+            "llvm": "llvm",
+        }
+        for dep in ("cmake", "ninja", "pkg-config", "git", "clang", "llvm"):
+            if dep in m:
+                pkgs.append(mapping[dep])
+        # clang-c/Index.h is shipped with clang on Arch; ensure it accompanies
+        # llvm when LLVM development headers are the missing part.
+        if "llvm" in m:
+            pkgs.append("clang")
+        return _dedupe(pkgs)
+
+    if is_fedora:
+        mapping = {
+            "cmake": "cmake",
+            "ninja": "ninja-build",
+            "pkg-config": "pkgconf-pkg-config",
+            "git": "git",
+            "clang": "clang",
+        }
+        for dep in ("cmake", "ninja", "pkg-config", "git", "clang"):
+            if dep in m:
+                pkgs.append(mapping[dep])
+        if "llvm" in m:
+            pkgs += ["llvm-devel", "clang", "clang-devel"]
+        return _dedupe(pkgs)
+
+    return []
+
+
 def ensure_deps(force_optional_prompt: bool = False, require_git: bool = False) -> None:
     if host_os() == "macos":
         configure_macos_llvm_env()
@@ -1524,9 +1660,10 @@ def ensure_deps(force_optional_prompt: bool = False, require_git: bool = False) 
         if prefix:
             _windows_configure_msys2_env(prefix)
     missing: list[str] = []
-    for t in ("cmake", "clang"):
-        if not which(t):
-            missing.append(t)
+    if not which("cmake"):
+        missing.append("cmake")
+    if not which("clang") or not which("clang++"):
+        missing.append("clang")
     if require_git and not which("git"):
         missing.append("git")
     if not (which("pkg-config") or which("pkgconf")):
@@ -1561,7 +1698,6 @@ def ensure_deps(force_optional_prompt: bool = False, require_git: bool = False) 
 
     if not missing:
         _windows_ensure_llvm()
-        pass
         if force_optional_prompt:
             _install_optional_std_deps(True)
         return
@@ -1575,36 +1711,39 @@ def ensure_deps(force_optional_prompt: bool = False, require_git: bool = False) 
     if os_name == "linux":
         info = read_os_release()
         distro, like = info.get("ID", "").lower(), info.get("ID_LIKE", "").lower()
+        pkgs = _linux_required_packages(distro, like, missing)
+
+        if not pkgs:
+            err("Missing build dependencies: " + ", ".join(missing))
+            err(f"No automatic package mapping is available for Linux distro: {distro or 'unknown'}")
+            err("Install the missing tools manually or set NYTRIX_AUTO_DEPS=0.")
+            raise SystemExit(1)
+
         if distro in ("debian", "ubuntu", "linuxmint", "pop", "raspbian") or "debian" in like:
-            v = apt_best_llvm_ver()
-            # The standard benchmark suite includes a 50-digit arbitrary-
-            # precision workload.  Keep GMP in the baseline toolchain so a
-            # minimal Ubuntu runner does not silently fall back to the much
-            # slower native BigInt implementation and time out in pidigits.
-            pkgs = ["build-essential", "python3", "cmake", "ninja-build", "git", "gdb", "pkg-config", "zlib1g-dev", "libgmp-dev"]
-            if v > 0:
-                pkgs += [f"clang-{v}", f"llvm-{v}", f"llvm-{v}-dev", f"llvm-{v}-runtime"]
-                if apt_has_pkg(f"libclang-{v}-dev"):
-                    pkgs.append(f"libclang-{v}-dev")
-                if apt_has_pkg("libclang-dev"):
-                    pkgs.append("libclang-dev")
-            else:
-                pkgs += ["clang", "llvm-dev", "libclang-dev"]
-            run(["sudo", "apt", "update"])
-            step("deps: apt install")
-            run(["sudo", "apt", "install", "-y", *pkgs])
+            _require_program("apt", context="deps")
+            step("deps: apt update")
+            _run_privileged(["apt", "update"], action="update apt package metadata")
+            step("deps: apt install " + " ".join(pkgs))
+            _run_privileged(["apt", "install", "-y", *pkgs], action="install Nytrix build dependencies")
             _install_optional_std_deps(force_optional_prompt)
             _clean_stale_cmake_caches()
             return
+
         if distro in ("arch", "manjaro") or "arch" in like:
-            step("deps: pacman install")
-            run(["sudo", "pacman", "-Sy", "--noconfirm", "base-devel", "python", "clang", "cmake", "ninja", "git", "gdb", "llvm", "pkgconf", "zlib"])
+            _require_program("pacman", context="deps")
+            step("deps: pacman install " + " ".join(pkgs))
+            _run_privileged(
+                ["pacman", "-S", "--needed", "--noconfirm", *pkgs],
+                action="install Nytrix build dependencies",
+            )
             _install_optional_std_deps(force_optional_prompt)
             _clean_stale_cmake_caches()
             return
+
         if distro in ("fedora", "rhel", "centos", "rocky") or "fedora" in like or "rhel" in like:
-            step("deps: dnf install")
-            run(["sudo", "dnf", "install", "-y", "@development-tools", "clang", "llvm-devel", "cmake", "ninja-build", "git", "gdb", "pkgconf-pkg-config", "zlib-devel"])
+            _require_program("dnf", context="deps")
+            step("deps: dnf install " + " ".join(pkgs))
+            _run_privileged(["dnf", "install", "-y", *pkgs], action="install Nytrix build dependencies")
             _install_optional_std_deps(force_optional_prompt)
             _clean_stale_cmake_caches()
             return
@@ -3849,9 +3988,9 @@ def run_test(build_root: Path, kind: str, jobs: int, extra: list[str]) -> int:
     # NYTRIX_TEST_TIMEOUT belongs to ny-test and limits each fixture.  Keep the
     # outer suite deadline independent so a large, healthy suite is not killed
     # after one fixture's allowance (notably on slower Windows runners).
-    # The fixture ceiling is intentionally fixed at 20s; do not inherit a
-    # stale 90s value from a caller or an older test binary.
-    os.environ["NYTRIX_TEST_TIMEOUT"] = "20"
+    # Keep enough room for cold stdlib/native compilation on slower hosts
+    # while retaining an explicit per-fixture ceiling.
+    os.environ["NYTRIX_TEST_TIMEOUT"] = "45"
     suite_timeout_s = int(os.environ.get("NYTRIX_TEST_SUITE_TIMEOUT") or "1800")
     step(f"run tests: bin=ny jobs={test_jobs} suite_timeout={suite_timeout_s}s")
     # `--no-progress` controls this Python bootstrapper.  ny-test deliberately
@@ -4873,25 +5012,94 @@ def _find_shared_lib(name: str, search_dirs: list[Path]) -> Path | None:
         return cnd
     return None
 
-def _copy_one_shared_lib(src: Path, dst_dir: Path, needed_name: str | None = None) -> Path | None:
+def _elf_soname(path: Path) -> str:
+    """Return the ELF DT_SONAME for path, or an empty string."""
+    if host_os() != "linux":
+        return ""
+    readelf = which("readelf")
+    if not readelf:
+        return ""
+    try:
+        res = subprocess.run(
+            [readelf, "-d", str(path)],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except Exception:
+        return ""
+    if res.returncode != 0:
+        return ""
+    for line in res.stdout.splitlines():
+        if "(SONAME)" not in line:
+            continue
+        m = re.search(r"\[(.*?)\]", line)
+        if m:
+            return m.group(1).strip()
+    return ""
+
+
+def _hardlink_alias(src: Path, dst: Path) -> None:
+    """Make dst a hardlink to src. Never create a symlink or duplicate copy."""
+    src = Path(src)
+    dst = Path(dst)
+    if src == dst:
+        return
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    if dst.is_symlink():
+        dst.unlink()
+    if dst.exists():
+        try:
+            if os.path.samefile(src, dst):
+                return
+        except OSError:
+            pass
+        dst.unlink()
+    try:
+        os.link(src, dst)
+    except OSError as exc:
+        raise SystemExit(
+            f"vendor: failed to hardlink {dst.name} to {src.name}: {exc}"
+        )
+
+
+def _copy_one_shared_lib(
+    src: Path,
+    dst_dir: Path,
+    needed_name: str | None = None,
+) -> Path | None:
+    """Copy one shared-library payload compactly.
+
+    The payload is stored under its ELF SONAME when available. Any additional
+    filename required by the loader/linker is a hardlink to that same inode.
+    Host distro implementation names such as libz.so.1.3.2 are not retained
+    unless they are themselves the SONAME/required name.
+    """
     try:
         dst_dir.mkdir(parents=True, exist_ok=True)
-        real = src.resolve() if src.is_symlink() else src
-        name = needed_name or src.name
-        dst = dst_dir / name
-        if not dst.exists():
-            shutil.copy2(real, dst)
-        # Symlink the real name → needed name to avoid duplicate .so files (~90MB waste).
-        if real.name != name:
-            real_dst = dst_dir / real.name
-            if not real_dst.exists():
-                try:
-                    os.symlink(name, real_dst)
-                except Exception:
-                    shutil.copy2(real, real_dst)
-        return dst
+        real = src.resolve()
+        if not real.exists() or not real.is_file():
+            return None
+
+        soname = _elf_soname(real)
+        canonical_name = soname or needed_name or src.name or real.name
+        canonical = dst_dir / canonical_name
+
+        if canonical.is_symlink():
+            canonical.unlink()
+        if not canonical.exists():
+            shutil.copy2(real, canonical)
+
+        if needed_name and needed_name != canonical_name:
+            alias = dst_dir / needed_name
+            _hardlink_alias(canonical, alias)
+            return alias
+
+        return canonical
+    except SystemExit:
+        raise
     except Exception as exc:
-        log("STATIC", f"failed to copy {src}: {exc}")
+        log("STATIC", f"failed to copy shared lib {src}: {exc}")
         return None
 
 def _ldd_resolved(path: Path, lib_dir: Path) -> tuple[list[tuple[str, Path]], list[str]]:
@@ -4961,31 +5169,32 @@ def _write_bundle_env(bundle_dir: Path, lib_dir: Path) -> None:
         pass
 
 def _copy_static_runtime_libs(target_dir: Path, binary_path: Path) -> list[str]:
-    """Bundle dynamic dependencies for binary_path into target_dir.
+    """Bundle the transitive dynamic dependency closure of binary_path.
 
-    Unlike the old ldd-only helper, this also resolves missing sonames such as
-    libLLVM.so.21.1/libclang.so.21.1/libz3.so.4.16 from LLVM and system lib dirs,
-    then walks transitive dependencies. For bin-static/static-bin portability it
-    copies the full host runtime by default too (glibc loader, libc, libm,
-    libstdc++, libgcc_s, etc). Set NYTRIX_BUNDLE_NO_SYSTEM_LIBS=1 only if you
-    intentionally want a thin bundle tied to the target machine's system libc.
+    Libraries use one physical payload per inode/SONAME. Required alternate
+    names are hardlinks, never symlinks or duplicated copies.
     """
     copied: list[str] = []
     copy_system = not _env_flag("NYTRIX_BUNDLE_NO_SYSTEM_LIBS", False)
     search_dirs = [target_dir, *_runtime_search_dirs()]
     queue: list[Path] = [binary_path]
-    seen_files: set[str] = set()
+    seen_files: set[tuple[int, int]] = set()
     seen_missing: set[str] = set()
     unresolved: set[str] = set()
+
     while queue:
         cur = queue.pop(0)
         try:
-            key = str(cur.resolve())
+            if not cur.exists() or not cur.is_file():
+                continue
+            st = cur.stat()
+            key = (st.st_dev, st.st_ino)
         except Exception:
-            key = str(cur)
-        if key in seen_files or not cur.exists():
+            continue
+        if key in seen_files:
             continue
         seen_files.add(key)
+
         found, missing = _ldd_resolved(cur, target_dir)
         for name, dep in found:
             if not copy_system and _is_system_runtime_lib(name):
@@ -4995,7 +5204,7 @@ def _copy_static_runtime_libs(target_dir: Path, binary_path: Path) -> list[str]:
                 if dst.name not in copied:
                     copied.append(dst.name)
                 queue.append(dst)
-        # readelf catches libs hidden by ldd failure and lets us search manually.
+
         for name in [*missing, *_elf_needed_names(cur)]:
             if not name or name in seen_missing:
                 continue
@@ -5003,15 +5212,19 @@ def _copy_static_runtime_libs(target_dir: Path, binary_path: Path) -> list[str]:
             if not copy_system and _is_system_runtime_lib(name):
                 continue
             dep = _find_shared_lib(name, search_dirs)
-            if dep:
-                dst = _copy_one_shared_lib(dep, target_dir, name)
-                if dst:
-                    if dst.name not in copied:
-                        copied.append(dst.name)
-                    queue.append(dst)
-                    search_dirs.insert(0, target_dir)
-            else:
+            if dep is None:
                 unresolved.add(name)
+                continue
+            dst = _copy_one_shared_lib(dep, target_dir, name)
+            if not dst:
+                unresolved.add(name)
+                continue
+            if dst.name not in copied:
+                copied.append(dst.name)
+            queue.append(dst)
+            if target_dir not in search_dirs:
+                search_dirs.insert(0, target_dir)
+
     if unresolved:
         log("STATIC", "unresolved shared libs: " + ", ".join(sorted(unresolved)))
     return copied
@@ -5116,6 +5329,73 @@ def _copytree_replace(src: Path, dst: Path, ignore=None) -> None:
     if dst.exists():
         shutil.rmtree(dst, ignore_errors=True)
     shutil.copytree(src, dst, ignore=ignore, symlinks=True)
+
+
+def _copytree_replace_preserve_hardlinks(src: Path, dst: Path, ignore=None) -> None:
+    """Copy a tree while preserving hardlink groups between regular files."""
+    if not src.exists():
+        return
+    if dst.exists():
+        shutil.rmtree(dst, ignore_errors=True)
+
+    inode_map: dict[tuple[int, int], Path] = {}
+
+    def copy_file(src_name, dst_name):
+        src_path = Path(src_name)
+        dst_path = Path(dst_name)
+        st = src_path.stat()
+        key = (st.st_dev, st.st_ino)
+        previous = inode_map.get(key)
+        if previous is not None:
+            try:
+                os.link(previous, dst_path)
+            except OSError as exc:
+                raise SystemExit(
+                    f"tar: could not preserve hardlink {dst_path.name}: {exc}"
+                )
+            return str(dst_path)
+        shutil.copy2(src_path, dst_path)
+        inode_map[key] = dst_path
+        return str(dst_path)
+
+    shutil.copytree(
+        src,
+        dst,
+        ignore=ignore,
+        symlinks=True,
+        copy_function=copy_file,
+    )
+
+
+def _materialize_symlinks_as_hardlinks(root: Path) -> None:
+    """Convert file symlinks below root to hardlinks; reject directory links."""
+    if not root.exists():
+        return
+    links = [p for p in root.rglob("*") if p.is_symlink()]
+    for link in links:
+        try:
+            target = link.resolve(strict=True)
+        except Exception as exc:
+            raise SystemExit(f"tar: broken vendor symlink {link}: {exc}")
+        if not target.is_file():
+            raise SystemExit(f"tar: vendor directory symlink is forbidden: {link}")
+        tmp = link.with_name(link.name + ".hardlink.tmp")
+        tmp.unlink(missing_ok=True)
+        try:
+            os.link(target, tmp)
+        except OSError as exc:
+            raise SystemExit(
+                f"tar: cannot materialize {link.name} as hardlink: {exc}"
+            )
+        link.unlink()
+        tmp.replace(link)
+
+    remaining = [p for p in root.rglob("*") if p.is_symlink()]
+    if remaining:
+        raise SystemExit(
+            "tar: vendor bundle still contains symlinks: "
+            + ", ".join(str(p.relative_to(root)) for p in remaining[:20])
+        )
 
 def _copy_release_file(src: Path, dst: Path) -> None:
     if src.exists() and src.is_file():
@@ -5353,19 +5633,14 @@ def _write_vendor_libedit_stub(lib_dir: Path) -> bool:
         return False
 
     _remove_vendor_lib_family(lib_dir, "libedit.so*")
-    tmp.replace(real)
+    canonical = lib_dir / "libedit.so.0"
+    tmp.replace(canonical)
     try:
-        real.chmod(0o755)
+        canonical.chmod(0o755)
     except Exception:
         pass
-    for link_name, target in (("libedit.so.0", real.name), ("libedit.so", "libedit.so.0")):
-        link = lib_dir / link_name
-        try:
-            link.unlink(missing_ok=True)
-            link.symlink_to(target)
-        except Exception:
-            _copy2_if_different(real, link)
-    log("VENDOR", "replaced host libedit with Nytrix LLVM line-editor shim")
+    _hardlink_alias(canonical, lib_dir / "libedit.so")
+    log("VENDOR", "replaced host libedit with compact Nytrix LLVM line-editor shim")
     return True
 
 def _vendor_any_needed(lib_dir: Path, soname: str) -> bool:
@@ -5745,194 +6020,388 @@ def _detect_bundled_llvm_major(lib_dir: Path) -> str:
             return m.group(1)
     return ""
 
-def _create_linker_symlinks(lib_dir: Path, llvm_major: str) -> None:
-    """Create linker-name symlinks for bundled .so files so -l flags resolve."""
-    # Map canonical file -> desired linker symlinks
-    symlinks: list[tuple[str, str]] = []
-    for f in lib_dir.iterdir():
-        if not f.is_file() or f.is_symlink():
-            continue
-        # libLLVM.so.21.1 -> libLLVM-21.so
-        m = re.match(r"libLLVM\.so\.(\d+)(?:\.\d+.*)?", f.name)
-        if m and m.group(1) == llvm_major:
-            target = f"libLLVM-{llvm_major}.so"
-            symlinks.append((target, f.name))
-            continue
-        # libclang.so.21.1 -> libclang.so
-        m = re.match(r"libclang\.so\.(\d+)(?:\.\d+.*)?", f.name)
-        if m and m.group(1) == llvm_major:
-            symlinks.append(("libclang.so", f.name))
-            continue
-        # Generic: for most libs, create unversioned symlink if SONAME is versioned.
-        # libz.so.1 -> libz.so, libzstd.so.1 -> libzstd.so, etc.
-        m = re.match(r"^((?:lib[\w-]+)\.so)\.\d", f.name)
-        if m:
-            base = m.group(1)
-            if not (lib_dir / base).exists() and base not in (n for n, _ in symlinks):
-                symlinks.append((base, f.name))
-    for link_name, target in symlinks:
-        link = lib_dir / link_name
-        if link.exists() or link.is_symlink():
-            continue
-        link.symlink_to(target)
-        log("VENDOR", f"  symlink {link_name} -> {target}")
-
 def run_make_vendor(build_root: Path, kind: str, jobs: int, args: list[str]) -> int:
     if args and args[0] in ("-h", "--help", "help"):
-        print("usage: make vendor  -- bundle shared libs for build portability")
+        print("usage: make vendor  -- bundle shared build dependencies")
         print()
-        print("  Copies .so files + LLVM/Clang headers needed to build ny")
-        print("  into build/vendor/ so ./make tar produces a portable package")
-        print("  that can compile from source without system LLVM dev headers.")
-        print()
-        print("  The release binary must exist first (run ./make bin first).")
+        print("  Bundles LLVM/Clang/GMP/Z3 shared libraries and headers")
+        print("  into build/vendor/ for portable source tarballs.")
+        print("  Libraries are compact: one payload per SONAME, required")
+        print("  alternate names are hardlinks, and no symlinks are emitted.")
         return 0
 
     os.chdir(str(ROOT))
 
-    # Find the release binary; build it if missing.
     release_dir = build_root / "release"
+    tool_names = ("ny", "ny-fmt", "ny-perf", "ny-test", "ny-doc", "ny-make", "ny-lsp")
+    build_targets = ["ny", "std", "ny-fmt", "ny-perf", "ny-test", "ny-doc", "ny-make", "ny-lsp"]
+    if any(not (release_dir / name).exists() for name in tool_names):
+        boot_step("vendor: building release compiler/tools first")
+        cmake_build(build_root, "release", build_targets, jobs)
+
     ny_exe = release_dir / "ny"
     if not ny_exe.exists():
-        boot_step("vendor: building release ny first")
-        cmake_build(build_root, kind, ["ny", "std", "ny-fmt", "ny-perf", "ny-test", "ny-doc", "ny-make", "ny-lsp"], jobs)
+        raise SystemExit(f"vendor: release compiler was not produced: {ny_exe}")
 
     vendor_dir = build_root / "vendor"
+    if vendor_dir.exists():
+        shutil.rmtree(vendor_dir, ignore_errors=True)
+
     lib_dir = _vendor_lib_dir(build_root)
-    lib_dir.mkdir(parents=True, exist_ok=True)
-
-    os.environ["NYTRIX_BUNDLE_NO_SYSTEM_LIBS"] = "1"
-    copied = _copy_static_runtime_libs(lib_dir, ny_exe)
-    _check_static_bundle_glibc_floor(lib_dir, "vendor")
-
-    # Report only what actually survived the glibc floor prune.
-    real_names: set[str] = set()
-    for f in lib_dir.glob("*.so*"):
-        if f.is_symlink() or not f.is_file():
-            continue
-        real_names.add(f.name)
-    actual = sorted(real_names)
-    if actual:
-        log("VENDOR", f"bundled {len(actual)} shared libs: {', '.join(actual)}")
-    else:
-        log("VENDOR", "no shared libs copied (already static link?)")
-
-    # Detect bundled LLVM version from .so files
-    bundled_llvm_major = _detect_bundled_llvm_major(lib_dir)
-    if bundled_llvm_major:
-        log("VENDOR", f"detected bundled LLVM {bundled_llvm_major} from libLLVM.so.*")
-    else:
-        log("VENDOR", "no bundled LLVM .so found; skipping LLVM/Clang headers")
-
     vendored_bin = vendor_dir / "bin"
     vendored_include = vendor_dir / "include"
+    lib_dir.mkdir(parents=True, exist_ok=True)
 
-    # Z3's shared library is useful to a fresh source build only when its public
-    # headers travel with it. Copy the complete public z3*.h family because
-    # z3.h includes the generated API and version headers beside it.
-    z3_include_candidates = [Path("/usr/include"), Path("/usr/local/include")]
-    z3_pc = run_capture(["pkg-config", "--variable=includedir", "z3"])
-    if z3_pc.returncode == 0 and z3_pc.stdout.strip():
-        z3_include_candidates.insert(0, Path(z3_pc.stdout.strip()))
-    z3_header = next((p / "z3.h" for p in z3_include_candidates if (p / "z3.h").exists()), None)
-    if z3_header is not None and any(p.name.startswith("libz3.so") for p in lib_dir.glob("libz3.so*")):
+    # The source package carries compiler/build dependencies, not a private libc.
+    os.environ["NYTRIX_BUNDLE_NO_SYSTEM_LIBS"] = "1"
+
+    copied: list[str] = []
+
+    def remember(items: list[str]) -> None:
+        for item in items:
+            if item not in copied:
+                copied.append(item)
+
+    # Runtime closure of every shipped build tool, not just ny.
+    for tool_name in tool_names:
+        exe = release_dir / tool_name
+        if exe.exists() and exe.is_file():
+            remember(_copy_static_runtime_libs(lib_dir, exe))
+
+    runtime_llvm_major = _detect_bundled_llvm_major(lib_dir)
+    system_path = _system_path_excluding_vendor(build_root)
+    llvm_config_candidates: list[str] = []
+
+    def add_llvm_config_candidate(raw: str | None) -> None:
+        raw = (raw or "").strip()
+        if not raw:
+            return
+        candidate = Path(raw).expanduser()
+        if candidate.is_absolute() or "/" in raw or "\\" in raw:
+            found = str(candidate) if candidate.exists() else ""
+        else:
+            found = which(raw, path=system_path)
+        if not found:
+            return
+        try:
+            if _same_path(Path(found), vendored_bin / "llvm-config"):
+                return
+        except Exception:
+            pass
+        if found not in llvm_config_candidates:
+            llvm_config_candidates.append(found)
+
+    add_llvm_config_candidate(os.environ.get("LLVM_CONFIG"))
+    if runtime_llvm_major:
+        add_llvm_config_candidate(f"llvm-config-{runtime_llvm_major}")
+    add_llvm_config_candidate("llvm-config")
+    for major in (22, 21, 20, 19, 18, 17, 16):
+        add_llvm_config_candidate(f"llvm-config-{major}")
+
+    llvm_config_bin: str | None = None
+    llvm_version = ""
+    bundled_llvm_major = runtime_llvm_major or ""
+    for candidate in llvm_config_candidates:
+        result = run_capture([candidate, "--version"])
+        version = result.stdout.strip()
+        if result.returncode != 0 or not version:
+            continue
+        major = version.split(".", 1)[0]
+        if runtime_llvm_major and major != runtime_llvm_major:
+            continue
+        llvm_config_bin = candidate
+        llvm_version = version
+        bundled_llvm_major = major
+        break
+
+    if llvm_config_bin:
+        log("VENDOR", f"using system llvm-config: {llvm_config_bin} (LLVM {llvm_version})")
+    else:
+        log("VENDOR", "no usable system llvm-config found")
+
+    llvm_inc_raw = ""
+    llvm_libdir_raw = ""
+    llvm_cflags_raw = ""
+    llvm_cxxflags_raw = ""
+    llvm_libs_raw = ""
+    llvm_system_libs_raw = ""
+    if llvm_config_bin:
+        llvm_inc_raw = run_capture([llvm_config_bin, "--includedir"]).stdout.strip()
+        llvm_libdir_raw = run_capture([llvm_config_bin, "--libdir"]).stdout.strip()
+        llvm_cflags_raw = run_capture([llvm_config_bin, "--cflags"]).stdout.strip()
+        llvm_cxxflags_raw = run_capture([llvm_config_bin, "--cxxflags"]).stdout.strip()
+        llvm_libs_raw = run_capture([llvm_config_bin, "--libs", "all"]).stdout.strip()
+        llvm_system_libs_raw = run_capture([llvm_config_bin, "--system-libs"]).stdout.strip()
+
+    search_dirs: list[Path] = [lib_dir]
+    if llvm_libdir_raw:
+        search_dirs.append(Path(llvm_libdir_raw))
+    search_dirs.extend(_runtime_search_dirs())
+
+    dedup_dirs: list[Path] = []
+    seen_dirs: set[str] = set()
+    for directory in search_dirs:
+        try:
+            key = str(directory.resolve())
+        except Exception:
+            key = str(directory)
+        if key in seen_dirs or not directory.exists() or not directory.is_dir():
+            continue
+        seen_dirs.add(key)
+        dedup_dirs.append(directory)
+    search_dirs = dedup_dirs
+
+    seeded_names: set[str] = set()
+
+    def seed_shared(src: Path, needed_name: str | None = None) -> Path | None:
+        name = needed_name or src.name
+        if not name or _is_system_runtime_lib(name):
+            return None
+        existing = lib_dir / name
+        if existing.exists() and not existing.is_symlink():
+            return existing
+        if name in seeded_names:
+            return existing if existing.exists() else None
+        try:
+            if not src.exists():
+                return None
+        except Exception:
+            return None
+        seeded_names.add(name)
+        dst = _copy_one_shared_lib(src, lib_dir, name)
+        if dst is None:
+            return None
+        if dst.name not in copied:
+            copied.append(dst.name)
+        remember(_copy_static_runtime_libs(lib_dir, dst))
+        return dst
+
+    def seed_soname(name: str) -> Path | None:
+        if not name or _is_system_runtime_lib(name):
+            return None
+        existing = lib_dir / name
+        if existing.exists() and not existing.is_symlink():
+            return existing
+        dep = _find_shared_lib(name, search_dirs)
+        if dep is None:
+            return None
+        return seed_shared(dep, name)
+
+    # llvm-config describes the build-time LLVM closure even when ny itself was
+    # linked in a way that hides those libraries from ldd(ny).
+    llvm_link_flags = " ".join(
+        value for value in (llvm_libs_raw, llvm_system_libs_raw) if value
+    )
+    llvm_link_names: set[str] = set()
+    if llvm_link_flags:
+        try:
+            link_tokens = shlex.split(llvm_link_flags)
+        except ValueError:
+            link_tokens = llvm_link_flags.split()
+        for token in link_tokens:
+            if token.startswith("-L") and len(token) > 2:
+                directory = Path(token[2:]).expanduser()
+                if directory.exists() and directory.is_dir():
+                    try:
+                        key = str(directory.resolve())
+                    except Exception:
+                        key = str(directory)
+                    if key not in seen_dirs:
+                        seen_dirs.add(key)
+                        search_dirs.insert(0, directory)
+                continue
+            if token.startswith("-l") and len(token) > 2:
+                soname = "lib" + token[2:] + ".so"
+                llvm_link_names.add(soname)
+                seed_soname(soname)
+                continue
+            if ".so" in token:
+                p = Path(token)
+                if p.is_absolute() and p.exists():
+                    seed_shared(p, p.name)
+
+    if bundled_llvm_major and not any(name.startswith("libLLVM") for name in llvm_link_names):
+        seed_soname(f"libLLVM-{bundled_llvm_major}.so")
+
+    # Clang-family build libraries are not guaranteed to be listed by llvm-config.
+    for name in ("libclang.so", "libclang-cpp.so", "libLTO.so", "libomp.so"):
+        seed_soname(name)
+
+    pkg_tool = which("pkg-config") or which("pkgconf")
+
+    def pkg_value(package: str, variable: str) -> str:
+        if not pkg_tool:
+            return ""
+        result = run_capture([pkg_tool, f"--variable={variable}", package])
+        if result.returncode != 0:
+            return ""
+        value = result.stdout.strip()
+        return value.splitlines()[0] if value else ""
+
+    def add_pkg_libdir(package: str) -> None:
+        raw = pkg_value(package, "libdir")
+        if not raw:
+            return
+        directory = Path(raw)
+        if not directory.exists() or not directory.is_dir():
+            return
+        try:
+            key = str(directory.resolve())
+        except Exception:
+            key = str(directory)
+        if key not in seen_dirs:
+            seen_dirs.add(key)
+            search_dirs.insert(0, directory)
+
+    add_pkg_libdir("z3")
+    seed_soname("libz3.so")
+    add_pkg_libdir("gmp")
+    seed_soname("libgmp.so")
+
+    if not bundled_llvm_major:
+        bundled_llvm_major = _detect_bundled_llvm_major(lib_dir)
+    if bundled_llvm_major:
+        log("VENDOR", f"bundled LLVM major: {bundled_llvm_major}")
+
+    z3_include_candidates: list[Path] = []
+    z3_pkg_include = pkg_value("z3", "includedir")
+    if z3_pkg_include:
+        z3_include_candidates.append(Path(z3_pkg_include))
+    z3_include_candidates += [Path("/usr/include"), Path("/usr/local/include")]
+    z3_header = next(
+        (d / "z3.h" for d in z3_include_candidates if (d / "z3.h").exists()),
+        None,
+    )
+    have_z3 = any(p.name.startswith("libz3.so") for p in lib_dir.glob("libz3.so*"))
+    if z3_header is not None and have_z3:
         vendored_include.mkdir(parents=True, exist_ok=True)
-        copied_z3_headers = 0
+        count = 0
         for header in sorted(z3_header.parent.glob("z3*.h")):
             _copy2_if_different(header, vendored_include / header.name)
-            copied_z3_headers += 1
-        log("VENDOR", f"bundled {copied_z3_headers} Z3 public headers")
-    elif any(p.name.startswith("libz3.so") for p in lib_dir.glob("libz3.so*")):
-        log("VENDOR", "libz3 was bundled but z3.h was not found; install matching Z3 development headers before creating a source package")
+            count += 1
+        log("VENDOR", f"bundled {count} Z3 public headers")
+    elif have_z3:
+        log("VENDOR", "libz3 bundled but z3.h was not found")
 
-    # Find the llvm-config matching the bundled LLVM version.
-    # Must use the SYSTEM llvm-config, not the vendored one (which doesn't have
-    # headers yet and reports $here/include as --includedir).
-    llvm_config_bin: str | None = None
-    if bundled_llvm_major:
-        system_path = _system_path_excluding_vendor(build_root)
-        for cand in (f"llvm-config-{bundled_llvm_major}", "llvm-config"):
-            cand_path = which(cand, path=system_path)
-            if cand_path and cand_path != str(vendored_bin / "llvm-config"):
-                llvm_config_bin = cand_path
-                break
-        if llvm_config_bin:
-            check_ver = run_capture([llvm_config_bin, "--version"]).stdout.strip().split(".")[0]
-            if check_ver != bundled_llvm_major:
-                log("VENDOR", f"  {llvm_config_bin} reports LLVM {check_ver}, bundled libs are {bundled_llvm_major} — skipping incompatible headers")
-                llvm_config_bin = None
+    gmp_include_candidates: list[Path] = []
+    gmp_pkg_include = pkg_value("gmp", "includedir")
+    if gmp_pkg_include:
+        gmp_include_candidates.append(Path(gmp_pkg_include))
+    gmp_include_candidates += [
+        Path("/usr/include"), Path("/usr/local/include"), Path("/opt/homebrew/include")
+    ]
+    gmp_header = next(
+        (d / "gmp.h" for d in gmp_include_candidates if (d / "gmp.h").exists()),
+        None,
+    )
+    have_gmp = any(p.name.startswith("libgmp.so") for p in lib_dir.glob("libgmp.so*"))
+    if gmp_header is not None and have_gmp:
+        vendored_include.mkdir(parents=True, exist_ok=True)
+        _copy2_if_different(gmp_header, vendored_include / "gmp.h")
+        log("VENDOR", "bundled GMP public header")
 
-    if llvm_config_bin and bundled_llvm_major:
-        boot_step("vendor: bundling LLVM/Clang headers for self-contained build")
-        llvm_version = run_capture([llvm_config_bin, "--version"]).stdout.strip()
-        llvm_inc_raw = run_capture([llvm_config_bin, "--includedir"]).stdout.strip()
-        llvm_cflags_raw = run_capture([llvm_config_bin, "--cflags"]).stdout.strip()
-        llvm_libs_raw = run_capture([llvm_config_bin, "--libs", "all", "--system-libs"]).stdout.strip()
-        clang_resource = run_capture([llvm_config_bin, "--libdir"]).stdout.strip()
-
-        # Copy LLVM/Clang headers into vendor/include/.
+    if llvm_config_bin and bundled_llvm_major and llvm_inc_raw:
+        boot_step("vendor: bundling LLVM/Clang headers")
+        llvm_include = Path(llvm_inc_raw)
         for sub in ("llvm-c", "clang-c", "llvm", "clang"):
-            src = Path(llvm_inc_raw) / sub
-            dst = vendored_include / sub
+            src = llvm_include / sub
             if src.exists():
-                _copytree_replace(src, dst)
+                _copytree_replace(src, vendored_include / sub)
 
-        # Copy clang builtin includes.
-        for cand in (
-            Path(llvm_inc_raw).parent / "lib" / f"clang/{bundled_llvm_major}/include",
-            Path("/usr/lib") / f"clang/{bundled_llvm_major}/include",
-            Path("/usr/lib64") / f"clang/{bundled_llvm_major}/include",
-            Path("/usr/local/lib") / f"clang/{bundled_llvm_major}/include",
-            Path(clang_resource).parent / f"clang/{bundled_llvm_major}/include",
-        ):
-            if cand.exists() and any(cand.iterdir()):
-                _copytree_replace(cand, vendored_include / "clang-builtins")
+        clang_builtin_candidates = [
+            llvm_include.parent / "lib" / "clang" / bundled_llvm_major / "include",
+            Path("/usr/lib") / "clang" / bundled_llvm_major / "include",
+            Path("/usr/lib64") / "clang" / bundled_llvm_major / "include",
+            Path("/usr/local/lib") / "clang" / bundled_llvm_major / "include",
+        ]
+        if llvm_libdir_raw:
+            clang_builtin_candidates.append(
+                Path(llvm_libdir_raw) / "clang" / bundled_llvm_major / "include"
+            )
+        for candidate in clang_builtin_candidates:
+            if candidate.exists() and candidate.is_dir() and any(candidate.iterdir()):
+                _copytree_replace(candidate, vendored_include / "clang-builtins")
                 break
 
-        # Generate vendored llvm-config script.
         vendored_bin.mkdir(parents=True, exist_ok=True)
         config_script = (
             "#!/usr/bin/env sh\n"
-            "# Auto-generated by ./make vendor — do not edit\n"
-            f'here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/..\n'
-            f'llvm_libs="{llvm_libs_raw}"\nllvm_cflags="{llvm_cflags_raw}"\n'
-            'case "${1:-}" in\n'
-            f'  --version) echo "{llvm_version}" ;;\n'
-            f'  --includedir) echo "$here/include" ;;\n'
-            '  --cflags)\n'
-            '    echo "$llvm_cflags" | sed "s|-I[^ ]*|-I$here/include|g"\n'
-            '    ;;\n'
-            '  --ldflags) echo "-L$here/lib/host" ;;\n'
-            '  --libs)\n'
-            f'    echo "$llvm_libs"\n    ;;\n'
-            f'  *) exit 1 ;;\nesac\n'
+            "set -eu\n"
+            'here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/..\n'
+            f"llvm_version={shlex.quote(llvm_version)}\n"
+            f"llvm_cflags={shlex.quote(llvm_cflags_raw)}\n"
+            f"llvm_cxxflags={shlex.quote(llvm_cxxflags_raw)}\n"
+            f"llvm_libs={shlex.quote(llvm_libs_raw)}\n"
+            f"llvm_system_libs={shlex.quote(llvm_system_libs_raw)}\n"
+            'out=""\n'
+            'emit() { if [ -n "$out" ]; then out="$out $1"; else out="$1"; fi; }\n'
+            'for arg in "$@"; do\n'
+            '  case "$arg" in\n'
+            '    --version) echo "$llvm_version"; exit 0 ;;\n'
+            '    --prefix) echo "$here"; exit 0 ;;\n'
+            '    --includedir) echo "$here/include"; exit 0 ;;\n'
+            '    --libdir) echo "$here/lib/host"; exit 0 ;;\n'
+            '    --cflags) printf \'%s\\n\' "$llvm_cflags" | sed "s|-I[^ ]*|-I$here/include|g"; exit 0 ;;\n'
+            '    --cxxflags) printf \'%s\\n\' "$llvm_cxxflags" | sed "s|-I[^ ]*|-I$here/include|g"; exit 0 ;;\n'
+            '    --ldflags) emit "-L$here/lib/host -Wl,-rpath-link,$here/lib/host" ;;\n'
+            '    --libs) emit "$llvm_libs" ;;\n'
+            '    --system-libs) emit "$llvm_system_libs" ;;\n'
+            '    --shared-mode) echo shared; exit 0 ;;\n'
+            '    --link-shared|--link-static|all) : ;;\n'
+            '  esac\n'
+            'done\n'
+            'if [ -n "$out" ]; then printf \'%s\\n\' "$out"; exit 0; fi\n'
+            'exit 1\n'
         )
         config_path = vendored_bin / "llvm-config"
         config_path.write_text(config_script, encoding="utf-8")
         config_path.chmod(0o755)
-        log("VENDOR", f"vendored llvm-config ({llvm_version}) + LLVM/Clang headers (bundled {bundled_llvm_major})")
+        log("VENDOR", f"vendored llvm-config ({llvm_version}) + LLVM/Clang headers")
     else:
-        log("VENDOR", "no matching llvm-config for bundled LLVM; skipping LLVM/Clang headers")
+        log("VENDOR", "no matching llvm-config; LLVM/Clang headers not bundled")
 
-    # Create linker-name symlinks so -l flags resolve against bundled .so files.
-    _create_linker_symlinks(lib_dir, bundled_llvm_major)
+    _check_static_bundle_glibc_floor(lib_dir, "vendor")
 
-    # Write vendor env.sh.
+    symlinks = [p for p in vendor_dir.rglob("*") if p.is_symlink()]
+    if symlinks:
+        raise SystemExit(
+            "vendor: symlinks are forbidden: "
+            + ", ".join(str(p.relative_to(vendor_dir)) for p in symlinks[:20])
+        )
+
+    library_paths = [
+        p for p in lib_dir.glob("*.so*") if p.is_file() and not p.is_symlink()
+    ]
+    inode_groups: dict[tuple[int, int], list[str]] = {}
+    for p in library_paths:
+        st = p.stat()
+        inode_groups.setdefault((st.st_dev, st.st_ino), []).append(p.name)
+
+    log(
+        "VENDOR",
+        f"{len(inode_groups)} unique shared-library payloads, "
+        f"{len(library_paths)} required filenames",
+    )
+    for names in sorted(inode_groups.values(), key=lambda xs: sorted(xs)[0]):
+        if len(names) > 1:
+            log("VENDOR", "  hardlink names: " + " = ".join(sorted(names)))
+
     env_path = vendor_dir / "env.sh"
-    env_path.parent.mkdir(parents=True, exist_ok=True)
     env_lines = [
         "#!/usr/bin/env sh",
-        "# Source this to use vendored shared libs + LLVM for building.",
+        "# Nytrix vendored compiler dependencies.",
         '_nytrix_here=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE:-$0}")" && pwd)',
         'export LD_LIBRARY_PATH="$_nytrix_here/lib/host${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"',
+        'export LIBRARY_PATH="$_nytrix_here/lib/host${LIBRARY_PATH:+:$LIBRARY_PATH}"',
+        'export CPATH="$_nytrix_here/include${CPATH:+:$CPATH}"',
     ]
-    if vendored_bin.exists() and (vendored_bin / "llvm-config").exists():
+    if (vendored_bin / "llvm-config").exists():
         env_lines += [
             'export PATH="$_nytrix_here/bin${PATH:+:$PATH}"',
             'export LLVM_CONFIG="$_nytrix_here/bin/llvm-config"',
             'export NYTRIX_LLVM_INCLUDE="$_nytrix_here/include"',
         ]
-    env_lines += ["echo 'Nytrix vendor libs loaded'"]
+    env_lines.append("echo 'Nytrix vendor libs loaded'")
     env_path.write_text("\n".join(env_lines) + "\n", encoding="utf-8")
     env_path.chmod(0o755)
 
@@ -5963,9 +6432,10 @@ def run_make_tar(build_root: Path, kind: str, jobs: int, args: list[str]) -> int
         print("usage: make tar [--source|--with-binaries]")
         print()
         print("  Default: creates build/dist/nytrix-source.tar.gz")
-        print("    source code + vendored LLVM build libs, checked against NYTRIX_GLIBC_FLOOR")
+        print("    source + docs + compact vendored LLVM/Clang/Z3/GMP build deps")
         print("  --with-binaries: creates build/dist/nytrix-static.tar.gz")
-        print("    includes build/static/ with ./run-ny and bundled runtime libs")
+        print("    also includes build/static/ with portable binaries/runtime libs")
+        print("  Vendor libraries contain no symlinks and preserve hardlink deduplication.")
         print("  NYTRIX_GLIBC_FLOOR=2.38 controls the portability floor for packaged libs.")
         print("  NYTRIX_TAR_WITH_BINARIES=1 makes --with-binaries the default.")
         return 0
@@ -5976,33 +6446,43 @@ def run_make_tar(build_root: Path, kind: str, jobs: int, args: list[str]) -> int
     shutil.rmtree(package_dir, ignore_errors=True)
     package_dir.mkdir(parents=True, exist_ok=True)
 
-    # Ensure vendor libs exist (build release + bundle if needed).
-    vendor_lib = _vendor_lib_dir(build_root)
-    if not vendor_lib.exists() or not any(vendor_lib.glob("*.so*")):
-        boot_step("tar: bundling vendored libs first")
-        run_make_vendor(build_root, kind, jobs, [])
+    # Always regenerate vendor: a partially populated/stale vendor directory must
+    # never make tar silently skip dependency discovery.
+    boot_step("tar: refreshing compact vendored build dependencies")
+    rc = run_make_vendor(build_root, kind, jobs, [])
+    if rc != 0:
+        return rc
 
-    # Copy vendored libs into build/vendor/ inside the package, then repair the
-    # copy so source tarballs do not ship same-distro terminal libraries that
-    # require a newer glibc than the rest of the vendored LLVM closure.
-    _copytree_replace(build_root / "vendor", package_dir / "build" / "vendor")
-    _repair_tar_vendor_glibc_floor(package_dir / "build" / "vendor" / "lib" / "host")
+    package_vendor = package_dir / "build" / "vendor"
+    _copytree_replace_preserve_hardlinks(build_root / "vendor", package_vendor)
+    package_vendor_lib = package_vendor / "lib" / "host"
+    _repair_tar_vendor_glibc_floor(package_vendor_lib)
+
+    # Compatibility repair must not reintroduce symlinks.
+    _materialize_symlinks_as_hardlinks(package_vendor)
 
     if with_binaries:
-        # Build and bundle static portable folder.
         rc = run_make_static(build_root, kind, jobs, ["bin"])
         if rc != 0:
             return rc
         _copytree_replace(build_root / "static", package_dir / "build" / "static")
 
-    # Source tree (runtime headers, stdlib source, etc).
-    for name in ("src", "lib", "etc", ".github"):
+    # Source tree. Do not package .git history; it is large and not needed to build.
+    for name in ("src", "lib", "etc", "docs", ".github", ".githooks"):
         _copytree_replace(ROOT / name, package_dir / name, ignore=_tar_source_ignore)
-    for name in ("make", "CMakeLists.txt", ".clangd", "out.diff", "README.md", "LICENSE"):
+    for name in (
+        "make", "CMakeLists.txt", ".clangd", "README.md", "LICENSE", ".editorconfig"
+    ):
         _copy_release_file(ROOT / name, package_dir / name)
 
-    # No top-level env.sh is emitted. ./make now installs the package-local
-    # NYTRIX_ROOT/NYTRIX_RT_SRC/CC defaults before running any command.
+    # Fail closed if the vendor subtree contains any symbolic links.
+    vendor_links = [p for p in package_vendor.rglob("*") if p.is_symlink()]
+    if vendor_links:
+        raise SystemExit(
+            "tar: refusing vendor subtree containing symlinks: "
+            + ", ".join(str(p.relative_to(package_vendor)) for p in vendor_links[:20])
+        )
+
     archive_base = dist_dir / package_name
     tar_path = _make_tar_gz_fast(archive_base, dist_dir, package_name)
     ok(f"tar ready: {_rel_or_abs(tar_path)}")

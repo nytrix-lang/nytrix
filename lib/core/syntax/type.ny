@@ -270,28 +270,31 @@ fn is_nil(any x) bool {
 
 fn is_list(any x) bool {
    "Check if x is a list."
-   __tagof(x) == TAG_LIST
+   ;; REPL/lazy modules do not guarantee module-level TAG_* initializers have
+   ;; run before this predicate is first called.  Resolve the builtin tag at
+   ;; the use site so native tbuf lists and AOT values share one contract.
+   __has_tag(x, prim.runtime_tag_raw("list"))
 }
 
 fn is_dict(any x) bool {
    "Check if x is a dict."
-   __tagof(x) == TAG_DICT
+   __has_tag(x, prim.runtime_tag_raw("dict"))
 }
 
 fn is_str(any x) bool {
    "Check if x is a string."
    def tag = __tagof(x)
-   tag == TAG_STR1 || tag == TAG_STR2
+   tag == prim.runtime_tag_raw("str") || tag == prim.runtime_tag_raw("str_const")
 }
 
 fn is_tuple(any x) bool {
    "Check if x is a tuple."
-   __tagof(x) == TAG_TUPLE
+   __has_tag(x, prim.runtime_tag_raw("tuple"))
 }
 
 fn is_set(any x) bool {
    "Check if x is a set."
-   __tagof(x) == TAG_SET
+   __has_tag(x, prim.runtime_tag_raw("set"))
 }
 
 fn is_bigint(any x) bool {

@@ -30,7 +30,7 @@ static bool ny_capture_append(char **buf, size_t *len, size_t *cap,
     *buf = grown;
     *cap = next;
   }
-  memcpy(*buf + *len, data, size);
+  memmove(*buf + *len, data, size);
   *len += size;
   (*buf)[*len] = '\0';
   return true;

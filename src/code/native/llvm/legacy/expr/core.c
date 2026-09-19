@@ -320,6 +320,32 @@ static bool expr_target_is_known_list_like(codegen_t *cg, scope *scopes,
   return false;
 }
 
+static bool expr_target_is_known_string_like(codegen_t *cg, scope *scopes,
+                                             size_t depth, expr_t *target) {
+  if (!target)
+    return false;
+  if (target->kind == NY_E_LITERAL && target->as.literal.kind == NY_LIT_STR)
+    return true;
+  const char *type_name = infer_expr_type(cg, scopes, depth, target);
+  if (type_name && expr_type_base_is(type_name, "str"))
+    return true;
+  if (target->kind == NY_E_IDENT && target->as.ident.name) {
+    size_t name_len = (size_t)target->tok.len;
+    if (name_len == 0)
+      name_len = strlen(target->as.ident.name);
+    binding *b = expr_lookup_binding(cg, scopes, depth,
+                                     target->as.ident.name, name_len,
+                                     target->as.ident.hash);
+    if (b && b->type_name && expr_type_base_is(b->type_name, "str"))
+      return true;
+    expr_t *init = b ? ny_binding_var_init_expr(b,
+                                                 target->as.ident.name) : NULL;
+    return init && init->kind == NY_E_LITERAL &&
+           init->as.literal.kind == NY_LIT_STR;
+  }
+  return false;
+}
+
 static bool expr_negative_literal_i64(expr_t *e, int64_t *out) {
   if (!e || e->kind != NY_E_UNARY || !e->as.unary.op ||
       strcmp(e->as.unary.op, "-") != 0 || !e->as.unary.right)
@@ -336,11 +362,8 @@ static binding *expr_f64_list_target_binding(codegen_t *cg, scope *scopes,
                                              size_t depth, expr_t *target) {
   if (!target || target->kind != NY_E_IDENT || !target->as.ident.name)
     return NULL;
-  size_t name_len = (size_t)target->tok.len;
-  if (name_len == 0)
-    name_len = strlen(target->as.ident.name);
-  binding *b = expr_lookup_binding(cg, scopes, depth, target->as.ident.name,
-                                   name_len, target->as.ident.hash);
+  binding *b =
+      ny_static_int_list_target_binding(cg, scopes, depth, target);
   return (b && ((b->is_list_storage && b->is_f64_list_storage) ||
                 (b->raw_f64_list_mutation && b->raw_f64_list_ptr &&
                  b->raw_f64_list_len > 0)))
@@ -1199,8 +1222,8 @@ static bool ny_ct_fast_val_clone(const ny_ct_fast_val_t *src,
   return true;
 }
 
-static bool ny_try_eval_comptime_expr_fast(codegen_t *cg, expr_t *e,
-                                           ny_ct_fast_val_t *out, int depth);
+bool ny_try_eval_comptime_expr_fast(codegen_t *cg, expr_t *e,
+                                    ny_ct_fast_val_t *out, int depth);
 static bool ny_try_eval_comptime_fast_value(codegen_t *cg, stmt_t *body,
                                             ny_ct_fast_val_t *out);
 
@@ -1409,7 +1432,7 @@ static bool ny_ct_fast_eval_long_property(codegen_t *cg, expr_t *target,
 
 static bool ny_ct_fuel_consume(codegen_t *cg) {
   if (!cg)
-    return false;
+    return true;
   if (cg->env_cache.comptime_fuel_total == 0) {
     const char *env = getenv("NYTRIX_COMPTIME_FUEL");
     int64_t limit = NY_COMPTIME_FUEL_DEFAULT;
@@ -1428,8 +1451,8 @@ static bool ny_ct_fuel_consume(codegen_t *cg) {
   return true;
 }
 
-static bool ny_try_eval_comptime_expr_fast(codegen_t *cg, expr_t *e,
-                                           ny_ct_fast_val_t *out, int depth) {
+bool ny_try_eval_comptime_expr_fast(codegen_t *cg, expr_t *e,
+                                    ny_ct_fast_val_t *out, int depth) {
   if (!e || !out || depth > 64)
     return false;
   if (!ny_ct_fuel_consume(cg))
@@ -1601,7 +1624,43 @@ static bool ny_try_eval_comptime_expr_fast(codegen_t *cg, expr_t *e,
       out->s = ny_host_arch_name();
       return true;
     }
+    refine_def_t *ref = ny_lookup_refine(cg, name);
+    if (ref && e->as.call.args.len == 1) {
+      int res = 0;
+      if (ny_refine_eval_predicate(cg, NULL, 0, ref, e->as.call.args.data[0].val, &res)) {
+        out->kind = NY_CT_FAST_BOOL;
+        out->b = (res == 1);
+        return true;
+      }
+    }
     return false;
+  }
+
+  case NY_E_EXISTS: {
+    const char *k_name = e->as.exists.var;
+    expr_t *body = e->as.exists.body;
+    if (!k_name || !body)
+      return false;
+    bool found_witness = false;
+    for (int64_t cand = -500; cand <= 500; cand++) {
+      expr_t lit_k;
+      memset(&lit_k, 0, sizeof(lit_k));
+      lit_k.kind = NY_E_LITERAL;
+      lit_k.tok = e->tok;
+      lit_k.as.literal.kind = NY_LIT_INT;
+      lit_k.as.literal.as.i = cand;
+      expr_t *sub = ny_expr_subst(cg ? cg->arena : NULL, body, k_name, &lit_k);
+      ny_ct_fast_val_t res = ny_ct_fast_none();
+      if (ny_try_eval_comptime_expr_fast(cg, sub, &res, depth + 1)) {
+        if (res.kind == NY_CT_FAST_BOOL && res.b) {
+          found_witness = true;
+          break;
+        }
+      }
+    }
+    out->kind = NY_CT_FAST_BOOL;
+    out->b = found_witness;
+    return true;
   }
 
   default:
@@ -2367,6 +2426,15 @@ static bool ny_ct_interp_eval_expr(expr_t *e, ny_ct_interp_ctx_t *ctx,
       out->s = ny_host_arch_name();
       return true;
     }
+    refine_def_t *ref = ny_lookup_refine(ctx->cg, name);
+    if (ref && e->as.call.args.len == 1) {
+      int res = 0;
+      if (ny_refine_eval_predicate(ctx->cg, NULL, 0, ref, e->as.call.args.data[0].val, &res)) {
+        out->kind = NY_CT_FAST_BOOL;
+        out->b = (res == 1);
+        return true;
+      }
+    }
     return false;
   }
   case NY_E_MEMCALL: {
@@ -2377,6 +2445,32 @@ static bool ny_ct_interp_eval_expr(expr_t *e, ny_ct_interp_ctx_t *ctx,
                                    depth + 1);
     }
     return false;
+  }
+  case NY_E_EXISTS: {
+    const char *k_name = e->as.exists.var;
+    expr_t *body = e->as.exists.body;
+    if (!k_name || !body)
+      return false;
+    bool found_witness = false;
+    for (int64_t cand = -500; cand <= 500; cand++) {
+      expr_t lit_k;
+      memset(&lit_k, 0, sizeof(lit_k));
+      lit_k.kind = NY_E_LITERAL;
+      lit_k.tok = e->tok;
+      lit_k.as.literal.kind = NY_LIT_INT;
+      lit_k.as.literal.as.i = cand;
+      expr_t *sub = ny_expr_subst(ctx->cg ? ctx->cg->arena : NULL, body, k_name, &lit_k);
+      ny_ct_fast_val_t res = ny_ct_fast_none();
+      if (ny_ct_interp_eval_expr(sub, ctx, &res, depth + 1)) {
+        if (res.kind == NY_CT_FAST_BOOL && res.b) {
+          found_witness = true;
+          break;
+        }
+      }
+    }
+    out->kind = NY_CT_FAST_BOOL;
+    out->b = found_witness;
+    return true;
   }
   default:
     return false;
@@ -2751,7 +2845,14 @@ LLVMValueRef gen_closure(codegen_t *cg, scope *scopes, size_t depth,
   stmt_t *sfn = arena_alloc(cg->arena, sizeof(*sfn));
   memset(sfn, 0, sizeof(*sfn));
   ny_param_list callable_params = params;
-  const char *callable_return_type = return_type;
+  /*
+   * An unannotated lambda still returns a language value.  Keep its
+   * generated function on the tagged NyValue ABI so a dynamic arithmetic
+   * expression is not tagged once by the expression and again by the
+   * untyped-tail return path.  Explicit annotations continue to select the
+   * corresponding raw/native ABI.
+   */
+  const char *callable_return_type = return_type ? return_type : "any";
   bool needs_tagged_adapter_abi = callable_return_type != NULL;
   for (size_t i = 0; i < params.len; ++i) {
     if (params.data[i].type) {
@@ -3662,11 +3763,18 @@ static LLVMValueRef expr_try_fast_index_read(codegen_t *cg, scope *scopes,
     binding *b =
         ny_static_int_list_target_binding(cg, scopes, depth,
                                           e->as.index.target);
-    if (b && b->static_indexable_object_elided) {
-      expr_t *init = ny_binding_flow_static_int_list_init(b);
+    /*
+     * Literal integer tables do not need a runtime list object at all.
+     * This used to be restricted to the object-elided case, which meant a
+     * perfectly ordinary immutable table such as SHA-256's K[64] fell
+     * through to rt_tbuf_index_any_raw on every round.  The static-list
+     * helper already rejects escaping/mutable-unsafe bindings, so use the
+     * pooled constant array whenever that proof is available.
+     */
+    expr_t *init = ny_binding_flow_static_int_list_init(b);
+    if (init) {
       LLVMTypeRef array_ty = NULL;
-      LLVMValueRef g =
-          init ? ny_static_int_list_global(cg, b, init, &array_ty) : NULL;
+      LLVMValueRef g = ny_static_int_list_global(cg, b, init, &array_ty);
       if (g && array_ty) {
         LLVMValueRef key_v = gen_expr(cg, scopes, depth, e->as.index.start);
         if (key_v) {
@@ -4823,7 +4931,6 @@ LLVMValueRef gen_comptime_eval(codegen_t *cg, stmt_t *body) {
     }
   }
 
-
   const char *jit_engine = getenv("NYTRIX_JIT_ENGINE");
   if (jit_engine && strcmp(jit_engine, "orc") == 0) {
     if (tcg.debug_symbols)
@@ -5152,6 +5259,25 @@ static LLVMValueRef gen_expr_unary(codegen_t *cg, scope *scopes, size_t depth,
                    e->as.unary.op);
 }
 
+static bool expr_target_is_literal_backed_list(codegen_t *cg, scope *scopes,
+                                               size_t depth, expr_t *target) {
+  if (!target)
+    return false;
+  if (target->kind == NY_E_LIST || target->kind == NY_E_TUPLE)
+    return true;
+  if (target->kind != NY_E_IDENT || !target->as.ident.name)
+    return false;
+  size_t name_len = (size_t)target->tok.len;
+  if (name_len == 0)
+    name_len = strlen(target->as.ident.name);
+  binding *b = expr_lookup_binding(cg, scopes, depth, target->as.ident.name,
+                                   name_len, target->as.ident.hash);
+  if (!b)
+    return false;
+  expr_t *init = ny_binding_var_init_expr(b, target->as.ident.name);
+  return init && (init->kind == NY_E_LIST || init->kind == NY_E_TUPLE);
+}
+
 static LLVMValueRef gen_expr_index(codegen_t *cg, scope *scopes, size_t depth,
                                    expr_t *e) {
   if (e->as.index.stop || e->as.index.step || !e->as.index.start) {
@@ -5175,6 +5301,46 @@ static LLVMValueRef gen_expr_index(codegen_t *cg, scope *scopes, size_t depth,
                          stop, step},
         4, "");
   }
+  /*
+   * String indexing is a character lookup, not a raw native-buffer lookup.
+   * An inferred/unknown string local can otherwise enter the dynamic index
+   * fast path below; that path is valid for tbuf-backed sequences but can
+   * interpret a C-string payload as a suffix slice.  Keep the ordinary
+   * checked index contract for every statically identifiable string.
+   */
+  if (e->as.index.target && e->as.index.start &&
+      expr_target_is_known_string_like(cg, scopes, depth,
+                                       e->as.index.target)) {
+    fun_sig *string_index = ny_helper_index_read(cg);
+    if (string_index) {
+      LLVMValueRef target = gen_expr(cg, scopes, depth, e->as.index.target);
+      LLVMValueRef key = gen_expr(cg, scopes, depth, e->as.index.start);
+      if (target && key)
+        return LLVMBuildCall2(cg->builder, string_index->type,
+                              string_index->value,
+                              (LLVMValueRef[]){target, key}, 2,
+                              NY_LLVM_NAME(cg, "string_index_read"));
+    }
+  }
+  /*
+   * Literal-backed lists have representation proof strong enough to bypass
+   * the dynamic tbuf bridge.  Try the existing SROA/static/direct-index
+   * machinery before the conservative generic list path below.  Keeping
+   * this targeted avoids assuming that arbitrary list-like values (notably
+   * native typed buffers) use the legacy managed-list header layout.
+   */
+  if (expr_target_is_literal_backed_list(cg, scopes, depth,
+                                         e->as.index.target) &&
+      expr_index_is_int_key(cg, scopes, depth, e->as.index.start)) {
+    fun_sig *literal_index = ny_helper_index_read(cg);
+    LLVMValueRef fast = literal_index
+                            ? expr_try_fast_index_read(cg, scopes, depth, e,
+                                                       literal_index)
+                            : NULL;
+    if (fast)
+      return fast;
+  }
+
   if (expr_target_is_known_list_like(cg, scopes, depth,
                                      e->as.index.target) &&
       expr_index_is_int_key(cg, scopes, depth, e->as.index.start)) {
@@ -5188,10 +5354,15 @@ static LLVMValueRef gen_expr_index(codegen_t *cg, scope *scopes, size_t depth,
           "dynamic_index_key_raw");
       LLVMTypeRef args_ty[2] = {cg->type_i64, cg->type_i64};
       LLVMTypeRef fn_ty = LLVMFunctionType(cg->type_i64, args_ty, 2, 0);
+      /*
+       * key_raw is already an untagged native index.  Use the raw bridge;
+       * the tagged entry point would interpret odd raw indices (1, 3, ...)
+       * as language integers and untag them a second time.
+       */
       LLVMValueRef fn = LLVMGetNamedFunction(cg->module,
-                                             "rt_tbuf_index_any");
+                                             "rt_tbuf_index_any_raw");
       if (!fn)
-        fn = LLVMAddFunction(cg->module, "rt_tbuf_index_any", fn_ty);
+        fn = LLVMAddFunction(cg->module, "rt_tbuf_index_any_raw", fn_ty);
       if (fn && key_raw)
         return LLVMBuildCall2(
             cg->builder, fn_ty, fn, (LLVMValueRef[]){target_v, key_raw}, 2,
@@ -5211,7 +5382,10 @@ static LLVMValueRef gen_expr_index(codegen_t *cg, scope *scopes, size_t depth,
   bool dynamic_target =
       !target_type || ny_gencall_type_is(target_type, "any") ||
       ny_gencall_type_is(target_type, "unknown");
-  if (dynamic_target && e->as.index.start->kind == NY_E_LITERAL &&
+  bool string_target = expr_target_is_known_string_like(
+      cg, scopes, depth, e->as.index.target);
+  if (dynamic_target && !string_target &&
+      e->as.index.start->kind == NY_E_LITERAL &&
       e->as.index.start->as.literal.kind == NY_LIT_INT &&
       e->as.index.start->as.literal.as.i >= 0) {
     LLVMValueRef target_v = gen_expr(cg, scopes, depth, e->as.index.target);

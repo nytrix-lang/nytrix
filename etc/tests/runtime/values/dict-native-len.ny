@@ -1,6 +1,6 @@
 fn typed_len(dict d) int { d.len }
-fn dynamic_len(any d) int { d.len }
 
+fn dynamic_len(any d) int { d.len }
 def d = dict_set(dict(4), "a", 1)
 assert(d.len == 1, "native dictionary property length")
 assert(typed_len(d) == 1, "typed native dictionary property length")

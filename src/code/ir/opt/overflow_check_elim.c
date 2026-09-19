@@ -1,7 +1,7 @@
 /*
  * Overflow check elimination: removes proven-safe overflow guards.
  *
- * ── Literature ──
+ * Literature
  *  Warren — Hacker's Delight (2nd Ed.), Ch.2 §2-13 "Overflow
  *   Detection": signed add/sub/mul overflow conditions via sign-
  *   bit tests. Unsigned via carry flag.
@@ -12,7 +12,7 @@
  *
  *  Nytrix VRP (vrp.c): provides range facts consumed by this pass.
  *
- * ── Nytrix implementation ──
+ * Nytrix implementation
  *  Eliminates overflow checks when VRP/SCCP prove the operation
  *  result stays within representable range. Tags proven operations
  *  with NYIR_INST_F_NO_OVERFLOW for codegen to skip checking.

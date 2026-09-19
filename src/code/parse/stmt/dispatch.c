@@ -372,6 +372,12 @@ static stmt_t *p_parse_stmt_raw(parser_t *p) {
     if (id_len == 4 && strncmp(id, "impl", 4) == 0) {
       return parse_impl_stmt(p);
     }
+    if (id_len == 6 && strncmp(id, "refine", 6) == 0) {
+      return parse_refine_stmt(p);
+    }
+    if (id_len == 5 && strncmp(id, "trait", 5) == 0) {
+      return parse_trait(p);
+    }
     if (id_len == 5 && strncmp(id, "shape", 5) == 0 &&
         (next.kind == NY_T_IDENT || next.kind == NY_T_LT)) {
       return parse_struct(p);

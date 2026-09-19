@@ -195,21 +195,73 @@ static bool hm_type_is_unbound_var(ny_hm_type_t *t) {
   return t && t->kind == NY_HM_VAR;
 }
 
-static bool hm_type_known_numeric(ny_hm_type_t *t, const char **canonical_out) {
+static const char *hm_lookup_refine_base_in_stmts(ny_stmt_list *stmts, const char *name) {
+  if (!stmts || !name)
+    return NULL;
+  for (size_t i = 0; i < stmts->len; ++i) {
+    stmt_t *s = stmts->data[i];
+    if (!s)
+      continue;
+    if (s->kind == NY_S_REFINE && s->as.refine.name &&
+        strcmp(s->as.refine.name, name) == 0)
+      return s->as.refine.base_type;
+    if (s->kind == NY_S_MODULE) {
+      const char *b = hm_lookup_refine_base_in_stmts(&s->as.module.body, name);
+      if (b)
+        return b;
+    }
+  }
+  return NULL;
+}
+
+static const char *hm_lookup_refine_base(ny_hm_state_t *hm, const char *name) {
+  if (!hm || !name)
+    return NULL;
+  if (hm->ctx && hm->ctx->cg) {
+    const char *b = ny_refine_base_type(hm->ctx->cg, name);
+    if (b && strcmp(b, name) != 0)
+      return b;
+  }
+  if (hm->ctx && hm->ctx->prog) {
+    const char *b = hm_lookup_refine_base_in_stmts(&hm->ctx->prog->body, name);
+    if (b)
+      return b;
+  }
+  return NULL;
+}
+
+static const char *hm_resolve_refine_root_base(ny_hm_state_t *hm, const char *name) {
+  if (!name)
+    return NULL;
+  const char *cur = name;
+  for (int depth = 0; depth < 16 && cur; depth++) {
+    const char *next = hm_lookup_refine_base(hm, cur);
+    if (!next || strcmp(next, cur) == 0)
+      break;
+    cur = next;
+  }
+  return (cur != name) ? cur : NULL;
+}
+
+static bool hm_type_known_numeric(ny_hm_state_t *hm, ny_hm_type_t *t, const char **canonical_out) {
   t = hm_prune(t);
   if (!t || t->kind != NY_HM_NAME || !t->name)
     return false;
-  if (tp_is_float_type(t->name) || strcmp(t->name, "float") == 0) {
+  const char *name = t->name;
+  const char *base = hm_resolve_refine_root_base(hm, name);
+  if (base)
+    name = base;
+  if (tp_is_float_type(name) || strcmp(name, "float") == 0) {
     if (canonical_out)
-      *canonical_out = tp_is_float_type(t->name) ? t->name : "f64";
+      *canonical_out = tp_is_float_type(name) ? name : "f64";
     return true;
   }
-  if (tp_is_int_type(t->name) || strcmp(t->name, "integer") == 0) {
+  if (tp_is_int_type(name) || strcmp(name, "integer") == 0) {
     if (canonical_out)
-      *canonical_out = tp_is_int_type(t->name) ? t->name : "int";
+      *canonical_out = tp_is_int_type(name) ? name : "int";
     return true;
   }
-  if (strcmp(t->name, "number") == 0) {
+  if (strcmp(name, "number") == 0) {
     if (canonical_out)
       *canonical_out = "number";
     return true;
@@ -228,15 +280,15 @@ static bool hm_type_known_collection(ny_hm_type_t *t) {
                t->kind == NY_HM_TUPLE || t->kind == NY_HM_DICT);
 }
 
-static bool hm_name_compatible(const char *want, const char *got);
+static bool hm_name_compatible(ny_hm_state_t *hm, const char *want, const char *got);
 
 static bool hm_generic_base_same(const char *want, const char *got) {
   return strchr(want ? want : "", '<') && strchr(got ? got : "", '<') &&
          ny_generic_type_base_is(want, got);
 }
 
-static bool hm_generic_name_compatible(const char *want, const char *got);
-static char *hm_merge_generic_name_owned(const char *want, const char *got);
+static bool hm_generic_name_compatible(ny_hm_state_t *hm, const char *want, const char *got);
+static char *hm_merge_generic_name_owned(ny_hm_state_t *hm, const char *want, const char *got);
 
 static bool hm_generic_arg_is_dynamic(const char *name) {
   const char *leaf = ny_generic_type_leaf(name);
@@ -255,22 +307,22 @@ static char *hm_generic_base_owned(const char *name) {
   return ny_strndup(leaf, (size_t)(lt - leaf));
 }
 
-static char *hm_merge_generic_arg_owned(const char *want, const char *got) {
+static char *hm_merge_generic_arg_owned(ny_hm_state_t *hm, const char *want, const char *got) {
   if (hm_generic_arg_is_dynamic(want))
     return ny_strdup(got ? got : "any");
   if (hm_generic_arg_is_dynamic(got))
     return ny_strdup(want ? want : "any");
   if (hm_generic_base_same(want, got)) {
-    char *merged = hm_merge_generic_name_owned(want, got);
+    char *merged = hm_merge_generic_name_owned(hm, want, got);
     if (merged)
       return merged;
   }
   return ny_strdup(want ? want : (got ? got : "any"));
 }
 
-static char *hm_merge_generic_name_owned(const char *want, const char *got) {
+static char *hm_merge_generic_name_owned(ny_hm_state_t *hm, const char *want, const char *got) {
   if (!hm_generic_base_same(want, got) ||
-      !hm_generic_name_compatible(want, got))
+      !hm_generic_name_compatible(hm, want, got))
     return NULL;
   char *base = hm_generic_base_owned(want);
   if (!base)
@@ -289,7 +341,7 @@ static char *hm_merge_generic_name_owned(const char *want, const char *got) {
       free(j.data);
       return NULL;
     }
-    char *arg = hm_merge_generic_arg_owned(wa, ga);
+    char *arg = hm_merge_generic_arg_owned(hm, wa, ga);
     if (i)
       tp_append(&j, ", ");
     tp_append(&j, "%s", arg ? arg : "any");
@@ -301,7 +353,7 @@ static char *hm_merge_generic_name_owned(const char *want, const char *got) {
   return tp_take(&j, "");
 }
 
-static bool hm_generic_name_compatible(const char *want, const char *got) {
+static bool hm_generic_name_compatible(ny_hm_state_t *hm, const char *want, const char *got) {
   if (!hm_generic_base_same(want, got))
     return false;
   for (size_t i = 0; i < 16; ++i) {
@@ -314,7 +366,7 @@ static bool hm_generic_name_compatible(const char *want, const char *got) {
       free(ga);
       return false;
     }
-    bool ok = hm_name_compatible(wa, ga);
+    bool ok = hm_name_compatible(hm, wa, ga);
     free(wa);
     free(ga);
     if (!ok)
@@ -323,12 +375,18 @@ static bool hm_generic_name_compatible(const char *want, const char *got) {
   return true;
 }
 
-static bool hm_name_compatible(const char *want, const char *got) {
+static bool hm_name_compatible(ny_hm_state_t *hm, const char *want, const char *got) {
   if (!want || !got)
     return true;
   if (strcmp(want, got) == 0 || strcmp(want, "any") == 0 ||
       strcmp(got, "any") == 0)
     return true;
+  const char *r_want = hm_resolve_refine_root_base(hm, want);
+  const char *r_got = hm_resolve_refine_root_base(hm, got);
+  if (r_want || r_got) {
+    if (hm_name_compatible(hm, r_want ? r_want : want, r_got ? r_got : got))
+      return true;
+  }
   /*
    * Fin<N> has the integer ABI.  Keep the named bound in the environment
    * for declaration checking, but allow it wherever an ordinary integer is
@@ -356,7 +414,7 @@ static bool hm_name_compatible(const char *want, const char *got) {
     if (ok)
       return true;
   }
-  if (hm_generic_name_compatible(want, got))
+  if (hm_generic_name_compatible(hm, want, got))
     return true;
   if ((hm_is_callable_name(want) && hm_is_callable_name(got)))
     return true;
@@ -426,8 +484,93 @@ static void hm_check_fin_initializer(ny_hm_state_t *hm, const char *decl,
                  bound, bound, value);
 }
 
-/* Builtin kind/ primitive names keep their exact-kind unification; any
- * other declared name is a nominal user/impl type. */
+static stmt_t *hm_lookup_refine_stmt_in_stmts(ny_stmt_list *stmts, const char *name) {
+  if (!stmts || !name)
+    return NULL;
+  for (size_t i = 0; i < stmts->len; ++i) {
+    stmt_t *s = stmts->data[i];
+    if (!s)
+      continue;
+    if (s->kind == NY_S_REFINE && s->as.refine.name &&
+        strcmp(s->as.refine.name, name) == 0)
+      return s;
+    if (s->kind == NY_S_MODULE) {
+      stmt_t *res = hm_lookup_refine_stmt_in_stmts(&s->as.module.body, name);
+      if (res)
+        return res;
+    }
+  }
+  return NULL;
+}
+
+static stmt_t *hm_lookup_refine_stmt(ny_hm_state_t *hm, const char *name) {
+  if (!hm || !name)
+    return NULL;
+  if (hm->ctx && hm->ctx->cg) {
+    refine_def_t *r = ny_lookup_refine(hm->ctx->cg, name);
+    if (r && r->stmt)
+      return r->stmt;
+  }
+  if (hm->ctx && hm->ctx->prog) {
+    stmt_t *s = hm_lookup_refine_stmt_in_stmts(&hm->ctx->prog->body, name);
+    if (s)
+      return s;
+  }
+  return NULL;
+}
+
+static void hm_check_refinement_initializer(ny_hm_state_t *hm, const char *decl,
+                                            const expr_t *init, token_t tok) {
+  if (!hm || !decl || !*decl || !init)
+    return;
+  codegen_t *cg = hm->ctx ? hm->ctx->cg : NULL;
+  refine_def_t *ref = NULL;
+  if (cg)
+    ref = ny_lookup_refine(cg, decl);
+  if (ref) {
+    int res = 0;
+    if (ny_refine_eval_predicate(cg, NULL, 0, ref, (expr_t *)init, &res)) {
+      if (res == 0) {
+        tp_add_diag_ex(hm->ctx, tok, "hm", "hm-refinement-obligation-failed",
+                       "variable declaration", decl, "refinement satisfaction",
+                       "value",
+                       "refinement predicates must hold at compile time for constant initializers",
+                       "provide a value satisfying the refinement predicate",
+                       "refinement obligation failed: value does not satisfy '%s' refinement predicate",
+                       decl);
+      }
+    }
+    return;
+  }
+  stmt_t *r_stmt = hm_lookup_refine_stmt(hm, decl);
+  if (!r_stmt)
+    return;
+  if (r_stmt->as.refine.base_type)
+    hm_check_refinement_initializer(hm, r_stmt->as.refine.base_type, init, tok);
+  if (!r_stmt->as.refine.predicate || !r_stmt->as.refine.param)
+    return;
+  expr_t *inst = ny_expr_subst(NULL, r_stmt->as.refine.predicate,
+                               r_stmt->as.refine.param, (expr_t *)init);
+  if (!inst)
+    return;
+  ny_ct_fast_val_t fval = ny_ct_fast_none();
+  if (ny_try_eval_comptime_expr_fast(cg, inst, &fval, 0)) {
+    if (fval.kind == NY_CT_FAST_BOOL && !fval.b) {
+      tp_add_diag_ex(hm->ctx, tok, "hm", "hm-refinement-obligation-failed",
+                     "variable declaration", decl, "refinement satisfaction",
+                     "value",
+                     "refinement predicates must hold at compile time for constant initializers",
+                     "provide a value satisfying the refinement predicate",
+                     "refinement obligation failed: value does not satisfy '%s' refinement predicate",
+                     decl);
+    }
+  }
+}
+
+/*
+ * Builtin kind/ primitive names keep their exact-kind unification; any
+ * other declared name is a nominal user/impl type.
+ */
 static bool hm_name_is_builtin_kind(const char *name) {
   if (!name)
     return false;
@@ -775,18 +918,18 @@ static bool hm_unify(ny_hm_state_t *hm, ny_hm_type_t *want, ny_hm_type_t *got,
   }
   if (want->kind == NY_HM_NAME && got->kind == NY_HM_NAME) {
     if (hm_generic_base_same(want->name, got->name)) {
-      if (!hm_generic_name_compatible(want->name, got->name)) {
+      if (!hm_generic_name_compatible(hm, want->name, got->name)) {
         hm_unify_diag(hm, tok, "hm-type-mismatch", context, want, got);
         return false;
       }
-      char *merged = hm_merge_generic_name_owned(want->name, got->name);
+      char *merged = hm_merge_generic_name_owned(hm, want->name, got->name);
       if (merged) {
         want->name = hm_arena_strdup(hm, merged);
         free(merged);
       }
       return true;
     }
-    if (hm_name_compatible(want->name, got->name))
+    if (hm_name_compatible(hm, want->name, got->name))
       return true;
     hm_unify_diag(hm, tok, "hm-type-mismatch", context, want, got);
     return false;
@@ -934,6 +1077,45 @@ static ny_hm_env_entry_t *hm_env_entry(ny_hm_env_list *env,
       return e;
   }
   return NULL;
+}
+
+static ssize_t hm_env_entry_index(ny_hm_env_list *env, const char *name) {
+  if (!name)
+    return -1;
+  for (size_t i = env ? env->len : 0; i > 0; --i) {
+    ny_hm_env_entry_t *e = &env->data[i - 1];
+    if (e->name && strcmp(e->name, name) == 0)
+      return (ssize_t)(i - 1);
+  }
+  return -1;
+}
+
+static bool hm_is_mutable_binding(ny_hm_state_t *hm, ny_hm_env_list *env,
+                                  const char *name, size_t max_env_idx) {
+  if (!name)
+    return false;
+  ssize_t idx = hm_env_entry_index(env, name);
+  if (idx >= 0 && (size_t)idx < max_env_idx) {
+    return env->data[idx].mutable_value;
+  }
+  if (hm && hm->ctx && hm->ctx->cg) {
+    binding *b = lookup_global(hm->ctx->cg, name);
+    if (b && b->is_mut)
+      return true;
+  }
+  if (hm && hm->ctx && hm->ctx->prog) {
+    for (size_t i = 0; i < hm->ctx->prog->body.len; ++i) {
+      stmt_t *s = hm->ctx->prog->body.data[i];
+      if (s && s->kind == NY_S_VAR && s->as.var.is_mut) {
+        for (size_t j = 0; j < s->as.var.names.len; ++j) {
+          if (s->as.var.names.data[j] &&
+              strcmp(s->as.var.names.data[j], name) == 0)
+            return true;
+        }
+      }
+    }
+  }
+  return false;
 }
 
 static void hm_env_set_value_facts(ny_hm_state_t *hm, ny_hm_env_list *env,
@@ -1322,7 +1504,14 @@ static ny_hm_type_t *hm_infer_comptime_expr(ny_hm_state_t *hm,
   ny_hm_env_list local;
   hm_env_clone(&local, env);
   ny_hm_type_t *ret = hm_var(hm);
+  int saved_depth = hm->comptime_depth;
+  size_t saved_outer_len = hm->comptime_outer_env_len;
+  if (saved_depth == 0)
+    hm->comptime_outer_env_len = env ? env->len : 0;
+  hm->comptime_depth++;
   hm_infer_stmt(hm, &local, e->as.comptime_expr.body, self_name, ret);
+  hm->comptime_depth = saved_depth;
+  hm->comptime_outer_env_len = saved_outer_len;
   vec_free(&local);
   ny_hm_type_t *out = hm_prune(ret);
   if (!out || (out->kind == NY_HM_VAR && !out->instance))
@@ -1889,6 +2078,8 @@ static void hm_validate_ownership(ny_hm_state_t *hm, stmt_t *fn) {
   vec_init(&facts);
   hm_owner_scan_stmt(hm, fn->as.fn.body, &facts, fn);
   vec_free(&facts);
+  if (fn->as.fn.attr_allowances.len > 0)
+    stmt_ownership_check_allowances(hm->ctx->cg, fn);
 }
 
 static char *hm_attached_owner_name(const char *type_name) {
@@ -2257,6 +2448,14 @@ static ny_hm_type_t *hm_call_named(ny_hm_state_t *hm, ny_hm_env_list *env,
     if (member && owner)
       return hm_adt_constructor_type(hm, env, owner, member, args, self_name);
   }
+  if (!target && name) {
+    const char *refine_base = hm_lookup_refine_base(hm, name);
+    if (refine_base) {
+      for (size_t i = 0; args && i < args->len; ++i)
+        (void)hm_infer_expr(hm, env, args->data[i].val, self_name);
+      return hm_name(hm, "bool");
+    }
+  }
   if (!target && leaf && args) {
     if ((strcmp(leaf, "require_shape") == 0 ||
          strcmp(leaf, "assert_shape") == 0) && args->len >= 2) {
@@ -2373,6 +2572,9 @@ static ny_hm_type_t *hm_call_named(ny_hm_state_t *hm, ny_hm_env_list *env,
                   hm, env, args->data[i].val, self_name,
                   allow_dynamic_literal_args);
               if (param < params->len && params->data[param].type) {
+                hm_check_refinement_initializer(hm, params->data[param].type,
+                                                args->data[i].val,
+                                                args->data[i].val ? args->data[i].val->tok : tok);
                 hm_unify(
                     hm,
                     hm_parse_type_name(hm, params->data[param].type, self_name),
@@ -2416,6 +2618,9 @@ static ny_hm_type_t *hm_call_named(ny_hm_state_t *hm, ny_hm_env_list *env,
               hm, env, args->data[i].val, self_name,
               allow_dynamic_literal_args);
           if (param < params->len && params->data[param].type) {
+            hm_check_refinement_initializer(hm, params->data[param].type,
+                                            args->data[i].val,
+                                            args->data[i].val ? args->data[i].val->tok : tok);
             hm_unify(
                 hm, hm_parse_type_name(hm, params->data[param].type, self_name),
                 arg_t, args->data[i].val ? args->data[i].val->tok : tok,
@@ -2481,10 +2686,19 @@ static ny_hm_type_t *hm_call_named(ny_hm_state_t *hm, ny_hm_env_list *env,
     ny_hm_type_t *arg_t = hm_infer_expr_dynamic_literal_ok(
         hm, env, args->data[i].val, self_name, allow_dynamic_literal_args);
     size_t param = i + offset;
-    if (param < fn->args.len)
+    if (param < fn->args.len) {
+      if (scheme && scheme->stmt && scheme->stmt->kind == NY_S_FUNC) {
+        ny_param_list *sparams = &scheme->stmt->as.fn.params;
+        if (param < sparams->len && sparams->data[param].type) {
+          hm_check_refinement_initializer(hm, sparams->data[param].type,
+                                          args->data[i].val,
+                                          args->data[i].val ? args->data[i].val->tok : tok);
+        }
+      }
       hm_unify(hm, fn->args.data[param], arg_t,
                args->data[i].val ? args->data[i].val->tok : tok,
                "function argument");
+    }
   }
   return fn->a ? fn->a : hm_any(hm);
 }
@@ -2513,8 +2727,8 @@ static ny_hm_type_t *hm_infer_binary(ny_hm_state_t *hm, ny_hm_env_list *env,
     }
     if (op && strcmp(op, "==") != 0 && strcmp(op, "!=") != 0) {
       const char *ln = NULL, *rn = NULL;
-      bool lnum = hm_type_known_numeric(lt, &ln);
-      bool rnum = hm_type_known_numeric(rt, &rn);
+      bool lnum = hm_type_known_numeric(hm, lt, &ln);
+      bool rnum = hm_type_known_numeric(hm, rt, &rn);
       if (lnum && hm_type_is_unbound_var(rt))
         hm_unify(hm, rt, hm_name(hm, ln ? ln : "number"), e->tok,
                  "ordered comparison");
@@ -2572,8 +2786,8 @@ static ny_hm_type_t *hm_infer_binary(ny_hm_state_t *hm, ny_hm_env_list *env,
     }
   }
   const char *ln = NULL, *rn = NULL;
-  bool lnum = hm_type_known_numeric(lt, &ln);
-  bool rnum = hm_type_known_numeric(rt, &rn);
+  bool lnum = hm_type_known_numeric(hm, lt, &ln);
+  bool rnum = hm_type_known_numeric(hm, rt, &rn);
   if (lnum && hm_type_is_unbound_var(rt)) {
     hm_unify(hm, rt, hm_name(hm, ln ? ln : "number"), e->tok,
              "numeric operator");
@@ -2594,9 +2808,13 @@ static ny_hm_type_t *hm_infer_binary(ny_hm_state_t *hm, ny_hm_env_list *env,
   }
   char *ls = hm_type_string(lt);
   char *rs = hm_type_string(rt);
-  if ((tp_is_int_type(ls) || tp_is_float_type(ls)) &&
-      (tp_is_int_type(rs) || tp_is_float_type(rs))) {
-    bool f = tp_is_float_type(ls) || tp_is_float_type(rs);
+  const char *ls_base = hm_resolve_refine_root_base(hm, ls);
+  const char *rs_base = hm_resolve_refine_root_base(hm, rs);
+  const char *ls_c = ls_base ? ls_base : ls;
+  const char *rs_c = rs_base ? rs_base : rs;
+  if ((tp_is_int_type(ls_c) || tp_is_float_type(ls_c)) &&
+      (tp_is_int_type(rs_c) || tp_is_float_type(rs_c))) {
+    bool f = tp_is_float_type(ls_c) || tp_is_float_type(rs_c);
     free(ls);
     free(rs);
     return hm_name(hm, f ? "f64" : "int");
@@ -2614,6 +2832,18 @@ static ny_hm_type_t *hm_infer_expr_impl(ny_hm_state_t *hm, ny_hm_env_list *env,
   case NY_E_LITERAL:
     return hm_name(hm, tp_literal_type(&e->as.literal, e->tok));
   case NY_E_IDENT: {
+    if (hm && hm->comptime_depth > 0 && e->as.ident.name &&
+        hm_is_mutable_binding(hm, env, e->as.ident.name,
+                              hm->comptime_outer_env_len)) {
+      tp_add_diag_ex(
+          hm->ctx, e->tok, "hm", "hm-comptime-mut-capture",
+          "comptime", "immutable compile-time value", "runtime mutable binding",
+          "comptime",
+          "comptime{} is closed code and cannot capture runtime mutable variables",
+          "pass the value as an explicit compile-time parameter or make the binding immutable",
+          "cannot capture runtime mutable variable '%s' in compile-time evaluation",
+          e->as.ident.name);
+    }
     ny_hm_type_t *t = hm_env_get(hm, env, e->as.ident.name);
     if (t)
       return t;
@@ -3203,7 +3433,30 @@ static ny_hm_type_t *hm_infer_expr_impl(ny_hm_state_t *hm, ny_hm_env_list *env,
     return hm_name(hm, "ast");
   case NY_E_SPLICE:
     return e->as.splice.expr ? hm_infer_expr(hm, env, e->as.splice.expr, self_name) : hm_name(hm, "any");
-  case NY_E_MATCH:
+  case NY_E_EXISTS: {
+    ny_hm_env_list local;
+    hm_env_clone(&local, env);
+    if (e->as.exists.var)
+      hm_env_set(&local, e->as.exists.var, hm_name(hm, "int"));
+    (void)hm_infer_expr(hm, &local, e->as.exists.body, self_name);
+    vec_free(&local);
+    return hm_name(hm, "bool");
+  }
+  case NY_E_MATCH: {
+    /*
+     * Match expressions share the statement representation. Infer each arm
+     * as an implicit return and merge it into one result variable instead of
+     * degrading the whole expression to `any`.
+     */
+    stmt_t match_stmt = {.kind = NY_S_MATCH, .tok = e->tok};
+    match_stmt.as.match = e->as.match;
+    ny_hm_type_t *result = hm_var(hm);
+    hm_infer_stmt(hm, env, &match_stmt, self_name, result);
+    result = hm_prune(result);
+    if (!result || (result->kind == NY_HM_VAR && !result->instance))
+      return hm_any(hm);
+    return result;
+  }
   case NY_E_TRY:
   case NY_E_ASM:
     /*
@@ -3269,6 +3522,30 @@ static ny_sem_rep_t hm_semantic_rep(const char *type_name) {
       strncmp(leaf, "Fin<", 4) == 0)
     return NY_SEM_REP_RAW_INT;
   return NY_SEM_REP_AGGREGATE;
+}
+
+static bool hm_sem_rep_coherent_with_type(const char *type_name, ny_sem_rep_t rep) {
+  if (!type_name || !*type_name)
+    return true;
+  if (!ny_sem_rep_is_valid(rep))
+    return false;
+  const char *leaf = ny_name_leaf(type_name);
+  if (!leaf || strcmp(leaf, "any") == 0 || leaf[0] == '\'')
+    return true;
+  if (strcmp(leaf, "int") == 0 || strcmp(leaf, "i64") == 0 ||
+      strcmp(leaf, "i32") == 0 || strcmp(leaf, "bool") == 0 ||
+      strncmp(leaf, "Fin<", 4) == 0) {
+    return rep == NY_SEM_REP_RAW_INT || rep == NY_SEM_REP_TAGGED_DYNAMIC;
+  }
+  if (strcmp(leaf, "f64") == 0 || strcmp(leaf, "float") == 0 ||
+      strcmp(leaf, "f32") == 0) {
+    return rep == NY_SEM_REP_F64 || rep == NY_SEM_REP_F32 ||
+           rep == NY_SEM_REP_TAGGED_DYNAMIC;
+  }
+  if (strcmp(leaf, "str") == 0 || strcmp(leaf, "string") == 0) {
+    return rep == NY_SEM_REP_STRING || rep == NY_SEM_REP_TAGGED_DYNAMIC;
+  }
+  return true;
 }
 
 static void hm_persist_member_target(ny_hm_state_t *hm, ny_hm_env_list *env,
@@ -3354,10 +3631,12 @@ static void hm_complete_leaf_fact(ny_visitor_t *visitor, expr_t *e) {
     return;
   if (e->kind == NY_E_IDENT && e->as.ident.name) {
     if (!ctx->owner) {
-      /* In module-global completion pass, do not resolve bare lowercase
+      /*
+       * In module-global completion pass, do not resolve bare lowercase
        * identifiers against the global environment, as they may be function
        * parameters or locals. Only uppercase constants or qualified identifiers
-       * are admitted as module constants. */
+       * are admitted as module constants.
+       */
       const char *leaf = strrchr(e->as.ident.name, '.');
       leaf = leaf ? leaf + 1 : e->as.ident.name;
       if (leaf[0] && !(leaf[0] >= 'A' && leaf[0] <= 'Z'))
@@ -3491,6 +3770,17 @@ static void hm_infer_stmt_mode(ny_hm_state_t *hm, ny_hm_env_list *env,
   case NY_S_VAR:
     for (size_t i = 0; i < s->as.var.names.len; ++i) {
       const char *name = s->as.var.names.data[i];
+      if (!s->as.var.is_decl && hm && hm->comptime_depth > 0 && name &&
+          hm_is_mutable_binding(hm, env, name, hm->comptime_outer_env_len)) {
+        tp_add_diag_ex(
+            hm->ctx, s->tok, "hm", "hm-comptime-mut-capture",
+            "comptime", "local compile-time mutation", "outer variable mutation",
+            "comptime",
+            "comptime{} is closed code and cannot mutate variables from outer runtime scope",
+            "declare the mutable variable inside the comptime block",
+            "cannot mutate outer runtime variable '%s' in compile-time evaluation",
+            name);
+      }
       if (s->as.var.is_del) {
         ny_hm_env_entry_t *entry = hm_env_entry(env, name);
         if (entry && !entry->mutable_value) {
@@ -3514,6 +3804,7 @@ static void hm_infer_stmt_mode(ny_hm_state_t *hm, ny_hm_env_list *env,
           decl && *decl ? hm_parse_type_name(hm, decl, self_name) : it;
       if (decl && *decl) {
         hm_check_fin_initializer(hm, decl, init, init ? init->tok : s->tok);
+        hm_check_refinement_initializer(hm, decl, init, init ? init->tok : s->tok);
         hm_unify(hm, final_t, it, init ? init->tok : s->tok,
                  "variable declaration");
       } else if (!s->as.var.is_decl && hm_is_any(final_t)) {
@@ -3628,8 +3919,16 @@ static void hm_infer_stmt_mode(ny_hm_state_t *hm, ny_hm_env_list *env,
     break;
   }
   case NY_S_TRY:
-    hm_infer_stmt(hm, env, s->as.tr.body, self_name, NULL);
-    hm_infer_stmt(hm, env, s->as.tr.handler, self_name, NULL);
+    /*
+     * A try/catch in tail position contributes the value of either arm just
+     * like `if` and `match`.  Dropping `ret` here forced untyped functions
+     * whose entire body was a try/catch to `any`, which in turn made raw
+     * list results cross the dynamic ABI and appear as zero/scalars.
+     */
+    hm_infer_stmt_mode(hm, env, s->as.tr.body, self_name, ret,
+                       allow_tail_expr);
+    hm_infer_stmt_mode(hm, env, s->as.tr.handler, self_name, ret,
+                       allow_tail_expr);
     break;
   case NY_S_DEFER:
     hm_infer_stmt_mode(hm, env, s->as.de.body, self_name, ret, false);
@@ -3785,13 +4084,45 @@ static void hm_infer_function_scheme(ny_hm_state_t *hm,
   hm_validate_ownership(hm, fn);
   for (size_t i = 0; i < fn->as.fn.params.len && i < ft->args.len; ++i) {
     char *name = hm_type_string(ft->args.data[i]);
-    fn->as.fn.params.data[i].semantic.rep = hm_semantic_rep(name);
+    ny_sem_rep_t r = hm_semantic_rep(name);
+    NY_INVARIANT_ASSERT(ny_sem_rep_is_valid(r), "valid semantic rep",
+                        fn->tok.filename, fn->tok.line, fn->tok.col,
+                        fn->as.fn.name ? fn->as.fn.name : "<anon>",
+                        name, "invalid semantic representation computed for parameter %zu", i);
+    fn->as.fn.params.data[i].semantic.rep = r;
     fn->as.fn.params.data[i].semantic.resolved = true;
+    if (fn->as.fn.params.data[i].type) {
+      NY_INVARIANT_ASSERT(hm_sem_rep_coherent_with_type(fn->as.fn.params.data[i].type, r),
+                          "HM representation coherence",
+                          fn->tok.filename, fn->tok.line, fn->tok.col,
+                          fn->as.fn.name ? fn->as.fn.name : "<anon>",
+                          ny_sem_rep_name(r),
+                          "parameter '%s' declared as '%s' but inferred impossible representation '%s'",
+                          fn->as.fn.params.data[i].name ? fn->as.fn.params.data[i].name : "<param>",
+                          fn->as.fn.params.data[i].type,
+                          ny_sem_rep_name(r));
+    }
     free(name);
   }
   char *return_name = hm_type_string(ft->a);
-  fn->as.fn.return_semantic.rep = hm_semantic_rep(return_name);
+  ny_sem_rep_t ret_r = hm_semantic_rep(return_name);
+  NY_INVARIANT_ASSERT(ny_sem_rep_is_valid(ret_r), "valid semantic rep",
+                      fn->tok.filename, fn->tok.line, fn->tok.col,
+                      fn->as.fn.name ? fn->as.fn.name : "<anon>",
+                      return_name, "invalid semantic representation computed for return");
+  fn->as.fn.return_semantic.rep = ret_r;
   fn->as.fn.return_semantic.resolved = true;
+  if (fn->as.fn.return_type) {
+    NY_INVARIANT_ASSERT(hm_sem_rep_coherent_with_type(fn->as.fn.return_type, ret_r),
+                        "HM representation coherence",
+                        fn->tok.filename, fn->tok.line, fn->tok.col,
+                        fn->as.fn.name ? fn->as.fn.name : "<anon>",
+                        ny_sem_rep_name(ret_r),
+                        "function '%s' return declared as '%s' but inferred impossible representation '%s'",
+                        fn->as.fn.name ? fn->as.fn.name : "<anon>",
+                        fn->as.fn.return_type,
+                        ny_sem_rep_name(ret_r));
+  }
   fn->as.fn.return_semantic.ownership =
       fn->as.fn.attr_returns_owned
           ? NY_SEM_OWN_OWNED

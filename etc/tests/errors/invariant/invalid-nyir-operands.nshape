@@ -1,0 +1,16 @@
+shape invariant-invalid-nyir-operands {
+  family "compiler-errors/nyir"
+  generator "error"
+  features ["error", "invariant", "nyir", "operands", "negative"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "unsupported string operator '/'"
+  source ny <<'NY'
+use std.core
+
+def a = "hello"
+def b = "world"
+def c = a / b
+print(c)
+NY
+}

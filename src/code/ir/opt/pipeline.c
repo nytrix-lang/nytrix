@@ -234,6 +234,7 @@ static const nyir_pass_control_t nyir_pass_controls[] = {
     {nyir_escape_sroa, "escape_sroa"},
     {nyir_tbuf_scalar_len, "tbuf_scalar_len"},
     {nyir_tbuf_private_object, "tbuf_private_object"},
+    {nyir_tbuf_promote_alloca, "tbuf_promote_alloca"},
     {nyir_sroa_scalar, "sroa_scalar"},
     {nyir_block_layout, "block_layout"},
     {nyir_points_to_sroa, "points_to_sroa"},
@@ -471,15 +472,16 @@ static bool nyir_run_finish_scalar(nyir_func_t *f,
     static bool (*const base[])(nyir_func_t *) = {
         nyir_const_fold, nyir_strength_reduce, nyir_narrow, nyir_peephole, nyir_apply_rules,
         nyir_copy_prop, nyir_redundant_load_elim, nyir_bounds_check_elim, nyir_cse,
-        nyir_tbuf_scalar_len, nyir_tbuf_private_object};
-    nyir_run_seq(f, base, 11, stats, dump, ok);
+        nyir_tbuf_scalar_len, nyir_tbuf_private_object,
+        nyir_tbuf_promote_alloca};
+    nyir_run_seq(f, base, 12, stats, dump, ok);
     if (*ok && has_locals) {
       static bool (*const memory[])(nyir_func_t *) = {
           nyir_memory_ssa_forward, nyir_points_to_sroa,
           nyir_store_sink, nyir_aggregate_sroa, nyir_escape_sroa,
-          nyir_tbuf_private_object, nyir_sroa_scalar,
-          nyir_dead_store_elim, nyir_dce};
-      nyir_run_seq(f, memory, 9, stats, dump, ok);
+          nyir_tbuf_private_object, nyir_tbuf_promote_alloca,
+          nyir_sroa_scalar, nyir_dead_store_elim, nyir_dce};
+      nyir_run_seq(f, memory, 10, stats, dump, ok);
     }
     if (*ok && has_cf) {
       static bool (*const control[])(nyir_func_t *) = {
@@ -554,6 +556,15 @@ static bool nyir_optimize_pipeline(nyir_func_t *f, nyir_opt_stats_t *stats,
       nyir_run_pass(f, nyir_inline_general, stats, dump, &ok);
     if (ok && !nyir_pass_stopped)
       nyir_run_pass(f, nyir_inline_small, stats, dump, &ok);
+    /*
+     * Wrapper inlining can expose fixed-size typed-buffer allocations whose
+     * source bounds checks are still present at this point.  Promote those
+     * scratch objects before loop/BCE passes erase the checks that prove all
+     * derived payload addresses stay within the allocation.  Re-running the
+     * pass later remains useful for allocations exposed by other transforms.
+     */
+    if (ok && !nyir_pass_stopped)
+      nyir_run_pass(f, nyir_tbuf_promote_alloca, stats, dump, &ok);
     if (ok && !nyir_pass_stopped) {
       static bool (*const post_inline1[])(nyir_func_t *) = {
           nyir_const_fold, nyir_sccp, nyir_copy_prop};
@@ -604,14 +615,14 @@ static bool nyir_optimize_pipeline(nyir_func_t *f, nyir_opt_stats_t *stats,
     if (ok && !nyir_pass_stopped) {
       static bool (*const pre_slp[])(nyir_func_t *) = {
           nyir_redundant_load_elim, nyir_memory_ssa_forward,
-          nyir_tbuf_private_object, nyir_sroa_scalar,
-          nyir_dead_store_elim, nyir_dce};
+          nyir_tbuf_private_object, nyir_tbuf_promote_alloca,
+          nyir_sroa_scalar, nyir_dead_store_elim, nyir_dce};
       /*
        * SLP sees better trees after private/local memory has been forwarded
        * into SSA.  Keep this immediately before SLP so later scalar cleanup
        * does not become the first point where load/store chains disappear.
        */
-      nyir_run_seq(f, pre_slp, 6, stats, dump, &ok);
+      nyir_run_seq(f, pre_slp, 7, stats, dump, &ok);
       if (ok && !nyir_pass_stopped)
         nyir_run_pass(f, nyir_memcombine, stats, dump, &ok);
     }
@@ -649,6 +660,10 @@ static bool nyir_optimize_pipeline(nyir_func_t *f, nyir_opt_stats_t *stats,
       nyir_run_pass(f, nyir_inline_general, stats, dump, &ok);
     if (ok && !nyir_pass_stopped)
       nyir_run_pass(f, nyir_inline_small, stats, dump, &ok);
+    /* See the O2 note above: stack promotion must consume source bounds
+     * evidence before BCE/IRCE intentionally erase it. */
+    if (ok && !nyir_pass_stopped)
+      nyir_run_pass(f, nyir_tbuf_promote_alloca, stats, dump, &ok);
     if (ok && f->len > 2) {
       static bool (*const mid[])(nyir_func_t *) = {
           nyir_const_fold, nyir_sccp, nyir_copy_prop, nyir_cse,
@@ -704,9 +719,10 @@ static bool nyir_optimize_pipeline(nyir_func_t *f, nyir_opt_stats_t *stats,
       if (ok && !nyir_pass_stopped) {
         static bool (*const pre_slp[])(nyir_func_t *) = {
             nyir_redundant_load_elim, nyir_memory_ssa_forward,
-            nyir_tbuf_private_object, nyir_sroa_scalar,
-            nyir_dead_store_elim, nyir_dce, nyir_alias_store_sink};
-        nyir_run_seq(f, pre_slp, 7, stats, dump, &ok);
+            nyir_tbuf_private_object, nyir_tbuf_promote_alloca,
+            nyir_sroa_scalar, nyir_dead_store_elim, nyir_dce,
+            nyir_alias_store_sink};
+        nyir_run_seq(f, pre_slp, 8, stats, dump, &ok);
         if (ok && !nyir_pass_stopped)
           nyir_run_pass(f, nyir_memcombine, stats, dump, &ok);
       }

@@ -1046,7 +1046,15 @@ static bool ny_emit_referenced_function_declarations(codegen_t *cg, scope *gsc,
       }
     }
     cg->current_module_name = sig_mod;
-    gen_func(cg, sig->stmt_t, sig->name, gsc, gd, NULL);
+    /* Attached-method signatures can be registered under their owner leaf
+     * name (for example `vec3.add`) while the declaration already lives in
+     * `std.math.vector`.  Demand emission must use the same qualified name as
+     * the declaration/call site; otherwise it materializes `ny_fn_vec3.add`
+     * while callers reference `std.math.vector.vec3.add`.  Ordinary names
+     * remain unchanged because codegen_qname is idempotent for qualified
+     * names. */
+    const char *emit_name = codegen_qname(cg, sig->name, sig_mod);
+    gen_func(cg, sig->stmt_t, emit_name, gsc, gd, NULL);
     cg->current_module_name = saved_mod;
     emitted = true;
   }

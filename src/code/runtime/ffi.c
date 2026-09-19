@@ -217,6 +217,20 @@ typedef int64_t (*rt_any_fn6)(int64_t, int64_t, int64_t,
                               int64_t, int64_t, int64_t);
 typedef int64_t (*rt_any_fn7)(int64_t, int64_t, int64_t, int64_t,
                                      int64_t, int64_t, int64_t);
+typedef int64_t (*rt_any_fn9)(int64_t, int64_t, int64_t,
+                              int64_t, int64_t, int64_t,
+                              int64_t, int64_t, int64_t);
+typedef int64_t (*rt_any_fn10)(int64_t, int64_t, int64_t, int64_t,
+                               int64_t, int64_t, int64_t,
+                               int64_t, int64_t, int64_t);
+typedef int64_t (*rt_any_fn12)(int64_t, int64_t, int64_t,
+                               int64_t, int64_t, int64_t,
+                               int64_t, int64_t, int64_t,
+                               int64_t, int64_t, int64_t);
+typedef int64_t (*rt_any_fn13)(int64_t, int64_t, int64_t, int64_t,
+                               int64_t, int64_t, int64_t,
+                               int64_t, int64_t, int64_t,
+                               int64_t, int64_t, int64_t);
 
 static int64_t rt_any_len(int64_t value) {
   return rt_sequence_len_safe(value);
@@ -378,10 +392,10 @@ int64_t rt_call_any1(int64_t f, int64_t value) {
    */
   if (dynamic_callable)
     return rt_dynamic_callback_result(
-        ((rt_any_fn6)(uintptr_t)f)(rt_dynamic_callback_arg(value, raw_scalar_callback_args),
-                                          len, tag, 0, 0, 0),
-        dynamic_bool_callable, raw_scalar_callback_args,
-        raw_result_callable);
+        ((rt_any_fn6)(uintptr_t)f)(
+            rt_dynamic_callback_arg(value, raw_scalar_callback_args), len, tag,
+            0, 0, 0),
+        dynamic_bool_callable, raw_scalar_callback_args, raw_result_callable);
   return rt_any_callback_result(
       ((rt_any_fn6)(uintptr_t)f)(rt_any_to_i64(value), len, tag, 0, 0, 0));
 }
@@ -436,37 +450,167 @@ int64_t rt_call_any2(int64_t f, int64_t left, int64_t right) {
                                         left_tag, right, right_len, right_tag));
 }
 
+int64_t rt_call_any3(int64_t f, int64_t a0, int64_t a1, int64_t a2) {
+  if (!f || (uintptr_t)f < 0x1000)
+    return 0;
+  bool dynamic_callable = NY_DYNAMIC_CALLABLE_IS(f);
+  bool dynamic_bool_callable = NY_DYNAMIC_CALLABLE_BOOL_IS(f);
+  bool raw_result_callable = NY_DYNAMIC_CALLABLE_RAW_RESULT_IS(f);
+  bool raw_scalar_callback_args = !NY_DYNAMIC_CALLABLE_TAGGED_ARGS_IS(f);
+  if (dynamic_callable)
+    f = (int64_t)(uintptr_t)NY_DYNAMIC_CALLABLE_DECODE(f);
+  bool is_closure = false;
+  if (is_heap_ptr(f)) {
+    intptr_t base = (intptr_t)rt_untag_v(f);
+    is_closure = *(int64_t *)(base - 8) == TAG_CLOSURE;
+  }
+  if (!is_closure)
+    f = rt_prepare_raw_callable(f);
+  int64_t l0 = rt_any_len(a0), t0 = rt_any_tag(a0);
+  int64_t l1 = rt_any_len(a1), t1 = rt_any_tag(a1);
+  int64_t l2 = rt_any_len(a2), t2 = rt_any_tag(a2);
+  if (is_heap_ptr(f)) {
+    intptr_t base = (intptr_t)rt_untag_v(f);
+    if (*(int64_t *)(base - 8) == TAG_CLOSURE) {
+      int64_t code = rt_prepare_raw_callable(*(int64_t *)base);
+      int64_t env = *(int64_t *)(base + 8);
+      return rt_dynamic_callback_result(
+          ((rt_any_fn10)code)(env, rt_dynamic_callback_arg(a0, false), l0, t0,
+                              rt_dynamic_callback_arg(a1, false), l1, t1,
+                              rt_dynamic_callback_arg(a2, false), l2, t2),
+          dynamic_bool_callable, false, raw_result_callable);
+    }
+  }
+  if (NY_NATIVE_IS(f) && !dynamic_callable)
+    return rt_any_callback_result(
+        ((rt_any_fn9)NY_NATIVE_DECODE(f))(a0, l0, t0, a1, l1, t1, a2, l2, t2));
+  if (dynamic_callable) {
+    /* A plain (non-closure) function value keeps the ordinary native ABI:
+     * one raw i64 slot per parameter, ints untagged and handles passed
+     * through (tui_canvas_loop's draw(c,z,w,h) read w=nil, h=-1 when entered
+     * with the value/len/tag triple layout).  Heap closures keep the
+     * closure-prologue triple layout. */
+    if (!is_closure)
+      return ((int64_t (*)(int64_t, int64_t, int64_t))(uintptr_t)f)(
+          rt_dynamic_callback_arg(a0, true),
+          rt_dynamic_callback_arg(a1, true),
+          rt_dynamic_callback_arg(a2, true));
+    return rt_dynamic_callback_result(
+        ((rt_any_fn9)(uintptr_t)f)(
+            rt_dynamic_callback_arg(a0, raw_scalar_callback_args), l0, t0,
+            rt_dynamic_callback_arg(a1, raw_scalar_callback_args), l1, t1,
+            rt_dynamic_callback_arg(a2, raw_scalar_callback_args), l2, t2),
+        dynamic_bool_callable, raw_scalar_callback_args, raw_result_callable);
+  }
+  return rt_any_callback_result(
+      ((rt_any_fn9)(uintptr_t)f)(rt_any_to_i64(a0), l0, t0,
+                                 rt_any_to_i64(a1), l1, t1,
+                                 rt_any_to_i64(a2), l2, t2));
+}
+
+int64_t rt_call_any4(int64_t f, int64_t a0, int64_t a1, int64_t a2,
+                     int64_t a3) {
+  if (!f || (uintptr_t)f < 0x1000)
+    return 0;
+  bool dynamic_callable = NY_DYNAMIC_CALLABLE_IS(f);
+  bool dynamic_bool_callable = NY_DYNAMIC_CALLABLE_BOOL_IS(f);
+  bool raw_result_callable = NY_DYNAMIC_CALLABLE_RAW_RESULT_IS(f);
+  bool raw_scalar_callback_args = !NY_DYNAMIC_CALLABLE_TAGGED_ARGS_IS(f);
+  if (dynamic_callable)
+    f = (int64_t)(uintptr_t)NY_DYNAMIC_CALLABLE_DECODE(f);
+  bool is_closure = false;
+  if (is_heap_ptr(f)) {
+    intptr_t base = (intptr_t)rt_untag_v(f);
+    is_closure = *(int64_t *)(base - 8) == TAG_CLOSURE;
+  }
+  if (!is_closure)
+    f = rt_prepare_raw_callable(f);
+  int64_t l0 = rt_any_len(a0), t0 = rt_any_tag(a0);
+  int64_t l1 = rt_any_len(a1), t1 = rt_any_tag(a1);
+  int64_t l2 = rt_any_len(a2), t2 = rt_any_tag(a2);
+  int64_t l3 = rt_any_len(a3), t3 = rt_any_tag(a3);
+  if (is_heap_ptr(f)) {
+    intptr_t base = (intptr_t)rt_untag_v(f);
+    if (*(int64_t *)(base - 8) == TAG_CLOSURE) {
+      int64_t code = rt_prepare_raw_callable(*(int64_t *)base);
+      int64_t env = *(int64_t *)(base + 8);
+      return rt_dynamic_callback_result(
+          ((rt_any_fn13)code)(env, rt_dynamic_callback_arg(a0, false), l0, t0,
+                              rt_dynamic_callback_arg(a1, false), l1, t1,
+                              rt_dynamic_callback_arg(a2, false), l2, t2,
+                              rt_dynamic_callback_arg(a3, false), l3, t3),
+          dynamic_bool_callable, false, raw_result_callable);
+    }
+  }
+  if (NY_NATIVE_IS(f) && !dynamic_callable)
+    return rt_any_callback_result(
+        ((rt_any_fn12)NY_NATIVE_DECODE(f))(a0, l0, t0, a1, l1, t1, a2, l2, t2,
+                                           a3, l3, t3));
+  if (dynamic_callable) {
+    /* See rt_call_any3: plain function values keep the native raw shape. */
+    if (!is_closure)
+      return ((int64_t (*)(int64_t, int64_t, int64_t, int64_t))(uintptr_t)f)(
+          rt_dynamic_callback_arg(a0, true),
+          rt_dynamic_callback_arg(a1, true),
+          rt_dynamic_callback_arg(a2, true),
+          rt_dynamic_callback_arg(a3, true));
+    return rt_dynamic_callback_result(
+        ((rt_any_fn12)(uintptr_t)f)(
+            rt_dynamic_callback_arg(a0, raw_scalar_callback_args), l0, t0,
+            rt_dynamic_callback_arg(a1, raw_scalar_callback_args), l1, t1,
+            rt_dynamic_callback_arg(a2, raw_scalar_callback_args), l2, t2,
+            rt_dynamic_callback_arg(a3, raw_scalar_callback_args), l3, t3),
+        dynamic_bool_callable, raw_scalar_callback_args, raw_result_callable);
+  }
+  return rt_any_callback_result(
+      ((rt_any_fn12)(uintptr_t)f)(rt_any_to_i64(a0), l0, t0,
+                                  rt_any_to_i64(a1), l1, t1,
+                                  rt_any_to_i64(a2), l2, t2,
+                                  rt_any_to_i64(a3), l3, t3));
+}
+
 int64_t rt_call0(int64_t f) {
   if (!f)
     return 1;
 
   if ((uintptr_t)(f) < 0x1000)
     return 1;
-  if (NY_NATIVE_IS(f)) {
-    return rt_tag_v(NY_NATIVE_RET0(NY_NATIVE_DECODE(f)));
-  }
-  f = rt_prepare_raw_callable(f);
+
+  /*
+   * Zero-argument callbacks use the same marked callable encoding as
+   * rt_call_any1/2.  Decode it before any raw-pointer/native-tag heuristic:
+   * otherwise a marked lambda is invoked at the encoded high-bit address,
+   * making thunk() correctness depend on generated function alignment.
+   */
+  bool dynamic_callable = NY_DYNAMIC_CALLABLE_IS(f);
+  bool dynamic_bool_callable = NY_DYNAMIC_CALLABLE_BOOL_IS(f);
+  bool raw_result_callable = NY_DYNAMIC_CALLABLE_RAW_RESULT_IS(f);
+  if (dynamic_callable)
+    f = (int64_t)(uintptr_t)NY_DYNAMIC_CALLABLE_DECODE(f);
+
+  bool is_closure = false;
   if (is_heap_ptr(f)) {
     intptr_t base = (intptr_t)rt_untag_v(f);
-    if (*(int64_t *)(base - 8) == TAG_CLOSURE) {
-      int64_t code = *(int64_t *)base;
-      code = rt_prepare_raw_callable(code);
-      int64_t env = *(int64_t *)(base + 8);
-      int64_t result = ((int64_t (*)(int64_t))code)(env);
-      /*
-       * Zero-argument closures use the dynamic call surface.  Their native
-       * bodies may return a raw scalar, so normalize that result exactly as
-       * the one/two-argument callback trampolines do.
-       */
-      if (result != NY_IMM_NIL && !rt_is_bool_imm(result) &&
-          !is_v_flt(result) && !is_int(result) && !is_ptr(result) &&
-          !is_heap_ptr(result) && !rt_native_is_str(result) &&
-          !NY_NATIVE_IS(result))
-        return rt_tag_v(result);
-      return result;
-    }
+    is_closure = *(int64_t *)(base - 8) == TAG_CLOSURE;
   }
-  return ((int64_t (*)(void))f)();
+  if (!is_closure && NY_NATIVE_IS(f) && !dynamic_callable &&
+      !rt_addr_readable_safe((uintptr_t)f, 1))
+    return rt_tag_v(NY_NATIVE_RET0(NY_NATIVE_DECODE(f)));
+  if (!is_closure)
+    f = rt_prepare_raw_callable(f);
+  if (is_closure) {
+    intptr_t base = (intptr_t)rt_untag_v(f);
+    int64_t code = rt_prepare_raw_callable(*(int64_t *)base);
+    int64_t env = *(int64_t *)(base + 8);
+    int64_t result = ((int64_t (*)(int64_t))code)(env);
+    return rt_dynamic_callback_result(result, dynamic_bool_callable, false,
+                                      raw_result_callable);
+  }
+  int64_t result = ((int64_t (*)(void))f)();
+  return dynamic_callable
+             ? rt_dynamic_callback_result(result, dynamic_bool_callable, false,
+                                          raw_result_callable)
+             : result;
 }
 
 int64_t rt_call0_ptr(int64_t f) {

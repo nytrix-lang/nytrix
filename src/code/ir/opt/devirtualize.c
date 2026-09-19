@@ -47,7 +47,6 @@ static const char *get_function_name(const nyir_func_t *f, const int *defs, int 
   return NULL;
 }
 
-
 /*
  * Main devirtualization pass.
  * Scans for CALL instructions with function pointer arguments and replaces

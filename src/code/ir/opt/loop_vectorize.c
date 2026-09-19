@@ -27,7 +27,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-
 static bool nyir_vector_trace_enabled(void) {
   return ny_trace_enabled("NY_TRACE_VECTORIZE");
 }

@@ -1,3 +1,4 @@
+;; flags: --native-only
 use std.core
 use std.core.error
 

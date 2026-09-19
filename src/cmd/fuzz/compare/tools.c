@@ -663,7 +663,7 @@ static bool byte_buf_append(byte_buf_t *b, const char *data, size_t len) {
     b->data = p;
     b->cap = next;
   }
-  memcpy(b->data + b->len, data, len);
+  memmove(b->data + b->len, data, len);
   b->len += len;
   b->data[b->len] = '\0';
   return true;
@@ -1660,7 +1660,7 @@ static void audit_copy_trimmed_segment(char *out, size_t out_sz,
   while (end > start && isspace((unsigned char)end[-1])) --end;
   size_t n = (size_t)(end - start);
   if (n >= out_sz) n = out_sz - 1;
-  memcpy(out, start, n);
+  memmove(out, start, n);
   out[n] = '\0';
 }
 
@@ -7105,9 +7105,9 @@ static char *selftest_expand_arg(const char *arg, const char *json_path, const c
     size_t suffix_len = strlen(suffix);
     char *out = (char *)malloc(pre + rep_len + suffix_len + 1);
     if (!out) return strdup(arg);
-    memcpy(out, arg, pre);
-    memcpy(out + pre, rep, rep_len);
-    memcpy(out + pre + rep_len, suffix, suffix_len + 1);
+    memmove(out, arg, pre);
+    memmove(out + pre, rep, rep_len);
+    memmove(out + pre + rep_len, suffix, suffix_len + 1);
     return out;
   }
   const char *work_marker = strstr(arg, "$WORK");
@@ -7119,9 +7119,9 @@ static char *selftest_expand_arg(const char *arg, const char *json_path, const c
     size_t suffix_len = strlen(suffix);
     char *out = (char *)malloc(pre + rep_len + suffix_len + 1);
     if (!out) return strdup(arg);
-    memcpy(out, arg, pre);
-    memcpy(out + pre, rep, rep_len);
-    memcpy(out + pre + rep_len, suffix, suffix_len + 1);
+    memmove(out, arg, pre);
+    memmove(out + pre, rep, rep_len);
+    memmove(out + pre + rep_len, suffix, suffix_len + 1);
     return out;
   }
   return strdup(arg);

@@ -41,7 +41,10 @@ mut _factor_ext_cache = dict()
 
 fn is_bigint(any x) bool {
    "Check if x is a BigInt(internal type marker 107)."
-   __has_tag(x, _TAG_BIGINT) || (is_ptr(x) && __tagof(x) == _TAG_LIST && x.get(0) == 107)
+   ; __tagof remains stable for loop-carried native BigInt handles while the
+   ; generic __has_tag probe can lose the handle's dynamic provenance after a
+   ; mutable assignment. Prefer the concrete runtime tag at this boundary.
+   __tagof(x) == _TAG_BIGINT || (is_ptr(x) && __tagof(x) == _TAG_LIST && x.get(0) == 107)
 }
 
 fn Z(any n) bigint {
@@ -101,7 +104,11 @@ fn egcd(any a, any b) list {
 
 fn mod(any a, any b) bigint {
    "Modular reduction: a mod b."
-   def m, r = Z(b), bigint_mod(Z(a), m)
+   ; Keep the modulus in a real local before it is consumed by bigint_mod.
+   ; A comma declaration is parallel/destructuring syntax and the second RHS
+   ; must not depend on the first binding being materialized already.
+   def m = Z(b)
+   def r = bigint_mod(Z(a), m)
    if bigint_lt(r, Z(0)) { return bigint_add(r, m) }
    r
 }
