@@ -1,0 +1,45 @@
+shape lemma_arith_list {
+  family "runtime/proofs"
+  generator "program"
+  features ["proofs", "lemma", "arith", "list"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.math.lemma.arith
+use core.math.lemma.list
+
+def proof p1 = prove(add_comm_bounded(3, 4))
+assert(proof_matches(p1, add_comm_bounded(3, 4)), "add comm")
+
+def proof p2 = prove(add_assoc_bounded(1, 2, 3))
+assert(proof_matches(p2, add_assoc_bounded(1, 2, 3)), "add assoc")
+
+def proof p3 = prove(mul_comm_bounded(3, 4))
+assert(proof_matches(p3, mul_comm_bounded(3, 4)), "mul comm")
+
+def proof p4 = prove(distrib_bounded(2, 3, 4))
+assert(proof_matches(p4, distrib_bounded(2, 3, 4)), "distrib")
+
+def proof p5 = prove(natsum_four())
+assert(proof_matches(p5, natsum_four()), "natsum closed")
+
+def int s = natsum(4)
+assert(s == 10, "natsum fn")
+
+def proof q1 = prove(append_len_comm(3, 4))
+assert(proof_matches(q1, append_len_comm(3, 4)), "append comm")
+
+def proof q2 = prove(append_len_assoc(1, 2, 3))
+assert(proof_matches(q2, append_len_assoc(1, 2, 3)), "append assoc")
+
+def proof q3 = prove(map_len(7))
+assert(proof_matches(q3, map_len(7)), "map len")
+
+def proof q4 = prove(fold_sum_four())
+assert(proof_matches(q4, fold_sum_four()), "fold sum")
+
+assert(true, "lemma arith list complete")
+NY
+}

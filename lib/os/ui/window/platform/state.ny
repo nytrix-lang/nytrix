@@ -1,11 +1,11 @@
 ;; Keywords: platform window backend state os ui input
 ;; Shared mutable state for the backend-neutral window platform layer.
 ;; References:
-;; - std.os.ui.window.platform
-;; - std.os.ui.window
-;; - std.os.ui.window.consts
-module std.os.ui.window.platform.state(_ensure_platform_state, _get_platform_val, _set_platform_val)
-use std.core
+;; - core.os.ui.window.platform
+;; - core.os.ui.window
+;; - core.os.ui.window.consts
+module core.os.ui.window.platform.state(_ensure_platform_state, _get_platform_val, _get_platform_dict, _set_platform_val, _set_platform_dict)
+use core
 
 mut _platform_state = dict(8)
 
@@ -42,6 +42,19 @@ fn _ensure_platform_state() dict {
 fn _get_platform_val(any key, any default=0) any {
    def state = _ensure_platform_state()
    state.get(key, default)
+}
+
+fn _get_platform_dict(str key, dict default) dict {
+   def state = _ensure_platform_state()
+   def value = state.get(key, default)
+   if is_dict(value) { value } else { default }
+}
+
+fn _set_platform_dict(str key, dict value) dict {
+   mut state = _ensure_platform_state()
+   state[key] = value
+   _platform_state = state
+   value
 }
 
 fn _set_platform_val(any key, any val) any {

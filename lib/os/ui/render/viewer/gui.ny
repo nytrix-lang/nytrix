@@ -1,19 +1,19 @@
 ;; Keywords: ui gui immediate-mode widgets layout input controls panels colorpicker os render viewer
 ;; Immediate-mode GUI widgets, layout state, input routing, and draw integration.
 ;; References:
-;; - std.os.ui.render.viewer.batch
-;; - std.os.ui.window
-module std.os.ui.render.viewer.gui(set_enabled, enabled, set_scale, scale, set_fonts, set_accent, accent, set_debug_overlay, debug_overlay, rect, inset, center_rect, clamp_rect, split_cols, split_rows, apply_window_rect, apply_window_rect_if_visible, tile_editor_shell, tile_editor_shell_preset, prepare_input, feed_event, key_pressed, begin_frame, end_frame, reset_state, wants_mouse, wants_keyboard, hit_test, suppress_mouse_clicks, hovered_id, active_id, focused_id, mouse_down, mouse_press_seq, last_item_rect, focus_window, request_focus, clear_focus, show_window, window_visible, window_closed, set_window_pos, set_window_size, window_rect, reset_window_scroll, warm_text_pipeline, begin_window, end_window, begin_scroll_area, set_scroll_area_content_hint, scroll_area_ensure_visible, end_scroll_area, scroll_area_scroll_y, scroll_area_visible_h, push_clip_rect, pop_clip_rect, same_line, spacing, spacer_px, reset_cursor, layout_gap, remaining_h, separator, text, label, text_colored, property_row, title_input_text, button, small_button, image, icon_button, selectable, selectable_file, input_text, checkbox, toggle, radio_button, tab_strip, combo_box, slider_float, slider_int, progress_bar, stat_card, plot_lines, grid_canvas, node_canvas, collapsing_header, color_edit4, color_picker4)
-use std.core
-use std.math
-use std.os.ui.window.consts
-use std.os.ui.render
-use std.os.ui.window as uiw
-use std.os.ui.render.dump as ui_profile
-use std.os.ui.render.viewer.batch as gui_batch
-use std.core.str as str
-use std.core.common as common
-use std.core.cache as cache
+;; - core.os.ui.render.viewer.batch
+;; - core.os.ui.window
+module core.os.ui.render.viewer.gui(set_enabled, enabled, set_scale, scale, set_fonts, set_accent, accent, set_debug_overlay, debug_overlay, rect, inset, center_rect, clamp_rect, split_cols, split_rows, apply_window_rect, apply_window_rect_if_visible, tile_editor_shell, tile_editor_shell_preset, prepare_input, feed_event, key_pressed, begin_frame, end_frame, reset_state, wants_mouse, wants_keyboard, hit_test, suppress_mouse_clicks, hovered_id, active_id, focused_id, mouse_down, mouse_press_seq, last_item_rect, focus_window, request_focus, clear_focus, show_window, window_visible, window_closed, set_window_pos, set_window_size, window_rect, reset_window_scroll, warm_text_pipeline, begin_window, end_window, begin_scroll_area, set_scroll_area_content_hint, scroll_area_ensure_visible, end_scroll_area, scroll_area_scroll_y, scroll_area_visible_h, push_clip_rect, pop_clip_rect, same_line, spacing, spacer_px, reset_cursor, layout_gap, remaining_h, separator, text, label, text_colored, property_row, title_input_text, button, small_button, image, icon_button, selectable, selectable_file, input_text, checkbox, toggle, radio_button, tab_strip, combo_box, slider_float, slider_int, progress_bar, stat_card, plot_lines, grid_canvas, node_canvas, collapsing_header, color_edit4, color_picker4)
+use core
+use core.math
+use core.os.ui.window.consts
+use core.os.ui.render
+use core.os.ui.window as uiw
+use core.os.ui.render.dump as ui_profile
+use core.os.ui.render.viewer.batch as gui_batch
+use core.str as str
+use core.common as common
+use core.cache as cache
 
 mut _enabled, _scale, _win = true, 1.0, 0
 mut _font, _font_title, _font_small = 0, 0, 0
@@ -3945,9 +3945,13 @@ fn begin_window(any id, any title, f64 x, f64 y, f64 w, f64 h, any opts=0) bool 
    _theme_refresh()
    _current_window = 0
    _sync_current_layout_cache(0)
-   if !_enabled { return false }
+   if !_enabled {
+      return false
+   }
    mut st = _ensure_window(id, title, x, y, w, h, opts)
-   if !st.get("open", true) { return false }
+   if !st.get("open", true) {
+      return false
+   }
    _focus_collect_active = _focus_collect_for_window(id)
    st["clip_override"] = 0
    mut sx, sy = _snap(float(st.get("x", x))), _snap(float(st.get("y", y)))
@@ -3959,8 +3963,10 @@ fn begin_window(any id, any title, f64 x, f64 y, f64 w, f64 h, any opts=0) bool 
    def titlebar = st.get("titlebar", true)
    def title_h = titlebar ? _title_h() : 0.0
    def collapsible = st.get("collapsible", true)
-   mut collapsed = st.get("collapsed", false)
-   if !titlebar || !collapsible { collapsed = false }
+   mut bool collapsed = false
+   if bool(titlebar) && bool(collapsible) {
+      collapsed = bool(st.get("collapsed", false))
+   }
    def body_h = max(1.0, sh - title_h - _pad())
    def max_scroll = scrollable ? max(0.0, float(st.get("content_h", 0.0)) - body_h) : 0.0
    mut scroll_y = clamp(float(st.get("scroll_y", 0.0)), 0.0, max_scroll)
@@ -4170,7 +4176,8 @@ fn end_window() any {
    assert(focused_id() == "", "gui clear focus")
    prepare_input(0, 320.0, 240.0)
    begin_frame()
-   assert(begin_window("probe", "Probe", 8.0, 8.0, 280.0, 210.0, {"closable": false, "resizable": false}), "gui begin window")
+   assert(begin_window("probe", "Probe", 8.0, 8.0, 280.0, 210.0,
+      {"closable": false, "resizable": false, "collapsed": true, "collapsible": false, "titlebar": false}), "gui begin window expands pinned panel")
    assert(remaining_h() > 0.0, "gui remaining height")
    assert(!icon_button("icon", -1, "Run", 72.0, 32.0, false), "gui icon button idle")
    assert(!selectable("row", "Row", false, 180.0, 34.0, "Detail", -1), "gui selectable idle")
@@ -4187,5 +4194,5 @@ fn end_window() any {
    end_window()
    end_frame()
    close_window()
-   print("✓ std.os.ui.render.viewer.gui self-test passed")
+   print("✓ core.os.ui.render.viewer.gui self-test passed")
 }

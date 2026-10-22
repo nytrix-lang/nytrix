@@ -1,19 +1,19 @@
 ;; Keywords: clipboard copy paste os
 ;; Clipboard access utilities with backend/tool fallbacks.
 ;; References:
-;; - std.os
-module std.os.clipboard(set_text, get_text, set_clipboard_text, get_clipboard_text)
+;; - core.os
+module core.os.clipboard(set_text, get_text, set_clipboard_text, get_clipboard_text)
 
 ;; Native hosts use the platform clipboard tools with a temporary-file bridge;
 ;; callers receive the explicit boolean/string result and the bridge cleans up
 ;; its temporary path on every exit path.
-use std.core
-use std.os
-use std.os.path as ospath
-use std.os.io as pio
-use std.os.sys (sys_close_quiet)
-use std.os.subprocess as subprocess
-use std.core.str as str
+use core
+use core.os
+use core.os.path as ospath
+use core.os.io as pio
+use core.os.sys (sys_close_quiet)
+use core.os.subprocess as subprocess
+use core.str as str
 
 fn _detect_tool() str {
    def wd = env("WAYLAND_DISPLAY")

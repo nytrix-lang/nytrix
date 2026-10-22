@@ -3,12 +3,12 @@
 ;; Reference:
 ;; - https://www.rfc-editor.org/rfc/rfc7468
 ;; References:
-;; - std.math.crypto.encoding
-;; - std.math.crypto
-module std.math.crypto.encoding.pairing(cantor_pair, cantor_unpair, cantor_unpair_leaves)
-use std.core
-use std.math.nt
-use std.math.bin
+;; - core.math.crypto.encoding
+;; - core.math.crypto
+module core.math.crypto.encoding.pairing(cantor_pair, cantor_unpair, cantor_unpair_leaves)
+use core
+use core.math.nt
+use core.math.bin
 
 fn cantor_pair(any x, any y) any {
    "Cantor-pair two non-negative integers into one integer."
@@ -53,5 +53,5 @@ fn cantor_unpair_leaves(any z, int leaf_limit=256) list {
    assert(leaves == [65, 66, 67, 68], "nested Cantor leaves")
    assert(leaves.text == "ABCD", "nested Cantor text")
    print("CANTOR_PAIRING_OK")
-   print("✓ std.math.crypto.encoding.pairing self-test passed")
+   print("✓ core.math.crypto.encoding.pairing self-test passed")
 }

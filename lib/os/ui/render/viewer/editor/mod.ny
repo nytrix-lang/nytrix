@@ -1,9 +1,9 @@
 ;; Keywords: editor module app text ui os render viewer
 ;; Public editor module wiring buffers, panels, commands, and UI drawing.
 ;; References:
-;; - std.os.ui.render.viewer.editor.core
-;; - std.os.ui.render.viewer.editor.commands
-module std.os.ui.render.viewer.editor(
+;; - core.os.ui.render.viewer.editor.core
+;; - core.os.ui.render.viewer.editor.commands
+module core.os.ui.render.viewer.editor(
    LINE_H, STATUS_H,
    split_lines, join_lines, buffer, state,
    current_buffer, current_lines, set_lines, clamp_cursor,
@@ -15,31 +15,31 @@ module std.os.ui.render.viewer.editor(
    row_at, col_at, buffer_at, divider_hit
 )
 
-use std.core
-use std.os.ui.render.viewer.editor.core as core
-use std.os.ui.render.viewer.editor.edit as edit
-use std.os.ui.render.viewer.editor.selection as sel
-use std.os.ui.render.viewer.editor.geom as geom
-use std.os.ui.render.viewer.editor.keychord
+use core
+use core.os.ui.render.viewer.editor.core as editor_core
+use core.os.ui.render.viewer.editor.edit as edit
+use core.os.ui.render.viewer.editor.selection as sel
+use core.os.ui.render.viewer.editor.geom as geom
+use core.os.ui.render.viewer.editor.keychord
 
 def LINE_H = geom.LINE_H
 def STATUS_H = geom.STATUS_H
 
-fn split_lines(str text) list { core.split_lines(text) }
+fn split_lines(str text) list { editor_core.split_lines(text) }
 
-fn join_lines(list lines) str { core.join_lines(lines) }
+fn join_lines(list lines) str { editor_core.join_lines(lines) }
 
-fn buffer(str name, str path, str text) dict { core.buffer(name, path, text) }
+fn buffer(str name, str path, str text) dict { editor_core.buffer(name, path, text) }
 
-fn state(list buffers) dict { core.state(buffers) }
+fn state(list buffers) dict { editor_core.state(buffers) }
 
-fn current_buffer(dict st) dict { core.current_buffer(st) }
+fn current_buffer(dict st) dict { editor_core.current_buffer(st) }
 
-fn current_lines(dict st) list { core.current_lines(st) }
+fn current_lines(dict st) list { editor_core.current_lines(st) }
 
-fn set_lines(dict st, list lines) dict { core.set_lines(st, lines) }
+fn set_lines(dict st, list lines) dict { editor_core.set_lines(st, lines) }
 
-fn clamp_cursor(dict st) dict { core.clamp_cursor(st) }
+fn clamp_cursor(dict st) dict { editor_core.clamp_cursor(st) }
 
 fn line_insert(str line, int col, str text) str { edit.line_insert(line, col, text) }
 

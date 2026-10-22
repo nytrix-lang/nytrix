@@ -1,0 +1,69 @@
+shape relational_refinement_implication {
+  family "runtime/language"
+  generator "embedded"
+  features ["ny", "test", "typing", "refinement", "proof", "relational"]
+  template ny-test-case
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+refine Even = int where(v) { v % 2 == 0 }
+refine Positive = int where(v) { v > 0 }
+refine PositiveEven = Even where(v) { Positive(v) }
+refine AtLeastTwo = int where(value) { value >= 2 }
+
+fn accept_at_least_two(AtLeastTwo value) int { value }
+fn accept_positive(Positive value) int { value }
+fn preserve_positive(Positive value) Positive { value }
+fn constant_positive() Positive { 7 }
+
+fn exact_positive_alias_guard(int value) int {
+  if Positive(value) {
+    def alias = value
+    accept_positive(alias)
+  } else {
+    0
+  }
+}
+
+fn positive_relational_guard(int value) int {
+  if value > 0 {
+    accept_positive(value)
+  } else {
+    0
+  }
+}
+
+fn stronger_relational_guard(int value) int {
+  if value > 5 {
+    accept_at_least_two(value)
+  } else {
+    0
+  }
+}
+
+fn conjunctive_relational_guard(int value) int {
+  if value > 0 && value >= 2 {
+    accept_at_least_two(value)
+  } else {
+    0
+  }
+}
+
+def Positive refined_positive = 5
+def Even even_value = 2
+def PositiveEven positive_even_value = 4
+
+assert(stronger_relational_guard(6) == 6,
+       "a stronger guard proves a weaker lower-bound refinement")
+assert(positive_relational_guard(6) == 6,
+       "an exact relational guard selects a refinement among related declarations")
+assert(conjunctive_relational_guard(6) == 6,
+       "relational conjunction facts prove a lower-bound refinement")
+assert(preserve_positive(refined_positive) == 5,
+       "values already carrying a refinement preserve their nominal type")
+assert(constant_positive() == 7,
+       "constant values proved by a refinement remain accepted")
+NY
+}

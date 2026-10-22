@@ -1,17 +1,17 @@
 ;; Keywords: editor geometry layout hitbox text os ui render viewer
 ;; Geometry and hitbox helpers for editor layout and text interactions.
 ;; References:
-;; - std.os.ui.render.viewer.gui
-module std.os.ui.render.viewer.editor.geom(
+;; - core.os.ui.render.viewer.gui
+module core.os.ui.render.viewer.editor.geom(
    LINE_H, STATUS_H, editor_layout, visible_rows,
    with_bottom_dock, pane_at, focus_next,
    row_at, col_at, buffer_at, divider_hit
 )
 
-use std.core
-use std.core.str as str
-use std.math (max, min)
-use std.os.ui.render as gfx
+use core
+use core.str as str
+use core.math (max, min)
+use core.os.ui.render as gfx
 
 def LINE_H = 22.0
 def STATUS_H = 27.0

@@ -1,0 +1,30 @@
+shape comptime_generated_contracts {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "comptime", "contracts", "proof", "total"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-only; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+comptime template bounded(name, lower) {
+   @proves(result > ${lower})
+   fn ${name}(int n) int requires n > ${lower} { return n }
+}
+comptime emit bounded(ident("above_one"), 1)
+comptime emit bounded(ident("above_three"), 3)
+assert(above_one(2) == 2 && above_three(4) == 4,
+       "generated requires formulas substitute each template argument independently")
+comptime template countdown(name, offset) {
+   @total
+   fn ${name}(int n) int requires n >= 0 && n <= 100 decreases n + ${offset} {
+      if n <= 0 { return 0 }
+      return ${name}(n - 1) + 1
+   }
+}
+comptime emit countdown(ident("count_one"), 1)
+comptime emit countdown(ident("count_three"), 3)
+assert(count_one(5) == 5 && count_three(7) == 7,
+       "generated total functions validate substituted decreases formulas")
+NY
+}

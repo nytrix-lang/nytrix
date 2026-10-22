@@ -1,0 +1,46 @@
+shape comptime_seeded_random {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "comptime", "random", "seeded", "deterministic"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-only; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_and_run
+  source ny <<'SRC'
+use core
+use core.math.random (seed, rand)
+
+fn seeded_value(int value) int {
+   seed(value)
+   return rand()
+}
+
+fn nested_draw(bool consume_first) int {
+   if consume_first { rand() }
+   return #run rand()
+}
+
+fn function_local_comptime_draw() int {
+   return #run seeded_value(123)
+}
+
+def first = #run seeded_value(123)
+def repeated = #run seeded_value(123)
+def different_seed = #run seeded_value(124)
+def nested_untouched = #run nested_draw(false)
+def nested_after_draw = #run nested_draw(true)
+
+assert(first == repeated,
+       "compile-time random output is repeatable for the same explicit seed")
+assert(first != different_seed,
+       "compile-time random output changes with the explicit seed")
+assert(first == 216166348317084771,
+       "compile-time seeded random follows its pinned deterministic stream")
+assert(nested_untouched == nested_after_draw,
+       "nested compile-time random does not inherit parent RNG consumption")
+seed(456)
+assert(function_local_comptime_draw() == first,
+       "function-local #run embeds the interpreted seeded value")
+assert(rand() == 4319379447247319916,
+       "function-local #run cannot change the runtime RNG state")
+SRC
+}

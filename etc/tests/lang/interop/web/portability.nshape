@@ -1,0 +1,15 @@
+shape test_unsupported_process {
+  family "interop/web"
+  generator "embedded"
+  ci skip
+  features [browser wasm portability negative process]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+;; Keywords: browser portability process negative fixture
+;; Browser targets must reject native process spawning instead of substituting a host fallback.
+use core.os.process
+
+process.run("true", [])
+NY
+}

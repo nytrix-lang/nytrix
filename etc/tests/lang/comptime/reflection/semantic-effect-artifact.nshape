@@ -1,0 +1,127 @@
+shape semantic_effect_artifact {
+  family "lang/comptime/reflection"
+  generator "embedded"
+  features ["semantic-artifact", "effects", "obligations", "reflection"]
+  template ny-test-case
+  flags "--native-only"
+  timeout 360
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.fs as fs
+use core.os.subprocess (run_capture)
+use core.str as str
+
+def root = env("NYTRIX_ROOT")
+def ny = env("NYTRIX_NY_FULL_BIN")
+def cmake = env("NYTRIX_CMAKE_COMMAND")
+def build_root = env("NYTRIX_TEST_BUILD_ROOT")
+def source = root + "/etc/tests/lang/comptime/reflection/semantic-effect-artifact.ny"
+def consumer_template = root +
+   "/etc/tests/lang/comptime/reflection/semantic-reflection-consumer.ny.in"
+assert(is_str(root) && root.len > 0, "CTest provides the source root")
+assert(is_str(ny) && ny.len > 0, "test runner provides ny-full")
+assert(is_str(cmake) && cmake.len > 0, "CTest provides CMake")
+assert(is_str(build_root) && build_root.len > 0,
+       "CTest provides the build root")
+
+def test_dir = temp_dir() + "/semantic-effect-artifact-" + to_str(pid())
+def setup = run_capture([cmake, "-E", "make_directory", test_dir], [], nil, false)
+assert(setup.get("code", 127) == 0, "create isolated semantic artifact directory")
+
+def artifact = test_dir + "/semantic-effects.json"
+def core_source = build_root + "/core.ny"
+def core_bc = env("NYTRIX_TEST_CORE_BC")
+def compile_argv = [
+   cmake, "-E", "chdir", root, cmake, "-E", "env",
+   "NYTRIX_CORE_PATH=" + core_source, ny
+]
+if is_str(core_bc) && core_bc.len > 0 && fs.is_file(core_bc) {
+   compile_argv = compile_argv.append("--core-bc").append(core_bc)
+}
+compile_argv = compile_argv.append("--comptime-limit=20000000")
+compile_argv = compile_argv.append("--stop-after=hm")
+compile_argv = compile_argv.append("--emit-artifact=" + artifact)
+compile_argv = compile_argv.append(source)
+def compile = run_capture(compile_argv, [], nil, false)
+assert(compile.get("code", 127) == 0 && fs.is_file(artifact),
+       "compiler emits typed semantic artifact: " + compile.get("stdout", ""))
+
+def template_result = file_read(consumer_template)
+assert(is_ok(template_result), "read semantic reflection consumer template")
+def template_source = unwrap(template_result)
+def token = "__SEMANTIC_ARTIFACT_PATH__"
+def token_at = str.find(template_source, token)
+assert(token_at >= 0, "consumer template has artifact path placeholder")
+def consumer_source =
+   str.str_slice(template_source, 0, token_at) + artifact +
+   str.str_slice(template_source, token_at + token.len, template_source.len)
+def consumer_path = test_dir + "/semantic-reflection-consumer.ny"
+assert(is_ok(file_write(consumer_path, consumer_source)),
+       "write consumer bound to generated artifact")
+
+mut consumer_argv = [
+   cmake, "-E", "chdir", root, cmake, "-E", "env",
+   "NYTRIX_CORE_PATH=" + core_source, ny, "--native", "--run"
+]
+if is_str(core_bc) && core_bc.len > 0 && fs.is_file(core_bc) {
+   consumer_argv = consumer_argv.append("--core-bc").append(core_bc)
+}
+consumer_argv = consumer_argv.append(consumer_path)
+def consumer = run_capture(consumer_argv, [], nil, false)
+def consumer_output = consumer.get("stdout", "")
+assert(consumer.get("code", 127) == 0 &&
+       str.find(consumer_output, "semantic artifact consumer passed") >= 0,
+       "native reflection consumer accepts artifact: " + consumer_output)
+
+def artifact_result = file_read(artifact)
+assert(is_ok(artifact_result), "read emitted semantic artifact")
+def json = unwrap(artifact_result)
+def required_fragments = [
+   "\"callee_effects\":{\"schema\":\"nytrix.semantic.call-effects\",\"version\":1,\"known\":true,\"callee\":\"semantic_effect_io\",\"row\":\"ny.effect-row.v1{std.effects.io=unit}\"}",
+   "\"callee_effects\":{\"schema\":\"nytrix.semantic.call-effects\",\"version\":1,\"known\":true,\"callee\":\"semantic_effect_pure\",\"row\":\"ny.effect-row.v1{}\"}",
+   "\"callee_effects\":{\"schema\":\"nytrix.semantic.call-effects\",\"version\":1,\"known\":false,\"callee\":",
+   "\"callee_effects\":{\"schema\":\"nytrix.semantic.call-effects\",\"version\":1,\"known\":true,\"callee\":\"list.map\",\"row\":\"ny.effect-row.v1{std.effects.alloc=unit,std.effects.io=unit,std.effects.read_memory=unit}\"}",
+   "\"callee_effects\":{\"schema\":\"nytrix.semantic.call-effects\",\"version\":1,\"known\":true,\"callee\":\"\",\"row\":\"ny.effect-row.v1{std.effects.io=unit}\"}",
+   "\"expression_effects\":{\"schema\":\"nytrix.semantic.expression-effects\",\"version\":1,\"expression_kind\":\"binary\",\"known\":true,\"inferred_builtin_row\":\"ny.effect-row.v1{std.effects.io=unit}\",\"inferred_custom_row\":\"ny.effect-row.v1{}\"}",
+   "\"expression_effects\":{\"schema\":\"nytrix.semantic.expression-effects\",\"version\":1,\"expression_kind\":\"binary\",\"known\":false,\"inferred_builtin_row\":null,\"inferred_custom_row\":null}",
+   "\"expression_effects\":{\"schema\":\"nytrix.semantic.expression-effects\",\"version\":1,\"expression_kind\":\"comptime\",\"known\":true,\"inferred_builtin_row\":\"ny.effect-row.v1{}\",\"inferred_custom_row\":\"ny.effect-row.v1{}\"}",
+   "\"schema\":\"nytrix.semantic.statement-effects\",\"version\":1,\"kind\":\"match\",\"known\":true,\"inferred_builtin_row\":\"ny.effect-row.v1{std.effects.io=unit}\",\"inferred_custom_row\":\"ny.effect-row.v1{}\"",
+   "\"schema\":\"nytrix.semantic.statement-effects\",\"version\":1,\"kind\":\"expr\",\"known\":true,\"inferred_builtin_row\":\"ny.effect-row.v1{std.effects.io=unit}\",\"inferred_custom_row\":\"ny.effect-row.v1{}\"",
+   "\"inferred_custom_row\":\"ny.effect-row.v1{ny.capability.project.storage.read=cap%28project.storage.read%29}\"",
+   "\"schema\":\"nytrix.semantic.obligations\",\"version\":1",
+   "\"requires\":{\"formula\":",
+   "\"requires\":{\"formula\":{\"type\":\"binary\",\"op\":\">=\",\"left\":{\"type\":\"ident\",\"name\":\"x\"",
+   "\"decreases\":{\"method\":\"integer_measure\",\"strict_descent\":",
+   "\"status\":\"proved\"",
+   "\"schema\":\"nytrix.semantic.layouts\",\"version\":1",
+   "\"name\":\"SemanticArtifactLayout\"",
+   "\"alignment\":4",
+   "\"name\":\"semantic_artifact_generated_fn\"",
+   "\"emission_origin\":{\"file\":",
+   "\"schema\":\"nytrix.semantic.callable-effects\",\"version\":1",
+   "\"name\":\"semantic_effect_io\",\"owner\":\"\",\"kind\":\"function\",\"arity\":0,\"variadic\":false,\"known\":true,\"row\":\"ny.effect-row.v1{std.effects.io=unit}\"",
+   "\"known\":false,\"row\":null,\"reason\":\"builtin\"",
+   "\"schema\":\"nytrix.semantic.proof-obligations\",\"version\":1",
+   "\"kind\":\"impl-law\",\"function\":\"\",\"trait\":\"SemanticLawTrait\",\"type\":\"SemanticLawProved\"",
+   "\"type\":\"SemanticLawRefuted\",\"formula\":{\"type\":\"binary\",\"op\":\"==\",\"left\":{\"type\":\"literal\",\"kind\":\"int\",\"value\":1},\"right\":{\"type\":\"literal\",\"kind\":\"int\",\"value\":2}}",
+   "\"status\":\"refuted\"",
+   "\"status\":\"unknown\"",
+   "\"kind\":\"invariant\"",
+   "\"status\":\"not_proven\",\"verdict\":\"unknown\"",
+   "\"kind\":\"refinement\""
+]
+mut fragment_index = 0
+while fragment_index < required_fragments.len {
+   def fragment = required_fragments.get(fragment_index)
+   assert(str.find(json, fragment) >= 0,
+          "semantic artifact contains required contract fragment " +
+          to_str(fragment_index) + ": " + fragment)
+   fragment_index += 1
+}
+
+def cleanup = run_capture([cmake, "-E", "rm", "-rf", test_dir], [], nil, false)
+assert(cleanup.get("code", 127) == 0, "remove isolated semantic artifact directory")
+print("SEMANTIC_EFFECT_ARTIFACT_OK")
+NY
+}

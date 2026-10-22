@@ -1,0 +1,65 @@
+shape closed_form_runtime_even_scale_positive_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle loop ivelim closed-form runtime scaled regression]
+  template ny-test-case
+  flags "--native-result-oracle=90 -O3"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+fn scaled(i64 n) i64 {
+  mut i64 s = 0
+  mut i64 i = 0
+  while i < n {
+    s = s + i * 2
+    i = i + 1
+  }
+  s
+}
+scaled(10)
+NY
+}
+
+shape closed_form_runtime_even_scale_negative_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle loop ivelim closed-form runtime scaled regression]
+  template ny-test-case
+  flags "--native-result-oracle=-90 -O3"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+fn scaled(i64 n) i64 {
+  mut i64 s = 0
+  mut i64 i = 0
+  while i < n {
+    s = s + i * -2
+    i = i + 1
+  }
+  s
+}
+scaled(10)
+NY
+}
+
+shape closed_form_runtime_even_scale_wrapping_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle loop ivelim closed-form runtime scaled regression]
+  template ny-test-case
+  flags "--native-result-oracle=934 -O3"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+fn scaled(i64 n) i64 {
+  mut i64 s = 0
+  mut i64 i = 0
+  while i < n {
+    s = s + i * 1152921504606846974
+    i = i + 1
+  }
+  s
+}
+scaled(10) & 1023
+NY
+}

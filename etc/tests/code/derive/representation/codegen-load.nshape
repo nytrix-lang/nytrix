@@ -1,0 +1,85 @@
+shape codegen_load {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "codegen", "reflection", "layout"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-only; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.compiler.codegen (json_for, load_fields_for)
+
+layout GeneratedLoadRecord {
+   i32 count
+   bool enabled
+   int wide
+   f32 narrow_float
+   f64 scale
+   str label
+}
+layout record LegacyLoadRecord derive(load) {
+   i32 count
+   bool enabled
+   int wide
+   f32 narrow_float
+   f64 scale
+   str label
+}
+comptime emit load_fields_for(GeneratedLoadRecord)
+comptime emit json_for(GeneratedLoadRecord)
+
+fn generated_narrow_float(ptr value) f32 {
+   return load_layout(value, "GeneratedLoadRecord", "narrow_float")
+}
+fn generated_promoted_float(ptr value) f64 {
+   return load_layout(value, "GeneratedLoadRecord", "narrow_float")
+}
+
+assert(GeneratedLoadRecord_load_fields(0).get("count") == nil &&
+       GeneratedLoadRecord_json_value(0).get("count") == nil,
+       "generated layout readers return an empty dictionary for null")
+
+def ptr generated = malloc(__layout_size("GeneratedLoadRecord"))
+def ptr legacy = malloc(__layout_size("LegacyLoadRecord"))
+store_layout(generated, "GeneratedLoadRecord", 23, true, 900719925474099,
+             3.5, 1.25, "loaded")
+store_layout(legacy, "LegacyLoadRecord", 23, true, 900719925474099,
+             3.5, 1.25, "loaded")
+def loaded_fields = GeneratedLoadRecord_load_fields(generated)
+assert(loaded_fields.get("count") ==
+          LegacyLoadRecord_load_count(legacy) &&
+       loaded_fields.get("enabled") ==
+          LegacyLoadRecord_load_enabled(legacy) &&
+       loaded_fields.get("wide") == LegacyLoadRecord_load_wide(legacy) &&
+       loaded_fields.get("narrow_float") ==
+          LegacyLoadRecord_load_narrow_float(legacy) &&
+       loaded_fields.get("scale") == LegacyLoadRecord_load_scale(legacy) &&
+       loaded_fields.get("label") == LegacyLoadRecord_load_label(legacy),
+       "Ny load_fields_for matches the legacy typed field accessors")
+assert(GeneratedLoadRecord_load_count(generated) ==
+          LegacyLoadRecord_load_count(legacy) &&
+       GeneratedLoadRecord_load_enabled(generated) ==
+          LegacyLoadRecord_load_enabled(legacy) &&
+       GeneratedLoadRecord_load_wide(generated) ==
+          LegacyLoadRecord_load_wide(legacy) &&
+       GeneratedLoadRecord_load_narrow_float(generated) ==
+          LegacyLoadRecord_load_narrow_float(legacy) &&
+       GeneratedLoadRecord_load_scale(generated) ==
+          LegacyLoadRecord_load_scale(legacy) &&
+       GeneratedLoadRecord_load_label(generated) ==
+          LegacyLoadRecord_load_label(legacy),
+       "Ny generates typed per-field load functions matching derive(load)")
+def json_fields = GeneratedLoadRecord_json_value(generated)
+assert(json_fields.get("count") == 23 &&
+       json_fields.get("wide") == 900719925474099 &&
+       json_fields.get("narrow_float") == 3.5 &&
+       json_fields.get("scale") == 1.25 &&
+       json_fields.get("label") == "loaded",
+       "json_for reads the declared layout through its typed adapter")
+assert(generated_narrow_float(generated) == 3.5 &&
+       generated_promoted_float(generated) == 3.5,
+       "load_layout preserves f32 and f64 typed return ABIs")
+free(generated)
+free(legacy)
+NY
+}

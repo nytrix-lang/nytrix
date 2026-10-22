@@ -1,0 +1,79 @@
+shape wasm32_single_scalar_aggregate_imports_use_direct_values {
+  family "runtime-native"
+  generator "embedded"
+  features [ny test wasm32 aggregate integer sse c-abi nyir]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os (file_exists, file_remove, file_write, run_capture, temp_dir, pid)
+
+def compiler = env("NYTRIX_NY_FULL_BIN")
+assert(is_str(compiler) && compiler.len > 0,
+       "test runner provides the compiler path")
+def stem = temp_dir() + "/ny-wasm-single-sse-" + to_str(pid())
+def host_wat = stem + "-host.wat"
+def host_wasm = stem + "-host.wasm"
+def provider_wat = stem + "-provider.wat"
+def provider_wasm = stem + "-provider.wasm"
+def host_source =
+    "#include \"etc/tests/lang/interop/c/internal-byvalue-param-import.h\"\n" +
+    "use core\ndef source = malloc(8)\n" +
+    "store64_f64(source, 3.5)\n" +
+    "def echoed = inspect_single_sse(source)\n" +
+    "def returned = make_single_sse()\n" +
+    "def integer_source = malloc(8)\n" +
+    "store64_i(integer_source, 6789)\n" +
+    "def integer_echoed = inspect_single_integer(integer_source)\n" +
+    "def integer_returned = make_single_integer()\n" +
+    "def ok = echoed == 3.5 && load64_f64(returned) == 3.5 && " +
+    "integer_echoed == 6789 && load64_i(integer_returned) == 6789\n" +
+    "ok ? 0 : 1"
+def compile = run_capture(
+    [compiler, "--native-backend=wasm", "--native-only", "--nyir-verify",
+     "--emit-asm=" + host_wat, "-no-std", "-emit-only", "-e", host_source],
+    [], nil, false)
+def assemble = run_capture(["wat2wasm", host_wat, "-o", host_wasm],
+                           [], nil, false)
+def provider_write = file_write(
+    provider_wat,
+    "(module\n" +
+    "  (func (export \"inspect_single_sse\") (param f64) (result f64)\n" +
+    "    local.get 0)\n" +
+    "  (func (export \"make_single_sse\") (result f64)\n" +
+    "    f64.const 3.5)\n" +
+    "  (func (export \"inspect_single_integer\") (param i64) (result i64)\n" +
+    "    local.get 0)\n" +
+    "  (func (export \"make_single_integer\") (result i64)\n" +
+    "    i64.const 6789))\n")
+def provider_assemble =
+    run_capture(["wat2wasm", provider_wat, "-o", provider_wasm],
+                [], nil, false)
+def execute = run_capture(
+    ["wasmtime", "run", "--preload", "env=" + provider_wasm,
+     "--invoke", "rt_main", host_wasm],
+    [], nil, false)
+def removed_host_wasm =
+    if file_exists(host_wasm) { is_ok(file_remove(host_wasm)) } else { true }
+def removed_host_wat =
+    if file_exists(host_wat) { is_ok(file_remove(host_wat)) } else { true }
+def removed_provider_wasm =
+    if file_exists(provider_wasm) {
+      is_ok(file_remove(provider_wasm))
+    } else { true }
+def removed_provider_wat =
+    if file_exists(provider_wat) {
+      is_ok(file_remove(provider_wat))
+    } else { true }
+assert(removed_host_wasm && removed_host_wat &&
+       removed_provider_wasm && removed_provider_wat,
+       "remove generated single-SSE aggregate artifacts")
+assert(provider_write && compile.get("code", 127) == 0 &&
+       assemble.get("code", 127) == 0 &&
+       provider_assemble.get("code", 127) == 0,
+       "single-SSE aggregate imports emit and assemble as f64")
+assert(execute.get("code", 127) == 0 &&
+       endswith(execute.get("stdout", ""), "1\n"),
+       "Wasm marshals single-piece INTEGER and SSE aggregate imports")
+NY
+}

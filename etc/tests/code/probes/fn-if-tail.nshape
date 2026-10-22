@@ -1,0 +1,29 @@
+shape fn_if_tail {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "lang"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os as os
+fn tail_if() any {
+   def raw = os.env("DOES_NOT_EXIST")
+   if(is_str(raw) && len(raw) > 0){
+      def v = atoi(raw)
+      if(v > 0){ return v }
+   }
+   100
+}
+def path = os.env("PATH")
+assert(is_str(path) && len(path) > 0, "present environment variable scan")
+fn main(){
+   def value = tail_if()
+   assert(value == 100, "missing environment variable falls through")
+   print("f1=", value)
+   0
+}
+main()
+0
+NY
+}

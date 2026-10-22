@@ -1,0 +1,117 @@
+shape comptime_interpreter_calls {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "test", "comptime"]
+  flags_matrix "--native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+fn ct_add(a, b=3) int {
+  return a + b
+}
+
+fn ct_c_sum() int {
+  mut total = 0
+  for (mut i = 0 i < 4 i += 1) {
+    total += i
+  }
+  return total
+}
+
+fn ct_loop_control() int {
+  mut total = 0
+  for (mut i = 0 i < 10 i += 1) {
+    if i == 2 { continue }
+    if i == 6 { break }
+    total += i
+  }
+  return total
+}
+
+fn ct_match_stmt(int value) int {
+  match value {
+    0 -> { return 11 }
+    1, 2 if value > 1 -> { return 20 }
+    _ -> { return 30 }
+  }
+  return 40
+}
+
+fn ct_match_expr(int value) int {
+  return match value {
+    0 -> 3
+    _ -> 4
+  }
+}
+
+fn ct_destructure() int {
+  def [left, right] = [8, 13]
+  return left + right
+}
+
+fn ct_block_scope() int {
+  def value = 9
+  if true {
+    def value = 100
+  }
+  return value
+}
+
+def default_arg = comptime { return ct_add(4) }
+def named_args = comptime { return ct_add(b=8, a=5) }
+def iter_sum = comptime {
+  mut total = 0
+  for i in range(6) {
+    total += i
+  }
+  return total
+}
+def c_sum = comptime { return ct_c_sum() }
+def loop_control = comptime { return ct_loop_control() }
+def match_zero = comptime { return ct_match_stmt(0) }
+def match_guard = comptime { return ct_match_stmt(2) }
+def match_wildcard = comptime { return ct_match_stmt(7) }
+def match_expression = comptime { return ct_match_expr(0) }
+def destructured = comptime { return ct_destructure() }
+def shadowed = comptime { return ct_block_scope() }
+def float_sum = comptime { return 1.25 + 2.5 }
+def float_list = comptime { return [1.25, 2.5] }
+def comptime_get = comptime { return [8, 13].get(1, 99) }
+def comptime_get_named = comptime { return [8, 13].get(default=99, key=1) }
+def comptime_get_negative = comptime { return [8, 13].get(-1) }
+def comptime_get_default = comptime { return [8, 13].get(9, 99) }
+def comptime_get_default_zero = comptime { return [8, 13].get(9) }
+def comptime_tuple_get = comptime { return (8, 13).get(1, 99) }
+def comptime_range_get = comptime { return range(4).get(2) }
+def comptime_fstring = comptime {
+  def answer = 42
+  return f"answer={answer}, {answer=}, ok={true}, float={1.5}, none={nil}"
+}
+
+assert(default_arg == 7, "comptime call evaluates defaults")
+assert(named_args == 13, "comptime call binds named arguments")
+assert(iter_sum == 15, "comptime call evaluates iterator for loops")
+assert(c_sum == 6, "comptime call evaluates C-style for loops")
+assert(loop_control == 13, "comptime interpreter handles loop break and continue")
+assert(match_zero == 11 && match_guard == 20 && match_wildcard == 30,
+       "comptime interpreter evaluates match patterns, guards, and wildcard")
+assert(match_expression == 3, "comptime interpreter evaluates match expressions")
+assert(destructured == 21, "comptime interpreter destructures list values")
+assert(shadowed == 9, "comptime call preserves lexical block scope")
+assert(float_sum == 3.75, "comptime interpreter evaluates floating-point arithmetic")
+assert(float_list[0] == 1.25 && float_list[1] == 2.5,
+       "comptime interpreter materializes float list elements")
+assert(comptime_get == 13, "comptime list get preserves the dynamic integer ABI")
+assert(comptime_get_named == 13,
+       "comptime list get binds named key and default arguments")
+assert(comptime_get_negative == 13 && comptime_get_default == 99,
+       "comptime list get handles negative indices and defaults")
+assert(comptime_get_default_zero == 0 && comptime_range_get == 2,
+       "comptime sequence get matches default and range behavior")
+assert(comptime_fstring == "answer=42, answer=42, ok=true, float=1.5, none=0",
+       "comptime interpreter formats f-strings with primitive values")
+assert(comptime_tuple_get == 13,
+       "comptime tuple get preserves its dynamic integer ABI")
+print("COMPTIME_INTERPRETER_CALLS_OK")
+NY
+}

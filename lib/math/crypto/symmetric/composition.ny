@@ -1,10 +1,10 @@
 ;; Keywords: symmetric composition math crypto
 ;; Symmetric-crypto routines for cipher composition experiments and checks.
 ;; References:
-;; - std.math.crypto.symmetric
-;; - std.math.crypto
-module std.math.crypto.symmetric.composition(encrypt_and_mac_encrypt, encrypt_and_mac_decrypt, encrypt_then_mac_encrypt, encrypt_then_mac_decrypt, mac_then_encrypt_encrypt, mac_then_encrypt_decrypt)
-use std.core
+;; - core.math.crypto.symmetric
+;; - core.math.crypto
+module core.math.crypto.symmetric.composition(encrypt_and_mac_encrypt, encrypt_and_mac_decrypt, encrypt_then_mac_encrypt, encrypt_then_mac_decrypt, mac_then_encrypt_encrypt, mac_then_encrypt_decrypt)
+use core
 
 fn _composition_equal(any a, any b) bool {
    if is_list(a) && is_list(b) {

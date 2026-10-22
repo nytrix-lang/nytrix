@@ -1,8 +1,12 @@
 # Nytrix Development Guide
 
-A compact reference for working in the Nytrix tree: repository layout, compiler boundaries, native quirks, debugging tools, validation, benchmarking, browser behavior, and memory tooling.
+A compact reference for the Nytrix tree: repository layout, compiler
+boundaries, native behavior, debugging, validation, benchmarking, browser
+work, and memory tools.
 
-The useful default is simple: start from current source and observed behavior, reduce the problem, change the layer that owns it, and keep the final diff narrow. Historical notes are useful only while they still match the code.
+Start from current source and observed behavior. Reduce the problem, change
+the layer that owns it, and keep the diff focused. Use historical notes only
+when they still match the code.
 
 ## Repository Map
 
@@ -65,15 +69,15 @@ Public library facades keep their high-level documentation in source:
 ;; Keywords: text collections iteration
 ;; One concise summary for the module card and API header.
 ;; References:
-;; - std
+;; - core
 ;; Documentation:
 ;; ## Scope
 ;; What this facade owns and where its boundary ends.
 ;;
 ;; ## Namespaces
-;; - **Text:** `std.example.text`
+;; - **Text:** `core.example.text`
 
-module std.example
+module core.example
 ```
 
 The purpose line becomes the module summary; the `Documentation:` body renders as Markdown. Facade docs are a good place for scope, namespaces, portability boundaries, and selection guidance. Function docs stay with the declaration that owns them.
@@ -132,8 +136,9 @@ An exit status alone is weak evidence whenever another path can produce the same
 Think about native failures in pipeline order:
 
 ```text
-source -> parsing -> semantic analysis -> lowering -> NYIR
-       -> machine form -> allocation -> object/link -> runtime
+flowchart LR
+    Source --> Parsing --> Semantics[Semantic analysis] --> Lowering --> NYIR
+    NYIR --> MachineForm[Machine form] --> Allocation --> ObjectLink[Object and link] --> Runtime
 ```
 
 IR, assembly, and object output are intermediate evidence. They can support a hypothesis without proving encoding, linking, or execution.
@@ -214,9 +219,9 @@ Pair the marker with a clear diagnostic. Never silently drop source. Where the c
 
 Renderer fixes belong in shared renderer code. The usual things to check are resource lifetime, failure propagation, headless behavior, and bounded framebuffer/artifact probes.
 
-The runtime amalgamation starts at `src/code/runtime/init.c`; CMake tracks its included sources.
+The runtime amalgamation starts at `src/code/lang/runtime/init.c`; CMake tracks its included sources.
 
-Generated `build/release/std.ny`, generated shared libraries, and generated `.so`/`.dll` files do not belong in source control. Vendored dependencies should change only for a demonstrated defect.
+Generated `build/release/core.ny`, generated shared libraries, and generated `.so`/`.dll` files do not belong in source control. Vendored dependencies should change only for a demonstrated defect.
 
 Project-local libraries referenced by `link "...so"` with a sibling C source are built under:
 
@@ -257,10 +262,10 @@ For a runtime or FFI change:
 ```bash
 export NYTRIX_NO_PROGRESS=1
 NYTRIX_TEST_CACHE=0 build/release/ny-test --bin build/release/ny \
-  --color=never --timeout 300 etc/tests/runtime/<fixture>.ny
+  --color=never --timeout 300 etc/tests/<fixture>.nshape
 
 NYTRIX_STD_CACHE=0 build/release/ny-full --no-progress --color=never \
-  --native-only --native-result-oracle etc/tests/runtime/<fixture>.ny
+  --native-only --native-result-oracle /tmp/reproducer.ny
 
 gdb -q -batch -ex run -ex 'bt 20' --args \
   build/release/ny-full --no-progress --color=never <reproducer>
@@ -272,45 +277,48 @@ argument construction, EOF handling, fd ownership, and deterministic errors
 still need coverage. Never turn a timeout into a pass by raising its limit.
 Keep temporary shared libraries under `<tmpdir>/nytrix-shlib/`, and include a
 valid plus malformed C-ABI case whenever an interop boundary is changed.
+Run `.nshape` specifications through `ny-test`; put backend options in the
+fixture's `flags` or `flags_matrix` field. Use `ny-full` directly for a `.ny`
+reproducer such as the one above.
 
 ## Build and Validation
 
 Start with the original reproducer or the narrowest relevant check, then widen according to risk.
 
 ```bash
-NYTRIX_NO_PROGRESS=1 ./make ny --no-progress --color=never
-NYTRIX_NO_PROGRESS=1 ./make test --no-progress --color=never
-NYTRIX_NO_PROGRESS=1 ./make test --failures-only --no-progress --color=never
-NYTRIX_NO_PROGRESS=1 ./make all --no-progress --color=never
-NYTRIX_NO_PROGRESS=1 ./make web-test --no-progress --color=never
-NYTRIX_NO_PROGRESS=1 ./make bench --no-progress --color=never
-NYTRIX_NO_PROGRESS=1 ./make perf --no-progress --color=never
+NYTRIX_NO_PROGRESS=1 ./make --color=never ny --no-progress
+NYTRIX_NO_PROGRESS=1 ./make --color=never test --failures-only
+NYTRIX_NO_PROGRESS=1 ./make --color=never all
+NYTRIX_NO_PROGRESS=1 ./make --color=never web-test
+NYTRIX_NO_PROGRESS=1 ./make --color=never bench
+NYTRIX_NO_PROGRESS=1 ./make --color=never perf
 git diff --check
 ```
 
+
 ### Baseline verification
 
-```bash
-./make ny
-
-./make test
-# green as of 2026-08-26
-
-./make bench --bench-show-passes
-# 56/56 ok
-
-NY_DUMP_OBJ_NYIR=1 \
-  ny --native-backend x86_64 -emit-only -o /tmp/x.o f.ny
-```
+The authoritative runner policy and live agent work queue are maintained
+outside the public documentation tree. Completed runs and their recorded
+fixtures belong in `docs/CHANGELOG.md`. Treat any historical snapshot in those
+files (fixture counts, RSS peaks, pass/fail tallies) as evidence of the commit
+it was captured on — not of your working tree. Reproduce the nearest focused
+matrix cold before relying on a baseline, and never claim a full gate from
+stale transcripts or cached runs.
 
 Focused and cold checks:
 
+`./make test --pattern PAT` runs matching fixtures and skips the automatic
+full benchmark suite. Run `./make bench ...` explicitly when benchmark
+measurements are wanted. `NYTRIX_TEST_NO_BENCH=1` remains available to skip
+benchmarks for an unfiltered `./make test` run.
+
 ```bash
-./make test --failures-only --color=never \
+NYTRIX_NO_PROGRESS=1 ./make --color=never test --failures-only \
   --pattern=<focused-fixture>
 
 NYTRIX_TEST_COLD=1 \
-  ./make test --failures-only --color=never \
+  NYTRIX_NO_PROGRESS=1 ./make --color=never test --failures-only \
   --pattern=<focused-fixture>
 ```
 
@@ -319,7 +327,7 @@ Cached iteration is useful while working; the cold run matters because stale art
 For broader changes, use the canonical quality gate:
 
 ```bash
-./make check
+NYTRIX_NO_PROGRESS=1 ./make --color=never check
 ```
 
 `./make check` is fail-closed: it rejects NUL bytes and temporary print-debugging
@@ -331,23 +339,25 @@ for it.
 
 ## Exact Working Commands
 
-This is the canonical command inventory for native Nytrix development. Always
-append `--no-progress --color=never` to `ny`/`./make` invocations and export
-`NYTRIX_NO_PROGRESS=1` for child tools. The current standalone `ny-test`
-binary does not accept `--no-progress`; use `./make test` to filter that flag,
-or set the environment variable and pass only `--color=never` directly.
-For a single fixture without the additional full benchmark run:
+This is the canonical command inventory for native Nytrix development. Set
+`NYTRIX_NO_PROGRESS=1` for tools that can print progress. Pass
+`--no-progress --color=never` to compiler invocations, and use the global
+`--color=never` option before a `./make` target. The standalone `ny-test` and
+`ny test` commands do not accept `--no-progress`; the browser runner accepts
+only `--headless`, so suppress progress through the environment and color via
+the global make option.
+For a single cold fixture:
 
 ```bash
-NYTRIX_NO_PROGRESS=1 NYTRIX_TEST_COLD=1 NYTRIX_TEST_NO_BENCH=1 \
-  ./make test --pattern runtime/modules/import.ny --no-progress --color=never
+NYTRIX_NO_PROGRESS=1 NYTRIX_TEST_COLD=1 \
+  ./make --color=never test --pattern compiler/modules/import.nshape
 ```
 
 ```bash
 # Build native compiler
 cmake --build build/release --target ny-full -j 8
 # or, through the repository driver:
-./make build
+NYTRIX_NO_PROGRESS=1 ./make --color=never build
 
 # Clean rebuild (use after moving/renaming headers)
 cmake --build build/release --target ny-full --clean-first -j 8
@@ -358,16 +368,16 @@ NYTRIX_STD_CACHE=1 build/release/ny-full --no-progress --color=never -O0 --nativ
   -o /tmp/nytrix-ui-engine.o etc/projects/ui/engine.ny
 
 # Focused semantic regressions
-build/release/ny-test --bin build/release/ny --color=never --timeout 300 \
-  etc/tests/native/optcheck/loop-predication.nshape \
-  etc/tests/native/optcheck/scev-loop-exit.nshape \
-  etc/tests/native/nyir/semantic-dynamic-containers.nshape \
-  etc/tests/native/nyir/semantic-temp-regressions.nshape \
-  etc/tests/native/nyir/semantic-builtin-shadowing.nshape \
-  etc/tests/native/nyir/extern-multi.nshape
+NYTRIX_NO_PROGRESS=1 build/release/ny-test --bin build/release/ny --color=never --timeout 300 \
+  etc/tests/code/intermediate/opt/loop-predication.nshape \
+  etc/tests/code/intermediate/opt/scev-loop-exit.nshape \
+  etc/tests/code/intermediate/ny/semantic-dynamic-containers.nshape \
+  etc/tests/code/intermediate/ny/semantic-temp-regressions.nshape \
+  etc/tests/code/intermediate/ny/semantic-builtin-shadowing.nshape \
+  etc/tests/code/intermediate/ny/extern-multi.nshape
 
-# Remaining language gates (run individually until empty)
-NYTRIX_STD_CACHE=0 build/release/ny-full --no-progress --color=never etc/tests/runtime/language/<file>.ny
+# Focused language fixture
+NYTRIX_NO_PROGRESS=1 ./make --color=never test --pattern types/refinements/refinements.nshape
 
 # Staged CI validation: run Ubuntu first, then expand to other platforms only
 after the Ubuntu run is green. Automatic push runs can be superseded by the
@@ -383,7 +393,7 @@ gh workflow run multi-platform.yml --ref main \
   -f target=windows -f suite=standard -f checks=tests
 
 # One-knob introspection: every trace on, compact header first
-NY_TRACE_ALL=1 build/release/ny-full --no-progress --color=never -O2 file.ny
+build/release/ny-full --no-progress --color=never -trace -O2 file.ny
 
 # Deep native diagnostics, one-line records with optional category filtering
 NY_TRACE_DEEP=1 NYTRIX_TRACE_FILTER=LOWER,RESOLVE,MACHINE,EMIT \
@@ -391,26 +401,45 @@ NY_TRACE_DEEP=1 NYTRIX_TRACE_FILTER=LOWER,RESOLVE,MACHINE,EMIT \
 
 # Release compile/object sweep for every OS example (interactive demos need a
 # positive step/count argument or a terminal input stream to execute)
-for f in etc/projects/os/*.ny; do
+for f in etc/projects/*.ny; do
   NYTRIX_STD_CACHE=0 build/release/ny-full --no-progress --color=never --native-only \
     --native-backend=x86_64 --native-tier=baseline -O0 -g -emit-only \
     -o /tmp/nytrix-os-check.o "$f" || exit $?
 done
 
 # Interactive/project smoke checks should be run individually, for example:
-# NYTRIX_STD_CACHE=0 build/release/ny-full --no-progress --color=never --native-only etc/projects/os/ant.ny 100
-# NYTRIX_STD_CACHE=0 build/release/ny-full --no-progress --color=never --native-only etc/projects/os/110.ny
+# NYTRIX_STD_CACHE=0 build/release/ny-full --no-progress --color=never --native-only etc/projects/ant.ny 100
+# NYTRIX_STD_CACHE=0 build/release/ny-full --no-progress --color=never --native-only etc/projects/110.ny
 #
 # `herodoc.ny` is a deterministic native smoke test; generic higher-order
 # sequence adapters remain tracked separately until their ABI is complete.
 ```
 
-When extending the focused regression list, keep the checked-in fixture paths
-intact; the files above are the current set under `etc/tests/native/`. When a
-focused run goes green, widen to the full gate:
+Fixture directories follow the subsystem they exercise under
+`etc/tests/lang/`; benchmark fixtures are under `etc/tests/bench/`.
+Language semantics, runtime behavior, compiler behavior, and verification
+fixtures use the matching `lang/` subcategory; interoperability fixtures are
+under `lang/interop/`.
+Loader integration tests live in `src/base/loader/tests/`. Compiler-linked
+type/effect row tests live in `src/code/lang/types/test.c` and run with
+`build/release/ny-full --type-row-test`. Native IR optimizer C tests live in
+`src/code/backend/ir/test/opt/`; they are compiled into `ny-full` and run
+with `build/release/ny-full --ir-opt-test`. Pass a driver basename to select
+one, for example `--ir-opt-test gvn_pre`. Their shared construction and
+evaluation helpers live in `src/code/backend/ir/test/opt/support.h`, and the
+directory's `run.cmake` registers the drivers without a standalone Makefile.
+Backend, NYIR, target, ABI, and format fixtures live under
+`etc/tests/code/`; compiler probes live under `etc/tests/code/probes/`.
+Language semantics, types, runtime, modules, and interop live under
+`etc/tests/lang/`, with negative cases under `etc/tests/lang/errors/`.
+Keep paths in commands and fixture metadata aligned with that layout.
+
+When extending the focused regression list, use the checked-in paths under
+`etc/tests/`.
+When a focused run goes green, widen to the full gate:
 
 ```bash
-./make check --no-progress --color=never
+NYTRIX_NO_PROGRESS=1 ./make --color=never check
 ```
 
 ## Git history and publication
@@ -585,11 +614,11 @@ One run is a smoke test, not performance evidence. Keep compiler/startup wall ti
 
 LLVM, MCJIT, ORC, native AOT, native JIT, the legacy AST-to-LLVM path, and C are separate execution paths. A result from one does not represent the others. Compare only semantically equivalent fixtures; when there is a meaningful C analogue, keep matching `source ny` and `source c` blocks. Workloads without one should remain explicitly non-comparative.
 
-For legacy LLVM differential work, use `--legacy-llvm` to execute through the
-compatibility AST backend, or `--legacy-llvm-dump=/tmp/program.ll` to emit its
-LLVM IR without executing. Legacy mode bypasses JIT caches so dumps always
-reflect the selected backend. Pair it with `--emit-ir` or `-dump-llvm` when a
-second IR view is useful.
+For legacy LLVM differential diagnostics, use
+`--legacy-llvm-dump=/tmp/program.ll` to emit the compatibility AST backend's
+LLVM IR without executing it. The dump bypasses JIT caches. Pair it with
+`--emit-ir` or `-dump-llvm` when a second IR view is useful. Runtime comparison
+uses the NYIR VM, LLVM MCJIT/ORC, or native execution routes.
 
 Native AOT/JIT comparison is most useful after recording an LLVM/JIT/C baseline and then enabling the native path explicitly.
 
@@ -602,7 +631,7 @@ For C/Nytrix/optional-GMP comparisons, the implementations need to perform equiv
 `./make web-test` is the maintained browser path and reads:
 
 ```text
-etc/tests/native/web/tests.json
+etc/tests/lang/interop/web/tests.json
 ```
 
 Each fixture needs an observable browser marker and a bounded virtual-time budget. Fixtures that require a live browser lifecycle should say so and only skip in an explicitly supported headless mode.
@@ -706,9 +735,15 @@ genhtml coverage.info --output-directory coverage-report
 These paths normally deserve focused regression coverage:
 
 ```text
-src/code/native/
+src/code/lang/c/
+src/code/lang/lower.c
+src/code/backend/
+src/code/backend/ir/test/opt/
 src/base/options.c
-src/code/wire/pipe/
+src/code/lang/parse/frontend/
+src/code/lang/types/pipeline/
+src/code/lang/types/policy/
+src/code/lang/parse/stmt/
 ```
 
 Shared compiler, runtime, ABI, parser, and standard-library changes usually need wider coverage than a local fix.

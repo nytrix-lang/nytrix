@@ -1,0 +1,26 @@
+shape scalar_parameter_callable_shadow {
+  family "runtime/language"
+  generator "regression"
+  features [shadowing scalar parameter callable container abi]
+  template ny-test-case
+  flags_matrix "--native --run; --native-only --nyir-verify; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.mem
+use core.os.ffi (CType, CStruct, offsetof_struct, sizeof_struct)
+
+@noinline
+fn keep_alignment(int align) list {
+  def copied = align
+  [align, copied]
+}
+
+def values = keep_alignment(8)
+assert(values.get(0) == 8 && values.get(1) == 8,
+       "scalar parameters and aliases shadow callable names in containers")
+def point = CStruct([[CType("i64", 8), "x"], [CType("f64", 8), "weight"]])
+assert(offsetof_struct(point, "weight") == 8 && sizeof_struct(point) == 16,
+       "default alignment keeps a scalar representation")
+NY
+}

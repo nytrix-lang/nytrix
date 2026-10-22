@@ -4,17 +4,17 @@
 ;; - https://web.cs.elte.hu/~lovasz/scans/lll.pdf
 ;; - https://www.cs.cmu.edu/~afs/cs/project/quake/public/papers/Coppersmith-Crypto96.pdf
 ;; References:
-;; - std.math.crypto.lattice
-;; - std.math.crypto
-module std.math.crypto.lattice.flatter(lll_reduce, lll_reduce_delta, gram_schmidt_rows, shortest_vector, babai_cvp, vec_dot, vec_norm_sq, vec_clone, vec_scale_add, vec_sub_scaled, vec_scale, profile_default_alpha, profile_alpha_from_delta, profile_alpha_from_rhf, profile_rhf_from_alpha, profile_shape_report, profile_goal_report, profile_goal_check, profile_compression_plan_report, triangular_size_reduce, triangular_size_reduce_report, blocked_triangular_size_reduce, blocked_triangular_size_reduce_report, triangular_bounded_lll_prepass_report, triangular_tail_normal_form, triangular_tail_normal_form_report, qary_relation_prepass, qary_relation_prepass_report, lower_triangular_qary_relation_prepass, lower_triangular_qary_relation_prepass_report, short_row_prepass, short_row_prepass_report, banded_triplet_prepass, banded_triplet_prepass_report, relative_size_reduce, relative_size_reduce_report, lagrange_pair_reduce, lagrange_pair_reduce_report, lattice_matmul, lattice_matmul_report, lattice_matmul_blocked, lattice_matmul_blocked_report, lattice_matmul_threaded, lattice_matmul_threaded_report, lattice_triangular_matmul, lattice_triangular_matmul_report, lattice_matmul_strassen, lattice_matmul_strassen_report, schoenhage_reduce, schoenhage_reduce_report, recursive_strategy_plan_report, recursive_reduce, recursive_reduce_report, sublattice_reduce, sublattice_reduce_report, qr_factor, qr_factor_report, qr_reorthogonalized_factor, qr_reorthogonalized_factor_report, householder_qr_factor, householder_qr_factor_report, blocked_qr_factor, blocked_qr_factor_report, tall_skinny_qr_factor, tall_skinny_qr_factor_report, fused_qr_size_reduce, fused_qr_size_reduce_report, refined_fused_qr_size_reduce, refined_fused_qr_size_reduce_report, iterated_fused_qr_size_reduce, iterated_fused_qr_size_reduce_report, lattice_quad_double_gram_report, lattice_dpe_gram_report, lattice_numeric_backend_report, lattice_high_precision_fixture_report, precision_matrix_kernel_report, hlll_reduce, hlll_reduce_report, flatter_reduce, flatter_reduce_report)
-use std.math.matrix as matrix
-use std.math.big
-use std.math.integer (Z)
-use std.math.scalar (pow, log2, sqrt, floor, ceil, abs)
-use std.core.str (split)
-use std.math.crypto.lattice.lll as lll_backend
-use std.os.clock (ticks)
-use std.os.parallel as ospar
+;; - core.math.crypto.lattice
+;; - core.math.crypto
+module core.math.crypto.lattice.flatter(lll_reduce, lll_reduce_delta, gram_schmidt_rows, shortest_vector, babai_cvp, vec_dot, vec_norm_sq, vec_clone, vec_scale_add, vec_sub_scaled, vec_scale, profile_default_alpha, profile_alpha_from_delta, profile_alpha_from_rhf, profile_rhf_from_alpha, profile_shape_report, profile_goal_report, profile_goal_check, profile_compression_plan_report, triangular_size_reduce, triangular_size_reduce_report, blocked_triangular_size_reduce, blocked_triangular_size_reduce_report, triangular_bounded_lll_prepass_report, triangular_tail_normal_form, triangular_tail_normal_form_report, qary_relation_prepass, qary_relation_prepass_report, lower_triangular_qary_relation_prepass, lower_triangular_qary_relation_prepass_report, short_row_prepass, short_row_prepass_report, banded_triplet_prepass, banded_triplet_prepass_report, relative_size_reduce, relative_size_reduce_report, lagrange_pair_reduce, lagrange_pair_reduce_report, lattice_matmul, lattice_matmul_report, lattice_matmul_blocked, lattice_matmul_blocked_report, lattice_matmul_threaded, lattice_matmul_threaded_report, lattice_triangular_matmul, lattice_triangular_matmul_report, lattice_matmul_strassen, lattice_matmul_strassen_report, schoenhage_reduce, schoenhage_reduce_report, recursive_strategy_plan_report, recursive_reduce, recursive_reduce_report, sublattice_reduce, sublattice_reduce_report, qr_factor, qr_factor_report, qr_reorthogonalized_factor, qr_reorthogonalized_factor_report, householder_qr_factor, householder_qr_factor_report, blocked_qr_factor, blocked_qr_factor_report, tall_skinny_qr_factor, tall_skinny_qr_factor_report, fused_qr_size_reduce, fused_qr_size_reduce_report, refined_fused_qr_size_reduce, refined_fused_qr_size_reduce_report, iterated_fused_qr_size_reduce, iterated_fused_qr_size_reduce_report, lattice_quad_double_gram_report, lattice_dpe_gram_report, lattice_numeric_backend_report, lattice_high_precision_fixture_report, precision_matrix_kernel_report, hlll_reduce, hlll_reduce_report, flatter_reduce, flatter_reduce_report)
+use core.math.matrix as matrix
+use core.math.big
+use core.math.integer (Z)
+use core.math.scalar (pow, log2, sqrt, floor, ceil, abs)
+use core.str (split)
+use core.math.crypto.lattice.lll as lll_backend
+use core.os.clock (ticks)
+use core.os.parallel as ospar
 
 fn profile_default_alpha() f64 {
    "Return the default profile alpha used by flatter-style reduction heuristics."
@@ -295,7 +295,7 @@ fn _flatter_profile_compression_precision(f64 spread, int n, str mode, bool aggr
 }
 
 fn _flatter_profile_compression_plan_from_logs(list logs, str mode="recursive-generic", bool aggressive_precision=false) dict {
-   def n = logs.len
+   def int n = logs.len
    if n == 0 {
       return {
          "method": "profile-compression-plan",
@@ -314,10 +314,10 @@ fn _flatter_profile_compression_plan_from_logs(list logs, str mode="recursive-ge
          "ok": true
       }
    }
-   mut max_left = []
-   mut min_right = []
-   mut i = 0
-   mut cur_max = float(logs.get(0))
+   mut list<f64> max_left = []
+   mut list<f64> min_right = []
+   mut int i = 0
+   mut f64 cur_max = float(logs.get(0))
    while i < n {
       def v = float(logs.get(i))
       if v > cur_max { cur_max = v }
@@ -325,7 +325,7 @@ fn _flatter_profile_compression_plan_from_logs(list logs, str mode="recursive-ge
       min_right = min_right.append(0.0)
       i += 1
    }
-   mut cur_min = float(logs.get(n - 1))
+   mut f64 cur_min = float(logs.get(n - 1))
    i = n - 1
    while i >= 0 {
       def v = float(logs.get(i))
@@ -333,15 +333,15 @@ fn _flatter_profile_compression_plan_from_logs(list logs, str mode="recursive-ge
       min_right[i] = cur_min
       i -= 1
    }
-   mut shifts = [0]
-   mut compressible = 0
-   mut max_gap = 0.0
+   mut list<int> shifts = [0]
+   mut int compressible = 0
+   mut f64 max_gap = 0.0
    i = 1
    while i < n {
-      def gap = min_right.get(i) - max_left.get(i - 1)
-      mut next_shift = int(shifts.get(i - 1))
+      def f64 gap = min_right.get(i) - max_left.get(i - 1)
+      mut int next_shift = int(shifts.get(i - 1))
       if gap > 1.0 {
-         def add = int(floor(gap - 1.0))
+         def int add = int(floor(gap - 1.0))
          next_shift += add
          compressible += 1
          if gap > max_gap { max_gap = gap }
@@ -349,12 +349,14 @@ fn _flatter_profile_compression_plan_from_logs(list logs, str mode="recursive-ge
       shifts = shifts.append(next_shift)
       i += 1
    }
-   def spread_before = max_left.get(n - 1) - min_right.get(0)
-   def relative_tail = int(shifts.get(n - 1))
-   def spread_after = max_left.get(n - 1) - float(relative_tail) - min_right.get(0)
-   def precision = _flatter_profile_compression_precision(spread_after, n, mode, aggressive_precision)
-   def base_shift = int(ceil(max_left.get(n - 1))) - relative_tail - precision
-   mut column_shifts = []
+   def f64 spread_before = max_left.get(n - 1) - min_right.get(0)
+   def int relative_tail = shifts.get(n - 1)
+   def f64 spread_max_tail = max_left.get(n - 1)
+   def f64 spread_min_head = min_right.get(0)
+   def f64 spread_after = spread_max_tail - float(relative_tail) - spread_min_head
+   def int precision = _flatter_profile_compression_precision(spread_after, n, mode, aggressive_precision)
+   def int base_shift = int(ceil(max_left.get(n - 1))) - relative_tail - precision
+   mut list<int> column_shifts = []
    i = 0
    while i < n {
       column_shifts = column_shifts.append(int(shifts.get(i)) + base_shift)
@@ -5236,7 +5238,7 @@ fn _qr_full_reconstruction_error(any a, any q, any r) f64 {
    def a_data = _flatter_matrix_data(a)
    def q_data = _flatter_matrix_data(q)
    def r_data = _flatter_matrix_data(r)
-   mut worst = 0.0
+   mut f64 worst = 0.0
    mut i = 0
    while i < rows {
       def a_row = a_data[i]
@@ -5249,7 +5251,7 @@ fn _qr_full_reconstruction_error(any a, any q, any r) f64 {
             s += float(q_row[k]) * float(r_data[k][j])
             k += 1
          }
-         def e = abs(s - float(a_row[j]))
+         def f64 e = abs(s - float(a_row[j]))
          if e > worst { worst = e }
          j += 1
       }
@@ -5261,20 +5263,20 @@ fn _qr_full_reconstruction_error(any a, any q, any r) f64 {
 fn _qr_full_orthogonality_error(any q) f64 {
    def rows = _flatter_matrix_rows(q)
    def data = _flatter_matrix_data(q)
-   mut worst = 0.0
+   mut f64 worst = 0.0
    mut i = 0
    while i < rows {
       mut j = i
       while j < rows {
-         mut s = 0.0
+         mut f64 s = 0.0
          mut k = 0
          while k < rows {
             def row = data[k]
             s += float(row[i]) * float(row[j])
             k += 1
          }
-         def target = i == j ? 1.0 : 0.0
-         def e = abs(s - target)
+         def f64 target = i == j ? 1.0 : 0.0
+         def f64 e = abs(s - target)
          if e > worst { worst = e }
          j += 1
       }
@@ -5363,7 +5365,7 @@ fn qr_reorthogonalized_factor_report(any basis, int passes=2) dict {
    def int rows = _flatter_matrix_rows(a)
    def int cols = _flatter_matrix_cols(a)
    if rows < cols { panic("qr_reorthogonalized_factor_report: require rows >= cols") }
-   def int active_passes = max(1, passes)
+   def int active_passes = passes < 1 ? 1 : passes
    mut list<list<f64>> q_cols = list(0)
    mut list<list<f64>> r_rows = _qr_zero_rows(cols, cols)
    mut zero_norm_columns = []
@@ -5536,8 +5538,8 @@ fn _flatter_qr_method_name(str method) str {
 }
 
 fn _qr_block_from_rows(list rows_data, int row_start, int row_end, int col_start, int col_end) any {
-   def int out_rows = max(0, row_end - row_start)
-   def int out_cols = max(0, col_end - col_start)
+   def int out_rows = row_end > row_start ? row_end - row_start : 0
+   def int out_cols = col_end > col_start ? col_end - col_start : 0
    mut list<list<f64>> out = list(out_rows)
    __list_set_len(out, out_rows)
    mut int oi = 0
@@ -5603,14 +5605,15 @@ fn blocked_qr_factor_report(any basis, int block_size=16) dict {
    def int rows = _flatter_matrix_rows(a)
    def int cols = _flatter_matrix_cols(a)
    if rows < cols { panic("blocked_qr_factor_report: require rows >= cols") }
-   def int bs = max(1, block_size)
+   def int bs = block_size > 1 ? block_size : 1
    mut work = _qr_copy_float_rows(a)
    mut q_total = matrix.Matrix(_qr_identity(rows))
    mut panel_reports = []
    mut int panel_count = 0
    mut int k = 0
    while k < cols {
-      def int width = min(bs, cols - k)
+      def int remaining_cols = cols - k
+      def int width = remaining_cols < bs ? remaining_cols : bs
       def panel = _qr_block_from_rows(work, k, rows, k, k + width)
       def qr = householder_qr_factor_report(panel)
       def q_panel = qr.get("q")
@@ -5691,7 +5694,7 @@ fn _qr_top_square(any r, int cols) any {
 
 fn _qr_row_window(any m, int start, int end) any {
    def data = _flatter_matrix_data(m)
-   def int rows = max(0, end - start)
+   def int rows = end > start ? end - start : 0
    def int cols = _flatter_matrix_cols(m)
    mut list<list<f64>> out = list(rows)
    __list_set_len(out, rows)
@@ -6668,15 +6671,15 @@ fn _flatter_float_gram_report(any basis, any exact_gram, bool compensated=false)
    def rows = _flatter_matrix_rows(a)
    def data = _flatter_matrix_data(a)
    mut out_rows = []
-   mut max_abs_error = 0.0
-   mut correction_abs_sum = 0.0
+   mut f64 max_abs_error = 0.0
+   mut f64 correction_abs_sum = 0.0
    mut multiply_adds = 0
    mut i = 0
    while i < rows {
       mut row = []
       mut j = 0
       while j < rows {
-         mut got = 0.0
+         mut f64 got = 0.0
          if compensated {
             def pair = _flatter_compensated_float_dot(data.get(i), data.get(j))
             got = float(pair.get(0))
@@ -6684,8 +6687,8 @@ fn _flatter_float_gram_report(any basis, any exact_gram, bool compensated=false)
          } else {
             got = _flatter_float_dot(data.get(i), data.get(j))
          }
-         def expect = _flatter_z_to_float(matrix.mat_get(exact_gram, i, j))
-         def err = abs(got - expect)
+         def f64 expect = _flatter_z_to_float(matrix.mat_get(exact_gram, i, j))
+         def f64 err = abs(got - expect)
          if err > max_abs_error { max_abs_error = err }
          row = row.append(got)
          multiply_adds += data.get(i).len
@@ -6762,8 +6765,8 @@ fn _flatter_double_double_gram_report(any basis, any exact_gram) dict {
    def data = _flatter_matrix_data(a)
    mut hi_rows = []
    mut lo_rows = []
-   mut max_abs_error = 0.0
-   mut correction_abs_sum = 0.0
+   mut f64 max_abs_error = 0.0
+   mut f64 correction_abs_sum = 0.0
    mut multiply_adds = 0
    mut i = 0
    while i < rows {
@@ -6772,11 +6775,11 @@ fn _flatter_double_double_gram_report(any basis, any exact_gram) dict {
       mut j = 0
       while j < rows {
          def dd = _flatter_double_double_dot(data.get(i), data.get(j))
-         def hi = float(dd.get(0))
-         def lo = float(dd.get(1))
-         def got = hi + lo
-         def expect = _flatter_z_to_float(matrix.mat_get(exact_gram, i, j))
-         def err = abs(got - expect)
+         def f64 hi = float(dd.get(0))
+         def f64 lo = float(dd.get(1))
+         def f64 got = hi + lo
+         def f64 expect = _flatter_z_to_float(matrix.mat_get(exact_gram, i, j))
+         def f64 err = abs(got - expect)
          if err > max_abs_error { max_abs_error = err }
          correction_abs_sum = correction_abs_sum + abs(lo)
          hi_row = hi_row.append(hi)
@@ -6855,8 +6858,8 @@ fn _flatter_quad_double_gram_report(any basis, any exact_gram) dict {
    def rows = _flatter_matrix_rows(a)
    def data = _flatter_matrix_data(a)
    mut component_rows = []
-   mut max_abs_error = 0.0
-   mut component_abs_sum = 0.0
+   mut f64 max_abs_error = 0.0
+   mut f64 component_abs_sum = 0.0
    mut multiply_adds = 0
    mut i = 0
    while i < rows {
@@ -6864,9 +6867,9 @@ fn _flatter_quad_double_gram_report(any basis, any exact_gram) dict {
       mut j = 0
       while j < rows {
          def qd = _flatter_quad_double_dot(data.get(i), data.get(j))
-         def got = _flatter_quad_double_value(qd)
-         def expect = _flatter_z_to_float(matrix.mat_get(exact_gram, i, j))
-         def err = abs(got - expect)
+         def f64 got = _flatter_quad_double_value(qd)
+         def f64 expect = _flatter_z_to_float(matrix.mat_get(exact_gram, i, j))
+         def f64 err = abs(got - expect)
          if err > max_abs_error { max_abs_error = err }
          mut qi = 0
          while qi < qd.len {
@@ -6905,7 +6908,7 @@ fn _flatter_dpe_from_z(any x) dict {
    }
    def logv = _flatter_log2_abs(z)
    def exp2 = int(floor(logv))
-   def mant = pow(2.0, logv - float(exp2))
+   def f64 mant = pow(2.0, logv - float(exp2))
    {
       "sign": z < Z(0) ? -1 : 1,
       "mantissa": mant,
@@ -6922,7 +6925,7 @@ fn _flatter_dpe_gram_report(any exact_gram) dict {
    def data = _flatter_matrix_data(g)
    mut out_rows = []
    mut max_exp_abs = 0
-   mut max_log2_error = 0.0
+   mut f64 max_log2_error = 0.0
    mut overflow_safe_entries = 0
    mut i = 0
    while i < rows {
@@ -6936,8 +6939,8 @@ fn _flatter_dpe_gram_report(any exact_gram) dict {
          if eabs > 1023 { overflow_safe_entries += 1 }
          if int(d.get("sign", 0)) != 0 {
             def mant = float(d.get("mantissa", 1.0))
-            def recon = float(d.get("exponent2", 0)) + _flatter_log2_float_approx(mant)
-            def err = abs(recon - float(d.get("log2_abs", 0.0)))
+            def f64 recon = float(d.get("exponent2", 0)) + _flatter_log2_float_approx(mant)
+            def f64 err = abs(recon - float(d.get("log2_abs", 0.0)))
             if err > max_log2_error { max_log2_error = err }
          }
          row = row.append(d)
@@ -8633,5 +8636,5 @@ fn babai_cvp(list basis, list target) list {
    assert(num.get("method", "") == "lattice-numeric-backend-report", "numeric backend method")
    assert(num.get("fixed_point_exact", false), "numeric backend fixed exact")
    assert(num.get("size_reduce_transform_verified", false), "numeric backend transform")
-   print("✓ std.math.crypto.lattice.flatter self-test passed")
+   print("✓ core.math.crypto.lattice.flatter self-test passed")
 }

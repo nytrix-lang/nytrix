@@ -1,0 +1,16 @@
+shape test_repl_reflection {
+  family "repl"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  expect compile_and_run
+  repl_expect "REPL-REFLECT-OK"
+  source ny <<'NY'
+use core
+
+assert(to_str([1, 2]) == "[1, 2]", "REPL aggregate string conversion")
+assert(is_list([1, 2]), "REPL list predicate")
+assert(!is_list(1), "REPL scalar list predicate")
+print("REPL-REFLECT-OK")
+NY
+}

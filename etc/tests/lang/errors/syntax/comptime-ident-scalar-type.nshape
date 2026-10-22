@@ -1,0 +1,16 @@
+shape comptime_ident_scalar_type {
+  family "compiler-errors/comptime"
+  generator "error"
+  features ["error", "comptime", "template", "hygiene"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "non-identifier template values cannot be used as type or symbol names"
+  source ny <<'NY'
+comptime template make_typed(T) {
+  fn generated() T { return 0 }
+}
+
+comptime emit make_typed(7)
+NY
+}

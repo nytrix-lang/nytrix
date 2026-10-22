@@ -1,0 +1,90 @@
+shape returned_callback_alias_cannot_escape_narrow_effect_row {
+  family "typing/effects"
+  generator "regression"
+  features [ny test typing effects callback return alias negative]
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_fail
+  expect_message "effect contract violation"
+  source ny <<'NY'
+use core
+
+fn forward_callback(fnptr callback) fnptr {
+  def forwarded = callback
+  return forwarded
+}
+
+fn pure_callback() int { 41 }
+
+@effects(io)
+fn io_callback() int {
+  print("branch-selected callback has an IO effect\n")
+  42
+}
+
+fn choose_callback(bool choose, fnptr first, fnptr second) fnptr {
+  mut selected = first
+  if choose {
+    selected = second
+  }
+  return selected
+}
+
+fn early_return_callback(bool choose, fnptr first, fnptr second) fnptr {
+  if choose { return second }
+  return first
+}
+
+fn chained_early_return_callback(bool first, bool second,
+                                 fnptr a, fnptr b, fnptr fallback) fnptr {
+  if first { return a }
+  if second { return b }
+  return fallback
+}
+
+fn match_callback(bool choose, fnptr first, fnptr second) fnptr {
+  mut selected = first
+  match choose {
+    true -> { selected = second }
+    _ -> { selected = first }
+  }
+  return selected
+}
+
+@effects(alloc)
+fn underdeclared_forwarded_callback() int {
+  def callback = forward_callback(fn() {
+    print("this callback has an IO effect\n")
+    42
+  })
+  callback()
+}
+
+@effects(none)
+fn underdeclared_branch_selected_callback() int {
+  def callback = choose_callback(true, pure_callback, io_callback)
+  callback()
+}
+
+@effects(none)
+fn underdeclared_match_selected_callback() int {
+  def callback = match_callback(true, pure_callback, io_callback)
+  callback()
+}
+
+@effects(none)
+fn underdeclared_early_return_callback() int {
+  def callback = early_return_callback(true, pure_callback, io_callback)
+  callback()
+}
+
+@effects(none)
+fn underdeclared_chained_early_return_callback() int {
+  def callback =
+    chained_early_return_callback(false, true, pure_callback, io_callback,
+                                  pure_callback)
+  callback()
+}
+
+underdeclared_chained_early_return_callback()
+NY
+}

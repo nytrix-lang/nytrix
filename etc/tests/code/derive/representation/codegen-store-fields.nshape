@@ -1,0 +1,176 @@
+shape codegen_store_fields {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "codegen", "reflection", "layout"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-only; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.compiler.codegen (store_fields_for, store_dict_for, new_for,
+                      new_fields_for, load_fields_for, store_for)
+
+fn computed_store_default() int { return 29 }
+
+layout GeneratedStoreRecord {
+   i32 count
+   bool enabled
+   int computed = computed_store_default()
+   f32 precision
+   f64 scale
+   str label
+}
+layout record LegacyStoreRecord derive(store, load) {
+   i32 count
+   bool enabled
+   int computed = computed_store_default()
+   f32 precision
+   f64 scale
+   str label
+}
+
+comptime emit store_fields_for(GeneratedStoreRecord)
+comptime emit store_dict_for(GeneratedStoreRecord)
+comptime emit new_for(GeneratedStoreRecord)
+comptime emit new_fields_for(GeneratedStoreRecord)
+comptime emit store_for(GeneratedStoreRecord)
+comptime emit load_fields_for(GeneratedStoreRecord)
+def ptr generated = malloc(__layout_size("GeneratedStoreRecord"))
+def ptr legacy = malloc(__layout_size("LegacyStoreRecord"))
+mut stored = true
+stored = stored && GeneratedStoreRecord_store_count(generated, 23)
+stored = stored && GeneratedStoreRecord_store_enabled(generated, true)
+stored = stored && GeneratedStoreRecord_store_computed(generated, 29)
+stored = stored && GeneratedStoreRecord_store_precision(generated, 2.5)
+stored = stored && GeneratedStoreRecord_store_scale(generated, 1.25)
+stored = stored && GeneratedStoreRecord_store_label(generated, "ready")
+stored = stored && !GeneratedStoreRecord_store_field(generated, "missing", 1)
+stored = stored && !GeneratedStoreRecord_store_field(0, "count", 23)
+LegacyStoreRecord_store(legacy, 23, true, 29, 2.5, 1.25, "ready")
+def ptr positional = GeneratedStoreRecord_new_fields(
+    23, true, 29, 2.5, 1.25, "ready")
+def ptr positional_legacy = malloc(__layout_size("LegacyStoreRecord"))
+LegacyStoreRecord_store(positional_legacy, 23, true, 29, 2.5, 1.25, "ready")
+assert(LegacyStoreRecord_store(0, 23, true, 29, 2.5, 1.25, "ready") == 0,
+       "C-derived fixed-arity store returns safely for a null destination")
+def ptr direct_store = malloc(__layout_size("GeneratedStoreRecord"))
+assert(GeneratedStoreRecord_store(direct_store, 23, true, 29, 2.5, 1.25,
+                                  "ready") == direct_store &&
+       GeneratedStoreRecord_store(0, 23, true, 29, 2.5, 1.25, "ready") == 0,
+       "fixed-arity Ny store returns the destination and checks null")
+assert(GeneratedStoreRecord_load_count(direct_store) ==
+          LegacyStoreRecord_load_count(positional_legacy) &&
+       GeneratedStoreRecord_load_enabled(direct_store) ==
+          LegacyStoreRecord_load_enabled(positional_legacy) &&
+       GeneratedStoreRecord_load_computed(direct_store) ==
+          LegacyStoreRecord_load_computed(positional_legacy) &&
+       GeneratedStoreRecord_load_precision(direct_store) ==
+          LegacyStoreRecord_load_precision(positional_legacy) &&
+       GeneratedStoreRecord_load_scale(direct_store) ==
+          LegacyStoreRecord_load_scale(positional_legacy) &&
+       GeneratedStoreRecord_load_label(direct_store) ==
+          LegacyStoreRecord_load_label(positional_legacy),
+       "fixed-arity Ny store matches the legacy ABI field by field")
+assert(GeneratedStoreRecord_load_count(positional) ==
+          LegacyStoreRecord_load_count(positional_legacy) &&
+       GeneratedStoreRecord_load_enabled(positional) ==
+          LegacyStoreRecord_load_enabled(positional_legacy) &&
+       GeneratedStoreRecord_load_computed(positional) ==
+          LegacyStoreRecord_load_computed(positional_legacy) &&
+       GeneratedStoreRecord_load_precision(positional) ==
+          LegacyStoreRecord_load_precision(positional_legacy) &&
+       GeneratedStoreRecord_load_scale(positional) ==
+          LegacyStoreRecord_load_scale(positional_legacy) &&
+       GeneratedStoreRecord_load_label(positional) ==
+          LegacyStoreRecord_load_label(positional_legacy),
+       "field-sequence constructor matches the C-derived positional store")
+assert(stored,
+       "Ny field writer reports success only for known fields and pointers")
+assert(load_layout(generated, "GeneratedStoreRecord", "count") ==
+          LegacyStoreRecord_load_count(legacy),
+       "Ny field writer stores integer values")
+assert(load_layout(generated, "GeneratedStoreRecord", "enabled") ==
+          LegacyStoreRecord_load_enabled(legacy),
+       "Ny field writer stores boolean values")
+assert(load64_i(generated,
+                __layout_offset("GeneratedStoreRecord", "computed")) ==
+          29,
+       "Ny field writer stores computed integer values in the declared ABI")
+assert(load_layout(generated, "GeneratedStoreRecord", "computed") == 29,
+       "load_layout boxes a wide integer for dynamic callers")
+assert(load32(generated,
+              __layout_offset("GeneratedStoreRecord", "precision")) ==
+          1075838976 &&
+       load32(legacy, __layout_offset("LegacyStoreRecord", "precision")) ==
+          1075838976 &&
+       to_str(load_layout(generated, "GeneratedStoreRecord", "precision")) ==
+          "2.5",
+       "Ny field writer stores f32 values in the declared ABI")
+assert(load_layout(generated, "GeneratedStoreRecord", "scale") ==
+          LegacyStoreRecord_load_scale(legacy),
+       "Ny field writer stores floating values")
+assert(load_layout(generated, "GeneratedStoreRecord", "label") ==
+          LegacyStoreRecord_load_label(legacy),
+       "Ny reflected field writes match the C-derived store helper")
+
+def ptr generated_partial = malloc(__layout_size("GeneratedStoreRecord"))
+def ptr legacy_partial = malloc(__layout_size("LegacyStoreRecord"))
+def supplied = {"count": 5, "enabled": true}
+GeneratedStoreRecord_store_dict(generated_partial, supplied)
+LegacyStoreRecord_store(legacy_partial, 5, true, 29, 0.0, 0.0, "")
+assert(load_layout(generated_partial, "GeneratedStoreRecord", "count") == 5 &&
+       load_layout(generated_partial, "GeneratedStoreRecord", "enabled") &&
+       load64_i(generated_partial,
+                __layout_offset("GeneratedStoreRecord", "computed")) ==
+          29 &&
+       load_layout(generated_partial, "GeneratedStoreRecord", "computed") ==
+          29 &&
+       to_str(load_layout(generated_partial, "GeneratedStoreRecord", "precision")) ==
+          "0" &&
+       load_layout(generated_partial, "GeneratedStoreRecord", "scale") ==
+          LegacyStoreRecord_load_scale(legacy_partial) &&
+       load_layout(generated_partial, "GeneratedStoreRecord", "label") ==
+          LegacyStoreRecord_load_label(legacy_partial),
+       "Ny store_for fills omitted fields with layout defaults")
+assert(GeneratedStoreRecord_store_dict(0, supplied) == 0,
+       "Ny store_dict_for returns null for a null destination")
+def ptr generated_unknown = malloc(__layout_size("GeneratedStoreRecord"))
+GeneratedStoreRecord_store_field(generated_unknown, "count", 3)
+assert(GeneratedStoreRecord_store_dict(
+          generated_unknown, {"count": 8, "typo": true}) == 0 &&
+       load_layout(generated_unknown, "GeneratedStoreRecord", "count") == 3,
+       "Ny store_dict_for rejects unknown keys without partial writes")
+assert(GeneratedStoreRecord_new({"typo": true}) == 0,
+       "Ny new_for rejects unknown keys")
+def ptr generated_new = GeneratedStoreRecord_new(
+    {"count": 5, "enabled": true, "precision": 4.5})
+assert(load_layout(generated_new, "GeneratedStoreRecord", "count") == 5 &&
+       load_layout(generated_new, "GeneratedStoreRecord", "enabled") &&
+       load64_i(generated_new,
+                __layout_offset("GeneratedStoreRecord", "computed")) == 29 &&
+       load_layout(generated_new, "GeneratedStoreRecord", "computed") == 29 &&
+       load_layout(generated_new, "GeneratedStoreRecord", "precision") ==
+          4.5 &&
+       load_layout(generated_new, "GeneratedStoreRecord", "scale") == 0.0 &&
+       load_layout(generated_new, "GeneratedStoreRecord", "label") == "",
+       "Ny new_for allocates with supplied fields and declared defaults")
+def ptr generated_default_new = GeneratedStoreRecord_new(dict())
+assert(load_layout(generated_default_new, "GeneratedStoreRecord", "count") == 0 &&
+       !load_layout(generated_default_new, "GeneratedStoreRecord", "enabled") &&
+       load_layout(generated_default_new, "GeneratedStoreRecord", "computed") == 29 &&
+       load_layout(generated_default_new, "GeneratedStoreRecord", "precision") == 0.0 &&
+       load_layout(generated_default_new, "GeneratedStoreRecord", "scale") == 0.0 &&
+       load_layout(generated_default_new, "GeneratedStoreRecord", "label") == "",
+       "Ny new_for constructs a complete value from defaults alone")
+free(generated)
+free(legacy)
+free(positional)
+free(positional_legacy)
+free(direct_store)
+free(generated_partial)
+free(legacy_partial)
+free(generated_new)
+free(generated_default_new)
+free(generated_unknown)
+NY
+}

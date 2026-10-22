@@ -1,0 +1,163 @@
+shape generated_mutable_list_callback_replacement_differential {
+  family "language/types/effects"
+  generator "embedded"
+  features [typing effects callback mutable list alias invalidation generated differential]
+  timeout 120
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.subprocess as process
+use core.os.prim (env)
+
+def compiler = env("NYTRIX_NY_FULL_BIN")
+assert(is_str(compiler) && compiler.len > 0,
+       "test runner provides the compiler for generated callback-flow cases")
+
+fn source_for(int mode) str {
+  if mode >= 19 && mode <= 21 {
+    def contract = mode == 19 ? "alloc, read, write, io" :
+                   (mode == 20 ? "alloc, read, write" : "")
+    return "use core\n" +
+      "@effects(io) fn impure() int { print(\"generated callback\\n\")\nreturn 43 }\n" +
+      "@effects(none) fn pure() int { return 42 }\n" +
+      (mode == 21 ? "" : "@effects(alloc, read, write, e)\n") +
+      "fn dispatch(fnptr added, int index) int {\n" +
+      "def source = [pure, pure]\n" +
+      "def extended = source.append(added)\n" +
+      "extended[index]()\n}\n" +
+      (mode == 21 ? "" : "@effects(" + contract + ")\n") +
+      "fn owner() int { dispatch(impure, 2) }\nowner()\n"
+  }
+  if mode == 22 {
+    return "use core\n" +
+      "@effects(io) fn impure() int { print(\"dictionary mutation\\n\")\nreturn 43 }\n" +
+      "@effects(none) fn pure() int { return 42 }\n" +
+      "@effects(alloc, read, write) fn owner() int {\n" +
+      "mut callbacks = [pure]\n" +
+      "mut entries = {\"run\": pure}\n" +
+      "entries[\"run\"] = impure\n" +
+      "callbacks[0]()\n}\nowner()\n"
+  }
+  mut str callbacks = "mut callbacks = [pure_callback]\n"
+  mut str declaration = "@effects(alloc, read, write)\nfn invoke() int {\n"
+  mut str replacement = "callbacks[0] = pure_callback\n"
+  mut str called = "callbacks[0]()\n"
+  mut str invocation = "invoke()\n"
+  if mode == 1 {
+    replacement = "callbacks[0] = io_callback\n"
+  } else if mode == 2 {
+    callbacks = "mut callbacks = [pure_callback, pure_callback]\n"
+    called = "callbacks[1]()\n"
+  } else if mode >= 3 {
+    callbacks = "mut callbacks = {\"run\": pure_callback}\n"
+    replacement = "callbacks[\"run\"] = pure_callback\n"
+    called = "callbacks[\"run\"]()\n"
+    if mode == 4 {
+      replacement = "callbacks[\"run\"] = io_callback\n"
+    } else if mode == 5 {
+      callbacks = "mut callbacks = {\"replace\": pure_callback, \"run\": pure_callback}\n"
+      replacement = "callbacks[\"replace\"] = pure_callback\n"
+      called = "callbacks[\"run\"]()\n"
+    }
+  }
+  if mode == 6 || mode == 7 {
+    declaration = (mode == 6 ? "@effects(io, alloc, read, write)\n" :
+                                "@effects(alloc, read, write)\n") +
+        "fn invoke(bool choose_io) int {\n"
+    callbacks = "mut selected = pure_callback\n" +
+        "if choose_io { selected = io_callback } else { selected = pure_callback }\n" +
+        "mut callbacks = [pure_callback]\n"
+    replacement = "callbacks[0] = selected\n"
+    called = "callbacks[0]()\n"
+    invocation = "invoke(true)\n"
+  } else if mode >= 8 && mode <= 12 {
+    declaration = (mode == 8 ? "@effects(io, alloc, read, write)\n" :
+                    (mode == 9 ? "@effects(alloc, read, write)\n" :
+                                 "@effects(alloc, read, write)\n")) +
+        "fn invoke() int {\n"
+    callbacks = "mut callbacks = [pure_callback]\n" +
+        "mut alias = callbacks\nalias[0] = io_callback\n"
+    replacement = ""
+    called = mode == 10 ? "callbacks[0]()\n" : "alias[0]()\n"
+    invocation = "invoke()\n"
+    if mode == 11 || mode == 12 {
+      declaration = "@effects(alloc, read, write)\nfn invoke() int {\n"
+      callbacks = "mut callbacks = [pure_callback]\n" +
+          "mut alias = callbacks\nmut second = callbacks\n" +
+          "alias[0] = io_callback\n"
+      called = mode == 11 ? "second[0]()\n" : "alias[0]()\n"
+    }
+  } else if mode == 13 || mode == 14 {
+    callbacks = "mut callbacks = [pure_callback]\n"
+    if mode == 13 {
+      replacement = "callbacks.append(pure_callback)\n"
+    } else {
+      replacement = "callbacks.append(io_callback)\n"
+    }
+    called = "callbacks[0]()\n"
+  } else if mode == 15 || mode == 16 {
+    declaration = (mode == 15 ? "@effects(io, alloc, read, write)\n" :
+                                "@effects(alloc, read, write)\n") +
+        "fn invoke() int {\n"
+    callbacks = "mut callbacks = [pure_callback, io_callback]\n" +
+        "mut extended = callbacks.append(pure_callback)\n"
+    replacement = ""
+    called = "extended[1]()\n"
+  } else if mode == 17 || mode == 18 {
+    declaration = (mode == 17 ? "@effects(io, alloc, read, write)\n" :
+                                "@effects(alloc, read, write)\n") +
+        "fn invoke(int index) int {\n"
+    callbacks = "def source = [pure_callback, pure_callback]\n" +
+        "mut extended = source.append(io_callback)\n"
+    replacement = ""
+    called = "extended[index]()\n"
+    invocation = "invoke(2)\n"
+  }
+  return "use core\n" +
+      "@effects(io)\nfn io_callback() int { print(\"generated callback\\n\")\nreturn 1\n}\n" +
+      "@effects(none)\nfn pure_callback() int { return 2 }\n" +
+      declaration + callbacks + replacement + called + "}\n" + invocation
+}
+
+fn check_mode(int mode, bool expected) int {
+  def source = source_for(mode)
+  def result = process.run_capture(
+    compiler,
+    ["--effect-require-known", "--strict-types", "--native-only",
+     "--nyir-verify", "-emit-only", "-c", source], nil, false)
+  def output = result.get("stdout", "")
+  def code = result.get("code", 127)
+  def accepted = code == 0 && str.find(output, "error:") < 0
+  assert(accepted == expected,
+         "generated mutable callback case " + to_str(mode) +
+             " disagrees with expected " + to_str(expected) +
+             " (rc=" + to_str(code) + "): " + output)
+  0
+}
+
+check_mode(0, true)
+check_mode(1, false)
+check_mode(2, false)
+check_mode(3, true)
+check_mode(4, false)
+check_mode(5, false)
+check_mode(6, true)
+check_mode(7, false)
+check_mode(8, true)
+check_mode(9, false)
+check_mode(10, true)
+check_mode(11, true)
+check_mode(12, false)
+check_mode(13, true)
+check_mode(14, true)
+check_mode(15, true)
+check_mode(16, false)
+check_mode(17, true)
+check_mode(18, false)
+check_mode(19, true)
+check_mode(20, false)
+check_mode(21, false)
+check_mode(22, true)
+NY
+}

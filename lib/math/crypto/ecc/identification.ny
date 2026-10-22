@@ -3,11 +3,11 @@
 ;; Reference:
 ;; - Benjamin Smith, ECC school notes on identification with ephemeral keys
 ;; References:
-;; - std.math.crypto.ecc
-;; - std.math.crypto
-module std.math.crypto.ecc.identification(ecc_ident_public_key, ecc_ident_ephemeral_commit, ecc_ident_response, ecc_ident_verify, ecc_ident_verify_strict, ecc_ident_forge, ecc_ident_detect_cheating)
-use std.math.crypto.ecc.ecc
-use std.math.nt
+;; - core.math.crypto.ecc
+;; - core.math.crypto
+module core.math.crypto.ecc.identification(ecc_ident_public_key, ecc_ident_ephemeral_commit, ecc_ident_response, ecc_ident_verify, ecc_ident_verify_strict, ecc_ident_forge, ecc_ident_detect_cheating)
+use core.math.crypto.ecc.ecc
+use core.math.nt
 
 fn ecc_ident_public_key(number x, list P, number a, number p, any n=nil) any {
    "Compute public key Q = x*P for the identification protocol."

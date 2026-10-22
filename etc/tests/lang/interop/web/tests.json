@@ -1,0 +1,127 @@
+[
+  {
+    "id": "time-now",
+    "source": "etc/tests/lang/interop/web/time.nshape",
+    "route": "app",
+    "virtual_time_ms": 16000,
+    "required_regex": [
+      "data-touch-count=\"[1-9][0-9]*\"",
+      "data-touch-y=\"[1-9][0-9]*\""
+    ],
+    "shape": "test_time_now"
+  },
+  {
+    "id": "time-sleep",
+    "source": "etc/tests/lang/interop/web/time.nshape",
+    "route": "app",
+    "virtual_time_ms": 16000,
+    "required_regex": [
+      "data-touch-x=\"([5-9][0-9]|1[0-9][0-9])\"",
+      "data-touch-y=\"([5-9][0-9]|1[0-9][0-9])\""
+    ],
+    "shape": "test_time_sleep"
+  },
+  {
+    "id": "filesystem-directories",
+    "source": "etc/tests/lang/interop/web/filesystem.nshape",
+    "route": "app",
+    "virtual_time_ms": 16000,
+    "required": [
+      "data-touch-x=\"1\"",
+      "data-touch-y=\"1\"",
+      "data-touch-count=\"1\""
+    ],
+    "shape": "test_filesystem_directories"
+  },
+  {
+    "id": "network-fetch",
+    "source": "etc/tests/lang/interop/web/network.nshape",
+    "route": "app",
+    "virtual_time_ms": 16000,
+    "required": [
+      "data-touch-x=\"1\"",
+      "data-touch-y=\"1\""
+    ],
+    "shape": "test_network_fetch"
+  },
+  {
+    "id": "clipboard",
+    "source": "etc/tests/lang/interop/web/clipboard.nshape",
+    "route": "app",
+    "virtual_time_ms": 16000,
+    "clipboard": true,
+    "required": [
+      "data-touch-x=\"1\"",
+      "data-touch-y=\"1\"",
+      "data-clipboard-write=\"1\"",
+      "data-clipboard-read=\"nytrix-clipboard-fixture\""
+    ],
+    "shape": "test_clipboard"
+  },
+  {
+    "id": "websocket-lifecycle",
+    "source": "etc/tests/lang/interop/web/network.nshape",
+    "route": "app",
+    "skip_headless": true,
+    "virtual_time_ms": 16000,
+    "required": [
+      "data-touch-x=\"1\"",
+      "data-touch-y=\"1\""
+    ],
+    "required_regex": [
+      "data-touch-count=\"[1-9][0-9]*\""
+    ],
+    "shape": "test_websocket_lifecycle"
+  },
+  {
+    "id": "websocket-echo",
+    "source": "etc/tests/lang/interop/web/network.nshape",
+    "route": "app",
+    "virtual_time_ms": 3000,
+    "websocket_echo": true,
+    "real_time_browser": true,
+    "required": [
+      "data-touch-x=\"1\"",
+      "data-touch-y=\"1\""
+    ],
+    "required_regex": [
+      "data-touch-count=\"[1-9][0-9]*\""
+    ],
+    "shape": "test_websocket_echo"
+  },
+  {
+    "id": "websocket-rejection",
+    "source": "etc/tests/lang/interop/web/network.nshape",
+    "route": "app",
+    "virtual_time_ms": 16000,
+    "required_regex": [
+      "data-touch-count=\"[1-9][0-9]*\"",
+      "data-touch-x=\"0\"",
+      "data-touch-y=\"0\""
+    ],
+    "shape": "test_websocket_rejection"
+  },
+  {
+    "id": "cmp",
+    "source": "etc/tests/lang/interop/web/renderer.nshape",
+    "shape": "test_cmp",
+    "route": "app",
+    "virtual_time_ms": 8000,
+    "required": [
+      "PLAIN_TRUE",
+      "LOC_TRUE",
+      "CAP_TRUE",
+      "HOST_TRUE"
+    ]
+  },
+  {
+    "id": "zz-tex",
+    "source": "etc/tests/lang/interop/web/renderer.nshape",
+    "shape": "test_zz_tex",
+    "route": "app",
+    "virtual_time_ms": 8000,
+    "required_regex": [
+      "data-presented=\"[1-9][0-9]*\""
+    ]
+  }
+]

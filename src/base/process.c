@@ -3,12 +3,21 @@
  * for compiler self-tests, fuzzer workers, and native executable probes.
  */
 #include "base/process.h"
+#include "base/options.h"
+#include "base/util.h"
+#include "base/compat.h"
 
 #include <stdint.h>
+#include <ctype.h>
 #include <errno.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#ifndef PATH_MAX
+#define PATH_MAX 4096
+#endif
 
 static bool ny_capture_append(char **buf, size_t *len, size_t *cap,
                               const char *data, size_t size) {
@@ -215,3 +224,138 @@ int ny_process_capture(const char *const argv[], char **out,
   return 127;
 }
 #endif
+
+#ifdef _WIN32
+static int ny_process_path_like(const char *s) {
+  if (!s || !*s)
+    return 0;
+  if (strchr(s, '\\') || strchr(s, '/'))
+    return 1;
+  if (isalpha((unsigned char)s[0]) && s[1] == ':')
+    return 1;
+  return 0;
+}
+#endif
+
+int ny_exec_spawn(const char *const argv[]) {
+  if (verbose_enabled >= 2 && argv && argv[0]) {
+    fprintf(stderr, "[cmd]");
+    for (size_t i = 0; argv[i]; ++i) {
+      const char *arg = argv[i];
+      bool needs_quote = false;
+      for (const char *p = arg; *p; ++p) {
+        if (isspace((unsigned char)*p) || *p == '"' || *p == '\'') {
+          needs_quote = true;
+          break;
+        }
+      }
+      fputc(' ', stderr);
+      if (!needs_quote) {
+        fputs(arg, stderr);
+      } else {
+        fputc('"', stderr);
+        for (const char *p = arg; *p; ++p) {
+          if (*p == '"' || *p == '\\')
+            fputc('\\', stderr);
+          fputc(*p, stderr);
+        }
+        fputc('"', stderr);
+      }
+    }
+    fputc('\n', stderr);
+  }
+#ifdef _WIN32
+  const char *a0 = argv[0] ? argv[0] : "";
+  int rc = -1;
+  if (ny_process_path_like(a0) && ny_access(a0, F_OK) == 0)
+    rc = _spawnv(_P_WAIT, a0, (const char *const *)argv);
+  else
+    rc = _spawnvp(_P_WAIT, a0, (const char *const *)argv);
+  if (rc < 0 && errno == ENOENT) {
+    const char *base = strrchr(a0, '/');
+    if (!base)
+      base = strrchr(a0, '\\');
+    base = base ? base + 1 : a0;
+    char base_buf[PATH_MAX];
+    snprintf(base_buf, sizeof(base_buf), "%s", base);
+    char *name = base_buf;
+    while (*name && isspace((unsigned char)*name))
+      name++;
+    if (*name == '"' || *name == '\'') {
+      char q = *name++;
+      char *endq = strchr(name, q);
+      if (endq)
+        *endq = '\0';
+    }
+    char *ws = strpbrk(name, " \t");
+    if (ws)
+      *ws = '\0';
+    if (strcasecmp(name, "clang") == 0 || strcasecmp(name, "clang.exe") == 0 ||
+        strcasecmp(name, "clang-cl") == 0 ||
+        strcasecmp(name, "clang-cl.exe") == 0) {
+      static const char *const win_clang_candidates[] = {
+          "C:\\msys64\\ucrt64\\bin\\clang.exe",
+          "C:\\msys64\\clang64\\bin\\clang.exe",
+          "C:\\msys64\\mingw64\\bin\\clang.exe",
+          "C:\\tools\\msys64\\ucrt64\\bin\\clang.exe",
+          "C:\\tools\\msys64\\clang64\\bin\\clang.exe",
+          "C:\\tools\\msys64\\mingw64\\bin\\clang.exe",
+          "C:\\PROGRA~1\\LLVM\\bin\\clang.exe",
+          "C:\\PROGRA~2\\LLVM\\bin\\clang.exe",
+          "C:\\PROGRA~1\\LLVM\\bin\\clang-cl.exe",
+          "C:\\PROGRA~2\\LLVM\\bin\\clang-cl.exe",
+          "C:\\Program Files\\LLVM\\bin\\clang.exe",
+          "C:\\Program Files (x86)\\LLVM\\bin\\clang.exe",
+          "C:\\Program Files\\LLVM\\bin\\clang-cl.exe",
+          "C:\\Program Files (x86)\\LLVM\\bin\\clang-cl.exe",
+      };
+      const char *argv2[128];
+      size_t k = 0;
+      while (argv[k] && k + 1 < (sizeof(argv2) / sizeof(argv2[0]))) {
+        argv2[k] = argv[k];
+        k++;
+      }
+      argv2[k] = NULL;
+      for (size_t i = 0;
+           i < sizeof(win_clang_candidates) / sizeof(win_clang_candidates[0]);
+           ++i) {
+        if (ny_access(win_clang_candidates[i], F_OK) != 0)
+          continue;
+        argv2[0] = win_clang_candidates[i];
+        rc = _spawnv(_P_WAIT, argv2[0], (const char *const *)argv2);
+        if (rc >= 0)
+          return rc;
+      }
+    }
+  }
+  if (rc < 0) {
+    perror("_spawnvp");
+    return -1;
+  }
+  return rc;
+#else
+  pid_t pid = fork();
+  if (pid < 0) {
+    perror("fork");
+    return -1;
+  }
+  if (pid == 0) {
+    execvp(argv[0], (char *const *)argv);
+    perror("execvp");
+    _exit(127);
+  }
+  int status = 0;
+  if (waitpid(pid, &status, 0) < 0) {
+    perror("waitpid");
+    return -1;
+  }
+  if (WIFEXITED(status))
+    return WEXITSTATUS(status);
+  if (WIFSIGNALED(status)) {
+    fprintf(stderr, "process %s terminated by signal %d\n", argv[0],
+            WTERMSIG(status));
+    return -1;
+  }
+  return status;
+#endif
+}

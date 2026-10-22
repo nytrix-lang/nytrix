@@ -1,16 +1,16 @@
 ;; Keywords: engine catalog assets search filter os ui render viewer scene
 ;; Catalog panel helpers for filtering, listing, and selecting viewer assets.
 ;; References:
-;; - std.os.ui.assets.catalog
-;; - std.os.ui.assets.viewer
-module std.os.ui.render.viewer.engine.catalog(draw_grid, filter_cached, grid_h, invalidate_caches, model_index, pick_index_cached, refresh_names, sync_selected)
-use std.core
-use std.math (max, min)
-use std.os.ui.assets.catalog as asset_catalog
-use std.os.ui.assets.viewer as ui_assets
-use std.os.ui.render.viewer.gui as gui
-use std.os.ui.render.dump as ui_profile
-use std.os.ui.render.viewer.icons as icons
+;; - core.os.ui.assets.catalog
+;; - core.os.ui.assets.viewer
+module core.os.ui.render.viewer.engine.catalog(draw_grid, filter_cached, grid_h, invalidate_caches, model_index, pick_index_cached, refresh_names, sync_selected)
+use core
+use core.math (max, min)
+use core.os.ui.assets.catalog as asset_catalog
+use core.os.ui.assets.viewer as ui_assets
+use core.os.ui.render.viewer.gui as gui
+use core.os.ui.render.dump as ui_profile
+use core.os.ui.render.viewer.icons as icons
 
 mut _row_id_cache = dict(512)
 mut _icon_name_cache = dict(512)
@@ -216,5 +216,5 @@ fn draw_grid(idp, suffix, model_names, win_w, list_h, compact=false, opts=0) dic
    assert(model_index(names, "CesiumMan") == 1 && sync_selected("", "", names) == "Avocado", "catalog selection")
    assert(filter_cached(names, "ces").get("items", []).len == 1, "catalog filter")
    assert(pick_index_cached({}, names, "CesiumMan", "").get("idx", -1) == 1, "catalog pick cache")
-   print("✓ std.os.ui.render.viewer.engine.catalog self-test passed")
+   print("✓ core.os.ui.render.viewer.engine.catalog self-test passed")
 }

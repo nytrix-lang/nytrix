@@ -1,18 +1,18 @@
 ;; Keywords: viewer gamepad input controller os ui render
 ;; Gamepad input helpers for viewer navigation and editor control surfaces.
 ;; References:
-;; - std.os.ui.window.input.gamepad
-module std.os.ui.render.viewer.gamepad(
+;; - core.os.ui.window.input.gamepad
+module core.os.ui.render.viewer.gamepad(
    axis_i100, axis_f, safe_axis_value, fixed2, axis_label, button_label, button_chip_label,
    button_side_label, is_sony_pad, joysticks, device_row, refresh, rows, best_jid, snapshot,
    release, pad_button, pad_axis, display_axis_slot, raw_axis_value, raw_button_down, axes_text,
    pad_text, button_text, raw_button_text, hats_text, raw_device_text, devices_text, signature
 )
 
-use std.core
-use std.os (ticks)
-use std.os.ui.window.input.gamepad as input_gamepad
-use std.core.str as str
+use core
+use core.os (ticks)
+use core.os.ui.window.input.gamepad as input_gamepad
+use core.str as str
 
 mut _device_rows = []
 mut _best_jid_cached = -1
@@ -421,5 +421,5 @@ fn best_jid() int { _best_jid_cached }
    def st = {"mapped": true, "name": "Demo DualSense Wireless Controller", "axes": [-0.62, 0.34], "buttons": [true]}
    assert(st.get("mapped", false) && axis_label(0) == "LX", "gamepad device demo state")
    assert(button_label(st, 0).len > 0 && fixed2(0.25).len > 0, "gamepad device labels")
-   print("✓ std.os.ui.render.viewer.gamepad self-test passed")
+   print("✓ core.os.ui.render.viewer.gamepad self-test passed")
 }

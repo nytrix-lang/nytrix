@@ -1,0 +1,33 @@
+shape codegen_soa {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "codegen", "reflection", "layout", "soa"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-only; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.compiler.codegen (soa_for)
+
+layout SoaRecord {
+   i32 id
+   bool active
+   f64 ratio
+}
+comptime emit soa_for(SoaRecord)
+
+def ptr row0 = malloc(__layout_size("SoaRecord"))
+def ptr row1 = malloc(__layout_size("SoaRecord"))
+store_layout(row0, "SoaRecord", 7, true, 1.5)
+store_layout(row1, "SoaRecord", 8, false, 2.25)
+def columns = SoaRecord_soa([row0, row1])
+def active = columns.get("active")
+def ratios = columns.get("ratio")
+assert(columns.get("id") == [7, 8] && active.len == 2 &&
+       is_bool(active[0]) && active[0] && is_bool(active[1]) && !active[1] &&
+       ratios.len == 2 && ratios[0] == 1.5 && ratios[1] == 2.25,
+       "soa_for preserves typed values and declaration-order columns")
+free(row0)
+free(row1)
+NY
+}

@@ -1,0 +1,24 @@
+shape ownership_rule_borrow_capture_match_expression_positive {
+  family "runtime/ownership"
+  generator "regression"
+  features ["ownership", "positive", "borrow", "closure", "match"]
+  template ny-test-case
+  expect compile_and_run
+  flags "--ownership-strict --nyir-verify"
+  source ny <<'NY'
+use core
+
+@effects(all)
+fn good(int value) int {
+  def borrowed = &value
+  def delayed = match true {
+    true -> fn() { value }
+    _ -> fn() { 0 }
+  }
+  borrowed
+  value
+}
+
+assert(good(7) == 7, "closure in a match expression without borrow capture")
+NY
+}

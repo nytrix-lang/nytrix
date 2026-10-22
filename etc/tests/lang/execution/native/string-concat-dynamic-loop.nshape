@@ -1,0 +1,20 @@
+shape test_string_concat_dynamic_loop {
+  family "runtime/execution/native"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.reflect
+
+mut result = ""
+mut i = 0
+while i < 5 {
+   result = result + to_str(i)
+   i += 1
+}
+assert(result == "01234", "runtime string concat preserves dynamic loop values")
+NY
+}

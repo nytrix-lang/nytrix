@@ -1,0 +1,20 @@
+shape named_reexport_scalar_return {
+  family "language/modules/use"
+  generator "embedded"
+  features ["ny", "test", "abi", "identity"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+module ReExportMath(ceil, floor) {
+  use core.math.float (ceil, floor)
+}
+use ReExportMath (floor as re_floor, ceil as re_ceil)
+assert(re_floor(1.8) == 1, "named floor reexport keeps raw integer result")
+assert(re_floor(-1.2) == -2, "named floor reexport preserves negative result")
+assert(re_ceil(2.1) == 3, "named ceil reexport keeps raw integer result")
+assert(to_str("010203".unhex.long) == "66051", "hex digit ternary keeps raw integers")
+0
+NY
+}

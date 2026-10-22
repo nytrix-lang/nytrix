@@ -1,0 +1,71 @@
+shape bpf_signed_portable_ops_assemble {
+  family "runtime/compiler"
+  generator "regression"
+  features ["ny", "test", "bpf", "portable-text", "signed-opcodes"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os (file_exists, file_remove, run_capture, temp_dir, pid)
+
+def compiler = env("NYTRIX_NY_FULL_BIN")
+assert(is_str(compiler) && compiler.len > 0,
+       "test runner provides the compiler path")
+def stem = temp_dir() + "/ny-bpf-sar-" + to_str(pid())
+def asm_path = stem + ".s"
+def object_path = stem + ".o"
+def program =
+    "fn choose(int condition, int left, int right) int {\n" +
+    "  if condition != 0 { left } else { right }\n" +
+    "}\n" +
+    "fn arithmetic_shift(int value, int amount) int { value >> amount }\n" +
+    "fn signed_less(int left, int right) int {\n" +
+    "  if left < right { 1 } else { 0 }\n" +
+    "}\n" +
+    "fn signed_less_equal(int left, int right) int {\n" +
+    "  if left <= right { 1 } else { 0 }\n" +
+    "}\n" +
+    "fn signed_greater(int left, int right) int {\n" +
+    "  if left > right { 1 } else { 0 }\n" +
+    "}\n" +
+    "fn signed_greater_equal(int left, int right) int {\n" +
+    "  if left >= right { 1 } else { 0 }\n" +
+    "}\n" +
+    "fn signed_divide(int value, int divisor) int { value / divisor }\n" +
+    "fn signed_remainder(int value, int divisor) int { value % divisor }\n" +
+    "choose(1, 7, 9) + arithmetic_shift(-8, 2) + signed_less(-4, 1) +\n" +
+    "signed_less_equal(-4, 1) + signed_greater(-4, 1) +\n" +
+    "signed_greater_equal(-4, 1) + signed_divide(-8, 2) +\n" +
+    "signed_remainder(-8, 3)"
+def emitted = run_capture(
+    [compiler, "--native-backend=bpf", "--native-only", "-O3",
+     "--nyir-verify",
+     "--emit-asm=" + asm_path, "-no-std", "-emit-only", "-e", program],
+    [], nil, false)
+def assembled = run_capture(
+    ["clang", "--target=bpf", "-c", asm_path, "-o", object_path],
+    [], nil, false)
+def disassembled = run_capture(
+    ["llvm-objdump", "-d", object_path], [], nil, false)
+def asm_removed =
+    if file_exists(asm_path) { is_ok(file_remove(asm_path)) } else { true }
+def object_removed =
+    if file_exists(object_path) { is_ok(file_remove(object_path)) } else { true }
+assert(emitted.get("code", 127) == 0 && assembled.get("code", 127) == 0,
+       "BPF signed-shift output assembles to an eBPF object")
+assert(disassembled.get("code", 127) == 0 &&
+       str_contains(disassembled.get("stdout", ""), "s>>="),
+       "eBPF object contains arithmetic, not logical, right shift")
+assert(str_contains(disassembled.get("stdout", ""), "s<"),
+       "eBPF object uses signed less-than")
+assert(str_contains(disassembled.get("stdout", ""), "s<=") &&
+       str_contains(disassembled.get("stdout", ""), "s>") &&
+       str_contains(disassembled.get("stdout", ""), "s>="),
+       "eBPF object preserves signed inclusive and greater comparisons")
+assert(str_contains(disassembled.get("stdout", ""), "s/=") &&
+       str_contains(disassembled.get("stdout", ""), "s%="),
+       "eBPF object preserves signed division and remainder")
+assert(asm_removed && object_removed, "remove BPF assembly artifacts")
+print("BPF_SIGNED_PORTABLE_OPCODES_OK")
+NY
+}

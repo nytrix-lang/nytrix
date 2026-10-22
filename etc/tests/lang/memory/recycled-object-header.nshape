@@ -1,0 +1,38 @@
+shape test_recycled_object_header {
+  family "runtime/memory"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  flags_matrix "--native --run --no-zero-init; --native-backend=llvm --jit --jit-engine=mcjit --no-zero-init; --native-backend=llvm --jit --jit-engine=orc --no-zero-init"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+mut i = 0
+while i < 32 {
+   def buffer = malloc(16)
+   store8(buffer, 120, 0)
+   store8(buffer, 0, 1)
+   def text = init_str(buffer, 12)
+   free(text)
+   def fresh = malloc(16)
+   store8(fresh, 65, 0)
+   store8(fresh, 0, 1)
+   def converted = cstr_to_str(fresh)
+   assert(__str_len(converted) == 1 && converted == "A", "fresh allocation has no stale string metadata")
+   free(fresh)
+   i += 1
+}
+def first = malloc(16)
+store8(first, 65, 0)
+store8(first, 0, 1)
+def first_string = init_str(first, 1)
+assert(__str_hash(first_string) == __str_hash(cstr_to_str("A")), "initial string hash")
+free(first_string)
+def second = malloc(16)
+store8(second, 66, 0)
+store8(second, 0, 1)
+def second_string = init_str(second, 1)
+assert(__str_hash(second_string) == __str_hash(cstr_to_str("B")), "reused address does not retain a string hash")
+free(second_string)
+NY
+}

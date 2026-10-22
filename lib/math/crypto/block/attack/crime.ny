@@ -4,10 +4,10 @@
 ;; Reference:
 ;; - https://www.rfc-editor.org/rfc/rfc7457
 ;; References:
-;; - std.math.crypto.block.attack
-;; - std.math.crypto
-module std.math.crypto.block.attack.crime(crime_attack, crime_recover_with_alphabet, deflate_compress)
-use std.core
+;; - core.math.crypto.block.attack
+;; - core.math.crypto
+module core.math.crypto.block.attack.crime(crime_attack, crime_recover_with_alphabet, deflate_compress)
+use core
 
 fn deflate_compress(list data) list {
    "Simple DEFLATE-like compression using LZ77 + Huffman approximation.

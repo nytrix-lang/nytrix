@@ -1,0 +1,45 @@
+shape intrinsic_conversion_render {
+  family "runtime/values"
+  generator "program"
+  features ["runtime", "intrinsic", "abi", "print", "regression"]
+  template ny-test-case
+  flags_matrix "--color=never; --native-only --color=never; --native --run --color=never; -O3 --color=never; --native-only -O3 --color=never"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.math
+
+fn as_int(int n) int { n }
+fn as_any(any v) any { v }
+fn dyn_f64(any x) f64 { x + 0.0 }
+
+;; `__flt_to_int` lowers to the raw-int conversion bridge on the native path.
+;; Its result rendered through the tagged-any print lane decoded raw 480 as a
+;; tagged word (nil). The ABI record row (RESULT_RAW_INT) is authoritative at
+;; the print boundary: an already-decoded scalar renders through the raw
+;; integer formatter on every route.
+assert(__flt_to_int(480.0) == 480, "flt_to_int value")
+print("direct=", __flt_to_int(480.0))
+
+;; A def-carried result takes the boxed-any boundary; both spellings must
+;; agree with the direct-call rendering.
+def carried = __flt_to_int(480.0)
+print("carried=", carried)
+assert(carried == 480, "carried value")
+
+;; Truncation toward zero and negatives keep the same conversion bridge.
+assert(__flt_to_int(0.01 * 48000.0) == 480, "product conversion")
+assert(__flt_to_int(-2.9) == -2, "negative truncation")
+
+;; The core.math.float.int wrapper shares the same bridge through its body.
+assert(int(2.9) == 2, "float int wrapper")
+print("wrapper=", int(7.0))
+
+;; Module-boundary flows: a helper typed int receives the conversion result
+;; and a dynamic formal receives the boxed word; both must round-trip.
+assert(as_int(__flt_to_int(123.9)) == 123, "int formal boundary")
+def dyn = as_any(__flt_to_int(45.7))
+print("dynamic=", dyn)
+assert(__flt_to_int(dyn_f64(45.7)) == 45, "f64 formal round trip")
+NY
+}

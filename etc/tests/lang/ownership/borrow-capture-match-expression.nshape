@@ -1,0 +1,24 @@
+shape ownership_rule_borrow_capture_match_expression {
+  family "compiler-errors/ownership"
+  generator "error"
+  features ["error", "ownership", "negative", "borrow", "closure", "match"]
+  template ny-compile-fail
+  expect compile_fail
+  flags "--ownership-strict"
+  expect_message "a second-class borrow cannot be captured by a closure"
+  source ny <<'NY'
+use core
+
+@effects(all)
+fn bad(int value) int {
+  def borrowed = &value
+  def delayed = match true {
+    true -> fn() { borrowed }
+    _ -> fn() { 0 }
+  }
+  delayed()
+}
+
+bad(1)
+NY
+}

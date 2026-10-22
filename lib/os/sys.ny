@@ -1,10 +1,10 @@
 ;; Keywords: sys syscalls os
 ;; Os Sys for Nytrix
 ;; References:
-;; - std.os
-module std.os.sys(syscall, sys_open, sys_read, sys_write, sys_close, sys_close_quiet, sys_getdents64, sys_ioctl, sys_openpty, STDIN_FD, STDOUT_FD, STDERR_FD)
-use std.core
-use std.core.error
+;; - core.os
+module core.os.sys(syscall, sys_open, sys_read, sys_write, sys_close, sys_close_quiet, sys_getdents64, sys_ioctl, sys_openpty, STDIN_FD, STDOUT_FD, STDERR_FD)
+use core
+use core.error
 
 def STDIN_FD = 0
 def STDOUT_FD = 1
@@ -42,38 +42,36 @@ fn syscall(any num, any a=0, any b=0, any c=0, any d=0, any e=0, any f=0) int {
    } #endif
 }
 
-fn sys_open(any path, any flags, any mode) Result<int, int> {
+fn sys_open(str path, int flags, int mode) Result<int, int> {
    "Wrapper for `open(2)`; returns `ok(fd)` or `err(errno_like_code)`."
-   def fd = __open(path, flags, mode)
-   if fd < 0 { return err(fd) }
-   return ok(fd)
+   def int fd = __open_raw(path, flags, mode)
+   if fd < 0 { return err(__tag(fd)) }
+   return ok(__tag(fd))
 }
 
-fn _sys_io_result(any res) Result<int, int> {
-   ;; Result integer payloads use the language's tagged-value ABI.  Preserve
-   ;; the syscall word so callers can unwrap it exactly once.
+fn _sys_io_result(int res) Result<int, int> {
    if res < 0 { return err(res) }
    return ok(res)
 }
 
-fn sys_read(any fd, any buf, any n) Result<int, int> {
+fn sys_read(int fd, ptr buf, int n) Result<int, int> {
    "Wrapper for `read(2)`; returns `ok(bytes_read)` or `err(errno_like_code)`."
-   return _sys_io_result(__read_off(fd, buf, n, 0))
+   return _sys_io_result(__read_fd_raw(fd, buf, n))
 }
 
-fn sys_write(any fd, any buf, any n) Result<int, int> {
+fn sys_write(int fd, ptr buf, int n) Result<int, int> {
    "Wrapper for `write(2)`; returns `ok(bytes_written)` or `err(errno_like_code)`."
-   return _sys_io_result(__write_off(fd, buf, n, 0))
+   return _sys_io_result(__write_fd_raw(fd, buf, n))
 }
 
-fn sys_close(any fd) Result<int, int> {
+fn sys_close(int fd) Result<int, int> {
    "Wrapper for `close(2)`; returns `ok(0)` or `err(errno_like_code)`."
    def res = __close(fd)
    if res < 0 { return err(res) }
    return ok(0)
 }
 
-fn sys_close_quiet(any fd) any {
+fn sys_close_quiet(int fd) any {
    "Closes a file descriptor and ignores close errors."
    if fd < 0 { return 0 }
    def ignored = __close(fd)
@@ -82,7 +80,7 @@ fn sys_close_quiet(any fd) any {
 
 fn sys_getdents64(any fd, any buf, any n) Result<int, int> {
    "Wrapper for `getdents64(2)`; returns `ok(bytes_filled)` or `err(errno_like_code)`."
-   use std.os
+   use core.os
    #linux {
       def res = syscall(217, fd, buf, n, 0, 0, 0)
       if res < 0 { return err(res) }
@@ -116,5 +114,5 @@ fn sys_openpty(any fds_ptr) Result<int, int> {
    } #else {
       assert(syscall(39) == -1, "non-linux syscall fallback")
    } #endif
-   print("✓ std.os.sys self-test passed")
+   print("✓ core.os.sys self-test passed")
 }

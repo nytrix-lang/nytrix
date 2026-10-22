@@ -1,0 +1,15 @@
+shape type-comptime-mut-capture {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "comptime", "staging", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "cannot capture runtime mutable variable 'counter' in compile-time evaluation"
+  source ny <<'NY'
+use core
+mut counter = 0
+
+def bad = comptime{ counter + 1 }
+NY
+}

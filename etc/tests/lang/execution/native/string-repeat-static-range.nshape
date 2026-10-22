@@ -1,0 +1,29 @@
+shape test_string_repeat_static_range {
+  family "runtime/execution/native"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+mut repeated = "seed"
+for i in 2..5 {
+  repeated = repeated + "xy"
+}
+assert(repeated == "seedxyxyxyxy", "static inclusive range repeats each literal append")
+
+mut empty = "stable"
+for i in 1..0 {
+  empty = empty + "z"
+}
+assert(empty == "stable", "empty static range leaves the builder unchanged")
+
+mut negative = ""
+for i in -2..0 {
+  negative = negative + "q"
+}
+assert(negative == "qqq", "negative static range keeps inclusive trip count")
+NY
+}

@@ -5,13 +5,13 @@
 ;; - I. Damgard, M. Jurik, A Generalisation, a Simplification and Some Applications of
 ;;   Paillier's Probabilistic Public-Key System.
 ;; References:
-;; - std.math.crypto.public_key
-;; - std.math.crypto
+;; - core.math.crypto.public_key
+;; - core.math.crypto
 ;; - inspiration from crypto-commons (asymmetric)
-module std.math.crypto.public_key.damgard_jurik(damgard_jurik_keygen, damgard_jurik_encrypt, damgard_jurik_decrypt)
-use std.core
-use std.math.nt
-use std.math.crypto.public_key.paillier (paillier_encrypt)
+module core.math.crypto.public_key.damgard_jurik(damgard_jurik_keygen, damgard_jurik_encrypt, damgard_jurik_decrypt)
+use core
+use core.math.nt
+use core.math.crypto.public_key.paillier (paillier_encrypt)
 
 fn _dj_l(any u, any n) bigint {
    (Z(u) - Z(1)) / Z(n)
@@ -123,5 +123,5 @@ fn damgard_jurik_decrypt(any c, dict key) bigint {
    def c3 = damgard_jurik_encrypt(42, key3, 7)
    def m3 = damgard_jurik_decrypt(c3, key3)
    assert(m3 == Z(42), "dj s=3 round-trip")
-   print("✓ std.math.crypto.public_key.damgard_jurik self-test passed")
+   print("✓ core.math.crypto.public_key.damgard_jurik self-test passed")
 }

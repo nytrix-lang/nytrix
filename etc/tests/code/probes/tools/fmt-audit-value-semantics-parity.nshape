@@ -1,0 +1,40 @@
+shape fmt_audit_value_semantics_parity {
+  family "probe/tools"
+  generator "embedded"
+  features ["formatter", "audit", "value-semantics", "parity"]
+  template ny-test-case
+  flags "--native-only"
+  timeout 60
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.subprocess (run_capture)
+use core.str as str
+def ny = env("NYTRIX_NY_FULL_BIN")
+def fmt = env("NYTRIX_TEST_FMT_BIN")
+def cmake = env("NYTRIX_CMAKE_COMMAND")
+def dir = temp_dir() + "/fmt-value-semantics-" + to_str(pid())
+def made = run_capture([cmake, "-E", "make_directory", dir], [], nil, false)
+assert(made.get("code", 127) == 0, "create value semantics audit directory")
+def path = dir + "/value-semantics.ny"
+assert(is_ok(file_write(path,
+   "fn value_semantics() {\n   mut frozen = {}\n   frozen.set(\"key\", 1)\n" +
+   "   def also_frozen = {}\n   also_frozen.set(\"key\", 2)\n" +
+   "   mut proper = dict()\n   proper.set(\"key\", 3)\n   xs.append(1)\n" +
+   "   xs.extend([2, make(3, 4)])\n   xs = xs.append(5)\n" +
+   "   return xs.append(6)\n}\n")),
+   "write value semantics source")
+def c = run_capture([fmt, "--bugs", "--json", path], [], nil, false)
+def embedded = run_capture([ny, "fmt", "--bugs", "--json", path], [], nil, false)
+def output = embedded.get("stdout", "")
+assert(c.get("code", 127) == 0 && embedded.get("code", 127) == 0 &&
+       c.get("stdout", "") == output, "value-semantics audit parity")
+for expected in ["NYAUD1119", "frozen {} on line", "NYAUD1120",
+                 "discarded list.append", "discarded list.extend"] {
+   assert(str.find(output, expected) >= 0, "missing " + expected + ": " + output)
+}
+def cleanup = run_capture([cmake, "-E", "rm", "-rf", dir], [], nil, false)
+assert(cleanup.get("code", 127) == 0, "remove value semantics directory")
+print("FMT_AUDIT_VALUE_SEMANTICS_PARITY_OK")
+NY
+}

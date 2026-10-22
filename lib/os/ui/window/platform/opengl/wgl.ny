@@ -1,12 +1,12 @@
 ;; Keywords: platform window backend opengl wgl os ui input
 ;; WGL context creation for the Win32 window backend.
 ;; References:
-;; - std.os.ui.window.platform.opengl
-;; - std.os.ui.window
-;; - std.os.ui.window.consts
-module std.os.ui.window.platform.opengl.wgl(create_context, destroy_context, make_current, swap_buffers, swap_interval, get_proc_address, choose_pixel_format)
-use std.core
-use std.core.mem (cstr)
+;; - core.os.ui.window.platform.opengl
+;; - core.os.ui.window
+;; - core.os.ui.window.consts
+module core.os.ui.window.platform.opengl.wgl(create_context, destroy_context, make_current, swap_buffers, swap_interval, get_proc_address, choose_pixel_format)
+use core
+use core.mem (cstr)
 
 fn ChoosePixelFormat(any _dc, any _pfd) int {
    "Runs the ChoosePixelFormat operation."
@@ -105,5 +105,5 @@ fn get_proc_address(any name) any {
    assert(create_context(0) == 0 && !destroy_context(0), "wgl context fallback")
    assert(!make_current(0, 0) && !swap_buffers(0) && !swap_interval(1), "wgl current fallback")
    assert(get_proc_address("definitely_missing_nytrix_probe_symbol") == 0, "wgl proc fallback")
-   print("✓ std.os.ui.window.platform.opengl.wgl self-test passed")
+   print("✓ core.os.ui.window.platform.opengl.wgl self-test passed")
 }

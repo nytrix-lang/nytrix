@@ -1,30 +1,34 @@
 ;; Keywords: bytes binary endian strings elf
 ;; Bounds-checked binary byte and string primitives for ELF readers.
-module std.os.rev.decomp.bytes(_u16, _u32, _u64, _slice, _slice_list, _cstring)
-use std.core
-use std.core.str as str
+module core.os.rev.decomp.bytes(_u16, _u32, _u64, _slice, _slice_list, _cstring)
+use core
+use core.primitives (bor, bshl)
+use core.str as str
 
 fn _u16(str b, int off, bool le=true) int {
    if off < 0 || off + 1 >= b.len { return 0 }
    def a = load8(b, off)
    def c = load8(b, off + 1)
-   le ? (a | (c << 8)) : ((a << 8) | c)
+   le ? bor(a, bshl(c, 8)) : bor(bshl(a, 8), c)
 }
 
 fn _u32(str b, int off, bool le=true) int {
    if off < 0 || off + 3 >= b.len { return 0 }
    if le {
-      return load8(b, off) | (load8(b, off + 1) << 8) |
-      (load8(b, off + 2) << 16) | (load8(b, off + 3) << 24)
+      return bor(load8(b, off),
+         bor(bshl(load8(b, off + 1), 8),
+            bor(bshl(load8(b, off + 2), 16),
+               bshl(load8(b, off + 3), 24))))
    }
-   (load8(b, off) << 24) | (load8(b, off + 1) << 16) |
-   (load8(b, off + 2) << 8) | load8(b, off + 3)
+   bor(bshl(load8(b, off), 24),
+      bor(bshl(load8(b, off + 1), 16),
+         bor(bshl(load8(b, off + 2), 8), load8(b, off + 3))))
 }
 
 fn _u64(str b, int off, bool le=true) int {
    if off < 0 || off + 7 >= b.len { return 0 }
-   le ? (_u32(b, off, true) | (_u32(b, off + 4, true) << 32)) :
-   ((_u32(b, off, false) << 32) | _u32(b, off + 4, false))
+   le ? bor(_u32(b, off, true), bshl(_u32(b, off + 4, true), 32)) :
+   bor(bshl(_u32(b, off, false), 32), _u32(b, off + 4, false))
 }
 
 fn _slice(str b, int off, int n) str {
@@ -67,5 +71,5 @@ fn _cstring(str b, int off, int maxn=4096) str {
 #main {
    assert(_u16("\x34\x12", 0) == 0x1234 && _u32("\x78\x56\x34\x12", 0) == 0x12345678, "little-endian reads")
    assert(_slice("abcdef", 2, 3) == "cde" && _cstring("ok\x00tail", 0) == "ok", "bounded byte strings")
-   print("✓ std.os.rev.decomp.bytes self-test passed")
+   print("✓ core.os.rev.decomp.bytes self-test passed")
 }

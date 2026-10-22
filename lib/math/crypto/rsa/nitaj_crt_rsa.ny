@@ -5,13 +5,13 @@
 ;; This targets the practical regime where dp and/or dq are very small and can
 ;; be recovered by bounded search, then lifted to factors via CRT identities.
 ;; References:
-;; - std.math.crypto.rsa
-;; - std.math.crypto
-module std.math.crypto.rsa.nitaj_crt_rsa(nitaj_crt_rsa_attack)
-use std.math.nt
-use std.math.scalar (log, sqrt)
-use std.math.crypto.rsa.known_crt_exponents
-use std.math.crypto.rsa.op (compute_phi, compute_d)
+;; - core.math.crypto.rsa
+;; - core.math.crypto
+module core.math.crypto.rsa.nitaj_crt_rsa(nitaj_crt_rsa_attack)
+use core.math.nt
+use core.math.scalar (log, sqrt)
+use core.math.crypto.rsa.known_crt_exponents
+use core.math.crypto.rsa.op (compute_phi, compute_d)
 
 fn _nitaj_try_small_dp(any n, any e, any max_dp) any {
    mut dp = Z(1)

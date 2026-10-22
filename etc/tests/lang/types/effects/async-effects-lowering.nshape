@@ -1,0 +1,53 @@
+shape async_effect_calls_create_awaitable_tasks {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "async", "lowering"]
+  template ny-test-case
+  flags_matrix "--effect-require-known --nyir-verify --native --run; --effect-require-known --nyir-verify --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --nyir-verify --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --nyir-verify --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+fn ordinary_pair_sum(int base, int offset) int {
+  base + offset
+}
+assert(ordinary_pair_sum(40, 41) == 81,
+       "ordinary typed two-argument call establishes ABI baseline")
+
+@async_effects
+@effects(io)
+fn effectful_answer(base=41) int {
+  print("")
+  base + 1
+}
+
+def answer_task = effectful_answer()
+assert(await answer_task == 42,
+       "annotated effect call creates an awaitable task")
+
+fn forward_effectful_answer() handle {
+  effectful_answer(99)
+}
+
+assert(await forward_effectful_answer() == 100,
+       "effect call task passes through a handle return")
+
+@async_effects
+@effects(io)
+fn effectful_default_uses_prior_argument(int base, int offset=base + 1) int {
+  print("")
+  base + offset
+}
+assert(await effectful_default_uses_prior_argument(40) == 81,
+       "later async defaults substitute earlier arguments")
+
+@async_effects
+@effects(io)
+fn effectful_pair_sum(int base, int offset) int {
+  print("")
+  base + offset
+}
+def async_pair_result = await effectful_pair_sum(40, 41)
+assert(async_pair_result == 81, "typed async two-argument call preserves ABI")
+NY
+}

@@ -1,0 +1,12 @@
+shape nyir_value_compact {
+  family "runtime-native"
+  generator "native"
+  features ["native", "nyir", "optimizer", "compact"]
+  template ny-test-case
+  flags "--native --run --nyir-dump-stats"
+  expect compile_and_run
+  expect_exit 3
+  source ny <<'NY'
+1 + 0 + 2 * 1
+NY
+}

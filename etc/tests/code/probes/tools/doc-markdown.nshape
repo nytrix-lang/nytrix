@@ -1,0 +1,39 @@
+shape doc_static_markdown_rendering {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "doc", "markdown", "static-site", "renderer"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-only; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_and_run
+  source ny <<'SRC'
+use core
+use core.str as str
+use core.compiler.tools.doc.markdown (render_static, render_static_batch)
+
+def html = render_static("# Title\n\nHello & <world>.\n- item\n| a | b |\n|---|---|\n```ny\nx < 2\n```\n", "learn/start")
+assert(html ==
+   "<h1>Title</h1>\n<p>Hello &amp; &lt;world&gt;.</p>\n<ul>\n<li>item</li>\n</ul>\n<table><tbody>\n<tr><td>a</td><td>b</td></tr>\n</tbody></table>\n<pre><code class=\"language-ny\">x &lt; 2\n</code></pre>\n",
+   "static Markdown renderer preserves site HTML structure")
+assert(render_static("[Types](../spec/types.md#intro) [site](https://example.test)", "learn/start") ==
+   "<p><a href=\"../../spec/types/#intro\">Types</a> <a href=\"https://example.test\" rel=\"noopener noreferrer\">site</a></p>\n",
+   "static Markdown renderer resolves local and external links")
+assert(render_static("It's fine.", "learn/start") == "<p>It's fine.</p>\n",
+   "static Markdown renderer matches HTML quote escaping")
+assert(render_static("café & crème", "learn/start") ==
+   "<p>café &amp; crème</p>\n",
+   "static Markdown renderer preserves UTF-8 across byte-range escaping")
+mut lines = []
+mut i = 0
+while i < 128 {
+   lines = lines.append("line")
+   i += 1
+}
+def str many_lines = str.join(lines, "\n")
+def str long_html = render_static(many_lines, "learn/long")
+assert(long_html.len == 128 * 12 && str.endswith(long_html, "<p>line</p>\n"),
+   "static Markdown renderer processes many lines with bounded slicing work")
+assert(render_static_batch(["# First", "# Second"], ["a", "b"]) ==
+   ["<h1>First</h1>\n", "<h1>Second</h1>\n"],
+   "static Markdown batch keeps route and source positions aligned")
+SRC
+}

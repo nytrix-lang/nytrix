@@ -1,9 +1,9 @@
 #ifndef REPL_INTERNAL_H
 #define REPL_INTERNAL_H
 
-#include "code/parse/parser.h"
-#include "cmd/ny/repl/repl.h"
 #include "base/compat.h"
+#include "cmd/ny/repl/repl.h"
+#include "code/lang/parse/parser.h"
 #include <ctype.h>
 #include <string.h>
 #ifndef _WIN32
@@ -110,12 +110,14 @@ static inline int repl_fuzzy_score(const char *cand, const char *query,
   return fuzzy > score ? fuzzy : score;
 }
 
-void doclist_set(doc_list_t *dl, const char *name, const char *doc, const char *def,
-                 const char *src, int kind);
-void doclist_add_recursive(doc_list_t *dl, ny_stmt_list *body, const char *prefix);
+void doclist_set(doc_list_t *dl, const char *name, const char *doc,
+                 const char *def, const char *src, int kind);
+void doclist_add_recursive(doc_list_t *dl, ny_stmt_list *body,
+                           const char *prefix);
 void doclist_add_from_prog(doc_list_t *dl, program_t *prog);
 void add_builtin_docs(doc_list_t *docs);
 int doclist_print(const doc_list_t *dl, const char *name);
+int doclist_print_missing(const doc_list_t *dl, const char *name);
 void doclist_free(doc_list_t *dl);
 void repl_load_module_docs(doc_list_t *docs, const char *name);
 void repl_ensure_docs_for_query(doc_list_t *docs, const char *query);
@@ -137,8 +139,8 @@ char *repl_extract_persistent_source(const char *src);
 void repl_remove_def(const char *name);
 char *repl_assignment_target(const char *src);
 int is_input_complete(const char *src);
-void count_unclosed(const char *src, int *out_paren, int *out_brack, int *out_brace,
-                    int *out_in_str);
+void count_unclosed(const char *src, int *out_paren, int *out_brack,
+                    int *out_brace, int *out_in_str);
 void print_incomplete_hint(const char *src);
 int repl_calc_indent(const char *src);
 int is_repl_stmt(const char *src);
@@ -150,8 +152,9 @@ enum {
 };
 
 void repl_highlight_line(const char *line);
-void repl_highlight_line_ex(const char *line, int cursor_pos, const char *ml_prompt, int sel_start,
-                            int sel_end, int sel_mode);
+void repl_highlight_line_ex(const char *line, int cursor_pos,
+                            const char *ml_prompt, int sel_start, int sel_end,
+                            int sel_mode);
 void repl_redisplay(void);
 void repl_reset_redisplay(void);
 void repl_display_match_list(char **matches, int len, int max);
@@ -162,7 +165,8 @@ void repl_update_docs(doc_list_t *dl, const char *src);
 void repl_print_error_snippet(const char *src, int line, int col);
 
 char **nytrix_get_completions_for_prefix(const char *prefix, size_t *out_count);
-char **nytrix_get_completions_for_line(const char *line, int cursor, size_t *out_count);
+char **nytrix_get_completions_for_line(const char *line, int cursor,
+                                       size_t *out_count);
 void nytrix_free_completions(char **completions, size_t count);
 
 int repl_handle_command(const char *cmd);

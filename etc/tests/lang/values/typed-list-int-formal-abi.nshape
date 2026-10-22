@@ -1,0 +1,31 @@
+shape test_typed_list_int_formal_abi {
+  family "runtime/values"
+  generator "embedded"
+  features ["ny", "test", "native", "regression"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+fn divide(int numerator, int denominator) int {
+   numerator / denominator
+}
+
+fn checksum(list<int> values) int {
+   mut int total = 0
+   mut i = 0
+   while i < values.len {
+      total += divide(120000, values[i])
+      i += 1
+   }
+   total
+}
+
+def inferred = [1, 2, 3, 4, 5, 6, 7, 8]
+def list<int> explicit = [1, 2, 3, 4, 5, 6, 7, 8]
+assert(checksum(inferred) == 326142, "inferred typed-list element passed to int formal")
+assert(checksum(explicit) == 326142, "explicit typed-list element passed to int formal")
+print("ok typed-list int formal abi")
+NY
+}

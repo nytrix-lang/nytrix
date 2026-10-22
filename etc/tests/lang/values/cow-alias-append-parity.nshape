@@ -1,0 +1,41 @@
+shape test_cow_alias_append_parity {
+  family "runtime/values"
+  generator "embedded"
+  features ["ny", "test", "native", "regression"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+fn run() int {
+   mut xs = []
+   mut i = 0
+   while i < 32 {
+      xs = append(xs, (i * 37 + 11) & 0xFFFF)
+      i += 1
+   }
+   def alias = xs
+   mut acc = 0
+   mut j = 0
+   while j < 32 {
+      def v = xs[j]
+      alias[j] = (v * 7 + j) & 0xFFFF
+      acc = (acc + xs[j] + alias[j]) & 0xFFFFFFFF
+      if j == 15 {
+         xs = append(xs, 65535)
+         acc = acc + xs.len()
+      }
+      j += 1
+   }
+   assert(xs.len() == 33, "append updates the original binding")
+   assert(alias.len() == 32, "append preserves the detached alias length")
+   acc += xs[32]
+   acc
+}
+
+;; Sum((37*j+11) + (260*j+77), j=0..31), plus 33 and 65535.
+assert(run() == 215696, "copy-on-write alias values agree across routes")
+print("ok copy-on-write alias append parity")
+NY
+}

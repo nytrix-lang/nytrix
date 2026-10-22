@@ -1,19 +1,19 @@
 ;; Keywords: render camera view os ui
 ;; 3D Camera system for Nytrix.
 ;; References:
-;; - std.os.ui.render
-;; - std.os.ui.render.matrix
-module std.os.ui.render.camera(Camera, init, update, apply, get_yaw, get_pitch, get_pos, get_rot, get_fov, set_fov, set_speed, set_sens, set_smoothing, reset_motion, set_pitch_limits, target_from_angles, fit_camera_space_pose, fit_camera_space_pose_margin, mesh_fit_bounds, mesh_fit_center_span, mesh_set_target, mesh_set_camera, env_float_range, fit_camera_sane, fit_bounds_pose, angle_state, fit_scene_state, simulate_frame_state, camera_init, camera_update, camera_free_look, camera_free_move, camera_vectors)
-use std.core
-use std.core.common as common
-use std.core.str as str
-use std.math
-use std.math.float (is_nan, is_inf)
-use std.math.vector
-use std.math.matrix
-use std.os.ui.window.consts (KEY_W, KEY_S, KEY_A, KEY_D, KEY_E, KEY_Q, KEY_SPACE, KEY_CTRL, KEY_SHIFT, MOD_CONTROL)
-use std.os.ui.window as ui_window
-use std.os.ui.window.native as native
+;; - core.os.ui.render
+;; - core.os.ui.render.matrix
+module core.os.ui.render.camera(Camera, init, update, apply, get_yaw, get_pitch, get_pos, get_rot, get_fov, set_fov, set_speed, set_sens, set_smoothing, reset_motion, set_pitch_limits, target_from_angles, fit_camera_space_pose, fit_camera_space_pose_margin, mesh_fit_bounds, mesh_fit_center_span, mesh_set_target, mesh_set_camera, env_float_range, fit_camera_sane, fit_bounds_pose, angle_state, fit_scene_state, simulate_frame_state, camera_init, camera_update, camera_free_look, camera_free_move, camera_vectors)
+use core
+use core.common as common
+use core.str as str
+use core.math
+use core.math.float (is_nan, is_inf)
+use core.math.vector
+use core.math.matrix
+use core.os.ui.window.consts (KEY_W, KEY_S, KEY_A, KEY_D, KEY_E, KEY_Q, KEY_SPACE, KEY_CTRL, KEY_SHIFT, MOD_CONTROL)
+use core.os.ui.window as ui_window
+use core.os.ui.window.native as native
 
 fn _mesh_num3(any v, int idx, f64 fallback) f64 { float(v.get(idx, fallback)) }
 
@@ -463,7 +463,7 @@ fn init(list pos=[0,0,0], f64 yaw=0.0, f64 pitch=0.0) list {
 fn update(list cam, f64 dt, any win, bool skip_look=false, bool skip_move=false) list {
    "Updates camera state based on input and physics."
    def _ww = cam.get(20) def _wh = cam.get(21)
-   def _cx = _ww * 0.5 def _cy = _wh * 0.5
+   def f64 _cx = float(_ww) * 0.5 def f64 _cy = float(_wh) * 0.5
    mut target_yaw = cam.get(8)
    mut target_pitch = cam.get(9)
    if !skip_look {
@@ -741,5 +741,5 @@ fn camera_free_move(dict c, any win, f64 dt) dict {
    assert(float(sim.get("cam_z", 0.0)) < 0.0, "camera simulate")
    def c0 = camera_init([0.0, 0.0, 0.0], 0.0, 0.0, 90.0)
    assert(is_dict(c0) && camera_vectors(c0).len == 3, "camera helper")
-   print("✓ std.os.ui.render.camera self-test passed")
+   print("✓ core.os.ui.render.camera self-test passed")
 }

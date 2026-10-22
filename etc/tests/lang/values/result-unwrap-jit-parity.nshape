@@ -1,0 +1,24 @@
+shape result_unwrap_jit_parity {
+  family "runtime/values"
+  generator "embedded"
+  features [ny jit result payload parity]
+  template ny-test-case
+  flags_matrix "--native-backend=llvm --jit --jit-engine=mcjit; --native-only"
+  expect compile_and_run
+  timeout 25
+  source ny <<'NY'
+use core
+use core.math.parse.data.json as json
+
+def cfg = json.json_decode("{\"name\":\"ny\",\"ports\":[8080,8081]}")
+assert(cfg.get("name", "") == "ny", "JSON name payload")
+assert(cfg.get("ports", [])[0] == 8080, "JSON ports payload")
+print("JSON_OK")
+
+def r = ok(42)
+def e = err("missing")
+assert(is_ok(r) && is_err(e), "Result variants")
+assert(unwrap(r) == 42, "unwrap keeps the resolved scalar representation")
+print("RESULT_OK")
+NY
+}

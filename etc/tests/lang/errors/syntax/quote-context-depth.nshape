@@ -1,0 +1,142 @@
+shape quote_context_depth {
+  family "compiler-errors/syntax"
+  generator "error"
+  features ["error", "comptime", "quote", "hygiene", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "quote nesting exceeds 64 levels"
+  source ny <<'NY'
+def too_deep = quote {
+  quote {
+quote {
+quote {
+quote {
+quote {
+quote {
+quote {
+quote {
+quote {
+quote {
+quote {
+quote {
+quote {
+quote {
+quote {
+quote {
+quote {
+quote {
+quote {
+quote {
+quote {
+quote {
+quote {
+quote {
+quote {
+quote {
+quote {
+quote {
+quote {
+quote {
+quote {
+quote {
+quote {
+quote {
+quote {
+quote {
+quote {
+quote {
+quote {
+quote {
+quote {
+quote {
+quote {
+quote {
+quote {
+quote {
+quote {
+quote {
+quote {
+quote {
+quote {
+quote {
+quote {
+quote {
+quote {
+quote {
+quote {
+quote {
+quote {
+quote {
+quote {
+quote {
+quote {
+quote {
+    1
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+  }
+}
+NY
+}

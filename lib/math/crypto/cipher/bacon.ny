@@ -4,11 +4,11 @@
 ;; Reference:
 ;; - https://www.dcode.fr/bacon-cipher
 ;; References:
-;; - std.math.crypto.cipher
-;; - std.math.crypto.analysis
-module std.math.crypto.cipher.bacon(bacon_decode_ab)
-use std.core
-use std.core.str
+;; - core.math.crypto.cipher
+;; - core.math.crypto.analysis
+module core.math.crypto.cipher.bacon(bacon_decode_ab)
+use core
+use core.str
 
 fn bacon_decode_ab(str bits) str {
    "Decode a string like \"AABAA...\" into letters using the 24-letter Bacon table.

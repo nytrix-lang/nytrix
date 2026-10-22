@@ -4,12 +4,12 @@
 ;; - https://netlab.cs.ucla.edu/wiki/files/shannon1949.pdf
 ;; - https://cacr.uwaterloo.ca/hac/about/chap1.pdf
 ;; References:
-;; - std.math.crypto.cipher
-;; - std.math.crypto.analysis
-module std.math.crypto.cipher.vigenere(vigenere_encrypt, vigenere_decrypt, vigenere_crack, vigenere_guess_key_lengths, index_of_coincidence, kasiski_test)
-use std.core
-use std.core.str (Builder, builder_append, builder_append_byte, builder_to_str, builder_free)
-use std.math.crypto.error
+;; - core.math.crypto.cipher
+;; - core.math.crypto.analysis
+module core.math.crypto.cipher.vigenere(vigenere_encrypt, vigenere_decrypt, vigenere_crack, vigenere_guess_key_lengths, index_of_coincidence, kasiski_test)
+use core
+use core.str (Builder, builder_append, builder_append_byte, builder_to_str, builder_free)
+use core.math.crypto.error
 
 def _VG_ENG_FREQ = [82, 15, 28, 43, 127, 22, 20, 61, 70, 2, 8, 40, 24, 67, 75, 19, 1, 60, 63, 91, 28, 10, 24, 2, 20, 2]
 
@@ -438,5 +438,5 @@ fn vigenere_crack(str ciphertext) list {
    assert(vigenere_decrypt("lxfopv", "LEMON") == "attack", "lowercase ciphertext still decrypts to lowercase")
    def lens = vigenere_guess_key_lengths("LXFOPV EF RNHR", 8)
    assert(lens.len > 0, "key length guess returns candidates")
-   print("✓ std.math.crypto.cipher.vigenere self-test passed")
+   print("✓ core.math.crypto.cipher.vigenere self-test passed")
 }

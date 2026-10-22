@@ -1,0 +1,45 @@
+shape ownership_exclusive_borrow_disjoint_dictionary_keys {
+  family "language/ownership"
+  generator "regression"
+  features [ny ownership borrow exclusive noalias dictionary-key positive]
+  template ny-test-case
+  flags_matrix "--ownership-strict --native --run; --ownership-strict --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+fn disjoint_dictionary_keys() int {
+  mut dict values = {"first": 5, "second": 8}
+  def exclusive = &mut values["first"]
+  values["second"] = 9
+  def observed = exclusive
+  observed + 9
+}
+
+assert(disjoint_dictionary_keys() == 14,
+       "different literal dictionary keys are disjoint places")
+NY
+}
+
+shape ownership_exclusive_borrow_overlapping_dictionary_key {
+  family "compiler-errors/ownership"
+  generator "error"
+  features [error ownership borrow exclusive dictionary-key overlap negative]
+  template ny-compile-fail
+  flags_matrix "--ownership-strict --native --run; --ownership-strict --native-only"
+  expect compile_fail
+
+  source ny <<'NY'
+use core
+
+fn overlapping_dictionary_key() int {
+  mut dict values = {"first": 5, "second": 8}
+  def exclusive = &mut values["first"]
+  def conflicting = values["first"]
+  def observed = exclusive
+  conflicting + observed
+}
+
+overlapping_dictionary_key()
+NY
+}

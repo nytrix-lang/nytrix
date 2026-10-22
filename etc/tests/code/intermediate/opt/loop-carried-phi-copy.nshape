@@ -1,0 +1,40 @@
+shape opt_loop_carried_phi_copy_is_preserved {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle optcheck loop phi regalloc correctness]
+  template ny-test-case
+  flags_matrix "--native-only --native-backend=x86_64 --native-tier=baseline -O0 --native-result-oracle=0 --nyir-verify --no-progress --color=never; --native-only --native-backend=x86_64 --native-tier=opt -O3 --native-result-oracle=0 --nyir-verify --no-progress --color=never"
+  expect compile_and_run
+  source ny <<'NY'
+use core.tbuf
+
+fn branch_mix(int depth, int seed) int {
+  mut int x = seed + depth
+  mut int acc = 1
+  mut int i = 0
+  while i < depth {
+    if (x & 1) == 0 { acc = (acc * 3) + i + depth } else { acc = (acc * 5) - i + depth }
+    x = (x / 2) + acc + i
+    i += 1
+  }
+  acc
+}
+
+fn pointer_phi_swap() int {
+  mut ptr a = i64buf_new(1)
+  mut ptr b = i64buf_new(1)
+  i64buf_store(a, 0, 17)
+  i64buf_store(b, 0, 29)
+  mut int i = 0
+  while i < 1 {
+    def ptr tmp = a
+    a = b
+    b = tmp
+    i += 1
+  }
+  i64buf_load(a, 0) == 29 && i64buf_load(b, 0) == 17 ? 0 : 1
+}
+
+branch_mix(6, 3) == 8646 && pointer_phi_swap() == 0 ? 0 : 1
+NY
+}

@@ -1,0 +1,27 @@
+shape oracle_f64_reduction_phi_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features ["native", "x86_64", "f64", "regalloc", "phi", "loop", "convert"]
+  template ny-test-case
+  flags_matrix "--native-result-oracle=0 -O0; --native-result-oracle=0 -O2; --native-result-oracle=0 -O3"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+@noinline
+fn sum(int mode) int {
+  mut i = 0
+  mut acc = 0.0
+  while i < 10 {
+    acc = acc + float(i)
+    if i == 4 {
+      acc = acc + 1.0
+      def bump = float(mode)
+      if bump > 0.0 { acc = acc + 3.0 }
+    }
+    i += 1
+  }
+  int(acc)
+}
+if sum(0) == 46 && sum(1) == 49 { 0 } else { 1 }
+NY
+}

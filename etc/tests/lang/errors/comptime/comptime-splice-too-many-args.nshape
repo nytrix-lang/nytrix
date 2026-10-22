@@ -1,0 +1,15 @@
+shape comptime_splice_too_many_call_arguments {
+  family "compiler-errors/comptime"
+  generator "error"
+  features ["error", "comptime", "code", "splice", "arity", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "function call"
+  source ny <<'NY'
+fn splice_single(int value) int { value }
+comptime template call_single(args: code<expr>) {
+   fn generated_too_many_arguments() int { return splice_single(${args}) }
+}
+comptime emit call_single([quote{1}, quote{2}])
+NY
+}

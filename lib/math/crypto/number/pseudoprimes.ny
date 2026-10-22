@@ -3,11 +3,11 @@
 ;; Reference:
 ;; - "Prime and Prejudice: Primality Testing Under Adversarial Conditions"
 ;; References:
-;; - std.math.crypto.number
-;; - std.math.crypto
-module std.math.crypto.number.pseudoprimes(generate_pseudoprime)
-use std.math.nt
-use std.math.crypto.number.crt
+;; - core.math.crypto.number
+;; - core.math.crypto
+module core.math.crypto.number.pseudoprimes(generate_pseudoprime)
+use core.math.nt
+use core.math.crypto.number.crt
 
 fn _pp_index(list xs, any v) int {
    mut i = 0
@@ -122,5 +122,5 @@ fn generate_pseudoprime(list bases, any k2=nil, any k3=nil, int min_bit_length=0
       assert(r.len == 4, "generate_pseudoprime tuple size")
       assert(r.get(0) == r.get(1) * r.get(2) * r.get(3), "generate_pseudoprime product")
    }
-   print("✓ std.math.crypto.number.pseudoprimes self-test passed")
+   print("✓ core.math.crypto.number.pseudoprimes self-test passed")
 }

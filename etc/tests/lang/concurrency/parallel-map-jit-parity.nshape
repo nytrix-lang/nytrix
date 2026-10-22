@@ -1,0 +1,21 @@
+shape parallel_map_jit_parity {
+  family "runtime/concurrency"
+  generator "embedded"
+  features [ny jit parallel callback parity]
+  template ny-test-case
+  flags_matrix "--native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only; --native-backend=llvm --jit --jit-engine=orc --parallel=threads --threads=2 --parallel-min-work=1"
+  expect compile_and_run
+  timeout 120
+  source ny <<'NY'
+use core
+use core.os.parallel
+
+fn twice(int x) int { x * 2 }
+if parallel_mode() == "threads" {
+   assert(thread_budget(3, 2) == 2,
+          "conditional caps preserve the configured integer worker budget")
+}
+assert(parallel_map([1, 2, 3], twice) == [2, 4, 6],
+       "parallel_map returns in input order without hanging")
+NY
+}

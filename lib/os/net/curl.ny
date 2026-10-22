@@ -4,19 +4,20 @@
 ;; This lives in Ny stdlib (not the C runtime) to keep the runtime smaller while
 ;; still allowing HTTPS + redirects when libcurl is present.
 ;; References:
-;; - std.os.net
-;; - std.os
-module std.os.net.curl(curl_available, curl_request, curl_request_raw, curl_get, curl_fetch)
-use std.core
-use std.core.error
-use std.core.dict_mod as _d
-use std.core.str
-use std.os (temp_dir, file_read, file_remove)
-use std.os.clock (ticks)
-use std.os.path as ospath
-use std.os.net.context as netctx
-use std.os.net.http as http
-use std.os.ffi (dlsym, call0_ptr, call1, call1_ptr, call2_ptr, call3, cstr, cptr)
+;; - core.os.net
+;; - core.os
+module core.os.net.curl(curl_available, curl_request, curl_request_raw, curl_get, curl_fetch)
+use core
+use core.error
+use core.dict_mod as _d
+use core.str
+use core.os (temp_dir, file_read, file_remove)
+use core.os.clock (ticks)
+use core.os.path as ospath
+use core.os.net.context as netctx
+use core.os.net.http as http
+use core.os.ffi (dlsym, cstr, cptr)
+use core.os.ffi as calls
 
 #linux {
    #link "libcurl.so"
@@ -211,7 +212,7 @@ fn _opt_str_any(any options, list names, str fallback="") str {
 fn _curl_error(int code) str {
    if code == 0 { return "" }
    if _p_easy_strerror != 0 {
-      def p = call1_ptr(_p_easy_strerror, code)
+      def p = calls.pointer1(_p_easy_strerror, code)
       if p != 0 { return cstr_to_str(p) }
    }
    "curl error " + to_str(code)
@@ -288,7 +289,7 @@ fn _headers_slist(any headers) any {
       mut j = 0
       while j < headers.len {
          def line = to_str(headers.get(j))
-         if line.len > 0 && !_has_ctl(line) { sl0 = call2_ptr(_p_slist_append, sl0, cstr(line)) }
+         if line.len > 0 && !_has_ctl(line) { sl0 = calls.pointer2(_p_slist_append, sl0, cstr(line)) }
          j += 1
       }
       return sl0
@@ -303,7 +304,7 @@ fn _headers_slist(any headers) any {
       def v = pair.get(1)
       if is_str(k) && strip(k).len > 0 && !_has_ctl(k) {
          def vv = is_str(v) ? v : to_str(v)
-         if !_has_ctl(vv) { sl = call2_ptr(_p_slist_append, sl, cstr(strip(k) + ": " + vv)) }
+         if !_has_ctl(vv) { sl = calls.pointer2(_p_slist_append, sl, cstr(strip(k) + ": " + vv)) }
       }
       i += 1
    }
@@ -316,7 +317,7 @@ fn _string_slist(any values) any {
    mut i = 0
    while i < values.len {
       def v = to_str(values.get(i))
-      if v.len > 0 && !_has_ctl(v) { sl = call2_ptr(_p_slist_append, sl, cstr(v)) }
+      if v.len > 0 && !_has_ctl(v) { sl = calls.pointer2(_p_slist_append, sl, cstr(v)) }
       i += 1
    }
    sl
@@ -374,7 +375,7 @@ fn curl_request(any method, any url, any data=0, any headers=0, any timeout_sec=
    _curl_log(options, "info", m + " " + (is_str(url) ? url : to_str(url)))
    if !_load() { return _curl_result("", "", m, url, 1) }
    if !_curl_inited && _p_global_init {
-      call1(_p_global_init, _CURL_GLOBAL_ALL)
+      calls.any1(_p_global_init, _CURL_GLOBAL_ALL)
       _curl_inited = true
    }
    if !is_str(url) || url.len == 0 || _has_ctl(url) { return _curl_result("", "", m, url, 1) }
@@ -392,9 +393,9 @@ fn curl_request(any method, any url, any data=0, any headers=0, any timeout_sec=
    mut slist = 0
    mut resolve_list = 0
    defer {
-      if curl != 0 { call1(_p_easy_cleanup, curl) }
-      if slist != 0 && _p_slist_free_all != 0 { call1(_p_slist_free_all, slist) }
-      if resolve_list != 0 && _p_slist_free_all != 0 { call1(_p_slist_free_all, resolve_list) }
+      if curl != 0 { calls.any1(_p_easy_cleanup, curl) }
+      if slist != 0 && _p_slist_free_all != 0 { calls.any1(_p_slist_free_all, slist) }
+      if resolve_list != 0 && _p_slist_free_all != 0 { calls.any1(_p_slist_free_all, resolve_list) }
       if body_fp != 0 { _fclose(body_fp) }
       if header_fp != 0 { _fclose(header_fp) }
       if remove_tmp {
@@ -405,131 +406,131 @@ fn curl_request(any method, any url, any data=0, any headers=0, any timeout_sec=
    body_fp = _fopen(cptr(body_path), cptr("wb"))
    header_fp = _fopen(cptr(header_path), cptr("wb"))
    if body_fp == 0 || header_fp == 0 { return _curl_result("", "", m, url, 1) }
-   curl = call0_ptr(_p_easy_init)
+   curl = calls.pointer0(_p_easy_init)
    if curl == 0 { return _curl_result("", "", m, url, 1) }
    mut body = ""
    def has_body = !(data == nil || data == 0)
    if has_body { body = is_str(data) ? data : to_str(data) }
    def body_c = has_body ? cstr(body) : 0
    slist = _headers_slist(headers)
-   def ok_url  = call3(_p_easy_setopt, curl, _CURLOPT_URL, cstr(url)) == 0
-   def ok_wr   = call3(_p_easy_setopt, curl, _CURLOPT_WRITEDATA, body_fp) == 0
-   def ok_hdr  = call3(_p_easy_setopt, curl, _CURLOPT_HEADERDATA, header_fp) == 0
-   def ok_meth = call3(_p_easy_setopt, curl, _CURLOPT_CUSTOMREQUEST, cstr(m)) == 0
-   def ok_foll = call3(_p_easy_setopt, curl, _CURLOPT_FOLLOWLOCATION, _opt_bool(options, "follow", true) ? 1 : 0) == 0
-   def ok_maxr = call3(_p_easy_setopt, curl, _CURLOPT_MAXREDIRS, _opt_int(options, "max_redirects", 20, 0, 100)) == 0
-   def ok_fail = call3(_p_easy_setopt, curl, _CURLOPT_FAILONERROR, _opt_bool(options, "fail_on_error", false) ? 1 : 0) == 0
-   def ok_to   = call3(_p_easy_setopt, curl, _CURLOPT_TIMEOUT, timeout_v) == 0
-   def ok_ua   = call3(_p_easy_setopt, curl, _CURLOPT_USERAGENT, cstr(ua_v)) == 0
-   def ok_sig  = call3(_p_easy_setopt, curl, _CURLOPT_NOSIGNAL, 1) == 0
+   def ok_url  = calls.any3(_p_easy_setopt, curl, _CURLOPT_URL, cstr(url)) == 0
+   def ok_wr   = calls.any3(_p_easy_setopt, curl, _CURLOPT_WRITEDATA, body_fp) == 0
+   def ok_hdr  = calls.any3(_p_easy_setopt, curl, _CURLOPT_HEADERDATA, header_fp) == 0
+   def ok_meth = calls.any3(_p_easy_setopt, curl, _CURLOPT_CUSTOMREQUEST, cstr(m)) == 0
+   def ok_foll = calls.any3(_p_easy_setopt, curl, _CURLOPT_FOLLOWLOCATION, _opt_bool(options, "follow", true) ? 1 : 0) == 0
+   def ok_maxr = calls.any3(_p_easy_setopt, curl, _CURLOPT_MAXREDIRS, _opt_int(options, "max_redirects", 20, 0, 100)) == 0
+   def ok_fail = calls.any3(_p_easy_setopt, curl, _CURLOPT_FAILONERROR, _opt_bool(options, "fail_on_error", false) ? 1 : 0) == 0
+   def ok_to   = calls.any3(_p_easy_setopt, curl, _CURLOPT_TIMEOUT, timeout_v) == 0
+   def ok_ua   = calls.any3(_p_easy_setopt, curl, _CURLOPT_USERAGENT, cstr(ua_v)) == 0
+   def ok_sig  = calls.any3(_p_easy_setopt, curl, _CURLOPT_NOSIGNAL, 1) == 0
    mut ok_extra = true
    def timeout_ms = _opt_int_any(options, ["timeout_ms", "read_timeout_ms"], 0, 0, 2147483647)
-   if timeout_ms > 0 { ok_extra = ok_extra && call3(_p_easy_setopt, curl, _CURLOPT_TIMEOUT_MS, timeout_ms) == 0 }
+   if timeout_ms > 0 { ok_extra = ok_extra && calls.any3(_p_easy_setopt, curl, _CURLOPT_TIMEOUT_MS, timeout_ms) == 0 }
    def connect_timeout = _opt_int_any(options, ["connect_timeout", "connect_timeout_sec"], 0, 0, 3600)
-   if connect_timeout > 0 { ok_extra = ok_extra && call3(_p_easy_setopt, curl, _CURLOPT_CONNECTTIMEOUT, connect_timeout) == 0 }
+   if connect_timeout > 0 { ok_extra = ok_extra && calls.any3(_p_easy_setopt, curl, _CURLOPT_CONNECTTIMEOUT, connect_timeout) == 0 }
    def connect_timeout_ms = _opt_int(options, "connect_timeout_ms", 0, 0, 2147483647)
-   if connect_timeout_ms > 0 { ok_extra = ok_extra && call3(_p_easy_setopt, curl, _CURLOPT_CONNECTTIMEOUT_MS, connect_timeout_ms) == 0 }
-   if m == "HEAD" || _opt_bool(options, "nobody", false) { ok_extra = ok_extra && call3(_p_easy_setopt, curl, _CURLOPT_NOBODY, 1) == 0 }
-   if m == "GET" && _opt_bool(options, "force_get", false) { ok_extra = ok_extra && call3(_p_easy_setopt, curl, _CURLOPT_HTTPGET, 1) == 0 }
-   if m == "POST" && _opt_bool(options, "force_post", false) { ok_extra = ok_extra && call3(_p_easy_setopt, curl, _CURLOPT_POST, 1) == 0 }
+   if connect_timeout_ms > 0 { ok_extra = ok_extra && calls.any3(_p_easy_setopt, curl, _CURLOPT_CONNECTTIMEOUT_MS, connect_timeout_ms) == 0 }
+   if m == "HEAD" || _opt_bool(options, "nobody", false) { ok_extra = ok_extra && calls.any3(_p_easy_setopt, curl, _CURLOPT_NOBODY, 1) == 0 }
+   if m == "GET" && _opt_bool(options, "force_get", false) { ok_extra = ok_extra && calls.any3(_p_easy_setopt, curl, _CURLOPT_HTTPGET, 1) == 0 }
+   if m == "POST" && _opt_bool(options, "force_post", false) { ok_extra = ok_extra && calls.any3(_p_easy_setopt, curl, _CURLOPT_POST, 1) == 0 }
    def referer = _opt_str_any(options, ["referer", "referrer"], "")
-   if referer.len > 0 { ok_extra = ok_extra && call3(_p_easy_setopt, curl, _CURLOPT_REFERER, cstr(referer)) == 0 }
-   if _opt_bool(options, "auto_referer", false) { ok_extra = ok_extra && call3(_p_easy_setopt, curl, _CURLOPT_AUTOREFERER, 1) == 0 }
+   if referer.len > 0 { ok_extra = ok_extra && calls.any3(_p_easy_setopt, curl, _CURLOPT_REFERER, cstr(referer)) == 0 }
+   if _opt_bool(options, "auto_referer", false) { ok_extra = ok_extra && calls.any3(_p_easy_setopt, curl, _CURLOPT_AUTOREFERER, 1) == 0 }
    if _opt_has(options, "accept_encoding") {
-      ok_extra = ok_extra && call3(_p_easy_setopt, curl, _CURLOPT_ACCEPT_ENCODING, cstr(_opt_str(options, "accept_encoding", ""))) == 0
+      ok_extra = ok_extra && calls.any3(_p_easy_setopt, curl, _CURLOPT_ACCEPT_ENCODING, cstr(_opt_str(options, "accept_encoding", ""))) == 0
    } elif _opt_bool(options, "decompress", false) {
-      ok_extra = ok_extra && call3(_p_easy_setopt, curl, _CURLOPT_ACCEPT_ENCODING, cstr("")) == 0
+      ok_extra = ok_extra && calls.any3(_p_easy_setopt, curl, _CURLOPT_ACCEPT_ENCODING, cstr("")) == 0
    }
    def userpwd = _opt_str(options, "userpwd", "")
-   if userpwd.len > 0 { ok_extra = ok_extra && call3(_p_easy_setopt, curl, _CURLOPT_USERPWD, cstr(userpwd)) == 0 }
+   if userpwd.len > 0 { ok_extra = ok_extra && calls.any3(_p_easy_setopt, curl, _CURLOPT_USERPWD, cstr(userpwd)) == 0 }
    def username = _opt_str_any(options, ["username", "user"], "")
-   if username.len > 0 { ok_extra = ok_extra && call3(_p_easy_setopt, curl, _CURLOPT_USERNAME, cstr(username)) == 0 }
+   if username.len > 0 { ok_extra = ok_extra && calls.any3(_p_easy_setopt, curl, _CURLOPT_USERNAME, cstr(username)) == 0 }
    def password = _opt_str(options, "password", "")
-   if password.len > 0 { ok_extra = ok_extra && call3(_p_easy_setopt, curl, _CURLOPT_PASSWORD, cstr(password)) == 0 }
+   if password.len > 0 { ok_extra = ok_extra && calls.any3(_p_easy_setopt, curl, _CURLOPT_PASSWORD, cstr(password)) == 0 }
    if _opt_has(options, "auth") || _opt_has(options, "auth_type") || userpwd.len > 0 || username.len > 0 {
-      ok_extra = ok_extra && call3(_p_easy_setopt, curl, _CURLOPT_HTTPAUTH, _curl_auth_mask(options.get("auth_type", options.get("auth", "basic")), 1)) == 0
+      ok_extra = ok_extra && calls.any3(_p_easy_setopt, curl, _CURLOPT_HTTPAUTH, _curl_auth_mask(options.get("auth_type", options.get("auth", "basic")), 1)) == 0
    }
    def proxy_userpwd = _opt_str(options, "proxy_userpwd", "")
-   if proxy_userpwd.len > 0 { ok_extra = ok_extra && call3(_p_easy_setopt, curl, _CURLOPT_PROXYUSERPWD, cstr(proxy_userpwd)) == 0 }
+   if proxy_userpwd.len > 0 { ok_extra = ok_extra && calls.any3(_p_easy_setopt, curl, _CURLOPT_PROXYUSERPWD, cstr(proxy_userpwd)) == 0 }
    def proxy_username = _opt_str_any(options, ["proxy_username", "proxy_user"], "")
-   if proxy_username.len > 0 { ok_extra = ok_extra && call3(_p_easy_setopt, curl, _CURLOPT_PROXYUSERNAME, cstr(proxy_username)) == 0 }
+   if proxy_username.len > 0 { ok_extra = ok_extra && calls.any3(_p_easy_setopt, curl, _CURLOPT_PROXYUSERNAME, cstr(proxy_username)) == 0 }
    def proxy_password = _opt_str(options, "proxy_password", "")
-   if proxy_password.len > 0 { ok_extra = ok_extra && call3(_p_easy_setopt, curl, _CURLOPT_PROXYPASSWORD, cstr(proxy_password)) == 0 }
+   if proxy_password.len > 0 { ok_extra = ok_extra && calls.any3(_p_easy_setopt, curl, _CURLOPT_PROXYPASSWORD, cstr(proxy_password)) == 0 }
    if _opt_has(options, "proxy_auth") || proxy_userpwd.len > 0 || proxy_username.len > 0 {
-      ok_extra = ok_extra && call3(_p_easy_setopt, curl, _CURLOPT_PROXYAUTH, _curl_auth_mask(options.get("proxy_auth", "basic"), 1)) == 0
+      ok_extra = ok_extra && calls.any3(_p_easy_setopt, curl, _CURLOPT_PROXYAUTH, _curl_auth_mask(options.get("proxy_auth", "basic"), 1)) == 0
    }
    def verify = _opt_bool(options, "verify", true)
-   ok_extra = ok_extra && call3(_p_easy_setopt, curl, _CURLOPT_SSL_VERIFYPEER, verify ? 1 : 0) == 0
-   ok_extra = ok_extra && call3(_p_easy_setopt, curl, _CURLOPT_SSL_VERIFYHOST, verify ? 2 : 0) == 0
+   ok_extra = ok_extra && calls.any3(_p_easy_setopt, curl, _CURLOPT_SSL_VERIFYPEER, verify ? 1 : 0) == 0
+   ok_extra = ok_extra && calls.any3(_p_easy_setopt, curl, _CURLOPT_SSL_VERIFYHOST, verify ? 2 : 0) == 0
    def ca = _opt_str_any(options, ["ca", "ca_info", "cainfo"], "")
-   if ca.len > 0 { ok_extra = ok_extra && call3(_p_easy_setopt, curl, _CURLOPT_CAINFO, cstr(ca)) == 0 }
+   if ca.len > 0 { ok_extra = ok_extra && calls.any3(_p_easy_setopt, curl, _CURLOPT_CAINFO, cstr(ca)) == 0 }
    def cert = _opt_str_any(options, ["cert", "ssl_cert"], "")
-   if cert.len > 0 { ok_extra = ok_extra && call3(_p_easy_setopt, curl, _CURLOPT_SSLCERT, cstr(cert)) == 0 }
+   if cert.len > 0 { ok_extra = ok_extra && calls.any3(_p_easy_setopt, curl, _CURLOPT_SSLCERT, cstr(cert)) == 0 }
    def key = _opt_str_any(options, ["key", "ssl_key"], "")
-   if key.len > 0 { ok_extra = ok_extra && call3(_p_easy_setopt, curl, _CURLOPT_SSLKEY, cstr(key)) == 0 }
+   if key.len > 0 { ok_extra = ok_extra && calls.any3(_p_easy_setopt, curl, _CURLOPT_SSLKEY, cstr(key)) == 0 }
    def cert_type = _opt_str(options, "cert_type", "")
-   if cert_type.len > 0 { ok_extra = ok_extra && call3(_p_easy_setopt, curl, _CURLOPT_SSLCERTTYPE, cstr(cert_type)) == 0 }
+   if cert_type.len > 0 { ok_extra = ok_extra && calls.any3(_p_easy_setopt, curl, _CURLOPT_SSLCERTTYPE, cstr(cert_type)) == 0 }
    def key_type = _opt_str(options, "key_type", "")
-   if key_type.len > 0 { ok_extra = ok_extra && call3(_p_easy_setopt, curl, _CURLOPT_SSLKEYTYPE, cstr(key_type)) == 0 }
+   if key_type.len > 0 { ok_extra = ok_extra && calls.any3(_p_easy_setopt, curl, _CURLOPT_SSLKEYTYPE, cstr(key_type)) == 0 }
    if _opt_has(options, "http_version") {
-      ok_extra = ok_extra && call3(_p_easy_setopt, curl, _CURLOPT_HTTP_VERSION, _curl_http_version(options.get("http_version"))) == 0
+      ok_extra = ok_extra && calls.any3(_p_easy_setopt, curl, _CURLOPT_HTTP_VERSION, _curl_http_version(options.get("http_version"))) == 0
    }
    if _opt_has(options, "ip_resolve") {
-      ok_extra = ok_extra && call3(_p_easy_setopt, curl, _CURLOPT_IPRESOLVE, _curl_ip_resolve(options.get("ip_resolve"))) == 0
+      ok_extra = ok_extra && calls.any3(_p_easy_setopt, curl, _CURLOPT_IPRESOLVE, _curl_ip_resolve(options.get("ip_resolve"))) == 0
    }
    def iface = _opt_str_any(options, ["interface", "bind_interface"], "")
-   if iface.len > 0 { ok_extra = ok_extra && call3(_p_easy_setopt, curl, _CURLOPT_INTERFACE, cstr(iface)) == 0 }
+   if iface.len > 0 { ok_extra = ok_extra && calls.any3(_p_easy_setopt, curl, _CURLOPT_INTERFACE, cstr(iface)) == 0 }
    def local_port = _opt_int(options, "local_port", 0, 0, 65535)
-   if local_port > 0 { ok_extra = ok_extra && call3(_p_easy_setopt, curl, _CURLOPT_LOCALPORT, local_port) == 0 }
+   if local_port > 0 { ok_extra = ok_extra && calls.any3(_p_easy_setopt, curl, _CURLOPT_LOCALPORT, local_port) == 0 }
    def local_range = _opt_int(options, "local_port_range", 0, 0, 65535)
-   if local_range > 0 { ok_extra = ok_extra && call3(_p_easy_setopt, curl, _CURLOPT_LOCALPORTRANGE, local_range) == 0 }
+   if local_range > 0 { ok_extra = ok_extra && calls.any3(_p_easy_setopt, curl, _CURLOPT_LOCALPORTRANGE, local_range) == 0 }
    def range_v = _opt_str(options, "range", "")
-   if range_v.len > 0 { ok_extra = ok_extra && call3(_p_easy_setopt, curl, _CURLOPT_RANGE, cstr(range_v)) == 0 }
+   if range_v.len > 0 { ok_extra = ok_extra && calls.any3(_p_easy_setopt, curl, _CURLOPT_RANGE, cstr(range_v)) == 0 }
    def resume_from = _opt_int(options, "resume_from", -1, -1, 2147483647)
-   if resume_from >= 0 { ok_extra = ok_extra && call3(_p_easy_setopt, curl, _CURLOPT_RESUME_FROM, resume_from) == 0 }
+   if resume_from >= 0 { ok_extra = ok_extra && calls.any3(_p_easy_setopt, curl, _CURLOPT_RESUME_FROM, resume_from) == 0 }
    def max_filesize = _opt_int(options, "max_filesize", -1, -1, 2147483647)
-   if max_filesize >= 0 { ok_extra = ok_extra && call3(_p_easy_setopt, curl, _CURLOPT_MAXFILESIZE, max_filesize) == 0 }
+   if max_filesize >= 0 { ok_extra = ok_extra && calls.any3(_p_easy_setopt, curl, _CURLOPT_MAXFILESIZE, max_filesize) == 0 }
    def low_speed_limit = _opt_int(options, "low_speed_limit", 0, 0, 2147483647)
-   if low_speed_limit > 0 { ok_extra = ok_extra && call3(_p_easy_setopt, curl, _CURLOPT_LOW_SPEED_LIMIT, low_speed_limit) == 0 }
+   if low_speed_limit > 0 { ok_extra = ok_extra && calls.any3(_p_easy_setopt, curl, _CURLOPT_LOW_SPEED_LIMIT, low_speed_limit) == 0 }
    def low_speed_time = _opt_int(options, "low_speed_time", 0, 0, 2147483647)
-   if low_speed_time > 0 { ok_extra = ok_extra && call3(_p_easy_setopt, curl, _CURLOPT_LOW_SPEED_TIME, low_speed_time) == 0 }
-   if _opt_bool(options, "tcp_keepalive", false) { ok_extra = ok_extra && call3(_p_easy_setopt, curl, _CURLOPT_TCP_KEEPALIVE, 1) == 0 }
+   if low_speed_time > 0 { ok_extra = ok_extra && calls.any3(_p_easy_setopt, curl, _CURLOPT_LOW_SPEED_TIME, low_speed_time) == 0 }
+   if _opt_bool(options, "tcp_keepalive", false) { ok_extra = ok_extra && calls.any3(_p_easy_setopt, curl, _CURLOPT_TCP_KEEPALIVE, 1) == 0 }
    def unix_socket = _opt_str_any(options, ["unix_socket", "unix_socket_path"], "")
-   if unix_socket.len > 0 { ok_extra = ok_extra && call3(_p_easy_setopt, curl, _CURLOPT_UNIX_SOCKET_PATH, cstr(unix_socket)) == 0 }
+   if unix_socket.len > 0 { ok_extra = ok_extra && calls.any3(_p_easy_setopt, curl, _CURLOPT_UNIX_SOCKET_PATH, cstr(unix_socket)) == 0 }
    if _opt_has(options, "resolve") {
       resolve_list = _string_slist(options.get("resolve"))
-      if resolve_list != 0 { ok_extra = ok_extra && call3(_p_easy_setopt, curl, _CURLOPT_RESOLVE, resolve_list) == 0 }
+      if resolve_list != 0 { ok_extra = ok_extra && calls.any3(_p_easy_setopt, curl, _CURLOPT_RESOLVE, resolve_list) == 0 }
    }
    def dns = _opt_str_any(options, ["dns_servers", "dns"], "")
-   if dns.len > 0 { ok_extra = ok_extra && call3(_p_easy_setopt, curl, _CURLOPT_DNS_SERVERS, cstr(dns)) == 0 }
+   if dns.len > 0 { ok_extra = ok_extra && calls.any3(_p_easy_setopt, curl, _CURLOPT_DNS_SERVERS, cstr(dns)) == 0 }
    if _opt_has(options, "post_redirects") {
-      ok_extra = ok_extra && call3(_p_easy_setopt, curl, _CURLOPT_POSTREDIR, _curl_postredir(options.get("post_redirects"))) == 0
+      ok_extra = ok_extra && calls.any3(_p_easy_setopt, curl, _CURLOPT_POSTREDIR, _curl_postredir(options.get("post_redirects"))) == 0
    }
-   if _opt_bool(options, "verbose", false) { ok_extra = ok_extra && call3(_p_easy_setopt, curl, _CURLOPT_VERBOSE, 1) == 0 }
+   if _opt_bool(options, "verbose", false) { ok_extra = ok_extra && calls.any3(_p_easy_setopt, curl, _CURLOPT_VERBOSE, 1) == 0 }
    if _log_enabled(options, "debug") {
       _curl_log(options, "debug", "timeout=" + to_str(timeout_v) + "s connect_timeout_ms=" + to_str(connect_timeout_ms) + " follow=" + to_str(_opt_bool(options, "follow", true)) + " redirects=" + to_str(_opt_int(options, "max_redirects", 20, 0, 100)))
    }
    mut ok_body = true
    if has_body {
-      ok_body = (call3(_p_easy_setopt, curl, _CURLOPT_POSTFIELDS, body_c) == 0) &&
-      (call3(_p_easy_setopt, curl, _CURLOPT_POSTFIELDSIZE, body.len) == 0)
+      ok_body = (calls.any3(_p_easy_setopt, curl, _CURLOPT_POSTFIELDS, body_c) == 0) &&
+      (calls.any3(_p_easy_setopt, curl, _CURLOPT_POSTFIELDSIZE, body.len) == 0)
    }
    mut ok_head = true
-   if slist != 0 { ok_head = call3(_p_easy_setopt, curl, _CURLOPT_HTTPHEADER, slist) == 0 }
+   if slist != 0 { ok_head = calls.any3(_p_easy_setopt, curl, _CURLOPT_HTTPHEADER, slist) == 0 }
    def cookie = _opt_str(options, "cookie", "")
    mut ok_cookie = true
-   if cookie.len > 0 { ok_cookie = call3(_p_easy_setopt, curl, _CURLOPT_COOKIE, cstr(cookie)) == 0 }
+   if cookie.len > 0 { ok_cookie = calls.any3(_p_easy_setopt, curl, _CURLOPT_COOKIE, cstr(cookie)) == 0 }
    def cookie_file = _opt_str(options, "cookie_file", "")
-   if cookie_file.len > 0 { ok_cookie = ok_cookie && call3(_p_easy_setopt, curl, _CURLOPT_COOKIEFILE, cstr(cookie_file)) == 0 }
+   if cookie_file.len > 0 { ok_cookie = ok_cookie && calls.any3(_p_easy_setopt, curl, _CURLOPT_COOKIEFILE, cstr(cookie_file)) == 0 }
    def cookie_jar = _opt_str(options, "cookie_jar", "")
-   if cookie_jar.len > 0 { ok_cookie = ok_cookie && call3(_p_easy_setopt, curl, _CURLOPT_COOKIEJAR, cstr(cookie_jar)) == 0 }
+   if cookie_jar.len > 0 { ok_cookie = ok_cookie && calls.any3(_p_easy_setopt, curl, _CURLOPT_COOKIEJAR, cstr(cookie_jar)) == 0 }
    def proxy = _opt_str(options, "proxy", "")
    mut ok_proxy = true
-   if proxy.len > 0 { ok_proxy = call3(_p_easy_setopt, curl, _CURLOPT_PROXY, cstr(proxy)) == 0 }
+   if proxy.len > 0 { ok_proxy = calls.any3(_p_easy_setopt, curl, _CURLOPT_PROXY, cstr(proxy)) == 0 }
    if !(ok_url && ok_wr && ok_hdr && ok_meth && ok_foll && ok_maxr && ok_fail && ok_to && ok_ua && ok_sig && ok_extra && ok_body && ok_head && ok_cookie && ok_proxy) {
       return _curl_result("", "", m, url, 1)
    }
-   def res = call1(_p_easy_perform, curl)
+   def res = calls.any1(_p_easy_perform, curl)
    _fclose(body_fp)
    body_fp = 0
    _fclose(header_fp)

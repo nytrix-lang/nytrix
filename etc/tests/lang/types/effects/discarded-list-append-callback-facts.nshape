@@ -1,0 +1,40 @@
+shape discarded_list_append_preserves_callback_rows {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "callback", "capture", "container", "append", "positive"]
+  template ny-test-case
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+@effects(io)
+fn print_answer() int {
+  print("answer through list\n")
+  42
+}
+
+@effects(none)
+fn pure_answer() int { 7 }
+
+@effects(alloc, read, write, e)
+fn make_container_callback(fnptr callback, int index) fnptr {
+  def callbacks = [callback, pure_answer]
+  def alias = callbacks
+  alias.append(pure_answer)
+  return fn() { callbacks[index]() }
+}
+
+@effects(e)
+fn run_eff(fnptr callback) int { callback() }
+
+@effects(alloc, io, read, write)
+fn invoke_container_callback() int {
+  run_eff(make_container_callback(print_answer, 0))
+}
+
+assert(invoke_container_callback() == 42,
+       "discarding append leaves the original callback list unchanged")
+0
+NY
+}

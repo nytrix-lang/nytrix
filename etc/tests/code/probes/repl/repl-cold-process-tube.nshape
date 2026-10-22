@@ -1,0 +1,23 @@
+shape repl_cold_process_tube {
+  family "probe-suite"
+  generator "embedded"
+  features ["ny", "test", "stdlib", "process-tube"]
+  template ny-test-case
+  flags "--native-only"
+  timeout 30
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.net as net
+
+if env("NYTRIX_TEST_UNIX") == "1" {
+   net.context({"log_level": "quiet", "timeout_ms": 1000, "color": false})
+   def io = net.process("/bin/cat", [])
+   net.sendline(io, "ny")
+   def out = net.recvuntil(io, "ny\n")
+   net.close(io)
+   assert_eq(out, "ny\n", "process tube")
+}
+print("REPL-PROCESS-TUBE-OK")
+NY
+}

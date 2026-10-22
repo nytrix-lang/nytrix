@@ -1,0 +1,14 @@
+shape test_repl_persistent_state {
+  family "repl"
+  generator "embedded"
+  features ["ny", "test", "repl", "incremental", "state"]
+  template ny-test-case
+  expect compile_and_run
+  repl_expect "REPL-PERSISTENT-STATE-OK"
+  repl_commands "fn add_later(int n) int { n + 2 }\nstate_count = add_later(state_count)\nstate_items = state_items.append(state_count)\nassert(state_count == 42, \"bindings and functions persist across REPL submissions\")\nassert(state_items[0] == 7 && state_items[1] == 42, \"aggregate mutation persists across REPL submissions\")\nprint(\"REPL-PERSISTENT-STATE-OK\")"
+  source ny <<'NY'
+mut int state_count = 40
+mut state_items = [7]
+fn next_count(int n) int { n + 2 }
+NY
+}

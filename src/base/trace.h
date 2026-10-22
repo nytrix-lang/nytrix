@@ -14,11 +14,11 @@
  *   - the specific variable is authoritative when set: any value other than
  *     "0" enables that single trace, "0" disables it even under the master
  *     switch;
- *   - otherwise the master switches apply: NY_TRACE_ALL=1 enables every known
- *     trace, and NYTRIX_TRACE=all additionally enables the runtime trace
- *     family triggered by NYTRIX_TRACE=1.
+ *   - otherwise the master switch applies: NYTRIX_TRACE=all (the value the
+ *     -trace option family centers on) enables every known trace, and the
+ *     NY_TRACE_DEEP/NYTRIX_TRACE_DEEP deep-trace variables do the same.
  *
- * So a single `NY_TRACE_ALL=1 ny file.ny` reproduces the full verbose
+ * So a single `NYTRIX_TRACE=all ny file.ny` reproduces the full verbose
  * diagnostics of a dozen hand-set variables, with per-tag "=0" still available
  * to silence one noisy stream.  Use ny_trace_summary() to emit a compact,
  * machine-friendly text table of the effective state that can be pasted into

@@ -1,0 +1,14 @@
+shape native_core_shorthand {
+  family "runtime/modules/use"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  flags_matrix "--native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+assert(core.len([1, 2, 3]) == 3,
+       "qualified core lookup uses the registered core module")
+NY
+}

@@ -1,0 +1,26 @@
+shape typed_buffer_mutator_results {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "codegen"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-only; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_and_run
+  source ny <<'NY'
+fn append_dynamic(list values, any item) list {
+   values = values.append(item)
+   values
+}
+
+fn update_dynamic(list values, any item) list {
+   values = values.set(0, item)
+   values
+}
+
+mut values = append_dynamic([1], "two")
+assert(values.len == 2 && values[0] == 1 && values[1] == "two",
+       "append returns a typed-buffer value after a dynamic append")
+values = update_dynamic(values, "first")
+assert(values[0] == "first" && values[1] == "two",
+       "set returns a typed-buffer value after a dynamic store")
+NY
+}

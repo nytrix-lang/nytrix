@@ -4,16 +4,16 @@
 ;; - https://crypto.stanford.edu/~dabo/pubs/abstracts/lowRSAexp.html
 ;; Uses LLL and bivariate Coppersmith-style resultant elimination.
 ;; References:
-;; - std.math.crypto.rsa
-;; - std.math.crypto
-module std.math.crypto.rsa.boneh_durfee(boneh_durfee_attack)
-use std.core
-use std.math.nt
-use std.math (pow)
-use std.math.matrix (Matrix, _matrix_cols, _matrix_data, _matrix_get, _matrix_rows, _matrix_set)
-use std.math.crypto.lattice.lll
-use std.math.crypto.lattice.coppersmith
-use std.math.crypto.poly
+;; - core.math.crypto.rsa
+;; - core.math.crypto
+module core.math.crypto.rsa.boneh_durfee(boneh_durfee_attack)
+use core
+use core.math.nt
+use core.math (pow)
+use core.math.matrix (Matrix, _matrix_cols, _matrix_data, _matrix_get, _matrix_rows, _matrix_set)
+use core.math.crypto.lattice.lll
+use core.math.crypto.lattice.coppersmith
+use core.math.crypto.poly
 
 fn boneh_durfee_attack(any e, any n, f64 delta=0.292, int m=3, any t=nil) any {
    "Boneh-Durfee attack on RSA with small private exponent d < n^0.292.

@@ -3,10 +3,10 @@
 ;; Reference:
 ;; - https://www.rfc-editor.org/rfc/rfc6229
 ;; References:
-;; - std.math.crypto.block.stream
-;; - std.math.crypto
-module std.math.crypto.block.stream.rc4(rc4_ksa, rc4_prga, rc4_decrypt_known_key)
-use std.core
+;; - core.math.crypto.block.stream
+;; - core.math.crypto
+module core.math.crypto.block.stream.rc4(rc4_ksa, rc4_prga, rc4_decrypt_known_key)
+use core
 
 fn rc4_ksa(list key) list {
    "RC4 Key Scheduling Algorithm(KSA).
@@ -74,7 +74,7 @@ fn rc4_decrypt_known_key(list ct, list key) list {
       __store_item_fast(s, i, sj)
       __store_item_fast(s, j, si)
       def idx = (si + sj) % 256
-      __store_item_fast(plaintext, k, __load_item_fast(ct, k) ^^ __load_item_fast(s, idx))
+      __store_item_fast(plaintext, k, __load_item_fast(ct, k) ^ __load_item_fast(s, idx))
       k += 1
    }
    plaintext

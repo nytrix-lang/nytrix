@@ -1,0 +1,75 @@
+shape parse_code_rejects_malformed_source {
+  family "compiler-errors/comptime"
+  generator "error"
+  features ["error", "comptime", "parse-code", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "compile-time parse_code source has syntax errors"
+  source ny <<'NY'
+comptime template insert(declarations) {
+   ${declarations}
+}
+comptime emit insert(parse_code("fn () int { return 1 }"))
+NY
+}
+
+shape parse_code_rejects_empty_source {
+  family "compiler-errors/comptime"
+  generator "error"
+  features ["error", "comptime", "parse-code", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "compile-time parse_code source must contain declarations"
+  source ny <<'NY'
+comptime template insert(declarations) {
+   ${declarations}
+}
+comptime emit insert(parse_code(""))
+NY
+}
+
+shape parse_code_rejects_executable_top_level {
+  family "compiler-errors/comptime"
+  generator "error"
+  features ["error", "comptime", "parse-code", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "compile-time parse_code accepts declaration-only source"
+  source ny <<'NY'
+comptime template insert(declarations) {
+   ${declarations}
+}
+comptime emit insert(parse_code("print(1)"))
+NY
+}
+
+shape parse_code_rejects_top_level_assignment {
+  family "compiler-errors/comptime"
+  generator "error"
+  features ["error", "comptime", "parse-code", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "compile-time parse_code accepts declaration-only source"
+  source ny <<'NY'
+comptime template insert(declarations) {
+   ${declarations}
+}
+comptime emit insert(parse_code("answer = 42"))
+NY
+}
+
+shape parse_code_requires_literal_source {
+  family "compiler-errors/comptime"
+  generator "error"
+  features ["error", "comptime", "parse-code", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "compile-time parse_code expects a string literal"
+  source ny <<'NY'
+def source = "fn generated() int { return 1 }"
+comptime template insert(declarations) {
+   ${declarations}
+}
+comptime emit insert(parse_code(source))
+NY
+}

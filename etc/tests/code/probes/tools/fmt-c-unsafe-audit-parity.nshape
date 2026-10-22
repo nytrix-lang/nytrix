@@ -1,0 +1,67 @@
+shape fmt_c_unsafe_audit_parity {
+  family "probe/tools"
+  generator "embedded"
+  features ["formatter", "c-audit", "unsafe", "parity"]
+  template ny-test-case
+  flags "--native-only"
+  timeout 180
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.subprocess (run_capture)
+use core.str as str
+def ny = env("NYTRIX_NY_FULL_BIN")
+def fmt = env("NYTRIX_TEST_FMT_BIN")
+def cmake = env("NYTRIX_CMAKE_COMMAND")
+def dir = temp_dir() + "/fmt-c-unsafe-" + to_str(pid())
+def made = run_capture([cmake, "-E", "make_directory", dir], [], nil, false)
+assert(made.get("code", 127) == 0, "create C unsafe audit directory")
+def source = dir + "/unsafe.c"
+def header = dir + "/unsafe.h"
+assert(is_ok(file_write(source,
+   "void copy(char *dst, const char *src) {\n  strcpy(dst, src);\n" +
+   "  // strcat(dst, src);\n  const char *text = \"sprintf(dst, src)\";\n" +
+   "  /* gets(src); */\n  my_strcpy(dst, src);\n" +
+   "  object.strcpy(dst, src);\n  vsprintf(dst, src, 0);\n" +
+   "  if (should_copy);\n  while (ready) ;\n" +
+   "  for (int i = 0; i < 1; ++i);\n" +
+   "  if (has_body) { copy(dst, src); }\n  if (1) { copy(dst, src); }\n" +
+   "  if (state == 1) { copy(dst, src); }\n" +
+   "  else if (state == 1) { copy(dst, src); }\n" +
+   "  if (ready && ready) { copy(dst, src); }\n" +
+   "  if (state == state) { copy(dst, src); }\n" +
+   "  if (state == 1 && state == 2) { copy(dst, src); }\n" +
+   "  if (state != 1 || state != 2) { copy(dst, src); }\n" +
+   "  // if (commented);\n  /* multiline comment starts\n" +
+   "  if (also_commented);\n  */\n  int quotient = 8 / 0;\n" +
+   "  void *buffer = malloc(-1);\n  const char *control = \"if (text);\";\n" +
+   "  /*\n  extern fn fake_ffi_1() int\n  extern fn fake_ffi_2() int\n" +
+   "  extern fn fake_ffi_3() int\n  extern fn fake_ffi_4() int\n" +
+   "  extern fn fake_ffi_5() int\n  */\n}\n" +
+   "void empty_parameter_list(void) { }\n")) &&
+   is_ok(file_write(header,
+   "static inline char *read_line(char *buffer) {\n  if (0) { return buffer; }\n" +
+   "  if (state == 1) { return buffer; }\n" +
+   "  else if (state == 1) { return buffer; }\n" +
+   "  if (ready && ready) { return buffer; }\n" +
+   "  if (state == state) { return buffer; }\n" +
+   "  if (state == 1 && state == 2) { return buffer; }\n" +
+   "  if (state != 1 || state != 2) { return buffer; }\n" +
+   "  return gets(buffer);\n}\n")),
+   "write C unsafe source and header")
+def c = run_capture([fmt, "--bugs", "--json", source, header], [], nil, false)
+def embedded = run_capture([ny, "fmt", "--bugs", "--json", source, header],
+                           [], nil, false)
+def output = embedded.get("stdout", "")
+assert(c.get("code", 127) == 0 && embedded.get("code", 127) == 0 &&
+       c.get("stdout", "") == output, "C unsafe audit parity: " + output)
+for expected in ["NYAUD1102", "NYAUD1103", "NYAUD1104", "NYAUD1108",
+                 "NYAUD1109", "NYAUD1110", "NYAUD1111", "NYAUD1112",
+                 "NYAUD1115", "NYAUD1118", "strcpy", "vsprintf", "gets"] {
+   assert(str.find(output, expected) >= 0, "missing " + expected + ": " + output)
+}
+def cleanup = run_capture([cmake, "-E", "rm", "-rf", dir], [], nil, false)
+assert(cleanup.get("code", 127) == 0, "remove C unsafe audit directory")
+print("FMT_C_UNSAFE_AUDIT_PARITY_OK")
+NY
+}

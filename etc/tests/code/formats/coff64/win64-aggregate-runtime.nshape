@@ -1,0 +1,58 @@
+shape win64_ny_aggregate_runtime {
+  family "code/formats/coff64"
+  generator "embedded"
+  features ["ny", "test", "abi", "win64"]
+  template ny-test-case
+  flags "--native-only"
+  timeout 120
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.fs as fs
+use core.os.subprocess (run_capture)
+
+def root = env("NYTRIX_ROOT")
+def ny = env("NYTRIX_NY_FULL_BIN")
+def cc = env("NYTRIX_TEST_WIN64_CC")
+def runner = env("NYTRIX_TEST_WIN64_RUNNER")
+def cmake = env("NYTRIX_CMAKE_COMMAND")
+
+assert(is_str(root) && root.len > 0, "CTest provides the source root")
+assert(is_str(ny) && ny.len > 0, "test runner provides ny-full")
+assert(is_str(cc) && cc.len > 0, "CTest provides the Win64 compiler")
+assert(is_str(runner) && runner.len > 0, "CTest provides the Win64 runner")
+assert(is_str(cmake) && cmake.len > 0, "CTest provides CMake")
+
+def test_dir = temp_dir() + "/win64-ny-aggregate-" + to_str(pid())
+def setup = run_capture([cmake, "-E", "make_directory", test_dir], [], nil, false)
+assert(setup.get("code", 127) == 0, "create isolated Win64 test directory")
+
+def object = test_dir + "/ny-win64-aggregate.obj"
+def executable = test_dir + "/ny-win64-aggregate.exe"
+def source = root + "/etc/tests/code/formats/coff64/aggregate-call-probe.ny"
+def compile = run_capture(
+   [ny, "--c-frontend=nytrix", "--native-only",
+    "--native-backend", "x86_64", "--host-triple", "x86_64-w64-windows-gnu",
+    "--native-abi", "win64", "--nyir-verify", "-no-std", "-emit-only",
+    "-o", object, source],
+   [], nil, false)
+assert(compile.get("code", 127) == 0 && fs.is_file(object),
+       "compile Win64 aggregate probe: " + compile.get("stdout", ""))
+
+def host = root + "/src/code/lang/c/tests/win64-ny-aggregate-host.c"
+def link = run_capture(
+   [cc, "-std=c11", "-Wall", "-Wextra", "-Werror", "-I", root,
+    "-o", executable, host, object],
+   [], nil, false)
+assert(link.get("code", 127) == 0 && fs.is_file(executable),
+       "link Win64 aggregate host: " + link.get("stdout", ""))
+
+def result = run_capture([runner, executable], [], nil, false)
+assert(result.get("code", 127) == 0,
+       "Win64 aggregate ABI runtime mismatch: " + result.get("stdout", ""))
+
+def cleanup = run_capture([cmake, "-E", "rm", "-rf", test_dir], [], nil, false)
+assert(cleanup.get("code", 127) == 0, "remove isolated Win64 test directory")
+print("WIN64_NY_AGGREGATE_RUNTIME_OK")
+NY
+}

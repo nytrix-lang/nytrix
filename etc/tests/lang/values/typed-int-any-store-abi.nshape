@@ -1,0 +1,27 @@
+shape typed_int_any_store_abi {
+  family "runtime/values"
+  generator "embedded"
+  features [runtime abi int any local store slot-class regression]
+  template ny-test-case
+  flags_matrix "--run --color=never; --native --run --color=never; --native-backend=llvm --jit --jit-engine=mcjit --color=never; --native-backend=llvm --jit --jit-engine=orc --color=never; --native-only --color=never; --native-only --native --run --color=never"
+  expect compile_and_run
+  timeout 25
+  source ny <<'NY'
+use core
+
+fn dynamic_odd() any { 321 }
+fn dynamic_even() any { 480 }
+
+fn exercise_typed_local() int {
+  mut int frame_count = dynamic_odd()
+  assert(frame_count == 321, "typed int initialization decodes tagged odd value")
+  frame_count = dynamic_even()
+  assert(frame_count == 480, "typed int reassignment decodes tagged even value")
+  frame_count = dynamic_odd()
+  assert(frame_count == 321, "typed int slot stays raw across repeated writes")
+  frame_count
+}
+
+assert(exercise_typed_local() == 321, "typed int function result remains raw")
+NY
+}

@@ -1,13 +1,13 @@
 ;; Keywords: viewer batch rect texture primitive os ui render
 ;; Batched rectangle and texture primitive drawing for fast UI overlays.
 ;; References:
-;; - std.os.ui.render
-;; - std.os.ui.render.viewer.gui
-module std.os.ui.render.viewer.batch(reset, shutdown, queued_count, flush, queue_rect, queue_outline, checker, static_checker, release_static_checker, rgba_mesh, release_mesh, draw_mesh, draw_tex_uv)
-use std.core
-use std.math as math
-use std.os.ui.render as gfx
-use std.os.ui.render.matrix as rmat
+;; - core.os.ui.render
+;; - core.os.ui.render.viewer.gui
+module core.os.ui.render.viewer.batch(reset, shutdown, queued_count, flush, queue_rect, queue_outline, checker, static_checker, release_static_checker, rgba_mesh, release_mesh, draw_mesh, draw_tex_uv)
+use core
+use core.math as math
+use core.os.ui.render as gfx
+use core.os.ui.render.matrix as rmat
 
 def RECT_STRIDE = 20
 def TEX_STRIDE = 52
@@ -15,10 +15,10 @@ def RECT_INITIAL_CAP = 65536
 def RECT_SOFT_FLUSH = 32768
 def VERTEX_STRIDE = 64
 def DEG_TO_RAD = 0.017453292519943295
-mut _rects = 0
+mut ptr _rects = 0
 mut _cap = 0
 mut _count = 0
-mut _tex = 0
+mut ptr _tex = 0
 mut _tex_cap = 0
 mut _tex_count = 0
 mut _last_rect_valid = false

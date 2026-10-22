@@ -4,11 +4,11 @@
 ;; Reference:
 ;; - common-prime attack literature and standard batch-GCD observation
 ;; References:
-;; - std.math.crypto.rsa
-;; - std.math.crypto
-module std.math.crypto.rsa.common_prime(common_prime_factor_pair, common_prime_recover_pair, common_prime_scan, common_prime_scan_fast, common_prime_factor_all, common_factors_attack, common_factors_factor_all)
-use std.math.nt
-use std.math.crypto.rsa.op (compute_phi, compute_d)
+;; - core.math.crypto.rsa
+;; - core.math.crypto
+module core.math.crypto.rsa.common_prime(common_prime_factor_pair, common_prime_recover_pair, common_prime_scan, common_prime_scan_fast, common_prime_factor_all, common_factors_attack, common_factors_factor_all)
+use core.math.nt
+use core.math.crypto.rsa.op (compute_phi, compute_d)
 
 fn _z(any x) any { is_bigint(x) ? x : Z(x) }
 
@@ -230,5 +230,5 @@ fn common_factors_factor_all(any moduli) list {
       i += 1
    }
    assert(common_prime_factor_all(clean).len == 0, "common-prime product-tree clean corpus")
-   print("✓ std.math.crypto.rsa.common_prime self-test passed")
+   print("✓ core.math.crypto.rsa.common_prime self-test passed")
 }

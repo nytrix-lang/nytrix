@@ -6,15 +6,15 @@
 ;; and falls back to a cached copy of:
 ;; https://raw.githubusercontent.com/gibsjose/statistical-attack/master/english-quadgrams.txt
 ;; References:
-;; - std.math.crypto.analysis
-;; - std.math.crypto
-module std.math.crypto.analysis.quadgrams(quadgrams_default_cache_path, quadgrams_load, quadgrams_score, quadgrams_score_upper_ascii)
-use std.core
-use std.math.scalar (log)
-use std.math.crypto.analysis.worldfreq
-use std.os (cache_dir, file_exists, file_read, file_write, fetch)
-use std.os.path as ospath
-use std.core.str as str
+;; - core.math.crypto.analysis
+;; - core.math.crypto
+module core.math.crypto.analysis.quadgrams(quadgrams_default_cache_path, quadgrams_load, quadgrams_score, quadgrams_score_upper_ascii)
+use core
+use core.math.scalar (log)
+use core.math.crypto.analysis.worldfreq
+use core.os (cache_dir, file_exists, file_read, file_write, fetch)
+use core.os.path as ospath
+use core.str as str
 
 def _QUAD_PACKED_SIZE = 456976
 mut _quad_loaded = false
@@ -224,5 +224,5 @@ fn quadgrams_score_upper_ascii(str s) f64 {
    assert(model[0].get("TION", 0.0) > model[0].get("ZZZZ", model[1]), "quadgram probabilities")
    assert(quadgrams_score("TION") > quadgrams_score("ZZZZ"), "quadgram score")
    assert(quadgrams_score_upper_ascii("tion!") == quadgrams_score("TION"), "quadgram uppercase helper")
-   print("✓ std.math.crypto.analysis.quadgrams self-test passed")
+   print("✓ core.math.crypto.analysis.quadgrams self-test passed")
 }

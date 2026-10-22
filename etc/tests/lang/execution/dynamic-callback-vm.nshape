@@ -1,0 +1,159 @@
+shape test_dynamic_callback_vm {
+  family "runtime/execution"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+fn vm_callback_marker(dict values) bool { values.get("x") == 1 }
+@effects(all)
+fn vm_invoke_callback(any callback, dict value) bool { callback(value) }
+fn vm_callback_pair(dict values, int expected) bool {
+   values.get("x") == expected
+}
+@effects(all)
+fn vm_invoke_callback_pair(any callback, dict value, int expected) bool {
+   callback(value, expected)
+}
+fn vm_callback_any_equal(any left, any right) bool { left == right }
+@effects(all)
+fn vm_invoke_callback_any_pair(any callback, any left, any right) bool {
+   callback(left, right)
+}
+fn vm_make_threshold_callback(int threshold) any {
+   lambda(dict values) bool { values.get("x") == threshold }
+}
+fn vm_make_int_threshold_callback(int threshold) any {
+   lambda(int value) bool { value >= threshold }
+}
+@effects(all)
+fn vm_invoke_int_callback(any callback, int value) bool { callback(value) }
+fn vm_make_int_range_callback(int lower) any {
+   lambda(int value, int upper) bool { value >= lower && value <= upper }
+}
+@effects(all)
+fn vm_invoke_int_range_callback(any callback, int value, int upper) bool {
+   callback(value, upper)
+}
+fn vm_make_int_sum_callback(int threshold) any {
+   lambda(int first, int second, int third) bool {
+      first + second + third >= threshold
+   }
+}
+@effects(all)
+fn vm_invoke_int_sum_callback(any callback, int first, int second,
+      int third) bool { callback(first, second, third) }
+fn vm_make_int_window_callback(int lower) any {
+   lambda(int first, int second, int third, int fourth) bool {
+      first >= lower && second <= third && fourth == 4
+   }
+}
+@effects(all)
+fn vm_invoke_int_window_callback(any callback, int first, int second,
+      int third, int fourth) bool { callback(first, second, third, fourth) }
+fn vm_make_int_window5_callback(int lower) any {
+   lambda(int first, int second, int third, int fourth, int fifth) bool {
+      first >= lower && second <= third && fourth == 4 && fifth == 5
+   }
+}
+@effects(all)
+fn vm_invoke_int_window5_callback(any callback, int first, int second,
+      int third, int fourth, int fifth) bool {
+   callback(first, second, third, fourth, fifth)
+}
+fn vm_make_sum5_callback() any {
+   lambda(int first, int second, int third, int fourth, int fifth) int {
+      first + second + third + fourth + fifth
+   }
+}
+fn vm_make_sum6_callback() any {
+   lambda(int first, int second, int third, int fourth, int fifth,
+      int sixth) int { first + second + third + fourth + fifth + sixth }
+}
+@effects(all)
+fn vm_invoke_int_sum5_callback(any callback, int first, int second,
+      int third, int fourth, int fifth) int {
+   callback(first, second, third, fourth, fifth)
+}
+@effects(all)
+fn vm_invoke_int_sum6_callback(any callback, int first, int second,
+      int third, int fourth, int fifth, int sixth) int {
+   callback(first, second, third, fourth, fifth, sixth)
+}
+fn vm_make_any_threshold_callback(int threshold) any {
+   lambda(any value) bool { to_int(value) >= threshold }
+}
+@effects(all)
+fn vm_invoke_any_int_callback(any callback, any value) bool {
+   callback(value)
+}
+fn vm_make_int_result_callback(int offset) any {
+   lambda(int value) int { value + offset }
+}
+@effects(all)
+fn vm_invoke_int_result_callback(any callback, int value) int {
+   callback(value)
+}
+fn vm_make_payload_callback(any payload) any {
+   lambda(int ignored) any { payload }
+}
+fn vm_make_zero_payload_callback(any payload) any {
+   lambda() any { payload }
+}
+fn vm_callback_payload() any { ["heap", "value"] }
+@effects(all)
+fn vm_invoke_zero_callback(any callback) any { callback() }
+@effects(all)
+fn vm_invoke_payload_callback(any callback) any { callback(0) }
+assert(vm_invoke_callback(vm_callback_marker, {"x": 1}),
+   "NYIR VM invokes named dynamic callbacks")
+assert(vm_invoke_callback_pair(vm_callback_pair, {"x": 42}, 42),
+   "NYIR VM invokes two-argument named dynamic callbacks")
+assert(vm_invoke_callback_any_pair(vm_callback_any_equal, 7, 7),
+   "NYIR VM preserves tagged any values in two-argument callbacks")
+def vm_captured_callback = vm_make_threshold_callback(42)
+assert(vm_invoke_callback(vm_captured_callback, {"x": 42}),
+   "NYIR VM invokes captured closures with their environment")
+def vm_captured_int_callback = vm_make_int_threshold_callback(43)
+assert(!vm_invoke_int_callback(vm_captured_int_callback, 42),
+   "captured bool callbacks preserve tagged typed-int arguments below threshold")
+assert(vm_invoke_int_callback(vm_captured_int_callback, 44),
+   "captured bool callbacks preserve tagged typed-int arguments above threshold")
+def vm_captured_int_range = vm_make_int_range_callback(40)
+assert(vm_invoke_int_range_callback(vm_captured_int_range, 42, 44),
+   "two-argument captured bool callbacks preserve typed-int arguments")
+def vm_captured_int_sum = vm_make_int_sum_callback(12)
+assert(vm_invoke_int_sum_callback(vm_captured_int_sum, 3, 4, 5),
+   "three-argument captured bool callbacks preserve typed-int arguments")
+def vm_captured_int_window = vm_make_int_window_callback(40)
+assert(vm_invoke_int_window_callback(vm_captured_int_window, 42, 2, 3, 4),
+   "four-argument captured bool callbacks preserve typed-int arguments")
+def vm_captured_any_callback = vm_make_any_threshold_callback(43)
+assert(vm_invoke_any_int_callback(vm_captured_any_callback, 44),
+   "bool result metadata does not untag a captured callback's any argument")
+def vm_captured_int_result = vm_make_int_result_callback(2)
+assert(vm_invoke_int_result_callback(vm_captured_int_result, 45) == 47,
+   "captured callback raw integer results are normalized exactly once")
+def vm_zero_payload = vm_invoke_zero_callback(vm_callback_payload)
+assert(vm_zero_payload[1] == "value",
+   "zero-argument callbacks return heap values through the dynamic ABI")
+def vm_retained_payload = vm_invoke_payload_callback(
+   vm_make_payload_callback(["heap", "value"]))
+assert(vm_retained_payload[1] == "value",
+   "dynamic callbacks preserve captured heap values through the return ABI")
+def vm_zero_captured_payload = vm_invoke_zero_callback(
+   vm_make_zero_payload_callback(["heap", "value"]))
+assert(vm_zero_captured_payload[1] == "value",
+   "zero-argument captured callbacks preserve their environment and result")
+def vm_captured_window5 = vm_make_int_window5_callback(40)
+assert(vm_invoke_int_window5_callback(vm_captured_window5, 42, 2, 3, 4, 5),
+   "five-argument captured bool callbacks preserve typed-int arguments")
+def vm_sum5 = vm_make_sum5_callback()
+assert(vm_invoke_int_sum5_callback(vm_sum5, 1, 2, 3, 4, 5) == 15,
+   "five-argument callbacks invoke the target exactly once")
+def vm_sum6 = vm_make_sum6_callback()
+assert(vm_invoke_int_sum6_callback(vm_sum6, 1, 2, 3, 4, 5, 6) == 21,
+   "six-argument callbacks invoke the target exactly once")
+NY
+}

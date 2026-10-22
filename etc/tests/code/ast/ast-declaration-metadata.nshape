@@ -1,0 +1,114 @@
+shape ast_declaration_metadata {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "ast", "reflection", "attributes", "contracts", "origin"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.compiler.ast (parse_ast, parse_ast_snapshot, code_str)
+use core.math.parse.data.json (json_decode)
+
+def source = "@inline\n@effects(none)\n@total\nfn countdown(int n=3) int requires n >= 0 decreases n {\n   \"A bounded countdown.\"\n   return n\n}"
+def snapshot = parse_ast_snapshot(source)
+def declaration = snapshot.get("nodes").get(0)
+def attributes = declaration.get("attributes")
+assert(attributes.len == 3 && attributes.get(0).get("name") == "inline" &&
+       attributes.get(1).get("name") == "effects" &&
+       attributes.get(2).get("name") == "total",
+       "snapshot preserves ordered function decorators")
+assert(str(attributes.get(1).get("args").get(0).get("kind")) == "int" &&
+       int(attributes.get(1).get("args").get(0).get("value")) == 0,
+       "snapshot preserves the parsed none effect argument")
+assert(int(attributes.get(0).get("source_origin").get("line")) == 1 &&
+       int(attributes.get(1).get("source_origin").get("line")) == 2 &&
+       int(attributes.get(2).get("source_origin").get("line")) == 3,
+       "each decorator retains its source origin")
+assert(declaration.get("requires").get("type") == "binary" &&
+       declaration.get("decreases").get("name") == "n" &&
+       declaration.get("doc") == "A bounded countdown.",
+       "snapshot exposes contract syntax and documentation")
+assert(declaration.get("params").get(0).get("type") == "int" &&
+       int(declaration.get("params").get(0).get("default").get("value")) == 3,
+       "snapshot preserves typed parameters and default syntax")
+def roundtrip = json_decode(code_str(snapshot))
+assert(code_str(roundtrip) == code_str(snapshot),
+       "declaration metadata survives canonical serialization")
+def legacy = parse_ast(source).get(0)
+assert(!dict_exists(legacy, "attributes") && !dict_exists(legacy, "requires"),
+       "legacy AST records retain their existing shape")
+def generated = parse_ast_snapshot("comptime template tagged() { @inline fn generated(int value=7) int { return value } }\ncomptime emit tagged()")
+def generated_parameter = generated.get("nodes").get(0).get("params").get(0)
+assert(int(generated_parameter.get("source_origin").get("line")) == 1 &&
+       int(generated_parameter.get("expansion_origin").get("line")) == 2,
+       "generated parameters retain definition and emission origins")
+def generated_attribute = generated.get("nodes").get(0).get("attributes").get(0)
+assert(int(generated_attribute.get("source_origin").get("line")) == 1 &&
+       int(generated_attribute.get("expansion_origin").get("line")) == 2,
+       "generated decorators retain definition and emission origins")
+def contracted = parse_ast_snapshot("comptime template contract(lower) { fn generated_contract(int n) int requires n > ${lower} decreases n + ${lower} { return n } }\ncomptime emit contract(3)")
+def contract_node = contracted.get("nodes").get(0)
+assert(int(contract_node.get("requires").get("right").get("value")) == 3 &&
+       int(contract_node.get("decreases").get("right").get("value")) == 3,
+       "generated contract syntax contains substituted AST values")
+assert(int(contract_node.get("requires").get("expansion_origin").get("line")) == 2 &&
+       int(contract_node.get("requires").get("right").get("expansion_origin").get("line")) == 2,
+       "generated contract nodes retain their emission origins")
+def foreign = parse_ast_snapshot("comptime template foreign(name) { extern fn ${name}(str text) int as \"strlen\" }\ncomptime emit foreign(ident(\"generated_strlen\"))")
+def external = foreign.get("nodes").get(0)
+assert(external.get("name") == "generated_strlen" &&
+       external.get("link_name") == "strlen" &&
+       int(external.get("params").get(0).get("expansion_origin").get("line")) == 2,
+       "generated external signatures substitute names and retain parameter origins")
+def nested_module = parse_ast_snapshot("comptime template nested() { module Generated { fn inner() int { return 1 } } }\ncomptime emit nested()")
+def module_node = nested_module.get("nodes").get(0)
+def module_child = module_node.get("body").get(0)
+assert(int(module_node.get("source_origin").get("line")) == 1 &&
+       int(module_node.get("expansion_origin").get("line")) == 2 &&
+       int(module_child.get("source_origin").get("line")) == 1 &&
+       int(module_child.get("expansion_origin").get("line")) == 2,
+       "recursive generated module clones preserve definition and emission origins")
+def generated_use = parse_ast_snapshot("comptime template imports(target, source, alias) { use ${target} (${source} as ${alias}) }\ncomptime emit imports(core.math.scalar, ident(\"min\"), ident(\"minimum\"))").get("nodes").get(0)
+def imported_name = generated_use.get("imports").get(0)
+assert(generated_use.get("module") == "core.math.scalar" &&
+       imported_name.get("name") == "min" &&
+       imported_name.get("alias") == "minimum" &&
+       int(imported_name.get("source_origin").get("line")) == 1 &&
+       int(imported_name.get("expansion_origin").get("line")) == 2 &&
+       int(imported_name.get("alias_source_origin").get("line")) == 1 &&
+       int(imported_name.get("alias_expansion_origin").get("line")) == 2 &&
+       generated_use.get("is_local") == false &&
+       generated_use.get("import_all") == false &&
+       int(generated_use.get("expansion_origin").get("line")) == 2,
+       "generated use imports retain name and alias source and emission origins")
+def authored_import = parse_ast_snapshot(
+   "    use core (fmt as formatting)").get("nodes").get(0).get("imports").get(0)
+assert(int(authored_import.get("source_origin").get("column")) == 15 &&
+       int(authored_import.get("alias_source_origin").get("column")) == 22,
+       "authored use imports retain separate name and alias positions")
+def generated_export = parse_ast_snapshot(
+   "comptime template export_name() { module ExportOrigin { export core(foo) } }\ncomptime emit export_name()")
+def export_node = generated_export.get("nodes").get(0).get("body").get(0)
+def export_name_node = export_node.get("name_nodes").get(0)
+assert(export_node.get("names").get(0) == "foo" &&
+       int(export_name_node.get("source_origin").get("line")) == 1 &&
+       int(export_name_node.get("expansion_origin").get("line")) == 2,
+       "generated export names retain definition and emission origins")
+def generated_statement = parse_ast_snapshot("comptime template statement(value) { fn generated_statement() int {\n${value}\nreturn 2\n} }\ncomptime emit statement(1)").get("nodes").get(0).get("body").get("body").get(0)
+assert(int(generated_statement.get("source_origin").get("line")) == 2 &&
+       int(generated_statement.get("expansion_origin").get("line")) == 5,
+       "generated scalar statement splices retain definition and emission origins")
+def generated_enum = parse_ast_snapshot("comptime template make_enum() { enum GeneratedEnum<T> { Item(T payload), Empty } }\ncomptime emit make_enum()").get("nodes").get(0)
+def generated_variant = generated_enum.get("items").get(0)
+def generated_payload = generated_variant.get("fields").get(0)
+def generated_type_parameter = generated_enum.get("type_param_nodes").get(0)
+assert(generated_type_parameter.get("name") == "T" &&
+       int(generated_type_parameter.get("source_origin").get("line")) == 1 &&
+       int(generated_type_parameter.get("expansion_origin").get("line")) == 2 &&
+       int(generated_variant.get("source_origin").get("line")) == 1 &&
+       int(generated_variant.get("expansion_origin").get("line")) == 2 &&
+       int(generated_payload.get("source_origin").get("line")) == 1 &&
+       int(generated_payload.get("expansion_origin").get("line")) == 2,
+       "generated enum variants and payload fields retain both origins")
+NY
+}

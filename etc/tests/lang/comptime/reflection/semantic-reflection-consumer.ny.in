@@ -1,0 +1,598 @@
+use core
+use core.reflect (semantic_snapshot, semantic_get, semantic_items,
+                      semantic_functions, semantic_find_function,
+                      semantic_find_function_at,
+                      semantic_layouts, semantic_find_layout,
+                      semantic_expressions, semantic_find_expression,
+                      semantic_expression_type,
+                      semantic_expression_representation,
+                      semantic_expression_ownership,
+                      semantic_expression_mutable,
+                      semantic_expression_alias_class,
+                      semantic_expression_effects,
+                      semantic_expression_custom_effect_row,
+                      semantic_obligations, semantic_find_obligation,
+                      semantic_callable_effects,
+                      semantic_find_callable_effect,
+                      semantic_callable_effect_row,
+                      semantic_proof_obligations, semantic_find_invariant,
+                      semantic_find_law, semantic_find_lemma,
+                      semantic_find_fin_bound,
+                      semantic_statement_effects,
+                      semantic_statement_custom_effect_row,
+                      semantic_find_statement_effect,
+                      semantic_signature, semantic_parameters,
+                      semantic_return, semantic_signature_effects,
+                      semantic_calls, semantic_call_effects,
+                      semantic_call_effect_row)
+use core.os (file_read)
+
+fn test_real_semantic_artifact() {
+   def source = match file_read("__SEMANTIC_ARTIFACT_PATH__") {
+      ok(contents) -> contents
+      err(code) -> { panic("compiler artifact read failed: " + str(code)) }
+   }
+   def decoded = semantic_snapshot(source)
+   assert(decoded.get("ok"), "real compiler artifact is accepted: " +
+          str(decoded.get("error")))
+   def snapshot = decoded.get("value")
+   def typed = snapshot[2]
+   def functions = semantic_functions(snapshot)
+   assert(semantic_get(semantic_find_function(snapshot,
+                    "semantic_effect_caller"), "name") ==
+             "semantic_effect_caller",
+          "the unified reflection API finds typed function facts by name")
+   mut found_caller = false
+   mut found_requirement = false
+   mut found_codegen = false
+   mut found_if_init_effect = false
+   mut found_while_init_effect = false
+   mut found_match_expression_effect = false
+   mut found_ternary_expression_effect = false
+   mut found_sizeof_effect = false
+   mut found_quoted_syntax_effect = false
+   mut found_custom_row_aggregation = false
+   mut found_custom_callback_row = false
+   mut found_custom_container_row = false
+   mut found_dynamic_custom_index_row = false
+   mut found_dynamic_custom_tuple_index_row = false
+   mut found_dynamic_custom_dict_index_row = false
+   mut found_unresolved_expression = false
+   mut i = 0
+   while i < functions.len {
+      def function_record = functions.get(i)
+      def expression_facts = semantic_expressions(function_record)
+      mut expression_index = 0
+      while expression_index < expression_facts.len {
+         def expression_fact = expression_facts.get(expression_index)
+         if semantic_get(expression_fact, "type_resolved") == false {
+            assert(is_nil(semantic_expression_type(expression_fact)) &&
+                   is_tuple(semantic_get(expression_fact, "source_origin")),
+                   "unresolved expressions remain present with explicit type state and origin")
+            found_unresolved_expression = true
+         }
+         expression_index += 1
+      }
+      if semantic_get(function_record, "name") == "semantic_effect_caller" {
+         def function_origin = semantic_get(function_record, "source_origin")
+         found_caller = true
+         assert(semantic_find_function_at(snapshot, "semantic_effect_caller",
+                   int(semantic_get(function_origin, "line", 0)),
+                   int(semantic_get(function_origin, "column", 0)),
+                   str(semantic_get(function_origin, "file", ""))) ==
+                   function_record,
+                "real function artifact lookup uses declaration source origin")
+         def signature = semantic_signature(function_record)
+         def effects = semantic_signature_effects(function_record)
+         def parameters = semantic_parameters(function_record)
+         def parameter_facts = semantic_get(parameters.get(0), "facts")
+         def expressions = semantic_expressions(function_record)
+         def first_call = semantic_find_expression(function_record,
+                                                    "call", 12)
+         def origin = semantic_get(first_call, "source_origin")
+         assert(semantic_get(semantic_return(function_record), "type") ==
+                   "i32" &&
+                semantic_get(parameter_facts, "ownership") == "borrowed" &&
+                str(semantic_get(effects, "inferred_builtin_row")) ==
+                   "ny.effect-row.v1{std.effects.io=unit}" &&
+                semantic_get(semantic_get(first_call, "callee_effects"),
+                             "callee") == "semantic_effect_io" &&
+                semantic_expression_type(first_call) == "nil" &&
+                semantic_expression_representation(first_call) == "aggregate" &&
+                semantic_expression_ownership(first_call) == "unknown" &&
+                !bool(semantic_expression_mutable(first_call)) &&
+                semantic_expression_alias_class(first_call) == 0 &&
+                semantic_get(semantic_expression_effects(first_call),
+                             "known") &&
+                semantic_get(origin, "line") == 12,
+                "real signature and direct type, ownership, effect, and origin reflection are visible")
+         assert(is_tuple(function_origin) &&
+                semantic_get(function_origin, "line") > 0,
+                "function records retain their authored declaration origin")
+      }
+      if semantic_get(function_record, "name") == "semantic_effect_if_init" {
+         def statements = semantic_statement_effects(function_record)
+         def if_effect = semantic_find_statement_effect(function_record,
+                                                         "if", 109)
+         assert(semantic_get(if_effect, "known") &&
+                semantic_get(if_effect, "inferred_builtin_row") ==
+                   "ny.effect-row.v1{std.effects.io=unit}",
+                "direct reflection lookup returns the real if effect row")
+         mut j = 0
+         while j < statements.len {
+            def statement = statements.get(j)
+            if semantic_get(statement, "kind") == "if" {
+               assert(semantic_get(statement, "known") &&
+                      semantic_get(statement, "inferred_builtin_row") ==
+                         "ny.effect-row.v1{std.effects.io=unit}",
+                      "if initializer effects contribute to the if row")
+               found_if_init_effect = true
+            }
+            j += 1
+         }
+      }
+      if semantic_get(function_record, "name") == "semantic_effect_while_init" {
+         def statements = semantic_statement_effects(function_record)
+         def while_effect = semantic_find_statement_effect(function_record,
+                                                            "while", 116)
+         assert(semantic_get(while_effect, "known") &&
+                semantic_get(while_effect, "inferred_builtin_row") ==
+                   "ny.effect-row.v1{std.effects.io=unit}",
+                "direct reflection lookup returns the real while effect row")
+         mut j = 0
+         while j < statements.len {
+            def statement = statements.get(j)
+            if semantic_get(statement, "kind") == "while" {
+               assert(semantic_get(statement, "known") &&
+                      semantic_get(statement, "inferred_builtin_row") ==
+                         "ny.effect-row.v1{std.effects.io=unit}",
+                      "while initializer effects contribute to the while row")
+               found_while_init_effect = true
+            }
+            j += 1
+         }
+      }
+      if semantic_get(function_record, "name") ==
+         "semantic_effect_match_expression" {
+         def match_expression = semantic_find_expression(function_record,
+                                                          "match", 52)
+         def match_effect = semantic_expression_effects(match_expression)
+         assert(semantic_get(match_effect, "known") &&
+                semantic_get(match_effect, "inferred_builtin_row") ==
+                   "ny.effect-row.v1{std.effects.io=unit}",
+                "match expression effects union known arm rows")
+         found_match_expression_effect = true
+      }
+      if semantic_get(function_record, "name") ==
+         "semantic_effect_ternary_expression" {
+         def ternary_expression = semantic_find_expression(function_record,
+                                                            "ternary", 59)
+         def ternary_effect = semantic_expression_effects(ternary_expression)
+         assert(semantic_get(ternary_effect, "known") &&
+                semantic_get(ternary_effect, "inferred_builtin_row") ==
+                   "ny.effect-row.v1{std.effects.io=unit}",
+                "ternary expression effects union evaluated branch rows")
+         found_ternary_expression_effect = true
+      }
+      if semantic_get(function_record, "name") ==
+         "semantic_effect_sizeof_value" {
+         def sizeof_expression = semantic_find_expression(function_record,
+                                                            "sizeof", 127)
+         def sizeof_effect = semantic_expression_effects(sizeof_expression)
+         def signature_effects = semantic_signature_effects(function_record)
+         assert(semantic_get(sizeof_effect, "known") &&
+                semantic_get(sizeof_effect, "inferred_builtin_row") ==
+                   "ny.effect-row.v1{}" &&
+                semantic_get(signature_effects, "inferred_builtin_row") ==
+                   "ny.effect-row.v1{}",
+                "sizeof does not execute an effectful operand")
+         found_sizeof_effect = true
+      }
+      if semantic_get(function_record, "name") ==
+         "semantic_effect_quoted_syntax" {
+         def signature_effects = semantic_signature_effects(function_record)
+         assert(semantic_get(signature_effects, "inferred_builtin_row") ==
+                   "ny.effect-row.v1{}",
+                "quoted calls do not contribute runtime effects")
+         def expressions = semantic_expressions(function_record)
+         mut j = 0
+         while j < expressions.len {
+            def expression = expressions.get(j)
+            if semantic_get(expression, "kind") == "quote" {
+               def quote_effects = semantic_expression_effects(expression)
+               assert(semantic_get(quote_effects, "known") &&
+                      semantic_get(quote_effects, "inferred_builtin_row") ==
+                         "ny.effect-row.v1{}",
+                      "quote syntax has an empty runtime effect row")
+               found_quoted_syntax_effect = true
+            }
+            j += 1
+         }
+      }
+      if semantic_get(function_record, "name") ==
+         "semantic_effect_custom_parent" {
+         def expressions = semantic_expressions(function_record)
+         mut found_expression_row = false
+         mut found_union_row = false
+         mut j = 0
+         while j < expressions.len {
+            def expression = expressions.get(j)
+            if semantic_get(expression, "kind") == "binary" {
+               def effects = semantic_expression_effects(expression)
+               def row = semantic_expression_custom_effect_row(expression)
+               if row ==
+                  "ny.effect-row.v1{ny.capability.project.storage.read=cap%28project.storage.read%29}" {
+                  found_expression_row = true
+               } elif row ==
+                  "ny.effect-row.v1{ny.capability.project.audit.write=cap%28project.audit.write%29,ny.capability.project.storage.read=cap%28project.storage.read%29}" {
+                  found_union_row = true
+               } else {
+                  panic("unexpected custom effect row on binary parent: " +
+                        str(row))
+               }
+            }
+            j += 1
+         }
+         def statements = semantic_statement_effects(function_record)
+         mut found_statement_row = false
+         j = 0
+         while j < statements.len {
+            def statement = statements.get(j)
+            if semantic_get(statement, "kind") == "return" {
+               assert(semantic_statement_custom_effect_row(statement) ==
+                         "ny.effect-row.v1{ny.capability.project.audit.write=cap%28project.audit.write%29,ny.capability.project.storage.read=cap%28project.storage.read%29}",
+                      "enclosing statement retains the custom effect row")
+               found_statement_row = true
+            }
+            j += 1
+         }
+         assert(found_expression_row && found_union_row && found_statement_row,
+                "custom call rows aggregate through expressions and statements")
+         found_custom_row_aggregation = true
+      }
+      if semantic_get(function_record, "name") ==
+         "semantic_effect_custom_hof" {
+         def expressions = semantic_expressions(function_record)
+         mut found_callback_row = false
+         mut j = 0
+         while j < expressions.len {
+            def expression = expressions.get(j)
+            if semantic_get(expression, "kind") == "memcall" {
+               def effects = semantic_expression_effects(expression)
+               def calls = semantic_calls(function_record)
+               def origin = semantic_get(expression, "source_origin")
+               def located_call = semantic_find_call(function_record,
+                  int(semantic_get(origin, "line", 0)),
+                  int(semantic_get(origin, "column", 0)),
+                  str(semantic_get(origin, "file", "")))
+               assert(semantic_get(located_call, "kind") == "memcall" &&
+                      semantic_call_effect_row(located_call) ==
+                        "ny.effect-row.v1{ny.capability.project.storage.read=cap%28project.storage.read%29,std.effects.alloc=unit,std.effects.read_memory=unit}",
+                      "source-location lookup finds member calls and their combined effect row")
+               mut matched_call = false
+               mut k = 0
+               while k < calls.len {
+                  def call = calls.get(k)
+                  if semantic_get(call, "source_origin") ==
+                     semantic_get(expression, "source_origin") {
+                     assert(semantic_call_effects(call) != nil &&
+                            semantic_call_effect_row(call) ==
+                              "ny.effect-row.v1{ny.capability.project.storage.read=cap%28project.storage.read%29,std.effects.alloc=unit,std.effects.read_memory=unit}",
+                            "member call reflection exposes the closed builtin and custom callback row")
+                     matched_call = true
+                  }
+                  k += 1
+               }
+               assert(matched_call,
+                      "member calls are included in semantic call enumeration")
+               assert(semantic_expression_custom_effect_row(expression) ==
+                         "ny.effect-row.v1{ny.capability.project.storage.read=cap%28project.storage.read%29}",
+                      "higher-order callback custom row is substituted into its call")
+               found_callback_row = true
+            }
+            j += 1
+         }
+         assert(found_callback_row,
+                "custom effect callback call fact is present")
+         found_custom_callback_row = true
+      }
+      if semantic_get(function_record, "name") ==
+         "semantic_effect_custom_container_caller" {
+         assert(semantic_get(function_record, "effect_row") ==
+                   "ny.effect-row.v1{ny.capability.project.storage.read=cap%28project.storage.read%29,std.effects.alloc=unit,std.effects.read_memory=unit}" &&
+                semantic_get(function_record, "effect_row_known"),
+                "returned closures preserve callback capability rows through immutable dictionary aliases")
+         found_custom_container_row = true
+      }
+      if semantic_get(function_record, "name") ==
+         "semantic_effect_custom_tuple_caller" {
+         assert(semantic_get(function_record, "effect_row") ==
+                   "ny.effect-row.v1{ny.capability.project.storage.read=cap%28project.storage.read%29,std.effects.alloc=unit,std.effects.read_memory=unit}" &&
+                semantic_get(function_record, "effect_row_known"),
+                "tuple get preserves callback capability rows through returned closures")
+         found_custom_container_row = true
+      }
+      if semantic_get(function_record, "name") ==
+         "semantic_effect_dynamic_custom_index_caller" {
+         assert(semantic_get(function_record, "effect_row") ==
+                   "ny.effect-row.v1{ny.capability.project.audit.write=cap%28project.audit.write%29,ny.capability.project.storage.read=cap%28project.storage.read%29,std.effects.alloc=unit,std.effects.read_memory=unit}" &&
+                semantic_get(function_record, "effect_row_known"),
+                "dynamic indexing unions distinct callback capability rows")
+         found_dynamic_custom_index_row = true
+      }
+      if semantic_get(function_record, "name") ==
+         "semantic_effect_dynamic_custom_tuple_index_caller" {
+         assert(semantic_get(function_record, "effect_row") ==
+                   "ny.effect-row.v1{ny.capability.project.audit.write=cap%28project.audit.write%29,ny.capability.project.storage.read=cap%28project.storage.read%29,std.effects.alloc=unit,std.effects.read_memory=unit}" &&
+                semantic_get(function_record, "effect_row_known"),
+                "dynamic tuple indexing unions callback capability rows through aliases")
+         found_dynamic_custom_tuple_index_row = true
+      }
+      if semantic_get(function_record, "name") ==
+         "semantic_effect_dynamic_custom_dict_index_caller" {
+         assert(semantic_get(function_record, "effect_row") ==
+                   "ny.effect-row.v1{ny.capability.project.audit.write=cap%28project.audit.write%29,ny.capability.project.storage.read=cap%28project.storage.read%29,std.effects.alloc=unit,std.effects.read_memory=unit}" &&
+                semantic_get(function_record, "effect_row_known"),
+                "dynamic dictionary indexing unions callback rows through aliases")
+         found_dynamic_custom_dict_index_row = true
+      }
+      if semantic_get(function_record, "name") ==
+         "semantic_requires_caller" {
+         def requirements = semantic_find_obligation(function_record,
+                                                       "requires", 72)
+         assert(semantic_get(semantic_get(requirements, "requires"),
+                             "status") == "proved" &&
+                semantic_obligations(function_record).len > 0,
+                "direct obligation lookup returns the checked requires record")
+         def expressions = semantic_items(
+            semantic_get(function_record, "expression_facts"))
+         mut j = 0
+         while j < expressions.len {
+            def obligations = semantic_get(expressions.get(j), "obligations")
+            if is_tuple(obligations) {
+               def requirement = semantic_get(obligations, "requires")
+               assert(semantic_get(requirement, "status") == "proved" &&
+                      semantic_get(semantic_get(requirement, "source_origin"),
+                                   "line") == 67,
+                      "real caller-instantiated proof obligation is visible")
+               found_requirement = true
+            }
+            j += 1
+         }
+      }
+      if semantic_get(function_record, "name") ==
+         "semantic_decreases_countdown" {
+         def termination = semantic_find_obligation(function_record,
+                                                      "decreases", 78)
+         def decreases = semantic_get(termination, "decreases")
+         assert(semantic_get(decreases, "status") == "proved" &&
+                semantic_get(decreases, "method") == "integer_measure",
+                "direct obligation lookup returns the checked decreases record")
+      }
+      if semantic_get(function_record, "name") ==
+         "SemanticArtifactLayout_table_data" {
+         found_codegen = true
+         assert(is_tuple(semantic_get(function_record, "source_origin")) &&
+                is_tuple(semantic_get(function_record, "emission_origin")),
+                "generated function records retain source and emission origins")
+         def generated_expressions = semantic_items(
+            semantic_get(function_record, "expression_facts"))
+         assert(generated_expressions.len > 0,
+                "Ny-generated function has typed expression facts")
+         mut j = 0
+         mut found_compound_assignment = false
+         while j < generated_expressions.len {
+            def expression = generated_expressions.get(j)
+            def source_origin = semantic_get(expression, "source_origin")
+            def emission_origin = semantic_get(expression, "emission_origin")
+            assert(is_tuple(source_origin) && is_tuple(emission_origin) &&
+                   semantic_get(source_origin, "line") > 0 &&
+                   semantic_get(emission_origin, "line") > 0,
+                   "every generated expression retains source and emission origins")
+            if semantic_get(expression, "kind") == "binary" {
+               if str(semantic_get(source_origin, "file", "")).contains(
+                     "codegen.ny") {
+                  found_compound_assignment = true
+                  assert(semantic_get(emission_origin, "line") == 98,
+                         "generated binary expressions retain their emission location")
+               }
+            }
+            j += 1
+         }
+         assert(found_compound_assignment,
+                "generated function exposes library-origin binary expressions")
+      }
+      i += 1
+   }
+   assert(found_caller, "real typed artifact exposes the expected function")
+   assert(found_if_init_effect,
+          "real typed artifact includes if initializer effects")
+   assert(found_while_init_effect,
+          "real typed artifact includes while initializer effects")
+   assert(found_match_expression_effect,
+          "real typed artifact includes match expression effects")
+   assert(found_ternary_expression_effect,
+          "real typed artifact includes ternary expression effects")
+   assert(found_sizeof_effect,
+          "real typed artifact treats sizeof operands as unevaluated")
+   assert(found_quoted_syntax_effect,
+          "real typed artifact excludes quoted syntax from runtime effects")
+   assert(found_custom_row_aggregation,
+          "real typed artifact aggregates custom effect rows")
+   assert(found_custom_callback_row,
+          "real typed artifact resolves custom callback effect rows")
+   assert(found_custom_container_row,
+          "real typed artifact preserves custom rows through returned container callbacks")
+   assert(found_dynamic_custom_index_row,
+          "real typed artifact unions custom callback rows across dynamic indices")
+   assert(found_dynamic_custom_tuple_index_row,
+          "real typed artifact unions custom callback rows across dynamic tuple indices")
+   assert(found_dynamic_custom_dict_index_row,
+          "real typed artifact unions custom callback rows across dynamic dictionary indices")
+   assert(found_unresolved_expression,
+          "real typed artifact retains expressions without resolved HM types")
+   assert(found_requirement, "real typed artifact exposes proof obligations")
+   assert(found_codegen, "real typed artifact exposes Ny-generated code")
+   def layouts = semantic_layouts(snapshot)
+   assert(semantic_get(semantic_find_layout(snapshot,
+                    "SemanticArtifactLayout"), "name") ==
+             "SemanticArtifactLayout",
+          "the unified reflection API finds resolved layouts by name")
+   assert(is_nil(semantic_find_layout(snapshot, "SharedArtifactLayout")) &&
+          semantic_get(semantic_find_layout(snapshot, "SharedArtifactLayout",
+                    "SemanticOwnerRight"), "owner") ==
+             "SemanticOwnerRight",
+          "the compiler artifact preserves layout owners for ambiguous names")
+   assert(layouts.len > 0 &&
+          semantic_get(layouts.get(0), "name") == "SemanticArtifactLayout",
+          "real versioned layout facts are visible")
+   def layout_fields = semantic_items(semantic_get(layouts.get(0), "fields"))
+   def first_field = layout_fields.get(0)
+   assert(semantic_get(layouts.get(0), "alignment") == 4 &&
+          semantic_get(first_field, "offset") == 0 &&
+          semantic_get(first_field, "alignment") == 4,
+          "real aggregate and field ABI facts are visible")
+   test_unit_wide_records(snapshot)
+   print("semantic artifact consumer passed")
+}
+
+fn test_unit_wide_records(any snapshot) {
+   def io_callable = semantic_find_callable_effect(snapshot,
+                                                   "semantic_effect_io", 0)
+   assert(semantic_get(io_callable, "kind") == "function" &&
+          semantic_get(io_callable, "arity") == 0 &&
+          semantic_callable_effect_row(io_callable) ==
+            "ny.effect-row.v1{std.effects.io=unit}",
+          "unit-wide callable rows expose the analyzed function row by name and arity")
+   assert(bool(semantic_get(semantic_find_callable_effect(snapshot,
+                              "semantic_effect_unknown_parent", 1), "known")),
+          "effect-polymorphic callables keep a closed all-effects callable row")
+   assert(is_nil(semantic_find_callable_effect(snapshot,
+                             "semantic_effect_missing", 0)) &&
+          is_nil(semantic_find_callable_effect(snapshot, "", 0)),
+          "missing and empty callable lookups fail closed")
+   def callable_rows = semantic_callable_effects(snapshot)
+   assert(callable_rows.len > 0,
+          "the callable table exposes the whole unit's callables")
+   mut found_unknown_builtin = false
+   mut found_extern_or_imported_reason = false
+   mut ci = 0
+   while ci < callable_rows.len {
+      def row = callable_rows.get(ci)
+      if semantic_get(row, "known") != true {
+         assert(is_str(semantic_get(row, "reason")) &&
+                semantic_get(row, "row") == nil &&
+                str(semantic_get(row, "reason")) != "",
+                "unknown callable rows carry a reason and never a row")
+         def reason = str(semantic_get(row, "reason"))
+         if reason == "builtin" || reason == "extern" || reason == "imported" {
+            found_extern_or_imported_reason = true
+         }
+         if reason == "builtin" {
+            found_unknown_builtin = true
+         }
+      }
+      ci += 1
+   }
+   assert(found_unknown_builtin,
+          "runtime builtins without contracts are known:false with reason \"builtin\"")
+   assert(found_extern_or_imported_reason || callable_rows.len > 640,
+          "builtin and imported callables stay distinguishable from proven rows")
+   def laws = semantic_proof_obligations(snapshot)
+   assert(laws.len >= 9,
+          "the proof table carries invariant, impl-law, refinement, lemma, and Fin<N> records")
+   def finite_lemma = semantic_find_lemma(snapshot, "semantic_effect_finite")
+   def lemma_bound = semantic_find_fin_bound(snapshot, "n")
+   def function_bound = semantic_find_fin_bound(snapshot, "index")
+   assert(semantic_get(finite_lemma, "status") == "unchecked" &&
+          semantic_get(finite_lemma, "name") == "semantic_effect_finite" &&
+          semantic_get(semantic_get(finite_lemma, "formula"), "type") ==
+             "binary",
+          "lemma formulas are visible as unchecked typed-pass obligations")
+   def lemma_origin = semantic_get(finite_lemma, "source_origin")
+   assert(semantic_find_obligation(
+             snapshot, "lemma", int(semantic_get(lemma_origin, "line")),
+             int(semantic_get(lemma_origin, "column")),
+             str(semantic_get(lemma_origin, "file"))) == finite_lemma,
+          "generic obligation lookup finds lemma records by authored origin")
+   assert(semantic_get(lemma_bound, "upper_exclusive") == 5 &&
+          semantic_get(lemma_bound, "status") == "assumed" &&
+          semantic_get(lemma_bound, "owner") == "semantic_effect_finite" &&
+          semantic_get(function_bound, "upper_exclusive") == 7 &&
+          semantic_get(function_bound, "function") ==
+             "semantic_effect_finite_index",
+          "Fin<N> parameter bounds expose their owner and half-open domain")
+   def bound_origin = semantic_get(function_bound, "source_origin")
+   assert(semantic_find_obligation(
+             snapshot, "fin-bound", int(semantic_get(bound_origin, "line")),
+             int(semantic_get(bound_origin, "column")),
+             str(semantic_get(bound_origin, "file"))) == function_bound,
+          "generic obligation lookup finds Fin<N> domains by parameter origin")
+   def proved_law = semantic_find_law(snapshot, "SemanticLawTrait",
+                                      "SemanticLawProved")
+   def refuted_law = semantic_find_law(snapshot, "SemanticLawTrait",
+                                       "SemanticLawRefuted")
+   def undecided_law = semantic_find_law(snapshot, "SemanticLawTrait",
+                                         "SemanticLawUnknown")
+   assert(semantic_get(proved_law, "status") == "proved",
+          "proved impl laws are visible with their trait and type")
+   assert(semantic_get(refuted_law, "status") == "refuted",
+          "impl law reflection distinguishes a refuted law")
+   assert(semantic_get(undecided_law, "status") == "unknown",
+          "impl law reflection keeps undecided laws distinct from refuted ones")
+   assert(is_nil(semantic_find_law(snapshot, "SemanticLawTrait",
+                                   "SemanticLawMissing")) &&
+          is_nil(semantic_find_law(snapshot, "", "")),
+          "missing and empty impl law lookups fail closed")
+   def refuted_origin = semantic_get(refuted_law, "source_origin")
+   assert(semantic_find_obligation(snapshot, "impl-law",
+             int(semantic_get(refuted_origin, "line", 0)),
+             int(semantic_get(refuted_origin, "column", 0)),
+             str(semantic_get(refuted_origin, "file", ""))) == refuted_law,
+          "generalized obligation lookup resolves impl-law records by origin")
+   mut trivial_invariant = nil
+   mut symbolic_invariant = nil
+   mut oi = 0
+   while oi < laws.len {
+      def obligation = laws.get(oi)
+      if semantic_get(obligation, "kind", "") == "invariant" {
+         if semantic_get(obligation, "function", "") ==
+            "semantic_invariant_trivial" {
+            trivial_invariant = obligation
+         } elif semantic_get(obligation, "function", "") ==
+                  "semantic_invariant_symbolic" {
+            symbolic_invariant = obligation
+         }
+      }
+      oi += 1
+   }
+   assert(semantic_get(trivial_invariant, "status") == "proved" &&
+          semantic_get(trivial_invariant, "function") ==
+            "semantic_invariant_trivial",
+          "proved loop invariants are visible with their enclosing function")
+   assert(semantic_get(symbolic_invariant, "status") == "not_proven" &&
+          semantic_get(symbolic_invariant, "verdict") == "unknown",
+          "unproven loop invariants report honest not_proven and unknown verdicts")
+   assert(is_nil(semantic_find_invariant(snapshot, 999)),
+          "missing invariant lookups fail closed")
+   mut found_refinement = false
+   mut pi = 0
+   while pi < laws.len {
+      def record = laws.get(pi)
+      if str(semantic_get(record, "kind", "")) == "refinement" {
+         assert(semantic_get(record, "name") == "SemanticPositive" &&
+                semantic_get(record, "status") == "proved",
+                "refinement construction obligations carry their type and status")
+         found_refinement = true
+      }
+      pi += 1
+   }
+   assert(found_refinement,
+          "refinement construction obligations are enumerated")
+   assert(semantic_find_obligation(snapshot, "requires", 72, 36) != nil,
+          "generalized obligation lookup finds call requires facts unit-wide")
+   assert(is_nil(semantic_find_obligation(snapshot, "unknown", 72)),
+          "generalized obligation lookup rejects unknown kinds")
+}
+
+test_real_semantic_artifact()

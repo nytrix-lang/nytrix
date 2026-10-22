@@ -1,0 +1,72 @@
+shape string_repeat_copy {
+  family "perf-real"
+  generator "stress"
+  features ["perf", "string", "repeat", "memory-copy", "c-vs-ny", "checksum", "time"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core.os.time
+use core.str
+
+fn repeat_case(int repetitions) int {
+   def str chunk = "0123456789abcdef0123456789abcdef"
+   def str repeated = str.repeat(chunk, repetitions)
+   mut int checksum = 0
+   mut int i = 0
+   while i < repeated.len {
+      checksum += load8(repeated, i)
+      ;; Sample one byte per page so construction and copy dominate.
+      i += 4096
+   }
+   checksum
+}
+
+def int t0 = ticks()
+def int checksum = repeat_case(32768) + repeat_case(524288) + repeat_case(4194304)
+def int t1 = ticks()
+assert(checksum == 1781760, "string repeat checksum")
+print("checksum=", checksum)
+print("elapsed_ns=", t1 - t0)
+NY
+  source c <<'C'
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+
+static const char chunk[] = "0123456789abcdef0123456789abcdef";
+
+static int64_t now_ns(void) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0;
+    return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
+}
+
+static int64_t repeat_case(int repetitions) {
+    const size_t chunk_len = sizeof(chunk) - 1;
+    const size_t total_len = chunk_len * (size_t)repetitions;
+    char *repeated = malloc(total_len + 1);
+    if (!repeated) return INT64_MIN;
+    for (int i = 0; i < repetitions; ++i)
+        memcpy(repeated + (size_t)i * chunk_len, chunk, chunk_len);
+    repeated[total_len] = '\0';
+    int64_t checksum = 0;
+    for (size_t i = 0; i < total_len; i += 4096)
+        checksum += (unsigned char)repeated[i];
+    free(repeated);
+    return checksum;
+}
+
+int main(void) {
+    int64_t start = now_ns();
+    int64_t checksum = repeat_case(32768) + repeat_case(524288) + repeat_case(4194304);
+    int64_t end = now_ns();
+    if (checksum != INT64_C(1781760)) return 3;
+    printf("checksum=%lld\n", (long long)checksum);
+    if (end <= start) end = start + 1;
+    printf("elapsed_ns=%lld\n", (long long)(end - start));
+    return 0;
+}
+C
+}

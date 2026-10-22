@@ -1,0 +1,13 @@
+shape test_local_import_probe_mod {
+  family "compiler/modules"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+module local_import_probe_mod(run)
+use core
+
+fn run() int { 7 }
+NY
+}

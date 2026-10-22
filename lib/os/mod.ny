@@ -1,47 +1,47 @@
 ;; Keywords: os filesystem path process subprocess io time thread async parallel atomic clipboard gpu opencl hardware platform
 ;; Portable host services for files, processes, time, concurrency, networking, and integration.
 ;; References:
-;; - std
+;; - core
 ;; Documentation:
 ;; ## Scope
-;; `std.os` is the host-services facade. Use a focused module rather than an
+;; `core.os` is the host-services facade. Use a focused module rather than an
 ;; implementation hook so portability and failure behavior remain visible.
 ;;
 ;; ## Namespaces
-;; - **Files and directories:** `std.os.fs`
-;; - **Paths:** `std.os.path`
-;; - **Wall-clock and monotonic time:** `std.os.time` and `std.os.clock`
-;; - **Processes and pipes:** `std.os.process` and `std.os.subprocess`
-;; - **Threads and atomics:** `std.os.thread` and `std.os.atomic`
-;; - **Async work:** `std.os.async` and `std.os.parallel`
-;; - **Browser fetch and clipboard:** `std.os` and `std.os.clipboard`
-;; - **Browser WebSockets:** `std.os.websocket`
+;; - **Files and directories:** `core.os.fs`
+;; - **Paths:** `core.os.path`
+;; - **Wall-clock and monotonic time:** `core.os.time` and `core.os.clock`
+;; - **Processes and pipes:** `core.os.process` and `core.os.subprocess`
+;; - **Threads and atomics:** `core.os.thread` and `core.os.atomic`
+;; - **Async work:** `core.os.async` and `core.os.parallel`
+;; - **Browser fetch and clipboard:** `core.os` and `core.os.clipboard`
+;; - **Browser WebSockets:** `core.os.websocket`
 ;;
 ;; ## Notes
 ;; Native and browser targets share this facade, but not every host capability.
 ;; Browser fetch, clipboard, and WebSockets depend on origin policy and
 ;; permissions. Unavailable operations return documented failure values.
-module std.os(pid, ppid, env, environ, getcwd, uid, gid, file_read, file_write, file_exists, file_append, file_remove, file_rename, os, arch, argv, args, path_sep, path_has_sep, path_is_abs, path_join, path_normalize, path_basename, path_dirname, path_extname, path_splitext, path_resolve_repo_asset, temp_dir, home_dir, config_dir, data_dir, cache_dir, is_file, is_dir, list_dir, walk, time, now, unix, now_ms, sleep, msleep, ticks, monotonic_ns, Instant, instant, since_ns, since_ms, Timer, timer, timer_start, elapsed_ns, elapsed_ms, elapsed_sec, format, format_time, run, popen, waitpid, spawn, send, sendline, recv, recv_line, recv_all, shutdown_send, close, run_capture, check_output, output, check_lines, shell, shell_lines, gpu_mode, gpu_backend, gpu_offload, gpu_min_work, gpu_async, gpu_fast_math, gpu_available, gpu_should_offload, gpu_offload_status, accel_target, accel_targets, accel_target_available, accel_target_triple, accel_binary_kind, accel_binary_ext, accel_backend, accel_target_status, accel_compile_plan, accel_emit_plan, accel_emit_command, parallel_mode, parallel_threads, parallel_min_work, parallel_should_threads, parallel_status, scheduler_policy, scheduler_status, work_stealing_enabled, work_stealing_plan, work_queue, work_queue_push, work_queue_pop, work_queue_steal, thread_spawn, thread_spawn_call, thread_launch, thread_launch_call, thread_join, mutex_new, mutex_lock, mutex_unlock, mutex_free, hardware_threads, atomic_i64, atomic_free, atomic_load, atomic_store, atomic_add, atomic_sub, atomic_exchange, atomic_compare_exchange, thread_budget, future, async, await, await_all, detach, future_wait, async_yield_now, async_sleep_ms, async_run, async_backend, async_state, parallel_map, parallel_map_indexed, parallel_each, chunk_ranges, opencl_available, opencl_toolchain_available, opencl_async, opencl_fast_math, opencl_should_offload, opencl_status, opencl_device_policy, opencl_compile_plan, opencl_kernel_plan, opencl_cpu_fallback_plan, opencl_dispatch_plan, opencl_work_groups, OS, ARCH, IS_LINUX, IS_MACOS, IS_WINDOWS, IS_X86_64, IS_AARCH64, IS_ARM, GPU_MODE, GPU_BACKEND, GPU_OFFLOAD, GPU_MIN_WORK, GPU_ASYNC, GPU_FAST_MATH, GPU_AVAILABLE, ACCEL_TARGET, ACCEL_OBJECT, PARALLEL_MODE, PARALLEL_THREADS, PARALLEL_MIN_WORK, SCHEDULER_POLICY, HARDWARE_THREADS, OPENCL_AVAILABLE, OPENCL_TOOLCHAIN_AVAILABLE, hardware_status, set_clipboard_text, get_clipboard_text, exit, fetch)
-use std.core
-use std.core.common as common
-use std.core.error
-use std.core.str
-use std.os.sys
-use std.core.io
-use std.os.path as ospath
-use std.os.net (requests_get_parsed)
-use std.core.dict_mod
-use std.os.prim as osprim
-use std.os.gpu as osg
-use std.os.parallel as ospar
-use std.os.async as osasync
-use std.os.thread as osthread
-use std.os.atomic as osatomic
-use std.os.args as osargs
-use std.os.time as ostime
-use std.os.process as osproc
-use std.os.io as osio
-use std.os.subprocess as subprocess
+module core.os(pid, ppid, env, environ, getcwd, uid, gid, file_read, file_write, file_exists, file_append, file_remove, file_rename, os, arch, argv, args, path_sep, path_has_sep, path_is_abs, path_join, path_normalize, path_basename, path_dirname, path_extname, path_splitext, path_resolve_repo_asset, temp_dir, home_dir, config_dir, data_dir, cache_dir, is_file, is_dir, list_dir, walk, time, now, unix, now_ms, sleep, msleep, ticks, monotonic_ns, Instant, instant, since_ns, since_ms, Timer, timer, timer_start, elapsed_ns, elapsed_ms, elapsed_sec, format, format_time, run, popen, waitpid, spawn, send, sendline, recv, recv_line, recv_all, shutdown_send, close, run_capture, check_output, output, check_lines, shell, shell_lines, gpu_mode, gpu_backend, gpu_offload, gpu_min_work, gpu_async, gpu_fast_math, gpu_available, gpu_should_offload, gpu_offload_status, accel_target, accel_targets, accel_target_available, accel_target_triple, accel_binary_kind, accel_binary_ext, accel_backend, accel_target_status, accel_compile_plan, accel_emit_plan, accel_emit_command, parallel_mode, parallel_threads, parallel_min_work, parallel_should_threads, parallel_status, scheduler_policy, scheduler_status, work_stealing_enabled, work_stealing_plan, work_queue, work_queue_push, work_queue_pop, work_queue_steal, thread_spawn, thread_spawn_call, thread_launch, thread_launch_call, thread_join, mutex_new, mutex_lock, mutex_unlock, mutex_free, hardware_threads, atomic_i64, atomic_free, atomic_load, atomic_store, atomic_add, atomic_sub, atomic_exchange, atomic_compare_exchange, thread_budget, future, async, await, await_all, detach, future_wait, async_yield_now, async_sleep_ms, async_run, async_backend, async_state, parallel_map, parallel_map_indexed, parallel_each, chunk_ranges, opencl_available, opencl_toolchain_available, opencl_async, opencl_fast_math, opencl_should_offload, opencl_status, opencl_device_policy, opencl_compile_plan, opencl_kernel_plan, opencl_cpu_fallback_plan, opencl_dispatch_plan, opencl_work_groups, OS, ARCH, IS_LINUX, IS_MACOS, IS_WINDOWS, IS_X86_64, IS_AARCH64, IS_ARM, GPU_MODE, GPU_BACKEND, GPU_OFFLOAD, GPU_MIN_WORK, GPU_ASYNC, GPU_FAST_MATH, GPU_AVAILABLE, ACCEL_TARGET, ACCEL_OBJECT, PARALLEL_MODE, PARALLEL_THREADS, PARALLEL_MIN_WORK, SCHEDULER_POLICY, HARDWARE_THREADS, OPENCL_AVAILABLE, OPENCL_TOOLCHAIN_AVAILABLE, hardware_status, set_clipboard_text, get_clipboard_text, exit, fetch)
+use core
+use core.common as common
+use core.error
+use core.str
+use core.os.sys
+use core.io
+use core.os.path as ospath
+use core.os.net (requests_get_parsed)
+use core.dict_mod
+use core.os.prim as osprim
+use core.os.gpu as osg
+use core.os.parallel as ospar
+use core.os.async as osasync
+use core.os.thread as osthread
+use core.os.atomic as osatomic
+use core.os.args as osargs
+use core.os.time as ostime
+use core.os.process as osproc
+use core.os.io as osio
+use core.os.subprocess as subprocess
 
 fn _clipboard_tool() str {
    #linux {
@@ -612,13 +612,13 @@ fn _is_transient_file_error(any code) bool {
    } #endif
 }
 
-fn _open_with_retry(str path, int flags, int mode) Result {
-   mut tries = 0
-   mut last = err(-1)
+fn _open_raw_with_retry(str path, int flags, int mode) int {
+   mut int tries = 0
+   mut int last = -1
    while tries < 5 {
-      last = sys_open(path, flags, mode)
-      if is_ok(last) { return last }
-      if _is_transient_file_error(__unwrap(last)) {
+      last = __open_raw(path, flags, mode)
+      if last >= 0 { return last }
+      if _is_transient_file_error(__tag(last)) {
          msleep(10)
          tries += 1
          continue
@@ -630,29 +630,38 @@ fn _open_with_retry(str path, int flags, int mode) Result {
 
 fn _file_write_impl(str path, any content, int flags) Result<int, int> {
    def p = ospath.normalize(path)
-   def open_res = _open_with_retry(p, flags, 420)
-   if is_err(open_res) { return open_res }
-   def fd = unwrap(open_res)
-   def n = content.len
-   mut off = 0
+   def int fd = _open_raw_with_retry(p, flags, 420)
+   if fd < 0 { return err(__tag(fd)) }
+   ;; Keep the original dynamic string handle for its exact length. Converting
+   ;; it to the raw native string ABI first can lose the length sidecar and
+   ;; make C-string sizing read beyond the payload. Managed bytes remain binary.
+   mut any buffer = content
+   mut int n = 0
+   if is_bytes(content) {
+      n = len(content)
+   } else {
+      def str text = content
+      buffer = text
+      n = is_str(content) ? len(content) : __str_len(text)
+   }
+   mut int off = 0
    while off < n {
-      ;; The low-level syscall adapter consumes Nytrix integer values. The
-      ;; loop counters are raw typed ints, so tag them at this ABI boundary;
-      ;; otherwise an odd raw count (5) is interpreted as tagged 2 by the
-      ;; runtime and a five-byte write is silently truncated.
-      def w = __write_off_raw(fd, content, n - off, off)
+      ; Keep the descriptor and byte counts on the raw native ABI.  The
+      ; dynamic tagged entry can mistake raw odd descriptors for tagged ints
+      ; after native lowering (for example fd 3 becomes fd 1).
+      def int w = __write_off_raw(fd, buffer, n - off, off)
       if w < 0 {
          sys_close_quiet(fd)
-         return err(w)
+         return err(__tag(w))
       }
       if w <= 0 {
          sys_close_quiet(fd)
-         return err(-5)
+         return err(__tag(-5))
       }
       off += w
    }
    sys_close_quiet(fd)
-   ok(off)
+   ok(__tag(off))
 }
 
 fn getcwd() str {
@@ -684,63 +693,51 @@ fn gid() int {
 fn file_read(str path) Result<str, int> {
    "Reads the whole file at `path`; returns `ok(content_string)` or `err(errno_like_code)`."
    def p = ospath.normalize(path)
-   match sys_open(p, 0, 0) {
-      ok(fd) -> {
-         mut cap = 4096
-         mut base = malloc(cap + 16)
-         if base == 0 {
-            sys_close_quiet(fd)
-            return err(-1)
-         }
-         mut buf = base + 16
-         def tmp = malloc(4096)
-         if tmp == 0 {
+   def int fd = _open_raw_with_retry(p, 0, 0)
+   if fd < 0 { return err(__tag(fd)) }
+   mut int cap = 4096
+   mut ptr base = malloc(cap)
+   if base == 0 {
+      sys_close_quiet(fd)
+      return err(__tag(-1))
+   }
+   mut ptr buf = base
+   def ptr tmp = malloc(4096)
+   if tmp == 0 {
+      free(base)
+      sys_close_quiet(fd)
+      return err(__tag(-1))
+   }
+   mut int tlen = 0
+   while true {
+      def int count = __read_off(fd, tmp, 4096, 0)
+      if count < 0 {
+         free(tmp)
+         free(base)
+         sys_close_quiet(fd)
+         return err(__tag(count))
+      }
+      if count == 0 { break }
+      if tlen + count >= cap {
+         while tlen + count >= cap { cap = cap * 2 }
+         def nbase = realloc(base, cap)
+         if nbase == 0 {
+            free(tmp)
             free(base)
             sys_close_quiet(fd)
-            return err(-1)
+            return err(__tag(-1))
          }
-         mut tlen = 0
-         while true {
-            def read_word = __read_off_raw(fd, tmp, 4096, 0)
-            match ok(__tag(read_word)) {
-               ok(r) -> {
-                  ;; Result integer payloads are tagged language values.
-                  ;; Decode exactly once before using the count as a raw
-                  ;; buffer length; an odd byte count such as 5 must remain 5.
-                  def int count = __untag(r)
-                  if count <= 0 { break }
-                  if tlen + count >= cap {
-                     while tlen + count >= cap { cap = cap * 2 }
-                     def nbase = realloc(base, cap + 16)
-                     if nbase == 0 {
-                        free(tmp, base)
-                        sys_close_quiet(fd)
-                        return err(-1)
-                     }
-                     base = nbase
-                     buf = base + 16
-                  }
-                  ;; __copy_mem consumes a raw byte count. Tagging `count`
-                  ;; doubled the copy span plus one, corrupting file content
-                  ;; and every consumer such as proof-index JSON reload.
-                  __copy_mem(ptr_add(buf, tlen), tmp, __tag(count))
-                  tlen = tlen + count
-               }
-               err(e) -> {
-                  free(tmp, base)
-                  sys_close_quiet(fd)
-                  return err(e)
-               }
-            }
-         }
-         free(tmp)
-         store8(buf, 0, tlen)
-         sys_close_quiet(fd)
-         def final = init_str(buf, tlen)
-         return ok(final)
+         base = nbase
+         buf = base
       }
-      err(e) -> { return err(e) }
+      __copy_mem(ptr_add(buf, tlen), tmp, count)
+      tlen = tlen + count
    }
+   free(tmp)
+   store8(buf, 0, tlen)
+   sys_close_quiet(fd)
+   def str final = __init_str_raw(buf, tlen)
+   return ok(final)
 }
 
 fn file_write(str path, any content) Result<int, int> {
@@ -783,13 +780,13 @@ fn file_rename(str old_path, str new_path) Result<int, int> {
    def src = ospath.normalize(old_path)
    def dst = ospath.normalize(new_path)
    if src.len <= 0 || dst.len <= 0 { return err(-1) }
-   def res = __rename(src, dst)
+   def res = __rename_raw(src, dst)
    if res >= 0 { return ok(0) }
    err(res)
 }
 
 @inline
-fn exit(int code=0) any {
+fn exit(any code=0) any {
    "Terminates the calling process with the given status code."
    __exit(code)
 }
@@ -847,5 +844,5 @@ fn exit(int code=0) any {
    assert(__argc() == 0, "os facade empty argc")
    assert(__argvp() != 0, "os facade empty argv snapshot")
    assert(__argv(0) == nil, "os facade argv out of range")
-   print("✓ std.os self-test passed")
+   print("✓ core.os self-test passed")
 }

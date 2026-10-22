@@ -1,0 +1,24 @@
+shape native_all_architectures {
+  family "runtime-native"
+  generator "native"
+  features ["native", "target", "architecture-matrix", "divmod"]
+  estimate_ms 28000
+  template ny-test-case
+  # This source exercises scalar arithmetic and conditional selection without
+  # a stdlib dependency.
+  # Avoid repeatedly initializing the core module for each target backend.
+  # WebAssembly runtime parity has its own executable direct-text fixture.
+  flags_matrix "-no-std -O3 --nyir-verify --emit-asm=/tmp/nytrix-native-all-aarch64.s --native-backend aarch64; -no-std -O3 --nyir-verify --emit-asm=/tmp/nytrix-native-all-arm.s --native-backend arm --native-abi aapcs; -no-std -O3 --nyir-verify --emit-asm=/tmp/nytrix-native-all-bpf.s --native-backend bpf; -no-std -O3 --nyir-verify --emit-asm=/tmp/nytrix-native-all-mips.s --native-backend mips; -no-std -O3 --nyir-verify --emit-asm=/tmp/nytrix-native-all-powerpc.s --native-backend powerpc; -no-std -O3 --nyir-verify --emit-asm=/tmp/nytrix-native-all-riscv.s --native-backend riscv; -no-std -O3 --nyir-verify --emit-asm=/tmp/nytrix-native-all-x86.s --native-backend x86"
+  expect compile_and_run
+  source ny <<'NY'
+fn mix(i64 a, i64 b) i64 {
+  (a / b) + (a % b)
+}
+
+fn choose(i64 left, i64 right) i64 {
+  if left < right { left + right } else { left - right }
+}
+
+(1 + 2) + mix(10, 3) + choose(2, 1)
+NY
+}

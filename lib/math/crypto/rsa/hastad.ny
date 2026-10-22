@@ -6,10 +6,10 @@
 ;; - https://people.csail.mit.edu/rivest/Rsapaper.pdf
 ;; - https://crypto.stanford.edu/~dabo/pubs/papers/RSA-survey.pdf
 ;; References:
-;; - std.math.crypto.rsa
-;; - std.math.crypto
-module std.math.crypto.rsa.hastad(hastad_solve, hastad_find, hastad_attack, hastad_attack_report, hastads_attack)
-use std.math.nt
+;; - core.math.crypto.rsa
+;; - core.math.crypto
+module core.math.crypto.rsa.hastad(hastad_solve, hastad_find, hastad_attack, hastad_attack_report, hastads_attack)
+use core.math.nt
 
 fn _hastad_exp(any e) int { int(e) }
 

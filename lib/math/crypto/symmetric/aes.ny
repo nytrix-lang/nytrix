@@ -4,15 +4,15 @@
 ;; - https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.197-upd1.pdf
 ;; Implementation of AES-128, AES-192, and AES-256.
 ;; References:
-;; - std.math.crypto.symmetric
-;; - std.math.crypto
-module std.math.crypto.symmetric.aes(aes_encrypt_block, aes_decrypt_block, aes_init,
+;; - core.math.crypto.symmetric
+;; - core.math.crypto
+module core.math.crypto.symmetric.aes(aes_encrypt_block, aes_decrypt_block, aes_init,
    aes_encrypt_ecb, aes_decrypt_ecb, aes_encrypt_cbc, aes_decrypt_cbc, aes_encrypt_ctr,
    aes_sbox, aes_inv_sbox, aes_matrix_to_bytes, aes_add_round_key_matrix,
    aes_sub_bytes_matrix, aes_inv_shift_rows_matrix, aes_inv_mix_columns_matrix)
-use std.core
-use std.math.bin (unpack_be32)
-use std.math.simmd as simmd
+use core
+use core.math.bin (unpack_be32)
+use core.math.simmd as simmd
 
 fn _build_aes_sbox() list {
    [
@@ -93,7 +93,7 @@ fn aes_add_round_key_matrix(list state, list round_key) list {
       mut row = []
       mut j = 0
       while j < state[i].len {
-         row = row.append(state[i][j] ^^ round_key[i][j])
+         row = row.append(state[i][j] ^ round_key[i][j])
          j += 1
       }
       out = out.append(row)
@@ -141,7 +141,7 @@ def AES_RCON = _build_aes_rcon()
 
 fn _xtime(int x) int {
    def y = (x << 1) & 0xff
-   (x & 0x80) != 0 ? (y ^^ 0x1b) : y
+   (x & 0x80) != 0 ? (y ^ 0x1b) : y
 }
 
 fn _sub_word(any w) any {
@@ -167,11 +167,11 @@ fn aes_init(list key) list {
    while i < words {
       mut temp = w[i - 1]
       if i % nk == 0 {
-         temp = _sub_word(_rot_word(temp)) ^^ (AES_RCON[i / nk] << 24)
+         temp = _sub_word(_rot_word(temp)) ^ (AES_RCON[i / nk] << 24)
       } elif nk > 6 && i % nk == 4 {
          temp = _sub_word(temp)
       }
-      w[i] = w[i - nk] ^^ temp
+      w[i] = w[i - nk] ^ temp
       i += 1
    }
    [w, nr]
@@ -195,11 +195,11 @@ fn _shift_rows(list st) any {
 fn _mix_columns(list st) any {
    mut i = 0 while i < 4 {
       def b0 = st[i*4] def b1 = st[i*4+1] def b2 = st[i*4+2] def b3 = st[i*4+3]
-      def t, u = b0 ^^ b1 ^^ b2 ^^ b3, b0
-      st[i*4] = b0 ^^ t ^^ _xtime(b0 ^^ b1)
-      st[i*4+1] = b1 ^^ t ^^ _xtime(b1 ^^ b2)
-      st[i*4+2] = b2 ^^ t ^^ _xtime(b2 ^^ b3)
-      st[i*4+3] = b3 ^^ t ^^ _xtime(b3 ^^ u)
+      def t, u = b0 ^ b1 ^ b2 ^ b3, b0
+      st[i*4] = b0 ^ t ^ _xtime(b0 ^ b1)
+      st[i*4+1] = b1 ^ t ^ _xtime(b1 ^ b2)
+      st[i*4+2] = b2 ^ t ^ _xtime(b2 ^ b3)
+      st[i*4+3] = b3 ^ t ^ _xtime(b3 ^ u)
       i += 1
    }
 }
@@ -222,11 +222,11 @@ fn _inv_shift_rows(list st) any {
 fn _inv_mix_columns(list st) any {
    mut i = 0 while i < 4 {
       def b0 = st[i*4] def b1 = st[i*4+1] def b2 = st[i*4+2] def b3 = st[i*4+3]
-      def u, v = _xtime(_xtime(b0 ^^ b2)), _xtime(_xtime(b1 ^^ b3))
-      st[i*4] = b0 ^^ u
-      st[i*4+1] = b1 ^^ v
-      st[i*4+2] = b2 ^^ u
-      st[i*4+3] = b3 ^^ v
+      def u, v = _xtime(_xtime(b0 ^ b2)), _xtime(_xtime(b1 ^ b3))
+      st[i*4] = b0 ^ u
+      st[i*4+1] = b1 ^ v
+      st[i*4+2] = b2 ^ u
+      st[i*4+3] = b3 ^ v
       i += 1
    }
    _mix_columns(st)
@@ -235,10 +235,10 @@ fn _inv_mix_columns(list st) any {
 fn _add_round_key(list st, list w, int r) any {
    mut i = 0 while i < 4 {
       def word = w[r*4 + i]
-      st[i*4] = st[i*4] ^^ ((word >> 24) & 0xff)
-      st[i*4+1] = st[i*4+1] ^^ ((word >> 16) & 0xff)
-      st[i*4+2] = st[i*4+2] ^^ ((word >> 8)  & 0xff)
-      st[i*4+3] = st[i*4+3] ^^ (word & 0xff)
+      st[i*4] = st[i*4] ^ ((word >> 24) & 0xff)
+      st[i*4+1] = st[i*4+1] ^ ((word >> 16) & 0xff)
+      st[i*4+2] = st[i*4+2] ^ ((word >> 8)  & 0xff)
+      st[i*4+3] = st[i*4+3] ^ (word & 0xff)
       i += 1
    }
 }
@@ -346,7 +346,7 @@ fn aes_encrypt_cbc(list key, list iv, list plaintext) list {
       mut i = 0
       while i < 16 {
          def src = p + i
-         block[i] = (src < plaintext.len ? plaintext[src] : 0) ^^ prev[i]
+         block[i] = (src < plaintext.len ? plaintext[src] : 0) ^ prev[i]
          i += 1
       }
       _aes_encrypt_state(ctx, block)
@@ -382,7 +382,7 @@ fn aes_decrypt_cbc(list key, list iv, list ciphertext) any {
       _aes_decrypt_state(ctx, block)
       i = 0
       while i < 16 {
-         res = res.append(block[i] ^^ prev[i])
+         res = res.append(block[i] ^ prev[i])
          i += 1
       }
       def tmp = prev
@@ -420,7 +420,7 @@ fn aes_encrypt_ctr(list key, list nonce_counter, list data) list {
       _aes_encrypt_state(ctx, block)
       mut i = 0
       while i < 16 && p + i < data.len {
-         out = out.append(data[p + i] ^^ block[i])
+         out = out.append(data[p + i] ^ block[i])
          i += 1
       }
       _aes_inc128_inplace(ctr)

@@ -1,0 +1,102 @@
+shape word_frequency {
+  family "perf-real"
+  generator "stress"
+  features ["perf", "string", "split", "dict", "c-vs-ny", "checksum", "time"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core.dict
+use core.os.time
+use core.str
+;; Repeated text stresses byte scanning and string-keyed aggregation.
+def int repetitions = 25000
+def str vocabulary = "amber birch cobalt delta ember fern garnet hazel indigo "
+def int t0 = ticks()
+def str corpus = str.repeat(vocabulary, repetitions)
+;; This scans token spans and allocates keys only when a word is first seen.
+def counts = str.word_frequency(corpus)
+def int checksum = int(counts.get("amber", 0)) + 2 * int(counts.get("birch", 0)) +
+   3 * int(counts.get("cobalt", 0)) + 4 * int(counts.get("delta", 0)) +
+   5 * int(counts.get("ember", 0)) + 6 * int(counts.get("fern", 0)) +
+   7 * int(counts.get("garnet", 0)) + 8 * int(counts.get("hazel", 0)) +
+   9 * int(counts.get("indigo", 0))
+def int t1 = ticks()
+assert(checksum == 1125000, "word-frequency checksum")
+print("checksum=", checksum)
+print("elapsed_ns=", t1 - t0)
+NY
+  source c <<'C'
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+
+enum { REPETITIONS = 25000, TABLE_SIZE = 32 };
+static const char vocabulary[] = "amber birch cobalt delta ember fern garnet hazel indigo ";
+
+typedef struct {
+    const char *key;
+    int64_t count;
+} slot_t;
+
+static int64_t now_ns(void) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0;
+    return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
+}
+
+static uint64_t hash_string(const char *s) {
+    uint64_t h = UINT64_C(1469598103934665603);
+    while (*s) {
+        h ^= (unsigned char)*s++;
+        h *= UINT64_C(1099511628211);
+    }
+    return h;
+}
+
+static int64_t get_count(const slot_t *table, const char *key) {
+    size_t at = (size_t)hash_string(key) & (TABLE_SIZE - 1);
+    while (table[at].key && strcmp(table[at].key, key) != 0)
+        at = (at + 1) & (TABLE_SIZE - 1);
+    return table[at].key ? table[at].count : 0;
+}
+
+int main(void) {
+    int64_t start = now_ns();
+    size_t vocab_len = sizeof(vocabulary) - 1;
+    size_t corpus_len = vocab_len * REPETITIONS;
+    char *corpus = malloc(corpus_len + 1);
+    if (!corpus) return 2;
+    for (int i = 0; i < REPETITIONS; ++i)
+        memcpy(corpus + (size_t)i * vocab_len, vocabulary, vocab_len);
+    corpus[corpus_len] = '\0';
+
+    slot_t table[TABLE_SIZE] = {{0}};
+    char *p = corpus;
+    while (*p) {
+        while (*p == ' ') ++p;
+        if (!*p) break;
+        char *word = p;
+        while (*p && *p != ' ') ++p;
+        if (*p) *p++ = '\0';
+        size_t at = (size_t)hash_string(word) & (TABLE_SIZE - 1);
+        while (table[at].key && strcmp(table[at].key, word) != 0)
+            at = (at + 1) & (TABLE_SIZE - 1);
+        if (!table[at].key) table[at].key = word;
+        ++table[at].count;
+    }
+    int64_t checksum = get_count(table, "amber") + 2 * get_count(table, "birch") +
+        3 * get_count(table, "cobalt") + 4 * get_count(table, "delta") +
+        5 * get_count(table, "ember") + 6 * get_count(table, "fern") +
+        7 * get_count(table, "garnet") + 8 * get_count(table, "hazel") +
+        9 * get_count(table, "indigo");
+    int64_t end = now_ns();
+    free(corpus);
+    printf("checksum=%lld\n", (long long)checksum);
+    if (end <= start) end = start + 1;
+    printf("elapsed_ns=%lld\n", (long long)(end - start));
+    return 0;
+}
+C
+}

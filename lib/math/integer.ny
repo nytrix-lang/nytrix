@@ -1,9 +1,9 @@
 ;; Keywords: integer modular-arithmetic math
 ;; Integer arithmetic, modular arithmetic, roots, divisibility, and number conversion.
 ;; References:
-;; - std.math
-module std.math.integer(Z, ZZ, Int, Integer, is_bigint, bigint, gcd, lcm, xgcd, egcd, mod, inverse_mod)
-use std.math.big
+;; - core.math
+module core.math.integer(Z, ZZ, Int, Integer, is_bigint, bigint, gcd, lcm, xgcd, egcd, mod, inverse_mod)
+use core.math.big
 
 fn Z(any n) bigint { bigint(n) }
 

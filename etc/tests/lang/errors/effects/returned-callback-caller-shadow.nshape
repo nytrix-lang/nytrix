@@ -1,0 +1,37 @@
+shape returned_callback_ignores_caller_local_shadow {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "callback", "return", "shadowing"]
+  template ny-test-case
+  flags_matrix "--effect-require-known"
+  expect compile_fail
+  expect_message "effect contract violation in 'std.project.invoke': declared @effects(none) but inferred"
+  source ny <<'NY'
+module std.project(
+  global_io,
+  make_callback,
+  invoke
+)
+
+fn global_io() int {
+  print("real global IO callback\n")
+  0
+}
+
+fn make_callback() fnptr {
+  return fn(value) {
+    global_io()
+    value
+  }
+}
+
+@effects(none)
+fn invoke() int {
+  def global_io = fn() { 0 }
+  def callback = make_callback()
+  callback(41)
+}
+
+print("unreachable")
+NY
+}

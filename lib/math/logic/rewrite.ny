@@ -1,8 +1,8 @@
 ;; Keywords: logic rewrite normalize congruence bounded terms
-;; Deterministic, bounded rewriting over std.math.logic.prolog terms.
-module std.math.logic.rewrite(rule, is_rule, rewrite_once, normalize)
-use std.core
-use std.math.logic.prolog as prolog
+;; Deterministic, bounded rewriting over core.math.logic.prolog terms.
+module core.math.logic.rewrite(rule, is_rule, rewrite_once, normalize)
+use core
+use core.math.logic.prolog as prolog
 
 ;; Returns the result of the `rule` operation.
 fn rule(any pattern, any replacement) dict {
@@ -159,24 +159,25 @@ fn normalize(any value, list rules, int max_passes=256,
    while passes < max_passes {
       def result = rewrite_once(current, rules, remaining_steps,
          max_depth, remaining_nodes, max_variables, remaining_memory)
-      current = result.get("value")
+      def next = result.get("value")
       remaining_steps -= result.get("steps")
       remaining_nodes -= result.get("nodes")
       remaining_memory -= result.get("memory")
       passes += 1
       if !result.get("decided") {
          return {"decided":false, "reason":result.get("reason"),
-            "value":current, "passes":passes,
+            "value":next, "passes":passes,
             "steps":max_steps - remaining_steps,
             "nodes":max_nodes - remaining_nodes,
             "memory":max_memory - remaining_memory}
       }
       if !result.get("changed") {
-         return {"decided":true, "reason":"normal form", "value":current,
+         return {"decided":true, "reason":"normal form", "value":next,
             "passes":passes, "steps":max_steps - remaining_steps,
             "nodes":max_nodes - remaining_nodes,
             "memory":max_memory - remaining_memory}
       }
+      current = next
       if remaining_steps <= 0 || remaining_nodes <= 0 || remaining_memory <= 0 {
          return {"decided":false,
             "reason":remaining_steps <= 0 ? "step limit" :

@@ -1,9 +1,9 @@
 ;; Keywords: viewer app bootstrap renderer assets layout window os ui render
 ;; Application-level UI setup for layout, assets, renderer state, and run-loop integration.
 ;; References:
-;; - std.os.ui.render.viewer.runtime
-;; - std.os.ui.render.viewer.gui
-module std.os.ui.render.viewer.app(
+;; - core.os.ui.render.viewer.runtime
+;; - core.os.ui.render.viewer.gui
+module core.os.ui.render.viewer.app(
    app_absf, app_resolve_repo_asset, app_key_is_shift, app_key_is_ctrl, app_effective_mods,
    app_pick_font, app_list_find_text, app_push_hist_sample, app_hist_mean,
    app_hist_max, app_hist_mean_max, app_flag_names, app_scene_feature_names, app_msaa_index, app_msaa_samples,
@@ -13,13 +13,13 @@ module std.os.ui.render.viewer.app(
    app_window_h, app_window_body_h, app_window_compact, app_rect_text, app_card_w, app_graph_node
 )
 
-use std.core
-use std.core.str as str
-use std.os.path as ospath
-use std.os.ui.window.consts
-use std.os.ui.render.viewer.gui as gui
-use std.os.ui.window.input as uin
-use std.core.common as common
+use core
+use core.str as str
+use core.os.path as ospath
+use core.os.ui.window.consts
+use core.os.ui.render.viewer.gui as gui
+use core.os.ui.window.input as uin
+use core.common as common
 
 def _APP_SCENE_FEATURE_FLAGS = [
    [16, "specular"], [32, "sheen"], [64, "clearcoat"], [128, "transmission"],
@@ -74,11 +74,11 @@ fn app_list_find_text(any items, any value) int {
    -1
 }
 
-fn app_push_hist_sample(any hist, any value, any limit=256) list {
+fn app_push_hist_sample(list hist, f64 value, int limit=256) list {
    "Appends one numeric sample and bounds history length with batched trimming."
-   mut out = is_list(hist) ? hist : []
+   mut out = hist
    def cap = max(1, int(limit))
-   out = out.append(float(value))
+   out = out.append(value)
    if out.len > cap + 64 { out = slice(out, out.len - cap, out.len) }
    out
 }
@@ -343,5 +343,5 @@ fn app_graph_node(any title, any x, any y, any inputs, any outputs, any selected
    assert(app_renderer_hotspot_label(stats) == "dynamic draw pressure" && app_renderer_stats_line(stats).len > 0, "app renderer stats")
    def node = app_graph_node("Mix", 10, 20, ["a"], ["b"], true, 240)
    assert(node.get("title") == "Mix" && node.get("selected") == true, "app graph node")
-   print("✓ std.os.ui.render.viewer.app self-test passed")
+   print("✓ core.os.ui.render.viewer.app self-test passed")
 }

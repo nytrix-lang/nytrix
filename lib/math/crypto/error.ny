@@ -1,13 +1,13 @@
 ;; Keywords: error panic precondition require validation crypto-error math crypto
 ;; Crypto error and precondition routines for consistent failure reporting.
 ;; References:
-;; - std.math.crypto
-module std.math.crypto.error(crypto_fail, crypto_require, crypto_require_nonempty, crypto_require_len)
-use std.core
+;; - core.math.crypto
+module core.math.crypto.error(crypto_fail, crypto_require, crypto_require_nonempty, crypto_require_len)
+use core
 
 fn crypto_fail(str scope, str msg) any {
    "Raise a standardized crypto module panic with a scoped message."
-   panic("std.math.crypto." + scope + ": " + msg)
+   panic("core.math.crypto." + scope + ": " + msg)
 }
 
 fn crypto_require(bool cond, str scope, str msg) bool {

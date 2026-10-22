@@ -1,0 +1,19 @@
+shape ownership_rule_linear_resource_capture {
+  family "compiler-errors/ownership"
+  generator "error"
+  features ["error", "ownership", "resource", "linear", "closure"]
+  template ny-compile-fail
+  expect compile_fail
+  flags "--ownership-strict"
+  expect_message "[L4] ownership"
+  source ny <<'NY'
+linear layout File { int fd }
+
+fn capture(File file) int {
+  def later = fn() { file.fd }
+  0
+}
+
+capture(File(37))
+NY
+}

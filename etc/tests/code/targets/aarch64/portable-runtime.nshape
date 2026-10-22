@@ -1,0 +1,326 @@
+shape aarch64_portable_text_executes_signed_comparisons_divmod_and_select {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "test", "aarch64", "portable-text", "runtime", "control-flow",
+            "ror32"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os (file_read, file_remove, file_write, run_capture, temp_dir, pid)
+
+def compiler = env("NYTRIX_NY_FULL_BIN")
+assert(is_str(compiler) && compiler.len > 0,
+       "test runner provides the compiler path")
+def stem = temp_dir() + "/ny-aarch64-portable-" + to_str(pid())
+fn run_qemu(str qemu, str executable) dict {
+  run_capture(["sh", "-c", "ulimit -c 0; exec \"$@\"", "sh", qemu,
+               executable], [], nil, false)
+}
+def asm_path = stem + ".s"
+def start_path = stem + "-start.s"
+def exe_path = stem
+def start_source =
+  ".text\n.globl _start\n.type _start, %function\n_start:\n" +
+  "  bl rt_main\n  mov x8, #93\n  svc #0\n"
+assert(is_ok(file_write(start_path, start_source)),
+       "write AArch64 Linux startup wrapper")
+def program =
+  "fn divmod(int value) int { value / 3 * 3 + value % 3 }\n" +
+  "@noinline\nfn rotate_right_8(int value) int {\n" +
+  "  if value >= 0 { (value >> 8) | (value << 56) } else { 0 }\n" +
+  "}\n" +
+  "@noinline\nfn rotate_right_1(int value) int {\n" +
+  "  if value >= 0 { (value >> 1) | (value << 63) } else { 0 }\n" +
+  "}\n" +
+  "@noinline\nfn rotate_right_63(int value) int {\n" +
+  "  if value >= 0 { (value >> 63) | (value << 1) } else { 0 }\n" +
+  "}\n" +
+  "@noinline\nfn rotate_right32(int value, int count) int {\n" +
+  "  def word = value & 0xffffffff\n" +
+  "  def shift = count & 31\n" +
+  "  ((word >> shift) | (word << (32 - shift))) & 0xffffffff\n" +
+  "}\n" +
+  "@noinline\nfn rotate_right32_8(int value) int {\n" +
+  "  def word = value & 0xffffffff\n" +
+  "  ((word >> 8) | (word << 24)) & 0xffffffff\n" +
+  "}\n" +
+  "@noinline\nfn integer_ops_check(int left, int right) int {\n" +
+  "  def result = (left + right) + (left - right) + (left * right) +\n" +
+  "               (left & right) + (left | right) + (left ^ right) +\n" +
+  "               (left << 1) + (left >> 1)\n" +
+  "  if result == -142 { 0 } else { 1 }\n" +
+  "}\n" +
+  "fn choose(int left, int right) int {\n" +
+  "  if left < right { left + right } else { 0 }\n" +
+  "}\n" +
+  "fn is_true(bool value) int { if value { 1 } else { 0 } }\n" +
+  "fn compare_sum(int left, int right) int {\n" +
+  "  is_true(left == right) + is_true(left != right) +\n" +
+  "  is_true(left < right) + is_true(left <= right) +\n" +
+  "  is_true(left > right) + is_true(left >= right)\n" +
+  "}\nchoose(20, 22) + choose(22, 20) + compare_sum(20, 22) +\n" +
+  "compare_sum(22, 20) + compare_sum(22, 22) +\n" +
+  "divmod(20) + divmod(-19) + integer_ops_check(-13, 5) + " +
+  "(rotate_right_8(0x0123456789abcd2e) == 0x2e0123456789abcd ? 0 : 1) + " +
+  "(rotate_right_1(0x0123456789abcd2e) == 0x0091a2b3c4d5e697 ? 0 : 1) + " +
+  "(rotate_right_63(0x0123456789abcd2e) == 0x02468acf13579a5c ? 0 : 1) + " +
+  "(rotate_right32(0x0123456789abcd2e, 1) == 0x44d5e697 ? 0 : 1) + " +
+  "(rotate_right32(0x0123456789abcd2e, 8) == 0x2e89abcd ? 0 : 1) + " +
+  "(rotate_right32(0x0123456789abcd2e, 31) == 0x13579a5d ? 0 : 1) + " +
+  "(rotate_right32(0x0123456789abcd2e, 32) == 0x89abcd2e ? 0 : 1) + " +
+  "(rotate_right32_8(0x0123456789abcd2e) == 0x2e89abcd ? 0 : 1)"
+def emitted = run_capture(
+    [compiler, "--native-backend=aarch64", "--native-only", "-O3",
+     "--nyir-verify", "--emit-asm=" + asm_path, "-no-std", "-emit-only",
+     "-e", program],
+    [], nil, false)
+def linked = run_capture(
+    ["clang", "--target=aarch64-unknown-linux-gnu", "-march=armv8-a",
+     "-fuse-ld=lld", "-nostdlib", "-static", "-Wl,-e,_start",
+     "-Wl,--build-id=none", "-o", exe_path, asm_path, start_path],
+    [], nil, false)
+def execution = run_qemu("qemu-aarch64", exe_path)
+def checked_asm = stem + "-checked.s"
+def checked_exe = stem + "-checked"
+def checked_emit = run_capture(
+    [compiler, "--native-backend=aarch64", "--native-only", "--nyir-verify",
+     "--emit-asm=" + checked_asm, "-no-std", "-emit-only", "-e",
+     "fn divide(int left, int right) int { left / right }\ndivide(9, 3)"],
+    [], nil, false)
+def checked_link = run_capture(
+    ["clang", "--target=aarch64-unknown-linux-gnu", "-march=armv8-a",
+     "-fuse-ld=lld", "-nostdlib", "-static", "-Wl,-e,_start",
+     "-Wl,--build-id=none", "-o", checked_exe, checked_asm, start_path],
+    [], nil, false)
+def checked_execution = run_qemu("qemu-aarch64", checked_exe)
+def zero_asm = stem + "-zero.s"
+def zero_exe = stem + "-zero"
+def zero_emit = run_capture(
+    [compiler, "--native-backend=aarch64", "--native-only", "--nyir-verify",
+     "--emit-asm=" + zero_asm, "-no-std", "-emit-only", "-e",
+     "fn divide(int left, int right) int { left / right }\n" +
+     "mut int divisor = 1\nwhile divisor > 0 { divisor -= 1 }\n" +
+     "divide(9, divisor)"],
+    [], nil, false)
+def zero_link = run_capture(
+    ["clang", "--target=aarch64-unknown-linux-gnu", "-march=armv8-a",
+     "-fuse-ld=lld", "-nostdlib", "-static", "-Wl,-e,_start",
+     "-Wl,--build-id=none", "-o", zero_exe, zero_asm, start_path],
+    [], nil, false)
+def zero_execution = run_qemu("qemu-aarch64", zero_exe)
+def bswap_asm = stem + "-bswap.s"
+def bswap_exe = stem + "-bswap"
+def bswap_emit = run_capture(
+    [compiler, "--native-backend=aarch64", "--native-only", "--nyir-verify",
+     "--emit-asm=" + bswap_asm, "-no-std", "-emit-only", "-e",
+     "intrinsic(\"bswap.i32\", 0x12345678)"],
+    [], nil, false)
+def bswap_link = run_capture(
+    ["clang", "--target=aarch64-unknown-linux-gnu", "-march=armv8-a",
+     "-fuse-ld=lld", "-nostdlib", "-static", "-Wl,-e,_start",
+     "-Wl,--build-id=none", "-o", bswap_exe, bswap_asm, start_path],
+    [], nil, false)
+def bswap_execution = run_qemu("qemu-aarch64", bswap_exe)
+def bswap64_asm = stem + "-bswap64.s"
+def bswap64_exe = stem + "-bswap64"
+def bswap64_emit = run_capture(
+    [compiler, "--native-backend=aarch64", "--native-only", "--nyir-verify",
+     "--emit-asm=" + bswap64_asm, "-no-std", "-emit-only", "-e",
+     "intrinsic(\"bswap.i64\", 0x0100000000000000)"],
+    [], nil, false)
+def bswap64_link = run_capture(
+    ["clang", "--target=aarch64-unknown-linux-gnu", "-march=armv8-a",
+     "-fuse-ld=lld", "-nostdlib", "-static", "-Wl,-e,_start",
+     "-Wl,--build-id=none", "-o", bswap64_exe, bswap64_asm, start_path],
+    [], nil, false)
+def bswap64_execution = run_qemu("qemu-aarch64", bswap64_exe)
+def power_asm = stem + "-power.s"
+def power_emitted = run_capture(
+     [compiler, "--no-effect-require-known", "--native-backend=aarch64",
+     "--native-only", "--nyir-verify",
+     "--emit-asm=" + power_asm, "-no-std", "-emit-only", "-e",
+     "fn power_check() int {\n" +
+     "  def positive = 2.0 ** 3.0\n" +
+     "  def negative = 4.0 ** -1.0\n" +
+     "  mut f64 sine = sin(0.0)\n" +
+     "  mut f64 cosine = cos(0.0)\n" +
+     "  def remainder = 7.0 % 4.0\n" +
+     "  (positive == 8.0 ? 0 : 1) + (negative == 0.25 ? 0 : 2) +\n" +
+     "  (sine == 0.0 ? 0 : 4) + (cosine == 1.0 ? 0 : 8) +\n" +
+     "  (remainder == 3.0 ? 0 : 16)\n" +
+     "}\npower_check()"],
+    [], nil, false)
+def power_without_runtime_exe = stem + "-power-without-runtime"
+def power_unresolved_link = run_capture(
+    ["clang", "--target=aarch64-unknown-linux-gnu", "-march=armv8-a",
+     "-fuse-ld=lld", "-nostdlib", "-static", "-Wl,-e,_start",
+     "-Wl,--build-id=none", "-o", power_without_runtime_exe,
+     power_asm, start_path],
+    [], nil, false)
+def runtime_math_object = stem + "-runtime-math.o"
+def runtime_math_compiled = run_capture(
+    ["aarch64-linux-gnu-gcc", "-std=c11", "-O2", "-ffunction-sections",
+     "-fdata-sections", "-Isrc", "-Isrc/include", "-c",
+     "src/code/lang/runtime/math.c", "-o", runtime_math_object],
+    [], nil, false)
+def power_runtime_exe = stem + "-power-runtime"
+def power_runtime_link = run_capture(
+    ["aarch64-linux-gnu-gcc", "-nostartfiles", "-static",
+     "-Wl,-e,_start", "-Wl,--build-id=none", "-Wl,--gc-sections",
+     "-o", power_runtime_exe, power_asm, start_path, runtime_math_object,
+     "-lm"],
+    [], nil, false)
+def power_runtime_execution = run_qemu("qemu-aarch64", power_runtime_exe)
+def sqrt_asm = stem + "-sqrt.s"
+def sqrt_exe = stem + "-sqrt"
+def sqrt_emit = run_capture(
+    [compiler, "--native-backend=aarch64", "--native-only", "--nyir-verify",
+     "--emit-asm=" + sqrt_asm, "-no-std", "-emit-only", "-e",
+     "(sqrt(4.0) == 2.0 ? 1 : 0) + " +
+     "(sqrt(9.0) == 3.0 ? 1 : 0)"],
+    [], nil, false)
+def sqrt_link = run_capture(
+    ["clang", "--target=aarch64-unknown-linux-gnu", "-march=armv8-a",
+     "-fuse-ld=lld", "-nostdlib", "-static", "-Wl,-e,_start",
+     "-Wl,--build-id=none", "-o", sqrt_exe, sqrt_asm, start_path],
+    [], nil, false)
+def sqrt_execution = run_qemu("qemu-aarch64", sqrt_exe)
+def scalar_float_asm = stem + "-scalar-float.s"
+def scalar_float_exe = stem + "-scalar-float"
+def scalar_float_emit = run_capture(
+    [compiler, "--native-backend=aarch64", "--native-only", "--nyir-verify",
+     "--emit-asm=" + scalar_float_asm, "-no-std", "-emit-only", "-e",
+     "@noinline fn check_scalar_float(int choose) int {\n" +
+     "  def left64 = choose ? 8.0 : 4.0\n" +
+     "  def left32 = choose ? 3.0f32 : 5.0f32\n" +
+     "  def left_int = choose ? 8 : 4\n" +
+     "  mut f32 narrowed = left64\n" +
+     "  ((left64 + 4.0 == (choose ? 12.0 : 8.0)) ? 1 : 0) + " +
+     "((left64 - 2.0 == (choose ? 6.0 : 2.0)) ? 1 : 0) + " +
+     "((left64 * 2.0 == (choose ? 16.0 : 8.0)) ? 1 : 0) + " +
+     "((left64 / 2.0 == (choose ? 4.0 : 2.0)) ? 1 : 0) + " +
+     "((left_int + 2.0 == (choose ? 10.0 : 6.0)) ? 1 : 0) + " +
+     "((left_int + 2.0f32 == (choose ? 10.0f32 : 6.0f32)) ? 1 : 0) + " +
+     "((left32 + 2.0 == (choose ? 5.0 : 7.0)) ? 1 : 0) + " +
+     "((narrowed == (choose ? 8.0f32 : 4.0f32)) ? 1 : 0) + " +
+     "((left32 + 1.0f32 == (choose ? 4.0f32 : 6.0f32)) ? 1 : 0) + " +
+     "((left32 - 1.0f32 == (choose ? 2.0f32 : 4.0f32)) ? 1 : 0) + " +
+     "((left32 * 2.0f32 == (choose ? 6.0f32 : 10.0f32)) ? 1 : 0) + " +
+     "((left32 / 1.0f32 == (choose ? 3.0f32 : 5.0f32)) ? 1 : 0) + " +
+     "((left64 == (choose ? 8.0 : 4.0)) ? 1 : 0) + " +
+     "((left64 != (choose ? 7.0 : 5.0)) ? 1 : 0) + " +
+     "((left64 < (choose ? 9.0 : 5.0)) ? 1 : 0) + " +
+     "((left64 <= (choose ? 8.0 : 4.0)) ? 1 : 0) + " +
+     "((left64 > (choose ? 3.0 : 3.0)) ? 1 : 0) + " +
+     "((left64 >= (choose ? 8.0 : 4.0)) ? 1 : 0) + " +
+     "((left32 == (choose ? 3.0f32 : 5.0f32)) ? 1 : 0) + " +
+     "((left32 != (choose ? 4.0f32 : 6.0f32)) ? 1 : 0) + " +
+     "((left32 < (choose ? 4.0f32 : 6.0f32)) ? 1 : 0) + " +
+     "((left32 <= (choose ? 3.0f32 : 5.0f32)) ? 1 : 0) + " +
+     "((left32 > (choose ? 2.0f32 : 4.0f32)) ? 1 : 0) + " +
+     "((left32 >= (choose ? 3.0f32 : 5.0f32)) ? 1 : 0)\n" +
+     "}\ncheck_scalar_float(1) + check_scalar_float(0) + " +
+     "(sqrt(-1.0) == 0.0 ? 0 : 1) + " +
+     "(sqrt(-1.0) != 0.0 ? 1 : 0) + " +
+     "(sqrt(-1.0) < 0.0 ? 0 : 1) + " +
+     "(sqrt(-1.0) <= 0.0 ? 0 : 1) + " +
+     "(sqrt(-1.0) > 0.0 ? 0 : 1) + " +
+     "(sqrt(-1.0) >= 0.0 ? 0 : 1)"],
+    [], nil, false)
+def scalar_float_link = run_capture(
+    ["clang", "--target=aarch64-unknown-linux-gnu", "-march=armv8-a",
+     "-fuse-ld=lld", "-nostdlib", "-static", "-Wl,-e,_start",
+     "-Wl,--build-id=none", "-o", scalar_float_exe, scalar_float_asm,
+     start_path],
+    [], nil, false)
+def scalar_float_execution = run_qemu("qemu-aarch64", scalar_float_exe)
+def panic_asm = stem + "-panic.s"
+def panic_exe = stem + "-panic"
+def panic_emit = run_capture(
+    [compiler, "--native-backend=aarch64", "--native-only", "--nyir-verify",
+     "--emit-asm=" + panic_asm, "-no-std", "-emit-only", "-e",
+     "panic(\"portable static panic\")"],
+    [], nil, false)
+def panic_link = run_capture(
+    ["clang", "--target=aarch64-unknown-linux-gnu", "-march=armv8-a",
+     "-fuse-ld=lld", "-nostdlib", "-static", "-Wl,-e,_start",
+     "-Wl,--build-id=none", "-o", panic_exe, panic_asm, start_path],
+    [], nil, false)
+def panic_execution = run_qemu("qemu-aarch64", panic_exe)
+assert(emitted.get("code", 127) == 0 && linked.get("code", 127) == 0,
+       "NYIR-verified AArch64 portable assembly assembles and links")
+def asm_text = file_read(asm_path)
+assert(is_ok(asm_text) &&
+       str_contains(unwrap(asm_text), "\tror\tw0, w0, w1"),
+       "AArch64 constant-count ror32.i64 uses the W-register rotate")
+assert(execution.get("code", 127) == 105,
+       "AArch64 signed comparisons, divmod, and select return tagged 52")
+assert(checked_emit.get("code", 127) == 0 &&
+       checked_link.get("code", 127) == 0 &&
+       checked_execution.get("code", 127) == 7,
+       "checked AArch64 division links and returns tagged 3")
+assert(zero_emit.get("code", 127) == 0 && zero_link.get("code", 127) == 0 &&
+       zero_execution.get("code", 0) != 0,
+       "checked AArch64 division traps on a zero divisor")
+assert(bswap_emit.get("code", 127) == 0 &&
+       bswap_link.get("code", 127) == 0 &&
+       bswap_execution.get("code", 127) == 37,
+       "AArch64 bswap.i32 assembles, links, and returns the expected value")
+assert(bswap64_emit.get("code", 127) == 0 &&
+       bswap64_link.get("code", 127) == 0 &&
+       bswap64_execution.get("code", 127) == 3,
+       "AArch64 bswap.i64 assembles, links, and returns the expected value")
+assert(power_emitted.get("code", 127) == 0 &&
+       power_unresolved_link.get("code", 0) != 0 &&
+       !file_exists(power_without_runtime_exe),
+       "AArch64 math builtins require the runtime helpers at link time")
+assert(runtime_math_compiled.get("code", 127) == 0 &&
+       power_runtime_link.get("code", 127) == 0 &&
+       power_runtime_execution.get("code", 127) == 1,
+       "AArch64 floating power and trig execute through the production math runtime")
+assert(scalar_float_emit.get("code", 127) == 0 &&
+       scalar_float_link.get("code", 127) == 0 &&
+       scalar_float_execution.get("code", 127) == 109,
+       "AArch64 runtime f32/f64 arithmetic, conversions, and ordered/unordered comparisons execute")
+assert(sqrt_emit.get("code", 127) == 0 &&
+       sqrt_link.get("code", 127) == 0 &&
+       sqrt_execution.get("code", 127) == 5,
+       "AArch64 runtime f64 square root executes")
+assert(panic_emit.get("code", 127) == 0 &&
+       panic_link.get("code", 127) == 0 &&
+       panic_execution.get("code", 0) != 0,
+       "literal AArch64 panic links and traps")
+def removed_exe = file_remove(exe_path)
+def removed_asm = file_remove(asm_path)
+def removed_start = file_remove(start_path)
+def removed_checked_asm = file_remove(checked_asm)
+def removed_checked_exe = file_remove(checked_exe)
+def removed_zero_asm = file_remove(zero_asm)
+def removed_zero_exe = file_remove(zero_exe)
+def removed_bswap_asm = file_remove(bswap_asm)
+def removed_bswap_exe = file_remove(bswap_exe)
+def removed_bswap64_asm = file_remove(bswap64_asm)
+def removed_bswap64_exe = file_remove(bswap64_exe)
+def removed_scalar_float_asm = file_remove(scalar_float_asm)
+def removed_scalar_float_exe = file_remove(scalar_float_exe)
+def removed_sqrt_asm = file_remove(sqrt_asm)
+def removed_sqrt_exe = file_remove(sqrt_exe)
+def removed_power_asm = file_remove(power_asm)
+def removed_power_runtime_object = file_remove(runtime_math_object)
+def removed_power_runtime_exe = file_remove(power_runtime_exe)
+def removed_panic_asm = file_remove(panic_asm)
+def removed_panic_exe = file_remove(panic_exe)
+assert(is_ok(removed_exe) && is_ok(removed_asm) && is_ok(removed_start) &&
+       is_ok(removed_checked_asm) && is_ok(removed_checked_exe) &&
+       is_ok(removed_zero_asm) && is_ok(removed_zero_exe) &&
+       is_ok(removed_bswap_asm) && is_ok(removed_bswap_exe) &&
+       is_ok(removed_bswap64_asm) && is_ok(removed_bswap64_exe) &&
+       is_ok(removed_scalar_float_asm) && is_ok(removed_scalar_float_exe) &&
+       is_ok(removed_power_asm) && is_ok(removed_power_runtime_object) &&
+       is_ok(removed_power_runtime_exe) &&
+       is_ok(removed_panic_asm) && is_ok(removed_panic_exe),
+       "remove AArch64 portable cross-run artifacts")
+print("AARCH64_PORTABLE_RUNTIME_PARITY_OK")
+NY
+}

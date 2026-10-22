@@ -1,0 +1,33 @@
+shape variadic_dynamic_locals_keep_float_tags {
+  family "codegen/abi/calls"
+  generator "embedded"
+  features ["ny", "test", "codegen", "abi", "scalar-classes"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only; --native-only --native-backend=x86_64"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+fn forward_three(str kind, any x, any y, any z, any w=0) list {
+   assert(kind == "vec3", "kind is string")
+   [x, y, z, w]
+}
+fn collect_three(...args) list {
+   mut x = args.get(0, nil)
+   mut y = args.get(1, nil)
+   mut z = args.get(2, nil)
+   if x == nil { x = 0.0 }
+   if y == nil { y = 0.0 }
+   if z == nil { z = 0.0 }
+   forward_three("vec3", x, y, z)
+}
+
+def values = collect_three(0.0, 0.6, 0.8)
+assert(values.len == 4, "variadic local result length")
+assert(values.get(0, nil) == 0.0, "variadic local x")
+assert(values.get(1, nil) == 0.6, "variadic local y")
+assert(values.get(2, nil) == 0.8, "variadic local z")
+assert(values.get(3, nil) == 0, "defaulted any formal")
+assert(is_float(values.get(1, nil)), "variadic local retains dynamic float tag")
+NY
+}

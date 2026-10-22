@@ -1,0 +1,18 @@
+shape user_raw_conversion_origin {
+  family "runtime/modules/use"
+  generator "regression"
+  features [module identity integer abi]
+  template ny-test-case
+  flags_matrix "--native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only --native-backend=x86_64"
+  expect compile_and_run
+  source ny <<'NY'
+module project.convert(to_int)
+fn to_int(int value) int { value + 7 }
+#main {
+  def int value = project.convert.to_int(2)
+  assert(value == 9, "user conversion keeps declared integer result")
+  assert(value % 2 == 1, "user result is not tagged twice")
+  0
+}
+NY
+}

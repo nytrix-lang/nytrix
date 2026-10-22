@@ -1,20 +1,20 @@
 ;; Keywords: viewer bootstrap startup app runtime os ui render
 ;; Startup helpers for initializing viewer runtime state and default UI configuration.
 ;; References:
-;; - std.os.ui.render.viewer.app
-;; - std.os.ui.render.viewer.runtime
-module std.os.ui.render.viewer.bootstrap(
+;; - core.os.ui.render.viewer.app
+;; - core.os.ui.render.viewer.runtime
+module core.os.ui.render.viewer.bootstrap(
    apply_identity_hints, raw_mouse_enabled, headless_sim_refused, failure_summary,
    open_viewer_window, fit_to_workarea_enabled, live_framebuffer_size, finish_window
 )
 
-use std.core
-use std.core.common as common
-use std.os.ui.render.viewer.app as ui_app
-use std.os.ui.render.dump as ui_profile
-use std.os.ui.render.viewer.runtime as ui_runtime
-use std.os.ui.window
-use std.os.ui.window.native as win_native
+use core
+use core.common as common
+use core.os.ui.render.viewer.app as ui_app
+use core.os.ui.render.dump as ui_profile
+use core.os.ui.render.viewer.runtime as ui_runtime
+use core.os.ui.window
+use core.os.ui.window.native as win_native
 
 fn apply_identity_hints(str title_class="NytrixViewer", str title_instance="nytrix-viewer") int {
    "Applies platform window identity hints from env or defaults."
@@ -109,5 +109,5 @@ fn finish_window(any win, bool fullscreen, bool headless_enabled) list {
 #main {
    assert(!fit_to_workarea_enabled(true, false), "fullscreen never workarea-fits")
    assert(failure_summary("vulkan", false).len > 0, "failure summary")
-   print("✓ std.os.ui.render.viewer.bootstrap self-test passed")
+   print("✓ core.os.ui.render.viewer.bootstrap self-test passed")
 }

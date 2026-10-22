@@ -3,13 +3,13 @@
 ;; Reference:
 ;; - https://doi.org/10.1007/3-540-39568-7_9
 ;; References:
-;; - std.math.crypto.public_key
-;; - std.math.crypto
-module std.math.crypto.public_key.blum_goldwasser(bg_keygen, bg_random_keygen, bg_seed_state, bg_encrypt_bits, bg_decrypt_bits, bg_encrypt_int, bg_decrypt_int)
-use std.core
-use std.math.nt
-use std.math.crypto.number.arith
-use std.math.crypto.number.pseudoprimes
+;; - core.math.crypto.public_key
+;; - core.math.crypto
+module core.math.crypto.public_key.blum_goldwasser(bg_keygen, bg_random_keygen, bg_seed_state, bg_encrypt_bits, bg_decrypt_bits, bg_encrypt_int, bg_decrypt_int)
+use core
+use core.math.nt
+use core.math.crypto.number.arith
+use core.math.crypto.number.pseudoprimes
 
 fn _bg_require_blum_prime(any p, str name) int {
    if !is_blum_prime(p) { panic("blum_goldwasser: " + name + " must be a Blum prime") }
@@ -76,7 +76,7 @@ fn bg_encrypt_bits(list bits, any n, any seed=nil) dict {
    mut i = 0
    while i < plain.len {
       x = _bg_step(x, nn)
-      ct = ct.append((plain.get(i) & 1) ^^ bigint_to_int(x % Z(2)))
+      ct = ct.append((plain.get(i) & 1) ^ bigint_to_int(x % Z(2)))
       i += 1
    }
    mut out = dict(4)
@@ -111,7 +111,7 @@ fn bg_decrypt_bits(dict cipher, any p, any q) list {
    mut i = 0
    while i < bits.len {
       x = _bg_step(x, n)
-      out = out.append((bits.get(i) & 1) ^^ bigint_to_int(x % Z(2)))
+      out = out.append((bits.get(i) & 1) ^ bigint_to_int(x % Z(2)))
       i += 1
    }
    out
@@ -156,5 +156,5 @@ fn bg_decrypt_int(dict cipher, any p, any q) any {
    assert(bg_decrypt_bits(cipher2, 7, 11) == bits, "bg bit decrypt")
    def cipher_int = bg_encrypt_int(45, 6, n2, 5)
    assert(bg_decrypt_int(cipher_int, 7, 11) == 45, "bg integer decrypt")
-   print("✓ std.math.crypto.public_key.blum_goldwasser self-test passed")
+   print("✓ core.math.crypto.public_key.blum_goldwasser self-test passed")
 }

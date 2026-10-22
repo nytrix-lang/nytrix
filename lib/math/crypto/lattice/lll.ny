@@ -4,18 +4,18 @@
 ;; - https://web.cs.elte.hu/~lovasz/scans/lll.pdf
 ;; - https://www.cs.cmu.edu/~afs/cs/project/quake/public/papers/Coppersmith-Crypto96.pdf
 ;; References:
-;; - std.math.crypto.lattice
-;; - std.math.crypto
-module std.math.crypto.lattice.lll(lll, gram_schmidt, lll_backend_report, gso_profile, gso_report, lll_quality_report, lll_is_reduced, lll_reduce_report, lll_report, lll_reduce_bounded, lll_reduce_bounded_report, lll_find_ternary_pair_rows, lll_find_ntru_key_rows, lll_basis_gram_gso_parity_report, lll_gso_parity_report, lll_gram_gso_report, lll_gram_quality_report, lll_gram_is_reduced, lll_gram_reduce_report, lll_gram_reduce_bounded_report, lll_gram_first_column_reduce_report, lll_gram_report, lll_gram)
-use std.core
-use std.core.str as str
-use std.core.tbuf
-use std.math.big (bigint_to_str, bigint_from_int, bigint, is_bigint, bigint_bit_length, bigint_to_int)
-use std.math.integer (Z, gcd)
-use std.math.matrix
-use std.math.scalar (pow)
-use std.os.clock (ticks)
-use std.os.prim (env)
+;; - core.math.crypto.lattice
+;; - core.math.crypto
+module core.math.crypto.lattice.lll(lll, gram_schmidt, lll_backend_report, gso_profile, gso_report, lll_quality_report, lll_is_reduced, lll_reduce_report, lll_report, lll_reduce_bounded, lll_reduce_bounded_report, lll_find_ternary_pair_rows, lll_find_ntru_key_rows, lll_basis_gram_gso_parity_report, lll_gso_parity_report, lll_gram_gso_report, lll_gram_quality_report, lll_gram_is_reduced, lll_gram_reduce_report, lll_gram_reduce_bounded_report, lll_gram_first_column_reduce_report, lll_gram_report, lll_gram)
+use core
+use core.str as str
+use core.tbuf
+use core.math.big (bigint_to_str, bigint_from_int, bigint, is_bigint, bigint_bit_length, bigint_to_int)
+use core.math.integer (Z, gcd)
+use core.math.matrix
+use core.math.scalar (pow)
+use core.os.clock (ticks)
+use core.os.prim (env)
 
 fn _lll_set_fields(dict out, list fields) dict {
    mut i = 0
@@ -3722,5 +3722,5 @@ fn round(any x) int {
    assert(q4.get("ok", false), "identity quality ok")
    def rep_auto = lll_reduce_report(Matrix([[105, 821, 17], [31, 251, 11], [1, 0, 3]]), 0.75, "auto")
    assert(rep_auto.get("transform_verified", false), "auto LLL transform verified")
-   print("✓ std.math.crypto.lattice.lll self-test passed")
+   print("✓ core.math.crypto.lattice.lll self-test passed")
 }

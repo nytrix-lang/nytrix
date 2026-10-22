@@ -1,0 +1,12 @@
+shape quote_opener_alias_is_rejected {
+  family "compiler-errors/syntax"
+  generator "error"
+  features ["error", "quote", "syntax", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "quote bodies use braces"
+  source ny <<'NY'
+def invalid = quote $ { 1 }
+NY
+}

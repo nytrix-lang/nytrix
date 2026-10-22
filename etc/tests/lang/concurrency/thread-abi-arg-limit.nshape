@@ -1,0 +1,23 @@
+shape test_thread_abi_arg_limit {
+  family "runtime/execution"
+  generator "embedded"
+  features ["ny", "test", "backend-capability"]
+  template ny-test-case
+  flags "--native-only"
+  expect compile_fail
+  expect_message "@thread call '_thread_add16' supports up to 15 arguments"
+  source ny <<'NY'
+use core
+
+@thread
+fn _thread_add16(int a, int b, int c, int d, int e, int f, int g, int h,
+                 int i, int j, int k, int l, int m, int n, int o, int p) int {
+    a + b + c + d + e + f + g + h + i + j + k + l + m + n + o + p
+}
+
+fn main() int {
+    _thread_add16(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16)
+    0
+}
+NY
+}

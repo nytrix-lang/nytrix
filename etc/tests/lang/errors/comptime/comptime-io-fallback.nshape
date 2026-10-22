@@ -1,0 +1,117 @@
+shape comptime_io_does_not_fall_back_to_runtime {
+  family "runtime/errors"
+  generator "regression"
+  features ["ny" "test" "comptime" "io"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_fail
+  expect_message "comptime expression cannot perform IO"
+  source ny <<'NY'
+def escaped_io = comptime {
+  print("COMPTIME_IO_MUST_NOT_ESCAPE")
+  return 1
+}
+print(escaped_io)
+NY
+}
+
+shape inferred_io_helper_cannot_escape_comptime {
+  family "runtime/errors"
+  generator "regression"
+  features ["ny" "test" "comptime" "io" "effects"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_fail
+  expect_message "comptime expression cannot perform IO"
+  source ny <<'NY'
+fn noisy() int {
+  print("INFERRED_HELPER_COMPTIME_IO_MUST_NOT_ESCAPE")
+  return 5
+}
+fn forward() int { return noisy() }
+def escaped_io = comptime { return forward() }
+print(escaped_io)
+NY
+}
+
+shape nested_run_io_does_not_fall_back_to_runtime {
+  family "runtime/errors"
+  generator "regression"
+  features ["ny" "test" "comptime" "io"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_fail
+  expect_message "comptime expression cannot perform IO"
+  source ny <<'NY'
+def escaped_io = comptime {
+  return #run {
+    print("NESTED_COMPTIME_IO_MUST_NOT_ESCAPE")
+    return 2
+  }
+}
+print(escaped_io)
+NY
+}
+
+shape unknown_callback_does_not_hide_comptime_io {
+  family "runtime/errors"
+  generator "regression"
+  features ["ny" "test" "comptime" "io" "callback"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_fail
+  expect_message "comptime expression cannot perform IO"
+  source ny <<'NY'
+fn invoke(fnptr callback) int {
+  return comptime {
+    callback()
+    print("COMPTIME_IO_MUST_NOT_BE_HIDDEN")
+    return 3
+  }
+}
+fn answer() int { return 42 }
+print(invoke(answer))
+NY
+}
+
+shape declared_io_helper_cannot_escape_comptime {
+  family "runtime/errors"
+  generator "regression"
+  features ["ny" "test" "comptime" "io" "effects"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_fail
+  expect_message "comptime expression cannot perform IO"
+  source ny <<'NY'
+@effects(io)
+fn noisy() int {
+  print("HELPER_COMPTIME_IO_MUST_NOT_ESCAPE")
+  return 4
+}
+def escaped_io = comptime { return noisy() }
+print(escaped_io)
+NY
+}
+
+shape unresolved_callback_effects_cannot_escape_comptime {
+  family "runtime/errors"
+  generator "regression"
+  features ["ny" "test" "comptime" "effects" "callback"]
+  template ny-test-case
+  flags_matrix "--no-effect-require-known --native --run; --no-effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --no-effect-require-known --native-backend=llvm --jit --jit-engine=orc; --no-effect-require-known --native-only"
+  expect compile_fail
+  expect_message "comptime effect analysis is incomplete; cannot verify that the expression is IO-free"
+  source ny <<'NY'
+fn invoke(fnptr callback) int {
+  return comptime {
+    callback()
+    return 7
+  }
+}
+fn noisy() int {
+  print("UNKNOWN_CALLBACK_IO_MUST_NOT_ESCAPE")
+  return 1
+}
+print(invoke(noisy))
+NY
+}

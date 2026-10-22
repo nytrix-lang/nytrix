@@ -1,0 +1,62 @@
+shape comptime_generated_refinement_rejects_false_obligation {
+  family "compiler-errors/comptime"
+  generator "error"
+  features ["error", "comptime", "refinement", "negative"]
+  template ny-compile-fail
+  flags_matrix "--native --run; --native-only; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_fail
+  expect_message "refinement obligation failed"
+  source ny <<'NY'
+use core
+comptime template bounded(name, lower) {
+   refine ${name} = int where(value) { value > ${lower} }
+}
+comptime emit bounded(ident("AboveThree"), 3)
+def AboveThree valid = 2
+assert(valid == 4, "generated refinement")
+NY
+}
+
+shape comptime_generated_law_rejects_false_obligation {
+  family "compiler-errors/comptime"
+  generator "error"
+  features ["error", "comptime", "law", "negative"]
+  template ny-compile-fail
+  flags_matrix "--native --run; --native-only; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_fail
+  expect_message "law verification failed"
+  source ny <<'NY'
+use core
+comptime template show_trait() {
+   trait Show { fn show(any value) str }
+}
+comptime emit show_trait()
+struct Point { int x }
+comptime template point_impl(cert) {
+   impl Show for Point {
+      fn show(any value) str { return "point" }
+      law { ${cert} == 1 }
+   }
+}
+comptime emit point_impl(0)
+def Point p = Point(5)
+assert(show(p) == "point", "generated trait and law")
+NY
+}
+
+shape comptime_generated_existential_rejects_false_obligation {
+  family "compiler-errors/comptime"
+  generator "error"
+  features ["error", "comptime", "refinement", "exists", "negative"]
+  template ny-compile-fail
+  flags_matrix "--native --run; --native-only; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_fail
+  expect_message "refinement obligation failed"
+  source ny <<'NY'
+comptime template multiple(name, factor) {
+   refine ${name} = int where(value) { exists(k) { value == ${factor} * k } }
+}
+comptime emit multiple(ident("MultipleThree"), 3)
+def MultipleThree invalid = 5
+NY
+}

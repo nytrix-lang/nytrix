@@ -2,14 +2,14 @@
 ;; Lattice routines for multivariate polynomial arithmetic for lattice attacks.
 ;; Representation: ["mvpoly", nvars, [[[e0, e1, ...], coeff], ...]]
 ;; References:
-;; - std.math.crypto.lattice
-;; - std.math.crypto
-module std.math.crypto.lattice.mvpoly(mv_poly, mv_const, mv_var, mv_monomial, mv_is_poly, mv_nvars, mv_terms, mv_normalize, mv_add, mv_neg, mv_sub, mv_scale, mv_mul, mv_pow, mv_mod_coeffs, mv_monomial_mul, mv_degree, mv_degrees, mv_constant, mv_coeff, mv_eval, mv_max_norm_scaled, mv_create_lattice, mv_reconstruct_polynomials, mv_find_roots, mv_small_roots_modular, mv_small_roots_integer)
-use std.core
-use std.math.nt
-use std.math.matrix
-use std.math.crypto.lattice.lll
-use std.os.prim
+;; - core.math.crypto.lattice
+;; - core.math.crypto
+module core.math.crypto.lattice.mvpoly(mv_poly, mv_const, mv_var, mv_monomial, mv_is_poly, mv_nvars, mv_terms, mv_normalize, mv_add, mv_neg, mv_sub, mv_scale, mv_mul, mv_pow, mv_mod_coeffs, mv_monomial_mul, mv_degree, mv_degrees, mv_constant, mv_coeff, mv_eval, mv_max_norm_scaled, mv_create_lattice, mv_reconstruct_polynomials, mv_find_roots, mv_small_roots_modular, mv_small_roots_integer)
+use core
+use core.math.nt
+use core.math.matrix
+use core.math.crypto.lattice.lll
+use core.os.prim
 
 fn _mv_abs_z(any x) bigint {
    def z = Z(x)

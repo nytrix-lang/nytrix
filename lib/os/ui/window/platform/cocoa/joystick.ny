@@ -1,15 +1,15 @@
 ;; Keywords: platform window backend cocoa macos joystick os ui input
 ;; Native macOS IOKit/HID joystick backend for Nytrix.
 ;; References:
-;; - std.os.ui.window.platform.cocoa
-;; - std.os.ui.window
-;; - std.os.ui.window.consts
-module std.os.ui.window.platform.cocoa.joystick(init, terminate, poll_joysticks, joystick_present, get_joystick_name, get_joystick_guid, get_joystick_axes, get_joystick_buttons, joystick_is_gamepad, get_gamepad_state, get_gamepad_name, set_joystick_callback, update_gamepad_mappings)
-use std.core
-use std.core.mem
-use std.core.str as str
-use std.os.ui.window.platform.api as backend_api
-use std.os.ui.window.platform.gamepad_map as gamepad_map
+;; - core.os.ui.window.platform.cocoa
+;; - core.os.ui.window
+;; - core.os.ui.window.consts
+module core.os.ui.window.platform.cocoa.joystick(init, terminate, poll_joysticks, joystick_present, get_joystick_name, get_joystick_guid, get_joystick_axes, get_joystick_buttons, joystick_is_gamepad, get_gamepad_state, get_gamepad_name, set_joystick_callback, update_gamepad_mappings)
+use core
+use core.mem
+use core.str as str
+use core.os.ui.window.platform.api as backend_api
+use core.os.ui.window.platform.gamepad_map as gamepad_map
 
 def MAX_JOYSTICKS = 16
 def MAX_ELEMENTS  = 128

@@ -1,0 +1,31 @@
+shape ast_string_serialization {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "ast", "serialization", "string", "escape"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.compiler.ast (parse_ast, parse_ast_snapshot, code_str)
+use core.math.parse.data.json (json_decode)
+
+def source = "def text = \"a\\t\\r\\b\\f\\0z\"\ndef formatted = f\"a\\0z{7}\""
+def raw = __parse_ast(source)
+assert(raw.contains("\\t") && raw.contains("\\r") && raw.contains("\\u0008") &&
+       raw.contains("\\u000c") && raw.contains("\\u0000z"),
+       "AST string literals escape every control byte and retain data after NUL")
+free(raw)
+def tree = parse_ast(source)
+assert(is_list(tree) && tree.len == 2,
+       "escaped literal and formatted-string AST records remain valid JSON")
+def value = tree.get(0).get("exprs").get(0).get("value")
+assert(value.len == 7 && load8(value, 5) == 0 && load8(value, 6) == 122,
+       "decoded AST strings preserve their complete byte length")
+def formatted = tree.get(1).get("exprs").get(0).get("parts").get(0).get("value")
+assert(formatted.len == 3 && load8(formatted, 1) == 0 && load8(formatted, 2) == 122,
+       "formatted-string parts preserve data after NUL")
+def snapshot = parse_ast_snapshot(source)
+assert(code_str(json_decode(code_str(snapshot))) == code_str(snapshot),
+       "escaped AST strings survive canonical round trips")
+NY
+}

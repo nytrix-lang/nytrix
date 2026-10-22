@@ -2,8 +2,8 @@
 ;; Finite-field arithmetic for prime fields, GF(2), and extension-field elements.
 ;; Reference: HAC Ch.2/11/14 (https://cacr.uwaterloo.ca/hac/about/chap2.pdf)
 ;; References:
-;; - std.math.crypto
-module std.math.crypto.gf(gfp_elem, gfp_add, gfp_sub, gfp_neg, gfp_mul, gfp_div, gfp_inv,
+;; - core.math.crypto
+module core.math.crypto.gf(gfp_elem, gfp_add, gfp_sub, gfp_neg, gfp_mul, gfp_div, gfp_inv,
    gfp_pow, gfp_sqrt, gfp_is_qr, gfp_legendre, gfp_order, gfp_discrete_log_bsgs,
    gfpk_add, gfpk_sub, gfpk_neg, gfpk_mul,
    gfpk_mod, gfpk_pow, gfpk_inv, gfpk_eq, gfpk_is_zero, gfpk_scalar_mul, gfpk_degree, gfpk_frobenius,
@@ -12,13 +12,13 @@ module std.math.crypto.gf(gfp_elem, gfp_add, gfp_sub, gfp_neg, gfp_mul, gfp_div,
    GF, GFElem, gf, gfe, gf_field, gf_elem,
    gf_trace, gf_norm, gf_conjugates, gf_minpoly, gf_frobenius,
    gf_multiplicative_order, gf_is_primitive, gf_primitive_element, gf_discrete_log,
-   solve_gf2, num2vec, vec2num, _clone_list,
+   solve_gf2, num2vec, vec2num, _gf_clone_list,
    GF2BVBitVec, gf2bv_bitvec,
    GF2BVLinearSystem, gf2bv_linear_system, gf2bv_bv, gf2bv_linear)
-use std.core
-use std.core.primitives (bxor, bshl)
-use std.math.nt
-use std.math.bin (bit_count)
+use core
+use core.primitives (bxor, bshl)
+use core.math.nt
+use core.math.bin (bit_count)
 
 comptime template _gf_ctor_alias1(alias_name, target_name){
    fn ${alias_name}(any arg0) gf2 { ${target_name}(arg0) }
@@ -430,7 +430,7 @@ fn gfpk_frobenius(list a, list irred, any p) list {
 }
 
 fn _gf2_xor(any a, any b) any {
-   if is_int(a) && is_int(b) { return a ^^ b }
+   if is_int(a) && is_int(b) { return a ^ b }
    bxor(a, b)
 }
 
@@ -685,8 +685,8 @@ impl gf2e {
    operator * int: gf2e = mul_int
    operator * bigint: gf2e = mul_bigint
    operator / gf2e: gf2e = div
-   operator ^ int: gf2e = pow_int
-   operator ^ bigint: gf2e = pow_bigint
+   operator ** int: gf2e = pow_int
+   operator ** bigint: gf2e = pow_bigint
    operator == gf2e: bool = same
    operator != gf2e: bool = different
 }
@@ -1240,13 +1240,13 @@ impl gfe {
    operator * int: gfe = mul_int
    operator * bigint: gfe = mul_bigint
    operator / gfe: gfe = div
-   operator ^ int: gfe = pow_int
-   operator ^ bigint: gfe = pow_bigint
+   operator ** int: gfe = pow_int
+   operator ** bigint: gfe = pow_bigint
    operator == gfe: bool = same
    operator != gfe: bool = different
 }
 
-fn _clone_list(list lst) list { _gf_list_copy(lst) }
+fn _gf_clone_list(list lst) list { _gf_list_copy(lst) }
 
 fn num2vec(any x, int w) list {
    "Convert integer x to binary vector of width w(MSB first)."
@@ -1273,37 +1273,40 @@ fn vec2num(list v) int {
 
 fn solve_gf2(list A, list b) any {
    "Solve Ax = b over GF(2) via Gaussian elimination. Returns x or nil if inconsistent."
-   def nr, nc = A.len, len(A[0])
-   mut M, i = [], 0
+   def int nr = A.len
+   def list first_row = A[0]
+   def int nc = first_row.len
+   mut M = []
+   mut int i = 0
    while i < nr {
-      mut row = _clone_list(A[i])
+      mut row = _gf_clone_list(A[i])
       row = row.append(b[i])
       M = M.append(row)
       i += 1
    }
-   mut pivot_row = 0
-   mut pivot_col = 0
+   mut int pivot_row = 0
+   mut int pivot_col = 0
    while pivot_row < nr && pivot_col < nc {
-      mut r = pivot_row
+      mut int scan_idx = pivot_row
       mut found = false
-      while r < nr {
-         if M[r][pivot_col] == 1 {
+      while scan_idx < nr {
+         if M[scan_idx][pivot_col] == 1 {
             def tmp = M[pivot_row]
-            M[pivot_row] = M[r]
-            M[r] = tmp
+            M[pivot_row] = M[scan_idx]
+            M[scan_idx] = tmp
             found = true
             break
          }
-         r += 1
+         scan_idx += 1
       }
       if found {
-         mut j = 0
+         mut int j = 0
          while j < nr {
             if j != pivot_row && M[j][pivot_col] == 1 {
                def rj, rp = M[j], M[pivot_row]
-               mut k = pivot_col
+               mut int k = pivot_col
                while k <= nc {
-                  rj[k] = rj[k] ^^ rp[k]
+                  rj[k] = rj[k] ^ rp[k]
                   k += 1
                }
             }
@@ -1321,8 +1324,8 @@ fn solve_gf2(list A, list b) any {
    }
    i = 0
    while i < nr {
-      mut first_one = -1
-      mut j = 0
+      mut int first_one = -1
+      mut int j = 0
       while j < nc {
          if M[i][j] == 1 {
             first_one = j
@@ -1339,12 +1342,12 @@ fn solve_gf2(list A, list b) any {
 impl gf2bv_bv {}
 
 impl gf2bv_linear {}
-fn _gf2bv_fail(str msg) any { panic("std.math.crypto.gf.gf2bv: " + msg) }
+fn _gf2bv_fail(str msg) any { panic("core.math.crypto.gf.gf2bv: " + msg) }
 
 fn GF2BVBitVec(any bits) gf2bv_bv {
    "Create a symbolic GF(2) bit-vector."
    mut out = []
-   if is_list(bits) || is_tuple(bits) { out = _clone_list(bits) } elif is_bytes(bits) {
+   if is_list(bits) || is_tuple(bits) { out = _gf_clone_list(bits) } elif is_bytes(bits) {
       mut i = 0
       while i < bits.len {
          out = out.append(load8(bits, i))
@@ -1387,7 +1390,7 @@ fn _gf2bv_fill(int n, any v) list {
 }
 
 fn _gf2bv_append_fill(list xs, int n, any v) list {
-   mut out = _clone_list(xs)
+   mut out = _gf_clone_list(xs)
    mut i = 0
    while i < n {
       out = out.append(v)
@@ -1420,7 +1423,7 @@ fn _gf2bv_all_ones(list bits) bool {
 }
 
 fn _gf2bv_join(list a, list b) list {
-   mut out = _clone_list(a)
+   mut out = _gf_clone_list(a)
    mut i = 0
    while i < b.len {
       out = out.append(b.get(i, 0))
@@ -1434,7 +1437,7 @@ fn _gf2bv_xor_bits(list a, list b) list {
    mut out = []
    mut i = 0
    while i < a.len {
-      out = out.append((a.get(i, 0) ^^ b.get(i, 0)))
+      out = out.append((a.get(i, 0) ^ b.get(i, 0)))
       i += 1
    }
    out
@@ -1533,7 +1536,7 @@ fn _gf2bv_reduce_space(list eqs, int cols) any {
          }
          r = 0
          while r < rows.len {
-            if r != row && (((rows.get(r, 0) >> col) & 1) == 1) { rows[r] = rows.get(r, 0) ^^ rows.get(row, 0) }
+            if r != row && (((rows.get(r, 0) >> col) & 1) == 1) { rows[r] = rows.get(r, 0) ^ rows.get(row, 0) }
             r += 1
          }
          pivots = pivots.append(col)
@@ -1577,7 +1580,7 @@ fn _gf2bv_reduce_space(list eqs, int cols) any {
          i = 0
          while i < pivots.len {
             def pc = pivots.get(i, 0)
-            if ((rows.get(i, 0) >> free_col) & 1) == 1 { vec = vec ^^ (1 << pc) }
+            if ((rows.get(i, 0) >> free_col) & 1) == 1 { vec = vec ^ (1 << pc) }
             i += 1
          }
          basis = basis.append(vec)
@@ -1592,7 +1595,7 @@ fn _gf2bv_eval_mask(any mask, any raw_solution) int { (bit_count(mask & ((raw_so
 fn GF2BVLinearSystem(list sizes) gf2bv_linear {
    "Create a symbolic GF(2) linear system for bit-vector variables."
    if !is_list(sizes) { _gf2bv_fail("sizes must be a list") }
-   mut sizes_copy = _clone_list(sizes)
+   mut sizes_copy = _gf_clone_list(sizes)
    mut cols = 0
    mut i = 0
    while i < sizes_copy.len {
@@ -1645,7 +1648,9 @@ impl gf2bv_bv {
       if e < s { e = s }
       GF2BVBitVec(_gf2bv_slice_list(bs, s, e))
    }
-   fn bit(gf2bv_bv a, int idx) gf2bv_bv { a.slice(idx, idx + 1) }
+   fn bit(gf2bv_bv a, int idx) gf2bv_bv {
+      GF2BVBitVec(_gf2bv_slice_list(_gf2bv_bits(a), idx, idx + 1))
+   }
    fn xor(gf2bv_bv a, gf2bv_bv b) gf2bv_bv { GF2BVBitVec(_gf2bv_xor_bits(_gf2bv_bits(a), _gf2bv_bits(b))) }
    fn xor_int(gf2bv_bv a, int other) gf2bv_bv {
       def bs, os = _gf2bv_bits(a), _gf2bv_to_bits_le(bs.len, other)
@@ -1708,7 +1713,7 @@ impl gf2bv_bv {
       mut acc = 0
       mut i = 0
       while i < bs.len {
-         acc = acc ^^ bs.get(i, 0)
+         acc = acc ^ bs.get(i, 0)
          i += 1
       }
       GF2BVBitVec([acc])
@@ -1754,8 +1759,8 @@ impl gf2bv_bv {
    }
    fn same(gf2bv_bv a, gf2bv_bv b) bool { _gf2bv_bits(a) == _gf2bv_bits(b) }
    fn different(gf2bv_bv a, gf2bv_bv b) bool { !a.same(b) }
-   operator ^^ gf2bv_bv: gf2bv_bv = xor
-   operator ^^ int: gf2bv_bv = xor_int
+   operator ^ gf2bv_bv: gf2bv_bv = xor
+   operator ^ int: gf2bv_bv = xor_int
    operator >> int: gf2bv_bv = shr
    operator << int: gf2bv_bv = shl
    operator & int: gf2bv_bv = and_mask
@@ -1798,7 +1803,7 @@ impl gf2bv_linear {
          mut raw = origin
          mut i = 0
          while i < basis.len {
-            if ((mask >> i) & 1) == 1 { raw = raw ^^ basis.get(i, 0) }
+            if ((mask >> i) & 1) == 1 { raw = raw ^ basis.get(i, 0) }
             i += 1
          }
          all = all.append(l.convert_raw(raw))
@@ -1852,7 +1857,7 @@ impl gf2bv_linear {
    def gf2bv_bv vb = vars.get(1)
    def gf2bv_bv vc = vars.get(2)
    def gf2bv_bv vd = vars.get(3)
-   def zeros = [va ^^ vb ^^ vc ^^ 1, vb ^^ vd, va ^^ vc ^^ 1]
+   def zeros = [va ^ vb ^ vc ^ 1, vb ^ vd, va ^ vc ^ 1]
    def one_sol = lin.solve_one(zeros)
    assert(one_sol != nil && one_sol.len == 4, "GF2BV solve_one")
    mut zi = 0

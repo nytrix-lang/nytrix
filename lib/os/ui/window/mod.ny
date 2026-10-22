@@ -1,12 +1,12 @@
 ;; Keywords: window consts native native-windowing event os ui input
 ;; Window facade: creation, monitors, lifecycle, keyboard, mouse, gamepads, events, clipboard, and backend hooks.
 ;; References:
-;; - std.os.ui
-;; - std.os.ui.window.consts
-module std.os.ui.window(BACKEND_NY, backend, available, EVENT_NONE, EVENT_KEY_PRESSED, EVENT_KEY_RELEASED, EVENT_KEY_CHAR, EVENT_MOUSE_BUTTON_PRESSED, EVENT_MOUSE_BUTTON_RELEASED, EVENT_MOUSE_SCROLL, EVENT_MOUSE_POS_CHANGED, EVENT_WINDOW_MOVED, EVENT_WINDOW_RESIZED, EVENT_FOCUS_IN, EVENT_FOCUS_OUT, EVENT_MOUSE_ENTER, EVENT_MOUSE_LEAVE, EVENT_WINDOW_REFRESH, EVENT_QUIT, EVENT_DATA_DROP, EVENT_DATA_DRAG, EVENT_WINDOW_MAXIMIZED, EVENT_WINDOW_MINIMIZED, EVENT_WINDOW_RESTORED, EVENT_SCALE_UPDATED, EVENT_MONITOR_CONNECTED, EVENT_MONITOR_DISCONNECTED, WINDOW_NORMAL, WINDOW_NO_BORDER, WINDOW_NO_RESIZE, WINDOW_ALLOW_DND, WINDOW_HIDE_MOUSE, WINDOW_FULLSCREEN, WINDOW_TRANSPARENT, WINDOW_CENTER, WINDOW_RAW_MOUSE, WINDOW_SCALE_TO_MONITOR, WINDOW_HIDE, WINDOW_MAXIMIZE, WINDOW_CENTER_CURSOR, WINDOW_FLOATING, WINDOW_FOCUS_ON_SHOW, WINDOW_MINIMIZE, WINDOW_FOCUS, WINDOW_CAPTURE_MOUSE, WINDOW_CPU, WINDOW_VULKAN, CLIENT_API, NO_API, CURSOR_NORMAL, CURSOR_HIDDEN, CURSOR_DISABLED, ARROW_CURSOR, IBEAM_CURSOR, CROSSHAIR_CURSOR, POINTING_HAND_CURSOR, RESIZE_EW_CURSOR, RESIZE_NS_CURSOR, RESIZE_NWSE_CURSOR, RESIZE_NESW_CURSOR, RESIZE_ALL_CURSOR, NOT_ALLOWED_CURSOR, KEY_NULL, KEY_ESCAPE, KEY_ESC, KEY_ENTER, KEY_TAB, KEY_BACKSPACE, KEY_SPACE, KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT, KEY_PAGE_UP, KEY_PAGE_DOWN, KEY_HOME, KEY_END, KEY_INSERT, KEY_DELETE, KEY_CAPS_LOCK, KEY_SCROLL_LOCK, KEY_NUM_LOCK, KEY_PRINT_SCREEN, KEY_PAUSE, KEY_MENU, KEY_F1, KEY_F2, KEY_F3, KEY_F4, KEY_F5, KEY_F6, KEY_F7, KEY_F8, KEY_F9, KEY_F10, KEY_F11, KEY_F12, KEY_F13, KEY_F14, KEY_F15, KEY_F16, KEY_F17, KEY_F18, KEY_F19, KEY_F20, KEY_F21, KEY_F22, KEY_F23, KEY_F24, KEY_F25, KEY_KP_0, KEY_KP_1, KEY_KP_2, KEY_KP_3, KEY_KP_4, KEY_KP_5, KEY_KP_6, KEY_KP_7, KEY_KP_8, KEY_KP_9, KEY_KP_ADD, KEY_KP_SUBTRACT, KEY_KP_MULTIPLY, KEY_KP_DIVIDE, KEY_KP_DECIMAL, KEY_KP_ENTER, KEY_KP_EQUAL, KEY_LEFT_SHIFT, KEY_RIGHT_SHIFT, KEY_LEFT_CONTROL, KEY_RIGHT_CONTROL, KEY_LEFT_ALT, KEY_RIGHT_ALT, KEY_LEFT_SUPER, KEY_RIGHT_SUPER, KEY_SHIFT, KEY_CTRL, KEY_ALT, KEY_SUPER, KEY_GRAVE, KEY_MINUS, KEY_EQUAL, KEY_APOSTROPHE, KEY_COMMA, KEY_PERIOD, KEY_SLASH, KEY_SEMICOLON, KEY_LEFT_BRACKET, KEY_BACKSLASH, KEY_RIGHT_BRACKET, KEY_0, KEY_1, KEY_2, KEY_3, KEY_4, KEY_5, KEY_6, KEY_7, KEY_8, KEY_9, KEY_A, KEY_B, KEY_C, KEY_D, KEY_E, KEY_F, KEY_G, KEY_H, KEY_I, KEY_J, KEY_K, KEY_L, KEY_M, KEY_N, KEY_O, KEY_P, KEY_Q, KEY_R, KEY_S, KEY_T, KEY_U, KEY_V, KEY_W, KEY_X, KEY_Y, KEY_Z, KEY_WORLD_1, KEY_WORLD_2, MOD_SHIFT, MOD_CONTROL, MOD_ALT, MOD_SUPER, MOD_META, get_monitors, get_primary_monitor, get_monitor_pos, get_monitor_workarea, get_monitor_physical_size, get_monitor_content_scale, get_monitor_name, get_video_mode, get_video_modes, get_monitor_resolution, get_monitor_rect, get_monitor_desktop_bounds, get_monitor_index_at, get_current_monitor_index, get_current_monitor, move_to_monitor, set_gamma, get_gamma_ramp, set_gamma_ramp, get_window_monitor, set_window_monitor, set_window_fullscreen, toggle_window_fullscreen, set_window_borderless, toggle_window_borderless, primary_mode, default_window_size, fit_to_workarea, open_window, create, show, hide, iconify, restore, maximize, id, title, set_title, pos, size, get_framebuffer_size, get_window_content_scale, get_window_scale_dpi, window_flags, has_window_flag, set_window_flag, toggle_window_flag, window_attrib, window_state, is_window_visible, is_window_focused, is_window_minimized, is_window_maximized, is_window_resizable, is_window_decorated, is_window_floating, is_window_fullscreen, is_window_borderless, window_vsync, set_window_vsync, toggle_window_vsync, toggle_window_resizable, toggle_window_decorated, toggle_window_floating, set_icon, move, resize, should_close, set_should_close, close, quit, exit_key, set_exit_key, key_state, key_name, key_down, key_pressed, get_modifiers, mod_down, mouse_pos, mouse_down, mouse_pressed, joystick_present, get_joystick_name, get_joystick_guid, get_joystick_axes, get_joystick_buttons, get_joystick_hats, joystick_is_gamepad, get_gamepad_state, get_gamepad_name, get_gamepad_guid, gamepad_count, gamepads, gamepad_connected, gamepad_mapped, gamepad_name, gamepad_guid, gamepad_axis, gamepad_button, gamepad_axis_count, gamepad_button_count, set_joystick_callback, update_gamepad_mappings, add_gamepad_mapping, JOYSTICK_1, JOYSTICK_2, JOYSTICK_3, JOYSTICK_4, JOYSTICK_5, JOYSTICK_6, JOYSTICK_7, JOYSTICK_8, JOYSTICK_9, JOYSTICK_10, JOYSTICK_11, JOYSTICK_12, JOYSTICK_13, JOYSTICK_14, JOYSTICK_15, JOYSTICK_16, JOYSTICK_LAST, JOYSTICK_HAT_BUTTONS, GAMEPAD_BUTTON_A, GAMEPAD_BUTTON_B, GAMEPAD_BUTTON_X, GAMEPAD_BUTTON_Y, GAMEPAD_BUTTON_LEFT_BUMPER, GAMEPAD_BUTTON_RIGHT_BUMPER, GAMEPAD_BUTTON_BACK, GAMEPAD_BUTTON_START, GAMEPAD_BUTTON_GUIDE, GAMEPAD_BUTTON_LEFT_THUMB, GAMEPAD_BUTTON_RIGHT_THUMB, GAMEPAD_BUTTON_DPAD_UP, GAMEPAD_BUTTON_DPAD_RIGHT, GAMEPAD_BUTTON_DPAD_DOWN, GAMEPAD_BUTTON_DPAD_LEFT, GAMEPAD_BUTTON_LAST, GAMEPAD_BUTTON_CROSS, GAMEPAD_BUTTON_SQUARE, GAMEPAD_BUTTON_TRIANGLE, GAMEPAD_AXIS_LEFT_X, GAMEPAD_AXIS_LEFT_Y, GAMEPAD_AXIS_RIGHT_X, GAMEPAD_AXIS_RIGHT_Y, GAMEPAD_AXIS_LEFT_TRIGGER, GAMEPAD_AXIS_RIGHT_TRIGGER, GAMEPAD_AXIS_LAST, set_cursor_mode, create_cursor, create_standard_cursor, destroy_cursor, set_cursor, cursor_pos, scroll_pos, touch_count, touch_pos, touch_active, test_report_touch, test_report_gamepad, mouse_state, set_cursor_pos, center_cursor, show_centered_cursor, sync_cursor, focus, transparent_framebuffer, set_window_opacity, set_window_resizable, set_window_decorated, set_window_floating, set_input_exclusive, match_chord, bind, push_event, check_event, event_type, event_window, event_window_id, event_data, event_key_is, on_key, poll_events, count_open, last, get_win, swap_buffers, make_current, blit_buffer, blit_software, update_input, set_blit_handler, set_clipboard, get_clipboard, get_error, get_proc_address, window_hint, window_hint_string, get_x11_display, get_x11_window, set_x11_selection_string, get_x11_selection_string)
-use std.core
-use std.core.dict_mod
-use std.os.ui.window.consts (
+;; - core.os.ui
+;; - core.os.ui.window.consts
+module core.os.ui.window(BACKEND_NY, backend, available, EVENT_NONE, EVENT_KEY_PRESSED, EVENT_KEY_RELEASED, EVENT_KEY_CHAR, EVENT_MOUSE_BUTTON_PRESSED, EVENT_MOUSE_BUTTON_RELEASED, EVENT_MOUSE_SCROLL, EVENT_MOUSE_POS_CHANGED, EVENT_WINDOW_MOVED, EVENT_WINDOW_RESIZED, EVENT_FOCUS_IN, EVENT_FOCUS_OUT, EVENT_MOUSE_ENTER, EVENT_MOUSE_LEAVE, EVENT_WINDOW_REFRESH, EVENT_QUIT, EVENT_DATA_DROP, EVENT_DATA_DRAG, EVENT_WINDOW_MAXIMIZED, EVENT_WINDOW_MINIMIZED, EVENT_WINDOW_RESTORED, EVENT_SCALE_UPDATED, EVENT_MONITOR_CONNECTED, EVENT_MONITOR_DISCONNECTED, WINDOW_NORMAL, WINDOW_NO_BORDER, WINDOW_NO_RESIZE, WINDOW_ALLOW_DND, WINDOW_HIDE_MOUSE, WINDOW_FULLSCREEN, WINDOW_TRANSPARENT, WINDOW_CENTER, WINDOW_RAW_MOUSE, WINDOW_SCALE_TO_MONITOR, WINDOW_HIDE, WINDOW_MAXIMIZE, WINDOW_CENTER_CURSOR, WINDOW_FLOATING, WINDOW_FOCUS_ON_SHOW, WINDOW_MINIMIZE, WINDOW_FOCUS, WINDOW_CAPTURE_MOUSE, WINDOW_CPU, WINDOW_VULKAN, CLIENT_API, NO_API, CURSOR_NORMAL, CURSOR_HIDDEN, CURSOR_DISABLED, ARROW_CURSOR, IBEAM_CURSOR, CROSSHAIR_CURSOR, POINTING_HAND_CURSOR, RESIZE_EW_CURSOR, RESIZE_NS_CURSOR, RESIZE_NWSE_CURSOR, RESIZE_NESW_CURSOR, RESIZE_ALL_CURSOR, NOT_ALLOWED_CURSOR, KEY_NULL, KEY_ESCAPE, KEY_ESC, KEY_ENTER, KEY_TAB, KEY_BACKSPACE, KEY_SPACE, KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT, KEY_PAGE_UP, KEY_PAGE_DOWN, KEY_HOME, KEY_END, KEY_INSERT, KEY_DELETE, KEY_CAPS_LOCK, KEY_SCROLL_LOCK, KEY_NUM_LOCK, KEY_PRINT_SCREEN, KEY_PAUSE, KEY_MENU, KEY_F1, KEY_F2, KEY_F3, KEY_F4, KEY_F5, KEY_F6, KEY_F7, KEY_F8, KEY_F9, KEY_F10, KEY_F11, KEY_F12, KEY_F13, KEY_F14, KEY_F15, KEY_F16, KEY_F17, KEY_F18, KEY_F19, KEY_F20, KEY_F21, KEY_F22, KEY_F23, KEY_F24, KEY_F25, KEY_KP_0, KEY_KP_1, KEY_KP_2, KEY_KP_3, KEY_KP_4, KEY_KP_5, KEY_KP_6, KEY_KP_7, KEY_KP_8, KEY_KP_9, KEY_KP_ADD, KEY_KP_SUBTRACT, KEY_KP_MULTIPLY, KEY_KP_DIVIDE, KEY_KP_DECIMAL, KEY_KP_ENTER, KEY_KP_EQUAL, KEY_LEFT_SHIFT, KEY_RIGHT_SHIFT, KEY_LEFT_CONTROL, KEY_RIGHT_CONTROL, KEY_LEFT_ALT, KEY_RIGHT_ALT, KEY_LEFT_SUPER, KEY_RIGHT_SUPER, KEY_SHIFT, KEY_CTRL, KEY_ALT, KEY_SUPER, KEY_GRAVE, KEY_MINUS, KEY_EQUAL, KEY_APOSTROPHE, KEY_COMMA, KEY_PERIOD, KEY_SLASH, KEY_SEMICOLON, KEY_LEFT_BRACKET, KEY_BACKSLASH, KEY_RIGHT_BRACKET, KEY_0, KEY_1, KEY_2, KEY_3, KEY_4, KEY_5, KEY_6, KEY_7, KEY_8, KEY_9, KEY_A, KEY_B, KEY_C, KEY_D, KEY_E, KEY_F, KEY_G, KEY_H, KEY_I, KEY_J, KEY_K, KEY_L, KEY_M, KEY_N, KEY_O, KEY_P, KEY_Q, KEY_R, KEY_S, KEY_T, KEY_U, KEY_V, KEY_W, KEY_X, KEY_Y, KEY_Z, KEY_WORLD_1, KEY_WORLD_2, MOD_SHIFT, MOD_CONTROL, MOD_ALT, MOD_SUPER, MOD_META, get_monitors, get_primary_monitor, get_monitor_pos, get_monitor_workarea, get_monitor_physical_size, get_monitor_content_scale, get_monitor_name, get_video_mode, get_video_modes, get_monitor_resolution, get_monitor_rect, get_monitor_desktop_bounds, get_monitor_index_at, get_current_monitor_index, get_current_monitor, move_to_monitor, set_gamma, get_gamma_ramp, set_gamma_ramp, get_window_monitor, set_window_monitor, set_window_fullscreen, toggle_window_fullscreen, set_window_borderless, toggle_window_borderless, primary_mode, default_window_size, fit_to_workarea, open_window, create, show, hide, iconify, restore, maximize, id, title, set_title, pos, size, get_framebuffer_size, get_window_content_scale, get_window_scale_dpi, window_flags, has_window_flag, set_window_flag, toggle_window_flag, window_attrib, window_state, is_window_visible, is_window_focused, is_window_minimized, is_window_maximized, is_window_resizable, is_window_decorated, is_window_floating, is_window_fullscreen, is_window_borderless, window_vsync, set_window_vsync, toggle_window_vsync, toggle_window_resizable, toggle_window_decorated, toggle_window_floating, set_icon, move, resize, should_close, set_should_close, close, quit, exit_key, set_exit_key, key_state, key_name, key_down, key_pressed, get_modifiers, mod_down, mouse_pos, mouse_down, mouse_pressed, joystick_present, get_joystick_name, get_joystick_guid, get_joystick_axes, get_joystick_buttons, get_joystick_hats, joystick_is_gamepad, get_gamepad_state, get_gamepad_name, get_gamepad_guid, gamepad_count, gamepads, gamepad_connected, gamepad_mapped, gamepad_name, gamepad_guid, gamepad_axis, gamepad_button, gamepad_axis_count, gamepad_button_count, set_joystick_callback, update_gamepad_mappings, add_gamepad_mapping, JOYSTICK_1, JOYSTICK_2, JOYSTICK_3, JOYSTICK_4, JOYSTICK_5, JOYSTICK_6, JOYSTICK_7, JOYSTICK_8, JOYSTICK_9, JOYSTICK_10, JOYSTICK_11, JOYSTICK_12, JOYSTICK_13, JOYSTICK_14, JOYSTICK_15, JOYSTICK_16, JOYSTICK_LAST, JOYSTICK_HAT_BUTTONS, GAMEPAD_BUTTON_A, GAMEPAD_BUTTON_B, GAMEPAD_BUTTON_X, GAMEPAD_BUTTON_Y, GAMEPAD_BUTTON_LEFT_BUMPER, GAMEPAD_BUTTON_RIGHT_BUMPER, GAMEPAD_BUTTON_BACK, GAMEPAD_BUTTON_START, GAMEPAD_BUTTON_GUIDE, GAMEPAD_BUTTON_LEFT_THUMB, GAMEPAD_BUTTON_RIGHT_THUMB, GAMEPAD_BUTTON_DPAD_UP, GAMEPAD_BUTTON_DPAD_RIGHT, GAMEPAD_BUTTON_DPAD_DOWN, GAMEPAD_BUTTON_DPAD_LEFT, GAMEPAD_BUTTON_LAST, GAMEPAD_BUTTON_CROSS, GAMEPAD_BUTTON_SQUARE, GAMEPAD_BUTTON_TRIANGLE, GAMEPAD_AXIS_LEFT_X, GAMEPAD_AXIS_LEFT_Y, GAMEPAD_AXIS_RIGHT_X, GAMEPAD_AXIS_RIGHT_Y, GAMEPAD_AXIS_LEFT_TRIGGER, GAMEPAD_AXIS_RIGHT_TRIGGER, GAMEPAD_AXIS_LAST, set_cursor_mode, create_cursor, create_standard_cursor, destroy_cursor, set_cursor, cursor_pos, scroll_pos, touch_count, touch_pos, touch_active, test_report_touch, test_report_gamepad, mouse_state, set_cursor_pos, center_cursor, show_centered_cursor, sync_cursor, focus, transparent_framebuffer, set_window_opacity, set_window_resizable, set_window_decorated, set_window_floating, set_input_exclusive, match_chord, bind, push_event, check_event, event_type, event_window, event_window_id, event_data, event_key_is, on_key, poll_events, count_open, last, get_win, swap_buffers, make_current, blit_buffer, blit_software, update_input, set_blit_handler, set_clipboard, get_clipboard, get_error, get_proc_address, window_hint, window_hint_string, get_x11_display, get_x11_window, set_x11_selection_string, get_x11_selection_string)
+use core
+use core.dict_mod
+use core.os.ui.window.consts (
    BACKEND_NY, EVENT_NONE, EVENT_KEY_PRESSED, EVENT_KEY_RELEASED, EVENT_KEY_CHAR,
    EVENT_MOUSE_BUTTON_PRESSED, EVENT_MOUSE_BUTTON_RELEASED, EVENT_MOUSE_SCROLL, EVENT_MOUSE_POS_CHANGED,
    EVENT_WINDOW_MOVED, EVENT_WINDOW_RESIZED, EVENT_FOCUS_IN, EVENT_FOCUS_OUT, EVENT_MOUSE_ENTER,
@@ -32,17 +32,17 @@ use std.os.ui.window.consts (
    KEY_Z, KEY_WORLD_1, KEY_WORLD_2, MOD_SHIFT, MOD_CONTROL, MOD_ALT, MOD_SUPER, MOD_META,
 )
 
-use std.os.ui.window.event as ev
-use std.os.ui.window.input.key as ui_key
-use std.os.ui.window.input.gamepad as ui_gamepad
-use std.os (msleep)
-use std.os.time
-use std.math (abs)
-use std.core.str as str
-use std.core.common as common
-use std.os.ui.render.dump as ui_profile
-use std.os.ui.window.platform as ui_backend
-use std.os.ui.window.platform.api (
+use core.os.ui.window.event as ev
+use core.os.ui.window.input.key as ui_key
+use core.os.ui.window.input.gamepad as ui_gamepad
+use core.os (msleep)
+use core.os.time
+use core.math (abs)
+use core.str as str
+use core.common as common
+use core.os.ui.debug as ui_profile
+use core.os.ui.window.platform as ui_backend
+use core.os.ui.window.platform.api (
    CLIENT_API, NO_API, CURSOR_NORMAL, CURSOR_HIDDEN, CURSOR_DISABLED, ARROW_CURSOR, IBEAM_CURSOR,
    CROSSHAIR_CURSOR, POINTING_HAND_CURSOR, RESIZE_EW_CURSOR, RESIZE_NS_CURSOR, RESIZE_NWSE_CURSOR,
    RESIZE_NESW_CURSOR, RESIZE_ALL_CURSOR, NOT_ALLOWED_CURSOR, JOYSTICK_1, JOYSTICK_2,
@@ -57,7 +57,7 @@ use std.os.ui.window.platform.api (
    GAMEPAD_AXIS_LEFT_TRIGGER, GAMEPAD_AXIS_RIGHT_TRIGGER, GAMEPAD_AXIS_LAST,
 )
 
-use std.os.ui.window.native
+use core.os.ui.window.native
 
 def _MOD_MASK = MOD_SHIFT | MOD_CONTROL | MOD_ALT | MOD_SUPER | MOD_META
 def _KEY_POLL_COUNT = 120
@@ -155,7 +155,7 @@ fn _ensure_backend_ready() bool {
 
 fn backend() str { "Returns the name of the active windowing platform(e.g., 'x11', 'wayland', 'win32', 'cocoa')." return ui_backend.get_backend_name() }
 
-fn available() bool { "Checks if the windowing system is available on the current platform." true }
+fn available() bool { "Checks if a native or explicitly selected null window backend is available." ui_backend.available() }
 
 fn _is_window(any win) bool { "Internal: Type check for window dictionary." is_dict(win) && win.contains("handle") }
 
@@ -184,7 +184,7 @@ fn _get_win(any win) any {
    def h = _get_handle(win)
    if !h { return win }
    def real = _ensure_window_registry().get(h, 0)
-   if real { return real }
+   if _is_window(real) { return real }
    win
 }
 
@@ -218,7 +218,7 @@ fn _sync_live_size(any win) any {
    if !_is_window(win) { return win }
    def h = _get_handle(win)
    if !h { return win }
-   def sz = ui_backend.get_size(h)
+   def sz = ui_backend.get_size(win)
    def nw = int(sz.get(0, win.get("w", 0)))
    def nh = int(sz.get(1, win.get("h", 0)))
    if nw > 0 && nh > 0 &&
@@ -236,7 +236,7 @@ fn _sync_live_pos(any win) any {
    if ui_backend.get_backend_name() == "wayland" { return win }
    def h = _get_handle(win)
    if !h { return win }
-   def pos = ui_backend.get_pos(h)
+   def pos = ui_backend.get_pos(win)
    def nx = int(pos.get(0, win.get("x", 0)))
    def ny = int(pos.get(1, win.get("y", 0)))
    if nx != win.get("x", 0) || ny != win.get("y", 0) {
@@ -679,7 +679,7 @@ fn _cursor_pos_cb(ptr h, f64 dx, f64 dy) any {
    }
 }
 
-fn open_window(str name, int x, int y, int w, int h, int flags=0) any {
+fn open_window(str name, int x, int y, int w, int h, int flags=0, any hint_overrides=0) any {
    "Creates and opens a new system window."
    if !_ensure_backend_ready() { return false }
    if !is_str(name) { name = to_str(name) }
@@ -689,13 +689,13 @@ fn open_window(str name, int x, int y, int w, int h, int flags=0) any {
       flags = flags | WINDOW_HIDE
       _dbg("open_window: NY_UI_HEADLESS forcing flags=0x" + str.to_hex(flags) + " pos=(" + to_str(x) + "," + to_str(y) + ")")
    }
-   mut handle = ui_backend.create_window(name, x, y, w, h, flags)
+   mut handle = ui_backend.create_window(name, x, y, w, h, flags, hint_overrides)
    if !handle {
       _dbg("ERROR: open_window backend create failed")
       return false
    }
    _dbg_win(handle, "backend window created")
-   mut win = {
+   mut any win = {
       "handle": handle, "title": name, "x": x, "y": y, "w": w, "h": h,
       "flags": flags, "should_close": false, "exit_key": KEY_ESCAPE,
       "events": [], "events_head": 0,
@@ -725,9 +725,15 @@ fn open_window(str name, int x, int y, int w, int h, int flags=0) any {
    win
 }
 
-fn window_hint(any hint, any value) any { "Sets a window hint for upcoming window creations." ui_backend.window_hint(hint, value) }
+fn window_hint(any hint, any value) any {
+   "Sets a window hint for upcoming window creations."
+   ui_backend.window_hint(hint, value)
+}
 
-fn window_hint_string(any hint, str value) any { "Sets a string window hint for upcoming window creations." ui_backend.window_hint_string(hint, value) }
+fn window_hint_string(any hint, str value) any {
+   "Sets a string window hint for upcoming window creations."
+   ui_backend.window_hint_string(hint, value)
+}
 
 fn create(int w, int h, str name, int flags=0) any { "Common shortcut for creating a centered window." open_window(name, 0, 0, w, h, flags) }
 
@@ -902,7 +908,7 @@ fn get_framebuffer_size(any win) list {
    if !_is_window(win) { return [0,0] }
    def h = win.get("handle", 0)
    if !h { return [win.get("w", 0), win.get("h", 0)] }
-   ui_backend.get_framebuffer_size(h)
+   ui_backend.get_framebuffer_size(win)
 }
 
 fn get_window_content_scale(any win) list {
@@ -1175,10 +1181,16 @@ fn get_monitor_resolution(any monitor) list {
    def fallback_h = is_dict(monitor) ? monitor.get("height", 0) : 0
    def fallback_hz = is_dict(monitor) ? monitor.get("refresh_rate", 0) : 0
    if is_dict(mode) {
+      mut width = int(mode.get("width", 0))
+      mut height = int(mode.get("height", 0))
+      mut refresh = int(mode.get("refresh_rate", 0))
+      if width <= 0 { width = int(fallback_w) }
+      if height <= 0 { height = int(fallback_h) }
+      if refresh <= 0 { refresh = int(fallback_hz) }
       return [
-         max(1, int(mode.get("width", fallback_w))),
-         max(1, int(mode.get("height", fallback_h))),
-         int(mode.get("refresh_rate", fallback_hz))
+         max(1, width),
+         max(1, height),
+         refresh
       ]
    }
    [max(1, int(fallback_w)), max(1, int(fallback_h)), int(fallback_hz)]
@@ -1581,7 +1593,7 @@ fn _drop_uri_to_path(str uri) str {
 
 fn _drop_paths_from_text(str text) list {
    mut out = []
-   def lines = str.split(str.replace(text, "\r\n", "\n"), "\n")
+   def lines = str.split(text.replace("\r\n", "\n"), "\n")
    mut i = 0
    while i < lines.len {
       def line = str.strip(to_str(lines.get(i, "")))
@@ -1950,28 +1962,30 @@ fn check_event(any win) any {
       if native_events {
          def now_poll = ticks()
          def last_poll = int(_event_poll_ns_by_handle.get(handle, 0))
-         if last_poll <= 0 || now_poll - last_poll >= 500000 {
+         mut polled_events = ui_backend.pump_window_events(handle)
+         if (!is_list(polled_events) || polled_events.len == 0) &&
+            (last_poll <= 0 || now_poll - last_poll >= 500000) {
             _event_poll_ns_by_handle[handle] = now_poll
-            def polled_events = ui_backend.poll_events_for_window(handle)
-            if is_list(polled_events) && polled_events.len > 0 {
-               mut q2 = cw.get("events", [])
-               mut head2 = int(cw.get("events_head", 0))
-               if head2 >= q2.len { q2 = [] head2 = 0 }
-               elif head2 > 64 && head2 * 2 >= q2.len {
-                  q2 = slice(q2, head2, q2.len, 1)
-                  head2 = 0
-               }
-               def polled_events_n = polled_events.len
-               mut i = 0
-               while i < polled_events_n {
-                  def ne = polled_events.get(i)
-                  if ev.is_event(ne) { q2 = ev.queue_push(q2, ne) }
-                  i += 1
-               }
-               cw["events"] = q2
-               cw["events_head"] = head2
-               _set_window_registry(handle, cw)
+            polled_events = ui_backend.poll_events_for_window(handle)
+         }
+         if is_list(polled_events) && polled_events.len > 0 {
+            mut q2 = cw.get("events", [])
+            mut head2 = int(cw.get("events_head", 0))
+            if head2 >= q2.len { q2 = [] head2 = 0 }
+            elif head2 > 64 && head2 * 2 >= q2.len {
+               q2 = slice(q2, head2, q2.len, 1)
+               head2 = 0
             }
+            def polled_events_n = polled_events.len
+            mut i = 0
+            while i < polled_events_n {
+               def ne = polled_events.get(i)
+               if ev.is_event(ne) { q2 = ev.queue_push(q2, ne) }
+               i += 1
+            }
+            cw["events"] = q2
+            cw["events_head"] = head2
+            _set_window_registry(handle, cw)
          }
       } else {
          update_input(win)
@@ -2052,11 +2066,11 @@ fn quit(any e) bool {
    event_type(e) == 15
 }
 
-@jit
-fn key_down(any win, any k) bool {
+fn key_down(any win, int k) bool {
    "Returns true if key `k` is currently held down in `win`."
    win = _get_win(win)
    if !_is_window(win) { return false }
+   if win.get("_mock", false) { return false }
    def nk = _normalize_key(k)
    def ks = win.get("key_states", 0)
    if is_dict(ks) && ks.get(nk, false) { return true }
@@ -2068,7 +2082,6 @@ fn key_down(any win, any k) bool {
       if scs.get(qsc.get(i), false) { return true }
       i += 1
    }
-   if ui_backend.uses_native_events() { return _backend_key_down(win, nk) }
    _backend_key_down(win, nk)
 }
 
@@ -2088,9 +2101,10 @@ fn mod_down(any win, any m) bool {
    (get_modifiers(win) & nm) == nm
 }
 
-fn key_pressed(any win, any k) bool {
+fn key_pressed(any win, int k) bool {
    "Runs the key pressed operation."
    win = _get_win(win) if !_is_window(win) { return false }
+   if win.get("_mock", false) { return false }
    def nk = _normalize_key(k) def ks = win.get("key_states", 0)
    def lks = win.get("last_key_states", 0) def pk = win.get("pressed_keys", 0)
    def cached = (!!ks.get(nk, false) && !lks.get(nk, false)) || !!pk.get(nk, false)
@@ -2098,11 +2112,13 @@ fn key_pressed(any win, any k) bool {
    _backend_key_down(win, nk) && !lks.get(nk, false)
 }
 
-@jit
 fn mouse_pos(any win) list {
    "Returns [x, y] coordinates of the mouse cursor relative to the window."
    win = _get_win(win)
    if !_is_window(win) { return [0, 0] }
+   if win.get("_mock", false) {
+      return [win.get("mouse_x", 0), win.get("mouse_y", 0)]
+   }
    def cur = _backend_mouse_pos(win)
    def mx = cur.get(0, win.get("mouse_x", 0))
    def my = cur.get(1, win.get("mouse_y", 0))
@@ -2118,6 +2134,10 @@ fn mouse_down(any win, int b) bool {
    "Returns true if mouse button `b` is currently held down."
    win = _get_win(win)
    if !_is_window(win) { return false }
+   if win.get("_mock", false) {
+      def mock_buttons = win.get("mouse_buttons", 0)
+      return is_dict(mock_buttons) && !!mock_buttons.get(b, false)
+   }
    def live = _backend_mouse_down(win, b)
    def mb = win.get("mouse_buttons", 0)
    if live {
@@ -2145,6 +2165,7 @@ fn mouse_pressed(any win, int b) bool {
    def down_now = !!mb.get(b, false)
    def cached = (down_now && !lmb.get(b, false)) || !!pb.get(b, false)
    if cached { return true }
+   if win.get("_mock", false) { return false }
    _backend_mouse_down(win, b) && !lmb.get(b, false)
 }
 
@@ -2256,23 +2277,31 @@ fn swap_buffers(any win) any {
 fn make_current(any win) any {
    "Makes a window OpenGL context current, or releases it when win is false."
    if !win { return ui_backend.make_context_current(0) }
+   _dbg("make_current: input_dict=" + to_str(is_dict(win)) +
+      " input_handle=" + to_str(is_dict(win) ? win.get("handle", 0) : win))
+   _dbg("make_current: input_keys=" + to_str(is_dict(win) ? dict_keys(win) : []) +
+      " contains_handle=" + to_str(is_dict(win) && win.contains("handle")))
    win = _get_win(win)
+   _dbg("make_current: resolved_keys=" + to_str(is_dict(win) ? dict_keys(win) : []) +
+      " contains_handle=" + to_str(is_dict(win) && win.contains("handle")))
+   _dbg("make_current: window_record=" + to_str(_is_window(win)))
    if !_is_window(win) { return false }
-   def h = _get_handle(win)
-   if !h { return false }
-   ui_backend.make_context_current(h)
+   def made_current = ui_backend.make_context_current(win)
+   _dbg("make_current: result=" + to_str(made_current))
+   made_current
 }
 
-mut _blit_hook = 0
+mut fnptr _blit_hook = nil
 
-fn set_blit_handler(any h) any {
+fn set_blit_handler(fnptr h) any {
    "Runs the set blit handler operation."
    _blit_hook = h
 }
 
 fn blit_buffer(any win, any buf, int w, int h) any {
    "Runs the blit buffer operation."
-   win = _get_win(win) if _is_window(win) && is_ptr(buf) && _blit_hook { _blit_hook(buf, w, h) } 0
+   def fnptr hook = _blit_hook
+   win = _get_win(win) if _is_window(win) && is_ptr(buf) && hook { hook(buf, w, h) } 0
 }
 
 fn blit_software(any win, any buf, int w, int h) any {
@@ -2286,9 +2315,10 @@ fn blit_software(any win, any buf, int w, int h) any {
 
 fn poll_events() bool {
    "Triggers the system to process window and input events."
+   def windows = _ensure_windows()
+   if windows.len == 0 { return true }
    if !_ensure_backend_ready() { return false }
    ui_backend.poll_events()
-   def windows = _ensure_windows()
    def windows_n = windows.len
    def native_events = ui_backend.uses_native_events()
    mut i = 0
@@ -2316,7 +2346,9 @@ fn poll_events() bool {
             mut j = 0
             while j < native_events_n {
                def ne = queued_native_events.get(j)
-               if ev.is_event(ne) { push_event(win, ev.event_type(ne), ev.event_data(ne)) }
+               if ev.is_event(ne) {
+                  push_event(poll_handle, ev.event_type(ne), ev.event_data(ne))
+               }
                j += 1
             }
          }
@@ -2462,7 +2494,7 @@ fn test_report_touch(int count, any x, any y) bool {
    "Test-only: echoes an observed touch count and position back to the host so
    the headless-browser harness can confirm the touch facade delivered data.
    No-op on native(returns true) ; the browser target writes data-touch-* attrs."
-   true
+   __web_test_report_touch(count, x, y)
 }
 
 fn test_report_gamepad(int count, any buttonA, any leftX) bool {
@@ -2470,7 +2502,7 @@ fn test_report_gamepad(int count, any buttonA, any leftX) bool {
    X back to the host so the headless-browser harness can confirm the gamepad
    facade delivered mapped data. No-op on native(returns true) ; the browser
    target writes data-gamepad-* attrs."
-   true
+   __web_test_report_gamepad(count, buttonA, leftX)
 }
 
 fn mouse_state(any win) dict {
@@ -2946,5 +2978,5 @@ fn get_x11_selection_string(any win) str {
    assert(quit(quit_event), "window quit recognized")
    assert(count_open() == 0, "window quit leaves open count")
    assert(close(win) && should_close(win) && count_open() == 0, "window close lifecycle")
-   print("✓ std.os.ui.window self-test passed")
+   print("✓ core.os.ui.window self-test passed")
 }

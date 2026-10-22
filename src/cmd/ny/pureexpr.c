@@ -2,7 +2,7 @@
  * Pure i64 arithmetic evaluator for the thin ny launcher.
  * No LLVM/Z3/stdlib — process can finish in sub-millisecond range.
  */
-#include "cmd/ny/pureexpr.h"
+#include "pureexpr.h"
 
 #include <ctype.h>
 #include <stdbool.h>
@@ -24,6 +24,7 @@ static bool parse_shift(int64_t *out);
 static bool parse_add(int64_t *out);
 static bool parse_mul(int64_t *out);
 static bool parse_unary(int64_t *out);
+static bool parse_power(int64_t *out);
 static bool parse_primary(int64_t *out);
 
 static bool parse_primary(int64_t *out) {
@@ -48,8 +49,8 @@ static bool parse_primary(int64_t *out) {
     int any = 0;
     while (isxdigit((unsigned char)*g_p)) {
       any = 1;
-      int d = isdigit((unsigned char)*g_p) ? *g_p - '0'
-            : (*g_p | 32) - 'a' + 10;
+      int d =
+          isdigit((unsigned char)*g_p) ? *g_p - '0' : (*g_p | 32) - 'a' + 10;
       v = (v << 4) | (int64_t)d;
       g_p++;
     }
@@ -89,7 +90,52 @@ static bool parse_unary(int64_t *out) {
     *out = ~*out;
     return true;
   }
-  return parse_primary(out);
+  return parse_power(out);
+}
+
+static bool parse_checked_mul(int64_t a, int64_t b, int64_t *out) {
+  if (a == 0 || b == 0) {
+    *out = 0;
+    return true;
+  }
+  if (a == -1 && b == INT64_MIN)
+    return false;
+  if (b == -1 && a == INT64_MIN)
+    return false;
+  if (a > 0) {
+    if ((b > 0 && a > INT64_MAX / b) || (b < 0 && b < INT64_MIN / a))
+      return false;
+  } else {
+    if ((b > 0 && a < INT64_MIN / b) || (b < 0 && a < INT64_MAX / b))
+      return false;
+  }
+  *out = a * b;
+  return true;
+}
+
+static bool parse_power(int64_t *out) {
+  if (!parse_primary(out))
+    return false;
+  skip_ws();
+  if (!((g_p[0] == '*' && g_p[1] == '*') || (g_p[0] == '^' && g_p[1] == '^')))
+    return true;
+  g_p += 2;
+  int64_t exponent = 0;
+  if (!parse_unary(&exponent) || exponent < 0)
+    return false;
+  int64_t base = *out;
+  int64_t value = 1;
+  while (exponent > 0) {
+    if (exponent & 1) {
+      if (!parse_checked_mul(value, base, &value))
+        return false;
+    }
+    exponent >>= 1;
+    if (exponent > 0 && !parse_checked_mul(base, base, &base))
+      return false;
+  }
+  *out = value;
+  return true;
 }
 
 static bool parse_mul(int64_t *out) {
@@ -234,9 +280,9 @@ bool ny_pure_expr_eval(const char *src, int64_t *out) {
       s += 2; /* loop +1 */
       continue;
     }
-    if (c == '"' || c == '\'' || c == '`' || c == '{' || c == '}' ||
-        c == ';' || c == '=' || c == '!' || c == '?' || c == '[' || c == ']' ||
-        c == ',' || c == '@' || c == '#' || c == '$' || c == ':')
+    if (c == '"' || c == '\'' || c == '`' || c == '{' || c == '}' || c == ';' ||
+        c == '=' || c == '!' || c == '?' || c == '[' || c == ']' || c == ',' ||
+        c == '@' || c == '#' || c == '$' || c == ':')
       return false;
   }
   g_p = src;

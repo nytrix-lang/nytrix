@@ -1,0 +1,82 @@
+shape proof_policy_recursion {
+  family "runtime/proofs"
+  generator "program"
+  features ["proofs", "policy", "recursion", "bounds", "parser"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.proof
+
+;; Recursion meets the policy in two bounded places: deeply nested
+;; canonical propositions must degrade to unknown (never crash, never
+;; guess), and guarded countdown obligations carry the same versioned
+;; certificates as any other obligation.
+
+;; A 200-deep conjunction chain exceeds the depth budget on both sides.
+mut deep = "bool:true"
+mut i = 0
+while i < 200 {
+   deep = "binary:&&(bool:true," + deep + ")"
+   i += 1
+}
+def ob_deep = proof.obligation(deep, "x=0..1")
+def cert_deep = proof.solve(ob_deep)
+assert(proof.verdict_of(cert_deep) == "unknown",
+   "over-budget nesting stays unknown")
+assert(!proof.check(cert_deep),
+   "an over-budget obligation earns no trusted certificate")
+
+;; The Ny parser reports the depth failure instead of recursing forever.
+def parsed = proof.parse_canonical(deep)
+assert(!parsed.get("ok"), "parser rejects over-budget nesting with a reason")
+assert(proof.parse_canonical("binary:>(name:x,int:0)").get("ok"),
+   "in-budget propositions parse")
+
+;; Guarded countdown: the decreasing-step obligation over a bounded
+;; parameter proves exactly when the guard excludes the underflow.
+def ob_countdown = proof.obligation(
+   "binary:>=(binary:-(name:n,int:1),int:0)", "n=1..10")
+def cert_countdown = proof.solve(ob_countdown)
+assert(proof.verdict_of(cert_countdown) == "proved",
+   "countdown step stays in range when the guard excludes zero")
+assert(proof.check(cert_countdown), "countdown certificate checks")
+
+def ob_guard = proof.obligation(
+   "binary:>=(binary:-(name:n,int:1),int:0)", "n=0..10")
+def cert_guard = proof.solve(ob_guard)
+assert(proof.verdict_of(cert_guard) == "refuted",
+   "without the guard the step underflows and refutes")
+
+;; A recursive helper bounded by the same countdown fact: @total accepts
+;; the guarded form and the compiler rejects the zero-step recursion.
+fn count_down(int n) int {
+   if n <= 0 { return 0 }
+   return 1 + count_down(n - 1)
+}
+assert(count_down(5) == 5, "guarded recursion evaluates")
+
+assert(true, "recursion policy fixtures complete")
+NY
+}
+
+shape proof_policy_recursion_negative {
+  family "runtime/proofs"
+  generator "program"
+  features ["proofs", "policy", "recursion", "totality"]
+  template ny-test-case
+  expect compile_fail
+  expect_message "recursive termination is not certified"
+  source ny <<'NY'
+use core
+
+;; A countdown without a decreasing step is not total: the compiler must
+;; reject it on every backend.
+@total
+fn runaway(int n) int decreases(n) {
+   if n <= 0 { return 0 }
+   return 1 + runaway(n)
+}
+print("never reached")
+NY
+}

@@ -1,11 +1,13 @@
 ;; Keywords: render opengl gl backend facade
-;; References: std.os.ui.render.gl.state std.os.ui.render.gl.texture std.os.ui.render.gl.draw std.os.ui.render.gl.buffer
-module std.os.ui.render.gl(init, shutdown, capabilities, begin_frame, end_frame, notify_window_resize, get_swapchain_width, get_swapchain_height, get_swapchain_image_count, set_clear_color, set_next_frame_load_color, clear, clear_depth, set_mvp, set_model_matrix, set_ortho, set_perspective, set_scissor_rect, reset_scissor_rect, set_wireframe, set_mesh_raster_state, renderer_vertex_offset, frame_stats, draw_rect, draw_rect_fast, draw_rect_outline_fast, draw_rects_fast_ptr, draw_lines_2d_fast_ptr, draw_rect_tex, draw_rect_tex_uv, draw_rect_tex_uv_rot, draw_line, draw_line_fast, draw_fan_2d, draw_ring_2d, draw_rounded_rect_2d, draw_vertices, draw_vertices_indexed_raw, draw_lines_raw, draw_points_raw, draw_line_3d, draw_triangle_3d, draw_quad_3d, draw_glyph_bitmap_scaled, set_unlit, set_vertex_color_mode, set_material, set_material_packed, set_material_from_slab, set_material_from_slab_base, set_ui_material, create_texture, create_cubemap, create_texture_ex, update_texture_rect, bind_texture, bind_default_texture, destroy_texture, texture_size, texture_format, texture_count, last_created_texture_id, read_framebuffer, create_static_buffer, create_static_index_buffer, create_static_indexed_buffer, destroy_static_buffer, draw_static_buffer, draw_static_buffer_raw, draw_static_buffer_indexed, draw_static_buffer_indexed_raw)
-use std.os.ui.render.gl.constants as c
-use std.os.ui.render.gl.state as s
-use std.os.ui.render.gl.texture as t
-use std.os.ui.render.gl.buffer as b
-use std.os.ui.render.gl.draw as d
+;; Forwards the renderer API to its OpenGL state, texture, buffer, and draw modules.
+;; References: core.os.ui.render.gl.state core.os.ui.render.gl.texture core.os.ui.render.gl.draw core.os.ui.render.gl.buffer
+module core.os.ui.render.gl(init, shutdown, capabilities, begin_frame, end_frame, notify_window_resize, get_swapchain_width, get_swapchain_height, get_swapchain_image_count, set_clear_color, set_next_frame_load_color, clear, clear_depth, set_mvp, set_model_matrix, set_ortho, set_perspective, set_scissor_rect, reset_scissor_rect, set_wireframe, set_mesh_raster_state, renderer_vertex_offset, frame_stats, draw_rect, draw_rect_fast, draw_rect_outline_fast, draw_rects_fast_ptr, draw_lines_2d_fast_ptr, draw_rect_tex, draw_rect_tex_uv, draw_rect_tex_uv_rot, draw_line, draw_line_fast, draw_fan_2d, draw_ring_2d, draw_rounded_rect_2d, draw_vertices, draw_vertices_indexed_raw, draw_lines_raw, draw_points_raw, draw_line_3d, draw_triangle_3d, draw_quad_3d, draw_glyph_bitmap_scaled, set_unlit, set_vertex_color_mode, set_material, set_material_packed, set_material_from_slab, set_material_from_slab_base, set_ui_material, create_texture, create_cubemap, create_texture_ex, update_texture_rect, bind_texture, bind_default_texture, destroy_texture, texture_size, texture_format, texture_count, last_created_texture_id, read_framebuffer, create_static_buffer, create_static_index_buffer, create_static_indexed_buffer, destroy_static_buffer, draw_static_buffer, draw_static_buffer_raw, draw_static_buffer_indexed, draw_static_buffer_indexed_raw)
+use core.os.ui.render.gl.constants as c
+use core.os.ui.render.gl.state as s
+use core.os.ui.render.gl.state (clear as state_clear)
+use core.os.ui.render.gl.texture as t
+use core.os.ui.render.gl.buffer as b
+use core.os.ui.render.gl.draw as d
 
 fn init(any win) bool { s.init(win) }
 
@@ -29,7 +31,7 @@ fn set_clear_color(f64 r, f64 g, f64 b, f64 a=1.0) bool { s.set_clear_color(r, g
 
 fn set_next_frame_load_color(any enabled) bool { s.set_next_frame_load_color(enabled) }
 
-fn clear(f64 r, f64 g, f64 b, f64 a=1.0) bool { s.clear(r, g, b, a) }
+fn clear(f64 r, f64 g, f64 b, f64 a=1.0) bool { state_clear(r, g, b, a) }
 
 fn clear_depth() bool { s.clear_depth() }
 
@@ -59,9 +61,9 @@ fn draw_rect_fast(f64 x, f64 y, f64 w, f64 h, int color_u32) bool { d.draw_rect_
 
 fn draw_rect_outline_fast(f64 x, f64 y, f64 w, f64 h, int color_u32, f64 thickness=1.0) bool { d.draw_rect_outline_fast(x, y, w, h, color_u32, thickness) }
 
-fn draw_rects_fast_ptr(any rects, int count, int stride=20) int { d.draw_rects_fast_ptr(rects, count, stride) }
+fn draw_rects_fast_ptr(ptr rects, int count, int stride=20) int { d.draw_rects_fast_ptr(rects, count, stride) }
 
-fn draw_lines_2d_fast_ptr(any lines, int count, int stride=24) int { d.draw_lines_2d_fast_ptr(lines, count, stride) }
+fn draw_lines_2d_fast_ptr(ptr lines, int count, int stride=24) int { d.draw_lines_2d_fast_ptr(lines, count, stride) }
 
 fn draw_rect_tex(f64 x, f64 y, f64 w, f64 h, int tex_id, f64 r, f64 g, f64 b, f64 a) bool { d.draw_rect_tex(x, y, w, h, tex_id, r, g, b, a) }
 

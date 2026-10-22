@@ -1,0 +1,12 @@
+shape nyir_logical_short_circuit {
+  family "runtime-native"
+  generator "native"
+  features ["native", "nyir", "logical", "short-circuit", "vm"]
+  template ny-test-case
+  flags "--native --run"
+  expect compile_and_run
+  expect_exit 1
+  source ny <<'NY'
+1 || (10 / 0)
+NY
+}

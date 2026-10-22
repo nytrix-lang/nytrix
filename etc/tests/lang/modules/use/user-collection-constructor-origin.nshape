@@ -1,0 +1,21 @@
+shape user_collection_constructor_origin {
+  family "runtime/modules/use"
+  generator "regression"
+  features [module identity constructor scalar]
+  template ny-test-case
+  flags_matrix "--native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only --native-backend=x86_64"
+  expect compile_and_run
+  source ny <<'NY'
+module project.factories(list, dict)
+fn list(int count) int { count + 73 }
+fn dict(int count) int { count + 91 }
+#main {
+  def int first = project.factories.list(2)
+  def int second = project.factories.dict(4)
+  assert(first == 75, "user list spelling does not imply list storage")
+  assert(second == 95, "user dict spelling does not imply dictionary storage")
+  assert(first + second == 170, "user factory results retain scalar arithmetic")
+  0
+}
+NY
+}

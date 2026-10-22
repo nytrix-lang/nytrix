@@ -1,20 +1,21 @@
 ;; Keywords: elf sections symbols relocations imports disassembly flirt
 ;; ELF loading, recovery, symbols, imports, disassembly, and FLIRT signatures.
-module std.os.rev.decomp.elf *
-use std.core
-use std.core.str as str
-use std.os as os
-use std.os.path as path
-use std.os.time as ostime
-use std.os.disasm as dasm
-use std.os.rev.strings as rev_strings
-use std.os.rev.decomp.tools (tool_status, demangle)
-use std.os.rev.decomp.elf_types (machine, file_type, symbol_bind, symbol_type, segment_perms)
-use std.os.rev.decomp.bytes (_u16, _u32, _u64, _slice, _slice_list, _cstring)
-use std.os.rev.decomp.source (_read, _source_data, _looks_path)
-use std.os.rev.decomp.collections (_list_has, _append_unique, _append_all_unique, _symbols_intersect)
-use std.os.rev.decomp.pe as pe
-use std.os.rev.decomp.macho as macho
+module core.os.rev.decomp.elf *
+use core
+use core.primitives (band, bshr)
+use core.str as str
+use core.os as os
+use core.os.path as path
+use core.os.time as ostime
+use core.os.disasm as dasm
+use core.os.rev.strings as rev_strings
+use core.os.rev.decomp.tools (tool_status, demangle)
+use core.os.rev.decomp.elf_types (machine, file_type, symbol_bind, symbol_type, segment_perms)
+use core.os.rev.decomp.bytes (_u16, _u32, _u64, _slice, _slice_list, _cstring)
+use core.os.rev.decomp.source (_read, _source_data, _looks_path)
+use core.os.rev.decomp.collections (_list_has, _append_unique, _append_all_unique, _symbols_intersect)
+use core.os.rev.decomp.pe as pe
+use core.os.rev.decomp.macho as macho
 
 def SHT_SYMTAB = 2
 def SHT_STRTAB = 3
@@ -381,15 +382,20 @@ fn function_extent(any source, any fn_or_addr, int max_bytes=4096) dict {
    "Return one inferred function extent as `{start,end,size,inferred}`."
    def bin = is_dict(source) && source.contains("header") ? source : load(to_str(source))
    def fs = bin.contains("functions") ? bin.get("functions", []) : recover_functions(bin)
-   mut f = dict()
-   if is_dict(fn_or_addr) { f = fn_or_addr }
-   elif is_str(fn_or_addr) {
+   if is_dict(fn_or_addr) {
+      if fn_or_addr.len == 0 { return {"ok": false, "reason": "function_not_found", "start": 0, "end": 0, "size": 0} }
+      return _extent_from_functions(bin, fn_or_addr, fs, max_bytes).set("ok", true)
+   } elif is_str(fn_or_addr) {
       mut i = 0
       while i < fs.len {
-         if fs[i].get("name", "") == fn_or_addr { f = fs[i] break }
+         if fs[i].get("name", "") == fn_or_addr {
+            return _extent_from_functions(bin, fs[i], fs, max_bytes).set("ok", true)
+         }
          i += 1
       }
-   } else { f = function_at(bin.set("functions", fs), int(fn_or_addr)) }
+      return {"ok": false, "reason": "function_not_found", "start": 0, "end": 0, "size": 0}
+   }
+   def f = function_at(bin.set("functions", fs), int(fn_or_addr))
    if f.len == 0 { return {"ok": false, "reason": "function_not_found", "start": 0, "end": 0, "size": 0} }
    _extent_from_functions(bin, f, fs, max_bytes).set("ok", true)
 }
@@ -763,7 +769,7 @@ fn _relocations_from_section(str b, dict h, list ss, any syms, dict relsec) list
    mut idx = 0
    while off + ent <= b.len && off + ent <= end {
       mut r_off = 0
-      mut r_info = 0
+      mut int r_info = 0
       mut addend = 0
       if bits == 64 {
          r_off = _u64(b, off, le)
@@ -774,8 +780,8 @@ fn _relocations_from_section(str b, dict h, list ss, any syms, dict relsec) list
          r_info = _u32(b, off + 4, le)
          if rela { addend = _u32(b, off + 8, le) }
       }
-      def sym_idx = bits == 64 ? (r_info >> 32) : (r_info >> 8)
-      def typ = bits == 64 ? (r_info & 0xffffffff) : (r_info & 255)
+      def sym_idx = bits == 64 ? band(bshr(r_info, 32), 0xffffffff) : bshr(r_info, 8)
+      def typ = bits == 64 ? band(r_info, 0xffffffff) : band(r_info, 255)
       def sym = _symbol_by_index(syms, sym_idx, sym_source)
       out = out.append({"index": idx, "section": relsec.get("name", ""), "offset": r_off,
             "info": r_info, "sym_index": sym_idx, "type": typ,
@@ -798,7 +804,7 @@ fn relocations(any source) list {
    mut out = []
    mut i = 0
    while i < ss.len {
-      def s = ss[i]
+      def dict s = ss[i]
       def t = int(s.get("type", 0))
       if t == SHT_RELA || t == SHT_REL {
          def part = _relocations_from_section(b, h, ss, sy_index, s)
@@ -1078,19 +1084,21 @@ fn disassemble(any source, any target=".text", int max_bytes=512) list {
 fn disassemble_function(any source, any fn_name_or_addr, int max_bytes=512) list {
    "Disassemble one known function by name or address."
    def bin = is_dict(source) && source.contains("header") ? source : load(to_str(source))
-   mut f = dict()
    if is_dict(fn_name_or_addr) {
-      f = fn_name_or_addr
+      if fn_name_or_addr.len == 0 { return [] }
+      return disassemble(bin, fn_name_or_addr, max_bytes)
    } elif is_str(fn_name_or_addr) {
       def fs = bin.get("functions", [])
       mut i = 0
       while i < fs.len {
-         if fs[i].get("name", "") == fn_name_or_addr { f = fs[i] break }
+         if fs[i].get("name", "") == fn_name_or_addr {
+            return disassemble(bin, fs[i], max_bytes)
+         }
          i += 1
       }
-   } else {
-      f = function_at(bin, int(fn_name_or_addr))
+      return []
    }
+   def f = function_at(bin, int(fn_name_or_addr))
    if f.len == 0 { return [] }
    disassemble(bin, f, max_bytes)
 }
@@ -1099,10 +1107,10 @@ fn _crc16_ccitt(list bytes, int start, int count) int {
    mut crc = 0xffff
    mut i = 0
    while i < count && start + i < bytes.len {
-      crc = crc ^^ ((int(bytes[start + i]) & 255) << 8)
+      crc = crc ^ ((int(bytes[start + i]) & 255) << 8)
       mut bit = 0
       while bit < 8 {
-         if (crc & 0x8000) != 0 { crc = ((crc << 1) ^^ 0x1021) & 0xffff }
+         if (crc & 0x8000) != 0 { crc = ((crc << 1) ^ 0x1021) & 0xffff }
          else { crc = (crc << 1) & 0xffff }
          bit += 1
       }
@@ -1353,5 +1361,5 @@ fn flirt_apply(any source, list signatures, any opts=dict()) dict {
    assert(_reloc_type_name(243, 5) == "riscv_jump_slot", "riscv relocation names")
    assert(_reloc_type_name(243, 19) == "riscv_pcrel_hi20", "riscv pcrel_hi20")
    assert(_reloc_type_name(8, 3) == "reloc_3", "unknown machine falls back")
-   print("✓ std.os.rev.decomp.elf relocation names passed")
+   print("✓ core.os.rev.decomp.elf relocation names passed")
 }

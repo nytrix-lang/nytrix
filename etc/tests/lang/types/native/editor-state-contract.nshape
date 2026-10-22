@@ -1,0 +1,17 @@
+shape test_editor_state_contract {
+  family "native/typing"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  expect compile_and_run
+  timeout 60
+  source ny <<'NY'
+use core
+use core.os.ui.render.viewer.editor as editor
+
+def dict state = editor.state([editor.buffer("scratch", "", "one\ntwo")])
+assert(is_dict(editor.current_buffer(state)), "editor current buffer is a dict")
+assert(is_list(editor.current_lines(state)), "editor current lines is a list")
+print("EDITOR-STATE-CONTRACT-OK")
+NY
+}

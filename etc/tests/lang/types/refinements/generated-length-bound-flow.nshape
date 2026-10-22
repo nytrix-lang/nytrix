@@ -1,0 +1,79 @@
+shape generated_list_length_bound_flow_differential {
+  family "language/types/refinements"
+  generator "embedded"
+  features [ny test typing refinement mutable aggregate length lower bound generated differential]
+  timeout 180
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.subprocess as process
+use core.os.prim (env)
+
+def compiler = env("NYTRIX_NY_FULL_BIN")
+def core_bc = env("NYTRIX_TEST_CORE_BC")
+def shared_core_bc = is_str(core_bc) ? core_bc : ""
+assert(is_str(compiler) && compiler.len > 0,
+       "test runner provides the compiler for generated length flow cases")
+
+fn check_case(int bound, bool inclusive, bool shrink, bool reversed) int {
+  mut str op = inclusive ? ">=" : ">"
+  if reversed {
+    op = inclusive ? "<=" : "<"
+  }
+  def name = "Bound" + to_str(bound) + (inclusive ? "GE" : "GT") +
+             (reversed ? "Rev" : "")
+  mut str predicate = "items.len " + op + " " + to_str(bound)
+  if reversed {
+    predicate = to_str(bound) + " " + op + " items.len"
+  }
+  mut str source = "use core\nrefine " + name + " = list where(items) { " + predicate + " }\n" +
+      "fn require_bound(" + name + " items) int { return items.len }\n" +
+      "fn generated() int {\nmut list<int> items = [1, 2, 3, 4]\n" +
+      "if " + name + "(items) {\n"
+  if shrink {
+    source += "items.pop()\n"
+  } else {
+    source += "items[1] = 9\nitems = append(items, 5)\n"
+  }
+  source += "return require_bound(items)\n}\n0\n}\ngenerated()\n"
+  mut args = []
+  if shared_core_bc.len > 0 {
+    args = args.append("--core-bc")
+    args = args.append(shared_core_bc)
+  }
+  args = args.append("--strict-types")
+  args = args.append("--native-only")
+  args = args.append("--nyir-verify")
+  args = args.append("-emit-only")
+  args = args.append("-c")
+  args = args.append(source)
+  def result = process.run_capture(compiler, args, nil, false)
+  def output = result.get("stdout", "")
+  def code = result.get("code", 127)
+  def expected = !shrink
+  def accepted = code == 0 && str.find(output, "error:") < 0
+  assert(accepted == expected,
+         "length bound flow mismatch for bound " + to_str(bound) +
+             (inclusive ? " >= " : " > ") + to_str(bound) +
+             (shrink ? " after shrink" : " after store and append") +
+             " (rc=" + to_str(code) + "): " + output)
+  0
+}
+
+def bounds = [0, 3, 4, 5]
+mut int bound_index = 0
+while bound_index < bounds.len {
+  def bound = bounds[bound_index]
+  check_case(bound, true, false, false)
+  check_case(bound, false, false, false)
+  check_case(bound, true, false, true)
+  check_case(bound, false, false, true)
+  check_case(bound, true, true, false)
+  check_case(bound, false, true, false)
+  check_case(bound, true, true, true)
+  check_case(bound, false, true, true)
+  bound_index += 1
+}
+NY
+}

@@ -8,11 +8,11 @@
 ;; If S = p+q is known, recover p,q by solving:
 ;;   x^2 - S*x + n = 0
 ;; References:
-;; - std.math.crypto.factorization
-;; - std.math.crypto
-module std.math.crypto.factorization.fixed_sum(factor_from_sum, factor_from_fixed_sum, factor_from_fixed_sum_scan)
-use std.math.nt
-use std.math.crypto.factorization.known_phi
+;; - core.math.crypto.factorization
+;; - core.math.crypto
+module core.math.crypto.factorization.fixed_sum(factor_from_sum, factor_from_fixed_sum, factor_from_fixed_sum_scan)
+use core.math.nt
+use core.math.crypto.factorization.known_phi
 
 fn factor_from_sum(any n, any sum_pq) any {
    "Factor semiprime n given exact sum S = p+q. Returns [p, q] (p<=q) or nil."

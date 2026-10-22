@@ -4,13 +4,13 @@
 ;; - https://netlab.cs.ucla.edu/wiki/files/shannon1949.pdf
 ;; - https://cacr.uwaterloo.ca/hac/about/chap1.pdf
 ;; References:
-;; - std.math.crypto.cipher
-;; - std.math.crypto.analysis
-module std.math.crypto.cipher.hill(hill_encrypt, hill_decrypt, find_mod_inverse_26)
-use std.core
-use std.math.nt
-use std.math.matrix
-use std.core.str
+;; - core.math.crypto.cipher
+;; - core.math.crypto.analysis
+module core.math.crypto.cipher.hill(hill_encrypt, hill_decrypt, find_mod_inverse_26)
+use core
+use core.math.nt
+use core.math.matrix
+use core.str
 
 fn _hill_builder_take(list b) str { def out = builder_to_str(b) builder_free(b) out }
 

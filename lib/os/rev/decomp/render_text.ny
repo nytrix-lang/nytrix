@@ -1,10 +1,10 @@
 ;; Keywords: decompiler pseudocode rendering tokens renames text
 ;; Quote-aware token replacement and symbol normalization for rendered Ny text.
-module std.os.rev.decomp.render_text *
-use std.core
-use std.core.str as str
-use std.os.rev.decomp.annotations (_safe_name)
-use std.os.rev.decomp.symbols (_symbol_is_name_char)
+module core.os.rev.decomp.render_text *
+use core
+use core.str as str
+use core.os.rev.decomp.annotations (_safe_name)
+use core.os.rev.decomp.symbols (_symbol_is_name_char)
 
 fn _clean_token_char(int c) bool { str.ascii_is_alnum(c) || c == 95 }
 
@@ -133,5 +133,5 @@ fn _clean_normalize_rip_relative_data_symbols(str text) str {
    assert(_clean_replace_token("rax + rax1", "rax", "value") == "value + rax1", "token boundary")
    assert(_clean_replace_token_code("rax + \"rax\"", "rax", "value") == "value + \"rax\"", "quoted token")
    assert(_clean_normalize_rip_relative_data_symbols("data_flag[rip] = str_ok[rip]") == "data_flag = str_ok", "rip symbols")
-   print("✓ std.os.rev.decomp.render_text self-test passed")
+   print("✓ core.os.rev.decomp.render_text self-test passed")
 }

@@ -1,10 +1,10 @@
 ;; Keywords: block-cipher stream stream-core math crypto
 ;; CTR and many-time-pad stream-cipher analysis routines.
 ;; References:
-;; - std.math.crypto.block.stream
-;; - std.math.crypto
-module std.math.crypto.block.stream.core(ctr_xor_plaintexts, ctr_recover_keystream, ctr_bit_flip_byte, ctr_bit_flipping, ctr_score_english_byte, ctr_recover_periodic_keystream_english, ctr_apply_periodic_keystream, mtp_xor_all, mtp_guess_key_byte, mtp_crib_drag)
-use std.core
+;; - core.math.crypto.block.stream
+;; - core.math.crypto
+module core.math.crypto.block.stream.core(ctr_xor_plaintexts, ctr_recover_keystream, ctr_bit_flip_byte, ctr_bit_flipping, ctr_score_english_byte, ctr_recover_periodic_keystream_english, ctr_apply_periodic_keystream, mtp_xor_all, mtp_guess_key_byte, mtp_crib_drag)
+use core
 
 fn _xor_overlap(list a, list b) list {
    def n = a.len < b.len ? a.len : b.len
@@ -12,7 +12,7 @@ fn _xor_overlap(list a, list b) list {
    store64(out, n, 0)
    mut i = 0
    while i < n {
-      __store_item_fast(out, i, __load_item_fast(a, i) ^^ __load_item_fast(b, i))
+      __store_item_fast(out, i, __load_item_fast(a, i) ^ __load_item_fast(b, i))
       i += 1
    }
    out
@@ -52,7 +52,7 @@ fn ctr_bit_flip_byte(list ciphertext, int pos, int old_byte, int new_byte) list 
    "Flip one plaintext byte under CTR by editing ciphertext at the same position."
    if pos < 0 || pos >= ciphertext.len { return clone(ciphertext) }
    mut out = clone(ciphertext)
-   out[pos] = out[pos] ^^ old_byte ^^ new_byte
+   out[pos] = out[pos] ^ old_byte ^ new_byte
    out
 }
 
@@ -64,7 +64,7 @@ fn ctr_bit_flipping(list ciphertext, list edits) list {
       def e = edits.get(i, [])
       if is_list(e) && e.len >= 3 {
          def pos = int(e.get(0, -1))
-         if pos >= 0 && pos < out.len { out[pos] = out[pos] ^^ int(e.get(1, 0)) ^^ int(e.get(2, 0)) }
+         if pos >= 0 && pos < out.len { out[pos] = out[pos] ^ int(e.get(1, 0)) ^ int(e.get(2, 0)) }
       }
       i += 1
    }
@@ -92,7 +92,7 @@ fn ctr_recover_periodic_keystream_english(list ciphertexts, int period=16) list 
             def ct = ciphertexts[ci]
             mut j = pos
             while j < ct.len {
-               score += _printable_score(__load_item_fast(ct, j) ^^ guess)
+               score += _printable_score(__load_item_fast(ct, j) ^ guess)
                j += period
             }
             ci += 1
@@ -119,7 +119,7 @@ fn ctr_apply_periodic_keystream(list ciphertext, list keystream) list {
    store64(out, n, 0)
    mut i = 0
    while i < n {
-      __store_item_fast(out, i, __load_item_fast(ciphertext, i) ^^ __load_item_fast(keystream, i % kn))
+      __store_item_fast(out, i, __load_item_fast(ciphertext, i) ^ __load_item_fast(keystream, i % kn))
       i += 1
    }
    out
@@ -156,7 +156,7 @@ fn mtp_guess_key_byte(list ciphertexts, int position, int guess) dict {
          __store_item_fast(plaintexts, i, 0)
          __store_item_fast(valid, i, false)
       } else {
-         def b = __load_item_fast(ct, position) ^^ guess
+         def b = __load_item_fast(ct, position) ^ guess
          def ok = b == 0 || b == 10 || b == 13 || (b >= 32 && b <= 126)
          if ok { score += 1 }
          __store_item_fast(plaintexts, i, b)
@@ -182,14 +182,14 @@ fn mtp_crib_drag(list ciphertexts, list crib) list {
             mut score = 0
             mut k = 0
             while k < crib.len {
-               if _printable_score((a[pos + k] ^^ b[pos + k]) ^^ crib[k]) > 0 { score += 1 }
+               if _printable_score((a[pos + k] ^ b[pos + k]) ^ crib[k]) > 0 { score += 1 }
                k += 1
             }
             if score >= crib.len - 1 {
                mut ks = list(crib.len)
                k = 0
                while k < crib.len {
-                  ks[k] = a[pos + k] ^^ crib[k]
+                  ks[k] = a[pos + k] ^ crib[k]
                   k += 1
                }
                store64(ks, crib.len, 0)
@@ -223,7 +223,7 @@ fn mtp_crib_drag(list ciphertexts, list crib) list {
    mut expected_x12 = []
    mut i = 0
    while i < p1.len {
-      expected_x12 = expected_x12.append(p1[i] ^^ p2[i])
+      expected_x12 = expected_x12.append(p1[i] ^ p2[i])
       i += 1
    }
    assert(x12 == expected_x12, "ctr xor plaintexts")
@@ -246,5 +246,5 @@ fn mtp_crib_drag(list ciphertexts, list crib) list {
    assert(is_list(crib), "crib drag returns list")
    assert(crib.len > 0, "crib drag finds plausible matches")
    assert(is_dict(crib.get(0)), "crib drag match shape")
-   print("✓ std.math.crypto.block.stream.core self-test passed")
+   print("✓ core.math.crypto.block.stream.core self-test passed")
 }

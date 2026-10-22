@@ -1,96 +1,56 @@
-<!-- nytrix-doc: {"audience":"user","featured":true,"group":"learn","order":110,"summary":"Generate checked declarations, tables, and source during compilation."} -->
-# Comptime
+<!-- nytrix-doc: {"audience":"user","featured":true,"group":"learn","order":110,"summary":"Evaluate constants and generate declarations during compilation."} -->
+# Compile-time programming
 
-Compile-time code produces ordinary Nytrix declarations. Keep the generated
-result small, named, and covered by an executable assertion.
+Use compile-time evaluation for values or declarations that can be determined
+from source inputs. The compiler checks generated declarations as ordinary
+source; compile-time code cannot use runtime results to rewrite the program.
 
-## Start with a value
-
-```ny
-use std.core
-
-def scale = comptime { 2 ^ 5 }
-assert(scale == 32, "compile-time value")
-```
-
-A compile-time block containing only declarations evaluates to `nil`. Return or
-end with an expression when the block must produce a value.
-
-## Use a table for fixed classification
+## Evaluate a constant
 
 ```ny
-use std.core
+use core
 
-comptime table Opcode {
-   0x00 -> "halt"
-   0x10..0x1f -> "load"
-   0x20..0x2f -> "math"
-   _ -> "data"
-}
+static_assert(2 ** 5 == 32, "power is exponentiation")
+def scale = #run 2 ** 5
 
-fn opcode_name(i32 raw) str = comptime match Opcode(raw, "data")
-assert(opcode_name(0x24) == "math", "opcode class")
-```
-
-Tables keep a static classification beside the code that consumes it. Use
-`case` for ordinary literal and range dispatch.
-
-## Emit repeated declarations
-
-`emit` and `comptime for` generate source from a static input. Use this only
-when repeated declarations are clearer than a runtime loop. Run
-`ny fmt --metaprog file.ny` before reviewing the generated form.
-
-## Reflect over known structure
-
-`comptime fields(Layout)` and `comptime exports(Module)` iterate static
-metadata. Generate checks, adapters, or tables from those loops. Keep a
-runtime assertion that proves the generated declaration has the required
-behavior.
-
-Field metadata includes `name`, `type`, `offset`, `index`, array extent,
-default-source, and explicit-alignment information. Check
-`f.array_len_known` before using `f.array_len`; symbolic layout parameters do
-not pretend to be a literal extent.
-
-```ny
-comptime fields(Packet) as f {
-   emit assert(__layout_offset("Packet", f.name) == f.offset, "field offset")
-   emit if f.is_array && f.array_len_known {
-      assert(f.array_len > 0, "fixed array extent")
-   }
+#main {
+   assert_eq(scale, 32, "compile-time value")
 }
 ```
 
-Bound large evaluation jobs explicitly with `--comptime-limit=N`. The default
-compilation-wide budget is 1,000,000 evaluator steps.
+`#run` and `#comptime` evaluate an expression during compilation. Use `**` for
+power; `^` is bitwise XOR. Compile-time evaluation has a shared fuel budget;
+see [Comptime](../spec/comptime.md#boundaries).
 
-## Generated modules and embedded files
+## Generate repeated declarations
 
-Generated modules follow the same module and export rules as handwritten
-files. `embed(path)` reads a build-time resource into the source contract.
-Keep paths repository-relative and ensure the build input owns the file.
+Use a table for fixed compile-time lookup and a template when source
+structure must be generated. The specification lists the supported table,
+reflection, splice, and module forms. Keep generated names deterministic and
+make the generated API no broader than the handwritten contract it replaces.
 
-## Diagnostic rules
+When a generated declaration is hard to understand, inspect the expansion,
+then compile or test the resulting program through its intended backend.
 
-`comptime diagnostic rule` declares a compile-time condition, error, and repair
-for a project-specific invalid form. Put a diagnostic rule near the generated
-contract it protects. Use one clear error for one repairable condition.
+## Boundaries
 
-## Tooling
+- Compile-time execution is not an unrestricted second runtime. Unsupported
+  operations and exhausted budgets produce diagnostics.
+- Generated source still goes through normal parsing and semantic checks.
+- Embedded files are build inputs; use stable project-relative paths and make
+  sure the build owns the referenced file.
+- Syntax extensions and source rewriters are a separate mechanism. Prefer
+  ordinary functions or templates unless the source grammar itself needs to
+  change.
+
+## Inspect and verify
 
 ```bash
 ny fmt --metaprog file.ny
 ny fmt --specialize file.ny
-ny fmt --trim --check file.ny
-ny --strict-types file.ny
+ny --expand file.ny
 ```
 
-`--metaprog` and `--specialize` are review tools. They report candidates and
-do not replace validation of the generated program.
-
-## Related
-
-- [Compile-time execution](../spec/comptime.md)
-- [Syntax](syntax.md)
-- [Proofs](proofs.md)
+These commands help inspect candidates or expansions; they do not replace
+compiling and running the generated program. See [Comptime specification](../spec/comptime.md),
+[Syntax extensions](syntax.md), and [Testing](testing.md).

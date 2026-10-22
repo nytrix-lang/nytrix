@@ -5,10 +5,10 @@
 ;; - https://cacr.uwaterloo.ca/hac/about/chap8.pdf
 ;; - https://crypto.stanford.edu/~dabo/pubs/papers/RSA-survey.pdf
 ;; References:
-;; - std.math.crypto.factorization
-;; - std.math.crypto
-module std.math.crypto.factorization.fermat(fermat_factor, fermat_factor_bounded, fermat_attack, is_perfect_square)
-use std.math.nt
+;; - core.math.crypto.factorization
+;; - core.math.crypto
+module core.math.crypto.factorization.fermat(fermat_factor, fermat_factor_bounded, fermat_attack, is_perfect_square)
+use core.math.nt
 
 fn _fermat_isqrt_int(int n) int {
    if n <= 0 { return 0 }

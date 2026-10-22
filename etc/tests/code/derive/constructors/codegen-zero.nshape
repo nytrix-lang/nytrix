@@ -1,0 +1,33 @@
+shape codegen_zero {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "codegen", "reflection", "layout"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-only; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.compiler.codegen (zero_for)
+
+layout ZeroGeneratedRecord {
+   i32 count
+   bool enabled
+}
+layout record LegacyZeroRecord derive(zero) {
+   i32 count
+   bool enabled
+}
+comptime emit zero_for(ZeroGeneratedRecord)
+
+def ptr zero_value = ZeroGeneratedRecord_zero()
+def ptr legacy_zero_value = LegacyZeroRecord_zero()
+assert(load_layout(zero_value, "ZeroGeneratedRecord", "count") == 0 &&
+       load_layout(zero_value, "ZeroGeneratedRecord", "enabled") == false,
+       "zero_for initializes every field through the layout ABI")
+assert(load_layout(legacy_zero_value, "LegacyZeroRecord", "count") == 0 &&
+       load_layout(legacy_zero_value, "LegacyZeroRecord", "enabled") == false,
+       "Ny zero_for and the existing derive produce equivalent field values")
+free(zero_value)
+free(legacy_zero_value)
+NY
+}

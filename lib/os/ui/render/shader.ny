@@ -1,20 +1,20 @@
 ;; Keywords: render shader os ui
-;; Backend-neutral shader-source handler for std.os.ui.render usage.
+;; Backend-neutral shader-source handler for core.os.ui.render usage.
 ;; References:
-;; - std.os.ui.render
-;; - std.os.ui.render.matrix
-module std.os.ui.render.shader(
+;; - core.os.ui.render
+;; - core.os.ui.render.matrix
+module core.os.ui.render.shader(
    SHADER_BACKEND_VK450, SHADER_BACKEND_GL120, SHADER_BACKEND_GL330, SHADER_BACKEND_GLES300,
    normalize_backend_name, select_shader_defs, select_shader_source,
    parse_combined_shader, transpile_shader_defs, transpile_shader_source,
    shader_hash32, shader_sources, shader_watch
 )
 
-use std.core
-use std.core.dict_mod
-use std.core.str
-use std.os (file_read, ticks)
-use std.os.path as ospath
+use core
+use core.dict_mod
+use core.str
+use core.os (file_read, ticks)
+use core.os.path as ospath
 
 def SHADER_BACKEND_VK450 = "vkglsl450"
 def SHADER_BACKEND_GL120 = "glsl120"
@@ -218,11 +218,14 @@ fn _resolve_repo_asset(any rel) str {
 fn shader_hash32(any s) int {
    "Returns a small stable hash for shader source change detection."
    if !is_str(s) { return 0 }
-   mut h = 2166136261
+   mut int h = 2166136261
    mut i = 0
    def n = s.len
    while i < n {
-      h = band(bxor(h, load8(s, i)) * 16777619, 2147483647)
+      def int mixed = bxor(h, load8(s, i))
+      ;; FNV-1a prime 16777619 = 2^24 + 2^8 + 2^7 + 2^4 + 2 + 1.
+      ;; Shift/add keeps the bounded 32-bit hash in native int arithmetic.
+      h = band((mixed << 24) + (mixed << 8) + (mixed << 7) + (mixed << 4) + (mixed << 1) + mixed, 2147483647)
       i += 1
    }
    h
@@ -293,5 +296,5 @@ fn select_shader_source(str combined_src, str backend="vkglsl450") dict {
    assert(watch.get("ready", false) && watch.get("changed", false), "shader watch initial")
    watch = shader_watch(watch, "etc/assets/shaders/ui/lit.vert.glsl", "etc/assets/shaders/ui/lit.frag.glsl", true, 0)
    assert(watch.get("ready", false) && !watch.get("changed", true), "shader watch stable")
-   print("✓ std.os.ui.render.shader self-test passed")
+   print("✓ core.os.ui.render.shader self-test passed")
 }

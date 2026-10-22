@@ -1,0 +1,101 @@
+shape wasm32_memory_class_aggregate_argument_uses_wasm32_pointer {
+  family "runtime-native"
+  generator "embedded"
+  features [ny test wasm32 aggregate memory-class c-abi nyir]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os (file_exists, file_remove, file_write, run_capture, temp_dir, pid)
+
+def compiler = env("NYTRIX_NY_FULL_BIN")
+assert(is_str(compiler) && compiler.len > 0,
+       "test runner provides the compiler path")
+def stem = temp_dir() + "/ny-wasm-aggregate-arg-" + to_str(pid())
+def host_wat = stem + "-host.wat"
+def host_wasm = stem + "-host.wasm"
+def provider_wat = stem + "-provider.wat"
+def provider_wasm = stem + "-provider.wasm"
+def host_source =
+    "#include \"etc/tests/lang/interop/c/internal-byvalue-param-import.h\"\n" +
+    "use core\ndef wide = malloc(24)\ndef sse = malloc(16)\n" +
+    "def small = malloc(8)\ndef small_float = malloc(8)\n" +
+    "def scalar_i32 = malloc(8)\nstore64_i(scalar_i32, 17)\n" +
+    "def scalar_f32 = make_single_float()\n" +
+    "sum_pair(wide) == 120 && sum_sse_pair(sse) == 4 && " +
+    "inspect_small_integer_pair(small) == 8 && " +
+    "inspect_small_float_pair(small_float) == 8 && " +
+    "inspect_single_integer32(scalar_i32) == 8 && " +
+    "inspect_single_float(scalar_f32) == 8 ? 0 : 1"
+def compile = run_capture(
+    [compiler, "--native-backend=wasm", "--native-only", "--nyir-verify",
+     "--emit-asm=" + host_wat, "-no-std", "-emit-only", "-e", host_source],
+    [], nil, false)
+def assemble = run_capture(["wat2wasm", host_wat, "-o", host_wasm],
+                           [], nil, false)
+def provider_write = file_write(
+    provider_wat,
+    "(module\n" +
+    "  (func (export \"sum_pair\") (param i32) (result i64)\n" +
+    "    local.get 0\n" +
+    "    i32.eqz\n" +
+    "    if unreachable end\n" +
+    "    i64.const 120)\n" +
+    "  (func (export \"sum_sse_pair\") (param i32) (result i64)\n" +
+    "    local.get 0\n" +
+    "    i32.eqz\n" +
+    "    if unreachable end\n" +
+    "    i64.const 4)\n" +
+    "  (func (export \"inspect_small_integer_pair\") (param i32) (result i64)\n" +
+    "    local.get 0\n" +
+    "    i32.eqz\n" +
+    "    if unreachable end\n" +
+    "    i64.const 8)\n" +
+    "  (func (export \"inspect_small_float_pair\") (param i32) (result i64)\n" +
+    "    local.get 0\n" +
+    "    i32.eqz\n" +
+    "    if unreachable end\n" +
+    "    i64.const 8)\n" +
+    "  (func (export \"inspect_single_integer32\") (param i32) (result i64)\n" +
+    "    local.get 0\n" +
+    "    i32.const 17\n" +
+    "    i32.eq\n" +
+    "    if (result i64) i64.const 8 else i64.const 0 end)\n" +
+    "  (func (export \"make_single_float\") (result f32)\n" +
+    "    f32.const 1.25)\n" +
+    "  (func (export \"inspect_single_float\") (param f32) (result i64)\n" +
+    "    local.get 0\n" +
+    "    f32.const 1.25\n" +
+    "    f32.eq\n" +
+    "    if (result i64) i64.const 8 else i64.const 0 end))\n")
+def provider_assemble =
+    run_capture(["wat2wasm", provider_wat, "-o", provider_wasm],
+                [], nil, false)
+def execute = run_capture(
+    ["wasmtime", "run", "--preload", "env=" + provider_wasm,
+     "--invoke", "rt_main", host_wasm],
+    [], nil, false)
+def removed_host_wasm =
+    if file_exists(host_wasm) { is_ok(file_remove(host_wasm)) } else { true }
+def removed_host_wat =
+    if file_exists(host_wat) { is_ok(file_remove(host_wat)) } else { true }
+def removed_provider_wasm =
+    if file_exists(provider_wasm) {
+      is_ok(file_remove(provider_wasm))
+    } else { true }
+def removed_provider_wat =
+    if file_exists(provider_wat) {
+      is_ok(file_remove(provider_wat))
+    } else { true }
+assert(removed_host_wasm && removed_host_wat &&
+       removed_provider_wasm && removed_provider_wat,
+       "remove generated aggregate-argument artifacts")
+assert(provider_write && compile.get("code", 127) == 0 &&
+       assemble.get("code", 127) == 0 &&
+       provider_assemble.get("code", 127) == 0,
+       "memory-class aggregate import emits and assembles with an i32 pointer")
+assert(execute.get("code", 127) == 0 &&
+       endswith(execute.get("stdout", ""), "1\n"),
+       "Wasm providers receive non-null pointers for memory-class aggregate arguments")
+NY
+}

@@ -1,0 +1,19 @@
+shape nyir_loop_break_continue {
+  family "runtime-native"
+  generator "native"
+  features ["native", "nyir", "loop", "break", "continue", "vm"]
+  template ny-test-case
+  flags "--native --run"
+  expect compile_and_run
+  expect_exit 11
+  source ny <<'NY'
+def x = 11
+while 0 {
+  continue
+}
+while 1 {
+  break
+}
+x
+NY
+}

@@ -1,0 +1,133 @@
+shape proof_policy_certificates {
+  family "runtime/proofs"
+  generator "program"
+  features ["proofs", "policy", "certificates", "tri-state"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.proof
+
+;; The Ny-owned policy builds versioned obligations and proposes
+;; certificates; the independent bounded C checker decides trust.
+
+def ob_proved = proof.obligation("binary:>(name:x,int:0)", "x=5..5")
+def cert_proved = proof.solve(ob_proved)
+assert(proof.verdict_of(cert_proved) == "proved", "bounded obligation proves")
+assert(proof.check(cert_proved), "proved certificate survives the checker")
+
+def ob_open = proof.obligation("binary:>(name:x,int:0)", "x=0..5")
+def cert_open = proof.solve(ob_open)
+assert(proof.verdict_of(cert_open) == "refuted", "counterexample range refutes")
+assert(proof.check(cert_open), "refuted certificate survives the checker")
+assert(cert_open.get("cex") != "", "refutation carries bindings")
+
+;; A nonlinear product is outside the bounded kernels' fragment: neither
+;; provable nor refutable for them, so the verdict is honest unknown.
+def ob_unknown = proof.obligation("binary:>(binary:*(name:x,name:x),int:1)",
+   "x=-9..9", "presburger")
+def cert_unknown = proof.solve(ob_unknown)
+assert(proof.verdict_of(cert_unknown) == "unknown",
+   "nonlinear obligation stays unknown")
+assert(proof.check(cert_unknown), "unknown certificate survives the checker")
+assert(proof.explain(cert_unknown).contains("open") ||
+       proof.explain(cert_unknown).contains("unknown"),
+       "unknown is explained as open, not false")
+
+;; The independent checker can validate bounded nonlinear interval proofs
+;; even when a solver is not asked to propose the certificate.
+def ob_square_bound = proof.obligation(
+   "binary:<=(binary:*(name:x,name:x),int:81)", "x=-9..9")
+def solved_square_bound = proof.solve(ob_square_bound)
+assert(proof.verdict_of(solved_square_bound) == "proved",
+   "bounded interval tactic proposes the nonlinear proof")
+assert(proof.check(solved_square_bound),
+   "checker validates the proposed bounded nonlinear proof")
+def square_bound_cert = CERTIFICATE_FORMAT + "|" + ob_square_bound.get("digest") +
+   "|proved|interval|checker||bounded square interval"
+assert(proof.check_texts(ob_square_bound.get("text"), square_bound_cert),
+   "checker validates a bounded nonlinear square upper bound")
+
+def ob_complement_bound = proof.obligation(
+   "binary:<=(binary:*(name:x,binary:-(int:10,name:x)),int:25)", "x=0..10")
+def complement_bound_cert = proof.solve(ob_complement_bound)
+assert(proof.verdict_of(complement_bound_cert) == "proved",
+   "interval splitting proves a bounded complement product")
+assert(proof.check(complement_bound_cert),
+   "checker validates the split complement-product certificate")
+def ob_complement_too_small = proof.obligation(
+   "binary:<=(binary:*(name:x,binary:-(int:10,name:x)),int:24)", "x=0..10")
+def false_complement_cert = CERTIFICATE_FORMAT + "|" +
+   ob_complement_too_small.get("digest") +
+   "|proved|interval|checker||false complement-product bound"
+assert(!proof.check_texts(ob_complement_too_small.get("text"),
+   false_complement_cert),
+   "checker rejects a false complement-product bound")
+
+def ob_product_bound = proof.obligation(
+   "binary:<=(binary:*(name:x,name:y),int:6)", "x=0..2;y=1..3")
+def product_bound_cert = proof.solve(ob_product_bound)
+assert(proof.verdict_of(product_bound_cert) == "proved",
+   "interval checker proves a bounded product of distinct variables")
+assert(proof.check(product_bound_cert),
+   "checker validates the bounded product certificate")
+def ob_product_too_small = proof.obligation(
+   "binary:<=(binary:*(name:x,name:y),int:5)", "x=0..2;y=1..3")
+def false_product_cert = CERTIFICATE_FORMAT + "|" +
+   ob_product_too_small.get("digest") +
+   "|proved|interval|checker||false product bound"
+assert(!proof.check_texts(ob_product_too_small.get("text"),
+   false_product_cert),
+   "checker rejects an upper bound smaller than the product interval")
+
+def ob_square_from_premise = proof.obligation(
+   "binary:||(binary:||(binary:<(name:x,int:-9),binary:>(name:x,int:9)),binary:<=(binary:*(name:x,name:x),int:81))")
+def square_from_premise = proof.solve(ob_square_from_premise)
+assert(proof.verdict_of(square_from_premise) == "proved",
+   "checker derives finite bounds from linear premise branches")
+assert(proof.check(square_from_premise),
+   "premise-derived nonlinear interval proof validates")
+
+def ob_overflow_premise = proof.obligation(
+   "binary:||(binary:==(binary:+(name:x,int:1),int:-9223372036854775808),binary:==(binary:*(name:x,name:x),int:2))")
+def overflow_premise_cert = proof.solve(ob_overflow_premise)
+assert(proof.verdict_of(overflow_premise_cert) != "proved",
+   "overflowing arithmetic cannot manufacture interval bounds")
+def fabricated_overflow_proof = CERTIFICATE_FORMAT + "|" +
+   ob_overflow_premise.get("digest") +
+   "|proved|interval|checker||unsafe premise"
+assert(!proof.check_texts(ob_overflow_premise.get("text"),
+   fabricated_overflow_proof),
+   "checker refuses a proof relying on an overflowing premise")
+
+def ob_square_false = proof.obligation(
+   "binary:<=(binary:*(name:x,name:x),int:80)", "x=-9..9", "presburger")
+def false_square_cert = CERTIFICATE_FORMAT + "|" + ob_square_false.get("digest") +
+   "|proved|interval|checker||false square bound"
+assert(!proof.check_texts(ob_square_false.get("text"), false_square_cert),
+   "checker rejects an invalid bounded nonlinear interval proof")
+
+;; The fold tactic decides closed propositions exactly.
+def ob_fold = proof.obligation("binary:<(int:2,int:3)", "", "fold")
+def cert_fold = proof.solve(ob_fold)
+assert(proof.verdict_of(cert_fold) == "proved", "closed true proposition proves")
+assert(proof.check(cert_fold), "fold certificate survives the checker")
+
+def ob_fold_false = proof.obligation("binary:>(int:2,int:3)", "", "fold")
+def cert_fold_false = proof.solve(ob_fold_false)
+assert(proof.verdict_of(cert_fold_false) == "refuted", "closed false proposition refutes")
+assert(proof.check(cert_fold_false), "closed refutation survives the checker")
+
+;; Explanations carry the tactic, backend, and reason.
+assert(proof.explain(cert_proved).contains("proved"), "explanation states the verdict")
+assert(proof.explain(cert_open).contains("counterexample"), "refutation explains the witness")
+
+;; Law checking through the same interface.
+def law = proof.law_solve("Eq", "Int",
+   proof.law_obligation("Eq", "Int",
+      "binary:>=(binary:+(name:a,name:b),int:0)", "a=0..3;b=0..3"))
+assert(proof.law_check(law), "commutative-range law checks")
+
+assert(true, "proof policy certificates complete")
+NY
+}

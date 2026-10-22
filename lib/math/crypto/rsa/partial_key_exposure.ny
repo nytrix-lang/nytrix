@@ -5,17 +5,17 @@
 ;; This module covers the bounded-enumeration cases directly and routes into
 ;; known-d / known-CRT-exponent recovery when enough structure is available.
 ;; References:
-;; - std.math.crypto.rsa
-;; - std.math.crypto
-module std.math.crypto.rsa.partial_key_exposure(partial_key_exposure_known_d, partial_key_exposure_known_crt, partial_key_exposure_attack, partial_key_exposure_attack_report, partial_key_exposure_known_p, partial_key_exposure_known_p_msb, partial_key_exposure_known_p_msb_coppersmith, partial_key_exposure_known_p_msb_report)
-use std.core
-use std.os.clock (ticks)
-use std.math.nt
-use std.math.crypto.number.partial
-use std.math.crypto.rsa.op (compute_phi, compute_d)
-use std.math.crypto.rsa.known_d
-use std.math.crypto.rsa.known_crt_exponents
-use std.math.crypto.lattice.coppersmith as coppersmith
+;; - core.math.crypto.rsa
+;; - core.math.crypto
+module core.math.crypto.rsa.partial_key_exposure(partial_key_exposure_known_d, partial_key_exposure_known_crt, partial_key_exposure_attack, partial_key_exposure_attack_report, partial_key_exposure_known_p, partial_key_exposure_known_p_msb, partial_key_exposure_known_p_msb_coppersmith, partial_key_exposure_known_p_msb_report)
+use core
+use core.os.clock (ticks)
+use core.math.nt
+use core.math.crypto.number.partial
+use core.math.crypto.rsa.op (compute_phi, compute_d)
+use core.math.crypto.rsa.known_d
+use core.math.crypto.rsa.known_crt_exponents
+use core.math.crypto.lattice.coppersmith as coppersmith
 
 fn _pke_factor_pair_from_p(any n, any p) any {
    def nn, pp = Z(n), Z(p)
@@ -183,7 +183,7 @@ fn partial_key_exposure_known_crt(any n, any e, any partial_dp=nil, any partial_
 fn partial_key_exposure_known_p(any n, any partial_p, int max_unknown_bits=22) any {
    "Recover [p, q] from a partial prime p when the unknown segment is small.
    The partial integer is little-endian by segment, matching
-   std.math.crypto.number.partial. This is the bounded counterpart to the
+   core.math.crypto.number.partial. This is the bounded counterpart to the
    common RSA high-bits-known Coppersmith setup."
    if partial_p == nil { return nil }
    if _pi_unknowns_count(partial_p) == 0 {

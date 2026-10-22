@@ -1,0 +1,34 @@
+shape long_module_alias_identity {
+  family "language/modules/use"
+  generator "regression"
+  features ["ny", "test", "modules", "identity", "alias"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+module segment_0_aaaaaaaaaaaaaaaa.segment_1_aaaaaaaaaaaaaaaa.segment_2_aaaaaaaaaaaaaaaa.segment_3_aaaaaaaaaaaaaaaa.segment_4_aaaaaaaaaaaaaaaa.segment_5_aaaaaaaaaaaaaaaa.segment_6_aaaaaaaaaaaaaaaa.segment_7_aaaaaaaaaaaaaaaa.segment_8_aaaaaaaaaaaaaaaa.segment_9_aaaaaaaaaaaaaaaa.segment_10_aaaaaaaaaaaaaaaa.segment_11_aaaaaaaaaaaaaaaa(value) {
+  fn value() int { 41 }
+}
+module segment_0_bbbbbbbbbbbbbbbb.segment_1_bbbbbbbbbbbbbbbb.segment_2_bbbbbbbbbbbbbbbb.segment_3_bbbbbbbbbbbbbbbb.segment_4_bbbbbbbbbbbbbbbb.segment_5_bbbbbbbbbbbbbbbb.segment_6_bbbbbbbbbbbbbbbb.segment_7_bbbbbbbbbbbbbbbb.segment_8_bbbbbbbbbbbbbbbb.segment_9_bbbbbbbbbbbbbbbb.segment_10_bbbbbbbbbbbbbbbb.segment_11_bbbbbbbbbbbbbbbb(value) {
+  fn value() int { 99 }
+}
+use segment_0_aaaaaaaaaaaaaaaa.segment_1_aaaaaaaaaaaaaaaa.segment_2_aaaaaaaaaaaaaaaa.segment_3_aaaaaaaaaaaaaaaa.segment_4_aaaaaaaaaaaaaaaa.segment_5_aaaaaaaaaaaaaaaa.segment_6_aaaaaaaaaaaaaaaa.segment_7_aaaaaaaaaaaaaaaa.segment_8_aaaaaaaaaaaaaaaa.segment_9_aaaaaaaaaaaaaaaa.segment_10_aaaaaaaaaaaaaaaa.segment_11_aaaaaaaaaaaaaaaa as first
+use segment_0_bbbbbbbbbbbbbbbb.segment_1_bbbbbbbbbbbbbbbb.segment_2_bbbbbbbbbbbbbbbb.segment_3_bbbbbbbbbbbbbbbb.segment_4_bbbbbbbbbbbbbbbb.segment_5_bbbbbbbbbbbbbbbb.segment_6_bbbbbbbbbbbbbbbb.segment_7_bbbbbbbbbbbbbbbb.segment_8_bbbbbbbbbbbbbbbb.segment_9_bbbbbbbbbbbbbbbb.segment_10_bbbbbbbbbbbbbbbb.segment_11_bbbbbbbbbbbbbbbb as second
+module alias_loader(load) {
+  fn load(int value) int { value }
+}
+module selected_loader(load) {
+  fn load(int left, int right) int { left + right }
+}
+use alias_loader as only_loader
+use selected_loader (load)
+assert(first.value() == 41, "long first module retains declaration identity")
+assert(second.value() == 99, "same leaf in second long module remains distinct")
+assert(first.value() == 41, "cached long module alias preserves its full spelling")
+assert(second.value() == 99, "repeated aliases retain distinct module identity")
+assert(load(20, 22) == 42, "selective import binds the bare function")
+assert(only_loader.load(99) == 99, "namespace alias does not shadow bare import")
+0
+NY
+}

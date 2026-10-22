@@ -10,9 +10,9 @@
 #include "base/compat.h"
 #endif
 #include "base/util.h"
-#include "code/parse/parser.h"
-#include "priv.h"
 #include "cmd/ny/repl/types.h"
+#include "code/lang/parse/parser.h"
+#include "priv.h"
 #include <ctype.h>
 #include <dirent.h>
 #include <stdio.h>
@@ -23,115 +23,204 @@
 #endif
 #include <sys/stat.h>
 
-typedef enum { CTX_NORMAL, CTX_MEMBER, CTX_STRING, CTX_COMMAND, CTX_USE } compl_ctx_t;
+typedef enum {
+  CTX_NORMAL,
+  CTX_MEMBER,
+  CTX_STRING,
+  CTX_COMMAND,
+  CTX_USE
+} compl_ctx_t;
 
 static const char *g_sort_prefix = NULL;
 static compl_ctx_t g_sort_ctx = CTX_NORMAL;
 
 static const char *const k_repl_commands[] = {
-    ":help",  ":h",    ":doc",     ":exit",  ":quit", ":q",    ":clear",
-    ":cls",   ":reset", ":time",    ":trace", ":expand",       ":vars",
-    ":env",   ":history",          ":hist",  ":pwd",  ":ls",   ":cd",
-    ":load",  ":run",  ":save",    ":std",   ":cancel",        ":c",
-    ":complete", NULL};
+    ":help",    ":h",     ":doc",    ":exit",  ":quit",     ":q",    ":clear",
+    ":cls",     ":reset", ":time",   ":trace", ":expand",   ":vars", ":env",
+    ":history", ":hist",  ":pwd",    ":ls",    ":cd",       ":load", ":run",
+    ":save",    ":std",   ":cancel", ":c",     ":complete", NULL};
 
 static const char *const k_syntax_words[] = {
-    "fn",       "def",      "mut",      "if",       "else",     "elif",
-    "while",    "for",      "in",       "return",   "break",    "continue",
-    "use",      "module",   "as",       "lambda",   "defer",    "try",
-    "catch",    "throw",    "finally",  "case",     "match",    "enum",
-    "struct",   "layout",   "extern",   "embed",    "comptime", "impl",
-    "operator", "self",     "true",     "false",    "nil",      "none",
-    "del",      "goto",     "export",   "type",     NULL};
+    "fn",       "def",    "mut",      "if",     "else",     "elif",   "while",
+    "for",      "in",     "return",   "break",  "continue", "use",    "module",
+    "as",       "lambda", "defer",    "try",    "catch",    "throw",  "finally",
+    "case",     "match",  "enum",     "struct", "layout",   "extern", "embed",
+    "comptime", "impl",   "operator", "self",   "true",     "false",  "nil",
+    "none",     "del",    "goto",     "export", "type",     NULL};
 
 static const char *const k_type_words[] = {
-    "any",     "bool",      "int",      "i8",       "i16",      "i32",
-    "i64",     "i128",      "u8",       "u16",      "u32",      "u64",
-    "u128",    "f32",       "f64",      "f128",     "float",    "number",
-    "numeric", "integer",   "bigint",   "str",      "char",     "bytes",
-    "list",    "tuple",     "dict",     "set",      "range",    "ptr",
-    "handle",  "fnptr",     "seq",      "sequence", "iterable", "indexable",
-    "collection", "container", "allocator", "complex", "c64", "c128",
+    "any",        "bool",      "int",       "i8",       "i16",      "i32",
+    "i64",        "i128",      "u8",        "u16",      "u32",      "u64",
+    "u128",       "f32",       "f64",       "f128",     "float",    "number",
+    "numeric",    "integer",   "bigint",    "str",      "char",     "bytes",
+    "list",       "tuple",     "dict",      "set",      "range",    "ptr",
+    "handle",     "fnptr",     "seq",       "sequence", "iterable", "indexable",
+    "collection", "container", "allocator", "complex",  "c64",      "c128",
     NULL};
 
-static const char *const k_member_words[] = {
-    "len",      "get",       "set",       "put",       "add",       "append",
-    "pop",      "extend",    "contains",  "slice",     "keys",      "values",
-    "items",    "merge",     "map",       "filter",    "reduce",    "each",
-    "count",    "count_if",  "first",     "last",      "take",      "drop",
-    "reverse",  "compact",   "chunk",     "windowed",  "delete",    "remove",
-    "clear",    "clone",     "long",      "to_bytes",  "to_list",   "unhex",
-    "bytes",    "as_bytes",  "hex",       "base64",    "text",      "le32",
-    "be32",     "le64",      "be64",      "u8",        "u16le",     "u16be",
-    "u32le",    "u32be",     "u64le",     "u64be",     "xor",       "concat",
-    "repeat",   "rev",       "trim0",     "bytes_long", "type_shape", "is_shape",
-    "require_shape", "abs",  "min",       "max",        "pow",        "mod",
-    "clamp",    "clamp01",   "sign",      "sqrt",      "lerp",      "sin",
-    "cos",      "tan",       "atan",      "asin",      "acos",      "exp",
-    "log",      "log2",      "log10",     "fmod",      "floor",     "ceil",
-    "round",    "gcd",       "lcm",       "factorial", "x",         "y",
-    "z",        "w",         "r",         "g",         "b",         "a",
-    NULL};
+static const char *const k_member_words[] = {"len",
+                                             "get",
+                                             "set",
+                                             "put",
+                                             "add",
+                                             "append",
+                                             "pop",
+                                             "extend",
+                                             "contains",
+                                             "slice",
+                                             "keys",
+                                             "values",
+                                             "items",
+                                             "merge",
+                                             "map",
+                                             "filter",
+                                             "reduce",
+                                             "each",
+                                             "count",
+                                             "count_if",
+                                             "first",
+                                             "last",
+                                             "take",
+                                             "drop",
+                                             "reverse",
+                                             "compact",
+                                             "chunk",
+                                             "windowed",
+                                             "delete",
+                                             "remove",
+                                             "clear",
+                                             "clone",
+                                             "long",
+                                             "to_bytes",
+                                             "to_list",
+                                             "unhex",
+                                             "bytes",
+                                             "as_bytes",
+                                             "hex",
+                                             "base64",
+                                             "text",
+                                             "le32",
+                                             "be32",
+                                             "le64",
+                                             "be64",
+                                             "u8",
+                                             "u16le",
+                                             "u16be",
+                                             "u32le",
+                                             "u32be",
+                                             "u64le",
+                                             "u64be",
+                                             "xor",
+                                             "concat",
+                                             "repeat",
+                                             "rev",
+                                             "trim0",
+                                             "bytes_long",
+                                             "type_shape",
+                                             "is_shape",
+                                             "require_shape",
+                                             "abs",
+                                             "min",
+                                             "max",
+                                             "pow",
+                                             "mod",
+                                             "clamp",
+                                             "clamp01",
+                                             "sign",
+                                             "sqrt",
+                                             "lerp",
+                                             "sin",
+                                             "cos",
+                                             "tan",
+                                             "atan",
+                                             "asin",
+                                             "acos",
+                                             "exp",
+                                             "log",
+                                             "log2",
+                                             "log10",
+                                             "fmod",
+                                             "floor",
+                                             "ceil",
+                                             "round",
+                                             "gcd",
+                                             "lcm",
+                                             "factorial",
+                                             "x",
+                                             "y",
+                                             "z",
+                                             "w",
+                                             "r",
+                                             "g",
+                                             "b",
+                                             "a",
+                                             NULL};
 
 static const char *const k_any_member_words[] = {
-    "long", "to_bytes", "as_bytes", "unhex", "type_shape", "is_shape",
-    "require_shape", "len", "get", "set", "put", "add", "append", "contains",
-    "slice", NULL};
+    "long",          "to_bytes", "as_bytes", "unhex", "type_shape", "is_shape",
+    "require_shape", "len",      "get",      "set",   "put",        "add",
+    "append",        "contains", "slice",    NULL};
 
 static const char *const k_list_member_words[] = {
-    "len",      "get",       "set",       "put",      "add",      "append",
-    "pop",      "extend",    "clear",     "contains", "slice",    "map",
-    "filter",   "reduce",    "each",      "count",    "count_if", "first",
-    "last",     "take",      "drop",      "reverse",  "compact",  "chunk",
-    "windowed", "long",      "to_bytes",  "as_bytes", "bytes",    "hex",
-    "base64",   "text",      "le32",      "be32",     "le64",     "be64",
-    "xor",      "concat",    "repeat",    "rev",      "trim0",    "type_shape",
-    "is_shape", "require_shape", NULL};
+    "len",    "get",        "set",      "put",           "add",
+    "append", "pop",        "extend",   "clear",         "contains",
+    "slice",  "map",        "filter",   "reduce",        "each",
+    "count",  "count_if",   "first",    "last",          "take",
+    "drop",   "reverse",    "compact",  "chunk",         "windowed",
+    "long",   "to_bytes",   "as_bytes", "bytes",         "hex",
+    "base64", "text",       "le32",     "be32",          "le64",
+    "be64",   "xor",        "concat",   "repeat",        "rev",
+    "trim0",  "type_shape", "is_shape", "require_shape", NULL};
 
 static const char *const k_str_member_words[] = {
-    "len",      "get",       "contains", "slice",   "map",      "filter",
-    "reduce",   "each",      "count",    "count_if", "first",    "last",
-    "take",     "drop",      "reverse",  "chunk",   "windowed", "long",
-    "to_bytes", "as_bytes",  "bytes",    "unhex",   "hex",      "base64",
-    "base64_decode", "bytes_long", "u8", "le16",    "be16",     "le32",
-    "be32",     "le64",      "be64",     "type_shape", "is_shape",
+    "len",           "get",      "contains", "slice",      "map",
+    "filter",        "reduce",   "each",     "count",      "count_if",
+    "first",         "last",     "take",     "drop",       "reverse",
+    "chunk",         "windowed", "long",     "to_bytes",   "as_bytes",
+    "bytes",         "unhex",    "hex",      "base64",     "base64_decode",
+    "bytes_long",    "u8",       "le16",     "be16",       "le32",
+    "be32",          "le64",     "be64",     "type_shape", "is_shape",
     "require_shape", NULL};
 
 static const char *const k_bytes_member_words[] = {
-    "len",      "get",      "set",     "put",      "long",     "to_list",
-    "to_bytes", "as_bytes", "bytes",   "hex",      "base64",   "text",
-    "u8",       "le16",     "be16",    "le32",     "be32",     "le64",
+    "len",      "get",        "set",      "put",           "long",   "to_list",
+    "to_bytes", "as_bytes",   "bytes",    "hex",           "base64", "text",
+    "u8",       "le16",       "be16",     "le32",          "be32",   "le64",
     "be64",     "type_shape", "is_shape", "require_shape", NULL};
 
 static const char *const k_dict_member_words[] = {
-    "len",    "clone", "get",    "set",   "put",   "contains", "delete",
-    "remove", "clear", "keys",   "values", "items", "merge",    "type_shape",
-    "is_shape", "require_shape", NULL};
+    "len",    "clone",      "get",      "set",           "put",    "contains",
+    "delete", "remove",     "clear",    "keys",          "values", "items",
+    "merge",  "type_shape", "is_shape", "require_shape", NULL};
 
 static const char *const k_set_member_words[] = {
-    "len", "add", "sub", "remove", "delete", "contains", "clear", "values",
-    "type_shape", "is_shape", "require_shape", NULL};
+    "len",   "add",    "sub",        "remove",   "delete",        "contains",
+    "clear", "values", "type_shape", "is_shape", "require_shape", NULL};
 
 static const char *const k_tuple_member_words[] = {
-    "len",    "get",     "contains", "map",    "filter", "reduce", "count",
-    "count_if", "first", "last",     "take",   "drop",   "reverse", "compact",
-    "chunk", "windowed", "type_shape", "is_shape", "require_shape", NULL};
+    "len",      "get",        "contains", "map",           "filter",
+    "reduce",   "count",      "count_if", "first",         "last",
+    "take",     "drop",       "reverse",  "compact",       "chunk",
+    "windowed", "type_shape", "is_shape", "require_shape", NULL};
 
 static const char *const k_range_member_words[] = {
-    "len",     "get",      "keys",    "values", "items",   "map",
-    "filter",  "reduce",   "count",   "count_if", "first", "last",
-    "take",    "drop",     "reverse", "chunk",  "windowed", "contains",
-    "type_shape", "is_shape", "require_shape", NULL};
+    "len",           "get",      "keys",     "values",     "items",
+    "map",           "filter",   "reduce",   "count",      "count_if",
+    "first",         "last",     "take",     "drop",       "reverse",
+    "chunk",         "windowed", "contains", "type_shape", "is_shape",
+    "require_shape", NULL};
 
 static const char *const k_number_member_words[] = {
-    "abs",    "min",       "max",       "pow",      "mod",       "clamp",
-    "clamp01", "sign",     "sqrt",      "lerp",     "sin",       "cos",
-    "tan",    "atan",      "asin",      "acos",     "exp",       "log",
-    "log2",   "log10",     "fmod",      "floor",    "ceil",      "round",
-    "gcd",    "lcm",       "factorial", "Z",        "bigint",    "powmod",
-    "invmod", "sqrt_mod",  "is_prime",  "next_prime", "prev_prime", "factor",
-    "phi",    "bitlen",    "bytes",     "as_bytes", "hex",       "as_hex",
-    "type_shape", "is_shape", "require_shape", NULL};
+    "abs",    "min",       "max",        "pow",        "mod",
+    "clamp",  "clamp01",   "sign",       "sqrt",       "lerp",
+    "sin",    "cos",       "tan",        "atan",       "asin",
+    "acos",   "exp",       "log",        "log2",       "log10",
+    "fmod",   "floor",     "ceil",       "round",      "gcd",
+    "lcm",    "factorial", "Z",          "bigint",     "powmod",
+    "invmod", "sqrt_mod",  "is_prime",   "next_prime", "prev_prime",
+    "factor", "phi",       "bitlen",     "bytes",      "as_bytes",
+    "hex",    "as_hex",    "type_shape", "is_shape",   "require_shape",
+    NULL};
 
 static void add_match(const char *s);
 
@@ -217,18 +306,21 @@ static compl_ctx_t get_context(const char *line, int pos) {
 }
 
 static int is_break_char(char c) {
-  return c == ' ' || c == '\t' || c == '\n' || c == '"' || c == '\\' || c == '\'' || c == '`' ||
-         c == '@' || c == '$' || c == '>' || c == '<' || c == '=' || c == ';' || c == '|' ||
-         c == '&' || c == '{' || c == '}' || c == '.' || c == '(';
+  return c == ' ' || c == '\t' || c == '\n' || c == '"' || c == '\\' ||
+         c == '\'' || c == '`' || c == '@' || c == '$' || c == '>' ||
+         c == '<' || c == '=' || c == ';' || c == '|' || c == '&' || c == '{' ||
+         c == '}' || c == '.' || c == '(';
 }
 
 static int is_member_break_char(char c) {
-  return c == ' ' || c == '\t' || c == '\n' || c == '"' || c == '\\' || c == '\'' || c == '`' ||
-         c == '@' || c == '$' || c == '>' || c == '<' || c == '=' || c == ';' || c == '|' ||
-         c == '&' || c == '{' || c == '}' || c == '(';
+  return c == ' ' || c == '\t' || c == '\n' || c == '"' || c == '\\' ||
+         c == '\'' || c == '`' || c == '@' || c == '$' || c == '>' ||
+         c == '<' || c == '=' || c == ';' || c == '|' || c == '&' || c == '{' ||
+         c == '}' || c == '(';
 }
 
-static void extract_prefix(const char *line, int pos, char *out, size_t out_cap) {
+static void extract_prefix(const char *line, int pos, char *out,
+                           size_t out_cap) {
   if (!out || out_cap == 0) {
     return;
   }
@@ -251,7 +343,8 @@ static void extract_prefix(const char *line, int pos, char *out, size_t out_cap)
   out[len] = '\0';
 }
 
-static void extract_command_arg(const char *line, int cursor, char *out, size_t out_cap) {
+static void extract_command_arg(const char *line, int cursor, char *out,
+                                size_t out_cap) {
   if (!out || out_cap == 0)
     return;
   out[0] = '\0';
@@ -280,7 +373,8 @@ static void add_list_completions(const char *const *items, const char *text) {
   }
 }
 
-static void add_member_word_completions(const char *const *items, const char *text) {
+static void add_member_word_completions(const char *const *items,
+                                        const char *text) {
   if (!items)
     return;
   for (int i = 0; items[i]; i++) {
@@ -308,7 +402,8 @@ static int completion_symbol_matches(const char *cand, const char *text) {
     return 1;
   size_t len = strlen(text);
   if (strchr(text, '.'))
-    return len < 2 ? repl_starts_with_ci(cand, text) : repl_fuzzy_score(cand, text, 1) > 0;
+    return len < 2 ? repl_starts_with_ci(cand, text)
+                   : repl_fuzzy_score(cand, text, 1) > 0;
   if (repl_starts_with_ci(cand, text))
     return 1;
   if (len < 2)
@@ -330,13 +425,14 @@ static int command_matches(const char *line, const char *name) {
   return next == '\0' || isspace((unsigned char)next);
 }
 
-static int completion_score(const char *cand, const char *text, compl_ctx_t ctx) {
+static int completion_score(const char *cand, const char *text,
+                            compl_ctx_t ctx) {
   if (!cand)
     return 0;
   if (!text || !*text) {
     if (ctx == CTX_COMMAND && cand[0] == ':')
       return 500;
-    if (ctx == CTX_USE && strncmp(cand, "std.", 4) == 0)
+    if (ctx == CTX_USE && strncmp(cand, "core.", 5) == 0)
       return 450;
     return 100;
   }
@@ -355,7 +451,7 @@ static int completion_score(const char *cand, const char *text, compl_ctx_t ctx)
     score += 200 - (int)(inside - base > 64 ? 64 : (inside - base));
   if (ctx == CTX_COMMAND && cand[0] == ':')
     score += 80;
-  if (ctx == CTX_USE && strncmp(cand, "std.", 4) == 0)
+  if (ctx == CTX_USE && strncmp(cand, "core.", 5) == 0)
     score += 60;
   return score;
 }
@@ -411,7 +507,9 @@ static void add_files(const char *text) {
   const char *last_sep =
       (!last_slash)
           ? last_bslash
-          : (!last_bslash ? last_slash : (last_bslash > last_slash ? last_bslash : last_slash));
+          : (!last_bslash
+                 ? last_slash
+                 : (last_bslash > last_slash ? last_bslash : last_slash));
   char sep = last_sep && *last_sep == '\\' ? '\\' : '/';
   if (last_sep) {
     size_t dlen = (size_t)(last_sep - text);
@@ -459,10 +557,10 @@ static void add_files(const char *text) {
   closedir(d);
 }
 
-static int module_is_top_level_std(const char *m) {
-  if (!m || strncmp(m, "std.", 4) != 0)
+static int module_is_top_level_core(const char *m) {
+  if (!m || strncmp(m, "core.", 5) != 0)
     return 0;
-  return strchr(m + 4, '.') == NULL;
+  return strchr(m + 5, '.') == NULL;
 }
 
 static void add_normal_completions(const char *text) {
@@ -474,7 +572,8 @@ static void add_normal_completions(const char *text) {
   }
   for (size_t i = 0; i < ny_std_module_count(); i++) {
     const char *m = ny_std_module_name(i);
-    if ((empty && module_is_top_level_std(m)) || (!empty && completion_symbol_matches(m, text)))
+    if ((empty && module_is_top_level_core(m)) ||
+        (!empty && completion_symbol_matches(m, text)))
       add_match(m);
   }
   add_list_completions(k_syntax_words, text);
@@ -494,8 +593,8 @@ static void add_normal_completions(const char *text) {
   }
 }
 
-static void split_member_expr(const char *line, int cursor, char *head, size_t head_cap, char *tail,
-                              size_t tail_cap) {
+static void split_member_expr(const char *line, int cursor, char *head,
+                              size_t head_cap, char *tail, size_t tail_cap) {
   if (head_cap)
     head[0] = '\0';
   if (tail_cap)
@@ -662,8 +761,9 @@ static receiver_kind_t receiver_from_type_word(const char *type) {
     return RECV_RANGE;
   if (!strcmp(type, "bool"))
     return RECV_BOOL;
-  if (!strcmp(type, "int") || !strcmp(type, "float") || !strcmp(type, "number") ||
-      !strcmp(type, "numeric") || !strcmp(type, "integer") || !strcmp(type, "bigint") ||
+  if (!strcmp(type, "int") || !strcmp(type, "float") ||
+      !strcmp(type, "number") || !strcmp(type, "numeric") ||
+      !strcmp(type, "integer") || !strcmp(type, "bigint") ||
       !strcmp(type, "f32") || !strcmp(type, "f64"))
     return RECV_NUMBER;
   if (!strcmp(type, "any"))
@@ -705,8 +805,8 @@ static receiver_kind_t infer_receiver_from_expr(const char *expr) {
     return RECV_BOOL;
   char head[128];
   size_t n = 0;
-  while (expr[n] && !isspace((unsigned char)expr[n]) && strchr(",)]};", expr[n]) == NULL &&
-         n + 1 < sizeof(head)) {
+  while (expr[n] && !isspace((unsigned char)expr[n]) &&
+         strchr(",)]};", expr[n]) == NULL && n + 1 < sizeof(head)) {
     head[n] = expr[n];
     n++;
   }
@@ -734,7 +834,8 @@ static int parse_ident_token(const char **pp, char *out, size_t out_cap) {
   return n > 0;
 }
 
-static receiver_kind_t infer_receiver_var_from_source(const char *src, const char *var) {
+static receiver_kind_t infer_receiver_var_from_source(const char *src,
+                                                      const char *var) {
   if (!src || !var || !*var)
     return RECV_UNKNOWN;
   receiver_kind_t best = RECV_UNKNOWN;
@@ -803,8 +904,9 @@ static receiver_kind_t infer_receiver_var_from_source(const char *src, const cha
   return best;
 }
 
-static receiver_kind_t infer_member_receiver_from_variable(const char *line, int cursor,
-                                                          const char *head) {
+static receiver_kind_t infer_member_receiver_from_variable(const char *line,
+                                                           int cursor,
+                                                           const char *head) {
   char h[256];
   trim_receiver_head(head, h, sizeof(h));
   if (!h[0])
@@ -897,11 +999,13 @@ static const char *receiver_owner_name(receiver_kind_t recv) {
   }
 }
 
-static int curated_member_word_matches_receiver(receiver_kind_t recv, const char *word) {
+static int curated_member_word_matches_receiver(receiver_kind_t recv,
+                                                const char *word) {
   const char *const *items = receiver_member_words(recv);
   if (!items)
     return 1;
-  return member_word_in(items, word) || (recv == RECV_NUMBER && repl_starts_with_ci(word, "ascii_"));
+  return member_word_in(items, word) ||
+         (recv == RECV_NUMBER && repl_starts_with_ci(word, "ascii_"));
 }
 
 static int method_matches_receiver(const char *name, receiver_kind_t recv) {
@@ -913,9 +1017,12 @@ static int method_matches_receiver(const char *name, receiver_kind_t recv) {
   if (owner)
     return method_owner_leaf_is(name, owner);
   if (recv == RECV_NUMBER) {
-    return method_owner_leaf_is(name, "int") || method_owner_leaf_is(name, "f32") ||
-           method_owner_leaf_is(name, "f64") || method_owner_leaf_is(name, "float") ||
-           method_owner_leaf_is(name, "number") || method_owner_leaf_is(name, "bigint");
+    return method_owner_leaf_is(name, "int") ||
+           method_owner_leaf_is(name, "f32") ||
+           method_owner_leaf_is(name, "f64") ||
+           method_owner_leaf_is(name, "float") ||
+           method_owner_leaf_is(name, "number") ||
+           method_owner_leaf_is(name, "bigint");
   }
   return 1;
 }
@@ -932,13 +1039,15 @@ static void add_member_completions(const char *line, int cursor) {
   if (!tail[0] && !head[0])
     return;
   int namespace_like = completion_head_is_namespace(head);
-  receiver_kind_t recv = namespace_like ? RECV_UNKNOWN : classify_member_receiver(head);
+  receiver_kind_t recv =
+      namespace_like ? RECV_UNKNOWN : classify_member_receiver(head);
   if (!namespace_like && recv == RECV_UNKNOWN)
     recv = infer_member_receiver_from_variable(line, cursor, head);
   if (!namespace_like)
     add_receiver_member_words(recv, tail);
   if (g_repl_docs && (namespace_like || tail[0])) {
-    repl_ensure_docs_for_query((doc_list_t *)g_repl_docs, namespace_like && head[0] ? head : tail);
+    repl_ensure_docs_for_query((doc_list_t *)g_repl_docs,
+                               namespace_like && head[0] ? head : tail);
     const doc_list_t *d = (const doc_list_t *)g_repl_docs;
     for (size_t i = 0; i < d->len; i++) {
       const char *name = d->data[i].name;
@@ -994,7 +1103,8 @@ char **repl_enhanced_completion(const char *text, int start, int end) {
   return NULL;
 }
 
-char **nytrix_get_completions_for_prefix(const char *prefix, size_t *out_count) {
+char **nytrix_get_completions_for_prefix(const char *prefix,
+                                         size_t *out_count) {
   if (matches) {
     for (int i = 0; i < matches_len; i++)
       free(matches[i]);
@@ -1032,7 +1142,8 @@ char **nytrix_get_completions_for_prefix(const char *prefix, size_t *out_count) 
   return res;
 }
 
-char **nytrix_get_completions_for_line(const char *line, int cursor, size_t *out_count) {
+char **nytrix_get_completions_for_line(const char *line, int cursor,
+                                       size_t *out_count) {
   if (matches) {
     for (int i = 0; i < matches_len; i++)
       free(matches[i]);
@@ -1051,17 +1162,19 @@ char **nytrix_get_completions_for_line(const char *line, int cursor, size_t *out
   if (ctx == CTX_STRING)
     wants_files = 1;
   if (ctx == CTX_COMMAND &&
-      (command_matches(line, "load") || command_matches(line, "cd") || command_matches(line, "run") ||
-       command_matches(line, "save")))
+      (command_matches(line, "load") || command_matches(line, "cd") ||
+       command_matches(line, "run") || command_matches(line, "save")))
     wants_files = 1;
   if (ctx == CTX_COMMAND &&
-      (command_matches(line, "help") || command_matches(line, "h") || command_matches(line, "doc")) &&
+      (command_matches(line, "help") || command_matches(line, "h") ||
+       command_matches(line, "doc")) &&
       prefix[0] != ':') {
     help_query = 1;
   }
   if ((ctx == CTX_COMMAND || is_cmd) && !wants_files && !help_query) {
     for (int i = 0; k_repl_commands[i]; i++) {
-      if (!prefix[0] || strncmp(k_repl_commands[i], prefix, strlen(prefix)) == 0)
+      if (!prefix[0] ||
+          strncmp(k_repl_commands[i], prefix, strlen(prefix)) == 0)
         add_match(k_repl_commands[i]);
     }
   } else if (wants_files) {

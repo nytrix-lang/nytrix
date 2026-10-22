@@ -3,12 +3,12 @@
 ;; Reference:
 ;; - Heninger N., Shacham H., "Reconstructing RSA Private Keys from Random Key Bits"
 ;; References:
-;; - std.math.crypto.factorization
-;; - std.math.crypto
-module std.math.crypto.factorization.branch_and_prune(factorize_pq, factorize_pqd, factorize_pqddpdq)
-use std.core
-use std.math.nt
-use std.math.crypto.number.partial
+;; - core.math.crypto.factorization
+;; - core.math.crypto
+module core.math.crypto.factorization.branch_and_prune(factorize_pq, factorize_pqd, factorize_pqddpdq)
+use core
+use core.math.nt
+use core.math.crypto.number.partial
 
 fn _bits_to_int_le(list bits, int upto) any {
    mut out = 0
@@ -155,7 +155,7 @@ fn _bp_pq(any n, list p_bits, list q_bits, any p_cur, any q_cur, int i) any {
    while p_bit <= p1 {
       mut q_bit = q0
       while q_bit <= q1 {
-         if (p_bit ^^ q_bit) == c1 {
+         if (p_bit ^ q_bit) == c1 {
             p_bits[i] = p_bit
             q_bits[i] = q_bit
             def r = _bp_pq(n, p_bits, q_bits, p_cur | (p_bit << i), q_cur | (q_bit << i), i + 1)
@@ -186,7 +186,7 @@ fn _bp_pqd(any n, any e, any k, int tk, list p_bits, list q_bits, list d_bits, a
       while q_bit <= q1 {
          mut d_bit = d0
          while d_bit <= d1 {
-            if (p_bit ^^ q_bit) == c1 && (d_bit ^^ p_bit ^^ q_bit) == c2 {
+            if (p_bit ^ q_bit) == c1 && (d_bit ^ p_bit ^ q_bit) == c2 {
                p_bits[i] = p_bit
                q_bits[i] = q_bit
                _set_if_present(d_bits, di, d_bit)
@@ -232,8 +232,8 @@ fn _bp_pqddpdq(any n, any e, any k, int tk, any kp, int tkp, any kq, int tkq, li
                mut dq_bit = dq0
                while dq_bit <= dq1 {
                   if
-                  (p_bit ^^ q_bit) == c1 && (d_bit ^^ p_bit ^^ q_bit) == c2 &&
-                  (dp_bit ^^ p_bit) == c3 && (dq_bit ^^ q_bit) == c4
+                  (p_bit ^ q_bit) == c1 && (d_bit ^ p_bit ^ q_bit) == c2 &&
+                  (dp_bit ^ p_bit) == c3 && (dq_bit ^ q_bit) == c4
                   {
                      p_bits[i] = p_bit
                      q_bits[i] = q_bit

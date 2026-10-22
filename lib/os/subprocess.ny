@@ -1,12 +1,12 @@
 ;; Keywords: subprocess process spawn os
 ;; Subprocess convenience API for quick scripts that need spawn, capture, and wait behavior.
 ;; References:
-;; - std.os
-module std.os.subprocess(check_output, output, check_lines, shell, shell_lines, run_capture)
-use std.core
-use std.core.error
-use std.core.str as str
-use std.os.io as pio
+;; - core.os
+module core.os.subprocess(check_output, output, check_lines, shell, shell_lines, run_capture)
+use core
+use core.error
+use core.str as str
+use core.os.io as pio
 
 fn _cmd_args(any cmd, any args=[]) list {
    if is_list(cmd) { return cmd }
@@ -23,7 +23,7 @@ fn _cmd_args(any cmd, any args=[]) list {
 }
 
 fn run_capture(any cmd, any args=[], any input=nil, bool check=true) dict {
-   "Runs a command and captures stdout. Returns `{code, stdout, ok, argv}`.
+   "Runs a command and captures merged stdout and stderr. Returns `{code, stdout, ok, argv}`.
    `cmd` may be a string plus `args`, or a full argv list like `['git', 'status']`."
    def argv = _cmd_args(cmd, args)
    def path = to_str(argv.get(0, ""))
@@ -46,7 +46,7 @@ fn run_capture(any cmd, any args=[], any input=nil, bool check=true) dict {
    def stdout = pio.recv_all(p, 4096)
    def status = pio.close(p)
    mut code = 1
-   if is_ok(status) { code = unwrap(status) }
+   if is_ok(status) { code = int(to_int(unwrap(status))) }
    mut out = dict(8)
    out["code"] = code
    out["stdout"] = stdout
@@ -111,10 +111,26 @@ fn shell_lines(str command, bool keep_empty=false) list {
    } #endif
    def cap = run_capture(echo_argv, [], nil, true)
    assert(cap.get("ok", false) && str.strip(cap.get("stdout", "")) == "subprocess-probe", "subprocess run_capture")
+   mut stderr_args = ["/bin/sh", "-c", "printf subprocess-stderr-probe >&2"]
+   #windows {
+      stderr_args = ["cmd", "/c", "echo subprocess-stderr-probe 1>&2"]
+   } #endif
+   def stderr_cap = run_capture(stderr_args, [], nil, true)
+   assert(str.find(stderr_cap.get("stdout", ""), "subprocess-stderr-probe") >= 0,
+      "subprocess run_capture merges stderr")
+   mut path_echo_argv = ["sh", "-c", "echo subprocess-path-probe"]
+   #windows {
+      path_echo_argv = ["cmd", "/c", "echo subprocess-path-probe"]
+   } #endif
+   def process_path = env("PATH")
+   if is_str(process_path) && process_path.len > 0 {
+      def path_cap = run_capture(path_echo_argv, [], nil, true)
+      assert(path_cap.get("ok", false) && str.strip(path_cap.get("stdout", "")) == "subprocess-path-probe", "subprocess executable lookup uses PATH")
+   }
    assert(check_output(echo_argv, [], true, true) == "subprocess-probe", "subprocess check_output")
    assert(output(echo_argv, [], true) == "subprocess-probe", "subprocess output")
    assert(check_lines(echo_argv) == ["subprocess-probe"], "subprocess check_lines")
    assert(shell("echo shell-probe", true, true) == "shell-probe", "subprocess shell")
    assert(shell_lines("echo line-probe") == ["line-probe"], "subprocess shell_lines")
-   print("✓ std.os.subprocess self-test passed")
+   print("✓ core.os.subprocess self-test passed")
 }

@@ -1,0 +1,141 @@
+shape optcheck_kernel_list_alias_cow {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle optcheck kernel-family list alias copy-on-write]
+  template ny-test-case
+  flags_matrix "-O0 --color=never; -O3 --color=never; --native-only -O0 --color=never; --native-only -O3 --color=never; --native-backend=llvm --jit --jit-engine=mcjit --color=never"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+;; Sweep list sizes around buffer growth boundaries. The compiler's bounded
+;; append-to-fill rewrite must publish the final logical length before aliases
+;; are observed and xs is repeatedly grown.
+fn run() int {
+   mut checksum = 0
+   mut n = 1
+   while n <= 513 {
+      mut xs = []
+      mut i = 0
+      while i < n {
+         xs = append(xs, i)
+         i += 1
+      }
+      ;; The zero at index zero must not make a typed buffer look like an
+      ;; empty C string at either length API boundary.
+      assert(xs.len() == n, "zero-leading list method length")
+      assert(len(xs) == n, "zero-leading list builtin length")
+      def alias = xs
+      mut j = 0
+      while j < n {
+         alias[j] = j * 7 + 3
+         xs = append(xs, 1000 + j)
+         j += 1
+      }
+      mut sum = xs.len() * 100000 + alias.len() * 1000
+      j = 0
+      while j < alias.len() {
+         sum += alias[j]
+         j += 1
+      }
+      j = n
+      while j < xs.len() {
+         sum += xs[j]
+         j += 1
+      }
+      def expected = 201999 * n + 4 * n * n
+      if sum != expected {
+         assert(false, "copy-on-write length at growth boundary")
+      }
+      checksum += sum
+      n += 1
+   }
+   checksum
+}
+
+def checksum = run()
+print("checksum=", checksum)
+assert(checksum == 26812284435, "copy-on-write growth-boundary checksum")
+NY
+}
+
+shape entry_fill_preserves_observable_globals {
+  family "runtime-native"
+  generator "native"
+  features [native nyir optcheck list globals alias capture]
+  template ny-test-case
+  flags_matrix "-O0; -O3; --native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+mut int private_index = 0
+mut list<int> private_values = []
+while private_index < 17 {
+   private_values = append(private_values, private_index * 3)
+   private_index += 1
+}
+assert(private_index == 17 && len(private_values) == 17,
+   "private entry fill publishes its counter and logical length")
+assert(private_values[0] == 0 && private_values[16] == 48,
+   "private typed entry fill preserves its element representation")
+
+mut list<int> reset_values = []
+mut int reset_index = 0
+while reset_index < 11 {
+   reset_values = append(reset_values, reset_index * 7)
+   reset_index += 1
+}
+reset_index = 0
+while reset_index < 11 {
+   assert(reset_values[reset_index] == reset_index * 7,
+      "reusing a fill counter preserves its reset and subsequent reads")
+   reset_index += 1
+}
+assert(reset_index == 11, "reset counter loop terminates at its original bound")
+
+mut list<int> recurrent_values = []
+mut int recurrent_index = 0
+while recurrent_index < 7 {
+   recurrent_values = append(recurrent_values, 0)
+   recurrent_index += 1
+}
+recurrent_index = 0
+while recurrent_index < 7 {
+   mut local_value = 0
+   mut local_index = 0
+   while local_index < 3 {
+      local_value += 1
+      local_index += 1
+   }
+   recurrent_values[recurrent_index] = local_value
+   recurrent_index += 1
+}
+assert(recurrent_values[0] == 3 && recurrent_values[6] == 3,
+   "indexed stores preserve values computed by local scalar recurrences")
+
+mut int captured_index = 0
+mut list<int> captured_values = []
+fn observe_captured() int { captured_index + len(captured_values) }
+while captured_index < 9 {
+   captured_values = append(captured_values, captured_index)
+   captured_index += 1
+   assert(observe_captured() == captured_index * 2,
+      "called functions observe the same mutable scalar and list cells")
+}
+assert(observe_captured() == 18 && captured_values[8] == 8,
+   "captured entry bindings remain shared after the loop")
+
+mut int addressed = 7
+def address = &addressed
+addressed += 4
+assert(load64(address) == 11,
+   "address-taken entry bindings retain their storage identity")
+
+mut int closed_over = 0
+def read_closure = fn() { return closed_over }
+closed_over += 23
+assert(read_closure() == 23,
+   "entry-frame optimization preserves closure capture")
+NY
+}

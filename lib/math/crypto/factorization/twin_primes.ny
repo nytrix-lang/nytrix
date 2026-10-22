@@ -5,10 +5,10 @@
 ;; - https://cacr.uwaterloo.ca/hac/about/chap8.pdf
 ;; - https://crypto.stanford.edu/~dabo/pubs/papers/RSA-survey.pdf
 ;; References:
-;; - std.math.crypto.factorization
-;; - std.math.crypto
-module std.math.crypto.factorization.twin_primes(twin_prime_factor, twin_prime_factor_general, factor_close_primes, detect_twin_prime_product, is_perfect_square)
-use std.math.nt
+;; - core.math.crypto.factorization
+;; - core.math.crypto
+module core.math.crypto.factorization.twin_primes(twin_prime_factor, twin_prime_factor_general, factor_close_primes, detect_twin_prime_product, is_perfect_square)
+use core.math.nt
 
 fn twin_prime_factor(any n) any {
    "Factor n where n = p * (p + 2), i.e., twin primes.
@@ -16,7 +16,8 @@ fn twin_prime_factor(any n) any {
    Returns [p, q] with q = p + 2, or nil if n is not a twin-prime product."
    def inner = n + 1
    if !is_perfect_square(inner) { return nil }
-   mut s, p = isqrt(inner), s - 1
+   mut s = isqrt(inner)
+   mut p = s - 1
    mut q = p + 2
    if p < 2 { return nil }
    if p * q != n { return nil }
@@ -29,7 +30,8 @@ fn twin_prime_factor_general(any n, any k) any {
    Returns [p, p+k] or nil."
    def disc = k * k + 4 * n
    if !is_perfect_square(disc) { return nil }
-   mut s, p = isqrt(disc), (s - k) / 2
+   mut s = isqrt(disc)
+   mut p = (s - k) / 2
    mut q = p + k
    if p < 2 { return nil }
    if p * q != n { return nil }
@@ -67,7 +69,8 @@ fn factor_close_primes_brute(any n, any k_max) any {
       if is_perfect_square(disc) {
          mut s = isqrt(disc)
          if (s - k) % 2 == 0 {
-            mut p, q = (s - k) / 2, p + k
+            mut p = (s - k) / 2
+            mut q = p + k
             if p > 1 && p * q == n { return [p, q] }
          }
       }

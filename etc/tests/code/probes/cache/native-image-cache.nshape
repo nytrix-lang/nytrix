@@ -1,0 +1,154 @@
+shape native_image_cache {
+  family "probe/cache"
+  generator "embedded"
+  features ["native-image-cache", "cache-identity", "fallback"]
+  template ny-test-case
+  flags "--native-only"
+  timeout 180
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.fs as fs
+use core.os.subprocess (run_capture)
+use core.str as str
+
+def root = env("NYTRIX_ROOT")
+def ny = env("NYTRIX_NY_FULL_BIN")
+def cmake = env("NYTRIX_CMAKE_COMMAND")
+assert(is_str(root) && root.len > 0, "CTest provides repository root")
+assert(is_str(ny) && ny.len > 0, "CTest provides full Ny executable")
+assert(is_str(cmake) && cmake.len > 0, "CTest provides CMake executable")
+def dir = temp_dir() + "/native-image-cache-" + to_str(pid())
+def source = dir + "/image.ny"
+def cache = dir + "/cache"
+def setup = run_capture([cmake, "-E", "make_directory", dir], [], nil, false)
+assert(setup.get("code", 127) == 0, "create isolated native image directory")
+
+fn run_image(str expected, bool expect_hit, list args,
+             list extra_env) str {
+   def command = [cmake, "-E", "env",
+      "NYTRIX_CACHE_DIR=" + cache,
+      "NYTRIX_JIT_CACHE=1",
+      "NYTRIX_JIT_CACHE_RUN=1",
+      "NYTRIX_STENCIL_CACHE=1",
+      "NYTRIX_STD_CACHE=1",
+      "NYTRIX_TRACE_CACHE=1"]
+   for entry in extra_env { command.append(entry) }
+   command.append(ny)
+   command.append("--no-progress")
+   command.append("--native-only")
+   command.append("--native-backend")
+   command.append("x86_64")
+   command.append("-time")
+   for arg in args { command.append(arg) }
+   command.append(source)
+   def result = run_capture(command, [], nil, false)
+   def output = result.get("stdout", "")
+   assert(result.get("code", 127) == 0 &&
+          str.find(output, expected + "\n") >= 0,
+          "native image output mismatch: " + output)
+   def hit = str.find(output, "native image cache hit:") >= 0
+   assert(hit == expect_hit,
+          "native image cache expected hit=" + to_str(expect_hit) +
+          ": " + output)
+   return output
+}
+
+def program =
+   "use core\nmut xs = [1, 2, 3]\nxs[0] = 9\nprint(xs.map(fn(i){ i * 2 }))\n"
+assert(is_ok(file_write(source, program)), "write cache test program")
+run_image("[18, 4, 6]", false, [], [])
+run_image("[18, 4, 6]", true, [], [])
+run_image("[18, 4, 6]", true, [], [])
+
+def image = ""
+for entry in fs.list_dir(cache + "/jit") {
+   if str.endswith(entry, ".so.obj") { image = cache + "/jit/" + entry }
+}
+assert(image.len > 0, "first native compile creates one object image")
+assert(is_ok(file_write(image, "truncated")), "truncate cached native image")
+run_image("[18, 4, 6]", false, [], [])
+run_image("[18, 4, 6]", true, [], [])
+
+run_image("[18, 4, 6]", false, ["-O3"], [])
+run_image("[18, 4, 6]", true, ["-O3"], [])
+program = "use core\nprint([4, 5].map(fn(i){ i * 3 }))\n"
+assert(is_ok(file_write(source, program)), "edit source without changing behavior")
+run_image("[12, 15]", false, [], [])
+run_image("[12, 15]", true, [], [])
+
+run_image("[12, 15]", false, [], ["NYTRIX_COMPILER_ASSERTS=1"])
+run_image("[12, 15]", false, [], ["NYTRIX_JIT_CACHE=0"])
+
+def inline_command = [cmake, "-E", "env",
+   "NYTRIX_CACHE_DIR=" + cache,
+   "NYTRIX_JIT_CACHE=1",
+   "NYTRIX_JIT_NATIVE_CACHE=1",
+   "NYTRIX_TRACE_CACHE=1",
+   ny, "--no-progress", "--native-backend", "llvm",
+   "-c", "print([6, 7].map(fn(i){ i * 4 }))"]
+for iteration in 0..1 {
+   def result = run_capture(inline_command, [], nil, false)
+   def output = result.get("stdout", "")
+   assert(result.get("code", 127) == 0 &&
+          str.find(output, "[24, 28]") >= 0,
+          "inline LLVM cache preserves output: " + output)
+   def hit = str.find(output, "JIT native cache hit (early):") >= 0
+   assert(hit == (iteration == 1),
+          "inline LLVM cache warm/cold state mismatch: " + output)
+}
+
+program = "use core\nprint([1, 2, 3].map(fn(i) { i * 2 }))\n"
+assert(is_ok(file_write(source, program)), "write core-dependent source")
+def core_command = [cmake, "-E", "env",
+   "NYTRIX_CACHE_DIR=" + cache,
+   "NYTRIX_JIT_CACHE=1",
+   "NYTRIX_JIT_NATIVE_CACHE=1",
+   "NYTRIX_TRACE_CACHE=1",
+   ny, "--no-progress", "--native-backend", "x86_64", "--run", source]
+for iteration in 0..1 {
+   def result = run_capture(core_command, [], nil, false)
+   def output = result.get("stdout", "")
+   assert(result.get("code", 127) == 0 &&
+          str.find(output, "[2, 4, 6]") >= 0,
+          "cached core-dependent program runs: " + output)
+   assert(str.find(output, "JIT native cache hit (early):") < 0,
+          "core-dependent program does not bypass linked-core fallback")
+}
+
+def fannkuch_fixture =
+   unwrap(file_read(root + "/etc/tests/bench/algorithms/fannkuch.nshape"))
+def source_marker = "source ny <<'NY'\n"
+def source_start = str.find(fannkuch_fixture, source_marker)
+assert(source_start >= 0, "Fannkuch fixture has embedded Ny source")
+source_start += source_marker.len
+def source_end = str.find_from(fannkuch_fixture, "\nNY\n", source_start)
+assert(source_end > source_start, "Fannkuch fixture source is terminated")
+program = str.str_slice(fannkuch_fixture, source_start, source_end)
+assert(is_ok(file_write(source, program)), "write Fannkuch cache source")
+def fannkuch_command = [cmake, "-E", "env",
+   "NYTRIX_CACHE_DIR=" + cache,
+   "NYTRIX_JIT_CACHE=1",
+   "NYTRIX_JIT_CACHE_RUN=1",
+   "NYTRIX_STENCIL_CACHE=1",
+   "NYTRIX_STD_CACHE=1",
+   "NYTRIX_TRACE_CACHE=1",
+   "NYTRIX_OPT_PROFILE=peak",
+   ny, "--no-progress", "--native-only", "--native-backend", "x86_64",
+   "-O3", source]
+for iteration in 0..1 {
+   def result = run_capture(fannkuch_command, [], nil, false)
+   def output = result.get("stdout", "")
+   assert(result.get("code", 127) == 0 &&
+          str.find(output, "15830566") >= 0,
+          "Fannkuch checksum remains correct: " + output)
+   def hit = str.find(output, "native image cache hit:") >= 0
+   assert(hit == (iteration == 1),
+          "Fannkuch cache warm/cold state mismatch: " + output)
+}
+
+def cleanup = run_capture([cmake, "-E", "rm", "-rf", dir], [], nil, false)
+assert(cleanup.get("code", 127) == 0, "remove native image test directory")
+print("NATIVE_IMAGE_CACHE_OK")
+NY
+}

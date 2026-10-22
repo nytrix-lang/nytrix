@@ -1,33 +1,35 @@
 ;; Keywords: parallel threads scheduler work-stealing os
 ;; Parallel CPU threading policy.
 ;; References:
-;; - std.os
-module std.os.parallel(parallel_mode, parallel_threads, parallel_min_work, parallel_should_threads, parallel_status, hardware_threads, thread_budget, future, async, detach, future_wait, parallel_map, parallel_map_indexed, parallel_each, chunk_ranges, scheduler_policy, scheduler_status, work_stealing_enabled, work_stealing_plan, work_queue, work_queue_push, work_queue_pop, work_queue_steal, PARALLEL_MODE, PARALLEL_THREADS, PARALLEL_MIN_WORK, SCHEDULER_POLICY, HARDWARE_THREADS)
+;; - core.os
+module core.os.parallel(parallel_mode, parallel_threads, parallel_min_work, parallel_should_threads, parallel_status, hardware_threads, thread_budget, future, async, detach, future_wait, parallel_map, parallel_map_indexed, parallel_each, chunk_ranges, scheduler_policy, scheduler_status, work_stealing_enabled, work_stealing_plan, work_queue, work_queue_push, work_queue_pop, work_queue_steal, PARALLEL_MODE, PARALLEL_THREADS, PARALLEL_MIN_WORK, SCHEDULER_POLICY, HARDWARE_THREADS)
 
 ;; Work queues use the runtime queue abstraction and thread-budget policy.
 ;; Queue ownership is explicit in each operation; callers can select direct or
 ;; work-stealing scheduling through SCHEDULER_POLICY.
-use std.core
-use std.core.str
-use std.os.prim
-use std.os.info as osinfo
-use std.core.common as common
-use std.os.thread
+use core
+use core.str
+use core.os.prim
+use core.os.info as osinfo
+use core.common as common
+use core.os.thread
 
 fn _normalize_parallel_mode(any v) str {
    if !is_str(v) { return "auto" }
-   def s = lower(strip(v))
-   case s {
-      "off", "auto", "threads" -> s
+   ;; Environment values are compiler/runtime configuration tokens, not user
+   ;; prose. Compare the documented spellings directly: calling the general
+   ;; string trim/lower helpers during module initialization recursively
+   ;; re-entered the JIT's str.strip bridge before execution could start.
+   case v {
+      "off", "auto", "threads" -> v
       _ -> "auto"
    }
 }
 
 fn _normalize_scheduler_policy(any v) str {
    if !is_str(v) { return "auto" }
-   def s = lower(strip(v))
-   case s {
-      "off", "direct", "auto", "work-stealing" -> s
+   case v {
+      "off", "direct", "auto", "work-stealing" -> v
       "work_stealing" -> "work-stealing"
       _ -> "auto"
    }
@@ -77,10 +79,10 @@ fn _effective_parallel_min_work() int {
    out
 }
 
-def PARALLEL_MODE = _normalize_parallel_mode(strip(to_str(env("NYTRIX_PARALLEL_MODE"))))
+def PARALLEL_MODE = _normalize_parallel_mode(to_str(env("NYTRIX_PARALLEL_MODE")))
 def PARALLEL_THREADS = common.parse_nonneg_int(env("NYTRIX_PARALLEL_THREADS"))
 def PARALLEL_MIN_WORK = common.parse_nonneg_int(env("NYTRIX_PARALLEL_MIN_WORK"))
-def SCHEDULER_POLICY = _normalize_scheduler_policy(strip(to_str(env("NYTRIX_THREAD_SCHEDULER"))))
+def SCHEDULER_POLICY = _normalize_scheduler_policy(to_str(env("NYTRIX_THREAD_SCHEDULER")))
 
 fn parallel_mode() str {
    "Returns the configured parallel mode: `off`, `auto`, or `threads`.
@@ -154,7 +156,7 @@ fn scheduler_status(int work_items=0) dict {
 }
 
 fn hardware_threads() int {
-   "Returns the effective logical CPU thread budget selected by std.os.parallel."
+   "Returns the effective logical CPU thread budget selected by core.os.parallel."
    def n = parallel_status(0).get("effective_threads", 1)
    if n > 0 { return n }
    1
@@ -341,7 +343,7 @@ fn _spawn_chunks(list xs, fnptr f, list ranges, fnptr worker) list {
 }
 
 fn parallel_map(list xs, fnptr f, int max_threads=0) list {
-   "Maps `f(item)` over `xs`, using worker threads when std.os.parallel policy selects them."
+   "Maps `f(item)` over `xs`, using worker threads when core.os.parallel policy selects them."
    def n = xs.len
    if n == 0 { return list() }
    def workers = thread_budget(n, max_threads)
@@ -384,7 +386,11 @@ fn parallel_each(list xs, fnptr f, int max_threads=0) int {
    done
 }
 
-def HARDWARE_THREADS = hardware_threads()
+;; Keep module initialization side-effect free.  The old initializer queried
+;; `nproc` through core.os.info while the REPL was still wiring its JIT module;
+;; that crossed the process/string ABI before the module was usable.  Callers
+;; that need the detected value should use hardware_threads().
+def HARDWARE_THREADS = PARALLEL_THREADS > 0 ? PARALLEL_THREADS : 1
 
 #main {
    fn _parallel_self_inc(int x) int { x + 1 }
@@ -411,5 +417,5 @@ def HARDWARE_THREADS = hardware_threads()
    assert(future_wait(h) == 42, "parallel future")
    def xs = [1, 2, 3, 4]
    assert(parallel_map(xs, _parallel_self_inc, 2) == [2, 3, 4, 5] && parallel_map_indexed(xs, _parallel_self_add_index, 2) == [1, 3, 5, 7] && parallel_each(xs, _parallel_self_inc, 2) == 4, "parallel collection helpers")
-   print("✓ std.os.parallel self-test passed")
+   print("✓ core.os.parallel self-test passed")
 }

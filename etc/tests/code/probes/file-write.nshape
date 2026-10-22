@@ -1,0 +1,19 @@
+shape test_file_write_odd_count {
+  family "runtime/system"
+  generator "embedded"
+  features ["ny", "test", "filesystem"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os
+
+def path = "/tmp/nytrix-file-write-odd-count.tmp"
+match file_write(path, "odd!!") {
+   ok(count) -> { assert(count == 5, "file_write preserves odd byte count") }
+   err(code) -> { assert(false, "file_write returns an error: " + to_str(code)) }
+}
+unwrap(file_remove(path))
+NY
+}

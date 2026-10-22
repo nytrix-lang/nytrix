@@ -4,10 +4,10 @@
 ;; - https://cacr.uwaterloo.ca/hac/about/chap2.pdf
 ;; - https://cacr.uwaterloo.ca/hac/about/chap14.pdf
 ;; References:
-;; - std.math.crypto.factorization
-;; - std.math.crypto
-module std.math.crypto.factorization.complex_multiplication(cm_factor, find_cm_curve, cm_order, class_number, cm_discriminant, cm_hilbert_class_poly, cm_j_invariant, is_cm_discriminant, cm_curve_params, cm11_prime_candidates_from_order_mod)
-use std.math.nt
+;; - core.math.crypto.factorization
+;; - core.math.crypto
+module core.math.crypto.factorization.complex_multiplication(cm_factor, find_cm_curve, cm_order, class_number, cm_discriminant, cm_hilbert_class_poly, cm_j_invariant, is_cm_discriminant, cm_curve_params, cm11_prime_candidates_from_order_mod)
+use core.math.nt
 
 fn _cm_abs(number n) number { (n < 0) ? 0 - n : n }
 

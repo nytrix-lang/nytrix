@@ -6,13 +6,13 @@
 ;; - https://cseweb.ucsd.edu/~mihir/papers/dss-lcg.pdf
 ;; - https://cacr.uwaterloo.ca/hac/about/chap5.pdf
 ;; References:
-;; - std.math.crypto.prng
-;; - std.math.crypto
-module std.math.crypto.prng.lcg(lcg_next, lcg_previous, lcg_predict_next, lcg_crack_multiplier, lcg_crack_increment, lcg_crack_modulus, lcg_crack_full, lcg_recover_state_mod_outputs, lcg_smt_recover_seed_from_bit_outputs, msvc_rand_next_state, msvc_rand_output, msvc_rand_outputs, msvc_rand_key_bytes, msvc_rand_key, msvc_rand_crypt, msvc_rand_bruteforce_seed, tlcg_modulus, tlcg_next_state, tlcg_high_output, tlcg_output_at, tlcg_recover, tlcg_recover_state)
-use std.math.nt
-use std.math.bin
-use std.math.smt
-use std.math.crypto.lattice.cvp as lcvp
+;; - core.math.crypto.prng
+;; - core.math.crypto
+module core.math.crypto.prng.lcg(lcg_next, lcg_previous, lcg_predict_next, lcg_crack_multiplier, lcg_crack_increment, lcg_crack_modulus, lcg_crack_full, lcg_recover_state_mod_outputs, lcg_smt_recover_seed_from_bit_outputs, msvc_rand_next_state, msvc_rand_output, msvc_rand_outputs, msvc_rand_key_bytes, msvc_rand_key, msvc_rand_crypt, msvc_rand_bruteforce_seed, tlcg_modulus, tlcg_next_state, tlcg_high_output, tlcg_output_at, tlcg_recover, tlcg_recover_state)
+use core.math.nt
+use core.math.bin
+use core.math.smt
+use core.math.crypto.lattice.cvp as lcvp
 
 fn _z(any x) any { is_bigint(x) ? x : Z(x) }
 
@@ -252,7 +252,7 @@ fn msvc_rand_crypt(any data, any key) list<int> {
    __list_set_len(out, n)
    mut i = 0
    while i < n {
-      __store_item_fast(out, i, _byte_at(data, i) ^^ _byte_at(key, i % k))
+      __store_item_fast(out, i, _byte_at(data, i) ^ _byte_at(key, i % k))
       i += 1
    }
    out
@@ -283,7 +283,7 @@ fn _msvc_rand_build_checks(any data, any known_prefix, any known_suffix, int key
    mut max_ki = -1
    mut i = 0
    while i < _byte_len(known_prefix) {
-      def ki, kb = i % key_len, _byte_at(data, i) ^^ _byte_at(known_prefix, i)
+      def ki, kb = i % key_len, _byte_at(data, i) ^ _byte_at(known_prefix, i)
       if expected[ki] >= 0 && expected[ki] != kb { return [expected, max_ki, false] }
       expected[ki] = kb
       if ki > max_ki { max_ki = ki }
@@ -294,7 +294,7 @@ fn _msvc_rand_build_checks(any data, any known_prefix, any known_suffix, int key
    while i < sn {
       def pos = n - sn + i
       def ki = pos % key_len
-      def kb = _byte_at(data, pos) ^^ _byte_at(known_suffix, i)
+      def kb = _byte_at(data, pos) ^ _byte_at(known_suffix, i)
       if expected[ki] >= 0 && expected[ki] != kb { return [expected, max_ki, false] }
       expected[ki] = kb
       if ki > max_ki { max_ki = ki }
@@ -523,5 +523,5 @@ fn tlcg_recover_state(any outputs_high, any a, any b, int modulus_bits, int low_
    def ct = msvc_rand_crypt(msg, key)
    def hit = msvc_rand_bruteforce_seed(ct, "plain-", 18000, 19000, 32, charset, "")
    assert(hit != nil && hit[0] == seed && hit[2] == msg.to_bytes, "MSVC rand brute-force roundtrip")
-   print("✓ std.math.crypto.prng.lcg self-test passed")
+   print("✓ core.math.crypto.prng.lcg self-test passed")
 }

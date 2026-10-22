@@ -1,0 +1,25 @@
+shape user_std_math_float_is_float_keeps_user_origin {
+  family "runtime/modules/use"
+  generator "regression"
+  features ["ny", "test", "modules", "identity", "legacy-llvm", "predicate"]
+  template ny-test-case
+  flags_matrix "--native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only --native-backend=x86_64"
+  expect compile_and_run
+  source ny <<'NY'
+module core.math.float(
+  is_float
+)
+
+fn is_float(any value) bool {
+  value == 73
+}
+
+#main {
+  assert(!core.math.float.is_float(1.0),
+         "user-owned core.math.float.is_float must not bind the stdlib runtime shortcut")
+  assert(core.math.float.is_float(73),
+         "user predicate accepts its integer sentinel")
+  0
+}
+NY
+}

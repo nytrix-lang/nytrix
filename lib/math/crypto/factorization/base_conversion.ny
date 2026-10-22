@@ -3,10 +3,10 @@
 ;; This Ny port looks for bases where the digit polynomial of N has a short,
 ;; Z-factorable representation and evaluates those factors back at the base.
 ;; References:
-;; - std.math.crypto.factorization
-;; - std.math.crypto
-module std.math.crypto.factorization.base_conversion(base_conversion_factor, base_conversion_factor_pow2)
-use std.math.nt
+;; - core.math.crypto.factorization
+;; - core.math.crypto
+module core.math.crypto.factorization.base_conversion(base_conversion_factor, base_conversion_factor_pow2)
+use core.math.nt
 
 fn _absz(any x) any { bigint_lt(x, Z(0)) ? (-x) : x }
 
@@ -227,5 +227,5 @@ fn base_conversion_factor_pow2(any n, int coefficient_threshold=32, int max_base
    assert(r2[2] == Z(2) || r2[2] == Z(4) || r2[2] == Z(8) || r2[2] == Z(16) || r2[2] == Z(32) || r2[2] == Z(64), "pow2 base shape")
    assert(base_conversion_factor(Z(143), 2, 32) == nil, "threshold can reject")
    assert(base_conversion_factor_pow2(Z(101), 8, 64) == nil, "prime miss")
-   print("✓ std.math.crypto.factorization.base_conversion self-test passed")
+   print("✓ core.math.crypto.factorization.base_conversion self-test passed")
 }

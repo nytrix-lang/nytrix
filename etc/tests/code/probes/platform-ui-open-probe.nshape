@@ -1,0 +1,22 @@
+shape platform-ui-open-probe {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "sys"]
+  ci skip
+  timeout 300
+  template ny-test-case
+  expect compile_and_run
+source ny <<'NY'
+use core
+use core.os.ui.window as window
+def w = window.open_window("probe", 0, 0, 1280, 720, window.WINDOW_FOCUS_ON_SHOW)
+if is_dict(w) {
+   assert(window.id(w) > 0, "open window handle")
+   window.close(w)
+   print("WINDOW_OK")
+} else {
+   ;; A headless or unavailable backend is a bounded, explicit result.
+   print("WINDOW_UNAVAILABLE", window.backend())
+}
+NY
+}

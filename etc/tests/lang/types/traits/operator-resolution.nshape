@@ -1,0 +1,38 @@
+shape operator_resolution_uses_type_identity {
+  family "runtime/types"
+  generator "runtime"
+  features ["operator", "impl", "identity", "backend-parity"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  source ny <<'NY'
+use core
+
+impl Meter {
+   fn add(self left, self right) self {
+      Meter({"value": int(left.get("value", 0)) + int(right.get("value", 0))})
+   }
+   fn power(self base, int exponent) self {
+      Meter({"value": int(base.get("value", 0)) ** exponent})
+   }
+   fn xor(self left, self right) self {
+      Meter({"value": int(left.get("value", 0)) ^ int(right.get("value", 0))})
+   }
+   operator + self: self = add
+   operator ** int: self = power
+   operator ^ self: self = xor
+}
+
+def Meter left = Meter({"value": 19})
+def Meter right = Meter({"value": 23})
+def total = left + right
+assert(int(total.get("value", 0)) == 42,
+       "all backends lower the uniquely resolved impl operator")
+def Meter powered = left ** 2
+assert(int(powered.get("value", 0)) == 361, "Ny-defined power operator overload")
+def Meter alias_powered = left ^^ 2
+assert(int(alias_powered.get("value", 0)) == 361,
+       "Ny power alias resolves to the power overload")
+def Meter toggled = left ^ right
+assert(int(toggled.get("value", 0)) == 4, "Ny-defined XOR operator overload")
+NY
+}

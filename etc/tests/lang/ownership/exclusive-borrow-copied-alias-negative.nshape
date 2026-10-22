@@ -1,0 +1,23 @@
+shape ownership_exclusive_borrow_copied_alias_negative {
+  family "compiler-errors/ownership"
+  generator "error"
+  features ["error", "ownership", "borrow", "exclusive", "alias", "negative"]
+  template ny-compile-fail
+  expect compile_fail
+  flags "--ownership-strict"
+
+  source ny <<'NY'
+use core
+
+fn copied_alias_conflict() int {
+  mut int value = 5
+  def borrowed = &mut value
+  def alias = borrowed
+  value = value + 1
+  def observed = alias
+  value
+}
+
+copied_alias_conflict()
+NY
+}

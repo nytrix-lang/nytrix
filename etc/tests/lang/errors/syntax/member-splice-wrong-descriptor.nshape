@@ -1,0 +1,20 @@
+shape member_splice_wrong_descriptor {
+  family "compiler-errors/comptime"
+  generator "error"
+  features ["error", "comptime", "reflection", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "member splice requires the active compile-time field descriptor"
+  source ny <<'NY'
+layout MemberSpliceRecord {
+  i32 value
+}
+
+#fields(MemberSpliceRecord) as field {
+  #insert fn invalid_member_splice(ptr value) i32 {
+    return value.(other)
+  }
+}
+NY
+}

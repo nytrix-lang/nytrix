@@ -1,0 +1,50 @@
+shape collection_calls_include_callback_effect_rows {
+  family "typing/effects"
+  generator "regression"
+  features ["ny" "test" "typing" "effects" "higher-order" "callback"]
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.iter as it
+use core.collections as collections
+
+@effects(read, alloc)
+fn map_with_pure_callback(list items) any {
+  def increment = fn(value) { value + 1 }
+  items.map(increment)
+}
+
+@effects(read, alloc, io)
+fn map_with_io_callback(list items) any {
+  def announce = fn(value) {
+    print("mapped callback\n")
+    value
+  }
+  items.map(announce)
+}
+
+@effects(read, alloc)
+fn partition_with_pure_callback(list items) any {
+  it.partition(items, fn(value) { value > 1 })
+}
+
+@effects(read, alloc, io)
+fn count_by_with_io_callback(list items) dict {
+  collections.count_by(items, fn(value) {
+    print("counted value\n")
+    value
+  })
+}
+
+@effects(read, alloc)
+fn group_by_with_pure_callback(list items) dict {
+  collections.group_by(items, fn(value) { value % 2 })
+}
+
+def items = [1, 2]
+map_with_pure_callback(items)
+map_with_io_callback(items)
+print("collection callback effect rows passed")
+NY
+}

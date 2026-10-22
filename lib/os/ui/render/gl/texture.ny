@@ -1,12 +1,12 @@
 ;; Keywords: render opengl gl texture readback
-;; References: std.os.ui.render.gl.state std.os.ui.render.gl.constants
-module std.os.ui.render.gl.texture(_read_pixels_buffer, _readback_detail_score, _readback_rgb_score, alt, alt_detail, alt_score, b0, bytes, cp, create_cubemap, create_texture, create_texture_ex, destroy_texture, dst, g0, i, id, last_created_texture_id, meta, off, out, pix, pixels, primary_buffer, primary_detail, primary_score, r0, raw, read_framebuffer, row_bytes, score, step, t, texture_count, texture_format, texture_size, tw, update_texture_rect, y)
-use std.core
-use std.math
-use std.os.ffi as ffi
-use std.os.ui.render.shared as render_shared
-use std.os.ui.render.gl.constants as gl_constants
-use std.os.ui.render.gl.state as gl_state
+;; References: core.os.ui.render.gl.state core.os.ui.render.gl.constants
+module core.os.ui.render.gl.texture(_read_pixels_buffer, _readback_detail_score, _readback_rgb_score, alt, alt_detail, alt_score, b0, bytes, cp, create_cubemap, create_texture, create_texture_ex, destroy_texture, dst, g0, i, id, last_created_texture_id, meta, off, out, pix, pixels, primary_buffer, primary_detail, primary_score, r0, raw, read_framebuffer, row_bytes, score, step, t, texture_count, texture_format, texture_size, tw, update_texture_rect, y)
+use core
+use core.math
+use core.os.ffi as ffi
+use core.os.ui.render.shared as render_shared
+use core.os.ui.render.gl.constants as gl_constants
+use core.os.ui.render.gl.state as gl_state
 
 ;; Creates and returns the texture.
 fn create_texture(int width, int height, any pixels) int {
@@ -251,5 +251,5 @@ fn read_framebuffer() any {
    assert(capabilities().get("opengl", false), "gl capability flag")
    assert(texture_size(-1) == [0, 0], "gl missing texture size")
    assert(get_swapchain_image_count() == 2, "gl double buffered")
-   print("✓ std.os.ui.render.gl self-test passed")
+   print("✓ core.os.ui.render.gl self-test passed")
 }

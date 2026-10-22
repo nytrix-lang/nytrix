@@ -4,12 +4,12 @@
 ;; - https://cacr.uwaterloo.ca/hac/about/chap1.pdf
 ;; - https://cacr.uwaterloo.ca/hac/about/chap12.pdf
 ;; References:
-;; - std.math.crypto.lattice
-;; - std.math.crypto
-module std.math.crypto.lattice.acd(acd_solve_sda)
-use std.core
-use std.math.nt
-use std.math.crypto.lattice.lll
+;; - core.math.crypto.lattice
+;; - core.math.crypto
+module core.math.crypto.lattice.acd(acd_solve_sda)
+use core
+use core.math.nt
+use core.math.crypto.lattice.lll
 
 fn _acd_abs(any x) any { x < 0 ? -x : x }
 

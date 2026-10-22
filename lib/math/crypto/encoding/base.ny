@@ -2,15 +2,15 @@
 ;; Encoding routines for base/radix encoding and decoding.
 ;; Reference:
 ;; References:
-;; - std.math.crypto.encoding
-;; - std.math.crypto
-module std.math.crypto.encoding.base(encode64, decode64, encode64_url, decode64_url, encode32, decode32, encode32_hex, decode32_hex, encode16, decode16)
-use std.core
-use std.core.str as str
+;; - core.math.crypto.encoding
+;; - core.math.crypto
+module core.math.crypto.encoding.base(encode64, decode64, encode64_url, decode64_url, encode32, decode32, encode32_hex, decode32_hex, encode16, decode16)
+use core
+use core.str as str
 
 def _BASE16_ALPHABET = "0123456789ABCDEF"
 
-fn _base_builder_take(list b) str {
+fn _base_builder_take(ptr b) str {
    def out = str.builder_to_str(b)
    str.builder_free(b)
    out
@@ -304,5 +304,5 @@ fn decode16(str s) str {
    assert(decode16("414243") == "ABC", "base16 decode uppercase hex")
    assert(decode16("616263") == "abc", "base16 decode lowercase hex")
    assert(decode16("41zz42") == "AB", "base16 skips invalid pairs")
-   print("✓ std.math.crypto.encoding.base self-test passed")
+   print("✓ core.math.crypto.encoding.base self-test passed")
 }

@@ -1,12 +1,12 @@
 ;; Keywords: syntax yaml yml parse highlight
 ;; YAML syntax highlighter
 ;; References:
-;; - std.math.parse.syntax
-;; - std.math.parse.syntax.helpers
-module std.math.parse.syntax.yaml(tokenize)
-use std.core
-use std.core.str as str
-use std.math.parse.syntax.helpers as _h
+;; - core.math.parse.syntax
+;; - core.math.parse.syntax.helpers
+module core.math.parse.syntax.yaml(tokenize)
+use core
+use core.str as str
+use core.math.parse.syntax.helpers as _h
 
 def KW = "true;false;null;True;False;Null;TRUE;FALSE;NULL;yes;no;Yes;No;YES;NO;on;off;On;Off;ON;OFF"
 

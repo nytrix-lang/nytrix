@@ -1,0 +1,27 @@
+shape requires_predicate_does_not_overprove_multiple_guards {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "requires", "predicate-body"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "precondition obligation failed"
+  source ny <<'NY'
+use core
+
+@pure
+fn in_range(int value) bool {
+  def lower = 0
+  if value < lower { return false }
+  if value > 10 { return false }
+  return value >= lower && value <= 10
+}
+
+fn checked(int value) int requires in_range(value) {
+  return value
+}
+
+fn too_weak(int value) int requires value >= 0 {
+  return checked(value)
+}
+NY
+}

@@ -1,8 +1,8 @@
 ;; Keywords: abi registers calling-convention stack immediates
 ;; ABI, register-alias, stack-slot, and immediate parsing primitives.
-module std.os.rev.decomp.abi *
-use std.core
-use std.core.str as str
+module core.os.rev.decomp.abi *
+use core
+use core.str as str
 
 fn _parse_int_piece(str raw) int {
    mut s = str.strip(raw)

@@ -1,0 +1,39 @@
+shape native_x86_gpr_scratch_call_pressure {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 regalloc memory calls pressure]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; -O0; -O3"
+  timeout 25
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.tbuf
+
+@noinline
+fn pressure(ptr p, int a, int b, int c, int d, int e, int f,
+            int g, int h, int i, int j, int k) int {
+  i64buf_store(p, 0, k)
+  a + b + c + d + e + f + g + h + i + j + k
+}
+
+@noinline
+fn clobber(int a, int b, int c, int d, int e, int f) int {
+  a + b + c + d + e + f
+}
+
+@noinline
+fn across_call(int a, int b, int c, int d, int e, int f,
+               int g, int h, int i, int j, int k) int {
+  def result = clobber(101, 102, 103, 104, 105, 106)
+  result + a + b + c + d + e + f + g + h + i + j + k
+}
+
+def p = i64buf_new(1)
+assert(pressure(p, 1,2,3,4,5,6,7,8,9,10,11) == 66, "live GPR values")
+assert(i64buf_load(p, 0) == 11, "store scratch preserves address")
+assert(across_call(1,2,3,4,5,6,7,8,9,10,11) == 687,
+       "caller-saved registers are not live across calls")
+print("GPR_PRESSURE_OK")
+NY
+}

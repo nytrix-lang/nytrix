@@ -2,13 +2,13 @@
 ;; Reference:
 ;; - J. D. Dixon, Asymptotically Fast Factorization of Integers.
 ;; References:
-;; - std.math.crypto.factorization
-module std.math.crypto.factorization.classical.dixon(dixon_factor, euler_factor)
-use std.math.nt
-use std.math.scalar as math
-use std.os (ticks)
-use std.math.crypto.factorization.classical.misc
-use std.math.crypto.factorization.classical.qs
+;; - core.math.crypto.factorization
+module core.math.crypto.factorization.classical.dixon(dixon_factor, euler_factor)
+use core.math.nt
+use core.math.scalar as math
+use core.os (ticks)
+use core.math.crypto.factorization.classical.misc
+use core.math.crypto.factorization.classical.qs
 
 fn dixon_factor(any n, int max_base=256, int max_scan=20000) any {
    "Dixon-style congruence scan over prime bases.

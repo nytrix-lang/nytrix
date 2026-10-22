@@ -1,0 +1,14 @@
+shape name_param_collision {
+  family "runtime/language"
+  generator "embedded"
+  features ["ny", "test", "name-shadowing", "parameter"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+mut x = 5
+fn square(x) { x * x }
+assert(square(7) == 49, "top-level name does not alter parameter representation")
+NY
+}

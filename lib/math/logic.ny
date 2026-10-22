@@ -1,8 +1,8 @@
 ;; Keywords: logic boolean proposition proof reasoning math
 ;; Self-hosted propositional reasoning for Nytrix.
 ;; References:
-;; - std.math
-module std.math.logic(any, all,
+;; - core.math
+module core.math.logic(any, all,
    truth, falsity, atom, neg, conj, disj, implies, iff,
    evaluate, simplify, variables, decide, valid, canonical, digest,
    certificate, check_certificate,
@@ -10,13 +10,13 @@ module std.math.logic(any, all,
    prop_implies, prop_iff, prop_is, prop_eval, prop_simplify,
    prop_variables, prop_tautology_report, prop_tautology,
    prop_canonical, prop_digest, prop_certificate, prop_check_certificate)
-use std.math
-use std.core
-use std.core.reflect
-use std.math.logic.certificate as cert
+use core.math
+use core
+use core.reflect
+use core.math.logic.certificate as cert
 
-def LOGIC_MODULE_VERSION = "std.math.logic@1"
-def LOGIC_DEPENDENCY_DIGEST = "std.core+std.math@1"
+def LOGIC_MODULE_VERSION = "core.math.logic@1"
+def LOGIC_DEPENDENCY_DIGEST = "core+core.math@1"
 
 fn any(any xs) bool {
    "Returns true if at least one element in `xs` is truthy. If `xs` is not a list, returns `bool(xs)`."
@@ -153,7 +153,11 @@ fn prop_simplify(dict proposition) dict {
 }
 
 fn _prop_names_add(list names, str name) list {
-   if names.contains(name) { return names }
+   mut i = 0
+   while i < names.len {
+      if __str_eq(names.get(i), name) { return names }
+      i += 1
+   }
    names = names.append(name)
    names
 }
@@ -176,79 +180,87 @@ fn prop_variables(dict proposition) list {
 }
 
 @noinline
-fn _prop_measure(dict proposition, dict state, int depth, int max_depth,
-   int max_nodes, int max_memory) bool {
+fn _prop_measure(dict proposition, int depth, int max_depth,
+   int nodes, int max_nodes, int memory, int max_memory) dict {
    if depth > max_depth {
-      state.set("decided", false)
-      state.set("reason", "depth limit")
-      return false
+      return {"decided": false, "reason": "depth limit",
+         "nodes": nodes, "memory": memory}
    }
-   if to_int(state.get("nodes")) >= max_nodes {
-      state.set("decided", false)
-      state.set("reason", "node limit")
-      return false
+   if nodes >= max_nodes {
+      return {"decided": false, "reason": "node limit",
+         "nodes": nodes, "memory": memory}
    }
-   if to_int(state.get("memory")) >= max_memory {
-      state.set("decided", false)
-      state.set("reason", "memory limit")
-      return false
+   if memory >= max_memory {
+      return {"decided": false, "reason": "memory limit",
+         "nodes": nodes, "memory": memory}
    }
-   state.set("nodes", to_int(state.get("nodes")) + 1)
-   state.set("memory", to_int(state.get("memory")) + 1)
+   nodes += 1
+   memory += 1
    def kind = proposition.get("kind")
    if kind == "not" {
-      return _prop_measure(proposition.get("value"), state, depth + 1,
-         max_depth, max_nodes, max_memory)
+      return _prop_measure(proposition.get("value"), depth + 1,
+         max_depth, nodes, max_nodes, memory, max_memory)
    }
    if kind == "and" || kind == "or" || kind == "implies" || kind == "iff" {
-      return _prop_measure(proposition.get("left"), state, depth + 1,
-         max_depth, max_nodes, max_memory) &&
-      _prop_measure(proposition.get("right"), state, depth + 1,
-         max_depth, max_nodes, max_memory)
+      def left = _prop_measure(proposition.get("left"), depth + 1,
+         max_depth, nodes, max_nodes, memory, max_memory)
+      if !left.get("decided") { return left }
+      return _prop_measure(proposition.get("right"), depth + 1,
+         max_depth, left.get("nodes"), max_nodes,
+         left.get("memory"), max_memory)
    }
-   true
+   {"decided": true, "reason": "complete", "nodes": nodes,
+      "memory": memory}
 }
 
 @noinline
-fn _prop_eval_bounded(dict proposition, dict environment, dict state,
-   int depth, int max_depth, int max_steps) bool {
+fn _prop_eval_bounded(dict proposition, dict environment,
+   int depth, int max_depth, int steps, int max_steps) dict {
    if depth > max_depth {
-      state.set("decided", false)
-      state.set("reason", "depth limit")
-      return false
+      return {"decided": false, "value": false,
+         "steps": steps, "reason": "depth limit"}
    }
-   if to_int(state.get("steps")) >= max_steps {
-      state.set("decided", false)
-      state.set("reason", "step limit")
-      return false
+   if steps >= max_steps {
+      return {"decided": false, "value": false,
+         "steps": steps, "reason": "step limit"}
    }
-   state.set("steps", to_int(state.get("steps")) + 1)
+   steps += 1
    def str kind = proposition.get("kind")
-   if kind == "true" { return true }
-   if kind == "false" { return false }
-   if kind == "atom" { return bool(environment.get(proposition.get("name"), false)) }
+   if kind == "true" { return {"decided": true, "value": true,
+         "steps": steps, "reason": "complete"} }
+   if kind == "false" { return {"decided": true, "value": false,
+         "steps": steps, "reason": "complete"} }
+   if kind == "atom" { return {"decided": true,
+         "value": bool(environment.get(proposition.get("name"), false)),
+         "steps": steps, "reason": "complete"} }
    if kind == "not" {
-      return !_prop_eval_bounded(proposition.get("value"), environment,
-         state, depth + 1, max_depth, max_steps)
+      def result = _prop_eval_bounded(proposition.get("value"), environment,
+         depth + 1, max_depth, steps, max_steps)
+      if !result.get("decided") { return result }
+      return {"decided": true, "value": !result.get("value"),
+         "steps": result.get("steps"), "reason": "complete"}
    }
-   def left = _prop_eval_bounded(proposition.get("left"), environment,
-      state, depth + 1, max_depth, max_steps)
-   if !state.get("decided") { return false }
-   def right = _prop_eval_bounded(proposition.get("right"), environment,
-      state, depth + 1, max_depth, max_steps)
-   if kind == "and" { return left && right }
-   if kind == "or" { return left || right }
-   if kind == "implies" { return !left || right }
-   left == right
+   def left_result = _prop_eval_bounded(proposition.get("left"), environment,
+      depth + 1, max_depth, steps, max_steps)
+   if !left_result.get("decided") { return left_result }
+   def right_result = _prop_eval_bounded(proposition.get("right"), environment,
+      depth + 1, max_depth, left_result.get("steps"), max_steps)
+   if !right_result.get("decided") { return right_result }
+   def left = left_result.get("value")
+   def right = right_result.get("value")
+   if kind == "and" { return {"decided": true, "value": left && right,
+         "steps": right_result.get("steps"), "reason": "complete"} }
+   if kind == "or" { return {"decided": true, "value": left || right,
+         "steps": right_result.get("steps"), "reason": "complete"} }
+   if kind == "implies" { return {"decided": true, "value": !left || right,
+         "steps": right_result.get("steps"), "reason": "complete"} }
+   {"decided": true, "value": left == right,
+      "steps": right_result.get("steps"), "reason": "complete"}
 }
 
 ;; Decides a bounded proposition and returns its proof report.
-fn _prop_tautology_report_impl(dict proposition, dict budget) dict {
-   def int max_variables = to_int(budget.get("max_variables"))
-   def int max_steps = to_int(budget.get("max_steps"))
-   def int max_depth = to_int(budget.get("max_depth"))
-   def int max_nodes = to_int(budget.get("max_nodes"))
-   def int max_memory = to_int(budget.get("max_memory"))
+fn _prop_tautology_report_impl(dict proposition, int max_variables,
+   int max_steps, int max_depth, int max_nodes, int max_memory) dict {
    assert(prop_is(proposition), "prop_tautology_report expects a proposition")
    if max_variables < 0 || max_variables > 20 || max_steps <= 0 ||
    max_depth <= 0 || max_nodes <= 0 || max_memory <= 0 {
@@ -279,10 +291,13 @@ fn _prop_tautology_report_impl(dict proposition, dict budget) dict {
    state.set("steps", 0)
    state.set("nodes", 0)
    state.set("memory", 0)
-   _prop_measure(proposition, state, 0, max_depth, max_nodes, max_memory)
-   if !state.get("decided") {
+   def measure = _prop_measure(proposition, 0, max_depth, 0,
+      max_nodes, 0, max_memory)
+   state.set("nodes", measure.get("nodes"))
+   state.set("memory", measure.get("memory"))
+   if !measure.get("decided") {
       return {"decided":false, "valid":false, "variables":[],
-         "reason":state.get("reason"), "counterexample":{},
+         "reason":measure.get("reason"), "counterexample":{},
          "assignments_checked":0, "assignments_required":-1,
          "steps":state.get("steps"), "nodes":state.get("nodes"),
          "memory":state.get("memory")}
@@ -309,14 +324,16 @@ fn _prop_tautology_report_impl(dict proposition, dict budget) dict {
       mut environment = {}
       mut i = 0
       while i < names.len {
-         environment = environment.set(names[i], ((mask >> i) & 1) == 1)
+         environment = environment.set(names.get(i), ((mask >> i) & 1) == 1)
          i += 1
       }
-      if !_prop_eval_bounded(proposition, environment, state, 0,
-         max_depth, max_steps) {
-         if !state.get("decided") {
+      def evaluation = _prop_eval_bounded(proposition, environment, 0,
+         max_depth, state.get("steps"), max_steps)
+      state.set("steps", evaluation.get("steps"))
+      if !evaluation.get("value") {
+         if !evaluation.get("decided") {
             return {"decided":false, "valid":false, "variables":names,
-               "reason":state.get("reason"), "counterexample":{},
+               "reason":evaluation.get("reason"), "counterexample":{},
                "assignments_checked":mask,
                "assignments_required":assignments,
                "steps":state.get("steps"), "nodes":state.get("nodes"),
@@ -346,10 +363,8 @@ fn _prop_tautology_report_impl(dict proposition, dict budget) dict {
 fn prop_tautology_report(dict proposition, int max_variables=16,
    int max_steps=1000000, int max_depth=128, int max_nodes=100000,
    int max_memory=100000) dict {
-   def budget = {"max_variables":max_variables, "max_steps":max_steps,
-      "max_depth":max_depth, "max_nodes":max_nodes,
-      "max_memory":max_memory}
-   _prop_tautology_report_impl(proposition, budget)
+   _prop_tautology_report_impl(proposition, max_variables, max_steps,
+      max_depth, max_nodes, max_memory)
 }
 
 ;; Returns true when bounded evaluation proves the proposition valid.
@@ -440,15 +455,14 @@ fn prop_check_certificate(any value) bool {
       value.get("max_steps"), value.get("max_depth"),
       value.get("max_nodes"), value.get("max_memory"))
    def claimed = value.get("decision")
-   ;; Dynamic dictionary booleans are Ny immediates (2/8), while this
-   ;; function's declared bool return uses the predicate ABI.  Normalize the
-   ;; final conjunction explicitly at the boundary.
+   ;; Dynamic dictionary booleans are Ny immediates (2/8); the typed bool
+   ;; return below keeps its predicate representation at the function ABI.
    def final_ok = checked.get("decided") && checked.get("valid") &&
    claimed.get("decided", false) && claimed.get("valid", false)
    if final_ok {
-      return 1
+      return true
    }
-   return 0
+   return false
 }
 
 ;; Compact public vocabulary. The prop_* names remain available when explicit

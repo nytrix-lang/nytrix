@@ -1,0 +1,14 @@
+shape test_provider {
+  family "runtime/modules/use/collision"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+module CollisionProviderA(
+   collision_marker
+)
+
+fn collision_marker() str { "a" }
+NY
+}

@@ -3,11 +3,11 @@
 ;; Reference:
 ;; - FIPS 186-4, Digital Signature Algorithm
 ;; References:
-;; - std.math.crypto.dlp
-;; - std.math.crypto
-module std.math.crypto.dlp.dsa(dsa_sign_hash, dsa_verify_hash, dsa_recover_key_from_nonce, dsa_recover_nonce_reuse, dsa_recover_nonce_lcg_two_sigs, dsa_nonce_polynomial_value, dsa_verify_nonce_polynomial, dsa_recover_key_from_nonce_polynomial, dsa_recover_key_from_quadratic_nonces, dsa_verify_hash_or_bounds_zero_inverse_bug, dsa_zero_inverse_bypass_signature)
-use std.math.nt
-use std.math.matrix as matrix
+;; - core.math.crypto.dlp
+;; - core.math.crypto
+module core.math.crypto.dlp.dsa(dsa_sign_hash, dsa_verify_hash, dsa_recover_key_from_nonce, dsa_recover_nonce_reuse, dsa_recover_nonce_lcg_two_sigs, dsa_nonce_polynomial_value, dsa_verify_nonce_polynomial, dsa_recover_key_from_nonce_polynomial, dsa_recover_key_from_quadratic_nonces, dsa_verify_hash_or_bounds_zero_inverse_bug, dsa_zero_inverse_bypass_signature)
+use core.math.nt
+use core.math.matrix as matrix
 
 fn dsa_sign_hash(any h, any x, any k, any p, any q, any g) any {
    "Sign integer hash h with DSA private key x and nonce k. Returns [r, s] or nil."
@@ -178,5 +178,5 @@ fn dsa_recover_key_from_quadratic_nonces(list records, any q) any {
    def recovered = dsa_recover_key_from_quadratic_nonces(records, fq)
    assert(recovered != nil && recovered[0] == fx, "dsa quadratic key")
    assert(recovered[1] == coeffs, "dsa quadratic coeffs")
-   print("✓ std.math.crypto.dlp.dsa self-test passed")
+   print("✓ core.math.crypto.dlp.dsa self-test passed")
 }

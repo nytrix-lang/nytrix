@@ -1,0 +1,19 @@
+shape ownership_rule_allowance_interval_invalid {
+  family "compiler-errors/ownership"
+  generator "error"
+  features ["error", "ownership", "negative", "allowance", "interval"]
+  template ny-compile-fail
+  expect compile_fail
+  flags "--ownership-strict"
+  expect_message "expected non-negative integer or valid [lo,hi] interval"
+  source ny <<'NY'
+use core
+
+@allowance(x, [2,1])
+fn invalid_interval(int x) int {
+  x
+}
+
+invalid_interval(5)
+NY
+}

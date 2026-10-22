@@ -3,11 +3,11 @@
 ;; References:
 ;; - XKCD #3054, "Scream Cipher": https://xkcd.com/3054/
 ;; - Unicode combining-mark rendering: https://www.unicode.org/notes/tn2/
-;; - std.math.crypto.encoding
-;; - std.math.crypto
-module std.math.crypto.encoding.scream(scream_mark_decode, scream_mark_from_codepoint, scream_extract_marks, scream_decode_marks, scream_decode_text)
-use std.core
-use std.core.str
+;; - core.math.crypto.encoding
+;; - core.math.crypto
+module core.math.crypto.encoding.scream(scream_mark_decode, scream_mark_from_codepoint, scream_extract_marks, scream_decode_marks, scream_decode_text)
+use core
+use core.str
 
 fn _scream_mark_index(int mark) int {
    if mark == 0 { return 0 }
@@ -129,7 +129,7 @@ fn scream_extract_marks(str text) list {
    marks
 }
 
-fn scream_decode_marks(list marks) str {
+fn scream_decode_marks(any marks) str {
    "Decode a list of Scream Cipher combining-mark codepoints. Use 0 for bare A."
    mut out = Builder(max(8, marks.len + 1))
    mut i = 0
@@ -210,5 +210,5 @@ fn scream_decode_text(str text) str {
    def marks = scream_extract_marks("ÁB")
    assert(marks.len == 2 && marks[0] == 0x0301 && marks[1] == 0, "Scream Cipher mark extraction")
    assert(scream_mark_decode(0x0301) == "E", "Scream Cipher mark decode")
-   print("✓ std.math.crypto.encoding.scream self-test passed")
+   print("✓ core.math.crypto.encoding.scream self-test passed")
 }

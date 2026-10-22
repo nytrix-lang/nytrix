@@ -1,0 +1,34 @@
+shape comptime_variant_pattern_rejects_value_slot {
+  family "compiler-errors/comptime"
+  generator "error"
+  features ["error", "comptime", "reflection", "splice-category", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "enum variant pattern requires a match pattern slot"
+  source ny <<'NY'
+enum Payload { Entry(int value) }
+
+comptime variants(Payload) as variant {
+   emit fn invalid_pattern_value() {
+      return variant.pattern
+   }
+}
+NY
+}
+
+shape codegen_match_rejects_other_enum {
+  family "compiler-errors/comptime"
+  generator "error"
+  features ["error", "comptime", "codegen", "enum", "negative", "diagnostic"]
+  template ny-compile-fail
+  flags_matrix "--native --run; --native-only; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_fail
+  expect_message "function argument: expected Left, got Right"
+  source ny <<'NY'
+use core.compiler.codegen (match_gen)
+enum Left { A }
+enum Right { B }
+comptime emit match_gen(Left)
+Left_variant_name(Right.B)
+NY
+}

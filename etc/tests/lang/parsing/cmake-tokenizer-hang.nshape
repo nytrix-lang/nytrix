@@ -1,0 +1,23 @@
+shape test_cmake_tokenizer_hang {
+  family "shapes/compiler/regressions/parser"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+;; NY-007: core.math.parse.syntax CMake tokenization hangs on a tiny CMakeLists.txt
+;; shaped input.
+;;
+;; Repro:
+;;   ny-test fuzz compiler-known-bugs --only NY-007
+;;
+;; Current local bad signal on 2026-06-01:
+;;   timeout after 5s while evaluating tokenize_auto.
+use core
+use core.math.parse.syntax as syn
+
+def s = "cmake_minimum_required(VERSION 3.10)\nproject(x)\n"
+def toks = syn.tokenize_auto(s, "CMakeLists.txt", list(0))
+print(len(toks))
+NY
+}

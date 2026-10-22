@@ -1,0 +1,40 @@
+shape attached_method_identity_survives_module_reexport {
+  family "runtime/modules/use"
+  generator "regression"
+  features ["ny", "test", "modules", "method", "identity", "reexport"]
+  template ny-test-case
+  flags_matrix "-no-std --native --run; -no-std --native-backend=llvm --jit --jit-engine=mcjit; -no-std --native-backend=llvm --jit --jit-engine=orc; -no-std --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+module MethodProvider(Widget, make_widget) {
+  struct Widget { int value }
+  impl Widget {
+    fn read(self widget) int { return 42 }
+  }
+  fn make_widget(int value) Widget {
+    return Widget({"value": value})
+  }
+}
+module MethodBridge(Widget, make_widget) {
+  use MethodProvider (Widget, make_widget)
+}
+module MethodConsumer(read, read_reexported) {
+  use MethodBridge (Widget)
+  fn read(Widget widget) int { return 91 }
+  fn read_reexported(Widget widget) int {
+    def read = 91
+    def MethodBridge = 92
+    def Widget = 93
+    widget.read()
+  }
+}
+use MethodBridge (Widget, make_widget)
+def widget = make_widget(42)
+assert(widget.read() == 42, "method identity survives a chained module re-export")
+assert(Widget.read(widget) == 42, "associated method survives a chained module re-export")
+assert(MethodConsumer.read(widget) == 91,
+       "nested free function remains distinct from the receiver method")
+assert(MethodConsumer.read_reexported(widget) == 42,
+       "nested consumer method dispatch survives free-function and local-value shadows")
+NY
+}

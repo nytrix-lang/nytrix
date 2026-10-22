@@ -1,0 +1,26 @@
+shape global_mutable_list_method_effects_are_known {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "global", "list", "mutation"]
+  template ny-test-case
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+mut drop_y = own([0])
+
+@effects(alloc, write)
+fn update_global(int index, int value) int {
+  drop_y.set(index, value)
+  0
+}
+
+fn read_global(int index) int {
+  drop_y.get(index, 0)
+}
+
+assert(update_global(0, 17) == 0, "global list setter returns")
+assert(read_global(0) == 17, "global list mutation is visible")
+NY
+}

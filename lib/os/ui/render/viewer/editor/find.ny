@@ -1,20 +1,20 @@
 ;; Keywords: editor find search filter linebar os ui render viewer text
 ;; Find, filter, and linebar search helpers for editor buffers.
 ;; References:
-;; - std.os.ui.render.viewer.editor.core
-module std.os.ui.render.viewer.editor.find(
+;; - core.os.ui.render.viewer.editor.core
+module core.os.ui.render.viewer.editor.find(
    state, open, close, is_open, query, set_query, error, results, count, index, current,
    replacement, set_replacement, replace_on, show_replace, hide_replace, toggle_replace,
    active_field, toggle_field, toggle_regex, toggle_case, toggle_word, regex_on, case_on, word_on,
    refresh, next, prev, replace_current, replace_all, summary, handle_key, handle_char
 )
 
-use std.core
-use std.core.str as str
-use std.core.regex as regex
-use std.math (max, min)
-use std.os.ui.window
-use std.os.ui.window.consts as key
+use core
+use core.str as str
+use core.regex as regex
+use core.math (max, min)
+use core.os.ui.window
+use core.os.ui.window.consts as key
 
 def MAX_RESULTS = 5000
 

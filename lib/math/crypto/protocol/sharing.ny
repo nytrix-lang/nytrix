@@ -4,19 +4,19 @@
 ;; - https://web.mit.edu/6.857/OldStuff/Fall03/ref/Shamir-HowToShareASecret.pdf
 ;; - https://cacr.uwaterloo.ca/hac/about/chap12.pdf
 ;; References:
-;; - std.math.crypto.protocol
-;; - std.math.crypto
-module std.math.crypto.protocol.sharing(lagrange_interpolate_mod, lagrange_recover_secret, int_to_charset, shamir_generate_shares, shamir_recover, shamir_lagrange, shamir_recovery_weights, shamir_recover_with_weights, shamir_share_forgery, shamir_verify_consistency, shamir_lagrange_weight_zero, shamir_replace_share_value, shamir_forced_share_value, share_forgery, deterministic_coefficients_recover, shamir_recover_small_coeff_secret, shamir_recover_ascii_hex_coeffs)
-use std.core
-use std.core as core
-use std.math.nt
-use std.math.bin
-use std.core.str
-use std.math.smt
-use std.math.crypto.lattice.cvp as cvpmod
-use std.math.crypto.lattice.flatter as flattermod
-use std.math.crypto.lattice.lll as lllmod
-use std.os.prim (env)
+;; - core.math.crypto.protocol
+;; - core.math.crypto
+module core.math.crypto.protocol.sharing(lagrange_interpolate_mod, lagrange_recover_secret, int_to_charset, shamir_generate_shares, shamir_recover, shamir_lagrange, shamir_recovery_weights, shamir_recover_with_weights, shamir_share_forgery, shamir_verify_consistency, shamir_lagrange_weight_zero, shamir_replace_share_value, shamir_forced_share_value, share_forgery, deterministic_coefficients_recover, shamir_recover_small_coeff_secret, shamir_recover_ascii_hex_coeffs)
+use core
+use core as core
+use core.math.nt
+use core.math.bin
+use core.str
+use core.math.smt
+use core.math.crypto.lattice.cvp as cvpmod
+use core.math.crypto.lattice.flatter as flattermod
+use core.math.crypto.lattice.lll as lllmod
+use core.os.prim (env)
 
 mut _sss_weight_cache_prime = nil
 mut _sss_weight_cache_xs = nil
@@ -333,7 +333,7 @@ fn deterministic_coefficients_recover(number p, int k, number a1, fnptr next_coe
    mut s, a = Z(y), Z(a1)
    mut i = 1
    while i < k {
-      s -= a * (Z(x) ^ Z(i))
+      s -= a * (Z(x) ** Z(i))
       a = Z(next_coeff_fn(a))
       i += 1
    }
@@ -803,7 +803,7 @@ fn _sss_ascii_hex_embedding_recover(list shares, list part, list kernel, int deg
    def eq_idx = coeff_vars + 1
    def dim = coeff_vars + 1 + degree
    def center = _sss_ascii_hex_center(byte_count)
-   def w_eq = Z(2) ^ Z(_sss_env_int("NY_SHAMIR_EQ_BITS", 16))
+   def w_eq = Z(2) ** Z(_sss_env_int("NY_SHAMIR_EQ_BITS", 16))
    def w_const = Z(11)
    mut pow256 = []
    i = 0
@@ -1036,5 +1036,5 @@ fn shamir_recover_ascii_hex_coeffs(list shares, number prime, int degree, int by
    fn next_a(number a) number { a + Z(1) }
    def rec = deterministic_coefficients_recover(Z(101), 3, Z(7), next_a, Z(2), Z(51))
    assert(rec == Z(5), "deterministic coefficients recover")
-   print("✓ std.math.crypto.protocol.sharing self-test passed")
+   print("✓ core.math.crypto.protocol.sharing self-test passed")
 }

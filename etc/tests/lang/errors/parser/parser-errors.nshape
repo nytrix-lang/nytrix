@@ -1,0 +1,266 @@
+shape parser-asm-constraint-arity {
+  family "compiler-errors/parser"
+  generator "error"
+  features [error parser negative diagnostic asm case-asm-constraint-arity]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "asm constraint/input count mismatch"
+  source ny <<'NY'
+use core
+
+def value = asm("mov $1, $0", "=r", 7, 8)
+NY
+}
+
+shape parser-asm-empty-structured {
+  family "compiler-errors/parser"
+  generator "error"
+  features [error parser negative diagnostic asm case-asm-empty-structured]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "structured asm requires an instruction"
+  source ny <<'NY'
+use core
+
+def value = asm {
+   in reg input = 7
+}
+NY
+}
+
+shape parser-asm-empty-template {
+  family "compiler-errors/parser"
+  generator "error"
+  features [error parser negative diagnostic asm case-asm-empty-template]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "asm template must not be empty"
+  source ny <<'NY'
+use core
+
+def value = asm("   ", "=r")
+NY
+}
+
+shape parser-asm-unsupported-constraint {
+  family "compiler-errors/parser"
+  generator "error"
+  features [error parser negative diagnostic asm case-asm-unsupported-constraint]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "unsupported asm constraint"
+  source ny <<'NY'
+use core
+
+def value = asm("nop", "=z")
+NY
+}
+
+shape parser-attribute-needs-function {
+  family "compiler-errors/parser"
+  generator "error"
+  features ["error", "parser", "negative", "diagnostic", "case-attribute-needs-function"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "function attributes must be followed by 'fn'"
+  source ny <<'NY'
+use core
+
+@inline
+print(1)
+NY
+}
+
+shape parser-function-missing-body-newline {
+  family "compiler-errors/parser"
+  generator "error"
+  features ["error", "parser", "negative", "diagnostic", "case-function-missing-body-newline"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "expected function body"
+  source ny <<'NY'
+use core
+
+fn main()
+main()
+NY
+}
+
+shape parser-lexer-c-comment-stops {
+  family "compiler-errors/parser"
+  generator "error"
+  features ["error", "parser", "negative", "diagnostic", "case-lexer-c-comment-stops"]
+  template ny-compile-fail
+  expect compile_fail
+  source ny <<'NY'
+use core
+
+// C-style comments must remain a hard lexer error, not a warning.
+
+fn main() { 0 }
+main()
+NY
+}
+
+shape parser-lexer-invalid-byte-stops {
+  family "compiler-errors/parser"
+  generator "error"
+  features ["error", "parser", "negative", "diagnostic", "case-lexer-invalid-byte-stops"]
+  template ny-compile-fail
+  expect compile_fail
+  source ny <<'NY'
+use core
+
+mut i = 0
+while (i < 8)é
+
+fn main() { 0 }
+main()
+NY
+}
+
+shape parser-match-recovery-extra-paren {
+  family "compiler-errors/parser"
+  generator "error"
+  features ["error", "parser", "negative", "diagnostic", "case-match-recovery-extra-paren"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "expected '->' or block after case patterns"
+  source ny <<'NY'
+use core
+
+fn main() { 0 match}
+mavvvvvvvv)
+vvvvvvvvvvvvvvvvvvinvv
+NY
+}
+
+shape parser-missing-brace-semicolon {
+  family "compiler-errors/parser"
+  generator "error"
+  features ["error", "parser", "negative", "diagnostic", "case-missing-brace-semicolon"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "';' is a comment in Nytrix"
+  source ny <<'NY'
+use core
+
+fn f() int {
+  1; 2 }
+NY
+}
+
+shape parser-missing-brace {
+  family "compiler-errors/parser"
+  generator "error"
+  features ["error", "parser", "negative", "diagnostic", "case-missing-brace"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "missing '}'"
+  source ny <<'NY'
+use core
+
+if true {
+   print(1)
+NY
+}
+
+shape parser-module-block-extra-brace {
+  family "compiler-errors/parser"
+  generator "error"
+  features ["error", "parser", "negative", "diagnostic", "case-module-block-extra-brace"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "unexpected token '}'"
+  source ny <<'NY'
+use core
+
+{module 0 }
+main() }
+main()
+NY
+}
+
+shape parser-torture-errors {
+  family "compiler-errors/parser"
+  generator "error"
+  features ["error", "parser", "negative", "diagnostic", "case-torture-errors"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "missing '}' before end of file"
+  source ny <<'NY'
+use core
+
+fn bad_inference(x) {
+   ;; This should challenge the HM-inference if types are contradictory
+   if x > 0 {
+      return x + 1
+   } else {
+      return "not a number"
+   }
+}
+
+fn deeply_nested() {
+   ;; Torture the parser with deep nesting
+   ((((((((((((((((((((((((((((((((((((((((((((((((((42))))))))))))))))))))))))))))))))))))))))))))))))))
+}
+
+fn mismatched_braces() {
+   if true {
+      {
+         {
+            print("missing braces")
+         }
+         ;; Missing one here
+      }
+   }
+   fn main() {
+      bad_inference(10)
+      deeply_nested()
+      mismatched_braces()
+   }
+NY
+}
+
+shape parser-use-dot-stops {
+  family "compiler-errors/parser"
+  generator "error"
+  features ["error", "parser", "negative", "diagnostic", "case-use-dot-stops"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "use expects module identifier or string path"
+  source ny <<'NY'
+use .
+
+fn main() { 0 }
+main()
+NY
+}
+
+shape parser-use-trailing-dot-stops {
+  family "compiler-errors/parser"
+  generator "error"
+  features ["error", "parser", "negative", "diagnostic", "case-use-trailing-dot-stops"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "expected identifier after '.'"
+  source ny <<'NY'
+use core.
+
+fn main() { 0 }
+main()
+NY
+}

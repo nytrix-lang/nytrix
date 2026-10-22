@@ -1,0 +1,56 @@
+shape test_list_type_name_stability {
+  family "runtime/values"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+def l0 = [1]
+def l1 = [l0]
+def l2 = [l1]
+def l3 = [l2]
+def l4 = [l3]
+def l5 = [l4]
+def l6 = [l5]
+def l7 = [l6]
+def l8 = [l7]
+def l9 = [l8]
+def l10 = [l9]
+def l11 = [l10]
+def l12 = [l11]
+def l13 = [l12]
+def l14 = [l13]
+def l15 = [l14]
+def l16 = [l15]
+def l17 = [l16]
+def l18 = [l17]
+def l19 = [l18]
+def l20 = [l19]
+def l21 = [l20]
+def l22 = [l21]
+def l23 = [l22]
+def l24 = [l23]
+def l25 = [l24]
+def l26 = [l25]
+def l27 = [l26]
+def l28 = [l27]
+def l29 = [l28]
+def l30 = [l29]
+def l31 = [l30]
+def l32 = [l31]
+def l33 = [l32]
+def l34 = [l33]
+def l35 = [l34]
+def l36 = [l35]
+def l37 = [l36]
+def l38 = [l37]
+def l39 = [l38]
+mut l40 = [l39]
+;; Keep the final chain mutable so this fixture isolates nested type-name
+;; stability; the immutable-global call-result representation is covered
+;; separately by the global scalar ABI fixtures.
+assert(l40[0][0][0][0][0][0][0][0][0][0][0][0][0][0][0][0][0][0][0][0][0][0][0][0][0][0][0][0][0][0][0][0][0][0][0][0][0][0][0][0][0] == 1, "deep typed-list indexing keeps inferred type names stable")
+NY
+}

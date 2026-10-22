@@ -3,19 +3,19 @@
 ;; - https://www.rfc-editor.org/rfc/rfc4648
 ;; - https://cacr.uwaterloo.ca/hac/about/chap1.pdf
 ;; References:
-;; - std.math.crypto.encoding
-;; - std.math.crypto
-module std.math.crypto.encoding.radix(digit_value, parse_radix_int, parse_octal_int,
+;; - core.math.crypto.encoding
+;; - core.math.crypto
+module core.math.crypto.encoding.radix(digit_value, parse_radix_int, parse_octal_int,
    decimal_chunks_to_text, octal_chunks_to_text, keyed_alpha_decode,
    base_n_encode_int, base_n_decode_int, base_n_encode_bytes, base_n_decode_bytes,
    base36_encode_int, base36_decode_int, base62_encode_int, base62_decode_int,
    base62_encode_bytes, base62_decode_bytes, base45_decode, ascii85_decode,
    base92_decode, base65536_decode, base58_encode_bytes, base58_decode_str,
    base58check_encode_bytes, base58check_decode_str, base91_pair_decode)
-use std.core
-use std.core.str
-use std.math.nt
-use std.math.crypto.hash as h
+use core
+use core.str
+use core.math.nt
+use core.math.crypto.hash as h
 
 def BASE58_CHARS = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 def BASE36_CHARS = "0123456789abcdefghijklmnopqrstuvwxyz"
@@ -280,7 +280,7 @@ fn base45_decode(str s) str {
    _radix_finish_builder(out)
 }
 
-fn _ascii85_append_value(list out, int v, int take=4) list {
+fn _ascii85_append_value(ptr out, int v, int take=4) ptr {
    assert(v >= 0, "ascii85_decode: negative value")
    mut b = out
    if take >= 1 { b = builder_append_byte(b, (v >> 24) & 255) }
@@ -339,7 +339,7 @@ fn _base92_value(int c) int {
    }
 }
 
-fn _radix_finish_builder(list out) str {
+fn _radix_finish_builder(ptr out) str {
    def text = builder_to_str(out)
    builder_free(out)
    text
@@ -644,5 +644,5 @@ fn base91_pair_decode(str s, str alphabet="") list {
    assert(base62_decode_bytes(encoded) == payload, "base62 bytes round trip")
    assert(base_n_encode_int(255, "01") == "11111111", "base-n binary encode")
    assert(base_n_decode_int("11111111", "01") == 255, "base-n binary decode")
-   print("✓ std.math.crypto.encoding.radix self-test passed")
+   print("✓ core.math.crypto.encoding.radix self-test passed")
 }

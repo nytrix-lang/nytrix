@@ -1,0 +1,18 @@
+shape aarch64_scalar_select {
+  family "codegen/abi/calls"
+  generator "embedded"
+  features ["ny", "test", "abi", "aarch64", "qemu"]
+  flags "--native-backend=aarch64 -O3 -emit-only -o /tmp/nytrix-select-aarch64.o"
+  expect object_link_run_i64_42
+  source ny <<'NY'
+use core
+@noinline
+fn choose(int condition, int yes, int no) int {
+  condition ? yes : no
+}
+assert(choose(0, 17, 42) == 42, "select chooses false operand")
+assert(choose(1, 42, -17) == 42, "select chooses true operand")
+assert(choose(-7, -42, 17) == -42, "select accepts negative nonzero condition")
+42
+NY
+}

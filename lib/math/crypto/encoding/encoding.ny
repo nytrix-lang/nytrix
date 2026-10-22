@@ -3,16 +3,16 @@
 ;; Reference:
 ;; - https://www.rfc-editor.org/rfc/rfc7468
 ;; References:
-;; - std.math.crypto.encoding
-;; - std.math.crypto
-module std.math.crypto.encoding.encoding(asn1_parse, asn1_decode_length, asn1_to_json, asn1_get_integer, asn1_get_sequence, asn1_integers, pem_decode, hex_encode, hex_decode, base64_encode, base64_decode)
-use std.core
-use std.math.bin as bin
-use std.math.nt
-use std.core.str
-use std.math.crypto.encoding.xor
-use std.math.crypto.encoding.radix
-use std.math.crypto.encoding.uu
+;; - core.math.crypto.encoding
+;; - core.math.crypto
+module core.math.crypto.encoding.encoding(asn1_parse, asn1_decode_length, asn1_to_json, asn1_get_integer, asn1_get_sequence, asn1_integers, pem_decode, hex_encode, hex_decode, base64_encode, base64_decode)
+use core
+use core.math.bin as bin
+use core.math.nt
+use core.str
+use core.math.crypto.encoding.xor
+use core.math.crypto.encoding.radix
+use core.math.crypto.encoding.uu
 
 layout shape Asn1Node derive(load) pack(8){
    int tag = 0,
@@ -29,9 +29,9 @@ fn base64_decode(str s) list {
    s.base64_decode
 }
 
-fn hex_encode(list b) str {
+fn hex_encode(list<int> b) str {
    "Encode bytes list to hex string."
-   b.hex
+   bin.bytes_to_hex(b)
 }
 
 fn hex_decode(str s) list {
@@ -77,7 +77,7 @@ fn asn1_parse(list data, int offset=0, any limit=nil) list {
    results
 }
 
-fn _asn1_append_value(list out, any v, str pad, int indent) list {
+fn _asn1_append_value(ptr out, any v, str pad, int indent) ptr {
    if is_list(v) { return builder_append(out, asn1_to_json(v, indent + 1)) }
    if is_str(v) && v.len > 0 {
       out = builder_append(out, pad)
@@ -88,7 +88,7 @@ fn _asn1_append_value(list out, any v, str pad, int indent) list {
    out
 }
 
-fn _asn1_append_node(list out, *Asn1Node child, any value, str pad, int indent) list {
+fn _asn1_append_node(ptr out, *Asn1Node child, any value, str pad, int indent) ptr {
    out = builder_append(out, pad)
    out = builder_append(out, "tag=0x")
    out = builder_append(out, [child.tag].hex)
@@ -215,5 +215,5 @@ fn pem_decode(str s) list {
    def pem = "-----BEGIN TEST-----\nQUJD\n-----END TEST-----\n"
    assert(pem_decode(pem) == [65, 66, 67], "pem decode")
    assert(uu_decode_line("#06)C") == "Abc", "uu decode")
-   print("✓ std.math.crypto.encoding.encoding self-test passed")
+   print("✓ core.math.crypto.encoding.encoding self-test passed")
 }

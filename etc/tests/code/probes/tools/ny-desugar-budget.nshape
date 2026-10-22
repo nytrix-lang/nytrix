@@ -1,0 +1,13 @@
+shape ny_desugar_container_budget {
+  family "compiler-errors/frontend"
+  generator "error"
+  features ["error", "frontend", "desugar", "budget", "negative"]
+  template ny-compile-fail
+  flags "-no-std --ny-desugar=ny"
+  expect compile_fail
+  expect_message "64-container budget"
+
+  source ny <<'NY'
+def nested = [[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[0]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]
+NY
+}

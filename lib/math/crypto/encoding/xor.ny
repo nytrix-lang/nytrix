@@ -4,19 +4,19 @@
 ;; - https://netlab.cs.ucla.edu/wiki/files/shannon1949.pdf
 ;; - https://cacr.uwaterloo.ca/hac/about/chap1.pdf
 ;; References:
-;; - std.math.crypto.encoding
-;; - std.math.crypto
-module std.math.crypto.encoding.xor(xor_with_single_byte, xor_with_repeating_key, xor_bytes_hex, single_byte_xor_bruteforce, english_score, repeating_key_xor_keylength, repeating_key_xor_crack, multi_text_xor_keystream, hamming_distance, crib_drag, xor_two_ciphertexts, repeating_xor_key_from_prefix)
-use std.core
-use std.math.bin
-use std.core.str
+;; - core.math.crypto.encoding
+;; - core.math.crypto
+module core.math.crypto.encoding.xor(xor_with_single_byte, xor_with_repeating_key, xor_bytes_hex, single_byte_xor_bruteforce, english_score, repeating_key_xor_keylength, repeating_key_xor_crack, multi_text_xor_keystream, hamming_distance, crib_drag, xor_two_ciphertexts, repeating_xor_key_from_prefix)
+use core
+use core.math.bin
+use core.str
 
 fn _xor_overlap(list a, list b) list {
    def n = a.len < b.len ? a.len : b.len
    mut out = list(n)
    mut i = 0
    while i < n {
-      out[i] = a[i] ^^ b[i]
+      out[i] = a[i] ^ b[i]
       i += 1
    }
    store64(out, n, 0)
@@ -29,7 +29,7 @@ fn xor_with_single_byte(list data, int key_byte) list {
    mut out = list(n)
    mut i = 0
    while i < n {
-      out[i] = data[i] ^^ key_byte
+      out[i] = data[i] ^ key_byte
       i += 1
    }
    store64(out, n, 0)
@@ -47,7 +47,7 @@ fn xor_with_repeating_key(list data, list key) list {
    mut out = list(n)
    mut i = 0
    while i < n {
-      out[i] = data[i] ^^ key[i % key_len]
+      out[i] = data[i] ^ key[i % key_len]
       i += 1
    }
    store64(out, n, 0)
@@ -60,7 +60,7 @@ fn repeating_xor_key_from_prefix(list ciphertext, list known_prefix) list {
    mut key = list(n)
    mut i = 0
    while i < n {
-      key[i] = ciphertext[i] ^^ known_prefix[i]
+      key[i] = ciphertext[i] ^ known_prefix[i]
       i += 1
    }
    store64(key, n, 0)
@@ -79,7 +79,7 @@ fn hamming_distance(list a, list b) int {
    mut dist = 0
    mut i = 0
    while i < n {
-      dist += bit_count(a[i] ^^ b[i])
+      dist += bit_count(a[i] ^ b[i])
       i += 1
    }
    dist
@@ -117,7 +117,7 @@ fn _english_score_xor_key(list data, int key_byte) int {
    mut score = 0
    mut i = 0
    while i < data.len {
-      score += _english_byte_score(int(data[i]) ^^ key_byte)
+      score += _english_byte_score(int(data[i]) ^ key_byte)
       i += 1
    }
    score
@@ -127,7 +127,7 @@ fn _english_score_xor_key_strided(list data, int start, int stride, int key_byte
    mut score = 0
    mut i = start
    while i < data.len {
-      score += _english_byte_score(int(data[i]) ^^ key_byte)
+      score += _english_byte_score(int(data[i]) ^ key_byte)
       i += stride
    }
    score
@@ -197,7 +197,7 @@ fn repeating_key_xor_keylength(list ct, int min_len=2, int max_len=40) int {
       while bi + 1 < n_blocks {
          mut j = 0
          while j < ks {
-            total_dist += bit_count(ct[bi * ks + j] ^^ ct[(bi + 1) * ks + j])
+            total_dist += bit_count(ct[bi * ks + j] ^ ct[(bi + 1) * ks + j])
             j += 1
          }
          pairs += 1
@@ -281,7 +281,7 @@ fn crib_drag(list ciphertext, list crib) list {
       mut ks_bytes = list(cr_len)
       mut i = 0
       while i < cr_len {
-         ks_bytes[i] = ct[pos + i] ^^ crib[i]
+         ks_bytes[i] = ct[pos + i] ^ crib[i]
          i += 1
       }
       store64(ks_bytes, cr_len, 0)
@@ -320,5 +320,5 @@ fn crib_drag(list ciphertext, list crib) list {
    def multi = [[1, 2, 3], [4, 5, 6]]
    def ks = multi_text_xor_keystream(multi)
    assert(ks.len == 3, "multi_text keystream length")
-   print("✓ std.math.crypto.encoding.xor self-test passed")
+   print("✓ core.math.crypto.encoding.xor self-test passed")
 }

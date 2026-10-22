@@ -1,14 +1,15 @@
 ;; Keywords: font truetype os parse ui
 ;; FreeType-backed TrueType font loading, metrics, glyph rasterization, and atlas data.
 ;; References:
-;; - std.os.ui.font
-;; - std.os
-module std.os.ui.font.truetype(load, load_path, unload, shutdown, available, scale_for_pixel_height, scale_for_em, get_vmetrics, get_hmetrics, get_kern, get_glyph_index, get_glyph_bitmap, get_glyph_box)
-use std.core
-use std.core.mem
-use std.os (file_exists)
-use std.os.ffi (dlopen_checked, dlsym, RTLD_NOW, RTLD_GLOBAL, call1, call2, call3, call4, call5)
-use std.os.path as ospath
+;; - core.os.ui.font
+;; - core.os
+module core.os.ui.font.truetype(load, load_path, unload, shutdown, available, scale_for_pixel_height, scale_for_em, get_vmetrics, get_hmetrics, get_kern, get_glyph_index, get_glyph_bitmap, get_glyph_box)
+use core
+use core.mem
+use core.os (file_exists)
+use core.os.ffi (dlopen_checked, dlsym, RTLD_NOW, RTLD_GLOBAL)
+use core.os.ffi as calls
+use core.os.path as ospath
 
 extern {
    fn _ft_init(ptr lib_p) i32 as "FT_Init_FreeType"
@@ -213,7 +214,7 @@ fn unload(any info) any {
    if !is_dict(info) { return 0 }
    def face = info.get("face", 0)
    if face {
-      if _FT_ptr_done_face { call1(_FT_ptr_done_face, _raw_ptr(face)) }
+      if _FT_ptr_done_face { calls.any1(_FT_ptr_done_face, _raw_ptr(face)) }
       else { _ft_done_face(_raw_ptr(face)) }
    }
    def ps_ptr = info.get("ps_ptr", 0)
@@ -226,7 +227,7 @@ fn unload(any info) any {
 fn shutdown() any {
    "Releases the shared FreeType library instance after all faces are unloaded."
    if _FT_library {
-      if _FT_ptr_done_free_type { call1(_FT_ptr_done_free_type, _raw_ptr(_FT_library)) }
+      if _FT_ptr_done_free_type { calls.any1(_FT_ptr_done_free_type, _raw_ptr(_FT_library)) }
       else { _ft_done_free_type(_raw_ptr(_FT_library)) }
    }
    _FT_library = 0
@@ -302,8 +303,9 @@ fn get_vmetrics(dict info) list {
    ]
 }
 
-fn get_glyph_index(dict info, int cp) int {
+fn get_glyph_index(any info, int cp) int {
    "Returns the glyph index for codepoint `cp`."
+   if !is_dict(info) { return 0 }
    def face = info.get("face", 0)
    if !face { return 0 }
    _ft_get_char_index(_raw_ptr(face), cp)
@@ -353,8 +355,9 @@ fn get_glyph_box(dict info, int gi) any {
    [float(bl_s), float(bt_s - rows), float(bl_s + width), float(bt_s)]
 }
 
-fn get_kern(dict info, int g1, int g2, int px=0) float {
+fn get_kern(any info, int g1, int g2, int px=0) float {
    "Returns horizontal kerning between glyphs `g1` and `g2` at pixel size `px`."
+   if !is_dict(info) { return 0.0 }
    def face = info.get("face", 0)
    if !face { return 0 }
    if px > 0 { _set_size(info, px) }

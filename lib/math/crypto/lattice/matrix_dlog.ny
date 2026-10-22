@@ -4,12 +4,12 @@
 ;; extension-field lifting is intentionally not hidden here; this module exposes
 ;; the practical brute path.
 ;; References:
-;; - std.math.crypto.lattice
-;; - std.math.crypto
-module std.math.crypto.lattice.matrix_dlog(matrix_mod, matrix_mul_mod, matrix_pow_mod, matrix_dlog_brute)
-use std.core
-use std.math.matrix as matrix
-use std.math.nt
+;; - core.math.crypto.lattice
+;; - core.math.crypto
+module core.math.crypto.lattice.matrix_dlog(matrix_mod, matrix_mul_mod, matrix_pow_mod, matrix_dlog_brute)
+use core
+use core.math.matrix as matrix
+use core.math.nt
 
 fn matrix_mod(any A, any p) any {
    "Reduce every matrix entry modulo p."
@@ -47,5 +47,5 @@ fn matrix_dlog_brute(any A, any B, any p, any order) any {
    def A = matrix.Matrix([[1, 1], [0, 1]])
    def B = matrix_pow_mod(A, 3, 5)
    assert(matrix_dlog_brute(A, B, 5, 8) == 3, "matrix dlog brute")
-   print("✓ std.math.crypto.lattice.matrix_dlog self-test passed")
+   print("✓ core.math.crypto.lattice.matrix_dlog self-test passed")
 }

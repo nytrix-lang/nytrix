@@ -4,10 +4,10 @@
 ;; - https://people.csail.mit.edu/rivest/Rsapaper.pdf
 ;; - https://crypto.stanford.edu/~dabo/pubs/papers/RSA-survey.pdf
 ;; References:
-;; - std.math.crypto.rsa
-;; - std.math.crypto
-module std.math.crypto.rsa.known_d(known_d_factorize)
-use std.math.nt
+;; - core.math.crypto.rsa
+;; - core.math.crypto
+module core.math.crypto.rsa.known_d(known_d_factorize)
+use core.math.nt
 
 fn _known_d_factor_pair_if_valid(any n, any e, any d, any p) any {
    def nn = Z(n)

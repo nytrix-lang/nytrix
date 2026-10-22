@@ -1,0 +1,18 @@
+shape comptime_field_parameter_splice_rejects_wrong_type {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "comptime", "reflection", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "expected int"
+  source ny <<'NY'
+use core.compiler.codegen (new_fields_for)
+
+layout SpliceTypedRecord {
+   int count
+}
+
+comptime emit new_fields_for(SpliceTypedRecord)
+SpliceTypedRecord_new_fields("not an integer")
+NY
+}

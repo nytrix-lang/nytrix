@@ -1,0 +1,63 @@
+shape test_list_dynamic_get_abi {
+  family "runtime/values"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+fn first_in_dynamic_list(any s) any {
+   def xs = [s, 0, 0, "", s.len, 0]
+   return xs.get(0)
+}
+
+fn indexed_in_dynamic_list(any s, int index) any {
+   def xs = [s, 17, false, "tail"]
+   return xs.get(index)
+}
+
+fn indexed_after_dynamic_append(int index) any {
+   mut list xs = [11]
+   xs = xs.append(17)
+   return xs.get(index)
+}
+
+fn return_false() bool { false }
+fn return_true() bool { true }
+
+fn false_call_from_dynamic_list() bool {
+   def values = [return_false()]
+   if values.get(0, false) { return false }
+   return true
+}
+
+fn true_call_from_dynamic_list() bool {
+   def values = [return_true()]
+   if values.get(0, false) { return true }
+   return false
+}
+
+fn raw_any_index(any xs, int index) any {
+   __tbuf_index_any_raw(xs, index)
+}
+
+assert(first_in_dynamic_list("7") == "7",
+   "list.get preserves a string stored through an any parameter")
+assert(indexed_in_dynamic_list("7", 1) == 17,
+   "list.get normalizes an odd index once")
+assert(indexed_in_dynamic_list("7", 2) == false,
+   "list.get preserves dynamic boolean elements")
+assert(indexed_in_dynamic_list("7", 9) == 0,
+   "list.get returns its default for an out-of-range index")
+assert(indexed_after_dynamic_append(1) == 17,
+   "list.get decodes a raw index after a dynamic-list append")
+assert(false_call_from_dynamic_list(),
+   "list.get preserves false returned by a function")
+assert(true_call_from_dynamic_list(),
+   "list.get preserves true returned by a function")
+assert(raw_any_index([11, 17], 1) == 17,
+   "raw tbuf accessor result retains its declared tagged-value representation")
+NY
+}

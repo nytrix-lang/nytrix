@@ -1,0 +1,13 @@
+shape stdlib_ascii85_owned_builder {
+  family "runtime/modules/use"
+  generator "regression"
+  features [module import ascii85 builder ownership]
+  template ny-test-case
+  flags_matrix "--native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core.math.crypto.encoding.radix as radix
+assert(radix.ascii85_decode("87cURD_*#TDfTZ)+T") == "Hello, world!", "ascii85 builder ownership transfer")
+0
+NY
+}

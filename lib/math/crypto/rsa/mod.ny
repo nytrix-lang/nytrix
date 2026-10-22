@@ -3,15 +3,15 @@
 ;; References:
 ;; - https://people.csail.mit.edu/rivest/Rsapaper.pdf
 ;; - https://crypto.stanford.edu/~dabo/pubs/papers/RSA-survey.pdf
-module std.math.crypto.rsa(op, wiener, extended_wiener, boneh_durfee, hastad, low_exponent, common_modulus, common_prime, related_message, non_coprime, known_d, fixed_points, multiprime, partial, repeated_roots, crt_fault, d_fault, known_crt_exponents, cca_malleability, stereotyped, lsb_oracle, bleichenbacher, manger, rsa_solve, signature, pkcs1_v15, recover_modulus, desmedt_odlyzko, partial_key_exposure, cherkaoui_semmouni, nitaj_crt_rsa, mersenne_exponent, key, lcg_rng, rsa_lcg_factor_power2, low_exp_attack_report, common_modulus_attack_report, hastad_attack_report)
-use std.math.nt
-use std.math.crypto.rsa.op
-use std.math.crypto.rsa.wiener
-use std.math.crypto.rsa.low_exponent
-use std.math.crypto.rsa.common_modulus
-use std.math.crypto.rsa.lcg_rng as lcg_rng_mod
-use std.math.crypto.factorization.fermat
-use std.math.crypto.factorization.pollard
+module core.math.crypto.rsa(op, wiener, extended_wiener, boneh_durfee, hastad, low_exponent, common_modulus, common_prime, related_message, non_coprime, known_d, fixed_points, multiprime, partial, repeated_roots, crt_fault, d_fault, known_crt_exponents, cca_malleability, stereotyped, lsb_oracle, bleichenbacher, manger, rsa_solve, signature, pkcs1_v15, recover_modulus, desmedt_odlyzko, partial_key_exposure, cherkaoui_semmouni, nitaj_crt_rsa, mersenne_exponent, key, lcg_rng, rsa_lcg_factor_power2, low_exp_attack_report, common_modulus_attack_report, hastad_attack_report)
+use core.math.nt
+use core.math.crypto.rsa.op
+use core.math.crypto.rsa.wiener
+use core.math.crypto.rsa.low_exponent
+use core.math.crypto.rsa.common_modulus
+use core.math.crypto.rsa.lcg_rng as lcg_rng_mod
+use core.math.crypto.factorization.fermat
+use core.math.crypto.factorization.pollard
 
 fn rsa_lcg_factor_power2(any n, any mult, any inc, int modulus_bits=512, int max_gap=4096) list {
    "Recover RSA factors when primes are consecutive LCG prime states modulo 2^modulus_bits."

@@ -1,6 +1,9 @@
-;; Printable-string scanner shared by reverse-engineering analysis modules.
-module std.os.rev.strings(scan)
-use std.core
+;; Keywords: reverse engineering binary strings printable scanner
+;; Scans binary data for printable ASCII strings with stable offsets.
+;; References:
+;; - core
+module core.os.rev.strings(scan)
+use core
 
 fn scan(any bytes, int min_len=4, int limit=512) list {
    "Returns printable ASCII string records from bytes with stable offsets."
@@ -32,5 +35,5 @@ fn scan(any bytes, int min_len=4, int limit=512) list {
 #main {
    def found = scan("\x00hello\x00nytrix\x00", 4)
    assert(found.len == 2 && found.get(0).get("value") == "hello" && found.get(1).get("offset") == 7, "reverse string scanner")
-   print("✓ std.os.rev.strings self-test passed")
+   print("✓ core.os.rev.strings self-test passed")
 }

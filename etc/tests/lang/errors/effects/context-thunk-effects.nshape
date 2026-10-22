@@ -1,0 +1,24 @@
+shape context_thunk_effects_cannot_be_omitted_from_contract {
+  family "typing/effects"
+  generator "regression"
+  features ["ny" "test" "typing" "effects" "higher-order" "callback" "negative"]
+  template ny-test-case
+  flags_matrix "--effect-require-known"
+  expect compile_fail
+  expect_message "declared @effects(none) but inferred effects=io|alloc|read|write"
+  source ny <<'NY'
+use core.alloc as mem
+
+@effects(none)
+fn missing_thunk_io_effect() int {
+  def ctx = [[1, 1, 1, 0, "test"]]
+  mem.with_context(ctx, fn() {
+    print("callback effect must be included\n")
+    42
+  })
+}
+
+missing_thunk_io_effect()
+print("unreachable")
+NY
+}

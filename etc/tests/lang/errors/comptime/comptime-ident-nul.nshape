@@ -1,0 +1,15 @@
+shape comptime_identifier_rejects_nul {
+  family "compiler-errors/comptime"
+  generator "error"
+  features ["error", "comptime", "ident", "nul", "negative"]
+  template ny-compile-fail
+  flags_matrix "--native --run; --native-only; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_fail
+  expect_message "identifier fragment contains a NUL byte"
+  source ny <<'NY'
+comptime template named(name) {
+   fn ${name}() int { return 1 }
+}
+comptime emit named(ident("safe\0captured"))
+NY
+}

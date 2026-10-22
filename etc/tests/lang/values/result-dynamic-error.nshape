@@ -1,0 +1,25 @@
+shape test_result_dynamic_error_payloads {
+  family "runtime/values"
+  generator "embedded"
+  features ["ny", "test", "result", "dynamic-abi"]
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+fn mixed_error_result(bool text_error) Result<int, any> {
+   if text_error { return err("text failure") }
+   return err(17)
+}
+
+match mixed_error_result(true) {
+   err(payload) -> { assert(payload == "text failure", "dynamic string error payload") }
+   ok(_) -> { assert(false, "expected string error") }
+}
+match mixed_error_result(false) {
+   err(payload) -> { assert(payload == 17, "dynamic integer error payload") }
+   ok(_) -> { assert(false, "expected integer error") }
+}
+NY
+}

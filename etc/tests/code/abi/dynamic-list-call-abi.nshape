@@ -1,0 +1,55 @@
+shape dynamic_list_call_abi {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "native", "llvm", "dynamic-access", "container-abi"]
+  template ny-test-case
+  flags_matrix "--native-only; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+fn _target_case(any entries, int target) int {
+   mut i = 0
+   while i < entries.len {
+      if int(entries[i].get("target", 0)) == target {
+         return int(entries[i].get("index", i))
+      }
+      i += 1
+   }
+   -1
+}
+
+fn _case_model(dict bin, list rows, dict switch_row, dict entry,
+               any entries, list entry_indices,
+               list dispatcher_addrs) dict {
+   {"state": int(entry.get("index", -1)),
+    "target_state": _target_case(entries, 300),
+    "entry_count": entries.len,
+    "index_count": entry_indices.len,
+    "dispatcher_count": dispatcher_addrs.len,
+    "row_count": rows.len,
+    "has_binary": bin.len >= 0,
+    "has_switch": switch_row.len >= 0}
+}
+
+fn _states_from_table(dict bin, list rows, dict switch_row, dict table) dict {
+   def entries = table.get("entries", [])
+   def entry_indices = [2, 4]
+   def dispatcher_addrs = [100, 200, 300]
+   if entries.len == 0 { return {} }
+   _case_model(bin, rows, switch_row, entries[0], entries,
+               entry_indices, dispatcher_addrs)
+}
+
+def result = _states_from_table({}, [1, 2], {},
+   {"entries": [{"target": 200, "index": 7}, {"target": 300, "index": 9}]})
+assert(int(result.get("state", -1)) == 7, "entry value survives mixed ABI call")
+assert(int(result.get("target_state", -1)) == 9, "dynamic entries are indexed")
+assert(int(result.get("entry_count", 0)) == 2, "dynamic list length")
+assert(int(result.get("index_count", 0)) == 2, "typed index list length")
+assert(int(result.get("dispatcher_count", 0)) == 3, "typed dispatcher list length")
+assert(int(result.get("row_count", 0)) == 2, "typed rows list length")
+assert(result.get("has_binary", false) && result.get("has_switch", false),
+       "typed dictionary arguments survive")
+NY
+}

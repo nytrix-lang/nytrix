@@ -1,0 +1,20 @@
+shape comptime_io_boundary_preserves_runtime_main {
+  family "runtime/compiler"
+  generator "regression"
+  features ["ny" "test" "comptime" "io"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+def answer = comptime {
+  def unused = fn() {
+    print("UNUSED_LAMBDA_MUST_NOT_EXECUTE")
+  }
+  return 7
+}
+#main {
+  assert(answer == 7, "uninvoked callback IO does not execute in comptime")
+  print("COMPTIME_IO_BOUNDARY_OK")
+}
+NY
+}

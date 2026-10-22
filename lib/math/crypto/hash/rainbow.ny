@@ -5,11 +5,11 @@
 ;; - https://www.rfc-editor.org/rfc/rfc1321
 ;; - https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.180-4.pdf
 ;; References:
-;; - std.math.crypto.hash
-;; - std.math.crypto
-module std.math.crypto.hash.rainbow(rainbow_chain, build_rainbow_table, rainbow_lookup, build_dict_table, dict_crack)
-use std.core
-use std.math.nt
+;; - core.math.crypto.hash
+;; - core.math.crypto
+module core.math.crypto.hash.rainbow(rainbow_chain, build_rainbow_table, rainbow_lookup, build_dict_table, dict_crack)
+use core
+use core.math.nt
 
 fn rainbow_chain(any start, fnptr hash_fn, fnptr reduce_fn, int chain_len) list {
    "Build one rainbow chain of length chain_len from start.

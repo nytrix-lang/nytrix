@@ -1,0 +1,26 @@
+shape mutable_aggregate_content_predicate_survives_nonnegative_append {
+  family "runtime/language"
+  generator "regression"
+  features [ny test typing refinement mutable aggregate content append positive]
+  template ny-test-case
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+refine EqualGap = list where(items) { items[0] == items[1] + 5 }
+fn require_equal_gap(EqualGap items) int { return items.len }
+
+fn checked_after_append() int {
+  mut list<int> items = [10, 5]
+  if EqualGap(items) {
+    items = append(items, 99)
+    return require_equal_gap(items)
+  }
+  0
+}
+
+assert(checked_after_append() == 3,
+       "appending preserves facts over fixed nonnegative list indices")
+NY
+}

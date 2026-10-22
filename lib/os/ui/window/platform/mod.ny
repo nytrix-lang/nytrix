@@ -1,9 +1,9 @@
 ;; Keywords: platform window backend api contract gamepad joystick controller map os ui input
 ;; Backend-neutral window platform API.
 ;; References:
-;; - std.os.ui.window
-;; - std.os.ui.window.consts
-module std.os.ui.window.platform(
+;; - core.os.ui.window
+;; - core.os.ui.window.consts
+module core.os.ui.window.platform(
    init, terminate, init_hint, init_allocator, init_vulkan_loader, get_version, get_version_string,
    get_platform, get_error, set_error_callback, get_proc_address, get_instance_proc_address, make_context_current, get_time,
    set_time, get_timer_value, get_timer_frequency, wait_events, wait_events_timeout, create_window,
@@ -18,7 +18,7 @@ module std.os.ui.window.platform(
    set_close_callback, set_char_callback, set_input_mode, get_input_mode, raw_mouse_motion_supported,
    get_key_scancode, show_window, hide_window, iconify_window, restore_window, maximize_window,
    vulkan_supported, required_extensions, create_surface, get_surface_capabilities, apply_hints, focus_window,
-   get_backend_name, set_gamma, get_x11_display, get_x11_window, get_wayland_display, get_wayland_window,
+   get_backend_name, available, set_gamma, get_x11_display, get_x11_window, get_wayland_display, get_wayland_window,
    get_wayland_monitor, get_glx_context, get_glx_window, get_win32_window, get_win32_adapter,
    get_win32_monitor, get_wgl_context, get_cocoa_window, get_nsgl_context, get_cocoa_monitor, get_cocoa_view,
    get_egl_display, get_egl_context, get_egl_surface, get_egl_config, get_osmesa_context,
@@ -81,14 +81,14 @@ module std.os.ui.window.platform(
    PLATFORM_WIN32, PLATFORM_COCOA, PLATFORM_X11, PLATFORM_WAYLAND, PLATFORM_NULL, PLATFORM_ANY, TRUE, FALSE
 )
 
-use std.core
-use std.core.mem
-use std.math as math
-use std.core.str as str
-use std.core.common as common
-use std.os.ui.render.dump as ui_profile
-use std.os.ui.window.event (is_event, make_event, event_type, event_window, event_window_id, event_data)
-use std.os.ui.window.consts (EVENT_KEY_PRESSED, EVENT_KEY_RELEASED, EVENT_KEY_CHAR,
+use core
+use core.mem
+use core.math as math
+use core.str as str
+use core.common as common
+use core.os.ui.debug as ui_profile
+use core.os.ui.window.event (is_event, make_event, event_type, event_window, event_window_id, event_data)
+use core.os.ui.window.consts (EVENT_KEY_PRESSED, EVENT_KEY_RELEASED, EVENT_KEY_CHAR,
    EVENT_FLAGS_DATA_DROP_EVENTS, EVENT_FLAGS_MONITOR_EVENTS,
    EVENT_FLAGS_ALL,
    EVENT_KEY_CHAR_MODS, EVENT_FLAG_KEY_CHAR_MODS,
@@ -100,42 +100,50 @@ use std.os.ui.window.consts (EVENT_KEY_PRESSED, EVENT_KEY_RELEASED, EVENT_KEY_CH
    EVENT_FOCUS_IN, EVENT_FOCUS_OUT, EVENT_SCALE_UPDATED,
    EVENT_MONITOR_CONNECTED, EVENT_MONITOR_DISCONNECTED,
    EVENT_DATA_DROP, EVENT_QUIT)
-use std.os.ui.window.platform.api
-use std.os.ui.window.platform.api as api
-use std.os.ui.window.platform.state as platform_state
-use std.os.ui.window.platform.opengl as opengl_backend
-use std.os.ui.window.platform.linux.joystick as linux_joystick
-use std.os.ui.window.platform.win32.joystick as win32_joystick
-use std.os.ui.window.platform.cocoa.joystick as cocoa_joystick
-use std.os.ui.window.platform.win32 as win32_impl
-use std.os.ui.window.platform.cocoa as cocoa_impl
-use std.os.ui.window.platform.linux.x11 as x11_backend
-use std.os.ui.window.platform.linux.wayland as wayland_backend
-use std.os.ui.render.vk.vulkan (vk_get_instance_proc_addr)
+use core.os.ui.window.platform.api
+use core.os.ui.window.platform.api as api
+use core.os.ui.window.platform.state as platform_state
+use core.os.ui.window.platform.opengl as opengl_backend
+use core.os.ui.window.platform.opengl (choose_visual, create_context)
+use core.os.ui.window.platform.linux.joystick as linux_joystick
+use core.os.ui.window.platform.win32.joystick as win32_joystick
+use core.os.ui.window.platform.cocoa.joystick as cocoa_joystick
+use core.os.ui.window.platform.win32 as win32_impl
+use core.os.ui.window.platform.cocoa as cocoa_impl
+use core.os.ui.window.platform.linux.x11 as x11_backend
+use core.os.ui.window.platform.linux.x11 (
+   create_basic_window as _x11_create_basic_window,
+   default_screen as _x11_default_screen,
+   open_display as _x11_open_display
+)
+
+use core.os.ui.window.platform.linux.wayland as wayland_backend
+use core.os.ui.render.vk.vulkan (vk_get_instance_proc_addr)
 
 mut _wayland_scroll_gain_cache = -1.0
 mut _xwayland_scroll_fix_cache = -1
 mut _wayland_scroll_fix_cache = -1
+mut _null_backend_requested = false
 
 fn _ensure_platform_state() dict {
    mut state = platform_state._ensure_platform_state()
-   def hints = state.get("window_hints", 0)
+   def hints = platform_state._get_platform_dict("window_hints", dict(8))
    if !is_dict(hints) || hints.len == 0 {
-      platform_state._set_platform_val("window_hints", _default_window_hints())
+      platform_state._set_platform_dict("window_hints", _default_window_hints())
       state = platform_state._ensure_platform_state()
    }
    state
 }
 
 fn _get_platform_val(any key, any default=0) any {
-   def state = _ensure_platform_state()
-   state.get(key, default)
+   _ensure_platform_state()
+   platform_state._get_platform_val(key, default)
 }
 
 fn _set_platform_val(any key, any val) any { platform_state._set_platform_val(key, val) }
 
 fn _native_handle(any win) any {
-   if is_dict(win) { return win.get("handle", 0) }
+   if is_dict(win) { return get(win, "handle", 0) }
    win
 }
 
@@ -146,21 +154,52 @@ fn _native_value_eq(any a, any b) bool {
 }
 
 fn _native_window(any win) any {
-   if is_dict(win) && win.get("display", 0) && win.get("handle", 0) { return win }
+   if is_dict(win) {
+      if get(win, "display", 0) && get(win, "handle", 0) { return win }
+   }
    def handle = _native_handle(win)
    if !handle { return 0 }
-   def native_windows = _get_platform_val("native_windows")
-   def direct = native_windows.get(handle, 0)
-   if direct { return direct }
-   def wins = dict_values(native_windows)
+   def native_windows = platform_state._get_platform_dict("native_windows", dict(8))
+   def direct = get(native_windows, handle, 0)
+   if is_dict(direct) { return direct }
+   def wins = dict_values(is_dict(native_windows) ? native_windows : dict(8))
    mut i = 0
    def wins_n = wins.len
    while i < wins_n {
       def cand = wins.get(i, 0)
-      if is_dict(cand) && _native_value_eq(cand.get("handle", 0), handle) { return cand }
+      if is_dict(cand) && _native_value_eq(get(cand, "handle", 0), handle) { return cand }
       i += 1
    }
    0
+}
+
+fn _register_x11_window(dict native, dict hints, int client_api) any {
+   def handle = get(native, "handle", 0)
+   if !handle {
+      _dbg_err("create_window: X11 returned native state without a handle")
+      _dbg_err("  keys=" + to_str(dict_keys(native)))
+      return false
+   }
+   mut native_windows = platform_state._get_platform_dict("native_windows", dict(16))
+   native_windows[handle] = native
+   platform_state._set_platform_dict("native_windows", native_windows)
+   mut should_close_flags = platform_state._get_platform_dict("should_close_flags", dict(8))
+   should_close_flags[handle] = false
+   platform_state._set_platform_dict("should_close_flags", should_close_flags)
+   if client_api != api.NO_API {
+      def ctx = create_context(native, hints)
+      if ctx {
+         _dbg("create_window: OpenGL context created")
+         mut window_contexts = platform_state._get_platform_dict("window_contexts", dict(8))
+         window_contexts[handle] = ctx
+         platform_state._set_platform_dict("window_contexts", window_contexts)
+         _dbg("create_window: OpenGL context stored")
+      } else {
+         _dbg_warn("create_window: OpenGL context creation failed")
+      }
+   }
+   _dump_window_state(handle)
+   handle
 }
 
 fn _is_debug() bool {
@@ -199,7 +238,7 @@ fn _dump_window_state(any win) any { return 0 }
 fn _dump_all_windows() any {
    if !_is_debug() { return 0 }
    ui_profile.print_text("[window:state] *** All Windows Dump ***")
-   def handles = dict_keys(_get_platform_val("native_windows", dict(8)))
+   def handles = dict_keys(platform_state._get_platform_dict("native_windows", dict(8)))
    mut i = 0
    def handles_n = handles.len
    while i < handles_n {
@@ -264,16 +303,25 @@ fn _select_backend_name() str {
    if requested == "none" { name = "none" }
    else {
       #macos {
-         if (requested == "" || requested == "auto" || requested == "cocoa" || requested == "macos") && cocoa_impl.available() { name = "cocoa" }
+         if (requested == "" || requested == "auto" || requested == "cocoa" || requested == "macos") && cocoa_impl.available() {
+            name = "cocoa"
+         }
          else { name = "none" }
       } #elif windows {
-         if (requested == "" || requested == "auto" || requested == "win32" || requested == "windows") && win32_impl.available() { name = "win32" }
+         if (requested == "" || requested == "auto" || requested == "win32" || requested == "windows") && win32_impl.available() {
+            name = "win32"
+         }
          else { name = "none" }
       } #else {
-         if requested == "x11" && x11_backend.available() { name = "x11" }
-         elif requested == "wayland" && wayland_backend.available() { name = "wayland" }
-         elif x11_backend.available() { name = "x11" }
-         elif wayland_backend.available() { name = "wayland" }
+         if requested == "x11" && x11_backend.available() {
+            name = "x11"
+         } elif requested == "wayland" && wayland_backend.available() {
+            name = "wayland"
+         } elif x11_backend.available() {
+            name = "x11"
+         } elif wayland_backend.available() {
+            name = "wayland"
+         }
          else { name = "none" }
       } #endif
    }
@@ -293,6 +341,13 @@ fn _select_backend_name() str {
 }
 
 fn get_backend_name() str { "Returns the selected native window backend name." return _select_backend_name() }
+
+fn available() bool {
+   "Returns whether a native backend or explicitly selected null backend is available."
+   def backend = _select_backend_name()
+   if backend != "none" { return true }
+   common.env_lower("NY_UI_BACKEND") == "none" || _null_backend_requested
+}
 
 fn uses_native_events() bool { "Returns true because this backend owns native event polling." true }
 
@@ -356,15 +411,30 @@ fn get_platform() int {
 fn init_hint(any hint, any value) any {
    "Stores an initialization hint for backend selection."
    if _native_value_eq(hint, PLATFORM) {
-      if _native_value_eq(value, PLATFORM_X11) { _set_platform_val("backend_name", "x11") }
-      elif _native_value_eq(value, PLATFORM_WAYLAND) { _set_platform_val("backend_name", "wayland") }
-      elif _native_value_eq(value, PLATFORM_WIN32) { _set_platform_val("backend_name", "win32") }
-      elif _native_value_eq(value, PLATFORM_COCOA) { _set_platform_val("backend_name", "cocoa") }
-      elif _native_value_eq(value, PLATFORM_NULL) { _set_platform_val("backend_name", "none") }
+      if _native_value_eq(value, PLATFORM_X11) {
+         _null_backend_requested = false
+         _set_platform_val("backend_name", "x11")
+      }
+      elif _native_value_eq(value, PLATFORM_WAYLAND) {
+         _null_backend_requested = false
+         _set_platform_val("backend_name", "wayland")
+      }
+      elif _native_value_eq(value, PLATFORM_WIN32) {
+         _null_backend_requested = false
+         _set_platform_val("backend_name", "win32")
+      }
+      elif _native_value_eq(value, PLATFORM_COCOA) {
+         _null_backend_requested = false
+         _set_platform_val("backend_name", "cocoa")
+      }
+      elif _native_value_eq(value, PLATFORM_NULL) {
+         _null_backend_requested = true
+         _set_platform_val("backend_name", "none")
+      }
    }
-   mut hints = _get_platform_val("init_hints", dict(8))
+   mut hints = platform_state._get_platform_dict("init_hints", dict(8))
    hints[hint] = value
-   _set_platform_val("init_hints", hints)
+   platform_state._set_platform_dict("init_hints", hints)
 }
 
 fn init_allocator(any alloc) bool { "Accepts an allocator hook; custom allocators are not used yet." false }
@@ -429,10 +499,10 @@ fn init() bool {
       }
       def globals = wayland_backend.bootstrap_globals(display)
       wayland_backend.set_globals(globals)
-      mut p = _get_platform_val("platform", dict(8))
+      mut p = platform_state._get_platform_dict("platform", dict(8))
       p["wayland_display"] = display
       p["wayland_globals"] = globals
-      _set_platform_val("platform", p)
+      platform_state._set_platform_dict("platform", p)
       _set_platform_val("initialized", true)
       return globals != 0
    }
@@ -448,6 +518,14 @@ fn init() bool {
       _set_platform_val("initialized", true)
       return true
    }
+   if b == "none" {
+      def requested = common.env_lower("NY_UI_BACKEND")
+      if requested != "none" && !_null_backend_requested {
+         return false
+      }
+      _set_platform_val("initialized", true)
+      return true
+   }
    _set_platform_val("initialized", true)
    true
 }
@@ -457,7 +535,7 @@ fn terminate() any {
    _dbg("terminate")
    def b = _select_backend_name()
    if b == "wayland" {
-      def p = _get_platform_val("platform", dict(8))
+      def p = platform_state._get_platform_dict("platform", dict(8))
       def wayland_globals = p.get("wayland_globals", 0)
       if wayland_globals { wayland_backend.destroy_globals(wayland_globals) }
    }
@@ -470,40 +548,59 @@ fn terminate() any {
    } #endif
 }
 
-fn create_window(str name, int x, int y, int w, int h, int flags) any {
+fn create_window(str name, int x, int y, int w, int h, int flags, any hint_overrides=0) any {
    "Creates a native platform window and returns its handle."
    def b = _select_backend_name()
    if ui_profile.debug_enabled() { ui_profile.print_text("[window:platform] create_window: backend=" + b + " title='" + name + "'") }
-   def hints = _get_platform_val("window_hints", dict(8))
+   mut hints = dict_merge(_default_window_hints(), platform_state._get_platform_dict("window_hints", dict(8)))
+   if is_dict(hint_overrides) { hints = dict_merge(hints, hint_overrides) }
    mut x11_class = common.env_trim("NY_UI_X11_CLASS_NAME")
    mut x11_inst = common.env_trim("NY_UI_X11_INSTANCE_NAME")
    mut wl_app_id = common.env_trim("NY_UI_WAYLAND_APP_ID")
-   if x11_class.len == 0 { x11_class = hints.get(api.X11_CLASS_NAME, "Nytrix") }
-   if x11_inst.len == 0 { x11_inst = hints.get(api.X11_INSTANCE_NAME, "nytrix") }
-   if wl_app_id.len == 0 { wl_app_id = hints.get(api.WAYLAND_APP_ID, "nytrix") }
+   if x11_class.len == 0 { x11_class = get(hints, api.X11_CLASS_NAME, "Nytrix") }
+   if x11_inst.len == 0 { x11_inst = get(hints, api.X11_INSTANCE_NAME, "nytrix") }
+   if wl_app_id.len == 0 { wl_app_id = get(hints, api.WAYLAND_APP_ID, "nytrix") }
    def client_api = band(flags, 0x80000) ? api.NO_API : hints.get(api.CLIENT_API, api.NO_API)
-   mut visual = 0
-   mut depth = 0
-   mut x11_display = 0
+   if ui_profile.env_truthy_cached("NY_UI_STARTUP_TRACE") {
+      ui_profile.print_text("[window:platform] create_window: client_api=" +
+         to_str(client_api) + " hint_keys=" + to_str(dict_keys(hints)) +
+         " member=" + to_str(hints.get(api.CLIENT_API, -9)) +
+         " generic=" + to_str(get(hints, api.CLIENT_API, -10)))
+   }
+   mut ptr visual = 0
+   mut int depth = 0
+   mut ptr x11_display = 0
    if b == "x11" && client_api != api.NO_API {
-      x11_display = x11_backend.open_display()
+      if ui_profile.env_truthy_cached("NY_UI_STARTUP_TRACE") { ui_profile.print_text("[window:platform] x11 display.open.before") }
+      x11_display = _x11_open_display()
+      if ui_profile.env_truthy_cached("NY_UI_STARTUP_TRACE") { ui_profile.print_text("[window:platform] x11 display.open.after=" + to_str(bool(x11_display))) }
       if x11_display {
-         def s = x11_backend.default_screen(x11_display)
-         def info = opengl_backend.choose_visual(hints, x11_display, s)
+         if ui_profile.env_truthy_cached("NY_UI_STARTUP_TRACE") { ui_profile.print_text("[window:platform] x11 choose_visual.before") }
+         def s = _x11_default_screen(x11_display)
+         def info = choose_visual(hints, x11_display, s)
          visual, depth = info.get(0), info.get(1)
+         if ui_profile.env_truthy_cached("NY_UI_STARTUP_TRACE") { ui_profile.print_text("[window:platform] x11 choose_visual.after") }
       }
    }
-   mut native = 0
-   if b == "x11" { native = x11_backend.create_basic_window(name, w, h, x, y, flags, 0, x11_class, x11_inst, visual, depth, x11_display) }
-   elif b == "wayland" {
-      def wayland_globals = _get_platform_val("platform", dict(8)).get("wayland_globals", 0)
+   if b == "x11" {
+      if ui_profile.env_truthy_cached("NY_UI_STARTUP_TRACE") { ui_profile.print_text("[window:platform] x11 create_basic_window.before") }
+      mut dict native = _x11_create_basic_window(
+         name, w, h, x, y, flags, 0, x11_class, x11_inst, visual, depth, x11_display,
+      )
+      if ui_profile.env_truthy_cached("NY_UI_STARTUP_TRACE") { ui_profile.print_text("[window:platform] x11 create_basic_window.after") }
+      return _register_x11_window(native, hints, client_api)
+   }
+   mut any native = 0
+   if b == "wayland" {
+      def wayland_state = platform_state._get_platform_dict("platform", dict(8))
+      def wayland_globals = get(wayland_state, "wayland_globals", 0)
       native = wayland_backend.create_basic_window(wayland_globals, name, w, h, wl_app_id)
    } elif b == "win32" {
       native = win32_impl.create_basic_window(name, w, h, x, y, flags)
    } elif b == "cocoa" {
       native = cocoa_impl.create_basic_window(name, w, h, x, y, flags)
    } elif b == "none" {
-      def native_windows = _get_platform_val("native_windows", dict(8))
+      def native_windows = platform_state._get_platform_dict("native_windows", dict(8))
       def handle = len(dict_keys(native_windows)) + 1
       native = dict(8)
       native["handle"] = handle
@@ -520,21 +617,28 @@ fn create_window(str name, int x, int y, int w, int h, int flags) any {
       def handle = _native_handle(native)
       if !handle {
          _dbg_err("create_window: returned native state without a handle")
+         _dbg_err("  native_is_dict=" + to_str(is_dict(native)))
+         if is_dict(native) {
+            _dbg_err("  native_handle=" + to_str(get(native, "handle", 0)) +
+               " keys=" + to_str(dict_keys(native)))
+         }
          _dump_window_state(0)
          return false
       }
-      mut native_windows = _get_platform_val("native_windows", dict(16))
+      mut native_windows = platform_state._get_platform_dict("native_windows", dict(16))
       native_windows[handle] = native
-      _set_platform_val("native_windows", native_windows)
-      mut should_close_flags = _get_platform_val("should_close_flags", dict(8))
+      platform_state._set_platform_dict("native_windows", native_windows)
+      mut should_close_flags = platform_state._get_platform_dict("should_close_flags", dict(8))
       should_close_flags[handle] = false
-      _set_platform_val("should_close_flags", should_close_flags)
+      platform_state._set_platform_dict("should_close_flags", should_close_flags)
       if (b == "x11" || b == "wayland") && client_api != api.NO_API {
-         def ctx = opengl_backend.create_context(native, hints)
+         def ctx = create_context(native, hints)
          if ctx {
-            mut window_contexts = _get_platform_val("window_contexts", dict(8))
+            _dbg("create_window: OpenGL context created")
+            mut window_contexts = platform_state._get_platform_dict("window_contexts", dict(8))
             window_contexts[handle] = ctx
-            _set_platform_val("window_contexts", window_contexts)
+            platform_state._set_platform_dict("window_contexts", window_contexts)
+            _dbg("create_window: OpenGL context stored")
          } else {
             _dbg_warn("create_window: OpenGL context creation failed(may be expected for NO_API)")
          }
@@ -561,7 +665,7 @@ fn destroy_window(any win) any {
       return 0
    }
    def b = _select_backend_name()
-   def window_contexts = _get_platform_val("window_contexts", dict(8))
+   def window_contexts = platform_state._get_platform_dict("window_contexts", dict(8))
    def ctx = window_contexts.get(handle, 0)
    if ctx {
       if _get_platform_val("current_win_context", 0) == handle {
@@ -570,63 +674,63 @@ fn destroy_window(any win) any {
          _dbg_v("destroy_window: cleared current context")
       }
       opengl_backend.destroy_offscreen_context(ctx)
-      _set_platform_val("window_contexts", window_contexts.delete(handle))
+      platform_state._set_platform_dict("window_contexts", window_contexts.delete(handle))
       _dbg_v("destroy_window: OpenGL context destroyed")
    }
    if b == "x11" { x11_backend.destroy_basic_window(native) }
    elif b == "wayland" { wayland_backend.destroy_basic_window(native) }
    elif b == "win32" { win32_impl.destroy_basic_window(native) }
    elif b == "cocoa" { cocoa_impl.destroy_basic_window(native) }
-   _set_platform_val("native_windows", _get_platform_val("native_windows", dict(8)).delete(handle))
-   _set_platform_val("should_close_flags", _get_platform_val("should_close_flags", dict(8)).delete(handle))
-   _set_platform_val("window_attribs", _get_platform_val("window_attribs", dict(8)).delete(handle))
+   platform_state._set_platform_dict("native_windows", platform_state._get_platform_dict("native_windows", dict(8)).delete(handle))
+   platform_state._set_platform_dict("should_close_flags", platform_state._get_platform_dict("should_close_flags", dict(8)).delete(handle))
+   platform_state._set_platform_dict("window_attribs", platform_state._get_platform_dict("window_attribs", dict(8)).delete(handle))
    if _get_platform_val("current_win_context", 0) == handle {
       _set_platform_val("current_win_context", 0)
       _dbg_v("destroy_window: cleared current context")
    }
-   _set_platform_val("window_user_pointers", _get_platform_val("window_user_pointers", dict(8)).delete(handle))
-   _set_platform_val("window_size_limits", _get_platform_val("window_size_limits", dict(8)).delete(handle))
-   _set_platform_val("window_aspect_ratios", _get_platform_val("window_aspect_ratios", dict(8)).delete(handle))
-   _set_platform_val("window_callbacks", _get_platform_val("window_callbacks", dict(8)).delete(handle))
-   _dbg_win(handle, "destroyed - remaining windows: " + to_str(len(dict_keys(_get_platform_val("native_windows", dict(8))))))
+   platform_state._set_platform_dict("window_user_pointers", platform_state._get_platform_dict("window_user_pointers", dict(8)).delete(handle))
+   platform_state._set_platform_dict("window_size_limits", platform_state._get_platform_dict("window_size_limits", dict(8)).delete(handle))
+   platform_state._set_platform_dict("window_aspect_ratios", platform_state._get_platform_dict("window_aspect_ratios", dict(8)).delete(handle))
+   platform_state._set_platform_dict("window_callbacks", platform_state._get_platform_dict("window_callbacks", dict(8)).delete(handle))
+   _dbg_win(handle, "destroyed - remaining windows: " + to_str(len(dict_keys(platform_state._get_platform_dict("native_windows", dict(8))))))
 }
 
-fn should_close(any win) bool { "Returns the requested-close flag for a window." _get_platform_val("should_close_flags", dict(8)).get(win, false) }
+fn should_close(any win) bool { "Returns the requested-close flag for a window." platform_state._get_platform_dict("should_close_flags", dict(8)).get(win, false) }
 
 fn set_should_close(any win, any value) any {
    "Sets the requested-close flag for a window."
-   def flags = _get_platform_val("should_close_flags", dict(8))
+   def flags = platform_state._get_platform_dict("should_close_flags", dict(8))
    if !flags.contains(win) || flags.get(win, false) != value { _dbg("set_should_close: win=0x" + str.to_hex(win) + " value=" + to_str(value)) }
    flags[win] = value
-   _set_platform_val("should_close_flags", flags)
+   platform_state._set_platform_dict("should_close_flags", flags)
 }
 
 fn default_window_hints() any {
    "Resets all window hints to their default values."
    _dbg("default_window_hints: resetting to defaults")
-   _set_platform_val("window_hints", _default_window_hints())
+   platform_state._set_platform_dict("window_hints", _default_window_hints())
 }
 
 fn window_hint(any hint, any value) any {
    "Sets a window hint to a specific value."
    _dbg_hint(hint, value)
-   mut hints = _get_platform_val("window_hints", dict(8))
+   mut hints = platform_state._get_platform_dict("window_hints", dict(8))
    hints[hint] = value
-   _set_platform_val("window_hints", hints)
+   platform_state._set_platform_dict("window_hints", hints)
 }
 
 fn window_hint_string(any hint, str value) any {
    "Sets a string window hint(for class names, app IDs, etc.)."
    _dbg("window_hint_string: hint=0x" + str.to_hex(hint) + " value='" + value + "'")
-   mut hints = _get_platform_val("window_hints", dict(8))
+   mut hints = platform_state._get_platform_dict("window_hints", dict(8))
    hints[hint] = value
-   _set_platform_val("window_hints", hints)
+   platform_state._set_platform_dict("window_hints", hints)
 }
 
 fn get_window_attrib(any win, any attrib) any {
    "Gets a window attribute."
    def handle = _native_handle(win)
-   def window_attribs = _get_platform_val("window_attribs", dict(8))
+   def window_attribs = platform_state._get_platform_dict("window_attribs", dict(8))
    def attribs = window_attribs.get(handle, dict(8))
    def val = attribs.get(attrib, 0)
    if val != 0 {
@@ -652,7 +756,7 @@ fn get_window_attrib(any win, any attrib) any {
       _dbg_attrib(handle, attrib, res)
       return res
    }
-   def window_hints = _get_platform_val("window_hints", dict(8))
+   def window_hints = platform_state._get_platform_dict("window_hints", dict(8))
    def hint_val = window_hints.get(attrib, 0)
    _dbg_attrib(handle, attrib, hint_val)
    hint_val
@@ -662,11 +766,11 @@ fn set_window_attrib(any win, any attrib, any value) any {
    "Sets a window attribute."
    def handle = _native_handle(win)
    _dbg("set_window_attrib: win=0x" + str.to_hex(handle) + " attrib=0x" + str.to_hex(attrib) + " value=" + to_str(value))
-   mut window_attribs = _get_platform_val("window_attribs", dict(8))
+   mut window_attribs = platform_state._get_platform_dict("window_attribs", dict(8))
    mut attribs = window_attribs.get(handle, dict(8))
    attribs[attrib] = value
    window_attribs[handle] = attribs
-   _set_platform_val("window_attribs", window_attribs)
+   platform_state._set_platform_dict("window_attribs", window_attribs)
    def b = _select_backend_name()
    def native = _native_window(win)
    if b == "x11" {
@@ -697,9 +801,9 @@ fn set_window_size_limits(any win, int min_w, int min_h, int max_w, int max_h) a
    if max_w != -1 && min_w != -1 && max_w < min_w { _dbg_warn("set_window_size_limits: max_w(" + to_str(max_w) + ") < min_w(" + to_str(min_w) + ")") }
    if max_h != -1 && min_h != -1 && max_h < min_h { _dbg_warn("set_window_size_limits: max_h(" + to_str(max_h) + ") < min_h(" + to_str(min_h) + ")") }
    def limits = {"min_w": min_w, "min_h": min_h, "max_w": max_w, "max_h": max_h}
-   mut window_size_limits = _get_platform_val("window_size_limits", dict(8))
+   mut window_size_limits = platform_state._get_platform_dict("window_size_limits", dict(8))
    window_size_limits[win] = limits
-   _set_platform_val("window_size_limits", window_size_limits)
+   platform_state._set_platform_dict("window_size_limits", window_size_limits)
    def b = _select_backend_name()
    def native = _native_window(win)
    if b == "x11" {
@@ -724,9 +828,9 @@ fn set_window_size_limits(any win, int min_w, int min_h, int max_w, int max_h) a
 fn set_window_aspect_ratio(any win, int numer, int denom) any {
    "Sets the aspect ratio for a window."
    def ratio = {"numer": numer, "denom": denom}
-   mut window_aspect_ratios = _get_platform_val("window_aspect_ratios", dict(8))
+   mut window_aspect_ratios = platform_state._get_platform_dict("window_aspect_ratios", dict(8))
    window_aspect_ratios[win] = ratio
-   _set_platform_val("window_aspect_ratios", window_aspect_ratios)
+   platform_state._set_platform_dict("window_aspect_ratios", window_aspect_ratios)
    def b = _select_backend_name()
    def native = _native_window(win)
    if b == "x11" {
@@ -825,7 +929,7 @@ fn _native_queue_push(any q, any ne) list {
 
 fn _queue_native_events(any evs, any fallback_handle=0, bool dispatch_callbacks=false) int {
    if !is_list(evs) || evs.len <= 0 { return 0 }
-   mut pending_events = _get_platform_val("pending_native_events", dict(8))
+   mut pending_events = platform_state._get_platform_dict("pending_native_events", dict(8))
    mut normalized = []
    mut ei = 0
    def evs_n = evs.len
@@ -837,15 +941,15 @@ fn _queue_native_events(any evs, any fallback_handle=0, bool dispatch_callbacks=
          def q = pending_events.get(wid, [])
          pending_events[wid] = _native_queue_push(q, ne)
          if event_type(ne) == EVENT_QUIT {
-            mut flags = _get_platform_val("should_close_flags", dict(8))
+            mut flags = platform_state._get_platform_dict("should_close_flags", dict(8))
             flags[wid] = true
-            _set_platform_val("should_close_flags", flags)
+            platform_state._set_platform_dict("should_close_flags", flags)
          }
       }
       normalized = normalized.append(ne)
       ei += 1
    }
-   _set_platform_val("pending_native_events", pending_events)
+   platform_state._set_platform_dict("pending_native_events", pending_events)
    if dispatch_callbacks {
       ei = 0
       while ei < evs_n {
@@ -860,7 +964,7 @@ fn poll_events() any {
    "Polls native events and dispatches queued callbacks."
    def b = _select_backend_name()
    _poll_joysticks_if_needed()
-   def native_windows = _get_platform_val("native_windows", dict(8))
+   def native_windows = platform_state._get_platform_dict("native_windows", dict(8))
    def windows = dict_values(native_windows)
    def have_window_callbacks = !!_get_platform_val("has_window_callbacks", false)
    if b == "x11" {
@@ -869,7 +973,7 @@ fn poll_events() any {
       if windows.len > 0 {
          def result = x11_backend.poll_display_events(windows)
          def updated = result.get(0, dict(8))
-         _set_platform_val("native_windows", _merge_native_window_updates(updated, native_windows))
+         platform_state._set_platform_dict("native_windows", _merge_native_window_updates(updated, native_windows))
          def _ignored_x11_events = _queue_native_events(result.get(1, []), 0, have_window_callbacks)
       }
       return 0
@@ -891,7 +995,7 @@ fn poll_events() any {
             mut current_native_windows = _get_platform_val("native_windows", native_windows)
             if handle && is_dict(updated_win) {
                current_native_windows[handle] = updated_win
-               _set_platform_val("native_windows", current_native_windows)
+               platform_state._set_platform_dict("native_windows", current_native_windows)
             }
             def _ignored_win32_events = _queue_native_events(evs, handle, have_window_callbacks)
          }
@@ -912,7 +1016,7 @@ fn poll_events() any {
             mut current_native_windows = _get_platform_val("native_windows", native_windows)
             if handle && is_dict(updated_win) {
                current_native_windows[handle] = updated_win
-               _set_platform_val("native_windows", current_native_windows)
+               platform_state._set_platform_dict("native_windows", current_native_windows)
             }
             def _ignored_cocoa_events = _queue_native_events(evs, handle, have_window_callbacks)
          }
@@ -942,7 +1046,7 @@ fn poll_events() any {
          mut current_native_windows = _get_platform_val("native_windows", native_windows)
          if is_dict(updated_win) {
             current_native_windows[handle] = updated_win
-            _set_platform_val("native_windows", current_native_windows)
+            platform_state._set_platform_dict("native_windows", current_native_windows)
          }
          def _ignored_wayland_events = _queue_native_events(evs, handle, have_window_callbacks)
       } else {
@@ -959,7 +1063,7 @@ fn poll_events_for_window(any win) list {
    def b = _select_backend_name()
    if b == "x11" {
       _poll_joysticks_if_needed()
-      def native_windows = _get_platform_val("native_windows", dict(8))
+      def native_windows = platform_state._get_platform_dict("native_windows", dict(8))
       def native = native_windows.get(handle, 0)
       def display = is_dict(native) ? native.get("display", 0) : 0
       if display && x11_backend.pending(display) == 0 { return [] }
@@ -969,7 +1073,7 @@ fn poll_events_for_window(any win) list {
          def raw = result.get(1, [])
          if is_dict(updated) {
             native_windows[handle] = updated
-            _set_platform_val("native_windows", native_windows)
+            platform_state._set_platform_dict("native_windows", native_windows)
          }
          if !is_list(raw) || raw.len == 0 { return [] }
          def have_window_callbacks = !!_get_platform_val("has_window_callbacks", false)
@@ -987,14 +1091,14 @@ fn poll_events_for_window(any win) list {
    }
    if b == "win32" {
       _poll_joysticks_if_needed()
-      def native_windows = _get_platform_val("native_windows", dict(8))
+      def native_windows = platform_state._get_platform_dict("native_windows", dict(8))
       def native = native_windows.get(handle, 0)
       def result = win32_impl.poll_window_events(native)
       def updated = result.get(0, native)
       def raw = result.get(1, [])
       if is_dict(updated) {
          native_windows[handle] = updated
-         _set_platform_val("native_windows", native_windows)
+         platform_state._set_platform_dict("native_windows", native_windows)
       }
       if !is_list(raw) || raw.len == 0 { return [] }
       def have_window_callbacks = !!_get_platform_val("has_window_callbacks", false)
@@ -1011,14 +1115,14 @@ fn poll_events_for_window(any win) list {
    }
    if b == "cocoa" {
       _poll_joysticks_if_needed()
-      def native_windows = _get_platform_val("native_windows", dict(8))
+      def native_windows = platform_state._get_platform_dict("native_windows", dict(8))
       def native = native_windows.get(handle, 0)
       def result = cocoa_impl.poll_window_events(native)
       def updated = result.get(0, native)
       def raw = result.get(1, [])
       if is_dict(updated) {
          native_windows[handle] = updated
-         _set_platform_val("native_windows", native_windows)
+         platform_state._set_platform_dict("native_windows", native_windows)
       }
       if !is_list(raw) || raw.len == 0 { return [] }
       def have_window_callbacks = !!_get_platform_val("has_window_callbacks", false)
@@ -1041,10 +1145,10 @@ fn poll_events_for_window(any win) list {
 fn pump_window_events(any win) list {
    "Returns and clears queued events for one window."
    def handle = _native_handle(win)
-   def pending_native_events = _get_platform_val("pending_native_events", dict(8))
+   def pending_native_events = platform_state._get_platform_dict("pending_native_events", dict(8))
    def evs = pending_native_events.get(handle, [])
    if !is_list(evs) || evs.len == 0 { return evs }
-   _set_platform_val("pending_native_events", pending_native_events.delete(handle))
+   platform_state._set_platform_dict("pending_native_events", pending_native_events.delete(handle))
    evs
 }
 
@@ -1053,10 +1157,13 @@ fn swap_buffers(any win) any {
    def b = _select_backend_name()
    def handle = _native_handle(win)
    _dbg_v("swap_buffers: backend=" + b + " win=0x" + str.to_hex(handle))
-   def window_contexts = _get_platform_val("window_contexts", dict(8))
+   def window_contexts = platform_state._get_platform_dict("window_contexts", dict(8))
    def ctx = window_contexts.get(handle, 0)
    if ctx && (b == "x11" || b == "wayland") { opengl_backend.swap_buffers(ctx) }
-   if b == "x11" { x11_backend.flush(get_x11_display()) }
+   if b == "x11" {
+      def native = _native_window(win)
+      if native { x11_backend.flush(native.get("display", 0)) }
+   }
    elif b == "wayland" { wayland_backend.flush(0) }
 }
 
@@ -1094,10 +1201,13 @@ fn make_context_current(any win) bool {
    }
    def handle = _native_handle(win)
    if !handle { return false }
-   def window_contexts = _get_platform_val("window_contexts", dict(8))
+   def window_contexts = platform_state._get_platform_dict("window_contexts", dict(8))
    def ctx = window_contexts.get(handle, 0)
+   _dbg("make_context_current: found=" + to_str(!!ctx) + " contexts=" + to_str(window_contexts.len))
    if !ctx { return false }
-   if (b == "x11" || b == "wayland") && opengl_backend.make_context_current(ctx) {
+   def made_current = (b == "x11" || b == "wayland") && opengl_backend.make_context_current(ctx)
+   _dbg("make_context_current: made=" + to_str(made_current))
+   if made_current {
       _set_platform_val("current_win_context", handle)
       return true
    }
@@ -1222,9 +1332,9 @@ fn _store_updated_native_window(any updated) bool {
    if !is_dict(updated) { return false }
    def handle = updated.get("handle", 0)
    if !handle { return false }
-   mut native_windows = _get_platform_val("native_windows", dict(8))
+   mut native_windows = platform_state._get_platform_dict("native_windows", dict(8))
    native_windows[handle] = updated
-   _set_platform_val("native_windows", native_windows)
+   platform_state._set_platform_dict("native_windows", native_windows)
    true
 }
 
@@ -1261,10 +1371,10 @@ fn get_input_mode(any win, any mode) int {
    if !is_dict(native) { return 0 }
    if b == "x11" { return x11_backend.get_input_mode(native, mode) }
    if b == "wayland" { return wayland_backend.get_input_mode(native, mode) }
-   if mode == api.CURSOR { return int(native.get("cursor_mode", api.CURSOR_NORMAL)) }
-   if mode == api.RAW_MOUSE_MOTION { return native.get("raw_mouse_motion", false) ? 1 : 0 }
-   if mode == api.STICKY_KEYS { return native.get("sticky_keys", false) ? 1 : 0 }
-   if mode == api.STICKY_MOUSE_BUTTONS { return native.get("sticky_mouse", false) ? 1 : 0 }
+   if mode == api.CURSOR { return int(get(native, "cursor_mode", api.CURSOR_NORMAL)) }
+   if mode == api.RAW_MOUSE_MOTION { return get(native, "raw_mouse_motion", false) ? 1 : 0 }
+   if mode == api.STICKY_KEYS { return get(native, "sticky_keys", false) ? 1 : 0 }
+   if mode == api.STICKY_MOUSE_BUTTONS { return get(native, "sticky_mouse", false) ? 1 : 0 }
    0
 }
 
@@ -1284,10 +1394,30 @@ fn get_window_title(any win) str {
    "Returns the window title."
    def native = _native_window(win)
    if !is_dict(native) { return "Untitled" }
-   native.get("title", "Untitled")
+   get(native, "title", "Untitled")
 }
 
-comptime emit _dispatch_native_get0_list(get_size, x11_backend.get_size, wayland_backend.get_size, win32_impl.get_size, cocoa_impl.get_size)
+fn get_size(any win) list {
+   "Returns the current native window client size as [width, height]."
+   def b = _select_backend_name()
+   def handle = _native_handle(win)
+   if b == "x11" && handle {
+      ;; X11 ConfigureNotify updates this cache while polling native events.
+      ;; Prefer it to a synchronous XGetWindowAttributes round trip per frame.
+      def native_windows = platform_state._get_platform_dict("native_windows", dict(8))
+      def native = native_windows.get(handle, 0)
+      if is_dict(native) {
+         def w, h = int(native.get("w", 0)), int(native.get("h", 0))
+         if w > 0 && h > 0 { return [w, h] }
+      }
+   }
+   def native = _native_window(win)
+   if b == "x11" { return x11_backend.get_size(native) }
+   if b == "wayland" { return wayland_backend.get_size(native) }
+   if b == "win32" { return win32_impl.get_size(native) }
+   if b == "cocoa" { return cocoa_impl.get_size(native) }
+   [0, 0]
+}
 
 fn get_window_size(any win) list { get_size(win) }
 
@@ -1320,9 +1450,9 @@ fn focus_window(any win) any {
          def handle = native.get("handle", 0)
          if handle {
             native["focused"] = true
-            def native_windows = _get_platform_val("native_windows", dict(8))
+            def native_windows = platform_state._get_platform_dict("native_windows", dict(8))
             native_windows[handle] = native
-            _set_platform_val("native_windows", native_windows)
+            platform_state._set_platform_dict("native_windows", native_windows)
          }
       }
    }
@@ -1333,8 +1463,8 @@ fn focus_window(any win) any {
 fn apply_hints(any hints) any {
    "Merges window hints into the current hint set."
    _dbg("apply_hints: count=" + to_str(hints.len) + " values=" + to_str(hints))
-   def current_hints = _get_platform_val("window_hints", dict(8))
-   _set_platform_val("window_hints", dict_merge(current_hints, hints))
+   def current_hints = platform_state._get_platform_dict("window_hints", dict(8))
+   platform_state._set_platform_dict("window_hints", dict_merge(current_hints, hints))
 }
 
 fn post_empty_event(any win=0) any {
@@ -1349,7 +1479,7 @@ fn post_empty_event(any win=0) any {
 fn get_key_name(int key, int scancode) str {
    "Returns the platform display name for a key/scancode pair."
    def b = _select_backend_name()
-   def native_windows = _get_platform_val("native_windows", dict(8))
+   def native_windows = platform_state._get_platform_dict("native_windows", dict(8))
    def windows = dict_values(native_windows)
    if windows.len == 0 { return "" }
    def win = windows.get(0)
@@ -1363,7 +1493,7 @@ fn get_key_name(int key, int scancode) str {
 fn get_key_scancode(int key) int {
    "Returns the platform scancode for a key."
    def b = _select_backend_name()
-   def native_windows = _get_platform_val("native_windows", dict(8))
+   def native_windows = platform_state._get_platform_dict("native_windows", dict(8))
    def windows = dict_values(native_windows)
    if windows.len == 0 { return -1 }
    def win = windows.get(0)
@@ -1484,15 +1614,15 @@ fn set_gamma(any mon, f64 gamma) any {
    set_gamma_ramp(mon, ramp)
 }
 
-fn get_x11_display() any {
+fn get_x11_display() ptr {
    "Returns the cached X11 display, opening it on first use."
    if _select_backend_name() != "x11" { return 0 }
-   def p = _get_platform_val("platform", dict(8))
-   mut dpy = p.get("x11_display", 0)
+   def p = platform_state._get_platform_dict("platform", dict(8))
+   mut ptr dpy = p.get("x11_display", 0)
    if dpy == 0 {
       dpy = x11_backend.open_display()
       p["x11_display"] = dpy
-      _set_platform_val("platform", p)
+      platform_state._set_platform_dict("platform", p)
    }
    dpy
 }
@@ -1547,7 +1677,7 @@ comptime template _native_set1_all(name, x11_fn, win32_fn, cocoa_fn){
 
 fn _native_text_or_owned(str text, any native, str owned_key, str text_key) str {
    if text.len > 0 { return text }
-   if is_dict(native) && native.get(owned_key, false) { return native.get(text_key, "") }
+   if is_dict(native) && get(native, owned_key, false) { return get(native, text_key, "") }
    text
 }
 
@@ -1555,10 +1685,11 @@ comptime template _native_get_list2_all(name, x11_fn, win32_fn, cocoa_fn){
    fn ${name}(any win) list {
       def b = _select_backend_name()
       def native = _native_window(win)
+      if !is_dict(native) { return [0, 0] }
       if b == "x11" { return x11_fn(native) }
       elif b == "win32" { return win32_fn(native) }
       elif b == "cocoa" { return cocoa_fn(native) }
-      elif b == "none" && is_dict(native) { return [native.get("x", 0), native.get("y", 0)] }
+      elif b == "none" && is_dict(native) { return [get(native, "x", 0), get(native, "y", 0)] }
       [0, 0]
    }
 }
@@ -1658,16 +1789,16 @@ fn set_window_monitor(any win, any mon, int x, int y, int w, int h, int refresh_
    native
 }
 
-fn _get_win_cbs(any win_handle) dict { _get_platform_val("window_callbacks", dict(8)).get(win_handle, dict(8)) }
+fn _get_win_cbs(any win_handle) dict { platform_state._get_platform_dict("window_callbacks", dict(8)).get(win_handle, dict(8)) }
 
 fn _set_win_cb(any win, str name, any cb) any {
    def handle = _native_handle(win)
    if !handle { return 0 }
-   mut window_callbacks = _get_platform_val("window_callbacks", dict(8))
+   mut window_callbacks = platform_state._get_platform_dict("window_callbacks", dict(8))
    mut cbs = window_callbacks.get(handle, dict(8))
    cbs[name] = cb
    window_callbacks[handle] = cbs
-   _set_platform_val("window_callbacks", window_callbacks)
+   platform_state._set_platform_dict("window_callbacks", window_callbacks)
    _set_platform_val("has_window_callbacks", true)
 }
 
@@ -1945,7 +2076,7 @@ fn request_window_attention(any win) any {
 fn get_window_user_pointer(any win) any {
    "Returns the window user pointer."
    def handle = _native_handle(win)
-   if handle { return _get_platform_val("window_user_pointers", dict(8)).get(handle, 0) }
+   if handle { return platform_state._get_platform_dict("window_user_pointers", dict(8)).get(handle, 0) }
    if is_dict(win) { return win.get("user_pointer", 0) }
    0
 }
@@ -1954,9 +2085,9 @@ fn set_window_user_pointer(any win, any user_ptr) any {
    "Stores a user pointer for a window."
    def handle = _native_handle(win)
    if handle {
-      mut ptrs = _get_platform_val("window_user_pointers", dict(8))
+      mut ptrs = platform_state._get_platform_dict("window_user_pointers", dict(8))
       ptrs[handle] = user_ptr
-      _set_platform_val("window_user_pointers", ptrs)
+      platform_state._set_platform_dict("window_user_pointers", ptrs)
    }
    if is_dict(win) {
       mut out = win
@@ -2130,30 +2261,30 @@ fn update_gamepad_mappings(str mappings) bool {
    false
 }
 
-fn get_wayland_display() any { "Returns the cached Wayland display handle." _get_platform_val("platform", dict(8)).get("wayland_display", 0) }
+fn get_wayland_display() any { "Returns the cached Wayland display handle." platform_state._get_platform_dict("platform", dict(8)).get("wayland_display", 0) }
 
 fn get_wayland_window(any win) any {
    "Returns the native Wayland surface for a window."
    def native = _native_window(win)
    if !is_dict(native) { return 0 }
-   native.get("surface", 0)
+   get(native, "surface", 0)
 }
 
-fn _window_ctx_by_handle(any win_handle) any { _get_platform_val("window_contexts", dict(8)).get(win_handle, 0) }
+fn _window_ctx_by_handle(any win_handle) any { get(platform_state._get_platform_dict("window_contexts", dict(8)), win_handle, 0) }
 
 fn _window_ctx(any win) any { _window_ctx_by_handle(_native_handle(win)) }
 
 fn _window_ctx_field(any win, str field) any {
    def ctx = _window_ctx(win)
    if !ctx { return 0 }
-   ctx.get(field, 0)
+   get(ctx, field, 0)
 }
 
 fn _window_ctx_typed_field(any win, str typ, str field) any {
    def ctx = _window_ctx(win)
    if !ctx { return 0 }
-   if ctx.get("type", "") != typ { return 0 }
-   ctx.get(field, 0)
+   if get(ctx, "type", "") != typ { return 0 }
+   get(ctx, field, 0)
 }
 
 fn get_glx_context(any win) any {
@@ -2203,13 +2334,13 @@ fn get_osmesa_depth_buffer(any win) any {
    0
 }
 
-fn get_joystick_user_pointer(int jid) any { "Returns the joystick user pointer." _get_platform_val("joystick_user_pointers", dict(8)).get(jid, 0) }
+fn get_joystick_user_pointer(int jid) any { "Returns the joystick user pointer." platform_state._get_platform_dict("joystick_user_pointers", dict(8)).get(jid, 0) }
 
 fn set_joystick_user_pointer(int jid, any user_ptr) any {
    "Stores a user pointer for a joystick."
-   mut ptrs = _get_platform_val("joystick_user_pointers", dict(8))
+   mut ptrs = platform_state._get_platform_dict("joystick_user_pointers", dict(8))
    ptrs[jid] = user_ptr
-   _set_platform_val("joystick_user_pointers", ptrs)
+   platform_state._set_platform_dict("joystick_user_pointers", ptrs)
 }
 
 comptime template _native_window_handle_accessor(name, backend_name){
@@ -2217,7 +2348,7 @@ comptime template _native_window_handle_accessor(name, backend_name){
       if _select_backend_name() != backend_name { return 0 }
       def native = _native_window(win)
       if !is_dict(native) { return native }
-      native.get("handle", 0)
+      get(native, "handle", 0)
    }
 }
 
@@ -2225,7 +2356,7 @@ comptime template _monitor_handle_accessor(name, backend_name){
    fn ${name}(any mon) any {
       if _select_backend_name() != backend_name { return 0 }
       if !is_dict(mon) { return 0 }
-      mon.get("handle", 0)
+      get(mon, "handle", 0)
    }
 }
 
@@ -2285,5 +2416,5 @@ fn get_cocoa_view(any win) any {
    assert(get_wayland_display() == 0 && get_win32_window(win) == 0 && get_cocoa_window(win) == 0 && get_egl_display() == 0, "platform native handle fallback")
    destroy_window(win)
    assert(!should_close(win), "platform destroy clears close flag")
-   print("✓ std.os.ui.window.platform self-test passed")
+   print("✓ core.os.ui.window.platform self-test passed")
 }

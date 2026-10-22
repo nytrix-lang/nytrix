@@ -1,0 +1,452 @@
+shape ownership_generated_runtime_shadow_differential {
+  family "language/ownership"
+  generator "embedded"
+  features ["ownership", "borrow", "move", "generated", "differential"]
+  timeout 120
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.subprocess as process
+use core.os.prim (env)
+use core.os.thread as thread
+
+def compiler = env("NYTRIX_NY_FULL_BIN")
+assert(is_str(compiler) && compiler.len > 0,
+       "test runner provides the compiler used by the runtime shadow gate")
+def core_bc = env("NYTRIX_TEST_CORE_BC")
+def shared_core_bc = is_str(core_bc) ? core_bc : ""
+
+fn compile_generated(str source, bool emit_only) dict {
+  mut args = []
+  if shared_core_bc.len > 0 {
+    args = args.append("--core-bc")
+    args = args.append(shared_core_bc)
+  }
+  args = args.append("--ownership-strict")
+  args = args.append("--native-only")
+  args = args.append("--nyir-verify")
+  if emit_only { args = args.append("-emit-only") }
+  args = args.append("-c")
+  args = args.append(source)
+  process.run_capture(compiler, args, nil, false)
+}
+
+fn borrow_shadow(list operations) bool {
+  mut int last_use = -1
+  mut int index = 0
+  while index < operations.len {
+    if operations.get(index, 0) == 1 { last_use = index }
+    index += 1
+  }
+  index = 0
+  while index < last_use {
+    if operations.get(index, 0) == 0 { return false }
+    index += 1
+  }
+  last_use >= 0
+}
+
+fn borrow_source(list operations) str {
+  mut str source = "use core\nfn generated() int {\nmut int value = 0\ndef borrowed = &mut value\n"
+  mut int index = 0
+  while index < operations.len {
+    if operations.get(index, 0) == 1 {
+      source += "def observed" + to_str(index) + " = borrowed\n"
+    } else {
+      source += "value = value + 1\n"
+    }
+    index += 1
+  }
+  source += "value\n}\ngenerated()\n0\n"
+  source
+}
+
+fn move_shadow(list operations) bool {
+  mut bool moved = false
+  mut int index = 0
+  while index < operations.len {
+    if operations.get(index, 0) == 1 {
+      if moved { return false }
+      moved = true
+    } else if moved {
+      return false
+    }
+    index += 1
+  }
+  moved
+}
+
+fn move_source(list operations) str {
+  mut str source = "use core\nlinear layout File { int fd }\nfn generated() int {\ndef file = File(7)\n"
+  mut int index = 0
+  while index < operations.len {
+    if operations.get(index, 0) == 1 {
+      source += "forget(file)\n"
+    } else {
+      source += "def observed" + to_str(index) + " = file.fd\n"
+    }
+    index += 1
+  }
+  source += "0\n}\ngenerated()\n0\n"
+  source
+}
+
+fn aggregate_extraction_source() str {
+  "use core\nlinear layout File { int fd }\nlayout Pair { File left, File right }\n@consumes(file)\nfn dispose(File file) int { forget(file) 0 }\nfn generated() int {\ndef Pair pair = Pair(File(1), File(2))\ndef File left = pair.left\ndispose(left)\ndef File right = pair.right\ndispose(right)\n0\n}\ngenerated()\n0\n"
+}
+
+fn aggregate_shadow(list operations) bool {
+  mut bool left_moved = false
+  mut bool right_moved = false
+  mut int index = 0
+  while index < operations.len {
+    def operation = operations.get(index, 0)
+    if operation == 1 {
+      if left_moved { return false }
+      left_moved = true
+    } else if operation == 2 {
+      if right_moved { return false }
+      right_moved = true
+    }
+    index += 1
+  }
+  left_moved && right_moved
+}
+
+fn aggregate_source(list operations) str {
+  mut str source = "use core\nlinear layout File { int fd }\nlayout Pair { File left, File right, int tag }\nfn generated() int {\ndef Pair pair = Pair(File(7), File(9), 11)\n"
+  mut int index = 0
+  while index < operations.len {
+    def operation = operations.get(index, 0)
+    if operation == 1 {
+      source += "def File left" + to_str(index) + " = pair.left\nforget(left" + to_str(index) + ")\n"
+    } else if operation == 2 {
+      source += "def File right" + to_str(index) + " = pair.right\nforget(right" + to_str(index) + ")\n"
+    } else {
+      source += "def observed" + to_str(index) + " = pair.tag\n"
+    }
+    index += 1
+  }
+  source += "pair.tag\n}\ngenerated()\n0\n"
+  source
+}
+
+fn aggregate_alias_source(bool read_original) str {
+  mut str source = "use core\nlinear layout File { int fd }\nlayout Pair { File left, File right, int tag }\nfn generated() int {\ndef Pair original = Pair(File(7), File(9), 11)\ndef transferred = original\n"
+  if read_original {
+    source += "def observed = original.left.fd\n"
+  }
+  source += "def File left = transferred.left\nforget(left)\ndef File right = transferred.right\nforget(right)\ntransferred.tag\n}\ngenerated()\n0\n"
+  source
+}
+
+fn nested_borrow_source(bool conflict) str {
+  mut str source = "use core\nfn generated(bool outer, bool inner) int {\nmut int value = 0\ndef borrowed = &mut value\n"
+  if conflict {
+    source += "if outer {\nvalue = value + 1\ndef observed = borrowed\n} else {\ndef observed_else = borrowed\n}\n"
+  } else {
+    source += "if outer {\nif inner {\ndef observed = borrowed\n} else {\nvalue = value + 1\n}\n} else {\nvalue = value + 1\n}\n"
+  }
+  source += "value\n}\ngenerated(true, true)\n"
+  source
+}
+
+fn place_borrow_source(bool indexed, bool conflict) str {
+  mut str source = "use core\nlayout Pair { int left, int right }\nfn generated() int {\n"
+  if indexed {
+    source += "mut list<int> values = [7, 8]\ndef borrowed = &mut values[0]\n"
+    if conflict {
+      source += "def observed_index = values[0]\ndef observed = borrowed\n"
+    } else {
+      source += "def observed_index = values[1]\ndef observed = borrowed\n"
+    }
+    source += "values[0] + values[1]\n}\ngenerated()\n0\n"
+  } else {
+    source += "mut Pair pair = Pair(7, 8)\ndef borrowed = &mut pair.left\n"
+    if conflict {
+      source += "def observed_field = pair.left\ndef observed = borrowed\n"
+    } else {
+      source += "def observed_field = pair.right\ndef observed = borrowed\n"
+    }
+    source += "pair.left + pair.right\n}\ngenerated()\n0\n"
+  }
+  source
+}
+
+fn copied_borrow_source(bool conflict) str {
+  mut str source = "use core\nfn generated() int {\nmut int value = 5\ndef borrowed = &mut value\ndef alias = borrowed\n"
+  if conflict {
+    source += "value = value + 1\ndef observed = alias\n"
+  } else {
+    source += "def observed = alias\nvalue = value + 1\n"
+  }
+  source += "value\n}\ngenerated()\n0\n"
+  source
+}
+
+fn shadowed_set_idx_borrow_source() str {
+  "use core\n" +
+      "fn set_idx(list<int> values, int index, int value) int { values[0] }\n" +
+      "fn generated() int {\nmut list<int> values = [3, 5]\n" +
+      "def borrowed = &mut values[0]\nset_idx(values, 1, 9)\n" +
+      "def observed = borrowed\n0\n}\ngenerated()\n0\n"
+}
+
+fn match_borrow_source(bool conflict) str {
+  mut str source = "use core\nfn generated(int selector) int {\nmut int value = 5\ndef borrowed = &mut value\nmatch selector {\n"
+  if conflict {
+    source += "0 -> { value = value + 1; def observed = borrowed }\n_ -> { def other = borrowed }\n"
+  } else {
+    source += "0 -> { def observed = borrowed }\n_ -> { value = value + 1 }\n"
+  }
+  source += "}\nvalue\n}\ngenerated(0)\n0\n"
+  source
+}
+
+fn nested_copied_borrow_source(bool conflict) str {
+  mut str source = "use core\nfn generated(bool choose) int {\nmut int value = 5\ndef borrowed = &mut value\nif choose {\ndef alias = borrowed\n"
+  if conflict {
+    source += "value = value + 1\ndef observed = alias\n"
+  } else {
+    source += "def observed = alias\n"
+  }
+  source += "} else {\nvalue = value + 1\n}\nvalue\n}\ngenerated(true)\n0\n"
+  source
+}
+
+mut generated_cases = []
+
+fn check_generated(str source, bool expected, str label) int {
+  generated_cases = generated_cases.append([source, false, expected, label])
+  0
+}
+
+fn check_generated_emit_only(str source, bool expected, str label) int {
+  generated_cases = generated_cases.append([source, true, expected, label])
+  0
+}
+
+fn run_generated_cases(int first_case) str {
+  mut int case_index = first_case
+  while case_index < generated_cases.len {
+    def test_case = generated_cases.get(case_index, [])
+    def source = test_case.get(0, "")
+    def emit_only = test_case.get(1, false)
+    def expected = test_case.get(2, false)
+    def label = test_case.get(3, "")
+    def result = compile_generated(source, emit_only)
+    def output = result.get("stdout", "")
+    def code = result.get("code", 127)
+    def accepted = code == 0 && str.find(output, "error:") < 0
+    if accepted != expected {
+      return label + " runtime shadow and strict checker disagree (code " +
+             to_str(code) + "): " + output +
+             "\ngenerated source:\n" + source
+    }
+    case_index += 4
+  }
+  ""
+}
+
+fn borrow_closure_source(bool copied_alias, bool invoke) str {
+  mut str source = "use core\nfn generated() int {\nmut int value = 5\ndef borrowed = &mut value\n"
+  if copied_alias { source += "def alias = borrowed\n" }
+  def capture = copied_alias ? "alias" : "borrowed"
+  source += "def later = fn() { " + capture + " }\n"
+  if invoke { source += "later()\n" }
+  source += "value\n}\ngenerated()\n0\n"
+  source
+}
+
+fn allowance_branch_source(int left_uses, int right_uses, int lo, int hi,
+                           str name) str {
+  mut str source = "@allowance(x, [" + to_str(lo) + "," +
+                   to_str(hi) + "])\nfn " + name +
+                   "(bool choose, int x) int {\nif choose {\n"
+  mut int index = 0
+  if left_uses == 0 { source += "0\n" }
+  while index < left_uses {
+    if index > 0 { source += " + " }
+    source += "x"
+    index += 1
+  }
+  source += "\n} else {\n"
+  index = 0
+  if right_uses == 0 { source += "0\n" }
+  while index < right_uses {
+    if index > 0 { source += " + " }
+    source += "x"
+    index += 1
+  }
+  source += "\n}\n}\n"
+  source
+}
+
+mut int mask = 1
+while mask < 16 {
+  mut list borrow_ops = list(4)
+  mut int index = 0
+  while index < 4 {
+    borrow_ops = borrow_ops.append((mask >> index) & 1)
+    index += 1
+  }
+  if borrow_shadow(borrow_ops) {
+    check_generated(borrow_source(borrow_ops), true,
+                    "generated exclusive borrow " + to_str(mask))
+  } else {
+    check_generated(borrow_source(borrow_ops), false,
+                    "generated exclusive borrow " + to_str(mask))
+  }
+  mask += 1
+}
+
+; Closure construction cannot capture a second-class borrow, whether the
+; closure uses the original name or a copied alias. Invocation does not make
+; that capture safe.
+check_generated(borrow_closure_source(false, false), false,
+                "generated closure rejects direct borrow capture")
+check_generated(borrow_closure_source(false, true), false,
+                "generated closure rejects invoked direct borrow capture")
+check_generated(borrow_closure_source(true, false), false,
+                "generated closure rejects copied-alias borrow capture")
+check_generated(borrow_closure_source(true, true), false,
+                "generated closure rejects invoked copied-alias capture")
+
+mut int move_mask = 1
+while move_mask < 8 {
+  mut list move_ops = list(3)
+  mut int index = 0
+  while index < 3 {
+    move_ops = move_ops.append((move_mask >> index) & 1)
+    index += 1
+  }
+  if move_shadow(move_ops) {
+    check_generated(move_source(move_ops), true,
+                    "generated inferred resource move " + to_str(move_mask))
+  } else {
+    check_generated(move_source(move_ops), false,
+                    "generated inferred resource move " + to_str(move_mask))
+  }
+  move_mask += 1
+}
+
+check_generated(aggregate_extraction_source(), true,
+                "generated partial extraction from a linear aggregate")
+check_generated_emit_only(aggregate_alias_source(false), true,
+                          "generated inferred move of a resource aggregate")
+check_generated(aggregate_alias_source(true), false,
+                "generated inferred aggregate move rejects source reuse")
+check_generated(nested_borrow_source(false), true,
+                "generated nested branch keeps disjoint borrow paths")
+check_generated(nested_borrow_source(true), false,
+                "generated nested branch rejects an access before later borrow use")
+check_generated(place_borrow_source(false, false), true,
+                "generated field borrow preserves a disjoint field access")
+check_generated(place_borrow_source(false, true), false,
+                "generated field borrow rejects same-field access")
+check_generated(place_borrow_source(true, false), true,
+                "generated indexed borrow preserves a disjoint index access")
+check_generated(place_borrow_source(true, true), false,
+                "generated indexed borrow rejects same-index access")
+check_generated(copied_borrow_source(false), true,
+                "generated copied borrow ends after its final alias use")
+check_generated(copied_borrow_source(true), false,
+                "generated copied borrow keeps the owner exclusive through alias use")
+check_generated(shadowed_set_idx_borrow_source(), false,
+                "generated user set_idx calls do not inherit indexed-store treatment")
+check_generated(match_borrow_source(false), true,
+                "generated match keeps borrow and disjoint mutation on separate paths")
+check_generated(match_borrow_source(true), false,
+                "generated match rejects an owner access before a same-path borrow use")
+check_generated(nested_copied_borrow_source(false), true,
+                "generated nested copied borrow permits a disjoint sibling path")
+check_generated(nested_copied_borrow_source(true), false,
+                "generated nested copied borrow keeps same-path exclusivity")
+
+; Generated allowance contracts exercise path joins through a conditional.
+; The contract checker must accept the exact observed interval and reject
+; either a lower bound that is too high or an upper bound that is too low.
+check_generated(
+  "use core\n@allowance(x, [0,1])\nfn generated(bool left, int x) int { if left { x } else { 0 } }\ngenerated(true, 7)\n0\n",
+  true, "generated allowance accepts an optional branch use")
+check_generated(
+  "use core\n@allowance(x, [1,1])\nfn generated(bool left, int x) int { if left { x } else { x } }\ngenerated(true, 7)\n0\n",
+  true, "generated allowance accepts exact use on both branches")
+check_generated(
+  "use core\n@allowance(x, [2,2])\nfn generated(bool left, int x) int { if left { x } else { x } }\ngenerated(true, 7)\n0\n",
+  false, "generated allowance rejects an excessive minimum")
+check_generated(
+  "use core\n@allowance(x, [0,0])\nfn generated(bool left, int x) int { if left { x } else { 0 } }\ngenerated(true, 7)\n0\n",
+  false, "generated allowance rejects an insufficient maximum")
+
+; Exhaustively compare branch-use intervals against the path-count model.
+mut str exact_allowances = "use core\n"
+mut str exact_allowance_calls = ""
+mut int left_uses = 0
+while left_uses <= 3 {
+  mut int right_uses = 0
+  while right_uses <= 3 {
+    def minimum = left_uses < right_uses ? left_uses : right_uses
+    def maximum = left_uses > right_uses ? left_uses : right_uses
+    def suffix = to_str(left_uses) + "_" + to_str(right_uses)
+    def exact_name = "allowance_exact_" + suffix
+    exact_allowances += allowance_branch_source(left_uses, right_uses,
+                                                minimum, maximum, exact_name)
+    exact_allowance_calls += exact_name + "(true, 7)\n"
+    if minimum < maximum {
+      check_generated(
+          "use core\n" + allowance_branch_source(
+                            left_uses, right_uses, minimum + 1, maximum,
+                            "allowance_lower_" + suffix),
+          false, "generated lower-bound rejection for pair " + suffix)
+      check_generated(
+          "use core\n" + allowance_branch_source(
+                            left_uses, right_uses, minimum, maximum - 1,
+                            "allowance_upper_" + suffix),
+          false, "generated upper-bound rejection for pair " + suffix)
+    } else {
+      check_generated(
+          "use core\n" + allowance_branch_source(
+                            left_uses, right_uses, minimum + 1, maximum + 1,
+                            "allowance_exact_reject_" + suffix),
+          false, "generated exact-use rejection for pair " + suffix)
+    }
+    right_uses += 1
+  }
+  left_uses += 1
+}
+exact_allowances += exact_allowance_calls
+exact_allowances += "0\n"
+check_generated(exact_allowances, true,
+                "generated exact allowance intervals cover all 16 branch pairs")
+
+mut int aggregate_mask = 0
+while aggregate_mask < 9 {
+  mut list aggregate_ops = list(2)
+  mut int index = 0
+  mut int encoded = aggregate_mask
+  while index < 2 {
+    aggregate_ops = aggregate_ops.append(encoded % 3)
+    encoded /= 3
+    index += 1
+  }
+  def expected = aggregate_shadow(aggregate_ops)
+  check_generated(aggregate_source(aggregate_ops), expected,
+                  "generated partial aggregate move " + to_str(aggregate_mask))
+  aggregate_mask += 1
+}
+def worker0 = thread.thread_spawn(run_generated_cases, 0)
+def worker1 = thread.thread_spawn(run_generated_cases, 1)
+def worker2 = thread.thread_spawn(run_generated_cases, 2)
+def worker3 = thread.thread_spawn(run_generated_cases, 3)
+def failure0 = thread.thread_join(worker0)
+def failure1 = thread.thread_join(worker1)
+def failure2 = thread.thread_join(worker2)
+def failure3 = thread.thread_join(worker3)
+assert(failure0 == "", failure0)
+assert(failure1 == "", failure1)
+assert(failure2 == "", failure2)
+assert(failure3 == "", failure3)
+NY
+}

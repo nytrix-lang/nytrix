@@ -5,10 +5,10 @@
 ;; - https://www.secg.org/sec1-v2.pdf
 ;; - https://www.rfc-editor.org/rfc/rfc8032
 ;; References:
-;; - std.math.crypto.ecc
-;; - std.math.crypto
-module std.math.crypto.ecc.elgamal(elgamal_public_key, elgamal_private_key, elgamal_keygen, elgamal_encrypt, elgamal_decrypt, elgamal_derive_shared, elgamal_nonce_reuse, elgamal_recover_key_from_nonce_reuse, elgamal_key_nonce_reuse, elgamal_key_nonce_reuse_all, elgamal_recover_plaintext_from_nonce_reuse, elgamal_multiply_ciphertext, elgamal_unsafe_generator_leak, elgamal_sign, elgamal_verify, elgamal_signature_nonce_reuse)
-use std.math.nt
+;; - core.math.crypto.ecc
+;; - core.math.crypto
+module core.math.crypto.ecc.elgamal(elgamal_public_key, elgamal_private_key, elgamal_keygen, elgamal_encrypt, elgamal_decrypt, elgamal_derive_shared, elgamal_nonce_reuse, elgamal_recover_key_from_nonce_reuse, elgamal_key_nonce_reuse, elgamal_key_nonce_reuse_all, elgamal_recover_plaintext_from_nonce_reuse, elgamal_multiply_ciphertext, elgamal_unsafe_generator_leak, elgamal_sign, elgamal_verify, elgamal_signature_nonce_reuse)
+use core.math.nt
 
 fn elgamal_public_key(any h, any p, any g, any q=nil) list {
    "Create an ElGamal public key tuple [h, p, g, q]."
@@ -206,5 +206,5 @@ fn dlog_brute(any g, any h, any p, any max_iter) any {
    assert(elgamal_verify(m, sig, h, p, g), "elgamal_verify")
    def mal = elgamal_multiply_ciphertext(ct, 3, p)
    assert(elgamal_decrypt(mal[0], mal[1], x, p) == (m * 3) % p, "malleability")
-   print("✓ std.math.crypto.ecc.elgamal self-test passed")
+   print("✓ core.math.crypto.ecc.elgamal self-test passed")
 }

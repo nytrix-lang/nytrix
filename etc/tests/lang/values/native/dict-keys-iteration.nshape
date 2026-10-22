@@ -1,0 +1,23 @@
+shape test_dict_keys_iteration {
+  family "native/values"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+mut text = ""
+text = text + "b"
+assert(text == "b", "mutable string global keeps pointer ABI")
+
+mut m = {"a": 1, "b": 2}
+mut seen = ""
+for k in m.keys() { seen = seen + k }
+assert(seen == "ba" || seen == "ab", "direct dictionary-key iteration")
+def keys = m.keys()
+seen = ""
+for k in keys { seen = seen + k }
+assert(seen == "ba" || seen == "ab", "named dictionary-key iteration")
+NY
+}

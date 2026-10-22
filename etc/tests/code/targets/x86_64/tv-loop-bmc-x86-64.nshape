@@ -1,0 +1,25 @@
+shape oracle_tv_loop_bmc_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle translation-validation z3 cfg ite bounded-loop]
+  template ny-test-case
+  timeout 60
+  flags_matrix "-O2 --native-tv-seed=32 --native-result-oracle=0; -O3 --native-tv-seed=32 --native-result-oracle=0"
+  expect compile_and_run
+  source ny <<'NY'
+fn folded() i64 {
+  mut x = 0
+  mut y = 1
+  while x < 7 {
+    if x % 2 == 0 {
+      y = y + x * 3
+    } else {
+      y = y - x
+    }
+    x = x + 1
+  }
+  y
+}
+if folded() == 28 { 0 } else { 1 }
+NY
+}

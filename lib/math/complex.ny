@@ -1,9 +1,9 @@
 ;; Keywords: complex complex-numbers math
 ;; Native complex number facade for Nytrix.
 ;; References:
-;; - std.math
-module std.math.complex(complex, Complex, c64, c128, is_complex, real, imag, re, im, conj, abs2, add, sub, mul, div, same, different)
-use std.core
+;; - core.math
+module core.math.complex(complex, Complex, c64, c128, is_complex, real, imag, re, im, conj, abs2, add, sub, mul, div, same, different)
+use core
 
 fn complex(any real_part=0.0, any imag_part=0.0) complex {
    "Creates a boxed native complex value backed by the compiler's complex ABI type."

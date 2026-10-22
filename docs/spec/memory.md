@@ -29,9 +29,9 @@ a tagged integer.
 The ordinary allocator returns a 16-byte-aligned object pointer with a 32-byte
 runtime prefix immediately before it. The prefix contains the allocation magic
 and tagged body size; small allocations may be reused from thread-local pools.
-Reference accounting tracks ordinary managed allocations. With the opt-in GC,
-the collector adds its own 16-byte collector header before that same runtime
-prefix and moves/scans supported heap objects.
+Reference accounting tracks ordinary managed allocations. Tracing GC adds
+a 16-byte header before the runtime prefix and moves
+supported managed objects.
 
 ```text
 addresses grow ->

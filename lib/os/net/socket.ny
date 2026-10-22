@@ -1,17 +1,17 @@
 ;; Keywords: net socket tcp udp os
 ;; Net Socket for Nytrix
 ;; References:
-;; - std.os.net
-;; - std.os
-module std.os.net.socket(htons, ipv4_parse, ipv4_format, gethostbyname, _make_sockaddr, socket_connect, socket_bind, socket_bound_port, socket_accept, socket_accept_info, read_socket, write_socket, socket_connect_async, socket_accept_async, read_socket_async, write_socket_part_async, write_socket_all_async, read_socket_until_async, socket_set_timeout_ms, socket_set_recv_timeout_ms, socket_set_send_timeout_ms, read_socket_exact, write_socket_part, write_socket_all, write_socket_line, read_socket_until, close_socket)
-use std.core
-use std.core.str
-use std.core.reflect
-use std.os
-use std.os.sys
-use std.os.path
-use std.os.path as ospath
-use std.core.mem as mem
+;; - core.os.net
+;; - core.os
+module core.os.net.socket(htons, ipv4_parse, ipv4_format, gethostbyname, _make_sockaddr, socket_connect, socket_bind, socket_bound_port, socket_accept, socket_accept_info, read_socket, write_socket, socket_connect_async, socket_accept_async, read_socket_async, write_socket_part_async, write_socket_all_async, read_socket_until_async, socket_set_timeout_ms, socket_set_recv_timeout_ms, socket_set_send_timeout_ms, read_socket_exact, write_socket_part, write_socket_all, write_socket_line, read_socket_until, close_socket)
+use core
+use core.str
+use core.reflect
+use core.os
+use core.os.sys
+use core.os.path
+use core.os.path as ospath
+use core.mem as mem
 
 #windows {
    #link "ws2_32.lib"
@@ -224,12 +224,12 @@ fn _make_sockaddr(int ip, int port) any {
    ;; EAFNOSUPPORT).
    def sa = malloc(16)
    if sa == 0 { return 0 }
-   if OS == "macos" {
+   #if macos {
       store8(sa, 16, 0)
       store8(sa, AF_INET, 1)
-   } else {
+   } #else {
       store16(sa, AF_INET, 0)
-   }
+   } #endif
    store16(sa, htons(port), 2)
    store32(sa, ip, 4)
    store64(sa, 0, 8)
@@ -278,12 +278,12 @@ fn socket_bind(str host, int port) int {
    if ip == 0 && !(host.len == 0 || host == "*" || host == "0.0.0.0") { return -1 }
    def fd = _net_socket(AF_INET, SOCK_STREAM, 0)
    if fd < 0 {
-      print("Socket create failed, errno:", errno())
+      print("Socket create failed, errno:", __errno())
       return -1
    }
    def opt = malloc(4)
    if opt == 0 {
-      print("Socket bind setup failed, errno:", errno())
+      print("Socket bind setup failed, errno:", __errno())
       _net_close(fd)
       return -1
    }
@@ -298,13 +298,13 @@ fn socket_bind(str host, int port) int {
    def br = _c_bind(fd, sa, 16)
    free(sa)
    if br < 0 {
-      print("Socket bind failed, errno:", errno())
+      print("Socket bind failed, errno:", __errno())
       _net_close(fd)
       return -1
    }
    def lr = _c_listen(fd, 128)
    if lr < 0 {
-      print("Socket listen failed, errno:", errno())
+      print("Socket listen failed, errno:", __errno())
       _net_close(fd)
       return -1
    }
@@ -410,16 +410,16 @@ fn socket_set_timeout_ms(int fd, int timeout_ms) int {
    (r1 < 0 || r2 < 0) ? -1 : 0
 }
 
-fn read_socket(int fd, any max_len) any {
+fn read_socket(int fd, int max_len) str {
    "Reads up to `max_len` bytes from a socket. Returns the data as a string."
-   if !is_int(max_len) || max_len <= 0 { return "" }
-   if max_len > 1048576 { max_len = 1048576 }
-   def base = malloc(max_len + 17)
-   if base == 0 { return "" }
-   def buf = base + 16
-   def n = _c_recv(fd, buf, max_len, 0)
+   mut int len = max_len
+   if len <= 0 { return "" }
+   if len > 1048576 { len = 1048576 }
+   def ptr buf = malloc(len + 1)
+   if buf == 0 { return "" }
+   def n = _c_recv(fd, buf, len, 0)
    if n <= 0 {
-      free(base)
+      free(buf)
       return ""
    }
    ;; store8(p, v, i): write the NUL terminator one past the payload.
@@ -460,17 +460,19 @@ fn write_socket_part(int fd, any data, any off, any size=-1) int {
    "Writes a string slice `[off, off+size)` to socket without allocating substrings."
    if !is_str(data) || !is_int(off) { return -1 }
    def n = data.len
-   if off < 0 { off = 0 }
-   if off >= n { return 0 }
-   mut count = size
-   if !is_int(count) || count < 0 || off + count > n { count = n - off }
-   if count <= 0 { return 0 }
-   ;; off/count arrive as dynamic words; unbox both so the extern receives
-   ;; the raw pointer and raw length (a boxed `off` shifted the buffer).
-   def base_ptr = to_int(data)
-   def off_i = to_int(off)
-   def count_i = to_int(count)
-   _c_send(fd, base_ptr + off_i, count_i, 0)
+   ;; Convert dynamic indices once before raw arithmetic and the C boundary.
+   mut off_i = __any_to_i64(off)
+   if off_i < 0 { off_i = 0 }
+   if off_i >= n { return 0 }
+   mut count_i = 0
+   if !is_int(size) {
+      count_i = n - off_i
+   } else {
+      count_i = __any_to_i64(size)
+      if count_i < 0 || off_i + count_i > n { count_i = n - off_i }
+   }
+   if count_i <= 0 { return 0 }
+   _c_send(fd, ptr_add(data, off_i), count_i, 0)
 }
 
 fn write_socket_part_async(int fd, any data, any off, any size=-1) any {
@@ -551,5 +553,5 @@ fn close_socket(int fd) int {
    assert(ipv4_parse("999.1.1.1") == 0, "socket invalid ipv4")
    assert(socket_set_timeout_ms(-1, 100) == -1, "socket invalid timeout")
    assert(close_socket(-1) == -1, "socket invalid close")
-   print("✓ std.os.net.socket self-test passed")
+   print("✓ core.os.net.socket self-test passed")
 }

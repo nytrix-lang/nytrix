@@ -1,21 +1,21 @@
 ;; Keywords: editor core buffer state text os ui render viewer
 ;; Core editor buffer, cursor, viewport, and state helpers.
 ;; References:
-;; - std.os.ui.render.viewer.editor.selection
-module std.os.ui.render.viewer.editor.core(
+;; - core.os.ui.render.viewer.editor.selection
+module core.os.ui.render.viewer.editor.core(
    split_lines, join_lines, buffer, state,
    current_buffer, current_lines, set_lines, clamp_cursor
 )
 
-use std.core
-use std.core.str as str
-use std.math (max)
-use std.os.path as ospath
+use core
+use core.str as str
+use core.math (max)
+use core.os.path as ospath
 
 fn split_lines(str text) list {
    "Splits text into editor rows after normalizing CRLF."
    if str.find(text, "\r") < 0 { return str.split(text, "\n") }
-   str.split(str.replace(str.replace(text, "\r\n", "\n"), "\r", "\n"), "\n")
+   str.split(str.str_replace(str.str_replace(text, "\r\n", "\n"), "\r", "\n"), "\n")
 }
 
 fn join_lines(list lines) str {

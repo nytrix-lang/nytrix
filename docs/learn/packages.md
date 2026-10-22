@@ -1,217 +1,81 @@
-<!-- nytrix-doc: {"audience":"user","featured":false,"group":"learn","order":130,"summary":"Organize reusable code into packages and keep project boundaries clear."} -->
+<!-- nytrix-doc: {"audience":"user","featured":false,"group":"learn","order":130,"summary":"Create a package manifest, add dependencies, and reproduce installs from the lockfile."} -->
 # Packages
 
-Nytrix packages are source packages. The package manager records direct
-dependencies, installs source into an import root, and writes a lockfile with
-installed state.
+Nytrix packages are source dependencies resolved to an import root. The package
+manager records direct dependencies in `ny.pkg.json` and writes resolved state
+to `ny.pkg.json.lock`.
 
-The resolver imports package names the same way it imports modules. The package
-manager only decides where source lives and which version or local path was
-installed.
+## Start a project
 
-## Commands
+Use `ny new <dir>` for an application scaffold. In an existing project:
 
-| Command | Behavior |
-| --- | --- |
-| `ny new myapp` | Create a project scaffold. |
-| `ny pkg init name` | Create only `ny.pkg.json`. |
-| `ny pkg info` | Print package metadata and installed paths. |
-| `ny pkg add name source` | Add and install a direct dependency. |
-| `ny get name` | Resolve from registry/repository and install. |
-| `ny pkg search query` | Fuzzy-search registry entries and registered package repositories. |
-| `ny pkg search --interactive query` | Open the built-in fuzzy package picker. |
-| `ny pkg repo add name source` | Register a package repository for name lookup. |
-| `ny pkg uninstall name` | Remove a local dependency. |
-| `ny pkg path` | Print the selected install root. |
-
-## Project layout
-
-```text
-myapp/
-  ny.pkg.json
-  src/main.ny
-  .gitignore
+```bash
+ny pkg init myapp
+ny pkg add helper ./deps/helper
+ny pkg list
+ny pkg path
 ```
 
-After dependency installation:
-
-```text
-myapp/
-  ny.pkg.json
-  ny.pkg.json.lock
-  ny_modules/
-```
-
-Imports use package names:
-
-```ny
-use package_name
-```
+`ny pkg add` accepts a package name and source. `ny get <name> [source]` is an
+alias; omitting the source requires a registry or repository entry. See
+`ny pkg --help` for install roots and options.
 
 ## Manifest
 
-`ny.pkg.json` stores metadata and direct dependencies.
+A manifest contains package metadata and direct dependencies:
 
 ```json
 {
   "schema": "ny.pkg.v1",
   "name": "myapp",
-  "version": "0.1",
-  "description": "small tool",
-  "author": "Name <mail@example>",
-  "license": "MIT",
-  "repository": "https://example.com/myapp.git",
+  "version": "0.1.0",
   "dependencies": {
-    "foo": {"source": "./deps/foo"},
-    "bar": {"source": "git+https://example.com/bar.git", "ref": "main"}
+    "helper": {"source": "./deps/helper"}
   }
 }
 ```
 
-## Sources
-
-| Source | Form |
-| --- | --- |
-| Local folder | `./deps/foo` |
-| Local file | `./one.ny` |
-| Git HTTPS | `git+https://host/bar.git#main` |
-| Git SSH | `git@host:baz.git --ref v1.2.0` |
-| Git URL | any supported `.git` URL |
-| Archive | `./arcfoo.tgz`, `./arcfoo.zip` |
-| Explicit archive | `archive+./arcfoo.zip` |
-| Repository package | `repo+repo_name/package_name` |
-
-`#ref` or `--ref` pins a git ref.
-
-## Registry
-
-Registry entries map names to sources:
+The package name is the import name:
 
 ```text
-foo = ./deps/foo
-bar = git+https://example.com/bar.git#main
-repo core = git+https://github.com/owner/ny-packages.git
+use helper
 ```
 
-Registry lookup checks local registry files, configured registry environment,
-and the user registry.
+Dependency sources can be local paths, Git URLs, or supported tar/zip
+archives. Use `--ref` to select a Git ref. The package manager reports the
+accepted source forms and install modes in `ny pkg --help`.
 
-The shared Nytrix config files can also hold package repository entries:
+## Reproduce an install
 
-```text
-~/.config/nytrix/config
-./.nytrix/config
-```
+Commit the lockfile for an application when repeatable dependency resolution
+matters. `ny pkg sync` installs manifest dependencies; `ny pkg sync --offline`
+uses the lockfile and local package cache without contacting registries. A
+missing cached package is an error in offline mode. Local path dependencies
+must remain available on disk.
 
-Use the same line form:
+Content hashes identify the bytes that were installed; they do not prove who
+published them. Treat package sources and registry configuration as trusted
+inputs.
 
-```text
-repo core = git+https://github.com/owner/ny-packages.git
-NYTRIX_PKG_HOME=~/.local/share/nytrix/pkg
-NYTRIX_PKG_PATH=./ny_modules:./vendor/ny_modules
-```
-
-Environment variables override config defaults. Repository lines are read by
-`ny pkg repo list`, `ny pkg search`, and `ny get`.
-
-## Package repositories
-
-A package repository root contains package directories:
-
-```text
-packages/
-  bigint/mod.ny
-  crypto_extra/mod.ny
-```
-
-Repository commands:
+## Repositories and search
 
 ```bash
+ny pkg search query
 ny pkg repo add local ./packages
-ny pkg repo add core git+https://github.com/owner/ny-packages.git
 ny pkg repo list
 ny pkg repo sync
-ny pkg repo path local
-ny pkg repo remove local
-ny get bigint
-ny pkg search [--interactive] query
+ny get helper
 ```
 
-`repo list` prints the configured repository name, source URL/path, and local
-cache path. Repository sources can be local paths, `git+https://...`, SSH Git
-URLs, or archives. Config-file repository entries are listed with registry
-entries.
+Use `ny pkg search --interactive query` for the built-in picker. `ny pkg --help`
+lists repository commands and registry configuration.
 
-`ny get <name>` checks direct registry entries first, then registered
-repositories for `<name>/mod.ny` or `<name>.ny`.
+## Diagnose an import
 
-`ny pkg search <query>` scans the same registry and repository sources used by
-`ny get`. Results include package name, source, repository, version, and
-description when a package manifest is present.
+- Check the package name in the `use` statement against the manifest key.
+- Run `ny pkg path` to see the active install root.
+- Inspect the lockfile for the resolved source and ref.
+- For offline installs, verify the exact package content is cached.
 
-Use `--interactive` for the built-in fuzzy picker. The picker is implemented
-inside `ny`; it does not shell out to external `fzf`.
-
-## Install roots
-
-| Mode | Root |
-| --- | --- |
-| default | `./ny_modules` |
-| `--vendor` | `./vendor/ny_modules` |
-| `--venv` | `./.nytrix/venv/lib` |
-| `--global` | user package home |
-| `--system` | system package home |
-| `--root path` | custom root |
-
-Resolver order includes local modules, vendored modules, venv modules,
-configured package path, user package home, and system package home.
-
-## Lockfile
-
-`ny.pkg.json.lock` uses schema `ny.pkg.lock.v2`. It records every package
-reachable from the root manifest, parent→child dependency edges, installed
-paths, and immutable source identity. Git dependencies retain the resolved
-commit. Archive dependencies retain a SHA-256 digest computed from the archive
-bytes before extraction. Relative local dependencies inside a package are
-resolved relative to that package's own manifest, not the root project.
-
-Resolution is intentionally deterministic rather than version-solving: one
-package name identifies one source/ref pair for the complete graph. If two
-parents request the same package name from different sources or refs,
-installation fails with a conflict instead of silently choosing traversal
-order. Identical requests are deduplicated while every parent→child edge is
-retained. A package is reserved in the graph before descending into its
-manifest, so dependency cycles terminate; a depth bound remains as defense in
-depth for malformed graphs. Nested install failures propagate to the root and
-do not produce a successful lockfile.
-
-Commit the lockfile for applications when reproducibility matters. The lock is
-a record of the complete resolved graph. Successful online installs snapshot
-immutable git/archive package contents into the package content cache. Run
-`ny pkg sync --offline` (or another package install command with `--offline`)
-to replay strictly from that lock plus local package content: no registry or
-network lookup is attempted, source/ref mismatches fail, and a missing cached
-package is an error instead of silently falling back online. Local path
-dependencies remain path-backed and therefore must still be present locally.
-
-### Integrity and trust
-
-Content identity and publisher authenticity are separate. Git commits and
-archive SHA-256 digests detect content changes after an identity is trusted,
-but a digest learned from an untrusted registry is not authentication. Local
-paths are trusted as local filesystem input, and Git authenticity follows the
-configured transport/repository trust. A security-sensitive public registry
-would need authenticated or signed metadata that binds package name, immutable
-content identity, and release metadata.
-
-## Common package failures
-
-| Symptom | Check |
-| --- | --- |
-| Import not found | Run `ny pkg path` and confirm the package exists under the selected root. |
-| Wrong source version | Inspect `ny.pkg.json.lock` for the resolved git ref or local path. |
-| Package name mismatch | Confirm the dependency key matches the import name. |
-| Repo package not found | Run `ny pkg repo list` and `ny pkg repo sync <repo>`. |
-
-See [Tooling](tooling.md) for package command families and
-[Troubleshooting](troubleshooting.md) for import failures.
+See [Programs](programs.md) for module structure and
+[Troubleshooting](troubleshooting.md) for import errors.

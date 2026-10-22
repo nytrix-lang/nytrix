@@ -1,9 +1,9 @@
 ;; Keywords: net socket requests http-client request os
 ;; High-level HTTP requests for Nytrix.
 ;; References:
-;; - std.os.net
-;; - std.os
-module std.os.net.requests(
+;; - core.os.net
+;; - core.os
+module core.os.net.requests(
    request, request_raw, prepare_request, requests_prepare,
    requests_get, requests_get_host, requests_get_parsed, requests_get_host_parsed,
    requests_post, requests_put, requests_delete, requests_post_raw,
@@ -11,13 +11,13 @@ module std.os.net.requests(
    requests, requests_parse_url, requests_parse_url_ex, requests_parse_query, requests_parse_response
 )
 
-use std.os.net.http
-use std.os.net.curl as curl
-use std.os.net.context as netctx
-use std.core
-use std.core.dict_mod as _d
-use std.core.str
-use std.math.parse.data.json as jsonlib
+use core.os.net.http
+use core.os.net.curl as curl
+use core.os.net.context as netctx
+use core
+use core.dict_mod as _d
+use core.str
+use core.math.parse.data.json as jsonlib
 
 fn _requests_empty_response(any url, any method, str transport="requests", str error="") dict {
    mut out = _d.dict(12)
@@ -122,8 +122,8 @@ fn _quote(any value, bool plus=false) str {
    out
 }
 
-fn _append_pair(any builder, any key, any value, bool plus) any {
-   if builder[1] > 0 { builder = builder_append(builder, "&") }
+fn _append_pair(any builder, any key, any value, bool plus, bool prepend) any {
+   if prepend { builder = builder_append(builder, "&") }
    builder = builder_append(builder, _quote(key, plus) + "=" + _quote(value, plus))
    builder
 }
@@ -136,19 +136,22 @@ fn _encode_pairs(any params, bool plus=true) str {
    } elif is_dict(params) {
       mut b = Builder(128)
       def items = _d.dict_items(params)
-      mut i = 0
+      mut int i = 0
+      mut int pair_count = 0
       while i < items.len {
          def pair = items.get(i)
          def k = pair.get(0)
          def v = pair.get(1)
          if is_list(v) || is_tuple(v) {
-            mut j = 0
+            mut int j = 0
             while j < v.len {
-               b = _append_pair(b, k, v.get(j), plus)
+               b = _append_pair(b, k, v.get(j), plus, pair_count > 0)
+               pair_count += 1
                j += 1
             }
          } else {
-            b = _append_pair(b, k, v, plus)
+            b = _append_pair(b, k, v, plus, pair_count > 0)
+            pair_count += 1
          }
          i += 1
       }
@@ -156,10 +159,15 @@ fn _encode_pairs(any params, bool plus=true) str {
       builder_free(b)
       out
    } elif is_list(params) || is_tuple(params) {
-      mut b, i = Builder(128), 0
+      mut b = Builder(128)
+      mut int i = 0
+      mut int pair_count = 0
       while i < params.len {
          def p = params.get(i)
-         if (is_list(p) || is_tuple(p)) && p.len >= 2 { b = _append_pair(b, p.get(0), p.get(1), plus) }
+         if (is_list(p) || is_tuple(p)) && p.len >= 2 {
+            b = _append_pair(b, p.get(0), p.get(1), plus, pair_count > 0)
+            pair_count += 1
+         }
          i += 1
       }
       def out = builder_to_str(b)
@@ -192,7 +200,7 @@ fn _cookie_string(any cookies) str {
    mut b, i = Builder(128), 0
    while i < items.len {
       def pair = items.get(i)
-      if b[1] > 0 { b = builder_append(b, "; ") }
+      if i > 0 { b = builder_append(b, "; ") }
       b = builder_append(b, _quote(pair.get(0), false) + "=" + _quote(pair.get(1), false))
       i += 1
    }
@@ -688,5 +696,5 @@ fn requests_parse_response(any raw) dict {
    assert_eq(meta.get("reason", ""), "Created", "parse response metadata reason")
    assert_eq(meta.get("body", ""), "hello", "parse response content length")
    assert_eq(meta.get("headers", 0).get("x-test", ""), "ok", "parse response header lookup")
-   print("✓ std.os.net.requests self-test passed")
+   print("✓ core.os.net.requests self-test passed")
 }

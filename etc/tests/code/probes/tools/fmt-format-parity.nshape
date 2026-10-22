@@ -1,0 +1,162 @@
+shape fmt_format_parity {
+  family "probe/tools"
+  generator "embedded"
+  features ["formatter", "format", "analyze", "audit", "parity"]
+  template ny-test-case
+  flags "--native-only"
+  timeout 180
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.fs as fs
+use core.os.subprocess (run_capture)
+use core.str as str
+
+def root = env("NYTRIX_ROOT")
+def ny = env("NYTRIX_NY_FULL_BIN")
+def fmt = env("NYTRIX_TEST_FMT_BIN")
+assert(is_str(root) && root.len > 0, "test runner provides repository root")
+assert(is_str(ny) && ny.len > 0, "test runner provides full Ny executable")
+assert(is_str(fmt) && fmt.len > 0, "CTest provides standalone formatter")
+def dir = temp_dir() + "/fmt-format-parity-" + to_str(pid())
+def setup = run_capture(["cmake", "-E", "make_directory", dir], [], nil, false)
+assert(setup.get("code", 127) == 0, "create isolated formatter directory")
+
+fn write_file(str name, str contents) str {
+   def path = dir + "/" + name
+   assert(is_ok(file_write(path, contents)), "write formatter input " + name)
+   return path
+}
+
+fn compare(list args, str label) dict {
+   def c = run_capture([fmt] + args, [], nil, false)
+   def ny_result = run_capture([ny, "fmt"] + args, [], nil, false)
+   assert(c.get("code", 127) == ny_result.get("code", 127) &&
+          c.get("stdout", "") == ny_result.get("stdout", ""),
+          label + " differs from standalone C formatter\nC: " +
+          c.get("stdout", "") + "\nNy: " + ny_result.get("stdout", ""))
+   return c
+}
+
+def input = "use core *\n@inline @pure fn f(x){\nif (x){\nreturn (x)\n}\n}\n"
+def c_path = write_file("oracle.ny", input)
+def ny_path = write_file("embedded.ny", input)
+def c_fix = run_capture([fmt, "--fix", c_path], [], nil, false)
+def ny_fix = run_capture([ny, "fmt", "--fix", ny_path], [], nil, false)
+assert(c_fix.get("code", 127) == 0 && ny_fix.get("code", 127) == 0 &&
+       unwrap(file_read(c_path)) == unwrap(file_read(ny_path)),
+       "embedded --fix output matches standalone C formatter")
+
+def optimize_path = write_file("optimize.ny", input)
+def before = unwrap(file_read(optimize_path))
+def optimize_c = run_capture([fmt, "--optimize", "--diff", optimize_path],
+                             [], nil, false)
+def optimize_ny = run_capture([ny, "fmt", "--optimize", "--diff", optimize_path],
+                              [], nil, false)
+assert(optimize_c.get("code", 127) == 0 &&
+       optimize_ny.get("code", 127) == 0 &&
+       optimize_c.get("stdout", "") == optimize_ny.get("stdout", "") &&
+       unwrap(file_read(optimize_path)) == before,
+       "optimization preview is parity-preserving and read-only")
+
+def structure_path = write_file("structure.ny", "fn f() {\n  ; } // swallowed\n")
+def structure_c = run_capture([fmt, "--check", "--verbose", structure_path],
+                              [], nil, false)
+def structure_ny = run_capture([ny, "fmt", "--check", "--verbose", structure_path],
+                               [], nil, false)
+assert(structure_c.get("code", 127) == 1 &&
+       structure_ny.get("code", 127) == 1 &&
+       structure_c.get("stdout", "") == structure_ny.get("stdout", ""),
+       "structure diagnostics match")
+
+assert(is_ok(file_write(structure_path, "fn f() {\n  ; } // swallowed\n")),
+       "restore malformed structure")
+def fix_c = run_capture([fmt, "--check", "--fix", structure_path], [], nil, false)
+def fixed_c = unwrap(file_read(structure_path))
+assert(is_ok(file_write(structure_path, "fn f() {\n  ; } // swallowed\n")),
+       "restore malformed structure for Ny")
+def fix_ny = run_capture([ny, "fmt", "--check", "--fix", structure_path],
+                         [], nil, false)
+assert(fix_c.get("code", 127) == 1 && fix_ny.get("code", 127) == 1 &&
+       fix_c.get("stdout", "") == fix_ny.get("stdout", "") &&
+       fixed_c == unwrap(file_read(structure_path)),
+       "structure repair result matches")
+
+assert(is_ok(file_write(structure_path,
+   "fn f() {\n  def text = \"} {\"\n  ;; } { ignored in comment\n}\n")),
+   "write valid brace-containing literals")
+compare(["--check", "--verbose", structure_path],
+        "brace characters in strings and comments")
+assert(is_ok(file_write(structure_path, "fn f() { } }\n")),
+       "write unmatched closing brace")
+def extra_c = run_capture([fmt, "--check", "--verbose", structure_path], [], nil, false)
+def extra_ny = run_capture([ny, "fmt", "--check", "--verbose", structure_path],
+                           [], nil, false)
+assert(extra_c.get("code", 127) == 1 && extra_ny.get("code", 127) == 1 &&
+       extra_c.get("stdout", "") == extra_ny.get("stdout", ""),
+       "unmatched closing brace diagnostics match")
+
+def analysis =
+   "fn is_active(x) { return is_str(x) }\n" +
+   "fn count_len(items) { return items.len }\n" +
+   "fn opaque(value) { return value }\n" +
+   "fn sqrt(x) { return x }\nfn factorial(n) { return n }\n" +
+   ";; audit: type-infer intentional\nfn inferred(value) { return value }\n" +
+   "use core *\nuse core(name)\nlayout Point { center_x: f32, }\n" +
+   "fn sample() {\n   def value = 1   \n\t// TODO resolve this\n" +
+   "// Long analyzer probe: this line stays intentionally longer than one hundred and twenty visual columns to exercise Ny-owned width counting.\n" +
+   "   def marker = \"TODO\"\n   if (ready){ return(value) }\n" +
+   "   def values = [1].append(2).append(3)\n" +
+   "   mut first = 1 mut second = 2\n   def ax = 1\n   def ay = 2\n" +
+   "   left = 1 right = 2\n   pos_x = point.get(\"x\")\n" +
+   "   pos_y = point.get(\"y\")\n   return(value)\n   return value\n}\n"
+def a = write_file("analysis.ny", analysis)
+def b = write_file("analysis-two.ny", "fn extra() {\n\treturn TODO\n}\n")
+def c = write_file("analysis.c",
+   "#include <stdio.h>\nvoid unsafe_copy(char *dst, const char *src) {\n" +
+   "  strcpy(dst, src);\n  const char *example = \"sprintf(\"; // strcat(dst, src)\n}\n")
+def long_body = "fn intentionally_long() {\n"
+for line in 1..120 { long_body += "   def value_" + to_str(line) + " = " + to_str(line) + "\n" }
+long_body += "}\n"
+def long_path = write_file("analysis-long.ny", long_body)
+def boundary_body = "fn exactly_120_lines() {\n"
+for line in 1..118 { boundary_body += "   def value_" + to_str(line) + " = " + to_str(line) + "\n" }
+boundary_body += "}\n"
+def boundary_path = write_file("analysis-boundary.ny", boundary_body)
+def duplicates = write_file("analysis-duplicates.ny",
+   "fn repeated() { return 1 }\nfn repeated() { return 2 }\n")
+
+def analysis_files = [a, b, long_path, boundary_path, duplicates, c]
+def analysis_run = compare(["--analyze"] + analysis_files, "analyzer rendering")
+assert(analysis_run.get("code", 127) == 0, "analyzer succeeds")
+def audit_run = compare(["--audit", a, b], "audit rendering")
+assert(audit_run.get("code", 127) == 0, "audit succeeds")
+def audit_json = compare(["--audit", "--json", a, b], "audit JSON")
+assert(audit_json.get("code", 127) == 0, "audit JSON succeeds")
+def analyze_json = compare(["--analyze", "--json", a, b, c], "analyzer JSON")
+assert(analyze_json.get("code", 127) == 0, "analyzer JSON succeeds")
+
+def clean_path = write_file("clean.ny", "fn clean() {\n   return 1\n}\n")
+def clean = compare(["--analyze", "--json", clean_path], "empty analyzer JSON")
+assert(clean.get("code", 127) == 0, "empty JSON analysis succeeds")
+
+def doc_tag = to_str(pid())
+def doc_path = root + "/lib/.fmt-analyze-doc-" + doc_tag + ".ny"
+assert(is_ok(file_write(doc_path,
+   "fn undocumented() { return 1 }\nfn documented() {\n   \"doc string\"\n   return 1\n}\n" +
+   "fn forwarding() { return other.module.fn() }\n;; documentation comment\nfn commented() { return 1 }\n")),
+   "write stdlib documentation analyzer input")
+def doc_c = run_capture(["cmake", "-E", "chdir", root, fmt, "--analyze", doc_path],
+                        [], nil, false)
+def doc_ny = run_capture(["cmake", "-E", "chdir", root, ny, "fmt", "--analyze", doc_path],
+                         [], nil, false)
+assert(doc_c.get("code", 127) == 0 && doc_ny.get("code", 127) == 0 &&
+       doc_c.get("stdout", "") == doc_ny.get("stdout", ""),
+       "stdlib documentation findings match")
+assert(is_ok(file_remove(doc_path)), "remove stdlib documentation probe")
+
+def cleanup = run_capture(["cmake", "-E", "rm", "-rf", dir], [], nil, false)
+assert(cleanup.get("code", 127) == 0, "remove formatter test directory")
+print("FMT_FORMAT_PARITY_OK")
+NY
+}

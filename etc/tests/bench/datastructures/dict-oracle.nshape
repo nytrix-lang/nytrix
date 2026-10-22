@@ -1,0 +1,63 @@
+shape bench_dict_oracle {
+  family "runtime-native"
+  generator "native"
+  features ["native", "oracle", "dict", "checksum"]
+  template ny-test-case
+  flags "--native-backend x86_64 --native-result-oracle"
+  expect compile_and_run
+  source ny <<'NY'
+use core.dict
+mut d = dict()
+d.set("a", 1)
+d.set("b", 2)
+d.set("c", 3)
+def r = d.get("a", 0) + d.get("b", 0) + d.get("c", 0)
+print("checksum=", r)
+NY
+  source c <<'C'
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+
+typedef struct {
+  const char *key;
+  int value;
+} Entry;
+
+static size_t hash_key(const char *key) {
+  size_t hash = (size_t)1469598103934665603ULL;
+  while (*key) {
+    hash ^= (unsigned char)*key++;
+    hash *= (size_t)1099511628211ULL;
+  }
+  return hash;
+}
+
+static void set(Entry table[8], const char *key, int value) {
+  size_t slot = hash_key(key) & 7;
+  while (table[slot].key && strcmp(table[slot].key, key) != 0)
+    slot = (slot + 1) & 7;
+  table[slot] = (Entry){key, value};
+}
+
+static int get(const Entry table[8], const char *key, int fallback) {
+  size_t slot = hash_key(key) & 7;
+  while (table[slot].key) {
+    if (strcmp(table[slot].key, key) == 0)
+      return table[slot].value;
+    slot = (slot + 1) & 7;
+  }
+  return fallback;
+}
+
+int main(void) {
+  Entry table[8] = {0};
+  set(table, "a", 1);
+  set(table, "b", 2);
+  set(table, "c", 3);
+  int result = get(table, "a", 0) + get(table, "b", 0) + get(table, "c", 0);
+  printf("checksum=%d\n", result);
+  return 0;
+}
+C
+}

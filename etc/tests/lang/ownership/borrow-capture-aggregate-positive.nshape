@@ -1,0 +1,20 @@
+shape ownership_borrow_capture_aggregate_positive {
+  family "language/ownership"
+  generator "syntax"
+  features ["ownership", "borrow", "closure", "aggregate", "provenance"]
+  template ny-test-case
+  expect compile_and_run
+  flags "--ownership-strict --native-only"
+  source ny <<'NY'
+use core
+
+fn good(int x) int {
+  def holder = [x]
+  def later = fn() { holder[0] }
+  later()
+  0
+}
+
+assert(good(7) == 0, "non-borrowing aggregate captures remain valid")
+NY
+}

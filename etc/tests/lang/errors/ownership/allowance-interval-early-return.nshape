@@ -1,0 +1,20 @@
+shape ownership_rule_allowance_interval_early_return {
+  family "compiler-errors/ownership"
+  generator "error"
+  features ["error", "ownership", "negative", "allowance", "interval", "return"]
+  template ny-compile-fail
+  expect compile_fail
+  flags "--ownership-strict"
+  expect_message "ownership allowance below for 'x'"
+  source ny <<'NY'
+use core
+
+@allowance(x, [1,omega])
+fn return_before_use(bool stop, int x) int {
+  if stop { return 0 } else { x }
+  x
+}
+
+return_before_use(true, 5)
+NY
+}

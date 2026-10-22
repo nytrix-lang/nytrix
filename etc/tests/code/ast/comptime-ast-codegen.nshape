@@ -1,0 +1,22 @@
+shape comptime_ast_codegen {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "comptime", "parse-code", "codegen", "reflection"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-only; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.compiler.ast (parse_code)
+
+comptime template insert_parsed_declarations(declarations) {
+   ${declarations}
+}
+
+comptime emit insert_parsed_declarations(
+   parse_code("fn parsed_code_helper() int { return 18 }\nfn parsed_code_answer() int { return 43 }")
+)
+assert(parsed_code_answer() == 43,
+       "parse_code inserts multiple declarations through normal validation")
+NY
+}

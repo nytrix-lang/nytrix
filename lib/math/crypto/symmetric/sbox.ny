@@ -1,9 +1,9 @@
 ;; Keywords: symmetric sbox math crypto
 ;; Symmetric-crypto routines for S-box construction, metrics, algebraic forms, and tables.
 ;; References:
-;; - std.math.crypto.symmetric
-;; - std.math.crypto
-module std.math.crypto.symmetric.sbox(
+;; - core.math.crypto.symmetric
+;; - core.math.crypto
+module core.math.crypto.symmetric.sbox(
    sbox_repr, sbox_len, sbox_equal, sbox_not_equal, sbox_get, sbox_items,
    sbox_input_size, sbox_output_size, sbox_to_bits, sbox_from_bits,
    sbox_coeff_vector, sbox_from_coeff_vector, sbox_apply_gf2m, sbox_apply,
@@ -32,8 +32,8 @@ module std.math.crypto.symmetric.sbox(
    sbox_algebraic_degree, sbox_max_degree, sbox_min_degree
 )
 
-use std.math.bin as bin
-use std.math.matrix as matrix
+use core.math.bin as bin
+use core.math.matrix as matrix
 
 fn _sbox_pow2(int n) bool { n > 0 && (n & (n - 1)) == 0 }
 
@@ -299,7 +299,7 @@ fn sbox_ddt(list S) any {
       mut row = _sbox_zero_row(out_n)
       mut x = 0
       while x < n {
-         def dy = __load_item_fast(S, x) ^^ __load_item_fast(S, x ^^ dx)
+         def dy = __load_item_fast(S, x) ^ __load_item_fast(S, x ^ dx)
          __store_item_fast(row, dy, __load_item_fast(row, dy) + 1)
          x += 1
       }
@@ -325,7 +325,7 @@ fn sbox_differential_uniformity(list S) int {
       mut row = _sbox_zero_row(out_n)
       mut x = 0
       while x < n {
-         def dy = __load_item_fast(S, x) ^^ __load_item_fast(S, x ^^ dx)
+         def dy = __load_item_fast(S, x) ^ __load_item_fast(S, x ^ dx)
          def v = __load_item_fast(row, dy) + 1
          __store_item_fast(row, dy, v)
          if v > best { best = v }
@@ -531,7 +531,7 @@ fn sbox_derivative(list S, any u, bool big_endian=true) list {
    mut out = []
    mut x = 0
    while x < S.len {
-      out = out.append(__load_item_fast(S, x) ^^ __load_item_fast(S, x ^^ v))
+      out = out.append(__load_item_fast(S, x) ^ __load_item_fast(S, x ^ v))
       x += 1
    }
    out
@@ -571,7 +571,7 @@ fn _sbox_anf_from_truth_table(list table) list {
    while step < coeff.len {
       mut mask = 0
       while mask < coeff.len {
-         if (mask & step) != 0 { coeff[mask] = coeff.get(mask) ^^ coeff.get(mask ^^ step) }
+         if (mask & step) != 0 { coeff[mask] = coeff.get(mask) ^ coeff.get(mask ^ step) }
          mask += 1
       }
       step = step << 1
@@ -636,10 +636,10 @@ fn _sbox_gf_mul(int a, int b, int m, int poly) int {
    mut bb = b & mask
    mut out = 0
    while bb != 0 {
-      if (bb & 1) != 0 { out = out ^^ aa }
+      if (bb & 1) != 0 { out = out ^ aa }
       bb = bb >> 1
       aa = aa << 1
-      if (aa & (1 << m)) != 0 { aa = aa ^^ poly }
+      if (aa & (1 << m)) != 0 { aa = aa ^ poly }
    }
    out & mask
 }
@@ -671,8 +671,8 @@ fn _sbox_poly_mul_linear_gf(list p, int root, int m, int poly) list {
    i = 0
    while i < p.len {
       def c = int(p.get(i))
-      out[i] = int(out.get(i)) ^^ _sbox_gf_mul(c, root, m, poly)
-      out[i + 1] = int(out.get(i + 1)) ^^ c
+      out[i] = int(out.get(i)) ^ _sbox_gf_mul(c, root, m, poly)
+      out[i + 1] = int(out.get(i + 1)) ^ c
       i += 1
    }
    out
@@ -685,7 +685,7 @@ fn sbox_eval_polynomial_gf2m(list coeffs, int x, int m) int {
    mut out = 0
    mut i = coeffs.len - 1
    while i >= 0 {
-      out = _sbox_gf_mul(out, x, m, poly) ^^ (int(coeffs.get(i)) & ((1 << m) - 1))
+      out = _sbox_gf_mul(out, x, m, poly) ^ (int(coeffs.get(i)) & ((1 << m) - 1))
       i -= 1
    }
    out
@@ -741,14 +741,14 @@ fn sbox_interpolation_polynomial_gf2m(list S) list {
          if j != i {
             def xj = _sbox_bit_reverse(j, m)
             basis = _sbox_poly_mul_linear_gf(basis, xj, m, poly)
-            den = _sbox_gf_mul(den, xi ^^ xj, m, poly)
+            den = _sbox_gf_mul(den, xi ^ xj, m, poly)
          }
          j += 1
       }
       def scale = _sbox_gf_mul(yi, _sbox_gf_inv(den, m, poly), m, poly)
       j = 0
       while j < basis.len {
-         coeffs[j] = int(coeffs.get(j)) ^^ _sbox_gf_mul(int(basis.get(j)), scale, m, poly)
+         coeffs[j] = int(coeffs.get(j)) ^ _sbox_gf_mul(int(basis.get(j)), scale, m, poly)
          j += 1
       }
       i += 1
@@ -931,7 +931,7 @@ fn _sbox_row_xor(list a, list b) list {
    mut out = []
    mut i = 0
    while i < a.len {
-      out = out.append(int(a.get(i)) ^^ int(b.get(i)))
+      out = out.append(int(a.get(i)) ^ int(b.get(i)))
       i += 1
    }
    out
@@ -1106,7 +1106,7 @@ fn sbox_eval_anf(list monomials, int x) int {
    mut i = 0
    while i < monomials.len {
       def m = int(monomials.get(i))
-      if (x & m) == m { out = out ^^ 1 }
+      if (x & m) == m { out = out ^ 1 }
       i += 1
    }
    out
@@ -1300,7 +1300,7 @@ fn sbox_autocorrelation_table(list S) any {
          mut acc = 0
          mut x = 0
          while x < in_n {
-            def p = _sbox_parity(b & S.get(x)) ^^ _sbox_parity(b & S.get(x ^^ a))
+            def p = _sbox_parity(b & S.get(x)) ^ _sbox_parity(b & S.get(x ^ a))
             acc += p == 0 ? 1 : -1
             x += 1
          }
@@ -1331,7 +1331,7 @@ fn sbox_boomerang_connectivity_table(list S) any {
       __list_set_len(shifted, n)
       mut x = 0
       while x < n {
-         __store_item_fast(shifted, x, __load_item_fast(inv, __load_item_fast(S, x) ^^ dy))
+         __store_item_fast(shifted, x, __load_item_fast(inv, __load_item_fast(S, x) ^ dy))
          x += 1
       }
       x = 0
@@ -1339,8 +1339,8 @@ fn sbox_boomerang_connectivity_table(list S) any {
          def sx = __load_item_fast(shifted, x)
          mut y = x + 1
          while y < n {
-            def dx2 = x ^^ y
-            def lhs = sx ^^ __load_item_fast(shifted, y)
+            def dx2 = x ^ y
+            def lhs = sx ^ __load_item_fast(shifted, y)
             if lhs >= dx2 && lhs <= dx2 {
                __store_item_fast(__load_item_fast(rows, dx2), dy, __load_item_fast(__load_item_fast(rows, dx2), dy) + 2)
             }
@@ -1366,7 +1366,7 @@ fn sbox_boomerang_uniformity(list S) int {
       __list_set_len(shifted, n)
       mut x = 0
       while x < n {
-         __store_item_fast(shifted, x, __load_item_fast(inv, __load_item_fast(S, x) ^^ dy))
+         __store_item_fast(shifted, x, __load_item_fast(inv, __load_item_fast(S, x) ^ dy))
          x += 1
       }
       mut counts = _sbox_zero_row(n)
@@ -1375,8 +1375,8 @@ fn sbox_boomerang_uniformity(list S) int {
          def sx = __load_item_fast(shifted, x)
          mut y = x + 1
          while y < n {
-            def dx = x ^^ y
-            def lhs = sx ^^ __load_item_fast(shifted, y)
+            def dx = x ^ y
+            def lhs = sx ^ __load_item_fast(shifted, y)
             if lhs >= dx && lhs <= dx {
                def c = __load_item_fast(counts, dx) + 2
                __store_item_fast(counts, dx, c)
@@ -1522,7 +1522,7 @@ fn sbox_feistel_construction(list sboxes) list {
       mut r = 0
       while r < sboxes.len {
          def sb = sboxes.get(r)
-         def next_l = sb.get(xl) ^^ xr
+         def next_l = sb.get(xl) ^ xr
          xr, xl = xl, next_l
          r += 1
       }
@@ -1544,7 +1544,7 @@ fn sbox_misty_construction(list sboxes) list {
       mut r = 0
       while r < sboxes.len {
          def sb = sboxes.get(r)
-         def next_l = sb.get(xr) ^^ xl
+         def next_l = sb.get(xr) ^ xl
          xr, xl = xl, next_l
          r += 1
       }
@@ -1563,7 +1563,7 @@ fn sbox_differential_branch_number(list S) int {
       def in_wt = bin.bit_count(dx)
       mut x = 0
       while x < S.len {
-         def score = in_wt + bin.bit_count(__load_item_fast(S, x) ^^ __load_item_fast(S, x ^^ dx))
+         def score = in_wt + bin.bit_count(__load_item_fast(S, x) ^ __load_item_fast(S, x ^ dx))
          if score < best {
             best = score
             if best <= 1 { return best }
@@ -1645,7 +1645,7 @@ fn sbox_min_degree(list S) int {
       while step < S.len {
          mut i = 0
          while i < S.len {
-            if (i & step) != 0 { table[i] = table.get(i) ^^ table.get(i ^^ step) }
+            if (i & step) != 0 { table[i] = table.get(i) ^ table.get(i ^ step) }
             i += 1
          }
          step = step << 1
@@ -1684,7 +1684,7 @@ fn sbox_algebraic_degree(list S) int {
       while step < n {
          mut mask = 0
          while mask < n {
-            if (mask & step) != 0 { __store_item_fast(coeff, mask, __load_item_fast(coeff, mask) ^^ __load_item_fast(coeff, mask ^^ step)) }
+            if (mask & step) != 0 { __store_item_fast(coeff, mask, __load_item_fast(coeff, mask) ^ __load_item_fast(coeff, mask ^ step)) }
             mask += 1
          }
          step = step << 1
@@ -1709,5 +1709,5 @@ fn sbox_algebraic_degree(list S) int {
    assert(sbox_differential_uniformity(S) == 4, "sbox ddt uniformity")
    assert(sbox_linearity(S) == 4, "sbox Walsh linearity")
    assert(sbox_nonlinearity(S) == 0, "sbox nonlinearity")
-   print("✓ std.math.crypto.symmetric.sbox self-test passed")
+   print("✓ core.math.crypto.symmetric.sbox self-test passed")
 }

@@ -1,0 +1,21 @@
+shape user_std_os_name_keeps_user_call_origin {
+  family "runtime/modules/use"
+  generator "regression"
+  features ["ny" "test" "modules" "identity" "native-lowering"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only --native-backend=x86_64"
+  expect compile_and_run
+  source ny <<'NY'
+module core.os.project(
+  sleep
+)
+
+fn sleep(int value) int { value + 1 }
+
+#main {
+  assert(core.os.project.sleep(40) == 41,
+         "a user core.os-prefixed function must not use the runtime sleep intrinsic")
+  0
+}
+NY
+}

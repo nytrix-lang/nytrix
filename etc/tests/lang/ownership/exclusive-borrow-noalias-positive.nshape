@@ -1,0 +1,23 @@
+shape ownership_exclusive_borrow_noalias_positive {
+  family "language/ownership"
+  generator "syntax"
+  features ["ownership", "borrow", "exclusive", "noalias", "positive"]
+  template ny-test-case
+  expect compile_and_run
+  expect_exit 0
+  expect_message "[noalias]"
+  flags "--ownership-strict --nyir-verify --nyir-dump"
+  source ny <<'NY'
+use core
+
+fn exclusive_noalias_witness() int {
+  mut int value = 7
+  def exclusive = &mut value
+  def observed = exclusive
+  value
+}
+
+assert(exclusive_noalias_witness() == 7,
+       "verified exclusive borrow result")
+NY
+}

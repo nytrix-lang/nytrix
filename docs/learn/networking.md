@@ -1,202 +1,42 @@
-<!-- nytrix-doc: {"audience":"user","featured":false,"group":"learn","order":120,"summary":"Explore networking modules, transport boundaries, and the capabilities available on each host."} -->
+<!-- nytrix-doc: {"audience":"user","featured":false,"group":"learn","order":120,"summary":"Choose an HTTP, socket, server, or tube API and handle host-specific failures."} -->
 # Networking
 
-`std.os.net` is the facade for HTTP, sockets, local servers, process tubes,
-SSH-style workflows, TLS transport, transcripts, and shared network context.
+Choose the highest-level API that still exposes the data your program needs.
+The standard library provides HTTP requests, local servers, process/network
+tubes, and raw sockets. Browser networking uses a separate host contract.
 
-Pick the highest-level API that still exposes the data you need. `net.request`
-covers HTTP, server helpers cover local fixtures, tubes cover interactive
-processes or services, and raw sockets cover direct protocol implementations.
+## Choose a layer
 
-## Layers
-
-| Layer | Entry point | Result |
+| Need | Starting point | Notes |
 | --- | --- | --- |
-| HTTP client | `net.request` | Response dictionary with status, headers, body, transport, error metadata. |
-| Local HTTP server | `std.os.net.server` | Blocking HTTP/1.1 handler loop for tools and fixtures. |
-| Tube interaction | `remote`, `process`, `shell`, `ssh` | Buffered send/receive API with transcripts. |
-| Raw socket | `socket_connect`, `socket_bind`, `socket_accept` | Direct protocol-level TCP IO. |
-| Context | `net.context` | Log level, timeout, chunk size, color behavior. |
+| HTTP client | `core.os.net` | Use request options and inspect status, headers, body, and error. |
+| Local HTTP server | `core.os.net.server` | Useful for local tools and deterministic tests. |
+| Interactive process or service | `core.os.net` tube APIs | Use timeouts and retain the transcript when diagnosing a failure. |
+| Direct TCP protocol | `core.os.net.socket` | The caller owns connection, framing, timeout, and close behavior. |
+| Browser fetch or WebSocket | Browser host APIs | Permissions, origin policy, and server availability apply. See [Browser](browser.md). |
 
-## Context
+Find current function names and signatures in the checked-out library:
 
-Network APIs share context values:
-
-```ny
-use std.os.net as net
-
-net.context({
-   "log_level": "debug",
-   "timeout_ms": 3000,
-   "chunk_size": 4096,
-   "color": false
-})
+```bash
+ny doc search --symbols request
+ny doc search --symbols socket_connect
+ny doc get core.os.net
 ```
 
-Log levels are `quiet`, `error`, `info`, `debug`, and `trace`.
+## Failure handling
 
-## HTTP requests
+Network operations can fail because a name does not resolve, a connection is
+refused, a remote peer closes early, a timeout expires, or a browser denies a
+capability. Check the API's returned status or error value; do not treat a
+nonempty response as proof of success.
 
-`net.request(options)` or `net.request(method, url, data, headers, options)`
-prepares a request and returns a response dictionary.
+Set an explicit timeout for external services. Prefer a local server or fake
+peer in tests, and make the test assert the response status and body. Record the
+request metadata or tube transcript when reproducing failures.
 
-## Browser fetch
+## Portability
 
-`std.os.fetch(url)` is the small body-only facade for browser code. On the
-`wasm-bare` target it performs a same-origin `fetch()`, yields through Asyncify,
-and resumes the same Wasm stack when the response arrives. It returns the body
-text for a successful response and `0` for an unavailable URL, a non-success
-status, or a blocked request.
-
-```ny
-use std.os as os
-
-def page = os.fetch("index.html")
-if is_str(page) { print(page.len) }
-```
-
-The browser runner exposes a small lifecycle-only WebSocket facade. It returns
-a handle, reports `CONNECTING`, `OPEN`, `CLOSING`, `CLOSED`, or `ERROR`, queues
-text messages, and can send or close an open socket. Browser permissions,
-cross-origin policy, and server availability still apply; failures are
-reported as handle `0`, state `ERROR`, or a failed send. The
-`websocket-lifecycle.ny` fixture covers the portable lifecycle path. The
-`websocket-echo.ny` fixture covers a complete local text round trip.
-Structured native networking APIs remain the right choice for raw sockets and
-desktop services.
-
-```ny
-use std.os.websocket as websocket
-
-def socket = websocket.open("wss://example.test/events")
-if socket > 0 {
-   def state = websocket.state(socket)
-   if state == "OPEN" { websocket.send(socket, "hello") }
-   websocket.close(socket)
-}
-```
-
-| Option | Meaning |
-| --- | --- |
-| `method` | HTTP method. Defaults to `GET` unless a body implies `POST`. |
-| `url` / `uri` | Full URL. |
-| `params` / `query` | Query string pairs, dict, list, or raw query string. |
-| `headers` | Request headers. |
-| `json` | JSON body and JSON content type. |
-| `form` | URL-encoded form body. |
-| `multipart` / `fields` / `files` | Multipart body fields and files. |
-| `body` / `data` | Raw or form-like body. |
-| `cookies` / `cookie` | Cookie dict or raw cookie header. |
-| `auth` / `bearer` | Basic or bearer authorization helpers. |
-| `user_agent`, `accept`, `referer` | Header shortcuts. |
-| `timeout` / `timeout_sec` | Request timeout in seconds. |
-| `follow` | Redirect policy. |
-| `proxy` | Proxy configuration. |
-| `transport`, `curl` | Transport selection and curl options. |
-
-Response fields:
-
-| Field | Meaning |
-| --- | --- |
-| `ok` | Boolean success status. |
-| `status` | Numeric HTTP status. |
-| `reason` | Status reason. |
-| `headers` | Parsed response headers. |
-| `raw_headers` | Raw header text. |
-| `body` | Decoded body string/value where available. |
-| `raw` | Raw response body. |
-| `method` | Final method. |
-| `url` | Final URL. |
-| `transport` | Transport used. |
-| `request` | Prepared request metadata. |
-| `error` | Error text when a request fails. |
-
-HTTPS uses curl transport when libcurl is available. Plain HTTP can use the
-socket transport.
-
-## Local HTTP server
-
-`std.os.net.server` handlers receive a request dictionary and return a response
-dictionary or helper result.
-
-| Item | Behavior |
-| --- | --- |
-| Request keys | `method`, `path`, `query`, `query_params`, `headers`, `body`. |
-| Response helpers | `web.text`, `web.html`, `web.json`, `web.redirect`, `web.not_found`, `web.response`. |
-| Header lookup | `web.header(headers, name, fallback)` is case-insensitive. |
-| CLI server | `web.serve_cli(app, {"port": 8080})` binds a local server and logs requests. |
-
-Default no-argument examples use port `8080`.
-
-## Tubes
-
-Tubes provide buffered interaction with processes, TCP connections, and
-SSH-launched commands.
-
-```ny
-use std.core
-use std.os.net as net
-
-net.context({"log_level": "quiet", "timeout_ms": 1000, "color": false})
-
-def io = net.process("/bin/cat", [])
-net.sendline(io, "ny")
-def out = net.recvuntil(io, "ny\n")
-net.close(io)
-
-assert_eq(out, "ny\n", "tube echo")
-```
-
-| Call | Behavior |
-| --- | --- |
-| `remote(host, port, opts)` | Connect to a TCP service. |
-| `connect_retry(host, port, opts)` | Retry connection until timeout/limit. |
-| `process(path, args, opts)` | Spawn a local process as a tube. |
-| `shell(command, opts)` | Spawn a shell command as a tube. |
-| `ssh(opts)` | Open an SSH-style connection handle. |
-| `ssh_process(ssh, command, opts)` | Run a command through SSH as a tube. |
-| `send(io, data)` | Write bytes/text. |
-| `sendline(io, data)` | Write data plus newline. |
-| `recv(io, n)` | Read up to `n` bytes. |
-| `recvuntil(io, needle)` | Read through a delimiter and buffer extra bytes. |
-| `recvall(io)` | Read until EOF or configured limit. |
-| `sendlineafter(io, needle, data)` | Receive delimiter, then send a line. |
-| `expect(io, patterns)` | Match expected output patterns. |
-| `clean(io)` | Return buffered data without waiting for more. |
-| `transcript_text(io)` | Return ordered send/receive transcript. |
-| `interactive(io)` | Attach the terminal to the tube. |
-| `close(io)` | Close the tube. |
-
-## Raw sockets
-
-Raw socket helpers cover direct TCP work:
-
-| Helper | Purpose |
-| --- | --- |
-| `socket_connect(host, port)` | Open a TCP connection. |
-| `socket_bind(host, port)` | Bind a listening socket. |
-| `socket_accept(fd)` | Accept one incoming connection. |
-| `read_socket(fd, n)` | Read up to `n` bytes. |
-| `read_socket_until(fd, needle)` | Read until a delimiter or limit. |
-| `write_socket_all(fd, data)` | Write the full buffer. |
-| `write_socket_line(fd, data)` | Write data plus newline. |
-| `socket_set_timeout_ms(fd, ms)` | Set socket timeout. |
-| `close_socket(fd)` | Close the socket fd. |
-
-## Determinism
-
-Network checks use explicit timeouts. Local servers, process tubes, readiness
-checks, and transcript output make network behavior repeatable.
-
-Prefer local services in tests. Public internet calls are useful examples only
-when the text names the dependency and the code records timeout and error
-metadata.
-
-## Failure data
-
-For failing network checks, include:
-
-- context values: timeout, log level, chunk size
-- request metadata: method, URL, transport, status, error
-- tube transcript text
-- local fixture command or server route
+Native sockets and process APIs are not automatically available in a browser
+build. Browser `fetch` and WebSocket operations also depend on browser policy
+and user permissions. Use [Execution routes](routes.md) and
+[Implementation status](status.md) to check the target you intend to ship.

@@ -1,0 +1,43 @@
+shape dynamic_ternary_any_call_abi {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "native", "llvm", "dynamic-call", "ternary", "abi"]
+  template ny-test-case
+  flags_matrix "--native-only; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+fn sum_any(any left, any right) any {
+   left + right
+}
+
+fn absolute_difference_sum(any left, any right) any {
+   def difference = left > right ? left - right : right - left
+   sum_any(difference, left)
+}
+
+assert(int(absolute_difference_sum(9, 2)) == 16,
+       "the true ternary arm reaches an any parameter as a dynamic integer")
+assert(int(absolute_difference_sum(2, 9)) == 9,
+       "the false ternary arm reaches an any parameter as a dynamic integer")
+assert(int(absolute_difference_sum(1000000000000, 1)) == 1999999999999,
+       "boxing a raw ternary result preserves values outside the small-int range")
+
+fn capped_budget(dict status, int work, int limit) int {
+   def base = status.get("effective_threads", 1)
+   def limited = (limit > 0 && limit < base) ? limit : base
+   def capped = (work > 0 && work < limited) ? work : limited
+   capped < 1 ? 1 : capped
+}
+
+assert(capped_budget({"effective_threads": 8}, 3, 2) == 2,
+       "a second conditional preserves the tagged result of its first join")
+assert(capped_budget({"effective_threads": 8}, 3, 7) == 3,
+       "a raw integer arm is boxed before joining a tagged inferred local")
+assert(capped_budget({"effective_threads": 3}, 0, 0) == 3,
+       "untaken caps preserve an odd dynamic integer through repeated joins")
+assert(capped_budget({"effective_threads": 0}, 0, 0) == 1,
+       "the raw minimum arm joins the tagged cap before the integer return")
+NY
+}

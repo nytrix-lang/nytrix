@@ -1,0 +1,15 @@
+shape test_repl_reset_state {
+  family "repl"
+  generator "embedded"
+  features ["ny", "test", "repl", "incremental", "state", "reset"]
+  template ny-test-case
+  expect compile_and_run
+  repl_expect "REPL-RESET-STATE-OK"
+  repl_commands ":reset\nmut int reset_value = 1\nmut reset_items = [2]\nfn reset_function() int { reset_value + 1 }\nassert(reset_value == 1 && reset_items[0] == 2 && reset_items.len == 1, \"reset replaces prior scalar and aggregate bindings\")\nassert(reset_function() == 2, \"reset accepts declarations using previous function names\")\nprint(\"REPL-RESET-STATE-OK\")"
+  source ny <<'NY'
+mut int reset_value = 40
+mut reset_items = [9]
+fn reset_function() int { reset_value + 2 }
+assert(reset_function() == 42, "initial REPL state is live")
+NY
+}

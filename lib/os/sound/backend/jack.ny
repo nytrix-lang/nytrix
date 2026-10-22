@@ -1,15 +1,15 @@
 ;; Keywords: sound backend jack os
 ;; JACK sound backend probing and playback integration.
 ;; References:
-;; - std.os.sound.backend
-;; - std.os
-module std.os.sound.backend.jack(is_available, init, shutdown, stream_open, stream_start, stream_stop, write)
-use std.core
-use std.core.mem (cstr)
-use std.core.dict_mod
-use std.os.time
-use std.core.common as common
-use std.os.sound.backend.shared as backend_shared
+;; - core.os.sound.backend
+;; - core.os
+module core.os.sound.backend.jack(is_available, init, shutdown, stream_open, stream_start, stream_stop, write)
+use core
+use core.mem (cstr)
+use core.dict_mod
+use core.os.time
+use core.common as common
+use core.os.sound.backend.shared as backend_shared
 
 fn _ny_jack_set_process_callback(..._args) i32 { -1 }
 
@@ -249,7 +249,7 @@ fn _process_cb(any nframes, any arg) int {
 
 fn is_available() bool {
    "Returns whether the JACK backend is available on this host."
-   def state = backend_shared.probe_linux_library_once(_avail, _lib, "jack", "jack_client_open")
+   def state = backend_shared.probe_linux_library_once(_avail, _lib, "libjack.so", "jack_client_open")
    _avail, _lib = state.get(0), state.get(1)
    _avail == 1
 }

@@ -4,13 +4,13 @@
 ;; References:
 ;; - https://web.cs.elte.hu/~lovasz/scans/lll.pdf
 ;; - https://www.cs.cmu.edu/~afs/cs/project/quake/public/papers/Coppersmith-Crypto96.pdf
-module std.math.crypto.lattice(lattice, lll, flatter, bkz, coppersmith, small_roots,
+module core.math.crypto.lattice(lattice, lll, flatter, bkz, coppersmith, small_roots,
    mvpoly, howgrave_graham, lwe, ntru, acd, linmod, matrix_dlog, cvp, noisy_linear,
    lattice_core_coverage_report, lattice_replacement_report, lattice_reduction_report,
    gen_lattice_report, lattice_matrix_ntl_format, lattice_matrix_object_str)
-use std.math.matrix as matrix
-use std.math.crypto.lattice.lll
-use std.math.crypto.lattice.lattice
+use core.math.matrix as matrix
+use core.math.crypto.lattice.lll
+use core.math.crypto.lattice.lattice
 
 fn _lattice_coverage_item(str name, bool ny_default, bool tested, bool benchmarked, bool remove_blocker, str reason) dict {
    {
@@ -161,5 +161,5 @@ fn lattice_reduction_report(any basis, str strategy="auto", any opts=nil) dict {
       "flatter", {"max_rounds": 1}
    )
    assert(flat.get("selected_strategy", "") == "flatter", "lattice explicit flatter reducer")
-   print("✓ std.math.crypto.lattice self-test passed")
+   print("✓ core.math.crypto.lattice self-test passed")
 }

@@ -1,0 +1,124 @@
+shape ownership_expanded_argument_abi {
+  family "runtime/values"
+  generator "embedded"
+  features [ny ownership dynamic-abi borrow parity]
+  estimate_ms 30000
+  template ny-test-case
+  flags_matrix "--native --run -O0; --native --run -O3; --native-backend=llvm --jit --jit-engine=mcjit -O0; --native-backend=llvm --jit --jit-engine=mcjit -O3; --native-backend=llvm --jit --jit-engine=orc -O0; --native-backend=llvm --jit --jit-engine=orc -O3; --native-only -O0; --native-only -O3"
+  expect compile_and_run
+  timeout 25
+  source ny <<'NY'
+use core
+
+@borrows(value)
+@returns_borrow(value)
+fn borrow_dynamic(any value) any {
+  value
+}
+
+mut owner = [13, 21, 34]
+mut alias = borrow_dynamic(owner)
+assert_eq(alias[1], 21, "expanded dynamic list value survives borrow return")
+assert_eq(owner.len, 3, "runtime list length borrows its receiver")
+assert_eq(owner[2], 34, "borrowed list source remains usable")
+mut owner_alias = owner
+mut appended = owner.append(55)
+assert_eq(appended[3], 55, "list append returns its receiver")
+def appended_first = appended[3]
+def appended_second = appended[3]
+assert_eq(appended_first, appended_second,
+  "repeated indexed reads survive calls between values")
+assert_eq(owner_alias.len, 3, "list append leaves shared aliases unchanged")
+mut with_reference = appended.append("leaf")
+assert_eq(with_reference[4], "leaf", "tagged append preserves the reference value")
+assert_eq(owner_alias.len, 3, "tagged append leaves shared aliases unchanged")
+mut extended = with_reference.extend([89])
+assert_eq(extended.len, 6, "list extend returns its receiver")
+assert_eq(owner_alias.len, 3, "list extend leaves shared aliases unchanged")
+mut assigned = extended.set(0, 8)
+assert_eq(assigned[0], 8, "list set returns its receiver")
+assert_eq(owner_alias[0], 13, "list set leaves shared aliases unchanged")
+def swapped = swap(assigned, 0, 1)
+assert_eq(swapped[0], 21, "list swap returns its receiver")
+assert_eq(owner_alias[0], 13, "list swap leaves shared aliases unchanged")
+def owner_copy = owner_alias.clone()
+assert_eq(owner_copy.len, 3, "list clone reads its receiver")
+mut combined = owner_alias + [144]
+assert_eq(combined.len, 4, "list concatenation reads both operands")
+assert_eq(owner_alias.len, 3, "list concatenation leaves its input unchanged")
+def cleared = swapped.clear()
+assert_eq(cleared.len, 0, "list clear returns its receiver")
+assert_eq(owner_alias.len, 3, "list clear leaves shared aliases unchanged")
+
+mut set_owner = set()
+mut set_observer = set_owner
+mut set_added = set_owner.add("borrowed-key")
+assert(set_observer.contains("borrowed-key"),
+  "set insertion returns the shared receiver")
+def set_removed = set_added.sub("borrowed-key")
+assert_eq(set_observer.len, 0, "set removal mutates the shared receiver")
+mut set_reinserted = set_removed.add("visible-key")
+assert(set_owner.contains("visible-key"),
+  "set removal result remains an alias of the receiver")
+def set_removed_by_remove = set_reinserted.remove("visible-key")
+assert_eq(set_owner.len, 0, "set remove mutates the shared receiver")
+assert_eq(set_removed_by_remove.len, 0,
+  "set remove returns the shared receiver")
+
+mut inventory = dict_set(dict(1), "answer", 42)
+mut inventory_alias = borrow_dynamic(inventory)
+mut inventory_original = inventory
+assert_eq(inventory_alias.get("answer", 0), 42,
+  "runtime dictionary lookup borrows its dynamic receiver")
+mut dict_fallback = [89]
+def dict_miss = inventory_alias.get("missing", dict_fallback)
+dict_fallback.append(90)
+assert_eq(dict_miss.len, 2,
+  "dictionary lookup fallback preserves its returned borrow")
+mut stored = inventory_alias.set("extra", 43)
+assert_eq(stored.get("extra", 0), 43, "dictionary set returns its receiver")
+assert_eq(inventory_original.get("extra", 0), 43,
+  "dictionary set preserves receiver aliasing")
+mut merged = inventory_alias.merge({"merged": 55})
+assert_eq(merged.get("merged", 0), 55, "dictionary merge returns its receiver")
+assert_eq(inventory_original.get("merged", 0), 55,
+  "dictionary merge preserves receiver aliasing")
+assert_eq(inventory_alias.contains("answer"), true,
+  "dictionary membership borrows its receiver")
+def inventory_keys = inventory_alias.keys()
+def inventory_values = inventory_alias.values()
+def inventory_items = inventory_alias.items()
+assert_eq(inventory_keys.len, 3, "dictionary keys borrows its receiver")
+assert_eq(inventory_values.len, 3, "dictionary values borrows its receiver")
+assert_eq(inventory_items.len, 3, "dictionary items borrows its receiver")
+mut list_fallback = [101]
+def list_miss = get(owner_alias, 99, list_fallback)
+list_fallback.append(102)
+assert_eq(list_miss.len, 2,
+  "generic sequence lookup fallback preserves its returned borrow")
+def inventory_copy = inventory_alias.clone()
+assert_eq(inventory_copy.len, 3, "dictionary clone reads its receiver")
+assert_eq(inventory_alias.len, 3, "dictionary remains usable after clone")
+def deleted = inventory_alias.delete("answer")
+assert_eq(deleted.len, 2, "dictionary delete returns its receiver")
+assert_eq(inventory_original.len, 2,
+  "dictionary delete preserves receiver aliasing")
+
+def builder = __str_builder_new(16)
+def builder_alias = __str_builder_append(builder, "borrowed")
+assert_eq(builder_alias, builder, "string builder append returns its receiver")
+assert_eq(__str_builder_to_str(builder_alias), "borrowed",
+  "string builder conversion reads its receiver")
+assert(__str_builder_free(builder_alias) == nil,
+  "string builder free consumes its receiver")
+def managed_memory = malloc(8)
+assert(free(managed_memory) == nil, "managed free consumes its pointer")
+def raw_memory = malloc_raw(8)
+free_raw(raw_memory)
+
+def text = "dynamic argument"
+def text_alias = borrow_dynamic(text)
+assert_eq(text_alias, text, "expanded dynamic string value survives borrow return")
+assert_eq(text.len, 16, "borrowed string source remains usable")
+NY
+}

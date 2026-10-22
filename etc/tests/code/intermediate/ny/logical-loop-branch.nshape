@@ -1,0 +1,56 @@
+shape nyir_logical_loop_branch {
+  family "runtime-native"
+  generator "native"
+  features ["native", "nyir", "logical", "short-circuit", "loop"]
+  template ny-test-case
+  flags "--native --run"
+  expect compile_and_run
+source ny <<'NY'
+fn identity(bool value) bool {
+ value
+}
+assert(identity(0 < 3))
+assert(!identity(3 < 0))
+assert(identity(true && true))
+mut true_calls = 0
+mut false_calls = 0
+fn always_true() bool {
+ true_calls += 1
+ true
+}
+fn always_false() bool {
+ false_calls += 1
+ false
+}
+mut i = 0
+while i < 3 && always_true() {
+ i += 1
+}
+assert(i == 3)
+assert(true_calls == 3)
+assert(false_calls == 0)
+i = 0
+while i < 2 || always_false() {
+ i += 1
+}
+assert(i == 2)
+assert(false_calls == 1)
+mut taken = false
+if always_true() && always_true() {
+ taken = true
+}
+assert(taken)
+assert(true_calls == 5)
+if always_false() && always_true() {
+ taken = false
+}
+assert(taken)
+assert(false_calls == 2)
+assert(true_calls == 5)
+if always_true() || always_false() {
+ taken = true
+}
+assert(taken)
+assert(false_calls == 2)
+NY
+}

@@ -1,0 +1,31 @@
+shape aarch64_runtime_numeric_result_boundaries {
+  family "codegen/abi/calls"
+  generator "embedded"
+  features ["ny", "test", "abi"]
+  flags "--native-backend=aarch64 -emit-only -o /tmp/nytrix-runtime-numeric-results-aarch64.o"
+  expect object_link_run_i64_42
+  source ny <<'NY'
+use core
+use core.math.big
+use core.math.nt (Z)
+use core.str (atof)
+fn compare_values(any left, any right) int {
+  __bigfloat_cmp(left, right)
+}
+fn dynamic_compare(any left, any right) any {
+  compare_values(left, right)
+}
+fn echo(any value) any { value }
+def low = bf_from_int(1)
+def high = bf_from_int(2)
+assert(compare_values(high, low) == 1, "raw comparison positive result")
+assert(compare_values(low, high) == -1, "raw comparison negative result")
+assert(compare_values(low, low) == 0, "raw comparison equal result")
+assert(to_str(dynamic_compare(high, low)) == "1", "raw comparison boxed return")
+assert(to_str(echo(-Z(21))) == "-21", "bigint negation dynamic return")
+assert(to_str(echo(bigint_to_int(Z(21)))) == "21", "bigint integer dynamic return")
+assert(atof("-2.5") == -2.5, "negative floating parse select")
+assert(atof("2.5") == 2.5, "positive floating parse select")
+42
+NY
+}

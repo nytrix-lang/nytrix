@@ -1,0 +1,31 @@
+shape doc_markdown_index_sections {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "doc", "search", "markdown", "index"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-only; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.compiler.tools.doc.index (markdown_sections)
+
+def sections = markdown_sections(
+   "Lead\n\n## First ##  \nOne\n\n### Second\nTwo\n",
+   "guide/page.md", "page")
+assert(sections.len == 2, "extracts each Markdown heading section")
+assert(sections.get(0).get("name") == "First" &&
+       sections.get(0).get("full_name") == "guide/page.md#First" &&
+       sections.get(0).get("line") == 3 &&
+       sections.get(0).get("doc") == "## First ##  \nOne",
+       "preserves heading body and source line")
+assert(sections.get(1).get("name") == "Second" &&
+       sections.get(1).get("line") == 6 &&
+       sections.get(1).get("doc") == "### Second\nTwo",
+       "handles nested headings")
+def plain = markdown_sections("  text\n", "guide/plain.md", "plain")
+assert(plain.len == 1 && plain.get(0).get("name") == "plain" &&
+       plain.get(0).get("doc") == "text",
+       "indexes documents without headings")
+print("✓ Ny markdown index parity passed")
+NY
+}

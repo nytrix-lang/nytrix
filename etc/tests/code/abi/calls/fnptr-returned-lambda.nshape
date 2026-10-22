@@ -1,0 +1,33 @@
+shape fnptr_returned_lambda_preserves_callback_value_abi {
+  family "codegen/abi/calls"
+  generator "regression"
+  features ["ny", "test", "codegen", "abi", "fnptr", "closure", "callback"]
+  flags_matrix "--native --run --no-effect-require-known; --native-backend=llvm --jit --jit-engine=mcjit --no-effect-require-known; --native-backend=llvm --jit --jit-engine=orc --no-effect-require-known; --native-only --no-effect-require-known; --native-only --native-backend=x86_64 --no-effect-require-known"
+  expect compile_and_run
+  source ny <<'NY'
+fn make_runner() fnptr {
+  return fn(fnptr next) {
+    next(40)
+  }
+}
+
+fn apply_runner(fnptr runner) int {
+  runner(fn(value) { value + 2 })
+}
+
+fn apply_any(any runner, any callback) any {
+  runner(callback)
+}
+
+def runner = make_runner()
+def callback = fn(value) { value + 2 }
+assert(apply_runner(runner) == 42, "returned fnptr preserves callback representation")
+assert(apply_any(runner, callback) == 42,
+       "callable and callback preserve their ABI through any formals")
+def callbacks = [runner]
+assert(apply_runner(callbacks.get(0)) == 42,
+       "callable stored in a descriptor list preserves its dynamic tag")
+assert(apply_any(callbacks.get(0), callback) == 42,
+       "callable read from a descriptor list remains dynamically callable")
+NY
+}

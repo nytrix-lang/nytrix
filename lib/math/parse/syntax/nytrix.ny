@@ -1,12 +1,12 @@
 ;; Keywords: syntax nytrix language parse highlight
 ;; Nytrix syntax highlighter
 ;; References:
-;; - std.math.parse.syntax
-;; - std.math.parse.syntax.helpers
-module std.math.parse.syntax.nytrix(tokenize)
-use std.core
-use std.core.str as str
-use std.math.parse.syntax.helpers as _h
+;; - core.math.parse.syntax
+;; - core.math.parse.syntax.helpers
+module core.math.parse.syntax.nytrix(tokenize)
+use core
+use core.str as str
+use core.math.parse.syntax.helpers as _h
 
 def KW = "def;mut;del;fn;use;as;if;elif;else;while;for;in;match;case;return;break;continue;assert;print;struct;layout;module;import;comptime;template;emit;table;with;defer;try;catch;true;false;nil;not;and;or;enum;type;impl;operator;extern;static;resource;self;is;from;generated;export;internal"
 def FN = "len;append;slice;get;set;put;delete;clear;dict;list;set_idx;items;keys;values;contains;to_str;to_int;is_str;is_int;is_float;is_dict;is_list;is_set;is_tuple;is_bool;type;type_shape;require_shape;env;file_read;file_write;file_exists;chr;ord;range;range2;progress;progress_each;map;filter;reduce;fold;first;last;count;chunk;windowed;max;min;abs;sqrt;sin;cos;tan;log;exp;floor;ceil;round;pow;fmod;ticks;msleep;usleep;spawn;recv;sendline;close;future;async;await;await_all;future_wait;detach"

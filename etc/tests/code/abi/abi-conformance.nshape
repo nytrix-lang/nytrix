@@ -1,0 +1,162 @@
+shape abi_conformance {
+  family "runtime/language/types"
+  generator "embedded"
+  features ["ny", "test", "abi", "conformance"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only; --native-only --native-backend=x86_64"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.str
+use core.math.scalar (clamp)
+
+fn id(v) { v }
+fn abi_pass_any(any value) any { value }
+
+; NOTE: the local helper is named iadd, not add: core.math exports a generic
+; add and a same-named local miscompiles its call sites when the parent
+; module is imported (deterministic; tracked with the typing bullets).
+; Likewise, min/max/abs/clamp resolve here without extra imports, but lerp
+; needs `use core.math (lerp)` and that import destabilizes unrelated calls
+; in combination, so lerp stays covered by direct verification (CHANGELOG).
+fn iadd(int a, int b) int { a + b }
+
+fn fid(f64 x) f64 { x }
+
+fn predicate_value(bool value) int {
+   if value { return 53 }
+   71
+}
+
+mut abi_global_f64 = 0.0
+
+fn build_greeting(str name) str {
+   "Hello, " + name + "!"
+}
+
+fn build_list() list {
+   [10, 20]
+}
+
+fn sum_list(list xs) int {
+   mut total = 0
+   mut i = 0
+   while i < xs.len {
+      total = total + int(xs.get(i))
+      i += 1
+   }
+   total
+}
+
+fn abi_free_dynamic_pointers(any first, any second) int {
+   if first { free(first) }
+   if second { free(second) }
+   0
+}
+
+fn capture_division_error() {
+   mut caught = ""
+   try {
+      id(1) / id(0)
+   } catch e {
+      caught = e
+   }
+   caught
+}
+
+fn capture_len_error() {
+   mut caught = ""
+   try {
+      len(id(1))
+   } catch e {
+      caught = e
+   }
+   caught
+}
+
+; values agree on every route
+assert(iadd(19, 23) == 42, "abi int value")
+assert(fid(2.5) == 2.5, "abi f64 transport")
+def f64_values = [1.25, 2.5]
+assert(float(f64_values.get(0, 0.0)) == 1.25, "f64 list get value")
+assert(float(f64_values.get(8, 0.0)) == 0.0, "f64 list get fallback")
+abi_global_f64 = 3.75
+assert(abi_global_f64 == 3.75, "abi f64 global store")
+assert(abi_pass_any(2.5) == 2.5, "abi f64 any-formal conversion")
+assert(abi_pass_any(2.5f32) == 2.5, "abi f32 any-formal conversion")
+assert(min(max(1, 0), 100000000) == 1, "abi nested min/max")
+assert(max(min(5, 3), 100) == 100, "abi nested max/min")
+assert(abs(0 - 7) == 7, "abi abs expr")
+def neg7 = 0 - 7
+assert(abs(neg7) == 7, "abi abs local")
+assert(abs(abs(0 - 3)) == 3, "abi abs nested")
+assert(clamp(15, 0, 10) == 10, "abi clamp literal")
+def over = 15
+assert(clamp(over, 0, 10) == 10, "abi clamp local")
+assert(clamp(max(5, 3), 0, 10) == 5, "abi clamp nested")
+mut predicate = false
+predicate = iadd(2, 3) > 0
+assert(predicate_value(predicate) == 53,
+       "normalized true predicates retain the bool formal carrier")
+predicate = iadd(2, 3) < 0
+assert(predicate_value(predicate) == 71,
+       "normalized false predicates retain the bool formal carrier")
+assert(build_greeting("Nytrix") == "Hello, Nytrix!", "abi string value")
+assert(build_list() == [10, 20], "abi list value")
+assert(sum_list([1, 2, 3, 4]) == 10, "abi list accumulation")
+assert(abi_free_dynamic_pointers(malloc(8), malloc(8)) == 0,
+       "raw pointers retain their payload across any formals")
+def ptr pointer_text = malloc(4)
+store8(pointer_text, 65, 0)
+store8(pointer_text, 66, 1)
+store8(pointer_text, 0, 2)
+assert(__cstr_to_str(ptr_add(pointer_text, 1)) == "B",
+       "odd pointer arithmetic results remain raw addresses")
+free(pointer_text)
+mut d = dict(2)
+d = set(d, "k", 7)
+assert(int(get(d, "k", 0)) == 7, "abi dict value")
+mut list_record = dict(1)
+list_record = set(list_record, "items", [3, 4])
+def inferred_list = get(list_record, "items", [])
+assert(sum_list(inferred_list) == 7,
+       "inferred typed-list local decodes tagged lookup handle")
+module DictionaryCarrier(sum_rows) {
+   fn _row(any value) dict { if is_dict(value) { return value } dict() }
+   fn _value(dict row) int { int(row.get("value", 0)) }
+   fn sum_rows(list rows) int {
+      mut int total = 0
+      mut int index = 0
+      while index < rows.len {
+         def row = _row(rows[index]).set("index", index)
+         total += _value(row)
+         index += 1
+      }
+      total
+   }
+}
+assert(DictionaryCarrier.sum_rows([{"value": 53}, {"value": 71}, nil]) == 124,
+       "inferred dictionary mutation results retain object ABI through locals")
+assert(to_str([32, 33]) == "[32, 33]", "abi rendering")
+
+; closures keep captured environments on every route
+def base = 100
+assert(range(3).map(fn(i){ i + base }) == [100, 101, 102], "abi closure capture")
+
+; caught-error messages agree on every route
+assert(str_contains(capture_division_error(), "division by zero"), "abi int div error")
+assert(str_contains(capture_len_error(), "len expects"), "abi len error")
+
+; callee-built values stay valid in the caller on every route.
+; Fresh literals are used (never append-in-place on a literal): the NYIR
+; path currently extends a shared literal backing on append, which is
+; tracked separately (see CHANGELOG), so mutation is out of scope here.
+def owned_str = build_greeting("Ny")
+def owned_list = build_list()
+def owned_list2 = build_list()
+assert(owned_str.len == 10, "abi owned string length")
+assert(owned_list.len == 2 && int(owned_list.get(1)) == 20, "abi owned list contents")
+assert(owned_list2 == [10, 20], "abi literal freshness")
+print("ABI_CONFORMANCE_OK")
+NY
+}

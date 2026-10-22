@@ -1,0 +1,16 @@
+shape ownership_rule_linear_resource_must_use {
+  family "compiler-errors/ownership"
+  generator "error"
+  features ["error", "ownership", "resource", "linear"]
+  template ny-compile-fail
+  expect compile_fail
+  flags "--ownership-strict"
+  expect_message "linear resource 'file' must be consumed exactly once"
+  source ny <<'NY'
+linear layout File { int fd }
+
+fn forget(File file) int { 0 }
+
+forget(File(7))
+NY
+}

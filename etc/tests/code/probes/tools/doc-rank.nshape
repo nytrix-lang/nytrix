@@ -1,0 +1,73 @@
+shape doc_search_rank_library {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "doc", "search", "ranking"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-only; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.compiler.tools.doc.rank (fuzzy_score, score, rank)
+
+def entries = [
+   {"kind":"function", "name":"parse", "full_name":"core.math.parse",
+    "signature":"parse source", "keywords":"parser syntax",
+    "path":"lib/math/parse.ny", "doc":"bounded parser", "code":""},
+   {"kind":"doc", "name":"Compiler", "full_name":"Compiler",
+    "keywords":"compiler parser", "path":"docs/compiler.md",
+    "doc":"", "code":""},
+   {"kind":"function", "name":"_parse_internal",
+    "full_name":"core.math._parse_internal", "signature":"internal",
+    "keywords":"parser", "path":"lib/math/parse.ny", "doc":"", "code":""}
+]
+
+assert(fuzzy_score("core.math.parse", "parse") > 10000,
+       "substring scoring rewards leaf matches")
+assert(fuzzy_score("sample", "zzz") == 0,
+       "nonmatching fuzzy queries score zero")
+assert(fuzzy_score("xxPARsER", "parser") == 10198,
+       "ASCII case folding finds a substring ending at the final byte")
+assert(fuzzy_score("aaaaab", "aab") == 10197,
+       "a failed prefix does not skip overlapping substring candidates")
+assert(score(entries.get(0), "core.math.parse") == 1000000,
+       "exact qualified names win")
+assert(int(score(entries.get(0), "parse|compiler")) ==
+       int(max(score(entries.get(0), "parse"), score(entries.get(0), "compiler"))),
+       "alternatives select the best query branch")
+assert(score(entries.get(0), "parser syntax") > score(entries.get(0), "parser absent"),
+       "multi-term scoring rewards full term coverage")
+assert(score(entries.get(0), "parser\tsyntax") == score(entries.get(0), "parser syntax"),
+       "query tokenization matches C space/tab/CR/LF boundaries")
+assert(score(entries.get(2), "parser") < score(entries.get(0), "parser"),
+       "private functions receive the private-name penalty")
+def private_name_without_qualification = {
+   "kind":"function", "name":"_hidden", "full_name":"Visible Alias",
+   "keywords":"needle"
+}
+assert(score(private_name_without_qualification, "needle") == 15800,
+       "private-name scoring follows C when full_name has no qualified leaf")
+def ordered = rank(entries, "parser")
+assert(ordered.len == 3 && int(ordered.get(0)) == 0 &&
+       int(ordered.get(1)) == 2 && int(ordered.get(2)) == 1,
+       "ranking sorts by score and keeps stable source indices")
+def kind_tie = rank([
+   {"kind":"function", "name":"same", "full_name":"m.same"},
+   {"kind":"doc", "name":"same", "full_name":"z.same"}
+], "same")
+assert(kind_tie.len == 2 && int(kind_tie.get(0)) == 1,
+       "equal scores use kind as the first tie breaker")
+def name_tie = rank([
+   {"kind":"function", "name":"same", "full_name":"z.same"},
+   {"kind":"function", "name":"same", "full_name":"a.same"}
+], "same")
+assert(name_tie.len == 2 && int(name_tie.get(0)) == 1,
+       "equal kind and score use full name as the next tie breaker")
+def duplicate_tie = rank([
+   {"kind":"doc", "name":"same", "full_name":"same.entry", "id":1},
+   {"kind":"doc", "name":"same", "full_name":"same.entry", "id":2}
+], "same")
+assert(duplicate_tie.len == 2 && int(duplicate_tie.get(0)) == 0 &&
+       int(duplicate_tie.get(1)) == 1,
+       "identical score, kind, and full name preserve source order")
+NY
+}

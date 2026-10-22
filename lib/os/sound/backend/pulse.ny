@@ -1,52 +1,39 @@
 ;; Keywords: sound backend pulse os
 ;; PulseAudio simple-client backend for Linux audio playback.
 ;; References:
-;; - std.os.sound.backend
-;; - std.os
-module std.os.sound.backend.pulse(is_available, init, shutdown, stream_open, stream_start, stream_stop, write)
-use std.core
-use std.core.dict_mod
-use std.core.mem
-use std.core.str
-use std.core.common as common
-use std.os.sound.diag as sound_debug
-use std.os.sound.backend.shared as backend_shared
-
-fn pa_simple_new(..._args) any {
-   "Runs the pa simple new operation."
-   0
-}
-
-fn pa_strerror(any _err) any {
-   "Runs the pa strerror operation."
-   0
-}
-
-fn pa_simple_drain(..._args) int {
-   "Runs the pa simple drain operation."
-   return -1
-}
-
-fn pa_simple_flush(..._args) int {
-   "Runs the pa simple flush operation."
-   return -1
-}
-
-fn pa_simple_free(any _pa) any {
-   "Runs the pa simple free operation."
-   0
-}
-
-fn pa_simple_write(..._args) int {
-   "Runs the pa simple write operation."
-   return -1
-}
+;; - core.os.sound.backend
+;; - core.os
+module core.os.sound.backend.pulse(is_available, init, shutdown, stream_open, stream_start, stream_stop, write)
+use core
+use core.dict_mod
+use core.mem
+use core.str
+use core.common as common
+use core.os.sound.diag as sound_debug
+use core.os.sound.backend.shared as backend_shared
 
 #linux {
    #link "libpulse-simple.so"
    #include <pulse/simple.h> as "pa_"
    #link "libpulse.so"
    #include <pulse/error.h> as "pa_"
+   extern "pulse-simple" {
+      fn pa_simple_new(i32 server, ptr app, i32 stream, ptr dev, ptr name, ptr ss, ptr map, ptr attr, ptr err) ptr as "pa_simple_new"
+      fn pa_simple_drain(ptr pa, ptr err) i32 as "pa_simple_drain"
+      fn pa_simple_flush(ptr pa, ptr err) i32 as "pa_simple_flush"
+      fn pa_simple_free(ptr pa) as "pa_simple_free"
+      fn pa_simple_write(ptr pa, ptr data, u64 bytes, ptr err) i32 as "pa_simple_write"
+   }
+   extern "pulse" {
+      fn pa_strerror(i32 err) ptr as "pa_strerror"
+   }
+} #else {
+   fn pa_simple_new(..._args) any { 0 }
+   fn pa_strerror(any _err) any { 0 }
+   fn pa_simple_drain(..._args) int { -1 }
+   fn pa_simple_flush(..._args) int { -1 }
+   fn pa_simple_free(any _pa) any { 0 }
+   fn pa_simple_write(..._args) int { -1 }
 }
 
 #endif
@@ -55,14 +42,10 @@ fn _get_latency_ms() int { common.env_int_clamped("NY_AUDIO_LATENCY_MS", 40, 10,
 def PA_STREAM_PLAYBACK = 1
 def PA_SAMPLE_S16LE = 3
 def PA_SAMPLE_FLOAT32LE = 5
-mut _lib = 0
-mut _avail = -1
 
 fn is_available() bool {
    "Returns whether the PulseAudio backend is available on this host."
-   def state = backend_shared.probe_linux_library_once(_avail, _lib, "pulse-simple", "pa_simple_new")
-   _avail, _lib = state.get(0), state.get(1)
-   _avail == 1
+   backend_shared.probe_linux_library("libpulse-simple.so", "pa_simple_new") == 1
 }
 
 fn init(any ctx) any {
@@ -114,14 +97,15 @@ fn stream_open(any stream) any {
    store32(err_ptr, 0, 0)
    mut out_dev = common.env_trim("NY_AUDIO_PULSE_DEVICE")
    if !out_dev { out_dev = "" }
-   def out_dev_c = out_dev.len > 0 ? cstr_dup(out_dev) : 0
+   mut ?ptr out_dev_c = 0
+   if out_dev.len > 0 { out_dev_c = cstr_dup(out_dev) }
    mut app_name = common.env_trim("NY_AUDIO_PULSE_APP")
    if !app_name || app_name.len == 0 { app_name = "Nytrix Audio" }
    mut stream_name = common.env_trim("NY_AUDIO_PULSE_STREAM")
    if !stream_name || stream_name.len == 0 { stream_name = "Nytrix Output" }
    def app_name_c = cstr_dup(app_name)
    def stream_name_c = cstr_dup(stream_name)
-   if sound_debug.enabled() { print("Sound: Pulse: Opening stream: rate=" + to_str(rate) + " chan=" + to_str(channels) + " fmt=" + to_str(format)) }
+   if sound_debug.enabled() { print("Sound: Pulse: Opening stream: rate=" + to_str(rate) + " chan=" + to_str(channels) + " fmt=" + to_str(format) + " device=" + out_dev) }
    if sound_debug.enabled() { print(f"Audio: Pulse: Calling pa_simple_new(ss={ss}, app={app_name_c}, stream={stream_name_c}, dev={out_dev_c}, err={err_ptr})...") }
    def pa = pa_simple_new(0, app_name_c, PA_STREAM_PLAYBACK, out_dev_c, stream_name_c, ss, 0, attr, err_ptr)
    if sound_debug.enabled() { print("Sound: Pulse: pa_simple_new returned " + to_str(pa)) }
@@ -160,7 +144,7 @@ fn stream_start(any stream) bool {
 
 fn stream_stop(any stream) any {
    "Flushes, drains, and frees a PulseAudio playback stream."
-   def pa = stream.get("handle")
+   mut ?ptr pa = stream.get("handle")
    if pa {
       def err_ptr = malloc(4)
       store32(err_ptr, 0, 0)
@@ -175,11 +159,13 @@ fn stream_stop(any stream) any {
 fn write(any pa, any buf, int size) bool {
    "Writes `size` bytes to a PulseAudio stream."
    if !pa { return false }
+   mut ?ptr stream_handle = pa
+   mut ?ptr data = buf
    def n = size
    if n <= 0 { return true }
    def err_ptr = malloc(4)
    store32(err_ptr, 0, 0)
-   def rc = pa_simple_write(pa, buf, n, err_ptr)
+   def rc = pa_simple_write(stream_handle, data, n, err_ptr)
    if rc < 0 && sound_debug.enabled() {
       def err = load32(err_ptr, 0)
       def msg = pa_strerror(err)

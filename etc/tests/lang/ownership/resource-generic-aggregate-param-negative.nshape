@@ -1,0 +1,31 @@
+shape ownership_rule_resource_generic_aggregate_param_negative {
+  family "compiler-errors/ownership"
+  generator "error"
+  features ["error", "ownership", "resource", "linear", "generic", "aggregate"]
+  template ny-compile-fail
+  expect compile_fail
+  flags "--ownership-strict"
+  expect_message "linear resource 'files' must be consumed exactly once"
+  source ny <<'NY'
+use core
+linear layout File { int fd }
+
+fn lose_resource_list(list<File> files) int {
+  0
+}
+
+fn lose_resource_dict(dict<int, File> files) int {
+  0
+}
+
+fn lose_resource_set(set<File> files) int {
+  0
+}
+
+fn lose_resource_tuple(tuple<File, int> files) int {
+  0
+}
+
+0
+NY
+}

@@ -1,12 +1,12 @@
 ;; Keywords: platform window backend linux x11 keymap os ui input
 ;; Native X11 keyboard fallback logic.
 ;; References:
-;; - std.os.ui.window.platform.linux.x11
-;; - std.os.ui.window
-;; - std.os.ui.window.consts
-module std.os.ui.window.platform.linux.x11.keymap(translate_keysym, translate_scancode, keysym_to_unicode, keysym_from_key, INVALID_CODEPOINT)
-use std.core
-use std.os.ui.window.platform.api
+;; - core.os.ui.window.platform.linux.x11
+;; - core.os.ui.window
+;; - core.os.ui.window.consts
+module core.os.ui.window.platform.linux.x11.keymap(translate_keysym, translate_scancode, keysym_to_unicode, keysym_from_key, INVALID_CODEPOINT)
+use core
+use core.os.ui.window.platform.api
 
 def XK_KP_0 = 0xffb0
 def XK_KP_1 = 0xffb1
@@ -474,11 +474,11 @@ fn keysym_to_unicode(int keysym) int {
    (keysym >= 0x00a0 && keysym <= 0x00ff){
       return keysym
    }
-   ; Direct Unicode keysyms are encoded as 0x01000000 + codepoint.  Avoid the
-   ; dynamic bitwise bridge here: on the native path it may receive a tagged
-   ; integer and compare the representation bits rather than the keysym.
-   if keysym >= 0x01000000 && keysym < 0x02000000 {
-      return keysym % 0x01000000
+   ; Direct Unicode keysyms encode scalar values U+0100..U+10FFFF.
+   if keysym >= 0x01000100 && keysym <= 0x0110ffff {
+      def codepoint = keysym - 0x01000000
+      if codepoint >= 0xd800 && codepoint <= 0xdfff { return INVALID_CODEPOINT }
+      return codepoint
    }
    _keysym_table_lookup(keysym)
 }
@@ -491,10 +491,14 @@ fn keysym_to_unicode(int keysym) int {
    assert(translate_keysym(0xffff) == KEY_DELETE, "keysym delete")
    assert(translate_scancode(9) == KEY_ESCAPE, "scancode esc")
    assert(translate_scancode(24) == KEY_Q, "scancode q")
+   assert(translate_scancode(25) == KEY_W && KEY_W == 87, "scancode w")
+   assert(translate_scancode(38) == KEY_A && KEY_A == 65, "scancode a")
+   assert(translate_scancode(39) == KEY_S && KEY_S == 83, "scancode s")
+   assert(translate_scancode(40) == KEY_D && KEY_D == 68, "scancode d")
    assert(translate_scancode(133) == KEY_LEFT_SUPER, "scancode super")
    assert(keysym_from_key(KEY_ESCAPE) == 0xff1b, "key to keysym")
    assert(keysym_to_unicode(0x00e9) == 0x00e9, "latin1 keysym")
    assert(keysym_to_unicode(0x010020ac) == 0x20ac, "keysym direct unicode")
    assert(keysym_to_unicode(1) == INVALID_CODEPOINT, "invalid keysym")
-   print("✓ std.os.ui.window.platform.linux.x11.keymap self-test passed")
+   print("✓ core.os.ui.window.platform.linux.x11.keymap self-test passed")
 }

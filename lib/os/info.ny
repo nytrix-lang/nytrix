@@ -1,17 +1,17 @@
 ;; Keywords: info environment system-info os
 ;; OS system information (CPU, RAM, GPU).
 ;; References:
-;; - std.os
-module std.os.info(cpu_name, ram_short, gpu_name, hostname, cpu_logical_count, cpu_features_raw, cpu_features, cpu_feature_map, has_cpu_feature, has_opencl, system_info)
-use std.core
-use std.core.dict_mod
-use std.core.str
-use std.os
-use std.os.fs
-use std.os.io
-use std.os.path
-use std.os.path as ospath
-use std.os.platform as platform
+;; - core.os
+module core.os.info(cpu_name, ram_short, gpu_name, hostname, cpu_logical_count, cpu_features_raw, cpu_features, cpu_feature_map, has_cpu_feature, has_opencl, system_info)
+use core
+use core.dict_mod
+use core.str
+use core.os
+use core.os.fs
+use core.os.io
+use core.os.path
+use core.os.path as ospath
+use core.os.platform as os_platform
 
 mut _linux_cpuinfo_loaded = false
 mut _linux_cpuinfo_cache = ""
@@ -41,7 +41,7 @@ mut _system_info_loaded = false
 mut _system_info_cache = dict(32)
 
 fn _linux_cpuinfo_text() str {
-   if !platform.is_linux() { return "" }
+   if !os_platform.is_linux() { return "" }
    if _linux_cpuinfo_loaded { return _linux_cpuinfo_cache }
    _linux_cpuinfo_cache = _read_text(ospath.normalize("/proc/cpuinfo"))
    _linux_cpuinfo_loaded = true
@@ -220,7 +220,7 @@ fn cpu_logical_count() int {
    "Returns the detected number of logical CPU cores."
    if _cpu_logical_count_loaded { return _cpu_logical_count_cache }
    mut out = 0
-   if platform.is_linux() {
+   if os_platform.is_linux() {
       def nproc_out = _cmd_out("nproc", [])
       def n0 = _first_number(nproc_out)
       if n0 > 0 { out = n0 }
@@ -237,7 +237,7 @@ fn cpu_logical_count() int {
             if n > 0 { out = n }
          }
       }
-   } elif platform.is_macos() {
+   } elif os_platform.is_macos() {
       def sysctl_out = _cmd_out("sysctl", ["-n", "hw.logicalcpu"])
       def n = _first_number(sysctl_out)
       if n > 0 { out = n }
@@ -246,7 +246,7 @@ fn cpu_logical_count() int {
          def n2 = _first_number(ncpu_out)
          if n2 > 0 { out = n2 }
       }
-   } elif platform.is_windows() {
+   } elif os_platform.is_windows() {
       def p, n = env("NUMBER_OF_PROCESSORS"), _first_number(p)
       if n > 0 { out = n }
       if out <= 0 {
@@ -329,9 +329,9 @@ fn cpu_features_raw() str {
    "Returns a raw CPU feature string from OS-specific sources."
    if _cpu_features_raw_loaded { return _cpu_features_raw_cache }
    mut out = ""
-   if platform.is_linux() { out = _linux_cpu_features_raw() }
-   elif platform.is_macos() { out = _macos_cpu_features_raw() }
-   elif platform.is_windows() { out = _windows_cpu_features_raw() }
+   if os_platform.is_linux() { out = _linux_cpu_features_raw() }
+   elif os_platform.is_macos() { out = _macos_cpu_features_raw() }
+   elif os_platform.is_windows() { out = _windows_cpu_features_raw() }
    if !is_str(out) { out = "" }
    _cpu_features_raw_cache = out
    _cpu_features_raw_loaded = true
@@ -472,10 +472,10 @@ fn has_opencl() bool {
    "Returns true when an OpenCL runtime appears available on this host."
    def force = env("NYTRIX_OPENCL_FORCE")
    if is_str(force) { return _env_bool("NYTRIX_OPENCL_FORCE", false) }
-   if platform.is_windows() {
+   if os_platform.is_windows() {
       return _first_existing_path(["C:\\Windows\\System32\\OpenCL.dll", "C:\\Windows\\SysWOW64\\OpenCL.dll"])
    }
-   if platform.is_macos() { return file_exists(ospath.normalize("/System/Library/Frameworks/OpenCL.framework/OpenCL")) }
+   if os_platform.is_macos() { return file_exists(ospath.normalize("/System/Library/Frameworks/OpenCL.framework/OpenCL")) }
    _first_existing_path(["/etc/OpenCL/vendors", "/usr/lib/libOpenCL.so", "/usr/lib64/libOpenCL.so", "/usr/local/lib/libOpenCL.so", "/lib/x86_64-linux-gnu/libOpenCL.so.1", "/usr/lib/x86_64-linux-gnu/libOpenCL.so.1"])
 }
 
@@ -483,7 +483,7 @@ fn hostname() str {
    "Returns the machine hostname."
    if _hostname_loaded { return _hostname_cache }
    mut out = ""
-   if platform.is_windows() {
+   if os_platform.is_windows() {
       def hn = env("COMPUTERNAME")
       if is_str(hn) && strip(hn).len > 0 { out = strip(hn) }
       if out.len == 0 {
@@ -497,14 +497,14 @@ fn hostname() str {
    }
    def env_hn = env("HOSTNAME")
    if is_str(env_hn) && strip(env_hn).len > 0 { out = strip(env_hn) }
-   if out.len == 0 && platform.is_linux() {
+   if out.len == 0 && os_platform.is_linux() {
       def proc_hn = _read_text(ospath.normalize("/proc/sys/kernel/hostname"))
       if proc_hn.len > 0 {
          def h0 = _first_line(proc_hn)
          if h0.len > 0 { out = h0 }
       }
    }
-   if out.len == 0 && platform.is_macos() {
+   if out.len == 0 && os_platform.is_macos() {
       def sys_hn = _cmd_out("sysctl", ["-n", "kern.hostname"])
       if sys_hn.len > 0 {
          def h1 = _first_line(sys_hn)
@@ -518,7 +518,7 @@ fn hostname() str {
          if h.len > 0 { out = h }
       }
    }
-   if out.len == 0 && !platform.is_macos() {
+   if out.len == 0 && !os_platform.is_macos() {
       def host_out = _cmd_out("hostname", [])
       if host_out.len > 0 { out = _first_line(host_out) }
    }
@@ -596,7 +596,7 @@ fn ram_short() str {
    "Returns a summary string of system RAM usage(e.g., '2048/8192MB').
    Linux uses /proc ; macOS uses sysctl/vm_stat; Windows uses wmic/powershell."
    if _ram_short_loaded { return _ram_short_cache }
-   if platform.is_linux() {
+   if os_platform.is_linux() {
       def mem = _read_text(ospath.normalize("/proc/meminfo"))
       if mem.len > 0 {
          def total_v = _find_prefixed_line_value(mem, "MemTotal")
@@ -614,7 +614,7 @@ fn ram_short() str {
             return _ram_short_cache
          }
       }
-   } elif platform.is_macos() {
+   } elif os_platform.is_macos() {
       def total = _cmd_out("sysctl", ["-n", "hw.memsize"])
       mut total_b = _first_number(total)
       if total_b <= 0 {
@@ -655,7 +655,7 @@ fn ram_short() str {
          _ram_short_loaded = true
          return _ram_short_cache
       }
-   } elif platform.is_windows() {
+   } elif os_platform.is_windows() {
       mut out = _cmd_out("wmic", ["OS", "get", "TotalVisibleMemorySize,FreePhysicalMemory", "/value"])
       def wmic_mem = _parse_windows_mem_summary(out)
       if wmic_mem.len > 0 {
@@ -680,7 +680,7 @@ fn gpu_name() str {
    "Returns the name or primary identifier of the system's GPU.
    Linux uses sysfs ; macOS uses system_profiler (cached); Windows uses wmic/powershell (cached)."
    if _gpu_name_loaded { return _gpu_name_cache }
-   if platform.is_macos() {
+   if os_platform.is_macos() {
       def soc = _cmd_out("sysctl", ["-n", "machdep.cpu.brand_string"])
       if str_contains(soc, "Apple M") {
          _gpu_name_cache = "Apple GPU(" + strip(soc) + ")"
@@ -712,7 +712,7 @@ fn gpu_name() str {
       _gpu_name_loaded = true
       return _gpu_name_cache
    }
-   if platform.is_windows() {
+   if os_platform.is_windows() {
       if _gpu_deep_scan_enabled() {
          mut out = _cmd_out("wmic", ["path", "win32_VideoController", "get", "Name", "/value"])
          if out.len > 0 {
@@ -838,5 +838,5 @@ fn system_info() dict {
    assert(info.get("logical_cpus", 0) >= 1 && info.get("platform", "").len > 0, "info system basics")
    assert(info.get("gpu", "").len > 0 && info.get("ram", "").len > 0, "info system hardware strings")
    assert(is_dict(info.get("accel_status", 0)) && is_dict(info.get("opencl_status", 0)), "info accel/opencl status")
-   print("✓ std.os.info self-test passed")
+   print("✓ core.os.info self-test passed")
 }

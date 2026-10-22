@@ -1,18 +1,18 @@
 ;; Keywords: 3d gltf glb parse
 ;; Submodule: scene
-module std.math.parse.3d.gltf.scene(_gltf_build_node_world_mats, _gltf_root_relevant_for_mesh_limit, gltf_scene_punctual_lights, _gltf_compute_mesh_instance_mats_fast, _gltf_node_default_visibility, _gltf_node_local_visibility, _gltf_build_node_visibility_map, gltf_has_node_visibility, gltf_resolve_node_visibility, _gltf_resolve_part_skin, gltf_camera_count, gltf_camera_info, gltf_camera_instances, _gltf_model_has_negative_det, _gltf_model_mean_scale, _gltf_scale_bsdf2_thickness, _gltf_resolve_instancing_mats)
-use std.core
-use std.math.bin
-use std.math
-use std.math.float (is_nan, is_inf)
-use std.core.str as str
-use std.core.common as common
-use std.core.cache as cache
-use std.math.parse.3d.gltf.math as gltf_math
-use std.math.parse.3d.gltf.shared as shr
-use std.math.parse.3d.gltf.load as ld
-use std.math.parse.3d.gltf.material as mat
-use std.math.parse.3d.gltf.animation as anim
+module core.math.parse.3d.gltf.scene(_gltf_build_node_world_mats, _gltf_root_relevant_for_mesh_limit, gltf_scene_punctual_lights, _gltf_compute_mesh_instance_mats_fast, _gltf_node_default_visibility, _gltf_node_local_visibility, _gltf_build_node_visibility_map, gltf_has_node_visibility, gltf_resolve_node_visibility, _gltf_resolve_part_skin, gltf_camera_count, gltf_camera_info, gltf_camera_instances, _gltf_model_has_negative_det, _gltf_model_mean_scale, _gltf_scale_bsdf2_thickness, _gltf_resolve_instancing_mats)
+use core
+use core.math.bin
+use core.math
+use core.math.float (is_nan, is_inf)
+use core.str as str
+use core.common as common
+use core.cache as cache
+use core.math.parse.3d.gltf.math as gltf_math
+use core.math.parse.3d.gltf.shared as shr
+use core.math.parse.3d.gltf.load as ld
+use core.math.parse.3d.gltf.material as mat
+use core.math.parse.3d.gltf.animation as anim
 
 fn _gltf_build_node_world_mats(any g, int node_idx, list parent_m, dict node_world_mats) dict {
    def nodes = g.get("nodes")
@@ -199,7 +199,7 @@ fn _gltf_build_node_visibility_map(any g, int node_idx, bool parent_visible, dic
    def eff_vis = parent_visible && local_vis
    vis_map[node_idx] = eff_vis
    def node = nodes[node_idx]
-   def children = is_dict(node) ? node.get("children", 0) : 0
+   def list children = is_dict(node) ? node.get("children", 0) : []
    if is_list(children) {
       def children_n = children.len
       mut ci = 0
@@ -264,7 +264,7 @@ fn gltf_resolve_node_visibility(any gltf_data, any overrides=0) dict {
    def scene_idx = shr._gltf_active_scene_idx(g, gltf_data)
    if is_list(scenes) && scene_idx >= 0 && scene_idx < scenes.len {
       def scene = scenes[scene_idx]
-      def roots = is_dict(scene) ? scene.get("nodes", 0) : 0
+      def list roots = is_dict(scene) ? scene.get("nodes", 0) : []
       if is_list(roots) {
          def roots_n = roots.len
          mut ri = 0

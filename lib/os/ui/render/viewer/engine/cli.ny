@@ -1,11 +1,11 @@
 ;; Keywords: engine cli args viewer options os ui render scene
 ;; Command-line option parsing for engine viewer startup and model loading.
 ;; References:
-;; - std.os.args
-;; - std.os.ui.assets.viewer
-module std.os.ui.render.viewer.engine.cli(argv_list, parse_options, startup_plan, option_takes_value)
-use std.core
-use std.core.str as str
+;; - core.os.args
+;; - core.os.ui.assets.viewer
+module core.os.ui.render.viewer.engine.cli(argv_list, parse_options, startup_plan, option_takes_value)
+use core
+use core.str as str
 
 fn argv_list() list {
    "Returns process argv as a Nytrix list."
@@ -263,5 +263,5 @@ fn startup_plan(args, one_arg_cmds=[]) dict {
    assert(to_str(opt.get("render_backend", "")) == "gl", "viewer cli render backend")
    assert(to_str(opt.get("gui_shot", "")) == "probe" && bool(opt.get("gui_probe", false)) && to_str(plan.get("direct_scene", "")) == "Avocado", "viewer cli startup")
    assert(is_list(actions) && actions.len == 1 && actions.get(0, {}).get("kind", "") == "scene", "viewer cli action order")
-   print("✓ std.os.ui.render.viewer.engine.cli self-test passed")
+   print("✓ core.os.ui.render.viewer.engine.cli self-test passed")
 }

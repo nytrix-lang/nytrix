@@ -1,0 +1,24 @@
+shape ownership_exclusive_borrow_same_branch_access {
+  family "compiler-errors/ownership"
+  generator "error"
+  features ["error", "ownership", "borrow", "exclusive", "branch"]
+  template ny-compile-fail
+  expect compile_fail
+  flags "--ownership-strict"
+
+  source ny <<'NY'
+use core
+
+fn mutate_before_alias_use(bool choose) int {
+  mut int value = 5
+  def exclusive = &mut value
+  if choose {
+    value = value + 1
+    def observed = exclusive
+  }
+  value
+}
+
+mutate_before_alias_use(true)
+NY
+}

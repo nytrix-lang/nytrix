@@ -6,12 +6,12 @@
 ;; - https://www.secg.org/sec1-v2.pdf
 ;; - https://www.rfc-editor.org/rfc/rfc8032
 ;; References:
-;; - std.math.crypto.ecc
-;; - std.math.crypto
-module std.math.crypto.ecc.smart_attack(smart_attack)
-use std.math.nt
-use std.math.crypto.ecc.ecc
-use std.os.prim as os
+;; - core.math.crypto.ecc
+;; - core.math.crypto
+module core.math.crypto.ecc.smart_attack(smart_attack)
+use core.math.nt
+use core.math.crypto.ecc.ecc
+use core.os.prim as os
 
 fn smart_attack(any Px, any Py, any Qx, any Qy, any a, any p) any {
    "Smart's attack on anomalous curves. Recovers scalar k where Q = k*P on a curve y^2 = x^3+ax+b over F_p with #E(F_p) = p(anomalous curve).
@@ -96,7 +96,7 @@ fn _smart_attack_tiny_dlp(any Px, any Py, any Qx, any Qy, any a, any p) any {
 }
 
 fn _smart_attack_p2(any Px, any Py, any Qx, any Qy, any a, any p) any {
-   use std.math.crypto.ecc.ecc
+   use core.math.crypto.ecc.ecc
    def x1, y1 = mod(Px, p), mod(Py, p)
    def x2, y2 = mod(Qx, p), mod(Qy, p)
    mut b_p = mod(y1*y1 - x1*x1*x1 - a*x1, p)

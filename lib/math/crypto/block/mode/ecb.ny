@@ -3,11 +3,11 @@
 ;; Reference:
 ;; - https://nvlpubs.nist.gov/nistpubs/Legacy/SP/nistspecialpublication800-38a.pdf
 ;; References:
-;; - std.math.crypto.block.mode
-;; - std.math.crypto
-module std.math.crypto.block.mode.ecb(ecb_detect, ecb_byte_by_byte, ecb_byte_at_a_time_suffix, cbc_fixed_iv_byte_at_a_time_suffix, oracle_detect_block_size, zero_pad_to_block, locked_dungeon_mod_pad, ecb_split_blocks, ecb_splice_blocks)
-use std.core
-use std.math.bin
+;; - core.math.crypto.block.mode
+;; - core.math.crypto
+module core.math.crypto.block.mode.ecb(ecb_detect, ecb_byte_by_byte, ecb_byte_at_a_time_suffix, cbc_fixed_iv_byte_at_a_time_suffix, oracle_detect_block_size, zero_pad_to_block, locked_dungeon_mod_pad, ecb_split_blocks, ecb_splice_blocks)
+use core
+use core.math.bin
 
 fn ecb_split_blocks(list ciphertext, int block_size=16) list {
    "Split ciphertext bytes into fixed-size ECB blocks. Drops no trailing bytes."

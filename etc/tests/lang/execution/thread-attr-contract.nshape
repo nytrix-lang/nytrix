@@ -1,0 +1,82 @@
+shape thread_attr_join_detach {
+  family "runtime/execution"
+  generator "embedded"
+  features ["ny", "test", "thread", "attr"]
+  template ny-test-case
+  flags_matrix "--native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os
+
+;; Advertised @thread contract: a statement-position call detaches without
+;; blocking, a value-position call joins and returns the worker result, and
+;; the launch ABI carries arguments and callbacks. The NYIR VM is covered by
+;; the negative shape below: thread callbacks require executable code.
+
+@thread
+fn joined(a=40, b=2) {
+   return a + b
+}
+
+@thread
+fn slow(ms=150) {
+   msleep(ms)
+   return ms
+}
+
+@thread
+fn seven(a1=1, a2=2, a3=3, a4=4, a5=5, a6=6, a7=7) {
+   return a1 + a2 + a3 + a4 + a5 + a6 + a7
+}
+
+@thread
+fn eight(a1, a2, a3, a4, a5, a6, a7, a8=8) {
+   return a1 + a2 + a3 + a4 + a5 + a6 + a7 + a8
+}
+
+@thread
+fn apply(cb, v=1) {
+   return cb(v)
+}
+
+def inc = fn(x) { x + 1 }
+
+assert(joined() == 42, "@thread zero-arg join failed")
+assert(joined(10, 20) == 30, "@thread explicit-arg join failed")
+assert(joined(100) == 102, "@thread mixed default/explicit join failed")
+assert(seven(1, 2, 3, 4, 5, 6, 7) == 28, "@thread seven-argument join failed")
+assert(eight(1, 2, 3, 4, 5, 6, 7) == 36,
+       "@thread eight-argument call with a default failed")
+assert(apply(inc, 41) == 42, "@thread callback join failed")
+
+def t0 = ticks()
+slow(150)
+def t1 = ticks()
+def detach_ms = (t1 - t0) / 1000000
+assert(detach_ms < 120, "@thread statement call should detach, took ms")
+msleep(200)
+print("thread attr contract ok")
+NY
+}
+
+shape thread_attr_vm_rejects {
+  family "runtime/execution"
+  generator "embedded"
+  features ["ny", "thread", "attr", "vm", "negative"]
+  template ny-test-case
+  flags "--native-only --nyir-run"
+  expect compile_fail
+  expect_message "thread callbacks require executable code"
+  source ny <<'NY'
+use core
+use core.os
+
+@thread
+fn work(a=1) {
+   return a + 1
+}
+
+print(work(41))
+NY
+}

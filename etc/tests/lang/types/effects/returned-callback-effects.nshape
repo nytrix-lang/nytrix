@@ -1,0 +1,153 @@
+shape returned_callbacks_keep_their_effect_rows {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "higher-order", "callback", "return"]
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+fn make_pure_callback() fnptr {
+  return fn(value) { value + 1 }
+}
+
+fn make_io_callback() fnptr {
+  return fn(value) {
+    print("returned callback\n")
+    value + 1
+  }
+}
+
+fn make_aliased_io_callback() fnptr {
+  def callback = fn(value) {
+    print("aliased returned callback\n")
+    value + 2
+  }
+  return callback
+}
+
+fn forward_callback(fnptr callback) fnptr {
+  def forwarded = callback
+  return forwarded
+}
+
+fn choose_callback(bool choose, fnptr first, fnptr second) fnptr {
+  mut selected = first
+  if choose {
+    selected = second
+  }
+  return selected
+}
+
+fn early_return_callback(bool choose, fnptr first, fnptr second) fnptr {
+  if choose { return second }
+  return first
+}
+
+fn chained_early_return_callback(bool first, bool second,
+                                 fnptr a, fnptr b, fnptr fallback) fnptr {
+  if first { return a }
+  if second { return b }
+  return fallback
+}
+
+fn match_callback(bool choose, fnptr first, fnptr second) fnptr {
+  mut selected = first
+  match choose {
+    true -> { selected = second }
+    _ -> { selected = first }
+  }
+  return selected
+}
+
+@effects(cap(read))
+fn read_resource() int {
+  44
+}
+
+@effects(alloc)
+fn invoke_pure_callback() int {
+  def callback = make_pure_callback()
+  callback(40)
+}
+
+@effects(alloc, io)
+fn invoke_io_callback() int {
+  def callback = make_io_callback()
+  callback(40)
+}
+
+@effects(alloc, io)
+fn invoke_aliased_io_callback() int {
+  def callback = make_aliased_io_callback()
+  callback(40)
+}
+
+@effects(alloc, io)
+fn invoke_forwarded_callback() int {
+  def callback = forward_callback(fn(value) {
+    print("forwarded callback\n")
+    value + 3
+  })
+  callback(40)
+}
+
+@effects(cap(read))
+fn invoke_forwarded_custom_callback() int {
+  def callback = forward_callback(read_resource)
+  callback()
+}
+
+@effects(alloc, io)
+fn invoke_branch_selected_callback() int {
+  def callback = choose_callback(true, fn() { 41 }, fn() {
+    print("selected branch callback\n")
+    45
+  })
+  callback()
+}
+
+@effects(io, alloc)
+fn invoke_early_return_callback() int {
+  def callback = early_return_callback(true, fn() { 47 }, fn() {
+    print("early return callback\n")
+    48
+  })
+  callback()
+}
+
+@effects(alloc, io)
+fn invoke_chained_early_return_callback() int {
+  def callback = chained_early_return_callback(
+    false, true, fn() { 49 }, fn() {
+      print("chained early return callback\n")
+      50
+    }, fn() { 51 })
+  callback()
+}
+
+@effects(alloc, io)
+fn invoke_match_selected_callback() int {
+  def callback = match_callback(true, fn() { 41 }, fn() {
+    print("selected match callback\n")
+    46
+  })
+  callback()
+}
+
+assert(invoke_pure_callback() == 41, "returned pure callback effects")
+assert(invoke_io_callback() == 41, "returned IO callback effects")
+assert(invoke_aliased_io_callback() == 42,
+       "local callback aliases preserve returned closure effects")
+assert(invoke_forwarded_callback() == 43,
+       "callback parameter aliases preserve forwarded closure effects")
+assert(invoke_forwarded_custom_callback() == 44,
+       "forwarded callback aliases preserve custom effect rows")
+assert(invoke_branch_selected_callback() == 45,
+       "factory branch joins preserve returned callback effect provenance")
+assert(invoke_early_return_callback() == 48,
+       "early-return branch joins preserve returned callback effect provenance")
+assert(invoke_chained_early_return_callback() == 50,
+       "chained early-return joins preserve returned callback effect provenance")
+assert(invoke_match_selected_callback() == 46,
+       "factory match joins preserve returned callback effect provenance")
+NY
+}

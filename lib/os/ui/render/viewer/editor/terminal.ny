@@ -1,22 +1,22 @@
 ;; Keywords: editor terminal console output command os ui render viewer text
 ;; Embedded terminal and command output surface for editor workflows.
 ;; References:
-;; - std.os.ui.render.viewer.editor.runner
-module std.os.ui.render.viewer.editor.terminal(
+;; - core.os.ui.render.viewer.editor.runner
+module core.os.ui.render.viewer.editor.terminal(
    new, is_open, is_focused, title, mode, toggle_shell, toggle_repl,
    open_shell, open_repl, show_shell, show_repl, open_command, close, close_tab, select_tab, next_tab, prev_tab,
-   tab_count, active_tab, tab_title, set_font, update, resize, draw, contains, handle_event,
+   tab_count, active_tab, tab_title, set_font, update, resize, draw, point_contains, handle_event,
    send_text, write_text, visible_cell_count, debug_text
 )
 
-use std.core
-use std.core.common as common
-use std.math (max, min)
-use std.os (ticks)
-use std.os.ui.render.viewer.editor.tools as tools
-use std.os.ui.render.viewer.vterm as vterm
-use std.os.ui.window.consts
-use std.os.ui.render (font_load, FONT_FILTER_NEAREST, FONT_FILTER_LINEAR)
+use core
+use core.common as common
+use core.math (max, min)
+use core.os (ticks)
+use core.os.ui.render.viewer.editor.tools as tools
+use core.os.ui.render.viewer.vterm as vterm
+use core.os.ui.window.consts
+use core.os.ui.render (font_load, FONT_FILTER_NEAREST, FONT_FILTER_LINEAR)
 
 fn _fonts(any font) dict {
    def path = common.env_trim("NY_EDITOR_TERM_FONT")
@@ -187,7 +187,7 @@ fn _spawn(dict st, str m, str path, list args, str banner, list child_env=[]) di
    if child_env.len > 0 { vt = vt.set("child_env", child_env) }
    match vterm.open(vt, path, args) {
       ok(v) -> { vt = v }
-      err(e) -> { vt = vterm.write(vt, "terminal start failed: " + to_str(e) + "\n") }
+      err(e) -> { vt = vterm.put_text(vt, "terminal start failed: " + to_str(e) + "\n") }
    }
    mut tabs = _tabs(st)
    tabs = tabs.append({"mode": m, "vt": vt})
@@ -297,7 +297,7 @@ fn send_text(dict st, str text) dict {
       st = _ensure_vt(st)
       def vt = st.get("vt")
       if vterm.is_running(vt) { vterm.send_input(vt, text) }
-      else { st = _replace_active(st, vterm.write(vt, text)) }
+      else { st = _replace_active(st, vterm.put_text(vt, text)) }
    }
    st
 }
@@ -322,7 +322,7 @@ fn _display_text(str text) str {
 fn write_text(dict st, str text) dict {
    if is_open(st) {
       st = _ensure_vt(st)
-      st = _replace_active(st, vterm.write(st.get("vt"), _display_text(text)))
+      st = _replace_active(st, vterm.put_text(st.get("vt"), _display_text(text)))
    }
    st
 }
@@ -515,7 +515,8 @@ fn resize(dict st, f64 x, f64 y, f64 w, f64 h) dict {
 }
 
 ;; Returns true when contains.
-fn contains(dict st, f64 x, f64 y) bool {
+@noinline
+fn point_contains(dict st, f64 x, f64 y) bool {
    is_open(st) &&
    x >= float(st.get("x", 0.0)) && x <= float(st.get("x", 0.0)) + float(st.get("w", 0.0)) &&
    y >= float(st.get("y", 0.0)) && y <= float(st.get("y", 0.0)) + float(st.get("h", 0.0))
@@ -536,7 +537,7 @@ fn handle_event(dict st, int typ, any data) list {
    def d = _event_data(st, data)
    def mouse_event = typ == EVENT_MOUSE_BUTTON_PRESSED || typ == EVENT_MOUSE_BUTTON_RELEASED || typ == EVENT_MOUSE_POS_CHANGED || typ == EVENT_MOUSE_SCROLL
    if mouse_event {
-      def inside = contains(st, float(d.get("x", -1.0)), float(d.get("y", -1.0)))
+      def inside = point_contains(st, float(d.get("x", -1.0)), float(d.get("y", -1.0)))
       if typ == EVENT_MOUSE_BUTTON_PRESSED { st["focus"] = inside }
       if !inside { return [st, false] }
    } elif !is_focused(st) {
@@ -558,7 +559,7 @@ fn draw(dict st) dict {
 #main {
    mut st = new(0)
    st = resize(st, 10.0, 20.0, 400.0, 200.0)
-   assert(contains(st.set("open", true), 12.0, 24.0), "editor terminal hit")
+   assert(point_contains(st.set("open", true), 12.0, 24.0), "editor terminal hit")
    st["tabs"] = [{"mode": "terminal", "vt": st.get("vt")}, {"mode": "repl", "vt": _blank_vt(st)}]
    st["open"] = true
    st = select_tab(st, 1)

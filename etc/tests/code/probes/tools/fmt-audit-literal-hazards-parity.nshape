@@ -1,0 +1,45 @@
+shape fmt_audit_literal_hazards_parity {
+  family "probe/tools"
+  generator "embedded"
+  features ["formatter", "audit", "literal-hazards", "parity"]
+  template ny-test-case
+  flags "--native-only"
+  timeout 60
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.subprocess (run_capture)
+use core.str as str
+def ny = env("NYTRIX_NY_FULL_BIN")
+def fmt = env("NYTRIX_TEST_FMT_BIN")
+def cmake = env("NYTRIX_CMAKE_COMMAND")
+def dir = temp_dir() + "/fmt-literal-hazards-" + to_str(pid())
+def made = run_capture([cmake, "-E", "make_directory", dir], [], nil, false)
+assert(made.get("code", 127) == 0, "create literal hazards directory")
+def path = dir + "/literal-hazards.ny"
+assert(is_ok(file_write(path,
+   "fn hazards() {\n   def quotient = value / 0\n" +
+   "   def remainder = value % (+0.0)\n   def safe = value / 0.25\n" +
+   "   def text = \"fake / 0 and values[-2]\"\n   def first = values[-2]\n" +
+   "   def second = values [ -10_2]\n   def positive = values[2]\n" +
+   "   def buffer = malloc(-4)\n   def items = list(-3)\n" +
+   "   def qualified = object.malloc(-1)\n" +
+   "   ;; ignored = value / 0 and values[-3]\n}\n")),
+   "write literal hazards source")
+def c = run_capture([fmt, "--bugs", "--json", path], [], nil, false)
+def embedded = run_capture([ny, "fmt", "--bugs", "--json", path], [], nil, false)
+def output = embedded.get("stdout", "")
+assert(c.get("code", 127) == 0 && embedded.get("code", 127) == 0 &&
+       c.get("stdout", "") == output, "literal-hazard audit parity")
+for expected in ["NYAUD1115", "literal zero divisor after '/'",
+                 "literal zero divisor after '%'", "NYAUD1116",
+                 "negative literal index -2", "negative literal index -10_2",
+                 "NYAUD1118", "malloc called with negative literal size -4",
+                 "list called with negative literal size -3"] {
+   assert(str.find(output, expected) >= 0, "missing " + expected + ": " + output)
+}
+def cleanup = run_capture([cmake, "-E", "rm", "-rf", dir], [], nil, false)
+assert(cleanup.get("code", 127) == 0, "remove literal hazards directory")
+print("FMT_AUDIT_LITERAL_HAZARDS_PARITY_OK")
+NY
+}

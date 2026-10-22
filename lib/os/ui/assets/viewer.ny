@@ -1,9 +1,9 @@
 ;; Keywords: assets viewer gltf fonts skybox catalog os ui
 ;; Viewer asset lookup, font discovery, GLTF catalog loading, and skybox resolution.
 ;; References:
-;; - std.os.ui.assets.catalog
-;; - std.os.ui.render.scene
-module std.os.ui.assets.viewer(
+;; - core.os.ui.assets.catalog
+;; - core.os.ui.render.scene
+module core.os.ui.assets.viewer(
    MONO_FONT_CANDIDATES, EDITOR_FONT_CANDIDATES, UI_FONT_CANDIDATES, TERM_FONT_DEFAULT, TERM_FONT_CANDIDATES,
    GLTF_ASSET_DEFAULT_ROOTS,
    mono_font, editor_font, ui_font,
@@ -15,14 +15,14 @@ module std.os.ui.assets.viewer(
    load_env_skybox
 )
 
-use std.core
-use std.core.common as common
-use std.core.str as str
-use std.os.fs as osfs
-use std.os.path as ospath
-use std.os.ui.assets.catalog as asset_catalog
-use std.os.ui.render.viewer.runtime as ui_runtime
-use std.os.ui.render.scene as scene_engine
+use core
+use core.common as common
+use core.str as str
+use core.os.fs as osfs
+use core.os.path as ospath
+use core.os.ui.assets.catalog as asset_catalog
+use core.os.ui.render.viewer.runtime as ui_runtime
+use core.os.ui.render.scene as scene_engine
 
 def list MONO_FONT_CANDIDATES = [
    "etc/assets/fonts/monocraft.ttf",
@@ -250,5 +250,5 @@ fn load_env_skybox(default_rel_path="etc/assets/images/DaySkyHDRI041B_4K_HDR.exr
    assert(icon_path("", []) == "" && icon_dirs(["/definitely/missing"], ["NY_UI_ASSET_TEST_MISSING"]).len == 0, "ui asset icon helpers")
    assert(_skybox_env_source("NY_UI_ASSET_TEST_MISSING", "fallback.exr") == "", "ui asset skybox disabled by missing env")
    assert(skybox_env_size(true).get(0) == 128 && skybox_source_is_off("off") && skybox_source_is_generated("fast"), "ui asset skybox helpers")
-   print("✓ std.os.ui.assets.viewer self-test passed")
+   print("✓ core.os.ui.assets.viewer self-test passed")
 }

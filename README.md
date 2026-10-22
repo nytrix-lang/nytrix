@@ -16,14 +16,15 @@ Native · Explicit · Ownership · Interop · Paradigms
 
 </div>
 
-Nytrix is a statically typed native language that keeps high-level abstractions transparent, guarantees checked, costs visible, and the machine within reach.
+Nytrix is an experimental statically typed language for native code,
+compile-time generation, and explicit machine-level interfaces.
 
 See the [Nytrix Manual](docs/README.md) for guides, specification, and API reference.
 
 ## First program
 
 ```ny
-use std.core
+use core
 
 fn greet(str name) str {
     "Hello, " + name + "!"
@@ -49,7 +50,7 @@ Or build a native executable:
 Source can also be run directly from a URL:
 
 ```bash
-./make ny https://raw.githubusercontent.com/x3ric/xtool/refs/heads/main/xtool
+./make ny https://raw.githubusercontent.com/nytrix-lang/nytrix/refs/heads/main/etc/projects/xtool.ny
 ```
 
 ## Install
@@ -72,7 +73,7 @@ python3 ./make
 ### Data
 
 ```ny
-use std.core
+use core
 
 enum Shape {
     Circle(int radius),
@@ -89,14 +90,15 @@ fn area(shape) int {
 assert(area(Shape.Circle(4)) == 16, "area")
 ```
 
-ADT payloads use `Type name` in declarations and positional values in constructors and match patterns.
+ADT payloads use `Type name` in declarations and positional values in
+constructors and match patterns.
 
 ### Compile-time
 
 ```ny
-use std.core
+use core
 
-def base = comptime{ 2^5 }
+def base = comptime{ 2 ** 5 }
 def shifted = comptime{ range(4).map(fn(i){ i + base }) }
 
 assert(base == 32, "comptime value")
@@ -106,7 +108,7 @@ assert(to_str(shifted) == "[32, 33, 34, 35]", "comptime list")
 ### Native ABI
 
 ```ny
-use std.core
+use core
 
 layout Vec2 pack(4) {
     f32 x,
@@ -118,7 +120,10 @@ layout Vec2 pack(4) {
 assert(cos(0.0) == 1.0, "cos")
 ```
 
-Layouts use `Type name` fields. A colon may still parse as an implicit separator where the grammar is otherwise unambiguous.
+Layouts use `Type name` fields. A colon may still parse as an implicit
+separator where the grammar is otherwise unambiguous.
+
+Compiler contributors can start with the [contribution guide](docs/CONTRIBUTE.md).
 
 ## Project layout
 
@@ -132,7 +137,11 @@ Layouts use `Type name` fields. A colon may still parse as an implicit separator
 
 ## Status
 
-> Work in progress. The compiler is still experimental. The native backend is being developed toward a full JIT/AOT path without LLVM.
+Nytrix is experimental. Feature support varies across LLVM, the Nytrix-owned
+native backend, and WebAssembly. Before choosing a backend or relying on
+partial contracts, read [Where Nytrix fits today](docs/learn/fits.md),
+[Implementation status](docs/learn/status.md), and the
+[language quick reference](docs/learn/quirks.md).
 
 Pin a commit for reproducible builds and check the [Changelog](docs/CHANGELOG.md) before upgrading.
 

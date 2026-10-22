@@ -1,0 +1,46 @@
+shape optcheck_kernel_crypto_arx_rounds {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle optcheck kernel-family crypto arx rotate wrap xor]
+  template ny-test-case
+  flags_matrix "-O0 --color=never; -O3 --color=never; --native-only -O0 --color=never; --native-only -O3 --color=never; --native-backend=llvm --jit --jit-engine=mcjit --color=never"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+;; Adversarial ARX (add-rotate-xor) differential for the cryptographic-rounds
+;; transform family.  Four 32-bit lanes seeded with edge words (0, 0xFFFFFFFF)
+;; run 48 rounds of wrapping adds, xor, and data-dependent rotations over a
+;; masked 32-bit domain.  Legality bar: reassociation may not assume unmasked
+;; wrapping behavior, rotations may not be strengthened past their masking,
+;; and the round-count-dependent rotate amount must not be hoisted out of the
+;; round loop.
+
+fn rotr32(int value, int amount) int {
+   ((value >> amount) | (value << (32 - amount))) & 0xFFFFFFFF
+}
+
+fn run() int {
+   mut a = 0
+   mut b = 0xFFFFFFFF
+   mut c = 0x01234567
+   mut d = 0x89ABCDEF
+   mut round = 0
+   while round < 48 {
+      def t = (d + round + 0x9E3779B9) & 0xFFFFFFFF
+      d = c
+      c = b
+      b = (a + rotr32(t, 7) + b) & 0xFFFFFFFF
+      a = t ^ 0xFFFFFFFF
+      ;; Data-dependent rotate amount: constant only within one round.
+      b = b ^ rotr32(a, (round & 15) + 1)
+      round = round + 1
+   }
+   ((a + (b * 3) + (c * 5) + (d * 7)) & 0xFFFFFFFF)
+}
+
+def checksum = run()
+print("checksum=", checksum)
+assert(checksum == 1942488320, "ARX rounds checksum")
+NY
+}

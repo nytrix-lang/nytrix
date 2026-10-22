@@ -1,0 +1,21 @@
+shape test_trace_counters {
+  family "runtime/execution"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+__trace_reset()
+__trace_enter("counter_probe", "trace-counters.ny", 1)
+__trace_enter("counter_probe", "trace-counters.ny", 1)
+assert(__trace_count("counter_probe") >= 2,
+   "trace counters record entries across the dynamic boundary")
+__trace_exit()
+__trace_exit()
+__trace_reset()
+assert(__trace_count("counter_probe") == 0,
+   "trace counters reset per function")
+NY
+}

@@ -1,0 +1,63 @@
+shape test_typed_list_walk_read_abi {
+  family "runtime/values"
+  generator "embedded"
+  features ["ny", "test", "native", "regression"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+;; Regression: assigning a typed list<int> element into an untyped
+;; loop-carried local must keep the raw elem-8 payload.  The LLVM-surface
+;; lowering used to decode the raw read through rt_any_to_i64, halving every
+;; odd element (stored 19 read back as 9) and corrupting the cycle walk.
+def N = 20
+mut list<int> next_ = []
+mut list<int> vis = []
+mut i = 0
+while i < N {
+   next_ = append(next_, 0)
+   vis = append(vis, 0)
+   i += 1
+}
+mut seed = 42
+i = 0
+while i < N {
+   seed = (seed * 3877 + 29573) % 139968
+   next_[i] = seed % N
+   vis[i] = 0
+   i += 1
+}
+;; Fold and indexed reads must agree on the true slot payloads.
+mut int hand = 0
+i = 0
+while i < N {
+   hand += next_[i]
+   i += 1
+}
+assert(sum(next_) == hand, "sum matches indexed reads")
+assert(next_[0] == 19, "slot 0 raw")
+assert(next_[1] == 0, "slot 1 raw")
+assert(next_[2] == 5, "slot 2 raw")
+assert(next_[16] == 15, "slot 16 raw")
+;; Loop-carried read into an untyped local (the corrupted walk shape).
+mut cycles = 0
+mut pass_id = 0
+i = 0
+while i < N {
+   if vis[i] == 0 {
+      pass_id += 1
+      mut cur = i
+      while vis[cur] == 0 {
+         vis[cur] = pass_id
+         cur = next_[cur]
+      }
+      if vis[cur] == pass_id { cycles += 1 }
+   }
+   i += 1
+}
+assert(cycles == 2, "cycle count")
+print("ok typed-list walk read abi", hand, cycles)
+NY
+}

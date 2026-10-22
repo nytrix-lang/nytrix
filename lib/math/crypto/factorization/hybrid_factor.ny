@@ -4,17 +4,17 @@
 ;; - https://cacr.uwaterloo.ca/hac/about/chap8.pdf
 ;; - https://crypto.stanford.edu/~dabo/pubs/papers/RSA-survey.pdf
 ;; References:
-;; - std.math.crypto.factorization
-;; - std.math.crypto
-module std.math.crypto.factorization.hybrid_factor(hybrid_factor, is_prime_hybrid, pollard_rho_factor, pollard_pm1_factor, brute_force_factor, add_factor, next_prime_hybrid, prev_prime_hybrid, factor_to_number, mul_mod, factordb_query, factor_plan, trial_division_split, hybrid_factor_one, hybrid_factor_one_report, factor_work_schedule_report, hybrid_factor_orchestration_report, factor_complete, factor_complete_report, factor_validate, hybrid_factor_local, hybrid_factor_report)
-use std.math.nt
-use std.math.crypto.factorization.pollard as pollard
-use std.math.crypto.factorization.fermat as fermat
-use std.math.crypto.factorization.ecm as ecm
-use std.math.crypto.factorization.classical as classical
-use std.math.crypto.factorization.classical.qs as qs
-use std.math.crypto.factorization.nfs as nfs
-use std.os.clock (ticks)
+;; - core.math.crypto.factorization
+;; - core.math.crypto
+module core.math.crypto.factorization.hybrid_factor(hybrid_factor, is_prime_hybrid, pollard_rho_factor, pollard_pm1_factor, brute_force_factor, add_factor, next_prime_hybrid, prev_prime_hybrid, factor_to_number, mul_mod, factordb_query, factor_plan, trial_division_split, hybrid_factor_one, hybrid_factor_one_report, factor_work_schedule_report, hybrid_factor_orchestration_report, factor_complete, factor_complete_report, factor_validate, hybrid_factor_local, hybrid_factor_report)
+use core.math.nt
+use core.math.crypto.factorization.pollard as pollard
+use core.math.crypto.factorization.fermat as fermat
+use core.math.crypto.factorization.ecm as ecm
+use core.math.crypto.factorization.classical as classical
+use core.math.crypto.factorization.classical.qs as qs
+use core.math.crypto.factorization.nfs as nfs
+use core.os.clock (ticks)
 
 mut _hf_ecm_levels_cache = nil
 mut _hf_ecm_b1s_cache = nil

@@ -1,0 +1,21 @@
+shape ownership_shared_borrow_live_mutation {
+  family "compiler-errors/ownership"
+  generator "error"
+  features ["error", "ownership", "negative", "borrow", "shared", "liveness"]
+  template ny-compile-fail
+  expect compile_fail
+  flags "--ownership-strict"
+  expect_message "cannot reassign owned slot 'value' while borrow 'shared' is live"
+  source ny <<'NY'
+use core
+
+fn bad() int {
+  mut int value = 1
+  def shared = &value
+  value = 2
+  shared
+}
+
+bad()
+NY
+}

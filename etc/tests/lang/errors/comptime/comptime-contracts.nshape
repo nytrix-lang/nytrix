@@ -1,0 +1,37 @@
+shape comptime_generated_requires_rejects_bad_call {
+  family "compiler-errors/comptime"
+  generator "error"
+  features ["error", "comptime", "contracts", "proof", "negative"]
+  template ny-compile-fail
+  flags_matrix "--native --run; --native-only; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_fail
+  expect_message "precondition"
+  source ny <<'NY'
+comptime template bounded(name, lower) {
+   fn ${name}(int n) int requires n > ${lower} { return n }
+}
+comptime emit bounded(ident("above_one"), 1)
+above_one(1)
+NY
+}
+
+shape comptime_generated_total_rejects_zero_descent {
+  family "compiler-errors/comptime"
+  generator "error"
+  features ["error", "comptime", "contracts", "total", "negative"]
+  template ny-compile-fail
+  flags_matrix "--native --run; --native-only; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_fail
+  expect_message "@total claim refused"
+  source ny <<'NY'
+comptime template countdown(name, step, offset) {
+   @total
+   fn ${name}(int n) int requires n >= 0 && n <= 100 decreases n + ${offset} {
+      if n <= 0 { return 0 }
+      return ${name}(n - ${step})
+   }
+}
+comptime emit countdown(ident("no_descent"), 0, 1)
+no_descent(5)
+NY
+}

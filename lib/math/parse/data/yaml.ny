@@ -1,12 +1,12 @@
 ;; Keywords: data serialization yaml yml parse
 ;; YAML subset parser and generator for practical configuration files.
 ;; References:
-;; - std.math.parse.data
-;; - std.math.parse
-module std.math.parse.data.yaml(yaml_decode, yaml_try_decode, yaml_last_error, yaml_encode, decode, encode)
-use std.core
-use std.core.str as str
-use std.math.parse.data.json as json
+;; - core.math.parse.data
+;; - core.math.parse
+module core.math.parse.data.yaml(yaml_decode, yaml_try_decode, yaml_last_error, yaml_encode, decode, encode)
+use core
+use core.str as str
+use core.math.parse.data.json as json
 
 mut _yaml_error = ""
 

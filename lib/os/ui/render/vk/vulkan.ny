@@ -1,10 +1,10 @@
 ;; Keywords: render vulkan gpu os ui
 ;; Vulkan bindings for Nytrix
 ;; References:
-;; - std.os.ui.render.vk
-;; - std.os.ui.render
-;; - std.os.ui.render.matrix
-module std.os.ui.render.vk.vulkan(
+;; - core.os.ui.render.vk
+;; - core.os.ui.render
+;; - core.os.ui.render.matrix
+module core.os.ui.render.vk.vulkan(
    VkImageMemoryBarrierColor, vk_get_instance_proc_addr, vk_create_instance, destroy_instance, vk_result_code,
    enumerate_instance_extension_properties, enumerate_instance_layer_properties, enumerate_physical_devices,
    get_physical_device_properties, get_physical_device_memory_properties,
@@ -107,11 +107,9 @@ module std.os.ui.render.vk.vulkan(
    vk_cmd_begin_debug_utils_label, vk_cmd_end_debug_utils_label
 )
 
-use std.core
-use std.os.ffi (
-   cstr, dlopen, dlsym, tag_native, __call2_ptr, __call3_ptr_u64_ptr_i32,
-   __call4_ptr_ptr_ptr_ptr_i32, __call4_ptr_u32_u64_ptr_i32, __call4_ptr_u64_ptr_ptr_i32
-)
+use core
+use core.os.ffi (cstr, dlopen, dlsym, tag_native)
+use core.os.ffi as calls
 
 fn _vk_alloc(int size) ?ptr {
    def p = zalloc(size)
@@ -125,7 +123,7 @@ fn _vk_struct(int size, int stype) ?ptr {
    info
 }
 
-fn VkImageMemoryBarrierColor(any bar, any image, int src_access, int dst_access, int old_layout, int new_layout, int base_layer=0, int layer_count=1, int level_count=1) ?ptr {
+fn VkImageMemoryBarrierColor(?ptr bar, any image, int src_access, int dst_access, int old_layout, int new_layout, int base_layer=0, int layer_count=1, int level_count=1) ?ptr {
    "Writes a color-image memory barrier into `bar` and returns it."
    memset(bar, 0, 72)
    store32(bar, 45, 0)
@@ -297,7 +295,7 @@ fn _vk_get_instance_proc_addr_raw(any inst, any proc_name) any {
          if _lib_vulkan_loader { _pfn_vkGetInstanceProcAddr = dlsym(_lib_vulkan_loader, "vkGetInstanceProcAddr") }
       }
    }
-   if _pfn_vkGetInstanceProcAddr { return __call2_ptr(_pfn_vkGetInstanceProcAddr, inst, proc_name) }
+   if _pfn_vkGetInstanceProcAddr { return calls.pointer2(_pfn_vkGetInstanceProcAddr, inst, proc_name) }
    vkGetInstanceProcAddr(inst, proc_name)
 }
 
@@ -633,7 +631,7 @@ fn vk_result_code(any res) int {
 fn _vk_create_surface4(any inst, any ci, any al, any s, str name, int missing=-1) int {
    def f = _vk_instance_proc_cached(inst, name, name)
    if !f { return missing }
-   def res = __call4_ptr_ptr_ptr_ptr_i32(f, inst, ci, al, s)
+   def res = calls.pointer4pointerpointerpointerint32(f, inst, ci, al, s)
    vk_result_code(res)
 }
 
@@ -642,9 +640,9 @@ fn _vk_surface_call4(any inst, str name, any a, any b, any c, any d) int {
    if !f { return -1 }
    mut res = 0
    if name == "vkGetPhysicalDeviceSurfaceSupportKHR" {
-      res = __call4_ptr_u32_u64_ptr_i32(f, a, b, c, d)
+      res = calls.pointer4uint32uint64pointerint32(f, a, b, c, d)
    } else {
-      res = __call4_ptr_u64_ptr_ptr_i32(f, a, b, c, d)
+      res = calls.pointer4uint64pointerpointerint32(f, a, b, c, d)
    }
    vk_result_code(res)
 }
@@ -734,7 +732,7 @@ fn get_physical_device_surface_capabilities_khr(any inst, any pd, any surf, any 
    if !inst || !pd || !surf || surf == 0x8000000000 || !p { return -1 }
    def f = _vk_instance_proc_cached(inst, "vkGetPhysicalDeviceSurfaceCapabilitiesKHR", "vkGetPhysicalDeviceSurfaceCapabilitiesKHR")
    if !f { return -1 }
-   def res = __call3_ptr_u64_ptr_i32(f, pd, surf, p)
+   def res = calls.pointer3uint64pointerint32(f, pd, surf, p)
    vk_result_code(res)
 }
 
@@ -1082,7 +1080,7 @@ fn VkImageCreateInfo(int flags, int image_type, int fmt, int w, int h, int d, in
    info
 }
 
-fn VkPipelineShaderStageCreateInfo(int stage, any shader_mod, any entry_name) ?ptr {
+fn VkPipelineShaderStageCreateInfo(int stage, ?handle shader_mod, ?ptr entry_name) ?ptr {
    "Creates a VkPipelineShaderStageCreateInfo structure."
    def info = _vk_struct(48, 18)
    store32(info, stage, 20)
@@ -1241,7 +1239,7 @@ fn VkPipelineDynamicStateCreateInfo(int d_count, any d_states) ?ptr {
    info
 }
 
-fn VkGraphicsPipelineCreateInfo(int stage_count, any stages, any v_input, any i_assembly, any tess, any v_port, any raster, any multi, any depth, any blend, any dynamic_state, any lyt, any rp, int subpass, any base_pipe, int base_idx) ?ptr {
+fn VkGraphicsPipelineCreateInfo(int stage_count, any stages, any v_input, any i_assembly, any tess, any v_port, any raster, any multi, any depth, any blend, any dynamic_state, ?handle lyt, ?handle rp, int subpass, ?handle base_pipe, int base_idx) ?ptr {
    "Creates a VkGraphicsPipelineCreateInfo structure."
    def info = _vk_struct(144, 28)
    store32(info, stage_count, 20)
@@ -1427,5 +1425,5 @@ fn vk_cmd_end_debug_utils_label(any cb) int { "Ends a debug utils label when bac
    assert(vk_get_physical_device_surface_support_khr(0, 0, 0, 0) == 0, "vulkan surface support stub")
    assert(vk_debug_marker_begin(0, "probe") == 0 && vk_debug_marker_end(0) == 0, "vulkan debug marker stubs")
    assert(vk_cmd_begin_debug_utils_label(0, 0) == 0 && vk_cmd_end_debug_utils_label(0) == 0, "vulkan debug utils stubs")
-   print("✓ std.os.ui.render.vk.vulkan self-test passed")
+   print("✓ core.os.ui.render.vk.vulkan self-test passed")
 }

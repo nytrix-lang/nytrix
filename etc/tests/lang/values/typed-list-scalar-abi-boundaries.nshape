@@ -1,0 +1,86 @@
+shape test_typed_list_scalar_abi_boundaries {
+  family "runtime/values"
+  generator "embedded"
+  features ["ny", "test", "native", "regression"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+;; Regression set for the typed list<int> elem-8 scalar ABI at its consumer
+;; boundaries: literal appends, direct prints, and arithmetic with a literal
+;; operand.  A raw slot payload used to be decoded as a tagged word (raw 0
+;; printed as nil, raw 2 as false) and `xs[i] + 1` used to tag only the
+;; literal, storing i + 3.
+mut list<int> a = []
+a = append(a, 0)
+a = append(a, 1)
+a = append(a, 2)
+a = append(a, 3)
+a = append(a, 4)
+a = append(a, 5)
+a = append(a, 100)
+assert(a.len == 7, "append length")
+assert(a[0] == 0, "slot 0")
+assert(a[1] == 1, "slot 1")
+assert(a[2] == 2, "slot 2")
+assert(a[3] == 3, "slot 3")
+assert(a[6] == 100, "slot 6")
+mut int s = 0
+mut i = 0
+while i < 7 {
+   s += a[i]
+   i += 1
+}
+assert(s == 115, "indexed sum")
+;; Arithmetic over a typed read with a literal operand stays in the raw
+;; domain on both sides.
+mut list<int> b = []
+i = 0
+while i < 5 {
+   b = append(b, a[i] + 1)
+   i += 1
+}
+assert(b[0] == 1, "arith slot 0")
+assert(b[1] == 2, "arith slot 1")
+assert(b[4] == 5, "arith slot 4")
+mut list<int> c = []
+i = 0
+while i < 5 {
+   c = append(c, 1 + a[i])
+   i += 1
+}
+assert(c[0] == 1, "mirrored arith slot 0")
+assert(c[4] == 5, "mirrored arith slot 4")
+;; Iterator-pipeline shape: map, reverse, chain over typed lists.
+def n = 64
+mut list<int> xs = []
+mut list<int> mapped = []
+mut list<int> chained = []
+i = 0
+while i < n {
+   xs = append(xs, i)
+   i += 1
+}
+i = 0
+while i < n {
+   mapped = append(mapped, xs[i] + 1)
+   chained = append(chained, xs[i] + 1)
+   i += 1
+}
+i = 0
+while i < n {
+   chained = append(chained, mapped[n - 1 - i])
+   i += 1
+}
+mut int sum = 0
+i = 0
+while i < n * 2 {
+   sum += chained[i]
+   i += 1
+}
+assert(sum == n * (n + 1), "pipeline checksum")
+print("ok typed-list scalar abi boundaries", s, sum)
+NY
+}

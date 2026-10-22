@@ -1,0 +1,61 @@
+shape fmt_case_dispatch_parity {
+  generator "embedded"
+  family "probe/tools/fmt"
+  features ["formatter", "case-dispatch", "c-parity"]
+  template ny-test-case
+  flags "--native-only"
+  timeout 120
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.subprocess (run_capture)
+use core.str as str
+
+def ny = env("NYTRIX_NY_FULL_BIN")
+def fmt = env("NYTRIX_TEST_FMT_BIN")
+def cmake = env("NYTRIX_CMAKE_COMMAND")
+assert(is_str(ny) && ny.len > 0, "test runner exports the full compiler")
+assert(is_str(fmt) && fmt.len > 0, "CTest provides standalone formatter path")
+assert(is_str(cmake) && cmake.len > 0, "CMake exposes its executable path")
+
+def test_dir = temp_dir() + "/fmt-case-dispatch-" + to_str(pid())
+def source = test_dir + "/case-dispatch.ny"
+def setup = run_capture([cmake, "-E", "make_directory", test_dir], [], nil, false)
+assert(setup.get("code", 127) == 0, "create formatter test directory")
+def source_text = """
+fn dispatch(mode) {
+   if (mode == "read" || mode == "write") { return 1 }
+   elif (mode == "check") { return 2 }
+   elif (mode == "format") { return 3 }
+   elif (mode == "parse") { return 4 }
+   def ignored = "case mode { 1 -> fake() }"
+   if (i == 1 || i == 2) { return 5 }
+   elif (i == 3) { return 6 }
+   elif (i == 4) { return 7 }
+   elif (i == 5) { return 8 }
+   return 0
+}
+"""
+assert(is_ok(file_write(source, source_text)),
+       "write deterministic formatter input")
+
+def c_result = run_capture([fmt, "--trim", "--json", source], [], nil, false)
+def ny_result = run_capture([ny, "fmt", "--trim", "--json", source],
+                            [], nil, false)
+def c_output = c_result.get("stdout", "")
+def ny_output = ny_result.get("stdout", "")
+assert(c_result.get("code", 127) == 0 &&
+       ny_result.get("code", 127) == 0 &&
+       c_output == ny_output,
+       "standalone and embedded formatter audit outputs match\nC: " +
+       c_output + "\nNy: " + ny_output)
+assert(str.find(ny_output, "NYAUD3002") >= 0 &&
+       str.find(ny_output, "if/elif dispatch can become case ranges") >= 0 &&
+       str.find(ny_output, "\"trim_targets\": 1") >= 0,
+       "case-dispatch report includes the expected rule and count")
+
+def cleanup = run_capture([cmake, "-E", "rm", "-rf", test_dir], [], nil, false)
+assert(cleanup.get("code", 127) == 0, "remove formatter test directory")
+print("FMT_CASE_DISPATCH_PARITY_OK")
+NY
+}

@@ -1,0 +1,13 @@
+shape test_global_symbol_shadow {
+  family "runtime/execution"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+mut strchr = 41
+strchr = 42
+assert(strchr == 42, "Ny globals shadow process symbols in NYIR")
+NY
+}

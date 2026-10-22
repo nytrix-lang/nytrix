@@ -6,18 +6,17 @@ CompileFlags:
     - -Isrc
     - -Isrc/base
     - -Isrc/code
-    - -Isrc/code/native/llvm
-    - -Isrc/code/native
-    - -Isrc/code/ffi
-    - -Isrc/code/frontend
-    - -Isrc/code/ir
-    - -Isrc/code/parse
-    - -Isrc/code/typing
+    - -Isrc/code/backend/llvm
+    - -Isrc/code/lang
+    - -Isrc/code/lang/c
+    - -Isrc/code/backend/ir
+    - -Isrc/code/lang/parse
+    - -Isrc/code/lang/parse/frontend
+    - -Isrc/code/lang/types
     - -Isrc/cmd/ny/repl
-    - -Isrc/code/runtime
-    - -Isrc/code/wire
+    - -Isrc/code/lang/runtime
+    - -Isrc/code/backend/wire
     - -D_GNU_SOURCE
-    - -DNYTRIX_STD_PATH="/usr/share/nytrix/std.ny"
 
 Diagnostics:
   Suppress:

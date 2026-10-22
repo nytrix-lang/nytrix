@@ -1,0 +1,115 @@
+shape parallel_map_composes_io_callback_effects {
+  family "typing/effects"
+  generator "regression"
+  features ["ny" "test" "typing" "effects" "higher-order" "callback" "thread"]
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known"
+  expect compile_fail
+  expect_message "declared @effects(alloc|thread) but inferred effects=io|alloc|thread|read|write"
+  source ny <<'NY'
+use core
+use core.os as os
+@effects(alloc, thread)
+fn callback_check(list items) list {
+   os.parallel_map(items, fn(value) { print("callback\n")
+      value
+   }, 1)
+}
+callback_check([1, 2])
+NY
+}
+
+shape parallel_map_indexed_composes_io_callback_effects {
+  family "typing/effects"
+  generator "regression"
+  features ["ny" "test" "typing" "effects" "higher-order" "callback" "thread"]
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known"
+  expect compile_fail
+  expect_message "declared @effects(alloc|thread) but inferred effects=io|alloc|thread|read|write"
+  source ny <<'NY'
+use core
+use core.os as os
+@effects(alloc, thread)
+fn callback_check(list items) list {
+   os.parallel_map_indexed(items, fn(value, index) { print("callback\n")
+      value + index
+   }, 1)
+}
+callback_check([1, 2])
+NY
+}
+
+shape parallel_each_composes_io_callback_effects {
+  family "typing/effects"
+  generator "regression"
+  features ["ny" "test" "typing" "effects" "higher-order" "callback" "thread"]
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known"
+  expect compile_fail
+  expect_message "declared @effects(alloc|thread) but inferred effects=io|alloc|thread|read|write"
+  source ny <<'NY'
+use core
+use core.os as os
+@effects(alloc, thread)
+fn callback_check(list items) int {
+   os.parallel_each(items, fn(value) { print(value) }, 1)
+}
+callback_check([1, 2])
+NY
+}
+
+shape parallel_module_map_composes_io_callback_effects {
+  family "typing/effects"
+  generator "regression"
+  features ["ny" "test" "typing" "effects" "higher-order" "callback" "thread"]
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known"
+  expect compile_fail
+  expect_message "declared @effects(alloc|thread) but inferred effects=io|alloc|thread|read|write"
+  source ny <<'NY'
+use core
+use core.os.parallel as parallel
+@effects(alloc, thread)
+fn callback_check(list items) list {
+   parallel.parallel_map(items, fn(value) { print("callback\n")
+      value
+   }, 1)
+}
+callback_check([1, 2])
+NY
+}
+
+shape parallel_module_indexed_map_composes_io_callback_effects {
+  family "typing/effects"
+  generator "regression"
+  features ["ny" "test" "typing" "effects" "higher-order" "callback" "thread"]
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known"
+  expect compile_fail
+  expect_message "declared @effects(alloc|thread) but inferred effects=io|alloc|thread|read|write"
+  source ny <<'NY'
+use core
+use core.os.parallel as parallel
+@effects(alloc, thread)
+fn callback_check(list items) list {
+   parallel.parallel_map_indexed(items, fn(value, index) { print("callback\n")
+      value + index
+   }, 1)
+}
+callback_check([1, 2])
+NY
+}
+
+shape parallel_module_each_composes_io_callback_effects {
+  family "typing/effects"
+  generator "regression"
+  features ["ny" "test" "typing" "effects" "higher-order" "callback" "thread"]
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known"
+  expect compile_fail
+  expect_message "declared @effects(alloc|thread) but inferred effects=io|alloc|thread|read|write"
+  source ny <<'NY'
+use core
+use core.os.parallel as parallel
+@effects(alloc, thread)
+fn callback_check(list items) int {
+   parallel.parallel_each(items, fn(value) { print(value) }, 1)
+}
+callback_check([1, 2])
+NY
+}

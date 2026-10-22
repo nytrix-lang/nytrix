@@ -3,13 +3,13 @@
 ;; Reference:
 ;; - "Practical Cryptanalysis of ISO 9796-2 and EMV Signatures" (Section 3)
 ;; References:
-;; - std.math.crypto.rsa
-;; - std.math.crypto
-module std.math.crypto.rsa.desmedt_odlyzko(desmedt_odlyzko_attack)
-use std.core
-use std.math.nt
-use std.math.matrix (Matrix, matrix_solve_mod)
-use std.math.crypto.rsa.op (compute_phi, compute_d)
+;; - core.math.crypto.rsa
+;; - core.math.crypto
+module core.math.crypto.rsa.desmedt_odlyzko(desmedt_odlyzko_attack)
+use core
+use core.math.nt
+use core.math.matrix (Matrix, matrix_solve_mod)
+use core.math.crypto.rsa.op (compute_phi, compute_d)
 
 fn _modp(any x, any p) any {
    def r = x % p

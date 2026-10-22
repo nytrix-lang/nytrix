@@ -1,0 +1,16 @@
+shape comptime_ident_invalid_name {
+  family "compiler-errors/comptime"
+  generator "error"
+  features ["error", "comptime", "template", "hygiene"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "identifier splice does not form a valid identifier"
+  source ny <<'NY'
+comptime template make_named(name) {
+  fn ${name}() int { return 42 }
+}
+
+comptime emit make_named(ident(7))
+NY
+}

@@ -1,10 +1,10 @@
 ;; Keywords: smt z3 proofs equivalence bitvectors semantics
 ;; SMT-backed equivalence proofs used by semantic recovery.
-module std.os.rev.decomp.smt_proofs *
-use std.core
-use std.core.str as str
-use std.math.smt as smt
-use std.os.rev.decomp.elf
+module core.os.rev.decomp.smt_proofs *
+use core
+use core.str as str
+use core.math.smt as smt
+use core.os.rev.decomp.elf
 
 fn _hex_width_local(str hex0, int bits) str {
    def width = max(1, (bits + 3) / 4)
@@ -166,7 +166,7 @@ fn _smt_expr_to_ast(any ctx, any expr, int bits, dict env=dict()) any {
       "mul", "*" -> smt.bvmul(ctx, a, b)
       "and", "&" -> smt.bvand(ctx, a, b)
       "or", "|" -> smt.bvor(ctx, a, b)
-      "xor", "^^" -> smt.bvxor(ctx, a, b)
+      "xor", "^" -> smt.bvxor(ctx, a, b)
       "shl", "<<" -> smt.bvshl(ctx, a, b)
       "lshr", ">>" -> smt.bvlshr(ctx, a, b)
       "ashr" -> smt.bvashr(ctx, a, b)
@@ -457,9 +457,9 @@ fn _smt_affine_byte_mix_proof() dict {
       "expr": {"op": "extract", "hi": 7, "lo": 0, "expr": mixed}}
    def out = _smt_prove_equal("affine_byte_mix", 32,
       _smt_expr_to_ast(ctx, lhs_expr, 32), _smt_expr_to_ast(ctx, rhs_expr, 32), ctx)
-   .set("expr", "((zext(b) ^^ 0x5a) + 17) & 0xff == byte result")
+   .set("expr", "((zext(b) ^ 0x5a) + 17) & 0xff == byte result")
    .set("operator", "byte_affine").set("lhs_ir", lhs_expr).set("rhs_ir", rhs_expr)
-   .set("replacement", "byte(((b ^^ 0x5a) + 17))")
+   .set("replacement", "byte(((b ^ 0x5a) + 17))")
    smt.ctx_del(ctx)
    out
 }
@@ -477,9 +477,9 @@ fn _smt_rotate_xor_hash_round_proof(int bits) dict {
    def rhs_expr = {"op": "rol", "args": [base], "shift": 5, "bits": bits}
    def out = _smt_prove_equal("rotate_xor_hash_round", bits,
       _smt_expr_to_ast(ctx, lhs_expr, bits), _smt_expr_to_ast(ctx, rhs_expr, bits), ctx)
-   .set("expr", "shift/or hash round == rol((x ^^ k) + c, 5)")
+   .set("expr", "shift/or hash round == rol((x ^ k) + c, 5)")
    .set("operator", "hash_round").set("lhs_ir", lhs_expr).set("rhs_ir", rhs_expr)
-   .set("replacement", "rol((x ^^ k) + c, 5)")
+   .set("replacement", "rol((x ^ k) + c, 5)")
    smt.ctx_del(ctx)
    out
 }
@@ -614,5 +614,5 @@ fn _smt_expression_proofs_from_facts(dict bundle, any opts=dict()) dict {
 #main {
    def proofs = _smt_expression_proofs_from_facts({"arch": "x86_64", "rows": []})
    assert(proofs.get("proof_count", 0) > 0, "SMT archetype proofs")
-   print("✓ std.os.rev.decomp.smt_proofs self-test passed")
+   print("✓ core.os.rev.decomp.smt_proofs self-test passed")
 }

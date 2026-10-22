@@ -1,0 +1,32 @@
+shape typed_vertex_write {
+  family "runtime-native"
+  generator "native"
+  features ["native", "nyir", "ui", "render", "vertex"]
+  template ny-test-case
+  flags "--native --run"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.ui.render.shared as render
+
+def vertices = malloc(render.VERTEX_STRIDE * 2)
+assert(vertices != 0, "vertex allocation")
+render.store_vertex64_typed(
+   vertices, 1, 1.25, -2.5, 0.75, 0.125, 0.875,
+   0xa1b2c3d4, 9, 0.5, -0.25, 0.0,
+)
+def second = vertices + render.VERTEX_STRIDE
+assert(load32_f32(second, render.OFF_X) == 1.25, "vertex x")
+assert(load32_f32(second, render.OFF_Y) == -2.5, "vertex y")
+assert(load32_f32(second, render.OFF_Z) == 0.75, "vertex z")
+assert(load32(second, render.OFF_C) == 0xa1b2c3d4, "packed color")
+assert(load32(second, render.OFF_TEX) == 9, "texture id")
+assert(load32_f32(second, render.OFF_NX) == 0.5, "normal x")
+assert(load32_f32(second, render.OFF_NY) == -0.25, "normal y")
+assert(load32_f32(second, render.OFF_NZ) == 0.0, "normal z")
+render.store_vertex64_typed(vertices, 0, 2000000.0, -2000000.0, 0.0, 0.0, 0.0, 0, 0)
+assert(load32_f32(vertices, render.OFF_X) == 1048576.0, "positive vertex clamp")
+assert(load32_f32(vertices, render.OFF_Y) == -1048576.0, "negative vertex clamp")
+free(vertices)
+NY
+}

@@ -1,0 +1,49 @@
+shape cps_returned_computations_preserve_callback_effect_rows {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "higher-order", "callback", "cps", "return"]
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core.cps as cps
+
+@effects(alloc)
+fn map_pure_cps_value() int {
+  def computation = cps.cps_map(cps.cps_return(40), fn(value) { value + 2 })
+  cps.cps_run(computation)
+}
+
+@effects(alloc, io)
+fn map_io_cps_value() int {
+  def computation = cps.cps_map(cps.cps_return(40), fn(value) {
+    print("CPS callback ran\n")
+    value + 2
+  })
+  cps.cps_run(computation)
+}
+
+@effects(alloc, io)
+fn bind_io_cps_value() int {
+  def computation = cps.cps_bind(cps.cps_return(40), fn(value) {
+    print("CPS bind callback ran\n")
+    cps.cps_return(value + 2)
+  })
+  cps.cps_run(computation)
+}
+
+@effects(alloc, io)
+fn lift2_io_cps_value() int {
+  def computation = cps.cps_lift2(fn(left, right) {
+    print("CPS lift2 callback ran\n")
+    left + right
+  }, cps.cps_return(20), cps.cps_return(22))
+  cps.cps_run(computation)
+}
+
+
+assert(map_pure_cps_value() == 42, "pure CPS result executes")
+assert(map_io_cps_value() == 42, "IO CPS result executes")
+assert(bind_io_cps_value() == 42, "IO CPS bind result executes")
+assert(lift2_io_cps_value() == 42, "IO CPS lift2 result executes")
+NY
+}

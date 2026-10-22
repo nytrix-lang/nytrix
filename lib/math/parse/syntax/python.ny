@@ -1,12 +1,12 @@
 ;; Keywords: syntax python parse highlight
 ;; Python syntax highlighter.
 ;; References:
-;; - std.math.parse.syntax
-;; - std.math.parse.syntax.helpers
-module std.math.parse.syntax.python(tokenize)
-use std.core
-use std.core.str as str
-use std.math.parse.syntax.helpers as _h
+;; - core.math.parse.syntax
+;; - core.math.parse.syntax.helpers
+module core.math.parse.syntax.python(tokenize)
+use core
+use core.str as str
+use core.math.parse.syntax.helpers as _h
 
 def KW = "False;None;True;and;as;assert;async;await;break;class;continue;def;del;elif;else;except;finally;for;from;global;if;import;in;is;lambda;nonlocal;not;or;pass;raise;return;try;while;with;yield"
 def FN = "abs;all;any;ascii;bin;bool;breakpoint;bytearray;bytes;callable;chr;classmethod;compile;complex;delattr;dict;dir;divmod;enumerate;eval;exec;filter;float;format;frozenset;getattr;globals;hasattr;hash;hex;id;input;int;isinstance;issubclass;iter;len;list;locals;map;max;min;next;object;oct;open;ord;pow;print;property;range;repr;reversed;round;set;setattr;slice;sorted;staticmethod;str;sum;super;tuple;type;vars;zip"

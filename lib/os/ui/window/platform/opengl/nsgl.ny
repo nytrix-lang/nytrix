@@ -1,12 +1,12 @@
 ;; Keywords: platform window backend opengl nsgl os ui input
 ;; NSGL context creation for the Cocoa window backend.
 ;; References:
-;; - std.os.ui.window.platform.opengl
-;; - std.os.ui.window
-;; - std.os.ui.window.consts
-module std.os.ui.window.platform.opengl.nsgl(create_context, destroy_context, make_current, swap_buffers, swap_interval, get_proc_address)
-use std.core
-use std.os.ui.window.platform.cocoa as cocoa
+;; - core.os.ui.window.platform.opengl
+;; - core.os.ui.window
+;; - core.os.ui.window.consts
+module core.os.ui.window.platform.opengl.nsgl(create_context, destroy_context, make_current, swap_buffers, swap_interval, get_proc_address)
+use core
+use core.os.ui.window.platform.cocoa as cocoa
 
 fn create_context(any share=0) any {
    "Creates a native NSOpenGLContext for Cocoa."

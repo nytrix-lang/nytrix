@@ -1,0 +1,31 @@
+shape test_top_level_constant_fold_context {
+  family "runtime/execution"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+def source_base = 40
+def source_total = source_base + 2
+mut changing_source = 1
+
+fn double_source(int value) int { value * 2 }
+fn read_changing_source() int { double_source(changing_source) }
+
+fn local_shadow() int {
+   mut int source_base = 1
+   source_base + 2
+}
+
+assert(source_total == 42,
+   "const registration folds a top-level identifier through its program")
+assert(local_shadow() == 3,
+   "function-local names shadow top-level constants during folding")
+assert(read_changing_source() == 2,
+   "a mutable top-level initializer is not folded into a call argument")
+changing_source = 7
+assert(read_changing_source() == 14,
+   "call arguments observe the current mutable top-level value")
+NY
+}

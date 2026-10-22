@@ -1,0 +1,34 @@
+shape str_word_frequency {
+  family "lang"
+  features ["string", "dictionary", "word-frequency", "whitespace"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core.dict
+use core.str
+
+def counts = str.word_frequency(" \talpha\t  beta\n alpha\r ")
+assert(counts.len == 2, "word_frequency stores distinct trimmed words")
+assert(counts.get("alpha", 0) == 2, "word_frequency counts repeated words")
+assert(counts.get("beta", 0) == 1, "word_frequency trims token edge whitespace")
+
+def tabs = str.word_frequency("left\tright left\tright")
+assert(tabs.len == 1 && tabs.get("left\tright", 0) == 2,
+       "word_frequency splits only on literal spaces")
+
+def many = str.word_frequency("oak ash elm fir pine yew birch maple cedar oak")
+assert(many.len == 9 && many.get("oak", 0) == 2 && many.get("cedar", 0) == 1,
+       "word_frequency survives dictionary growth and preserves counts")
+
+def long_words = str.word_frequency(
+   "supercalifragilisticexpialidocious supercalifragilisticexpialidocious")
+assert(long_words.len == 1 &&
+       long_words.get("supercalifragilisticexpialidocious", 0) == 2,
+       "word_frequency handles long keys")
+
+assert(str.word_frequency(" \t\r\n ").len == 0,
+       "word_frequency handles whitespace-only strings")
+assert(str.word_frequency(42).len == 0,
+       "word_frequency handles non-string values")
+NY
+}

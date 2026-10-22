@@ -1,0 +1,14 @@
+shape comptime_code_category_mismatch {
+  family "compiler-errors/comptime"
+  generator "error"
+  features ["error", "comptime", "code", "category", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "comptime template code category mismatch"
+  source ny <<'NY'
+comptime template wants_expression(value: code<expr>) {
+   fn generated_category_mismatch() int { return ${value} }
+}
+comptime emit wants_expression(quote{ fn not_an_expression() int { return 1 } })
+NY
+}

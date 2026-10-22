@@ -1,0 +1,37 @@
+shape comptime_type_declarations {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "comptime", "refine", "trait", "law"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-only; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+comptime template bounded(name, lower) {
+   refine ${name} = int where(value) { value > ${lower} }
+}
+comptime emit bounded(ident("AboveThree"), 3)
+def AboveThree valid = 4
+assert(valid == 4, "generated refinement")
+comptime template show_trait() {
+   trait Show { fn show(any value) str }
+}
+comptime emit show_trait()
+struct Point { int x }
+comptime template point_impl(cert) {
+   impl Show for Point {
+      fn show(any value) str { return "point" }
+      law { ${cert} == 1 }
+   }
+}
+comptime emit point_impl(1)
+def Point p = Point(5)
+assert(show(p) == "point", "generated trait and law")
+comptime template multiple(name, factor) {
+   refine ${name} = int where(value) { exists(k) { value == ${factor} * k } }
+}
+comptime emit multiple(ident("MultipleThree"), 3)
+def MultipleThree divisible = 6
+assert(divisible == 6, "generated existential refinement substitutes its factor")
+NY
+}

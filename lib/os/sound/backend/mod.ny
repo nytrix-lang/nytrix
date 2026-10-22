@@ -1,36 +1,38 @@
 ;; Keywords: sound backend pulse jack io input output stream alsa shared winmm os
 ;; Sound backend facade for ALSA, PulseAudio, JACK, WinMM, and shared backend selection.
 ;; References:
-;; - std.os.sound
-;; - std.os
-module std.os.sound.backend(init, shutdown, play, stop, stop_all, is_playing, set_master_volume, get_master_volume, get_backend_name, set_fx_enabled, fx_enabled, set_fx_param, get_fx_param, reset_fx, fx_preset)
-use std.core
-use std.math (abs)
-use std.os
-use std.os.thread
-use std.os.time
-use std.core.str
-use std.core.common as common
-use std.os.sound.diag as sound_debug
-use std.os.sound.backend.io (
-   create, connect, connect_backend, disconnect, get_output_device_count, get_output_device, get_default_output_device_index,
-   outstream_create, outstream_open, outstream_start, outstream_write_frames, outstream_destroy,
+;; - core.os.sound
+;; - core.os
+module core.os.sound.backend(init, shutdown, play, stop, stop_all, is_playing, set_master_volume, get_master_volume, get_backend_name, available_backends, is_ready, set_fx_enabled, fx_enabled, set_fx_param, get_fx_param, reset_fx, fx_preset)
+use core
+use core.math (abs)
+use core.os
+use core.os.thread
+use core.os.time
+use core.str
+use core.common as common
+use core.os.sound.diag as sound_debug
+use core.os.sound.backend.io (
+   create as audio_create, connect, connect_backend, disconnect, get_output_device_count, get_output_device, get_default_output_device_index,
+   outstream_create, outstream_open, outstream_start, outstream_write_frames as audio_write_frames, outstream_destroy,
    FORMAT_S16LE, FORMAT_FLOAT32LE, get_backend_name as io_backend_name,
 )
 
-use std.os.sound.backend.alsa as alsa
-use std.os.sound.backend.jack as jack
-use std.os.sound.backend.pulse as pulse
-use std.os.sound.backend.winmm as winmm
-use std.os.sound.mixer as mixer
+use core.os.sound.backend.alsa as alsa
+use core.os.sound.backend.jack as jack
+use core.os.sound.backend.pulse as pulse
+use core.os.sound.backend.winmm as winmm
+use core.os.sound.mixer as mixer
 
-mut _ctx = 0
-mut _stream = 0
+mut any _ctx = 0
+mut any _stream = 0
+mut str _active_backend_name = "none"
 mut _running = false
 mut _thread = 0
 mut _mtx = 0
 mut _active_sounds = []
 mut _master_vol = 1.0
+mut _master_vol_initialized = false
 mut _debug_mix = -1
 mut _async_mode = -1
 mut _period_frames = 0
@@ -41,6 +43,13 @@ mut _idle_sleep_ms = 0
 mut _next_inst_id = 1
 
 fn _is_debug() bool { sound_debug.enabled() }
+
+fn _ensure_master_volume() any {
+   if !_master_vol_initialized {
+      _master_vol = 1.0
+      _master_vol_initialized = true
+   }
+}
 
 fn _is_mix_debug() bool {
    _debug_mix = common.cached_env_present(_debug_mix, "NY_AUDIO_DEBUG_MIX")
@@ -56,7 +65,7 @@ fn _is_async_mode() bool {
    if _async_mode == -1 {
       def v = _env_lower("NY_AUDIO_ASYNC")
       if v.len == 0 {
-         if _ctx && eq(io_backend_name(_ctx), "pulse") { _async_mode = 0 } else { _async_mode = 1 }
+         if eq(_active_backend_name, "pulse") { _async_mode = 0 } else { _async_mode = 1 }
       } else {
          case v {
             "0", "false", "off", "no" -> { _async_mode = 0 }
@@ -158,6 +167,7 @@ fn _cleanup_partial() any {
    if _ctx { disconnect(_ctx) _ctx = 0 }
    if _mtx { mutex_free(_mtx) _mtx = 0 }
    _active_sounds = []
+   _active_backend_name = "none"
    _period_frames = 0
    _out_rate = 0
    _out_format = FORMAT_S16LE
@@ -189,11 +199,11 @@ fn _backend_try_order_for_os(bool full) list {
    ["pulse", "alsa", "winmm"]
 }
 
-fn _open_current_stream() bool {
-   def count = get_output_device_count(_ctx)
-   if _is_debug() { print("Sound: Found " + to_str(count) + " output devices for " + io_backend_name(_ctx) + ".") }
+fn _open_current_stream(any ctx) bool {
+   def count = get_output_device_count(ctx)
+   if _is_debug() { print("Sound: Found " + to_str(count) + " output devices for " + io_backend_name(ctx) + ".") }
    if count == 0 { return false }
-   def dev = get_output_device(_ctx, get_default_output_device_index(_ctx))
+   def dev = get_output_device(ctx, get_default_output_device_index(ctx))
    if !dev { return false }
    mut stream = outstream_create(dev)
    if !stream { return false }
@@ -205,14 +215,14 @@ fn _open_current_stream() bool {
       nstream = outstream_open(stream, out_format, out_rate, 2, nil)
    }
    if !nstream {
-      if _is_debug() { print("Sound: Failed to open output stream for " + io_backend_name(_ctx) + ".") }
+      if _is_debug() { print("Sound: Failed to open output stream for " + io_backend_name(ctx) + ".") }
       outstream_destroy(stream)
       return false
    }
    stream = nstream
    _out_format = out_format
    if !outstream_start(stream) {
-      if _is_debug() { print("Sound: Failed to start output stream for " + io_backend_name(_ctx) + ".") }
+      if _is_debug() { print("Sound: Failed to start output stream for " + io_backend_name(ctx) + ".") }
       outstream_destroy(stream)
       _stream = 0
       return false
@@ -222,7 +232,7 @@ fn _open_current_stream() bool {
 }
 
 fn _try_backend(str name) bool {
-   def ctx = create()
+   def ctx = audio_create()
    def nctx = connect_backend(ctx, name)
    if !nctx {
       if _is_debug() { print("Sound: backend " + name + " unavailable.") }
@@ -230,13 +240,18 @@ fn _try_backend(str name) bool {
       return false
    }
    _ctx = nctx
-   if _is_debug() { print("Sound: trying backend " + io_backend_name(_ctx) + "...") }
-   if _open_current_stream() { return true }
+   if _is_debug() { print("Sound: trying backend " + name + "...") }
+   def opened = _open_current_stream(nctx)
+   if opened {
+      _active_backend_name = name
+      return true
+   }
    _cleanup_partial()
    false
 }
 
 fn _do_init(bool force_async=false) bool {
+   _ensure_master_volume()
    if _ctx != 0 { return true }
    if _is_debug() { print("Sound: Initializing auto backend...") }
    def order = _backend_try_order()
@@ -244,12 +259,13 @@ fn _do_init(bool force_async=false) bool {
    while i < order.len {
       if _try_backend(order.get(i)) {
          _prime_stream()
-         if force_async || _is_async_mode() {
+         def async_mode = _is_async_mode()
+         if force_async || async_mode {
             if !_start_mixer_thread() && _is_debug() { print("Sound: Failed to spawn mixer thread; falling back to sync mode.") }
          }
          if _is_debug() {
             def fmt = (_out_format == FORMAT_FLOAT32LE) ? "f32" : "s16"
-            print(f"Sound: Backend '{io_backend_name(_ctx)}' ready @ {_get_output_rate()}Hz format={fmt} period={_get_period_frames()} prime={_get_prime_periods()}.")
+            print(f"Sound: Backend '{_active_backend_name}' ready @ {_get_output_rate()}Hz format={fmt} period={_get_period_frames()} prime={_get_prime_periods()}.")
          }
          return true
       }
@@ -261,6 +277,14 @@ fn _do_init(bool force_async=false) bool {
 
 fn init(bool force_async=false) bool {
    "Initializes module state."
+   if os() == "web" {
+      if _active_backend_name == "web-audio" { return true }
+      if __sound_init(force_async) {
+         _active_backend_name = "web-audio"
+         return true
+      }
+      return false
+   }
    _do_init(force_async)
 }
 
@@ -286,12 +310,18 @@ fn _play_sync(any sound, any pitch=1.0, any vol=1.0, bool looping=false, any pan
    mut actives = list()
    def inst = _make_inst(sound, pitch, vol, false, pan)
    actives = actives.append(inst)
+   def output_stream = _stream
+   mut write_failed = false
    while actives.len > 0 {
       memset(mix_buf, 0, buf_size)
       actives = mixer.mix_sounds(mix_buf, buf_size, actives, _master_vol, 0, _get_output_rate(), _out_format)
-      if !outstream_write_frames(_stream, mix_buf, period_frames) { break }
+      if !audio_write_frames(output_stream, mix_buf, period_frames) {
+         write_failed = true
+         break
+      }
    }
    free(mix_buf)
+   if write_failed { return 0 }
    inst
 }
 
@@ -318,7 +348,12 @@ fn fx_preset(str name) any { mixer.fx_preset(name) }
 fn shutdown() any {
    "Shuts down module state."
    if _is_debug() { print("Sound: Shutting down...") }
-   _cleanup_partial()
+   if _active_backend_name == "web-audio" {
+      __sound_shutdown()
+      _active_backend_name = "none"
+   } else {
+      _cleanup_partial()
+   }
 }
 
 fn _audio_thread(any arg) int {
@@ -427,18 +462,35 @@ fn is_playing(any inst) bool {
 fn set_master_volume(any vol) any {
    "Sets master volume."
    _master_vol = vol + 0.0
+   _master_vol_initialized = true
 }
 
 fn get_master_volume() f64 {
    "Gets master volume."
+   _ensure_master_volume()
    _master_vol
 }
 
 fn get_backend_name() str {
    "Gets backend name."
    if !_ctx { return "none" }
-   def name = io_backend_name(_ctx)
-   name ? to_str(name) : "none"
+   if !_active_backend_name || _active_backend_name.len == 0 { return "none" }
+   _active_backend_name
+}
+
+fn available_backends() list {
+   "Lists drivers whose host library/API probe succeeds; this does not imply a device is ready."
+   mut out = list()
+   if pulse.is_available() { out = out.append("pulse") }
+   if alsa.is_available() { out = out.append("alsa") }
+   if jack.is_available() { out = out.append("jack") }
+   if winmm.is_available() { out = out.append("winmm") }
+   out
+}
+
+fn is_ready() bool {
+   "Reports whether an output stream has been opened and started."
+   _ctx != 0 && _stream != 0
 }
 
 #main {
@@ -450,5 +502,5 @@ fn get_backend_name() str {
    assert(!is_playing(0), "sound backend not playing")
    stop(0)
    shutdown()
-   print("✓ std.os.sound.backend self-test passed")
+   print("✓ core.os.sound.backend self-test passed")
 }

@@ -1,0 +1,78 @@
+shape aot_cache_comptime_identity {
+  family "probe/cache"
+  generator "embedded"
+  features ["aot-cache", "comptime-fuel", "interpreter-mode", "test-mode"]
+  template ny-test-case
+  flags "--native-only"
+  timeout 600
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.fs as fs
+use core.os.subprocess (run_capture)
+use core.str as str
+
+def ny = env("NYTRIX_NY_FULL_BIN")
+def cmake = env("NYTRIX_CMAKE_COMMAND")
+def root = env("NYTRIX_ROOT")
+def test_dir = temp_dir() + "/aot-cache-comptime-identity-" + to_str(pid())
+def cache_root = test_dir + "/cache"
+def source = test_dir + "/cache-source.ny"
+assert(is_str(ny) && ny.len > 0, "test runner exports the full compiler")
+assert(is_str(cmake) && cmake.len > 0, "CMake exposes its executable path")
+assert(is_str(root) && root.len > 0, "CTest exposes the source root")
+def setup = run_capture([cmake, "-E", "make_directory", test_dir], [], nil, false)
+assert(setup.get("code", 127) == 0, "create isolated AOT cache directory")
+def copy = run_capture(
+   [cmake, "-E", "copy",
+    root + "/etc/tests/code/probes/cache/module-cache-equivalence.ny",
+    source], [], nil, false)
+assert(copy.get("code", 127) == 0, "create unique AOT cache source identity")
+
+fn compile(str output, str interpreter_mode, str fuel, str test_mode,
+           bool expect_hit) {
+   mut argv = [cmake, "-E", "env",
+               "NYTRIX_AOT_CACHE=1",
+               "NYTRIX_CACHE_DIR=" + cache_root,
+               "NYTRIX_JIT_CACHE=0",
+               "NYTRIX_COMPTIME_FUEL=" + fuel]
+   if interpreter_mode == "unset" {
+      argv = argv.append("--unset=NYTRIX_COMPTIME_INTERP_ONLY")
+   } else {
+      argv = argv.append("NYTRIX_COMPTIME_INTERP_ONLY=" + interpreter_mode)
+   }
+   if test_mode == "unset" {
+      argv = argv.append("--unset=NYTRIX_TEST_MODE")
+   } else {
+      argv = argv.append("NYTRIX_TEST_MODE=" + test_mode)
+   }
+   argv = argv.append(ny)
+   argv = argv.append("-no-std")
+   argv = argv.append("-vv")
+   argv = argv.append("-o")
+   argv = argv.append(output)
+   argv = argv.append(source)
+   def result = run_capture(argv, [], nil, false)
+   def text = result.get("stdout", "")
+   assert(result.get("code", 127) == 0,
+          "AOT cache compile failed: " + text)
+   assert(fs.is_file(output), "AOT compilation writes " + output)
+   def hit = str.find(text, "AOT cache hit:") >= 0
+   assert(hit == expect_hit,
+          "AOT cache identity expected hit=" + to_str(expect_hit) +
+          " but observed hit=" + to_str(hit) + ": " + text)
+}
+
+compile(test_dir + "/interp-unset", "unset", "1000000", "unset", false)
+compile(test_dir + "/interp-enabled", "1", "1000000", "unset", false)
+compile(test_dir + "/warm-enabled", "1", "1000000", "unset", true)
+compile(test_dir + "/test-mode-changed", "1", "1000000", "1", false)
+compile(test_dir + "/warm-test-mode", "1", "1000000", "1", true)
+compile(test_dir + "/fuel-changed", "1", "1000001", "1", false)
+compile(test_dir + "/warm-fuel-changed", "1", "1000001", "1", true)
+
+def cleanup = run_capture([cmake, "-E", "rm", "-rf", test_dir], [], nil, false)
+assert(cleanup.get("code", 127) == 0, "remove isolated AOT cache directory")
+print("AOT_CACHE_COMPTIME_IDENTITY_OK")
+NY
+}

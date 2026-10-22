@@ -1,9 +1,9 @@
 ;; Keywords: window native native-windowing os ui input
 ;; Native window backend — platform-delegating API layer.
 ;; References:
-;; - std.os.ui.window
-;; - std.os.ui.window.consts
-module std.os.ui.window.native(
+;; - core.os.ui.window
+;; - core.os.ui.window.consts
+module core.os.ui.window.native(
    init, terminate, create_window, destroy_window, should_close, set_should_close, set_title, get_pos,
    set_pos, get_size, get_framebuffer_size, set_size, get_window_attrib, set_window_opacity, poll_events,
    swap_buffers, swap_interval, get_key, get_mouse_button, get_cursor_pos, set_key_callback,
@@ -50,13 +50,13 @@ module std.os.ui.window.native(
    WIN32_KEYBOARD_MENU, WIN32_SHOWDEFAULT, get_backend_name
 )
 
-use std.core
-use std.core.mem
-use std.core.str (to_hex)
-use std.core.common as common
-use std.os.ui.render.dump as ui_profile
-use std.os.ui.window.platform.api
-use std.os.ui.window.platform as ui_backend
+use core
+use core.mem
+use core.str (to_hex)
+use core.common as common
+use core.os.ui.debug as ui_profile
+use core.os.ui.window.platform.api
+use core.os.ui.window.platform as ui_backend
 
 fn _is_debug() bool { ui_profile.debug_enabled() }
 
@@ -446,5 +446,5 @@ fn get_nsgl_context(any win) any { ui_backend.get_nsgl_context(win) }
    assert(get_backend_name().len > 0 && get_current_context() == 0 && extension_supported("probe") == false, "window native backend stubs")
    assert(get_instance_proc_address(0, "vkGetInstanceProcAddr") == 0 && get_clipboard(0) == "" && get_osmesa_context(0) == 0, "window native null handles")
    assert(get_osmesa_color_buffer(0, 0, 0, 0, 0) == false && get_osmesa_depth_buffer(0, 0, 0, 0, 0) == false, "window native osmesa stubs")
-   print("✓ std.os.ui.window.native self-test passed")
+   print("✓ core.os.ui.window.native self-test passed")
 }

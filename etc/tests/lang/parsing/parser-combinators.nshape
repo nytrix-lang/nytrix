@@ -1,0 +1,197 @@
+shape parser_combinators {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "parser", "combinators", "diagnostic", "bounded"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-only; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.parser as parser
+
+@effects(all)
+fn test_sequence() {
+   def config_parser = parser.sequence([
+      parser.literal("port="),
+      parser.integer(),
+      parser.literal(";")
+   ])
+   def result = parser.run(config_parser, "port=8080;")
+   assert(result.get("ok") && int(result.get("value").get(1)) == 8080 &&
+          int(result.get("offset")) == 10,
+          "sequence parses ordered values and consumes input")
+}
+
+@effects(all)
+fn test_choice() {
+   def alternative = parser.choice([
+      parser.literal("cat"),
+      parser.literal("car")
+   ])
+   def result = parser.run(alternative, "car")
+   assert(result.get("ok") && str(result.get("value")) == "car",
+          "choice retries alternatives from the original offset")
+   mut wide = []
+   mut i = 0
+   while i < 140 {
+      wide = wide.append(parser.literal("miss-" + to_str(i)))
+      i += 1
+   }
+   wide = wide.append(parser.literal("done"))
+   def wide_result = parser.run(parser.choice(wide), "done", 1000, 8)
+   assert(wide_result.get("ok") && str(wide_result.get("value")) == "done",
+          "flat choice alternatives do not consume grammar nesting depth")
+}
+
+@effects(all)
+fn test_backtracking_diagnostics() {
+   def choice_then_literal = parser.sequence([
+      parser.choice([
+         parser.sequence([parser.literal("a"), parser.literal("b")]),
+         parser.literal("a")
+      ]),
+      parser.literal("x")
+   ])
+   def choice_result = parser.run(choice_then_literal, "ay")
+   def dict choice_error = choice_result.get("error")
+   assert(int(choice_error.get("span").get("start")) == 1 &&
+          choice_error.get("expected").len == 1 &&
+          str(choice_error.get("expected").get(0)) == "'x'",
+          "a successful choice clears expectations from rejected branches")
+
+   def optional_then_literal = parser.sequence([
+      parser.optional(parser.literal("ab")), parser.literal("x")
+   ])
+   def optional_result = parser.run(optional_then_literal, "a?")
+   def dict optional_error = optional_result.get("error")
+   assert(int(optional_error.get("span").get("start")) == 0 &&
+          optional_error.get("expected").len == 1 &&
+          str(optional_error.get("expected").get(0)) == "'x'",
+          "an absent optional parser clears its speculative expectations")
+
+   def repeat_then_literal = parser.sequence([
+      parser.many(parser.literal("a")), parser.literal("x")
+   ])
+   def repeat_result = parser.run(repeat_then_literal, "aa?")
+   def dict repeat_error = repeat_result.get("error")
+   assert(int(repeat_error.get("span").get("start")) == 2 &&
+          repeat_error.get("expected").len == 1 &&
+          str(repeat_error.get("expected").get(0)) == "'x'",
+          "a terminating many probe does not pollute the next parser error")
+}
+
+@effects(all)
+fn test_repetition_and_mapping() {
+   def digit = parser.byte_where("ASCII digit", fn(byte) {
+      byte >= 48 && byte <= 57
+   })
+   def digits = parser.run(parser.many(digit), "2048")
+   assert(digits.get("ok") && digits.get("value").len == 4 &&
+          int(digits.get("value").get(0)) == 50,
+          "many repeats while making progress")
+   def doubled = parser.map(parser.integer(), fn(value) { value * 2 })
+   assert(int(parser.parse(doubled, "-21")) == -42,
+          "map transforms signed integer parser results")
+   assert(is_nil(parser.parse(parser.optional(parser.literal("x")), "")),
+          "optional succeeds without consuming when its parser fails")
+   def zero_width = parser.run(parser.many(parser.pure(1)), "")
+   assert(!zero_width.get("ok"),
+          "many rejects a zero-width parser")
+   def empty_many = parser.run_prefix(parser.many(parser.literal("x"), 0),
+                                     "xxx")
+   assert(empty_many.get("ok") && empty_many.get("value").len == 0 &&
+          int(empty_many.get("offset")) == 0,
+          "many with a zero item bound succeeds without consuming input")
+   def negative_many = parser.run(parser.many(parser.literal("x"), -1), "")
+   assert(!negative_many.get("ok") &&
+          str(negative_many.get("error").get("message")) ==
+             "many max_items cannot be negative",
+          "many rejects negative item bounds")
+}
+
+@effects(all)
+fn test_integer_boundaries() {
+   def positive = parser.run(parser.integer(), "+42")
+   def maximum = parser.run(parser.integer(), "4611686018427387903")
+   def minimum = parser.run(parser.integer(), "-4611686018427387904")
+   assert(positive.get("ok") && int(positive.get("value")) == 42,
+          "integer parser accepts an explicit plus sign")
+   assert(maximum.get("ok") &&
+          int(maximum.get("value")) == 4611686018427387903,
+          "integer parser accepts the maximum signed value")
+   assert(minimum.get("ok") &&
+          int(minimum.get("value")) == -4611686018427387903 - 1,
+          "integer parser accepts the minimum signed value")
+   def positive_overflow = parser.run(parser.integer(),
+                                     "4611686018427387904")
+   def negative_overflow = parser.run(parser.integer(),
+                                     "-4611686018427387905")
+   assert(!positive_overflow.get("ok") &&
+          str(positive_overflow.get("error").get("message")) ==
+             "signed decimal integer overflow",
+          "positive integer overflow fails with a structured diagnostic")
+   assert(!negative_overflow.get("ok") &&
+          str(negative_overflow.get("error").get("message")) ==
+             "signed decimal integer overflow",
+          "negative integer overflow fails with a structured diagnostic")
+}
+
+@effects(all)
+fn test_recursive_references() {
+   def expression = parser.forward()
+   def grouping = parser.sequence([
+      parser.literal("("), expression, parser.literal(")")
+   ])
+   def grammar = parser.choice([parser.integer(), grouping])
+   assert(parser.resolve(expression, grammar),
+          "forward reference resolves to a parser")
+   assert(!parser.resolve(expression, parser.integer()),
+          "forward reference can only be resolved once")
+   def nested = parser.run(expression, "((42))")
+   assert(nested.get("ok"), "forward reference parses nested groups")
+
+   def unresolved = parser.run(parser.forward(), "42")
+   assert(!unresolved.get("ok") &&
+          str(unresolved.get("error").get("message")) ==
+             "unresolved recursive parser reference",
+          "unresolved reference fails closed")
+   def shallow = parser.run(expression, "((42))", 100, 3)
+   assert(!shallow.get("ok") &&
+          str(shallow.get("error").get("message")) ==
+             "parser nesting limit exceeded",
+          "recursive grammar obeys depth limit")
+}
+
+@effects(all)
+fn test_structured_errors_and_limits() {
+   def located = parser.run(parser.literal("alpha\nbeta"), "alpha\nx")
+   def parse_error = located.get("error")
+   assert(!located.get("ok") && str(parse_error.get("code")) == "E_PARSE" &&
+          int(parse_error.get("span").get("start")) == 6 &&
+          int(parse_error.get("line")) == 2 &&
+          int(parse_error.get("column")) == 1 &&
+          int(parse_error.get("found_byte")) == 120,
+          "failure reports a structured byte span and line/column")
+   def bounded = parser.run(parser.sequence([parser.literal("a")]), "a", 1)
+   assert(!bounded.get("ok") &&
+          str(bounded.get("error").get("message")) ==
+             "parser step limit exceeded",
+          "step limit fails closed")
+   def input_bounded = parser.run(parser.literal(""), "long", 100, 20, 2)
+   assert(!input_bounded.get("ok") &&
+          str(input_bounded.get("error").get("message")) ==
+             "parser input byte limit exceeded",
+          "input byte limit fails closed")
+}
+
+test_sequence()
+test_choice()
+test_backtracking_diagnostics()
+test_repetition_and_mapping()
+test_integer_boundaries()
+test_recursive_references()
+test_structured_errors_and_limits()
+
+print("✓ parser combinator tests passed")
+NY
+}

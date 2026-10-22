@@ -3,11 +3,11 @@
 ;; Reference:
 ;; - Nitaj A., Ariffin M.R.K., "Implicit factorization of unbalanced RSA moduli"
 ;; References:
-;; - std.math.crypto.factorization
-;; - std.math.crypto
-module std.math.crypto.factorization.implicit(implicit_factorize_msb, implicit_factorize_lsb)
-use std.math.nt
-use std.math.crypto.lattice.flatter
+;; - core.math.crypto.factorization
+;; - core.math.crypto
+module core.math.crypto.factorization.implicit(implicit_factorize_msb, implicit_factorize_lsb)
+use core.math.nt
+use core.math.crypto.lattice.flatter
 
 fn _abs(any x) any { x < 0 ? (0 - x) : x }
 

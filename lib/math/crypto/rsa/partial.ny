@@ -4,10 +4,10 @@
 ;; - https://people.csail.mit.edu/rivest/Rsapaper.pdf
 ;; - https://crypto.stanford.edu/~dabo/pubs/papers/RSA-survey.pdf
 ;; References:
-;; - std.math.crypto.rsa
-;; - std.math.crypto
-module std.math.crypto.rsa.partial(recover_p_from_d_partial, coppersmith_factor_known_bits, partial_key_recovery, partial_bit_length)
-use std.math.nt
+;; - core.math.crypto.rsa
+;; - core.math.crypto
+module core.math.crypto.rsa.partial(recover_p_from_d_partial, coppersmith_factor_known_bits, partial_key_recovery, partial_bit_length)
+use core.math.nt
 
 fn partial_bit_length(any n) int {
    "Return the number of bits required to represent integer n."

@@ -1,0 +1,13 @@
+shape repl_jit_smoke {
+  suite "repl"
+  family "compiler/semantics/repl"
+  generator "stress"
+  features ["ny", "compiler"]
+  template ny-test-case
+  expect compile_and_run
+  repl_expect "2"
+  source ny <<'NY'
+use core
+1 + 1
+NY
+}

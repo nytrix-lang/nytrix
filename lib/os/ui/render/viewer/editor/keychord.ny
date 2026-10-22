@@ -1,15 +1,15 @@
 ;; Keywords: editor keychord shortcuts input os ui render viewer text
 ;; Editor key chord parsing and shortcut matching helpers.
 ;; References:
-;; - std.os.ui.render.viewer.keyboard
-module std.os.ui.render.viewer.editor.keychord(
+;; - core.os.ui.render.viewer.keyboard
+module core.os.ui.render.viewer.editor.keychord(
    PREFIX_TIMEOUT, empty_state, tick, clear, pending, describe, event_chord, command_chord
 )
 
-use std.core
-use std.core.str as str
-use std.os.ui.render.viewer.editor.commands as commands
-use std.os.ui.window.consts as key
+use core
+use core.str as str
+use core.os.ui.render.viewer.editor.commands as commands
+use core.os.ui.window.consts as key
 
 def PREFIX_TIMEOUT = 2.0
 

@@ -1,9 +1,9 @@
 ;; Keywords: window input keyboard mouse gamepad joystick controller key os ui
 ;; Window-input facade for key parsing, chords, mouse buttons, and gamepad input.
 ;; References:
-;; - std.os.ui.window
-;; - std.os.ui.window.consts
-module std.os.ui.window.input(
+;; - core.os.ui.window
+;; - core.os.ui.window.consts
+module core.os.ui.window.input(
    KEY_NULL, KEY_ESCAPE, KEY_ENTER, KEY_TAB, KEY_BACKSPACE, KEY_SPACE, KEY_UP, KEY_DOWN, KEY_LEFT,
    KEY_RIGHT, KEY_PAGE_UP, KEY_PAGE_DOWN, KEY_HOME, KEY_END, KEY_INSERT, KEY_DELETE, KEY_CAPS_LOCK,
    KEY_SCROLL_LOCK, KEY_NUM_LOCK, KEY_PRINT_SCREEN, KEY_PAUSE, KEY_MENU, KEY_F1, KEY_F2, KEY_F3, KEY_F4,
@@ -30,12 +30,12 @@ module std.os.ui.window.input(
    GAMEPAD_BUTTONS, GAMEPAD_AXES, GAMEPAD_BUTTON_MAP
 )
 
-use std.core
-use std.core.str as str
-use std.os.ui.window.consts
-use std.os.ui.window.input.key as uikey
-use std.os.ui.window.input.gamepad
-use std.os.ui.window as window
+use core
+use core.str as str
+use core.os.ui.window.consts
+use core.os.ui.window.input.key as uikey
+use core.os.ui.window.input.gamepad
+use core.os.ui.window as window
 
 def MOUSE_LEFT    = 0
 def MOUSE_RIGHT   = 1
@@ -456,5 +456,5 @@ fn mouse_view_state(any win, any view_w, any view_h, int button=MOUSE_LEFT) dict
    def ev = scale_event_xy(0, {"x": 8.0, "y": 4.0, "dx": 2.0}, 16, 8)
    assert(float(ev.get("x", 0.0)) == 8.0 && float(ev.get("dx", 0.0)) == 2.0, "event position scaling")
    assert(!key_down(KEY_A) && !key_down(0, KEY_A) && !mouse_button_down(MOUSE_LEFT) && !mouse_button_down(0, MOUSE_LEFT), "active input without window")
-   print("✓ std.os.ui.window.input self-test passed")
+   print("✓ core.os.ui.window.input self-test passed")
 }

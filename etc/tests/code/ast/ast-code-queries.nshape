@@ -1,0 +1,365 @@
+shape ast_code_queries {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "ast", "code", "queries"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.compiler.ast (parse_ast, parse_code, parse_code_typed, code_kind, code_name,
+                  code_has_attribute, code_str, code_origin, code_attributes,
+                  code_signature, code_contract, code_category, Code, CodeExpr, CodeStmt,
+                  CodeDecl, CodeIdent, code_expr, code_stmt, code_decl,
+                  code_ident, code_expr_json, code_stmt_json, code_decl_json,
+                  code_ident_json, code_stmt_syntax,
+                  code_decl_syntax, code_ident_syntax, code_expr_syntax,
+                  code_expr_from_json, code_stmt_from_json,
+                  code_decl_from_json, code_ident_from_json,
+                  code_expr_is_sequence, code_stmt_is_sequence,
+                  code_decl_is_sequence, code_ident_is_sequence)
+use core.math.parse.data.json (json_decode)
+
+def declaration = parse_code("@trace @memoize(3) fn answer() int { return 42 }")
+assert(is_nil(parse_code("answer = 7")),
+       "runtime parse_code rejects assignments as non-declarations")
+def variable_declaration = parse_code("def answer_value = 42")
+assert(!is_nil(variable_declaration) &&
+       code_name(variable_declaration) == "answer_value",
+       "runtime parse_code still accepts variable declarations")
+def declaration_sources = [
+   "use core.math.scalar as scalar",
+   "module ParsedExport { fn parsed_export() int { return 1 } export core(parsed_export) }",
+   "#define PARSED_FLAG 1",
+   "#link \"m\"",
+   "#include \"stddef.h\"",
+   "layout ParsedLayout { i32 value }",
+   "struct ParsedStruct { i32 value }",
+   "enum ParsedEnum { Unit, Payload(int value) }",
+   "module ParsedModule { fn nested() int { return 1 } }",
+   "refine ParsedPositive = int where(value) { value > 0 }",
+   "trait ParsedTrait { fn get(any value) int }",
+   "impl ParsedTrait for ParsedStruct { fn get(any value) int { return 1 } law { 1 == 1 } }",
+   "operator int + int: int = parsed_add",
+   "fn lemma parsed_lemma(int value) { value >= 0 → value >= 0 }",
+   "extern fn parsed_extern() int",
+   "fn parsed_function() int { return 1 }",
+   "def parsed_global = 1"
+]
+mut parsed_declaration_count = 0
+mut declaration_index = 0
+mut rejected_declarations = ""
+while declaration_index < declaration_sources.len {
+   if !is_nil(parse_code(declaration_sources.get(declaration_index))) {
+      parsed_declaration_count += 1
+   } else {
+      rejected_declarations = rejected_declarations +
+         declaration_sources.get(declaration_index) + "\n"
+   }
+   declaration_index += 1
+}
+assert(parsed_declaration_count == declaration_sources.len,
+       "parse_code accepts supported declaration families; rejected=" +
+          rejected_declarations)
+def two_declarations = parse_code(
+   "fn first() int { return 1 } fn second() int { return 2 }")
+def typed_declarations = unwrap(parse_code_typed(
+   "fn first() int { return 1 } fn second() int { return 2 }"))
+assert(code_decl_is_sequence(typed_declarations),
+       "parse_code_typed returns declaration sequences")
+assert(code_category(code_decl_syntax(typed_declarations)) == "declarations",
+       "parse_code_typed preserves declaration category")
+assert(is_err(parse_code_typed("answer = 7")),
+       "parse_code_typed rejects executable statements")
+assert(is_err(parse_code_typed("fn broken( int {")),
+       "parse_code_typed rejects malformed declarations")
+module QualifiedCodeofSource {
+   fn qualified_codeof_answer() int { return 42 }
+}
+comptime template insert_codeof_declaration(declaration: code<decl>) {
+   ${declaration}
+}
+comptime emit insert_codeof_declaration(
+   codeof(QualifiedCodeofSource.qualified_codeof_answer))
+assert(qualified_codeof_answer() == 42,
+       "codeof resolves a qualified declaration from its source module")
+def signature_decl = parse_code(
+   "@trace fn combine(int left, int right=2) int { return left + right }")
+def signature = code_signature(signature_decl)
+assert(is_tuple(signature), "code_signature returns an immutable tuple")
+assert(signature[0] == "nytrix.ast.signature", "signature schema")
+assert(signature[1] == 1, "signature version")
+assert(signature[2] == "func" && signature[3] == "combine" &&
+       signature[4] == "int", "signature function identity and result type")
+assert(!bool(signature[5]), "signature variadic fact")
+assert(is_tuple(signature[6]) && signature[6].len == 2 &&
+       signature[6][0][0] == "left" && signature[6][0][1] == "int" &&
+       signature[6][0][2] == "" && signature[6][1][0] == "right" &&
+       signature[6][1][1] == "int",
+       "code_signature preserves ordered parameter names and types")
+assert(json_decode(signature[6][1][2]).get("value") == 2,
+       "code_signature preserves default syntax")
+assert(signature[6][1][3] != "",
+       "code_signature preserves parameter source origin")
+assert(signature[7][2][0][0] == "trace" &&
+       code_signature(expression) == nil,
+       "code_signature includes attributes and rejects nondeclarations")
+def lambda_code = parse_ast(
+   "def transform = fn(int input) int { return input }").get(0)
+   .get("exprs").get(0)
+def lambda_signature = code_signature(lambda_code)
+assert(lambda_signature[0] == "nytrix.ast.signature" &&
+       lambda_signature[2] == "fn" && lambda_signature[3] == "" &&
+       lambda_signature[4] == "int" && lambda_signature[6][0][0] == "input" &&
+       lambda_signature[7][0] == "nytrix.code.attributes",
+       "code_signature also reflects anonymous lambda syntax")
+def extern_decl = parse_code("extern fn c_length(str text) int as \"strlen\"")
+def extern_signature = code_signature(extern_decl)
+assert(extern_signature[2] == "extern" &&
+       extern_signature[3] == "c_length" && extern_signature[4] == "int" &&
+       extern_signature[6][0][0] == "text",
+       "code_signature reflects extern signatures")
+def contract_decl = parse_code(
+   "fn bounded(int n) int requires n >= 0 decreases n { return n }")
+def contract_view = code_contract(contract_decl)
+assert(is_tuple(contract_view) && contract_view[0] == "nytrix.ast.contract" &&
+       contract_view[1] == 1 &&
+       json_decode(contract_view[2]).get("type") == "binary" &&
+       json_decode(contract_view[3]).get("name") == "n" &&
+       code_contract(lambda_code) == nil &&
+       code_contract(signature_decl)[2] == "" &&
+       code_contract(signature_decl)[3] == "",
+       "code_contract preserves function requires and decreases syntax")
+fn preserve_expr_code(Code<CodeExpr> value) Code<CodeExpr> { value }
+fn preserve_stmt_code(Code<CodeStmt> value) Code<CodeStmt> { value }
+fn preserve_decl_code(Code<CodeDecl> value) Code<CodeDecl> { value }
+fn preserve_ident_code(Code<CodeIdent> value) Code<CodeIdent> { value }
+fn ordinary_expr_code() Code<CodeExpr> {
+   return unwrap(code_expr(quote{ 6 * 7 }))
+}
+fn ordinary_expr_code_forward() Code<CodeExpr> {
+   def value = ordinary_expr_code()
+   return value
+}
+fn ordinary_expr_code_result() Result<Code<CodeExpr>, str> {
+   return code_expr(quote{ 6 * 7 })
+}
+fn ordinary_stmt_code(any syntax) Code<CodeStmt> {
+   return unwrap(code_stmt(syntax))
+}
+fn ordinary_decl_code(any syntax) Code<CodeDecl> {
+   return unwrap(code_decl(syntax))
+}
+fn ordinary_ident_code(any syntax) Code<CodeIdent> {
+   return unwrap(code_ident(syntax))
+}
+fn ordinary_stmt_code_result(any syntax) Result<Code<CodeStmt>, str> {
+   return code_stmt(syntax)
+}
+fn ordinary_decl_code_result(any syntax) Result<Code<CodeDecl>, str> {
+   return code_decl(syntax)
+}
+fn ordinary_ident_code_result(any syntax) Result<Code<CodeIdent>, str> {
+   return code_ident(syntax)
+}
+comptime template emit_expr_code(value: code<expr>) {
+   fn generated_expr_code() int { return ${value} }
+}
+comptime template emit_stmt_code(value: code<stmt>) {
+   fn generated_stmt_code() int {
+      mut result = 0
+      ${value}
+      return result
+   }
+}
+comptime template emit_decl_code(value: code<decl>) { ${value} }
+comptime template emit_ident_code(name: code<ident>) {
+   fn ${name}() int { return 42 }
+}
+comptime emit emit_expr_code(ordinary_expr_code())
+comptime emit emit_expr_code(ordinary_expr_code_forward())
+comptime emit emit_expr_code(ordinary_expr_code_result())
+comptime emit emit_stmt_code(ordinary_stmt_code(
+   quote{ result = 40 + 2 }))
+comptime emit emit_stmt_code(ordinary_stmt_code_result(
+   quote{ result = 40 + 2 }))
+comptime emit emit_decl_code(ordinary_decl_code(
+   quote{ fn generated_decl_code() int { return 40 + 2 } }))
+comptime emit emit_decl_code(ordinary_decl_code_result(
+   quote{ fn generated_decl_code() int { return 40 + 2 } }))
+comptime emit emit_ident_code(ordinary_ident_code(generated_ident_code))
+comptime emit emit_ident_code(
+   ordinary_ident_code_result(generated_ident_code))
+assert(generated_expr_code() == 42,
+       "ordinary Ny helpers return and forward typed Code values into splices")
+assert(generated_stmt_code() == 42 && generated_decl_code() == 42 &&
+       generated_ident_code() == 42,
+       "ordinary Ny helpers splice typed statement, declaration, and identifier code")
+def typed_expr_code = unwrap(code_expr(expression))
+def passed_expr_code = preserve_expr_code(typed_expr_code)
+def typed_expr_json = json_decode(code_expr_json(passed_expr_code))
+def typed_stmt_code = preserve_stmt_code(unwrap(code_stmt([statement])))
+def typed_decl_code = preserve_decl_code(unwrap(code_decl(declaration)))
+def typed_empty_exprs = unwrap(code_expr([]))
+def identifier_node = parse_ast("def value = item").get(0).get("exprs").get(0)
+def typed_identifier = preserve_ident_code(unwrap(code_ident(identifier_node)))
+def restored_expr_code = unwrap(code_expr_from_json(code_expr_json(passed_expr_code)))
+def restored_stmt_code = unwrap(code_stmt_from_json(code_stmt_json(typed_stmt_code)))
+def restored_decl_code = unwrap(code_decl_from_json(code_decl_json(typed_decl_code)))
+def restored_ident_code = unwrap(code_ident_from_json(code_ident_json(typed_identifier)))
+assert(typed_expr_json.get("schema") == "nytrix.code.value",
+       "Code<T> envelope schema")
+assert(typed_expr_json.get("version") == 1, "Code<T> envelope version")
+assert(typed_expr_json.get("category") == "expr", "Code<T> envelope category")
+assert(!bool(typed_expr_json.get("sequence")), "Code<T> scalar envelope shape")
+assert(code_str(code_expr_syntax(passed_expr_code)) == code_str(expression),
+       "Code<T> values survive storage and typed calls")
+assert(code_str(code_expr_syntax(restored_expr_code)) == code_str(expression),
+       "Code<T> decodes expression envelopes")
+assert(code_category(code_stmt_syntax(restored_stmt_code)) == "statements",
+       "Code<T> decodes statement envelopes")
+assert(code_category(code_decl_syntax(restored_decl_code)) == "declarations",
+       "Code<T> decodes declaration envelopes")
+assert(code_kind(code_ident_syntax(restored_ident_code)) == "ident",
+       "Code<T> decodes identifier envelopes")
+def forged_quote_category = {
+   "type":"quote",
+   "code_type":{"schema":"nytrix.code", "version":1, "category":"expr"},
+   "body":{"type":"block", "body":[{"type":"func"}]},
+   "expr":nil
+}
+def forged_quote_version = {
+   "type":"quote",
+   "code_type":{"schema":"nytrix.code", "version":true, "category":"decl"},
+   "body":{"type":"block", "body":[{"type":"func"}]},
+   "expr":nil
+}
+assert(code_category(forged_quote_category) == "invalid" &&
+       is_err(code_decl(forged_quote_category)) &&
+       code_category(forged_quote_version) == "invalid",
+       "quoted code metadata is checked against body category and schema version")
+assert(is_err(code_expr_from_json(
+          "{\"category\":\"expr\",\"schema\":\"nytrix.code.value\"," +
+          "\"sequence\":false,\"syntax\":{\"type\":\"literal\"}," +
+          "\"version\":\"1\"}")),
+       "Code<T> decoder rejects wrong field types")
+assert(!code_expr_is_sequence(passed_expr_code), "Code<T> identifies scalar syntax")
+assert(code_stmt_is_sequence(typed_stmt_code) &&
+       code_category(code_stmt_syntax(typed_stmt_code)) == "statements" &&
+       code_category(code_decl_syntax(typed_decl_code)) == "declarations" &&
+       json_decode(code_stmt_json(typed_stmt_code)).get("category") == "stmt" &&
+       json_decode(code_decl_json(typed_decl_code)).get("category") == "decl",
+       "Code<T> retains homogeneous sequence categories")
+assert(code_expr_is_sequence(typed_empty_exprs) &&
+       code_expr_syntax(typed_empty_exprs).len == 0,
+       "Code<T> retains explicitly typed empty sequences")
+assert(code_kind(code_ident_syntax(typed_identifier)) == "ident" &&
+       json_decode(code_ident_json(typed_identifier)).get("category") == "ident" &&
+       !code_ident_is_sequence(typed_identifier) &&
+       is_err(code_expr(statement)) && is_err(code_stmt(expression)) &&
+       is_err(code_decl(expression)) && is_err(code_ident("item")),
+       "Code<T> constructors reject category mismatches and string capture")
+def origin_expression = parse_ast_snapshot("def origin_value = 9")
+   .get("nodes").get(0).get("exprs").get(0)
+def origin_code = unwrap(code_expr(origin_expression))
+assert(code_expr_syntax(origin_code).get("source_origin") ==
+       origin_expression.get("source_origin"),
+       "Code<T> round-trip preserves source origins supplied by snapshots")
+def assignment = parse_ast_snapshot("answer = 7").get("nodes").get(0)
+def if_init = parse_ast_snapshot(
+   "fn init_probe() int {\n" +
+   "   if (def value = 1 value > 0) { return value }\n" +
+   "   return 0\n" +
+   "}").get("nodes").get(0).get("body").get("body").get(0)
+assert(if_init.get("init").get("type") == "var" &&
+       if_init.get("test").get("type") == "binary",
+       "AST snapshots preserve an if header initializer as syntax")
+def while_init = parse_ast_snapshot(
+   "fn while_probe() int {\n" +
+   "   while (def value = 1 value > 0) { break }\n" +
+   "   return 0\n" +
+   "}").get("nodes").get(0).get("body").get("body").get(0)
+assert(while_init.get("init").get("type") == "var" &&
+       while_init.get("test").get("type") == "binary",
+       "AST snapshots preserve a while header initializer as syntax")
+def expression = parse_ast("def value = 1 + 2").get(0).get("exprs").get(0)
+def statement = parse_ast("return 1").get(0)
+
+assert(code_kind(declaration) == "declarations" &&
+       code_kind(expression) == "binary" &&
+       code_kind([expression, expression]) == "expressions" &&
+       code_kind([statement, statement]) == "statements" &&
+       code_kind([assignment]) == "statements" &&
+       code_name(assignment) == "" &&
+       code_kind([expression, statement]) == "mixed" &&
+       code_kind([]) == "empty" && code_kind(42) == "invalid",
+       "code_kind classifies syntax nodes and homogeneous or invalid sequences")
+assert(code_name(declaration) == "answer" &&
+       code_name(declaration.get(0)) == "answer" &&
+       code_name(expression) == "" && code_name(two_declarations) == "",
+       "code_name reports only a single declaration name")
+assert(code_has_attribute(declaration, "trace") &&
+       code_has_attribute(declaration.get(0), "trace"),
+       "parse_code retains declaration attributes")
+assert(declaration.get(0).get("source_origin").get("line") == 1,
+       "parse_code retains source origins")
+def origin = code_origin(declaration.get(0))
+assert(origin.get("schema") == "nytrix.origin", "code_origin schema")
+assert(origin.get("version") == 1, "code_origin version")
+assert(is_dict(origin.get("source")), "code_origin has a source record")
+assert(origin.get("source").get("file") ==
+          declaration.get(0).get("source_origin").get("file") &&
+       origin.get("source").get("line") ==
+          declaration.get(0).get("source_origin").get("line") &&
+       origin.get("source").get("column") ==
+          declaration.get(0).get("source_origin").get("column") &&
+       is_nil(origin.get("expansion")),
+       "code_origin preserves source and expansion values")
+assert(is_nil(code_origin(expression)),
+       "code_origin returns nil when legacy expressions have no origin")
+assert(is_nil(code_origin({"type":"func",
+                           "source_origin":{"file":"fake.ny",
+                                             "line":-1,"column":2}})) &&
+       is_nil(code_origin({"type":"func",
+                           "source_origin":{"file":"fake.ny",
+                                             "line":1,"column":true}})),
+       "code_origin rejects malformed source coordinates")
+assert(!code_has_attribute(declaration, "inline"),
+       "code_has_attribute rejects an absent attribute")
+assert(!code_has_attribute(two_declarations, "trace"),
+       "code_has_attribute rejects multi-declaration sequences")
+assert(!code_has_attribute(expression, "trace"),
+       "code_has_attribute rejects expression nodes")
+def attribute_view = code_attributes(declaration)
+def attribute_argument = json_decode(attribute_view[2][1][1][0])
+assert(is_tuple(attribute_view) &&
+       attribute_view[0] == "nytrix.code.attributes" &&
+       attribute_view[1] == 1 && is_tuple(attribute_view[2]) &&
+       attribute_view[2][0][0] == "trace" &&
+       attribute_view[2][0][1].len == 0 &&
+       attribute_view[2][1][0] == "memoize" &&
+       is_tuple(attribute_view[2][1][1]),
+       "code_attributes returns ordered versioned entries")
+assert(attribute_argument.get("value") == 3,
+       "code_attributes preserves argument syntax")
+assert(find(attribute_view[2][1][1][0], "\"source_origin\"") >= 0,
+       "code_attributes preserves argument origin")
+assert(is_str(attribute_view[2][0][2]) &&
+       is_str(attribute_view[2][0][3]) &&
+       is_str(attribute_view[2][1][2]) &&
+       is_str(attribute_view[2][1][3]),
+       "code_attributes preserves source and expansion origins")
+assert(code_attributes(two_declarations) == nil &&
+       code_attributes(expression) == nil,
+       "code_attributes rejects multi-declarations and expressions")
+def serialized = code_str(declaration)
+def restored = json_decode(serialized)
+assert(code_str(restored) == serialized,
+       "canonical code serialization round-trips")
+assert(code_has_attribute(restored, "trace"),
+       "canonical code serialization preserves attributes")
+assert(restored.get(0).get("source_origin").get("line") == 1,
+       "canonical code serialization preserves source origins")
+print("✓ AST code query tests passed")
+NY
+}

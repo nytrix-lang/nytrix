@@ -1,0 +1,25 @@
+shape test_http_server_request_parser_marks_valid_requests {
+  family "runtime/modules"
+  generator "regression"
+  features ["ny", "test", "stdlib", "http", "server", "request-parser"]
+  estimate_ms 19000
+  template ny-test-case
+  flags_matrix "--nyir-verify --native --run; --nyir-verify --native-backend=llvm --jit --jit-engine=mcjit; --nyir-verify --native-backend=llvm --jit --jit-engine=orc; --nyir-verify --native-only"
+  expect compile_and_run
+  timeout 60
+  source ny <<'NY'
+use core
+use core.os.net.server as web
+
+def request = web.parse_request(
+  "GET /health?ready=1 HTTP/1.1\r\nHost: 127.0.0.1:8080\r\n\r\n")
+assert(request.get("ok", false) == true, "valid HTTP request is accepted")
+assert(request.get("method", "") == "GET", "request method is parsed")
+assert(request.get("path", "") == "/health", "request path is parsed")
+assert(request.get("query", "") == "ready=1", "request query is parsed")
+
+def incomplete = web.parse_request("GET")
+assert(incomplete.get("ok", true) == false,
+       "request without a target remains invalid")
+NY
+}

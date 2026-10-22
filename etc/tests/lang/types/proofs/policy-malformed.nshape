@@ -1,0 +1,93 @@
+shape proof_policy_malformed {
+  family "runtime/proofs"
+  generator "program"
+  features ["proofs", "policy", "malformed", "fail-closed"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.str
+use core.proof
+
+;; Malformed obligations and certificates fail closed: the strongest
+;; verdict a malformed record can carry is unknown, and the independent
+;; checker rejects anything stronger.
+
+def bad_format = {"format": "ny-proof-obligation-v0", "canonical":
+   "binary:>(name:x,int:0)", "ranges": "x=5..5", "policy": "",
+   "budgets": "v8,c32,d64", "text": "ny-proof-obligation-v0|x|y|z|b",
+   "digest": __proof_policy_digest_hex("ny-proof-obligation-v0|x|y|z|b")}
+def cert_bad = proof.solve(bad_format)
+assert(proof.verdict_of(cert_bad) == "unknown", "malformed obligation stays unknown")
+assert(!proof.check(cert_bad), "malformed record yields no trusted certificate")
+
+def bad_prop = proof.obligation("float:1.5", "x=5..5")
+def cert_bad_prop = proof.solve(bad_prop)
+assert(proof.verdict_of(cert_bad_prop) == "unknown",
+   "unsupported proposition token stays unknown")
+
+def unbalanced = proof.obligation("binary:>(name:x,int:0", "x=5..5")
+def cert_unbalanced = proof.solve(unbalanced)
+assert(proof.verdict_of(cert_unbalanced) == "unknown",
+   "unbalanced proposition stays unknown")
+
+;; A certificate text mutated into garbage is rejected by the checker.
+def ob = proof.obligation("binary:>(name:x,int:0)", "x=5..5")
+def cert = proof.solve(ob)
+def good_text = proof.certificate_text(cert)
+assert(proof.check(cert), "baseline certificate checks")
+
+def fields = good_text.split("|")
+assert(fields.len == 7, "certificate has seven fields")
+
+def rest = good_text.split("|")
+def mangled = "not-a-certificate|" + get(rest, 1) + "|" + get(rest, 2) + "|" +
+   get(rest, 3) + "|" + get(rest, 4) + "|" + get(rest, 5) + "|" + get(rest, 6)
+assert(!proof.check_texts(ob.get("text"), mangled), "wrong format is rejected")
+
+def short_cert = get(fields, 0) + "|" + get(fields, 1) + "|" + get(fields, 2)
+assert(!proof.check_texts(ob.get("text"), short_cert), "truncated certificate is rejected")
+
+def empty_digest = get(fields, 0) + "|0000000000000000|" + get(fields, 2) +
+   "|" + get(fields, 3) + "|" + get(fields, 4) + "|" + get(fields, 5) +
+   "|" + get(fields, 6)
+assert(!proof.check_texts(ob.get("text"), empty_digest), "zeroed digest is rejected")
+
+def no_expl = get(fields, 0) + "|" + get(fields, 1) + "|unknown|" +
+   get(fields, 3) + "|" + get(fields, 4) + "|" + get(fields, 5) + "|"
+assert(!proof.check_texts(ob.get("text"), no_expl),
+   "unknown without an explanation is rejected")
+
+;; An obligation mutated after the fact invalidates its certificate.
+def moved_range = proof.obligation("binary:>(name:x,int:0)", "x=0..5")
+assert(!proof.check_texts(moved_range.get("text"), good_text),
+   "certificate does not transfer across obligations")
+
+;; A single-tactic policy only runs that tactic: fold cannot decide a
+;; proposition over names, so the verdict is unknown, never false.
+def strict_fold = proof.obligation("binary:>(name:x,int:0)", "x=5..5", "fold")
+assert(proof.verdict_of(proof.solve(strict_fold)) == "unknown",
+   "a fold-only policy cannot decide named propositions")
+def closed_fold = proof.obligation("binary:<(int:1,int:2)", "", "fold")
+assert(proof.verdict_of(proof.solve(closed_fold)) == "proved",
+   "an explicit fold policy still proves closed propositions")
+
+assert(true, "malformed policy fixtures complete")
+NY
+}
+
+shape proof_policy_malformed_strategy {
+  family "runtime/proofs"
+  generator "program"
+  features ["proofs", "policy", "malformed", "fail-closed"]
+  template ny-test-case
+  expect compile_fail
+  expect_message "malformed proof strategy"
+  source ny <<'NY'
+use core
+
+;; A token shaped like a tactic must name a real tactic on every backend.
+def proof p = prove(1 < 2, "by_vibes")
+print("never reached")
+NY
+}

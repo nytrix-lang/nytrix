@@ -1,0 +1,15 @@
+shape test_thread_nyir_unsupported {
+  family "runtime/execution"
+  generator "embedded"
+  features ["ny", "test", "backend-capability"]
+  template ny-test-case
+  flags "--native --run"
+  expect compile_fail
+  source ny <<'NY'
+use core
+
+fn _thread_worker(int value) int { value + 1 }
+
+thread_spawn_call(_thread_worker, [41])
+NY
+}

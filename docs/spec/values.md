@@ -1,8 +1,8 @@
 <!-- nytrix-doc: {"audience":"user","featured":false,"group":"spec","order":200,"summary":"Primitive and compound values, collections, mutability, ownership, and representation boundaries."} -->
 # Values
 
-Values cover literals, strings, containers, receiver methods, equality, and
-representation.
+Values include literals, strings, collections, functions, and native handles.
+This page gives the shared value rules; module docs define exported helpers.
 
 ## Literal classes
 
@@ -41,7 +41,7 @@ values, and dictionaries. APIs that use absence, such as `filter_map`, must
 return `nil` rather than integer `0`.
 
 ```ny
-use std.core
+use core
 assert(nil != 0, "nil identity")
 assert(!nil && !0, "falsy values")
 assert(to_str(nil) == "nil", "nil string")
@@ -62,48 +62,42 @@ document whether they expect text or raw bytes.
 
 Formatted strings use expression interpolation:
 
-```ny
+```text
 f"name={name} count={n}"
 ```
 
 A trailing top-level `=` keeps the expression text as a label:
 
-```ny
+```text
 f"{name=}"
 f"{count + 1=}"
 ```
 
 ## Lists
 
-Lists are ordered mutable sequences. `list(n)` creates an empty list with
-reserved capacity `n`. It does not create `n` initialized elements; the list
-starts with zero elements, so `list(4).len` is `0`. Use `append` or a literal
-to fill it.
+Lists are ordered sequences. `list(n)` creates an empty list with reserved
+capacity `n`; it does not create `n` initialized elements. The initial length
+is zero.
 
 ```ny
+use core
+
 def reserved = list(4)
 assert(reserved.len == 0, "capacity is not length")
 
-def xs = [1, 2, 3]
-mut out = list(16)
-out = out.append(4)
-add(out, 5)
+mut xs = list(4)
+xs = xs.append(4)
+xs = add(xs, 5)
+assert_eq(xs, [4, 5], "retain list updates")
 ```
 
-`append` and `add` both mutate the list in place and return that same list.
-Use receiver form when it reads better:
+`append`, `add`, and `extend` return the updated list value. Retain the return
+value: an update may produce a replacement list, so a call whose result is
+ignored need not update the binding.
 
-```ny
-xs.append(value)
-```
-
-Use free-function form for generic container code:
-
-```ny
-add(xs, value)
-```
-
-Neither form requires reassignment for list mutation.
+Do not rely on whether another alias sees an update. Use the returned value
+when continuing with the updated sequence; use `clone` when an API needs a
+detached mutable copy.
 
 Indexing a reserved-but-empty slot is not valid. Use `append`, a literal, or a
 standard-library helper that fills the list before reading by index.
@@ -112,7 +106,7 @@ standard-library helper that fills the list before reading by index.
 
 Lists, tuples, strings, bytes, and ranges support integer indexing:
 
-```ny
+```text
 xs[0]
 xs[-1]
 (4, 5, 6)[1]
@@ -130,6 +124,8 @@ Dicts map keys to values. `value.get(key, fallback)` returns `fallback` when
 the key is absent.
 
 ```ny
+use core
+
 def empty = {}
 def cfg = {"port": 8080}
 def port = cfg.get("port", 80)
@@ -146,6 +142,8 @@ for a mutable accumulator, seed a literal with a value, or clone an existing
 literal:
 
 ```ny
+use core
+
 mut out = dict()
 out.set("ok", true)
 ```
@@ -164,15 +162,17 @@ value stays valid across growth - the dict is a single managed object, not a
 pointer to its table. Iteration order over `keys`, `values`, and `items` is not
 a stable program contract across insertions and resizes.
 
-## List mutability
+## List updates
 
-Lists mutate in place. `list.append` and `list.extend` return the same list,
-which allows chaining without forcing reassignment:
+List updates can be chained by retaining each returned value:
 
 ```ny
+use core
+
 mut xs = []
-xs.append(1)
-xs.extend([2, 3])
+xs = xs.append(1)
+xs = xs.append(2)
+assert_eq(xs, [1, 2], "retained updates")
 ```
 
 ## Core idioms
@@ -185,10 +185,10 @@ xs.extend([2, 3])
 | `value?.member` | Optional chaining - returns `nil` when receiver is `nil`. |
 | `dict.get(key, default)` | Safe lookup with fallback for missing keys. |
 | `dict.set(key, value)` | Mutates dict in place, returns the same dict. |
-| `list.append(item)` | Mutates the list in place and returns it. |
-| `list.extend(other)` | Mutates the list in place and returns it. |
+| `list.append(item)` | Returns the updated list; retain the result because growth may replace the value. |
+| `list.extend(other)` | Returns the updated list; retain the result because growth may replace the value. |
 | `clone(value)` | Detached mutable copy of a dict or list. |
-| `is_dict(v)`, `is_list(v)`, `is_int(v)`,... | Runtime type predicates. |
+| `is_dict(v)`, `is_list(v)`, `is_int(v)` | Runtime type predicates. |
 
 ## Receiver methods
 
@@ -198,31 +198,26 @@ availability; values do not gain receiver methods on their own.
 When exact behavior matters, check the module page:
 
 ```bash
-ny doc get std.core.str
+ny doc get core.str
 ny doc search --symbols append
 ```
 
-Runtime tests cover these receiver surfaces:
-
-- sequence properties such as `.len`;
-- string methods such as `.strip()`, `.upper()`, `.split()`, `.byte_at()`;
-- list/dict/set methods such as `.get()`, `.set()`, `.keys()`, `.contains()`;
-- iterator methods such as `.map()`, `.filter()`, `.reduce()`, `.chunk()`;
-- byte/integer conversion properties such as `.long`, `.bytes`, `.to_bytes`,
- `.unhex`, and `.text` where the owning module exports them.
+Check the owning module for the exact receiver methods and aliases. The
+available surface depends on module exports; a method name is not guaranteed
+for every value type.
 
 ## Sequence operations
 
 Strings and lists can be repeated with `*`:
 
-```ny
+```text
 "ha" * 3
 [1, 2] * 2
 ```
 
 Standard sequence helpers include `sort`, `sorted`, `swapped`, `slice`,
 `keys`, `values`, and `items`. The exact exported names and receiver aliases
-belong to `std.core`, `std.core.str`, and `std.core.iter`.
+belong to `core`, `core.str`, and `core.iter`.
 
 `sort(xs)` sorts `xs` in place and returns the same sorted list. `sorted(xs)`
 returns a sorted copy and leaves `xs` unchanged.

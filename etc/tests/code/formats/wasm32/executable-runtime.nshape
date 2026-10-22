@@ -1,0 +1,324 @@
+shape wasm32_executable_runtime {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "test", "wasm", "runtime", "nyir", "select", "ror32"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os (file_exists, file_remove, file_write, run_capture, temp_dir, pid)
+
+def compiler = env("NYTRIX_NY_FULL_BIN")
+assert(is_str(compiler) && compiler.len > 0,
+       "test runner provides the compiler path")
+def wasm_path = temp_dir() + "/ny-wasm-runtime-" + to_str(pid()) + ".wasm"
+def compile = run_capture(
+    [compiler, "--native-backend=wasm", "--native-only", "-O3", "--nyir-verify",
+     "--emit-wasm=" + wasm_path, "-no-std", "-c",
+     "fn add(int left, int right) int {\n" +
+     "  if left < right { left + right } else { left - right }\n" +
+     "}\n" +
+     "@noinline\nfn choose(int condition) int {\n" +
+     "  condition ? 42 : 11\n" +
+     "}\n" +
+     "@noinline\nfn rotate_right32_8(int value) int {\n" +
+     "  def word = value & 0xffffffff\n" +
+     "  ((word >> 8) | (word << 24)) & 0xffffffff\n" +
+     "}\nadd(20, 22) + (choose(1) - 42) + (choose(0) - 11) + " +
+     "(rotate_right32_8(0x0123456789abcd2e) == 0x2e89abcd ? 0 : 1)"],
+    [], nil, false)
+def execution = run_capture(
+    ["wasmtime", "run", "--invoke", "_ny_top_entry", wasm_path], [], nil,
+    false)
+def removed = file_remove(wasm_path)
+assert(is_ok(removed), "remove generated WebAssembly module")
+assert(compile.get("code", 127) == 0,
+       "verified native-only compilation emits a WebAssembly module")
+assert(execution.get("code", 127) == 0 &&
+       endswith(execution.get("stdout", ""), "42\n"),
+       "WebAssembly select, ror32, and scalar call execute under wasmtime")
+print("WASM_RUNTIME_PARITY_OK")
+NY
+}
+
+shape wasm32_portable_text_runtime_and_checked_division {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "test", "wasm", "portable-text", "runtime", "checked-div"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os (file_exists, file_remove, run_capture, temp_dir, pid)
+
+def compiler = env("NYTRIX_NY_FULL_BIN")
+assert(is_str(compiler) && compiler.len > 0,
+       "test runner provides the compiler path")
+def stem = temp_dir() + "/ny-portable-wasm-" + to_str(pid())
+def wat_path = stem + ".wat"
+def wasm_path = stem + ".wasm"
+def checked_wat_path = stem + "-checked.wat"
+def checked_wasm_path = stem + "-checked.wasm"
+def zero_wat_path = stem + "-zero.wat"
+def zero_wasm_path = stem + "-zero.wasm"
+def panic_wat_path = stem + "-panic.wat"
+def panic_wasm_path = stem + "-panic.wasm"
+def unsupported_wat_path = stem + "-unsupported.wat"
+def host_wat_path = stem + "-host.wat"
+def host_wasm_path = stem + "-host.wasm"
+def provider_wat_path = stem + "-provider.wat"
+def provider_wasm_path = stem + "-provider.wasm"
+mut str wide_import_decl = "  fn host_sum64("
+mut str wide_import_call = "host_sum64("
+mut str wide_import_params = ""
+mut str wide_import_body = ""
+for index in 0..63 {
+  if index > 0 {
+    wide_import_decl = wide_import_decl + ", "
+    wide_import_call = wide_import_call + ", "
+  }
+  if index == 63 {
+    wide_import_decl = wide_import_decl + "*int a" + to_str(index)
+    wide_import_call = wide_import_call + "host_pointer()"
+    wide_import_params = wide_import_params + "(param i32) "
+    wide_import_body =
+        wide_import_body +
+        "    local.get 63\n" +
+        "    i32.const -2147483648\n" +
+        "    i32.ne\n" +
+        "    if\n" +
+        "      unreachable\n" +
+        "    end\n" +
+        "    i64.const 64\n"
+  } else {
+    wide_import_decl = wide_import_decl + "int a" + to_str(index)
+    wide_import_call = wide_import_call + "1"
+    wide_import_params = wide_import_params + "(param i64) "
+  }
+}
+wide_import_decl = wide_import_decl + ") int\n"
+wide_import_call = wide_import_call + ") - 64 + "
+def wide_import_provider =
+    "  (func (export \"host_sum64\") " + wide_import_params +
+    "(result i64)\n" + wide_import_body + "  )\n"
+def host_source =
+    "extern \"c\" {\n" +
+    "  fn host_value(int value) int\n" +
+    "  fn host_adjust_f64(f64 value) f64\n" +
+    "  fn host_adjust_f32(f32 value) f32\n" +
+    "  fn host_sum8(int a, int b, int c, int d, " +
+    "int e, int f, int g, int h) int\n" +
+    "  fn host_pointer() *int\n" +
+    "  fn host_identity(*int value) *int\n" +
+    wide_import_decl +
+    "  fn host_notify(int value) int\n" +
+    "}\n" +
+    "fn internal_sum8(int a, int b, int c, int d, int e, int f, int g, int h) int {\n" +
+    "  a + b + c + d + e + f + g + h\n" +
+    "}\n" +
+    "host_notify(7)\n" +
+    "host_sum8(1, 2, 3, 4, 5, 6, 7, 8) - 36 + " +
+    wide_import_call +
+    "internal_sum8(1, 2, 3, 4, 5, 6, 7, 8) - 36 + " +
+    "host_value(3) - 42 + " +
+    "(host_adjust_f64(40.5) == 42.0 ? 1 : 0) + " +
+    "(host_adjust_f32(40.5f32) == 42.0f32 ? 1 : 0) + " +
+    "(host_identity(host_pointer()) == host_pointer() ? 1 : 0)"
+def host_compile = run_capture(
+    [compiler, "--native-backend=wasm", "--native-only", "--nyir-verify",
+     "--emit-asm=" + host_wat_path, "-no-std", "-emit-only", "-e",
+     host_source],
+    [], nil, false)
+def host_assemble = run_capture(
+    ["wat2wasm", host_wat_path, "-o", host_wasm_path], [], nil, false)
+def provider_write = file_write(
+    provider_wat_path,
+    "(module\n" +
+    "  (func (export \"host_value\") (param i64) (result i64)\n" +
+    "    local.get 0\n" +
+    "    i64.const 39\n" +
+    "    i64.add)\n" +
+    "  (func (export \"host_adjust_f64\") (param f64) (result f64)\n" +
+    "    local.get 0\n" +
+    "    f64.const 1.5\n" +
+    "    f64.add)\n" +
+    "  (func (export \"host_adjust_f32\") (param f32) (result f32)\n" +
+    "    local.get 0\n" +
+    "    f32.const 1.5\n" +
+    "    f32.add)\n" +
+    "  (func (export \"host_sum8\") " +
+    "(param i64) (param i64) (param i64) (param i64) " +
+    "(param i64) (param i64) (param i64) (param i64) (result i64)\n" +
+    "    local.get 0\n" +
+    "    local.get 1\n" +
+    "    i64.add\n" +
+    "    local.get 2\n" +
+    "    i64.add\n" +
+    "    local.get 3\n" +
+    "    i64.add\n" +
+    "    local.get 4\n" +
+    "    i64.add\n" +
+    "    local.get 5\n" +
+    "    i64.add\n" +
+    "    local.get 6\n" +
+    "    i64.add\n" +
+    "    local.get 7\n" +
+    "    i64.add)\n" +
+    wide_import_provider +
+    "  (func (export \"host_pointer\") (result i32)\n" +
+    "    i32.const -2147483648)\n" +
+    "  (func (export \"host_identity\") (param i32) (result i32)\n" +
+    "    local.get 0)\n" +
+    "  (func (export \"host_notify\") (param i64) (result i64)\n" +
+    "    local.get 0\n" +
+    "    i64.const 7\n" +
+    "    i64.ne\n" +
+    "    if\n" +
+    "      unreachable\n" +
+    "    end\n" +
+    "    i64.const 0))\n")
+def provider_assemble = run_capture(
+    ["wat2wasm", provider_wat_path, "-o", provider_wasm_path], [], nil,
+    false)
+def host_execution = run_capture(
+    ["wasmtime", "run", "--preload",
+     "env=" + provider_wasm_path, "--invoke", "rt_main", host_wasm_path],
+    [], nil, false)
+def compile = run_capture(
+    [compiler, "--native-backend=wasm", "--native-only", "-O3", "--nyir-verify",
+     "--emit-asm=" + wat_path, "-no-std", "-emit-only", "-e",
+     "fn rotate_check(int value) int {\n" +
+     "  mut word = value & 0xff\n" +
+     "  ((word >> 1) | (word << 63)) >> 63 & 1\n" +
+     "}\n" +
+     "fn add(int left, int right) int {\n" +
+     "  if left < right { left + right } else { left - right }\n" +
+     "}\nadd(20, 22) + rotate_check(1) - 1"],
+    [], nil, false)
+def assemble = run_capture(
+    ["wat2wasm", wat_path, "-o", wasm_path], [], nil, false)
+def execution = run_capture(
+    ["wasmtime", "run", "--invoke", "rt_main", wasm_path], [], nil, false)
+def checked_compile = run_capture(
+    [compiler, "--native-backend=wasm", "--native-only", "--nyir-verify",
+     "--emit-asm=" + checked_wat_path, "-no-std", "-emit-only", "-e",
+     "fn divide(int left, int right) int { left / right }\ndivide(9, 3)"],
+    [], nil, false)
+def checked_assemble = run_capture(
+    ["wat2wasm", checked_wat_path, "-o", checked_wasm_path], [], nil, false)
+def checked_execution = run_capture(
+    ["wasmtime", "run", "--invoke", "rt_main", checked_wasm_path], [], nil,
+    false)
+def zero_compile = run_capture(
+    [compiler, "--native-backend=wasm", "--native-only", "--nyir-verify",
+     "--emit-asm=" + zero_wat_path, "-no-std", "-emit-only", "-e",
+     "fn divide(int left, int right) int { left / right }\n" +
+     "mut divisor = 1\nwhile divisor > 0 { divisor -= 1 }\n" +
+     "divide(9, divisor)"],
+    [], nil, false)
+def zero_assemble = run_capture(
+    ["wat2wasm", zero_wat_path, "-o", zero_wasm_path], [], nil, false)
+def zero_execution = run_capture(
+    ["wasmtime", "run", "--invoke", "rt_main", zero_wasm_path], [], nil,
+    false)
+def panic_compile = run_capture(
+    [compiler, "--native-backend=wasm", "--native-only", "--nyir-verify",
+     "--emit-asm=" + panic_wat_path, "-no-std", "-emit-only", "-e",
+     "panic(\"portable wasm panic marker\")"],
+    [], nil, false)
+def panic_assemble = run_capture(
+    ["wat2wasm", panic_wat_path, "-o", panic_wasm_path], [], nil, false)
+def panic_execution = run_capture(
+    ["wasmtime", "run", "--invoke", "rt_main", panic_wasm_path], [], nil,
+    false)
+def unsupported_import = run_capture(
+    [compiler, "--native-backend=wasm", "--native-only", "--nyir-verify",
+     "--emit-asm=" + unsupported_wat_path, "-no-std", "-emit-only", "-e",
+     "extern \"c\" { fn rt_unimplemented(int value) int }\n" +
+     "rt_unimplemented(3)"],
+    [], nil, false)
+def removed_wasm =
+    if file_exists(wasm_path) { is_ok(file_remove(wasm_path)) } else { true }
+def removed_wat =
+    if file_exists(wat_path) { is_ok(file_remove(wat_path)) } else { true }
+def removed_checked_wasm =
+    if file_exists(checked_wasm_path) {
+      is_ok(file_remove(checked_wasm_path))
+    } else { true }
+def removed_checked_wat =
+    if file_exists(checked_wat_path) {
+      is_ok(file_remove(checked_wat_path))
+    } else { true }
+def removed_zero_wasm =
+    if file_exists(zero_wasm_path) { is_ok(file_remove(zero_wasm_path)) } else { true }
+def removed_zero_wat =
+    if file_exists(zero_wat_path) { is_ok(file_remove(zero_wat_path)) } else { true }
+def removed_unsupported_wat =
+    if file_exists(unsupported_wat_path) {
+      is_ok(file_remove(unsupported_wat_path))
+    } else { true }
+def removed_host_wasm =
+    if file_exists(host_wasm_path) {
+      is_ok(file_remove(host_wasm_path))
+    } else { true }
+def removed_host_wat =
+    if file_exists(host_wat_path) {
+      is_ok(file_remove(host_wat_path))
+    } else { true }
+def removed_provider_wasm =
+    if file_exists(provider_wasm_path) {
+      is_ok(file_remove(provider_wasm_path))
+    } else { true }
+def removed_provider_wat =
+    if file_exists(provider_wat_path) {
+      is_ok(file_remove(provider_wat_path))
+    } else { true }
+def removed_panic_wasm =
+    if file_exists(panic_wasm_path) {
+      is_ok(file_remove(panic_wasm_path))
+    } else { true }
+def removed_panic_wat =
+    if file_exists(panic_wat_path) {
+      is_ok(file_remove(panic_wat_path))
+    } else { true }
+assert(removed_wasm && removed_wat && removed_checked_wasm &&
+       removed_checked_wat && removed_zero_wasm && removed_zero_wat &&
+       removed_unsupported_wat && removed_host_wasm && removed_host_wat &&
+       removed_provider_wasm && removed_provider_wat &&
+       removed_panic_wasm && removed_panic_wat,
+       "remove portable WebAssembly artifacts")
+assert(is_ok(provider_write) && provider_assemble.get("code", 127) == 0 &&
+       host_compile.get("code", 127) == 0 &&
+       host_assemble.get("code", 127) == 0 &&
+       host_execution.get("code", 127) == 0 &&
+       endswith(host_execution.get("stdout", ""), "7\n"),
+       "supported i64, f32, f64, and Wasm32-pointer C imports execute from env")
+assert(compile.get("code", 127) == 0,
+       "NYIR-verified scalar function emission succeeds")
+assert(assemble.get("code", 127) == 0,
+       "portable text output assembles as a valid WebAssembly module")
+assert(execution.get("code", 127) == 0 &&
+       endswith(execution.get("stdout", ""), "85\n"),
+       "WebAssembly function call returns the tagged result 85 under wasmtime")
+assert(checked_compile.get("code", 127) == 0 &&
+       checked_assemble.get("code", 127) == 0 &&
+       checked_execution.get("code", 127) == 0 &&
+       endswith(checked_execution.get("stdout", ""), "7\n"),
+       "checked division returns the tagged result when its divisor is nonzero")
+assert(zero_compile.get("code", 127) == 0 &&
+       zero_assemble.get("code", 127) == 0 &&
+       zero_execution.get("code", 0) != 0 &&
+       str_contains(zero_execution.get("stdout", ""), "division by zero"),
+       "zero-divisor panic preserves its message and traps in WebAssembly")
+assert(panic_compile.get("code", 127) == 0 &&
+       panic_assemble.get("code", 127) == 0 &&
+       panic_execution.get("code", 0) != 0 &&
+       str_contains(panic_execution.get("stdout", ""),
+                    "portable wasm panic marker"),
+       "explicit panic preserves its message and traps in WebAssembly")
+assert(unsupported_import.get("code", 0) != 0 &&
+       !file_exists(unsupported_wat_path),
+       "unsupported runtime imports still fail closed")
+print("PORTABLE_WASM_RUNTIME_PARITY_OK")
+NY
+}

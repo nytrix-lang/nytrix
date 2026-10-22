@@ -3,17 +3,17 @@
 ;; Reference:
 ;; - D. Boneh, Twenty Years of Attacks on the RSA Cryptosystem.
 ;; References:
-;; - std.math.crypto.rsa
-;; - std.math.crypto
-module std.math.crypto.rsa.roots(
+;; - core.math.crypto.rsa
+;; - core.math.crypto
+module core.math.crypto.rsa.roots(
    rsa_crt_pq,
    rsa_plaintexts_from_pq,
    rsa_ascii_hits_from_pq,
    rsa_find_flag_from_pq
 )
 
-use std.math.nt
-use std.math.crypto.support.tools (
+use core.math.nt
+use core.math.crypto.support.tools (
    bytes_ascii,
    bytes_contains,
    bytes_has_prefix,

@@ -1,13 +1,13 @@
 ;; Keywords: data serialization zlib deflate compression parse
 ;; Zlib Compression and Decompression Library for Nytrix
 ;; References:
-;; - std.math.parse.data
-;; - std.math.parse
-module std.math.parse.data.zlib(decompress_zlib, compress_zlib, error, last_out_len, decompress_zlib_limit)
-use std.core
-use std.core.mem as core_mem
-use std.os (env)
-use std.os.prim
+;; - core.math.parse.data
+;; - core.math.parse
+module core.math.parse.data.zlib(decompress_zlib, compress_zlib, error, last_out_len, decompress_zlib_limit)
+use core
+use core.mem as core_mem
+use core.os (env)
+use core.os.prim
 
 mut _error = ""
 mut _last_out_len = 0
@@ -114,5 +114,5 @@ fn compress_zlib(any s, int level=6) str {
    assert(packed.len > 0, "zlib compressed output")
    assert_eq(decompress_zlib(packed, 4096), plain, "zlib round trip")
    assert(error() == "", "zlib no error after round trip")
-   print("✓ std.math.parse.data.zlib self-test passed")
+   print("✓ core.math.parse.data.zlib self-test passed")
 }

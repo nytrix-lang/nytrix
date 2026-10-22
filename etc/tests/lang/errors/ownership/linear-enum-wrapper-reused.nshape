@@ -1,0 +1,21 @@
+shape ownership_linear_enum_wrapper_reused {
+  family "compiler-errors/ownership"
+  generator "error"
+  features ["error", "ownership", "resource", "linear", "enum", "move"]
+  template ny-compile-fail
+  expect compile_fail
+  flags "--ownership-strict"
+  expect_message "linear resource 'wrapped' may be consumed at most once on every path"
+  source ny <<'NY'
+linear layout File { int fd }
+enum MaybeFile<T> { Some(T file), None }
+
+fn reuse(MaybeFile<File> wrapped) int {
+  def first = wrapped
+  def second = wrapped
+  0
+}
+
+reuse(MaybeFile.Some(File(41)))
+NY
+}

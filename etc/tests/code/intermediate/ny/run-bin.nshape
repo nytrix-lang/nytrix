@@ -1,0 +1,15 @@
+shape nyir_run_bin {
+  family "runtime-native"
+  generator "native"
+  features ["native", "nyir", "vm", "binary"]
+  template ny-test-case
+  flags "--nyir-dump-bin=/tmp/nytrix-native-nyir-run-bin.nyir --nyir-run-bin=/tmp/nytrix-native-nyir-run-bin.nyir"
+  expect compile_and_run
+  expect_exit 58
+  expect_message "result=58"
+  source ny <<'NY'
+fn binary_f64_identity(f64 value) f64 { value }
+assert(binary_f64_identity(-0.0) == 0.0, "binary f64 scalar class")
+9 * 7 - 5
+NY
+}

@@ -1,11 +1,11 @@
 ;; Keywords: engine state viewer selection transform os ui render scene
 ;; Central engine viewer state for selection, transform modes, panels, and runtime toggles.
 ;; References:
-;; - std.os.ui.render.scene
-;; - std.os.ui.render.viewer.runtime
-module std.os.ui.render.viewer.engine.state *
-use std.core
-use std.os.ui.render.matrix as rmat
+;; - core.os.ui.render.scene
+;; - core.os.ui.render.viewer.runtime
+module core.os.ui.render.viewer.engine.state *
+use core
+use core.os.ui.render.matrix as rmat
 
 mut int APP_MSAA = 4
 mut bool APP_VSYNC = false
@@ -14,7 +14,6 @@ mut list APP_BG = own([0.000, 0.000, 0.000, 1.0])
 mut bool APP_WIRE = false
 mut bool APP_STATS = true
 mut bool print_to_stdout = false
-mut any win = 0
 mut any cam = 0
 mut any camthreed = 0
 mut f64 _cam_px = 0.0
@@ -225,7 +224,6 @@ mut int _last_draw_world_state = -1
 mut str _last_world_parity_sig = ""
 mut str _last_editor_parity_sig = ""
 mut int _last_term_open_state = -1
-mut str _ui_update_stage = ""
 mut bool _gui_visible = false
 mut bool _gui_show_editor = false
 mut bool _gui_probe_overlay = false

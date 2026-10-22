@@ -1,0 +1,145 @@
+shape ownership_exclusive_borrow_place_noalias_positive {
+  family "language/ownership"
+  generator "syntax"
+  features ["ownership", "borrow", "exclusive", "noalias", "field", "index"]
+  template ny-test-case
+  expect compile_and_run
+  expect_message "[noalias]"
+  flags "--ownership-strict --native-only --nyir-verify --nyir-dump"
+  source ny <<'NY'
+use core
+
+layout Pair { int left, int right }
+layout Nest { Pair inner, int tail }
+
+@returns_borrow(x)
+fn mutable_borrow_parameter(any x) any {
+  return borrow_mut(x)
+}
+
+@returns_borrow(x)
+fn mutable_borrow_parameter_via_local(any x) any {
+  def alias = borrow_mut(x)
+  return alias
+}
+
+@returns_borrow(x)
+fn mutable_borrow_parameter_branch(bool choose, any x) any {
+  if choose {
+    return borrow_mut(x)
+  } else {
+    return borrow_mut(x)
+  }
+}
+
+@returns_borrow(x)
+fn mutable_borrow_parameter_match(bool choose, any x) any {
+  match choose {
+    true -> { return borrow_mut(x) }
+    _ -> { return borrow_mut(x) }
+  }
+}
+
+fn field_borrow() int {
+  mut Pair pair = Pair(5, 8)
+  def exclusive = &mut pair.left
+  def observed = exclusive
+  pair.left + pair.right
+}
+
+fn index_borrow() int {
+  mut list<int> values = [7, 8]
+  def exclusive = &mut values[0]
+  values[1] = 9
+  def observed = exclusive
+  values[0] + values[1]
+}
+
+fn negative_index_borrow() int {
+  mut list<int> values = [7, 8, 9]
+  def exclusive = &mut values[-1]
+  values[-2] = 10
+  def observed = exclusive
+  values[2] + values[1]
+}
+
+fn nested_field_borrow() int {
+  mut Nest value = Nest(Pair(11, 13), 17)
+  def exclusive = &mut value.inner.left
+  def observed = exclusive
+  value.inner.left + value.inner.right + value.tail
+}
+
+fn dynamic_index_distinct_member_borrow() int {
+  mut list<Pair> values = [Pair(19, 23)]
+  def left_index = 0
+  def right_index = 0
+  def exclusive = &mut values[left_index].left
+  def untouched = values[right_index].right
+  def observed = exclusive
+  untouched + observed
+}
+
+fn constant_expression_index_borrow() int {
+  mut list<int> values = [3, 5, 7, 11]
+  def exclusive = &mut values[0 + 1]
+  values[3 - 1] = 13
+  def observed = exclusive
+  values[1] + values[2]
+}
+
+fn returned_mutable_borrow() int {
+  mut Pair pair = Pair(29, 31)
+  def exclusive = mutable_borrow_parameter(pair.left)
+  def untouched = pair.right
+  def observed = exclusive
+  def keep_live = observed == untouched
+  0
+}
+
+fn returned_mutable_borrow_via_local() int {
+  mut Pair pair = Pair(43, 47)
+  def exclusive = mutable_borrow_parameter_via_local(pair.left)
+  def untouched = pair.right
+  def observed = exclusive
+  def keep_live = observed == untouched
+  0
+}
+
+fn returned_mutable_borrow_branch() int {
+  mut Pair pair = Pair(53, 59)
+  def exclusive = mutable_borrow_parameter_branch(true, pair.left)
+  def untouched = pair.right
+  def observed = exclusive
+  def keep_live = observed == untouched
+  0
+}
+
+fn returned_mutable_borrow_match() int {
+  mut list<int> values = [61, 67]
+  def exclusive = mutable_borrow_parameter_match(true, values[0])
+  values[1] = 71
+  def observed = exclusive
+  observed
+}
+
+assert(field_borrow() == 13, "field borrow keeps a verified certificate")
+assert(index_borrow() == 16, "disjoint index access keeps a verified borrow")
+assert(negative_index_borrow() == 19,
+       "distinct negative indices keep a verified borrow")
+assert(nested_field_borrow() == 41,
+       "a nested aggregate place keeps a verified borrow certificate")
+assert(dynamic_index_distinct_member_borrow() == 42,
+       "distinct members remain disjoint under dynamic list indices")
+assert(constant_expression_index_borrow() == 18,
+       "constant arithmetic indices retain exact disjointness")
+assert(returned_mutable_borrow() == 0,
+       "an attributed returned mutable borrow preserves its exact place")
+assert(returned_mutable_borrow_via_local() == 0,
+       "a direct local alias preserves its attributed mutable place")
+assert(returned_mutable_borrow_branch() == 0,
+       "side-effect-free branches preserve the attributed mutable place")
+assert(returned_mutable_borrow_match() == 61,
+       "exhaustive safe match arms preserve the attributed mutable place")
+NY
+}

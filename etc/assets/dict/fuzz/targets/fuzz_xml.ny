@@ -1,7 +1,7 @@
-use std.core
-use std.os
-use std.os.args
-use std.math.parse.data.xml as xml
+use core
+use core.os
+use core.os.args
+use core.math.parse.data.xml as xml
 
 fn _input_path(){
    if(argc() > 2){

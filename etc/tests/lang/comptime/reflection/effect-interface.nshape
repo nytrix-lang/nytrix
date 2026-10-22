@@ -1,0 +1,169 @@
+shape effect_interface {
+  family "lang/comptime/reflection"
+  features ["effect-interface", "module-reexport", "callback-contract"]
+  template ny-test-case
+  flags "--native-only"
+  timeout 240
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.subprocess (run_capture)
+use core.str as str
+
+def ny = env("NYTRIX_NY_FULL_BIN")
+def cmake = env("NYTRIX_CMAKE_COMMAND")
+def test_dir = temp_dir() + "/effect-interface-" + to_str(pid())
+def interface = test_dir + "/portable.effectif"
+def provider = test_dir + "/provider.ny"
+def consumer = test_dir + "/consumer.ny"
+def underdeclared = test_dir + "/underdeclared.ny"
+def unknown_callback = test_dir + "/unknown-callback.ny"
+assert(is_str(ny) && ny.len > 0, "test runner exports the full compiler")
+assert(is_str(cmake) && cmake.len > 0, "CMake exposes its executable path")
+def setup = run_capture([cmake, "-E", "make_directory", test_dir], [], nil, false)
+assert(setup.get("code", 127) == 0, "create isolated effect-interface directory")
+
+def provider_source = """
+module project.storage(read_resource) {
+  @effects(cap(read))
+  fn read_resource() int { 7 }
+}
+
+module project.facade(read_alias) {
+  use project.storage (read_resource as read_alias)
+}
+
+module project.audit(log_event) {
+  @effects(cap(write))
+  fn log_event() int { 9 }
+}
+
+module project.effects(invoke) {
+  @effects(e)
+  fn invoke(fnptr callback) int { callback() }
+}
+"""
+assert(is_ok(file_write(provider, provider_source)), "write effect provider")
+def emitted = run_capture(
+   [ny, "-no-std", "-emit-only",
+    "--emit-effect-interface=" + interface, provider],
+   [], nil, false)
+assert(emitted.get("code", 127) == 0 && is_ok(file_read(interface)),
+       "emit portable effect interface: " + emitted.get("stdout", ""))
+
+def common_imports = """
+module project.storage(read_resource) {
+  extern fn read_resource() int
+}
+module project.facade(read_alias) {
+  extern fn read_alias() int
+}
+module project.effects(invoke) {
+  extern fn invoke(fnptr callback) int
+}
+module project.audit(log_event) {
+  extern fn log_event() int
+}
+"""
+def consumer_source = common_imports + """
+@effects(cap("project.storage.read"))
+fn reader() int { project.storage.read_resource() }
+@effects(cap("project.storage.read"))
+fn reader_via_reexport() int { project.facade.read_alias() }
+@effects(cap("project.storage.read"))
+fn invoke_reader() int { project.effects.invoke(reader) }
+@effects(cap("project.audit.write"))
+fn writer() int { project.audit.log_event() }
+@effects(cap("project.audit.write"))
+fn invoke_writer() int { project.effects.invoke(writer) }
+assert(invoke_reader() == 7 && invoke_writer() == 9,
+       "imported closed and instantiated open effect rows")
+"""
+def underdeclared_source = common_imports + """
+@effects(cap("project.storage.read"))
+fn reader() int { project.storage.read_resource() }
+@effects(none)
+fn underdeclared_reexport() int { project.facade.read_alias() }
+@effects(none)
+fn invoke_reader() int { project.effects.invoke(reader) }
+underdeclared_reexport()
+invoke_reader()
+"""
+def unknown_source = """
+module project.effects(invoke) {
+  extern fn invoke(fnptr callback) int
+}
+extern fn opaque_callback() int
+@effects(none)
+fn invoke_unknown() int { project.effects.invoke(opaque_callback) }
+invoke_unknown()
+"""
+assert(is_ok(file_write(consumer, consumer_source)) &&
+       is_ok(file_write(underdeclared, underdeclared_source)) &&
+       is_ok(file_write(unknown_callback, unknown_source)),
+       "write effect interface consumers")
+
+fn run_case(str name, str path, str mode, bool should_pass,
+            str expected_message, str interface_path=interface) {
+   mut argv = [ny, "-no-std", "-emit-only", "--effect-require-known",
+               "--use-effect-interface=" + interface_path]
+   if mode == "nyir" {
+      argv = argv.append("--nyir-run")
+   } else if mode == "mcjit" {
+      argv = argv.append("--native-backend=llvm")
+      argv = argv.append("--jit")
+      argv = argv.append("--jit-engine=mcjit")
+   } else if mode == "orc" {
+      argv = argv.append("--native-backend=llvm")
+      argv = argv.append("--jit")
+      argv = argv.append("--jit-engine=orc")
+   }
+   argv = argv.append(path)
+   def result = run_capture(argv, [], nil, false)
+   def text = result.get("stdout", "")
+   if should_pass {
+      assert(result.get("code", 127) == 0,
+             name + " effect interface consumer failed: " + text)
+   } else {
+      assert(result.get("code", 0) != 0 &&
+             str.find(text, expected_message) >= 0,
+             name + " did not fail closed as expected: " + text)
+   }
+}
+
+run_case("NYIR mode", consumer, "nyir", true, "")
+run_case("LLVM MCJIT mode", consumer, "mcjit", true, "")
+run_case("LLVM ORC mode", consumer, "orc", true, "")
+run_case("NYIR underdeclared", underdeclared, "nyir", false,
+         "effect contract violation")
+run_case("LLVM MCJIT underdeclared", underdeclared, "mcjit", false,
+         "effect contract violation")
+run_case("LLVM ORC underdeclared", underdeclared, "orc", false,
+         "effect contract violation")
+run_case("NYIR unknown callback", unknown_callback, "nyir", false,
+         "effect contract violation")
+run_case("LLVM MCJIT unknown callback", unknown_callback, "mcjit", false,
+         "effect contract violation")
+run_case("LLVM ORC unknown callback", unknown_callback, "orc", false,
+         "effect contract violation")
+
+def future = test_dir + "/future.effectif"
+def malformed = test_dir + "/malformed.effectif"
+assert(is_ok(file_write(future, "ny-effect-interface-v999\tfuture\n")),
+       "write future interface version")
+def interface_contents = unwrap(file_read(interface))
+def header_end = str.find(interface_contents, "\n")
+assert(header_end >= 0, "emitted effect interface has a header")
+def header = str.str_slice(interface_contents, 0, header_end)
+assert(is_ok(file_write(malformed, header + "\nnot-a-record\n")),
+       "write malformed effect interface")
+run_case("future-version", consumer, "emit", false,
+         "Effect interface import failed", future)
+run_case("malformed-record", consumer, "emit", false,
+         "Effect interface import failed", malformed)
+
+def cleanup = run_capture([cmake, "-E", "rm", "-rf", test_dir], [], nil, false)
+assert(cleanup.get("code", 127) == 0, "remove effect-interface directory")
+print("EFFECT_INTERFACE_OK")
+NY
+}

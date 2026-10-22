@@ -1,85 +1,56 @@
-# Nytrix Proofs and Dependent Types
+<!-- nytrix-doc: {"audience":"user","featured":false,"group":"learn","order":105,"summary":"Use compile-time assertions, bounded index types, and checked function preconditions."} -->
+# Proofs
 
-Nytrix incorporates advanced type-theory features designed to support Lean-like proofs and Agda-level dependent types directly in the language syntax.
+Use a proof feature only when it expresses a real program boundary. Nytrix's
+solver handles a bounded set of propositions; it is not a general theorem
+prover. Unknown obligations are rejected rather than treated as true. The exact
+accepted forms and regression boundaries are in [Types](../spec/types.md).
 
-Currently, the grammar, parser, AST generation, and lowering-skip passes are completely implemented and verified ("green") for the following constructs. The underlying semantic discharge (the proof kernel) has now been implemented.
-
-## `where` Refinement Types
-
-Nytrix supports defining refinement types. The declarations parse, produce AST nodes (`stmt_refine_t`/`NY_S_REFINE`), pass statement verification, and safely skip lowering.
-
-```ny
-use std.core
-
-refine Even = int where (v) { v % 2 == 0 }
-refine Positive = int where (v) { v > 0 }
-refine PositiveEven = Even where (v) { Positive(v) }   ; refinement of a refinement
-
-def Even x = 2
-```
-
-## Existential Refinements (`exists`)
-
-Comptime-only `exists` predicates are supported in the AST (`NY_E_EXISTS`).
+## Check a compile-time fact
 
 ```ny
-use std.core
+use core
 
-refine Even from int where (v) { exists(k) { v == 2 * k } }
-refine Nat  from int where (v) { v >= 0 }
-```
+static_assert(3 * 7 == 21, "constant arithmetic")
 
-## Dependent Functions & `match`
-
-Nytrix's grammar supports parameter-dependent results, preconditions (`requires`), termination metrics (`decreases`), and indexed families (`Fin<n>`).
-
-```ny
-use std.core
-
-fn lemma nonneg(int n) { n >= 0 }
-
-fn natsum(int n) int requires nonneg(n) {
-   n * (n + 1) / 2
-}
-
-enum Vec(Fin<n>) {
-   Nil(Fin<0>),
-   Cons(int h, Vec(t))
-}
-
-fn sum(Vec(n) v) int decreases(n) {
-   match v {
-      Vec.Nil -> 0
-      Vec.Cons(h, t) -> h + sum(t)
-   }
+#main {
+   assert_eq(3 * 7, 21, "runtime result")
 }
 ```
 
-## `law`-based Traits
+`static_assert` checks a condition while compiling. Use an ordinary `assert`
+for a condition that depends on runtime values.
 
-Traits can include comptime-checked `law` blocks to enforce semantic guarantees.
+## Bound an index
+
+`Fin<N>` represents a finite index range. Pass it where the API requires an
+index known to be below `N`:
 
 ```ny
-use std.core
+use core
 
-trait Show {
-   fn show(any v) str
+fn at(Fin<3> index) int {
+   [10, 20, 30][index]
 }
 
-impl Show for Shape {
-   fn show(s) str {
-      match s {
-         Shape.Circle(r) -> "Circle(" + to_str(r) + ")"
-         Shape.Empty -> "Empty"
-      }
-   }
-   law { show(s) != "" }
-   law { show(s) == __show_canonical(s) }
+#main {
+   assert_eq(at(1), 20, "finite index")
 }
 ```
 
-## Completed Kernel Discharge Tasks
-- **NEWT-01**: Refinement predicate discharge (`Even where Positive`-style stacking) is implemented and emitted as proof-typed checks natively.
-- **NEWT-02**: Existential discharge (`exists(k){...}`) is handled via Fourier-Motzkin elimination and witness synthesis.
-- **NEWT-03**: Evidence-gated erasure for `@pure`/`@total` correctly lowers to real erasure instead of defaulting to `unknown=true`.
-- **NEWT-10/11**: Dependent-function discharge (e.g. `requires`, `decreases(n)` termination measures) is successfully modeled and discharged in the SMT engine.
+## State a precondition
+
+A function's `requires(condition)` clause makes callers prove the precondition.
+A recursive `@total` function also needs a supported `decreases` measure on
+recursive calls. These checks are bounded and fail closed when a fact cannot be
+established; they do not prove arbitrary termination or safety properties.
+
+For user-defined refinement types, witnesses, lemmas, and solver limits, see
+the [type specification](../spec/types.md) and
+[function contract reference](../spec/functions.md#preconditions-and-termination-measures).
+
+## Evidence
+
+When a proof affects memory safety or a public API, run the paired positive and
+negative fixture for the exact construct and backend. A passing example proves
+only that obligation; it does not validate a broader theorem.

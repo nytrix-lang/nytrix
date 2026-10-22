@@ -1,0 +1,15 @@
+shape x86_64_coff_aggregate_factory_to_argument_call {
+  family "runtime-native"
+  generator "native"
+  features [native object coff x86_64 aggregate return argument win64 nyir]
+  template ny-test-case
+  flags "--c-frontend=nytrix --native-only --native-backend x86_64 --host-triple x86_64-w64-windows-gnu --native-abi win64 --nyir-verify -no-std -emit-only -o /tmp/nytrix-native-coff64-aggregate-composed-call.obj"
+  expect compile_and_run
+  source ny <<'NY'
+#include "etc/tests/lang/interop/c/internal-byvalue-param-import.h" link "etc/tests/lang/interop/c/sum-pair.so"
+use core
+
+def pair = make_sum_pair()
+sum_pair(pair)
+NY
+}

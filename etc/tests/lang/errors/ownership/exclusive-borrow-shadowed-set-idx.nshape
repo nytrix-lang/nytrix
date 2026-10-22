@@ -1,0 +1,26 @@
+shape ownership_exclusive_borrow_shadowed_set_idx
+  family "compiler-errors/ownership"
+  generator "error"
+  features ["error", "ownership", "borrow", "exclusive", "shadowed-helper", "fail-closed"]
+  template ny-compile-fail
+  expect compile_fail
+  flags "--ownership-strict"
+
+  source ny <<'NY'
+use core
+
+fn set_idx(list<int> values, int index, int value) int {
+  values[0]
+}
+
+fn bad() int {
+  mut list<int> values = [3, 5]
+  def borrowed = &mut values[0]
+  set_idx(values, 1, 9)
+  def observed = borrowed
+  0
+}
+
+bad()
+NY
+}

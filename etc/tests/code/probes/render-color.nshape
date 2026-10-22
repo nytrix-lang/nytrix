@@ -1,0 +1,32 @@
+shape renderer_color_carriers {
+  family "runtime/device"
+  generator "regression"
+  features ["ny", "render", "color", "abi"]
+  template ny-test-case
+  expect compile_and_run
+  flags_matrix "--native --run; --native-only; --native-backend=llvm --jit --jit-engine=mcjit"
+  source ny <<'NY'
+use core
+use core.os.ui.render as gfx
+use core.os.ui.render.shared as colors
+fn check(any color) bool {
+   assert(colors.color_component(color, 0) == 0.2, "red carrier")
+   assert(colors.color_component(color, 1) == 0.4, "green carrier")
+   assert(colors.color_component(color, 2) == 0.6, "blue carrier")
+   assert(colors.color_component(color, 3) == 0.8, "alpha carrier")
+   assert(colors.color_u32(color) == 0xCC996633, "packed carrier")
+   true
+}
+assert(check(vec4(0.2, 0.4, 0.6, 0.8)))
+assert(check([0.2, 0.4, 0.6, 0.8]))
+assert(check(0xCC996633))
+def hex = gfx.color_hex("#336699")
+assert(colors.color_component(hex, 0) == 0.2, "hex red")
+assert(colors.color_component(hex, 1) == 0.4, "hex green")
+assert(colors.color_component(hex, 2) == 0.6, "hex blue")
+assert(colors.color_component(hex, 3) == 1.0, "hex alpha")
+assert(colors.color_component(vec4(0.2, 0.4, 0.6, 0.8), 4, 0.5) == 0.5)
+assert(colors.color_component([0.2, 0.4, 0.6], 3) == 1.0)
+print("RENDERER-COLOR-CARRIERS-OK")
+NY
+}

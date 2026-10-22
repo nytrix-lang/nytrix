@@ -1,0 +1,122 @@
+shape module_cache_equivalence {
+  family "probe/cache"
+  generator "embedded"
+  features ["module-cache", "parallel", "configuration", "environment"]
+  template ny-test-case
+  flags "--native-only"
+  timeout 300
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.subprocess (run_capture)
+use core.str as str
+
+def ny = env("NYTRIX_NY_FULL_BIN")
+def cmake = env("NYTRIX_CMAKE_COMMAND")
+def root = env("NYTRIX_ROOT")
+def test_dir = temp_dir() + "/module-cache-equivalence-" + to_str(pid())
+def source = root + "/etc/tests/code/probes/cache/module-cache-equivalence.ny"
+assert(is_str(ny) && ny.len > 0, "test runner exports the full compiler")
+assert(is_str(cmake) && cmake.len > 0, "CMake exposes its executable path")
+assert(is_str(root) && root.len > 0, "CTest exposes the source root")
+
+def setup = run_capture([cmake, "-E", "make_directory", test_dir], [], nil, false)
+assert(setup.get("code", 127) == 0, "create isolated module-cache test directory")
+
+fn compile_module_case(str label, str output, str parallel, str cache_root,
+                       str config, str extra_env="", str expected_trace="",
+                       int jobs=0) {
+   mut argv = [cmake, "-E", "env",
+               "NYTRIX_CACHE_DIR=" + cache_root,
+               "NYTRIX_TRACE_CACHE=1",
+               "NYTRIX_JIT_CACHE=0"]
+   if extra_env.len > 0 { argv = argv.append(extra_env) }
+   argv = argv.append(ny)
+   argv = argv.append("--dump-on-error")
+   argv = argv.append("-no-std")
+   argv = argv.append("--effect-require-known")
+   argv = argv.append(config)
+   argv = argv.append("--parallel=" + parallel)
+   if jobs > 0 { argv = argv.append("--threads=" + to_str(jobs)) }
+   argv = argv.append("-o")
+   argv = argv.append(output)
+   argv = argv.append(source)
+   def result = run_capture(argv, [], nil, false)
+   def text = result.get("stdout", "")
+   assert(result.get("code", 127) == 0,
+          label + " module compilation failed: " + text)
+   if expected_trace.len > 0 {
+      assert(str.find(text, expected_trace) >= 0,
+             label + " module compilation omitted cache trace " +
+             expected_trace + ": " + text)
+   }
+}
+
+fn run_module_case(str label, str binary) {
+   def result = run_capture([binary], [], nil, false)
+   assert(result.get("code", 127) == 0,
+          label + " module interface executable failed: " +
+          result.get("stdout", ""))
+}
+
+def cache_dir = test_dir + "/module-cache"
+def uncached_bin = test_dir + "/uncached"
+def cold_bin = test_dir + "/cold"
+def warm_bin = test_dir + "/warm"
+def changed_bin = test_dir + "/changed-config"
+def interp_only_bin = test_dir + "/interp-only-config"
+def interp_empty_bin = test_dir + "/interp-empty-config"
+def vectorize_bin = test_dir + "/vectorize-config"
+def test_mode_bin = test_dir + "/test-mode-config"
+def test_mode_enabled_bin = test_dir + "/test-mode-enabled-config"
+
+compile_module_case("uncached", uncached_bin, "off",
+                    test_dir + "/uncached-cache", "--no-strict-types")
+run_module_case("uncached", uncached_bin)
+compile_module_case("cold", cold_bin, "modules", cache_dir,
+                    "--no-strict-types", "", "module cache saved:")
+run_module_case("cold", cold_bin)
+compile_module_case("warm", warm_bin, "modules", cache_dir,
+                    "--no-strict-types", "", "module cache hit:")
+run_module_case("warm", warm_bin)
+compile_module_case("changed config", changed_bin, "modules", cache_dir,
+                    "--no-effect-require-known", "", "module cache saved:")
+run_module_case("changed config", changed_bin)
+compile_module_case("comptime interpreter enabled", interp_only_bin,
+                    "modules", cache_dir, "--no-strict-types",
+                    "NYTRIX_COMPTIME_INTERP_ONLY=1", "module cache saved:")
+run_module_case("comptime interpreter enabled", interp_only_bin)
+compile_module_case("empty comptime interpreter setting", interp_empty_bin,
+                    "modules", cache_dir, "--no-strict-types",
+                    "NYTRIX_COMPTIME_INTERP_ONLY=", "module cache saved:")
+run_module_case("empty comptime interpreter setting", interp_empty_bin)
+compile_module_case("loop vectorization enabled", vectorize_bin,
+                    "modules", cache_dir, "--no-strict-types",
+                    "NYTRIX_AUTO_VECTORIZE_LOOPS=1", "module cache saved:")
+run_module_case("loop vectorization enabled", vectorize_bin)
+compile_module_case("test mode empty", test_mode_bin, "modules", cache_dir,
+                    "--no-strict-types", "NYTRIX_TEST_MODE=",
+                    "module cache saved:")
+run_module_case("test mode empty", test_mode_bin)
+compile_module_case("test mode enabled", test_mode_enabled_bin, "modules",
+                    cache_dir, "--no-strict-types", "NYTRIX_TEST_MODE=1",
+                    "module cache saved:")
+run_module_case("test mode enabled", test_mode_enabled_bin)
+
+def one_worker = test_dir + "/one-worker"
+compile_module_case("one worker", one_worker, "modules",
+                    test_dir + "/one-worker-cache", "--no-strict-types",
+                    "", "module cache saved:", 1)
+run_module_case("one worker", one_worker)
+def four_workers = test_dir + "/four-workers"
+compile_module_case("four workers", four_workers, "modules",
+                    test_dir + "/four-workers-cache", "--no-strict-types",
+                    "", "module cache saved:", 4)
+run_module_case("four workers", four_workers)
+
+def cleanup = run_capture([cmake, "-E", "rm", "-rf", test_dir], [], nil, false)
+assert(cleanup.get("code", 127) == 0,
+       "remove isolated module-cache test directory")
+print("MODULE_CACHE_EQUIVALENCE_OK")
+NY
+}

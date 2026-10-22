@@ -1,0 +1,26 @@
+shape comptime_generated_control_flow {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "comptime", "try", "defer"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-only; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+mut observed = 0
+comptime template control(name, number) {
+   fn ${name}(bool fail=false) int {
+      defer { observed = ${number} }
+      mut answer = 0
+      try {
+         if fail { panic("generated-control") }
+         answer = ${number}
+      } catch err { answer = -${number} }
+      return answer
+   }
+}
+comptime emit control(ident("generated_control"), 7)
+assert(generated_control() == 7 && observed == 7, "generated control flow")
+assert(generated_control(true) == -7 && observed == 7, "generated handler and defer cleanup")
+NY
+}

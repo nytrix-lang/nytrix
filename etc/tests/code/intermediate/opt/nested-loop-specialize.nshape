@@ -1,0 +1,54 @@
+shape nested_loop_specialize {
+  family "compiler/optimizer"
+  generator "embedded"
+  features [ny optimizer loop-nest specialization cross-backend]
+  estimate_ms 26000
+  template ny-test-case
+  flags_matrix "-O0 --native-only --native-backend=x86_64; -O1 --native-only --native-backend=x86_64; -O2 --native-only --native-backend=x86_64; -O3 --native-only --native-backend=x86_64; -O0 --native-backend=llvm --jit --jit-engine=mcjit; -O1 --native-backend=llvm --jit --jit-engine=mcjit; -O2 --native-backend=llvm --jit --jit-engine=mcjit; -O3 --native-backend=llvm --jit --jit-engine=mcjit"
+  expect compile_and_run
+  timeout 25
+  source ny <<'NY'
+use core
+
+fn branch_mix(int depth, int seed) int {
+  mut x = seed + depth
+  mut acc = 1
+  mut i = 0
+  while i < depth {
+    if (x & 1) == 0 {
+      acc = (acc * 3) + i + depth
+    } else {
+      acc = (acc * 5) - i + depth
+    }
+    x = (x / 2) + acc + i
+    i += 1
+  }
+  acc
+}
+
+fn checksum(int min_depth, int max_depth, int rounds) int {
+  mut total = 0
+  mut depth = min_depth
+  while depth <= max_depth {
+    mut local = 0
+    mut seed = 0
+    while seed < rounds / depth {
+      local += branch_mix(depth, seed)
+      seed += 1
+    }
+    total += local
+    depth += 2
+  }
+  total
+}
+
+assert(checksum(4, 18, 1200) == 41458412777585,
+       "nested loop recurrence preserves wrapping result")
+assert(checksum(4, 4, 4) == 961, "single depth and exact trip boundary")
+assert(checksum(4, 18, 3) == 0, "zero-trip inner loops")
+assert(checksum(18, 18, 36) == 786415721212,
+       "upper depth with one seed trip")
+assert(checksum(6, 10, 50) == 17878406,
+       "odd seed-trip counts across multiple depths")
+NY
+}

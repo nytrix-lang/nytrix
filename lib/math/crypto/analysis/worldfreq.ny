@@ -1,14 +1,14 @@
 ;; Keywords: analysis frequency-analysis language-model worldfreq math crypto
 ;; Cryptanalysis scoring and recovery routines for language frequency profiles, n-gram scoring, and detection.
 ;; References:
-;; - std.math.crypto.analysis
-;; - std.math.crypto
-module std.math.crypto.analysis.worldfreq(worldfreq_assets_root, worldfreq_stat_root, worldfreq_profile_names, worldfreq_profile_exists, worldfreq_profile_paths, worldfreq_load, worldfreq_alpha_upper, worldfreq_word_counter, worldfreq_word_rows, worldfreq_rows_to_table, worldfreq_word_table, worldfreq_word_stats, worldfreq_ngram_counter, worldfreq_ngram_rows, worldfreq_ngram_table, worldfreq_ngram_score, worldfreq_score_text, worldfreq_detect)
-use std.core
-use std.os (file_exists, file_read)
-use std.os.fs as osfs
-use std.os.path as ospath
-use std.core.str as str
+;; - core.math.crypto.analysis
+;; - core.math.crypto
+module core.math.crypto.analysis.worldfreq(worldfreq_assets_root, worldfreq_stat_root, worldfreq_profile_names, worldfreq_profile_exists, worldfreq_profile_paths, worldfreq_load, worldfreq_alpha_upper, worldfreq_word_counter, worldfreq_word_rows, worldfreq_rows_to_table, worldfreq_word_table, worldfreq_word_stats, worldfreq_ngram_counter, worldfreq_ngram_rows, worldfreq_ngram_table, worldfreq_ngram_score, worldfreq_score_text, worldfreq_detect)
+use core
+use core.os (file_exists, file_read)
+use core.os.fs as osfs
+use core.os.path as ospath
+use core.str as str
 
 mut _worldfreq_profiles = dict(4)
 mut _worldfreq_ngram_profiles = dict(4)
@@ -639,5 +639,5 @@ fn worldfreq_detect(str text, any langs=nil, int limit=8) list {
    def stats = worldfreq_word_stats("THIS IS A SECRET MESSAGE", profile)
    assert(int(stats.get(2, 0)) >= 4 && worldfreq_ngram_score("ABABA", profile) > 0 && worldfreq_score_text("THIS IS ABABA", profile) > 0, "worldfreq scoring")
    assert(worldfreq_detect("THIS IS A SECRET MESSAGE", [], 1).len == 0, "empty detect set")
-   print("✓ std.math.crypto.analysis.worldfreq self-test passed")
+   print("✓ core.math.crypto.analysis.worldfreq self-test passed")
 }

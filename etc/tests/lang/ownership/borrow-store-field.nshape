@@ -1,0 +1,22 @@
+shape ownership_rule_borrow_store_field {
+  family "compiler-errors/ownership"
+  generator "error"
+  features ["error", "ownership", "negative", "borrow", "field"]
+  template ny-compile-fail
+  expect compile_fail
+  flags "--ownership-strict"
+  expect_message "a second-class borrow cannot be stored in a field"
+  source ny <<'NY'
+use core
+
+layout BorrowField { ptr value }
+
+fn bad(int x) {
+  def ptr box = malloc(__layout_size("BorrowField"))
+  store_layout_field(box, "BorrowField", "value", &x)
+  free(box)
+}
+
+bad(1)
+NY
+}

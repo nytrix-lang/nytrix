@@ -3,11 +3,11 @@
 ;; References:
 ;; - Dujella A., "Continued fractions and RSA with small secret exponent"
 ;; - Nguyen P. Q., "Public-Key Cryptanalysis"
-module std.math.crypto.rsa.extended_wiener(extended_wiener_attack, lattice_wiener_attack, extended_wiener_attack_entry, wiener_attack_lattice_entry)
-use std.math.nt
-use std.math.crypto.factorization.known_phi
-use std.math.crypto.lattice.lll
-use std.math.matrix
+module core.math.crypto.rsa.extended_wiener(extended_wiener_attack, lattice_wiener_attack, extended_wiener_attack_entry, wiener_attack_lattice_entry)
+use core.math.nt
+use core.math.crypto.factorization.known_phi
+use core.math.crypto.lattice.lll
+use core.math.matrix
 
 fn _babs(any x) any { bigint_lt(x, Z(0)) ? (-x) : x }
 

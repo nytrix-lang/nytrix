@@ -3,19 +3,19 @@
 ;; Univariate modular roots are solved directly; multivariate helpers build
 ;; Ny mvpoly lattices and return bounded candidate roots where available.
 ;; References:
-;; - std.math.crypto.lattice
-;; - std.math.crypto
-module std.math.crypto.lattice.small_roots(small_roots_backend_report, create_lattice_univariate, reduce_lattice_basis, reduce_lattice_basis_report, reconstruct_polynomials_univariate, modular_univariate, modular_univariate_report, small_roots_strategy_unavailable, howgrave_graham_modular_univariate, aono_integer_multivariate, blomer_may_modular_trivariate, blomer_may_modular_bivariate, coron_integer_bivariate, coron_direct_integer_bivariate, ernst_integer_trivariate_1, ernst_integer_trivariate_2, herrmann_may_modular_bivariate, herrmann_may_modular_multivariate, jochemsz_may_integer_multivariate, jochemsz_may_modular_multivariate, nitaj_fouotsa_modular_trivariate)
-use std.core
-use std.core.common as common
-use std.os.clock (ticks)
-use std.math.nt
-use std.math (abs)
-use std.math.crypto.error
-use std.math.crypto.poly
-use std.math.crypto.lattice.lll
-use std.math.crypto.lattice.mvpoly
-use std.math.matrix
+;; - core.math.crypto.lattice
+;; - core.math.crypto
+module core.math.crypto.lattice.small_roots(small_roots_backend_report, create_lattice_univariate, reduce_lattice_basis, reduce_lattice_basis_report, reconstruct_polynomials_univariate, modular_univariate, modular_univariate_report, small_roots_strategy_unavailable, howgrave_graham_modular_univariate, aono_integer_multivariate, blomer_may_modular_trivariate, blomer_may_modular_bivariate, coron_integer_bivariate, coron_direct_integer_bivariate, ernst_integer_trivariate_1, ernst_integer_trivariate_2, herrmann_may_modular_bivariate, herrmann_may_modular_multivariate, jochemsz_may_integer_multivariate, jochemsz_may_modular_multivariate, nitaj_fouotsa_modular_trivariate)
+use core
+use core.common as common
+use core.os.clock (ticks)
+use core.math.nt
+use core.math (abs)
+use core.math.crypto.error
+use core.math.crypto.poly
+use core.math.crypto.lattice.lll
+use core.math.crypto.lattice.mvpoly
+use core.math.matrix
 
 mut _sr_trace_cache = -1
 mut _sr_exact_gcd_cache = -1

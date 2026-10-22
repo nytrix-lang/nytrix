@@ -1,0 +1,265 @@
+shape test_ffi_pointer_handles {
+  family "runtime/execution"
+  generator "embedded"
+  features ["ny", "test", "ffi"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+source ny <<'NY'
+use core
+use core.os.ffi as ffi
+use core.os.ffi as calls
+use core.mem as mem
+fn callback_sum6(any a, any b, any c, any d, any e, any g) any {
+   a + b + c + d + e + g
+}
+fn callback_identity(any value) any {
+   value
+}
+fn callback_sum4(any a, any b, any c, any d) any {
+   a + b + c + d
+}
+fn callback_sum5(any a, any b, any c, any d, any e) any {
+   a + b + c + d + e
+}
+try {
+   calls.any0(callback_identity)
+   panic("calls.any0 accepted a Ny callback")
+} catch ffi_error {
+   assert(ffi_error == "err.type: core.os.ffi requires a C function pointer",
+      "generic zero-argument FFI bridge rejects a marked Ny callback")
+}
+def captured_value = 41
+def captured_callback = fn() int { captured_value }
+try {
+   calls.any0(captured_callback)
+   panic("calls.any0 accepted a captured Ny closure")
+} catch ffi_error {
+   assert(ffi_error == "err.type: core.os.ffi requires a C function pointer",
+      "generic FFI bridge rejects a captured Ny closure")
+}
+try {
+   calls.any1(callback_identity, 7)
+   panic("calls.any1 accepted a Ny callback")
+} catch ffi_error {
+   assert(ffi_error == "err.type: core.os.ffi requires a C function pointer",
+      "generic one-argument FFI bridge rejects a marked Ny callback")
+}
+try {
+   calls.any6(callback_sum6, 1, 2, 3, 4, 5, 6)
+   panic("calls.any6 accepted a Ny callback")
+} catch ffi_error {
+   assert(ffi_error == "err.type: core.os.ffi requires a C function pointer",
+      "generic FFI bridge rejects a Ny callback without dereferencing its ABI handle")
+}
+try {
+   calls.int64one(callback_identity, 7)
+   panic("calls.int64one accepted a Ny callback")
+} catch ffi_error {
+   assert(ffi_error == "err.type: core.os.ffi requires a C function pointer",
+      "specialized FFI adapter rejects a Ny callback before indirect dispatch")
+}
+try {
+   calls.pointer4(callback_sum4, 1, 2, 3, 4)
+   panic("calls.pointer4 accepted a Ny callback")
+} catch ffi_error {
+   assert(ffi_error == "err.type: core.os.ffi requires a C function pointer",
+      "pointer-return adapter rejects a Ny callback before indirect dispatch")
+}
+try {
+   calls.pointer5(callback_sum5, 1, 2, 3, 4, 5)
+   panic("calls.pointer5 accepted a Ny callback")
+} catch ffi_error {
+   assert(ffi_error == "err.type: core.os.ffi requires a C function pointer",
+      "five-argument pointer-return adapter rejects a Ny callback safely")
+}
+#linux {
+   assert(__ffi_untag_ptr(83) == 83,
+      "pointer conversion preserves odd X11-style scalar identifiers")
+   def libc = ffi.dlopen("libc.so.6", ffi.RTLD_NOW())
+   assert(libc != 0, "libc opens for pointer FFI regression")
+   mut freetype = ffi.dlopen("libfreetype.so.6", ffi.RTLD_NOW() | ffi.RTLD_GLOBAL())
+   if !freetype { freetype = ffi.dlopen("libfreetype.so", ffi.RTLD_NOW() | ffi.RTLD_GLOBAL()) }
+   if freetype {
+      assert(ffi.dlsym(freetype, "FT_Init_FreeType") != 0,
+         "tagged global dynamic-library handles resolve symbols")
+      ffi.dlclose(freetype)
+   }
+   def libgl = ffi.dlopen("libGL.so.1", ffi.RTLD_NOW())
+   if libgl != 0 {
+      def point_size = ffi.dlsym(libgl, "glPointSize")
+      def polygon_offset = ffi.dlsym(libgl, "glPolygonOffset")
+      def color3f = ffi.dlsym(libgl, "glColor3f")
+      def clear_color = ffi.dlsym(libgl, "glClearColor")
+      assert(point_size != 0 && polygon_offset != 0 && color3f != 0 &&
+             clear_color != 0,
+         "libGL exports exact void(float...) callback targets")
+      calls.float32voidone(point_size, 1.0)
+      calls.float32voidtwo(polygon_offset, 1.0, 2.0)
+      calls.float32voidthree(color3f, 0.125, 0.25, 0.5)
+      calls.float32voidfour(clear_color, 0.125, 0.25, 0.5, 1.0)
+   }
+   def getpid_fn = ffi.dlsym(libc, "getpid")
+   assert(int(calls.int32zero(getpid_fn)) > 0,
+      "zero-argument i32 callback result is tagged as an integer")
+   def toupper_fn = ffi.dlsym(libc, "toupper")
+   assert(int(calls.uint32one(toupper_fn, 97)) == 65,
+      "u32 callback argument and result use their declared representation")
+   def srand_fn = ffi.dlsym(libc, "srand")
+   calls.uint32voidone(srand_fn, 1)
+   def strdup_fn = ffi.dlsym(libc, "strdup")
+   assert(strdup_fn != 0, "libc exports the pointer-call target")
+   def strcmp_fn = ffi.dlsym(libc, "strcmp")
+   def copy = calls.pointer1(strdup_fn, ffi.cstr("nytrix pointer ABI"))
+   def copy2 = calls.pointer1(strdup_fn, copy)
+   assert(copy != 0, "pointer-return call boxes its result as a native handle")
+   assert(copy2 != 0,
+      "pointer-call argument decodes a returned native handle")
+   assert(int(calls.any2(strcmp_fn, copy, ffi.cstr("nytrix pointer ABI"))) == 0,
+      "pointer callback receives the C string bytes, not a value-slot address")
+   assert(int(calls.any2(strcmp_fn, copy2, ffi.cstr("nytrix pointer ABI"))) == 0,
+      "native pointer handles round-trip through a second pointer callback")
+   def free_fn = ffi.dlsym(libc, "free")
+   calls.void1(free_fn, copy)
+   assert(copy2 != 0,
+      "generic void callback converts its declared dynamic-word argument")
+   def closelog_fn = ffi.dlsym(libc, "closelog")
+   calls.void0(closelog_fn)
+   def strchr_fn = ffi.dlsym(libc, "strchr")
+   def suffix = calls.pointer2uint32(strchr_fn, ffi.cstr("nytrix pointer ABI"), 116)
+   assert(suffix != 0 &&
+          int(calls.any2(strcmp_fn, suffix, ffi.cstr("trix pointer ABI"))) == 0,
+      "pointer-u32 callback arguments use their declared ABI")
+   def ffi_raw_string = ffi.cstr("explicit C string conversion")
+   assert(is_str(ffi_raw_string) &&
+          ffi_raw_string == "explicit C string conversion",
+      "ffi.cstr produces an explicitly managed NUL-terminated string")
+   def strtok_r_fn = ffi.dlsym(libc, "strtok_r")
+   def save_slot = ffi.malloc(8)
+   mem.memset(save_slot, 0, 8)
+   def delimiter = ffi.cstr(",")
+   def token1 = calls.pointer3(strtok_r_fn, ffi.cstr("alpha,beta"), delimiter,
+                              save_slot)
+   def token2 = calls.pointer3(strtok_r_fn, 0, delimiter, save_slot)
+   assert(token1 != 0 &&
+          int(calls.any2(strcmp_fn, token1, ffi.cstr("alpha"))) == 0,
+      "three-pointer callback receives pointer arguments")
+   assert(token2 != 0 &&
+          int(calls.any2(strcmp_fn, token2, ffi.cstr("beta"))) == 0,
+      "three-pointer callback preserves native state through a pointer slot")
+   ffi.free(save_slot)
+   def strncpy_fn = ffi.dlsym(libc, "strncpy")
+   def copied_buffer = ffi.malloc(16)
+   def copied = calls.pointer3pointeruint32(strncpy_fn, copied_buffer,
+                                     ffi.cstr("copy ABI"), 9)
+   assert(copied != 0 &&
+          int(calls.any2(strcmp_fn, copied_buffer, ffi.cstr("copy ABI"))) == 0,
+      "pointer-pointer-u32 callback uses its declared scalar width")
+   ffi.free(copied_buffer)
+   def snprintf_fn = ffi.dlsym(libc, "snprintf")
+   def seven_arg_buffer = ffi.malloc(32)
+   def seven_arg_format = ffi.cstr("%d-%d-%d-%d")
+   calls.void7(snprintf_fn, seven_arg_buffer, 32, seven_arg_format,
+                  1, 2, 3, 4)
+   assert(int(calls.any2(strcmp_fn, seven_arg_buffer, ffi.cstr("1-2-3-4"))) == 0,
+      "seven-argument dynamic-word void callback follows its ABI record")
+   def nine_arg_buffer = ffi.malloc(32)
+   def nine_arg_format = ffi.cstr("%d-%d-%d-%d-%d-%d")
+   calls.void9(snprintf_fn, nine_arg_buffer, 32, nine_arg_format,
+                  1, 2, 3, 4, 5, 6)
+   assert(int(calls.any2(strcmp_fn, nine_arg_buffer,
+                        ffi.cstr("1-2-3-4-5-6"))) == 0,
+      "nine-argument dynamic-word void callback follows its ABI record")
+   def six_arg_buffer = ffi.malloc(32)
+   def six_arg_count = calls.any6(snprintf_fn, six_arg_buffer, 32,
+                                 ffi.cstr("%d-%d-%d"), 1, 2, 3)
+   assert(int(calls.any2(strcmp_fn, six_arg_buffer, ffi.cstr("1-2-3"))) == 0,
+      "six-argument dynamic-word void callback follows its ABI record")
+   assert(int(six_arg_count) == 5,
+      "generic six-argument FFI bridge returns the tagged C integer")
+   calls.void6(snprintf_fn, six_arg_buffer, 32,
+                  ffi.cstr("%d-%d-%d"), 1, 2, 3)
+   def eight_arg_buffer = ffi.malloc(32)
+   def eight_arg_count = calls.any8(snprintf_fn, eight_arg_buffer, 32,
+                                   ffi.cstr("%d-%d-%d-%d-%d"), 1, 2, 3, 4, 5)
+   assert(int(calls.any2(strcmp_fn, eight_arg_buffer,
+                        ffi.cstr("1-2-3-4-5"))) == 0,
+      "eight-argument dynamic-word void callback follows its ABI record")
+   assert(int(eight_arg_count) == 9,
+      "generic eight-argument FFI bridge returns the tagged C integer")
+   calls.void8(snprintf_fn, eight_arg_buffer, 32,
+                  ffi.cstr("%d-%d-%d-%d-%d"), 1, 2, 3, 4, 5)
+   def ten_arg_buffer = ffi.malloc(32)
+   def ten_arg_count = calls.any10(snprintf_fn, ten_arg_buffer, 32,
+                                  ffi.cstr("%d-%d-%d-%d-%d-%d-%d"),
+                                  1, 2, 3, 4, 5, 6, 7)
+   assert(int(calls.any2(strcmp_fn, ten_arg_buffer,
+                        ffi.cstr("1-2-3-4-5-6-7"))) == 0,
+      "ten-argument dynamic-word void callback follows its ABI record")
+   assert(int(ten_arg_count) == 13,
+      "generic ten-argument FFI bridge returns the tagged C integer")
+   calls.void10(snprintf_fn, ten_arg_buffer, 32,
+                   ffi.cstr("%d-%d-%d-%d-%d-%d-%d"), 1, 2, 3, 4, 5, 6, 7)
+   ffi.free(ten_arg_buffer)
+   ffi.free(eight_arg_buffer)
+   ffi.free(six_arg_buffer)
+   ffi.free(nine_arg_buffer)
+   ffi.free(seven_arg_buffer)
+   def hints = ffi.malloc(64)
+   def result_slot = ffi.malloc(8)
+   mem.memset(hints, 0, 64)
+   mem.memset(result_slot, 0, 8)
+   def getaddrinfo_fn = ffi.dlsym(libc, "getaddrinfo")
+   def gai_rc = calls.pointer4pointerpointerpointerint32(
+      getaddrinfo_fn, ffi.cstr("127.0.0.1"), ffi.cstr("80"), hints,
+      result_slot)
+   def addresses = load64(result_slot)
+   assert(int(gai_rc) == 0 && addresses != 0,
+      "four-pointer callback returns the declared i32 ABI")
+   def freeaddrinfo_fn = ffi.dlsym(libc, "freeaddrinfo")
+   calls.void1(freeaddrinfo_fn, addresses)
+   ffi.free(result_slot)
+   ffi.free(hints)
+   def odd_source = ffi.cstr("xxxxxxnytrix odd pointer ABI")
+   def odd_copy = calls.pointer1(strdup_fn, ptr_add(odd_source, 6))
+   assert(odd_copy != 0,
+      "pointer-call argument preserves readable odd raw pointers")
+   assert(!is_str(odd_copy),
+      "declared pointer-return ABI is not reclassified from C-string contents")
+   def managed_odd_copy = cstr_to_str(odd_copy)
+   assert(is_str(managed_odd_copy) &&
+          managed_odd_copy == "nytrix odd pointer ABI",
+      "explicit conversion gives a raw FFI C string managed provenance")
+   assert(int(calls.any2(strcmp_fn, odd_copy,
+                        ffi.cstr("nytrix odd pointer ABI"))) == 0,
+      "odd raw C-string pointers preserve their content")
+   def fopen_fn = ffi.dlsym(libc, "fopen")
+   def fclose_fn = ffi.dlsym(libc, "fclose")
+   def stream2 = calls.pointer2(fopen_fn, ffi.cstr("/dev/null"), ffi.cstr("r"))
+   assert(stream2 != 0, "two-pointer callback receives C string arguments")
+   assert(int(calls.int64one(fclose_fn, stream2)) == 0,
+      "two-argument pointer result can be passed back to C")
+   def tmpfile_fn = ffi.dlsym(libc, "tmpfile")
+   def stream = calls.pointer0(tmpfile_fn)
+   assert(stream != 0, "zero-argument pointer return boxes a native handle")
+   def fwrite_fn = ffi.dlsym(libc, "fwrite")
+   def rewind_fn = ffi.dlsym(libc, "rewind")
+   def fread_fn = ffi.dlsym(libc, "fread")
+   def payload = ffi.cstr("R")
+   assert(int(calls.any4(fwrite_fn, payload, 1, 1, stream)) == 1,
+      "generic callback writes one byte to a temporary stream")
+   calls.void1(rewind_fn, stream)
+   def read_buffer = ffi.malloc(2)
+   mem.memset(read_buffer, 0, 2)
+   def read_count = calls.any4(fread_fn, read_buffer, 1, 1, stream)
+   assert(int(read_count) == 1 && load8(read_buffer, 0) == 82,
+      "generic callback reads one byte using fread's pointer/size_t/size_t/pointer ABI")
+   ffi.free(read_buffer)
+   assert(int(calls.int64one(fclose_fn, stream)) == 0,
+      "zero-argument pointer result can be passed back to C")
+   ffi.free(copy2)
+   ffi.free(odd_copy)
+   ffi.dlclose(libc)
+} #endif
+NY
+}

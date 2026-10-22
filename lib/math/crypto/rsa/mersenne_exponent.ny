@@ -3,12 +3,12 @@
 ;; Reference:
 ;; - https://people.csail.mit.edu/rivest/Rsapaper.pdf
 ;; References:
-;; - std.math.crypto.rsa
-;; - std.math.crypto
-module std.math.crypto.rsa.mersenne_exponent(rsa_mersenne_plaintext_from_factors, rsa_mersenne_plaintext_scan_from_factors)
-use std.math.nt
-use std.math.bin
-use std.core.str as str
+;; - core.math.crypto.rsa
+;; - core.math.crypto
+module core.math.crypto.rsa.mersenne_exponent(rsa_mersenne_plaintext_from_factors, rsa_mersenne_plaintext_scan_from_factors)
+use core.math.nt
+use core.math.bin
+use core.str as str
 
 fn _rsa_mersenne_plain_from_power(any mg, any g) any {
    if g == Z(1) { return Z(mg).bytes.text }

@@ -1,0 +1,34 @@
+shape oracle_signed_power2_divmod_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle signed divmod power-of-two object-jit]
+  template ny-test-case
+  flags_matrix "-O0 --native-result-oracle=-2178; -O1 --native-result-oracle=-2178; -O2 --native-result-oracle=-2178; -O3 --native-result-oracle=-2178"
+  expect compile_and_run
+  source ny <<'NY'
+fn div64(i64 value) i64 { value / 64 }
+fn rem64(i64 value) i64 { value % 64 }
+fn div_dynamic(i64 value, i64 divisor) i64 { value / divisor }
+fn rem_dynamic(i64 value, i64 divisor) i64 { value % divisor }
+
+def i64 i64_min = -9223372036854775808
+def i64 i64_max = 9223372036854775807
+def i64 negative_max = -9223372036854775807
+def negative = 0 - 130
+def positive = 130
+if (negative / 64) * 1000 + (negative % 64) * 100 +
+       (positive / 64) * 10 + (positive % 64) == -2178 &&
+   div64(i64_min) == -144115188075855872 && rem64(i64_min) == 0 &&
+   div64(i64_max) == 144115188075855871 && rem64(i64_max) == 63 &&
+   div64(negative_max) == -144115188075855871 &&
+   rem64(negative_max) == -63 &&
+   div_dynamic(i64_min, 3) == -3074457345618258602 &&
+   rem_dynamic(i64_min, 3) == -2 &&
+   div_dynamic(i64_max, 0 - 3) == -3074457345618258602 &&
+   rem_dynamic(i64_max, 0 - 3) == 1 {
+  -2178
+} else {
+  1
+}
+NY
+}

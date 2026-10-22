@@ -1,141 +1,43 @@
-<!-- nytrix-doc: {"audience":"user","featured":false,"group":"learn","order":160,"summary":"Use the interactive REPL to explore values, modules, diagnostics, and small experiments."} -->
+<!-- nytrix-doc: {"audience":"user","featured":false,"group":"learn","order":160,"summary":"Use the REPL for interactive experiments and move reproducible checks into files."} -->
 # REPL
 
-The REPL evaluates Nytrix source interactively. It keeps imports, definitions,
-and lazy-loaded modules between prompts, so file execution remains the cleaner
-record for bugs, tests, and benchmarks.
+The REPL evaluates source interactively and retains imports and definitions
+between prompts. Use a source file when you need a reproducible bug report, test,
+or benchmark.
 
 ## Start
 
 ```bash
 ny
 ny -i
-ny --interactive
 ny --plain-repl
-ny -ic 'a=1337'
+ny -ic 'value = 1337'
 ny --repl < file.ny
 ```
 
-`--plain-repl` uses plain terminal input. `--repl` reads stdin as source once;
-prompt commands such as `:help`, `:snapshot`, and `:load` are interactive-only.
+`--repl` reads stdin as source once; it is not an interactive prompt. Run `ny
+--help` for the installed options.
 
-## Use
+## Work interactively
 
-| Task | Form |
+Type expressions and declarations at the prompt. Use `ny doc search` to find a
+symbol or concept. Session state can make a snippet behave differently from a
+fresh file, so move surprising cases into a file and run them directly.
+
+| Task | Command or action |
 | --- | --- |
-| Evaluate expression | Type it directly. |
-| Import a module | `use module.path` |
-| Search APIs | `ny doc search --symbols name` |
-| Inspect a concept | `ny doc search --docs topic` |
-| Reproduce exactly | Move the snippet to a file and run `ny file.ny`. |
+| Check exported names | `ny doc search --symbols name` |
+| Find docs for a topic | `ny doc search --docs topic` |
+| Reproduce a source failure | Save the snippet, then run `ny file.ny` |
+| Validate formatting | `ny fmt --check file.ny` |
 
-Example:
-
-```ny
-use std.core
-use std.math
-
-fn midpoint(number a, number b) number {
-   (a + b) / 2
-}
-
-assert(midpoint(2, 6) == 4, "midpoint")
-```
-
-## State Model
-
-A REPL session may already contain:
-
-- previous imports;
-- previous definitions;
-- lazy stdlib modules loaded by earlier expressions;
-- an unfinished multiline form after a bad paste.
-
-For file-equivalent diagnostics:
-
-```bash
-ny --diag-rich file.ny
-ny -run file.ny
-ny fmt --check file.ny
-```
-
-`comptime{ ... }` follows normal import rules in the REPL: session imports are
-visible, immutable compile-time constants can be reused, and runtime globals
-are not captured.
-
-## Imports And Completion
-
-Owning-module imports keep completion and file behavior aligned:
-
-```ny
-use std.math
-abs(10)
-
-use std.math as math
-math.abs(10)
-```
-
-Receiver completion depends on the imported API and the receiver shape:
-
-```ny
-[1, 2, 3].len
-```
-
-Indexed loops bind value first, index second:
-
-```ny
-for ch, i in "test" { print(f"{ch}:{i}") }
-```
-
-## One-Shot Probes
-
-Use `-c` for source strings that do not need prompt state:
-
-```bash
-ny -c 'use std.math
-assert(abs(10) == 10, "abs")'
-```
-
-Use files for quotes, multiline source, imports, packages, native declarations,
-and reproducible output.
+Interactive prompt commands are not source syntax. See the prompt's `:help`
+for supported commands.
 
 ## Snapshots
 
-```text
-ny> def doc_value = 7
-ny> :snapshot app.nys
-ny> :load app.nys
-ny> doc_value
-7
-```
+Use the REPL snapshot command only for saving a session that must be restored
+later. For application source or a regression, prefer a `.ny` file and an
+executable fixture; files keep imports, setup, and assertions visible.
 
-Use `:snapshot app.nys -o app` to export through the native AOT path.
-
-New snapshots include a source fingerprint and byte length in their header.
-`:load` checks those fields before replacing the persistent session, rejecting
-an edited or truncated snapshot instead of rebuilding it as if it were intact.
-Older source-only v1 snapshots remain loadable for compatibility. A snapshot
-that declares the v2 format cannot downgrade to v1 by omitting those fields.
-
-## Debug Loop
-
-| Symptom | Next command |
-| --- | --- |
-| Unknown name | `ny doc search --symbols name` |
-| Import shape unclear | `ny doc search --docs import` |
-| Type mismatch | `ny --diag-rich file.ny` |
-| REPL/file disagreement | `ny file.ny` then `ny -run file.ny` |
-| Formatter issue | `ny fmt --check file.ny` |
-| Parser issue | `ny -dump-tokens file.ny` or `ny --expand file.ny` |
-| Slow paste | Move to a file and run `ny -time file.ny`. |
-
-## Transcript Rule
-
-A useful transcript records imports, source, result or diagnostic, and no
-hidden setup.
-
-## Related
-
-- [Tooling](tooling.md)
-- [Troubleshooting](troubleshooting.md)
-- [Programs](programs.md)
+See [Start](start.md), [Programs](programs.md), and [Testing](testing.md).

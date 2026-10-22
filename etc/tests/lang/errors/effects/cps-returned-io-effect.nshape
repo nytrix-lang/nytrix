@@ -1,0 +1,29 @@
+shape cps_returned_computation_keeps_io_effect {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "higher-order", "callback", "cps", "return", "unknown"]
+  flags_matrix "--effect-require-known"
+  expect compile_fail
+  expect_message "declared @effects(alloc) but inferred effects=io|alloc"
+  source ny <<'NY'
+use core.cps as cps
+
+@effects(alloc, io)
+fn map_io_cps_value() int {
+  def computation = cps.cps_map(cps.cps_return(40), fn(value) {
+    print("CPS callback ran\n")
+    value + 2
+  })
+  cps.cps_run(computation)
+}
+
+@effects(alloc)
+fn io_cps_continuation() int {
+  cps.cps_run(cps.cps_return(40), fn(value) {
+    print("CPS continuation ran\n")
+    value + 2
+  })
+}
+
+NY
+}

@@ -1,0 +1,45 @@
+shape float_loop_register_calls {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 regression float loop call register-coalescing]
+  template ny-test-case
+  flags_matrix "--native-only --native-backend=x86_64 -O0 --nyir-verify; --native-only --native-backend=x86_64 -O3 --nyir-verify"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.time
+
+fn recurrence(bool with_call) bool {
+   mut x = 0.0
+   mut y = 2.0
+   mut i = 0
+   while i < 12 {
+      x = (x + 0.5) * 0.5
+      y = y * 0.5
+      if with_call && i == 5 {
+         def stamp = ticks()
+         assert(stamp > 0, "call returns a timestamp")
+      }
+      i += 1
+   }
+   ;; Binary fractions make these exact checks independent of tolerance.
+   x == 0.4998779296875 && y == 0.00048828125
+}
+assert(recurrence(false), "floating recurrence survives loop edges")
+assert(recurrence(true), "floating recurrence survives call and join edges")
+mut sum = 0.0
+mut scale = 1.0
+mut i = 0
+while i < 12 {
+   sum += float(i)
+   scale *= 0.5
+   i += 1
+}
+def rounded = int(sum)
+sum += 0.5
+scale *= 0.5
+assert(rounded == 66 && sum == 66.5 && scale == 0.0001220703125,
+       "conversion scratch preserves other floating values")
+print("float loop registers ok")
+NY
+}

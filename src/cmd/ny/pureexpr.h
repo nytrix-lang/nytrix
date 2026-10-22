@@ -1,5 +1,5 @@
-#ifndef NY_PUREEXPR_H
-#define NY_PUREEXPR_H
+#ifndef NY_CMD_NY_PUREEXPR_H
+#define NY_CMD_NY_PUREEXPR_H
 
 #include <stdbool.h>
 #include <stdint.h>

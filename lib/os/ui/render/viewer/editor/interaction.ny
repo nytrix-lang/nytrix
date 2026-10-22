@@ -1,15 +1,15 @@
 ;; Keywords: editor interaction cursor mouse selection os ui render viewer text
 ;; Mouse and keyboard interaction handling for editor cursors and selections.
 ;; References:
-;; - std.os.ui.render.viewer.editor.selection
-;; - std.os.ui.render.viewer.input
-module std.os.ui.render.viewer.editor.interaction(
+;; - core.os.ui.render.viewer.editor.selection
+;; - core.os.ui.render.viewer.input
+module core.os.ui.render.viewer.editor.interaction(
    new, message, tick, command, key_seen, show_key, status,
    history, history_add, last_command, clear_key
 )
 
-use std.core
-use std.core.str as str
+use core
+use core.str as str
 
 ;; Creates a new module state with the supplied configuration.
 fn new() dict {

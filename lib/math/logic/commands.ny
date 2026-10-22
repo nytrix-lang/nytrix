@@ -1,10 +1,16 @@
 ;; Keywords: reasoning command macro comptime metadata generated module LSP
 ;; Ordinary module-defined reasoning commands backed by the syntax registry.
-module std.math.logic.commands(
+module core.math.logic.commands(
    new_registry, register, standard_registry, run, metadata, names)
-use std.core
-use std.core.syntax as syntax
-use std.math.logic.solve as solve
+use core
+use core.compiler.syntax as syntax
+use core.math.logic.solve as solve
+
+fn _arg_count(any args) int {
+   if !is_list(args) { return -1 }
+   def list values = args
+   values.len
+}
 
 ;; Creates and returns the registry.
 fn new_registry() dict {
@@ -12,10 +18,14 @@ fn new_registry() dict {
 }
 
 ;; Returns the result of the `register` operation.
-fn register(dict registry, str name, any handler, str summary,
+fn register(dict registry, str name, fnptr handler, str summary,
    str module_name, str result_kind="certificate-report") dict {
-   if name == "" || !handler { panic("reasoning command requires name and handler") }
+   if name == "" || type(handler) == "nil" {
+      panic("reasoning command requires name and handler")
+   }
    def existed = registry.get("metadata").contains(name)
+   ;; Dispatch through `expand_macro` lowers to an indirect call, whose
+   ;; boundary marks tagged-args callbacks automatically; no manual mark.
    registry["syntax"] = syntax.register_macro_in(registry.get("syntax"),
       name, handler)
    registry.get("metadata")[name] = {"name":name, "summary":summary,
@@ -27,13 +37,13 @@ fn register(dict registry, str name, any handler, str summary,
 
 fn _arithmetic(any node) any {
    def args = node.get("args", [])
-   if args.len != 1 { panic("arithmetic reasoning expects one expression") }
+   if _arg_count(args) != 1 { panic("arithmetic reasoning expects one expression") }
    solve.arithmetic(args[0])
 }
 
 fn _congruence(any node) any {
    def args = node.get("args", [])
-   if args.len != 3 {
+   if _arg_count(args) != 3 {
       panic("congruence reasoning expects equalities, left, and right")
    }
    solve.congruence(args[0], args[1], args[2])
@@ -41,37 +51,42 @@ fn _congruence(any node) any {
 
 fn _finite(any node) any {
    def args = node.get("args", [])
-   if args.len != 2 { panic("finite reasoning expects domains and predicate") }
+   if _arg_count(args) != 2 { panic("finite reasoning expects domains and predicate") }
    solve.finite(args[0], args[1])
 }
 
 fn _linear(any node) any {
    def args = node.get("args", [])
-   if args.len != 2 { panic("linear reasoning expects constraints and bounds") }
+   if _arg_count(args) != 2 { panic("linear reasoning expects constraints and bounds") }
    solve.linear(args[0], args[1])
 }
 
 fn _induction(any node) any {
    def args = node.get("args", [])
-   if args.len != 3 { panic("induction reasoning expects predicate, first, last") }
-   solve.induction(args[0], args[1], args[2])
+   if _arg_count(args) != 3 { panic("induction reasoning expects predicate, first, last") }
+   solve.induction(args[0], __any_to_i64(args[1]), __any_to_i64(args[2]))
 }
 
 ;; Returns the result of the `standard_registry` operation.
 fn standard_registry() dict {
    mut registry = new_registry()
-   registry = register(registry, "arithmetic", _arithmetic,
+   registry = register(registry, "arithmetic",
+      fn(any node) any { _arithmetic(node) },
       "Normalize a closed arithmetic term with a bounded certificate.",
-      "std.math.logic.solve")
-   registry = register(registry, "congruence", _congruence,
+      "core.math.logic.solve")
+   registry = register(registry, "congruence",
+      fn(any node) any { _congruence(node) },
       "Close bounded term equalities by congruence.",
-      "std.math.logic.solve")
-   registry = register(registry, "finite", _finite,
-      "Search explicitly bounded finite domains.", "std.math.logic.solve")
-   registry = register(registry, "linear", _linear,
-      "Search bounded integer linear constraints.", "std.math.logic.solve")
-   register(registry, "induction", _induction,
-      "Check a bounded induction interval.", "std.math.logic.solve")
+      "core.math.logic.solve")
+   registry = register(registry, "finite",
+      fn(any node) any { _finite(node) },
+      "Search explicitly bounded finite domains.", "core.math.logic.solve")
+   registry = register(registry, "linear",
+      fn(any node) any { _linear(node) },
+      "Search bounded integer linear constraints.", "core.math.logic.solve")
+   register(registry, "induction",
+      fn(any node) any { _induction(node) },
+      "Check a bounded induction interval.", "core.math.logic.solve")
 }
 
 ;; Returns the result of the `run` operation.

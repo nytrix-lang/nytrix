@@ -1,0 +1,68 @@
+shape ast_binding_metadata {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "ast", "quote", "hygiene", "binding"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.compiler.ast (parse_ast_snapshot, code_str)
+use core.math.parse.data.json (json_decode)
+
+fn missing_syntax_origin(any value, str path) str {
+   if is_list(value) {
+      mut i = 0
+      while i < value.len {
+         def missing = missing_syntax_origin(value.get(i), path + "[" + to_str(i) + "]")
+         if missing != "" { return missing }
+         i += 1
+      }
+      return ""
+   }
+   if !is_dict(value) { return "" }
+   if value.contains("type") && is_str(value.get("type")) &&
+      !value.contains("source_origin") {
+      return path
+   }
+   def keys = dict_keys(value)
+   mut i = 0
+   while i < keys.len {
+      def key = str(keys.get(i))
+      def missing = missing_syntax_origin(value.get(key), path + "." + key)
+      if missing != "" { return missing }
+      i += 1
+   }
+   ""
+}
+
+def snapshot = parse_ast_snapshot("def int value = 9\ndef quoted = quote {\n  mut int value = 3\n  value + ${value}\n  fn nested(int input=4) int { return input }\n}")
+def nodes = snapshot.get("nodes")
+def outer = nodes.get(0)
+def quoted = nodes.get(1).get("exprs").get(0)
+def binding = quoted.get("body").get("body").get(0)
+def expression = quoted.get("body").get("body").get(1).get("expr_t")
+assert(outer.get("syntax_ctx") == 0 && quoted.get("syntax_ctx") > 0 &&
+       binding.get("syntax_ctx") == quoted.get("syntax_ctx"),
+       "quoted bindings retain their scope mark separately from outer bindings")
+assert(expression.get("left").get("syntax_ctx") == binding.get("syntax_ctx") &&
+       expression.get("right").get("type") == "splice" &&
+       expression.get("right").get("expr").get("syntax_ctx") == outer.get("syntax_ctx"),
+       "quoted uses and spliced uses retain their respective binding scopes")
+assert(outer.get("is_decl") && !outer.get("is_mut") &&
+       binding.get("is_decl") && binding.get("is_mut") &&
+       !binding.get("is_destructure") && binding.get("types").get(0) == "int",
+       "binding records retain declaration kind, mutability, and type annotations")
+def nested = quoted.get("body").get("body").get(2)
+def parameter = nested.get("params").get(0)
+assert(parameter.get("syntax_ctx") == binding.get("syntax_ctx") &&
+       parameter.get("source_origin").get("line") == 5 &&
+       nested.get("body").get("body").get(0).get("value").get("syntax_ctx") ==
+       parameter.get("syntax_ctx"),
+       "quoted parameters retain binding marks and declaration origins")
+def decoded = json_decode(code_str(snapshot))
+assert(code_str(decoded) == code_str(snapshot),
+       "scope and binding metadata survive canonical serialization")
+assert(missing_syntax_origin(snapshot, "snapshot") == "",
+       "every syntax record with a scope mark carries a source origin")
+NY
+}

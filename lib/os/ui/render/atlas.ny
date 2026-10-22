@@ -1,15 +1,15 @@
 ;; Keywords: render atlas os ui
-;; Texture Atlas manager for std.os.ui.render.
+;; Texture Atlas manager for core.os.ui.render.
 ;; Efficiently packs many small images (glyphs, icons) into larger textures.
 ;; References:
-;; - std.os.ui.render
-;; - std.os.ui.render.matrix
-module std.os.ui.render.atlas(atlas_set_backend, atlas_get_backend, atlas_create, atlas_destroy, atlas_add, atlas_get, atlas_bind, atlas_texture_id, atlas_uv_rect, atlas_ensure_texture, atlas_flush)
-use std.core
-use std.os.ui.render.vk as vkr
-use std.os.ui.render.vk.texture as vk_texture
-use std.os.ui.render.gl as glr
-use std.math
+;; - core.os.ui.render
+;; - core.os.ui.render.matrix
+module core.os.ui.render.atlas(atlas_set_backend, atlas_get_backend, atlas_create, atlas_destroy, atlas_add, atlas_get, atlas_bind, atlas_texture_id, atlas_uv_rect, atlas_ensure_texture, atlas_flush)
+use core
+use core.os.ui.render.vk as vkr
+use core.os.ui.render.vk.texture as vk_texture
+use core.os.ui.render.gl as glr
+use core.math
 
 mut _atlas_backend = "vk"
 
@@ -264,9 +264,11 @@ fn atlas_flush(any a) int {
    if !_atlas_scratch { return 0 }
    mut row = 0
    while row < rh {
+      def ptr dst = ptr_add(_atlas_scratch, int(row * rw * 4))
+      def ptr src = ptr_add(cpu_buf, int(((dy1 + row) * aw + dx1) * 4))
       memcpy(
-         _atlas_scratch + row * rw * 4,
-         cpu_buf + (((dy1 + row) * aw + dx1) * 4),
+         dst,
+         src,
          rw * 4
       )
       row += 1

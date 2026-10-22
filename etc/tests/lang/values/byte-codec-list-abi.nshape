@@ -1,0 +1,19 @@
+shape test_byte_codec_list_abi {
+  family "runtime/values"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core.math.crypto.encoding
+use core.math.bin as bin
+
+assert(hex_encode([110, 121]) == "6e79", "encoding exports consume typed byte lists")
+assert(bin.bytes_to_hex([110, 121]) == "6e79", "binary hex helper preserves integer byte elements")
+def decoded = bin.hex_to_bytes("f6fa2d")
+assert(is_list(decoded) && decoded.len == 3 && decoded[0] == 246 &&
+   decoded[1] == 250 && decoded[2] == 45,
+   "hex decoding returns typed integer byte elements")
+NY
+}

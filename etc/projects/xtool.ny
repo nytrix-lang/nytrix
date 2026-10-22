@@ -1,0 +1,2021 @@
+#!/usr/bin/env ny
+;; Keywords: x11 desktop automation mouse keyboard windows input cli
+;; X11 automation utility like xdotool.
+
+#link "libX11.so"
+#link "libX11.so.6"
+#link "libXtst.so"
+#link "libc.so"
+
+#include <math.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <sys/wait.h>
+#include <X11/Xlib.h>
+#include <X11/Xutil.h>
+#include <X11/XKBlib.h>
+#include <X11/cursorfont.h>
+#include <X11/extensions/XTest.h>
+
+use core
+use core.os (msleep, waitpid)
+
+extern "c" {
+   fn fork() i32
+   fn posix_open(ptr path, i32 flags) i32 as "open"
+   fn posix_dup2(i32 oldfd, i32 newfd) i32 as "dup2"
+   fn posix_close(i32 fd) i32 as "close"
+   fn c_system(ptr command) i32 as "system"
+   fn xt_xintern_atom(ptr display, ptr name, i32 only_if_exists) u64 as "XInternAtom"
+   fn xt_xget_window_property(ptr display, u64 window, u64 property,
+                              i64 offset, i64 length, i32 delete,
+                              u64 requested_type, ptr actual_type,
+                              ptr actual_format, ptr item_count,
+                              ptr bytes_after, ptr data_out) i32 as "XGetWindowProperty"
+   fn xt_xfree(ptr data) i32 as "XFree"
+   fn xt_xquery_tree(ptr display, u64 window, ptr root_out, ptr parent_out,
+                     ptr children_out, ptr child_count_out) i32 as "XQueryTree"
+   fn xt_xdefault_screen(ptr display) i32 as "XDefaultScreen"
+   fn xt_xroot_window(ptr display, i32 screen) u64 as "XRootWindow"
+   fn xt_xfetch_name(ptr display, u64 window, ptr name_out) i32 as "XFetchName"
+   fn xt_xget_window_attributes(ptr display, u64 window, ptr attributes) i32 as "XGetWindowAttributes"
+   fn xt_xtranslate_coordinates(ptr display, u64 source, u64 destination,
+                                i32 source_x, i32 source_y,
+                                ptr destination_x, ptr destination_y,
+                                ptr child_out) i32 as "XTranslateCoordinates"
+   fn xt_xget_class_hint(ptr display, u64 window, ptr hint) i32 as "XGetClassHint"
+   fn xt_xget_atom_name(ptr display, u64 atom) ptr as "XGetAtomName"
+   fn xt_xsend_event(ptr display, u64 window, i32 propagate, i64 event_mask,
+                     ptr event) i32 as "XSendEvent"
+   fn xt_xset_input_focus(ptr display, u64 focus, i32 revert_to, u64 timestamp) i32 as "XSetInputFocus"
+   fn xt_xkill_client(ptr display, u64 resource) i32 as "XKillClient"
+   fn xt_xmove_window(ptr display, u64 window, i32 x, i32 y) i32 as "XMoveWindow"
+   fn xt_xresize_window(ptr display, u64 window, i32 width, i32 height) i32 as "XResizeWindow"
+   fn xt_xmap_window(ptr display, u64 window) i32 as "XMapWindow"
+   fn xt_xunmap_window(ptr display, u64 window) i32 as "XUnmapWindow"
+   fn xt_xraise_window(ptr display, u64 window) i32 as "XRaiseWindow"
+   fn xt_xlower_window(ptr display, u64 window) i32 as "XLowerWindow"
+   fn xt_xiconify_window(ptr display, u64 window, i32 screen) i32 as "XIconifyWindow"
+   fn xt_strnlen(ptr text, u64 maxlen) u64 as "strnlen"
+}
+
+mut display = nil
+mut root = nil
+
+fn parse_int(str s) int {
+   mut start = 0
+   mut negative = false
+   if(s.len > 0 && ord(s.get(0)) == 45) {
+      start = 1
+      negative = true
+   }
+   mut base = 10
+   if(s.len > start + 1 && ord(s.get(start)) == 48 &&
+      (ord(s.get(start + 1)) == 120 || ord(s.get(start + 1)) == 88)) {
+      base = 16
+      start += 2
+   }
+   mut value = 0
+   mut i = start
+   while(i < s.len) {
+      def c = ord(s.get(i))
+      mut digit = 0
+      if(c >= 48 && c <= 57) { digit = c - 48 }
+      elif(c >= 65 && c <= 70) { digit = c - 55 }
+      elif(c >= 97 && c <= 102) { digit = c - 87 }
+      value = value * base + digit
+      i += 1
+   }
+   negative ? 0 - value : value
+}
+
+fn to_hex(int n) str {
+   if(n == 0) { return "0" }
+   def hex_chars = "0123456789abcdef"
+   mut val = n
+   mut out = ""
+   while(val > 0) {
+      out = str(hex_chars.get(val & 15)) + out
+      val = val >> 4
+   }
+   out
+}
+
+fn atom_val(str name) u64 {
+   xt_xintern_atom(display, cstr(name), 0)
+}
+
+fn raw_window_id(any value) int {
+   int(value)
+}
+
+fn has_wm() bool {
+   def a = atom_val("_NET_SUPPORTING_WM_CHECK")
+   def prop = zalloc(8)
+   def act = zalloc(8)
+   def fmt = zalloc(4)
+   def nitems = zalloc(8)
+   def after = zalloc(8)
+   def ok = xt_xget_window_property(display, root, a, 0, 1, 0, 33, act, fmt, nitems, after, prop)
+   mut found = false
+   if(ok == 0) {
+      def p = load64(prop, 0)
+      if(p) {
+         def win = load64(p, 0)
+         if(win != 0) {
+            def tree = get_top_windows()
+            mut in_tree = false
+            mut j = 0
+            while(j < tree.len) {
+               if(int(tree.get(j, 0)) == int(win)) { in_tree = true }
+               if(in_tree) { break }
+               j += 1
+            }
+            found = in_tree
+         }
+         xt_xfree(p)
+      }
+   }
+   free(prop, act, fmt, nitems, after)
+   found
+}
+
+fn mouse_pos() list {
+   def root_ret = zalloc(8)
+   def child_ret = zalloc(8)
+   def root_x = zalloc(4)
+   def root_y = zalloc(4)
+   def win_x = zalloc(4)
+   def win_y = zalloc(4)
+   def mask = zalloc(4)
+   XQueryPointer(display, root, root_ret, child_ret, root_x, root_y, win_x, win_y, mask)
+   def x = load32(root_x, 0)
+   def y = load32(root_y, 0)
+   free(root_ret, child_ret, root_x, root_y, win_x, win_y, mask)
+   [x, y]
+}
+
+fn active_window_ptr() int {
+   def prop = zalloc(8)
+   def act = zalloc(8)
+   def fmt = zalloc(4)
+   def nitems = zalloc(8)
+   def after = zalloc(8)
+   def a = atom_val("_NET_ACTIVE_WINDOW")
+   def ok = xt_xget_window_property(display, root, a, 0, 1, 0, 33, act, fmt, nitems, after, prop)
+   def win = load64(prop, 0)
+   if(ok == 0 && win) {
+      def val = load64(win, 0)
+      xt_xfree(win)
+      free(prop, act, fmt, nitems, after)
+      return val
+   }
+   free(prop, act, fmt, nitems, after)
+   0
+}
+
+fn read_cstr(any ptr, int maxlen) str {
+   def len = int(xt_strnlen(int(ptr), maxlen))
+   if(len == 0) { return "Unknown" }
+   def buf = malloc(len + 1)
+   if(!buf) { return "Unknown" }
+   memcpy(buf, int(ptr), len)
+   store8(buf, 0, len)
+   def s = init_str(buf, len)
+   s
+}
+
+fn load_i32(any ptr, int offset) int {
+   def value = int(load32(ptr, offset))
+   if(value >= 2147483648) { return value - 4294967296 }
+   value
+}
+
+fn win_title(int win) str {
+   def net_wm = atom_val("_NET_WM_NAME")
+   def utf8 = atom_val("UTF8_STRING")
+   def prop = zalloc(8)
+   def act = zalloc(8)
+   def fmt = zalloc(4)
+   def nitems = zalloc(8)
+   def after = zalloc(8)
+   def ok = xt_xget_window_property(display, win, net_wm, 0, 1000, 0, utf8, act, fmt, nitems, after, prop)
+   def data = load64(prop, 0)
+   mut title = ""
+   if(ok == 0 && data) {
+      def len = load64(nitems, 0)
+      if(len > 0) {
+         title = read_cstr(data, len > 1024 ? 1024 : len)
+      }
+      xt_xfree(data)
+   }
+   free(prop, act, fmt, nitems, after)
+   if(title.len > 0) {
+      return title
+   }
+   def name = zalloc(8)
+   if(xt_xfetch_name(display, win, name)) {
+      def p = load64(name, 0)
+      if(p) {
+         title = read_cstr(p, 256)
+         xt_xfree(p)
+      }
+   }
+   free(name)
+   if(title.len == 0) {
+      return "Unknown"
+   }
+   title
+}
+
+fn btn_event(int button, bool press) {
+   XTestFakeButtonEvent(display, button, press ? 1 : 0, 0)
+   XFlush(display)
+}
+
+fn key_event(int keycode, bool press) {
+   XTestFakeKeyEvent(display, keycode, press ? 1 : 0, 0)
+   XFlush(display)
+}
+
+fn read_card_prop(str atom_name, any target) int {
+   def a = atom_val(atom_name)
+   def prop = zalloc(8)
+   def act = zalloc(8)
+   def fmt = zalloc(4)
+   def nitems = zalloc(8)
+   def after = zalloc(8)
+   def ok = xt_xget_window_property(display, target, a, 0, 1, 0, 6, act, fmt, nitems, after, prop)
+   mut val = 0
+   if(ok == 0) {
+      def p = load64(prop, 0)
+      def n = load64(nitems, 0)
+      def f = load32(fmt, 0)
+      if(p && n > 0 && f == 32) {
+         val = load32(p, 0)
+      }
+      if(p) { xt_xfree(p) }
+   }
+   free(prop, act, fmt, nitems, after)
+   val
+}
+
+fn send_client_message(any target, str atom_str, int val0, int val1) {
+   def a = atom_val(atom_str)
+   def ev = zalloc(192)
+   store32(ev, 33, 0)
+   store64(ev, target, 32)
+   store64(ev, a, 40)
+   store32(ev, 32, 48)
+   store32(ev, val0, 56)
+   store32(ev, val1, 60)
+   xt_xsend_event(display, root, 0, 557056, ev)
+   XFlush(display)
+   free(ev)
+}
+
+fn window_geom(int win) list {
+   def attr = zalloc(136)
+   def ok = xt_xget_window_attributes(display, win, attr)
+   if(!ok) { free(attr)
+      return [0, 0, 0, 0] }
+   def w = load32(attr, 8)
+   def h = load32(attr, 12)
+   def bdr = load32(attr, 16)
+   free(attr)
+   def dest_x = zalloc(4)
+   def dest_y = zalloc(4)
+   def child_ret = zalloc(8)
+   xt_xtranslate_coordinates(display, win, root, -int(bdr), -int(bdr), dest_x, dest_y, child_ret)
+   def x = load_i32(dest_x, 0)
+   def y = load_i32(dest_y, 0)
+   free(dest_x, dest_y, child_ret)
+   [int(x), int(y), int(w), int(h)]
+}
+
+fn wm_state_names(any win) list {
+   def a = atom_val("_NET_WM_STATE")
+   def prop = zalloc(8)
+   def act = zalloc(8)
+   def fmt = zalloc(4)
+   def nitems = zalloc(8)
+   def after = zalloc(8)
+   def ok = xt_xget_window_property(display, win, a, 0, 1024, 0, 4, act, fmt, nitems, after, prop)
+   mut names = []
+   if(ok == 0) {
+      def p = load64(prop, 0)
+      def n = load64(nitems, 0)
+      if(p && n > 0) {
+         mut i = 0
+         while(i < n) {
+            def atom = load64(p, i * 8)
+            def raw = xt_xget_atom_name(display, atom)
+            if(raw) {
+               def name = read_cstr(raw, 256)
+               if(name != "Unknown") { names = names + [name] }
+               xt_xfree(raw)
+            }
+            i += 1
+         }
+      }
+      if(p) { xt_xfree(p) }
+   }
+   free(prop, act, fmt, nitems, after)
+   names
+}
+
+fn set_wm_state(any win, str state1, str state2, int action) {
+   def a = atom_val("_NET_WM_STATE")
+   def a1 = atom_val(state1)
+   def a2 = state2.len > 0 ? atom_val(state2) : 0
+   def ev = zalloc(192)
+   store32(ev, 33, 0)
+   store64(ev, win, 32)
+   store64(ev, a, 40)
+   store32(ev, 32, 48)
+   store32(ev, action, 56)
+   store32(ev, int(a1), 60)
+   store32(ev, int(a2), 64)
+   store32(ev, 1, 68)
+   xt_xsend_event(display, root, 0, 557056, ev)
+   XFlush(display)
+   free(ev)
+}
+
+fn get_top_windows() list {
+   def root_ret = zalloc(8)
+   def parent_ret = zalloc(8)
+   def children = zalloc(8)
+   def nchildren = zalloc(4)
+   xt_xquery_tree(display, root, root_ret, parent_ret, children, nchildren)
+   mut result = []
+   def count = load32(nchildren, 0)
+   def child_list = load64(children, 0)
+   if(child_list && count > 0) {
+      mut i = 0
+      while(i < count) {
+         result = result + [__tag(load64(child_list, i * 8))]
+         i += 1
+      }
+      xt_xfree(child_list)
+   }
+   free(root_ret, parent_ret, children, nchildren)
+   result
+}
+
+fn safe_window_exists(int win) bool {
+   def pid = fork()
+   if(int(pid) == 0) {
+      def fd = posix_open(cstr("/dev/null"), 1)
+      posix_dup2(fd, 2)
+      posix_close(fd)
+      def cd = XOpenDisplay(0)
+      mut name_ok = false
+      if(cd) {
+         def attr = zalloc(136)
+         name_ok = xt_xget_window_attributes(cd, win, attr) != 0
+         free(attr)
+         XCloseDisplay(cd)
+      }
+      __exit(name_ok ? 0 : 1)
+   }
+   waitpid(int(pid), 0) == 0
+}
+
+fn get_client_windows() list {
+   def a = atom_val("_NET_CLIENT_LIST")
+   def prop = zalloc(8)
+   def act = zalloc(8)
+   def fmt = zalloc(4)
+   def nitems = zalloc(8)
+   def after = zalloc(8)
+   def ok = xt_xget_window_property(display, root, a, 0, 1000000, 0, 33, act, fmt, nitems, after, prop)
+   if(ok == 0) {
+      def p = load64(prop, 0)
+      if(p) {
+         def n = load64(nitems, 0)
+         if(n > 0) {
+            mut valid = []
+            mut i = 0
+            while(i < n) {
+               def win = load64(p, i * 8)
+               if(safe_window_exists(win)) {
+                  valid = valid + [__tag(win)]
+               }
+               i += 1
+            }
+            xt_xfree(p)
+            free(prop, act, fmt, nitems, after)
+            if(valid.len > 0) {
+               return valid
+            }
+         } else {
+            xt_xfree(p)
+         }
+      }
+   }
+   free(prop, act, fmt, nitems, after)
+
+   ; Fallback: use XQueryTree with fork-verified entries
+   def tree = get_top_windows()
+   mut valid = []
+   mut i = 0
+   while(i < tree.len) {
+      def encoded_win = tree.get(i, 0)
+      def win = raw_window_id(encoded_win)
+      def w = int(win)
+      if(w != 2097152 && w != 3145728 && w != 3145729 && w != 5242880) {
+         if(safe_window_exists(win)) {
+            valid = valid + [encoded_win]
+         }
+      }
+      i += 1
+   }
+   valid
+}
+
+fn keysym_from_name(str name) any {
+   def buf = zalloc(256)
+   mut i = 0
+   while(i < name.len) {
+      store8(buf, ord(name.get(i)), i)
+      i += 1
+   }
+   store8(buf, 0, i)
+   def ks = XStringToKeysym(buf)
+   free(buf)
+   ks
+}
+
+fn ieq(str a, str b) bool {
+   if(a.len != b.len) { return false }
+   mut i = 0
+   while(i < a.len) {
+      mut ca = ord(a.get(i))
+      mut cb = ord(b.get(i))
+      if(ca >= 65 && ca <= 90) { ca += 32 }
+      if(cb >= 65 && cb <= 90) { cb += 32 }
+      if(ca != cb) { return false }
+      i += 1
+   }
+   true
+}
+
+fn mod_aliases(str name) any {
+   if(ieq(name, "alt") || ieq(name, "meta")) { return XStringToKeysym(cstr("Alt_L")) }
+   if(ieq(name, "ctrl") || ieq(name, "control")) { return XStringToKeysym(cstr("Control_L")) }
+   if(ieq(name, "shift")) { return XStringToKeysym(cstr("Shift_L")) }
+   if(ieq(name, "super") || ieq(name, "win") || ieq(name, "windows")) { return XStringToKeysym(cstr("Super_L")) }
+   XStringToKeysym(cstr(name))
+}
+
+fn parse_combo(str spec) list {
+   mut shift = false
+   mut ctrl = false
+   mut alt = false
+   mut key_name = ""
+   def parts = spec.split("+")
+   mut i = 0
+   while(i < parts.len) {
+      def part = parts.get(i, "")
+      if(ieq(part, "shift")) { shift = true }
+      elif(ieq(part, "ctrl") || ieq(part, "control")) { ctrl = true }
+      elif(ieq(part, "alt") || ieq(part, "meta")) { alt = true }
+      elif(!ieq(part, "super") && !ieq(part, "win") && !ieq(part, "windows")) { key_name = part }
+      i += 1
+   }
+   [key_name, shift, ctrl, alt]
+}
+
+fn send_keysequence(str seq, bool press) {
+   def plus = seq.find("+")
+   mut mods = []
+   mut key_part = seq
+   if(plus >= 0) {
+      def parts = seq.split("+")
+      key_part = parts.get(parts.len - 1, "")
+      mut i = 0
+      while(i < parts.len - 1) {
+         mods = mods + [parts.get(i, "")]
+         i += 1
+      }
+   }
+   if(press) {
+      mut i = 0
+      while(i < mods.len) {
+         def mod = mod_aliases(mods.get(i, ""))
+         if(mod) {
+            def kc = XKeysymToKeycode(display, mod)
+            if(int(kc)) { key_event(int(kc), true) }
+         }
+         i += 1
+      }
+   }
+   def keysym = keysym_from_name(key_part)
+   if(keysym) {
+      def kc = XKeysymToKeycode(display, keysym)
+      if(int(kc)) { key_event(int(kc), press) }
+   }
+   if(!press) {
+      mut i = 0
+      while(i < mods.len) {
+         def mod = mod_aliases(mods.get(i, ""))
+         if(mod) {
+            def kc = XKeysymToKeycode(display, mod)
+            if(int(kc)) { key_event(int(kc), false) }
+         }
+         i += 1
+      }
+   }
+}
+
+fn send_combo_key(str key_name, bool shift, bool ctrl, bool alt) {
+   mut mods = []
+   if(shift) {
+      def kc = XKeysymToKeycode(display, XStringToKeysym(cstr("Shift_L")))
+      mods = mods + [int(kc)]
+   }
+   if(ctrl) {
+      def kc = XKeysymToKeycode(display, XStringToKeysym(cstr("Control_L")))
+      mods = mods + [int(kc)]
+   }
+   if(alt) {
+      def kc = XKeysymToKeycode(display, XStringToKeysym(cstr("Alt_L")))
+      mods = mods + [int(kc)]
+   }
+   mut i = 0
+   while(i < mods.len) {
+      key_event(mods.get(i, 0), true)
+      i += 1
+   }
+   def keysym = keysym_from_name(key_name)
+   if(keysym) {
+      def kc = XKeysymToKeycode(display, keysym)
+      if(int(kc)) {
+         key_event(int(kc), true)
+         msleep(20)
+         key_event(int(kc), false)
+      }
+   }
+   i = mods.len
+   while(i > 0) {
+      i -= 1
+      key_event(mods.get(i, 0), false)
+   }
+}
+
+fn type_string(str s, int delay_ms) {
+   def shift_kc = XKeysymToKeycode(display, XStringToKeysym(cstr("Shift_L")))
+   mut i = 0
+   while(i < s.len) {
+      mut c = ord(s.get(i))
+      mut name = ""
+      mut shift = false
+      if(c >= 97 && c <= 122) {
+         name = s.slice(i, i + 1)
+      } elif(c >= 65 && c <= 90) {
+         def letters = "abcdefghijklmnopqrstuvwxyz"
+         name = letters.slice(c - 65, c - 64)
+         shift = true
+      } elif(c >= 48 && c <= 57) {
+         name = s.slice(i, i + 1)
+      } elif(c == 32) {
+         name = "space"
+      } elif(c == 10) {
+         name = "Return"
+      } elif(c == 9) {
+         name = "Tab"
+      } elif(c == 47) { name = "slash"
+      } elif(c == 63) { name = "slash"
+         shift = true
+      } elif(c == 46) { name = "period"
+      } elif(c == 62) { name = "period"
+         shift = true
+      } elif(c == 44) { name = "comma"
+      } elif(c == 60) { name = "comma"
+         shift = true
+      } elif(c == 58) { name = "semicolon"
+         shift = true
+      } elif(c == 59) { name = "semicolon"
+      } elif(c == 40) { name = "9"
+         shift = true
+      } elif(c == 41) { name = "0"
+         shift = true
+      } elif(c == 34) { name = "apostrophe"
+         shift = true
+      } elif(c == 39) { name = "apostrophe"
+      } elif(c == 95) { name = "minus"
+         shift = true
+      } elif(c == 45) { name = "minus"
+      } elif(c == 61) { name = "equal"
+      } elif(c == 43) { name = "equal"
+         shift = true
+      } elif(c == 91) { name = "bracketleft"
+      } elif(c == 123) { name = "bracketleft"
+         shift = true
+      } elif(c == 93) { name = "bracketright"
+      } elif(c == 125) { name = "bracketright"
+         shift = true
+      } elif(c == 92) { name = "backslash"
+      } elif(c == 124) { name = "backslash"
+         shift = true
+      } elif(c == 96) { name = "grave"
+      } elif(c == 126) { name = "grave"
+         shift = true
+      } elif(c == 33) { name = "1"
+         shift = true
+      } elif(c == 64) { name = "2"
+         shift = true
+      } elif(c == 35) { name = "3"
+         shift = true
+      } elif(c == 36) { name = "4"
+         shift = true
+      } elif(c == 37) { name = "5"
+         shift = true
+      } elif(c == 94) { name = "6"
+         shift = true
+      } elif(c == 38) { name = "7"
+         shift = true
+      } elif(c == 42) { name = "8"
+         shift = true
+      } else {
+         eprint("type: unsupported character '" + str(s.slice(i, i + 1)) + "'")
+         i += 1
+         continue
+      }
+      if(name.len > 0) {
+         def ks = XStringToKeysym(cstr(name))
+         if(ks) {
+            def kc = XKeysymToKeycode(display, ks)
+            if(kc) {
+               if(shift) { key_event(int(shift_kc), true) }
+               key_event(int(kc), true)
+               msleep(delay_ms)
+               key_event(int(kc), false)
+               if(shift) { key_event(int(shift_kc), false) }
+               msleep(delay_ms)
+            }
+         }
+      }
+      i += 1
+   }
+}
+
+fn mouse_move_to(int tx, int ty, int sx, int sy, int steps) {
+   mut i = 0
+   while(i <= steps) {
+      def t = float(i) / float(steps)
+      def p = t * t * (3.0 - 2.0 * t)
+      def nx = sx + int(p * float(tx - sx))
+      def ny = sy + int(p * float(ty - sy))
+      XTestFakeMotionEvent(display, 0, nx, ny, 0)
+      XFlush(display)
+      msleep(5)
+      i += 1
+   }
+}
+
+fn list_windows() {
+   def wins = get_client_windows()
+   if(wins.len == 0) {
+      eprint("No windows found")
+      return 1
+   }
+   print("Window list:")
+   mut i = 0
+   while(i < wins.len) {
+      def win = raw_window_id(wins.get(i, 0))
+      print("  ID: " + to_str(int(win)) + "  Title: " + win_title(win))
+      i += 1
+   }
+   0
+}
+
+fn search_windows(str needle) {
+   def wins = get_client_windows()
+   if(wins.len == 0) {
+      print("No windows found")
+      return
+   }
+   mut found = false
+   mut i = 0
+   while(i < wins.len) {
+      def win = raw_window_id(wins.get(i, 0))
+      def title = win_title(win)
+      if(title.contains(needle)) {
+         print(to_str(int(win)) + "  " + title)
+         found = true
+      }
+      i += 1
+   }
+   if(!found) {
+      print("No matching windows found")
+   }
+}
+
+fn selectwindow() int {
+   def cursor = XCreateFontCursor(display, 128)
+   def ret = XGrabPointer(display, root, 0, 8, 1, 0, 0, cursor, 0)
+   if(ret != 0) {
+     XFreeCursor(display, cursor)
+      eprint("Failed to grab pointer")
+      return 0
+   }
+   def event = zalloc(192)
+   mut win = 0
+   while(true) {
+      XAllowEvents(display, 0, 0)
+      store32(event, 0, 0)
+      XNextEvent(display, event)
+      if(load32(event, 0) == 5) {
+         def sub = load64(event, 48)
+         win = sub ? sub : load64(event, 32)
+         break
+      }
+   }
+   free(event)
+   XUngrabPointer(display, 0)
+   XFlush(display)
+   XFreeCursor(display, cursor)
+   win
+}
+
+fn find_window(str needle, bool prefer_largest) int {
+   def wins = get_client_windows()
+   mut best = 0
+   mut best_area = -1
+   mut i = 0
+   while(i < wins.len) {
+      def encoded_win = wins.get(i, 0)
+      def win = raw_window_id(encoded_win)
+      def title = win_title(win)
+      if(title.contains(needle)) {
+         if(prefer_largest) {
+            def g = window_geom(win)
+            def area = int(g.get(2, 0)) * int(g.get(3, 0))
+            if(int(area) > best_area) {
+               best = win
+               best_area = int(area)
+            }
+         } else {
+            best = win
+            break
+         }
+      }
+      i += 1
+   }
+   best
+}
+
+fn wait_window(str needle, int timeout_ms) int {
+   mut remaining = timeout_ms
+   while(remaining > 0) {
+      def win = find_window(needle, true)
+      if(win) { return win }
+      msleep(200)
+      remaining -= 200
+   }
+   0
+}
+
+fn print_window_geom(any win, bool shell_mode, str prefix) {
+   def g = window_geom(win)
+   def x = g.get(0, 0)
+   def y = g.get(1, 0)
+   def w = g.get(2, 0)
+   def h = g.get(3, 0)
+   if(shell_mode) {
+      print(prefix + "WINDOW=" + to_str(int(win)))
+      print(prefix + "X=" + to_str(int(x)))
+      print(prefix + "Y=" + to_str(int(y)))
+      print(prefix + "WIDTH=" + to_str(int(w)))
+      print(prefix + "HEIGHT=" + to_str(int(h)))
+      print(prefix + "SCREEN=0")
+   } else {
+      print("Window " + to_str(int(win)))
+      print("  Position: " + to_str(int(x)) + "," + to_str(int(y)) + " (screen: 0)")
+      print("  Geometry: " + to_str(int(w)) + "x" + to_str(int(h)))
+   }
+}
+
+fn getwindowname(any win) {
+   print(win_title(win))
+}
+
+fn get_window_class(any win) str {
+   def hint = zalloc(16)
+   def ok = xt_xget_class_hint(display, win, hint)
+   mut cls = ""
+   if(ok) {
+      def res_class = load64(hint, 8)
+      if(res_class) {
+         cls = read_cstr(res_class, 256)
+         xt_xfree(res_class)
+      }
+      def res_name = load64(hint, 0)
+      if(res_name) { xt_xfree(res_name) }
+   }
+   free(hint)
+   if(cls.len == 0) { cls = "Unknown" }
+   cls
+}
+
+fn get_window_focus() int {
+   def focus = zalloc(8)
+   def revert = zalloc(4)
+   XGetInputFocus(display, focus, revert)
+   def w = load64(focus, 0)
+   free(focus, revert)
+   w
+}
+
+fn inputscan_loop() {
+   def gret = XGrabKeyboard(display, root, 0, 1, 1, 0)
+   if(gret != 0) {
+      eprint("Failed to grab keyboard (already grabbed?)")
+      return
+   }
+   def event = zalloc(192)
+   mut pressed = list(256)
+   mut i = 0
+   while(i < 256) {
+      pressed = pressed.append(false)
+      i += 1
+   }
+   print("Listening for key events. Press Escape or Ctrl+C to quit.")
+   while(true) {
+      store32(event, 0, 0)
+      XNextEvent(display, event)
+      def etype = load32(event, 0)
+      if(etype == 2 || etype == 3) {
+         def is_press = etype == 2
+         def keycode = load32(event, 84)
+         if(keycode < 256) {
+            if(is_press) {
+               if(pressed.get(keycode)) {
+                  continue
+               }
+               pressed.set(keycode, true)
+            } else {
+               mut is_autorepeat = false
+               if(XEventsQueued(display, 1) > 0) {
+                  def nev = zalloc(192)
+                  XPeekEvent(display, nev)
+                  if(load32(nev, 0) == 2 && load32(nev, 84) == keycode && load64(nev, 56) == load64(event, 56)) {
+                     is_autorepeat = true
+                  }
+                  free(nev)
+               }
+               if(is_autorepeat) {
+                  continue
+               }
+               pressed.set(keycode, false)
+            }
+         }
+         def keysym = XKeycodeToKeysym(display, keycode, 0)
+         def state = load32(event, 80)
+         mut mods = ""
+         if(state & 1) { mods = mods + "Shift+" }
+         if(state & 4) { mods = mods + "Ctrl+" }
+         if(state & 8) { mods = mods + "Alt+" }
+         if(state & 64) { mods = mods + "Super+" }
+         mut name = ""
+         def ks_ptr = XKeysymToString(keysym)
+         if(ks_ptr) {
+            name = ks_ptr
+            def end = name.find("\0")
+            if(end >= 0) { name = name.slice(0, end) }
+         }
+         if(name.len == 0) {
+            name = "0x" + to_hex(int(keysym))
+         }
+         def ev_name = is_press ? "KeyPress" : "KeyRelease"
+         print(ev_name + ": " + mods + name + " (keycode=" + to_str(keycode) + ")")
+         if(is_press && (name == "Escape" || (name == "c" && (state & 4) != 0))) {
+            break
+         }
+      }
+   }
+   XUngrabKeyboard(display, 0)
+   free(event)
+}
+
+fn btn_tap(btn) {
+   btn_event(btn, true)
+   msleep(8)
+   btn_event(btn, false)
+}
+
+fn fakemouse_loop(use_wasd) {
+   def q_kc = XKeysymToKeycode(display, XStringToKeysym(cstr("q")))
+   def esc_kc = XKeysymToKeycode(display, XStringToKeysym(cstr("Escape")))
+   def w_kc = XKeysymToKeycode(display, XStringToKeysym(cstr("w")))
+   def a_kc = XKeysymToKeycode(display, XStringToKeysym(cstr("a")))
+   def s_kc = XKeysymToKeycode(display, XStringToKeysym(cstr("s")))
+   def d_kc = XKeysymToKeycode(display, XStringToKeysym(cstr("d")))
+   def up_kc = XKeysymToKeycode(display, XStringToKeysym(cstr("Up")))
+   def down_kc = XKeysymToKeycode(display, XStringToKeysym(cstr("Down")))
+   def left_kc = XKeysymToKeycode(display, XStringToKeysym(cstr("Left")))
+   def right_kc = XKeysymToKeycode(display, XStringToKeysym(cstr("Right")))
+   def kp8_kc = XKeysymToKeycode(display, XStringToKeysym(cstr("KP_8")))
+   def kp2_kc = XKeysymToKeycode(display, XStringToKeysym(cstr("KP_2")))
+   def kp4_kc = XKeysymToKeycode(display, XStringToKeysym(cstr("KP_4")))
+   def kp6_kc = XKeysymToKeycode(display, XStringToKeysym(cstr("KP_6")))
+   def kp7_kc = XKeysymToKeycode(display, XStringToKeysym(cstr("KP_7")))
+   def kp9_kc = XKeysymToKeycode(display, XStringToKeysym(cstr("KP_9")))
+   def kp1_kc = XKeysymToKeycode(display, XStringToKeysym(cstr("KP_1")))
+   def kp3_kc = XKeysymToKeycode(display, XStringToKeysym(cstr("KP_3")))
+   def kp5_kc = XKeysymToKeycode(display, XStringToKeysym(cstr("KP_5")))
+   def sp_kc = XKeysymToKeycode(display, XStringToKeysym(cstr("space")))
+   def r_kc = XKeysymToKeycode(display, XStringToKeysym(cstr("r")))
+   def m_kc = XKeysymToKeycode(display, XStringToKeysym(cstr("m")))
+   def pgup_kc = XKeysymToKeycode(display, XStringToKeysym(cstr("Page_Up")))
+   def pgdn_kc = XKeysymToKeycode(display, XStringToKeysym(cstr("Page_Down")))
+   def shift_l_kc = XKeysymToKeycode(display, XStringToKeysym(cstr("Shift_L")))
+   def shift_r_kc = XKeysymToKeycode(display, XStringToKeysym(cstr("Shift_R")))
+   def k1_kc = XKeysymToKeycode(display, XStringToKeysym(cstr("1")))
+   def k2_kc = XKeysymToKeycode(display, XStringToKeysym(cstr("2")))
+   def k3_kc = XKeysymToKeycode(display, XStringToKeysym(cstr("3")))
+   def k4_kc = XKeysymToKeycode(display, XStringToKeysym(cstr("4")))
+   def k5_kc = XKeysymToKeycode(display, XStringToKeysym(cstr("5")))
+   def k6_kc = XKeysymToKeycode(display, XStringToKeysym(cstr("6")))
+   def k7_kc = XKeysymToKeycode(display, XStringToKeysym(cstr("7")))
+   def k8_kc = XKeysymToKeycode(display, XStringToKeysym(cstr("8")))
+   def k9_kc = XKeysymToKeycode(display, XStringToKeysym(cstr("9")))
+   def k0_kc = XKeysymToKeycode(display, XStringToKeysym(cstr("0")))
+   def plus_kc = XKeysymToKeycode(display, XStringToKeysym(cstr("plus")))
+   def minus_kc = XKeysymToKeycode(display, XStringToKeysym(cstr("minus")))
+   def comma_kc = XKeysymToKeycode(display, XStringToKeysym(cstr("comma")))
+   def period_kc = XKeysymToKeycode(display, XStringToKeysym(cstr("period")))
+   def scr_w = XDisplayWidth(display, 0)
+   def scr_h = XDisplayHeight(display, 0)
+   mut event = zalloc(192)
+   mut held_up = false
+   mut held_down = false
+   mut held_left = false
+   mut held_right = false
+   mut dragging = false
+   mut hold_left = false
+   mut hold_right = false
+   mut hold_middle = false
+    mut speed = 8
+
+    mut km_buf = zalloc(32)
+   def gret = XGrabKeyboard(display, root, 0, 1, 1, 0)
+   if(gret != 0) {
+      eprint("Failed to grab keyboard (already grabbed?)")
+      free(event)
+      return
+   }
+   print("arrows/numpad=move" + (use_wasd ? "/wasd" : "") + "  space=hold  r=hold3  m=hold2  kp5=click")
+    print("pgup/uparrow=scrollUp  pgdn/downarrow=scrollDown  shift=drag")
+    print("1-9=speed  0=pixel  +/-=adjust  q=quit")
+    print("speed=" + to_str(int(speed)))
+    while(true) {
+       def px = mouse_pos().get(0, 0)
+       def py = mouse_pos().get(1, 0)
+       store32(event, 0, 0)
+       mut ev_found = XCheckTypedEvent(display, 2, event)
+       if(!ev_found) {
+          store32(event, 0, 0)
+          ev_found = XCheckTypedEvent(display, 3, event)
+       }
+       if(ev_found) {
+          def etype = load32(event, 0)
+          def kc = load32(event, 84)
+         if(kc == q_kc || kc == esc_kc) {
+            if(dragging) {
+               btn_event(1, false)
+               key_event(shift_l_kc, false)
+               dragging = false
+            }
+            if(hold_left) {
+               btn_event(1, false)
+               hold_left = false
+            }
+            if(hold_right) {
+               btn_event(3, false)
+               hold_right = false
+            }
+            if(hold_middle) {
+               btn_event(2, false)
+               hold_middle = false
+            }
+             XUngrabKeyboard(display, 0)
+             XFlush(display)
+             free(event, km_buf)
+             return
+         }
+          mut is_bound = false
+          def pressed = etype == 2
+          if(kc == up_kc || kc == kp8_kc || kc == kp7_kc || kc == kp9_kc) {
+             held_up = pressed
+             is_bound = true
+          }
+          if(kc == down_kc || kc == kp2_kc || kc == kp1_kc || kc == kp3_kc) {
+             held_down = pressed
+             is_bound = true
+          }
+          if(kc == left_kc || kc == kp4_kc || kc == kp7_kc || kc == kp1_kc) {
+             held_left = pressed
+             is_bound = true
+          }
+          if(kc == right_kc || kc == kp6_kc || kc == kp9_kc || kc == kp3_kc) {
+             held_right = pressed
+             is_bound = true
+          }
+          if(use_wasd) {
+             if(kc == w_kc) {
+                held_up = pressed
+                is_bound = true
+             }
+             if(kc == s_kc) {
+                held_down = pressed
+                is_bound = true
+             }
+             if(kc == a_kc) {
+                held_left = pressed
+                is_bound = true
+             }
+             if(kc == d_kc) {
+                held_right = pressed
+                is_bound = true
+             }
+          }
+          if(kc == sp_kc) {
+             is_bound = true
+             if(pressed) {
+                if(hold_left) {
+                   btn_event(1, false)
+                   hold_left = false
+                   print("left up")
+                } else {
+                   btn_event(1, true)
+                   hold_left = true
+                   print("left down")
+                }
+             }
+          }
+          if(kc == r_kc) {
+             is_bound = true
+             if(pressed) {
+                if(hold_right) {
+                   btn_event(3, false)
+                   hold_right = false
+                   print("right up")
+                } else {
+                   btn_event(3, true)
+                   hold_right = true
+                   print("right down")
+                }
+             }
+          }
+          if(kc == m_kc) {
+             is_bound = true
+             if(pressed) {
+                if(hold_middle) {
+                   btn_event(2, false)
+                   hold_middle = false
+                   print("middle up")
+                } else {
+                   btn_event(2, true)
+                   hold_middle = true
+                   print("middle down")
+                }
+             }
+          }
+          if(kc == kp5_kc) {
+             is_bound = true
+             if(pressed) { btn_tap(1) }
+          }
+          if(kc == period_kc) {
+             is_bound = true
+             if(pressed) { btn_tap(3) }
+          }
+          if(kc == comma_kc) {
+             is_bound = true
+             if(pressed) { btn_tap(2) }
+          }
+          if(kc == pgup_kc) {
+             is_bound = true
+             if(pressed) { btn_tap(4) }
+          }
+          if(kc == pgdn_kc) {
+             is_bound = true
+             if(pressed) { btn_tap(5) }
+          }
+          if(kc == shift_l_kc || kc == shift_r_kc) {
+             is_bound = true
+             if(pressed && !dragging) {
+                key_event(kc, true)
+                btn_event(1, true)
+                dragging = true
+             }
+             if(!pressed && dragging) {
+                btn_event(1, false)
+                key_event(kc, false)
+                dragging = false
+             }
+          }
+          if(kc == k0_kc || kc == k1_kc || kc == k2_kc || kc == k3_kc || kc == k4_kc) {
+             is_bound = true
+             if(pressed) {
+                if(kc == k0_kc) { speed = 1 }
+                if(kc == k1_kc) { speed = 4 }
+                if(kc == k2_kc) { speed = 8 }
+                if(kc == k3_kc) { speed = 12 }
+                if(kc == k4_kc) { speed = 16 }
+                print("speed=" + to_str(int(speed)))
+             }
+          }
+          if(kc == k5_kc || kc == k6_kc || kc == k7_kc || kc == k8_kc || kc == k9_kc) {
+             is_bound = true
+             if(pressed) {
+                if(kc == k5_kc) { speed = 20 }
+                if(kc == k6_kc) { speed = 24 }
+                if(kc == k7_kc) { speed = 28 }
+                if(kc == k8_kc) { speed = 32 }
+                if(kc == k9_kc) { speed = 36 }
+                print("speed=" + to_str(int(speed)))
+             }
+          }
+          if(kc == plus_kc || kc == minus_kc) {
+             is_bound = true
+             if(pressed) {
+                if(kc == plus_kc) {
+                   speed = speed + 2 > 50 ? speed : speed + 2
+                } else {
+                   speed = speed - 2 < 1 ? speed : speed - 2
+                }
+                print("speed=" + to_str(int(speed)))
+             }
+           }
+        }
+        mut dx = 0
+       mut dy = 0
+       if(held_up) { dy = -speed }
+       if(held_down) { dy = speed }
+      if(held_left) { dx = -speed }
+      if(held_right) { dx = speed }
+      if(dx != 0 || dy != 0) {
+         mut nx = int(px) + dx
+         mut ny = int(py) + dy
+         if(ny < 0) { ny = 0 }
+         if(ny >= scr_h) { ny = scr_h - 1 }
+         if(nx < 0) { nx = 0 }
+         if(nx >= scr_w) { nx = scr_w - 1 }
+         XTestFakeMotionEvent(display, 0, nx, ny, 0)
+         XFlush(display)
+      }
+      msleep(15)
+   }
+}
+
+fn print_usage() {
+   print("xtool 0.1 — X11 automation tool")
+   print("Usage: xtool <command> [args...]")
+   print("")
+   print("Mouse commands:")
+   print("   mousemove x y                  Move mouse to absolute position")
+   print("   mousemove_smooth x y           Move mouse absolute with smooth animation")
+   print("   mousemove_relative x y         Move mouse relative to current position")
+   print("   mousemove_relative_smooth x y  Move mouse relative with smooth animation")
+   print("   click [button]                 Click mouse button (1=left, 2=middle, 3=right)")
+   print("   mousedown [button]             Press mouse button")
+   print("   mouseup [button]               Release mouse button")
+   print("   getmouselocation               Print current mouse position")
+   print("")
+   print("Keyboard commands:")
+   print("   key <seq>                      Send keystroke (e.g. Return, alt+Tab)")
+   print("   keydown <seq>                  Press key(s)")
+   print("   keyup <seq>                    Release key(s)")
+   print("   combo <seq>                    Send combo (e.g. ctrl+alt+F1)")
+   print("   type <text>                    Type a string of text")
+   print("   repeat-key <n> <key> [--delay] Repeat key N times")
+   print("")
+   print("Window commands:")
+   print("   listwindows                    List all client windows")
+   print("   search <text>                  Search windows by title")
+   print("   find-window [pattern]          Find window by name (largest match)")
+   print("   wait-window <sec> [pattern]    Wait for window to appear")
+   print("   getactivewindow                Print active window ID")
+   print("   active-window-id               Print active window ID (decimal)")
+   print("   getwindowfocus                 Print focused window ID")
+   print("   getwindowgeometry <id>         Get window position and size")
+   print("   getwindowname <id>             Get window title")
+   print("   getwindowclassname <id>        Get window class name")
+   print("   getwindowpid <id>              Get window PID")
+   print("   window-geom <id>               Get window geometry: x y w h")
+   print("   windowfocus <id>               Focus a window")
+   print("   windowactivate <id>            Activate a window (switches desktop)")
+   print("   windowclose <id>               Close a window")
+   print("   windowkill <id>                Kill a window's client")
+   print("   windowsize <id> <w> <h>        Resize a window")
+   print("   windowmove <id> <x> <y>        Move a window")
+   print("   windowmap <id>                 Show a window")
+   print("   windowunmap <id>               Hide a window")
+   print("   windowminimize <id>            Minimize a window")
+   print("   windowraise <id>               Raise a window")
+   print("   windowlower <id>               Lower a window")
+   print("   move-window <id> <rx> <ry>     Warp pointer to window-relative")
+   print("   click-window <id> <rx> <ry>    Warp+click relative to window")
+   print("   wm-state [id]                  List WM_STATE atoms of window")
+   print("   fullscreen-window <id>         Set window fullscreen")
+   print("   maximize-window <id>           Maximize window")
+   print("")
+   print("Desktop commands:")
+   print("   get_num_desktops               Print number of desktops")
+   print("   set_num_desktops <n>           Set number of desktops")
+   print("   get_desktop                    Print current desktop number")
+   print("   set_desktop <n>                Switch to desktop n")
+   print("   get_desktop_for_window <id>    Print desktop containing window")
+   print("   set_desktop_for_window <id> <n>  Move window to desktop n")
+   print("   get_desktop_viewport           Print desktop viewport x y")
+   print("   set_desktop_viewport <x> <y>   Set desktop viewport")
+   print("   getdisplaygeometry             Print screen dimensions")
+   print("")
+   print("Monitoring:")
+   print("   inputscan                      Listen for key events")
+   print("   fakemouse [--wasd]             Control mouse with keyboard [add wasd]")
+   print("")
+   print("Other:")
+   print("   sleep <sec>                    Sleep for N seconds")
+   print("   exec <cmd...>                  Execute a command")
+   print("   windowquit <id>                Send WM_DELETE_WINDOW (close request)")
+   print("   help                           Show this help")
+   print("   version                        Print version")
+   print("")
+   print("Examples:")
+   print("   xtool mousemove 100 100")
+   print("   xtool mousemove_relative -10 -10")
+   print("   xtool click 1")
+   print("   xtool key Return")
+   print("   xtool key alt+Tab")
+   print("   xtool type \"Hello World\"")
+   print("   xtool selectwindow")
+   print("   xtool getmouselocation")
+   print("   xtool getdisplaygeometry")
+   print("   xtool getwindowgeometry 0x1e00003")
+   print("   xtool getwindowname 0x1e00003")
+   print("   xtool getwindowclassname 0x1e00003")
+   print("   xtool search firefox")
+   print("   xtool listwindows")
+   print("   xtool windowactivate 0x1e00003")
+   print("   xtool windowsize 0x1e00003 800 600")
+   print("   xtool windowmove 0x1e00003 0 0")
+   print("   xtool inputscan")
+   print("   xtool fakemouse")
+}
+
+mut arg_offset = 0
+if argc() > 1 && xt_arg(1) == "--" { arg_offset = 1 }
+fn xt_arg(int index) str { str(argv(index + arg_offset)) }
+def nargs = argc() - arg_offset
+mut cmd = nargs > 1 ? xt_arg(1) : ""
+
+if(cmd == "version" || cmd == "--version") {
+   print("xtool 0.1")
+   exit(0)
+}
+
+if(nargs == 1 || cmd == "help" || cmd == "--help") {
+   print_usage()
+   exit(0)
+}
+
+; Command aliases
+if(cmd == "ls" || cmd == "winlist") { cmd = "listwindows" }
+if(cmd == "mv" || cmd == "mm") { cmd = "mousemove" }
+if(cmd == "mvrel" || cmd == "mmrel") { cmd = "mousemove_relative" }
+if(cmd == "mvsm" || cmd == "mmsm") { cmd = "mousemove_smooth" }
+if(cmd == "mvre" || cmd == "mmre") { cmd = "mousemove_relative_smooth" }
+if(cmd == "loc" || cmd == "where") { cmd = "getmouselocation" }
+if(cmd == "aw" || cmd == "active") { cmd = "getactivewindow" }
+if(cmd == "gf" || cmd == "focus") { cmd = "getwindowfocus" }
+if(cmd == "gw" || cmd == "geom") { cmd = "getwindowgeometry" }
+if(cmd == "wn" || cmd == "name") { cmd = "getwindowname" }
+if(cmd == "cls") { cmd = "getwindowclassname" }
+if(cmd == "sel") { cmd = "selectwindow" }
+if(cmd == "wf" || cmd == "focusw") { cmd = "windowfocus" }
+if(cmd == "wa" || cmd == "activate") { cmd = "windowactivate" }
+if(cmd == "ws") { cmd = "windowsize" }
+if(cmd == "wm" || cmd == "movew") { cmd = "windowmove" }
+if(cmd == "map") { cmd = "windowmap" }
+if(cmd == "unmap") { cmd = "windowunmap" }
+if(cmd == "min") { cmd = "windowminimize" }
+if(cmd == "raise") { cmd = "windowraise" }
+if(cmd == "lower") { cmd = "windowlower" }
+if(cmd == "close") { cmd = "windowclose" }
+if(cmd == "kill") { cmd = "windowkill" }
+if(cmd == "sc") { cmd = "search" }
+if(cmd == "dg" || cmd == "disp" || cmd == "screen") { cmd = "getdisplaygeometry" }
+if(cmd == "nd" || cmd == "desks") { cmd = "get_num_desktops" }
+if(cmd == "cd" || cmd == "desk") { cmd = "get_desktop" }
+if(cmd == "sd") { cmd = "set_desktop" }
+if(cmd == "gdw") { cmd = "get_desktop_for_window" }
+if(cmd == "sdw") { cmd = "set_desktop_for_window" }
+if(cmd == "fw" || cmd == "find") { cmd = "find-window" }
+if(cmd == "ww") { cmd = "wait-window" }
+if(cmd == "awid" || cmd == "activeid") { cmd = "active-window-id" }
+if(cmd == "rk" || cmd == "repeat") { cmd = "repeat-key" }
+if(cmd == "mw" || cmd == "movewin") { cmd = "move-window" }
+if(cmd == "cw") { cmd = "click-window" }
+if(cmd == "wg") { cmd = "window-geom" }
+if(cmd == "ws" || cmd == "wstate") { cmd = "wm-state" }
+if(cmd == "fs" || cmd == "fullscreen") { cmd = "fullscreen-window" }
+if(cmd == "mx" || cmd == "maximize") { cmd = "maximize-window" }
+if(cmd == "sl") { cmd = "sleep" }
+if(cmd == "wq" || cmd == "close") { cmd = "windowquit" }
+if(cmd == "snd" || cmd == "numdesktops") { cmd = "set_num_desktops" }
+if(cmd == "gdv" || cmd == "getviewport") { cmd = "get_desktop_viewport" }
+if(cmd == "sdv" || cmd == "setviewport") { cmd = "set_desktop_viewport" }
+
+display = XOpenDisplay(0)
+if(!display) {
+   eprint("Cannot open display. Is X11 running?")
+   exit(1)
+}
+root = xt_xroot_window(display, xt_xdefault_screen(display))
+XSync(display, 0)
+XFlush(display)
+
+mut code = 0
+
+if(cmd == "mousemove" || cmd == "mousemove_relative") {
+   if(nargs < 4) {
+      eprint(cmd + " requires x y")
+      code = 1
+   } else {
+      def x = parse_int(xt_arg(2))
+      def y = parse_int(xt_arg(3))
+      def pos = mouse_pos()
+      def cx = int(pos.get(0, 0))
+      def cy = int(pos.get(1, 0))
+      if(cmd == "mousemove") {
+         XTestFakeMotionEvent(display, 0, x, y, 0)
+      } else {
+         XTestFakeMotionEvent(display, 0, cx + x, cy + y, 0)
+      }
+      XFlush(display)
+   }
+} elif(cmd == "mousemove_smooth" || cmd == "mousemove_relative_smooth") {
+   if(nargs < 4) {
+      eprint(cmd + " requires x y")
+      code = 1
+   } else {
+      def x = parse_int(xt_arg(2))
+      def y = parse_int(xt_arg(3))
+      def pos = mouse_pos()
+      def cx = int(pos.get(0, 0))
+      def cy = int(pos.get(1, 0))
+      def abs_cmd = !cmd.contains("relative")
+      def tx = abs_cmd ? x : cx + x
+      def ty = abs_cmd ? y : cy + y
+      mouse_move_to(tx, ty, cx, cy, 100)
+   }
+} elif(cmd == "click" || cmd == "mousedown" || cmd == "mouseup") {
+   mut arg_idx = 2
+   mut win = 0
+   while(arg_idx < nargs && xt_arg(arg_idx) == "--window") {
+      if(arg_idx + 1 >= nargs) {
+         eprint("--window requires a window ID")
+         code = 1
+         break
+      }
+      win = parse_int(xt_arg(arg_idx + 1))
+      arg_idx += 2
+   }
+   if(win && code == 0) {
+      def g = window_geom(win)
+      def cx = int(g.get(0, 0)) + int(g.get(2, 0)) / 2
+      def cy = int(g.get(1, 0)) + int(g.get(3, 0)) / 2
+      XTestFakeMotionEvent(display, 0, cx, cy, 0)
+      XFlush(display)
+   }
+   if(code == 0) {
+      def btn = nargs > arg_idx ? parse_int(xt_arg(arg_idx)) : 1
+      if(cmd == "click") {
+         btn_event(btn, true)
+         msleep(10)
+         btn_event(btn, false)
+      } elif(cmd == "mousedown") {
+         btn_event(btn, true)
+      } else {
+         btn_event(btn, false)
+      }
+   }
+} elif(cmd == "key" || cmd == "keydown" || cmd == "keyup") {
+   mut arg_idx = 2
+   mut win = 0
+   while(arg_idx < nargs && xt_arg(arg_idx) == "--window") {
+      if(arg_idx + 1 >= nargs) {
+         eprint("--window requires a window ID")
+         code = 1
+         break
+      }
+      win = parse_int(xt_arg(arg_idx + 1))
+      arg_idx += 2
+   }
+   if(arg_idx >= nargs && code == 0) {
+      eprint(cmd + " requires a key sequence")
+      code = 1
+   }
+   if(win && code == 0) {
+      def g = window_geom(win)
+      def cx = int(g.get(0, 0)) + int(g.get(2, 0)) / 2
+      def cy = int(g.get(1, 0)) + int(g.get(3, 0)) / 2
+      XTestFakeMotionEvent(display, 0, cx, cy, 0)
+      XFlush(display)
+   }
+   if(code == 0) {
+      def is_press = cmd != "keyup"
+      def do_release = cmd == "key"
+      send_keysequence(xt_arg(arg_idx), is_press)
+      if(do_release) {
+         msleep(20)
+         send_keysequence(xt_arg(arg_idx), false)
+      }
+   }
+} elif(cmd == "combo") {
+   if(nargs < 3) {
+      eprint("combo requires a key sequence")
+      code = 1
+   } else {
+      def c = parse_combo(xt_arg(2))
+      send_combo_key(c.get(0, ""), c.get(1, false), c.get(2, false), c.get(3, false))
+   }
+} elif(cmd == "type") {
+   mut delay = 10
+   mut win = 0
+   mut arg_idx = 2
+   while(arg_idx < nargs && (xt_arg(arg_idx) == "--delay" || xt_arg(arg_idx) == "--window")) {
+      if(xt_arg(arg_idx) == "--delay") {
+         if(arg_idx + 1 >= nargs) {
+            eprint("--delay requires a value")
+            code = 1
+            break
+         }
+         delay = parse_int(xt_arg(arg_idx + 1))
+         arg_idx += 2
+      } elif(xt_arg(arg_idx) == "--window") {
+         if(arg_idx + 1 >= nargs) {
+            eprint("--window requires a window ID")
+            code = 1
+            break
+         }
+         win = parse_int(xt_arg(arg_idx + 1))
+         arg_idx += 2
+      }
+   }
+   if(win && code == 0) {
+      def g = window_geom(win)
+      def cx = int(g.get(0, 0)) + int(g.get(2, 0)) / 2
+      def cy = int(g.get(1, 0)) + int(g.get(3, 0)) / 2
+      XTestFakeMotionEvent(display, 0, cx, cy, 0)
+      XFlush(display)
+   }
+   if(arg_idx < nargs && code == 0) {
+      type_string(xt_arg(arg_idx), delay)
+   } elif(code == 0) {
+      eprint("type requires a string")
+      code = 1
+   }
+} elif(cmd == "getmouselocation") {
+   def root_ret = zalloc(8)
+   def child_ret = zalloc(8)
+   def rx = zalloc(4)
+   def ry = zalloc(4)
+   def wx = zalloc(4)
+   def wy = zalloc(4)
+   def mask = zalloc(4)
+   XQueryPointer(display, root, root_ret, child_ret, rx, ry, wx, wy, mask)
+   def x = load32(rx, 0)
+   def y = load32(ry, 0)
+   def child = load64(child_ret, 0)
+   free(root_ret, child_ret, rx, ry, wx, wy, mask)
+   mut shell_mode = false
+   mut prefix = ""
+   mut arg_idx = 2
+   while(arg_idx < nargs) {
+      if(xt_arg(arg_idx) == "--shell") {
+         shell_mode = true
+         arg_idx += 1
+         continue
+      }
+      if(xt_arg(arg_idx) == "--prefix") {
+         if(arg_idx + 1 >= nargs) {
+            eprint("--prefix requires a value")
+            code = 1
+            break
+         }
+         shell_mode = true
+         prefix = xt_arg(arg_idx + 1)
+         arg_idx += 2
+         continue
+      }
+      arg_idx += 1
+   }
+   if(shell_mode) {
+      print(prefix + "X=" + to_str(int(x)))
+      print(prefix + "Y=" + to_str(int(y)))
+      print(prefix + "SCREEN=0")
+      print(prefix + "WINDOW=" + to_str(int(child)))
+   } else {
+      print("x:" + to_str(int(x)) + " y:" + to_str(int(y)) + " screen:0 window:" + to_str(int(child)))
+   }
+} elif(cmd == "getactivewindow") {
+   def win = active_window_ptr()
+   print(to_str(int(win)))
+} elif(cmd == "getwindowfocus") {
+   def win = get_window_focus()
+   print(to_str(int(win)))
+} elif(cmd == "getwindowgeometry") {
+   mut shell_mode = false
+   mut prefix = ""
+   mut arg_idx = 2
+   while(arg_idx < nargs && xt_arg(arg_idx) == "--shell") {
+      shell_mode = true
+      arg_idx += 1
+   }
+   while(arg_idx < nargs && xt_arg(arg_idx) == "--prefix") {
+      if(arg_idx + 1 >= nargs) {
+         eprint("--prefix requires a value")
+         code = 1
+         break
+      }
+      prefix = xt_arg(arg_idx + 1)
+      arg_idx += 2
+   }
+   if(arg_idx >= nargs && code == 0) {
+      eprint("getwindowgeometry requires a window ID")
+      code = 1
+   } elif(code == 0) {
+      def win = parse_int(xt_arg(arg_idx))
+      print_window_geom(win, shell_mode, prefix)
+   }
+} elif(cmd == "getwindowname") {
+   if(nargs < 3) {
+      eprint("getwindowname requires a window ID")
+      code = 1
+   } else {
+      def win = parse_int(xt_arg(2))
+      getwindowname(win)
+   }
+} elif(cmd == "getwindowclassname") {
+   if(nargs < 3) {
+      eprint("getwindowclassname requires a window ID")
+      code = 1
+   } else {
+      def win = parse_int(xt_arg(2))
+      print(get_window_class(win))
+   }
+} elif(cmd == "getwindowpid") {
+   if(nargs < 3) {
+      eprint("getwindowpid requires a window ID")
+      code = 1
+   } else {
+      def win = parse_int(xt_arg(2))
+      def pid = read_card_prop("_NET_WM_PID", win)
+      if(pid) {
+         print(to_str(pid))
+      } else {
+         eprint("No PID found for window")
+         code = 1
+      }
+   }
+} elif(cmd == "getdisplaygeometry") {
+   def w = XDisplayWidth(display, 0)
+   def h = XDisplayHeight(display, 0)
+   mut shell_mode = false
+   mut prefix = ""
+   mut arg_idx = 2
+   while(arg_idx < nargs) {
+      if(xt_arg(arg_idx) == "--shell") {
+         shell_mode = true
+         arg_idx += 1
+         continue
+      }
+      if(xt_arg(arg_idx) == "--prefix") {
+         if(arg_idx + 1 >= nargs) {
+            eprint("--prefix requires a value")
+            code = 1
+            break
+         }
+         shell_mode = true
+         prefix = xt_arg(arg_idx + 1)
+         arg_idx += 2
+         continue
+      }
+      arg_idx += 1
+   }
+   if(shell_mode) {
+      print(prefix + "WIDTH=" + to_str(int(w)))
+      print(prefix + "HEIGHT=" + to_str(int(h)))
+   } else {
+      print(to_str(int(w)) + " " + to_str(int(h)))
+   }
+} elif(cmd == "get_num_desktops") {
+   def n = read_card_prop("_NET_NUMBER_OF_DESKTOPS", root)
+   print(to_str(n > 0 ? n : 1))
+} elif(cmd == "get_desktop") {
+   def d = read_card_prop("_NET_CURRENT_DESKTOP", root)
+   print(to_str(d))
+} elif(cmd == "set_desktop") {
+   if(nargs < 3) {
+      eprint("set_desktop requires a desktop number")
+      code = 1
+   } else {
+      def num = parse_int(xt_arg(2))
+      send_client_message(root, "_NET_CURRENT_DESKTOP", num, 0)
+   }
+} elif(cmd == "get_desktop_for_window") {
+   if(nargs < 3) {
+      eprint("get_desktop_for_window requires a window ID")
+      code = 1
+   } else {
+      def win = parse_int(xt_arg(2))
+      def d = read_card_prop("_NET_WM_DESKTOP", win)
+      print(to_str(d))
+   }
+} elif(cmd == "set_desktop_for_window") {
+   if(nargs < 4) {
+      eprint("set_desktop_for_window requires window ID and desktop number")
+      code = 1
+   } else {
+      def win = parse_int(xt_arg(2))
+      def num = parse_int(xt_arg(3))
+      send_client_message(win, "_NET_WM_DESKTOP", num, 1)
+   }
+} elif(cmd == "selectwindow") {
+   def win = selectwindow()
+   if(win) {
+      print(to_str(int(win)))
+   } else {
+      eprint("No window selected")
+      code = 1
+   }
+} elif(cmd == "windowfocus" || cmd == "windowactivate") {
+   if(nargs < 3) {
+      eprint(cmd + " requires window ID")
+      code = 1
+   } else {
+      def win = parse_int(xt_arg(2))
+      if(cmd == "windowactivate") {
+         def wm_desk = read_card_prop("_NET_WM_DESKTOP", win)
+         def cur_desk = read_card_prop("_NET_CURRENT_DESKTOP", root)
+         if(wm_desk > 0 && int(wm_desk) != int(cur_desk)) {
+            send_client_message(root, "_NET_CURRENT_DESKTOP", int(wm_desk), 0)
+            msleep(50)
+         }
+         def a = atom_val("_NET_ACTIVE_WINDOW")
+         def ev = zalloc(192)
+         store32(ev, 33, 0)
+         store64(ev, win, 32)
+         store64(ev, a, 40)
+         store32(ev, 32, 48)
+         store64(ev, 2, 56)
+   xt_xsend_event(display, root, 0, 557056, ev)
+         XFlush(display)
+         free(ev)
+      }
+      xt_xset_input_focus(display, win, 0, 0)
+      xt_xraise_window(display, win)
+      XFlush(display)
+   }
+} elif(cmd == "windowsize") {
+   if(nargs < 5) {
+      eprint("windowsize requires window ID, width, height")
+      code = 1
+   } else {
+      def win = parse_int(xt_arg(2))
+      def w = parse_int(xt_arg(3))
+      def h = parse_int(xt_arg(4))
+      xt_xresize_window(display, win, w, h)
+      XFlush(display)
+   }
+} elif(cmd == "windowmove") {
+   if(nargs < 5) {
+      eprint("windowmove requires window ID, x, y")
+      code = 1
+   } else {
+      def win = parse_int(xt_arg(2))
+      def x = parse_int(xt_arg(3))
+      def y = parse_int(xt_arg(4))
+      xt_xmove_window(display, win, x, y)
+      XFlush(display)
+   }
+} elif(cmd == "windowmap") {
+   if(nargs < 3) {
+      eprint("windowmap requires window ID")
+      code = 1
+   } else {
+      xt_xmap_window(display, parse_int(xt_arg(2)))
+      XFlush(display)
+   }
+} elif(cmd == "windowunmap") {
+   if(nargs < 3) {
+      eprint("windowunmap requires window ID")
+      code = 1
+   } else {
+      xt_xunmap_window(display, parse_int(xt_arg(2)))
+      XFlush(display)
+   }
+} elif(cmd == "windowminimize") {
+   if(nargs < 3) {
+      eprint("windowminimize requires window ID")
+      code = 1
+   } else {
+      xt_xiconify_window(display, parse_int(xt_arg(2)), 0)
+      XFlush(display)
+   }
+} elif(cmd == "windowraise") {
+   if(nargs < 3) {
+      eprint("windowraise requires window ID")
+      code = 1
+   } else {
+      xt_xraise_window(display, parse_int(xt_arg(2)))
+      XFlush(display)
+   }
+} elif(cmd == "windowlower") {
+   if(nargs < 3) {
+      eprint("windowlower requires window ID")
+      code = 1
+   } else {
+      xt_xlower_window(display, parse_int(xt_arg(2)))
+      XFlush(display)
+   }
+} elif(cmd == "windowclose") {
+   if(nargs < 3) {
+      eprint("windowclose requires window ID")
+      code = 1
+   } else {
+      def win = parse_int(xt_arg(2))
+      def a = atom_val("_NET_CLOSE_WINDOW")
+      def ev = zalloc(192)
+      store32(ev, 33, 0)
+      store64(ev, win, 32)
+      store64(ev, a, 40)
+      store32(ev, 32, 48)
+      xt_xsend_event(display, win, 0, 0, ev)
+      XFlush(display)
+      free(ev)
+   }
+} elif(cmd == "windowkill") {
+   if(nargs < 3) {
+      eprint("windowkill requires window ID")
+      code = 1
+   } else {
+      xt_xkill_client(display, parse_int(xt_arg(2)))
+      XFlush(display)
+   }
+} elif(cmd == "search") {
+   if(nargs < 3) {
+      eprint("search requires a string")
+      code = 1
+   } else {
+      search_windows(xt_arg(2))
+   }
+} elif(cmd == "listwindows") {
+   if(list_windows() != 0) { code = 1 }
+} elif(cmd == "inputscan") {
+   inputscan_loop()
+} elif(cmd == "fakemouse") {
+   mut use_wasd = false
+   mut arg_idx = 2
+   while(arg_idx < nargs) {
+      if(xt_arg(arg_idx) == "--wasd" || xt_arg(arg_idx) == "-w") {
+         use_wasd = true
+      }
+      arg_idx += 1
+   }
+   fakemouse_loop(use_wasd)
+} elif(cmd == "find-window") {
+   def needle = nargs > 2 ? xt_arg(2) : "Visual Studio Code"
+   def win = find_window(needle, true)
+   if(win) {
+      print(to_str(int(win)))
+   } else {
+      eprint("No matching window found")
+      code = 1
+   }
+} elif(cmd == "wait-window") {
+   if(nargs < 3) {
+      eprint("wait-window requires timeout (seconds)")
+      code = 1
+   } else {
+      def timeout_secs = parse_int(xt_arg(2))
+      def needle = nargs > 3 ? xt_arg(3) : "Visual Studio Code"
+      def win = wait_window(needle, timeout_secs * 1000)
+      if(win) {
+         print(to_str(int(win)))
+      } else {
+         eprint("Window not found within timeout")
+         code = 1
+      }
+   }
+} elif(cmd == "active-window-id") {
+   def win = active_window_ptr()
+   print(to_str(int(win)))
+} elif(cmd == "repeat-key") {
+   if(nargs < 4) {
+      eprint("repeat-key requires count and key name")
+      code = 1
+   } else {
+      def count = parse_int(xt_arg(2))
+      def key_name = xt_arg(3)
+      mut delay = 20
+      mut idx = 4
+      while(idx < nargs && xt_arg(idx) == "--delay") {
+         if(idx + 1 >= nargs) {
+            eprint("--delay requires a value")
+            code = 1
+            break
+         }
+         delay = parse_int(xt_arg(idx + 1))
+         idx += 2
+      }
+      if(code == 0) {
+         mut j = 0
+         while(j < count) {
+            send_keysequence(key_name, true)
+            msleep(delay)
+            send_keysequence(key_name, false)
+            if(j < count - 1) { msleep(delay) }
+            j += 1
+         }
+      }
+   }
+} elif(cmd == "move-window" || cmd == "click-window") {
+   if(nargs < 5) {
+      eprint(cmd + " requires window ID, rel_x, rel_y")
+      code = 1
+   } else {
+      def win = parse_int(xt_arg(2))
+      def rx = parse_int(xt_arg(3))
+      def ry = parse_int(xt_arg(4))
+      def g = window_geom(win)
+      def ax = int(g.get(0, 0)) + rx
+      def ay = int(g.get(1, 0)) + ry
+      XTestFakeMotionEvent(display, 0, ax, ay, 0)
+      XFlush(display)
+      if(cmd == "click-window") {
+         def btn = nargs > 5 ? parse_int(xt_arg(5)) : 1
+         btn_event(btn, true)
+         msleep(10)
+         btn_event(btn, false)
+      }
+   }
+} elif(cmd == "window-geom") {
+   if(nargs < 3) {
+      eprint("window-geom requires a window ID")
+      code = 1
+   } else {
+      def win = parse_int(xt_arg(2))
+      def g = window_geom(win)
+      print(to_str(g.get(0, 0)) + " " + to_str(g.get(1, 0)) + " " + to_str(g.get(2, 0)) + " " + to_str(g.get(3, 0)))
+   }
+} elif(cmd == "wm-state") {
+   def win = nargs > 2 ? parse_int(xt_arg(2)) : active_window_ptr()
+   if(!win) {
+      eprint("No window specified and no active window")
+      code = 1
+   }
+   else {
+      def states = wm_state_names(win)
+      mut i = 0
+      while(i < states.len) {
+         print(states.get(i, ""))
+         i += 1
+      }
+   }
+} elif(cmd == "fullscreen-window") {
+   if(nargs < 3) {
+      eprint("fullscreen-window requires a window ID")
+      code = 1
+   } else {
+      set_wm_state(parse_int(xt_arg(2)), "_NET_WM_STATE_FULLSCREEN", "", 1)
+   }
+} elif(cmd == "maximize-window") {
+   if(nargs < 3) {
+      eprint("maximize-window requires a window ID")
+      code = 1
+   } else {
+      set_wm_state(parse_int(xt_arg(2)), "_NET_WM_STATE_MAXIMIZED_VERT", "_NET_WM_STATE_MAXIMIZED_HORZ", 1)
+   }
+} elif(cmd == "sleep") {
+   if(nargs < 3) {
+      eprint("sleep requires a duration in seconds")
+      code = 1
+   } else {
+      msleep(parse_int(xt_arg(2)) * 1000)
+   }
+} elif(cmd == "exec") {
+   if(nargs < 3) {
+      eprint("exec requires a command")
+      code = 1
+   } else {
+      mut cmd_str = xt_arg(2)
+      mut i = 3
+      while(i < nargs) {
+         cmd_str = cmd_str + " " + xt_arg(i)
+         i += 1
+      }
+      def ret = c_system(cstr(cmd_str))
+      if(ret != 0) { code = 1 }
+   }
+} elif(cmd == "windowquit") {
+   if(nargs < 3) {
+      eprint("windowquit requires a window ID")
+      code = 1
+   } else {
+      def win = parse_int(xt_arg(2))
+      def a = atom_val("WM_PROTOCOLS")
+      def del_atom = atom_val("WM_DELETE_WINDOW")
+      def ev = zalloc(192)
+      store32(ev, 33, 0)
+      store64(ev, win, 32)
+      store64(ev, a, 40)
+      store32(ev, 32, 48)
+      store64(ev, del_atom, 56)
+      xt_xsend_event(display, win, 0, 0, ev)
+      XFlush(display)
+      free(ev)
+   }
+} elif(cmd == "set_num_desktops") {
+   if(nargs < 3) {
+      eprint("set_num_desktops requires a number")
+      code = 1
+   } else {
+      send_client_message(root, "_NET_NUMBER_OF_DESKTOPS", parse_int(xt_arg(2)), 0)
+   }
+} elif(cmd == "get_desktop_viewport") {
+   def a = atom_val("_NET_DESKTOP_VIEWPORT")
+   def prop = zalloc(8)
+   def act = zalloc(8)
+   def fmt = zalloc(4)
+   def nitems = zalloc(8)
+   def after = zalloc(8)
+   def ok = xt_xget_window_property(display, root, a, 0, 2, 0, 6, act, fmt, nitems, after, prop)
+   if(ok == 0) {
+      def p = load64(prop, 0)
+      def n = load64(nitems, 0)
+      def f = load32(fmt, 0)
+      if(p && n > 0 && f == 32) {
+         def vx = load32(p, 0)
+         def vy = load32(p, 8)
+         mut shell_mode = false
+         mut prefix = ""
+         mut arg_idx = 2
+         while(arg_idx < nargs) {
+            if(xt_arg(arg_idx) == "--shell") {
+               shell_mode = true
+               arg_idx += 1
+            } elif(xt_arg(arg_idx) == "--prefix") {
+               if(arg_idx + 1 >= nargs) {
+                  eprint("--prefix requires a value")
+                  code = 1
+                  break
+               }
+               shell_mode = true
+               prefix = xt_arg(arg_idx + 1)
+               arg_idx += 2
+            } else {
+               arg_idx += 1
+            }
+         }
+         if(shell_mode) {
+            print(prefix + "X=" + to_str(int(vx)))
+            print(prefix + "Y=" + to_str(int(vy)))
+         } else {
+            print(to_str(int(vx)) + " " + to_str(int(vy)))
+         }
+         xt_xfree(p)
+      } else {
+         print("0 0")
+      }
+   } else {
+      print("0 0")
+   }
+   free(prop, act, fmt, nitems, after)
+} elif(cmd == "set_desktop_viewport") {
+   if(nargs < 4) {
+      eprint("set_desktop_viewport requires x and y")
+      code = 1
+   } else {
+      def vx = parse_int(xt_arg(2))
+      def vy = parse_int(xt_arg(3))
+      send_client_message(root, "_NET_DESKTOP_VIEWPORT", vx, vy)
+   }
+} else {
+   eprint("Unknown command: " + cmd)
+   print_usage()
+   code = 1
+}
+
+XSync(display, 0)
+if(display) {
+   XCloseDisplay(display)
+   display = nil
+}
+exit(code)

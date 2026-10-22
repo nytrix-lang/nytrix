@@ -1,0 +1,20 @@
+shape async_effects_reject_unsupported_return {
+  family "compiler-errors/attr"
+  generator "error"
+  features [error attr async-effects negative diagnostic]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "@async_effects requires a known IO effect"
+  source ny <<'NY'
+use core
+
+@async_effects
+@effects(io)
+fn unsupported_async_float() f64 {
+   print("")
+   1.0
+}
+
+await unsupported_async_float()
+NY
+}

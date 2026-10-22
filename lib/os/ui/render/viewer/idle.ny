@@ -1,11 +1,11 @@
 ;; Keywords: viewer idle timing throttle frame os ui render
 ;; Idle timing and frame pacing helpers for reducing unnecessary viewer work.
 ;; References:
-;; - std.os.ui.render.viewer.runtime
-module std.os.ui.render.viewer.idle(enabled, note_events_seen, mark_event_seen, note_full_draw, try_present)
-use std.core
-use std.os.ui.render.dump as ui_profile
-use std.os.ui.render.reuse
+;; - core.os.ui.render.viewer.runtime
+module core.os.ui.render.viewer.idle(enabled, note_events_seen, mark_event_seen, note_full_draw, try_present)
+use core
+use core.os.ui.render.dump as ui_profile
+use core.os.ui.render.reuse
 
 mut _state = reuse.make()
 mut _mode = -1
@@ -48,5 +48,5 @@ fn try_present(opts) bool {
 #main {
    assert(is_bool(enabled()), "viewer idle enabled")
    assert(mark_event_seen(), "viewer idle mark")
-   print("✓ std.os.ui.render.viewer.idle self-test passed")
+   print("✓ core.os.ui.render.viewer.idle self-test passed")
 }

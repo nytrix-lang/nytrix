@@ -1,0 +1,224 @@
+shape attr-async-effects-jit {
+  family "compiler-errors/attr"
+  generator "error"
+  features ["error", "attr", "negative", "diagnostic", "case-async-effects-jit"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "conflicting attributes '@jit' and '@async_effects'"
+  source ny <<'NY'
+@jit
+@async_effects
+fn bad_async_effects_combo() {
+   1
+}
+NY
+}
+
+shape attr-contract-non-name {
+  family "compiler-errors/attr"
+  generator "error"
+  features ["error", "attr", "negative", "diagnostic", "case-contract-non-name"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "expected parameter name in @consumes(...)"
+  source ny <<'NY'
+use core
+
+@consumes(1)
+fn f(x) { x }
+print(f(1))
+NY
+}
+
+shape attr-duplicate-returns-borrow {
+  family "compiler-errors/attr"
+  generator "error"
+  features ["error", "attr", "negative", "diagnostic", "case-duplicate-returns-borrow"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "duplicate attribute '@returns_borrow(...)'"
+  source ny <<'NY'
+use core
+
+@returns_borrow(x)
+@returns_borrow(x)
+fn f(x) { x }
+print(f(1))
+NY
+}
+
+shape attr-duplicate-returns-owned {
+  family "compiler-errors/attr"
+  generator "error"
+  features ["error", "attr", "negative", "diagnostic", "case-duplicate-returns-owned"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "duplicate attribute '@returns_owned'"
+  source ny <<'NY'
+use core
+
+@returns_owned
+@returns_owned
+fn f() { [1] }
+print(f())
+NY
+}
+
+shape attr-effects-none-calls-effectful {
+  family "compiler-errors/attr"
+  generator "error"
+  features ["error", "attr", "negative", "diagnostic", "case-effects-none-calls-effectful"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "declared @effects(none) but inferred effects="
+  source ny <<'NY'
+use core
+
+@effects(none)
+fn bad() {
+   print("effect")
+   1
+}
+
+bad()
+NY
+}
+
+shape attr_optimize_level {
+  family "compiler-errors/attr"
+  generator "error"
+  features [error attr optimize diagnostic case-optimize-level]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "@optimize expects one integer level from 0 through 3"
+  source ny <<'NY'
+@optimize(4)
+fn too_much() int {
+   1
+}
+NY
+}
+
+shape attr-pure-calls-effectful {
+  family "compiler-errors/attr"
+  generator "error"
+  features ["error", "attr", "negative", "diagnostic", "case-pure-calls-effectful"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "declared @pure but inferred effects="
+  source ny <<'NY'
+use core
+
+@pure
+fn bad() {
+   print("effect")
+   1
+}
+
+bad()
+NY
+}
+
+shape attr-pure-effects-conflict {
+  family "compiler-errors/attr"
+  generator "error"
+  features ["error", "attr", "negative", "diagnostic", "case-pure-effects-conflict"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "conflicting attributes '@pure' and '@effects(...)'"
+  source ny <<'NY'
+use core
+
+@pure
+@effects(io)
+fn f() int {
+   1
+}
+
+print(f())
+NY
+}
+
+shape attr-returns-borrow-arity {
+  family "compiler-errors/attr"
+  generator "error"
+  features ["error", "attr", "negative", "diagnostic", "case-returns-borrow-arity"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "@returns_borrow(...) requires exactly one parameter name"
+  source ny <<'NY'
+use core
+
+@returns_borrow(x, y)
+fn f(x, y) { x }
+print(f(1, 2))
+NY
+}
+
+shape attr-unknown-consumes-param {
+  family "compiler-errors/attr"
+  generator "error"
+  features ["error", "attr", "negative", "diagnostic", "case-unknown-consumes-param"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "@consumes(...) references unknown parameter 'y'"
+  source ny <<'NY'
+use core
+
+@consumes(y)
+fn f(x) { x }
+print(f(1))
+NY
+}
+
+shape attr-thread-f64-return {
+  family "compiler-errors/attr"
+  generator "error"
+  features ["error", "attr", "thread", "negative", "diagnostic", "case-thread-f64-return"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "must return an i64-compatible value"
+  source ny <<'NY'
+use core
+
+@thread
+fn scale(x=1.0, k=2.0) {
+   return x * k
+}
+print(scale(1.5, 2.0))
+NY
+}
+
+shape attr-thread-default-expanded-arity {
+  family "compiler-errors/attr"
+  generator "error"
+  features ["error", "attr", "thread", "default-args", "negative", "diagnostic"]
+  template ny-compile-fail
+  flags_matrix "--native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_fail
+  expect_message "@thread call 'too_many_defaults' supports up to 15 arguments"
+  source ny <<'NY'
+use core
+
+@thread
+fn too_many_defaults(a1, a2, a3, a4, a5, a6, a7, a8,
+                     a9=9, a10=10, a11=11, a12=12,
+                     a13=13, a14=14, a15=15, a16=16) {
+   return a1 + a2 + a3 + a4 + a5 + a6 + a7 + a8 +
+          a9 + a10 + a11 + a12 + a13 + a14 + a15 + a16
+}
+
+print(too_many_defaults(1, 2, 3, 4, 5, 6, 7, 8))
+NY
+}

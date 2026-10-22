@@ -1,0 +1,27 @@
+shape json {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "lang"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.math.parse.data.json
+fn dump(label, src){
+   def r = json_try_decode(src)
+   print(label + " ok=" + to_str(dict_get(r, "ok", false)) + " err=" + to_str(dict_get(r, "error", "")) + " pos=" + to_str(dict_get(r, "pos", -1)))
+}
+fn main(){
+   dump("empty-str-object", "{\"copyright\":\"\",\"generator\":\"x\"}")
+   dump("xmp-shape", "{\"@id\":\"\",\"dc:contributor\":{\"@set\":[\"a\",\"b\"]}}")
+   dump("nested", "{\"a\":{\"b\":\"c\"},\"d\":1}")
+   def within_limit = json_try_decode_bounded("[{}]", 2)
+   def beyond_limit = json_try_decode_bounded("[[{}]]", 2)
+   assert(to_str(dict_get(within_limit, "ok", false)) == "1" &&
+          to_str(dict_get(beyond_limit, "ok", false)) == "0" &&
+          dict_get(beyond_limit, "error", "") ==
+             "JSON nesting limit exceeded",
+          "bounded JSON decode accepts the limit and rejects deeper containers")
+}
+NY
+}

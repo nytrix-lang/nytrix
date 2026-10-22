@@ -1,0 +1,88 @@
+shape core_bc_cache_selector {
+  family "probe/cache"
+  generator "embedded"
+  features ["core-bc", "cache-identity", "checker"]
+  template ny-test-case
+  flags "--native-only"
+  timeout 120
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.fs as fs
+use core.os.subprocess (run_capture)
+use core.str as str
+
+def checker = env("NYTRIX_TEST_CORE_BC_CHECKER")
+def cmake = env("NYTRIX_CMAKE_COMMAND")
+assert(is_str(checker) && checker.len > 0, "CTest provides checker target")
+assert(is_str(cmake) && cmake.len > 0, "CTest provides CMake executable")
+def test_dir = temp_dir() + "/core-bc-cache-selector-" + to_str(pid())
+def setup = run_capture([cmake, "-E", "make_directory", test_dir], [], nil, false)
+assert(setup.get("code", 127) == 0, "create isolated checker directory")
+
+def bitcode = test_dir + "/core.bc"
+def source = test_dir + "/core.ny"
+def signature = test_dir + "/core.bc.signature"
+def inputs = test_dir + "/core.bc.inputs"
+def signature_prefix =
+   "artifact=core.bc\nselector=lib\nformat=nyir-bodies-v2\nentry=no\ncompiler-source="
+def compiler_source =
+   "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+assert(is_ok(file_write(bitcode, "bitcode artifact\n")), "write synthetic bitcode")
+assert(is_ok(file_write(source, "use core\n")), "write synthetic core source")
+assert(is_ok(file_write(signature, signature_prefix + compiler_source + "\n")),
+       "write compatible checker signature")
+
+fn sha256(str path) str {
+   def result = run_capture([cmake, "-E", "sha256sum", path], [], nil, false)
+   assert(result.get("code", 127) == 0, "CMake hashes " + path)
+   def fields = str.split(str.strip(result.get("stdout", "")), " ")
+   assert(fields.len > 0 && fields.get(0, "").len == 64,
+          "CMake emits SHA-256 for " + path)
+   return fields.get(0)
+}
+
+fn refresh_inputs() {
+   assert(is_ok(file_write(inputs,
+      sha256(source) + "\n" + sha256(signature) + "\n")),
+      "write exact checker input manifest")
+}
+
+fn check_identity(bool expected_valid, str label) {
+   def result = run_capture(
+      [checker, bitcode, source, signature, inputs], [], nil, false)
+   def code = result.get("code", 127)
+   assert((code == 0) == expected_valid,
+          label + " checker result mismatch: " + result.get("stdout", ""))
+}
+
+refresh_inputs()
+check_identity(true, "exact build inputs")
+assert(is_ok(file_write(source, "use corE\n")), "change source without changing size")
+check_identity(false, "changed core source")
+assert(is_ok(file_write(source, "use core\n")), "restore core source")
+check_identity(true, "restored core source")
+
+assert(is_ok(file_write(signature,
+   signature_prefix +
+   "1123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n")),
+   "change compiler source fingerprint")
+check_identity(false, "changed compiler source fingerprint")
+assert(is_ok(file_write(signature, signature_prefix + compiler_source + "\n")),
+       "restore signature")
+check_identity(true, "restored signature")
+
+assert(is_ok(file_write(inputs, unwrap(file_read(inputs)) + "unexpected\n")),
+       "append unexpected manifest data")
+check_identity(false, "extra manifest data")
+
+assert(is_ok(file_write(signature, "artifact=other.bc\n")),
+       "write unsupported signature")
+refresh_inputs()
+check_identity(false, "unsupported signature")
+
+def cleanup = run_capture([cmake, "-E", "rm", "-rf", test_dir], [], nil, false)
+assert(cleanup.get("code", 127) == 0, "remove checker test directory")
+print("CORE_BC_CACHE_SELECTOR_OK")
+NY
+}

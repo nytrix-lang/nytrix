@@ -1,0 +1,23 @@
+shape ownership_shared_borrow_live_exclusive {
+  family "compiler-errors/ownership"
+  generator "error"
+  features ["error", "ownership", "negative", "borrow", "shared", "exclusive"]
+  template ny-compile-fail
+  expect compile_fail
+  flags "--ownership-strict"
+  expect_message "cannot mutate a place while a shared borrow of it is live"
+  source ny <<'NY'
+use core
+
+fn bad() int {
+  mut int value = 1
+  def shared = &value
+  def exclusive = &mut value
+  shared
+  exclusive
+  value
+}
+
+bad()
+NY
+}

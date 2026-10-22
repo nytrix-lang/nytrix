@@ -1,9 +1,9 @@
 ;; Keywords: symbols registers aliases tokens def-use slicing
 ;; Register aliases and token extraction for def-use and slicing passes.
-module std.os.rev.decomp.symbols(_symbol_is_name_char, _symbol_token_ok, _symbols_from_text, _slice_symbol_aliases)
-use std.core
-use std.core.str as str
-use std.os.rev.decomp.collections (_append_unique)
+module core.os.rev.decomp.symbols(_symbol_is_name_char, _symbol_token_ok, _symbols_from_text, _slice_symbol_aliases)
+use core
+use core.str as str
+use core.os.rev.decomp.collections (_append_unique)
 
 fn _symbol_is_name_char(int ch) bool { str.ascii_is_alnum(ch) || ch == 95 }
 
@@ -58,5 +58,5 @@ fn _slice_symbol_aliases(str sym) list {
 #main {
    assert(_symbols_from_text("mem(rax + item_1)").len == 2, "symbol extraction")
    assert(_slice_symbol_aliases("eax").len == 4, "register aliases")
-   print("✓ std.os.rev.decomp.symbols self-test passed")
+   print("✓ core.os.rev.decomp.symbols self-test passed")
 }

@@ -1,12 +1,12 @@
 ;; Keywords: syntax html markup parse highlight
 ;; HTML syntax highlighter
 ;; References:
-;; - std.math.parse.syntax
-;; - std.math.parse.syntax.helpers
-module std.math.parse.syntax.html(tokenize)
-use std.core
-use std.core.str as str
-use std.math.parse.syntax.helpers as _h
+;; - core.math.parse.syntax
+;; - core.math.parse.syntax.helpers
+module core.math.parse.syntax.html(tokenize)
+use core
+use core.str as str
+use core.math.parse.syntax.helpers as _h
 
 def TAGS = "html;head;body;title;meta;link;style;script;div;span;p;a;img;ul;ol;li;table;tr;td;th;thead;tbody;tfoot;form;input;button;select;option;textarea;label;h1;h2;h3;h4;h5;h6;header;footer;nav;main;section;article;aside;details;summary;dialog;canvas;svg;video;audio;source;track;iframe;object;embed;map;area;br;hr;pre;code;blockquote;q;em;strong;small;mark;del;ins;sub;sup;abbr;address;cite;dfn;time;var;samp;kbd;figure;figcaption"
 def ATTRS = "id;class;style;title;lang;dir;hidden;tabindex;accesskey;contenteditable;draggable;spellcheck;translate;data;src;href;alt;name;value;type;placeholder;required;disabled;readonly;checked;selected;multiple;maxlength;min;max;step;pattern;autocomplete;autofocus;novalidate;formaction;formmethod;formenctype;formtarget;formnovalidate;list;width;height;poster;preload;controls;loop;muted;autoplay;colspan;rowspan;scope;headers;colgroup;col;caption;datetime;cite;hreflang;rel;rev;target;media;sizes;sandbox;srcdoc;allowfullscreen;frameborder;scrolling;marginwidth;marginheight;align;valign;border;cellpadding;cellspacing;bgcolor;background;face;size;color"

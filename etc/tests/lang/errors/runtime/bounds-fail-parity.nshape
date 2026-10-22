@@ -1,0 +1,14 @@
+shape bounds-fail-parity {
+  family "runtime/errors"
+  generator "embedded"
+  features ["ny", "errors", "c5"]
+  template ny-test-case
+  expect compile_fail
+  expect_message "index_read out of range"
+  flags_matrix "--native-backend=llvm --jit; --native-only --native-backend=x86_64"
+  source ny <<'NY'
+use core
+def t = i64buf_new(4)
+print(i64buf_load(t, 9))
+NY
+}

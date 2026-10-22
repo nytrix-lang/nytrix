@@ -1,0 +1,177 @@
+shape bigint-oracle {
+  family "perf-real"
+  generator "stress"
+  features ["perf", "checksum", "gmp", "c-vs-ny", "native"]
+  optional_ldflags "-lgmp"
+  template ny-test-case
+  expect compile_and_run
+  source c_probe <<'C'
+#include <gmp.h>
+int main(void) {
+  mpz_t value;
+  mpz_init(value);
+  mpz_set_ui(value, 1);
+  mpz_clear(value);
+  return 0;
+}
+C
+  source ny <<'NY'
+use core
+use core.math.big
+use core.math.nt (Z)
+use core.os.time
+
+def int t0 = ticks()
+def S = bigint_from_str("1000000000000000000000000000000000000000000000000000000000000")
+def oa = bigint_mul(Z(3), S)
+def ob = bigint_mul(Z(7), S)
+def na = bf_from_int(3)
+def nb = bf_from_int(7)
+
+def n1 = 20000
+mut i = 0
+mut x = na
+while i < n1 { x = bf_add(na, nb) i += 1 }
+i = 0
+mut ox = oa
+while i < n1 { ox = bigint_add(oa, ob) i += 1 }
+i = 0
+while i < n1 { x = bf_sub(nb, na) i += 1 }
+i = 0
+while i < n1 { ox = bigint_sub(ob, oa) i += 1 }
+def n2 = 5000
+i = 0
+while i < n2 { x = bf_mul(na, nb) i += 1 }
+i = 0
+while i < n2 { ox = bigint_div(bigint_mul(oa, ob), S) i += 1 }
+i = 0
+while i < n2 { x = bf_div(nb, na) i += 1 }
+i = 0
+while i < n2 { ox = bigint_div(bigint_mul(ob, S), oa) i += 1 }
+def n3 = 300
+def f_two = bf_from_int(2)
+i = 0
+while i < n3 { x = bf_sqrt(f_two) i += 1 }
+def two = bigint_mul(Z(2), S)
+def temp = bigint_mul(two, S)
+mut guess = bigint_from_str("1414213562373095048801688724209698078569671875376948073176679")
+i = 0
+while i < n3 {
+  mut r = guess
+  mut j = 0
+  while j < 20 { r = bigint_div(bigint_add(r, bigint_div(temp, r)), Z(2)) j += 1 }
+  ox = r
+  i += 1
+}
+def n4 = 1000
+i = 0
+while i < n4 { x = bf_pow_int(na, 9) i += 1 }
+i = 0
+while i < n4 {
+  mut r = S
+  mut base = oa
+  mut e = 9
+  while e > 0 { if e % 2 == 1 { r = bigint_div(bigint_mul(r, base), S) } base = bigint_div(bigint_mul(base, base), S) e = e / 2 }
+  ox = r
+  i += 1
+}
+def int checksum = int(bf_to_float(x)) * 100 + bigint_to_str(ox).len
+print("checksum=", checksum)
+def int t_end = ticks()
+print("elapsed_ns=", t_end - t0)
+NY
+  source c <<'C'
+#include <gmp.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+int main(void) {
+  const int64_t n1 = 20000, n2 = 5000, n3 = 300, n4 = 1000;
+  mpf_t na, nb, x, f_two, f_base, f_result;
+  mpf_init2(na, 256);
+  mpf_init2(nb, 256);
+  mpf_init2(x, 256);
+  mpf_init2(f_two, 256);
+  mpf_init2(f_base, 256);
+  mpf_init2(f_result, 256);
+  mpf_set_ui(na, 3);
+  mpf_set_ui(nb, 7);
+  mpf_set(x, na);
+  mpz_t scale, oa, ob, ox, temp, two, guess, r, base;
+  mpz_inits(scale, oa, ob, ox, temp, two, guess, r, base, NULL);
+  mpz_set_str(scale, "1000000000000000000000000000000000000000000000000000000000000", 10);
+  mpz_mul_ui(oa, scale, 3);
+  mpz_mul_ui(ob, scale, 7);
+
+  for (int64_t i = 0; i < n1; ++i) mpf_add(x, na, nb);
+  for (int64_t i = 0; i < n1; ++i) mpz_add(ox, oa, ob);
+  for (int64_t i = 0; i < n1; ++i) mpf_sub(x, nb, na);
+  for (int64_t i = 0; i < n1; ++i) mpz_sub(ox, ob, oa);
+  for (int64_t i = 0; i < n2; ++i) mpf_mul(x, na, nb);
+  for (int64_t i = 0; i < n2; ++i) {
+    mpz_mul(temp, oa, ob);
+    mpz_tdiv_q(ox, temp, scale);
+  }
+  for (int64_t i = 0; i < n2; ++i) mpf_div(x, nb, na);
+  for (int64_t i = 0; i < n2; ++i) {
+    mpz_mul(temp, ob, scale);
+    mpz_tdiv_q(ox, temp, oa);
+  }
+  mpf_set_ui(f_two, 2);
+  for (int64_t i = 0; i < n3; ++i) mpf_sqrt(x, f_two);
+  mpz_mul_ui(two, scale, 2);
+  mpz_mul(temp, two, scale);
+  mpz_set_str(guess, "1414213562373095048801688724209698078569671875376948073176679", 10);
+  for (int64_t i = 0; i < n3; ++i) {
+    mpz_set(r, guess);
+    for (int j = 0; j < 20; ++j) {
+      mpz_tdiv_q(ox, temp, r);
+      mpz_add(ox, r, ox);
+      mpz_tdiv_q_2exp(r, ox, 1);
+    }
+    mpz_set(ox, r);
+  }
+  for (int64_t i = 0; i < n4; ++i) {
+    mpf_set(f_base, na);
+    mpf_set_ui(f_result, 1);
+    unsigned long exponent = 9;
+    while (exponent > 0) {
+      if (exponent & 1) mpf_mul(f_result, f_result, f_base);
+      exponent >>= 1;
+      if (exponent) mpf_mul(f_base, f_base, f_base);
+    }
+    mpf_set(x, f_result);
+  }
+  for (int64_t i = 0; i < n4; ++i) {
+    mpz_set(r, scale);
+    mpz_set(base, oa);
+    int exponent = 9;
+    while (exponent > 0) {
+      if (exponent & 1) {
+        mpz_mul(temp, r, base);
+        mpz_tdiv_q(r, temp, scale);
+      }
+      mpz_mul(temp, base, base);
+      mpz_tdiv_q(base, temp, scale);
+      exponent /= 2;
+    }
+    mpz_set(ox, r);
+  }
+
+  char *decimal = mpz_get_str(NULL, 10, ox);
+  if (!decimal) {
+    mpz_clears(scale, oa, ob, ox, temp, two, guess, r, base, NULL);
+    mpf_clears(na, nb, x, f_two, f_base, f_result, NULL);
+    return 1;
+  }
+  int checksum = (int)mpf_get_si(x) * 100 + (int)strlen(decimal);
+  printf("checksum=%d\n", checksum);
+  free(decimal);
+  mpz_clears(scale, oa, ob, ox, temp, two, guess, r, base, NULL);
+  mpf_clears(na, nb, x, f_two, f_base, f_result, NULL);
+  return 0;
+}
+C
+}

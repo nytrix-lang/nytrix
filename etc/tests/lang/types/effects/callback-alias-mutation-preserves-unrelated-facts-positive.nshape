@@ -1,0 +1,34 @@
+shape callback_alias_mutation_preserves_unrelated_facts {
+  family "typing/effects"
+  generator "regression"
+  features [typing effects callback dictionary alias mutation positive]
+  template ny-test-case
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+@effects(none)
+fn pure() int {
+  return 42
+}
+
+@effects(io)
+fn impure() int {
+  print("aliased callback\n")
+  return 43
+}
+
+@effects(alloc, read, write)
+fn owner() int {
+  mut callbacks = {"run": impure}
+  mut unrelated = {"run": pure}
+  mut alias = callbacks
+  alias.set("run", impure)
+  return unrelated.get("run")()
+}
+
+assert(owner() == 42,
+       "mutating one aliased dictionary keeps unrelated callback effects")
+NY
+}

@@ -1,0 +1,77 @@
+shape arithmetic_parser_kit {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "parser", "arithmetic", "emitter", "bounded"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-only; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.parser as parser
+use core.math.parse.arithmetic as arithmetic
+
+@effects(all)
+fn test_precedence_and_emitter() {
+   def direct_operator = parser.run(parser.sequence([
+      parser.many(parser.byte_where("whitespace", fn(byte) {
+         byte == 32 || byte == 9 || byte == 10 || byte == 13
+      })), parser.literal("+")
+   ]), " +")
+   assert(direct_operator.get("ok"),
+          "the whitespace and literal operator combinators compose")
+   def single = arithmetic.parse("1")
+   assert(single.get("ok") && type(single.get("value")) == "dict",
+          "single numeric atom produces a tree (got " +
+             type(single.get("value")) + ")")
+   def add = arithmetic.parse("1 + 2")
+   assert(add.get("ok") && type(add.get("value")) == "dict",
+          "additive chain produces a tree (ok=" + str(add.get("ok")) +
+             ", type=" + type(add.get("value")) + ", error=" +
+             str(add.get("error").get("message", "")) + ", span=" +
+             str(add.get("error").get("span").get("start", -1)) + ")")
+   def parsed = arithmetic.parse(" 1 + 2 * (3 - 4) ")
+   assert(parsed.get("ok"), "arithmetic grammar accepts grouping and spaces")
+   def emitted = arithmetic.emit(parsed.get("value"))
+   assert(emitted.get("ok") &&
+          str(emitted.get("text")) == "(1 + (2 * (3 - 4)))",
+          "emitter preserves precedence and associativity; got " +
+             str(emitted.get("error")) + ", parsed value type=" +
+             type(parsed.get("value")) + ", root kind=" +
+             str(parsed.get("value").get("kind", nil)))
+   def round_trip = arithmetic.parse(str(emitted.get("text")))
+   assert(round_trip.get("ok") &&
+          str(arithmetic.emit(round_trip.get("value")).get("text")) ==
+             str(emitted.get("text")),
+          "canonical output parses and emits identically")
+}
+
+@effects(all)
+fn test_errors_and_limits() {
+   def malformed = arithmetic.parse("1 + (2 * )")
+   assert(!malformed.get("ok") &&
+          str(malformed.get("error").get("code")) == "E_PARSE",
+          "malformed arithmetic returns the parser's structured error")
+   def steps = arithmetic.parse("1 + 2", 1)
+   assert(!steps.get("ok") &&
+          str(steps.get("error").get("message")) ==
+             "parser step limit exceeded",
+          "arithmetic parser obeys the step bound")
+   def depth = arithmetic.parse("((((1))))", 1000, 3)
+   assert(!depth.get("ok") &&
+          str(depth.get("error").get("message")) ==
+             "parser nesting limit exceeded",
+          "recursive groups obey the depth bound")
+   def bytes = arithmetic.parse("12345", 1000, 128, 3)
+   assert(!bytes.get("ok") &&
+          str(bytes.get("error").get("message")) ==
+             "parser input byte limit exceeded",
+          "arithmetic parser obeys the byte bound")
+   assert(!arithmetic.emit({"kind":"call"}).get("ok"),
+          "emitter rejects unknown node kinds")
+}
+
+test_precedence_and_emitter()
+test_errors_and_limits()
+print("✓ arithmetic parser kit tests passed")
+NY
+}

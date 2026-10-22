@@ -1,0 +1,26 @@
+shape native_complex_arithmetic_abi {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle types complex arithmetic abi-records]
+  template ny-test-case
+  flags "-O2 --native-backend x86_64 --native-result-oracle=6 --nyir-pass-stats"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+mut z = __complex_new(1.0, 2.0)
+mut zz = __complex_add(z, z)
+mut prod = __complex_mul(z, __complex_new(2.0, 2.0))
+mut flipped = __complex_conj(z)
+mut ok = 0
+if __complex_re_bits(zz) == 4611686018427387904 { ok += 1 }
+if __complex_im_bits(zz) == 4616189618054758400 { ok += 1 }
+if to_str(__complex_abs2(z)) == "5" { ok += 1 }
+if __complex_eq(zz, __complex_new(2.0, 4.0)) { ok += 1 }
+if !__complex_eq(zz, prod) { ok += 1 }
+if __complex_re_bits(flipped) == 4607182418800017408 &&
+   __complex_im_bits(flipped) == -4611686018427387904 {
+   ok += 1
+}
+ok
+NY
+}

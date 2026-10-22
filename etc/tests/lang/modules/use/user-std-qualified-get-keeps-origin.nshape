@@ -1,0 +1,21 @@
+shape user_std_qualified_get_keeps_origin {
+  family "runtime/modules/use"
+  generator "regression"
+  features ["ny" "test" "modules" "identity" "legacy-llvm"]
+  template ny-test-case
+  flags_matrix "--native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only --native-backend=x86_64"
+  expect compile_and_run
+  source ny <<'NY'
+module std.project(
+  get
+)
+
+fn get(any value, int index) int { 99 }
+
+#main {
+  assert(std.project.get([12], 0) == 99,
+         "qualified user get must not be replaced by the stdlib fast path")
+  0
+}
+NY
+}

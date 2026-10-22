@@ -1,13 +1,13 @@
 ;; Keywords: platform window backend opengl egl os ui input
 ;; EGL context creation for Wayland and X11 window backends.
 ;; References:
-;; - std.os.ui.window.platform.opengl
-;; - std.os.ui.window
-;; - std.os.ui.window.consts
-module std.os.ui.window.platform.opengl.egl(create_context, destroy_context, make_current, swap_buffers, swap_interval, get_proc_address, init_display, choose_config, create_surface, destroy_surface, get_config_attrib)
-use std.core
-use std.core.mem (cstr)
-use std.os.ui.window.platform.api as backend_api
+;; - core.os.ui.window.platform.opengl
+;; - core.os.ui.window
+;; - core.os.ui.window.consts
+module core.os.ui.window.platform.opengl.egl(create_context, destroy_context, make_current, swap_buffers, swap_interval, get_proc_address, init_display, choose_config, create_surface, destroy_surface, get_config_attrib)
+use core
+use core.mem (cstr)
+use core.os.ui.window.platform.api as backend_api
 
 #linux {
    #link "libEGL.so"
@@ -177,7 +177,7 @@ fn _create_context_with_attrs(any display, any config, any share, any attrs) any
 fn create_context(any display, any config, any share=0, int gles_ver=0) any {
    "Creates create context."
    if !display || !config { return 0 }
-   ;; The renderer in std.os.ui.render.gl uses desktop OpenGL fixed-function
+   ;; The renderer in core.os.ui.render.gl uses desktop OpenGL fixed-function
    ;; entry points. Request an EGL desktop-GL context first; GLES lacks glBegin,
    ;; matrix stack, and the client-array calls this backend intentionally uses.
    if eglBindAPI(0x30A2) != 0 {
@@ -256,5 +256,5 @@ fn get_proc_address(any name) any {
    assert(!destroy_surface(0, 0) && get_config_attrib(0, 0, 0) == 0, "egl surface fallback")
    assert(!destroy_context(0, 0), "egl destroy context fallback")
    assert(get_proc_address("definitely_missing_nytrix_probe_symbol") == 0, "egl proc fallback")
-   print("✓ std.os.ui.window.platform.opengl.egl self-test passed")
+   print("✓ core.os.ui.window.platform.opengl.egl self-test passed")
 }

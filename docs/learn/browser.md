@@ -1,59 +1,45 @@
-<!-- nytrix-doc: {"audience":"user","featured":true,"group":"learn","order":200,"summary":"Compiling, testing, and debugging Nytrix for WebAssembly and modern web browsers."} -->
-# Web & WebAssembly Guide
+<!-- nytrix-doc: {"audience":"user","featured":true,"group":"learn","order":200,"summary":"Build a browser app or Wasm artifact and check its browser host capabilities."} -->
+# Browser and WebAssembly
 
-Nytrix supports compiling to standalone WebAssembly and executing directly in browser environments.
+The browser target has its own host API. It does not inherit native filesystem,
+process, thread, audio, or Vulkan support merely because similarly named APIs
+exist on native targets. Check the capability used by the program on the exact
+browser route.
 
-## Web Tooling & Commands
+## Build and test
 
 ```bash
-# Run the complete browser test suite
+./make web etc/projects/ui/pong.ny --out build/web/pong
+./make web-check etc/projects/ui/pong.ny
 ./make web-test
-
-# Build WebAssembly demonstration bundles
+./make wasm path/to/program.ny --out build/program.wasm
 ./make web-demos
-
-# Validate web runtime contracts
-./make web-check
-
-# Compile standalone WebAssembly binary
-./make wasm
 ```
 
-## Runtime Contracts
+`web` builds a deployable browser app; `wasm` emits a Wasm artifact. Use the
+project command's help for options and prerequisites:
 
-Nytrix provides two distinct WebAssembly compilation targets:
-
-1. **`wasm-bare`**:
-   - The minimal WebAssembly contract.
-   - Embeds a compact runtime without requiring POSIX OS abstractions.
-   - Ideal for embedded canvas, computational micro-tasks, and serverless edge functions.
-
-2. **`wasm` (Full Runtime)**:
-   - Full Nytrix runtime compiled via Emscripten.
-   - Supports garbage collection, JIT compilation hooks, and virtualized filesystem operations (IndexedDB backed).
-   - Requires Emscripten SDK (`emcc`).
-
-## Browser Test Configuration (`tests.json`)
-
-Browser test fixtures are declared in `etc/tests/native/web/tests.json`:
-
-```json
-{
-  "engine": "wasm",
-  "fixture": "etc/tests/native/web/canvas_basic.ny",
-  "marker": "RENDER_OK",
-  "virtual_time_budget_ms": 5000
-}
+```bash
+./make help web
+./make help wasm
+./make help web-test
 ```
 
-### Key Configuration Fields:
-- **`engine`**: Target engine (`wasm`, `wasm-bare`).
-- **`fixture`**: Path to the executable test file.
-- **`marker`**: Expected stdout/console marker confirming successful test execution.
-- **`virtual_time_budget_ms`**: Virtual-time limit to ensure tests do not deadlock or timeout under headless browsers.
+## Host boundary
 
-## Headless Browser Debugging
+Browser code runs through explicit imports and browser capabilities. APIs that
+need a user gesture, permission, secure context, WebSocket server, or live
+browser lifecycle can fail or be unavailable even when the program compiles.
+Handle those results rather than assuming desktop behavior.
 
-- Tests automatically run under headless Chrome/Chromium via Puppeteer/Playwright if installed.
-- Fixtures requiring live window lifecycles declare capability requirements and skip gracefully when running headless.
-- Diagnostic logs capture console errors, unhandled rejections, and WebGL context state.
+The maintained browser path includes a WebGL2 runner and a minimal Wasm
+runtime. The separate Emscripten adapter has its own build and import contract;
+use it only when the project requires that toolchain. See [UI](ui.md) for
+application code and [Networking](networking.md) for browser networking.
+
+## Diagnose a failure
+
+Record the full command, target, browser, host capability, and first failing
+observable result. Separate a compile/link failure from a denied browser API or
+a missing service. See [Execution routes](routes.md) for route differences and
+[Testing](testing.md) for repository checks.

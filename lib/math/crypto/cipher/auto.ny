@@ -1,20 +1,20 @@
 ;; Keywords: cipher auto-detect decode chain classical encoding math crypto
 ;; Auto-detect and chain-decode classical cipher and encoding schemes.
 ;; References:
-;; - std.math.crypto.cipher
-;; - std.math.crypto.encoding
-module std.math.crypto.cipher.auto(decode_try, decode_chain)
-use std.core
-use std.math.bin (hex_is_valid)
-use std.math.crypto.encoding.xor (single_byte_xor_bruteforce)
-use std.math.crypto.encoding.encoding (hex_decode)
-use std.math.crypto.encoding.base (decode64, decode32, decode16)
-use std.math.crypto.encoding.radix (base58_decode_str, ascii85_decode, base92_decode)
-use std.math.crypto.cipher.atbash (atbash_text)
-use std.math.crypto.cipher.morse (morse_decode)
-use std.math.crypto.cipher.bacon (bacon_decode_ab)
-use std.math.crypto.cipher.caesar (caesar_bruteforce)
-use std.core.str (to_hex)
+;; - core.math.crypto.cipher
+;; - core.math.crypto.encoding
+module core.math.crypto.cipher.auto(decode_try, decode_chain)
+use core
+use core.math.bin (hex_is_valid)
+use core.math.crypto.encoding.xor (single_byte_xor_bruteforce)
+use core.math.crypto.encoding.encoding (hex_decode)
+use core.math.crypto.encoding.base (decode64, decode32, decode16)
+use core.math.crypto.encoding.radix (base58_decode_str, ascii85_decode, base92_decode)
+use core.math.crypto.cipher.atbash (atbash_text)
+use core.math.crypto.cipher.morse (morse_decode)
+use core.math.crypto.cipher.bacon (bacon_decode_ab)
+use core.math.crypto.cipher.caesar (caesar_bruteforce)
+use core.str (to_hex)
 
 fn _is_printable_byte(int c) bool {
    case c {

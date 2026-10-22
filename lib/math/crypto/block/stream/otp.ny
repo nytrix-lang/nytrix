@@ -4,12 +4,12 @@
 ;; - https://netlab.cs.ucla.edu/wiki/files/shannon1949.pdf
 ;; - https://cacr.uwaterloo.ca/hac/about/chap1.pdf
 ;; References:
-;; - std.math.crypto.block.stream
-;; - std.math.crypto
-module std.math.crypto.block.stream.otp(otp_reuse_attack, otp_decrypt_known_plaintext, otp_hamming_distance, otp_guess_key_sizes, otp_score_english, otp_recover_reused_key, otp_apply_key, otp_timestamp_sha256_key, otp_timestamp_sha256_xor, otp_timestamp_sha256_bruteforce)
-use std.core
-use std.math.bin (bit_count)
-use std.math.scalar (float, log10)
+;; - core.math.crypto.block.stream
+;; - core.math.crypto
+module core.math.crypto.block.stream.otp(otp_reuse_attack, otp_decrypt_known_plaintext, otp_hamming_distance, otp_guess_key_sizes, otp_score_english, otp_recover_reused_key, otp_apply_key, otp_timestamp_sha256_key, otp_timestamp_sha256_xor, otp_timestamp_sha256_bruteforce)
+use core
+use core.math.bin (bit_count)
+use core.math.scalar (float, log10)
 
 fn _timestamp_bytes(int ts) list {
    [(ts >> 24) & 0xff, (ts >> 16) & 0xff, (ts >> 8) & 0xff, ts & 0xff]
@@ -107,7 +107,7 @@ fn otp_hamming_distance(list a, list b) int {
    mut distance = 0
    mut i = 0
    while i < n {
-      distance += bit_count(__load_item_fast(a, i) ^^ __load_item_fast(b, i))
+      distance += bit_count(__load_item_fast(a, i) ^ __load_item_fast(b, i))
       i += 1
    }
    distance
@@ -172,7 +172,7 @@ fn _otp_score_english_with_key(list bytes, int key, any char_frequencies, any ch
    mut i = 0
    if char_frequencies == nil {
       while i < bytes.len {
-         def w = _otp_default_printable_weight(__load_item_fast(bytes, i) ^^ key)
+         def w = _otp_default_printable_weight(__load_item_fast(bytes, i) ^ key)
          if w < 0 { return nil }
          score += w
          i += 1
@@ -180,7 +180,7 @@ fn _otp_score_english_with_key(list bytes, int key, any char_frequencies, any ch
       return score
    }
    while i < bytes.len {
-      def b = __load_item_fast(bytes, i) ^^ key
+      def b = __load_item_fast(bytes, i) ^ key
       if !_otp_is_printable(b) { return nil }
       score = score + _otp_freq_weight(char_frequencies, b, char_floor)
       i += 1
@@ -319,7 +319,7 @@ fn otp_apply_key(list data, list key) list {
    store64(out, n, 0)
    mut i = 0
    while i < n {
-      __store_item_fast(out, i, __load_item_fast(data, i) ^^ __load_item_fast(key, i % kn))
+      __store_item_fast(out, i, __load_item_fast(data, i) ^ __load_item_fast(key, i % kn))
       i += 1
    }
    out
@@ -340,7 +340,7 @@ fn otp_timestamp_sha256_xor(list data, int timestamp) list {
    store64(out, n, 0)
    mut i = 0
    while i < n {
-      __store_item_fast(out, i, (__load_item_fast(data, i) ^^ __load_item_fast(key, i)) & 255)
+      __store_item_fast(out, i, (__load_item_fast(data, i) ^ __load_item_fast(key, i)) & 255)
       i += 1
    }
    out
@@ -384,7 +384,7 @@ fn otp_reuse_attack(list ct1, list ct2) list {
    store64(result, n, 0)
    mut i = 0
    while i < n {
-      __store_item_fast(result, i, __load_item_fast(ct1, i) ^^ __load_item_fast(ct2, i))
+      __store_item_fast(result, i, __load_item_fast(ct1, i) ^ __load_item_fast(ct2, i))
       i += 1
    }
    result
@@ -451,5 +451,5 @@ impl list {
    def recovered = otp_recover_reused_key([ct1, ct2, ct3], key.len, key.len)
    assert(recovered == key, "recover known-size repeating key")
    print("otp_score_case_probe ok")
-   print("✓ std.math.crypto.block.stream.otp self-test passed")
+   print("✓ core.math.crypto.block.stream.otp self-test passed")
 }

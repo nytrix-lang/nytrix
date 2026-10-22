@@ -1,10 +1,10 @@
 ;; Keywords: quat quaternion math crypto
 ;; Quaternion mathematics for Nytrix
 ;; References:
-;; - std.math.crypto
-module std.math.crypto.quat(quat, quat_identity, quat_mul, quat_dot, quat_norm, quat_slerp, quat_to_mat4, mul)
-use std.core
-use std.math
+;; - core.math.crypto
+module core.math.crypto.quat(quat, quat_identity, quat_mul, quat_dot, quat_norm, quat_slerp, quat_to_mat4, mul)
+use core
+use core.math
 
 fn quat(any x=0, any y=0, any z=0, any w=1) list {
    "Creates a 4-component quaternion [x, y, z, w]. Defaults to identity if no arguments provided."
@@ -83,7 +83,7 @@ fn quat_to_mat4(list q) list {
    def xx, yy, zz = x * x, y * y, z * z
    def xy, xz, yz = x * y, x * z, y * z
    def wx, wy, wz = w * x, w * y, w * z
-   use std.math.matrix
+   use core.math.matrix
    mut m = mat4_identity()
    m[0] = 1 - 2 * (yy + zz)
    m[1] = 2 * (xy + wz)
@@ -110,5 +110,5 @@ fn mul(any a, any b) any {
    def m = quat_to_mat4(quat(1, 0, 0, 0))
    assert(m.len == 16 && m[0] == 1.0 && m[5] == -1.0 && m[10] == -1.0, "quat mat4 axes")
    assert(quat_mul(id, quat(1, 2, 3, 4)) == quat(1, 2, 3, 4), "quat multiply identity")
-   print("✓ std.math.crypto.quat self-test passed")
+   print("✓ core.math.crypto.quat self-test passed")
 }

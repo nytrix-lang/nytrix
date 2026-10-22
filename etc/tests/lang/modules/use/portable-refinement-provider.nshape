@@ -1,0 +1,12 @@
+shape portable_refinement_provider {
+  family "runtime/modules/use"
+  generator "embedded"
+  features ["ny", "test", "modules", "refinement"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+module provider(Positive)
+
+refine Positive = int where(value) { value > 0 }
+NY
+}

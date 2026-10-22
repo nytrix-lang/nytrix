@@ -1,23 +1,23 @@
 ;; Keywords: image graphics svg vector webp tga gif jpeg jpg png exr openexr hdr bmp bitmap parse
 ;; Image codec facade for PNG, JPEG, BMP, GIF, TGA, WebP, SVG, EXR, and image metadata.
 ;; References:
-;; - std.math.parse
-module std.math.parse.img(decode, get_info, load, save, encode, free)
-use std.core
-use std.core.dict_mod
-use std.os
-use std.os.thread
-use std.os.path as ospath
-use std.core.str as str
-use std.math.parse.img.bmp as bmp
-use std.math.parse.img.exr as exr
-use std.math.parse.img.gif as gif
-use std.math.parse.img.jpeg as jpeg
-use std.math.parse.img.png as png
-use std.math.parse.img.svg as svg
-use std.math.parse.img.tga as tga
-use std.math.parse.img.webp as webp
-use std.core.common as common
+;; - core.math.parse
+module core.math.parse.img(decode, get_info, load, save, encode, free)
+use core
+use core.dict_mod
+use core.os
+use core.os.thread
+use core.os.path as ospath
+use core.str as str
+use core.math.parse.img.bmp as bmp
+use core.math.parse.img.exr as exr
+use core.math.parse.img.gif as gif
+use core.math.parse.img.jpeg as jpeg
+use core.math.parse.img.png as png
+use core.math.parse.img.svg as svg
+use core.math.parse.img.tga as tga
+use core.math.parse.img.webp as webp
+use core.common as common
 
 mut _image_decode_mu = 0
 mut _image_lock_native_cache = -1

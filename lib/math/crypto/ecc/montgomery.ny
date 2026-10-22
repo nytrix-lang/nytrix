@@ -3,10 +3,10 @@
 ;; Reference:
 ;; - https://cr.yp.to/ecdh/curve25519-20060209.pdf
 ;; References:
-;; - std.math.crypto.ecc
-;; - std.math.crypto
-module std.math.crypto.ecc.montgomery(montgomery_is_on_curve, montgomery_negate, montgomery_point_add, montgomery_point_double, montgomery_scalar_mult, montgomery_base_point)
-use std.math.nt
+;; - core.math.crypto.ecc
+;; - core.math.crypto
+module core.math.crypto.ecc.montgomery(montgomery_is_on_curve, montgomery_negate, montgomery_point_add, montgomery_point_double, montgomery_scalar_mult, montgomery_base_point)
+use core.math.nt
 
 fn montgomery_is_on_curve(any P, any A, any B, any p) bool {
    "Return true when P=[x,y] lies on B*y^2 = x^3 + A*x^2 + x over Fp."

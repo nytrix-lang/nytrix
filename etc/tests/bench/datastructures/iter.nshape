@@ -1,0 +1,100 @@
+shape iter {
+  family "perf-real"
+  generator "stress"
+  features ["perf", "c-vs-ny", "checksum"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.time
+;; Iterator-pipeline: map, reverse, chain over Ny lists.
+def n = 20000
+mut xs = []
+mut i = 0
+while i < n {
+   xs = append(xs, i)
+   i += 1
+}
+mut mapped = []
+mut reversed = []
+mut chained = []
+def int start = ticks()
+i = 0
+while i < n {
+   mapped = append(mapped, xs[i] + 1)
+   chained = append(chained, xs[i] + 1)
+   i += 1
+}
+i = 0
+while i < n {
+   def v = mapped[n - 1 - i]
+   reversed = append(reversed, v)
+   chained = append(chained, v)
+   i += 1
+}
+mut sum = 0
+i = 0
+while i < n * 2 {
+   sum += chained[i]
+   i += 1
+}
+def int end = ticks()
+print("checksum=", sum)
+print("elapsed_ns=", end - start)
+NY
+  source c <<'C'
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+
+static int64_t now_ns(void) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0;
+    return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
+}
+
+typedef struct { int64_t *data; size_t len, capacity; } I64Vec;
+
+static int append(I64Vec *v, int64_t value) {
+    if (v->len == v->capacity) {
+        size_t next = v->capacity ? v->capacity * 2 : 8;
+        if (next < v->capacity || next > SIZE_MAX / sizeof(*v->data))
+            return 0;
+        int64_t *grown = realloc(v->data, next * sizeof(*v->data));
+        if (!grown) return 0;
+        v->data = grown;
+        v->capacity = next;
+    }
+    v->data[v->len++] = value;
+    return 1;
+}
+
+static void release(I64Vec *v) { free(v->data); }
+
+int main(void) {
+    const int n = 20000;
+    int64_t *xs = malloc((size_t)n * sizeof(*xs));
+    if (!xs) return 2;
+    for (int i = 0; i < n; i++) xs[i] = i;
+    I64Vec mapped = {0}, reversed = {0}, chained = {0};
+    int64_t start = now_ns();
+    for (int i = 0; i < n; i++) {
+        int64_t value = xs[i] + 1;
+        if (!append(&mapped, value) || !append(&chained, value)) return 2;
+    }
+    for (int i = 0; i < n; i++) {
+        int64_t value = mapped.data[n - 1 - i];
+        if (!append(&reversed, value) || !append(&chained, value)) return 2;
+    }
+    int64_t sum = 0;
+    for (size_t i = 0; i < chained.len; i++) sum += chained.data[i];
+    int64_t end = now_ns();
+    free(xs); release(&mapped); release(&reversed); release(&chained);
+    printf("checksum=%lld\n", (long long)sum);
+    if (end <= start) end = start + 1;
+    printf("elapsed_ns=%lld\n", (long long)(end - start));
+    return 0;
+}
+C
+}

@@ -1,0 +1,16 @@
+shape broad_import_alias_collision {
+  family "language/modules/use"
+  generator "embedded"
+  features ["ny", "test", "abi", "identity"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.math.crypto.error
+
+assert(error.crypto_require(true, "alias", "explicit import wins"),
+       "explicitly imported module wins over nested core.error")
+0
+NY
+}

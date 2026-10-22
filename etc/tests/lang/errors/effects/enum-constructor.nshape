@@ -1,0 +1,37 @@
+shape enum_constructor_requires_alloc {
+  family "compiler-errors/effects"
+  generator "error"
+  features ["error", "effects", "enum", "negative", "diagnostic"]
+  template ny-compile-fail
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-only; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_fail
+  expect_message "declared @effects(none) but inferred effects=alloc"
+  source ny <<'NY'
+enum Message { Data(int code) }
+@effects(none)
+fn bad() Message { Message.Data(0) }
+bad()
+NY
+}
+
+shape enum_constructor_preserves_argument_effects {
+  family "compiler-errors/effects"
+  generator "error"
+  features ["error", "effects", "enum", "negative", "diagnostic"]
+  template ny-compile-fail
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-only; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_fail
+  expect_message "declared @effects(alloc) but inferred effects=io|alloc"
+  source ny <<'NY'
+use core
+enum Message { Data(int code) }
+@effects(io)
+fn argument() int {
+   print("argument")
+   return 7
+}
+@effects(alloc)
+fn bad() Message { Message.Data(argument()) }
+bad()
+NY
+}

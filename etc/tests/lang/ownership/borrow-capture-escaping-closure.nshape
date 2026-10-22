@@ -1,0 +1,20 @@
+shape ownership_rule_borrow_capture_escaping_closure {
+  family "compiler-errors/ownership"
+  generator "error"
+  features ["error", "ownership", "negative", "borrow", "closure", "escape"]
+  template ny-compile-fail
+  expect compile_fail
+  flags "--ownership-strict"
+  expect_message "a second-class borrow cannot be captured by a closure"
+  source ny <<'NY'
+use core
+
+fn make(int x) {
+  def ref = &x
+  return fn() { ref }
+}
+
+def saved = make(1)
+saved()
+NY
+}

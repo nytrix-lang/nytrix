@@ -1,14 +1,14 @@
 ;; Keywords: factorization classical qs mpqs siqs quadratic-sieve relation polynomial
-;; References: std.math.crypto.factorization.classical.misc
-module std.math.crypto.factorization.classical.qs(_mpqs_a_divisor_cycle_from_base, _mpqs_a_divisor_disabled_fields, _mpqs_a_divisor_fields, _mpqs_a_divisor_pool, _mpqs_a_divisor_pool_from_schedule, _mpqs_a_divisor_target, _mpqs_adiv_count_for_base, _mpqs_adiv_product_from_mask, _mpqs_advance_center_mods, _mpqs_append_sign_polys, _mpqs_attempt_apply_step, _mpqs_attempt_collect_pass, _mpqs_attempt_collect_state, _mpqs_attempt_collect_windows, _mpqs_attempt_finish_pass, _mpqs_attempt_policy_report, _mpqs_base_without_pool, _mpqs_best_adiv_mask, _mpqs_bit_bucket_counts, _mpqs_bound_for_target_base_count, _mpqs_bucketed_prime_loop_report, _mpqs_build_adiv_polys, _mpqs_byte_disabled_fields, _mpqs_byte_sieve_add_roots_raw, _mpqs_byte_sieve_survivor_scan, _mpqs_byte_sieve_survivor_stats, _mpqs_byte_sieve_tail_fields, _mpqs_byte_sieve_window_int_roots_into, _mpqs_byte_sieve_window_summary, _mpqs_byte_total_fields, _mpqs_byte_totals_add, _mpqs_byte_window_choice, _mpqs_collect_byte_window_relations, _mpqs_collect_fallback_window_relations, _mpqs_collect_result, _mpqs_collect_window_step, _mpqs_default_work_plan, _mpqs_direct_byte_total_fields, _mpqs_early_dependency, _mpqs_finish_attempt_report, _mpqs_has_prime_bits, _mpqs_interp_int, _mpqs_inv_mod_int, _mpqs_list_has_z, _mpqs_maybe_early_dependency, _mpqs_mod_int_norm, _mpqs_pack_survivor, _mpqs_param_dict, _mpqs_param_result, _mpqs_pick_scheduled_prime, _mpqs_plain_root_filter, _mpqs_poly_byte_sieve_window_into, _mpqs_poly_from_primes_with_signs, _mpqs_popcount_mask, _mpqs_prime_bits, _mpqs_primes_from_mask, _mpqs_raw_byte_sieve_add_pos, _mpqs_raw_byte_sieve_root_pos, _mpqs_raw_byte_sieve_score_window_int_roots, _mpqs_raw_byte_sieve_start_rem, _mpqs_relation_buffer, _mpqs_relation_buffer_trim, _mpqs_root_filter_hit, _mpqs_root_filter_list_to_raw_shifted, _mpqs_root_filter_list_to_raw_shifted32, _mpqs_roots_ints, _mpqs_sieve_params_for_bits, _mpqs_sieve_score_min, _mpqs_source_adjust_factor_bits, _mpqs_source_factor_bit_schedule, _mpqs_source_start_bits, _mpqs_sqrt_roots, _mpqs_start_mods, _mpqs_used_attempt_fields, _mpqs_window_attempt_report, _mpqs_window_finish_fields, _mpqs_window_report, _mpqs_window_solve_fields, _mpqs_window_stats_add, _qs_batch_extract_smooth, _qs_batch_merge_tree_reports, _qs_batch_process_leaf, _qs_batch_product_range, _qs_batch_remainder_tree, _qs_batch_work_items, _qs_best_multiplier_fast, _qs_clean_prime_list, _qs_congruence_factor, _qs_dependency_matrix, _qs_dependency_solve_filtered_report, _qs_dependency_solve_report, _qs_dependency_sparse_rows, _qs_factor_base_bigints, _qs_factor_base_ints, _qs_factor_base_report, _qs_factor_base_result, _qs_factor_over_base_filtered_int_raw_scan_limited, _qs_factor_over_base_filtered_int_raw_scan_pos, _qs_factor_over_base_filtered_int_raw_scan_pos_collect32, _qs_factor_over_base_filtered_int_raw_scan_pos_limited, _qs_factor_over_base_filtered_int_raw_scan_pos_limited_collect32, _qs_factor_over_base_intbase_scan, _qs_factor_over_base_profile, _qs_factor_over_base_profile_filtered, _qs_factor_over_base_profile_filtered_int, _qs_factor_over_base_profile_int, _qs_factor_over_base_profile_intbase, _qs_has_singleton_parity, _qs_large_prime_acceptance_report, _qs_large_prime_relation_record, _qs_large_prime_tuple_key, _qs_legendre_int, _qs_lp_cycle_graph, _qs_lp_hist_set, _qs_lp_normalize_square_pairs, _qs_lp_root, _qs_lp_roots_same, _qs_lp_singleton_prune, _qs_lp_surviving_relations, _qs_lp_union_roots, _qs_lp_unique_records, _qs_lp_vertices, _qs_multiplier_candidates, _qs_multiplier_score_int, _qs_multiplier_summary_report, _qs_parity_weight, _qs_pow_mod_int, _qs_prime_base, _qs_prime_base_int, _qs_prime_product_report, _qs_prune_singletons, _qs_relation, _qs_relation_cofactor_values, _qs_relation_collection_fields, _qs_relation_compact, _qs_relation_int_raw_mpqs, _qs_relation_int_sparse_mpqs, _qs_relation_large_primes, _qs_relation_parity, _qs_relation_width, _qs_sieve_add_root, _qs_sieve_score_min, _qs_sieve_scores_siqs_raw_into, _qs_sieve_scores_siqs_with_roots, _qs_singleton_prune_round, _qs_smooth_metric_fields, _qs_smooth_metric_fields_from, _qs_sort_large_primes, _qs_square_relation_factor, _qs_try_dependency_candidates_mod_report, _qs_try_verified_dependency_mod, _qs_unique_relation_report, _qs_zero_counts, _qs_zero_scores, _siqs_a_exponents, _siqs_apply_a_exponents, _siqs_collect_poly_pass, _siqs_collect_poly_pass_int_raw, _siqs_collect_poly_pass_int_raw_loop, _siqs_collect_relations, _siqs_collect_state, _siqs_cutoff_candidates, _siqs_cutoff_disabled, _siqs_cutoff_measurement, _siqs_cutoff_measurement_raw, _siqs_cutoff_tune_from_polys, _siqs_factor_relation_fields, _siqs_factor_sieve_fields, _siqs_factor_solve_fields, _siqs_poly_from_primes, _siqs_poly_int_scan_allowed, _siqs_poly_report_fields, _siqs_poly_scan_result, _siqs_polynomial_report, _siqs_relation_fields, _siqs_relation_final_fields, _siqs_relation_intbase, _siqs_relation_intbase_for_mode, _siqs_relation_report, _siqs_residue_primes, mpqs_a_divisor_cycle_report, mpqs_byte_sieve_report, mpqs_factor, mpqs_factor_report, mpqs_multiplier_report, mpqs_sieve_parameter_report, mpqs_source_factor, mpqs_source_factor_report, mpqs_source_work_plan_report, mpqs_work_plan_report, qs_batch_cofactor_report, qs_large_prime_filter_report, qs_multiplier_report, qs_relation_filter_report, quadratic_sieve_factor, quadratic_sieve_factor_report, siqs_cutoff_tune_report, siqs_factor, siqs_factor_report, siqs_polynomial_report, siqs_relation_report)
-use std.math.nt
-use std.math.scalar as math
-use std.math.matrix as matrix
-use std.math.bin (bit_count)
-use std.os (ticks)
-use std.math.crypto.factorization.classical.misc
-use std.math.crypto.factorization.classical.dixon
-use std.math.crypto.factorization.classical.gf2
+;; References: core.math.crypto.factorization.classical.misc
+module core.math.crypto.factorization.classical.qs(_mpqs_a_divisor_cycle_from_base, _mpqs_a_divisor_disabled_fields, _mpqs_a_divisor_fields, _mpqs_a_divisor_pool, _mpqs_a_divisor_pool_from_schedule, _mpqs_a_divisor_target, _mpqs_adiv_count_for_base, _mpqs_adiv_product_from_mask, _mpqs_advance_center_mods, _mpqs_append_sign_polys, _mpqs_attempt_apply_step, _mpqs_attempt_collect_pass, _mpqs_attempt_collect_state, _mpqs_attempt_collect_windows, _mpqs_attempt_finish_pass, _mpqs_attempt_policy_report, _mpqs_base_without_pool, _mpqs_best_adiv_mask, _mpqs_bit_bucket_counts, _mpqs_bound_for_target_base_count, _mpqs_bucketed_prime_loop_report, _mpqs_build_adiv_polys, _mpqs_byte_disabled_fields, _mpqs_byte_sieve_add_roots_raw, _mpqs_byte_sieve_survivor_scan, _mpqs_byte_sieve_survivor_stats, _mpqs_byte_sieve_tail_fields, _mpqs_byte_sieve_window_int_roots_into, _mpqs_byte_sieve_window_summary, _mpqs_byte_total_fields, _mpqs_byte_totals_add, _mpqs_byte_window_choice, _mpqs_collect_byte_window_relations, _mpqs_collect_fallback_window_relations, _mpqs_collect_result, _mpqs_collect_window_step, _mpqs_default_work_plan, _mpqs_direct_byte_total_fields, _mpqs_early_dependency, _mpqs_finish_attempt_report, _mpqs_has_prime_bits, _mpqs_interp_int, _mpqs_inv_mod_int, _mpqs_list_has_z, _mpqs_maybe_early_dependency, _mpqs_mod_int_norm, _mpqs_pack_survivor, _mpqs_param_dict, _mpqs_param_result, _mpqs_pick_scheduled_prime, _mpqs_plain_root_filter, _mpqs_poly_byte_sieve_window_into, _mpqs_poly_from_primes_with_signs, _mpqs_popcount_mask, _mpqs_prime_bits, _mpqs_primes_from_mask, _mpqs_raw_byte_sieve_add_pos, _mpqs_raw_byte_sieve_root_pos, _mpqs_raw_byte_sieve_score_window_int_roots, _mpqs_raw_byte_sieve_start_rem, _mpqs_relation_buffer, _mpqs_relation_buffer_trim, _mpqs_root_filter_hit, _mpqs_root_filter_list_to_raw_shifted, _mpqs_root_filter_list_to_raw_shifted32, _mpqs_roots_ints, _mpqs_sieve_params_for_bits, _mpqs_sieve_score_min, _mpqs_source_adjust_factor_bits, _mpqs_source_factor_bit_schedule, _mpqs_source_start_bits, _mpqs_sqrt_roots, _mpqs_start_mods, _mpqs_used_attempt_fields, _mpqs_window_attempt_report, _mpqs_window_finish_fields, _mpqs_window_report, _mpqs_window_solve_fields, _mpqs_window_stats_add, _qs_batch_extract_smooth, _qs_batch_merge_tree_reports, _qs_batch_process_leaf, _qs_batch_product_range, _qs_batch_remainder_tree, _qs_batch_work_items, _qs_best_multiplier_fast, _qs_clean_prime_list, _qs_congruence_factor, _qs_dependency_matrix, _qs_dependency_solve_filtered_report, _qs_dependency_solve_report, _qs_dependency_sparse_rows, _qs_factor_base_bigints, _qs_factor_base_ints, _qs_factor_base_report, _qs_factor_base_result, _qs_factor_over_base_filtered_int_raw_scan_limited, _qs_factor_over_base_filtered_int_raw_scan_pos, _qs_factor_over_base_filtered_int_raw_scan_pos_collect32, _qs_factor_over_base_filtered_int_raw_scan_pos_limited, _qs_factor_over_base_filtered_int_raw_scan_pos_limited_collect32, _qs_factor_over_base_intbase_scan, _qs_factor_over_base_profile, _qs_factor_over_base_profile_filtered, _qs_factor_over_base_profile_filtered_int, _qs_factor_over_base_profile_int, _qs_factor_over_base_profile_intbase, _qs_has_singleton_parity, _qs_large_prime_acceptance_report, _qs_large_prime_relation_record, _qs_large_prime_tuple_key, _qs_legendre_int, _qs_lp_cycle_graph, _qs_lp_hist_set, _qs_lp_normalize_square_pairs, _qs_lp_root, _qs_lp_roots_same, _qs_lp_singleton_prune, _qs_lp_surviving_relations, _qs_lp_union_roots, _qs_lp_unique_records, _qs_lp_vertices, _qs_multiplier_candidates, _qs_multiplier_score_int, _qs_multiplier_summary_report, _qs_parity_weight, _qs_pow_mod_int, _qs_prime_base, _qs_prime_base_int, _qs_prime_product_report, _qs_prune_singletons, _qs_relation, _qs_relation_cofactor_values, _qs_relation_collection_fields, _qs_relation_compact, _qs_relation_int_raw_mpqs, _qs_relation_int_sparse_mpqs, _qs_relation_large_primes, _qs_relation_parity, _qs_relation_width, _qs_sieve_add_root, _qs_sieve_score_min, _qs_sieve_scores_siqs_raw_into, _qs_sieve_scores_siqs_with_roots, _qs_singleton_prune_round, _qs_smooth_metric_fields, _qs_smooth_metric_fields_from, _qs_sort_large_primes, _qs_square_relation_factor, _qs_try_dependency_candidates_mod_report, _qs_try_verified_dependency_mod, _qs_unique_relation_report, _qs_zero_counts, _qs_zero_scores, _siqs_a_exponents, _siqs_apply_a_exponents, _siqs_collect_poly_pass, _siqs_collect_poly_pass_int_raw, _siqs_collect_poly_pass_int_raw_loop, _siqs_collect_relations, _siqs_collect_state, _siqs_cutoff_candidates, _siqs_cutoff_disabled, _siqs_cutoff_measurement, _siqs_cutoff_measurement_raw, _siqs_cutoff_tune_from_polys, _siqs_factor_relation_fields, _siqs_factor_sieve_fields, _siqs_factor_solve_fields, _siqs_poly_from_primes, _siqs_poly_int_scan_allowed, _siqs_poly_report_fields, _siqs_poly_scan_result, _siqs_polynomial_report, _siqs_relation_fields, _siqs_relation_final_fields, _siqs_relation_intbase, _siqs_relation_intbase_for_mode, _siqs_relation_report, _siqs_residue_primes, mpqs_a_divisor_cycle_report, mpqs_byte_sieve_report, mpqs_factor, mpqs_factor_report, mpqs_multiplier_report, mpqs_sieve_parameter_report, mpqs_source_factor, mpqs_source_factor_report, mpqs_source_work_plan_report, mpqs_work_plan_report, qs_batch_cofactor_report, qs_large_prime_filter_report, qs_multiplier_report, qs_relation_filter_report, quadratic_sieve_factor, quadratic_sieve_factor_report, siqs_cutoff_tune_report, siqs_factor, siqs_factor_report, siqs_polynomial_report, siqs_relation_report)
+use core.math.nt
+use core.math.scalar as math
+use core.math.matrix as matrix
+use core.math.bin (bit_count)
+use core.os (ticks)
+use core.math.crypto.factorization.classical.misc
+use core.math.crypto.factorization.classical.dixon
+use core.math.crypto.factorization.classical.gf2
 
 fn _qs_smooth_metric_fields(
    int candidate_count, int smooth_tests, int smooth_hits,
@@ -1317,10 +1317,10 @@ fn _mpqs_a_divisor_pool_from_schedule(list usable, int n_total, int target_prime
 }
 
 fn _mpqs_best_adiv_mask(list pool, int n_adiv, any target_A, dict seen_masks) dict {
-   mut best_mask = 0
-   mut best_score = 0.0
+   mut int best_mask = 0
+   mut f64 best_score = 0.0
    def mask_limit = pool.len > 0 ? (1 << pool.len) : 0
-   mut mask = 1
+   mut int mask = 1
    while mask < mask_limit {
       def key = to_str(mask)
       if _mpqs_popcount_mask(mask) == n_adiv && !seen_masks.contains(key) {
@@ -1620,14 +1620,15 @@ fn mpqs_byte_sieve_report(any n, int factor_base_bound=337, int windows=3, int w
    def buckets = _mpqs_bucketed_prime_loop_report(base, sieve_len)
    mut window_reports = []
    mut byte_totals = dict()
-   mut max_score = 0
+   mut int max_score = 0
    mut center = start
    def center_stride = Z(stride)
    mut w = 0
    while w < windows {
       def window = _mpqs_byte_sieve_window_int_roots_into(scratch, base_ints, sqrt_roots_int, center_mods, buckets, center, window_radius, threshold, start)
       byte_totals = _mpqs_byte_totals_add(byte_totals, window)
-      max_score = max(max_score, int(window.get("max_score", 0)))
+      mut int window_max = int(window.get("max_score", 0))
+      if window_max > max_score { max_score = window_max }
       window_reports = window_reports.append(_mpqs_byte_sieve_window_summary(window, w, 0))
       _mpqs_advance_center_mods(center_mods, stride_mods, base_ints)
       center += center_stride
@@ -3525,7 +3526,7 @@ fn _siqs_collect_poly_pass_int_raw_loop(
    int score_min, int max_relations, bool pass0, bool has_root_filters,
    bool include_relation_details, ptr raw_counts
 ) dict {
-   mut relations = relations_in
+   mut list relations = relations_in
    mut a_exps = []
    mut a_exps_ready = false
    mut int found = 0
@@ -3604,7 +3605,7 @@ fn _siqs_collect_poly_pass_int_raw(
    bool include_relation_details=true, bool include_poly_report=true,
 ) dict {
    mut relation_count = relations_in.len
-   mut relations = _mpqs_relation_buffer(relations_in, max_relations)
+   mut list relations = _mpqs_relation_buffer(relations_in, max_relations)
    mut state_candidate_count = int(state_in.get("candidate_count", 0))
    mut state_smooth_tests = int(state_in.get("smooth_tests", 0))
    mut state_smooth_hits = int(state_in.get("smooth_hits", 0))
@@ -3767,7 +3768,8 @@ fn _siqs_collect_poly_pass(
 }
 
 fn _siqs_collect_relations(any modulus, list base, list polys, int sieve_radius, int score_min, int max_relations, int multiplier, bool include_relation_details=true, bool include_poly_reports=true) dict {
-   mut relations, poly_reports = [], []
+   mut list relations = []
+   mut list poly_reports = []
    mut state = _siqs_collect_state()
    def trial_base = _qs_factor_base_ints(base)
    def sqrt_roots = _mpqs_sqrt_roots(modulus, base)
@@ -3953,7 +3955,7 @@ fn _qs_try_dependency_candidates_mod_report(any original_n, any modulus, list ba
       }
    } else {
       def limit = 1 << basis.len
-      mut mask = 1
+      mut int mask = 1
       while mask < limit && deps < cap && factor == nil {
          mut dep = _gf2_zero_vec(w)
          mut i = 0
@@ -4287,7 +4289,7 @@ fn _mpqs_byte_window_choice(
 
 fn _mpqs_collect_byte_window_relations_int(any nz, int modulus_i, list factor_base, list<int> trial_base, list<int> survivors, int survivor_count, int radius, int fallback_score_min, bool has_poly, int poly_A_i, int poly_B_i, int center_i, list<int> root_filters, int max_relations, list relations_in, bool large_relation_target) dict {
    mut relation_count = relations_in.len
-   mut relations = _mpqs_relation_buffer(relations_in, max_relations)
+   mut list relations = _mpqs_relation_buffer(relations_in, max_relations)
    mut found, smooth_tests, smooth_hits = 0, 0, 0
    mut trial_prime_tests, trial_divisions, nonzero_terms = 0, 0, 0
    mut prefilter_tested, a_divisor_relations = 0, 0
@@ -4418,7 +4420,7 @@ fn _mpqs_collect_byte_window_relations_int(any nz, int modulus_i, list factor_ba
 
 fn _mpqs_collect_byte_window_relations_big(any nz, any modulus, list factor_base, list<int> trial_base, list<int> survivors, int survivor_count, int radius, int fallback_score_min, bool has_poly, any raw_poly_A, any raw_poly_B, any center, list<int> root_filters, int max_relations, list relations_in, bool large_relation_target, int modulus_bits) dict {
    mut relation_count = relations_in.len
-   mut relations = _mpqs_relation_buffer(relations_in, max_relations)
+   mut list relations = _mpqs_relation_buffer(relations_in, max_relations)
    mut found, smooth_tests, smooth_hits = 0, 0, 0
    mut trial_prime_tests, trial_divisions, nonzero_terms = 0, 0, 0
    mut prefilter_tested, a_divisor_relations = 0, 0
@@ -4579,7 +4581,7 @@ fn _mpqs_collect_byte_window_relations(any nz, any modulus, list factor_base, li
 
 fn _mpqs_collect_fallback_window_relations(ptr scratch, any nz, any modulus, list base, list base_sqrt_roots, list<int> base_ints, list<int> base_sqrt_roots_int, list<int> center_mods, list factor_base, list<int> trial_base, any center, any start, int window_radius, int score_min, int w, int max_relations, list relations_in) dict {
    mut relation_count = relations_in.len
-   mut relations = _mpqs_relation_buffer(relations_in, max_relations)
+   mut list relations = _mpqs_relation_buffer(relations_in, max_relations)
    mut found, smooth_tests, smooth_hits = 0, 0, 0
    mut trial_prime_tests, trial_divisions, nonzero_terms, fallback_tests = 0, 0, 0, 0
    def root_filter_bytes = max(32, base.len * 32)
@@ -4689,7 +4691,7 @@ fn _mpqs_collect_window_step(
    bool adiv_enabled, int pass, int w, any center, any start, int window_radius,
    int score_min, int max_relations, list relations_in
 ) dict {
-   mut relations = relations_in
+   mut list relations = relations_in
    mut found, window_candidates, window_smooth_tests = 0, 0, 0
    mut window_trial_prime_tests, window_trial_divisions = 0, 0
    mut byte_report = dict()
@@ -5047,11 +5049,15 @@ fn mpqs_sieve_parameter_report(any n, bool input_is_bits=false) dict {
 fn _mpqs_bound_for_target_base_count(any n, any modulus, int target_count, int max_prime_bound) dict {
    def t0 = ticks()
    def nz, mz = _z(n), _z(modulus)
-   mut bound = 31
+   mut int bound = 31
    mut rep = _qs_factor_base_report(nz, mz, bound)
    mut probes = 1
    while rep.get("factor", nil) == nil && rep.get("base", []).len < target_count && bound < max_prime_bound {
-      bound = min(max_prime_bound, max(bound + 2, int(float(bound) * 1.35) + 8))
+      mut int next_bound = bound + 2
+      mut int scaled_bound = int(float(bound) * 1.35) + 8
+      if scaled_bound > next_bound { next_bound = scaled_bound }
+      if next_bound > max_prime_bound { next_bound = max_prime_bound }
+      bound = next_bound
       rep = _qs_factor_base_report(nz, mz, bound)
       probes += 1
    }
@@ -5300,5 +5306,5 @@ fn mpqs_source_factor(any n, int max_factor_base_count=96, int max_prime_bound=1
    }
    def default_factor = siqs_factor(semiprimes[2][0])
    assert(default_factor == semiprimes[2][1] || default_factor == semiprimes[2][2], "SIQS default plan does not silently return nil")
-   print("✓ std.math.crypto.factorization.classical.qs self-test passed")
+   print("✓ core.math.crypto.factorization.classical.qs self-test passed")
 }

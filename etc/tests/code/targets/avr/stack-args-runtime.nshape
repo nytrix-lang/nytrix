@@ -1,0 +1,230 @@
+shape avr_stack_arguments_execute_under_qemu {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "test", "avr", "portable-text", "stack-arguments", "extern",
+            "c-abi", "qemu"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os (file_remove, file_write, pid, run_capture, temp_dir)
+
+def compiler = env("NYTRIX_NY_FULL_BIN")
+assert(is_str(compiler) && compiler.len > 0,
+       "test runner provides the compiler path")
+def stem = temp_dir() + "/ny-avr-stack-args-" + to_str(pid())
+def asm_path = stem + ".s"
+def start_path = stem + "-start.s"
+def c_path = stem + "-extern.c"
+def obj_path = stem + ".o"
+def start_obj_path = stem + "-start.o"
+def c_obj_path = stem + "-extern.o"
+def elf_path = stem + ".elf"
+def c_source =
+  "long long external3(long long first, long long second, " +
+  "long long third) { return third; }\n" +
+  "long long external4(long long first, long long second, " +
+  "long long third, long long fourth) { return fourth; }\n" +
+  "long long external_float3(long long first, long long second, float value) " +
+  "{ union { float f; unsigned long bits; } raw; raw.f = value; " +
+  "return (long long)raw.bits; }\n" +
+  "long long external_float1(float value) { " +
+  "union { float f; unsigned long bits; } raw; raw.f = value; " +
+  "return (long long)raw.bits; }\n" +
+  "long long external_i64_float(long long first, float value) { " +
+  "union { float f; unsigned long bits; } raw; raw.f = value; " +
+  "return (long long)raw.bits; }\n" +
+  "long long external_two_float(float first, float second) { " +
+  "union { float f; unsigned long bits; } a, b; a.f = first; b.f = second; " +
+  "return (long long)(a.bits ^ b.bits); }\n" +
+  "long long external_mixed_float_stack(long long first, float a, float b, " +
+  "float value) { union { float f; unsigned long bits; } raw; raw.f = value; " +
+  "return (long long)raw.bits; }\n" +
+  "float external_float_echo(float value) { return value; }\n"
+def source =
+  "extern \"c\" {\n" +
+  "  fn external3(i64 first, i64 second, i64 third) i64\n" +
+  "  fn external4(i64 first, i64 second, i64 third, i64 fourth) i64\n" +
+  "  fn external_float3(i64 first, i64 second, f32 value) i64\n" +
+  "  fn external_float1(f32 value) i64\n" +
+  "  fn external_i64_float(i64 first, f32 value) i64\n" +
+  "  fn external_two_float(f32 first, f32 second) i64\n" +
+  "  fn external_mixed_float_stack(i64 first, f32 a, f32 b, f32 value) i64\n" +
+  "  fn external_float_echo(f32 value) f32\n" +
+  "}\n" +
+  "@noinline\nfn combine3(int first, int second, int third) int {\n" +
+  "  third\n}\n" +
+  "@noinline\nfn combine4(int first, int second, int third, int fourth) int {\n" +
+  "  fourth\n}\n" +
+  "@noinline\nfn combine9(int first, int second, int third, int fourth, " +
+  "int fifth, int sixth, int seventh, int eighth, int ninth) int {\n" +
+  "  ninth\n}\n" +
+  "combine3(1, 2, -3) + 3 + " +
+  "combine4(1, 2, 3, 0x0102030405060708) - 0x0102030405060708 + " +
+  "combine9(1, 2, 3, 4, 5, 6, 7, 8, 0x0102030405060708) - " +
+  "0x0102030405060708 + " +
+  "external3(1, 2, -3) + 3 + " +
+  "external4(1, 2, 3, 0x0102030405060708) - 0x0102030405060708 + " +
+  "external_float3(1, 2, 1.5f32) - 1069547520 + " +
+  "external_float1(1.5f32) - 1069547520 + " +
+  "external_i64_float(2, 1.5f32) - 1069547520 + " +
+  "external_two_float(1.5f32, 2.0f32) - 2143289344 + " +
+  "external_mixed_float_stack(1, 1.0f32, 2.0f32, 3.0f32) - 1077936128 + " +
+  "if external_float_echo(1.5f32) == 1.5f32 { 0 } else { 1 }"
+def start_source =
+  ".text\n.global _start\n_start:\n" +
+  "  call rt_main\n" +
+  "  ldi r16, 0\n  sts 0x00C5, r16\n" +
+  "  ldi r16, 103\n  sts 0x00C4, r16\n" +
+  "  ldi r16, 0x06\n  sts 0x00C2, r16\n" +
+  "  ldi r16, 0x08\n  sts 0x00C1, r16\n" +
+  "  cpi r18, 1\n  brne 3f\n" +
+  "  cpi r19, 0\n  brne 3f\n" +
+  "  cpi r20, 0\n  brne 3f\n" +
+  "  cpi r21, 0\n  brne 3f\n" +
+  "  cpi r22, 0\n  brne 3f\n" +
+  "  cpi r23, 0\n  brne 3f\n" +
+  "  cpi r24, 0\n  brne 3f\n" +
+  "  cpi r25, 0\n  brne 3f\n" +
+  "  ldi r16, 'U'\n  rjmp 4f\n" +
+  "3:\n  ldi r16, 'E'\n" +
+  "4:\n" +
+  "1:\n  lds r17, 0x00C0\n  sbrs r17, 5\n" +
+  "  rjmp 1b\n  sts 0x00C6, r16\n" +
+  "2:\n  rjmp 2b\n"
+assert(is_ok(file_write(start_path, start_source)),
+       "write AVR stack argument startup wrapper")
+assert(is_ok(file_write(c_path, c_source)),
+       "write AVR C ABI stack argument functions")
+def emitted = run_capture(
+    [compiler, "--native-backend=avr", "--native-only", "--nyir-verify",
+     "--emit-asm=" + asm_path, "-no-std", "-emit-only", "-e", source],
+    [], nil, false)
+def assembled = run_capture(
+    ["clang", "--target=avr", "-mmcu=atmega328p", "-c", asm_path,
+     "-o", obj_path], [], nil, false)
+def start_assembled = run_capture(
+    ["clang", "--target=avr", "-mmcu=atmega328p", "-c", start_path,
+     "-o", start_obj_path], [], nil, false)
+def c_assembled = run_capture(
+    ["clang", "--target=avr", "-mmcu=atmega328p", "-O0", "-c", c_path,
+     "-o", c_obj_path], [], nil, false)
+def linked = run_capture(
+    ["ld.lld", "-N", "--image-base=0", "-Ttext=0", "-e", "_start",
+     start_obj_path, obj_path, c_obj_path, "-o", elf_path], [], nil, false)
+assert(emitted.get("code", 127) == 0 &&
+       assembled.get("code", 127) == 0 &&
+       start_assembled.get("code", 127) == 0 &&
+       c_assembled.get("code", 127) == 0 &&
+       linked.get("code", 127) == 0,
+       "AVR internal and external C three-/four-argument calls assemble and link")
+def execution = run_capture(
+    ["timeout", "2s", "qemu-system-avr", "-M", "uno", "-display", "none",
+     "-monitor", "none", "-serial", "stdio", "-bios", elf_path],
+    [], nil, false)
+assert(execution.get("code", 0) == 124 &&
+       str_contains(execution.get("stdout", ""), "U"),
+       "QEMU verifies internal and C ABI register arguments, stack ordering, " +
+       "and caller cleanup; rc=" +
+       to_str(execution.get("code", 127)) + " stdout=" +
+       execution.get("stdout", "") + " stderr=" +
+       execution.get("stderr", ""))
+def removed_asm = file_remove(asm_path)
+def removed_start = file_remove(start_path)
+def removed_c = file_remove(c_path)
+def removed_obj = file_remove(obj_path)
+def removed_start_obj = file_remove(start_obj_path)
+def removed_c_obj = file_remove(c_obj_path)
+def removed_elf = file_remove(elf_path)
+assert(is_ok(removed_asm) && is_ok(removed_start) && is_ok(removed_c) &&
+       is_ok(removed_obj) && is_ok(removed_start_obj) &&
+       is_ok(removed_c_obj) && is_ok(removed_elf),
+       "remove AVR stack argument artifacts")
+print("AVR_STACK_ARGUMENTS_RUNTIME_OK")
+NY
+}
+
+shape avr_external_calls_reject_unsupported_stack_argument_classes {
+  family "runtime/compiler"
+  generator "regression"
+  features ["avr", "portable-text", "extern", "abi", "fail-closed"]
+  template ny-test-case
+  expect run
+  source ny <<'NY'
+use core
+use core.os (file_exists, file_remove, pid, run_capture, temp_dir)
+
+def compiler = env("NYTRIX_NY_FULL_BIN")
+assert(is_str(compiler) && compiler.len > 0,
+       "test runner provides the compiler path")
+def asm_path = temp_dir() + "/ny-avr-extern-overflow-" + to_str(pid()) + ".s"
+def register_asm_path = asm_path + "-register.s"
+def rejected = run_capture(
+    [compiler, "--native-backend=avr", "--native-only", "--nyir-verify",
+     "--emit-asm=" + asm_path, "-no-std", "-emit-only", "-e",
+     "extern \"c\" {\n  fn external_f64(i64 first, i64 second, f64 third) i64\n}\n" +
+     "external_f64(1, 2, 3.0)"],
+    [], nil, false)
+def register_rejected = run_capture(
+    [compiler, "--native-backend=avr", "--native-only", "--nyir-verify",
+     "--emit-asm=" + register_asm_path, "-no-std", "-emit-only", "-e",
+     "extern \"c\" {\n  fn external_f64_register(f64 value) i64\n}\n" +
+     "external_f64_register(1.5)"],
+    [], nil, false)
+assert(rejected.get("code", 0) != 0 && !file_exists(asm_path) &&
+       register_rejected.get("code", 0) != 0 &&
+       !file_exists(register_asm_path),
+       "AVR unsupported f64 stack and register argument layouts fail closed")
+if file_exists(asm_path) { file_remove(asm_path) }
+if file_exists(register_asm_path) { file_remove(register_asm_path) }
+print("AVR_EXTERNAL_CALL_ABI_REJECTION_OK")
+NY
+}
+
+shape avr_stack_arguments_reject_aggregate_parameters {
+  family "runtime/compiler"
+  generator "regression"
+  features ["avr", "portable-text", "stack-arguments", "aggregate", "fail-closed"]
+  template ny-test-case
+  expect run
+  source ny <<'NY'
+use core
+use core.os (file_exists, file_remove, pid, run_capture, temp_dir)
+
+def compiler = env("NYTRIX_NY_FULL_BIN")
+assert(is_str(compiler) && compiler.len > 0,
+       "test runner provides the compiler path")
+fn rejects(str name, str source) bool {
+  def asm_path = temp_dir() + "/ny-avr-aggregate-" + to_str(pid()) +
+                 "-" + name + ".s"
+  def result = run_capture(
+      [compiler, "--native-backend=avr", "--native-only", "--nyir-verify",
+       "--emit-asm=" + asm_path, "-no-std", "-emit-only", "-e", source],
+      [], nil, false)
+  def emitted = file_exists(asm_path)
+  if emitted { file_remove(asm_path) }
+  assert(result.get("code", 0) != 0 && !emitted,
+         "AVR aggregate " + name + " parameter fails closed")
+  true
+}
+assert(rejects("one-word",
+               "struct Word { int value }\n" +
+               "fn pass(Word value) int { value.value }\npass(Word(3))"),
+       "AVR one-word aggregate parameters remain fail-closed")
+assert(rejects("two-word",
+               "struct Pair { int left, int right }\n" +
+               "fn pass(Pair value) int { value.left }\npass(Pair(3, 4))"),
+       "AVR two-word aggregate parameters remain fail-closed")
+assert(rejects("float-pair",
+               "struct FloatPair { f32 left, f32 right }\n" +
+               "fn pass(FloatPair value) f32 { value.left }\n" +
+               "pass(FloatPair(1.0f32, 2.0f32))"),
+       "AVR floating aggregate parameters remain fail-closed")
+assert(rejects("three-word",
+               "struct Triple { int first, int second, int third }\n" +
+               "fn pass(Triple value) int { value.third }\n" +
+               "pass(Triple(1, 2, 3))"),
+       "AVR larger aggregate parameters remain fail-closed")
+print("AVR_AGGREGATE_PARAMETER_REJECTION_OK")
+NY
+}

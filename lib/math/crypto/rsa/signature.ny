@@ -4,11 +4,11 @@
 ;; - https://people.csail.mit.edu/rivest/Rsapaper.pdf
 ;; - https://crypto.stanford.edu/~dabo/pubs/papers/RSA-survey.pdf
 ;; References:
-;; - std.math.crypto.rsa
-;; - std.math.crypto
-module std.math.crypto.rsa.signature(rsa_raw_sign, rsa_raw_verify, rsa_raw_multiplicative_forge)
-use std.math.nt
-use std.math.crypto.rsa.op (compute_phi, compute_d)
+;; - core.math.crypto.rsa
+;; - core.math.crypto
+module core.math.crypto.rsa.signature(rsa_raw_sign, rsa_raw_verify, rsa_raw_multiplicative_forge)
+use core.math.nt
+use core.math.crypto.rsa.op (compute_phi, compute_d)
 
 fn rsa_raw_sign(number m, number d, number n) number {
    "Sign integer representative m with raw RSA: s = m^d mod n."

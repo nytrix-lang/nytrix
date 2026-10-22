@@ -1,0 +1,63 @@
+shape test_shift_promotion {
+  family "runtime/values"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only; --native-only --native-backend=x86_64"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.math.big
+
+;; Dynamic shifts must retain values that no longer fit the tagged-int payload.
+assert(to_str(__shl(0x78, 56)) == "8646911284551352320",
+   "left shift preserves high bits beyond tagged range")
+assert(to_str(__shl(-1, 63)) == "-9223372036854775808",
+   "negative left shift promotes without changing sign")
+assert(__shl(1, -1) == 1, "negative shift count leaves value unchanged")
+assert(to_str(__shl(1, 64)) == "18446744073709551616",
+   "large shift count promotes")
+assert((-8 >> 2) == -2, "negative right shift sign-extends")
+assert((-8 >> 64) == -8, "oversized right shift masks count to six bits")
+assert((8 >> 64) == 8, "oversized positive right shift masks count to six bits")
+assert((-8 >> -1) == -1, "negative right shift count masks to six bits")
+
+;; Bitwise operations must preserve signed two's-complement behavior and promote
+;; results that do not fit the tagged integer payload.
+assert(to_str(-8 & 3) == "0", "negative AND uses signed integer bits")
+assert(to_str(-8 | 3) == "-5", "negative OR uses signed integer bits")
+assert(to_str(-8 ^ 3) == "-5", "negative XOR uses signed integer bits")
+assert(to_str(~(-1)) == "0", "NOT of negative one")
+assert(to_str(~0) == "-1", "NOT of zero")
+assert(to_str(~7) == "-8", "NOT of positive value")
+def high_literal = 0x7000000000000000
+assert(type(high_literal) == "bigint" && is_bigint(high_literal),
+   "wide hexadecimal literal uses the BigInt representation")
+assert(bigint_to_str(bigint(high_literal)) == "8070450532247928832",
+   "wide hexadecimal literal preserves its value through typed calls")
+def bigint high = bigint_from_str("8070450532247928832")
+assert(bigint_to_str(bigint(high)) == "8070450532247928832",
+   "wide hexadecimal literal is a BigInt value")
+def mask = 0x0fffffffffffffff
+assert(bigint_to_str(bigint(high & mask)) == "0", "wide AND preserves high bits")
+assert(bigint_to_str(bigint(0x7000000000000000 & mask)) == "0",
+   "wide literal AND preserves high bits")
+assert(bigint_to_str(bigint(high << 1)) == "16140901064495857664",
+   "wide left shift preserves promoted integers")
+assert(bigint_to_str(bigint(high >> 1)) == "4035225266123964416",
+   "wide right shift preserves promoted integers")
+assert(bigint_to_str(bigint(high | mask)) == "9223372036854775807",
+   "wide OR promotes the signed maximum")
+assert(bigint_to_str(bigint(high | 0x0fffffffffffffff)) ==
+   "9223372036854775807",
+   "wide literal OR preserves the impl-int argument payload")
+assert(bigint_to_str(bigint(high ^ mask)) == "9223372036854775807",
+   "wide XOR promotes the signed maximum")
+assert(bigint_to_str(bigint(high ^ 0x0fffffffffffffff)) ==
+   "9223372036854775807",
+   "wide literal XOR preserves the impl-int argument payload")
+assert(bigint_to_str(bigint(~high)) == "-8070450532247928833",
+   "wide NOT sign-extends and promotes")
+print("✓ shift promotion tests passed")
+NY
+}

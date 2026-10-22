@@ -1,9 +1,9 @@
 ;; Keywords: render graphics atlas camera view term terminal ansi tty shader matrix linear-algebra snapshot vterm os ui
 ;; Rendering facade: frame loop, colors, 2D primitives, text, textures, cameras, meshes, capture, and renderer state.
 ;; References:
-;; - std.os.ui
-;; - std.os.ui.render.matrix
-module std.os.ui.render(
+;; - core.os.ui
+;; - core.os.ui.render.matrix
+module core.os.ui.render(
    BACKEND_NONE, BACKEND_GL, BACKEND_VK, BACKEND_MOCK, BACKEND_TTY, BACKEND_AUTO,
    WHITE, BLACK, RED, GREEN, BLUE, YELLOW, CYAN, MAGENTA, ORANGE, PURPLE, GRAY, CLEAR,
    color_rgba, color_rgb, color_gray, color_hex, color_255, color_lerp, color_alpha,
@@ -77,21 +77,22 @@ module std.os.ui.render(
    font_fast_glyph_present, font_fast_glyph_texture
 )
 
-use std.core
-use std.core.mem
-use std.core.error
-use std.os.ui.window.consts as ui_consts
-use std.os.ui.render.dump as ui_profile
-use std.os.ui.window as lib_uiw
-use std.os.ui.window.platform as ui_backend
-use std.os.ui.render.vk as lib_vkr
-use std.os.ui.render.vk.font as lib_vk_font
-use std.os.ui.render.gl as lib_glr
-use std.os.ui.render.texture as render_texture
-use std.os.ui.render.utils as render_utils
-use std.os.ui.render.shared as render_shared
-use std.math.parse.3d.gltf as gltf
-use std.os.ui.render.vk.state (
+use core
+use core.mem
+use core.error
+use core.os.ui.window.consts as ui_consts
+use core.os.ui.render.dump as ui_profile
+use core.os.ui.window as lib_uiw
+use core.os.ui.window.platform as ui_backend
+use core.os.ui.render.vk as lib_vkr
+use core.os.ui.render.vk.font as lib_vk_font
+use core.os.ui.render.gl as lib_glr
+use core.os.ui.render.texture as render_texture
+use core.os.ui.render.utils as render_utils
+use core.os.ui.render.shared as render_shared
+use core.os.ui.render.shared (color_component as _color_at)
+use core.math.parse.3d.gltf as gltf
+use core.os.ui.render.vk.state (
    _scratch_model_saved_a,
    _VKR_OFF_X, _VKR_OFF_Y, _VKR_OFF_Z,
    _snapshot_model_matrix, _model_matrix, _scratch_ident, _last_frame_draw_calls,
@@ -105,31 +106,32 @@ use std.os.ui.render.vk.state (
    MAX_TEXTURES
 )
 
-use std.os.ui.render.vk.vulkan
-use std.os.ui.render.shader as lib_shader
-use std.os.ui.render.camera as camera
-use std.os.ui.render.camera_contract as render_camera_contract
-use std.os.ui.render.contract as render_contract
-use std.os.ui.render.atlas as lib_atlas
-use std.os.ui.render.env as render_env
-use std.os.ui.font.truetype as lib_ttf
-use std.core.str as lib_str
-use std.math.crypto.encoding.base as str_base
-use std.math.crypto.encoding.bytes
-use std.os (file_exists, file_read, file_write)
-use std.os.sys as os_sys
-use std.os.fs as lib_fs
-use std.os.path as lib_path
-use std.os.thread
-use std.os.time as ostime
-use std.math
-use std.os.ui.render.matrix
-use std.math.vector
-use std.math.crypto.hash as lib_hash
-use std.math.parse.img as lib_img
-use std.math.parse.data.zlib as lib_zlib
-use std.math.parse.3d.obj as lib_obj
-use std.core.cache as cache
+use core.os.ui.render.vk.vulkan
+use core.os.ui.render.shader as lib_shader
+use core.os.ui.render.camera as camera
+
+;; (camera contract merged into this module)
+use core.os.ui.render.contract as render_contract
+use core.os.ui.render.atlas as lib_atlas
+use core.os.ui.render.env as render_env
+use core.os.ui.font.truetype as lib_ttf
+use core.str as lib_str
+use core.math.crypto.encoding.base as str_base
+use core.math.crypto.encoding.bytes
+use core.os (file_exists, file_read, file_write)
+use core.os.sys as os_sys
+use core.os.fs as lib_fs
+use core.os.path as lib_path
+use core.os.thread
+use core.os.time as ostime
+use core.math
+use core.os.ui.render.matrix
+use core.math.vector
+use core.math.crypto.hash as lib_hash
+use core.math.parse.img as lib_img
+use core.math.parse.data.zlib as lib_zlib
+use core.math.parse.3d.obj as lib_obj
+use core.cache as cache
 
 def BACKEND_NONE = 0
 def BACKEND_GL   = 1
@@ -193,7 +195,7 @@ fn _slab_i32(int slab, int off) int {
 
 fn color_alpha(any c, f64 a) vec4 {
    "Returns color `c` with the same RGB and replaced alpha."
-   [_color_at(c, 0, 1.0), _color_at(c, 1, 1.0), _color_at(c, 2, 1.0), a]
+   vec4(_color_at(c, 0, 1.0), _color_at(c, 1, 1.0), _color_at(c, 2, 1.0), a)
 }
 
 mut _active_win = nil
@@ -227,7 +229,7 @@ mut _frame_time_accum = 0.0
 mut _skybox_yaw_deg = 0.0
 mut _skybox_pitch_deg = 0.0
 mut _skybox_fov_deg = 60.0
-mut _backend = BACKEND_VK
+mut _backend = 2
 mut _cpu_buf = 0
 mut _cpu_w = 0
 mut _cpu_h = 0
@@ -1005,8 +1007,8 @@ mut _last_ortho2d_b = 0.0
 mut _last_ortho2d_t = 0.0
 mut _last_ortho2d_valid = false
 mut _ortho2d_active = false
-mut _backend_pref = BACKEND_VK
-mut _backend_requested = BACKEND_AUTO
+mut _backend_pref = 2
+mut _backend_requested = 5
 mut _backend_auto_requested = true
 
 fn _is_debug() int {
@@ -1228,7 +1230,7 @@ fn get_framebuffer_size() list {
    if _backend == BACKEND_VK {
       if _active_win {
          def fresh = lib_uiw.get_win(_active_win)
-         if fresh { _active_win = fresh }
+         if is_dict(fresh) && fresh.contains("handle") { _active_win = fresh }
          mut fb = lib_uiw.get_framebuffer_size(_active_win)
          mut w, h = int(fb.get(0, 0)), int(fb.get(1, 0))
          if w <= 0 || h <= 0 {
@@ -1248,7 +1250,7 @@ fn get_framebuffer_size() list {
    [_cpu_w, _cpu_h]
 }
 
-fn framebuffer_size_f64(f64 fallback_w=960.0, f64 fallback_h=540.0) list {
+fn framebuffer_size_f64(f64 fallback_w=960.0, f64 fallback_h=540.0) list<f64> {
    "Returns sanitized [width, height] of the active framebuffer as floats."
    def fb = get_framebuffer_size()
    mut w, h = float(fb.get(0, fallback_w)), float(fb.get(1, fallback_h))
@@ -1265,7 +1267,7 @@ fn layout_fit(f64 base_w=960.0, f64 base_h=540.0, f64 min_scale=0.0, f64 max_sca
    if bw <= 0.0 { bw = 1.0 }
    if bh <= 0.0 { bh = 1.0 }
    def fb = framebuffer_size_f64(bw, bh)
-   def w, h = float(fb.get(0, bw)), float(fb.get(1, bh))
+   def w, h = float(fb[0]), float(fb[1])
    def sx, sy = w / bw, h / bh
    mut scale = sx
    if sy < scale { scale = sy }
@@ -1336,8 +1338,9 @@ fn _ensure_fonts() dict {
 }
 
 fn _font_register(dict font_obj) int {
-   def id = _next_font_id
-   _next_font_id += 1
+   mut id = _next_font_id
+   if id <= 0 { id = 1 }
+   _next_font_id = id + 1
    _fonts = _ensure_fonts()
    _fonts[id] = font_obj
    id
@@ -1797,7 +1800,7 @@ fn _font_load_impl(str path, int size, int filter=FONT_FILTER_DEFAULT) int {
       "atlas": a, "atlas_chain": [a], "atlas_size": atlas_sz
    }
    def id = _font_register(font_obj)
-   if ui_profile.env_truthy_cached("NY_FONT_LOAD_TRACE") { ui_profile.print_text("[font:load] id=" + to_str(id) + " path=" + path + " size=" + to_str(size) + " scale=" + to_str(scale) + " filter=" + to_str(resolved_filter)) }
+   if ui_profile.env_truthy_cached("NY_FONT_LOAD_TRACE") { ui_profile.print_text("[font:load] id=" + to_str(id) + " next=" + to_str(_next_font_id) + " path=" + path + " size=" + to_str(size) + " scale=" + to_str(scale) + " filter=" + to_str(resolved_filter)) }
    def fb_mode = _font_fallback_mode()
    def fb_full = fb_mode == 1
    def fb_none = fb_mode == 2
@@ -2270,7 +2273,7 @@ fn _font_try_resolve_fallback_chain(
    dict glyphs,
    list fallbacks,
    int emoji_fid
-) list {
+) any {
    "Resolves glyph from fallback chain/emoji fallback and caches primary hit.
    Returns [glyph_or_zero, font_obj, glyphs]."
    mut fi = 0
@@ -2857,7 +2860,8 @@ fn _draw_text_ttf(int font_id, str text, f64 x, f64 y, any color) bool {
    drew
 }
 
-comptime table BuiltinGlyphBits {
+;; Table aliases must not collide with the normalizing wrappers below.
+comptime table BuiltinGlyphLookup {
    48 -> 15623448110 49 -> 4701950094 50 -> 15603929375 51 -> 32247317566
    52 -> 2359917634 53 -> 33854359086 54 -> 6728664622 55 -> 33321787656
    56 -> 15621113390 57 -> 15621129292 65 -> 15621670449 66 -> 32801506878
@@ -2875,7 +2879,7 @@ comptime table BuiltinGlyphBits {
 
 fn _builtin_glyph_bits(int c) int {
    if c >= 97 && c <= 122 { c = c - 32 }
-   comptime match BuiltinGlyphBits(c, 33874822719)
+   comptime match BuiltinGlyphLookup(c, 33874822719)
 }
 
 @jit
@@ -2885,7 +2889,7 @@ fn _builtin_text_rect_capacity(str text) int {
 }
 
 @jit
-fn _builtin_text_rects_append(any rects, int count, int cap, str text, f64 x, f64 y, int packed) int {
+fn _builtin_text_rects_append(ptr rects, int count, int cap, str text, f64 x, f64 y, int packed) int {
    mut cx, cy = x, y
    def px = 1.45
    def cw = px * 6.0
@@ -2906,14 +2910,14 @@ fn _builtin_text_rects_append(any rects, int count, int cap, str text, f64 x, f6
       }
       def glyph_bits = _builtin_glyph_bits(c)
       mut gy = 0
-      while gy < 7 {
-         def bits = int((glyph_bits >> ((6 - gy) * 5)) & 31)
+      while gy < render_shared.BUILTIN_GLYPH_HEIGHT {
+         def bits = int((glyph_bits >> ((render_shared.BUILTIN_GLYPH_HEIGHT - 1 - gy) * render_shared.BUILTIN_GLYPH_WIDTH)) & render_shared.BUILTIN_GLYPH_ROW_MASK)
          mut gx = 0
-         while gx < 5 {
-            while gx < 5 && (bits & (1 << (4 - gx))) == 0 { gx += 1 }
-            if gx >= 5 { break }
+         while gx < render_shared.BUILTIN_GLYPH_WIDTH {
+            while gx < render_shared.BUILTIN_GLYPH_WIDTH && (bits & (1 << (render_shared.BUILTIN_GLYPH_WIDTH - 1 - gx))) == 0 { gx += 1 }
+            if gx >= render_shared.BUILTIN_GLYPH_WIDTH { break }
             def start = gx
-            while gx < 5 && (bits & (1 << (4 - gx))) != 0 { gx += 1 }
+            while gx < render_shared.BUILTIN_GLYPH_WIDTH && (bits & (1 << (render_shared.BUILTIN_GLYPH_WIDTH - 1 - gx))) != 0 { gx += 1 }
             if count < cap {
                def rec = rects + count * 20
                store32_f32(rec, float(cx + float(start) * px), 0)
@@ -3014,11 +3018,11 @@ fn _font_builtin_make_pixels(int bits, int scale, int w, int h) any {
    def pixels = zalloc(w * h * 4)
    if !pixels { return 0 }
    mut gy = 0
-   while gy < 7 {
-      def row_bits = int((bits >> ((6 - gy) * 5)) & 31)
+   while gy < render_shared.BUILTIN_GLYPH_HEIGHT {
+      def row_bits = int((bits >> ((render_shared.BUILTIN_GLYPH_HEIGHT - 1 - gy) * render_shared.BUILTIN_GLYPH_WIDTH)) & render_shared.BUILTIN_GLYPH_ROW_MASK)
       mut gx = 0
-      while gx < 5 {
-         if (row_bits & (1 << (4 - gx))) != 0 {
+      while gx < render_shared.BUILTIN_GLYPH_WIDTH {
+         if (row_bits & (1 << (render_shared.BUILTIN_GLYPH_WIDTH - 1 - gx))) != 0 {
             mut sy = 0
             while sy < scale {
                mut sx = 0
@@ -3123,6 +3127,12 @@ fn _draw_text_builtin(str text, f64 x, f64 y, any color) bool {
    def cw = px * 6.0
    def ch = px * 8.0
    def packed = _pack_color_from(color, 1.0, 1.0, 1.0, 1.0, true)
+   mut verts = 0
+   mut quad_count = 0
+   if _backend == BACKEND_GL || _backend == BACKEND_VK {
+      def max_runs = text.len * render_shared.BUILTIN_GLYPH_HEIGHT * ((render_shared.BUILTIN_GLYPH_WIDTH + 1) / 2)
+      verts = _shape_scratch_alloc(max_runs * VERTEX_STRIDE * 6)
+   }
    mut i = 0
    while i < text.len {
       def c = load8(text, i)
@@ -3139,23 +3149,43 @@ fn _draw_text_builtin(str text, f64 x, f64 y, any color) bool {
       }
       def glyph_bits = _builtin_glyph_bits(c)
       mut gy = 0
-      while gy < 7 {
-         def bits = int((glyph_bits >> ((6 - gy) * 5)) & 31)
+      while gy < render_shared.BUILTIN_GLYPH_HEIGHT {
+         def bits = int((glyph_bits >> ((render_shared.BUILTIN_GLYPH_HEIGHT - 1 - gy) * render_shared.BUILTIN_GLYPH_WIDTH)) & render_shared.BUILTIN_GLYPH_ROW_MASK)
          mut gx = 0
-         while gx < 5 {
-            if (bits & (1 << (4 - gx))) != 0 { draw_rect_fast(cx + float(gx) * px, cy + float(gy) * px, px, px, packed) }
-            gx += 1
+         while gx < render_shared.BUILTIN_GLYPH_WIDTH {
+            if (bits & (1 << (render_shared.BUILTIN_GLYPH_WIDTH - 1 - gx))) != 0 {
+               def run_start = gx
+               while gx < render_shared.BUILTIN_GLYPH_WIDTH && (bits & (1 << (render_shared.BUILTIN_GLYPH_WIDTH - 1 - gx))) != 0 {
+                  gx += 1
+               }
+               if verts {
+                  _gl_store_text_quad(
+                     verts + quad_count * VERTEX_STRIDE * 6,
+                     cx + float(run_start) * px, cy + float(gy) * px,
+                     float(gx - run_start) * px, px, 0.0, 0.0, 0.0, 0.0, packed
+                  )
+                  quad_count += 1
+               } else {
+                  draw_rect_fast(cx + float(run_start) * px, cy + float(gy) * px, float(gx - run_start) * px, px, packed)
+               }
+            } else {
+               gx += 1
+            }
          }
          gy += 1
       }
       cx += cw
+   }
+   if verts && quad_count > 0 {
+      _reset_material_state()
+      draw_vertices(verts, quad_count * 6, -1)
    }
    true
 }
 
 fn color_rgba(f64 r, f64 g, f64 b, f64 a=1.0) vec4 {
    "Creates a vec4 color from floating point RGBA components(0.0 to 1.0)."
-   return [r, g, b, a]
+   return vec4(r, g, b, a)
 }
 
 fn color_rgb(f64 r, f64 g, f64 b) vec4 {
@@ -3198,13 +3228,13 @@ fn rect_w(any r) f64 { is_dict(r) ? float(r.get("w", r.get("width", 0.0))) : _re
 ;; Returns the result of the `rect_h` operation.
 fn rect_h(any r) f64 { is_dict(r) ? float(r.get("h", r.get("height", 0.0))) : _rect_seq_at(r, 3, 0.0) }
 
-comptime table HexNibble {
+comptime table ColorHexLookup {
    48..57 -> raw - 48
    65..70 -> raw - 55
    97..102 -> raw - 87
 }
 
-fn _hex_nibble(int ch) int { comptime match HexNibble(ch, 0) }
+fn _hex_nibble(int ch) int { comptime match ColorHexLookup(ch, 0) }
 
 fn _hex_byte(str hex, int idx) int {
    if hex.len <= idx + 1 { return 0 }
@@ -3565,21 +3595,8 @@ fn load_shader_pipeline(str _frag_path) int {
    return -1
 }
 
-fn _wait_window_ready(any win) bool {
-   if !win { return false }
-   def b = win.get(13, 0)
-   if b != 1 { return false }
-   mut i = 0
-   while i < 2 {
-      lib_uiw.check_event(win)
-      i += 1
-   }
-   true
-}
-
 fn _init_with_window(any win, bool prefer_vulkan=true) bool {
    if !win { return false }
-   _wait_window_ready(win)
    def live_sz = lib_uiw.size(win)
    def live_w = int(live_sz.get(0, 0))
    def live_h = int(live_sz.get(1, 0))
@@ -3587,11 +3604,11 @@ fn _init_with_window(any win, bool prefer_vulkan=true) bool {
    if !prefer_vulkan {
       if !lib_glr.init(win) {
          if _is_debug() { ui_profile.print_text("[gfx] OpenGL context bind failed") }
-         _backend = BACKEND_NONE
+         _backend = 0
          return false
       }
       _active_win = win
-      _backend = BACKEND_GL
+      _backend = 1
       lib_atlas.atlas_set_backend("gl")
       _vk_cam_pos_valid = false
       if _is_debug() { ui_profile.print_text("[gfx] Using Native OpenGL Backend") }
@@ -3608,11 +3625,11 @@ fn _init_with_window(any win, bool prefer_vulkan=true) bool {
          ui_profile.print_text("[gfx] Vulkan init failed")
          ui_profile.print_text("[gfx] requested GPU backend failed; no software fallback is active")
       }
-      _backend = BACKEND_NONE
+      _backend = 0
       return false
    }
    _active_win = win
-   _backend = BACKEND_VK
+   _backend = 2
    lib_atlas.atlas_set_backend("vk")
    _vk_cam_pos_valid = false
    if _is_debug() { ui_profile.print_text("[gfx] Using Native Vulkan Backend") }
@@ -3631,7 +3648,7 @@ fn init_mock_surface(int width=1280, int height=720) any {
    _vk_cam_pos_valid = false
    if _cpu_buf != 0 { free(_cpu_buf) _cpu_buf = 0 _cpu_w = 0 _cpu_h = 0 }
    _auto_show_pending = false
-   _backend = BACKEND_MOCK
+   _backend = 3
    lib_atlas.atlas_set_backend("mock")
    def win = {
       "_mock": true, "handle": 0,
@@ -3646,7 +3663,7 @@ fn init_mock_surface(int width=1280, int height=720) any {
    _active_win = win
    set_win_size(int(max(1, width)), int(max(1, height)))
    if !_cpu_ensure_surface() {
-      _backend = BACKEND_NONE
+      _backend = 0
       _active_win = nil
       return false
    }
@@ -3718,13 +3735,14 @@ fn init_window(int width, int height, str title, int flags=0, any vsync=false, b
    if f == 0 { f = 0 }
    def explicit_hide = (f & 0x0200) != 0
    def use_gl = _backend_pref == BACKEND_GL
+   mut window_hints = dict(4)
    if use_gl {
-      lib_uiw.window_hint(ui_backend.CLIENT_API, ui_backend.OPENGL_API)
-      ui_backend.window_hint(ui_backend.DOUBLEBUFFER, ui_backend.TRUE)
-      ui_backend.window_hint(ui_backend.SAMPLES, int(max(0, msaa)))
+      window_hints[ui_backend.CLIENT_API] = ui_backend.OPENGL_API
+      window_hints[ui_backend.DOUBLEBUFFER] = ui_backend.TRUE
+      window_hints[ui_backend.SAMPLES] = int(max(0, msaa))
    } else {
       f = f | 0x80000
-      lib_uiw.window_hint(ui_backend.CLIENT_API, ui_backend.NO_API)
+      window_hints[ui_backend.CLIENT_API] = ui_backend.NO_API
    }
    def headless = ui_profile.env_truthy_cached("NY_UI_HEADLESS")
    if headless {
@@ -3733,9 +3751,9 @@ fn init_window(int width, int height, str title, int flags=0, any vsync=false, b
       if _is_debug() { ui_profile.print_text("[gfx] Applying headless mode(HIDDEN | NO_RESIZE)") }
       if use_gl && !ui_profile.headless_gui_enabled() { return init_mock_surface(width, height) }
    }
-   def auto_hide_boot = !headless && !explicit_hide && (use_gl || !_visible_vulkan_boot_required())
+   def auto_hide_boot = !headless && !explicit_hide && !use_gl && !_visible_vulkan_boot_required()
    if auto_hide_boot { f = f | 0x0200 }
-   mut win = lib_uiw.open_window(title, x, y, width, height, f)
+   mut any win = lib_uiw.open_window(title, x, y, width, height, f, window_hints)
    if !win { return false }
    _prepare_visible_vulkan_boot(win, explicit_hide, headless)
    if !_init_with_window(win, !use_gl) {
@@ -3744,11 +3762,12 @@ fn init_window(int width, int height, str title, int flags=0, any vsync=false, b
       if _backend_auto_requested {
          if headless { return init_mock_surface(width, height) }
          if _is_debug() { ui_profile.print_text("[gfx] Vulkan init failed; retrying auto backend with OpenGL") }
-         lib_uiw.window_hint(ui_backend.CLIENT_API, ui_backend.OPENGL_API)
-         ui_backend.window_hint(ui_backend.DOUBLEBUFFER, ui_backend.TRUE)
-         ui_backend.window_hint(ui_backend.SAMPLES, int(max(0, msaa)))
-         def gl_flags = f & ~0x80000
-         def gl_win = lib_uiw.open_window(title, x, y, width, height, gl_flags)
+         mut gl_hints = dict(4)
+         gl_hints[ui_backend.CLIENT_API] = ui_backend.OPENGL_API
+         gl_hints[ui_backend.DOUBLEBUFFER] = ui_backend.TRUE
+         gl_hints[ui_backend.SAMPLES] = int(max(0, msaa))
+         mut gl_flags = f & ~0x80000
+         def gl_win = lib_uiw.open_window(title, x, y, width, height, gl_flags, gl_hints)
          if gl_win && _init_with_window(gl_win, false) {
             win = gl_win
          } else {
@@ -3765,15 +3784,16 @@ fn init_window(int width, int height, str title, int flags=0, any vsync=false, b
          if _is_debug() {
             ui_profile.print_text("[gfx] requested " + _requested_backend_name() + " backend failed; retrying " + (try_gl ? "OpenGL" : "Vulkan"))
          }
+         mut alt_hints = dict(4)
          if try_gl {
-            lib_uiw.window_hint(ui_backend.CLIENT_API, ui_backend.OPENGL_API)
-            ui_backend.window_hint(ui_backend.DOUBLEBUFFER, ui_backend.TRUE)
-            ui_backend.window_hint(ui_backend.SAMPLES, int(max(0, msaa)))
+            alt_hints[ui_backend.CLIENT_API] = ui_backend.OPENGL_API
+            alt_hints[ui_backend.DOUBLEBUFFER] = ui_backend.TRUE
+            alt_hints[ui_backend.SAMPLES] = int(max(0, msaa))
          } else {
-            lib_uiw.window_hint(ui_backend.CLIENT_API, ui_backend.NO_API)
+            alt_hints[ui_backend.CLIENT_API] = ui_backend.NO_API
          }
-         def alt_flags = try_gl ? (f & ~0x80000) : (f | 0x80000)
-         def alt_win = lib_uiw.open_window(title, x, y, width, height, alt_flags)
+         mut alt_flags = try_gl ? (f & ~0x80000) : (f | 0x80000)
+         def alt_win = lib_uiw.open_window(title, x, y, width, height, alt_flags, alt_hints)
          if alt_win && _init_with_window(alt_win, !try_gl) {
             win = alt_win
          } else {
@@ -3796,7 +3816,8 @@ fn init_window(int width, int height, str title, int flags=0, any vsync=false, b
          ui_backend.swap_interval(0)
       }
    }
-   _auto_show_pending = auto_hide_boot
+   ;; Keep an automatic window hidden until its backend has submitted a frame.
+   _auto_show_pending = auto_hide_boot && (_backend == BACKEND_VK || _backend == BACKEND_GL)
    win
 }
 
@@ -3848,10 +3869,15 @@ fn close_window() bool {
 
 fn window_should_close(any win=0) bool {
    "Returns true if the window has requested closure. Polls events automatically."
+   if _backend == BACKEND_MOCK {
+      def target = win ? win : _active_win
+      if !target || !is_dict(target) { return true }
+      return bool(target.get("should_close", false))
+   }
    lib_uiw.poll_events()
-   if win { return lib_uiw.should_close(win) }
-   if !_active_win { return true }
-   lib_uiw.should_close(_active_win)
+   def target = win ? win : _active_win
+   if !target { return true }
+   lib_uiw.should_close(target)
 }
 
 fn _sync_win32_native_cursor() bool {
@@ -3872,7 +3898,7 @@ fn _sync_win32_native_cursor() bool {
 fn _sync_vk_framebuffer_to_window(bool headless) bool {
    if _backend != BACKEND_VK || headless || !_active_win { return false }
    def fresh = lib_uiw.get_win(_active_win)
-   if fresh { _active_win = fresh }
+   if is_dict(fresh) && fresh.contains("handle") { _active_win = fresh }
    mut fb = lib_uiw.get_framebuffer_size(_active_win)
    mut w, h = int(fb.get(0, 0)), int(fb.get(1, 0))
    if w <= 0 || h <= 0 {
@@ -3911,7 +3937,7 @@ fn begin_drawing() bool {
       def headless = ui_profile.env_truthy_cached("NY_UI_HEADLESS")
       if !headless {
          def fresh = lib_uiw.get_win(_active_win)
-         if fresh { _active_win = fresh }
+         if is_dict(fresh) && fresh.contains("handle") { _active_win = fresh }
       }
       _sync_vk_framebuffer_to_window(headless)
       lib_vkr.set_frame_time_sec(_frame_time_accum)
@@ -3950,16 +3976,24 @@ fn begin_drawing() bool {
    }
    if _backend == BACKEND_GL {
       def fresh = lib_uiw.get_win(_active_win)
-      if fresh { _active_win = fresh }
+      if is_dict(fresh) && fresh.contains("handle") { _active_win = fresh }
       mut w = int(_active_win.get("w", 0))
       mut h = int(_active_win.get("h", 0))
-      if w <= 0 || h <= 0 {
-         def sz = lib_uiw.size(_active_win)
+      ;; The stored window size can still be the requested size after the
+      ;; window manager constrains or resizes the client. Use the live pixel
+      ;; framebuffer dimensions for GL viewport and 2D projection each frame.
+      def fbsz = ui_backend.get_framebuffer_size(_active_win)
+      def fbw, fbh = int(fbsz.get(0, 0)), int(fbsz.get(1, 0))
+      if fbw <= 0 || fbh <= 0 {
+         def live_size = ui_backend.get_size(_active_win)
+         def live_w, live_h = int(live_size.get(0, 0)), int(live_size.get(1, 0))
+         if live_w > 0 && live_h > 0 { w, h = live_w, live_h }
+      }
+      if fbw > 0 && fbh > 0 {
+         w, h = fbw, fbh
+      } elif w <= 0 || h <= 0 {
+         def sz = ui_backend.get_size(_active_win)
          w, h = int(sz.get(0, 0)), int(sz.get(1, 0))
-         if w <= 0 || h <= 0 {
-            def fbsz = lib_uiw.get_framebuffer_size(_active_win)
-            w, h = int(fbsz.get(0, 0)), int(fbsz.get(1, 0))
-         }
       }
       if w > 0 && h > 0 {
          _last_win_w, _last_win_h = float(w), float(h)
@@ -4109,7 +4143,7 @@ fn set_camera(any cam) bool {
       if live_w > 0 && live_h > 0 { set_win_size(live_w, live_h) }
    }
    ;; Accept both camera representations exported by this module: the compact
-   ;; facade list and the named dictionary from std.os.ui.render.camera.
+   ;; facade list and the named dictionary from core.os.ui.render.camera.
    def pos = is_dict(cam) ? cam.get("pos", [0.0, 0.0, 0.0]) : cam.get(0, [0.0, 0.0, 0.0])
    _send_vk_cam_pos(_camera_vec3_component(pos, 0), _camera_vec3_component(pos, 1), _camera_vec3_component(pos, 2))
    def target = is_dict(cam) ? cam.get("target", [0.0, 0.0, -1.0]) : cam.get(1, [0.0, 0.0, -1.0])
@@ -4414,7 +4448,13 @@ fn set_ortho_2d(f64 l, f64 r, f64 b, f64 t) bool {
    set_model_matrix(_scratch_ident)
    set_unlit(true)
    _ortho2d_active = true
-   if _backend == BACKEND_VK { lib_vkr.set_ortho(l, r, bb, tt, -1.0, 1.0) } else { _sync_combined_vp() }
+   if _backend == BACKEND_VK {
+      lib_vkr.set_ortho(l, r, bb, tt, -1.0, 1.0)
+   } elif _backend == BACKEND_GL {
+      lib_glr.set_ortho(l, r, bb, tt, -1.0, 1.0)
+   } else {
+      _sync_combined_vp()
+   }
    true
 }
 
@@ -4446,13 +4486,17 @@ fn create_pipeline(
    int front_face=0,
    int depth_bias=0,
    int depth_clamp=0
-) any {
+) ?handle {
    "Creates a custom graphics pipeline from shader modules."
    if _backend == BACKEND_VK { return lib_vkr.create_pipeline(vert_mod, frag_mod, topology, depth_test, depth_write, cull_mode, front_face, depth_bias, depth_clamp) }
    0
 }
 
-comptime emit _vk_only_void1(bind_pipeline, "Binds a custom graphics pipeline for subsequent draw calls.", lib_vkr.bind_pipeline)
+fn bind_pipeline(?handle pipe) bool {
+   "Binds a custom graphics pipeline for subsequent draw calls."
+   if _backend == BACKEND_VK { lib_vkr.bind_pipeline(pipe) return true }
+   false
+}
 
 fn reset_pipeline() bool {
    "Restores the engine's default graphics pipeline."
@@ -4519,30 +4563,6 @@ fn set_clear_color(any color) bool {
       _cpu_clear_color = bor(bor(bor(bshl(a, 24), bshl(r, 16)), bshl(g, 8)), b)
    }
    true
-}
-
-@inline
-fn _color_at(any color, int idx, f64 fallback) f64 {
-   if is_list(color) && color.len > idx { return float(color.get(idx, fallback)) }
-   if is_int(color) {
-      if idx == 0 { return float(color & 255) / 255.0 }
-      if idx == 1 { return float((color >> 8) & 255) / 255.0 }
-      if idx == 2 { return float((color >> 16) & 255) / 255.0 }
-      if idx == 3 { return float((color >> 24) & 255) / 255.0 }
-   }
-   fallback
-}
-
-fn _shape_sdf_color(any color) vec4 {
-   mut r, g, b, a = 1.0, 1.0, 1.0, 1.0
-   if is_int(color) {
-      a, r = float((color >> 24) & 255) / 255.0, float((color >> 16) & 255) / 255.0
-      g, b = float((color >> 8)  & 255) / 255.0, float(color & 255) / 255.0
-   } else {
-      r, g = _color_at(color, 0, 1.0), _color_at(color, 1, 1.0)
-      b, a = _color_at(color, 2, 1.0), _color_at(color, 3, 1.0)
-   }
-   [r, g, b, a]
 }
 
 fn _store_v3_c4(ptr buf, int vi, f64 x, f64 y, f64 z, f64 r, f64 g, f64 b, f64 a) bool {
@@ -5142,9 +5162,8 @@ fn _draw_filled_fan_fallback(
 fn draw_circle(f64 cx, f64 cy, f64 radius, any color, int segments=256) bool {
    "Draws a filled circle. Reuses edge points to minimize trig calls."
    if radius <= 0 { return false }
-   def rgba = _shape_sdf_color(color)
-   def r, g = float(rgba.get(0, 1.0)), float(rgba.get(1, 1.0))
-   def b, a = float(rgba.get(2, 1.0)), float(rgba.get(3, 1.0))
+   def r, g = _color_at(color, 0, 1.0), _color_at(color, 1, 1.0)
+   def b, a = _color_at(color, 2, 1.0), _color_at(color, 3, 1.0)
    if _backend == BACKEND_VK {
       lib_vkr.draw_circle_sdf(cx, cy, radius, r, g, b, a)
       return true
@@ -5192,19 +5211,19 @@ fn _draw_ring_sector_fallback(
 
 fn draw_ring(f64 cx, f64 cy, f64 inner_radius, f64 outer_radius, any color, int segments=256) bool {
    "Draws a filled ring(donut)."
-   if inner_radius < 0 { inner_radius = 0 }
-   if outer_radius <= inner_radius { return false }
-   def rgba = _shape_sdf_color(color)
-   def r, g = float(rgba.get(0, 1.0)), float(rgba.get(1, 1.0))
-   def b, a = float(rgba.get(2, 1.0)), float(rgba.get(3, 1.0))
+   def normalized_inner = max(0.0, inner_radius)
+   def ring_width = outer_radius - normalized_inner
+   if ring_width <= 0.0 { return false }
+   def r, g = _color_at(color, 0, 1.0), _color_at(color, 1, 1.0)
+   def b, a = _color_at(color, 2, 1.0), _color_at(color, 3, 1.0)
    if _backend == BACKEND_VK {
-      lib_vkr.draw_ring_sdf(cx, cy, inner_radius, outer_radius, r, g, b, a)
+      lib_vkr.draw_ring_sdf(cx, cy, normalized_inner, outer_radius, r, g, b, a)
       return true
    }
    if _backend == BACKEND_GL {
-      return lib_glr.draw_ring_2d(cx, cy, inner_radius, outer_radius, segments, r, g, b, a)
+      return lib_glr.draw_ring_2d(cx, cy, normalized_inner, outer_radius, segments, r, g, b, a)
    }
-   _draw_ring_sector_fallback(cx, cy, inner_radius, outer_radius, 0.0, TAU, segments, r, g, b, a)
+   _draw_ring_sector_fallback(cx, cy, normalized_inner, outer_radius, 0.0, TAU, segments, r, g, b, a)
 }
 
 fn draw_circle_lines(f64 cx, f64 cy, f64 radius, any color, f64 thickness=0.02, int segments=256) bool {
@@ -5942,21 +5961,60 @@ fn shutdown() bool {
 
 fn camera_init(list pos, f64 yaw, f64 pitch, f64 aspect=1.33) list {
    "Initializes a 3D camera object with position and orientation."
-   render_camera_contract.camera_init(pos, yaw, pitch, aspect)
+   def ryaw = yaw * PI / 180.0
+   def rpitch = pitch * PI / 180.0
+   def front = vec3(sin(ryaw) * cos(rpitch), sin(rpitch), -cos(ryaw) * cos(rpitch))
+   def target = [pos.get(0, 0.0) + at(front, 0, 0.0), pos.get(1, 0.0) + at(front, 1, 0.0), pos.get(2, 0.0) + at(front, 2, 0.0)]
+   mut cam = list()
+   cam = cam.append(pos)
+   cam = cam.append(target)
+   cam = cam.append(vec3(0.0, 1.0, 0.0))
+   cam = cam.append(120.0)
+   cam = cam.append(yaw)
+   cam = cam.append(pitch)
+   cam = cam.append(aspect)
+   cam
 }
 
 fn camera_update(list camera) list {
    "Updates the camera's target position based on its orientation."
-   render_camera_contract.camera_update(camera)
+   def yaw = camera.get(4)
+   def pitch = camera.get(5)
+   def pos = camera.get(0)
+   def ryaw = yaw * PI / 180.0
+   def rpitch = pitch * PI / 180.0
+   mut target = camera.get(1)
+   def fx, fy = sin(ryaw) * cos(rpitch), sin(rpitch)
+   def fz = -cos(ryaw) * cos(rpitch)
+   if is_list(target) {
+      target[0] = pos.get(0) + fx
+      target[1] = pos.get(1) + fy
+      target[2] = pos.get(2) + fz
+   } else {
+      target = vec3(pos.get(0) + fx, pos.get(1) + fy, pos.get(2) + fz)
+      camera[1] = target
+   }
+   camera
 }
 
 fn __cam_compute_vectors(f64 yaw, f64 pitch, any out) any {
-   render_camera_contract.__cam_compute_vectors(yaw, pitch, out)
+   def y, p = float(yaw), float(pitch)
+   def cp = cos(p)
+   def fx = sin(y) * cp
+   def fy = sin(p)
+   def fz = -cos(y) * cp
+   if is_list(out) || is_dict(out) {
+      out[2] = fx
+      out[3] = fy
+      out[4] = fz
+   }
+   out
 }
 
 fn camera_set_look_at(any camera, list target) any {
    "Explicitly sets the camera's look-at target."
-   render_camera_contract.camera_set_look_at(camera, target)
+   camera[1] = target
+   camera
 }
 
 fn set_model_matrix(any mat) bool {
@@ -5983,7 +6041,7 @@ fn log(any msg) bool {
    true
 }
 
-fn _snapshot_fill_alpha(any data, int w, int h) bool {
+fn _snapshot_fill_alpha(ptr data, int w, int h) bool {
    if !data || w <= 0 || h <= 0 { return false }
    mut ai = 3
    def aend = w * h * 4
@@ -5994,7 +6052,7 @@ fn _snapshot_fill_alpha(any data, int w, int h) bool {
    true
 }
 
-fn _snapshot_own_rgba(any fb, any data, int w, int h) bool {
+fn _snapshot_own_rgba(any fb, ptr data, int w, int h) bool {
    if !fb || !is_dict(fb) || !data || w <= 0 || h <= 0 { return false }
    def n = w * h * 4
    if n <= 0 { return false }
@@ -6007,7 +6065,7 @@ fn _snapshot_own_rgba(any fb, any data, int w, int h) bool {
    true
 }
 
-fn _snapshot_hash_line(any data, int w, int h) str {
+fn _snapshot_hash_line(ptr data, int w, int h) str {
    if !data || w <= 0 || h <= 0 { return "" }
    def n = w * h * 4
    if n <= 0 { return "" }
@@ -6017,7 +6075,7 @@ fn _snapshot_hash_line(any data, int w, int h) str {
    "FB_HASH: " + lib_str.to_hex(lib_hash.xxh32(fb_bytes, 0, 0, n))
 }
 
-fn _snapshot_cache_hash(any data, int w, int h) bool {
+fn _snapshot_cache_hash(ptr data, int w, int h) bool {
    def line = _snapshot_hash_line(data, w, h)
    if line.len <= 0 { return false }
    ui_profile.set_framebuffer_hash_line(line)
@@ -6031,7 +6089,7 @@ fn _gl_capture_trace(any msg) any {
    if ui_profile.env_truthy_cached("NY_GL_CAPTURE_TRACE") { print("[gl:capture] " + to_str(msg)) }
 }
 
-fn _gl_capture_detail_score(any data, int w, int h) int {
+fn _gl_capture_detail_score(ptr data, int w, int h) int {
    if !data || w <= 0 || h <= 0 { return 0 }
    def pixels = w * h
    if pixels <= 0 { return 0 }
@@ -6185,28 +6243,28 @@ fn set_backend_type(int type) bool {
    "Configures the preferred graphics backend(must be called before init)."
    def t = int(type)
    if t == BACKEND_MOCK {
-      _backend_pref = BACKEND_MOCK
-      _backend_requested = BACKEND_MOCK
+      _backend_pref = t
+      _backend_requested = t
       _backend_auto_requested = false
       lib_atlas.atlas_set_backend("mock")
    } elif t == BACKEND_GL {
-      _backend_pref = BACKEND_GL
-      _backend_requested = BACKEND_GL
+      _backend_pref = t
+      _backend_requested = t
       _backend_auto_requested = false
       lib_atlas.atlas_set_backend("gl")
    } elif t == BACKEND_VK {
-      _backend_pref = BACKEND_VK
-      _backend_requested = BACKEND_VK
+      _backend_pref = t
+      _backend_requested = t
       _backend_auto_requested = false
       lib_atlas.atlas_set_backend("vk")
    } elif t == BACKEND_AUTO {
-      _backend_pref = BACKEND_VK
-      _backend_requested = BACKEND_AUTO
+      _backend_pref = 2
+      _backend_requested = 5
       _backend_auto_requested = true
       lib_atlas.atlas_set_backend("vk")
    } else {
-      _backend_pref = BACKEND_VK
-      _backend_requested = BACKEND_AUTO
+      _backend_pref = 2
+      _backend_requested = 5
       _backend_auto_requested = true
       lib_atlas.atlas_set_backend("vk")
    }
@@ -7535,7 +7593,7 @@ fn terminal_fast_text_supported() bool {
    false
 }
 
-fn font_fast_glyph_present(any glyphs_ptr, int cp) bool {
+fn font_fast_glyph_present(ptr glyphs_ptr, int cp) bool {
    "Returns true when a prebuilt fast glyph exists for the active backend."
    if !glyphs_ptr { return false }
    if _backend == BACKEND_VK {
@@ -7547,28 +7605,28 @@ fn font_fast_glyph_present(any glyphs_ptr, int cp) bool {
       if !off || load32(off, render_shared.GLYPH_PRESENT) == 0 { return false }
       def bw = load32_f32(off, render_shared.GLYPH_BW)
       def bh = load32_f32(off, render_shared.GLYPH_BH)
-      if bw <= 0.0 || bh <= 0.0 { return true }
-      _backend_texture_id_valid(int(load32(off, render_shared.GLYPH_TEX)))
+      if bw <= 0.0 || bh <= 0.0 { return cp == 32 || cp == 160 }
+      _backend_texture_id_valid(_fast_glyph_texture_id(off))
    }
    false
 }
 
-fn font_fast_glyph_texture(any glyphs_ptr, int cp) int {
+fn font_fast_glyph_texture(ptr glyphs_ptr, int cp) int {
    "Returns the texture id for a prebuilt fast glyph, or -1 if unavailable."
    if !glyphs_ptr { return -1 }
    if _backend == BACKEND_VK {
       if !_font_can_use_fast_vk_text() { return -1 }
       def off = lib_vkr._vkr_glyph_get_off(glyphs_ptr, cp)
-      return off ? int(load32(off, render_shared.GLYPH_TEX)) : -1
+      return _fast_glyph_texture_id(off)
    }
    if _backend == BACKEND_GL && _font_can_use_fast_gl_text() {
       def off = _gl_fast_glyph_off(glyphs_ptr, cp)
-      return off ? int(load32(off, render_shared.GLYPH_TEX)) : -1
+      return _fast_glyph_texture_id(off)
    }
    -1
 }
 
-fn _gl_draw_text_glyph_fast(any glyphs_ptr, f64 x, f64 baseline_y, int cp, int color_u32) bool {
+fn _gl_draw_text_glyph_fast(ptr glyphs_ptr, f64 x, f64 baseline_y, int cp, int color_u32) bool {
    if _backend != BACKEND_GL || !glyphs_ptr { return false }
    mut g_off = _gl_fast_glyph_off(glyphs_ptr, cp)
    ;; Terminal fast text must not draw a '?' / tofu rectangle for missing
@@ -7578,7 +7636,7 @@ fn _gl_draw_text_glyph_fast(any glyphs_ptr, f64 x, f64 baseline_y, int cp, int c
    def bw = load32_f32(g_off, render_shared.GLYPH_BW)
    def bh = load32_f32(g_off, render_shared.GLYPH_BH)
    if bw <= 0.0 || bh <= 0.0 { return false }
-   def tex_id = int(load32(g_off, render_shared.GLYPH_TEX))
+   def tex_id = _fast_glyph_texture_id(g_off)
    if tex_id <= 0 { return false }
    def verts = _shape_scratch_alloc(VERTEX_STRIDE * 6)
    if !verts { return false }
@@ -7608,7 +7666,7 @@ fn _gl_draw_terminal_glyph_fast(any glyphs_ptr, f64 cell_x, f64 baseline_y, int 
    mut bw = load32_f32(g_off, render_shared.GLYPH_BW)
    mut bh = load32_f32(g_off, render_shared.GLYPH_BH)
    if bw <= 0.0 || bh <= 0.0 { return false }
-   def tex_id = int(load32(g_off, render_shared.GLYPH_TEX))
+   def tex_id = _fast_glyph_texture_id(g_off)
    if tex_id <= 0 { return false }
    mut gx = floor(cell_x + load32_f32(g_off, render_shared.GLYPH_XOFF) + 0.5)
    mut gy = floor(baseline_y - load32_f32(g_off, render_shared.GLYPH_YOFF) + 0.5)
@@ -7631,14 +7689,14 @@ fn _gl_draw_terminal_glyph_fast(any glyphs_ptr, f64 cell_x, f64 baseline_y, int 
    true
 }
 
-fn draw_text_glyph_fast(any glyphs_ptr, f64 x, f64 y, int cp, any color, int tex_id=-1) bool {
+fn draw_text_glyph_fast(ptr glyphs_ptr, f64 x, f64 y, int cp, any color, int tex_id=-1) bool {
    "Draws one glyph through the active backend fast path when available."
    def packed = _pack_color_from(color, 1.0, 1.0, 1.0, 1.0, true)
    if _backend == BACKEND_VK && glyphs_ptr {
       if !_font_can_use_fast_vk_text() { return false }
       def g_off = lib_vkr._vkr_glyph_get_off(glyphs_ptr, cp)
       if !g_off || load32(g_off, render_shared.GLYPH_PRESENT) == 0 { return false }
-      def gt = int(load32(g_off, render_shared.GLYPH_TEX))
+      def gt = _fast_glyph_texture_id(g_off)
       if gt < 0 { return false }
       lib_vkr.__vkr_draw_text_glyph(glyphs_ptr, 0, x, y, cp, packed, tex_id)
       return true
@@ -7649,7 +7707,7 @@ fn draw_text_glyph_fast(any glyphs_ptr, f64 x, f64 y, int cp, any color, int tex
    false
 }
 
-fn _gl_draw_terminal_line_ptr(any line_ptr, int co, f64 px, f64 baseline_y, f64 cw, any glyphs_ptr, int skip_mask, int reverse_mask) bool {
+fn _gl_draw_terminal_line_ptr(ptr line_ptr, int co, f64 px, f64 baseline_y, f64 cw, ptr glyphs_ptr, int skip_mask, int reverse_mask) bool {
    if _backend != BACKEND_GL || !line_ptr || !glyphs_ptr || co <= 0 { return false }
    ;; Batched fast path: allocate one scratch buffer for the whole line and
    ;; accumulate quads, flushing only when the glyph texture changes (rare —
@@ -7676,7 +7734,7 @@ fn _gl_draw_terminal_line_ptr(any line_ptr, int co, f64 px, f64 baseline_y, f64 
                def bw = load32_f32(g_off, render_shared.GLYPH_BW)
                def bh = load32_f32(g_off, render_shared.GLYPH_BH)
                if bw > 0.0 && bh > 0.0 {
-                  def tex_id = int(load32(g_off, render_shared.GLYPH_TEX))
+                  def tex_id = _fast_glyph_texture_id(g_off)
                   if tex_id > 0 {
                      ;; Flush pending batch when texture changes so each draw
                      ;; call uses a single atlas texture.
@@ -7716,7 +7774,7 @@ fn _gl_draw_terminal_line_ptr(any line_ptr, int co, f64 px, f64 baseline_y, f64 
    drew
 }
 
-fn draw_terminal_line_fast_ptr(any line_ptr, int cols, f64 x, f64 baseline_y, f64 cell_w, any glyphs_ptr, int skip_mask, int reverse_mask) bool {
+fn draw_terminal_line_fast_ptr(ptr line_ptr, int cols, f64 x, f64 baseline_y, f64 cell_w, ptr glyphs_ptr, int skip_mask, int reverse_mask) bool {
    "Draws one terminal cell line through the active backend fast path when available."
    if !line_ptr || !glyphs_ptr || cols <= 0 { return false }
    if _backend == BACKEND_VK {
@@ -7792,7 +7850,7 @@ fn draw_rect_outline_fast(f64 x, f64 y, f64 w, f64 h, int c_u32) bool {
 }
 
 @jit
-fn draw_rects_fast_ptr(any rects, int count, int stride=20) int {
+fn draw_rects_fast_ptr(ptr rects, int count, int stride=20) int {
    "Draws packed rect records: f32 x,y,w,h + u32 color."
    if count <= 0 || !rects { return 0 }
    if _backend == BACKEND_VK { return lib_vkr.draw_rects_fast_ptr(rects, count, stride) }
@@ -7813,7 +7871,7 @@ fn draw_rects_fast_ptr(any rects, int count, int stride=20) int {
 }
 
 @jit
-fn draw_lines_2d_fast_ptr(any lines, int count, int stride=24) int {
+fn draw_lines_2d_fast_ptr(ptr lines, int count, int stride=24) int {
    "Draws packed 2D line records: f32 x1,y1,x2,y2,thickness + u32 color."
    if count <= 0 || !lines { return 0 }
    if _backend == BACKEND_VK { return lib_vkr.draw_lines_2d_fast_ptr(lines, count, stride) }
@@ -7871,22 +7929,28 @@ fn _gl_text_baseline_y(any y, any ascent) f64 {
    floor(float(y) + float(ascent) + 0.5)
 }
 
-fn _gl_fast_glyph_off(any glyphs_ptr, int cp) any {
+fn _gl_fast_glyph_off(ptr glyphs_ptr, int cp) ptr {
    if !glyphs_ptr || cp < 0 || cp >= 1114112 { return 0 }
    def page = load64(glyphs_ptr, (cp >> 8) * 8)
    if !page { return 0 }
    ptr_add(page, (cp & 255) * 48)
 }
 
+fn _fast_glyph_texture_id(ptr glyph_off) int {
+   if !glyph_off { return -1 }
+   def raw = load32(glyph_off, render_shared.GLYPH_TEX)
+   raw >= 2147483648 ? raw - 4294967296 : raw
+}
+
 fn _gl_store_text_quad(ptr p, f64 x, f64 y, f64 w, f64 h, f64 u1, f64 v1, f64 u2, f64 v2, int color_u32) bool {
    def x2 = x + w
    def y2 = y + h
-   render_shared.store_vertex64(p, 0, x,  y,  0.0, u1, v1, color_u32, 0)
-   render_shared.store_vertex64(p, 1, x,  y2, 0.0, u1, v2, color_u32, 0)
-   render_shared.store_vertex64(p, 2, x2, y2, 0.0, u2, v2, color_u32, 0)
-   render_shared.store_vertex64(p, 3, x2, y2, 0.0, u2, v2, color_u32, 0)
-   render_shared.store_vertex64(p, 4, x2, y,  0.0, u2, v1, color_u32, 0)
-   render_shared.store_vertex64(p, 5, x,  y,  0.0, u1, v1, color_u32, 0)
+   render_shared.store_vertex64_typed(p, 0, x,  y,  0.0, u1, v1, color_u32, 0)
+   render_shared.store_vertex64_typed(p, 1, x,  y2, 0.0, u1, v2, color_u32, 0)
+   render_shared.store_vertex64_typed(p, 2, x2, y2, 0.0, u2, v2, color_u32, 0)
+   render_shared.store_vertex64_typed(p, 3, x2, y2, 0.0, u2, v2, color_u32, 0)
+   render_shared.store_vertex64_typed(p, 4, x2, y,  0.0, u2, v1, color_u32, 0)
+   render_shared.store_vertex64_typed(p, 5, x,  y,  0.0, u1, v1, color_u32, 0)
    true
 }
 
@@ -7947,7 +8011,7 @@ fn _gl_draw_text_fast_inner(int font_id, str text, f64 x, f64 y, int color_u32, 
          pen_x += load32_f32(g_off, render_shared.GLYPH_ADV)
          continue
       }
-      def tex_id = int(load32(g_off, render_shared.GLYPH_TEX))
+      def tex_id = _fast_glyph_texture_id(g_off)
       if tex_id <= 0 {
          pen_x += load32_f32(g_off, render_shared.GLYPH_ADV)
          continue
@@ -8244,8 +8308,12 @@ fn draw_text_runs_flat_colors(int font, list runs) bool {
       def f = _font_get(font_id)
       def glyphs_ptr = f ? f.get("fast_glyphs", 0) : 0
       if glyphs_ptr {
-         return _gl_draw_text_runs_flat_inner(font_id, runs, 0xffffffff, glyphs_ptr, f.get("ascent", 0.0), f.get("line_height", f.get("size", 16.0)), 4, 3)
+         if _gl_draw_text_runs_flat_inner(font_id, runs, 0xffffffff, glyphs_ptr, f.get("ascent", 0.0), f.get("line_height", f.get("size", 16.0)), 4, 3) {
+            return true
+         }
       }
+      _draw_text_runs_flat_color_list(font_id, runs)
+      return true
    }
    if !_font_can_use_fast_vk_text() {
       if _mock_fast_text_enabled() { return _draw_text_mock_flat_color_bars(runs) }
@@ -10512,5 +10580,12 @@ fn set_wireframe(bool enabled) bool {
 #main {
    assert(color_pack(1.0, 0.0, 0.0, 1.0) != color_pack(0.0, 1.0, 0.0, 1.0), "render color pack")
    assert(BACKEND_NONE == 0 && BACKEND_MOCK == 3, "render backend constants")
-   print("✓ std.os.ui.render self-test passed")
+   def glyph_off = malloc(render_shared.GLYPH_STRIDE)
+   assert(!!glyph_off, "fast glyph test allocation")
+   store32(glyph_off, 0xffffffff, render_shared.GLYPH_TEX)
+   assert(_fast_glyph_texture_id(glyph_off) == -1, "fast glyph unavailable texture sentinel")
+   store32(glyph_off, 17, render_shared.GLYPH_TEX)
+   assert(_fast_glyph_texture_id(glyph_off) == 17, "fast glyph texture id")
+   free(glyph_off)
+   print("✓ core.os.ui.render self-test passed")
 }

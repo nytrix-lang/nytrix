@@ -1,0 +1,19 @@
+shape ownership_rule_linear_inferred_local_must_use {
+  family "compiler-errors/ownership"
+  generator "error"
+  features ["error", "ownership", "resource", "linear", "inferred"]
+  template ny-compile-fail
+  expect compile_fail
+  flags "--ownership-strict"
+  expect_message "linear resource 'file' must be consumed exactly once"
+  source ny <<'NY'
+linear layout File { int fd }
+
+fn forget() int {
+  def file = File(23)
+  0
+}
+
+forget()
+NY
+}

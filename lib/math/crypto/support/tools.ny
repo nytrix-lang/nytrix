@@ -3,17 +3,17 @@
 ;;
 ;; These are intentionally generic utilities.
 ;; References:
-;; - std.math.crypto.support
-;; - std.math.crypto
-module std.math.crypto.support.tools(scan_lines, collect_lines, bytes_contains, find_subseq,
+;; - core.math.crypto.support
+;; - core.math.crypto
+module core.math.crypto.support.tools(scan_lines, collect_lines, bytes_contains, find_subseq,
    rol_bits, ror_bits, bytes_fixed_from_bigint, bytes_ascii, bytes_is_printable_ascii,
    bytes_has_prefix, extract_flag, extract_flag_bytes, list_uniq, max_bit_length,
    str_strip_ws, str_strip_bytes_literal)
-use std.core
-use std.math.bin
-use std.math.big
-use std.math.nt
-use std.core.str as str
+use core
+use core.math.bin
+use core.math.big
+use core.math.nt
+use core.str as str
 
 fn scan_lines(str txt, fnptr on_line) any {
    "Call on_line(line_str) for each non-empty line in txt.
@@ -241,5 +241,5 @@ fn str_strip_bytes_literal(any s) str {
    assert(str_strip_bytes_literal(" b'abc' ") == "abc", "str_strip_bytes_literal single")
    assert(str_strip_bytes_literal('b"abc"') == "abc", "str_strip_bytes_literal double")
    assert(str_strip_bytes_literal(nil) == "", "str_strip_bytes_literal nil")
-   print("✓ std.math.crypto.support.tools self-test passed")
+   print("✓ core.math.crypto.support.tools self-test passed")
 }

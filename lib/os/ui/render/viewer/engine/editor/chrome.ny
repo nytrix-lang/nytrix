@@ -1,15 +1,15 @@
 ;; Keywords: engine editor chrome panels toolbar embedded os ui render viewer scene
 ;; Chrome and panel helpers for the embedded engine editor surface.
 ;; References:
-;; - std.os.ui.render.viewer.editor.mod
-;; - std.os.ui.render.viewer.engine.editor.mod
-module std.os.ui.render.viewer.engine.editor.chrome(EDITOR_TAB_ITEMS, SHOT_PRESET_ITEMS, graph_node, graph_nodes, graph_links, selected_graph_node, standalone_now, standalone_rect, visibility_changed, visibility_snapshot, chrome_metrics, draw_header, draw_footer, draw_style_tab, draw_layout_tab, draw_graph_body)
-use std.core
-use std.math (clamp)
-use std.os.ui.render.viewer.gui as gui
-use std.os.ui.render.viewer.editor.colorpicker as colorpicker
-use std.os.ui.render.viewer.app as ui_app
-use std.os.ui.render.dump as ui_profile
+;; - core.os.ui.render.viewer.editor.mod
+;; - core.os.ui.render.viewer.engine.editor.mod
+module core.os.ui.render.viewer.engine.editor.chrome(EDITOR_TAB_ITEMS, SHOT_PRESET_ITEMS, graph_node, graph_nodes, graph_links, selected_graph_node, standalone_now, standalone_rect, visibility_changed, visibility_snapshot, chrome_metrics, draw_header, draw_footer, draw_style_tab, draw_layout_tab, draw_graph_body)
+use core
+use core.math (clamp)
+use core.os.ui.render.viewer.gui as gui
+use core.os.ui.render.viewer.editor.colorpicker as colorpicker
+use core.os.ui.render.viewer.app as ui_app
+use core.os.ui.render.dump as ui_profile
 
 def EDITOR_TAB_ITEMS = ["Catalog", "Hierarchy", "Theme", "Console"]
 def SHOT_PRESET_ITEMS = [
@@ -378,5 +378,5 @@ fn draw_graph_body(any nodes, any links, any selected, any card_w, any canvas_h,
    def dense_metrics = chrome_metrics(620.0, 500.0)
    assert(!dense_metrics.get("compact", true) && dense_metrics.get("dense", false) && dense_metrics.get("summary_cols", 0) == 2, "editor chrome dense metrics")
    assert(chrome_metrics(1440.0, 800.0).get("summary_cols", 0) == 3, "editor chrome wide metrics")
-   print("✓ std.os.ui.render.viewer.engine.editor.chrome self-test passed")
+   print("✓ core.os.ui.render.viewer.engine.editor.chrome self-test passed")
 }

@@ -17,9 +17,9 @@ module declaration at most.
 
 ```ny
 ;; Keywords: source module
-module sample.units
+module sample.units(answer)
 
-pub fn answer() int { 42 }
+fn answer() int { 42 }
 ```
 
 A file is both a script and a module when it declares `module` and also keeps
@@ -30,7 +30,7 @@ direct execution runs the startup block.
 
 | Form | Meaning |
 | --- | --- |
-| `module name *` | Export every `pub` declaration in the file. |
+| `module name *` | Export every top-level declaration in the file. |
 | `module name (a, b, c)` | Export exactly `a`, `b`, `c`; `pub` elsewhere is ignored by imports. |
 | `module name { export group(a, b) internal(_helper) }` | Grouped exports; `internal` names stay private. |
 | `module name generated from Spec { key = value emit make_backend(Contract) }` | Attach compile-time configuration and emit generated declarations. |
@@ -38,7 +38,7 @@ direct execution runs the startup block.
 The `export group(...)` form names a profile. A `use module:profile` selects
 the `core` surface plus that profile.
 
-```ny
+```text
 module sample.groups {
    export core(run)
    export debug(dump_state)
@@ -52,24 +52,25 @@ use sample.groups:debug
 
 | Form | Binding |
 | --- | --- |
-| `use std.core` | Imports the module namespace. |
-| `use std.core as core` | Imports it under an alias. |
-| `use std.core: print` | Imports selected exported names. |
+| `use core` | Imports the module namespace. |
+| `use core as core` | Imports it under an alias. |
+| `use core: print` | Imports selected exported names. |
 | `use mod:debug` | Selects the `debug` profile when that module provides one. |
 
 Imports resolve before ordinary declarations. An unresolved module or export is
 a diagnostic. Imports do not execute an entry point.
 
 ```ny
-use std.core: assert
-use std.math as math
+use core: assert
+assert(true, "selected import")
 
-assert(math.sqrt(9) == 3, "imported name")
+use core as core
+assert(core.len([1, 2, 3]) == 3, "module alias")
 ```
 
 Import forms apply to relative files as well as module paths:
 
-```ny
+```text
 use "./parser.ny" as parser
 use "./parser.ny" (parse_node)
 use "./parser.ny":debug
@@ -77,13 +78,14 @@ use "./parser.ny":debug
 
 ## Exports and visibility
 
-`pub` exports a declaration. Declarations without `pub` remain private to the
-module. Selected imports may name only exported declarations.
+The module declaration owns visibility. List exported names in parentheses,
+or use `*` to export every top-level declaration. Names omitted from a selected
+export list remain private; this language version has no `pub` keyword.
 
 ```ny
-module sample.visibility
+module sample.visibility(public_value)
 
-pub def public_value = 1
+def public_value = 1
 def private_value = 2
 ```
 
@@ -92,6 +94,8 @@ def private_value = 2
 `#main { body }` gates `body` to the program entry path. It is equivalent to:
 
 ```ny
+use core
+
 if comptime { __main() } { print("entry") }
 ```
 
@@ -107,7 +111,7 @@ entry path; imports of that module never execute that body.
 
 Generated source must declare its module identity when it forms a module. The
 generated declaration participates in the same import and export rules as a
-handwritten module. See [compile-time execution](comptime.md#emission-and-generated-source).
+handwritten module. See [compile-time execution](comptime.md#generated-modules).
 
 ## Diagnostics
 
@@ -121,6 +125,6 @@ handwritten module. See [compile-time execution](comptime.md#emission-and-genera
 
 ## Related
 
-- [Syntax](syntax.md#source-structure)
-- [Functions](functions.md#visibility-and-attributes)
+- [Syntax](syntax.md#files-modules-and-imports)
+- [Functions](functions.md#attributes)
 - [Programs](../learn/programs.md)

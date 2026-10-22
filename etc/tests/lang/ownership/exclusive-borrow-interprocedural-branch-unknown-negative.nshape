@@ -1,0 +1,35 @@
+shape ownership_exclusive_borrow_interprocedural_branch_unknown_negative {
+  family "language/ownership"
+  generator "syntax"
+  features ["ownership", "borrow", "exclusive", "interprocedural", "branch", "negative"]
+  template ny-test-case
+  expect compile_failure
+  expect_message "unverified borrow"
+  flags "--ownership-strict --native-only"
+  source ny <<'NY'
+use core
+
+fn choose_branch(bool choose) bool {
+  return choose
+}
+
+@returns_borrow(x)
+fn mutable_borrow_parameter_branch(any x) any {
+  if choose_branch(true) {
+    return borrow_mut(x)
+  } else {
+    return borrow_mut(x)
+  }
+}
+
+fn disjoint_write() int {
+  mut list<int> values = [41, 43]
+  def exclusive = mutable_borrow_parameter_branch(values[0])
+  values[1] = 44
+  def observed = exclusive
+  observed
+}
+
+disjoint_write()
+NY
+}

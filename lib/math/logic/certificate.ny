@@ -1,16 +1,19 @@
 ;; Keywords: logic proof certificate checker canonical digest budget
 ;; Compact certificate envelope shared by self-hosted reasoning modules.
-module std.math.logic.certificate(
+module core.math.logic.certificate(
    envelope, check, key)
-use std.core
+use core
 
 ;; Returns the result of the `envelope` operation.
 fn envelope(str canonical, str module_version, str dependency_digest,
    str checker_version="logic-kernel-v1") dict {
-   def digest = __proof_cert_digest(canonical, module_version,
-      dependency_digest, checker_version)
    return {"format":"ny-proof-v1", "canonical":canonical,
-      "digest":digest, "module_version":module_version,
+      ;; Keep the tagged helper result at the dictionary boundary. Storing it
+      ;; in a local crosses the native scalar-class inference path and can
+      ;; unbox/rebox a dynamic integer incorrectly when the caller has many
+      ;; live locals.
+      "digest":__proof_cert_digest(canonical, module_version,
+         dependency_digest, checker_version), "module_version":module_version,
       "dependency_digest":dependency_digest,
       "checker_version":checker_version}
 }
@@ -24,11 +27,10 @@ fn key(dict certificate) str {
 }
 
 ;; Returns the result of the `check` operation.
-fn check(any certificate, int max_variables=16, int max_nodes=100000,
+fn _check_dict(dict certificate, int max_variables, int max_nodes,
    int max_depth=128, int max_steps=1000000, int max_memory=100000) bool {
-   if !is_dict(certificate) || certificate.get("format", "") != "ny-proof-v1" ||
+   if certificate.get("format", "") != "ny-proof-v1" ||
    !is_str(certificate.get("canonical", nil)) ||
-   !is_int(certificate.get("digest", nil)) ||
    !is_str(certificate.get("module_version", nil)) ||
    !is_str(certificate.get("dependency_digest", nil)) ||
    !is_str(certificate.get("checker_version", nil)) {
@@ -43,4 +45,11 @@ fn check(any certificate, int max_variables=16, int max_nodes=100000,
       certificate.get("dependency_digest"),
       certificate.get("checker_version"), max_variables, max_nodes,
       max_depth, max_steps, max_memory)
+}
+
+fn check(any certificate, int max_variables=16, int max_nodes=100000,
+   int max_depth=128, int max_steps=1000000, int max_memory=100000) bool {
+   if !is_dict(certificate) { return false }
+   _check_dict(certificate, max_variables, max_nodes, max_depth, max_steps,
+      max_memory)
 }

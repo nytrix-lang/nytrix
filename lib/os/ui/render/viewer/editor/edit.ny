@@ -1,16 +1,16 @@
 ;; Keywords: editor edit text insert delete indent os ui render viewer
 ;; Text edit primitives for insertion, deletion, indentation, and line operations.
 ;; References:
-;; - std.os.ui.render.viewer.editor.history
-module std.os.ui.render.viewer.editor.edit(
+;; - core.os.ui.render.viewer.editor.history
+module core.os.ui.render.viewer.editor.edit(
    line_insert, line_delete_before, insert_text, newline, backspace, delete_char,
    switch_buffer, select_buffer
 )
 
-use std.core
-use std.core.str as str
-use std.math (max, min)
-use std.os.ui.render.viewer.editor.core
+use core
+use core.str as str
+use core.math (max, min)
+use core.os.ui.render.viewer.editor.core
 
 @inline
 fn _line_at(list lines, int i) str {

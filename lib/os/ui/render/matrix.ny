@@ -1,12 +1,12 @@
 ;; Keywords: render matrix linear-algebra os ui
 ;; Matrix construction and transform operations for renderer cameras and models.
 ;; References:
-;; - std.os.ui.render
-module std.os.ui.render.matrix(mat4_zero, mat4_identity, mat4_identity_into, mat4_get, mat4_set, mat4_mul, mat4_mul_into, mat4_to_buffer, mat4_from_buffer, mat4_mul_vec4, mat4_add, mat4_translate, mat4_translate_into, mat4_scale, mat4_scale_into, mat4_rotate, mat4_rotate_into, mat4_rotate_x, mat4_rotate_x_into, mat4_rotate_y, mat4_rotate_y_into, mat4_rotate_z, mat4_rotate_z_into, mat4_perspective, mat4_perspective_into, mat4_ortho, mat4_ortho_into, mat4_look_at, mat4_look_at_xyz, mat4_look_at_into, mat4_look_at_into_xyz, mat4_transpose, mat4_inverse, mat4_inverse_into)
-use std.core
-use std.core.mem
-use std.math
-use std.math.simmd as simmd
+;; - core.os.ui.render
+module core.os.ui.render.matrix(mat4_zero, mat4_identity, mat4_identity_into, mat4_get, mat4_set, mat4_mul, mat4_mul_into, mat4_to_buffer, mat4_from_buffer, mat4_mul_vec4, mat4_add, mat4_translate, mat4_translate_into, mat4_scale, mat4_scale_into, mat4_rotate, mat4_rotate_into, mat4_rotate_x, mat4_rotate_x_into, mat4_rotate_y, mat4_rotate_y_into, mat4_rotate_z, mat4_rotate_z_into, mat4_perspective, mat4_perspective_into, mat4_ortho, mat4_ortho_into, mat4_look_at, mat4_look_at_xyz, mat4_look_at_into, mat4_look_at_into_xyz, mat4_transpose, mat4_inverse, mat4_inverse_into)
+use core
+use core.mem
+use core.math
+use core.math.simmd as simmd
 
 fn _mat4_zero_raw() list {
    "Returns a zero-initialized 4x4 matrix."
@@ -194,7 +194,8 @@ fn mat4_perspective(f64 fovy, f64 aspect, f64 near, f64 far) list {
 
 fn mat4_perspective_into(f64 fovy, f64 aspect, f64 near, f64 far, list m) list {
    "Writes a perspective projection matrix into `m`."
-   def f = 1.0 / tan(float(fovy) / 2.0)
+   def half_fovy = float(fovy) / 2.0
+   def f = cos(half_fovy) / sin(half_fovy)
    def nf = float(near) - float(far)
    mut i = 0 while i < 16 { m[2 + i] = 0.0 i += 1 }
    m[2] = f / float(aspect)
@@ -376,5 +377,5 @@ fn mat4_inverse_into(list src, list dst) list {
    free(buf)
    def inv = mat4_inverse(translated)
    assert(abs(mat4_get(inv, 0, 3) + 2.0) < 0.0001, "mat4 inverse")
-   print("✓ std.os.ui.render.matrix self-test passed")
+   print("✓ core.os.ui.render.matrix self-test passed")
 }

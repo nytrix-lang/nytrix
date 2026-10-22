@@ -1,0 +1,53 @@
+shape dynamic-dict-scalar-box {
+  family "native-nyir"
+  generator "regression"
+  features ["ny", "native", "dict"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+fn wrap_fd(int fd) dict {
+   mut d = dict(4)
+   set(d, "fd", fd)
+   set(d, "ready", fd >= 0)
+   d
+}
+
+def d = wrap_fd(5)
+assert(d.get("fd", -1) == 5, "typed integer survives dynamic dict setter")
+assert(d.get("ready", false) == true, "typed boolean survives dynamic dict setter")
+def e = wrap_fd(-1)
+assert(e.get("fd", 0) == -1, "negative typed integer survives dynamic dict setter")
+assert(e.get("ready", true) == false, "false predicate survives dynamic dict setter")
+
+fn store_value(dict target, any key, any value) {
+   target[key] = value
+}
+
+def values = dict(8)
+store_value(values, "backend", "x11")
+store_value(values, "zero", 0)
+store_value(values, "odd", 5)
+store_value(values, "negative", -7)
+store_value(values, "fraction", 0.25)
+store_value(values, "ready", true)
+store_value(values, "nested", {"answer": 42})
+store_value(values, "items", [3, 5, 7])
+assert(values.get("backend") == "x11", "dynamic indexed store preserves string identity")
+assert(values.get("zero") == 0, "dynamic indexed store preserves zero instead of nil")
+assert(values.get("odd") == 5 && values.get("negative") == -7, "dynamic indexed store preserves integer tags")
+assert(values.get("fraction") == 0.25, "dynamic indexed store preserves floats")
+assert(values.get("ready") == true, "dynamic indexed store preserves booleans")
+assert(values.get("nested").get("answer") == 42, "dynamic indexed store preserves dictionaries")
+assert(values.get("items")[1] == 5, "dynamic indexed store preserves lists")
+
+mut int_keys = {}
+int_keys[7] = 1
+int_keys[7] = 9
+assert(int_keys.get(7, 0) == 9 && int_keys.len == 1,
+       "native integer-key dictionary updates an existing first-probe entry")
+
+print("dynamic_dict_scalar_box ok")
+NY
+}

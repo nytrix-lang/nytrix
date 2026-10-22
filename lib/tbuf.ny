@@ -1,0 +1,137 @@
+;; Keywords: tbuf text-buffer core
+;; Typed buffer primitives for hot numeric loops.
+;; Unlike lists, typed buffers store raw untagged values in contiguous memory.
+;; References:
+;; - core
+module core.tbuf(f32buf_new, f32buf_load, f32buf_store, f32buf_load_raw, f32buf_store_raw, f64buf_new, f64buf_load, f64buf_store, u8buf_new, u8buf_load, u8buf_store, i32buf_new, i32buf_load, i32buf_store, i64buf_new, i64buf_load, i64buf_store, tbuf_len, tbuf_ptr, tbuf_copy)
+use core
+
+fn _tbuf_new(int n, int elem_size) ptr {
+   "Allocates via the runtime's 24-byte-header tbuf so core buffers are
+   interchangeable with compiler-pooled lists and raw tbuf helpers."
+   if n < 0 { n = 0 }
+   if elem_size <= 0 { elem_size = 1 }
+   rt_tbuf_new_typed_raw(n, elem_size)
+}
+
+extern "" {
+   fn rt_tbuf_new_typed_raw(int count, int elem_size) ptr
+}
+
+fn f32buf_new(int n) ptr { _tbuf_new(n, 4) }
+
+fn f64buf_new(int n) ptr { _tbuf_new(n, 8) }
+
+fn u8buf_new(int n) ptr { _tbuf_new(n, 1) }
+
+fn i32buf_new(int n) ptr { _tbuf_new(n, 4) }
+
+fn i64buf_new(int n) ptr { _tbuf_new(n, 8) }
+
+fn f32buf_load(ptr buf, int i) f32 { load32_f32(buf, i * 4) }
+
+fn f64buf_load(ptr buf, int i) f64 { load64_f64(buf, i * 8) }
+
+@inline
+fn u8buf_load(ptr buf, int i) int { load8(buf, i) }
+
+fn i32buf_load(ptr buf, int i) int {
+   "Loads a signed 32-bit integer from `buf` at index `i`."
+   def v = load32(buf, i * 4)
+   v >= 0x80000000 ? v - 0x100000000 : v
+}
+
+@inline
+fn i64buf_load(ptr buf, int i) int { load64_i(buf, i * 8) }
+
+fn f32buf_store(ptr buf, int i, f32 v) ptr {
+   store32_f32(buf, v, i * 4)
+   buf
+}
+
+fn f64buf_store(ptr buf, int i, f64 v) ptr {
+   store64_f64(buf, v, i * 8)
+   buf
+}
+
+@inline
+fn u8buf_store(ptr buf, int i, int v) ptr {
+   store8(buf, v, i)
+   buf
+}
+
+fn i32buf_store(ptr buf, int i, int v) ptr {
+   store32(buf, v, i * 4)
+   buf
+}
+
+@inline
+fn i64buf_store(ptr buf, int i, int v) ptr {
+   store64_i(buf, v, i * 8)
+   buf
+}
+
+@inline
+fn f32buf_load_raw(ptr buf, int i) int {
+   "Loads the raw IEEE-754 bit pattern of the `f32` value at index `i`."
+   load32(buf, i * 4)
+}
+
+@inline
+fn f32buf_store_raw(ptr buf, int i, int bits) ptr {
+   "Stores raw IEEE-754 bits at index `i` without converting through `f32`."
+   store32(buf, bits, i * 4)
+   buf
+}
+
+@inline
+fn tbuf_len(ptr buf) int {
+   "Returns the logical element count for typed buffer `buf`."
+   if !buf { return 0 }
+   load64(buf - 24, 0)
+}
+
+@inline
+fn tbuf_ptr(ptr buf) ptr {
+   "Returns the raw backing pointer for typed buffer `buf`."
+   buf
+}
+
+@inline
+fn tbuf_copy(ptr dst, int di, ptr src, int si, int n, int elem_size) ptr {
+   "Copies `n` elements of `elem_size` bytes from `src[si]` into `dst[di]`."
+   if !dst || !src || n <= 0 || elem_size <= 0 { return dst }
+   memcpy(dst + di * elem_size, src + si * elem_size, n * elem_size)
+   dst
+}
+
+#main {
+   def ub = u8buf_new(4)
+   assert(tbuf_len(ub) == 4 && tbuf_ptr(ub) == ub, "tbuf metadata")
+   assert(u8buf_store(ub, 0, 65) == ub, "tbuf u8 store returns buffer")
+   u8buf_store(ub, 1, 66)
+   assert(u8buf_load(ub, 0) == 65 && u8buf_load(ub, 1) == 66, "tbuf u8 roundtrip")
+   def ib = i32buf_new(2)
+   assert(i32buf_store(ib, 0, -7) == ib, "tbuf i32 store returns buffer")
+   i32buf_store(ib, 1, 42)
+   assert(i32buf_load(ib, 0) == -7 && i32buf_load(ib, 1) == 42, "tbuf i32 roundtrip")
+   def lb = i64buf_new(1)
+   assert(i64buf_store(lb, 0, 123456789) == lb, "tbuf i64 store returns buffer")
+   assert(i64buf_load(lb, 0) == 123456789, "tbuf i64 roundtrip")
+   def fb = f32buf_new(2)
+   assert(f32buf_store_raw(fb, 0, 0x3f800000) == fb, "tbuf f32 raw store returns buffer")
+   assert(f32buf_store(fb, 1, 2.5f32) == fb, "tbuf f32 store returns buffer")
+   assert(f32buf_load_raw(fb, 0) == 0x3f800000 && f32buf_load(fb, 1) == 2.5f32, "tbuf f32 roundtrip")
+   def db = f64buf_new(1)
+   assert(f64buf_store(db, 0, 3.25) == db, "tbuf f64 store returns buffer")
+   assert(f64buf_load(db, 0) == 3.25, "tbuf f64 roundtrip")
+   def src = u8buf_new(4)
+   def dst = u8buf_new(4)
+   u8buf_store(src, 0, 10)
+   u8buf_store(src, 1, 20)
+   u8buf_store(src, 2, 30)
+   u8buf_store(src, 3, 40)
+   tbuf_copy(dst, 1, src, 2, 2, 1)
+   assert(u8buf_load(dst, 0) == 0 && u8buf_load(dst, 1) == 30 && u8buf_load(dst, 2) == 40, "tbuf copy")
+   print("✓ core.tbuf self-test passed")
+}

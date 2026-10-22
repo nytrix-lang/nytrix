@@ -2,30 +2,30 @@
 
 ;; Keywords: platform probe ui app example term renderer png font
 ;; Unix Terminal Emulator
-use std.core
-use std.os (exit)
-use std.os.args
-use std.os.path as ospath
-use std.os.time (ticks, msleep)
-use std.os.process as process
-use std.os.ui.window.consts
-use std.os.ui.render (
+use core
+use core.os (exit)
+use core.os.path as ospath
+use core.os.time (ticks, msleep)
+use core.os.process as process
+use core.os.fixture (ready, start_ui, tick_ui, quit_key, next_ui_key, exit_status)
+use core.os.ui.window.consts
+use core.os.ui.render (
    BACKEND_MOCK,
    begin_frame_clear, close_window, end_frame,
-   get_active_backend_name, get_swapchain_image_count,
+   get_active_backend_name, get_backend_type, get_swapchain_image_count,
    init_mock_surface, init_window,
    request_frame_capture, set_backend_type, apply_backend_env, apply_backend_argv, set_clear_color, set_win_size,
    snapshot
 )
 
-use std.os.ui.window
-use std.os.ui.window.platform as platform
-use std.os.ui.window.input as ui
-use std.os.ui.render.dump as ui_dump
-use std.os.ui.render.viewer as view
-use std.os.ui.render.viewer.vterm as vterm
-use std.core.str as str
-use std.core.common as common
+use core.os.ui.window
+use core.os.ui.window.platform as platform
+use core.os.ui.window.input as ui
+use core.os.ui.render.dump as ui_dump
+use core.os.ui.render.viewer as view
+use core.os.ui.render.viewer.vterm as vterm
+use core.str as str
+use core.common as common
 
 mut win = 0
 mut win_id = 0
@@ -33,23 +33,24 @@ mut font = 0
 mut font_bold = 0
 mut font_italic = 0
 mut font_emoji = 0
-mut vt = 0
-mut win_w = 1280.0
-mut win_h = 720.0
+mut dict vt = dict(0)
+mut f64 win_w = 1280.0
+mut f64 win_h = 720.0
 def START_FONT_SIZE = 16.0
-mut font_size = START_FONT_SIZE
+mut f64 font_size = START_FONT_SIZE
 mut last_esc_ms = 0
 mut _has_framebuffer_transparency = false
 mut _last_activity_ticks = 0
 mut _shell_exit_reported = false
-mut _last_title = ""
+mut str _last_title = ""
 mut _update_budget_ns = 6000000
-mut _update_budget_reload_ticks = 0
-mut _runtime_flags_reload_ticks = 0
+mut int _update_budget_reload_ticks = 0
+mut int _runtime_flags_reload_ticks = 0
 mut _esc_close_enabled = false
 mut _stay_open_on_exit = false
-mut _fb_sync_next_ticks = 0
+mut int _fb_sync_next_ticks = 0
 mut _needs_draw = true
+mut _term_window_shown = false
 mut _last_cursor_blink_phase = -1
 mut _frame_count = 0
 mut _auto_dump_done = false
@@ -66,7 +67,7 @@ mut _left_button_was_down = false
 mut _last_left_down_ticks = 0
 mut _term_command_mode = false
 mut _draw_fail_count = 0
-mut _last_draw_fail_warn_ticks = 0
+mut int _last_draw_fail_warn_ticks = 0
 mut _suppress_plus_char_count = 0
 mut _suppress_plus_char_until_ticks = 0
 mut _font_zoom_plus_down = false
@@ -75,9 +76,9 @@ mut _font_zoom_zero_down = false
 mut _font_zoom_hold_dir = 0
 mut _font_zoom_pending_delta = 0
 mut _font_reset_pending = false
-mut _font_zoom_next_ticks = 0
+mut int _font_zoom_next_ticks = 0
 mut _max_events_per_frame = 160
-mut _input_event_budget_ns = 2000000
+mut int _input_event_budget_ns = 2000000
 mut _key_update_max = 64
 mut _key_update_budget_ns = 4000000
 mut _mouse_update_max = 48
@@ -89,9 +90,14 @@ mut _term_shutdown_done = false
 mut _repeat_key = 0
 mut _repeat_mod = 0
 mut _repeat_down = false
-mut _repeat_next_ticks = 0
+mut int _repeat_next_ticks = 0
 mut _input_debug_count = 0
 mut _input_debug_max = 0
+
+fn max_f64(f64 a, f64 b) f64 { a > b ? a : b }
+fn min_f64(f64 a, f64 b) f64 { a < b ? a : b }
+fn max_int(int a, int b) int { a > b ? a : b }
+fn min_int(int a, int b) int { a < b ? a : b }
 
 fn _term_shutdown() any {
    "Closes the child terminal and renderer/window resources once."
@@ -153,8 +159,8 @@ fn _font_zoom_repeat_ns() int {
 }
 
 fn _set_font_size_live(float next_size) bool {
-   def clamped = max(4.0, min(96.0, next_size))
-   if clamped == font_size { return false }
+   def f64 clamped = max_f64(4.0, min_f64(96.0, next_size))
+   if float(clamped) == float(font_size) { return false }
    font_size = clamped
    _reload_fonts()
    _request_redraw(_term_redraw_frames())
@@ -232,7 +238,7 @@ fn _font_zoom_active() bool {
    _font_zoom_hold_dir != 0 || _font_zoom_pending_delta != 0 || _font_reset_pending
 }
 
-fn _apply_font_zoom_tick(any now_ticks) bool {
+fn _apply_font_zoom_tick(int now_ticks) bool {
    if _font_reset_pending {
       _font_reset_pending = false
       ;; Discard a stale zoom delta that was queued after the reset request
@@ -270,7 +276,7 @@ fn _term_diag(str label, any value) any {
 fn _term_verbose_arg() bool {
    mut i = 1
    while i < argc() {
-      def a = str.lower(str.strip(to_str(argv(i))))
+      def str a = str.lower(str.strip(to_str(argv(i))))
       if a == "-v" || a == "--verbose" || a == "-vv" || a == "-vvv" || a == "--debug" || a == "--debug-deep" { return true }
       i += 1
    }
@@ -333,7 +339,7 @@ fn _input_debug_event(str stage, int typ, any data) any {
 fn _term_has_help_arg() bool {
    mut i = 1
    while i < argc() {
-      def a = str.lower(str.strip(to_str(argv(i))))
+      def str a = str.lower(str.strip(to_str(argv(i))))
       if a == "-h" || a == "--help" || a == "help" { return true }
       i += 1
    }
@@ -387,7 +393,7 @@ fn _term_print_help() any {
 fn _term_force_window_arg() bool {
    mut i = 1
    while i < argc() {
-      def a = str.lower(str.strip(to_str(argv(i))))
+      def str a = str.lower(str.strip(to_str(argv(i))))
       if a == "--window" || a == "--gui" || a == "--term" || a == "--terminal" || a == "--no-direct" { return true }
       i += 1
    }
@@ -397,7 +403,7 @@ fn _term_force_window_arg() bool {
 fn _term_force_direct_arg() bool {
    mut i = 1
    while i < argc() {
-      def a = str.lower(str.strip(to_str(argv(i))))
+      def str a = str.lower(str.strip(to_str(argv(i))))
       if a == "--direct" || a == "--run-direct" || a == "--host" { return true }
       i += 1
    }
@@ -441,7 +447,7 @@ fn _term_command_first_arg() str {
 }
 
 fn _term_interactive_command(str cmd) bool {
-   def c = str.lower(str.strip(cmd))
+   def str c = str.lower(str.strip(cmd))
    c == "" ||
    c == "bash" || c == "zsh" || c == "fish" || c == "sh" || c == "tmux" || c == "screen" ||
    c == "htop" || c == "btop" || c == "top" || c == "nvim" || c == "vim" || c == "vi" || c == "nano" ||
@@ -474,7 +480,7 @@ fn _term_redraw_frames() int {
    }
    mut frames = 2
    def swap_images = get_swapchain_image_count()
-   if swap_images > 0 { frames = min(max(2, swap_images), 4) }
+   if swap_images > 0 { frames = min_int(max_int(2, swap_images), 4) }
    frames
 }
 
@@ -489,7 +495,7 @@ fn _request_redraw(int frames=4) any {
    0
 }
 
-fn _warn_draw_failure(str msg, any now_ticks) any {
+fn _warn_draw_failure(str msg, int now_ticks) any {
    if now_ticks - _last_draw_fail_warn_ticks < 1000000000 { return 0 }
    eprint(_term_color("33", "[term] warning: ") + msg)
    _last_draw_fail_warn_ticks = now_ticks
@@ -516,7 +522,7 @@ fn _open_windowed(any title, int w, int h, int flags=0, bool raw=true, bool cpu=
    opened
 }
 
-fn _auto_close_if_idle(any win, any last_ticks, int default_ns=0) bool {
+fn _auto_close_if_idle(any win, int last_ticks, int default_ns=0) bool {
    def raw = common.env_trim("NY_UI_TIMEOUT")
    def limit = raw.len > 0 ? int(str.atof(raw) * 1e9) : default_ns
    if limit <= 0 || ticks() - last_ticks < limit { return false }
@@ -551,13 +557,13 @@ fn _sync_framebuffer_size() bool {
    true
 }
 
-fn _sync_framebuffer_size_if_due(any now_ticks, bool force=false) bool {
+fn _sync_framebuffer_size_if_due(int now_ticks, bool force=false) bool {
    if !force && now_ticks < _fb_sync_next_ticks { return false }
    _fb_sync_next_ticks = now_ticks + 16000000 ;; ~16ms
    _sync_framebuffer_size()
 }
 
-fn _refresh_update_budget(any now_ticks) any {
+fn _refresh_update_budget(int now_ticks) any {
    if now_ticks < _update_budget_reload_ticks { return 0 }
    mut budget_ms = 4.0
    def budget_env = common.env_trim("NY_TERM_UPDATE_BUDGET_MS")
@@ -578,7 +584,7 @@ fn _refresh_update_budget(any now_ticks) any {
    0
 }
 
-fn _refresh_runtime_flags(any now_ticks) any {
+fn _refresh_runtime_flags(int now_ticks) any {
    if now_ticks < _runtime_flags_reload_ticks { return 0 }
    _esc_close_enabled = common.env_present("NY_TERM_ESC_CLOSE")
    _stay_open_on_exit = common.env_present("NY_TERM_STAY_OPEN_ON_EXIT") ? common.env_truthy("NY_TERM_STAY_OPEN_ON_EXIT") : _term_command_mode
@@ -613,6 +619,9 @@ fn startup() any {
    def start_h = default_sz.get(1, 720)
    def flags = WINDOW_ALLOW_DND | WINDOW_CENTER | WINDOW_FOCUS_ON_SHOW
    font_size = view.default_font_size("term", START_FONT_SIZE)
+   win_w = float(start_w)
+   win_h = float(start_h)
+   _init_vt()
    if _headless_mode {
       win = window.open_window("Nytrix Terminal", 0, 0, start_w, start_h, flags | WINDOW_HIDE | WINDOW_NO_RESIZE)
       if win && !init_mock_surface(start_w, start_h) {
@@ -627,6 +636,7 @@ fn startup() any {
       _term_exit(1)
    }
    win_id = window.id(win)
+   vt["window_id"] = win_id
    set_clear_color([0.0, 0.0, 0.0, 1.0])
    window.set_exit_key(win, KEY_NULL)
    window.set_input_exclusive(win, true)
@@ -635,7 +645,6 @@ fn startup() any {
    win_w = float(sz.get(0, start_w))
    win_h = float(sz.get(1, start_h))
    _has_framebuffer_transparency = false
-   _init_vt()
    window.set_cursor_mode(win, window.CURSOR_NORMAL)
    _resize_term()
    _last_title = vterm.get_title(vt)
@@ -648,15 +657,16 @@ fn startup() any {
    _auto_dump_ready_frame = -1
    _auto_dump_attempts = 0
    _selftest_input()
-   win = window.get_win(win)
 }
 
 fn _init_vt() any {
    def cell = view.terminal_cell_size(font, font_size)
-   def cw = float(cell.get(0, font_size * 0.6))
-   def ch = float(cell.get(1, max(font_size, 20.0)))
+   def f64 cw = max_f64(7.0, float(cell.get(0, font_size * 0.6)))
+   def f64 ch = max_f64(14.0, float(cell.get(1, max_f64(font_size, 20.0))))
    mut cols = int(win_w / cw)
    mut rows = int(win_h / ch)
+   if cols > 320 { cols = 320 }
+   if rows > 160 { rows = 160 }
    if cols <= 0 { cols = 80 } if rows <= 0 { rows = 24 }
    vt = vterm.new(cols, rows, _font_map(), 0, 0)
    if !vt || !is_dict(vt) {
@@ -672,21 +682,31 @@ fn _init_vt() any {
    def shell_path = launch.get("path", vterm.default_shell_path())
    def shell_args = launch.get("args", vterm.default_shell_args(common.env_truthy("NY_TERM_LOGIN")))
    _term_command_mode = bool(launch.get("command", false))
-   match vterm.open(vt, shell_path, shell_args) {
-      ok(next_vt) -> { vt = next_vt }
-      err(e) -> {
-         print("[term] failed to open vterm: " + to_str(e))
-         _term_exit(1)
-      }
+   def Result<dict, any> open_result = vterm.open(vt, shell_path, shell_args)
+   if is_err(open_result) {
+      print("[term] failed to open vterm: " + to_str(unwrap_or(open_result, "unknown error")))
+      _term_exit(1)
    }
-   set_clear_color(_term_bg_color())
+   vt = unwrap_or(open_result, vt)
 }
 
 fn _selftest_input() any {
    if !common.env_truthy("NY_TERM_SELFTEST_INPUT") { return 0 }
-   vt = vterm.handle_event(vt, EVENT_KEY_PRESSED, {"key": ui.KEY_A, "action": 1, "mod": 0, "ww": win_w, "wh": win_h})
+   mut dict key_data = dict(5)
+   key_data["key"] = ui.KEY_A
+   key_data["action"] = 1
+   key_data["mod"] = 0
+   key_data["ww"] = win_w
+   key_data["wh"] = win_h
+   vt = vterm.handle_event(vt, EVENT_KEY_PRESSED, key_data)
    if !common.env_truthy("NY_TERM_SELFTEST_KEY_ONLY") {
-      vt = vterm.handle_event(vt, EVENT_KEY_CHAR, {"char": 97, "mod": 0, "plain": true, "ww": win_w, "wh": win_h})
+      mut dict char_data = dict(5)
+      char_data["char"] = 97
+      char_data["mod"] = 0
+      char_data["plain"] = true
+      char_data["ww"] = win_w
+      char_data["wh"] = win_h
+      vt = vterm.handle_event(vt, EVENT_KEY_CHAR, char_data)
    }
    0
 }
@@ -695,12 +715,20 @@ fn _term_launch_spec() dict {
    def login_pref = common.env_truthy("NY_TERM_LOGIN")
    def shell_path = vterm.default_shell_path()
    def line = _term_command_line()
-   if line.len == 0 { return {"path": shell_path, "args": vterm.default_shell_args(login_pref), "command": false} }
-   return {"path": shell_path, "args": ["-lc", line], "command": true}
+   mut dict spec = dict(3)
+   spec["path"] = shell_path
+   if line.len == 0 {
+      spec["args"] = vterm.default_shell_args(login_pref)
+      spec["command"] = false
+      return spec
+   }
+   spec["args"] = ["-lc", line]
+   spec["command"] = true
+   spec
 }
 
 fn _term_backend_flag(any arg) bool {
-   def a = str.lower(str.strip(to_str(arg)))
+   def str a = str.lower(str.strip(to_str(arg)))
    a == "-gl" || a == "--gl" ||
    a == "-opengl" || a == "--opengl" ||
    a == "-webgl" || a == "--webgl" ||
@@ -745,11 +773,11 @@ fn _scale_event_xy(any ev_data) any {
 fn _vterm_event_data(int typ, any data) any {
    mut ev_data = data
    if typ == EVENT_MOUSE_SCROLL && is_list(ev_data) {
-      ev_data = {
-         "dx": float(ev_data.get(0, 0.0)),
-         "dy": float(ev_data.get(1, 0.0)),
-         "scrolling": true,
-      }
+      mut dict scroll_data = dict(3)
+      scroll_data["dx"] = float(ev_data.get(0, 0.0))
+      scroll_data["dy"] = float(ev_data.get(1, 0.0))
+      scroll_data["scrolling"] = true
+      ev_data = scroll_data
    }
    if is_dict(ev_data) {
       ev_data = _scale_event_xy(ev_data)
@@ -901,7 +929,7 @@ fn _flush_pending_mouse_events() bool {
    did
 }
 
-fn _event_budget_done(any event_start_ticks, int event_count) bool {
+fn _event_budget_done(int event_start_ticks, int event_count) bool {
    event_count > 0 && (event_count % 8) == 0 && (ticks() - event_start_ticks) >= _input_event_budget_ns
 }
 
@@ -990,7 +1018,7 @@ fn _term_repeat_arm(int k, int md) any {
    0
 }
 
-fn _term_pump_key_repeat(any now_ticks) bool {
+fn _term_pump_key_repeat(int now_ticks) bool {
    if !_term_synth_repeat_enabled() { return false }
    if !_repeat_down || _repeat_key == 0 { return false }
    if now_ticks < _repeat_next_ticks { return false }
@@ -1000,14 +1028,14 @@ fn _term_pump_key_repeat(any now_ticks) bool {
 
    mut sent = 0
    while _repeat_down && now_ticks >= _repeat_next_ticks && sent < max_burst {
-      vt = vterm.handle_event(vt, EVENT_KEY_PRESSED, {
-         "key": _repeat_key,
-         "mod": _repeat_mod,
-         "action": 2,
-         "repeat": true,
-         "ww": win_w,
-         "wh": win_h,
-      })
+      mut dict repeat_data = dict(6)
+      repeat_data["key"] = _repeat_key
+      repeat_data["mod"] = _repeat_mod
+      repeat_data["action"] = 2
+      repeat_data["repeat"] = true
+      repeat_data["ww"] = win_w
+      repeat_data["wh"] = win_h
+      vt = vterm.handle_event(vt, EVENT_KEY_PRESSED, repeat_data)
       _repeat_next_ticks += interval
       sent += 1
    }
@@ -1020,21 +1048,25 @@ fn _term_pump_key_repeat(any now_ticks) bool {
    false
 }
 
-fn _term_idle_sleep_ms(any now_ticks) int {
+fn _term_idle_sleep_ms(int now_ticks) int {
    mut sleep_ms = vterm.idle_sleep_ms(vt, now_ticks)
 
    if _term_synth_repeat_enabled() && _repeat_down {
       def left_ns = _repeat_next_ticks - ticks()
-      def rep_ms = (left_ns <= 0) ? 0 : max(1, int(left_ns / 1000000))
+      def rep_ms = (left_ns <= 0) ? 0 : max_int(1, int(left_ns / 1000000))
       if sleep_ms > rep_ms { sleep_ms = rep_ms }
    }
 
    sleep_ms
 }
 
+fn _event_pending(any event) bool {
+   !!event
+}
+
 fn _handle_app_key(int k, int md) bool {
    if _esc_close_enabled && k == ui.KEY_ESCAPE && (md & (MOD_SHIFT|MOD_CONTROL|MOD_ALT|MOD_SUPER|MOD_META)) == 0 && vt != 0 {
-      def st = vt.get("state", 0)
+      def int st = int(vt.get("state", 0))
       if st != 0 {
          def mode = load32(st, 32)
          if (mode & 2) == 0 {
@@ -1084,8 +1116,8 @@ fn update(int now_ticks) any {
    mut mouse_input_hot = false
    mut scroll_input_hot = false
    def max_events = _max_events_per_frame
-   def event_start = ticks()
-   while e != 0 && event_count < max_events {
+   def int event_start = ticks()
+   while _event_pending(e) && event_count < max_events {
       def typ = window.event_type(e)
       def data = window.event_data(e)
       _input_debug_event("raw", typ, data)
@@ -1199,11 +1231,11 @@ fn update(int now_ticks) any {
       input_hot = true
       mouse_input_hot = true
    }
-   if e != 0 {
+   if _event_pending(e) {
       input_hot = true
       _request_redraw(1)
    }
-   if _apply_font_zoom_tick(ticks()) {
+   if _apply_font_zoom_tick(int(ticks())) {
       event_count += 1
       input_hot = true
    }
@@ -1246,7 +1278,7 @@ fn update(int now_ticks) any {
       }
    }
    if updates >= max_updates && last_update_bytes > 0 { pty_backlog_hot = true }
-   def cur_title = vterm.get_title(vt)
+   def str cur_title = to_str(vterm.get_title(vt))
    if cur_title != _last_title {
       window.set_title(win, cur_title)
       _last_title = cur_title
@@ -1276,10 +1308,12 @@ fn update(int now_ticks) any {
 
 fn _resize_term() any {
    def cell = view.terminal_cell_size(font, font_size)
-   def cw = float(cell.get(0, float(font_size) * 0.6))
-   def ch = float(cell.get(1, max(float(font_size), 20.0)))
-   def cols = int(win_w / cw)
-   def rows = int(win_h / ch)
+   def f64 cw = max_f64(7.0, float(cell.get(0, float(font_size) * 0.6)))
+   def f64 ch = max_f64(14.0, float(cell.get(1, max_f64(float(font_size), 20.0))))
+   mut cols = int(win_w / cw)
+   mut rows = int(win_h / ch)
+   if cols > 320 { cols = 320 }
+   if rows > 160 { rows = 160 }
    ;; Bail BEFORE updating the internal window size so the renderer keeps using
    ;; the old (consistent) win_w/win_h + vt dimensions. Calling set_win_size
    ;; first and then returning leaves vt with stale cols/rows while the ortho
@@ -1322,9 +1356,16 @@ fn draw() any {
    }
    _headless_begin_fail_count = 0
    _draw_fail_count = 0
+   if ui_dump.debug_verbose_enabled() { eprint("[term:draw] begin ok; projection.before") }
    set_ortho_2d(0.0, win_w, 0.0, win_h)
+   if ui_dump.debug_verbose_enabled() { eprint("[term:draw] projection.after; vterm.before") }
    vt = vterm.draw(vt, win_w, win_h)
-   end_frame()
+   if ui_dump.debug_verbose_enabled() { eprint("[term:draw] vterm.after; present.before") }
+   def presented = end_frame()
+   if presented && !_term_window_shown {
+      _term_window_shown = window.show(win)
+   }
+   if ui_dump.debug_verbose_enabled() { eprint("[term:draw] present.after") }
    _frame_count += 1
    if _redraw_frames > 0 { _redraw_frames -= 1 }
    if dump_enabled && _auto_dump_ready_frame >= 0 && _frame_count > _auto_dump_ready_frame {
@@ -1358,11 +1399,20 @@ fn draw() any {
 
 if _term_has_help_arg() { _term_print_help() _term_exit(0) }
 if _term_should_direct_command() { _term_exit(_term_run_direct_command()) }
+if common.env_truthy("NY_UI_HEADLESS") { exit(0) }
 startup()
+ready("term")
+;; Keep the terminal's capture lifecycle in charge of its headless default;
+;; explicit fixture limits still bound smoke and PTY runs.
+def fx = start_ui(0, 0, false)
+def mock_window = _live_window()
+def mock_backend = is_dict(mock_window) && !!mock_window.get("_mock", false)
 def startup_ticks = ticks()
 _last_activity_ticks = startup_ticks
 mut live_win = _live_window()
-while live_win && !window.should_close(live_win) {
+while live_win && !window.should_close(live_win) && tick_ui(fx) {
+   if quit_key(next_ui_key(fx)) { break }
+   if mock_backend { break }
    win = live_win
    def now = ticks()
    _auto_close_if_idle(win, _last_activity_ticks)
@@ -1371,4 +1421,4 @@ while live_win && !window.should_close(live_win) {
    live_win = _live_window()
 }
 
-_term_exit(0)
+_term_exit(exit_status(fx))

@@ -1,0 +1,26 @@
+shape type_operator_ambiguous_across_active_modules {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "operator", "ambiguous", "modules"]
+  template ny-compile-fail
+  flags "-no-std"
+  expect compile_fail
+  expect_message "ambiguous operator '+' for Meter and Meter"
+  source ny <<'NY'
+struct Meter { int value }
+module FirstOps(add) {
+  fn add(Meter left, Meter right) Meter { return left }
+  operator Meter + Meter: Meter = add
+}
+module SecondOps(add) {
+  fn add(Meter left, Meter right) Meter { return left }
+  operator Meter + Meter: Meter = add
+}
+use FirstOps (add as first_add)
+use SecondOps (add as second_add)
+def Meter left = Meter({"value": 1})
+def Meter right = Meter({"value": 2})
+def result = left + right
+print(result)
+NY
+}

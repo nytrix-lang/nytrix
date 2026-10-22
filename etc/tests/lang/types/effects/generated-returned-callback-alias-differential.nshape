@@ -1,0 +1,823 @@
+shape generated_returned_callback_alias_effect_differential {
+  family "typing/effects"
+  generator "embedded"
+  features [typing effects callback returned-alias generated differential]
+  estimate_ms 27000
+  timeout 180
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.subprocess as process
+use core.os.prim (env)
+use core.os.thread as thread
+
+def compiler = env("NYTRIX_NY_FULL_BIN")
+def core_bc = env("NYTRIX_TEST_CORE_BC")
+def shared_core_bc = is_str(core_bc) ? core_bc : ""
+assert(is_str(compiler) && compiler.len > 0,
+       "runner supplies the compiler for callback alias flow cases")
+
+fn generated_source(int mode) str {
+  if mode == 120 || mode == 121 || mode == 122 || mode == 123 ||
+     mode == 124 || mode == 125 {
+    def contract = if mode == 120 || mode == 122 || mode == 124 {
+      "alloc, read, write, io"
+    } else {
+      "alloc, read, write"
+    }
+    def forwarding = if mode >= 124 {
+      "fn forward(list callbacks) list { return callbacks }\n" +
+      "fn forward_again(list callbacks) list { return forward(callbacks) }\n"
+    } else if mode >= 122 {
+      "fn forward(list callbacks) list { return callbacks }\n"
+    } else {
+      ""
+    }
+    def returned = if mode >= 124 {
+      "def returned = forward_again(make())\n"
+    } else if mode >= 122 {
+      "def returned = forward(make())\n"
+    } else {
+      "def returned = make()\n"
+    }
+    return "use core\n" +
+      "@effects(none) fn pure() int { return 42 }\n" +
+      "@effects(io) fn impure() int { print(\"returned callback container\\n\")\nreturn 43 }\n" +
+      "@effects(alloc, read, write) fn make() list {\n" +
+      "mut callbacks = [pure]\ncallbacks[0] = impure\nreturn callbacks\n}\n" +
+      forwarding +
+      "@effects(" + contract + ") fn owner() int {\n" +
+      returned + "returned[0]()\n}\nowner()\n"
+  }
+  if mode == 118 || mode == 119 {
+    def contract = mode == 118 ? "alloc, io" : "alloc"
+    return "use core\n" +
+      "@effects(io) fn impure() int { print(\"forwarded escaped closure\\n\")\nreturn 43 }\n" +
+      "@effects(alloc) fn make() fnptr { return fn() { impure() } }\n" +
+      "fn forward(fnptr callback) fnptr { return callback }\n" +
+      "@effects(" + contract + ") fn owner() int {\n" +
+      "def returned = forward(make())\nreturned()\n}\nowner()\n"
+  }
+  if mode == 116 || mode == 117 {
+    def contract = mode == 116 ? "alloc, io" : "alloc"
+    return "use core\n" +
+      "@effects(none) fn pure() int { return 42 }\n" +
+      "@effects(io) fn impure() int { print(\"escaped closure callback\\n\")\nreturn 43 }\n" +
+      "@effects(alloc) fn make() fnptr {\n" +
+      "mut callback = pure\n" +
+      "def returned = fn() { callback() }\n" +
+      "callback = impure\nreturn returned\n}\n" +
+      "@effects(" + contract + ") fn owner() int {\n" +
+      "def returned = make()\nreturned()\n}\nowner()\n"
+  }
+  if mode == 114 || mode == 115 {
+    def contract = mode == 114 ? "alloc, io, read" : "alloc, read"
+    return "use core\n" +
+      "@effects(io) fn impure() int { print(\"aliased forward\\n\")\nreturn 43 }\n" +
+      "@effects(none) fn alias_forward(dict callbacks) dict {\n" +
+      "def alias = callbacks\nreturn alias\n}\n" +
+      "fn forward_again(dict callbacks) dict { return alias_forward(callbacks) }\n" +
+      "@effects(" + contract + ") fn owner() int {\n" +
+      "mut callbacks = {\"run\": impure}\n" +
+      "def returned = forward_again(callbacks)\nreturned.get(\"run\")()\n}\n" +
+      "owner()\n"
+  }
+  if mode == 126 || mode == 127 {
+    def contract = mode == 126 ? "alloc, io" : "alloc"
+    return "use core\n" +
+      "@effects(io) fn impure() int { print(\"multiply forwarded closure\\n\")\nreturn 43 }\n" +
+      "@effects(alloc) fn make() fnptr { return fn() { impure() } }\n" +
+      "fn forward(fnptr callback) fnptr { return callback }\n" +
+      "fn forward_again(fnptr callback) fnptr { return forward(callback) }\n" +
+      "@effects(" + contract + ") fn owner() int {\n" +
+      "def returned = forward_again(make())\nreturned()\n}\nowner()\n"
+  }
+  if mode == 128 || mode == 129 {
+    def contract = mode == 128 ? "alloc, io" : "alloc"
+    return "use core\n" +
+      "@effects(none) fn pure() int { return 42 }\n" +
+      "@effects(io) fn impure() int { print(\"mutated forwarded closure\\n\")\nreturn 43 }\n" +
+      "@effects(alloc) fn make() fnptr {\n" +
+      "mut callback = pure\n" +
+      "def returned = fn() { callback() }\n" +
+      "callback = impure\nreturn returned\n}\n" +
+      "fn forward(fnptr callback) fnptr { return callback }\n" +
+      "fn forward_again(fnptr callback) fnptr { return forward(callback) }\n" +
+      "@effects(" + contract + ") fn owner() int {\n" +
+      "def returned = forward_again(make())\nreturned()\n}\nowner()\n"
+  }
+  if mode == 113 {
+    return "use core\n" +
+      "@effects(none) fn pure() int { return 42 }\n" +
+      "@effects(io) fn impure() int { print(\"escaped callback\\n\")\nreturn 43 }\n" +
+      "fn replace(dict callbacks) int { callbacks[\"run\"] = impure\nreturn 0 }\n" +
+      "fn forward(dict callbacks, int ignored) dict { return callbacks }\n" +
+      "fn wrapper(dict callbacks) dict { return forward(callbacks, replace(callbacks)) }\n" +
+      "@effects(alloc, read, write) fn owner() int {\n" +
+      "mut callbacks = {\"run\": pure}\ndef returned = wrapper(callbacks)\n" +
+      "returned.get(\"run\")()\n}\nowner()\n"
+  }
+  if mode == 111 || mode == 112 {
+    def contract = mode == 111 ? "alloc, io" : "alloc"
+    return "use core\n" +
+      "@effects(io) fn impure() int { print(\"nested forward callback\\n\")\nreturn 43 }\n" +
+      "@effects(none) fn pure() int { return 42 }\n" +
+      "fn forward_one(list<fnptr> callbacks) list<fnptr> { return callbacks }\n" +
+      "fn forward_two(list<fnptr> callbacks) list<fnptr> {\n" +
+      "return forward_one(callbacks)\n}\n" +
+      "@effects(" + contract + ") fn owner() int {\n" +
+      "def callbacks = [pure, impure]\n" +
+      "def returned = forward_two(callbacks)\nreturned[1]()\n}\nowner()\n"
+  }
+  if mode == 107 || mode == 108 {
+    def contract = mode == 107 ? "alloc, io" : "alloc"
+    return "use core\n" +
+      "@effects(io) fn impure() int { print(\"chained branch callback\\n\")\nreturn 43 }\n" +
+      "@effects(none) fn pure() int { return 42 }\n" +
+      "fn choose(bool path, list<fnptr> callbacks) list<fnptr> {\n" +
+      "def first = callbacks\ndef second = first\ndef alias = second\n" +
+      "if path { return alias } else { return alias }\n}\n" +
+      "@effects(" + contract + ") fn owner() int {\n" +
+      "def callbacks = [pure, impure]\n" +
+      "def returned = choose(true, callbacks)\nreturned[1]()\n}\nowner()\n"
+  }
+  if mode == 109 || mode == 110 {
+    def contract = mode == 109 ? "alloc, io" : "alloc"
+    return "use core\n" +
+      "@effects(io) fn impure() int { print(\"chained match callback\\n\")\nreturn 43 }\n" +
+      "@effects(none) fn pure() int { return 42 }\n" +
+      "fn choose(int path, list<fnptr> callbacks) list<fnptr> {\n" +
+      "def first = callbacks\ndef second = first\ndef alias = second\n" +
+      "match path { 0 -> { return alias } else { return alias } }\n" +
+      "}\n@effects(" + contract + ") fn owner() int {\n" +
+      "def callbacks = [pure, impure]\n" +
+      "def returned = choose(0, callbacks)\nreturned[1]()\n}\nowner()\n"
+  }
+  if mode == 103 || mode == 104 {
+    def contract = mode == 103 ? "alloc, io" : "alloc"
+    return "use core\n" +
+      "@effects(io) fn impure() int { print(\"aliased branch callback\\n\")\nreturn 43 }\n" +
+      "@effects(none) fn pure() int { return 42 }\n" +
+      "fn choose(bool path, list<fnptr> callbacks) list<fnptr> {\n" +
+      "def alias = callbacks\n" +
+      "if path { return alias } else { return alias }\n}\n" +
+      "@effects(" + contract + ") fn owner() int {\n" +
+      "def callbacks = [pure, impure]\n" +
+      "def returned = choose(true, callbacks)\nreturned[1]()\n}\nowner()\n"
+  }
+  if mode == 105 || mode == 106 {
+    def contract = mode == 105 ? "alloc, io" : "alloc"
+    return "use core\n" +
+      "@effects(io) fn impure() int { print(\"aliased match callback\\n\")\nreturn 43 }\n" +
+      "@effects(none) fn pure() int { return 42 }\n" +
+      "fn choose(int path, list<fnptr> callbacks) list<fnptr> {\n" +
+      "def alias = callbacks\n" +
+      "match path { 0 -> { return alias } else { return alias } }\n" +
+      "}\n@effects(" + contract + ") fn owner() int {\n" +
+      "def callbacks = [pure, impure]\n" +
+      "def returned = choose(0, callbacks)\nreturned[1]()\n}\nowner()\n"
+  }
+  if mode >= 99 && mode <= 102 {
+    def contract = mode == 99 || mode == 101 ? "alloc, io" : "alloc"
+    mut str selector = ""
+    if mode >= 101 {
+      selector = "fn choose(int path, list<fnptr> callbacks) list<fnptr> {\n" +
+          "match path { 0 -> { return callbacks } else { return callbacks } }\n}\n"
+    } else {
+      selector = "fn choose(bool path, list<fnptr> callbacks) list<fnptr> {\n" +
+          "if path { return callbacks } else { return callbacks }\n}\n"
+    }
+    def argument = mode >= 101 ? "0" : "true"
+    return "use core\n" +
+      "@effects(io) fn impure() int { print(\"branch returned alias\\n\")\nreturn 43 }\n" +
+      "@effects(none) fn pure() int { return 42 }\n" +
+      selector +
+      "@effects(" + contract + ") fn owner() int {\n" +
+      "def callbacks = [pure, impure]\n" +
+      "def returned = choose(" + argument + ", callbacks)\n" +
+      "returned[1]()\n}\nowner()\n"
+  }
+  if mode == 57 || mode == 58 {
+    def contract = mode == 57 ? "io" : "none"
+    return "use core\n" +
+      "@effects(io) fn impure() int { print(\"nested callback\\n\")\nreturn 43 }\n" +
+      "@effects(none) fn pure() int { return 42 }\n" +
+      "fn select(bool outer, bool inner, fnptr first, fnptr second, fnptr third) fnptr {\n" +
+      "if outer { return first } else { if inner { return second } else { return third } }\n" +
+      "}\n@effects(" + contract + ") fn owner() int {\n" +
+      "def callback = select(false, true, pure, impure, pure)\ncallback()\n" +
+      "}\nowner()\n"
+  }
+  if mode == 55 || mode == 56 {
+    def contract = mode == 55 ? "alloc,io" : "alloc"
+    return "use core\n" +
+      "fn select(bool choose, int captured) fnptr {\n" +
+      "def pure_callback = fn() int { return captured }\n" +
+      "def io_callback = fn() int { print(\"captured callback\\n\")\nreturn captured }\n" +
+      "if choose { return pure_callback }\nreturn io_callback\n" +
+      "}\n@effects(" + contract + ") fn owner() int {\n" +
+      "def callback = select(true, 42)\ncallback()\n}\nowner()\n"
+  }
+  if mode == 53 || mode == 54 {
+    def contract = mode == 53 ? "io" : "none"
+    mut str source =
+        "use core\n@effects(io) fn impure() int { print(\"long callback join\\n\")\nreturn 43 }\n" +
+        "fn select(bool choose, fnptr callback) fnptr {\n"
+    mut int index = 0
+    while index < 15 {
+      source += "if choose { return callback }\n"
+      index += 1
+    }
+    source += "return callback\n}\n@effects(" + contract +
+              ") fn owner() int {\ndef callback = select(false, impure)\n" +
+              "callback()\n}\nowner()\n"
+    return source
+  }
+  if mode == 51 || mode == 52 {
+    def contract = mode == 51 ? "io" : "none"
+    return "use core\n" +
+      "@effects(io) fn impure() int { print(\"match callback\\n\")\nreturn 43 }\n" +
+      "@effects(none) fn pure() int { return 42 }\n" +
+      "fn select(int choice, fnptr first, fnptr second) fnptr {\n" +
+      "match choice { 0 -> { return first } }\nreturn second\n" +
+      "}\n@effects(" + contract + ") fn owner() int {\n" +
+      "def callback = select(1, pure, impure)\ncallback()\n}\nowner()\n"
+  }
+  if mode == 49 || mode == 50 {
+    def contract = mode == 49 ? "io" : "none"
+    return "use core\n" +
+      "@effects(io) fn impure() int { print(\"match callback\\n\")\nreturn 43 }\n" +
+      "@effects(none) fn pure() int { return 42 }\n" +
+      "fn select(int choice, fnptr first, fnptr second) fnptr {\n" +
+      "match choice { 0 -> { return first } else { return second } }\n" +
+      "}\n@effects(" + contract + ") fn owner() int {\n" +
+      "def callback = select(1, pure, impure)\ncallback()\n}\nowner()\n"
+  }
+  if mode == 47 || mode == 48 {
+    def contract = mode == 47 ? "io" : "none"
+    mut str source =
+        "use core\n@effects(io) fn impure() int { print(\"long callback join\\n\")\nreturn 43 }\n" +
+        "@effects(none) fn pure() int { return 42 }\nfn select("
+    mut int index = 0
+    while index < 7 {
+      if index > 0 {
+        source += ", "
+      }
+      source += "bool choose_" + to_str(index)
+      index += 1
+    }
+    index = 0
+    while index < 7 {
+      source += ", fnptr callback_" + to_str(index)
+      index += 1
+    }
+    source += ", fnptr fallback) fnptr {\n"
+    index = 0
+    while index < 7 {
+      source += "if choose_" + to_str(index) + " { return callback_" +
+                to_str(index) + " }\n"
+      index += 1
+    }
+    source += "return fallback\n}\n@effects(" + contract +
+              ") fn owner() int {\ndef callback = select("
+    index = 0
+    while index < 7 {
+      if index > 0 {
+        source += ", "
+      }
+      source += "false"
+      index += 1
+    }
+    index = 0
+    while index < 7 {
+      source += ", "
+      source += index == 6 ? "impure" : "pure"
+      index += 1
+    }
+    source += ", pure)\ncallback()\n}\nowner()\n"
+    return source
+  }
+  if mode == 45 || mode == 46 {
+    def contract = mode == 45 ? "alloc, io, write" : "alloc, write"
+    return "use core\n" +
+      "@effects(io) fn impure() int { print(\"dictionary set callback\\n\")\nreturn 43 }\n" +
+      "@effects(none) fn pure() int { return 42 }\n" +
+      "fn make() fnptr {\nmut callbacks = {\"run\": pure}\n" +
+      "callbacks.set(\"run\", impure)\nreturn callbacks[\"run\"]\n}\n" +
+      "@effects(" + contract + ") fn owner() int {\n" +
+      "def callback = make()\ncallback()\n}\nowner()\n"
+  }
+  if mode == 44 {
+    return "use core\n" +
+      "@effects(io) fn impure() int { print(\"dynamic captured callback\\n\")\nreturn 43 }\n" +
+      "@effects(none) fn pure() int { return 42 }\n" +
+      "fn make(str key) fnptr {\nmut selected = pure\n" +
+      "mut callbacks = {\"run\": fn() { selected() }}\n" +
+      "selected = impure\nreturn callbacks.get(key)\n}\n" +
+      "@effects(alloc) fn owner() int {\n" +
+      "def callback = make(\"run\")\ncallback()\n}\nowner()\n"
+  }
+  if mode == 42 || mode == 43 {
+    def contract = mode == 42 ? "alloc, io" : "alloc"
+    return "use core\n" +
+      "@effects(io) fn impure() int { print(\"aliased list capture\\n\")\nreturn 43 }\n" +
+      "@effects(none) fn pure() int { return 42 }\n" +
+      "fn make() fnptr {\nmut selected = pure\n" +
+      "mut callbacks = [fn() { selected() }]\n" +
+      "mut alias = callbacks\nselected = impure\nreturn alias[0]\n}\n" +
+      "@effects(" + contract + ") fn owner() int {\n" +
+      "def callback = make()\ncallback()\n}\nowner()\n"
+  }
+  if mode == 40 || mode == 41 {
+    def contract = mode == 40 ? "alloc, io" : "alloc"
+    return "use core\n" +
+      "@effects(io) fn impure() int { print(\"aliased dictionary capture\\n\")\nreturn 43 }\n" +
+      "@effects(none) fn pure() int { return 42 }\n" +
+      "fn make() fnptr {\nmut selected = pure\n" +
+      "mut callbacks = {\"run\": fn() { selected() }}\n" +
+      "mut alias = callbacks\nselected = impure\nreturn alias[\"run\"]\n}\n" +
+      "@effects(" + contract + ") fn owner() int {\n" +
+      "def callback = make()\ncallback()\n}\nowner()\n"
+  }
+  if mode == 38 || mode == 39 {
+    def contract = mode == 38 ? "alloc, io" : "alloc"
+    return "use core\n" +
+      "@effects(io) fn impure() int { print(\"dictionary capture\\n\")\nreturn 43 }\n" +
+      "@effects(none) fn pure() int { return 42 }\n" +
+      "fn make() fnptr {\nmut selected = pure\n" +
+      "mut callbacks = {\"run\": fn() { selected() }}\n" +
+      "selected = impure\nreturn callbacks[\"run\"]\n}\n" +
+      "@effects(" + contract + ") fn owner() int {\n" +
+      "def callback = make()\ncallback()\n}\nowner()\n"
+  }
+  if mode == 37 {
+    return "use core\n" +
+      "@effects(cap(\"project.storage.read\")) fn restricted() int { return 43 }\n" +
+      "@effects(none) fn pure() int { return 42 }\n" +
+      "fn make() fnptr {\nmut selected = pure\n" +
+      "def wrapped = fn() { selected() }\n" +
+      "selected = restricted\nreturn wrapped\n}\n" +
+      "@effects(alloc) fn owner() int {\n" +
+      "def callback = make()\ncallback()\n}\nowner()\n"
+  }
+  if mode == 35 || mode == 36 {
+    def contract = mode == 35 ? "alloc, io" : "alloc"
+    return "use core\n" +
+      "@effects(io) fn impure() int { print(\"nested reassigned capture\\n\")\nreturn 43 }\n" +
+      "@effects(none) fn pure() int { return 42 }\n" +
+      "fn make() fnptr {\nmut selected = pure\n" +
+      "def inner = fn() { selected() }\n" +
+      "def outer = fn() { inner() }\n" +
+      "selected = impure\nreturn outer\n}\n" +
+      "@effects(" + contract + ") fn owner() int {\n" +
+      "def callback = make()\ncallback()\n}\nowner()\n"
+  }
+  if mode == 33 || mode == 34 {
+    def contract = mode == 33 ? "alloc, io" : "alloc"
+    return "use core\n" +
+      "@effects(io) fn impure() int { print(\"reassigned capture\\n\")\nreturn 43 }\n" +
+      "@effects(none) fn pure() int { return 42 }\n" +
+      "fn make() fnptr {\nmut selected = pure\n" +
+      "def wrapped = fn() { selected() }\n" +
+      "selected = impure\nreturn wrapped\n}\n" +
+      "@effects(" + contract + ") fn owner() int {\n" +
+      "def callback = make()\ncallback()\n}\nowner()\n"
+  }
+  if mode == 31 || mode == 32 {
+    def contract = mode == 31 ? "alloc, io" : "alloc"
+    return "use core\n" +
+      "@effects(io) fn impure() int { print(\"reassigned capture\\n\")\nreturn 43 }\n" +
+      "@effects(none) fn pure() int { return 42 }\n" +
+      "fn make() fnptr {\nmut selected = impure\n" +
+      "def wrapped = fn() { selected() }\n" +
+      "selected = pure\nreturn wrapped\n}\n" +
+      "@effects(" + contract + ") fn owner() int {\n" +
+      "def callback = make()\ncallback()\n}\nowner()\n"
+  }
+  if mode == 27 || mode == 28 {
+    def contract = mode == 27 ? "alloc, io" : "alloc"
+    return "use core\n" +
+      "@effects(io) fn impure() int { print(\"nested callback\\n\")\nreturn 43 }\n" +
+      "@effects(none) fn pure() int { return 42 }\n" +
+      "@effects(alloc, e) fn make(bool choose, fnptr first, fnptr second) fnptr {\n" +
+      "mut selected = first\nif choose { selected = second }\n" +
+      "def inner = fn() { selected() }\n" +
+      "def outer = fn() { inner() }\nreturn outer\n}\n" +
+      "@effects(" + contract + ") fn owner() int {\n" +
+      "def callback = make(true, pure, impure)\ncallback()\n}\nowner()\n"
+  }
+  if mode == 29 || mode == 30 {
+    def contract =
+        mode == 29 ? "alloc, cap(\"project.storage.read\")" : "alloc"
+    return "use core\n" +
+      "@effects(cap(\"project.storage.read\")) fn restricted() int { return 43 }\n" +
+      "@effects(none) fn pure() int { return 42 }\n" +
+      "@effects(alloc, e) fn make(bool choose, fnptr first, fnptr second) fnptr {\n" +
+      "mut selected = first\nif choose { selected = second }\n" +
+      "def inner = fn() { selected() }\n" +
+      "def outer = fn() { inner() }\nreturn outer\n}\n" +
+      "@effects(" + contract + ") fn owner() int {\n" +
+      "def callback = make(true, pure, restricted)\ncallback()\n}\nowner()\n"
+  }
+  if mode == 25 || mode == 26 {
+    def contract =
+        if mode == 25 { "alloc, cap(\"project.storage.read\")" } else { "alloc" }
+    return "use core\n" +
+      "@effects(cap(\"project.storage.read\")) fn restricted() int { return 43 }\n" +
+      "@effects(none) fn pure() int { return 42 }\n" +
+      "@effects(alloc, e) fn select(bool first, bool second, fnptr a, fnptr b, fnptr fallback) fnptr {\n" +
+      "if first { return a }\nif second { return b }\nreturn fallback\n}\n" +
+      "@effects(" + contract + ") fn owner() int {\n" +
+      "def callback = select(false, true, pure, restricted, pure)\n" +
+      "callback()\n}\nowner()\n"
+  }
+  if mode == 59 || mode == 60 {
+    def contract = mode == 59 ? "io" : "none"
+    return "use core\n" +
+      "@effects(io) fn impure() int { print(\"logical callback\\n\")\nreturn 43 }\n" +
+      "@effects(none) fn pure() int { return 42 }\n" +
+      "fn select(bool first, bool second, fnptr quiet, fnptr loud) fnptr {\n" +
+      "if first && !second { return loud }\nreturn quiet\n" +
+      "}\n@effects(" + contract + ") fn owner() int {\n" +
+      "def callback = select(true, false, pure, impure)\ncallback()\n}\nowner()\n"
+  }
+  if mode == 61 || mode == 62 {
+    def contract = mode == 61 ? "alloc, io, read, write" : "alloc, read, write"
+    return "use core\n" +
+      "@effects(io) fn impure() int { print(\"dynamic list replacement\\n\")\nreturn 43 }\n" +
+      "@effects(none) fn pure() int { return 42 }\n" +
+      "@effects(" + contract + ") fn owner(int index) int {\n" +
+      "mut callbacks = [pure, pure]\ncallbacks[index] = impure\n" +
+      "callbacks.get(index)()\n}\nowner(0)\n"
+  }
+  if mode == 63 || mode == 64 {
+    def custom_row = "cap(\"project.storage.read\")"
+    def contract =
+        if mode == 63 { "alloc, read, write, " + custom_row }
+        else { "alloc, read, write" }
+    return "use core\n" +
+      "@effects(" + custom_row + ") fn restricted() int { return 43 }\n" +
+      "@effects(none) fn pure() int { return 42 }\n" +
+      "@effects(" + contract + ") fn owner(int index) int {\n" +
+      "mut callbacks = [pure, pure]\ncallbacks[index] = restricted\n" +
+      "callbacks.get(index)()\n}\nowner(0)\n"
+  }
+  if mode == 65 || mode == 66 {
+    def contract =
+        if mode == 65 { "alloc, read, write, io" }
+        else { "alloc, read, write" }
+    return "use core\n" +
+      "@effects(io) fn impure() int { print(\"dynamic dict replacement\\n\")\nreturn 43 }\n" +
+      "@effects(none) fn pure() int { return 42 }\n" +
+      "@effects(" + contract + ") fn owner(str key) int {\n" +
+      "mut callbacks = {\"first\": pure, \"second\": pure}\n" +
+      "callbacks.set(key, impure)\ncallbacks.get(key)()\n}\nowner(\"first\")\n"
+  }
+  if mode == 67 || mode == 68 {
+    def custom_row = "cap(\"project.storage.read\")"
+    def contract =
+        if mode == 67 { "alloc, read, write, " + custom_row }
+        else { "alloc, read, write" }
+    return "use core\n" +
+      "@effects(" + custom_row + ") fn restricted() int { return 43 }\n" +
+      "@effects(none) fn pure() int { return 42 }\n" +
+      "@effects(" + contract + ") fn owner(str key) int {\n" +
+      "mut callbacks = {\"first\": pure, \"second\": pure}\n" +
+      "callbacks.set(key, restricted)\ncallbacks.get(key)()\n}\nowner(\"first\")\n"
+  }
+  if mode == 69 || mode == 70 {
+    def contract =
+        if mode == 69 { "alloc, read, write, io" }
+        else { "alloc, read, write" }
+    return "use core\n" +
+      "@effects(io) fn impure() int { print(\"dynamic dict index replacement\\n\")\nreturn 43 }\n" +
+      "@effects(none) fn pure() int { return 42 }\n" +
+      "@effects(" + contract + ") fn owner(str key) int {\n" +
+      "mut callbacks = {\"first\": pure, \"second\": pure}\n" +
+      "callbacks[key] = impure\ncallbacks.get(key)()\n}\nowner(\"first\")\n"
+  }
+  if mode == 71 || mode == 72 {
+    def custom_row = "cap(\"project.storage.read\")"
+    def contract =
+        if mode == 71 { "alloc, read, write, " + custom_row }
+        else { "alloc, read, write" }
+    return "use core\n" +
+      "@effects(" + custom_row + ") fn restricted() int { return 43 }\n" +
+      "@effects(none) fn pure() int { return 42 }\n" +
+      "@effects(" + contract + ") fn owner(str key) int {\n" +
+      "mut callbacks = {\"first\": pure, \"second\": pure}\n" +
+      "callbacks[key] = restricted\ncallbacks.get(key)()\n}\nowner(\"first\")\n"
+  }
+  if mode == 73 || mode == 74 {
+    def contract =
+        if mode == 73 { "alloc, read, write, io" }
+        else { "alloc, read, write" }
+    return "use core\n" +
+      "@effects(io) fn impure() int { print(\"returned mutable dictionary\\n\")\nreturn 43 }\n" +
+      "@effects(none) fn pure() int { return 42 }\n" +
+      "@effects(alloc, read, write) fn make(str key) dict {\n" +
+      "mut callbacks = {\"first\": pure, \"second\": pure}\n" +
+      "callbacks.set(key, impure)\nreturn callbacks\n}\n" +
+      "@effects(" + contract + ") fn owner(str key) int {\n" +
+      "def callbacks = make(key)\ncallbacks.get(key)()\n}\nowner(\"first\")\n"
+  }
+  if mode == 75 || mode == 76 {
+    def custom_row = "cap(\"project.storage.read\")"
+    def contract =
+        if mode == 75 { "alloc, read, write, " + custom_row }
+        else { "alloc, read, write" }
+    return "use core\n" +
+      "@effects(" + custom_row + ") fn restricted() int { return 43 }\n" +
+      "@effects(none) fn pure() int { return 42 }\n" +
+      "@effects(alloc, read, write) fn make(str key) dict {\n" +
+      "mut callbacks = {\"first\": pure, \"second\": pure}\n" +
+      "callbacks.set(key, restricted)\nreturn callbacks\n}\n" +
+      "@effects(" + contract + ") fn owner(str key) int {\n" +
+      "def callbacks = make(key)\ncallbacks.get(key)()\n}\nowner(\"first\")\n"
+  }
+  if mode == 77 || mode == 78 {
+    def contract =
+        if mode == 77 { "alloc, read, write, io" }
+        else { "alloc, read, write" }
+    return "use core\n" +
+      "@effects(io) fn impure() int { print(\"returned callback alias\\n\")\nreturn 43 }\n" +
+      "@effects(none) fn pure() int { return 42 }\n" +
+      "@effects(alloc, read, write) fn make(str key) dict {\n" +
+      "mut callbacks = {\"first\": pure, \"second\": pure}\n" +
+      "callbacks.set(key, impure)\ndef result = callbacks\nreturn result\n}\n" +
+      "@effects(" + contract + ") fn owner(str key) int {\n" +
+      "def callbacks = make(key)\ncallbacks.get(key)()\n}\nowner(\"first\")\n"
+  }
+  if mode == 79 || mode == 80 {
+    def contract =
+        if mode == 79 { "alloc, read, write, io" }
+        else { "alloc, read, write" }
+    return "use core\n" +
+      "@effects(io) fn impure() int { print(\"returned aliased dictionary\\n\")\nreturn 43 }\n" +
+      "@effects(none) fn pure() int { return 42 }\n" +
+      "@effects(alloc, read, write) fn make(str key) dict {\n" +
+      "mut callbacks = {\"first\": pure, \"second\": pure}\n" +
+      "def alias = callbacks\nalias.set(key, impure)\nreturn alias\n}\n" +
+      "@effects(" + contract + ") fn owner(str key) int {\n" +
+      "def callbacks = make(key)\ncallbacks.get(key)()\n}\nowner(\"first\")\n"
+  }
+  if mode == 81 || mode == 82 {
+    def contract =
+        if mode == 81 { "alloc, read, write, io" }
+        else { "alloc, read, write" }
+    return "use core\n" +
+      "@effects(io) fn impure() int { print(\"returned mutable list\\n\")\nreturn 43 }\n" +
+      "@effects(none) fn pure() int { return 42 }\n" +
+      "@effects(alloc, read, write) fn make(int index) list {\n" +
+      "mut callbacks = [pure, pure]\ncallbacks[index] = impure\n" +
+      "return callbacks\n}\n" +
+      "@effects(" + contract + ") fn owner(int index) int {\n" +
+      "def callbacks = make(index)\ncallbacks.get(index)()\n}\nowner(0)\n"
+  }
+  if mode == 83 || mode == 84 {
+    def contract =
+        if mode == 83 { "alloc, read, write, io" }
+        else { "alloc, read, write" }
+    return "use core\n" +
+      "@effects(io) fn impure() int { print(\"returned branched dictionary\\n\")\nreturn 43 }\n" +
+      "@effects(none) fn pure() int { return 42 }\n" +
+      "@effects(alloc, read, write) fn make(bool choose, str key) dict {\n" +
+      "mut callbacks = {\"first\": pure, \"second\": pure}\n" +
+      "if choose { callbacks.set(key, impure) } else { callbacks.set(key, pure) }\n" +
+      "return callbacks\n}\n" +
+      "@effects(" + contract + ") fn owner(bool choose, str key) int {\n" +
+      "def callbacks = make(choose, key)\ncallbacks.get(key)()\n}\nowner(true, \"first\")\n"
+  }
+  if mode == 85 || mode == 86 {
+    def contract =
+        if mode == 85 { "alloc, read, write, io" }
+        else { "alloc, read, write" }
+    return "use core\n" +
+      "@effects(io) fn impure() int { print(\"returned branched list\\n\")\nreturn 43 }\n" +
+      "@effects(none) fn pure() int { return 42 }\n" +
+      "@effects(alloc, read, write) fn make(bool choose, int index) list {\n" +
+      "mut callbacks = [pure, pure]\n" +
+      "if choose { callbacks[index] = impure } else { callbacks[index] = pure }\n" +
+      "return callbacks\n}\n" +
+      "@effects(" + contract + ") fn owner(bool choose, int index) int {\n" +
+      "def callbacks = make(choose, index)\ncallbacks.get(index)()\n}\nowner(true, 0)\n"
+  }
+  if mode == 87 || mode == 88 {
+    def contract =
+        if mode == 87 { "alloc, read, write, io" }
+        else { "alloc, read, write" }
+    return "use core\n" +
+      "@effects(io) fn impure() int { print(\"returned aliased branch\\n\")\nreturn 43 }\n" +
+      "@effects(none) fn pure() int { return 42 }\n" +
+      "@effects(alloc, read, write) fn make(bool choose, str key) dict {\n" +
+      "mut callbacks = {\"first\": pure, \"second\": pure}\n" +
+      "def alias = callbacks\n" +
+      "if choose { alias.set(key, impure) } else { alias.set(key, pure) }\n" +
+      "return alias\n}\n" +
+      "@effects(" + contract + ") fn owner(bool choose, str key) int {\n" +
+      "def callbacks = make(choose, key)\ncallbacks.get(key)()\n}\nowner(true, \"first\")\n"
+  }
+  if mode == 89 || mode == 90 {
+    def contract =
+        if mode == 89 { "alloc, read, write, io" }
+        else { "alloc, read, write" }
+    return "use core\n" +
+      "@effects(io) fn impure() int { print(\"returned match dictionary\\n\")\nreturn 43 }\n" +
+      "@effects(none) fn pure() int { return 42 }\n" +
+      "@effects(alloc, read, write) fn make(bool choose, str key) dict {\n" +
+      "mut callbacks = {\"first\": pure, \"second\": pure}\n" +
+      "match choose { true -> { callbacks.set(key, impure) } " +
+      "else { callbacks.set(key, pure) } }\nreturn callbacks\n}\n" +
+      "@effects(" + contract + ") fn owner(bool choose, str key) int {\n" +
+      "def callbacks = make(choose, key)\ncallbacks.get(key)()\n}\nowner(true, \"first\")\n"
+  }
+  if mode >= 22 && mode <= 24 {
+    def contract = mode == 22 ? "alloc, io" : "alloc"
+    mut str source =
+      "use core\n@effects(io) fn impure() int { print(\"io\\n\")\nreturn 43 }\n" +
+      "@effects(none) fn pure() int { return 42 }\n"
+    if mode == 24 {
+      source = source +
+        "@effects(alloc, e) fn select(bool a, bool b, bool c, bool d, fnptr w, fnptr x, fnptr y, fnptr z, fnptr fallback) fnptr {\n" +
+        "if a { return w }\nif b { return x }\nif c { return y }\nif d { return z }\nreturn fallback\n}\n"
+    } else {
+      source = source +
+        "@effects(alloc, e) fn select(bool first, bool second, fnptr a, fnptr b, fnptr fallback) fnptr {\n" +
+        "if first { return a }\nif second { return b }\nreturn fallback\n}\n"
+    }
+    mut str callback =
+      "def callback = select(false, true, pure, impure, pure)\n"
+    if mode == 24 {
+      callback =
+        "def callback = select(false, false, false, false, pure, pure, pure, pure, pure)\n"
+    }
+    source = source + "@effects(" + contract + ") fn owner() int {\n" +
+      callback + "callback()\n}\nowner()\n"
+    return source
+  }
+  if mode == 0 {
+    return "use core\nfn pure() int { 42 }\n" +
+      "fn forward(fnptr callback) fnptr { def alias = callback\nreturn alias }\n" +
+      "@effects(none) fn owner() int { def callback = forward(pure)\ncallback() }\nowner()\n"
+  }
+  if mode == 1 || mode == 2 {
+    def contract = if mode == 1 { "io" } else { "none" }
+    return "use core\n@effects(io) fn impure() int { print(\"io\\n\")\n42 }\n" +
+      "fn forward(fnptr callback) fnptr { def alias = callback\nreturn alias }\n" +
+      "@effects(" + contract + ") fn owner() int { def callback = forward(impure)\ncallback() }\nowner()\n"
+  }
+  if mode == 5 || mode == 6 {
+    def contract = if mode == 5 { "io" } else { "none" }
+    return "use core\nfn pure() int { 42 }\n" +
+      "@effects(io) fn impure() int { print(\"io\\n\")\n43 }\n" +
+      "fn select(bool choose, fnptr first, fnptr second) fnptr { mut selected = first\n" +
+      "if choose { selected = second }\nreturn selected }\n" +
+      "@effects(" + contract + ") fn owner() int { def callback = select(true, pure, impure)\ncallback() }\nowner()\n"
+  }
+  if mode == 7 {
+    return "use core\nfn pure() int { 42 }\n" +
+      "@effects(io) fn impure() int { print(\"io\\n\")\n43 }\n" +
+      "fn select(bool choose, fnptr first, fnptr second) fnptr { if choose { return second }\nreturn first }\n" +
+      "@effects(none) fn owner() int { def callback = select(true, pure, impure)\ncallback() }\nowner()\n"
+  }
+  if mode == 8 || mode == 9 {
+    def contract = if mode == 8 { "io" } else { "none" }
+    return "use core\nfn pure() int { 42 }\n" +
+      "@effects(io) fn impure() int { print(\"io\\n\")\n43 }\n" +
+      "fn select(bool choose, fnptr first, fnptr second) fnptr { mut selected = first\n" +
+      "match choose { true -> { selected = second } _ -> { selected = first } }\n" +
+      "return selected }\n" +
+      "@effects(" + contract + ") fn owner() int { def callback = select(true, pure, impure)\ncallback() }\nowner()\n"
+  }
+  if mode == 10 || mode == 11 {
+    def contract = if mode == 10 { "io" } else { "none" }
+    return "use core\nfn pure() int { 42 }\n" +
+      "@effects(io) fn impure() int { print(\"io\\n\")\n43 }\n" +
+      "fn select(bool choose, fnptr first, fnptr second) fnptr { def selected = choose ? second : first\n" +
+      "return selected }\n" +
+      "@effects(" + contract + ") fn owner() int { def callback = select(true, pure, impure)\ncallback() }\nowner()\n"
+  }
+  if mode == 12 || mode == 13 {
+    def contract = if mode == 12 { "io" } else { "none" }
+    return "use core\nfn pure() int { 42 }\n" +
+      "@effects(io) fn impure() int { print(\"io\\n\")\n43 }\n" +
+      "fn select(bool choose, fnptr first, fnptr second) fnptr { " +
+      "if choose { return second }\nreturn first }\n" +
+      "@effects(" + contract + ") fn owner() int { def callback = select(true, pure, impure)\ncallback() }\nowner()\n"
+  }
+  if mode == 14 || mode == 15 {
+    def contract = if mode == 14 { "cap(read)" } else { "none" }
+    return "use core\nfn pure() int { 42 }\n" +
+      "@effects(cap(read)) fn restricted() int { 43 }\n" +
+      "fn select(bool choose, fnptr first, fnptr second) fnptr { " +
+      "if choose { return second }\nreturn first }\n" +
+      "@effects(" + contract + ") fn owner() int { def callback = select(true, pure, restricted)\ncallback() }\nowner()\n"
+  }
+  if mode == 91 || mode == 92 {
+    def contract = if mode == 91 { "alloc, read, write, io" } else { "alloc, read, write" }
+    return "use core\n@effects(io) fn impure() int { print(\"io\\n\")\n42 }\n" +
+      "@effects(none) fn forward(dict callbacks) dict { return callbacks }\n" +
+      "@effects(" + contract + ") fn owner() int { " +
+      "mut callbacks = {\"run\": impure}\ndef returned = forward(callbacks)\n" +
+      "returned.get(\"run\")() }\nowner()\n"
+  }
+  if mode == 93 || mode == 94 {
+    def contract = if mode == 93 { "alloc, read, write, io" } else { "alloc, read, write" }
+    return "use core\n@effects(io) fn impure() int { print(\"io\\n\")\n42 }\n" +
+      "@effects(none) fn forward(list callbacks) list { return callbacks }\n" +
+      "@effects(" + contract + ") fn owner() int { " +
+      "mut callbacks = [impure]\ndef returned = forward(callbacks)\n" +
+      "returned[0]() }\nowner()\n"
+  }
+  if mode == 95 || mode == 96 {
+    def contract = if mode == 95 { "alloc, read, write, io" } else { "alloc, read, write" }
+    return "use core\n@effects(io) fn impure() int { print(\"io\\n\")\n42 }\n" +
+      "@effects(none) fn forward(dict callbacks) dict { " +
+      "def alias = callbacks\nreturn alias }\n" +
+      "@effects(" + contract + ") fn owner() int { " +
+      "mut callbacks = {\"run\": impure}\ndef returned = forward(callbacks)\n" +
+      "returned.get(\"run\")() }\nowner()\n"
+  }
+  if mode == 97 || mode == 98 {
+    def invoked = if mode == 97 { "unrelated.get(\"run\")()" }
+                  else { "alias.get(\"run\")()" }
+    return "use core\n@effects(none) fn pure() int { return 42 }\n" +
+      "@effects(io) fn impure() int { print(\"io\\n\")\n43 }\n" +
+      "@effects(alloc, read, write) fn owner() int {\n" +
+      "mut callbacks = {\"run\": impure}\n" +
+      "mut unrelated = {\"run\": pure}\n" +
+      "mut alias = callbacks\nalias.set(\"run\", impure)\n" +
+      invoked + "\n}\nowner()\n"
+  }
+  def contract = if mode == 3 { "alloc, io" } else { "alloc" }
+  "use core\nfn make() fnptr { def alias = fn() { print(\"io\\n\")\n42 }\nreturn alias }\n" +
+      "@effects(" + contract + ") fn owner() int { def callback = make()\ncallback() }\nowner()\n"
+}
+
+fn check_generated_modes(int first_mode) str {
+   mut int mode = first_mode
+   while mode < 130 {
+      def source = generated_source(mode) + "\n0\n"
+      mut args = []
+      if shared_core_bc.len > 0 {
+         args = args.append("--core-bc")
+         args = args.append(shared_core_bc)
+      }
+      args = args.append("--effect-require-known")
+      args = args.append("--native-only")
+      args = args.append("--nyir-verify")
+      if mode >= 45 {
+         args = args.append("-emit-only")
+         args = args.append("-o")
+         args = args.append("/dev/null")
+      }
+      args = args.append("-c")
+      args = args.append(source)
+      def result = process.run_capture(compiler, args, nil, false)
+      def output = result.get("stdout", "")
+      def accepted = result.get("code", 127) == 0 && str.find(output, "error:") < 0
+      def expected = mode == 0 || mode == 1 || mode == 3 || mode == 5 ||
+                     mode == 8 || mode == 10 || mode == 12 || mode == 14 ||
+                     mode == 22 || mode == 24 || mode == 25 || mode == 27 ||
+                     mode == 29 ||
+                     mode == 31 || mode == 32 || mode == 33 || mode == 35 ||
+                     mode == 38 || mode == 40 || mode == 42 || mode == 45 ||
+                     mode == 47 || mode == 49 || mode == 51 || mode == 53 ||
+                     mode == 55 || mode == 57 || mode == 59 || mode == 61 ||
+                     mode == 63 || mode == 65 || mode == 67 || mode == 69 ||
+                     mode == 71 || mode == 73 || mode == 75 || mode == 77 ||
+                     mode == 79 || mode == 81 || mode == 83 || mode == 85 ||
+                     mode == 87 || mode == 89 || mode == 91 || mode == 93 ||
+                     mode == 95 || mode == 97 || mode == 99 || mode == 101 ||
+                     mode == 103 || mode == 105 || mode == 107 || mode == 109 ||
+                     mode == 111 || mode == 114 || mode == 116 || mode == 118 ||
+                     mode == 120 || mode == 122 || mode == 124 || mode == 126 ||
+                     mode == 128
+      if accepted != expected {
+         return "returned callback alias mode " + to_str(mode) +
+                " expected accepted=" + to_str(expected) + ": " + output +
+                "\ngenerated source:\n" + source
+      }
+      if !expected && str.find(output, "effect contract violation") < 0 {
+         return "underdeclared alias callback must fail for its effect row: " +
+                output + "\ngenerated source:\n" + source
+      }
+      mode += 4
+   }
+   ""
+}
+
+def first_worker = thread.thread_spawn(check_generated_modes, 0)
+def second_worker = thread.thread_spawn(check_generated_modes, 1)
+def third_worker = thread.thread_spawn(check_generated_modes, 2)
+def fourth_worker = thread.thread_spawn(check_generated_modes, 3)
+def first_failure = thread.thread_join(first_worker)
+def second_failure = thread.thread_join(second_worker)
+def third_failure = thread.thread_join(third_worker)
+def fourth_failure = thread.thread_join(fourth_worker)
+assert(first_failure == "", first_failure)
+assert(second_failure == "", second_failure)
+assert(third_failure == "", third_failure)
+assert(fourth_failure == "", fourth_failure)
+NY
+}

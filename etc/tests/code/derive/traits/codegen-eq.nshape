@@ -1,0 +1,53 @@
+shape codegen_eq {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "codegen", "reflection", "layout"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-only; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.compiler.codegen (eq_for)
+
+layout GeneratedEqRecord {
+   i32 value
+   bool enabled
+   f32 precision
+}
+layout record LegacyEqRecord derive(eq) {
+   i32 value
+   bool enabled
+   f32 precision
+}
+comptime emit eq_for(GeneratedEqRecord)
+
+def ptr generated_a = malloc(__layout_size("GeneratedEqRecord"))
+def ptr generated_b = malloc(__layout_size("GeneratedEqRecord"))
+def ptr legacy_a = malloc(__layout_size("LegacyEqRecord"))
+def ptr legacy_b = malloc(__layout_size("LegacyEqRecord"))
+store_layout(generated_a, "GeneratedEqRecord", 11, true, 2.5)
+store_layout(generated_b, "GeneratedEqRecord", 11, true, 2.5)
+store_layout(legacy_a, "LegacyEqRecord", 11, true, 2.5)
+store_layout(legacy_b, "LegacyEqRecord", 11, true, 2.5)
+assert(GeneratedEqRecord_eq(generated_a, generated_b) &&
+       LegacyEqRecord_eq(legacy_a, legacy_b),
+       "generated and legacy equality accept matching field values")
+store_layout(generated_b, "GeneratedEqRecord", 11, false, 2.5)
+store_layout(legacy_b, "LegacyEqRecord", 11, false, 2.5)
+assert(!GeneratedEqRecord_eq(generated_a, generated_b) &&
+       !LegacyEqRecord_eq(legacy_a, legacy_b),
+       "generated and legacy equality reject a differing field")
+store_layout(generated_b, "GeneratedEqRecord", 11, true, 3.5)
+store_layout(legacy_b, "LegacyEqRecord", 11, true, 3.5)
+assert(!GeneratedEqRecord_eq(generated_a, generated_b) &&
+       !LegacyEqRecord_eq(legacy_a, legacy_b),
+       "generated and legacy equality compare f32 fields")
+assert(!GeneratedEqRecord_eq(nil, generated_a) &&
+       !LegacyEqRecord_eq(nil, legacy_a),
+       "generated and legacy equality reject null operands")
+free(generated_a)
+free(generated_b)
+free(legacy_a)
+free(legacy_b)
+NY
+}

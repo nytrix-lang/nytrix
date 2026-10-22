@@ -3,11 +3,11 @@
 ;; Reference:
 ;; - https://opensource.adobe.com/dc-acrobat-sdk-docs/pdfstandards/PDF32000_2008.pdf
 ;; References:
-;; - std.math.crypto.protocol
-;; - std.math.crypto
-module std.math.crypto.protocol.pdf(pdf_password_pad, pdf_r3_key, pdf_r3_user_hash, pdf_r3_check_user_password, pdf_find_user_password)
-use std.math.crypto.hash as hash
-use std.math.crypto.block.stream.rc4 (rc4_decrypt_known_key)
+;; - core.math.crypto.protocol
+;; - core.math.crypto
+module core.math.crypto.protocol.pdf(pdf_password_pad, pdf_r3_key, pdf_r3_user_hash, pdf_r3_check_user_password, pdf_find_user_password)
+use core.math.crypto.hash as hash
+use core.math.crypto.block.stream.rc4 (rc4_decrypt_known_key)
 
 fn _pdf_password_padding() list {
    "Return a fresh copy of the PDF password padding bytes."

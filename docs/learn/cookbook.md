@@ -1,4 +1,4 @@
-<!-- nytrix-doc: {"audience":"user","featured":false,"group":"learn","order":125,"summary":"Small, focused combinations of Nytrix language has for everyday programs."} -->
+<!-- nytrix-doc: {"audience":"user","featured":false,"group":"learn","order":125,"summary":"Short patterns for common Nytrix programming tasks."} -->
 # Cookbook
 
 Use one pattern at a time. Each pattern names the owning language rule and the
@@ -11,8 +11,9 @@ guide that explains its workflow.
 | Precompute a table | `comptime table` and a typed lookup | [Comptime](comptime.md) |
 | Check an index | `assert_compile_range` and `assert_compile_index` | [Proofs](proofs.md) |
 | Return resource ownership | `@returns_owned` and a narrow owner | [Ownership](ownership.md) |
+| Attach methods or traits | `impl`, `trait`, `law`, operators | [Traits and impl](../spec/traits.md) |
 | Cross a C boundary | `layout`, `extern`, and a typed wrapper | [Native compilation](native.md) |
-| Run independent work | async task plus `parallel_map` | [Effects](effects.md) |
+| Run independent work | async task plus `parallel_map` | [Effects](effect.md) |
 | Draw a portable frame | window, frame, then render calls | [UI and rendering](ui.md) |
 | Inspect a public API | `ny doc get` and source comments | [Library](library.md) |
 | Measure a native change | reproducible binary and result assertion | [Performance](performance.md) |
@@ -20,23 +21,28 @@ guide that explains its workflow.
 ## Match an algebraic value
 
 ```ny
-use std.core
+use core
 
-def value = ok(7)
+enum DemoResult {
+   Value(int value),
+   Failure(str message)
+}
+
+def value = DemoResult.Value(7)
 def answer = match value {
-   ok(n) -> n
-   err(_) -> 0
+   DemoResult.Value(n) -> n
+   DemoResult.Failure(_) -> 0
 }
 assert(answer == 7, "matched result")
 ```
 
-Match arms are exhaustive for ADT values. Add `err(_)` or a wildcard before
-the compiler rejects the match.
+Match arms are exhaustive for ADT values. Add every missing constructor arm
+or a wildcard before the compiler rejects the match.
 
 ## Use a compile-time table
 
 ```ny
-use std.core
+use core
 
 comptime table Opcode {
    0x00 -> "halt"
@@ -54,7 +60,7 @@ Tables keep a static classification beside the code that consumes it.
 ## Classify with case
 
 ```ny
-use std.core
+use core
 
 fn bucket(int n) str {
    case n {
@@ -72,7 +78,8 @@ assert(bucket(5) == "small", "range dispatch")
 ## Check a callback result
 
 ```ny
-use std.os.parallel
+use core
+use core.os.parallel
 
 fn twice(int x) int { x * 2 }
 assert(parallel_map([1, 2, 3], twice) == [2, 4, 6], "parallel map")
@@ -83,42 +90,49 @@ the typed boundary.
 
 ## Chain list transforms
 
+Use a `for` loop when explicit accumulation is clearer. The `map`, `filter`,
+and `reduce` APIs are documented in
+[Values](../spec/values.md#sequence-operations).
+
 ```ny
-use std.core
+use core
 
 def xs = [1, 2, 3, 4]
-def doubled = xs.map(fn(x){ x * 2 })
-def evens = xs.filter(fn(x){ (x % 2) == 0 })
-def total = xs.reduce(0, fn(acc, x){ acc + x })
+mut doubled = []
+mut evens = []
+mut total = 0
+for x in xs {
+   doubled = doubled.append(x * 2)
+   if (x % 2) == 0 { evens = evens.append(x) }
+   total += x
+}
 assert(doubled == [2, 4, 6, 8], "map")
 assert(evens == [2, 4], "filter")
 assert(total == 10, "reduce")
 ```
 
-`map`, `filter`, and `reduce` return new values; assign the result back.
-
-## Grow a list safely
+## Build a list
 
 ```ny
-use std.core
+use core
 
-mut xs = []
-xs.append(1)
-xs.extend([2, 3])
-assert(xs == [1, 2, 3], "append then extend")
+mut xs = list(3)
+xs = xs.append(1)
+xs = xs.append(2)
+assert(xs.len == 2 && xs[1] == 2, "retained append")
 ```
 
-`list(n)` reserves capacity but starts with zero elements. `append` and
-`extend` mutate lists in place and also return the list for chaining.
+`list(n)` reserves capacity but starts empty. Keep the result of `append`;
+growth can return a replacement list value.
 
 ## Accumulate into a dict
 
 ```ny
-use std.core
+use core
 
 mut counts = dict()
-counts.set("a", counts.get("a", 0) + 1)
-counts.set("a", counts.get("a", 0) + 1)
+counts = counts.set("a", counts.get("a", 0) + 1)
+counts = counts.set("a", counts.get("a", 0) + 1)
 assert_eq(counts.get("a", 0), 2, "counted twice")
 ```
 
@@ -127,8 +141,10 @@ key case.
 
 ## Sort in place or as a copy
 
+`sort` mutates and returns the same list; `sorted` returns a copy.
+
 ```ny
-use std.core
+use core
 
 mut xs = [3, 1, 2]
 sort(xs)
@@ -139,13 +155,11 @@ def sorted_ys = sorted(ys)
 assert(ys == [3, 1, 2] && sorted_ys == [1, 2, 3], "sorted copy")
 ```
 
-`sort` mutates and returns the same list; `sorted` returns a copy.
-
 ## Parse JSON safely
 
 ```ny
-use std.core
-use std.math.parse.data.json as json
+use core
+use core.math.parse.data.json as json
 
 def cfg = json.json_decode("{\"port\": 8080, \"host\": \"127.0.0.1\"}")
 assert_eq(cfg.get("port", 0), 8080, "parsed port")
@@ -157,8 +171,8 @@ checks before relying on a field.
 ## Read and write a file
 
 ```ny
-use std.os (file_read, file_write)
-use std.core
+use core.os (file_read, file_write)
+use core
 
 def path = "/tmp/cookbook.txt"
 assert(is_ok(file_write(path, "ny")), "write")
@@ -172,8 +186,8 @@ assert(is_ok(data) && unwrap(data) == "ny", "read back")
 ## Read CLI arguments
 
 ```ny
-use std.core
-use std.os.args as args
+use core
+use core.os.args as args
 
 def pos = args.positionals()
 if pos.len > 0 { assert(is_str(pos[0]), "first positional") }
@@ -184,8 +198,8 @@ if pos.len > 0 { assert(is_str(pos[0]), "first positional") }
 ## Run a background thread
 
 ```ny
-use std.core
-use std.os.thread
+use core
+use core.os.thread
 
 fn worker(any arg) any { arg }
 
@@ -198,7 +212,7 @@ Protect shared mutable state with `mutex_new`/`mutex_lock`/`mutex_unlock`.
 ## Pass values through a channel
 
 ```ny
-use std.core
+use core
 
 def ch = channel(4)
 assert(chan_send(ch, "ny"), "send")
@@ -211,7 +225,7 @@ nonblocking forms.
 ## Return ownership explicitly
 
 ```ny
-use std.core
+use core
 
 @returns_owned
 fn make_buffer() ptr { malloc(16) }
@@ -226,7 +240,7 @@ matching cleanup.
 ## Prove an index in bounds
 
 ```ny
-use std.core
+use core
 
 def xs = [10, 20, 30]
 def int i = 1
@@ -240,7 +254,7 @@ the native store happens.
 ## Wrap a C call
 
 ```ny
-use std.core
+use core
 
 extern "c" {
    fn abs(int v) int
@@ -254,18 +268,18 @@ Keep the extern block next to the wrapper that owns the ABI shape.
 ## Round a number
 
 ```ny
-use std.core
+use core
 
 assert_eq(round(3.6), 4, "round up")
 assert_eq(abs(-3), 3, "absolute value")
 ```
 
-`round` and `abs` are exported numeric helpers in `std.core`.
+`round` and `abs` are exported numeric helpers in `core`.
 
 ## Build a small state machine
 
 ```ny
-use std.core
+use core
 
 fn step(str state, str input) str {
    case state + ":" + input {
@@ -283,7 +297,7 @@ Keep one transition per `case` arm and a wildcard fallback for unknown input.
 ## Optional member access
 
 ```ny
-use std.core
+use core
 
 def maybe = nil
 assert(maybe?.missing == nil, "optional chain on nil")

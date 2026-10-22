@@ -1,0 +1,146 @@
+shape graph_bfs {
+  family "perf-real"
+  generator "stress"
+  features ["perf", "graph", "csr", "bfs", "c-vs-ny", "checksum", "time"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.time
+use core.tbuf
+;; Build four-neighbor CSR and run BFS from four starts. The +1 edge makes
+;; every vertex reachable; the longer jumps make the traversal nontrivial.
+def DEGREE = 4
+fn bfs(ptr offsets, ptr edges, ptr dist, ptr queue, int n, int source) int {
+   mut v = 0
+   while v < n {
+      i64buf_store(dist, v, -1)
+      v += 1
+   }
+   i64buf_store(dist, source, 0)
+   i64buf_store(queue, 0, source)
+   mut head = 0
+   mut tail = 1
+   mut total_distance = 0
+   while head < tail {
+      def int current = i64buf_load(queue, head)
+      def int next_distance = i64buf_load(dist, current) + 1
+      mut int edge = i64buf_load(offsets, current)
+      def int end = i64buf_load(offsets, current + 1)
+      while edge < end {
+         def int neighbor = i64buf_load(edges, edge)
+         if i64buf_load(dist, neighbor) == -1 {
+            i64buf_store(dist, neighbor, next_distance)
+            i64buf_store(queue, tail, neighbor)
+            tail += 1
+            total_distance += next_distance
+         }
+         edge += 1
+      }
+      head += 1
+   }
+   total_distance
+}
+fn graph_case(int n) int {
+   def int mask = n - 1
+   def offsets = i64buf_new(n + 1)
+   def edges = i64buf_new(n * DEGREE)
+   def dist = i64buf_new(n)
+   def queue = i64buf_new(n)
+   mut int vertex = 0
+   while vertex < n {
+      def int base = vertex * DEGREE
+      i64buf_store(offsets, vertex, base)
+      i64buf_store(edges, base, (vertex + 1) & mask)
+      i64buf_store(edges, base + 1, (vertex + 17) & mask)
+      i64buf_store(edges, base + 2, (vertex - 1) & mask)
+      i64buf_store(edges, base + 3, (vertex - 17) & mask)
+      vertex += 1
+   }
+   i64buf_store(offsets, n, n * DEGREE)
+   mut checksum = bfs(offsets, edges, dist, queue, n, 0)
+   checksum += bfs(offsets, edges, dist, queue, n, n / 7)
+   checksum += bfs(offsets, edges, dist, queue, n, n / 3)
+   checksum += bfs(offsets, edges, dist, queue, n, n - 1)
+   checksum
+}
+def int t0 = ticks()
+def checksum = graph_case(4096) + graph_case(32768) + graph_case(262144)
+def int t1 = ticks()
+print("checksum=", checksum)
+print("elapsed_ns=", t1 - t0)
+NY
+  source c <<'C'
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+
+enum { DEGREE = 4 };
+
+static int64_t now_ns(void) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0;
+    return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
+}
+
+static int64_t bfs(const int64_t *offsets, const int64_t *edges,
+                   int64_t *dist, int64_t *queue, int n, int source) {
+    for (int v = 0; v < n; ++v) dist[v] = -1;
+    dist[source] = 0;
+    queue[0] = source;
+    int head = 0, tail = 1;
+    int64_t total_distance = 0;
+    while (head < tail) {
+        int current = (int)queue[head++];
+        int64_t next_distance = dist[current] + 1;
+        for (int64_t edge = offsets[current]; edge < offsets[current + 1]; ++edge) {
+            int neighbor = (int)edges[edge];
+            if (dist[neighbor] == -1) {
+                dist[neighbor] = next_distance;
+                queue[tail++] = neighbor;
+                total_distance += next_distance;
+            }
+        }
+    }
+    return total_distance;
+}
+
+static int64_t graph_case(int n) {
+    int mask = n - 1;
+    int64_t *offsets = malloc((size_t)(n + 1) * sizeof(*offsets));
+    int64_t *edges = malloc((size_t)(n * DEGREE) * sizeof(*edges));
+    int64_t *dist = malloc((size_t)n * sizeof(*dist));
+    int64_t *queue = malloc((size_t)n * sizeof(*queue));
+    if (!offsets || !edges || !dist || !queue) return 2;
+    for (int vertex = 0; vertex < n; ++vertex) {
+        int base = vertex * DEGREE;
+        offsets[vertex] = base;
+        edges[base] = (vertex + 1) & mask;
+        edges[base + 1] = (vertex + 17) & mask;
+        edges[base + 2] = (vertex - 1) & mask;
+        edges[base + 3] = (vertex - 17) & mask;
+    }
+    offsets[n] = n * DEGREE;
+    int64_t checksum = bfs(offsets, edges, dist, queue, n, 0);
+    checksum += bfs(offsets, edges, dist, queue, n, n / 7);
+    checksum += bfs(offsets, edges, dist, queue, n, n / 3);
+    checksum += bfs(offsets, edges, dist, queue, n, n - 1);
+    free(queue);
+    free(dist);
+    free(edges);
+    free(offsets);
+    return checksum;
+}
+
+int main(void) {
+    int64_t start = now_ns();
+    int64_t checksum = graph_case(4096) + graph_case(32768) + graph_case(262144);
+    int64_t end = now_ns();
+    printf("checksum=%lld\n", (long long)checksum);
+    if (end <= start) end = start + 1;
+    printf("elapsed_ns=%lld\n", (long long)(end - start));
+    return 0;
+}
+C
+}

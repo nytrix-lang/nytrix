@@ -1,0 +1,18 @@
+shape test_directory_handle_abi {
+  family "runtime/system"
+  generator "embedded"
+  features ["ny", "test", "filesystem"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+def dir = __dir_open(".")
+assert(dir, "directory handle opens")
+def entry = __dir_read(dir)
+assert(is_str(entry), "directory read borrows the live handle")
+assert(__dir_close(dir), "directory handle closes successfully")
+print("DIR_HANDLE_ABI_OK")
+NY
+}

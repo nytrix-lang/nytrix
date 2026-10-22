@@ -1,9 +1,9 @@
 ;; Keywords: decompiler annotations names renames notes
 ;; Analysis rename overlays, notes, and safe rendering identifiers.
-module std.os.rev.decomp.annotations *
-use std.core
-use std.core.str as str
-use std.os.rev.decomp.elf
+module core.os.rev.decomp.annotations *
+use core
+use core.str as str
+use core.os.rev.decomp.elf
 
 fn _safe_name(str n, str fallback) str {
    if n.len == 0 { return fallback }
@@ -99,5 +99,5 @@ fn note_at(any source, any key) dict {
 #main {
    assert(_safe_name("entry-point", "sub") == "entry_point", "safe annotation identifier")
    assert(_note_record(0x401000, "entry").get("key", "") == "0x401000", "address note key")
-   print("✓ std.os.rev.decomp.annotations self-test passed")
+   print("✓ core.os.rev.decomp.annotations self-test passed")
 }

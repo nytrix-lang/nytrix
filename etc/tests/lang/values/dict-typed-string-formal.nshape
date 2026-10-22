@@ -1,0 +1,18 @@
+shape test_dict_typed_string_formal {
+  family "runtime/values"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core.reflect as reflect
+
+fn make_string_dict(str value) dict { {"value":value} }
+def payload = to_str(hash("typed-string-dict-value"))
+def values = make_string_dict(payload)
+assert(is_str(values.get("value")), "typed string local becomes managed")
+assert(reflect.eq(values.get("value"), payload),
+   "dictionary literal preserves the typed string contents")
+NY
+}

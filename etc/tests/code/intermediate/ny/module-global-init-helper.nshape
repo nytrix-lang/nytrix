@@ -1,0 +1,18 @@
+shape native_module_global_initializer_reachability {
+  family "runtime-native"
+  generator "native"
+  features [native nyir reachability module-global initializer]
+  template ny-test-case
+  flags_matrix "--native-only --native-backend=x86_64 --native-tier=baseline -O0 --parallel=threads --nyir-verify; --native-backend=llvm --jit --jit-engine=mcjit --parallel=threads; --native-backend=llvm --jit --jit-engine=orc --parallel=threads"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.parallel as parallel
+
+def mapped = parallel.parallel_map([1, 2, 3, 4], fn(value) { value + 1 }, 2)
+def indexed = parallel.parallel_map_indexed([1, 2, 3, 4], fn(value, index) { value + index }, 2)
+def done = parallel.parallel_each([1, 2, 3, 4], fn(value) { value + 1 }, 2)
+assert(mapped == [2, 3, 4, 5] && indexed == [1, 3, 5, 7] && done == 4,
+       "parallel helpers initialize module policy and run callbacks")
+NY
+}

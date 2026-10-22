@@ -1,0 +1,291 @@
+shape arm_portable_text_executes_signed_comparisons_and_select {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "test", "arm", "portable-text", "runtime", "control-flow"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os (file_remove, file_write, run_capture, temp_dir, pid)
+
+def compiler = env("NYTRIX_NY_FULL_BIN")
+assert(is_str(compiler) && compiler.len > 0,
+       "test runner provides the compiler path")
+def stem = temp_dir() + "/ny-arm-portable-" + to_str(pid())
+fn run_qemu(str qemu, str executable) dict {
+  run_capture(["sh", "-c", "ulimit -c 0; exec \"$@\"", "sh", qemu,
+               executable], [], nil, false)
+}
+def asm_path = stem + ".s"
+def start_path = stem + "-start.s"
+def abi_start_path = stem + "-abi-start.s"
+def abi_start_obj_path = stem + "-abi-start.o"
+def exe_path = stem
+mut str arm_abi_matrix_source = ""
+mut str arm_abi_matrix_start = ""
+mut str arm_abi_matrix_calls = ""
+for count in 0..8 {
+  mut str parameters = ""
+  mut str arguments = ""
+  for index in 0..count {
+    if index < count {
+      if index > 0 {
+        parameters += ", "
+        arguments += ", "
+      }
+      parameters += "int p" + to_str(index)
+      arguments += to_str(11 + index)
+    }
+  }
+  if count > 0 {
+    parameters += ", "
+    arguments += ", "
+  }
+  parameters += "f64 value"
+  arguments += "1.1"
+  arm_abi_matrix_source +=
+    "@noinline\nfn f64_matrix_" + to_str(count) + "(" + parameters +
+    ") f64 { value }\n" +
+    "@noinline\nfn arm_f64_matrix_" + to_str(count) + "_roundtrip() f64 {\n" +
+    "  f64_matrix_" + to_str(count) + "(" + arguments + ")\n}\n"
+  parameters = ""
+  arguments = ""
+  for index in 0..count {
+    if index < count {
+      if index > 0 {
+        parameters += ", "
+        arguments += ", "
+      }
+      parameters += "int p" + to_str(index)
+      arguments += to_str(11 + index)
+    }
+  }
+  if count > 0 {
+    parameters += ", "
+    arguments += ", "
+  }
+  parameters += "f32 value"
+  arguments += "1.1f32"
+  arm_abi_matrix_source +=
+    "@noinline\nfn f32_matrix_" + to_str(count) + "(" + parameters +
+    ") f32 { value }\n" +
+    "@noinline\nfn arm_f32_matrix_" + to_str(count) + "_roundtrip() f32 {\n" +
+    "  f32_matrix_" + to_str(count) + "(" + arguments + ")\n}\n"
+  arm_abi_matrix_calls +=
+    "arm_f64_matrix_" + to_str(count) + "_roundtrip()\n" +
+    "arm_f32_matrix_" + to_str(count) + "_roundtrip()\n"
+  arm_abi_matrix_start +=
+    "  bl ny_fn_arm_f64_matrix_" + to_str(count) + "_roundtrip\n" +
+    "  ldr r2, =0x9999999a\n  cmp r0, r2\n  bne 1f\n" +
+    "  ldr r2, =0x3ff19999\n  cmp r1, r2\n  bne 1f\n" +
+    "  bl ny_fn_arm_f32_matrix_" + to_str(count) + "_roundtrip\n" +
+    "  ldr r2, =0x3f8ccccd\n  cmp r0, r2\n  bne 1f\n"
+}
+arm_abi_matrix_start +=
+  "  bl ny_fn_arm_f64_mixed_order_roundtrip\n" +
+  "  ldr r2, =0x9999999a\n  cmp r0, r2\n  bne 1f\n" +
+  "  ldr r2, =0x40019999\n  cmp r1, r2\n  bne 1f\n" +
+  "  bl ny_fn_arm_f32_mixed_order_roundtrip\n" +
+  "  ldr r2, =0x3f8ccccd\n  cmp r0, r2\n  bne 1f\n"
+def start_source =
+  ".syntax unified\n.arm\n.text\n.globl _start\n.type _start, %function\n" +
+  "_start:\n  bl rt_main\n  mov r7, #1\n  svc #0\n"
+def abi_start_source =
+  ".syntax unified\n.arm\n.text\n.globl _start\n.type _start, %function\n" +
+  "_start:\n  bl rt_main\n  mov r4, r0\n" +
+  arm_abi_matrix_start +
+  "  bl ny_fn_arm_f64_stack_roundtrip\n" +
+  "  ldr r2, =0x9999999a\n  cmp r0, r2\n  bne 1f\n" +
+  "  ldr r2, =0x3ff19999\n  cmp r1, r2\n  bne 1f\n" +
+  "  bl ny_fn_arm_f64_register_roundtrip\n" +
+  "  ldr r2, =0x9999999a\n  cmp r0, r2\n  bne 1f\n" +
+  "  ldr r2, =0x3ff19999\n  cmp r1, r2\n  bne 1f\n" +
+  "  bl ny_fn_arm_f32_register_roundtrip\n" +
+  "  ldr r2, =0x3f8ccccd\n  cmp r0, r2\n  bne 1f\n" +
+  "  bl ny_fn_arm_f64_stack_after_four_roundtrip\n" +
+  "  ldr r2, =0x9999999a\n  cmp r0, r2\n  bne 1f\n" +
+  "  ldr r2, =0x3ff19999\n  cmp r1, r2\n  bne 1f\n" +
+  "  bl ny_fn_arm_f32_stack_after_five_roundtrip\n" +
+  "  ldr r2, =0x3f8ccccd\n  cmp r0, r2\n  bne 1f\n" +
+  "  bl ny_fn_arm_f32_stack_roundtrip\n" +
+  "  ldr r2, =0x3f8ccccd\n  cmp r0, r2\n  bne 1f\n" +
+  "  mov r0, r4\n  b 2f\n" +
+  "1:\n  mov r0, #1\n" +
+  "2:\n  mov r7, #1\n  svc #0\n"
+assert(is_ok(file_write(start_path, start_source)),
+       "write ARM Linux startup wrapper")
+assert(is_ok(file_write(abi_start_path, abi_start_source)),
+       "write ARM float ABI startup wrapper")
+def program =
+  arm_abi_matrix_source +
+  "fn f64_stack_identity(int a, int b, int c, f64 value) f64 {\n" +
+  "  value\n}\n" +
+  "@noinline\nfn f64_stack_after_four_identity(int a, int b, int c, int d, f64 value) f64 {\n" +
+  "  value\n}\n" +
+  "@noinline\nfn f64_register_identity(int a, f64 value) f64 {\n" +
+  "  value\n}\n" +
+  "@noinline\nfn f32_register_identity(int a, f32 value) f32 {\n" +
+  "  value\n}\n" +
+  "fn f32_stack_identity(int a, int b, int c, int d, f32 value) f32 {\n" +
+  "  value\n}\n" +
+  "@noinline\nfn f32_stack_after_five_identity(int a, int b, int c, int d, int e, f32 value) f32 {\n" +
+  "  value\n}\n" +
+  "fn arm_f64_stack_roundtrip() f64 {\n" +
+  "  f64_stack_identity(11, 22, 33, 1.1)\n" +
+  "}\n" +
+  "@noinline\nfn arm_f64_stack_after_four_roundtrip() f64 {\n" +
+  "  f64_stack_after_four_identity(11, 22, 33, 44, 1.1)\n" +
+  "}\n" +
+  "@noinline\nfn arm_f64_register_roundtrip() f64 {\n" +
+  "  f64_register_identity(11, 1.1)\n" +
+  "}\n" +
+  "@noinline\nfn arm_f32_register_roundtrip() f32 {\n" +
+  "  f32_register_identity(11, 1.1f32)\n" +
+  "}\n" +
+  "fn arm_f32_stack_roundtrip() f32 {\n" +
+  "  f32_stack_identity(11, 22, 33, 44, 1.1f32)\n" +
+  "}\n" +
+  "@noinline\nfn arm_f32_stack_after_five_roundtrip() f32 {\n" +
+  "  f32_stack_after_five_identity(11, 22, 33, 44, 55, 1.1f32)\n" +
+  "}\n" +
+  "@noinline\nfn f64_mixed_order_identity(f32 first, int middle, f64 value, f32 last) f64 {\n" +
+  "  value\n" +
+  "}\n" +
+  "@noinline\nfn arm_f64_mixed_order_roundtrip() f64 {\n" +
+  "  f64_mixed_order_identity(1.1f32, 22, 2.2, 3.3f32)\n" +
+  "}\n" +
+  "@noinline\nfn f32_mixed_order_identity(f64 first, int middle, f32 value, f64 last) f32 {\n" +
+  "  value\n" +
+  "}\n" +
+  "@noinline\nfn arm_f32_mixed_order_roundtrip() f32 {\n" +
+  "  f32_mixed_order_identity(2.2, 22, 1.1f32, 3.3)\n" +
+  "}\n" +
+  "arm_f64_stack_roundtrip()\n" +
+  "arm_f64_register_roundtrip()\n" +
+  "arm_f32_register_roundtrip()\n" +
+  "arm_f64_stack_after_four_roundtrip()\n" +
+  "arm_f32_stack_after_five_roundtrip()\n" +
+  "arm_f64_mixed_order_roundtrip()\n" +
+  "arm_f32_mixed_order_roundtrip()\n" +
+  arm_abi_matrix_calls +
+  "arm_f32_stack_roundtrip()\n" +
+  "fn divmod(int value) int { value / 3 * 3 + value % 3 }\n" +
+  "@noinline\nfn integer_ops_check(int left, int right) int {\n" +
+  "  def result = (left + right) + (left - right) + (left * right) +\n" +
+  "               (left & right) + (left | right) + (left ^ right) +\n" +
+  "               (left << 1) + (left >> 1)\n" +
+  "  if result == -142 { 0 } else { 1 }\n" +
+  "}\n" +
+  "fn choose(int left, int right) int {\n" +
+  "  if left < right { left + right } else { 0 }\n" +
+  "}\n" +
+  "fn is_true(bool value) int { if value { 1 } else { 0 } }\n" +
+  "fn compare_sum(int left, int right) int {\n" +
+  "  is_true(left == right) + is_true(left != right) +\n" +
+  "  is_true(left < right) + is_true(left <= right) +\n" +
+  "  is_true(left > right) + is_true(left >= right)\n" +
+  "}\nchoose(20, 22) + choose(22, 20) + compare_sum(20, 22) +\n" +
+  "compare_sum(22, 20) + compare_sum(22, 22) +\n" +
+  "divmod(20) + divmod(-19) + integer_ops_check(-13, 5)"
+def emitted = run_capture(
+    [compiler, "--native-backend=arm", "--native-abi=aapcs", "--native-only",
+     "-O3", "--nyir-verify", "--emit-asm=" + asm_path, "-no-std", "-emit-only",
+     "-e", program],
+    [], nil, false)
+def abi_start_assembled = run_capture(
+    ["clang", "--target=armv7-linux-gnueabi", "-march=armv7ve",
+     "-mfloat-abi=soft", "-c", abi_start_path, "-o", abi_start_obj_path],
+    [], nil, false)
+def linked = run_capture(
+    ["clang", "--target=armv7-linux-gnueabi", "-march=armv7ve",
+     "-mfloat-abi=soft", "-fuse-ld=lld", "-nostdlib", "-static",
+     "-Wl,-e,_start", "-Wl,--build-id=none", "-o", exe_path, asm_path,
+     abi_start_obj_path],
+    [], nil, false)
+def execution = run_qemu("qemu-arm", exe_path)
+def checked_asm = stem + "-checked.s"
+def checked_exe = stem + "-checked"
+def checked_emit = run_capture(
+    [compiler, "--native-backend=arm", "--native-abi=aapcs", "--native-only",
+     "--nyir-verify", "--emit-asm=" + checked_asm, "-no-std", "-emit-only",
+     "-e", "if 9 / 3 == 3 && " +
+     "4294967296 / 3 == 1431655765 && " +
+     "-4294967296 / 3 == -1431655765 && " +
+     "4294967297 % 4294967296 == 1 && " +
+     "-4294967297 % 4294967296 == -1 { 3 } else { 0 }"],
+    [], nil, false)
+def checked_link = run_capture(
+    ["clang", "--target=armv7-linux-gnueabi", "-march=armv7ve",
+     "-mfloat-abi=soft", "-fuse-ld=lld", "-nostdlib", "-static",
+     "-Wl,-e,_start", "-Wl,--build-id=none", "-o", checked_exe,
+     checked_asm, start_path],
+    [], nil, false)
+def checked_execution = run_qemu("qemu-arm", checked_exe)
+def zero_asm = stem + "-zero.s"
+def zero_exe = stem + "-zero"
+def zero_emit = run_capture(
+    [compiler, "--native-backend=arm", "--native-abi=aapcs", "--native-only",
+     "--nyir-verify", "--emit-asm=" + zero_asm, "-no-std", "-emit-only",
+     "-e", "fn divide(int left, int right) int { left / right }\n" +
+     "mut int divisor = 1\nwhile divisor > 0 { divisor -= 1 }\n" +
+     "divide(9, divisor)"],
+    [], nil, false)
+def zero_link = run_capture(
+    ["clang", "--target=armv7-linux-gnueabi", "-march=armv7ve",
+     "-mfloat-abi=soft", "-fuse-ld=lld", "-nostdlib", "-static",
+     "-Wl,-e,_start", "-Wl,--build-id=none", "-o", zero_exe,
+     zero_asm, start_path],
+    [], nil, false)
+def zero_execution = run_qemu("qemu-arm", zero_exe)
+def panic_asm = stem + "-panic.s"
+def panic_exe = stem + "-panic"
+def panic_emit = run_capture(
+    [compiler, "--native-backend=arm", "--native-abi=aapcs", "--native-only",
+     "--nyir-verify", "--emit-asm=" + panic_asm, "-no-std", "-emit-only",
+     "-e", "panic(\"portable static panic\")"],
+    [], nil, false)
+def panic_link = run_capture(
+    ["clang", "--target=armv7-linux-gnueabi", "-march=armv7ve",
+     "-mfloat-abi=soft", "-fuse-ld=lld", "-nostdlib", "-static",
+     "-Wl,-e,_start", "-Wl,--build-id=none", "-o", panic_exe,
+     panic_asm, start_path],
+    [], nil, false)
+def panic_execution = run_qemu("qemu-arm", panic_exe)
+assert(emitted.get("code", 127) == 0 &&
+       abi_start_assembled.get("code", 127) == 0 &&
+       linked.get("code", 127) == 0,
+       "NYIR-verified ARM portable assembly assembles and links")
+assert(execution.get("code", 127) == 105,
+       "ARM signed comparisons, divmod, and select return tagged 52")
+assert(checked_emit.get("code", 127) == 0 &&
+       checked_link.get("code", 127) == 0 &&
+       checked_execution.get("code", 127) == 7,
+       "checked ARM division links and returns tagged 3 (exit=" +
+         to_str(checked_execution.get("code", 127)) + ")")
+assert(zero_emit.get("code", 127) == 0 && zero_link.get("code", 127) == 0 &&
+       zero_execution.get("code", 0) != 0,
+       "checked ARM division traps on a zero divisor")
+assert(panic_emit.get("code", 127) == 0 &&
+       panic_link.get("code", 127) == 0 &&
+       panic_execution.get("code", 0) != 0,
+       "literal ARM panic links and traps")
+def removed_exe = file_remove(exe_path)
+def removed_asm = file_remove(asm_path)
+def removed_start = file_remove(start_path)
+def removed_abi_start = file_remove(abi_start_path)
+def removed_abi_start_obj = file_remove(abi_start_obj_path)
+def removed_checked_asm = file_remove(checked_asm)
+def removed_checked_exe = file_remove(checked_exe)
+def removed_zero_asm = file_remove(zero_asm)
+def removed_zero_exe = file_remove(zero_exe)
+def removed_panic_asm = file_remove(panic_asm)
+def removed_panic_exe = file_remove(panic_exe)
+assert(is_ok(removed_exe) && is_ok(removed_asm) && is_ok(removed_start) &&
+       is_ok(removed_abi_start) && is_ok(removed_abi_start_obj) &&
+       is_ok(removed_checked_asm) && is_ok(removed_checked_exe) &&
+       is_ok(removed_zero_asm) && is_ok(removed_zero_exe) &&
+       is_ok(removed_panic_asm) && is_ok(removed_panic_exe),
+       "remove ARM portable cross-run artifacts")
+print("ARM_PORTABLE_RUNTIME_PARITY_OK")
+NY
+}

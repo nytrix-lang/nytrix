@@ -1,288 +1,113 @@
-<!-- nytrix-doc: {"audience":"user","featured":false,"group":"spec","order":140,"summary":"Function declarations, calls, closures, returns, receivers, and parameter behavior."} -->
+<!-- nytrix-doc: {"audience":"user","featured":true,"group":"spec","order":140,"summary":"Function declarations, calls, closures, returns, and checked function contracts."} -->
 # Functions
 
-Functions cover bindings, parameters, lambdas, return behavior, docstrings, and
-block values.
+Function rules are shared across execution backends; support for a particular
+native or foreign signature can still vary. See [Native](native.md) for ABI
+boundaries.
 
-## Bindings
+## Bindings and declarations
 
-```ny
-def name = expr
-mut name = expr
-def Type name = expr
-mut Type name = expr
-def a, b = expr
-mut a, b
-del name
+`def` declares an immutable binding; `mut` permits reassignment. An optional
+type annotation precedes the binding name. `del` clears a mutable binding; it
+does not free an object.
+
+```text
+def name = expression
+mut name = expression
+def Type name = expression
+mut Type name = expression
+
+def name(parameters) { body }
+fn name(parameters) Type { body }
+fn name(parameters) Type = expression
 ```
 
-`def` creates an immutable binding. `mut` creates a mutable binding. Typed
-binding order is `Type name`.
+A function's final expression is its result when no explicit `return` exits
+first. A string literal at the start of a function body is its docstring.
 
-`del name` sets an existing mutable binding to `nil` and clears the compiler's
-static facts for that binding. The binding remains readable. `del` rejects
-immutable `def` bindings. It is not a native free operation. Use the owning
-API's cleanup function, `with`, `release`, or `forget` for resources that need
-explicit lifetime handling.
+## Parameters and calls
 
-## Function forms
+Parameters may be inferred or explicitly typed. A parameter can have a default;
+`...rest` collects additional positional arguments. Arguments are evaluated
+left to right. Omitted defaults are evaluated at the call site in declaration
+order.
 
-```ny
-fn name(params) { body }
-fn name(params) Type { body }
-fn name(params) Type = expr
-fn(v){ expr }
-fn(a, b){ body }
-```
-
-Named functions bind a public or local function name. `fn(...) { ... }` creates
-an inline callable value.
-
-The parser accepts `lambda(...) { ... }` as a compatibility spelling with the same
-parameter-list and return-type syntax as `fn(...) { ... }`. New code should use
-`fn`.
-
-Return types follow the parameter list without `:`. The parser reserves `->`
-for pattern/case arms.
-
-## Parameters
-
-```ny
+```text
 name
 Type name
 name = default
 Type name = default
 ...rest
+
+function(positional)
+function(name = value)
 ```
 
-Parameter types belong to the callable surface. The call path evaluates
-defaults according to the function definition.
+A lambda uses `fn(parameters) { body }`. Function values and lambdas can capture
+bindings from their enclosing scope. Their parameter and return types may be
+inferred when the call site provides enough information. For explicit callable
+shapes, use `fnptr` where required by an API.
 
-## Argument evaluation
+## Return and container behavior
 
-Arguments are evaluated left to right before the call. Default parameters are
-evaluated when the argument is omitted, at the call site, in declaration order.
-A rest parameter collects the remaining positional arguments into a list.
-
-```ny
-fn log(str tag, str message = "ok", ...rest) str {
-   tag + ":" + message
-}
-
-assert_eq(log("t"), "t:ok", "default parameter")
-assert_eq(log("t", "hi", 1, 2), "t:hi", "rest parameter")
-```
-
-## Closures and capture
-
-`fn(...) { ... }` values capture the bindings they reference from the enclosing
-scope. A captured binding keeps its value for the lifetime of the closure; a
-closure that mutates a captured `mut` binding changes that binding for the
-caller too, so keep captures read-only unless the shared state is intended.
-
-```ny
-def offset = 10
-def add_offset = fn(int x) int { x + offset }
-assert_eq(add_offset(5), 15, "closure capture")
-```
-
-Closures are first-class values: they can be stored in lists, passed to
-higher-order helpers such as `map`, `filter`, and `reduce`, and returned from
-functions. A function that returns a closure keeps the captured bindings alive.
-
-## Blocks
-
-Blocks use braces:
-
-```ny
-{ statement* expr? }
-```
-
-An empty block evaluates to `nil`. A block with a final expression evaluates to
-that expression unless control exits earlier.
-
-## Returns
-
-`return` exits the current function. Without `return`, the final expression
-becomes the function result.
-
-```ny
-fn clamp(number x, number lo, number hi) number {
-   if(x < lo){ return lo }
-   if(x > hi){ return hi }
-   x
-}
-```
-
-## Value and container behavior
-
-Scalars, structs, tuples, and ranges cross function boundaries by value. Lists,
-dicts, and sets cross as references to the same managed object: a function that
-mutates an argument list or dict changes the caller's object. When a function
-must not change the caller's container, clone it first with `clone(value)`.
-
-```ny
-fn bump(dict cfg) {
-   cfg.set("hits", cfg.get("hits", 0) + 1)
-}
-
-mut cfg = {"hits": 0}
-bump(cfg)
-assert_eq(cfg.get("hits", 0), 1, "caller sees mutation")
-```
+`return expression` exits the current function. Without an explicit return, the
+last expression supplies the result. A function call does not implicitly copy
+or deep-clone a managed container; use the owning collection API or `clone`
+when a detached value is required. See [Values](values.md) for collection
+mutation and alias behavior, and [Ownership](ownership.md) for resource
+contracts.
 
 ## Attributes
 
-Function attributes attach compile-time metadata to the following function.
-The portable attributes describe effects, ownership, compile-time evaluation,
-or a semantic intent that Nytrix can preserve across backends.
+Attributes attach compiler metadata to a function. They are contracts only to
+the extent the checker or selected backend implements them; see
+[Implementation status](../learn/status.md) before relying on a partial rule.
 
-```ny
-@pure
-@effects(none|io|alloc|ffi|thread|all)
-@async_effects
-@thread
-@naked
-@consteval
-@constant_time
-@optimize(0|1|2|3)
-fn work(){ 0 }
-```
-
-`@pure` is shorthand for `@effects(none)`. The compiler checks declared effect
-contracts. It rejects inferred `io`, `alloc`, `ffi`, or `thread` effects
-outside the declared mask.
-
-`@total` marks a function's preconditions as exhaustive: the function is
-expected to be total over its declared domain. The compiler parses `@total` as
-an attribute; it does not yet require the proof kernel to discharge it before
-comptime/`def` erasure.
-
-Precondition and termination clauses attach to the signature:
-
-```ny
-fn sha_block_len() int { 64 }
-
-@pure @total
-fn fill_fast(byte[] dst, byte[] src) int requires(dst.length == src.length) {
-   ...
-}
-
-fn count_down(Fin<10> n) int decreases(n) {   ; termination measure over n
-   ...
-}
-```
-
-`requires(expr)` states a value precondition, `decreases(expr)` a
-strict-descent termination measure. Both are parsed and verified as signature
-clauses; the compiler does not yet discharge them into proof obligations.
-Body-less signatures with the same clause forms are accepted so that
-`lemma`/trait/law families can be declared before a body exists.
-
-`@async_effects` marks eligible `io`-effect functions for the stackless async
-lowering path after their effect contract passes.
-
-`@thread` affects execution: a statement-position call detaches, while a
-value-position call joins and returns the worker result. `@naked` is a real
-target-specific ABI escape hatch for an assembly body; it is rejected when the
-selected backend cannot honor it. Prefer typed standard-library APIs and
-semantic contracts for portable application code.
-
-`@optimize(level)` selects NYIR optimization level `0` through `3` for one
-function. It is useful when a measured hot function needs a different tradeoff
-from the program default. Level `0` also asks the LLVM adapter to preserve that
-function without LLVM optimization; higher LLVM per-function pipelines are not
-claimed until they are implemented.
-
-## Function policy reference
-
-Use the smallest attribute that states the property the compiler needs. These
-attributes are metadata with an implemented compiler effect, not comments.
-
-| Goal | Attribute | Compiler contract |
+| Goal | Form | Meaning |
 | --- | --- | --- |
-| Declare allowed effects | `@effects(...)`, `@pure` | The effect checker validates calls against the declared set. |
-| Describe ownership | `@returns_owned`, `@borrows(x)`, `@consumes(x)`, `@mutates(x)`, `@allowance(x, limit)` | Ownership, alias analysis, and grade-aware usage bounds receive an explicit contract. |
-| Evaluate during compilation | `@consteval` | Requires a compile-time-safe function contract. |
-| Request async lowering | `@async_effects` | Applies only after the declared effect contract passes. |
-| Run work in a worker | `@thread` | Statement calls detach; value calls join. |
-| Choose NYIR optimization | `@optimize(0|1|2|3)` | Overrides the program NYIR level for this function. |
-| Control call shape | `@inline`, `@noinline`, `@tailcall` | Requests implemented call/inlining behavior; conflicting requests diagnose. |
-| Communicate execution frequency | `@hot`, `@cold` | Feeds the compiler's function-priority metadata. |
-| Prefer call-site expansion | `@flatten` | Requests supported flattening where function shape permits it. |
-| Mark constant-time intent | `@constant_time` | Preserves the intent and applies the supported target policy. |
-| Request an accelerator target | `@accel`, `@accel(spirv)` | Uses the validated accelerator-lowering path or reports an unsupported target. |
-| Supply target-specific code | `@naked`, `asm(...)`, `intrinsic(...)` | Requires a backend that explicitly supports the requested form. |
+| Declare effects | `@effects(...)`, `@pure` | Restrict the effects accepted by the effect checker. `@pure` means no declared effects. |
+| Describe ownership | `@borrows(x)`, `@returns_borrow(x)`, `@returns_owned`, `@consumes(x)`, `@mutates(x)`, `@releases(x)`, `@forgets(x)` | State argument and return ownership facts for supported ownership checks. |
+| Bound use counts | `@allowance(x, [lo, hi])` | State a supported path-sensitive usage interval. |
+| Require compile-time evaluation | `@consteval` | Mark a function for compile-time-safe evaluation. |
+| Lower eligible IO calls as tasks | `@async_effects` | Request stackless task lowering for supported direct calls. |
+| Run work on a thread | `@thread` | Statement-position calls detach; value-position calls join on supported routes. |
+| Set a per-function optimization level | `@optimize(0|1|2|3)` | Override NYIR optimization level for that function. |
+| Guide call handling | `@inline`, `@noinline`, `@tailcall`, `@flatten` | Request supported inlining, tail-call, or flattening behavior. |
+| Mark frequency or timing intent | `@hot`, `@cold`, `@constant_time` | Provide compiler policy metadata; target support varies. |
+| Request accelerator code | `@accel`, `@accel(spirv)` | Request a validated accelerator path or receive an unsupported-target error. |
+| Require target-specific code | `@naked`, `asm(...)`, `intrinsic(...)` | Use only on a backend that supports the requested form. |
 
-Attributes do not replace algorithm choice. Measure a workload first, use
-`@optimize` or call-shape controls only where the measurement identifies that
-function, and keep the portable source behavior correct without them.
+Use semantic contracts for portable behavior. Optimization hints do not replace
+measurement or change source-level operator precedence.
 
-## Callable inference
+## Preconditions and termination measures
 
-Function values and lambdas keep inferred parameter and return shapes when the
-call site provides enough information:
+`requires(expression)` states a condition that each call must satisfy.
+`decreases(expression)` supplies a measure for supported recursive
+`@total` checks. The solver is bounded: false and unknown obligations are
+rejected, and `decreases` alone is not a termination proof. See
+[Proofs](../learn/proofs.md) for examples and [Types](types.md) for the accepted
+proof boundary.
 
-```ny
-fn compose(f, g, x){ f(g(x)) }
-
-def out = compose(fn(x){ x + 1 }, fn(x){ x * 2 }, 20)
-assert(out == 41, "compose")
-```
-
-Typed function expressions can declare parameter and return types inline:
+## Example
 
 ```ny
-def shout = fn(str x) str { x + "!" }
-```
+use core
 
-## Ownership contracts
-
-Ownership attributes document and enforce how arguments and returns move
-through a function under borrow checking.
-
-```ny
-@borrows(x)
-@returns_borrow(x)
-fn peek(x){ x }
-
-@returns_owned
-@consumes(x)
-fn adopt(x){ x }
-
-@consumes(x)
-@releases(x)
-fn close_owned(x) int {
-   __drop_owned(x)
-   0
+fn clamp(int value, int lower, int upper) int {
+   if value < lower { return lower }
+   if value > upper { return upper }
+   value
 }
-```
 
-`ny --borrow-check`, `ny --strict`, and `ny --borrow-check --ownership-strict`
-check these attributes. Without ownership checking, the compiler parses them
-and warns that it will not enforce them. In strict mode, owned tracked returns
-need `@returns_owned`; local-owner borrows cannot escape unless they borrow a
-declared parameter; live borrows block moves, releases, and mutations.
-The `@allowance(param, limit)` attribute enforces grade-aware usage limits over
-`ℕ ∪ {omega}` (with `omega` / `inf` meaning unbounded), joining exclusive branches
-by `max`, summing sequential uses, treating closure captures as single construction
-demand, and allowing `mut` reassignments to satisfy their allowances independently.
-
-## Docstrings
-
-A string literal at the start of a function body is the function docstring. It
-is documentation metadata; it is not ordinary executable work.
-
-```ny
-fn normalize_port(int raw) int {
-   "Return a TCP port after a boundary check."
-   assert(raw >= 0 && raw <= 65535, "port range")
-   raw
+#main {
+   assert_eq(clamp(12, 0, 10), 10, "upper bound")
 }
 ```
 
 ## Related
 
-- [Types](types.md) for typed parameters and return types.
-- [Control Flow](control-flow.md) for early exits and cleanup forms.
-- [Programs](../learn/programs.md) for script/module file shape.
+- [Types](types.md) for parameter and return types.
+- [Control Flow](control-flow.md) for exits and cleanup.
+- [Programs](../learn/programs.md) for scripts, modules, and entry points.
+- [Ownership](ownership.md) for resource and borrow contracts.

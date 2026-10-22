@@ -1,0 +1,109 @@
+shape std_reflect_metadata_codegen {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "reflection", "codegen", "layout", "exports"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-only; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.reflect (layout_for, fields_for, fields_with_origins_for,
+                      exports_for, variants_for, variants_with_origins_for,
+                      attributes_for)
+
+layout ReflectMetadataRecord {
+   i32 id
+   [u8, 4] bytes
+   bool active = true
+}
+comptime emit fields_for(ReflectMetadataRecord)
+comptime emit fields_with_origins_for(ReflectMetadataRecord)
+comptime emit layout_for(ReflectMetadataRecord)
+
+module ReflectMetadataModule(alpha, beta) {
+   fn alpha() int { return 1 }
+   fn beta() int { return 2 }
+}
+comptime emit exports_for(ReflectMetadataModule)
+
+enum ReflectMetadataEnum {
+   Empty,
+   Data(int code, str body),
+   Count(int amount),
+}
+comptime emit variants_for(ReflectMetadataEnum)
+comptime emit variants_with_origins_for(ReflectMetadataEnum)
+
+@trace @memoize(3)
+fn ReflectMetadataFunction() int { return 1 }
+mut direct_attribute_names = []
+comptime attributes(ReflectMetadataFunction) as attribute {
+   emit direct_attribute_names = direct_attribute_names.append(attribute)
+}
+comptime emit attributes_for(ReflectMetadataFunction)
+
+def field_snapshot = ReflectMetadataRecord_reflection_fields()
+def fields = field_snapshot[2]
+def origin_snapshot = ReflectMetadataRecord_reflection_fields_with_origins()
+def layout_info = ReflectMetadataRecord_reflection_layout()
+assert(layout_info[0] == "nytrix.reflect.layout" && layout_info[1] == 1 &&
+       layout_info[2] == "ReflectMetadataRecord" &&
+       layout_info[3] == __layout_size("ReflectMetadataRecord") &&
+       layout_info[4] == __layout_align("ReflectMetadataRecord") &&
+       layout_info[5].len == 3 && layout_info[3] == 12 && layout_info[4] == 4,
+       "layout reflection snapshots compiler-resolved size, alignment, and fields")
+assert(field_snapshot[0] == "nytrix.reflect.fields" &&
+       field_snapshot[1] == 1 && is_tuple(field_snapshot) &&
+       is_tuple(fields) && fields.len == 3 && is_tuple(fields[0]),
+       "layout reflection returns a versioned, deeply immutable tuple snapshot")
+assert(origin_snapshot[0] == "nytrix.reflect.fields.origins" &&
+       origin_snapshot[1] == 1 && origin_snapshot[2].len == 3 &&
+       origin_snapshot[2][0][0] == "id" &&
+       origin_snapshot[2][0][1] != "" &&
+       origin_snapshot[2][0][2] > 0 && origin_snapshot[2][0][3] > 0,
+       "origin-aware field reflection preserves source file and coordinates")
+assert(fields[0][0] == "id" &&
+       fields[0][1] == "i32" && fields[0][2] == 0 &&
+       fields[0][3] == 0 && fields[0][4] == 0,
+       "layout reflection copies field identity, order, and explicit alignment facts")
+assert(is_bool(fields[1][5]) && fields[1][5] &&
+       is_bool(fields[1][6]) && fields[1][6] &&
+       fields[1][7] == 4 && fields[1][0] == "bytes",
+       "layout reflection copies fixed array metadata")
+assert(is_bool(fields[2][8]) && fields[2][8] && fields[2][9] == "true" &&
+       fields[2][1] == "bool",
+       "layout reflection copies field default and type metadata")
+def exports = ReflectMetadataModule_reflection_exports()
+assert(exports[0] == "nytrix.reflect.exports" && exports[1] == 1 &&
+       exports[2] == ("alpha", "beta"),
+       "module reflection copies ordered exported names")
+def variants = ReflectMetadataEnum_reflection_variants()
+def variant_origins =
+   ReflectMetadataEnum_reflection_variants_with_origins()
+assert(variants[0] == "nytrix.reflect.variants" && variants[1] == 1 &&
+       variants[2][0] == ("Empty", 0, false, 0, ()) &&
+       variants[2][1] == ("Data", 1, true, 2,
+                          (("code", "int"), ("body", "str"))) &&
+       variants[2][2] == ("Count", 2, true, 1, (("amount", "int"),)),
+       "enum reflection returns immutable ordered variants and payload facts")
+assert(variant_origins[0] == "nytrix.reflect.variants.origins" &&
+       variant_origins[1] == 1 && variant_origins[2].len == 3 &&
+       variant_origins[2][1][0] == "Data" &&
+       variant_origins[2][1][1] != "" &&
+       variant_origins[2][1][2] > 0 && variant_origins[2][1][3] > 0,
+       "origin-aware variant reflection preserves source coordinates")
+def payload_origins = get(get(variant_origins[2][1], 7, ()), 0, ())
+assert(get(payload_origins, 0, "") == "code" &&
+       get(payload_origins, 1, "") == "int" &&
+       get(payload_origins, 2, "") != "" &&
+       get(payload_origins, 3, 0) > 0 &&
+       get(payload_origins, 4, 0) > 0,
+       "origin-aware variant reflection preserves payload field type origins")
+def attributes = ReflectMetadataFunction_reflection_attributes()
+assert(direct_attribute_names == ["trace", "memoize"] &&
+       attributes[0] == "nytrix.reflect.attributes" && attributes[1] == 1 &&
+       is_tuple(attributes[2]) && attributes[2].len == 2 &&
+       attributes[2] == ("trace", "memoize"),
+       "declaration reflection exposes ordered attribute names")
+NY
+}

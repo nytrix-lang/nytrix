@@ -3,14 +3,14 @@
 ;; Reference:
 ;; - https://www.rfc-editor.org/rfc/rfc9110.html
 ;; References:
-;; - std.os.net
-;; - std.os
-module std.os.net.http(_http_parse_url, http_request_raw, http_request, http_request_url, http_request_url_parsed, http_get, http_post, http_put, http_delete, http_get_parsed, http_post_parsed, http_put_parsed, http_delete_parsed, http_get_url, http_get_url_parsed, http_parse_url, http_parse_url_ex, http_parse_query, http_parse_response)
-use std.os.net.socket
-use std.core
-use std.core.dict_mod as _d
-use std.core.str
-use std.core.common as common
+;; - core.os.net
+;; - core.os
+module core.os.net.http(_http_parse_url, http_request_raw, http_request, http_request_url, http_request_url_parsed, http_get, http_post, http_put, http_delete, http_get_parsed, http_post_parsed, http_put_parsed, http_delete_parsed, http_get_url, http_get_url_parsed, http_parse_url, http_parse_url_ex, http_parse_query, http_parse_response)
+use core.os.net.socket
+use core
+use core.dict_mod as _d
+use core.str
+use core.common as common
 
 def _HTTP_MAX_RESPONSE_BYTES = 64 * 1024 * 1024
 
@@ -621,5 +621,5 @@ fn http_parse_query(any q) dict {
    assert(parsed.get("headers", dict(4)).get("content-type", "") == "text/plain" && parsed.get("body", "") == "hello", "http response body")
    def raw_chunked = "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n4\r\nWiki\r\n5\r\npedia\r\n0\r\n\r\n"
    assert(http_parse_response(raw_chunked).get("body", "") == "Wikipedia", "http chunked response")
-   print("✓ std.os.net.http self-test passed")
+   print("✓ core.os.net.http self-test passed")
 }

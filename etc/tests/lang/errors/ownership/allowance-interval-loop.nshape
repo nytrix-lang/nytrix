@@ -1,0 +1,22 @@
+shape ownership_rule_allowance_interval_loop {
+  family "compiler-errors/ownership"
+  generator "error"
+  features ["error", "ownership", "negative", "allowance", "loop"]
+  template ny-compile-fail
+  expect compile_fail
+  flags "--ownership-strict"
+  expect_message "ownership allowance exceeded for 'x'"
+  source ny <<'NY'
+use core
+
+@allowance(x, [0,1])
+fn loop_may_use_more_than_once(bool cond, int x) int {
+  while cond {
+    x
+  }
+  0
+}
+
+loop_may_use_more_than_once(false, 5)
+NY
+}

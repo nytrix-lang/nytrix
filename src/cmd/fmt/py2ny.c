@@ -67,10 +67,10 @@ static void pny_sb_clear(pny_sb_t *b) {
  */
 
 #define PN_IS_DIGIT(c) ((c) >= '0' && (c) <= '9')
-#define PN_IS_ALPHA(c) \
+#define PN_IS_ALPHA(c)                                                         \
   (((c) >= 'a' && (c) <= 'z') || ((c) >= 'A' && (c) <= 'Z') || (c) == '_')
 #define PN_IS_ALNUM(c) (PN_IS_ALPHA(c) || PN_IS_DIGIT(c))
-#define PN_IS_XDIGIT(c) \
+#define PN_IS_XDIGIT(c)                                                        \
   (PN_IS_DIGIT(c) || ((c) >= 'a' && (c) <= 'f') || ((c) >= 'A' && (c) <= 'F'))
 #define PN_IS_ODIGIT(c) ((c) >= '0' && (c) <= '7')
 
@@ -83,7 +83,7 @@ enum {
   PNTK_INT,
   PNTK_FLT,
   PNTK_STR, /* string literal, including any prefix */
-  PNTK_OP    /* operator or punctuator */
+  PNTK_OP   /* operator or punctuator */
 };
 
 typedef struct {
@@ -123,12 +123,10 @@ static void pny_toks_free(pny_toks_t *t) {
 }
 
 static const char *const pny_ops[] = {
-    "**=", "//=", ">>=", "<<=", "...",
-    "**", "//", ">>", "<<", "<=", ">=", "==", "!=",
-    "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "->", ":=", "@=",
-    "+", "-", "*", "/", "%", "&", "|", "^", "~", "<", ">", "=",
-    "(", ")", "[", "]", "{", "}", ",", ":", ".", "@",
-    NULL};
+    "**=", "//=", ">>=", "<<=", "...", "**", "//", ">>", "<<", "<=", ">=", "==",
+    "!=",  "+=",  "-=",  "*=",  "/=",  "%=", "&=", "|=", "^=", "->", ":=", "@=",
+    "+",   "-",   "*",   "/",   "%",   "&",  "|",  "^",  "~",  "<",  ">",  "=",
+    "(",   ")",   "[",   "]",   "{",   "}",  ",",  ":",  ".",  "@",  NULL};
 
 static size_t pny_op_len(const char *s, size_t n) {
   for (size_t k = 0; pny_ops[k]; k++) {
@@ -319,8 +317,7 @@ static void pny_lex(const char *src, size_t n, pny_toks_t *out) {
     if (PN_IS_DIGIT(c) || (c == '.' && i + 1 < n && PN_IS_DIGIT(src[i + 1]))) {
       size_t start = i;
       int isflt = 0;
-      if (c == '0' && i + 1 < n &&
-          (src[i + 1] == 'x' || src[i + 1] == 'X')) {
+      if (c == '0' && i + 1 < n && (src[i + 1] == 'x' || src[i + 1] == 'X')) {
         i += 2;
         while (i < n && (PN_IS_XDIGIT(src[i]) || src[i] == '_'))
           i++;
@@ -404,15 +401,13 @@ typedef struct {
   pny_sb_t warn; /* pending warning text (without leading ';;') */
   int indent;
   int errors;
-  pny_sb_t main_buf;       /* collects top-level executable statements */
-  char **decls;            /* names declared in current scope */
+  pny_sb_t main_buf; /* collects top-level executable statements */
+  char **decls;      /* names declared in current scope */
   size_t ndecls, cdecls;
-  int noted_truediv;       /* emitted the Python `/` vs Ny int-division note */
+  int noted_truediv; /* emitted the Python `/` vs Ny int-division note */
 } pny_t;
 
-static const pny_tok_t *pny_cur(const pny_t *p) {
-  return &p->toks[p->ti];
-}
+static const pny_tok_t *pny_cur(const pny_t *p) { return &p->toks[p->ti]; }
 
 static int pny_at_kind(const pny_t *p, int kind) {
   return p->toks[p->ti].kind == kind;
@@ -438,9 +433,7 @@ static void pny_advance(pny_t *p) {
     p->ti++;
 }
 
-static void pny_emit(pny_t *p, const char *s) {
-  pny_sb_add(&p->ln, s);
-}
+static void pny_emit(pny_t *p, const char *s) { pny_sb_add(&p->ln, s); }
 
 static void pny_emit_n(pny_t *p, const char *s, size_t n) {
   pny_sb_addn(&p->ln, s, n);
@@ -669,15 +662,12 @@ static void pny_power(pny_t *p, pny_sb_t *out) {
      */
     pny_factor(p, &r);
     /*
-     * Wrap the whole power in parens: Ny `^` is exponentiation with its own
-     * parser-defined precedence (looser than `+`/`*`), so without outer
-     * grouping `(x) ^ (2) + 3` would parse as `x ^ (2 + 3)`. Parenthesizing
-     * both the whole expression and each operand preserves Python's
-     * tighter-than-multiply binding for `**`.
+     * Ny `**` matches Python's precedence and right associativity. Retain
+     * explicit operand grouping so unary and nested powers stay exact.
      */
     pny_ebuf(p, out, "((");
     pny_ebuf(p, out, base.data ? base.data : "");
-    pny_ebuf(p, out, ") ^ (");
+    pny_ebuf(p, out, ") ** (");
     pny_ebuf(p, out, r.data ? r.data : "");
     pny_ebuf(p, out, "))");
     free(r.data);
@@ -709,10 +699,9 @@ struct pny_opinfo {
 };
 
 static const struct pny_opinfo pny_bin_ops[] = {
-    {"|", "|", 4},    {"^", "^^", 5},  {"&", "&", 6},
-    {"<<", "<<", 7},  {">>", ">>", 7}, {"+", "+", 8},
-    {"-", "-", 8},    {"*", "*", 9},   {"/", "/", 9},
-    {"//", "/", 9},   {"%", "%", 9},   {NULL, NULL, 0},
+    {"|", "|", 4},   {"^", "^", 5},  {"&", "&", 6}, {"<<", "<<", 7},
+    {">>", ">>", 7}, {"+", "+", 8},  {"-", "-", 8}, {"*", "*", 9},
+    {"/", "/", 9},   {"//", "/", 9}, {"%", "%", 9}, {NULL, NULL, 0},
 };
 
 static const struct pny_opinfo *pny_bin_lookup(const pny_tok_t *t) {
@@ -1133,8 +1122,8 @@ static void pny_atom(pny_t *p, pny_sb_t *out) {
   /*
    * unexpected
    */
-  pny_warn_at(p, t->line, "unsupported", "unexpected token '%.*s' in expression",
-              (int)t->n, t->s);
+  pny_warn_at(p, t->line, "unsupported",
+              "unexpected token '%.*s' in expression", (int)t->n, t->s);
   pny_advance(p);
 }
 
@@ -1349,8 +1338,7 @@ static void pny_parse_for(pny_t *p) {
   if (pny_at_word(p, "range") && p->toks[p->ti + 1].kind == PNTK_OP &&
       p->toks[p->ti + 1].n == 1 && p->toks[p->ti + 1].s[0] == '(') {
     if (nt != 1) {
-      pny_warn_at(p, line, "unsupported",
-                  "for-range with multiple targets");
+      pny_warn_at(p, line, "unsupported", "for-range with multiple targets");
       p->errors++;
       pny_skip_suite(p);
       return;
@@ -1423,8 +1411,7 @@ static void pny_parse_for(pny_t *p) {
   if (pny_at_word(p, "enumerate") && p->toks[p->ti + 1].kind == PNTK_OP &&
       p->toks[p->ti + 1].n == 1 && p->toks[p->ti + 1].s[0] == '(') {
     if (nt != 2) {
-      pny_warn_at(p, line, "unsupported",
-                  "for-enumerate needs two targets");
+      pny_warn_at(p, line, "unsupported", "for-enumerate needs two targets");
       p->errors++;
       pny_skip_suite(p);
       return;
@@ -1560,8 +1547,7 @@ static void pny_parse_def(pny_t *p) {
         continue;
       }
       char pname[128];
-      snprintf(pname, sizeof(pname), "%.*s", (int)pny_cur(p)->n,
-               pny_cur(p)->s);
+      snprintf(pname, sizeof(pname), "%.*s", (int)pny_cur(p)->n, pny_cur(p)->s);
       pny_advance(p);
       char ty[64];
       ty[0] = 0;
@@ -1590,7 +1576,7 @@ static void pny_parse_def(pny_t *p) {
       pny_advance(p);
     pny_emit(p, ") ");
     char ret[64];
-    strcpy(ret, "any");
+    memcpy(ret, "any", sizeof("any"));
     if (pny_at_op(p, "->")) {
       pny_advance(p);
       pny_parse_type(p, ret, sizeof(ret));
@@ -1667,8 +1653,8 @@ static int pny_take_aug(pny_t *p, char *opbuf, size_t opsz) {
   const pny_tok_t *t = pny_cur(p);
   if (t->kind != PNTK_OP)
     return 0;
-  static const char *const aug[] = {"+=", "-=", "*=", "/=", "%=", "&=",
-                                    "|=", "^=", NULL};
+  static const char *const aug[] = {
+      "+=", "-=", "*=", "**=", "/=", "%=", "&=", "|=", "^=", NULL};
   for (int k = 0; aug[k]; k++) {
     if (t->n == strlen(aug[k]) && memcmp(t->s, aug[k], t->n) == 0) {
       snprintf(opbuf, opsz, " %s ", aug[k]);
@@ -1681,12 +1667,8 @@ static int pny_take_aug(pny_t *p, char *opbuf, size_t opsz) {
     pny_advance(p);
     return 1;
   }
-  if (t->n == 3 && memcmp(t->s, "**=", 3) == 0) {
-    pny_warn_at(p, t->line, "unsupported", "**= augmented assignment");
-    pny_advance(p);
-    return 1;
-  }
-  if ((t->n == 3 && (memcmp(t->s, ">>=", 3) == 0 || memcmp(t->s, "<<=", 3) == 0)) ||
+  if ((t->n == 3 &&
+       (memcmp(t->s, ">>=", 3) == 0 || memcmp(t->s, "<<=", 3) == 0)) ||
       (t->n == 2 && memcmp(t->s, "@=", 2) == 0)) {
     pny_warn_at(p, t->line, "unsupported", "'%.*s' augmented assignment",
                 (int)t->n, t->s);
@@ -2004,42 +1986,44 @@ static int pny_convert(const char *src, size_t n, pny_sb_t *out) {
  */
 
 static int py2ny_selftest(void) {
-  static const char probe[] =
-      "def classify(x):\n"
-      "    if x < 0:\n"
-      "        return -1\n"
-      "    elif x == 0:\n"
-      "        return 0\n"
-      "    else:\n"
-      "        return 1\n"
-      "\n"
-      "def factorial(n):\n"
-      "    r = 1\n"
-      "    for i in range(1, n + 1):\n"
-      "        r = r * i\n"
-      "    return r\n"
-      "\n"
-      "def first_even(xs):\n"
-      "    for x in xs:\n"
-      "        if x % 2 == 0:\n"
-      "            return x\n"
-      "    return -1\n"
-      "\n"
-      "def has_item(xs, x):\n"
-      "    return x in xs\n"
-      "\n"
-      "def lacks_item(xs, x):\n"
-      "    return x not in xs\n"
-      "\n"
-      "def swap(a, b):\n"
-      "    a, b = b, a\n"
-      "    return a, b\n"
-      "\n"
-      "print(classify(5))\n"
-      "print(factorial(5))\n"
-      "print(first_even([1, 3, 4, 5]))\n"
-      "print(has_item([1, 2, 3], 2))\n"
-      "print(lacks_item([1, 2, 3], 9))\n";
+  static const char probe[] = "def classify(x):\n"
+                              "    if x < 0:\n"
+                              "        return -1\n"
+                              "    elif x == 0:\n"
+                              "        return 0\n"
+                              "    else:\n"
+                              "        return 1\n"
+                              "\n"
+                              "def factorial(n):\n"
+                              "    r = 1\n"
+                              "    for i in range(1, n + 1):\n"
+                              "        r = r * i\n"
+                              "    return r\n"
+                              "\n"
+                              "def first_even(xs):\n"
+                              "    for x in xs:\n"
+                              "        if x % 2 == 0:\n"
+                              "            return x\n"
+                              "    return -1\n"
+                              "\n"
+                              "def has_item(xs, x):\n"
+                              "    return x in xs\n"
+                              "\n"
+                              "def lacks_item(xs, x):\n"
+                              "    return x not in xs\n"
+                              "\n"
+                              "def square(x):\n"
+                              "    return x ** 2\n"
+                              "\n"
+                              "def swap(a, b):\n"
+                              "    a, b = b, a\n"
+                              "    return a, b\n"
+                              "\n"
+                              "print(classify(5))\n"
+                              "print(factorial(5))\n"
+                              "print(first_even([1, 3, 4, 5]))\n"
+                              "print(has_item([1, 2, 3], 2))\n"
+                              "print(lacks_item([1, 2, 3], 9))\n";
   pny_sb_t out = {0};
   if (pny_convert(probe, sizeof(probe) - 1, &out) != 0) {
     fprintf(stderr, "ny-fmt py2ny selftest: pny_convert reported unsupported "
@@ -2062,6 +2046,7 @@ static int py2ny_selftest(void) {
       "if (x % 2 == 0) {\n",
       "return contains(xs, x)\n",
       "return !contains(xs, x)\n",
+      "return ((x) ** (2))\n",
       "a, b = b, a\n",
       "return [a, b]\n",
       "#main {\n",
@@ -2078,9 +2063,9 @@ static int py2ny_selftest(void) {
   /*
    * leak / merge regression checks
    */
-  if (strstr(o, "}elif") || strstr(o, "}else") || strstr(o, "r = r * ireturn") ||
-      strstr(o, "fn classify(x)any") || strstr(o, "1 i<") ||
-      strstr(o, "mut r = 1for") || strstr(o, "__py2ny_")) {
+  if (strstr(o, "}elif") || strstr(o, "}else") ||
+      strstr(o, "r = r * ireturn") || strstr(o, "fn classify(x)any") ||
+      strstr(o, "1 i<") || strstr(o, "mut r = 1for") || strstr(o, "__py2ny_")) {
     fprintf(stderr, "ny-fmt py2ny selftest: emission leak detected\n");
     fail = 1;
   }

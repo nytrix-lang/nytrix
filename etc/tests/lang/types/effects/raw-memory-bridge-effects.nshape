@@ -1,0 +1,80 @@
+shape raw_memory_bridges_have_precise_effect_rows {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "runtime", "memory"]
+  template ny-test-case
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+@effects(read)
+fn compare_raw_memory() int {
+  rt_memcmp_raw(0, 0, 0)
+}
+
+@effects(read, write)
+fn copy_raw_memory() int {
+  rt_memcpy_raw(0, 0, 0)
+}
+
+@effects(write)
+fn fill_raw_memory() int {
+  rt_memset_raw(0, 0, 0)
+}
+
+@effects(read_memory)
+fn compare_raw_memory_long_alias() int {
+  rt_memcmp_raw(0, 0, 0)
+}
+
+@effects(write_memory)
+fn fill_raw_memory_long_alias() int {
+  rt_memset_raw(0, 0, 0)
+}
+
+assert(compare_raw_memory() == 0, "raw compare effect contract")
+assert(copy_raw_memory() == 0, "raw copy effect contract")
+assert(fill_raw_memory() == 0, "raw fill effect contract")
+assert(compare_raw_memory_long_alias() == 0, "read_memory effect alias")
+assert(fill_raw_memory_long_alias() == 0, "write_memory effect alias")
+
+@effects(read)
+fn compare_tagged_memory() int {
+  __memcmp(0, 0, 0)
+}
+
+@effects(read, write)
+fn copy_tagged_memory() int {
+  __memcpy(0, 0, 0)
+}
+
+@effects(write)
+fn fill_tagged_memory() int {
+  __memset(0, 0, 0)
+}
+
+@effects(read)
+fn compare_core_memory() int {
+  memcmp(0, 0, 0)
+}
+
+@effects(read, write)
+fn copy_core_memory() int {
+  memcpy(0, 0, 0)
+}
+
+@effects(write)
+fn fill_core_memory() int {
+  memset(0, 0, 0)
+}
+
+assert(compare_tagged_memory() == 0, "tagged compare effect contract")
+assert(copy_tagged_memory() == 0, "tagged copy effect contract")
+assert(fill_tagged_memory() == 0, "tagged fill effect contract")
+assert(compare_core_memory() == 0, "core compare effect contract")
+assert(copy_core_memory() == 0, "core copy effect contract")
+assert(fill_core_memory() == 0, "core fill effect contract")
+0
+NY
+}

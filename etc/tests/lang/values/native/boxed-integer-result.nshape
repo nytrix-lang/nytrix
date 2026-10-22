@@ -1,0 +1,11 @@
+shape test_boxed_integer_result {
+  family "native/values"
+  generator "embedded"
+  features ["ny", "test", "abi"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+def boxed = __box_i64(12)
+assert(boxed == 12, "native boxed integer result stays tagged once")
+NY
+}

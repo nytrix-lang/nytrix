@@ -84,8 +84,8 @@ static int repl_insert_bytes(char **pbuf, int *cap, int *len, int *pos,
   return 1;
 }
 
-static int repl_insert_newline_indent(char **pbuf, int *cap, int *len,
-                                      int *pos, int indent, int extra) {
+static int repl_insert_newline_indent(char **pbuf, int *cap, int *len, int *pos,
+                                      int indent, int extra) {
   if (!pbuf || !*pbuf || !cap || !len || !pos)
     return 0;
   if (indent < 0)
@@ -437,6 +437,161 @@ static int csi_parse_x10_mouse(int ms) {
   return K_UNKNOWN;
 }
 
+static int read_escape_posix(void) {
+  int seq1 = get_char_timeout(250);
+  if (seq1 == -1)
+    return '\x1b';
+  if (seq1 == '\r' || seq1 == '\n')
+    return K_ALT_ENTER;
+  if (seq1 == '[') {
+    int seq2 = get_char_timeout(1000);
+    if (seq2 == -1)
+      return K_UNKNOWN;
+    if (seq2 == 'Z')
+      return K_SHIFT_TAB;
+    if (seq2 == '<')
+      return csi_parse_sgr_mouse(100);
+    if (seq2 == 'M')
+      return csi_parse_x10_mouse(100);
+    if (seq2 == 'A')
+      return K_UP;
+    if (seq2 == 'B')
+      return K_DOWN;
+    if (seq2 == 'C')
+      return K_RIGHT;
+    if (seq2 == 'D')
+      return K_LEFT;
+    if (seq2 == 'H')
+      return K_HOME;
+    if (seq2 == 'F')
+      return K_END;
+    if (seq2 == '1') {
+      int seq3 = get_char_timeout(1000);
+      if (seq3 == '3') {
+        int seq4 = get_char_timeout(1000);
+        if (seq4 == '~')
+          return K_ALT_ENTER;
+        csi_consume_tail(seq4, 1000);
+        return K_UNKNOWN;
+      }
+      if (seq3 == ';') {
+        int seq4 = get_char_timeout(1000);
+        int seq5 = get_char_timeout(1000);
+        if (seq4 == '2') {
+          if (seq5 == 'A')
+            return K_SHIFT_UP;
+          if (seq5 == 'B')
+            return K_SHIFT_DOWN;
+          if (seq5 == 'C')
+            return K_SHIFT_RIGHT;
+          if (seq5 == 'D')
+            return K_SHIFT_LEFT;
+          if (seq5 == 'H')
+            return K_SHIFT_HOME;
+          if (seq5 == 'F')
+            return K_SHIFT_END;
+        }
+        if (seq4 == '5') {
+          if (seq5 == 'C')
+            return K_CTRL_RIGHT;
+          if (seq5 == 'D')
+            return K_CTRL_LEFT;
+        } else if (seq4 == '6') {
+          if (seq5 == 'A')
+            return K_CTRL_SHIFT_UP;
+          if (seq5 == 'B')
+            return K_CTRL_SHIFT_DOWN;
+          if (seq5 == 'C')
+            return K_CTRL_SHIFT_RIGHT;
+          if (seq5 == 'D')
+            return K_CTRL_SHIFT_LEFT;
+        } else if (seq4 == '3') {
+          if (seq5 == 'C')
+            return K_ALT_RIGHT;
+          if (seq5 == 'D')
+            return K_ALT_LEFT;
+        } else if (seq4 == '4') {
+          if (seq5 == 'A')
+            return K_ALT_SHIFT_UP;
+          if (seq5 == 'B')
+            return K_ALT_SHIFT_DOWN;
+          if (seq5 == 'C')
+            return K_ALT_SHIFT_RIGHT;
+          if (seq5 == 'D')
+            return K_ALT_SHIFT_LEFT;
+          if (seq5 == 'H')
+            return K_ALT_SHIFT_HOME;
+          if (seq5 == 'F')
+            return K_ALT_SHIFT_END;
+        }
+      }
+    }
+    if (seq2 == '2') {
+      int seq3 = get_char_timeout(1000);
+      if (seq3 == '0') {
+        int seq4 = get_char_timeout(1000);
+        int seq5 = get_char_timeout(1000);
+        if (seq4 == '0' && seq5 == '~')
+          return K_PASTE_START;
+        if (seq4 == '1' && seq5 == '~')
+          return K_PASTE_END;
+      }
+    }
+    if (seq2 >= '0' && seq2 <= '9') {
+      int seq3 = get_char_timeout(1000);
+      if (seq3 == '~') {
+        if (seq2 == '1' || seq2 == '7')
+          return K_HOME;
+        if (seq2 == '4' || seq2 == '8')
+          return K_END;
+        if (seq2 == '3')
+          return K_DEL;
+        if (seq2 == '5')
+          return K_PAGE_UP;
+        if (seq2 == '6')
+          return K_PAGE_DOWN;
+      } else if (seq3 == ';') {
+        int seq4 = get_char_timeout(1000);
+        int seq5 = get_char_timeout(1000);
+        if (seq2 == '3' && seq4 == '5' && seq5 == '~')
+          return K_CTRL_DEL;
+        if ((seq2 == '1' || seq2 == '7') && seq4 == '2' && seq5 == '~')
+          return K_SHIFT_HOME;
+        if ((seq2 == '4' || seq2 == '8') && seq4 == '2' && seq5 == '~')
+          return K_SHIFT_END;
+        if ((seq2 == '1' || seq2 == '7') && seq4 == '4' && seq5 == '~')
+          return K_ALT_SHIFT_HOME;
+        if ((seq2 == '4' || seq2 == '8') && seq4 == '4' && seq5 == '~')
+          return K_ALT_SHIFT_END;
+      } else {
+        csi_consume_tail(seq3, 1000);
+      }
+    }
+    csi_consume_tail(seq2, 1000);
+  } else if (seq1 == 'f')
+    return K_ALT_RIGHT;
+  else if (seq1 == 'b')
+    return K_ALT_LEFT;
+  else if (seq1 == 127 || seq1 == 8)
+    return K_CTRL_BACKSPACE;
+  else if (seq1 == 'O') {
+    int seq2 = get_char_timeout(1000);
+    if (seq2 == 'A')
+      return K_UP;
+    if (seq2 == 'B')
+      return K_DOWN;
+    if (seq2 == 'C')
+      return K_RIGHT;
+    if (seq2 == 'D')
+      return K_LEFT;
+    if (seq2 == 'H')
+      return K_HOME;
+    if (seq2 == 'F')
+      return K_END;
+  }
+  return K_UNKNOWN;
+}
+
 static int read_key_posix(char *out_chr) {
   static int unget_char = -1;
   int c;
@@ -466,160 +621,8 @@ static int read_key_posix(char *out_chr) {
   int ctrl_code = repl_control_key(c);
   if (ctrl_code)
     return ctrl_code;
-  if (c == '\x1b') {
-    int seq1 = get_char_timeout(250);
-    if (seq1 == -1)
-      return '\x1b';
-    if (seq1 == '\r' || seq1 == '\n')
-      return K_ALT_ENTER;
-    if (seq1 == '[') {
-      int seq2 = get_char_timeout(1000);
-      if (seq2 == -1)
-        return K_UNKNOWN;
-      if (seq2 == 'Z')
-        return K_SHIFT_TAB;
-      if (seq2 == '<')
-        return csi_parse_sgr_mouse(100);
-      if (seq2 == 'M')
-        return csi_parse_x10_mouse(100);
-      if (seq2 == 'A')
-        return K_UP;
-      if (seq2 == 'B')
-        return K_DOWN;
-      if (seq2 == 'C')
-        return K_RIGHT;
-      if (seq2 == 'D')
-        return K_LEFT;
-      if (seq2 == 'H')
-        return K_HOME;
-      if (seq2 == 'F')
-        return K_END;
-      if (seq2 == '1') {
-        int seq3 = get_char_timeout(1000);
-        if (seq3 == '3') {
-          int seq4 = get_char_timeout(1000);
-          if (seq4 == '~')
-            return K_ALT_ENTER;
-          csi_consume_tail(seq4, 1000);
-          return K_UNKNOWN;
-        }
-        if (seq3 == ';') {
-          int seq4 = get_char_timeout(1000);
-          int seq5 = get_char_timeout(1000);
-          if (seq4 == '2') {
-            if (seq5 == 'A')
-              return K_SHIFT_UP;
-            if (seq5 == 'B')
-              return K_SHIFT_DOWN;
-            if (seq5 == 'C')
-              return K_SHIFT_RIGHT;
-            if (seq5 == 'D')
-              return K_SHIFT_LEFT;
-            if (seq5 == 'H')
-              return K_SHIFT_HOME;
-            if (seq5 == 'F')
-              return K_SHIFT_END;
-          }
-          if (seq4 == '5') {
-            if (seq5 == 'C')
-              return K_CTRL_RIGHT;
-            if (seq5 == 'D')
-              return K_CTRL_LEFT;
-          } else if (seq4 == '6') {
-            if (seq5 == 'A')
-              return K_CTRL_SHIFT_UP;
-            if (seq5 == 'B')
-              return K_CTRL_SHIFT_DOWN;
-            if (seq5 == 'C')
-              return K_CTRL_SHIFT_RIGHT;
-            if (seq5 == 'D')
-              return K_CTRL_SHIFT_LEFT;
-          } else if (seq4 == '3') {
-            if (seq5 == 'C')
-              return K_ALT_RIGHT;
-            if (seq5 == 'D')
-              return K_ALT_LEFT;
-          } else if (seq4 == '4') {
-            if (seq5 == 'A')
-              return K_ALT_SHIFT_UP;
-            if (seq5 == 'B')
-              return K_ALT_SHIFT_DOWN;
-            if (seq5 == 'C')
-              return K_ALT_SHIFT_RIGHT;
-            if (seq5 == 'D')
-              return K_ALT_SHIFT_LEFT;
-            if (seq5 == 'H')
-              return K_ALT_SHIFT_HOME;
-            if (seq5 == 'F')
-              return K_ALT_SHIFT_END;
-          }
-        }
-      }
-      if (seq2 == '2') {
-        int seq3 = get_char_timeout(1000);
-        if (seq3 == '0') {
-          int seq4 = get_char_timeout(1000);
-          int seq5 = get_char_timeout(1000);
-          if (seq4 == '0' && seq5 == '~')
-            return K_PASTE_START;
-          if (seq4 == '1' && seq5 == '~')
-            return K_PASTE_END;
-        }
-      }
-      if (seq2 >= '0' && seq2 <= '9') {
-        int seq3 = get_char_timeout(1000);
-        if (seq3 == '~') {
-          if (seq2 == '1' || seq2 == '7')
-            return K_HOME;
-          if (seq2 == '4' || seq2 == '8')
-            return K_END;
-          if (seq2 == '3')
-            return K_DEL;
-          if (seq2 == '5')
-            return K_PAGE_UP;
-          if (seq2 == '6')
-            return K_PAGE_DOWN;
-        } else if (seq3 == ';') {
-          int seq4 = get_char_timeout(1000);
-          int seq5 = get_char_timeout(1000);
-          if (seq2 == '3' && seq4 == '5' && seq5 == '~')
-            return K_CTRL_DEL;
-          if ((seq2 == '1' || seq2 == '7') && seq4 == '2' && seq5 == '~')
-            return K_SHIFT_HOME;
-          if ((seq2 == '4' || seq2 == '8') && seq4 == '2' && seq5 == '~')
-            return K_SHIFT_END;
-          if ((seq2 == '1' || seq2 == '7') && seq4 == '4' && seq5 == '~')
-            return K_ALT_SHIFT_HOME;
-          if ((seq2 == '4' || seq2 == '8') && seq4 == '4' && seq5 == '~')
-            return K_ALT_SHIFT_END;
-        } else {
-          csi_consume_tail(seq3, 1000);
-        }
-      }
-      csi_consume_tail(seq2, 1000);
-    } else if (seq1 == 'f')
-      return K_ALT_RIGHT;
-    else if (seq1 == 'b')
-      return K_ALT_LEFT;
-    else if (seq1 == 127 || seq1 == 8)
-      return K_CTRL_BACKSPACE;
-    else if (seq1 == 'O') {
-      int seq2 = get_char_timeout(1000);
-      if (seq2 == 'A')
-        return K_UP;
-      if (seq2 == 'B')
-        return K_DOWN;
-      if (seq2 == 'C')
-        return K_RIGHT;
-      if (seq2 == 'D')
-        return K_LEFT;
-      if (seq2 == 'H')
-        return K_HOME;
-      if (seq2 == 'F')
-        return K_END;
-    }
-    return K_UNKNOWN;
-  }
+  if (c == '\x1b')
+    return read_escape_posix();
   *out_chr = (char)c;
   return c;
 }
@@ -671,39 +674,35 @@ static int win_key_from_csi_final(int final, int mod) {
   int ctrl = mod == 5 || mod == 6 || mod == 7 || mod == 8;
   switch (final) {
   case 'A':
-    return ctrl && shifted ? K_CTRL_SHIFT_UP
+    return ctrl && shifted  ? K_CTRL_SHIFT_UP
            : alt && shifted ? K_ALT_SHIFT_UP
            : shifted        ? K_SHIFT_UP
            : alt            ? K_ALT_UP
                             : K_UP;
   case 'B':
-    return ctrl && shifted ? K_CTRL_SHIFT_DOWN
+    return ctrl && shifted  ? K_CTRL_SHIFT_DOWN
            : alt && shifted ? K_ALT_SHIFT_DOWN
            : shifted        ? K_SHIFT_DOWN
            : alt            ? K_ALT_DOWN
                             : K_DOWN;
   case 'C':
-    return ctrl && shifted ? K_CTRL_SHIFT_RIGHT
+    return ctrl && shifted  ? K_CTRL_SHIFT_RIGHT
            : alt && shifted ? K_ALT_SHIFT_RIGHT
            : ctrl           ? K_CTRL_RIGHT
            : shifted        ? K_SHIFT_RIGHT
            : alt            ? K_ALT_RIGHT
                             : K_RIGHT;
   case 'D':
-    return ctrl && shifted ? K_CTRL_SHIFT_LEFT
+    return ctrl && shifted  ? K_CTRL_SHIFT_LEFT
            : alt && shifted ? K_ALT_SHIFT_LEFT
            : ctrl           ? K_CTRL_LEFT
            : shifted        ? K_SHIFT_LEFT
            : alt            ? K_ALT_LEFT
                             : K_LEFT;
   case 'H':
-    return alt && shifted ? K_ALT_SHIFT_HOME
-           : shifted      ? K_SHIFT_HOME
-                          : K_HOME;
+    return alt && shifted ? K_ALT_SHIFT_HOME : shifted ? K_SHIFT_HOME : K_HOME;
   case 'F':
-    return alt && shifted ? K_ALT_SHIFT_END
-           : shifted      ? K_SHIFT_END
-                          : K_END;
+    return alt && shifted ? K_ALT_SHIFT_END : shifted ? K_SHIFT_END : K_END;
   default:
     return K_UNKNOWN;
   }
@@ -884,8 +883,10 @@ static int read_key_win(char *out_chr) {
     WORD vk = k.wVirtualKeyCode;
     WCHAR wch = k.uChar.UnicodeChar;
     char ch = (wch >= 1 && wch < 128) ? (char)(unsigned char)wch : 0;
-    int ctrl = (k.dwControlKeyState & (LEFT_CTRL_PRESSED | RIGHT_CTRL_PRESSED)) != 0;
-    int alt = (k.dwControlKeyState & (LEFT_ALT_PRESSED | RIGHT_ALT_PRESSED)) != 0;
+    int ctrl =
+        (k.dwControlKeyState & (LEFT_CTRL_PRESSED | RIGHT_CTRL_PRESSED)) != 0;
+    int alt =
+        (k.dwControlKeyState & (LEFT_ALT_PRESSED | RIGHT_ALT_PRESSED)) != 0;
     if (g_win_skip_lf_after_cr) {
       if (wch == L'\r')
         continue;
@@ -916,25 +917,27 @@ static int read_key_win(char *out_chr) {
              : alt                                            ? K_ALT_UP
                                                               : K_UP;
     if (vk == VK_DOWN)
-      return (ctrl && (k.dwControlKeyState & SHIFT_PRESSED))  ? K_CTRL_SHIFT_DOWN
+      return (ctrl && (k.dwControlKeyState & SHIFT_PRESSED)) ? K_CTRL_SHIFT_DOWN
              : (alt && (k.dwControlKeyState & SHIFT_PRESSED)) ? K_ALT_SHIFT_DOWN
              : (k.dwControlKeyState & SHIFT_PRESSED)          ? K_SHIFT_DOWN
              : alt                                            ? K_ALT_DOWN
                                                               : K_DOWN;
     if (vk == VK_LEFT)
-      return (ctrl && (k.dwControlKeyState & SHIFT_PRESSED))  ? K_CTRL_SHIFT_LEFT
+      return (ctrl && (k.dwControlKeyState & SHIFT_PRESSED)) ? K_CTRL_SHIFT_LEFT
              : (alt && (k.dwControlKeyState & SHIFT_PRESSED)) ? K_ALT_SHIFT_LEFT
              : ctrl                                           ? K_CTRL_LEFT
              : (k.dwControlKeyState & SHIFT_PRESSED)          ? K_SHIFT_LEFT
              : alt                                            ? K_ALT_LEFT
                                                               : K_LEFT;
     if (vk == VK_RIGHT)
-      return (ctrl && (k.dwControlKeyState & SHIFT_PRESSED))  ? K_CTRL_SHIFT_RIGHT
-             : (alt && (k.dwControlKeyState & SHIFT_PRESSED)) ? K_ALT_SHIFT_RIGHT
-             : ctrl                                           ? K_CTRL_RIGHT
-             : (k.dwControlKeyState & SHIFT_PRESSED)          ? K_SHIFT_RIGHT
-             : alt                                            ? K_ALT_RIGHT
-                                                              : K_RIGHT;
+      return (ctrl && (k.dwControlKeyState & SHIFT_PRESSED))
+                 ? K_CTRL_SHIFT_RIGHT
+             : (alt && (k.dwControlKeyState & SHIFT_PRESSED))
+                 ? K_ALT_SHIFT_RIGHT
+             : ctrl                                  ? K_CTRL_RIGHT
+             : (k.dwControlKeyState & SHIFT_PRESSED) ? K_SHIFT_RIGHT
+             : alt                                   ? K_ALT_RIGHT
+                                                     : K_RIGHT;
     if (vk == VK_HOME)
       return (alt && (k.dwControlKeyState & SHIFT_PRESSED)) ? K_ALT_SHIFT_HOME
              : (k.dwControlKeyState & SHIFT_PRESSED)        ? K_SHIFT_HOME
@@ -998,8 +1001,10 @@ static int read_key_win(char *out_chr) {
 static int win_text_event_utf8(const KEY_EVENT_RECORD *k, char out[4]) {
   if (!k || !k->bKeyDown)
     return 0;
-  int ctrl = (k->dwControlKeyState & (LEFT_CTRL_PRESSED | RIGHT_CTRL_PRESSED)) != 0;
-  int alt = (k->dwControlKeyState & (LEFT_ALT_PRESSED | RIGHT_ALT_PRESSED)) != 0;
+  int ctrl =
+      (k->dwControlKeyState & (LEFT_CTRL_PRESSED | RIGHT_CTRL_PRESSED)) != 0;
+  int alt =
+      (k->dwControlKeyState & (LEFT_ALT_PRESSED | RIGHT_ALT_PRESSED)) != 0;
   if (ctrl || alt)
     return 0;
   WCHAR wch = k->uChar.UnicodeChar;
@@ -1028,8 +1033,8 @@ static int win_text_event_utf8(const KEY_EVENT_RECORD *k, char out[4]) {
   return 3;
 }
 
-static int win_append_bytes(char **buf, int *len, int *cap,
-                            const char *data, int data_len) {
+static int win_append_bytes(char **buf, int *len, int *cap, const char *data,
+                            int data_len) {
   if (!buf || !len || !cap || !data || data_len <= 0)
     return 0;
   if (*len + data_len + 1 > *cap) {
@@ -1174,8 +1179,8 @@ static int win_append_utf16_as_utf8(char **buf, int *len, int *cap,
                                     const WCHAR *text, int text_len) {
   if (!buf || !len || !cap || !text || text_len <= 0)
     return 1;
-  int bytes = WideCharToMultiByte(CP_UTF8, 0, text, text_len, NULL, 0, NULL,
-                                  NULL);
+  int bytes =
+      WideCharToMultiByte(CP_UTF8, 0, text, text_len, NULL, 0, NULL, NULL);
   if (bytes <= 0)
     return 0;
   if (*len + bytes + 1 > *cap) {
@@ -1193,9 +1198,8 @@ static int win_append_utf16_as_utf8(char **buf, int *len, int *cap,
     *buf = grown;
     *cap = new_cap;
   }
-  int written =
-      WideCharToMultiByte(CP_UTF8, 0, text, text_len, *buf + *len,
-                          *cap - *len, NULL, NULL);
+  int written = WideCharToMultiByte(CP_UTF8, 0, text, text_len, *buf + *len,
+                                    *cap - *len, NULL, NULL);
   if (written != bytes)
     return 0;
   *len += written;
@@ -1249,8 +1253,8 @@ static char *win_readline_cooked(const char *prompt) {
     fputs(prompt, stdout);
   fflush(stdout);
 
-  DWORD cooked = old_mode | ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT |
-                 ENABLE_PROCESSED_INPUT;
+  DWORD cooked =
+      old_mode | ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT | ENABLE_PROCESSED_INPUT;
 #ifdef ENABLE_VIRTUAL_TERMINAL_INPUT
   cooked &= ~ENABLE_VIRTUAL_TERMINAL_INPUT;
 #endif
@@ -1342,7 +1346,8 @@ void ny_readline_prepare_console(void) {
     if (SetConsoleMode(hOut, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING |
                                  DISABLE_NEWLINE_AUTO_RETURN)) {
       vt_ok = 1;
-    } else if (SetConsoleMode(hOut, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING)) {
+    } else if (SetConsoleMode(hOut,
+                              mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING)) {
       vt_ok = 1;
     }
     SetConsoleOutputCP(CP_UTF8);
@@ -1406,7 +1411,8 @@ static int visible_len(const char *s) {
       s++;
       if (*s == '[') {
         s++;
-        while (*s && ((*s >= '0' && *s <= '9') || *s == ';' || *s == '?' || *s == ' '))
+        while (*s && ((*s >= '0' && *s <= '9') || *s == ';' || *s == '?' ||
+                      *s == ' '))
           s++;
         if (*s)
           s++;
@@ -1470,7 +1476,8 @@ static int repl_match_pasted_prompt(const char *s, int i, int end) {
   return i;
 }
 
-static void repl_paste_string_state_update(char ch, int *in_str, char *quote, int *esc) {
+static void repl_paste_string_state_update(char ch, int *in_str, char *quote,
+                                           int *esc) {
   if (!in_str || !quote || !esc)
     return;
   if (*in_str) {
@@ -1491,7 +1498,8 @@ static void repl_paste_string_state_update(char ch, int *in_str, char *quote, in
 
 enum { REPL_TAB_VISUAL_WIDTH = 2, REPL_CONT_PROMPT_COLS = 3 };
 
-static void calc_cursor(const char *buf, int pos, int term_cols, int prompt_cols, int *r, int *c) {
+static void calc_cursor(const char *buf, int pos, int term_cols,
+                        int prompt_cols, int *r, int *c) {
   int row = 0;
   int col = prompt_cols;
   while (col >= term_cols) {
@@ -1526,8 +1534,8 @@ static void calc_cursor(const char *buf, int pos, int term_cols, int prompt_cols
   *c = col;
 }
 
-static int visual_to_pos(const char *buf, int len, int target_r, int target_c, int term_cols,
-                         int prompt_cols) {
+static int visual_to_pos(const char *buf, int len, int target_r, int target_c,
+                         int term_cols, int prompt_cols) {
   int row = 0;
   int col = prompt_cols;
   while (col >= term_cols) {
@@ -1603,10 +1611,12 @@ static int repl_sel_start(int sel_anchor, int pos);
 static int repl_sel_end(int sel_anchor, int pos);
 static void repl_sel_clear(int *sel_anchor);
 static void repl_sel_begin(int *sel_anchor, int pos);
-static int repl_delete_selection(char *buf, int *len, int *pos, int *sel_anchor);
+static int repl_delete_selection(char *buf, int *len, int *pos,
+                                 int *sel_anchor);
 
-static void buf_row_slice(const char *buf, int term_cols, int prompt_cols, int start_r, int max_r,
-                          int *out_start, int *out_len) {
+static void buf_row_slice(const char *buf, int term_cols, int prompt_cols,
+                          int start_r, int max_r, int *out_start,
+                          int *out_len) {
   int row = 0;
   int col = prompt_cols;
   while (col >= term_cols) {
@@ -1660,7 +1670,8 @@ static void buf_row_slice(const char *buf, int term_cols, int prompt_cols, int s
 static int g_draw_sel_anchor = -1;
 static int g_draw_sel_mode = REPL_SEL_NONE;
 
-static void draw_line(const char *prompt, const char *buf, int len, int pos, int prompt_cols) {
+static void draw_line(const char *prompt, const char *buf, int len, int pos,
+                      int prompt_cols) {
   if (!g_vt_output_ok) {
     (void)len;
     (void)pos;
@@ -1724,7 +1735,8 @@ static void draw_line(const char *prompt, const char *buf, int len, int pos, int
       cur_end_row = viewport_start + max_code_rows - 1;
     }
     int s_off, s_len;
-    buf_row_slice(buf, term_cols, prompt_cols, viewport_start, max_code_rows, &s_off, &s_len);
+    buf_row_slice(buf, term_cols, prompt_cols, viewport_start, max_code_rows,
+                  &s_off, &s_len);
     if (s_len > 0 && buf[s_off + s_len - 1] == '\n')
       s_len--;
     char *sub = malloc(s_len + 1);
@@ -1736,8 +1748,10 @@ static void draw_line(const char *prompt, const char *buf, int len, int pos, int
     if (adj_pos > s_len)
       adj_pos = s_len;
     int sub_cur_r, sub_cur_c, sub_tot_r, sub_tot_c;
-    int sub_prompt_cols = (viewport_start == 0) ? prompt_cols : REPL_CONT_PROMPT_COLS;
-    calc_cursor(sub, adj_pos, term_cols, sub_prompt_cols, &sub_cur_r, &sub_cur_c);
+    int sub_prompt_cols =
+        (viewport_start == 0) ? prompt_cols : REPL_CONT_PROMPT_COLS;
+    calc_cursor(sub, adj_pos, term_cols, sub_prompt_cols, &sub_cur_r,
+                &sub_cur_c);
     calc_cursor(sub, s_len, term_cols, sub_prompt_cols, &sub_tot_r, &sub_tot_c);
     if (hud_top) {
       printf("\r\x1b[90m%d rows above\x1b[K\n", viewport_start);
@@ -1762,8 +1776,8 @@ static void draw_line(const char *prompt, const char *buf, int len, int pos, int
         sub_sel_end = -1;
       }
     }
-    repl_highlight_line_ex(sub, adj_pos, "\x1b[90m..|\x1b[0m", sub_sel_start, sub_sel_end,
-                           g_draw_sel_mode);
+    repl_highlight_line_ex(sub, adj_pos, "\x1b[90m..|\x1b[0m", sub_sel_start,
+                           sub_sel_end, g_draw_sel_mode);
     if (has_bottom) {
       printf("\n\x1b[90m%d rows below (%d%%)\x1b[K", tot_r - cur_end_row,
              (cur_end_row * 100) / tot_r);
@@ -1783,13 +1797,14 @@ static void draw_line(const char *prompt, const char *buf, int len, int pos, int
     prev_lines = active_r;
   } else {
     viewport_start = 0;
-    int up = prev_lines;
-    if (up >= term_rows)
-      up = term_rows - 1;
-    printf("\r");
-    if (up > 0)
-      printf("\x1b[%dA", up);
-    printf("\x1b[J");
+    /*
+     * Allocate vertical space for growth BEFORE moving up.  The cursor
+     * sits at the bottom of the previous render, so newlines printed here
+     * hit the terminal bottom margin and trigger proper scrolling.
+     * Printing them after the move-up/clear landed them near the prompt
+     * row, which never reached the bottom — the terminal then scrolled
+     * mid-render and prev_lines became wrong, overlaying text.
+     */
     int growth = tot_r - prev_total_rows;
     if (prev_total_rows == 0 && tot_r > 0)
       growth = tot_r;
@@ -1800,13 +1815,23 @@ static void draw_line(const char *prompt, const char *buf, int len, int pos, int
         printf("\n");
       printf("\x1b[%dA", growth);
     }
+    int up = prev_lines;
+    if (up >= term_rows)
+      up = term_rows - 1;
+    printf("\r");
+    if (up > 0)
+      printf("\x1b[%dA", up);
+    printf("\x1b[J");
     if (prompt && *prompt)
       fputs(prompt, stdout);
-    int sel_start =
-        repl_sel_active(g_draw_sel_anchor, pos) ? repl_sel_start(g_draw_sel_anchor, pos) : -1;
-    int sel_end =
-        repl_sel_active(g_draw_sel_anchor, pos) ? repl_sel_end(g_draw_sel_anchor, pos) : -1;
-    repl_highlight_line_ex(buf, pos, "\x1b[90m..|\x1b[0m", sel_start, sel_end, g_draw_sel_mode);
+    int sel_start = repl_sel_active(g_draw_sel_anchor, pos)
+                        ? repl_sel_start(g_draw_sel_anchor, pos)
+                        : -1;
+    int sel_end = repl_sel_active(g_draw_sel_anchor, pos)
+                      ? repl_sel_end(g_draw_sel_anchor, pos)
+                      : -1;
+    repl_highlight_line_ex(buf, pos, "\x1b[90m..|\x1b[0m", sel_start, sel_end,
+                           g_draw_sel_mode);
     int up_dist = rows_below;
     if (up_dist >= term_rows)
       up_dist = term_rows - 1;
@@ -1848,11 +1873,17 @@ static void repl_finish_submit_display(const char *prompt, const char *buf,
   fflush(stdout);
 }
 
-static int repl_sel_active(int sel_anchor, int pos) { return sel_anchor >= 0 && sel_anchor != pos; }
+static int repl_sel_active(int sel_anchor, int pos) {
+  return sel_anchor >= 0 && sel_anchor != pos;
+}
 
-static int repl_sel_start(int sel_anchor, int pos) { return (sel_anchor < pos) ? sel_anchor : pos; }
+static int repl_sel_start(int sel_anchor, int pos) {
+  return (sel_anchor < pos) ? sel_anchor : pos;
+}
 
-static int repl_sel_end(int sel_anchor, int pos) { return (sel_anchor < pos) ? pos : sel_anchor; }
+static int repl_sel_end(int sel_anchor, int pos) {
+  return (sel_anchor < pos) ? pos : sel_anchor;
+}
 
 static void repl_sel_clear(int *sel_anchor) { *sel_anchor = -1; }
 
@@ -1861,7 +1892,8 @@ static void repl_sel_begin(int *sel_anchor, int pos) {
     *sel_anchor = pos;
 }
 
-static int repl_delete_selection(char *buf, int *len, int *pos, int *sel_anchor) {
+static int repl_delete_selection(char *buf, int *len, int *pos,
+                                 int *sel_anchor) {
   if (!repl_sel_active(*sel_anchor, *pos))
     return 0;
   int start = repl_sel_start(*sel_anchor, *pos);
@@ -1873,7 +1905,8 @@ static int repl_delete_selection(char *buf, int *len, int *pos, int *sel_anchor)
   return 1;
 }
 
-static int repl_delete_block_selection(char *buf, int *len, int *pos, int *sel_anchor) {
+static int repl_delete_block_selection(char *buf, int *len, int *pos,
+                                       int *sel_anchor) {
   if (!repl_sel_active(*sel_anchor, *pos))
     return 0;
   int row0, col0, row1, col1;
@@ -1910,7 +1943,8 @@ static int repl_delete_block_selection(char *buf, int *len, int *pos, int *sel_a
   col = 0;
   while (src < *len) {
     int remove = 0;
-    if (buf[src] != '\n' && row >= rmin && row <= rmax && col >= cmin && col < cmax)
+    if (buf[src] != '\n' && row >= rmin && row <= rmax && col >= cmin &&
+        col < cmax)
       remove = 1;
     if (!remove)
       buf[dst++] = buf[src];
@@ -1929,8 +1963,8 @@ static int repl_delete_block_selection(char *buf, int *len, int *pos, int *sel_a
   return 1;
 }
 
-static int repl_delete_active_selection(char *buf, int *len, int *pos, int *sel_anchor,
-                                        int *sel_mode) {
+static int repl_delete_active_selection(char *buf, int *len, int *pos,
+                                        int *sel_anchor, int *sel_mode) {
   int deleted = 0;
   if (*sel_mode == REPL_SEL_BLOCK)
     deleted = repl_delete_block_selection(buf, len, pos, sel_anchor);
@@ -1974,8 +2008,8 @@ static void repl_completion_query_from_span(const char *buf, int start, int pos,
   out[n] = '\0';
 }
 
-static char *repl_completion_probe_line(const char *buf, int len, int start, int pos,
-                                        int *out_cursor) {
+static char *repl_completion_probe_line(const char *buf, int len, int start,
+                                        int pos, int *out_cursor) {
   (void)start;
   if (!buf || len < 0)
     return NULL;
@@ -2024,7 +2058,8 @@ typedef struct {
 } repl_static_doc_t;
 
 static const repl_static_doc_t k_repl_completion_docs[] = {
-    {":help", ":help [name]", "Show command, module, or symbol documentation.", 8},
+    {":help", ":help [name]", "Show command, module, or symbol documentation.",
+     8},
     {":doc", ":doc [name]", "Alias for :help.", 8},
     {":h", ":h [name]", "Short alias for :help.", 8},
     {":exit", ":exit", "Leave the REPL.", 8},
@@ -2034,7 +2069,8 @@ static const repl_static_doc_t k_repl_completion_docs[] = {
     {":reset", ":reset", "Reset the current REPL session state.", 8},
     {":time", ":time", "Toggle timing output for evaluated snippets.", 8},
     {":trace", ":trace [mode] [filter]", "Toggle runtime/compiler tracing.", 8},
-    {":expand", ":expand [mode] [code|last]", "Inspect parsed and lowered code without running it.", 8},
+    {":expand", ":expand [mode] [code|last]",
+     "Inspect parsed and lowered code without running it.", 8},
     {":vars", ":vars", "Show persistent REPL definitions and variables.", 8},
     {":history", ":history", "Show command history.", 8},
     {":pwd", ":pwd", "Print the current working directory.", 8},
@@ -2044,7 +2080,8 @@ static const repl_static_doc_t k_repl_completion_docs[] = {
     {":run", ":run <file>", "Compile and run a Nytrix file.", 8},
     {":save", ":save [file]", "Save the current session source.", 8},
     {":std", ":std", "Show standard-library loading information.", 8},
-    {":complete", ":complete [prefix]", "Print completion candidates for a prefix.", 8},
+    {":complete", ":complete [prefix]",
+     "Print completion candidates for a prefix.", 8},
     {"fn", "fn name(type arg) ret { ... }", "Define a function.", 6},
     {"def", "def name = value", "Bind an immutable value.", 6},
     {"mut", "mut name = value", "Bind a mutable value.", 6},
@@ -2057,8 +2094,9 @@ static const repl_static_doc_t k_repl_completion_docs[] = {
     {"return", "return value", "Return from the current function.", 6},
     {"break", "break", "Exit the nearest loop.", 6},
     {"continue", "continue", "Skip to the next loop iteration.", 6},
-    {"use", "use std.module", "Import a standard-library module.", 6},
-    {"module", "module name { ... }", "Group declarations under a namespace.", 6},
+    {"use", "use core.module", "Import a standard-library module.", 6},
+    {"module", "module name { ... }", "Group declarations under a namespace.",
+     6},
     {"as", "use module as alias", "Bind an import or include to an alias.", 6},
     {"lambda", "lambda(args){ expr }", "Create an anonymous function.", 6},
     {"defer", "defer { ... }", "Run cleanup code when leaving scope.", 6},
@@ -2066,16 +2104,23 @@ static const repl_static_doc_t k_repl_completion_docs[] = {
     {"catch", "catch(e){ ... }", "Handle a try block error.", 6},
     {"throw", "throw value", "Raise an error value.", 6},
     {"finally", "finally { ... }", "Run code after try/catch.", 6},
-    {"case", "case value { pattern -> expr }", "Match a value against patterns.", 6},
-    {"match", "match value { pattern -> expr }", "Match a value against patterns.", 6},
+    {"case", "case value { pattern -> expr }",
+     "Match a value against patterns.", 6},
+    {"match", "match value { pattern -> expr }",
+     "Match a value against patterns.", 6},
     {"enum", "enum Name { A, B }", "Declare an enum type.", 6},
-    {"struct", "struct Name { Type field }", "Declare a structured value type.", 6},
-    {"layout", "layout Name { Type field }", "Declare an ABI/layout-shaped type.", 6},
-    {"extern", "extern \"lib\" { fn name(...) }", "Declare foreign functions.", 6},
+    {"struct", "struct Name { Type field }", "Declare a structured value type.",
+     6},
+    {"layout", "layout Name { Type field }",
+     "Declare an ABI/layout-shaped type.", 6},
+    {"extern", "extern \"lib\" { fn name(...) }", "Declare foreign functions.",
+     6},
     {"embed", "embed \"path\"", "Embed file contents at compile time.", 6},
     {"comptime", "comptime { ... }", "Run code during compilation.", 6},
-    {"impl", "impl type { fn method(...) { ... } }", "Attach methods/operators to a type.", 6},
-    {"operator", "operator Type + Type: Type = fn_name", "Bind an operator implementation.", 6},
+    {"impl", "impl type { fn method(...) { ... } }",
+     "Attach methods/operators to a type.", 6},
+    {"operator", "operator Type + Type: Type = fn_name",
+     "Bind an operator implementation.", 6},
     {"self", "self", "Receiver type marker inside impl methods.", 6},
     {"true", "true", "Boolean true literal.", 6},
     {"false", "false", "Boolean false literal.", 6},
@@ -2128,11 +2173,11 @@ static int repl_nerdfont_enabled(void) {
   int out = 0;
   if (repl_env_bool("NYTRIX_REPL_NERDFONT", &out) ||
       repl_env_bool("NYTRIX_NERDFONT", &out) ||
-      repl_env_bool("NERD_FONT", &out) ||
-      repl_env_bool("NF_ICONS", &out))
+      repl_env_bool("NERD_FONT", &out) || repl_env_bool("NF_ICONS", &out))
     return out;
   const char *icons = getenv("NYTRIX_REPL_ICONS");
-  return icons && (strcasecmp(icons, "nerd") == 0 || strcasecmp(icons, "nf") == 0);
+  return icons &&
+         (strcasecmp(icons, "nerd") == 0 || strcasecmp(icons, "nf") == 0);
 }
 
 static repl_comp_theme_t repl_completion_theme(void) {
@@ -2162,17 +2207,20 @@ static const char *repl_completion_last_segment(const char *s) {
   return dot ? dot + 1 : (s ? s : "");
 }
 
-static int repl_completion_name_ends_with(const char *name, const char *suffix) {
+static int repl_completion_name_ends_with(const char *name,
+                                          const char *suffix) {
   if (!name || !suffix || !*suffix)
     return 0;
   if (strcmp(name, suffix) == 0)
     return 1;
   size_t nl = strlen(name);
   size_t sl = strlen(suffix);
-  return nl > sl && name[nl - sl - 1] == '.' && strcmp(name + nl - sl, suffix) == 0;
+  return nl > sl && name[nl - sl - 1] == '.' &&
+         strcmp(name + nl - sl, suffix) == 0;
 }
 
-static int repl_completion_method_owner_is(const char *name, const char *owner) {
+static int repl_completion_method_owner_is(const char *name,
+                                           const char *owner) {
   if (!name || !owner || !*owner)
     return 0;
   const char *end = strrchr(name, '.');
@@ -2195,8 +2243,9 @@ static int repl_completion_number_owner_is(const char *name) {
          repl_completion_method_owner_is(name, "bigint");
 }
 
-static int repl_completion_doc_score(const ny_doc_entry *e, const char *candidate,
-                                     int member_context, const char *owner_hint) {
+static int repl_completion_doc_score(const ny_doc_entry *e,
+                                     const char *candidate, int member_context,
+                                     const char *owner_hint) {
   if (!e || !e->name || !candidate || !*candidate)
     return 0;
   int score = 0;
@@ -2220,7 +2269,8 @@ static int repl_completion_doc_score(const ny_doc_entry *e, const char *candidat
     if (strcmp(owner_hint, "number") == 0) {
       score += repl_completion_number_owner_is(e->name) ? 3500 : -1000;
     } else {
-      score += repl_completion_method_owner_is(e->name, owner_hint) ? 4000 : -1000;
+      score +=
+          repl_completion_method_owner_is(e->name, owner_hint) ? 4000 : -1000;
     }
   }
   if (e->def && *e->def)
@@ -2232,7 +2282,8 @@ static int repl_completion_doc_score(const ny_doc_entry *e, const char *candidat
   return score;
 }
 
-static const repl_static_doc_t *repl_completion_static_doc(const char *candidate) {
+static const repl_static_doc_t *
+repl_completion_static_doc(const char *candidate) {
   if (!candidate || !*candidate)
     return NULL;
   for (int i = 0; k_repl_completion_docs[i].name; ++i) {
@@ -2242,15 +2293,16 @@ static const repl_static_doc_t *repl_completion_static_doc(const char *candidate
   return NULL;
 }
 
-static void repl_completion_ensure_docs(const char *candidate, int member_context) {
+static void repl_completion_ensure_docs(const char *candidate,
+                                        int member_context) {
   if (!g_repl_docs || !candidate || !*candidate)
     return;
   doc_list_t *docs = (doc_list_t *)g_repl_docs;
   repl_ensure_docs_for_query(docs, candidate);
   if (member_context || !strchr(candidate, '.')) {
     static const char *const common_modules[] = {
-        "std.core",     "std.core.iter", "std.core.str", "std.core.collections",
-        "std.math",     "std.math.bin",  "std.math.nt",  "std.math.big",
+        "core",      "core.iter",     "core.str",     "core.collections",
+        "core.math", "core.math.bin", "core.math.nt", "core.math.big",
         NULL,
     };
     for (int i = 0; common_modules[i]; ++i)
@@ -2258,8 +2310,9 @@ static void repl_completion_ensure_docs(const char *candidate, int member_contex
   }
 }
 
-static repl_comp_meta_t repl_completion_meta_for(const char *candidate, int member_context,
-                                                const char *owner_hint) {
+static repl_comp_meta_t repl_completion_meta_for(const char *candidate,
+                                                 int member_context,
+                                                 const char *owner_hint) {
   repl_comp_meta_t meta = {0};
   repl_completion_ensure_docs(candidate, member_context);
   if (g_repl_docs && candidate && *candidate) {
@@ -2268,7 +2321,8 @@ static repl_comp_meta_t repl_completion_meta_for(const char *candidate, int memb
     int best_score = 0;
     for (size_t i = 0; i < docs->len; ++i) {
       const ny_doc_entry *e = &docs->data[i];
-      int score = repl_completion_doc_score(e, candidate, member_context, owner_hint);
+      int score =
+          repl_completion_doc_score(e, candidate, member_context, owner_hint);
       if (score > best_score) {
         best = e;
         best_score = score;
@@ -2301,8 +2355,8 @@ static int repl_completion_is_member_probe(const char *line, int cursor) {
   return i >= 0 && line[i] == '.';
 }
 
-static void repl_completion_receiver_owner(const char *line, int cursor, char *out,
-                                           size_t out_cap) {
+static void repl_completion_receiver_owner(const char *line, int cursor,
+                                           char *out, size_t out_cap) {
   if (!out || out_cap == 0)
     return;
   out[0] = '\0';
@@ -2405,7 +2459,8 @@ static int repl_print_flat_trimmed(const char *s, int width) {
   return used;
 }
 
-static int repl_completion_param_has_default(const char *start, const char *end) {
+static int repl_completion_param_has_default(const char *start,
+                                             const char *end) {
   int depth = 0;
   for (const char *p = start; p && p < end && *p; ++p) {
     if (*p == '(' || *p == '[' || *p == '{')
@@ -2434,7 +2489,8 @@ static int repl_completion_slice_contains(const char *start, const char *end,
   return 0;
 }
 
-static void repl_completion_arg_summary(const repl_comp_meta_t *meta, char *out, size_t out_cap) {
+static void repl_completion_arg_summary(const repl_comp_meta_t *meta, char *out,
+                                        size_t out_cap) {
   if (!out || out_cap == 0)
     return;
   out[0] = '\0';
@@ -2492,8 +2548,9 @@ static void repl_completion_arg_summary(const repl_comp_meta_t *meta, char *out,
   }
 }
 
-static void repl_completion_signature(const repl_comp_meta_t *meta, const char *candidate,
-                                      char *out, size_t out_cap) {
+static void repl_completion_signature(const repl_comp_meta_t *meta,
+                                      const char *candidate, char *out,
+                                      size_t out_cap) {
   if (!out || out_cap == 0)
     return;
   out[0] = '\0';
@@ -2539,7 +2596,8 @@ static void repl_completion_signature(const repl_comp_meta_t *meta, const char *
         if (n < 0)
           return;
         if (args < args_end && (size_t)n < out_cap) {
-          int w = snprintf(out + n, out_cap - (size_t)n, "%.*s", (int)(args_end - args), args);
+          int w = snprintf(out + n, out_cap - (size_t)n, "%.*s",
+                           (int)(args_end - args), args);
           if (w > 0)
             n += w;
         }
@@ -2552,8 +2610,9 @@ static void repl_completion_signature(const repl_comp_meta_t *meta, const char *
   snprintf(out, out_cap, "%s", name);
 }
 
-static void repl_completion_detail(const repl_comp_meta_t *meta, const char *candidate,
-                                   char *out, size_t out_cap) {
+static void repl_completion_detail(const repl_comp_meta_t *meta,
+                                   const char *candidate, char *out,
+                                   size_t out_cap) {
   if (!out || out_cap == 0)
     return;
   out[0] = '\0';
@@ -2572,8 +2631,8 @@ static void repl_completion_detail(const repl_comp_meta_t *meta, const char *can
 }
 
 static void repl_print_fuzzy_candidate(const char *candidate, const char *query,
-                                       const repl_comp_theme_t *theme, int width,
-                                       int selected) {
+                                       const repl_comp_theme_t *theme,
+                                       int width, int selected) {
   if (!candidate || width <= 0)
     return;
   if (!theme || !theme->color) {
@@ -2587,8 +2646,8 @@ static void repl_print_fuzzy_candidate(const char *candidate, const char *query,
   printf("%s", base);
   for (int i = 0; candidate[i] && i < width; ++i) {
     unsigned char c = (unsigned char)candidate[i];
-    int is_hit = query && query[qi] &&
-                 tolower(c) == tolower((unsigned char)query[qi]);
+    int is_hit =
+        query && query[qi] && tolower(c) == tolower((unsigned char)query[qi]);
     if (is_hit != in_hit) {
       printf("%s", is_hit ? hit : base);
       in_hit = is_hit;
@@ -2624,7 +2683,8 @@ static int repl_completion_is_syntax_word(const char *s) {
   return repl_completion_static_kind_is(s, 6);
 }
 
-static int repl_completion_empty_score(const char *candidate, int member_context,
+static int repl_completion_empty_score(const char *candidate,
+                                       int member_context,
                                        const char *owner_hint) {
   if (!candidate || !*candidate)
     return 0;
@@ -2641,7 +2701,7 @@ static int repl_completion_empty_score(const char *candidate, int member_context
     score += 7600;
   if (!strchr(candidate, '.'))
     score += 2200;
-  else if (strncmp(candidate, "std.", 4) == 0)
+  else if (strncmp(candidate, "core.", 5) == 0)
     score += 700;
   if (base && *base && strcmp(base, candidate) == 0)
     score += 1000;
@@ -2663,8 +2723,10 @@ static int repl_completion_item_cmp(const void *a, const void *b) {
   const repl_comp_item_t *ib = (const repl_comp_item_t *)b;
   if (ia->score != ib->score)
     return ib->score - ia->score;
-  const char *sa = g_repl_comp_sort_matches ? g_repl_comp_sort_matches[ia->idx] : "";
-  const char *sb = g_repl_comp_sort_matches ? g_repl_comp_sort_matches[ib->idx] : "";
+  const char *sa =
+      g_repl_comp_sort_matches ? g_repl_comp_sort_matches[ia->idx] : "";
+  const char *sb =
+      g_repl_comp_sort_matches ? g_repl_comp_sort_matches[ib->idx] : "";
   return strcasecmp(sa, sb);
 }
 
@@ -2686,14 +2748,15 @@ static int repl_completion_page_rows(void) {
 
 static int repl_completion_limit_for(int empty_query) {
   const char *env = getenv(empty_query ? "NYTRIX_REPL_COMPLETE_EMPTY_LIMIT"
-                                      : "NYTRIX_REPL_COMPLETE_LIMIT");
+                                       : "NYTRIX_REPL_COMPLETE_LIMIT");
   if (env && *env) {
     char *end = NULL;
     long v = strtol(env, &end, 10);
     if (end && *end == '\0' && v > 0 && v < INT_MAX)
       return (int)v;
   }
-  return empty_query ? REPL_COMPLETION_EMPTY_LIMIT : REPL_COMPLETION_FILTER_LIMIT;
+  return empty_query ? REPL_COMPLETION_EMPTY_LIMIT
+                     : REPL_COMPLETION_FILTER_LIMIT;
 }
 
 static int repl_completion_better(char **matches, const repl_comp_item_t *a,
@@ -2707,7 +2770,8 @@ static int repl_completion_better(char **matches, const repl_comp_item_t *a,
   return strcasecmp(sa ? sa : "", sb ? sb : "") < 0;
 }
 
-static int repl_completion_worst_index(char **matches, repl_comp_item_t *items, int n) {
+static int repl_completion_worst_index(char **matches, repl_comp_item_t *items,
+                                       int n) {
   int worst = 0;
   for (int i = 1; i < n; ++i) {
     if (repl_completion_better(matches, &items[worst], &items[i]))
@@ -2717,8 +2781,10 @@ static int repl_completion_worst_index(char **matches, repl_comp_item_t *items, 
 }
 
 static repl_comp_item_t *repl_completion_filter(char **matches, size_t count,
-                                                const char *query, int member_context,
-                                                const char *owner_hint, int *out_len) {
+                                                const char *query,
+                                                int member_context,
+                                                const char *owner_hint,
+                                                int *out_len) {
   if (out_len)
     *out_len = 0;
   if (!matches || count == 0)
@@ -2735,9 +2801,9 @@ static repl_comp_item_t *repl_completion_filter(char **matches, size_t count,
   int n = 0;
   int worst = -1;
   for (size_t i = 0; i < count; ++i) {
-    int score = empty_query
-                    ? repl_completion_empty_score(matches[i], member_context, owner_hint)
-                    : repl_fuzzy_score(matches[i], query, 0);
+    int score = empty_query ? repl_completion_empty_score(
+                                  matches[i], member_context, owner_hint)
+                            : repl_fuzzy_score(matches[i], query, 0);
     if (score <= 0)
       continue;
     repl_comp_item_t item = {.idx = (int)i, .score = score};
@@ -2761,8 +2827,8 @@ static repl_comp_item_t *repl_completion_filter(char **matches, size_t count,
   return items;
 }
 
-static int repl_completion_find_item(char **matches, repl_comp_item_t *items, int item_count,
-                                     const char *candidate) {
+static int repl_completion_find_item(char **matches, repl_comp_item_t *items,
+                                     int item_count, const char *candidate) {
   if (!matches || !items || item_count <= 0 || !candidate)
     return 0;
   for (int i = 0; i < item_count; ++i) {
@@ -2773,20 +2839,24 @@ static int repl_completion_find_item(char **matches, repl_comp_item_t *items, in
   return 0;
 }
 
-static const char *repl_completion_selected(char **matches, repl_comp_item_t *items,
+static const char *repl_completion_selected(char **matches,
+                                            repl_comp_item_t *items,
                                             int item_count, int selected) {
   if (!matches || !items || selected < 0 || selected >= item_count)
     return NULL;
   return matches[items[selected].idx];
 }
 
-static void repl_completion_refilter(char **matches, size_t count, const char *query,
-                                     int member_context, const char *owner_hint,
+static void repl_completion_refilter(char **matches, size_t count,
+                                     const char *query, int member_context,
+                                     const char *owner_hint,
                                      repl_comp_item_t **items, int *item_count,
                                      int *selected, const char *old_choice) {
   free(*items);
-  *items = repl_completion_filter(matches, count, query, member_context, owner_hint, item_count);
-  *selected = repl_completion_find_item(matches, *items, *item_count, old_choice);
+  *items = repl_completion_filter(matches, count, query, member_context,
+                                  owner_hint, item_count);
+  *selected =
+      repl_completion_find_item(matches, *items, *item_count, old_choice);
   if (*selected >= *item_count)
     *selected = *item_count > 0 ? *item_count - 1 : 0;
 }
@@ -2805,8 +2875,9 @@ static int repl_completion_query_pop_word(char *query) {
   size_t qlen = query ? strlen(query) : 0;
   if (qlen == 0)
     return 0;
-  while (qlen > 0 && (query[qlen - 1] == '_' || query[qlen - 1] == '-' ||
-                      query[qlen - 1] == '.' || isalnum((unsigned char)query[qlen - 1])))
+  while (qlen > 0 &&
+         (query[qlen - 1] == '_' || query[qlen - 1] == '-' ||
+          query[qlen - 1] == '.' || isalnum((unsigned char)query[qlen - 1])))
     qlen--;
   query[qlen] = '\0';
   return 1;
@@ -2841,8 +2912,8 @@ static void repl_return_to_editor_cursor(int up, int cur_c) {
     printf("\x1b[%dC", cur_c);
 }
 
-static void repl_reserve_completion_popup(const char *prompt, const char *buf, int len,
-                                          int pos, int prompt_cols) {
+static void repl_reserve_completion_popup(const char *prompt, const char *buf,
+                                          int len, int pos, int prompt_cols) {
   if (!g_vt_output_ok)
     return;
   draw_line(prompt, buf, len, pos, prompt_cols);
@@ -2860,8 +2931,8 @@ static void repl_reserve_completion_popup(const char *prompt, const char *buf, i
   fflush(stdout);
 }
 
-static void repl_clear_completion_popup(const char *prompt, const char *buf, int len,
-                                        int pos, int prompt_cols) {
+static void repl_clear_completion_popup(const char *prompt, const char *buf,
+                                        int len, int pos, int prompt_cols) {
   if (!g_vt_output_ok)
     return;
   draw_line(prompt, buf, len, pos, prompt_cols);
@@ -2878,18 +2949,21 @@ static void repl_clear_completion_popup(const char *prompt, const char *buf, int
 }
 
 static void repl_print_completion_row(const char *candidate, const char *query,
-                                      const repl_comp_theme_t *theme, int item_width,
-                                      int selected, int member_context,
+                                      const repl_comp_theme_t *theme,
+                                      int item_width, int selected,
+                                      int member_context,
                                       const char *owner_hint) {
   if (!candidate)
     candidate = "";
   char detail[512] = {0};
   if (selected) {
-    repl_comp_meta_t meta = repl_completion_meta_for(candidate, member_context, owner_hint);
+    repl_comp_meta_t meta =
+        repl_completion_meta_for(candidate, member_context, owner_hint);
     repl_completion_detail(&meta, candidate, detail, sizeof(detail));
   }
   int name_width = visible_len(candidate);
-  int cand_width = (detail[0] && name_width + 3 < item_width) ? name_width : item_width;
+  int cand_width =
+      (detail[0] && name_width + 3 < item_width) ? name_width : item_width;
   if (cand_width < 0)
     cand_width = 0;
   if (theme && theme->color) {
@@ -2920,10 +2994,12 @@ static void repl_print_completion_row(const char *candidate, const char *query,
   }
 }
 
-static int repl_print_completion_preview(const char *candidate, const repl_comp_theme_t *theme,
+static int repl_print_completion_preview(const char *candidate,
+                                         const repl_comp_theme_t *theme,
                                          int item_width, int member_context,
                                          const char *owner_hint) {
-  repl_comp_meta_t meta = repl_completion_meta_for(candidate, member_context, owner_hint);
+  repl_comp_meta_t meta =
+      repl_completion_meta_for(candidate, member_context, owner_hint);
   if (!meta.def && !meta.doc)
     return 0;
   int lines = 0;
@@ -2934,7 +3010,8 @@ static int repl_print_completion_preview(const char *candidate, const repl_comp_
       printf("%s  sig %s", theme->dim, theme->item);
     else
       printf("  sig ");
-    repl_print_flat_trimmed(detail, item_width > 6 ? item_width - 6 : item_width);
+    repl_print_flat_trimmed(detail,
+                            item_width > 6 ? item_width - 6 : item_width);
     if (theme && theme->color)
       printf("%s", theme->reset);
     printf("\n");
@@ -2945,7 +3022,8 @@ static int repl_print_completion_preview(const char *candidate, const repl_comp_
       printf("%s  doc %s", theme->dim, theme->item);
     else
       printf("  doc ");
-    repl_print_flat_trimmed(meta.doc, item_width > 6 ? item_width - 6 : item_width);
+    repl_print_flat_trimmed(meta.doc,
+                            item_width > 6 ? item_width - 6 : item_width);
     if (theme && theme->color)
       printf("%s", theme->reset);
     printf("\n");
@@ -2954,11 +3032,13 @@ static int repl_print_completion_preview(const char *candidate, const repl_comp_
   return lines;
 }
 
-static void repl_render_completion_popup(const char *prompt, const char *buf, int len,
-                                         int pos, int prompt_cols, const char *query,
-                                         char **matches, repl_comp_item_t *items,
-                                         int item_count, size_t total_count, int selected,
-                                         int member_context, const char *owner_hint) {
+static void repl_render_completion_popup(const char *prompt, const char *buf,
+                                         int len, int pos, int prompt_cols,
+                                         const char *query, char **matches,
+                                         repl_comp_item_t *items,
+                                         int item_count, size_t total_count,
+                                         int selected, int member_context,
+                                         const char *owner_hint) {
   repl_comp_theme_t theme = repl_completion_theme();
   if (!g_vt_output_ok) {
     if (items && item_count > 0) {
@@ -2992,15 +3072,18 @@ static void repl_render_completion_popup(const char *prompt, const char *buf, in
   int popup_lines = 0;
   if (theme.color) {
     printf("%s%s %scomplete%s %s%s%s ", theme.accent, theme.search_icon,
-           theme.dim, theme.reset, has_query ? theme.match : theme.dim, q, theme.reset);
+           theme.dim, theme.reset, has_query ? theme.match : theme.dim, q,
+           theme.reset);
     if (total_count > (size_t)item_count)
-      printf("%s(top %d/%zu)%s\n", theme.dim, item_count, total_count, theme.reset);
+      printf("%s(top %d/%zu)%s\n", theme.dim, item_count, total_count,
+             theme.reset);
     else
       printf("%s(%d match%s)%s\n", theme.dim, item_count,
              item_count == 1 ? "" : "es", theme.reset);
   } else {
     if (total_count > (size_t)item_count)
-      printf("%s complete %s (top %d/%zu)\n", theme.search_icon, q, item_count, total_count);
+      printf("%s complete %s (top %d/%zu)\n", theme.search_icon, q, item_count,
+             total_count);
     else
       printf("%s complete %s (%d match%s)\n", theme.search_icon, q, item_count,
              item_count == 1 ? "" : "es");
@@ -3018,29 +3101,32 @@ static void repl_render_completion_popup(const char *prompt, const char *buf, in
       end = item_count;
     for (int i = start; i < end; ++i) {
       const char *m = matches[items[i].idx];
-      repl_print_completion_row(m, query, &theme, item_width, i == selected, member_context,
-                                owner_hint);
+      repl_print_completion_row(m, query, &theme, item_width, i == selected,
+                                member_context, owner_hint);
       popup_lines++;
     }
     if (end < item_count) {
       if (theme.color)
-        printf("%s  %s %d more%s\n", theme.dim, theme.more_icon, item_count - end,
-               theme.reset);
+        printf("%s  %s %d more%s\n", theme.dim, theme.more_icon,
+               item_count - end, theme.reset);
       else
         printf("  %s %d more\n", theme.more_icon, item_count - end);
       popup_lines++;
     }
     if (!has_query) {
       if (theme.color)
-        printf("%s  type filters · arrows move · tab/enter accept · esc cancel%s\n",
+        printf("%s  type filters · arrows move · tab/enter accept · esc "
+               "cancel%s\n",
                theme.dim, theme.reset);
       else
-        printf("  type filters · arrows move · tab/enter accept · esc cancel\n");
+        printf(
+            "  type filters · arrows move · tab/enter accept · esc cancel\n");
       popup_lines++;
     }
     if (selected >= 0 && selected < item_count)
-      popup_lines += repl_print_completion_preview(matches[items[selected].idx], &theme, item_width,
-                                                   member_context, owner_hint);
+      popup_lines +=
+          repl_print_completion_preview(matches[items[selected].idx], &theme,
+                                        item_width, member_context, owner_hint);
   }
   repl_return_to_editor_cursor(down + 1 + popup_lines, cur_c);
   fflush(stdout);
@@ -3055,13 +3141,15 @@ static int repl_run_completion_menu(const char *prompt, char **pbuf, int *cap,
   char query[256];
   repl_completion_query_from_span(*pbuf, start, *pos, query, sizeof(query));
   int probe_cursor = start;
-  char *probe = repl_completion_probe_line(*pbuf, *len, start, *pos, &probe_cursor);
+  char *probe =
+      repl_completion_probe_line(*pbuf, *len, start, *pos, &probe_cursor);
   if (!probe)
     return 0;
   size_t count = 0;
   int member_context = repl_completion_is_member_probe(probe, probe_cursor);
   char owner_hint[32];
-  repl_completion_receiver_owner(probe, probe_cursor, owner_hint, sizeof(owner_hint));
+  repl_completion_receiver_owner(probe, probe_cursor, owner_hint,
+                                 sizeof(owner_hint));
   char **matches = nytrix_get_completions_for_line(probe, probe_cursor, &count);
   free(probe);
   if (!matches || count == 0) {
@@ -3070,13 +3158,15 @@ static int repl_run_completion_menu(const char *prompt, char **pbuf, int *cap,
     return 0;
   }
   int item_count = 0;
-  repl_comp_item_t *items = repl_completion_filter(matches, count, query, member_context, owner_hint, &item_count);
+  repl_comp_item_t *items = repl_completion_filter(
+      matches, count, query, member_context, owner_hint, &item_count);
   int selected = 0;
   int accepted = 0;
   int canceled = 0;
   repl_reserve_completion_popup(prompt, *pbuf, *len, *pos, prompt_cols);
   repl_render_completion_popup(prompt, *pbuf, *len, *pos, prompt_cols, query,
-                               matches, items, item_count, count, selected, member_context, owner_hint);
+                               matches, items, item_count, count, selected,
+                               member_context, owner_hint);
   while (!accepted && !canceled) {
     char ch_val = 0;
     int k;
@@ -3085,7 +3175,8 @@ static int repl_run_completion_menu(const char *prompt, char **pbuf, int *cap,
 #else
     k = read_key_posix(&ch_val);
 #endif
-    if (k == K_EOF || k == K_CTRL_C || k == K_CTRL_G || k == '\x1b' || k == K_UNKNOWN) {
+    if (k == K_EOF || k == K_CTRL_C || k == K_CTRL_G || k == '\x1b' ||
+        k == K_UNKNOWN) {
       canceled = 1;
       break;
     }
@@ -3099,7 +3190,8 @@ static int repl_run_completion_menu(const char *prompt, char **pbuf, int *cap,
       }
       break;
     }
-    if (k == K_UP || k == K_CTRL_P || k == K_SHIFT_TAB || k == K_MOUSE_WHEEL_UP) {
+    if (k == K_UP || k == K_CTRL_P || k == K_SHIFT_TAB ||
+        k == K_MOUSE_WHEEL_UP) {
       if (item_count > 0)
         selected = (selected - 1 + item_count) % item_count;
     } else if (k == K_DOWN || k == K_CTRL_N || k == K_MOUSE_WHEEL_DOWN) {
@@ -3121,43 +3213,52 @@ static int repl_run_completion_menu(const char *prompt, char **pbuf, int *cap,
       }
     } else if (k == K_CTRL_U) {
       if (query[0]) {
-        const char *old_choice = repl_completion_selected(matches, items, item_count, selected);
+        const char *old_choice =
+            repl_completion_selected(matches, items, item_count, selected);
         query[0] = '\0';
-        repl_completion_refilter(matches, count, query, member_context, owner_hint,
-                                 &items, &item_count, &selected, old_choice);
+        repl_completion_refilter(matches, count, query, member_context,
+                                 owner_hint, &items, &item_count, &selected,
+                                 old_choice);
       } else {
         canceled = 1;
       }
     } else if (k == K_CTRL_W) {
       if (repl_completion_query_pop_word(query)) {
-        const char *old_choice = repl_completion_selected(matches, items, item_count, selected);
-        repl_completion_refilter(matches, count, query, member_context, owner_hint,
-                                 &items, &item_count, &selected, old_choice);
+        const char *old_choice =
+            repl_completion_selected(matches, items, item_count, selected);
+        repl_completion_refilter(matches, count, query, member_context,
+                                 owner_hint, &items, &item_count, &selected,
+                                 old_choice);
       } else {
         canceled = 1;
       }
     } else if (k == K_BACKSPACE || k == K_CTRL_BACKSPACE) {
       if (repl_completion_query_pop_char(query)) {
-        const char *old_choice = repl_completion_selected(matches, items, item_count, selected);
-        repl_completion_refilter(matches, count, query, member_context, owner_hint,
-                                 &items, &item_count, &selected, old_choice);
+        const char *old_choice =
+            repl_completion_selected(matches, items, item_count, selected);
+        repl_completion_refilter(matches, count, query, member_context,
+                                 owner_hint, &items, &item_count, &selected,
+                                 old_choice);
       } else {
         canceled = 1;
       }
     } else if (k < 1000 && k > 0 && isprint((unsigned char)k)) {
       size_t qlen = strlen(query);
       if (qlen + 2 < sizeof(query)) {
-        const char *old_choice = repl_completion_selected(matches, items, item_count, selected);
+        const char *old_choice =
+            repl_completion_selected(matches, items, item_count, selected);
         query[qlen++] = (char)k;
         query[qlen] = '\0';
-        repl_completion_refilter(matches, count, query, member_context, owner_hint,
-                                 &items, &item_count, &selected, old_choice);
+        repl_completion_refilter(matches, count, query, member_context,
+                                 owner_hint, &items, &item_count, &selected,
+                                 old_choice);
       }
     }
     if (selected >= item_count)
       selected = item_count > 0 ? item_count - 1 : 0;
     repl_render_completion_popup(prompt, *pbuf, *len, *pos, prompt_cols, query,
-                                 matches, items, item_count, count, selected, member_context, owner_hint);
+                                 matches, items, item_count, count, selected,
+                                 member_context, owner_hint);
   }
   repl_clear_completion_popup(prompt, *pbuf, *len, *pos, prompt_cols);
   free(items);
@@ -3207,8 +3308,8 @@ char *ny_readline(const char *prompt) {
   HANDLE hIn = GetStdHandle(STD_INPUT_HANDLE);
   DWORD oldMode = 0;
   GetConsoleMode(hIn, &oldMode);
-  DWORD rawMode =
-      oldMode & ~(ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT | ENABLE_PROCESSED_INPUT);
+  DWORD rawMode = oldMode & ~(ENABLE_LINE_INPUT | ENABLE_ECHO_INPUT |
+                              ENABLE_PROCESSED_INPUT);
 #ifdef ENABLE_VIRTUAL_TERMINAL_INPUT
   if (!SetConsoleMode(hIn, rawMode | ENABLE_VIRTUAL_TERMINAL_INPUT))
     SetConsoleMode(hIn, rawMode);
@@ -3393,7 +3494,8 @@ char *ny_readline(const char *prompt) {
         }
       }
       if (found_idx != -1) {
-        if (repl_set_buffer_text(&buf, &cap, &len, &pos, ny_hist[found_idx], 128)) {
+        if (repl_set_buffer_text(&buf, &cap, &len, &pos, ny_hist[found_idx],
+                                 128)) {
           if (search_q[0]) {
             char *hit = strstr(buf, search_q);
             if (hit)
@@ -3439,7 +3541,8 @@ char *ny_readline(const char *prompt) {
           if (r < old_pos) {
             if (buf[r] == '\n')
               is_line_start = 1;
-            repl_paste_string_state_update(buf[r], &paste_in_str, &paste_quote, &paste_esc);
+            repl_paste_string_state_update(buf[r], &paste_in_str, &paste_quote,
+                                           &paste_esc);
             buf[w++] = buf[r++];
           }
         }
@@ -3520,7 +3623,8 @@ char *ny_readline(const char *prompt) {
       if (repl_sel_active(sel_anchor, pos)) {
         repl_delete_active_selection(buf, &len, &pos, &sel_anchor, &sel_mode);
       }
-      int handled = repl_run_completion_menu(prompt, &buf, &cap, &len, &pos, prompt_cols);
+      int handled =
+          repl_run_completion_menu(prompt, &buf, &cap, &len, &pos, prompt_cols);
       if (handled == 0 && !repl_has_completion_prefix(buf, pos)) {
         int spaces = 3;
         if (!repl_reserve_buf(&buf, &cap, len + spaces, 128))
@@ -3563,10 +3667,11 @@ char *ny_readline(const char *prompt) {
     if (k != K_UP && k != K_DOWN && k != K_CTRL_P && k != K_CTRL_N) {
       target_col = -1;
     }
-    int mutating_key =
-        k == K_BACKSPACE || k == K_CTRL_D || k == K_DEL || k == K_CTRL_BACKSPACE ||
-        k == K_CTRL_DEL || k == K_CTRL_K || k == K_CTRL_Y || k == K_CTRL_U ||
-        k == K_CTRL_W || (k < 1000 && k > 0 && isprint((unsigned char)k));
+    int mutating_key = k == K_BACKSPACE || k == K_CTRL_D || k == K_DEL ||
+                       k == K_CTRL_BACKSPACE || k == K_CTRL_DEL ||
+                       k == K_CTRL_K || k == K_CTRL_Y || k == K_CTRL_U ||
+                       k == K_CTRL_W ||
+                       (k < 1000 && k > 0 && isprint((unsigned char)k));
     if (mutating_key) {
       char *snapshot = ny_strdup(buf);
       if (snapshot) {
@@ -3578,14 +3683,18 @@ char *ny_readline(const char *prompt) {
     int old_pos = pos;
     int moved_cursor = 0;
     int extend_linear =
-        (k == K_SHIFT_LEFT || k == K_SHIFT_RIGHT || k == K_SHIFT_UP || k == K_SHIFT_DOWN ||
-         k == K_SHIFT_HOME || k == K_SHIFT_END || k == K_CTRL_SHIFT_LEFT ||
-         k == K_CTRL_SHIFT_RIGHT || k == K_CTRL_SHIFT_UP || k == K_CTRL_SHIFT_DOWN);
-    int extend_block = (k == K_ALT_SHIFT_LEFT || k == K_ALT_SHIFT_RIGHT || k == K_ALT_SHIFT_UP ||
-                        k == K_ALT_SHIFT_DOWN || k == K_ALT_SHIFT_HOME || k == K_ALT_SHIFT_END);
+        (k == K_SHIFT_LEFT || k == K_SHIFT_RIGHT || k == K_SHIFT_UP ||
+         k == K_SHIFT_DOWN || k == K_SHIFT_HOME || k == K_SHIFT_END ||
+         k == K_CTRL_SHIFT_LEFT || k == K_CTRL_SHIFT_RIGHT ||
+         k == K_CTRL_SHIFT_UP || k == K_CTRL_SHIFT_DOWN);
+    int extend_block = (k == K_ALT_SHIFT_LEFT || k == K_ALT_SHIFT_RIGHT ||
+                        k == K_ALT_SHIFT_UP || k == K_ALT_SHIFT_DOWN ||
+                        k == K_ALT_SHIFT_HOME || k == K_ALT_SHIFT_END);
     int extend_sel = extend_linear || extend_block;
     if (k == K_BACKSPACE) {
-      if (!repl_delete_active_selection(buf, &len, &pos, &sel_anchor, &sel_mode) && pos > 0) {
+      if (!repl_delete_active_selection(buf, &len, &pos, &sel_anchor,
+                                        &sel_mode) &&
+          pos > 0) {
         int line_start = pos;
         while (line_start > 0 && buf[line_start - 1] != '\n')
           line_start--;
@@ -3596,7 +3705,8 @@ char *ny_readline(const char *prompt) {
             break;
           }
         int skip = 1;
-        if (all_spaces && (pos - line_start) >= 3 && (pos - line_start) % 3 == 0)
+        if (all_spaces && (pos - line_start) >= 3 &&
+            (pos - line_start) % 3 == 0)
           skip = 3;
         else {
           while (pos - skip > 0 && (buf[pos - skip] & 0xc0) == 0x80)
@@ -3611,7 +3721,8 @@ char *ny_readline(const char *prompt) {
         free(buf);
         buf = NULL;
         break;
-      } else if (!repl_delete_active_selection(buf, &len, &pos, &sel_anchor, &sel_mode) &&
+      } else if (!repl_delete_active_selection(buf, &len, &pos, &sel_anchor,
+                                               &sel_mode) &&
                  pos < len) {
         int skip = 1;
         while (pos + skip < len && (buf[pos + skip] & 0xc0) == 0x80)
@@ -3620,7 +3731,9 @@ char *ny_readline(const char *prompt) {
         len -= skip;
       }
     } else if (k == K_DEL) {
-      if (!repl_delete_active_selection(buf, &len, &pos, &sel_anchor, &sel_mode) && pos < len) {
+      if (!repl_delete_active_selection(buf, &len, &pos, &sel_anchor,
+                                        &sel_mode) &&
+          pos < len) {
         int skip = 1;
         while (pos + skip < len && (buf[pos + skip] & 0xc0) == 0x80)
           skip++;
@@ -3659,8 +3772,8 @@ char *ny_readline(const char *prompt) {
         }
         moved_cursor = 1;
       }
-    } else if (k == K_CTRL_RIGHT || k == K_ALT_RIGHT || k == K_CTRL_SHIFT_RIGHT ||
-               k == K_ALT_SHIFT_RIGHT) {
+    } else if (k == K_CTRL_RIGHT || k == K_ALT_RIGHT ||
+               k == K_CTRL_SHIFT_RIGHT || k == K_ALT_SHIFT_RIGHT) {
       if (pos < len) {
         while (pos < len && !is_break_char(buf[pos]))
           pos++;
@@ -3669,7 +3782,9 @@ char *ny_readline(const char *prompt) {
         moved_cursor = 1;
       }
     } else if (k == K_CTRL_BACKSPACE) {
-      if (!repl_delete_active_selection(buf, &len, &pos, &sel_anchor, &sel_mode) && pos > 0) {
+      if (!repl_delete_active_selection(buf, &len, &pos, &sel_anchor,
+                                        &sel_mode) &&
+          pos > 0) {
         int start = pos;
         pos--;
         while (pos > 0 && isspace((unsigned char)buf[pos - 1]))
@@ -3682,7 +3797,9 @@ char *ny_readline(const char *prompt) {
         len -= klen;
       }
     } else if (k == K_CTRL_DEL) {
-      if (!repl_delete_active_selection(buf, &len, &pos, &sel_anchor, &sel_mode) && pos < len) {
+      if (!repl_delete_active_selection(buf, &len, &pos, &sel_anchor,
+                                        &sel_mode) &&
+          pos < len) {
         int end = pos;
         while (end < len && !is_break_char(buf[end]))
           end++;
@@ -3693,14 +3810,15 @@ char *ny_readline(const char *prompt) {
         memmove(buf + pos, buf + end, len - end + 1);
         len -= klen;
       }
-    } else if (k == K_UP || k == K_CTRL_P || k == K_SHIFT_UP || k == K_CTRL_SHIFT_UP ||
-               k == K_ALT_SHIFT_UP) {
+    } else if (k == K_UP || k == K_CTRL_P || k == K_SHIFT_UP ||
+               k == K_CTRL_SHIFT_UP || k == K_ALT_SHIFT_UP) {
       int cur_r, cur_c;
       calc_cursor(buf, pos, term_cols, prompt_cols, &cur_r, &cur_c);
       if (target_col == -1)
         target_col = cur_c;
       if (cur_r > 0) {
-        pos = visual_to_pos(buf, len, cur_r - 1, target_col, term_cols, prompt_cols);
+        pos = visual_to_pos(buf, len, cur_r - 1, target_col, term_cols,
+                            prompt_cols);
         moved_cursor = 1;
       } else {
         if (ny_hist_len > 0 && hist_idx > 0) {
@@ -3709,7 +3827,8 @@ char *ny_readline(const char *prompt) {
             saved_buf = ny_strdup(buf);
           }
           int next_hist_idx = hist_idx - 1;
-          if (repl_set_buffer_text(&buf, &cap, &len, &pos, ny_hist[next_hist_idx], 256)) {
+          if (repl_set_buffer_text(&buf, &cap, &len, &pos,
+                                   ny_hist[next_hist_idx], 256)) {
             hist_idx = next_hist_idx;
             repl_reset_selection_state(&sel_anchor, &sel_mode);
             prev_lines = 0;
@@ -3718,21 +3837,23 @@ char *ny_readline(const char *prompt) {
           }
         }
       }
-    } else if (k == K_DOWN || k == K_CTRL_N || k == K_SHIFT_DOWN || k == K_CTRL_SHIFT_DOWN ||
-               k == K_ALT_SHIFT_DOWN) {
+    } else if (k == K_DOWN || k == K_CTRL_N || k == K_SHIFT_DOWN ||
+               k == K_CTRL_SHIFT_DOWN || k == K_ALT_SHIFT_DOWN) {
       int cur_r, cur_c, tot_r, tot_c;
       calc_cursor(buf, pos, term_cols, prompt_cols, &cur_r, &cur_c);
       calc_cursor(buf, len, term_cols, prompt_cols, &tot_r, &tot_c);
       if (target_col == -1)
         target_col = cur_c;
       if (cur_r < tot_r) {
-        pos = visual_to_pos(buf, len, cur_r + 1, target_col, term_cols, prompt_cols);
+        pos = visual_to_pos(buf, len, cur_r + 1, target_col, term_cols,
+                            prompt_cols);
         moved_cursor = 1;
       } else {
         if (hist_idx < ny_hist_len) {
           int next_hist_idx = hist_idx + 1;
-          const char *next =
-              next_hist_idx == ny_hist_len ? (saved_buf ? saved_buf : "") : ny_hist[next_hist_idx];
+          const char *next = next_hist_idx == ny_hist_len
+                                 ? (saved_buf ? saved_buf : "")
+                                 : ny_hist[next_hist_idx];
           if (repl_set_buffer_text(&buf, &cap, &len, &pos, next, 256)) {
             hist_idx = next_hist_idx;
             repl_reset_selection_state(&sel_anchor, &sel_mode);
@@ -3754,7 +3875,8 @@ char *ny_readline(const char *prompt) {
           moved_cursor = 1;
         }
       }
-    } else if (k == K_HOME || k == K_CTRL_A || k == K_SHIFT_HOME || k == K_ALT_SHIFT_HOME) {
+    } else if (k == K_HOME || k == K_CTRL_A || k == K_SHIFT_HOME ||
+               k == K_ALT_SHIFT_HOME) {
       int line_start = pos;
       while (line_start > 0 && buf[line_start - 1] != '\n')
         line_start--;
@@ -3766,12 +3888,14 @@ char *ny_readline(const char *prompt) {
       else
         pos = indent_end;
       moved_cursor = (pos != old_pos);
-    } else if (k == K_END || k == K_CTRL_E || k == K_SHIFT_END || k == K_ALT_SHIFT_END) {
+    } else if (k == K_END || k == K_CTRL_E || k == K_SHIFT_END ||
+               k == K_ALT_SHIFT_END) {
       while (pos < len && buf[pos] != '\n')
         pos++;
       moved_cursor = (pos != old_pos);
     } else if (k == K_CTRL_K) {
-      if (!repl_delete_active_selection(buf, &len, &pos, &sel_anchor, &sel_mode)) {
+      if (!repl_delete_active_selection(buf, &len, &pos, &sel_anchor,
+                                        &sel_mode)) {
         int line_end = pos;
         while (line_end < len && buf[line_end] != '\n')
           line_end++;
@@ -3790,7 +3914,8 @@ char *ny_readline(const char *prompt) {
           continue;
       }
     } else if (k == K_CTRL_U) {
-      if (!repl_delete_active_selection(buf, &len, &pos, &sel_anchor, &sel_mode)) {
+      if (!repl_delete_active_selection(buf, &len, &pos, &sel_anchor,
+                                        &sel_mode)) {
         int line_start = pos;
         while (line_start > 0 && buf[line_start - 1] != '\n')
           line_start--;
@@ -3801,7 +3926,8 @@ char *ny_readline(const char *prompt) {
         pos = line_start;
       }
     } else if (k == K_CTRL_W) {
-      if (!repl_delete_active_selection(buf, &len, &pos, &sel_anchor, &sel_mode)) {
+      if (!repl_delete_active_selection(buf, &len, &pos, &sel_anchor,
+                                        &sel_mode)) {
         int start = pos;
         while (start > 0 && isspace((unsigned char)buf[start - 1]))
           start--;
@@ -3839,9 +3965,10 @@ char *ny_readline(const char *prompt) {
         sel_mode = REPL_SEL_NONE;
       }
     } else if (!extend_sel &&
-               (k == K_HOME || k == K_END || k == K_LEFT || k == K_RIGHT || k == K_CTRL_B ||
-                k == K_CTRL_F || k == K_CTRL_LEFT || k == K_CTRL_RIGHT || k == K_ALT_LEFT ||
-                k == K_ALT_RIGHT || k == K_UP || k == K_DOWN || k == K_CTRL_P || k == K_CTRL_N)) {
+               (k == K_HOME || k == K_END || k == K_LEFT || k == K_RIGHT ||
+                k == K_CTRL_B || k == K_CTRL_F || k == K_CTRL_LEFT ||
+                k == K_CTRL_RIGHT || k == K_ALT_LEFT || k == K_ALT_RIGHT ||
+                k == K_UP || k == K_DOWN || k == K_CTRL_P || k == K_CTRL_N)) {
       repl_sel_clear(&sel_anchor);
       sel_mode = REPL_SEL_NONE;
     }

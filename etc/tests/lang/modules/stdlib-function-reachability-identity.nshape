@@ -1,0 +1,20 @@
+shape test_imported_stdlib_function_reachability_keeps_declaration_identity {
+  family "runtime/modules"
+  generator "regression"
+  features ["ny", "test", "stdlib", "reachability", "same-leaf"]
+  template ny-test-case
+  flags_matrix "--nyir-verify --native --run; --nyir-verify --native-backend=llvm --jit --jit-engine=mcjit; --nyir-verify --native-backend=llvm --jit --jit-engine=orc; --nyir-verify --native-only"
+  expect compile_and_run
+  timeout 60
+  source ny <<'NY'
+use core
+use core.str
+
+fn slice_one(str text, int index) str {
+  utf8_slice(text, index, index + 1)
+}
+
+assert(slice_one("aéz", 1) == "é",
+       "a function call reaches the selected free stdlib declaration")
+NY
+}

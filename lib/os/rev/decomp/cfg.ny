@@ -1,21 +1,21 @@
 ;; Keywords: cfg blocks edges dominance loops jump-tables
 ;; Basic-block, jump-table, and control-flow graph recovery.
-module std.os.rev.decomp.cfg *
-use std.core
-use std.core.str as str
-use std.os.disasm as dasm
-use std.os.rev.decomp.elf
-use std.os.rev.decomp.collections (_list_has, _append_unique, _append_all_unique)
-use std.os.rev.decomp.cfg_sets (_set_intersection, _same_set, _list_without, _set_difference)
-use std.os.rev.decomp.bytes (_u32, _u64)
-use std.os.rev.decomp.symbols (_slice_symbol_aliases)
+module core.os.rev.decomp.cfg *
+use core
+use core.str as str
+use core.os.disasm as dasm
+use core.os.rev.decomp.elf
+use core.os.rev.decomp.collections (_list_has, _append_unique, _append_all_unique)
+use core.os.rev.decomp.cfg_sets (_set_intersection, _same_set, _list_without, _set_difference)
+use core.os.rev.decomp.bytes (_u32, _u64)
+use core.os.rev.decomp.symbols (_slice_symbol_aliases)
 
 fn _cfg_arch(dict bin) str {
    bin.get("header", dict()).get("machine", "unknown")
 }
 
-fn _row_target(str arch_name, list row) int {
-   dasm.target_address(row, arch_name)
+fn _row_target(str arch_name, int row_base, str operands) int {
+   dasm.target_address(operands, arch_name, row_base)
 }
 
 fn _rip_memory_target(list row) int {
@@ -92,7 +92,7 @@ fn _block_leaders(list rows, str a) dict {
       def r = rows[i]
       def k = dasm.instruction_kind(a, r[1])
       if k == "branch" {
-         def t = str.find(r[2], "[") >= 0 ? 0 : _row_target(a, r)
+         def t = str.find(r[2], "[") >= 0 ? 0 : _row_target(a, int(r[0]), r[2])
          if t != 0 && idx.contains(to_str(t)) { leaders = leaders.set(to_str(t), true) }
          if i + 1 < rows.len { leaders = leaders.set(to_str(int(rows[i + 1][0])), true) }
       } elif k == "call" || k == "syscall" {
@@ -377,7 +377,7 @@ fn _cfg_from_blocks(dict bin, list blocks) dict {
          def m = last[1]
          def k = dasm.instruction_kind(a, m)
          def cond = dasm.branch_condition(a, m)
-         def t = str.find(last[2], "[") >= 0 ? 0 : _row_target(a, last)
+         def t = str.find(last[2], "[") >= 0 ? 0 : _row_target(a, int(last[0]), last[2])
          if k == "call" && t != 0 {
             edges = _edge_unique(edges, {"from": b.get("addr", 0), "to": t, "kind": "call"})
          } elif k == "branch" && t != 0 {

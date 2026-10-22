@@ -1,0 +1,22 @@
+shape server_handler_composes_callback_effects {
+  family "typing/effects"
+  generator "regression"
+  features ["ny" "test" "typing" "effects" "higher-order" "callback" "server"]
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_fail
+  expect_message "declared @effects(io|alloc) but inferred effects=io|alloc|thread|read|write"
+  source ny <<'NY'
+use core
+use core.os.net.server as server
+use core.os.thread as thread
+
+@effects(io, alloc)
+fn check_handler(int fd) dict {
+  server.handle_client(fd, fn(req) {
+    thread.thread_spawn(fn() { req })
+  })
+}
+
+check_handler(0)
+NY
+}

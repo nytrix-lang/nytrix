@@ -1,11 +1,11 @@
 ;; Keywords: editor diff changes compare lines os ui render viewer text
 ;; Diff view helpers for comparing editor buffers and rendering changed lines.
 ;; References:
-;; - std.os.ui.render.viewer.editor.core
-module std.os.ui.render.viewer.editor.diff(side_by_side)
-use std.core
-use std.core.str as str
-use std.math (max, min)
+;; - core.os.ui.render.viewer.editor.core
+module core.os.ui.render.viewer.editor.diff(side_by_side)
+use core
+use core.str as str
+use core.math (max, min)
 
 fn _clean(str s) str {
    str.str_replace(str.str_replace(s, "\r\n", "\n"), "\t", "   ")

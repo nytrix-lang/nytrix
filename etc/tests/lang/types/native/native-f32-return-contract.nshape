@@ -1,0 +1,24 @@
+shape native_f32_return_contract {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle types f32 scalar-class return-boundary]
+  template ny-test-case
+  flags "-O2 --native-backend x86_64 --native-result-oracle=4 --nyir-pass-stats"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+fn lit32() f32 { 1.5 }
+fn local32() f32 {
+  mut x = 2.5
+  x
+}
+fn promote32(n) f32 { n }
+fn narrow64() f32 { lit32() * 2.0 }
+mut ok = 0
+if to_str(lit32()) == "1.5" { ok += 1 }
+if to_str(local32()) == "2.5" { ok += 1 }
+if to_str(promote32(7)) == "7" { ok += 1 }
+if to_str(narrow64()) == "3" { ok += 1 }
+ok
+NY
+}

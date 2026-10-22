@@ -1,0 +1,32 @@
+shape math_runtime_effect_contracts_are_known {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "math"]
+  template ny-test-case
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.math.nt (Z)
+use core.math.ring (PolynomialRing, is_poly_ring, is_poly_elem)
+
+@effects(alloc)
+fn make_integer(int value) bigint { Z(value) }
+
+@effects(alloc)
+fn make_ring() poly_ring { PolynomialRing("ZZ", "x") }
+
+@effects(read)
+fn is_ring(any value) bool { is_poly_ring(value) }
+
+@effects(read)
+fn is_element(any value) bool { is_poly_elem(value) }
+
+def bigint value = make_integer(42)
+def poly_ring ring = make_ring()
+assert(value != nil, "integer constructor contract")
+assert(is_ring(ring), "ring predicate contract")
+assert(!is_element(ring), "element predicate contract")
+print("ok math runtime effect contracts are known")
+NY
+}

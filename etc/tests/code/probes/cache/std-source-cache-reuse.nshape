@@ -1,0 +1,77 @@
+shape std_source_cache_reuse {
+  family "probe/cache"
+  generator "embedded"
+  features ["stdlib", "source-cache", "path-identity"]
+  template ny-test-case
+  flags "--native-only"
+  timeout 180
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.fs as fs
+use core.os.subprocess (run_capture)
+use core.str as str
+
+def ny = env("NYTRIX_NY_FULL_BIN")
+def cmake = env("NYTRIX_CMAKE_COMMAND")
+assert(is_str(ny) && ny.len > 0, "test runner exports the full compiler")
+assert(is_str(cmake) && cmake.len > 0, "CMake exposes its executable path")
+
+def test_dir = temp_dir() + "/std-source-cache-reuse-" + to_str(pid())
+def source = "use core\nprint(\"std-cache-reuse\")\n"
+def first_source = test_dir + "/first.ny"
+def second_source = test_dir + "/second.ny"
+def cache_dir = test_dir + "/cache"
+def xdg_cache = test_dir + "/xdg"
+def make_dir = run_capture([cmake, "-E", "make_directory", test_dir], [], nil, false)
+assert(make_dir.get("code", 127) == 0, "create isolated stdlib cache directory")
+assert(is_ok(file_write(first_source, source)) &&
+       is_ok(file_write(second_source, source)),
+       "write same source under distinct pathnames")
+
+fn run_from_source(str source_path) dict {
+   run_capture(
+      [cmake, "-E", "env",
+       "--unset=NYTRIX_STD_PREBUILT",
+       "--unset=NYTRIX_BUILD_STD_PATH",
+       "--unset=NYTRIX_STD_PATH",
+       "--unset=NYTRIX_CORE_PATH",
+       "NYTRIX_STD_CACHE=1",
+       "NYTRIX_STD_BC_CACHE_AUTO=0",
+       "NYTRIX_CACHE_DIR=" + cache_dir,
+       "XDG_CACHE_HOME=" + xdg_cache,
+       ny, "--no-progress", source_path],
+      [], nil, false)
+}
+
+fn cache_entry_count(str dir) int {
+   mut count = 0
+   for entry in fs.list_dir(dir) {
+      if str.find(entry, "ny_std_cache_") == 0 &&
+         str.endswith(entry, ".ny") {
+         count += 1
+      }
+   }
+   count
+}
+
+def first = run_from_source(first_source)
+assert(first.get("code", 127) == 0 &&
+       first.get("stdout", "") == "std-cache-reuse\n",
+       "first program compiles and runs against stdlib source")
+def first_count = cache_entry_count(cache_dir + "/std-src")
+assert(first_count > 0, "first compile writes a standard source cache entry")
+
+def second = run_from_source(second_source)
+assert(second.get("code", 127) == 0 &&
+       second.get("stdout", "") == "std-cache-reuse\n",
+       "second program runs using the reusable standard source cache")
+def second_count = cache_entry_count(cache_dir + "/std-src")
+assert(second_count == first_count,
+       "source pathname does not create duplicate standard source entries")
+
+def cleanup = run_capture([cmake, "-E", "rm", "-rf", test_dir], [], nil, false)
+assert(cleanup.get("code", 127) == 0, "remove isolated stdlib cache directory")
+print("STD_SOURCE_CACHE_REUSE_OK")
+NY
+}

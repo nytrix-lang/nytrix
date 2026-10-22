@@ -1,0 +1,17 @@
+shape no_std_imported_module_qualified_call_keeps_its_target {
+  family "runtime/modules/use"
+  generator "regression"
+  features ["ny", "test", "modules", "qualified-call", "no-stdlib"]
+  template ny-test-case
+  flags_matrix "-no-std --native --run; -no-std --native-backend=llvm --jit --jit-engine=mcjit; -no-std --native-backend=llvm --jit --jit-engine=orc; -no-std --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use "./no-stdlib-provider.ny" as provider
+
+assert(provider.math.add(20, 22) == 42,
+       "no-stdlib imported module calls retain their target")
+def add_callback = provider.math.add
+assert(add_callback(19, 23) == 42,
+       "no-stdlib imported module function values retain their target")
+NY
+}

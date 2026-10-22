@@ -6,9 +6,9 @@
 ;; - https://www.w3.org/Graphics/JPEG/itu-t81.pdf
 ;; - https://www.youtube.com/playlist?list=PLzH6n4zXuckoAod3z31QEST1ZaizBuNHh
 ;; References:
-;; - std.math.parse.img
-;; - std.math.parse
-module std.math.parse.img.jpeg(encode, decode)
+;; - core.math.parse.img
+;; - core.math.parse
+module core.math.parse.img.jpeg(encode, decode)
 #include <turbojpeg.h>
 extern "turbojpeg" {
    fn tjInitDecompress() ptr
@@ -21,12 +21,12 @@ extern "turbojpeg" {
    fn _tj_destroy(ptr tj) i32 as "tjDestroy"
 }
 
-use std.core
-use std.core.dict_mod
-use std.math
-use std.math.bin as pbin
-use std.core.str as str
-use std.core.common as common
+use core
+use core.dict_mod
+use core.math
+use core.math.bin as pbin
+use core.str as str
+use core.common as common
 
 def _QY = [16, 11, 10, 16, 24, 40, 51, 61, 12, 12, 14, 19, 26, 58, 60, 55, 14, 13, 16, 24, 40, 57, 69, 56, 14, 17, 22, 29, 51, 87, 80, 62, 18, 22, 37, 56, 68, 109, 103, 77, 24, 35, 55, 64, 81, 104, 113, 92, 49, 64, 78, 87, 103, 121, 120, 101, 72, 92, 95, 98, 112, 100, 103, 99]
 def _QC = [17, 18, 24, 47, 99, 99, 99, 99, 18, 21, 26, 66, 99, 99, 99, 99, 24, 26, 56, 99, 99, 99, 99, 99, 47, 66, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99, 99]
@@ -1364,7 +1364,8 @@ fn _fdct(list blk, list qn) list {
          while yC < 8 {
             mut xC = 0
             while xC < 8 {
-               def pV = blk.get((yC * 8 + xC)) * 1.0
+               def int sample_index = yC * 8 + xC
+               def pV = float(blk.get(sample_index))
                def a1 = ((2.0 * xC + 1.0) * uL * 3.141592653589793) / 16.0
                def a2 = ((2.0 * yC + 1.0) * vL * 3.141592653589793) / 16.0
                def term = pV * cos(a1) * cos(a2)
@@ -1374,7 +1375,8 @@ fn _fdct(list blk, list qn) list {
             yC += 1
          }
          def cu, cv = (uL == 0) ? 0.707106 : 1.0, (vL == 0) ? 0.707106 : 1.0
-         def qv = qn.get((vL * 8 + uL)) * 1.0
+         def int quant_index = vL * 8 + uL
+         def qv = float(qn.get(quant_index))
          def qv_safe = (qv == 0.0) ? 1.0 : qv
          def resF = (0.25 * cu * cv * sA) / qv_safe
          def ri = resF >= 0.0 ? (resF + 0.5) : (resF - 0.5)

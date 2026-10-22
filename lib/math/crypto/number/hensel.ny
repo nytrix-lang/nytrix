@@ -2,11 +2,11 @@
 ;; Crypto number-theory routines for Hensel lifting over modular polynomial roots.
 ;; Polynomials are coefficient lists in ascending order: c0 + c1*x + c2*x^2 + ...
 ;; References:
-;; - std.math.crypto.number
-;; - std.math.crypto
-module std.math.crypto.number.hensel(poly_eval_mod, hensel_lift_linear, hensel_roots)
-use std.core
-use std.math.nt
+;; - core.math.crypto.number
+;; - core.math.crypto
+module core.math.crypto.number.hensel(poly_eval_mod, hensel_lift_linear, hensel_roots)
+use core
+use core.math.nt
 
 fn poly_eval_mod(list poly, any x, any m) any {
    "Evaluate a coefficient-list polynomial at x modulo m."

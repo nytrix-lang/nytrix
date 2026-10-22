@@ -1,0 +1,26 @@
+shape list_length_fact_survives_copy_on_write_append {
+  family "runtime/values"
+  generator "program"
+  features ["runtime", "list", "length", "copy-on-write", "regression"]
+  template ny-test-case
+  flags_matrix "--color=never; --native-only --color=never; -O3 --color=never; --native-only -O3 --color=never"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+mut xs = []
+mut i = 0
+while i < 4 {
+   xs = append(xs, i)
+   i += 1
+}
+assert(xs.len() == 4, "append length after carrier copy")
+
+def alias = xs
+alias = append(alias, 40)
+assert(alias.len() == 5, "appended copy length")
+assert(alias[4] == 40, "appended copy contains the new element")
+assert(xs.len() == 4, "copy-on-write preserves the source length")
+assert(xs[3] == 3, "copy-on-write preserves the source elements")
+NY
+}

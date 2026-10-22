@@ -1,181 +1,58 @@
-<!-- nytrix-doc: {"audience":"user","featured":true,"group":"learn","order":40,"summary":"Build, inspect, and troubleshoot native Nytrix programs across supported targets."} -->
-# Native
+<!-- nytrix-doc: {"audience":"user","featured":true,"group":"learn","order":40,"summary":"Declare native layouts and calls, then verify ABI, ownership, and target support."} -->
+# Native interfaces
 
-Native interop uses layouts, externs, pointers, handles, ownership rules, and
-small boundary checks.
+Treat every native declaration as a boundary with an ABI, lifetime, and error
+contract. Native execution is a separate compiler route; it does not make an
+unsupported signature portable.
 
-Keep native wrappers explicit. A wrapper states the ABI shape, error shape, and
-ownership shape close to the declaration that crosses the boundary.
+## Choose a declaration form
 
-Native execution does not change Nytrix semantics. On supported hosts,
-`-run` and `-o` select the owned native object encoder by default; choose
-`--native-only` to require the native path from lowering through execution.
-If a feature is not supported on the selected native path, the compiler reports
-that boundary instead of silently choosing a different mode.
-
-## Boundary contract
-
-Identify the native contract before writing Nytrix declarations:
-
-| Question | Why |
+| Need | Form |
 | --- | --- |
-| What library owns the symbol? | Selects the extern block library string. |
-| What is the ABI type? | Determines layout fields, pointer type, or handle. |
-| Who owns returned memory? | Determines cleanup. |
-| Is text null-terminated or length-based? | Determines string/byte conversion. |
-| Can the call fail? | Determines result/error handling. |
+| Describe a fixed native field layout | `layout` |
+| Declare a known function symbol | `extern` |
+| Import declarations from a C header | `#include` |
+| Explore a symbol dynamically | `core.os.ffi` |
 
-## Layouts
+Prefer `extern`, `#include`, and `layout` when the compiler can know the ABI
+shape. Use dynamic FFI for experiments or APIs whose function signatures are
+not statically available.
 
-```ny
-layout Pixel {
-   u8 r,
-   u8 g,
-   u8 b,
-   u8 a
-}
-```
-
-Field order matches the native ABI.
-
-For field access in compiled code, use `layout` and the layout helpers. Dynamic
-`CStruct` descriptors are convenient while exploring a header, but they resolve
-fields through runtime descriptor lookups.
-
-## Externs
-
-```ny
-extern "library" {
-   fn native_call(int value) int
-}
-
-extern {
-   fn process_symbol(handle h) int
-}
-```
-
-Use `extern "library"` when Nytrix should link or load a library. Use bare
-`extern` for symbols already available from the current process. `extern ""`
-means the same thing, but the bare form is easier to read.
-
-Prefer `extern`, `#include`, and `layout` for code that should behave like
-native code. The dynamic `std.os.ffi` helpers are useful for quick symbol
-experiments, but compiled declarations give the compiler the ABI shape.
-
-## Header imports
-
-Use `#include` when the C header already describes constants, macros, enum
-values, layouts, or function declarations:
-
-```ny
+```text
+layout Pixel { u8 r, u8 g, u8 b, u8 a }
+extern "library" { fn native_call(int value) int }
 #include <stdlib.h> as "c"
-#include "./my_header.h"
 ```
 
-An explicit namespace alias keeps a header under that namespace. An unaliased
-import exposes non-conflicting names directly and does not create a hidden
-namespace. Existing Nytrix names remain authoritative on collisions; use an
-explicit namespace alias when both declarations are needed.
+## Check the boundary
 
-Imported C typedef structs become layouts:
+Before calling native code, establish:
 
-```ny
-#include <sys/time.h> as ""
+- the library or process that owns the symbol;
+- the calling convention and argument/return layout;
+- whether pointers are borrowed, consumed, or returned-owned;
+- whether text is UTF-8, null-terminated, or passed with an explicit length;
+- how failure is reported and who releases resources.
 
-mut timeval tv = timeval(0, 0)
-gettimeofday(&tv, NULL)
-```
+Use `handle` for opaque native resources and pointers only when the API exposes
+an address. Do not assume the garbage collector releases native resources.
+Wrap ownership and error handling close to the foreign declaration.
 
-`NULL` is accepted as the C null pointer spelling and has the same value as
-`nil`/`0` at the native boundary.
+## Select and test the route
 
-## Pointers and handles
+`ny -run` and `ny -o` build a native executable. `--native-only` requires the
+NYIR/native path and reports unsupported shapes rather than falling back through
+LLVM. Target, aggregate ABI, and C frontend coverage vary; check the
+[Native specification](../spec/native.md) for the exact boundary.
 
-Pointers model addresses. Handles model opaque scalar resources. A handle is
-pointer-addressable only when the API documents that conversion.
+Test a small caller/callee pair on the actual target and flags. Include the
+layout or scalar arguments, the return value, and one failure or cleanup path.
+Do not infer support for one ABI from a passing test on another.
 
-## Text and bytes
+## Debugging
 
-Native string APIs vary. Check whether the boundary expects:
-
-- managed Nytrix text
-- UTF-8 bytes
-- a null-terminated C string
-- a pointer plus length
-
-## Ownership contracts
-
-When native code returns owned memory or consumes a handle, write the wrapper
-contract next to the boundary:
-
-```ny
-@returns_owned
-fn allocate_block(){ malloc(64) }
-
-@consumes(p)
-@releases(p)
-fn release_block(p) int {
-   free(p)
-   0
-}
-```
-
-Run ownership checks while developing wrappers:
-
-```bash
-ny --safe-mode wrapper.ny
-```
-
-In safe mode, raw memory operations on compiler-tracked allocations must prove
-their byte range. Scoped buffers make the lifetime explicit:
-
-```ny
-with ptr buf = malloc(16){
-   def int off = 4
-   assert_compile_range(off, 0, 15, "buffer byte offset")
-   store8(buf, 1, off)
-}
-```
-
-## Optimized debugging
-
-Native debug information is best-effort after optimization. Source line/file
-locations remain attached to NYIR diagnostics where available, and emitted
-symbols are intended to stay useful to debuggers and profilers, but an
-optimized binary does not promise one machine instruction per source statement
-or a continuously materialized location for every local variable. Inlining,
-constant folding, scalar replacement, register allocation, and dead-code
-elimination can merge, move, or erase source-level values.
-
-For source-faithful triage, reproduce with a lower optimization level and use
-NYIR/LLVM dumps to correlate the optimized form. Treat a missing optimized local
-or a line that covers several machine instructions as an optimization/debug-info
-limitation unless the unoptimized mapping is also wrong.
-
-## Checks
-
-Native checks verify one boundary at a time:
-
-```ny
-use std.core
-
-layout Pixel {
-   u8 r,
-   u8 g,
-   u8 b,
-   u8 a
-}
-
-assert_eq(sizeof(Pixel), 4, "pixel abi size")
-```
-
-For handles, check creation, one normal operation, and cleanup.
-
-For C headers, regenerate docs or run `ny doc search --symbols name` after the
-import path works. That confirms the names users import from the wrapper.
-
-## Related
-
-- [Native](../spec/native.md) for the exact language boundary.
-- [Runtime](../spec/runtime.md) for ownership and cleanup forms.
-- [Troubleshooting](troubleshooting.md) for native crash triage.
+Optimized code may move or eliminate source variables. If a native failure is
+hard to locate, reproduce with lower optimization and inspect the NYIR and
+native artifacts for the failing boundary. See
+[Execution routes](routes.md), [Testing](testing.md), and
+[Troubleshooting](troubleshooting.md).

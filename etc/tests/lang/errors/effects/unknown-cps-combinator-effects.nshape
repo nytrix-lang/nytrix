@@ -1,0 +1,37 @@
+shape unknown_cps_apply_effects_remain_unknown {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "unknown", "callback", "cps", "apply"]
+  flags_matrix "--effect-require-known"
+  expect compile_fail
+  expect_message "effect policy violation in 'std.project.invoke_apply': effects are unknown"
+  source ny <<'SRC'
+use core.cps as cps
+module std.project(
+  invoke_apply
+)
+
+fn invoke_apply(fnptr computation_of_function, fnptr computation_of_argument) any {
+  cps.cps_run(cps.cps_apply(computation_of_function, computation_of_argument))
+}
+SRC
+}
+
+shape unknown_cps_pipe_effects_remain_unknown {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "unknown", "callback", "cps", "pipe"]
+  flags_matrix "--effect-require-known"
+  expect compile_fail
+  expect_message "effect policy violation in 'std.project.invoke_pipe': effects are unknown"
+  source ny <<'SRC'
+use core.cps as cps
+module std.project(
+  invoke_pipe
+)
+
+fn invoke_pipe(any value, list functions) any {
+  cps.cps_run(cps.cps_pipe(value, functions))
+}
+SRC
+}

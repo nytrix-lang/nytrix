@@ -1,0 +1,31 @@
+shape fixed_clobber_loop_remainder {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle optcheck regalloc fixed-register remainder loop float-compare]
+  template ny-test-case
+  flags_matrix "-O3 --color=never; --native-only -O3 --color=never; --native-only -O2 --color=never"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+;; Keep the loop-carried induction value live across two constant remainders,
+;; then extend its live range through six float comparisons. At O3 this
+;; combines GVN-PRE, LICM, high register pressure, and fixed-register
+;; quotient/remainder lowering.
+mut i = 0
+mut checksum = 0
+while i < 38 {
+   def a = float(i % 37) * 0.5
+   def b = float(i % 41) * 0.5
+   if a < b { checksum += 1 }
+   if a <= b { checksum += 2 }
+   if a > b { checksum += 4 }
+   if a >= b { checksum += 8 }
+   if a == b { checksum += 16 }
+   if a != b { checksum += 32 }
+   i += 1
+}
+assert(checksum == 997, "fixed-register remainder preserves loop-carried values")
+print("checksum=", checksum)
+NY
+}

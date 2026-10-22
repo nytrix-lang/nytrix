@@ -1,0 +1,24 @@
+shape user_range_like_name_keeps_string_element_representation {
+  family "runtime/modules/use"
+  generator "regression"
+  features ["ny", "test", "modules", "identity", "legacy-llvm", "abi"]
+  template ny-test-case
+  flags_matrix "--native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_and_run
+  source ny <<'NY'
+module std.project(
+  range
+)
+
+fn range(int count) list {
+  ["a", "b"]
+}
+
+mut result = ""
+for value in std.project.range(2) {
+  result += value
+}
+assert(result == "ab",
+       "a user function named range returning strings must keep string elements")
+NY
+}

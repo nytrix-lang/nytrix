@@ -1,26 +1,26 @@
 ;; Keywords: editor session files buffers tabs os ui render viewer text
 ;; Editor session state for open files, buffers, and workspace navigation.
 ;; References:
-;; - std.os.ui.render.viewer.editor.core
-module std.os.ui.render.viewer.editor.session(
+;; - core.os.ui.render.viewer.editor.core
+module core.os.ui.render.viewer.editor.session(
    file_kind, read_text, read_buffer, write_text,
    seed_buffers, mark_clean, set_status,
    append_file, open_file, open_or_toggle_project_row, project_entry_for_path,
    set_output_buffer, save, run_current_file, run_text, check_current_file, format_current_file, debug_current_file
 )
 
-use std.core
-use std.core.common as common
-use std.core.str as str
-use std.math (max, min)
-use std.os (file_exists, file_read, file_remove, file_write, pid, ticks)
-use std.os.fs (is_dir)
-use std.os.path as ospath
-use std.os.sys as sys
-use std.os.ui.render.viewer.editor as ed
-use std.os.ui.render.viewer.editor.project as project
-use std.os.ui.render.viewer.editor.runner as runner
-use std.os.ui.render.viewer.editor.tools as tools
+use core
+use core.common as common
+use core.str as str
+use core.math (max, min)
+use core.os (file_exists, file_read, file_remove, file_write, pid, ticks)
+use core.os.fs (is_dir)
+use core.os.path as ospath
+use core.os.sys as sys
+use core.os.ui.render.viewer.editor as ed
+use core.os.ui.render.viewer.editor.project as project
+use core.os.ui.render.viewer.editor.runner as runner
+use core.os.ui.render.viewer.editor.tools as tools
 
 ;; Updates the status and returns the resulting state.
 fn set_status(dict st, str msg) dict {

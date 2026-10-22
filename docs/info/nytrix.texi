@@ -30,6 +30,13 @@ Nytrix uses explicit imports, native output, compile-time source generation,
 and direct C ABI interop. The Markdown docs in @file{docs/spec/} are the
 canonical language reference; this manual is the compact Info entry point.
 
+@strong{Status:} Feature support varies across LLVM, the Nytrix-owned native
+backend, and WebAssembly. Read
+@file{docs/learn/fits.md},
+@file{docs/learn/status.md}, and
+@file{docs/learn/quirks.md} before choosing a backend or relying on a
+partial contract.
+
 @menu
 * Model::      Source units, values, execution, imports.
 * Syntax::     Core source spellings.
@@ -48,7 +55,7 @@ Top-level statements run when a file is executed. @code{module} controls the
 exported surface.
 
 @example
-use std.core
+use core
 
 module sample(add)
 
@@ -181,14 +188,17 @@ strings cross into native lifetime rules.
 
 @table @code
 @item --strict-types
-Keep default compile-time type checks enabled.
-@item --borrow-check --ownership-strict
-Check moves, borrows, releases, and ownership returns.
+Reject selected dynamic type fallbacks while keeping default type checks.
+@item --borrow-check
+Enable advisory borrow and ownership diagnostics.
+@item --ownership-strict
+Promote supported ownership diagnostics to errors; not every lifetime rule is
+complete.
 @item --safe-mode
 Use default type checks plus ownership/borrow checks, RC/RAII cleanup, strict
 effect/alias policy, and raw-memory diagnostics.
 @item --heap=gc
-Use the opt-in runtime collector.
+Enable the optional tracing collector. Ownership and RAII are recommended.
 @end table
 
 Ownership helpers include @code{borrow(x)}, @code{&x}, @code{own(x)},
@@ -204,7 +214,7 @@ threads, atomics, queues, channels, sockets, and process tubes.
 @example
 ny doc search json
 ny doc search --symbols recvuntil
-ny doc get std.math.parse.data.json
+ny doc get core.math.parse.data.json
 ny fmt --check file.ny
 ny fmt --trim --check file.ny
 ny test --pattern name
@@ -224,6 +234,9 @@ language rules.
 @item @file{docs/spec/native.md}
 @item @file{docs/spec/runtime.md}
 @item @file{docs/learn/start.md}
+@item @file{docs/learn/fits.md}
+@item @file{docs/learn/status.md}
+@item @file{docs/learn/quirks.md}
 @item @file{docs/learn/tooling.md}
 @end itemize
 

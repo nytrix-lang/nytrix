@@ -3,11 +3,11 @@
 ;; Reference:
 ;; - https://cacr.uwaterloo.ca/hac/about/chap3.pdf
 ;; References:
-;; - std.math.crypto.dlp
-;; - std.math.crypto
-module std.math.crypto.dlp.clock(clock_identity, clock_add, clock_sub, clock_neg, clock_scalar_mult, clock_on_curve, clock_recover_modulus, clock_baby_step_giant_step, clock_pohlig_hellman)
-use std.core
-use std.math.nt
+;; - core.math.crypto.dlp
+;; - core.math.crypto
+module core.math.crypto.dlp.clock(clock_identity, clock_add, clock_sub, clock_neg, clock_scalar_mult, clock_on_curve, clock_recover_modulus, clock_baby_step_giant_step, clock_pohlig_hellman)
+use core
+use core.math.nt
 
 fn clock_identity() list {
    "Identity point for the clock group."

@@ -1,0 +1,46 @@
+shape nyir_shift_count_mask_jit {
+  family "codegen/ir/nyir"
+  generator "embedded"
+  backend "jit"
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only -O0; --native-only -O3"
+  features ["ny", "test", "nyir", "shift"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+fn shift_right(i64 value, i64 amount) i64 { value >> amount }
+fn shift_left(i64 value, i64 amount) i64 { value << amount }
+
+def word = 0x510e527f
+assert(shift_right(word, 64) == word,
+       "NYIR shifts mask an oversized count to six bits")
+assert(shift_right(word, -1) == 0,
+       "NYIR shifts mask a negative count to six bits")
+assert(shift_right(-8, 65) == -4,
+       "arithmetic right shift preserves the sign after count masking")
+assert(shift_left(word, 64) == word,
+       "left shifts mask an oversized count to six bits")
+assert(shift_left(word, 65) == word * 2,
+       "left shifts retain the nonzero low count bits")
+assert(shift_left(2, -1) == 0,
+       "left shifts mask negative counts without exceeding the word width")
+
+;; Computed counts remain register-resident after CFG inlining. Exercise both
+;; operands through live values rather than only constant-count call sites.
+mut i64 count = 1
+mut i64 power = 2
+while count < 17 {
+  assert(shift_left(3, count) == 3 * power,
+         "variable left shift reads the current count")
+  assert(shift_right(196608, count) == 196608 / power,
+         "variable right shift reads the current count")
+  assert(shift_right(-196608, count) == -196608 / power,
+         "variable arithmetic shift preserves the sign")
+  count += 1
+  power *= 2
+}
+assert(count == 17 && power == 131072,
+       "variable shifts preserve the loop-carried count and power")
+NY
+}

@@ -1,18 +1,22 @@
 <!-- nytrix-doc: {"audience":"user","featured":false,"group":"spec","order":150,"summary":"Branches, loops, pattern cases, exits, and control-flow expressions."} -->
 # Control Flow
 
-Control flow covers conditionals, loops, dispatch, cleanup, and error-control
-forms.
+Use this page for branch, loop, dispatch, and cleanup syntax. See
+[Patterns](patterns.md) for arm matching and [Errors](errors.md) for failure
+behavior.
 
 ## Conditionals
 
-```ny
+```text
 if(cond){ a } else { b }
 if(cond){ a } elif(other){ b } else { c }
 if cond { a } elif other { b } else { c }
 if(def x = value x > 0){ a } else { b }
 def value = if(cond){ a } else { b }
 ```
+
+These are grammar shapes with placeholder names, not a standalone program.
+Use the complete examples below when you want a REPL input.
 
 The parser accepts parenthesized conditions and whitespace-separated
 conditions.
@@ -25,6 +29,7 @@ expression or a nested value-producing `if`.
 Expression-position `if` needs an `else` branch:
 
 ```ny
+def code = 200
 def label = if(code == 200){ "ok" } else { "error" }
 ```
 
@@ -44,7 +49,7 @@ comparison in code that should stay readable under `--strict-types`.
 
 ## Loops
 
-```ny
+```text
 while(cond){ body }
 while(mut i = 0 i < n ++i){ body }
 for item in iterable { body }
@@ -62,6 +67,8 @@ continue
 The `for(init cond update)` loop keeps an explicit counter binding:
 
 ```ny
+use core
+
 mut total = 0
 for(mut i = 0 i < 5 ++i){ total += i }
 assert(total == 10, "counter loop")
@@ -72,10 +79,23 @@ standard-library iterable helpers. The comma form binds the current value first
 and the zero-based index second. The `lo..hi` range expression is inclusive in
 source-level `for` loops.
 
+Parenthesized counter loops use spaces between the initializer, condition, and
+update. Semicolons start comments in Nytrix:
+
+```ny
+use core
+
+mut total = 0
+for (mut i = 0 i < 5 i += 1) { total += i }
+assert(total == 10, "parenthesized counter loop")
+```
+
 The parenthesized `for(index in xs){ ... }` form binds the zero-based index.
 Use it when the body reads `xs[index]`.
 
 ```ny
+use core
+
 mut seen = []
 for ch, i in "test" {
    seen = seen.append(f"{ch}:{i}")
@@ -107,7 +127,7 @@ for i in 1..10 {
 
 See [Patterns](patterns.md#guards-and-clarity) for full arm syntax and guards.
 
-```ny
+```text
 case value {
    literal -> expr
    a, b, c -> expr
@@ -129,7 +149,7 @@ Use `case` in binding position when each selected arm produces a value.
 
 See [Patterns](patterns.md#match-patterns) for full arm syntax and guards.
 
-```ny
+```text
 match value {
    pattern -> expr
    Pattern(value) -> expr
@@ -142,7 +162,7 @@ constructor name and positional payload bindings.
 
 ## Try and catch
 
-```ny
+```text
 try { body } catch err { handler }
 try { body } catch(_) { handler }
 ```
@@ -152,7 +172,7 @@ structured `Result` values instead.
 
 ## Defer
 
-```ny
+```text
 defer { cleanup }
 ```
 
@@ -161,10 +181,18 @@ processes, and native resources. The runtime runs multiple defers in
 last-in-first-out order and also runs them during panic unwinding.
 
 ```ny
-mut order = []
-defer { order = order.append("a") }
-defer { order = order.append("b") }
-assert(order == ["b", "a"], "defers run LIFO at scope exit")
+use core
+
+fn deferred_order() str {
+   mut order = ""
+   if true {
+      defer { order = order + "a" }
+      defer { order = order + "b" }
+   }
+   order
+}
+
+assert(deferred_order() == "ba", "defers run LIFO at scope exit")
 ```
 
 A `defer` runs when its enclosing scope exits, whether by falling through, an
@@ -173,7 +201,7 @@ not run at program end for scopes that never exited normally.
 
 ## Labels and goto
 
-```ny
+```text
 start:
 if(done){ goto end }
 goto start
@@ -191,14 +219,14 @@ loops make the control path harder to see. Prefer `while`, `for`, `break`, and
 
 ## With
 
-```ny
+```text
 with Type name = value { body }
 ```
 
-`with` is a type-first resource binding. The colon separates the resource type
-from the binding name; do not write `with name: Type`. Cleanup runs when the
-body falls through, returns, or unwinds through a panic. `with ptr` scopes raw
-allocations from `malloc`.
+`with` is a type-first resource binding: `with Type name = value`. Do not put a
+colon between the type and name. Cleanup runs when the body falls through,
+returns, or unwinds through a panic. `with ptr` scopes raw allocations from
+`malloc`.
 
 ## Related
 

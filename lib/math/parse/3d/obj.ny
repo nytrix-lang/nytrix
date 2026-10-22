@@ -1,16 +1,16 @@
 ;; Keywords: 3d obj wavefront parse gltf
-;; Wavefront OBJ mesh loading for std.os.ui.render workflows.
+;; Wavefront OBJ mesh loading for core.os.ui.render workflows.
 ;; Reference:
 ;; - https://en.wikipedia.org/wiki/Wavefront_.obj_file
 ;; - https://github.com/syoyo/tinyobjloader-c
 ;; References:
-;; - std.math.parse.3d
-;; - std.math.parse
-module std.math.parse.3d.obj(load_obj, mesh_from_obj, parse_obj_str)
-use std.core
-use std.core.str
-use std.math.vector
-use std.os (file_read)
+;; - core.math.parse.3d
+;; - core.math.parse
+module core.math.parse.3d.obj(load_obj, mesh_from_obj, parse_obj_str)
+use core
+use core.str
+use core.math.vector
+use core.os (file_read)
 
 fn parse_obj_str(str content) dict {
    "Parses an OBJ string and returns { vertices, normals, uvs, faces }."

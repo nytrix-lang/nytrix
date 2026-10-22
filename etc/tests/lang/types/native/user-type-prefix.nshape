@@ -1,0 +1,22 @@
+shape test_user_type_prefix {
+  family "native/typing"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+;; Regression: nominal type names are not ABI classifications.
+struct image {
+   i32 width,
+   i32 height
+}
+
+fn roundtrip(image value) image { value }
+def got = roundtrip(image(3, 4))
+assert(got.width == 3 && got.height == 4,
+   "nominal type beginning with i keeps its aggregate ABI")
+print("USER-TYPE-PREFIX-OK")
+NY
+}

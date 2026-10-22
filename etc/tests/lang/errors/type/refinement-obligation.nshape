@@ -1,0 +1,14 @@
+shape type-refinement-obligation {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "refinement", "obligation"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "refinement obligation failed"
+  source ny <<'NY'
+use core
+
+refine Even = int where (v) { v % 2 == 0 }
+def Even bad = 3
+NY
+}

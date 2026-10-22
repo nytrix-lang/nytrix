@@ -1,0 +1,36 @@
+shape stored_query_predicates_preserve_effect_rows {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "higher-order", "callback", "query", "stored"]
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core.query as query
+
+@effects(read, write, alloc)
+fn pure_query_predicate() any {
+  mut q = query.from([1, 2, 3])
+  def predicate = fn(value) { value > 1 }
+  def filter_step = query.where(predicate)
+  q = query.pipe(q, filter_step)
+  query.run(q)
+}
+
+@effects(read, write, alloc, io)
+fn io_query_predicate() any {
+  mut q = query.from([1, 2, 3])
+  def predicate = fn(value) {
+    print("query predicate ran\n")
+    value > 1
+  }
+  def filter_step = query.where(predicate)
+  q = query.pipe(q, filter_step)
+  query.run(q)
+}
+
+assert(len(pure_query_predicate()) == 2,
+       "pure stored query predicate returns matching rows")
+assert(len(io_query_predicate()) == 2,
+       "IO stored query predicate returns matching rows")
+NY
+}

@@ -1,0 +1,90 @@
+shape captured_callback_rows_union_for_dynamic_indices {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "callback", "capture", "dynamic-index"]
+  template ny-test-case
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_fail
+  expect_message "inferred effects=io|alloc"
+  source ny <<'NY'
+use core
+
+@effects(io)
+fn print_answer() int {
+  print("answer through dynamic callback index\n")
+  42
+}
+
+fn pure_answer() int { 7 }
+
+@effects(alloc, read)
+fn invoke_dynamic_callback(int index) int {
+  def callbacks = [print_answer, pure_answer]
+  def captured = callbacks
+  captured.get(index)()
+}
+
+invoke_dynamic_callback(0)
+NY
+}
+
+shape captured_tuple_callback_rows_union_for_dynamic_get {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "callback", "capture", "dynamic-index", "tuple"]
+  template ny-test-case
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_fail
+  expect_message "inferred effects=io|alloc|read"
+  source ny <<'NY'
+use core
+
+@effects(io)
+fn print_answer() int {
+  print("answer through dynamic tuple callback index\n")
+  42
+}
+
+fn pure_answer() int { 7 }
+
+@effects(alloc, read)
+fn invoke_dynamic_tuple_callback(int index) int {
+  def callbacks = (print_answer, pure_answer)
+  callbacks[index]()
+  callbacks.get(index)()
+}
+
+invoke_dynamic_tuple_callback(0)
+NY
+}
+
+shape dynamic_get_callback_fallback_effects_are_included {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "callback", "dynamic-index", "fallback"]
+  template ny-test-case
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_fail
+  expect_message "inferred effects=io|alloc|read"
+  source ny <<'NY'
+use core
+
+fn pure_answer() int {
+  7
+}
+
+@effects(io)
+fn io_fallback() int {
+  print("fallback")
+  9
+}
+
+@effects(alloc, read)
+fn invoke_with_fallback(int index) int {
+  def callbacks = [pure_answer]
+  callbacks.get(index, io_fallback)()
+}
+
+invoke_with_fallback(0)
+NY
+}

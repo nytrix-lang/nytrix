@@ -1,0 +1,27 @@
+shape inlined_guarded_division {
+  family "compiler/optimizer"
+  generator "embedded"
+  features [inliner guard division trap cfg]
+  template ny-test-case
+  flags_matrix "--native-only -O0 --nyir-verify --color=never; --native-only -O1 --nyir-verify --color=never; --native-only -O2 --nyir-verify --color=never; --native-only -O3 --nyir-verify --color=never; --native --run -O0 --color=never; --native --run -O3 --color=never; --native-backend=llvm --jit --jit-engine=mcjit -O0 --color=never; --native-backend=llvm --jit --jit-engine=mcjit -O3 --color=never"
+  expect compile_and_run
+  timeout 25
+  source ny <<'NY'
+use core
+
+fn guarded_div(int big, int d) int {
+  if d != 0 { big / d } else { 17 }
+}
+
+assert(guarded_div(120000, 0) == 17,
+       "constant zero selects the guarded non-trapping branch")
+
+mut acc = 0
+mut i = 0
+while i < 8 {
+  acc += guarded_div(120000, i - 3)
+  i += 1
+}
+assert(acc == 30017, "guard keeps the zero divisor on the non-trapping branch")
+NY
+}

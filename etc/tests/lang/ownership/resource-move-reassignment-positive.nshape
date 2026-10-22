@@ -1,0 +1,32 @@
+shape ownership_rule_resource_move_reassignment_positive {
+  family "language/ownership"
+  generator "syntax"
+  features ["ownership", "resource", "linear", "move", "positive"]
+  template ny-test-case
+  expect compile_and_run
+  flags "--ownership-strict"
+  source ny <<'NY'
+use core
+
+linear layout File { int fd }
+
+@consumes(file)
+fn close_file(File file) int {
+  forget(file)
+  0
+}
+
+fn replace_file() int {
+  mut File slot = File(3)
+  def File incoming = File(7)
+  close_file(slot)
+  slot = incoming
+  def fd = slot.fd
+  close_file(slot)
+  fd
+}
+
+assert(replace_file() == 7,
+       "a consumed linear slot can receive and consume a moved value")
+NY
+}

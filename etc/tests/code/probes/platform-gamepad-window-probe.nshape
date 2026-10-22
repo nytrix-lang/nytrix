@@ -1,0 +1,31 @@
+shape platform-gamepad-window-probe {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "sys"]
+  ci skip
+  timeout 300
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.ui.window.consts
+use core.os.ui.window as window
+use core.os.ui.window.native as native
+use core.os.ui.window.input.gamepad as gamepad
+use core.os.ui.window.platform as platform
+platform.init_hint(platform.PLATFORM, platform.PLATFORM_NULL)
+def win = window.open_window("gamepad-window-probe", 0, 0, 320, 240, WINDOW_HIDE)
+assert(win && window.id(win) > 0, "probe window opens")
+window.poll_events()
+print("load", gamepad.load_joysticks())
+print("list", gamepad.get_joysticks())
+mut jid = 0
+while jid < 16 {
+   if native.joystick_present(jid) {
+      print("jid", jid, native.get_joystick_name(jid), native.joystick_is_gamepad(jid), native.get_gamepad_name(jid))
+   }
+   jid += 1
+}
+window.close(win)
+NY
+}

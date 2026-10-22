@@ -1,12 +1,12 @@
 ;; Keywords: platform window backend linux x11 common shared os ui input
 ;; Portable X11 utility operations shared by the native Linux window backend.
 ;; References:
-;; - std.os.ui.window.platform.linux.x11
-;; - std.os.ui.window
-;; - std.os.ui.window.consts
-module std.os.ui.window.platform.linux.x11.common(encodeUTF8, encodeUTF8String, decodeUTF8, convertLatin1toUTF8, parseUriList, dup_string)
-use std.core
-use std.core.str as str
+;; - core.os.ui.window.platform.linux.x11
+;; - core.os.ui.window
+;; - core.os.ui.window.consts
+module core.os.ui.window.platform.linux.x11.common(encodeUTF8, encodeUTF8String, decodeUTF8, convertLatin1toUTF8, parseUriList, dup_string)
+use core
+use core.str as str
 
 fn _decode_utf8_offset(int count) int {
    match count {
@@ -100,22 +100,23 @@ fn encodeUTF8String(int codepoint) any {
 fn decodeUTF8(str s, int start=0) list {
    "Decode one UTF-8 sequence and return `[codepoint, next_index]`."
    if !is_str(s) { return [0, start] }
-   if start < 0 { return [0, start] }
+   def int n = __str_len(s)
+   if start < 0 || start >= n { return [0, start] }
    def int first = load8(s, start)
    if first < 0x80 { return [first, from_int(start + 1)] }
    if first < 0xe0 {
-      def int b1 = load8(s, start + 1)
+      def int b1 = start + 1 < n ? load8(s, start + 1) : 0
       return [((first - 0xc0) * 64) + (b1 - 0x80), from_int(start + 2)]
    }
    if first < 0xf0 {
-      def int b1 = load8(s, start + 1)
-      def int b2 = load8(s, start + 2)
+      def int b1 = start + 1 < n ? load8(s, start + 1) : 0
+      def int b2 = start + 2 < n ? load8(s, start + 2) : 0
       return [((first - 0xe0) * 4096) + ((b1 - 0x80) * 64) +
          (b2 - 0x80), from_int(start + 3)]
    }
-   def int b1 = load8(s, start + 1)
-   def int b2 = load8(s, start + 2)
-   def int b3 = load8(s, start + 3)
+   def int b1 = start + 1 < n ? load8(s, start + 1) : 0
+   def int b2 = start + 2 < n ? load8(s, start + 2) : 0
+   def int b3 = start + 3 < n ? load8(s, start + 3) : 0
    [((first - 0xf0) * 262144) + ((b1 - 0x80) * 4096) +
       ((b2 - 0x80) * 64) + (b3 - 0x80), from_int(start + 4)]
 }
@@ -206,5 +207,5 @@ fn _x11_common_test_latin1(list bytes) any {
    assert(convertLatin1toUTF8(latin1) == ("A" + str.chr(233)), "convertLatin1toUTF8")
    def parsed = parseUriList("file:///var/demo/a%20b\r\n#ignored\nfile://host/opt/demo/test")
    assert(parsed.len == 2 && parsed.get(0) == "/var/demo/a b" && parsed.get(1) == "/opt/demo/test" && dup_string("copy") == "copy", "x11 common uri/string")
-   print("✓ std.os.ui.window.platform.linux.x11.common self-test passed")
+   print("✓ core.os.ui.window.platform.linux.x11.common self-test passed")
 }

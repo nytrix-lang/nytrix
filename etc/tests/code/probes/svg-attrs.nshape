@@ -1,0 +1,22 @@
+shape svg_attrs_native_verifier {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "image", "native"]
+  template ny-test-case
+  expect compile_and_run
+  ci optional
+  source ny <<'NY'
+use core
+use core.math.parse.img.svg as svg
+
+def source = "<svg width=\"32\" height=\"24\" viewBox=\"0 0 32 24\"><rect x=\"2\" y=\"3\" width=\"12\" height=\"8\" fill=\"#204060\" stroke=\"#ffffff\" stroke-width=\"2\"/></svg>"
+def img = svg.decode(source)
+assert(is_dict(img), "SVG attribute parser returned an image")
+assert(int(img.get("width", 0)) > 0, "SVG width")
+assert(int(img.get("height", 0)) > 0, "SVG height")
+assert(int(img.get("channels", 0)) == 4, "SVG channels")
+def data = img.get("data", "")
+assert(is_str(data) && data.len == int(img.get("width", 0)) * int(img.get("height", 0)) * 4, "SVG RGBA payload")
+print("svg attribute parser native verifier ok")
+NY
+}

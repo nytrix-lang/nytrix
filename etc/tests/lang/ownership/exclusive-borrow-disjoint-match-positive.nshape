@@ -1,0 +1,24 @@
+shape ownership_exclusive_borrow_disjoint_match_positive {
+  family "runtime/ownership"
+  generator "regression"
+  features ["ownership", "borrow", "exclusive", "match", "positive"]
+  template ny-test-case
+  expect compile_and_run
+  flags "--ownership-strict --nyir-verify"
+  source ny <<'NY'
+use core
+
+fn good(int tag) int {
+  mut list value = [4]
+  def exclusive = &mut value
+  match tag {
+    0 -> exclusive
+    _ -> value.append(5)
+  }
+  return value[0]
+}
+
+assert(good(0) == 4, "exclusive borrow on first arm")
+assert(good(1) == 4, "mutation on disjoint match arm")
+NY
+}

@@ -4,13 +4,13 @@
 ;; - https://en.wikipedia.org/wiki/BMP_file_format
 ;; - https://www.rfc-editor.org/rfc/rfc7854.html
 ;; References:
-;; - std.math.parse.img
-;; - std.math.parse
-module std.math.parse.img.bmp(decode, encode)
-use std.core
-use std.core.dict_mod
-use std.math.simmd as simmd
-use std.os.path as ospath
+;; - core.math.parse.img
+;; - core.math.parse
+module core.math.parse.img.bmp(decode, encode)
+use core
+use core.dict_mod
+use core.math.simmd as simmd
+use core.os.path as ospath
 
 fn _ctz32(int x) int {
    if x == 0 { return 0 }
@@ -109,24 +109,24 @@ fn _bmp_store_row24(any data, any pixels, int src_row, int dst_row, int w) bool 
    def n4 = w / 4
    mut xi = 0
    while xi < n4 {
-      def s, d = src_row + xi * 12, dst_row + xi * 16
-      def p0 = load8(data,s)    | (load8(data,s+1)<<8)  | (load8(data,s+2)<<16)  | 0xFF000000
-      def p1 = load8(data,s+3)  | (load8(data,s+4)<<8)  | (load8(data,s+5)<<16)  | 0xFF000000
-      def p2 = load8(data,s+6)  | (load8(data,s+7)<<8)  | (load8(data,s+8)<<16)  | 0xFF000000
-      def p3 = load8(data,s+9)  | (load8(data,s+10)<<8) | (load8(data,s+11)<<16) | 0xFF000000
-      store32(pixels, _bgr_to_rgba(p0), d)
-      store32(pixels, _bgr_to_rgba(p1), d+4)
-      store32(pixels, _bgr_to_rgba(p2), d+8)
-      store32(pixels, _bgr_to_rgba(p3), d+12)
+      def src_offset, dst_offset = src_row + xi * 12, dst_row + xi * 16
+      def p0 = load8(data, src_offset)    | (load8(data, src_offset+1)<<8)  | (load8(data, src_offset+2)<<16)  | 0xFF000000
+      def p1 = load8(data, src_offset+3)  | (load8(data, src_offset+4)<<8)  | (load8(data, src_offset+5)<<16)  | 0xFF000000
+      def p2 = load8(data, src_offset+6)  | (load8(data, src_offset+7)<<8)  | (load8(data, src_offset+8)<<16)  | 0xFF000000
+      def p3 = load8(data, src_offset+9)  | (load8(data, src_offset+10)<<8) | (load8(data, src_offset+11)<<16) | 0xFF000000
+      store32(pixels, _bgr_to_rgba(p0), dst_offset)
+      store32(pixels, _bgr_to_rgba(p1), dst_offset+4)
+      store32(pixels, _bgr_to_rgba(p2), dst_offset+8)
+      store32(pixels, _bgr_to_rgba(p3), dst_offset+12)
       xi += 1
    }
    mut xr = n4 * 4
    while xr < w {
-      def s, d = src_row + xr * 3, dst_row + xr * 4
-      store8(pixels, load8(data, s+2), d)
-      store8(pixels, load8(data, s+1), d+1)
-      store8(pixels, load8(data, s),   d+2)
-      store8(pixels, 255,               d+3)
+      def src_offset, dst_offset = src_row + xr * 3, dst_row + xr * 4
+      store8(pixels, load8(data, src_offset+2), dst_offset)
+      store8(pixels, load8(data, src_offset+1), dst_offset+1)
+      store8(pixels, load8(data, src_offset),   dst_offset+2)
+      store8(pixels, 255,                       dst_offset+3)
       xr += 1
    }
    true

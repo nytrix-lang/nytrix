@@ -1,20 +1,20 @@
 ;; Keywords: render vulkan gpu font truetype os ui
 ;; Vulkan font atlas upload, glyph cache, and text draw submission.
 ;; References:
-;; - std.os.ui.render.vk
-;; - std.os.ui.render
-;; - std.os.ui.render.matrix
-module std.os.ui.render.vk.font(draw_text_batch, draw_text_runs, draw_text_runs_ptr, draw_text_runs_flat_ptr, draw_text_runs_flat_color_ptr, draw_terminal_line_ptr, __vkr_draw_text, __vkr_draw_text_glyph, _vkr_glyph_get_off, _vkr_glyph_present)
-use std.core
-use std.core.mem
-use std.math.float as fmath
-use std.os.ui.font.truetype as lib_ttf
-use std.os.ui.render.vk.state
-use std.os.ui.render.vk.utils
-use std.os.ui.render.vk.renderer (_check_flush, set_mask, set_unlit, set_ui_material)
-use std.os.ui.render.vk.texture (bind_texture, bindless_sync_texture_slot)
-use std.os.ui.render.vk.draw (_ensure_default_triangle_pipeline)
-use std.os.ui.render (_font_get)
+;; - core.os.ui.render.vk
+;; - core.os.ui.render
+;; - core.os.ui.render.matrix
+module core.os.ui.render.vk.font(draw_text_batch, draw_text_runs, draw_text_runs_ptr, draw_text_runs_flat_ptr, draw_text_runs_flat_color_ptr, draw_terminal_line_ptr, __vkr_draw_text, __vkr_draw_text_glyph, _vkr_glyph_get_off, _vkr_glyph_present)
+use core
+use core.mem
+use core.math.float as fmath
+use core.os.ui.font.truetype as lib_ttf
+use core.os.ui.render.vk.state
+use core.os.ui.render.vk.utils
+use core.os.ui.render.vk.renderer (_check_flush, set_mask, set_unlit, set_ui_material)
+use core.os.ui.render.vk.texture (bind_texture, bindless_sync_texture_slot)
+use core.os.ui.render.vk.draw (_ensure_default_triangle_pipeline)
+use core.os.ui.render (_font_get)
 
 def _TEXT_METRIC_LIMIT = 8192.0
 def _TEXT_COORD_LIMIT = 1048576.0
@@ -455,7 +455,7 @@ fn _vkr_draw_text_runs_flat_inner(list runs, int color_u32, any glyphs_ptr, any 
 @jit
 fn draw_text_batch(int font_id, list lines, any x, any y, any spacing, int color_u32) any {
    "Draws multiple lines of text in a single Nytrix call to minimize interpreter overhead."
-   if !_frame_open { return 0 }
+   if !frame_open() { return 0 }
    def f = _font_get(font_id)
    if !f { return 0 }
    def gptr = f.get("fast_glyphs", 0)
@@ -475,7 +475,7 @@ fn draw_text_batch(int font_id, list lines, any x, any y, any spacing, int color
 @jit
 fn draw_text_runs(int font_id, list runs, int color_u32) any {
    "Draws arbitrary same-font/same-color text runs in one backend text batch."
-   if !_frame_open || !is_list(runs) { return 0 }
+   if !frame_open() || !is_list(runs) { return 0 }
    def n_runs = runs.len
    if n_runs <= 0 { return 0 }
    def f = _font_get(font_id)
@@ -497,7 +497,7 @@ fn draw_text_runs(int font_id, list runs, int color_u32) any {
 @jit
 fn draw_text_runs_ptr(int font_id, list runs, int color_u32, any glyphs_ptr, any ascent, any line_h) any {
    "Draws arbitrary same-font/same-color text runs using a pre-resolved glyph table."
-   if !_frame_open || !is_list(runs) || !glyphs_ptr { return 0 }
+   if !frame_open() || !is_list(runs) || !glyphs_ptr { return 0 }
    def n_runs = runs.len
    if n_runs <= 0 { return 0 }
    def asc = float(ascent)
@@ -525,7 +525,7 @@ fn draw_text_runs_ptr(int font_id, list runs, int color_u32, any glyphs_ptr, any
 @jit
 fn draw_text_runs_flat_ptr(int font_id, list runs, int color_u32, any glyphs_ptr, any ascent, any line_h) any {
    "Draws flat [text,x,y,...] runs using a pre-resolved glyph table."
-   if !_frame_open || !is_list(runs) || !glyphs_ptr { return 0 }
+   if !frame_open() || !is_list(runs) || !glyphs_ptr { return 0 }
    def n = runs.len
    if n < 3 { return 0 }
    _begin_text_batch()
@@ -536,7 +536,7 @@ fn draw_text_runs_flat_ptr(int font_id, list runs, int color_u32, any glyphs_ptr
 @jit
 fn draw_text_runs_flat_color_ptr(int font_id, list runs, any glyphs_ptr, any ascent, any line_h) any {
    "Draws flat [text,x,y,color,...] runs using a pre-resolved glyph table."
-   if !_frame_open || !is_list(runs) || !glyphs_ptr { return 0 }
+   if !frame_open() || !is_list(runs) || !glyphs_ptr { return 0 }
    def n = runs.len
    if n < 4 { return 0 }
    _begin_text_batch()
@@ -686,7 +686,7 @@ fn __vkr_draw_text(int font_id, any text, any x, any y, any color, any glyphs_pt
 }
 
 fn __vkr_draw_text_glyph(any g_ptr, any v, any x, any y, int cp, any color, any tid) any {
-   if !g_ptr || !_frame_open { return 0 }
+   if !g_ptr || !frame_open() { return 0 }
    if !_check_flush(_VKR_VERT_STRIDE * 6) { return 0 }
    mut g_off = _vkr_glyph_get_off(g_ptr, cp)
    if !g_off || load32(g_off, 40) == 0 {
@@ -714,7 +714,7 @@ fn draw_terminal_line_ptr(any line_ptr, int co, f64 px, f64 baseline_y, f64 cw, 
    "Draws a terminal cell line via the packed glyph atlas fast path. Glyphs are
    placed using their own baseline/x-offset metrics ; the cell box is not clipped,
    so overhanging box/block/braille glyphs connect across adjacent cells."
-   if !line_ptr || !glyphs_ptr || !_frame_open || co <= 0 { return 0 }
+   if !line_ptr || !glyphs_ptr || !frame_open() || co <= 0 { return 0 }
    if !_check_flush(co * _VKR_VERT_STRIDE * 6) { return 0 }
    def page0 = load64(glyphs_ptr, 0)
    def missing_glyph = page0 ? ptr_add(page0, 63 * 48) : 0

@@ -1,0 +1,15 @@
+shape test_bigint_literal_overflow {
+  family "native/values"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+def x = 12345678901234567890
+assert(to_str(x) == "12345678901234567890", "large decimal literal preserves digits")
+assert(to_str(x * 2) == "24691357802469135780", "large decimal bigint arithmetic")
+assert(type(x) == "bigint", "large decimal literal has bigint type")
+NY
+}

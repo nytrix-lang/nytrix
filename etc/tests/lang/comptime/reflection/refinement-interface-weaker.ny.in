@@ -1,0 +1,9 @@
+fn accept_positive(portable.Positive value) int { value }
+
+fn weak_guard(int value) int {
+  if value >= 0 {
+    accept_positive(value)
+  } else {
+    0
+  }
+}

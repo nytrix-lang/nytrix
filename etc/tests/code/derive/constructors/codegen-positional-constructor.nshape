@@ -1,0 +1,45 @@
+shape comptime_parameter_field_splice {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "comptime", "reflection", "codegen", "layout"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-only; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.compiler.codegen (new_fields_for)
+layout ParameterSpliceRecord {
+   int left
+   int right = 4
+}
+
+comptime template sum_fields(Layout) {
+   fn ${Layout}_sum_fields(comptime fields(Layout)) int {
+      return left + right
+   }
+}
+
+comptime template reflect_field_identity(Layout) {
+   comptime fields(Layout) as field {
+      emit fn ${Layout}_${field.name}_identity(int left, int right) int {
+         return ${field.name}
+      }
+   }
+}
+
+comptime emit sum_fields(ParameterSpliceRecord)
+comptime emit new_fields_for(ParameterSpliceRecord)
+comptime emit reflect_field_identity(ParameterSpliceRecord)
+
+assert(ParameterSpliceRecord_sum_fields(3) == 7,
+       "field parameter splice preserves typed parameters and defaults")
+assert(ParameterSpliceRecord_left_identity(23, 31) == 23 &&
+       ParameterSpliceRecord_right_identity(23, 31) == 31,
+       "reflected field identifiers splice as scoped expressions")
+def ptr generated = ParameterSpliceRecord_new_fields(3)
+assert(load_layout(generated, "ParameterSpliceRecord", "left") == 3 &&
+       load_layout(generated, "ParameterSpliceRecord", "right") == 4,
+       "typed field-sequence constructor stores defaults and supplied values")
+free(generated)
+NY
+}

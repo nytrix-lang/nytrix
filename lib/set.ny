@@ -1,0 +1,278 @@
+;; Keywords: set hashset core
+;; Set construction, membership, mutation, and set algebra operations.
+;; References:
+;; - core
+module core.set_mod(set, _set_new, add, sub, contains, len, clear, values, is_empty, _set_add, _set_remove, _set_contains, _set_len, _set_values, _set_clear)
+use core
+use core.reflect as core_ref
+
+@inline
+fn _set_hash(any x) int {
+   if is_str(x) {
+      mut h, i = 2166136261, 0
+      def n = x.len
+      while i < n {
+         h = ((h ^ load8(x, i)) * 16777619) & 2147483647
+         i += 1
+      }
+      return h
+   }
+   if is_int(x) { return x }
+   return x
+}
+
+@inline
+fn _set_find_existing_off(set s, any key) int {
+   def cap = load64_i(s, 8)
+   mut i = 0
+   while i < cap {
+      def off = 16 + i * 24
+      if load64_i(s, off + 16) == 1 {
+         if core_ref.eq(load64(s, off), key) { return off }
+      }
+      i += 1
+   }
+   -1
+}
+
+@inline
+@returns_owned
+@consumes(s)
+fn _set_tombstone_at(set s, int off) set {
+   store64(s, 0, off)
+   store64(s, 0, off + 8)
+   store64(s, 2, off + 16)
+   store64_i(s, load64_i(s, 0) - 1, 0)
+   s
+}
+
+@returns_owned
+fn _set_new(int cap) set {
+   if cap < 8 { cap = 8 }
+   cap = _pow2(cap)
+   def p = __malloc(16 + cap * 24)
+   if !p { panic("set malloc failed") }
+   store64(p, __runtime_tag("set"), -8)
+   store64(p, 0, 0)
+   store64(p, cap, 8)
+   mut i = 0
+   while i < cap {
+      def off = 16 + i * 24
+      store64(p, 0, off)
+      store64(p, 0, off + 8)
+      store64(p, 0, off + 16)
+      i += 1
+   }
+   return p
+}
+
+@inline
+@returns_owned
+fn set(int cap=8) set {
+   "Creates a new empty set."
+   return _set_new(cap)
+}
+
+@inline
+@returns_owned
+@consumes(s)
+fn _set_insert(set s, any key) set {
+   def cap = load64_i(s, 8)
+   if is_str(key) && _set_find_existing_off(s, key) >= 0 { return s }
+   def h = _set_hash(key)
+   def mask = cap - 1
+   mut idx = h & mask
+   mut probes = 0
+   while probes < cap {
+      def off = 16 + idx * 24
+      def st = load64_i(s, off + 16)
+      case st {
+         0 -> {
+            store64(s, retain(key), off)
+            store64(s, 1, off + 8)
+            store64(s, 1, off + 16)
+            store64_i(s, load64_i(s, 0) + 1, 0)
+            return s
+         }
+         1 if core_ref.eq(load64(s, off), key) -> { return s }
+         _ -> {}
+      }
+      idx = (idx + 1) & mask
+      probes += 1
+   }
+   return s
+}
+
+@returns_owned
+@consumes(s)
+fn _set_resize(set s, int newcap) set {
+   mut ns = _set_new(newcap)
+   def cap = load64_i(s, 8)
+   mut i = 0
+   while i < cap {
+      def off = 16 + i * 24
+      def st = load64_i(s, off + 16)
+      if st == 1 {
+         ns = _set_insert(ns, load64(s, off))
+      }
+      i += 1
+   }
+   free(s)
+   ns
+}
+
+@inline
+fn _set_has_existing(any s, any key) bool {
+   if !is_set(s) { return false }
+   if is_str(key) { return _set_find_existing_off(s, key) >= 0 }
+   def cap = load64_i(s, 8)
+   def h = _set_hash(key)
+   def mask = cap - 1
+   mut idx = h & mask
+   mut probes = 0
+   while probes < cap {
+      def off = 16 + idx * 24
+      def st = load64_i(s, off + 16)
+      case st {
+         0 -> { return false }
+         1 if core_ref.eq(load64(s, off), key) -> { return true }
+         _ -> {}
+      }
+      idx = (idx + 1) & mask
+      probes += 1
+   }
+   return false
+}
+
+@returns_owned
+@consumes(s)
+fn _set_add(any s, any key) set {
+   if !s { s = _set_new(8) }
+   if !is_set(s) { panic("add on non-set") }
+   if _set_has_existing(s, key) { return s }
+   def count = load64_i(s, 0)
+   def cap = load64_i(s, 8)
+   if count * 10 >= cap * 7 {
+      def ns = _set_resize(s, cap * 2)
+      return _set_insert(ns, key)
+   }
+   return _set_insert(s, key)
+}
+
+@inline
+fn _set_contains(any s, any key) bool { _set_has_existing(s, key) }
+
+@returns_owned
+fn _set_remove(any s, any key) any {
+   if !is_set(s) { return s }
+   if is_str(key) {
+      def off = _set_find_existing_off(s, key)
+      if off >= 0 { return _set_tombstone_at(s, off) }
+      return s
+   }
+   def cap = load64_i(s, 8)
+   def h = _set_hash(key)
+   def mask = cap - 1
+   mut idx = h & mask
+   mut probes = 0
+   while probes < cap {
+      def off = 16 + idx * 24
+      def st = load64_i(s, off + 16)
+      case st {
+         0 -> { return s }
+         1 if core_ref.eq(load64(s, off), key) -> {
+            return _set_tombstone_at(s, off)
+         }
+         _ -> {}
+      }
+      idx = (idx + 1) & mask
+      probes += 1
+   }
+   s
+}
+
+@inline
+fn _set_len(any s) int {
+   if !is_set(s) { return 0 }
+   load64_i(s, 0)
+}
+
+@inline
+fn len(any s) int {
+   "Returns the number of elements in set `s`."
+   _set_len(s)
+}
+
+@inline
+fn is_empty(any s) bool {
+   "Returns true if set `s` has no elements."
+   _set_len(s) == 0
+}
+
+@returns_owned
+fn _set_values(any s) list {
+   if !is_set(s) { return list(0) }
+   def cap = load64_i(s, 8)
+   mut out = list(0)
+   mut i = 0
+   while i < cap {
+      def off = 16 + i * 24
+      def st = load64_i(s, off + 16)
+      if st == 1 {
+         out = out.append(load64(s, off))
+      }
+      i += 1
+   }
+   out
+}
+
+@returns_owned
+fn _set_clear(any s) any {
+   if !is_set(s) { return s }
+   def cap = load64_i(s, 8)
+   mut i = 0
+   while i < cap {
+      def off = 16 + i * 24
+      store64(s, 0, off)
+      store64(s, 0, off + 8)
+      store64(s, 0, off + 16)
+      i += 1
+   }
+   store64_i(s, 0, 0)
+   s
+}
+
+@inline
+@returns_owned
+@consumes(s)
+fn add(any s, any key) set {
+   "Adds `key` to set `s`."
+   return _set_add(s, key)
+}
+
+@inline
+@returns_owned
+fn sub(any s, any key) any {
+   "Removes `key` from set `s`."
+   return _set_remove(s, key)
+}
+
+@inline
+fn contains(any s, any key) bool {
+   "Returns true if `key` is in set `s`."
+   return _set_contains(s, key)
+}
+
+@inline
+@returns_owned
+fn clear(any s) any {
+   "Removes all elements from set `s`."
+   return _set_clear(s)
+}
+
+@inline
+@returns_owned
+fn values(any s) list {
+   "Returns the values of set `s` as a list."
+   return _set_values(s)
+}

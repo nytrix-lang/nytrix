@@ -7,7 +7,7 @@ diagnostics.
 ## Assertions
 
 ```ny
-use std.core
+use core
 
 def condition = true
 def actual = [1, 2]
@@ -23,7 +23,7 @@ messages name the behavior being checked.
 ## Panic
 
 ```ny
-use std.core
+use core
 
 try {
    panic("message")
@@ -51,8 +51,8 @@ the caller has a real fallback, and `panic` when continuing would be wrong.
 ## Structured errors
 
 ```ny
-use std.core
-use std.core.error
+use core
+use core.error
 
 def e = exception(ERR_DIV_ZERO, "division by zero")
 def w = warning(WARN_RUNTIME, "slow fallback")
@@ -74,13 +74,13 @@ language failures. Keep messages compact and practical.
 
 Recommended recoverable shape:
 
-```ny
+```json
 {"ok": false, "code": "invalid_graph", "message": "cycle at node 7", "at": 7}
 ```
 
 Recommended success shape when a tagged result is useful:
 
-```ny
+```json
 {"ok": true, "value": result}
 ```
 
@@ -100,7 +100,7 @@ Callers inspect the success/error shape before using the payload when
 compile-time type checking requires refinement.
 
 ```ny
-use std.core
+use core
 
 def r = ok(42)
 def e = err("missing")

@@ -1,0 +1,31 @@
+shape typed_nominal_local_accepts_dynamic_handle_branch {
+  family "codegen/abi/calls"
+  generator "embedded"
+  features ["ny", "test", "codegen", "abi", "scalar-classes"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only; --native-only --native-backend=x86_64"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+impl BoxedValue {
+   fn get_value(BoxedValue self) int { self.get("value", 0) }
+}
+
+fn make_boxed(int value) BoxedValue {
+   {"value": value}
+}
+
+fn select_boxed(any dynamic_value, bool choose_dynamic, int fallback) int {
+   def BoxedValue selected = choose_dynamic ? dynamic_value : make_boxed(fallback)
+   selected.get_value()
+}
+
+def BoxedValue boxed = make_boxed(41)
+assert(select_boxed(boxed, true, 0) == 41,
+       "tagged dynamic branch converts at the typed nominal local boundary")
+assert(select_boxed(boxed, false, 42) == 42,
+       "aggregate-producing branch remains valid")
+0
+NY
+}

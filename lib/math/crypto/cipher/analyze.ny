@@ -1,23 +1,23 @@
 ;; Keywords: cipher analyze cryptanalysis scoring frequency math crypto analysis
 ;; Cipher analysis helpers for ranking classical cipher candidates without the legacy autocrack API name.
 ;; References:
-;; - std.math.crypto.analysis.worldfreq
-;; - std.math.crypto.cipher
-module std.math.crypto.cipher.analyze(analyze, analyze_best)
-use std.core
-use std.math.bin (hex_is_valid, hex_normalize)
-use std.math.crypto.error
-use std.math.crypto.cipher.caesar
-use std.math.crypto.cipher.affine
-use std.math.crypto.cipher.rail_fence
-use std.math.crypto.cipher.keyboard_shift
-use std.math.crypto.cipher.substitution
-use std.math.crypto.cipher.vigenere
-use std.math.crypto.analysis.worldfreq (
+;; - core.math.crypto.analysis.worldfreq
+;; - core.math.crypto.cipher
+module core.math.crypto.cipher.analyze(analyze, analyze_best)
+use core
+use core.math.bin (hex_is_valid, hex_normalize)
+use core.math.crypto.error
+use core.math.crypto.cipher.caesar
+use core.math.crypto.cipher.affine
+use core.math.crypto.cipher.rail_fence
+use core.math.crypto.cipher.keyboard_shift
+use core.math.crypto.cipher.substitution
+use core.math.crypto.cipher.vigenere
+use core.math.crypto.analysis.worldfreq (
    worldfreq_alpha_upper, worldfreq_word_stats, worldfreq_ngram_score,
 )
 
-use std.math.crypto.encoding.xor
+use core.math.crypto.encoding.xor
 
 @inline
 fn _is_alpha_byte(int c) bool {

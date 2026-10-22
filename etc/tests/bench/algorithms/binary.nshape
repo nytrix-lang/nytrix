@@ -1,0 +1,99 @@
+shape binary {
+  family "perf-real"
+  generator "stress"
+  features ["perf", "c-vs-ny", "checksum"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.time
+def max_depth = 18
+def min_depth = 4
+def rounds = 120000
+;; Binary decision benchmark. It is allocation-free and recursion-free so the
+;; real harness can compare native Ny and C without depending on private data.
+fn branch_mix(int depth, int seed) int {
+   mut int x = seed + depth
+   mut int acc = 1
+   mut int i = 0
+   while i < depth {
+      if (x & 1) == 0 {
+         acc = (acc * 3) + i + depth
+      } else {
+         acc = (acc * 5) - i + depth
+      }
+      x = (x / 2) + acc + i
+      i += 1
+   }
+   acc
+}
+
+def int start = ticks()
+mut int checksum = 0
+mut int d = min_depth
+while d <= max_depth {
+   mut int i = 0
+   mut int local = 0
+   while i < rounds / d {
+      local += branch_mix(d, i)
+      i += 1
+   }
+   checksum += local
+   d += 2
+}
+def int end = ticks()
+print("checksum=", checksum)
+print("elapsed_ns=", end - start)
+NY
+  source c <<'C'
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+
+static int64_t now_ns(void) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0;
+    return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
+}
+
+static int64_t signed_from_bits(uint64_t bits) {
+    if (bits <= INT64_MAX) return (int64_t)bits;
+    return -1 - (int64_t)(UINT64_MAX - bits);
+}
+
+static int64_t branch_mix(int depth, int seed) {
+    uint64_t x = (uint64_t)seed + (uint64_t)depth;
+    uint64_t acc = 1;
+    for (int i = 0; i < depth; i++) {
+        if ((x & 1) == 0) {
+            acc = (acc * UINT64_C(3)) + (uint64_t)i + (uint64_t)depth;
+        } else {
+            acc = (acc * UINT64_C(5)) - (uint64_t)i + (uint64_t)depth;
+        }
+        /* Match Nytrix's wrapping i64 arithmetic and signed division. */
+        int64_t signed_x = signed_from_bits(x);
+        x = (uint64_t)(signed_x / 2) + acc + (uint64_t)i;
+    }
+    return signed_from_bits(acc);
+}
+
+int main(void) {
+    const int min_depth = 4;
+    const int max_depth = 18;
+    const int rounds = 120000;
+    int64_t start = now_ns();
+    uint64_t checksum = 0;
+    for (int d = min_depth; d <= max_depth; d += 2) {
+        uint64_t local = 0;
+        for (int i = 0; i < rounds / d; i++) local += branch_mix(d, i);
+        checksum += local;
+    }
+    int64_t end = now_ns();
+    printf("checksum=%lld\n", (long long)signed_from_bits(checksum));
+    if (end <= start) end = start + 1;
+    printf("elapsed_ns=%lld\n", (long long)(end - start));
+    return 0;
+}
+C
+}

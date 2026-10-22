@@ -1,0 +1,38 @@
+shape euler9_optimized_loop_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 optimized loop checksum register-cache regression]
+  template ny-test-case
+  flags_matrix "-O3 --native-only --native-backend=x86_64"
+  expect compile_and_run
+  expect_stdout "checksum= 31875000"
+  source ny <<'NY'
+fn gcd(int a, int b) int {
+   while b != 0 {
+      def r = a % b
+      a = b
+      b = r
+   }
+   a
+}
+mut result = 0
+mut m = 2
+while 2 * m * (m + 1) <= 1000 {
+   mut n = 1
+   while n < m {
+      def perimeter = 2 * m * (m + n)
+      if ((m - n) & 1) != 0 && 1000 % perimeter == 0 && gcd(m, n) == 1 {
+         def k = 1000 / perimeter
+         def x = (m * m - n * n) * k
+         def y = (2 * m * n) * k
+         def z = (m * m + n * n) * k
+         result = x * y * z
+      }
+      n += 1
+   }
+   m += 1
+}
+assert(result == 31875000, "optimized loop preserves the cached source value")
+print("checksum=", result)
+NY
+}

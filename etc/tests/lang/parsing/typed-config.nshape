@@ -1,0 +1,238 @@
+shape typed_config {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "config", "toml", "schema", "validation"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-only; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.config as config
+
+@effects(all)
+fn test_config_parse_and_defaults() {
+   def spec = config.schema([
+      config.defaulted("host", "str", "localhost"),
+      config.required("port", "int"),
+      config.defaulted("enabled", "bool", true),
+      config.optional("tag", "str")
+   ])
+   def result = config.parse("port = 8080\n", spec)
+   assert(result.get("ok") &&
+          str(result.get("value").get("host")) == "localhost" &&
+          int(result.get("value").get("port")) == 8080 &&
+          result.get("value").get("enabled") &&
+          !result.get("value").contains("tag"),
+          "typed field constructors apply defaults and optionality: " +
+             str(result.get("errors").get(0, {}).get("message", "")))
+}
+
+@effects(all)
+fn test_config_errors() {
+   def spec = config.schema([
+      config.field("port", "int"),
+      config.field("name", "str", false)
+   ])
+   def wrong_type = config.parse("port = \"8080\"\n", spec)
+   assert(!wrong_type.get("ok") &&
+          is_nil(wrong_type.get("value")) &&
+          str(wrong_type.get("errors").get(0).get("code")) ==
+             "E_CONFIG_TYPE",
+          "typed config rejects wrong types without partial values")
+   def missing = config.parse("name = \"test\"\n", spec)
+   assert(!missing.get("ok") &&
+          str(missing.get("errors").get(0).get("code")) ==
+             "E_CONFIG_MISSING",
+          "typed config rejects missing required fields")
+   def unknown = config.parse("port = 4\nextra = true\n", spec)
+   assert(!unknown.get("ok") &&
+          str(unknown.get("errors").get(0).get("code")) ==
+             "E_CONFIG_UNKNOWN",
+          "typed config rejects unknown fields")
+   def malformed = config.parse("= invalid\n", spec)
+   def syntax_error = malformed.get("errors").get(0)
+   assert(!malformed.get("ok") &&
+          str(syntax_error.get("code")) == "E_CONFIG_SYNTAX" &&
+          int(syntax_error.get("line")) == 1 &&
+          int(syntax_error.get("span").get("start")) == 0,
+          "syntax failures include a source line and byte span")
+   def too_large = config.parse("port = 4\n", spec, 2)
+   assert(!too_large.get("ok") &&
+          str(too_large.get("errors").get(0).get("code")) ==
+             "E_CONFIG_LIMIT",
+          "typed config enforces an input byte limit")
+
+   def malformed_field_schema = {
+      "schema":"nytrix.config", "version":1, "fields":[17],
+      "reject_unknown":true, "errors":[]
+   }
+   def malformed_field_result = config.validate({}, malformed_field_schema)
+   assert(!malformed_field_result.get("ok") &&
+          str(malformed_field_result.get("errors").get(0).get("code")) ==
+             "E_CONFIG_SCHEMA",
+          "forged schema with a non-dict field fails as a structured error")
+   def invalid_field_flag_schema = {
+      "schema":"nytrix.config", "version":1,
+      "fields":[{"name":"port", "type":"int", "required":"yes",
+                  "has_default":false, "default":nil}],
+      "reject_unknown":true, "errors":[]
+   }
+   def invalid_field_flag_result = config.validate({}, invalid_field_flag_schema)
+   assert(!invalid_field_flag_result.get("ok") &&
+          str(invalid_field_flag_result.get("errors").get(0).get("code")) ==
+             "E_CONFIG_SCHEMA",
+          "forged schema with a non-boolean field flag fails closed")
+   def invalid_field_flag_constructed = config.schema([
+      {"name":"port", "type":"int", "required":"yes",
+       "has_default":false, "default":nil}
+   ])
+   assert(invalid_field_flag_constructed.get("errors").len > 0 &&
+          str(invalid_field_flag_constructed.get("errors").get(0).get("code")) ==
+             "E_CONFIG_SCHEMA",
+          "schema construction reports malformed raw field descriptors")
+   def contradictory = config.schema([
+      config.field("value", "int", true, true, 1)
+   ])
+   assert(contradictory.get("errors").len == 1 &&
+          str(contradictory.get("errors").get(0).get("message")) ==
+             "a defaulted field cannot also be required",
+          "schema construction rejects required fields with defaults")
+}
+
+@effects(all)
+fn test_config_round_trip() {
+   def spec = config.schema([
+      config.field("name", "str"),
+      config.field("port", "int"),
+      config.optional("tags", "list")
+   ])
+   def values = {"name":"local\n\"node, two\"", "port":9000,
+                 "tags":["comma,inside", ["nested,comma"],
+                         "quote: \\\"", "slash: \\\\"]}
+   def emitted = config.encode(values, spec)
+   assert(emitted.get("ok") &&
+          str(emitted.get("text")).contains("name = \"local\\n") &&
+          int(config.parse(str(emitted.get("text")), spec)
+                 .get("value").get("port")) == 9000 &&
+          config.parse(str(emitted.get("text")), spec).get("value").get("name") ==
+             values.get("name") &&
+          config.parse(str(emitted.get("text")), spec).get("value").get("tags") ==
+             values.get("tags"),
+          "typed config canonical TOML round-trips escaped strings")
+   def escaped_controls = "a" + chr(8) + chr(9) + chr(10) + chr(12) + chr(13) + "z"
+   def controls_encoded = config.encode(
+      {"name":escaped_controls, "port":9001}, spec)
+   def controls_decoded = config.parse(str(controls_encoded.get("text")), spec)
+   assert(controls_encoded.get("ok") && controls_decoded.get("ok") &&
+          controls_decoded.get("value").get("name") == escaped_controls,
+          "supported TOML control escapes round-trip without being rejected")
+   def malformed_escape = config.parse("name = \"bad\\q\"\nport = 1\n", spec)
+   assert(!malformed_escape.get("ok") &&
+          str(malformed_escape.get("errors").get(0).get("code")) ==
+             "E_CONFIG_SYNTAX",
+          "TOML rejects malformed quoted-string escapes")
+}
+
+@effects(all)
+fn test_config_nested_tables() {
+   def spec = config.schema([
+      config.table("service", [
+         config.required("host", "str"),
+         config.required("port", "int"),
+         config.table("tls", [config.required("enabled", "bool")], false)
+      ]),
+      config.required("name", "str")
+   ])
+   def values = {
+      "service":{"host":"localhost", "port":8080,
+                  "tls":{"enabled":true}},
+      "name":"api"
+   }
+   def emitted = config.encode(values, spec)
+   assert(emitted.get("ok") &&
+          str(emitted.get("text")).contains("[service]") &&
+          str(emitted.get("text")).contains("[service.tls]") &&
+          str(emitted.get("text")).contains("enabled = true"),
+          "nested dictionaries emit as canonical TOML sections; errors=" +
+             str(emitted.get("errors")) + " text=" +
+             str(emitted.get("text")) + " type=" +
+             type(emitted.get("text")))
+   def parsed = config.parse(str(emitted.get("text")), spec)
+   def service = parsed.get("value").get("service")
+   def parse_error = parsed.get("errors").get(0, {})
+   assert(parsed.get("ok") && service.get("host") == "localhost" &&
+          int(service.get("port")) == 8080 &&
+          service.get("tls").get("enabled") &&
+          type(service.get("tls").get("enabled")) == "bool",
+          "nested table output parses back through the typed schema (ok=" +
+             str(parsed.get("ok")) + ", error=" +
+             str(parse_error.get("code", "")) + ":" +
+             str(parse_error.get("path", "")) + ":" +
+             str(parse_error.get("message", "")) + ")")
+
+   def wrong_nested_type = config.validate(
+      {"service":{"host":"localhost", "port":"8080"},
+       "name":"api"}, spec)
+   assert(!wrong_nested_type.get("ok") &&
+          wrong_nested_type.get("errors").len == 1 &&
+          str(wrong_nested_type.get("errors").get(0).get("path")) ==
+             "service.port" &&
+          str(wrong_nested_type.get("errors").get(0).get("code")) ==
+             "E_CONFIG_TYPE",
+          "nested tables validate leaf types and report qualified paths")
+
+   def missing_nested = config.validate(
+      {"service":{"host":"localhost"}, "name":"api"}, spec)
+   assert(!missing_nested.get("ok") &&
+          str(missing_nested.get("errors").get(0).get("path")) ==
+             "service.port",
+          "nested tables enforce required child fields")
+
+   def unknown_nested = config.validate(
+      {"service":{"host":"localhost", "port":8080, "extra":true},
+       "name":"api"}, spec)
+   assert(!unknown_nested.get("ok") &&
+          str(unknown_nested.get("errors").get(0).get("path")) ==
+             "service.extra" &&
+          str(unknown_nested.get("errors").get(0).get("code")) ==
+             "E_CONFIG_UNKNOWN",
+          "nested tables reject unknown child fields with qualified paths")
+
+   def quoted_key_spec = config.schema([
+      config.table("service api", [config.required("tls.mode", "str")])
+   ])
+   def quoted_key_emitted = config.encode(
+      {"service api":{"tls.mode":"strict"}}, quoted_key_spec)
+   def quoted_key_parsed = config.parse(
+      str(quoted_key_emitted.get("text")), quoted_key_spec)
+   assert(quoted_key_emitted.get("ok") && quoted_key_parsed.get("ok") &&
+          quoted_key_parsed.get("value").get("service api").get("tls.mode") ==
+             "strict" &&
+          str(quoted_key_emitted.get("text")).contains("\"tls.mode\" = \"strict\""),
+          "TOML emitter quotes non-bare schema and nested keys")
+
+   def control_text = "prefix" + chr(1) + "suffix"
+   def control_emitted = config.encode(
+      {"service api":{"tls.mode":control_text}}, quoted_key_spec)
+   def control_parsed = config.parse(
+      str(control_emitted.get("text")), quoted_key_spec)
+   assert(control_emitted.get("ok") && control_parsed.get("ok") &&
+          control_parsed.get("value").get("service api").get("tls.mode") ==
+             control_text,
+          "TOML Unicode escapes round-trip control characters")
+   def surrogate_text = "prefix" + chr(55296) + "suffix"
+   def invalid_unicode_emitted = config.encode(
+      {"service api":{"tls.mode":surrogate_text}}, quoted_key_spec)
+   assert(!invalid_unicode_emitted.get("ok") &&
+          str(invalid_unicode_emitted.get("errors").get(0).get("code")) ==
+             "E_CONFIG_VALUE",
+          "TOML emitter rejects surrogate code points in strings")
+}
+
+test_config_parse_and_defaults()
+test_config_errors()
+test_config_round_trip()
+test_config_nested_tables()
+print("✓ typed config tests passed")
+NY
+}

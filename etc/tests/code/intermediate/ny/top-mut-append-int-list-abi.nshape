@@ -1,0 +1,47 @@
+shape top_mut_append_int_list_abi {
+  family "codegen/ir/nyir"
+  generator "embedded"
+  features ["compiler", "runtime", "list", "raw-abi"]
+  template ny-test-case
+  flags_matrix "-O3 --profile=peak --native --run; -O3 --profile=peak --native-backend=llvm --jit --jit-engine=mcjit; -O3 --profile=peak --native-backend=llvm --jit --jit-engine=orc; -O3 --profile=peak --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+def n = 64
+mut values = []
+mut seed = 42
+mut i = 0
+while i < n {
+   seed = (seed * 3877 + 29573) % 139968
+   values = append(values, seed)
+   i += 1
+}
+
+;; Exercise the def/read, ident store, and compound arithmetic sequence that
+;; used to leak one tagged-word interpretation into the accumulator.
+def key = values[10]
+values[3] = key
+assert(values[3] == key,
+   "indexed assignment writes the selected append-built list element")
+mut weighted = 0
+i = 0
+while i < n {
+   weighted += values[i] * (i + 1)
+   i += 1
+}
+assert(weighted == 141053788,
+   "append-built list compound accumulator stays in raw integer ABI")
+
+;; Equality on a promoted typed-buffer index must compare raw integers, not
+;; reinterpret the payloads as tagged dynamic values (raw 5 aliases tagged 2).
+mut list<int> visits = []
+visits = append(visits, 2)
+mut pass_id = 5
+assert(visits[0] != pass_id,
+   "raw indexed integer 2 must not compare equal to raw integer 5")
+pass_id = 2
+assert(visits[0] == pass_id,
+   "raw indexed integer equality must preserve the scalar value")
+NY
+}

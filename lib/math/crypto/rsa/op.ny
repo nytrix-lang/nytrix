@@ -4,11 +4,11 @@
 ;; - https://people.csail.mit.edu/rivest/Rsapaper.pdf
 ;; - https://crypto.stanford.edu/~dabo/pubs/papers/RSA-survey.pdf
 ;; References:
-;; - std.math.crypto.rsa
-;; - std.math.crypto
-module std.math.crypto.rsa.op(rsa_keygen, rsa_gen_keypair, rsa_encrypt, rsa_decrypt, rsa_sign, rsa_verify, compute_phi, compute_d, compute_lambda_factors, rsa_private_exponent_from_factors, rsa_decrypt_with_factors, rsa_decrypt_text_with_factors, is_perfect_square, rsa_decrypt_exponent_chain, rsa_combine_exponent_chain)
-use std.math.nt
-use std.math.bin
+;; - core.math.crypto.rsa
+;; - core.math.crypto
+module core.math.crypto.rsa.op(rsa_keygen, rsa_gen_keypair, rsa_encrypt, rsa_decrypt, rsa_sign, rsa_verify, compute_phi, compute_d, compute_lambda_factors, rsa_private_exponent_from_factors, rsa_decrypt_with_factors, rsa_decrypt_text_with_factors, is_perfect_square, rsa_decrypt_exponent_chain, rsa_combine_exponent_chain)
+use core.math.nt
+use core.math.bin
 
 fn compute_phi(any p, any q) bigint {
    "Compute Euler's totient phi(n) = (p-1)*(q-1) for RSA primes p and q."

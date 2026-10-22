@@ -1,0 +1,24 @@
+shape dict_get_f64_default {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "codegen"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-only; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+mut values = {"present": 3.5}
+def fallback = values.get("missing", values.get("also_missing", -1.5))
+assert(fallback == -1.5,
+       "nested dictionary defaults preserve f64 values through dynamic lookup")
+assert(values.get("present", values.get("missing", -1.5)) == 3.5,
+       "dictionary lookup returns the stored value over a tagged f64 default")
+mut integer_keys = {1: 3.5}
+assert(integer_keys.get(2, -1.5) == -1.5,
+       "integer-key dictionary lookup boxes an f64 fallback")
+def list_fallback = values.get("missing", [1, 2])
+assert(list_fallback.len == 2 && list_fallback[1] == 2,
+       "dictionary lookup preserves a typed-buffer fallback as a dynamic value")
+NY
+}

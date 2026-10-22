@@ -1,0 +1,283 @@
+shape generic_callback_row_substitution_reaches_callers {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "higher-order", "callback", "row"]
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+@effects(io)
+fn print_answer() int {
+  print("answer\n")
+  42
+}
+
+@effects(e)
+fn run_eff(fnptr callback) int {
+  callback()
+}
+
+@effects(e)
+fn run_both(fnptr first, fnptr second) int {
+  def first_result = first()
+  def second_result = second()
+  first_result + second_result
+}
+
+@effects(e)
+fn relay_both(fnptr first, fnptr second) int {
+  def first_alias = first
+  def second_alias = second
+  run_both(first_alias, second_alias)
+}
+
+@effects(io, e)
+fn run_eff_with_direct_io(fnptr callback) int {
+  print("wrapper IO\n")
+  callback()
+}
+
+@effects(e)
+fn run_eff_through_alias(fnptr callback) int {
+  def captured = callback
+  def forwarded = captured
+  return run_eff(forwarded)
+}
+
+fn pure_answer() int {
+  24
+}
+
+@effects(alloc)
+fn allocate_answer() int {
+  def values = [1]
+  values[0]
+}
+
+fn make_io_answer() fnptr {
+  return fn() {
+    print("returned answer\n")
+    44
+  }
+}
+
+fn make_captured_answer(int delta) fnptr {
+  return fn(value) { value + delta }
+}
+
+@effects(e)
+fn run_eff_value(fnptr callback) int {
+  callback(40)
+}
+
+fn make_wrapped_callback(fnptr callback) fnptr {
+  return fn() { callback() }
+}
+
+fn make_aliased_wrapped_callback(fnptr callback) fnptr {
+  def captured = callback
+  def forwarded = captured
+  return fn() { forwarded() }
+}
+
+@effects(none)
+fn invoke_pure() int {
+  run_eff(pure_answer)
+}
+
+@effects(io, alloc)
+fn invoke_both() int {
+  run_both(print_answer, allocate_answer)
+}
+
+@effects(io, alloc)
+fn invoke_both_through_open_rows() int {
+  relay_both(print_answer, allocate_answer)
+}
+
+@effects(none)
+fn invoke_reassigned_pure() int {
+  mut callback = print_answer
+  callback = pure_answer
+  run_eff(callback)
+}
+
+@effects(io)
+fn invoke_positional() int {
+  run_eff(print_answer)
+}
+
+@effects(io)
+fn invoke_direct_io_with_pure_callback() int {
+  run_eff_with_direct_io(pure_answer)
+}
+
+@effects(io)
+fn invoke_named() int {
+  run_eff(callback: print_answer)
+}
+
+@effects(none)
+fn invoke_aliased_row_pure() int {
+  run_eff_through_alias(pure_answer)
+}
+
+@effects(io)
+fn invoke_aliased_row_io() int {
+  run_eff_through_alias(print_answer)
+}
+
+@effects(io)
+fn invoke_alias() int {
+  def callback = print_answer
+  run_eff(callback)
+}
+
+@effects(io)
+fn invoke_reassigned_io() int {
+  mut callback = pure_answer
+  callback = print_answer
+  run_eff(callback)
+}
+
+@effects(none)
+fn invoke_branch_pure(bool select) int {
+  mut callback = pure_answer
+  if select {
+    callback = pure_answer
+  } else {
+    callback = pure_answer
+  }
+  run_eff(callback)
+}
+
+@effects(io)
+fn invoke_branch_mixed(bool select) int {
+  mut callback = pure_answer
+  if select {
+    callback = print_answer
+  } else {
+    callback = pure_answer
+  }
+  run_eff(callback)
+}
+
+@effects(none)
+fn invoke_match_pure(bool select) int {
+  mut callback = print_answer
+  match select {
+    true -> { callback = pure_answer }
+    else { callback = pure_answer }
+  }
+  run_eff(callback)
+}
+
+@effects(io)
+fn invoke_match_mixed(bool select) int {
+  mut callback = pure_answer
+  match select {
+    true -> { callback = print_answer }
+    else { callback = pure_answer }
+  }
+  run_eff(callback)
+}
+
+@effects(io)
+fn invoke_while_mixed(bool update) int {
+  mut callback = pure_answer
+  while update {
+    callback = print_answer
+    break
+  }
+  run_eff(callback)
+}
+
+@effects(io)
+fn invoke_for_mixed() int {
+  mut callback = pure_answer
+  for (mut i = 0 i < 1 i += 1) {
+    callback = print_answer
+  }
+  run_eff(callback)
+}
+
+@effects(alloc, io)
+fn invoke_lambda() int {
+  run_eff(fn() {
+    print("lambda answer\n")
+    43
+  })
+}
+
+@effects(alloc, io)
+fn invoke_returned() int {
+  run_eff(make_io_answer())
+}
+
+@effects(alloc)
+fn invoke_captured_pure_returned() int {
+  run_eff_value(make_captured_answer(2))
+}
+
+@effects(alloc)
+fn invoke_wrapped_pure_callback() int {
+  run_eff(make_wrapped_callback(pure_answer))
+}
+
+@effects(alloc, io)
+fn invoke_wrapped_io_callback() int {
+  run_eff(make_wrapped_callback(print_answer))
+}
+
+@effects(alloc)
+fn invoke_aliased_wrapped_pure_callback() int {
+  run_eff(make_aliased_wrapped_callback(pure_answer))
+}
+
+@effects(alloc, io)
+fn invoke_aliased_wrapped_io_callback() int {
+  run_eff(make_aliased_wrapped_callback(print_answer))
+}
+
+assert(invoke_positional() == 42, "positional callback row substitution")
+assert(invoke_both() == 43,
+       "polymorphic row includes effects from every callback argument")
+assert(invoke_both_through_open_rows() == 43,
+       "open callback row preserves both callback effects through a relay")
+assert(invoke_direct_io_with_pure_callback() == 24,
+       "an open callback row composes with its declared direct IO effect")
+assert(invoke_named() == 42, "named callback row substitution")
+assert(invoke_aliased_row_pure() == 24,
+       "open callback row survives two local aliases")
+assert(invoke_aliased_row_io() == 42,
+       "open callback row carries IO through two local aliases")
+assert(invoke_alias() == 42, "local function alias row substitution")
+assert(invoke_reassigned_io() == 42,
+       "reassignment adds the current callback row")
+assert(invoke_lambda() == 43, "closure callback row substitution")
+assert(invoke_returned() == 44, "returned callback row substitution")
+assert(invoke_captured_pure_returned() == 42,
+       "captured scalar return callback has a known pure row")
+assert(invoke_wrapped_pure_callback() == 24,
+       "returned closure preserves a captured pure callback row")
+; `fnptr` has no statically declared result payload, so this call exercises
+; the captured callback effect without asserting its dynamic return value.
+invoke_aliased_wrapped_io_callback()
+; The two aliased wrappers above exercise effect checking at compile time.
+; Their callback-row declarations are checked during typing.
+assert(invoke_pure() == 24, "pure callback leaves caller row empty")
+assert(invoke_reassigned_pure() == 24,
+       "reassignment removes the prior callback row")
+assert(invoke_branch_pure(true) == 24 && invoke_branch_pure(false) == 24,
+       "branch callback rows merge to pure")
+assert(invoke_branch_mixed(true) == 42 && invoke_branch_mixed(false) == 24,
+       "branch callback rows merge the possible IO effect")
+assert(invoke_match_pure(true) == 24 && invoke_match_pure(false) == 24,
+       "match callback rows merge to pure")
+assert(invoke_match_mixed(true) == 42 && invoke_match_mixed(false) == 24,
+       "match callback rows merge the possible IO effect")
+assert(invoke_while_mixed(true) == 42 && invoke_while_mixed(false) == 24,
+       "while callback rows include zero and repeated iteration paths")
+assert(invoke_for_mixed() == 42,
+       "for callback rows include zero or more iteration paths")
+NY
+}

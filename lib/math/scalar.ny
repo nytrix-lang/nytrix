@@ -1,10 +1,10 @@
 ;; Keywords: scalar elementary-math math
 ;; Scalar numeric operations for common arithmetic, clamping, interpolation, and comparisons.
 ;; References:
-;; - std.math
-module std.math.scalar(PI, E, LN2, LN10, float, int, floor, ceil, round, abs, min, max, clamp, clamp01, pow, sqrt, log, log2, log10, exp, fmod)
-use std.core
-use std.math.float (float, int, floor, ceil, round, abs)
+;; - core.math
+module core.math.scalar(PI, E, LN2, LN10, float, int, floor, ceil, round, abs, min, max, clamp, clamp01, pow, sqrt, log, log2, log10, exp, fmod)
+use core
+use core.math.float (float, int, floor, ceil, round, abs)
 
 def f64 PI   = 3.14159265358979323846
 def f64 E    = 2.71828182845904523536
@@ -52,5 +52,5 @@ fn fmod(any a, any b) f64 { __flt_fmod(float(a), float(b)) }
 
 #main {
    assert(abs(log2(8.0) - 3.0) < 0.000001 && abs(log10(1000.0) - 3.0) < 0.000001, "scalar log intrinsics")
-   print("✓ std.math.scalar self-test passed")
+   print("✓ core.math.scalar self-test passed")
 }

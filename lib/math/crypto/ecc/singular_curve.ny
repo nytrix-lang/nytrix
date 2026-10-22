@@ -5,11 +5,11 @@
 ;; - https://www.secg.org/sec1-v2.pdf
 ;; - https://www.rfc-editor.org/rfc/rfc8032
 ;; References:
-;; - std.math.crypto.ecc
-;; - std.math.crypto
-module std.math.crypto.ecc.singular_curve(detect_singular, singular_curve_dlp)
-use std.math.nt
-use std.math.crypto.ecc
+;; - core.math.crypto.ecc
+;; - core.math.crypto
+module core.math.crypto.ecc.singular_curve(detect_singular, singular_curve_dlp)
+use core.math.nt
+use core.math.crypto.ecc
 
 fn detect_singular(any a, any b, any p) bool {
    "Check whether y^2 = x^3 + ax + b is singular mod p. " +

@@ -3,4 +3,4 @@
 ;; References:
 ;; - https://www.secg.org/sec1-v2.pdf
 ;; - https://www.rfc-editor.org/rfc/rfc8032
-module std.math.crypto.ecc(ecc, ecdsa, elgamal, ecdlp, edwards, invalid_curve, singular_curve, smart_attack, identification, montgomery)
+module core.math.crypto.ecc(ecc, ecdsa, elgamal, ecdlp, edwards, invalid_curve, singular_curve, smart_attack, identification, montgomery)

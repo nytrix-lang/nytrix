@@ -1,0 +1,27 @@
+shape comptime_interpreter_structural_equality {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "test", "comptime"]
+  flags_matrix "--native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+fn ct_nested_equal() bool {
+  def left = [1, [2.5, 3], (4, 5)]
+  def right = [1, [2.5, 3], (4, 5)]
+  return left == right
+}
+
+fn ct_nested_not_equal() bool {
+  def left = [1, [2.5, 3], (4, 5)]
+  def right = [1, [2.5, 4], (4, 5)]
+  return left != right
+}
+
+def equal = comptime { return ct_nested_equal() }
+def not_equal = comptime { return ct_nested_not_equal() }
+assert(equal, "comptime recursively compares list and tuple elements")
+assert(not_equal, "comptime detects a nested sequence mismatch")
+print("COMPTIME_INTERPRETER_STRUCTURAL_EQUALITY_OK")
+NY
+}

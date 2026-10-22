@@ -13,7 +13,11 @@
 #endif
 #ifndef _WIN32
 #include <unistd.h>
+#include <sys/ioctl.h>
 #endif
+
+bool ny_dbg_json_enabled(void);
+void ny_dbg_logv(const char *marker, const char *fmt, va_list ap);
 
 static inline const char *ny_tail_name(const char *name) {
   const char *tail = name ? strrchr(name, '.') : NULL;
@@ -23,6 +27,7 @@ static inline const char *ny_tail_name(const char *name) {
 typedef enum {
   NY_BUILTIN_ALLOC_NONE = 0,
   NY_BUILTIN_ALLOC_MALLOC,
+  NY_BUILTIN_ALLOC_ZALLOC,
   NY_BUILTIN_ALLOC_CALLOC,
   NY_BUILTIN_ALLOC_REALLOC,
   NY_BUILTIN_ALLOC_FREE,
@@ -34,8 +39,10 @@ static inline ny_builtin_alloc_kind_t ny_builtin_alloc_kind(const char *name) {
     return NY_BUILTIN_ALLOC_NONE;
   if (strncmp(leaf, "__", 2) == 0)
     leaf += 2;
-  if (strcmp(leaf, "malloc") == 0 || strcmp(leaf, "zalloc") == 0)
+  if (strcmp(leaf, "malloc") == 0)
     return NY_BUILTIN_ALLOC_MALLOC;
+  if (strcmp(leaf, "zalloc") == 0)
+    return NY_BUILTIN_ALLOC_ZALLOC;
   if (strcmp(leaf, "calloc") == 0)
     return NY_BUILTIN_ALLOC_CALLOC;
   if (strcmp(leaf, "realloc") == 0)
@@ -100,35 +107,191 @@ static inline bool ny_color_mode_value(const char *mode, bool *out) {
   return false;
 }
 
-static inline bool color_enabled(void) {
+static inline bool ny_color_enabled_for_fd(int fd) {
   if (color_mode == 0)
     return false;
   if (color_mode == 1)
     return true;
-  static int enabled = -1;
-  if (enabled != -1)
-    return enabled != 0;
   bool env_color = false;
   if (ny_color_mode_value(getenv("NYTRIX_COLOR"), &env_color) ||
       ny_color_mode_value(getenv("NYTRIX_TOOL_COLOR"), &env_color)) {
-    enabled = env_color ? 1 : 0;
     return env_color;
   }
   if (getenv("NO_COLOR")) {
-    enabled = 0;
     return false;
   }
   if (ny_env_truthy(getenv("CLICOLOR_FORCE")) || ny_env_truthy(getenv("FORCE_COLOR"))) {
-    enabled = 1;
     return true;
   }
   const char *term_program = getenv("TERM_PROGRAM");
   if (term_program && strcmp(term_program, "vscode") == 0) {
-    enabled = 1;
     return true;
   }
-  enabled = isatty(STDOUT_FILENO);
-  return enabled != 0;
+  return isatty(fd) != 0;
+}
+
+static inline bool color_enabled(void) {
+  return ny_color_enabled_for_fd(STDOUT_FILENO);
+}
+
+/*
+ * Shared CLI presentation policy.  Color is controlled separately from
+ * glyphs: Unicode remains the default in redirected logs, while ASCII is an
+ * explicit compatibility mode for terminals and consumers that need it.
+ */
+static inline bool ny_ui_ascii(void) {
+  const char *style = getenv("NYTRIX_GLYPHS");
+  if (!style || !*style)
+    style = getenv("NYTRIX_UI_SYMBOLS");
+  if (!style || !*style)
+    style = getenv("MAKE_ASCII");
+  if (!style || !*style)
+    return false;
+  return strcasecmp(style, "ascii") == 0 || strcasecmp(style, "plain") == 0 ||
+         strcasecmp(style, "fallback") == 0 || strcmp(style, "1") == 0 ||
+         strcasecmp(style, "true") == 0 || strcasecmp(style, "yes") == 0 ||
+         strcasecmp(style, "on") == 0;
+}
+
+static inline const char *ny_ui_glyph(const char *unicode, const char *ascii) {
+  return ny_ui_ascii() ? (ascii ? ascii : "") : (unicode ? unicode : "");
+}
+
+/*
+ * Nerd-font glyph registry for section headers, keyed by short names.  ASCII
+ * mode (NYTRIX_GLYPHS=ascii) collapses every entry to its fallback spelling.
+ */
+static inline const char *ny_ui_icon(const char *name) {
+  if (!name)
+    return ny_ui_glyph("", "");
+  if (strcmp(name, "git") == 0)
+    return ny_ui_glyph("\xe2\x8e\x87", "git");
+  if (strcmp(name, "clock") == 0)
+    return ny_ui_glyph("\xe2\x97\xb7", "o");
+  if (strcmp(name, "todo") == 0)
+    return ny_ui_glyph("\xe2\x98\x91", "[ ]");
+  if (strcmp(name, "palette") == 0)
+    return ny_ui_glyph("\xe2\x97\x90", "#");
+  if (strcmp(name, "file") == 0)
+    return ny_ui_glyph("\xe2\x96\xa5", "f");
+  if (strcmp(name, "build") == 0)
+    return ny_ui_glyph("\xe2\x9a\x99", "==");
+  if (strcmp(name, "check") == 0)
+    return ny_ui_glyph("\xe2\x9c\x94", "v");
+  if (strcmp(name, "play") == 0)
+    return ny_ui_glyph("\xe2\x96\xb6", ">");
+  if (strcmp(name, "search") == 0)
+    return ny_ui_glyph("\xe2\x97\x89", "o");
+  if (strcmp(name, "globe") == 0)
+    return ny_ui_glyph("\xe2\x97\x8e", "*");
+  if (strcmp(name, "wrench") == 0)
+    return ny_ui_glyph("\xe2\x9a\x92", "-");
+  if (strcmp(name, "book") == 0)
+    return ny_ui_glyph("\xe2\x96\xa4", "b");
+  return ny_ui_glyph("", "");
+}
+
+/* Section-title keywords mapped to the icon registry above.  Callers may
+ * always pass an explicit name; this keeps ad-hoc sections themed too. */
+static inline const char *ny_ui_section_icon(const char *title) {
+  if (!title || !*title)
+    return NULL;
+  char lowered[96];
+  size_t i = 0;
+  for (; title[i] && i < sizeof(lowered) - 1; ++i)
+    lowered[i] = (char)((title[i] >= 'A' && title[i] <= 'Z')
+                            ? title[i] + ('a' - 'A')
+                            : title[i]);
+  lowered[i] = '\0';
+  if (strstr(lowered, "git") || strstr(lowered, "repositor"))
+    return "git";
+  if (strstr(lowered, "recent commit") || strstr(lowered, "history") ||
+      strstr(lowered, "timing"))
+    return "clock";
+  if (strstr(lowered, "backlog") || strstr(lowered, "todo"))
+    return "todo";
+  if (strstr(lowered, "source line") || strstr(lowered, "composition"))
+    return "palette";
+  if (strstr(lowered, "largest"))
+    return "file";
+  if (strncmp(lowered, "build", 5) == 0)
+    return "build";
+  if (strncmp(lowered, "check", 5) == 0 || strncmp(lowered, "test", 4) == 0 ||
+      strstr(lowered, "tool") || strstr(lowered, "doctor"))
+    return "check";
+  if (strncmp(lowered, "error", 5) == 0 || strncmp(lowered, "fuzz", 4) == 0)
+    return "flask";
+  if (strncmp(lowered, "run", 3) == 0 || strncmp(lowered, "runtime", 7) == 0 ||
+      strstr(lowered, "replay"))
+    return "play";
+  if (strncmp(lowered, "inspect", 7) == 0 || strstr(lowered, "environment"))
+    return "search";
+  if (strstr(lowered, "toolchain") || strstr(lowered, "override") ||
+      strstr(lowered, "option") || strstr(lowered, "configure"))
+    return "wrench";
+  if (strncmp(lowered, "cross", 5) == 0 || strstr(lowered, "preset") ||
+      strstr(lowered, "parallel"))
+    return "globe";
+  if (strstr(lowered, "help") || strstr(lowered, "docs") ||
+      strstr(lowered, "usage") || strstr(lowered, "example") ||
+      strstr(lowered, "info"))
+    return "book";
+  if (strncmp(lowered, "general", 7) == 0)
+    return "wrench";
+  if (strncmp(lowered, "tooling", 7) == 0)
+    return "search";
+  if (strstr(lowered, "memory") || strstr(lowered, "cache"))
+    return "palette";
+  if (strstr(lowered, "optimization") || strstr(lowered, "build tuning") ||
+      strstr(lowered, "linking"))
+    return "build";
+  if (strncmp(lowered, "execution", 9) == 0 || strstr(lowered, "stdlib") ||
+      strncmp(lowered, "repl", 4) == 0)
+    return "play";
+  if (strstr(lowered, "debugging") || strstr(lowered, "diagnostic"))
+    return "search";
+  return NULL;
+}
+
+static inline const char *ny_ui_mark(const char *kind) {
+  if (!kind)
+    return ny_ui_glyph("•", "*");
+  if (strcmp(kind, "ok") == 0 || strcmp(kind, "success") == 0)
+    return ny_ui_glyph("✓", "OK");
+  if (strcmp(kind, "error") == 0 || strcmp(kind, "fail") == 0)
+    return ny_ui_glyph("✗", "X");
+  if (strcmp(kind, "warn") == 0)
+    return ny_ui_glyph("▲", "!");
+  if (strcmp(kind, "step") == 0)
+    return ny_ui_glyph("›", ">");
+  if (strcmp(kind, "section") == 0 || strcmp(kind, "brand") == 0)
+    return ny_ui_glyph("◆", "*");
+  if (strcmp(kind, "hint") == 0)
+    return ny_ui_glyph("↳", "->");
+  return ny_ui_glyph("•", "*");
+}
+
+static inline int ny_ui_width(void) {
+  int width = 96;
+  const char *columns = getenv("COLUMNS");
+  if (columns && *columns) {
+    char *end = NULL;
+    long parsed = strtol(columns, &end, 10);
+    if (end && *end == '\0' && parsed > 0 && parsed < 10000)
+      width = (int)parsed;
+  }
+#ifndef _WIN32
+  if ((!columns || !*columns) && isatty(STDOUT_FILENO)) {
+    struct winsize ws;
+    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0 && ws.ws_col > 0)
+      width = (int)ws.ws_col;
+  }
+#endif
+  if (width < 40)
+    width = 40;
+  if (width > 112)
+    width = 112;
+  return width;
 }
 
 #define NY_CLR_RESET "\033[0m"
@@ -160,9 +323,16 @@ void ny_progress_stderr_lock(void);
 void ny_progress_stderr_unlock(void);
 
 static inline void ny_log_emit_checked(const char *label, const char *color,
-                                       const char *fmt, ...) {
+                                       const char *event, const char *fmt, ...) {
   if (!fmt || !ny_log_should_emit(fmt))
     return;
+  if (ny_dbg_json_enabled()) {
+    va_list ap;
+    va_start(ap, fmt);
+    ny_dbg_logv(event, fmt, ap);
+    va_end(ap);
+    return;
+  }
   ny_progress_stderr_lock();
   fprintf(stderr, "%s%s%s ", clr(color), label, clr(NY_CLR_RESET));
   va_list ap;
@@ -176,6 +346,13 @@ static inline void ny_log_emit_unchecked(const char *label, const char *color,
                                          const char *fmt, ...) {
   if (!fmt)
     return;
+  if (ny_dbg_json_enabled()) {
+    va_list ap;
+    va_start(ap, fmt);
+    ny_dbg_logv("MESSAGE", fmt, ap);
+    va_end(ap);
+    return;
+  }
   ny_progress_stderr_lock();
   fprintf(stderr, "%s%s%s ", clr(color), label, clr(NY_CLR_RESET));
   va_list ap;
@@ -188,25 +365,25 @@ static inline void ny_log_emit_unchecked(const char *label, const char *color,
 #define NY_LOG_V1(...)                                                                            \
   do {                                                                                             \
     if (verbose_enabled >= 1)                                                                      \
-      ny_log_emit_checked("[*]", NY_CLR_CYAN, __VA_ARGS__);                                      \
+      ny_log_emit_checked(ny_ui_mark("step"), NY_CLR_CYAN, "STEP", __VA_ARGS__);               \
   } while (0)
 
 #define NY_LOG_V2(...)                                                                            \
   do {                                                                                             \
     if (verbose_enabled >= 2)                                                                      \
-      ny_log_emit_checked("[**]", NY_CLR_MAGENTA, __VA_ARGS__);                                  \
+      ny_log_emit_checked(ny_ui_mark("note"), NY_CLR_MAGENTA, "DETAIL", __VA_ARGS__);          \
   } while (0)
 
 #define NY_LOG_V3(...)                                                                            \
   do {                                                                                             \
     if (verbose_enabled >= 3)                                                                      \
-      ny_log_emit_checked("[***]", NY_CLR_YELLOW, __VA_ARGS__);                                  \
+      ny_log_emit_checked(ny_ui_mark("trace"), NY_CLR_GRAY, "TRACE", __VA_ARGS__);             \
   } while (0)
 
 #define NY_LOG_INFO(...) NY_LOG_V1(__VA_ARGS__)
-#define NY_LOG_ERR(...) ny_log_emit_checked("Error:", NY_CLR_RED, __VA_ARGS__)
-#define NY_LOG_WARN(...) ny_log_emit_checked("Warning:", NY_CLR_YELLOW, __VA_ARGS__)
-#define NY_LOG_SUCCESS(...) ny_log_emit_unchecked("Success:", NY_CLR_GREEN, __VA_ARGS__)
+#define NY_LOG_ERR(...) ny_log_emit_checked(ny_ui_mark("error"), NY_CLR_RED, "ERROR", __VA_ARGS__)
+#define NY_LOG_WARN(...) ny_log_emit_checked(ny_ui_mark("warn"), NY_CLR_YELLOW, "WARNING", __VA_ARGS__)
+#define NY_LOG_SUCCESS(...) ny_log_emit_unchecked(ny_ui_mark("success"), NY_CLR_GREEN, __VA_ARGS__)
 
 extern int debug_enabled;
 
@@ -214,7 +391,7 @@ extern int debug_enabled;
 #define NY_LOG_DEBUG(...)                                                                          \
   do {                                                                                             \
     if (debug_enabled)                                                                             \
-      ny_log_emit_unchecked("[DEBUG]", NY_CLR_GRAY, __VA_ARGS__);                                \
+      ny_log_emit_unchecked(ny_ui_mark("hint"), NY_CLR_GRAY, __VA_ARGS__);                       \
   } while (0)
 #else
 #define NY_LOG_DEBUG(...)                                                                          \
@@ -500,7 +677,7 @@ static inline bool ny_arena_alloc_aligned_try(arena_t *a, size_t size,
   arena_push_region(a, r);
   *out = r->data + aligned_off;
   r->off = aligned_off + rounded;
-  memset(*out, 0, rounded);
+  /* arena_region_new() calloced the full region, including this allocation. */
   return true;
 }
 

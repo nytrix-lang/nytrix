@@ -4,14 +4,14 @@
 ;; - https://people.csail.mit.edu/rivest/Rsapaper.pdf
 ;; This exposes the close-prime/small-d regime as a first-class RSA attack.
 ;; References:
-;; - std.math.crypto.rsa
-;; - std.math.crypto
-module std.math.crypto.rsa.cherkaoui_semmouni(cherkaoui_semmouni_attack)
-use std.math.nt
-use std.math.scalar (log, sqrt, pow)
-use std.math.crypto.factorization.fermat
-use std.math.crypto.rsa.wiener
-use std.math.crypto.rsa.op (compute_phi, compute_d)
+;; - core.math.crypto.rsa
+;; - core.math.crypto
+module core.math.crypto.rsa.cherkaoui_semmouni(cherkaoui_semmouni_attack)
+use core.math.nt
+use core.math.scalar (log, sqrt, pow)
+use core.math.crypto.factorization.fermat
+use core.math.crypto.rsa.wiener
+use core.math.crypto.rsa.op (compute_phi, compute_d)
 
 fn _cs_private_from_factors(number e, number p, number q) any {
    def d = compute_d(e, compute_phi(p, q))

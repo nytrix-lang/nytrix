@@ -6,12 +6,12 @@
 ;; - https://cacr.uwaterloo.ca/hac/about/chap3.pdf
 ;; - https://cacr.uwaterloo.ca/hac/about/chap5.pdf
 ;; References:
-;; - std.math.crypto.dlp
-;; - std.math.crypto
-module std.math.crypto.dlp.dlp(multiplicative_order_from_factors, multiplicative_order_factorization, baby_step_giant_step, pohlig_hellman, pohlig_hellman_bounded, ph_prime_power, ph_recombine, pohlig_hellman_prime_power, pohlig_hellman_recombine, pollard_rho_dlp, dlp_brute_force, solve_dlp)
-use std.core
-use std.core.dict_mod
-use std.math.nt
+;; - core.math.crypto.dlp
+;; - core.math.crypto
+module core.math.crypto.dlp.dlp(multiplicative_order_from_factors, multiplicative_order_factorization, baby_step_giant_step, pohlig_hellman, pohlig_hellman_bounded, ph_prime_power, ph_recombine, pohlig_hellman_prime_power, pohlig_hellman_recombine, pollard_rho_dlp, dlp_brute_force, solve_dlp)
+use core
+use core.dict_mod
+use core.math.nt
 
 fn baby_step_giant_step(any g, any h, any p, any order=nil) any {
    "Solve the discrete log g^x = h(mod p) using baby-step giant-step.
@@ -328,5 +328,5 @@ fn solve_dlp(any g, any h, any p, any order=nil) list {
    def rho = pollard_rho_dlp(Z(2), rho_h, Z(383), Z(191))
    assert(rho == Z(77), "pollard rho exact solution")
    assert(power_mod(Z(2), rho, Z(383)) == rho_h, "pollard rho verifies")
-   print("✓ std.math.crypto.dlp.dlp self-test passed")
+   print("✓ core.math.crypto.dlp.dlp self-test passed")
 }

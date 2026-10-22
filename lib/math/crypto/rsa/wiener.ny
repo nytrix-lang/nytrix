@@ -5,15 +5,15 @@
 ;; - https://people.csail.mit.edu/rivest/Rsapaper.pdf
 ;; - https://crypto.stanford.edu/~dabo/pubs/papers/RSA-survey.pdf
 ;; References:
-;; - std.math.crypto.rsa
-;; - std.math.crypto
-module std.math.crypto.rsa.wiener(wiener_attack, wiener_attack_entry, convergents, factorize_from_phi, wiener_lattice_attack, wiener_attack_lattice_entry, wiener_attack_common_prime, wiener_attack_common_prime_entry)
-use std.math.nt
-use std.math.crypto.factorization.known_phi
-use std.math.crypto.lattice.lll
-use std.math.crypto.rsa.common_prime
-use std.math.crypto.rsa.op (compute_phi, compute_d)
-use std.math.matrix
+;; - core.math.crypto.rsa
+;; - core.math.crypto
+module core.math.crypto.rsa.wiener(wiener_attack, wiener_attack_entry, convergents, factorize_from_phi, wiener_lattice_attack, wiener_attack_lattice_entry, wiener_attack_common_prime, wiener_attack_common_prime_entry)
+use core.math.nt
+use core.math.crypto.factorization.known_phi
+use core.math.crypto.lattice.lll
+use core.math.crypto.rsa.common_prime
+use core.math.crypto.rsa.op (compute_phi, compute_d)
+use core.math.matrix
 
 fn convergents(any num, any den) list {
    "Return list of [k, h, k2] convergent triples for num/den.

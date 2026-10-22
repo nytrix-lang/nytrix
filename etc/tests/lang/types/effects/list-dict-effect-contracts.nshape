@@ -1,0 +1,70 @@
+shape typed_list_and_dict_operations_have_effect_contracts {
+  family "typing/effects"
+  generator "regression"
+  features ["ny" "test" "typing" "effects" "containers" "list" "dict"]
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_and_run
+  timeout 180
+  source ny <<'NY'
+use core
+
+@effects(read, write, alloc)
+fn exercise_list(list items) {
+  items.append(3)
+  items.extend([5, 7])
+  items.pop()
+  items.contains(5)
+  items.clear()
+}
+
+@effects(read, write, alloc)
+fn exercise_dict(dict values) {
+  values.set("first", 1)
+  values.put("second", 2)
+  values.contains("first")
+  values.keys()
+  values.values()
+  values.items()
+  values.delete("first")
+  values.clear()
+}
+
+@effects(read, write, alloc)
+fn exercise_sequence_helpers(list items) {
+  sort(items)
+  sorted(items)
+  clone(items)
+  items.reverse()
+  items.drop(1)
+}
+
+@effects(read, write, alloc)
+fn exercise_temporary_containers() {
+  [1].append(2)
+  dict().set("temporary", 3)
+}
+
+@effects(read, alloc)
+fn exercise_read_derived_list_ops(list items) {
+  items.join(",")
+  items.slice(0, 2)
+  items.count()
+  items.first()
+  items.last()
+  items.take(2)
+  items.reverse()
+  items.compact()
+  items.chunk(2)
+  items.windowed(2, 1)
+}
+
+mut items = [1]
+mut values = dict()
+exercise_list(items)
+exercise_dict(values)
+exercise_sequence_helpers(items)
+exercise_temporary_containers()
+exercise_read_derived_list_ops(items)
+0
+NY
+}

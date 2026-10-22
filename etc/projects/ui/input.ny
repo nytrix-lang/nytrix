@@ -2,28 +2,31 @@
 
 ;; Keywords: ui input keyboard gamepad controller example
 ;; Unified input visualizer. Tab switches keyboard/gamepad; active inputs can auto-follow.
-use std.core
-use std.math (max)
-use std.os (ticks)
-use std.os.ui.window.consts
-use std.os.ui.render
-use std.os.ui.render.viewer.runtime as ui_runtime
-use std.os.ui.render.viewer
-use std.os.ui.render.dump as ui_dump
-use std.os.ui.render.viewer.gamepad
-use std.os.ui.render.viewer.input
-use std.os.ui.render.viewer.keyboard
-use std.os.ui.render.viewer.widgets
-use std.os.ui.window
+use core
+use core.os (exit)
+use core.os.fixture as fixture
+use core.math (max)
+use core.os (ticks)
+use core.os.ui.window.consts
+use core.os.ui.render
+use core.os.ui.render.viewer.runtime as ui_runtime
+use core.os.ui.render.viewer
+use core.os.ui.render.dump as ui_dump
+use core.os.ui.render.viewer.gamepad
+use core.os.ui.render.viewer.input
+use core.os.ui.render.viewer.keyboard
+use core.os.ui.render.viewer.widgets as widgets
+use core.os.ui.window
 
 def START_W = 1040
 def START_H = 620
 def START_FLAGS = consts.WINDOW_CENTER | consts.WINDOW_FOCUS_ON_SHOW
 render.apply_backend_env()
 render.apply_backend_argv()
-def win = render.init_window(START_W, START_H, "Nytrix Input", START_FLAGS, false, true, 1)
+mut win = render.init_window(START_W, START_H, "Nytrix Input", START_FLAGS, false, true, 1)
 
 if !win { panic("window init failed") }
+fixture.ready("input")
 window.set_exit_key(win, consts.KEY_NULL)
 def fonts = viewer.FONT_CANDIDATES
 def font_title = render.font_load_first(fonts, 28)
@@ -32,6 +35,8 @@ def font_key = render.font_load_first(fonts, 13)
 viewer.set_font(font_body)
 def auto_dump_delay = ui_dump.auto_dump_delay_frames(8)
 def timeout_limit = ui_runtime.timeout_ns(0)
+def mock_backend = is_dict(win) && !!win.get("_mock", false)
+def fx = fixture.start_ui(ui_dump.auto_dump_enabled() ? auto_dump_delay + 2 : 0, 0, mock_backend)
 mut fps_state = ui_runtime.fps_begin()
 mut active = "keyboard"
 mut last_key = "-"
@@ -84,9 +89,14 @@ fn cached_pad_info(any pad_state, list rows, int jid, str sig) dict {
    pad_info_cache
 }
 
-while !render.window_should_close(win) {
-   gamepad.refresh(false)
+while !render.window_should_close(win) && fixture.tick_ui(fx) {
+   if fixture.quit_key(fixture.next_ui_key(fx)) { break }
    if !render.begin_frame_clear(widgets.C_BG) { continue }
+   if mock_backend {
+      render.draw_text(font_title, "Nytrix Input", 24.0, 24.0, widgets.C_TEXT)
+      render.end_frame()
+      continue
+   }
    def dt = render.get_delta_time()
    fps_state = ui_runtime.fps_tick(fps_state, dt)
    def fps = ui_runtime.fps_current(fps_state, dt)
@@ -126,6 +136,7 @@ while !render.window_should_close(win) {
    ui_dump.auto_dump_pre_frame(auto_dump_done, frame_count, auto_dump_delay)
    render.end_frame()
    frame_count += 1
+   if frame_count >= 4 { gamepad.refresh(false) }
    auto_dump_done = ui_dump.auto_dump_post_frame(win, auto_dump_done, frame_count, auto_dump_delay, "build/cache/fb/ui/input.png")
    ui_runtime.close_on_timeout(win, int(fps_state.get("start", 0)), timeout_limit)
 }
@@ -133,3 +144,4 @@ while !render.window_should_close(win) {
 release_cached_pad()
 ui_runtime.fps_finish("input", fps_state)
 render.close_window()
+exit(fixture.exit_status(fx))

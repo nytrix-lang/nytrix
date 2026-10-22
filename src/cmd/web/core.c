@@ -2,12 +2,21 @@
  * ny-doc core: manual generator, API-reference extraction, Markdown
  * rendering, and website builder shared by `ny doc` and `ny web`.
  */
+#include "base/args.h"
+#include "base/strbuf.h"
 #include "base/util.h"
-#include "../tools/tool.h"
+#ifdef NYTRIX_EMBEDDED_TOOLS
+#include <nytrix/nytrix.h>
+#endif
+#include "cmd/fmt/ui.h"
+#ifdef NYTRIX_EMBEDDED_TOOLS
+#include <nytrix/nytrix.h>
+#endif
 
 #include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
+#include <limits.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -28,34 +37,14 @@
 #include <sys/socket.h>
 #include <sys/wait.h>
 #else
-#include <winsock2.h>
-#include <windows.h>
 #include <process.h>
+#include <windows.h>
+#include <winsock2.h>
 #endif
 
 #ifndef PATH_MAX
 #define PATH_MAX 4096
 #endif
-
-static int ny_mkdir_compat(const char *path) {
-#ifdef _WIN32
-  return mkdir(path);
-#else
-  return mkdir(path, 0755);
-#endif
-}
-
-static int mkdir_p(const char *path) {
-  char tmp[PATH_MAX];
-  snprintf(tmp, sizeof(tmp), "%s", path);
-  for (char *p = tmp + 1; *p; p++) {
-    if (*p != '/') continue;
-    *p = '\0';
-    ny_mkdir_compat(tmp);
-    *p = '/';
-  }
-  return ny_mkdir_compat(tmp) == 0 || ny_access(tmp, F_OK) == 0;
-}
 
 static int copy_file_bytes(const char *src, const char *dst) {
   FILE *in = fopen(src, "rb");
@@ -93,7 +82,7 @@ static int copy_regular_files_in_dir(const char *src_dir, const char *dst_dir,
   DIR *d = opendir(src_dir);
   if (!d)
     return 0;
-  if (!mkdir_p(dst_dir)) {
+  if (!ny_mkdir_p(dst_dir)) {
     closedir(d);
     return 0;
   }
@@ -260,40 +249,18 @@ static const char *find_nytrix_share_root(void) {
       "/opt/homebrew/share/nytrix",
   };
   for (size_t i = 0; i < sizeof(system_roots) / sizeof(system_roots[0]); i++) {
-    if (!has_web_assets(system_roots[i])) continue;
+    if (!has_web_assets(system_roots[i]))
+      continue;
     snprintf(root, sizeof(root), "%s", system_roots[i]);
     return root;
   }
   return NULL;
 }
 
-typedef struct {
-  char *data;
-  size_t len;
-  size_t cap;
-} sb_t;
-
-static int sb_reserve(sb_t *sb, size_t need) {
-  if (need <= sb->cap)
-    return 1;
-  size_t cap = sb->cap ? sb->cap : 4096;
-  while (cap < need)
-    cap *= 2;
-  char *p = (char *)realloc(sb->data, cap);
-  if (!p)
-    return 0;
-  sb->data = p;
-  sb->cap = cap;
-  return 1;
-}
+typedef ny_strbuf_t sb_t;
 
 static int sb_addn(sb_t *sb, const char *s, size_t n) {
-  if (!sb_reserve(sb, sb->len + n + 1))
-    return 0;
-  memmove(sb->data + sb->len, s, n);
-  sb->len += n;
-  sb->data[sb->len] = '\0';
-  return 1;
+  return ny_strbuf_append_n(sb, s, n) ? 1 : 0;
 }
 
 static int sb_add(sb_t *sb, const char *s) { return sb_addn(sb, s, strlen(s)); }
@@ -384,11 +351,12 @@ static int write_og_fontconfig(const char *path, const char *font_path) {
   if (!dirname_into(font_dir, sizeof(font_dir), font_path))
     return 0;
   sb_t xml = {0};
-  sb_add(&xml, "<?xml version=\"1.0\"?>\n"
-               "<!DOCTYPE fontconfig SYSTEM \"urn:fontconfig:fonts.dtd\">\n"
-               "<fontconfig>\n"
-               "  <include ignore_missing=\"yes\">/etc/fonts/fonts.conf</include>\n"
-               "  <dir>");
+  sb_add(&xml,
+         "<?xml version=\"1.0\"?>\n"
+         "<!DOCTYPE fontconfig SYSTEM \"urn:fontconfig:fonts.dtd\">\n"
+         "<fontconfig>\n"
+         "  <include ignore_missing=\"yes\">/etc/fonts/fonts.conf</include>\n"
+         "  <dir>");
   sb_add_xml_escaped(&xml, font_dir);
   sb_add(&xml, "</dir>\n</fontconfig>\n");
   int ok = xml.data && ny_write_file(path, xml.data, strlen(xml.data)) == 0;
@@ -406,24 +374,33 @@ static int generate_website_og_png(const char *svg_path, const char *png_path,
                png_path) < (int)sizeof(fontconfig_path)) {
     has_fontconfig = write_og_fontconfig(fontconfig_path, font_path);
   }
-  char *rsvg[] = {"rsvg-convert", "-w", "1200", "-h", "630", "-f", "png",
-                  "-o",           (char *)png_path, (char *)svg_path, NULL};
+  char *rsvg[] = {"rsvg-convert",
+                  "-w",
+                  "1200",
+                  "-h",
+                  "630",
+                  "-f",
+                  "png",
+                  "-o",
+                  (char *)png_path,
+                  (char *)svg_path,
+                  NULL};
   if (run_doc_tool_with_fontconfig(rsvg,
                                    has_fontconfig ? fontconfig_path : NULL) &&
       ny_path_readable(png_path))
     return 1;
 
-  char *magick[] = {"magick", (char *)svg_path, "-resize", "1200x630!",
-                    (char *)png_path, NULL};
-  if (run_doc_tool_with_fontconfig(
-          magick, has_fontconfig ? fontconfig_path : NULL) &&
+  char *magick[] = {"magick",    (char *)svg_path, "-resize",
+                    "1200x630!", (char *)png_path, NULL};
+  if (run_doc_tool_with_fontconfig(magick,
+                                   has_fontconfig ? fontconfig_path : NULL) &&
       ny_path_readable(png_path))
     return 1;
 
-  char *convert[] = {"convert", (char *)svg_path, "-resize", "1200x630!",
-                     (char *)png_path, NULL};
-  if (run_doc_tool_with_fontconfig(
-          convert, has_fontconfig ? fontconfig_path : NULL) &&
+  char *convert[] = {"convert",   (char *)svg_path, "-resize",
+                     "1200x630!", (char *)png_path, NULL};
+  if (run_doc_tool_with_fontconfig(convert,
+                                   has_fontconfig ? fontconfig_path : NULL) &&
       ny_path_readable(png_path))
     return 1;
   return 0;
@@ -439,9 +416,10 @@ static int generate_website_og_svg(const char *path, const char *logo_path,
   (void)files;
   char *logo_uri = svg_data_uri_from_file(logo_path);
   char *favicon_uri = svg_data_uri_from_file(favicon_path);
-  char *mono_font_uri = mono_font_path && ny_path_readable(mono_font_path)
-                            ? file_data_uri_from_file(mono_font_path, "font/ttf")
-                            : NULL;
+  char *mono_font_uri =
+      mono_font_path && ny_path_readable(mono_font_path)
+          ? file_data_uri_from_file(mono_font_path, "font/ttf")
+          : NULL;
   char *display_font_uri =
       display_font_path && ny_path_readable(display_font_path)
           ? file_data_uri_from_file(display_font_path, "font/ttf")
@@ -469,49 +447,96 @@ static int generate_website_og_svg(const char *path, const char *logo_path,
     sb_add(&svg, display_font_uri);
     sb_add(&svg, ") format('truetype');font-weight:400;}\n");
   }
-  sb_add(&svg,
-               "    ]]></style>\n"
-               "    <linearGradient id=\"rule\" x1=\"0\" y1=\"0\" x2=\"1\" y2=\"0\">\n"
-               "      <stop offset=\"0\" stop-color=\"#8ccfff\"/>\n"
-               "      <stop offset=\"0.48\" stop-color=\"#b8b0ff\"/>\n"
-               "      <stop offset=\"1\" stop-color=\"#8bdc9a\"/>\n"
-               "    </linearGradient>\n"
-               "    <pattern id=\"checker\" width=\"48\" height=\"48\" patternUnits=\"userSpaceOnUse\">\n"
-               "      <rect width=\"48\" height=\"48\" fill=\"#000\"/>\n"
-               "      <path d=\"M0 0h24v24H0zM24 24h24v24H24z\" fill=\"#040405\" opacity=\"0.62\"/>\n"
-               "      <path d=\"M24 0h24v24H24zM0 24h24v24H0z\" fill=\"#010102\" opacity=\"0.72\"/>\n"
-               "      <path d=\"M47.5 0v48M0 47.5h48\" stroke=\"#b6a0ff\" stroke-width=\"1\" opacity=\"0.035\"/>\n"
-               "    </pattern>\n"
-               "  </defs>\n"
-               "  <rect width=\"1200\" height=\"630\" fill=\"#000\"/>\n"
-               "  <rect width=\"1200\" height=\"630\" fill=\"url(#checker)\" opacity=\"0.72\"/>\n"
-               "  <path d=\"M0 0h1200v630H0z\" fill=\"#000\" opacity=\"0.36\"/>\n"
-               "  <path d=\"M84 548h1040\" stroke=\"#202433\" stroke-width=\"1.5\"/>\n"
-               "  <image x=\"70\" y=\"113\" width=\"90\" height=\"90\" preserveAspectRatio=\"xMidYMid meet\" href=\"");
+  sb_add(
+      &svg,
+      "    ]]></style>\n"
+      "    <linearGradient id=\"rule\" x1=\"0\" y1=\"0\" x2=\"1\" y2=\"0\">\n"
+      "      <stop offset=\"0\" stop-color=\"#8ccfff\"/>\n"
+      "      <stop offset=\"0.48\" stop-color=\"#b8b0ff\"/>\n"
+      "      <stop offset=\"1\" stop-color=\"#8bdc9a\"/>\n"
+      "    </linearGradient>\n"
+      "    <pattern id=\"checker\" width=\"48\" height=\"48\" "
+      "patternUnits=\"userSpaceOnUse\">\n"
+      "      <rect width=\"48\" height=\"48\" fill=\"#000\"/>\n"
+      "      <path d=\"M0 0h24v24H0zM24 24h24v24H24z\" fill=\"#040405\" "
+      "opacity=\"0.62\"/>\n"
+      "      <path d=\"M24 0h24v24H24zM0 24h24v24H0z\" fill=\"#010102\" "
+      "opacity=\"0.72\"/>\n"
+      "      <path d=\"M47.5 0v48M0 47.5h48\" stroke=\"#b6a0ff\" "
+      "stroke-width=\"1\" opacity=\"0.035\"/>\n"
+      "    </pattern>\n"
+      "  </defs>\n"
+      "  <rect width=\"1200\" height=\"630\" fill=\"#000\"/>\n"
+      "  <rect width=\"1200\" height=\"630\" fill=\"url(#checker)\" "
+      "opacity=\"0.72\"/>\n"
+      "  <path d=\"M0 0h1200v630H0z\" fill=\"#000\" opacity=\"0.36\"/>\n"
+      "  <path d=\"M84 548h1040\" stroke=\"#202433\" stroke-width=\"1.5\"/>\n"
+      "  <image x=\"70\" y=\"113\" width=\"90\" height=\"90\" "
+      "preserveAspectRatio=\"xMidYMid meet\" href=\"");
   sb_add(&svg, favicon_uri);
   sb_add(&svg, "\"/>\n"
-               "  <image x=\"168\" y=\"113\" width=\"106\" height=\"106\" preserveAspectRatio=\"xMidYMid meet\" href=\"");
+               "  <image x=\"168\" y=\"113\" width=\"106\" height=\"106\" "
+               "preserveAspectRatio=\"xMidYMid meet\" href=\"");
   sb_add(&svg, logo_uri);
-  sb_add(&svg, "\"/>\n"
-               "  <g font-family=\"NyOGDisplay, Quantico, Inter, DejaVu Sans, Arial, sans-serif\">\n"
-               "    <text x=\"257\" y=\"197\" fill=\"#f6f7fb\" font-family=\"NyOGDisplay, Quantico, Inter, DejaVu Sans, Arial, sans-serif\" font-size=\"76\" font-weight=\"400\">ytrix</text>\n"
-               "    <text x=\"84\" y=\"258\" fill=\"#f0f1f5\" font-size=\"36\" font-weight=\"400\">Think freely.</text>\n"
-               "    <text x=\"84\" y=\"298\" fill=\"#b9bdc8\" font-size=\"25\" font-weight=\"400\">Native. Explicit. Comptime. Cross-platform.</text>\n"
-               "  </g>\n"
-               "  <g font-family=\"NyOGMono, JetBrains Mono, DejaVu Sans Mono, Consolas, monospace\">\n"
-               "    <rect x=\"72\" y=\"330\" width=\"1052\" height=\"150\" fill=\"#010102\" stroke=\"#202433\"/>\n"
-               "    <path d=\"M72 361h1052\" stroke=\"#151823\" stroke-width=\"1\"/>\n"
-               "    <text x=\"80\" y=\"350\" fill=\"#77717f\" font-size=\"13\" font-weight=\"700\" letter-spacing=\"2\">NYTRIX</text>\n"
-               "    <text x=\"80\" y=\"382\" xml:space=\"preserve\" font-size=\"19\" font-weight=\"720\"><tspan fill=\"#b6a0ff\" font-weight=\"760\">use</tspan><tspan fill=\"#aebdff\"> std.core</tspan></text>\n"
-               "    <text x=\"80\" y=\"410\" xml:space=\"preserve\" font-size=\"19\" font-weight=\"720\"><tspan fill=\"#b6a0ff\" font-weight=\"760\">fn</tspan><tspan fill=\"#d1c2ff\"> area</tspan><tspan fill=\"#85808d\" font-weight=\"700\">(</tspan><tspan fill=\"#bcaaff\">int</tspan><tspan fill=\"#eeeeef\"> w</tspan><tspan fill=\"#85808d\" font-weight=\"700\">, </tspan><tspan fill=\"#bcaaff\">int</tspan><tspan fill=\"#eeeeef\"> h</tspan><tspan fill=\"#85808d\" font-weight=\"700\">) </tspan><tspan fill=\"#bcaaff\">int</tspan><tspan fill=\"#85808d\" font-weight=\"700\"> {</tspan><tspan fill=\"#b6a0ff\" font-weight=\"760\"> return</tspan><tspan fill=\"#eeeeef\"> w</tspan><tspan fill=\"#c4bed2\"> *</tspan><tspan fill=\"#eeeeef\"> h</tspan><tspan fill=\"#85808d\" font-weight=\"700\"> }</tspan></text>\n"
-               "    <text x=\"80\" y=\"438\" xml:space=\"preserve\" font-size=\"19\" font-weight=\"720\"><tspan fill=\"#b6a0ff\" font-weight=\"760\">def</tspan><tspan fill=\"#eeeeef\"> pixels</tspan><tspan fill=\"#c4bed2\"> =</tspan><tspan fill=\"#d1c2ff\"> area</tspan><tspan fill=\"#85808d\" font-weight=\"700\">(</tspan><tspan fill=\"#c9b6ff\">12</tspan><tspan fill=\"#85808d\" font-weight=\"700\">, </tspan><tspan fill=\"#c9b6ff\">8</tspan><tspan fill=\"#85808d\" font-weight=\"700\">)</tspan></text>\n"
-               "    <text x=\"80\" y=\"466\" xml:space=\"preserve\" font-size=\"19\" font-weight=\"720\"><tspan fill=\"#e4ddff\">print</tspan><tspan fill=\"#85808d\" font-weight=\"700\">(</tspan><tspan fill=\"#eeeeef\">pixels</tspan><tspan fill=\"#85808d\" font-weight=\"700\">)</tspan></text>\n"
-               "  </g>\n"
-               "  <g font-family=\"NyOGDisplay, Quantico, Inter, DejaVu Sans, Arial, sans-serif\" font-size=\"21\" font-weight=\"400\">\n"
-               "    <text x=\"84\" y=\"584\" fill=\"#858a96\">nytrix.x3ric.com</text>\n"
-               "    <text x=\"798\" y=\"584\" fill=\"#858a96\">learn / spec / changelog / API</text>\n"
-               "  </g>\n"
-               "</svg>\n");
+  sb_add(
+      &svg,
+      "\"/>\n"
+      "  <g font-family=\"NyOGDisplay, Quantico, Inter, DejaVu Sans, Arial, "
+      "sans-serif\">\n"
+      "    <text x=\"257\" y=\"197\" fill=\"#f6f7fb\" "
+      "font-family=\"NyOGDisplay, Quantico, Inter, DejaVu Sans, Arial, "
+      "sans-serif\" font-size=\"76\" font-weight=\"400\">ytrix</text>\n"
+      "    <text x=\"84\" y=\"258\" fill=\"#f0f1f5\" font-size=\"36\" "
+      "font-weight=\"400\">Think freely.</text>\n"
+      "    <text x=\"84\" y=\"298\" fill=\"#b9bdc8\" font-size=\"25\" "
+      "font-weight=\"400\">Native. Explicit. Comptime. Cross-platform.</text>\n"
+      "  </g>\n"
+      "  <g font-family=\"NyOGMono, JetBrains Mono, DejaVu Sans Mono, "
+      "Consolas, monospace\">\n"
+      "    <rect x=\"72\" y=\"330\" width=\"1052\" height=\"150\" "
+      "fill=\"#010102\" stroke=\"#202433\"/>\n"
+      "    <path d=\"M72 361h1052\" stroke=\"#151823\" stroke-width=\"1\"/>\n"
+      "    <text x=\"80\" y=\"350\" fill=\"#77717f\" font-size=\"13\" "
+      "font-weight=\"700\" letter-spacing=\"2\">NYTRIX</text>\n"
+      "    <text x=\"80\" y=\"382\" xml:space=\"preserve\" font-size=\"19\" "
+      "font-weight=\"720\"><tspan fill=\"#b6a0ff\" "
+      "font-weight=\"760\">use</tspan><tspan fill=\"#aebdff\"> "
+      "core</tspan></text>\n"
+      "    <text x=\"80\" y=\"410\" xml:space=\"preserve\" font-size=\"19\" "
+      "font-weight=\"720\"><tspan fill=\"#b6a0ff\" "
+      "font-weight=\"760\">fn</tspan><tspan fill=\"#d1c2ff\"> "
+      "area</tspan><tspan fill=\"#85808d\" font-weight=\"700\">(</tspan><tspan "
+      "fill=\"#bcaaff\">int</tspan><tspan fill=\"#eeeeef\"> w</tspan><tspan "
+      "fill=\"#85808d\" font-weight=\"700\">, </tspan><tspan "
+      "fill=\"#bcaaff\">int</tspan><tspan fill=\"#eeeeef\"> h</tspan><tspan "
+      "fill=\"#85808d\" font-weight=\"700\">) </tspan><tspan "
+      "fill=\"#bcaaff\">int</tspan><tspan fill=\"#85808d\" "
+      "font-weight=\"700\"> {</tspan><tspan fill=\"#b6a0ff\" "
+      "font-weight=\"760\"> return</tspan><tspan fill=\"#eeeeef\"> "
+      "w</tspan><tspan fill=\"#c4bed2\"> *</tspan><tspan fill=\"#eeeeef\"> "
+      "h</tspan><tspan fill=\"#85808d\" font-weight=\"700\"> }</tspan></text>\n"
+      "    <text x=\"80\" y=\"438\" xml:space=\"preserve\" font-size=\"19\" "
+      "font-weight=\"720\"><tspan fill=\"#b6a0ff\" "
+      "font-weight=\"760\">def</tspan><tspan fill=\"#eeeeef\"> "
+      "pixels</tspan><tspan fill=\"#c4bed2\"> =</tspan><tspan "
+      "fill=\"#d1c2ff\"> area</tspan><tspan fill=\"#85808d\" "
+      "font-weight=\"700\">(</tspan><tspan fill=\"#c9b6ff\">12</tspan><tspan "
+      "fill=\"#85808d\" font-weight=\"700\">, </tspan><tspan "
+      "fill=\"#c9b6ff\">8</tspan><tspan fill=\"#85808d\" "
+      "font-weight=\"700\">)</tspan></text>\n"
+      "    <text x=\"80\" y=\"466\" xml:space=\"preserve\" font-size=\"19\" "
+      "font-weight=\"720\"><tspan fill=\"#e4ddff\">print</tspan><tspan "
+      "fill=\"#85808d\" font-weight=\"700\">(</tspan><tspan "
+      "fill=\"#eeeeef\">pixels</tspan><tspan fill=\"#85808d\" "
+      "font-weight=\"700\">)</tspan></text>\n"
+      "  </g>\n"
+      "  <g font-family=\"NyOGDisplay, Quantico, Inter, DejaVu Sans, Arial, "
+      "sans-serif\" font-size=\"21\" font-weight=\"400\">\n"
+      "    <text x=\"84\" y=\"584\" fill=\"#858a96\">nytrix.x3ric.com</text>\n"
+      "    <text x=\"798\" y=\"584\" fill=\"#858a96\">learn / spec / changelog "
+      "/ API</text>\n"
+      "  </g>\n"
+      "</svg>\n");
   free(logo_uri);
   free(favicon_uri);
   free(mono_font_uri);
@@ -523,12 +548,10 @@ static int generate_website_og_svg(const char *path, const char *logo_path,
   return ok;
 }
 
-static int generate_website_og_assets(const char *svg_path, const char *png_path,
-                                      const char *logo_path,
-                                      const char *favicon_path,
-                                      const char *mono_font_path,
-                                      const char *display_font_path, int modules,
-                                      int symbols, int files) {
+static int generate_website_og_assets(
+    const char *svg_path, const char *png_path, const char *logo_path,
+    const char *favicon_path, const char *mono_font_path,
+    const char *display_font_path, int modules, int symbols, int files) {
   return generate_website_og_svg(svg_path, logo_path, favicon_path,
                                  mono_font_path, display_font_path, modules,
                                  symbols, files) &&
@@ -541,38 +564,10 @@ static int sb_add_json_strn(sb_t *sb, const char *s, size_t n) {
   if (!s)
     n = 0;
   for (size_t i = 0; i < n; i++) {
-    const unsigned char ch = (const unsigned char)s[i];
-    char tmp[8];
-    switch (ch) {
-    case '\\':
-      if (!sb_add(sb, "\\\\"))
-        return 0;
-      break;
-    case '"':
-      if (!sb_add(sb, "\\\""))
-        return 0;
-      break;
-    case '\n':
-      if (!sb_add(sb, "\\n"))
-        return 0;
-      break;
-    case '\r':
-      if (!sb_add(sb, "\\r"))
-        return 0;
-      break;
-    case '\t':
-      if (!sb_add(sb, "\\t"))
-        return 0;
-      break;
-    default:
-      if (ch < 0x20) {
-        snprintf(tmp, sizeof(tmp), "\\u%04x", ch);
-        if (!sb_add(sb, tmp))
-          return 0;
-      } else if (!sb_addn(sb, (const char *)&s[i], 1))
-        return 0;
-      break;
-    }
+    char escaped[7];
+    size_t escaped_len = ny_json_escape_byte((unsigned char)s[i], escaped);
+    if (!sb_addn(sb, escaped, escaped_len))
+      return 0;
   }
   return sb_add(sb, "\"");
 }
@@ -702,7 +697,8 @@ static char *dedent_clean_code(const char *code, size_t n) {
       p++;
     int blank = 1;
     for (size_t i = start; i < p; i++) {
-      if (code[i] == ' ' || code[i] == '\t' || code[i] == '\r') continue;
+      if (code[i] == ' ' || code[i] == '\t' || code[i] == '\r')
+        continue;
       blank = 0;
       break;
     }
@@ -909,8 +905,8 @@ static int parse_fn_decl_at(const char *body, size_t body_n, size_t pos,
   }
 
   if (has_ret) {
-    while (p < body_n && body[p] != '{' && body[p] != '\n' &&
-           body[p] != '\r' && body[p] != ';')
+    while (p < body_n && body[p] != '{' && body[p] != '\n' && body[p] != '\r' &&
+           body[p] != ';')
       p++;
     ret_end = ny_web_trim_end_ws(body, ret_start, p);
     p = ny_web_skip_ws(body, body_n, p);
@@ -950,44 +946,57 @@ static void append_fn_signature(sb_t *sig, const char *display_name,
   }
 }
 
+typedef struct {
+  const char *source;
+  size_t scanned;
+  int depth;
+  int in_string;
+  int in_comment;
+  int esc_next;
+  char quote;
+} ny_brace_depth_cursor_t;
+
 static int ny_brace_depth_at(const char *s, size_t pos) {
-  int depth = 0, in_string = 0, in_comment = 0, esc_next = 0;
-  char quote = 0;
-  for (size_t i = 0; i < pos; i++) {
+  static _Thread_local ny_brace_depth_cursor_t cursor;
+  if (cursor.source != s || pos < cursor.scanned) {
+    cursor = (ny_brace_depth_cursor_t){.source = s};
+  }
+  for (size_t i = cursor.scanned; i < pos; i++) {
     char c = s[i];
-    if (esc_next) {
-      esc_next = 0;
+    if (cursor.esc_next) {
+      cursor.esc_next = 0;
       continue;
     }
-    if (in_string && c == '\\') {
-      esc_next = 1;
+    if (cursor.in_string && c == '\\') {
+      cursor.esc_next = 1;
       continue;
     }
-    if (!in_string && c == ';') {
-      in_comment = 1;
+    if (!cursor.in_string && c == ';') {
+      cursor.in_comment = 1;
       continue;
     }
-    if (in_comment) {
+    if (cursor.in_comment) {
       if (c == '\n')
-        in_comment = 0;
+        cursor.in_comment = 0;
       continue;
     }
-    if (!in_string && (c == '"' || c == '\'')) {
-      in_string = 1;
-      quote = c;
+    if (!cursor.in_string && (c == '"' || c == '\'')) {
+      cursor.in_string = 1;
+      cursor.quote = c;
       continue;
     }
-    if (in_string) {
-      if (c == quote)
-        in_string = 0;
+    if (cursor.in_string) {
+      if (c == cursor.quote)
+        cursor.in_string = 0;
       continue;
     }
     if (c == '{')
-      depth++;
-    else if (c == '}' && depth > 0)
-      depth--;
+      cursor.depth++;
+    else if (c == '}' && cursor.depth > 0)
+      cursor.depth--;
   }
-  return depth;
+  cursor.scanned = pos;
+  return cursor.depth;
 }
 
 static char *leading_comments(const char *s, size_t start) {
@@ -1121,7 +1130,8 @@ static char *extract_body_html(const char *html) {
   const char *lo = html;
   const char *body = NULL;
   for (const char *p = lo; *p; p++) {
-    if (strncasecmp(p, "<body", 5) != 0) continue;
+    if (strncasecmp(p, "<body", 5) != 0)
+      continue;
     body = strchr(p, '>');
     if (body)
       body++;
@@ -1131,7 +1141,8 @@ static char *extract_body_html(const char *html) {
     return strdup(html);
   const char *end = NULL;
   for (const char *p = body; *p; p++) {
-    if (strncasecmp(p, "</body>", 7) != 0) continue;
+    if (strncasecmp(p, "</body>", 7) != 0)
+      continue;
     end = p;
     break;
   }
@@ -1450,14 +1461,13 @@ static int docs_origin_is_lib(const char *root, const char *orig) {
   while (rel[0] == '.' && rel[1] == '/')
     rel += 2;
   if (strncmp(rel, "etc/projects/", 13) == 0 ||
-      strncmp(rel, "etc/tests/", 10) == 0 ||
-      strstr(rel, "/etc/projects/") || strstr(rel, "/etc/tests/"))
+      strncmp(rel, "etc/tests/", 10) == 0 || strstr(rel, "/etc/projects/") ||
+      strstr(rel, "/etc/tests/"))
     return 0;
   char lib_dir[PATH_MAX];
   if (join_path(lib_dir, sizeof(lib_dir), root, "lib")) {
     size_t n = strlen(lib_dir);
-    if (strncmp(norm, lib_dir, n) == 0 &&
-        (norm[n] == '/' || norm[n] == '\0'))
+    if (strncmp(norm, lib_dir, n) == 0 && (norm[n] == '/' || norm[n] == '\0'))
       return 1;
   }
   if (strcmp(rel, "lib") == 0 || strncmp(rel, "lib/", 4) == 0 ||
@@ -1606,13 +1616,11 @@ static void rewrite_markdown_source_links_line(sb_t *out, const char *line,
     if (after_label >= len || line[after_label] != '(')
       continue;
     const char *href_start = line + after_label + 1;
-    const char *href_end =
-        memchr(href_start, ')', line + len - href_start);
+    const char *href_end = memchr(href_start, ')', line + len - href_start);
     if (!href_end)
       break;
-    char *github =
-        github_source_href_for_markdown(href_start,
-                                        (size_t)(href_end - href_start));
+    char *github = github_source_href_for_markdown(
+        href_start, (size_t)(href_end - href_start));
     if (github) {
       sb_addn(out, line + last, (size_t)(href_start - (line + last)));
       sb_add(out, github);
@@ -1674,8 +1682,7 @@ static int parse_code_include_directive(const char *line, size_t len,
   const char *key = "ny-doc-include-code:";
   const char *close = "-->";
   size_t open_n = strlen(open), key_n = strlen(key), close_n = strlen(close);
-  if (len < open_n + key_n + close_n ||
-      strncmp(line, open, open_n) != 0)
+  if (len < open_n + key_n + close_n || strncmp(line, open, open_n) != 0)
     return 0;
   line += open_n;
   len -= open_n;
@@ -1830,8 +1837,8 @@ static int append_markdown_doc_json_item(sb_t *json, const char *base_dir,
   sb_add(json, ",\"format\":");
   sb_add_json_str(json, fmt);
   sb_add(json, ",\"overview\":");
-  sb_add(json, overview_path && strcmp(path, overview_path) == 0 ? "true"
-                                                                  : "false");
+  sb_add(json,
+         overview_path && strcmp(path, overview_path) == 0 ? "true" : "false");
   sb_add(json, ",\"html\":");
   sb_add_json_str(json, body ? body : "");
   sb_add(json, "}");
@@ -1843,11 +1850,20 @@ static int append_markdown_doc_json_item(sb_t *json, const char *base_dir,
   return 1;
 }
 
+static int append_markdown_docs_from_ny(sb_t *json, const char *base_dir,
+                                        const char *root, const char *dir,
+                                        const char *overview_path, int *first,
+                                        char **seen, int *seen_n, int seen_cap);
+
 static void append_markdown_docs_from_dir(sb_t *json, const char *base_dir,
                                           const char *root, const char *dir,
                                           const char *overview_path, int *first,
                                           char **seen, int *seen_n,
                                           int seen_cap, int recursive) {
+  if (recursive &&
+      append_markdown_docs_from_ny(json, base_dir, root, dir, overview_path,
+                                   first, seen, seen_n, seen_cap))
+    return;
   DIR *d = opendir(dir);
   if (!d)
     return;
@@ -1873,13 +1889,11 @@ static void append_markdown_docs_from_dir(sb_t *json, const char *base_dir,
     char path[PATH_MAX];
     if (join_path(path, sizeof(path), dir, names[i])) {
       if (recursive && path_is_dir(path))
-        append_markdown_docs_from_dir(json, base_dir, root, path,
-                                      overview_path, first, seen, seen_n,
-                                      seen_cap, recursive);
+        append_markdown_docs_from_dir(json, base_dir, root, path, overview_path,
+                                      first, seen, seen_n, seen_cap, recursive);
       else
-        append_markdown_doc_json_item(json, base_dir, root, path,
-                                      overview_path, first, seen, seen_n,
-                                      seen_cap);
+        append_markdown_doc_json_item(json, base_dir, root, path, overview_path,
+                                      first, seen, seen_n, seen_cap);
     }
     free(names[i]);
   }
@@ -1973,7 +1987,7 @@ static void append_project_examples_json(sb_t *json, const char *root) {
     sb_add_json_str(json, names[i]);
     sb_add(json, ",\"path\":");
     char rel[PATH_MAX];
-    snprintf(rel, sizeof(rel), "etc/projects/os/%s", names[i]);
+    snprintf(rel, sizeof(rel), "etc/projects/%s", names[i]);
     sb_add_json_str(json, rel);
     sb_add(json, ",\"source\":");
     sb_add_json_strn(json, source, source_n);
@@ -1989,7 +2003,7 @@ static void append_hero_data_json(sb_t *json, const char *root) {
   char path[PATH_MAX], *source = NULL;
   size_t source_n = 0;
   sb_add(json, ",\"hero_source\":");
-  if (join_path(path, sizeof(path), root, "etc/projects/os/herodoc.ny") &&
+  if (join_path(path, sizeof(path), root, "etc/projects/herodoc.ny") &&
       read_file_bytes(path, &source, &source_n)) {
     sb_add_json_strn(json, source, source_n);
     free(source);
@@ -2038,8 +2052,8 @@ static char *parse_import_target(const char *body, size_t n, size_t *pos) {
     return target;
   }
   size_t start = p;
-  while (p < n && (isalnum((unsigned char)body[p]) || body[p] == '_' ||
-                   body[p] == '.'))
+  while (p < n &&
+         (isalnum((unsigned char)body[p]) || body[p] == '_' || body[p] == '.'))
     p++;
   if (p == start)
     return NULL;
@@ -2053,8 +2067,8 @@ static int parse_import_symbol(const char *body, size_t n, size_t *pos,
   while (p < n && (isspace((unsigned char)body[p]) || body[p] == ','))
     p++;
   size_t ss = p;
-  while (p < n && (isalnum((unsigned char)body[p]) || body[p] == '_' ||
-                   body[p] == '*'))
+  while (p < n &&
+         (isalnum((unsigned char)body[p]) || body[p] == '_' || body[p] == '*'))
     p++;
   if (p == ss)
     return 0;
@@ -2607,14 +2621,59 @@ typedef struct {
   char *doc;
   char *code;
   int line;
-  int score;
 } doc_search_entry_t;
 
 typedef struct {
   doc_search_entry_t *items;
   size_t len;
   size_t cap;
+  size_t *dedup_slots;
+  size_t dedup_cap;
 } doc_search_index_t;
+
+static uint64_t doc_search_hash_field(uint64_t hash, const char *value) {
+  const unsigned char *p = (const unsigned char *)(value ? value : "");
+  while (*p) {
+    hash ^= *p++;
+    hash *= UINT64_C(1099511628211);
+  }
+  hash ^= 0xff;
+  return hash * UINT64_C(1099511628211);
+}
+
+static uint64_t doc_search_entry_hash(int line, const char *kind,
+                                      const char *full_name, const char *path,
+                                      const char *signature,
+                                      const char *keywords) {
+  uint64_t hash = UINT64_C(14695981039346656037);
+  hash = doc_search_hash_field(hash, kind);
+  hash = doc_search_hash_field(hash, full_name);
+  hash = doc_search_hash_field(hash, path);
+  hash = doc_search_hash_field(hash, signature);
+  hash = doc_search_hash_field(hash, keywords);
+  hash ^= (uint32_t)line;
+  hash *= UINT64_C(1099511628211);
+  return hash;
+}
+
+static int doc_search_rehash(doc_search_index_t *idx, size_t capacity) {
+  size_t *slots = (size_t *)calloc(capacity, sizeof(*slots));
+  if (!slots)
+    return 0;
+  for (size_t i = 0; i < idx->len; i++) {
+    const doc_search_entry_t *e = &idx->items[i];
+    uint64_t hash = doc_search_entry_hash(e->line, e->kind, e->full_name,
+                                          e->path, e->signature, e->keywords);
+    size_t slot = (size_t)hash & (capacity - 1);
+    while (slots[slot])
+      slot = (slot + 1) & (capacity - 1);
+    slots[slot] = i + 1;
+  }
+  free(idx->dedup_slots);
+  idx->dedup_slots = slots;
+  idx->dedup_cap = capacity;
+  return 1;
+}
 
 static void doc_search_index_free(doc_search_index_t *idx) {
   if (!idx)
@@ -2630,6 +2689,7 @@ static void doc_search_index_free(doc_search_index_t *idx) {
     free(idx->items[i].code);
   }
   free(idx->items);
+  free(idx->dedup_slots);
   idx->items = NULL;
   idx->len = 0;
   idx->cap = 0;
@@ -2737,8 +2797,24 @@ static int doc_search_add(doc_search_index_t *idx, const char *kind,
   char *entry_doc_owned = doc_without_keyword_lines(doc);
   const char *entry_keywords = entry_keywords_owned ? entry_keywords_owned : "";
   const char *entry_doc = entry_doc_owned ? entry_doc_owned : "";
-  for (size_t i = 0; i < idx->len; i++) {
-    doc_search_entry_t *old = &idx->items[i];
+  if (!idx->dedup_cap && !doc_search_rehash(idx, 512)) {
+    free(local_keywords);
+    free(entry_keywords_owned);
+    free(entry_doc_owned);
+    return 0;
+  }
+  if ((idx->len + 1) * 10 >= idx->dedup_cap * 7 &&
+      !doc_search_rehash(idx, idx->dedup_cap * 2)) {
+    free(local_keywords);
+    free(entry_keywords_owned);
+    free(entry_doc_owned);
+    return 0;
+  }
+  uint64_t hash = doc_search_entry_hash(line, entry_kind, entry_full,
+                                        entry_path, entry_sig, entry_keywords);
+  size_t slot = (size_t)hash & (idx->dedup_cap - 1);
+  while (idx->dedup_slots[slot]) {
+    doc_search_entry_t *old = &idx->items[idx->dedup_slots[slot] - 1];
     if (old->line == line && strcmp(old->kind, entry_kind) == 0 &&
         strcmp(old->full_name, entry_full) == 0 &&
         strcmp(old->path, entry_path) == 0 &&
@@ -2749,6 +2825,7 @@ static int doc_search_add(doc_search_index_t *idx, const char *kind,
       free(entry_doc_owned);
       return 1;
     }
+    slot = (slot + 1) & (idx->dedup_cap - 1);
   }
   if (idx->len == idx->cap) {
     size_t next_cap = idx->cap ? idx->cap * 2 : 256;
@@ -2774,6 +2851,8 @@ static int doc_search_add(doc_search_index_t *idx, const char *kind,
   e->doc = strdup(entry_doc);
   e->code = strdup(code ? code : "");
   e->line = line;
+  if (e->kind && e->full_name && e->path && e->signature && e->keywords)
+    idx->dedup_slots[slot] = idx->len;
   free(local_keywords);
   free(entry_keywords_owned);
   free(entry_doc_owned);
@@ -2824,6 +2903,10 @@ static int docs_file_supported(const char *name) {
          path_has_suffix(name, ".texi");
 }
 
+static char *ny_web_doc_collect_paths(const char *docs_dir);
+static char *json_read_string(const char **pp);
+static int collect_doc_files_from_ny(doc_search_index_t *idx, const char *root,
+                                     const char *dir);
 static char *markdown_heading_title(const char *line, size_t n) {
   size_t p = 0;
   while (p < n && p < 3 && (line[p] == ' ' || line[p] == '\t'))
@@ -2931,97 +3014,23 @@ static void add_plain_doc_entry(doc_search_index_t *idx, const char *root,
   free(excerpt);
 }
 
-static void collect_doc_files(doc_search_index_t *idx, const char *root,
-                              const char *dir) {
-  DIR *d = opendir(dir);
-  if (!d)
-    return;
-  char **names = NULL;
-  size_t len = 0, cap = 0;
-  struct dirent *ent;
-  while ((ent = readdir(d))) {
-    if (web_skip_source_dir(ent->d_name))
-      continue;
-    if (len == cap) {
-      size_t next_cap = cap ? cap * 2 : 64;
-      char **next = (char **)realloc(names, next_cap * sizeof(char *));
-      if (!next)
-        break;
-      names = next;
-      cap = next_cap;
-    }
-    names[len++] = strdup(ent->d_name);
-  }
-  closedir(d);
-  qsort(names, len, sizeof(*names), cmp_cstr_ptr);
-  for (size_t i = 0; i < len; i++) {
-    char path[PATH_MAX];
-    if (join_path(path, sizeof(path), dir, names[i])) {
-      if (path_is_dir(path)) {
-        collect_doc_files(idx, root, path);
-      } else if (docs_file_supported(path)) {
-        char *txt = ny_read_file_raw(path, NULL);
-        if (txt) {
-          if (path_has_suffix(path, ".md"))
-            add_markdown_doc_entries(idx, root, path, txt);
-          else
-            add_plain_doc_entry(idx, root, path, txt);
-          free(txt);
-        }
-      }
-    }
-    free(names[i]);
-  }
-  free(names);
-}
-
-static void collect_named_doc_dirs(doc_search_index_t *idx, const char *root,
-                                   const char *dir, const char *wanted_name) {
-  const char *base = path_basename(dir);
-  if (base && strcmp(base, wanted_name) == 0) {
-    collect_doc_files(idx, root, dir);
-    return;
-  }
-
-  DIR *d = opendir(dir);
-  if (!d)
-    return;
-  char **names = NULL;
-  size_t len = 0, cap = 0;
-  struct dirent *ent;
-  while ((ent = readdir(d))) {
-    if (web_skip_source_dir(ent->d_name))
-      continue;
-    if (len == cap) {
-      size_t next_cap = cap ? cap * 2 : 64;
-      char **next = (char **)realloc(names, next_cap * sizeof(char *));
-      if (!next)
-        break;
-      names = next;
-      cap = next_cap;
-    }
-    names[len++] = strdup(ent->d_name);
-  }
-  closedir(d);
-  qsort(names, len, sizeof(*names), cmp_cstr_ptr);
-  for (size_t i = 0; i < len; i++) {
-    char path[PATH_MAX];
-    if (join_path(path, sizeof(path), dir, names[i]) && path_is_dir(path))
-      collect_named_doc_dirs(idx, root, path, wanted_name);
-    free(names[i]);
-  }
-  free(names);
-}
-
-static void collect_all_docs(doc_search_index_t *idx, const char *root) {
-  collect_named_doc_dirs(idx, root, root, "docs");
-  collect_named_doc_dirs(idx, root, root, "status");
+static bool collect_all_docs(doc_search_index_t *idx, const char *root) {
+  char docs_dir[PATH_MAX], status_dir[PATH_MAX];
+  if (!join_path(docs_dir, sizeof(docs_dir), root, "docs") ||
+      !join_path(status_dir, sizeof(status_dir), root, "status") ||
+      !collect_doc_files_from_ny(idx, root, docs_dir))
+    return false;
+  if (path_is_dir(status_dir) &&
+      !collect_doc_files_from_ny(idx, root, status_dir))
+    return false;
 
   const char *info_dir = getenv("NYTRIX_DOC_INFO_DIR");
   if (!info_dir || !*info_dir)
     info_dir = getenv("NYTRIX_WEBDOC_INFO_DIR");
-  if (info_dir && *info_dir)
-    collect_doc_files(idx, root, info_dir);
+  if (info_dir && *info_dir && path_is_dir(info_dir) &&
+      !collect_doc_files_from_ny(idx, root, info_dir))
+    return false;
+  return true;
 }
 
 static void append_symbol_entries_from_bundle(doc_search_index_t *idx,
@@ -3145,7 +3154,8 @@ static void append_symbol_entries_from_bundle(doc_search_index_t *idx,
         append_fn_signature(&sig, display.data ? display.data : fn.name, &fn,
                             body);
         char *code = dedent_clean_code(body + i, closep - i + 1);
-        doc_search_add(idx, "function", fn.name, full.data ? full.data : fn.name,
+        doc_search_add(idx, "function", fn.name,
+                       full.data ? full.data : fn.name,
                        rel_orig ? rel_orig : orig, line_number_at(body, i),
                        sig.data ? sig.data : fn.name, mod_keywords,
                        doc2.data ? doc2.data : "", code ? code : "");
@@ -3324,71 +3334,6 @@ static void append_symbol_entries_from_bundle(doc_search_index_t *idx,
   }
 }
 
-static int fuzzy_score_one(const char *cand, const char *query) {
-  if (!cand || !*cand || !query || !*query)
-    return 0;
-  const char *hit = find_case(cand, query);
-  if (hit) {
-    int score = 10000;
-    if (hit == cand)
-      score += 2000;
-    if (hit == cand || hit[-1] == '.' || hit[-1] == '/' || hit[-1] == '-' ||
-        hit[-1] == '_' || isspace((unsigned char)hit[-1]))
-      score += 700;
-    size_t cn = strlen(cand), qn = strlen(query);
-    if (cn > qn && cn - qn < 200)
-      score += (int)(200 - (cn - qn));
-    return score;
-  }
-
-  const unsigned char *c = (const unsigned char *)cand;
-  const unsigned char *q = (const unsigned char *)query;
-  int score = 0;
-  int streak = 0;
-  int last_match = -2;
-  for (int qi = 0; q[qi]; qi++) {
-    int qc = tolower(q[qi]);
-    int found = 0;
-    for (int ci = last_match + 1; c[ci]; ci++) {
-      if (tolower(c[ci]) == qc) {
-        found = 1;
-        score += 20;
-        if (ci == 0 || c[ci - 1] == '.' || c[ci - 1] == '/' ||
-            c[ci - 1] == '-' || c[ci - 1] == '_' || isspace(c[ci - 1]))
-          score += 20;
-        if (ci == last_match + 1) {
-          streak++;
-          score += 15 + streak * 2;
-        } else {
-          streak = 0;
-        }
-        last_match = ci;
-        break;
-      }
-    }
-    if (!found)
-      return 0;
-  }
-  return score;
-}
-
-static int field_match_score(const char *field, const char *term, int weight) {
-  int s = fuzzy_score_one(field, term);
-  return s > 0 ? s + weight : 0;
-}
-
-static int doc_search_query_has_alt(const char *query) {
-  if (!query)
-    return 0;
-  for (const char *p = query; *p; p++) {
-    if (*p == '|')
-      return 1;
-    if (*p == '\\' && p[1] == '|')
-      return 1;
-  }
-  return 0;
-}
-
 static char *doc_search_query_terms_copy(const char *query) {
   const char *src = query ? query : "";
   size_t n = strlen(src);
@@ -3408,155 +3353,6 @@ static char *doc_search_query_terms_copy(const char *query) {
   }
   out[w] = '\0';
   return out;
-}
-
-static char *doc_search_trimmed_slice(const char *start, size_t len) {
-  while (len && isspace((unsigned char)*start)) {
-    start++;
-    len--;
-  }
-  while (len && isspace((unsigned char)start[len - 1]))
-    len--;
-  if (!len)
-    return NULL;
-  return strndup0(start, len);
-}
-
-static int doc_entry_score_terms(const doc_search_entry_t *e,
-                                 const char *query) {
-  if (query && *query) {
-    if (e->full_name && strcasecmp(e->full_name, query) == 0)
-      return 1000000;
-    if (e->name && strcasecmp(e->name, query) == 0)
-      return 950000;
-    const char *leaf = e->full_name ? strrchr(e->full_name, '.') : NULL;
-    leaf = leaf ? leaf + 1 : NULL;
-    if (leaf && strcasecmp(leaf, query) == 0)
-      return 925000;
-  }
-  char *copy = strdup(query ? query : "");
-  if (!copy)
-    return 0;
-  int total = 0;
-  int terms = 0;
-  int matched_terms = 0;
-  int strong_terms = 0;
-  for (char *term = strtok(copy, " \t\r\n"); term;
-       term = strtok(NULL, " \t\r\n")) {
-    int full_s = field_match_score(e->full_name, term, 600);
-    int name_s = field_match_score(e->name, term, 550);
-    int sig_s = field_match_score(e->signature, term, 450);
-    int keyword_s = field_match_score(e->keywords, term, 700);
-    int path_s = field_match_score(e->path, term, 300);
-    int doc_s = field_match_score(e->doc, term, 80);
-    int code_s = field_match_score(e->code, term, 30);
-    int best = full_s;
-    if (name_s > best)
-      best = name_s;
-    if (sig_s > best)
-      best = sig_s;
-    if (keyword_s > best)
-      best = keyword_s;
-    if (path_s > best)
-      best = path_s;
-    if (doc_s > best)
-      best = doc_s;
-    if (code_s > best)
-      best = code_s;
-    if (best <= 0) {
-      terms++;
-      continue;
-    }
-    matched_terms++;
-    if (best >= 10000)
-      strong_terms++;
-    int support = 0;
-    if (full_s > 0)
-      support += full_s > 500 ? 500 : full_s;
-    if (name_s > 0)
-      support += name_s > 650 ? 650 : name_s;
-    if (sig_s > 0)
-      support += sig_s > 450 ? 450 : sig_s;
-    if (keyword_s > 0)
-      support += keyword_s > 700 ? 700 : keyword_s;
-    if (doc_s > 0)
-      support += doc_s > 550 ? 550 : doc_s;
-    if (path_s > 0)
-      support += path_s > 180 ? 180 : path_s;
-    if (code_s > 0)
-      support += code_s > 80 ? 80 : code_s;
-    total += best + support;
-    terms++;
-  }
-  free(copy);
-  if (!terms || !matched_terms)
-    return 0;
-  if ((terms >= 4 && matched_terms < terms - 1) ||
-      (terms == 3 && matched_terms < 2))
-    return 0;
-  if (terms > 1 && matched_terms < terms) {
-    if (terms <= 2)
-      return 0;
-    if (matched_terms * 2 < terms && strong_terms == 0)
-      return 0;
-    total -= (terms - matched_terms) * 2400;
-  }
-  total += matched_terms * 1200;
-  if (matched_terms == terms)
-    total += 3000;
-  if (e->kind && strcmp(e->kind, "function") == 0) {
-    const char *leaf = strrchr(e->full_name ? e->full_name : e->name, '.');
-    leaf = leaf ? leaf + 1 : (e->name ? e->name : "");
-    int explicit_private = query && strchr(query, '_');
-    if (leaf[0] == '_' && !explicit_private)
-      total -= 2500;
-    else if (leaf[0] != '_')
-      total += 300;
-  }
-  return total > 0 ? total : 1;
-}
-
-static int doc_entry_score(const doc_search_entry_t *e, const char *query) {
-  if (!doc_search_query_has_alt(query))
-    return doc_entry_score_terms(e, query);
-
-  int best = 0;
-  const char *start = query;
-  const char *p = query;
-  while (p && *p) {
-    if (*p != '|' && !(*p == '\\' && p[1] == '|')) {
-      p++;
-      continue;
-    }
-    char *part = doc_search_trimmed_slice(start, (size_t)(p - start));
-    if (part) {
-      int score = doc_entry_score_terms(e, part);
-      if (score > best)
-        best = score;
-      free(part);
-    }
-    p += (*p == '\\' && p[1] == '|') ? 2 : 1;
-    start = p;
-  }
-  char *part = doc_search_trimmed_slice(start, strlen(start));
-  if (part) {
-    int score = doc_entry_score_terms(e, part);
-    if (score > best)
-      best = score;
-    free(part);
-  }
-  return best;
-}
-
-static int cmp_doc_match_ptr(const void *a, const void *b) {
-  const doc_search_entry_t *ea = *(const doc_search_entry_t *const *)a;
-  const doc_search_entry_t *eb = *(const doc_search_entry_t *const *)b;
-  if (ea->score != eb->score)
-    return eb->score - ea->score;
-  int k = strcmp(ea->kind, eb->kind);
-  if (k)
-    return k;
-  return strcmp(ea->full_name, eb->full_name);
 }
 
 static void print_limited_text(const char *txt, int max_lines, int max_chars,
@@ -3740,8 +3536,8 @@ static int build_search_index(doc_search_index_t *idx, const char *root,
     *module_count = 0;
   if (symbol_count)
     *symbol_count = 0;
-  if (include_docs)
-    collect_all_docs(idx, root);
+  if (include_docs && !collect_all_docs(idx, root))
+    return 0;
   if (include_symbols) {
     int src_n = 0;
     char *bundle = read_web_input_bundle(input, root, &src_n);
@@ -3792,8 +3588,8 @@ static int doc_search_parse_args(int argc, char **argv, int get_one,
     }
     int color_mode = -2;
     int color_idx = i;
-    int color_rc = ny_arg_consume_color(&color_idx, argc, argv, &color_mode,
-                                        err, err_sz);
+    int color_rc =
+        ny_arg_consume_color(&color_idx, argc, argv, &color_mode, err, err_sz);
     if (color_rc < 0) {
       nyt_err("ny-doc", "%s", err);
       free(query_sb.data);
@@ -3846,8 +3642,7 @@ static int doc_search_parse_args(int argc, char **argv, int get_one,
   return 0;
 }
 
-static const char *doc_search_resolve_input(const char *root,
-                                            const char *input,
+static const char *doc_search_resolve_input(const char *root, const char *input,
                                             char *default_input) {
   if (input)
     return input;
@@ -3857,31 +3652,254 @@ static const char *doc_search_resolve_input(const char *root,
   return root;
 }
 
-static void doc_search_collect_matches(doc_search_index_t *idx,
+static unsigned char doc_rank_lower(unsigned char c) {
+  return c >= 'A' && c <= 'Z' ? (unsigned char)(c + ('a' - 'A')) : c;
+}
+
+static int doc_rank_equal_fold(const char *a, const char *b) {
+  if (!a || !b)
+    return (!a || !*a) && (!b || !*b);
+  while (*a && *b &&
+         doc_rank_lower((unsigned char)*a) ==
+             doc_rank_lower((unsigned char)*b)) {
+    ++a;
+    ++b;
+  }
+  return *a == '\0' && *b == '\0';
+}
+
+static int doc_rank_boundary(const char *value, size_t at) {
+  if (at == 0)
+    return 1;
+  unsigned char c = (unsigned char)value[at - 1];
+  return c == '.' || c == '/' || c == '-' || c == '_' || c == ' ' ||
+         (c >= 9 && c <= 13);
+}
+
+static int doc_rank_fuzzy(const char *candidate, const char *query) {
+  size_t cn = strlen(candidate ? candidate : "");
+  size_t qn = strlen(query ? query : "");
+  if (!cn || !qn)
+    return 0;
+  if (qn <= cn) {
+    for (size_t at = 0; at <= cn - qn; ++at) {
+      size_t i = 0;
+      while (i < qn && doc_rank_lower((unsigned char)candidate[at + i]) ==
+                           doc_rank_lower((unsigned char)query[i]))
+        ++i;
+      if (i == qn) {
+        int score = 10000 + (at == 0 ? 2000 : 0) +
+                    (doc_rank_boundary(candidate, at) ? 700 : 0);
+        size_t gap = cn - qn;
+        if (gap > 0 && gap < 200)
+          score += (int)(200 - gap);
+        return score;
+      }
+    }
+  }
+  int score = 0, streak = 0;
+  size_t last = SIZE_MAX;
+  for (size_t qi = 0; qi < qn; ++qi) {
+    size_t ci = last == SIZE_MAX ? 0 : last + 1;
+    while (ci < cn && doc_rank_lower((unsigned char)candidate[ci]) !=
+                          doc_rank_lower((unsigned char)query[qi]))
+      ++ci;
+    if (ci == cn)
+      return 0;
+    score += 20 + (doc_rank_boundary(candidate, ci) ? 20 : 0);
+    if (last != SIZE_MAX && ci == last + 1) {
+      ++streak;
+      score += 15 + streak * 2;
+    } else {
+      streak = 0;
+    }
+    last = ci;
+  }
+  return score;
+}
+
+static int doc_rank_field_score(const char *field, const char *term,
+                                int weight) {
+  int score = doc_rank_fuzzy(field, term);
+  return score ? score + weight : 0;
+}
+
+static int doc_rank_max(int a, int b) { return a > b ? a : b; }
+static int doc_rank_min(int a, int b) { return a < b ? a : b; }
+
+static int doc_rank_score_terms(const doc_search_entry_t *e, char *query) {
+  const char *full = e->full_name ? e->full_name : "";
+  const char *name = e->name ? e->name : "";
+  if (*query) {
+    if (doc_rank_equal_fold(full, query))
+      return 1000000;
+    if (doc_rank_equal_fold(name, query))
+      return 950000;
+    const char *leaf = strrchr(full, '.');
+    if (leaf && doc_rank_equal_fold(leaf + 1, query))
+      return 925000;
+  }
+  size_t qn = strlen(query), terms = 0, matched = 0, strong = 0;
+  int total = 0;
+  for (size_t start = 0; start < qn;) {
+    while (start < qn && isspace((unsigned char)query[start]))
+      ++start;
+    if (start == qn)
+      break;
+    size_t end = start;
+    while (end < qn && !isspace((unsigned char)query[end]))
+      ++end;
+    char saved = query[end];
+    query[end] = '\0';
+    const char *term = query + start;
+    ++terms;
+    const char *fields[] = {full,
+                            name,
+                            e->signature ? e->signature : "",
+                            e->keywords ? e->keywords : "",
+                            e->path ? e->path : "",
+                            e->doc ? e->doc : "",
+                            e->code ? e->code : ""};
+    const int weights[] = {600, 550, 450, 700, 300, 80, 30};
+    const int caps[] = {500, 650, 450, 700, 180, 550, 80};
+    int scores[7], best = 0;
+    for (size_t i = 0; i < 7; ++i) {
+      scores[i] = doc_rank_field_score(fields[i], term, weights[i]);
+      best = doc_rank_max(best, scores[i]);
+    }
+    if (best) {
+      ++matched;
+      if (best >= 10000)
+        ++strong;
+      total += best;
+      for (size_t i = 0; i < 7; ++i)
+        total += doc_rank_min(scores[i], caps[i]);
+    }
+    query[end] = saved;
+    start = end;
+  }
+  if (!matched)
+    return 0;
+  if ((terms >= 4 && matched < terms - 1) || (terms == 3 && matched < 2))
+    return 0;
+  if (terms > 1 && matched < terms) {
+    if (terms <= 2 || (matched * 2 < terms && !strong))
+      return 0;
+    total -= (int)(terms - matched) * 2400;
+  }
+  total += (int)matched * 1200;
+  if (matched == terms)
+    total += 3000;
+  if (e->kind && strcmp(e->kind, "function") == 0) {
+    const char *qualified = *full ? full : name;
+    const char *dot = strrchr(qualified, '.');
+    const char *leaf = dot ? dot + 1 : name;
+    if (*leaf == '_' && !strchr(query, '_'))
+      total -= 2500;
+    else if (*leaf != '_')
+      total += 300;
+  }
+  return total > 0 ? total : 1;
+}
+
+static int doc_rank_score(const doc_search_entry_t *e, char *query) {
+  size_t qn = strlen(query ? query : "");
+  if (!qn)
+    return 0;
+  int has_alt = 0;
+  for (size_t i = 0; i < qn; ++i)
+    if (query[i] == '|' ||
+        (query[i] == '\\' && i + 1 < qn && query[i + 1] == '|')) {
+      has_alt = 1;
+      break;
+    }
+  if (!has_alt)
+    return doc_rank_score_terms(e, query);
+  int best = 0;
+  size_t start = 0;
+  for (size_t i = 0; i <= qn; ++i) {
+    if (i < qn && query[i] != '|' &&
+        !(query[i] == '\\' && i + 1 < qn && query[i + 1] == '|'))
+      continue;
+    size_t left = start, right = i;
+    while (left < right && isspace((unsigned char)query[left]))
+      ++left;
+    while (right > left && isspace((unsigned char)query[right - 1]))
+      --right;
+    char saved = query[right];
+    query[right] = '\0';
+    best = doc_rank_max(best, doc_rank_score_terms(e, query + left));
+    query[right] = saved;
+    if (i < qn && query[i] == '\\')
+      ++i;
+    start = i + 1;
+  }
+  return best;
+}
+
+typedef struct {
+  doc_search_entry_t *entry;
+  size_t source_order;
+  int score;
+} doc_search_match_t;
+
+static int doc_search_match_compare(const void *left, const void *right) {
+  const doc_search_match_t *a = (const doc_search_match_t *)left;
+  const doc_search_match_t *b = (const doc_search_match_t *)right;
+  if (a->score != b->score)
+    return a->score > b->score ? -1 : 1;
+  int kind = strcmp(a->entry->kind ? a->entry->kind : "",
+                    b->entry->kind ? b->entry->kind : "");
+  if (kind)
+    return kind;
+  int name = strcmp(a->entry->full_name ? a->entry->full_name : "",
+                    b->entry->full_name ? b->entry->full_name : "");
+  if (name)
+    return name;
+  return (a->source_order > b->source_order) -
+         (a->source_order < b->source_order);
+}
+
+static bool doc_search_collect_matches(doc_search_index_t *idx,
                                        const char *query,
                                        doc_search_entry_t ***matches_out,
                                        size_t *match_n_out) {
-  doc_search_entry_t **matches = NULL;
-  size_t match_n = 0, match_cap = 0;
-  for (size_t i = 0; i < idx->len; i++) {
-    int score = doc_entry_score(&idx->items[i], query);
-    if (score <= 0)
-      continue;
-    idx->items[i].score = score;
-    if (match_n == match_cap) {
-      size_t next_cap = match_cap ? match_cap * 2 : 128;
-      doc_search_entry_t **next = (doc_search_entry_t **)realloc(
-          matches, next_cap * sizeof(doc_search_entry_t *));
-      if (!next)
-        break;
-      matches = next;
-      match_cap = next_cap;
-    }
-    matches[match_n++] = &idx->items[i];
+  *matches_out = NULL;
+  *match_n_out = 0;
+  if (!idx->len)
+    return true;
+  doc_search_match_t *ranked =
+      (doc_search_match_t *)malloc(idx->len * sizeof(*ranked));
+  if (!ranked)
+    return false;
+  char *query_copy = strdup(query ? query : "");
+  if (!query_copy) {
+    free(ranked);
+    return false;
   }
-  qsort(matches, match_n, sizeof(*matches), cmp_doc_match_ptr);
+  size_t count = 0;
+  for (size_t i = 0; i < idx->len; ++i) {
+    int score = doc_rank_score(&idx->items[i], query_copy);
+    if (!score)
+      continue;
+    ranked[count++] = (doc_search_match_t){
+        .entry = &idx->items[i], .source_order = i, .score = score};
+  }
+  free(query_copy);
+  if (count > 1)
+    qsort(ranked, count, sizeof(*ranked), doc_search_match_compare);
+  doc_search_entry_t **matches =
+      count ? (doc_search_entry_t **)malloc(count * sizeof(*matches)) : NULL;
+  if (count && !matches) {
+    free(ranked);
+    return false;
+  }
+  for (size_t i = 0; i < count; ++i)
+    matches[i] = ranked[i].entry;
+  free(ranked);
   *matches_out = matches;
-  *match_n_out = match_n;
+  *match_n_out = count;
+  return true;
 }
 
 static int ny_doc_search_main(int argc, char **argv, int get_one) {
@@ -3916,7 +3934,11 @@ static int ny_doc_search_main(int argc, char **argv, int get_one) {
 
   doc_search_entry_t **matches = NULL;
   size_t match_n = 0;
-  doc_search_collect_matches(&idx, opts.query, &matches, &match_n);
+  if (!doc_search_collect_matches(&idx, opts.query, &matches, &match_n)) {
+    doc_search_index_free(&idx);
+    free(opts.query);
+    return 1;
+  }
 
   if (get_one) {
     if (match_n == 0) {
@@ -3929,14 +3951,13 @@ static int ny_doc_search_main(int argc, char **argv, int get_one) {
     print_doc_entry_detail(matches[0]);
   } else {
     printf("%sny doc%s search '%s' %s(%zu matches, %zu indexed",
-           nyt_clr(NYT_BOLD), nyt_clr(NYT_RESET), opts.query,
-           nyt_clr(NYT_GRAY), match_n, idx.len);
+           nyt_clr(NYT_BOLD), nyt_clr(NYT_RESET), opts.query, nyt_clr(NYT_GRAY),
+           match_n, idx.len);
     if (opts.include_symbols)
       printf(", %d modules, %d symbols, %d source files", modules, symbols,
              source_files);
     printf(")%s\n", nyt_clr(NYT_RESET));
-    size_t shown =
-        match_n < (size_t)opts.limit ? match_n : (size_t)opts.limit;
+    size_t shown = match_n < (size_t)opts.limit ? match_n : (size_t)opts.limit;
     for (size_t i = 0; i < shown; i++)
       print_search_result(matches[i], (int)i + 1, opts.query);
     if (shown < match_n)
@@ -3976,7 +3997,6 @@ static char *replace_doc_template(const char *tpl, const char *data,
   return out.data;
 }
 
-static void sb_add_xml_escaped(sb_t *sb, const char *s);
 static void sb_add_html_escaped(sb_t *sb, const char *s);
 
 static void append_site_url(sb_t *out, const char *site, const char *rel) {
@@ -4010,6 +4030,10 @@ typedef struct {
   size_t cap;
 } ny_doc_meta_list_t;
 
+static char *ny_web_doc_collect_paths(const char *docs_dir);
+static char *json_read_string(const char **pp);
+static void ny_doc_meta_list_free(ny_doc_meta_list_t *list);
+
 static void ny_doc_meta_list_push(ny_doc_meta_list_t *list, char *route,
                                   char *title, char *path, time_t mtime) {
   if (!list || !route || !title) {
@@ -4034,55 +4058,106 @@ static void ny_doc_meta_list_push(ny_doc_meta_list_t *list, char *route,
   list->data[list->len++] = (ny_doc_meta_entry_t){route, title, path, mtime};
 }
 
-static void ny_doc_meta_collect_dir(const char *base_dir, const char *dir,
-                                    ny_doc_meta_list_t *list) {
-  DIR *d = opendir(dir);
-  if (!d)
-    return;
-  char **names = NULL;
-  int names_n = 0, names_cap = 0;
-  struct dirent *ent;
-  while ((ent = readdir(d))) {
-    if (web_skip_source_dir(ent->d_name))
-      continue;
-    if (names_n == names_cap) {
-      int next_cap = names_cap ? names_cap * 2 : 32;
-      char **next = (char **)realloc(names, (size_t)next_cap * sizeof(*names));
-      if (!next)
-        break;
-      names = next;
-      names_cap = next_cap;
-    }
-    names[names_n++] = strdup(ent->d_name);
-  }
-  closedir(d);
-  qsort(names, (size_t)names_n, sizeof(char *), cmp_cstr_ptr);
-  for (int i = 0; i < names_n; i++) {
-    char path[PATH_MAX];
-    if (join_path(path, sizeof(path), dir, names[i])) {
-      if (path_is_dir(path)) {
-        ny_doc_meta_collect_dir(base_dir, path, list);
-      } else if (docs_file_supported(path)) {
-        char *route = doc_route_name(base_dir, path);
-        char *title = doc_title_from_route(route);
-        char *doc_path = strdup(path);
-        struct stat st;
-        time_t mtime = stat(path, &st) == 0 ? st.st_mtime : 0;
-        ny_doc_meta_list_push(list, route, title, doc_path, mtime);
+static char *ny_doc_meta_title_from_source(const char *source) {
+  if (!source)
+    return NULL;
+  size_t len = strlen(source), start = 0;
+  while (start < len) {
+    size_t stop = start;
+    while (stop < len && source[stop] != '\n')
+      ++stop;
+    size_t left = start, right = stop;
+    while (left < right && (source[left] == ' ' || source[left] == '\t'))
+      ++left;
+    if (right > left && source[right - 1] == '\r')
+      --right;
+    if (right - left >= 2 && source[left] == ';' && source[left + 1] == ';') {
+      left += 2;
+      while (left < right && (source[left] == ' ' || source[left] == '\t'))
+        ++left;
+      bool keywords =
+          right - left >= 9 && strncasecmp(source + left, "keywords:", 9) == 0;
+      if (!keywords) {
+        size_t title_len = right - left;
+        if (title_len && title_len < 256)
+          return strndup0(source + left, title_len);
       }
+    } else if (right > left && source[left] != '#') {
+      break;
     }
-    free(names[i]);
+    start = stop < len ? stop + 1 : len;
   }
-  free(names);
+  return NULL;
 }
 
-static void ny_doc_meta_collect(const char *root, ny_doc_meta_list_t *list) {
-  if (!root || !*root || !list)
-    return;
+static bool ny_doc_meta_collect_from_ny(const char *root,
+                                        ny_doc_meta_list_t *list) {
+  if (!root || !list)
+    return false;
   char docs_dir[PATH_MAX];
-  if (join_path(docs_dir, sizeof(docs_dir), root, "docs") &&
-      path_is_dir(docs_dir))
-    ny_doc_meta_collect_dir(docs_dir, docs_dir, list);
+  if (!join_path(docs_dir, sizeof(docs_dir), root, "docs"))
+    return false;
+  char *json = ny_web_doc_collect_paths(docs_dir);
+  if (!json)
+    return false;
+  const char *p = json;
+  while (isspace((unsigned char)*p))
+    p++;
+  if (*p != '[') {
+    free(json);
+    return false;
+  }
+  p++;
+  bool ok = true;
+  for (;;) {
+    while (isspace((unsigned char)*p))
+      p++;
+    if (*p == ']') {
+      p++;
+      break;
+    }
+    char *doc_path = json_read_string(&p);
+    if (!doc_path || !docs_file_supported(doc_path) ||
+        !path_is_under(docs_dir, doc_path) || path_is_dir(doc_path)) {
+      free(doc_path);
+      ok = false;
+      break;
+    }
+    char *route = doc_route_name(docs_dir, doc_path);
+    char *source = ny_read_file_raw(doc_path, NULL);
+    char *title = source ? ny_doc_meta_title_from_source(source) : NULL;
+    free(source);
+    if (!route || !title)
+      if (route && !title)
+        title = doc_title_from_route(route);
+    if (!route || !title) {
+      free(route);
+      free(title);
+      free(doc_path);
+      ok = false;
+      break;
+    }
+    struct stat st;
+    time_t mtime = stat(doc_path, &st) == 0 ? st.st_mtime : 0;
+    ny_doc_meta_list_push(list, route, title, doc_path, mtime);
+    while (isspace((unsigned char)*p))
+      ++p;
+    if (*p == ',')
+      ++p;
+    else if (*p != ']') {
+      ok = false;
+      break;
+    }
+  }
+  while (isspace((unsigned char)*p))
+    p++;
+  ok = ok && *p == '\0';
+  free(json);
+  if (!ok) {
+    ny_doc_meta_list_free(list);
+    return false;
+  }
+  return true;
 }
 
 static void append_doc_url(sb_t *out, const char *site, const char *route) {
@@ -4146,8 +4221,7 @@ static void append_site_open_graph(sb_t *out, const char *site,
   sb_add_html_escaped(out, root_url->data ? root_url->data : "");
   sb_add(out, "\" />\n    <meta property=\"og:image\" content=\"");
   sb_add_html_escaped(out, logo_url->data ? logo_url->data : "");
-  sb_add(out,
-         "\" />\n    <meta property=\"og:image:secure_url\" content=\"");
+  sb_add(out, "\" />\n    <meta property=\"og:image:secure_url\" content=\"");
   sb_add_html_escaped(out, logo_url->data ? logo_url->data : "");
   sb_add(out,
          "\" />\n    <meta property=\"og:image:width\" content=\"1200\" />\n"
@@ -4185,12 +4259,11 @@ static void append_site_ld_json(sb_t *out, const char *site,
   sb_add(out, ", ");
   sb_add_json_str(out, "https://mastodon.social/@nytrix");
   sb_add(out, "]");
-  sb_add(
-      out,
-      ",\n                    \"about\": [\"native programming language\", "
-      "\"compiler\", \"compile-time execution\", \"native FFI\", \"C ABI\", "
-      "\"standard library\", \"networking\", \"native FFI\", \"parsing\"],\n"
-      "                    \"hasPart\": [");
+  sb_add(out,
+         ",\n                    \"about\": [\"native programming language\", "
+         "\"compiler\", \"compile-time execution\", \"native FFI\", \"C ABI\", "
+         "\"standard library\", \"networking\", \"native FFI\", \"parsing\"],\n"
+         "                    \"hasPart\": [");
   for (size_t i = 0; i < docs->len; i++) {
     if (i)
       sb_add(out, ",");
@@ -4250,7 +4323,10 @@ static void append_site_ld_json(sb_t *out, const char *site,
 
 static char *render_site_head(const char *site, const char *root) {
   ny_doc_meta_list_t docs = {0};
-  ny_doc_meta_collect(root, &docs);
+  if (!ny_doc_meta_collect_from_ny(root, &docs)) {
+    nyt_err("ny-doc", "Ny documentation metadata collection failed");
+    return NULL;
+  }
   sb_t root_url = {0}, logo_url = {0}, feed_url = {0}, out = {0};
   if (site && *site) {
     append_site_url(&root_url, site, "");
@@ -4297,10 +4373,77 @@ static void sb_add_html_escaped(sb_t *sb, const char *s) {
 }
 
 static void sb_add_html_escapedn(sb_t *sb, const char *s, size_t n) {
+  if (!s || n == 0)
+    return;
+  /*
+   * Work out the final size first.  Documentation often contains many angle
+   * brackets in code samples; appending each entity through sb_add() used to
+   * reserve/check the buffer once per character.
+   */
+  size_t extra = 0;
   for (size_t i = 0; i < n; i++) {
-    char tmp[2] = {s[i], 0};
-    sb_add_html_escaped(sb, tmp);
+    size_t add = 0;
+    switch (s[i]) {
+    case '&':
+      add = 4;
+      break;
+    case '<':
+    case '>':
+      add = 3;
+      break;
+    case '"':
+      add = 5;
+      break;
+    case '\0':
+      break;
+    default:
+      continue;
+    }
+    if (extra > SIZE_MAX - add)
+      return;
+    extra += add;
   }
+  if (extra > SIZE_MAX - n)
+    return;
+  size_t expanded = n + extra;
+  if (expanded == SIZE_MAX || sb->len > SIZE_MAX - expanded - 1 ||
+      !ny_strbuf_reserve(sb, expanded + 1))
+    return;
+
+  size_t write = sb->len;
+  for (size_t i = 0; i < n; i++) {
+    const char *entity = NULL;
+    size_t entity_len = 0;
+    switch (s[i]) {
+    case '&':
+      entity = "&amp;";
+      entity_len = 5;
+      break;
+    case '<':
+      entity = "&lt;";
+      entity_len = 4;
+      break;
+    case '>':
+      entity = "&gt;";
+      entity_len = 4;
+      break;
+    case '"':
+      entity = "&quot;";
+      entity_len = 6;
+      break;
+    case '\0':
+      break;
+    default:
+      sb->data[write++] = s[i];
+      continue;
+    }
+    if (entity) {
+      memcpy(sb->data + write, entity, entity_len);
+      write += entity_len;
+    }
+  }
+  sb->len = write;
+  sb->data[write] = '\0';
 }
 
 static void append_static_site_end_html(sb_t *html, const char *feed_href) {
@@ -4400,18 +4543,22 @@ static char *markdown_summary(const char *md) {
   return strdup("Nytrix documentation page.");
 }
 
-static int href_is_external(const char *href) {
-  if (!href || !*href)
+static int href_span_is_external(const char *href, size_t len) {
+  if (!href || len == 0)
     return 0;
-  if (href[0] == '/' && href[1] == '/')
+  if (len > 1 && href[0] == '/' && href[1] == '/')
     return 1;
-  for (const char *p = href; *p; p++) {
-    if (*p == ':')
+  for (size_t i = 0; i < len; i++) {
+    if (href[i] == ':')
       return 1;
-    if (*p == '/' || *p == '#' || *p == '?')
+    if (href[i] == '/' || href[i] == '#' || href[i] == '?')
       return 0;
   }
   return 0;
+}
+
+static int href_is_external(const char *href) {
+  return href ? href_span_is_external(href, strlen(href)) : 0;
 }
 
 static char *doc_route_from_href_static(const char *base_route,
@@ -4440,23 +4587,25 @@ static char *doc_route_from_href_static(const char *base_route,
   for (char *p = path; *p; p++)
     if (*p == '\\')
       *p = '/';
-  while (strncmp(path, "./", 2) == 0)
-    memmove(path, path + 2, strlen(path + 2) + 1);
-  while (path[0] == '/')
-    memmove(path, path + 1, strlen(path));
-  if (strncmp(path, "docs/", 5) == 0)
-    memmove(path, path + 5, strlen(path + 5) + 1);
-  char *dot = strrchr(path, '.');
+  char *path_start = path;
+  while (strncmp(path_start, "./", 2) == 0)
+    path_start += 2;
+  while (path_start[0] == '/')
+    path_start++;
+  if (strncmp(path_start, "docs/", 5) == 0)
+    path_start += 5;
+  char *dot = strrchr(path_start, '.');
   if (dot &&
       (!strcmp(dot, ".md") || !strcmp(dot, ".html") || !strcmp(dot, ".htm")))
     *dot = '\0';
-  size_t l = strlen(path);
-  if (l >= 6 && strcmp(path + l - 6, "/index") == 0)
-    path[l - 6] = '\0';
+  size_t l = strlen(path_start);
+  if (l >= 6 && strcmp(path_start + l - 6, "/index") == 0)
+    path_start[l - 6] = '\0';
 
   char combined[PATH_MAX];
   combined[0] = '\0';
-  int root_doc_path = !strncmp(path, "learn/", 6) || !strncmp(path, "spec/", 5);
+  int root_doc_path =
+      !strncmp(path_start, "learn/", 6) || !strncmp(path_start, "spec/", 5);
   if (href[0] != '/' && strncmp(href, "docs/", 5) != 0 && !root_doc_path &&
       base_route && *base_route) {
     snprintf(combined, sizeof(combined), "%s", base_route);
@@ -4466,9 +4615,9 @@ static char *doc_route_from_href_static(const char *base_route,
     else
       combined[0] = '\0';
   }
-  if (combined[0] && path[0])
+  if (combined[0] && path_start[0])
     strncat(combined, "/", sizeof(combined) - strlen(combined) - 1);
-  strncat(combined, path, sizeof(combined) - strlen(combined) - 1);
+  strncat(combined, path_start, sizeof(combined) - strlen(combined) - 1);
 
   char buf[PATH_MAX];
   snprintf(buf, sizeof(buf), "%s", combined);
@@ -4544,6 +4693,20 @@ static void markdown_render_inline(sb_t *out, const char *s, size_t n,
         const char *href_start = label_end + 2;
         const char *href_end = memchr(href_start, ')', s + n - href_start);
         if (href_end) {
+          size_t href_n = (size_t)(href_end - href_start);
+          if (href_span_is_external(href_start, href_n)) {
+            /*
+             * External links need no route normalization or temporary copy.
+             */
+            sb_add(out, "<a href=\"");
+            sb_add_html_escapedn(out, href_start, href_n);
+            sb_add(out, "\" rel=\"noopener noreferrer\">");
+            markdown_render_inline(out, s + i + 1,
+                                   (size_t)(label_end - (s + i + 1)), route);
+            sb_add(out, "</a>");
+            i = (size_t)(href_end - s);
+            continue;
+          }
           char *href = strndup0(href_start, (size_t)(href_end - href_start));
           char *anchor = NULL;
           char *doc_route = doc_route_from_href_static(route, href, &anchor);
@@ -4569,8 +4732,16 @@ static void markdown_render_inline(sb_t *out, const char *s, size_t n,
         }
       }
     }
-    char tmp[2] = {c, 0};
-    sb_add_html_escaped(out, tmp);
+    if (!in_code && c == '[') {
+      sb_add_html_escapedn(out, s + i, 1);
+      continue;
+    }
+    size_t start = i;
+    do {
+      i++;
+    } while (i < n && s[i] != '`' && (in_code || s[i] != '['));
+    sb_add_html_escapedn(out, s + start, i - start);
+    i--;
   }
   if (in_code)
     sb_add(out, "</code>");
@@ -4635,8 +4806,8 @@ static void render_md_code_block(sb_t *out, const char *p, size_t len,
   while (off < len && isspace((unsigned char)p[off]))
     off++;
   size_t lang_start = off;
-  while (off < len && (isalnum((unsigned char)p[off]) || p[off] == '_' ||
-                       p[off] == '-'))
+  while (off < len &&
+         (isalnum((unsigned char)p[off]) || p[off] == '_' || p[off] == '-'))
     off++;
   if (off > lang_start) {
     sb_add(out, " class=\"language-");
@@ -4723,6 +4894,14 @@ static void render_md_line(sb_t *out, const char *p, size_t len,
 
 static char *render_markdown_static(const char *md, const char *route) {
   sb_t out = {0};
+  size_t source_len = md ? strlen(md) : 0;
+  /*
+   * Most output bytes are input text plus compact tags.  Reserving the input
+   * once avoids repeated reallocations for large pages while keeping the
+   * reserve proportional to source size.
+   */
+  if (source_len < SIZE_MAX - 1)
+    (void)ny_strbuf_reserve(&out, source_len + 1);
   int in_code = 0, in_ul = 0, in_table = 0;
   for (const char *line = md ? md : ""; *line;) {
     const char *next = strchr(line, '\n');
@@ -4762,7 +4941,7 @@ static int write_static_doc_page(const char *out_dir, const char *site,
                                  const char *summary, const char *body_html) {
   char safe[PATH_MAX], dir[PATH_MAX], path[PATH_MAX];
   if (!safe_route_path(safe, sizeof(safe), route) ||
-      !join_path(dir, sizeof(dir), out_dir, safe) || !mkdir_p(dir) ||
+      !join_path(dir, sizeof(dir), out_dir, safe) || !ny_mkdir_p(dir) ||
       !join_path(path, sizeof(path), dir, "index.html"))
     return 0;
   sb_t canonical = {0}, app = {0}, feed = {0}, root_rel = {0}, html = {0};
@@ -4844,7 +5023,8 @@ static int write_static_doc_page(const char *out_dir, const char *site,
       "flex;flex-wrap:wrap;gap:6px}.site-links a{display:inline-flex;align-"
       "items:center;min-height:24px;padding:3px 7px;border:1px solid #292832;"
       "background:#020203;font:700 11px ui-monospace,monospace}.site-links "
-      "a.primary{color:#d6d3e6;border-color:rgba(182,160,255,.32)}</style></head>"
+      "a.primary{color:#d6d3e6;border-color:rgba(182,160,255,.32)}</style></"
+      "head>"
       "<body><main><a "
       "class=\"open\" "
       "href=\"");
@@ -4984,14 +5164,17 @@ static void append_rss_item(sb_t *rss, const char *title, const char *link,
   sb_add(rss, "</description>\n    </item>\n");
 }
 
-static void write_rss_feed(const char *out_dir, const char *site,
+static bool write_rss_feed(const char *out_dir, const char *site,
                            const char *root) {
   char path[PATH_MAX];
   if (!join_path(path, sizeof(path), out_dir, "feed.xml"))
-    return;
+    return false;
 
   ny_doc_meta_list_t docs = {0};
-  ny_doc_meta_collect(root, &docs);
+  if (!ny_doc_meta_collect_from_ny(root, &docs)) {
+    nyt_err("ny-doc", "Ny documentation metadata collection failed");
+    return false;
+  }
   if (docs.len > 1)
     qsort(docs.data, docs.len, sizeof(*docs.data), cmp_doc_meta_recent);
   time_t latest = doc_meta_latest_mtime(&docs);
@@ -5049,97 +5232,70 @@ static void write_rss_feed(const char *out_dir, const char *site,
     free(page_url.data);
     free(summary);
   }
-  append_rss_item(&rss, "Nytrix Standard Library API",
-                  api_url.data ? api_url.data : "api/",
-                  "Source-linked map for the bundled standard library.", "API",
-                  latest);
+  append_rss_item(
+      &rss, "Nytrix Standard Library API", api_url.data ? api_url.data : "api/",
+      "Source-linked map for the bundled standard library.", "API", latest);
   sb_add(&rss, "  </channel>\n</rss>\n");
 
-  ny_write_file(path, rss.data ? rss.data : "",
-                rss.data ? strlen(rss.data) : 0);
+  bool ok = ny_write_file(path, rss.data ? rss.data : "",
+                          rss.data ? strlen(rss.data) : 0) == 0;
   ny_doc_meta_list_free(&docs);
   free(root_url.data);
   free(api_url.data);
   free(feed_url.data);
   free(rss.data);
+  return ok;
 }
 
-static void generate_static_docs_from_dir(const char *out_dir,
-                                          const char *root,
-                                          const char *docs_dir, const char *dir,
-                                          const char *site, sb_t *sitemap,
-                                          sb_t *plain, sb_t *full,
-                                          int recursive, int *count) {
-  DIR *d = opendir(dir);
-  if (!d)
+static void generate_static_doc_file(const char *out_dir, const char *root,
+                                     const char *docs_dir, const char *path,
+                                     const char *site, sb_t *sitemap,
+                                     sb_t *plain, sb_t *full, int *count,
+                                     const char *rendered_body) {
+  if (!path_has_suffix(path, ".md"))
     return;
-  char **names = NULL;
-  int names_n = 0, names_cap = 0;
-  struct dirent *ent;
-  while ((ent = readdir(d))) {
-    if (web_skip_source_dir(ent->d_name))
-      continue;
-    if (names_n == names_cap) {
-      int next_cap = names_cap ? names_cap * 2 : 32;
-      char **next = (char **)realloc(names, (size_t)next_cap * sizeof(char *));
-      if (!next)
-        break;
-      names = next;
-      names_cap = next_cap;
-    }
-    names[names_n++] = strdup(ent->d_name);
+  char *route = doc_route_name(docs_dir, path);
+  char *title = doc_title_from_route(route);
+  char *txt = ny_read_file_raw(path, NULL);
+  char *expanded = prepare_markdown_doc_body(root, txt);
+  char *summary = markdown_summary(expanded);
+  char *body = rendered_body ? strdup(rendered_body)
+                             : render_markdown_static(expanded, route);
+  if (route && title && body &&
+      write_static_doc_page(out_dir, site, route, title, summary, body)) {
+    char safe[PATH_MAX];
+    if (site && *site && safe_route_path(safe, sizeof(safe), route))
+      append_sitemap_url(
+          sitemap, site, safe,
+          strstr(route, "learn/") || strstr(route, "spec/") ? "0.84" : "0.64");
   }
-  closedir(d);
-  qsort(names, (size_t)names_n, sizeof(char *), cmp_cstr_ptr);
-  for (int i = 0; i < names_n; i++) {
-    char path[PATH_MAX];
-    if (join_path(path, sizeof(path), dir, names[i])) {
-      if (recursive && path_is_dir(path)) {
-        generate_static_docs_from_dir(out_dir, root, docs_dir, path, site,
-                                      sitemap, plain, full, recursive, count);
-      } else if (path_has_suffix(path, ".md")) {
-        char *route = doc_route_name(docs_dir, path);
-        char *title = doc_title_from_route(route);
-        char *txt = ny_read_file_raw(path, NULL);
-        char *expanded = prepare_markdown_doc_body(root, txt);
-        char *summary = markdown_summary(expanded);
-        char *body = render_markdown_static(expanded, route);
-        if (route && title && body &&
-            write_static_doc_page(out_dir, site, route, title, summary, body)) {
-          char safe[PATH_MAX];
-          if (site && *site && safe_route_path(safe, sizeof(safe), route))
-            append_sitemap_url(sitemap, site, safe,
-                               strstr(route, "learn/") || strstr(route, "spec/")
-                                   ? "0.84"
-                                   : "0.64");
-        }
-        if (route && title) {
-          sb_add(plain, "- [");
-          sb_add(plain, title);
-          sb_add(plain, "](");
-          sb_add(plain, route);
-          sb_add(plain, "/): ");
-          sb_add(plain, summary);
-          sb_add(plain, "\n");
-          sb_add(full, "\n\n# ");
-          sb_add(full, title);
-          sb_add(full, "\n\n");
-          sb_add(full, txt ? txt : "");
-          if (count)
-            (*count)++;
-        }
-        free(route);
-        free(title);
-        free(txt);
-        free(expanded);
-        free(summary);
-        free(body);
-      }
-    }
-    free(names[i]);
+  if (route && title) {
+    sb_add(plain, "- [");
+    sb_add(plain, title);
+    sb_add(plain, "](");
+    sb_add(plain, route);
+    sb_add(plain, "/): ");
+    sb_add(plain, summary);
+    sb_add(plain, "\n");
+    sb_add(full, "\n\n# ");
+    sb_add(full, title);
+    sb_add(full, "\n\n");
+    sb_add(full, txt ? txt : "");
+    if (count)
+      (*count)++;
   }
-  free(names);
+  free(route);
+  free(title);
+  free(txt);
+  free(expanded);
+  free(summary);
+  free(body);
 }
+
+static int generate_static_docs_from_ny(const char *out_dir, const char *root,
+                                        const char *docs_dir, const char *dir,
+                                        const char *site, sb_t *sitemap,
+                                        sb_t *plain, sb_t *full, int *count);
 
 static char *json_read_string(const char **pp) {
   const char *p = *pp;
@@ -5174,12 +5330,166 @@ static char *json_read_string(const char **pp) {
   return NULL;
 }
 
+static int ny_web_doc_paths_decode(const char *json, char ***out_paths,
+                                   size_t *out_len) {
+  if (!json || !out_paths || !out_len)
+    return 0;
+  char **paths = NULL;
+  size_t len = 0, cap = 0;
+  const char *p = json;
+  while (isspace((unsigned char)*p))
+    p++;
+  int ok = *p == '[';
+  if (ok)
+    p++;
+  while (ok) {
+    while (isspace((unsigned char)*p))
+      p++;
+    if (*p == ']') {
+      p++;
+      break;
+    }
+    char *path = json_read_string(&p);
+    if (!path || len >= 100000) {
+      free(path);
+      ok = 0;
+      break;
+    }
+    if (len == cap) {
+      size_t next_cap = cap ? cap * 2 : 32;
+      char **next = (char **)realloc(paths, next_cap * sizeof(*paths));
+      if (!next) {
+        free(path);
+        ok = 0;
+        break;
+      }
+      paths = next;
+      cap = next_cap;
+    }
+    paths[len++] = path;
+    while (isspace((unsigned char)*p))
+      p++;
+    if (*p == ',') {
+      p++;
+      continue;
+    }
+    if (*p == ']') {
+      p++;
+      break;
+    }
+    ok = 0;
+  }
+  while (isspace((unsigned char)*p))
+    p++;
+  ok = ok && *p == '\0';
+  if (!ok) {
+    for (size_t i = 0; i < len; i++)
+      free(paths[i]);
+    free(paths);
+    return 0;
+  }
+  *out_paths = paths;
+  *out_len = len;
+  return 1;
+}
+
+static int generate_static_docs_from_ny(const char *out_dir, const char *root,
+                                        const char *docs_dir, const char *dir,
+                                        const char *site, sb_t *sitemap,
+                                        sb_t *plain, sb_t *full, int *count) {
+  char *encoded_paths = ny_web_doc_collect_paths(dir);
+  if (!encoded_paths)
+    return 0;
+  char **paths = NULL;
+  size_t len = 0;
+  int ok = ny_web_doc_paths_decode(encoded_paths, &paths, &len);
+  free(encoded_paths);
+  if (!ok)
+    return 0;
+  for (size_t i = 0; i < len; i++) {
+    if (!docs_file_supported(paths[i]) || !path_is_under(dir, paths[i]) ||
+        path_is_dir(paths[i])) {
+      for (size_t j = 0; j < len; j++)
+        free(paths[j]);
+      free(paths);
+      return 0;
+    }
+  }
+  for (size_t i = 0; i < len; i++) {
+    generate_static_doc_file(out_dir, root, docs_dir, paths[i], site, sitemap,
+                             plain, full, count, NULL);
+    free(paths[i]);
+  }
+  free(paths);
+  return 1;
+}
+
+static int collect_doc_files_from_ny(doc_search_index_t *idx, const char *root,
+                                     const char *dir) {
+  char *json = ny_web_doc_collect_paths(dir);
+  if (!json)
+    return 0;
+  char **paths = NULL;
+  size_t len = 0;
+  int ok = ny_web_doc_paths_decode(json, &paths, &len);
+  free(json);
+  if (!ok)
+    return 0;
+  for (size_t i = 0; i < len; i++) {
+    if (!docs_file_supported(paths[i]) || !path_is_under(dir, paths[i]) ||
+        path_is_dir(paths[i])) {
+      for (size_t j = 0; j < len; j++)
+        free(paths[j]);
+      free(paths);
+      return 0;
+    }
+  }
+  for (size_t i = 0; i < len; i++) {
+    char *txt = ny_read_file_raw(paths[i], NULL);
+    if (txt) {
+      if (path_has_suffix(paths[i], ".md"))
+        add_markdown_doc_entries(idx, root, paths[i], txt);
+      else
+        add_plain_doc_entry(idx, root, paths[i], txt);
+      free(txt);
+    }
+    free(paths[i]);
+  }
+  free(paths);
+  return 1;
+}
+
+static int append_markdown_docs_from_ny(sb_t *json, const char *base_dir,
+                                        const char *root, const char *dir,
+                                        const char *overview_path, int *first,
+                                        char **seen, int *seen_n,
+                                        int seen_cap) {
+  char *encoded_paths = ny_web_doc_collect_paths(dir);
+  if (!encoded_paths)
+    return 0;
+  char **paths = NULL;
+  size_t len = 0;
+  int ok = ny_web_doc_paths_decode(encoded_paths, &paths, &len);
+  free(encoded_paths);
+  if (!ok)
+    return 0;
+  for (size_t i = 0; i < len; i++) {
+    if (path_has_suffix(paths[i], ".md"))
+      append_markdown_doc_json_item(json, base_dir, root, paths[i],
+                                    overview_path, first, seen, seen_n,
+                                    seen_cap);
+    free(paths[i]);
+  }
+  free(paths);
+  return 1;
+}
+
 static void write_api_seo_index(const char *out_dir, const char *site,
                                 const char *docs_json, sb_t *sitemap,
                                 sb_t *plain, int module_count,
                                 int symbol_count) {
   char dir[PATH_MAX], path[PATH_MAX], txt_path[PATH_MAX];
-  if (!join_path(dir, sizeof(dir), out_dir, "api") || !mkdir_p(dir) ||
+  if (!join_path(dir, sizeof(dir), out_dir, "api") || !ny_mkdir_p(dir) ||
       !join_path(path, sizeof(path), dir, "index.html") ||
       !join_path(txt_path, sizeof(txt_path), dir, "modules.txt"))
     return;
@@ -5290,7 +5600,7 @@ static void write_api_seo_index(const char *out_dir, const char *site,
   free(txt.data);
 }
 
-static void write_seo_artifacts(const char *out_dir, const char *root,
+static bool write_seo_artifacts(const char *out_dir, const char *root,
                                 const char *docs_json, int module_count,
                                 int symbol_count, const char *site) {
   int has_site = site && *site;
@@ -5310,20 +5620,26 @@ static void write_seo_artifacts(const char *out_dir, const char *root,
 
   char docs_dir[PATH_MAX];
   int doc_count = 0;
-  if (join_path(docs_dir, sizeof(docs_dir), root, "docs"))
-    generate_static_docs_from_dir(out_dir, root, docs_dir, docs_dir, site,
-                                  has_site ? &sitemap : NULL, &plain, &full, 1,
-                                  &doc_count);
+  if (!join_path(docs_dir, sizeof(docs_dir), root, "docs") ||
+      !generate_static_docs_from_ny(out_dir, root, docs_dir, docs_dir, site,
+                                    has_site ? &sitemap : NULL, &plain, &full,
+                                    &doc_count)) {
+    nyt_err("ny-doc", "Ny documentation path collection failed");
+    free(sitemap.data);
+    free(plain.data);
+    free(full.data);
+    free(robots.data);
+    return false;
+  }
 
   sb_add(&plain, "\n## API\n\n");
   write_api_seo_index(out_dir, site, docs_json, has_site ? &sitemap : NULL,
                       &plain, module_count, symbol_count);
-  sb_add(&plain,
-            "\n## Feed and social\n\n"
-            "- [RSS](feed.xml): reader-ready feed for documentation, "
-            "release notes, and API index changes.\n"
-         "- [Discord](https://discord.gg/XQDR6DZWb)\n"
-         "- [Mastodon](https://mastodon.social/@nytrix)\n");
+  sb_add(&plain, "\n## Feed and social\n\n"
+                 "- [RSS](feed.xml): reader-ready feed for documentation, "
+                 "release notes, and API index changes.\n"
+                 "- [Discord](https://discord.gg/XQDR6DZWb)\n"
+                 "- [Mastodon](https://mastodon.social/@nytrix)\n");
   if (has_site)
     append_sitemap_url(&sitemap, site, "feed.xml", "0.5");
   if (has_site)
@@ -5348,7 +5664,14 @@ static void write_seo_artifacts(const char *out_dir, const char *root,
                   robots.data ? strlen(robots.data) : 0);
   else if (!has_site && join_path(path, sizeof(path), out_dir, "robots.txt"))
     unlink(path);
-  write_rss_feed(out_dir, site, root);
+  if (!write_rss_feed(out_dir, site, root)) {
+    free(sitemap_url.data);
+    free(sitemap.data);
+    free(plain.data);
+    free(full.data);
+    free(robots.data);
+    return false;
+  }
   if (join_path(path, sizeof(path), out_dir, "manual.txt"))
     ny_write_file(path, plain.data ? plain.data : "",
                   plain.data ? strlen(plain.data) : 0);
@@ -5357,7 +5680,8 @@ static void write_seo_artifacts(const char *out_dir, const char *root,
                   full.data ? strlen(full.data) : 0);
   if (join_path(path, sizeof(path), out_dir, "site.txt")) {
     sb_t site_txt = {0};
-    sb_add(&site_txt, "Nytrix Lang native programming language documentation\n");
+    sb_add(&site_txt,
+           "Nytrix Lang native programming language documentation\n");
     sb_add(&site_txt, "URL: ");
     sb_add(&site_txt, has_site ? site : "local");
     sb_add(&site_txt, "\nDocs pages: ");
@@ -5376,6 +5700,7 @@ static void write_seo_artifacts(const char *out_dir, const char *root,
   free(plain.data);
   free(full.data);
   free(robots.data);
+  return true;
 }
 
 static int read_file_bytes(const char *path, char **out, size_t *out_n) {
@@ -5648,8 +5973,8 @@ static int web_parse_args(int argc, char **argv, web_opts_t *opts, char *err,
     }
     int color_mode = -2;
     int color_idx = i;
-    int color_rc = ny_arg_consume_color(&color_idx, argc, argv, &color_mode,
-                                        err, err_sz);
+    int color_rc =
+        ny_arg_consume_color(&color_idx, argc, argv, &color_mode, err, err_sz);
     if (color_rc < 0) {
       nyt_err("ny-doc", "%s", err);
       return 2;
@@ -5760,8 +6085,7 @@ static int web_build_asset_paths(const char *root, const char *out_dir,
 
 static int web_render_docs_page(const char *root, const char *site_url,
                                 const char *bundle, int source_files,
-                                const char *out_dir,
-                                const web_paths_t *paths,
+                                const char *out_dir, const web_paths_t *paths,
                                 int *parsed_modules, int *parsed_symbols) {
   char *html_tpl = ny_read_file_raw(paths->template_path, NULL);
   char *js_tpl = ny_read_file_raw(paths->js_path, NULL);
@@ -5786,11 +6110,10 @@ static int web_render_docs_page(const char *root, const char *site_url,
     nyt_err("ny-doc", "failed to build docs data");
     return 0;
   }
-  if (!generate_website_og_assets(paths->cache_og_svg_path,
-                                  paths->cache_og_png_path, paths->logo_path,
-                                  paths->favicon_path, paths->mono_font_path,
-                                  paths->display_font_path, *parsed_modules,
-                                  *parsed_symbols, source_files)) {
+  if (!generate_website_og_assets(
+          paths->cache_og_svg_path, paths->cache_og_png_path, paths->logo_path,
+          paths->favicon_path, paths->mono_font_path, paths->display_font_path,
+          *parsed_modules, *parsed_symbols, source_files)) {
     free(html_tpl);
     free(js_tpl);
     free(css_tpl);
@@ -5800,6 +6123,14 @@ static int web_render_docs_page(const char *root, const char *site_url,
     return 0;
   }
   char *seo_head = render_site_head(site_url, root);
+  if (!seo_head) {
+    free(docs_json);
+    free(html_tpl);
+    free(js_tpl);
+    free(css_tpl);
+    nyt_err("ny-doc", "failed to collect documentation metadata");
+    return 0;
+  }
   char *html =
       replace_doc_template(html_tpl, docs_json, js_tpl, css_tpl, seo_head);
   free(html_tpl);
@@ -5825,9 +6156,13 @@ static int web_render_docs_page(const char *root, const char *site_url,
     return 0;
   }
   free(html);
-  write_seo_artifacts(out_dir, root, docs_json, *parsed_modules,
-                      *parsed_symbols, site_url);
+  bool seo_ok = write_seo_artifacts(out_dir, root, docs_json, *parsed_modules,
+                                    *parsed_symbols, site_url);
   free(docs_json);
+  if (!seo_ok) {
+    nyt_err("ny-doc", "failed to write documentation SEO artifacts");
+    return 0;
+  }
   return 1;
 }
 

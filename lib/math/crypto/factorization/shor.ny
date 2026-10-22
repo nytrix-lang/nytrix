@@ -2,10 +2,10 @@
 ;; Integer-factorization routines for Shor-style order-finding support.
 ;; Given an order relation a^s = 1 mod n, recover non-trivial factors.
 ;; References:
-;; - std.math.crypto.factorization
-;; - std.math.crypto
-module std.math.crypto.factorization.shor(shor_factor_from_order)
-use std.math.nt
+;; - core.math.crypto.factorization
+;; - core.math.crypto
+module core.math.crypto.factorization.shor(shor_factor_from_order)
+use core.math.nt
 
 fn shor_factor_from_order(any n, any a, any s) any {
    "Recover a non-trivial factor of n given a^s = 1 mod n and the order s of a.

@@ -5,11 +5,11 @@
 ;; - https://people.csail.mit.edu/rivest/Rsapaper.pdf
 ;; - https://crypto.stanford.edu/~dabo/pubs/papers/RSA-survey.pdf
 ;; References:
-;; - std.math.crypto.rsa
-;; - std.math.crypto
-module std.math.crypto.rsa.cca_malleability(rsa_malleable_multiply, rsa_blind_decrypt, rsa_cca_attack)
-use std.core
-use std.math.nt
+;; - core.math.crypto.rsa
+;; - core.math.crypto
+module core.math.crypto.rsa.cca_malleability(rsa_malleable_multiply, rsa_blind_decrypt, rsa_cca_attack)
+use core
+use core.math.nt
 
 fn rsa_malleable_multiply(any c, any s, any e, any n) any {
    "Multiply ciphertext c by s^e mod n to create a blinded ciphertext.

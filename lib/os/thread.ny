@@ -1,9 +1,9 @@
 ;; Keywords: thread threads concurrency os
 ;; Os Thread for Nytrix
 ;; References:
-;; - std.os
-module std.os.thread(thread_spawn, thread_spawn_call, thread_launch, thread_launch_call, thread_join, mutex_new, mutex_lock, mutex_unlock, mutex_free)
-use std.core
+;; - core.os
+module core.os.thread(thread_spawn, thread_spawn_call, thread_launch, thread_launch_call, thread_join, mutex_new, mutex_lock, mutex_unlock, mutex_free)
+use core
 
 fn thread_spawn(fnptr target, any arg=0) any {
    "Spawns a new thread executing `func(arg)`. Returns the thread handle."
@@ -79,12 +79,13 @@ fn mutex_free(any m) any {
 }
 
 fn _thread_selftest_catches(fnptr thunk) bool {
+   mut caught = false
    try {
       thunk()
-      false
    } catch _ {
-      true
+      caught = true
    }
+   caught
 }
 
 #main {
@@ -97,5 +98,5 @@ fn _thread_selftest_catches(fnptr thunk) bool {
    assert(_thread_selftest_catches(fn() {
             thread_spawn_call(fn() { 0 }, too_many)
          }), "thread_spawn_call diagnoses too many args")
-   print("✓ std.os.thread self-test passed")
+   print("✓ core.os.thread self-test passed")
 }

@@ -1,17 +1,17 @@
 ;; Keywords: net socket remote tube process ssh os
 ;; Buffered tube-style interaction with TCP sockets, local processes, SSH, and transcripts.
 ;; References:
-;; - std.os.net
-;; - std.os
-module std.os.net.remote(remote, connect, remote_retry, connect_retry, process, proc, shell, ssh, ssh_process, ssh_shell, tube, tube_fd, tube_process, tube_fixture, fixture, tube_replay, replay, transcript, transcript_text, tube_kind, fileno, pid, connected, context, set_context, set_default_level, default_level, set_level, set_log_level, log_level, set_verbose, verbose, set_chunk_size, set_timeout, buffered, unrecv, clean, send, sendline, send_after, sendafter, sendline_after, sendlineafter, recv, recvn, recv_line, recvline, recv_until, recvuntil, recv_all, recvall, expect, expect_map, shutdown_send, close, interactive)
-use std.core
-use std.core.str
-use std.os.net.socket as sock
-use std.os.net.context as netctx
-use std.os.io as pio
-use std.os.prim
-use std.os.sys as sys
-use std.os.time
+;; - core.os.net
+;; - core.os
+module core.os.net.remote(remote, connect, remote_retry, connect_retry, process, proc, shell, ssh, ssh_process, ssh_shell, tube, tube_fd, tube_process, tube_fixture, fixture, tube_replay, replay, transcript, transcript_text, tube_kind, fileno, pid, connected, context, set_context, set_default_level, default_level, set_level, set_log_level, log_level, set_verbose, verbose, set_chunk_size, set_timeout, buffered, unrecv, clean, send, sendline, send_after, sendafter, sendline_after, sendlineafter, recv, recvn, recv_line, recvline, recv_until, recvuntil, recv_all, recvall, expect, expect_map, shutdown_send, close, interactive)
+use core
+use core.str
+use core.os.net.socket as sock
+use core.os.net.context as netctx
+use core.os.io as pio
+use core.os.prim
+use core.os.sys as sys
+use core.os.time
 
 fn set_default_level(any level="debug") str {
    "Sets the default logging level for newly created tubes."
@@ -95,33 +95,33 @@ fn _record(dict io, str op, str data) int {
    mut rows = io.get("transcript", 0)
    if !is_list(rows) { rows = list(8) }
    rows = rows.append({"op": op, "data": data, "size": data.len})
-   set(io, "transcript", rows)
+   io["transcript"] = rows
    0
 }
 
 fn tube_fd(int fd, any host="", any port=0, any level="", int timeout_ms=-1, int chunk_size=0) dict {
    "Wraps an existing TCP socket fd in a buffered remote tube."
    mut io = dict(20)
-   io = set(io, "kind", "tcp")
-   io = set(io, "fd", fd)
-   io = set(io, "pid", -1)
-   io = set(io, "proc", 0)
-   io = set(io, "host", host)
-   io = set(io, "port", port)
-   io = set(io, "buf", "")
-   io = set(io, "chunk", 4096)
-   io = set(io, "closed", fd < 0)
-   io = set(io, "offline", false)
-   io = set(io, "script", "")
-   io = set(io, "sent", "")
-   io = set(io, "transcript", list(8))
+   io = dict_set(io, "kind", "tcp")
+   io = dict_set(io, "fd", fd)
+   io = dict_set(io, "pid", -1)
+   io = dict_set(io, "proc", 0)
+   io = dict_set(io, "host", host)
+   io = dict_set(io, "port", port)
+   io = dict_set(io, "buf", "")
+   io = dict_set(io, "chunk", 4096)
+   io = dict_set(io, "closed", fd < 0)
+   io = dict_set(io, "offline", false)
+   io = dict_set(io, "script", "")
+   io = dict_set(io, "sent", "")
+   io = dict_set(io, "transcript", list(8))
    def lvl = (is_str(level) && strip(level).len > 0) ? netctx.level_name(level) : netctx.default_level()
-   io = set(io, "level", lvl)
-   io = set(io, "verbose", netctx.level_value(lvl) >= netctx.level_value("debug"))
-   def timeout_eff = (timeout_ms >= 0) ? timeout_ms : netctx.timeout_ms(5000)
-   io = set(io, "timeout_ms", timeout_eff)
+   io = dict_set(io, "level", lvl)
+   io = dict_set(io, "verbose", netctx.level_value(lvl) >= netctx.level_value("debug"))
+   def int timeout_eff = (timeout_ms >= 0) ? timeout_ms : netctx.timeout_ms(5000)
+   io = dict_set(io, "timeout_ms", timeout_eff)
    def chunk_eff = (chunk_size > 0) ? chunk_size : netctx.chunk_size()
-   if chunk_eff > 0 { io = set(io, "chunk", max(1, min(chunk_eff, 1048576))) }
+   if chunk_eff > 0 { io = dict_set(io, "chunk", max(1, min(chunk_eff, 1048576))) }
    if fd >= 0 && timeout_eff > 0 { sock.socket_set_timeout_ms(fd, timeout_eff) }
    _log(io, "trace", "created")
    return io
@@ -130,13 +130,14 @@ fn tube_fd(int fd, any host="", any port=0, any level="", int timeout_ms=-1, int
 fn tube(int fd) dict { return tube_fd(fd) }
 
 fn tube_process(any p, any name="process", any level="", int timeout_ms=-1, int chunk_size=0) dict {
-   "Wraps a `std.os.io.spawn` process object as a buffered tube."
+   "Wraps a `core.os.io.spawn` process object as a buffered tube."
    if !is_dict(p) { return tube_fd(-1, name, 0, level, timeout_ms, chunk_size) }
    mut io = tube_fd(-1, name, 0, level, timeout_ms, chunk_size)
-   set(io, "kind", "process")
-   set(io, "closed", false)
-   set(io, "proc", p)
-   set(io, "pid", p.get("pid", -1))
+   def dict proc = p
+   io["kind"] = "process"
+   io["closed"] = false
+   io = dict_set(io, "proc", proc)
+   io["pid"] = p.get("pid", -1)
    _log(io, "trace", "process tube created")
    io
 }
@@ -283,7 +284,7 @@ fn transcript_text(any io) str {
 fn tube_kind(any io) str {
    "Returns `tcp`, `process`, `fixture`, or `invalid`."
    if !is_dict(io) { return "invalid" }
-   if io.get("offline", false) { return "fixture" }
+   if io.get("offline", false) == true { return "fixture" }
    io.get("kind", "tcp")
 }
 
@@ -321,10 +322,16 @@ fn remote_retry(str host, int port, int retries=20, int delay_ms=50, any level="
 
 fn connect_retry(str host, int port, int retries=20, int delay_ms=50, any level="", int timeout_ms=-1, int chunk_size=0) any { return remote_retry(host, port, retries, delay_ms, level, timeout_ms, chunk_size) }
 
+fn _raw_fd(any io) int {
+   if !is_dict(io) { return -1 }
+   def any value = io.get("fd", -1)
+   if is_int(value) { return __untag(value) }
+   return -1
+}
+
 fn fileno(any io) int {
    "Returns the underlying socket descriptor, or -1 for invalid/offline tubes."
-   if !is_dict(io) { return -1 }
-   return io.get("fd", -1)
+   return _raw_fd(io)
 }
 
 fn pid(any io) int {
@@ -336,9 +343,9 @@ fn pid(any io) int {
 fn connected(any io) bool {
    "Returns true while the tube is usable."
    if !is_dict(io) { return false }
-   if io.get("offline", false) { return !io.get("closed", false) }
-   if io.get("kind", "tcp") == "process" { return is_dict(io.get("proc", 0)) && !io.get("closed", false) }
-   return io.get("fd", -1) >= 0 && !io.get("closed", false)
+   if io.get("offline", false) == true { return io.get("closed", false) != true }
+   if io.get("kind", "tcp") == "process" { return is_dict(io.get("proc", 0)) && io.get("closed", false) != true }
+   return io.get("fd", -1) >= 0 && io.get("closed", false) != true
 }
 
 fn set_level(any io, any level="debug") any {
@@ -381,7 +388,7 @@ fn set_timeout(any io, int timeout_ms) any {
    if !is_dict(io) { return io }
    if timeout_ms < 0 { timeout_ms = 0 }
    set(io, "timeout_ms", timeout_ms)
-   def fd = fileno(io)
+   def int fd = to_int(_raw_fd(io))
    if fd >= 0 { sock.socket_set_timeout_ms(fd, timeout_ms) }
    return io
 }
@@ -393,7 +400,7 @@ fn _buf(any io) str {
 }
 
 fn _set_buf(any io, str b) any {
-   if is_dict(io) { set(io, "buf", b) }
+   if is_dict(io) { io["buf"] = b }
    return io
 }
 
@@ -410,27 +417,28 @@ fn unrecv(any io, any data) int {
 fn clean(any io) str {
    "Returns and clears already-buffered bytes without blocking for more."
    def b = _buf(io)
-   _set_buf(io, "")
+   if b.len > 0 { _set_buf(io, "") }
    _log(io, "trace", "clean buffered=" + to_str(b.len) + "B")
    return b
 }
 
 fn _read_more(dict io, int want) str {
-   if !connected(io) { return "" }
+   def is_connected = connected(io)
+   if !is_connected { return "" }
    if want < 1 { want = io.get("chunk", 4096) }
    if want > 1048576 { want = 1048576 }
-   if io.get("offline", false) {
+   if io.get("offline", false) == true {
       def script = io.get("script", "")
       if !is_str(script) || script.len == 0 { return "" }
       def take = (script.len < want) ? script.len : want
-      def got = slice(script, 0, take)
-      set(io, "script", slice(script, take, script.len))
+      def got = str._substr(script, 0, take)
+      set(io, "script", str._substr(script, take, script.len))
       _record(io, "recv", got)
       _trace(io, "[<]", "recv", got)
       return got
    }
    if io.get("kind", "tcp") == "process" {
-      def p = io.get("proc", 0)
+      any p = dict_get(io, "proc", 0)
       if !is_dict(p) { return "" }
       def gotp = pio.recv(p, int(want))
       if is_str(gotp) && gotp.len > 0 {
@@ -442,13 +450,9 @@ fn _read_more(dict io, int want) str {
    }
    mut tries = 0
    while tries < 200 {
-      def got = sock.read_socket(fileno(io), want)
-      if is_int(got) || got == nil {
-         tries += 1
-         msleep(5)
-         continue
-      }
-      if is_str(got) && got.len > 0 {
+      def int fd = to_int(_raw_fd(io))
+      def str got = sock.read_socket(fd, want)
+      if got != "" {
          _record(io, "recv", got)
          _trace(io, "[<]", "recv", got)
          return got
@@ -464,18 +468,17 @@ fn _send_all(any io, any data) int {
    if !is_dict(io) || !is_str(data) || !connected(io) { return -1 }
    def _trace_ignore = (data.len > 0) ? _trace(io, "[>]", "send", data) : 0
    _record(io, "send", data)
-   if io.get("offline", false) {
+   if io.get("offline", false) == true {
       set(io, "sent", get(io, "sent", "") + data)
       return data.len
    }
    if io.get("kind", "tcp") == "process" {
-      def sent = pio.send(io.get("proc", 0), data)
-      if is_ok(sent) {
-         return data.len
+      match pio.send(io.get("proc", 0), data) {
+         ok(_) -> { return data.len }
+         err(_) -> { return -1 }
       }
-      return -1
    }
-   def fd = fileno(io)
+   def int fd = to_int(_raw_fd(io))
    mut off = 0
    while off < data.len {
       def wrote = sock.write_socket_part(fd, data, off, data.len - off)
@@ -504,14 +507,33 @@ fn _recv_take(any io, any n=4096) str {
    def b = _buf(io)
    if b.len > 0 {
       def take = (b.len < n) ? b.len : n
-      def out = slice(b, 0, take)
-      _set_buf(io, slice(b, take, b.len))
+      def out = str._substr(b, 0, take)
+      _set_buf(io, str._substr(b, take, b.len))
       return out
    }
    return _read_more(io, n)
 }
 
 fn recv(any io, any n=4096) str { return _recv_take(io, n) }
+
+@inline
+fn _find_bytes(str data, str needle) int {
+   def data_len = data.len
+   def needle_len = needle.len
+   if needle_len == 0 { return 0 }
+   if needle_len > data_len { return -1 }
+   mut int at = 0
+   def last = data_len - needle_len
+   while at <= last {
+      mut int matched = 0
+      while matched < needle_len && load8(data, at + matched) == load8(needle, matched) {
+         matched += 1
+      }
+      if matched == needle_len { return at }
+      at += 1
+   }
+   return -1
+}
 
 fn recvn(any io, int n) str {
    "Receives up to exactly `n` bytes, stopping early on EOF."
@@ -529,30 +551,36 @@ fn recvn(any io, int n) str {
    return s
 }
 
-fn recv_until(any io, any needle, bool drop=false, int max_bytes=65536) str {
+fn recv_until(any io, any needle, bool drop=false, any max_bytes=65536) str {
    "Receives until `needle` appears. Extra bytes after the needle remain buffered."
    if !is_dict(io) || !is_str(needle) { return "" }
-   ; Dynamic default arguments can arrive as the tagged sentinel value 1;
-   ; restore the documented ceiling before scanning.
-   if max_bytes <= 1 { max_bytes = 65536 }
-   _log(io, "trace", "recvuntil needle=" + repr(needle) + " drop=" + to_str(drop) + " max=" + to_str(max_bytes))
-   mut acc = clean(io)
-   while acc.len < max_bytes {
-      ; Guard the short-prefix case: the dynamic string bridge may report a
-      ; false match when the needle is longer than the accumulated bytes.
-      def at = (needle.len == 0) ? 0 : ((needle.len > acc.len) ? -1 : find(acc, needle))
+   ; Keep this boundary dynamic until the default argument has been decoded:
+   ; the omitted-argument sentinel can otherwise look like a one-byte limit.
+   if !is_int(max_bytes) { max_bytes = 65536 }
+   mut limit = int(max_bytes)
+   if limit <= 0 { limit = 65536 }
+   _log(io, "trace", "recvuntil needle=" + repr(needle) + " drop=" + to_str(drop) + " max=" + to_str(limit))
+   mut acc = io.get("buf", "")
+   if !is_str(acc) { acc = "" }
+   if acc.len > 0 { io["buf"] = "" }
+   while acc.len < limit {
+      def at = _find_bytes(acc, needle)
       if at >= 0 {
-         def end = at + needle.len
-         def out_end = drop ? at : end
+         def int at_index = at
+         def int end_index = at_index + needle.len
+         mut int out_end = end_index
+         if drop == true { out_end = at_index }
          ; Exact reads end at the delimiter; avoid passing the dynamic
          ; arithmetic result through the slice-index bridge.
-         if end == acc.len { return drop ? "" : acc }
-         def out = slice(acc, 0, out_end)
-         if end < acc.len { unrecv(io, slice(acc, end, acc.len)) }
+         if end_index == acc.len {
+            return (drop == true) ? "" : acc
+         }
+         def out = str._substr(acc, 0, out_end)
+         if end_index < acc.len { unrecv(io, str._substr(acc, end_index, acc.len)) }
          _log(io, "trace", "recvuntil hit len=" + to_str(out.len))
          return out
       }
-      def left = max_bytes - acc.len
+      def left = limit - acc.len
       def want = (left < io.get("chunk", 4096)) ? left : io.get("chunk", 4096)
       def chunk = _recv_take(io, want)
       if chunk.len == 0 { break }
@@ -562,11 +590,11 @@ fn recv_until(any io, any needle, bool drop=false, int max_bytes=65536) str {
    return acc
 }
 
-fn recvuntil(any io, any needle, bool drop=false, int max_bytes=65536) str { return recv_until(io, needle, drop, max_bytes) }
+fn recvuntil(any io, any needle, bool drop=false, any max_bytes=65536) str { return recv_until(io, needle, drop, max_bytes) }
 
-fn recv_line(any io, bool keepends=true, int max_bytes=65536) str { return recv_until(io, "\n", !keepends, max_bytes) }
+fn recv_line(any io, bool keepends=true, any max_bytes=65536) str { return recv_until(io, "\n", !keepends, max_bytes) }
 
-fn recvline(any io, bool keepends=true, int max_bytes=65536) str { return recv_line(io, keepends, max_bytes) }
+fn recvline(any io, bool keepends=true, any max_bytes=65536) str { return recv_line(io, keepends, max_bytes) }
 
 fn recv_all(any io, int max_bytes=65536) str {
    "Receives until EOF or `max_bytes` is reached."
@@ -603,12 +631,13 @@ fn expect(any io, any needles, int max_bytes=65536) list {
       while i < needles.len {
          def nd = needles.get(i)
          if is_str(nd) {
-            def at = (nd.len == 0) ? 0 : find(buf, nd)
+            def at = (nd.len == 0) ? 0 : str.find_from(buf, nd, 0)
             if at >= 0 {
-               def end = at + nd.len
-               def out = slice(buf, 0, end)
-               if end < buf.len {
-                  def rest = slice(buf, end, buf.len)
+               def int at_index = at
+               def int end_index = at_index + nd.len
+               def out = str._substr(buf, 0, end_index)
+               if end_index < buf.len {
+                  def rest = str._substr(buf, end_index, buf.len)
                   _set_buf(io, rest)
                } else {
                   _set_buf(io, "")
@@ -635,10 +664,12 @@ fn expect_map(any io, dict mapping, int max_bytes=65536) list {
    if !is_dict(mapping) { return [nil, ""] }
    def ks = mapping.keys()
    def res = expect(io, ks, max_bytes)
-   def idx = res.get(0, -1)
+   def int idx = res.get(0, -1)
    if idx < 0 { return [nil, res.get(1, "")] }
-   def key = ks.get(idx)
-   return [mapping.get(key, nil), res.get(1, "")]
+   ; The key list and value list share the dictionary's slot iteration order.
+   ; Indexing them together avoids a second dynamic hash lookup at this ABI edge.
+   def vs = mapping.values()
+   return [vs.get(idx, nil), res.get(1, "")]
 }
 
 fn _send_after_impl(any io, any needle, any data, bool newline, int max_bytes) str {
@@ -680,15 +711,16 @@ fn close(any io) int {
    _log(io, "info", "close")
    set(io, "fd", -1)
    set(io, "closed", true)
-   if io.get("offline", false) { return 0 }
+   if io.get("offline", false) == true { return 0 }
    if io.get("kind", "tcp") == "process" {
       ; A child such as `cat` waits for EOF on stdin before exiting. Close
       ; the sending side before reaping so `close` cannot block forever after
       ; a successful receive.
       def shut = pio.shutdown_send(io.get("proc", 0))
-      def res = pio.close(io.get("proc", 0))
-      if is_ok(res) { return unwrap(res) }
-      return -1
+      match pio.close(io.get("proc", 0)) {
+         ok(status) -> { return status }
+         err(_) -> { return -1 }
+      }
    }
    if fd >= 0 { return sock.close_socket(fd) }
    return 0
@@ -836,5 +868,5 @@ fn interactive(any io, int max_read=4096, any options=0) int {
          assert(close(sio) >= 0, "remote ssh tube process status")
       }
    } #endif
-   print("✓ std.os.net.remote self-test passed")
+   print("✓ core.os.net.remote self-test passed")
 }

@@ -1,18 +1,18 @@
 ;; Keywords: engine browser assets model gltf os ui render viewer scene
 ;; Asset browser panel helpers for choosing and loading GLTF scenes.
 ;; References:
-;; - std.os.ui.assets.catalog
-;; - std.os.ui.assets.viewer
-module std.os.ui.render.viewer.engine.browser(draw_body, prepare_state)
-use std.core
-use std.core.str as str
-use std.math (clamp, max, min)
-use std.os.ui.assets.catalog as asset_catalog
-use std.os.ui.window.consts as uin
-use std.os.ui.render.viewer.gui as gui
-use std.os.ui.render.dump as ui_profile
-use std.os.ui.render.viewer.engine.catalog as viewer_catalog
-use std.os.ui.render.viewer.icons as icons
+;; - core.os.ui.assets.catalog
+;; - core.os.ui.assets.viewer
+module core.os.ui.render.viewer.engine.browser(draw_body, prepare_state)
+use core
+use core.str as str
+use core.math (clamp, max, min)
+use core.os.ui.assets.catalog as asset_catalog
+use core.os.ui.window.consts as uin
+use core.os.ui.render.viewer.gui as gui
+use core.os.ui.render.dump as ui_profile
+use core.os.ui.render.viewer.engine.catalog as viewer_catalog
+use core.os.ui.render.viewer.icons as icons
 
 fn _result(str filter, bool filter_changed, int tab, bool show_paths, str action="", str model="") dict {
    {"filter": filter, "filter_changed": filter_changed, "tab": tab, "show_paths": show_paths, "action": action, "model": model}
@@ -291,5 +291,5 @@ fn draw_body(dict state) dict {
    def r = _result("x", true, 2, true, "load", "Model")
    assert(r.get("filter", "") == "x" && r.get("action", "") == "load", "browser result")
    assert(_pick_names("", ["a"], ["b"]).get(0, "") == "a" && _pick_names("b", ["a"], ["b"]).get(0, "") == "b", "browser pick names")
-   print("✓ std.os.ui.render.viewer.engine.browser self-test passed")
+   print("✓ core.os.ui.render.viewer.engine.browser self-test passed")
 }

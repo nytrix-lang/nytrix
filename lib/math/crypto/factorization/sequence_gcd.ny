@@ -2,11 +2,11 @@
 ;; Integer-factorization routines for GCD factorization across generated integer sequences.
 ;; Reusable scans for sequence-derived non-trivial factors.
 ;; References:
-;; - std.math.crypto.factorization
-;; - std.math.crypto
-module std.math.crypto.factorization.sequence_gcd(factor_fibonacci_gcd, factor_lucas_gcd, factor_factorial_pm1_gcd, factor_primorial_pm1_gcd, factor_mersenne_pm1_gcd, factor_compositorial_pm1_gcd, factor_fermat_numbers_gcd, factor_multiple_base_inversion_gcd)
-use std.math.nt
-use std.core.str (str_add, ord_at)
+;; - core.math.crypto.factorization
+;; - core.math.crypto
+module core.math.crypto.factorization.sequence_gcd(factor_fibonacci_gcd, factor_lucas_gcd, factor_factorial_pm1_gcd, factor_primorial_pm1_gcd, factor_mersenne_pm1_gcd, factor_compositorial_pm1_gcd, factor_fermat_numbers_gcd, factor_multiple_base_inversion_gcd)
+use core.math.nt
+use core.str (str_add, ord_at)
 
 fn _z(any x) any { is_bigint(x) ? x : Z(x) }
 

@@ -1,20 +1,20 @@
 ;; Keywords: ui terminal ansi tty console text os render viewer
 ;; Terminal text parsing and ANSI rendering helpers for embedded consoles.
 ;; References:
-;; - std.os.ui.render.viewer.gui
-module std.os.ui.render.viewer.term(init, toggle, draw, handle_event, log, exec, clear, is_open, set_font, set_colors, get_history, get_input, font_cell_size, framebuffer_size, sync_framebuffer_size, resize_term)
-use std.core
-use std.os (ticks)
-use std.math
-use std.core.common as common
-use std.core.term as cli_term
-use std.core.str as str
-use std.os.ui.window.consts
-use std.os.ui.render
-use std.os.ui.render.viewer.vterm as vterm
-use std.os.ui.window as window
-use std.os.ui.window.native as nativewin
-use std.os.ui.window.input as uin
+;; - core.os.ui.render.viewer.gui
+module core.os.ui.render.viewer.term(init, toggle, draw, handle_event, log, exec, clear, is_open, set_font, set_colors, get_history, get_input, font_cell_size, framebuffer_size, sync_framebuffer_size, resize_term)
+use core
+use core.os (ticks)
+use core.math
+use core.common as common
+use core.term as cli_term
+use core.str as str
+use core.os.ui.window.consts
+use core.os.ui.render
+use core.os.ui.render.viewer.vterm as vterm
+use core.os.ui.window as window
+use core.os.ui.window.native as nativewin
+use core.os.ui.window.input as uin
 
 mut _is_open      = false
 mut _input_render_list = [""]
@@ -701,5 +701,5 @@ fn get_input() str {
    set_colors(0, 0xffffffff, 0xff00ffff)
    set_font(0)
    assert(!is_open(), "render term remains closed")
-   print("✓ std.os.ui.render.viewer.term self-test passed")
+   print("✓ core.os.ui.render.viewer.term self-test passed")
 }

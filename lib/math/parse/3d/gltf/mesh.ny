@@ -1,19 +1,19 @@
 ;; Keywords: 3d gltf glb parse
 ;; Submodule: mesh
-module std.math.parse.3d.gltf.mesh(_gltf_make_indexed_part_from_state, gltf_mesh_count, gltf_get_mesh, _gltf_accessor_local_bounds, _gltf_prim_meta, _gltf_collect_indexed_semantics, _gltf_release_vertex_pack_accessors, _gltf_try_pack_vertices_pnc_raw, _gltf_apply_morph_vec3, _gltf_pack_unique_vertices, _gltf_store_index, _gltf_store_index2, _gltf_store_index3, _gltf_pack_index_value, _gltf_pack_point_indices, _gltf_pack_line_indices, _gltf_pack_triangle_strip_indices, _gltf_pack_triangle_fan_indices, _gltf_pack_triangle_indices, _gltf_pack_indices, _gltf_index_value, _gltf_expand_primitive_vertices, _gltf_copy_part_opts, _gltf_pack_cacheable_meta, _gltf_pack_vertex_cache_key, _gltf_pack_index_cache_key, _gltf_pack_primitive_buffers, _gltf_indexed_append_instance_parts, _gltf_indexed_scene_world_mats, _gltf_indexed_finish_result, gltf_to_mesh_group_indexed, gltf_warm_runtime)
-use std.core
-use std.math.bin
-use std.math
-use std.math.float (is_nan, is_inf)
-use std.core.str as str
-use std.core.common as common
-use std.core.cache as cache
-use std.math.parse.3d.gltf.math as gltf_math
-use std.math.parse.3d.gltf.shared as shr
-use std.math.parse.3d.gltf.load as ld
-use std.math.parse.3d.gltf.material as mat
-use std.math.parse.3d.gltf.animation as anim
-use std.math.parse.3d.gltf.scene as scn
+module core.math.parse.3d.gltf.mesh(_gltf_make_indexed_part_from_state, gltf_mesh_count, gltf_get_mesh, _gltf_accessor_local_bounds, _gltf_prim_meta, _gltf_collect_indexed_semantics, _gltf_release_vertex_pack_accessors, _gltf_try_pack_vertices_pnc_raw, _gltf_apply_morph_vec3, _gltf_pack_unique_vertices, _gltf_store_index, _gltf_store_index2, _gltf_store_index3, _gltf_pack_index_value, _gltf_pack_point_indices, _gltf_pack_line_indices, _gltf_pack_triangle_strip_indices, _gltf_pack_triangle_fan_indices, _gltf_pack_triangle_indices, _gltf_pack_indices, _gltf_index_value, _gltf_expand_primitive_vertices, _gltf_copy_part_opts, _gltf_pack_cacheable_meta, _gltf_pack_vertex_cache_key, _gltf_pack_index_cache_key, _gltf_pack_primitive_buffers, _gltf_indexed_append_instance_parts, _gltf_indexed_scene_world_mats, _gltf_indexed_finish_result, gltf_to_mesh_group_indexed, gltf_warm_runtime)
+use core
+use core.math.bin
+use core.math
+use core.math.float (is_nan, is_inf)
+use core.str as str
+use core.common as common
+use core.cache as cache
+use core.math.parse.3d.gltf.math as gltf_math
+use core.math.parse.3d.gltf.shared as shr
+use core.math.parse.3d.gltf.load as ld
+use core.math.parse.3d.gltf.material as mat
+use core.math.parse.3d.gltf.animation as anim
+use core.math.parse.3d.gltf.scene as scn
 
 fn _gltf_make_indexed_part_from_state(
    any vptr, int vcnt, any iptr, int icnt, dict part_opts,
@@ -822,7 +822,7 @@ fn _gltf_node_or_mesh_morph_weights(any g, int mesh_idx, int node_idx, int targe
    def nodes = g.get("nodes", 0)
    if is_list(nodes) && node_idx >= 0 && node_idx < nodes.len {
       def node = nodes[node_idx]
-      def node_w = is_dict(node) ? node.get("weights", 0) : 0
+      def list node_w = is_dict(node) ? node.get("weights", 0) : []
       if is_list(node_w) {
          mut wi = 0
          while wi < target_count && wi < node_w.len {

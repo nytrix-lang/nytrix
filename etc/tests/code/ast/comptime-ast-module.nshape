@@ -1,0 +1,33 @@
+shape comptime_ast_module {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "comptime", "parse-code", "module"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-only; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.compiler.ast (parse_code)
+
+comptime template insert_parsed_declarations(declarations) {
+   ${declarations}
+}
+
+module ParsedCodeModule generated from ParsedCodeSpec {
+   export core(parsed_code_answer, parsed_name_first, parsed_name_second, parsed_name_third)
+   fn parsed_name_first() str { gensym(temp) }
+   emit insert_parsed_declarations(
+      parse_code("fn parsed_code_answer() int { return 43 }\nfn parsed_name_second() str { return gensym(temp) }")
+   )
+   fn parsed_name_third() str { gensym(temp) }
+}
+assert(ParsedCodeModule.parsed_code_answer() == 43,
+       "parse_code declarations inherit the active generated module")
+assert(ParsedCodeModule.parsed_name_first() == "__ny_gensym_m506172736564436f64654d6f64756c65_1_temp",
+       "isolated declaration parsing shares the generated module sequence")
+assert(ParsedCodeModule.parsed_name_second() == "__ny_gensym_m506172736564436f64654d6f64756c65_2_temp",
+       "isolated declaration parsing shares the generated module sequence")
+assert(ParsedCodeModule.parsed_name_third() == "__ny_gensym_m506172736564436f64654d6f64756c65_3_temp",
+       "isolated declaration parsing shares the generated module sequence")
+NY
+}

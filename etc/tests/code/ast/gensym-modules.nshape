@@ -1,0 +1,74 @@
+shape gensym_module_order_gensymleft {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "comptime", "gensym", "modules", "determinism"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-only; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+def root_first = gensym("temp")
+module GensymLeft {
+  export core(first, second, interpolated, after)
+  fn first() str { gensym("temp") }
+  fn second() str { gensym("temp") }
+  fn interpolated() str { f"{gensym(temp)}" }
+  fn after() str { gensym("temp") }
+}
+module GensymRight {
+  export core(first, second, interpolated, after)
+  fn first() str { gensym("temp") }
+  fn second() str { gensym("temp") }
+  fn interpolated() str { f"{gensym(temp)}" }
+  fn after() str { gensym("temp") }
+}
+def root_second = gensym("temp")
+assert(GensymLeft.first() == "__ny_gensym_m47656e73796d4c656674_1_temp", "module name ignores declaration order")
+assert(GensymLeft.second() == "__ny_gensym_m47656e73796d4c656674_2_temp", "module has its own sequence")
+assert(GensymLeft.interpolated() == "__ny_gensym_m47656e73796d4c656674_3_temp", "interpolation shares the module sequence")
+assert(GensymLeft.after() == "__ny_gensym_m47656e73796d4c656674_4_temp", "interpolation advances the enclosing sequence")
+assert(GensymRight.first() == "__ny_gensym_m47656e73796d5269676874_1_temp", "module name ignores declaration order")
+assert(GensymRight.second() == "__ny_gensym_m47656e73796d5269676874_2_temp", "module has its own sequence")
+assert(GensymRight.interpolated() == "__ny_gensym_m47656e73796d5269676874_3_temp", "interpolation shares the module sequence")
+assert(GensymRight.after() == "__ny_gensym_m47656e73796d5269676874_4_temp", "interpolation advances the enclosing sequence")
+assert(GensymLeft.first() != GensymRight.first(), "module namespaces cannot collide")
+assert(root_first == "__ny_gensym_1_temp" && root_second == "__ny_gensym_2_temp", "module generation cannot perturb root sequence")
+NY
+}
+shape gensym_module_order_gensymright {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "comptime", "gensym", "modules", "determinism"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-only; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+def root_first = gensym("temp")
+module GensymRight {
+  export core(first, second, interpolated, after)
+  fn first() str { gensym("temp") }
+  fn second() str { gensym("temp") }
+  fn interpolated() str { f"{gensym(temp)}" }
+  fn after() str { gensym("temp") }
+}
+module GensymLeft {
+  export core(first, second, interpolated, after)
+  fn first() str { gensym("temp") }
+  fn second() str { gensym("temp") }
+  fn interpolated() str { f"{gensym(temp)}" }
+  fn after() str { gensym("temp") }
+}
+def root_second = gensym("temp")
+assert(GensymRight.first() == "__ny_gensym_m47656e73796d5269676874_1_temp", "module name ignores declaration order")
+assert(GensymRight.second() == "__ny_gensym_m47656e73796d5269676874_2_temp", "module has its own sequence")
+assert(GensymRight.interpolated() == "__ny_gensym_m47656e73796d5269676874_3_temp", "interpolation shares the module sequence")
+assert(GensymRight.after() == "__ny_gensym_m47656e73796d5269676874_4_temp", "interpolation advances the enclosing sequence")
+assert(GensymLeft.first() == "__ny_gensym_m47656e73796d4c656674_1_temp", "module name ignores declaration order")
+assert(GensymLeft.second() == "__ny_gensym_m47656e73796d4c656674_2_temp", "module has its own sequence")
+assert(GensymLeft.interpolated() == "__ny_gensym_m47656e73796d4c656674_3_temp", "interpolation shares the module sequence")
+assert(GensymLeft.after() == "__ny_gensym_m47656e73796d4c656674_4_temp", "interpolation advances the enclosing sequence")
+assert(GensymLeft.first() != GensymRight.first(), "module namespaces cannot collide")
+assert(root_first == "__ny_gensym_1_temp" && root_second == "__ny_gensym_2_temp", "module generation cannot perturb root sequence")
+NY
+}

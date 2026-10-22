@@ -1,0 +1,45 @@
+shape test_proof_policy {
+  family "verification/proofs"
+  generator "embedded"
+  features ["ny", "test", "proof", "policy", "certificate"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core.proof as proof
+
+def valid_obligation = proof.obligation("binary:<(int:1,int:2)", "", "fold")
+def valid_certificate = proof.solve(valid_obligation)
+assert(proof.verdict_of(valid_certificate) == "proved",
+   "Ny policy folds a closed proposition")
+assert(proof.check(valid_certificate),
+   "independent checker validates Ny-issued proof certificate")
+
+def refuted_obligation = proof.obligation("binary:>(int:1,int:2)", "", "fold")
+def refuted_certificate = proof.solve(refuted_obligation)
+assert(proof.verdict_of(refuted_certificate) == "refuted",
+   "refutation remains distinct from unknown")
+assert(proof.check(refuted_certificate),
+   "independent checker validates exact closed refutation")
+
+def open_obligation = proof.obligation("name:x", "", "fold")
+def open_certificate = proof.solve(open_obligation)
+assert(proof.verdict_of(open_certificate) == "unknown",
+   "an open proposition is not reported false")
+assert(proof.check(open_certificate),
+   "independent checker accepts a re-derived unknown certificate")
+
+def tampered = {
+   "obligation_text": valid_certificate.get("obligation_text"),
+   "text": replace(proof.certificate_text(valid_certificate), "proved", "refuted")
+}
+assert(!proof.check(tampered),
+   "independent checker rejects a mutated verdict")
+
+def malformed_certificate = proof.solve({})
+assert(proof.verdict_of(malformed_certificate) == "unknown" &&
+   !proof.check(malformed_certificate),
+   "malformed obligations cannot produce a trusted certificate")
+print("ok proof policy certificate boundary")
+NY
+}

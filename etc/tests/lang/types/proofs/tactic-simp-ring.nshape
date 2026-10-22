@@ -1,0 +1,36 @@
+shape tactic_simp_ring {
+  family "runtime/proofs"
+  generator "program"
+  features ["proofs", "tactics", "simp", "ring", "logic"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.tactic as tactic
+use core.math.logic as logic
+
+def chain = tactic.simp_conjunction([
+  {"canonical": "binary:==(int:6,int:6)", "ranges": "", "policy": "fold"},
+  {"canonical": "binary:>(name:n,int:0)", "ranges": "n=5..5", "policy": "range"},
+  {"canonical": "binary:<=(binary:*(name:a,name:a),int:81)", "ranges": "a=-9..9", "policy": "solver"}
+])
+assert(str(chain.get("verdict")) == "proved", "simp discharges chain no single tactic covers")
+assert(bool(chain.get("checked")), "simp certs check")
+
+def ring = tactic.ring_normalize_closed(2, 3, 4)
+assert(str(ring.get("verdict")) == "proved", "ring proves distrib instance")
+assert(bool(ring.get("checked")), "ring checked")
+assert(int(ring.get("lhs")) == int(ring.get("rhs")), "ring sides equal")
+
+def skel = tactic.ring_distrib_check()
+assert(bool(skel.get("valid")), "ring logic skeleton valid")
+assert(bool(skel.get("checked")), "ring logic skeleton checked")
+
+def p = logic.prop_atom("a")
+def taut = logic.prop_implies(logic.prop_and(p, p), p)
+assert(logic.prop_tautology(taut), "logic tautology from core.math.logic")
+
+assert(true, "simp ring complete")
+NY
+}

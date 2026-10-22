@@ -1,22 +1,22 @@
 ;; Keywords: viewer runtime event-loop frame timing window resources os ui render
 ;; UI runtime setup, frame-loop coordination, auto-close policy, and resource loading.
 ;; References:
-;; - std.os.ui.window
-;; - std.os.ui.render.dump
-module std.os.ui.render.viewer.runtime(dbg, default_font_size, default_font_filter, font_from_candidates, mono_font, ui_font_from_candidates, timeout_ns, timeout_hit, close_on_timeout, deadline_passed, fps_begin, fps_tick, fps_current, fps_finish, auto_close, auto_close_if_idle, open_fullscreen, open_windowed, handle_close_events, step, build_crosshair_mesh, load_equirect_skybox)
-use std.core
-use std.core.str as str
-use std.os (ticks)
-use std.os.fs as osfs
-use std.os.path as lib_path
-use std.os.ui.window.consts
-use std.os.ui.render
-use std.os.ui.render.dump as ui_profile
-use std.os.ui.render.viewer.term as ui_term
-use std.os.ui.window as window
-use std.os.prim
-use std.math.parse.img.exr as exr
-use std.core.common as common
+;; - core.os.ui.window
+;; - core.os.ui.render.dump
+module core.os.ui.render.viewer.runtime(dbg, default_font_size, default_font_filter, font_from_candidates, mono_font, ui_font_from_candidates, timeout_ns, timeout_hit, close_on_timeout, deadline_passed, fps_begin, fps_tick, fps_current, fps_finish, auto_close, auto_close_if_idle, open_fullscreen, open_windowed, handle_close_events, step, build_crosshair_mesh, load_equirect_skybox)
+use core
+use core.str as str
+use core.os (ticks)
+use core.os.fs as osfs
+use core.os.path as lib_path
+use core.os.ui.window.consts
+use core.os.ui.render
+use core.os.ui.render.dump as ui_profile
+use core.os.ui.render.viewer.term as ui_term
+use core.os.ui.window as window
+use core.os.prim
+use core.math.parse.img.exr as exr
+use core.common as common
 
 mut _headless_cache = -1
 
@@ -284,5 +284,5 @@ fn load_equirect_skybox(any path) int {
    mut fps = fps_begin()
    fps = fps_tick(fps, 0.016)
    assert(timeout_ns(0) >= 0 && !deadline_passed(ticks(), 0) && !timeout_hit(ticks(), 0) && fps_current(fps, 0.016) > 0 && load_equirect_skybox("") == -1, "runtime timing/assets")
-   print("✓ std.os.ui.render.viewer.runtime self-test passed")
+   print("✓ core.os.ui.render.viewer.runtime self-test passed")
 }

@@ -1,0 +1,27 @@
+shape mutable_aggregate_content_predicate_expires_after_different_store {
+  family "compiler-errors/types"
+  generator "error"
+  features [error typing refinement mutable aggregate content-dependent store invalidation negative]
+  template ny-compile-fail
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  expect compile_fail
+  expect_message "refinement obligation"
+  source ny <<'NY'
+use core
+
+refine EqualGap = list where(items) { items[0] == items[1] + 5 }
+@effects(read)
+fn require_equal_gap(EqualGap items) int { return items.len }
+
+fn invalid_after_different_store() int {
+  mut list<int> items = [10, 5]
+  if EqualGap(items) {
+    items[0] = items[1]
+    return require_equal_gap(items)
+  }
+  0
+}
+
+invalid_after_different_store()
+NY
+}

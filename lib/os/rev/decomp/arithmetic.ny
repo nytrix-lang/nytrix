@@ -1,11 +1,14 @@
 ;; Keywords: decompiler arithmetic expressions mba simplification
 ;; Arithmetic and mixed-boolean-arithmetic normalization for Ny pseudocode.
-module std.os.rev.decomp.arithmetic *
-use std.core
-use std.core.str as str
-use std.os.rev.decomp.text (_clean_outer_balanced_parens_wrap, _clean_strip_outer_balanced_parens, _clean_strip_outer_parens, _clean_top_level_find, _clean_literal_int_value)
+module core.os.rev.decomp.arithmetic *
+use core
+use core.str as str
+use core.os.rev.decomp.text (_clean_outer_balanced_parens_wrap, _clean_strip_outer_balanced_parens, _clean_strip_outer_parens, _clean_top_level_find, _clean_literal_int_value)
 
-fn _ny_infix_operator(str sym) str { sym == "^" ? "^^" : sym }
+fn _ny_infix_operator(str sym) str {
+   if sym == "^^" { return "**" }
+   sym
+}
 
 fn _clean_paren(str expr) str {
    def clean = str.strip(expr)
@@ -122,9 +125,9 @@ fn _clean_mba_pair_same_unordered(dict a, dict b) bool {
 
 fn _clean_mba_pair_sum(dict pair) str { _clean_paren(pair.get("left", "")) + " + " + _clean_paren(pair.get("right", "")) }
 
-fn _clean_mba_pair_xor(dict pair) str { _clean_paren(pair.get("left", "")) + " ^^ " + _clean_paren(pair.get("right", "")) }
+fn _clean_mba_pair_xor(dict pair) str { _clean_paren(pair.get("left", "")) + " ^ " + _clean_paren(pair.get("right", "")) }
 
-fn _clean_mba_xor_pair_expr(str expr0) dict { _clean_mba_pair_expr(expr0, "^^") }
+fn _clean_mba_xor_pair_expr(str expr0) dict { _clean_mba_pair_expr(expr0, "^") }
 
 fn _clean_mba_add_expr(str left0, str right0) str {
    def left_xor = _clean_mba_xor_pair_expr(left0)
@@ -216,8 +219,11 @@ fn _clean_binary_expr(str left0, str sym, str right0) str {
 }
 
 #main {
+   assert(_ny_infix_operator("^") == "^", "decompiler XOR spelling")
+   assert(_ny_infix_operator("**") == "**", "decompiler power spelling")
+   assert(_ny_infix_operator("^^") == "**", "decompiler power alias canonicalization")
    assert(_clean_binary_expr("value", "+", "value") == "2 * value", "scaled addition")
-   assert(_clean_simplify_mba_expr("(a ^^ b) + 2 * (a & b)") == "a + b", "mba addition")
+   assert(_clean_simplify_mba_expr("(a ^ b) + 2 * (a & b)") == "a + b", "mba addition")
    assert(_clean_binary_expr("value", "*", "1") == "value", "identity multiplication")
-   print("✓ std.os.rev.decomp.arithmetic self-test passed")
+   print("✓ core.os.rev.decomp.arithmetic self-test passed")
 }

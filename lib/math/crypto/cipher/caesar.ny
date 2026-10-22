@@ -4,12 +4,12 @@
 ;; - https://netlab.cs.ucla.edu/wiki/files/shannon1949.pdf
 ;; - https://cacr.uwaterloo.ca/hac/about/chap1.pdf
 ;; References:
-;; - std.math.crypto.cipher
-;; - std.math.crypto.analysis
-module std.math.crypto.cipher.caesar(caesar_encrypt, caesar_decrypt, caesar_bruteforce, caesar_encrypt_alnum, caesar_decrypt_alnum, caesar_progressive_encrypt, caesar_progressive_decrypt)
-use std.core
-use std.core.str
-use std.math.crypto.error
+;; - core.math.crypto.cipher
+;; - core.math.crypto.analysis
+module core.math.crypto.cipher.caesar(caesar_encrypt, caesar_decrypt, caesar_bruteforce, caesar_encrypt_alnum, caesar_decrypt_alnum, caesar_progressive_encrypt, caesar_progressive_decrypt)
+use core
+use core.str
+use core.math.crypto.error
 
 fn _caesar_builder_take(list b) str { def out = builder_to_str(b) builder_free(b) out }
 
@@ -117,5 +117,5 @@ fn caesar_progressive_decrypt(str text, int start_shift=0, bool step_all=false) 
    assert(caesar_progressive_decrypt(cipher, 5, true) == plain, "progressive caesar step-all decrypt")
    assert(caesar_progressive_encrypt("abc-xyz", 0, false) == "ace-ace", "progressive caesar alpha-only")
    assert(caesar_progressive_decrypt("ace-ace", 0, false) == "abc-xyz", "progressive caesar alpha-only decrypt")
-   print("✓ std.math.crypto.cipher.caesar self-test passed")
+   print("✓ core.math.crypto.cipher.caesar self-test passed")
 }

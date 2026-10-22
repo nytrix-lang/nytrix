@@ -1,19 +1,19 @@
 ;; Keywords: 3d gltf glb parse
 ;; Submodule: animation
-module std.math.parse.3d.gltf.animation(_gltf_read_mat4_accessor_value, _gltf_mat4_transpose, _gltf_pack_skin_sidecars, gltf_skin_joint_mats, _gltf_skin_inv_bind_mats, _gltf_mesh_inv_key, _gltf_mesh_inv_cached, _gltf_pack_skin_mat_slab, _gltf_write_skin_mat_slab, _gltf_skin_mats_cache_record, gltf_free_skin_mats_cache, _gltf_apply_skinning_slab, _gltf_skin_weighted_mat4_vec3, _gltf_apply_skinning_fallback, gltf_apply_skinning, gltf_skin_count, gltf_skin_info, gltf_morph_target_count, _gltf_mesh_morph_weights, _gltf_collect_morph_targets, _gltf_release_morph_targets, _gltf_read_acc_f32, _gltf_read_acc_components, _gltf_read_acc_scalar_tuple, _gltf_read_anim_tuple, _gltf_lerp_vec, _gltf_nlerp_quat, _gltf_normalize_quat, _gltf_read_norm_i16_quat, _gltf_find_time_bracket, _gltf_sample_channel, gltf_animation_count, _gltf_animation_duration_from_anim, _gltf_animation_duration_from_samples, gltf_animation_info, _gltf_anim_fast_records, _gltf_anim_record_bracket, _gltf_anim_clean_tiny, _gltf_anim_fast_value, _gltf_sample_animation_fast, _gltf_anim_sample_component_count, _gltf_anim_store_override, gltf_sample_animation, gltf_sample_animation_merged, gltf_apply_morph_weights, _gltf_build_node_world_mats_animated_fast, gltf_rebuild_animated_mats)
-use std.core
-use std.math.bin
-use std.math
-use std.math.float (is_nan, is_inf)
-use std.core.str as str
-use std.core.common as common
-use std.core.cache as cache
-use std.math.parse.3d.gltf.math as gltf_math
-use std.math.parse.3d.gltf.shared as shr
-use std.math.parse.3d.gltf.load as ld
-use std.math.parse.3d.gltf.material as mat
+module core.math.parse.3d.gltf.animation(_gltf_read_mat4_accessor_value, _gltf_mat4_transpose, _gltf_pack_skin_sidecars, gltf_skin_joint_mats, _gltf_skin_inv_bind_mats, _gltf_mesh_inv_key, _gltf_mesh_inv_cached, _gltf_pack_skin_mat_slab, _gltf_write_skin_mat_slab, _gltf_skin_mats_cache_record, gltf_free_skin_mats_cache, _gltf_apply_skinning_slab, _gltf_skin_weighted_mat4_vec3, _gltf_apply_skinning_fallback, gltf_apply_skinning, gltf_skin_count, gltf_skin_info, gltf_morph_target_count, _gltf_mesh_morph_weights, _gltf_collect_morph_targets, _gltf_release_morph_targets, _gltf_read_acc_f32, _gltf_read_acc_components, _gltf_read_acc_scalar_tuple, _gltf_read_anim_tuple, _gltf_lerp_vec, _gltf_nlerp_quat, _gltf_normalize_quat, _gltf_read_norm_i16_quat, _gltf_find_time_bracket, _gltf_sample_channel, gltf_animation_count, _gltf_animation_duration_from_anim, _gltf_animation_duration_from_samples, gltf_animation_info, _gltf_anim_fast_records, _gltf_anim_record_bracket, _gltf_anim_clean_tiny, _gltf_anim_fast_value, _gltf_sample_animation_fast, _gltf_anim_sample_component_count, _gltf_anim_store_override, gltf_sample_animation, gltf_sample_animation_merged, gltf_apply_morph_weights, _gltf_build_node_world_mats_animated_fast, gltf_rebuild_animated_mats)
+use core
+use core.math.bin
+use core.math
+use core.math.float (is_nan, is_inf)
+use core.str as str
+use core.common as common
+use core.cache as cache
+use core.math.parse.3d.gltf.math as gltf_math
+use core.math.parse.3d.gltf.shared as shr
+use core.math.parse.3d.gltf.load as ld
+use core.math.parse.3d.gltf.material as mat
 
-fn _gltf_read_mat4_accessor_value(any res, int idx) list {
+fn _gltf_read_mat4_accessor_value(any res, int idx) list<any> {
    if !is_dict(res) { return gltf_math.mat4_identity() }
    def ptr = res.get("ptr", 0)
    if !ptr { return gltf_math.mat4_identity() }
@@ -28,7 +28,7 @@ fn _gltf_read_mat4_accessor_value(any res, int idx) list {
    ]
 }
 
-fn _gltf_mat4_transpose(any m) list {
+fn _gltf_mat4_transpose(any m) list<any> {
    if !is_list(m) || m.len < 16 { return gltf_math.mat4_identity() }
    [
       m.get(0, 1.0), m.get(4, 0.0), m.get(8, 0.0), m.get(12, 0.0),
@@ -590,7 +590,7 @@ fn gltf_apply_skinning(any part, any gltf_data, any node_world_mats, any skin_ma
    if !is_list(mesh_bind_world)|| mesh_bind_world.len < 16 { mesh_bind_world = part.get("skin_mesh_bind_world", part.get("model", 0)) }
    if !is_dict(skin_mats_cache) { skin_mats_cache = dict(4) }
    def skin_rec = _gltf_skin_mats_cache_record(gltf_data, skin_idx, node_world_mats, mesh_bind_world, skin_mats_cache)
-   mut skin_mats = is_list(skin_rec) ? skin_rec.get(0, 0) : 0
+   mut list skin_mats = is_list(skin_rec) ? skin_rec.get(0, 0) : []
    def skin_slab = is_list(skin_rec) ? skin_rec.get(1, 0) : 0
    def skin_mat_count = is_list(skin_rec) ? int(skin_rec.get(2, 0)) : 0
    if skin_slab && skin_mat_count > 0 && !shr._gltf_skin_raw_off_enabled() {
@@ -641,13 +641,13 @@ fn gltf_morph_target_count(any gltf_data) int {
    mut mi = 0
    while mi < meshes_n {
       def mesh = meshes[mi]
-      def prims = is_dict(mesh) ? mesh.get("primitives", 0) : 0
+      def list prims = is_dict(mesh) ? mesh.get("primitives", 0) : []
       if is_list(prims) {
          def prims_n = prims.len
          mut pi = 0
          while pi < prims_n {
             def prim = prims[pi]
-            def targets = is_dict(prim) ? prim.get("targets", 0) : 0
+            def list targets = is_dict(prim) ? prim.get("targets", 0) : []
             if is_list(targets) {
                def targets_n = targets.len
                if targets_n > best { best = targets_n }
@@ -669,7 +669,7 @@ fn _gltf_mesh_morph_weights(any g, int mesh_idx, int target_count) list {
    def meshes = g.get("meshes")
    if !is_list(meshes) || mesh_idx < 0 || mesh_idx >= meshes.len { return out }
    def mesh = meshes[mesh_idx]
-   def weights = is_dict(mesh) ? mesh.get("weights", 0) : 0
+   def list weights = is_dict(mesh) ? mesh.get("weights", 0) : []
    if !is_list(weights) { return out }
    def weights_n = weights.len
    i = 0
@@ -900,20 +900,20 @@ fn _gltf_find_time_bracket(any data, any input_res, f64 time_sec) list {
    if !ptr || count <= 0 { return [0, 0, 0.0] }
    def stride = int(input_res.get("stride", 4))
    if count == 1 { return [0, 0, 0.0] }
-   def t_first = f32le(ptr, 0)
-   def t_last  = f32le(ptr, (count - 1) * stride)
+   def t_first = float(f32le(ptr, 0))
+   def t_last  = float(f32le(ptr, (count - 1) * stride))
    if time_sec <= t_first { return [0, 0, 0.0] }
    if time_sec >= t_last { return [count-1, count-1, 0.0] }
    mut lo = 0
    mut hi = count - 1
    while hi - lo > 1 {
       def mid = (lo + hi) / 2
-      def t_mid = f32le(ptr, mid * stride)
+      def t_mid = float(f32le(ptr, mid * stride))
       if t_mid <= time_sec { lo = mid }
       else { hi = mid }
    }
-   def t_lo = f32le(ptr, lo * stride)
-   def t_hi = f32le(ptr, hi * stride)
+   def t_lo = float(f32le(ptr, lo * stride))
+   def t_hi = float(f32le(ptr, hi * stride))
    def alpha = _gltf_anim_alpha(time_sec, t_lo, t_hi)
    [lo, hi, alpha]
 }
@@ -1164,29 +1164,29 @@ fn _gltf_anim_record_bracket(any rec, f64 time_sec) list {
    def count = int(rec.get(4, 0))
    def stride = int(rec.get(5, 4))
    if !in_ptr || count <= 1 { return [0, 0, 0.0] }
-   def first_t = f32le(in_ptr, 0)
+   def first_t = float(f32le(in_ptr, 0))
    if time_sec <= first_t {
       rec[8] = 0
       return [0, 0, 0.0]
    }
-   def last_t = f32le(in_ptr, (count - 1) * stride)
+   def last_t = float(f32le(in_ptr, (count - 1) * stride))
    if time_sec >= last_t {
       rec[8] = count - 1
       return [count - 1, count - 1, 0.0]
    }
    mut lo = int(rec.get(8, 0))
    if lo < 0 || lo >= count - 1 { lo = 0 }
-   mut t_lo = f32le(in_ptr, lo * stride)
-   mut t_hi = f32le(in_ptr, (lo + 1) * stride)
+   mut t_lo = float(f32le(in_ptr, lo * stride))
+   mut t_hi = float(f32le(in_ptr, (lo + 1) * stride))
    while lo > 0 && time_sec < t_lo {
       lo -= 1
-      t_lo = f32le(in_ptr, lo * stride)
-      t_hi = f32le(in_ptr, (lo + 1) * stride)
+      t_lo = float(f32le(in_ptr, lo * stride))
+      t_hi = float(f32le(in_ptr, (lo + 1) * stride))
    }
    while lo + 1 < count - 1 && time_sec >= t_hi {
       lo += 1
       t_lo = t_hi
-      t_hi = f32le(in_ptr, (lo + 1) * stride)
+      t_hi = float(f32le(in_ptr, (lo + 1) * stride))
    }
    rec[8] = lo
    def alpha = _gltf_anim_alpha(time_sec, t_lo, t_hi)
@@ -1204,16 +1204,16 @@ fn _gltf_anim_fast_tuple(any rec, int idx) list {
    def off = idx * stride
    if n_comp == 4 {
       return [
-         _gltf_anim_clean_tiny(f32le(out_ptr, off + 0)),
-         _gltf_anim_clean_tiny(f32le(out_ptr, off + 4)),
-         _gltf_anim_clean_tiny(f32le(out_ptr, off + 8)),
-         _gltf_anim_clean_tiny(f32le(out_ptr, off + 12))
+         _gltf_anim_clean_tiny(float(f32le(out_ptr, off + 0))),
+         _gltf_anim_clean_tiny(float(f32le(out_ptr, off + 4))),
+         _gltf_anim_clean_tiny(float(f32le(out_ptr, off + 8))),
+         _gltf_anim_clean_tiny(float(f32le(out_ptr, off + 12)))
       ]
    }
    [
-      _gltf_anim_clean_tiny(f32le(out_ptr, off + 0)),
-      _gltf_anim_clean_tiny(f32le(out_ptr, off + 4)),
-      _gltf_anim_clean_tiny(f32le(out_ptr, off + 8))
+      _gltf_anim_clean_tiny(float(f32le(out_ptr, off + 0))),
+      _gltf_anim_clean_tiny(float(f32le(out_ptr, off + 4))),
+      _gltf_anim_clean_tiny(float(f32le(out_ptr, off + 8)))
    ]
 }
 
@@ -1229,14 +1229,14 @@ fn _gltf_anim_fast_value(any rec, f64 time_sec) list {
    def lo_off = lo * stride
    def hi_off = hi * stride
    if n_comp == 4 && int(rec.get(1, 0)) == 2 {
-      def ax = f32le(out_ptr, lo_off + 0)
-      def ay = f32le(out_ptr, lo_off + 4)
-      def az = f32le(out_ptr, lo_off + 8)
-      def aw = f32le(out_ptr, lo_off + 12)
-      mut bx = f32le(out_ptr, hi_off + 0)
-      mut by = f32le(out_ptr, hi_off + 4)
-      mut bz = f32le(out_ptr, hi_off + 8)
-      mut bw = f32le(out_ptr, hi_off + 12)
+      def ax = float(f32le(out_ptr, lo_off + 0))
+      def ay = float(f32le(out_ptr, lo_off + 4))
+      def az = float(f32le(out_ptr, lo_off + 8))
+      def aw = float(f32le(out_ptr, lo_off + 12))
+      mut bx = float(f32le(out_ptr, hi_off + 0))
+      mut by = float(f32le(out_ptr, hi_off + 4))
+      mut bz = float(f32le(out_ptr, hi_off + 8))
+      mut bw = float(f32le(out_ptr, hi_off + 12))
       mut dot = ax * bx + ay * by + az * bz + aw * bw
       if dot < 0.0 { bx = -bx by = -by bz = -bz bw = -bw dot = 0.0 - dot }
       if dot > 0.9995 {
@@ -1277,14 +1277,14 @@ fn _gltf_anim_fast_value(any rec, f64 time_sec) list {
       ]
    }
    if n_comp == 4 {
-      def ax = f32le(out_ptr, lo_off + 0)
-      def ay = f32le(out_ptr, lo_off + 4)
-      def az = f32le(out_ptr, lo_off + 8)
-      def aw = f32le(out_ptr, lo_off + 12)
-      def bx = f32le(out_ptr, hi_off + 0)
-      def by = f32le(out_ptr, hi_off + 4)
-      def bz = f32le(out_ptr, hi_off + 8)
-      def bw = f32le(out_ptr, hi_off + 12)
+      def ax = float(f32le(out_ptr, lo_off + 0))
+      def ay = float(f32le(out_ptr, lo_off + 4))
+      def az = float(f32le(out_ptr, lo_off + 8))
+      def aw = float(f32le(out_ptr, lo_off + 12))
+      def bx = float(f32le(out_ptr, hi_off + 0))
+      def by = float(f32le(out_ptr, hi_off + 4))
+      def bz = float(f32le(out_ptr, hi_off + 8))
+      def bw = float(f32le(out_ptr, hi_off + 12))
       return [
          _gltf_anim_clean_tiny(ax + (bx - ax) * t),
          _gltf_anim_clean_tiny(ay + (by - ay) * t),
@@ -1292,12 +1292,12 @@ fn _gltf_anim_fast_value(any rec, f64 time_sec) list {
          _gltf_anim_clean_tiny(aw + (bw - aw) * t)
       ]
    }
-   def ax = f32le(out_ptr, lo_off + 0)
-   def ay = f32le(out_ptr, lo_off + 4)
-   def az = f32le(out_ptr, lo_off + 8)
-   def bx = f32le(out_ptr, hi_off + 0)
-   def by = f32le(out_ptr, hi_off + 4)
-   def bz = f32le(out_ptr, hi_off + 8)
+   def ax = float(f32le(out_ptr, lo_off + 0))
+   def ay = float(f32le(out_ptr, lo_off + 4))
+   def az = float(f32le(out_ptr, lo_off + 8))
+   def bx = float(f32le(out_ptr, hi_off + 0))
+   def by = float(f32le(out_ptr, hi_off + 4))
+   def bz = float(f32le(out_ptr, hi_off + 8))
    [
       _gltf_anim_clean_tiny(ax + (bx - ax) * t),
       _gltf_anim_clean_tiny(ay + (by - ay) * t),
@@ -1838,5 +1838,5 @@ fn gltf_rebuild_animated_mats(any gltf_data, any overrides) dict {
    free(joints)
    free(weights)
    free(skin_slab)
-   print("✓ std.math.parse.3d.gltf.animation self-test passed")
+   print("✓ core.math.parse.3d.gltf.animation self-test passed")
 }

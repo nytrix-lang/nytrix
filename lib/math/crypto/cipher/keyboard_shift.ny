@@ -3,11 +3,11 @@
 ;; - https://netlab.cs.ucla.edu/wiki/files/shannon1949.pdf
 ;; - https://cacr.uwaterloo.ca/hac/about/chap1.pdf
 ;; References:
-;; - std.math.crypto.cipher
-;; - std.math.crypto.analysis
-module std.math.crypto.cipher.keyboard_shift(keyboard_shift_transform, keyboard_shift_decrypt)
-use std.core
-use std.core.str
+;; - core.math.crypto.cipher
+;; - core.math.crypto.analysis
+module core.math.crypto.cipher.keyboard_shift(keyboard_shift_transform, keyboard_shift_decrypt)
+use core
+use core.str
 
 fn _row_shift_char(str c, str normal_row, str shifted_row, int shift) str {
    mut i = 0

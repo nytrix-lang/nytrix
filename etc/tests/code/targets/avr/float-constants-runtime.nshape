@@ -1,0 +1,238 @@
+shape avr_float_constants_execute_under_qemu {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "test", "avr", "portable-text", "float-constants",
+            "stack-args", "qemu"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os (file_remove, file_write, run_capture, temp_dir, pid)
+
+def compiler = env("NYTRIX_NY_FULL_BIN")
+assert(is_str(compiler) && compiler.len > 0,
+       "test runner provides the compiler path")
+
+fn run_avr_case(str suffix, str value_source, list expected) bool {
+  def stem = temp_dir() + "/ny-avr-float-" + to_str(pid()) + "-" + suffix
+  def asm_path = stem + ".s"
+  def start_path = stem + "-start.s"
+  def obj_path = stem + ".o"
+  def start_obj_path = stem + "-start.o"
+  def elf_path = stem + ".elf"
+  mut str checks = ""
+  for index in 0..7 {
+    checks += "  cpi r" + to_str(18 + index) + ", " +
+              to_str(expected[index]) + "\n  breq 1f\n  ldi r16, " +
+              to_str(48 + index) + "\n  rjmp 4f\n1:\n"
+  }
+  def start_source =
+    ".text\n.global _start\n_start:\n" +
+    "  call rt_main\n" +
+    "  ldi r16, 0\n  sts 0x00C5, r16\n" +
+    "  ldi r16, 103\n  sts 0x00C4, r16\n" +
+    "  ldi r16, 0x06\n  sts 0x00C2, r16\n" +
+    "  ldi r16, 0x08\n  sts 0x00C1, r16\n" +
+    checks +
+    "  ldi r16, 'U'\n  rjmp 4f\n" +
+    "3:\n  ldi r16, 'E'\n" +
+    "4:\n1:\n  lds r17, 0x00C0\n  sbrs r17, 5\n" +
+    "  rjmp 1b\n  sts 0x00C6, r16\n2:\n  rjmp 2b\n"
+  assert(is_ok(file_write(start_path, start_source)),
+         "write AVR float-constant startup wrapper")
+  def emitted = run_capture(
+      [compiler, "--native-backend=avr", "--native-only", "--nyir-verify",
+       "--emit-asm=" + asm_path, "-no-std", "-emit-only", "-e",
+       value_source],
+      [], nil, false)
+  def assembled = run_capture(
+      ["/usr/bin/clang", "--target=avr", "-mmcu=atmega328p", "-c", asm_path,
+       "-o", obj_path],
+      [], nil, false)
+  def start_assembled = run_capture(
+      ["/usr/bin/clang", "--target=avr", "-mmcu=atmega328p", "-c", start_path,
+       "-o", start_obj_path],
+      [], nil, false)
+  def linked = run_capture(
+      ["/usr/bin/avr-gcc", "-mmcu=atmega328p", "-mdouble=64", "-nostartfiles",
+       "-Wl,-e,_start", start_obj_path, obj_path, "-o", elf_path],
+      [], nil, false)
+  assert(emitted.get("code", 127) == 0 &&
+         assembled.get("code", 127) == 0 &&
+         start_assembled.get("code", 127) == 0 &&
+         linked.get("code", 127) == 0,
+         "AVR " + suffix + " compiles, assembles, and links; codes=" +
+         to_str(emitted.get("code", 127)) + "," +
+         to_str(assembled.get("code", 127)) + "," +
+         to_str(start_assembled.get("code", 127)) + "," +
+         to_str(linked.get("code", 127)) + " link output=" +
+         linked.get("stdout", ""))
+  def execution = run_capture(
+      ["/usr/bin/timeout", "0.5s", "/usr/bin/qemu-system-avr", "-M", "uno", "-display", "none",
+       "-monitor", "none", "-serial", "stdio", "-bios", elf_path],
+      [], nil, false)
+  assert(execution.get("code", 0) == 124 &&
+         str_contains(execution.get("stdout", ""), "U") &&
+         !str_contains(execution.get("stdout", ""), "E"),
+         "QEMU verifies AVR " + suffix + " tagged return bytes; code=" +
+         to_str(execution.get("code", -1)) + " stdout=" +
+         execution.get("stdout", ""))
+  assert(is_ok(file_remove(asm_path)) && is_ok(file_remove(start_path)) &&
+         is_ok(file_remove(obj_path)) && is_ok(file_remove(start_obj_path)) &&
+         is_ok(file_remove(elf_path)),
+         "remove AVR " + suffix + " test artifacts")
+  true
+}
+
+;; Keep each precision's ABI and comparison matrix in one compiler/QEMU run.
+;; The wrapper checks exact return bytes; each predicate group gates that return.
+fn compare_helpers(str type) str {
+  "@noinline\nfn lt(" + type + " a, " + type + " b) bool { a < b }\n" +
+  "@noinline\nfn le(" + type + " a, " + type + " b) bool { a <= b }\n" +
+  "@noinline\nfn gt(" + type + " a, " + type + " b) bool { a > b }\n" +
+  "@noinline\nfn ge(" + type + " a, " + type + " b) bool { a >= b }\n" +
+  "@noinline\nfn eq(" + type + " a, " + type + " b) bool { a == b }\n" +
+  "@noinline\nfn ne(" + type + " a, " + type + " b) bool { a != b }\n"
+}
+
+def f64_checks =
+  "@noinline\nfn check_lt_le() bool {\n" +
+  "if lt(-1.0, 0.0) { } else { return false }\n" +
+  "if lt(0.0, -1.0) { return false }\n" +
+  "if le(0.0, 0.0) { } else { return false }\n" +
+  "if le(1.0, 0.0) { return false }\nreturn true\n}\n" +
+  "@noinline\nfn check_gt_ge() bool {\n" +
+  "if gt(1.0, 0.0) { } else { return false }\n" +
+  "if gt(0.0, 1.0) { return false }\n" +
+  "if ge(0.0, 0.0) { } else { return false }\n" +
+  "if ge(-1.0, 0.0) { return false }\nreturn true\n}\n" +
+  "@noinline\nfn check_equality() bool {\n" +
+  "if eq(-0.0, 0.0) { } else { return false }\n" +
+  "if eq(0.0, 1.0) { return false }\n" +
+  "if ne(0.0, 1.0) { } else { return false }\n" +
+  "if ne(-0.0, 0.0) { return false }\nreturn true\n}\n" +
+  "@noinline\nfn check_nan_ordering() bool {\n" +
+  "if lt(__flt_nan(), 0.0) { return false }\n" +
+  "if le(0.0, __flt_nan()) { return false }\n" +
+  "if gt(__flt_nan(), 0.0) { return false }\n" +
+  "if ge(0.0, __flt_nan()) { return false }\nreturn true\n}\n" +
+  "@noinline\nfn check_nan_infinity() bool {\n" +
+  "if eq(__flt_nan(), 0.0) { return false }\n" +
+  "if ne(__flt_nan(), 0.0) { } else { return false }\n" +
+  "if gt(__flt_inf(), 0.0) { } else { return false }\n" +
+  "if ge(__flt_inf(), __flt_inf()) { } else { return false }\nreturn true\n}\n" +
+  "@noinline\nfn check_infinity_equality() bool {\n" +
+  "if eq(__flt_inf(), __flt_inf()) { } else { return false }\n" +
+  "if ne(__flt_inf(), 0.0) { } else { return false }\nreturn true\n}\n" +
+  "@noinline\nfn comparisons() bool {\n" +
+  "if check_lt_le() { } else { return false }\n" +
+  "if check_gt_ge() { } else { return false }\n" +
+  "if check_equality() { } else { return false }\n" +
+  "if check_nan_ordering() { } else { return false }\n" +
+  "if check_nan_infinity() { } else { return false }\n" +
+  "if check_infinity_equality() { } else { return false }\nreturn true\n}\n"
+def f64_compare_prefix =
+  "@noinline\nfn pass_f64(int a, int b, int c, int d, f64 value) f64 {\n" +
+  "  value\n}\n" + compare_helpers("f64") +
+  f64_checks
+
+def f64_arithmetic_prefix =
+  "@noinline\nfn f64_add(f64 a, f64 b) f64 { a + b }\n" +
+  "@noinline\nfn f64_sub(f64 a, f64 b) f64 { a - b }\n" +
+  "@noinline\nfn f64_mul(f64 a, f64 b) f64 { a * b }\n" +
+  "@noinline\nfn f64_div(f64 a, f64 b) f64 { a / b }\n"
+
+def f32_checks =
+  "@noinline\nfn check_lt_le() bool {\n" +
+  "if lt(-1.0f32, 0.0f32) { } else { return false }\n" +
+  "if lt(0.0f32, -1.0f32) { return false }\n" +
+  "if le(0.0f32, 0.0f32) { } else { return false }\n" +
+  "if le(1.0f32, 0.0f32) { return false }\nreturn true\n}\n" +
+  "@noinline\nfn check_gt_ge() bool {\n" +
+  "if gt(1.0f32, 0.0f32) { } else { return false }\n" +
+  "if gt(0.0f32, 1.0f32) { return false }\n" +
+  "if ge(0.0f32, 0.0f32) { } else { return false }\n" +
+  "if ge(-1.0f32, 0.0f32) { return false }\nreturn true\n}\n" +
+  "@noinline\nfn check_equality() bool {\n" +
+  "if eq(-0.0f32, 0.0f32) { } else { return false }\n" +
+  "if eq(0.0f32, 1.0f32) { return false }\n" +
+  "if ne(0.0f32, 1.0f32) { } else { return false }\n" +
+  "if ne(-0.0f32, 0.0f32) { return false }\nreturn true\n}\n" +
+  "@noinline\nfn comparisons() bool {\n" +
+  "if check_lt_le() { } else { return false }\n" +
+  "if check_gt_ge() { } else { return false }\n" +
+  "if check_equality() { } else { return false }\nreturn true\n}\n"
+def f32_prefix =
+  "@noinline\nfn pass_f32(int a, int b, int c, int d, f32 value) f32 {\n" +
+  "  value\n}\n" + compare_helpers("f32") +
+  f32_checks
+
+def f32_arithmetic_prefix =
+  "@noinline\nfn f32_add(f32 a, f32 b) f32 { a + b }\n" +
+  "@noinline\nfn f32_sub(f32 a, f32 b) f32 { a - b }\n" +
+  "@noinline\nfn f32_mul(f32 a, f32 b) f32 { a * b }\n" +
+  "@noinline\nfn f32_div(f32 a, f32 b) f32 { a / b }\n"
+
+def f64_add_sub =
+  f64_arithmetic_prefix +
+  "if f64_add(1.5, 2.25) == 3.75 && " +
+  "f64_sub(3.75, 1.5) == 2.25 { 3 } else { 0 }"
+def f64_mul_div =
+  f64_arithmetic_prefix +
+  "if f64_mul(-1.5, 2.0) == -3.0 && " +
+  "f64_div(3.0, 2.0) == 1.5 { 3 } else { 0 }"
+def f64_conversions =
+  "@noinline\nfn int_to_f64(int value) f64 { value }\n" +
+  "@noinline\nfn f64_to_int(f64 value) int { int(value) }\n" +
+  "@noinline\nfn widen_f32(f32 value) f64 { value }\n" +
+  "@noinline\nfn narrow_f64(f64 value) f32 { value }\n" +
+  "if int_to_f64(16777217) == 16777217.0 && " +
+  "f64_to_int(1234.875) == 1234 && f64_to_int(-1234.875) == -1234 && " +
+  "widen_f32(1.25f32) == 1.25 && narrow_f64(1.5) == 1.5 { 3 } else { 0 }"
+
+def f32_add_sub =
+  f32_arithmetic_prefix +
+  "if f32_add(1.5f32, 2.25f32) == 3.75f32 && " +
+  "f32_sub(3.75f32, 1.5f32) == 2.25f32 { 3 } else { 0 }"
+def f32_mul_div =
+  f32_arithmetic_prefix +
+  "if f32_mul(-1.5f32, 2.0f32) == -3.0f32 && " +
+  "f32_div(3.0f32, 2.0f32) == 1.5f32 { 3 } else { 0 }"
+def f32_conversions =
+  "@noinline\nfn int_to_f32(int value) f32 { value }\n" +
+  "@noinline\nfn f32_to_int(f32 value) int { int(value) }\n" +
+  "if int_to_f32(16777217) == 16777216.0f32 && " +
+  "int_to_f32(-16777217) == -16777216.0f32 && " +
+  "f32_to_int(1234.875f32) == 1234 && " +
+  "f32_to_int(-1234.875f32) == -1234 { 3 } else { 0 }"
+
+assert(run_avr_case("f64-comparisons",
+                    f64_compare_prefix +
+                    "if comparisons() && pass_f64(1, 2, 3, 4, 1.5) == 1.5 { 3 } else { 0 }",
+                    [7, 0, 0, 0, 0, 0, 0, 0]),
+       "AVR f64 comparisons, NaN, infinity, and stack arguments")
+assert(run_avr_case("f64-add-sub", f64_add_sub,
+                    [7, 0, 0, 0, 0, 0, 0, 0]),
+       "AVR f64 addition and subtraction")
+assert(run_avr_case("f64-mul-div", f64_mul_div,
+                    [7, 0, 0, 0, 0, 0, 0, 0]),
+       "AVR f64 multiplication and division")
+assert(run_avr_case("f64-conversions", f64_conversions,
+                    [7, 0, 0, 0, 0, 0, 0, 0]),
+       "AVR signed i64/f64 and f32/f64 conversions")
+assert(run_avr_case("f32-comparisons",
+                    f32_prefix +
+                    "if comparisons() && pass_f32(1, 2, 3, 4, 1.5f32) == 1.5f32 { 3 } else { 0 }",
+                    [7, 0, 0, 0, 0, 0, 0, 0]),
+       "AVR f32 constants, stack arguments, comparisons, and signed zero")
+assert(run_avr_case("f32-add-sub", f32_add_sub,
+                    [7, 0, 0, 0, 0, 0, 0, 0]),
+       "AVR f32 addition and subtraction")
+assert(run_avr_case("f32-mul-div", f32_mul_div,
+                    [7, 0, 0, 0, 0, 0, 0, 0]),
+       "AVR f32 multiplication and division")
+assert(run_avr_case("f32-conversions", f32_conversions,
+                    [7, 0, 0, 0, 0, 0, 0, 0]),
+       "AVR signed i64/f32 conversions")
+NY
+}

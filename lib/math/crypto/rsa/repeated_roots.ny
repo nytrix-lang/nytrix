@@ -6,11 +6,11 @@
 ;; - https://people.csail.mit.edu/rivest/Rsapaper.pdf
 ;; - https://crypto.stanford.edu/~dabo/pubs/papers/RSA-survey.pdf
 ;; References:
-;; - std.math.crypto.rsa
-;; - std.math.crypto
-module std.math.crypto.rsa.repeated_roots(mod_sqrt_all, mod_2kth_roots)
-use std.core
-use std.math.nt
+;; - core.math.crypto.rsa
+;; - core.math.crypto
+module core.math.crypto.rsa.repeated_roots(mod_sqrt_all, mod_2kth_roots)
+use core
+use core.math.nt
 
 fn mod_sqrt_all(number a, number p) list {
    "Find all square roots of a mod p using Tonelli-Shanks.
@@ -96,5 +96,5 @@ fn mod_2kth_roots(number c, int k, number p, number q) list {
       idx += 1
    }
    assert(mod_2kth_roots(1, 2, 3, 5).len == 8, "fourth roots mod 15")
-   print("✓ std.math.crypto.rsa.repeated_roots self-test passed")
+   print("✓ core.math.crypto.rsa.repeated_roots self-test passed")
 }

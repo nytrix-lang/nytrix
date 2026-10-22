@@ -1,0 +1,20 @@
+shape oracle_signed_power2_div_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle signed-division truncation power-of-two]
+  template ny-test-case
+  flags_matrix "-O0 --native-result-oracle=-4611686018427387904; -O1 --native-result-oracle=-4611686018427387904; -O2 --native-result-oracle=-4611686018427387904; -O3 --native-result-oracle=-4611686018427387904"
+  expect compile_and_run
+  source ny <<'NY'
+fn half(int x) int { x / 2 }
+fn eighth(int x) int { x / 8 }
+fn mod_neg_eight(int x) int { x % -8 }
+
+half(-5) + half(-4) + half(5) + half(4) +
+  eighth(-17) + eighth(-16) + eighth(17) + eighth(16) +
+  half(-9223372036854775808) +
+  mod_neg_eight(-9) + mod_neg_eight(-8) + mod_neg_eight(-7) +
+  mod_neg_eight(9) + mod_neg_eight(8) + mod_neg_eight(7) +
+  mod_neg_eight(-9223372036854775808)
+NY
+}

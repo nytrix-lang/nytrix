@@ -1,0 +1,25 @@
+shape ownership_allowance_fixed_range_match_reassignment_underflow {
+  family "compiler-errors/ownership"
+  generator "error"
+  features [error ownership allowance fixed-range match reassignment underflow]
+  template ny-compile-fail
+  flags "--ownership-strict"
+  expect compile_fail
+  expect_message "ownership allowance below"
+  source ny <<'NY'
+use core
+
+@allowance(x, [1,1])
+fn match_reassignment(int selector, int x) int {
+  for index in 0..1 {
+    match selector {
+      0 -> { x = 7 }
+      _ -> { x = 8 }
+    }
+  }
+  0
+}
+
+match_reassignment(0, 3)
+NY
+}

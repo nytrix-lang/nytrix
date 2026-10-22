@@ -4,9 +4,9 @@
 ;; - https://cacr.uwaterloo.ca/hac/about/chap2.pdf
 ;; - https://cacr.uwaterloo.ca/hac/about/chap14.pdf
 ;; References:
-;; - std.math.crypto
-module std.math.crypto.hensel(hensel_lift_linear, hensel_lift, hensel_roots, poly_eval_mod, poly_derivative, find_roots_mod_p)
-use std.math.nt
+;; - core.math.crypto
+module core.math.crypto.hensel(hensel_lift_linear, hensel_lift, hensel_roots, poly_eval_mod, poly_derivative, find_roots_mod_p)
+use core.math.nt
 
 fn poly_eval_mod(list poly, any x, any modulus) any {
    "Evaluate polynomial at x modulo modulus using Horner's method. Returns the result mod modulus."

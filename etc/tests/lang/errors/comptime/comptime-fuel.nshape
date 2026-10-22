@@ -1,0 +1,78 @@
+shape comptime-fuel-exhaustion {
+  family "compiler-errors/comptime"
+  generator "error"
+  features ["error", "comptime", "fuel", "negative", "diagnostic"]
+  template ny-compile-fail
+  flags "--comptime-limit=32"
+  expect compile_fail
+  expect_message "comptime fuel exhausted"
+
+  source ny <<'NY'
+use core
+
+def exhausted = #run {
+  mut i = 0
+  while true {
+    i += 1
+  }
+}
+NY
+}
+
+shape comptime-fuel-within-budget {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "test", "comptime", "fuel"]
+  template ny-test-case
+  flags "--comptime-limit=64"
+  expect compile_and_run
+
+  source ny <<'NY'
+use core
+
+def total = #run {
+  mut i = 0
+  mut sum = 0
+  while i < 2 {
+    sum += i
+    i += 1
+  }
+  return sum
+}
+assert(total == 1, "comptime finite loop stays within fuel budget")
+NY
+}
+
+shape comptime-fuel-shared-across-run-expressions {
+  family "compiler-errors/comptime"
+  generator "error"
+  features ["error", "comptime", "fuel", "negative", "diagnostic"]
+  template ny-compile-fail
+  flags "--comptime-limit=32"
+  expect compile_fail
+  expect_message "comptime fuel exhausted"
+
+  source ny <<'NY'
+use core
+
+def first = #run {
+  mut i = 0
+  mut sum = 0
+  while i < 2 {
+    sum += i
+    i += 1
+  }
+  return sum
+}
+
+def second = #run {
+  mut i = 0
+  mut sum = 0
+  while i < 2 {
+    sum += i
+    i += 1
+  }
+  return sum
+}
+NY
+}

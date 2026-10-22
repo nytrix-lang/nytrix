@@ -2,10 +2,10 @@
 ;; Constant-time cryptography primitives for Nytrix
 ;; These functions use branchless operations to prevent timing side-channel attacks
 ;; References:
-;; - std.math.crypto
-module std.math.crypto.ct(ct_select, ct_compare, ct_eq, ct_neq, ct_lt, ct_le, ct_gt, ct_ge, ct_min, ct_max, ct_abs, ct_swap, ct_cond_negate, CT_ZERO, CT_ONE)
-use std.core
-use std.core.error
+;; - core.math.crypto
+module core.math.crypto.ct(ct_select, ct_compare, ct_eq, ct_neq, ct_lt, ct_le, ct_gt, ct_ge, ct_min, ct_max, ct_abs, ct_swap, ct_cond_negate, CT_ZERO, CT_ONE)
+use core
+use core.error
 
 def CT_ZERO = 0
 def CT_ONE = 1
@@ -29,7 +29,7 @@ fn ct_compare(ptr a, ptr b, int len) int {
 fn ct_eq(int a, int b) int {
    "Constant-time equality comparison for integers.
    Returns 1 if a == b, 0 otherwise. No branching."
-   def x = a ^^ b
+   def x = a ^ b
    def neg_x = 0 - x
    def or_val = x | neg_x
    1 - ((or_val >> 63) & 1)
@@ -77,7 +77,7 @@ fn ct_abs(int a) int {
    "Constant-time absolute value for signed integers.
    Returns |a| without branching on the sign."
    def mask = a >> 63
-   def xored = a ^^ mask
+   def xored = a ^ mask
    xored - mask
 }
 
@@ -85,12 +85,12 @@ fn ct_swap(int a, int b, int condition) list {
    "Constant-time conditional swap.
    Returns [b, a] if condition != 0, else [a, b].
    No branching based on condition."
-   def x = a ^^ b
+   def x = a ^ b
    def mask_val = condition | (0 - condition)
    def mask_shifted = (mask_val >> 63)
    def mask = 0 - mask_shifted
    def masked = x & mask
-   [a ^^ masked, b ^^ masked]
+   [a ^ masked, b ^ masked]
 }
 
 fn ct_cond_negate(int a, int condition) int {

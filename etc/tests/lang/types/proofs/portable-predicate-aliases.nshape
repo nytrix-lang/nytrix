@@ -1,0 +1,60 @@
+shape immutable_pure_predicate_aliases_are_inlined {
+  family "runtime/proofs"
+  generator "regression"
+  features ["proofs", "requires", "pure", "indirect-call", "alias"]
+  template ny-test-case
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+@pure
+fn positive(int value) bool {
+  value > 0
+}
+
+def predicate_inner = positive
+def predicate = predicate_inner
+
+fn needs_positive(int value) int requires predicate(value) {
+  value
+}
+
+fn forward_positive(int value) int requires value > 0 {
+  needs_positive(value)
+}
+
+assert(forward_positive(7) == 7, "immutable pure predicate aliases inline")
+NY
+}
+
+shape immutable_pure_predicate_aliases_still_require_a_proof {
+  family "runtime/proofs"
+  generator "regression"
+  features ["proofs", "requires", "pure", "indirect-call", "alias", "negative"]
+  template ny-test-case
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  expect compile_fail
+  expect_message "precondition obligation failed"
+  source ny <<'NY'
+use core
+
+@pure
+fn positive(int value) bool {
+  value > 0
+}
+
+def predicate_inner = positive
+def predicate = predicate_inner
+
+fn needs_positive(int value) int requires predicate(value) {
+  value
+}
+
+fn without_proof(int value) int {
+  needs_positive(value)
+}
+
+without_proof(7)
+NY
+}

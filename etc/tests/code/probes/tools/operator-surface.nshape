@@ -1,0 +1,107 @@
+shape operator_surface {
+  generator "embedded"
+  family "probe/tools"
+  features ["operators", "aot", "jit", "wasm"]
+  template ny-test-case
+  flags "--native-only"
+  timeout 240
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.fs as fs
+use core.os.subprocess (run_capture)
+
+def ny = env("NYTRIX_NY_FULL_BIN")
+def cmake = env("NYTRIX_CMAKE_COMMAND")
+assert(is_str(ny) && ny.len > 0, "test runner exports the full compiler")
+assert(is_str(cmake) && cmake.len > 0, "CMake exposes its executable path")
+def test_dir = temp_dir() + "/operator-surface-" + to_str(pid())
+def setup = run_capture([cmake, "-E", "make_directory", test_dir], [], nil, false)
+assert(setup.get("code", 127) == 0, "create operator test directory")
+
+def source = """
+use core
+use core.math.big
+assert_eq(2 ** 3, 8, "power")
+assert_eq(2 ** 3 ** 2, 512, "right-associative power")
+assert_eq(-2 ** 2, -4, "power precedence")
+assert_eq(2 ^^ 3, 8, "power alias")
+assert_eq(2 ^ 20, 22, "XOR")
+assert_eq(7 ^ 3 ^ 1, 5, "left-associative XOR")
+assert_eq(bigint(2) ^^ 8, bigint(256), "BigInt power alias")
+assert_eq(bigint(6) ^ 3, bigint(5), "BigInt XOR")
+mut pow_value = 2
+pow_value **= 3
+assert_eq(pow_value, 8, "power assignment")
+mut alias_power = 2
+alias_power ^^= 3
+assert_eq(alias_power, 8, "alias power assignment")
+mut xor_value = 6
+xor_value ^= 3
+assert_eq(xor_value, 5, "XOR assignment")
+"""
+
+fn run_operator_case(str label, str mode) {
+   mut argv = [ny]
+   if mode == "aot" {
+      argv = argv.append("-run")
+   } else if mode == "nyir" {
+      argv = argv.append("--nyir-run")
+   } else if mode == "native" {
+      argv = argv.append("--native-only")
+   } else if mode == "mcjit" {
+      argv = argv.append("--jit")
+      argv = argv.append("--jit-engine=mcjit")
+   } else if mode == "orc" {
+      argv = argv.append("--jit")
+      argv = argv.append("--jit-engine=orc")
+   }
+   argv = argv.append("-c")
+   argv = argv.append(source)
+   def result = run_capture(argv, [], nil, false)
+   assert(result.get("code", 127) == 0,
+          "operator surface failed in " + label + ": " +
+          result.get("stdout", ""))
+}
+
+run_operator_case("default", "default")
+run_operator_case("AOT -run", "aot")
+run_operator_case("NYIR VM", "nyir")
+run_operator_case("native-only", "native")
+run_operator_case("LLVM MCJIT", "mcjit")
+run_operator_case("LLVM ORC", "orc")
+
+def source_file = test_dir + "/operator-surface.ny"
+def native_file = test_dir + "/operator-surface-native"
+assert(is_ok(file_write(source_file, source)), "write native operator program")
+def native_compile = run_capture([ny, "-o", native_file, source_file],
+                                 [], nil, false)
+assert(native_compile.get("code", 127) == 0 && fs.is_file(native_file),
+       "compile operator source to executable: " +
+       native_compile.get("stdout", ""))
+def native_run = run_capture([native_file], [], nil, false)
+assert(native_run.get("code", 127) == 0,
+       "run emitted operator executable: " + native_run.get("stdout", ""))
+
+def wasm_source = test_dir + "/operator-surface-wasm.ny"
+def wasm_file = test_dir + "/operator-surface.wasm"
+def wasm_program = """
+fn main() int {
+  def powered = 2 ^^ 3
+  def toggled = 6 ^ 3
+  if powered == 8 && toggled == 5 { return 0 }
+  return 1
+}
+"""
+assert(is_ok(file_write(wasm_source, wasm_program)), "write Wasm operator program")
+def wasm = run_capture(
+   [ny, "--wasm", "--emit-wasm=" + wasm_file, "-emit-only", wasm_source],
+   [], nil, false)
+assert(wasm.get("code", 127) == 0 && fs.is_file(wasm_file),
+       "emit operator program as Wasm: " + wasm.get("stdout", ""))
+
+def cleanup = run_capture([cmake, "-E", "rm", "-rf", test_dir], [], nil, false)
+assert(cleanup.get("code", 127) == 0, "remove operator test directory")
+print("OPERATOR_SURFACE_OK")
+NY
+}

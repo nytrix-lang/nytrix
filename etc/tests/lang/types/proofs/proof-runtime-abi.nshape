@@ -1,0 +1,28 @@
+shape test_proof_runtime_abi {
+  family "runtime/language"
+  generator "embedded"
+  features ["ny", "test", "proof", "runtime-abi"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core.math.logic.certificate as certificate
+
+def valid = certificate.envelope("T", "proof-test@1", "proof-dependencies@1")
+assert(certificate.check(valid, 0),
+   "native proof checker accepts a constant certificate with no variables")
+assert(valid.get("canonical") == "T" && certificate.check(valid),
+   "proof checking borrows certificate strings without consuming them")
+assert(!certificate.check(certificate.envelope("A0:", "proof-test@1",
+      "proof-dependencies@1")),
+   "native proof checker rejects empty atom names")
+assert(!certificate.check(certificate.envelope("A01:x", "proof-test@1",
+      "proof-dependencies@1")),
+   "native proof checker rejects non-canonical lengths")
+assert(!certificate.check(valid, 16, 100000, 128, 1000000, 1),
+   "native proof checker accounts for atom metadata in its memory budget")
+assert(!certificate.check(valid.set("digest", 0)),
+   "native proof checker rejects a tagged scalar digest mismatch")
+
+NY
+}

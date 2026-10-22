@@ -3,12 +3,12 @@
 ;; Reference:
 ;; - https://datatracker.ietf.org/doc/draft-irtf-cfrg-sigma-protocols/
 ;; References:
-;; - std.math.crypto.protocol
-;; - std.math.crypto
-module std.math.crypto.protocol.zk(sigma_linear_witness_from_reuse, schnorr_secret_from_nonce_reuse, oss_public_h, oss_sign, oss_verify, fiat_shamir_challenge, zk_transcript_reused_commitment, girault_malicious_challenge_extract)
-use std.math.nt
-use std.math.crypto.hash
-use std.core.str
+;; - core.math.crypto.protocol
+;; - core.math.crypto
+module core.math.crypto.protocol.zk(sigma_linear_witness_from_reuse, schnorr_secret_from_nonce_reuse, oss_public_h, oss_sign, oss_verify, fiat_shamir_challenge, zk_transcript_reused_commitment, girault_malicious_challenge_extract)
+use core.math.nt
+use core.math.crypto.hash
+use core.str
 
 fn zk_transcript_reused_commitment(list t1, list t2) bool {
    "Return true if two transcript tuples reuse the same commitment at index 0."
@@ -135,5 +135,5 @@ fn fiat_shamir_challenge(list parts, any q) any {
    def ext = girault_malicious_challenge_extract(Z(100), Z(7), Z(20))
    assert(ext == Z(14), "girault extract w=14")
    assert(girault_malicious_challenge_extract(Z(0), Z(5), Z(10)) == nil, "girault nil for zero z")
-   print("✓ std.math.crypto.protocol.zk self-test passed")
+   print("✓ core.math.crypto.protocol.zk self-test passed")
 }

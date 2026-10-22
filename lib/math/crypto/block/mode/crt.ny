@@ -3,12 +3,12 @@
 ;; Reference:
 ;; - https://cacr.uwaterloo.ca/hac/about/chap2.pdf
 ;; References:
-;; - std.math.crypto.block.mode
-;; - std.math.crypto
-module std.math.crypto.block.mode.crt(crt_block_combine)
-use std.core
-use std.math.nt
-use std.math.bin
+;; - core.math.crypto.block.mode
+;; - core.math.crypto
+module core.math.crypto.block.mode.crt(crt_block_combine)
+use core
+use core.math.nt
+use core.math.bin
 
 fn crt_block_combine(list remainders, list moduli, int block_size) list {
    "Combine partial decryptions from multiple RSA/block-cipher moduli using CRT.

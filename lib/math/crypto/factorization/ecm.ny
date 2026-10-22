@@ -3,12 +3,12 @@
 ;; Reference:
 ;; - https://en.wikipedia.org/wiki/Lenstra_elliptic-curve_factorization
 ;; References:
-;; - std.math.crypto.factorization
-;; - std.math.crypto
-module std.math.crypto.factorization.ecm(ecm_factor, ecm_factor_report, micro_ecm_work_plan_report, ecm_work_plan_report, ecm_scheduled_factor_report, ecm_batch_lane_factor_report, ecm_batch_lane_factor, montgomery_ecm_factor, montgomery_ecm_factor_report)
-use std.math.nt
-use std.os.time (ticks)
-use std.math.crypto.factorization.pollard as pollard
+;; - core.math.crypto.factorization
+;; - core.math.crypto
+module core.math.crypto.factorization.ecm(ecm_factor, ecm_factor_report, micro_ecm_work_plan_report, ecm_work_plan_report, ecm_scheduled_factor_report, ecm_batch_lane_factor_report, ecm_batch_lane_factor, montgomery_ecm_factor, montgomery_ecm_factor_report)
+use core.math.nt
+use core.os.time (ticks)
+use core.math.crypto.factorization.pollard as pollard
 
 mut _ecm_stage1_scalars_cache = dict()
 mut _ecm_stage2_scalars_cache = dict()
@@ -815,5 +815,5 @@ fn ecm_factor(any n, int B1=1000, int curves=32, int B2=0) any {
    assert(!rep2.get("success", false), "stage2 prime ECM does not factor")
    assert(rep2.get("attempts").get(0).get("stage2_kernel", "") == "prime-product-ladder", "product scalar stage2 kernel")
    assert(int(rep2.get("total_stage2_ops", 0)) == 2, "one stage2 product ladder per curve")
-   print("✓ std.math.crypto.factorization.ecm self-test passed")
+   print("✓ core.math.crypto.factorization.ecm self-test passed")
 }

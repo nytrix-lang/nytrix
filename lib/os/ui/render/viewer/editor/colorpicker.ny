@@ -1,18 +1,18 @@
 ;; Keywords: editor colorpicker rgba hex swatch os ui render viewer text
 ;; RGBA and hex color picker helpers for editor and inspector color controls.
 ;; References:
-;; - std.os.ui.render.viewer.gui
-module std.os.ui.render.viewer.editor.colorpicker(
+;; - core.os.ui.render.viewer.gui
+module core.os.ui.render.viewer.editor.colorpicker(
    state, open, close, is_open,
    hex, line, start, end, rgb, rgb_label,
    normalize, scan_hex_literal, at_cursor, swatches_visible,
    rgba, rgba_hex, same_rgba, changed, edit4, picker4
 )
 
-use std.core
-use std.core.str as str
-use std.math (clamp, max, min)
-use std.os.ui.render.viewer.gui as gui
+use core
+use core.str as str
+use core.math (clamp, max, min)
+use core.os.ui.render.viewer.gui as gui
 
 ;; Returns the result of the `state` operation.
 fn state() dict {

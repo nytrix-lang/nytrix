@@ -1,0 +1,28 @@
+shape test_dynamic_arithmetic_type {
+  family "runtime/values"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.time (ticks)
+
+fn type_through_any(any value) str { type(value) }
+
+assert_eq(type(3), "int", "literal integer type")
+assert_eq(type(3.5), "float", "float type remains dynamic-float aware")
+assert_eq(type(true), "bool", "boolean type remains immediate-aware")
+assert_eq(type("value"), "str", "string type remains object-aware")
+
+def start = ticks()
+def stop = ticks()
+def delta = stop - start
+assert_eq(type(delta), "int", "stored arithmetic result has int type")
+assert_eq(type(stop - start), "int", "direct arithmetic result has int type")
+assert_eq(type(delta + 1), "int", "chained arithmetic result has int type")
+assert_eq(type_through_any((stop - start) + 1), "int",
+   "arithmetic argument crosses any with int representation")
+NY
+}

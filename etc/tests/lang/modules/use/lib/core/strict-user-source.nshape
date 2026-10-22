@@ -1,0 +1,18 @@
+shape project_lib_core_source_keeps_user_diagnostics {
+  family "compiler-errors/modules"
+  generator "error"
+  features ["error", "modules", "identity", "strict-types"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "hm-strict-dynamic-member"
+  flags "--strict-types"
+  source ny <<'NY'
+use core
+
+fn unresolved_member(any value) {
+   value.missing_project_core_member
+}
+
+unresolved_member(1)
+NY
+}

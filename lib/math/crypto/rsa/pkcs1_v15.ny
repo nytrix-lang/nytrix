@@ -4,14 +4,14 @@
 ;; - RFC 8017
 ;; - PKCS #1 v2.2, EMSA-PKCS1-v1_5 and RSAES-PKCS1-v1_5
 ;; References:
-;; - std.math.crypto.rsa
-;; - std.math.crypto
-module std.math.crypto.rsa.pkcs1_v15(emsa_pkcs1_v15_encode, rsa_pkcs1_v15_sign, rsa_pkcs1_v15_verify, eme_pkcs1_v15_encode, eme_pkcs1_v15_decode, rsa_pkcs1_v15_encrypt, rsa_pkcs1_v15_decrypt, rsa_pkcs1_v15_padding_oracle)
-use std.core
-use std.math.nt
-use std.math.random
-use std.math.crypto.hash
-use std.math.crypto.rsa.op (compute_phi, compute_d)
+;; - core.math.crypto.rsa
+;; - core.math.crypto
+module core.math.crypto.rsa.pkcs1_v15(emsa_pkcs1_v15_encode, rsa_pkcs1_v15_sign, rsa_pkcs1_v15_verify, eme_pkcs1_v15_encode, eme_pkcs1_v15_decode, rsa_pkcs1_v15_encrypt, rsa_pkcs1_v15_decrypt, rsa_pkcs1_v15_padding_oracle)
+use core
+use core.math.nt
+use core.math.random
+use core.math.crypto.hash
+use core.math.crypto.rsa.op (compute_phi, compute_d)
 
 def _ASN1_MD5 = [0x30,0x20,0x30,0x0c,0x06,0x08,0x2a,0x86,0x48,0x86,0xf7,0x0d,0x02,0x05,0x05,0x00,0x04,0x10]
 def _ASN1_SHA1 = [0x30,0x21,0x30,0x09,0x06,0x05,0x2b,0x0e,0x03,0x02,0x1a,0x05,0x00,0x04,0x14]
@@ -121,10 +121,9 @@ fn eme_pkcs1_v15_encode(list message, int k, any ps=nil) any {
    ps may be supplied for deterministic tests and must contain nonzero bytes."
    if k < message.len + 11 { return nil }
    def ps_len = int(k - message.len - 3)
-   mut pad = []
+   mut pad = list(ps_len)
+   __list_set_len(pad, ps_len)
    if ps == nil {
-      pad = list(ps_len)
-      __list_set_len(pad, ps_len)
       mut i = 0
       while i < ps_len {
          __store_item_fast(pad, i, _nonzero_random_byte())
@@ -133,7 +132,11 @@ fn eme_pkcs1_v15_encode(list message, int k, any ps=nil) any {
    } else {
       if ps.len != ps_len { return nil }
       if !_valid_nonzero_bytes(ps) { return nil }
-      pad = ps
+      mut i = 0
+      while i < ps_len {
+         __store_item_fast(pad, i, ps[i])
+         i += 1
+      }
    }
    mut out = list(k)
    __list_set_len(out, k)
@@ -208,5 +211,5 @@ fn rsa_pkcs1_v15_padding_oracle(number ciphertext, number d, number n) bool {
    def ps = [1,2,3,4,5,6,7,8]
    def em = eme_pkcs1_v15_encode(msg, msg.len + 11, ps)
    assert(em != nil && eme_pkcs1_v15_decode(em) == msg, "PKCS1 v1.5 deterministic EME roundtrip")
-   print("✓ std.math.crypto.rsa.pkcs1_v15 self-test passed")
+   print("✓ core.math.crypto.rsa.pkcs1_v15 self-test passed")
 }

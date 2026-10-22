@@ -1,0 +1,26 @@
+shape user_std_reflect_operator_keeps_origin {
+  family "runtime/modules/use"
+  generator "regression"
+  features ["ny" "test" "modules" "identity" "legacy-llvm"]
+  template ny-test-case
+  flags_matrix "--std-builtin-ops --native-backend=llvm --jit --jit-engine=mcjit; --std-builtin-ops --native-backend=llvm --jit --jit-engine=orc; --std-builtin-ops --native-only --native-backend=x86_64"
+  expect compile_and_run
+  source ny <<'NY'
+module core.reflect(
+  eq,
+  compare
+)
+
+fn eq(any left, any right) bool { false }
+
+fn compare() bool { eq(1, 1) }
+
+#main {
+  assert(!core.reflect.compare(),
+         "a user module named core.reflect keeps its equality helper")
+  assert(1 == 1,
+         "a same-spelled helper does not declare a numeric operator overload")
+  0
+}
+NY
+}

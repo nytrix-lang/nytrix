@@ -1,9 +1,9 @@
 ;; Keywords: decompiler semantic summary findings analyst
 ;; Data-only summary helpers shared by the public decompiler facade.
-module std.os.rev.decomp.summary *
-use std.core
-use std.core.str as str
-use std.os.rev.decomp.elf
+module core.os.rev.decomp.summary *
+use core
+use core.str as str
+use core.os.rev.decomp.elf
 
 fn _summary_hex(int value) str {
    "0x" + str.to_hex(value, 0)
@@ -259,5 +259,5 @@ fn _summary_text(dict summary) str {
    assert(_summary_count_categories(records).get("input", 0) == 1, "summary input category")
    assert(_summary_count_categories(records).get("anti_analysis", 0) == 1, "summary anti-analysis category")
    assert(_summary_hard_branches({"branch_dependencies": [{"addr": 16, "target": 32}]}).get(0).get("addr_hex", "") == "0x10", "summary branch hex")
-   print("✓ std.os.rev.decomp.summary self-test passed")
+   print("✓ core.os.rev.decomp.summary self-test passed")
 }

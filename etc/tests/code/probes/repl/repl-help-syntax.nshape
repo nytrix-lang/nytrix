@@ -1,0 +1,12 @@
+shape test_repl_help_syntax {
+  family "repl"
+  generator "embedded"
+  features ["ny", "test", "repl", "help", "syntax"]
+  template ny-test-case
+  expect compile_and_run
+  repl_expect "Struct constructor (positional)"
+  repl_commands ":help syntax"
+  source ny <<'NY'
+1 + 2
+NY
+}

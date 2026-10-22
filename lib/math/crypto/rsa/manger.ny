@@ -3,11 +3,11 @@
 ;; Reference:
 ;; - Manger J., "A Chosen Ciphertext Attack on RSA Optimal Asymmetric Encryption Padding (OAEP) as Standardized in PKCS #1 v2.0"
 ;; References:
-;; - std.math.crypto.rsa
-;; - std.math.crypto
-module std.math.crypto.rsa.manger(manger_attack)
-use std.math.nt
-use std.math.crypto.rsa.op (compute_phi, compute_d)
+;; - core.math.crypto.rsa
+;; - core.math.crypto
+module core.math.crypto.rsa.manger(manger_attack)
+use core.math.nt
+use core.math.crypto.rsa.op (compute_phi, compute_d)
 
 fn _floor_div(any a, any b) any { a / b }
 

@@ -4,12 +4,12 @@
 ;; - https://netlab.cs.ucla.edu/wiki/files/shannon1949.pdf
 ;; - https://cacr.uwaterloo.ca/hac/about/chap1.pdf
 ;; References:
-;; - std.math.crypto.cipher
-;; - std.math.crypto.analysis
-module std.math.crypto.cipher.rail_fence(rail_fence_encrypt, rail_fence_decrypt, rail_fence_encrypt_offset, rail_fence_decrypt_offset, rail_fence_crack)
-use std.core
-use std.core.str
-use std.math.crypto.error
+;; - core.math.crypto.cipher
+;; - core.math.crypto.analysis
+module core.math.crypto.cipher.rail_fence(rail_fence_encrypt, rail_fence_decrypt, rail_fence_encrypt_offset, rail_fence_decrypt_offset, rail_fence_crack)
+use core
+use core.str
+use core.math.crypto.error
 
 fn _rail_builder_take(list b) str { def out = builder_to_str(b) builder_free(b) out }
 
@@ -139,5 +139,5 @@ fn rail_fence_crack(str ciphertext) list {
    def long = "this is a test message for rail fence cipher test"
    def long_enc = rail_fence_encrypt_offset(long, 7, 4)
    assert(rail_fence_decrypt_offset(long_enc, 7, 4) == long, "rail fence offset roundtrip long")
-   print("✓ std.math.crypto.cipher.rail_fence self-test passed")
+   print("✓ core.math.crypto.cipher.rail_fence self-test passed")
 }

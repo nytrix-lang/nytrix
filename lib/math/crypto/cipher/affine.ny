@@ -4,19 +4,19 @@
 ;; - https://netlab.cs.ucla.edu/wiki/files/shannon1949.pdf
 ;; - https://cacr.uwaterloo.ca/hac/about/chap1.pdf
 ;; References:
-;; - std.math.crypto.cipher
-;; - std.math.crypto.analysis
-module std.math.crypto.cipher.affine(affine_encrypt, affine_decrypt, affine_decrypt_bytes,
+;; - core.math.crypto.cipher
+;; - core.math.crypto.analysis
+module core.math.crypto.cipher.affine(affine_encrypt, affine_decrypt, affine_decrypt_bytes,
    affine_crack_bytes_contains, affine_crack_bytes_known_substring,
    affine_encrypt_alphabet, affine_decrypt_alphabet, affine_decrypt_block_pairs_alphabet,
    affine_cbc_decrypt_alphabet, affine_score_ngrams, affine_cbc_crack_alphabet,
    affine_crack_block_pairs_alphabet, affine_cbc_crack_known_prefix_alphabet,
    affine_crack_block_pairs_known_prefix_alphabet, affine_crack_known_pt_alphabet, affine_crack_known_pt)
-use std.core
-use std.math.nt
-use std.core.str
-use std.math.crypto.error
-use std.math.crypto.support.tools as support
+use core
+use core.math.nt
+use core.str
+use core.math.crypto.error
+use core.math.crypto.support.tools as support
 
 fn affine_mod_inverse(number a, number m) number {
    "Compute the modular multiplicative inverse of a mod m. Returns the inverse or 0 if it does not exist."
@@ -524,5 +524,5 @@ fn affine_crack_known_pt(str ct, str pt, number m=26) any {
    assert(khit != nil, "affine byte known substring hit")
    assert(khit[0] == 3 && khit[1] == 7, "affine byte known substring keys")
    assert(khit[3] == bpt, "affine byte known substring plaintext")
-   print("✓ std.math.crypto.cipher.affine self-test passed")
+   print("✓ core.math.crypto.cipher.affine self-test passed")
 }

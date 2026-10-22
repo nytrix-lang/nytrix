@@ -1,0 +1,76 @@
+shape ast_type_declarations {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "ast", "reflection", "refine", "trait", "enum"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.compiler.ast (parse_code, parse_ast_snapshot, code_str)
+use core.math.parse.data.json (json_decode)
+
+fn missing_type_origin(any value, str path) str {
+   if is_list(value) {
+      mut i = 0
+      while i < value.len {
+         def missing = missing_type_origin(value.get(i), path + "[" + to_str(i) + "]")
+         if missing != "" { return missing }
+         i += 1
+      }
+      return ""
+   }
+   if !is_dict(value) { return "" }
+   if value.contains("type") && is_str(value.get("type")) &&
+      !value.contains("source_origin") { return path }
+   def keys = dict_keys(value)
+   mut i = 0
+   while i < keys.len {
+      def key = str(keys.get(i))
+      def missing = missing_type_origin(value.get(key), path + "." + key)
+      if missing != "" { return missing }
+      i += 1
+   }
+   ""
+}
+
+def source = "refine Positive = int where(value) { value > 0 }\ntrait Show { fn show(any value) str }\nstruct Point { int x }\nimpl Show for Point { fn show(any value) str { return \"point\" } law { 1 == 1 } }\nenum Option<T> { None, Some(T value) }"
+def declarations = parse_code(source)
+assert(is_list(declarations) && declarations.len == 5,
+       "parse_code accepts complete refinement and trait declarations")
+assert(declarations.get(0).get("type") == "refine" &&
+       declarations.get(0).get("name") == "Positive" &&
+       declarations.get(0).get("base") == "int" &&
+       declarations.get(0).get("param") == "value" &&
+       declarations.get(0).get("predicate").get("op") == ">",
+       "refinement records retain their predicate syntax")
+assert(declarations.get(1).get("type") == "trait" &&
+       declarations.get(1).get("methods").len == 1,
+       "trait records retain method signatures")
+def existential = parse_ast_snapshot("refine Even = int where(value) { exists(k) { value == 2 * k } }")
+def predicate = existential.get("nodes").get(0).get("predicate")
+assert(predicate.get("type") == "exists" && predicate.get("var") == "k" &&
+       predicate.get("body").get("op") == "==",
+       "existential refinement predicates retain bound variables and bodies")
+def snapshot = parse_ast_snapshot(source)
+def nodes = snapshot.get("nodes")
+assert(nodes.get(3).get("trait") == "Show" &&
+       nodes.get(3).get("laws").len == 1 &&
+       nodes.get(3).get("laws").get(0).get("op") == "==",
+       "implementation records retain their trait and law syntax")
+def option = nodes.get(4)
+assert(option.get("type_params").get(0) == "T" &&
+       !option.get("indexed_family") && is_nil(option.get("index_param")),
+       "enum records retain generic and indexed-family metadata")
+assert(option.get("items").get(0).get("fields").len == 0 &&
+       option.get("items").get(1).get("fields").get(0).get("name") == "value" &&
+       option.get("items").get(1).get("fields").get(0).get("type") == "T",
+       "enum records distinguish unit and typed payload variants")
+assert(code_str(json_decode(code_str(snapshot))) == code_str(snapshot),
+       "type declaration facts survive canonical syntax serialization")
+assert(missing_type_origin(snapshot, "snapshot") == "",
+       "refinement, trait, implementation and enum syntax records carry origins")
+assert(is_nil(parse_code("trait Broken { fn missing(")) &&
+       is_nil(parse_code("refine Broken = int where(value) {")),
+       "malformed type declarations do not return partial code")
+NY
+}

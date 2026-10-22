@@ -3,10 +3,10 @@
 ;; Reference:
 ;; - https://cacr.uwaterloo.ca/hac/about/chap3.pdf
 ;; References:
-;; - std.math.crypto.dlp
-;; - std.math.crypto
-module std.math.crypto.dlp.subgroup_confinement(dh_small_subgroup_element, dh_small_subgroup_confinement)
-use std.math.nt
+;; - core.math.crypto.dlp
+;; - core.math.crypto
+module core.math.crypto.dlp.subgroup_confinement(dh_small_subgroup_element, dh_small_subgroup_confinement)
+use core.math.nt
 
 fn _sg_pow_int(any base, any exp) any {
    mut out = Z(1)

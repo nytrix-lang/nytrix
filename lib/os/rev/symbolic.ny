@@ -1,7 +1,7 @@
 ;; Keywords: symbolic reverse unicorn z3 smt
 ;; Symbolic execution tools for reversing. Z3 handles constraints, and Unicorn
 ;; is loaded only when present so scripts can import this module everywhere.
-module std.os.rev.symbolic(
+module core.os.rev.symbolic(
    sleep, msleep,
    unicorn_available, unicorn_version, unicorn_arch_supported, unicorn_constants,
    unicorn_open, unicorn_close, unicorn_error, unicorn_session, unicorn_plan,
@@ -47,12 +47,13 @@ module std.os.rev.symbolic(
    SAT, UNSAT, UNKNOWN,
 )
 
-use std.core
-use std.core.str as str
-use std.os.ffi as ffi
-use std.os.time as ostime
-use std.math.smt as smt
-use std.math.parse.data.zlib as zlib
+use core
+use core.str as str
+use core.os.ffi as ffi
+use core.os.ffi as calls
+use core.os.time as ostime
+use core.math.smt as smt
+use core.math.parse.data.zlib as zlib
 
 fn to_hex(int v, int width=0) str {
    str.to_hex(v, width)
@@ -214,7 +215,7 @@ fn unicorn_version() list {
    }
    store32(maj, 0, 0)
    store32(minp, 0, 0)
-   def combined = ffi.call2(_p_uc_version, maj, minp)
+   def combined = calls.any2(_p_uc_version, maj, minp)
    def out = [load32(maj, 0), load32(minp, 0), combined]
    ffi.free(maj)
    ffi.free(minp)
@@ -224,7 +225,7 @@ fn unicorn_version() list {
 fn unicorn_arch_supported(any arch) bool {
    "Returns true if Unicorn reports support for `arch`."
    if !_load_unicorn() || !_p_uc_arch_supported { return false }
-   ffi.call1(_p_uc_arch_supported, _arch_id(arch)) != 0
+   calls.any1(_p_uc_arch_supported, _arch_id(arch)) != 0
 }
 
 fn unicorn_constants() dict {
@@ -239,8 +240,8 @@ fn unicorn_constants() dict {
 fn unicorn_error(any code) str {
    "Returns Unicorn error text for an error code when available."
    if !_load_unicorn() || !_p_uc_strerror { return "unicorn error " + to_str(code) }
-   def p = ffi.call1_ptr(_p_uc_strerror, int(code))
-   p ? str.cstr_to_str(__untag(p)) : ("unicorn error " + to_str(code))
+   def p = calls.pointer1(_p_uc_strerror, int(code))
+   p ? str.cstr_to_str(p) : ("unicorn error " + to_str(code))
 }
 
 fn unicorn_open(any arch="x86_64", any mode="64") dict {
@@ -1967,7 +1968,7 @@ fn _al_imm8_ast(dict st, any alv, str op, int imm8) any {
 fn _al_imm8_int(any alv, str op, int imm8) int {
    def a = _low8(alv)
    match op {
-      "xor" -> (a ^^ imm8) & 255
+      "xor" -> (a ^ imm8) & 255
       "add" -> (a + imm8) & 255
       "sub" -> (a - imm8) & 255
       _ -> a
@@ -2901,7 +2902,7 @@ fn _lift_binary_value(dict st, str dst, any lhs, str op, any rhs) any {
          "+" -> a + b
          "-" -> a - b
          "*" -> a * b
-         "^" -> a ^^ b
+         "^" -> a ^ b
          "&" -> a & b
          "|" -> a | b
          "<<" -> a << b
@@ -4309,7 +4310,7 @@ fn _byte_xor(dict st, any byte, int key) any {
       def ctx = state_solver(st).get("ctx", 0)
       return smt.bvxor(ctx, byte, smt.bv_u8(ctx, key & 255))
    }
-   is_int(byte) ? ((int(byte) ^^ key) & 255) : byte
+   is_int(byte) ? ((int(byte) ^ key) & 255) : byte
 }
 
 fn _mem_xor_in_place(dict st, int addr, int n, int key) dict {

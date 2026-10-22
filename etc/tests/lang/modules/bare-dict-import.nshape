@@ -1,0 +1,19 @@
+shape test_bare_dict_import {
+  family "shapes/compiler/regressions/stdlib"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+;; NY-005: bare core.dict import fails unless core is imported first.
+;;
+;; Current local bad signal on 2026-06-01:
+;;   Error: Could not load core.ny or standard library source files.
+;;
+;; Baseline that should pass:
+;;   etc/tests/lang/modules/bare-dict-import-baseline.nshape
+use core.dict
+
+0
+NY
+}

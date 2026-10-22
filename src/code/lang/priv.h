@@ -1,0 +1,843 @@
+/*
+ * Private internal headers for Nytrix codegen.
+ */
+#ifndef CODEGEN_INTERNAL_H
+#define CODEGEN_INTERNAL_H
+
+#include "code/lang/code.h"
+#include "code/lang/llvm/internal.h"
+#include "code/lang/runtime/shared.h"
+#include "code/lang/types/policy.h"
+#include <llvm-c/Core.h>
+#include <llvm-c/DebugInfo.h>
+#include <stdlib.h>
+#include <string.h>
+
+typedef enum {
+  E_SYNTAX = 1001,
+  E_UNDEFINED = 1002,
+  E_TYPE_MISMATCH = 1003,
+  E_ARITY = 1004,
+  E_DUPLICATE_NAME = 1005,
+  E_SHADOWING = 1006,
+  E_INVALID_LITERAL = 1007,
+  E_RETURN_MISMATCH = 1008,
+  E_IMMUTABLE_MODIFY = 1009,
+  E_NOT_CALLABLE = 1010,
+  E_INDEX_OOB = 1011,
+  E_MATCH_EXHAUSTIVE = 1012,
+  E_EFFECT_VIOLATION = 1013,
+  E_INVALID_ATTR = 1014,
+  E_LAYOUT_SIZE = 1015,
+  E_INVALID_FFI = 1016,
+
+  W_UNUSED = 2001,
+  W_SHADOWING = 2002,
+  W_DEPRECATED = 2003,
+  W_IMPLICIT_COERCE = 2004,
+  W_DIV_ZERO = 2005,
+  W_MISSING_RETURN = 2006,
+} diag_code_t;
+
+static inline const char *ny_llvm_name(codegen_t *cg, const char *name) {
+  if (!name || !*name)
+    return "";
+  return (cg && cg->llvm_value_names) ? name : "";
+}
+#define NY_LLVM_NAME(cg, name) ny_llvm_name((cg), (name))
+
+/* Scope arrays are stack allocated by each code-generation entry point.
+ * Deeply nested blocks use two entries per loop (loop plus body). */
+#define NY_SCOPE_STACK_CAP 256
+
+static inline LLVMValueRef ny_ptr2i64(codegen_t *cg, LLVMValueRef v,
+                                      const char *n);
+
+static inline LLVMValueRef ny_llvm_cast_to_i64(codegen_t *cg, LLVMValueRef v,
+                                               const char *name) {
+  if (!cg || !v || LLVMTypeOf(v) == cg->type_i64)
+    return v;
+  if (LLVMTypeOf(v) == cg->type_f64)
+    return LLVMBuildBitCast(cg->builder, v, cg->type_i64,
+                            NY_LLVM_NAME(cg, name ? name : ""));
+  return ny_ptr2i64(cg, v, ny_llvm_name(cg, name));
+}
+
+/* Kept as the established gencall spelling while all lowering paths share
+ * one implementation. */
+static inline LLVMValueRef ny_cast_to_i64(codegen_t *cg, LLVMValueRef v,
+                                          const char *name) {
+  return ny_llvm_cast_to_i64(cg, v, name);
+}
+
+#define NY_SEMA_ASSERT(stmt, kind)                                             \
+  do {                                                                         \
+    const stmt_t *ny_sema_stmt__ = (stmt);                                     \
+    NY_COMPILER_ASSERTF(                                                       \
+        !ny_sema_stmt__ || ny_sema_stmt__->sema_kind == (kind),                \
+        "sema kind mismatch: got %d expected %d",                              \
+        ny_sema_stmt__ ? (int)ny_sema_stmt__->sema_kind : -1, (int)(kind));    \
+  } while (0)
+
+static inline const char *ny_host_os_name(void) {
+#if defined(_WIN32)
+  return "windows";
+#elif defined(__APPLE__) && defined(__MACH__)
+  return "macos";
+#elif defined(__linux__)
+  return "linux";
+#elif defined(__FreeBSD__)
+  return "freebsd";
+#elif defined(__NetBSD__)
+  return "netbsd";
+#elif defined(__OpenBSD__)
+  return "openbsd";
+#else
+  return "unknown";
+#endif
+}
+
+static inline const char *ny_host_arch_name(void) {
+#if defined(__x86_64__) || defined(_M_X64)
+  return "x86_64";
+#elif defined(__i386__) || defined(_M_IX86)
+  return "x86";
+#elif defined(__aarch64__) || defined(_M_ARM64)
+  return "aarch64";
+#elif defined(__arm__) || defined(_M_ARM)
+  return "arm";
+#elif defined(__riscv)
+  return "riscv";
+#else
+  return "unknown";
+#endif
+}
+
+static inline const char *ny_type_leaf(const char *type_name) {
+  if (!type_name)
+    return NULL;
+  while (*type_name == '?')
+    type_name++;
+  const char *dot = strrchr(type_name, '.');
+  return dot ? dot + 1 : type_name;
+}
+static inline bool ny_type_is(const char *type_name, const char *want_tail) {
+  const char *leaf = ny_type_leaf(type_name);
+  return leaf && want_tail && strcmp(leaf, want_tail) == 0;
+}
+static inline bool ny_stmt_is_bare_core_use(const stmt_t *s) {
+  if (!s || s->kind != NY_S_USE)
+    return false;
+  if (s->as.use.import_all || s->as.use.imports.len != 0 || s->as.use.alias ||
+      s->as.use.profile)
+    return false;
+  return s->as.use.module && strcmp(s->as.use.module, "core") == 0;
+}
+static inline uint32_t ny_cached_fun_name_len(fun_sig *fs) {
+  if (!fs || !fs->name)
+    return 0;
+  if (fs->name[0] == '\0') {
+    fs->name_len = 0;
+    return 0;
+  }
+  if (fs->name_len && fs->name_hash)
+    return fs->name_len;
+  fs->name_len = (uint32_t)strlen(fs->name);
+  return fs->name_len;
+}
+
+static inline LLVMTypeRef ny_layout_abi_carrier_type(codegen_t *cg,
+                                                     layout_def_t *layout) {
+  if (!cg || !layout)
+    return NULL;
+  if (layout->size > 16)
+    return cg->type_i8ptr;
+  switch (layout->size) {
+  case 1:
+    return cg->type_i8;
+  case 2:
+    return cg->type_i16;
+  case 4:
+    return cg->type_i32;
+  case 8:
+    return cg->type_i64;
+  default:
+    return layout->llvm_type;
+  }
+}
+
+static inline bool ny_checked_small_pow_i64(int64_t base, int64_t exp,
+                                            int64_t *out) {
+  if (!out || exp < 0)
+    return false;
+  int64_t result = 1, b = base;
+  uint64_t e = (uint64_t)exp;
+  while (e) {
+    if ((e & 1) && (__builtin_mul_overflow(result, b, &result) ||
+                    !ny_small_int_fits_i64(result)))
+      return false;
+    e >>= 1;
+    if (e && (__builtin_mul_overflow(b, b, &b) || !ny_small_int_fits_i64(b)))
+      return false;
+  }
+  *out = result;
+  return true;
+}
+
+static inline const char *ny_sig_param_type(fun_sig *sig, size_t idx) {
+  if (!sig || !sig->stmt_t)
+    return NULL;
+  if (sig->stmt_t->kind == NY_S_FUNC)
+    return idx < sig->stmt_t->as.fn.params.len
+               ? sig->stmt_t->as.fn.params.data[idx].type
+               : NULL;
+  if (sig->stmt_t->kind == NY_S_EXTERN)
+    return idx < sig->stmt_t->as.ext.params.len
+               ? sig->stmt_t->as.ext.params.data[idx].type
+               : NULL;
+  return NULL;
+}
+static inline bool ny_codegen_speed_profile_enabled(codegen_t *cg) {
+  if (cg && cg->env_cache.speed_profile != 0)
+    return cg->env_cache.speed_profile == 1;
+  const char *p = getenv("NYTRIX_OPT_PROFILE");
+  bool enabled = p && (strcmp(p, "speed") == 0 || strcmp(p, "peak") == 0);
+  if (cg)
+    cg->env_cache.speed_profile = enabled ? 1 : -1;
+  return enabled;
+}
+static inline bool ny_fast_path_enabled(codegen_t *cg, const char *env_name) {
+  if (cg) {
+    if (cg->env_cache.fast_all == 0) {
+      cg->env_cache.fast_all =
+          ny_env_enabled("NYTRIX_FAST_ALL_PROFILES") ? 1 : -1;
+    }
+    if (cg->env_cache.fast_all == 1)
+      return true;
+
+    int *cache_ptr = NULL;
+    if (strcmp(env_name, "NYTRIX_PROVEN_INT_CAST_FAST") == 0)
+      cache_ptr = &cg->env_cache.proven_int_cast_fast;
+    else if (strcmp(env_name, "NYTRIX_PROVEN_INT_MOD_FAST") == 0)
+      cache_ptr = &cg->env_cache.proven_int_mod_fast;
+    else if (strcmp(env_name, "NYTRIX_PROVEN_INT_BRANCH_FAST") == 0)
+      cache_ptr = &cg->env_cache.proven_int_branch_fast;
+    else if (strcmp(env_name, "NYTRIX_RAW_INT_EXPR_FAST") == 0)
+      cache_ptr = &cg->env_cache.raw_int_expr_fast;
+    else if (strcmp(env_name, "NYTRIX_RAW_INT_HELPERS") == 0)
+      cache_ptr = &cg->env_cache.raw_int_helpers;
+    else if (strcmp(env_name, "NYTRIX_UNTAGGED_INT_LIST_STORAGE") == 0)
+      cache_ptr = &cg->env_cache.untagged_int_list_storage;
+    else if (strcmp(env_name, "NYTRIX_CONST_STRING_GLOBAL_INIT") == 0)
+      cache_ptr = &cg->env_cache.const_string_global_init;
+    else if (strcmp(env_name, "NYTRIX_PRINT_PROVEN_INT_FAST") == 0)
+      cache_ptr = &cg->env_cache.print_proven_int_fast;
+    else if (strcmp(env_name, "NYTRIX_PRINT_PROVEN_STR_FAST") == 0)
+      cache_ptr = &cg->env_cache.print_proven_str_fast;
+
+    if (cache_ptr) {
+      if (*cache_ptr == 0) {
+        bool enabled = ny_env_enabled(env_name);
+        if (!enabled &&
+            (strcmp(env_name, "NYTRIX_PRINT_PROVEN_INT_FAST") == 0 ||
+             strcmp(env_name, "NYTRIX_PRINT_PROVEN_STR_FAST") == 0)) {
+          enabled = ny_codegen_speed_profile_enabled(cg);
+        }
+        *cache_ptr = enabled ? 1 : -1;
+      }
+      return *cache_ptr == 1;
+    }
+  }
+
+  return ny_env_enabled("NYTRIX_FAST_ALL_PROFILES") ||
+         ny_env_enabled(env_name) ||
+         ((strcmp(env_name, "NYTRIX_PRINT_PROVEN_INT_FAST") == 0 ||
+           strcmp(env_name, "NYTRIX_PRINT_PROVEN_STR_FAST") == 0) &&
+          ny_codegen_speed_profile_enabled(cg));
+}
+static inline bool ny_expr_literal_i64(const expr_t *e, int64_t *out) {
+  if (!e || e->kind != NY_E_LITERAL || e->as.literal.kind != NY_LIT_INT ||
+      e->tok.kind == NY_T_NIL || e->as.literal.integer_outside_i64)
+    return false;
+  if (out)
+    *out = e->as.literal.as.i;
+  return true;
+}
+static inline bool ny_expr_is_list_or_tuple_lit(expr_t *e) {
+  return e && (e->kind == NY_E_LIST || e->kind == NY_E_TUPLE);
+}
+static inline bool ny_expr_call_args(expr_t *e, call_arg_t **args,
+                                     size_t *len) {
+  if (!e)
+    return false;
+  if (e->kind == NY_E_CALL) {
+    if (args)
+      *args = e->as.call.args.data;
+    if (len)
+      *len = e->as.call.args.len;
+    return true;
+  }
+  if (e->kind == NY_E_MEMCALL) {
+    if (args)
+      *args = e->as.memcall.args.data;
+    if (len)
+      *len = e->as.memcall.args.len;
+    return true;
+  }
+  return false;
+}
+static inline bool ny_expr_init_replay_safe_depth(expr_t *e, unsigned depth) {
+  if (!e || depth > 32)
+    return false;
+  switch (e->kind) {
+  case NY_E_IDENT:
+  case NY_E_LITERAL:
+    return true;
+  case NY_E_COMPTIME:
+  case NY_E_QUOTE:
+    return true;
+  case NY_E_UNARY:
+    return ny_expr_init_replay_safe_depth(e->as.unary.right, depth + 1);
+  case NY_E_BINARY:
+    return ny_expr_init_replay_safe_depth(e->as.binary.left, depth + 1) &&
+           ny_expr_init_replay_safe_depth(e->as.binary.right, depth + 1);
+  case NY_E_LOGICAL:
+    return ny_expr_init_replay_safe_depth(e->as.logical.left, depth + 1) &&
+           ny_expr_init_replay_safe_depth(e->as.logical.right, depth + 1);
+  case NY_E_TERNARY:
+    return ny_expr_init_replay_safe_depth(e->as.ternary.cond, depth + 1) &&
+           ny_expr_init_replay_safe_depth(e->as.ternary.true_expr, depth + 1) &&
+           ny_expr_init_replay_safe_depth(e->as.ternary.false_expr, depth + 1);
+  case NY_E_LIST:
+  case NY_E_TUPLE:
+  case NY_E_SET:
+    for (size_t i = 0; i < e->as.list_like.len; ++i) {
+      if (!ny_expr_init_replay_safe_depth(e->as.list_like.data[i], depth + 1))
+        return false;
+    }
+    return true;
+  case NY_E_DICT:
+    for (size_t i = 0; i < e->as.dict.pairs.len; ++i) {
+      if (!ny_expr_init_replay_safe_depth(e->as.dict.pairs.data[i].key,
+                                          depth + 1) ||
+          !ny_expr_init_replay_safe_depth(e->as.dict.pairs.data[i].value,
+                                          depth + 1))
+        return false;
+    }
+    return true;
+  default:
+    return false;
+  }
+}
+
+static inline expr_t *ny_binding_var_init_expr(binding *b, const char *name) {
+  if (!b || !name || !b->stmt_t || b->stmt_t->kind != NY_S_VAR)
+    return NULL;
+  stmt_var_t *var = &b->stmt_t->as.var;
+  for (size_t i = 0; i < var->names.len && i < var->exprs.len; ++i) {
+    const char *n = var->names.data[i];
+    if (n && strcmp(n, name) == 0 &&
+        ny_expr_init_replay_safe_depth(var->exprs.data[i], 0))
+      return var->exprs.data[i];
+  }
+  return NULL;
+}
+/*
+ * Binding flags are rebuilt by some frontends (notably the REPL) after the
+ * declaration AST is attached.  Optimizations must never infer immutability
+ * from that cache alone: the declaration is the source of truth.
+ */
+static inline bool ny_binding_declared_mutable(const binding *b) {
+  return b && (b->is_mut || (b->stmt_t && b->stmt_t->kind == NY_S_VAR &&
+                             b->stmt_t->as.var.is_mut));
+}
+static inline expr_t *ny_binding_static_indexable_lit(binding *b) {
+  if (!b || ny_binding_declared_mutable(b) || !b->stmt_t ||
+      b->stmt_t->kind != NY_S_VAR)
+    return NULL;
+  stmt_var_t *var = &b->stmt_t->as.var;
+  for (size_t i = 0; i < var->names.len && i < var->exprs.len; ++i) {
+    const char *name = var->names.data[i];
+    expr_t *init = var->exprs.data[i];
+    if (name && b->name && strcmp(name, b->name) == 0 &&
+        ny_expr_is_list_or_tuple_lit(init))
+      return init;
+  }
+  return NULL;
+}
+static inline ssize_t ny_enum_member_field_index(enum_member_def_t *mem,
+                                                 const char *name) {
+  if (!mem || !name)
+    return -1;
+  for (size_t i = 0; i < mem->fields.len; i++) {
+    if (mem->fields.data[i].name && strcmp(mem->fields.data[i].name, name) == 0)
+      return (ssize_t)i;
+  }
+  return -1;
+}
+static inline size_t ny_sig_min_arity(const fun_sig *sig) {
+  if (!sig)
+    return 0;
+  size_t min_arity = (size_t)(sig->arity < 0 ? 0 : sig->arity);
+  if (sig->min_arity_known) {
+    if (sig->min_arity < 0)
+      return 0;
+    if (sig->min_arity > sig->arity)
+      return min_arity;
+    return (size_t)sig->min_arity;
+  }
+  if (sig->stmt_t && sig->stmt_t->kind == NY_S_FUNC)
+    min_arity = (size_t)ny_param_required_arity(&sig->stmt_t->as.fn.params,
+                                                sig->arity, sig->is_variadic);
+  else if (sig->stmt_t && sig->stmt_t->kind == NY_S_EXTERN)
+    min_arity = (size_t)ny_param_required_arity(&sig->stmt_t->as.ext.params,
+                                                sig->arity, sig->is_variadic);
+  return min_arity;
+}
+static inline bool ny_sig_allows_zero_arg_property(fun_sig *sig) {
+  return sig && !sig->is_variadic && sig->arity >= 1 &&
+         ny_sig_min_arity(sig) <= 1;
+}
+static inline LLVMValueRef ny_fix_fn_ptr_codegen(codegen_t *cg,
+                                                 LLVMValueRef raw) {
+  LLVMValueRef fix = LLVMGetNamedFunction(cg->module, "rt_fix_fn_ptr");
+  if (!fix) {
+    LLVMTypeRef args[1] = {cg->type_i64};
+    LLVMTypeRef fn_ty = LLVMFunctionType(cg->type_i64, args, 1, false);
+    fix = LLVMAddFunction(cg->module, "rt_fix_fn_ptr", fn_ty);
+  }
+  return LLVMBuildCall2(cg->builder, LLVMGlobalGetValueType(fix), fix,
+                        (LLVMValueRef[]){raw}, 1,
+                        NY_LLVM_NAME(cg, "fix_fn_ptr"));
+}
+static inline LLVMValueRef ny_ptr2i64(codegen_t *cg, LLVMValueRef v,
+                                      const char *n) {
+  LLVMValueRef raw =
+      LLVMBuildPtrToInt(cg->builder, v, cg->type_i64, NY_LLVM_NAME(cg, n));
+  if (v && LLVMIsAFunction(v))
+    raw = ny_fix_fn_ptr_codegen(cg, raw);
+  return raw;
+}
+static inline LLVMValueRef ny_i642ptr(codegen_t *cg, LLVMValueRef v,
+                                      const char *n) {
+  return LLVMBuildIntToPtr(cg->builder, v, ny_ptr_i64_ty(cg),
+                           NY_LLVM_NAME(cg, n));
+}
+static inline LLVMValueRef ny_bitcast(codegen_t *cg, LLVMValueRef v,
+                                      LLVMTypeRef t, const char *n) {
+  return LLVMBuildBitCast(cg->builder, v, t, NY_LLVM_NAME(cg, n));
+}
+void add_builtins(codegen_t *cg);
+bool builtin_allowed_comptime(const char *name);
+
+fun_sig *lookup_fun(codegen_t *cg, const char *name, uint64_t hash);
+fun_sig *lookup_fun_exact(codegen_t *cg, const char *name);
+fun_sig *lookup_use_module_fun(codegen_t *cg, const char *name, size_t argc);
+const char *resolve_import_alias(codegen_t *cg, const char *name);
+const char *ny_resolve_used_module_export_alias(codegen_t *cg,
+                                                const char *name);
+binding *lookup_global(codegen_t *cg, const char *name);
+binding *lookup_global_hash(codegen_t *cg, const char *name, uint64_t hash);
+binding *lookup_global_exact(codegen_t *cg, const char *name);
+fun_sig *resolve_overload(codegen_t *cg, const char *name, size_t argc,
+                          uint64_t hash);
+binding *scope_lookup(scope *scopes, size_t depth, const char *name);
+binding *scope_lookup_hash(scope *scopes, size_t depth, const char *name,
+                           size_t name_len, uint64_t hash);
+binding *scope_lookup_hash_no_mark(scope *scopes, size_t depth,
+                                   const char *name, size_t name_len,
+                                   uint64_t hash);
+binding *lookup_binding_hash(codegen_t *cg, scope *scopes, size_t depth,
+                             const char *name, size_t name_len, uint64_t hash);
+binding *lookup_binding_hash_syntax(codegen_t *cg, scope *scopes, size_t depth,
+                                    const char *name, size_t name_len,
+                                    uint64_t hash, uint32_t syntax_ctx);
+bool ny_builtin_name_shadowed_by_user_symbol(codegen_t *cg, scope *scopes,
+                                             size_t depth, const char *name,
+                                             size_t name_len, uint64_t hash);
+const char *ny_builtin_surface_name_for_callee(expr_t *callee, size_t *out_len,
+                                               uint64_t *out_hash);
+static inline bool ny_call_builtin_name_shadowed(codegen_t *cg, scope *scopes,
+                                                 size_t depth, expr_t *callee) {
+  size_t name_len = 0;
+  uint64_t hash = 0;
+  const char *name =
+      ny_builtin_surface_name_for_callee(callee, &name_len, &hash);
+  return !name || ny_builtin_name_shadowed_by_user_symbol(cg, scopes, depth,
+                                                          name, name_len, hash);
+}
+binding *lookup_binding_hash_no_mark(scope *scopes, size_t depth,
+                                     const char *name, size_t name_len,
+                                     uint64_t hash);
+void scope_bind(codegen_t *cg, scope *scopes, size_t depth, const char *name,
+                LLVMValueRef v, stmt_t *stmt, bool is_mut,
+                const char *type_name, bool is_slot);
+void scope_pop(scope *scopes, size_t *depth);
+uint64_t ny_hash_name(const char *s, size_t len);
+uint32_t ny_binding_name_len(binding *b);
+uint64_t ny_binding_name_hash(binding *b);
+
+/* Proof-system tracing (implemented in src/code/lang/types/proof.c). Enabled by
+ * NYTRIX_PROOF_DEBUG (fallback NY_PROOF_DEBUG); "0"/"false"/"off"/"no"
+ * disable it, an integer n sets the trace level (1..9), anything else sets
+ * level 1. Levels: 1 = lemma resolution and prove/assert path decisions;
+ * 2 = range decisions, digests, solver attempts; 3 = canonical-decide
+ * recursion and binding lookups. Trace output is written to stderr with a
+ * "[proof debug]" prefix and never affects normal diagnostics or output. */
+int ny_proof_debug_level(void);
+bool ny_proof_debug_enabled(void);
+void ny_proof_debug_at(int level, token_t tok, const char *fmt, ...);
+void ny_proof_debug(int level, const char *fmt, ...);
+
+/* Solver-backed proofs (src/code/lang/types/proof.c). Returns true only when
+ * the negation of `proposition` is proven unsatisfiable under the known binding
+ * ranges; unknown results fall through to the existing const-eval path.
+ * `cex` (optional) receives a counterexample description when the solver
+ * finds one. */
+bool ny_proof_try_solver(codegen_t *cg, scope *scopes, size_t depth,
+                         expr_t *proposition, char *cex, size_t cex_cap);
+/* Requires-call proof variant: every arithmetic intermediate must fit i64. */
+bool ny_proof_try_contract_solver(codegen_t *cg, scope *scopes, size_t depth,
+                                  expr_t *proposition, char *cex,
+                                  size_t cex_cap);
+bool ny_proof_check_lemma_definition(codegen_t *cg, stmt_t *lemma_stmt);
+int ny_proof_solver_differential_selftest(void);
+/* Policy tactic wrappers (implemented next to the legacy proof checkers). */
+bool ny_proof_tactic_lemma_instantiation(codegen_t *cg, scope *scopes,
+                                         size_t depth, expr_t *cond);
+bool ny_proof_tactic_range_truth(codegen_t *cg, scope *scopes, size_t depth,
+                                 expr_t *cond, const char **out_reason);
+void ny_scope_bloom_add(scope *sc, uint64_t hash);
+bool ny_scope_bloom_maybe_has(const scope *sc, uint64_t hash);
+void report_undef_symbol(codegen_t *cg, const char *name, token_t tok);
+bool ny_diag_should_emit(const char *kind, token_t tok, const char *name);
+bool ny_is_stdlib_tok(token_t tok);
+bool ny_strict_error_enabled(codegen_t *cg, token_t tok);
+bool ny_emit_module_match(codegen_t *cg, const char *cur_mod);
+bool ny_lazy_emit_stdlib_var_needed(codegen_t *cg, stmt_t *s,
+                                    const char *cur_mod);
+void ny_diag_configure(int warn_level, bool compact_mode);
+int ny_diag_warn_level(void);
+void ny_diag_set_warn_as_error(bool value);
+void ny_diag_set_shadow_warnings(bool value);
+int ny_diag_warn_as_error_count(void);
+void ny_diag_error(token_t tok, const char *fmt, ...);
+void ny_diag_warning(token_t tok, const char *fmt, ...);
+void ny_diag_error_code(token_t tok, int code, const char *fmt, ...);
+void ny_diag_warning_code(token_t tok, int code, const char *fmt, ...);
+void ny_diag_hint(const char *fmt, ...);
+const char *ny_keyword_typo_suggestion(const char *name);
+void ny_diag_fix(const char *fmt, ...);
+void ny_diag_note_tok(token_t tok, const char *fmt, ...);
+void ny_diag_error_context(token_t tok, const char *primary_msg,
+                           const char *context, const char *suggestion);
+void ny_emit_trace_loc_force(codegen_t *cg, token_t tok);
+/* Enhanced error reporting */
+void ny_diag_error_with_context(token_t tok, const char *primary_msg,
+                                const char *common_cause,
+                                const char *fix_suggestion);
+void ny_diag_type_mismatch(token_t tok, const char *expected, const char *got,
+                           const char *context);
+LLVMTypeRef resolve_type_name(codegen_t *cg, const char *name, token_t tok);
+LLVMTypeRef resolve_abi_type_name(codegen_t *cg, const char *name, token_t tok);
+bool ny_type_is_tagged(const char *name);
+/* Canonical semantic dimension for built-in vector aliases; zero otherwise. */
+int ny_type_vector_dimension(const char *name);
+bool ny_is_native_abi_type_name(const char *name);
+void ny_register_tagged_type(codegen_t *cg, const char *name, token_t origin);
+bool ny_lookup_tagged_type(codegen_t *cg, const char *name);
+bool ny_indexed_declared_type_base(codegen_t *cg, const char *type_name,
+                                   char *base, size_t base_cap);
+LLVMValueRef ny_coerce_to_abi(codegen_t *cg, LLVMValueRef v,
+                              const char *type_name);
+LLVMValueRef ny_coerce_to_abi_proven_int(codegen_t *cg, LLVMValueRef v,
+                                         const char *type_name,
+                                         bool proven_int);
+LLVMValueRef ny_box_abi_result(codegen_t *cg, LLVMValueRef v,
+                               const char *type_name);
+/* Keep legacy LLVM call sites on the same semantic representation contract
+ * as NYIR, including calls synthesized by lowering (for example iteration). */
+bool ny_legacy_sig_param_is_tagged_dynamic(const fun_sig *sig, size_t index);
+bool ny_legacy_expr_is_raw_int_arg(codegen_t *cg, scope *scopes, size_t depth,
+                                   expr_t *expr);
+bool ny_legacy_expr_is_static_bigintish(codegen_t *cg, scope *scopes,
+                                        size_t depth, expr_t *expr,
+                                        unsigned recursion);
+const char *infer_expr_type(codegen_t *cg, scope *scopes, size_t depth,
+                            expr_t *e);
+bool ny_expr_type_compatible(codegen_t *cg, scope *scopes, size_t depth,
+                             const char *want, expr_t *expr);
+bool ensure_expr_type_compatible(codegen_t *cg, scope *scopes, size_t depth,
+                                 const char *want, expr_t *expr, token_t tok,
+                                 const char *ctx);
+/* Canonical source-type to runtime-representation classification shared by
+ * legacy inference, the HM pipeline, and backend fact persistence. */
+ny_sem_rep_t ny_semantic_rep_for_type(const char *type_name);
+bool ny_sem_rep_coherent_with_type(const char *type_name, ny_sem_rep_t rep);
+/* Shared spelling classifiers for native lowering and type validation. */
+bool ny_type_name_is_f64(const char *type_name);
+bool ny_type_name_is_f32(const char *type_name);
+bool ny_type_name_is_int(const char *type_name);
+bool ny_type_name_is_bool(const char *type_name);
+bool ny_type_name_is_list(const char *type_name);
+bool ny_type_name_is_str(const char *type_name);
+bool ny_type_name_is_bytes(const char *type_name);
+bool ny_type_name_is_any(const char *type_name);
+bool ny_type_name_is_ptr(const char *type_name);
+/* Wide-int fact shared by every backend bigint-ABI decision: accepts both
+ * spellings (`bigint`, `BigInt`) after nullable stripping and qualified-leaf
+ * reduction. */
+bool ny_type_is_bigint(const char *type_name);
+refine_def_t *ny_lookup_refine(codegen_t *cg, const char *name);
+const char *ny_refine_base_type(codegen_t *cg, const char *name);
+trait_def_t *ny_lookup_trait(codegen_t *cg, const char *name);
+bool ny_refine_eval_predicate(codegen_t *cg, scope *scopes, size_t depth,
+                              refine_def_t *ref, expr_t *expr, int *result);
+expr_t *ny_expr_subst(arena_t *arena, expr_t *e, const char *var,
+                      expr_t *replacement);
+layout_def_t *lookup_layout(codegen_t *cg, const char *name);
+void ny_register_layout_def(codegen_t *cg, stmt_t *s, bool is_layout);
+layout_def_t *ny_layout_instantiate(codegen_t *cg, const char *inst_name,
+                                    const char *generic_name, int64_t bound);
+bool ny_indexed_extract_ctor_and_bound(const char *type_name, char *out_ctor,
+                                       size_t ctor_cap, int64_t *out_bound);
+bool ny_indexed_resolve_bound(codegen_t *cg, scope *scopes, size_t depth,
+                              const char *type_name, char *out_ctor,
+                              size_t ctor_cap, int64_t *out_bound);
+bool ny_fin_resolve_bound(codegen_t *cg, scope *scopes, size_t depth,
+                          const char *type_name, int64_t *out_bound);
+bool ny_type_is_fin(const char *type_name);
+type_layout_t resolve_raw_layout(codegen_t *cg, const char *name, token_t tok);
+const char *codegen_qname(codegen_t *cg, const char *name,
+                          const char *module_name);
+void ny_dbg_loc(codegen_t *cg, token_t tok);
+enum_member_def_t *lookup_enum_member(codegen_t *cg, const char *name);
+enum_member_def_t *lookup_enum_member_owner(codegen_t *cg, const char *name,
+                                            enum_def_t **out_enum);
+char *codegen_full_name(codegen_t *cg, expr_t *e, arena_t *a);
+static inline char *ny_adt_member_call_full_name(codegen_t *cg, expr_t *e) {
+  if (!cg || !e)
+    return NULL;
+  if (e->kind == NY_E_CALL && e->as.call.callee)
+    return codegen_full_name(cg, e->as.call.callee, cg->arena);
+  if (e->kind == NY_E_MEMCALL && e->as.memcall.target && e->as.memcall.name) {
+    char *target = codegen_full_name(cg, e->as.memcall.target, cg->arena);
+    if (!target)
+      return NULL;
+    size_t a = strlen(target), b = strlen(e->as.memcall.name);
+    char *out = arena_alloc(cg->arena, a + b + 2);
+    memcpy(out, target, a);
+    out[a] = '.';
+    memcpy(out + a + 1, e->as.memcall.name, b + 1);
+    return out;
+  }
+  return NULL;
+}
+LLVMValueRef expr_fail(codegen_t *cg, token_t tok, const char *fmt, ...);
+LLVMValueRef ny_is_tagged_int(codegen_t *cg, LLVMValueRef v);
+LLVMValueRef ny_untag_int(codegen_t *cg, LLVMValueRef v);
+LLVMValueRef ny_tag_int(codegen_t *cg, LLVMValueRef v);
+LLVMValueRef ny_is_float(codegen_t *cg, LLVMValueRef v);
+LLVMValueRef ny_unbox_float(codegen_t *cg, LLVMValueRef v);
+bool ny_module_target_is_apple_arm64(LLVMModuleRef module);
+bool ny_is_proven_int(codegen_t *cg, scope *scopes, size_t depth, expr_t *e,
+                      LLVMValueRef v);
+bool ny_is_proven_bool(codegen_t *cg, scope *scopes, size_t depth, expr_t *e,
+                       LLVMValueRef v);
+bool ny_expr_is_pure(codegen_t *cg, scope *scopes, size_t depth, expr_t *e);
+
+LLVMValueRef gen_expr(codegen_t *cg, scope *scopes, size_t depth, expr_t *e);
+LLVMValueRef ny_native_callback_adapter_value(codegen_t *cg, expr_t *expr);
+LLVMValueRef gen_expr_list_stack_alloc(codegen_t *cg, scope *scopes,
+                                       size_t depth, expr_t *e);
+LLVMValueRef ny_try_member_property_expr(codegen_t *cg, scope *scopes,
+                                         size_t depth, expr_t *e);
+
+LLVMValueRef gen_expr_as_f64(codegen_t *cg, scope *scopes, size_t depth,
+                             expr_t *e);
+LLVMValueRef ny_try_fast_f64buf_load_as_f64(codegen_t *cg, scope *scopes,
+                                            size_t depth, expr_t *e);
+LLVMValueRef ny_try_native_call_as_f64(codegen_t *cg, scope *scopes,
+                                       size_t depth, expr_t *e);
+bool ny_build_mono_raw_int_expr(codegen_t *cg, scope *scopes, size_t depth,
+                                expr_t *e, LLVMValueRef *raw_out,
+                                LLVMValueRef *ok_out);
+LLVMValueRef ny_try_direct_llvm_intrinsic(codegen_t *cg, scope *scopes,
+                                          size_t depth, expr_t *e,
+                                          const char *callee_name,
+                                          bool shadowed, expr_call_t *c);
+void ny_proof_check_fn_proves(codegen_t *cg, scope *scopes, size_t depth,
+                              stmt_t *fn_stmt);
+bool ny_proof_check_loop_invariant(codegen_t *cg, scope *scopes, size_t depth,
+                                   expr_t *invariant);
+bool ny_gencall_type_is_nullable(const char *type_name);
+bool ny_gencall_type_is(const char *type_name, const char *want_tail);
+bool ny_gencall_type_is_real_number(const char *type_name);
+bool ny_gencall_type_is_integer_number(const char *type_name);
+bool ny_gencall_type_is_bigint(const char *type_name);
+bool ny_gencall_type_is_number(const char *type_name);
+bool ny_gencall_type_is_ordered_number(const char *type_name);
+bool ny_gencall_check_math_contract(codegen_t *cg, scope *scopes, size_t depth,
+                                    fun_sig *sig, expr_t *arg);
+int ny_gencall_vec_type_dim(const char *type_name);
+bool ny_gencall_type_is_vec(const char *type_name);
+const char *ny_gencall_attached_owner(const char *type_name);
+fun_sig *ny_gencall_lookup_attached_method(codegen_t *cg, const char *type_name,
+                                           const char *method_name);
+int ny_gencall_known_obj_tag(const char *type_name);
+int ny_gencall_known_tagof(const char *type_name);
+bool ny_expr_is_literal_int_list(expr_t *e);
+expr_t *ny_binding_flow_static_int_list_init(binding *b);
+binding *ny_static_int_list_target_binding(codegen_t *cg, scope *scopes,
+                                           size_t depth, expr_t *target);
+LLVMValueRef ny_static_int_list_global(codegen_t *cg, binding *b, expr_t *init,
+                                       LLVMTypeRef *out_array_ty);
+bool ny_gencall_type_is_known_obj(const char *type_name);
+bool ny_gencall_type_is_known_non_obj(const char *type_name);
+LLVMValueRef gen_binary(codegen_t *cg, scope *scopes, size_t depth,
+                        const char *op, LLVMValueRef l, LLVMValueRef r,
+                        expr_t *le, expr_t *re);
+LLVMValueRef to_bool(codegen_t *cg, LLVMValueRef v);
+LLVMValueRef const_string_ptr(codegen_t *cg, const char *s, size_t len);
+LLVMValueRef gen_closure(codegen_t *cg, scope *scopes, size_t depth,
+                         ny_param_list params, stmt_t *body, bool is_variadic,
+                         const char *return_type, const char *name_hint);
+LLVMValueRef gen_comptime_eval(codegen_t *cg, stmt_t *body);
+bool ny_try_eval_comptime_interp_value(codegen_t *cg, stmt_t *body,
+                                       ny_ct_fast_val_t *out);
+bool ny_try_eval_comptime_interp_program(program_t *prog, stmt_t *body,
+                                         ny_ct_fast_val_t *out);
+bool ny_try_eval_comptime_interp(codegen_t *cg, stmt_t *body,
+                                 int64_t *out_tagged);
+bool ny_try_eval_comptime_expr_fast(codegen_t *cg, expr_t *e,
+                                    ny_ct_fast_val_t *out, int depth);
+bool ny_try_eval_comptime_fast_value(codegen_t *cg, stmt_t *body,
+                                     ny_ct_fast_val_t *out);
+bool ny_try_eval_binding_comptime_const(codegen_t *cg, binding *b,
+                                        const char *name, ny_ct_fast_val_t *out,
+                                        int depth);
+bool ny_ct_fuel_consume(codegen_t *cg);
+bool ny_ct_platform_ident(const char *name, ny_ct_fast_val_t *out);
+bool ny_ct_interp_eval_pure_call(codegen_t *cg, expr_t *call,
+                                 ny_ct_fast_val_t *out);
+bool ny_ct_fast_eval_unary(const char *op, const ny_ct_fast_val_t *r,
+                           ny_ct_fast_val_t *out);
+char *ny_ct_i64_to_dec(int64_t v);
+bool ny_ct_fast_eval_binary(const char *op, const ny_ct_fast_val_t *l,
+                            const ny_ct_fast_val_t *r, ny_ct_fast_val_t *out);
+const char *ny_ct_fast_callee_leaf_name(expr_t *callee);
+bool ny_ct_fast_eval_bigint_constructor_arg(const ny_ct_fast_val_t *arg,
+                                            ny_ct_fast_val_t *out);
+bool ny_ct_seq_len(const ny_ct_fast_val_t *v, int64_t *out);
+bool ny_ct_seq_item(const ny_ct_fast_val_t *v, int64_t idx,
+                    ny_ct_fast_val_t *out);
+bool ny_ct_fast_string_scalar_len(const ny_ct_fast_val_t *string, int64_t *out);
+bool ny_ct_fast_string_index(const ny_ct_fast_val_t *string, int64_t index,
+                             ny_ct_fast_val_t *out);
+bool ny_ct_make_seq(ny_ct_fast_kind_t kind, size_t len, ny_ct_fast_val_t *out);
+bool ny_ct_fast_slice_sequence(const ny_ct_fast_val_t *target,
+                               const ny_ct_fast_val_t *start_value,
+                               const ny_ct_fast_val_t *stop_value,
+                               const ny_ct_fast_val_t *step_value,
+                               bool stop_is_omitted, ny_ct_fast_val_t *out);
+bool ny_ct_make_range(int64_t start, int64_t stop, int64_t step,
+                      ny_ct_fast_val_t *out);
+bool ny_ct_fast_val_clone(const ny_ct_fast_val_t *src, ny_ct_fast_val_t *dst);
+bool ny_ct_fast_eval_long_property(codegen_t *cg, expr_t *target,
+                                   ny_ct_fast_val_t *out, int depth);
+bool ny_ct_fast_bytes_long(const char *data, size_t len, ny_ct_fast_val_t *out);
+bool ny_ct_fast_unhex_long(const char *data, size_t len, ny_ct_fast_val_t *out);
+bool ny_ct_fast_to_tagged(const ny_ct_fast_val_t *v, int64_t *out_tagged);
+bool ny_comptime_main_enabled(codegen_t *cg, token_t tok);
+bool ny_expr_kind_profile_is_enabled(void);
+int ny_expr_kind_profile_begin(void);
+void ny_expr_kind_profile_end(int kind, int slot, double total_ms);
+void ny_ct_fast_val_free(ny_ct_fast_val_t *v);
+void ny_ct_fast_val_move(ny_ct_fast_val_t *dst, ny_ct_fast_val_t *src);
+bool ny_eval_comptime_if(codegen_t *cg, stmt_t *s, bool *truthy);
+LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
+                           expr_t *e);
+void ny_lazy_emit_prepare_reachable(codegen_t *cg);
+void ny_lazy_emit_demand_referenced(codegen_t *cg, scope *gsc, size_t gd,
+                                    const char *phase);
+
+void gen_stmt(codegen_t *cg, scope *scopes, size_t *depth, stmt_t *s,
+              size_t func_root, bool is_tail);
+void emit_defers(codegen_t *cg, scope *scopes, size_t depth, size_t func_root);
+void collect_labels(codegen_t *cg, LLVMValueRef func, stmt_t *s, size_t depth);
+
+void gen_func(codegen_t *cg, stmt_t *fn, const char *name, scope *scopes,
+              size_t depth, binding_list *captures);
+void collect_sigs(codegen_t *cg, stmt_t *s);
+bool ny_fn_uses_native_abi(codegen_t *cg, const stmt_t *fn);
+LLVMTypeRef ny_fn_resolve_user_abi_type(codegen_t *cg, const stmt_t *fn,
+                                        bool use_native_abi,
+                                        const char *type_name, token_t tok);
+void ny_fun_sig_copy_contracts(fun_sig *sig, const stmt_func_t *fn);
+void ny_resolve_fn_attrs(codegen_t *cg, stmt_t *fn_stmt);
+bool ny_stmt_func_body_has_try(stmt_t *fn_stmt);
+void ny_infer_param_types(stmt_t *fn, const char **param_types);
+char *ny_infer_fn_return_type(stmt_t *fn, const char **param_types);
+void infer_pure_functions(codegen_t *cg);
+/* Call after the shared frontend has attached checked descent to call sites. */
+bool ny_verify_totality(codegen_t *cg);
+
+void add_import_alias(codegen_t *cg, const char *alias, const char *full_name);
+void add_import_alias_from_full(codegen_t *cg, const char *full_name);
+const char *ny_lookup_import_alias_indexed(codegen_t *cg, bool user_only,
+                                           const char *alias, size_t alias_len,
+                                           uint64_t alias_hash);
+void ny_alias_lookup_cache_clear(codegen_t *cg);
+stmt_t *find_module_stmt(stmt_t *s, const char *name);
+bool module_has_export_list(const stmt_t *mod);
+void collect_module_exports(stmt_t *mod, str_list *exports,
+                            const char *profile);
+void collect_module_defs(stmt_t *mod, str_list *exports);
+void add_imports_from_prefix(codegen_t *cg, bool user_use, const char *mod);
+void process_default_core_imports(codegen_t *cg);
+void process_use_imports(codegen_t *cg, stmt_t *s);
+void collect_use_aliases(codegen_t *cg, stmt_t *s);
+void ny_mark_import_alias_used(codegen_t *cg, const char *alias,
+                               const char *target);
+void collect_use_modules(codegen_t *cg, stmt_t *s);
+void process_exports(codegen_t *cg, stmt_t *s);
+void ny_lint_unused_imports(codegen_t *cg, program_t *prog);
+bool ny_is_module_active(codegen_t *cg, const char *name);
+const char *ny_lookup_module_alias(codegen_t *cg, scope *scopes, size_t depth,
+                                   const char *name, size_t name_len,
+                                   uint64_t name_hash);
+bool ny_resolve_module_expr_path(codegen_t *cg, scope *scopes, size_t depth,
+                                 expr_t *e, char *out, size_t out_cap);
+bool ny_module_path_exists(codegen_t *cg, const char *path);
+bool ny_module_path_has_descendant(codegen_t *cg, const char *path);
+bool ny_module_declares_exported_member(codegen_t *cg, const char *module_name,
+                                        const char *member);
+bool ny_module_exported_module_path(codegen_t *cg, const char *module_name,
+                                    const char *member, char *out,
+                                    size_t out_cap);
+bool ny_resolve_module_function_path(codegen_t *cg, const char *module_name,
+                                     const char *member, char *out,
+                                     size_t out_cap);
+bool ny_codegen_token_is_source_file(codegen_t *cg, token_t tok);
+bool ny_codegen_stmt_is_source_file(codegen_t *cg, stmt_t *s);
+bool ny_codegen_module_is_source_file(codegen_t *cg, const char *module_name);
+bool ny_stmt_tree_has_source_file(codegen_t *cg, stmt_t *s);
+bool ny_program_has_explicit_main_entry(codegen_t *cg, program_t *prog);
+
+void ny_sym_state_free(codegen_t *cg);
+void ny_lookup_prof_register_atexit(void);
+void ny_lookup_prof_note_pipeline_ms(double ms);
+
+void codegen_emit_string_init(codegen_t *cg);
+LLVMValueRef codegen_emit_string_or_array_global(codegen_t *cg,
+                                                 const char *name);
+LLVMValueRef build_alloca(codegen_t *cg, const char *name, LLVMTypeRef type);
+void add_fn_string_attr(codegen_t *cg, LLVMValueRef fn, const char *name,
+                        const char *val);
+void add_fn_enum_attr(codegen_t *cg, LLVMValueRef fn, const char *name,
+                      uint64_t val);
+void ny_apply_rt_fn_attrs(codegen_t *cg, LLVMValueRef fn);
+void ny_apply_decl_fn_attrs(codegen_t *cg, LLVMValueRef fn, stmt_t *fn_stmt);
+void ny_apply_longjmp_fn_attrs(codegen_t *cg, LLVMValueRef fn);
+
+#endif /* CODEGEN_INTERNAL_H */

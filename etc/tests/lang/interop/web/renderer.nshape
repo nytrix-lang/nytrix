@@ -1,0 +1,133 @@
+shape test_cmp {
+  family "interop/web"
+  generator "embedded"
+  ci skip
+  features [browser wasm interop renderer value-comparison texture-size]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+;; Keywords: zzprobe
+use core.os.ui.render as gfx
+
+def win = gfx.init_window(64, 64, "t", 0, true, false, 1)
+gfx.begin_frame_clear(gfx.BLACK)
+def x = 2
+
+if x == 2 { print("PLAIN_TRUE") } else { print("PLAIN_FALSE") }
+def loc = [2, 2]
+
+if loc.get(0) == 2 { print("LOC_TRUE") } else { print("LOC_FALSE") }
+def g0 = loc.get(0)
+
+if g0 == 2 { print("CAP_TRUE") } else { print("CAP_FALSE") }
+def sz = gfx.texture_size(gfx.texture_create_rgba(2, 2, [0,0,0,255,0,0,0,255,0,0,0,255,0,0,0,255], 37, 1, 10497, 10497, false))
+
+if sz.get(0) == 2 { print("HOST_TRUE") } else { print("HOST_FALSE") }
+gfx.end_frame()
+NY
+}
+
+shape test_renderer_2d_texture {
+  family "interop/web"
+  generator "embedded"
+  ci skip
+  features [browser wasm interop renderer texture-2d readback]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+;; Keywords: browser webgl texture probe portability fixture
+;; Texture probe: the browser renderer must create a 2x2 RGBA texture from
+;; Ny-side pixel data, report its live size through the public facade, draw it,
+;; and read a pixel back through the host. Loop-free on purpose: a `while`
+;; loop before the texture calls is DCE'd by the wasm backend.
+use core.os.ui.render as gfx
+
+def win = gfx.init_window(320, 180, "Nytrix browser texture", 0, true, false, 1)
+gfx.begin_frame_clear(gfx.BLACK)
+def pix = [255, 0, 0, 255,  255, 0, 0, 255,  0, 0, 0, 255,  0, 0, 0, 255]
+def tex = gfx.texture_create_rgba(2, 2, pix, 37, 1, 10497, 10497, false)
+def sz = gfx.texture_size(tex)
+print(int(sz.get(0)), int(sz.get(1)))
+
+if int(sz.get(0)) == 2 && int(sz.get(1)) == 2 {
+   gfx.draw_texture(tex, 0.0, 0.0, 1.0, gfx.WHITE)
+   def tl = gfx.get_pixel(0, 0)
+   print(int(tl.get(0) * 255), int(tl.get(1) * 255), int(tl.get(2) * 255))
+   def br = gfx.get_pixel(1, 1)
+   print(int(br.get(0) * 255), int(br.get(1) * 255), int(br.get(2) * 255))
+   gfx.end_frame()
+}
+
+gfx.end_frame()
+NY
+}
+
+shape test_renderer_3d {
+  family "interop/web"
+  generator "embedded"
+  ci skip
+  features [browser wasm interop renderer texture-3d depth]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+;; Keywords: browser webgl renderer 3d portability fixture
+;; Shared 3D renderer baseline: a depth-tested cube must not silently fall back.
+use core.os.ui.render as gfx
+
+def win = gfx.init_window(320, 180, "Nytrix browser 3d", 0, true, false, 1)
+def cam = gfx.camera_init([0.0, 0.0, 4.0], 0.0, 0.0, 16.0 / 9.0)
+gfx.begin_frame_clear(gfx.BLACK)
+gfx.begin_mode_3d(cam)
+gfx.draw_cube([0.0, 0.0, 0.0], 1.0, gfx.WHITE)
+gfx.draw_cube([0.35, 0.0, 0.5], 0.5, [0.2, 0.6, 1.0, 0.5])
+gfx.end_mode_3d()
+gfx.draw_rect(2, 2, 8, 8, gfx.WHITE)
+gfx.end_frame()
+NY
+}
+
+shape test_renderer_framebuffer {
+  family "interop/web"
+  generator "embedded"
+  ci skip
+  features [browser wasm interop renderer framebuffer]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+;; Keywords: browser webgl framebuffer probe portability fixture
+;; Framebuffer probe: the browser renderer must report the live backbuffer
+;; dimensions through the public facade, not an unhosted stub.
+use core.os.ui.render as gfx
+
+def win = gfx.init_window(320, 180, "Nytrix browser framebuffer", 0, true, false, 1)
+gfx.begin_frame_clear(gfx.BLACK)
+def sz = gfx.get_framebuffer_size()
+print(int(sz.get(0)), int(sz.get(1)))
+gfx.end_frame()
+NY
+}
+
+shape test_zz_tex {
+  family "interop/web"
+  generator "embedded"
+  ci skip
+  features [browser wasm interop renderer texture lifecycle]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+;; Keywords: zz
+use core.os.ui.render as gfx
+
+def win = gfx.init_window(64, 64, "t", 0, true, false, 1)
+gfx.begin_frame_clear(gfx.BLACK)
+mut pix = list()
+mut i = 0
+while i < 64 { pix = pix.append(255) if i % 4 != 0 pix = pix.append(128) if i % 4 == 1 pix = pix.append(0) if i % 4 == 2 i += 1 }
+def tex = gfx.texture_create_rgba(4, 4, pix, 37, 1, 10497, 10497, false)
+def sz = gfx.texture_size(tex)
+print(tex, sz != nil)
+def c = gfx.get_pixel(2, 2)
+print(c == nil)
+gfx.end_frame()
+NY
+}

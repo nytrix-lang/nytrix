@@ -1,0 +1,49 @@
+shape proof_policy_backend_matrix {
+  family "runtime/proofs"
+  generator "program"
+  features ["proofs", "policy", "backend-matrix", "tri-state"]
+  estimate_ms 21000
+  template ny-test-case
+  flags_matrix "--proof-solver=auto; --proof-solver=presburger; --proof-solver=z3; --proof-solver=none"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.proof
+
+;; The same obligations run under every --proof-solver mode: verdicts are
+;; backend-consistent.  Proved stays proved everywhere, refuted stays
+;; refuted, and unknown never turns into false.  The Ny policy talks to
+;; the bounded kernels through explicit per-call modes, so core.proof
+;; answers must not drift with the CLI setting at all.
+
+def ob_proved = proof.obligation("binary:>(name:x,int:0)", "x=5..5")
+def cert_proved = proof.solve(ob_proved)
+assert(proof.verdict_of(cert_proved) == "proved", "bounded obligation proves on every backend")
+assert(proof.check(cert_proved), "proved certificate validates on every backend")
+
+def ob_refuted = proof.obligation("binary:>(name:x,int:0)", "x=0..5")
+def cert_refuted = proof.solve(ob_refuted)
+assert(proof.verdict_of(cert_refuted) == "refuted", "counterexample range refutes on every backend")
+assert(proof.check(cert_refuted), "refuted certificate validates on every backend")
+
+def ob_unknown = proof.obligation("binary:>(binary:*(name:x,name:x),int:1)",
+   "x=-9..9", "presburger")
+def cert_unknown = proof.solve(ob_unknown)
+assert(proof.verdict_of(cert_unknown) == "unknown", "nonlinear obligation stays unknown")
+assert(proof.check(cert_unknown), "unknown certificate validates on every backend")
+assert(!proof.check_texts(
+       proof.obligation("binary:>(name:x,int:0)", "x=0..5").get("text"),
+       proof.certificate_text(cert_unknown)),
+   "certificates bind to their own obligation on every backend")
+
+;; Compiler-side proves that every mode must accept: the range and fold
+;; tactics do not consult the CLI solver at all.
+def n = 5
+def proof p_range = prove(n > 0, "by_range")
+assert(proof_matches(p_range, n > 0), "range tactic witness matches")
+
+assert_compile(2 + 2 == 4, "fold accepts closed truths on every backend")
+
+assert(true, "backend matrix complete")
+NY
+}

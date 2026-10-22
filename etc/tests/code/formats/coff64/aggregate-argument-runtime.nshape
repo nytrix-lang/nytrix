@@ -1,0 +1,15 @@
+shape x86_64_coff_aggregate_argument_abi_link_runs {
+  family "runtime-native"
+  generator "native"
+  features [native object coff x86_64 aggregate argument win64 nyir link-run]
+  template ny-test-case
+  flags "--c-frontend=nytrix --native-only --native-backend x86_64 --host-triple x86_64-w64-windows-gnu --native-abi win64 --nyir-verify -no-std -emit-only -o /tmp/nytrix-native-coff64-aggregate-argument.obj"
+  expect compile_and_run
+  source ny <<'NY'
+#include "etc/tests/lang/interop/c/internal-byvalue-param-import.h" link "etc/tests/lang/interop/c/sum-pair.so"
+use core
+
+def pair = malloc(24)
+sum_pair(pair)
+NY
+}

@@ -1,0 +1,56 @@
+shape attached_method_identity_keeps_the_typed_owner {
+  family "runtime/types"
+  generator "runtime"
+  features ["method", "identity", "backend-parity"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  source ny <<'NY'
+enum LeftOwner {
+   Only
+}
+
+enum RightOwner {
+   Only
+}
+
+;; An ordinary function and a local value with the same leaf name must remain
+;; distinct from owner-qualified attached methods through every lowering route.
+fn identity(LeftOwner value) int {
+   33
+}
+
+fn local_identity_shadow() int {
+   def identity = 91
+   identity
+}
+
+fn local_method_name_shadow(LeftOwner receiver) int {
+   def identity = 91
+   receiver.identity()
+}
+
+impl LeftOwner {
+   fn identity(self value) int {
+      11
+   }
+}
+
+impl RightOwner {
+   fn identity(self value) int {
+      22
+   }
+}
+
+def left = LeftOwner.Only
+def right = RightOwner.Only
+assert(left.identity() == 11, "left owner resolves its attached method")
+assert(right.identity() == 22, "right owner resolves the same method leaf")
+assert(LeftOwner.identity(left) == 11, "associated method keeps left owner")
+assert(RightOwner.identity(right) == 22, "associated method keeps right owner")
+assert(identity(left) == 33, "same-spelled free function resolves independently")
+assert(local_identity_shadow() == 91,
+       "local value shadowing a same-spelled function remains independent")
+assert(local_method_name_shadow(left) == 11,
+       "local value shadowing a method name does not capture receiver dispatch")
+NY
+}

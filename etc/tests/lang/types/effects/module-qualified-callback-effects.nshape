@@ -1,0 +1,56 @@
+shape module_qualified_callbacks_keep_effect_rows {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "higher-order", "callback", "modules"]
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core.iter as it
+
+module std.project(
+  increment,
+  announce
+)
+
+fn increment(int value) int { value + 1 }
+
+fn announce(int value) int {
+  print("qualified callback\n")
+  value + 1
+}
+
+@effects(e)
+fn invoke(fnptr callback) int {
+  callback(41)
+}
+
+@effects(read, alloc)
+fn map_pure(list values) list {
+  it.map(values, std.project.increment)
+}
+
+@effects(read, alloc, io)
+fn map_io(list values) list {
+  it.map(values, std.project.announce)
+}
+
+@effects(none)
+fn invoke_qualified_pure_alias() int {
+  def callback = std.project.increment
+  invoke(callback)
+}
+
+@effects(io)
+fn invoke_qualified_io_alias() int {
+  def callback = std.project.announce
+  invoke(callback)
+}
+
+assert(map_pure([1, 2]).get(1) == 3, "qualified pure callback row")
+assert(map_io([1, 2]).get(1) == 3, "qualified IO callback row")
+assert(invoke_qualified_pure_alias() == 42,
+       "qualified pure callback aliases keep their row")
+assert(invoke_qualified_io_alias() == 42,
+       "qualified IO callback aliases keep their row")
+NY
+}

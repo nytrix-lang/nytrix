@@ -1,0 +1,70 @@
+shape proof_policy_mutation {
+  family "runtime/proofs"
+  generator "program"
+  features ["proofs", "policy", "mutation", "digest-binding"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.str
+use core.proof
+
+;; Every field of the versioned interface is digest- or checker-bound:
+;; mutating one field invalidates the certificate.  Unknown stays distinct
+;; from false under mutation too - flipping a verdict cannot forge trust.
+
+def ob = proof.obligation("binary:>(name:x,int:0)", "x=5..5")
+def cert = proof.solve(ob)
+def good_text = proof.certificate_text(cert)
+def ob_text = ob.get("text")
+def fields = good_text.split("|")
+
+assert(proof.verdict_of(cert) == "proved", "baseline proves")
+assert(proof.check_texts(ob_text, good_text), "baseline checks")
+
+;; Flip the verdict to refuted: the digest still matches the obligation,
+;; but a refutation without a counterexample is rejected.
+def flipped = get(fields, 0) + "|" + get(fields, 1) + "|refuted|" +
+   get(fields, 3) + "|" + get(fields, 4) + "|" + get(fields, 5) + "|" +
+   get(fields, 6)
+assert(!proof.check_texts(ob_text, flipped), "verdict flip to refuted is rejected")
+
+;; Flip the verdict to unknown: the checker decided the obligation, so an
+;; unknown claim contradicts its own evidence.
+def weakened = get(fields, 0) + "|" + get(fields, 1) + "|unknown|" +
+   get(fields, 3) + "|" + get(fields, 4) + "|" + get(fields, 5) +
+   "|mutated explanation"
+assert(!proof.check_texts(ob_text, weakened), "verdict downgrade is rejected")
+
+;; Forge a stronger backend claim: the verdict must re-derive, not parse.
+def forged = get(fields, 0) + "|" + get(fields, 1) + "|proved|solver|z3||forged"
+assert(proof.check_texts(ob_text, forged),
+   "a correct verdict with new metadata still re-derives")
+
+;; Mutate the obligation the certificate binds to.
+def other = proof.obligation("binary:>=(name:x,int:0)", "x=5..5")
+assert(!proof.check_texts(other.get("text"), good_text),
+   "changed proposition is rejected")
+
+def widened = proof.obligation("binary:>(name:x,int:0)", "x=0..5")
+assert(!proof.check_texts(widened.get("text"), good_text),
+   "changed ranges are rejected")
+
+def different_policy = proof.obligation("binary:>(name:x,int:0)",
+   "x=5..5", "range")
+assert(!proof.check_texts(different_policy.get("text"), good_text),
+   "a changed policy field invalidates the certificate")
+
+;; Counterexample tampering: a binding outside the obligation range.
+def ob_open = proof.obligation("binary:>(name:x,int:0)", "x=0..5")
+def cert_open = proof.solve(ob_open)
+assert(proof.verdict_of(cert_open) == "refuted", "open range refutes")
+def open_fields = proof.certificate_text(cert_open).split("|")
+def tampered = get(open_fields, 0) + "|" + get(open_fields, 1) + "|refuted|" +
+   get(open_fields, 3) + "|" + get(open_fields, 4) + "|x=9|x tampered"
+assert(!proof.check_texts(ob_open.get("text"), tampered),
+   "out-of-range counterexample is rejected")
+
+assert(true, "mutation fixtures complete")
+NY
+}

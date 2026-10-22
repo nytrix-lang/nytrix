@@ -3,10 +3,10 @@
 ;; Reference:
 ;; - https://cacr.uwaterloo.ca/hac/about/chap14.pdf
 ;; References:
-;; - std.math.crypto.number
-;; - std.math.crypto
-module std.math.crypto.number.crt(fast_crt)
-use std.math.nt
+;; - core.math.crypto.number
+;; - core.math.crypto
+module core.math.crypto.number.crt(fast_crt)
+use core.math.nt
 
 fn _crt_z(any x) any { is_bigint(x) ? x : Z(x) }
 

@@ -1,0 +1,98 @@
+shape test_comments {
+  family "runtime/language"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.error
+use core.reflect
+use core.dict
+use core.io
+use core.str
+
+;; Comments parsing (Test)
+;; Single line comment at start
+mut x = 1 ;; inline
+
+;; Multiple single line comments
+;; Comment line 1
+;; Comment line 2
+;; Comment line 3
+def y = 2
+
+fn add(a, b) {
+   ;; inside function
+   a + b ;; return comment
+}
+
+fn call_result_locals_equal() bool {
+   mut local_mut = add(1, 2)
+   def local_def = add(1, 2)
+   local_mut == 3 && local_def == 3 && add(1, 2) == 3
+}
+
+assert(call_result_locals_equal(), "function call-result local equality")
+
+mut result = add(x, y)
+assert(result == 3, "fn with comments")
+mut r = add(1, 2)
+assert(r == 3, "mutable call-result local equality")
+def call_result = add(1, 2)
+assert(call_result == 3, "immutable call-result local equality")
+assert(add(1, 2) == 3, "direct call-result equality")
+
+if x == 1 {
+   ;; inside if
+   def z = 3
+}
+
+mut i = 0
+while i < 5 {
+   ;; inside loop
+   i += 1
+}
+
+assert(i == 5, "loop with comments")
+
+;; Empty lines and comments
+def a = 10
+def b = 20
+mut c = a + b ;; inline math
+assert(c == 30, "ops with comments")
+
+if 1 == 1 {
+   ;; outer
+   if 2 == 2 {
+      ;; inner
+      def nested = 42
+   }
+}
+
+fn test() {
+   def val = 100
+   ;; last comment
+}
+
+;{
+Multiline comment block
+} ;
+
+;; @#$%^&*()_+-=[]{}|;':",.<>?/
+;; 言 🫪
+;; very long comment used to exercise comment scanning
+;; Multiline comments
+;EOFMARK
+this is a multiline comment block
+it should be ignored entirely by the compiler
+def dummy = "should not compile"
+EOFMARK ;
+
+;TEST_BLOCK
+mut val_ignored = 123
+TEST_BLOCK ;
+print("✓ comments tests passed")
+NY
+}

@@ -1,0 +1,25 @@
+shape user_attached_length_origin {
+  family "language/modules/use"
+  generator "embedded"
+  features ["ny", "test", "abi", "identity"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+layout CounterBox { i64 value }
+impl CounterBox {
+  fn len(*self value) int { 73 }
+  fn long(*self value) f64 { 2.5 }
+  fn append(*self value, int delta) int { 73 + delta }
+}
+def *CounterBox box = malloc(8)
+assert(box.len() == 73, "custom attached length keeps its declaration")
+assert(box.len == 73, "custom attached length property keeps its declaration")
+assert(box.long() == 2.5, "custom attached conversion keeps its float return")
+assert(box.long == 2.5, "custom attached conversion property keeps its float return")
+assert(box.append(9) == 82, "custom attached append keeps its scalar argument")
+free(box)
+0
+NY
+}

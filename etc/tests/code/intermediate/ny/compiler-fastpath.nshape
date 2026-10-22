@@ -1,0 +1,17 @@
+shape test_compiler_fastpath {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+;; flags: -emit-only
+fn _ny_regress_emit_only_self_recursive_fastpath() {
+   _ny_regress_emit_only_self_recursive_fastpath()
+}
+
+fn _ny_regress_emit_only_self_recursive_fastpath_return() int {
+   return _ny_regress_emit_only_self_recursive_fastpath_return()
+}
+NY
+}

@@ -1,0 +1,70 @@
+shape ny_desugar_parity_compound_assignments {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "test", "frontend", "desugar", "parity"]
+  flags_matrix "-no-std --native --run --ny-desugar=c; -no-std --native --run --ny-desugar=ny; -no-std --native-backend=llvm --jit --jit-engine=mcjit --ny-desugar=c; -no-std --native-backend=llvm --jit --jit-engine=mcjit --ny-desugar=ny; -no-std --native-backend=llvm --jit --jit-engine=orc --ny-desugar=c; -no-std --native-backend=llvm --jit --jit-engine=orc --ny-desugar=ny; -std minimal --native --run --ny-desugar=c; -std minimal --native --run --ny-desugar=ny"
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+;; Differential fixture for the compound-assignment desugar pass:
+;; every row of the flags matrix compiles this same source through a
+;; different backend and desugar implementation (--ny-desugar=c keeps the
+;; in-parser C pass, --ny-desugar=ny runs the core.compiler.desugar
+;; library over the raw AST).  Identical expected output across all rows is
+;; the cross-implementation checksum proof.
+use core
+
+mut ident_sum = 0
+def items = [3, 5, 8]
+def counts = {"a": 2}
+
+mut flat = 10
+mut grouped = 4
+mut logical = 1
+mut multi = 100
+
+ident_sum += 1
+ident_sum -= 2
+ident_sum *= 3
+ident_sum /= 1
+ident_sum %= 5
+
+items[0] += 7
+items[1] -= 1
+items[2] *= 2
+counts["a"] += 6
+
+flat += 1 + 2
+grouped *= (2 + 3)
+logical += items[0] == 10 || counts["a"] == 8
+multi += 1 +
+        2
+
+mut deref_target = 40
+def *int p = malloc(8)
+if p == nil {
+  print("DESUGAR_PARITY_ALLOC_FAIL")
+  exit(1)
+}
+*p = 40
+*p += 2
+def deref_value = *p
+free(p)
+
+mut prefix_counter = 6
+++prefix_counter
+
+assert(ident_sum == (0 + 1 - 2) * 3 % 5,
+       "identifier compound operators accumulate in order")
+assert(items[0] == 10 && items[1] == 4 && items[2] == 16,
+       "list index compound assignments store through set_idx")
+assert(counts["a"] == 8, "dictionary index compound assignment stores")
+assert(flat == 13, "the += flatten form reassociates like the C pass")
+assert(grouped == 20, "grouped right-hand sides keep their grouping")
+assert(logical == 2, "logical right-hand sides stay parenthesized")
+assert(multi == 103, "multi-line right-hand sides survive the rewrite")
+assert(deref_value == 42, "deref compound assignment stores through the pointer")
+assert(prefix_counter == 7, "prefix increment stays untouched by the pass")
+print("DESUGAR_PARITY_OK")
+NY
+}

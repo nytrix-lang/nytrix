@@ -3,11 +3,11 @@
 ;; Reference:
 ;; - https://www.rfc-editor.org/rfc/rfc3470.html
 ;; References:
-;; - std.math.parse.data
-;; - std.math.parse
-module std.math.parse.data.xml(parse, encode, Node)
-use std.core
-use std.core.str as str
+;; - core.math.parse.data
+;; - core.math.parse
+module core.math.parse.data.xml(parse, encode, Node)
+use core
+use core.str as str
 
 fn Node(str name, any attr=0, any children=0, any text="") dict {
    "Creates an XML node record."
@@ -58,17 +58,18 @@ fn _parse_attr(str s, int p, int n) list {
          p += 1
          p = _skip_ws(s, p, n)
          def quote = load8(s, p)
+         mut attr_value = ""
          if quote == 34 || quote == 39 {
             p += 1
-            mut vb = Builder(64)
-            while p < n && load8(s, p) != quote {
-               vb = builder_append(vb, chr(load8(s, p)))
-               p += 1
+            def value_start = p
+            def quote_at = str.find_from(s, chr(quote), p)
+            if quote_at >= 0 {
+               attr_value = str.str_slice(s, value_start, quote_at)
+               p = quote_at + 1
+            } else {
+               attr_value = str.str_slice(s, value_start, n)
+               p = n
             }
-            def val = builder_to_str(vb)
-            builder_free(vb)
-            if key.len > 0 { attrs = attrs.set(key, val) }
-            if p < n { p += 1 }
          } else {
             mut vb = Builder(32)
             while p < n {
@@ -79,10 +80,10 @@ fn _parse_attr(str s, int p, int n) list {
                vb = builder_append(vb, chr(c))
                p += 1
             }
-            def val = builder_to_str(vb)
+            attr_value = builder_to_str(vb)
             builder_free(vb)
-            if key.len > 0 { attrs = attrs.set(key, val) }
          }
+         if key.len > 0 { attrs = attrs.set(key, attr_value) }
       } else {
          if key.len > 0 { attrs = attrs.set(key, true) }
       }
@@ -96,7 +97,7 @@ fn parse(any data) any {
    def n = data.len
    mut p = 0
    mut stack = []
-   mut root = 0
+   mut any root = 0
    while p < n {
       p = _skip_ws(data, p, n)
       if p >= n { break }

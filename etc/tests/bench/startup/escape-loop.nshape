@@ -1,0 +1,64 @@
+shape escape-loop {
+  family "perf-real"
+  generator "stress"
+  features ["perf", "escape", "sroa", "alloc", "c-vs-ny", "native", "checksum", "time"]
+  template ny-test-case
+  tier "critical"
+  budget {
+    max_native_c_ratio 16.0
+    max_ny_compile_ms 3000
+  }
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.time
+;; Transient heap object per iteration (SROA / escape-analysis candidate).
+def N = 1000000 * argc()
+def int t0 = ticks()
+mut acc = 0
+mut i = 0
+while i < N {
+   def p = [i]
+   acc += p[0]
+   i += 1
+}
+def int t1 = ticks()
+print("checksum=", acc)
+print("elapsed_ns=", t1 - t0)
+NY
+  source c <<'C'
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+
+static int64_t now_ns(void) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0;
+    return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
+}
+
+int main(int argc, char **argv) {
+    (void)argv;
+    int N = 1000000 * argc;
+    int64_t start = now_ns();
+    volatile int64_t acc = 0;
+    for (int i = 0; i < N; i++) {
+        /* Transient heap box per iteration, matching the Ny side's `[i]`
+         * list allocation: measures allocator/escape behavior, not register
+         * speed. A plain register scalar here would not be equivalent. */
+        int64_t *box = (int64_t *)malloc(sizeof(int64_t));
+        if (!box)
+            return 1;
+        *box = (int64_t)i;
+        acc += *box;
+        free(box);
+    }
+    int64_t end = now_ns();
+    printf("checksum=%lld\n", (long long)acc);
+    if (end <= start) end = start + 1;
+    printf("elapsed_ns=%lld\n", (long long)(end - start));
+    return 0;
+}
+C
+}

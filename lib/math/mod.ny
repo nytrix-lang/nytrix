@@ -1,28 +1,28 @@
 ;; Keywords: math scalar integer float bigint rational complex vector matrix ring finite-field polynomial random statistics simd number-theory
 ;; Numeric types, algorithms, vectors, matrices, parsers, and cryptographic tools.
 ;; References:
-;; - std
+;; - core
 ;; Documentation:
 ;; ## Scope
-;; `std.math` groups numeric representations, algorithms, and parsers. Use the
+;; `core.math` groups numeric representations, algorithms, and parsers. Use the
 ;; narrowest owning namespace so type and performance expectations remain clear.
 ;;
 ;; ## Namespaces
-;; - **Integers and floating point:** `std.math.integer`, `std.math.float`,
-;;   and `std.math.scalar`
-;; - **Big integers and rational values:** `std.math.big` and `std.math.bigrat`
-;; - **Vectors, matrices, quaternions, and statistics:** `std.math.vector`,
-;;   `std.math.matrix`, `std.math.quat`, and `std.math.stat`
-;; - **Data formats and parsers:** `std.math.parse.data`
-;; - **Images, fonts, and 3D assets:** `std.math.parse.img`,
-;;   `std.math.parse.font`, and `std.math.parse.3d`
-;; - **Hashes, ciphers, and number theory:** `std.math.crypto`
+;; - **Integers and floating point:** `core.math.integer`, `core.math.float`,
+;;   and `core.math.scalar`
+;; - **Big integers and rational values:** `core.math.big` and `core.math.bigrat`
+;; - **Vectors, matrices, quaternions, and statistics:** `core.math.vector`,
+;;   `core.math.matrix`, `core.math.quat`, and `core.math.stat`
+;; - **Data formats and parsers:** `core.math.parse.data`
+;; - **Images, fonts, and 3D assets:** `core.math.parse.img`,
+;;   `core.math.parse.font`, and `core.math.parse.3d`
+;; - **Hashes, ciphers, and number theory:** `core.math.crypto`
 ;;
 ;; ## Notes
 ;; Crypto namespaces are focused tools. For example,
-;; `std.math.crypto.factorization.xor` searches factor pairs under an XOR
+;; `core.math.crypto.factorization.xor` searches factor pairs under an XOR
 ;; constraint; it is not a general factorization engine.
-module std.math(backends,
+module core.math(backends,
    PI, PHI, E, TAU, LN2, LN10,
    abs, min, max, pow, mod, clamp, clamp01, sign, sqrt, gcd, lcm, factorial, lerp,
    sin, cos, tan, asin, acos, atan, atan2,
@@ -31,11 +31,11 @@ module std.math(backends,
    Complex, complex, c64, c128, is_complex, real, imag, re, im, conj, abs2,
    ring, Zmod, Integers, ZmodElem, zmod_ring, zmod_elem, is_zmod_ring, is_zmod,
    PolynomialRing, Poly, poly_ring, poly_elem, is_poly_ring, is_poly_elem)
-use std.core
-use std.math.float
-use std.math.ring
-use std.math.backends
-use std.math.complex as cmplx
+use core
+use core.math.float
+use core.math.ring
+use core.math.backends
+use core.math.complex as cmplx
 
 def f64 PI   = 3.14159265358979323846
 def f64 PHI  = 1.61803398874989484820
@@ -44,7 +44,7 @@ def f64 TAU  = 2.0 * PI
 def f64 LN2  = 0.69314718055994530941
 def f64 LN10 = 2.30258509299404568402
 
-fn abs(number x) number {
+fn abs(any x) any {
    "Absolute value."
    if is_float(x) {
       if flt(float(x), float(0)) { return fsub(float(0), float(x)) }
@@ -116,9 +116,12 @@ fn sqrt(number x) f64 {
    __flt_sqrt(float(x))
 }
 
-fn gcd(number a, number b) number {
+fn gcd(int a, int b) int {
    "Greatest common divisor."
-   mut x, y = abs(a), abs(b)
+   mut int x = a
+   mut int y = b
+   if x < 0 { x = 0 - x }
+   if y < 0 { y = 0 - y }
    while y != 0 {
       def t = x % y
       x, y = y, t
@@ -126,10 +129,14 @@ fn gcd(number a, number b) number {
    return x
 }
 
-fn lcm(number a, number b) number {
+fn lcm(int a, int b) int {
    "Least common multiple."
    if a == 0 || b == 0 { return 0 }
-   return abs((a / gcd(a, b)) * b)
+   def divisor = gcd(a, b)
+   def reduced = a / divisor
+   def product = reduced * b
+   if product < 0 { return 0 - product }
+   return product
 }
 
 fn factorial(number n) number {

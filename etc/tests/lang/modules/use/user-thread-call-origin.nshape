@@ -1,0 +1,21 @@
+shape user_thread_call_origin {
+  family "runtime/modules/use"
+  generator "regression"
+  features [module identity thread abi]
+  template ny-test-case
+  flags_matrix "--native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only --native-backend=x86_64"
+  expect compile_and_run
+  source ny <<'NY'
+module project.work(thread_spawn_call, thread_launch_call)
+fn worker(int x) int { x + 1 }
+fn thread_spawn_call(fnptr target, any args) int { 73 }
+fn thread_launch_call(fnptr target, any args) int { 91 }
+#main {
+  assert(project.work.thread_spawn_call(worker, [2]) == 73,
+         "user thread_spawn_call retains its implementation")
+  assert(project.work.thread_launch_call(worker, [2]) == 91,
+         "user thread_launch_call retains its implementation")
+  0
+}
+NY
+}

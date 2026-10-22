@@ -1,0 +1,90 @@
+shape assigned_list_append_preserves_fixed_callback_facts {
+  family "typing/effects"
+  generator "regression"
+  features [ny test typing effects callback list append assigned result fixed index]
+  template ny-test-case
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+@effects(io)
+fn io_callback() int {
+  print("assigned append callback\n")
+  42
+}
+
+@effects(none)
+fn pure_callback() int { 7 }
+
+@effects(io, alloc, read, write)
+fn invoke_assigned_append() int {
+  def callbacks = [pure_callback, io_callback]
+  def extended = callbacks.append(pure_callback)
+  extended[1]()
+}
+
+assert(invoke_assigned_append() == 42,
+       "assigned append results preserve known source slots")
+NY
+}
+
+shape assigned_list_append_rejects_underdeclared_fixed_callback {
+  family "typing/effects"
+  generator "regression"
+  features [error typing effects callback list append assigned result underdeclared]
+  template ny-compile-fail
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_fail
+  expect_message "inferred effects=io|alloc|write"
+  source ny <<'NY'
+use core
+
+@effects(io)
+fn io_callback() int {
+  print("assigned append callback\n")
+  42
+}
+
+@effects(none)
+fn pure_callback() int { 7 }
+
+@effects(alloc, read, write)
+fn invoke_underdeclared_assigned_append() int {
+  def callbacks = [pure_callback, io_callback]
+  def extended = callbacks.append(pure_callback)
+  extended[1]()
+}
+
+invoke_underdeclared_assigned_append()
+NY
+}
+
+shape assigned_list_append_joins_dynamic_callback_effects {
+  family "typing/effects"
+  generator "regression"
+  features [ny test typing effects callback list append dynamic index summary]
+  template ny-test-case
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+@effects(io)
+fn io_callback() int { print("dynamic append callback\n")
+return 42 }
+
+@effects(none)
+fn pure_callback() int { 7 }
+
+@effects(io, alloc, read, write)
+fn invoke_dynamic_after_append(int index) int {
+  def callbacks = [pure_callback, io_callback]
+  def extended = callbacks.append(pure_callback)
+  extended[index]()
+}
+
+assert(invoke_dynamic_after_append(1) == 42,
+       "dynamic lookup includes the appended callback effect row")
+NY
+}

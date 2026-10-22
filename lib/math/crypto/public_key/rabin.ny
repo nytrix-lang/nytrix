@@ -4,18 +4,18 @@
 ;; - M. O. Rabin, Digitalized Signatures and Public-Key Functions as Intractable as Factorization.
 ;; - H. C. Williams, A Modification of the RSA Public-Key Encryption Procedure.
 ;; References:
-;; - std.math.crypto.public_key
-;; - std.math.crypto
-module std.math.crypto.public_key.rabin(
+;; - core.math.crypto.public_key
+;; - core.math.crypto
+module core.math.crypto.public_key.rabin(
    rabin_keygen, rabin_encrypt, rabin_valid_blum_ciphertext,
    rabin_principal_decrypt_blum, rabin_decrypt_candidates,
    rabin_select_candidate, rabin_decrypt_with_padding,
    rabin_sign_int, rabin_verify_int, rabin_sign, rabin_verify
 )
 
-use std.core
-use std.math.nt
-use std.math.crypto.hash (sha256_bytes)
+use core
+use core.math.nt
+use core.math.crypto.hash (sha256_bytes)
 
 fn _rabin_append_unique(list xs, any x) list {
    xs.contains(x) ? xs : xs.append(x)
@@ -180,5 +180,5 @@ fn rabin_verify(str msg, list sig, any n) bool {
    def msg_sig = rabin_sign("hello", key)
    assert(rabin_verify("hello", msg_sig, key.get("n")), "rabin-williams verify string")
    assert(!rabin_verify("world", msg_sig, key.get("n")), "rabin-williams wrong string")
-   print("✓ std.math.crypto.public_key.rabin self-test passed")
+   print("✓ core.math.crypto.public_key.rabin self-test passed")
 }

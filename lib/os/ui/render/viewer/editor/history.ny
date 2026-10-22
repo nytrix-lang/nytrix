@@ -1,15 +1,15 @@
 ;; Keywords: editor history undo redo edit os ui render viewer text
 ;; Undo and redo history storage for editor text edits.
 ;; References:
-;; - std.os.ui.render.viewer.editor.edit
-module std.os.ui.render.viewer.editor.history(
+;; - core.os.ui.render.viewer.editor.edit
+module core.os.ui.render.viewer.editor.history(
    new, snapshot, push, undo, redo,
    insert_text, newline, backspace, delete_char, cut_selection, insert_pair
 )
 
-use std.core
-use std.core.str as str
-use std.os.ui.render.viewer.editor as ed
+use core
+use core.str as str
+use core.os.ui.render.viewer.editor as ed
 
 ;; Creates a new module state with the supplied configuration.
 fn new() dict {

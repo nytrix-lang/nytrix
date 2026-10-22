@@ -1,0 +1,19 @@
+shape test_defer_loop_capture {
+  family "runtime/execution"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+mut i = 0
+mut seen = 0
+while i < 3 {
+   defer { seen = seen * 10 + i }
+   i += 1
+}
+
+assert(seen == 12, "defer captures the registration value in a loop")
+NY
+}

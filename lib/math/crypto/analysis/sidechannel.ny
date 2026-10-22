@@ -1,12 +1,12 @@
 ;; Keywords: analysis side-channel traces math crypto
 ;; Cryptanalysis scoring and recovery routines for side-channel trace thresholding and key-byte recovery.
 ;; References:
-;; - std.math.crypto.analysis
-;; - std.math.crypto
-module std.math.crypto.analysis.sidechannel(trace_column_sums, threshold_trace_bits, bits_lsb_to_bigint, threshold_trace_text, aes_sbox_lsb_leak_count, aes_sbox_lsb_recover_byte, aes_sbox_lsb_recover_key)
-use std.math.bin as bin
-use std.math.nt
-use std.math.crypto.symmetric.aes (aes_sbox)
+;; - core.math.crypto.analysis
+;; - core.math.crypto
+module core.math.crypto.analysis.sidechannel(trace_column_sums, threshold_trace_bits, bits_lsb_to_bigint, threshold_trace_text, aes_sbox_lsb_leak_count, aes_sbox_lsb_recover_byte, aes_sbox_lsb_recover_key)
+use core.math.bin as bin
+use core.math.nt
+use core.math.crypto.symmetric.aes (aes_sbox)
 
 fn trace_column_sums(list traces) list {
    "Return per-column sums for a rectangular list of numeric traces."
@@ -69,7 +69,7 @@ fn aes_sbox_lsb_leak_count(list plaintext, list key) int {
    mut count = 0
    mut i = 0
    while i < n {
-      count += S[(plaintext[i] ^^ key[i]) & 255] & 1
+      count += S[(plaintext[i] ^ key[i]) & 255] & 1
       i += 1
    }
    count
@@ -91,7 +91,7 @@ fn aes_sbox_lsb_recover_byte(list leaks) int {
       mut ok = true
       mut p = 0
       while p < 256 {
-         if (leaks[p] - base) != (S[(p ^^ k) & 255] & 1) { ok = false }
+         if (leaks[p] - base) != (S[(p ^ k) & 255] & 1) { ok = false }
          p += 1
       }
       if ok { return k }
@@ -121,5 +121,5 @@ fn aes_sbox_lsb_recover_key(list leak_rows) list {
    assert(trace_column_sums(traces) == [75, 420, 480, 120], "trace column sums")
    assert(threshold_trace_bits(traces, 120) == [0, 1, 1, 0], "threshold trace bits")
    assert(bits_lsb_to_bigint([1, 0, 1, 1]) == Z(13), "lsb bit packing")
-   print("✓ std.math.crypto.analysis.sidechannel self-test passed")
+   print("✓ core.math.crypto.analysis.sidechannel self-test passed")
 }

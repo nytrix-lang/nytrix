@@ -13,30 +13,27 @@ through channels and queues instead of sharing mutable state between threads.
 | Own a raw thread with a handle | `thread_spawn` + `thread_join` |
 | Pass values between tasks | `channel` + `chan_send` / `chan_recv` |
 | Protect shared mutable state | `mutex_new` / `mutex_lock` / `mutex_unlock` |
-| Atomic counters and flags | `atomic_i64` family in `std.os.atomic` |
+| Atomic counters and flags | `atomic_i64` family in `core.os.atomic` |
 
 ## Parallel map
 
-`std.os.parallel` maps a typed callback over a list with a bounded worker set:
+`core.os.parallel` maps a typed callback over a list with a bounded worker set:
 
 ```ny
-use std.core
-use std.os.parallel
+use core
+use core.os.parallel
 
 fn twice(int x) int { x * 2 }
 assert(parallel_map([1, 2, 3], twice) == [2, 4, 6], "parallel map")
 ```
 
-Keep the callback side-effect free. `parallel_map_indexed` also passes the
-index when the result depends on position.
-
 ## Async tasks
 
-`std.os.async` starts and joins units of work:
+`core.os.async` starts and joins units of work:
 
 ```ny
-use std.core
-use std.os.async as a
+use core
+use core.os.async as a
 
 def t1 = a.async(fn() { 21 + 21 })
 def t2 = a.async(fn() { 40 + 2 })
@@ -50,8 +47,8 @@ def done = a.await_all([t1, t2])
 Own a thread with a handle and join for its result:
 
 ```ny
-use std.core
-use std.os.thread
+use core
+use core.os.thread
 
 fn worker(any arg) any { arg }
 def handle = thread_spawn(worker, "ok")
@@ -66,7 +63,7 @@ A channel passes values between producers and consumers. Capacity `0` is
 unbounded:
 
 ```ny
-use std.core
+use core
 
 def ch = channel(4)
 assert(chan_send(ch, "ny"), "send")
@@ -80,21 +77,19 @@ count.
 ## Queues
 
 `queue`, `queue_push`, `queue_pop`, `queue_try_pop`, `queue_peek`, `queue_len`,
-and `queue_empty` cover FIFO handoff in `std.core`. Use a queue when items are
+and `queue_empty` cover FIFO handoff in `core`. Use a queue when items are
 produced and consumed in order.
 
 ## Shared state
 
 Protect shared mutable state with a mutex:
 
-```ny
-use std.core
-use std.os.thread
-
-mut m = thread.mutex_new()
-thread.mutex_lock(m)
-;; guarded section
-thread.mutex_unlock(m)
+```text
+mutex_new()
+mutex_lock(m)
+; guarded access to shared state
+mutex_unlock(m)
+mutex_free(m)
 ```
 
 Free mutexes with `thread.mutex_free(m)`. Prefer channels and merged results
@@ -103,7 +98,7 @@ the same slot is live.
 
 ## Atomic values
 
-`std.os.atomic` exports `atomic_i64` with `load`, `store`, `add`, `sub`,
+`core.os.atomic` exports `atomic_i64` with `load`, `store`, `add`, `sub`,
 `exchange`, and `compare_exchange`, plus `free`. Use an atomic for a single
 counter or flag that many threads touch.
 
@@ -117,5 +112,5 @@ rewrite (see [Performance](performance.md)).
 ## Related
 
 - [Runtime: concurrency](../spec/runtime.md#concurrency)
-- [Effects](effects.md)
+- [Effects](effect.md)
 - [Cookbook](cookbook.md)

@@ -4,9 +4,9 @@
 ;; References:
 ;; - The ROCA paper: "The Return of Coppersmith's Attack: Practical
 ;;   Factorization of Widely Used RSA Moduli".
-module std.math.crypto.factorization.roca(ROCA_E, roca_prime_set, roca_prime_power_divisors, roca_multiplicative_order, roca_compute_max_M, roca_greedy_find_M, roca_discrete_log, roca_check_prime, roca_factor, roca_factor_with_params, roca_factor_with_prime_info, roca_detect, coppersmith_approximation)
-use std.math.nt
-use std.math.scalar (log2)
+module core.math.crypto.factorization.roca(ROCA_E, roca_prime_set, roca_prime_power_divisors, roca_multiplicative_order, roca_compute_max_M, roca_greedy_find_M, roca_discrete_log, roca_check_prime, roca_factor, roca_factor_with_params, roca_factor_with_prime_info, roca_detect, coppersmith_approximation)
+use core.math.nt
+use core.math.scalar (log2)
 
 def ROCA_E = 65537
 

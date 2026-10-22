@@ -1,0 +1,100 @@
+shape expression_tree {
+  family "perf-real"
+  generator "stress"
+  features ["perf", "tree", "interpreter", "recursion", "c-vs-ny", "checksum", "time"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.time
+use core.tbuf
+;; Build a compact full expression tree, then interpret nonlinear operations
+;; repeatedly; modulo bounds the intermediate values independently of depth.
+fn eval(ptr tags, ptr values, int node, int leaf_base) int {
+   if node >= leaf_base { return i64buf_load(values, node) }
+   def int left = node * 2 + 1
+   def int right = left + 1
+   def int left_value = eval(tags, values, left, leaf_base)
+   def int right_value = eval(tags, values, right, leaf_base)
+   if i64buf_load(tags, node) == 1 {
+      return (left_value + right_value) % 97
+   }
+   (left_value * right_value) % 97
+}
+def int leaf_base = 1023
+def int node_count = leaf_base * 2 + 1
+def int seed = argc() * 7 + 3
+def tags = i64buf_new(node_count)
+def values = i64buf_new(node_count)
+mut int node = 0
+while node < node_count {
+   if node < leaf_base {
+      i64buf_store(tags, node, node % 2 + 1)
+   } else {
+      i64buf_store(values, node, (node * 13 + seed) % 17)
+   }
+   node += 1
+}
+def int t0 = ticks()
+mut int checksum = 0
+mut int run = 0
+while run < 4096 {
+   i64buf_store(values, leaf_base + (run % (node_count - leaf_base)),
+                (run * 7 + seed) % 17)
+   checksum += eval(tags, values, 0, leaf_base)
+   run += 1
+}
+def int t1 = ticks()
+print("checksum=", checksum)
+print("elapsed_ns=", t1 - t0)
+NY
+  source c <<'C'
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+
+enum { LEAF_BASE = 1023, NODE_COUNT = LEAF_BASE * 2 + 1, RUNS = 4096 };
+
+static int64_t now_ns(void) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0;
+    return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
+}
+
+static int64_t eval(const int64_t *tags, const int64_t *values, int node) {
+    if (node >= LEAF_BASE) return values[node];
+    int left = node * 2 + 1;
+    int right = left + 1;
+    int64_t left_value = eval(tags, values, left);
+    int64_t right_value = eval(tags, values, right);
+    if (tags[node] == 1) return (left_value + right_value) % 97;
+    return (left_value * right_value) % 97;
+}
+
+int main(int argc, char **argv) {
+    (void)argv;
+    int seed = argc * 7 + 3;
+    int64_t *tags = calloc(NODE_COUNT, sizeof(*tags));
+    int64_t *values = calloc(NODE_COUNT, sizeof(*values));
+    if (!tags || !values) return 2;
+    for (int node = 0; node < NODE_COUNT; ++node) {
+        if (node < LEAF_BASE) tags[node] = node % 2 + 1;
+        else values[node] = (node * 13 + seed) % 17;
+    }
+    int64_t start = now_ns();
+    int64_t checksum = 0;
+    for (int run = 0; run < RUNS; ++run) {
+        values[LEAF_BASE + run % (NODE_COUNT - LEAF_BASE)] = (run * 7 + seed) % 17;
+        checksum += eval(tags, values, 0);
+    }
+    int64_t end = now_ns();
+    free(values);
+    free(tags);
+    printf("checksum=%lld\n", (long long)checksum);
+    if (end <= start) end = start + 1;
+    printf("elapsed_ns=%lld\n", (long long)(end - start));
+    return 0;
+}
+C
+}

@@ -1,0 +1,30 @@
+shape ownership_allowance_potentially_throwing_try_reassignment_fails_closed {
+  family "compiler-errors/ownership"
+  generator "error"
+  features [error ownership allowance try reassignment potentially throwing inconclusive negative]
+  template ny-compile-fail
+  flags "--ownership-strict"
+  expect compile_fail
+  expect_message "cannot validate ownership allowance"
+  source ny <<'NY'
+use core
+
+fn maybe_throw(int value) int {
+  if value > 0 { return value }
+  assert(false, "throw")
+  0
+}
+
+@allowance(x, [0,1])
+fn update(int x) int {
+  try {
+    x = maybe_throw(x)
+  } catch _ {
+    x = 8
+  }
+  0
+}
+
+update(3)
+NY
+}

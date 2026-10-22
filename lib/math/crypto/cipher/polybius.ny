@@ -5,11 +5,11 @@
 ;; - https://en.wikipedia.org/wiki/Polybius_square
 ;; - https://en.wikipedia.org/wiki/ADFGVX_cipher
 ;; References:
-;; - std.math.crypto.cipher
-;; - std.math.crypto.analysis
-module std.math.crypto.cipher.polybius(polybius_decode_pair, polybius_decode_text, polybius_encode_char, polybius_encode_text, polybius_make_grid)
-use std.core
-use std.core.str
+;; - core.math.crypto.cipher
+;; - core.math.crypto.analysis
+module core.math.crypto.cipher.polybius(polybius_decode_pair, polybius_decode_text, polybius_encode_char, polybius_encode_text, polybius_make_grid)
+use core
+use core.str
 
 fn _pchar(str text, int i) str { utf8_slice(text, i, i + 1, 1) }
 
@@ -123,5 +123,5 @@ fn polybius_decode_text(str text, str grid, int row_min=49, int row_max=53, int 
    assert(grid6 == "SECRTABDFGHIJKLMNOPQUVWXYZ0123456789", "keyed 6x6 grid")
    assert(polybius_encode_text("A9Z", grid6, "123456", "123456", "-", 6) == "16-66-52", "6x6 encode")
    assert(polybius_decode_text("11-66,52", grid6, 49, 54, 49, 54, 6) == "S9Z", "6x6 decode")
-   print("✓ std.math.crypto.cipher.polybius self-test passed")
+   print("✓ core.math.crypto.cipher.polybius self-test passed")
 }

@@ -3,11 +3,11 @@
 ;; - https://crypto.stanford.edu/~dabo/pubs/papers/dhmsb.pdf
 ;; - https://cacr.uwaterloo.ca/hac/about/chap3.pdf
 ;; References:
-;; - std.math.crypto
-module std.math.crypto.hnp(hnp, hnp_centered_mod, hnp_leak_bound, hnp_embedding, hnp_default_sample_counts, hnp_partition_samples, hnp_bound_constraint, hnp_replace_samples, hnp_prescreen_target, hnp_lsb_lattice_eliminate_alpha, hnp_lsb_lattice_increase_volume, hnp_alpha_from_target, hnp_check_alpha, hnp_linear_predicate_eliminate_alpha, hnp_recover, hnp_lattice, hnp_recover_x, hnp_extract_x)
-use std.core
-use std.math.nt
-use std.math.crypto.hnp.hnp
+;; - core.math.crypto
+module core.math.crypto.hnp(hnp, hnp_centered_mod, hnp_leak_bound, hnp_embedding, hnp_default_sample_counts, hnp_partition_samples, hnp_bound_constraint, hnp_replace_samples, hnp_prescreen_target, hnp_lsb_lattice_eliminate_alpha, hnp_lsb_lattice_increase_volume, hnp_alpha_from_target, hnp_check_alpha, hnp_linear_predicate_eliminate_alpha, hnp_recover, hnp_lattice, hnp_recover_x, hnp_extract_x)
+use core
+use core.math.nt
+use core.math.crypto.hnp.hnp
 
 #main {
    def q = Z(101)
@@ -23,5 +23,5 @@ use std.math.crypto.hnp.hnp
    assert(counts[0] == 16, "hnp_default_sample_counts lattice count")
    def groups = hnp_partition_samples([[1, 2], [3, 4], [5, 6], [7, 8]], counts)
    assert(groups.len == 4, "hnp_partition_samples 4 groups")
-   print("✓ std.math.crypto.hnp self-test passed")
+   print("✓ core.math.crypto.hnp self-test passed")
 }

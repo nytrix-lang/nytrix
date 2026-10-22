@@ -5,10 +5,10 @@
 ;; - https://cacr.uwaterloo.ca/hac/about/chap8.pdf
 ;; - https://crypto.stanford.edu/~dabo/pubs/papers/RSA-survey.pdf
 ;; References:
-;; - std.math.crypto.factorization
-;; - std.math.crypto
-module std.math.crypto.factorization.known_phi(factor_from_phi, factor_from_multiple_phi, factor_from_phi_multi, factor_from_phi_with_e_d, recover_phi_from_d, solve_quadratic_roots)
-use std.math.nt
+;; - core.math.crypto.factorization
+;; - core.math.crypto
+module core.math.crypto.factorization.known_phi(factor_from_phi, factor_from_multiple_phi, factor_from_phi_multi, factor_from_phi_with_e_d, recover_phi_from_d, solve_quadratic_roots)
+use core.math.nt
 
 fn solve_quadratic_roots(any sum_pq, any prod_pq) any {
    "Solve x^2 - sum_pq*x + prod_pq = 0 and return [r1, r2].
@@ -189,5 +189,5 @@ fn recover_phi_from_d(any n, any e, any d) any {
    assert(solve_quadratic_roots(p + q, p * q) == [p, q], "quadratic roots")
    assert(factor_from_phi_with_e_d(n, e, d) == [q, p], "factor from e d")
    assert(recover_phi_from_d(n, e, d) == phi, "recover phi")
-   print("✓ std.math.crypto.factorization.known_phi self-test passed")
+   print("✓ core.math.crypto.factorization.known_phi self-test passed")
 }

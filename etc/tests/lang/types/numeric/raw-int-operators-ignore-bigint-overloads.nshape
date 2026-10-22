@@ -1,0 +1,23 @@
+shape raw_integer_operators_keep_the_int_overload {
+  family "typing/operators"
+  generator "regression"
+  features ["ny", "test", "types", "operators", "integer", "bigint"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.math.big
+
+fn raw_sum(int left, int right) int { return left + right }
+fn raw_shift(int value) int { return value >> 8 }
+fn raw_mask(int value) int { return value & 255 }
+
+assert(raw_sum(19, 23) == 42, "raw int addition is not routed to BigInt")
+assert(raw_shift(0x12345678) == 0x123456,
+       "raw int right shift is not routed to BigInt")
+assert(raw_mask(0x12345678) == 0x78,
+       "raw int mask is not routed to BigInt")
+print("RAW_INTEGER_OPERATOR_ABI_OK")
+NY
+}

@@ -3,13 +3,13 @@
 ;; Reference:
 ;; - https://www.rfc-editor.org/rfc/rfc1320
 ;; References:
-;; - std.math.crypto.hash
-;; - std.math.crypto
-module std.math.crypto.hash.ntlm(md4_bytes, md4_hex, lm_hash, ntlm_hash, dcc_hash, dcc2_hash)
-use std.core
-use std.math.bin (zero_list)
-use std.math.crypto.symmetric.des
-use std.core.str as str
+;; - core.math.crypto.hash
+;; - core.math.crypto
+module core.math.crypto.hash.ntlm(md4_bytes, md4_hex, lm_hash, ntlm_hash, dcc_hash, dcc2_hash)
+use core
+use core.math.bin (zero_list)
+use core.math.crypto.symmetric.des
+use core.str as str
 
 fn _u32(int x) int { x & 4294967295 }
 
@@ -17,7 +17,7 @@ fn _and32(int a, int b) int { (a & 4294967295) & (b & 4294967295) }
 
 fn _or32(int a, int b) int { (a & 4294967295) | (b & 4294967295) }
 
-fn _xor32(int a, int b) int { (a & 4294967295) ^^ (b & 4294967295) }
+fn _xor32(int a, int b) int { (a & 4294967295) ^ (b & 4294967295) }
 
 fn _not32(int x) int { 4294967295 - (x & 4294967295) }
 
@@ -53,9 +53,9 @@ fn _sha1_bytes(list data) list {
    mut h0, h1 = 0x67452301, 0xefcdab89
    mut h2, h3 = 0x98badcfe, 0x10325476
    mut h4 = 0xc3d2e1f0
-   ;; Use a typed int list so 32-bit schedule words store and retrieve
-   ;; correctly; zero_list is byte-backed and silently truncates values.
-   mut list<int> w = list(80)
+   ;; The plain dynamic list stores and retrieves full-width schedule words;
+   ;; no typed list signature is needed.
+   mut w = list(80)
    mut off = 0
    while off < msg.len {
       i = 0
@@ -161,8 +161,8 @@ fn _hmac_sha1_pads(list key) list {
    i = 0
    while i < 64 {
       def kb = __load_item_fast(k, i)
-      __store_item_fast(ipad, i, kb ^^ 0x36)
-      __store_item_fast(opad, i, kb ^^ 0x5c)
+      __store_item_fast(ipad, i, kb ^ 0x36)
+      __store_item_fast(opad, i, kb ^ 0x5c)
       i += 1
    }
    [ipad, opad]
@@ -172,7 +172,7 @@ fn _xor_bytes(list a, list b) list {
    mut out = zero_list(a.len)
    mut i = 0
    while i < a.len {
-      __store_item_fast(out, i, __load_item_fast(a, i) ^^ __load_item_fast(b, i))
+      __store_item_fast(out, i, __load_item_fast(a, i) ^ __load_item_fast(b, i))
       i += 1
    }
    out
@@ -302,16 +302,16 @@ fn md4_bytes(list data) list {
             if r == 0 { xi = 3 } elif r == 1 { xi = 11 } elif r == 2 { xi = 7 } else { xi = 15 }
          }
          if r == 0 {
-            def h = (B ^^ C ^^ D) & 4294967295
+            def h = (B ^ C ^ D) & 4294967295
             A = _rotl32((A + h + __load_item_fast(X, xi) + 0x6ed9eba1) & 4294967295, 3)
          } elif r == 1 {
-            def h = (A ^^ B ^^ C) & 4294967295
+            def h = (A ^ B ^ C) & 4294967295
             D = _rotl32((D + h + __load_item_fast(X, xi) + 0x6ed9eba1) & 4294967295, 9)
          } elif r == 2 {
-            def h = (D ^^ A ^^ B) & 4294967295
+            def h = (D ^ A ^ B) & 4294967295
             C = _rotl32((C + h + __load_item_fast(X, xi) + 0x6ed9eba1) & 4294967295, 11)
          } else {
-            def h = (C ^^ D ^^ A) & 4294967295
+            def h = (C ^ D ^ A) & 4294967295
             B = _rotl32((B + h + __load_item_fast(X, xi) + 0x6ed9eba1) & 4294967295, 15)
          }
          i += 1
@@ -427,5 +427,5 @@ fn dcc2_hash(str password, str username, int iterations=10240) str {
    assert(md4_hex([]) == "31d6cfe0d16ae931b73c59d7e0c089c0", "MD4 empty vector")
    assert(md4_hex("abc".to_bytes) == "a448017aaf21d8525fc10ae87aa6729d", "MD4 abc vector")
    assert(ntlm_hash("password") == "8846f7eaee8fb117ad06bdd830b7586c", "NTLM password vector")
-   print("✓ std.math.crypto.hash.ntlm self-test passed")
+   print("✓ core.math.crypto.hash.ntlm self-test passed")
 }

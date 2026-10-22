@@ -1,0 +1,85 @@
+shape test_imported_global_not_module {
+  family "native/typing"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.ui.render.viewer.engine.state
+
+;; A wildcard-imported value must remain a value when it is followed by a
+;; dynamic member call.  Its qualified export path is not a module path.
+fn read_scene_value() any {
+   if is_dict(active_scene) { return active_scene.get("name", "") }
+   return ""
+}
+
+fn update_imported_camera() f64 {
+   _cam_px = 41.0
+   return _cam_px
+}
+
+assert(read_scene_value() == "")
+assert(_cam_px == 0.0)
+assert(update_imported_camera() == 41.0)
+assert(_cam_px == 41.0)
+print("IMPORTED-GLOBAL-NOT-MODULE-OK")
+NY
+}
+
+shape mutable_module_argument_tracks_updates {
+  family "native/typing"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+module renderer_state {
+   mut backend = 2
+   mut flags = 0
+   mut visible = false
+
+   fn select(int value, int mask) bool {
+      backend = value
+      flags = mask
+      def hide = (mask & 512) != 0
+      def gl = value == 1
+      def auto_show = !hide && (gl || value == 2)
+      visible = auto_show
+      true
+   }
+
+   fn backend_name(int value) str {
+      if value == 1 { return "opengl" }
+      if value == 2 { return "vulkan" }
+      "none"
+   }
+
+   fn name() str { backend_name(backend) }
+   fn mask(int value) int { value }
+   fn active_flags() int { mask(flags | 8) }
+   fn is_visible() bool { visible }
+   fn is_hidden() bool { !visible }
+}
+
+assert(renderer_state.name() == "vulkan")
+assert(renderer_state.is_hidden())
+renderer_state.select(1, 5)
+assert(renderer_state.name() == "opengl")
+assert(renderer_state.backend == 1)
+assert(renderer_state.mask(renderer_state.backend) == 1)
+assert(renderer_state.active_flags() == 13)
+assert(renderer_state.is_visible())
+assert(!renderer_state.is_hidden())
+renderer_state.select(0, 2)
+assert(renderer_state.name() == "none")
+assert(renderer_state.backend == 0)
+assert(renderer_state.active_flags() == 10)
+assert(!renderer_state.is_visible())
+assert(renderer_state.is_hidden())
+print("MUTABLE-MODULE-ARGUMENT-OK")
+NY
+}

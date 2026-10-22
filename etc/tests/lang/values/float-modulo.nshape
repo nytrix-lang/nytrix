@@ -1,0 +1,18 @@
+shape test_float_modulo {
+  family "runtime/values"
+  generator "embedded"
+  features ["ny", "test", "native", "regression"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+fn modulo(number value, number divisor) number {
+   value % divisor
+}
+
+assert(modulo(5.5, 2.0) == 1.5, "floating remainder uses numeric modulo")
+print("ok floating modulo")
+NY
+}

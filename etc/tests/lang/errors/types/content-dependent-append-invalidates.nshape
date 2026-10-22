@@ -1,0 +1,26 @@
+shape mutable_aggregate_negative_index_content_predicate_expires_after_append {
+  family "compiler-errors/types"
+  generator "error"
+  features [error typing refinement mutable aggregate content append negative index invalidation negative]
+  template ny-compile-fail
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  expect compile_fail
+  expect_message "refinement obligation"
+  source ny <<'NY'
+use core
+
+refine PositiveLast = list where(items) { items[-1] == 5 }
+fn require_positive_last(PositiveLast items) int { return items.len }
+
+fn invalid_after_append() int {
+  mut list<int> items = [5]
+  if PositiveLast(items) {
+    items = append(items, 99)
+    return require_positive_last(items)
+  }
+  0
+}
+
+invalid_after_append()
+NY
+}

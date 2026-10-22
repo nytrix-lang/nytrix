@@ -11,7 +11,7 @@
 
 #include "base/options.h"
 #include "base/util.h"
-#include "code/wire/build.h"
+#include "base/process.h"
 #include <errno.h>
 #include <stdio.h>
 #include <string.h>
@@ -24,20 +24,17 @@
 #include <poll.h>
 #include <signal.h>
 #include <sys/resource.h>
-#include <unistd.h>
 #include <sys/wait.h>
+#include <unistd.h>
 #endif
 
 /*
  * Check whether any safe-run limit is actually configured.
  */
 static bool ny_safe_run_any_set(const ny_safe_run_t *sr) {
-  return sr->cpu_seconds > 0 || sr->wall_seconds > 0 ||
-         sr->max_rss_bytes > 0 ||
+  return sr->cpu_seconds > 0 || sr->wall_seconds > 0 || sr->max_rss_bytes > 0 ||
          sr->max_files > 0 || sr->max_processes > 0 ||
-         sr->max_output_bytes > 0 ||
-         sr->telemetry ||
-         sr->contain_process_group;
+         sr->max_output_bytes > 0 || sr->telemetry || sr->contain_process_group;
 }
 
 #ifdef _WIN32
@@ -104,9 +101,7 @@ static bool ny_win_cmd_arg(char **buf, size_t *len, size_t *cap,
   return ny_win_cmd_append(buf, len, cap, "\"", 1);
 }
 
-static uint64_t ny_win_now_ms(void) {
-  return (uint64_t)GetTickCount64();
-}
+static uint64_t ny_win_now_ms(void) { return (uint64_t)GetTickCount64(); }
 
 static void ny_win_forward_pipe(HANDLE pipe, HANDLE dst, uint64_t limit,
                                 uint64_t *total, bool *breached) {
@@ -141,8 +136,10 @@ int ny_safe_run_spawn(const ny_safe_run_t *sr, const char *const argv[],
   if (!argv || !argv[0])
     return 127;
   if (sr->max_files > 0)
-    fprintf(stderr, "safe-run: Windows has no Job Object open-file limit; "
-                    "files:%d is not active\n", sr->max_files);
+    fprintf(stderr,
+            "safe-run: Windows has no Job Object open-file limit; "
+            "files:%d is not active\n",
+            sr->max_files);
 
   char *cmd = NULL;
   size_t cmd_len = 0, cmd_cap = 0;
@@ -173,8 +170,8 @@ int ny_safe_run_spawn(const ny_safe_run_t *sr, const char *const argv[],
   si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
   si.hStdOutput = out_w;
   si.hStdError = err_w;
-  BOOL created = CreateProcessA(NULL, cmd, NULL, NULL, TRUE,
-                                CREATE_SUSPENDED, NULL, NULL, &si, &pi);
+  BOOL created = CreateProcessA(NULL, cmd, NULL, NULL, TRUE, CREATE_SUSPENDED,
+                                NULL, NULL, &si, &pi);
   free(cmd);
   CloseHandle(out_w);
   CloseHandle(err_w);
@@ -201,15 +198,19 @@ int ny_safe_run_spawn(const ny_safe_run_t *sr, const char *const argv[],
     info.ProcessMemoryLimit = (SIZE_T)sr->max_rss_bytes;
     info.BasicLimitInformation.LimitFlags |= JOB_OBJECT_LIMIT_PROCESS_MEMORY;
   }
-  if (!job || !SetInformationJobObject(job, JobObjectExtendedLimitInformation,
-                                       &info, sizeof(info)) ||
+  if (!job ||
+      !SetInformationJobObject(job, JobObjectExtendedLimitInformation, &info,
+                               sizeof(info)) ||
       !AssignProcessToJobObject(job, pi.hProcess)) {
-    fprintf(stderr, "safe-run: could not configure Windows Job Object "
-                    "(error %lu)\n", (unsigned long)GetLastError());
+    fprintf(stderr,
+            "safe-run: could not configure Windows Job Object "
+            "(error %lu)\n",
+            (unsigned long)GetLastError());
     TerminateProcess(pi.hProcess, 125);
     CloseHandle(pi.hThread);
     CloseHandle(pi.hProcess);
-    if (job) CloseHandle(job);
+    if (job)
+      CloseHandle(job);
     CloseHandle(out_r);
     CloseHandle(err_r);
     return 125;
@@ -250,15 +251,18 @@ int ny_safe_run_spawn(const ny_safe_run_t *sr, const char *const argv[],
   CloseHandle(pi.hProcess);
   CloseHandle(job);
   if (wall_breach) {
-    fprintf(stderr, "safe-run: %s exceeded wall-time limit %d seconds; "
-                    "raise wall:<seconds> or disable --safe-run\n",
+    fprintf(stderr,
+            "safe-run: %s exceeded wall-time limit %d seconds; "
+            "raise wall:<seconds> or disable --safe-run\n",
             workload ? workload : "workload", sr->wall_seconds);
     return 124;
   }
   if (output_breach) {
-    fprintf(stderr, "safe-run: %s exceeded output limit %llu bytes "
-                    "(observed at least %llu); raise output:<bytes> or disable "
-                    "--safe-run\n", workload ? workload : "workload",
+    fprintf(stderr,
+            "safe-run: %s exceeded output limit %llu bytes "
+            "(observed at least %llu); raise output:<bytes> or disable "
+            "--safe-run\n",
+            workload ? workload : "workload",
             (unsigned long long)sr->max_output_bytes,
             (unsigned long long)output);
     return 125;
@@ -271,8 +275,9 @@ int ny_safe_run_call(const ny_safe_run_t *sr, ny_safe_run_child_fn fn,
   (void)sr;
   (void)fn;
   (void)ctx;
-  fprintf(stderr, "safe-run: %s uses an in-process JIT callback; Windows Job "
-                  "Object containment requires a helper process\n",
+  fprintf(stderr,
+          "safe-run: %s uses an in-process JIT callback; Windows Job "
+          "Object containment requires a helper process\n",
           workload ? workload : "JIT workload");
   return 125;
 }
@@ -296,8 +301,9 @@ int ny_safe_run_apply_limits(const ny_safe_run_t *sr) {
         want = rl.rlim_max;
       rl.rlim_cur = want;
       if (setrlimit(RLIMIT_CPU, &rl) != 0) {
-        fprintf(stderr, "safe-run: warning: could not set CPU time limit "
-                        "to %d seconds: %s\n",
+        fprintf(stderr,
+                "safe-run: warning: could not set CPU time limit "
+                "to %d seconds: %s\n",
                 sr->cpu_seconds, strerror(errno));
         failures++;
       }
@@ -319,13 +325,15 @@ int ny_safe_run_apply_limits(const ny_safe_run_t *sr) {
         want = rl.rlim_max;
       rl.rlim_cur = want;
       if (setrlimit(RLIMIT_AS, &rl) != 0) {
-        fprintf(stderr, "safe-run: warning: could not set address-space limit "
-                        "to %llu bytes: %s\n",
+        fprintf(stderr,
+                "safe-run: warning: could not set address-space limit "
+                "to %llu bytes: %s\n",
                 (unsigned long long)sr->max_rss_bytes, strerror(errno));
         failures++;
       }
     } else {
-      fprintf(stderr, "safe-run: warning: could not get address-space limit: %s\n",
+      fprintf(stderr,
+              "safe-run: warning: could not get address-space limit: %s\n",
               strerror(errno));
       failures++;
     }
@@ -342,13 +350,15 @@ int ny_safe_run_apply_limits(const ny_safe_run_t *sr) {
         want = rl.rlim_max;
       rl.rlim_cur = want;
       if (setrlimit(RLIMIT_NOFILE, &rl) != 0) {
-        fprintf(stderr, "safe-run: warning: could not set file descriptor limit "
-                        "to %d: %s\n",
+        fprintf(stderr,
+                "safe-run: warning: could not set file descriptor limit "
+                "to %d: %s\n",
                 sr->max_files, strerror(errno));
         failures++;
       }
     } else {
-      fprintf(stderr, "safe-run: warning: could not get file descriptor limit: %s\n",
+      fprintf(stderr,
+              "safe-run: warning: could not get file descriptor limit: %s\n",
               strerror(errno));
       failures++;
     }
@@ -367,8 +377,9 @@ int ny_safe_run_apply_limits(const ny_safe_run_t *sr) {
         want = rl.rlim_max;
       rl.rlim_cur = want;
       if (setrlimit(RLIMIT_NPROC, &rl) != 0) {
-        fprintf(stderr, "safe-run: warning: could not set process limit "
-                        "to %d: %s\n",
+        fprintf(stderr,
+                "safe-run: warning: could not set process limit "
+                "to %d: %s\n",
                 sr->max_processes, strerror(errno));
         failures++;
       }
@@ -427,8 +438,7 @@ static size_t ny_safe_run_proc_tree(pid_t root, ny_safe_proc_t *items,
     if (fgets(line, sizeof(line), f)) {
       char *tail = strrchr(line, ')');
       long ppid = 0;
-      if (tail && tail[1] == ' ' &&
-          sscanf(tail + 2, "%*c %ld", &ppid) == 1) {
+      if (tail && tail[1] == ' ' && sscanf(tail + 2, "%*c %ld", &ppid) == 1) {
         items[len].pid = (pid_t)strtol(de->d_name, NULL, 10);
         items[len].ppid = (pid_t)ppid;
         items[len].descendant = items[len].pid == root;
@@ -574,13 +584,11 @@ static int ny_safe_run_supervise(pid_t pid, int out_fd, int err_fd,
   uint64_t termination_ms = 0;
   uint64_t seen = 0;
   uint64_t started_ms = ny_safe_run_now_ms();
-  uint64_t deadline_ms =
-      sr && sr->wall_seconds > 0
-          ? started_ms + (uint64_t)sr->wall_seconds * 1000u
-          : 0;
-  int sample_ms = sr && sr->telemetry_interval_ms >= 50
-                      ? sr->telemetry_interval_ms
-                      : 250;
+  uint64_t deadline_ms = sr && sr->wall_seconds > 0
+                             ? started_ms + (uint64_t)sr->wall_seconds * 1000u
+                             : 0;
+  int sample_ms =
+      sr && sr->telemetry_interval_ms >= 50 ? sr->telemetry_interval_ms : 250;
   int warn_window = sr && sr->telemetry_window >= 2 ? sr->telemetry_window : 3;
   uint64_t next_sample_ms = started_ms + (uint64_t)sample_ms;
   uint64_t last_sample_ms = started_ms;
@@ -624,32 +632,30 @@ static int ny_safe_run_supervise(pid_t pid, int out_fd, int err_fd,
                                ? sample.cpu_ticks - previous.cpu_ticks
                                : 0;
       long ticks = sysconf(_SC_CLK_TCK);
-      double cpu_cores = ticks > 0
-                             ? ((double)cpu_delta * 1000.0) /
-                                   ((double)ticks * (double)elapsed)
-                             : 0.0;
+      double cpu_cores = ticks > 0 ? ((double)cpu_delta * 1000.0) /
+                                         ((double)ticks * (double)elapsed)
+                                   : 0.0;
       rss_streak = sr->max_rss_bytes > 0 &&
                            sample.rss_bytes * 100u >= sr->max_rss_bytes * 85u
                        ? rss_streak + 1
                        : 0;
-      cpu_streak = sr->cpu_seconds > 0 && cpu_cores >= 0.90
-                       ? cpu_streak + 1
-                       : 0;
+      cpu_streak =
+          sr->cpu_seconds > 0 && cpu_cores >= 0.90 ? cpu_streak + 1 : 0;
       vm_streak = sr->max_rss_bytes > 0 &&
                           vm_delta * 1000u * 4u >= sr->max_rss_bytes * elapsed
                       ? vm_streak + 1
                       : 0;
-      proc_streak = sr->max_processes > 0 &&
-                            sample.descendants * 100u >=
-                                (unsigned)sr->max_processes * 85u
-                        ? proc_streak + 1
-                        : 0;
-      output_streak = sr->max_output_bytes > 0 &&
-                              output_delta * 1000u * 2u >=
-                                  sr->max_output_bytes * elapsed
-                          ? output_streak + 1
-                          : 0;
-#define NY_SAFE_WARN(streak, warned, ...)                                     \
+      proc_streak =
+          sr->max_processes > 0 &&
+                  sample.descendants * 100u >= (unsigned)sr->max_processes * 85u
+              ? proc_streak + 1
+              : 0;
+      output_streak =
+          sr->max_output_bytes > 0 &&
+                  output_delta * 1000u * 2u >= sr->max_output_bytes * elapsed
+              ? output_streak + 1
+              : 0;
+#define NY_SAFE_WARN(streak, warned, ...)                                      \
   do {                                                                         \
     if (!(warned) && (streak) >= warn_window) {                                \
       fprintf(stderr, __VA_ARGS__);                                            \
@@ -668,12 +674,12 @@ static int ny_safe_run_supervise(pid_t pid, int out_fd, int err_fd,
       NY_SAFE_WARN(vm_streak, vm_warned,
                    "safe-run: warning: sustained virtual-memory growth is "
                    "%llu bytes over %llu ms (allocation-rate proxy)\n",
-                   (unsigned long long)vm_delta,
-                   (unsigned long long)elapsed);
-      NY_SAFE_WARN(proc_streak, proc_warned,
-                   "safe-run: warning: sustained process-group descendant count is "
-                   "%u (limit %d)\n",
-                   sample.descendants, sr->max_processes);
+                   (unsigned long long)vm_delta, (unsigned long long)elapsed);
+      NY_SAFE_WARN(
+          proc_streak, proc_warned,
+          "safe-run: warning: sustained process-group descendant count is "
+          "%u (limit %d)\n",
+          sample.descendants, sr->max_processes);
       NY_SAFE_WARN(output_streak, output_warned,
                    "safe-run: warning: sustained output rate is %.0f bytes/s\n",
                    (double)output_delta * 1000.0 / (double)elapsed);
@@ -695,7 +701,8 @@ static int ny_safe_run_supervise(pid_t pid, int out_fd, int err_fd,
         ssize_t got = read(fds[i].fd, buf, sizeof(buf));
         if (got > 0) {
           size_t emit = (size_t)got;
-          if (sr && sr->max_output_bytes && seen + emit > sr->max_output_bytes) {
+          if (sr && sr->max_output_bytes &&
+              seen + emit > sr->max_output_bytes) {
             emit = seen < sr->max_output_bytes
                        ? (size_t)(sr->max_output_bytes - seen)
                        : 0;
@@ -771,8 +778,8 @@ static int ny_safe_run_supervise(pid_t pid, int out_fd, int err_fd,
     } else if (sr && sr->max_rss_bytes > 0 && peak.vm_bytes > 0 &&
                peak.vm_bytes * 100u >= sr->max_rss_bytes * 90u &&
                (sig == SIGSEGV || sig == SIGABRT || sig == SIGKILL)) {
-      kind = sig == SIGKILL ? "probable OOM kill" :
-                              "address-space limit/allocation failure";
+      kind = sig == SIGKILL ? "probable OOM kill"
+                            : "address-space limit/allocation failure";
       hint = "raise rss:<bytes> or disable --safe-run";
     } else if (sig == SIGKILL) {
       kind = "SIGKILL (OOM status unavailable)";
@@ -781,9 +788,8 @@ static int ny_safe_run_supervise(pid_t pid, int out_fd, int err_fd,
     fprintf(stderr,
             "safe-run: %s terminated by %s, signal %d (peak RSS %lld bytes, "
             "peak VM %llu bytes, descendants %u, output %llu bytes); %s\n",
-            workload, kind, sig, peak_bytes,
-            (unsigned long long)peak.vm_bytes, peak.descendants,
-            (unsigned long long)seen, hint);
+            workload, kind, sig, peak_bytes, (unsigned long long)peak.vm_bytes,
+            peak.descendants, (unsigned long long)seen, hint);
     if (sr && sr->contain_process_group)
       (void)kill(-pid, SIGKILL);
     return 128 + sig;

@@ -17,7 +17,7 @@ typedef struct {
 
 int ny_parallel_threads(void);
 size_t ny_parallel_min_work(void);
-bool ny_parallel_enabled(size_t work_items);
+bool ny_parallel_enabled(size_t count, size_t work_items);
 bool ny_parallel_for(size_t count, size_t work_items, ny_parallel_task_fn fn,
                      void *ctx);
 void ny_parallel_stats(ny_parallel_stats_t *out);

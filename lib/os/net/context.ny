@@ -1,17 +1,17 @@
 ;; Keywords: net context logging color os
 ;; Shared network context and log formatting.
 ;; References:
-;; - std.os.net
-;; - std.os
-module std.os.net.context(
+;; - core.os.net
+;; - core.os
+module core.os.net.context(
    context, set_context, set_default_level, default_level,
    level_value, level_name, timeout_ms, chunk_size,
    color_enabled, paint, log_enabled, log_line
 )
 
-use std.core
-use std.core.str
-use std.os.prim (env)
+use core
+use core.str
+use core.os.prim (env)
 
 mut _default_level_override = ""
 mut _default_timeout_ms = -1
@@ -201,5 +201,5 @@ fn context(any options=0) dict {
    assert_eq(color_enabled(), false, "context color off")
    assert_eq(paint("ny", "cyan", 1), "ny", "paint disabled")
    assert_eq(log_enabled(0, "debug"), true, "debug enabled")
-   print("✓ std.os.net.context self-test passed")
+   print("✓ core.os.net.context self-test passed")
 }

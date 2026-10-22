@@ -1,0 +1,17 @@
+shape comptime_generated_lemma_rejects_false_claim {
+  family "compiler-errors/comptime"
+  generator "error"
+  features ["error", "comptime", "lemma", "proof", "negative"]
+  template ny-compile-fail
+  flags_matrix "--native --run; --native-only; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_fail
+  expect_message "not universally provable"
+  source ny <<'NY'
+use core
+comptime template claim(name, number) {
+   fn lemma ${name}(int x) { x == ${number} }
+}
+comptime emit claim(ident("generated_claim"), 3)
+def proof p = prove(generated_claim(4))
+NY
+}

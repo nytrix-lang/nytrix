@@ -1,0 +1,35 @@
+shape test_loop_overwrite_collapse {
+  family "runtime/execution/native"
+  generator "embedded"
+  features ["ny", "test", "native"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+fn overwritten(int flag) int {
+  mut sum = 0
+  mut i = 0
+  while i < 7 {
+    if flag { sum = i + 10 } else { sum = i * 2 }
+    i += 1
+  }
+  sum * 100 + i
+}
+
+fn zero_trip() int {
+  mut sum = 17
+  mut i = 5
+  while i < 3 {
+    if 1 { sum = i + 10 } else { sum = i * 2 }
+    i += 1
+  }
+  sum * 100 + i
+}
+
+assert(overwritten(1) == 1607, "overwrite loop takes the last true-arm value")
+assert(overwritten(0) == 1207, "overwrite loop takes the last false-arm value")
+assert(zero_trip() == 1705, "zero-trip loop preserves its incoming locals")
+NY
+}

@@ -1,13 +1,13 @@
 ;; Keywords: window input keyboard mouse key os ui
-;; Key normalization and key-chord parsing for std.os.ui input APIs.
+;; Key normalization and key-chord parsing for core.os.ui input APIs.
 ;; References:
-;; - std.os.ui.window.input
-;; - std.os.ui.window
-;; - std.os.ui.window.consts
-module std.os.ui.window.input.key(normalize_key, normalize_mod, mod_bit_for_key, mods_from_key_states, parse_notation)
-use std.core
-use std.core.str
-use std.os.ui.window.consts
+;; - core.os.ui.window.input
+;; - core.os.ui.window
+;; - core.os.ui.window.consts
+module core.os.ui.window.input.key(normalize_key, normalize_mod, mod_bit_for_key, mods_from_key_states, parse_notation)
+use core
+use core.str
+use core.os.ui.window.consts
 
 def _MOD_MASK = MOD_SHIFT | MOD_CONTROL | MOD_ALT | MOD_SUPER | MOD_META
 
@@ -106,7 +106,7 @@ comptime table KeyPrefixMod {
 }
 
 fn normalize_mod(any mod) i32 {
-   "Masks a modifier bitset down to the supported std.os.ui modifier flags."
+   "Masks a modifier bitset down to the supported core.os.ui modifier flags."
    if is_str(mod) { return _prefix_mod(upper(strip(to_str(mod)))) & _MOD_MASK }
    if is_int(mod) || is_float(mod) { return int(mod) & _MOD_MASK }
    0
@@ -233,5 +233,5 @@ fn parse_notation(str notation) list {
    ks = ks.set(KEY_LEFT_ALT, false)
    ks = ks.set("right_alt", true)
    assert(mods_from_key_states(ks) == (MOD_SHIFT | MOD_CONTROL | MOD_ALT), "input key state mods")
-   print("✓ std.os.ui.window.input.key self-test passed")
+   print("✓ core.os.ui.window.input.key self-test passed")
 }

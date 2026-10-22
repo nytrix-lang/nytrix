@@ -1,0 +1,167 @@
+shape powerpc64_portable_text_executes_control_flow_and_compares_i64 {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "test", "powerpc64", "portable-text", "runtime",
+            "control-flow", "ror32"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os (file_remove, file_write, run_capture, temp_dir, pid)
+
+def compiler = env("NYTRIX_NY_FULL_BIN")
+assert(is_str(compiler) && compiler.len > 0,
+       "test runner provides the compiler path")
+def stem = temp_dir() + "/ny-powerpc64-portable-" + to_str(pid())
+fn run_qemu(str qemu, str executable) dict {
+  run_capture(["sh", "-c", "ulimit -c 0; exec \"$@\"", "sh", qemu,
+               executable], [], nil, false)
+}
+def asm_path = stem + ".s"
+def start_path = stem + "-start.s"
+def exe_path = stem
+def start_source =
+  ".text\n.globl _start\n.type _start, @function\n_start:\n" +
+  "  bl rt_main\n  nop\n  li 0, 1\n  sc\n"
+assert(is_ok(file_write(start_path, start_source)),
+       "write PowerPC64 Linux startup wrapper")
+def program =
+  "fn divmod(int value) int { value / 3 * 3 + value % 3 }\n" +
+  "@noinline\nfn integer_ops_check(int left, int right) int {\n" +
+  "  def result = (left + right) + (left - right) + (left * right) +\n" +
+  "               (left & right) + (left | right) + (left ^ right) +\n" +
+  "               (left << 1) + (left >> 1)\n" +
+  "  if result == -142 { 0 } else { 1 }\n" +
+  "}\n" +
+  "fn rotate_check(int value) int {\n" +
+  "  mut word = value & 0xff\n" +
+  "  ((word >> 1) | (word << 63)) >> 63 & 1\n" +
+  "}\n" +
+  "@noinline\nfn rotate_right32_8(int value) int {\n" +
+  "  def word = value & 0xffffffff\n" +
+  "  ((word >> 8) | (word << 24)) & 0xffffffff\n" +
+  "}\n" +
+  "fn memory_roundtrip() int {\n" +
+  "  mut int slot = 40\n" +
+  "  def *int pointer = addr_of(slot)\n" +
+  "  store64_i(pointer, 42)\n" +
+  "  store8(pointer, 42)\n" +
+  "  if load64_i(pointer) == 42 && load8(pointer, 0) == 42 { 42 } else { 0 }\n" +
+  "}\n" +
+  "fn indexed_memory(*int pointer, int value, int index) int {\n" +
+  "  store64_i(pointer, value, index)\n" +
+  "  store8(pointer, value, index)\n" +
+  "  load64_i(pointer, index) + load8(pointer, index)\n" +
+  "}\n" +
+  "fn add_wide_constant(int value) int {\n" +
+  "  1311768467463790320 + value\n" +
+  "}\n" +
+  "fn add_wide_negative(int value) int {\n" +
+  "  -1311768467463790320 + value\n" +
+  "}\n" +
+  "fn choose(int left, int right) int {\n" +
+  "  if left < right { left + right } else { 0 }\n" +
+  "}\n" +
+  "fn is_true(bool value) int { if value { 1 } else { 0 } }\n" +
+  "fn compare_sum(int left, int right) int {\n" +
+  "  is_true(left == right) + is_true(left != right) +\n" +
+  "  is_true(left < right) + is_true(left <= right) +\n" +
+  "  is_true(left > right) + is_true(left >= right)\n" +
+  "}\nchoose(20, 22) + choose(22, 20) + compare_sum(20, 22) +\n" +
+  "compare_sum(22, 20) + compare_sum(22, 22) +\n" +
+  "divmod(20) + divmod(-19) + rotate_check(1) + memory_roundtrip() +\n" +
+  "add_wide_constant(memory_roundtrip()) +\n" +
+  "add_wide_negative(memory_roundtrip()) + integer_ops_check(-13, 5) + " +
+  "(rotate_right32_8(0x0123456789abcd2e) == 0x2e89abcd ? 0 : 1)"
+def emitted = run_capture(
+    [compiler, "--native-backend=powerpc", "--native-only", "-O3", "--nyir-verify",
+     "--emit-asm=" + asm_path, "-no-std", "-emit-only", "-e", program],
+    [], nil, false)
+def linked = run_capture(
+    ["clang", "--target=powerpc64-unknown-linux-gnu", "-fuse-ld=lld",
+     "-nostdlib", "-static", "-Wl,-e,_start", "-Wl,--build-id=none",
+     "-o", exe_path, asm_path, start_path],
+    [], nil, false)
+def execution = run_qemu("qemu-ppc64", exe_path)
+def disassembly =
+    run_capture(["llvm-objdump", "-d", exe_path], [], nil, false)
+def checked_asm = stem + "-checked.s"
+def checked_exe = stem + "-checked"
+def checked_emit = run_capture(
+    [compiler, "--native-backend=powerpc", "--native-only", "--nyir-verify",
+     "--emit-asm=" + checked_asm, "-no-std", "-emit-only", "-e",
+     "fn divide(int left, int right) int { left / right }\ndivide(9, 3)"],
+    [], nil, false)
+def checked_link = run_capture(
+    ["clang", "--target=powerpc64-unknown-linux-gnu", "-fuse-ld=lld",
+     "-nostdlib", "-static", "-Wl,-e,_start", "-Wl,--build-id=none",
+     "-o", checked_exe, checked_asm, start_path],
+    [], nil, false)
+def checked_execution = run_qemu("qemu-ppc64", checked_exe)
+def zero_asm = stem + "-zero.s"
+def zero_exe = stem + "-zero"
+def zero_emit = run_capture(
+    [compiler, "--native-backend=powerpc", "--native-only", "-O3",
+     "--nyir-verify", "--emit-asm=" + zero_asm, "-no-std", "-emit-only",
+     "-e", "fn divide(int left, int right) int { left / right }\n" +
+     "mut int divisor = 1\nwhile divisor > 0 { divisor -= 1 }\n" +
+     "divide(9, divisor)"],
+    [], nil, false)
+def zero_link = run_capture(
+    ["clang", "--target=powerpc64-unknown-linux-gnu", "-fuse-ld=lld",
+     "-nostdlib", "-static", "-Wl,-e,_start", "-Wl,--build-id=none",
+     "-o", zero_exe, zero_asm, start_path],
+    [], nil, false)
+def zero_execution = run_qemu("qemu-ppc64", zero_exe)
+def panic_asm = stem + "-panic.s"
+def panic_exe = stem + "-panic"
+def panic_emit = run_capture(
+    [compiler, "--native-backend=powerpc", "--native-only", "--nyir-verify",
+     "--emit-asm=" + panic_asm, "-no-std", "-emit-only", "-e",
+     "panic(\"portable static panic\")"],
+    [], nil, false)
+def panic_link = run_capture(
+    ["clang", "--target=powerpc64-unknown-linux-gnu", "-fuse-ld=lld",
+     "-nostdlib", "-static", "-Wl,-e,_start", "-Wl,--build-id=none",
+     "-o", panic_exe, panic_asm, start_path],
+    [], nil, false)
+def panic_execution = run_qemu("qemu-ppc64", panic_exe)
+assert(emitted.get("code", 127) == 0 && linked.get("code", 127) == 0,
+       "NYIR-verified PowerPC64 assembly assembles and links")
+assert(execution.get("code", 127) == 103,
+       "PowerPC64 comparison, divmod, rotate, memory, and wide constant parity")
+assert(disassembly.get("code", 127) == 0 &&
+       str_contains(disassembly.get("stdout", ""), "lbz") &&
+       str_contains(disassembly.get("stdout", ""), "stb") &&
+       str_contains(disassembly.get("stdout", ""), "sldi") &&
+       str_contains(disassembly.get("stdout", ""), "oris"),
+       "PowerPC64 object includes byte memory ops and full-width immediates")
+assert(checked_emit.get("code", 127) == 0 &&
+       checked_link.get("code", 127) == 0 &&
+       checked_execution.get("code", 127) == 7,
+       "checked PowerPC64 division links and returns tagged 3")
+assert(zero_emit.get("code", 127) == 0 && zero_link.get("code", 127) == 0 &&
+       zero_execution.get("code", 0) != 0,
+       "checked PowerPC64 division traps on a zero divisor")
+assert(panic_emit.get("code", 127) == 0 &&
+       panic_link.get("code", 127) == 0 &&
+       panic_execution.get("code", 0) != 0,
+       "literal PowerPC64 panic links and traps")
+def removed_exe = file_remove(exe_path)
+def removed_asm = file_remove(asm_path)
+def removed_start = file_remove(start_path)
+def removed_checked_asm = file_remove(checked_asm)
+def removed_checked_exe = file_remove(checked_exe)
+def removed_zero_asm = file_remove(zero_asm)
+def removed_zero_exe = file_remove(zero_exe)
+def removed_panic_asm = file_remove(panic_asm)
+def removed_panic_exe = file_remove(panic_exe)
+assert(is_ok(removed_exe) && is_ok(removed_asm) &&
+       is_ok(removed_start) && is_ok(removed_checked_asm) &&
+       is_ok(removed_checked_exe) && is_ok(removed_zero_asm) &&
+       is_ok(removed_zero_exe) && is_ok(removed_panic_asm) &&
+       is_ok(removed_panic_exe),
+       "remove PowerPC64 cross-run artifacts")
+print("POWERPC64_PORTABLE_RUNTIME_PARITY_OK")
+NY
+}

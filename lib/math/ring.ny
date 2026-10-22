@@ -1,12 +1,12 @@
 ;; Keywords: ring algebra math
 ;; Packed algebra facades over the low-level number theory, finite-field, and polynomial kernels.
 ;; References:
-;; - std.math
-module std.math.ring(Zmod, Integers, ZmodElem, zmod_ring, zmod_elem, is_zmod_ring, is_zmod, PolynomialRing, Poly, poly_ring, poly_elem, is_poly_ring, is_poly_elem)
-use std.core
-use std.math.nt
-use std.math.crypto.gf
-use std.math.crypto.poly as rawpoly
+;; - core.math
+module core.math.ring(Zmod, Integers, ZmodElem, zmod_ring, zmod_elem, is_zmod_ring, is_zmod, PolynomialRing, Poly, poly_ring, poly_elem, is_poly_ring, is_poly_elem)
+use core
+use core.math.nt
+use core.math.crypto.gf
+use core.math.crypto.poly as rawpoly
 
 impl zmod_ring {}
 
@@ -108,8 +108,8 @@ impl zmod {
    operator * int: zmod = mul_int
    operator * bigint: zmod = mul_bigint
    operator / zmod: zmod = div
-   operator ^ int: zmod = pow_int
-   operator ^ bigint: zmod = pow_bigint
+   operator ** int: zmod = pow_int
+   operator ** bigint: zmod = pow_bigint
    operator == zmod: bool = same
    operator != zmod: bool = different
 }
@@ -125,7 +125,7 @@ fn PolynomialRing(any base=nil, str name="x") poly_ring {
 }
 
 fn _poly_base_kind(poly_ring R) str {
-   def b = R.get("base", "ZZ")
+   def any b = R.get("base", "ZZ")
    if is_dict(b) && b.get("__type", "") == "gf" { return "gf" }
    if is_zmod_ring(b) { return "zmod" }
    "zz"
@@ -142,12 +142,14 @@ fn _poly_coeff_value(poly_ring R, any c) any {
    def kind = _poly_base_kind(R)
    if kind == "gf" {
       def gf F = R.get("base")
-      if is_dict(c) && c.get("__type", "") == "gfe" { return c.value }
+      if is_dict(c) && c.get("__type", "") == "gfe" {
+         return c["value"]
+      }
       return mod(c, F.get("p", 0))
    }
    if kind == "zmod" {
       def zmod_ring ZR = R.get("base")
-      if is_zmod(c) { return c.value }
+      if is_zmod(c) { return c["value"] }
       return mod(c, _zmod_modulus(ZR))
    }
    Z(c)
@@ -173,7 +175,11 @@ fn Poly(any ring_or_base, list coeffs, str name="x") poly_elem {
 
 fn _poly_ring(poly_elem f) poly_ring { f.get("ring") }
 
-fn _poly_coeffs(poly_elem f) list { f.get("coeffs", [0]) }
+fn _poly_coeffs(poly_elem f) list {
+   def coeffs = f.get("coeffs", [0])
+   if !is_list(coeffs) { panic("poly: coefficients are not a list") }
+   coeffs
+}
 
 fn _poly_check_same(poly_elem a, poly_elem b) poly_ring {
    def poly_ring Ra = _poly_ring(a)
@@ -338,7 +344,7 @@ impl poly_elem {
    operator + poly_elem: poly_elem = add
    operator - poly_elem: poly_elem = sub
    operator * poly_elem: poly_elem = mul
-   operator ^ int: poly_elem = poly_pow_int
+   operator ** int: poly_elem = poly_pow_int
    operator == poly_elem: bool = eq_poly
    operator != poly_elem: bool = different
 }

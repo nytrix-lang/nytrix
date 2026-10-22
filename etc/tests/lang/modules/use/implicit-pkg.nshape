@@ -1,0 +1,18 @@
+shape test_implicit_pkg {
+  family "runtime/modules/use"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+module implicitpkg(
+   child,
+   parent_value,
+   parent_child_sum,
+)
+
+fn parent_value() int { 7 }
+
+fn parent_child_sum() int { child_value() + child.child_value() }
+NY
+}

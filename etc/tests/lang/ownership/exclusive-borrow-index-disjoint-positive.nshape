@@ -1,0 +1,25 @@
+shape ownership_rule_exclusive_borrow_index_disjoint_positive {
+  family "language/ownership"
+  generator "syntax"
+  features ["ownership", "borrow", "exclusive", "index", "branch", "positive"]
+  template ny-test-case
+  expect compile_and_run
+  flags "--ownership-strict --nyir-verify"
+  source ny <<'NY'
+use core
+
+fn borrow_index(bool read_alias) int {
+  mut list<int> values = [7, 8]
+  def first = &mut values[0]
+  if read_alias {
+    def observed = first
+  } else {
+    values[1] = 9
+  }
+  values[0]
+}
+
+assert(borrow_index(true) == 7, "read the exclusive indexed borrow")
+assert(borrow_index(false) == 7, "mutate a disjoint control-flow arm")
+NY
+}

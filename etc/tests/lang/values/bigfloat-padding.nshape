@@ -1,0 +1,42 @@
+shape bigfloat_padding_and_scratch {
+  family "runtime/values"
+  generator "embedded"
+  features ["ny", "test", "bigfloat", "precision", "native", "padding"]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit -O3; --native-backend=llvm --jit --jit-engine=orc -O3"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.math.big
+
+fn check(int precision) {
+  def a = bf_with_precision(3, precision)
+  def one = bf_with_precision(1, precision)
+  def two = bf_with_precision(2, precision)
+  def scale = bf_pow_int(two, precision / 2)
+  def b = bf_add(one, bf_div(one, scale))
+  def wide_a = bf_with_precision(a, precision * 2)
+  def wide_b = bf_with_precision(b, precision * 2)
+  def q1 = bf_div(a, b)
+  def q2 = bf_div(b, a)
+  def expected1 = bf_with_precision(bf_div(wide_a, wide_b), precision)
+  def expected2 = bf_with_precision(bf_div(wide_b, wide_a), precision)
+  assert(bf_eq(q1, expected1), "padded numerator retains quotient precision")
+  assert(bf_eq(q2, expected2), "padded denominator retains quotient precision")
+  assert(bf_eq(bf_mul(a, b), bf_add(a, bf_div(a, scale))), "multiply padding")
+  assert(bf_precision(q1) == precision, "quotient precision")
+  assert(bf_eq(a, bf_with_precision(3, precision)), "borrowed input preserved")
+  assert(bf_eq(bf_mul(bf_zero(), b), bf_zero()), "zero product")
+  assert(bf_eq(bf_div(bf_zero(), b), bf_zero()), "zero numerator")
+  assert(bf_eq(bf_div(a, bf_zero()), bf_zero()), "zero divisor contract")
+}
+check(128)
+check(256)
+check(512)
+check(1024)
+assert(bf_eq(bf_with_precision(7, 65), bf_from_int(7)), "partial limb normalization")
+assert(bf_eq(bf_with_precision(4294967297, 32), bf_with_precision(4294967296, 32)), "precision tie rounds to even")
+assert(bf_eq(bf_with_precision(4294967299, 32), bf_with_precision(4294967300, 32)), "precision tie rounds upward to even")
+print("ok bigfloat padding and scratch")
+NY
+}

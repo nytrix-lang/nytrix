@@ -1,0 +1,79 @@
+shape bpf_portable_ror_i64_assembles {
+  family "runtime/compiler"
+  generator "regression"
+  features ["ny", "test", "bpf", "portable-text", "ror", "ror32", "memory",
+            "assemble"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os (file_exists, file_remove, run_capture, temp_dir, pid)
+
+def compiler = env("NYTRIX_NY_FULL_BIN")
+assert(is_str(compiler) && compiler.len > 0,
+       "test runner provides the compiler path")
+def asm_path =
+    temp_dir() + "/ny-bpf-portable-ror-" + to_str(pid()) + ".s"
+def object_path =
+    temp_dir() + "/ny-bpf-portable-ror-" + to_str(pid()) + ".o"
+def program =
+  "fn rotate_check(int value) int {\n" +
+  "  mut word = value & 0xff\n" +
+  "  ((word >> 1) | (word << 63)) >> 63 & 1\n" +
+  "}\n" +
+  "@noinline\nfn memory_roundtrip(int value) int {\n" +
+  "  mut int slot = 40\n" +
+  "  def *int pointer = addr_of(slot)\n" +
+  "  store64_i(pointer, value)\n" +
+  "  store8(pointer, value)\n" +
+  "  load64_i(pointer) + load8(pointer, 0)\n" +
+  "}\n" +
+  "rotate_check(1) + memory_roundtrip(42)"
+def emitted = run_capture(
+    [compiler, "--native-backend=bpf", "--native-only", "-O0",
+     "--nyir-verify", "--emit-asm=" + asm_path, "-no-std", "-emit-only",
+     "-e", program],
+    [], nil, false)
+def assembled =
+    run_capture(["clang", "--target=bpf", "-c", asm_path, "-o", object_path],
+                [], nil, false)
+def disassembled =
+    run_capture(["llvm-objdump", "-d", object_path], [], nil, false)
+def sections =
+    run_capture(["llvm-objdump", "-h", object_path], [], nil, false)
+def symbols =
+    run_capture(["llvm-objdump", "-t", object_path], [], nil, false)
+def cleanup_ok =
+    (if file_exists(asm_path) { is_ok(file_remove(asm_path)) } else { true }) &&
+    (if file_exists(object_path) { is_ok(file_remove(object_path)) } else { true })
+assert(emitted.get("code", 127) == 0 && assembled.get("code", 127) == 0,
+       "BPF native-only rotation emits a valid eBPF object")
+def disassembly = disassembled.get("stdout", "")
+assert(disassembled.get("code", 127) == 0 &&
+       str_contains(disassembly, "Disassembly of section socket:") &&
+       str_contains(disassembly, ">>=") &&
+       str_contains(disassembly, "<<=") &&
+       str_contains(disassembly, "|="),
+       "eBPF object combines right and complementary left shifts")
+def section_table = sections.get("stdout", "")
+assert(sections.get("code", 127) == 0 &&
+       str_contains(section_table, "socket") &&
+       str_contains(section_table, "license"),
+       "eBPF object exposes a loadable socket program and GPL license section")
+def symbol_table = symbols.get("stdout", "")
+assert(symbols.get("code", 127) == 0 &&
+       str_contains(symbol_table, "g     F socket") &&
+       str_contains(symbol_table, "rt_main") &&
+       str_contains(symbol_table, "ny_fn_rotate_check"),
+       "eBPF entry symbol and called subprogram are emitted in program sections")
+assert(str_contains(disassembly, "*(u64 *)") &&
+       str_contains(disassembly, "*(u8 *)") &&
+       str_contains(disassembly, " = r"),
+       "eBPF object contains byte and 64-bit load and store instructions")
+assert(!str_contains(disassembly, " = r2") &&
+       !str_contains(disassembly, " = r3"),
+       "single-argument BPF functions do not spill nonexistent arguments")
+assert(cleanup_ok, "remove BPF assembly and object outputs")
+print("BPF_PORTABLE_ROR_ASSEMBLES")
+NY
+}

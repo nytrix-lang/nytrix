@@ -1,0 +1,11 @@
+shape test_provider {
+  family "native/incremental"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+module provider(provider_value)
+fn provider_value() int { 41 }
+NY
+}

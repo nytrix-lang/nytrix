@@ -1,0 +1,48 @@
+shape ast_parse_size_limit {
+  family "runtime/compiler"
+  generator "regression"
+  features ["ny", "ast", "reflection", "bounded"]
+  template ny-test-case
+  flags_matrix "--native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.compiler.ast (parse_ast, parse_ast_snapshot, parse_code, parse_code_typed,
+                  code_expr_from_json)
+use core.str as str
+
+def oversized_source = str.repeat("x", 1048577)
+assert(is_nil(parse_ast(oversized_source)) &&
+       is_nil(parse_ast_snapshot(oversized_source)) &&
+       is_nil(parse_code(oversized_source)) &&
+       is_err(parse_code_typed(oversized_source)),
+       "runtime AST and declaration parsers reject input above one MiB")
+def oversized_code_value =
+   "{\"category\":\"expr\",\"schema\":\"nytrix.code.value\"," +
+   "\"sequence\":false,\"syntax\":{\"type\":\"literal\",\"value\":\"" +
+   str.repeat("x", 1048577) + "\"},\"version\":1}"
+assert(is_err(code_expr_from_json(oversized_code_value)),
+       "typed code JSON decoder rejects input above one MiB")
+mut deeply_nested_code_value =
+   "{\"category\":\"expr\",\"schema\":\"nytrix.code.value\"," +
+   "\"sequence\":false,\"syntax\":{\"padding\":"
+mut code_depth = 0
+while code_depth < 65 {
+   deeply_nested_code_value += "["
+   code_depth += 1
+}
+deeply_nested_code_value += "0"
+while code_depth > 0 {
+   deeply_nested_code_value += "]"
+   code_depth -= 1
+}
+deeply_nested_code_value += ",\"type\":\"literal\"},\"version\":1}"
+assert(is_err(code_expr_from_json(deeply_nested_code_value)),
+       "typed code JSON decoder rejects input beyond 64 container levels")
+def boundary_source = str.repeat(" ", 1048576)
+def boundary_snapshot = parse_ast_snapshot(boundary_source)
+assert(parse_ast(boundary_source).len == 0 &&
+       boundary_snapshot.get("nodes").len == 0,
+       "runtime AST parsers accept input at the one-megabyte boundary")
+NY
+}

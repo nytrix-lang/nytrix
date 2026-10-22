@@ -1,0 +1,27 @@
+shape test_bitwise_raw_tree {
+  family "runtime/values"
+  generator "embedded"
+  features ["ny", "runtime", "bitwise", "native"]
+  template ny-test-case
+  flags_matrix "--native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+fn rotr(int value, int amount) int {
+   ((value >> amount) | (value << (32 - amount))) & 0xFFFFFFFF
+}
+
+def word = 0x510e527f
+def high_word = 0xDEADBEEF
+def words = [high_word]
+assert((word >> 6) == 21248329, "logical shift keeps odd raw result")
+assert(rotr(word, 6) == 4249106761, "nested rotate preserves raw shift bits")
+assert((((word >> 6) | (word << 26)) & 0xFFFFFFFF) == 4249106761,
+       "nested bitwise tree stays in the raw integer representation")
+assert((high_word >> 2) == 933982139, "logical shift preserves high-bit words")
+assert(rotr(high_word, 6) == 3212490491, "rotate preserves high-bit words")
+assert((words[0] >> 2) == 933982139, "indexed words keep their raw shift value")
+print("✓ raw bitwise tree passed")
+NY
+}

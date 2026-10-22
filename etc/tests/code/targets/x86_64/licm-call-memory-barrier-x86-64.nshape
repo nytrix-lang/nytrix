@@ -1,0 +1,27 @@
+shape oracle_licm_call_memory_barrier_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle nyir licm alias call memory list mutation]
+  template ny-test-case
+  flags_matrix "-O1 --native-result-oracle=528; -O2 --native-result-oracle=528; -O3 --native-result-oracle=528"
+  expect compile_and_run
+  source ny <<'NY'
+fn set_first(list<int> values, int value) int {
+  values[0] = value
+  0
+}
+fn sum_observed_writes() i64 {
+  mut list<int> values = list(1)
+  values[0] = 0
+  mut total = 0
+  mut i = 0
+  while i < 32 {
+    set_first(values, i + 1)
+    total += values[0]
+    i += 1
+  }
+  total
+}
+sum_observed_writes()
+NY
+}

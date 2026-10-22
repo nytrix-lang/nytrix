@@ -1,0 +1,18 @@
+shape test_path_normalize {
+  family "runtime/execution"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.path
+
+assert(normalize("/bin/echo") == "/bin/echo", "absolute path keeps its components")
+assert(normalize("/bin/../usr/bin") == "/usr/bin", "absolute parent path")
+assert(normalize("bin/./echo") == "bin/echo", "relative path components")
+assert(normalize("/a/b/../../c") == "/c", "nested parent components")
+assert(normalize("../../a") == "../../a", "relative parents stay relative")
+NY
+}

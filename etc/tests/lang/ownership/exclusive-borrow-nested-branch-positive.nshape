@@ -1,0 +1,31 @@
+shape ownership_exclusive_borrow_nested_branch_positive {
+  family "language/ownership"
+  generator "syntax"
+  features ["ownership", "borrow", "exclusive", "nested-branch", "positive"]
+  template ny-test-case
+  expect compile_and_run
+  flags "--ownership-strict --nyir-verify --nyir-dump"
+  expect_message "[noalias]"
+  source ny <<'NY'
+use core
+
+fn nested_disjoint(bool outer, bool inner) int {
+  mut int value = 5
+  def exclusive = &mut value
+  if outer {
+    if inner {
+      def observed = exclusive
+    } else {
+      value = value + 1
+    }
+  } else {
+    value = value + 2
+  }
+  value
+}
+
+assert(nested_disjoint(true, true) == 5, "nested alias branch")
+assert(nested_disjoint(true, false) == 6, "nested disjoint branch")
+assert(nested_disjoint(false, false) == 7, "outer disjoint branch")
+NY
+}

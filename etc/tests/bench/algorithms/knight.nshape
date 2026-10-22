@@ -1,0 +1,53 @@
+shape knight {
+  family "algorithm"
+  generator "stress"
+  features ["c-vs-ny", "checksum"]
+  template ny-test-case
+  expect compile_and_run
+  ;; Translated from the QBE minic test: minic/test/knight.c.
+  source ny <<'NY'
+fn moves(int depth, int x, int y) int {
+   if depth == 0 { return 1 }
+   mut total = 0
+   mut i = 0
+   while i < 8 {
+      def pair = i >> 1
+      def dx = pair < 2 ? pair - 2 : pair - 1
+      def sign = (i & 1) == 0 ? -1 : 1
+      def magnitude = pair == 0 || pair == 3 ? 1 : 2
+      def dy = sign * magnitude
+      def nx = x + dx
+      def ny = y + dy
+      if nx >= 0 && nx < 8 && ny >= 0 && ny < 8 { total += moves(depth - 1, nx, ny) }
+      i += 1
+   }
+   total
+}
+def result = moves(4, 2, 0)
+print("checksum=", result)
+NY
+  source c <<'C'
+#include <stdio.h>
+
+static int moves(int depth, int x, int y) {
+  static const int dx[8] = {-2, -2, -1, -1, 1, 1, 2, 2};
+  static const int dy[8] = {-1, 1, -2, 2, -2, 2, -1, 1};
+  if (depth == 0) return 1;
+
+  int total = 0;
+  for (int i = 0; i < 8; ++i) {
+    int next_x = x + dx[i];
+    int next_y = y + dy[i];
+    if (next_x >= 0 && next_x < 8 && next_y >= 0 && next_y < 8) {
+      total += moves(depth - 1, next_x, next_y);
+    }
+  }
+  return total;
+}
+
+int main(void) {
+  int result = moves(4, 2, 0);
+  printf("checksum=%d\n", result);
+}
+C
+}

@@ -1,11 +1,11 @@
 ;; Keywords: factorization quadratic-form math crypto number-theory
 ;; Integer-factorization routines for quadratic-form factorization.
 ;; References:
-;; - std.math.crypto.factorization
-;; - std.math.crypto
-module std.math.crypto.factorization.quadratic_form(factor_square_offsets, factor_square_offsets_scan, square_offset_factor)
-use std.core
-use std.math.nt
+;; - core.math.crypto.factorization
+;; - core.math.crypto
+module core.math.crypto.factorization.quadratic_form(factor_square_offsets, factor_square_offsets_scan, square_offset_factor)
+use core
+use core.math.nt
 
 fn factor_square_offsets_scan(any n, any p_offset, any q_offset, any scan) any {
    "Factor n when p=a^2+p_offset and q=b^2+q_offset by scanning ab near sqrt(n)."

@@ -1,0 +1,18 @@
+shape comptime_syntax_helper_depth_limit {
+  family "compiler-errors/comptime"
+  generator "error"
+  features ["error", "comptime", "code", "helper", "depth", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "compile-time code helper recursion limit exceeded"
+  source ny <<'NY'
+fn recursive_syntax_helper(any syntax) any {
+   return recursive_syntax_helper(syntax)
+}
+
+comptime template wants_expression(value: code<expr>) {
+   fn generated_from_recursive_helper() int { return ${value} }
+}
+comptime emit wants_expression(recursive_syntax_helper(quote{42}))
+NY
+}

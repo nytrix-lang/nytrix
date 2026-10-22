@@ -1,0 +1,35 @@
+shape global_bool_storage {
+  family "runtime/values"
+  generator "regression"
+  features ["ny", "bool", "global", "abi"]
+  template ny-test-case
+  expect compile_and_run
+  flags_matrix "--native --run -O0; --native --run -O3; --native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect_message "GLOBAL-BOOL-STORAGE-OK"
+  source ny <<'NY'
+use core
+
+mut bool flag = false
+
+fn reset_flag() {
+   flag = bool(false)
+}
+
+fn identity(bool value) bool { value }
+
+assert(!flag)
+reset_flag()
+assert(!flag)
+assert(!identity(flag))
+flag = bool(true)
+assert(flag)
+assert(identity(flag))
+
+mut any dynamic_flag = false
+assert(!dynamic_flag)
+dynamic_flag = true
+assert(dynamic_flag)
+
+print("GLOBAL-BOOL-STORAGE-OK")
+NY
+}

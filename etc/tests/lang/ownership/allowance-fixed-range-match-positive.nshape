@@ -1,0 +1,25 @@
+shape ownership_allowance_fixed_range_match_positive {
+  family "language/ownership"
+  generator "regression"
+  features [ownership allowance fixed-range match positive]
+  template ny-test-case
+  flags_matrix "--ownership-strict --native --run --nyir-verify; --ownership-strict --native-backend=llvm --jit --jit-engine=mcjit --nyir-verify; --ownership-strict --native-backend=llvm --jit --jit-engine=orc --nyir-verify; --ownership-strict --native-only --nyir-verify"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+@allowance(x, [2,2])
+fn repeat_match(int selector, int x) int {
+  for index in 0..1 {
+    match selector {
+      0 -> { def first = x }
+      _ -> { def second = x }
+    }
+  }
+  0
+}
+
+assert(repeat_match(0, 3) == 0, "the selected match path contributes one use per iteration")
+assert(repeat_match(1, 3) == 0, "default match arm is included in the allowance join")
+NY
+}

@@ -1,0 +1,391 @@
+shape generic_callback_row_reaches_caller_contract {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "higher-order", "callback", "row", "soundness"]
+  flags_matrix "--effect-require-known"
+  expect compile_fail
+  expect_message "declared @effects(none) but inferred effects=io"
+  source ny <<'NY'
+module std.project(
+  invalid, run_eff, print_answer
+)
+
+@effects(io)
+fn print_answer() int {
+  print("answer\n")
+  42
+}
+
+@effects(e)
+fn run_eff(fnptr callback) int {
+  callback()
+}
+
+@effects(none)
+fn invalid() int {
+  run_eff(print_answer)
+}
+
+invalid()
+NY
+}
+shape returned_callback_row_reaches_caller_contract {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "higher-order", "callback", "row", "soundness"]
+  flags_matrix "--effect-require-known"
+  expect compile_fail
+  expect_message "declared @effects(none) but inferred effects="
+  source ny <<'NY'
+module std.project(
+  invalid, run_eff, make_answer
+)
+
+fn make_answer() fnptr {
+  return fn() {
+    print("returned answer\n")
+    42
+  }
+}
+
+@effects(e)
+fn run_eff(fnptr callback) int {
+  callback()
+}
+
+@effects(none)
+fn invalid() int {
+  run_eff(make_answer())
+}
+
+invalid()
+NY
+}
+shape callback_alias_row_reaches_caller_contract {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "higher-order", "callback", "row", "soundness"]
+  flags_matrix "--effect-require-known"
+  expect compile_fail
+  expect_message "declared @effects(none) but inferred effects=io"
+  source ny <<'NY'
+module std.project(
+  invalid, run_eff, print_answer
+)
+
+@effects(io)
+fn print_answer() int {
+  print("answer\n")
+  42
+}
+
+@effects(e)
+fn run_eff(fnptr callback) int {
+  callback()
+}
+
+@effects(none)
+fn invalid() int {
+  def callback = print_answer
+  run_eff(callback)
+}
+
+invalid()
+NY
+}
+
+shape reassigned_callback_alias_row_reaches_caller_contract {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "higher-order", "callback", "row", "soundness"]
+  flags_matrix "--effect-require-known"
+  expect compile_fail
+  expect_message "declared @effects(none) but inferred effects=io"
+  source ny <<'NY'
+module std.project(
+  invalid, run_eff, pure_answer, print_answer
+)
+
+fn pure_answer() int { 24 }
+
+@effects(io)
+fn print_answer() int {
+  print("answer\n")
+  42
+}
+
+@effects(e)
+fn run_eff(fnptr callback) int {
+  callback()
+}
+
+@effects(none)
+fn invalid() int {
+  mut callback = pure_answer
+  callback = print_answer
+  run_eff(callback)
+}
+
+invalid()
+NY
+}
+
+shape branch_reassigned_callback_joins_effect_rows {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "higher-order", "callback", "row", "soundness"]
+  flags_matrix "--effect-require-known"
+  expect compile_fail
+  expect_message "declared @effects(none) but inferred effects=io"
+  source ny <<'NY'
+module std.project(
+  invalid, run_eff, pure_answer, print_answer
+)
+
+fn pure_answer() int { 24 }
+
+@effects(io)
+fn print_answer() int {
+  print("answer\n")
+  42
+}
+
+@effects(e)
+fn run_eff(fnptr callback) int {
+  callback()
+}
+
+@effects(none)
+fn invalid(bool select_io) int {
+  mut callback = pure_answer
+  if select_io {
+    callback = print_answer
+  }
+  run_eff(callback)
+}
+
+invalid(false)
+NY
+}
+
+shape loop_reassigned_callback_joins_effect_rows {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "higher-order", "callback", "row", "soundness"]
+  flags_matrix "--effect-require-known"
+  expect compile_fail
+  expect_message "declared @effects(none) but inferred effects=io"
+  source ny <<'NY'
+module std.project(
+  invalid, run_eff, pure_answer, print_answer
+)
+
+fn pure_answer() int { 24 }
+
+@effects(io)
+fn print_answer() int {
+  print("answer\n")
+  42
+}
+
+@effects(e)
+fn run_eff(fnptr callback) int {
+  callback()
+}
+
+@effects(none)
+fn invalid(bool update_callback) int {
+  mut callback = pure_answer
+  while update_callback {
+    callback = print_answer
+    break
+  }
+  run_eff(callback)
+}
+
+invalid(false)
+NY
+}
+
+shape match_reassigned_callback_joins_effect_rows {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "higher-order", "callback", "row", "soundness"]
+  flags_matrix "--effect-require-known"
+  expect compile_fail
+  expect_message "declared @effects(none) but inferred effects=io"
+  source ny <<'NY'
+module std.project(
+  invalid, run_eff, pure_answer, print_answer
+)
+
+fn pure_answer() int { 24 }
+
+@effects(io)
+fn print_answer() int {
+  print("answer\n")
+  42
+}
+
+@effects(e)
+fn run_eff(fnptr callback) int {
+  callback()
+}
+
+@effects(none)
+fn invalid(bool select_io) int {
+  mut callback = pure_answer
+  match select_io {
+    true -> { callback = print_answer }
+    else { callback = pure_answer }
+  }
+  run_eff(callback)
+}
+
+invalid(false)
+NY
+}
+
+shape match_without_else_keeps_incoming_callback_row {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "higher-order", "callback", "row", "soundness"]
+  flags_matrix "--effect-require-known"
+  expect compile_fail
+  expect_message "declared @effects(none) but inferred effects=io"
+  source ny <<'NY'
+module std.project(
+  invalid, run_eff, pure_answer, print_answer
+)
+
+fn pure_answer() int { 24 }
+
+@effects(io)
+fn print_answer() int {
+  print("answer\n")
+  42
+}
+
+@effects(e)
+fn run_eff(fnptr callback) int {
+  callback()
+}
+
+@effects(none)
+fn invalid(bool select_pure) int {
+  mut callback = print_answer
+  match select_pure {
+    true -> { callback = pure_answer }
+  }
+  run_eff(callback)
+}
+
+invalid(false)
+NY
+}
+
+shape reexported_callback_alias_row_reaches_caller_contract {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "higher-order", "callback", "modules", "reexport", "soundness"]
+  flags_matrix "--effect-require-known"
+  expect compile_fail
+  expect_message "declared @effects(none) but inferred effects=io"
+  source ny <<'NY'
+use core
+
+module CallbackSource(print_answer)
+
+@effects(io)
+fn print_answer() int {
+  print("re-exported answer\n")
+  42
+}
+
+module CallbackRelay(print_answer) {
+  use CallbackSource (print_answer)
+}
+use CallbackRelay (print_answer as re_print_answer)
+
+@effects(e)
+fn invoke(fnptr callback) int {
+  callback()
+}
+
+@effects(none)
+fn invalid() int {
+  def callback = re_print_answer
+  invoke(callback)
+}
+
+invalid()
+NY
+}
+
+shape captured_unknown_callback_row_stays_unknown {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "higher-order", "callback", "row", "capture", "soundness"]
+  flags_matrix "--effect-require-known"
+  expect compile_fail
+  expect_message "effect policy violation in 'std.project.invalid': effects are unknown"
+  source ny <<'NY'
+module std.project(
+  invalid, make_wrapped, run_eff
+)
+
+@effects(e)
+fn make_wrapped(fnptr callback) fnptr {
+  return fn() { callback() }
+}
+
+@effects(e)
+fn run_eff(fnptr callback) int {
+  callback()
+}
+
+@effects(none)
+fn invalid(fnptr callback) int {
+  def wrapped = make_wrapped(callback)
+  run_eff(wrapped)
+}
+
+invalid(fn() { print("unknown callback\n") })
+NY
+}
+
+shape captured_callback_factory_defers_the_io_row {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "higher-order", "callback", "row", "capture", "soundness"]
+  flags_matrix "--effect-require-known"
+  expect compile_fail
+  expect_message "declared @effects(alloc) but inferred effects=io|alloc"
+  source ny <<'NY'
+module std.project(
+  invalid, make_wrapped, run_eff, print_answer
+)
+
+@effects(io)
+fn print_answer() int {
+  print("captured IO callback\n")
+  42
+}
+
+fn make_wrapped(fnptr callback) fnptr {
+  return fn() { callback() }
+}
+
+@effects(e)
+fn run_eff(fnptr callback) int {
+  callback()
+}
+
+@effects(alloc)
+fn invalid() int {
+  run_eff(make_wrapped(print_answer))
+}
+
+invalid()
+NY
+}

@@ -1,8 +1,8 @@
 ;; Keywords: nt number-theory modular math
 ;; Number-theory operations for primes, modular arithmetic, CRT, residues, and arithmetic functions.
 ;; References:
-;; - std.math
-module std.math.nt(Z, ZZ, Int, Integer, nt_bigint, is_bigint, bigint, bigint_from_int,
+;; - core.math
+module core.math.nt(Z, ZZ, Int, Integer, nt_bigint, is_bigint, bigint, bigint_from_int,
    bigint_from_str, bigint_add, bigint_sub, bigint_mul, bigint_div, bigint_mod,
    bigint_cmp, bigint_eq, bigint_neq, bigint_lt, bigint_le, bigint_gt, bigint_ge,
    bigint_neg, bigint_abs, bigint_clone, bigint_pow, bigint_divmod,
@@ -28,12 +28,12 @@ module std.math.nt(Z, ZZ, Int, Integer, nt_bigint, is_bigint, bigint, bigint_fro
    str_to_bytes, bytes_to_str, isqrt, nth_root, _mont_init, _mont_redc, _mont_mul, _mont_to, _mont_from,
    _barrett_init, _barrett_reduce, mod_ctx_new, mod_kernel_mul, mod_kernel_pow, mod_kernel_inv, mod_add,
    mod_sub, mod_mul)
-use std.core
-use std.math.big
-use std.core.str
-use std.core.str as str_mod
-use std.os.net (requests_get_parsed)
-use std.math.parse.data.json (json_decode)
+use core
+use core.math.big
+use core.str
+use core.str as str_mod
+use core.os.net (requests_get_parsed)
+use core.math.parse.data.json (json_decode)
 
 def _TAG_BIGINT = __runtime_tag("bigint")
 def _TAG_LIST = __runtime_tag("list")
@@ -70,7 +70,7 @@ fn Integer(any n) bigint {
 fn nt_bigint(any x) bigint {
    "Convert int, string, or BigInt to BigInt."
    if is_bigint(x) { return x }
-   if is_int(x) { return bigint_from_int(x) }
+   if is_int(x) { return __bigint_from_int(x) }
    if is_str(x) {
       def s0 = str_mod.strip(x)
       if str_mod.startswith(s0, "-0x") || str_mod.startswith(s0, "-0X") { return bigint_neg(hex_to_bigint(str_mod.str_slice(s0, 3, s0.len))) }
@@ -93,7 +93,7 @@ fn lcm(any a, any b) bigint {
 }
 
 fn xgcd(any a, any b) list {
-   "Extended GCD: returns [g, u, v] where a*u + b*v = g. Uses GMP-backed builtin."
+   "Extended GCD: returns [g, u, v] where a*u + b*v = g. Uses the native BigInt runtime."
    __bigint_xgcd(Z(a), Z(b))
 }
 
@@ -115,7 +115,7 @@ fn mod(any a, any b) bigint {
 
 fn power_mod(any base, any exp, any modulus) bigint {
    "Modular exponentiation: base^exp mod modulus.
-   Uses GMP-backed builtin for performance."
+   Uses the native BigInt runtime."
    def modulus_big = Z(modulus)
    if bigint_eq(modulus_big, Z(0)) { return Z(base) }
    if bigint_lt(Z(exp), Z(0)) { return Z(base) }
@@ -826,9 +826,12 @@ fn moebius(any n) int {
    (facs.len % 2 == 0) ? 1 : -1
 }
 
+;; The __bigint_{legendre,jacobi,kronecker} runtime entries return tagged
+;; small ints (rt_tag_v); their ABI records declare RESULT_TAGGED_INT so the
+;; lowering normalizes the result at the call boundary itself.
 fn legendre(any a, any p) int {
    "Legendre symbol(a/p)."
-   __untag(__bigint_legendre(Z(a), Z(p)))
+   __bigint_legendre(Z(a), Z(p))
 }
 
 fn jacobi(any a, any n) int {
@@ -928,7 +931,7 @@ fn xor_bytes(list a, list b) list {
    __list_set_len(out, n)
    mut i = 0
    while i < n {
-      __store_item_fast(out, i, (a.get(i) ^^ b.get(i)) & 255)
+      __store_item_fast(out, i, (a.get(i) ^ b.get(i)) & 255)
       i += 1
    }
    out
@@ -1228,8 +1231,11 @@ fn bigint_to_bytes(any a) list<int> {
    mut i = n
    while i > 0 {
       i -= 1
-      __store_item_fast(out, i, int(x & Z(255)))
-      x = x >> Z(8)
+      ;; Explicit helper calls, not operators: the operator form on an
+      ;; untyped mutable local can lose the bigint handle ABI in the
+      ;; dynamic band path and store a mangled word.
+      __store_item_fast(out, i, bigint_to_int(bigint_and(x, Z(255))))
+      x = bigint_rshift(x, 8)
    }
    out
 }
@@ -1379,8 +1385,8 @@ fn solve_linear_congruence(int a, int b, int m) list {
 fn crt2(int a1, int m1, int a2, int m2) int {
    "CRT for two congruences x = a1 mod m1, x = a2 mod m2. Returns x mod lcm(m1,m2), or 0 if inconsistent."
    def res = extended_gcd(m1, m2)
-   def g = res[0]
-   def p = res[1]
+   def int g = int(res[0])
+   def int p = int(res[1])
    if (a2 - a1) % g != 0 { return 0 }
    def lcm_val = m1 / g * m2
    ((a1 + m1 * ((a2 - a1) / g % (m2 / g) * p % (m2 / g))) % lcm_val + lcm_val) % lcm_val
@@ -1515,7 +1521,7 @@ fn hex_to_bigint(str s) bigint {
          i += 1
          continue
       }
-      def v = (c >= 97) ? (c - 87) : ((c >= 65) ? (c - 55) : (c - 48))
+      def int v = (c >= 97) ? (c - 87) : ((c >= 65) ? (c - 55) : (c - 48))
       result = bigint_add(bigint_mul(result, Z(16)), Z(v))
       i += 1
    }
@@ -1523,13 +1529,13 @@ fn hex_to_bigint(str s) bigint {
 }
 
 fn bit_length(any n) int {
-   "Number of bits needed to represent abs(n). Returns 0 for n=0. Uses GMP-backed builtin."
+   "Number of bits needed to represent abs(n). Returns 0 for n=0. Uses the native BigInt runtime."
    if n == 0 { return 0 }
    __bigint_bitlen(Z(n))
 }
 
 fn is_square(any n) int {
-   "Returns 1 if n is a perfect square, 0 otherwise. Uses GMP-backed builtin."
+   "Returns 1 if n is a perfect square, 0 otherwise. Uses the native BigInt runtime."
    if n < 0 { return 0 }
    __bigint_is_perfect_square(Z(n))
 }
@@ -1606,5 +1612,5 @@ fn is_perfect_square(any n) bool {
    assert(power_mod(tonelli_shanks(Z(4), 17), 2, 17) == Z(4), "bigint impl sqrt_mod")
    assert(power_mod(tonelli_shanks(4, 17), 2, 17) == Z(4), "int impl sqrt_mod")
    assert(hex_to_bigint("ff") == Z(255), "str impl hex_bigint")
-   print("✓ std.math.nt self-test passed")
+   print("✓ core.math.nt self-test passed")
 }

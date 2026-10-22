@@ -1,18 +1,18 @@
 ;; Keywords: engine tools transform toolbar snap os ui render viewer scene
 ;; Toolbar helpers for transform modes, snapping, playback, and viewport tools.
 ;; References:
-;; - std.os.ui.render.viewer.engine.state
-;; - std.os.ui.render.viewer.gizmo
-module std.os.ui.render.viewer.engine.tools(draw_gallery, draw_graph, draw_probe, draw_profiler, draw_workspace, profiler_hot_label, profiler_snapshot)
-use std.core
-use std.math (clamp)
-use std.os.ui.render.viewer.app as ui_app
-use std.os.ui.render.viewer.gui as gui
-use std.os.ui.render.dump as ui_profile
-use std.os.ui.window as ui_window
-use std.os.ui.render.viewer.dock as ui_editor
-use std.os.ui.render.viewer.engine.editor.chrome as demo_editor
-use std.os.ui.render.viewer.engine.panels as viewer_panels
+;; - core.os.ui.render.viewer.engine.state
+;; - core.os.ui.render.viewer.gizmo
+module core.os.ui.render.viewer.engine.tools(draw_gallery, draw_graph, draw_probe, draw_profiler, draw_workspace, profiler_hot_label, profiler_snapshot)
+use core
+use core.math (clamp)
+use core.os.ui.render.viewer.app as ui_app
+use core.os.ui.render.viewer.gui as gui
+use core.os.ui.render.dump as ui_profile
+use core.os.ui.window as ui_window
+use core.os.ui.render.viewer.dock as ui_editor
+use core.os.ui.render.viewer.engine.editor.chrome as demo_editor
+use core.os.ui.render.viewer.engine.panels as viewer_panels
 
 fn _state(any state) dict { is_dict(state) ? state : dict(0) }
 
@@ -177,10 +177,18 @@ fn draw_workspace(any state) dict {
    if !bool(opened.get(0, false)) && bool(opened.get(1, st).get("closed", false)) { return opened.get(1, st) }
    st = opened.get(1, st)
    if bool(opened.get(0, false)) {
-      def out = viewer_panels.workspace_body(clamp(ui_app.app_window_body_h("workspace_grid", 210.0, 170.0), 190.0, 520.0),
-         st.get("grid", 32.0), st.get("major", 4), st.get("cam_x", 0.0), st.get("cam_y", 0.0), st.get("cam_z", 0.0), st.get("font", 0))
-      st["grid"] = float(out.get(0, st.get("grid", 32.0)))
-      st["major"] = int(out.get(1, st.get("major", 4)))
+      def f64 canvas_h = clamp(ui_app.app_window_body_h("workspace_grid", 210.0, 170.0), 190.0, 520.0)
+      def f64 grid = float(st.get("grid", 32.0))
+      def int major = int(st.get("major", 4))
+      def f64 cam_x = float(st.get("cam_x", 0.0))
+      def f64 cam_y = float(st.get("cam_y", 0.0))
+      def f64 cam_z = float(st.get("cam_z", 0.0))
+      def int font = int(st.get("font", 0))
+      def out = viewer_panels.workspace_body(canvas_h, grid, major, cam_x, cam_y, cam_z, font)
+      def f64 updated_grid = float(out.get(0, grid))
+      def int updated_major = int(out.get(1, major))
+      st["grid"] = updated_grid
+      st["major"] = updated_major
    }
    ui_editor.end_tool()
    _finish(st, true)

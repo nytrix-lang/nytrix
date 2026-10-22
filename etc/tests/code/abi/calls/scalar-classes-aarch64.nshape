@@ -1,0 +1,66 @@
+shape aarch64_scalar_classes_global_any_and_typed_boundaries {
+  family "native/calls"
+  generator "embedded"
+  features ["ny" "test" "abi" "scalar-classes" "aarch64" "qemu"]
+  flags "--native-backend=aarch64 -emit-only -o /tmp/nytrix-scalar-classes-aarch64.o"
+  expect object_link_run_i64_42
+  source ny <<'NY'
+use core
+
+fn echo_any(any value) any { value }
+@effects(all)
+fn invoke_callback(any callback, any value) any { callback(value) }
+fn forward_f32(f32 value) f32 { value }
+fn forward_f64(f64 value) f64 { value }
+fn combine_f64(f64 left, f64 right) f64 { left + right }
+fn replace_typed_i64(list<int> values, int index, int value) int {
+  values[index] = value
+  values[index]
+}
+fn replace_typed_f64(list<f64> values, int index, f64 value) f64 {
+  values[index] = value
+  values[index]
+}
+
+mut global_i64 = 0
+mut global_f32 = 0.0f32
+mut global_f64 = 0.0
+mut global_bool = false
+mut global_string = ""
+mut global_list = [0]
+
+global_i64 = 42
+global_f32 = -0.0f32
+global_f64 = 2.5
+global_bool = true
+global_string = "aarch64 ABI"
+global_list = [7, 11]
+mut typed_i64 = [5, 7]
+mut typed_f64 = [1.5, 2.5]
+
+assert(global_i64 == 42, "i64 global")
+assert(str(global_f32) == "-0", "f32 global preserves negative zero")
+assert(global_f64 == 2.5, "f64 global")
+assert(global_bool, "bool global")
+assert(global_string == "aarch64 ABI", "string global")
+assert(global_list == [7, 11], "list global")
+assert(replace_typed_i64(typed_i64, 1, 42) == 42,
+       "AArch64 typed i64 store, reload, call, and return")
+assert(typed_i64[1] == 42, "AArch64 typed i64 mutation persists")
+assert(replace_typed_f64(typed_f64, 0, -0.0) == 0.0,
+       "AArch64 typed f64 store, reload, call, and return")
+assert(str(typed_f64[0]) == "-0", "AArch64 typed f64 store preserves sign bit")
+assert(str(echo_any(global_f32)) == "-0", "f32 any-formal conversion")
+assert(echo_any(global_f64) == 2.5, "f64 any-formal conversion")
+assert(echo_any(global_i64) == 42, "int any-formal conversion")
+assert(forward_f32(1.25f32) == 1.25f32, "f32 typed call and return")
+assert(combine_f64(forward_f64(2.0), 0.5) == 2.5,
+       "f64 typed call and return")
+def callback = __mark_dynamic_callable_tagged_args(echo_any)
+assert(str(invoke_callback(callback, global_f32)) == "-0",
+       "f32 dynamic callback conversion")
+assert(invoke_callback(callback, global_i64) == 42,
+       "i64 dynamic callback conversion")
+42
+NY
+}

@@ -1,10 +1,10 @@
 ;; Keywords: window event os ui input
 ;; Window event record construction and inspection for native input backends.
 ;; References:
-;; - std.os.ui.window
-;; - std.os.ui.window.consts
-module std.os.ui.window.event(is_event, make_event, event_type, event_window, event_window_id, event_data, queue_push, queue_pop, queue_len)
-use std.core
+;; - core.os.ui.window
+;; - core.os.ui.window.consts
+module core.os.ui.window.event(is_event, make_event, event_type, event_window, event_window_id, event_data, queue_push, queue_pop, queue_len)
+use core
 
 def _EVENT_MOUSE_POS_CHANGED = 7
 def _E_TAG = 0
@@ -15,13 +15,13 @@ def _E_DATA = 4
 def _EVENT_NONE = 0
 
 fn is_event(any ev) bool {
-   "Returns true when `ev` is a std.os.ui event payload."
-   is_list(ev) && ev.len >= 5 && ev.get(_E_TAG, "") == "std.os.ui.window.event"
+   "Returns true when `ev` is a core.os.ui event payload."
+   is_list(ev) && ev.len >= 5 && ev.get(_E_TAG, "") == "core.os.ui.window.event"
 }
 
 fn make_event(i32 kind, any win, i32 win_id=0, any data=0) list {
    "Constructs an event payload."
-   ["std.os.ui.window.event", kind, win, win_id, data]
+   ["core.os.ui.window.event", kind, win, win_id, data]
 }
 
 fn _event_get(any ev, i32 slot, any fallback=0) any {

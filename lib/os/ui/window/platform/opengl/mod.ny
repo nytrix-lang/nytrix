@@ -1,16 +1,16 @@
 ;; Keywords: platform window backend opengl nsgl glx egl os ui input
 ;; OpenGL context facade for EGL, GLX, and NSGL platform backends.
 ;; References:
-;; - std.os.ui.window.platform
-;; - std.os.ui.window
-;; - std.os.ui.window.consts
-module std.os.ui.window.platform.opengl(get_proc_address, create_context, create_offscreen_context, destroy_offscreen_context, make_context_current, release_context_current, get_current_context, create_osmesa_context, destroy_osmesa_context, swap_buffers, swap_interval)
-use std.core
-use std.core.common as common
-use std.os.ui.window.platform.api as api
-use std.os.ui.window.platform.opengl.glx as glx
-use std.os.ui.window.platform.opengl.egl as egl
-use std.os.ui.window.platform.opengl.nsgl as nsgl
+;; - core.os.ui.window.platform
+;; - core.os.ui.window
+;; - core.os.ui.window.consts
+module core.os.ui.window.platform.opengl(get_proc_address, create_context, create_offscreen_context, destroy_offscreen_context, make_context_current, release_context_current, get_current_context, create_osmesa_context, destroy_osmesa_context, swap_buffers, swap_interval)
+use core
+use core.common as common
+use core.os.ui.window.platform.api as api
+use core.os.ui.window.platform.opengl.glx as glx
+use core.os.ui.window.platform.opengl.egl as egl
+use core.os.ui.window.platform.opengl.nsgl as nsgl
 
 #macos {
    fn OSMesaCreateContext(any _format, any _share) any {
@@ -175,6 +175,8 @@ fn make_context_current(any ctx) bool {
       def dpy = ctx.get("display", 0)
       def win = ctx.get("window", 0)
       def gl_ctx = ctx.get("context", 0)
+      _dbg("glx make display=" + to_str(dpy) + " window=" + to_str(win) +
+         " context=" + to_str(gl_ctx))
       if dpy && win && gl_ctx && glx.make_current(dpy, win, gl_ctx) {
          _current_context = ctx
          return true
@@ -288,7 +290,7 @@ fn choose_visual(any hints, any display=0, any screen=0) list {
    def b = _get_backend_name()
    #linux {
       if b == "x11" {
-         mut attrs = [
+         def base_attrs = [
             0x8002, 1,
             0x8010, 0x01,
             0x8011, 0x01,
@@ -300,6 +302,7 @@ fn choose_visual(any hints, any display=0, any screen=0) list {
             0x000d, hints.get(api.STENCIL_BITS, 8),
             0x0005, 1
          ]
+         mut attrs = base_attrs
          def samples = int(hints.get(api.SAMPLES, 0))
          if samples > 1 {
             attrs = attrs.append(0x186A0)
@@ -307,18 +310,32 @@ fn choose_visual(any hints, any display=0, any screen=0) list {
             attrs = attrs.append(0x186A1)
             attrs = attrs.append(samples)
          }
-         def config = glx.choose_fb_config(display, screen, attrs)
-         _dbg("choose_visual: display=0x" + to_hex(display) + " screen=" + to_str(screen) + " config=0x" + to_hex(config))
+         _dbg("glx visual samples=" + to_str(samples) + " attrs=" + to_str(attrs))
+         mut config = glx.choose_fb_config(display, screen, attrs)
+         if !config && samples > 1 {
+            def fallback_attrs = [
+               0x8002, 1, 0x8010, 0x01, 0x8011, 0x01,
+               0x0008, hints.get(api.RED_BITS, 8),
+               0x0009, hints.get(api.GREEN_BITS, 8),
+               0x000a, hints.get(api.BLUE_BITS, 8),
+               0x000b, hints.get(api.ALPHA_BITS, 8),
+               0x000c, hints.get(api.DEPTH_BITS, 24),
+               0x000d, hints.get(api.STENCIL_BITS, 8),
+               0x0005, 1
+            ]
+            _dbg("glx visual fallback attrs=" + to_str(fallback_attrs))
+            config = glx.choose_fb_config(display, screen, fallback_attrs)
+         }
          if !config { return [0, 0] }
          def visual = glx.get_visual(display, config)
          def depth = glx.get_visual_depth(display, config)
-         _dbg("choose_visual: visual=0x" + to_hex(visual) + " depth=" + to_str(depth))
          return [visual, depth]
       }
    } #endif
    [0, 0]
 }
 
+@jit
 fn create_context(any native, any hints) any {
    "Create an OpenGL context for a native window using backend context hints."
    def b = _get_backend_name()
@@ -328,13 +345,14 @@ fn create_context(any native, any hints) any {
          def w = native.get("handle", 0)
          def dpy = egl.init_display(d)
          if !dpy { return 0 }
-         mut attrs = [
+         def base_attrs = [
             0x3024, hints.get(api.RED_BITS, 8),
             0x3023, hints.get(api.GREEN_BITS, 8),
             0x3022, hints.get(api.BLUE_BITS, 8),
             0x3021, hints.get(api.ALPHA_BITS, 8),
             0x3025, hints.get(api.DEPTH_BITS, 24),
          ]
+         mut attrs = base_attrs
          def samples = int(hints.get(api.SAMPLES, 0))
          if samples > 1 {
             attrs = attrs.append(0x3032)
@@ -343,7 +361,18 @@ fn create_context(any native, any hints) any {
             attrs = attrs.append(samples)
          }
          attrs = attrs.append(0x3038)
-         def config = egl.choose_config(dpy, attrs)
+         mut config = egl.choose_config(dpy, attrs)
+         if !config && samples > 1 {
+            def base_config_attrs = [
+               0x3024, hints.get(api.RED_BITS, 8),
+               0x3023, hints.get(api.GREEN_BITS, 8),
+               0x3022, hints.get(api.BLUE_BITS, 8),
+               0x3021, hints.get(api.ALPHA_BITS, 8),
+               0x3025, hints.get(api.DEPTH_BITS, 24),
+               0x3038
+            ]
+            config = egl.choose_config(dpy, base_config_attrs)
+         }
          if !config { return 0 }
          def surface = egl.create_surface(dpy, config, w)
          if !surface { return 0 }
@@ -357,8 +386,9 @@ fn create_context(any native, any hints) any {
       if b == "x11" {
          def d, w = native.get("display", 0), native.get("handle", 0)
          def s = native.get("screen", 0)
-         _dbg("create_context:x11 display=0x" + to_hex(d) + " window=0x" + to_hex(w) + " screen=" + to_str(s))
-         mut attrs = [
+         _dbg("glx create display=" + to_str(d) + " window=" + to_str(w) +
+            " screen=" + to_str(s))
+         def base_attrs = [
             0x8002, 1,
             0x8010, 0x01,
             0x8011, 0x01,
@@ -370,6 +400,7 @@ fn create_context(any native, any hints) any {
             0x000d, hints.get(api.STENCIL_BITS, 8),
             0x0005, 1
          ]
+         mut attrs = base_attrs
          def samples = int(hints.get(api.SAMPLES, 0))
          if samples > 1 {
             attrs = attrs.append(0x186A0)
@@ -377,11 +408,26 @@ fn create_context(any native, any hints) any {
             attrs = attrs.append(0x186A1)
             attrs = attrs.append(samples)
          }
-         def fbconfig = glx.choose_fb_config(d, s, attrs)
-         _dbg("create_context:x11 fbconfig=0x" + to_hex(fbconfig))
+         _dbg("glx context samples=" + to_str(samples) + " attrs=" + to_str(attrs))
+         mut fbconfig = glx.choose_fb_config(d, s, attrs)
+         if !fbconfig && samples > 1 {
+            def fallback_attrs = [
+               0x8002, 1, 0x8010, 0x01, 0x8011, 0x01,
+               0x0008, hints.get(api.RED_BITS, 8),
+               0x0009, hints.get(api.GREEN_BITS, 8),
+               0x000a, hints.get(api.BLUE_BITS, 8),
+               0x000b, hints.get(api.ALPHA_BITS, 8),
+               0x000c, hints.get(api.DEPTH_BITS, 24),
+               0x000d, hints.get(api.STENCIL_BITS, 8),
+               0x0005, 1
+            ]
+            _dbg("glx context fallback attrs=" + to_str(fallback_attrs))
+            fbconfig = glx.choose_fb_config(d, s, fallback_attrs)
+         }
+         _dbg("glx fbconfig=" + to_str(fbconfig))
          if !fbconfig { return 0 }
          def ctx = glx.create_context(d, fbconfig, 0, true)
-         _dbg("create_context:x11 ctx=0x" + to_hex(ctx))
+         _dbg("glx context=" + to_str(ctx))
          if !ctx { return 0 }
          return {"type": "glx", "display": d, "window": w, "context": ctx}
       }
@@ -400,5 +446,5 @@ fn create_context(any native, any hints) any {
    assert(!swap_buffers(0) && !swap_interval(1), "opengl swap fallback")
    assert(choose_visual(dict(4), 0, 0) == [0, 0], "opengl visual fallback")
    assert(create_context(dict(2), dict(4)) == 0, "opengl native context fallback")
-   print("✓ std.os.ui.window.platform.opengl self-test passed")
+   print("✓ core.os.ui.window.platform.opengl self-test passed")
 }

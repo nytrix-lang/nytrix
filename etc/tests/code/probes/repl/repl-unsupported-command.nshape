@@ -1,0 +1,12 @@
+shape test_repl_unsupported_command {
+  family "repl"
+  generator "embedded"
+  features ["ny", "test", "repl", "diagnostic", "unsupported"]
+  template ny-test-case
+  expect compile_and_run
+  repl_expect "Unknown command: :not-a-command"
+  repl_commands ":not-a-command"
+  source ny <<'NY'
+1 + 2
+NY
+}

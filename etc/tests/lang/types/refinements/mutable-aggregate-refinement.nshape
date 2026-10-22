@@ -1,0 +1,1384 @@
+shape mutable_aggregate_monotone_content_length_survives_append {
+  family "runtime/language"
+  generator "regression"
+  features [ny test typing refinement mutable aggregate content append positive]
+  template ny-test-case
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+refine FirstBelowLength = list where(items) { items[0] < items.len }
+fn require_first_below_length(FirstBelowLength items) int { return items.len }
+
+fn checked_after_append() int {
+  mut list<int> items = [0]
+  if FirstBelowLength(items) {
+    items = append(items, 9)
+    return require_first_below_length(items)
+  }
+  0
+}
+
+assert(checked_after_append() == 2,
+       "a fixed-index value below list length remains below it after append")
+NY
+}
+
+shape mutable_fresh_aggregate_refinement_is_preserved_in_readonly_region {
+  family "runtime/language"
+  generator "regression"
+  features [ny test typing refinement mutable aggregate alias-flow positive]
+  template ny-test-case
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+refine NonEmpty = list where(items) { items.len > 0 }
+
+fn checked_length() int {
+  mut list<int> items = [4, 5]
+  if NonEmpty(items) {
+    return items.len
+  }
+  0
+}
+
+assert(checked_length() == 2,
+       "a fresh mutable aggregate keeps its checked refinement in a read-only arm")
+NY
+}
+
+shape mutable_aggregate_nonempty_constant_bound_survives_store_and_append {
+  family "runtime/language"
+  generator "regression"
+  features [ny test typing refinement mutable aggregate length constant expression positive]
+  template ny-test-case
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+refine NonEmptyExpr = list where(items) { items.len > 1 - 1 }
+fn require_nonempty_expr(NonEmptyExpr items) int { return items.len }
+
+fn checked_after_store_and_append() int {
+  mut list<int> items = [4]
+  if NonEmptyExpr(items) {
+    items[0] = 8
+    items = append(items, 9)
+    return require_nonempty_expr(items)
+  }
+  0
+}
+
+assert(checked_after_store_and_append() == 2,
+       "constant arithmetic equivalent to the nonempty bound preserves length proof")
+NY
+}
+
+shape mutable_aggregate_refinement_expires_before_mutation {
+  family "compiler-errors/types"
+  generator "error"
+  features [error typing refinement mutable aggregate invalidation negative]
+  template ny-compile-fail
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  expect compile_fail
+  expect_message "refinement obligation"
+  source ny <<'NY'
+use core
+
+refine PositiveFirst = list where(items) { items[0] > 0 }
+fn require_positive(PositiveFirst items) int { return items.len }
+
+fn invalid_after_mutation() int {
+  mut list<int> items = [4]
+  if PositiveFirst(items) {
+    items[0] = 0
+    return require_positive(items)
+  }
+  0
+}
+invalid_after_mutation()
+NY
+}
+
+shape mutable_aggregate_indexed_refinement_survives_proven_store {
+  family "runtime/language"
+  generator "regression"
+  features [ny test typing refinement mutable aggregate indexed predicate transport positive]
+  template ny-test-case
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+refine PositiveFirst = list where(items) { items[0] > 0 }
+fn require_positive(PositiveFirst items) int { return items.len }
+
+fn checked_after_proven_store() int {
+  mut list<int> items = [4, 5]
+  if PositiveFirst(items) {
+    items[1] = 8
+    items = append(items, 9)
+    items[0] = 8
+    return require_positive(items)
+  }
+  0
+}
+
+assert(checked_after_proven_store() == 3,
+       "an indexed refinement survives an unrelated store, append, and a proving store")
+NY
+}
+
+shape mutable_aggregate_constant_expression_refinement_survives_store {
+  family "runtime/language"
+  generator "regression"
+  features [ny test typing refinement mutable aggregate constant expression positive]
+  template ny-test-case
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+refine AboveThree = list where(items) { items[4 / 2 - 1] > 7 % 4 }
+fn require_above_three(AboveThree items) int { return items.len }
+
+fn checked_after_constant_store() int {
+  mut list<int> items = [4, 5]
+  if AboveThree(items) {
+    items[0] = 2 * 2
+    return require_above_three(items)
+  }
+  0
+}
+
+assert(checked_after_constant_store() == 2,
+       "constant arithmetic in the index, bound, and proving store is folded")
+NY
+}
+
+shape mutable_aggregate_constant_expression_violation_expires {
+  family "compiler-errors/types"
+  generator "error"
+  features [error typing refinement mutable aggregate constant expression violation negative]
+  template ny-compile-fail
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  expect compile_fail
+  expect_message "refinement obligation"
+  source ny <<'NY'
+use core
+
+refine AboveThree = list where(items) { items[0] > 1 + 2 }
+fn require_above_three(AboveThree items) int { return items.len }
+
+fn invalid_after_constant_store() int {
+  mut list<int> items = [4, 5]
+  if AboveThree(items) {
+    items[0] = 4 - 1
+    return require_above_three(items)
+  }
+  0
+}
+
+invalid_after_constant_store()
+NY
+}
+
+shape mutable_aggregate_overflowing_constant_refinement_fails_closed {
+  family "compiler-errors/types"
+  generator "error"
+  features [error typing refinement mutable aggregate constant overflow negative]
+  template ny-compile-fail
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  expect compile_fail
+  expect_message "refinement obligation"
+  source ny <<'NY'
+use core
+
+refine AboveOverflow = list where(items) {
+  items[0] > 9223372036854775807 + 1
+}
+fn require_above_overflow(AboveOverflow items) int { return items.len }
+
+fn invalid_after_store() int {
+  mut list<int> items = [4, 5]
+  if AboveOverflow(items) {
+    items[0] = 0
+    return require_above_overflow(items)
+  }
+  0
+}
+
+invalid_after_store()
+NY
+}
+
+shape mutable_aggregate_negative_index_exact_store_preserves_refinement {
+  family "runtime/language"
+  generator "regression"
+  features [ny test typing refinement mutable aggregate negative index exact store positive]
+  template ny-test-case
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+refine PositiveLast = list where(items) { items[-1] > 0 }
+fn require_positive_last(PositiveLast items) int { return items.len }
+
+fn checked_after_exact_store() int {
+  mut list<int> items = [4, 5]
+  if PositiveLast(items) {
+    items[-1] = 8
+    return require_positive_last(items)
+  }
+  0
+}
+
+assert(checked_after_exact_store() == 2,
+       "a proving write through the same negative index preserves its fact")
+NY
+}
+
+shape mutable_aggregate_content_predicate_survives_disjoint_negative_store {
+  family "runtime/language"
+  generator "regression"
+  features [ny test typing refinement mutable aggregate negative index content positive]
+  template ny-test-case
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+refine DescendingTail = list where(items) { items[-1] > items[-2] }
+fn require_descending_tail(DescendingTail items) int { return items.len }
+
+fn checked_after_disjoint_negative_store() int {
+  mut list<int> items = [1, 3, 5]
+  if DescendingTail(items) {
+    items[-3] = 2
+    return require_descending_tail(items)
+  }
+  0
+}
+
+assert(checked_after_disjoint_negative_store() == 3,
+       "same-sign distinct negative stores preserve relative tail facts")
+NY
+}
+
+shape mutable_aggregate_content_predicate_survives_disjoint_positive_store {
+  family "runtime/language"
+  generator "regression"
+  features [ny test typing refinement mutable aggregate content positive index positive]
+  template ny-test-case
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+refine EqualGap = list where(items) { items[0] == items[1] + 5 }
+fn require_equal_gap(EqualGap items) int { return items.len }
+
+fn checked_after_disjoint_store() int {
+  mut list<int> items = [10, 5, 0]
+  if EqualGap(items) {
+    items[2] = 99
+    return require_equal_gap(items)
+  }
+  0
+}
+
+assert(checked_after_disjoint_store() == 3,
+       "a disjoint nonnegative store preserves fixed-index content facts")
+NY
+}
+
+shape mutable_aggregate_content_predicate_expires_after_mixed_sign_store {
+  family "compiler-errors/types"
+  generator "error"
+  features [error typing refinement mutable aggregate mixed sign alias negative]
+  template ny-compile-fail
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  expect compile_fail
+  expect_message "refinement obligation"
+  source ny <<'NY'
+use core
+
+refine OrderedEnds = list where(items) { items[0] > items[-1] }
+fn require_ordered_ends(OrderedEnds items) int { return items.len }
+
+fn invalid_after_mixed_sign_store() int {
+  mut list<int> items = [4, 1]
+  if OrderedEnds(items) {
+    items[1] = 9
+    return require_ordered_ends(items)
+  }
+  0
+}
+
+invalid_after_mixed_sign_store()
+NY
+}
+
+shape mutable_aggregate_negative_index_alias_store_expires_refinement {
+  family "compiler-errors/types"
+  generator "error"
+  features [error typing refinement mutable aggregate negative index alias invalidation negative]
+  template ny-compile-fail
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  expect compile_fail
+  expect_message "refinement obligation"
+  source ny <<'NY'
+use core
+
+refine PositiveLast = list where(items) { items[-1] > 0 }
+fn require_positive_last(PositiveLast items) int { return items.len }
+
+fn invalid_after_aliasing_store() int {
+  mut list<int> items = [4]
+  if PositiveLast(items) {
+    items[0] = 0
+    return require_positive_last(items)
+  }
+  0
+}
+
+invalid_after_aliasing_store()
+NY
+}
+
+shape mutable_aggregate_negative_index_append_expires_refinement {
+  family "compiler-errors/types"
+  generator "error"
+  features [error typing refinement mutable aggregate negative index append invalidation negative]
+  template ny-compile-fail
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  expect compile_fail
+  expect_message "refinement obligation"
+  source ny <<'NY'
+use core
+
+refine PositiveLast = list where(items) { items[-1] > 0 }
+fn require_positive_last(PositiveLast items) int { return items.len }
+
+fn invalid_after_append() int {
+  mut list<int> items = [4]
+  if PositiveLast(items) {
+    items = append(items, 0)
+    return require_positive_last(items)
+  }
+  0
+}
+
+invalid_after_append()
+NY
+}
+
+shape mutable_aggregate_symbolic_integer_bound_transport {
+  family "runtime/language"
+  generator "regression"
+  features [ny test typing refinement mutable aggregate symbolic integer bound store append positive]
+  template ny-test-case
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+def threshold = 1 + 2
+def safe = 2 + 3
+
+refine AboveThreshold = list where(items) {
+  items[1] > threshold
+}
+@effects(read) fn require_above_threshold(AboveThreshold items) int {
+  return items.len
+}
+refine AboveLast = list where(items) {
+  items[1] > threshold
+}
+@effects(read) fn require_above_last(AboveLast items) int {
+  return items.len
+}
+
+fn store_preserves_proof() int {
+  mut list<int> items = [9, 9]
+  if AboveThreshold(items) {
+    items[1] = safe
+    return require_above_threshold(items)
+  }
+  0
+}
+
+fn append_preserves_proof() int {
+  mut list<int> items = [1, 9]
+  if AboveLast(items) {
+    items = append(items, safe)
+    return require_above_last(items)
+  }
+  0
+}
+
+assert(store_preserves_proof() == 2,
+       "immutable signed-i64 expressions prove a relational store")
+assert(append_preserves_proof() == 3,
+       "immutable signed-i64 expressions prove an indexed append")
+NY
+}
+
+shape mutable_aggregate_relation_preserved_by_reconstructing_stored_value {
+  family "runtime/language"
+  generator "regression"
+  features [ny test typing refinement mutable aggregate content relation reconstruct store positive]
+  template ny-test-case
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+refine EqualGap = list where(items) {
+  items[0] == items[1] + 5
+}
+@effects(read) fn require_equal_gap(EqualGap items) int {
+  return items.len
+}
+
+fn reconstruct_equal_value() int {
+  mut list<int> items = [10, 5]
+  if EqualGap(items) {
+    items[0] = items[1] + 5
+    return require_equal_gap(items)
+  }
+  0
+}
+
+fn append_after_equal_value() int {
+  mut list<int> items = [10, 5]
+  if EqualGap(items) {
+    items = append(items, 99)
+    return require_equal_gap(items)
+  }
+  0
+}
+
+refine EqualTail = list where(items) {
+  items[-2] == items[-1]
+}
+@effects(read) fn require_equal_tail(EqualTail items) int {
+  return items.len
+}
+
+fn append_copies_proven_tail() int {
+  mut list<int> items = [5, 5]
+  if EqualTail(items) {
+    items = append(items, items[-1])
+    return require_equal_tail(items)
+  }
+  0
+}
+
+refine EqualGapPositive = list where(items) {
+  items[0] == items[1] + 5 && items[2] > 0
+}
+@effects(read) fn require_equal_gap_positive(EqualGapPositive items) int {
+  return items.len
+}
+
+fn reconstruct_conjunctive_relation() int {
+  mut list<int> items = [10, 5, 1]
+  if EqualGapPositive(items) {
+    items[0] = items[1] + 5
+    return require_equal_gap_positive(items)
+  }
+  0
+}
+
+assert(reconstruct_equal_value() == 2,
+       "storing the guarded expression preserves the content relation")
+assert(append_after_equal_value() == 3,
+       "append preserves a content relation over stable nonnegative indices")
+assert(append_copies_proven_tail() == 3,
+       "appending the proven previous tail preserves the new tail equality")
+assert(reconstruct_conjunctive_relation() == 3,
+       "reconstructing one conjunct preserves unaffected conjuncts")
+NY
+}
+
+shape mutable_aggregate_symbolic_last_bound_survives_exact_append {
+  family "runtime/language"
+  generator "regression"
+  features [ny test typing refinement mutable aggregate symbolic last-bound append positive]
+  template ny-test-case
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+def threshold = 3
+refine LastAtLeastThreshold = list where(items) {
+  items[-1] >= threshold
+}
+fn require_last_at_least_threshold(LastAtLeastThreshold items) int {
+  return items.len
+}
+
+fn checked_after_exact_append() int {
+  mut list<int> items = [5, 3]
+  if LastAtLeastThreshold(items) {
+    items = append(items, threshold)
+    return require_last_at_least_threshold(items)
+  }
+  0
+}
+
+assert(checked_after_exact_append() == 3,
+       "appending the immutable bound proves the new last element")
+NY
+}
+
+shape mutable_aggregate_symbolic_last_bound_expires_after_other_append {
+  family "compiler-errors/types"
+  generator "error"
+  features [error typing refinement mutable aggregate symbolic last-bound append invalidation negative]
+  template ny-compile-fail
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  expect compile_fail
+  expect_message "refinement obligation"
+  source ny <<'NY'
+use core
+
+def threshold = 3
+refine LastAtLeastThreshold = list where(items) {
+  items[-1] >= threshold
+}
+fn require_last_at_least_threshold(LastAtLeastThreshold items) int {
+  return items.len
+}
+
+fn invalid_after_unproven_append() int {
+  mut list<int> items = [5, 3]
+  if LastAtLeastThreshold(items) {
+    items = append(items, 0)
+    return require_last_at_least_threshold(items)
+  }
+  0
+}
+invalid_after_unproven_append()
+NY
+}
+
+shape mutable_aggregate_symbolic_bound_survives_disjoint_store {
+  family "runtime/language"
+  generator "regression"
+  features [ny test typing refinement mutable aggregate immutable bound transport positive]
+  template ny-test-case
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+def threshold = 3
+refine AboveThreshold = list where(items) { items[0] > threshold }
+fn require_above(AboveThreshold items) int { return items.len }
+
+fn checked_after_disjoint_store() int {
+  mut list<int> items = [5, 0]
+  if AboveThreshold(items) {
+    items[1] = 7
+    return require_above(items)
+  }
+  0
+}
+
+assert(checked_after_disjoint_store() == 2,
+       "an immutable scalar comparison bound survives a disjoint fixed-index store")
+NY
+}
+
+shape mutable_aggregate_symbolic_bound_violation_expires {
+  family "compiler-errors/types"
+  generator "error"
+  features [error typing refinement mutable aggregate symbolic bound invalidation negative]
+  template ny-compile-fail
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  expect compile_fail
+  expect_message "refinement obligation"
+  source ny <<'NY'
+use core
+
+def threshold = 3
+refine AboveThreshold = list where(items) { items[0] > threshold }
+fn require_above(AboveThreshold items) int { return items.len }
+
+fn invalid_after_guarded_store() int {
+  mut list<int> items = [5, 0]
+  if AboveThreshold(items) {
+    items[0] = 0
+    return require_above(items)
+  }
+  0
+}
+
+invalid_after_guarded_store()
+NY
+}
+
+shape mutable_aggregate_length_or_content_disjunction_survives_append {
+  family "runtime/language"
+  generator "regression"
+  features [ny test typing refinement mutable aggregate disjunction length content append positive]
+  template ny-test-case
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+refine LengthOrFirst = list where(items) {
+  items.len >= 5 || items[0] > 0
+}
+fn require_length_or_first(LengthOrFirst items) int { return items.len }
+
+fn checked_disjoint_store_and_append() int {
+  mut list<int> items = [2, 4, 6]
+  if LengthOrFirst(items) {
+    items[1] = 9
+    items = append(items, 8)
+    return require_length_or_first(items)
+  }
+  0
+}
+
+assert(checked_disjoint_store_and_append() == 4,
+       "append preserves an OR fact when its length and content alternatives remain true")
+NY
+}
+
+shape mutable_aggregate_length_or_content_disjunction_expires_after_store {
+  family "compiler-errors/types"
+  generator "error"
+  features [error typing refinement mutable aggregate disjunction content violation negative]
+  template ny-compile-fail
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  expect compile_fail
+  expect_message "refinement obligation"
+  source ny <<'NY'
+use core
+
+refine LengthOrFirst = list where(items) {
+  items.len >= 5 || items[0] > 0
+}
+fn require_length_or_first(LengthOrFirst items) int { return items.len }
+
+fn invalid_after_store_and_append() int {
+  mut list<int> items = [2, 4, 6]
+  if LengthOrFirst(items) {
+    items[0] = 0
+    items = append(items, 8)
+    return require_length_or_first(items)
+  }
+  0
+}
+invalid_after_store_and_append()
+NY
+}
+shape mutable_aggregate_conjunctive_refinement_transport {
+  family "runtime/language"
+  generator "regression"
+  features [ny test typing refinement mutable aggregate conjunction transport positive]
+  template ny-test-case
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+refine BoundedPair = list where(items) { items[0] > 0 && items[1] < 10 }
+fn require_pair(BoundedPair items) int { return items.len }
+
+fn checked_after_conjunct_preserving_store() int {
+  mut list<int> items = [4, 5]
+  if BoundedPair(items) {
+    items[2] = 8
+    items[1] = 7
+    items = append(items, 6)
+    return require_pair(items)
+  }
+  0
+}
+
+assert(checked_after_conjunct_preserving_store() == 4,
+       "disjoint/proving stores and append preserve every conjunct")
+NY
+}
+
+shape mutable_aggregate_disjunctive_indexed_refinement_transport {
+  family "runtime/language"
+  generator "regression"
+  features [ny test typing refinement mutable aggregate indexed disjunction transport positive]
+  template ny-test-case
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+refine IndexedAlternative = list where(items) {
+  items[0] > 0 || items[1] < 10
+}
+fn require_alternative(IndexedAlternative items) int { return items.len }
+
+fn checked_after_proving_store() int {
+  mut list<int> items = [4, 5]
+  if IndexedAlternative(items) {
+    items[0] = 3
+    items = append(items, 6)
+    return require_alternative(items)
+  }
+  0
+}
+
+assert(checked_after_proving_store() == 3,
+       "indexed disjunction survives a proving store and append")
+NY
+}
+
+shape mutable_aggregate_disjunctive_indexed_refinement_violation_expires {
+  family "compiler-errors/types"
+  generator "error"
+  features [error typing refinement mutable aggregate indexed disjunction invalidation negative]
+  template ny-compile-fail
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  expect compile_fail
+  expect_message "refinement obligation"
+  source ny <<'NY'
+use core
+
+refine IndexedAlternative = list where(items) {
+  items[0] > 0 || items[1] < 10
+}
+fn require_alternative(IndexedAlternative items) int { return items.len }
+
+fn invalid_after_violation() int {
+  mut list<int> items = [4, 12]
+  if IndexedAlternative(items) {
+    items[0] = 0
+    return require_alternative(items)
+  }
+  0
+}
+
+invalid_after_violation()
+NY
+}
+
+shape mutable_aggregate_conjunctive_refinement_violation_expires {
+  family "compiler-errors/types"
+  generator "error"
+  features [error typing refinement mutable aggregate conjunction invalidation negative]
+  template ny-compile-fail
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  expect compile_fail
+  expect_message "refinement obligation"
+  source ny <<'NY'
+use core
+
+refine BoundedPair = list where(items) { items[0] > 0 && items[1] < 10 }
+fn require_pair(BoundedPair items) int { return items.len }
+
+fn invalid_after_conjunct_violation() int {
+  mut list<int> items = [4, 5]
+  if BoundedPair(items) {
+    items[1] = 10
+    return require_pair(items)
+  }
+  0
+}
+
+invalid_after_conjunct_violation()
+NY
+}
+
+
+shape mutable_aggregate_local_write_precedes_refinement_guard {
+  family "runtime/language"
+  generator "regression"
+  features [ny test typing refinement mutable aggregate mutation guard positive]
+  template ny-test-case
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+refine NonEmpty = list where(items) { items.len > 0 }
+
+fn checked_after_local_write() int {
+  mut list<int> items = [4, 5]
+  items[0] = 8
+  if NonEmpty(items) {
+    return items.len
+  }
+  0
+}
+
+assert(checked_after_local_write() == 2,
+       "a local write before the predicate is checked does not invalidate its later fact")
+NY
+}
+
+shape mutable_aggregate_element_store_preserves_nonempty_fact {
+  family "runtime/language"
+  generator "regression"
+  features [ny test typing refinement mutable aggregate mutation transport positive]
+  template ny-test-case
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+refine NonEmpty = list where(items) { items.len > 0 }
+
+@effects(read)
+fn require_nonempty(NonEmpty items) int { return items.len }
+
+fn checked_after_element_store() int {
+  mut list<int> items = [4, 5]
+  if NonEmpty(items) {
+    items[0] = 8
+    return require_nonempty(items)
+  }
+  0
+}
+
+assert(checked_after_element_store() == 2,
+       "an element store preserves the refinement proof for a checked call")
+NY
+}
+
+shape mutable_aggregate_append_preserves_nonempty_fact {
+  family "runtime/language"
+  generator "regression"
+  features [ny test typing refinement mutable aggregate mutation transport positive]
+  template ny-test-case
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+refine NonEmpty = list where(items) { items.len > 0 }
+
+@effects(read)
+fn require_nonempty(NonEmpty items) int { return items.len }
+
+fn checked_after_append() int {
+  mut list<int> items = [4, 5]
+  if NonEmpty(items) {
+    items = append(items, 9)
+    return require_nonempty(items)
+  }
+  0
+}
+
+assert(checked_after_append() == 3,
+       "appending to a refined nonempty local preserves its length proof")
+NY
+}
+
+shape mutable_aggregate_mutating_call_expires_nonempty_fact {
+  family "compiler-errors/types"
+  generator "error"
+  features [error typing refinement mutable aggregate mutation call invalidation negative]
+  template ny-compile-fail
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  expect compile_fail
+  expect_message "refinement obligation"
+  source ny <<'NY'
+use core
+
+refine NonEmpty = list where(items) { items.len > 0 }
+@effects(read)
+fn require_nonempty(NonEmpty items) int { return items.len }
+fn maybe_clear(list<int> values) int {
+  values.pop()
+  0
+}
+
+fn invalid_after_call() int {
+  mut list<int> items = [4]
+  if NonEmpty(items) {
+    maybe_clear(items)
+    return require_nonempty(items)
+  }
+  0
+}
+invalid_after_call()
+NY
+}
+
+shape mutable_aggregate_rebinding_expires_nonempty_fact {
+  family "compiler-errors/types"
+  generator "error"
+  features [error typing refinement mutable aggregate rebind invalidation negative]
+  template ny-compile-fail
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  expect compile_fail
+  expect_message "refinement obligation"
+  source ny <<'NY'
+use core
+
+refine NonEmpty = list where(items) { items.len > 0 }
+@effects(read)
+fn require_nonempty(NonEmpty items) int { return items.len }
+
+fn invalid_after_rebinding() int {
+  mut list<int> items = [4]
+  if NonEmpty(items) {
+    items = []
+    return require_nonempty(items)
+  }
+  0
+}
+
+invalid_after_rebinding()
+NY
+}
+
+shape mutable_aggregate_unknown_call_before_refinement_fails_closed {
+  family "compiler-errors/types"
+  generator "error"
+  features [error typing refinement mutable aggregate alias escape negative]
+  template ny-compile-fail
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  expect compile_fail
+  expect_message "refinement obligation"
+  source ny <<'NY'
+use core
+
+refine NonEmpty = list where(items) { items.len > 0 }
+fn preserve_alias(list<int> values) list<int> { return values }
+@effects(read)
+fn require_nonempty(NonEmpty items) int { return items.len }
+
+fn invalid_after_alias_may_escape() int {
+  mut list<int> items = [4]
+  preserve_alias(items)
+  if NonEmpty(items) {
+    return require_nonempty(items)
+  }
+  0
+}
+
+invalid_after_alias_may_escape()
+NY
+}
+
+shape mutable_aggregate_closure_capture_before_refinement_fails_closed {
+  family "compiler-errors/types"
+  generator "error"
+  features [error typing refinement mutable aggregate closure provenance negative]
+  template ny-compile-fail
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  expect compile_fail
+  expect_message "refinement obligation"
+  source ny <<'NY'
+use core
+
+refine NonEmpty = list where(items) { items.len > 0 }
+@effects(read)
+fn require_nonempty(NonEmpty items) int { return items.len }
+
+fn invalid_after_capture() int {
+  mut list<int> items = [4]
+  def later = fn() { return items.len }
+  if NonEmpty(items) {
+    return require_nonempty(items)
+  }
+  0
+}
+
+invalid_after_capture()
+NY
+}
+
+shape mutable_refinement_rejects_overloaded_operator_guard {
+  family "compiler-errors/types"
+  generator "error"
+  features [error typing refinement mutable operator soundness negative]
+  template ny-compile-fail
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  expect compile_fail
+  expect_message "refinement obligation"
+  source ny <<'NY'
+use core
+
+impl int {
+  fn always_true(self left, int right) bool { true }
+  operator > int: bool = always_true
+}
+
+refine Positive = int where(value) { value > 0 }
+
+fn invalid_overloaded_guard(int input) Positive {
+  mut value = input
+  if value > 0 {
+    return value
+  }
+  return 0
+}
+
+invalid_overloaded_guard(-1)
+NY
+}
+
+shape mutable_aggregate_negative_last_append_preserves_proven_value {
+  family "runtime/language"
+  generator "regression"
+  features [ny test typing refinement mutable aggregate negative append value positive]
+  template ny-test-case
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+refine BoundedLast = list where(items) {
+  items[-1] > 0 && items[0] < 10
+}
+fn require_bounded_last(BoundedLast items) int { return items.len }
+
+fn checked_after_append() int {
+  mut list<int> items = [4, 5]
+  if BoundedLast(items) {
+    items = append(items, 1 + 2)
+    return require_bounded_last(items)
+  }
+  0
+}
+
+assert(checked_after_append() == 3,
+       "append proves a negative last-index fact from its constant value")
+NY
+}
+
+shape mutable_aggregate_earlier_negative_index_append_expires {
+  family "compiler-errors/types"
+  generator "error"
+  features [error typing refinement mutable aggregate negative index append shifted negative]
+  template ny-compile-fail
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  expect compile_fail
+  expect_message "refinement obligation"
+  source ny <<'NY'
+use core
+
+refine PositivePenultimate = list where(items) { items[-2] > 0 }
+fn require_positive_penultimate(PositivePenultimate items) int {
+  return items.len
+}
+
+fn invalid_after_append() int {
+  mut list<int> items = [3, 2]
+  if PositivePenultimate(items) {
+    items = append(items, 7)
+    return require_positive_penultimate(items)
+  }
+  0
+}
+
+invalid_after_append()
+NY
+}
+
+shape mutable_aggregate_general_length_bound_survives_store_and_append {
+  family "runtime/language"
+  generator "regression"
+  features [ny test typing refinement mutable aggregate arbitrary nonnegative length lower bound positive]
+  template ny-test-case
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+refine AtLeastThree = list where(items) { items.len >= 3 }
+fn require_at_least_three(AtLeastThree items) int { return items.len }
+
+fn checked_length() int {
+  mut list<int> items = [2, 4, 6]
+  if AtLeastThree(items) {
+    items[1] = 9
+    items = append(items, 8)
+    return require_at_least_three(items)
+  }
+  0
+}
+
+assert(checked_length() == 4,
+       "length lower bounds survive element stores and append")
+NY
+}
+
+shape mutable_aggregate_general_length_bound_expires_after_shrink {
+  family "compiler-errors/types"
+  generator "error"
+  features [error typing refinement mutable aggregate length lower bound invalidation negative]
+  template ny-compile-fail
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  expect compile_fail
+  expect_message "refinement obligation"
+  source ny <<'NY'
+use core
+
+refine AtLeastThree = list where(items) { items.len >= 3 }
+fn require_at_least_three(AtLeastThree items) int { return items.len }
+
+fn invalid_after_shrink() int {
+  mut list<int> items = [2, 4, 6]
+  if AtLeastThree(items) {
+    items.pop()
+    return require_at_least_three(items)
+  }
+  0
+}
+invalid_after_shrink()
+NY
+}
+
+shape mutable_aggregate_indexed_refinement_survives_literal_concatenation {
+  family "runtime/language"
+  generator "regression"
+  features [ny test typing refinement mutable aggregate list concatenation positive]
+  template ny-test-case
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+refine PositiveFirstAfterConcat = list where(items) {
+  items.len > 0 && items[0] > 0
+}
+fn require_positive_first(PositiveFirstAfterConcat items) int {
+  return items.len
+}
+
+fn checked_after_literal_concat() int {
+  mut list<int> items = [4]
+  if PositiveFirstAfterConcat(items) {
+    items = items + [8, 9]
+    return require_positive_first(items)
+  }
+  0
+}
+
+assert(checked_after_literal_concat() == 3,
+       "a nonnegative fixed-index fact survives appending a literal list")
+NY
+}
+
+shape mutable_aggregate_negative_index_expires_after_literal_concatenation {
+  family "compiler-errors/types"
+  generator "error"
+  features [error typing refinement mutable aggregate list concatenation negative]
+  template ny-compile-fail
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  expect compile_fail
+  expect_message "refinement obligation"
+  source ny <<'NY'
+use core
+
+refine PositiveLastAfterConcat = list where(items) { items[-1] > 0 }
+fn require_positive_last(PositiveLastAfterConcat items) int {
+  return items.len
+}
+
+fn invalid_after_literal_concat() int {
+  mut list<int> items = [4]
+  if PositiveLastAfterConcat(items) {
+    items = items + [0]
+    return require_positive_last(items)
+  }
+  0
+}
+invalid_after_literal_concat()
+NY
+}
+
+shape mutable_aggregate_indexed_refinement_survives_known_list_suffix {
+  family "runtime/language"
+  generator "regression"
+  features [ny test typing refinement mutable aggregate list concatenation variable suffix positive]
+  template ny-test-case
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+refine PositiveFirst = list where(items) { items[0] > 0 }
+@effects(read)
+fn require_positive_first(PositiveFirst items) int {
+  return items.len
+}
+
+fn checked_after_variable_concat() int {
+  mut list<int> items = [4, 5]
+  mut list<int> suffix = [0]
+  if PositiveFirst(items) {
+    items = items + suffix
+    return require_positive_first(items)
+  }
+  0
+}
+
+assert(checked_after_variable_concat() == 3,
+       "a proven nonnegative prefix fact survives concatenating a list local")
+NY
+}
+
+shape mutable_aggregate_negative_index_expires_after_known_list_suffix {
+  family "compiler-errors/types"
+  generator "error"
+  features [error typing refinement mutable aggregate list concatenation variable suffix negative]
+  template ny-compile-fail
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  expect compile_fail
+  expect_message "refinement obligation"
+  source ny <<'NY'
+use core
+
+refine PositiveLastAfterConcat = list where(items) { items[-1] > 0 }
+fn require_positive_last(PositiveLastAfterConcat items) int {
+  return items[-1]
+}
+
+fn invalid_after_variable_concat() int {
+  mut list<int> items = [4]
+  mut list<int> suffix = [0]
+  if PositiveLastAfterConcat(items) {
+    items = items + suffix
+    return require_positive_last(items)
+  }
+  0
+}
+invalid_after_variable_concat()
+NY
+}
+
+shape mutable_aggregate_length_refinement_survives_literal_prefix {
+  family "runtime/language"
+  generator "regression"
+  features [ny test typing refinement mutable aggregate list prefix positive]
+  template ny-test-case
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+refine NonEmptyAfterPrefix = list where(items) { items.len > 0 }
+fn require_nonempty_prefix(NonEmptyAfterPrefix items) int {
+  return items.len
+}
+
+fn checked_after_literal_prefix() int {
+  mut list<int> items = [4, 5]
+  if NonEmptyAfterPrefix(items) {
+    items = [8, 9] + items
+    return require_nonempty_prefix(items)
+  }
+  0
+}
+
+assert(checked_after_literal_prefix() == 4,
+       "prepending a literal list preserves a length lower-bound fact")
+NY
+}
+
+shape mutable_aggregate_indexed_refinement_expires_after_literal_prefix {
+  family "compiler-errors/types"
+  generator "error"
+  features [error typing refinement mutable aggregate list prefix negative]
+  template ny-compile-fail
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  expect compile_fail
+  expect_message "refinement obligation"
+  source ny <<'NY'
+use core
+
+refine PositiveFirstAfterPrefix = list where(items) { items[0] > 0 }
+fn require_positive_prefix(PositiveFirstAfterPrefix items) int {
+  return items.len
+}
+
+fn invalid_after_literal_prefix() int {
+  mut list<int> items = [4, 5]
+  if PositiveFirstAfterPrefix(items) {
+    items = [0] + items
+    return require_positive_prefix(items)
+  }
+  0
+}
+invalid_after_literal_prefix()
+NY
+}
+
+shape mutable_aggregate_length_and_content_conjunction_survives_append {
+  family "runtime/language"
+  generator "regression"
+  features [ny test typing refinement mutable aggregate length content conjunction append positive]
+  template ny-test-case
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+refine AtLeastThreeAndFirstPositive = list where(items) {
+  items.len >= 3 && items[0] > 0
+}
+fn require_at_least_three_and_first_positive(
+    AtLeastThreeAndFirstPositive items) int {
+  return items.len
+}
+
+fn checked_append() int {
+  mut list<int> items = [2, 4, 6]
+  if AtLeastThreeAndFirstPositive(items) {
+    items[1] = 9
+    items = append(items, 8)
+    return require_at_least_three_and_first_positive(items)
+  }
+  0
+}
+
+assert(checked_append() == 4,
+       "the stable first element and length lower bound survive append")
+NY
+}
+
+shape mutable_aggregate_exact_length_and_content_conjunction_expires_after_append {
+  family "compiler-errors/types"
+  generator "error"
+  features [error typing refinement mutable aggregate exact length append invalidation negative]
+  template ny-compile-fail
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  expect compile_fail
+  expect_message "refinement obligation"
+  source ny <<'NY'
+use core
+
+refine ExactlyThreeAndFirstPositive = list where(items) {
+  items.len == 3 && items[0] > 0
+}
+fn require_exactly_three_and_first_positive(
+    ExactlyThreeAndFirstPositive items) int {
+  return items.len + items[0]
+}
+
+fn invalid_after_append() int {
+  mut list<int> items = [2, 4, 6]
+  if ExactlyThreeAndFirstPositive(items) {
+    items[1] = 9
+    items = append(items, 8)
+    return require_exactly_three_and_first_positive(items)
+  }
+  0
+}
+invalid_after_append()
+NY
+}

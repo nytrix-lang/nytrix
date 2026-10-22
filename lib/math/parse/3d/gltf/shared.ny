@@ -1,17 +1,18 @@
 ;; Keywords: 3d gltf glb parse
-module std.math.parse.3d.gltf.shared(GLTF_COMP_NONE, GLTF_COMP_BYTE, GLTF_COMP_UBYTE, GLTF_COMP_SHORT, GLTF_COMP_USHORT, GLTF_COMP_UINT, GLTF_COMP_FLOAT, GLTF_TYPE_SCALAR, GLTF_TYPE_VEC2, GLTF_TYPE_VEC3, GLTF_TYPE_VEC4, GLTF_TYPE_MAT2, GLTF_TYPE_MAT3, GLTF_TYPE_MAT4, _GLB_MAGIC, _GLB_CHUNK_JSON, _GLB_CHUNK_BIN, _gltf_is_json_ws, GltfCompSize, GltfTypeCount, GltfTypeCols, GltfTypeRows, GltfImageMimeSupported, GltfImageExtFromMime, GltfExtensionStatus, _gltf_img_uri_cache, _gltf_material_infos_cache, _gltf_anim_info_cache, _gltf_acc_res_cache, _gltf_anim_sample_cache, _gltf_node_local_mats_cache, _gltf_skin_inv_bind_cache, _gltf_mesh_inv_cache, _gltf_visibility_flag_cache, _gltf_disable_skinning_mode, _gltf_skin_raw_off_mode, _gltf_skin_validate_mode, _gltf_skin_no_mesh_inv_mode, _gltf_skin_transpose_inv_bind_mode, _gltf_skin_invbind_first_mode, _gltf_anim_fast_mode, _gltf_anim_fast_skin_mode, _gltf_ensure_caches, _gltf_env_truthy_flag, _gltf_env_toggle_flag, _gltf_disable_skinning_enabled, _gltf_skin_raw_off_enabled, _gltf_skin_validate_enabled, _gltf_skin_no_mesh_inv_enabled, _gltf_skin_transpose_inv_bind_enabled, _gltf_skin_invbind_first_enabled, _gltf_anim_fast_enabled, _gltf_anim_fast_skin_enabled, _gltf_cache_key_from_g, _gltf_cache_key_from_data, _gltf_stamp_cache_key, _GLTF_CACHE_LIMIT_SMALL, _GLTF_CACHE_LIMIT_MED, _GLTF_CACHE_LIMIT_BIG, GLTF_MODE_TRIANGLES, _GLTF_VTX_STRIDE, _GLTF_VTX_OFF_X, _GLTF_VTX_OFF_Y, _GLTF_VTX_OFF_Z, _GLTF_VTX_OFF_U, _GLTF_VTX_OFF_V, _GLTF_VTX_OFF_C, _GLTF_VTX_OFF_NX, _GLTF_VTX_OFF_NY, _GLTF_VTX_OFF_NZ, _GLTF_VTX_OFF_TX, _GLTF_VTX_OFF_TY, _GLTF_VTX_OFF_TZ, _GLTF_VTX_OFF_TW, _GLTF_VTX_OFF_U2, _GLTF_VTX_OFF_V2, _GLTF_VTX_OFF_TEX, _GLTF_INV_255, _GLTF_INV_127, _GLTF_INV_65535, _GLTF_INV_32767, _gltf_copy_bytes, _gltf_copy_blob_bytes, _gltf_blob_ptr, _gltf_is_path_sep, _gltf_path_dirname, _gltf_url_decode, _gltf_float_bad, _gltf_float3_bad, _gltf_float6_bad, _gltf_list_has_bad_float, _gltf_mat3x4_bad, _gltf_num_or, _gltf_vec3, _gltf_vec4, _gltf_anim_duration_valid, _gltf_doc_has_invalid_node_trs, _gltf_align_up, _gltf_elem_size, _gltf_read_f32_fast, _gltf_read_f32_acc, _gltf_read_index_acc, _gltf_node_local_mats, _gltf_node_visit_key, _gltf_make_material_slot, _gltf_alpha_mode_code, _gltf_prim_mode_expands_to_vertices, _gltf_apply_prim_mode_opts, _gltf_active_scene_idx, _gltf_vertex_color_u32, _gltf_make_uv_xform, _gltf_mat3x4_num, _gltf_mat3_num, _gltf_pack_uv_xform_words_from_values, _gltf_pack_uv_xform_words, _gltf_uv_xf_force_uv0, _gltf_pick_primary_uv_props, _gltf_extension_status, _gltf_extension_required_supported, gltf_supported_extension_caps, gltf_extensions_report, gltf_required_extension_failures, _gltf_meshes, _gltf_transform_aabb, _gltf_comp_size, _gltf_type_count)
-use std.core
-use std.math.bin
-use std.math
-use std.math.float (is_nan, is_inf)
-use std.core.str as str
-use std.core.common as common
-use std.core.cache as cache
-use std.os.path as ospath
-use std.math.parse.data.json
-use std.math.crypto.hash as lib_hash
-use std.os (file_exists, file_read)
-use std.math.parse.3d.gltf.math as gltf_math
+;; Defines shared glTF constants, records, and caches for model loading.
+module core.math.parse.3d.gltf.shared(GLTF_COMP_NONE, GLTF_COMP_BYTE, GLTF_COMP_UBYTE, GLTF_COMP_SHORT, GLTF_COMP_USHORT, GLTF_COMP_UINT, GLTF_COMP_FLOAT, GLTF_TYPE_SCALAR, GLTF_TYPE_VEC2, GLTF_TYPE_VEC3, GLTF_TYPE_VEC4, GLTF_TYPE_MAT2, GLTF_TYPE_MAT3, GLTF_TYPE_MAT4, _GLB_MAGIC, _GLB_CHUNK_JSON, _GLB_CHUNK_BIN, _gltf_is_json_ws, GltfCompSize, GltfTypeCount, GltfTypeCols, GltfTypeRows, GltfImageMimeSupported, GltfImageExtFromMime, GltfExtensionStatus, _gltf_img_uri_cache, _gltf_material_infos_cache, _gltf_anim_info_cache, _gltf_acc_res_cache, _gltf_anim_sample_cache, _gltf_node_local_mats_cache, _gltf_skin_inv_bind_cache, _gltf_mesh_inv_cache, _gltf_visibility_flag_cache, _gltf_disable_skinning_mode, _gltf_skin_raw_off_mode, _gltf_skin_validate_mode, _gltf_skin_no_mesh_inv_mode, _gltf_skin_transpose_inv_bind_mode, _gltf_skin_invbind_first_mode, _gltf_anim_fast_mode, _gltf_anim_fast_skin_mode, _gltf_ensure_caches, _gltf_env_truthy_flag, _gltf_env_toggle_flag, _gltf_disable_skinning_enabled, _gltf_skin_raw_off_enabled, _gltf_skin_validate_enabled, _gltf_skin_no_mesh_inv_enabled, _gltf_skin_transpose_inv_bind_enabled, _gltf_skin_invbind_first_enabled, _gltf_anim_fast_enabled, _gltf_anim_fast_skin_enabled, _gltf_cache_key_from_g, _gltf_cache_key_from_data, _gltf_stamp_cache_key, _GLTF_CACHE_LIMIT_SMALL, _GLTF_CACHE_LIMIT_MED, _GLTF_CACHE_LIMIT_BIG, GLTF_MODE_TRIANGLES, _GLTF_VTX_STRIDE, _GLTF_VTX_OFF_X, _GLTF_VTX_OFF_Y, _GLTF_VTX_OFF_Z, _GLTF_VTX_OFF_U, _GLTF_VTX_OFF_V, _GLTF_VTX_OFF_C, _GLTF_VTX_OFF_NX, _GLTF_VTX_OFF_NY, _GLTF_VTX_OFF_NZ, _GLTF_VTX_OFF_TX, _GLTF_VTX_OFF_TY, _GLTF_VTX_OFF_TZ, _GLTF_VTX_OFF_TW, _GLTF_VTX_OFF_U2, _GLTF_VTX_OFF_V2, _GLTF_VTX_OFF_TEX, _GLTF_INV_255, _GLTF_INV_127, _GLTF_INV_65535, _GLTF_INV_32767, _gltf_copy_bytes, _gltf_copy_blob_bytes, _gltf_blob_ptr, _gltf_is_path_sep, _gltf_path_dirname, _gltf_url_decode, _gltf_float_bad, _gltf_float3_bad, _gltf_float6_bad, _gltf_list_has_bad_float, _gltf_mat3x4_bad, _gltf_num_or, _gltf_vec3, _gltf_vec4, _gltf_anim_duration_valid, _gltf_doc_has_invalid_node_trs, _gltf_align_up, _gltf_elem_size, _gltf_read_f32_fast, _gltf_read_f32_acc, _gltf_read_index_acc, _gltf_node_local_mats, _gltf_node_visit_key, _gltf_make_material_slot, _gltf_alpha_mode_code, _gltf_prim_mode_expands_to_vertices, _gltf_apply_prim_mode_opts, _gltf_active_scene_idx, _gltf_vertex_color_u32, _gltf_make_uv_xform, _gltf_mat3x4_num, _gltf_mat3_num, _gltf_pack_uv_xform_words_from_values, _gltf_pack_uv_xform_words, _gltf_uv_xf_force_uv0, _gltf_pick_primary_uv_props, _gltf_extension_status, _gltf_extension_required_supported, gltf_supported_extension_caps, gltf_extensions_report, gltf_required_extension_failures, _gltf_meshes, _gltf_transform_aabb, _gltf_comp_size, _gltf_type_count)
+use core
+use core.math.bin
+use core.math
+use core.math.float (is_nan, is_inf)
+use core.str as str
+use core.common as common
+use core.cache as cache
+use core.os.path as ospath
+use core.math.parse.data.json
+use core.math.crypto.hash as lib_hash
+use core.os (file_exists, file_read)
+use core.math.parse.3d.gltf.math as gltf_math
 
 def GLTF_COMP_NONE = 0
 def GLTF_COMP_BYTE = 5120
@@ -45,27 +46,27 @@ comptime table GltfCompSize {
 }
 
 comptime table GltfTypeCount {
-   GLTF_TYPE_SCALAR -> 1
-   GLTF_TYPE_VEC2 -> 2
-   GLTF_TYPE_VEC3 -> 3
-   GLTF_TYPE_VEC4 -> 4
-   GLTF_TYPE_MAT2 -> 4
-   GLTF_TYPE_MAT3 -> 9
-   GLTF_TYPE_MAT4 -> 16
+   "SCALAR" -> 1
+   "VEC2" -> 2
+   "VEC3" -> 3
+   "VEC4" -> 4
+   "MAT2" -> 4
+   "MAT3" -> 9
+   "MAT4" -> 16
 }
 
 comptime table GltfTypeCols {
-   GLTF_TYPE_SCALAR, GLTF_TYPE_VEC2, GLTF_TYPE_VEC3, GLTF_TYPE_VEC4 -> 1
-   GLTF_TYPE_MAT2 -> 2
-   GLTF_TYPE_MAT3 -> 3
-   GLTF_TYPE_MAT4 -> 4
+   "SCALAR", "VEC2", "VEC3", "VEC4" -> 1
+   "MAT2" -> 2
+   "MAT3" -> 3
+   "MAT4" -> 4
 }
 
 comptime table GltfTypeRows {
-   GLTF_TYPE_SCALAR -> 1
-   GLTF_TYPE_VEC2, GLTF_TYPE_MAT2 -> 2
-   GLTF_TYPE_VEC3, GLTF_TYPE_MAT3 -> 3
-   GLTF_TYPE_VEC4, GLTF_TYPE_MAT4 -> 4
+   "SCALAR" -> 1
+   "VEC2", "MAT2" -> 2
+   "VEC3", "MAT3" -> 3
+   "VEC4", "MAT4" -> 4
 }
 
 comptime table GltfImageMimeSupported {
@@ -451,7 +452,7 @@ fn _gltf_elem_size(int comp_size, str type_str) int {
 
 fn _gltf_read_f32_fast(any data, int offset, int comp_type) f64 {
    case comp_type {
-      GLTF_COMP_FLOAT -> f32le(data, offset)
+      GLTF_COMP_FLOAT -> float(f32le(data, offset))
       GLTF_COMP_UBYTE -> load8(data, offset) * _GLTF_INV_255
       GLTF_COMP_BYTE -> {
          def raw = load8(data, offset)
@@ -473,7 +474,7 @@ fn _gltf_read_f32_fast(any data, int offset, int comp_type) f64 {
 
 fn _gltf_read_f32_acc(any data_ptr, int offset, int comp_type, bool normalized=false) f64 {
    case comp_type {
-      GLTF_COMP_FLOAT -> f32le(data_ptr, offset)
+      GLTF_COMP_FLOAT -> float(f32le(data_ptr, offset))
       GLTF_COMP_UBYTE -> {
          def raw = load8(data_ptr, offset)
          normalized ? raw * _GLTF_INV_255 : raw * 1.0
@@ -705,7 +706,7 @@ fn _gltf_pick_primary_uv_props(any info, any texrec=0) list {
    [uv_set, _gltf_make_uv_xform(info, prefix)]
 }
 
-fn _gltf_extension_status(str name) str { comptime match GltfExtensionStatus(name, "unknown") }
+fn _gltf_extension_status_name(str name) str { comptime match GltfExtensionStatus(name, "unknown") }
 
 fn _gltf_extension_required_supported(str status) bool {
    status != "unknown" && status != "unsupported" && status != "fallback-or-unsupported"
@@ -767,7 +768,7 @@ fn _gltf_extension_doc(any gltf_data) any {
 }
 
 fn _gltf_extension_report_row(str name) dict {
-   def status = _gltf_extension_status(name)
+   def status = _gltf_extension_status_name(name)
    {
       "name": name,
       "status": status,

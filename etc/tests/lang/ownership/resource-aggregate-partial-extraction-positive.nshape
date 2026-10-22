@@ -1,0 +1,28 @@
+shape ownership_resource_aggregate_partial_extraction_positive {
+  family "language/ownership"
+  generator "syntax"
+  features ["ownership", "resource", "linear", "aggregate", "partial-extraction", "positive"]
+  template ny-test-case
+  expect compile_and_run
+  expect_exit 0
+  flags "--ownership-strict --nyir-verify"
+  source ny <<'NY'
+use core
+linear layout File { int fd }
+layout Pair { File left, File right }
+
+@consumes(file)
+fn dispose(File file) int { forget(file) 0 }
+
+fn partial_extraction() int {
+  def Pair pair = Pair(File(1), File(2))
+  def File left = pair.left
+  dispose(left)
+  def File right = pair.right
+  dispose(right)
+  0
+}
+
+assert(partial_extraction() == 0, "each extracted resource is consumed")
+NY
+}

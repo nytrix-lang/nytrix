@@ -1,0 +1,22 @@
+shape ownership_rule_exclusive_borrow_mixed_sign_index_negative {
+  family "compiler-errors/ownership"
+  generator "error"
+  features ["error", "ownership", "borrow", "exclusive", "index", "overlap", "negative"]
+  template ny-compile-fail
+  expect compile_fail
+  flags "--ownership-strict --nyir-verify"
+
+  source ny <<'NY'
+use core
+
+fn borrow_negative_index() int {
+  mut list<int> values = [7, 8, 9]
+  def exclusive = &mut values[-1]
+  values[2] = 10
+  def observed = exclusive
+  values[-1]
+}
+
+borrow_negative_index()
+NY
+}

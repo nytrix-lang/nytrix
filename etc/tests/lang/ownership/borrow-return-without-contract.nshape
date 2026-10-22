@@ -1,0 +1,19 @@
+shape ownership_rule_borrow_return_without_contract {
+  family "compiler-errors/ownership"
+  generator "error"
+  features ["error", "ownership", "negative", "borrow", "return"]
+  template ny-compile-fail
+  expect compile_fail
+  flags "--ownership-strict"
+  expect_message "returning a borrow requires @returns_borrow(param)"
+  source ny <<'NY'
+use core
+
+fn bad(int x) {
+  def ref = &x
+  return ref
+}
+
+bad(1)
+NY
+}

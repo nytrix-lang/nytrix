@@ -1,34 +1,34 @@
 ;; Keywords: render vulkan gpu os ui
 ;; Vulkan renderer core for frames, command buffers, swapchains, and presentation.
 ;; References:
-;; - std.os.ui.render.vk
-;; - std.os.ui.render
-;; - std.os.ui.render.matrix
-module std.os.ui.render.vk.renderer(renderer_config, init, _update_default_mvp, _mvp_matrix, set_model_matrix, set_mvp, set_ortho, set_perspective, set_frame_time_sec, begin_frame, set_unlit, set_double_sided, set_vertex_color_mode, _sync_pc, _flush, _check_flush, set_next_frame_load_color, set_scissor_rect, reset_scissor_rect, end_frame, _end_frame_internal, clear, clear_depth, set_clear_color, shutdown, set_wireframe, request_frame_capture, capture_scene_color_resume_pass, clear_scene_color_capture, _create_instance, _create_surface, _pick_physical_device, _create_logical_device, _choose_composite_alpha, _choose_present_mode, set_mask, _create_headless_image, _create_swapchain, _create_swapchain_image_views, _destroy_swapchain_objects, _recreate_swapchain, _create_image_views, _create_depth_resources, _create_render_pass, _create_framebuffers, _create_sync_objects, _create_command_pool, _create_command_buffers, notify_window_resize, get_swapchain_size, get_swapchain_width, get_swapchain_height, set_cam_pos, set_env_tex, set_env_spec_tex, set_scene_lights, set_scene_lights_slab, set_ui_material, set_material_from_slab, draw_parts_flat, draw_parts_flat_range, draw_parts_flat_range_no_restore, draw_parts_flat_range_state_no_restore, draw_part_flat_no_restore, draw_part0_flat_no_restore, draw_part0_flat_state_no_restore, debug_stage)
-use std.core
-use std.core.mem
-use std.math
-use std.math.matrix
-use std.math.simmd as simmd
-use std.os.ui.render.matrix (mat4_identity)
-use std.os.ui.window.native as native
-use std.os.ui.window as lib_uiw
-use std.os.ui.window.consts
-use std.os.ui.window.consts (WINDOW_TRANSPARENT)
-use std.os.ui.render.dump as ui_profile
-use std.os.ui.render.vk.state as vk_state
-use std.os.ui.render.vk.utils
-use std.os.ui.render.vk.buffers
-use std.os.ui.render.vk.texture
-use std.os.ui.render.vk.pipeline
-use std.os.ui.render.vk.draw (draw_static_buffer_raw, draw_static_buffer_indexed_raw)
-use std.os.ui.render.vk.vulkan
-use std.os (msleep, ticks)
-use std.os.path as ospath
-use std.os.process as proc
-use std.math.parse.data.json
-use std.core.str as text
-use std.core.common as common
+;; - core.os.ui.render.vk
+;; - core.os.ui.render
+;; - core.os.ui.render.matrix
+module core.os.ui.render.vk.renderer(renderer_config, init, _update_default_mvp, _mvp_matrix, set_model_matrix, set_mvp, set_ortho, set_perspective, set_frame_time_sec, begin_frame, set_unlit, set_target_pipeline, set_double_sided, set_vertex_color_mode, _sync_pc, _flush, _check_flush, set_next_frame_load_color, set_scissor_rect, reset_scissor_rect, end_frame, _end_frame_internal, clear, clear_depth, set_clear_color, shutdown, set_wireframe, request_frame_capture, _take_frame_capture, capture_scene_color_resume_pass, clear_scene_color_capture, _create_instance, _create_surface, _pick_physical_device, _create_logical_device, _choose_composite_alpha, _choose_present_mode, set_mask, _create_headless_image, _create_swapchain, _create_swapchain_image_views, _destroy_swapchain_objects, _recreate_swapchain, _create_image_views, _create_depth_resources, _create_render_pass, _create_framebuffers, _create_sync_objects, _create_command_pool, _create_command_buffers, notify_window_resize, get_swapchain_size, get_swapchain_width, get_swapchain_height, set_cam_pos, set_env_tex, set_env_spec_tex, set_scene_lights, set_scene_lights_slab, set_ui_material, set_material_from_slab, set_material_from_slab_base, draw_parts_flat, draw_parts_flat_range, draw_parts_flat_range_no_restore, draw_parts_flat_range_state_no_restore, draw_part_flat_no_restore, draw_part0_flat_no_restore, draw_part0_flat_state_no_restore, debug_stage)
+use core
+use core.mem
+use core.math
+use core.math.matrix
+use core.math.simmd as simmd
+use core.os.ui.render.matrix (mat4_identity)
+use core.os.ui.window.native as native
+use core.os.ui.window as lib_uiw
+use core.os.ui.window.consts
+use core.os.ui.window.consts (WINDOW_TRANSPARENT)
+use core.os.ui.render.dump as ui_profile
+use core.os.ui.render.vk.state as vk_state
+use core.os.ui.render.vk.utils
+use core.os.ui.render.vk.buffers
+use core.os.ui.render.vk.texture
+use core.os.ui.render.vk.pipeline
+use core.os.ui.render.vk.draw (draw_static_buffer_raw, draw_static_buffer_indexed_raw)
+use core.os.ui.render.vk.vulkan
+use core.os (msleep, ticks)
+use core.os.path as ospath
+use core.os.process as proc
+use core.math.parse.data.json
+use core.str as text
+use core.common as common
 
 fn _renderer_alloc(int size) any {
    def p = zalloc(size)
@@ -36,10 +36,14 @@ fn _renderer_alloc(int size) any {
    p
 }
 
-mut _flush_diag_counter = 0
+mut _flush_diag_counter, _flush_diag_enabled = 0, -1
 
 fn _flush_diag(str msg) any {
-   if !(common.env_truthy("NY_GLTF_FORCE_GROUP_DIAG") || common.env_truthy("NY_VK_PIPE_TRACE")) { return 0 }
+   if _flush_diag_enabled < 0 {
+      _flush_diag_enabled = (common.env_truthy("NY_GLTF_FORCE_GROUP_DIAG") ||
+         common.env_truthy("NY_VK_PIPE_TRACE")) ? 1 : 0
+   }
+   if _flush_diag_enabled == 0 { return 0 }
    if _flush_diag_counter < 24 { ui_profile.print_text("[vk:flush:diag] " + msg) }
    _flush_diag_counter += 1
    0
@@ -123,7 +127,7 @@ fn _store_mat4_cm(any dst, any mat) bool {
    store_mat4_cm_raw(dst, mat, true)
 }
 
-fn _store_identity_mat4(any dst) bool {
+fn _store_identity_mat4(?ptr dst) bool {
    if dst == 0 { ui_profile.print_text("[vk] _store_identity_mat4: null ptr") return false }
    memset(dst, 0, 64)
    store32_f32(dst, 1.0, 0)
@@ -299,10 +303,10 @@ fn _vk_frame_targets_ready(any has_surface=-1) bool {
    }
    if _current_frame < 0 || _current_frame >= _command_buffers_count { return false }
    if _current_frame >= _image_available_semaphores_count
-   || _current_frame >= _render_finished_semaphores_count
-   || _current_frame >= _in_flight_fences_count{
+   || _in_flight_fences_count < _frames_in_flight(){
       return false
    }
+   if _render_finished_semaphores_count < _swapchain_image_count { return false }
    if _offscreen_draw_enabled()
    && (_draw_image_views_count < _swapchain_image_count
       || _draw_images.len < _swapchain_image_count){
@@ -609,7 +613,7 @@ fn _ensure_scene_color_capture_tex() bool {
 }
 
 fn _begin_load_render_pass() bool {
-   if !_frame_open { return false }
+   if !vk_state.frame_open() { return false }
    if !_handle_ok(_render_pass_load) { return false }
    if !_vk_handle_slab_ready(_framebuffers_slab, _framebuffers_count, _image_index) { return false }
    def fb = load64_h(_framebuffers_slab, _image_index * 8)
@@ -659,7 +663,7 @@ fn set_next_frame_load_color(bool enabled) any {
 }
 
 fn _apply_scissor_rect_i32(int x, int y, int w, int h) bool {
-   if !_frame_open || !_current_frame_cb { return false }
+   if !vk_state.frame_open() || !_current_frame_cb { return false }
    mut sx, sy = int(x), int(y)
    mut sw, sh = int(w), int(h)
    if sx < 0 {
@@ -700,7 +704,7 @@ fn reset_scissor_rect() bool {
 
 fn capture_scene_color_resume_pass() bool {
    "Runs the capture scene color resume pass operation."
-   if !_frame_open || !_current_frame_cb { return false }
+   if !vk_state.frame_open() || !_current_frame_cb { return false }
    if !_ensure_scene_color_capture_tex() { return false }
    if _scene_color_capture_tex_id < 0 { return false }
    def tex_obj = _textures.get(_scene_color_capture_tex_id, 0)
@@ -858,7 +862,7 @@ fn _store_attachment_desc(
    store32(atts, final_layout, off + 32)
 }
 
-fn _create_render_pass_handle(any atts, int att_count, any subpass_desc) any {
+fn _create_render_pass_handle(any atts, int att_count, any subpass_desc) ?handle {
    def create_info = _renderer_alloc(64)
    store32(create_info, VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO, 0)
    store32(create_info, att_count, 20)
@@ -1260,40 +1264,45 @@ fn set_ortho(any l, any r, any b, any t, any n, any f) any {
    "Sets the MVP matrix to an orthographic projection(row-major memory layout, Vulkan clip Z=[0,1])."
    if b < t { def tmp = b b = t t = tmp }
    if !_handle_ok(_current_mvp) { return 0 }
-   l, r, b, t, n, f = float(l), float(r), float(b), float(t), float(n), float(f)
+   def lf = float(l)
+   def rf = float(r)
+   def bf = float(b)
+   def tf = float(t)
+   def nf = float(n)
+   def ff = float(f)
    if _last_ortho_valid && _current_is_ortho &&
-   _last_ortho_l == l && _last_ortho_r == r &&
-   _last_ortho_b == b && _last_ortho_t == t &&
-   _last_ortho_n == n && _last_ortho_f == f{
+   _last_ortho_l == lf && _last_ortho_r == rf &&
+   _last_ortho_b == bf && _last_ortho_t == tf &&
+   _last_ortho_n == nf && _last_ortho_f == ff{
       return 0
    }
-   def rl = float(r - l)
-   def tb = float(t - b)
-   def fnv = float(f - n)
+   def rl = rf - lf
+   def tb = tf - bf
+   def fnv = ff - nf
    if rl == 0.0 || tb == 0.0 || fnv == 0.0 { return 0 }
    if _vertex_offset != _last_flush_offset {
       _flush_reason = 2
       _flush()
    }
-   def mat = [
-      2.0 / rl, 0.0, 0.0, -float(r + l) / rl,
-      0.0, 2.0 / tb, 0.0, -float(t + b) / tb,
-      0.0, 0.0, 1.0 / fnv, -float(n) / fnv,
-      0.0, 0.0, 0.0, 1.0
-   ]
-   if _store_mat4(_current_mvp, mat) {
-      _mvp_dirty = true
-      _pc_dirty = true
-      _current_is_ortho = true
-      _last_ortho_valid = true
-      _last_ortho_l = l
-      _last_ortho_r = r
-      _last_ortho_b = b
-      _last_ortho_t = t
-      _last_ortho_n = n
-      _last_ortho_f = f
-      _last_persp_valid = false
-   }
+   memset(_current_mvp, 0, 64)
+   store32_f32(_current_mvp, 2.0 / rl, 0)
+   store32_f32(_current_mvp, 2.0 / tb, 20)
+   store32_f32(_current_mvp, 1.0 / fnv, 40)
+   store32_f32(_current_mvp, 1.0, 60)
+   store32_f32(_current_mvp, -(rf + lf) / rl, 48)
+   store32_f32(_current_mvp, -(tf + bf) / tb, 52)
+   store32_f32(_current_mvp, -nf / fnv, 56)
+   _mvp_dirty = true
+   _pc_dirty = true
+   _current_is_ortho = true
+   _last_ortho_valid = true
+   _last_ortho_l = lf
+   _last_ortho_r = rf
+   _last_ortho_b = bf
+   _last_ortho_t = tf
+   _last_ortho_n = nf
+   _last_ortho_f = ff
+   _last_persp_valid = false
    0
 }
 
@@ -1589,7 +1598,7 @@ fn _draw_part_flat_base_no_restore(?ptr base) int {
 }
 
 fn _draw_static_mesh_part_fast(any sbuf, int soff, any ibuf, int ioff, int idx_count, int draw_count, int index_type, any pipe) bool {
-   if !_frame_open || !sbuf || (!ibuf && draw_count <= 0) || (ibuf && idx_count <= 0) || !pipe { return false }
+   if !vk_state.frame_open() || !sbuf || (!ibuf && draw_count <= 0) || (ibuf && idx_count <= 0) || !pipe { return false }
    if _vertex_offset != _last_flush_offset {
       _flush_reason = 3
       _flush()
@@ -1831,7 +1840,7 @@ fn _vk_begin_frame_acquire_image(bool has_surface, bool backend_is_wayland, bool
       }
       if !_same_int_value(acq, 0) && !_same_int_value(acq, 1000001003) { return _vk_begin_false("acquire_error_" + to_str(acq)) }
       if _deep_on { _vk_deep_begin_acquire_ms = ui_profile.elapsed_ms(_t_acquire) }
-      _image_index = load32_h(_ptr_img_idx, 0)
+      _image_index = load32(_ptr_img_idx, 0)
    } else {
       _vk_stage("begin.acquire.headless")
       if _swapchain_image_count < 1 {
@@ -1935,7 +1944,6 @@ fn _vk_begin_frame_record_commands(bool _deep_on, bool has_surface) bool {
    cmd_set_scissor(cb, 0, 1, _ptr_sci)
    _vk_stage("begin.dynamic.done")
    if _deep_on { _vk_deep_begin_vp_ms = ui_profile.elapsed_ms(_t_vp) }
-   _frame_open = true
    _current_frame_cb = cb
    _current_frame_ubo_ds = load64_h(_ubo_ds_slab, _current_frame * 8)
    _total_frames += 1
@@ -1974,7 +1982,7 @@ fn begin_frame() bool {
    _vk_stage("begin.resize")
    if !_vk_begin_frame_prepare_swapchain(has_surface) { return false }
    _vk_stage("begin.reset")
-   _frame_open = false
+   vk_state.set_frame_open(false)
    _active_scene_color_tex_id = -1
    _flush_total = 0
    _flush_reason_tex = 0
@@ -2026,6 +2034,7 @@ fn begin_frame() bool {
    }
    if !_vk_begin_frame_acquire_image(has_surface, backend_is_wayland, backend_is_win32, _deep_on) { return false }
    if !_vk_begin_frame_record_commands(_deep_on, has_surface) { return false }
+   vk_state.set_frame_open(true)
    _vk_stage("begin.mvp")
    if !_skip_default_mvp_this_frame() { _update_default_mvp(_window_ref) }
    _vk_stage("begin.mvp.done")
@@ -2075,8 +2084,36 @@ fn begin_frame() bool {
    memcpy(_pc_buffer + 64, _current_model, 64)
    store32(_pc_buffer, 0, 128)
    store32(_pc_buffer, _current_is_unlit, 132)
-   store32(_pc_buffer, _swapchain_extent_w, 136)
-   store32(_pc_buffer, _swapchain_extent_h, 140)
+   store32(_pc_buffer, _current_base_color_u32, 136)
+   store32(_pc_buffer, _current_metallic_roughness_u32, 140)
+   store32(_pc_buffer, _packed_env_scene_word(), 144)
+   store32(_pc_buffer, _current_env_spec_tex_id, 148)
+   store32(_pc_buffer, _current_bsdf4_u32, 152)
+   store32(_pc_buffer, _current_bsdf5_u32, 156)
+   store32_f32(_pc_buffer, _cam_pos_x, 160)
+   store32_f32(_pc_buffer, _cam_pos_y, 164)
+   store32_f32(_pc_buffer, _cam_pos_z, 168)
+   store32(_pc_buffer, _current_emissive_u32, 172)
+   store32(_pc_buffer, _current_emissive_tex_word, 176)
+   store32(_pc_buffer, _current_base_tex_word, 180)
+   store32(_pc_buffer, _current_alpha_u32, 184)
+   store32(_pc_buffer, _current_occlusion_tex_word, 188)
+   store32(_pc_buffer, _current_bsdf0_u32, 192)
+   store32(_pc_buffer, _current_bsdf1_u32, 196)
+   store32(_pc_buffer, _current_bsdf2_u32, 200)
+   store32(_pc_buffer, _current_bsdf3_u32, 204)
+   store32(_pc_buffer, _current_base_uv_xf0, 208)
+   store32(_pc_buffer, _current_base_uv_xf1, 212)
+   store32(_pc_buffer, _current_normal_uv_xf0, 216)
+   store32(_pc_buffer, _current_normal_uv_xf1, 220)
+   store32(_pc_buffer, _current_mr_uv_xf0, 224)
+   store32(_pc_buffer, _current_mr_uv_xf1, 228)
+   store32(_pc_buffer, _current_occlusion_uv_xf0, 232)
+   store32(_pc_buffer, _current_occlusion_uv_xf1, 236)
+   store32(_pc_buffer, _current_emissive_uv_xf0, 240)
+   store32(_pc_buffer, _current_emissive_uv_xf1, 244)
+   store32(_pc_buffer, _current_normal_tex_word, 248)
+   store32(_pc_buffer, _current_ext2_tex_word, 252)
    _mvp_dirty = false
    _model_dirty = false
    _pc_dirty = true
@@ -2084,19 +2121,34 @@ fn begin_frame() bool {
    _last_is_unlit = _current_is_unlit
    if _prof_on { _frame_begin_cpu_us = float(ticks() - _t_begin) / 1000.0 }
    if _deep_on { _vk_deep_begin_total_ms = ui_profile.elapsed_ms(_t_begin_deep) }
-   _vk_stage("begin.done")
+   _vk_stage("begin.done open=" + to_str(vk_state.frame_open()))
    true
 }
 
 fn set_unlit(bool unlit) any {
    "Marks lighting mode for subsequent draws without forcing an immediate flush."
+   _vk_stage("unlit.enter open=" + to_str(vk_state.frame_open()))
    def val = unlit ? 1 : 0
    if val != _current_is_unlit {
       if _vertex_offset != _last_flush_offset { _flush() }
       _current_is_unlit = val
       _pc_dirty = true
    }
+   _vk_stage("unlit.done open=" + to_str(vk_state.frame_open()))
    0
+}
+
+fn set_target_pipeline(?handle target) bool {
+   if _target_pipeline != target {
+      if _vertex_offset != _last_flush_offset {
+         _flush_reason = 4
+         _flush()
+      }
+      _target_pipeline = target
+      _use_custom_pc = 0
+      _pc_dirty = true
+   }
+   true
 }
 
 fn set_double_sided(bool enabled) any {
@@ -3031,38 +3083,38 @@ fn _sync_pc() any {
          memcpy(pc_ptr + 64, _current_model, 64)
          _model_dirty = false
       }
-      store32_h(pc_ptr, _last_is_mask, 128)
-      store32_h(pc_ptr, _last_is_unlit, 132)
-      store32_h(pc_ptr, _current_base_color_u32, 136)
-      store32_h(pc_ptr, _current_metallic_roughness_u32, 140)
-      store32_h(pc_ptr, _packed_env_scene_word(), 144)
-      store32_h(pc_ptr, _current_env_spec_tex_id, 148)
-      store32_h(pc_ptr, _current_bsdf4_u32, 152)
-      store32_h(pc_ptr, _current_bsdf5_u32, 156)
+      store32(pc_ptr, _last_is_mask, 128)
+      store32(pc_ptr, _last_is_unlit, 132)
+      store32(pc_ptr, _current_base_color_u32, 136)
+      store32(pc_ptr, _current_metallic_roughness_u32, 140)
+      store32(pc_ptr, _packed_env_scene_word(), 144)
+      store32(pc_ptr, _current_env_spec_tex_id, 148)
+      store32(pc_ptr, _current_bsdf4_u32, 152)
+      store32(pc_ptr, _current_bsdf5_u32, 156)
       store32_f32(pc_ptr, _cam_pos_x, 160)
       store32_f32(pc_ptr, _cam_pos_y, 164)
       store32_f32(pc_ptr, _cam_pos_z, 168)
-      store32_h(pc_ptr, _current_emissive_u32, 172)
-      store32_h(pc_ptr, _current_emissive_tex_word, 176)
-      store32_h(pc_ptr, _current_base_tex_word, 180)
-      store32_h(pc_ptr, _current_alpha_u32, 184)
-      store32_h(pc_ptr, _current_occlusion_tex_word, 188)
-      store32_h(pc_ptr, _current_bsdf0_u32, 192)
-      store32_h(pc_ptr, _current_bsdf1_u32, 196)
-      store32_h(pc_ptr, _current_bsdf2_u32, 200)
-      store32_h(pc_ptr, _current_bsdf3_u32, 204)
-      store32_h(pc_ptr, _current_base_uv_xf0, 208)
-      store32_h(pc_ptr, _current_base_uv_xf1, 212)
-      store32_h(pc_ptr, _current_normal_uv_xf0, 216)
-      store32_h(pc_ptr, _current_normal_uv_xf1, 220)
-      store32_h(pc_ptr, _current_mr_uv_xf0, 224)
-      store32_h(pc_ptr, _current_mr_uv_xf1, 228)
-      store32_h(pc_ptr, _current_occlusion_uv_xf0, 232)
-      store32_h(pc_ptr, _current_occlusion_uv_xf1, 236)
-      store32_h(pc_ptr, _current_emissive_uv_xf0, 240)
-      store32_h(pc_ptr, _current_emissive_uv_xf1, 244)
-      store32_h(pc_ptr, _current_normal_tex_word, 248)
-      store32_h(pc_ptr, _current_ext2_tex_word, 252)
+      store32(pc_ptr, _current_emissive_u32, 172)
+      store32(pc_ptr, _current_emissive_tex_word, 176)
+      store32(pc_ptr, _current_base_tex_word, 180)
+      store32(pc_ptr, _current_alpha_u32, 184)
+      store32(pc_ptr, _current_occlusion_tex_word, 188)
+      store32(pc_ptr, _current_bsdf0_u32, 192)
+      store32(pc_ptr, _current_bsdf1_u32, 196)
+      store32(pc_ptr, _current_bsdf2_u32, 200)
+      store32(pc_ptr, _current_bsdf3_u32, 204)
+      store32(pc_ptr, _current_base_uv_xf0, 208)
+      store32(pc_ptr, _current_base_uv_xf1, 212)
+      store32(pc_ptr, _current_normal_uv_xf0, 216)
+      store32(pc_ptr, _current_normal_uv_xf1, 220)
+      store32(pc_ptr, _current_mr_uv_xf0, 224)
+      store32(pc_ptr, _current_mr_uv_xf1, 228)
+      store32(pc_ptr, _current_occlusion_uv_xf0, 232)
+      store32(pc_ptr, _current_occlusion_uv_xf1, 236)
+      store32(pc_ptr, _current_emissive_uv_xf0, 240)
+      store32(pc_ptr, _current_emissive_uv_xf1, 244)
+      store32(pc_ptr, _current_normal_tex_word, 248)
+      store32(pc_ptr, _current_ext2_tex_word, 252)
       _last_metallic = _current_metallic
       _last_roughness = _current_roughness
    }
@@ -3096,7 +3148,7 @@ fn _sync_pc() any {
 fn _flush() any {
    def _prof_on = _vk_profile_enabled()
    def _t0 = _prof_on ? ticks() : 0
-   if !_frame_open { return 0 }
+   if !vk_state.frame_open() { return 0 }
    if _vertex_offset == _last_flush_offset { return 0 }
    _flush_total += 1
    if _flush_reason == 1 { _flush_reason_tex += 1 }
@@ -3112,7 +3164,7 @@ fn _flush() any {
    }
    def first_vert = _last_flush_offset / _VKR_VERT_STRIDE
    def cb = _current_frame_cb
-   mut target = _target_pipeline
+   mut ?handle target = _target_pipeline
    if target == _pipeline {
       if _current_is_unlit != 0 {
          def up = _get_unlit_nocull_pipeline()
@@ -3214,9 +3266,10 @@ fn _vk_end_frame_record_capture(any cb, bool has_surface) bool {
       def w, h = _swapchain_extent_w, _swapchain_extent_h
       def size = w * h * 4
       if w > 0 && h > 0 && _staging_buffer && _staging_map && _staging_capacity >= size {
-         if _ensure_readback_slab() {
-            def barrier = _readback_barrier
-            def region = _readback_region
+         def ptr readback_slab = _ensure_readback_slab()
+         if readback_slab {
+            def ptr barrier = ptr_add(readback_slab, 72)
+            def ptr region = ptr_add(readback_slab, 144)
             def src_image = _swapchain_images.get(_image_index)
             if barrier && region && _handle_ok(src_image) {
                def old_layout = has_surface ? VK_IMAGE_LAYOUT_PRESENT_SRC_KHR : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
@@ -3276,7 +3329,8 @@ fn _vk_end_frame_download_capture(bool has_surface) bool {
                      " m22=" + to_str(load32_f32(_pc_buffer, 40)) +
                      " m33=" + to_str(load32_f32(_pc_buffer, 60)) +
                      " isUnlit=" + to_str(load32(_pc_buffer, 132)) +
-                     " base=0x" + text.to_hex(load32(_pc_buffer, 136)))
+                     " vertexColor=" + to_str(_current_vc_mode) +
+                     " baseTex=0x" + text.to_hex(_current_base_tex_word))
                }
                _capture_pixels = pixels
                _capture_w = w
@@ -3324,7 +3378,7 @@ fn _vk_end_frame_present_image(bool backend_is_win32, bool _deep_on) bool {
    if _deep_on { _vk_deep_end_present_ms = ui_profile.elapsed_ms(_t_present) }
    if _vk_debug_basic == 1 { ui_profile.print_text("[gfx:vulkan] end_frame after present result=" + to_str(pr)) }
    if pr == 0xC460C464 || pr == -1000001004 {
-      _frame_open = false
+      vk_state.set_frame_open(false)
       _schedule_swapchain_recreate()
       return false
    }
@@ -3337,7 +3391,7 @@ fn _vk_end_frame_present_image(bool backend_is_win32, bool _deep_on) bool {
       if vk_state._debug_gfx_enabled {
          ui_profile.print_text("[gfx:vulkan] present failed code=" + to_str(pr) + " — scheduling recreate")
       }
-      _frame_open = false
+      vk_state.set_frame_open(false)
       _schedule_swapchain_recreate(true)
       return false
    }
@@ -3355,7 +3409,7 @@ fn _end_frame_internal(bool present) bool {
    def _profile_frame = _total_frames
    def _deep_on = (_vk_deep_debug == 1) && ((_prof_on && ((_profile_frame % _vk_profile_every()) == 0)) || ((_profile_frame % _vk_deep_every()) == 0))
    def _t_end_deep = _deep_on ? ticks() : 0
-   if !_frame_open { return false }
+   if !vk_state.frame_open() { return false }
    def has_surface = _has_valid_surface_fast()
    def backend_is_win32 = has_surface && _backend_is_win32_fast()
    if !_vk_frame_targets_ready(has_surface) { return false }
@@ -3376,7 +3430,7 @@ fn _end_frame_internal(bool present) bool {
    if ecb != 0 { return false }
    if has_surface {
       def sem_avail = load64_h(_sem_avail_slab, _current_frame * 8)
-      def sem_finish = load64_h(_sem_finish_slab, _current_frame * 8)
+      def sem_finish = load64_h(_sem_finish_slab, _image_index * 8)
       store64_h(_ptr_wait_sems, sem_avail, 0)
       store64_h(_ptr_sig_sems, sem_finish, 0)
       store32(_ptr_stages,
@@ -3459,6 +3513,7 @@ fn _end_frame_internal(bool present) bool {
          }
       }
    }
+   _current_frame = (_current_frame + 1) % _frames_in_flight()
    if _deep_on && _vk_deep_should_emit(_total_frames) {
       ui_profile.print_text("[vk:end] frame=" + to_str(_total_frames) +
          " draws=" + to_str(_frame_draw_calls) +
@@ -3490,7 +3545,7 @@ fn _end_frame_internal(bool present) bool {
          " indexed=" + to_str(_frame_indexed_draw_calls) +
          " flush=" + to_str(_flush_total) +
          " valids=" + to_str(_handles_valid) +
-         " open=" + to_str(_frame_open) +
+         " open=" + to_str(vk_state.frame_open()) +
          " img=" + to_str(_image_index) +
          " curr=" + to_str(_current_frame) +
          " cb=" + to_str(cb) +
@@ -3514,7 +3569,8 @@ fn _end_frame_internal(bool present) bool {
 
 fn clear(any r, any g, any b, any a) any {
    "Commands the GPU to clear the current color attachment."
-   if !_frame_open { return 0 }
+   _vk_stage("clear.enter open=" + to_str(vk_state.frame_open()))
+   if !vk_state.frame_open() { return 0 }
    _flush()
    if _clear_ca == 0 { _clear_ca = _renderer_alloc(24) _clear_rect = _renderer_alloc(24) }
    def cb = load64(_cmd_bufs_slab, _current_frame * 8)
@@ -3534,7 +3590,7 @@ fn clear(any r, any g, any b, any a) any {
 
 fn clear_depth() any {
    "Clears the depth buffer, ensuring subsequent depth passes render correctly over past layers."
-   if !_frame_open { return 0 }
+   if !vk_state.frame_open() { return 0 }
    _flush()
    if _clear_ca == 0 { _clear_ca = _renderer_alloc(24) _clear_rect = _renderer_alloc(24) }
    def cb = load64(_cmd_bufs_slab, _current_frame * 8)
@@ -3692,14 +3748,7 @@ fn shutdown() any {
    _present_copy_slab = 0
    _present_dst_bar = 0
    _present_copy_region = 0
-   if _readback_slab { free(_readback_slab) }
-   _readback_slab = 0
-   _readback_ai = 0
-   _readback_cb_p = 0
-   _readback_bi = 0
-   _readback_barrier = 0
-   _readback_region = 0
-   _readback_s_info = 0
+   _release_readback_slab()
    _capture_request = false
    _capture_ready = false
    if _capture_pixels { free(_capture_pixels) }
@@ -3802,6 +3851,16 @@ fn request_frame_capture() any {
    "Requests a staging-buffer readback to be recorded for the current frame."
    _capture_request = true
    0
+}
+
+fn _take_frame_capture() any {
+   if !_capture_ready || !_capture_pixels || _capture_w <= 0 || _capture_h <= 0 { return 0 }
+   def result = {"data": _capture_pixels, "width": _capture_w, "height": _capture_h, "bpp": 4}
+   _capture_pixels = 0
+   _capture_w = 0
+   _capture_h = 0
+   _capture_ready = false
+   result
 }
 
 fn _ensure_present_copy_slab() bool {
@@ -4881,6 +4940,7 @@ fn _recreate_swapchain() bool {
    _vk_stage("recreate.enter")
    if _window_ref == 0 || _device == 0 { return false }
    device_wait_idle(_device)
+   _destroy_sync_objects()
    def old_swapchain = _swapchain
    _swapchain = 0
    mut i = 0
@@ -4910,6 +4970,7 @@ fn _recreate_swapchain() bool {
    if !ok { return false }
    if _swapchain == 0 { ui_profile.print_text("[gfx:vulkan] _recreate_swapchain: swapchain null after create") return false }
    if _swapchain_image_count < 1 { ui_profile.print_text("[gfx:vulkan] _recreate_swapchain: zero image count after create") return false }
+   if !_create_sync_objects() { return false }
    _vk_stage("recreate.image_views")
    if !_create_swapchain_image_views() { return false }
    if _swapchain_image_views_count < 1 { return false }
@@ -5276,7 +5337,7 @@ fn _create_sync_objects() bool {
    _render_finished_semaphores = []
    _in_flight_fences = []
    _sem_avail_slab = _vk_alloc_handle_slab(_sem_avail_slab, _frames_in_flight())
-   _sem_finish_slab = _vk_alloc_handle_slab(_sem_finish_slab, _frames_in_flight())
+   _sem_finish_slab = _vk_alloc_handle_slab(_sem_finish_slab, _swapchain_image_count)
    _fences_slab = _vk_alloc_handle_slab(_fences_slab, _frames_in_flight())
    if !_sem_avail_slab || !_sem_finish_slab || !_fences_slab {
       if ui_profile.env_truthy_cached("NY_VK_DESCRIPTOR_TRACE") {
@@ -5306,16 +5367,6 @@ fn _create_sync_objects() bool {
       _image_available_semaphores = _image_available_semaphores.append(sem1_h)
       _image_available_semaphores_count = _image_available_semaphores.len
       store64_h(_sem_avail_slab, sem1_h, i * 8)
-      mut sem2 = _renderer_alloc(8)
-      def s2_res = create_semaphore(_device, si, 0, sem2)
-      if s2_res != 0 {
-         if vk_state._debug_gfx_enabled { ui_profile.print_text("[gfx:vulkan] create semaphore render_finished failed res=" + to_str(s2_res) + " stype=" + to_str(load32(si, 0))) }
-         return false
-      }
-      def sem2_h = load64_h(sem2, 0)
-      _render_finished_semaphores = _render_finished_semaphores.append(sem2_h)
-      _render_finished_semaphores_count = _render_finished_semaphores.len
-      store64_h(_sem_finish_slab, sem2_h, i * 8)
       mut fi = _renderer_alloc(24)
       store32(fi, VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, 0)
       store32(fi, 0, 8) store32(fi, 0, 12)
@@ -5332,6 +5383,30 @@ fn _create_sync_objects() bool {
       store64_h(_fences_slab, fence_h, i * 8)
       i += 1
    }
+   mut sem_info = _renderer_alloc(24)
+   if !sem_info { return false }
+   store32(sem_info, VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO, 0)
+   store32(sem_info, 0, 8)
+   store32(sem_info, 0, 12)
+   store32(sem_info, 0, 16)
+   i = 0
+   while i < _swapchain_image_count {
+      mut sem_ptr = _renderer_alloc(8)
+      if !sem_ptr { free(sem_info) return false }
+      def sem_res = create_semaphore(_device, sem_info, 0, sem_ptr)
+      if sem_res != 0 {
+         free(sem_info, sem_ptr)
+         if vk_state._debug_gfx_enabled { ui_profile.print_text("[gfx:vulkan] create semaphore render_finished failed res=" + to_str(sem_res)) }
+         return false
+      }
+      def sem_h = load64_h(sem_ptr, 0)
+      _render_finished_semaphores = _render_finished_semaphores.append(sem_h)
+      _render_finished_semaphores_count = _render_finished_semaphores.len
+      store64_h(_sem_finish_slab, sem_h, i * 8)
+      free(sem_ptr)
+      i += 1
+   }
+   free(sem_info)
    true
 }
 
@@ -5411,6 +5486,7 @@ fn _create_ubo_descriptor_sets() bool {
 
 fn notify_window_resize(int w, int h) bool {
    "Notifies the renderer that the window has been resized."
+   _vk_stage("resize.notify open=" + to_str(vk_state.frame_open()))
    if w <= 0 || h <= 0 { return false }
    if _same_int_value(_pending_resize_w, int(w)) && _same_int_value(_pending_resize_h, int(h)) { return true }
    if _same_int_value(_swapchain_extent_w, int(w)) && _same_int_value(_swapchain_extent_h, int(h)) { return true }
