@@ -711,7 +711,9 @@ static int64_t bf_from_u64_raw(uint64_t mag, int sign, int64_t exp2,
 
   size_t bits = 64u - bf_clz64(mag);
   if (precision >= bits) {
-    /* Normalize exact values directly into final storage. */
+    /*
+     * Normalize exact values directly into final storage.
+     */
     size_t words = ((size_t)precision + 63u) / 64u;
     size_t shift = (size_t)precision - bits;
     size_t word_shift = shift / 64u;
@@ -1179,9 +1181,11 @@ int64_t rt_bigfloat_sqrt(int64_t av) {
   int64_t xv = bf_from_u64_raw(1, 1, guess_exp, a->precision);
   if (!xv)
     return 0;
-  /* The Newton relative error roughly squares each step. The exponent-based
+  /*
+   * The Newton relative error roughly squares each step. The exponent-based
    * seed is within a factor of two, so ceil(log2(precision)) steps plus one
-   * guard step is enough to reach a precision-sized result. */
+   * guard step is enough to reach a precision-sized result.
+   */
   unsigned iterations = 1;
   for (uint32_t p = a->precision - 1; p; p >>= 1)
     iterations++;

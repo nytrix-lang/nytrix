@@ -5,6 +5,27 @@ Nytrix packages are source dependencies resolved to an import root. The package
 manager records direct dependencies in `ny.pkg.json` and writes resolved state
 to `ny.pkg.json.lock`.
 
+## Repository trust
+
+Nytrix ships no default package repository or public-registry fallback. Add
+repositories you trust, or supply a dependency's source explicitly. Package
+search is a convenience for discovering source packages in those configured
+repositories and registry entries, not a centrally curated package catalog.
+
+The package manager is not a dependency-injection framework. It discovers,
+installs, and records source dependencies; choosing a repository does not make
+its packages safe. Review the source and resolved revisions you install.
+Content hashes identify bytes, not the publisher's identity or trustworthiness.
+
+Repository lookup reads project and user configuration, including paths selected
+by environment variables such as `NYTRIX_PKG_REGISTRY`. Inspect the active sources
+before resolving a name:
+
+```bash
+ny pkg registry
+ny pkg repo list
+```
+
 ## Start a project
 
 Use `ny new <dir>` for an application scaffold. In an existing project:
@@ -37,7 +58,7 @@ A manifest contains package metadata and direct dependencies:
 
 The package name is the import name:
 
-```text
+```ny
 use helper
 ```
 
@@ -53,22 +74,22 @@ uses the lockfile and local package cache without contacting registries. A
 missing cached package is an error in offline mode. Local path dependencies
 must remain available on disk.
 
-Content hashes identify the bytes that were installed; they do not prove who
-published them. Treat package sources and registry configuration as trusted
-inputs.
-
 ## Repositories and search
 
+To search a local repository you own and trust:
+
 ```bash
-ny pkg search query
 ny pkg repo add local ./packages
 ny pkg repo list
 ny pkg repo sync
+ny pkg search helper
 ny get helper
 ```
 
-Use `ny pkg search --interactive query` for the built-in picker. `ny pkg --help`
-lists repository commands and registry configuration.
+`./packages` must contain the packages to discover. An unconfigured package
+name is not looked up in an implicit public repository. Use
+`ny pkg search --interactive query` for the built-in picker, and
+`ny pkg repo rm local` to remove this discovery source.
 
 ## Diagnose an import
 

@@ -46,15 +46,15 @@ fn run_avr_case(str suffix, str value_source, list expected) bool {
        value_source],
       [], nil, false)
   def assembled = run_capture(
-      ["/usr/bin/clang", "--target=avr", "-mmcu=atmega328p", "-c", asm_path,
+      ["clang", "--target=avr", "-mmcu=atmega328p", "-c", asm_path,
        "-o", obj_path],
       [], nil, false)
   def start_assembled = run_capture(
-      ["/usr/bin/clang", "--target=avr", "-mmcu=atmega328p", "-c", start_path,
+      ["clang", "--target=avr", "-mmcu=atmega328p", "-c", start_path,
        "-o", start_obj_path],
       [], nil, false)
   def linked = run_capture(
-      ["/usr/bin/avr-gcc", "-mmcu=atmega328p", "-mdouble=64", "-nostartfiles",
+      ["avr-gcc", "-mmcu=atmega328p", "-nostartfiles",
        "-Wl,-e,_start", start_obj_path, obj_path, "-o", elf_path],
       [], nil, false)
   assert(emitted.get("code", 127) == 0 &&
@@ -68,7 +68,7 @@ fn run_avr_case(str suffix, str value_source, list expected) bool {
          to_str(linked.get("code", 127)) + " link output=" +
          linked.get("stdout", ""))
   def execution = run_capture(
-      ["/usr/bin/timeout", "0.5s", "/usr/bin/qemu-system-avr", "-M", "uno", "-display", "none",
+      ["timeout", "0.5s", "qemu-system-avr", "-M", "uno", "-display", "none",
        "-monitor", "none", "-serial", "stdio", "-bios", elf_path],
       [], nil, false)
   assert(execution.get("code", 0) == 124 &&
@@ -82,6 +82,41 @@ fn run_avr_case(str suffix, str value_source, list expected) bool {
          is_ok(file_remove(elf_path)),
          "remove AVR " + suffix + " test artifacts")
   true
+}
+
+fn run_avr_codegen_case(str suffix, str value_source, list expected_helpers) bool {
+  def stem = temp_dir() + "/ny-avr-float-" + to_str(pid()) + "-" + suffix
+  def asm_path = stem + ".s"
+  def obj_path = stem + ".o"
+  def emitted = run_capture(
+      [compiler, "--native-backend=avr", "--native-only", "--nyir-verify",
+       "--emit-asm=" + asm_path, "-no-std", "-emit-only", "-e",
+       value_source],
+      [], nil, false)
+  def assembled = run_capture(
+      ["clang", "--target=avr", "-mmcu=atmega328p", "-c", asm_path,
+       "-o", obj_path],
+      [], nil, false)
+  def symbols = run_capture(["avr-nm", "-u", obj_path], [], nil, false)
+  mut bool helpers_found = true
+  for helper in expected_helpers {
+    if !str_contains(symbols.get("stdout", ""), helper) {
+      helpers_found = false
+    }
+  }
+  def valid = emitted.get("code", 127) == 0 &&
+              assembled.get("code", 127) == 0 &&
+              symbols.get("code", 127) == 0 && helpers_found
+  assert(valid,
+         "AVR " + suffix + " emits the expected libgcc helper calls; codes=" +
+         to_str(emitted.get("code", 127)) + "," +
+         to_str(assembled.get("code", 127)) + "," +
+         to_str(symbols.get("code", 127)) + " symbols=" +
+         symbols.get("stdout", "") + " stderr=" + symbols.get("stderr", ""))
+  assert((if file_exists(asm_path) { is_ok(file_remove(asm_path)) } else { true }) &&
+         (if file_exists(obj_path) { is_ok(file_remove(obj_path)) } else { true }),
+         "remove AVR " + suffix + " codegen artifacts")
+  valid
 }
 
 ;; Keep each precision's ABI and comparison matrix in one compiler/QEMU run.
@@ -206,20 +241,47 @@ def f32_conversions =
   "f32_to_int(1234.875f32) == 1234 && " +
   "f32_to_int(-1234.875f32) == -1234 { 3 } else { 0 }"
 
+def avr_libgcc_symbols = run_capture(
+    ["sh", "-c",
+     "avr-nm -g --defined-only \"$(avr-gcc -print-libgcc-file-name)\""],
+    [], nil, false)
+def avr_f64_runtime_available =
+    avr_libgcc_symbols.get("code", 127) == 0 &&
+    str_contains(avr_libgcc_symbols.get("stdout", ""), "__adddf3") &&
+    str_contains(avr_libgcc_symbols.get("stdout", ""), "__subdf3") &&
+    str_contains(avr_libgcc_symbols.get("stdout", ""), "__muldf3") &&
+    str_contains(avr_libgcc_symbols.get("stdout", ""), "__divdf3") &&
+    str_contains(avr_libgcc_symbols.get("stdout", ""), "__floatdidf") &&
+    str_contains(avr_libgcc_symbols.get("stdout", ""), "__fixdfdi") &&
+    str_contains(avr_libgcc_symbols.get("stdout", ""), "__extendsfdf2") &&
+    str_contains(avr_libgcc_symbols.get("stdout", ""), "__truncdfsf2")
+
 assert(run_avr_case("f64-comparisons",
                     f64_compare_prefix +
                     "if comparisons() && pass_f64(1, 2, 3, 4, 1.5) == 1.5 { 3 } else { 0 }",
                     [7, 0, 0, 0, 0, 0, 0, 0]),
        "AVR f64 comparisons, NaN, infinity, and stack arguments")
-assert(run_avr_case("f64-add-sub", f64_add_sub,
-                    [7, 0, 0, 0, 0, 0, 0, 0]),
-       "AVR f64 addition and subtraction")
-assert(run_avr_case("f64-mul-div", f64_mul_div,
-                    [7, 0, 0, 0, 0, 0, 0, 0]),
-       "AVR f64 multiplication and division")
-assert(run_avr_case("f64-conversions", f64_conversions,
-                    [7, 0, 0, 0, 0, 0, 0, 0]),
-       "AVR signed i64/f64 and f32/f64 conversions")
+if avr_f64_runtime_available {
+  assert(run_avr_case("f64-add-sub", f64_add_sub,
+                      [7, 0, 0, 0, 0, 0, 0, 0]),
+         "AVR f64 addition and subtraction")
+  assert(run_avr_case("f64-mul-div", f64_mul_div,
+                      [7, 0, 0, 0, 0, 0, 0, 0]),
+         "AVR f64 multiplication and division")
+  assert(run_avr_case("f64-conversions", f64_conversions,
+                      [7, 0, 0, 0, 0, 0, 0, 0]),
+         "AVR signed i64/f64 and f32/f64 conversions")
+} else {
+  print("AVR f64 runtime checks skipped: installed libgcc lacks 64-bit helpers")
+  assert(run_avr_codegen_case("f64-add-sub", f64_add_sub,
+                              ["__adddf3", "__subdf3"]) &&
+         run_avr_codegen_case("f64-mul-div", f64_mul_div,
+                              ["__muldf3", "__divdf3"]) &&
+         run_avr_codegen_case("f64-conversions", f64_conversions,
+                              ["__floatdidf", "__fixdfdi",
+                               "__extendsfdf2", "__truncdfsf2"]),
+         "AVR f64 operations lower to libgcc helpers on toolchains without runtime support")
+}
 assert(run_avr_case("f32-comparisons",
                     f32_prefix +
                     "if comparisons() && pass_f32(1, 2, 3, 4, 1.5f32) == 1.5f32 { 3 } else { 0 }",

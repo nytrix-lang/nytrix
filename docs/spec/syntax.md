@@ -1,8 +1,8 @@
 <!-- nytrix-doc: {"audience":"user","featured":true,"group":"spec","order":11,"summary":"Source spellings for Nytrix comments, literals, declarations, blocks, and expressions."} -->
 # Syntax
 
-This page is a source-form index. Topic pages define meaning, type rules, and
-backend limits. The parser-oriented grammar is in
+Topic references define meaning, type rules, and backend limits for these source
+forms. The parser-oriented grammar is in
 [Info EBNF](../info/nytrix.ebnf).
 
 ## Lexical forms
@@ -12,7 +12,7 @@ lexer also supports delimited multiline comments: `;MARKER ... MARKER;` and
 the paired forms `;{ ... };`, `;< ... >;`, `;[ ... ];`, and `;( ... );`.
 There are no C-style `/* ... */` comments.
 
-```text
+```ny
 ; line comment
 value = 1 ; inline comment
 ;NOTE
@@ -26,7 +26,7 @@ braces. Newlines can separate statements; semicolons do not terminate them.
 
 ## Literals and values
 
-```text
+```ny
 nil  true  false
 123  0xff  0o77  0b1010
 1i8 1i16 1i32 1i64  1u8 1u16 1u32 1u64
@@ -40,7 +40,7 @@ initialized elements. See [Values](values.md) for value and container behavior.
 
 ## Files, modules, and imports
 
-```text
+```ny
 use core
 use module.path
 use module.path as alias
@@ -68,7 +68,7 @@ reassigned. Type annotations precede names. Functions can have inferred or
 explicit return types; the final expression in the body is the result when no
 `return` exits earlier.
 
-```text
+```ny
 def name = expr
 mut name = expr
 def Type name = expr
@@ -93,7 +93,7 @@ See [Functions](functions.md) for calls, defaults, closures, and attributes.
 
 ## Types and declarations
 
-```text
+```ny
 T
 T<A>
 T<A, B>
@@ -119,7 +119,7 @@ See [Types](types.md), [Traits and impl](traits.md), and [Native](native.md).
 
 ## Statements and control flow
 
-```text
+```ny
 expression
 return expression
 if (condition) { body } elif (other) { body } else { body }
@@ -144,7 +144,7 @@ with Type name = expression { body }
 
 ## Operators
 
-```text
+```ny
 +  -  *  /  %  **  ^^  ^
 =  +=  -=  *=  /=  %=  **=  ^^=  ^=
 ++  --
@@ -161,7 +161,7 @@ for precedence and associativity.
 
 ## Native declarations and attributes
 
-```text
+```ny
 #include <stdlib.h> as "c"
 #include "./header.h"
 extern "library" { fn symbol(Type argument) Type }
@@ -181,7 +181,7 @@ for attribute contracts.
 
 ## Compile-time and proof forms
 
-```text
+```ny
 comptime { body }
 #run expression
 #comptime expression

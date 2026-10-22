@@ -39,9 +39,29 @@ then compile or test the resulting program through its intended backend.
 - Generated source still goes through normal parsing and semantic checks.
 - Embedded files are build inputs; use stable project-relative paths and make
   sure the build owns the referenced file.
-- Syntax extensions and source rewriters are a separate mechanism. Prefer
-  ordinary functions or templates unless the source grammar itself needs to
-  change.
+- Syntax extensions and source rewriters change source processing. Prefer
+  ordinary functions or templates unless the grammar itself needs to change.
+
+## Syntax extensions
+
+| Need | Mechanism |
+| --- | --- |
+| Compute a compile-time value | `#run`, `#comptime`, or `static_assert` |
+| Generate declarations from known inputs | `comptime template` and `comptime emit` |
+| Check a declaration contract | A supported function attribute |
+| Introduce a new source form | A macro handler |
+| Rewrite an existing form | A deterministic rewriter |
+
+The syntax registry lives under `core.compiler.syntax`. Macro and rewrite
+handlers transform accepted source forms into expanded syntax; their output
+still needs to compile and run on the intended backend. See the
+[registry reference](../spec/comptime.md#syntax-extension-registry) for local
+and process-wide registries, handler lookup, and expansion operations.
+
+```bash
+ny doc get core.compiler.syntax
+ny doc search --symbols register_macro_in
+```
 
 ## Inspect and verify
 
@@ -51,6 +71,6 @@ ny fmt --specialize file.ny
 ny --expand file.ny
 ```
 
-These commands help inspect candidates or expansions; they do not replace
-compiling and running the generated program. See [Comptime specification](../spec/comptime.md),
-[Syntax extensions](syntax.md), and [Testing](testing.md).
+These commands inspect candidates or expansions, not runtime correctness.
+Compile and run the generated program; see the
+[Comptime specification](../spec/comptime.md) and [Testing](testing.md).

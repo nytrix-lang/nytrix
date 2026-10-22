@@ -388,7 +388,9 @@ static bool licm_candidate(const nyr_func_t *f, const nyr_scev_info_t *scev,
     memset(out_guard, 0, sizeof(*out_guard));
   if (out_guard_index)
     *out_guard_index = SIZE_MAX;
-  /* Division can trap; require range proof or a cloned zero-divisor guard. */
+  /*
+   * Division can trap; require range proof or a cloned zero-divisor guard.
+   */
   bool division_nontrapping =
       (in->op == NYIR_DIV_I64 || in->op == NYIR_MOD_I64) &&
       licm_division_nontrapping(f, scev, defs, at, in, facts, value_count);

@@ -1,6 +1,6 @@
 #include "base/debug.h"
-#include "base/json.h"
 #include "base/common.h"
+#include "base/json.h"
 #include "code/backend/ir/opt/util.h"
 #include <errno.h>
 #include <fcntl.h>
@@ -15,15 +15,17 @@
 #include <unistd.h>
 
 #if defined(NY_TOOL_ENTRY)
-/* Small tools use the shared logger without linking the NYIR implementation. */
+/*
+ * Small tools use the shared logger without linking the NYIR implementation.
+ */
 bool nyr_diff_is_empty(const nyr_func_t *before, const nyr_func_t *after) {
   (void)before;
   (void)after;
   return 1;
 }
 
-void nyr_dump_diff(FILE *out, const nyr_func_t *before,
-                    const nyr_func_t *after, const char *tag) {
+void nyr_dump_diff(FILE *out, const nyr_func_t *before, const nyr_func_t *after,
+                   const char *tag) {
   (void)out;
   (void)before;
   (void)after;
@@ -635,7 +637,9 @@ void ny_dbg_init_from_verbosity(int verbosity) {
              dump && *dump ? dump : "build/debug/last_debug.log");
     signal(SIGSEGV, ny_dbg_crash_sink);
     signal(SIGABRT, ny_dbg_crash_sink);
+#ifdef SIGBUS
     signal(SIGBUS, ny_dbg_crash_sink);
+#endif
     signal(SIGFPE, ny_dbg_crash_sink);
     dbg_ring_head = 0;
     memset(dbg_ring, 0, sizeof(dbg_ring));

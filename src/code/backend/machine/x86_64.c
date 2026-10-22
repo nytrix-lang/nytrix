@@ -1213,8 +1213,10 @@ static bool ny_x64_nir_store_xmm(ny_x64_nir_ctx_t *c, int slot, int xmm) {
                     c->slot_offset[slot]);
 }
 
-/* VEC4 i64 values contain two lanes. Their homes are four scalar slots wide
- * in the shared allocator; the pair beginning at slot is contiguous. */
+/*
+ * VEC4 i64 values contain two lanes. Their homes are four scalar slots wide
+ * in the shared allocator; the pair beginning at slot is contiguous.
+ */
 static bool ny_x64_nir_load_i64v2(ny_x64_nir_ctx_t *c, int slot, int xmm) {
   if (!c || slot < 0 || slot + 1 >= NY_X64_NIR_MAX_SLOTS || xmm < 0 ||
       xmm > 15 || c->slot_offset[slot] <= 0)
@@ -4714,7 +4716,9 @@ bool nyr_x86_64_emit_mach_scalar(nyr_writer_t *w,
           if (!nyr_printf(w, "\t%s\t%%xmm0, -%d(%%rbp)\n",
                           f32 ? "movss" : "movsd", dst))
             return false;
-          /* The immediate path used %rax; discard its cached stack home. */
+          /*
+           * The immediate path used %rax; discard its cached stack home.
+           */
           if (in->src0.kind == NYR_MACH_OPERAND_IMM)
             rax_cached_off = -1;
           break;

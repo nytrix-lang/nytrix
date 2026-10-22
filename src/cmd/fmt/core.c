@@ -4270,8 +4270,7 @@ static void analyze_duplicates(FnVec *fns, IssueVec *issues,
         ++j;
       for (size_t k = i; k + 1 < j; ++k) {
         size_t source_index = (size_t)(ordered[k] - fns->items);
-        next_duplicate[source_index] =
-            (size_t)(ordered[k + 1] - fns->items);
+        next_duplicate[source_index] = (size_t)(ordered[k + 1] - fns->items);
       }
       i = j;
     }
@@ -4283,8 +4282,7 @@ static void analyze_duplicates(FnVec *fns, IssueVec *issues,
       if (fns->items[i].is_private || next_duplicate[i] == SIZE_MAX)
         continue;
       stats->duplicate_names++;
-      for (size_t k = next_duplicate[i]; k != SIZE_MAX;
-           k = next_duplicate[k]) {
+      for (size_t k = next_duplicate[i]; k != SIZE_MAX; k = next_duplicate[k]) {
         if (stats->hygiene_from_ny && !fns->items[k].is_c)
           continue;
         issue_push(issues, fns->items[k].file, fns->items[k].line, 1,
@@ -8744,7 +8742,7 @@ static void audit_add_prealloc_append_findings(const char *path, StrVec *lines,
 }
 
 static void audit_scan_calls_lines(const char *path, FnVec *fns,
-                                  const StrVec *lines, CallSeqVec *calls);
+                                   const StrVec *lines, CallSeqVec *calls);
 
 static void audit_scan_file(const char *path, FnVec *fns,
                             FilePressureVec *files,
@@ -9297,7 +9295,7 @@ static void audit_collect_calls_line(StrVec *out, const char *line) {
 }
 
 static void audit_scan_calls_lines(const char *path, FnVec *fns,
-                                  const StrVec *lines, CallSeqVec *calls) {
+                                   const StrVec *lines, CallSeqVec *calls) {
   size_t fn_first = 0, fn_end = 0;
   fn_file_range(fns, path, &fn_first, &fn_end);
   for (size_t i = fn_first; i < fn_end; i++) {
@@ -9827,24 +9825,20 @@ typedef struct {
   const char *mode;
   size_t start_idx;
   size_t end_idx;
-  FnVec fns;
+  FnVec *fns;
   FilePressureVec files;
   FunctionPressureVec functions;
   IssueVec issues;
   CallSeqVec calls;
   AuditStats stats;
-  AnalyzeStats astats;
 } AuditWorkerCtx;
 
 static void *audit_worker_run(void *arg) {
   AuditWorkerCtx *w = (AuditWorkerCtx *)arg;
-  IssueVec local_throwaway = {0};
   for (size_t i = w->start_idx; i < w->end_idx; i++) {
-    analyze_file(w->scan->items[i], &w->fns, &local_throwaway, &w->astats);
-    audit_scan_file(w->scan->items[i], &w->fns, &w->files, &w->functions,
+    audit_scan_file(w->scan->items[i], w->fns, &w->files, &w->functions,
                     &w->issues, &w->stats, w->mode, &w->calls);
   }
-  free(local_throwaway.items);
   return NULL;
 }
 
@@ -9898,7 +9892,7 @@ static int run_audit_simple(StrVec *paths, const char *mode, int json_mode,
   for (size_t i = 0; i < scan.len; ++i)
     analyze_file(scan.items[i], &fns, &throwaway, &astats);
 
-  long nprocs = sysconf(_SC_NPROCESSORS_ONLN);
+  long nprocs = ny_cpu_count();
   if (nprocs < 1)
     nprocs = 1;
   if (nprocs > 32)
@@ -9911,8 +9905,8 @@ static int run_audit_simple(StrVec *paths, const char *mode, int json_mode,
 
   if (num_threads == 1) {
     for (size_t i = 0; i < scan.len; i++) {
-      audit_scan_file(scan.items[i], &fns, &files, &functions, &issues,
-                      &stats, mode, &calls);
+      audit_scan_file(scan.items[i], &fns, &files, &functions, &issues, &stats,
+                      mode, &calls);
     }
   } else {
     AuditWorkerCtx *workers =
@@ -9923,36 +9917,16 @@ static int run_audit_simple(StrVec *paths, const char *mode, int json_mode,
     for (size_t t = 0; t < num_threads; t++) {
       workers[t].scan = &scan;
       workers[t].mode = mode;
+      /*
+       * File-range lookups require the table to stay sorted and immutable.
+       */
+      workers[t].fns = &fns;
       workers[t].start_idx = t * chunk;
       workers[t].end_idx = (t + 1) * chunk;
       if (workers[t].start_idx > scan.len)
         workers[t].start_idx = scan.len;
       if (workers[t].end_idx > scan.len)
         workers[t].end_idx = scan.len;
-    }
-    /*
-     * Distribute function metadata by its sorted file path.  The old setup
-     * searched every file chunk once per function and worker (O(F*N*T)); a
-     * lower-bound lookup assigns each function in O(log N) instead.
-     */
-    for (size_t j = 0; chunk && j < fns.len; ++j) {
-      size_t lo = 0;
-      size_t hi = scan.len;
-      while (lo < hi) {
-        size_t mid = lo + (hi - lo) / 2;
-        int cmp = strcmp(scan.items[mid], fns.items[j].file);
-        if (cmp < 0)
-          lo = mid + 1;
-        else
-          hi = mid;
-      }
-      if (lo >= scan.len || strcmp(scan.items[lo], fns.items[j].file) != 0)
-        continue;
-      size_t t = lo / chunk;
-      if (t >= num_threads)
-        t = num_threads - 1;
-      if (lo >= workers[t].start_idx && lo < workers[t].end_idx)
-        fv_push(&workers[t].fns, &fns.items[j]);
     }
     for (size_t t = 0; t < num_threads; t++)
       pthread_create(&tids[t], NULL, audit_worker_run, &workers[t]);
@@ -10006,7 +9980,6 @@ static int run_audit_simple(StrVec *paths, const char *mode, int json_mode,
         }
       }
 
-      free(workers[t].fns.items);
       free(workers[t].files.items);
       free(workers[t].functions.items);
       free(workers[t].issues.items);

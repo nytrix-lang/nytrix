@@ -20,117 +20,178 @@
 
 #include <nyr/ir.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#define MAP_FAILED ((void *)(intptr_t)-1)
+#else
+#include <sys/mman.h>
+#endif
+
+static inline int nyr_opt_setenv(const char *name, const char *value) {
+#ifdef _WIN32
+  return _putenv_s(name, value);
+#else
+  return setenv(name, value, 1);
+#endif
+}
+
+static inline int nyr_opt_unsetenv(const char *name) {
+#ifdef _WIN32
+  return _putenv_s(name, "");
+#else
+  return unsetenv(name);
+#endif
+}
+
+static inline void *nyr_opt_execmem_alloc(size_t size) {
+#ifdef _WIN32
+  void *mapping =
+      VirtualAlloc(NULL, size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+  return mapping ? mapping : MAP_FAILED;
+#else
+  return mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS,
+              -1, 0);
+#endif
+}
+
+static inline int nyr_opt_execmem_protect(void *mapping, size_t size) {
+#ifdef _WIN32
+  DWORD old_protection;
+  if (VirtualProtect(mapping, size, PAGE_EXECUTE_READ, &old_protection) == 0 ||
+      FlushInstructionCache(GetCurrentProcess(), mapping, size) == 0)
+    return -1;
+  return 0;
+#else
+  return mprotect(mapping, size, PROT_READ | PROT_EXEC);
+#endif
+}
+
+static inline void nyr_opt_execmem_free(void *mapping, size_t size) {
+  if (mapping == MAP_FAILED)
+    return;
+#ifdef _WIN32
+  (void)size;
+  (void)VirtualFree(mapping, 0, MEM_RELEASE);
+#else
+  (void)munmap(mapping, size);
+#endif
+}
 
 /* IR builders: every operand slot is explicitly filled so accidental
  * zero-value operands cannot masquerade as valid value ids. */
 static inline int nyr_opt_label(nyr_func_t *f, int64_t id) {
   return nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_LABEL,
-                                    .dst = -1,
-                                    .a = -1,
-                                    .b = -1,
-                                    .c = -1,
-                                    .d = -1,
-                                    .e = -1,
-                                    .f = -1,
-                                    .imm = id});
+                                     .dst = -1,
+                                     .a = -1,
+                                     .b = -1,
+                                     .c = -1,
+                                     .d = -1,
+                                     .e = -1,
+                                     .f = -1,
+                                     .imm = id});
 }
 
 static inline int nyr_opt_const(nyr_func_t *f, int64_t v) {
   return nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_CONST_I64,
-                                    .dst = -1,
-                                    .a = -1,
-                                    .b = -1,
-                                    .c = -1,
-                                    .d = -1,
-                                    .e = -1,
-                                    .f = -1,
-                                    .imm = v});
+                                     .dst = -1,
+                                     .a = -1,
+                                     .b = -1,
+                                     .c = -1,
+                                     .d = -1,
+                                     .e = -1,
+                                     .f = -1,
+                                     .imm = v});
 }
 
 static inline int nyr_opt_const_f64(nyr_func_t *f, double v) {
   uint64_t bits;
   memcpy(&bits, &v, sizeof(bits));
   return nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_CONST_F64,
-                                    .dst = -1,
-                                    .a = -1,
-                                    .b = -1,
-                                    .c = -1,
-                                    .d = -1,
-                                    .e = -1,
-                                    .f = -1,
-                                    .imm = (int64_t)bits});
+                                     .dst = -1,
+                                     .a = -1,
+                                     .b = -1,
+                                     .c = -1,
+                                     .d = -1,
+                                     .e = -1,
+                                     .f = -1,
+                                     .imm = (int64_t)bits});
 }
 
 static inline int nyr_opt_select(nyr_func_t *f, int cond, int tval, int fval) {
   return nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_SELECT_I64,
-                                    .dst = -1,
-                                    .a = cond,
-                                    .b = tval,
-                                    .c = fval,
-                                    .d = -1,
-                                    .e = -1,
-                                    .f = -1});
+                                     .dst = -1,
+                                     .a = cond,
+                                     .b = tval,
+                                     .c = fval,
+                                     .d = -1,
+                                     .e = -1,
+                                     .f = -1});
 }
 
 static inline int nyr_opt_binop(nyr_func_t *f, nyr_op_t op, int a, int b) {
   return nyr_ir_emit(f, (nyr_inst_t){.op = op,
-                                    .dst = -1,
-                                    .a = a,
-                                    .b = b,
-                                    .c = -1,
-                                    .d = -1,
-                                    .e = -1,
-                                    .f = -1});
+                                     .dst = -1,
+                                     .a = a,
+                                     .b = b,
+                                     .c = -1,
+                                     .d = -1,
+                                     .e = -1,
+                                     .f = -1});
 }
 
 static inline int nyr_opt_cmp(nyr_func_t *f, int a, int b, nyr_cmp_t cmp) {
   return nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_CMP_I64,
-                                    .dst = -1,
-                                    .a = a,
-                                    .b = b,
-                                    .c = -1,
-                                    .d = -1,
-                                    .e = -1,
-                                    .f = -1,
-                                    .cmp = cmp});
+                                     .dst = -1,
+                                     .a = a,
+                                     .b = b,
+                                     .c = -1,
+                                     .d = -1,
+                                     .e = -1,
+                                     .f = -1,
+                                     .cmp = cmp});
 }
 
 static inline void nyr_opt_br(nyr_func_t *f, int64_t label) {
   nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_BR,
-                             .dst = -1,
-                             .a = -1,
-                             .b = -1,
-                             .c = -1,
-                             .d = -1,
-                             .e = -1,
-                             .f = -1,
-                             .imm = label});
+                              .dst = -1,
+                              .a = -1,
+                              .b = -1,
+                              .c = -1,
+                              .d = -1,
+                              .e = -1,
+                              .f = -1,
+                              .imm = label});
 }
 
 static inline void nyr_opt_br_if(nyr_func_t *f, int cond, int64_t label) {
   nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_BR_IF,
-                             .dst = -1,
-                             .a = cond,
-                             .b = -1,
-                             .c = -1,
-                             .d = -1,
-                             .e = -1,
-                             .f = -1,
-                             .imm = label});
+                              .dst = -1,
+                              .a = cond,
+                              .b = -1,
+                              .c = -1,
+                              .d = -1,
+                              .e = -1,
+                              .f = -1,
+                              .imm = label});
 }
 
 static inline void nyr_opt_ret(nyr_func_t *f, int value) {
   nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_RET,
-                             .dst = -1,
-                             .a = value,
-                             .b = -1,
-                             .c = -1,
-                             .d = -1,
-                             .e = -1,
-                             .f = -1});
+                              .dst = -1,
+                              .a = value,
+                              .b = -1,
+                              .c = -1,
+                              .d = -1,
+                              .e = -1,
+                              .f = -1});
 }
 
 /* Two-entry PHI with explicit predecessor labels; entry blocks are

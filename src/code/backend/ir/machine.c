@@ -157,10 +157,12 @@ static void mach_compact_nops(nyr_mach_func_t *m) {
   m->inst_len = next;
 }
 
-/* Immediate/address folding can leave a literal's definition behind after
+/*
+ * Immediate/address folding can leave a literal's definition behind after
  * its last vreg use disappeared. Remove only truly unread pure literals;
  * rematerializable values with real consumers still keep their definitions
- * and canonical homes. STORE's destination is an address input. */
+ * and canonical homes. STORE's destination is an address input.
+ */
 static bool mach_remove_unused_literals(nyr_mach_func_t *m) {
   if (!m->vreg_len)
     return true;
@@ -473,7 +475,9 @@ static void mach_propagate_local_copies(nyr_mach_func_t *mach) {
       continue;
     for (size_t pc = block->first_inst; pc < end; ++pc) {
       const nyr_mach_inst_t *in = &mach->insts[pc];
-      /* A PHI edge COPY consumes a snapshot that must survive this bundle. */
+      /*
+       * A PHI edge COPY consumes a snapshot that must survive this bundle.
+       */
       if (in->source_pc == UINT32_MAX && in->opcode == NYR_MACH_COPY &&
           in->src0.kind == NYR_MACH_OPERAND_VREG &&
           in->src0.as.reg < mach->vreg_len)
@@ -624,7 +628,9 @@ static void mach_propagate_single_pred_copies(nyr_mach_func_t *mach) {
   for (size_t v = 0; v < mach->vreg_len; ++v)
     use_block[v] = UINT32_MAX;
 
-  /* Record unique predecessor blocks for explicit branches and fallthrough. */
+  /*
+   * Record unique predecessor blocks for explicit branches and fallthrough.
+   */
   for (size_t b = 0; b < mach->block_len; ++b) {
     const nyr_mach_block_t *block = &mach->blocks[b];
     bool has_unconditional = false, has_return = false, has_conditional = false;
@@ -650,7 +656,9 @@ static void mach_propagate_single_pred_copies(nyr_mach_func_t *mach) {
     }
   }
 
-  /* Destination uses must be confined to one successor block. */
+  /*
+   * Destination uses must be confined to one successor block.
+   */
   for (size_t b = 0; b < mach->block_len; ++b) {
     const nyr_mach_block_t *block = &mach->blocks[b];
     for (size_t n = 0; n < block->inst_count; ++n) {
@@ -707,7 +715,9 @@ static void mach_propagate_single_pred_copies(nyr_mach_func_t *mach) {
           only_pred[succ] != p)
         continue;
 
-      /* No source redefinition may intervene before or within the uses. */
+      /*
+       * No source redefinition may intervene before or within the uses.
+       */
       bool source_redefined = false, destination_redefined = false;
       for (size_t n = pc + 1; n < end; ++n) {
         const nyr_mach_inst_t *in = &mach->insts[n];
@@ -3759,8 +3769,7 @@ static bool mach_schedule_inst_safe(const nyr_mach_func_t *func,
    * sequence. Their virtual registers can represent successive values of a
    * loop PHI, so ordinary SSA read/write dependencies do not preserve the
    * snapshot-before-overwrite order.
-   */
-  /*
+   *
    * Shift-count lowering may select %cl even for a virtual source. Without
    * target constraint metadata, retain every shift block unchanged.
    */

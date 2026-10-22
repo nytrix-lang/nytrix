@@ -4508,6 +4508,7 @@ static char *markdown_summary(const char *md) {
     if (len >= 3 && strncmp(p, "```", 3) == 0) {
       in_code = !in_code;
     } else if (!in_code && len > 0 && p[0] != '#' && p[0] != '|' &&
+               !(len >= 4 && !strncmp(p, "<!--", 4)) &&
                !(len >= 2 && p[0] == '-' && p[1] == ' ')) {
       sb_t out = {0};
       int bracket = 0, paren = 0;
@@ -4595,11 +4596,12 @@ static char *doc_route_from_href_static(const char *base_route,
   if (strncmp(path_start, "docs/", 5) == 0)
     path_start += 5;
   char *dot = strrchr(path_start, '.');
+  int source_markdown = dot && !strcmp(dot, ".md");
   if (dot &&
       (!strcmp(dot, ".md") || !strcmp(dot, ".html") || !strcmp(dot, ".htm")))
     *dot = '\0';
   size_t l = strlen(path_start);
-  if (l >= 6 && strcmp(path_start + l - 6, "/index") == 0)
+  if (!source_markdown && l >= 6 && strcmp(path_start + l - 6, "/index") == 0)
     path_start[l - 6] = '\0';
 
   char combined[PATH_MAX];
@@ -4650,6 +4652,24 @@ static char *static_href_for_doc_route(const char *from_route,
                                        const char *anchor) {
   if (!to_route)
     return NULL;
+  if (!strncmp(to_route, "src/", 4) || !strncmp(to_route, "lib/", 4) ||
+      !strncmp(to_route, "etc/", 4) || !strncmp(to_route, "info/", 5) ||
+      !strcmp(to_route, "LICENSE")) {
+    sb_t source = {0};
+    const char *name = strrchr(to_route, '/');
+    name = name ? name + 1 : to_route;
+    sb_add(&source, strchr(name, '.') || !strcmp(name, "LICENSE")
+                        ? "https://github.com/nytrix-lang/nytrix/blob/main/"
+                        : "https://github.com/nytrix-lang/nytrix/tree/main/");
+    if (!strncmp(to_route, "info/", 5))
+      sb_add(&source, "docs/");
+    sb_add(&source, to_route);
+    if (anchor && *anchor) {
+      sb_add(&source, "#");
+      sb_add(&source, anchor);
+    }
+    return source.data;
+  }
   if (from_route && to_route && strcmp(from_route, to_route) == 0) {
     sb_t same = {0};
     sb_add(&same, "#");
@@ -4682,6 +4702,25 @@ static void markdown_render_inline(sb_t *out, const char *s, size_t n,
   int in_code = 0;
   for (size_t i = 0; i < n; i++) {
     char c = s[i];
+    if (c == '\\' && i + 1 < n &&
+        (s[i + 1] == '|' || (!in_code && ispunct((unsigned char)s[i + 1])))) {
+      sb_add_html_escapedn(out, s + ++i, 1);
+      continue;
+    }
+    if (!in_code && (c == '*' || c == '_')) {
+      size_t width = i + 1 < n && s[i + 1] == c ? 2 : 1;
+      size_t end = i + width;
+      while (end < n &&
+             (s[end] != c || (width == 2 && (end + 1 >= n || s[end + 1] != c))))
+        end++;
+      if (end < n) {
+        sb_add(out, width == 2 ? "<strong>" : "<em>");
+        markdown_render_inline(out, s + i + width, end - i - width, route);
+        sb_add(out, width == 2 ? "</strong>" : "</em>");
+        i = end + width - 1;
+        continue;
+      }
+    }
     if (c == '`') {
       sb_add(out, in_code ? "</code>" : "<code>");
       in_code = !in_code;
@@ -4739,7 +4778,8 @@ static void markdown_render_inline(sb_t *out, const char *s, size_t n,
     size_t start = i;
     do {
       i++;
-    } while (i < n && s[i] != '`' && (in_code || s[i] != '['));
+    } while (i < n && s[i] != '`' && s[i] != '\\' &&
+             (in_code || (s[i] != '[' && s[i] != '*' && s[i] != '_')));
     sb_add_html_escapedn(out, s + start, i - start);
     i--;
   }
@@ -4767,8 +4807,15 @@ static void markdown_render_table_row(sb_t *out, const char *p, size_t len,
     start++;
   while (start < len) {
     size_t end = start;
-    while (end < len && p[end] != '|')
+    while (end < len) {
+      if (p[end] == '\\' && end + 1 < len) {
+        end += 2;
+        continue;
+      }
+      if (p[end] == '|')
+        break;
       end++;
+    }
     size_t next = end < len ? end + 1 : end;
     size_t cell_start = start;
     size_t cell_end = end;
@@ -4835,7 +4882,17 @@ static void render_md_heading(sb_t *out, const char *p, size_t len,
   snprintf(tag, sizeof(tag), "h%d", level);
   sb_add(out, "<");
   sb_add(out, tag);
-  sb_add(out, ">");
+  sb_add(out, " id=\"");
+  for (size_t i = off; i < len; i++) {
+    unsigned char c = (unsigned char)p[i];
+    if (isalnum(c) || c == '_' || c == '-' || c >= 128) {
+      char lower = c < 128 ? (char)tolower(c) : (char)c;
+      sb_addn(out, &lower, 1);
+    } else if (isspace(c)) {
+      sb_add(out, "-");
+    }
+  }
+  sb_add(out, "\">");
   markdown_render_inline(out, p + off, len - off, route);
   sb_add(out, "</");
   sb_add(out, tag);
@@ -4892,6 +4949,18 @@ static void render_md_line(sb_t *out, const char *p, size_t len,
   }
 }
 
+static int markdown_raw_block(const char *p, size_t len) {
+  static const char *const prefixes[] = {"<div",      "</div>",     "<img ",
+                                         "<details>", "</details>", "<summary>",
+                                         "</summary>"};
+  for (size_t i = 0; i < sizeof(prefixes) / sizeof(prefixes[0]); i++) {
+    size_t n = strlen(prefixes[i]);
+    if (len >= n && !strncmp(p, prefixes[i], n))
+      return 1;
+  }
+  return 0;
+}
+
 static char *render_markdown_static(const char *md, const char *route) {
   sb_t out = {0};
   size_t source_len = md ? strlen(md) : 0;
@@ -4902,7 +4971,9 @@ static char *render_markdown_static(const char *md, const char *route) {
    */
   if (source_len < SIZE_MAX - 1)
     (void)ny_strbuf_reserve(&out, source_len + 1);
-  int in_code = 0, in_ul = 0, in_table = 0;
+  int in_code = 0, in_ul = 0, in_table = 0, in_comment = 0;
+  int ordered = 0, list_item = 0;
+  sb_t paragraph = {0};
   for (const char *line = md ? md : ""; *line;) {
     const char *next = strchr(line, '\n');
     size_t n = next ? (size_t)(next - line) : strlen(line);
@@ -4910,21 +4981,100 @@ static char *render_markdown_static(const char *md, const char *route) {
     size_t len = n;
     while (len && (p[len - 1] == '\r' || p[len - 1] == '\n'))
       len--;
-    if (len >= 3 && strncmp(p, "```", 3) == 0) {
-      render_md_close_structures(&out, &in_ul, &in_table);
-      render_md_code_block(&out, p, len, in_code);
-      in_code = !in_code;
-    } else if (in_code) {
-      sb_add_html_escapedn(&out, p, len);
+    size_t code_len = len;
+    while (len && isspace((unsigned char)*p)) {
+      p++;
+      len--;
+    }
+    int fence = len >= 3 && !strncmp(p, "```", 3);
+    if (in_code && !fence) {
+      sb_add_html_escapedn(&out, line, code_len);
       sb_add(&out, "\n");
     } else {
-      while (len && isspace((unsigned char)*p)) {
-        p++;
-        len--;
-      }
       while (len && isspace((unsigned char)p[len - 1]))
         len--;
-      render_md_line(&out, p, len, route, &in_ul, &in_table);
+      if (in_comment || (len >= 4 && !strncmp(p, "<!--", 4))) {
+        in_comment = 1;
+        for (size_t j = 0; j + 2 < len; j++) {
+          if (!strncmp(p + j, "-->", 3)) {
+            in_comment = 0;
+            break;
+          }
+        }
+        if (!next)
+          break;
+        line = next + 1;
+        continue;
+      }
+      size_t marker = 0;
+      int next_ordered = 0;
+      if (len >= 2 && (p[0] == '-' || p[0] == '*') &&
+          isspace((unsigned char)p[1])) {
+        marker = 2;
+      } else {
+        while (marker < len && isdigit((unsigned char)p[marker]))
+          marker++;
+        if (marker && marker + 1 < len &&
+            (p[marker] == '.' || p[marker] == ')') &&
+            isspace((unsigned char)p[marker + 1])) {
+          marker += 2;
+          next_ordered = 1;
+        } else {
+          marker = 0;
+        }
+      }
+      int raw = markdown_raw_block(p, len);
+      int boundary =
+          !len || p[0] == '#' || p[0] == '|' || fence || marker || raw;
+      if (boundary && paragraph.len) {
+        sb_add(&out, list_item ? "<li>" : "<p>");
+        markdown_render_inline(&out, paragraph.data, paragraph.len, route);
+        sb_add(&out, list_item ? "</li>\n" : "</p>\n");
+        paragraph.len = 0;
+        paragraph.data[0] = '\0';
+      }
+      if (marker) {
+        if (in_table) {
+          sb_add(&out, "</tbody></table>\n");
+          in_table = 0;
+        }
+        if (in_ul && ordered != next_ordered) {
+          sb_add(&out, ordered ? "</ol>\n" : "</ul>\n");
+          in_ul = 0;
+        }
+        ordered = next_ordered;
+        if (!in_ul) {
+          sb_add(&out, ordered ? "<ol>\n" : "<ul>\n");
+          in_ul = 1;
+        }
+        list_item = 1;
+        sb_addn(&paragraph, p + marker, len - marker);
+      } else if (boundary) {
+        if (in_ul) {
+          sb_add(&out, ordered ? "</ol>\n" : "</ul>\n");
+          in_ul = 0;
+        }
+        list_item = 0;
+        if (raw) {
+          render_md_close_structures(&out, &in_ul, &in_table);
+          sb_addn(&out, p, len);
+          sb_add(&out, "\n");
+        } else if (fence) {
+          render_md_close_structures(&out, &in_ul, &in_table);
+          render_md_code_block(&out, p, len, in_code);
+          in_code = !in_code;
+        } else {
+          render_md_line(&out, p, len, route, &in_ul, &in_table);
+        }
+      } else {
+        if (in_table) {
+          sb_add(&out, "</tbody></table>\n");
+          in_table = 0;
+        }
+        if (paragraph.len)
+          sb_add(&paragraph, " ");
+        sb_addn(&paragraph, p, len);
+      }
     }
     if (!next)
       break;
@@ -4932,6 +5082,16 @@ static char *render_markdown_static(const char *md, const char *route) {
   }
   if (in_code)
     sb_add(&out, "</code></pre>\n");
+  if (paragraph.len) {
+    sb_add(&out, list_item ? "<li>" : "<p>");
+    markdown_render_inline(&out, paragraph.data, paragraph.len, route);
+    sb_add(&out, list_item ? "</li>\n" : "</p>\n");
+  }
+  free(paragraph.data);
+  if (in_ul) {
+    sb_add(&out, ordered ? "</ol>\n" : "</ul>\n");
+    in_ul = 0;
+  }
   render_md_close_structures(&out, &in_ul, &in_table);
   return out.data ? out.data : strdup("");
 }

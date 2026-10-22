@@ -5,7 +5,14 @@
 #include "code/lang/parse/proof.h"
 #include "code/lang/priv.h"
 
+#ifdef _WIN32
+#include <malloc.h>
+#ifndef alloca
+#define alloca _alloca
+#endif
+#else
 #include <alloca.h>
+#endif
 #include <stdlib.h>
 #include <string.h>
 

@@ -25,42 +25,9 @@ assert_eq(byte_class(200), "other", "fallback")
 ```
 
 Supported arm shapes include literals, literal lists, ranges, and wildcard
-arms.
-
-`case` arms can be compact while staying explicit:
-
-```ny
-use core
-
-fn classify(int b) str {
-   case b {
-      9, 10, 13 -> "control-space"
-      32..126 -> "ascii"
-      _ -> "other"
-   }
-}
-
-assert_eq(classify(10), "control-space", "literal set")
-assert_eq(classify(48), "ascii", "range arm")
-```
-
-Common `case` inputs include byte classifiers, token kinds, command names,
-enum-like values, and numeric ranges.
-
-This is a typical shape for byte classifiers:
-
-```ny
-fn ascii_score(int b) int {
-   case b {
-      9, 10, 13 -> 1
-      32..126 -> 10
-      _ -> -40
-   }
-}
-```
-
-Generated or shared classifiers can move to `comptime` tables or helper
-functions.
+arms. Common inputs include byte classes, token kinds, command names, and
+numeric ranges. Generated or shared classifiers can use
+[compile-time tables](comptime.md#tables).
 
 ## Match patterns
 
@@ -110,14 +77,11 @@ assert(positive_radius(Shape.Circle(4)) == 4, "guard matches")
 assert(positive_radius(Shape.Circle(0)) == 0, "guard falls through")
 ```
 
-The compiler checks duplicate variants, payload arity, unknown constructors,
-and non-exhaustive ADT matches.
-
 When arms use only literals or ranges, `case` is the direct form.
 
 ## Wildcard
 
-```text
+```ny
 _ -> fallback
 ```
 
@@ -143,9 +107,7 @@ assert_eq(status_class(404), "missing", "specific arm first")
 assert_eq(status_class(401), "client-error", "client range")
 ```
 
-Reversing the first two arms would make `404` unreachable as a special case.
-
-Place special cases before a broad range that catches many values.
+Reversing the first two arms would select `"client-error"` for `404` too.
 
 ## Exhaustiveness and binding
 
@@ -181,31 +143,6 @@ fn sign_name(int x) str {
 assert_eq(sign_name(-1), "negative", "negative case")
 assert_eq(sign_name(0), "zero", "zero case")
 ```
-
-## Comptime tables
-
-Repeated classifiers can be represented as compile-time data:
-
-```ny
-use core
-
-fn operator_group(str kind) str {
-   case kind {
-      "add", "sub", "mul", "div" -> "arithmetic"
-      "and", "or", "xor" -> "bitwise"
-      _ -> "other"
-   }
-}
-
-assert_eq(operator_group("add"), "arithmetic", "literal set")
-assert_eq(operator_group("xor"), "bitwise", "second literal set")
-```
-
-Large or generated tables can use a `comptime` table or generated module
-instead of a long hand-written `case`.
-
-There is no fixed arm-count cutoff. Move logic out when arms hide helper calls
-or multi-step setup.
 
 ## Diagnostics
 

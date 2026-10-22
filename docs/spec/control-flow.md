@@ -1,13 +1,12 @@
 <!-- nytrix-doc: {"audience":"user","featured":false,"group":"spec","order":150,"summary":"Branches, loops, pattern cases, exits, and control-flow expressions."} -->
 # Control Flow
 
-Use this page for branch, loop, dispatch, and cleanup syntax. See
-[Patterns](patterns.md) for arm matching and [Errors](errors.md) for failure
-behavior.
+For pattern matching and failure handling, see [Patterns](patterns.md) and
+[Errors](errors.md).
 
 ## Conditionals
 
-```text
+```ny
 if(cond){ a } else { b }
 if(cond){ a } elif(other){ b } else { c }
 if cond { a } elif other { b } else { c }
@@ -49,7 +48,7 @@ comparison in code that should stay readable under `--strict-types`.
 
 ## Loops
 
-```text
+```ny
 while(cond){ body }
 while(mut i = 0 i < n ++i){ body }
 for item in iterable { body }
@@ -127,7 +126,7 @@ for i in 1..10 {
 
 See [Patterns](patterns.md#guards-and-clarity) for full arm syntax and guards.
 
-```text
+```ny
 case value {
    literal -> expr
    a, b, c -> expr
@@ -149,7 +148,7 @@ Use `case` in binding position when each selected arm produces a value.
 
 See [Patterns](patterns.md#match-patterns) for full arm syntax and guards.
 
-```text
+```ny
 match value {
    pattern -> expr
    Pattern(value) -> expr
@@ -162,7 +161,7 @@ constructor name and positional payload bindings.
 
 ## Try and catch
 
-```text
+```ny
 try { body } catch err { handler }
 try { body } catch(_) { handler }
 ```
@@ -172,13 +171,17 @@ structured `Result` values instead.
 
 ## Defer
 
-```text
+```ny
 defer { cleanup }
 ```
 
 `defer` schedules cleanup for the current scope. Use it around files, handles,
 processes, and native resources. The runtime runs multiple defers in
 last-in-first-out order and also runs them during panic unwinding.
+
+This cleanup-order example fails for a captured local string on the default
+LLVM route; see
+[known documentation smoke limitations](../learn/status.md#documentation-smoke-limitations).
 
 ```ny
 use core
@@ -201,7 +204,7 @@ not run at program end for scopes that never exited normally.
 
 ## Labels and goto
 
-```text
+```ny
 start:
 if(done){ goto end }
 goto start
@@ -219,7 +222,7 @@ loops make the control path harder to see. Prefer `while`, `for`, `break`, and
 
 ## With
 
-```text
+```ny
 with Type name = value { body }
 ```
 

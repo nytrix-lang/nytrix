@@ -4,7 +4,6 @@
 #include "code/backend/ir/machine.h"
 #include "code/backend/object/internal.h"
 #include "support.h"
-#include <sys/mman.h>
 
 typedef int64_t (*gpr_kernel_t)(int64_t, int64_t, int64_t, int64_t, int64_t,
                                 int64_t, int64_t, int64_t, int64_t, int64_t,
@@ -43,22 +42,22 @@ static int check(nyr_abi_t abi) {
   int values[11];
   for (int i = 0; i < 11; ++i)
     values[i] = nyr_ir_emit(&ir, (nyr_inst_t){.op = NYIR_LOAD_LOCAL,
-                                             .dst = -1,
-                                             .a = -1,
-                                             .b = -1,
-                                             .c = -1,
-                                             .d = -1,
-                                             .e = -1,
-                                             .f = -1,
-                                             .imm = i});
+                                              .dst = -1,
+                                              .a = -1,
+                                              .b = -1,
+                                              .c = -1,
+                                              .d = -1,
+                                              .e = -1,
+                                              .f = -1,
+                                              .imm = i});
   nyr_ir_emit(&ir, (nyr_inst_t){.op = NYIR_STORE_I64,
-                               .dst = -1,
-                               .a = values[9],
-                               .b = -1,
-                               .c = values[10],
-                               .d = -1,
-                               .e = -1,
-                               .f = -1});
+                                .dst = -1,
+                                .a = values[9],
+                                .b = -1,
+                                .c = values[10],
+                                .d = -1,
+                                .e = -1,
+                                .f = -1});
   int sum = values[10];
   for (int i = 0; i < 9; ++i)
     sum = nyr_opt_binop(&ir, NYIR_ADD_I64, sum, values[i]);
@@ -85,24 +84,23 @@ static int check(nyr_abi_t abi) {
       nyr_target_info_init(&target, &target_request) &&
       nyr_mach_lower_nir(&ir, &mach, target.caps, err, sizeof(err)) &&
       nyr_mach_lower_nir(&entry_ir, &entry, target.caps, err, sizeof(err)) &&
-      nyr_x64_mach_build_bundle(&entry, &mach, (const char *const[]){"pressure"},
-                               1, &target, "rt_main", false, &code, defs,
-                               &def_count, relocs, &reloc_count, err,
-                               sizeof(err));
+      nyr_x64_mach_build_bundle(&entry, &mach,
+                                (const char *const[]){"pressure"}, 1, &target,
+                                "rt_main", false, &code, defs, &def_count,
+                                relocs, &reloc_count, err, sizeof(err));
   int symbol =
       ok ? nyr_x64_obj_def_index(defs, def_count, "ny_fn_pressure") : -1;
   ok = ok && symbol >= 0;
   void *mapping = MAP_FAILED;
   if (ok && !reloc_count) {
-    mapping = mmap(NULL, code.len, PROT_READ | PROT_WRITE,
-                   MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    mapping = nyr_opt_execmem_alloc(code.len);
     ok = mapping != MAP_FAILED;
   } else {
     ok = false;
   }
   if (ok) {
     memcpy(mapping, code.data, code.len);
-    ok = mprotect(mapping, code.len, PROT_READ | PROT_EXEC) == 0;
+    ok = nyr_opt_execmem_protect(mapping, code.len) == 0;
   }
   if (ok) {
     gpr_kernel_t kernel =
@@ -117,7 +115,7 @@ static int check(nyr_abi_t abi) {
               (long long)result, (long long)stored);
   }
   if (mapping != MAP_FAILED)
-    munmap(mapping, code.len);
+    nyr_opt_execmem_free(mapping, code.len);
   nyr_obj_free(&code);
   nyr_mach_func_free(&mach);
   nyr_mach_func_free(&entry);

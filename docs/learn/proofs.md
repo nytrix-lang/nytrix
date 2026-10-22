@@ -1,10 +1,10 @@
 <!-- nytrix-doc: {"audience":"user","featured":false,"group":"learn","order":105,"summary":"Use compile-time assertions, bounded index types, and checked function preconditions."} -->
 # Proofs
 
-Use a proof feature only when it expresses a real program boundary. Nytrix's
-solver handles a bounded set of propositions; it is not a general theorem
-prover. Unknown obligations are rejected rather than treated as true. The exact
-accepted forms and regression boundaries are in [Types](../spec/types.md).
+Nytrix checks a bounded set of propositions and rejects unknown obligations.
+Use proofs to express a program's preconditions or bounds; the solver is not a
+general theorem prover. [Types](../spec/types.md) lists supported forms and
+regression boundaries.
 
 ## Check a compile-time fact
 

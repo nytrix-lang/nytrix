@@ -1,24 +1,23 @@
-<!-- nytrix-doc: {"audience":"user","featured":true,"group":"spec","order":15,"summary":"How source becomes a checked program, native artifact, JIT execution, or WebAssembly."} -->
+<!-- nytrix-doc: {"audience":"contributor","featured":true,"group":"spec","order":15,"summary":"How checked source reaches NYIR, machine code, LLVM, or WebAssembly."} -->
 # Pipeline
 
-This page describes the compiler and runtime path for a Nytrix program. It is
-an implementation map, not a promise that every source shape is accepted by
-every backend.
+The compiler checks source before selecting a code-generation route. Each
+backend has its own source-shape and host limits.
 
 ## Stage map
 
-For `ny file.ny`, the normal path is:
+Source units and the selected standard library pass through parsing, expansion,
+symbol resolution, and semantic checking before NYIR lowering. Ownership and
+provenance analysis run when enabled. The selected backend then consumes NYIR:
 
-```text
-source units + selected stdlib
-  -> parse and source expansion
-  -> symbol resolution and type/effect checks
-  -> ownership/provenance analysis
-  -> LLVM IR -> JIT execution or object -> linked executable
-                 \
-                  -> NYIR -> machine form -> native object
-                  -> Wasm for the browser target
-```
+| Route | Code generation |
+| --- | --- |
+| LLVM | NYIR-to-LLVM emission, then LLVM JIT execution or object emission and linking. |
+| Owned native | NYIR optimization, typed machine lowering, register allocation, and native object or JIT emission. |
+| Browser/Wasm | Supported Wasm lowering and explicit browser host imports. |
+
+The REPL's compatibility emitter is a separate incremental path, described
+under [Lowering and execution](#lowering-and-execution).
 
 The exact terminal path is selected by the command and backend. `--native-only`
 requires the NYIR/native path. On supported hosts, `-run` and `-o` select the
@@ -38,24 +37,24 @@ separate from ordinary type inference.
 
 ### Trait validation
 
-After HM typing succeeds, the type pipeline runs a **trait** stage before ABI
-(`NY_TYPE_PIPELINE_STAGE_TRAIT` in `src/code/lang/types/pipeline/emit.c`). This stage
-is what users see as **`trait validation failed`** when compilation stops early.
+After HM typing, the type pipeline runs trait validation before ABI analysis
+(`NY_TYPE_PIPELINE_STAGE_TRAIT` in `src/code/lang/types/pipeline/emit.c`).
+Failures report `trait validation failed`.
 
 It checks:
 
-- **Operator declarations:** target function exists, arity is two, parameter and
-  return types match the declaration, no duplicate `(operator, left, right)` in
-  scope.
-- **Impl coherence:** no duplicate attached method with the same owner, method
-  tail name, and arity in user code (stdlib delegating duplicates are allowed).
-- **Operator obligations:** binary operators on nominal custom types must resolve
-  to exactly one impl or the compiler reports unresolved/ambiguous operators.
+- An operator's target function must exist, take two arguments, and match the
+  declared parameter and return types. Duplicate `(operator, left, right)`
+  declarations in one scope are rejected.
+- User code cannot define duplicate attached methods with the same owner,
+  method tail name, and arity. Standard-library delegating duplicates are allowed.
+- Binary operators on nominal custom types must resolve to exactly one impl;
+  unresolved or ambiguous operators produce diagnostics.
 
-**Impl law** propositions are checked by the shared trait-validation stage with
+Impl law propositions are checked by the shared trait-validation stage with
 the proof policy and compile-time Boolean evaluator, before codegen prepare.
-Trait **definitions** are registered into the codegen trait list; method bodies
-for **`impl Trait for Type`** lower like ordinary functions with trait metadata.
+Trait definitions enter the codegen trait list; `impl Trait for Type` method
+bodies lower like ordinary functions with trait metadata.
 
 User-facing detail: [Traits and impl](traits.md).
 
@@ -185,7 +184,8 @@ assert_eq(square(21), 441, "square")
 Compile it through each stage:
 
 ```bash
-ny -dump-ast hello.ny            # parsed structure
+ny --dump-ast hello.ny           # parsed source tree; no execution
+ny --dump-ast-typed --dump-ast-filter=square hello.ny  # checked declaration
 ny -vvvv hello.ny                # full compiler trace; save failure artifacts
 ny --dump-on-error --dump-dir=build/debug/case hello.ny
 ny --dump-diagnose --dump-dir=build/debug/case hello.ny
@@ -196,7 +196,9 @@ ny --nyir-track-value=12 --native-only hello.ny         # follow SSA value 12
 ny -trace hello.ny               # runtime trace
 ```
 
-Flags come before the file argument. `-dump-llvm` prints LLVM IR; `--emit-ir`
+Flags come before the file argument. AST dumps stop before execution; the typed
+form first validates types and traits. See [AST inspection](../learn/debugging.md#ast-inspection)
+for node metadata and filtering. `-dump-llvm` prints LLVM IR; `--emit-ir`
 writes it to a path and `-emit-only` stops before execution. `-vvvv` and
 `-vvvvv` enable the deepest compiler trace and save artifacts on failure under
 `build/debug/`; `--dump-dir` chooses another location. The failure manifest

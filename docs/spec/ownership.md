@@ -31,7 +31,7 @@ a borrow-safety certificate.
 Moving a value, passing it to a consuming function, or explicitly releasing it
 can discharge its obligation. Reusing a moved value is rejected.
 
-```text
+```ny
 linear layout File { int fd }
 affine layout Socket { int fd }
 

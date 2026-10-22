@@ -1964,7 +1964,7 @@ fn check_event(any win) any {
          def last_poll = int(_event_poll_ns_by_handle.get(handle, 0))
          mut polled_events = ui_backend.pump_window_events(handle)
          if (!is_list(polled_events) || polled_events.len == 0) &&
-            (last_poll <= 0 || now_poll - last_poll >= 500000) {
+         (last_poll <= 0 || now_poll - last_poll >= 500000) {
             _event_poll_ns_by_handle[handle] = now_poll
             polled_events = ui_backend.poll_events_for_window(handle)
          }

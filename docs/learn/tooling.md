@@ -20,8 +20,12 @@ ny -o app file.ny
 ny --native-only file.ny
 ```
 
-These commands exercise different paths. See [Execution routes](routes.md)
+These commands exercise different paths. See [Execution routes](status.md#execution-routes)
 before treating a successful run as evidence for another backend.
+
+For source inspection without execution, use `ny --dump-ast file.ny` or
+`ny --dump-ast-typed --dump-ast-filter=name file.ny`.
+The [debugging guide](debugging.md#ast-inspection) explains the tree and checks.
 
 ## Format and test
 
@@ -46,6 +50,26 @@ ny doc get module.name
 
 The results depend on the checked-out source and its generated docs. See
 [Library](library.md) for a search workflow.
+
+In the generated website, **Contents** links open any containing disclosure
+before scrolling to a heading. Long outlines scroll within their own panel.
+Release highlights are visible in the [changelog](../CHANGELOG.md); each
+version's **Details** contains its development record.
+
+The sidebar separates folder groups from page links with disclosure arrows,
+indentation, and tree guides. Click an API namespace or module name to open its
+page; use its arrow to expand children without navigating. Folder and arrow
+buttons support Enter and Space. The selected page stays visible in the tree.
+Typing outside interactive controls starts a search; focused navigation
+controls keep their normal keyboard behavior.
+
+## Editor navigation
+
+`ny-lsp` provides symbols, definitions, references, rename, and
+`textDocument/prepareRename`. Reference/rename discovery excludes line comments
+and quoted strings, avoiding edits to those lexical lookalikes. Clients can
+preview the selected name and range before applying a workspace edit. This does
+not yet provide interactive move-declaration or change-signature refactors.
 
 ## Diagnose a failure
 

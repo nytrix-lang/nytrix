@@ -177,7 +177,12 @@ def removed_start = file_remove(start_path)
 def removed_helper = file_remove(helper_path)
 def removed_executable = file_remove(executable)
 assert(emitted.get("code", 127) == 0 && linked.get("code", 127) == 0,
-       "verified AArch64 float-call module assembles and links")
+       "verified AArch64 float-call module assembles and links; emitted=" +
+           to_str(emitted.get("code", 127)) + " emit stdout=" +
+           emitted.get("stdout", "") + " emit stderr=" +
+           emitted.get("stderr", "") + " link=" +
+           to_str(linked.get("code", 127)) + " link stdout=" +
+           linked.get("stdout", "") + " link stderr=" + linked.get("stderr", ""))
 assert(execution.get("code", 127) == 0,
        "AArch64 floating and overflow-argument ABI failure mask: " +
            to_str(execution.get("code", 127)))

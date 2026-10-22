@@ -27,13 +27,11 @@ MIT License
 @top Nytrix
 
 Nytrix uses explicit imports, native output, compile-time source generation,
-and direct C ABI interop. The Markdown docs in @file{docs/spec/} are the
-canonical language reference; this manual is the compact Info entry point.
+and direct C ABI interop. See @file{docs/spec/} for the language reference.
 
-@strong{Status:} Feature support varies across LLVM, the Nytrix-owned native
+Feature support varies across LLVM, the Nytrix-owned native
 backend, and WebAssembly. Read
-@file{docs/learn/fits.md},
-@file{docs/learn/status.md}, and
+@file{docs/learn/status.md} and
 @file{docs/learn/quirks.md} before choosing a backend or relying on a
 partial contract.
 
@@ -135,7 +133,7 @@ case value @{ literal -> expr _ -> fallback @}
 match value @{ Pattern(value) -> expr _ -> fallback @}
 try @{ body @} catch err @{ handler @}
 defer @{ cleanup @}
-with Type: name = value @{ body @}
+with Type name = value @{ body @}
 @end example
 
 @section Compile Time
@@ -234,7 +232,6 @@ language rules.
 @item @file{docs/spec/native.md}
 @item @file{docs/spec/runtime.md}
 @item @file{docs/learn/start.md}
-@item @file{docs/learn/fits.md}
 @item @file{docs/learn/status.md}
 @item @file{docs/learn/quirks.md}
 @item @file{docs/learn/tooling.md}

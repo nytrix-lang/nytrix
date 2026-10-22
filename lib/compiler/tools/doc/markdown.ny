@@ -61,10 +61,11 @@ fn _route_for(str base, str href) dict {
    while str.startswith(path, "./") { path = str._substr(path, 2, path.len) }
    while str.startswith(path, "/") { path = str._substr(path, 1, path.len) }
    if str.startswith(path, "docs/") { path = str._substr(path, 5, path.len) }
+   def bool source_markdown = str.endswith(path, ".md")
    if str.endswith(path, ".md") { path = str._substr(path, 0, path.len - 3) }
    elif str.endswith(path, ".html") { path = str._substr(path, 0, path.len - 5) }
    elif str.endswith(path, ".htm") { path = str._substr(path, 0, path.len - 4) }
-   if str.endswith(path, "/index") { path = str._substr(path, 0, path.len - 6) }
+   if !source_markdown && str.endswith(path, "/index") { path = str._substr(path, 0, path.len - 6) }
    def bool rooted = href.len > 0 && load8(href, 0) == 47 ||
    str.startswith(href, "docs/") || str.startswith(path, "learn/") ||
    str.startswith(path, "spec/")
@@ -100,6 +101,14 @@ fn _route_for(str base, str href) dict {
 }
 
 fn _href(str from, str to, str anchor) str {
+   if str.startswith(to, "src/") || str.startswith(to, "lib/") || str.startswith(to, "etc/") || str.startswith(to, "info/") || to == "LICENSE" {
+      def int slash = str.find_last(to, "/")
+      def str name = slash >= 0 ? str._substr(to, slash + 1, to.len) : to
+      def str kind = str.find(name, ".") >= 0 || name == "LICENSE" ? "blob" : "tree"
+      return "https://github.com/nytrix-lang/nytrix/" + kind + "/main/" +
+      (str.startswith(to, "info/") ? "docs/" : "") + to +
+      (anchor.len > 0 ? "#" + anchor : "")
+   }
    if from == to { return "#" + anchor }
    mut int depth = from.len > 0 ? 1 : 0
    mut int i = 0
@@ -124,6 +133,34 @@ fn _inline(str text, str route) str {
    mut int i = 0
    while i < text.len {
       def int byte = load8(text, i)
+      if byte == 10 || byte == 13 {
+         out = str.builder_append(out, " ")
+         i += 1
+         continue
+      }
+      if byte == 92 && i + 1 < text.len {
+         def int next = load8(text, i + 1)
+         if next == 124 || (!code && ((next >= 33 && next <= 47) || (next >= 58 && next <= 64) || (next >= 91 && next <= 96) || (next >= 123 && next <= 126))) {
+            out = _append_html_range(out, text, i + 1, i + 2)
+            i += 2
+            continue
+         }
+      }
+      if !code && (byte == 42 || byte == 95) {
+         def int width = i + 1 < text.len && load8(text, i + 1) == byte ? 2 : 1
+         mut int end = i + width
+         while end < text.len {
+            if load8(text, end) == byte && (width == 1 || (end + 1 < text.len && load8(text, end + 1) == byte)) { break }
+            end += 1
+         }
+         if end < text.len {
+            out = str.builder_append(out, width == 2 ? "<strong>" : "<em>")
+            out = str.builder_append(out, _inline(str._substr(text, i + width, end), route))
+            out = str.builder_append(out, width == 2 ? "</strong>" : "</em>")
+            i = end + width
+            continue
+         }
+      }
       if byte == 96 {
          out = str.builder_append(out, code ? "</code>" : "<code>")
          code = !code
@@ -159,7 +196,7 @@ fn _inline(str text, str route) str {
       i += 1
       while i < text.len {
          def int next_byte = load8(text, i)
-         if next_byte == 96 || (!code && next_byte == 91) { break }
+         if next_byte == 10 || next_byte == 13 || next_byte == 96 || next_byte == 92 || (!code && (next_byte == 91 || next_byte == 42 || next_byte == 95)) { break }
          i += 1
       }
       out = _append_html_range(out, text, span_start, i)
@@ -196,7 +233,14 @@ fn _table_row(ptr out, str line, str route) ptr {
    mut int start = load8(line, 0) == 124 ? 1 : 0
    while start < line.len {
       mut int end = start
-      while end < line.len && load8(line, end) != 124 { end += 1 }
+      while end < line.len {
+         if load8(line, end) == 92 && end + 1 < line.len {
+            end += 2
+            continue
+         }
+         if load8(line, end) == 124 { break }
+         end += 1
+      }
       mut int left = start
       mut int right = end
       while left < right && (load8(line, left) == 32 || load8(line, left) == 9) { left += 1 }
@@ -228,6 +272,23 @@ fn _code_fence(ptr out, str line, bool closing) ptr {
    str.builder_append(out, ">")
 }
 
+fn _heading_id(str text) str {
+   mut ptr out = str.Builder(text.len + 1)
+   mut int i = 0
+   while i < text.len {
+      def int byte = load8(text, i)
+      if str.ascii_is_alnum(byte) || byte == 95 || byte == 45 || byte >= 128 {
+         if byte >= 65 && byte <= 90 {
+            out = str.builder_append(out, str.chr(byte + 32))
+         } else { out = str.builder_append(out, str._substr(text, i, i + 1)) }
+      } elif byte == 32 || byte == 9 { out = str.builder_append(out, "-") }
+      i += 1
+   }
+   def str result = str.builder_to_str(out)
+   str.builder_free(out)
+   result
+}
+
 fn _line(str line, str route, bool ul, bool table) dict {
    mut ptr out = str.Builder(128)
    if line.len == 0 {
@@ -245,7 +306,7 @@ fn _line(str line, str route, bool ul, bool table) dict {
       mut int start = level
       while start < line.len && (load8(line, start) == 32 || load8(line, start) == 9) { start += 1 }
       def str tag = "h" + str(level)
-      out = str.builder_append(out, "<" + tag + ">")
+      out = str.builder_append(out, "<" + tag + " id=\"" + _heading_id(str._substr(line, start, line.len)) + "\">")
       out = str.builder_append(out, _inline(str._substr(line, start, line.len), route))
       out = str.builder_append(out, "</" + tag + ">\n")
       def str html = str.builder_to_str(out)
@@ -278,11 +339,16 @@ fn _line(str line, str route, bool ul, bool table) dict {
 }
 
 fn render_static(str markdown, str route) str {
-   "Renders the static-site Markdown subset with the same stable HTML as ny web."
+   "Renders trusted documentation Markdown, including div, img, details, and summary HTML blocks. Not an HTML sanitizer."
    mut ptr out = str.Builder(markdown.len + 128)
    mut bool code = false
    mut bool ul = false
    mut bool table = false
+   mut bool comment = false
+   mut bool ordered = false
+   mut bool list_item = false
+   mut int paragraph_start = -1
+   mut int paragraph_end = 0
    mut int start = 0
    mut int i = 0
    while i <= markdown.len {
@@ -292,27 +358,101 @@ fn render_static(str markdown, str route) str {
       }
       mut str line = str._substr(markdown, start, i)
       if str.endswith(line, "\r") { line = str._substr(line, 0, line.len - 1) }
-      if line.len >= 3 && str.startswith(line, "```") {
-         out = _close(out, ul, table)
-         ul = false
-         table = false
-         out = _code_fence(out, line, code)
-         code = !code
-      } elif code {
+      mut int content_start = start
+      while content_start < i && (load8(markdown, content_start) == 32 || load8(markdown, content_start) == 9) { content_start += 1 }
+      def bool fence = i - content_start >= 3 &&
+      load8(markdown, content_start) == 96 && load8(markdown, content_start + 1) == 96 && load8(markdown, content_start + 2) == 96
+      if code && !fence {
          out = _append_html(out, line)
          out = str.builder_append(out, "\n")
       } else {
          line = _trim(line)
-         def dict next = _line(line, route, ul, table)
-         def str html = next.get("html")
-         out = str.builder_append(out, html)
-         ul = next.get("ul")
-         table = next.get("table")
+         if comment || str.startswith(line, "<!--") {
+            comment = str.find(line, "-->") < 0
+            start = i + 1
+            i += 1
+            continue
+         }
+         mut int marker = 0
+         mut bool next_ordered = false
+         if line.len >= 2 && (load8(line, 0) == 45 || load8(line, 0) == 42) && (load8(line, 1) == 32 || load8(line, 1) == 9) {
+            marker = 2
+         } else {
+            while marker < line.len && load8(line, marker) >= 48 && load8(line, marker) <= 57 { marker += 1 }
+            if marker > 0 && marker + 1 < line.len && (load8(line, marker) == 46 || load8(line, marker) == 41) && (load8(line, marker + 1) == 32 || load8(line, marker + 1) == 9) {
+               marker += 2
+               next_ordered = true
+            } else { marker = 0 }
+         }
+         def bool raw = str.startswith(line, "<div") || str.startswith(line, "</div>") || str.startswith(line, "<img ") ||
+         str.startswith(line, "<details>") || str.startswith(line, "</details>") ||
+         str.startswith(line, "<summary>") || str.startswith(line, "</summary>")
+         def bool boundary = line.len == 0 || str.startswith(line, "#") || str.startswith(line, "|") || fence || marker > 0 || raw
+         if boundary && paragraph_start >= 0 {
+            out = str.builder_append(out, list_item ? "<li>" : "<p>")
+            out = str.builder_append(out, _inline(str._substr(markdown, paragraph_start, paragraph_end), route))
+            out = str.builder_append(out, list_item ? "</li>\n" : "</p>\n")
+            paragraph_start = -1
+         }
+         if marker > 0 {
+            if table {
+               out = str.builder_append(out, "</tbody></table>\n")
+               table = false
+            }
+            if ul && ordered != next_ordered {
+               out = str.builder_append(out, ordered ? "</ol>\n" : "</ul>\n")
+               ul = false
+            }
+            ordered = next_ordered
+            if !ul {
+               out = str.builder_append(out, ordered ? "<ol>\n" : "<ul>\n")
+               ul = true
+            }
+            list_item = true
+            paragraph_start = content_start + marker
+            paragraph_end = i
+         } elif boundary {
+            if ul {
+               out = str.builder_append(out, ordered ? "</ol>\n" : "</ul>\n")
+               ul = false
+            }
+            list_item = false
+            if raw {
+               out = _close(out, ul, table)
+               table = false
+               out = str.builder_append(out, line + "\n")
+            } elif fence {
+               out = _close(out, ul, table)
+               table = false
+               out = _code_fence(out, line, code)
+               code = !code
+            } else {
+               def dict next = _line(line, route, ul, table)
+               out = str.builder_append(out, str(next.get("html")))
+               table = next.get("table")
+            }
+         } else {
+            if table {
+               out = str.builder_append(out, "</tbody></table>\n")
+               table = false
+            }
+            if paragraph_start < 0 { paragraph_start = start }
+            paragraph_end = i
+         }
       }
       start = i + 1
       i += 1
    }
    if code { out = str.builder_append(out, "</code></pre>\n") }
+   if paragraph_start >= 0 {
+      out = str.builder_append(out, list_item ? "<li>" : "<p>")
+      out = str.builder_append(out, _inline(str._substr(markdown, paragraph_start, paragraph_end), route))
+      out = str.builder_append(out, list_item ? "</li>\n" : "</p>\n")
+   }
+   if ul {
+      out = str.builder_append(out, ordered ? "</ol>\n" : "</ul>\n")
+      ul = false
+   }
    out = _close(out, ul, table)
    def str result = str.builder_to_str(out)
    str.builder_free(out)

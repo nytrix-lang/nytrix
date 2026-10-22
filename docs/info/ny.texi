@@ -30,8 +30,7 @@ MIT License
 the built-in project tools.
 
 Feature support varies across LLVM, the Nytrix-owned native backend, and
-WebAssembly. See @file{docs/learn/fits.md},
-@file{docs/learn/status.md}, and
+WebAssembly. See @file{docs/learn/status.md} and
 @file{docs/learn/quirks.md} before relying on a backend or partial
 contract.
 
@@ -120,6 +119,14 @@ and repository packages. Install roots include @file{./ny_modules},
 @file{./vendor/ny_modules}, @file{./.nytrix/venv/lib}, user/global roots,
 system roots, and @code{--root path}.
 
+There is no default package repository or implicit public-registry fallback.
+Add repositories you trust with @code{ny pkg repo add}, or pass an explicit
+source. Search discovers packages from configured repositories and registry
+entries; it does not certify their safety. This is source dependency management,
+not a dependency-injection framework. Content hashes identify bytes, not a
+trusted publisher. Inspect active configuration with @code{ny pkg registry} and
+@code{ny pkg repo list}.
+
 @node Options
 @chapter Options
 
@@ -173,7 +180,11 @@ Add native linker search paths and libraries.
 Increase logging.
 @item -time, -prof, -dump-stats
 Print timing, profiling, or compiler statistics.
-@item -dump-ast, -dump-tokens, -dump-llvm, -dump-funcs, -dump-symbols
+@item --dump-ast, --dump-ast-typed, --dump-ast-filter=NAME
+Print the parsed or checked source AST tree without execution. Filter named
+declarations by a case-sensitive substring; the typed form validates types and
+traits before showing available semantic facts.
+@item -dump-tokens, -dump-llvm, -dump-funcs, -dump-symbols
 Inspect compiler/runtime artifacts.
 @item --emit-ir=PATH, --emit-asm=PATH
 Write LLVM IR or assembly.
@@ -231,7 +242,6 @@ Canonical repository docs:
 @itemize @bullet
 @item @file{docs/README.md}
 @item @file{docs/learn/tooling.md}
-@item @file{docs/learn/fits.md}
 @item @file{docs/learn/status.md}
 @item @file{docs/learn/quirks.md}
 @item @file{docs/learn/performance.md}

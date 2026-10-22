@@ -17,6 +17,7 @@
 
 #include "../tools/repo.h"
 #include "base/args.h"
+#include "base/json.h"
 #include "base/util.h"
 #include "cmd/fmt/ui.h"
 #include "test.h"
@@ -225,12 +226,12 @@ static void apply_test_child_mem_limit(void) {
 #endif
 }
 
+#ifdef __linux__
 /*
- * Resident set of a process group (leader + direct children), in KiB.
- * Returns -1 when /proc gives us nothing (non-Linux, exited group).
+ * Linux resident set of a process group (leader + direct children), in KiB.
+ * Returns -1 when /proc gives us nothing (exited group).
  */
 static long test_group_rss_kib(int pid) {
-#ifndef _WIN32
   char path[64];
   snprintf(path, sizeof(path), "/proc/%d/status", pid);
   FILE *f = fopen(path, "r");
@@ -273,11 +274,8 @@ static long test_group_rss_kib(int pid) {
     fclose(kids);
   }
   return total > 0 ? total : -1;
-#else
-  (void)pid;
-  return -1;
-#endif
 }
+#endif
 
 /*
  * Available host memory in GiB (MemAvailable on Linux); -1 when unknown.
@@ -1481,7 +1479,9 @@ static void export_shape_fixture_tools_for(const char *bin) {
     }
   }
 
-  /* The test executable lives in the active CMake binary directory. */
+  /*
+   * The test executable lives in the active CMake binary directory.
+   */
   if (!getenv("NYTRIX_TEST_BUILD_ROOT") || !*getenv("NYTRIX_TEST_BUILD_ROOT"))
     ny_setenv("NYTRIX_TEST_BUILD_ROOT", dir, 0);
 
@@ -3475,8 +3475,7 @@ static int run_debug_argv_capture(char *const argv[], int timeout_sec,
     ny_setenv("FORCE_COLOR", "1", 1);
   enable_core_dumps();
   (void)use_path_lookup;
-  (void)output_path;
-  ny_test_proc_t proc = ny_test_spawn_argv(argv, NULL, 0);
+  ny_test_proc_t proc = ny_test_spawn_argv(argv, output_path, 0);
   if (!ny_test_proc_valid(proc))
     return 127;
   int timed_out = 0;
@@ -3594,10 +3593,10 @@ static const char *test_debugger_name(void) {
   if (test_command_available("gdb"))
     return "gdb";
 #elif defined(_WIN32)
-  if (test_command_available("lldb"))
-    return "lldb";
   if (test_command_available("gdb"))
     return "gdb";
+  if (test_command_available("lldb"))
+    return "lldb";
 #else
   if (test_command_available("gdb"))
     return "gdb";
@@ -3836,7 +3835,7 @@ static int build_trace_argv(char **argv, int max, const char *bin,
 
 static const char *test_diag_root(void) {
   const char *root = getenv("NYTRIX_TEST_DIAG_DIR");
-  return root && *root ? root : "tmp/diagnostics/tests";
+  return root && *root ? root : "build/diagnostics/tests";
 }
 
 static void test_diag_safe_name(const char *path, char *out, size_t out_len) {
@@ -4017,8 +4016,19 @@ static int run_debugger_replay(const char *debugger, char *const trace_argv[],
     }
     append_arg(argv, &argc, 192, "--args");
   }
+#ifdef _WIN32
+  /*
+   * _spawnv leaves the launcher waiting outside the compiler process.
+   */
+  const char *full_bin = getenv("NYTRIX_NY_FULL_BIN");
+#endif
   for (int i = 0; trace_argv[i]; i++) {
-    if (!append_arg(argv, &argc, 192, trace_argv[i]))
+    const char *arg = trace_argv[i];
+#ifdef _WIN32
+    if (i == 0 && full_bin && *full_bin)
+      arg = full_bin;
+#endif
+    if (!append_arg(argv, &argc, 192, (char *)arg))
       return 127;
   }
   int debug_timeout = timeout_sec;
@@ -5049,6 +5059,35 @@ static int run_suite(const char *suite_name, StrVec *files, const char *bin,
                      CacheDb *cache, int use_cache, TimingVec *timings,
                      StrVec *failed_paths, const char *cache_path);
 
+static const char *test_path_basename(const char *path) {
+  const char *slash = strrchr(path, '/');
+#ifdef _WIN32
+  const char *backslash = strrchr(path, '\\');
+  if (backslash && (!slash || backslash > slash))
+    slash = backslash;
+#endif
+  return slash ? slash + 1 : path;
+}
+
+static bool test_path_contains(const char *path, const char *pattern) {
+  for (const char *start = path;; ++start) {
+    const char *at = start;
+    const char *needle = pattern;
+    while (*at && *needle) {
+      char path_char = *at == '\\' ? '/' : *at;
+      char pattern_char = *needle == '\\' ? '/' : *needle;
+      if (path_char != pattern_char)
+        break;
+      ++at;
+      ++needle;
+    }
+    if (!*needle)
+      return true;
+    if (!*start)
+      return false;
+  }
+}
+
 static int run_error_suite(StrVec *files, const char *bin, const char *std_path,
                            const char *std_bc, StrVec *patterns, int jobs,
                            int timeout_sec, int *passed, int *failed,
@@ -5064,7 +5103,7 @@ static int run_error_suite(StrVec *files, const char *bin, const char *std_path,
     if (patterns && patterns->len > 0) {
       match = 0;
       for (size_t k = 0; k < patterns->len; k++) {
-        if (strstr(p, patterns->items[k])) {
+        if (test_path_contains(p, patterns->items[k])) {
           match = 1;
           break;
         }
@@ -5970,7 +6009,7 @@ static int run_repl_suite(StrVec *files, const char *bin, const char *std_path,
     if (patterns && patterns->len > 0) {
       match = 0;
       for (size_t k = 0; k < patterns->len; k++) {
-        if (strstr(p, patterns->items[k])) {
+        if (test_path_contains(p, patterns->items[k])) {
           match = 1;
           break;
         }
@@ -6090,7 +6129,7 @@ static int run_suite(const char *suite_name, StrVec *files, const char *bin,
     if (patterns && patterns->len > 0) {
       match = 0;
       for (size_t k = 0; k < patterns->len; k++) {
-        if (strstr(p, patterns->items[k])) {
+        if (test_path_contains(p, patterns->items[k])) {
           match = 1;
           break;
         }
@@ -6349,6 +6388,7 @@ static int run_suite(const char *suite_name, StrVec *files, const char *bin,
         if (heartbeat_interval_ms > 180000.0)
           heartbeat_interval_ms = 180000.0;
       }
+#ifdef __linux__
       /*
        * Memory watchdog: poll each active worker's process-group RSS and
        * kill the group as soon as it crosses the configured cap.  A fixture
@@ -6378,17 +6418,14 @@ static int run_suite(const char *suite_name, StrVec *files, const char *bin,
                       disp_path(run[i].path), used_gib, mem_cap);
               fflush(stderr);
               run[i].timed_out = 1;
-#ifdef _WIN32
-              TerminateProcess(run[i].pid, NY_TEST_TIMEOUT_RC);
-#else
               ny_test_kill_group(run[i].pid);
-#endif
               if (!ny_test_proc_valid(done))
                 done = run[i].pid;
             }
           }
         }
       }
+#endif
       /*
        * Terminate every expired worker in one deadline pass.  Killing and
        * reaping only the first one serialized simultaneous timeouts: a batch
@@ -7026,8 +7063,7 @@ static int run_list_bench(const char *root_dir) {
   }
   qsort(shapes.items, shapes.len, sizeof(char *), path_lex_cmp);
   for (size_t i = 0; i < shapes.len; ++i) {
-    const char *base = strrchr(shapes.items[i], '/');
-    base = base ? base + 1 : shapes.items[i];
+    const char *base = test_path_basename(shapes.items[i]);
     char stem[128];
     snprintf(stem, sizeof(stem), "%s", base);
     char *dot = strrchr(stem, '.');
@@ -7714,14 +7750,18 @@ int ny_test_main(int argc, char **argv) {
                 !*getenv("NYTRIX_TEST_WIN64_CC") ||
                 !getenv("NYTRIX_TEST_WIN64_RUNNER") ||
                 !*getenv("NYTRIX_TEST_WIN64_RUNNER"))) {
-      /* CMake registers this fixture only when both tools are available. */
+      /*
+       * CMake registers this fixture only when both tools are available.
+       */
       skipped_optional_win64++;
       timings_push(&timings, p, 0, "Skipped", "skip");
     } else if (strcmp(p, "etc/tests/code/probes/cache/"
                          "core-bc-cache-selector.nshape") == 0 &&
                (!getenv("NYTRIX_TEST_CORE_BC_CHECKER") ||
                 !*getenv("NYTRIX_TEST_CORE_BC_CHECKER"))) {
-      /* CMake registers this fixture only when it builds the checker tool. */
+      /*
+       * CMake registers this fixture only when it builds the checker tool.
+       */
       skipped_optional_core_bc_checker++;
       timings_push(&timings, p, 0, "Skipped", "skip");
     } else if (test_path_in(p, "lang/interop/web/")) {
@@ -7987,6 +8027,7 @@ int ny_test_main(int argc, char **argv) {
   }
 
   nyt_rule(stdout);
+#if defined(__APPLE__) || defined(__linux__)
   {
     /*
      * Surface the memory the suite actually used: ru_maxrss of reaped
@@ -7994,9 +8035,17 @@ int ny_test_main(int argc, char **argv) {
      * compile children) reached.
      */
     struct rusage ru;
-    if (getrusage(RUSAGE_CHILDREN, &ru) == 0 && ru.ru_maxrss > 0)
-      printf("Peak fixture RSS: %.1f MiB\n", (double)ru.ru_maxrss / 1024.0);
+    if (getrusage(RUSAGE_CHILDREN, &ru) == 0 && ru.ru_maxrss > 0) {
+#ifdef __APPLE__
+      const double bytes_per_unit = 1.0;
+#else
+      const double bytes_per_unit = 1024.0;
+#endif
+      printf("Peak fixture RSS: %.1f MiB\n",
+             (double)ru.ru_maxrss * bytes_per_unit / (1024.0 * 1024.0));
+    }
   }
+#endif
   printf("%s%d total%s %s· %d passed%s · %s%d failed%s · %dms\n",
          nyt_clr(NYT_BOLD), passed + failed, nyt_clr(NYT_RESET),
          nyt_clr(NYT_GRAY), passed, nyt_clr(NYT_RESET),
@@ -10177,8 +10226,10 @@ static void bench_diag(const char *shape, int show_ir, int show_asm,
     out = bench_diag_capture(bin, opt_level, tier, "native", target, obj_extra,
                              ny_path);
     if (access(obj_tmp, R_OK) == 0) {
-      /* Include user helpers as well as main: the hottest loop often lives
-       * in a helper, and the text emitter above has different allocation. */
+      /*
+       * Include user helpers as well as main: the hottest loop often lives
+       * in a helper, and the text emitter above has different allocation.
+       */
       char *objdump_argv[] = {"objdump", "-dr", obj_tmp, NULL};
       int objdump_rc =
           bench_run_capture(objdump_argv, NY_BENCH_TIMEOUT_SEC, objdump_tmp);
@@ -12072,28 +12123,46 @@ static void bench_write_csv(FILE *f, const BenchTable *t,
   }
 }
 
+static void bench_json_string_field(FILE *f, const char *name,
+                                    const char *value) {
+  fprintf(f, "\"%s\":\"", name);
+  for (const unsigned char *p = (const unsigned char *)(value ? value : ""); *p;
+       ++p) {
+    char escaped[7];
+    size_t n = ny_json_escape_byte(*p, escaped);
+    (void)fwrite(escaped, 1, n, f);
+  }
+  fputs("\",", f);
+}
+
 static void bench_write_json(FILE *f, const BenchTable *t,
                              const BenchEnvironment *env) {
   fprintf(f, "{\n");
   if (env) {
+    fputs("  \"environment\": {", f);
+    bench_json_string_field(f, "os", env->os);
+    bench_json_string_field(f, "arch", env->arch);
+    bench_json_string_field(f, "cpu_model", env->cpu_model);
+    bench_json_string_field(f, "target", env->target);
+    bench_json_string_field(f, "target_features", env->target_features);
+    bench_json_string_field(f, "compiler_binary", env->compiler_binary);
+    bench_json_string_field(f, "compiler_binary_fnv64",
+                            env->compiler_binary_fnv64);
+    bench_json_string_field(f, "c_compiler", env->c_compiler);
+    bench_json_string_field(f, "c_compiler_version", env->c_compiler_version);
+    bench_json_string_field(f, "c_flags", env->c_flags);
+    bench_json_string_field(f, "compiler_revision", env->compiler_revision);
+    bench_json_string_field(f, "opt_level", env->opt_level);
+    bench_json_string_field(f, "profile", env->profile);
+    bench_json_string_field(f, "tier", env->tier);
+    bench_json_string_field(f, "engine", env->engine);
+    bench_json_string_field(f, "cache", env->cache);
     fprintf(f,
-            "  \"environment\": {\"os\":\"%s\",\"arch\":\"%s\","
-            "\"cpu_model\":\"%s\",\"target\":\"%s\",\"target_features\":\"%s\","
-            "\"compiler_binary\":\"%s\",\"compiler_binary_fnv64\":\"%s\","
-            "\"c_compiler\":\"%s\",\"c_compiler_version\":\"%s\","
-            "\"c_flags\":\"%s\",\"compiler_revision\":\"%s\","
-            "\"opt_level\":\"%s\",\"profile\":\"%s\",\"tier\":\"%s\","
-            "\"engine\":\"%s\",\"cache\":\"%s\","
             "\"fixture_workers\":%d,\"route_workers\":%d,"
             "\"measurement_mode\":\"%s\","
             "\"timing_source_scope\":\"per-row\","
             "\"runtime_counters_enabled\":%s,"
             "\"samples\":%d,\"warmups\":%d},\n",
-            env->os, env->arch, env->cpu_model, env->target,
-            env->target_features, env->compiler_binary,
-            env->compiler_binary_fnv64, env->c_compiler,
-            env->c_compiler_version, env->c_flags, env->compiler_revision,
-            env->opt_level, env->profile, env->tier, env->engine, env->cache,
             env->fixture_workers, env->route_workers,
             env->fixture_workers > 1 ? "parallel-fixtures-sequential-routes"
                                      : "isolated-serial",
@@ -12112,15 +12181,17 @@ static void bench_write_json(FILE *f, const BenchTable *t,
     double native_llvm_ratio =
         native_llvm_ratio_valid ? r->ny_ms / r->llvm_ms : 0.0;
     const char *status = bench_row_status(r);
-    fprintf(
-        f,
-        "    {\"name\":\"%s\",\"backend\":\"%s\",\"engine\":\"%s\","
-        "\"cache\":\"%s\",\"status\":\"%s\",\"checksum\":\"%s\","
-        "\"ny_checksum\":\"%s\",\"llvm_checksum\":\"%s\",\"c_checksum\":\"%s\","
-        "\"checksum_ok\":%s,",
-        r->name, r->backend, r->engine, r->cache, status, r->checksum,
-        r->ny_checksum, r->llvm_checksum, r->c_checksum,
-        r->checksum_ok ? "true" : "false");
+    fputs("    {", f);
+    bench_json_string_field(f, "name", r->name);
+    bench_json_string_field(f, "backend", r->backend);
+    bench_json_string_field(f, "engine", r->engine);
+    bench_json_string_field(f, "cache", r->cache);
+    bench_json_string_field(f, "status", status);
+    bench_json_string_field(f, "checksum", r->checksum);
+    bench_json_string_field(f, "ny_checksum", r->ny_checksum);
+    bench_json_string_field(f, "llvm_checksum", r->llvm_checksum);
+    bench_json_string_field(f, "c_checksum", r->c_checksum);
+    fprintf(f, "\"checksum_ok\":%s,", r->checksum_ok ? "true" : "false");
     fprintf(
         f,
         "\"ny_native_ms\":%.4f,\"ny_compile_ms\":%.4f,\"ny_link_ms\":%.4f,"
@@ -12537,8 +12608,7 @@ run_benchmarks(const char *bin, const char *std_path, const char *std_bc,
          */
         bool exact_stem = false;
         for (size_t j = 0; j < all.len; j++) {
-          const char *base = strrchr(all.items[j], '/');
-          base = base ? base + 1 : all.items[j];
+          const char *base = test_path_basename(all.items[j]);
           char stem[128];
           snprintf(stem, sizeof(stem), "%s", base);
           char *dot = strrchr(stem, '.');
@@ -12551,8 +12621,7 @@ run_benchmarks(const char *bin, const char *std_path, const char *std_bc,
         }
         size_t matches = 0;
         for (size_t j = 0; j < all.len; j++) {
-          const char *base = strrchr(all.items[j], '/');
-          base = base ? base + 1 : all.items[j];
+          const char *base = test_path_basename(all.items[j]);
           char stem[128];
           snprintf(stem, sizeof(stem), "%s", base);
           char *dot = strrchr(stem, '.');
@@ -12640,12 +12709,11 @@ run_benchmarks(const char *bin, const char *std_path, const char *std_bc,
   size_t bench_count = 0;
   for (size_t i = 0; i < shapes.len; i++) {
     const char *shape = shapes.items[i];
-    const char *base = strrchr(shape, '/');
-    base = base ? base + 1 : shape;
+    const char *base = test_path_basename(shape);
     if (patterns && patterns->len > 0) {
       int matched = 0;
       for (size_t p = 0; p < patterns->len; p++)
-        if (strstr(base, patterns->items[p]))
+        if (test_path_contains(shape, patterns->items[p]))
           matched = 1;
       if (!matched)
         continue;

@@ -194,7 +194,7 @@ fn canvas_loop(fnptr draw, int def_frames=0, int def_frame_ms=0, int def_timeout
    mode, resize polling, cleanup) ; the fixture owns admission, scripted
    and physical quit keys, per-frame delay, and the whole-run deadline.
    Calls draw(canvas, zbuf, width, height) once per admitted frame.
-   The loop owns its fixture state; callers supply only the draw callback and
+   The loop owns its fixture state ; callers supply only the draw callback and
    frame policy."
    def fx = start(def_frames, def_frame_ms, def_timeout_ms)
    def interactive = __tty_isatty(0) != 0 && __tty_isatty(1) != 0

@@ -278,7 +278,16 @@ assert(power_emitted.get("code", 127) == 0 &&
 assert(runtime_math_compiled.get("code", 127) == 0 &&
        power_runtime_link.get("code", 127) == 0 &&
        power_runtime_execution.get("code", 127) == 1,
-       "AArch64 floating power and trig execute through the production math runtime")
+       "AArch64 floating power and trig execute through the production math runtime; codes=" +
+           to_str(runtime_math_compiled.get("code", 127)) + "," +
+           to_str(power_runtime_link.get("code", 127)) + "," +
+           to_str(power_runtime_execution.get("code", 127)) + " compile stdout=" +
+           runtime_math_compiled.get("stdout", "") + " compile stderr=" +
+           runtime_math_compiled.get("stderr", "") + " link stdout=" +
+           power_runtime_link.get("stdout", "") + " link stderr=" +
+           power_runtime_link.get("stderr", "") + " run=" +
+           power_runtime_execution.get("stdout", "") + " " +
+           power_runtime_execution.get("stderr", ""))
 assert(scalar_float_emit.get("code", 127) == 0 &&
        scalar_float_link.get("code", 127) == 0 &&
        scalar_float_execution.get("code", 127) == 109,

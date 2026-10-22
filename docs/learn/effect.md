@@ -72,4 +72,4 @@ contract.
 - [Functions](../spec/functions.md#attributes)
 - [Runtime](../spec/runtime.md#attributes-and-effects)
 - [Ownership](ownership.md)
-- [Effect-row implementation boundary](../spec/effect-rows.md)
+- [Effect rows](../spec/functions.md#effect-rows)

@@ -1,8 +1,7 @@
 <!-- nytrix-doc: {"audience":"user","featured":true,"group":"spec","order":10,"summary":"Rules for source files, imports, modules, profiles, and entry points."} -->
 # Units
 
-This page defines source-file structure. Use [Programs](../learn/programs.md)
-for project workflow.
+Use [Programs](../learn/programs.md) for project setup and import workflows.
 
 ## File forms
 
@@ -38,7 +37,7 @@ direct execution runs the startup block.
 The `export group(...)` form names a profile. A `use module:profile` selects
 the `core` surface plus that profile.
 
-```text
+```ny
 module sample.groups {
    export core(run)
    export debug(dump_state)
@@ -70,7 +69,7 @@ assert(core.len([1, 2, 3]) == 3, "module alias")
 
 Import forms apply to relative files as well as module paths:
 
-```text
+```ny
 use "./parser.ny" as parser
 use "./parser.ny" (parse_node)
 use "./parser.ny":debug

@@ -1,4 +1,5 @@
-name: test
+name: Native CI
+run-name: "${{ inputs.mode || 'checks' }} · ${{ inputs.platform || 'all' }} · ${{ github.ref_name }}"
 
 on:
   push:
@@ -7,175 +8,171 @@ on:
     branches: [main]
   workflow_dispatch:
     inputs:
-      target:
-        description: Platform to test
-        required: false
+      mode:
+        description: "Run: checks only, tests, benchmarks, or tests + benchmarks"
+        type: choice
+        default: checks
+        options: [checks, tests, benchmarks, full]
+      platform:
+        description: "Platform: each selected host builds natively"
+        type: choice
         default: all
+        options: [all, ubuntu, macos, windows]
+      pattern:
+        description: "Filter: test path or benchmark filename (empty = all)"
+        type: string
+        default: ''
+      workers:
+        description: "Tests: parallel workers (benchmarks always run serially)"
         type: choice
-        options:
-          - all
-          - ubuntu
-          - macos
-          - windows
-      suite:
-        description: Test breadth for manual runs
-        required: false
-        default: standard
+        default: '2'
+        options: ['1', '2', '4', '8']
+      cold:
+        description: "Tests: bypass result and execution caches"
+        type: boolean
+        default: true
+      replay:
+        description: "Tests: replay failures and capture diagnostics"
+        type: boolean
+        default: true
+      samples:
+        description: "Benchmarks: measured samples after one warm-up"
         type: choice
-        options:
-          - standard
-          - full-stdlib
-      checks:
-        description: Optional checks for manual runs
-        required: false
-        default: tests
+        default: '3'
+        options: ['1', '3', '7']
+      optimization:
+        description: "Benchmarks: optimization level"
         type: choice
-        options:
-          - tests
-          - memory-safety
-          - coverage
-          - all
+        default: O3
+        options: [O0, O1, O2, O3]
 
+permissions:
+  contents: read
+
+# New pushes replace stale checks; manual investigations are not interrupted.
 concurrency:
-  group: test-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
-env:
-  NYTRIX_TEST_COLD: "1"
-  # Keep functional CI independent from timed benchmark variance.
-  # Benchmark parity remains available through ./make bench and dedicated runs.
-  NYTRIX_TEST_NO_BENCH: "1"
+  group: native-${{ github.ref }}-${{ github.event_name }}-${{ inputs.mode || 'checks' }}-${{ inputs.platform || 'all' }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 
 jobs:
-  test-ubuntu:
-    if: ${{ github.event_name != 'workflow_dispatch' || inputs.target == 'all' || inputs.target == 'ubuntu' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 90
-    env:
-      # The hosted Ubuntu runner exposes only 1–2 CPUs. Keep the fixture
-      # scheduler deterministic until the standard suite is green; parallel
-      # stress remains available locally with NYTRIX_TEST_JOBS=2+.
-      NYTRIX_TEST_JOBS: "1"
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Build and verify Ubuntu runtime dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y lcov
-          command -v lcov
-          command -v genhtml
-          ./make bin
-          if nm -u build/release/ny-full | grep -q '__gmp'; then
-            echo "unexpected GMP dependency"
-            exit 1
-          fi
-      - run: |
-          if [ "${{ inputs.suite }}" = "full-stdlib" ]; then
-            ./make test --with-stdlib
-          else
-            ./make test
-          fi
-      - name: Run ASan suite
-        if: ${{ github.event_name == 'workflow_dispatch' && (inputs.checks == 'memory-safety' || inputs.checks == 'all') }}
-        run: |
-          if [ "${{ inputs.suite }}" = "full-stdlib" ]; then
-            ./make asan --with-stdlib
-          else
-            ./make asan
-          fi
-          ./make asan fuzz
-      - name: Run UBSan suite
-        if: ${{ github.event_name == 'workflow_dispatch' && (inputs.checks == 'memory-safety' || inputs.checks == 'all') }}
-        run: |
-          if [ "${{ inputs.suite }}" = "full-stdlib" ]; then
-            ./make ubsan --with-stdlib
-          else
-            ./make ubsan
-          fi
-          ./make ubsan fuzz
-      - name: Run Valgrind smoke
-        if: ${{ github.event_name == 'workflow_dispatch' && (inputs.checks == 'memory-safety' || inputs.checks == 'all') }}
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y valgrind
-          ./make bin
-          valgrind --trace-children=yes --leak-check=full --show-leak-kinds=definite \
-            --errors-for-leak-kinds=definite --error-exitcode=97 \
-            build/release/ny-test --bin build/release/ny-full \
-            --pattern memory-safety-smoke
-      - name: Run coverage through the repository driver
-        if: ${{ github.event_name == 'workflow_dispatch' && (inputs.checks == 'coverage' || inputs.checks == 'all') }}
-        run: |
-          ./make coverage --test --pattern runtime --failures-only
-          ./make coverage --test --pattern user-type-prefix --failures-only
-      - name: Upload coverage
-        if: ${{ github.event_name == 'workflow_dispatch' && (inputs.checks == 'coverage' || inputs.checks == 'all') }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-ubuntu
-          path: |
-            build/coverage/coverage.info
-            build/coverage/coverage-html
-
-  test-macos:
-    # Keep pushes staged on Ubuntu; run macOS explicitly after Ubuntu is green.
-    if: ${{ github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && (inputs.target == 'all' || inputs.target == 'macos')) }}
-    runs-on: macos-latest
-    timeout-minutes: 90
-    env:
-      NYTRIX_TEST_JOBS: "3"
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - run: |
-          if [ "${{ inputs.suite }}" = "full-stdlib" ]; then
-            ./make test --with-stdlib
-          else
-            ./make test
-          fi
-      - name: Run ASan and UBSan suite
-        if: ${{ github.event_name == 'workflow_dispatch' && (inputs.checks == 'memory-safety' || inputs.checks == 'all') }}
-        run: |
-          if [ "${{ inputs.suite }}" = "full-stdlib" ]; then
-            ./make asan --with-stdlib
-            ./make ubsan --with-stdlib
-          else
-            ./make asan
-            ./make ubsan
-          fi
-
-  test-windows:
-    # Keep pushes staged on Ubuntu; run Windows explicitly after Ubuntu is green.
-    if: ${{ github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && (inputs.target == 'all' || inputs.target == 'windows')) }}
-    runs-on: windows-latest
-    timeout-minutes: 90
-    # Native test artifacts share Windows temp paths and compiler state.
-    # Keep this platform serialized until those paths are isolated.
-    env:
-      NYTRIX_TEST_JOBS: "1"
+  native:
+    name: "${{ matrix.platform }} · ${{ inputs.mode || 'checks' }}"
+    # Apple silicon checks compiler portability; x86-64 execution stays native.
+    runs-on: >-
+      ${{ matrix.platform == 'ubuntu' && 'ubuntu-latest' ||
+          matrix.platform == 'windows' && 'windows-latest' ||
+          (inputs.mode == 'tests' || inputs.mode == 'benchmarks' || inputs.mode == 'full') &&
+          'macos-26-intel' || 'macos-latest' }}
+    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && inputs.mode != 'checks' && 180 || 30 }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: ${{ fromJSON(inputs.platform == 'ubuntu' && '["ubuntu"]' || inputs.platform == 'macos' && '["macos"]' || inputs.platform == 'windows' && '["windows"]' || '["ubuntu","macos","windows"]') }}
     defaults:
       run:
         shell: bash
+    env:
+      CI_MODE: ${{ inputs.mode || 'checks' }}
+      CI_PATTERN: ${{ inputs.pattern }}
+      CI_WORKERS: ${{ inputs.workers || '2' }}
+      CI_COLD: ${{ inputs.cold }}
+      CI_REPLAY: ${{ inputs.replay }}
+      CI_SAMPLES: ${{ inputs.samples || '3' }}
+      CI_OPT: ${{ inputs.optimization || 'O3' }}
+      NYTRIX_TEST_DIAG_DIR: build/ci/diagnostics
     steps:
-      - uses: actions/checkout@v4
+      # Toolchain: no emulators or cross-compiler packages.
+      - name: Check out source and version history
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - run: |
-          if [ "${{ inputs.suite }}" = "full-stdlib" ]; then
-            ./make test --with-stdlib
-          else
-            ./make test
-          fi
-      - name: Run ASan and UBSan suite
-        if: ${{ github.event_name == 'workflow_dispatch' && (inputs.checks == 'memory-safety' || inputs.checks == 'all') }}
+      - name: Install Ubuntu LLVM
+        if: matrix.platform == 'ubuntu'
         run: |
-          if [ "${{ inputs.suite }}" = "full-stdlib" ]; then
-            ./make asan --with-stdlib
-            ./make ubsan --with-stdlib
-          else
-            ./make asan
-            ./make ubsan
-          fi
+          sudo apt-get update
+          sudo apt-get install -y libcurl4-openssl-dev wget software-properties-common gnupg lsb-release
+          wget -O "$RUNNER_TEMP/llvm.sh" https://apt.llvm.org/llvm.sh
+          sudo bash "$RUNNER_TEMP/llvm.sh" 22
+          sudo apt-get install -y clang-22 llvm-22 llvm-22-dev libclang-22-dev lld-22
+          echo "/usr/lib/llvm-22/bin" >> "$GITHUB_PATH"
+          echo "CC=clang-22" >> "$GITHUB_ENV"
+          echo "CXX=clang++-22" >> "$GITHUB_ENV"
+          echo "LLVM_CONFIG=/usr/lib/llvm-22/bin/llvm-config" >> "$GITHUB_ENV"
+          echo "NYTRIX_LLVM_INCLUDE=$(/usr/lib/llvm-22/bin/llvm-config --includedir)" >> "$GITHUB_ENV"
+      - name: Install macOS LLVM
+        if: matrix.platform == 'macos'
+        run: |
+          brew install lld@22 llvm@22
+          llvm_prefix="$(brew --prefix llvm@22)"
+          lld_prefix="$(brew --prefix lld@22)"
+          echo "$llvm_prefix/bin" >> "$GITHUB_PATH"
+          echo "$lld_prefix/bin" >> "$GITHUB_PATH"
+          echo "CC=$llvm_prefix/bin/clang" >> "$GITHUB_ENV"
+          echo "CXX=$llvm_prefix/bin/clang++" >> "$GITHUB_ENV"
+          echo "LLVM_CONFIG=$llvm_prefix/bin/llvm-config" >> "$GITHUB_ENV"
+          echo "NYTRIX_LLVM_INCLUDE=$llvm_prefix/include" >> "$GITHUB_ENV"
+
+      # Default gate: build, hygiene, formatting, parser checks, and audit.
+      - name: Build native compiler and check sources
+        id: checks
+        run: |
+          mkdir -p build/ci
+          ./make check --no-test-suite 2>&1 | tee build/ci/checks.log
+
+      # Manual-only execution: full live output, exact exit status, no eval.
+      - name: Install native Windows replay debugger
+        if: matrix.platform == 'windows' && env.CI_REPLAY == 'true' && (env.CI_MODE == 'tests' || env.CI_MODE == 'full')
+        run: C:/msys64/usr/bin/bash.exe -lc 'pacman --noconfirm -S --needed mingw-w64-ucrt-x86_64-gdb'
+      - name: Run fixtures and optional failure replay
+        id: tests
+        if: env.CI_MODE == 'tests' || env.CI_MODE == 'full'
+        env:
+          NYTRIX_TEST_USE_STD_BC: ${{ inputs.pattern != '' && '0' || 'auto' }}
+        run: |
+          args=(--with-stdlib)
+          if [[ "$CI_COLD" == true ]]; then args+=(--cold); else args+=(--no-cold); fi
+          if [[ "$CI_REPLAY" == true ]]; then args+=(--with-replay); else args+=(--no-debug-failures); fi
+          if [[ -n "$CI_PATTERN" ]]; then args+=(--pattern "$CI_PATTERN"); fi
+          ./make -j "$CI_WORKERS" test "${args[@]}" 2>&1 | tee build/ci/tests.log
+      - name: Compare serial NYR, LLVM, and C benchmarks
+        id: benchmarks
+        if: env.CI_MODE == 'benchmarks' || env.CI_MODE == 'full'
+        run: |
+          args=(--bench-run "$CI_SAMPLES" --bench-warmup 1 --bench-opt "$CI_OPT"
+                --bench-out-json build/ci/benchmarks.json --bench-out-md build/ci/benchmarks.md)
+          if [[ -n "$CI_PATTERN" ]]; then args+=(--pattern "$CI_PATTERN"); fi
+          ./make -j 1 bench "${args[@]}" 2>&1 | tee build/ci/benchmarks.log
+
+      # Results remain available when a check, fixture, or budget fails.
+      - name: Summarize results
+        if: always()
+        env:
+          CI_PLATFORM: ${{ matrix.platform }}
+          CI_ARCH: ${{ runner.arch }}
+          CHECK_RESULT: ${{ steps.checks.outcome }}
+          TEST_RESULT: ${{ steps.tests.outcome }}
+          BENCH_RESULT: ${{ steps.benchmarks.outcome }}
+        run: |
+          {
+            printf '## Native CI · %s · %s\n\n' "$CI_PLATFORM" "$CI_ARCH"
+            printf 'Mode: `%s` · Filter: `%s`\n\n' "$CI_MODE" "${CI_PATTERN:-all fixtures}"
+            printf '| Stage | Result |\n| --- | --- |\n'
+            printf '| Native build and source checks | %s |\n' "$CHECK_RESULT"
+            printf '| Fixtures and failure replay | %s |\n' "$TEST_RESULT"
+            printf '| Serial benchmarks | %s |\n' "$BENCH_RESULT"
+            printf '\nFull logs and failure diagnostics are in the run artifacts.\n'
+            if [[ -f build/ci/benchmarks.md ]]; then
+              printf '\n'
+              cat build/ci/benchmarks.md
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Save logs, benchmark reports, and failure diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-${{ matrix.platform }}-${{ inputs.mode || 'checks' }}-${{ github.run_attempt }}
+          retention-days: 7
+          if-no-files-found: ignore
+          path: |
+            build/ci/
+            build/check-reports/

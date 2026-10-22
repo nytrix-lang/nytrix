@@ -1,5 +1,6 @@
 #if defined(__linux__) && defined(__x86_64__)
 
+#include "base/util.h"
 #include "code/backend/internal.h"
 #include "code/backend/object/internal.h"
 #include "support.h"
@@ -10,23 +11,21 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/mman.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
 typedef double (*vec4_f64_fn)(double *, double *, double *, double *);
 
-static int emit(nyr_func_t *f, nyr_op_t op, int a, int b, int c,
-                int64_t imm) {
+static int emit(nyr_func_t *f, nyr_op_t op, int a, int b, int c, int64_t imm) {
   return nyr_ir_emit(f, (nyr_inst_t){.op = op,
-                                    .dst = -1,
-                                    .a = a,
-                                    .b = b,
-                                    .c = c,
-                                    .d = -1,
-                                    .e = -1,
-                                    .f = -1,
-                                    .imm = imm});
+                                     .dst = -1,
+                                     .a = a,
+                                     .b = b,
+                                     .c = c,
+                                     .d = -1,
+                                     .e = -1,
+                                     .f = -1,
+                                     .imm = imm});
 }
 
 static int add_offset(nyr_func_t *f, int base, int64_t offset) {
@@ -78,14 +77,14 @@ static bool build_vectors(nyr_func_t *f) {
       !store_vector(f, out_ptr, 192, splat))
     return false;
   (void)nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_RET,
-                                   .dst = -1,
-                                   .a = reduction,
-                                   .b = -1,
-                                   .c = -1,
-                                   .d = -1,
-                                   .e = -1,
-                                   .f = -1,
-                                   .scalar_class = NYIR_SCALAR_F64});
+                                    .dst = -1,
+                                    .a = reduction,
+                                    .b = -1,
+                                    .c = -1,
+                                    .d = -1,
+                                    .e = -1,
+                                    .f = -1,
+                                    .scalar_class = NYIR_SCALAR_F64});
   char err[256] = {0};
   bool verified = nyr_ir_verify(f, err, sizeof(err));
   if (!verified)
@@ -214,13 +213,12 @@ static bool check_x64_machine_form(const nyr_func_t *f,
     }
     void *mapping = MAP_FAILED;
     if (ok) {
-      mapping = mmap(NULL, code.len, PROT_READ | PROT_WRITE,
-                     MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+      mapping = nyr_opt_execmem_alloc(code.len);
       ok = mapping != MAP_FAILED;
     }
     if (ok) {
       memcpy(mapping, code.data, code.len);
-      ok = mprotect(mapping, code.len, PROT_READ | PROT_EXEC) == 0;
+      ok = nyr_opt_execmem_protect(mapping, code.len) == 0;
     }
     if (ok) {
       vec4_f64_fn run =
@@ -229,7 +227,7 @@ static bool check_x64_machine_form(const nyr_func_t *f,
       double returned = run((double *)a, (double *)b, (double *)c, out);
       ok = results_match(a, b, c, out, returned);
       if (!ok) {
-        const char *dump_path = "tmp/work/native-vec4-f64-mach.bin";
+        const char *dump_path = "build/cache/scratch/native-vec4-f64-mach.bin";
         int dump = open(dump_path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
         if (dump >= 0) {
           (void)write_all(dump, (const char *)code.data, code.len);
@@ -239,7 +237,7 @@ static bool check_x64_machine_form(const nyr_func_t *f,
       }
     }
     if (mapping != MAP_FAILED)
-      munmap(mapping, code.len);
+      nyr_opt_execmem_free(mapping, code.len);
   }
 done:
   nyr_obj_free(&code);
@@ -358,7 +356,7 @@ static bool check_aarch64_emission(nyr_func_t *f,
               nyr_op_name(ops[op_i]), err[0] ? err : "no detail");
     } else if (!file_has_words(obj_path, word_sets[op_i], word_counts[op_i])) {
       char keep[256];
-      snprintf(keep, sizeof(keep), "tmp/work/vec4-a64-missing-%s.o",
+      snprintf(keep, sizeof(keep), "build/cache/scratch/vec4-a64-missing-%s.o",
                nyr_op_name(ops[op_i]));
       (void)rename(obj_path, keep);
       fprintf(stderr, "AArch64 four-lane encoding missing for %s (kept %s)\n",
@@ -372,8 +370,9 @@ static bool check_aarch64_emission(nyr_func_t *f,
 }
 
 int main(void) {
-  char temp[] = "tmp/work/native-vec4-f64-XXXXXX";
+  char temp[] = "build/cache/scratch/native-vec4-f64-XXXXXX";
   char asm_path[256], so_path[256], aarch64_obj_path[256];
+  ny_ensure_dir_recursive("build/cache/scratch");
   if (!mkdtemp(temp))
     return 1;
   snprintf(asm_path, sizeof(asm_path), "%s/vec4.s", temp);

@@ -329,7 +329,7 @@ relation ::= additive { ('<' | '<=' | '>' | '>=' | '..') additive }
 additive ::= multiplicative { ('+' | '-') multiplicative }
 multiplicative ::= bitwise { ('*' | '/' | '%') bitwise }
 bitwise ::= power { ('|' | '&' | '^' | '<<' | '>>') power }
-power ::= pow_prefix ['**' power]
+power ::= pow_prefix [('**' | '^^') power]
 
 pow_prefix ::= ('-' | '!' | '~') power
              | unary

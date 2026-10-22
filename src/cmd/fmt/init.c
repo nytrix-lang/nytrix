@@ -11,6 +11,7 @@
 
 #include "../tools/repo.h"
 #include "base/args.h"
+#include "base/compat.h"
 #include "base/process.h"
 #include "base/util.h"
 #include "fmt.h"
@@ -1297,7 +1298,7 @@ static int fmt_source_batch_c(const StrVec *files, char ***formatted_out,
   atomic_init(&work.total_bytes, 0);
   atomic_init(&work.failed, 0);
 
-  long online_cpus = sysconf(_SC_NPROCESSORS_ONLN);
+  long online_cpus = ny_cpu_count();
   if (online_cpus < 1)
     online_cpus = 1;
   if (online_cpus > 8)

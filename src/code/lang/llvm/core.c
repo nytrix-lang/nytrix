@@ -171,7 +171,6 @@ void ny_apply_rt_fn_attrs(codegen_t *cg, LLVMValueRef fn) {
 
   ny_apply_rt_purity_attrs(cg, fn);
 
-
   bool is_apple = ny_module_target_is_apple(cg->module);
   bool is_apple_arm64 = ny_module_target_is_apple_arm64(cg->module);
 

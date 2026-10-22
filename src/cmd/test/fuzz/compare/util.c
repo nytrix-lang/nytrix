@@ -3735,7 +3735,7 @@ static bool looks_like_repo(const char *path) {
   (void)path_join(a, sizeof(a), path, "src");
   (void)path_join(b, sizeof(b), path, "lib");
   (void)path_join(c, sizeof(c), path, "etc");
-  (void)path_join(d, sizeof(d), path, "tmp");
+  (void)path_join(d, sizeof(d), path, "CMakeLists.txt");
   return exists_path(a) && exists_path(b) && exists_path(c) && exists_path(d);
 }
 
@@ -5110,7 +5110,8 @@ static int cmd_public_bridge_generate(int argc, char **argv) {
       asprintf(&ny_dir, "%s/ny", out_dir) >= 0 &&
       nytrix_asprintf(&bin_dir, "build/cbridge/generated/%s_%d", profile,
                       seed) >= 0;
-  if (!path_ok || !ny_mkdir_p(out_dir) || !ny_mkdir_p(ny_dir) || !ny_mkdir_p(bin_dir)) {
+  if (!path_ok || !ny_mkdir_p(out_dir) || !ny_mkdir_p(ny_dir) ||
+      !ny_mkdir_p(bin_dir)) {
     printf("{\"ok\":false,\"error\":\"prepare-failed\"}\n");
     free(out_dir);
     free(ny_dir);

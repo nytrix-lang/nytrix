@@ -7257,10 +7257,10 @@ static bool nyr_lower_stmt_impl(nyr_builder_t *b, const stmt_t *s) {
       if (error < 0)
         return false;
       if (s->as.tr.err && s->as.tr.err[0] && strcmp(s->as.tr.err, "_") != 0) {
-        nyr_local_t *err_local = nyr_bind_local(b, s->as.tr.err);
-        if (err_local)
-          err_local->is_any = true;
-        if (!err_local || !nyr_store_local_value(b, err_local->slot, error))
+        nyr_local_t *error_local = nyr_bind_local(b, s->as.tr.err);
+        if (error_local)
+          error_local->is_any = true;
+        if (!error_local || !nyr_store_local_value(b, error_local->slot, error))
           return false;
       }
       if (s->as.tr.handler && !nyr_lower_stmt(b, s->as.tr.handler))

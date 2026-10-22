@@ -1776,7 +1776,7 @@ static bool ny_options_apply_common_codegen_option(ny_options *opt,
      * Surfaces the NYTRIX_TRACE_FILTER env contract as a flag: the value is
      * a comma-separated list of function-name tails to keep in -trace.
      */
-    setenv("NYTRIX_TRACE_FILTER", a + 15, 1);
+    ny_setenv("NYTRIX_TRACE_FILTER", a + 15, 1);
     return true;
   }
   if (strcmp(a, "--trace-tokens") == 0) {
@@ -1792,7 +1792,14 @@ static bool ny_options_apply_common_codegen_option(ny_options *opt,
     return true;
   }
   if (strcmp(a, "--dump-ast-typed") == 0) {
+    opt->dump_ast = true;
     opt->dump_ast_typed = true;
+    return true;
+  }
+  if ((value = ny_option_value_or_die(a, "--dump-ast-filter", i, argc, argv,
+                                      argv0)) != NULL) {
+    opt->dump_ast = true;
+    opt->dump_ast_filter = value;
     return true;
   }
   if (strcmp(a, "--trace-hm") == 0) {
@@ -2176,7 +2183,7 @@ static bool ny_options_apply_toggle(ny_options *opt, const char *a) {
       {"--no-strip", offsetof(ny_options, strip_override), 0,
        NY_OPT_TOGGLE_INT},
       {"-time", offsetof(ny_options, do_timing), 1, NY_OPT_TOGGLE_BOOL},
-      {"-dump-ast", offsetof(ny_options, dump_ast), 1, NY_OPT_TOGGLE_BOOL},
+      {"--dump-ast", offsetof(ny_options, dump_ast), 1, NY_OPT_TOGGLE_BOOL},
       {"--extract-json", offsetof(ny_options, extract_json), 1,
        NY_OPT_TOGGLE_BOOL},
       {"--collect-errors", offsetof(ny_options, collect_errors), 1,
@@ -2696,11 +2703,13 @@ static void ny_options_usage_impl(const char *prog, bool show_env) {
       {NY_CLR_GREEN, "-timeout <seconds>", "Set a hard execution limit"},
       {NY_CLR_GREEN, "-no-std", "Disable stdlib loading"},
       {NY_CLR_GREEN, "--core-path=<path>", "Use custom core.ny"},
-      {NY_CLR_GREEN, "--std-path=<path>", "Compatibility alias for --core-path"},
+      {NY_CLR_GREEN, "--std-path=<path>",
+       "Compatibility alias for --core-path"},
       {NY_CLR_GREEN, "--full-mod", "Alias for -std full"},
       {NY_CLR_GREEN, "--bundle-core=P", "Generate core.ny at P"},
       {NY_CLR_GREEN, "--bundle-symbols=P", "Generate core_symbols.h at P"},
-      {NY_CLR_GREEN, "--core-bc=<path>", "Reuse the compiled core library cache"},
+      {NY_CLR_GREEN, "--core-bc=<path>",
+       "Reuse the compiled core library cache"},
       {NULL, NULL, NULL}});
   ny_usage_section("LINKING");
   ny_usage_items((const ny_usage_entry_t[]){
@@ -2729,7 +2738,11 @@ static void ny_options_usage_impl(const char *prog, bool show_env) {
        "Show live stderr compiler progress for long builds (default-on for "
        "TTY)"},
       {NY_CLR_BLUE, "--no-progress", "Disable live stderr compiler progress"},
-      {NY_CLR_BLUE, "-dump-ast", "Dump parsed AST"},
+      {NY_CLR_BLUE, "--dump-ast", "Print the parsed source AST tree and stop"},
+      {NY_CLR_BLUE, "--dump-ast-typed",
+       "Check types and traits, print the annotated AST tree, and stop"},
+      {NY_CLR_BLUE, "--dump-ast-filter=NAME",
+       "Dump declarations whose names contain NAME (implies --dump-ast)"},
       {NY_CLR_BLUE, "--expand",
        "Print expansion/desugar report and stop after parse"},
       {NY_CLR_BLUE, "--expand-only=NAME",
@@ -3019,8 +3032,8 @@ static const char *ny_default_std_path(void) {
     if (ny_access(exe_stdp, R_OK) == 0)
       return exe_stdp;
 #ifdef NYTRIX_INSTALL_DATADIR
-    snprintf(exe_stdp, sizeof(exe_stdp), "%s/../%s/nytrix/core.ny",
-             exe_dir, NYTRIX_INSTALL_DATADIR);
+    snprintf(exe_stdp, sizeof(exe_stdp), "%s/../%s/nytrix/core.ny", exe_dir,
+             NYTRIX_INSTALL_DATADIR);
     if (ny_access(exe_stdp, R_OK) == 0)
       return exe_stdp;
 #endif

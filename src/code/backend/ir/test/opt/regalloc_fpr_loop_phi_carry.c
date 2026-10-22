@@ -2,6 +2,7 @@
  * FPR loop phis may stay resident only when all incoming edges agree.
  */
 #include "code/backend/ir/machine.h"
+#include "support.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -48,7 +49,7 @@ int main(void) {
 
   bool ok =
       (!had_prior_env || saved_env) &&
-      setenv("NYTRIX_GPR_LOOP_CARRY", "1", 1) == 0 &&
+      nyr_opt_setenv("NYTRIX_GPR_LOOP_CARRY", "1") == 0 &&
       nyr_mach_alloc_typed_vreg(&mach, NYR_MACH_TYPE_F64, &initial) &&
       nyr_mach_alloc_typed_vreg(&mach, NYR_MACH_TYPE_F64, &phi) &&
       nyr_mach_alloc_typed_vreg(&mach, NYR_MACH_TYPE_F64, &next) &&
@@ -124,9 +125,9 @@ int main(void) {
     puts("[regalloc-fpr-loop-phi-carry] all loop phi edges share one XMM preg");
 
   if (had_prior_env)
-    setenv("NYTRIX_GPR_LOOP_CARRY", saved_env, 1);
+    nyr_opt_setenv("NYTRIX_GPR_LOOP_CARRY", saved_env);
   else
-    unsetenv("NYTRIX_GPR_LOOP_CARRY");
+    nyr_opt_unsetenv("NYTRIX_GPR_LOOP_CARRY");
   free(saved_env);
   nyr_mach_regalloc_free(&alloc);
   nyr_mach_func_free(&mach);

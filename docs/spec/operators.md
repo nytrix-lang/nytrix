@@ -6,7 +6,7 @@ coalescing, indexing, calls, and member access.
 
 ## Arithmetic
 
-```text
+```ny
 a + b
 a - b
 a * b
@@ -53,13 +53,13 @@ Higher rows bind more tightly.
 | Level | Operators | Associativity |
 | --- | --- | --- |
 | 8 | `**`, `^^` | right |
-| 7 | `&`, `|`, `^`, `<<`, `>>` | left |
+| 7 | `&`, `\|`, `^`, `<<`, `>>` | left |
 | 6 | `*`, `/`, `%` | left |
 | 5 | `+`, `-` | left |
 | 4 | `<`, `<=`, `>`, `>=`, `lo..hi` range | left |
 | 3 | `==`, `!=` | left |
 | 2 | `&&`, `??` | left |
-| 1 | `||`, `a |> f` | left |
+| 1 | `\|\|`, `a \|> f` | left |
 | - | `cond ? a : b`, assignment `=` and compound forms | right |
 
 Consequences worth noting:
@@ -67,15 +67,15 @@ Consequences worth noting:
 - Bitwise and shift operators bind tighter than `+` and `-`, so
   `a & b + c` is `(a & b) + c`.
 - The range operator `..` binds with the ordering comparisons, so
- `1..n == 1..n` compares two range values.
+  `1..n == 1..n` compares two range values.
 - `??` binds with `&&`, looser than `==`: `x == y ?? z` parses as
   `(x == y) ?? z`.
 - Ternary and assignment are loosest. `a ? b : c = d` groups as
- `a ? b : (c = d)`.
+  `a ? b : (c = d)`.
 
 Parentheses override any of these rules:
 
-```text
+```ny
 (a + b) * c
 (flags & mask) != 0
 cond ? a : (b ?? fallback)
@@ -90,7 +90,7 @@ Declare custom operators on a type with an `impl` block (left operand type is th
 impl owner). Full grammar, top-level declarations, and trait-adjacent rules are
 in [Traits and impl](traits.md).
 
-```text
+```ny
 impl Meter {
    operator + self: self = add
    operator ** int: self = pow

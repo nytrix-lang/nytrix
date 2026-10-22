@@ -550,6 +550,7 @@ aside.active {
 
 .gtitle,
 .item {
+    position: relative;
     min-height: 26px;
     display: flex;
     align-items: center;
@@ -560,10 +561,56 @@ aside.active {
 }
 
 .gtitle {
+    width: 100%;
     margin: 1px 0;
     padding: 5px 7px;
     border: 1px solid transparent;
+    background: transparent;
+    text-align: left;
     font: 730 10.5px var(--font-text);
+}
+
+#nav .gtitle,
+#nav .item,
+#nav .tag-nav-cloud {
+    padding-left: calc(12px + var(--nav-depth, 0) * 12px);
+}
+
+.gtitle.is-folder {
+    min-height: 30px;
+    font-size: 11.5px;
+    font-weight: 750;
+}
+
+.gtitle.is-module {
+    font-size: 11.5px;
+    font-weight: 500;
+}
+
+.gtitle > a.nav-label {
+    color: inherit;
+    text-decoration: none;
+}
+
+.nav-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 24px;
+    min-height: 24px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+}
+
+#nav button:focus-visible,
+#nav a:focus-visible {
+    outline: 1px solid var(--accent);
+    outline-offset: -1px;
+}
+
+.gtitle .nav-label[aria-current="page"] {
+    color: var(--accent);
 }
 
 .gtitle.collapsible {
@@ -578,7 +625,7 @@ aside.active {
     border-color: var(--accent-line);
 }
 
-.gtitle[style*="padding-left: 12px"] {
+.gtitle.is-root {
     margin-top: 6px;
     padding-top: 7px;
     padding-bottom: 7px;
@@ -586,11 +633,6 @@ aside.active {
     font-weight: 800;
     background: #020203;
     border-color: var(--line2);
-}
-
-.gtitle[style*="padding-left: 22px"],
-.gtitle[style*="padding-left: 32px"] {
-    color: var(--muted);
 }
 
 .item {
@@ -742,9 +784,19 @@ aside.active {
 }
 
 .collapsible-content {
+    position: relative;
     display: none;
-    margin-left: 4px;
-    border-left: 1px solid var(--line);
+}
+
+#nav .collapsible-content::before {
+    content: "";
+    position: absolute;
+    top: 3px;
+    bottom: 6px;
+    left: calc(20px + var(--nav-depth, 0) * 12px);
+    width: 1px;
+    background: var(--line2);
+    pointer-events: none;
 }
 
 .collapsible-content.active {
@@ -1894,18 +1946,6 @@ pre code {
     margin-bottom: 42px;
 }
 
-.md-title {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    margin-bottom: 12px;
-    padding: 0 0 10px;
-    border-bottom: 1px solid var(--line);
-    color: var(--accent);
-    font: 820 16px var(--font-ui);
-}
-
 .doc-pager {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2236,6 +2276,8 @@ pre code {
 .doc-outline {
     display: grid;
     gap: 4px;
+    max-height: min(360px, 45vh);
+    overflow-y: auto;
     margin: 0 0 18px;
     padding: 10px;
     border: 1px solid var(--line);

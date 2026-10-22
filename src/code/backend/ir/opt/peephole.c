@@ -81,7 +81,8 @@ static const nyr_inst_t *nir_boolean_compare_root(const nyr_func_t *f,
   return NULL;
 }
 
-/* Prove copy/PHI cycles boolean without assuming an unresolved backedge is
+/*
+ * Prove copy/PHI cycles boolean without assuming an unresolved backedge is
  * boolean. Every reachable definition must preserve {0,1}, and every node
  * must reach a real boolean producer. In particular, a closed undef cycle
  * cannot borrow a proof from an unrelated constant input of the root PHI.

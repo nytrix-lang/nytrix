@@ -44,7 +44,7 @@ The exact export and entry-point rules are in [Units](../spec/units.md).
 Import a module namespace or selected exported names. Aliases make the owner
 visible at each call site.
 
-```text
+```ny
 use core.os.net as net
 use core.math.parse.data.json as json
 use mathx (double)

@@ -17,8 +17,8 @@ boundaries rather than relying on mixed-width arithmetic. The type rules are in
 ```ny
 use core
 
-def i8 small = i8(7)
-def u16 port = u16(8080)
+def i8 small = 7i8
+def u16 port = 8080u16
 assert_eq(int(small), 7, "explicit integer conversion")
 ```
 
@@ -55,10 +55,29 @@ constructors, conversion rules, and available operations.
 | From | To | Form |
 | --- | --- | --- |
 | `int` | `f64` | `f64(value)` |
-| `int` | fixed width | `i32(value)`, `u8(value)`, and similar constructors |
+| literal | fixed width | `7i8`, `8080u16`, and other sized literal suffixes |
 | `str` | `int` | `int(text)` |
 | `int` | `bigint` | `bigint(value)` after importing `core.math.big` |
 | `bigint` | `str` | `bigint_to_str(value)` from `core.math.big` |
 
 Keep ABI types explicit at native boundaries; see
 [Memory](../spec/memory.md#function-and-abi-boundaries).
+
+## Vectors and acceleration
+
+`core.math.vector` provides vector constructors and operations; `core.os.gpu`
+provides accelerator APIs. Query their current signatures with:
+
+```bash
+ny doc get core.math.vector
+ny doc get core.os.gpu
+```
+
+Vector types and `@accel` or `@accel(spirv)` annotations do not guarantee a
+speedup. Support depends on the operation and selected target; unsupported
+shapes produce diagnostics. See [Native](../spec/native.md) and
+[function attributes](../spec/functions.md#attributes).
+
+Keep a scalar implementation as the correctness reference and measure the same
+complete workload before adopting a vector path. Assembly output explains
+lowering, not performance; see [Performance](performance.md).

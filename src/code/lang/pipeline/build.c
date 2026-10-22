@@ -3,8 +3,8 @@
  * source to artifact, managing phases, caching, and incremental builds.
  */
 #include "code/lang/pipeline/build.h"
-#include "base/process.h"
 #include "base/common.h"
+#include "base/process.h"
 #include "base/util.h"
 #include <ctype.h>
 #include <errno.h>
@@ -237,8 +237,10 @@ static void ny_win_copy_aot_runtime_dlls(const char *output_path) {
   if (!root || !*root)
     return;
   static const char *const dlls[] = {
-      "zlib1.dll", "libwinpthread-1.dll",
-      "libgcc_s_seh-1.dll", NULL,
+      "zlib1.dll",
+      "libwinpthread-1.dll",
+      "libgcc_s_seh-1.dll",
+      NULL,
   };
   for (size_t i = 0; dlls[i]; ++i) {
     char src[PATH_MAX];
@@ -430,6 +432,61 @@ static void ny_update_runtime_cache(const char *cache_obj,
   (void)ny_copy_file(out_runtime, cache_obj);
 }
 
+static int has_llvm_c_core(const char *inc) {
+  if (!inc || !*inc)
+    return 0;
+  char probe[PATH_MAX];
+  snprintf(probe, sizeof(probe), "%s/llvm-c/Core.h", inc);
+  if (ny_access(probe, F_OK) == 0)
+    return 1;
+#ifdef _WIN32
+  snprintf(probe, sizeof(probe), "%s\\llvm-c\\Core.h", inc);
+  if (ny_access(probe, F_OK) == 0)
+    return 1;
+#endif
+  return 0;
+}
+
+static const char *find_llvm_include_dir(void) {
+  static char buf[PATH_MAX];
+  const char *env = getenv("NYTRIX_LLVM_HEADERS");
+  if (env && *env && has_llvm_c_core(env))
+    return env;
+  env = getenv("NYTRIX_LLVM_INCLUDE");
+  if (env && *env && has_llvm_c_core(env))
+    return env;
+  env = getenv("LLVM_ROOT");
+  if (env && *env) {
+#ifdef _WIN32
+    snprintf(buf, sizeof(buf), "%s\\include", env);
+#else
+    snprintf(buf, sizeof(buf), "%s/include", env);
+#endif
+    if (has_llvm_c_core(buf))
+      return buf;
+  }
+  const char *root = ny_src_root();
+  if (root && *root) {
+    snprintf(buf, sizeof(buf), "%s/build/third_party/llvm/headers/include",
+             root);
+    if (has_llvm_c_core(buf))
+      return buf;
+  }
+#ifdef _WIN32
+  static const char *const defaults[] = {
+      "C:\\PROGRA~1\\LLVM\\include",
+      "C:\\PROGRA~2\\LLVM\\include",
+      "C:\\Program Files\\LLVM\\include",
+      "C:\\Program Files (x86)\\LLVM\\include",
+  };
+  for (size_t i = 0; i < sizeof(defaults) / sizeof(defaults[0]); ++i) {
+    if (has_llvm_c_core(defaults[i]))
+      return defaults[i];
+  }
+#endif
+  return NULL;
+}
+
 #ifdef _WIN32
 static int is_msvc_cc(const char *cc) {
   if (!cc || !*cc)
@@ -538,57 +595,6 @@ static int is_path_like(const char *s) {
   if (isalpha((unsigned char)s[0]) && s[1] == ':')
     return 1;
   return 0;
-}
-
-static int has_llvm_c_core(const char *inc) {
-  if (!inc || !*inc)
-    return 0;
-  char probe[PATH_MAX];
-  snprintf(probe, sizeof(probe), "%s/llvm-c/Core.h", inc);
-  if (ny_access(probe, F_OK) == 0)
-    return 1;
-#ifdef _WIN32
-  snprintf(probe, sizeof(probe), "%s\\llvm-c\\Core.h", inc);
-  if (ny_access(probe, F_OK) == 0)
-    return 1;
-#endif
-  return 0;
-}
-
-static const char *find_llvm_include_dir(void) {
-  static char buf[PATH_MAX];
-  const char *env = getenv("NYTRIX_LLVM_HEADERS");
-  if (env && *env && has_llvm_c_core(env))
-    return env;
-  env = getenv("NYTRIX_LLVM_INCLUDE");
-  if (env && *env && has_llvm_c_core(env))
-    return env;
-  env = getenv("LLVM_ROOT");
-  if (env && *env) {
-    snprintf(buf, sizeof(buf), "%s\\include", env);
-    if (has_llvm_c_core(buf))
-      return buf;
-  }
-  const char *root = ny_src_root();
-  if (root && *root) {
-    snprintf(buf, sizeof(buf), "%s/build/third_party/llvm/headers/include",
-             root);
-    if (has_llvm_c_core(buf))
-      return buf;
-  }
-#ifdef _WIN32
-  static const char *const defaults[] = {
-      "C:\\PROGRA~1\\LLVM\\include",
-      "C:\\PROGRA~2\\LLVM\\include",
-      "C:\\Program Files\\LLVM\\include",
-      "C:\\Program Files (x86)\\LLVM\\include",
-  };
-  for (size_t i = 0; i < sizeof(defaults) / sizeof(defaults[0]); ++i) {
-    if (has_llvm_c_core(defaults[i]))
-      return defaults[i];
-  }
-#endif
-  return NULL;
 }
 
 static int spawn_with_host_flags(const char *const base[], const char *env,
@@ -784,14 +790,13 @@ const char *ny_builder_choose_cc(void) {
 static bool ny_builder_compile_runtime_archive(
     const char *cc, const char *root, const char *out_runtime,
     const char *include_arg, const char *public_include_arg,
-    const char *llvm_include_arg,
-    const char *dwarf_flag, bool debug, bool profile, int speed_level,
-    bool native_tune, bool target_windows, const char *sanitize_kind,
-    bool has_ccache) {
+    const char *llvm_include_arg, const char *dwarf_flag, bool debug,
+    bool profile, int speed_level, bool native_tune, bool target_windows,
+    const char *sanitize_kind, bool has_ccache) {
   static const char *const units[] = {
-      "ast",  "bigint",   "core",   "simmd", "ffi",   "ffigates", "gc",
-      "math", "bigfloat", "memory", "os",    "proof", "string",
-      "parse_ast", "parse_lexer", "parse_shared",
+      "ast",    "bigint",    "core",        "simmd",        "ffi", "ffigates",
+      "gc",     "math",      "bigfloat",    "memory",       "os",  "proof",
+      "string", "parse_ast", "parse_lexer", "parse_shared",
   };
   char dir[PATH_MAX];
   snprintf(dir, sizeof(dir), "%s/ny_rt_units_%ld", ny_get_temp_dir(),
@@ -921,8 +926,8 @@ bool ny_builder_compile_runtime(const char *cc, const char *out_runtime,
   if (msvc) {
 
     snprintf(include_arg, sizeof(include_arg), "/I%s/src", root);
-    snprintf(public_include_arg, sizeof(public_include_arg),
-             "/I%s/src/include", root);
+    snprintf(public_include_arg, sizeof(public_include_arg), "/I%s/src/include",
+             root);
     const char *llvm_inc = find_llvm_include_dir();
     if (llvm_inc && *llvm_inc)
       snprintf(llvm_include_arg, sizeof(llvm_include_arg), "/I%s", llvm_inc);
@@ -995,8 +1000,8 @@ bool ny_builder_compile_runtime(const char *cc, const char *out_runtime,
   }
 #endif
   snprintf(include_arg, sizeof(include_arg), "-I%s/src", root);
-  snprintf(public_include_arg, sizeof(public_include_arg),
-           "-I%s/src/include", root);
+  snprintf(public_include_arg, sizeof(public_include_arg), "-I%s/src/include",
+           root);
 #ifdef _WIN32
   {
     const char *llvm_inc = find_llvm_include_dir();
@@ -1006,7 +1011,13 @@ bool ny_builder_compile_runtime(const char *cc, const char *out_runtime,
       snprintf(llvm_include_arg, sizeof(llvm_include_arg), "%s", include_arg);
   }
 #else
-  snprintf(llvm_include_arg, sizeof(llvm_include_arg), "%s", include_arg);
+  {
+    const char *llvm_inc = find_llvm_include_dir();
+    if (llvm_inc && *llvm_inc)
+      snprintf(llvm_include_arg, sizeof(llvm_include_arg), "-I%s", llvm_inc);
+    else
+      snprintf(llvm_include_arg, sizeof(llvm_include_arg), "%s", include_arg);
+  }
 #endif
   ny_runtime_cache_path(cache_obj, sizeof(cache_obj), cc, root, debug,
                         speed_level, native_tune, llvm_include_arg);
@@ -1018,8 +1029,8 @@ bool ny_builder_compile_runtime(const char *cc, const char *out_runtime,
   if (!out_ast) {
     bool ok = ny_builder_compile_runtime_archive(
         cc, root, out_runtime, include_arg, public_include_arg,
-        llvm_include_arg, dwarf_flag, debug, profile, speed_level,
-        native_tune, target_windows, sanitize_kind, has_ccache);
+        llvm_include_arg, dwarf_flag, debug, profile, speed_level, native_tune,
+        target_windows, sanitize_kind, has_ccache);
     if (ok && (!sanitize_kind || !*sanitize_kind))
       ny_update_runtime_cache(cache_obj, out_runtime);
     return ok;

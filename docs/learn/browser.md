@@ -41,5 +41,5 @@ application code and [Networking](networking.md) for browser networking.
 
 Record the full command, target, browser, host capability, and first failing
 observable result. Separate a compile/link failure from a denied browser API or
-a missing service. See [Execution routes](routes.md) for route differences and
+a missing service. See [Execution routes](status.md#execution-routes) for route differences and
 [Testing](testing.md) for repository checks.

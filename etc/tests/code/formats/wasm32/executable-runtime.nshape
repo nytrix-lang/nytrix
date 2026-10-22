@@ -292,7 +292,19 @@ assert(is_ok(provider_write) && provider_assemble.get("code", 127) == 0 &&
        host_assemble.get("code", 127) == 0 &&
        host_execution.get("code", 127) == 0 &&
        endswith(host_execution.get("stdout", ""), "7\n"),
-       "supported i64, f32, f64, and Wasm32-pointer C imports execute from env")
+       "supported i64, f32, f64, and Wasm32-pointer C imports execute from env; " +
+           "codes=" + to_str(provider_assemble.get("code", 127)) + "," +
+           to_str(host_compile.get("code", 127)) + "," +
+           to_str(host_assemble.get("code", 127)) + "," +
+           to_str(host_execution.get("code", 127)) + " compile stdout=" +
+           host_compile.get("stdout", "") + " compile stderr=" +
+           host_compile.get("stderr", "") + " provider stdout=" +
+           provider_assemble.get("stdout", "") + " provider stderr=" +
+           provider_assemble.get("stderr", "") + " assemble stdout=" +
+           host_assemble.get("stdout", "") + " assemble stderr=" +
+           host_assemble.get("stderr", "") + " stdout=" +
+           host_execution.get("stdout", "") + " stderr=" +
+           host_execution.get("stderr", ""))
 assert(compile.get("code", 127) == 0,
        "NYIR-verified scalar function emission succeeds")
 assert(assemble.get("code", 127) == 0,

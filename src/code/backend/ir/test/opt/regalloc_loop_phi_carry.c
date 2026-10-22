@@ -3,6 +3,7 @@
  * agrees on the same physical register.
  */
 #include "code/backend/ir/machine.h"
+#include "support.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -53,7 +54,7 @@ static bool preheader_call_keeps_phi_source_out_of_clobbered_color(void) {
 
   bool ok =
       (!had_prior_env || saved_env) &&
-      setenv("NYTRIX_GPR_LOOP_CARRY", "1", 1) == 0 &&
+      nyr_opt_setenv("NYTRIX_GPR_LOOP_CARRY", "1") == 0 &&
       nyr_mach_alloc_typed_vreg(&mach, NYR_MACH_TYPE_I64, &initial) &&
       nyr_mach_alloc_typed_vreg(&mach, NYR_MACH_TYPE_I64, &phi) &&
       nyr_mach_alloc_typed_vreg(&mach, NYR_MACH_TYPE_I64, &next) &&
@@ -113,9 +114,9 @@ static bool preheader_call_keeps_phi_source_out_of_clobbered_color(void) {
             err[0] ? err : "call-clobbered source register");
 
   if (had_prior_env)
-    setenv("NYTRIX_GPR_LOOP_CARRY", saved_env, 1);
+    nyr_opt_setenv("NYTRIX_GPR_LOOP_CARRY", saved_env);
   else
-    unsetenv("NYTRIX_GPR_LOOP_CARRY");
+    nyr_opt_unsetenv("NYTRIX_GPR_LOOP_CARRY");
   free(saved_env);
   nyr_mach_regalloc_free(&alloc);
   nyr_mach_func_free(&mach);
@@ -139,7 +140,7 @@ static bool call_in_loop_disables_carry(void) {
 
   bool ok =
       (!had_prior_env || saved_env) &&
-      setenv("NYTRIX_GPR_LOOP_CARRY", "1", 1) == 0 &&
+      nyr_opt_setenv("NYTRIX_GPR_LOOP_CARRY", "1") == 0 &&
       nyr_mach_alloc_typed_vreg(&mach, NYR_MACH_TYPE_I64, &initial) &&
       nyr_mach_alloc_typed_vreg(&mach, NYR_MACH_TYPE_I64, &phi) &&
       nyr_mach_alloc_typed_vreg(&mach, NYR_MACH_TYPE_I64, &next) &&
@@ -186,9 +187,9 @@ static bool call_in_loop_disables_carry(void) {
             err[0] ? err : "call-containing loop carried its phi");
 
   if (had_prior_env)
-    setenv("NYTRIX_GPR_LOOP_CARRY", saved_env, 1);
+    nyr_opt_setenv("NYTRIX_GPR_LOOP_CARRY", saved_env);
   else
-    unsetenv("NYTRIX_GPR_LOOP_CARRY");
+    nyr_opt_unsetenv("NYTRIX_GPR_LOOP_CARRY");
   free(saved_env);
   nyr_mach_regalloc_free(&alloc);
   nyr_mach_func_free(&mach);
@@ -210,7 +211,7 @@ int main(void) {
 
   bool ok =
       (!had_prior_env || saved_env) &&
-      setenv("NYTRIX_GPR_LOOP_CARRY", "1", 1) == 0 &&
+      nyr_opt_setenv("NYTRIX_GPR_LOOP_CARRY", "1") == 0 &&
       nyr_mach_alloc_typed_vreg(&mach, NYR_MACH_TYPE_I64, &initial) &&
       nyr_mach_alloc_typed_vreg(&mach, NYR_MACH_TYPE_I64, &phi) &&
       nyr_mach_alloc_typed_vreg(&mach, NYR_MACH_TYPE_I64, &next) &&
@@ -295,9 +296,9 @@ int main(void) {
     puts("[regalloc-loop-phi-carry] all loop phi edges share one preg");
 
   if (had_prior_env)
-    setenv("NYTRIX_GPR_LOOP_CARRY", saved_env, 1);
+    nyr_opt_setenv("NYTRIX_GPR_LOOP_CARRY", saved_env);
   else
-    unsetenv("NYTRIX_GPR_LOOP_CARRY");
+    nyr_opt_unsetenv("NYTRIX_GPR_LOOP_CARRY");
   free(saved_env);
   nyr_mach_regalloc_free(&alloc);
   nyr_mach_func_free(&mach);

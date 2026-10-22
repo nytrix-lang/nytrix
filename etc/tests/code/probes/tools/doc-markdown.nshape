@@ -8,32 +8,42 @@ shape doc_static_markdown_rendering {
   source ny <<'SRC'
 use core
 use core.str as str
-use core.compiler.tools.doc.markdown (render_static, render_static_batch)
+use core.compiler.tools.doc.markdown (render_static)
 
-def html = render_static("# Title\n\nHello & <world>.\n- item\n| a | b |\n|---|---|\n```ny\nx < 2\n```\n", "learn/start")
-assert(html ==
-   "<h1>Title</h1>\n<p>Hello &amp; &lt;world&gt;.</p>\n<ul>\n<li>item</li>\n</ul>\n<table><tbody>\n<tr><td>a</td><td>b</td></tr>\n</tbody></table>\n<pre><code class=\"language-ny\">x &lt; 2\n</code></pre>\n",
-   "static Markdown renderer preserves site HTML structure")
-assert(render_static("[Types](../spec/types.md#intro) [site](https://example.test)", "learn/start") ==
-   "<p><a href=\"../../spec/types/#intro\">Types</a> <a href=\"https://example.test\" rel=\"noopener noreferrer\">site</a></p>\n",
-   "static Markdown renderer resolves local and external links")
-assert(render_static("It's fine.", "learn/start") == "<p>It's fine.</p>\n",
-   "static Markdown renderer matches HTML quote escaping")
-assert(render_static("café & crème", "learn/start") ==
-   "<p>café &amp; crème</p>\n",
-   "static Markdown renderer preserves UTF-8 across byte-range escaping")
-mut lines = []
-mut i = 0
-while i < 128 {
-   lines = lines.append("line")
-   i += 1
-}
-def str many_lines = str.join(lines, "\n")
-def str long_html = render_static(many_lines, "learn/long")
-assert(long_html.len == 128 * 12 && str.endswith(long_html, "<p>line</p>\n"),
-   "static Markdown renderer processes many lines with bounded slicing work")
-assert(render_static_batch(["# First", "# Second"], ["a", "b"]) ==
-   ["<h1>First</h1>\n", "<h1>Second</h1>\n"],
-   "static Markdown batch keeps route and source positions aligned")
+def html = render_static(
+   "<!-- private metadata\nnot prose -->\n# Types and `calls`\n\nA `call(\nvalue)` keeps <brackets> & café.\n\n1. Read the **contract**\n   before calling.\n2. Check *errors*.\n\n| Operator | Meaning |\n| --- | --- |\n| `a \\| b` | bitwise OR |\n\n[Types](../spec/types.md#proof-and-refinement-types)\n\n```ny\nx < 2\n```\n",
+   "learn/start")
+assert(str.str_contains(html, "id=\"types-and-calls\""),
+   "heading anchors match links after inline-code punctuation is removed")
+assert(str.str_contains(html, "<p>A <code>call( value)</code> keeps &lt;brackets&gt; &amp; café.</p>"),
+   "wrapped inline code stays in one paragraph and text is HTML escaped")
+assert(!str.str_contains(html, "private metadata") && !str.str_contains(html, "not prose"),
+   "multiline metadata comments do not appear as document text")
+assert(str.str_contains(html, "<ol>\n<li>Read the <strong>contract</strong>") &&
+       str.str_contains(html, "before calling.</li>\n<li>Check <em>errors</em>.</li>\n</ol>"),
+   "ordered steps retain continuation text and emphasis inside their list items")
+assert(str.str_contains(html, "<tr><td><code>a | b</code></td><td>bitwise OR</td></tr>"),
+   "escaped operator pipes do not create extra table cells")
+assert(str.str_contains(html, "href=\"../../spec/types/#proof-and-refinement-types\""),
+   "relative specification links retain their target fragment")
+def source_link = render_static("[Linker](../../src/code/backend/object/linker.c)", "spec/linker")
+assert(str.str_contains(source_link, "href=\"https://github.com/nytrix-lang/nytrix/blob/main/src/code/backend/object/linker.c\""),
+   "repository source links resolve to source rather than nonexistent manual routes")
+assert(str.str_contains(render_static("[Specification](../spec/index.md)", "learn/start"),
+       "href=\"../../spec/index/\""),
+   "explicit index Markdown links retain their generated manual page")
+def folded = render_static("<details>\n<summary>Changes</summary>\n\nA release note.\n\n</details>\n", "CHANGELOG")
+assert(str.str_contains(folded, "<details>\n<summary>Changes</summary>\n<p>A release note.</p>\n</details>"),
+   "trusted release-note disclosure blocks remain interactive HTML")
+assert(str.str_contains(html, "<pre><code class=\"language-ny\">x &lt; 2\n</code></pre>"),
+   "fenced source preserves code lines without interpreting angle brackets")
+def indented = render_static("  ```ny\n  x < 2\n  ```\n\n## After\n\n   ```sh\n# still code\n   ```\n\n## Done\n", "CHANGELOG")
+assert(str.str_contains(indented, "<pre><code class=\"language-ny\">  x &lt; 2\n</code></pre>"),
+   "indented closing fences terminate code without discarding source indentation")
+assert(str.str_contains(indented, "<h2 id=\"after\">After</h2>") &&
+       str.str_contains(indented, "<h2 id=\"done\">Done</h2>"),
+   "headings following indented fences remain document structure")
+assert(str.str_contains(indented, "<pre><code class=\"language-sh\"># still code\n</code></pre>"),
+   "a subsequent shell block does not turn its comment into a heading")
 SRC
 }

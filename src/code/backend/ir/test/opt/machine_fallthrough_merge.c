@@ -9,7 +9,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/mman.h>
 
 static bool build_function(nyr_func_t *ir, bool extra_predecessor) {
   nyr_opt_begin(ir);
@@ -20,14 +19,14 @@ static bool build_function(nyr_func_t *ir, bool extra_predecessor) {
   ir->param_types[0] = NYIR_PARAM_I64;
 
   int arg = nyr_ir_emit(ir, (nyr_inst_t){.op = NYIR_LOAD_LOCAL,
-                                        .dst = -1,
-                                        .a = -1,
-                                        .b = -1,
-                                        .c = -1,
-                                        .d = -1,
-                                        .e = -1,
-                                        .f = -1,
-                                        .imm = 0});
+                                         .dst = -1,
+                                         .a = -1,
+                                         .b = -1,
+                                         .c = -1,
+                                         .d = -1,
+                                         .e = -1,
+                                         .f = -1,
+                                         .imm = 0});
   if (arg < 0)
     return false;
   if (extra_predecessor) {
@@ -73,13 +72,12 @@ static bool run_case(const ny_native_target_info_t *target,
 
   void *mapping = MAP_FAILED;
   if (ok) {
-    mapping = mmap(NULL, code.len, PROT_READ | PROT_WRITE,
-                   MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    mapping = nyr_opt_execmem_alloc(code.len);
     ok = mapping != MAP_FAILED;
   }
   if (ok) {
     memcpy(mapping, code.data, code.len);
-    ok = mprotect(mapping, code.len, PROT_READ | PROT_EXEC) == 0;
+    ok = nyr_opt_execmem_protect(mapping, code.len) == 0;
   }
   if (ok) {
     typedef int64_t (*fn_t)(int64_t);
@@ -98,7 +96,7 @@ static bool run_case(const ny_native_target_info_t *target,
   if (!ok && err[0])
     fprintf(stderr, "[machine-fallthrough-merge] %s\n", err);
   if (mapping != MAP_FAILED)
-    munmap(mapping, code.len);
+    nyr_opt_execmem_free(mapping, code.len);
   nyr_obj_free(&code);
   nyr_mach_func_free(&mach);
   nyr_ir_func_free(&ir);

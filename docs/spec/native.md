@@ -37,21 +37,21 @@ object-emission target limits are narrower than the full in-tree native backend.
 
 ## Layouts
 
-```text
+```ny
 layout Name {
    Type field,
    Type field2
 }
 ```
 
-Field order is part of the ABI. Reordering fields changes the ABI. A by-value
-FFI parameter or result requires a fully materialized LLVM type matching the
-layout; unresolved layout types are rejected instead of being represented by
-an empty placeholder struct. Pointer parameters may use incomplete layouts.
+Field order is part of the ABI. Reordering fields changes the ABI. On the LLVM
+route, a by-value FFI parameter or result requires a fully materialized LLVM
+type matching the layout; unresolved layout types are rejected rather than
+represented by an empty struct. Pointer parameters may use incomplete layouts.
 
 ## Extern blocks
 
-```text
+```ny
 extern "library" {
    fn symbol(Type arg) Type
 }
@@ -73,14 +73,14 @@ selects which linked or loaded library provides the symbol.
 
 `#include` imports declarations from C headers:
 
-```text
+```ny
 #include <stdlib.h>
 #include "./ffi.h"
 ```
 
 An optional namespace alias exposes declarations under that name:
 
-```text
+```ny
 #include <stdlib.h> as "c"
 c.malloc(64)
 ```
@@ -103,25 +103,28 @@ available directly. Existing Nytrix names win on collisions.
 3. Max depth is 64. Recursive includes inherit the parser's typedef, tag, and
  macro state.
 
-### Supported C constructs
+### Supported C header constructs
 
-**Types:** `void`, `_Bool`/`bool`, `char`, `short`, `int`, `long`, `float`,
+`#include` imports these declarations. The standalone C compiler has separate
+function-body support.
+
+Types: `void`, `_Bool`/`bool`, `char`, `short`, `int`, `long`, `float`,
 `double`, `long double`, `_Complex`/`_Imaginary` (base type), `_BitInt(N)`,
 `signed`/`unsigned`, `const`, `volatile`, `restrict`, `_Atomic`.
 
-**Declarators:** pointers, arrays (flexible and unknown-size), function
+Declarators: pointers, arrays (flexible and unknown-size), function
 parameters (variadic), deep function pointer nesting, typedefs.
 
-**Declarations:** `extern`, `static`, `inline`; struct, union, enum with
+Declarations: `extern`, `static`, `inline`; struct, union, enum with
 fields, bitfields, anonymous members, and nested definitions;
 `#pragma pack(push, N)` / `#pragma pack(pop)`.
 
-**Attributes:** `packed`, `aligned(N)`, `unused`, `deprecated`, `weak`,
+Attributes: `packed`, `aligned(N)`, `unused`, `deprecated`, `weak`,
 `format(...)`, `visibility(...)`, `alloc_size(...)`, `const`, `pure`,
 `noreturn`, `malloc`, `warn_unused_result`, `vector_size(...)`, `__declspec`,
 `_Alignas`, `_Static_assert`, `__asm__`, `__extension__`.
 
-**Preprocessor:** object-like and function-like `#define` with `__VA_ARGS__`
+Preprocessor: object-like and function-like `#define` with `__VA_ARGS__`
 expansion, `#undef`, `#if`/`#ifdef`/`#ifndef`/`#elif`, `#include` with
 recursive resolution, `__has_include`, `__has_builtin`, predefined platform
 macros.
@@ -146,7 +149,7 @@ macros.
 
 Use `&value` when a C function expects an out pointer:
 
-```text
+```ny
 #include <sys/time.h>
 mut timeval tv = timeval(0, 0)
 gettimeofday(&tv, nil)
@@ -171,7 +174,7 @@ backend and is checked at the boundary.
 Foreign declarations require a matching symbol and native link configuration;
 the REPL does not link arbitrary external libraries.
 
-```text
+```ny
 extern "library" {
    fn host_call(int a, f64 b) int
 }
@@ -225,7 +228,7 @@ aggregate shape is supported by every native backend.
 
 ## Layout helpers
 
-```text
+```ny
 __layout_size("Name")
 __layout_align("Name")
 __layout_offset("Name", "field")
@@ -246,7 +249,7 @@ Raw load/store helpers:
 
 ## Inline assembly
 
-```text
+```ny
 asm("mov $1, $0", "=r,r", value)
 intrinsic("ctpop.i64", value)
 ```
@@ -262,14 +265,13 @@ these support tiers:
 
 | Tier | Backends | Contract |
 | --- | --- | --- |
-| Primary native | `x86_64`, `aarch64` | Machine-form lowering and target-specific backend/object infrastructure; these are the production native architecture families. |
-| Secondary native | `x86`/i386, `arm` | Real target/ABI lowering exists, but optimization and object/ABI coverage is narrower than the primary tier. |
+| Primary native | `x86_64`, `aarch64` | Main native architecture families, with machine-form lowering and target-specific object infrastructure; feature coverage still depends on the target and source shape. |
+| Secondary native | `x86`/i386, `arm` | Target/ABI lowering with narrower optimization, object, and ABI coverage than the primary tier. |
 | Bring-up / debug | `riscv`, `bpf`, `mips`, `powerpc`, `avr` and the portable NYIR text emitters | Intended for bring-up, cross-checking, and diagnostics; not a promise of host-quality native-only parity. |
 | Browser/Wasm | `wasm` | Separate browser/WebAssembly execution contract; do not infer native object/JIT parity from the backend selector. |
 
-Capability checks, not the backend spelling, decide whether a requested object
-format, JIT path, machine feature, or ABI form is available. Unsupported shapes
-must diagnose instead of silently pretending a debug backend is first-class.
+Capability checks determine support for each object format, JIT path, machine
+feature, and ABI form. Unsupported requests must produce diagnostics.
 
 ## Machine form
 
@@ -346,7 +348,7 @@ Nytrix itself.
 
 Ownership attributes define who allocates and who frees:
 
-```text
+```ny
 @returns_owned
 fn make_buffer(){ malloc(64) }
 

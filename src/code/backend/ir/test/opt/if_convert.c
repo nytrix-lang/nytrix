@@ -273,7 +273,7 @@ static int run_multiply_speculation_cost_case(void) {
 }
 
 static int run_loop_speculation_cost_case(void) {
-  const char *name = "if-convert-loop-vectorization-budget";
+  const char *name = "if-convert-loop-duplicate-multiply-cost";
   nyr_func_t f;
   nyr_opt_begin(&f);
   int init = nyr_opt_const(&f, 0), trip = nyr_opt_const(&f, 2);
@@ -335,11 +335,11 @@ static int run_loop_speculation_cost_case(void) {
   size_t selects = count_op(&f, NYIR_SELECT_I64);
   nyr_ir_func_free(&f);
   nyr_opt_check(name, before, after, 26);
-  if (selects != 1) {
-    fprintf(
-        stderr,
-        "[%s] loop-local cost-10 diamond should become a select (got %zu)\n",
-        name, selects);
+  if (selects != 0) {
+    fprintf(stderr,
+            "[%s] loop-local duplicate multiplies should retain the branch "
+            "(got %zu selects)\n",
+            name, selects);
     return 1;
   }
   return 0;

@@ -18,7 +18,7 @@ Prefer `extern`, `#include`, and `layout` when the compiler can know the ABI
 shape. Use dynamic FFI for experiments or APIs whose function signatures are
 not statically available.
 
-```text
+```ny
 layout Pixel { u8 r, u8 g, u8 b, u8 a }
 extern "library" { fn native_call(int value) int }
 #include <stdlib.h> as "c"
@@ -54,5 +54,5 @@ Do not infer support for one ABI from a passing test on another.
 Optimized code may move or eliminate source variables. If a native failure is
 hard to locate, reproduce with lower optimization and inspect the NYIR and
 native artifacts for the failing boundary. See
-[Execution routes](routes.md), [Testing](testing.md), and
+[Execution routes](status.md#execution-routes), [Testing](testing.md), and
 [Troubleshooting](troubleshooting.md).
