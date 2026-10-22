@@ -3,12 +3,12 @@
 ;; Reference:
 ;; - https://en.wikipedia.org/wiki/GIF
 ;; References:
-;; - std.math.parse.img
-;; - std.math.parse
-module std.math.parse.img.gif(decode, decode_frames, encode)
-use std.core
-use std.core.dict_mod
-use std.math.bin as pbin
+;; - core.math.parse.img
+;; - core.math.parse
+module core.math.parse.img.gif(decode, decode_frames, encode)
+use core
+use core.dict_mod
+use core.math.bin as pbin
 
 fn _g_sb(any data, int p) dict {
    def n = data.len

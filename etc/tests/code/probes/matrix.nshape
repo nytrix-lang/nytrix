@@ -1,0 +1,42 @@
+shape matrix {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "math"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+#!/bin/ny
+use core
+use core.math
+use core.os.ui.render.matrix
+fn dump_mat(name, m){
+   print(name)
+   mut r = 0
+   while(r < 4){
+      mut line = ""
+      mut c = 0
+      while(c < 4){
+         if(c > 0){ line = line + " " }
+         line = line + to_str(mat4_get(m, r, c, 0.0))
+         c += 1
+      }
+      print(line)
+      r += 1
+   }
+}
+def ortho = mat4_ortho(0.0, 1920.0, 1080.0, 0.0, -1.0, 1.0)
+def persp = mat4_perspective(45.0 * PI / 180.0, 1920.0 / 1080.0, 0.1, 1000.0)
+assert(mat4_get(persp, 0, 0) > 1.35 && mat4_get(persp, 0, 0) < 1.37, "perspective horizontal scale")
+assert(mat4_get(persp, 1, 1) > 2.41 && mat4_get(persp, 1, 1) < 2.43, "perspective vertical scale")
+def wide_persp = mat4_perspective(120.0 * PI / 180.0, 1920.0 / 1080.0, 0.1, 1000.0)
+assert(mat4_get(wide_persp, 0, 0) > 0.32 && mat4_get(wide_persp, 0, 0) < 0.33, "wide perspective horizontal scale")
+assert(mat4_get(wide_persp, 1, 1) > 0.57 && mat4_get(wide_persp, 1, 1) < 0.59, "wide perspective vertical scale")
+def view = mat4_look_at([0.0, 8.0, 45.0], [0.0, 8.0, 44.0], [0.0, 1.0, 0.0])
+mut vp = mat4_identity()
+mat4_mul_into(persp, view, vp)
+dump_mat("ortho", ortho)
+dump_mat("persp", persp)
+dump_mat("view", view)
+dump_mat("vp", vp)
+NY
+}

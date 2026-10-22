@@ -1,0 +1,49 @@
+shape rev-decompiler-c-control-flow {
+  suite "native"
+  family "reverse-engineering"
+  generator "deterministic"
+  features [elf c-source decompiler cfg strings pseudocode]
+  ci skip
+  timeout 90
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os as os
+use core.os.rev.decomp as dc
+
+;; core.os.rev.decomp currently consumes ELF. Keep the fixture honest about
+;; that contract instead of treating a host-generated Mach-O/PE as ELF.
+if os.os() != "linux" {
+   print("✓ generated C ELF decompiler fixture not applicable on this host")
+} else {
+def stem = "nytrix-rev-control-" + to_str(os.pid()) + "-" + to_str(os.ticks())
+def src = os.path_join(os.temp_dir(), stem + ".c")
+def exe = os.path_join(os.temp_dir(), stem)
+def c_source =
+   "#include <stdio.h>\n" +
+   "__attribute__((noinline)) int rev_transform(int x) {\n" +
+   "  if (x < 0) return 3;\n" +
+   "  return x + 1;\n" +
+   "}\n" +
+   "int main(void) { puts(\"nytrix-rev-fixture\"); return rev_transform(41) & 1; }\n"
+
+unwrap(os.file_write(src, c_source))
+def cc = os.run_capture(["cc", "-O1", "-fno-inline", "-fno-omit-frame-pointer", "-no-pie", "-o", exe, src], [], nil, false)
+assert(cc.get("code", 1) == 0, "compile deterministic reverse fixture")
+
+def bin = dc.load(exe, {"string_limit": 16, "scan_bytes": 2048})
+assert(bin.get("ok", false) && dc.arch(bin) == "x86_64", "load generated ELF")
+assert(dc.strings(bin, 8, 64).len > 0, "recover fixture strings")
+def fun = dc.function_at(bin, dc.functions(bin).get(0, {}).get("value", 0))
+def rows = dc.disassemble_function(bin, "rev_transform", 256)
+def graph = dc.cfg(bin, "rev_transform", 256)
+def dec = dc.decompile(bin, "rev_transform", {"max_bytes": 256, "clean": true})
+assert(fun.len > 0 && rows.len > 0 && graph.get("nodes", []).len > 1, "recover function structure")
+assert(dec.get("ok", false) && contains(dec.get("text", ""), "fn "), "render Ny pseudocode")
+unwrap(os.file_remove(src))
+unwrap(os.file_remove(exe))
+print("✓ generated C ELF decompiler fixture passed")
+}
+NY
+}

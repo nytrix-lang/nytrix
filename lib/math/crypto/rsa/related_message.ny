@@ -4,13 +4,13 @@
 ;; - https://people.csail.mit.edu/rivest/Rsapaper.pdf
 ;; - https://crypto.stanford.edu/~dabo/pubs/papers/RSA-survey.pdf
 ;; References:
-;; - std.math.crypto.rsa
-;; - std.math.crypto
-module std.math.crypto.rsa.related_message(franklin_reiter_attack, franklin_reiter_e3_successor, coppersmith_short_pad)
-use std.core
-use std.math.nt
-use std.math.crypto.poly
-use std.math.crypto.lattice.small_roots (modular_univariate)
+;; - core.math.crypto.rsa
+;; - core.math.crypto
+module core.math.crypto.rsa.related_message(franklin_reiter_attack, franklin_reiter_e3_successor, coppersmith_short_pad)
+use core
+use core.math.nt
+use core.math.crypto.poly
+use core.math.crypto.lattice.small_roots (modular_univariate)
 
 fn franklin_reiter_attack(any n, int e, any c1, any c2, list f1_coeffs, list f2_coeffs) any {
    "Franklin-Reiter related message attack.  Recovers the shared message m
@@ -234,5 +234,5 @@ fn _poly_mod_mod(list a, list b, any m) list {
    def c2 = power_mod(m + r, e, n)
    def recovered = coppersmith_short_pad(n, e, c1, c2)
    assert(recovered == m, "coppersmith_short_pad recovers message")
-   print("✓ std.math.crypto.rsa.related_message self-test passed")
+   print("✓ core.math.crypto.rsa.related_message self-test passed")
 }

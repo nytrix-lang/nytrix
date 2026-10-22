@@ -1,0 +1,51 @@
+shape optcheck_kernel_list_index_mutation {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle optcheck kernel-family list index mutation bounds growth]
+  template ny-test-case
+  flags_matrix "-O0 --color=never; -O3 --color=never; --native-only -O0 --color=never; --native-only -O3 --color=never; --native-backend=llvm --jit --jit-engine=mcjit --color=never"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+;; Adversarial list/index-loop differential for the dynamic-list transform
+;; family.  The kernel indexes, stores, and grows one list while observing a
+;; saved length: optimizers may eliminate bounds checks only when the proof
+;; covers the mid-loop growth (an append at j == 15 keeps every later index
+;; in range), and may not cache element values across the indexed stores.
+;; Aliased-binding observation of indexed stores and post-append growth is
+;; deliberately out of scope here; the open differential investigation is
+;; tracked in the Nytrix agent TODO queue.
+
+fn run() int {
+   mut xs = []
+   mut i = 0
+   while i < 32 {
+      xs = append(xs, (i * 37 + 11) & 0xFFFF)
+      i += 1
+   }
+   def saved = xs.len()
+   assert(saved == 32, "post-append length")
+   mut acc = 0
+   mut j = 0
+   while j < 32 {
+      xs[j] = (xs[j] * 7 + j) & 0xFFFF
+      ;; The read must observe this loop's own store, not a cached value.
+      acc = (acc + xs[j]) & 0xFFFFFFFF
+      if j == 15 {
+         xs = append(xs, 65535)
+         acc = (acc + xs.len()) & 0xFFFFFFFF
+      }
+      j = j + 1
+   }
+   assert(xs.len() == 33, "growth observed")
+   acc = (acc + xs[32]) & 0xFFFFFFFF
+   acc
+}
+
+def checksum = run()
+print("checksum=", checksum)
+;; Sum(260*j + 77, j=0..31), plus the growth length and appended value.
+assert(checksum == 196992, "list kernel checksum")
+NY
+}

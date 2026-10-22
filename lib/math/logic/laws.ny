@@ -1,11 +1,11 @@
 ;; Keywords: law certificate algebra property bounded counterexample
 ;; Certify laws over the values and operations of existing modules.
-module std.math.logic.laws(check, unary, binary, ternary)
-use std.core
-use std.core.reflect as reflect
-use std.math.logic.certificate as cert
+module core.math.logic.laws(check, unary, binary, ternary)
+use core
+use core.reflect as reflect
+use core.math.logic.certificate as cert
 
-def LAW_VERSION = "std.math.logic.laws@1"
+def LAW_VERSION = "core.math.logic.laws@1"
 
 fn _invalid(str reason) dict {
    {"decided":false, "valid":false, "reason":reason,
@@ -47,9 +47,11 @@ fn check(str domain, str law, list cases, any left, any right, any equal,
       }
       i += 1
    }
-   def dependency = to_str(hash(reflect.repr(
-            [domain, law, evidence, max_steps, max_nodes, max_depth,
-               max_variables, max_memory])))
+   ;; Keep nested evidence out of the mixed-value literal: the NYIR route
+   ;; otherwise hashes the list handle instead of its stable contents.
+   def str dependency = to_str(hash(reflect.repr(
+            [domain, law, max_steps, max_nodes, max_depth, max_variables,
+               max_memory]) + reflect.repr(evidence)))
    def certificate = cert.envelope("T", LAW_VERSION, dependency).merge({
          "domain":domain, "law":law, "evidence":evidence,
          "cases_checked":i})

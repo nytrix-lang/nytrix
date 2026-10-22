@@ -1,0 +1,25 @@
+shape ownership_exclusive_borrow_nested_copied_alias_negative {
+  family "compiler-errors/ownership"
+  generator "error"
+  features ["error", "ownership", "borrow", "exclusive", "nested", "alias", "negative"]
+  template ny-compile-fail
+  expect compile_fail
+  flags "--ownership-strict"
+
+  source ny <<'NY'
+use core
+
+fn nested_copy_conflict(bool choose) int {
+  mut int value = 5
+  def borrowed = &mut value
+  if choose {
+    def alias = borrowed
+    value = value + 1
+    def observed = alias
+  }
+  value
+}
+
+nested_copy_conflict(true)
+NY
+}

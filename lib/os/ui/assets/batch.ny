@@ -1,19 +1,19 @@
 ;; Keywords: assets batch prefetch gltf load os ui
 ;; Batch asset prefetch and GLTF loading helpers for viewer and editor workflows.
 ;; References:
-;; - std.os.ui.assets.catalog
-;; - std.os.ui.assets.viewer
-module std.os.ui.assets.batch(parse_env, format_model, skip_enabled, elapsed_s, eta_s, fast_static_settle, fast_static_settle_frames, terminal_log_enabled, dump_anim_pose_fraction)
-use std.core
-use std.core.str as str
-use std.math (clamp)
-use std.math.float (is_nan, is_inf)
-use std.os (file_read)
-use std.os.fs as osfs
-use std.os.path as ospath
-use std.os.ui.assets.catalog as asset_catalog
-use std.os.ui.render.dump as ui_dump
-use std.os.ui.render.dump as ui_profile
+;; - core.os.ui.assets.catalog
+;; - core.os.ui.assets.viewer
+module core.os.ui.assets.batch(parse_env, format_model, skip_enabled, elapsed_s, eta_s, fast_static_settle, fast_static_settle_frames, terminal_log_enabled, dump_anim_pose_fraction)
+use core
+use core.str as str
+use core.math (clamp)
+use core.math.float (is_nan, is_inf)
+use core.os (file_read)
+use core.os.fs as osfs
+use core.os.path as ospath
+use core.os.ui.assets.catalog as asset_catalog
+use core.os.ui.render.dump as ui_dump
+use core.os.ui.render.dump as ui_profile
 
 fn skip_enabled(txt) bool {
    "Returns whether skip enabled."
@@ -184,5 +184,5 @@ fn parse_env(cli_raw="", cli_all=false, all_names=[], cli_dump_dir="", cli_delay
    assert(elapsed_s(0) == 0.0 && eta_s(0, 0, 10) == 0.0, "batch timing empty")
    assert(terminal_log_enabled(false, true), "batch terminal log default")
    assert(dump_anim_pose_fraction() >= 0.0 && dump_anim_pose_fraction() <= 1.0, "batch pose fraction")
-   print("✓ std.os.ui.assets.batch self-test passed")
+   print("✓ core.os.ui.assets.batch self-test passed")
 }

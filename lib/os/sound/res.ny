@@ -2,21 +2,20 @@
 ;; Unified resource loader for sound and image files.
 ;; Uses libsndfile for sound.
 ;; References:
-;; - std.os.sound
-;; - std.os
-module std.os.sound.res(init, shutdown, load, get_sound_info, get_image_info, clear_cache, is_cached)
-use std.core
-use std.core.error
-use std.core.dict_mod
-use std.core.mem (cstr)
-use std.os (env, file_read, file_remove, file_write, mutex_free, mutex_lock, mutex_new, mutex_unlock, temp_dir)
-use std.os.clock (ticks)
-use std.os.path as path
-use std.os.fs as fs
-use std.core.str as str
-use std.math.parse.img as image
-use std.os.sound.diag as sound_debug
-use std.os.sound.source
+;; - core.os.sound
+;; - core.os
+module core.os.sound.res(init, shutdown, load, get_sound_info, get_image_info, clear_cache, is_cached)
+use core
+use core.error
+use core.dict_mod
+use core.mem (cstr)
+use core.os (file_read, mutex_free, mutex_lock, mutex_new, mutex_unlock)
+use core.os.path as path
+use core.os.fs as fs
+use core.str as str
+use core.math.parse.img as image
+use core.os.sound.diag as sound_debug
+use core.os.sound.source
 
 #linux {
    #link "libsndfile.so"
@@ -57,22 +56,15 @@ fn _sf_available() bool {
    #linux { true } #else { false } #endif
 }
 
-fn _decode_sf(any data) any {
-   if !_sf_available() { return 0 }
-   if !is_str(data) || data.len < 16 { return 0 }
+fn _decode_sf(str filepath) any {
    def debug = sound_debug.enabled()
-   def tmp_fn = "ny_snd_" + to_str(ticks()) + "_" + to_str(malloc(1)) + ".tmp"
-   def tmp_path = path.normalize(temp_dir() + "/" + tmp_fn)
-   match file_write(tmp_path, data) {
-      err(e) -> {
-         if debug { print("RES: Sndfile temp write failed: " + to_str(e)) }
-         return 0
-      }
-      ok(ignoredok)  -> { ignoredok }
+   if !_sf_available() {
+      if debug { print("RES: Sndfile backend unavailable") }
+      return 0
    }
    def info_ptr = malloc(64)
    memset(info_ptr, 0, 64)
-   def path_cstr = cstr(tmp_path)
+   def path_cstr = cstr(filepath)
    def sf = sf_open(path_cstr, SFM_READ, info_ptr)
    if !sf {
       if debug {
@@ -81,17 +73,15 @@ fn _decode_sf(any data) any {
          print("RES: Sndfile sf_open failed: " + str.cstr_to_str(err_msg))
       }
       free(info_ptr)
-      match file_remove(tmp_path) { _ -> {} }
       return 0
    }
-   def frames   = load64(info_ptr, 0)
+   def frames   = load64_h(info_ptr, 0)
    def rate     = load32(info_ptr, 8)
    def channels = load32(info_ptr, 12)
-   if debug { print("RES: Sndfile opened " + tmp_path + " frames=" + to_str(frames) + " rate=" + to_str(rate) + " channels=" + to_str(channels)) }
+   if debug { print("RES: Sndfile opened " + filepath + " frames=" + to_str(frames) + " rate=" + to_str(rate) + " channels=" + to_str(channels)) }
    if frames <= 0 || channels <= 0 || channels > 32 {
       sf_close(sf)
       free(info_ptr)
-      match file_remove(tmp_path) { _ -> {} }
       return 0
    }
    def n_samples = frames * channels
@@ -99,7 +89,6 @@ fn _decode_sf(any data) any {
    def got = sf_read_short(sf, out_ptr, n_samples)
    sf_close(sf)
    free(info_ptr)
-   match file_remove(tmp_path) { _ -> {} }
    if got <= 0 {
       free(out_ptr)
       return 0
@@ -151,12 +140,15 @@ fn load(any filepath) any {
    mutex_unlock(_mtx)
    if cached { return cached }
    if !fs.is_file(full) { return 0 }
-   def res = file_read(full)
-   if is_err(res) { return 0 }
-   def data = unwrap(res)
    def ext = str.lower(path.extname(full))
-   mut asset = 0
-   if ext == ".wav" || ext == ".ogg" || ext == ".flac" || ext == ".mp3" || ext == ".aiff" || ext == ".aif" || ext == ".opus" { asset = _decode_sf(data) } else { asset = image.decode(data, ext) }
+   mut any asset = 0
+   if ext == ".wav" || ext == ".ogg" || ext == ".flac" || ext == ".mp3" || ext == ".aiff" || ext == ".aif" || ext == ".opus" {
+      asset = _decode_sf(full)
+   } else {
+      def res = file_read(full)
+      if is_err(res) { return 0 }
+      asset = image.decode(unwrap(res), ext)
+   }
    if asset != 0 {
       mutex_lock(_mtx)
       _cache = _cache.set(full, asset)
@@ -170,20 +162,7 @@ fn load(any filepath) any {
 
 fn get_sound_info(any sound) any {
    "Returns normalized metadata for a loaded sound source."
-   if !is_list(sound) { return 0 }
-   def tag = sound.get(0)
-   if tag != "SOUND_SOURCE" { return 0 }
-   def d = sound.get(1)
-   mut info = dict(8)
-   info = info.set("channels", d.get("channels"))
-   info = info.set("rate",     d.get("rate"))
-   info = info.set("bits",     d.get("bits"))
-   def frames = d.get("total_frames")
-   def rate = d.get("rate")
-   def duration = (frames + 0.0) / (rate + 0.0)
-   info = info.set("duration", duration)
-   info = info.set("frames",   frames)
-   info
+   source.sound_info(sound)
 }
 
 fn get_image_info(any img) any {

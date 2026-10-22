@@ -3,14 +3,14 @@
 ;; Reference:
 ;; - https://en.wikipedia.org/wiki/General_number_field_sieve
 ;; References:
-;; - std.math.crypto.factorization
-;; - std.math.crypto
-module std.math.crypto.factorization.nfs(nfs_polynomial_report, snfs_shape_report, nfs_factor_base_report, nfs_trial_relation_report, nfs_line_relation_report, nfs_lattice_sieve_report, nfs_relation_filter_report, nfs_dependency_report, nfs_algebraic_product_report, nfs_qadic_prime_for_sqrt_report, nfs_qadic_initial_inverse_sqrt_report, nfs_qadic_newton_sqrt_report, nfs_qadic_sqrt_report, nfs_square_root_report, nfs_factor_report, nfs_factor)
-use std.core
-use std.math.nt
-use std.math.crypto.factorization.classical as classical
-use std.math.crypto.factorization.classical.gf2 as gf2
-use std.os.clock (ticks)
+;; - core.math.crypto.factorization
+;; - core.math.crypto
+module core.math.crypto.factorization.nfs(nfs_polynomial_report, snfs_shape_report, nfs_factor_base_report, nfs_trial_relation_report, nfs_line_relation_report, nfs_lattice_sieve_report, nfs_relation_filter_report, nfs_dependency_report, nfs_algebraic_product_report, nfs_qadic_prime_for_sqrt_report, nfs_qadic_initial_inverse_sqrt_report, nfs_qadic_newton_sqrt_report, nfs_qadic_sqrt_report, nfs_square_root_report, nfs_factor_report, nfs_factor)
+use core
+use core.math.nt
+use core.math.crypto.factorization.classical as classical
+use core.math.crypto.factorization.classical.gf2 as gf2
+use core.os.clock (ticks)
 
 fn _nfs_elapsed_ms(any t0) number { float(ticks() - t0) / 1000000.0 }
 
@@ -521,13 +521,15 @@ fn _nfs_xor_vec(list a, list b) list {
    mut i = 0
    def n = max(a.len, b.len)
    while i < n {
-      out = out.append((int(a.get(i, 0)) ^^ int(b.get(i, 0))) & 1)
+      out = out.append((int(a.get(i, 0)) ^ int(b.get(i, 0))) & 1)
       i += 1
    }
    out
 }
 
-fn _nfs_dependency_candidates(list basis, int width, int max_count=4096) list {
+;; This value comes from a dynamic dictionary lookup; keep its callable ABI
+;; tagged instead of claiming a typed-buffer representation at the boundary.
+fn _nfs_dependency_candidates(any basis, int width, int max_count=4096) list {
    if basis.len == 0 { return [] }
    if basis.len > 14 { return basis }
    mut out = []
@@ -546,7 +548,7 @@ fn _nfs_dependency_candidates(list basis, int width, int max_count=4096) list {
    out
 }
 
-fn _nfs_selected_relations(list relations, list dependency) list {
+fn _nfs_selected_relations(any relations, list dependency) list {
    mut out = []
    mut i = 0
    while i < dependency.len && i < relations.len {
@@ -899,7 +901,9 @@ fn nfs_algebraic_product_report(any n, list relations, any polynomial=nil, list 
    }
 }
 
-fn _nfs_try_square_root_candidate(any n, list relations, list dependency, list rbase, list abase) dict {
+;; Report dictionaries keep these collections dynamically tagged at lookup
+;; boundaries; only the dependency candidates are compiler-owned lists.
+fn _nfs_try_square_root_candidate(any n, any relations, list dependency, any rbase, any abase) dict {
    def nz = _nfs_z(n)
    def selected = _nfs_selected_relations(relations, dependency)
    def rexps = _nfs_sum_exponents(selected, "rational_exponents", rbase.len)

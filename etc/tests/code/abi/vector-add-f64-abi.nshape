@@ -1,0 +1,25 @@
+shape typed_vector_f64_add_abi {
+  family "runtime/language/types"
+  generator "embedded"
+  features ["ny", "test", "vector", "f64", "abi"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.math.vector as vec
+
+fn typed_vec3_add() bool {
+   def a = vec.Vector3(1.0, 2.0, 3.0)
+   def b = vec.Vector3(4.0, 5.0, 6.0)
+   def sum = a + b
+   def half = b / 2.0
+   def ratio = b / a
+   sum.x == 5.0 && sum.y == 7.0 && sum.z == 9.0 &&
+      vec.is_vec3(sum) && vec.type_name(sum) == "vec3" &&
+      half.x == 2.0 && half.y == 2.5 && half.z == 3.0 &&
+      ratio.x == 4.0 && ratio.y == 2.5 && ratio.z == 2.0
+}
+assert(typed_vec3_add(), "typed vec3 arithmetic preserves f64 components and identity")
+NY
+}

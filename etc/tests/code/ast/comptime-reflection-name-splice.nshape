@@ -1,0 +1,30 @@
+shape comptime_reflection_name_splice {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "comptime", "reflection", "codegen"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-only; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+layout ReflectionNameSpliceRecord {
+   i32 count
+   bool enabled
+}
+
+comptime template make_field_names(Layout) {
+   comptime fields(Layout) as field {
+      emit fn ${field.name}_reflection_name() str { return field.name }
+      emit fn ${field.type}_field_type() str { return field.type }
+   }
+}
+
+comptime emit make_field_names(ReflectionNameSpliceRecord)
+assert(count_reflection_name() == "count" &&
+       enabled_reflection_name() == "enabled",
+       "field reflection facts splice hygienically into generated names")
+assert(i32_field_type() == "i32" && bool_field_type() == "bool",
+       "reflected field type identifiers splice into generated names")
+NY
+}

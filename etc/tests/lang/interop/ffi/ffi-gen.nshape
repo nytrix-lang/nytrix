@@ -1,0 +1,68 @@
+shape ffi_gen_header_declarations {
+  family "interop/ffi"
+  generator "embedded"
+  features ["ny", "test", "ffi", "codegen", "bindings"]
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+;; Golden-text coverage for the Ny ffi.gen library: a bounded C header
+;; compiles into core.os.ffi declarations with byte-exact output, and the
+;; equivalent generated descriptor is exercised through core.os.ffi's
+;; layout helpers.  Constructs outside the supported subset must produce
+;; explicit `;; ffi.gen: unsupported:` markers, never silent omissions.
+use core
+use core.os.ffi (CType, CStruct, sizeof_struct, offsetof_struct, generate)
+
+def header = "/* probe header */
+#define FFI_GEN_UNUSED 1
+// a comment between declarations
+typedef struct Point {
+  long x;
+  double weight;
+} Point;
+
+extern double cos(double angle);
+extern long scale(long base, int factor);
+extern void fill(void);
+extern void reset();
+extern union Hidden { long a; };
+"
+
+def expected = "def Point = ffi.CStruct([[ffi.CType(\"i64\", 8), \"x\"], [ffi.CType(\"f64\", 8), \"weight\"]])\n" +
+   "extern {\n  fn cos(f64 angle) f64\n}\n" +
+   "extern {\n  fn scale(i64 base, i32 factor) i64\n}\n" +
+   "extern {\n  fn fill()\n}\n" +
+   "extern {\n  fn reset()\n}\n" +
+   ";; ffi.gen: unsupported: union layout\n"
+
+match generate("") {
+   ok(_) -> {
+      assert(false, "an empty header has no declarations")
+   }
+   err(reason) -> {
+      assert(reason == "header contained no declarations",
+             "empty input reports no declarations")
+   }
+}
+
+match generate(header) {
+   ok(text) -> {
+      assert(text == expected, "ffi.gen output matches the golden text")
+   }
+   err(reason) -> {
+      assert(false, "ffi.gen failed: " + reason)
+   }
+}
+
+;; The generated Point descriptor, built exactly as the emitted text
+;; constructs it, must have C layout through core.os.ffi.
+def point = CStruct([[CType("i64", 8), "x"], [CType("f64", 8), "weight"]])
+assert(offsetof_struct(point, "x") == 0, "generated x field sits at offset 0")
+assert(offsetof_struct(point, "weight") == 8,
+       "generated weight field respects alignment")
+assert(sizeof_struct(point) == 16, "generated Point is 16 bytes")
+
+print("FFI_GEN_OK")
+NY
+}

@@ -1,0 +1,24 @@
+shape whitespace_control_headers {
+  family "runtime/language/parser"
+  generator "embedded"
+  features ["ny", "lexer", "comments", "control-headers"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+mut total = 0
+for (mut i = 0 i < 3 i += 1) {
+   total += i
+}
+if (def seed = 10 seed == 10) {
+   total += seed
+}
+while (mut target = 15 total < target) {
+   total += 1
+}
+total += 0 ; a trailing semicolon comment
+;; A standalone semicolon comment after control headers.
+assert(total == 15,
+       "whitespace-separated control headers preserve semicolon comments")
+NY
+}

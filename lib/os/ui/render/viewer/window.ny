@@ -1,21 +1,21 @@
 ;; Keywords: viewer window layout viewport frame os ui render
 ;; Viewer window lifecycle and viewport sizing helpers.
 ;; References:
-;; - std.os.ui.window
-;; - std.os.ui.render.viewer.runtime
-module std.os.ui.render.viewer.window(
+;; - core.os.ui.window
+;; - core.os.ui.render.viewer.runtime
+module core.os.ui.render.viewer.window(
    FLAG_CELLS,
    rect_x, rect_y, rect_w, rect_h, monitor_name, monitor_row, desktop_bounds,
    extend_bounds, desktop_bounds_with_window, desktop_map, map_desktop_rect,
    metric, meter, cursor_scope, draw_window_flags, draw_dpi_info_text, draw_dpi_info, draw_monitor_info, draw_window_marker
 )
 
-use std.core
-use std.core.str (to_hex)
-use std.math (clamp, max, min)
-use std.os.ui.render
-use std.os.ui.window
-use std.os.ui.render.viewer.widgets
+use core
+use core.str (to_hex)
+use core.math (clamp, max, min)
+use core.os.ui.render
+use core.os.ui.window
+use core.os.ui.render.viewer.widgets
 
 def FLAG_CELLS = [["F fullscreen", "fullscreen"], ["B borderless", "borderless"], ["R fixed", "no_resize"], ["C no border", "no_border"], ["M maximize", "maximized"], ["T topmost", "floating"], ["H hide", "hidden"], ["N minimize", "minimized"], ["V vsync", "vsync"]]
 
@@ -244,5 +244,5 @@ fn draw_window_marker(any font_sm, list rect, str label="window") int {
    def bounds = desktop_bounds_with_window([{"rect": [0, 0, 10, 10]}], [-20, 2], [4, 8])
    def mapped = map_desktop_rect(desktop_map(bounds, 0.0, 0.0, 100.0, 80.0), [-20, 2, 4, 8])
    assert(int(bounds.get(0, 0)) == -20 && float(mapped.get(2, 0.0)) >= 1.0, "window desktop map helpers")
-   print("✓ std.os.ui.render.viewer.window self-test passed")
+   print("✓ core.os.ui.render.viewer.window self-test passed")
 }

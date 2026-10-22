@@ -1,0 +1,39 @@
+shape optcheck_cse_bigint_loop {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle optcheck cse bigint]
+  template ny-test-case
+  flags_matrix "-O0 --native-only; -O1 --native-only; -O2 --native-only; -O3 --native-only"
+  expect compile_and_run
+source ny <<'NY'
+use core
+use core.math.big
+
+fn atan_inv(int x) bigint {
+   def base = bigint_from_int(10)
+   def p50 = bigint_pow(base, bigint_from_int(50))
+   mut term = bigint_div(p50, bigint_from_int(x))
+   def zero = bigint_from_int(0)
+   mut acc = bigint_from_int(0)
+   mut k = 0
+   while bigint_cmp(term, zero) != 0 {
+      if k % 2 == 0 { acc = bigint_add(acc, term) }
+      else { acc = bigint_sub(acc, term) }
+      k += 1
+      term = bigint_mul(term, bigint_from_int(2 * k - 1))
+      term = bigint_div(term, bigint_from_int(2 * k + 1))
+      term = bigint_div(term, bigint_from_int(x * x))
+   }
+   acc
+}
+
+def a5 = atan_inv(5)
+def a239 = atan_inv(239)
+def pi = bigint_sub(bigint_mul(a5, bigint_from_int(16)),
+                    bigint_mul(a239, bigint_from_int(4)))
+def checksum = bigint_mod(bigint_div(pi, bigint_from_int(10000000000)),
+                           bigint_from_int(10000000000))
+assert(bigint_to_str(checksum) == "5028841971", "CSE preserves BigInt loop values")
+print("BigInt CSE parity passed")
+NY
+}

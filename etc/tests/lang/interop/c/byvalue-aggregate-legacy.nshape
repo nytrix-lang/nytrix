@@ -1,0 +1,21 @@
+shape byvalue_aggregate_abi {
+  family "interop/c"
+  generator "embedded"
+  features ["ny", "ffi", "aggregate", "byvalue", "abi"]
+  template ny-test-case
+  flags "--c-frontend=nytrix --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+#include "etc/tests/lang/interop/c/internal-byvalue-param-import.h" link "etc/tests/lang/interop/c/sum-pair.so"
+use core
+
+assert(sum_pair(make_sum_pair()) == 60,
+       "memory-class aggregate argument")
+assert(sum_mixed_pair(mixed_pair()) == 10,
+       "mixed integer/SSE aggregate argument")
+assert(sum_sse_pair(sse_pair()) == 4,
+       "two-SSE aggregate argument")
+assert(1 + 2 == 3, "execution sentinel")
+0
+NY
+}

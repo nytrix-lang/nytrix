@@ -3,12 +3,12 @@
 ;; Reference:
 ;; - https://www.cl.cam.ac.uk/ftp/papers/djw-rmn/djw-rmn-tea.html
 ;; References:
-;; - std.math.crypto.symmetric
-;; - std.math.crypto
-module std.math.crypto.symmetric.tea(tea_encrypt_block, tea_decrypt_block, tea_equivalent_keys)
-use std.core
-use std.math.bin (unpack_be32)
-use std.math.crypto.error
+;; - core.math.crypto.symmetric
+;; - core.math.crypto
+module core.math.crypto.symmetric.tea(tea_encrypt_block, tea_decrypt_block, tea_equivalent_keys)
+use core
+use core.math.bin (unpack_be32)
+use core.math.crypto.error
 
 fn _tea_u32(any x) int { int(x) & 0xffffffff }
 
@@ -32,8 +32,8 @@ fn tea_encrypt_block(list key, list block) list {
    mut i = 0
    while i < 32 {
       sum = _tea_u32(sum + delta)
-      v0 = _tea_u32(v0 + (((v1 << 4) + k[0]) ^^ (v1 + sum) ^^ ((v1 >> 5) + k[1])))
-      v1 = _tea_u32(v1 + (((v0 << 4) + k[2]) ^^ (v0 + sum) ^^ ((v0 >> 5) + k[3])))
+      v0 = _tea_u32(v0 + (((v1 << 4) + k[0]) ^ (v1 + sum) ^ ((v1 >> 5) + k[1])))
+      v1 = _tea_u32(v1 + (((v0 << 4) + k[2]) ^ (v0 + sum) ^ ((v0 >> 5) + k[3])))
       i += 1
    }
    _tea_word_bytes(v0) + _tea_word_bytes(v1)
@@ -48,8 +48,8 @@ fn tea_decrypt_block(list key, list block) list {
    mut sum = _tea_u32(delta * 32)
    mut i = 0
    while i < 32 {
-      v1 = _tea_u32(v1 - (((v0 << 4) + k[2]) ^^ (v0 + sum) ^^ ((v0 >> 5) + k[3])))
-      v0 = _tea_u32(v0 - (((v1 << 4) + k[0]) ^^ (v1 + sum) ^^ ((v1 >> 5) + k[1])))
+      v1 = _tea_u32(v1 - (((v0 << 4) + k[2]) ^ (v0 + sum) ^ ((v0 >> 5) + k[3])))
+      v0 = _tea_u32(v0 - (((v1 << 4) + k[0]) ^ (v1 + sum) ^ ((v1 >> 5) + k[1])))
       sum = _tea_u32(sum - delta)
       i += 1
    }
@@ -57,7 +57,7 @@ fn tea_decrypt_block(list key, list block) list {
 }
 
 fn _tea_xor_80000000(list word) list {
-   [word[0] ^^ 0x80, word[1], word[2], word[3]]
+   [word[0] ^ 0x80, word[1], word[2], word[3]]
 }
 
 fn tea_equivalent_keys(list key) list {

@@ -1,0 +1,50 @@
+shape legacy_derive_expansion {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "test", "derive", "legacy", "json"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os (file_write, file_remove, temp_dir, pid, run_capture)
+use core.str as str
+
+def ny = env("NYTRIX_NY_FULL_BIN")
+assert(is_str(ny) && ny.len > 0, "test runner exports the full compiler path")
+def source_path = temp_dir() + "/legacy-derive-" + to_str(pid()) + ".ny"
+def source = "layout record CompatRecord derive(default, load, store, zero, eq, hash, debug_str) {\n   i32 value\n   bool enabled\n}\n"
+assert(is_ok(file_write(source_path, source)), "write legacy derive source")
+def shared_core_bc = env("NYTRIX_TEST_CORE_BC")
+def result = if is_str(shared_core_bc) && shared_core_bc.len > 0 {
+  run_capture([ny, "--core-bc", shared_core_bc, "--expand-json", source_path],
+              [], nil, false)
+} else {
+  run_capture([ny, "--expand-json", source_path], [], nil, false)
+}
+assert(result.get("code", 127) == 0, "legacy derive expansion succeeds")
+def output = result.get("stdout", "")
+def marker = str.find(output, "ast-json")
+assert(marker >= 0, "expansion output contains the AST payload")
+def payload = str.strip(str.str_slice(output, marker + 8, output.len))
+assert(str.find(payload, "\"type\":\"block\"") >= 0,
+       "expanded AST contains a module")
+assert(str.find(payload,
+       "\"type\":\"layout\",\"name\":\"CompatRecord\"") >= 0 &&
+       str.find(payload,
+       "\"fields\":[{\"name\":\"value\",\"type\":\"i32\"") >= 0 &&
+       str.find(payload, "{\"name\":\"enabled\",\"type\":\"bool\"") >= 0,
+       "legacy derive expansion preserves the record and its field types")
+assert(str.find(payload, "\"name\":\"CompatRecord\"") >= 0 &&
+       str.find(payload, "\"name\":\"CompatRecord_load_value\"") >= 0 &&
+       str.find(payload, "\"name\":\"CompatRecord_load_enabled\"") >= 0 &&
+       str.find(payload, "\"name\":\"CompatRecord_store\"") >= 0 &&
+       str.find(payload, "\"name\":\"CompatRecord_zero\"") >= 0 &&
+       str.find(payload, "\"name\":\"CompatRecord_eq\"") >= 0 &&
+       str.find(payload, "\"name\":\"CompatRecord_hash\"") >= 0 &&
+       str.find(payload, "\"name\":\"CompatRecord_debug_str\"") >= 0,
+       "legacy derive expansion emits constructor, accessors, and derived operations")
+assert(is_ok(file_remove(source_path)), "remove temporary derive source")
+print("LEGACY_DERIVE_EXPANSION_OK")
+NY
+}

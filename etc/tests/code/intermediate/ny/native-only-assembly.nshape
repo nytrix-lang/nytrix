@@ -1,0 +1,26 @@
+shape native_only_assembly_emit {
+  family "runtime-native"
+  generator "native"
+  features [native nyir asm x86_64 regression]
+  template ny-test-case
+  flags "--native-only -emit-only --emit-asm=/tmp/nytrix-native-only-assembly.s --native-backend=x86_64"
+  expect compile_and_run
+  ci windows-skip
+  source ny <<'NY'
+fn twice(i64 x) i64 { x * 2 }
+twice(21)
+NY
+}
+
+shape native_only_assembly_write_failure {
+  family "runtime-native"
+  generator "native"
+  features [native nyir asm x86_64 regression]
+  template ny-test-case
+  flags "--native-only -emit-only --emit-asm=/dev/null/nytrix-assembly.s --native-backend=x86_64"
+  expect compile_fail
+  ci windows-skip
+  source ny <<'NY'
+42
+NY
+}

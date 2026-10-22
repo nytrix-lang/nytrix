@@ -4,13 +4,13 @@
 ;; - https://cacr.uwaterloo.ca/hac/about/chap1.pdf
 ;; - https://cacr.uwaterloo.ca/hac/about/chap12.pdf
 ;; References:
-;; - std.math.crypto.cipher
-;; - std.math.crypto.analysis
-module std.math.crypto.cipher.knapsack(knapsack_solve, knapsack_density, knapsack_lo, knapsack_cjloss, knapsack_mitm_table, knapsack_mitm_right_table, knapsack_mitm_solve_prepared, knapsack_mitm_solve_many_prepared, knapsack_mitm_solve)
-use std.core
-use std.math.nt
-use std.math.scalar (ceil, sqrt)
-use std.math.crypto.lattice.lll
+;; - core.math.crypto.cipher
+;; - core.math.crypto.analysis
+module core.math.crypto.cipher.knapsack(knapsack_solve, knapsack_density, knapsack_lo, knapsack_cjloss, knapsack_mitm_table, knapsack_mitm_right_table, knapsack_mitm_solve_prepared, knapsack_mitm_solve_many_prepared, knapsack_mitm_solve)
+use core
+use core.math.nt
+use core.math.scalar (ceil, sqrt)
+use core.math.crypto.lattice.lll
 
 fn vec_zero(int n) list {
    "Internal: Create a zero vector of length n with bigint elements."

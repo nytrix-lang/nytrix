@@ -1,0 +1,44 @@
+shape fmt_cli_parity {
+  generator "embedded"
+  family "probe/tools/fmt"
+  features ["formatter", "cli-errors", "c-parity"]
+  template ny-test-case
+  flags "--native-only"
+  timeout 120
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.subprocess (run_capture)
+
+def ny = env("NYTRIX_NY_FULL_BIN")
+def fmt = env("NYTRIX_TEST_FMT_BIN")
+assert(is_str(ny) && ny.len > 0, "test runner exports the full compiler")
+assert(is_str(fmt) && fmt.len > 0, "CTest provides standalone formatter path")
+
+fn reject_case(str name, str option, str value="") {
+   mut c_argv = [fmt]
+   mut ny_argv = [ny, "fmt"]
+   c_argv = c_argv.append(option)
+   ny_argv = ny_argv.append(option)
+   if value.len > 0 {
+      c_argv = c_argv.append(value)
+      ny_argv = ny_argv.append(value)
+   }
+   def c_result = run_capture(c_argv, [], nil, false)
+   def ny_result = run_capture(ny_argv, [], nil, false)
+   assert(c_result.get("code", 127) == 2 &&
+          ny_result.get("code", 127) == 2,
+          "formatter parser must reject " + name + " with status 2\n" +
+          "C: " + c_result.get("stdout", "") + "\nNy: " +
+          ny_result.get("stdout", ""))
+}
+
+reject_case("unknown option", "--not-a-formatter-option")
+reject_case("invalid color", "--color=violet")
+reject_case("missing color value", "--color")
+reject_case("missing audit mode", "--audit-mode")
+reject_case("missing duplicate threshold", "--dupes-min")
+reject_case("conversion missing required options", "--conv")
+print("FMT_CLI_PARITY_OK")
+NY
+}

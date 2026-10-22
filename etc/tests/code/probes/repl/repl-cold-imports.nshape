@@ -1,0 +1,62 @@
+shape test_repl_cold_imports {
+  family "probe"
+  generator "embedded"
+  features ["ny", "test", "stdlib", "repl", "cold-imports"]
+  template ny-test-case
+  timeout 240
+  expect compile_and_run
+  source ny <<'NY'
+use core.os.subprocess (run_capture)
+use core.str as str
+def ny = env("NYTRIX_NY_FULL_BIN")
+def cmake = env("NYTRIX_CMAKE_COMMAND")
+
+def io_path = temp_dir() + "/repl-file-roundtrip-" + to_str(pid())
+def script =
+   "assert(find(\"a\", \"a\") == 0, \"bare find import\")\n" +
+   "print(\"REPL-BARE-FIND-OK\")\n" +
+   "use core\n" +
+   "assert(find(\"a\", \"a\") == 0, \"core root import of find\")\n" +
+   "print(\"REPL-ROOT-FIND-OK\")\n" +
+   "use core.str\n" +
+   "assert(find(\"a\", \"a\") == 0, \"explicit import of find\")\n" +
+   "print(\"REPL-EXPLICIT-FIND-OK\")\n" +
+   "use core.error\n" +
+   "def e = exception(ERR_DIV_ZERO, \"division by zero\")\n" +
+   "assert_eq(error_kind(e), ERR_DIV_ZERO, \"error kind\")\n" +
+   "assert_eq(error_message(e), \"division by zero\", \"error message\")\n" +
+   "assert(is_error(e, ERR_DIV_ZERO), \"error match\")\n" +
+   "print(\"REPL-STRUCTURED-ERRORS-OK\")\n" +
+   "def r = ok(42)\ndef missing = err(\"missing\")\n" +
+   "assert(is_ok(r) && is_err(missing), \"result tags\")\n" +
+   "assert_eq(unwrap(r), 42, \"result unwrap\")\n" +
+   "print(\"REPL-RESULT-VALUES-OK\")\n" +
+   "assert(to_str([1, 2, 3].map(fn(x) { x * 2 })) == \"[2, 4, 6]\", \"list callback\")\n" +
+   "print(\"REPL-COLLECTION-CALLBACK-OK\")\n" +
+   "use core.os\n" +
+   "assert(is_ok(file_write(\"" + io_path + "\", \"ny\")), \"file write\")\n" +
+   "def data = file_read(\"" + io_path + "\")\n" +
+   "assert(is_ok(data) && unwrap(data) == \"ny\", \"file read\")\n" +
+   "print(\"REPL-FILE-IO-OK\")\n"
+def result = run_capture(
+   [cmake, "-E", "env", "NYTRIX_STD_CACHE=0",
+    "NYTRIX_STD_BC_CACHE_AUTO=0", ny, "--repl", "--no-progress"],
+   [], script, false)
+def output = result.get("stdout", "")
+assert(result.get("code", 127) == 0 &&
+       str.find(output, "REPL-BARE-FIND-OK") >= 0 &&
+       str.find(output, "REPL-ROOT-FIND-OK") >= 0 &&
+       str.find(output, "REPL-EXPLICIT-FIND-OK") >= 0 &&
+       str.find(output, "REPL-STRUCTURED-ERRORS-OK") >= 0 &&
+       str.find(output, "REPL-RESULT-VALUES-OK") >= 0 &&
+       str.find(output, "REPL-COLLECTION-CALLBACK-OK") >= 0 &&
+       str.find(output, "REPL-FILE-IO-OK") >= 0 &&
+       str.find(output, "undefined symbol") < 0 &&
+       str.find(output, "failed during compilation") < 0 &&
+       str.find(output, "Segmentation fault") < 0 &&
+       str.find(output, "panic") < 0,
+       "cold REPL imports failed: " + output)
+print("REPL-COLD-IMPORTS-OK")
+NY
+}
+}

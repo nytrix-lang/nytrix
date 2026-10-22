@@ -10,11 +10,11 @@
 #include "base/common.h"
 #include "base/curl.h"
 #include <errno.h>
+#include <limits.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <limits.h>
 #include <sys/stat.h>
 #ifdef _WIN32
 #include <direct.h>
@@ -38,7 +38,8 @@
 #include <linux/limits.h>
 #endif
 
-static const char *ny_first_nonempty_env(const char *const *names, size_t name_count) {
+static const char *ny_first_nonempty_env(const char *const *names,
+                                         size_t name_count) {
   if (!names)
     return NULL;
   for (size_t i = 0; i < name_count; ++i) {
@@ -48,6 +49,67 @@ static const char *ny_first_nonempty_env(const char *const *names, size_t name_c
   }
   return NULL;
 }
+static bool ny_path_separator(char c) {
+#ifdef _WIN32
+  return c == '/' || c == '\\';
+#else
+  return c == '/';
+#endif
+}
+
+static bool ny_mkdir_one(const char *path, unsigned int mode) {
+  struct stat st;
+  if (stat(path, &st) == 0)
+    return S_ISDIR(st.st_mode);
+#ifdef _WIN32
+  int rc = _mkdir(path);
+#else
+  int rc = mkdir(path, (mode_t)mode);
+#endif
+  if (rc != 0 && errno != EEXIST)
+    return false;
+  return stat(path, &st) == 0 && S_ISDIR(st.st_mode);
+}
+
+bool ny_mkdir_p_mode(const char *path, unsigned int mode) {
+  if (!path || !*path)
+    return false;
+  size_t len = strlen(path);
+  char *tmp = malloc(len + 1);
+  if (!tmp)
+    return false;
+  memcpy(tmp, path, len + 1);
+
+  size_t root_len = 0;
+  if (ny_path_separator(tmp[0]))
+    root_len = 1;
+#ifdef _WIN32
+  if (len >= 3 && tmp[1] == ':' && (tmp[2] == '/' || tmp[2] == '\\'))
+    root_len = 3;
+#endif
+  while (len > root_len && ny_path_separator(tmp[len - 1]))
+    tmp[--len] = '\0';
+
+  size_t start = root_len ? root_len : 1;
+  for (size_t i = start; i < len; ++i) {
+    if (!ny_path_separator(tmp[i]))
+      continue;
+    char sep = tmp[i];
+    tmp[i] = '\0';
+    bool ok = !(i == 2 && root_len == 3) && ny_mkdir_one(tmp, mode);
+    tmp[i] = sep;
+    if (!ok) {
+      free(tmp);
+      return false;
+    }
+  }
+  bool ok = ny_mkdir_one(tmp, mode);
+  free(tmp);
+  return ok;
+}
+
+bool ny_mkdir_p(const char *path) { return ny_mkdir_p_mode(path, 0755); }
+
 static const char *ny_cache_path(char *buf, size_t cap, const char *path) {
   if (!buf || cap == 0 || !path)
     return NULL;
@@ -72,14 +134,16 @@ bool ny_compiler_asserts_enabled(void) {
   if (env && *env) {
     cached = ny_env_enabled("NYTRIX_COMPILER_ASSERTS") ? 1 : 0;
   } else {
-    /* Always-on by default unless NYTRIX_NO_COMPILER_ASSERTS is set */
+    /*
+     * Always-on by default unless NYTRIX_NO_COMPILER_ASSERTS is set
+     */
     cached = ny_env_enabled("NYTRIX_NO_COMPILER_ASSERTS") ? 0 : 1;
   }
   return cached != 0;
 }
 
-void ny_compiler_assert_fail(const char *file, int line, const char *func, const char *cond,
-                             const char *fmt, ...) {
+void ny_compiler_assert_fail(const char *file, int line, const char *func,
+                             const char *cond, const char *fmt, ...) {
   fprintf(stderr, "%sInternal compiler assertion failed:%s %s:%d in %s\n",
           clr(NY_CLR_RED), clr(NY_CLR_RESET), file ? file : "<unknown>", line,
           func ? func : "<unknown>");
@@ -93,7 +157,8 @@ void ny_compiler_assert_fail(const char *file, int line, const char *func, const
     va_end(ap);
     fputc('\n', stderr);
   }
-  fprintf(stderr, "  hint: rerun with --dump-on-error or keep NYTRIX_COMPILER_ASSERTS=1 under stress\n");
+  fprintf(stderr, "  hint: rerun with --dump-on-error or keep "
+                  "NYTRIX_COMPILER_ASSERTS=1 under stress\n");
   fflush(stderr);
   if (getenv("NYTRIX_COMPILER_ASSERT_ABORT") &&
       strcmp(getenv("NYTRIX_COMPILER_ASSERT_ABORT"), "0") != 0) {
@@ -106,8 +171,8 @@ void ny_compiler_invariant_fail(const char *file, int line, const char *func,
                                 const char *invariant_name,
                                 const char *src_file, int src_line, int src_col,
                                 const char *module_or_fn,
-                                const char *state_detail,
-                                const char *fmt, ...) {
+                                const char *state_detail, const char *fmt,
+                                ...) {
   char detail[512] = {0};
   if (fmt && *fmt) {
     va_list ap;
@@ -119,15 +184,16 @@ void ny_compiler_invariant_fail(const char *file, int line, const char *func,
           clr(NY_CLR_RED), clr(NY_CLR_RESET),
           invariant_name ? invariant_name : "unspecified invariant");
   if (src_file && src_line > 0)
-    fprintf(stderr, "  source: %s:%d:%d\n", src_file, src_line, src_col > 0 ? src_col : 1);
+    fprintf(stderr, "  source: %s:%d:%d\n", src_file, src_line,
+            src_col > 0 ? src_col : 1);
   if (module_or_fn && *module_or_fn)
     fprintf(stderr, "  context: %s\n", module_or_fn);
   if (state_detail && *state_detail)
     fprintf(stderr, "  state: %s\n", state_detail);
   if (detail[0])
     fprintf(stderr, "  detail: %s\n", detail);
-  fprintf(stderr, "  location: %s:%d in %s\n",
-          file ? file : "<unknown>", line, func ? func : "<unknown>");
+  fprintf(stderr, "  location: %s:%d in %s\n", file ? file : "<unknown>", line,
+          func ? func : "<unknown>");
   fflush(stderr);
   if (getenv("NYTRIX_COMPILER_ASSERT_ABORT") &&
       strcmp(getenv("NYTRIX_COMPILER_ASSERT_ABORT"), "0") != 0) {
@@ -136,7 +202,8 @@ void ny_compiler_invariant_fail(const char *file, int line, const char *func,
   exit(1);
 }
 
-bool ny_extract_line(const char *src, int line, const char **out_start, size_t *out_len) {
+bool ny_extract_line(const char *src, int line, const char **out_start,
+                     size_t *out_len) {
   if (!src || line <= 0 || !out_start || !out_len)
     return false;
   const char *cur = src;
@@ -217,7 +284,8 @@ typedef struct {
   size_t cap;
 } ny_curl_buf_t;
 
-static size_t ny_curl_write_cb(void *ptr, size_t size, size_t nmemb, void *userdata) {
+static size_t ny_curl_write_cb(void *ptr, size_t size, size_t nmemb,
+                               void *userdata) {
   size_t total = 0;
   if (!ny_size_mul_ok(size, nmemb, &total))
     return 0;
@@ -353,6 +421,120 @@ int ny_copy_file(const char *src, const char *dst) {
   return 0;
 }
 
+static uint32_t ny_sha256_rotr32(uint32_t value, unsigned count) {
+  return (value >> count) | (value << (32u - count));
+}
+
+static void ny_sha256_block(uint32_t state[8], const unsigned char block[64]) {
+  static const uint32_t k[64] = {
+      0x428a2f98u, 0x71374491u, 0xb5c0fbcfu, 0xe9b5dba5u, 0x3956c25bu,
+      0x59f111f1u, 0x923f82a4u, 0xab1c5ed5u, 0xd807aa98u, 0x12835b01u,
+      0x243185beu, 0x550c7dc3u, 0x72be5d74u, 0x80deb1feu, 0x9bdc06a7u,
+      0xc19bf174u, 0xe49b69c1u, 0xefbe4786u, 0x0fc19dc6u, 0x240ca1ccu,
+      0x2de92c6fu, 0x4a7484aau, 0x5cb0a9dcu, 0x76f988dau, 0x983e5152u,
+      0xa831c66du, 0xb00327c8u, 0xbf597fc7u, 0xc6e00bf3u, 0xd5a79147u,
+      0x06ca6351u, 0x14292967u, 0x27b70a85u, 0x2e1b2138u, 0x4d2c6dfcu,
+      0x53380d13u, 0x650a7354u, 0x766a0abbu, 0x81c2c92eu, 0x92722c85u,
+      0xa2bfe8a1u, 0xa81a664bu, 0xc24b8b70u, 0xc76c51a3u, 0xd192e819u,
+      0xd6990624u, 0xf40e3585u, 0x106aa070u, 0x19a4c116u, 0x1e376c08u,
+      0x2748774cu, 0x34b0bcb5u, 0x391c0cb3u, 0x4ed8aa4au, 0x5b9cca4fu,
+      0x682e6ff3u, 0x748f82eeu, 0x78a5636fu, 0x84c87814u, 0x8cc70208u,
+      0x90befffau, 0xa4506cebu, 0xbef9a3f7u, 0xc67178f2u};
+  uint32_t words[64];
+  for (size_t i = 0; i < 16; ++i) {
+    size_t j = i * 4;
+    words[i] = ((uint32_t)block[j] << 24) | ((uint32_t)block[j + 1] << 16) |
+               ((uint32_t)block[j + 2] << 8) | (uint32_t)block[j + 3];
+  }
+  for (size_t i = 16; i < 64; ++i) {
+    uint32_t x = words[i - 15];
+    uint32_t y = words[i - 2];
+    uint32_t s0 = ny_sha256_rotr32(x, 7) ^ ny_sha256_rotr32(x, 18) ^ (x >> 3);
+    uint32_t s1 = ny_sha256_rotr32(y, 17) ^ ny_sha256_rotr32(y, 19) ^ (y >> 10);
+    words[i] = words[i - 16] + s0 + words[i - 7] + s1;
+  }
+  uint32_t a = state[0], b = state[1], c = state[2], d = state[3], e = state[4],
+           f = state[5], g = state[6], h = state[7];
+  for (size_t i = 0; i < 64; ++i) {
+    uint32_t s1 = ny_sha256_rotr32(e, 6) ^ ny_sha256_rotr32(e, 11) ^
+                  ny_sha256_rotr32(e, 25);
+    uint32_t choose = (e & f) ^ (~e & g);
+    uint32_t t1 = h + s1 + choose + k[i] + words[i];
+    uint32_t s0 = ny_sha256_rotr32(a, 2) ^ ny_sha256_rotr32(a, 13) ^
+                  ny_sha256_rotr32(a, 22);
+    uint32_t majority = (a & b) ^ (a & c) ^ (b & c);
+    uint32_t t2 = s0 + majority;
+    h = g;
+    g = f;
+    f = e;
+    e = d + t1;
+    d = c;
+    c = b;
+    b = a;
+    a = t1 + t2;
+  }
+  state[0] += a;
+  state[1] += b;
+  state[2] += c;
+  state[3] += d;
+  state[4] += e;
+  state[5] += f;
+  state[6] += g;
+  state[7] += h;
+}
+
+bool ny_sha256_file_hex(const char *path, char out[65]) {
+  if (!path || !out)
+    return false;
+  FILE *file = fopen(path, "rb");
+  if (!file)
+    return false;
+  uint32_t state[8] = {0x6a09e667u, 0xbb67ae85u, 0x3c6ef372u, 0xa54ff53au,
+                       0x510e527fu, 0x9b05688cu, 0x1f83d9abu, 0x5be0cd19u};
+  unsigned char block[64];
+  uint64_t total_bytes = 0;
+  size_t used = 0;
+  for (;;) {
+    size_t count = fread(block + used, 1, sizeof(block) - used, file);
+    total_bytes += count;
+    used += count;
+    if (used == sizeof(block)) {
+      ny_sha256_block(state, block);
+      used = 0;
+    }
+    if (count == 0) {
+      if (ferror(file)) {
+        fclose(file);
+        return false;
+      }
+      break;
+    }
+  }
+  fclose(file);
+  uint64_t total_bits = total_bytes * UINT64_C(8);
+  block[used++] = 0x80;
+  if (used > 56) {
+    memset(block + used, 0, sizeof(block) - used);
+    ny_sha256_block(state, block);
+    used = 0;
+  }
+  memset(block + used, 0, 56 - used);
+  for (size_t i = 0; i < 8; ++i)
+    block[63 - i] = (unsigned char)(total_bits >> (i * 8));
+  ny_sha256_block(state, block);
+
+  static const char hex[] = "0123456789abcdef";
+  for (size_t i = 0; i < 8; ++i) {
+    for (size_t j = 0; j < 4; ++j) {
+      unsigned char byte = (unsigned char)(state[i] >> (24 - j * 8));
+      out[(i * 4 + j) * 2] = hex[byte >> 4];
+      out[(i * 4 + j) * 2 + 1] = hex[byte & 0x0f];
+    }
+  }
+  out[64] = '\0';
+  return true;
+}
+
 void ny_write_text_file(const char *path, const char *contents) {
   if (!path || !contents)
     return;
@@ -361,7 +543,7 @@ void ny_write_text_file(const char *path, const char *contents) {
 
 static bool nytrix_has_sources(const char *root) {
   char probe[8192];
-  snprintf(probe, sizeof(probe), "%s/src/code/runtime/runtime.h", root);
+  snprintf(probe, sizeof(probe), "%s/src/code/lang/runtime/runtime.h", root);
   return ny_access(probe, R_OK) == 0;
 }
 
@@ -443,6 +625,13 @@ const char *ny_src_root(void) {
     }
     {
       char tmp[PATH_MAX];
+#ifdef NYTRIX_INSTALL_DATADIR
+      snprintf(tmp, sizeof(tmp), "%s/../%s/nytrix", exe_dir,
+               NYTRIX_INSTALL_DATADIR);
+      if (nytrix_has_sources(tmp)) {
+        return ny_cache_path(buf, sizeof(buf), tmp);
+      }
+#endif
       snprintf(tmp, sizeof(tmp), "%s/../share/nytrix", exe_dir);
       if (nytrix_has_sources(tmp)) {
         return ny_cache_path(buf, sizeof(buf), tmp);
@@ -455,9 +644,11 @@ const char *ny_src_root(void) {
   }
 #ifndef _WIN32
   const char *install_paths[] = {"/usr/share/nytrix", "/usr/local/share/nytrix",
-                                 "/opt/nytrix/share/nytrix", "/opt/nytrix/share",
+                                 "/opt/nytrix/share/nytrix",
+                                 "/opt/nytrix/share",
                                  "/opt/homebrew/share/nytrix"};
-  for (size_t i = 0; i < sizeof(install_paths) / sizeof(install_paths[0]); i++) {
+  for (size_t i = 0; i < sizeof(install_paths) / sizeof(install_paths[0]);
+       i++) {
     if (!nytrix_has_sources(install_paths[i]))
       continue;
     return ny_cache_path(buf, sizeof(buf), install_paths[i]);
@@ -581,7 +772,7 @@ char *ny_ensure_shared_lib(const char *path) {
   if (strcmp(dot, ".so") != 0 && strcmp(dot, ".dll") != 0 &&
       strcmp(dot, ".dylib") != 0)
     return ny_strdup(path);
-  strcpy(dot, ".c");
+  memcpy(dot, ".c", sizeof(".c"));
   if (ny_access(src, R_OK) != 0)
     return ny_strdup(path);
 
@@ -611,16 +802,11 @@ char *ny_ensure_shared_lib(const char *path) {
     if (!cc || !*cc)
       cc = "cc";
     char *argv[] = {
-        (char *)cc,
-        (char *)"-shared",
+        (char *)cc,      (char *)"-shared",
 #ifndef _WIN32
         (char *)"-fPIC",
 #endif
-        (char *)"-O2",
-        (char *)"-o",
-        out,
-        src,
-        NULL,
+        (char *)"-O2",   (char *)"-o",      out, src, NULL,
     };
     if (ny_shlib_spawn(argv) != 0 || ny_access(out, R_OK) != 0) {
       /*
@@ -680,7 +866,8 @@ int ny_env_int_range(const char *name, int fallback, int minv, int maxv) {
   return v;
 }
 
-bool ny_str_list_append(char ***list, size_t *len, size_t *cap, const char *str) {
+bool ny_str_list_append(char ***list, size_t *len, size_t *cap,
+                        const char *str) {
   if (!list || !len || !cap)
     return false;
   if (*len == *cap) {
@@ -946,7 +1133,8 @@ bool ny_log_should_emit(const char *fmt) {
   return true;
 }
 
-void ny_print_snippet(const char *src, int line, int col, int len, const char *color) {
+void ny_print_snippet(const char *src, int line, int col, int len,
+                      const char *color) {
   if (!src || line <= 0 || col <= 0)
     return;
   const char *line_start = NULL;
@@ -990,8 +1178,8 @@ void ny_print_snippet(const char *src, int line, int col, int len, const char *c
   const char *gray = clr(NY_CLR_GRAY);
   const char *reset = clr(NY_CLR_RESET);
   const char *mark = clr(color);
-  fprintf(stderr, "  %s%*d%s | %s%s%s\n", gray, width, line, reset, prefix ? "..." : "", buf,
-          suffix ? "..." : "");
+  fprintf(stderr, "  %s%*d%s | %s%s%s\n", gray, width, line, reset,
+          prefix ? "..." : "", buf, suffix ? "..." : "");
   size_t caret_pad = caret_col - start + (prefix ? 3 : 0);
   fprintf(stderr, "  %s%*s%s | ", gray, width, "", reset);
   for (size_t i = 0; i < caret_pad; i++)
@@ -1012,7 +1200,7 @@ void ny_complexity_note(const char *file, int line, const char *func,
     g_complexity_enabled = ny_env_enabled("NYTRIX_COMPLEXITY_REPORT");
   if (!g_complexity_enabled || !verbose_enabled)
     return;
-  fprintf(stderr, "[complexity] %s:%d in %s: [%s] %s\n",
-          file ? file : "?", line, func ? func : "?",
-          category ? category : "misc", detail ? detail : "");
+  fprintf(stderr, "[complexity] %s:%d in %s: [%s] %s\n", file ? file : "?",
+          line, func ? func : "?", category ? category : "misc",
+          detail ? detail : "");
 }

@@ -1,12 +1,12 @@
 ;; Keywords: engine loading progress assets async os ui render viewer scene
 ;; Loading state and progress UI helpers for model and asset changes.
 ;; References:
-;; - std.os.ui.assets.batch
-;; - std.os.ui.render.scene
-module std.os.ui.render.viewer.engine.loading(draw_card, draw_startup_card)
-use std.core
-use std.math
-use std.os.ui.render as gfx
+;; - core.os.ui.assets.batch
+;; - core.os.ui.render.scene
+module core.os.ui.render.viewer.engine.loading(draw_card, draw_startup_card)
+use core
+use core.math
+use core.os.ui.render as gfx
 
 fn _panel_rect(f64 w, f64 h, f64 min_w, f64 max_w, f64 frac, f64 panel_h) list {
    def pw = min(max_w, max(min_w, w * frac))

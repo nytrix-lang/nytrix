@@ -1,8 +1,9 @@
 ;; Keywords: factorization classical helpers dict report
-;; References: std.math.crypto.factorization.classical
-module std.math.crypto.factorization.classical.misc(_append_used_defaults, _dict_add_int, _dict_add_int_fields, _dict_int, _dict_max_int, _dict_max_int_fields, _dict_with, _elapsed_ms, _fields_extend, _finish_factor_status, _finish_report, _finish_report_with, _is_nontrivial_factor, _list_concat, _report, _report_with, _set_factor_status, _set_fields, _z)
-use std.math.nt
-use std.os (ticks)
+;; Provides shared factorization status, timing, and report helpers.
+;; References: core.math.crypto.factorization.classical
+module core.math.crypto.factorization.classical.misc(_append_used_defaults, _dict_add_int, _dict_add_int_fields, _dict_int, _dict_max_int, _dict_max_int_fields, _dict_with, _elapsed_ms, _fields_extend, _finish_factor_status, _finish_report, _finish_report_with, _is_nontrivial_factor, _list_concat, _report, _report_with, _set_factor_status, _set_fields, _z)
+use core.math.nt
+use core.os (ticks)
 
 fn _z(any x) any { is_bigint(x) ? x : Z(x) }
 

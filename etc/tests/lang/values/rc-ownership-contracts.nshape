@@ -1,0 +1,26 @@
+shape test_rc_ownership_contracts {
+  family "runtime/values"
+  generator "embedded"
+  features [ny ownership rc dynamic-abi]
+  template ny-test-case
+  flags_matrix "--native --run --heap=rc; --native-backend=llvm --jit --jit-engine=mcjit --heap=rc; --native-backend=llvm --jit --jit-engine=orc --heap=rc; --native-only --heap=rc"
+  expect compile_and_run
+  timeout 25
+  source ny <<'NY'
+use core
+
+def owner = malloc(8)
+def before = rc_count(owner)
+def retained = retain(owner)
+assert_eq(retained, owner, "retain returns the same pointer")
+def after_retain = rc_count(owner)
+assert(after_retain > before, "retain adds an owned reference")
+assert_eq(release(retained), 0, "release returns its sentinel")
+assert_eq(rc_count(owner), before, "release consumes the retained reference")
+assert(__retain_owned(nil) == nil, "retain borrows and accepts nil")
+assert(__release_owned(nil) == nil, "release consumes and accepts nil")
+assert(__drop_owned(nil) == nil, "drop consumes and accepts nil")
+assert(__drop_owned_slot(0) == nil, "drop-owned-slot borrows a null slot address")
+free(owner)
+NY
+}

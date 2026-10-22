@@ -1,0 +1,15 @@
+shape comptime_generated_cache_attribute_conflict {
+  family "compiler-errors/comptime"
+  generator "error"
+  features ["error", "comptime", "attributes", "generated-code", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "attribute '@cache' is not supported with '@thread'"
+  source ny <<'NY'
+comptime template cached_thread(name) {
+   @cache @thread fn ${name}() int { return 1 }
+}
+
+comptime emit cached_thread(ident("generated_cached_thread"))
+NY
+}

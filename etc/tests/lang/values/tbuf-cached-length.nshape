@@ -1,0 +1,46 @@
+shape tbuf_cached_length_provenance {
+  family "runtime/values"
+  generator "embedded"
+  features ["ny", "test", "native", "tbuf", "length", "growth", "provenance"]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit -O0; --native-backend=llvm --jit --jit-engine=mcjit -O3; --native-backend=llvm --jit --jit-engine=orc -O3"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+extern "" {
+  fn rt_tbuf_new_raw(int count, int width) ptr
+  fn rt_tbuf_append_i64_raw(ptr buffer, int value) ptr
+  fn rt_tbuf_len_raw(ptr buffer) int
+}
+
+@noinline
+fn length(ptr buffer) int { rt_tbuf_len_raw(buffer) }
+
+def bytes = rt_tbuf_new_raw(17, 1)
+def words = rt_tbuf_new_raw(23, 4)
+def floats = rt_tbuf_new_raw(31, 8)
+def descriptors = rt_tbuf_new_raw(5, 24)
+assert(length(bytes) == 17, "byte buffer length")
+assert(length(words) == 23, "word buffer length")
+assert(length(floats) == 31, "elem-8 buffer length")
+assert(length(descriptors) == 5, "descriptor buffer length")
+
+mut buffer = rt_tbuf_new_raw(0, 8)
+def original = buffer
+assert(length(buffer) == 0, "empty buffer length")
+mut i = 0
+while i < 4097 {
+  buffer = rt_tbuf_append_i64_raw(buffer, i)
+  assert(length(buffer) == i + 1, "length after append and growth")
+  i += 1
+}
+assert(length(original) == 0, "growth preserves the original empty alias")
+assert(length(bytes) == 17, "cache replacement retains other lengths")
+
+def unrelated = malloc_raw(64)
+assert(length(unrelated) == 0, "unregistered raw allocation is not a buffer")
+free_raw(unrelated)
+print("ok cached tbuf length")
+NY
+}

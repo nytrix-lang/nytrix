@@ -1,8 +1,8 @@
 ;; Keywords: decompiler pseudocode structure braces switches formatting
 ;; Structural normalization for rendered Ny pseudocode blocks and delimiters.
-module std.os.rev.decomp.structure *
-use std.core
-use std.core.str as str
+module core.os.rev.decomp.structure *
+use core
+use core.str as str
 
 fn _clean_next_nonblank_index(list lines, int start) int {
    mut i = start
@@ -142,5 +142,5 @@ fn _clean_drop_repeated_switches(str text) str {
    assert(_clean_structure_report("if ok{\n}\n").get("ok", false), "balanced report")
    assert(_clean_balance_trailing_braces("if ok{\n") == "if ok{\n}\n", "balance trailing brace")
    assert(_clean_drop_repeated_switches("switch(x){\n}\nswitch(x){\n}\n") == "switch(x){\n}\n", "deduplicate switch")
-   print("✓ std.os.rev.decomp.structure self-test passed")
+   print("✓ core.os.rev.decomp.structure self-test passed")
 }

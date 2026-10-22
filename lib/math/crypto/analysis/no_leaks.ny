@@ -1,10 +1,10 @@
 ;; Keywords: analysis no-leaks constraints math crypto
 ;; Cryptanalysis scoring and recovery routines for leak-free candidate filtering and byte recovery.
 ;; References:
-;; - std.math.crypto.analysis
-;; - std.math.crypto
-module std.math.crypto.analysis.no_leaks(no_leaks_candidates, no_leaks_candidate_sets, no_leaks_apply_sample, no_leaks_recover_bytes, no_leaks_recover_text, no_leaks_summary)
-use std.core
+;; - core.math.crypto.analysis
+;; - core.math.crypto
+module core.math.crypto.analysis.no_leaks(no_leaks_candidates, no_leaks_candidate_sets, no_leaks_apply_sample, no_leaks_recover_bytes, no_leaks_recover_text, no_leaks_summary)
+use core
 
 fn _no_leaks_byte_at(any sample, int i) int {
    if sample == nil { return -1 }

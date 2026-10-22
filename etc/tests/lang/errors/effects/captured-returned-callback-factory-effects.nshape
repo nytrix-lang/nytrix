@@ -1,0 +1,27 @@
+shape captured_returned_callback_factory_effects_are_known {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "callback", "return", "capture"]
+  template ny-test-case
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_fail
+  expect_message "declared @effects(none) but inferred effects=alloc"
+  source ny <<'NY'
+module std.project(
+  make_callback,
+  invoke
+)
+
+fn make_callback(int delta) fnptr {
+  return fn(value) { value + delta }
+}
+
+@effects(none)
+fn invoke() int {
+  def callback = make_callback(2)
+  callback(40)
+}
+
+print("unreachable")
+NY
+}

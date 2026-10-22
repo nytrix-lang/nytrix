@@ -1,0 +1,28 @@
+shape test_dict_native_len {
+  family "runtime/values"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core (dict_get, dict_set)
+use core.dict_mod (dict_len)
+
+fn typed_len(dict d) int { d.len }
+
+fn dynamic_len(any d) int { d.len }
+def d = dict_set(dict(4), "a", 1)
+assert(d.len == 1, "native dictionary property length")
+assert(to_str(dict_get(d, "a", 0)) == "1",
+   "dictionary bridge reads a string key")
+assert(typed_len(d) == 1, "typed native dictionary property length")
+assert(dynamic_len(d) == 1, "dynamic native dictionary property length")
+assert(dict_len(d) == 1, "dictionary helper length")
+assert(dict(4).len == 0, "empty native dictionary property length")
+def xs = [7, 8, 9]
+def int direct_list_length = to_int(__list_len(xs))
+assert(direct_list_length == 3 && xs.len == 3,
+   "tagged list length agrees across direct and property access")
+NY
+}

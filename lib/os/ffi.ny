@@ -1,37 +1,133 @@
 ;; Keywords: ffi foreign-function-interface interop os
-;; Os Ffi for Nytrix
+;; Foreign-function interface, dynamic loading, C layouts, and header bindings.
+;; Low-level C ABI call variants are exported alongside the FFI helpers.
 ;; References:
-;; - std.os
-module std.os.ffi(RTLD_LAZY, RTLD_NOW, RTLD_GLOBAL, RTLD_LOCAL,
+;; - core.os
+module core.os.ffi(generate, gen_file, RTLD_LAZY, RTLD_NOW, RTLD_GLOBAL, RTLD_LOCAL,
    dlopen, dlopen_any, dlopen_checked, dlsym, dlclose, dlerror,
-   call0_void, call0_i32, call1_void, call1_u32_void, call2_void,
-   call3_void, call4_void, call5_void, call7_void, call9_void,
-   call1_f32_void, call2_f32_void, call3_f32_void, call4_f32_void,
-   call0, call1, call1_i64, call1_u32, call2, call3, call4, call5,
-   call0_ptr, call1_ptr, call2_ptr, call3_ptr, call4_ptr, call5_ptr,
-   call2_ptr_u32, call3_ptr_u64_ptr, call3_ptr_u32_ptr,
-   call3_ptr_ptr_u32, call4_ptr_ptr_ptr_ptr_void,
-   call6, call7, call8, call9, call10, call11, call12, call13, call14, call15,
    ffi_call, bind, call_ext, bind_all, bind_linked, import_all, import_linked, extern_all,
-   __call0, __call0_void, __call0_ptr, __call1, __call1_ptr, __call1_void, __call2, __call2_ptr,
-   __call2_void, __call3, __call3_ptr, __call3_void, __call4, __call4_ptr, __call4_void, __call5, __call5_ptr,
-   __call5_void,
-   __call6, __call7, __call7_void, __call8, __call9, __call9_void, __call10, __call11, __call12,
-   __call13, __call14, __call15,
-   __call2_ptr_u32, __call3_ptr_u64_ptr, __call3_ptr_u32_ptr,
-   __call3_ptr_ptr_u32, __call3_ptr_u64_ptr_i32,
-   __call4_ptr_ptr_ptr_ptr_i32, __call4_ptr_ptr_ptr_u64_i32,
-   __call4_ptr_u32_u64_ptr_i32, __call4_ptr_u64_ptr_ptr_i32,
-   __call5_ptr_ptr_ptr_u64_i32_i32, __call1_f32_void, __call2_f32_void,
-   __call3_f32_void, __call4_f32_void, __call4_ptr_ptr_ptr_ptr_void,
    CStruct, CType, cstr, cptr, u8, i8, u16, i16, u32, i32, u64, i64,
    f32, f64, ptr, handle, sizeof_struct, offsetof_struct, malloc, free,
-   cstruct_set, cstruct_get, bind_lib, tag_native)
-use std.core
-use std.core.mem as mem
-use std.core.dict_mod as _d
-use std.os.prim
-use std.os.path as ospath
+   cstruct_set, cstruct_get, bind_lib, tag_native,
+   any0, any1, any2, any3, any4, any5, any6, any7, any8, any9, any10, any11, any12, any13, any14, any15,
+   pointer0, pointer1, pointer2, pointer3, pointer4, pointer5,
+   void0, void1, void2, void3, void4, void5, void6, void7, void8, void9, void10,
+   int32zero, int64one, uint32one, uint32voidone,
+   float32voidone, float32voidtwo, float32voidthree, float32voidfour,
+   pointer2uint32, pointer3uint64pointer, pointer3uint32pointer, pointer3pointeruint32,
+   pointer4pointerpointerpointervoid, pointer4pointerpointerpointerint32, pointer4pointerpointeruint64int32,
+   pointer4uint32uint64pointerint32, pointer4uint64pointerpointerint32, pointer3uint64pointerint32,
+   pointer5pointerpointeruint64int32int32)
+use core
+use core.dict_mod as _d
+use core.os.prim
+use core.os.path as ospath
+use core.str as str
+use core.os (file_read, file_write)
+
+fn any0(any f) any { __call0(f) }
+
+fn any1(any f, any a0) any { __call1(f, a0) }
+
+fn any2(any f, any a0, any a1) any { __call2(f, a0, a1) }
+
+fn any3(any f, any a0, any a1, any a2) any { __call3(f, a0, a1, a2) }
+
+fn any4(any f, any a0, any a1, any a2, any a3) any { __call4(f, a0, a1, a2, a3) }
+
+fn any5(any f, any a0, any a1, any a2, any a3, any a4) any { __call5(f, a0, a1, a2, a3, a4) }
+
+fn any6(any f, any a0, any a1, any a2, any a3, any a4, any a5) any { __call6(f, a0, a1, a2, a3, a4, a5) }
+
+fn any7(any f, any a0, any a1, any a2, any a3, any a4, any a5, any a6) any { __call7(f, a0, a1, a2, a3, a4, a5, a6) }
+
+fn any8(any f, any a0, any a1, any a2, any a3, any a4, any a5, any a6, any a7) any { __call8(f, a0, a1, a2, a3, a4, a5, a6, a7) }
+
+fn any9(any f, any a0, any a1, any a2, any a3, any a4, any a5, any a6, any a7, any a8) any { __call9(f, a0, a1, a2, a3, a4, a5, a6, a7, a8) }
+
+fn any10(any f, any a0, any a1, any a2, any a3, any a4, any a5, any a6, any a7, any a8, any a9) any { __call10(f, a0, a1, a2, a3, a4, a5, a6, a7, a8, a9) }
+
+fn any11(any f, any a0, any a1, any a2, any a3, any a4, any a5, any a6, any a7, any a8, any a9, any a10) any { __call11(f, a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10) }
+
+fn any12(any f, any a0, any a1, any a2, any a3, any a4, any a5, any a6, any a7, any a8, any a9, any a10, any a11) any { __call12(f, a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11) }
+
+fn any13(any f, any a0, any a1, any a2, any a3, any a4, any a5, any a6, any a7, any a8, any a9, any a10, any a11, any a12) any { __call13(f, a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12) }
+
+fn any14(any f, any a0, any a1, any a2, any a3, any a4, any a5, any a6, any a7, any a8, any a9, any a10, any a11, any a12, any a13) any { __call14(f, a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13) }
+
+fn any15(any f, any a0, any a1, any a2, any a3, any a4, any a5, any a6, any a7, any a8, any a9, any a10, any a11, any a12, any a13, any a14) any { __call15(f, a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14) }
+
+fn pointer0(any f) any { __call0_ptr(f) }
+
+fn pointer1(any f, any a0) any { __call1_ptr(f, a0) }
+
+fn pointer2(any f, any a0, any a1) any { __call2_ptr(f, a0, a1) }
+
+fn pointer3(any f, any a0, any a1, any a2) any { __call3_ptr(f, a0, a1, a2) }
+
+fn pointer4(any f, any a0, any a1, any a2, any a3) any { __call4_ptr(f, a0, a1, a2, a3) }
+
+fn pointer5(any f, any a0, any a1, any a2, any a3, any a4) any { __call5_ptr(f, a0, a1, a2, a3, a4) }
+
+fn void0(any f) any { __call0_void(f) }
+
+fn void1(any f, any a0) any { __call1_void(f, a0) }
+
+fn void2(any f, any a0, any a1) any { __call2_void(f, a0, a1) }
+
+fn void3(any f, any a0, any a1, any a2) any { __call3_void(f, a0, a1, a2) }
+
+fn void4(any f, any a0, any a1, any a2, any a3) any { __call4_void(f, a0, a1, a2, a3) }
+
+fn void5(any f, any a0, any a1, any a2, any a3, any a4) any { __call5_void(f, a0, a1, a2, a3, a4) }
+
+fn void6(any f, any a0, any a1, any a2, any a3, any a4, any a5) any { __call6_void(f, a0, a1, a2, a3, a4, a5) }
+
+fn void7(any f, any a0, any a1, any a2, any a3, any a4, any a5, any a6) any { __call7_void(f, a0, a1, a2, a3, a4, a5, a6) }
+
+fn void8(any f, any a0, any a1, any a2, any a3, any a4, any a5, any a6, any a7) any { __call8_void(f, a0, a1, a2, a3, a4, a5, a6, a7) }
+
+fn void9(any f, any a0, any a1, any a2, any a3, any a4, any a5, any a6, any a7, any a8) any { __call9_void(f, a0, a1, a2, a3, a4, a5, a6, a7, a8) }
+
+fn void10(any f, any a0, any a1, any a2, any a3, any a4, any a5, any a6, any a7, any a8, any a9) any { __call10_void(f, a0, a1, a2, a3, a4, a5, a6, a7, a8, a9) }
+
+fn int32zero(any f) int { __call0_i32(f) }
+
+fn int64one(any f, any a) any { __call1_i64(f, a) }
+
+fn uint32one(any f, any a) any { __call1_u32(f, a) }
+
+fn uint32voidone(any f, any a) any { __call1_u32_void(f, a) }
+
+fn float32voidone(any f, any a) any { __call1_f32_void(f, a) }
+
+fn float32voidtwo(any f, any a, any b) any { __call2_f32_void(f, a, b) }
+
+fn float32voidthree(any f, any a, any b, any c) any { __call3_f32_void(f, a, b, c) }
+
+fn float32voidfour(any f, any a, any b, any c, any d) any { __call4_f32_void(f, a, b, c, d) }
+
+fn pointer2uint32(any f, any a, any b) any { __call2_ptr_u32(f, a, b) }
+
+fn pointer3uint64pointer(any f, any a, any b, any c) any { __call3_ptr_u64_ptr(f, a, b, c) }
+
+fn pointer3uint32pointer(any f, any a, any b, any c) any { __call3_ptr_u32_ptr(f, a, b, c) }
+
+fn pointer3pointeruint32(any f, any a, any b, any c) any { __call3_ptr_ptr_u32(f, a, b, c) }
+
+fn pointer4pointerpointerpointervoid(any f, any a, any b, any c, any d) any { __call4_ptr_ptr_ptr_ptr_void(f, a, b, c, d) }
+
+fn pointer4pointerpointeruint64int32(any f, any a, any b, any c, any d) any { __call4_ptr_ptr_ptr_u64_i32(f, a, b, c, d) }
+
+fn pointer5pointerpointeruint64int32int32(any f, any a, any b, any c, any d, any e) any { __call5_ptr_ptr_ptr_u64_i32_i32(f, a, b, c, d, e) }
+
+fn pointer3uint64pointerint32(any f, any a, any b, any c) int { __call3_ptr_u64_ptr_i32(f, a, b, c) }
+
+fn pointer4pointerpointerpointerint32(any f, any a, any b, any c, any d) int { __call4_ptr_ptr_ptr_ptr_i32(f, a, b, c, d) }
+
+fn pointer4uint32uint64pointerint32(any f, any a, any b, any c, any d) int { __call4_ptr_u32_u64_ptr_i32(f, a, b, c, d) }
+
+fn pointer4uint64pointerpointerint32(any f, any a, any b, any c, any d) int { __call4_ptr_u64_ptr_ptr_i32(f, a, b, c, d) }
 
 fn RTLD_LAZY() int {
    "Returns the RTLD_LAZY flag for `dlopen` (1)."
@@ -147,7 +243,7 @@ fn dlopen_any(any name, int flags=0) any {
 
 fn cstr(any s) ptr {
    "Ensures `s` is NUL-terminated for C APIs."
-   mem.cstr(s)
+   s + ""
 }
 
 fn cptr(any s) ptr {
@@ -160,172 +256,25 @@ fn tag_native(any addr) any {
    __tag_native(addr)
 }
 
-fn call0(any f) any { "Low-level FFI call with 0 arguments." __call0(f) }
-
-fn call0_ptr(any f) any { "Low-level FFI call with 0 arguments and pointer return." __call0_ptr(f) }
-
-fn call1(any f, any a) any { "Low-level FFI call with 1 argument." __call1(f,a) }
-
-fn call1_ptr(any f, any a) any { "Low-level FFI call with 1 argument and pointer return." __call1_ptr(f,a) }
-
-fn call2(any f, any a, any b) any { "Low-level FFI call with 2 arguments." __call2(f,a,b) }
-
-fn call2_ptr(any f, any a, any b) any { "Low-level FFI call with 2 arguments and pointer return." __call2_ptr(f,a,b) }
-
-fn call2_ptr_u32(any f, any a, any b) any { "Low-level FFI call f(ptr,u32)->ptr." __call2_ptr_u32(f,a,b) }
-
-fn call3(any f, any a, any b, any c) any { "Low-level FFI call with 3 arguments." __call3(f,a,b,c) }
-
-fn call3_ptr(any f, any a, any b, any c) any { "Low-level FFI call with 3 arguments and pointer return." __call3_ptr(f,a,b,c) }
-
-fn call3_ptr_u64_ptr(any f, any a, any b, any c) any { "Low-level FFI call f(ptr,u64,ptr)->ptr." __call3_ptr_u64_ptr(f,a,b,c) }
-
-fn call3_ptr_u32_ptr(any f, any a, any b, any c) any { "Low-level FFI call f(ptr,u32,ptr)->ptr." __call3_ptr_u32_ptr(f,a,b,c) }
-
-fn call3_ptr_ptr_u32(any f, any a, any b, any c) any { "Low-level FFI call f(ptr,ptr,u32)->ptr." __call3_ptr_ptr_u32(f,a,b,c) }
-
-fn call4(any f, any a, any b, any c, any d) any { "Low-level FFI call with 4 arguments." __call4(f,a,b,c,d) }
-
-fn call4_ptr(any f, any a, any b, any c, any d) any { "Low-level FFI call with 4 arguments and pointer return." __call4_ptr(f,a,b,c,d) }
-
-fn call5(any f, any a, any b, any c, any d, any e) any { "Low-level FFI call with 5 arguments." __call5(f,a,b,c,d,e) }
-
-fn call5_ptr(any f, any a, any b, any c, any d, any e) any { "Low-level FFI call with 5 arguments and pointer return." __call5_ptr(f,a,b,c,d,e) }
-
-fn call6(any f, any a, any b, any c, any d, any e, any g) any { "Low-level FFI call with 6 arguments." __call6(f,a,b,c,d,e,g) }
-
-fn call7(any f, any a, any b, any c, any d, any e, any g, any h) any { "Low-level FFI call with 7 arguments." __call7(f,a,b,c,d,e,g,h) }
-
-fn call8(any f, any a, any b, any c, any d, any e, any g, any h, any i) any { "Low-level FFI call with 8 arguments." __call8(f,a,b,c,d,e,g,h,i) }
-
-fn call9(any f, any a, any b, any c, any d, any e, any g, any h, any i, any j) any { "Low-level FFI call with 9 arguments." __call9(f,a,b,c,d,e,g,h,i,j) }
-
-fn call10(any f, any a, any b, any c, any d, any e, any g, any h, any i, any j, any k) any { "Low-level FFI call with 10 arguments." __call10(f,a,b,c,d,e,g,h,i,j,k) }
-
-fn call11(any f, any a, any b, any c, any d, any e, any g, any h, any i, any j, any k, any l) any { "Low-level FFI call with 11 arguments." __call11(f,a,b,c,d,e,g,h,i,j,k,l) }
-
-fn call12(any f, any a, any b, any c, any d, any e, any g, any h, any i, any j, any k, any l, any m) any { "Low-level FFI call with 12 arguments." __call12(f,a,b,c,d,e,g,h,i,j,k,l,m) }
-
-fn call13(any f, any a, any b, any c, any d, any e, any g, any h, any i, any j, any k, any l, any m, any n) any { "Low-level FFI call with 13 arguments." __call13(f,a,b,c,d,e,g,h,i,j,k,l,m,n) }
-
-fn call14(any f, any a, any b, any c, any d, any e, any g, any h, any i, any j, any k, any l, any m, any n, any o) any { "Low-level FFI call with 14 arguments." __call14(f,a,b,c,d,e,g,h,i,j,k,l,m,n,o) }
-
-fn call15(any f, any a, any b, any c, any d, any e, any g, any h, any i, any j, any k, any l, any m, any n, any o, any p) any { "Low-level FFI call with 15 arguments." __call15(f,a,b,c,d,e,g,h,i,j,k,l,m,n,o,p) }
-
-fn call0_void(any f) any {
-   "Calls `f` with no arguments and ignores any return value."
-   __call0_void(f)
-}
-
-fn call0_i32(any f) int {
-   "Calls `f` with no arguments and returns a 32-bit integer result."
-   __call0_i32(f)
-}
-
-fn call1_void(any f, any a) any {
-   "Calls `f` with one argument and ignores any return value."
-   __call1_void(f,a)
-}
-
-fn call1_u32_void(any f, any a) any {
-   "Calls `f` with one unsigned 32-bit argument and ignores any return value."
-   __call1_u32_void(f,a)
-}
-
-fn call2_void(any f, any a, any b) any {
-   "Calls `f` with two arguments and ignores any return value."
-   __call2_void(f,a,b)
-}
-
-fn call3_void(any f, any a, any b, any c) any {
-   "Calls `f` with three arguments and ignores any return value."
-   __call3_void(f,a,b,c)
-}
-
-fn call4_void(any f, any a, any b, any c, any d) any {
-   "Calls `f` with four arguments and ignores any return value."
-   __call4_void(f,a,b,c,d)
-}
-
-fn call5_void(any f, any a, any b, any c, any d, any e) any {
-   "Calls `f` with five arguments and ignores any return value."
-   __call5_void(f,a,b,c,d,e)
-}
-
-fn call7_void(any f, any a, any b, any c, any d, any e, any g, any h) any {
-   "Calls `f` with seven arguments and ignores any return value."
-   __call7_void(f,a,b,c,d,e,g,h)
-}
-
-fn call9_void(any f, any a, any b, any c, any d, any e, any g, any h, any i, any j) any {
-   "Calls `f` with nine arguments and ignores any return value."
-   __call9_void(f,a,b,c,d,e,g,h,i,j)
-}
-
-fn call1_f32_void(any f, any a) any {
-   "Calls `f` with one 32-bit float argument and ignores any return value."
-   __call1_f32_void(f,a)
-}
-
-fn call2_f32_void(any f, any a, any b) any {
-   "Calls `f` with two 32-bit float arguments and ignores any return value."
-   __call2_f32_void(f,a,b)
-}
-
-fn call3_f32_void(any f, any a, any b, any c) any {
-   "Calls `f` with three 32-bit float arguments and ignores any return value."
-   __call3_f32_void(f,a,b,c)
-}
-
-fn call4_f32_void(any f, any a, any b, any c, any d) any {
-   "Calls `f` with four 32-bit float arguments and ignores any return value."
-   __call4_f32_void(f,a,b,c,d)
-}
-
-fn call4_ptr_ptr_ptr_ptr_void(any f, any a, any b, any c, any d) any {
-   "Calls `f(ptr, ptr, ptr, ptr)` and ignores any return value."
-   __call4_ptr_ptr_ptr_ptr_void(f,a,b,c,d)
-}
-
-fn call4_ptr_ptr_ptr_u64_i32(any f, any a, any b, any c, any d) any {
-   "Calls `f` with three pointers and a 64-bit length, returning an i32 result."
-   __call4_ptr_ptr_ptr_u64_i32(f,a,b,c,d)
-}
-
-fn call5_ptr_ptr_ptr_u64_i32_i32(any f, any a, any b, any c, any d, any e) any {
-   "Calls `f` with three pointers, a 64-bit length, and a 32-bit level, returning an i32 result."
-   __call5_ptr_ptr_ptr_u64_i32_i32(f,a,b,c,d,e)
-}
-
-fn call1_u32(any f, any a) any {
-   "Calls `f` with one unsigned 32-bit argument and returns the raw result."
-   __call1_u32(f,a)
-}
-
-fn call1_i64(any f, any a) any {
-   "Calls `f` with one argument and returns a 64-bit integer result."
-   __call1_i64(f,a)
-}
-
 fn ffi_call(any fptr, list args) any {
    "Dynamic FFI fallback: calls external function at `fptr` with `args` list. Supports 0-15 arguments; use extern/#include for native ABI calls and wider signatures."
    def n = args.len
-   if n==0 { return call0(fptr)  }
-   if n==1 { def a = args.get(0) return call1(fptr, a)  }
-   if n==2 { def a = args.get(0) def b = args.get(1) return call2(fptr, a, b)  }
-   if n==3 { def a = args.get(0) def b = args.get(1) def c = args.get(2) return call3(fptr, a, b, c)  }
-   if n==4 { def a = args.get(0) def b = args.get(1) def c = args.get(2) def d = args.get(3) return call4(fptr, a, b, c, d)  }
-   if n==5 { def a = args.get(0) def b = args.get(1) def c = args.get(2) def d = args.get(3) def e = args.get(4) return call5(fptr, a, b, c, d, e)  }
-   if n==6 { def a = args.get(0) def b = args.get(1) def c = args.get(2) def d = args.get(3) def e = args.get(4) def f = args.get(5) return call6(fptr, a, b, c, d, e, f)  }
-   if n==7 { def a=args.get(0) def b=args.get(1) def c=args.get(2) def d=args.get(3) def e=args.get(4) def f=args.get(5) def g=args.get(6) return call7(fptr,a,b,c,d,e,f,g) }
-   if n==8 { def a=args.get(0) def b=args.get(1) def c=args.get(2) def d=args.get(3) def e=args.get(4) def f=args.get(5) def g=args.get(6) def h=args.get(7) return call8(fptr,a,b,c,d,e,f,g,h) }
-   if n==9 { def a=args.get(0) def b=args.get(1) def c=args.get(2) def d=args.get(3) def e=args.get(4) def f=args.get(5) def g=args.get(6) def h=args.get(7) def i=args.get(8) return call9(fptr,a,b,c,d,e,f,g,h,i) }
-   if n==10 { def a=args.get(0) def b=args.get(1) def c=args.get(2) def d=args.get(3) def e=args.get(4) def f=args.get(5) def g=args.get(6) def h=args.get(7) def i=args.get(8) def j=args.get(9) return call10(fptr,a,b,c,d,e,f,g,h,i,j) }
-   if n==11 { def a=args.get(0) def b=args.get(1) def c=args.get(2) def d=args.get(3) def e=args.get(4) def f=args.get(5) def g=args.get(6) def h=args.get(7) def i=args.get(8) def j=args.get(9) def k=args.get(10) return call11(fptr,a,b,c,d,e,f,g,h,i,j,k) }
-   if n==12 { def a=args.get(0) def b=args.get(1) def c=args.get(2) def d=args.get(3) def e=args.get(4) def f=args.get(5) def g=args.get(6) def h=args.get(7) def i=args.get(8) def j=args.get(9) def k=args.get(10) def l=args.get(11) return call12(fptr,a,b,c,d,e,f,g,h,i,j,k,l) }
-   if n==13 { def a=args.get(0) def b=args.get(1) def c=args.get(2) def d=args.get(3) def e=args.get(4) def f=args.get(5) def g=args.get(6) def h=args.get(7) def i=args.get(8) def j=args.get(9) def k=args.get(10) def l=args.get(11) def m=args.get(12) return call13(fptr,a,b,c,d,e,f,g,h,i,j,k,l,m) }
-   if n==14 { def a=args.get(0) def b=args.get(1) def c=args.get(2) def d=args.get(3) def e=args.get(4) def f=args.get(5) def g=args.get(6) def h=args.get(7) def i=args.get(8) def j=args.get(9) def k=args.get(10) def l=args.get(11) def m=args.get(12) def o=args.get(13) return call14(fptr,a,b,c,d,e,f,g,h,i,j,k,l,m,o) }
-   if n==15 { def a=args.get(0) def b=args.get(1) def c=args.get(2) def d=args.get(3) def e=args.get(4) def f=args.get(5) def g=args.get(6) def h=args.get(7) def i=args.get(8) def j=args.get(9) def k=args.get(10) def l=args.get(11) def m=args.get(12) def o=args.get(13) def p=args.get(14) return call15(fptr,a,b,c,d,e,f,g,h,i,j,k,l,m,o,p) }
+   if n==0 { return any0(fptr)  }
+   if n==1 { def a = args.get(0) return any1(fptr, a)  }
+   if n==2 { def a = args.get(0) def b = args.get(1) return any2(fptr, a, b)  }
+   if n==3 { def a = args.get(0) def b = args.get(1) def c = args.get(2) return any3(fptr, a, b, c)  }
+   if n==4 { def a = args.get(0) def b = args.get(1) def c = args.get(2) def d = args.get(3) return any4(fptr, a, b, c, d)  }
+   if n==5 { def a = args.get(0) def b = args.get(1) def c = args.get(2) def d = args.get(3) def e = args.get(4) return any5(fptr, a, b, c, d, e)  }
+   if n==6 { def a = args.get(0) def b = args.get(1) def c = args.get(2) def d = args.get(3) def e = args.get(4) def f = args.get(5) return any6(fptr, a, b, c, d, e, f)  }
+   if n==7 { def a=args.get(0) def b=args.get(1) def c=args.get(2) def d=args.get(3) def e=args.get(4) def f=args.get(5) def g=args.get(6) return any7(fptr,a,b,c,d,e,f,g) }
+   if n==8 { def a=args.get(0) def b=args.get(1) def c=args.get(2) def d=args.get(3) def e=args.get(4) def f=args.get(5) def g=args.get(6) def h=args.get(7) return any8(fptr,a,b,c,d,e,f,g,h) }
+   if n==9 { def a=args.get(0) def b=args.get(1) def c=args.get(2) def d=args.get(3) def e=args.get(4) def f=args.get(5) def g=args.get(6) def h=args.get(7) def i=args.get(8) return any9(fptr,a,b,c,d,e,f,g,h,i) }
+   if n==10 { def a=args.get(0) def b=args.get(1) def c=args.get(2) def d=args.get(3) def e=args.get(4) def f=args.get(5) def g=args.get(6) def h=args.get(7) def i=args.get(8) def j=args.get(9) return any10(fptr,a,b,c,d,e,f,g,h,i,j) }
+   if n==11 { def a=args.get(0) def b=args.get(1) def c=args.get(2) def d=args.get(3) def e=args.get(4) def f=args.get(5) def g=args.get(6) def h=args.get(7) def i=args.get(8) def j=args.get(9) def k=args.get(10) return any11(fptr,a,b,c,d,e,f,g,h,i,j,k) }
+   if n==12 { def a=args.get(0) def b=args.get(1) def c=args.get(2) def d=args.get(3) def e=args.get(4) def f=args.get(5) def g=args.get(6) def h=args.get(7) def i=args.get(8) def j=args.get(9) def k=args.get(10) def l=args.get(11) return any12(fptr,a,b,c,d,e,f,g,h,i,j,k,l) }
+   if n==13 { def a=args.get(0) def b=args.get(1) def c=args.get(2) def d=args.get(3) def e=args.get(4) def f=args.get(5) def g=args.get(6) def h=args.get(7) def i=args.get(8) def j=args.get(9) def k=args.get(10) def l=args.get(11) def m=args.get(12) return any13(fptr,a,b,c,d,e,f,g,h,i,j,k,l,m) }
+   if n==14 { def a=args.get(0) def b=args.get(1) def c=args.get(2) def d=args.get(3) def e=args.get(4) def f=args.get(5) def g=args.get(6) def h=args.get(7) def i=args.get(8) def j=args.get(9) def k=args.get(10) def l=args.get(11) def m=args.get(12) def o=args.get(13) return any14(fptr,a,b,c,d,e,f,g,h,i,j,k,l,m,o) }
+   if n==15 { def a=args.get(0) def b=args.get(1) def c=args.get(2) def d=args.get(3) def e=args.get(4) def f=args.get(5) def g=args.get(6) def h=args.get(7) def i=args.get(8) def j=args.get(9) def k=args.get(10) def l=args.get(11) def m=args.get(12) def o=args.get(13) def p=args.get(14) return any15(fptr,a,b,c,d,e,f,g,h,i,j,k,l,m,o,p) }
    panic("ffi_call supports 0-15 args")
    0
 }
@@ -535,13 +484,13 @@ fn bind_lib(any name_or_h, list syms) any {
       else { nm = s }
       def fptr = dlsym(lib, nm)
       if fptr {
-         if arity == 0 { res = res.set(nm, fn() { call0(fptr) }) }
-         elif arity == 1 { res = res.set(nm, fn(a) { call1(fptr, a) }) }
-         elif arity == 2 { res = res.set(nm, fn(a, b) { call2(fptr, a, b) }) }
-         elif arity == 3 { res = res.set(nm, fn(a, b, c) { call3(fptr, a, b, c) }) }
-         elif arity == 4 { res = res.set(nm, fn(a, b, c, d) { call4(fptr, a, b, c, d) }) }
-         elif arity == 5 { res = res.set(nm, fn(a, b, c, d, e) { call5(fptr, a, b, c, d, e) }) }
-         elif arity == 6 { res = res.set(nm, fn(a, b, c, d, e, f) { call6(fptr, a, b, c, d, e, f) }) }
+         if arity == 0 { res = res.set(nm, fn() { any0(fptr) }) }
+         elif arity == 1 { res = res.set(nm, fn(a) { any1(fptr, a) }) }
+         elif arity == 2 { res = res.set(nm, fn(a, b) { any2(fptr, a, b) }) }
+         elif arity == 3 { res = res.set(nm, fn(a, b, c) { any3(fptr, a, b, c) }) }
+         elif arity == 4 { res = res.set(nm, fn(a, b, c, d) { any4(fptr, a, b, c, d) }) }
+         elif arity == 5 { res = res.set(nm, fn(a, b, c, d, e) { any5(fptr, a, b, c, d, e) }) }
+         elif arity == 6 { res = res.set(nm, fn(a, b, c, d, e, f) { any6(fptr, a, b, c, d, e, f) }) }
          else {
             res = res.set(nm, fn(...args) { ffi_call(fptr, args) })
          }
@@ -578,8 +527,453 @@ fn bind_lib(any name_or_h, list syms) any {
    def c = malloc(4)
    def d = malloc(4)
    store32(a,0,0) store32(b,0,0) store32(c,0,0) store32(d,0,0)
-   call4_ptr_ptr_ptr_ptr_void(p, a, b, c, d)
+   pointer4pointerpointerpointervoid(p, a, b, c, d)
    print("ver = " + to_str(load32(a,0)) + "." + to_str(load32(b,0)) + "." + to_str(load32(c,0)) + "." + to_str(load32(d,0)))
    free(a) free(b) free(c) free(d)
-   print("✓ std.os.ffi self-test passed")
+   print("✓ core.os.ffi self-test passed")
+}
+
+;; C header binding generator. Keeps parser helpers private to this module.
+fn _ffi_gen_input_max_bytes() int { 1 << 20 }
+
+;; C scalar type name -> byte size text (LP64 widths).  Empty for names
+;; outside the supported subset.
+fn _ffi_gen_scalar_size(str name) str {
+   if name == "long" { return "8" }
+   if name == "int" { return "4" }
+   if name == "short" { return "2" }
+   if name == "char" { return "1" }
+   if name == "double" { return "8" }
+   if name == "float" { return "4" }
+   ""
+}
+
+;; C scalar type name -> core.os.ffi CType tag.
+fn _ffi_gen_scalar_tag(str name) str {
+   if name == "long" { return "i64" }
+   if name == "int" { return "i32" }
+   if name == "short" { return "i16" }
+   if name == "char" { return "i8" }
+   if name == "double" { return "f64" }
+   if name == "float" { return "f32" }
+   ""
+}
+
+fn _ffi_gen_strip_comments_and_directives(str source) str {
+   mut out = ""
+   mut i = 0
+   mut start = 0
+   while i < source.len {
+      def int byte = load8(source, i)
+      def int next = i + 1 < source.len ? load8(source, i + 1) : 0
+      if byte == 47 && next == 42 {
+         out += str.str_slice(source, start, i) + " "
+         i += 2
+         while i + 1 < source.len &&
+         !(load8(source, i) == 42 && load8(source, i + 1) == 47) {
+            i += 1
+         }
+         if i + 1 < source.len { i += 2 }
+         start = i
+         continue
+      }
+      if byte == 47 && next == 47 {
+         out += str.str_slice(source, start, i) + " "
+         i += 2
+         while i < source.len && load8(source, i) != 10 { i += 1 }
+         start = i
+         continue
+      }
+      if byte == 35 {
+         out += str.str_slice(source, start, i)
+         while i < source.len && load8(source, i) != 10 { i += 1 }
+         start = i
+         continue
+      }
+      i += 1
+   }
+   out += str.str_slice(source, start, source.len)
+   out
+}
+
+;; C declarations in the supported subset never contain a vertical bar.
+fn _ffi_gen_sep() str { "|" }
+
+;; Piece `index` of a `|`-separated encoded value (see _ffi_gen_parse_type).
+fn _ffi_gen_tok(str joined, int index) str { _ffi_gen_piece(joined, index) }
+
+fn _ffi_gen_tok_count(str joined) int { _ffi_gen_count_pieces(joined) }
+
+;; Piece `index` of a `|`-separated record string.
+fn _ffi_gen_piece(str record, int index) str {
+   mut start = 0
+   mut seen = 0
+   mut i = 0
+   while i <= record.len {
+      if i == record.len || load8(record, i) == 124 {
+         if seen == index { return str.str_slice(record, start, i) }
+         seen += 1
+         start = i + 1
+      }
+      i += 1
+   }
+   ""
+}
+
+fn _ffi_gen_count_pieces(str record) int {
+   if record.len == 0 { return 0 }
+   mut seen = 1
+   mut i = 0
+   while i < record.len {
+      if load8(record, i) == 124 { seen += 1 }
+      i += 1
+   }
+   seen
+}
+
+;; Split on top-level `;`, keeping brace-balanced typedef bodies together.
+fn _ffi_gen_split_declarations(str text) str {
+   mut out = ""
+   mut start = 0
+   mut depth = 0
+   mut i = 0
+   while i < text.len {
+      def int byte = load8(text, i)
+      if byte == 123 {
+         depth += 1
+      }
+      if byte == 125 {
+         depth -= 1
+      }
+      if byte == 59 && depth == 0 {
+         def declaration = str.strip(str.str_slice(text, start, i))
+         if declaration.len > 0 {
+            if out.len > 0 {
+               out += _ffi_gen_sep()
+            }
+            out += declaration
+         }
+         start = i + 1
+      }
+      i += 1
+   }
+   def declaration = str.strip(str.str_slice(text, start, text.len))
+   if declaration.len > 0 {
+      if out.len > 0 {
+         out += _ffi_gen_sep()
+      }
+      out += declaration
+   }
+   out
+}
+
+fn _ffi_gen_word_byte(int byte) bool {
+   (byte >= 97 && byte <= 122) || (byte >= 65 && byte <= 90) ||
+   (byte >= 48 && byte <= 57) || byte == 95
+}
+
+fn _ffi_gen_tokens(str decl) str {
+   mut out = ""
+   mut word_start = -1
+   mut i = 0
+   while i < decl.len {
+      def int byte = load8(decl, i)
+      if _ffi_gen_word_byte(byte) {
+         if word_start < 0 { word_start = i }
+      } else {
+         if word_start >= 0 {
+            if out.len > 0 {
+               out += _ffi_gen_sep()
+            }
+            out += str.str_slice(decl, word_start, i)
+            word_start = -1
+         }
+         if byte != 32 && byte != 9 && byte != 10 && byte != 13 {
+            if out.len > 0 {
+               out += _ffi_gen_sep()
+            }
+            out += str.str_slice(decl, i, i + 1)
+         }
+      }
+      i += 1
+   }
+   if word_start >= 0 {
+      if out.len > 0 {
+         out += _ffi_gen_sep()
+      }
+      out += str.str_slice(decl, word_start, decl.len)
+   }
+   out
+}
+
+;; Parse one scalar or pointer declarator from `toks[at]`; the encoded
+;; result is `next_index|ctype_tag|size|base_type`.
+;; Identifier predicate on the first byte: string relational compares do
+;; not survive module lowering, so classification always uses bytes.
+fn _ffi_gen_is_ident_start(str name) bool {
+   if name.len == 0 { return false }
+   def int b = load8(name, 0)
+   _ffi_gen_word_byte(b) && !(b >= 48 && b <= 57)
+}
+
+;; Extracts the `index`-th `|`-separated field without allocating per byte.
+fn _ffi_gen_part(str encoded, int index) str {
+   mut start = 0
+   mut seen = 0
+   mut i = 0
+   while i <= encoded.len {
+      if i == encoded.len || load8(encoded, i) == 124 {
+         if seen == index { return str.str_slice(encoded, start, i) }
+         seen += 1
+         start = i + 1
+      }
+      i += 1
+   }
+   ""
+}
+
+fn _ffi_gen_parse_type(str toks, int at) Result<str, str> {
+   mut i = at
+   if _ffi_gen_tok(toks, i) == "const" { i += 1 }
+   def base = _ffi_gen_tok(toks, i)
+   def size_text = _ffi_gen_scalar_size(base)
+   if size_text.len == 0 { return err("unsupported base type '" + base + "'") }
+   i += 1
+   mut pointer = false
+   while _ffi_gen_tok(toks, i) == "*" {
+      pointer = true
+      i += 1
+   }
+   def tag = "i64"
+   if pointer {
+      tag = "ptr"
+      i += 1
+      return ok(str(i) + "|ptr|8|" + base)
+   }
+   ok(str(i) + "|" + _ffi_gen_scalar_tag(base) + "|" + size_text + "|" + base)
+}
+
+fn _ffi_gen_emit_field(str toks, int at) Result<str, str> {
+   mut out = ""
+   match _ffi_gen_parse_type(toks, at) {
+      err(reason) -> { return err(reason) }
+      ok(encoded) -> {
+         def next_index = str.atoi(_ffi_gen_part(encoded, 0))
+         def tag = _ffi_gen_part(encoded, 1)
+         def size = _ffi_gen_part(encoded, 2)
+         def name = _ffi_gen_tok(toks, next_index)
+         if !_ffi_gen_is_ident_start(name) {
+            return err("field is missing a name")
+         }
+         out = "[ffi.CType(\"" + tag + "\", " + size + "), \"" + name + "\"]"
+      }
+   }
+   ok(out)
+}
+
+fn _ffi_gen_gen_struct(str decl, str out_name) Result<str, str> {
+   def open = str.find(decl, "{")
+   def close = str.find_last(decl, "}")
+   if open < 0 || close <= open { return err("struct body braces are missing") }
+   def body = str.str_slice(decl, open + 1, close)
+   def fields_text = _ffi_gen_split_declarations(body)
+   mut fields = ""
+   mut field_count = 0
+   mut skipped = ""
+   def total = _ffi_gen_count_pieces(fields_text)
+   mut index = 0
+   while index < total {
+      def toks = _ffi_gen_tokens(_ffi_gen_piece(fields_text, index))
+      match _ffi_gen_emit_field(toks, 0) {
+         ok(field) -> {
+            if field_count > 0 {
+               fields += ", "
+            }
+            fields += field
+            field_count += 1
+         }
+         err(reason) -> {
+            skipped += ";; ffi.gen: unsupported: field in " + out_name +
+            " skipped(" + reason + ")\n"
+         }
+      }
+      index += 1
+   }
+   if field_count == 0 {
+      return err("struct " + out_name + " has no supported fields")
+   }
+   ok(skipped + "def " + out_name + " = ffi.CStruct([" + fields + "])")
+}
+
+;; Split a parameter list on top-level commas (encoded record string).
+fn _ffi_gen_split_params(str text) str {
+   mut out = ""
+   mut start = 0
+   mut depth = 0
+   mut i = 0
+   while i < text.len {
+      def int byte = load8(text, i)
+      if byte == 40 {
+         depth += 1
+      }
+      if byte == 41 {
+         depth -= 1
+      }
+      if byte == 44 && depth == 0 {
+         def parameter = str.strip(str.str_slice(text, start, i))
+         if parameter.len > 0 {
+            if out.len > 0 {
+               out += _ffi_gen_sep()
+            }
+            out += parameter
+         }
+         start = i + 1
+      }
+      i += 1
+   }
+   def parameter = str.strip(str.str_slice(text, start, text.len))
+   if parameter.len > 0 {
+      if out.len > 0 {
+         out += _ffi_gen_sep()
+      }
+      out += parameter
+   }
+   out
+}
+
+fn _ffi_gen_gen_extern(str decl) Result<str, str> {
+   def open = str.find(decl, "(")
+   def close = str.find_last(decl, ")")
+   if open < 0 || close <= open { return err("prototype parentheses missing") }
+   def head_toks = _ffi_gen_tokens(str.strip(str.str_slice(decl, 0, open)))
+   mut idx = 0
+   if _ffi_gen_tok(head_toks, 0) == "extern" { idx = 1 }
+   ;; The prototype name is the last head token; everything before it is
+   ;; the (possibly const-qualified) return type.
+   def name = _ffi_gen_tok(head_toks, _ffi_gen_tok_count(head_toks) - 1)
+   if name.len == 0 { return err("prototype is missing a name") }
+   ;; `void` (and a bare `extern name(...)`) omits the generated return tag.
+   def ret_tag = "i64"
+   if _ffi_gen_tok(head_toks, idx) == "void" {
+      ret_tag = ""
+   } else if _ffi_gen_tok_count(head_toks) - 1 > idx {
+      match _ffi_gen_parse_type(head_toks, idx) {
+         err(reason) -> { return err("return type: " + reason) }
+         ok(encoded) -> {
+            ret_tag = _ffi_gen_part(encoded, 1)
+         }
+      }
+   } else {
+      ret_tag = ""
+   }
+   def params_text = _ffi_gen_split_params(str.str_slice(decl, open + 1, close))
+   mut params = ""
+   mut param_count = 0
+   def total = _ffi_gen_count_pieces(params_text)
+   mut index = 0
+   while index < total {
+      def raw = _ffi_gen_piece(params_text, index)
+      def toks = _ffi_gen_tokens(raw)
+      if _ffi_gen_tok_count(toks) == 1 && _ffi_gen_tok(toks, 0) == "void" {
+         index += 1
+         continue
+      }
+      match _ffi_gen_parse_type(toks, 0) {
+         err(reason) -> {
+            return err("parameter '" + raw + "': " + reason)
+         }
+         ok(encoded) -> {
+            def pname = _ffi_gen_tok(toks, str.atoi(_ffi_gen_part(encoded, 0)))
+            if pname.len == 0 { pname = "_" }
+            if param_count > 0 {
+               params += ", "
+            }
+            params += _ffi_gen_part(encoded, 1) + " " + pname
+            param_count += 1
+         }
+      }
+      index += 1
+   }
+   mut out = "extern {\n  fn " + name + "(" + params + ")"
+   if ret_tag.len > 0 {
+      out += " " + ret_tag
+   }
+   out += "\n}"
+   ok(out)
+}
+
+fn generate(str header) Result<str, str> {
+   "Generates Ny FFI declarations from C header `header` text; returns
+   `ok(generated_text)` or `err(reason)`."
+   if header.len > _ffi_gen_input_max_bytes() {
+      return err("header exceeds the 1 MiB ffi.gen budget")
+   }
+   def text = _ffi_gen_strip_comments_and_directives(header)
+   def decls = _ffi_gen_split_declarations(text)
+   mut lines = ""
+   mut line_count = 0
+   def total = _ffi_gen_count_pieces(decls)
+   mut index = 0
+   while index < total {
+      def decl = str.strip(_ffi_gen_piece(decls, index))
+      def toks = _ffi_gen_tokens(decl)
+      def first = _ffi_gen_tok(toks, 0)
+      def second = _ffi_gen_tok(toks, 1)
+      mut produced = ""
+      if first == "typedef" && second == "struct" {
+         def name = _ffi_gen_tok(toks, _ffi_gen_tok_count(toks) - 1)
+         match _ffi_gen_gen_struct(decl, name) {
+            ok(text_ok) -> { produced = text_ok }
+            err(reason) -> {
+               produced = ";; ffi.gen: unsupported: " + reason
+            }
+         }
+      } else if first == "union" || second == "union" {
+         produced = ";; ffi.gen: unsupported: union layout"
+      } else if first == "enum" || second == "enum" {
+         produced = ";; ffi.gen: unsupported: enum constants"
+      } else if first == "extern" || first == "long" || first == "int" ||
+      first == "double" || first == "float" || first == "short" ||
+      first == "char" ||
+      (first == "const" && second != "struct") {
+         match _ffi_gen_gen_extern(decl) {
+            ok(text_ok) -> { produced = text_ok }
+            err(reason) -> {
+               produced = ";; ffi.gen: unsupported: " + reason
+            }
+         }
+      } else {
+         produced = ";; ffi.gen: unsupported: declaration starts with '" +
+         first + "'"
+      }
+      if produced.len > 0 {
+         if line_count > 0 {
+            lines += "\n"
+         }
+         lines += produced
+         line_count += 1
+      }
+      index += 1
+   }
+   if line_count == 0 { return err("header contained no declarations") }
+   ok(lines + "\n")
+}
+
+fn gen_file(str in_path, str out_path) Result<int, str> {
+   "Reads the C header at `in_path`, runs `generate`, and writes the Ny
+   declarations to `out_path` ; returns `ok(bytes_written)` or `err(reason)`."
+   match file_read(in_path) {
+      ok(header) -> {
+         match generate(header) {
+            ok(text) -> {
+               match file_write(out_path, text) {
+                  ok(count) -> { ok(int(count)) }
+                  err(code) -> { err("write failed: " + str(code)) }
+               }
+            }
+            err(reason) -> { err(reason) }
+         }
+      }
+      err(code) -> { err("read failed: " + str(code)) }
+   }
 }

@@ -1,0 +1,39 @@
+shape test_thread_abi_args {
+  family "runtime/execution"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  flags_matrix "--native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-backend=llvm; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.thread
+use core.os.time
+
+@thread
+fn _thread_fill(any ptr, int a, int b, int c, int d, int e, int f, int g) int {
+    store64(ptr, a + b + c + d + e + f + g, 0)
+    0
+}
+
+@thread
+fn _thread_add8(int a = 1, int b = 2, int c = 3, int d = 4,
+                int e = 5, int f = 6, int g = 7, int h = 8) int {
+    a + b + c + d + e + f + g + h
+}
+
+fn main() int {
+    def buf = malloc(8)
+    store64(buf, 0, 0)
+    _thread_fill(buf, 1, 2, 3, 4, 5, 6, 7)
+    msleep(50)
+    assert(load64(buf, 0) == 28, "detached @thread call delivers eight ABI arguments")
+    def joined = _thread_add8(10, 20, 30, 40, 50, 60, 70, 80)
+    assert(joined == 360, "joined @thread call delivers eight ABI arguments")
+    def defaulted = _thread_add8()
+    assert(defaulted == 36, "default-argument sugar expands before the thread ABI")
+    print("ok thread abi args")
+    0
+}
+NY
+}

@@ -1,0 +1,72 @@
+shape list {
+  family "perf-real"
+  generator "stress"
+  features ["perf", "list", "append", "typed", "scaling", "c-vs-ny", "native", "checksum", "time"]
+  template ny-test-case
+  budget {
+    max_native_c_ratio 2.0
+    ;; Typed path lowers to preallocated direct stores (4 NYIR ops/iter),
+    ;; so the residual native/LLVM gap is the stack-home tax vs SSA regs
+    ;; plus host noise (LLVM route time alone swings ~3x run to run).
+    ;; Rule: stable-max × 1.2 over the 4-worker distribution (max 2.36);
+    ;; still catches a real 2x native regression (~5x+). Native beats C.
+    max_native_llvm_ratio 2.8
+  }
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.time
+def n = 1000000
+;; List (Benchmark): fill and sum a Ny list.
+def int start = ticks()
+mut list<int> lst = []
+mut i = 0
+while i < n {
+   lst = append(lst, i)
+   i += 1
+}
+def int end = ticks()
+def checksum = lst[0] + lst[n / 2] + lst[n - 1]
+print("checksum=", checksum)
+print("elapsed_ns=", end - start)
+NY
+  source c <<'C'
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+
+static int64_t now_ns(void) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0;
+    return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
+}
+
+int main(void) {
+    const int n = 1000000;
+    int64_t *lst = NULL;
+    size_t len = 0, capacity = 0;
+    int64_t start = now_ns();
+    for (int i = 0; i < n; i++) {
+        if (len == capacity) {
+            size_t next = capacity ? capacity * 2 : 8;
+            if (next < capacity || next > SIZE_MAX / sizeof(*lst)) return 2;
+            int64_t *grown = realloc(lst, next * sizeof(*lst));
+            if (!grown) { free(lst); return 2; }
+            lst = grown;
+            capacity = next;
+        }
+        lst[len++] = i;
+    }
+    int64_t end = now_ns();
+    if (len != (size_t)n) { free(lst); return 3; }
+    int64_t sum = lst[0] + lst[len / 2] + lst[len - 1];
+    free(lst);
+    printf("checksum=%lld\n", (long long)sum);
+    if (end <= start) end = start + 1;
+    printf("elapsed_ns=%lld\n", (long long)(end - start));
+    return 0;
+}
+C
+}

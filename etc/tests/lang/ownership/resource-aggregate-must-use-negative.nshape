@@ -1,0 +1,21 @@
+shape ownership_rule_resource_aggregate_must_use_negative {
+  family "compiler-errors/ownership"
+  generator "error"
+  features ["error", "ownership", "resource", "linear", "aggregate"]
+  template ny-compile-fail
+  expect compile_fail
+  flags "--ownership-strict"
+  expect_message "linear resource 'pair' must be consumed exactly once"
+  source ny <<'NY'
+use core
+linear layout File { int fd }
+
+fn lose_resource_in_tuple() int {
+  def File file = File(7)
+  def pair = (file, 1)
+  0
+}
+
+lose_resource_in_tuple()
+NY
+}

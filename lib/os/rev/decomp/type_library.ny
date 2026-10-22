@@ -1,10 +1,10 @@
 ;; Keywords: c library signatures calls types malloc libc
 ;; Known C-library signatures for call and type recovery.
-module std.os.rev.decomp.type_library *
-use std.core
-use std.core.str as str
-use std.os.rev.decomp.elf
-use std.os.rev.decomp.abi (_parse_int_piece)
+module core.os.rev.decomp.type_library *
+use core
+use core.str as str
+use core.os.rev.decomp.elf
+use core.os.rev.decomp.abi (_parse_int_piece)
 
 fn _type_call_name(str name0) str {
    str.lower(_display_symbol(name0))

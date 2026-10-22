@@ -1,0 +1,50 @@
+shape fmt_variadic_free_parity {
+  family "probe/tools"
+  generator "embedded"
+  features ["formatter", "audit", "variadic-free", "parity"]
+  template ny-test-case
+  flags "--native-only"
+  timeout 60
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.subprocess (run_capture)
+use core.str as str
+
+def ny = env("NYTRIX_NY_FULL_BIN")
+def fmt = env("NYTRIX_TEST_FMT_BIN")
+def cmake = env("NYTRIX_CMAKE_COMMAND")
+assert(is_str(ny) && is_str(fmt) && is_str(cmake),
+       "CTest provides formatter executables")
+def dir = temp_dir() + "/fmt-free-" + to_str(pid())
+def made = run_capture([cmake, "-E", "make_directory", dir], [], nil, false)
+assert(made.get("code", 127) == 0, "create variadic-free test directory")
+def source = dir + "/free-group.ny"
+assert(is_ok(file_write(source,
+   "fn release() {\n   free(a)\n   free(make(b, c))\n" +
+   "   free([d, e]); trailing text is a comment\n   free(f, g)\n" +
+   "   freex(h)\n   object.free(h)\n   def text = \"free(i)\"\n}\n")),
+   "write variadic-free audit source")
+
+fn compare(str mode) {
+   def c_result = run_capture([fmt, mode, "--json", source], [], nil, false)
+   def ny_result = run_capture([ny, "fmt", mode, "--json", source], [], nil, false)
+   def c_out = c_result.get("stdout", "")
+   def ny_out = ny_result.get("stdout", "")
+   assert(c_result.get("code", 127) == 0 &&
+          ny_result.get("code", 127) == 0 && c_out == ny_out,
+          "variadic-free parity failed for " + mode + ": " + ny_out)
+   assert(str.find(ny_out, "NYAUD4204") >= 0 &&
+          str.find(ny_out, "3 adjacent free() calls can use variadic free") >= 0 &&
+          str.find(ny_out, "collapse cleanup to free(a, make(b, c), [d, e])") >= 0 &&
+          str.find(ny_out, "\"col\": 4") >= 0,
+          "variadic-free finding missing for " + mode + ": " + ny_out)
+}
+
+compare("--trim")
+compare("--audit-mode=methods|legacy")
+def cleanup = run_capture([cmake, "-E", "rm", "-rf", dir], [], nil, false)
+assert(cleanup.get("code", 127) == 0, "remove variadic-free test directory")
+print("FMT_VARIADIC_FREE_PARITY_OK")
+NY
+}

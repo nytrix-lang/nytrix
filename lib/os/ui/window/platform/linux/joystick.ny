@@ -1,19 +1,19 @@
 ;; Keywords: platform window backend linux joystick os ui input
 ;; Native Linux joystick backend behavior.
 ;; References:
-;; - std.os.ui.window.platform.linux
-;; - std.os.ui.window
-;; - std.os.ui.window.consts
-module std.os.ui.window.platform.linux.joystick(init, terminate, poll_joysticks, joystick_present, get_joystick_name, get_joystick_guid, get_joystick_axes, get_joystick_buttons, get_joystick_hats, joystick_is_gamepad, get_gamepad_state, get_gamepad_name, set_joystick_callback, update_gamepad_mappings)
-use std.core
-use std.core.mem
-use std.os.fs as osfs
-use std.os.time
-use std.core.str as str
-use std.os.ui.render.dump as ui_profile
-use std.os.ui.window.platform.api as backend_api
-use std.os.ui.window.platform.gamepad_map as gamepad_map
-use std.core.common as common
+;; - core.os.ui.window.platform.linux
+;; - core.os.ui.window
+;; - core.os.ui.window.consts
+module core.os.ui.window.platform.linux.joystick(init, terminate, poll_joysticks, joystick_present, get_joystick_name, get_joystick_guid, get_joystick_axes, get_joystick_buttons, get_joystick_hats, joystick_is_gamepad, get_gamepad_state, get_gamepad_name, set_joystick_callback, update_gamepad_mappings)
+use core
+use core.mem
+use core.os.fs as osfs
+use core.os.time
+use core.str as str
+use core.os.ui.debug as ui_profile
+use core.os.ui.window.platform.api as backend_api
+use core.os.ui.window.platform.gamepad_map as gamepad_map
+use core.common as common
 
 def MAX_JOYSTICKS = 16
 def EV_CNT = 32
@@ -84,7 +84,7 @@ def JS_EVENT_INIT = 0x80
 def MAX_JS_BUTTONS = 256
 def MAX_JS_AXES = 64
 def MAX_JS_HATS = 16
-def DEVICE_RESCAN_INTERVAL_NS = 250000000
+def DEVICE_RESCAN_INTERVAL_NS = 5000000000
 def JOYSTICK_POLL_COALESCE_NS = 1000000
 def JOYSTICK_STATE_SYNC_INTERVAL_NS = 8000000
 def JOYSTICK_JS_RETRY_INTERVAL_NS = 250000000
@@ -102,6 +102,8 @@ while ji < MAX_JOYSTICKS {
 }
 
 mut _linux_js = dict(8)
+mut _linux_initialized = false
+mut _last_device_scan_ticks = 0
 
 fn _ensure_slot_buffers(int jid) bool {
    if jid < 0 || jid >= MAX_JOYSTICKS { return false }
@@ -157,23 +159,6 @@ fn _invoke_callback(int jid, int event) any {
    def cb = _get_js_val("joystick_callback", 0)
    if cb { cb(jid, event) }
 }
-
-#linux {
-   #include <sys/inotify.h>
-} #else {
-   fn inotify_init1(any _flags) int {
-      "Runs the inotify init1 operation."
-      return -1
-   }
-   fn inotify_add_watch(any _fd, any _path, any _mask) int {
-      "Runs the inotify add watch operation."
-      return -1
-   }
-   fn inotify_rm_watch(any _fd, any _wd) int {
-      "Runs the inotify rm watch operation."
-      0
-   }
-} #endif
 
 fn _is_event_device_name(any name) bool {
    if !name || !is_str(name) { return false }
@@ -289,7 +274,7 @@ fn _reject_open_device(
    false
 }
 
-fn _open_fd(str path, int flags, int mode=0) int { __open(path, flags, mode) }
+fn _open_fd(str path, int flags, int mode=0) int { __open(__any_to_cstr(path), flags, mode) }
 
 fn _read_fd(int fd, any buf, int n) int { __read_off(fd, buf, n, 0) }
 
@@ -657,6 +642,10 @@ fn _open_device(str path) bool {
    memset(name_ptr, 0, 256)
    def name = (_ioctl(fd, EVIOCGNAME_256, name_ptr) < 0) ? "Unknown" : str.cstr_to_str(name_ptr)
    def controller_aux = _is_controller_aux_input(name)
+   if !controller_aux && _looks_like_aux_input(name) {
+      _dbg("reject path='" + to_str(path) + "' auxiliary input name='" + to_str(name) + "'")
+      return _reject_open_device(fd, -1, ev_bits, key_bits, abs_bits, id_ptr, name_ptr)
+   }
    mut guid = _build_linux_guid(id_ptr, name)
    def fallback_guid = _zero_guid_fallback(name)
    if fallback_guid != "" {
@@ -754,10 +743,6 @@ fn _open_device(str path) bool {
       _dbg("reject path='" + to_str(path) + "' no joystick/gamepad buttons")
       return _reject_open_device(fd, js_fd, ev_bits, key_bits, abs_bits, id_ptr, name_ptr, key_map_ptr, abs_map_ptr, abs_info_ptr)
    }
-   if !mapped && !controller_aux && _looks_like_aux_input(name) {
-      _dbg("reject path='" + to_str(path) + "' auxiliary input name='" + to_str(name) + "'")
-      return _reject_open_device(fd, js_fd, ev_bits, key_bits, abs_bits, id_ptr, name_ptr, key_map_ptr, abs_map_ptr, abs_info_ptr)
-   }
    js = _poll_key_state(js)
    js = _poll_abs_state(js)
    js = _poll_js_slot(js)
@@ -778,7 +763,9 @@ fn _open_device(str path) bool {
    true
 }
 
-fn _mark_scan_now() any { _set_js_val("last_scan_ticks", ticks()) }
+fn _mark_scan_now() any {
+   _last_device_scan_ticks = ticks()
+}
 
 fn _scan_devices() int {
    if !_linux_input_supported() { return 0 }
@@ -797,7 +784,7 @@ fn _scan_devices() int {
 fn _maybe_rescan_devices(bool force=false) int {
    if !_linux_input_supported() { return 0 }
    def now = ticks()
-   def last = _get_js_val("last_scan_ticks", 0)
+   def last = _last_device_scan_ticks
    if force || last <= 0 || (now - last) >= DEVICE_RESCAN_INTERVAL_NS { _scan_devices() }
    0
 }
@@ -901,16 +888,18 @@ fn _poll_slot(int jid) bool {
 }
 
 fn _ensure_init() bool {
-   def initialized = _get_js_val("initialized", false)
-   if initialized || !_linux_input_supported() { return initialized }
-   _set_js_val("initialized", true)
+   if _linux_initialized || !_linux_input_supported() { return _linux_initialized }
+   _linux_initialized = true
    gamepad_map.init_default_linux_mappings()
-   def inotify_fd = inotify_init1(bor(IN_NONBLOCK, IN_CLOEXEC))
+   def inotify_fd = osfs.watch_init(bor(IN_NONBLOCK, IN_CLOEXEC))
    _set_js_val("inotify_fd", inotify_fd)
    if inotify_fd >= 0 {
-      def watch = inotify_add_watch(inotify_fd, cstr("/dev/input"),
+      def watch = osfs.watch_add(inotify_fd, "/dev/input",
          bor(bor(bor(IN_CREATE, IN_ATTRIB), bor(IN_CLOSE_WRITE, IN_MOVED_TO)), IN_DELETE))
       _set_js_val("inotify_watch", watch)
+      _dbg("inotify fd=" + to_str(inotify_fd) + " watch=" + to_str(watch))
+   } else {
+      _dbg("inotify unavailable fd=" + to_str(inotify_fd))
    }
    _scan_devices()
    true
@@ -923,7 +912,7 @@ fn init() bool {
 
 fn terminate() bool {
    "Shuts down native Linux joystick handling."
-   if !_get_js_val("initialized", false) { return true }
+   if !_linux_initialized { return true }
    mut jid = 0
    while jid < MAX_JOYSTICKS {
       if _get_js(jid) { _free_js(jid) }
@@ -932,7 +921,7 @@ fn terminate() bool {
    def inotify_fd = _get_js_val("inotify_fd", -1)
    def inotify_watch = _get_js_val("inotify_watch", -1)
    if inotify_fd >= 0 {
-      if inotify_watch >= 0 { inotify_rm_watch(inotify_fd, inotify_watch) }
+      if inotify_watch >= 0 { osfs.watch_rm(inotify_fd, inotify_watch) }
       _close_fd(inotify_fd)
    }
    _set_js_val("joysticks", dict(8))
@@ -940,7 +929,8 @@ fn terminate() bool {
    _set_js_val("inotify_watch", -1)
    _set_js_val("dropped", false)
    _set_js_val("last_poll_ticks", 0)
-   _set_js_val("initialized", false)
+   _linux_initialized = false
+   _last_device_scan_ticks = 0
    true
 }
 

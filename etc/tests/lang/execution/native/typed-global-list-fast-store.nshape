@@ -1,0 +1,23 @@
+shape test_typed_global_list_fast_store {
+  family "runtime/execution/native"
+  generator "embedded"
+  features ["ny", "test", "native", "list-abi"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+mut xs = []
+xs = append(xs, 10)
+xs = append(xs, 20)
+assert(xs.len == 2, "append establishes the live length")
+
+xs[-1] = 77
+assert(xs[1] == 77, "in-range negative index writes the normalized slot")
+
+xs[2] = 33
+assert(xs.len == 3, "capacity fallback materializes the next element")
+assert(xs[2] == 33, "capacity fallback stores the element")
+NY
+}

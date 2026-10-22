@@ -1,25 +1,26 @@
 ;; Keywords: process spawn subprocess os
 ;; Process execution, spawning, waiting, capture, and pipe control.
 ;; References:
-;; - std.os
-module std.os.process(run, popen, waitpid)
-use std.core
-use std.core as core
-use std.os.sys
-use std.os.prim (env)
-use std.core.str
-use std.core.reflect
-use std.os.path as ospath
+;; - core.os
+module core.os.process(run, popen, waitpid)
+use core
+use core as core
+use core.os.sys
+use core.os.prim (env)
+use core.str
+use core.reflect
+use core.os.path as ospath
 
 fn _path_exists(any path) bool {
    if !is_str(path) || path.len == 0 { return false }
    __access(path, 0) == 0
 }
 
-fn _resolve_cmd(any cmd) any {
-   if !is_str(cmd) { return cmd }
+fn _resolve_cmd(str cmd) str {
    if ospath.has_sep(cmd) || ospath.is_abs(cmd) {
-      def norm = ospath.normalize(cmd)
+      ;; Keep explicit relative paths intact: normalization removes a leading
+      ;; "./", changing execvp("./tool") into PATH lookup for "tool".
+      def norm = ospath.is_abs(cmd) ? ospath.normalize(cmd) : cmd
       #windows {
          if ospath.extname(norm) == "" {
             def exe = norm + ".exe"
@@ -76,18 +77,16 @@ fn _argv_offset(str path, str rpath, list args, int n) int {
    1
 }
 
-fn _build_argv(str path, str rpath, list args) any {
+fn _build_argv(str path, str rpath, list args) list {
    def n = args.len
    def offset = _argv_offset(path, rpath, args, n)
-   def argv = malloc((n + offset + 1) * 8)
-   if argv == 0 { return 0 }
-   if offset == 1 { store64(argv, rpath, 0) }
+   mut argv = list(n + offset)
+   if offset == 1 { argv = argv.append(rpath) }
    mut i = 0
    while i < n {
-      store64(argv, args.get(i, 0), (i + offset) * 8)
+      argv = argv.append(args.get(i, ""))
       i += 1
    }
-   store64(argv, 0, (n + offset) * 8)
    argv
 }
 
@@ -100,25 +99,27 @@ fn waitpid(int pid, int options) int {
       def status_ptr = malloc(8)
       if status_ptr == 0 { return -1 }
       defer { free(status_ptr) }
-      def res = __wait4(pid, status_ptr, options)
+      ; The rt_wait4 ABI consumes dynamic-value integers. Encode the typed
+      ; machine pid/options explicitly so odd raw pids are not mistaken for
+      ; pre-tagged immediates by the runtime bridge.
+      def res = __wait4(__tag(pid), status_ptr, __tag(options))
       if res < 0 { return res }
-      def status = load32(status_ptr, 0)
+      def int status = int(to_int(load32(status_ptr, 0)))
       if (status & 127) != 0 { return 128 + (status & 127) }
       return (status / 256) % 256
    } #endif
 }
 
 fn run(str path, list args) int {
-   "Forks and execs `path` with `args`, waits for completion, and returns the child exit code(0..255); returns `-1` if fork fails."
+   "Forks and execs `path` with `args` (with or without argv[0]), waits for completion, and returns the child exit code(0..255); returns `-1` if fork fails."
    mut rpath = _resolve_cmd(path)
    #if windows || macos {
       def argv = _build_argv(path, rpath, args)
-      if argv == 0 { return -1 }
-      defer { free(argv) }
       def code = __spawn_wait(rpath, argv)
       return code
    } #else {
-      return __spawn_wait(rpath, args)
+      def argv = _build_argv(path, rpath, args)
+      return __spawn_wait(rpath, argv)
    } #endif
 }
 
@@ -127,36 +128,35 @@ fn popen(str path, list args) any {
    mut rpath = _resolve_cmd(path)
    #windows {
       def argv = _build_argv(path, rpath, args)
-      if argv == 0 { return 0 }
-      defer { free(argv) }
       def fds = malloc(8)
       if fds == 0 { return 0 }
       defer { free(fds) }
-      def pid = __spawn_pipe(rpath, argv, fds)
+      def int pid = __spawn_pipe(rpath, argv, fds)
       if pid <= 0 { return 0 }
-      def stdin_write = load32(fds, 0)
-      def stdout_read = load32(fds, 4)
+      ;; The spawn helper writes raw 32-bit fds into the buffer; no untag.
+      def int stdin_write = load32(fds, 0)
+      def int stdout_read = load32(fds, 4)
       if stdin_write < 0 || stdout_read < 0 {
          sys_close_quiet(stdin_write)
          sys_close_quiet(stdout_read)
          return 0
       }
-      return [pid, __tag(stdin_write), __tag(stdout_read)]
+      return [__tag(pid), __tag(stdin_write), __tag(stdout_read)]
    }
    #endif
    def fds = malloc(8)
    if fds == 0 { return 0 }
    defer { free(fds) }
-   def pid = __spawn_pipe(rpath, args, fds)
+   def int pid = __spawn_pipe(rpath, args, fds)
    if pid <= 0 { return 0 }
-   def stdin_write = load32(fds, 0)
-   def stdout_read = load32(fds, 4)
+   def int stdin_write = load32(fds, 0)
+   def int stdout_read = load32(fds, 4)
    if stdin_write < 0 || stdout_read < 0 {
       sys_close_quiet(stdin_write)
       sys_close_quiet(stdout_read)
       return 0
    }
-   [pid, __tag(stdin_write), __tag(stdout_read)]
+   [__tag(pid), __tag(stdin_write), __tag(stdout_read)]
 }
 
 #main {
@@ -170,6 +170,9 @@ fn popen(str path, list args) any {
    } #endif
    assert(run(sh, ok_args) == 0, "process run zero")
    assert(run(sh, exit_args) == 7, "process run exit code")
+   #linux {
+      assert(run(sh, ["-c", "exit 9"]) == 9, "process run options without argv[0]")
+   }
    assert(run("nytrix-does-not-exist-nytrix", ["nytrix-does-not-exist-nytrix"]) != 0, "process run missing command")
-   print("✓ std.os.process self-test passed")
+   print("✓ core.os.process self-test passed")
 }

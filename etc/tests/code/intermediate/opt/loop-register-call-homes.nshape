@@ -1,0 +1,41 @@
+shape loop_register_call_homes {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 regression loop call callee-save forwarding]
+  template ny-test-case
+  flags_matrix "--native-only --native-backend=x86_64 -O0 --nyir-verify; --native-only --native-backend=x86_64 -O3 --nyir-verify"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.time
+
+mut checksum = 0
+mut d = 2
+while d <= 12 {
+   mut i = 0
+   while i < 37 {
+      mut x = i - d
+      mut acc = 1
+      mut j = 0
+      while j < d {
+         if (x & 1) == 0 {
+            acc = acc * 3 + j
+         } else {
+            acc = acc * 5 - j
+         }
+         acc += d
+         ;; Keep several loop values live across an actual runtime call.
+         def stamp = ticks()
+         assert(stamp > 0, "runtime call returns a timestamp")
+         x = x / 2 + acc + j
+         j += 1
+      }
+      checksum += acc
+      i += 1
+   }
+   d += 2
+}
+assert(checksum == 4319837781, "nested loop registers and homes agree")
+print(checksum)
+NY
+}

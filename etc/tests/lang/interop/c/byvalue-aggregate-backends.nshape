@@ -1,0 +1,55 @@
+shape byvalue_aggregate_backends {
+  family "interop/c"
+  generator "embedded"
+  features ["ny", "ffi", "aggregate", "byvalue", "abi"]
+  template ny-test-case
+  flags_matrix "--nyir-verify --c-frontend=nytrix --native --run; --nyir-verify --c-frontend=nytrix --native-backend=llvm --jit --jit-engine=mcjit; --nyir-verify --c-frontend=nytrix --native-backend=llvm --jit --jit-engine=orc; --nyir-verify --c-frontend=nytrix --native-only --native-backend=x86_64"
+  expect compile_and_run
+  source ny <<'NY'
+#include "etc/tests/lang/interop/c/internal-byvalue-param-import.h" link "etc/tests/lang/interop/c/sum-pair.so"
+use core
+
+def pair = malloc(24)
+store64_i(pair, 10)
+store64_i(pair, 20, 8)
+store64_i(pair, 30, 16)
+assert(sum_pair(pair) == 60, "three-word aggregate passed by value")
+def returned = make_sum_pair()
+assert(load64_i(returned) == 10 && load64_i(returned, 8) == 20 &&
+       load64_i(returned, 16) == 30, "three-word aggregate returned by value")
+free(pair)
+free(returned)
+
+def mixed = malloc(16)
+store64_i(mixed, 7)
+store64_f64(mixed, 3.5, 8)
+def sse = malloc(16)
+store64_f64(sse, 1.5)
+store64_f64(sse, 2.5, 8)
+assert(sum_mixed_pair(mixed) == 10,
+       "mixed integer and floating aggregate passed by value")
+assert(sum_sse_pair(sse) == 4,
+       "two floating fields passed by value")
+free(mixed)
+free(sse)
+
+def packed = malloc(25)
+store8(packed, 5, 0)
+store64_i(packed, 10, 1)
+store64_i(packed, 20, 9)
+store64_i(packed, 30, 17)
+assert(sum_packed_wide(packed) == 65,
+       "packed memory-class aggregate passed by value")
+free(packed)
+
+def aligned = malloc(32)
+store64_i(aligned, 11)
+store64_i(aligned, 22, 8)
+store64_i(aligned, 33, 16)
+assert(sum_aligned_wide(aligned) == 66,
+       "explicitly aligned memory-class aggregate passed by value")
+free(aligned)
+assert(1 + 2 == 3, "execution sentinel")
+0
+NY
+}

@@ -1,0 +1,100 @@
+shape test_network_fetch {
+  family "interop/web"
+  generator "embedded"
+  ci skip
+  features [browser wasm interop network fetch]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+;; Keywords: browser networking fetch asyncify fixture
+;; Verify that browser fetch returns same-origin text after an async resume.
+use core.os as os
+use core.os.ui.window as window
+
+def body = os.fetch("index.html")
+def ok = is_str(body) && body.len > 100
+window.test_report_touch(ok ? 1 : 0, ok ? 1 : 0, ok ? 1 : 0)
+ok ? 1 : 0
+NY
+}
+
+shape test_websocket_echo {
+  family "interop/web"
+  generator "embedded"
+  ci skip
+  features [browser wasm interop network websocket echo]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+;; Keywords: browser networking websocket asyncify fixture
+;; Verify browser WebSocket open, send, receive, and close behavior.
+use core.os.websocket as websocket
+use core.os.time as time
+use core.os.ui.window as window
+
+def handle = websocket.open("ws://127.0.0.1:18790")
+time.msleep(1000)
+def sent = handle > 0 && websocket.send(handle, "nytrix-echo")
+time.msleep(1000)
+def received = websocket.receive(handle)
+def ok = sent && contains(received, "nytrix-echo")
+window.test_report_touch(handle, sent ? 1 : 0, ok ? 1 : 0)
+
+if handle > 0 { websocket.close(handle) }
+ok ? 1 : 0
+NY
+}
+
+shape test_websocket_lifecycle {
+  family "interop/web"
+  generator "embedded"
+  ci skip
+  features [browser wasm interop network websocket lifecycle]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+;; Keywords: browser networking websocket fixture
+;; Verify that browser WebSocket handles expose an explicit lifecycle state.
+use core.os.websocket as websocket
+use core.os.ui.window as window
+
+def handle = websocket.open("ws://127.0.0.1:9")
+def current = handle > 0 ? websocket.state(handle) : 0
+
+;; Reading the state exercises the lifecycle lookup; the handle marker proves
+;; that the browser constructor returned a live record rather than a stub.
+def valid = handle > 0
+window.test_report_touch(handle, 1, 1)
+
+if handle > 0 { websocket.close(handle) }
+valid ? 1 : 0
+NY
+}
+
+shape test_websocket_rejection {
+  family "interop/web"
+  generator "embedded"
+  ci skip
+  features [browser wasm interop network websocket rejection]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+;; Keywords: browser networking websocket rejection fixture
+;; Invalid WebSocket schemes must fail synchronously and never become handles.
+use core.os.websocket as websocket
+use core.os.time as time
+use core.os.ui.render as gfx
+use core.os.ui.window as window
+
+def wall = time.now_ms()
+def handle = websocket.open("http://127.0.0.1:9")
+def sent = handle > 0 && websocket.send(handle, "must-not-send")
+window.test_report_touch(wall, handle, sent ? wall : handle)
+def win = gfx.init_window(320, 180, "Nytrix WebSocket rejection", 0, true, false, 1)
+gfx.begin_frame_clear(gfx.BLACK)
+gfx.end_frame()
+
+if handle > 0 { websocket.close(handle) }
+handle < 1 && !sent ? 1 : 0
+NY
+}

@@ -1,12 +1,12 @@
 ;; Keywords: data sql database query ast parse serialization
 ;; SQL tokenizer and parser for statement inspection, routing, normalization, and query-building tools.
 ;; References:
-;; - std.math.parse.data
-;; - std.math.parse
-module std.math.parse.data.sql(tokenize, parse, try_parse, parse_all, normalize, statement_kind)
-use std.core
-use std.core.dict_mod as _d
-use std.core.str
+;; - core.math.parse.data
+;; - core.math.parse
+module core.math.parse.data.sql(tokenize, parse, try_parse, parse_all, normalize, statement_kind)
+use core
+use core.dict_mod as _d
+use core.str
 
 fn _tok(str kind, any value, int pos) dict {
    return {"kind": kind, "value": value, "pos": pos}
@@ -608,5 +608,5 @@ fn statement_kind(any sql) str {
    assert_eq(all.get("ok", false), true, "parse_all ok")
    assert_eq(all.get("value", []).len, 3, "parse_all statements")
    assert_eq(statement_kind("drop table if exists tmp"), "drop_table", "statement kind")
-   print("✓ std.math.parse.data.sql self-test passed")
+   print("✓ core.math.parse.data.sql self-test passed")
 }

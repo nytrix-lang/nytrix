@@ -1,0 +1,49 @@
+shape ast_layout_metadata {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "ast", "reflection", "layout", "array", "default"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.compiler.ast (parse_ast_snapshot, parse_ast, code_str)
+use core.math.parse.data.json (json_decode)
+
+def source = "layout Buffer(int n=16) pack(1) align(8) {\n  [u8, n] data\n  i32 tag align(8) = 7\n  fn count() int { return 1 }\n}"
+def snapshot = parse_ast_snapshot(source)
+def record = snapshot.get("nodes").get(0)
+def fields = record.get("fields")
+assert(record.get("pack") == 1 && record.get("align") == 8 &&
+       record.get("params").get(0).get("name") == "n" &&
+       record.get("params").get(0).get("default").get("value") == 16,
+       "layout snapshot retains packing, alignment, and deftype defaults")
+assert(fields.get(0).get("is_array") &&
+       fields.get(0).get("source_origin").get("line") == 2 &&
+       fields.get(0).get("array_len").get("name") == "n" &&
+       fields.get(0).get("array_len").get("source_origin").get("line") == 2,
+       "layout snapshot retains symbolic array extents and origins")
+assert(!fields.get(1).get("is_array") && is_nil(fields.get(1).get("array_len")) &&
+       fields.get(1).get("source_origin").get("line") == 3 &&
+       fields.get(1).get("width") == 8 &&
+       fields.get(1).get("default").get("value") == 7 &&
+       fields.get(1).get("default_src") == "7",
+       "layout snapshot retains field alignment and default expression spelling")
+assert(record.get("methods").len == 1 &&
+       record.get("methods").get(0).get("return") == "int",
+       "layout snapshot retains method declarations")
+assert(code_str(json_decode(code_str(snapshot))) == code_str(snapshot),
+       "layout metadata survives canonical serialization")
+def legacy = parse_ast(source).get(0)
+assert(!dict_exists(legacy, "params") &&
+       !dict_exists(legacy.get("fields").get(0), "array_len"),
+       "legacy layout records retain their existing shape")
+def literal_array = parse_ast_snapshot("layout Empty { [u8, 0] bytes }").get("nodes").get(0).get("fields").get(0)
+assert(literal_array.get("is_array") &&
+       literal_array.get("array_len").get("value") == 0,
+       "zero array extent remains distinct from a scalar field")
+def generated_field = parse_ast_snapshot("comptime template generated_layout() { layout GeneratedOrigin { int value = 7 } }\ncomptime emit generated_layout()").get("nodes").get(0).get("fields").get(0)
+assert(generated_field.get("source_origin").get("line") == 1 &&
+       generated_field.get("expansion_origin").get("line") == 2,
+       "generated layout fields retain definition and emission origins")
+NY
+}

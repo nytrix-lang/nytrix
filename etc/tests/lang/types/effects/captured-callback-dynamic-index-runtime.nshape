@@ -1,0 +1,185 @@
+shape captured_callback_dynamic_index_runs_in_all_backends {
+  family "runtime/values"
+  generator "regression"
+  features [ny runtime callback dynamic-index regression]
+  template ny-test-case
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_and_run
+  expect_stdout "second callback\nsecond callback\nfallback callback"
+  timeout 25
+  source ny <<'NY'
+use core
+
+fn first_answer() int {
+  42
+}
+
+@effects(io)
+fn second_answer() int {
+  print("second callback")
+  7
+}
+
+@effects(io)
+fn fallback_answer() int {
+  print("fallback callback")
+  9
+}
+
+@effects(alloc, read, io)
+fn invoke(int index) {
+  def callbacks = [first_answer, second_answer]
+  callbacks[index]()
+  callbacks.get(index)()
+}
+
+@effects(alloc, read, io)
+fn invoke_get_fallback(int index) int {
+  def callbacks = [first_answer]
+  callbacks.get(index, fallback_answer)()
+}
+
+fn invoke_captured(int index) int {
+  def base = 40
+  def callbacks = [fn() int { base + 2 }, fn() int { base + 3 }]
+  callbacks.get(index)()
+}
+
+fn invoke_captured_tuple(int index) int {
+  def base = 50
+  def callbacks = (fn() int { base + 2 }, fn() int { base + 3 })
+  callbacks.get(index)()
+}
+
+fn invoke_captured_argument(int index, int value) int {
+  def base = 40
+  def callbacks = [fn(int input) int { base + input },
+                   fn(int input) int { base + input + 1 }]
+  callbacks.get(index)(value)
+}
+
+@effects(cap("project.storage.read"))
+fn factory_storage_answer() int { 61 }
+
+@effects(cap("project.audit.write"))
+fn factory_audit_answer() int { 73 }
+
+@effects(alloc)
+fn make_factory_callbacks(bool choose_storage) tuple {
+  if choose_storage { return (factory_storage_answer, factory_audit_answer) }
+  return (factory_audit_answer, factory_storage_answer)
+}
+
+@effects(alloc, read, cap("project.storage.read"), cap("project.audit.write"))
+fn invoke_factory_tuple_callback(bool choose_storage, int index) int {
+  def callbacks = make_factory_callbacks(choose_storage)
+  callbacks.get(index)()
+}
+
+@effects(alloc, read, cap("project.storage.read"), cap("project.audit.write"))
+fn invoke_factory_tuple_callback_index(bool choose_storage, int index) int {
+  def callbacks = make_factory_callbacks(choose_storage)
+  callbacks[index]()
+}
+
+@effects(alloc)
+fn make_factory_callback_list(bool choose_storage) list {
+  if choose_storage { return [factory_storage_answer, factory_audit_answer] }
+  return [factory_audit_answer, factory_storage_answer]
+}
+
+@effects(alloc, read, cap("project.storage.read"), cap("project.audit.write"))
+fn invoke_factory_list_callback(bool choose_storage, int index) int {
+  def callbacks = make_factory_callback_list(choose_storage)
+  callbacks.get(index)()
+}
+
+@effects(alloc, read, cap("project.storage.read"), cap("project.audit.write"))
+fn invoke_factory_list_callback_index(bool choose_storage, int index) int {
+  def callbacks = make_factory_callback_list(choose_storage)
+  callbacks[index]()
+}
+
+fn factory_true_answer() bool { true }
+fn factory_false_answer() bool { false }
+
+fn invoke_factory_tuple_bool(int index) bool {
+  def callbacks = (factory_true_answer, factory_false_answer)
+  callbacks.get(index)()
+}
+
+fn factory_add_ten(int value) int { value + 10 }
+fn factory_add_twenty(int value) int { value + 20 }
+
+@effects(alloc)
+fn make_factory_argument_callbacks(bool swap) tuple {
+  if swap { return (factory_add_twenty, factory_add_ten) }
+  return (factory_add_ten, factory_add_twenty)
+}
+
+@effects(alloc, read)
+fn invoke_factory_tuple_argument(bool swap, int index, int value) int {
+  def callbacks = make_factory_argument_callbacks(swap)
+  callbacks.get(index)(value)
+}
+
+@effects(alloc)
+fn make_factory_argument_dictionary(bool swap) dict {
+  if swap { return {"ten": factory_add_twenty, "twenty": factory_add_ten} }
+  return {"ten": factory_add_ten, "twenty": factory_add_twenty}
+}
+
+@effects(alloc, read)
+fn invoke_factory_dictionary_argument(bool swap, str key, int value) int {
+  def callbacks = make_factory_argument_dictionary(swap)
+  callbacks.get(key)(value)
+}
+
+invoke(0)
+invoke(1)
+assert(invoke_get_fallback(0) == 42,
+       "dynamic get keeps the selected callback on a hit")
+assert(invoke_get_fallback(1) == 9,
+       "dynamic get invokes its callback fallback on a miss")
+assert(invoke_captured(0) == 42 && invoke_captured(1) == 43,
+       "dynamic get invokes the selected captured closure")
+assert(invoke_captured_tuple(0) == 52 && invoke_captured_tuple(1) == 53,
+       "dynamic tuple get invokes the selected captured closure")
+assert(invoke_captured_argument(0, 2) == 42 &&
+       invoke_captured_argument(1, 2) == 43,
+       "dynamic get forwards arguments to the selected captured closure")
+assert(invoke_factory_tuple_callback(true, 0) == 61 &&
+       invoke_factory_tuple_callback(true, 1) == 73 &&
+       invoke_factory_tuple_callback(false, 0) == 73 &&
+       invoke_factory_tuple_callback(false, 1) == 61,
+       "dynamic tuple index dispatches to the selected factory callback")
+assert(invoke_factory_list_callback(true, 0) == 61 &&
+       invoke_factory_list_callback(true, 1) == 73 &&
+       invoke_factory_list_callback(false, 0) == 73 &&
+       invoke_factory_list_callback(false, 1) == 61,
+       "dynamic list index dispatches to the selected factory callback")
+assert(invoke_factory_tuple_callback_index(true, 0) == 61 &&
+       invoke_factory_tuple_callback_index(true, 1) == 73 &&
+       invoke_factory_tuple_callback_index(false, 0) == 73 &&
+       invoke_factory_tuple_callback_index(false, 1) == 61,
+       "dynamic tuple bracket dispatch selects the factory callback")
+assert(invoke_factory_list_callback_index(true, 0) == 61 &&
+       invoke_factory_list_callback_index(true, 1) == 73 &&
+       invoke_factory_list_callback_index(false, 0) == 73 &&
+       invoke_factory_list_callback_index(false, 1) == 61,
+       "dynamic list bracket dispatch selects the factory callback")
+assert(invoke_factory_tuple_bool(0) && !invoke_factory_tuple_bool(1),
+       "dynamic tuple callback dispatch preserves boolean result ABI")
+assert(invoke_factory_tuple_argument(false, 0, 5) == 15 &&
+       invoke_factory_tuple_argument(false, 1, 5) == 25 &&
+       invoke_factory_tuple_argument(true, 0, 5) == 25 &&
+       invoke_factory_tuple_argument(true, 1, 5) == 15,
+       "dynamic tuple callback dispatch forwards arguments across branches")
+assert(invoke_factory_dictionary_argument(false, "ten", 5) == 15 &&
+       invoke_factory_dictionary_argument(false, "twenty", 5) == 25 &&
+       invoke_factory_dictionary_argument(true, "ten", 5) == 25 &&
+       invoke_factory_dictionary_argument(true, "twenty", 5) == 15,
+       "dynamic dictionary callback dispatch forwards raw integer arguments")
+0
+NY
+}

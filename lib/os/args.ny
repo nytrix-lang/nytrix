@@ -1,10 +1,10 @@
 ;; Keywords: args argv cli os
 ;; Args for Nytrix
 ;; References:
-;; - std.os
-module std.os.args(argc, args, argv, program, positionals_from, positionals, value_from, flag_from, int_value_from, float_value_from, first_positive_int_from, value, flag, int_value, float_value, first_positive_int)
-use std.core
-use std.core.str as str
+;; - core.os
+module core.os.args(argc, args, argv, program, positionals_from, positionals, value_from, flag_from, int_value_from, float_value_from, first_positive_int_from, value, flag, int_value, float_value, first_positive_int)
+use core
+use core.str as str
 
 fn argc() int {
    "Returns the number of command-line arguments."
@@ -129,7 +129,15 @@ fn int_value(str name, int fallback=0) int { int_value_from(args(), name, fallba
 
 fn float_value(str name, f64 fallback=0.0) f64 { float_value_from(args(), name, fallback) }
 
-fn first_positive_int(int fallback=0) int { first_positive_int_from(args(), fallback) }
+fn first_positive_int(int fallback=0) int {
+   mut i = 0
+   while i < __argc() {
+      def n = str.atoi(to_str(__argv(i)))
+      if n > 0 { return n }
+      i += 1
+   }
+   fallback
+}
 
 #main {
    def ag = args()
@@ -147,5 +155,5 @@ fn first_positive_int(int fallback=0) int { first_positive_int_from(args(), fall
    assert(int_value_from(["ny", "--n", "7"], "--n", 0) == 7, "args int value")
    assert(float_value_from(["ny", "--f", "2.5"], "--f", 0.0) > 2.0, "args float value")
    assert(first_positive_int_from(["ny", "0", "-3", "12"], 5) == 12 && first_positive_int_from(["ny", "0"], 5) == 5, "args first positive int")
-   print("✓ std.os.args self-test passed")
+   print("✓ core.os.args self-test passed")
 }

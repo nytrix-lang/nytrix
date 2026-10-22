@@ -1,0 +1,24 @@
+fn accept_positive(portable.Positive value) int { value }
+
+fn guarded_positive(int value) int {
+  if value > 0 {
+    accept_positive(value)
+  } else {
+    0
+  }
+}
+
+fn accept_tagged(portable.Tagged value) str { value }
+
+fn guarded_tagged(str value) str {
+  if value == "ok" {
+    accept_tagged(value)
+  } else {
+    ""
+  }
+}
+
+assert(guarded_positive(5) == 5,
+       "serialized refinement identity and predicate survive import")
+assert(guarded_tagged("ok") == "ok",
+       "serialized string literals survive refinement interface import")

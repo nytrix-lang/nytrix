@@ -2,9 +2,9 @@
 ;; RSA recovery from known CRT exponents routines.
 ;; References:
 ;; - Campagna, Sethi, "Key Recovery Method for CRT Implementation of RSA"
-module std.math.crypto.rsa.known_crt_exponents(possible_prime_factors_from_crt_exponents, factor_from_known_crt_exponent, factor_from_small_crt_exponent_gcd)
-use std.math.nt
-use std.math.crypto.rsa.op (compute_phi, compute_d)
+module core.math.crypto.rsa.known_crt_exponents(possible_prime_factors_from_crt_exponents, factor_from_known_crt_exponent, factor_from_small_crt_exponent_gcd)
+use core.math.nt
+use core.math.crypto.rsa.op (compute_phi, compute_d)
 
 fn _get_possible_primes(any e, any d_crt) list {
    mut out = list(0)

@@ -1,0 +1,40 @@
+shape exists_synth {
+  family "runtime/proofs"
+  generator "program"
+  features ["proofs", "exists", "synth", "nonlinear", "requires"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.tactic as tactic
+
+refine EvenEx = int where (v) { exists(k) { v == 2 * k } }
+
+def EvenEx six = 6
+assert(EvenEx(6), "6 member")
+assert(!EvenEx(5), "5 not member")
+
+def w = tactic.synth_even_witness(6, 11)
+assert(bool(w.get("found")), "witness found")
+assert(int(w.get("witness")) == 3, "witness 6->3")
+
+def w2 = tactic.synth_even_witness(5, 11)
+assert(!bool(w2.get("found")), "odd has no witness")
+
+def mid = tactic.split_picker_mid(11)
+assert(mid == 5, "nonlinear split picker proposes midpoint")
+
+def safe = tactic.divisor_safe_obligation("binary:!=(name:d,int:0)", "d=1..5")
+assert(str(safe.get("verdict")) == "proved", "divisor side-condition first")
+assert(bool(safe.get("checked")), "divisor checked")
+
+def rng = tactic.inline_fin_range("x", 4)
+assert(rng == "x=0..3", "requires pre-pass inlines Fin range")
+
+def om = tactic.omega_fin_close("binary:>=(name:x,int:0)", "x", 4)
+assert(str(om.get("verdict")) == "proved", "omega closes Fin range")
+
+assert(true, "exists synth complete")
+NY
+}

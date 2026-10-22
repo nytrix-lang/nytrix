@@ -1,0 +1,106 @@
+shape wasm32_unsupported_runtime_reallocator_fails_closed {
+  family "runtime-native"
+  generator "native"
+  features [native object wasm32 runtime-helper nyir unsupported]
+  template ny-test-case
+  flags "--no-effect-require-known --native-only --native-backend wasm --nyir-verify -no-std -emit-only --emit-asm=/tmp/nytrix-native-wasm32-runtime-helper.wat"
+  expect compile_fail
+  expect_message "external call does not match a supported runtime helper"
+  source ny <<'NY'
+use core
+
+fn unsupported_reallocation(i64 idx) i64 {
+  def p = malloc(8)
+  def q = realloc(p, 16)
+  store64_i(q, 42, 0)
+  load64_i(q, idx)
+}
+
+unsupported_reallocation(0)
+NY
+}
+
+shape wasm32_runtime_allocator_executes {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "test", "wasm", "runtime-helper", "allocator", "nyir"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os (file_exists, file_remove, run_capture, temp_dir, pid)
+
+def compiler = env("NYTRIX_NY_FULL_BIN")
+assert(is_str(compiler) && compiler.len > 0,
+       "test runner provides the compiler path")
+def stem = temp_dir() + "/ny-wasm-malloc-" + to_str(pid())
+def wat = stem + ".wat"
+def wasm = stem + ".wasm"
+def bad_wat = stem + "-bad-size.wat"
+def bad_wasm = stem + "-bad-size.wasm"
+def large_wat = stem + "-oversize.wat"
+def large_wasm = stem + "-oversize.wasm"
+def source =
+    "fn load_value(int index) int {\n" +
+    "  def zero_a = malloc(0)\n" +
+    "  def zero_b = malloc(0)\n" +
+    "  if zero_a == zero_b { return -1 }\n" +
+    "  def pointer = malloc(8)\n" +
+    "  store64_i(pointer, 42, 0)\n" +
+    "  load64_i(pointer, index)\n" +
+    "}\nload_value(0)"
+def compile = run_capture(
+    [compiler, "--no-effect-require-known", "--native-backend=wasm",
+     "--native-only", "--nyir-verify",
+     "--emit-asm=" + wat, "-no-std", "-emit-only", "-e", source],
+    [], nil, false)
+def assemble = run_capture(["wat2wasm", wat, "-o", wasm], [], nil, false)
+def execute = run_capture(
+    ["wasmtime", "run", "--invoke", "rt_main", wasm], [], nil, false)
+def bad_compile = run_capture(
+    [compiler, "--no-effect-require-known", "--native-backend=wasm",
+     "--native-only", "--nyir-verify", "--emit-asm=" + bad_wat,
+     "-no-std", "-emit-only", "-e", "malloc(-1)"],
+    [], nil, false)
+def bad_assemble = run_capture(["wat2wasm", bad_wat, "-o", bad_wasm],
+                               [], nil, false)
+def bad_execute = run_capture(
+    ["wasmtime", "run", "--invoke", "rt_main", bad_wasm], [], nil, false)
+def large_compile = run_capture(
+    [compiler, "--no-effect-require-known", "--native-backend=wasm",
+     "--native-only", "--nyir-verify", "--emit-asm=" + large_wat,
+     "-no-std", "-emit-only", "-e", "malloc(4294967296)"],
+    [], nil, false)
+def large_assemble =
+    run_capture(["wat2wasm", large_wat, "-o", large_wasm], [], nil, false)
+def large_execute = run_capture(
+    ["wasmtime", "run", "--invoke", "rt_main", large_wasm], [], nil, false)
+def removed_wasm =
+    if file_exists(wasm) { is_ok(file_remove(wasm)) } else { true }
+def removed_wat = if file_exists(wat) { is_ok(file_remove(wat)) } else { true }
+def removed_bad_wasm =
+    if file_exists(bad_wasm) { is_ok(file_remove(bad_wasm)) } else { true }
+def removed_bad_wat =
+    if file_exists(bad_wat) { is_ok(file_remove(bad_wat)) } else { true }
+def removed_large_wasm =
+    if file_exists(large_wasm) { is_ok(file_remove(large_wasm)) } else { true }
+def removed_large_wat =
+    if file_exists(large_wat) { is_ok(file_remove(large_wat)) } else { true }
+assert(removed_wasm && removed_wat && removed_bad_wasm && removed_bad_wat &&
+       removed_large_wasm && removed_large_wat,
+       "remove generated WebAssembly artifacts")
+assert(compile.get("code", 127) == 0 && assemble.get("code", 127) == 0,
+       "native-only compilation emits valid allocator-enabled WebAssembly")
+assert(execute.get("code", 127) == 0 &&
+       endswith(execute.get("stdout", ""), "85\n"),
+       "zero-size mallocs are unique before ordinary allocation and access")
+assert(bad_compile.get("code", 127) == 0 &&
+       bad_assemble.get("code", 127) == 0 &&
+       bad_execute.get("code", 0) != 0,
+       "negative allocation size traps instead of wrapping to Wasm32")
+assert(large_compile.get("code", 127) == 0 &&
+       large_assemble.get("code", 127) == 0 &&
+       large_execute.get("code", 0) != 0,
+       "allocation sizes above Wasm32 trap instead of truncating")
+NY
+}

@@ -1,0 +1,1233 @@
+shape unsupported_or_loop_guard_does_not_prove_relation {
+  family "compiler-errors/proof"
+  generator "error"
+  features ["proof", "requires", "loop-flow", "soundness", "backend-parity"]
+  template ny-compile-fail
+  expect compile_fail
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect_message "'requires' condition is false or unproved for native lowering"
+  source ny <<'NY'
+fn greater_than(int lhs, int rhs) int requires lhs > rhs {
+  lhs - rhs
+}
+
+fn unsafe_loop(int x, int y) int {
+  mut i = 0
+  while x > y || i < 2 {
+    greater_than(x, y)
+    i += 1
+  }
+  0
+}
+
+unsafe_loop(0, 1)
+NY
+}
+
+shape loop_guard_fact_is_invalidated_after_parameter_rebind {
+  family "compiler-errors/proof"
+  generator "error"
+  features ["proof", "requires", "loop-flow", "mutation", "soundness", "backend-parity"]
+  template ny-compile-fail
+  expect compile_fail
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect_message "'requires' condition is false or unproved for native lowering"
+  source ny <<'NY'
+fn positive(int value) int requires value > 0 {
+  value
+}
+
+fn invalid_loop_rebind(int value) int {
+  while value > 0 {
+    value = 0
+    positive(value)
+  }
+  0
+}
+
+invalid_loop_rebind(1)
+NY
+}
+
+shape unsupported_or_c_style_for_guard_does_not_prove_relation {
+  family "compiler-errors/proof"
+  generator "error"
+  features ["proof", "requires", "loop-flow", "for", "soundness", "backend-parity"]
+  template ny-compile-fail
+  expect compile_fail
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect_message "'requires' condition is false or unproved for native lowering"
+  source ny <<'NY'
+fn within(int index, int limit) int requires index >= 0 && index < limit {
+  index
+}
+
+fn unsafe_for(int n) int {
+  mut total = 0
+  for (mut i = 0 i >= 0 || i < n i += 1) {
+    total = total + within(i, n)
+  }
+  total
+}
+
+unsafe_for(5)
+NY
+}
+
+shape division_interval_crossing_zero_remains_unknown {
+  family "compiler-errors/proof"
+  generator "error"
+  features ["proof", "requires", "division", "soundness", "backend-parity"]
+  template ny-compile-fail
+  expect compile_fail
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect_message "'requires' condition is false or unproved for native lowering"
+  source ny <<'NY'
+fn quotient_at_most_zero(int value, int divisor) int
+    requires value / divisor <= 0 {
+  value
+}
+
+fn unsafe_zero_crossing(int value, int divisor) int
+    requires value >= 0 && divisor >= -1 && divisor <= 1 {
+  quotient_at_most_zero(value, divisor)
+}
+
+unsafe_zero_crossing(1, 1)
+NY
+}
+
+shape modulo_interval_crossing_zero_remains_unknown {
+  family "compiler-errors/proof"
+  generator "error"
+  features ["proof", "requires", "modulo", "division-by-zero", "backend-parity"]
+  template ny-compile-fail
+  expect compile_fail
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect_message "'requires' condition is false or unproved for native lowering"
+  source ny <<'NY'
+fn bounded_remainder(int value, int divisor) int
+    requires value % divisor <= 4 {
+  value
+}
+
+fn unsafe_zero_crossing(int value, int divisor) int
+    requires value >= 0 && divisor >= -1 && divisor <= 1 {
+  bounded_remainder(value, divisor)
+}
+
+unsafe_zero_crossing(1, 0)
+NY
+}
+
+shape modulo_minimum_overflow_endpoint_remains_unknown {
+  family "compiler-errors/proof"
+  generator "error"
+  features ["proof", "requires", "modulo", "overflow", "backend-parity"]
+  template ny-compile-fail
+  expect compile_fail
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect_message "'requires' condition is false or unproved for native lowering"
+  source ny <<'NY'
+fn remainder_by_minus_one(int value) int requires value % -1 == 0 {
+  value
+}
+
+fn possibly_minimum_remainder(int value) int requires value <= 0 {
+  remainder_by_minus_one(value)
+}
+
+possibly_minimum_remainder(0)
+NY
+}
+
+shape negative_division_overflow_endpoint_remains_unknown {
+  family "compiler-errors/proof"
+  generator "error"
+  features ["proof", "requires", "division", "overflow", "soundness", "backend-parity"]
+  template ny-compile-fail
+  expect compile_fail
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect_message "'requires' condition is false or unproved for native lowering"
+  source ny <<'NY'
+fn quotient_at_least_zero(int value, int divisor) int
+    requires value / divisor >= 0 {
+  value
+}
+
+fn possibly_overflowing_negative_division(int value, int divisor) int
+    requires value <= 0 && divisor <= -1 {
+  quotient_at_least_zero(value, divisor)
+}
+
+possibly_overflowing_negative_division(0, -1)
+NY
+}
+
+shape positive_modulo_is_not_signed_remainder {
+  family "compiler-errors/proof"
+  generator "error"
+  features ["proof", "requires", "modulo", "soundness", "backend-parity"]
+  template ny-compile-fail
+  expect compile_fail
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect_message "'requires' condition is false or unproved for native lowering"
+  source ny <<'NY'
+fn nonnegative_remainder(int value) int requires value % 5 >= 0 {
+  value
+}
+
+fn negative_argument(int value) int requires value >= -100 && value <= -1 {
+  nonnegative_remainder(value)
+}
+
+negative_argument(-1)
+NY
+}
+
+shape z3_floor_division_does_not_certify_c_truncation {
+  family "compiler-errors/proof"
+  generator "error"
+  features ["proof", "requires", "division", "soundness", "backend-parity"]
+  template ny-compile-fail
+  expect compile_fail
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect_message "'requires' condition is false or unproved for native lowering"
+  source ny <<'NY'
+fn floor_quotient(int value, int divisor) int
+    requires value / divisor == -3 {
+  value
+}
+
+fn c_truncating_division(int value, int divisor) int
+    requires value == -5 && divisor == 2 {
+  floor_quotient(value, divisor)
+}
+
+c_truncating_division(-5, 2)
+NY
+}
+
+shape mutated_contract_parameter_does_not_reuse_precondition {
+  family "compiler-errors/proof"
+  generator "error"
+  features ["proof", "requires", "mutation", "soundness", "backend-parity"]
+  template ny-compile-fail
+  expect compile_fail
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect_message "'requires' condition is false or unproved for native lowering"
+  source ny <<'NY'
+fn positive(int n) int requires n > 0 {
+  n
+}
+
+fn invalid_after_rebind(int n) int requires n > 0 {
+  n = 0
+  positive(n)
+}
+
+invalid_after_rebind(1)
+NY
+}
+
+shape overflowing_contract_premise_is_not_proven {
+  family "compiler-errors/proof"
+  generator "error"
+  features ["proof", "requires", "overflow", "soundness", "backend-parity"]
+  template ny-compile-fail
+  expect compile_fail
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect_message "'requires' condition is false or unproved for native lowering"
+  source ny <<'NY'
+fn increment_contract(int value) int requires value + 1 > value {
+  value
+}
+
+fn unproved_increment(int value) int {
+  increment_contract(value)
+}
+
+unproved_increment(0)
+NY
+}
+
+shape omitted_default_does_not_satisfy_requires_implicitly {
+  family "compiler-errors/proof"
+  generator "error"
+  features ["proof", "requires", "default-argument", "soundness", "backend-parity"]
+  template ny-compile-fail
+  expect compile_fail
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect_message "'requires' condition is false or unproved for native lowering"
+  source ny <<'NY'
+fn below_default(int value, int upper = 10) int requires value < upper {
+  value
+}
+
+fn unsafe_forward(int value) int {
+  below_default(value)
+}
+
+unsafe_forward(9)
+NY
+}
+
+shape callee_scope_default_without_caller_proof_is_rejected {
+  family "compiler-errors/proof"
+  generator "error"
+  features ["proof", "requires", "default-argument", "lexical-scope", "soundness", "backend-parity"]
+  template ny-compile-fail
+  expect compile_fail
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect_message "'requires' condition is false or unproved for native lowering"
+  source ny <<'NY'
+def module_upper = 10
+
+fn below_default(int value, int upper = module_upper) int
+    requires value < upper {
+  value
+}
+
+fn unsafe_forward(int value) int {
+  below_default(value: value)
+}
+
+unsafe_forward(9)
+NY
+}
+
+shape shadowed_callee_default_global_is_not_used_as_a_caller_proof {
+  family "compiler-errors/proof"
+  generator "error"
+  features ["proof", "requires", "default-argument", "shadowing", "soundness", "backend-parity"]
+  template ny-compile-fail
+  expect compile_fail
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect_message "'requires' condition is false or unproved for native lowering"
+  source ny <<'NY'
+def module_upper = 10
+
+fn below_default(int value, int upper = module_upper) int
+    requires value < upper {
+  value
+}
+
+fn unsafe_forward(int value) int requires value < 10 {
+  mut module_upper = 1
+  below_default(value: value)
+}
+
+unsafe_forward(9)
+NY
+}
+
+shape mutable_callee_default_global_is_not_a_proof_constant {
+  family "compiler-errors/proof"
+  generator "error"
+  features ["proof", "requires", "default-argument", "mutable-global", "soundness", "backend-parity"]
+  template ny-compile-fail
+  expect compile_fail
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect_message "'requires' condition is false or unproved for native lowering"
+  source ny <<'NY'
+mut int module_upper = 10
+
+fn below_default(int value, int upper = module_upper) int
+    requires value < upper {
+  value
+}
+
+fn unsafe_forward(int value) int requires value < 10 {
+  below_default(value: value)
+}
+
+unsafe_forward(9)
+NY
+}
+
+shape parameter_default_arithmetic_requires_a_nonoverflow_proof {
+  family "compiler-errors/proof"
+  generator "error"
+  features ["proof", "requires", "default-argument", "overflow", "soundness", "backend-parity"]
+  template ny-compile-fail
+  expect compile_fail
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect_message "'requires' condition is false or unproved for native lowering"
+  source ny <<'NY'
+fn below_parameter_default(int value, int upper = value + 1) int
+    requires value < upper {
+  value
+}
+
+fn unsafe_forward(int value) int requires value > 0 {
+  below_parameter_default(value)
+}
+
+unsafe_forward(1)
+NY
+}
+
+shape false_refinement_requires_is_not_proven_by_fallback {
+  family "compiler-errors/proof"
+  generator "error"
+  features ["proof", "requires", "refinement", "false", "backend-parity"]
+  template ny-compile-fail
+  expect compile_fail
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect_message "'requires' condition is false or unproved for native lowering"
+  source ny <<'NY'
+use core
+
+refine PositiveInput = int where(value) { value > 0 }
+
+fn positive_refinement(int value) int requires PositiveInput(value) {
+  value
+}
+positive_refinement(-5)
+NY
+}
+
+shape impure_requires_predicate_is_not_executed_for_proof {
+  family "compiler-errors/proof"
+  generator "error"
+  features ["proof", "requires", "pure-predicate", "soundness", "backend-parity"]
+  template ny-compile-fail
+  expect compile_fail
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect_message "'requires' condition is false or unproved for native lowering"
+  source ny <<'NY'
+use core
+
+fn impure_positive_predicate(int value) bool {
+  print("must not run during proof")
+  value > 0
+}
+
+fn guarded(int value) int requires impure_positive_predicate(value) {
+  value
+}
+
+guarded(5)
+NY
+}
+
+shape symbolic_caller_does_not_inline_impure_predicate {
+  family "compiler-errors/proof"
+  generator "error"
+  features ["proof", "requires", "pure-predicate", "impure", "soundness", "backend-parity"]
+  template ny-compile-fail
+  expect compile_fail
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect_message "'requires' condition is false or unproved for native lowering"
+  source ny <<'NY'
+use core
+
+fn impure_positive_predicate(int value) bool {
+  print("must not run during proof")
+  value > 0
+}
+
+fn guarded(int value) int requires impure_positive_predicate(value) {
+  value
+}
+
+fn invalid_forward(int value) int requires value > 0 {
+  guarded(value)
+}
+
+invalid_forward(5)
+NY
+}
+
+shape false_pure_requires_predicate_is_not_proven {
+  family "compiler-errors/proof"
+  generator "error"
+  features ["proof", "requires", "pure-predicate", "false", "backend-parity"]
+  template ny-compile-fail
+  expect compile_fail
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect_message "'requires' condition is false or unproved for native lowering"
+  source ny <<'NY'
+@pure
+fn positive_predicate(int value) bool {
+  value > 0
+}
+
+fn guarded(int value) int requires positive_predicate(value) {
+  value
+}
+
+guarded(-1)
+NY
+}
+
+shape weaker_premise_does_not_prove_fallthrough_predicate {
+  family "compiler-errors/proof"
+  generator "error"
+  features ["proof", "requires", "pure-predicate", "early-return", "soundness", "backend-parity"]
+  template ny-compile-fail
+  expect compile_fail
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect_message "'requires' condition is false or unproved for native lowering"
+  source ny <<'NY'
+@pure
+fn positive(int value) bool {
+  def positive = value > 0
+  if positive {
+    return true
+  }
+  false
+}
+
+fn needs_positive(int value) int requires positive(value) {
+  value
+}
+
+fn weaker_caller(int value) int requires value < 100 {
+  needs_positive(value)
+}
+
+weaker_caller(1)
+NY
+}
+
+shape weaker_premise_does_not_prove_returned_statement_match {
+  family "compiler-errors/proof"
+  generator "error"
+  features ["proof", "requires", "pure-predicate", "statement-match", "soundness", "backend-parity"]
+  template ny-compile-fail
+  expect compile_fail
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect_message "'requires' condition is false or unproved for native lowering"
+  source ny <<'NY'
+@pure
+fn statement_positive(int value) bool {
+  match value {
+    0 -> { return false }
+    else { return value > 0 }
+  }
+}
+
+fn needs_statement_positive(int value) int
+    requires statement_positive(value) {
+  value
+}
+
+fn weaker_statement_caller(int value) int requires value >= 0 {
+  needs_statement_positive(value)
+}
+
+weaker_statement_caller(1)
+NY
+}
+
+shape Fin_upper_bound_does_not_prove_out_of_range_precondition {
+  family "compiler-errors/proof"
+  generator "error"
+  features ["proof", "requires", "Fin", "range-bound", "soundness", "backend-parity"]
+  template ny-compile-fail
+  expect compile_fail
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect_message "'requires' condition is false or unproved for native lowering"
+  source ny <<'NY'
+use core
+
+fn needs_at_least_four(int value) int requires value >= 4 {
+  value
+}
+
+fn invalid_fin_call(Fin<4> index) int {
+  needs_at_least_four(index)
+}
+
+invalid_fin_call(3)
+NY
+}
+
+shape weaker_symbolic_premise_does_not_prove_pure_predicate {
+  family "compiler-errors/proof"
+  generator "error"
+  features ["proof", "requires", "pure-predicate", "symbolic", "soundness", "backend-parity"]
+  template ny-compile-fail
+  expect compile_fail
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect_message "'requires' condition is false or unproved for native lowering"
+  source ny <<'NY'
+@pure
+fn positive_predicate(int value) bool {
+  value > 0
+}
+
+fn guarded(int value) int requires positive_predicate(value) {
+  value
+}
+
+fn invalid(int value) int requires value >= 0 {
+  guarded(value)
+}
+
+invalid(0)
+NY
+}
+
+shape weaker_premise_does_not_prove_branch_pure_predicate {
+  family "compiler-errors/proof"
+  generator "error"
+  features ["proof", "requires", "pure-predicate", "branch", "soundness", "backend-parity"]
+  template ny-compile-fail
+  expect compile_fail
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect_message "'requires' condition is false or unproved for native lowering"
+  source ny <<'NY'
+@pure
+fn branch_positive(int value) bool {
+  if value > 0 {
+    return true
+  } else {
+    return false
+  }
+}
+
+fn branch_guarded(int value) int requires branch_positive(value) {
+  value
+}
+
+fn weaker_caller(int value) int requires value >= 0 {
+  branch_guarded(value)
+}
+
+weaker_caller(0)
+NY
+}
+
+shape qualified_impure_predicate_is_not_executed_for_proof {
+  family "compiler-errors/proof"
+  generator "error"
+  features ["proof", "requires", "pure-predicate", "qualified-call", "soundness", "backend-parity"]
+  template ny-compile-fail
+  expect compile_fail
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect_message "'requires' condition is false or unproved for native lowering"
+  source ny <<'NY'
+use core
+
+module ImpurePredicateProvider(is_positive) {
+  fn is_positive(int value) bool {
+    print("must not run during proof")
+    value > 0
+  }
+}
+use ImpurePredicateProvider as impure_predicate_provider
+
+fn needs_positive(int value) int
+    requires impure_predicate_provider.is_positive(value) {
+  value
+}
+
+fn caller(int value) int requires value > 0 {
+  needs_positive(value)
+}
+
+caller(1)
+NY
+}
+
+shape ambiguous_attached_predicate_fails_closed {
+  family "compiler-errors/proof"
+  generator "error"
+  features ["proof", "requires", "attached-method", "ambiguity", "soundness", "backend-parity"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "'requires' condition is false or unproved for native lowering"
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  source ny <<'NY'
+use core
+
+impl int {
+  @pure
+  fn predicate_marker(self value) bool {
+    value > 0
+  }
+}
+
+impl str {
+  @pure
+  fn predicate_marker(self value) bool {
+    value == "positive"
+  }
+}
+
+fn needs_marker(int value) int requires value.predicate_marker() {
+  value
+}
+
+fn weaker_caller(int value) int requires value > 0 {
+  needs_marker(value)
+}
+
+weaker_caller(1)
+NY
+}
+
+shape weaker_premise_does_not_prove_local_pure_predicate {
+  family "compiler-errors/proof"
+  generator "error"
+  features ["proof", "requires", "pure-predicate", "local", "soundness", "backend-parity"]
+  template ny-compile-fail
+  expect compile_fail
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect_message "'requires' condition is false or unproved for native lowering"
+  source ny <<'NY'
+@pure
+fn local_positive(int value) bool {
+  def positive = value > 0
+  positive
+}
+
+fn local_guarded(int value) int requires local_positive(value) {
+  value
+}
+
+fn weaker_caller(int value) int requires value >= 0 {
+  local_guarded(value)
+}
+
+weaker_caller(0)
+NY
+}
+
+shape unsupported_nonlinear_requires_formula_fails_closed {
+  family "compiler-errors/proof"
+  generator "error"
+  features ["proof", "requires", "nonlinear", "soundness", "backend-parity"]
+  template ny-compile-fail
+  expect compile_fail
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect_message "'requires' condition is false or unproved for native lowering"
+  source ny <<'NY'
+fn positive_square(int value) int requires value * value > 0 {
+  value
+}
+
+fn caller(int value) int requires value > 0 {
+  positive_square(value)
+}
+
+caller(2)
+NY
+}
+
+shape bounded_nonlinear_interval_does_not_hide_counterexample {
+  family "compiler-errors/proof"
+  generator "error"
+  features ["proof", "requires", "nonlinear", "counterexample", "backend-parity"]
+  template ny-compile-fail
+  expect compile_fail
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect_message "'requires' condition is false or unproved for native lowering"
+  source ny <<'NY'
+fn square_at_most_eighty(int value) int requires value * value <= 80 {
+  value
+}
+
+fn forwards_bounded_square(int value) int
+    requires value >= -9 && value <= 9 {
+  square_at_most_eighty(value)
+}
+
+forwards_bounded_square(9)
+NY
+}
+
+shape cross_variable_product_interval_keeps_counterexample {
+  family "runtime/proofs"
+  generator "error"
+  features ["proof", "requires", "nonlinear", "interval", "soundness"]
+  template ny-compile-fail
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_fail
+  expect_message "precondition"
+  source ny <<'NY'
+use core
+
+fn needs_small_product(int left, int right) int requires left * right <= 5 {
+  left + right
+}
+
+fn forward_product(int left, int right) int
+    requires left >= 0 && left <= 2 && right >= 1 && right <= 3 {
+  needs_small_product(left, right)
+}
+
+forward_product(2, 3)
+NY
+}
+
+shape bounded_nonlinear_partition_keeps_counterexample {
+  family "compiler-errors/proof"
+  generator "error"
+  features ["proof", "requires", "nonlinear", "interval", "soundness", "backend-parity"]
+  template ny-compile-fail
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_fail
+  expect_message "'requires' condition is false or unproved for native lowering"
+  source ny <<'NY'
+fn needs_below_complement_product(Fin<11> value) int
+    requires value * (10 - value) <= 24 {
+  value
+}
+
+fn forwards_below_complement_product(Fin<11> value) int {
+  needs_below_complement_product(value)
+}
+
+forwards_below_complement_product(5)
+NY
+}
+
+shape weaker_premise_does_not_prove_multilocal_predicate {
+  family "compiler-errors/proof"
+  generator "error"
+  features ["proof", "requires", "pure-predicate", "local", "soundness", "backend-parity"]
+  template ny-compile-fail
+  expect compile_fail
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect_message "'requires' condition is false or unproved for native lowering"
+  source ny <<'NY'
+@pure
+fn positive_below_limit(int value) bool {
+  def positive = value > 0
+  def below_limit = value < 100
+  positive && below_limit
+}
+
+fn needs_bounded_positive(int value) int
+    requires positive_below_limit(value) {
+  value
+}
+
+fn weaker_caller(int value) int requires value > 0 {
+  needs_bounded_positive(value)
+}
+
+weaker_caller(1)
+NY
+}
+
+shape weaker_premise_does_not_prove_nested_branch_predicate {
+  family "compiler-errors/proof"
+  generator "error"
+  features ["proof", "requires", "pure-predicate", "branch", "soundness", "backend-parity"]
+  template ny-compile-fail
+  expect compile_fail
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect_message "'requires' condition is false or unproved for native lowering"
+  source ny <<'NY'
+@pure
+fn positive_below_limit(int value) bool {
+  if value > 0 {
+    def positive = value > 0
+    if value < 100 {
+      return positive
+    } else {
+      return false
+    }
+  } else {
+    return false
+  }
+}
+
+fn needs_bounded_positive(int value) int
+    requires positive_below_limit(value) {
+  value
+}
+
+fn weaker_caller(int value) int requires value > 0 {
+  needs_bounded_positive(value)
+}
+
+weaker_caller(1)
+NY
+}
+
+shape inclusive_foreach_bound_does_not_prove_strict_upper_bound {
+  family "compiler-errors/proof"
+  generator "error"
+  features ["proof", "requires", "iterable-range", "soundness", "backend-parity"]
+  template ny-compile-fail
+  expect compile_fail
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect_message "'requires' condition is false or unproved for native lowering"
+  source ny <<'NY'
+fn below_limit(int index, int limit) int requires index < limit {
+  index
+}
+
+fn caller(int limit) int {
+  mut total = 0
+  for index in 0..limit {
+    total += below_limit(index, limit)
+  }
+  total
+}
+
+caller(5)
+NY
+}
+
+shape iterable_range_fact_is_invalidated_when_bound_changes {
+  family "compiler-errors/proof"
+  generator "error"
+  features ["proof", "requires", "iterable-range", "mutation", "soundness", "backend-parity"]
+  template ny-compile-fail
+  expect compile_fail
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect_message "'requires' condition is false or unproved for native lowering"
+  source ny <<'NY'
+fn within_inclusive(int index, int limit) int
+    requires index >= 0 && index <= limit {
+  index
+}
+
+fn caller(int initial_limit) int {
+  mut limit = initial_limit
+  mut total = 0
+  for index in 0..limit {
+    limit = 0
+    total += within_inclusive(index, limit)
+  }
+  total
+}
+
+caller(5)
+NY
+}
+
+shape iterable_range_does_not_assume_nonoverflowing_increment {
+  family "compiler-errors/proof"
+  generator "error"
+  features ["proof", "requires", "iterable-range", "overflow", "soundness", "backend-parity"]
+  template ny-compile-fail
+  expect compile_fail
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect_message "'requires' condition is false or unproved for native lowering"
+  source ny <<'NY'
+fn nonnegative(int index) int requires index >= 0 {
+  index
+}
+
+fn caller(int limit) int {
+  mut total = 0
+  for index in 0..limit {
+    total += nonnegative(index)
+  }
+  total
+}
+
+caller(5)
+NY
+}
+
+shape match_predicate_requires_stronger_premise {
+  family "compiler-errors/proof"
+  generator "error"
+  features ["proof", "requires", "match", "soundness", "backend-parity"]
+  template ny-compile-fail
+  expect compile_fail
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect_message "'requires' condition is false or unproved for native lowering"
+  source ny <<'NY'
+@pure
+fn match_positive_predicate(int value) bool {
+  return match value {
+    0 -> false
+    else { value > 0 }
+  }
+}
+
+fn needs_positive(int value) int
+    requires match_positive_predicate(value) {
+  value
+}
+
+fn weaker_premise(int value) int requires value != 0 {
+  needs_positive(value)
+}
+
+weaker_premise(1)
+NY
+}
+
+shape nonexhaustive_boolean_match_does_not_prove_requires {
+  family "compiler-errors/proof"
+  generator "error"
+  features ["proof", "requires", "match", "soundness", "backend-parity"]
+  template ny-compile-fail
+  expect compile_fail
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect_message "'requires' condition is false or unproved for native lowering"
+  source ny <<'NY'
+@pure
+fn partial_boolean_predicate(bool value) bool {
+  return match value {
+    true -> value
+  }
+}
+
+fn needs_partial_predicate(bool value) int
+    requires partial_boolean_predicate(value) {
+  1
+}
+
+fn forwards_partial_predicate(bool value) int requires value {
+  needs_partial_predicate(value)
+}
+
+forwards_partial_predicate(true)
+NY
+}
+
+shape guarded_boolean_match_does_not_assume_exhaustive_patterns {
+  family "compiler-errors/proof"
+  generator "error"
+  features ["proof", "requires", "match", "guards", "soundness", "backend-parity"]
+  template ny-compile-fail
+  expect compile_fail
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect_message "'requires' condition is false or unproved for native lowering"
+  source ny <<'NY'
+@pure
+fn guarded_boolean_predicate(bool value) bool {
+  return match value {
+    true if value -> value
+    false -> !value
+  }
+}
+
+fn needs_guarded_predicate(bool value) int
+    requires guarded_boolean_predicate(value) {
+  1
+}
+
+fn forwards_guarded_predicate(bool value) int requires value {
+  needs_guarded_predicate(value)
+}
+
+forwards_guarded_predicate(true)
+NY
+}
+
+shape mutable_local_predicate_alias_fails_closed {
+  family "compiler-errors/proof"
+  generator "error"
+  features ["proof", "requires", "indirect-call", "mutation", "soundness", "backend-parity"]
+  template ny-compile-fail
+  expect compile_fail
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect_message "'requires' condition is false or unproved for native lowering"
+  source ny <<'NY'
+@pure
+fn positive_predicate(int value) bool {
+  value > 0
+}
+
+@pure
+fn mutable_alias_predicate(int value) bool {
+  mut predicate = positive_predicate
+  predicate(value)
+}
+
+fn needs_mutable_alias(int value) int
+    requires mutable_alias_predicate(value) {
+  value
+}
+
+fn weaker_caller(int value) int requires value != 0 {
+  needs_mutable_alias(value)
+}
+
+weaker_caller(1)
+NY
+}
+
+shape impure_indirect_predicate_fails_closed {
+  family "compiler-errors/proof"
+  generator "error"
+  features ["proof", "requires", "indirect-call", "effect-row", "soundness", "backend-parity"]
+  template ny-compile-fail
+  expect compile_fail
+  flags_matrix "--native --run --no-strict-types; --native-backend=llvm --jit --jit-engine=mcjit --no-strict-types; --native-backend=llvm --jit --jit-engine=orc --no-strict-types; --native-only --no-strict-types"
+  expect_message "'requires' condition is false or unproved for native lowering"
+  source ny <<'NY'
+fn impure_predicate(int value) bool {
+  print("predicate is not executed during proof")
+  value > 0
+}
+
+@effects(e)
+fn invoke_predicate(fnptr predicate, int value) bool {
+  predicate(value)
+}
+
+fn needs_predicate(int value) int
+    requires invoke_predicate(impure_predicate, value) {
+  value
+}
+
+fn weaker_caller(int value) int requires value != 0 {
+  needs_predicate(value)
+}
+
+weaker_caller(1)
+NY
+}
+
+shape range_match_weaker_guard_fails_closed {
+  family "compiler-errors/proof"
+  generator "error"
+  features ["proof", "requires", "match", "range-pattern", "soundness", "backend-parity"]
+  template ny-compile-fail
+  expect compile_fail
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect_message "'requires' condition is false or unproved for native lowering"
+  source ny <<'NY'
+@pure
+fn positive_in_range(int value) bool {
+  return match value {
+    1..10 -> true
+    else { false }
+  }
+}
+
+fn requires_range(int value) int requires positive_in_range(value) {
+  value
+}
+
+fn weaker_caller(int value) int requires value >= 0 {
+  requires_range(value)
+}
+
+weaker_caller(5)
+NY
+}
+
+shape if_initializer_weaker_guard_fails_closed {
+  family "compiler-errors/proof"
+  generator "error"
+  features ["proof", "requires", "pure-predicate", "if-initializer", "soundness", "backend-parity"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "precondition"
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  source ny <<'NY'
+@pure
+fn positive_from_local(int value) bool {
+  if (def is_positive = value > 0 is_positive) {
+    return true
+  } else {
+    return false
+  }
+}
+
+fn requires_positive_local(int value) int
+    requires positive_from_local(value) {
+  value
+}
+
+fn weaker_guard(int value) int requires value >= 0 {
+  requires_positive_local(value)
+}
+
+weaker_guard(0)
+NY
+}
+
+shape nested_expression_match_weaker_guard_fails_closed {
+  family "compiler-errors/proof"
+  generator "error"
+  features ["proof", "requires", "pure-predicate", "match", "expression", "soundness", "backend-parity"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "precondition"
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  source ny <<'NY'
+@pure
+fn nested_positive(int value) bool {
+  return (match value {
+    0 -> false
+    else { value > 0 }
+  }) || false
+}
+
+fn requires_nested_positive(int value) int requires nested_positive(value) {
+  value
+}
+
+fn weaker_guard(int value) int requires value >= 0 {
+  requires_nested_positive(value)
+}
+
+weaker_guard(0)
+NY
+}
+
+shape statement_range_match_weaker_guard_fails_closed {
+  family "compiler-errors/proof"
+  generator "error"
+  features ["proof", "requires", "pure-predicate", "match", "range-pattern", "statement-match", "soundness", "backend-parity"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "precondition"
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  source ny <<'NY'
+@pure
+fn positive_statement_range(int value) bool {
+  match value {
+    1..10 -> { return true }
+    else { return false }
+  }
+}
+
+fn requires_statement_range(int value) int
+    requires positive_statement_range(value) {
+  value
+}
+
+fn weaker_guard(int value) int requires value >= 0 {
+  requires_statement_range(value)
+}
+
+weaker_guard(5)
+NY
+}
+
+shape incomplete_finite_match_fails_closed {
+  family "compiler-errors/proof"
+  generator "error"
+  features ["proof", "requires", "match", "finite-range", "soundness", "backend-parity"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "precondition"
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  source ny <<'NY'
+@pure
+fn finite_positive(Fin<4> value) bool {
+  return match value {
+    0 -> false
+    1..2 -> true
+  }
+}
+
+fn needs_finite_positive(Fin<4> value) int
+    requires finite_positive(value) {
+  value
+}
+
+fn forwards_incomplete_match(Fin<4> value)
+    requires value >= 1 {
+  needs_finite_positive(value)
+}
+
+forwards_incomplete_match(2)
+NY
+}

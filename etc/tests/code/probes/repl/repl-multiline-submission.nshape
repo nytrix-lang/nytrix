@@ -1,0 +1,12 @@
+shape test_repl_multiline_submission {
+  family "repl"
+  generator "embedded"
+  features ["ny", "test", "repl", "incremental", "multiline"]
+  template ny-test-case
+  expect compile_and_run
+  repl_expect "REPL-MULTILINE-SUBMISSION-OK"
+  repl_commands "fn repl_multiline_double(int value) int {\n  value * 2\n}\nassert(repl_multiline_double(21) == 42, \"multiline declaration is accepted across terminal input lines\")\nprint(\"REPL-MULTILINE-SUBMISSION-OK\")"
+  source ny <<'NY'
+1 + 1
+NY
+}

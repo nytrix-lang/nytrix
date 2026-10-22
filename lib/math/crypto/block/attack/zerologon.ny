@@ -6,11 +6,11 @@
 ;; - https://nvd.nist.gov/vuln/detail/CVE-2020-1472
 ;; - https://nvlpubs.nist.gov/nistpubs/Legacy/SP/nistspecialpublication800-38a.pdf
 ;; References:
-;; - std.math.crypto.block.attack
-;; - std.math.crypto
-module std.math.crypto.block.attack.zerologon(zerologon_attack_step, zerologon_verify)
-use std.core
-use std.math.bin
+;; - core.math.crypto.block.attack
+;; - core.math.crypto
+module core.math.crypto.block.attack.zerologon(zerologon_attack_step, zerologon_verify)
+use core
+use core.math.bin
 
 fn _zero_bytes(int n) list {
    mut out = []
@@ -70,7 +70,7 @@ fn zerologon_verify(fnptr auth_oracle, list session_key) bool {
    mut all_match = true
    mut i = 0
    while i < resp_len {
-      def expected = bxor(session_key[i % key_len], challenge[i % 8])
+      def expected = session_key[i % key_len] ^ challenge[i % 8]
       if response[i] != expected {
          all_match = false
          i = resp_len

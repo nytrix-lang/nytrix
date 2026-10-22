@@ -1,0 +1,551 @@
+shape ownership_generated_allowance_flow_differential {
+  family "language/ownership"
+  generator "embedded"
+  features ["ownership", "allowance", "generated", "differential"]
+  estimate_ms 23000
+  timeout 180
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.subprocess as process
+use core.os.prim (env)
+use core.os.thread as thread
+
+def compiler = env("NYTRIX_NY_FULL_BIN")
+def core_bc = env("NYTRIX_TEST_CORE_BC")
+def shared_core_bc = is_str(core_bc) ? core_bc : ""
+assert(is_str(compiler) && compiler.len > 0,
+       "test runner provides the compiler used by the allowance differential")
+
+mut generated_cases = []
+
+fn compile_generated(str source) dict {
+  mut args = []
+  if shared_core_bc.len > 0 {
+    args = args.append("--core-bc")
+    args = args.append(shared_core_bc)
+  }
+  args = args.append("--ownership-strict")
+  args = args.append("--native-only")
+  args = args.append("--nyir-verify")
+  args = args.append("-c")
+  args = args.append(source)
+  process.run_capture(compiler, args, nil, false)
+}
+
+fn check_generated(str source, bool expected, str label) int {
+  generated_cases = generated_cases.append([source, 0, expected, label, ""])
+  0
+}
+
+fn check_generated_failure(str source, str reason, str label) int {
+  generated_cases = generated_cases.append([source, 1, false, label, reason])
+  0
+}
+
+fn run_generated_cases(int first_case) str {
+  mut int case_index = first_case
+  while case_index < generated_cases.len {
+    def test_case = generated_cases.get(case_index, [])
+    def source = test_case.get(0, "")
+    def kind = test_case.get(1, 0)
+    def expected = test_case.get(2, false)
+    def label = test_case.get(3, "")
+    def reason = test_case.get(4, "")
+    def result = compile_generated(source)
+    def output = result.get("stdout", "")
+    if kind == 0 {
+      def accepted = result.get("code", 127) == 0 &&
+                     str.find(output, "error:") < 0
+      if accepted != expected {
+        return label + " allowance shadow disagrees with strict checker " +
+               "(accepted=" + to_str(accepted) + ", expected=" +
+               to_str(expected) + "): " + output +
+               "\ngenerated source:\n" + source
+      }
+    } else if str.find(output, reason) < 0 {
+      return label + " expected diagnostic '" + reason + "': " + output +
+             "\ngenerated source:\n" + source
+    }
+    case_index += 4
+  }
+  ""
+}
+
+fn reassignment_source(int before_uses, int after_uses, int lo, int hi) str {
+  mut str source = "use core\n@allowance(x, [" + to_str(lo) + "," +
+                   to_str(hi) + "])\nfn generated(int x) int {\n"
+  mut int index = 0
+  while index < before_uses {
+    source += "def before_" + to_str(index) + " = x\n"
+    index += 1
+  }
+  source += "x = 7\n"
+  index = 0
+  while index < after_uses {
+    source += "def after_" + to_str(index) + " = x\n"
+    index += 1
+  }
+  source += "0\n}\ngenerated(3)\n0\n"
+  source
+}
+
+fn trailing_defer_source(int before_uses, int hi) str {
+  mut str source = "use core\n@allowance(x, [0," + to_str(hi) +"])\n" +
+                   "fn generated(int x) {\n"
+  mut int index = 0
+  while index < before_uses {
+    source += "def before_" + to_str(index) + " = x\n"
+    index += 1
+  }
+  source += "defer {\nx = 7\n}\n}\ngenerated(3)\n0\n"
+  source
+}
+
+fn branch_reassignment_source(int before_uses, int after_uses, int lo,
+                              int hi) str {
+  mut str source = "use core\n@allowance(x, [" + to_str(lo) + "," +
+                   to_str(hi) + "])\nfn generated(bool choose, int x) int {\n"
+  mut int index = 0
+  while index < before_uses {
+    source += "def before_" + to_str(index) + " = x\n"
+    index += 1
+  }
+  source += "if choose {\nx = 7\n} else {\nx = 9\n}\n"
+  index = 0
+  while index < after_uses {
+    source += "def after_" + to_str(index) + " = x\n"
+    index += 1
+  }
+  source += "0\n}\ngenerated(true, 3)\n0\n"
+  source
+}
+
+fn fixed_range_match_source(int first_uses, int fallback_uses, int lo,
+                            int hi) str {
+  mut str source = "use core\n@allowance(x, [" + to_str(lo) + "," +
+                   to_str(hi) + "])\nfn generated(int selector, int x) int {\n" +
+                   "for index in 0..1 {\nmatch selector {\n0 -> {\n"
+  mut int index = 0
+  while index < first_uses {
+    source += "def first_" + to_str(index) + " = x\n"
+    index += 1
+  }
+  source += "}\n_ -> {\n"
+  index = 0
+  while index < fallback_uses {
+    source += "def fallback_" + to_str(index) + " = x\n"
+    index += 1
+  }
+  source += "}\n}\n}\n0\n}\ngenerated(0, 3)\n0\n"
+  source
+}
+
+fn fixed_range_guarded_wildcard_source(int lo, int hi) str {
+  "use core\n@allowance(x, [" + to_str(lo) + "," + to_str(hi) + "])\n" +
+      "fn generated(bool choose, int x) int {\n" +
+      "for index in 0..1 {\nmatch true {\n_ if choose -> { def used = x }\n}\n}\n" +
+      "0\n}\ngenerated(false, 3)\n0\n"
+}
+
+fn one_sided_reassignment_source(int before_uses, int after_uses, int lo,
+                                 int hi) str {
+  mut str source = "use core\n@allowance(x, [" + to_str(lo) + "," +
+                   to_str(hi) + "])\nfn generated(bool choose, int x) int {\n"
+  mut int index = 0
+  while index < before_uses {
+    source += "def before_" + to_str(index) + " = x\n"
+    index += 1
+  }
+  source += "if choose {\nx = 7\n}\n"
+  index = 0
+  while index < after_uses {
+    source += "def after_" + to_str(index) + " = x\n"
+    index += 1
+  }
+  source += "0\n}\ngenerated(true, 3)\n0\n"
+  source
+}
+
+fn loop_reassignment_source() str {
+  "use core\n@allowance(x, [0,1])\n" +
+      "fn generated(bool run, int x) int {\n" +
+      "mut bool once = run\nwhile once {\nx = 7\nonce = false\n}\nx\n0\n}\n" +
+      "generated(true, 3)\n0\n"
+}
+
+fn guard_reassignment_source(int lo, int hi) str {
+  "layout AllowanceGuard {\ni32 value\n}\n" +
+      "use core\n@allowance(x, [" + to_str(lo) + "," + to_str(hi) + "])\n" +
+      "fn generated(any raw, int x) int {\n   def before = x\n" +
+      "   layout guard AllowanceGuard value = raw else {\n      x = 7\n   }\n" +
+      "   return before + x\n}\n" +
+      "generated(nil, 3)\n0\n"
+}
+
+fn fixed_range_reassignment_source(int lo, int hi, str start, str stop) str {
+  "use core\n@allowance(x, [" + to_str(lo) + "," + to_str(hi) + "])\n" +
+      "fn generated(int x) int {\ndef before = x\n" +
+      "for index in " + start + ".." + stop +
+      " {\ndef during = x\nx = 7\n}\ndef after = x\n0\n}\n" +
+      "generated(3)\n0\n"
+}
+
+fn nested_fixed_range_reassignment_source(bool duplicate_use) str {
+  "use core\n@allowance(x, [0,1])\n" +
+      "fn generated(int x) int {\n" +
+      "for outer in 0..1 {\nfor inner in 0..2 {\n" +
+      "def first = x\n" +
+      (if duplicate_use { "def second = x\n" } else { "" }) +
+      "x = 7\n}\n}\n0\n}\ngenerated(3)\n0\n"
+}
+
+fn cstyle_reassignment_source(int iterations, bool inclusive) str {
+  def op = if inclusive { "<=" } else { "<" }
+  def bound = if inclusive { iterations - 1 } else { iterations }
+  "use core\n@allowance(x, [1,2])\nfn generated(int x) int {\n" +
+      "def before = x\nfor (mut index = 0 index " + op + " " +
+      to_str(bound) + " ++index) {\ndef during = x\nx = 7\n}\n" +
+      "def after = x\n0\n}\ngenerated(3)\n0\n"
+}
+
+fn counted_while_reassignment_source(int iterations, bool inclusive) str {
+  def op = if inclusive { "<=" } else { "<" }
+  def bound = if inclusive { iterations - 1 } else { iterations }
+  "use core\n@allowance(x, [1,2])\nfn generated(int x) int {\n" +
+      "def before = x\nwhile (mut index = 0 index " + op + " " +
+      to_str(bound) + " ++index) {\ndef during = x\nx = 7\n}\n" +
+      "def after = x\n0\n}\ngenerated(3)\n0\n"
+}
+
+fn cstyle_dynamic_reassignment_source() str {
+  "use core\n@allowance(x, [0,1])\n" +
+      "fn generated(int limit, int x) int {\n" +
+      "for (mut index = 0 index < limit ++index) { x = 7 }\n" +
+      "x\n0\n}\ngenerated(2, 3)\n0\n"
+}
+
+fn counted_while_dynamic_reassignment_source() str {
+  "use core\n@allowance(x, [0,1])\n" +
+      "fn generated(int limit, int x) int {\n" +
+      "mut int index = 0\nwhile index < limit {\nx = 7\nindex += 1\n}\n" +
+      "x\n0\n}\ngenerated(2, 3)\n0\n"
+}
+
+fn counted_loop_iterator_reassignment_source() str {
+  "use core\n@allowance(x, [0,1])\n" +
+      "fn generated(int x) int {\n" +
+      "for (mut index = 0 index < 2 ++index) { index = 100\nx = 7 }\n" +
+      "0\n}\ngenerated(3)\n0\n"
+}
+
+fn fixed_range_if_reassignment_source(int lo, int hi) str {
+  "use core\n@allowance(x, [" + to_str(lo) + "," + to_str(hi) + "])\n" +
+      "fn generated(bool choose, int x) int {\ndef before = x\n" +
+      "for index in 0..1 {\nif choose { x = 7 } else { x = 8 }\n" +
+      "def during = x\n}\ndef after = x\n0\n}\n" +
+      "generated(true, 3)\n0\n"
+}
+
+fn branched_fixed_range_reassignment_source(int lo, int hi) str {
+  "use core\n@allowance(x, [" + to_str(lo) + "," + to_str(hi) + "])\n" +
+      "fn generated(bool choose, int x) int {\ndef before = x\n" +
+      "for index in 0..1 { def during = x\n" +
+      "if choose { x = 7 } else { x = 8 }\n}\n" +
+      "def after = x\n0\n}\ngenerated(true, 3)\n0\n"
+}
+
+fn one_sided_fixed_range_reassignment_source(int lo, int hi) str {
+  "use core\n@allowance(x, [" + to_str(lo) + "," + to_str(hi) + "])\n" +
+      "fn generated(bool choose, int x) int {\n" +
+      "for index in 0..1 { if choose { x = 7 }\ndef during = x\n}\n" +
+      "def after = x\n0\n}\ngenerated(false, 3)\n0\n"
+}
+
+fn called_fixed_range_reassignment_source() str {
+  "fn predicate(bool value) bool { value }\n" +
+      "use core\n@allowance(x, [0,1])\nfn generated(bool choose, int x) int {\n" +
+      "for index in 0..1 { if predicate(choose) { x = 7 } else { x = 8 } }\n" +
+      "0\n}\ngenerated(true, 3)\n0\n"
+}
+
+fn path_limited_fixed_range_reassignment_source() str {
+  "use core\n@allowance(x, [0,1])\n" +
+      "fn generated(bool choose, int x) int {\n" +
+      "for index in 0..7 { if choose { x = 7 } else { x = 8 } }\n" +
+      "0\n}\ngenerated(true, 3)\n0\n"
+}
+
+fn oversized_range_reassignment_source() str {
+  "use core\n@allowance(x, [0,1])\n" +
+      "fn generated(int x) int {\nfor index in 0..64 { x = 7 }\n0\n}\n" +
+      "generated(3)\n0\n"
+}
+
+fn dynamic_range_reassignment_source() str {
+  "use core\n@allowance(x, [0,1])\n" +
+      "fn generated(int x, int limit) int {\n" +
+      "for index in 0..limit { x = 7 }\n0\n}\ngenerated(3, 2)\n0\n"
+}
+
+fn closure_source(int captured_uses, int lo, int hi) str {
+  mut str source = "use core\n@allowance(x, [" + to_str(lo) + "," +
+                   to_str(hi) + "])\nfn generated(int x) int {\ndef callback = fn() int {\n"
+  if captured_uses == 0 {
+    source += "0\n"
+  } else {
+    mut int index = 0
+    while index < captured_uses {
+      if index > 0 { source += " + " }
+      source += "x"
+      index += 1
+    }
+    source += "\n"
+  }
+  source += "}\ncallback()\n0\n}\ngenerated(3)\n0\n"
+  source
+}
+
+fn allowance_body(int uses) str {
+  if uses == 0 { return "0\n" }
+  mut str body = ""
+  mut int index = 0
+  while index < uses {
+    if index > 0 { body += " + " }
+    body += "x"
+    index += 1
+  }
+  body + "\n"
+}
+
+fn nested_branch_source(int inner_left, int inner_right, int outer_right,
+                        int lo, int hi) str {
+  mut str source = "use core\n@allowance(x, [" + to_str(lo) + "," +
+                   to_str(hi) + "])\nfn generated(bool outer, bool inner, int x) int {\n"
+  source += "if outer {\nif inner {\n" + allowance_body(inner_left) +
+            "} else {\n" + allowance_body(inner_right) +
+            "}\n} else {\n" + allowance_body(outer_right) +
+            "}\n}\ngenerated(true, true, 7)\n0\n"
+  source
+}
+
+mut int epoch_mask = 0
+while epoch_mask < 9 {
+  def before_uses = epoch_mask / 3
+  def after_uses = epoch_mask % 3
+  def exact = before_uses == 1 && after_uses == 1
+  def upper = before_uses <= 1 && after_uses <= 1
+  def label = "generated allowance reassignment before=" +
+              to_str(before_uses) + " after=" + to_str(after_uses)
+  check_generated(reassignment_source(before_uses, after_uses, 1, 1),
+                  exact, label + " exact interval")
+  check_generated(reassignment_source(before_uses, after_uses, 0, 1),
+                  upper, label + " upper interval")
+  epoch_mask += 1
+}
+
+mut int branch_epoch_mask = 0
+while branch_epoch_mask < 9 {
+  def before_uses = branch_epoch_mask / 3
+  def after_uses = branch_epoch_mask % 3
+  def exact = before_uses == 1 && after_uses == 1
+  def upper = before_uses <= 1 && after_uses <= 1
+  def source = branch_reassignment_source(before_uses, after_uses, 1, 1)
+  def label = "generated branch reassignment before=" +
+              to_str(before_uses) + " after=" + to_str(after_uses)
+  check_generated(source, exact, label + " exact epochs")
+  check_generated(branch_reassignment_source(before_uses, after_uses, 0, 1),
+                  upper, label + " upper epochs")
+  branch_epoch_mask += 1
+}
+
+mut int one_sided_mask = 0
+while one_sided_mask < 9 {
+  def before_uses = one_sided_mask / 3
+  def after_uses = one_sided_mask % 3
+  def unsplit = before_uses + after_uses
+  def within_exact_interval = before_uses >= 1 && before_uses <= 2 &&
+                              after_uses >= 1 && after_uses <= 2 &&
+                              unsplit >= 1 && unsplit <= 2
+  def within_upper_interval = before_uses <= 1 && after_uses <= 1 &&
+                              unsplit <= 1
+  def source = one_sided_reassignment_source(before_uses, after_uses, 1, 2)
+  def label = "generated one-sided reassignment before=" +
+              to_str(before_uses) + " after=" + to_str(after_uses)
+  check_generated(source, within_exact_interval,
+                  label + " bounded path epochs")
+  check_generated(
+      one_sided_reassignment_source(before_uses, after_uses, 0, 1),
+      within_upper_interval,
+      label + " upper path epochs")
+  one_sided_mask += 1
+}
+
+check_generated_failure(loop_reassignment_source(),
+                        "cannot validate ownership allowance",
+                        "loop reassignment fails closed")
+check_generated_failure(cstyle_dynamic_reassignment_source(),
+                        "cannot validate ownership allowance",
+                        "dynamic C-style loop reassignment fails closed")
+check_generated_failure(counted_while_dynamic_reassignment_source(),
+                        "cannot validate ownership allowance",
+                        "dynamic counted while reassignment fails closed")
+check_generated_failure(counted_loop_iterator_reassignment_source(),
+                        "cannot validate ownership allowance",
+                        "counted loop iterator mutation fails closed")
+check_generated(
+    "use core\n@allowance(x, [0,1])\n" +
+        "fn generated(int x) int {\ntry { x = 7 } catch _ { x = 8 }\nx\n}\n" +
+        "generated(3)\n0\n",
+    true, "non-throwing try body starts a bounded reassignment epoch")
+check_generated_failure(
+    "fn maybe_throw(int value) int { if value > 0 { return value }\n" +
+        "assert(false, \"throw\")\n0\n}\n" +
+        "use core\n@allowance(x, [0,1])\nfn generated(int x) int {\ntry { x = maybe_throw(x) } " +
+        "catch _ { x = 8 }\n0\n}\ngenerated(3)\n0\n",
+    "cannot validate ownership allowance",
+    "potentially throwing try reassignment fails closed")
+check_generated_failure(
+    "use core\n@allowance(x, [0,1])\nfn generated(int x) int {\n" +
+        "defer { x = 7 }\ndef after_defer = x\n0\n}\ngenerated(3)\n0\n",
+    "cannot validate ownership allowance",
+    "non-trailing defer reassignment fails closed")
+check_generated(guard_reassignment_source(1, 2), true,
+                "guard fallback reassignment starts a bounded epoch")
+check_generated(guard_reassignment_source(2, 2), false,
+                "guard fallback checks the pre-reassignment lower bound")
+check_generated(guard_reassignment_source(1, 1), false,
+                "guard success checks the unsplit upper bound")
+check_generated(fixed_range_if_reassignment_source(1, 2), true,
+                "fixed-range branch arms split reassignment epochs")
+check_generated(fixed_range_reassignment_source(1, 2, "0", "1"), true,
+                "fixed range repeats bounded allowance epochs")
+check_generated(fixed_range_reassignment_source(1, 2, "0", "2"), true,
+                "three fixed-range iterations retain per-epoch bounds")
+check_generated(nested_fixed_range_reassignment_source(false), true,
+                "nested fixed ranges split bounded reassignment epochs")
+check_generated(nested_fixed_range_reassignment_source(true), false,
+                "nested fixed ranges enforce each epoch upper bound")
+mut int cstyle_iterations = 0
+while cstyle_iterations <= 4 {
+  check_generated(cstyle_reassignment_source(cstyle_iterations, false), true,
+                  "strict C-style loop iteration count " +
+                      to_str(cstyle_iterations))
+  if cstyle_iterations > 0 {
+    check_generated(cstyle_reassignment_source(cstyle_iterations, true), true,
+                    "inclusive C-style loop iteration count " +
+                        to_str(cstyle_iterations))
+  }
+  cstyle_iterations += 1
+}
+mut int counted_while_iterations = 0
+while counted_while_iterations <= 4 {
+  check_generated(
+      counted_while_reassignment_source(counted_while_iterations, false), true,
+      "strict counted-while iteration count " +
+          to_str(counted_while_iterations))
+  if counted_while_iterations > 0 {
+    check_generated(counted_while_reassignment_source(
+                        counted_while_iterations, true),
+                    true,
+                    "inclusive counted-while iteration count " +
+                        to_str(counted_while_iterations))
+  }
+  counted_while_iterations += 1
+}
+check_generated(fixed_range_reassignment_source(2, 2, "0", "1"), false,
+                "fixed range checks each reassignment interval")
+check_generated(fixed_range_reassignment_source(0, 1, "0", "2"), false,
+                "three fixed-range iterations reject an excessive epoch")
+check_generated(branched_fixed_range_reassignment_source(1, 2), true,
+                "conditional reassignment splits bounded loop epochs")
+check_generated(branched_fixed_range_reassignment_source(0, 1), false,
+                "conditional loop paths enforce each epoch upper bound")
+check_generated(one_sided_fixed_range_reassignment_source(0, 3), true,
+                "one-sided loop branches retain the no-reassignment path")
+check_generated(one_sided_fixed_range_reassignment_source(0, 2), false,
+                "one-sided loop branch enforces the unsplit path upper bound")
+check_generated_failure(called_fixed_range_reassignment_source(),
+                        "cannot validate ownership allowance",
+                        "calls in fixed-range branches fail closed")
+check_generated_failure(path_limited_fixed_range_reassignment_source(),
+                        "cannot validate ownership allowance",
+                        "fixed-range branch path growth fails closed")
+check_generated(fixed_range_reassignment_source(2, 2, "1", "0"), true,
+                "empty fixed range leaves the epoch intact")
+check_generated_failure(oversized_range_reassignment_source(),
+                        "cannot validate ownership allowance",
+                        "fixed range above the iteration limit fails closed")
+check_generated_failure(dynamic_range_reassignment_source(),
+                        "cannot validate ownership allowance",
+                        "dynamic range reassignment fails closed")
+mut int captured_uses = 0
+while captured_uses < 4 {
+  def captured = captured_uses > 0
+  check_generated(closure_source(captured_uses, 1, 1), captured,
+                  "generated closure capture count " + to_str(captured_uses))
+  check_generated(closure_source(captured_uses, 0, 1), true,
+                  "generated closure upper bound " + to_str(captured_uses))
+  captured_uses += 1
+}
+
+mut int scenario = 0
+while scenario < 3 {
+  def inner_left = scenario == 0 ? 0 : scenario == 1 ? 2 : 1
+  def inner_right = scenario == 0 ? 1 : scenario == 1 ? 0 : 1
+  def outer_right = scenario == 0 ? 2 : scenario == 1 ? 2 : 1
+  def minimum = min(inner_left, min(inner_right, outer_right))
+  def maximum = max(inner_left, max(inner_right, outer_right))
+  def source = nested_branch_source(inner_left, inner_right, outer_right,
+                                    minimum, maximum)
+  def label = "generated nested allowance " + to_str(inner_left) + "/" +
+              to_str(inner_right) + "/" + to_str(outer_right)
+  check_generated(source, true, label + " exact interval")
+  if minimum < maximum {
+    check_generated(
+        nested_branch_source(inner_left, inner_right, outer_right,
+                             minimum + 1, maximum),
+        false, label + " rejects insufficient lower bound")
+    check_generated(
+        nested_branch_source(inner_left, inner_right, outer_right,
+                             minimum, maximum - 1),
+        false, label + " rejects insufficient upper bound")
+  } else {
+    check_generated(
+        nested_branch_source(inner_left, inner_right, outer_right,
+                             minimum + 1, maximum + 1),
+        false, label + " rejects an exact interval that is too high")
+  }
+  scenario += 1
+}
+
+check_generated(fixed_range_match_source(1, 2, 2, 4), true,
+                "fixed-range match wildcard joins exact use interval")
+check_generated(fixed_range_match_source(1, 2, 3, 4), false,
+                "fixed-range match wildcard enforces lower bound")
+check_generated(fixed_range_match_source(1, 2, 2, 3), false,
+                "fixed-range match wildcard enforces upper bound")
+check_generated(trailing_defer_source(1, 1), true,
+                "trailing defer starts a new epoch at scope exit")
+check_generated(trailing_defer_source(2, 1), false,
+                "uses after defer registration still count before its write")
+check_generated(fixed_range_guarded_wildcard_source(0, 2), true,
+                "guarded wildcard retains a possible no-use fallthrough")
+check_generated(fixed_range_guarded_wildcard_source(1, 2), false,
+                "guarded wildcard does not prove a minimum use")
+
+def worker0 = thread.thread_spawn(run_generated_cases, 0)
+def worker1 = thread.thread_spawn(run_generated_cases, 1)
+def worker2 = thread.thread_spawn(run_generated_cases, 2)
+def worker3 = thread.thread_spawn(run_generated_cases, 3)
+def failure0 = thread.thread_join(worker0)
+def failure1 = thread.thread_join(worker1)
+def failure2 = thread.thread_join(worker2)
+def failure3 = thread.thread_join(worker3)
+assert(failure0 == "", failure0)
+assert(failure1 == "", failure1)
+assert(failure2 == "", failure2)
+assert(failure3 == "", failure3)
+NY
+}

@@ -1,0 +1,13 @@
+shape module_init_entry_result {
+  family "runtime/modules"
+  generator "embedded"
+  features [module initializer entry native]
+  template ny-test-case
+  flags_matrix "--native-only --native-backend=x86_64 -O0; --native-only --native-backend=x86_64 -O3; --native-backend=llvm -O0"
+  expect compile_and_run
+  source ny <<'NY'
+module initializer_only(values, fraction)
+mut values = [11, 22, 33]
+mut fraction = 1.25
+NY
+}

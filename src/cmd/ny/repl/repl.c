@@ -9,18 +9,20 @@
 #include "base/loader.h"
 #include "base/options.h"
 #include "base/util.h"
-#include "code/code.h"
-#include "code/native/llvm/jit.h"
-#include "code/native/llvm/legacy.h"
-#include "code/native/native.h"
-#include "code/priv.h"
-#include "code/parse/json.h"
-#include "priv.h"
 #include "cmd/ny/repl/types.h"
-#include "code/runtime/runtime.h"
-#include "code/runtime/shared.h"
-#include "code/wire/build.h"
-#include "code/wire/cache.h"
+#include "code/backend/llvm/bridge.h"
+#include "code/backend/native.h"
+#include "code/backend/wire/cache.h"
+#include "code/lang/code.h"
+#include "code/lang/llvm/jit.h"
+#include "code/lang/parse/json.h"
+#include "code/lang/pipeline/build.h"
+#include "code/lang/pipeline/native.h"
+#include "code/lang/priv.h"
+#include "code/lang/runtime/runtime.h"
+#include "code/lang/runtime/shared.h"
+#include "code/lang/types/pipeline.h"
+#include "priv.h"
 #include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
@@ -75,6 +77,11 @@ extern _rpev g_panic_env_stack;
 const doc_list_t *g_repl_docs = NULL;
 static VEC(char *) g_repl_loading_modules = {0};
 static VEC(char *) g_repl_persistent_sources = {0};
+typedef struct {
+  program_t *prog;
+  arena_t *arena;
+} repl_import_program_t;
+static VEC(repl_import_program_t) g_repl_import_programs = {0};
 
 static std_mode_t g_repl_std_override = STD_MODE_DEFAULT;
 static int g_repl_has_std_override = 0;
@@ -108,7 +115,7 @@ static int g_repl_exec_trace_json = 0;
 static int g_repl_exec_trace_ir = 0;
 static char *g_repl_exec_trace_filter = NULL;
 static int g_repl_opt_level = 1;
-static int g_repl_std_root_lazy = 0;
+static int g_repl_core_root_lazy = 0;
 volatile sig_atomic_t g_repl_sigint = 0;
 extern int g_trace_requested;
 extern int g_trace_suspended;
@@ -137,13 +144,78 @@ static void repl_init_engine(std_mode_t mode, doc_list_t *docs);
 static void repl_shutdown_engine(void);
 static int repl_eval_snippet(const char *full_input, int is_stmt, char *an,
                              std_mode_t std_mode, int tty_in, doc_list_t *docs,
-                             int from_init);
+                             int from_init, int retain_import_program);
 static int repl_print_namespace_help(doc_list_t *docs, const char *query);
 
 static void repl_free_persistent_sources(void) {
   for (size_t i = 0; i < g_repl_persistent_sources.len; ++i)
     free(g_repl_persistent_sources.data[i]);
   vec_free(&g_repl_persistent_sources);
+}
+
+static void repl_free_import_programs(void) {
+  for (size_t i = 0; i < g_repl_import_programs.len; ++i) {
+    repl_import_program_t *entry = &g_repl_import_programs.data[i];
+    if (!entry->prog)
+      continue;
+    program_free(entry->prog, entry->arena);
+    free(entry->prog);
+  }
+  vec_free(&g_repl_import_programs);
+}
+
+static bool repl_program_has_module(const program_t *prog, const char *name) {
+  if (!prog || !name)
+    return false;
+  for (size_t i = 0; i < prog->body.len; ++i) {
+    const stmt_t *stmt = prog->body.data[i];
+    if (stmt && stmt->kind == NY_S_MODULE && stmt->as.module.name &&
+        strcmp(stmt->as.module.name, name) == 0)
+      return true;
+  }
+  return false;
+}
+
+static bool repl_imported_program_has_module(const char *name) {
+  if (!name)
+    return false;
+  for (size_t i = 0; i < g_repl_import_programs.len; ++i) {
+    if (repl_program_has_module(g_repl_import_programs.data[i].prog, name))
+      return true;
+  }
+  return false;
+}
+
+static program_t repl_program_with_import_modules(program_t *source) {
+  program_t combined = *source;
+  combined.body.data = NULL;
+  combined.body.len = 0;
+  combined.body.cap = 0;
+  const program_t *base = g_repl_cg.prog;
+  if (base) {
+    for (size_t j = 0; j < base->body.len; ++j) {
+      stmt_t *stmt = base->body.data[j];
+      if (!stmt || stmt->kind != NY_S_MODULE ||
+          repl_program_has_module(&combined, stmt->as.module.name))
+        continue;
+      vec_push(&combined.body, stmt);
+    }
+  }
+  for (size_t i = 0; i < g_repl_import_programs.len; ++i) {
+    const program_t *imported = g_repl_import_programs.data[i].prog;
+    if (!imported)
+      continue;
+    for (size_t j = 0; j < imported->body.len; ++j) {
+      stmt_t *stmt = imported->body.data[j];
+      if (!stmt || stmt->kind != NY_S_MODULE ||
+          repl_program_has_module(&combined, stmt->as.module.name))
+        continue;
+      vec_push(&combined.body, stmt);
+    }
+  }
+  for (size_t i = 0; i < source->body.len; ++i)
+    vec_push(&combined.body, source->body.data[i]);
+  return combined;
 }
 
 static void repl_debug_stage(const char *stage) {
@@ -170,28 +242,46 @@ typedef struct {
 } repl_lazy_std_hint_t;
 
 static const repl_lazy_std_hint_t k_repl_lazy_std_hints[] = {
-    {"abs", "std.math"},           {"sin", "std.math"},
-    {"cos", "std.math"},           {"tan", "std.math"},
-    {"asin", "std.math"},          {"acos", "std.math"},
-    {"atan", "std.math"},          {"atan2", "std.math"},
-    {"sqrt", "std.math"},          {"pow", "std.math"},
-    {"exp", "std.math"},           {"log", "std.math"},
-    {"log2", "std.math"},          {"log10", "std.math"},
-    {"floor", "std.math"},         {"ceil", "std.math"},
-    {"round", "std.math"},         {"fmod", "std.math"},
-    {"min", "std.math"},           {"max", "std.math"},
-    {"clamp", "std.math"},         {"clamp01", "std.math"},
-    {"lerp", "std.math"},          {"gcd", "std.math"},
-    {"lcm", "std.math"},           {"factorial", "std.math"},
-    {"is_prime", "std.math.nt"},   {"next_prime", "std.math.nt"},
-    {"prev_prime", "std.math.nt"}, {"range", "std.core"},
-    {"assert", "std.core"},        {"assert_eq", "std.core"},
-    {"to_str", "std.core"},        {NULL, NULL}};
+    {"abs", "core.math"},
+    {"sin", "core.math"},
+    {"cos", "core.math"},
+    {"tan", "core.math"},
+    {"asin", "core.math"},
+    {"acos", "core.math"},
+    {"atan", "core.math"},
+    {"atan2", "core.math"},
+    {"sqrt", "core.math"},
+    {"pow", "core.math"},
+    {"exp", "core.math"},
+    {"log", "core.math"},
+    {"log2", "core.math"},
+    {"log10", "core.math"},
+    {"floor", "core.math"},
+    {"ceil", "core.math"},
+    {"round", "core.math"},
+    {"fmod", "core.math"},
+    {"min", "core.math"},
+    {"max", "core.math"},
+    {"clamp", "core.math"},
+    {"clamp01", "core.math"},
+    {"lerp", "core.math"},
+    {"gcd", "core.math"},
+    {"lcm", "core.math"},
+    {"factorial", "core.math"},
+    {"is_prime", "core.math.nt"},
+    {"next_prime", "core.math.nt"},
+    {"prev_prime", "core.math.nt"},
+    {"range", "core"},
+    {"assert", "core"},
+    {"assert_eq", "core"},
+    {"find", "core.str"},
+    {"to_str", "core"},
+    {NULL, NULL}};
 
-static void repl_enable_lazy_std_root(std_mode_t std_mode, doc_list_t *docs) {
+static void repl_enable_lazy_core_root(std_mode_t std_mode, doc_list_t *docs) {
   (void)std_mode;
   (void)docs;
-  g_repl_std_root_lazy = 1;
+  g_repl_core_root_lazy = 1;
 }
 
 static void repl_normalize_doc_query(const char *raw, char *out,
@@ -513,11 +603,11 @@ static int repl_rebuild_engine_from_persistent(std_mode_t std_mode,
   char *saved = (g_repl_user_source && *g_repl_user_source)
                     ? ny_strdup(g_repl_user_source)
                     : NULL;
-  g_repl_std_root_lazy = 0;
+  g_repl_core_root_lazy = 0;
   repl_shutdown_engine();
   repl_init_engine(std_mode, docs);
   if (saved && *saved) {
-    int status = repl_eval_snippet(saved, 1, NULL, std_mode, 0, docs, 1);
+    int status = repl_eval_snippet(saved, 1, NULL, std_mode, 0, docs, 1, 0);
     free(saved);
     return status;
   }
@@ -539,12 +629,20 @@ static fun_sig repl_owned_fun_sig_copy(const fun_sig *src) {
   dst.module_name = src->module_name ? ny_strdup(src->module_name) : NULL;
   dst.source_file = src->source_file ? ny_strdup(src->source_file) : NULL;
   dst.link_name = src->link_name ? ny_strdup(src->link_name) : NULL;
+  dst.llvm_name = src->llvm_name ? ny_strdup(src->llvm_name) : NULL;
   dst.return_type = src->return_type ? ny_strdup(src->return_type) : NULL;
   dst.abi_return_type =
       src->abi_return_type ? ny_strdup(src->abi_return_type) : NULL;
   dst.inferred_return_type =
       src->inferred_return_type ? ny_strdup(src->inferred_return_type) : NULL;
   repl_copy_str_list(&dst.param_types, &src->param_types);
+  memset(&dst.native_byval_param_layouts, 0,
+         sizeof(dst.native_byval_param_layouts));
+  for (size_t i = 0; i < src->native_byval_param_layouts.len; ++i) {
+    const char *layout = src->native_byval_param_layouts.data[i];
+    vec_push(&dst.native_byval_param_layouts,
+             layout ? ny_strdup(layout) : NULL);
+  }
   dst.returns_borrow =
       src->returns_borrow ? ny_strdup(src->returns_borrow) : NULL;
   repl_copy_str_list(&dst.borrows, &src->borrows);
@@ -552,6 +650,12 @@ static fun_sig repl_owned_fun_sig_copy(const fun_sig *src) {
   repl_copy_str_list(&dst.mutates, &src->mutates);
   repl_copy_str_list(&dst.releases, &src->releases);
   repl_copy_str_list(&dst.forgets, &src->forgets);
+  memset(&dst.allowances, 0, sizeof(dst.allowances));
+  for (size_t i = 0; i < src->allowances.len; ++i) {
+    ny_allowance_t allowance = src->allowances.data[i];
+    allowance.name = allowance.name ? ny_strdup(allowance.name) : NULL;
+    vec_push(&dst.allowances, allowance);
+  }
   dst.stmt_t = NULL;
   dst.owned = true;
   return dst;
@@ -617,8 +721,7 @@ typedef struct repl_pending_fn_mapping_t {
 
 static repl_pending_fn_mapping_t *
 repl_collect_existing_jit_function_mappings(LLVMExecutionEngineRef ee,
-                                            LLVMModuleRef mod,
-                                            codegen_t *cg,
+                                            LLVMModuleRef mod, codegen_t *cg,
                                             size_t *out_len) {
   if (out_len)
     *out_len = 0;
@@ -634,12 +737,12 @@ repl_collect_existing_jit_function_mappings(LLVMExecutionEngineRef ee,
     const char *name = LLVMGetValueName(f);
     if (!name || !*name || strncmp(name, "llvm.", 5) == 0)
       continue;
-    bool std_decl = strncmp(name, "std.", 4) == 0;
-    if (!std_decl && !LLVMGetFirstUse(f))
+    bool core_decl = strncmp(name, "core.", 5) == 0;
+    if (!core_decl && !LLVMGetFirstUse(f))
       continue;
     const char *tail = strrchr(name, '.');
     if (ny_jit_resolve_symbol(name) ||
-        (!std_decl && tail && tail[1] && ny_jit_resolve_symbol(tail + 1)) ||
+        (!core_decl && tail && tail[1] && ny_jit_resolve_symbol(tail + 1)) ||
         strncmp(name, "__", 2) == 0 || strncmp(name, "rt_", 3) == 0 ||
         strncmp(name, "ny_", 3) == 0 || strcmp(name, "_setjmp") == 0)
       continue;
@@ -709,8 +812,7 @@ static bool repl_define_jit_function_trampoline(LLVMValueRef fn,
   LLVMValueRef args[64];
   for (unsigned i = 0; i < argc; ++i)
     args[i] = LLVMGetParam(fn, i);
-  LLVMValueRef raw =
-      LLVMConstInt(LLVMInt64TypeInContext(ctx), addr, false);
+  LLVMValueRef raw = LLVMConstInt(LLVMInt64TypeInContext(ctx), addr, false);
   LLVMValueRef callee =
       LLVMBuildIntToPtr(b, raw, LLVMTypeOf(fn), "repl_jit_target");
   LLVMValueRef ret =
@@ -725,8 +827,9 @@ static bool repl_define_jit_function_trampoline(LLVMValueRef fn,
 }
 #endif
 
-static void repl_define_existing_jit_function_trampolines(
-    repl_pending_fn_mapping_t *items, size_t len) {
+static void
+repl_define_existing_jit_function_trampolines(repl_pending_fn_mapping_t *items,
+                                              size_t len) {
 #ifdef __APPLE__
   if (!items)
     return;
@@ -749,8 +852,7 @@ static void repl_apply_existing_jit_function_mappings(
     if (items[i].trampoline_defined)
       continue;
     if (items[i].fn && items[i].addr)
-      LLVMAddGlobalMapping(ee, items[i].fn,
-                           (void *)(uintptr_t)items[i].addr);
+      LLVMAddGlobalMapping(ee, items[i].fn, (void *)(uintptr_t)items[i].addr);
   }
 }
 
@@ -846,12 +948,12 @@ void repl_ensure_docs_for_query(doc_list_t *docs, const char *query) {
   }
 }
 
-static int repl_program_has_bare_std_use(program_t *prog) {
+static int repl_program_has_bare_core_use(program_t *prog) {
   if (!prog)
     return 0;
   for (size_t i = 0; i < prog->body.len; ++i) {
     stmt_t *s = prog->body.data[i];
-    if (ny_stmt_is_bare_std_use(s))
+    if (ny_stmt_is_bare_core_use(s))
       return 1;
   }
   return 0;
@@ -880,10 +982,10 @@ static int repl_lazy_ident_ignored(const char *name) {
       "catch",    "throw",  "finally", "case",   "match",    "enum",
       "struct",   "layout", "extern",  "embed",  "comptime", "impl",
       "operator", "self",   "true",    "false",  "nil",      "none",
-      "del",      "export", "type",    "std",    "int",      "float",
+      "del",      "export", "type",    "core",   "int",      "float",
       "number",   "str",    "list",    "dict",   "set",      "tuple",
-      "bool",     "any",    "bytes",   "ptr",    "handle",
-      "fnptr",    NULL};
+      "bool",     "any",    "bytes",   "ptr",    "handle",   "fnptr",
+      NULL};
   for (int i = 0; ignored[i]; ++i) {
     if (strcmp(ignored[i], name) == 0)
       return 1;
@@ -896,7 +998,7 @@ static char *repl_lazy_std_module_for_leaf(doc_list_t *docs, const char *leaf) {
     return NULL;
   for (size_t i = 0; i < docs->len; ++i) {
     const ny_doc_entry *e = &docs->data[i];
-    if (!e->name || strncmp(e->name, "std.", 4) == 0)
+    if (!e->name || strncmp(e->name, "core.", 5) == 0)
       continue;
     if ((e->kind == 3 || e->kind == 4) && strcmp(e->name, leaf) == 0)
       return NULL;
@@ -913,7 +1015,7 @@ static char *repl_lazy_std_module_for_member_chain(doc_list_t *docs,
   (void)docs;
   if (!chain || !*chain || !strchr(chain, '.'))
     return NULL;
-  if (strncmp(chain, "std.", 4) == 0)
+  if (strncmp(chain, "core.", 5) == 0)
     return NULL;
   const char *dot = strchr(chain, '.');
   if (!dot || dot == chain || !dot[1] || strchr(dot + 1, '.'))
@@ -924,9 +1026,8 @@ static char *repl_lazy_std_module_for_member_chain(doc_list_t *docs,
     const char *module;
   };
   static const struct alias_map_t aliases[] = {
-      {"math", "std.math"},     {"nt", "std.math.nt"},
-      {"bin", "std.math.bin"},  {"str", "std.core.str"},
-      {"os", "std.os"},         {NULL, NULL},
+      {"math", "core.math"}, {"nt", "core.math.nt"}, {"bin", "core.math.bin"},
+      {"str", "core.str"},   {"os", "core.os"},      {NULL, NULL},
   };
   for (int i = 0; aliases[i].alias; ++i) {
     if (strlen(aliases[i].alias) == alias_len &&
@@ -941,16 +1042,19 @@ static int repl_lazy_std_rewrite_for_full_chain(doc_list_t *docs,
                                                 const char *chain, char *out,
                                                 size_t out_cap) {
   (void)docs;
-  if (!chain || strncmp(chain, "std.", 4) != 0 || !out || out_cap == 0)
+  if (!chain || strncmp(chain, "core.", 5) != 0 || !out || out_cap == 0)
     return 0;
   struct rewrite_map_t {
     const char *prefix;
     const char *alias;
   };
   static const struct rewrite_map_t rewrites[] = {
-      {"std.math.nt.", "nt."},      {"std.math.bin.", "bin."},
-      {"std.math.", "math."},      {"std.core.str.", "str."},
-      {"std.os.", "os."},          {"std.core.", ""},
+      {"core.math.nt.", "nt."},
+      {"core.math.bin.", "bin."},
+      {"core.math.", "math."},
+      {"core.str.", "str."},
+      {"core.os.", "os."},
+      {"core.", ""},
       {NULL, NULL},
   };
   for (int i = 0; rewrites[i].prefix; ++i) {
@@ -1094,7 +1198,7 @@ static int repl_lazy_read_ident_chain(const char *start, char *out,
 
 static char *repl_rewrite_lazy_std_qualified_calls(const char *src,
                                                    doc_list_t *docs) {
-  if (!src || !*src || !docs || !g_repl_std_root_lazy)
+  if (!src || !*src || !docs || !g_repl_core_root_lazy)
     return NULL;
   char *out = NULL;
   size_t out_len = 0;
@@ -1107,7 +1211,7 @@ static char *repl_rewrite_lazy_std_qualified_calls(const char *src,
       continue;
     int before_boundary =
         p == src || !(isalnum((unsigned char)p[-1]) || p[-1] == '_');
-    if (!before_boundary || strncmp(p, "std.", 4) != 0) {
+    if (!before_boundary || strncmp(p, "core.", 5) != 0) {
       p++;
       continue;
     }
@@ -1154,7 +1258,7 @@ static char *repl_rewrite_lazy_std_qualified_calls(const char *src,
   return out;
 }
 
-static int repl_line_is_bare_std_use(const char *line, const char *line_end) {
+static int repl_line_is_bare_core_use(const char *line, const char *line_end) {
   if (!line || !line_end || line > line_end)
     return 0;
   const char *p = line;
@@ -1171,20 +1275,20 @@ static int repl_line_is_bare_std_use(const char *line, const char *line_end) {
     return 0;
   while (q < line_end && isspace((unsigned char)*q))
     q++;
-  if ((size_t)(line_end - q) < 3 || strncmp(q, "std", 3) != 0)
+  if ((size_t)(line_end - q) < 4 || strncmp(q, "core", 4) != 0)
     return 0;
-  if (q + 3 < line_end) {
-    unsigned char next = (unsigned char)q[3];
+  if (q + 4 < line_end) {
+    unsigned char next = (unsigned char)q[4];
     if (isalnum(next) || next == '_' || next == '.')
       return 0;
   }
-  q += 3;
+  q += 4;
   while (q < line_end && (*q == ' ' || *q == '\t' || *q == '\r'))
     q++;
   return q >= line_end || *q == ';' || *q == '#';
 }
 
-static char *repl_strip_bare_std_use_statements(const char *src) {
+static char *repl_strip_bare_core_use_statements(const char *src) {
   if (!src || !*src)
     return NULL;
   char *out = NULL;
@@ -1198,7 +1302,7 @@ static char *repl_strip_bare_std_use_statements(const char *src) {
     while (*line_end && *line_end != '\n')
       line_end++;
     int has_newline = *line_end == '\n';
-    if (repl_line_is_bare_std_use(line, line_end)) {
+    if (repl_line_is_bare_core_use(line, line_end)) {
       changed = 1;
       if (has_newline &&
           !repl_lazy_append_bytes(&out, &out_len, &out_cap, "\n", 1)) {
@@ -1223,7 +1327,7 @@ static char *repl_strip_bare_std_use_statements(const char *src) {
   return out;
 }
 
-static int repl_source_has_bare_std_use_text(const char *src) {
+static int repl_source_has_bare_core_use_text(const char *src) {
   if (!src)
     return 0;
   const char *p = src;
@@ -1232,7 +1336,7 @@ static int repl_source_has_bare_std_use_text(const char *src) {
     const char *line_end = line;
     while (*line_end && *line_end != '\n')
       line_end++;
-    if (repl_line_is_bare_std_use(line, line_end))
+    if (repl_line_is_bare_core_use(line, line_end))
       return 1;
     p = *line_end == '\n' ? line_end + 1 : line_end;
   }
@@ -1250,8 +1354,7 @@ static void repl_push_user_use_module_unique(const char *module) {
   vec_push(&g_repl_cg.user_use_modules, ny_strdup(module));
 }
 
-static void repl_preload_lazy_imports(const char *imports,
-                                      std_mode_t std_mode,
+static void repl_preload_lazy_imports(const char *imports, std_mode_t std_mode,
                                       doc_list_t *docs) {
   if (!imports || !*imports || std_mode == STD_MODE_NONE)
     return;
@@ -1259,8 +1362,7 @@ static void repl_preload_lazy_imports(const char *imports,
   while (*p) {
     while (*p && isspace((unsigned char)*p))
       p++;
-    if (strncmp(p, "use", 3) != 0 ||
-        (p[3] && !isspace((unsigned char)p[3]))) {
+    if (strncmp(p, "use", 3) != 0 || (p[3] && !isspace((unsigned char)p[3]))) {
       while (*p && *p != '\n')
         p++;
       continue;
@@ -1289,8 +1391,8 @@ static int repl_lazy_import_std_for_source(const char *src, std_mode_t std_mode,
                                            char **out_imports) {
   if (out_imports)
     *out_imports = NULL;
-  if (std_mode == STD_MODE_NONE || std_mode == STD_MODE_FULL || !docs || !src || !*src ||
-      !g_repl_std_root_lazy)
+  if (std_mode == STD_MODE_NONE || std_mode == STD_MODE_FULL || !docs || !src ||
+      !*src || !g_repl_core_root_lazy)
     return 0;
   char seen[128][64];
   char seen_modules[64][128];
@@ -1515,7 +1617,8 @@ static char *repl_snapshot_payload_copy(const char *src) {
  * persistent REPL engine. Old v1 source-only snapshots intentionally remain
  * readable: the identity fields are an additive corruption/staleness guard.
  */
-static bool repl_snapshot_identity_matches(const char *src, const char *payload) {
+static bool repl_snapshot_identity_matches(const char *src,
+                                           const char *payload) {
   if (!src || !payload)
     return false;
   const char *begin = strstr(src, REPL_SNAPSHOT_BEGIN);
@@ -1570,12 +1673,10 @@ static char *repl_build_snapshot_image(std_mode_t std_mode) {
   uint64_t payload_fingerprint = ny_cache_semantic_fingerprint(payload);
   char header[512];
   snprintf(header, sizeof(header),
-           "%s\n"
-           REPL_SNAPSHOT_FORMAT_V2 "\n"
+           "%s\n" REPL_SNAPSHOT_FORMAT_V2 "\n"
            "; nytrix-snapshot-std: %s\n"
-           "; nytrix-snapshot-created: %lld\n"
-           REPL_SNAPSHOT_FINGERPRINT "%016llx\n"
-           REPL_SNAPSHOT_BYTES "%zu\n"
+           "; nytrix-snapshot-created: %lld\n" REPL_SNAPSHOT_FINGERPRINT
+           "%016llx\n" REPL_SNAPSHOT_BYTES "%zu\n"
            "%s\n",
            REPL_SNAPSHOT_MAGIC, repl_std_mode_name(std_mode),
            (long long)time(NULL), (unsigned long long)payload_fingerprint,
@@ -1660,7 +1761,7 @@ static int repl_load_snapshot_image(const char *path, const char *src,
   repl_set_user_source(payload);
   repl_set_last_expand_source(payload, path);
   repl_reset_docs_from_source(docs, NULL, NULL);
-  g_repl_std_root_lazy = 0;
+  g_repl_core_root_lazy = 0;
   int status = repl_rebuild_engine_from_persistent(std_mode, docs);
   if (status != 0) {
     repl_set_user_source(old_source);
@@ -1907,7 +2008,7 @@ static void map_rt_syms_persistent(LLVMModuleRef mod,
     const char *n;
     void *p;
   } syms[] = {
-#include "code/runtime/defs.h"
+#include "code/lang/runtime/defs.h"
       {NULL, NULL}};
 #undef RT_DEF
 #undef RT_GV
@@ -1968,6 +2069,11 @@ static void repl_init_engine(std_mode_t mode, doc_list_t *docs) {
   if (mode != STD_MODE_NONE) {
 
     const char *prebuilt = getenv("NYTRIX_STD_PREBUILT");
+    if (!prebuilt || ny_access(prebuilt, R_OK) != 0) {
+      prebuilt = getenv("NYTRIX_CORE_PATH");
+      if (!prebuilt || ny_access(prebuilt, R_OK) != 0)
+        prebuilt = getenv("NYTRIX_STD_PATH");
+    }
     if ((!prebuilt || ny_access(prebuilt, R_OK) != 0)) {
       const char *build_std = getenv("NYTRIX_BUILD_STD_PATH");
       if (build_std && ny_access(build_std, R_OK) == 0)
@@ -1977,21 +2083,26 @@ static void repl_init_engine(std_mode_t mode, doc_list_t *docs) {
       char *exe_dir = ny_get_executable_dir();
       if (exe_dir) {
         static char path_buf[4096];
-        snprintf(path_buf, sizeof(path_buf), "%s/std.ny", exe_dir);
+        snprintf(path_buf, sizeof(path_buf), "%s/core.ny", exe_dir);
         if (ny_access(path_buf, R_OK) == 0)
           prebuilt = path_buf;
         else {
-          snprintf(path_buf, sizeof(path_buf), "%s/../share/nytrix/std.ny",
+#ifdef NYTRIX_INSTALL_DATADIR
+          snprintf(path_buf, sizeof(path_buf), "%s/../%s/nytrix/core.ny",
+                   exe_dir, NYTRIX_INSTALL_DATADIR);
+#else
+          snprintf(path_buf, sizeof(path_buf), "%s/../share/nytrix/core.ny",
                    exe_dir);
+#endif
           if (ny_access(path_buf, R_OK) == 0)
             prebuilt = path_buf;
         }
       }
     }
     if (!prebuilt || ny_access(prebuilt, R_OK) != 0) {
-#ifdef NYTRIX_STD_PATH
-      if (ny_access(NYTRIX_STD_PATH, R_OK) == 0)
-        prebuilt = NYTRIX_STD_PATH;
+#ifdef NYTRIX_CORE_PATH
+      if (ny_access(NYTRIX_CORE_PATH, R_OK) == 0)
+        prebuilt = NYTRIX_CORE_PATH;
 #endif
     }
 
@@ -2004,6 +2115,7 @@ static void repl_init_engine(std_mode_t mode, doc_list_t *docs) {
     if (g_std_src_cached_persistent) {
       parser_t parser;
       parser_init(&parser, g_std_src_cached_persistent, "<repl_std>");
+      parser_add_module_features(&parser, NY_MODULE_FEATURE_STDLIB);
       program_t *prog = malloc(sizeof(program_t));
       *prog = parse_program(&parser);
       if (!parser.had_error) {
@@ -2013,10 +2125,20 @@ static void repl_init_engine(std_mode_t mode, doc_list_t *docs) {
                                   g_repl_ctx, g_repl_builder);
         g_repl_cg.prog_owned = true;
         codegen_prepare(&g_repl_cg);
-        codegen_emit(&g_repl_cg);
-        if (!g_repl_cg.had_error) {
-          codegen_emit_script(&g_repl_cg, "__repl_std_init");
-          std_init_fn_name = "__repl_std_init";
+        if (!g_repl_cg.had_error &&
+            ny_type_pipeline_validate_semantics(
+                prog, &g_repl_cg, "<repl_std>", false,
+                NY_TYPE_PIPELINE_STAGE_TRAIT, NULL, true, NULL) != 0)
+          g_repl_cg.had_error = true;
+        char nyr_err[512] = {0};
+        if (!g_repl_cg.had_error &&
+            ny_pipeline_emit_llvm_program(&g_repl_cg, prog, g_repl_options,
+                                          nyr_err, sizeof(nyr_err))) {
+          std_init_fn_name = "_ny_top_entry";
+        } else if (nyr_err[0]) {
+          fprintf(stderr, "REPL std initialization NYIR failed: %s\n",
+                  nyr_err);
+          g_repl_cg.had_error = true;
         }
         ny_llvm_apply_host_attrs(mod);
       } else {
@@ -2059,6 +2181,7 @@ static void repl_init_engine(std_mode_t mode, doc_list_t *docs) {
   } else {
     map_rt_syms_persistent(mod, g_repl_ee);
     register_jit_symbols(g_repl_ee, mod, &g_repl_cg);
+    ny_jit_write_perf_map(g_repl_ee, mod);
     if (std_init_fn_name) {
       uint64_t init_addr = LLVMGetFunctionAddress(g_repl_ee, std_init_fn_name);
       if (init_addr && !ny_jit_prepare_execution(init_addr)) {
@@ -2153,6 +2276,7 @@ static void repl_shutdown_engine(void) {
     g_std_src_cached_persistent = NULL;
   }
   vec_free(&g_repl_loading_modules);
+  repl_free_import_programs();
   repl_free_persistent_sources();
 }
 
@@ -2167,6 +2291,7 @@ static void repl_drop_engine_refs_on_exit(void) {
     g_std_src_cached_persistent = NULL;
   }
   vec_free(&g_repl_loading_modules);
+  repl_free_import_programs();
   repl_free_persistent_sources();
 }
 
@@ -2225,7 +2350,7 @@ static bool repl_source_wants_auto_main(const char *src, int from_init) {
 
 static int repl_eval_snippet(const char *full_input, int is_stmt, char *an,
                              std_mode_t std_mode, int tty_in, doc_list_t *docs,
-                             int from_init) {
+                             int from_init, int retain_import_program) {
   const char *eval_input = full_input;
   char *eval_input_owned = NULL;
   char *trimmed = ltrim((char *)full_input);
@@ -2262,14 +2387,14 @@ static int repl_eval_snippet(const char *full_input, int is_stmt, char *an,
       repl_init_engine(std_mode, docs);
     }
     int status =
-        repl_eval_snippet(combined, is_stmt, an, std_mode, tty_in, docs, 1);
+        repl_eval_snippet(combined, is_stmt, an, std_mode, tty_in, docs, 1, 0);
     if (status == 0 && persistent_src && *persistent_src) {
       repl_append_user_source(persistent_src);
       repl_update_docs(docs, full_input);
     }
     if (status == 0 && auto_main_after_rebuild)
       status = repl_eval_snippet("if(true){\n   main()\n}", 1, NULL, std_mode,
-                                 0, docs, 1);
+                                 0, docs, 1, 0);
     free(combined);
     free(persistent_src);
     free(eval_input_owned);
@@ -2286,32 +2411,59 @@ static int repl_eval_snippet(const char *full_input, int is_stmt, char *an,
                !strncmp(trimmed, "while", 5) || !strncmp(trimmed, "for", 3) ||
                !strncmp(trimmed, "if", 2)) {
       show_an = 0;
+    } else {
+      /*
+       * The echo wrapper must only take pure value expressions.  An
+       * assignment (`a = 1337`) wrapped as `__repl_show(a = 1337)` parses
+       * the left side as a named argument.
+       */
+      const char *p = trimmed;
+      while ((*p >= 'A' && *p <= 'Z') || (*p >= 'a' && *p <= 'z') ||
+             (*p >= '0' && *p <= '9') || *p == '_')
+        p++;
+      while (*p == ' ' || *p == '\t')
+        p++;
+      if (*p == '=' && p[1] != '=')
+        show_an = 0;
     }
   }
-  const char *use_inspect =
-      (std_mode != STD_MODE_NONE && tty_in) ? "use std.core.inspect\n" : "";
+  /*
+   * Any path that can wrap output in the show helper (TTY echo, file echo,
+   * the TTY statement rewrite below) needs a resolver-proof definition: the
+   * helper is emitted into the snippet itself and depends only on core's
+   * print/repr, which the REPL always provides.  Calling core.inspect's
+   * repl_show from here previously failed on routes where the snippet's
+   * cross-module use was not loaded into the lowering's import set.
+   */
+  bool repl_show_possible =
+      std_mode != STD_MODE_NONE &&
+      (tty_in || !is_stmt || (an && std_mode != STD_MODE_NONE));
+  const char *repl_show_helper =
+      repl_show_possible ? "fn __repl_show(any x) any {\n   print(x)\n   x\n}\n"
+                         : "";
+  const char *use_inspect = "";
   const char *use_core = "";
   const char *use_os_prim = "";
-  int has_bare_std_use =
-      std_mode != STD_MODE_NONE && repl_source_has_bare_std_use_text(eval_input);
-  if (has_bare_std_use)
-    g_repl_std_root_lazy = 1;
+  int has_bare_core_use = std_mode != STD_MODE_NONE &&
+                          repl_source_has_bare_core_use_text(eval_input);
+  if (has_bare_core_use)
+    g_repl_core_root_lazy = 1;
   const char *compile_input = eval_input;
   char *compile_input_owned = NULL;
-  if (std_mode != STD_MODE_NONE && g_repl_std_root_lazy) {
+  if (std_mode != STD_MODE_NONE && g_repl_core_root_lazy) {
     compile_input_owned =
         repl_rewrite_lazy_std_qualified_calls(eval_input, docs);
     if (compile_input_owned)
       compile_input = compile_input_owned;
 
-    char *stripped = repl_strip_bare_std_use_statements(compile_input);
+    char *stripped = repl_strip_bare_core_use_statements(compile_input);
     if (stripped) {
       free(compile_input_owned);
       compile_input_owned = stripped;
       compile_input = compile_input_owned;
     }
-    if (has_bare_std_use && *ltrim((char *)compile_input) == '\0') {
-      repl_enable_lazy_std_root(std_mode, docs);
+    if (has_bare_core_use && *ltrim((char *)compile_input) == '\0') {
+      repl_enable_lazy_core_root(std_mode, docs);
       free(compile_input_owned);
       free(eval_input_owned);
       return 0;
@@ -2325,8 +2477,8 @@ static int repl_eval_snippet(const char *full_input, int is_stmt, char *an,
     repl_expand_source(eval_input, "<repl:trace>", g_repl_exec_trace_filter, 1,
                        g_repl_exec_trace_json, g_repl_exec_trace_ir);
   size_t blen = strlen(compile_input) + (an ? strlen(an) : 0) +
-                strlen(use_inspect) + strlen(use_core) + strlen(use_os_prim) +
-                strlen(use_lazy) + 128;
+                strlen(repl_show_helper) + strlen(use_inspect) +
+                strlen(use_core) + strlen(use_os_prim) + strlen(use_lazy) + 128;
   char *body = malloc(blen);
   if (!body) {
     free(compile_input_owned);
@@ -2334,19 +2486,27 @@ static int repl_eval_snippet(const char *full_input, int is_stmt, char *an,
     free(eval_input_owned);
     return 1;
   }
-  if (!is_stmt && !tty_in)
-    snprintf(body, blen, "%s%s%s%sreturn %s\n", use_core, use_os_prim,
-             use_inspect, use_lazy, compile_input);
+  if (!is_stmt && !tty_in && std_mode != STD_MODE_NONE)
+    snprintf(body, blen, "%s%s%s%s%sreturn __repl_show(%s\n)\n",
+             repl_show_helper, use_core, use_os_prim, use_inspect, use_lazy,
+             compile_input);
+  else if (!is_stmt && !tty_in)
+    snprintf(body, blen, "%s%s%s%s%sreturn %s\n", repl_show_helper, use_core,
+             use_os_prim, use_inspect, use_lazy, compile_input);
   else if (show_an)
-    snprintf(body, blen, "%s%s%s%s%s\nrepl_show(%s\n)\n", use_core, use_os_prim,
-             use_inspect, use_lazy, compile_input, an);
+    snprintf(body, blen, "%s%s%s%s%s%s\n__repl_show(%s\n)\n", repl_show_helper,
+             use_core, use_os_prim, use_inspect, use_lazy, compile_input, an);
   else
-    snprintf(body, blen, "%s%s%s%s%s\n", use_core, use_os_prim, use_inspect,
-             use_lazy, compile_input);
+    snprintf(body, blen, "%s%s%s%s%s%s\n", repl_show_helper, use_core,
+             use_os_prim, use_inspect, use_lazy, compile_input);
+  if (getenv("NYTRIX_REPL_DUMP_BODY"))
+    fprintf(stderr, "[repl body]\n%s\n[/repl body]\n", body);
   ny_tick_t t0 = ny_ticks_now();
   ny_tick_t t_parse0 = t0;
   parser_t ps;
   parser_init(&ps, body, "<repl_input>");
+  if (retain_import_program)
+    parser_add_module_features(&ps, NY_MODULE_FEATURE_STDLIB);
   ps.exit_on_limit = false;
   repl_apply_parser_limits(&ps);
   program_t *pr = malloc(sizeof(program_t));
@@ -2367,6 +2527,8 @@ static int repl_eval_snippet(const char *full_input, int is_stmt, char *an,
       free(body);
       body = body_with_main;
       parser_init(&ps, body, "<repl_input>");
+      if (retain_import_program)
+        parser_add_module_features(&ps, NY_MODULE_FEATURE_STDLIB);
       ps.exit_on_limit = false;
       repl_apply_parser_limits(&ps);
       *pr = parse_program(&ps);
@@ -2378,16 +2540,24 @@ static int repl_eval_snippet(const char *full_input, int is_stmt, char *an,
   bool rebuild_persistent = false;
   if (!ps.had_error) {
     repl_debug_stage("parsed");
-    if (repl_program_has_bare_std_use(pr))
-      g_repl_std_root_lazy = 1;
-    if (std_mode != STD_MODE_NONE && tty_in && !show_an && pr->body.len > 0) {
+    if (repl_program_has_bare_core_use(pr))
+      g_repl_core_root_lazy = 1;
+    if (std_mode != STD_MODE_NONE && tty_in && pr->body.len > 0) {
       for (size_t i = 0; i < pr->body.len; ++i) {
         stmt_t *stmt = pr->body.data[i];
         if (stmt->kind != NY_S_EXPR ||
             !repl_should_echo_expr(stmt->as.expr.expr))
           continue;
+        /*
+         * Never wrap assignments: `__repl_show(a = 1337)` parses the left
+         * side as a named argument, which has no matching parameter.
+         */
+        if (stmt->as.expr.expr->kind == NY_E_BINARY &&
+            stmt->as.expr.expr->as.binary.op &&
+            strcmp(stmt->as.expr.expr->as.binary.op, "=") == 0)
+          continue;
         expr_t *callee = expr_new(ps.arena, NY_E_IDENT, stmt->tok);
-        callee->as.ident.name = "repl_show";
+        callee->as.ident.name = "__repl_show";
         expr_t *call = expr_new(ps.arena, NY_E_CALL, stmt->tok);
         call->as.call.callee = callee;
         call_arg_t arg = {0};
@@ -2424,7 +2594,7 @@ static int repl_eval_snippet(const char *full_input, int is_stmt, char *an,
         free(eval_input_owned);
         return 0;
       }
-      ny_native_jit_image_t image = {0};
+      nyr_jit_image_t image = {0};
       char native_err[512] = {0};
       ny_options native_opt = *g_repl_options;
       native_opt.native_only = true;
@@ -2433,22 +2603,27 @@ static int repl_eval_snippet(const char *full_input, int is_stmt, char *an,
 #else
       native_opt.native_backend = NY_NATIVE_BACKEND_X86_64;
 #endif
-      if (!ny_native_jit_compile(pr, &native_opt, &image, native_err,
-                                 sizeof(native_err))) {
+      program_t combined_nir = {0};
+      const program_t *compile_prog = pr;
+      if (g_repl_cg.prog || g_repl_import_programs.len > 0) {
+        combined_nir = repl_program_with_import_modules(pr);
+        compile_prog = &combined_nir;
+      }
+      if (!ny_pipeline_jit_compile(compile_prog, &native_opt, &image,
+                                   native_err, sizeof(native_err))) {
         fprintf(stderr, "Native REPL input is unsupported: %s\n",
                 native_err[0] ? native_err : "unsupported native shape");
         last_status = 1;
-      } else if (!ny_jit_prepare_execution(
-                     (uint64_t)(uintptr_t)image.entry)) {
+      } else if (!ny_jit_prepare_execution((uint64_t)(uintptr_t)image.entry)) {
         fprintf(stderr, "JIT code memory is not executable\n");
-        ny_native_jit_image_free(&image);
+        nyr_jit_image_free(&image);
         last_status = 1;
       } else {
-        int64_t result = ((int64_t(*)(void))image.entry)();
+        int64_t result = ((int64_t (*)(void))image.entry)();
         rt_print_flush();
         if (!is_stmt && tty_in)
           printf("%lld\n", (long long)result);
-        ny_native_jit_image_free(&image);
+        nyr_jit_image_free(&image);
         last_status = 0;
       }
       if (last_status == 0 && !from_init && is_persistent_def(eval_input)) {
@@ -2459,6 +2634,8 @@ static int repl_eval_snippet(const char *full_input, int is_stmt, char *an,
         }
         free(persistent_src);
       }
+      if (compile_prog != pr)
+        vec_free(&combined_nir.body);
       program_free(pr, ps.arena);
       free(pr);
       free(body);
@@ -2535,13 +2712,34 @@ static int repl_eval_snippet(const char *full_input, int is_stmt, char *an,
     ny_tick_t t_codegen0 = ny_ticks_now();
     repl_debug_stage("codegen-prepare");
     codegen_prepare(&cg);
+    if (!cg.had_error &&
+        ny_type_pipeline_validate_semantics(pr, &cg, cg.source_main_file, false,
+                                            NY_TYPE_PIPELINE_STAGE_TRAIT, NULL,
+                                            true, NULL) != 0)
+      cg.had_error = true;
     repl_debug_stage("codegen-emit");
-    codegen_emit(&cg);
     char fn_name[64];
     snprintf(fn_name, sizeof(fn_name), "__eval_%d", g_eval_count++);
+    char nyr_err[512] = {0};
+    program_t combined_nir = {0};
+    const program_t *compile_prog = pr;
+    if (g_repl_cg.prog || g_repl_import_programs.len > 0) {
+      combined_nir = repl_program_with_import_modules(pr);
+      compile_prog = &combined_nir;
+    }
+    if (!cg.had_error &&
+        !ny_pipeline_emit_llvm_program(&cg, compile_prog, g_repl_options,
+                                       nyr_err, sizeof(nyr_err))) {
+      fprintf(stderr, "REPL snippet NYIR failed: %s\n",
+              nyr_err[0] ? nyr_err : "unsupported snippet");
+      cg.had_error = true;
+    }
+    if (compile_prog != pr)
+      vec_free(&combined_nir.body);
+    LLVMValueRef eval_fn = LLVMGetNamedFunction(eval_mod, "_ny_top_entry");
+    if (eval_fn)
+      LLVMSetValueName2(eval_fn, fn_name, strlen(fn_name));
     repl_debug_stage("codegen-script");
-    LLVMValueRef eval_fn = codegen_emit_script(&cg, fn_name);
-    (void)eval_fn;
     ny_llvm_apply_host_attrs(eval_mod);
     repl_debug_stage("codegen-done");
     if (!from_init && g_repl_exec_trace_compile && !cg.had_error &&
@@ -2559,8 +2757,8 @@ static int repl_eval_snippet(const char *full_input, int is_stmt, char *an,
       ny_tick_t t_jit0 = ny_ticks_now();
       size_t existing_map_len = 0;
       repl_pending_fn_mapping_t *existing_maps =
-          repl_collect_existing_jit_function_mappings(g_repl_ee, eval_mod,
-                                                      &cg, &existing_map_len);
+          repl_collect_existing_jit_function_mappings(g_repl_ee, eval_mod, &cg,
+                                                      &existing_map_len);
       repl_define_existing_jit_function_trampolines(existing_maps,
                                                     existing_map_len);
       repl_debug_ir(eval_mod);
@@ -2599,6 +2797,8 @@ static int repl_eval_snippet(const char *full_input, int is_stmt, char *an,
         last_status = 1;
         addr = 0;
       }
+      if (addr)
+        ny_jit_append_perf_map(g_repl_ee, eval_mod);
       if (addr) {
         repl_debug_stage("jit-call");
         int interrupted = 0;
@@ -2858,7 +3058,12 @@ static int repl_eval_snippet(const char *full_input, int is_stmt, char *an,
   }
   if (g_repl_timing && !from_init)
     printf("[Eval: %.3f ms]\n", ny_ticks_elapsed_ms(t0));
-  if (persistent) {
+  if (retain_import_program && last_status == 0) {
+    vec_push(&g_repl_import_programs,
+             ((repl_import_program_t){.prog = pr, .arena = ps.arena}));
+    vec_push(&g_repl_persistent_sources, body);
+    body = NULL;
+  } else if (persistent) {
     vec_push(&g_repl_cg.extra_progs, pr);
     codegen_module_graph_changed(&g_repl_cg);
     vec_push(&g_repl_cg.extra_arenas, ps.arena);
@@ -2882,14 +3087,13 @@ static int repl_eval_snippet(const char *full_input, int is_stmt, char *an,
 static void repl_ensure_module(const char *name, std_mode_t std_mode,
                                doc_list_t *docs) {
   char *norm_name = normalize_module_name(name);
-  for (size_t i = 0; i < g_repl_cg.use_modules.len; i++) {
-    if (strcmp(g_repl_cg.use_modules.data[i], norm_name) == 0) {
-      free(norm_name);
-      return;
-    }
-  }
 
-  if (std_mode != STD_MODE_NONE && strcmp(norm_name, "std") == 0) {
+  if (std_mode != STD_MODE_NONE && strcmp(norm_name, "core") == 0) {
+    vec_push(&g_repl_cg.use_modules, ny_strdup(norm_name));
+    free(norm_name);
+    return;
+  }
+  if (repl_imported_program_has_module(norm_name)) {
     vec_push(&g_repl_cg.use_modules, ny_strdup(norm_name));
     free(norm_name);
     return;
@@ -2908,7 +3112,7 @@ static void repl_ensure_module(const char *name, std_mode_t std_mode,
     if (src) {
       char *masked = repl_mask_main_guards(src);
       repl_eval_snippet(masked ? masked : src, 1, NULL, STD_MODE_NONE, 0, docs,
-                        1);
+                        1, 0);
       free(masked);
       free(src);
       g_repl_loading_modules.len--;
@@ -2937,8 +3141,9 @@ static void repl_ensure_module(const char *name, std_mode_t std_mode,
                                      STD_MODE_DEFAULT, 0, entry_path);
   if (bundle) {
     char *masked = repl_mask_main_guards(bundle);
+    bool retain_import_program = !strncmp(norm_name, "core.", 5);
     repl_eval_snippet(masked ? masked : bundle, 1, NULL, STD_MODE_NONE, 0, docs,
-                      1);
+                      1, retain_import_program);
     free(masked);
     free(bundle);
     g_repl_loading_modules.len--;
@@ -2960,7 +3165,7 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
     atexit(repl_restore_terminal_state);
     g_repl_exit_hook_registered = 1;
   }
-  g_repl_std_root_lazy = 0;
+  g_repl_core_root_lazy = 0;
   g_repl_options = options;
   bool fast_batch_exit = repl_fast_batch_exit_enabled(batch_mode);
   g_repl_opt_level = batch_mode ? 0 : opt_level;
@@ -3059,9 +3264,11 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
     }
   }
   if (!banner_off && !init_code && isatty(STDOUT_FILENO)) {
-    printf("%sNytrix REPL%s %s(%s)%s - Type :help for commands\n",
-           clr(NY_CLR_BOLD NY_CLR_CYAN), clr(NY_CLR_RESET), clr(NY_CLR_GRAY),
-           repl_std_mode_name(std_mode), clr(NY_CLR_RESET));
+    printf("%s%s%s Nytrix REPL %s%s%s %s(%s)%s  %s%s%s :help for commands\n",
+           clr(NY_CLR_MAGENTA), ny_ui_mark("brand"), clr(NY_CLR_RESET),
+           clr(NY_CLR_GRAY), ny_ui_glyph("·", "/"), clr(NY_CLR_RESET),
+           clr(NY_CLR_GRAY), repl_std_mode_name(std_mode), clr(NY_CLR_RESET),
+           clr(NY_CLR_GRAY), ny_ui_mark("hint"), clr(NY_CLR_RESET));
     fflush(stdout);
   }
   char history_path[PATH_MAX] = {0};
@@ -3346,7 +3553,7 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
           g_repl_user_source = NULL;
           g_repl_user_source_len = 0;
         }
-        g_repl_std_root_lazy = 0;
+        g_repl_core_root_lazy = 0;
         repl_set_last_expand_source(NULL, NULL);
         repl_init_engine(std_mode, &docs);
         printf("Reset\n");
@@ -3514,7 +3721,7 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
           if (src) {
             repl_set_last_expand_source(src, p);
             last_status =
-                repl_eval_snippet(src, 1, NULL, std_mode, tty_in, &docs, 0);
+                repl_eval_snippet(src, 1, NULL, std_mode, tty_in, &docs, 0, 0);
             free(src);
             repl_restore_terminal_state();
           } else {
@@ -3802,7 +4009,7 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
                    "Struct with type-first fields");
             printf("  %-30s %s\n", "Name(val1, val2)",
                    "Struct constructor (positional)");
-            printf("  %-30s %s\n", "use std.core", "Import module");
+            printf("  %-30s %s\n", "use core", "Import module");
             printf("  %-30s %s\n", "embed \"file\"",
                    "Embed file at compile time");
             printf("\n%sTip:%s Use ':doc <name>' to look up any symbol\n",
@@ -3812,9 +4019,10 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
             repl_normalize_doc_query(p, query, sizeof(query));
             const char *lookup = query[0] ? query : p;
             int printed = repl_print_help_query(&docs, lookup);
-            if (!printed)
-              printf("%sNo documentation found for '%s'%s\n", clr(NY_CLR_RED),
-                     lookup, clr(NY_CLR_RESET));
+            if (!printed && !doclist_print_missing(&docs, lookup))
+              fprintf(stderr,
+                      "ny: REPL documentation renderer failed for '%s'\n",
+                      lookup);
           }
         } else {
           printf("%sCommands:%s\n", clr(NY_CLR_BOLD NY_CLR_CYAN),
@@ -3847,12 +4055,12 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
             printf("  %s\n", ny_std_package_name(i));
           printf("\n%sNavigation Examples:%s\n", clr(NY_CLR_BOLD),
                  clr(NY_CLR_RESET));
-          printf("  :help std             - Browse the std package\n");
-          printf("  :help std.*           - List top-level std namespaces\n");
-          printf(
-              "  :help std.os.         - List direct children under std.os\n");
-          printf("  :help std.os.path     - Show module docs and members\n");
-          printf("  :help std.os.path.sep - Show a specific symbol\n");
+          printf("  :help core            - Browse the core package\n");
+          printf("  :help core.*          - List top-level core namespaces\n");
+          printf("  :help core.os.         - List direct children under "
+                 "core.os\n");
+          printf("  :help core.os.path     - Show module docs and members\n");
+          printf("  :help core.os.path.sep - Show a specific symbol\n");
           printf("  :help sep             - Resolve a symbol from imported "
                  "modules\n");
           printf("  :trace values aes     - Trace matching calls with return "
@@ -3861,7 +4069,7 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
                  "per eval\n");
           printf("  :trace ir             - Show compact LLVM IR for the "
                  "current eval\n");
-          printf("  :trace full std.os    - Graph+AST+IR plus runtime trace "
+          printf("  :trace full core.os    - Graph+AST+IR plus runtime trace "
                  "for matching calls\n");
           printf("  :expand for(x in xs){x} - Show compact AST/expansion for "
                  "inline code\n");
@@ -3911,17 +4119,17 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
       const char *stmt_end = trimmed;
       while (*stmt_end && *stmt_end != '\n')
         stmt_end++;
-      bool bare_std = repl_line_is_bare_std_use(trimmed, stmt_end);
-      if (bare_std)
-        repl_enable_lazy_std_root(std_mode, &docs);
+      bool bare_core = repl_line_is_bare_core_use(trimmed, stmt_end);
+      if (bare_core)
+        repl_enable_lazy_core_root(std_mode, &docs);
       else
         repl_ensure_module(name, std_mode, &docs);
       free(name);
     }
     repl_set_last_expand_source(full_input, "<repl:last>");
     char *an = repl_assignment_target(eval_input);
-    last_status =
-        repl_eval_snippet(eval_input, is_stmt, an, std_mode, tty_in, &docs, 0);
+    last_status = repl_eval_snippet(eval_input, is_stmt, an, std_mode, tty_in,
+                                    &docs, 0, 0);
     repl_restore_terminal_state();
     if (an)
       free(an);

@@ -1,0 +1,13 @@
+shape repl_nyir_std_init {
+  family "repl"
+  generator "embedded"
+  features ["ny", "compiler", "stdlib", "nyir"]
+  template ny-test-case
+  expect compile_and_run
+  repl_expect "REPL-NYIR-STD-INIT-OK"
+  source ny <<'NY'
+use core
+assert(len([1, 2, 3]) == 3, "stdlib call works after NYIR REPL initialization")
+print("REPL-NYIR-STD-INIT-OK")
+NY
+}

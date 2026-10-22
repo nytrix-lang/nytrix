@@ -1,0 +1,29 @@
+shape report_format_preserves_locations {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "diagnostics", "report", "locations"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-only"
+  expect compile_and_run
+  source ny <<'SRC'
+use core
+use core.report (format_error, format_warning, format_note,
+                     format_location)
+
+def error = format_error("broken input", "source.ny", 4, 7)
+def warning = format_warning("fallback", "source.ny", 9, 2)
+def unlocated = format_error("plain failure")
+
+assert(error.contains("source.ny:4:7: ") &&
+       error.contains("error") && error.contains("broken input"),
+       "error report retains source location, severity, and message")
+assert(warning.contains("source.ny:9:2: ") &&
+       warning.contains("warning") && warning.contains("fallback"),
+       "warning report retains source location, severity, and message")
+assert(unlocated.contains("error") &&
+       unlocated.contains("plain failure"),
+       "location-free report retains severity and message")
+assert(format_location("source.ny", 4, 7) == "source.ny:4:7",
+       "location formatting remains canonical")
+SRC
+}

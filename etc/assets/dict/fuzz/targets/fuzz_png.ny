@@ -1,7 +1,7 @@
-use std.core
-use std.os
-use std.os.args
-use std.math.parse.img.png as png
+use core
+use core.os
+use core.os.args
+use core.math.parse.img.png as png
 
 fn _input_path(){
    if(argc() > 2){

@@ -1,0 +1,34 @@
+shape ownership_exclusive_borrow_last_use_positive {
+  family "runtime/ownership"
+  generator "regression"
+  features ["ownership", "borrow", "exclusive", "liveness", "positive"]
+  template ny-test-case
+  expect compile_and_run
+  flags "--ownership-strict"
+  source ny <<'NY'
+use core
+
+fn good() int {
+  mut int value = 1
+  def exclusive = &mut value
+  def observed = exclusive
+  value = 2
+  return value
+}
+
+fn good_try() int {
+  mut int value = 3
+  def exclusive = &mut value
+  try {
+    def observed = exclusive
+  } catch _ {
+  }
+  value = 4
+  value
+}
+
+assert(good() == 2, "exclusive borrow ends after its last lexical use")
+assert(good_try() == 4,
+       "exclusive borrow ends after its last use in a try body")
+NY
+}

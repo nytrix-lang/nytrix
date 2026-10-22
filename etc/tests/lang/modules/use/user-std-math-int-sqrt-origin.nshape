@@ -1,0 +1,25 @@
+shape user_std_math_sqrt_uses_declared_integer_return_type {
+  family "runtime/modules/use"
+  generator "regression"
+  features ["ny", "test", "modules", "identity", "legacy-llvm", "integer"]
+  template ny-test-case
+  flags_matrix "--native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_and_run
+  source ny <<'NY'
+module core.math(
+  sqrt
+)
+
+fn sqrt(int value) int {
+  value + 7
+}
+
+#main {
+  assert(core.math.sqrt(2) == 9,
+         "same-named user sqrt must retain its integer implementation")
+  assert(core.math.sqrt(2) % 2 == 1,
+         "same-named user sqrt must retain integer expression representation")
+  0
+}
+NY
+}

@@ -1,0 +1,22 @@
+shape ownership_exclusive_borrow_index_live_access {
+  family "compiler-errors/ownership"
+  generator "error"
+  features ["error", "ownership", "borrow", "exclusive", "index"]
+  template ny-compile-fail
+  expect compile_fail
+  flags "--ownership-strict"
+
+  source ny <<'NY'
+use core
+
+fn access_borrowed_index() int {
+  mut list<int> values = [7, 8]
+  def first = &mut values[0]
+  def other = values[0]
+  def observed = first
+  other
+}
+
+access_borrowed_index()
+NY
+}

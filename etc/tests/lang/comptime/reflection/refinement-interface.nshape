@@ -1,0 +1,96 @@
+shape refinement_interface {
+  family "lang/comptime/reflection"
+  features ["refinement-interface", "portable-refinement", "fail-closed"]
+  template ny-test-case
+  flags "--native-only"
+  timeout 240
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.subprocess (run_capture)
+use core.str as str
+
+def ny = env("NYTRIX_NY_FULL_BIN")
+def cmake = env("NYTRIX_CMAKE_COMMAND")
+def root = env("NYTRIX_ROOT")
+def test_dir = temp_dir() + "/refinement-interface-" + to_str(pid())
+def interface = test_dir + "/portable.refineif"
+assert(is_str(ny) && ny.len > 0, "test runner exports the full compiler")
+assert(is_str(cmake) && cmake.len > 0, "CMake exposes its executable path")
+assert(is_str(root) && root.len > 0, "CTest exposes the source root")
+def setup = run_capture([cmake, "-E", "make_directory", test_dir], [], nil, false)
+assert(setup.get("code", 127) == 0, "create isolated refinement-interface directory")
+
+def provider = root + "/etc/tests/lang/comptime/reflection/refinement-interface-provider.ny"
+def consumer_source = unwrap(file_read(
+   root + "/etc/tests/lang/comptime/reflection/refinement-interface-consumer.ny.in"))
+def weaker_source = unwrap(file_read(
+   root + "/etc/tests/lang/comptime/reflection/refinement-interface-weaker.ny.in"))
+def consumer = test_dir + "/consumer.ny"
+def weaker = test_dir + "/weaker.ny"
+assert(is_ok(file_write(consumer, consumer_source)) &&
+       is_ok(file_write(weaker, weaker_source)),
+       "materialize refinement interface consumers")
+def emitted = run_capture(
+   [ny, "-no-std", "-emit-only",
+    "--emit-refinement-interface=" + interface, provider],
+   [], nil, false)
+assert(emitted.get("code", 127) == 0 && is_ok(file_read(interface)),
+       "emit portable refinement interface: " + emitted.get("stdout", ""))
+
+fn run_case(str name, str path, str mode, bool should_pass,
+            str expected_message, str interface_path=interface) {
+   mut argv = [ny, "-no-std",
+               "--use-refinement-interface=" + interface_path]
+   if mode == "nyir" {
+      argv = argv.append("--nyir-run")
+   } else if mode == "mcjit" {
+      argv = argv.append("--native-backend=llvm")
+      argv = argv.append("--jit")
+      argv = argv.append("--jit-engine=mcjit")
+   } else if mode == "orc" {
+      argv = argv.append("--native-backend=llvm")
+      argv = argv.append("--jit")
+      argv = argv.append("--jit-engine=orc")
+   } else if mode == "native" {
+      argv = argv.append("--native-only")
+   } else if mode == "emit" {
+      argv = argv.append("-emit-only")
+   }
+   argv = argv.append(path)
+   def result = run_capture(argv, [], nil, false)
+   def text = result.get("stdout", "")
+   if should_pass {
+      assert(result.get("code", 127) == 0,
+             name + " imported refinement failed: " + text)
+   } else {
+      assert(result.get("code", 0) != 0 &&
+             str.find(text, expected_message) >= 0,
+             name + " weaker guard did not fail closed: " + text)
+   }
+}
+
+run_case("NYIR", consumer, "nyir", true, "")
+run_case("LLVM MCJIT", consumer, "mcjit", true, "")
+run_case("LLVM ORC", consumer, "orc", true, "")
+run_case("native-only", consumer, "native", true, "")
+run_case("NYIR weaker guard", weaker, "nyir", false,
+         "refinement obligation is not proved")
+run_case("LLVM MCJIT weaker guard", weaker, "mcjit", false,
+         "refinement obligation is not proved")
+run_case("LLVM ORC weaker guard", weaker, "orc", false,
+         "refinement obligation is not proved")
+run_case("native-only weaker guard", weaker, "native", false,
+         "refinement obligation is not proved")
+
+def future = test_dir + "/future.refineif"
+assert(is_ok(file_write(future, "ny-refinement-interface-v999\tfuture\n")),
+       "write future refinement interface version")
+run_case("future interface", consumer, "nyir", false,
+         "Refinement interface import failed", future)
+def cleanup = run_capture([cmake, "-E", "rm", "-rf", test_dir], [], nil, false)
+assert(cleanup.get("code", 127) == 0,
+       "remove refinement-interface directory")
+print("REFINEMENT_INTERFACE_OK")
+NY
+}

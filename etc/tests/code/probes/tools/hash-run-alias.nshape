@@ -1,0 +1,174 @@
+shape test_hash_run_alias {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  expect compile_and_run
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  source ny <<'NY'
+use core
+
+fn square(int x) int { return x * x }
+
+layout HashAliasLayout {
+  i32 value
+  [u8, 2] bytes
+}
+
+layout MemberSpliceRecord {
+  i32 value
+}
+
+#fields(MemberSpliceRecord) as field {
+  #insert if field.name == "value" {
+    fn reflected_member_splice(ptr value) i32 {
+      return value.(field)
+    }
+  }
+}
+
+#template make_axis_family(axis){
+  fn alias_axis_${axis}() { return "${axis}" }
+}
+
+#template make_nested_alias(){
+  #insert #quote {
+    fn nested_alias_value() int { return 45 }
+  }
+}
+
+#table HashAliasOpcode {
+  0 -> "halt"
+  _ -> "unknown"
+}
+
+module HashAliasExports(alpha) {
+  fn alpha() int { return 7 }
+}
+
+module HashAliasGenerated generated from HashAliasSpec {
+  export core(generated_alias_value)
+  #insert #quote {
+    fn generated_alias_value() int { return 44 }
+  }
+}
+
+#diag rule bad_hash_alias_store {
+  when call.name == "store_layout" && !is_literal(call.arg(1))
+  error "layout name must be literal"
+  fix "pass a string literal layout name"
+}
+
+#fields(HashAliasLayout) as field {
+  #insert assert(__layout_offset("HashAliasLayout", field.name) == field.offset,
+                "hash fields reflection offset")
+  #insert if field.is_array && field.array_len_known {
+    assert(field.array_len == 2, "hash fields array extent")
+  }
+}
+#exports(HashAliasExports) as export_name {
+  #insert assert(export_name == "alpha", "hash exports reflection name")
+}
+
+#insert #quote {
+  fn inserted_value() int { return 43 }
+}
+#insert make_nested_alias()
+assert(inserted_value() == 43, "#insert accepts hygienic quoted declarations")
+assert(nested_alias_value() == 45, "#insert works inside a template")
+assert(HashAliasGenerated.generated_alias_value() == 44,
+       "#insert works in a generated module")
+
+fn local_splice_avoids_capture() str {
+  def caller_local = "caller"
+  #insert #quote {
+    def caller_local = "generated"
+    return ${caller_local}
+  }
+}
+assert(local_splice_avoids_capture() == "caller",
+       "spliced caller local is not captured by a quoted local")
+
+fn local_splice_preserves_caller_type() list {
+  def x = [1]
+  #insert #quote {
+    def x = "generated"
+    return ${x}
+  }
+}
+assert(local_splice_preserves_caller_type() == [1],
+       "spliced caller local keeps its type against quoted shadow")
+
+def caller_name = "caller"
+#insert #quote {
+  fn quoted_splice_avoids_capture() str {
+    def caller_name = "generated"
+    return ${caller_name}
+  }
+  fn quoted_local_binding_is_visible() str {
+    def local_name = "introduced"
+    return local_name
+  }
+  fn quoted_loop_binding_is_visible() int {
+    def i = "caller"
+    def result = 0
+    for i in [1, 2] { result += i }
+    return result
+  }
+}
+assert(quoted_splice_avoids_capture() == "caller",
+       "quoted local cannot capture a spliced caller binding")
+def t = "caller"
+#insert #quote {
+  fn quoted_t_splice_avoids_capture() str {
+    def t = "generated"
+    return ${t}
+  }
+}
+assert(quoted_t_splice_avoids_capture() == "caller",
+       "a quoted local t cannot capture a spliced caller t")
+assert(quoted_local_binding_is_visible() == "introduced",
+       "quoted identifiers resolve to their introduced local binding")
+assert(quoted_loop_binding_is_visible() == 3,
+       "quoted loop binding resolves against its introduction context")
+
+for axis in #run ["x", "y"] {
+  #insert make_axis_family(ident(axis))
+}
+#emit make_axis_family(ident("z"))
+assert(alias_axis_x() == "x", "#insert expands a template in comptime loops")
+assert(alias_axis_y() == "y", "#insert expands each comptime loop value")
+assert(alias_axis_z() == "z", "#emit aliases template insertion")
+assert(#match HashAliasOpcode(0, "fallback") == "halt",
+       "#match aliases comptime table lookup")
+
+def ptr reflected_storage = malloc(__layout_size("MemberSpliceRecord"))
+store_layout(reflected_storage, "MemberSpliceRecord", 37)
+assert(reflected_member_splice(reflected_storage) == 37,
+       "compile-time field descriptor lowers to typed member access")
+
+def value = #run 2**5
+assert(value == 32, "#run expression evaluates at compile time")
+
+def comptime_value = #comptime 2**5
+assert(comptime_value == value, "#comptime expression needs no braces")
+
+def called = #run square(value)
+assert(called == 1024, "#run evaluates ordinary functions")
+
+def mapped = #run range(4).map(fn(i) { i + value })
+assert(to_str(mapped) == "[32, 33, 34, 35]", "#run materializes collection values")
+
+def block_value = #run {
+  def base = 20
+  return base + 22
+}
+assert(block_value == 42, "#run block preserves comptime result rules")
+
+def comptime_alias = #comptime { return value + 10 }
+assert(comptime_alias == 42, "#comptime block aliases comptime expression")
+
+def legacy = comptime { return value + 10 }
+assert(legacy == comptime_alias, "legacy spelling has identical behavior")
+NY
+}

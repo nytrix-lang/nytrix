@@ -1,0 +1,23 @@
+shape ownership_rule_allowance_interval_match_guards {
+  family "compiler-errors/ownership"
+  generator "error"
+  features ["error", "ownership", "negative", "allowance", "interval", "match"]
+  template ny-compile-fail
+  expect compile_fail
+  flags "--ownership-strict"
+  expect_message "ownership allowance exceeded for 'x'"
+  source ny <<'NY'
+use core
+
+@allowance(x, [0,1])
+fn fall_through_guards(int tag, int x) int {
+  return match tag {
+    1 if x > 0 -> 1
+    1 if x < 0 -> 2
+    _ -> 0
+  }
+}
+
+fall_through_guards(1, 5)
+NY
+}

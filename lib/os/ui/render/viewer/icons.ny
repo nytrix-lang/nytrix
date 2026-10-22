@@ -1,16 +1,16 @@
 ;; Keywords: viewer icons ui glyph toolbar os render
 ;; Icon glyph names and compact drawing helpers for viewer and editor controls.
 ;; References:
-;; - std.os.ui.render.viewer.gui
-module std.os.ui.render.viewer.icons(icon_tex, icon_sprite, warm_sprites, stable_texture_id, clear_cache)
-use std.core
-use std.core.str as str
-use std.os.fs as osfs
-use std.os.ui.render.dump as ui_profile
-use std.os.ui.render as render
-use std.os.ui.render.atlas as atlas
-use std.os.ui.assets.viewer as assets
-use std.math.parse.img.svg as svg
+;; - core.os.ui.render.viewer.gui
+module core.os.ui.render.viewer.icons(icon_tex, icon_sprite, warm_sprites, stable_texture_id, clear_cache)
+use core
+use core.str as str
+use core.os.fs as osfs
+use core.os.ui.render.dump as ui_profile
+use core.os.ui.render as render
+use core.os.ui.render.atlas as atlas
+use core.os.ui.assets.viewer as assets
+use core.math.parse.img.svg as svg
 
 mut _cache = dict(32)
 mut _sprite_cache = dict(64)
@@ -193,5 +193,5 @@ fn warm_sprites(any names) int {
 
 #main {
    assert(clear_cache() == 0 && icon_tex("") == -1, "viewer icons basics")
-   print("✓ std.os.ui.render.viewer.icons self-test passed")
+   print("✓ core.os.ui.render.viewer.icons self-test passed")
 }

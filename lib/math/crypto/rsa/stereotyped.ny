@@ -4,14 +4,14 @@
 ;; - https://people.csail.mit.edu/rivest/Rsapaper.pdf
 ;; - https://crypto.stanford.edu/~dabo/pubs/papers/RSA-survey.pdf
 ;; References:
-;; - std.math.crypto.rsa
-;; - std.math.crypto
-module std.math.crypto.rsa.stereotyped(stereotyped_solve, stereotyped_message_attack)
-use std.math.nt
-use std.math.crypto.poly (poly_set_at)
-use std.math.crypto.number.partial
-use std.math.crypto.lattice.howgrave_graham
-use std.math.crypto.lattice.coppersmith
+;; - core.math.crypto.rsa
+;; - core.math.crypto
+module core.math.crypto.rsa.stereotyped(stereotyped_solve, stereotyped_message_attack)
+use core.math.nt
+use core.math.crypto.poly (poly_set_at)
+use core.math.crypto.number.partial
+use core.math.crypto.lattice.howgrave_graham
+use core.math.crypto.lattice.coppersmith
 
 def _STEREOTYPED_DIRECT_BITS = 20
 
@@ -105,5 +105,5 @@ fn stereotyped_message_attack(number n, int e, number c, any partial_m, int m=1,
    def msg = known + Z(7)
    def c = power_mod(msg, Z(3), n)
    assert(stereotyped_solve(n, 3, c, known, 4) == msg, "stereotyped small window direct recovery")
-   print("✓ std.math.crypto.rsa.stereotyped self-test passed")
+   print("✓ core.math.crypto.rsa.stereotyped self-test passed")
 }

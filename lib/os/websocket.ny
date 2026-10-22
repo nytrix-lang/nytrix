@@ -1,6 +1,6 @@
 ;; Keywords: websocket browser networking async transport
 ;; Small browser WebSocket lifecycle facade.
-module std.os.websocket(open, state, send, receive, close)
+module core.os.websocket(open, state, send, receive, close)
 
 ;; This module is a browser WebSocket facade.  Native hosts return the
 ;; documented zero/false/no-message values because no native socket transport

@@ -1,0 +1,20 @@
+shape ownership_rule_linear_use_after_move {
+  family "compiler-errors/ownership"
+  generator "error"
+  features ["error", "ownership", "resource", "linear", "move"]
+  template ny-compile-fail
+  expect compile_fail
+  flags "--ownership-strict"
+  expect_message "linear resource 'first'"
+  source ny <<'NY'
+linear layout File { int fd }
+
+fn use_after_move() int {
+  def File first = File(31)
+  def File second = first
+  first.fd + second.fd
+}
+
+use_after_move()
+NY
+}

@@ -5,11 +5,11 @@
 ;; - https://en.wikipedia.org/wiki/Linear-feedback_shift_register
 ;; - https://en.wikipedia.org/wiki/Berlekamp%E2%80%93Massey_algorithm
 ;; References:
-;; - std.math.crypto.prng
-;; - std.math.crypto
-module std.math.crypto.prng.lfsr(lfsr_next, lfsr_run, lfsr_keystream, lfsr_sequence, lfsr_autocorrelation, lfsr_connection_polynomial, lfsr_connection_polynomial_mod, lfsr_berlekamp_massey, lfsr_berlekamp_massey_mod, berlekamp_massey_mod, lfsr_polynomial_str, lfsr_connection_polynomial_str, lfsr_berlekamp_massey_polynomial_str, lfsr_rewind_sequence, lfsr_recover_state, lfsr_crack_from_output)
-use std.core
-use std.math.nt
+;; - core.math.crypto.prng
+;; - core.math.crypto
+module core.math.crypto.prng.lfsr(lfsr_next, lfsr_run, lfsr_keystream, lfsr_sequence, lfsr_autocorrelation, lfsr_connection_polynomial, lfsr_connection_polynomial_mod, lfsr_berlekamp_massey, lfsr_berlekamp_massey_mod, berlekamp_massey_mod, lfsr_polynomial_str, lfsr_connection_polynomial_str, lfsr_berlekamp_massey_polynomial_str, lfsr_rewind_sequence, lfsr_recover_state, lfsr_crack_from_output)
+use core
+use core.math.nt
 
 fn _lfsr_modp(any x, any p) any {
    def r = x % p
@@ -27,7 +27,7 @@ fn lfsr_next(any state, list taps, int n_bits) list {
    mut i = 0
    while i < taps.len {
       def t = taps.get(i)
-      fb = fb ^^ ((state >> (t - 1)) & 1)
+      fb = fb ^ ((state >> (t - 1)) & 1)
       i += 1
    }
    def new_state = (fb << (n_bits - 1)) | (state >> 1)
@@ -227,7 +227,7 @@ fn lfsr_rewind_sequence(list window, list connection_coeffs, int steps) list {
       mut i = 1
       while i < L {
          if (int(connection_coeffs[i]) & 1) == 1 {
-            prev = prev ^^ (int(state[L - 1 - i]) & 1)
+            prev = prev ^ (int(state[L - 1 - i]) & 1)
          }
          i += 1
       }
@@ -294,5 +294,5 @@ fn lfsr_crack_from_output(list bits) list {
    assert(seq == [1, 1, 0, 1, 0, 1, 1, 0, 0, 1, 0, 0, 0, 1, 1, 1, 1, 0, 1, 0], "lfsr sequence sample")
    assert(lfsr_autocorrelation(seq, 15, 7) == [4, 15], "autocorrelation sample")
    assert(lfsr_connection_polynomial(seq) == [1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1], "connection polynomial sample")
-   print("✓ std.math.crypto.prng.lfsr self-test passed")
+   print("✓ core.math.crypto.prng.lfsr self-test passed")
 }

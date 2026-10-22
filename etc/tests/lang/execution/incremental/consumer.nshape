@@ -1,0 +1,13 @@
+shape test_consumer {
+  family "native/incremental"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+module consumer(value)
+use "provider.ny" as provider
+
+fn value() int { provider.provider_value() + 1 }
+NY
+}

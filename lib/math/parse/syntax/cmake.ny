@@ -1,12 +1,12 @@
 ;; Keywords: syntax cmake build-system parse highlight
 ;; CMake syntax highlighter
 ;; References:
-;; - std.math.parse.syntax
-;; - std.math.parse.syntax.helpers
-module std.math.parse.syntax.cmake(tokenize)
-use std.core
-use std.core.str as str
-use std.math.parse.syntax.helpers as _h
+;; - core.math.parse.syntax
+;; - core.math.parse.syntax.helpers
+module core.math.parse.syntax.cmake(tokenize)
+use core
+use core.str as str
+use core.math.parse.syntax.helpers as _h
 
 def KW = "if;else;elseif;endif;foreach;endforeach;while;endwhile;function;endfunction;macro;endmacro;include;include_directories;add_executable;add_library;add_subdirectory;add_definitions;target_link_libraries;target_include_directories;set;unset;option;find_package;find_path;find_file;find_library;find_program;project;cmake_minimum_required;set_property;get_property;get_target_property;set_target_properties;configure_file;install;export;message;return;break;continue;list;string;math;file;exec_program;execute_process;add_custom_command;add_custom_target;add_test;enable_testing;ctest"
 

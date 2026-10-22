@@ -1,14 +1,14 @@
 ;; Keywords: 3d meshopt meshoptimizer parse gltf
 ;; meshoptimizer decoding and mesh-compression support for glTF assets.
 ;; References:
-;; - std.math.parse.3d
-;; - std.math.parse
-module std.math.parse.3d.meshopt(meshopt_process_mesh, meshopt_select_lod_cut)
-use std.core
-use std.math
-use std.math.bin (f32le)
-use std.core.str as str
-use std.core.common as common
+;; - core.math.parse.3d
+;; - core.math.parse
+module core.math.parse.3d.meshopt(meshopt_process_mesh, meshopt_select_lod_cut)
+use core
+use core.math
+use core.math.bin (f32le)
+use core.str as str
+use core.common as common
 
 fn vec_push(list xs, any v) list { xs.append(v) }
 
@@ -51,11 +51,11 @@ layout Meshlet {
    u32 lod_level
 }
 
-fn _px(any vbuf, int vi, int stride) any { f32le(vbuf, vi * stride) }
+fn _px(any vbuf, int vi, int stride) f64 { float(f32le(vbuf, vi * stride)) }
 
-fn _py(any vbuf, int vi, int stride) any { f32le(vbuf, vi * stride + 4) }
+fn _py(any vbuf, int vi, int stride) f64 { float(f32le(vbuf, vi * stride + 4)) }
 
-fn _pz(any vbuf, int vi, int stride) any { f32le(vbuf, vi * stride + 8) }
+fn _pz(any vbuf, int vi, int stride) f64 { float(f32le(vbuf, vi * stride + 8)) }
 
 fn _len3(any x, any y, any z) any { sqrt(x*x + y*y + z*z) }
 
@@ -326,7 +326,7 @@ fn _qem_add(list a, list b) list {
       a.get(9)+b.get(9)]
 }
 
-fn _qem_eval(list q, any x, any y, any z) any {
+fn _qem_eval(list q, f64 x, f64 y, f64 z) f64 {
    def a=q.get(0) def b=q.get(1) def c=q.get(2) def d=q.get(3)
    def e=q.get(4) def f=q.get(5) def g=q.get(6)
    def h=q.get(7) def ii=q.get(8)

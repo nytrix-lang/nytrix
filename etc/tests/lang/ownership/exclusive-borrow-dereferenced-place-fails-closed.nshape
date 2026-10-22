@@ -1,0 +1,23 @@
+shape ownership_rule_exclusive_borrow_dereferenced_place_fails_closed {
+  family "compiler-errors/ownership"
+  generator "error"
+  features ["error", "ownership", "borrow", "exclusive", "dereference", "fail-closed", "negative"]
+  template ny-compile-fail
+  expect compile_fail
+  flags "--ownership-strict --nyir-verify"
+
+  source ny <<'NY'
+use core
+
+fn borrow_through_pointer() int {
+  mut int value = 5
+  def pointer = borrow_mut(value)
+  def exclusive = borrow_mut(*pointer)
+  value = 6
+  def observed = exclusive
+  observed
+}
+
+borrow_through_pointer()
+NY
+}

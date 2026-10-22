@@ -13,7 +13,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#if defined(_OPENMP)
+#if defined(_OPENMP) && !defined(NYTRIX_NO_OPENMP)
 #include <omp.h>
 #define NY_PAR_HAVE_OPENMP 1
 #else
@@ -97,10 +97,13 @@ size_t ny_parallel_min_work(void) {
   return v > 0 ? (size_t)v : 2048;
 }
 
-bool ny_parallel_enabled(size_t work_items) {
-  if (!ny_parallel_mode_enabled() || ny_parallel_threads() < 2)
+bool ny_parallel_enabled(size_t count, size_t work_items) {
+  int threads = ny_parallel_threads();
+  if (!ny_parallel_mode_enabled() || threads < 2)
     return false;
-  return work_items >= ny_parallel_min_work();
+  size_t worker_count = count < (size_t)threads ? count : (size_t)threads;
+  return worker_count >= 2 &&
+         work_items / worker_count >= ny_parallel_min_work();
 }
 
 #if NY_PAR_HAVE_C11
@@ -135,7 +138,13 @@ bool ny_parallel_for(size_t count, size_t work_items, ny_parallel_task_fn fn,
   ny_parallel_register_report();
   atomic_fetch_add_explicit(&g_regions, 1, memory_order_relaxed);
   atomic_fetch_add_explicit(&g_tasks, count, memory_order_relaxed);
-  if (count < 2 || !ny_parallel_enabled(work_items)) {
+  int threads = ny_parallel_threads();
+  /*
+   * The minimum is a per-worker grain size. Checking only total work can
+   * start a large OpenMP team for tiny per-item callbacks, where team startup
+   * and synchronization cost more than the work being parallelized.
+   */
+  if (!ny_parallel_enabled(count, work_items)) {
     atomic_fetch_add_explicit(&g_serial_regions, 1, memory_order_relaxed);
     for (size_t i = 0; i < count; ++i)
       if (!fn(i, ctx))
@@ -146,7 +155,14 @@ bool ny_parallel_for(size_t count, size_t work_items, ny_parallel_task_fn fn,
 #if NY_PAR_HAVE_OPENMP
   if (!omp_in_parallel()) {
     _Atomic int failed = 0;
-    int threads = ny_parallel_threads();
+    /*
+     * OpenMP creates the requested team even when the loop has fewer tasks.
+     * Module and pass work often has only a handful of independent items;
+     * cap the team to useful workers instead of waking the machine-wide
+     * default (which can be dozens of idle threads for a two-item region).
+     */
+    if ((size_t)threads > count)
+      threads = (int)count;
 #pragma omp parallel for schedule(static) num_threads(threads)
     for (long long i = 0; i < (long long)count; ++i) {
       if (!atomic_load_explicit(&failed, memory_order_relaxed) &&
@@ -159,9 +175,6 @@ bool ny_parallel_for(size_t count, size_t work_items, ny_parallel_task_fn fn,
 #endif
 
 #if NY_PAR_HAVE_C11
-  int threads = ny_parallel_threads();
-  if ((size_t)threads > count)
-    threads = (int)count;
   if (threads > 1) {
     ny_parallel_c11_ctx_t p = {.next = 0,
                                .failed = 0,

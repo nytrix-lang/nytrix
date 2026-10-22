@@ -1,15 +1,15 @@
 ;; Keywords: platform window backend gamepad joystick controller map os ui input
 ;; Shared gamepad mapping logic for native window backends.
 ;; References:
-;; - std.os.ui.window.platform
-;; - std.os.ui.window
-;; - std.os.ui.window.consts
-module std.os.ui.window.platform.gamepad_map(init_default_linux_mappings, init_default_windows_mappings, init_default_macos_mappings, update_mappings, find_mapping, find_valid_mapping, joystick_is_gamepad, get_gamepad_name, get_gamepad_state)
-use std.core
-use std.core.mem
-use std.math.float as fmath
-use std.core.str as str
-use std.os.ui.window.platform.api as backend_api
+;; - core.os.ui.window.platform
+;; - core.os.ui.window
+;; - core.os.ui.window.consts
+module core.os.ui.window.platform.gamepad_map(init_default_linux_mappings, init_default_windows_mappings, init_default_macos_mappings, update_mappings, find_mapping, find_valid_mapping, joystick_is_gamepad, get_gamepad_name, get_gamepad_state)
+use core
+use core.mem
+use core.math.float as fmath
+use core.str as str
+use core.os.ui.window.platform.api as backend_api
 
 def GAMEPAD_BUTTON_LAST = 14
 def GAMEPAD_AXIS_LAST = 5
@@ -209,7 +209,7 @@ fn init_default_macos_mappings() bool {
 fn update_mappings(any s, str platform_name="Linux") int {
    "Parses SDL-style gamepad mapping rows into the active mapping table."
    if !s || !is_str(s) { return 0 }
-   def text = str.replace(s, "\\n", "\n")
+   def text = s.replace("\\n", "\n")
    def lines = str.split(text, "\n")
    if !is_list(lines) { return 0 }
    mut updated = 0
@@ -623,5 +623,5 @@ fn get_gamepad_state(any js, any state_ptr) bool {
    free(buttons)
    free(hats)
    free(state)
-   print("✓ std.os.ui.window.platform.gamepad_map self-test passed")
+   print("✓ core.os.ui.window.platform.gamepad_map self-test passed")
 }

@@ -1,0 +1,419 @@
+shape mutable_list_slot_replacement_tracks_callback_effects {
+  family "typing/effects"
+  generator "regression"
+  features [ny test typing effects callback capture mutable list exact indexed replacement positive]
+  template ny-test-case
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+@effects(io)
+fn io_callback() int {
+  print("mutable callback slot\n")
+  42
+}
+
+@effects(none)
+fn pure_callback() int { 7 }
+
+@effects(io, alloc, read, write)
+fn invoke_replaced_callback() int {
+  mut callbacks = [pure_callback]
+  callbacks[0] = io_callback
+  callbacks[0]()
+}
+
+assert(invoke_replaced_callback() == 42,
+       "a mutable exact-index store transfers the replacement callback row")
+NY
+}
+
+shape mutable_list_slot_replacement_rejects_underdeclared_effects {
+  family "typing/effects"
+  generator "regression"
+  features [error typing effects callback capture mutable list exact indexed replacement negative]
+  template ny-compile-fail
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_fail
+  expect_message "inferred effects=io|alloc|read|write"
+  source ny <<'NY'
+use core
+
+@effects(io)
+fn io_callback() int {
+  print("mutable callback slot\n")
+  42
+}
+
+@effects(none)
+fn pure_callback() int { 7 }
+
+@effects(none)
+fn invoke_underdeclared() int {
+  mut callbacks = [pure_callback]
+  callbacks[0] = io_callback
+  callbacks[0]()
+}
+
+invoke_underdeclared()
+NY
+}
+
+shape mutable_dictionary_slot_replacement_tracks_callback_effects {
+  family "typing/effects"
+  generator "regression"
+  features [ny test typing effects callback capture mutable dictionary exact indexed replacement positive]
+  template ny-test-case
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+@effects(io)
+fn io_callback() int {
+  print("mutable callback key\n")
+  42
+}
+
+@effects(none)
+fn pure_callback() int { 7 }
+
+@effects(io, alloc, read, write)
+fn invoke_replaced_callback() int {
+  mut callbacks = {"run": pure_callback}
+  callbacks["run"] = io_callback
+  callbacks["run"]()
+}
+
+assert(invoke_replaced_callback() == 42,
+       "a mutable exact-key store transfers the replacement callback row")
+NY
+}
+
+shape mutable_dictionary_slot_replacement_rejects_underdeclared_effects {
+  family "typing/effects"
+  generator "regression"
+  features [error typing effects callback capture mutable dictionary exact indexed replacement negative]
+  template ny-compile-fail
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_fail
+  expect_message "inferred effects=io|alloc|read|write"
+  source ny <<'NY'
+use core
+
+@effects(io)
+fn io_callback() int {
+  print("mutable callback key\n")
+  42
+}
+
+@effects(none)
+fn pure_callback() int { 7 }
+
+@effects(none)
+fn invoke_underdeclared() int {
+  mut callbacks = {"run": pure_callback}
+  callbacks["run"] = io_callback
+  callbacks["run"]()
+}
+
+invoke_underdeclared()
+NY
+}
+
+shape mutating_dictionary_preserves_disjoint_list_callback_summary {
+  family "typing/effects"
+  generator "regression"
+  features [ny test typing effects callback container-kind isolation positive]
+  template ny-test-case
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+@effects(io)
+fn io_callback() int {
+  print("dictionary callback mutation\n")
+  42
+}
+
+@effects(none)
+fn pure_callback() int { 7 }
+
+@effects(alloc, read, write)
+fn mutate_dictionary_and_call_list() int {
+  mut callbacks = [pure_callback]
+  mut entries = {"run": pure_callback}
+  entries["run"] = io_callback
+  callbacks[0]()
+}
+
+assert(mutate_dictionary_and_call_list() == 7,
+       "dictionary mutation does not invalidate a statically distinct list")
+NY
+}
+
+shape mutable_callback_alias_join_survives_exact_container_store {
+  family "typing/effects"
+  generator "regression"
+  features [ny test typing effects callback mutation branch join exact container store positive]
+  template ny-test-case
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+@effects(io)
+fn io_callback() int {
+  print("joined mutable callback\n")
+  42
+}
+
+@effects(none)
+fn pure_callback() int { 7 }
+
+@effects(io, alloc, read, write)
+fn invoke_joined_callback(bool choose_io) int {
+  mut selected = pure_callback
+  if choose_io {
+    selected = io_callback
+  } else {
+    selected = pure_callback
+  }
+  mut callbacks = [pure_callback]
+  callbacks[0] = selected
+  callbacks[0]()
+}
+
+assert(invoke_joined_callback(true) == 42,
+       "a branch-joined local callback alias transfers into an exact list slot")
+NY
+}
+
+shape mutable_callback_alias_join_rejects_underdeclared_container_store {
+  family "typing/effects"
+  generator "regression"
+  features [error typing effects callback mutation branch join exact container store negative]
+  template ny-compile-fail
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_fail
+  expect_message "inferred effects=io|alloc|read|write"
+  source ny <<'NY'
+use core
+
+@effects(io)
+fn io_callback() int {
+  print("joined mutable callback\n")
+  42
+}
+
+@effects(none)
+fn pure_callback() int { 7 }
+
+@effects(alloc, read, write)
+fn invoke_underdeclared(bool choose_io) int {
+  mut selected = pure_callback
+  if choose_io {
+    selected = io_callback
+  } else {
+    selected = pure_callback
+  }
+  mut callbacks = [pure_callback]
+  callbacks[0] = selected
+  callbacks[0]()
+}
+
+invoke_underdeclared(true)
+NY
+}
+
+shape mutable_list_cow_alias_slot_effects_are_isolated {
+  family "typing/effects"
+  generator "regression"
+  features [ny test typing effects callback mutable list copy-on-write alias exact slot positive]
+  template ny-test-case
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+@effects(io)
+fn io_callback() int {
+  print("cow alias callback\n")
+  42
+}
+
+@effects(none)
+fn pure_callback() int { 7 }
+
+@effects(io, alloc, read, write)
+fn invoke_cow_alias() int {
+  mut callbacks = [pure_callback]
+  mut alias = callbacks
+  alias[0] = io_callback
+  assert(callbacks[0]() == 7,
+         "writing the COW alias leaves the source callback pure")
+  alias[0]()
+}
+
+assert(invoke_cow_alias() == 42,
+       "the detached alias receives the replacement callback row")
+NY
+}
+
+shape mutable_list_cow_alias_preserves_source_callback_effect {
+  family "typing/effects"
+  generator "regression"
+  features [ny test typing effects callback mutable list copy-on-write alias source fact positive]
+  template ny-test-case
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+@effects(io)
+fn io_callback() int {
+  print("cow alias callback\n")
+  42
+}
+
+@effects(none)
+fn pure_callback() int { 7 }
+
+@effects(alloc, read, write)
+fn invoke_cow_alias() int {
+  mut callbacks = [pure_callback]
+  mut alias = callbacks
+  alias[0] = io_callback
+  callbacks[0]()
+}
+
+assert(invoke_cow_alias() == 7,
+       "copy-on-write keeps the source callback effect fact unchanged")
+NY
+}
+
+shape mutable_list_cow_alias_rejects_underdeclared_replacement_callback {
+  family "typing/effects"
+  generator "regression"
+  features [error typing effects callback mutable list copy-on-write alias underdeclared negative]
+  template ny-compile-fail
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_fail
+  expect_message "inferred effects=io|alloc|read|write"
+  source ny <<'NY'
+use core
+
+@effects(io)
+fn io_callback() int {
+  print("cow alias callback\n")
+  42
+}
+
+@effects(none)
+fn pure_callback() int { 7 }
+
+@effects(alloc, read, write)
+fn invoke_cow_alias() int {
+  mut callbacks = [pure_callback]
+  mut alias = callbacks
+  alias[0] = io_callback
+  alias[0]()
+}
+
+invoke_cow_alias()
+NY
+}
+
+shape assigned_list_append_tracks_added_callback_effects {
+  family "typing/effects"
+  generator "regression"
+  features [ny test typing effects callback mutable list append assignment summary positive]
+  template ny-test-case
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+@effects(io)
+fn io_callback() int {
+  print("appended callback\n")
+  42
+}
+
+@effects(none)
+fn pure_callback() int { 7 }
+
+@effects(io, alloc, read, write)
+fn invoke_appended_callback(int index) int {
+  def source = [pure_callback, pure_callback]
+  mut callbacks = source.append(io_callback)
+  assert(source[0]() == 7,
+         "appending into a new binding preserves the source callback facts")
+  callbacks[index]()
+}
+
+assert(invoke_appended_callback(2) == 42,
+       "the assigned append result summary includes its new callback")
+NY
+}
+
+shape assigned_list_append_rejects_underdeclared_callback_effects {
+  family "typing/effects"
+  generator "error"
+  features [error typing effects callback mutable list append assignment negative]
+  template ny-compile-fail
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_fail
+  expect_message "inferred effects=io|alloc|write"
+  source ny <<'NY'
+use core
+
+@effects(io)
+fn io_callback() int {
+  print("appended callback\n")
+  42
+}
+
+@effects(none)
+fn pure_callback() int { 7 }
+
+@effects(alloc, read, write)
+fn invoke_underdeclared(int index) int {
+  def source = [pure_callback, pure_callback]
+  mut callbacks = source.append(io_callback)
+  callbacks[index]()
+}
+
+invoke_underdeclared(2)
+NY
+}
+
+shape assigned_list_append_rejects_missing_custom_callback_row {
+  family "typing/effects"
+  generator "error"
+  features [error typing effects callback mutable list append assignment custom-row negative]
+  template ny-compile-fail
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_fail
+  expect_message "effect contract violation"
+  source ny <<'NY'
+use core
+
+@effects(cap("project.storage.read"))
+fn storage_callback() int { 9 }
+
+@effects(none)
+fn pure_callback() int { 7 }
+
+@effects(alloc, read, write)
+fn invoke_custom_appended_callback(int index) int {
+  def source = [pure_callback, pure_callback]
+  mut callbacks = source.append(storage_callback)
+  callbacks[index]()
+}
+
+invoke_custom_appended_callback(2)
+NY
+}

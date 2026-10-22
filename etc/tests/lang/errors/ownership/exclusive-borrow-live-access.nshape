@@ -1,0 +1,21 @@
+shape ownership_exclusive_borrow_live_access {
+  family "compiler-errors/ownership"
+  generator "error"
+  features ["error", "ownership", "negative", "borrow", "exclusive", "liveness"]
+  template ny-compile-fail
+  expect compile_fail
+  flags "--ownership-strict"
+
+  source ny <<'NY'
+use core
+
+fn bad() int {
+  mut int value = 1
+  def exclusive = &mut value
+  value = value + 1
+  exclusive
+}
+
+bad()
+NY
+}

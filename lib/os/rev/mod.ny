@@ -1,7 +1,7 @@
 ;; Keywords: reverse decompiler symbolic solver facade
 ;; Stable composed API over the rev/* implementation package. Use this module
 ;; when scripts want one reverse stack instead of individual engine modules.
-module std.os.rev(
+module core.os.rev(
    status, backend_status,
    load, inspect, analyze, triage, report,
    entry, arch, arch_profile, default_target,
@@ -13,10 +13,10 @@ module std.os.rev(
    symbolic_backend_status, z3_available, unicorn_available,
 )
 
-use std.core
-use std.os.rev.decomp as dc
-use std.os.rev.solve as rs
-use std.os.rev.symbolic as sym
+use core
+use core.os.rev.decomp as dc
+use core.os.rev.solve as rs
+use core.os.rev.symbolic as sym
 
 fn _opts(any opts) dict {
    is_dict(opts) ? opts : dict()
@@ -36,7 +36,7 @@ fn status() dict {
       "decompiler": dc.tool_status(),
       "symbolic": sym.backend_status(),
       "solver": {
-         "module": "std.os.rev.solve",
+         "module": "core.os.rev.solve",
          "z3": sym.z3_available(),
       },
    }
@@ -256,8 +256,8 @@ fn solve_byte_constraints(any raw_constraints, any opts=dict()) dict {
 
 #main {
    def s = status()
-   assert(s.get("solver", dict()).get("module", "") == "std.os.rev.solve", "reverse facade canonical solver")
+   assert(s.get("solver", dict()).get("module", "") == "core.os.rev.solve", "reverse facade canonical solver")
    assert(is_dict(s.get("decompiler", 0)) && is_dict(symbolic_backend_status()), "reverse facade backend status")
    assert(solve_byte_constraints([], dict()).get("status", "") != "", "reverse facade solver dispatch")
-   print("✓ std.os.rev self-test passed")
+   print("✓ core.os.rev self-test passed")
 }

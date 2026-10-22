@@ -1,0 +1,57 @@
+shape invalid_tbuf_integer_receiver {
+  family "runtime/values"
+  generator "embedded"
+  features ["ny", "test", "runtime", "provenance"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only; --native-only --native-backend=x86_64"
+  expect compile_and_run
+  expect_exit 1
+  source ny <<'NY'
+use core
+__append(1, 9)
+NY
+}
+shape invalid_tbuf_garbage_pointer_receiver {
+  family "runtime/values"
+  generator "embedded"
+  features ["ny", "test", "runtime", "provenance"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only; --native-only --native-backend=x86_64"
+  expect compile_and_run
+  expect_exit 1
+  source ny <<'NY'
+use core
+def ptr = malloc_raw(16)
+__append(ptr, 9)
+NY
+}
+shape invalid_tbuf_freed_handle_receiver {
+  family "runtime/values"
+  generator "embedded"
+  features ["ny", "test", "runtime", "provenance"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only; --native-only --native-backend=x86_64"
+  expect compile_and_run
+  expect_exit 1
+  source ny <<'NY'
+use core
+fn as_ptr(any value) ptr = value
+def handle = list(1)
+free_raw(as_ptr(handle))
+__append(handle, 9)
+NY
+}
+shape invalid_tbuf_dictionary_receiver {
+  family "runtime/values"
+  generator "embedded"
+  features ["ny", "test", "runtime", "provenance"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only; --native-only --native-backend=x86_64"
+  expect compile_and_run
+  expect_exit 1
+  source ny <<'NY'
+use core
+def value = dict()
+__append(value, 9)
+NY
+}

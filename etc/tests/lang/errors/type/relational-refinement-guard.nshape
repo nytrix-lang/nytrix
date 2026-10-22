@@ -1,0 +1,292 @@
+shape type-relational-refinement-guard-is-not-strong-enough {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "refinement", "relational-guard", "negative"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "refinement obligation is not proved"
+  source ny <<'NY'
+use core
+
+refine Positive = int where(v) { v > 0 }
+fn accept_positive(Positive value) int { value }
+fn insufficient_guard(int value) int {
+  if value >= 0 {
+    accept_positive(value)
+  } else {
+    0
+  }
+}
+NY
+}
+
+shape type-relational-implication-weak-bound-fails-closed {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "refinement", "relational-guard", "negative"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "refinement obligation is not proved"
+  source ny <<'NY'
+use core
+
+refine AtLeastTwo = int where(value) { value >= 2 }
+fn accept_at_least_two(AtLeastTwo value) int { value }
+fn insufficient_lower_bound(int value) int {
+  if value > 0 {
+    accept_at_least_two(value)
+  } else {
+    0
+  }
+}
+NY
+}
+
+shape type-equivalent-refinement-guards-fail-closed {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "refinement", "relational-guard", "ambiguity", "negative"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "refinement obligation is not proved"
+  source ny <<'NY'
+use core
+
+refine Positive = int where(v) { v > 0 }
+refine AboveZero = int where(n) { n > 0 }
+fn accept_positive(Positive value) int { value }
+fn equivalent_guard_is_ambiguous(int value) int {
+  if value > 0 {
+    accept_positive(value)
+  } else {
+    0
+  }
+}
+NY
+}
+
+shape type-incomparable-refinement-guards-fail-closed {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "refinement", "relational-guard", "ambiguity", "negative"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "refinement obligation is not proved"
+  source ny <<'NY'
+use core
+
+refine Positive = int where(v) { v > 0 }
+refine Even = int where(n) { n % 2 == 0 }
+fn accept_positive(Positive value) int { value }
+fn incomparable_guards_are_ambiguous(int value) int {
+  if value > 0 && value % 2 == 0 {
+    accept_positive(value)
+  } else {
+    0
+  }
+}
+NY
+}
+
+shape type-reversed-relational-refinement-guard-is-not-strong-enough {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "refinement", "relational-guard", "negative"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "refinement obligation is not proved"
+  source ny <<'NY'
+use core
+
+refine Positive = int where(v) { v > 0 }
+fn accept_positive(Positive value) int { value }
+fn insufficient_reversed_guard(int value) int {
+  if 0 <= value {
+    accept_positive(value)
+  } else {
+    0
+  }
+}
+NY
+}
+
+shape type-loop-refinement-fact-does-not-escape {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "refinement", "loop", "negative"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "refinement obligation is not proved"
+  source ny <<'NY'
+use core
+
+refine Positive = int where(v) { v > 0 }
+fn accept_positive(Positive value) int { value }
+fn loop_fact_does_not_escape(int value) int {
+  while value > 0 {
+    break
+  }
+  accept_positive(value)
+}
+NY
+}
+
+shape type-noncomplementary-guard-does-not-prove-else {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "refinement", "relational-guard", "negative"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "refinement obligation is not proved"
+  source ny <<'NY'
+use core
+
+refine Positive = int where(v) { v > 0 }
+fn accept_positive(Positive value) int { value }
+fn noncomplementary_else(int value) int {
+  if value != 0 {
+    0
+  } else {
+    accept_positive(value)
+  }
+}
+NY
+}
+
+shape type-disjunction-does-not-prove-refinement-conjunct {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "refinement", "relational-guard", "negative"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "refinement obligation is not proved"
+  source ny <<'NY'
+use core
+
+refine Positive = int where(v) { v > 0 }
+fn accept_positive(Positive value) int { value }
+fn disjunction_is_not_positive(int value) int {
+  if value > 0 || value == 0 {
+    accept_positive(value)
+  } else {
+    0
+  }
+}
+NY
+}
+
+shape type-conjunction-false-arm-does-not-prove-refinement-complement {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "refinement", "relational-guard", "negative"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "refinement obligation is not proved"
+  source ny <<'NY'
+use core
+
+refine Positive = int where(v) { v > 0 }
+fn accept_positive(Positive value) int { value }
+fn conjunction_false_does_not_prove_positive(int value) int {
+  if value <= 0 && value == 1 {
+    0
+  } else {
+    accept_positive(value)
+  }
+}
+NY
+}
+
+shape type-negated-comparison-wrong-polarity-does-not-prove-refinement {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "refinement", "relational-guard", "negative"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "refinement obligation is not proved"
+  source ny <<'NY'
+use core
+
+refine Positive = int where(v) { v > 0 }
+fn accept_positive(Positive value) int { value }
+fn negation_proves_wrong_polarity(int value) int {
+  if !(value > 0) {
+    accept_positive(value)
+  } else {
+    0
+  }
+}
+NY
+}
+
+shape type-mutable-guard-does-not-prove-refinement {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "refinement", "mutable", "negative"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "refinement obligation is not proved"
+  source ny <<'NY'
+use core
+
+refine Positive = int where(v) { v > 0 }
+fn accept_positive(Positive value) int { value }
+fn mutation_invalidates_guard(int input) int {
+  mut value = input
+  if value > 0 {
+    value = -1
+    accept_positive(value)
+  } else {
+    0
+  }
+}
+NY
+}
+
+shape type-mutable-guard-through-closure-does-not-prove-refinement {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "refinement", "mutable", "closure", "negative"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "refinement obligation is not proved"
+  source ny <<'NY'
+use core
+
+refine Positive = int where(v) { v > 0 }
+fn accept_positive(Positive value) int { value }
+fn mutation_via_closure(int input) int {
+  mut value = input
+  def invalidate = fn() { value = -1 }
+  if value > 0 {
+    invalidate()
+    accept_positive(value)
+  } else {
+    0
+  }
+}
+NY
+}
+
+shape type-mutable-guard-after-capture-does-not-prove-refinement {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "refinement", "mutable", "capture", "negative"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "refinement obligation is not proved"
+  source ny <<'NY'
+use core
+
+refine Positive = int where(v) { v > 0 }
+fn captured_binding(int input) Positive {
+  mut value = input
+  def later_write = fn() { value = -1 }
+  if value > 0 {
+    return value
+  } else {
+    return 1
+  }
+}
+NY
+}

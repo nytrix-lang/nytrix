@@ -1,7 +1,12 @@
-module std.os.ui.render.prims(draw_sphere_3d, draw_cylinder_3d, draw_cylinder_between_3d, draw_plane_3d, draw_box_3d)
-use std.math as math
-use std.math.vector
-use std.os.ui.render as render
+;; Keywords: ui rendering geometry 3d primitives
+;; Draws 3D primitives through the UI rendering facade.
+;; References:
+;; - core.math.vector
+;; - core.os.ui.render
+module core.os.ui.render.prims(draw_sphere_3d, draw_cylinder_3d, draw_cylinder_between_3d, draw_plane_3d, draw_box_3d)
+use core.math as math
+use core.math.vector
+use core.os.ui.render as render
 
 ; Helper: convert Vector3-like `v` to a list of three floats.
 fn _v3f(any v) list { [float(vector.x(v)), float(vector.y(v)), float(vector.z(v))] }
@@ -20,7 +25,7 @@ fn draw_sphere_3d(any center, any radius, any color) {
    ; precompute segment trig
    mut cu = []
    mut su = []
-   mut si = 0
+   mut int si = 0
    while si <= segs {
       def u = 2.0 * PI * float(si) / float(segs)
       cu = cu.append(math.cos(u))
@@ -28,7 +33,7 @@ fn draw_sphere_3d(any center, any radius, any color) {
       si += 1
    }
    mut tris = []
-   mut ri = 0
+   mut int ri = 0
    while ri < rings {
       def v0 = -PI * 0.5 + PI * float(ri) / float(rings)
       def v1 = -PI * 0.5 + PI * float(ri + 1) / float(rings)
@@ -36,11 +41,12 @@ fn draw_sphere_3d(any center, any radius, any color) {
       def c1 = math.cos(v1)
       def s0 = math.sin(v0)
       def s1 = math.sin(v1)
-      mut sj = 0
+      mut int sj = 0
       while sj < segs {
+         def int next_sj = sj + 1
          def p00 = [cx + c0*cu.get(sj)*r, cy + s0*r, cz + c0*su.get(sj)*r]
-         def p01 = [cx + c0*cu.get(sj + 1)*r, cy + s0*r, cz + c0*su.get(sj + 1)*r]
-         def p11 = [cx + c1*cu.get(sj + 1)*r, cy + s1*r, cz + c1*su.get(sj + 1)*r]
+         def p01 = [cx + c0*cu.get(next_sj)*r, cy + s0*r, cz + c0*su.get(next_sj)*r]
+         def p11 = [cx + c1*cu.get(next_sj)*r, cy + s1*r, cz + c1*su.get(next_sj)*r]
          def p10 = [cx + c1*cu.get(sj)*r, cy + s1*r, cz + c1*su.get(sj)*r]
          tris = tris.append([p00, p01, p11])
          tris = tris.append([p00, p11, p10])
@@ -65,7 +71,7 @@ fn draw_cylinder_3d(any center, any radiusTop, any radiusBottom, any height, any
    def n = math.max(3, int(sides))
    mut ca = []
    mut sa = []
-   mut i = 0
+   mut int i = 0
    while i <= n {
       def a = 2.0 * PI * float(i) / float(n)
       ca = ca.append(math.cos(a))
@@ -73,12 +79,13 @@ fn draw_cylinder_3d(any center, any radiusTop, any radiusBottom, any height, any
       i += 1
    }
    mut tris = []
-   mut j = 0
+   mut int j = 0
    while j < n {
+      def int next_j = j + 1
       def ca0 = ca.get(j)
-      def ca1 = ca.get(j + 1)
+      def ca1 = ca.get(next_j)
       def sa0 = sa.get(j)
-      def sa1 = sa.get(j + 1)
+      def sa1 = sa.get(next_j)
       def b0 = [cx + ca0*rb, y0, cz + sa0*rb]
       def b1 = [cx + ca1*rb, y0, cz + sa1*rb]
       def t1 = [cx + ca1*rt, y1, cz + sa1*rt]
@@ -109,7 +116,7 @@ fn draw_cylinder_between_3d(any start, any finish, any radiusStart, any radiusEn
    def n = math.max(3, int(sides))
    mut ca = []
    mut sa = []
-   mut i = 0
+   mut int i = 0
    while i <= n {
       def a = 2.0 * PI * float(i) / float(n)
       ca = ca.append(math.cos(a))
@@ -117,12 +124,13 @@ fn draw_cylinder_between_3d(any start, any finish, any radiusStart, any radiusEn
       i += 1
    }
    mut tris = []
-   mut j = 0
+   mut int j = 0
    while j < n {
+      def int next_j = j + 1
       def ca0 = ca.get(j)
-      def ca1 = ca.get(j + 1)
+      def ca1 = ca.get(next_j)
       def sa0 = sa.get(j)
-      def sa1 = sa.get(j + 1)
+      def sa1 = sa.get(next_j)
       def r0a = vector.add(vector.scale(right, ca0 * float(radiusStart)), vector.scale(fwd, sa0 * float(radiusStart)))
       def r0b = vector.add(vector.scale(right, ca1 * float(radiusStart)), vector.scale(fwd, sa1 * float(radiusStart)))
       def r1b = vector.add(vector.scale(right, ca1 * float(radiusEnd)), vector.scale(fwd, sa1 * float(radiusEnd)))

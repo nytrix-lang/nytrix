@@ -1,21 +1,21 @@
 ;; Keywords: 3d gltf glb parse
 ;; Submodule: load
-module std.math.parse.3d.gltf.load(_gltf_stage_binary_blob, _gltf_data_uri_decode, _gltf_load_buffer_uri, _gltf_parse_glb, _gltf_strip_top_level_key, _gltf_strip_asset_field, _gltf_parse_gltf_with_fallbacks, gltf_free_data, _gltf_sparse_accessor_meta, _gltf_sparse_buffer_ptr, _gltf_sparse_index_value, _gltf_sparse_materialize, _gltf_resolve_accessor_data, _gltf_release_accessor_data, _gltf_primary_data_ptr, load_gltf, load_gltf_file, parse_gltf_str)
-use std.core
-use std.math.bin
-use std.math
-use std.os (file_exists, file_read, file_write)
-use std.os.interact
-use std.math.parse.data.json
-use std.math.float (is_nan, is_inf)
-use std.math.crypto.hash as lib_hash
-use std.os.path as ospath
-use std.core.str as str
-use std.math.crypto.encoding.base as str_base
-use std.core.common as common
-use std.core.cache as cache
-use std.math.parse.3d.gltf.math as gltf_math
-use std.math.parse.3d.gltf.shared as shr
+module core.math.parse.3d.gltf.load(_gltf_stage_binary_blob, _gltf_data_uri_decode, _gltf_load_buffer_uri, _gltf_parse_glb, _gltf_strip_top_level_key, _gltf_strip_asset_field, _gltf_parse_gltf_with_fallbacks, gltf_free_data, _gltf_sparse_accessor_meta, _gltf_sparse_buffer_ptr, _gltf_sparse_index_value, _gltf_sparse_materialize, _gltf_resolve_accessor_data, _gltf_release_accessor_data, _gltf_primary_data_ptr, load_gltf_file, parse_gltf_str)
+use core
+use core.math.bin
+use core.math
+use core.os (file_exists, file_read, file_write)
+use core.os.interact
+use core.math.parse.data.json
+use core.math.float (is_nan, is_inf)
+use core.math.crypto.hash as lib_hash
+use core.os.path as ospath
+use core.str as str
+use core.math.crypto.encoding.base as str_base
+use core.common as common
+use core.cache as cache
+use core.math.parse.3d.gltf.math as gltf_math
+use core.math.parse.3d.gltf.shared as shr
 
 fn _gltf_stage_binary_blob(any raw) any {
    if !raw { return 0 }
@@ -261,7 +261,7 @@ fn parse_gltf_str(any json_str, str base_path="", any binary_override=0) dict {
             ui += 1
          }
          if !found { errors = errors.append("extensionsRequired contains " + name + " not present in extensionsUsed") }
-         def st = shr._gltf_extension_status(name)
+         def st = shr._gltf_extension_status_name(name)
          if !shr._gltf_extension_required_supported(st) { errors = errors.append("extensionsRequired contains unsupported " + name + " (" + st + ")") }
          ri += 1
       }

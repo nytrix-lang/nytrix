@@ -3,10 +3,10 @@
 ;; Reference:
 ;; - https://cacr.uwaterloo.ca/hac/about/chap12.pdf
 ;; References:
-;; - std.math.crypto.dlp
-;; - std.math.crypto
-module std.math.crypto.dlp.dh(dh_public_key, dh_private_key, dh_keygen, dh_derive, dh_default_group)
-use std.math.nt
+;; - core.math.crypto.dlp
+;; - core.math.crypto
+module core.math.crypto.dlp.dh(dh_public_key, dh_private_key, dh_keygen, dh_derive, dh_default_group)
+use core.math.nt
 
 fn dh_public_key(any h, any p, any g, any q=nil) list {
    "Create a Diffie-Hellman public key tuple [h, p, g, q]."
@@ -50,5 +50,5 @@ fn dh_derive(list pubkey, any x_or_privkey) any {
    def sa = dh_derive(b[0], a[1])
    def sb = dh_derive(a[0], b[1])
    assert(sa == sb, "dh shared secret")
-   print("✓ std.math.crypto.dlp.dh self-test passed")
+   print("✓ core.math.crypto.dlp.dh self-test passed")
 }

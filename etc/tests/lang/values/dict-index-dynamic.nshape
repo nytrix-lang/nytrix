@@ -1,0 +1,30 @@
+shape test_dynamic_dict_index_abi {
+  family "runtime/values"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+def literal_dict = {"a": 1}
+assert(literal_dict["a"] == 1,
+   "typed dictionary index compares tagged values with raw integers")
+assert(literal_dict["missing"] == 0,
+   "typed dictionary index retains its zero fallback")
+
+mut runtime_dict = dict(4)
+runtime_dict["handle"] = 1
+assert(runtime_dict.contains("handle"),
+   "dictionary contains reports true through the native bool ABI")
+assert(!runtime_dict.contains("missing"),
+   "dictionary contains reports false through the native bool ABI")
+fn has_key(dict value, str key) bool { value.contains(key) }
+assert(has_key(runtime_dict, "handle") && !has_key(runtime_dict, "missing"),
+   "dictionary contains remains a boolean across function calls")
+fn any_has_key(any value, str key) bool { value.contains(key) }
+assert(any_has_key(runtime_dict, "handle") && !any_has_key(runtime_dict, "missing"),
+   "generic any dictionary contains returns boxed booleans")
+NY
+}

@@ -1,0 +1,30 @@
+shape enum_method_abi {
+  family "runtime/language"
+  generator "embedded"
+  features [enum adt abi native jit]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only --native-backend=x86_64"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+enum Color { Red, Green, Blue }
+enum Shape { Circle(int radius), Empty }
+impl Shape {
+  fn area(self s) int {
+    match s { Shape.Circle(r) -> r * r Shape.Empty -> 0 }
+  }
+}
+fn describe(c) {
+  match c { Color.Red -> "red" Color.Green -> "green" Color.Blue -> "blue" _ -> "unknown" }
+}
+assert_eq(Color.Red, 0, "raw enum into any")
+assert_eq(Color.Blue, 2, "nonzero raw enum into any")
+assert_eq(describe(Color.Red), "red", "dynamic enum pattern")
+assert_eq(describe(Color.Blue), "blue", "nonzero dynamic enum pattern")
+assert_eq(Shape.Circle(5).area(), 25, "payload enum method")
+assert_eq(Shape.Empty.area(), 0, "empty mixed enum method")
+def empty = Shape.Empty
+assert_eq(empty.area(), 0, "bound mixed enum method")
+0
+NY
+}

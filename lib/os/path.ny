@@ -1,12 +1,12 @@
 ;; Keywords: path filepath pathname os
 ;; Path Manipulation for Nytrix
 ;; References:
-;; - std.os
-module std.os.path(sep, has_sep, is_abs, join, normalize, basename, dirname, extname, splitext, resolve_repo_asset, home_dir, temp_dir, config_dir, data_dir, cache_dir)
-use std.core
-use std.core.str (_substr, Builder, builder_append, builder_free, builder_to_str, cstr_to_str, split, str_replace)
-use std.core.common as common
-use std.os.prim
+;; - core.os
+module core.os.path(sep, has_sep, is_abs, join, normalize, basename, dirname, extname, splitext, resolve_repo_asset, home_dir, temp_dir, config_dir, data_dir, cache_dir)
+use core
+use core.str (_substr, Builder, builder_append, builder_free, builder_to_str, cstr_to_str, split, str_replace)
+use core.common as common
+use core.os.prim
 
 fn sep() str {
    "Returns the platform-specific path separator('\\\\' on Windows, '/' otherwise)."
@@ -47,26 +47,32 @@ fn is_abs(any p) bool {
    } #endif
 }
 
-fn _path_join(any a, any b) str {
-   if !is_str(a) || a.len == 0 {
-      if is_str(b) { return b }
+fn _path_join(any left_path, any right_path) str {
+   if !is_str(left_path) || left_path.len == 0 {
+      if is_str(right_path) { return to_str(right_path) }
       return ""
    }
-   if !is_str(b) || b.len == 0 { return a }
-   if is_abs(b) { return b }
+   if !is_str(right_path) || right_path.len == 0 { return to_str(left_path) }
+   if is_abs(right_path) { return to_str(right_path) }
+   ;; These operands entered through the dynamic `any` ABI. Give string
+   ;; concatenation concrete string representations before building the path;
+   ;; otherwise native lowering can treat the first pointer word as a scalar.
+   def str left = to_str(left_path)
+   def str right = to_str(right_path)
    def s = sep()
-   def al = a.len
-   def bl = b.len
+   def al = left.len
+   def bl = right.len
    if al > 0 && bl > 0 {
-      def ac, bc = __load8_idx(a, al - 1), __load8_idx(b, 0)
-      if _is_sep(ac) || _is_sep(bc) { return a + b }
+      def int ac = __load8_idx(left, al - 1)
+      def int bc = __load8_idx(right, 0)
+      if _is_sep(ac) || _is_sep(bc) { return left + right }
    }
-   return a + s + b
+   return left + s + right
 }
 
-fn join(any a, any b) str {
+fn join(any left_path, any right_path) str {
    "Joins two path segments, inserting a platform separator if necessary."
-   _path_join(a, b)
+   _path_join(left_path, right_path)
 }
 
 fn _is_drive_prefix(any p) bool {
@@ -143,7 +149,7 @@ fn _non_empty_or(any primary, str fallback) str {
 fn _dir_writable(str dir) bool {
    if !_is_non_empty(dir) { return false }
    def probe = _path_join(dir, ".nytrix_cache_probe_" + to_str(__getpid()))
-   def fd = __open(probe, 577, 420)
+   def fd = __open_raw(probe, 577, 420)
    if fd < 0 { return false }
    def written = __write_off(fd, "ok", 2, 0)
    __close(fd)
@@ -338,20 +344,43 @@ fn _search_installed_roots(str rel) str {
    legacy.len > 0 ? legacy : _search_share_or_asset_root("/opt/homebrew/share/nytrix", rel)
 }
 
+fn _path_components_are_normalized(str rest, str separator) bool {
+   def int n = rest.len
+   def int sep_byte = load8(separator, 0)
+   mut int start = 0
+   mut int i = 0
+   while i <= n {
+      if i == n || load8(rest, i) == sep_byte {
+         def int len = i - start
+         if len == 0 {
+            if n > 0 { return false }
+         } elif len == 1 && load8(rest, start) == 46 {
+            return false
+         } elif len == 2 && load8(rest, start) == 46 &&
+         load8(rest, start + 1) == 46 {
+            return false
+         }
+         start = i + 1
+      }
+      i += 1
+   }
+   true
+}
+
 fn _normalize_path(any p) str {
    if !is_str(p) { return "" }
    if p.len == 0 { return "" }
    def sepch = sep()
-   mut s = p
+   mut str s = to_str(p)
    #windows {
       s = str_replace(s, "/", "\\")
    } #else {
       s = str_replace(s, "\\", "/")
    } #endif
    def n = s.len
-   mut prefix = ""
+   mut str prefix = ""
    mut abs = false
-   mut rest = s
+   mut str rest = s
    #windows {
       if n >= 2 && _is_sep(load8(s, 0)) && _is_sep(load8(s, 1)) {
          prefix = "\\\\"
@@ -374,11 +403,13 @@ fn _normalize_path(any p) str {
          rest = _substr(s, 1, n)
       }
    } #endif
+   ;; Avoid allocating component lists for the common already-normalized path.
+   if _path_components_are_normalized(rest, sepch) { return s }
    def raw_parts = split(rest, sepch)
-   mut parts = list(0)
-   mut i = 0
+   mut list<str> parts = list(raw_parts.len)
+   mut int i = 0
    while i < raw_parts.len {
-      def p_comp = raw_parts.get(i, "")
+      def str p_comp = raw_parts.get(i, "")
       if p_comp.len == 0 || p_comp == "." {
          i += 1
          continue
@@ -387,7 +418,13 @@ fn _normalize_path(any p) str {
          if parts.len > 0 {
             def last = parts.get(parts.len - 1, "")
             if last != ".." {
-               parts.pop()
+               mut shortened = list(parts.len - 1)
+               mut j = 0
+               while j < parts.len - 1 {
+                  shortened = shortened.append(parts.get(j, ""))
+                  j += 1
+               }
+               parts = shortened
                i += 1
                continue
             }
@@ -399,29 +436,33 @@ fn _normalize_path(any p) str {
       parts = parts.append(p_comp)
       i += 1
    }
-   mut out = ""
+   mut int idx = 0
+   def part_count = parts.len
+   mut str out = ""
+   mut has_out = false
+   mut last_is_sep = false
    if prefix.len > 0 {
-      if abs && _is_drive_prefix(prefix) { out = prefix + sepch } else { out = prefix }
+      out = prefix
+      has_out = true
+      if abs && _is_drive_prefix(prefix) {
+         out = out + sepch
+         last_is_sep = true
+      } else {
+         last_is_sep = _is_sep(load8(prefix, prefix.len - 1))
+      }
    } elif abs {
       out = sepch
+      has_out = true
+      last_is_sep = true
    }
-   mut idx = 0
-   def part_count = parts.len
-   mut b = Builder(max(16, out.len + part_count * 8 + 8))
-   if out.len > 0 { b = builder_append(b, out) }
-   mut has_out = out.len > 0
-   mut last_is_sep = false
-   if has_out { last_is_sep = _is_sep(load8(out, out.len - 1)) }
    while idx < part_count {
       def part = parts.get(idx, "")
-      if has_out && !last_is_sep { b = builder_append(b, sepch) }
-      b = builder_append(b, part)
+      if has_out && !last_is_sep { out = out + sepch }
+      out = out + part
       has_out = true
       last_is_sep = false
       idx += 1
    }
-   out = builder_to_str(b)
-   builder_free(b)
    if out.len == 0 && part_count == 0 {
       if abs { return sepch }
       if prefix.len > 0 { return prefix }
@@ -521,11 +562,17 @@ fn dirname(any p) str {
 fn extname(any p) str {
    "Returns the file extension, including the dot(e.g. '.txt')."
    if !is_str(p) { return "" }
-   def b, n = basename(p), b.len
+   def str base = cstr_to_str(basename(p))
+   def n = base.len
    if n == 0 { return "" }
-   def dot = common.last_index_byte(b, 46)
+   mut int dot = -1
+   mut int i = 0
+   while i < n {
+      if load8(base, i) == 46 { dot = i }
+      i += 1
+   }
    if dot <= 0 || dot == n - 1 { return "" }
-   _substr(b, dot, n)
+   _substr(base, dot, n)
 }
 
 fn splitext(any p) list {
@@ -562,5 +609,5 @@ fn splitext(any p) list {
    assert(_search_asset_root_for_rel("etc/assets", "etc/assets/fonts/jetbrains.ttf").len > 0, "path resolve asset root repo rel")
    assert(_search_share_or_asset_root(".", "fonts/jetbrains.ttf").len > 0, "path resolve share asset root")
    assert(_resolve_share_or_asset_under_base(".", "fonts/jetbrains.ttf", 1).len > 0, "path resolve cwd asset root")
-   print("✓ std.os.path self-test passed")
+   print("✓ core.os.path self-test passed")
 }

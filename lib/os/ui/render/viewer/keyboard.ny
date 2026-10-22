@@ -1,20 +1,20 @@
 ;; Keywords: viewer keyboard shortcut chord input os ui render
 ;; Keyboard shortcut normalization and chord state helpers for viewer tools.
 ;; References:
-;; - std.os.ui.window.consts
-;; - std.os.ui.render.viewer.input
-module std.os.ui.render.viewer.keyboard(
+;; - core.os.ui.window.consts
+;; - core.os.ui.render.viewer.input
+module core.os.ui.render.viewer.keyboard(
    KEY_GAP, ROWS,
    row_width, keyboard_width, keyboard_height, keyboard_layout,
    is_viewer_menu_hotkey, draw_status, draw_keycap, draw_board_at, draw_board, scan_pressed
 )
 
-use std.core
-use std.math (clamp, max, min)
-use std.os.ui.window.consts as key
-use std.os.ui.render as gfx
-use std.os.ui.render.viewer.widgets
-use std.os.ui.window
+use core
+use core.math (clamp, max, min)
+use core.os.ui.window.consts as key
+use core.os.ui.render as gfx
+use core.os.ui.render.viewer.widgets
+use core.os.ui.window
 
 def KEY_GAP = 4.0
 def KEYBOARD_BASE_W = 748.0
@@ -189,5 +189,5 @@ fn scan_pressed(any win) any {
    assert(ROWS.len == 6 && row_width(ROWS.get(0)) == KEYBOARD_BASE_W && keyboard_height() == KEYBOARD_BASE_H, "keyboard layout")
    def l = keyboard_layout(960.0, 540.0, 24.0)
    assert(float(l.get("scale", 0.0)) > 0.0, "keyboard fit")
-   print("✓ std.os.ui.render.viewer.keyboard self-test passed")
+   print("✓ core.os.ui.render.viewer.keyboard self-test passed")
 }

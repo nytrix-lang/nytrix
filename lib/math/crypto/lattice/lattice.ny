@@ -3,13 +3,13 @@
 ;; Reference:
 ;; - https://www.cs.cmu.edu/~afs/cs/project/quake/public/papers/Coppersmith-Crypto96.pdf
 ;; References:
-;; - std.math.crypto.lattice
-;; - std.math.crypto
-module std.math.crypto.lattice.lattice(build_coppersmith_lattice, build_boneh_durfee_lattice, mat_from_rows, lattice_set_at, lattice_shortest_vectors, lattice_closest_vectors, gen_lattice, gen_modular_lattice, gen_random_lattice, gen_ideal_lattice, gen_cyclotomic_lattice, gen_lattice_report, gen_uniform_lattice, gen_intrel_lattice, gen_simdioph_lattice, gen_qary_lattice, latticegen, latticegen_report, gen_lattice_sweep_report, lattice_quotient_report, lattice_matrix_ntl_format, lattice_matrix_object_str, lattice_dot, lattice_norm2, gaussian_reduce_2d, lattice_text_parse, lattice_text_parse_matrix, lattice_text_parse_vector, lattice_text_format)
-use std.math.nt
-use std.math.matrix as matrix
-use std.math.crypto.lattice.lll as lllmod
-use std.core.str as str
+;; - core.math.crypto.lattice
+;; - core.math.crypto
+module core.math.crypto.lattice.lattice(build_coppersmith_lattice, build_boneh_durfee_lattice, mat_from_rows, lattice_set_at, lattice_shortest_vectors, lattice_closest_vectors, gen_lattice, gen_modular_lattice, gen_random_lattice, gen_ideal_lattice, gen_cyclotomic_lattice, gen_lattice_report, gen_uniform_lattice, gen_intrel_lattice, gen_simdioph_lattice, gen_qary_lattice, latticegen, latticegen_report, gen_lattice_sweep_report, lattice_quotient_report, lattice_matrix_ntl_format, lattice_matrix_object_str, lattice_dot, lattice_norm2, gaussian_reduce_2d, lattice_text_parse, lattice_text_parse_matrix, lattice_text_parse_vector, lattice_text_format)
+use core.math.nt
+use core.math.matrix as matrix
+use core.math.crypto.lattice.lll as lllmod
+use core.str as str
 
 fn _lat_seed_next(any state) bigint {
    mod(Z(6364136223846793005) * Z(state) + Z(1442695040888963407), Z(1) << Z(63))
@@ -1081,5 +1081,5 @@ fn pow(any base, any exp, any max_exp) any {
    assert(modrep.get("type", "") == "modular", "gen_lattice_report modular type")
    assert(modrep.get("determinant_ok", false), "gen_lattice_report determinant")
    assert(modrep.get("formatted", "").len > 0, "gen_lattice_report formatted")
-   print("✓ std.math.crypto.lattice.lattice self-test passed")
+   print("✓ core.math.crypto.lattice.lattice self-test passed")
 }

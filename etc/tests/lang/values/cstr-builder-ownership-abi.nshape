@@ -1,0 +1,18 @@
+shape test_cstr_builder_ownership_abi {
+  family "runtime/values"
+  generator "embedded"
+  features [ny ownership string-builder native-abi]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  timeout 25
+  source ny <<'NY'
+use core
+
+mut text = ""
+for i in 0..7 {
+  text = text + "x"
+}
+assert_eq(text, "xxxxxxxx", "exclusive C-string builder finalizes its buffer")
+NY
+}

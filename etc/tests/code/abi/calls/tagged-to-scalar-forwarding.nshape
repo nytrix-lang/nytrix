@@ -1,0 +1,26 @@
+shape tagged_to_scalar_forwarding {
+  family "codegen/abi/calls"
+  generator "embedded"
+  features ["ny", "test", "abi"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+fn bind(any data, any registry, str iface, str wanted,
+        int name, int version, any symbol, int slot,
+        int version_slot=-1, int max_supported=1) int {
+   name * 100 + version
+}
+fn forward(any name, any version) int {
+   def global_name = from_int(name)
+   def global_version = from_int(version)
+   bind(0, 0, "iface", "wanted", global_name, global_version, 0, 8, -1, 4)
+}
+assert(forward(7, 3) == 703, "tagged input forwards through raw formals after twelve ABI slots")
+assert(forward(41, 2) == 4102, "forwarding preserves odd and even payloads")
+assert(forward(-3, -2) == -302, "forwarding preserves negative payloads")
+assert(from_int(7) == 7, "already raw input is not decoded twice")
+0
+NY
+}

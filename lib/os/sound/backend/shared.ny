@@ -1,11 +1,12 @@
 ;; Keywords: sound backend shared os
 ;; Shared probing and backend-selection code for platform sound drivers.
 ;; References:
-;; - std.os.sound.backend
-;; - std.os
-module std.os.sound.backend.shared(append_output_device, init_output_device, probe_linux_library, probe_linux_library_once)
-use std.core
-use std.core.dict_mod
+;; - core.os.sound.backend
+;; - core.os
+module core.os.sound.backend.shared(append_output_device, init_output_device, probe_linux_library, probe_linux_library_once)
+use core
+use core.dict_mod
+use core.os.ffi as ffi
 
 fn append_output_device(any ctx, str name, str id) any {
    "Appends a default output device entry with display `name` and backend `id` to `ctx`."
@@ -27,16 +28,30 @@ fn init_output_device(any ctx, any ready, str name, str id) any {
 }
 
 fn probe_linux_library(str name, str required_symbol) int {
-   "Returns 1 on Linux(library linked via #include), 0 on other platforms."
-   #linux { return 1 }
+   "Returns 1 when the Linux library and required symbol are loadable."
+   #linux {
+      def h = ffi.dlopen(name, ffi.RTLD_NOW() | ffi.RTLD_GLOBAL())
+      if h == 0 { return 0 }
+      if ffi.dlsym(h, required_symbol) == 0 {
+         ffi.dlclose(h)
+         return 0
+      }
+      ffi.dlclose(h)
+      return 1
+   }
    #endif
    0
 }
 
 fn probe_linux_library_once(int avail, any lib_handle, str name, str required_symbol) list {
-   "Returns `[1, 0]` on Linux(library linked via #include), `[0, 0]` otherwise."
-   if avail != -1 { return [avail, lib_handle] }
-   #linux { return [1, 0] }
+   "Loads and validates a Linux backend library once, returning `[available, handle]`."
+   if avail >= 0 { return [avail, lib_handle] }
+   #linux {
+      def h = ffi.dlopen(name, ffi.RTLD_NOW() | ffi.RTLD_GLOBAL())
+      if h == 0 { return [0, 0] }
+      if ffi.dlsym(h, required_symbol) != 0 { return [1, h] }
+      ffi.dlclose(h)
+   }
    #endif
    [0, 0]
 }

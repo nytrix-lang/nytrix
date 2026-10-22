@@ -1,9 +1,9 @@
 ;; Keywords: logic prolog unification rules facts query backtracking
 ;; A bounded, self-hosted logic-programming engine.
-module std.math.logic.prolog(
+module core.math.logic.prolog(
    variable, term, fact, rule, is_variable, is_term, is_clause,
    substitute, unify, bindings, query)
-use std.core
+use core
 
 ;; Returns the result of the `variable` operation.
 fn variable(str name) dict {
@@ -36,21 +36,21 @@ fn rule(dict head, list body) dict {
 
 ;; Returns true when is variable.
 fn is_variable(any value) bool {
-   if !is_dict(value) || __dict_get_str_raw(value, "kind", "") != "variable" {
+   if !is_dict(value) || value.get("kind", "") != "variable" {
       return false
    }
-   def name = __dict_get_str_raw(value, "name", 0)
+   def name = value.get("name", 0)
    name && __str_len(name) > 0
 }
 
 ;; Returns true when is term.
 fn is_term(any value) bool {
    if !is_dict(value) ||
-   __dict_get_str_raw(value, "kind", "") != "term" ||
-   !is_list(__dict_get_str_raw(value, "args", 0)) {
+   value.get("kind", "") != "term" ||
+   !is_list(value.get("args", 0)) {
       return false
    }
-   def name = __dict_get_str_raw(value, "name", 0)
+   def name = value.get("name", 0)
    if !name || __str_len(name) == 0 { return false }
    true
 }
@@ -75,7 +75,10 @@ fn _walk(any value, dict substitution) any {
    mut depth = 0
    while is_variable(current) {
       def cname = __dict_get_str_raw(current, "name", "")
-      if __dict_has_str_raw(substitution, cname) == 0 { break }
+      ;; The raw has bridge returns an unboxed truth value, but its tagged
+      ;; dynamic string-key path can report absent while raw get succeeds.
+      ;; The dictionary method normalizes the key representation here.
+      if !substitution.contains(cname) { break }
       current = __dict_get_str_raw(substitution, cname, current)
       depth += 1
       assert(depth <= 1024, "cyclic substitution")
@@ -163,7 +166,7 @@ fn _fresh(any value, str suffix) any {
    term(value.get("name"), fresh_args)
 }
 
-fn _fresh_clause(dict clause, int stamp) dict {
+fn _fresh_clause(any clause, int stamp) dict {
    def suffix = "@" + to_str(stamp)
    mut body = []
    mut i = 0

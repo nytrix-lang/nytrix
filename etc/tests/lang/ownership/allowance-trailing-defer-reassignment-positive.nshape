@@ -1,0 +1,22 @@
+shape ownership_allowance_trailing_defer_reassignment_positive {
+  family "language/ownership"
+  generator "regression"
+  features [ownership allowance trailing-defer reassignment positive]
+  template ny-test-case
+  flags_matrix "--ownership-strict --native --run --nyir-verify; --ownership-strict --native-backend=llvm --jit --jit-engine=mcjit --nyir-verify; --ownership-strict --native-backend=llvm --jit --jit-engine=orc --nyir-verify; --ownership-strict --native-only --nyir-verify"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+@allowance(x, [0,1])
+fn trailing_defer_starts_exit_epoch(int x) {
+  x
+  defer {
+    x = 7
+  }
+}
+
+trailing_defer_starts_exit_epoch(3)
+0
+NY
+}

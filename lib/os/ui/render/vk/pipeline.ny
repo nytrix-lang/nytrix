@@ -1,25 +1,25 @@
 ;; Keywords: render vulkan gpu pipeline os ui
 ;; Vulkan pipeline creation, binding, cache, and shader-stage setup.
 ;; References:
-;; - std.os.ui.render.vk
-;; - std.os.ui.render
-;; - std.os.ui.render.matrix
-module std.os.ui.render.vk.pipeline(compile_glsl_to_spirv, create_shader_module_from_source, create_pipeline, create_pipeline_no_vertex_input, bind_pipeline, push_constants, shader_pc_bytes, _get_default_pipeline, _get_nocull_pipeline, _get_unlit_nocull_pipeline, _get_flip_pipeline, _get_flip_unlit_pipeline, _get_mesh_opaque_pipeline, _get_mesh_opaque_nocull_pipeline, _get_mesh_opaque_nocull_flip_pipeline, _get_mesh_opaque_unlit_pipeline, _get_mesh_opaque_unlit_nocull_pipeline, _get_mesh_opaque_unlit_nocull_flip_pipeline, _get_mesh_fast_opaque_pipeline, _get_mesh_fast_opaque_nocull_pipeline, _get_mesh_fast_opaque_flip_pipeline, _get_mesh_fast_opaque_nocull_flip_pipeline, _get_mesh_fast_env_opaque_pipeline, _get_mesh_fast_env_opaque_nocull_pipeline, _get_mesh_fast_env_opaque_flip_pipeline, _get_mesh_fast_env_opaque_nocull_flip_pipeline, _get_mesh_alpha_pipeline, _get_mesh_alpha_nocull_pipeline, _get_mesh_alpha_nocull_flip_pipeline, _get_mesh_alpha_unlit_pipeline, _get_mesh_alpha_unlit_nocull_pipeline, _get_mesh_alpha_unlit_nocull_flip_pipeline, _get_mesh_alpha_flip_pipeline, _get_mesh_alpha_unlit_flip_pipeline, _create_shader_module, _ensure_shader_binaries, _create_graphics_pipeline, _ensure_nocull_pipeline, _ensure_line_pipeline, _ensure_sdf_line_pipeline, _ensure_point_pipeline, _ensure_wire_pipeline, _ensure_circle_pipeline, _ensure_ring_pipeline, _ensure_rounded_rect_pipeline, _ensure_skybox_pipeline)
-use std.core
-use std.core.mem
-use std.os (file_exists, file_read, file_remove, file_write, ticks)
-use std.os.path as ospath
-use std.os.fs as osfs
-use std.os.sys as sys
-use std.os.process as proc
-use std.os.ui.render.dump as ui_profile
-use std.os.ui.render.shader as shader_mod
-use std.os.ui.render.vk.state
-use std.os.ui.render.vk.vulkan
-use std.os.ui.render.vk.renderer (_flush)
-use std.os.ui.render.vk.utils (_dbg_handle)
-use std.core.common as common
-use std.core.str (to_hex)
+;; - core.os.ui.render.vk
+;; - core.os.ui.render
+;; - core.os.ui.render.matrix
+module core.os.ui.render.vk.pipeline(compile_glsl_to_spirv, create_shader_module_from_source, create_pipeline, create_pipeline_no_vertex_input, bind_pipeline, push_constants, shader_pc_bytes, _get_default_pipeline, _get_nocull_pipeline, _get_unlit_nocull_pipeline, _get_flip_pipeline, _get_flip_unlit_pipeline, _get_mesh_opaque_pipeline, _get_mesh_opaque_nocull_pipeline, _get_mesh_opaque_nocull_flip_pipeline, _get_mesh_opaque_unlit_pipeline, _get_mesh_opaque_unlit_nocull_pipeline, _get_mesh_opaque_unlit_nocull_flip_pipeline, _get_mesh_fast_opaque_pipeline, _get_mesh_fast_opaque_nocull_pipeline, _get_mesh_fast_opaque_flip_pipeline, _get_mesh_fast_opaque_nocull_flip_pipeline, _get_mesh_fast_env_opaque_pipeline, _get_mesh_fast_env_opaque_nocull_pipeline, _get_mesh_fast_env_opaque_flip_pipeline, _get_mesh_fast_env_opaque_nocull_flip_pipeline, _get_mesh_alpha_pipeline, _get_mesh_alpha_nocull_pipeline, _get_mesh_alpha_nocull_flip_pipeline, _get_mesh_alpha_unlit_pipeline, _get_mesh_alpha_unlit_nocull_pipeline, _get_mesh_alpha_unlit_nocull_flip_pipeline, _get_mesh_alpha_flip_pipeline, _get_mesh_alpha_unlit_flip_pipeline, _create_shader_module, _ensure_shader_binaries, _create_graphics_pipeline, _ensure_nocull_pipeline, _ensure_line_pipeline, _ensure_sdf_line_pipeline, _ensure_point_pipeline, _ensure_wire_pipeline, _ensure_circle_pipeline, _ensure_ring_pipeline, _ensure_rounded_rect_pipeline, _ensure_skybox_pipeline)
+use core
+use core.mem
+use core.os (file_exists, file_read, file_remove, file_write, ticks)
+use core.os.path as ospath
+use core.os.fs as osfs
+use core.os.sys as sys
+use core.os.process as proc
+use core.os.ui.render.dump as ui_profile
+use core.os.ui.render.shader as shader_mod
+use core.os.ui.render.vk.state
+use core.os.ui.render.vk.vulkan
+use core.os.ui.render.vk.renderer (_flush)
+use core.os.ui.render.vk.utils (_dbg_handle)
+use core.common as common
+use core.str (to_hex)
 
 def _SHADER_PC_BYTES = 256
 def _VK_TOPO_POINTS = 0
@@ -47,7 +47,7 @@ fn _vk_shader_stage_fragment() int { 0x00000010 }
 
 fn shader_pc_bytes() int {
    "Return the Vulkan shader push-constant byte size."
-   std.os.ui.render.vk.pipeline._SHADER_PC_BYTES
+   _SHADER_PC_BYTES
 }
 
 fn _pipe_alloc(int size) ?ptr {
@@ -116,13 +116,23 @@ fn _shader_ui_source_path(str name) str { ospath.join(_shader_ui_source_root(), 
 fn _shader_ui_source_text(str name) str {
    def path = _shader_ui_source_path(name)
    def trace_shader = _shader_trace_enabled()
-   if file_exists(path) {
-      def res = file_read(path)
-      if is_ok(res) {
-         def txt = unwrap(res)
-         if is_str(txt) && txt.len > 0 {
-            if trace_shader { ui_profile.print_line("vk:shader", "source=" + path + " bytes=" + to_str(txt.len) + " hash=0x" + to_hex(shader_mod.shader_hash32(txt))) }
-            return txt
+   def source_exists = file_exists(path)
+   if trace_shader { ui_profile.print_line("vk:shader", "source_probe=" + path + " exists=" + to_str(source_exists)) }
+   if source_exists {
+      match file_read(path) {
+         ok(txt) -> {
+            if trace_shader { ui_profile.print_line("vk:shader", "source_read=" + path + " ok=true") }
+            if is_str(txt) && txt.len > 0 {
+               if trace_shader { ui_profile.print_line("vk:shader", "source=" + path + " bytes=" + to_str(txt.len) + " hash=0x" + to_hex(shader_mod.shader_hash32(txt))) }
+               return txt
+            }
+            if trace_shader {
+               def source_shape = is_str(txt) ? "string:" + to_str(txt.len) : "non-string"
+               ui_profile.print_line("vk:shader", "source_empty_or_non_string=" + path + " value=" + source_shape)
+            }
+         }
+         err(code) -> {
+            if trace_shader { ui_profile.print_line("vk:shader", "source_read=" + path + " ok=false error=" + to_str(code)) }
          }
       }
    }
@@ -201,7 +211,7 @@ fn _ensure_sky_shader_binaries() bool {
 
 fn _write_tmp_text_file(any path, any content) bool {
    if !path || !is_str(path) { return false }
-   file_write(str(path), content)
+   is_ok(file_write(str(path), content))
 }
 
 fn compile_glsl_to_spirv(str source, str stage_ext) any {
@@ -221,7 +231,7 @@ fn compile_glsl_to_spirv(str source, str stage_ext) any {
    unwrap(res)
 }
 
-fn create_shader_module_from_source(str source, str stage_ext) any {
+fn create_shader_module_from_source(str source, str stage_ext) ?handle {
    "Compiles GLSL source and creates a Vulkan shader module."
    def spirv = compile_glsl_to_spirv(source, stage_ext)
    if !spirv { return 0 }
@@ -234,12 +244,12 @@ fn create_shader_module_from_source(str source, str stage_ext) any {
    def res = create_shader_module(_device, ci, 0, mod_ptr)
    free(ci)
    if res != 0 { free(mod_ptr) return 0 }
-   def mod = load64(mod_ptr, 0)
+   def mod = load64_h(mod_ptr, 0)
    free(mod_ptr)
    mod
 }
 
-fn _create_pipeline_ex(any vert_mod, any frag_mod, int topology=_VK_TOPO_TRIANGLES, int depth_test=1, int depth_write=1, int cull_mode=_VK_CULL_NONE, int front_face=_VK_FRONT_DEFAULT, int depth_bias=0, int depth_clamp=0, f64 line_width=1.0, int blend_enable=_PIPE_BLEND_UI, int polygon_mode=_VK_POLYGON_FILL, int vertex_input=1) any {
+fn _create_pipeline_ex(?handle vert_mod, ?handle frag_mod, int topology=_VK_TOPO_TRIANGLES, int depth_test=1, int depth_write=1, int cull_mode=_VK_CULL_NONE, int front_face=_VK_FRONT_DEFAULT, int depth_bias=0, int depth_clamp=0, f64 line_width=1.0, int blend_enable=_PIPE_BLEND_UI, int polygon_mode=_VK_POLYGON_FILL, int vertex_input=1) ?handle {
    "Creates a custom graphics pipeline."
    mut main_str = _pipe_alloc(8)
    strcpy(main_str, "main")
@@ -308,10 +318,10 @@ fn _create_pipeline_ex(any vert_mod, any frag_mod, int topology=_VK_TOPO_TRIANGL
          " dyn=" + to_str(load32(ds, 0)))
    }
    if create_graphics_pipelines(_device, 0, 1, ci, 0, pipe_ptr) != 0 { return 0 }
-   load64(pipe_ptr, 0)
+   load64_h(pipe_ptr, 0)
 }
 
-fn create_pipeline(any vert_mod, any frag_mod, int topology=_VK_TOPO_TRIANGLES, int depth_test=1, int depth_write=1, int cull_mode=_VK_CULL_NONE, int front_face=_VK_FRONT_DEFAULT, int depth_bias=0, int depth_clamp=0, f64 line_width=1.0) any {
+fn create_pipeline(?handle vert_mod, ?handle frag_mod, int topology=_VK_TOPO_TRIANGLES, int depth_test=1, int depth_write=1, int cull_mode=_VK_CULL_NONE, int front_face=_VK_FRONT_DEFAULT, int depth_bias=0, int depth_clamp=0, f64 line_width=1.0) ?handle {
    "Create a Vulkan graphics pipeline from compiled shader modules."
    _create_pipeline_ex(vert_mod,
       frag_mod,
@@ -326,7 +336,7 @@ fn create_pipeline(any vert_mod, any frag_mod, int topology=_VK_TOPO_TRIANGLES, 
       1)
 }
 
-fn create_pipeline_no_vertex_input(any vert_mod, any frag_mod, int topology=_VK_TOPO_TRIANGLES, int depth_test=1, int depth_write=1, int cull_mode=_VK_CULL_NONE, int front_face=_VK_FRONT_DEFAULT, int depth_bias=0, int depth_clamp=0, f64 line_width=1.0) any {
+fn create_pipeline_no_vertex_input(?handle vert_mod, ?handle frag_mod, int topology=_VK_TOPO_TRIANGLES, int depth_test=1, int depth_write=1, int cull_mode=_VK_CULL_NONE, int front_face=_VK_FRONT_DEFAULT, int depth_bias=0, int depth_clamp=0, f64 line_width=1.0) ?handle {
    "Create a Vulkan graphics pipeline that does not require vertex input bindings."
    _create_pipeline_ex(vert_mod,
       frag_mod,
@@ -345,7 +355,7 @@ fn create_pipeline_no_vertex_input(any vert_mod, any frag_mod, int topology=_VK_
 
 fn _vk_eager_pipelines() bool { common.env_truthy("NY_VK_EAGER_PIPELINES") }
 
-fn _create_mesh_pipeline_with_frag(any frag_mod, bool alpha, bool nocull=false, bool flip=false) any {
+fn _create_mesh_pipeline_with_frag(?handle frag_mod, bool alpha, bool nocull=false, bool flip=false) ?handle {
    def cull = nocull ? _VK_CULL_NONE : _VK_CULL_BACK
    def front = flip ? _VK_FRONT_FLIPPED : _VK_FRONT_DEFAULT
    if alpha { return _create_pipeline_ex(_vert_module, frag_mod, _VK_TOPO_TRIANGLES, 1, 0, cull, front, 0, 0, 1.0, _PIPE_BLEND_ALPHA) }
@@ -356,9 +366,22 @@ fn _mesh_pipeline_ready_basic() bool { _device && _pipeline_layout && _render_pa
 
 fn _ensure_unlit_nocull_pipeline() bool {
    if _unlit_nocull_pipeline { return _unlit_nocull_pipeline != 0 }
-   if !_mesh_pipeline_ready_basic() { return false }
+   if !_mesh_pipeline_ready_basic() {
+      if _shader_trace_enabled() {
+         ui_profile.print_text("[vk:pipe] unlit prerequisites device=0x" + to_hex(_device) +
+            " layout=0x" + to_hex(_pipeline_layout) +
+            " render_pass=0x" + to_hex(_render_pass) +
+            " vert=0x" + to_hex(_vert_module) +
+            " frag=0x" + to_hex(_frag_module))
+      }
+      return false
+   }
    _unlit_pipeline = create_pipeline(_vert_module, _frag_module, _VK_TOPO_TRIANGLES, 1, 1, _VK_CULL_NONE, _VK_FRONT_DEFAULT, 0, 0)
    _unlit_nocull_pipeline = create_pipeline(_vert_module, _frag_module, _VK_TOPO_TRIANGLES, 0, 0, _VK_CULL_NONE, _VK_FRONT_DEFAULT, 0, 0)
+   if _shader_trace_enabled() {
+      ui_profile.print_text("[vk:pipe] unlit handles unlit=0x" + to_hex(_unlit_pipeline) +
+         " nocull=0x" + to_hex(_unlit_nocull_pipeline))
+   }
    _unlit_nocull_pipeline != 0
 }
 
@@ -436,10 +459,10 @@ fn _engine_pipeline_handle(any p) bool {
    _pipe_eq(p, _mesh_alpha_unlit_flip_pipeline)
 }
 
-fn bind_pipeline(any pipe) any {
+fn bind_pipeline(?handle pipe) any {
    "Selects a graphics pipeline for subsequent draws. Pass 0 to restore default."
-   if !_frame_open { return 0 }
-   mut p = pipe
+   if !frame_open() { return 0 }
+   mut ?handle p = pipe
    if p == 0 { p = _pipeline }
    if p == _target_pipeline { return 0 }
    if _vertex_offset != _last_flush_offset {
@@ -454,7 +477,7 @@ fn bind_pipeline(any pipe) any {
 
 fn push_constants(any data_ptr, int size, int offset=0) any {
    "Pushes raw data to the current pipeline's push constants and caches it for flushes."
-   if !_frame_open || !data_ptr || size <= 0 { return 0 }
+   if !frame_open() || !data_ptr || size <= 0 { return 0 }
    if offset + size > shader_pc_bytes() { return 0 }
    def pc_ptr = _use_custom_pc ? _pc_buffer_custom : _pc_buffer
    memcpy(pc_ptr + offset, data_ptr, size)
@@ -470,7 +493,7 @@ fn use_custom_push_constants(any enabled) any {
 
 fn set_custom_push_constants(any data_ptr, int size, int offset=0) any {
    "Sets custom push constant data(call after bind_pipeline with custom pipeline)."
-   if !_frame_open || !data_ptr || size <= 0 { return 0 }
+   if !frame_open() || !data_ptr || size <= 0 { return 0 }
    if offset + size > shader_pc_bytes() { return 0 }
    memcpy(_pc_buffer_custom + offset, data_ptr, size)
    _pc_dirty = true
@@ -478,7 +501,7 @@ fn set_custom_push_constants(any data_ptr, int size, int offset=0) any {
    cmd_push_constants(cb, _pipeline_layout, 1 | 16, offset, size, data_ptr)
 }
 
-fn _create_shader_module(str path) any {
+fn _create_shader_module(str path) ?handle {
    def res = file_read(path)
    if is_err(res) { return 0 }
    def code = unwrap(res)
@@ -760,7 +783,7 @@ fn _create_graphics_layouts() bool {
    true
 }
 
-fn _create_default_lit_pipeline() any {
+fn _create_default_lit_pipeline() ?handle {
    _create_pipeline_ex(_vert_module,
       _frag_module,
       _VK_TOPO_TRIANGLES,
@@ -878,126 +901,139 @@ fn _create_graphics_pipeline() bool {
    true
 }
 
-fn _get_default_pipeline() any { _pipeline }
+fn _get_default_pipeline() ?handle { _pipeline }
 
-fn _get_nocull_pipeline() any {
+fn _get_nocull_pipeline() ?handle {
    if !_nocull_pipeline { _ = _ensure_nocull_pipeline() }
    _nocull_pipeline
 }
 
-fn _pipeline_or(any pipe, any fallback) any {
+fn _pipeline_or(?handle pipe, ?handle fallback) ?handle {
    if pipe { return pipe }
    fallback
 }
 
-fn _get_unlit_nocull_pipeline() any {
-   if !_unlit_nocull_pipeline { _ = _ensure_unlit_nocull_pipeline() }
+fn _get_unlit_nocull_pipeline() ?handle {
+   if _shader_trace_enabled() {
+      ui_profile.print_text("[vk:pipe] unlit getter before pipeline=0x" + to_hex(_pipeline) +
+         " unlit=0x" + to_hex(_unlit_pipeline) +
+         " nocull=0x" + to_hex(_unlit_nocull_pipeline) +
+         " ready=" + to_str(_mesh_pipeline_ready_basic()))
+   }
+   if !_unlit_nocull_pipeline {
+      def built = _ensure_unlit_nocull_pipeline()
+      if _shader_trace_enabled() { ui_profile.print_text("[vk:pipe] unlit ensure result=" + to_str(built)) }
+   }
+   if _shader_trace_enabled() {
+      ui_profile.print_text("[vk:pipe] unlit getter after unlit=0x" + to_hex(_unlit_pipeline) +
+         " nocull=0x" + to_hex(_unlit_nocull_pipeline))
+   }
    _pipeline_or(_unlit_nocull_pipeline, _unlit_pipeline)
 }
 
-fn _get_flip_pipeline() any {
+fn _get_flip_pipeline() ?handle {
    if !_flip_pipeline { _ = _ensure_flip_pipeline() }
    _pipeline_or(_flip_pipeline, _pipeline)
 }
 
-fn _get_flip_unlit_pipeline() any {
+fn _get_flip_unlit_pipeline() ?handle {
    if !_flip_unlit_pipeline { _flip_unlit_pipeline = _get_flip_pipeline() }
    _pipeline_or(_flip_unlit_pipeline, _get_unlit_nocull_pipeline())
 }
 
-fn _fallback_default_pipeline() any { _pipeline }
+fn _fallback_default_pipeline() ?handle { _pipeline }
 
-fn _fallback_nocull_pipeline() any { _pipeline_or(_get_nocull_pipeline(), _pipeline) }
+fn _fallback_nocull_pipeline() ?handle { _pipeline_or(_get_nocull_pipeline(), _pipeline) }
 
-fn _fallback_flip_pipeline() any { _pipeline_or(_get_flip_pipeline(), _pipeline) }
+fn _fallback_flip_pipeline() ?handle { _pipeline_or(_get_flip_pipeline(), _pipeline) }
 
-fn _fallback_mesh_alpha_nocull_flip_pipeline() any { _pipeline_or(_get_mesh_alpha_flip_pipeline(), _get_mesh_alpha_pipeline()) }
+fn _fallback_mesh_alpha_nocull_flip_pipeline() ?handle { _pipeline_or(_get_mesh_alpha_flip_pipeline(), _get_mesh_alpha_pipeline()) }
 
-fn _get_mesh_opaque_pipeline() any {
+fn _get_mesh_opaque_pipeline() ?handle {
    if !_mesh_opaque_pipeline { _ = _ensure_mesh_opaque_pipeline() }
    _pipeline_or(_mesh_opaque_pipeline, _fallback_default_pipeline())
 }
 
-fn _get_mesh_opaque_nocull_pipeline() any {
+fn _get_mesh_opaque_nocull_pipeline() ?handle {
    if !_mesh_opaque_nocull_pipeline { _ = _ensure_mesh_opaque_nocull_pipeline() }
    _pipeline_or(_mesh_opaque_nocull_pipeline, _fallback_nocull_pipeline())
 }
 
-fn _get_mesh_opaque_nocull_flip_pipeline() any {
+fn _get_mesh_opaque_nocull_flip_pipeline() ?handle {
    if !_mesh_opaque_nocull_flip_pipeline { _ = _ensure_mesh_opaque_nocull_flip_pipeline() }
    _pipeline_or(_mesh_opaque_nocull_flip_pipeline, _fallback_flip_pipeline())
 }
 
-fn _get_mesh_opaque_unlit_pipeline() any { _get_mesh_opaque_pipeline() }
+fn _get_mesh_opaque_unlit_pipeline() ?handle { _get_mesh_opaque_pipeline() }
 
-fn _get_mesh_opaque_unlit_nocull_pipeline() any { _get_mesh_opaque_nocull_pipeline() }
+fn _get_mesh_opaque_unlit_nocull_pipeline() ?handle { _get_mesh_opaque_nocull_pipeline() }
 
-fn _get_mesh_opaque_unlit_nocull_flip_pipeline() any { _get_mesh_opaque_nocull_flip_pipeline() }
+fn _get_mesh_opaque_unlit_nocull_flip_pipeline() ?handle { _get_mesh_opaque_nocull_flip_pipeline() }
 
-fn _get_mesh_fast_opaque_pipeline() any {
+fn _get_mesh_fast_opaque_pipeline() ?handle {
    if !_mesh_fast_opaque_pipeline { _ = _ensure_mesh_fast_opaque_pipeline() }
    _pipeline_or(_mesh_fast_opaque_pipeline, _get_mesh_opaque_pipeline())
 }
 
-fn _get_mesh_fast_opaque_nocull_pipeline() any {
+fn _get_mesh_fast_opaque_nocull_pipeline() ?handle {
    if !_mesh_fast_opaque_nocull_pipeline { _ = _ensure_mesh_fast_opaque_nocull_pipeline() }
    _pipeline_or(_mesh_fast_opaque_nocull_pipeline, _get_mesh_opaque_nocull_pipeline())
 }
 
-fn _get_mesh_fast_opaque_flip_pipeline() any {
+fn _get_mesh_fast_opaque_flip_pipeline() ?handle {
    if !_mesh_fast_opaque_flip_pipeline { _ = _ensure_mesh_fast_opaque_flip_pipeline() }
    _pipeline_or(_mesh_fast_opaque_flip_pipeline, _get_flip_pipeline())
 }
 
-fn _get_mesh_fast_opaque_nocull_flip_pipeline() any {
+fn _get_mesh_fast_opaque_nocull_flip_pipeline() ?handle {
    if !_mesh_fast_opaque_nocull_flip_pipeline { _ = _ensure_mesh_fast_opaque_nocull_flip_pipeline() }
    _pipeline_or(_mesh_fast_opaque_nocull_flip_pipeline, _get_mesh_opaque_nocull_flip_pipeline())
 }
 
-fn _get_mesh_fast_env_opaque_pipeline() any {
+fn _get_mesh_fast_env_opaque_pipeline() ?handle {
    if !_mesh_fast_env_opaque_pipeline { _ = _ensure_mesh_fast_env_opaque_pipeline() }
    _pipeline_or(_mesh_fast_env_opaque_pipeline, _get_mesh_fast_opaque_pipeline())
 }
 
-fn _get_mesh_fast_env_opaque_nocull_pipeline() any {
+fn _get_mesh_fast_env_opaque_nocull_pipeline() ?handle {
    if !_mesh_fast_env_opaque_nocull_pipeline { _ = _ensure_mesh_fast_env_opaque_nocull_pipeline() }
    _pipeline_or(_mesh_fast_env_opaque_nocull_pipeline, _get_mesh_fast_opaque_nocull_pipeline())
 }
 
-fn _get_mesh_fast_env_opaque_flip_pipeline() any {
+fn _get_mesh_fast_env_opaque_flip_pipeline() ?handle {
    if !_mesh_fast_env_opaque_flip_pipeline { _ = _ensure_mesh_fast_env_opaque_flip_pipeline() }
    _pipeline_or(_mesh_fast_env_opaque_flip_pipeline, _get_mesh_fast_opaque_flip_pipeline())
 }
 
-fn _get_mesh_fast_env_opaque_nocull_flip_pipeline() any {
+fn _get_mesh_fast_env_opaque_nocull_flip_pipeline() ?handle {
    if !_mesh_fast_env_opaque_nocull_flip_pipeline { _ = _ensure_mesh_fast_env_opaque_nocull_flip_pipeline() }
    _pipeline_or(_mesh_fast_env_opaque_nocull_flip_pipeline, _get_mesh_fast_opaque_nocull_flip_pipeline())
 }
 
-fn _get_mesh_alpha_pipeline() any {
+fn _get_mesh_alpha_pipeline() ?handle {
    if !_mesh_alpha_pipeline { _ = _ensure_mesh_alpha_pipeline() }
    _pipeline_or(_mesh_alpha_pipeline, _fallback_default_pipeline())
 }
 
-fn _get_mesh_alpha_nocull_pipeline() any {
+fn _get_mesh_alpha_nocull_pipeline() ?handle {
    if !_mesh_alpha_nocull_pipeline { _ = _ensure_mesh_alpha_nocull_pipeline() }
    _pipeline_or(_mesh_alpha_nocull_pipeline, _fallback_nocull_pipeline())
 }
 
-fn _get_mesh_alpha_nocull_flip_pipeline() any {
+fn _get_mesh_alpha_nocull_flip_pipeline() ?handle {
    if !_mesh_alpha_nocull_flip_pipeline { _ = _ensure_mesh_alpha_nocull_flip_pipeline() }
    _pipeline_or(_mesh_alpha_nocull_flip_pipeline, _fallback_mesh_alpha_nocull_flip_pipeline())
 }
 
-fn _get_mesh_alpha_unlit_pipeline() any { _get_mesh_alpha_pipeline() }
+fn _get_mesh_alpha_unlit_pipeline() ?handle { _get_mesh_alpha_pipeline() }
 
-fn _get_mesh_alpha_unlit_nocull_pipeline() any { _get_mesh_alpha_nocull_pipeline() }
+fn _get_mesh_alpha_unlit_nocull_pipeline() ?handle { _get_mesh_alpha_nocull_pipeline() }
 
-fn _get_mesh_alpha_unlit_nocull_flip_pipeline() any { _get_mesh_alpha_nocull_flip_pipeline() }
+fn _get_mesh_alpha_unlit_nocull_flip_pipeline() ?handle { _get_mesh_alpha_nocull_flip_pipeline() }
 
-fn _get_mesh_alpha_flip_pipeline() any {
+fn _get_mesh_alpha_flip_pipeline() ?handle {
    if !_mesh_alpha_flip_pipeline { _ = _ensure_mesh_alpha_flip_pipeline() }
    _pipeline_or(_mesh_alpha_flip_pipeline, _fallback_flip_pipeline())
 }
 
-fn _get_mesh_alpha_unlit_flip_pipeline() any { _get_mesh_alpha_flip_pipeline() }
+fn _get_mesh_alpha_unlit_flip_pipeline() ?handle { _get_mesh_alpha_flip_pipeline() }

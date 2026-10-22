@@ -1,0 +1,17 @@
+shape test_type_shape_list {
+  family "runtime/values"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.reflect
+
+assert(type_shape([1, 2, 3]) == "list<int>",
+   "list shape keeps raw length from strict length helper")
+assert(type_shape(["red", "blue"]) == "list<str>",
+   "string list shape joins every element")
+NY
+}

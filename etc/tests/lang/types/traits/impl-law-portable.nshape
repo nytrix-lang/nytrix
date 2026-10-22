@@ -1,0 +1,25 @@
+shape impl_law_verification_is_backend_independent {
+  family "runtime/language"
+  generator "embedded"
+  features ["ny", "test", "trait", "law", "backend-parity"]
+  template ny-test-case
+  expect compile_and_run
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  source ny <<'NY'
+use core
+
+trait Show {
+  fn show(any value) str
+}
+
+struct Point { int x }
+
+impl Show for Point {
+  fn show(any value) str { "point" }
+  law { 1 == 1 }
+}
+
+def Point p = Point(5)
+assert(show(p) == "point", "a proved law is accepted on every backend")
+NY
+}

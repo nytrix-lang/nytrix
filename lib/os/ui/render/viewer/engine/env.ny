@@ -1,20 +1,20 @@
 ;; Keywords: engine environment skybox lighting view os ui render viewer scene
 ;; Environment, skybox, lighting, and viewport background controls for the engine viewer.
 ;; References:
-;; - std.os.ui.assets.viewer
-;; - std.os.ui.render.scene
-module std.os.ui.render.viewer.engine.env(load_skybox, build_generated_textures)
-use std.core
-use std.core.str as str
-use std.os.fs as osfs
-use std.os.ui.assets.viewer as ui_assets
-use std.os.ui.render.dump as ui_profile
-use std.os.ui.render
-use std.os.ui.render.scene as render_scene
-use std.os.ui.render.viewer.term as terminal
-use std.os.ui.render.viewer.engine.state
-use std.math.parse.img as img
-use std.math.parse.img.exr as exr
+;; - core.os.ui.assets.viewer
+;; - core.os.ui.render.scene
+module core.os.ui.render.viewer.engine.env(load_skybox, build_generated_textures)
+use core
+use core.str as str
+use core.os.fs as osfs
+use core.os.ui.assets.viewer as ui_assets
+use core.os.ui.render.dump as ui_profile
+use core.os.ui.render
+use core.os.ui.render.scene as render_scene
+use core.os.ui.render.viewer.term as terminal
+use core.os.ui.render.viewer.engine.state
+use core.math.parse.img as img
+use core.math.parse.img.exr as exr
 
 fn _reset_skybox_texture_resources() {
    if skybox_tex_id >= 0 {

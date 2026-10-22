@@ -1,0 +1,68 @@
+shape ownership_rule_resource_wrapper_positive {
+  family "language/ownership"
+  generator "syntax"
+  features ["ownership", "resource", "linear", "wrapper", "positive"]
+  template ny-test-case
+  expect compile_and_run
+  flags "--ownership-strict"
+  source ny <<'NY'
+linear layout File { int fd }
+layout Holder { File file }
+enum MaybeFile<T> { Some(T file), None }
+
+fn consume_holder(Holder holder) int {
+  def fd = holder.file.fd
+  forget(holder)
+  fd
+}
+
+fn make_maybe_file() MaybeFile<File> {
+  MaybeFile.Some(File(37))
+}
+
+fn consume_maybe_file(MaybeFile<File> file) int {
+  def result = match file {
+    MaybeFile.Some(value) -> 1
+    MaybeFile.None -> 0
+  }
+  result
+}
+
+fn consume_tuple_resource() int {
+  def File file = File(41)
+  def pair = (file, 1)
+  forget(pair)
+  0
+}
+
+@consumes(files)
+fn consume_file_list(list<File> files) int {
+  forget(files)
+  0
+}
+
+@consumes(files)
+fn consume_file_dict(dict<int, File> files) int {
+  forget(files)
+  0
+}
+
+@consumes(files)
+fn consume_file_set(set<File> files) int {
+  forget(files)
+  0
+}
+
+
+assert(consume_holder(Holder(File(53))) == 53,
+       "nested resource fields keep their scalar ABI through an inferred local")
+assert(consume_maybe_file(make_maybe_file()) == 1,
+       "enum wrappers inherit linear resource use")
+assert(consume_tuple_resource() == 0,
+       "tuples inherit and discharge contained linear resources")
+assert(consume_file_list([File(43)]) == 0,
+       "generic collections inherit contained linear resources")
+assert(consume_file_dict({1: File(47)}) == 0,
+       "generic dictionaries inherit contained linear resources")
+NY
+}

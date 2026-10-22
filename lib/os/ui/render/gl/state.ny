@@ -1,17 +1,18 @@
 ;; Keywords: render opengl gl state init material scissor raster ffi
-;; References: std.os.ui.render.gl.constants std.os.ui.window std.os.ffi
-module std.os.ui.render.gl.state(_apply_current_color, _apply_lighting, _apply_matrices, _base_uv_offset, _bind_buffer, _bound_tex, _call0, _call1, _call1f, _call1u, _call2, _call2f, _call3, _call3f, _call4, _call4f, _call7, _call9, _call_trace_enabled, _call_trace_mode, _cfg_gl_finish_each_draw, _cfg_gl_force_base_only, _cfg_gl_lit_textures, _cfg_gl_perf, _cfg_gl_preview_textures, _cfg_gl_vertex_colors, _clear_a, _clear_b, _clear_g, _clear_r, _color_chan, _current_alpha_u32, _current_base_color_u32, _current_base_tex_id, _current_base_uv_xf0, _current_base_uv_xf1, _current_material_u32, _current_unlit, _current_vc_mode, _decode_uv_offset16, _decode_uv_rot8, _decode_uv_scale11, _default_ortho, _default_tex, _delete_name, _depth_mask_enabled, _draw_immediate_vertices, _draw_mode, _dynamic_vbo, _enable_draw_state, _ensure_dynamic_vbo, _ensure_libgl, _ensure_light_buf, _ensure_matrix_buf, _ensure_name_ptr, _ensure_scratch, _filter_value, _format_external, _format_internal, _frame_draw_calls, _frame_dynamic_draw_calls, _frame_indexed_draw_calls, _frame_open, _frame_static_draw_calls, _frame_submitted_vertices, _gen_name, _gl_finish_each_draw, _gl_lit_textures, _gl_preview_textures, _gl_refresh_config, _gl_use_vertex_colors, _h, _has, _last_frame_draw_calls, _last_frame_dynamic_draw_calls, _last_frame_indexed_draw_calls, _last_frame_static_draw_calls, _last_submitted_vertices, _last_tex, _last_tex_env_mode, _last_texture_xf0, _last_texture_xf1, _libgl, _light_buf, _lighting_enabled, _load_base_uv_texture_matrix, _load_mat, _material_uses_vertex_color, _matrix_buf, _mesh_cull_enabled, _mesh_front_face, _model, _mvp, _name_ptr, _next_frame_load_color, _norm_i32, _ny_glBegin, _ny_glBindBuffer, _ny_glBlendFunc, _ny_glBufferData, _ny_glColor4d, _ny_glColor4ub, _ny_glColorMaterial, _ny_glColorPointer, _ny_glColorPointerOffset, _ny_glDepthFunc, _ny_glDisable, _ny_glDisableClientState, _ny_glDrawArrays, _ny_glDrawElements, _ny_glDrawElementsOffset, _ny_glEnable, _ny_glEnableClientState, _ny_glEnd, _ny_glFinish, _ny_glFrontFace, _ny_glLightfv, _ny_glNormal3d, _ny_glNormal3f, _ny_glNormalPointer, _ny_glNormalPointerOffset, _ny_glReadBuffer, _ny_glReadPixels, _ny_glRectd, _ny_glScissor, _ny_glTexCoord2d, _ny_glTexCoord2f, _ny_glTexCoordPointer, _ny_glTexCoordPointerOffset, _ny_glTexEnvi, _ny_glVertex3d, _ny_glVertex3f, _ny_glVertexPointer, _ny_glVertexPointerOffset, _proc, _procs, _publish_frame_stats, _record_draw, _reset_frame_stats, _reset_ui_draw_state, _scratch, _scratch_cap, _set_depth_mask, _set_tex_env_mode, _setup_arrays, _setup_arrays_vbo, _soft_active_tex, _soft_buf, _soft_clear, _soft_color_blend, _soft_color_chan, _soft_color_lerp2, _soft_color_lerp3, _soft_copy_texture_pixels, _soft_draw_indexed, _soft_draw_line_segment, _soft_draw_lines, _soft_draw_points, _soft_draw_tri, _soft_draw_vertices, _soft_enabled, _soft_ensure_surface, _soft_fill_rect_raw, _soft_h, _soft_index, _soft_mode, _soft_mul_color, _soft_pack, _soft_plot_line_sample, _soft_project, _soft_put, _soft_rect, _soft_sample_tex, _soft_scissor, _soft_sh, _soft_sw, _soft_sx, _soft_sy, _soft_tex_meta, _soft_update_texture_pixels, _soft_vertex_color, _soft_w, _store_light_vec, _store_vertex, _tex_formats, _tex_live, _tex_pixels, _upload_dynamic_vertices, _uv_xf_identity, _w, _win, _wireframe, a, active_tex, alpha, area, b, base_tex_id, begin_frame, bind_default_texture, bind_texture, bo, bytes, c, c0, c00, c01, c10, c11, capabilities, clear, clear_depth, col, cp, cr, cw, dr, dx, e0, e1, e2, end_frame, env_mode, face, fb, first_off, frame_stats, fx, fy, get_swapchain_height, get_swapchain_image_count, get_swapchain_width, glColor4d, glColor4ub, glRectd, glRecti, h, i, id, init, inv, ix, k, keys, last_x, m, mat, material_preview, max_x, max_y, meta, min_x, min_y, n, need, notify_window_resize, nx, o0, o1, off, off_x, off_y, old_sc, p, p0, p1, p2, pi, pix, pkeys, pp, pt, px, radius, renderer_vertex_offset, reset_scissor_rect, rot, rot_bits, rough, row_bytes, row_pixels, sa, scl_x, scl_y, set_clear_color, set_material, set_material_from_slab, set_material_from_slab_base, set_material_packed, set_mesh_raster_state, set_model_matrix, set_mvp, set_next_frame_load_color, set_ortho, set_perspective, set_scissor_rect, set_ui_material, set_unlit, set_vertex_color_mode, set_wireframe, shade, shutdown, sr, steps, sx, sz, t, trace_mode, tu, tv, tw, tx, ty, u, u0, u1, u2, uu, uv_off, v, vi, want_cull, x, x0, x1, x2, xx, y, y0, y1, yy)
-use std.os.ui.render.gl.constants as gl_constants
-use std.core
-use std.core.str as core_str
-use std.core.common as common
-use std.math
-use std.os.ffi as ffi
-use std.os.ui.window as lib_uiw
-use std.os.ui.window.platform as ui_backend
-use std.os.ui.render.dump as ui_profile
-use std.os.ui.render.matrix as matrix
-use std.os.ui.render.shared as render_shared
+;; References: core.os.ui.render.gl.constants core.os.ui.window core.os.ffi
+module core.os.ui.render.gl.state(_apply_current_color, _apply_lighting, _apply_matrices, _base_uv_offset, _bind_buffer, _bound_tex, _call0, _call1, _call1f, _call1u, _call2, _call2f, _call3, _call3f, _call4, _call4f, _call7, _call9, _call_trace_enabled, _call_trace_mode, _cfg_gl_finish_each_draw, _cfg_gl_force_base_only, _cfg_gl_lit_textures, _cfg_gl_perf, _cfg_gl_preview_textures, _cfg_gl_vertex_colors, _clear_a, _clear_b, _clear_g, _clear_r, _color_chan, _current_alpha_u32, _current_base_color_u32, _current_base_tex_id, _current_base_uv_xf0, _current_base_uv_xf1, _current_material_u32, _current_unlit, _current_vc_mode, _decode_uv_offset16, _decode_uv_rot8, _decode_uv_scale11, _default_ortho, _default_tex, _delete_name, _depth_mask_enabled, _draw_immediate_vertices, _draw_mode, _dynamic_vbo, _enable_draw_state, _ensure_dynamic_vbo, _ensure_libgl, _ensure_light_buf, _ensure_matrix_buf, _ensure_name_ptr, _ensure_scratch, _filter_value, _format_external, _format_internal, _frame_draw_calls, _frame_dynamic_draw_calls, _frame_indexed_draw_calls, _frame_open, _frame_static_draw_calls, _frame_submitted_vertices, _gen_name, _gl_finish_each_draw, _gl_lit_textures, _gl_preview_textures, _gl_refresh_config, _gl_use_vertex_colors, _h, _has, _last_frame_draw_calls, _last_frame_dynamic_draw_calls, _last_frame_indexed_draw_calls, _last_frame_static_draw_calls, _last_submitted_vertices, _last_tex, _last_tex_env_mode, _last_texture_xf0, _last_texture_xf1, _libgl, _light_buf, _lighting_enabled, _load_base_uv_texture_matrix, _load_mat, _material_uses_vertex_color, _matrix_buf, _mesh_cull_enabled, _mesh_front_face, _model, _mvp, _name_ptr, _next_frame_load_color, _norm_i32, _ny_glBegin, _ny_glBindBuffer, _ny_glBlendFunc, _ny_glBufferData, _ny_glColor4d, _ny_glColor4ub, _ny_glColorMaterial, _ny_glColorPointer, _ny_glColorPointerOffset, _ny_glDepthFunc, _ny_glDisable, _ny_glDisableClientState, _ny_glDrawArrays, _ny_glDrawElements, _ny_glDrawElementsOffset, _ny_glEnable, _ny_glEnableClientState, _ny_glEnd, _ny_glFinish, _ny_glFrontFace, _ny_glLightfv, _ny_glNormal3d, _ny_glNormal3f, _ny_glNormalPointer, _ny_glNormalPointerOffset, _ny_glReadBuffer, _ny_glReadPixels, _ny_glRectd, _ny_glScissor, _ny_glTexCoord2d, _ny_glTexCoord2f, _ny_glTexCoordPointer, _ny_glTexCoordPointerOffset, _ny_glTexEnvi, _ny_glVertex3d, _ny_glVertex3f, _ny_glVertexPointer, _ny_glVertexPointerOffset, _proc, _procs, _publish_frame_stats, _record_draw, _reset_frame_stats, _reset_ui_draw_state, _scratch, _scratch_cap, _set_depth_mask, _set_tex_env_mode, _setup_arrays, _setup_arrays_vbo, _soft_active_tex, _soft_buf, _soft_clear, _soft_color_blend, _soft_color_chan, _soft_color_lerp2, _soft_color_lerp3, _soft_copy_texture_pixels, _soft_draw_indexed, _soft_draw_line_segment, _soft_draw_lines, _soft_draw_points, _soft_draw_tri, _soft_draw_vertices, _soft_enabled, _soft_ensure_surface, _soft_fill_rect_raw, _soft_h, _soft_index, _soft_mode, _soft_mul_color, _soft_pack, _soft_plot_line_sample, _soft_project, _soft_put, _soft_rect, _soft_sample_tex, _soft_scissor, _soft_sh, _soft_sw, _soft_sx, _soft_sy, _soft_tex_meta, _soft_update_texture_pixels, _soft_vertex_color, _soft_w, _store_light_vec, _store_vertex, _tex_formats, _tex_live, _tex_pixels, _upload_dynamic_vertices, _uv_xf_identity, _w, _win, _wireframe, a, active_tex, alpha, area, b, base_tex_id, begin_frame, bind_default_texture, bind_texture, bo, bytes, c, c0, c00, c01, c10, c11, capabilities, clear, clear_depth, col, cp, cr, cw, dr, dx, e0, e1, e2, end_frame, env_mode, face, fb, first_off, frame_stats, fx, fy, get_swapchain_height, get_swapchain_image_count, get_swapchain_width, glColor4d, glColor4ub, glRectd, glRecti, h, i, id, init, inv, ix, k, keys, last_x, m, mat, material_preview, max_x, max_y, meta, min_x, min_y, n, need, notify_window_resize, nx, o0, o1, off, off_x, off_y, old_sc, p, p0, p1, p2, pi, pix, pkeys, pp, pt, px, radius, renderer_vertex_offset, reset_scissor_rect, rot, rot_bits, rough, row_bytes, row_pixels, sa, scl_x, scl_y, set_clear_color, set_material, set_material_from_slab, set_material_from_slab_base, set_material_packed, set_mesh_raster_state, set_model_matrix, set_mvp, set_next_frame_load_color, set_ortho, set_perspective, set_scissor_rect, set_ui_material, set_unlit, set_vertex_color_mode, set_wireframe, shade, shutdown, sr, steps, sx, sz, t, trace_mode, tu, tv, tw, tx, ty, u, u0, u1, u2, uu, uv_off, v, vi, want_cull, x, x0, x1, x2, xx, y, y0, y1, yy)
+use core.os.ui.render.gl.constants as gl_constants
+use core
+use core.str as core_str
+use core.common as common
+use core.math
+use core.os.ffi as ffi
+use core.os.ffi as calls
+use core.os.ui.window as lib_uiw
+use core.os.ui.window.platform as ui_backend
+use core.os.ui.render.dump as ui_profile
+use core.os.ui.render.matrix as matrix
+use core.os.ui.render.shared as render_shared
 
 ;; Keep the packed-vertex layout local to this module.  The underscored
 ;; constants are intentionally exported by gl.constants for compatibility,
@@ -21,8 +22,9 @@ def _STRIDE = render_shared.VERTEX_STRIDE
 def _OFF_X = render_shared.OFF_X
 def _OFF_C = render_shared.OFF_C
 def _OFF_NX = render_shared.OFF_NX
+mut _cfg_gl_debug = false
 
-fn _is_debug() bool { ui_profile.debug_enabled() }
+fn _is_debug() bool { _cfg_gl_debug }
 
 fn _check_gl_error(str where) bool {
    if !_is_debug() { return true }
@@ -159,7 +161,7 @@ fn _check_gl_error(str where) bool {
    ;; Returns the result of the `glRecti` operation.
    fn glRecti(i32 _x1, i32 _y1, i32 _x2, i32 _y2) any { nil }
 } #endif
-mut _win = 0
+mut any _win = nil
 mut _w = 0
 mut _h = 0
 mut _frame_open = false
@@ -180,8 +182,8 @@ mut _soft_sw = 0
 mut _soft_sh = 0
 mut _dynamic_vbo = 0
 mut _name_ptr = 0
-mut _mvp = 0
-mut _model = 0
+mut any _mvp = nil
+mut any _model = nil
 mut _default_tex = 0
 mut _bound_tex = -999999
 mut _last_tex = -1
@@ -232,9 +234,11 @@ mut _call_trace_mode = -1
 mut _cfg_gl_force_base_only = false
 mut _cfg_gl_preview_textures = true
 mut _cfg_gl_lit_textures = false
+mut _cfg_gl_perf = false
 mut _cfg_gl_vertex_colors = false
 mut _cfg_gl_finish_each_draw = false
-mut _cfg_gl_perf = false
+mut _cfg_gl_disable_dynamic_vbo = false
+mut _cfg_gl_debug = false
 mut _last_tex_env_mode = -999999
 mut _mesh_cull_enabled = false
 mut _mesh_front_face = GL_CCW
@@ -690,7 +694,7 @@ fn _call_trace_enabled() bool {
 fn _call0(str name) bool {
    def p = _proc(name)
    if !p { return false }
-   ffi.call0_void(p)
+   calls.void0(p)
    true
 }
 
@@ -707,7 +711,7 @@ fn _call1(str name, any a) bool {
    if name == "glMatrixMode" { _ny_glMatrixMode(a) return true }
    def p = _proc(name)
    if !p { return false }
-   ffi.call1_void(p, a)
+   calls.void1(p, a)
    true
 }
 
@@ -715,7 +719,7 @@ fn _call1u(str name, any a) bool {
    if _call_trace_enabled() { print("[gl] call1u " + name) }
    def p = _proc(name)
    if !p { return false }
-   ffi.call1_u32_void(p, a)
+   calls.uint32voidone(p, a)
    true
 }
 
@@ -728,7 +732,7 @@ fn _call2(str name, any a, any b) bool {
    if name == "glPolygonMode" { _ny_glPolygonMode(a, b) return true }
    def p = _proc(name)
    if !p { return false }
-   ffi.call2_void(p, a, b)
+   calls.void2(p, a, b)
    true
 }
 
@@ -739,7 +743,7 @@ fn _call3(str name, any a, any b, any c) bool {
    if name == "glTexParameteri" { _ny_glTexParameteri(a, b, c) return true }
    def p = _proc(name)
    if !p { return false }
-   ffi.call3_void(p, a, b, c)
+   calls.void3(p, a, b, c)
    true
 }
 
@@ -747,14 +751,14 @@ fn _call4(str name, any a, any b, any c, any d) bool {
    if name == "glViewport" { _ny_glViewport(a, b, c, d) return true }
    def p = _proc(name)
    if !p { return false }
-   ffi.call4_void(p, a, b, c, d)
+   calls.void4(p, a, b, c, d)
    true
 }
 
 fn _call7(str name, any a, any b, any c, any d, any e, any f, any g) bool {
    def p = _proc(name)
    if !p { return false }
-   ffi.call7_void(p, a, b, c, d, e, f, g)
+   calls.void7(p, a, b, c, d, e, f, g)
    true
 }
 
@@ -763,28 +767,28 @@ fn _call9(str name, any a, any b, any c, any d, any e, any f, any g, any h, any 
    if name == "glTexSubImage2D" { _ny_glTexSubImage2D(a, b, c, d, e, f, g, h, i) return true }
    def p = _proc(name)
    if !p { return false }
-   ffi.call9_void(p, a, b, c, d, e, f, g, h, i)
+   calls.void9(p, a, b, c, d, e, f, g, h, i)
    true
 }
 
 fn _call1f(str name, any a) bool {
    def p = _proc(name)
    if !p { return false }
-   ffi.call1_f32_void(p, a)
+   calls.float32voidone(p, a)
    true
 }
 
 fn _call2f(str name, any a, any b) bool {
    def p = _proc(name)
    if !p { return false }
-   ffi.call2_f32_void(p, a, b)
+   calls.float32voidtwo(p, a, b)
    true
 }
 
 fn _call3f(str name, any a, any b, any c) bool {
    def p = _proc(name)
    if !p { return false }
-   ffi.call3_f32_void(p, a, b, c)
+   calls.float32voidthree(p, a, b, c)
    true
 }
 
@@ -792,7 +796,7 @@ fn _call4f(str name, any a, any b, any c, any d) bool {
    if name == "glClearColor" { _ny_glClearColor(a, b, c, d) return true }
    def p = _proc(name)
    if !p { return false }
-   ffi.call4_f32_void(p, a, b, c, d)
+   calls.float32voidfour(p, a, b, c, d)
    true
 }
 
@@ -867,7 +871,7 @@ fn _load_mat(int mode, any mat) bool {
    _call1("glMatrixMode", mode)
    def p = _ensure_matrix_buf()
    if p && is_list(mat) && render_shared.store_mat4_cm_raw(p, mat, true) {
-      _call1("glLoadMatrixf", p)
+      _ny_glLoadMatrixf(p)
       return true
    }
    _call0("glLoadIdentity")
@@ -947,16 +951,26 @@ fn _ensure_scratch(int bytes) ptr {
    ;; realloc can also extend in-place without copying.
    def new_cap = max(bytes, _scratch_cap * 2)
    if _scratch {
-      _scratch = realloc(_scratch, new_cap)
+      def grown = realloc(_scratch, new_cap)
+      if grown {
+         _scratch = grown
+      } else {
+         ;; Scratch contents are disposable; preserve the old block on
+         ;; realloc failure and replace it only if a fresh block succeeds.
+         def fresh = malloc(new_cap)
+         if !fresh { return 0 }
+         free(_scratch)
+         _scratch = fresh
+      }
    } else {
       _scratch = malloc(new_cap)
    }
-   if _scratch { _scratch_cap = new_cap } else { _scratch_cap = 0 }
+   if _scratch { _scratch_cap = new_cap }
    _scratch
 }
 
 fn _store_vertex(ptr base, int idx, f64 x, f64 y, f64 z, f64 u, f64 v, int color) bool {
-   render_shared.store_vertex64(base, idx, x, y, z, u, v, color, 0)
+   render_shared.store_vertex64_typed(base, idx, x, y, z, u, v, color, 0)
    true
 }
 
@@ -1007,6 +1021,7 @@ fn _ensure_dynamic_vbo() int {
 
 fn _upload_dynamic_vertices(any p, int count) bool {
    if !p || count <= 0 { return false }
+   if _cfg_gl_disable_dynamic_vbo { return false }
    def id = _ensure_dynamic_vbo()
    if id <= 0 { return false }
    _bind_buffer(GL_ARRAY_BUFFER, id)
@@ -1016,6 +1031,7 @@ fn _upload_dynamic_vertices(any p, int count) bool {
 
 fn _gl_refresh_config() bool {
    def trace_mode = common.env_lower("NY_TRACE")
+   _cfg_gl_debug = ui_profile.debug_enabled()
    _cfg_gl_perf = common.env_truthy("NY_TRACE_PERF") || trace_mode == "perf" || trace_mode == "bench" || trace_mode == "fast"
    _cfg_gl_force_base_only = common.env_truthy("NY_GL_FORCE_BASE_ONLY")
    _cfg_gl_lit_textures = !common.env_falsey("NY_GL_LIT_TEXTURES")
@@ -1029,6 +1045,7 @@ fn _gl_refresh_config() bool {
    ;; them on for glTF parity; NY_GL_VERTEX_COLORS=0 disables them for probes.
    _cfg_gl_vertex_colors = !common.env_falsey("NY_GL_VERTEX_COLORS")
    _cfg_gl_finish_each_draw = common.env_truthy("NY_GL_FINISH_EACH_DRAW")
+   _cfg_gl_disable_dynamic_vbo = common.env_truthy("NY_GL_DISABLE_DYNAMIC_VBO")
    true
 }
 
@@ -1053,8 +1070,8 @@ fn _set_tex_env_mode(int mode) bool {
 
 fn _set_blend_enabled(bool enabled) bool {
    if enabled == _blend_enabled { return true }
-   if enabled { _call1u("glEnable", GL_BLEND) }
-   else { _call1u("glDisable", GL_BLEND) }
+   if enabled { _call1("glEnable", GL_BLEND) }
+   else { _call1("glDisable", GL_BLEND) }
    _blend_enabled = enabled
    true
 }
@@ -1089,13 +1106,16 @@ fn _enable_draw_state(int tex_id=-1, bool depth_write=false) bool {
       _set_tex_env_mode(env_mode)
       bind_texture(active_tex)
       _load_base_uv_texture_matrix(_current_base_uv_xf0, _current_base_uv_xf1)
+      _check_gl_error("draw_state.texture")
    } else {
       if _texture_2d_enabled {
          _call1("glDisable", GL_TEXTURE_2D)
          _texture_2d_enabled = false
       }
+      _check_gl_error("draw_state.texture_disable")
       _bound_tex = -999999
       _load_base_uv_texture_matrix(0, 0)
+      _check_gl_error("draw_state.texture_matrix")
    }
    ;; UI/text draw paths call with depth_write=false, so keep them out of the
    ;; scene depth buffer completely.  Mesh draw paths pass depth_write=true;
@@ -1106,12 +1126,15 @@ fn _enable_draw_state(int tex_id=-1, bool depth_write=false) bool {
       else { _call1u("glDisable", GL_DEPTH_TEST) }
       _depth_test_enabled = depth_write
    }
+   _check_gl_error("draw_state.depth")
    ;; UI draws call with depth_write=false and still need normal alpha blending.
    ;; Mesh draws call with depth_write=true; switch GL_BLEND from the active
    ;; material instead of leaving it globally enabled for every opaque object.
    def needs_blend = depth_write ? _current_material_needs_blend() : true
    _set_blend_enabled(needs_blend)
+   _check_gl_error("draw_state.blend")
    _set_depth_mask(depth_write && !needs_blend)
+   _check_gl_error("draw_state.blend_depthmask")
    true
 }
 
@@ -1143,9 +1166,9 @@ fn _apply_current_color() bool {
 
 fn _apply_lighting(bool enabled) bool {
    if !enabled {
-      _call1u("glDisable", GL_LIGHTING)
-      _call1u("glDisable", GL_LIGHT0)
-      _call1u("glDisable", GL_COLOR_MATERIAL)
+      _call1("glDisable", GL_LIGHTING)
+      _call1("glDisable", GL_LIGHT0)
+      _call1("glDisable", GL_COLOR_MATERIAL)
       _lighting_enabled = false
       return true
    }
@@ -1155,10 +1178,10 @@ fn _apply_lighting(bool enabled) bool {
    _store_light_vec(16, 0.65, 0.65, 0.65, 1.0)
    _store_light_vec(32, 0.25, 0.25, 0.25, 1.0)
    _store_light_vec(48, 0.45, 0.75, 1.0, 0.0)
-   _call1u("glEnable", GL_NORMALIZE)
-   _call1u("glEnable", GL_LIGHTING)
-   _call1u("glEnable", GL_LIGHT0)
-   _call1u("glEnable", GL_COLOR_MATERIAL)
+   _call1("glEnable", GL_NORMALIZE)
+   _call1("glEnable", GL_LIGHTING)
+   _call1("glEnable", GL_LIGHT0)
+   _call1("glEnable", GL_COLOR_MATERIAL)
    _call2("glColorMaterial", GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE)
    _call3("glLightfv", GL_LIGHT0, GL_AMBIENT, p + 0)
    _call3("glLightfv", GL_LIGHT0, GL_DIFFUSE, p + 16)
@@ -1228,7 +1251,7 @@ fn _setup_arrays_vbo(any base, bool use_vertex_color=true, bool lit_material=fal
    true
 }
 
-fn _draw_immediate_vertices(any p, int count, int mode, bool use_vertex_color=true, bool lit_material=false) bool {
+fn _draw_immediate_vertices(ptr p, int count, int mode, bool use_vertex_color=true, bool lit_material=false) bool {
    if !p || count <= 0 { return false }
    _apply_lighting(lit_material)
    _ny_glBegin(mode)
@@ -1484,10 +1507,11 @@ fn init(any win) bool {
    _call1("glEnable", GL_BLEND)
    _blend_enabled = true
    if _has("glBlendFuncSeparate") {
-      _call4("glBlendFuncSeparate", GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA)
+      _ny_glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA)
    } else {
-      _call2("glBlendFunc", GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+      _ny_glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
    }
+   _check_gl_error("init.blend")
    _ny_glEnable(GL_TEXTURE_2D)
    _set_tex_env_mode(GL_MODULATE)
    _call1("glEnable", GL_DEPTH_TEST)
@@ -1543,7 +1567,7 @@ fn shutdown() bool {
    if _libgl { ffi.dlclose(_libgl) _libgl = 0 }
    _procs = dict(128)
    _frame_open = false
-   _win = 0
+   _win = nil
    if !_soft_enabled() { lib_uiw.make_current(0) }
    true
 }
@@ -1807,7 +1831,13 @@ fn bind_default_texture() bool {
       _bound_tex = _default_tex
       return true
    }
-   if _default_tex > 0 { return bind_texture(_default_tex) }
+   if _default_tex > 0 {
+      if _bound_tex == _default_tex { return true }
+      _call1("glActiveTexture", GL_TEXTURE0)
+      _call2("glBindTexture", GL_TEXTURE_2D, _default_tex)
+      _bound_tex = _default_tex
+      return true
+   }
    _call2("glBindTexture", GL_TEXTURE_2D, 0)
    _bound_tex = 0
    true

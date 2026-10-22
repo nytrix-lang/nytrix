@@ -1,0 +1,22 @@
+shape list_index_set_typed_local_abi {
+  family "runtime/values"
+  generator "embedded"
+  features ["ny", "test", "list", "abi"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+mut values = []
+values = append(values, 10)
+values = append(values, 20)
+values = append(values, 30)
+values = append(values, 40)
+values[3] = 7
+assert(int(values[0]) == 10, "odd index store preserves slot 0")
+assert(int(values[1]) == 20, "odd index store preserves slot 1")
+assert(int(values[2]) == 30, "odd index store preserves slot 2")
+assert(int(values[3]) == 7, "odd index store updates slot 3")
+NY
+}

@@ -3,11 +3,11 @@
 ;; Reference:
 ;; - https://www.secg.org/sec1-v2.pdf
 ;; References:
-;; - std.math.crypto.ecc
-;; - std.math.crypto
-module std.math.crypto.ecc.ecdlp(ecdlp_baby_step_giant_step, ecdlp_brute_force, ecdlp_pollard_rho, ecdlp_recover_from_linear_collision)
-use std.math.nt
-use std.math.crypto.ecc.ecc
+;; - core.math.crypto.ecc
+;; - core.math.crypto
+module core.math.crypto.ecc.ecdlp(ecdlp_baby_step_giant_step, ecdlp_brute_force, ecdlp_pollard_rho, ecdlp_recover_from_linear_collision)
+use core.math.nt
+use core.math.crypto.ecc.ecc
 
 fn _ec_point_eq(any P, any Q) bool {
    if P == nil || Q == nil { return P == nil && Q == nil }

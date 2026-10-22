@@ -1,13 +1,13 @@
 ;; Keywords: logic congruence arithmetic linear finite induction certificate budget
 ;; Bounded self-hosted decision procedures with replayable reports.
-module std.math.logic.solve(
+module core.math.logic.solve(
    congruence, arithmetic, linear, finite, induction)
-use std.core
-use std.core.reflect as reflect
-use std.math.logic.prolog as prolog
-use std.math.logic.certificate as cert
+use core
+use core.reflect as reflect
+use core.math.logic.prolog as prolog
+use core.math.logic.certificate as cert
 
-def SOLVER_VERSION = "std.math.logic.solve@1"
+def SOLVER_VERSION = "core.math.logic.solve@1"
 
 fn _list_at(list values, int index) any {
    ;; Nested solver inputs carry dynamic terms; use the ABI-aware reader
@@ -16,10 +16,11 @@ fn _list_at(list values, int index) any {
 }
 
 fn _seq_len(any values) int {
-   ;; A value returned through `dict.get` is dynamic.  Its public `.len`
-   ;; method therefore returns a tagged integer at this boundary; this
-   ;; solver needs the raw count for loop bounds and index APIs.
-   __len_strict(values)
+   ;; `.len` on a value returned through `dict.get` is ambiguous on Legacy
+   ;; LLVM: the dynamic member path can expose the list handle as the length.
+   ;; Ask the runtime list helper to resolve the handle and return the count.
+   def int n = to_int(__list_len(values))
+   return n
 }
 
 fn _certificate(str method, any claim, any evidence) dict {
@@ -31,9 +32,9 @@ fn _certificate(str method, any claim, any evidence) dict {
 fn _term_key(any value) str {
    if !prolog.is_term(value) { return type(value) + ":" + to_str(value) }
    mut out = value.get("name") + "("
-   def args = value.get("args")
+   def list args = value.get("args")
    mut i = 0
-   while i < _seq_len(args) {
+   while i < args.len {
       def child = _term_key(_list_at(args, i))
       out += to_str(child.len) + ":" + child
       i += 1
@@ -42,13 +43,13 @@ fn _term_key(any value) str {
 }
 
 fn _consume(dict state, int depth) bool {
-   def max_depth = to_int(state.get("max_depth"))
-   def nodes = to_int(state.get("nodes"))
-   def max_nodes = to_int(state.get("max_nodes"))
-   def steps = to_int(state.get("steps"))
-   def max_steps = to_int(state.get("max_steps"))
-   def memory = to_int(state.get("memory", 0))
-   def max_memory = to_int(state.get("max_memory", 1000000))
+   def int max_depth = int(to_int(state.get("max_depth")))
+   def int nodes = int(to_int(state.get("nodes")))
+   def int max_nodes = int(to_int(state.get("max_nodes")))
+   def int steps = int(to_int(state.get("steps")))
+   def int max_steps = int(to_int(state.get("max_steps")))
+   def int memory = int(to_int(state.get("memory", 0)))
+   def int max_memory = int(to_int(state.get("max_memory", 1000000)))
    if depth > max_depth {
       state.set("decided", false)
       state.set("reason", "depth limit")
@@ -88,9 +89,10 @@ fn _variables(any value, dict seen, int depth, int max_depth,
       return dict_len(seen) <= max_variables
    }
    if !prolog.is_term(value) { return true }
-   def args = value.get("args")
+   def list args = value.get("args")
+   def int args_len = args.len
    mut i = 0
-   while i < _seq_len(args) {
+   while i < args_len {
       if !_variables(_list_at(args, i), seen, depth + 1, max_depth,
          max_variables) { return false }
       i += 1
@@ -107,9 +109,9 @@ fn _collect_terms(any value, dict terms, dict parent, dict state,
       parent[key] = key
    }
    if !prolog.is_term(value) { return true }
-   def args = value.get("args")
+   def list args = value.get("args")
    mut i = 0
-   while i < _seq_len(args) {
+   while i < args.len {
       if !_collect_terms(_list_at(args, i), terms, parent, state, depth + 1) {
          return false
       }
@@ -121,9 +123,11 @@ fn _collect_terms(any value, dict terms, dict parent, dict state,
 fn _root(dict parent, str key, dict state) str {
    mut current = key
    mut depth = 0
-   while parent.get(current, current) != current {
-      def next = parent.get(current, current)
-      if next == current { break }
+   while true {
+      ;; Dictionary values cross the dynamic ABI. Normalize the representative
+      ;; before comparing or carrying it into the next lookup.
+      def next = to_str(parent.get(current, current))
+      if reflect.eq(next, current) { break }
       if !_consume(state, depth) { return current }
       current = next
       depth += 1
@@ -135,7 +139,7 @@ fn _union(dict parent, str left, str right, dict state) bool {
    def a = _root(parent, left, state)
    def b = _root(parent, right, state)
    if !state.get("decided") { return false }
-   if a == b { return false }
+   if reflect.eq(a, b) { return false }
    parent[b] = a
    true
 }
@@ -144,24 +148,26 @@ fn _congruent(any left, any right, dict parent, dict state) bool {
    if !prolog.is_term(left) || !prolog.is_term(right) {
       return false
    }
-   def left_args = left.get("args")
-   def right_args = right.get("args")
-   if left.get("name") != right.get("name") ||
-   _seq_len(left_args) != _seq_len(right_args) {
+   def list left_args = left.get("args")
+   def list right_args = right.get("args")
+   if !reflect.eq(left.get("name"), right.get("name")) ||
+   left_args.len != right_args.len {
       return false
    }
    mut i = 0
-   while i < _seq_len(left_args) {
-      def a = _root(parent, _term_key(_list_at(left_args, i)), state)
-      def b = _root(parent, _term_key(_list_at(right_args, i)), state)
-      if !state.get("decided") || a != b { return false }
+   while i < left_args.len {
+      def left_child_key = _term_key(_list_at(left_args, i))
+      def right_child_key = _term_key(_list_at(right_args, i))
+      def a = _root(parent, left_child_key, state)
+      def b = _root(parent, right_child_key, state)
+      if !state.get("decided") || !reflect.eq(a, b) { return false }
       i += 1
    }
    true
 }
 
 ;; Returns the result of the `congruence` operation.
-fn congruence(list equalities, any left, any right, int max_steps=10000,
+fn congruence(any equalities, any left, any right, int max_steps=10000,
    int max_nodes=10000, int max_depth=128, int max_variables=256,
    int max_memory=100000) dict {
    if max_steps <= 0 || max_nodes <= 0 || max_depth <= 0 ||
@@ -181,9 +187,9 @@ fn congruence(list equalities, any left, any right, int max_steps=10000,
    _collect_terms(left, terms, parent, state, 0)
    _collect_terms(right, terms, parent, state, 0)
    mut i = 0
-   while i < _seq_len(equalities) && state.get("decided") {
-      def pair = _list_at(equalities, i)
-      if !is_list(pair) || _seq_len(pair) != 2 {
+   while i < equalities.len && state.get("decided") {
+      def list pair = _list_at(equalities, i)
+      if pair.len != 2 {
          return {"decided":false, "reason":"invalid equality",
             "equal":false, "steps":state.get("steps"),
             "nodes":state.get("nodes")}
@@ -200,15 +206,15 @@ fn congruence(list equalities, any left, any right, int max_steps=10000,
       }
       i += 1
    }
-   def keys = terms.keys()
+   def list keys = terms.keys()
    mut changed = true
    mut passes = 0
    while changed && state.get("decided") {
       changed = false
       i = 0
-      while i < _seq_len(keys) && state.get("decided") {
+      while i < keys.len && state.get("decided") {
          mut j = i + 1
-         while j < _seq_len(keys) && state.get("decided") {
+         while j < keys.len && state.get("decided") {
             if !_consume(state, 0) { break }
             ;; `dict.keys()` is dynamic; normalize each key before passing
             ;; it to string-keyed dictionary APIs and the typed root helper.
@@ -227,7 +233,7 @@ fn congruence(list equalities, any left, any right, int max_steps=10000,
    def right_key = _term_key(right)
    def left_root = _root(parent, left_key, state)
    def right_root = _root(parent, right_key, state)
-   def equal = state.get("decided") && left_root == right_root
+   def equal = state.get("decided") && reflect.eq(left_root, right_root)
    def evidence = {"equalities":equalities, "left":left, "right":right,
       "passes":passes}
    return {"decided":state.get("decided"), "reason":state.get("reason"),
@@ -243,12 +249,12 @@ fn _arithmetic_eval(any expression, dict state, int depth) any {
    if is_int(expression) || is_float(expression) { return expression }
    if !prolog.is_term(expression) { return nil }
    def name = expression.get("name")
-   def args = expression.get("args")
-   if name == "neg" && _seq_len(args) == 1 {
+   def list args = expression.get("args")
+   if name == "neg" && args.len == 1 {
       def value = _arithmetic_eval(_list_at(args, 0), state, depth + 1)
       return value == nil ? nil : -value
    }
-   if _seq_len(args) != 2 { return nil }
+   if args.len != 2 { return nil }
    def left = _arithmetic_eval(_list_at(args, 0), state, depth + 1)
    def right = _arithmetic_eval(_list_at(args, 1), state, depth + 1)
    if left == nil || right == nil { return nil }
@@ -287,19 +293,21 @@ fn arithmetic(any expression, int max_steps=10000, int max_nodes=10000,
       "certificate":_certificate("arithmetic", value, evidence)}
 }
 
-fn _linear_holds(dict constraint, dict assignment, dict state) bool {
+fn _linear_holds(any constraint, dict assignment, dict state) bool {
    if !_consume(state, 0) { return false }
    def coefficients = constraint.get("coefficients", {})
    mut total = 0
-   def names = coefficients.keys()
+   def list names = coefficients.keys()
    mut i = 0
-   while i < _seq_len(names) {
+   while i < names.len {
       def name = to_str(_list_at(names, i))
-      total += coefficients.get(name) * assignment.get(name, 0)
+      def int coefficient = int(to_int(coefficients.get(name)))
+      def int value = int(to_int(assignment.get(name, 0)))
+      total += coefficient * value
       i += 1
    }
-   def rhs = constraint.get("rhs", 0)
-   def op = constraint.get("op", "<=")
+   def int rhs = int(to_int(constraint.get("rhs", 0)))
+   def op = to_str(constraint.get("op", "<="))
    if op == "<=" { return total <= rhs }
    if op == "<" { return total < rhs }
    if op == ">=" { return total >= rhs }
@@ -308,17 +316,17 @@ fn _linear_holds(dict constraint, dict assignment, dict state) bool {
    false
 }
 
-fn _finite_walk(list names, dict domains, int index, dict assignment,
+fn _finite_walk(list names, any domains, int index, dict assignment,
    any predicate, dict state, int depth) any {
    if !_consume(state, depth) { return nil }
-   if index >= _seq_len(names) {
+   if index >= names.len {
       if predicate(assignment) { return assignment }
       return nil
    }
    def name = to_str(_list_at(names, index))
-   def values = domains.get(name, [])
+   def list values = domains.get(name, [])
    mut i = 0
-   while i < _seq_len(values) {
+   while i < values.len {
       def found = _finite_walk(names, domains, index + 1,
          assignment.set(name, _list_at(values, i)), predicate, state, depth + 1)
       if found != nil || !state.get("decided") { return found }
@@ -328,26 +336,27 @@ fn _finite_walk(list names, dict domains, int index, dict assignment,
 }
 
 ;; Returns the result of the `finite` operation.
-fn finite(dict domains, any predicate, int max_steps=100000,
+fn finite(any domains, any predicate, int max_steps=100000,
    int max_nodes=100000, int max_depth=128, int max_variables=32,
    int max_memory=1000000) dict {
-   def names = domains.keys()
+   def list names = domains.keys()
    if max_steps <= 0 || max_nodes <= 0 || max_depth <= 0 ||
    max_variables <= 0 || max_memory <= 0 {
       return {"decided":false, "reason":"invalid budget", "found":false}
    }
-   if _seq_len(names) > max_variables {
+   if names.len > max_variables {
       return {"decided":false, "reason":"variable limit", "found":false}
    }
-   mut cells = _seq_len(names)
+   mut cells = names.len
    mut i = 0
-   while i < _seq_len(names) {
+   while i < names.len {
       def name = to_str(_list_at(names, i))
       def values = domains.get(name, [])
       if !is_list(values) {
          return {"decided":false, "reason":"invalid domain", "found":false}
       }
-      cells += _seq_len(values)
+      def list domain_values = values
+      cells += domain_values.len
       i += 1
    }
    if cells > max_memory {
@@ -367,37 +376,27 @@ fn finite(dict domains, any predicate, int max_steps=100000,
       "certificate":_certificate("finite", found, evidence)}
 }
 
-mut _linear_constraints = []
-mut _linear_state = {}
-
-fn _linear_predicate(dict assignment) bool {
-   mut i = 0
-   while i < _seq_len(_linear_constraints) {
-      if !_linear_holds(_list_at(_linear_constraints, i), assignment, _linear_state) {
-         return false
-      }
-      i += 1
-   }
-   true
-}
-
 ;; Returns the result of the `linear` operation.
-fn linear(list constraints, dict bounds, int max_steps=100000,
+fn linear(any constraints, any bounds, int max_steps=100000,
    int max_nodes=100000, int max_depth=128, int max_variables=32,
    int max_memory=1000000) dict {
    mut domains = dict(32)
-   def names = bounds.keys()
+   def list names = bounds.keys()
    mut i = 0
-   while i < _seq_len(names) {
+   while i < names.len {
       def name = to_str(_list_at(names, i))
       def bound = bounds.get(name)
-      if !is_list(bound) || _seq_len(bound) != 2 ||
-      _list_at(bound, 1) < _list_at(bound, 0) {
+      if !is_list(bound) {
          return {"decided":false, "reason":"invalid bound",
             "satisfiable":false}
       }
-      def int low = to_int(_list_at(bound, 0))
-      def int high = to_int(_list_at(bound, 1))
+      def list bound_values = bound
+      if bound_values.len != 2 || bound_values[1] < bound_values[0] {
+         return {"decided":false, "reason":"invalid bound",
+            "satisfiable":false}
+      }
+      def int low = to_int(bound_values[0])
+      def int high = to_int(bound_values[1])
       mut values = list(high - low + 1)
       mut int value = low
       while value <= high {
@@ -407,15 +406,24 @@ fn linear(list constraints, dict bounds, int max_steps=100000,
       domains[name] = values
       i += 1
    }
-   _linear_constraints = constraints
-   _linear_state = {"decided":true, "reason":"complete", "steps":0,
+   mut linear_state = {"decided":true, "reason":"complete", "steps":0,
       "nodes":0, "max_steps":max_steps, "max_nodes":max_nodes,
       "max_depth":max_depth, "memory":0, "max_memory":max_memory}
-   def result = finite(domains, _linear_predicate, max_steps, max_nodes,
+   def predicate = fn(dict assignment) bool {
+      mut i = 0
+      while i < constraints.len {
+         if !_linear_holds(_list_at(constraints, i), assignment, linear_state) {
+            return false
+         }
+         i += 1
+      }
+      true
+   }
+   def result = finite(domains, predicate, max_steps, max_nodes,
       max_depth, max_variables, max_memory)
-   if !_linear_state.get("decided") {
+   if !linear_state.get("decided") {
       result["decided"] = false
-      result["reason"] = _linear_state.get("reason")
+      result["reason"] = linear_state.get("reason")
    }
    result["satisfiable"] = result.get("found")
    result["certificate"] = _certificate("linear",

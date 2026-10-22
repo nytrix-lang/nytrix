@@ -1,0 +1,75 @@
+shape ownership_rule_resource_qualifier_positive {
+  family "language/ownership"
+  generator "syntax"
+  features ["ownership", "resource", "linear", "positive"]
+  template ny-test-case
+  expect compile_and_run
+  flags "--ownership-strict"
+  source ny <<'NY'
+linear layout File { int fd }
+affine layout Socket { int fd }
+
+fn read_fd(File file) int {
+  def fd = file.fd
+  forget(file)
+  fd
+}
+
+fn optional_fd(bool read, Socket socket) int {
+  if read {
+    def fd = socket.fd
+    forget(socket)
+    fd
+  } else { 0 }
+}
+
+fn local_fd() int {
+  def File file = File(19)
+  def fd = file.fd
+  forget(file)
+  fd
+}
+
+fn make_file() File {
+  File(23)
+}
+
+fn factory_fd() int {
+  def file = make_file()
+  def fd = file.fd
+  forget(file)
+  fd
+}
+
+fn moved_fd() int {
+  def File first = File(29)
+  def File second = first
+  def fd = second.fd
+  forget(second)
+  fd
+}
+
+@consumes(first, second)
+fn consume_pair(File first, File second) int {
+  forget(first)
+  forget(second)
+  0
+}
+
+fn move_pair() int {
+  def File first = File(41)
+  def File second = File(43)
+  consume_pair(first, second)
+}
+
+assert(read_fd(File(11)) == 11, "linear parameter is consumed once")
+assert(optional_fd(false, Socket(13)) == 0,
+       "affine parameter may be unused")
+assert(optional_fd(true, Socket(17)) == 17,
+       "affine parameter may be consumed once")
+assert(local_fd() == 19, "a local linear resource is consumed once")
+assert(factory_fd() == 23, "a factory result keeps its linear qualifier")
+assert(moved_fd() == 29, "a local resource is transferred to its destination")
+assert(move_pair() == 0, "a call may consume multiple resource parameters")
+NY
+}

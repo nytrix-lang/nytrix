@@ -1,12 +1,12 @@
 ;; Keywords: ui dock layout panels workspace tiling os render viewer
 ;; Docking and tiled-panel layout primitives for editor and viewer workspaces.
 ;; References:
-;; - std.os.ui.render.viewer.gui
-module std.os.ui.render.viewer.dock(begin_tool, end_tool, show_tool, tool_closed, normalize_tool_ids, merge_tool_ids, visible_tool_ids, tool_snapshot, apply_tool_rect_if_visible, focus_pref_rect, apply_focus_layout, apply_merged_focus_layout)
-use std.core
-use std.math
-use std.core.str as str
-use std.os.ui.render.viewer.gui
+;; - core.os.ui.render.viewer.gui
+module core.os.ui.render.viewer.dock(begin_tool, end_tool, show_tool, tool_closed, normalize_tool_ids, merge_tool_ids, visible_tool_ids, tool_snapshot, apply_tool_rect_if_visible, focus_pref_rect, apply_focus_layout, apply_merged_focus_layout)
+use core
+use core.math
+use core.str as str
+use core.os.ui.render.viewer.gui
 
 fn _clean_tool_id(any id) str { str.strip(to_str(id)) }
 
@@ -292,5 +292,5 @@ fn apply_merged_focus_layout(any a, any b, f64 ww, f64 wh, f64 gap=14.0) int {
    assert(pref.get(2, 0.0) == 1000.0 && pref.get(3, 0.0) > 0.0, "dock focus pref rect")
    assert(apply_focus_layout(["editor_main", "inspector"], 1000.0, 700.0, 10.0) == 2, "dock focus layout")
    assert(gui.window_rect("inspector").get(2, 0.0) > 0.0, "dock focus layout writes rect")
-   print("✓ std.os.ui.render.viewer.dock self-test passed")
+   print("✓ core.os.ui.render.viewer.dock self-test passed")
 }

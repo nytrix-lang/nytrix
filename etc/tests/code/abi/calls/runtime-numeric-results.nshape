@@ -1,0 +1,36 @@
+shape runtime_numeric_result_boundaries {
+  family "codegen/abi/calls"
+  generator "embedded"
+  features ["ny", "test", "abi"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.math.big
+use core.math.nt (Z)
+fn compare_values(any left, any right) int {
+  __bigfloat_cmp(left, right)
+}
+fn dynamic_compare(any left, any right) any {
+  compare_values(left, right)
+}
+fn echo(any value) any { value }
+fn precision(any value) int { bf_precision(value) }
+fn dictionary_count(any value) int { dict_len(value) }
+def low = bf_from_int(1)
+def high = bf_from_int(2)
+assert(compare_values(high, low) == 1, "raw comparison positive result")
+assert(compare_values(low, high) == -1, "raw comparison negative result")
+assert(compare_values(low, low) == 0, "raw comparison equal result")
+assert(to_str(dynamic_compare(high, low)) == "1", "raw comparison boxed return")
+assert(to_str(echo(-Z(21))) == "-21", "bigint negation dynamic return")
+assert(to_str(echo(bigint_to_int(Z(21)))) == "21", "bigint integer dynamic return")
+assert(precision(low) == 256, "bigfloat precision scalar return")
+assert(to_str(echo(precision(low))) == "256", "bigfloat precision boxed return")
+def table = dict_set(dict(4), 7, 42)
+assert(dictionary_count(table) == 1, "dictionary length scalar return")
+assert(to_str(echo(dictionary_count(table))) == "1", "dictionary length boxed return")
+0
+NY
+}

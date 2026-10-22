@@ -2,24 +2,24 @@
 ;; Symmetric-crypto routines for ChaCha20 stream cipher operations.
 ;; Reference: RFC 8439 (https://tools.ietf.org/html/rfc8439)
 ;; References:
-;; - std.math.crypto.symmetric
-;; - std.math.crypto
-module std.math.crypto.symmetric.chacha20(chacha20_encrypt, chacha20_decrypt, chacha20_encrypt_64nonce, chacha20_decrypt_64nonce, chacha20_block)
-use std.core
-use std.math.bin (zero_list, unpack_le32)
+;; - core.math.crypto.symmetric
+;; - core.math.crypto
+module core.math.crypto.symmetric.chacha20(chacha20_encrypt, chacha20_decrypt, chacha20_encrypt_64nonce, chacha20_decrypt_64nonce, chacha20_block)
+use core
+use core.math.bin (zero_list, unpack_le32)
 
 fn _rotl32(int x, int n) int { ((x << n) | (x >> (32 - n))) & 0xffffffff }
 
 fn _quarter_round(list st, int a, int b, int c, int d) any {
    mut va, vb, vc, vd = st[a], st[b], st[c], st[d]
    va = (va + vb) & 0xffffffff
-   vd = _rotl32(vd ^^ va, 16)
+   vd = _rotl32(vd ^ va, 16)
    vc = (vc + vd) & 0xffffffff
-   vb = _rotl32(vb ^^ vc, 12)
+   vb = _rotl32(vb ^ vc, 12)
    va = (va + vb) & 0xffffffff
-   vd = _rotl32(vd ^^ va, 8)
+   vd = _rotl32(vd ^ va, 8)
    vc = (vc + vd) & 0xffffffff
-   vb = _rotl32(vb ^^ vc, 7)
+   vb = _rotl32(vb ^ vc, 7)
    st[a] = va
    st[b] = vb
    st[c] = vc
@@ -69,10 +69,10 @@ fn _chacha20_xor_words(list out, list data, int offset, list st) list {
    def remaining = data.len - offset
    while wi < 16 && j < remaining {
       def w = st[wi]
-      out[offset + j] = data[offset + j] ^^ (w & 0xff)
-      if j + 1 < remaining { out[offset + j + 1] = data[offset + j + 1] ^^ ((w >> 8) & 0xff) }
-      if j + 2 < remaining { out[offset + j + 2] = data[offset + j + 2] ^^ ((w >> 16) & 0xff) }
-      if j + 3 < remaining { out[offset + j + 3] = data[offset + j + 3] ^^ ((w >> 24) & 0xff) }
+      out[offset + j] = data[offset + j] ^ (w & 0xff)
+      if j + 1 < remaining { out[offset + j + 1] = data[offset + j + 1] ^ ((w >> 8) & 0xff) }
+      if j + 2 < remaining { out[offset + j + 2] = data[offset + j + 2] ^ ((w >> 16) & 0xff) }
+      if j + 3 < remaining { out[offset + j + 3] = data[offset + j + 3] ^ ((w >> 24) & 0xff) }
       wi += 1
       j += 4
    }
@@ -166,5 +166,5 @@ fn chacha20_decrypt_64nonce(list key, list nonce, int counter, list ciphertext) 
    def enc64 = chacha20_encrypt_64nonce(key, nonce64, 0, msg)
    assert(enc64 != msg, "64 nonce ciphertext differs")
    assert(chacha20_decrypt_64nonce(key, nonce64, 0, enc64) == msg, "64 nonce roundtrip")
-   print("✓ std.math.crypto.symmetric.chacha20 self-test passed")
+   print("✓ core.math.crypto.symmetric.chacha20 self-test passed")
 }

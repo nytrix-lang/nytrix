@@ -5,10 +5,10 @@
 ;; These expose transitions and jump functions so analysis tools can model,
 ;; rewind by search/linear algebra, and identify output families.
 ;; References:
-;; - std.math.crypto.prng
-;; - std.math.crypto
-module std.math.crypto.prng.xoshiro(xorshift32_next, xorshift64star_next, xoroshiro128plus_next, xoroshiro128plus_jump, xoshiro256plusplus_next, xoshiro256plusplus_jump, prng_output_family_hint)
-use std.math.nt
+;; - core.math.crypto.prng
+;; - core.math.crypto
+module core.math.crypto.prng.xoshiro(xorshift32_next, xorshift64star_next, xoroshiro128plus_next, xoroshiro128plus_jump, xoshiro256plusplus_next, xoshiro256plusplus_jump, prng_output_family_hint)
+use core.math.nt
 
 fn _X64_MOD() any { Z("18446744073709551616") }
 
@@ -26,18 +26,18 @@ fn _rotl64(any x, any k) any {
 fn xorshift32_next(any state) list {
    "Marsaglia-style xorshift32. Returns [next_state, output]."
    mut x = _u32(state)
-   x = _u32(x ^^ _u32(x << Z(13)))
-   x = _u32(x ^^ (x >> Z(17)))
-   x = _u32(x ^^ _u32(x << Z(5)))
+   x = _u32(x ^ _u32(x << Z(13)))
+   x = _u32(x ^ (x >> Z(17)))
+   x = _u32(x ^ _u32(x << Z(5)))
    [x, x]
 }
 
 fn xorshift64star_next(any state) list {
    "xorshift64* transition/output. Returns [next_state, output]."
    mut x = _u64(state)
-   x = _u64(x ^^ (x >> Z(12)))
-   x = _u64(x ^^ _u64(x << Z(25)))
-   x = _u64(x ^^ (x >> Z(27)))
+   x = _u64(x ^ (x >> Z(12)))
+   x = _u64(x ^ _u64(x << Z(25)))
+   x = _u64(x ^ (x >> Z(27)))
    [x, _u64(x * Z(2685821657736338717))]
 }
 
@@ -45,8 +45,8 @@ fn xoroshiro128plus_next(list state) list {
    "xoroshiro128+ next. State is [s0, s1], returns [next_state, output]."
    mut s0, s1 = _u64(state.get(0)), _u64(state.get(1))
    def result = _u64(s0 + s1)
-   s1 = _u64(s1 ^^ s0)
-   def ns0, ns1 = _u64(_rotl64(s0, 55) ^^ s1 ^^ _u64(s1 << Z(14))), _rotl64(s1, 36)
+   s1 = _u64(s1 ^ s0)
+   def ns0, ns1 = _u64(_rotl64(s0, 55) ^ s1 ^ _u64(s1 << Z(14))), _rotl64(s1, 36)
    [[ns0, ns1], result]
 }
 
@@ -59,7 +59,7 @@ fn xoroshiro128plus_jump(list state) list {
    while i < jumps.len {
       mut b = 0
       while b < 64 {
-         if (jumps.get(i) & (Z(1) << Z(b))) != Z(0) { s0, s1 = _u64(s0 ^^ st.get(0)), _u64(s1 ^^ st.get(1)) }
+         if (jumps.get(i) & (Z(1) << Z(b))) != Z(0) { s0, s1 = _u64(s0 ^ st.get(0)), _u64(s1 ^ st.get(1)) }
          st = xoroshiro128plus_next(st).get(0)
          b += 1
       }
@@ -74,9 +74,9 @@ fn xoshiro256plusplus_next(list state) list {
    mut s2, s3 = _u64(state.get(2)), _u64(state.get(3))
    def result = _u64(_rotl64(_u64(s0 + s3), 23) + s0)
    def t = _u64(s1 << Z(17))
-   s2, s3 = _u64(s2 ^^ s0), _u64(s3 ^^ s1)
-   s1, s0 = _u64(s1 ^^ s2), _u64(s0 ^^ s3)
-   s2, s3 = _u64(s2 ^^ t), _rotl64(s3, 45)
+   s2, s3 = _u64(s2 ^ s0), _u64(s3 ^ s1)
+   s1, s0 = _u64(s1 ^ s2), _u64(s0 ^ s3)
+   s2, s3 = _u64(s2 ^ t), _rotl64(s3, 45)
    [[s0, s1, s2, s3], result]
 }
 
@@ -91,8 +91,8 @@ fn xoshiro256plusplus_jump(list state) list {
       mut b = 0
       while b < 64 {
          if (jumps.get(i) & (Z(1) << Z(b))) != Z(0) {
-            s0, s1 = _u64(s0 ^^ st.get(0)), _u64(s1 ^^ st.get(1))
-            s2, s3 = _u64(s2 ^^ st.get(2)), _u64(s3 ^^ st.get(3))
+            s0, s1 = _u64(s0 ^ st.get(0)), _u64(s1 ^ st.get(1))
+            s2, s3 = _u64(s2 ^ st.get(2)), _u64(s3 ^ st.get(3))
          }
          st = xoshiro256plusplus_next(st).get(0)
          b += 1
@@ -124,5 +124,5 @@ fn prng_output_family_hint(str name) str {
    assert(prng_output_family_hint("raw").contains("GF(2)"), "raw hint")
    assert(prng_output_family_hint("*").contains("odd multiplication"), "star alias hint")
    assert(prng_output_family_hint("++").contains("rotated addition"), "plusplus alias hint")
-   print("✓ std.math.crypto.prng.xoshiro self-test passed")
+   print("✓ core.math.crypto.prng.xoshiro self-test passed")
 }

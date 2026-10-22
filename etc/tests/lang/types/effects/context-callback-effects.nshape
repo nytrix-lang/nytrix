@@ -1,0 +1,27 @@
+shape allocation_context_calls_include_thunk_effects {
+  family "typing/effects"
+  generator "regression"
+  features ["ny" "test" "typing" "effects" "higher-order" "callback" "allocator"]
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core.alloc as mem
+
+@effects(read, write, alloc)
+fn with_pure_thunk() int {
+  def ctx = [[1, 1, 1, 0, "test"]]
+  mem.with_context(ctx, fn() { 41 + 1 })
+}
+
+@effects(read, write, alloc, io)
+fn with_io_thunk() int {
+  def ctx = [[1, 1, 1, 0, "test"]]
+  mem.with_context(ctx, fn() {
+    print("context thunk effect\n")
+    42
+  })
+}
+
+print("allocation context callbacks are analyzed")
+NY
+}

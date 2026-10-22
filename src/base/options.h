@@ -1,6 +1,7 @@
 #ifndef NY_OPTIONS_H
 #define NY_OPTIONS_H
 
+#include <nyr/target.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -10,6 +11,7 @@ typedef enum {
   NY_MODE_REPL,
   NY_MODE_BUILD,
   NY_MODE_VERSION,
+  NY_MODE_VERSION_ID,
   NY_MODE_HELP,
   NY_MODE_BUNDLE,
   NY_MODE_CLEAN_CACHE
@@ -20,6 +22,14 @@ typedef enum {
   NY_DUMP_SCOPE_LIB = 1,
   NY_DUMP_SCOPE_BOTH = 2
 } ny_dump_scope_t;
+
+/* Implementation selector for the differential Ny frontend pass
+ * (--ny-desugar=ny|c).  Off keeps the ordinary single-path pipeline. */
+typedef enum {
+  NY_DESUGAR_OFF = 0,
+  NY_DESUGAR_C = 1,
+  NY_DESUGAR_NY = 2
+} ny_desugar_mode_t;
 
 typedef enum {
   NY_HEAP_MANUAL = 0,
@@ -59,35 +69,13 @@ typedef enum {
 } ny_proof_solver_t;
 
 typedef enum {
-  NY_NATIVE_BACKEND_LLVM = 0,
-  NY_NATIVE_BACKEND_X86_64 = 1,
-  NY_NATIVE_BACKEND_X86 = 2,
-  NY_NATIVE_BACKEND_AARCH64 = 3,
-  NY_NATIVE_BACKEND_AMDGPU = 4,
-  NY_NATIVE_BACKEND_ARM = 5,
-  NY_NATIVE_BACKEND_AVR = 6,
-  NY_NATIVE_BACKEND_BPF = 7,
-  NY_NATIVE_BACKEND_MIPS = 8,
-  NY_NATIVE_BACKEND_POWERPC = 9,
-  NY_NATIVE_BACKEND_RISCV = 10,
-  NY_NATIVE_BACKEND_WASM = 11,
-} ny_native_backend_t;
-
-typedef enum {
-  NY_NATIVE_ABI_AUTO = 0,
-  NY_NATIVE_ABI_SYSV = 1,
-  NY_NATIVE_ABI_WIN64 = 2,
-  NY_NATIVE_ABI_AAPCS = 3,
-} ny_native_abi_t;
-
-typedef enum {
   NY_NATIVE_TIER_AUTO = 0,
   NY_NATIVE_TIER_BASELINE,
   NY_NATIVE_TIER_STENCIL,
   NY_NATIVE_TIER_FAST,
   NY_NATIVE_TIER_OPT,
   NY_NATIVE_TIER_LLVM,
-} ny_native_tier_t;
+} nyr_tier_t;
 
 typedef enum {
   NY_C_FRONTEND_AUTO = 0,
@@ -150,9 +138,11 @@ typedef struct {
   bool progress;
   bool no_progress;
   bool profiler_mode;
+  bool report_peak_rss;
   bool dump_ast;
   bool expand;
   bool expand_json;
+  ny_desugar_mode_t ny_desugar;
   bool meta_trace;
   bool dump_llvm;
   bool dump_tokens;
@@ -171,6 +161,10 @@ typedef struct {
   const char *emit_artifact_path;
   const char *verify_artifact_path;
   const char *use_artifact_path;
+  const char *emit_refinement_interface_path;
+  const char *use_refinement_interface_path;
+  const char *emit_effect_interface_path;
+  const char *use_effect_interface_path;
   bool extract_code;
   bool extract_json;
   const char *extract_lang;
@@ -211,10 +205,10 @@ typedef struct {
   const char *native_backend_raw;
   const char *native_abi_raw;
   const char *c_frontend_raw;
-  ny_native_backend_t native_backend;
-  ny_native_abi_t native_abi;
+  nyr_backend_t native_backend;
+  nyr_abi_t native_abi;
   const char *native_tier_raw;
-  ny_native_tier_t native_tier;
+  nyr_tier_t native_tier;
   int native_tier_budget;
   int native_hot_threshold;
   int native_cold_threshold;
@@ -222,15 +216,18 @@ typedef struct {
   bool native_prefer_vm;
   bool native_prefer_asm;
   bool native_only;
-  /* Diagnostic compatibility path: emit the pre-NYIR AST-to-LLVM backend. */
-  bool legacy_llvm;
   /* Run LLVM optimization after independently compiled module bitcode is
    * linked. This is an explicit whole-program/LTO build mode. */
   bool llvm_lto;
   bool native_backend_explicit;
   bool native_enable_cf_mem2reg;
+  bool callgraph;
+  bool callgraph_json;
+  int callgraph_depth;
   bool native_tier_report;
   const char *native_tier_report_path;
+  const char *emit_report_path;
+  const char *profiler_output_mode;
   bool native_result_oracle;
   bool native_oracle_per_pass;
   int native_oracle_fuzz_count;
@@ -241,27 +238,44 @@ typedef struct {
   const char *native_result_oracle_expected;
   ny_c_frontend_t c_frontend;
   bool native_dump_ir;
-  bool nyir_dump_text;
-  bool nyir_dump_raw;
-  bool nyir_dump_cfg;
-  bool nyir_dump_stats;
-  bool nyir_pass_stats;
-  bool nyir_verify;
-  const char *nyir_disable_pass;
-  const char *nyir_stop_after;
-  bool nyir_dump_bin;
-  const char *nyir_dump_bin_path;
-  bool nyir_metadata_report;
-  const char *nyir_metadata_report_path;
-  const char *nyir_metadata_bin_path;
-  bool nyir_run;
-  const char *nyir_run_path;
-  const char *nyir_run_bin_path;
-  bool nyir_run_profile;
-  const char *nyir_run_profile_path;
+  bool nyr_dump_text;
+  bool nyr_dump_raw;
+  bool nyr_dump_cfg;
+  bool nyr_dump_stats;
+  bool nyr_pass_stats;
+  bool nyr_ir_verify;
+  bool nyr_bisect;
+  bool nyr_fingerprint;
+  bool nyr_flaky_check;
+  bool nyr_rollback_on_verify_fail;
+  size_t nyr_global_inst_cap;
+  double nyr_pass_growth_factor;
+  int verbosity;
+  int nyr_track_value;
+  const char *dbg_filter;
+  bool dbg_delta_only;
+  bool dbg_unify_trace;
+  bool dbg_trait_resolve;
+  bool dbg_format_json;
+  bool dbg_abi;
+  bool dbg_elf_dump;
+  bool dbg_regalloc_heat;
+  bool dbg_stack_layout;
+  const char *nyr_disable_pass;
+  const char *nyr_stop_after;
+  bool nyr_dump_bin;
+  const char *nyr_dump_bin_path;
+  bool nyr_metadata_report;
+  const char *nyr_metadata_report_path;
+  const char *nyr_metadata_bin_path;
+  bool nyr_run;
+  const char *nyr_run_path;
+  const char *nyr_run_bin_path;
+  bool nyr_run_profile;
+  const char *nyr_run_profile_path;
   const char *native_profile_use_path;
-  int nyir_run_max_steps;
-  int nyir_run_recursion_limit;
+  int nyr_run_max_steps;
+  int nyr_run_recursion_limit;
   const char *native_dump_ir_path;
   const char *arm_float_abi;
   const char *std_path;
@@ -308,30 +322,41 @@ typedef struct {
   ny_runtime_mode_t runtime_mode;
   const char *runtime_mode_raw;
   ny_safe_run_t safe_run;
-  const char *sanitize;    /* --sanitize=address|undefined|thread|leak */
-  const char *jit_engine;  /* --jit-engine=orc|mcjit (default: mcjit) */
-  bool jit_fast_isel;      /* --jit-fast-isel: JIT fast instruction selection */
+  const char *sanitize;   /* --sanitize=address|undefined|thread|leak */
+  const char *jit_engine; /* --jit-engine=orc|mcjit (default: mcjit) */
+  bool jit_fast_isel;     /* --jit-fast-isel: JIT fast instruction selection */
   const char *jit_code_model; /* --jit-code-model=small|kernel|medium|large */
-  int jit_opt_level;       /* --jit-opt-level=N: JIT optimization level (0..3) */
-  bool jit_perf_map;       /* --jit-perf-map: emit /tmp/perf-<pid>.map */
-  bool zero_init;          /* --zero-init: zero all managed heap allocations */
-  bool trace_tokens;       /* --trace-tokens: lexer token stream */
-  bool trace_parse;        /* --trace-parse: parser rule execution trace */
-  bool trace_scope;        /* --trace-scope: binding resolution trace */
-  bool dump_ast_typed;     /* --dump-ast-typed: AST dump with inferred types */
-  bool trace_hm;           /* --trace-hm: HM type inference trace */
-  bool explain;            /* --explain: semantic explanations of compiler decisions */
+  int jit_opt_level;   /* --jit-opt-level=N: JIT optimization level (0..3) */
+  bool jit_opt_level_explicit;
+  bool jit_perf_map;   /* --jit-perf-map: emit /tmp/perf-<pid>.map */
+  bool zero_init;      /* --zero-init: zero all managed heap allocations */
+  bool trace_tokens;   /* --trace-tokens: lexer token stream */
+  bool trace_parse;    /* --trace-parse: parser rule execution trace */
+  bool trace_scope;    /* --trace-scope: binding resolution trace */
+  bool dump_ast_typed; /* --dump-ast-typed: AST dump with inferred types */
+  bool trace_hm;       /* --trace-hm: HM type inference trace */
+  bool explain; /* --explain: semantic explanations of compiler decisions */
   const char *explain_topic; /* --explain=topic: specific explanation topic */
-  bool explain_any;        /* --explain-any: explain types degrading to any */
-  bool dump_escapes;       /* --dump-escapes: escape analysis verdict */
-  bool dump_proofs;        /* --dump-proofs: proven bounds and properties */
-  bool trace_llvm;         /* --trace-llvm: codegen LLVM IR trace */
-  bool dump_llvm_passes;   /* --dump-llvm-passes: LLVM IR after each pass */
-  bool trace_regalloc;     /* --trace-regalloc: machine vreg coloring trace */
-  bool dump_obj_full;      /* --dump-obj-full: full object file summary */
-  bool compile_profile_fn; /* --compile-profile-fn: per-fn compile time breakdown */
-  bool debug_everything;   /* --debug-everything: enable all debug traces */
+  bool explain_any;          /* --explain-any: explain types degrading to any */
+  bool dump_escapes;         /* --dump-escapes: escape analysis verdict */
+  bool dump_proofs;          /* --dump-proofs: proven bounds and properties */
+  bool trace_llvm;           /* --trace-llvm: codegen LLVM IR trace */
+  bool dump_llvm_passes;     /* --dump-llvm-passes: LLVM IR after each pass */
+  bool trace_regalloc;       /* --trace-regalloc: machine vreg coloring trace */
+  bool dump_obj_full;        /* --dump-obj-full: full object file summary */
+  bool compile_profile_fn;   /* --compile-profile-fn: per-fn compile time
+                                breakdown */
+  bool debug_everything;     /* --debug-everything: enable all debug traces */
 } ny_options;
+
+static inline bool ny_options_target_request(const ny_options *opt,
+                                             nyr_target_request_t *request) {
+  if (!opt || !request)
+    return false;
+  *request = nyr_target_request_make(opt->native_backend, opt->native_abi,
+                                     opt->host_triple, opt->opt_size);
+  return true;
+}
 
 void ny_options_init(ny_options *opt);
 void ny_options_parse(ny_options *opt, int argc, char **argv);

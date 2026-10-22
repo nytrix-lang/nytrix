@@ -1,0 +1,33 @@
+shape any_inline_boundary {
+  family "runtime/execution"
+  generator "embedded"
+  features ["ny", "native", "inline", "any", "abi"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+fn echo(any value) any { value }
+fn echo_unknown(value) any { value }
+fn string_as_any(str value) any { value }
+fn is_dynamic_string(any value) bool { is_str(value) }
+fn pass_string_to_any(str value) bool { is_dynamic_string(value) }
+
+def int raw_roundtrip = echo(17)
+def any dynamic_roundtrip = echo(25)
+def str string_roundtrip = echo("nytrix")
+def any inferred_roundtrip = echo_unknown(41)
+def str string_return_roundtrip = string_as_any("returned string")
+
+assert(raw_roundtrip == 17, "raw scalar is boxed and decoded at the any boundary")
+assert(dynamic_roundtrip == 25, "tagged scalar keeps its dynamic representation")
+assert(string_roundtrip == "nytrix", "string handle survives inlined any identity")
+assert(inferred_roundtrip == 41, "inferred dynamic formal keeps its boundary")
+assert(string_return_roundtrip == "returned string",
+       "raw string is boxed when returned through any")
+assert(pass_string_to_any("argument string"),
+       "raw string is boxed when passed to any")
+assert(1 + 2 == 3, "execution sentinel")
+0
+NY
+}

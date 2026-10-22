@@ -1,61 +1,32 @@
-<!-- nytrix-doc: {"audience":"user","featured":true,"group":"spec","order":11,"summary":"The complete source syntax: comments, literals, declarations, blocks, and expressions."} -->
+<!-- nytrix-doc: {"audience":"user","featured":true,"group":"spec","order":11,"summary":"Source spellings for Nytrix comments, literals, declarations, blocks, and expressions."} -->
 # Syntax
 
-Syntax records source spellings. Topic pages define behavior.
+This page is a source-form index. Topic pages define meaning, type rules, and
+backend limits. The parser-oriented grammar is in
+[Info EBNF](../info/nytrix.ebnf).
 
-## Lexical
+## Lexical forms
 
-```text
-comment        := ";" text-until-newline | ";" marker text-block marker ";"
-marker         := [A-Za-z_][A-Za-z0-9_]*
-identifier     := [A-Za-z_][A-Za-z0-9_]*
-module-path    := identifier ("." identifier)*
-block          := "{" source* "}"
-```
-
-There are no standard C-style block comments. Heredoc-style multiline comments can be written as `;MARKER ... MARKER;`. Semicolons are comments, not statement terminators.
-
-## Grammar
-
-The statement grammar is a sequence of statements, declarations, or expressions
-separated by newlines. A block is `{` statements-and-expressions `}`.
+`;` starts a line comment; it is not a statement separator or terminator. The
+lexer also supports delimited multiline comments: `;MARKER ... MARKER;` and
+the paired forms `;{ ... };`, `;< ... >;`, `;[ ... ];`, and `;( ... );`.
+There are no C-style `/* ... */` comments.
 
 ```text
-source          := (statement | declaration)*
-statement       := expression
-                 | "return" expression
-                 | "if" "(" condition ")" block ("elif" "(" condition ")" block)* ("else" block)?
-                 | "if" condition block ("elif" condition block)* ("else" block)?
-                 | "while" "(" condition ")" block
-                 | "while" "(" init condition update ")" block
-                 | "for" pattern "in" expression block
-                 | "for" pattern "," pattern "in" expression block
-                 | "for" "(" pattern "in" expression ")" block
-                 | "for" "(" init condition update ")" block
-                 | "match" expression "{" arm* "}"
-                 | "case" expression "{" arm* "}"
-                 | "try" block "catch" binding block
-                 | "defer" block
-                 | "with" type ":" binding "=" expression block
-                 | "break" | "continue"
-                 | label ":" statement
-                 | "goto" label
-arm             := pattern ("if" expression)? "->" expression
-init            := binding "=" expression
-condition       := expression
-update          := expression
-binding         := identifier | type identifier
-pattern         := literal | identifier | "(" pattern ")" | "_"
+; line comment
+value = 1 ; inline comment
+;NOTE
+ignored documentation block
+NOTE;
+;{ ignored block };
 ```
 
-`if` with a condition and no parentheses uses the same branch forms as the
-parenthesized spelling. In binding or expression position each branch needs one
-value-producing statement, such as a final expression or a nested
-value-producing `if`.
+Adjacent statements are separated by the grammar and source layout. Blocks use
+braces. Newlines can separate statements; semicolons do not terminate them.
 
-## Literals
+## Literals and values
 
-```ny
+```text
 nil  true  false
 123  0xff  0o77  0b1010
 1i8 1i16 1i32 1i64  1u8 1u16 1u32 1u64
@@ -65,23 +36,19 @@ nil  true  false
 ```
 
 `list(n)` creates an empty list with reserved capacity `n`; it does not create
-`n` initialized elements.
+initialized elements. See [Values](values.md) for value and container behavior.
 
-## Source Structure
+## Files, modules, and imports
 
-```ny
-use std
+```text
+use core
 use module.path
-use module.path, other.module
 use module.path as alias
-use std module.path as alias
 use module.path (name, other)
 use module.path (name as alias)
 use module.path:profile
-use module.path:profile *
 use "./relative.ny" as alias
 use "./relative.ny" (name)
-use "./relative.ny":debug
 
 module name *
 module name (a, b, c)
@@ -91,11 +58,17 @@ module name generated from Spec { key = value emit make_backend(Contract) }
 #main { body }
 ```
 
-`#main` is the direct-entry guard. Prefer it over manual `__main()` checks.
+`#main` marks direct-entry work in a module. Import and export rules are in
+[Units](units.md).
 
-## Bindings And Functions
+## Bindings and functions
 
-```ny
+Bindings use `def` for immutable names and `mut` for names that may be
+reassigned. Type annotations precede names. Functions can have inferred or
+explicit return types; the final expression in the body is the result when no
+`return` exits earlier.
+
+```text
 def name = expr
 mut name = expr
 def Type name = expr
@@ -107,232 +80,126 @@ del name
 fn name(params) { body }
 fn name(params) Type { body }
 fn name(params) Type = expr
-fn(v){ expr }
-```
+fn(value) { expression }
 
-Parameters:
-
-```ny
-name
-Type name
-name = default
-Type name = default
+parameter
+Type parameter
+parameter = default
+Type parameter = default
 ...rest
 ```
 
-## Types
+See [Functions](functions.md) for calls, defaults, closures, and attributes.
 
-```ny
+## Types and declarations
+
+```text
 T
 T<A>
 T<A, B>
 ?T
 *T
 fnptr
-seq | sequence
-numeric
-indexable
-iterable
-allocator
+numeric  sequence  indexable  iterable  allocator
 handle
-c64 | c128 | complex
-```
+c64  c128  complex
 
-Common generic forms include `list<int>`, `dict<str, int>`, `set<str>`,
-`Result<T, E>`, and ADTs such as `Option<int>`.
-
-## Data Declarations
-
-```ny
 struct Vec2 { f64 x, f64 y }
+enum Color { Red, Green, Blue }
+enum Shape { Circle(int radius), Rect(int width, int height), Empty }
+enum Option<T> { Some(T value), None }
 
-enum Color {
-   Red,
-   Green,
-   Blue
-}
-
-enum Shape {
-   Circle(int radius),
-   Rect(int width, int height),
-   Empty
-}
-
-enum Option<T> {
-   Some(T value),
-   None
-}
-
-impl Shape { fn area(self s) int { 0 } }
-impl int, f32 { fn twice(self x) self { x + x } }
-impl Meter { operator + self: self = add }
+trait Show { fn show(any value) str }
+impl Shape { fn area(self shape) int { 0 } }
+impl Show for Point { fn show(Point value) str { "Point" } }
 ```
 
-## Statements
+`struct` declares a language value; `layout` declares a native representation.
+See [Types](types.md), [Traits and impl](traits.md), and [Native](native.md).
 
-```ny
-expr
-return expr
-if(cond){ body } elif(other){ body } else { body }
-if cond { body } elif other { body } else { body }
-if(def x = value x > 0){ body }
-def x = if(cond){ value } else { fallback }
-while(cond){ body }
-while(mut i = 0 i < n ++i){ body }
-for value in expr { body }
-for value, index in expr { body }
-for(index in expr){ body }
-for(mut i = 0 i < n ++i){ body }
-for value in lo..hi { body }
-match expr { arms }
-case expr { arms }
-try { body } catch name { body }
-try { body } catch(_) { handler }
-defer { body }
-with Type name = expr { body }
+## Statements and control flow
+
+```text
+expression
+return expression
+if (condition) { body } elif (other) { body } else { body }
+if condition { body } elif other { body } else { body }
+if (def value = expression condition) { body }
+while (condition) { body }
+for value in iterable { body }
+for value, index in iterable { body }
+for (mut index = 0 index < limit ++index) { body }
+for value in lower..upper { body }
+break
+continue
+match expression { arms }
+case expression { arms }
+try { body } catch error { handler }
+defer { cleanup }
+with Type name = expression { body }
 ```
 
-Declarations use `Type name`. Resource scopes are also type-first: write
-`with Type name = value { ... }`; the legacy colon spelling is rejected.
+`case` dispatches values and ranges; `match` handles patterns and ADTs. See
+[Control Flow](control-flow.md) and [Patterns](patterns.md).
 
 ## Operators
 
-```ny
-a + b   a - b   a * b   a / b   a % b   a ^ b
-a = b   a += b  a -= b  a *= b  a /= b  a %= b
-++a      --a
-a == b  a != b  a < b   a <= b  a > b   a >= b
-a && b  a || b  !a
-&a      a & b   a | b   a ^^ b  ~a      a << b  a >> b
-a ?? b  a |> f  value?.member   cond ? a : b
-fn_name(arg)  value[index]  value.member  module.helper(value)
+```text
++  -  *  /  %  **  ^^  ^
+=  +=  -=  *=  /=  %=  **=  ^^=  ^=
+++  --
+==  !=  <  <=  >  >=
+&&  ||  !
+&  |  ^  ~  <<  >>
+??  |>  ?.  ? :
+call(...)  value[index]  value.member
 ```
 
-Unary `&expr` is borrow syntax. Binary `&` is bitwise-and. `^` is
-exponentiation. `^^` is bitwise XOR. See [Operators](operators.md#precedence)
-for the precedence and associativity table.
+Unary `&expression` is borrow syntax. Binary `&` is bitwise-and, `^` is XOR,
+and both `**` and `^^` spell exponentiation. See [Operators](operators.md)
+for precedence and associativity.
 
-## Dispatch
+## Native declarations and attributes
 
-```ny
-case value {
-   literal -> expr
-   a, b, c -> expr
-   lo..hi -> expr
-   _ -> expr
-}
-
-match value {
-   Pattern(value) -> expr
-   _ -> expr
-}
-```
-
-## Native Forms
-
-```ny
+```text
 #include <stdlib.h> as "c"
-#include "./header.h" as ""
+#include "./header.h"
+extern "library" { fn symbol(Type argument) Type }
+layout Name { Type field, Type other }
 
-extern "library" { fn symbol(Type arg) Type }
-extern { fn process_symbol(Type arg) Type }
-
-layout Name { Type field, Type field2 }
-layout Packed pack(1){ u8 tag, i32 value }
-layout record Row derive(default, eq, hash, debug_str) pack(4){ i32 id }
-layout shape Header derive(load, store, zero) pack(8){ str sender }
-layout guard Header h = value else { fallback }
-```
-
-Fields use the short `Type name` spelling.
-
-## Attributes
-
-Portable source should use attributes that state a semantic contract. Effects,
-ownership, compile-time evaluation, and constant-time intent are checked or
-preserved by Nytrix independently of a particular machine-code backend.
-
-```ny
 @pure
-@effects(none|io|alloc|ffi|thread|all)
-@async_effects
-@thread
-@naked
+@effects(none|io|alloc|ffi|thread|read|write|all)
 @consteval
 @constant_time
-@optimize(0|1|2|3)
-@inline @noinline @tailcall
-@hot @cold @flatten
-@accel @accel(spirv)
-@returns_owned @returns_borrow(x)
-@borrows(x) @consumes(x) @mutates(x) @releases(x) @forgets(x)
+@inline  @noinline  @tailcall
+@returns_owned  @returns_borrow(name)
+@borrows(name)  @consumes(name)  @mutates(name)
 ```
 
-Choose behavior through typed APIs and standard-library modules first. Backend
-tuning annotations are compatibility details and are intentionally not the
-normal way to express program logic.
+See [Native](native.md) for FFI and ABI rules, and [Functions](functions.md)
+for attribute contracts.
 
-## Proof declarations
+## Compile-time and proof forms
 
-```ny
+```text
+comptime { body }
+#run expression
+#comptime expression
+comptime table Name { pattern -> value }
+comptime template name(args) { declarations }
+comptime emit name(args)
+comptime fields(Layout) as field { emit ... }
+static_assert(condition, "message")
 fn lemma name(params) { proposition }
 ```
 
-A lemma body is a single proposition. `A → B` is implication syntax and is
-equivalent to `!A || B`. See [Proofs](../learn/proofs.md) for witness
-construction and use.
+See [Compile-time execution](comptime.md) and [Types](types.md) for proof
+forms and their limits.
 
-## Compile Time
-
-```ny
-comptime { body }
-comptime table Name { pattern -> value }
-comptime match Name(key, fallback)
-comptime template name(args) { declarations }
-comptime emit name(args)
-for name in comptime [values...] { emit template(name) }
-comptime fields(Layout) as f { emit ... }
-comptime exports(Module) as name { emit ... }
-comptime diagnostic rule name { when predicate error "message" fix "hint" }
-static_assert(cond, "message")
-assert_compile(cond, "message")
-assert_compile_range(value, lo, hi, "message")
-assert_compile_index(container, index, "message")
-
-#linux { body }
-#elif macos { body }
-#elif windows { body }
-#else { body }
-#endif
-#if(arch() == "x86_64"){ body }
-```
-
-## Builtins
+## Runnable shape
 
 ```ny
-embed("path")
-asm("template", "constraints", args...)
-intrinsic("ctpop.i64", value)
-argc()
-__os_name()
-__main()
-__tagof(value)
-__runtime_tag("name")
-__layout_size("Name")
-__layout_align("Name")
-__layout_offset("Name", "field")
-```
-
-`embed` reads file content at compile time. `asm` and `intrinsic(...)` are
-real target-specific forms; their supported backends are checked at
-compilation.
-Prefer public wrappers such as `argc()` over double-underscore runtime helpers
-when one exists.
-
-## Runnable Shape
-
-```ny
-use std.core
+use core
 
 module sample(add)
 
@@ -341,7 +208,7 @@ fn add(int a, int b) int {
 }
 
 #main {
-   assert_eq(add(1, 2), 3, "add")
+   assert_eq(add(19, 23), 42, "add")
 }
 ```
 

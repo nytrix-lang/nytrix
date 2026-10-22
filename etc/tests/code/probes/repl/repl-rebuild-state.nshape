@@ -1,0 +1,14 @@
+shape test_repl_rebuild_state {
+  family "repl"
+  generator "embedded"
+  features ["ny", "test", "repl", "incremental", "state", "rebuild"]
+  timeout 180
+  template ny-test-case
+  expect compile_and_run
+  repl_expect "Trace disabled\nREPL-REBUILD-STATE-OK"
+  repl_commands "rebuild_value = 7\n:trace off\nassert(rebuild_value == 7, \"engine rebuild replays accepted scalar updates\")\nassert(rebuild_helper() == 9, \"engine rebuild preserves earlier functions\")\nrebuild_value = 9\nassert(rebuild_value == 9, \"state remains mutable after rebuild\")\nprint(\"REPL-REBUILD-STATE-OK\")"
+  source ny <<'NY'
+mut int rebuild_value = 1
+fn rebuild_helper() int { rebuild_value + 2 }
+NY
+}

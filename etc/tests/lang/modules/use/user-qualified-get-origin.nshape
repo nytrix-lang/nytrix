@@ -1,0 +1,21 @@
+shape user_qualified_get_keeps_its_origin_in_f64_context {
+  family "runtime/modules/use"
+  generator "regression"
+  features ["ny", "test", "modules", "identity", "legacy-llvm", "f64"]
+  template ny-test-case
+  flags_matrix "--native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_and_run
+  source ny <<'NY'
+module project.data(get)
+
+fn get(list<f64> values, int index) f64 {
+  values[0] + 40.0 + index
+}
+
+#main {
+  assert(project.data.get([1.0], 1) + 1.0 == 43.0,
+         "qualified user get must not be lowered as core.get")
+  0
+}
+NY
+}

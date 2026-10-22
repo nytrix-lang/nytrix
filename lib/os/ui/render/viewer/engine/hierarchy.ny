@@ -1,18 +1,18 @@
 ;; Keywords: engine hierarchy selection tags assets os ui render viewer scene
 ;; Hierarchy tree helpers for scene nodes, materials, asset tags, and selection state.
 ;; References:
-;; - std.os.ui.assets.catalog
-;; - std.os.ui.render.viewer.icons
-module std.os.ui.render.viewer.engine.hierarchy(
+;; - core.os.ui.assets.catalog
+;; - core.os.ui.render.viewer.icons
+module core.os.ui.render.viewer.engine.hierarchy(
    active_gltf, gltf_list, draw_body, selected_node, selected_part, selected_material, reset_selection
 )
 
-use std.core
-use std.math (clamp, max, min)
-use std.os.ui.assets.catalog as asset_catalog
-use std.os.ui.render.dump as ui_profile
-use std.os.ui.render.viewer.gui as gui
-use std.os.ui.render.viewer.icons as icons
+use core
+use core.math (clamp, max, min)
+use core.os.ui.assets.catalog as asset_catalog
+use core.os.ui.render.dump as ui_profile
+use core.os.ui.render.viewer.gui as gui
+use core.os.ui.render.viewer.icons as icons
 
 mut _selected_node = -1
 mut _selected_part = -1
@@ -241,5 +241,5 @@ fn draw_body(idp, scene, win_w, win_h, compact=false, parity_lock=false, camera_
    assert(gltf_list(active_gltf(scene), "nodes").len == 2, "hierarchy gltf list")
    assert(_roots(g, gltf_list(g, "nodes")).get(0, -1) == 0, "hierarchy roots")
    assert(selected_node() == -1 && selected_part() == -1 && selected_material() == -1 && reset_selection() == -1, "hierarchy selection")
-   print("✓ std.os.ui.render.viewer.engine.hierarchy self-test passed")
+   print("✓ core.os.ui.render.viewer.engine.hierarchy self-test passed")
 }

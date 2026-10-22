@@ -1,0 +1,20 @@
+shape test_imported_default_module_constant {
+  family "native/typing"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.ui.window.platform.contract as contract
+
+;; Defaults are evaluated in the defining module, even when the call is
+;; lowered from an importing module.
+def ptr value = contract.make(1, contract.REQUIRED_RENDER_WINDOW)
+assert(contract.get_required(value) == 31,
+   "imported default uses the defining module's constant value")
+assert(contract.get_mask(value) == 127,
+   "imported capability composition preserves every bit")
+print("IMPORTED-DEFAULT-MODULE-CONSTANT-OK")
+NY
+}

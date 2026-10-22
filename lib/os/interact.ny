@@ -1,8 +1,8 @@
 ;; Keywords: interact prompt interactive tube process socket ssh os
-;; Compatibility facade for the buffered tube implementation in std.os.net.remote.
+;; Compatibility facade for the buffered tube implementation in core.os.net.remote.
 ;; References:
-;; - std.os
-module std.os.interact(
+;; - core.os
+module core.os.interact(
    proc, process, shell, ssh, ssh_process, ssh_shell,
    dial, remote, connect, connect_retry,
    context, set_context, verbose, set_verbose, set_level, set_log_level, log_level, set_timeout,
@@ -13,7 +13,7 @@ module std.os.interact(
    fileno, pid, transcript, transcript_text
 )
 
-use std.os.net.remote as tube
+use core.os.net.remote as tube
 
 fn proc(str path, list args=[], any level="", int timeout_ms=-1, int chunk_size=0) any {
    "Starts a local process with piped stdin/stdout and returns a buffered tube."

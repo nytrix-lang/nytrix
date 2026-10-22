@@ -5,11 +5,11 @@
 ;; Reference idea:
 ;; - bit flips during exponentiation leak bits of d through valid/faulty signatures
 ;; References:
-;; - std.math.crypto.rsa
-;; - std.math.crypto
-module std.math.crypto.rsa.d_fault(d_fault_bits, d_fault_attack)
-use std.math.nt
-use std.math.crypto.number.partial as partial
+;; - core.math.crypto.rsa
+;; - core.math.crypto
+module core.math.crypto.rsa.d_fault(d_fault_bits, d_fault_attack)
+use core.math.nt
+use core.math.crypto.number.partial as partial
 
 fn d_fault_bits(any n, any e, any valid_sig, list faulty_sigs) any {
    "Recover known bits of d from signatures generated with one-bit faults in d.
@@ -51,5 +51,5 @@ fn d_fault_attack(any n, any e, any valid_sig, list faulty_sigs) any {
    def faulty_bit0 = power_mod(Z(2), d - Z(1), n)
    def out = d_fault_bits(n, e, valid, [faulty_bit0])
    assert(out != nil, "rsa d-fault returns partial integer")
-   print("✓ std.math.crypto.rsa.d_fault self-test passed")
+   print("✓ core.math.crypto.rsa.d_fault self-test passed")
 }

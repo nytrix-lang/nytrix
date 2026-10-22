@@ -1,19 +1,19 @@
 ;; Keywords: viewer clipboard text copy paste os ui render
 ;; Clipboard bridge helpers for text editing and viewer commands.
 ;; References:
-;; - std.os.ui.window
-module std.os.ui.render.viewer.clipboard(
+;; - core.os.ui.window
+module core.os.ui.render.viewer.clipboard(
    make, input_text, clipboard_text, editing, set_input, set_editing,
    update, write, cut, copy, paste, read, clear, process_events, draw_panel
 )
 
-use std.core
-use std.core.str as str
-use std.math (max)
-use std.os.ui.window.consts as key
-use std.os.ui.render as gfx
-use std.os.ui.render.viewer.widgets
-use std.os.ui.window
+use core
+use core.str as str
+use core.math (max)
+use core.os.ui.window.consts as key
+use core.os.ui.render as gfx
+use core.os.ui.render.viewer.widgets
+use core.os.ui.window
 
 def MAX_TEXT = 256
 def ACTIONS = ["CUT", "COPY", "PASTE", "CLEAR", "READ"]
@@ -207,5 +207,5 @@ fn draw_panel(any win, dict st, any font_body, any font_small, f64 x, f64 y, f64
    st = update(st, 0.5)
    st = set_input(st, "abcd", "set")
    assert(input_text(st) == "abcd" && editing(st), "clipboard state")
-   print("✓ std.os.ui.render.viewer.clipboard self-test passed")
+   print("✓ core.os.ui.render.viewer.clipboard self-test passed")
 }

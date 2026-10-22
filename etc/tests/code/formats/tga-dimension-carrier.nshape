@@ -1,0 +1,49 @@
+shape tga_dimension_carrier {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "test", "abi", "image"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only; --native-only --native-backend=x86_64"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.math.parse.img.tga as Tga
+
+fn describe_stride(dict values) str {
+   def stride = values.get("stride", 3)
+   to_str(stride * 2)
+}
+assert(describe_stride({"stride": 5}) == "10",
+       "a numeric getter stays numeric inside a string-returning function")
+assert(describe_stride({"other": 5}) == "6",
+       "a numeric getter fallback stays numeric inside a string-returning function")
+
+def pixels = init_str(malloc(49), 48)
+mut index = 0
+while index < 12 {
+   store8(pixels, 17 + index * 3, index * 4)
+   store8(pixels, 34 + index * 3, index * 4 + 1)
+   store8(pixels, 51 + index * 3, index * 4 + 2)
+   store8(pixels, 255, index * 4 + 3)
+   index += 1
+}
+def encoded = Tga.encode({"width": 3, "height": 4, "channels": 4, "data": pixels})
+assert(encoded.len == 66, "numeric dictionary dimensions determine encoded length")
+assert(load8(encoded, 12) == 3 && load8(encoded, 14) == 4,
+       "numeric dictionary dimensions determine the TGA header")
+index = 0
+while index < 12 {
+   def offset = 18 + index * 4
+   assert(load8(encoded, offset) == 51 + index * 3,
+          "row and column arithmetic addresses each blue channel")
+   assert(load8(encoded, offset + 1) == 34 + index * 3,
+          "row and column arithmetic addresses each green channel")
+   assert(load8(encoded, offset + 2) == 17 + index * 3,
+          "row and column arithmetic addresses each red channel")
+   assert(load8(encoded, offset + 3) == 255,
+          "row and column arithmetic preserves alpha")
+   index += 1
+}
+print("TGA_DIMENSION_CARRIER_OK")
+NY
+}

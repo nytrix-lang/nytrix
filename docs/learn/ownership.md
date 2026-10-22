@@ -1,95 +1,28 @@
-<!-- nytrix-doc: {"audience":"user","featured":false,"group":"learn","order":112,"summary":"Express borrowing, ownership transfer, and cleanup at resource boundaries."} -->
+<!-- nytrix-doc: {"audience":"user","featured":false,"group":"learn","order":112,"summary":"Choose borrowed or owned APIs and check cleanup at resource boundaries."} -->
 # Ownership
 
-Ownership contracts make resource transfer visible in a function signature.
-Use them at APIs that retain, release, or return managed values.
+Use a borrow when the callee needs temporary access. Transfer ownership when the
+callee must retain, release, or return responsibility for a resource. Ownership
+analysis is opt-in and bounded; see the [specification](../spec/ownership.md)
+for supported rules.
 
-## Borrow or move
+## Choose the contract
 
-| Form | Meaning | Use |
-| --- | --- | --- |
-| `borrow(x)` | Explicit borrowed view. | Name a borrow at an API boundary. |
-| `&x` | Borrow shorthand. | Keep a local call compact. |
-| `@borrows(x)` | Function reads a borrowed argument. | Callee does not take ownership. |
-| `@consumes(x)` | Function takes ownership. | Caller must not use the moved value. |
-
-Both borrow spellings use the same ownership checker.
-
-## Decide: borrow or move
-
-Ask one question at each boundary: does the callee keep using the value after
-the call, and does the caller still need it?
-
-| Situation | Use |
+| Situation | Contract |
 | --- | --- |
-| Callee only reads; caller keeps using the value | `borrow(x)` or `@borrows(x)` |
-| Callee stores, closes, or releases the value | `own(value)`, `@consumes(x)`, and/or `@releases(x)` |
-| Callee returns a view tied to a parameter | `@returns_borrow(x)` |
-| Callee hands a fresh object to the caller | `@returns_owned` |
+| The callee reads a value without keeping it | `@borrows(value)` |
+| A returned view refers to an argument | `@returns_borrow(value)` |
+| The callee takes responsibility for an argument | `@consumes(value)` |
+| The callee releases an owned resource | `@releases(value)` |
+| A fresh result belongs to the caller | `@returns_owned` |
+| The callee changes a supported argument | `@mutates(value)` |
 
-When a borrow would outlive its owner, the checker reports it. End the borrow
-scope earlier, clone, or return an owned value instead.
+Declare the contract on the function that owns the boundary. Keep foreign
+resource cleanup in a small wrapper, and use `with` when the resource must be
+released at scope exit. A borrow must not outlive its owner; clone or return an
+owned value when the lifetime cannot be tied to an argument.
 
-## Return ownership deliberately
-
-| Attribute | Contract |
-| --- | --- |
-| `@returns_owned` | Caller receives an owned result. |
-| `@returns_borrow(x)` | Result borrows from parameter `x`. |
-| `@mutates(x)` | Function changes the argument. |
-| `@releases(x)` | Function releases the owned argument. |
-| `@forgets(x)` | Function intentionally abandons automatic cleanup. |
-| `@allowance(x, limit)` | Limits observed parameter uses over `ℕ ∪ {omega}`. |
-
-```ny
-use std.core
-
-@borrows(x)
-@returns_borrow(x)
-fn identity(any x) any { borrow(x) }
-
-assert(identity(7) == 7, "borrowed result")
-```
-
-## Grade-aware ownership (`@allowance`)
-
-Usage allowances constrain the maximum number of times a parameter may be accessed
-within the function body:
-
-- Limits are non-negative integers (`0`, `1`, `2`, ...) or `omega` / `inf` (unlimited).
-- Exclusive branches (`if/else`, `match`, ternary) join by `max`.
-- Sequential statements join by addition.
-- Closure construction demand only charges capturing the variable once (latent invocation demand is distinct).
-- `mut` reassignment satisfies its allowance independently: rebinding a variable begins a fresh scope for subsequent uses.
-
-```ny
-use std.core
-
-@consumes(x)
-@allowance(x, 1)
-fn first(any x, list xs) any {
-   def h = borrow(x)      ; observed 1 use <= allowance 1 ✓
-   xs[0]
-}
-
-@consumes(y)
-@allowance(y, 1)
-fn twice(any y) any {
-   y + y                  ; observed 2 > allowance 1 -> rejected
-}
-```
-
-## Common diagnostics
-
-| Diagnostic | Fix direction |
-| --- | --- |
-| `cannot release owned slot ... while borrow ... is live` | End the borrow scope, clone, or keep passing a borrow. |
-| `use after move of owned slot` | Borrow before moving, clone, or create a new owned value. |
-| `returning owned slot ... requires @returns_owned` | Add `@returns_owned` or return a borrow or clone. |
-| `returning borrow of local owner would outlive its slot` | Return an owned value or tie the borrow to a parameter with `@returns_borrow(name)`. |
-| `ownership allowance exceeded for 'x': observed N > allowance L` | Reduce uses of the parameter or increase the `@allowance(x, limit)` bound. |
-
-## Check ownership
+## Static checks
 
 ```bash
 ny --borrow-check file.ny
@@ -97,12 +30,19 @@ ny --borrow-check --ownership-strict file.ny
 ny --safe-mode file.ny
 ```
 
-Use the smallest scope that keeps a borrow live. Return an owned value when a
-borrow would outlive its owner. Use a `with` scope for resources whose cleanup
-must happen at scope exit.
+`--borrow-check` reports supported issues without selecting RAII cleanup.
+`--ownership-strict` promotes those diagnostics to errors. `--ownership` also
+selects ownership-aware cleanup; `--safe-mode` enables the broader safety
+profile. These modes do not turn unsupported source shapes into proven-safe
+ones.
 
-## Related
+`@allowance(parameter, [lower, upper])` can constrain how often a parameter is
+used on supported control-flow paths. Use it only when the count is part of the
+API contract; the checker rejects an allowance it cannot validate.
 
-- [Runtime](../spec/runtime.md#ownership)
-- [Functions](../spec/functions.md#ownership-contracts)
-- [Proofs](proofs.md)
+## Verify the boundary
+
+Test both valid and invalid use for the resource and control-flow shape you
+rely on. A pass on one backend does not prove every alias or aggregate form.
+See [Testing](testing.md) for focused fixture commands and
+[Implementation status](status.md) for known limits.

@@ -1,15 +1,15 @@
 ;; Keywords: assets asset-browser catalog os ui
 ;; Asset catalog indexing, filtering, and grid data for UI asset browsers.
 ;; References:
-;; - std.os.ui.assets
-module std.os.ui.assets.catalog(catalog_filter_key, catalog_pick_cache, catalog_row_id, catalog_filter, scene_part_count, hierarchy_node_label, hierarchy_node_detail, indent_prefix, virtual_row_range, asset_grid_cols, asset_grid_usable_w, asset_tile_h, asset_grid_content_h, asset_grid_fit_h, asset_grid_view_h, format_name_list, asset_icon_name, asset_detail, asset_dirs_from_env, first_gltf_in_dir, gltf_catalog_make, gltf_catalog_roots, gltf_catalog_scan, gltf_catalog_ensure, gltf_catalog_resolve, gltf_catalog_names)
-use std.core
-use std.core.str as str
-use std.math (clamp)
-use std.os (env)
-use std.os.fs as osfs
-use std.os.path as ospath
-use std.os.thread
+;; - core.os.ui.assets
+module core.os.ui.assets.catalog(catalog_filter_key, catalog_pick_cache, catalog_row_id, catalog_filter, scene_part_count, hierarchy_node_label, hierarchy_node_detail, indent_prefix, virtual_row_range, asset_grid_cols, asset_grid_usable_w, asset_tile_h, asset_grid_content_h, asset_grid_fit_h, asset_grid_view_h, format_name_list, asset_icon_name, asset_detail, asset_dirs_from_env, first_gltf_in_dir, gltf_catalog_make, gltf_catalog_roots, gltf_catalog_scan, gltf_catalog_ensure, gltf_catalog_resolve, gltf_catalog_names)
+use core
+use core.str as str
+use core.math (clamp)
+use core.os (env)
+use core.os.fs as osfs
+use core.os.path as ospath
+use core.os.thread
 
 def _ASSET_ICON_RULES = [
    ["asset_camera", ["camera"]],
@@ -491,7 +491,7 @@ fn asset_icon_name(any name, any rules=0) str {
    def rows = is_list(rules) ? rules : _ASSET_ICON_RULES
    mut i = 0
    while i < rows.len {
-      def row = rows[i]
+      def any row = rows[i]
       if _text_has_any(s, row.get(1, [])) { return to_str(row.get(0, "asset_model")) }
       i += 1
    }

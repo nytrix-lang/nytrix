@@ -1,0 +1,51 @@
+shape ownership_allowance_nonthrowing_try_reassignment_positive {
+  family "language/ownership"
+  generator "regression"
+  features [ownership allowance try reassignment epoch nonthrowing positive]
+  template ny-test-case
+  flags_matrix "--ownership-strict --native --run; --ownership-strict --native-backend=llvm --jit --jit-engine=mcjit; --ownership-strict --native-backend=llvm --jit --jit-engine=orc; --ownership-strict --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+@allowance(x, [0,1])
+fn update(int x) int {
+  try {
+    x = 7
+  } catch _ {
+    x = 8
+  }
+  x
+}
+
+assert(update(3) == 7,
+       "a proven non-throwing try body starts a new allowance epoch")
+
+@allowance(y, [0,1])
+fn update_without_else(int y) int {
+  try {
+    if true {
+      y = 9
+    }
+  } catch _ {
+    y = 10
+  }
+  y
+}
+
+assert(update_without_else(3) == 9,
+       "a missing if branch is a non-throwing no-op path")
+
+@allowance(z, [0,1])
+fn early_return(int z) {
+  try {
+    z = 0
+    return
+  } catch _ {
+    z = 1
+  }
+}
+
+early_return(3)
+NY
+}

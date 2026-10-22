@@ -1,0 +1,25 @@
+shape x11_logical_key_map {
+  family "runtime/input"
+  generator "embedded"
+  features ["ny", "sys", "window", "x11"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.ui.window.platform.linux.x11 as x11
+use core.os.ui.window.consts as key
+use core.os.ui.window as window
+mut hints = dict(0)
+hints[139265] = 196609
+assert(hints.get(139265, -9) == 196609, "integer key method lookup")
+assert(get(hints, 139265, -10) == 196609, "generic integer key lookup")
+def win = {"x11_scancodes": {87: 25, 83: 39, 80: 33, 265: 111, 264: 116}}
+assert(x11.get_key_scancode(win, key.KEY_W) == 25, "W retains its physical scancode")
+assert(x11.get_key_scancode(win, key.KEY_S) == 39, "S retains its physical scancode")
+assert(x11.get_key_scancode(win, key.KEY_P) == 33, "P retains its physical scancode")
+assert(x11.get_key_scancode(win, key.KEY_UP) == 111, "up arrow mapping")
+assert(x11.get_key_scancode(win, key.KEY_DOWN) == 116, "down arrow mapping")
+assert(x11.get_key_scancode(win, key.KEY_R) == -1, "missing key uses fallback")
+assert(!window.key_down(0, key.KEY_W), "missing window cannot hold a key")
+NY
+}

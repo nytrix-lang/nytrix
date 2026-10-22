@@ -3,12 +3,12 @@
 ;; Reference:
 ;; - https://en.wikipedia.org/wiki/Truevision_TGA
 ;; References:
-;; - std.math.parse.img
-;; - std.math.parse
-module std.math.parse.img.tga(decode, encode, save)
-use std.core
-use std.core.dict_mod
-use std.math.bin as pbin
+;; - core.math.parse.img
+;; - core.math.parse
+module core.math.parse.img.tga(decode, encode, save)
+use core
+use core.dict_mod
+use core.math.bin as pbin
 
 fn decode(str data) any {
    "Decodes an uncompressed 24-bit or 32-bit TGA image."
@@ -113,9 +113,9 @@ fn decode(str data) any {
 
 fn encode(dict img) str {
    "Encodes an image dictionary as a 32-bit BGRA TGA byte string."
-   def w, h = img.get("width"), img.get("height")
+   def int w, h = int(img.get("width", 0)), int(img.get("height", 0))
    def d = img.get("data")
-   def ch = img.get("channels", 4)
+   def int ch = int(img.get("channels", 4))
    def hdr = init_str(malloc(19), 18)
    memset(hdr, 0, 18)
    store8(hdr, 2, 2)
@@ -177,5 +177,5 @@ fn save(dict img, str path) Result {
       ok(n) -> { assert(n > 0, "tga native save bytes") }
       err(e) -> { panic("tga save failed: " + to_str(e)) }
    }
-   print("✓ std.math.parse.img.tga self-test passed")
+   print("✓ core.math.parse.img.tga self-test passed")
 }

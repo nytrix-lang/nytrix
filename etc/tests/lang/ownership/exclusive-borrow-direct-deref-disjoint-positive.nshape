@@ -1,0 +1,22 @@
+shape ownership_rule_exclusive_borrow_direct_deref_disjoint_positive {
+  family "runtime/language"
+  generator "regression"
+  features ["ownership", "borrow", "exclusive", "dereference", "disjoint", "positive"]
+  template ny-run
+  expect compile_and_run
+  flags "--ownership-strict --native --run --nyir-verify"
+  source ny <<'NY'
+use core
+
+fn direct_borrow_dereference() int {
+  mut int value = 5
+  mut int other = 8
+  def exclusive = borrow_mut(*borrow_mut(value))
+  other = 9
+  def observed = exclusive
+  other
+}
+
+0
+NY
+}

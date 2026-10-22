@@ -1,8 +1,8 @@
 ;; Keywords: decompiler callgraph graph edges scc
 ;; Pure call-graph edge traversal and strongly connected component helpers.
-module std.os.rev.decomp.graph *
-use std.core
-use std.os.rev.decomp.collections (_append_unique)
+module core.os.rev.decomp.graph *
+use core
+use core.os.rev.decomp.collections (_append_unique)
 
 fn _cg_edge_key(dict e) str {
    e.get("from", "") + "->" + e.get("to", "") + "@" + to_str(e.get("site", 0))
@@ -106,5 +106,5 @@ fn _cg_components(list names, list edges) list {
    def edges = [{"from": "a", "to": "b", "site": 1, "internal": true}, {"from": "b", "to": "a", "site": 2, "internal": true}]
    assert(_cg_components(["a", "b"], edges)[0].get("recursive", false), "recursive component")
    assert(_cg_successors(edges, "a").len == 1, "graph successor")
-   print("✓ std.os.rev.decomp.graph self-test passed")
+   print("✓ core.os.rev.decomp.graph self-test passed")
 }

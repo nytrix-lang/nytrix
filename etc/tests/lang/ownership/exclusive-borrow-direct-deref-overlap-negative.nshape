@@ -1,0 +1,22 @@
+shape ownership_rule_exclusive_borrow_direct_deref_overlap_negative {
+  family "compiler-errors/ownership"
+  generator "error"
+  features ["error", "ownership", "borrow", "exclusive", "dereference", "overlap", "negative"]
+  template ny-compile-fail
+  expect compile_fail
+  flags "--ownership-strict --nyir-verify"
+
+  source ny <<'NY'
+use core
+
+fn direct_borrow_dereference() int {
+  mut int value = 5
+  def exclusive = borrow_mut(*borrow_mut(value))
+  value = 6
+  def observed = exclusive
+  observed
+}
+
+direct_borrow_dereference()
+NY
+}

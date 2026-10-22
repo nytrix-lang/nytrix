@@ -1,0 +1,51 @@
+shape optcheck_loop_idiom_memset {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle optcheck loop-idiom memset zero-loop tbuf bounds-check]
+  template ny-test-case
+  flags_matrix "-O0 --color=never; -O3 --color=never; --native-only -O0 --color=never; --native-only -O3 --color=never; --native-backend=llvm --jit --jit-engine=mcjit --color=never"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.tbuf
+
+;; Cross-backend semantics for byte and i64 zero-fill loops. These
+;; bounds-checked loops are intentionally ineligible for the raw memset
+;; rewrite, which must preserve per-iteration trap behavior.
+
+def buf = i64buf_new(64)
+mut i = 0
+while i < 64 {
+   i64buf_store(buf, i, 0)
+   i += 1
+}
+;; The rewrite must cover exactly the stored range, no more, no less.
+i64buf_store(buf, 0, 11)
+i64buf_store(buf, 63, -22)
+
+def bytes = u8buf_new(96)
+i = 0
+while i < 96 {
+   u8buf_store(bytes, i, 0)
+   i += 1
+}
+u8buf_store(bytes, 95, 9)
+
+mut sum = 0
+mut c = 0
+while c < 64 {
+   sum += i64buf_load(buf, c)
+   c += 1
+}
+assert(sum == 11 + -22, "memset idiom value checksum")
+
+mut bsum = 0
+c = 0
+while c < 96 {
+   bsum += u8buf_load(bytes, c)
+   c += 1
+}
+assert(bsum == 9, "memset idiom byte checksum")
+print("checksum=", sum, " ", bsum)
+NY
+}

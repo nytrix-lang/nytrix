@@ -1,0 +1,29 @@
+shape ownership_rule_resource_aggregate_move_negative {
+  family "compiler-errors/ownership"
+  generator "error"
+  features ["error", "ownership", "resource", "linear", "aggregate", "move"]
+  template ny-compile-fail
+  expect compile_fail
+  flags "--ownership-strict"
+  expect_message "linear resource 'file' may be consumed at most once on every path"
+  source ny <<'NY'
+use core
+linear layout File { int fd }
+
+@consumes(file)
+fn consume_file(File file) int {
+  forget(file)
+  0
+}
+
+fn duplicate_aggregate_move() int {
+  def File file = File(7)
+  def pair = (file, 1)
+  consume_file(pair[0])
+  forget(file)
+  0
+}
+
+duplicate_aggregate_move()
+NY
+}

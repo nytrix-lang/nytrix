@@ -1,12 +1,12 @@
 ;; Keywords: engine overlay profile console info os ui render viewer scene
 ;; Viewport overlay helpers for profile, console, selection, and status information.
 ;; References:
-;; - std.os.ui.render.viewer.engine.state
-;; - std.os.ui.render.dump
-module std.os.ui.render.viewer.engine.overlay(init, prepare_pass, fps_skip_reuse, draw_fps, draw_backdrop, draw_crosshair_pixels, draw_crosshair)
-use std.core
-use std.os.ui.render as gfx
-use std.os.ui.render.matrix as rmat
+;; - core.os.ui.render.viewer.engine.state
+;; - core.os.ui.render.dump
+module core.os.ui.render.viewer.engine.overlay(init, prepare_pass, fps_skip_reuse, draw_fps, draw_backdrop, draw_crosshair_pixels, draw_crosshair)
+use core
+use core.os.ui.render as gfx
+use core.os.ui.render.matrix as rmat
 
 mut _cached_fps = -1
 mut _cached_fps_str = ""

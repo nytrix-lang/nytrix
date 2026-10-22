@@ -1,13 +1,13 @@
 ;; Keywords: ui render diagnostics profile trace frame os
-;; Runtime diagnostics for std.os.ui backends and graphics availability.
+;; Runtime diagnostics for core.os.ui backends and graphics availability.
 ;; References:
-;; - std.os.ui.render
-;; - std.os.ui.render.matrix
-module std.os.ui.render.diag(probe, probe_text, print_probe, snapshot, snapshot_text, print_snapshot)
-use std.core
-use std.os.ui.window as window
-use std.os.ui.render as render
-use std.core.common as common
+;; - core.os.ui.render
+;; - core.os.ui.render.matrix
+module core.os.ui.render.diag(probe, probe_text, print_probe, snapshot, snapshot_text, print_snapshot)
+use core
+use core.os.ui.window as window
+use core.os.ui.render as render
+use core.common as common
 
 fn probe() dict {
    "Returns a dictionary describing detected backend and graphics capabilities."
@@ -41,8 +41,8 @@ fn probe_text() str {
 }
 
 fn print_probe() any {
-   "Prints std.os.ui diagnostics summary."
-   print("std.os.ui.render.diag:", probe_text())
+   "Prints core.os.ui diagnostics summary."
+   print("core.os.ui.render.diag:", probe_text())
 }
 
 fn snapshot(any win=0) dict {
@@ -105,5 +105,5 @@ fn print_snapshot(any win=0) any {
    assert(contract.get("primitives", {}).get("texture", false) && contract.get("frame", {}).get("present", false), "ui contract primitives")
    assert(probe_text().contains("os="), "ui diag text")
    assert(snapshot_text().contains("ui.snapshot"), "ui diag snapshot")
-   print("✓ std.os.ui.render.diag self-test passed")
+   print("✓ core.os.ui.render.diag self-test passed")
 }

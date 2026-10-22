@@ -1,0 +1,63 @@
+shape comptime-recursion-limit-negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "proof", "comptime", "negative", "case-recursion-limit"]
+  template ny-compile-fail
+  flags_matrix "--native --run; --native-only; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_fail
+  expect_message "prove condition must be known at compile time"
+  source ny <<'NY'
+use core
+
+fn deep(int n) int {
+  if n <= 0 { return 0 }
+  deep(n - 1) + 1
+}
+
+def proof p = prove(deep(500) == 500)
+NY
+}
+
+shape comptime-long-loop-limit-negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "proof", "comptime", "negative", "case-long-loop-limit"]
+  template ny-compile-fail
+  flags_matrix "--native --run; --native-only; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_fail
+  expect_message "prove condition must be known at compile time"
+  source ny <<'NY'
+use core
+
+def s = comptime{
+  mut sum = 0
+  mut i = 0
+  while i < 50000000 {
+    sum += 1
+    i += 1
+  }
+  return sum
+}
+def proof p = prove(s == 50000000)
+NY
+}
+
+shape comptime-infinite-loop-negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "proof", "comptime", "negative", "case-infinite-loop"]
+  template ny-compile-fail
+  flags_matrix "--native --run; --native-only; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_fail
+  expect_message "prove condition must be known at compile time"
+  source ny <<'NY'
+use core
+
+def v = comptime{
+  while true {
+  }
+  return 0
+}
+def proof p = prove(v == 0)
+NY
+}

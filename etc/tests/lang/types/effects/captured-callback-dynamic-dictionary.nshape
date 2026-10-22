@@ -1,0 +1,608 @@
+shape dynamic_dictionary_callback_rows_union_for_lookup {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "callback", "capture", "dynamic-key"]
+  template ny-test-case
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_fail
+  expect_message "effect contract violation"
+  source ny <<'NY'
+use core
+
+@effects(cap("project.storage.read"))
+fn storage_answer() int {
+  42
+}
+
+@effects(cap("project.audit.write"))
+fn audit_answer() int {
+  7
+}
+
+@effects(alloc, read, cap("project.storage.read"))
+fn invoke_dynamic_dictionary_callback(str key) int {
+  def callbacks = {"storage": storage_answer, "audit": audit_answer}
+  def captured = callbacks
+  captured.get(key)() + captured[key]()
+}
+
+invoke_dynamic_dictionary_callback("storage")
+NY
+}
+
+shape returned_literal_dictionary_callback_rows_are_tracked {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "callback", "capture", "factory", "negative"]
+  template ny-test-case
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_fail
+  expect_message "effect contract violation"
+  source ny <<'NY'
+use core
+
+@effects(cap("project.storage.read"))
+fn storage_answer() int { 42 }
+
+@effects(cap("project.audit.write"))
+fn audit_answer() int { 7 }
+
+@effects(alloc)
+fn make_callbacks() dict {
+  def original = {"storage": storage_answer, "audit": audit_answer}
+  def callbacks = original
+  return callbacks
+}
+
+@effects(alloc, read, cap("project.storage.read"))
+fn invoke_factory_callback(str key) int {
+  def callbacks = make_callbacks()
+  callbacks.get(key)()
+}
+
+invoke_factory_callback("storage")
+NY
+}
+
+shape callback_parameter_rows_flow_through_container_factory {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "callback", "factory", "parameter", "negative"]
+  template ny-test-case
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_fail
+  expect_message "effect contract violation"
+  source ny <<'NY'
+use core
+
+@effects(cap("project.storage.read"))
+fn storage_answer() int { 42 }
+
+@effects(alloc)
+fn make_callbacks(fnptr callback) dict {
+  def callback_alias = callback
+  def callbacks = {"run": callback_alias}
+  def result = callbacks
+  return result
+}
+
+@effects(alloc, read)
+fn invoke_factory_callback(str key) int {
+  def local_callback = storage_answer
+  def callback_alias = local_callback
+  def callbacks = make_callbacks(callback_alias)
+  callbacks.get(key)()
+}
+
+invoke_factory_callback("run")
+NY
+}
+
+shape callback_parameter_rows_flow_through_list_factory {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "callback", "factory", "parameter", "list", "negative"]
+  template ny-test-case
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_fail
+  expect_message "effect contract violation"
+  source ny <<'NY'
+use core
+
+@effects(cap("project.storage.read"))
+fn storage_answer() int { 42 }
+
+@effects(alloc)
+fn make_callbacks(fnptr callback) list {
+  def callback_alias = callback
+  return [callback_alias]
+}
+
+@effects(alloc, read)
+fn invoke_factory_callback(int index) int {
+  def callbacks = make_callbacks(storage_answer)
+  callbacks.get(index)()
+}
+
+invoke_factory_callback(0)
+NY
+}
+
+shape callback_parameter_rows_flow_through_tuple_factory {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "callback", "factory", "parameter", "tuple", "negative"]
+  template ny-test-case
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_fail
+  expect_message "effect contract violation"
+  source ny <<'NY'
+use core
+
+@effects(cap("project.storage.read"))
+fn storage_answer() int { 42 }
+
+@effects(alloc)
+fn make_callbacks(fnptr callback) tuple {
+  def callback_alias = callback
+  return (callback_alias, callback_alias)
+}
+
+@effects(alloc, read)
+fn invoke_factory_callback(int index) int {
+  def callbacks = make_callbacks(storage_answer)
+  callbacks.get(index)()
+}
+
+invoke_factory_callback(0)
+NY
+}
+
+shape statement_branch_dictionary_factory_joins_rows {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "callback", "factory", "branch", "negative"]
+  template ny-test-case
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_fail
+  expect_message "effect contract violation"
+  source ny <<'NY'
+use core
+
+@effects(cap("project.storage.read"))
+fn storage_answer() int { 42 }
+
+@effects(cap("project.audit.write"))
+fn audit_answer() int { 7 }
+
+@effects(alloc)
+fn make_callbacks(bool use_storage) dict {
+  def seed = {"seed": storage_answer}
+  if use_storage {
+    return {"run": storage_answer}
+  }
+  return {"run": audit_answer}
+}
+
+@effects(alloc, read, cap("project.storage.read"))
+fn invoke_factory_callback(bool use_storage, str key) int {
+  def callbacks = make_callbacks(use_storage)
+  callbacks.get(key)()
+}
+
+invoke_factory_callback(true, "run")
+NY
+}
+
+shape mismatched_branch_dictionary_factory_remains_unknown {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "callback", "factory", "branch", "negative"]
+  template ny-test-case
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_fail
+  expect_message "effects are unknown"
+  source ny <<'NY'
+use core
+
+@effects(cap("project.storage.read"))
+fn storage_answer() int { 42 }
+
+@effects(cap("project.audit.write"))
+fn audit_answer() int { 7 }
+
+@effects(alloc)
+fn make_callbacks(bool use_storage) dict {
+  if use_storage { return {"run": storage_answer} }
+  return {"other": audit_answer}
+}
+
+@effects(alloc, read, cap("project.storage.read"))
+fn invoke_factory_callback(bool use_storage, str key) int {
+  def callbacks = make_callbacks(use_storage)
+  callbacks.get(key)()
+}
+
+invoke_factory_callback(true, "run")
+NY
+}
+
+shape ternary_dictionary_callback_factory_joins_branch_rows {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "callback", "factory", "branch", "negative"]
+  template ny-test-case
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_fail
+  expect_message "effect contract violation"
+  source ny <<'NY'
+use core
+
+@effects(cap("project.storage.read"))
+fn storage_answer() int { 42 }
+
+@effects(cap("project.audit.write"))
+fn audit_answer() int { 7 }
+
+@effects(alloc)
+fn make_callbacks(bool use_storage) dict {
+  return use_storage ? {"run": storage_answer} : {"run": audit_answer}
+}
+
+@effects(alloc, read, cap("project.storage.read"))
+fn invoke_factory_callback(bool use_storage, str key) int {
+  def callbacks = make_callbacks(use_storage)
+  callbacks.get(key)()
+}
+
+invoke_factory_callback(true, "run")
+NY
+}
+
+shape ternary_list_callback_factory_joins_index_rows {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "callback", "factory", "branch", "list", "negative"]
+  template ny-test-case
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_fail
+  expect_message "effect contract violation"
+  source ny <<'NY'
+use core
+
+@effects(cap("project.storage.read"))
+fn storage_answer() int { 42 }
+
+@effects(cap("project.audit.write"))
+fn audit_answer() int { 7 }
+
+@effects(alloc)
+fn make_callbacks(bool use_storage) list {
+  return use_storage ? ([storage_answer, audit_answer]) : ([audit_answer, storage_answer])
+}
+
+@effects(alloc, read, cap("project.storage.read"))
+fn invoke_factory_callback(bool use_storage, int index) int {
+  def callbacks = make_callbacks(use_storage)
+  callbacks.get(index)()
+}
+
+invoke_factory_callback(true, 0)
+NY
+}
+
+shape statement_branch_tuple_callback_factory_joins_index_rows {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "callback", "factory", "branch", "tuple", "negative"]
+  template ny-test-case
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_fail
+  expect_message "effect contract violation"
+  source ny <<'NY'
+use core
+
+@effects(cap("project.storage.read"))
+fn storage_answer() int { 42 }
+
+@effects(cap("project.audit.write"))
+fn audit_answer() int { 7 }
+
+@effects(alloc)
+fn make_callbacks(bool use_storage) tuple {
+  if use_storage { return (storage_answer, audit_answer) }
+  return (audit_answer, storage_answer)
+}
+
+@effects(alloc, read, cap("project.storage.read"))
+fn invoke_factory_callback(bool use_storage, int index) int {
+  def callbacks = make_callbacks(use_storage)
+  callbacks.get(index)()
+}
+
+invoke_factory_callback(false, 0)
+NY
+}
+
+shape match_branch_dictionary_factory_joins_rows {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "callback", "factory", "branch", "match", "negative"]
+  template ny-test-case
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_fail
+  expect_message "effect contract violation"
+  source ny <<'NY'
+use core
+
+enum Choice { Storage, Audit }
+
+@effects(cap("project.storage.read"))
+fn storage_answer() int { 42 }
+
+@effects(cap("project.audit.write"))
+fn audit_answer() int { 7 }
+
+@effects(alloc)
+fn make_callbacks(Choice choice) dict {
+  match choice {
+    Choice.Storage -> { return {"run": storage_answer} }
+    _ -> { return {"run": audit_answer} }
+  }
+}
+
+@effects(alloc, read, cap("project.storage.read"))
+fn invoke_factory_callback(Choice choice, str key) int {
+  def callbacks = make_callbacks(choice)
+  callbacks.get(key)()
+}
+
+invoke_factory_callback(Choice.Storage, "run")
+NY
+}
+
+shape multi_arm_match_callback_factory_joins_rows {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "callback", "factory", "branch", "match", "negative"]
+  template ny-test-case
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_fail
+  expect_message "effect contract violation"
+  source ny <<'NY'
+use core
+
+enum Choice { Storage, Audit, Other }
+
+@effects(cap("project.storage.read"))
+fn storage_answer() int { 42 }
+
+@effects(cap("project.audit.write"))
+fn audit_answer() int { 7 }
+
+@effects(cap("project.other.read"))
+fn other_answer() int { 3 }
+
+@effects(alloc)
+fn make_callbacks(Choice choice) dict {
+  match choice {
+    Choice.Storage -> { return {"run": storage_answer} }
+    Choice.Audit -> { return {"run": audit_answer} }
+    _ -> { return {"run": other_answer} }
+  }
+}
+
+@effects(alloc, read, cap("project.storage.read"))
+fn invoke_factory_callback(Choice choice, str key) int {
+  def callbacks = make_callbacks(choice)
+  callbacks.get(key)()
+}
+
+invoke_factory_callback(Choice.Storage, "run")
+NY
+}
+
+shape four_arm_match_callback_factory_joins_all_rows {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "callback", "factory", "branch", "match", "negative"]
+  template ny-test-case
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_fail
+  expect_message "effect contract violation"
+  source ny <<'NY'
+use core
+
+enum Choice { Storage, Audit, Network, Clock, Other }
+
+@effects(cap("project.storage.read"))
+fn storage_answer() int { 42 }
+
+@effects(cap("project.audit.write"))
+fn audit_answer() int { 7 }
+
+@effects(cap("project.network.read"))
+fn network_answer() int { 3 }
+
+@effects(cap("project.clock.read"))
+fn clock_answer() int { 4 }
+
+@effects(cap("project.other.read"))
+fn other_answer() int { 5 }
+
+@effects(alloc)
+fn make_callbacks(Choice choice) dict {
+  match choice {
+    Choice.Storage -> { return {"run": storage_answer} }
+    Choice.Audit -> { return {"run": audit_answer} }
+    Choice.Network -> { return {"run": network_answer} }
+    Choice.Clock -> { return {"run": clock_answer} }
+    _ -> { return {"run": other_answer} }
+  }
+}
+
+@effects(alloc, read, cap("project.storage.read"))
+fn invoke_factory_callback(Choice choice, str key) int {
+  def callbacks = make_callbacks(choice)
+  callbacks.get(key)()
+}
+
+invoke_factory_callback(Choice.Storage, "run")
+NY
+}
+
+
+shape dynamic_dictionary_callback_rows_include_custom_fallback {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "callback", "dynamic-key", "fallback", "negative"]
+  template ny-test-case
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_fail
+  expect_message "effect contract violation"
+  source ny <<'NY'
+use core
+
+@effects(cap("project.storage.read"))
+fn storage_answer() int { 42 }
+
+@effects(cap("project.audit.write"))
+fn audit_fallback() int { 7 }
+
+@effects(alloc, read, cap("project.storage.read"))
+fn invoke_dynamic_dictionary_callback(str key) int {
+  def callbacks = {"storage": storage_answer}
+  callbacks.get(key, audit_fallback)()
+}
+
+invoke_dynamic_dictionary_callback("storage")
+NY
+}
+
+shape dynamic_mutable_dictionary_callback_effects_include_prior_rows {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "callback", "capture", "dynamic-key", "negative"]
+  template ny-test-case
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_fail
+  expect_message "effect contract violation"
+  source ny <<'NY'
+use core
+
+@effects(io)
+fn print_answer() int {
+  print("mutable dynamic dictionary callback\n")
+  42
+}
+
+fn pure_answer() int { 7 }
+
+@effects(alloc, read, write)
+fn invoke_mutable_dictionary_callback(str key) int {
+  mut callbacks = {"io": print_answer, "pure": pure_answer}
+  callbacks.set("io", pure_answer)
+  callbacks.get(key)()
+}
+
+invoke_mutable_dictionary_callback("io")
+NY
+}
+
+shape dictionary_factory_callbacks_execute_with_joined_effect_rows {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "callback", "dictionary", "factory", "branch", "runtime"]
+  template ny-test-case
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+@effects(cap("project.storage.read"))
+fn storage_answer() int { 42 }
+
+@effects(cap("project.audit.write"))
+fn audit_answer() int { 7 }
+
+@effects(alloc)
+fn make_callbacks(bool use_storage) dict {
+  if use_storage { return {"run": storage_answer} }
+  return {"run": audit_answer}
+}
+
+@effects(alloc, read, cap("project.storage.read"), cap("project.audit.write"))
+fn invoke_factory_callback(bool use_storage) int {
+  def callbacks = make_callbacks(use_storage)
+  callbacks.get("run")()
+}
+
+assert(invoke_factory_callback(true) == 42,
+       "dictionary callback factory joins effects and preserves raw int result")
+NY
+}
+
+shape dynamic_key_dictionary_factory_callbacks_execute_with_joined_effect_rows {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "callback", "dictionary", "factory", "branch", "dynamic-key", "runtime"]
+  template ny-test-case
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+@effects(cap("project.storage.read"))
+fn storage_answer() int { 42 }
+
+@effects(cap("project.audit.write"))
+fn audit_answer() int { 7 }
+
+@effects(alloc)
+fn make_callbacks(bool use_storage) dict {
+  if use_storage { return {"storage": storage_answer, "audit": audit_answer} }
+  return {"storage": storage_answer, "audit": audit_answer}
+}
+
+@effects(alloc, read, cap("project.storage.read"), cap("project.audit.write"))
+fn invoke_factory_callback(bool use_storage, str key) int {
+  def callbacks = make_callbacks(use_storage)
+  callbacks.get(key)()
+}
+
+assert(invoke_factory_callback(true, "storage") == 42,
+       "dynamic-key dictionary factory calls preserve joined capability rows and result ABI")
+NY
+}
+shape dictionary_factory_boolean_callbacks_preserve_result_abi {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "callback", "dictionary", "factory", "bool", "runtime"]
+  template ny-test-case
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+@effects(cap("project.storage.read"))
+fn storage_ready() bool { true }
+
+@effects(cap("project.audit.write"))
+fn audit_ready() bool { false }
+
+@effects(alloc)
+fn make_ready_checks(bool use_storage) dict {
+  if use_storage { return {"check": storage_ready} }
+  return {"check": audit_ready}
+}
+
+@effects(alloc, read, cap("project.storage.read"), cap("project.audit.write"))
+fn invoke_ready_check(bool use_storage) bool {
+  def checks = make_ready_checks(use_storage)
+  checks.get("check")()
+}
+
+assert(invoke_ready_check(true), "dynamic dictionary callback retains bool result ABI")
+assert(!invoke_ready_check(false), "dynamic dictionary callback retains false bool result")
+NY
+}

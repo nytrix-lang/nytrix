@@ -1,0 +1,294 @@
+defaults {
+  family "runtime-native"
+  generator "native"
+  template ny-test-case
+}
+
+shape aarch64_elf64_internal_link_run_aggregate_two_words {
+  features [native object elf64 aarch64 aapcs64 qemu aggregate call return]
+  flags "--native-only --native-backend aarch64 --nyir-verify -emit-only -o /tmp/nytrix-aarch64-aggregate-two-words.o"
+  expect object_link_run_i64_42
+  source ny <<'NY'
+struct Pair {
+  i64 left,
+  i64 right
+}
+
+fn make_pair(i64 left, i64 right) Pair {
+  Pair(left, right)
+}
+
+fn sum_pair(Pair pair) i64 {
+  pair.left + pair.right
+}
+
+sum_pair(make_pair(40, 2))
+NY
+}
+
+shape aarch64_elf64_internal_link_run_aggregate_three_words {
+  features [native object elf64 aarch64 aapcs64 qemu aggregate call return]
+  flags "--native-only --native-backend aarch64 --nyir-verify -emit-only -o /tmp/nytrix-aarch64-aggregate-three-words.o"
+  expect object_link_run_i64_42
+  source ny <<'NY'
+struct Triple {
+  i64 first,
+  i64 second,
+  i64 third
+}
+
+fn make_triple(i64 first, i64 second, i64 third) Triple {
+  Triple(first, second, third)
+}
+
+fn sum_triple(Triple value) i64 {
+  value.first + value.second + value.third
+}
+
+sum_triple(make_triple(20, 10, 12))
+NY
+}
+
+shape aarch64_elf64_internal_link_run_aggregate_hfa_two_f64 {
+  features [native object elf64 aarch64 aapcs64 qemu aggregate hfa f64 call return]
+  flags "--native-only --native-backend aarch64 --nyir-verify -emit-only -o /tmp/nytrix-aarch64-aggregate-hfa-two-f64.o"
+  expect object_link_run_f64_42.0
+  source ny <<'NY'
+struct Pair {
+  f64 left,
+  f64 right
+}
+
+fn make_pair(f64 left, f64 right) Pair {
+  Pair(left, right)
+}
+
+fn sum_pair(Pair pair) f64 {
+  pair.left + pair.right
+}
+
+sum_pair(make_pair(19.5, 22.5))
+NY
+}
+
+shape aarch64_elf64_internal_link_run_aggregate_hfa_four_f64 {
+  features [native object elf64 aarch64 aapcs64 qemu aggregate hfa f64 call return]
+  flags "--native-only --native-backend aarch64 --nyir-verify -emit-only -o /tmp/nytrix-aarch64-aggregate-hfa-four-f64.o"
+  expect object_link_run_f64_42.0
+  source ny <<'NY'
+struct Quad {
+  f64 first,
+  f64 second,
+  f64 third,
+  f64 fourth
+}
+
+fn make_quad(f64 first, f64 second, f64 third, f64 fourth) Quad {
+  Quad(first, second, third, fourth)
+}
+
+fn sum_quad(Quad value) f64 {
+  value.first + value.second + value.third + value.fourth
+}
+
+sum_quad(make_quad(10.0, 11.0, 9.0, 12.0))
+NY
+}
+
+shape aarch64_elf64_internal_link_run_aggregate_hfa_five_f64_indirect {
+  features [native object elf64 aarch64 aapcs64 qemu aggregate hfa f64 indirect call return boundary]
+  flags "--native-only --native-backend aarch64 --nyir-verify -emit-only -o /tmp/nytrix-aarch64-aggregate-hfa-five-f64.o"
+  expect object_link_run_f64_42.0
+  source ny <<'NY'
+struct Five {
+  f64 first,
+  f64 second,
+  f64 third,
+  f64 fourth,
+  f64 fifth
+}
+
+fn make_five(f64 first, f64 second, f64 third, f64 fourth, f64 fifth) Five {
+  Five(first, second, third, fourth, fifth)
+}
+
+fn sum_five(Five value) f64 {
+  value.first + value.second + value.third + value.fourth + value.fifth
+}
+
+sum_five(make_five(8.0, 9.0, 7.0, 10.0, 8.0))
+NY
+}
+
+shape aarch64_elf64_internal_link_run_aggregate_nested_hfa_f32 {
+  features [native object elf64 aarch64 aapcs64 qemu aggregate hfa f32 nested call return]
+  flags "--native-only --native-backend aarch64 --nyir-verify -emit-only -o /tmp/nytrix-aarch64-aggregate-nested-hfa-f32.o"
+  expect object_link_run_f32_42.0
+  source ny <<'NY'
+struct F32Pair {
+  f32 first,
+  f32 second
+}
+
+struct F32Quad {
+  F32Pair left,
+  F32Pair right
+}
+
+fn make_quad(f32 a, f32 b, f32 c, f32 d) F32Quad {
+  F32Quad(F32Pair(a, b), F32Pair(c, d))
+}
+
+fn sum_quad(F32Quad value) f32 {
+  value.left.first + value.left.second + value.right.first + value.right.second
+}
+
+sum_quad(make_quad(10.0, 11.0, 9.0, 12.0))
+NY
+}
+
+shape aarch64_elf64_internal_link_run_aggregate_hfa_v_register_spill {
+  features [native object elf64 aarch64 aapcs64 qemu aggregate hfa f64 register spill call return]
+  flags "--native-only --native-backend aarch64 --nyir-verify -emit-only -o /tmp/nytrix-aarch64-aggregate-hfa-v-register-spill.o"
+  expect object_link_run_f64_42.0
+  source ny <<'NY'
+struct Pair {
+  f64 first,
+  f64 second
+}
+
+fn make_pair(f64 a, f64 b) Pair {
+  Pair(a, b)
+}
+
+fn sum_pairs(Pair a, Pair b, Pair c, Pair d, Pair e) f64 {
+  a.first + a.second + b.first + b.second + c.first + c.second +
+  d.first + d.second + e.first + e.second
+}
+
+sum_pairs(make_pair(1.0, 2.0), make_pair(3.0, 4.0), make_pair(5.0, 6.0),
+          make_pair(7.0, 8.0), make_pair(2.0, 4.0))
+NY
+}
+
+shape aarch64_elf64_internal_link_run_aggregate_align16_integer {
+  features [native object elf64 aarch64 aapcs64 qemu aggregate align16 call return]
+  flags "--native-only --native-backend aarch64 --nyir-verify -emit-only -o /tmp/nytrix-aarch64-aggregate-align16.o"
+  expect object_link_run_i64_42
+  source ny <<'NY'
+struct AlignedPair align(16) {
+  i64 left,
+  i64 right
+}
+
+fn make_pair(i64 left, i64 right) AlignedPair {
+  AlignedPair(left, right)
+}
+
+fn sum_pair(AlignedPair value) i64 {
+  value.left + value.right
+}
+
+sum_pair(make_pair(40, 2))
+NY
+}
+
+shape aarch64_elf64_internal_link_run_aggregate_mixed_i64_f64 {
+  features [native object elf64 aarch64 aapcs64 qemu aggregate mixed call return]
+  flags "--native-only --native-backend aarch64 --nyir-verify -emit-only -o /tmp/nytrix-aarch64-aggregate-mixed-i64-f64.o"
+  expect object_link_run_i64_42
+  source ny <<'NY'
+struct Mixed {
+  i64 whole,
+  f64 fraction
+}
+
+fn make_mixed(i64 whole, f64 fraction) Mixed {
+  Mixed(whole, fraction)
+}
+
+fn check_mixed(Mixed value) i64 {
+  if value.whole == 40 && value.fraction == 2.0 {
+    42
+  } else {
+    0
+  }
+}
+
+check_mixed(make_mixed(40, 2.0))
+NY
+}
+
+shape aarch64_elf64_internal_link_run_aggregate_packed {
+  features [native object elf64 aarch64 aapcs64 qemu aggregate packed call return]
+  flags "--native-only --native-backend aarch64 --nyir-verify -emit-only -o /tmp/nytrix-aarch64-aggregate-packed.o"
+  expect object_link_run_i64_42
+  source ny <<'NY'
+struct Packed pack(1) {
+  i32 prefix,
+  i64 value
+}
+
+fn make_packed(i32 prefix, i64 value) Packed {
+  Packed(prefix, value)
+}
+
+fn check_packed(Packed value) i64 {
+  if value.prefix == 7 && value.value == 35 {
+    42
+  } else {
+    0
+  }
+}
+
+check_packed(make_packed(7, 35))
+NY
+}
+
+shape aarch64_elf64_internal_link_run_aggregate_nested_by_value {
+  features [native object elf64 aarch64 aapcs64 qemu aggregate nested call return]
+  flags "--native-only --native-backend aarch64 --nyir-verify -emit-only -o /tmp/nytrix-aarch64-aggregate-nested.o"
+  expect object_link_run_i64_42
+  source ny <<'NY'
+struct Deep0 {
+  i64 value
+}
+struct Deep1 {
+  Deep0 value
+}
+struct Deep2 {
+  Deep1 value
+}
+struct Deep3 {
+  Deep2 value
+}
+struct Deep4 {
+  Deep3 value
+}
+struct Deep5 {
+  Deep4 value
+}
+struct Deep6 {
+  Deep5 value
+}
+struct Deep7 {
+  Deep6 value
+}
+struct Deep8 {
+  Deep7 value
+}
+struct Deep9 {
+  Deep8 value
+}
+
+fn make_deep(i64 value) Deep9 {
+  Deep9(Deep8(Deep7(Deep6(Deep5(Deep4(Deep3(Deep2(Deep1(Deep0(value))))))))))
+}
+
+fn read_deep(Deep9 value) i64 {
+  value.value.value.value.value.value.value.value.value.value.value
+}
+
+read_deep(make_deep(42))
+NY
+}

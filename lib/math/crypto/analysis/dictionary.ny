@@ -3,20 +3,23 @@
 ;; References:
 ;; - https://cacr.uwaterloo.ca/hac/about/chap1.pdf
 ;; - https://cacr.uwaterloo.ca/hac/about/chap12.pdf
-module std.math.crypto.analysis.dictionary(dictionary_attack, dictionary_attack_stream, dictionary_attack_stream_str, dictionary_attack_stream_predicate, dictionary_attack_salt, dictionary_attack_default, default_wordlist_paths, rockyou_wordlist_path, analysis_wordlist_path, load_wordlist, load_wordlist_limit, load_analysis_words_limit, analysis_word_exists, analysis_select_words, analysis_phrase_word, analysis_segment_text, analysis_dictionary_attack_predicate, leet_rules_apply, leet_variants_full, case_variants_ascii, case_variants_ascii_full, dictionary_candidate_variants, dictionary_candidate_variants_full_case, dictionary_crack_many, analysis_dictionary_crack_many, decimal_suffix, candidate_suffixes, dictionary_crack_suffixes, dictionary_crack_suffix_digits, analysis_dictionary_crack_suffix_digits, dictionary_crack_many_with_variants, analysis_dictionary_crack_many_with_variants, unix_crypt_available, unix_crypt_hash, analysis_unix_crypt_crack_many, analysis_unix_crypt_crack_many_exact)
-use std.core
-use std.core.mem
-use std.math.bin
-use std.math.crypto.hash
-use std.math.crypto.analysis.worldfreq
-use std.os (file_exists, file_read)
-use std.os.path as ospath
-use std.os.sys
-use std.core.str as str
+module core.math.crypto.analysis.dictionary(dictionary_attack, dictionary_attack_stream, dictionary_attack_stream_str, dictionary_attack_stream_predicate, dictionary_attack_salt, dictionary_attack_default, default_wordlist_paths, rockyou_wordlist_path, analysis_wordlist_path, load_wordlist, load_wordlist_limit, load_analysis_words_limit, analysis_word_exists, analysis_select_words, analysis_phrase_word, analysis_segment_text, analysis_dictionary_attack_predicate, leet_rules_apply, leet_variants_full, case_variants_ascii, case_variants_ascii_full, dictionary_candidate_variants, dictionary_candidate_variants_full_case, dictionary_crack_many, analysis_dictionary_crack_many, decimal_suffix, candidate_suffixes, dictionary_crack_suffixes, dictionary_crack_suffix_digits, analysis_dictionary_crack_suffix_digits, dictionary_crack_many_with_variants, analysis_dictionary_crack_many_with_variants, unix_crypt_available, unix_crypt_hash, analysis_unix_crypt_crack_many, analysis_unix_crypt_crack_many_exact)
+use core
+use core.mem
+use core.math.bin
+use core.math.crypto.hash
+use core.math.crypto.analysis.worldfreq
+use core.os (file_exists, file_read)
+use core.os.path as ospath
+use core.os.sys
+use core.str as str
 
 if comptime { __os_name() == "linux" }{
    #link "libcrypt.so.1"
    #include <crypt.h>
+   extern "" {
+      fn crypt(ptr phrase, ptr setting) ptr
+   }
 }
 
 mut _wordlist_cache = dict(8)
@@ -34,7 +37,7 @@ fn dictionary_attack(str target_hash, str wordlist_fn, fnptr hash_fn) dict {
    .attempts: number of words tried"
    def wordlist = _load_wordlist(wordlist_fn)
    def res = _dictionary_attack_scan(wordlist, target_hash, hash_fn, nil, 0)
-   _dict_result(res[0], res[1], res[2])
+   res
 }
 
 fn _dict_result(bool found, str password, int attempts) dict {
@@ -47,7 +50,7 @@ fn _dict_word_match(str word, str target_hash, fnptr hash_fn, any salt, int mode
    hash_fn(wb) == target_hash
 }
 
-fn _dictionary_attack_scan(list wordlist, str target_hash, fnptr hash_fn, any salt=nil, int mode=0) list {
+fn _dictionary_attack_scan(list wordlist, str target_hash, fnptr hash_fn, any salt=nil, int mode=0) dict {
    mut attempts = 0
    mut found = false
    mut password = ""
@@ -62,7 +65,7 @@ fn _dictionary_attack_scan(list wordlist, str target_hash, fnptr hash_fn, any sa
       }
       wi += 1
    }
-   [found, password, attempts]
+   _dict_result(found, password, attempts)
 }
 
 fn _dict_line_match(str line, str target_hash, fnptr hash_fn, fnptr pred_fn, int mode) bool {
@@ -198,7 +201,7 @@ fn dictionary_attack_salt(str target_hash, any salt, str wordlist_fn, fnptr hash
    .attempts: number of words tried"
    def wordlist = _load_wordlist(wordlist_fn)
    def res = _dictionary_attack_scan(wordlist, target_hash, hash_fn, salt, 1)
-   _dict_result(res[0], res[1], res[2])
+   res
 }
 
 fn dictionary_attack_default(str target_hash, fnptr hash_fn) dict {
@@ -328,7 +331,7 @@ fn _analysis_word_from_line(str text, int start, int stop, int min_len, int max_
 
 fn load_analysis_words_limit(int max_words=0, str lang="english", int min_len=1, int max_len=24) list {
    "Load lowercase words from the repo-local analysis dictionary.
-   The source is `std.math.crypto.analysis.worldfreq`'s weighted word profile, so
+   The source is `core.math.crypto.analysis.worldfreq`'s weighted word profile, so
    this is reproducible from the repository and does not depend on system
    wordlists. `max_words <= 0` means no limit."
    def path = analysis_wordlist_path(lang)

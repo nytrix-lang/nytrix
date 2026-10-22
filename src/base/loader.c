@@ -3,21 +3,25 @@
  * manages stdlib discovery, and owns the compilation-unit lifecycle.
  */
 #include "base/loader.h"
-#include "code/parse/ast.h"
 #include "base/common.h"
+#include "base/debug.h"
 #include "base/trace.h"
+#include "code/lang/parse/ast.h"
 #ifdef _WIN32
 #include "base/compat.h"
 #endif
 #include "base/util.h"
-#include "code/parse/parser.h"
+#include "code/lang/parse/parser.h"
 
 #include <ctype.h>
 #include <dirent.h>
+#include <errno.h>
+#include <inttypes.h>
 #include <stdbool.h>
 #include <stdint.h>
-#include <time.h>
+#include <stdio.h>
 #include <sys/stat.h>
+#include <time.h>
 #ifndef _WIN32
 #include <pthread.h>
 #include <unistd.h>
@@ -31,6 +35,8 @@
 #endif
 
 typedef struct ny_std_mod {
+  ny_module_id_t id;
+  uint32_t features;
   char *name;
   char *path;
   char *package;
@@ -58,6 +64,38 @@ static time_t ny_std_latest_src_mtime = 0;
 static int ny_std_latest_src_mtime_known = 0;
 static uint64_t ny_std_latest_src_fingerprint = 0;
 static int ny_std_latest_src_fingerprint_known = 0;
+
+static ny_module_id_t ny_loader_module_id(const char *name) {
+  uint64_t hash = UINT64_C(1469598103934665603);
+  for (const unsigned char *p = (const unsigned char *)name; p && *p; ++p) {
+    hash ^= *p;
+    hash *= UINT64_C(1099511628211);
+  }
+  /*
+   * Reserve zero for source files that do not belong to a registered module.
+   */
+  return hash ? hash : UINT64_C(1);
+}
+
+ny_module_id_t ny_user_module_id(const char *name) {
+  if (!name || !*name)
+    return NY_MODULE_ID_UNKNOWN;
+  /*
+   * Keep declared user modules in a disjoint identity domain from stdlib
+   * registry names, even when a user deliberately spells one `core.*`.
+   */
+  uint64_t hash = UINT64_C(1469598103934665603);
+  static const unsigned char domain[] = {0xff, 'U', 'S', 'E', 'R', 0};
+  for (size_t i = 0; i < sizeof(domain); ++i) {
+    hash ^= domain[i];
+    hash *= UINT64_C(1099511628211);
+  }
+  for (const unsigned char *p = (const unsigned char *)name; *p; ++p) {
+    hash ^= *p;
+    hash *= UINT64_C(1099511628211);
+  }
+  return hash ? hash : UINT64_C(1);
+}
 
 char *ny_read_declared_module_name(const char *path);
 
@@ -121,12 +159,24 @@ static int ny_std_trace_chunks_enabled(void) {
   return cached;
 }
 
-static void std_push_mod(const char *name, const char *path, const char *package) {
+static void std_push_mod(const char *name, const char *path,
+                         const char *package) {
   if (!name || !path || !package)
     return;
   for (size_t i = 0; i < ny_std_mods_len; ++i) {
     if (ny_std_mods[i].name && strcmp(ny_std_mods[i].name, name) == 0)
       return;
+  }
+  ny_module_id_t id = ny_loader_module_id(name);
+  for (size_t i = 0; i < ny_std_mods_len; ++i) {
+    if (ny_std_mods[i].id == id && strcmp(ny_std_mods[i].name, name) != 0) {
+      fprintf(
+          stderr,
+          "module identity hash collision: '%s' and '%s' share ID 0x%016" PRIx64
+          "\n",
+          ny_std_mods[i].name, name, id);
+      exit(1);
+    }
   }
   if (ny_std_mods_len == ny_std_mods_cap) {
     size_t nc = ny_std_mods_cap ? ny_std_mods_cap * 2 : 64;
@@ -135,6 +185,8 @@ static void std_push_mod(const char *name, const char *path, const char *package
     ny_std_mods_cap = nc;
   }
   ny_std_mods[ny_std_mods_len++] = (ny_std_mod){
+      .id = id,
+      .features = NY_MODULE_FEATURE_STDLIB,
       .name = ny_loader_xstrdup(name),
       .path = ny_loader_xstrdup(path),
       .package = ny_loader_xstrdup(package),
@@ -169,7 +221,8 @@ static int is_ny_file(const char *name) {
   return n > 3 && strcmp(name + n - 3, ".ny") == 0;
 }
 
-static void add_module_from_path(const char *root, const char *full_path) {
+static void add_module_from_path(const char *root, const char *full_path,
+                                 const char *fallback_prefix) {
   size_t rl = strlen(root);
   if (strncmp(full_path, root, rl) != 0)
     return;
@@ -201,30 +254,28 @@ static void add_module_from_path(const char *root, const char *full_path) {
     }
   }
   const char *final_name = name;
-  if (strncmp(name, "src.std.", 8) == 0) {
-    final_name = name + 8;
+  if (strncmp(name, "src.core.", 9) == 0) {
+    final_name = name + 9;
   } else if (strncmp(name, "src.lib.", 8) == 0) {
     final_name = name + 8;
-  } else if (strncmp(name, "std.", 4) == 0) {
-    final_name = name + 4;
+  } else if (strncmp(name, "core.", 5) == 0) {
+    final_name = name + 5;
   } else if (strncmp(name, "lib.", 4) == 0) {
     final_name = name + 4;
   }
-  const char *prefix = "";
-  if (strstr(root, "std") != NULL)
-    prefix = "std.";
-  else if (strstr(root, "lib") != NULL)
-    prefix = "lib.";
-  char *fallback_name = ny_loader_xmalloc(strlen(prefix) + strlen(final_name) + 1);
+  const char *prefix = fallback_prefix ? fallback_prefix : "";
+  char *fallback_name =
+      ny_loader_xmalloc(strlen(prefix) + strlen(final_name) + 1);
   size_t prefix_len = strlen(prefix);
   size_t final_len = strlen(final_name);
   memmove(fallback_name, prefix, prefix_len);
   memmove(fallback_name + prefix_len, final_name, final_len + 1);
   char *declared_name = ny_read_declared_module_name(full_path);
-  const char *module_name = (declared_name && declared_name[0]) ? declared_name : fallback_name;
+  const char *module_name =
+      (declared_name && declared_name[0]) ? declared_name : fallback_name;
   const char *dot = strchr(module_name, '.');
-  char *pkg =
-      dot ? ny_strndup(module_name, (size_t)(dot - module_name)) : ny_loader_xstrdup(module_name);
+  char *pkg = dot ? ny_strndup(module_name, (size_t)(dot - module_name))
+                  : ny_loader_xstrdup(module_name);
   if (!pkg)
     ny_loader_oom();
   std_push_mod(module_name, full_path, pkg);
@@ -234,13 +285,16 @@ static void add_module_from_path(const char *root, const char *full_path) {
   free(pkg);
 }
 
-static void scan_dir_recursive_depth(const char *root, const char *dir, int depth);
+static void scan_dir_recursive_depth(const char *root, const char *dir,
+                                     const char *fallback_prefix, int depth);
 
-static void scan_dir_recursive(const char *root, const char *dir) {
-  scan_dir_recursive_depth(root, dir, 0);
+static void scan_dir_recursive(const char *root, const char *dir,
+                               const char *fallback_prefix) {
+  scan_dir_recursive_depth(root, dir, fallback_prefix, 0);
 }
 
-static void scan_dir_recursive_depth(const char *root, const char *dir, int depth) {
+static void scan_dir_recursive_depth(const char *root, const char *dir,
+                                     const char *fallback_prefix, int depth) {
   if (depth > 32) {
     if (ny_std_trace_enabled())
       fprintf(stderr, "STD_TRACE max recursion depth at: %s\n", dir);
@@ -256,7 +310,8 @@ static void scan_dir_recursive_depth(const char *root, const char *dir, int dept
   struct dirent *ent;
   while ((ent = readdir(d)) != NULL) {
     if (ent->d_name[0] == '.' &&
-        (ent->d_name[1] == '\0' || (ent->d_name[1] == '.' && ent->d_name[2] == '\0')))
+        (ent->d_name[1] == '\0' ||
+         (ent->d_name[1] == '.' && ent->d_name[2] == '\0')))
       continue;
     if (ent->d_name[0] == 't' && strcmp(ent->d_name, "test") == 0)
       continue;
@@ -266,11 +321,11 @@ static void scan_dir_recursive_depth(const char *root, const char *dir, int dept
     bool handled = false;
 #if defined(_DIRENT_HAVE_D_TYPE)
     if (ent->d_type == DT_DIR) {
-      scan_dir_recursive_depth(root, fp, depth + 1);
+      scan_dir_recursive_depth(root, fp, fallback_prefix, depth + 1);
       handled = true;
     } else if (ent->d_type == DT_REG) {
       if (is_ny_file(fp))
-        add_module_from_path(root, fp);
+        add_module_from_path(root, fp, fallback_prefix);
       handled = true;
     } else if (ent->d_type == DT_LNK) {
       /*
@@ -279,7 +334,7 @@ static void scan_dir_recursive_depth(const char *root, const char *dir, int dept
        */
       struct stat st;
       if (stat(fp, &st) == 0 && S_ISREG(st.st_mode) && is_ny_file(fp))
-        add_module_from_path(root, fp);
+        add_module_from_path(root, fp, fallback_prefix);
       handled = true;
     }
 #endif
@@ -287,9 +342,9 @@ static void scan_dir_recursive_depth(const char *root, const char *dir, int dept
       struct stat st;
       if (stat(fp, &st) == 0) {
         if (S_ISDIR(st.st_mode)) {
-          scan_dir_recursive_depth(root, fp, depth + 1);
+          scan_dir_recursive_depth(root, fp, fallback_prefix, depth + 1);
         } else if (S_ISREG(st.st_mode) && is_ny_file(fp)) {
-          add_module_from_path(root, fp);
+          add_module_from_path(root, fp, fallback_prefix);
         }
       }
     }
@@ -363,10 +418,11 @@ static int ny_std_lookup_exact_fast(const char *name) {
   return -1;
 }
 
-static bool ny_scan_recursive_if_dir(const char *root, const char *dir) {
+static bool ny_scan_recursive_if_dir(const char *root, const char *dir,
+                                     const char *fallback_prefix) {
   struct stat st;
   if (stat(dir, &st) == 0 && S_ISDIR(st.st_mode)) {
-    scan_dir_recursive(root, dir);
+    scan_dir_recursive(root, dir, fallback_prefix);
     return true;
   }
   return false;
@@ -377,19 +433,20 @@ static void ny_scan_std_or_lib_roots(const char *src_root, const char *pkg) {
   char path_root[4096];
   char path_local_src[64];
   snprintf(path_src, sizeof(path_src), "%s/src/%s", src_root, pkg);
-  if (ny_scan_recursive_if_dir(path_src, path_src))
+  const char *fallback_prefix = strcmp(pkg, "std") == 0 ? "core." : "lib.";
+  if (ny_scan_recursive_if_dir(path_src, path_src, fallback_prefix))
     return;
   snprintf(path_root, sizeof(path_root), "%s/%s", src_root, pkg);
-  if (ny_scan_recursive_if_dir(path_root, path_root))
+  if (ny_scan_recursive_if_dir(path_root, path_root, fallback_prefix))
     return;
   snprintf(path_local_src, sizeof(path_local_src), "src/%s", pkg);
-  if (ny_scan_recursive_if_dir(path_local_src, path_local_src))
+  if (ny_scan_recursive_if_dir(path_local_src, path_local_src, fallback_prefix))
     return;
   if (strcmp(pkg, "std") == 0) {
-    scan_dir_recursive("std", "std");
+    scan_dir_recursive("std", "std", "core.");
     return;
   }
-  (void)ny_scan_recursive_if_dir(pkg, pkg);
+  (void)ny_scan_recursive_if_dir(pkg, pkg, fallback_prefix);
 }
 
 static void ny_scan_std_overlay_path_list(const char *paths) {
@@ -406,7 +463,7 @@ static void ny_scan_std_overlay_path_list(const char *paths) {
       char root[4096];
       memmove(root, start, (size_t)(p - start));
       root[p - start] = '\0';
-      (void)ny_scan_recursive_if_dir(root, root);
+      (void)ny_scan_recursive_if_dir(root, root, "core.");
     }
   }
 }
@@ -419,58 +476,72 @@ static void ny_scan_std_overlays(void) {
       "std_overrides",
       "lib_overrides",
   };
-  for (size_t i = 0; i < sizeof(project_roots) / sizeof(project_roots[0]); ++i) {
-    (void)ny_scan_recursive_if_dir(project_roots[i], project_roots[i]);
+  for (size_t i = 0; i < sizeof(project_roots) / sizeof(project_roots[0]);
+       ++i) {
+    const char *prefix = i == 0 || i == 2 ? "core." : "lib.";
+    (void)ny_scan_recursive_if_dir(project_roots[i], project_roots[i], prefix);
   }
+}
+
+static uint64_t ny_loader_stat_identity(const struct stat *st) {
+  uint64_t h = NY_FNV1A64_OFFSET_BASIS;
+  h = ny_hash64_u64(h, (uint64_t)st->st_dev);
+  h = ny_hash64_u64(h, (uint64_t)st->st_ino);
+  h = ny_hash64_u64(h, (uint64_t)st->st_size);
+  h = ny_hash64_u64(h, (uint64_t)st->st_mode);
+  h = ny_hash64_u64(h, (uint64_t)st->st_mtime);
+  h = ny_hash64_u64(h, (uint64_t)st->st_ctime);
+#ifndef _WIN32
+#ifdef __APPLE__
+  h = ny_hash64_u64(h, (uint64_t)st->st_mtimespec.tv_nsec);
+  h = ny_hash64_u64(h, (uint64_t)st->st_ctimespec.tv_nsec);
+#else
+  h = ny_hash64_u64(h, (uint64_t)st->st_mtim.tv_nsec);
+  h = ny_hash64_u64(h, (uint64_t)st->st_ctim.tv_nsec);
+#endif
+#endif
+  return h;
 }
 
 static long long ny_get_dir_mtime(const char *path) {
   struct stat st;
-  if (stat(path, &st) == 0) {
-    return (long long)st.st_mtime;
-  }
-  /* memory leak patched */ /* memory leak patched */ return 0;
+  return stat(path, &st) == 0 ? (long long)ny_loader_stat_identity(&st) : 0;
 }
 
 static long long ny_get_tree_mtime(const char *path) {
   struct stat st;
   if (stat(path, &st) != 0)
-    /* memory leak patched */ /* memory leak patched */ return 0;
-
-  long long latest = (long long)st.st_mtime;
+    return 0;
+  uint64_t identity = ny_loader_stat_identity(&st);
   if (!S_ISDIR(st.st_mode))
-    return latest;
-
+    return (long long)identity;
   DIR *d = opendir(path);
   if (!d)
-    return latest;
-
+    return (long long)identity;
+  uint64_t entries = 0, count = 0;
   struct dirent *ent;
   while ((ent = readdir(d)) != NULL) {
-    if (ent->d_name[0] == '.' &&
-        (ent->d_name[1] == '\0' || (ent->d_name[1] == '.' && ent->d_name[2] == '\0')))
+    if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0 ||
+        strcmp(ent->d_name, "test") == 0)
       continue;
-    if (ent->d_name[0] == 't' && strcmp(ent->d_name, "test") == 0)
-      continue;
-
     char *fp = ny_path_join_alloc(path, ent->d_name);
     if (!fp)
       ny_loader_oom();
-    struct stat child_st;
-    if (stat(fp, &child_st) == 0) {
-      long long child_mtime = 0;
-      if (S_ISDIR(child_st.st_mode)) {
-        child_mtime = ny_get_tree_mtime(fp);
-      } else if (S_ISREG(child_st.st_mode) && is_ny_file(fp)) {
-        child_mtime = (long long)child_st.st_mtime;
-      }
-      if (child_mtime > latest)
-        latest = child_mtime;
+    struct stat child;
+    if (stat(fp, &child) == 0 &&
+        (S_ISDIR(child.st_mode) || (S_ISREG(child.st_mode) && is_ny_file(fp)))) {
+      uint64_t value = S_ISDIR(child.st_mode)
+                           ? (uint64_t)ny_get_tree_mtime(fp)
+                           : ny_loader_stat_identity(&child);
+      value ^= ny_hash64_cstr(ent->d_name);
+      entries += value;
+      ++count;
     }
     free(fp);
   }
   closedir(d);
-  return latest;
+  identity = ny_hash64_u64(identity, entries);
+  return (long long)ny_hash64_u64(identity, count);
 }
 
 static long long ny_std_overlay_mtime(void) {
@@ -499,7 +570,8 @@ static long long ny_std_overlay_mtime(void) {
       "std_overrides",
       "lib_overrides",
   };
-  for (size_t i = 0; i < sizeof(project_roots) / sizeof(project_roots[0]); ++i) {
+  for (size_t i = 0; i < sizeof(project_roots) / sizeof(project_roots[0]);
+       ++i) {
     total ^= ny_get_tree_mtime(project_roots[i]);
   }
   return total;
@@ -536,7 +608,8 @@ static bool ny_std_load_cache(long long current_mtime) {
   if (!f)
     return false;
   uint32_t magic = 0;
-  if (fread(&magic, 4, 1, f) != 1 || (magic != 0xACE711DC && magic != 0xACE711DD)) {
+  if (fread(&magic, 4, 1, f) != 1 ||
+      magic != 0xACE711DE) {
     fclose(f);
     return false;
   }
@@ -547,7 +620,7 @@ static bool ny_std_load_cache(long long current_mtime) {
   }
   ny_std_latest_src_mtime = 0;
   ny_std_latest_src_mtime_known = 0;
-  if (magic == 0xACE711DD) {
+  if (magic == 0xACE711DE) {
     int64_t src_latest = 0;
     if (fread(&src_latest, sizeof(src_latest), 1, f) != 1) {
       fclose(f);
@@ -570,7 +643,8 @@ static bool ny_std_load_cache(long long current_mtime) {
   bool ok = true;
   for (uint32_t i = 0; i < count; i++) {
     uint32_t nl = 0, pl = 0, kl = 0;
-    if (fread(&nl, 4, 1, f) != 1 || fread(&pl, 4, 1, f) != 1 || fread(&kl, 4, 1, f) != 1) {
+    if (fread(&nl, 4, 1, f) != 1 || fread(&pl, 4, 1, f) != 1 ||
+        fread(&kl, 4, 1, f) != 1) {
       ok = false;
       break;
     }
@@ -605,7 +679,8 @@ static bool ny_std_load_cache(long long current_mtime) {
       ok = false;
       break;
     }
-    if (fread(name, 1, nl, f) != nl || fread(path, 1, pl, f) != pl || fread(pkg, 1, kl, f) != kl) {
+    if (fread(name, 1, nl, f) != nl || fread(path, 1, pl, f) != pl ||
+        fread(pkg, 1, kl, f) != kl) {
       ok = false;
       break;
     }
@@ -642,10 +717,27 @@ static void ny_std_save_cache(long long current_mtime) {
     *slash = '\0';
     ny_ensure_dir_recursive(dir);
   }
-  FILE *f = fopen(cp, "wb");
+  char temporary[4096];
+#ifndef _WIN32
+  int n = snprintf(temporary, sizeof(temporary), "%s.XXXXXX", cp);
+  if (n <= 0 || (size_t)n >= sizeof(temporary))
+    return;
+  int fd = mkstemp(temporary);
+  if (fd < 0)
+    return;
+  FILE *f = fdopen(fd, "wb");
+  if (!f) {
+    close(fd);
+    unlink(temporary);
+    return;
+  }
+#else
+  snprintf(temporary, sizeof(temporary), "%s.%ld.tmp", cp, (long)getpid());
+  FILE *f = fopen(temporary, "wb");
   if (!f)
     return;
-  uint32_t magic = 0xACE711DD;
+#endif
+  uint32_t magic = 0xACE711DE;
   fwrite(&magic, 4, 1, f);
   fwrite(&current_mtime, 8, 1, f);
   int64_t latest_i64 = (int64_t)ny_std_latest_src_mtime;
@@ -663,7 +755,15 @@ static void ny_std_save_cache(long long current_mtime) {
     fwrite(ny_std_mods[i].path, 1, pl, f);
     fwrite(ny_std_mods[i].package, 1, kl, f);
   }
-  fclose(f);
+  bool ok = !ferror(f);
+  if (fclose(f) != 0)
+    ok = false;
+#ifdef _WIN32
+  if (ok)
+    remove(cp);
+#endif
+  if (!ok || rename(temporary, cp) != 0)
+    remove(temporary);
 }
 
 static void ny_std_init_modules(void) {
@@ -706,8 +806,8 @@ static void ny_std_init_modules(void) {
   ny_std_latest_src_mtime_known = 1;
   ny_std_build_mod_lookup();
   if (ny_std_trace_enabled()) {
-    fprintf(stderr, "STD_TRACE: scanned %zu modules in %.4fs\n", ny_std_mods_len,
-            ny_ticks_elapsed_sec(t0));
+    fprintf(stderr, "STD_TRACE: scanned %zu modules in %.4fs\n",
+            ny_std_mods_len, ny_ticks_elapsed_sec(t0));
   }
 
   ny_std_save_cache(total_mtime);
@@ -740,7 +840,8 @@ static void ny_std_init_packages(void) {
     ny_std_pkgs[ny_std_pkgs_len++] = ny_std_mods[i].package;
   }
   if (ny_std_pkgs_len > 1) {
-    qsort(ny_std_pkgs, ny_std_pkgs_len, sizeof(ny_std_pkgs[0]), ny_cstr_ptr_cmp);
+    qsort(ny_std_pkgs, ny_std_pkgs_len, sizeof(ny_std_pkgs[0]),
+          ny_cstr_ptr_cmp);
     size_t out = 1;
     for (size_t i = 1; i < ny_std_pkgs_len; ++i) {
       if (strcmp(ny_std_pkgs[out - 1], ny_std_pkgs[i]) != 0)
@@ -778,6 +879,18 @@ size_t ny_std_module_count(void) {
   return ny_std_mods_len;
 }
 
+ny_module_id_t ny_std_module_id(size_t idx) {
+  if (idx >= ny_std_module_count())
+    return NY_MODULE_ID_UNKNOWN;
+  return ny_std_mods[idx].id;
+}
+
+uint32_t ny_std_module_features(size_t idx) {
+  if (idx >= ny_std_module_count())
+    return NY_MODULE_FEATURE_NONE;
+  return ny_std_mods[idx].features;
+}
+
 const char *ny_std_module_name(size_t idx) {
   if (idx >= ny_std_module_count())
     /* memory leak patched */ /* memory leak patched */ return NULL;
@@ -788,6 +901,110 @@ const char *ny_std_module_path(size_t idx) {
   if (idx >= ny_std_module_count())
     /* memory leak patched */ /* memory leak patched */ return NULL;
   return ny_std_mods[idx].path;
+}
+
+const char *ny_std_module_path_by_id(ny_module_id_t id) {
+  if (id == NY_MODULE_ID_UNKNOWN)
+    return NULL;
+  for (size_t i = 0; i < ny_std_module_count(); ++i)
+    if (ny_std_mods[i].id == id)
+      return ny_std_mods[i].path;
+  return NULL;
+}
+
+static bool ny_loader_normalize_path(char *dst, size_t dst_len,
+                                     const char *src) {
+  if (!dst || dst_len == 0 || !src)
+    return false;
+  size_t len = strlen(src);
+  if (len >= dst_len)
+    return false;
+  for (size_t i = 0; i < len; ++i)
+    dst[i] = src[i] == '\\' ? '/' : src[i];
+  dst[len] = '\0';
+  return true;
+}
+
+static bool ny_loader_canonical_path(char *dst, size_t dst_len,
+                                     const char *src) {
+  char normalized[4096];
+  char resolved[4096];
+  if (!ny_loader_normalize_path(normalized, sizeof(normalized), src) ||
+      !ny_realpath(normalized, resolved))
+    return false;
+  return ny_loader_normalize_path(dst, dst_len, resolved);
+}
+
+static bool ny_loader_path_equal(const char *a, const char *b) {
+  if (!a || !b)
+    return false;
+#ifdef _WIN32
+  return strcasecmp(a, b) == 0;
+#else
+  return strcmp(a, b) == 0;
+#endif
+}
+
+static bool ny_loader_path_is_absolute(const char *path) {
+  if (!path || !*path)
+    return false;
+  if (path[0] == '/')
+    return true;
+#ifdef _WIN32
+  return isalpha((unsigned char)path[0]) && path[1] == ':' && path[2] == '/';
+#else
+  return false;
+#endif
+}
+
+ny_module_id_t ny_std_find_module_id_by_path(const char *path) {
+  if (!path || !*path || path[0] == '<')
+    return NY_MODULE_ID_UNKNOWN;
+  size_t count = ny_std_module_count();
+  char normalized[4096];
+  if (!ny_loader_normalize_path(normalized, sizeof(normalized), path))
+    return NY_MODULE_ID_UNKNOWN;
+  char rooted[4096] = {0};
+  const char *root = ny_src_root();
+  if (root && *root && !ny_loader_path_is_absolute(normalized)) {
+    int n = snprintf(rooted, sizeof(rooted), "%s/%s", root, normalized);
+    if (n < 0 || (size_t)n >= sizeof(rooted))
+      rooted[0] = '\0';
+  }
+  for (size_t i = 0; i < count; ++i) {
+    char registered[4096];
+    ny_loader_normalize_path(registered, sizeof(registered),
+                             ny_std_mods[i].path);
+    if (ny_loader_path_equal(registered, normalized) ||
+        (rooted[0] && ny_loader_path_equal(registered, rooted)))
+      return ny_std_mods[i].id;
+  }
+
+  /*
+   * Preserve module identity when the parser sees a lexical or symlink alias
+   * for a registered source. Exact spelling above stays cheap for the normal
+   * path; canonicalization is only needed on a miss.
+   */
+  char canonical[4096] = {0};
+  char rooted_canonical[4096] = {0};
+  bool have_canonical =
+      ny_loader_canonical_path(canonical, sizeof(canonical), normalized);
+  if (rooted[0])
+    (void)ny_loader_canonical_path(rooted_canonical, sizeof(rooted_canonical),
+                                   rooted);
+  if (!have_canonical && !rooted_canonical[0])
+    return NY_MODULE_ID_UNKNOWN;
+  for (size_t i = 0; i < count; ++i) {
+    char registered[4096];
+    if (!ny_loader_canonical_path(registered, sizeof(registered),
+                                  ny_std_mods[i].path))
+      continue;
+    if ((have_canonical && ny_loader_path_equal(registered, canonical)) ||
+        (rooted_canonical[0] &&
+         ny_loader_path_equal(registered, rooted_canonical)))
+      return ny_std_mods[i].id;
+  }
+  return NY_MODULE_ID_UNKNOWN;
 }
 
 size_t ny_std_package_count(void) {
@@ -829,60 +1046,149 @@ static uint64_t ny_loader_hash_cstr(uint64_t h, const char *s) {
   return h;
 }
 
-static uint64_t ny_loader_stat_time_ns(const struct stat *st, bool ctime_field) {
-  if (!st)
-    /* memory leak patched */ /* memory leak patched */ return 0;
-  uint64_t sec = (uint64_t)(ctime_field ? st->st_ctime : st->st_mtime);
-  uint64_t nsec = 0;
-#if defined(__APPLE__)
-  nsec = (uint64_t)(ctime_field ? st->st_ctimespec.tv_nsec : st->st_mtimespec.tv_nsec);
-#elif !defined(_WIN32)
-  nsec = (uint64_t)(ctime_field ? st->st_ctim.tv_nsec : st->st_mtim.tv_nsec);
-#endif
-  return sec * 1000000000ULL + nsec;
+static uint64_t ny_loader_file_content_hash(const char *path) {
+  uint64_t h = 1469598103934665603ULL;
+  FILE *f = path ? fopen(path, "rb") : NULL;
+  if (!f)
+    return ny_loader_hash_u64(h, (uint64_t)(unsigned)(errno ? errno : ENOENT));
+  unsigned char buf[16384];
+  for (;;) {
+    size_t n = fread(buf, 1, sizeof(buf), f);
+    for (size_t i = 0; i < n; ++i) {
+      h ^= buf[i];
+      h *= 1099511628211ULL;
+    }
+    if (n < sizeof(buf)) {
+      if (ferror(f))
+        h = ny_loader_hash_u64(h, (uint64_t)(unsigned)(errno ? errno : EIO));
+      break;
+    }
+  }
+  fclose(f);
+  return h ? h : 1;
 }
 
 static uint64_t ny_std_compute_source_fingerprint(void) {
   uint64_t h = 1469598103934665603ULL;
-  bool strict_file_id = ny_env_enabled("NYTRIX_CACHE_STRICT_FILE_ID");
   h = ny_loader_hash_u64(h, (uint64_t)ny_std_mods_len);
   for (size_t i = 0; i < ny_std_mods_len; ++i) {
     const char *p = ny_std_mods[i].path;
     h = ny_loader_hash_cstr(h, ny_std_mods[i].name);
     h = ny_loader_hash_cstr(h, p);
-    struct stat st;
-    if (p && *p && stat(p, &st) == 0) {
-      h = ny_loader_hash_u64(h, ny_loader_stat_time_ns(&st, false));
-      h = ny_loader_hash_u64(h, (uint64_t)st.st_size);
-      if (strict_file_id)
-        h = ny_loader_hash_u64(h, ny_loader_stat_time_ns(&st, true));
-#ifndef _WIN32
-      if (strict_file_id) {
-        h = ny_loader_hash_u64(h, (uint64_t)st.st_ino);
-        h = ny_loader_hash_u64(h, (uint64_t)st.st_dev);
-      }
-#endif
-    } else {
-      h = ny_loader_hash_u64(h, 0);
-    }
+    h = ny_loader_hash_u64(h, ny_loader_file_content_hash(p));
   }
   return h ? h : 1;
 }
 
+#ifndef _WIN32
+/*
+ * Reuse the content fingerprint only while every registered source retains
+ * its identity, size, permissions, and nanosecond modification/change times.
+ * ctime detects edits that deliberately restore mtime.
+ */
+static uint64_t ny_std_source_metadata_fingerprint(void) {
+  uint64_t h = ny_loader_hash_cstr(1469598103934665603ULL,
+                                  "ny.std.source-metadata.v1");
+  h = ny_loader_hash_u64(h, ny_std_mods_len);
+  for (size_t i = 0; i < ny_std_mods_len; ++i) {
+    struct stat st;
+    h = ny_loader_hash_cstr(h, ny_std_mods[i].name);
+    h = ny_loader_hash_cstr(h, ny_std_mods[i].path);
+    if (!ny_std_mods[i].path || stat(ny_std_mods[i].path, &st) != 0)
+      return 0;
+    h = ny_loader_hash_u64(h, st.st_dev);
+    h = ny_loader_hash_u64(h, st.st_ino);
+    h = ny_loader_hash_u64(h, st.st_size);
+    h = ny_loader_hash_u64(h, st.st_mode);
+    h = ny_loader_hash_u64(h, st.st_mtime);
+    h = ny_loader_hash_u64(h, st.st_ctime);
+#ifdef __APPLE__
+    h = ny_loader_hash_u64(h, st.st_mtimespec.tv_nsec);
+    h = ny_loader_hash_u64(h, st.st_ctimespec.tv_nsec);
+#else
+    h = ny_loader_hash_u64(h, st.st_mtim.tv_nsec);
+    h = ny_loader_hash_u64(h, st.st_ctim.tv_nsec);
+#endif
+  }
+  return h;
+}
+
+static uint64_t ny_std_cached_source_fingerprint(void) {
+  if (!ny_env_enabled_default_on("NYTRIX_STD_CACHE") ||
+      ny_env_enabled("NYTRIX_CACHE_STRICT_CONTENT"))
+    return ny_std_compute_source_fingerprint();
+  uint64_t metadata = ny_std_source_metadata_fingerprint();
+  if (!metadata)
+    return ny_std_compute_source_fingerprint();
+  char dir[4096], path[4096], tmp[4096];
+  int n = snprintf(dir, sizeof(dir), "%s/std-fingerprint",
+                    ny_default_cache_root_dir());
+  if (n <= 0 || (size_t)n >= sizeof(dir))
+    return ny_std_compute_source_fingerprint();
+  n = snprintf(path, sizeof(path), "%s/%016" PRIx64, dir, metadata);
+  if (n <= 0 || (size_t)n >= sizeof(path))
+    return ny_std_compute_source_fingerprint();
+  FILE *f = fopen(path, "rb");
+  if (f) {
+    char schema[32];
+    uint64_t key = 0, value = 0, check = 0;
+    bool valid = fscanf(f, "%31s %16" SCNx64 " %16" SCNx64 " %16" SCNx64,
+                         schema, &key, &value, &check) == 4 &&
+                 strcmp(schema, "ny.std.fingerprint.v1") == 0 &&
+                 key == metadata && value != 0 &&
+                 check == ny_loader_hash_u64(metadata, value);
+    fclose(f);
+    if (valid) {
+      if (ny_env_enabled("NYTRIX_TRACE_CACHE"))
+        fprintf(stderr, "core source fingerprint cache hit\n");
+      return value;
+    }
+  }
+  uint64_t value = ny_std_compute_source_fingerprint();
+  if (metadata != ny_std_source_metadata_fingerprint())
+    return value;
+  ny_ensure_dir_recursive(dir);
+  n = snprintf(tmp, sizeof(tmp), "%s.XXXXXX", path);
+  if (n <= 0 || (size_t)n >= sizeof(tmp))
+    return value;
+  int fd = mkstemp(tmp);
+  if (fd < 0)
+    return value;
+  f = fdopen(fd, "wb");
+  if (!f) {
+    close(fd);
+    unlink(tmp);
+    return value;
+  }
+  bool ok = fprintf(f, "ny.std.fingerprint.v1 %016" PRIx64 " %016" PRIx64
+                       " %016" PRIx64 "\n", metadata, value,
+                     ny_loader_hash_u64(metadata, value)) > 0;
+  if (fclose(f) != 0)
+    ok = false;
+  if (!ok || rename(tmp, path) != 0)
+    unlink(tmp);
+  return value;
+}
+#endif
+
 uint64_t ny_std_source_fingerprint(void) {
   ny_std_init_modules();
   if (!ny_std_latest_src_fingerprint_known) {
+#ifndef _WIN32
+    ny_std_latest_src_fingerprint = ny_std_cached_source_fingerprint();
+#else
     ny_std_latest_src_fingerprint = ny_std_compute_source_fingerprint();
+#endif
     ny_std_latest_src_fingerprint_known = 1;
   }
   return ny_std_latest_src_fingerprint;
 }
 
-static const char *strip_std_prefix(const char *name) {
+static const char *strip_core_prefix(const char *name) {
   if (!name)
     return name;
-  if (strncmp(name, "std.", 4) == 0)
-    return name + 4;
+  if (strncmp(name, "core.", 5) == 0)
+    return name + 5;
   return name;
 }
 
@@ -909,10 +1215,10 @@ static int ny_find_module_exact_name(const char *name) {
 static int ny_find_module_prefixed_name(const char *name) {
   if (!name)
     return -1;
-  if (strncmp(name, "std.", 4) == 0 || strncmp(name, "lib.", 4) == 0)
+  if (strncmp(name, "core.", 5) == 0 || strncmp(name, "lib.", 4) == 0)
     return -1;
   char pbuf[512];
-  snprintf(pbuf, sizeof(pbuf), "std.%s", name);
+  snprintf(pbuf, sizeof(pbuf), "core.%s", name);
   int idx = ny_find_module_exact_name(pbuf);
   if (idx >= 0)
     return idx;
@@ -948,7 +1254,9 @@ int ny_std_find_module_by_name(const char *name) {
   return -1;
 }
 
-static int find_module_index(const char *name) { return ny_std_find_module_by_name(name); }
+static int find_module_index(const char *name) {
+  return ny_std_find_module_by_name(name);
+}
 
 static bool is_package_name(const char *pkg) {
   if (!pkg)
@@ -979,6 +1287,15 @@ static bool is_package_name(const char *pkg) {
       lo = mid + 1;
   }
   return false;
+}
+
+bool ny_std_has_module_or_package(const char *name) {
+  if (!name || !*name)
+    return false;
+  ny_std_init_modules();
+  if (ny_find_module_exact_name(name) >= 0)
+    return true;
+  return is_package_name(name);
 }
 
 static bool ny_mod_ident_start(char c) {
@@ -1013,12 +1330,14 @@ char *ny_read_declared_module_name(const char *path) {
         p++;
       continue;
     }
-    if (strncmp(p, "use", 3) == 0 && (isspace((unsigned char)p[3]) || p[3] == '\0')) {
+    if (strncmp(p, "use", 3) == 0 &&
+        (isspace((unsigned char)p[3]) || p[3] == '\0')) {
       while (*p && *p != '\n')
         p++;
       continue;
     }
-    if (strncmp(p, "module", 6) == 0 && (isspace((unsigned char)p[6]) || p[6] == '\0')) {
+    if (strncmp(p, "module", 6) == 0 &&
+        (isspace((unsigned char)p[6]) || p[6] == '\0')) {
       p += 6;
       while (*p && isspace((unsigned char)*p))
         p++;
@@ -1101,7 +1420,8 @@ static bool ny_module_name_is_path_like(const char *raw) {
   return false;
 }
 
-static char *ny_bundle_module_name(const char *raw, const char *path, bool is_std) {
+static char *ny_bundle_module_name(const char *raw, const char *path,
+                                   bool is_std) {
   if (is_std)
     return (char *)raw;
   if (path && *path) {
@@ -1135,7 +1455,12 @@ static char *find_local_module_in_base(const char *name, const char *base_dir) {
     is_abs = true;
   if (isalpha((unsigned char)name[0]) && name[1] == ':')
     is_abs = true;
-  if (!is_abs && strstr(name, ".ny") == NULL && strstr(name, "\\") == NULL) {
+  /*
+   * Only a trailing `.ny` marks an explicit source filename.  A dotted
+   * module name may legitimately contain `.ny` in an earlier component
+   * (e.g. `alpha.ny.beta` maps to `alpha/ny/beta.ny`).
+   */
+  if (!is_abs && !is_ny_file(name) && strstr(name, "\\") == NULL) {
     for (char *p = path + base_len + 1; *p; ++p)
       if (*p == '.')
         *p = '/';
@@ -1171,19 +1496,23 @@ static char *find_local_module_in_base(const char *name, const char *base_dir) {
         return ny_strdup(sib);
 
       char sib_mod[4096];
-      nw = snprintf(sib_mod, sizeof(sib_mod), "%s/%s/mod.ny", base_dir, leaf + 1);
-      if (nw > 0 && (size_t)nw < sizeof(sib_mod) && ny_access(sib_mod, R_OK) == 0)
+      nw = snprintf(sib_mod, sizeof(sib_mod), "%s/%s/mod.ny", base_dir,
+                    leaf + 1);
+      if (nw > 0 && (size_t)nw < sizeof(sib_mod) &&
+          ny_access(sib_mod, R_OK) == 0)
         return ny_strdup(sib_mod);
     }
   }
   /* memory leak patched */ /* memory leak patched */ return NULL;
 }
 
-static char *find_module_in_project_package_roots(const char *name, const char *cur) {
+static char *find_module_in_project_package_roots(const char *name,
+                                                  const char *cur) {
   const char *roots[] = {"ny_modules", "vendor/ny_modules", ".nytrix/venv/lib"};
   for (size_t i = 0; i < sizeof(roots) / sizeof(roots[0]); ++i) {
     char pkg_base[4096];
-    int nw = snprintf(pkg_base, sizeof(pkg_base), "%s/%s", cur && *cur ? cur : ".", roots[i]);
+    int nw = snprintf(pkg_base, sizeof(pkg_base), "%s/%s",
+                      cur && *cur ? cur : ".", roots[i]);
     if (nw <= 0 || (size_t)nw >= sizeof(pkg_base))
       continue;
     char *local = find_local_module_in_base(name, pkg_base);
@@ -1193,7 +1522,8 @@ static char *find_module_in_project_package_roots(const char *name, const char *
   /* memory leak patched */ /* memory leak patched */ return NULL;
 }
 
-static char *find_module_in_package_path_list(const char *name, const char *paths) {
+static char *find_module_in_package_path_list(const char *name,
+                                              const char *paths) {
   if (!paths || !*paths)
     /* memory leak patched */ /* memory leak patched */ return NULL;
   const char *p = paths;
@@ -1216,7 +1546,8 @@ static char *find_module_in_package_path_list(const char *name, const char *path
 }
 
 static char *find_module_in_global_package_roots(const char *name) {
-  char *local = find_module_in_package_path_list(name, getenv("NYTRIX_PKG_PATH"));
+  char *local =
+      find_module_in_package_path_list(name, getenv("NYTRIX_PKG_PATH"));
   if (local)
     return local;
 
@@ -1247,8 +1578,9 @@ static char *find_module_in_global_package_roots(const char *name) {
       return local;
   }
 #ifndef _WIN32
-  const char *system_roots[] = {"/usr/local/share/nytrix/pkg", "/usr/share/nytrix/pkg",
-                                "/opt/homebrew/share/nytrix/pkg", "/opt/nytrix/share/pkg"};
+  const char *system_roots[] = {
+      "/usr/local/share/nytrix/pkg", "/usr/share/nytrix/pkg",
+      "/opt/homebrew/share/nytrix/pkg", "/opt/nytrix/share/pkg"};
   for (size_t i = 0; i < sizeof(system_roots) / sizeof(system_roots[0]); ++i) {
     local = find_local_module_in_base(name, system_roots[i]);
     if (local)
@@ -1394,11 +1726,16 @@ static char *resolve_remote_module(const char *url) {
     }
 #ifdef _WIN32
     f_init = (curl_easy_init_t)GetProcAddress(curl_handle, "curl_easy_init");
-    f_setopt = (curl_easy_setopt_t)GetProcAddress(curl_handle, "curl_easy_setopt");
-    f_perform = (curl_easy_perform_t)GetProcAddress(curl_handle, "curl_easy_perform");
-    f_cleanup = (curl_easy_cleanup_t)GetProcAddress(curl_handle, "curl_easy_cleanup");
-    f_strerror = (curl_easy_strerror_t)GetProcAddress(curl_handle, "curl_easy_strerror");
-    f_global_init = (curl_global_init_t)GetProcAddress(curl_handle, "curl_global_init");
+    f_setopt =
+        (curl_easy_setopt_t)GetProcAddress(curl_handle, "curl_easy_setopt");
+    f_perform =
+        (curl_easy_perform_t)GetProcAddress(curl_handle, "curl_easy_perform");
+    f_cleanup =
+        (curl_easy_cleanup_t)GetProcAddress(curl_handle, "curl_easy_cleanup");
+    f_strerror =
+        (curl_easy_strerror_t)GetProcAddress(curl_handle, "curl_easy_strerror");
+    f_global_init =
+        (curl_global_init_t)GetProcAddress(curl_handle, "curl_global_init");
 #else
     f_init = (curl_easy_init_t)dlsym(curl_handle, "curl_easy_init");
     f_setopt = (curl_easy_setopt_t)dlsym(curl_handle, "curl_easy_setopt");
@@ -1425,7 +1762,8 @@ static char *resolve_remote_module(const char *url) {
   ny_ensure_dir_recursive(cache_dir);
 
   char cache_path[1024];
-  snprintf(cache_path, sizeof(cache_path), "%s/%016llx.ny", cache_dir, (unsigned long long)h);
+  snprintf(cache_path, sizeof(cache_path), "%s/%016llx.ny", cache_dir,
+           (unsigned long long)h);
 
   struct stat st;
   bool reload = ny_env_enabled("NYTRIX_REMOTE_RELOAD");
@@ -1465,8 +1803,8 @@ static char *resolve_remote_module(const char *url) {
   return ny_strdup(cache_path);
 }
 
-static char *resolve_module_path(const char *raw, const char *base_dir, bool prefer_local,
-                                 bool *is_std_out) {
+static char *resolve_module_path(const char *raw, const char *base_dir,
+                                 bool prefer_local, bool *is_std_out) {
   if (!raw)
     /* memory leak patched */ /* memory leak patched */ return NULL;
 
@@ -1476,12 +1814,13 @@ static char *resolve_module_path(const char *raw, const char *base_dir, bool pre
     return resolve_remote_module(raw);
   }
 
-  bool explicit_std = (strncmp(raw, "std.", 4) == 0);
+  bool explicit_core =
+      strcmp(raw, "core") == 0 || strncmp(raw, "core.", 5) == 0;
   bool explicit_lib = (strncmp(raw, "lib.", 4) == 0);
-  bool explicit_pkg = explicit_std || explicit_lib;
-  bool project_std = (strcmp(raw, "std.demo") == 0 ||
-                      strncmp(raw, "std.demo.", 9) == 0);
-  if (prefer_local && project_std) {
+  bool explicit_pkg = explicit_core || explicit_lib;
+  bool project_core =
+      (strcmp(raw, "core.demo") == 0 || strncmp(raw, "core.demo.", 10) == 0);
+  if (prefer_local && project_core) {
     char *local = find_project_demo_module(raw, base_dir);
     if (local) {
       if (is_std_out)
@@ -1542,16 +1881,18 @@ static char *dir_from_path(const char *path) {
 }
 
 typedef struct {
+  size_t id;
+  ny_module_id_t module_id;
+  uint32_t features;
   char *path;
   char *canonical_path;
   char *name;
   bool processed;
-  bool is_std;
   char *bundle_txt;
   size_t bundle_len;
   bool skip_entry;
   int export_depth;
-  char **deps;
+  size_t *deps;
   size_t deps_len;
   size_t deps_cap;
 } mod_entry;
@@ -1582,10 +1923,14 @@ static void mod_list_path_ht_init(mod_list *list, size_t want_cap) {
   if (list->path_ht)
     return;
   list->path_ht_cap = mod_list_pow2_cap(want_cap ? want_cap : 16);
-  list->path_ht = ny_loader_xmalloc(list->path_ht_cap * sizeof(list->path_ht[0]));
-  list->path_idx_ht = ny_loader_xmalloc(list->path_ht_cap * sizeof(list->path_idx_ht[0]));
-  memset((void *)list->path_ht, 0, list->path_ht_cap * sizeof(list->path_ht[0]));
-  memset((void *)list->path_idx_ht, 0, list->path_ht_cap * sizeof(list->path_idx_ht[0]));
+  list->path_ht =
+      ny_loader_xmalloc(list->path_ht_cap * sizeof(list->path_ht[0]));
+  list->path_idx_ht =
+      ny_loader_xmalloc(list->path_ht_cap * sizeof(list->path_idx_ht[0]));
+  memset((void *)list->path_ht, 0,
+         list->path_ht_cap * sizeof(list->path_ht[0]));
+  memset((void *)list->path_idx_ht, 0,
+         list->path_ht_cap * sizeof(list->path_idx_ht[0]));
   list->path_ht_len = 0;
 }
 
@@ -1635,10 +1980,12 @@ static bool mod_list_has_path(mod_list *list, const char *path) {
   return false;
 }
 
-static void mod_list_put_path_idx(mod_list *list, const char *path, size_t entry_idx) {
+static void mod_list_put_path_idx(mod_list *list, const char *path,
+                                  size_t entry_idx) {
   mod_list_path_ht_init(list, list->cap ? list->cap * 2 : 16);
   if ((list->path_ht_len + 1u) * 10u >= list->path_ht_cap * 7u)
-    mod_list_path_ht_rebuild(list, list->path_ht_cap ? list->path_ht_cap * 2u : 32u);
+    mod_list_path_ht_rebuild(list,
+                             list->path_ht_cap ? list->path_ht_cap * 2u : 32u);
   size_t mask = list->path_ht_cap - 1u;
   size_t pos = mod_list_hash_path(path) & mask;
   for (size_t probe = 0; probe < list->path_ht_cap; ++probe) {
@@ -1669,32 +2016,25 @@ static long mod_list_find_index_by_path(mod_list *list, const char *path) {
   return -1;
 }
 
-static void mod_entry_add_dep(mod_entry *entry, const char *path) {
-  if (!entry || !path || !*path)
-    return;
-  if (entry->path && strcmp(entry->path, path) == 0)
+static void mod_entry_add_dep(mod_entry *entry, size_t dep_id) {
+  if (!entry || entry->id == dep_id)
     return;
   for (size_t i = 0; i < entry->deps_len; ++i) {
-    if (strcmp(entry->deps[i], path) == 0)
+    if (entry->deps[i] == dep_id)
       return;
   }
   if (entry->deps_len == entry->deps_cap) {
     size_t nc = entry->deps_cap ? entry->deps_cap * 2 : 4;
-    entry->deps = ny_loader_xrealloc(entry->deps, nc * sizeof(char *));
+    entry->deps = ny_loader_xrealloc(entry->deps, nc * sizeof(size_t));
     entry->deps_cap = nc;
   }
-  entry->deps[entry->deps_len++] = ny_loader_xstrdup(path);
+  entry->deps[entry->deps_len++] = dep_id;
 }
 
-static long mod_list_find_entry_by_path(mod_list *list, const char *path) {
-  if (!list || !path)
-    return -1;
-  return mod_list_find_index_by_path(list, path);
-}
-
-static void mod_list_visit_deps(mod_list *list, size_t idx, unsigned char *state,
-                                size_t *stack, size_t depth, size_t *order,
-                                size_t *order_len, size_t *cycle_count) {
+static void mod_list_visit_deps(mod_list *list, size_t idx,
+                                unsigned char *state, size_t *stack,
+                                size_t depth, size_t *order, size_t *order_len,
+                                size_t *cycle_count) {
   if (!list || idx >= list->len || !state || !order || !order_len)
     return;
   if (state[idx] == 2)
@@ -1706,24 +2046,32 @@ static void mod_list_visit_deps(mod_list *list, size_t idx, unsigned char *state
     size_t begin = 0;
     while (begin < depth && stack[begin] != idx)
       ++begin;
-    fprintf(stderr, "warning: module dependency cycle detected");
+    char detail[2048];
+    int used =
+        snprintf(detail, sizeof(detail), "IMPORT_CYCLE allowed=yes path=");
     for (size_t i = begin; i < depth; ++i)
-      fprintf(stderr, "%s%s", i == begin ? ": " : " -> ",
-              list->entries[stack[i]].name ? list->entries[stack[i]].name
-                                           : list->entries[stack[i]].path);
-    fprintf(stderr, " -> %s\n", list->entries[idx].name
-                                    ? list->entries[idx].name
-                                    : list->entries[idx].path);
+      if (used >= 0 && (size_t)used < sizeof(detail))
+        used += snprintf(detail + used, sizeof(detail) - (size_t)used, "%s%s",
+                         i == begin ? "" : " -> ",
+                         list->entries[stack[i]].name
+                             ? list->entries[stack[i]].name
+                             : list->entries[stack[i]].path);
+    if (used >= 0 && (size_t)used < sizeof(detail))
+      snprintf(detail + used, sizeof(detail) - (size_t)used, " -> %s",
+               list->entries[idx].name ? list->entries[idx].name
+                                       : list->entries[idx].path);
+    ny_log_emit_unchecked(ny_ui_mark("hint"), NY_CLR_GRAY, "%s\n", detail);
     return;
   }
   state[idx] = 1;
   stack[depth++] = idx;
   mod_entry *entry = &list->entries[idx];
   for (size_t i = 0; i < entry->deps_len; ++i) {
-    long dep_idx = mod_list_find_entry_by_path(list, entry->deps[i]);
-    if (dep_idx >= 0 && (size_t)dep_idx != idx && !list->entries[dep_idx].skip_entry) {
-      mod_list_visit_deps(list, (size_t)dep_idx, state, stack, depth, order,
-                          order_len, cycle_count);
+    size_t dep_id = entry->deps[i];
+    if (dep_id < list->len && dep_id != idx &&
+        !list->entries[dep_id].skip_entry) {
+      mod_list_visit_deps(list, dep_id, state, stack, depth, order, order_len,
+                          cycle_count);
     }
   }
   state[idx] = 2;
@@ -1748,8 +2096,9 @@ static void mod_list_sort_for_bundle(mod_list *list) {
     mod_list_visit_deps(list, i, state, stack, 0, order, &order_len,
                         &cycle_count);
   if (ny_trace_enabled("NYTRIX_TRACE_IMPORTS") && cycle_count > 16)
-    fprintf(stderr, "warning: %zu additional module dependency cycles omitted\n",
-            cycle_count - 16);
+    ny_log_emit_unchecked(ny_ui_mark("hint"), NY_CLR_GRAY,
+                          "IMPORT_CYCLES omitted=%zu limit=16\n",
+                          cycle_count - 16);
   /*
    * Module initialization currently follows discovery order. The graph walk
    * validates cycles and dependencies, but must not reorder entries until
@@ -1778,9 +2127,8 @@ static void mod_list_add_ex(mod_list *list, const char *path, const char *name,
                             bool is_std, int export_depth) {
   if (mod_list_has_path(list, path)) {
     long idx = mod_list_find_path_index(list, path);
-    if (idx >= 0 &&
-        ny_export_depth_more_permissive(export_depth,
-                                        list->entries[idx].export_depth)) {
+    if (idx >= 0 && ny_export_depth_more_permissive(
+                        export_depth, list->entries[idx].export_depth)) {
       list->entries[idx].export_depth = export_depth;
       list->entries[idx].processed = false;
     }
@@ -1788,7 +2136,8 @@ static void mod_list_add_ex(mod_list *list, const char *path, const char *name,
   }
   if (list->len == list->cap) {
     size_t new_cap = list->cap ? list->cap * 2 : 16;
-    list->entries = ny_loader_xrealloc(list->entries, new_cap * sizeof(mod_entry));
+    list->entries =
+        ny_loader_xrealloc(list->entries, new_cap * sizeof(mod_entry));
     list->cap = new_cap;
   }
   char *path_dup = ny_loader_xstrdup(path);
@@ -1796,30 +2145,43 @@ static void mod_list_add_ex(mod_list *list, const char *path, const char *name,
   char *canonical_path = ny_realpath(path, canonical)
                              ? ny_loader_xstrdup(canonical)
                              : ny_loader_xstrdup(path);
+  char *declared_name = is_std ? NULL : ny_read_declared_module_name(path);
+  const char *identity_name =
+      declared_name && *declared_name ? declared_name : name;
+  ny_module_id_t module_id = is_std ? ny_loader_module_id(identity_name)
+                                    : ny_user_module_id(identity_name);
+  uint32_t features =
+      is_std ? NY_MODULE_FEATURE_STDLIB : NY_MODULE_FEATURE_USER;
+  free(declared_name);
   size_t entry_idx = list->len;
-  list->entries[list->len++] = (mod_entry){.path = path_dup,
+  list->entries[list->len++] = (mod_entry){.id = entry_idx,
+                                           .module_id = module_id,
+                                           .features = features,
+                                           .path = path_dup,
                                            .canonical_path = canonical_path,
-                                            .name = ny_loader_xstrdup(name),
-                                            .processed = false,
-                                            .is_std = is_std,
-                                            .bundle_txt = NULL,
-                                            .bundle_len = 0,
-                                            .skip_entry = false,
-                                            .export_depth = export_depth};
+                                           .name = ny_loader_xstrdup(name),
+                                           .processed = false,
+                                           .bundle_txt = NULL,
+                                           .bundle_len = 0,
+                                           .skip_entry = false,
+                                           .export_depth = export_depth};
   mod_list_put_path_idx(list, path_dup, entry_idx);
 }
 
-static void mod_list_add(mod_list *list, const char *path, const char *name, bool is_std) {
+static void mod_list_add(mod_list *list, const char *path, const char *name,
+                         bool is_std) {
   mod_list_add_ex(list, path, name, is_std, -1);
 }
 
-static void add_bare_std_modules(mod_list *list) {
-  static const char *const k_std_default_modules[] = {
-      "std.core",      "std.os.prim", "std.math",        "std.math.nt",
-      "std.math.bin",  "std.os",      "std.core.str",
+static void add_bare_core_modules(mod_list *list) {
+  static const char *const k_core_default_modules[] = {
+      "core",          "core.os.prim", "core.math", "core.math.nt",
+      "core.math.bin", "core.os",      "core.str",
   };
-  for (size_t i = 0; i < sizeof(k_std_default_modules) / sizeof(k_std_default_modules[0]); ++i) {
-    int idx = ny_std_find_module_by_name(k_std_default_modules[i]);
+  for (size_t i = 0;
+       i < sizeof(k_core_default_modules) / sizeof(k_core_default_modules[0]);
+       ++i) {
+    int idx = ny_std_find_module_by_name(k_core_default_modules[i]);
     if (idx >= 0)
       mod_list_add(list, ny_std_mods[idx].path, ny_std_mods[idx].name, true);
   }
@@ -1861,16 +2223,19 @@ static int module_export_child_depth(const char *module_name) {
   if (!module_name)
     return -1;
 
-  if (strncmp(module_name, "std.", 4) == 0 && ny_std_module_has_descendant(module_name))
+  int module_idx = ny_std_find_module_by_name(module_name);
+  bool is_stdlib =
+      module_idx >= 0 && (ny_std_module_features((size_t)module_idx) &
+                          NY_MODULE_FEATURE_STDLIB) != 0;
+  if (is_stdlib && ny_std_module_has_descendant(module_name))
     return 1;
   return -1;
 }
 
-static void scan_module_export_dependencies(mod_list *list, const char *module_name,
-                                            lexer_t *lx, token_t *tok,
-                                            const char *base_dir,
-                                            bool prefer_local,
-                                            int child_export_depth) {
+static void
+scan_module_export_dependencies(mod_list *list, const char *module_name,
+                                lexer_t *lx, token_t *tok, const char *base_dir,
+                                bool prefer_local, int child_export_depth) {
   if (!list || !module_name || !*module_name || !lx || !tok)
     return;
   token_t t = *tok;
@@ -1904,7 +2269,8 @@ static void scan_module_export_dependencies(mod_list *list, const char *module_n
     char *child = malloc(full_len + 1);
     if (child) {
       snprintf(child, full_len + 1, "%s.%s", module_name, leaf);
-      add_module_dependency_ex(list, child, base_dir, prefer_local, child_export_depth);
+      add_module_dependency_ex(list, child, base_dir, prefer_local,
+                               child_export_depth);
       free(child);
     }
     free(leaf);
@@ -1930,8 +2296,8 @@ static int ny_std_load_threads(size_t work_items) {
 }
 #endif
 
-static char *ny_build_module_chunk(const char *path, const char *name, size_t *out_len,
-                                   bool append_module_use) {
+static char *ny_build_module_chunk(const char *path, const char *name,
+                                   size_t *out_len, bool append_module_use) {
   if (!path || !name)
     /* memory leak patched */ /* memory leak patched */ return NULL;
   if (ny_std_trace_enabled()) {
@@ -1962,11 +2328,13 @@ static char *ny_build_module_chunk(const char *path, const char *name, size_t *o
         p++;
       continue;
     }
-    if (strncmp(p, "module", 6) == 0 && (isspace((unsigned char)p[6]) || p[6] == '\0')) {
+    if (strncmp(p, "module", 6) == 0 &&
+        (isspace((unsigned char)p[6]) || p[6] == '\0')) {
       has_decl = true;
       break;
     }
-    if (strncmp(p, "use", 3) == 0 && (isspace((unsigned char)p[3]) || p[3] == '\0')) {
+    if (strncmp(p, "use", 3) == 0 &&
+        (isspace((unsigned char)p[3]) || p[3] == '\0')) {
       while (*p && *p != '\n')
         p++;
       continue;
@@ -2030,8 +2398,8 @@ static void *ny_std_source_worker(void *arg) {
       continue;
     if (e->skip_entry)
       continue;
-    e->bundle_txt =
-        ny_build_module_chunk(e->path, e->name, &e->bundle_len, ctx->append_module_uses);
+    e->bundle_txt = ny_build_module_chunk(e->path, e->name, &e->bundle_len,
+                                          ctx->append_module_uses);
   }
   /* memory leak patched */ /* memory leak patched */ return NULL;
 }
@@ -2043,7 +2411,12 @@ static void scan_dependencies(mod_list *list, size_t idx) {
   if (ny_std_trace_enabled()) {
     fprintf(stderr, "STD_TRACE scan: %s\n", list->entries[idx].path);
   }
-  NY_LOG_V2("Scanning dependencies for %s\n", list->entries[idx].path);
+  /*
+   * Compact: the Include-module flow below already names every module;
+   * per-module scan lines doubled the report. Opt in via NYTRIX_LOG_SCAN.
+   */
+  if (getenv("NYTRIX_LOG_SCAN"))
+    NY_LOG_V2("Scanning dependencies for %s\n", list->entries[idx].path);
   list->entries[idx].processed = true;
   char *txt = ny_read_file(list->entries[idx].path);
   if (!txt) {
@@ -2052,7 +2425,8 @@ static void scan_dependencies(mod_list *list, size_t idx) {
   }
 
   char *base_dir = dir_from_path(list->entries[idx].path);
-  bool prefer_local = !list->entries[idx].is_std;
+  bool prefer_local =
+      (list->entries[idx].features & NY_MODULE_FEATURE_STDLIB) == 0;
 
   lexer_t lx;
   lexer_init(&lx, txt, list->entries[idx].path);
@@ -2064,9 +2438,11 @@ static void scan_dependencies(mod_list *list, size_t idx) {
       break;
 
   process_tok:
-    if (t.kind == NY_T_LBRACE || t.kind == NY_T_LPAREN || t.kind == NY_T_LBRACK) {
+    if (t.kind == NY_T_LBRACE || t.kind == NY_T_LPAREN ||
+        t.kind == NY_T_LBRACK) {
       depth++;
-    } else if (t.kind == NY_T_RBRACE || t.kind == NY_T_RPAREN || t.kind == NY_T_RBRACK) {
+    } else if (t.kind == NY_T_RBRACE || t.kind == NY_T_RPAREN ||
+               t.kind == NY_T_RBRACK) {
       if (depth > 0)
         depth--;
     } else if (depth == 0) {
@@ -2093,7 +2469,7 @@ static void scan_dependencies(mod_list *list, size_t idx) {
           token_t next_tok;
           char *raw = parse_use_name(&lx, &mod_tok, &next_tok);
           if (raw) {
-            if (strcmp(raw, "std") == 0 && next_tok.kind == NY_T_IDENT &&
+            if (strcmp(raw, "core") == 0 && next_tok.kind == NY_T_IDENT &&
                 next_tok.line == mod_tok.line) {
               token_t after_tail = next_tok;
               char *tail = parse_use_name(&lx, &next_tok, &after_tail);
@@ -2110,14 +2486,17 @@ static void scan_dependencies(mod_list *list, size_t idx) {
               free(tail);
             }
             bool dep_is_std = false;
-            char *dep_path = resolve_module_path(raw, base_dir, prefer_local, &dep_is_std);
+            char *dep_path =
+                resolve_module_path(raw, base_dir, prefer_local, &dep_is_std);
             if (dep_path) {
               if (!(list->skip_std && dep_is_std)) {
                 char *mname = ny_bundle_module_name(raw, dep_path, dep_is_std);
                 mod_list_add_ex(list, dep_path, mname, dep_is_std, -1);
+                long dep_id = mod_list_find_index_by_path(list, dep_path);
                 if (!dep_is_std)
                   free(mname);
-                mod_entry_add_dep(&list->entries[idx], dep_path);
+                if (dep_id >= 0)
+                  mod_entry_add_dep(&list->entries[idx], (size_t)dep_id);
               }
               free(dep_path);
             }
@@ -2135,18 +2514,30 @@ static void scan_dependencies(mod_list *list, size_t idx) {
   free(txt);
 }
 
-char *ny_build_std_source_ex(const char **modules, size_t module_count, std_mode_t mode,
-                             int verbose, const char *entry_path, bool append_module_uses) {
-  NY_LOG_V1("Generating std.ny source (mode=%d, count=%zu)\n", mode, module_count);
+char *ny_build_std_source_ex(const char **modules, size_t module_count,
+                             std_mode_t mode, int verbose,
+                             const char *entry_path, bool append_module_uses) {
+  static const char *const mode_names[] = {[STD_MODE_DEFAULT] = "default",
+                                           [STD_MODE_NONE] = "none",
+                                           [STD_MODE_FULL] = "full",
+                                           [STD_MODE_MINIMAL] = "minimal",
+                                           [STD_MODE_BC] = "bytecode"};
+  const char *mode_name =
+      (unsigned)mode < sizeof(mode_names) / sizeof(mode_names[0]) &&
+              mode_names[mode]
+          ? mode_names[mode]
+          : "unknown";
+  NY_LOG_V1("Standard library: mode=%s explicit_modules=%zu\n", mode_name,
+            module_count);
   if (mode == STD_MODE_NONE && module_count == 0)
     /* memory leak patched */ /* memory leak patched */ return NULL;
   ny_std_init_modules();
   char *prebuilt_src = NULL;
-  if (ny_std_find_module_by_name("std.core.mod") < 0) {
+  if (ny_std_find_module_by_name("core.mod") < 0) {
     const char *prebuilt = getenv("NYTRIX_STD_PREBUILT");
     if (prebuilt && ny_access(prebuilt, R_OK) == 0) {
       if (verbose)
-        printf("Using prebuilt standard library: %s\n", prebuilt);
+        NY_LOG_V2("Using prebuilt standard library: %s\n", prebuilt);
       prebuilt_src = ny_read_file(prebuilt);
     }
   }
@@ -2161,9 +2552,10 @@ char *ny_build_std_source_ex(const char **modules, size_t module_count, std_mode
     }
   } else {
     if (seed_count == 0 && mode != STD_MODE_NONE) {
-      int core_idx = ny_std_find_module_by_name("std.core");
+      int core_idx = ny_std_find_module_by_name("core");
       if (core_idx >= 0) {
-        mod_list_add(&mods, ny_std_mods[core_idx].path, ny_std_mods[core_idx].name, true);
+        mod_list_add(&mods, ny_std_mods[core_idx].path,
+                     ny_std_mods[core_idx].name, true);
       } else {
 
         for (size_t j = 0; j < ny_std_mods_len; ++j) {
@@ -2174,13 +2566,14 @@ char *ny_build_std_source_ex(const char **modules, size_t module_count, std_mode
   }
   for (size_t i = 0; i < seed_count; ++i) {
     const char *raw = seed_modules[i];
-    const char *name = strip_std_prefix(raw);
-    if (strcmp(name, "std") == 0) {
-      add_bare_std_modules(&mods);
+    const char *name = strip_core_prefix(raw);
+    if (strcmp(name, "core") == 0) {
+      add_bare_core_modules(&mods);
       continue;
     }
     bool is_std = false;
-    char *path = resolve_module_path(raw, entry_dir ? entry_dir : ".", true, &is_std);
+    char *path =
+        resolve_module_path(raw, entry_dir ? entry_dir : ".", true, &is_std);
     if (path) {
       char *mname = ny_bundle_module_name(raw, path, is_std);
       mod_list_add(&mods, path, mname, is_std);
@@ -2205,14 +2598,16 @@ char *ny_build_std_source_ex(const char **modules, size_t module_count, std_mode
     changed = false;
     size_t current_len = mods.len;
     for (size_t i = 0; i < current_len; ++i) {
-      if (mods.entries[i].processed) continue;
+      if (mods.entries[i].processed)
+        continue;
       scan_dependencies(&mods, i);
       if (mods.len > current_len)
         changed = true;
     }
   }
   for (size_t i = 0; i < mods.len; ++i) {
-    if (mods.entries[i].processed) continue;
+    if (mods.entries[i].processed)
+      continue;
     scan_dependencies(&mods, i);
   }
   mod_list_sort_for_bundle(&mods);
@@ -2240,11 +2635,10 @@ char *ny_build_std_source_ex(const char **modules, size_t module_count, std_mode
   if (mods.len > 0) {
     int threads = ny_std_load_threads(mods.len);
     if (threads > 1) {
-      bundle_ctx ctx = {
-          .entries = mods.entries,
-          .count = mods.len,
-          .next = 0,
-          .append_module_uses = append_module_uses};
+      bundle_ctx ctx = {.entries = mods.entries,
+                        .count = mods.len,
+                        .next = 0,
+                        .append_module_uses = append_module_uses};
       pthread_mutex_init(&ctx.mu, NULL);
       if ((size_t)threads > mods.len)
         threads = (int)mods.len;
@@ -2269,8 +2663,8 @@ char *ny_build_std_source_ex(const char **modules, size_t module_count, std_mode
             continue;
           if (!mods.entries[i].bundle_txt) {
             mods.entries[i].bundle_txt = ny_build_module_chunk(
-                mods.entries[i].path, mods.entries[i].name, &mods.entries[i].bundle_len,
-                append_module_uses);
+                mods.entries[i].path, mods.entries[i].name,
+                &mods.entries[i].bundle_len, append_module_uses);
           }
         }
       }
@@ -2280,8 +2674,8 @@ char *ny_build_std_source_ex(const char **modules, size_t module_count, std_mode
           continue;
         if (!mods.entries[i].bundle_txt) {
           mods.entries[i].bundle_txt = ny_build_module_chunk(
-              mods.entries[i].path, mods.entries[i].name, &mods.entries[i].bundle_len,
-              append_module_uses);
+              mods.entries[i].path, mods.entries[i].name,
+              &mods.entries[i].bundle_len, append_module_uses);
         }
       }
     }
@@ -2291,9 +2685,9 @@ char *ny_build_std_source_ex(const char **modules, size_t module_count, std_mode
     if (mods.entries[i].skip_entry)
       continue;
     if (!mods.entries[i].bundle_txt) {
-      mods.entries[i].bundle_txt = ny_build_module_chunk(mods.entries[i].path, mods.entries[i].name,
-                                                         &mods.entries[i].bundle_len,
-                                                         append_module_uses);
+      mods.entries[i].bundle_txt = ny_build_module_chunk(
+          mods.entries[i].path, mods.entries[i].name,
+          &mods.entries[i].bundle_len, append_module_uses);
     }
   }
 #endif
@@ -2309,11 +2703,29 @@ char *ny_build_std_source_ex(const char **modules, size_t module_count, std_mode
     memmove(bundle, prebuilt_src, total + 1);
     free(prebuilt_src);
   }
+  size_t included_modules = 0;
+  /*
+   * Compact module flow: collect names and print one wrapped line instead
+   * of one line per module (wide, not tall). Paths drop under NYTRIX_LOG_SCAN.
+   */
+  char *mod_flow = verbose ? malloc(1 << 15) : NULL;
+  size_t mod_flow_len = 0;
+  if (mod_flow)
+    mod_flow[0] = '\0';
   for (size_t i = 0; i < mods.len; ++i) {
     if (mods.entries[i].skip_entry)
       continue;
-    if (verbose)
-      printf("Including module: %s (%s)\n", mods.entries[i].name, mods.entries[i].path);
+    included_modules++;
+    ny_dbg_register_module_prefix(mods.entries[i].name);
+    if (verbose && mod_flow &&
+        mod_flow_len + strlen(mods.entries[i].name) + 2 < (1 << 15)) {
+      if (mod_flow_len)
+        mod_flow[mod_flow_len++] = ' ';
+      size_t nl = strlen(mods.entries[i].name);
+      memcpy(mod_flow + mod_flow_len, mods.entries[i].name, nl);
+      mod_flow_len += nl;
+      mod_flow[mod_flow_len] = '\0';
+    }
     char *chunk = mods.entries[i].bundle_txt;
     if (chunk) {
       append_text(&bundle, &total, &cap, chunk);
@@ -2321,12 +2733,30 @@ char *ny_build_std_source_ex(const char **modules, size_t module_count, std_mode
       mods.entries[i].bundle_txt = NULL;
     }
   }
+  if (verbose && mod_flow) {
+    if (mod_flow_len) {
+      fprintf(stderr, "› Modules (%zu): ", included_modules);
+      size_t off = 0, col = 16;
+      while (off < mod_flow_len) {
+        char *sp = strchr(mod_flow + off, ' ');
+        size_t tok = sp ? (size_t)(sp - (mod_flow + off)) : mod_flow_len - off;
+        if (col + tok + 1 > 98) {
+          fprintf(stderr, "\n  ");
+          col = 2;
+        }
+        fprintf(stderr, "%.*s ", (int)tok, mod_flow + off);
+        col += tok + 1;
+        off += tok + (sp ? 1 : 0);
+      }
+      fputc('\n', stderr);
+    }
+    free(mod_flow);
+  }
+
   for (size_t i = 0; i < mods.len; ++i) {
     free(mods.entries[i].path);
     free(mods.entries[i].canonical_path);
     free(mods.entries[i].name);
-    for (size_t j = 0; j < mods.entries[i].deps_len; ++j)
-      free(mods.entries[i].deps[j]);
     free(mods.entries[i].deps);
     if (mods.entries[i].bundle_txt)
       free(mods.entries[i].bundle_txt);
@@ -2337,15 +2767,17 @@ char *ny_build_std_source_ex(const char **modules, size_t module_count, std_mode
     free((void *)mods.path_ht);
   if (mods.path_idx_ht)
     free((void *)mods.path_idx_ht);
-  if (verbose)
-    NY_LOG_INFO("Loaded module bundle: %zu bytes\n", total);
+  NY_LOG_V1("Standard library ready: modules=%zu source_bytes=%zu\n",
+            included_modules, total);
   free(entry_dir);
   return bundle;
 }
 
-char *ny_build_std_source(const char **modules, size_t module_count, std_mode_t mode, int verbose,
+char *ny_build_std_source(const char **modules, size_t module_count,
+                          std_mode_t mode, int verbose,
                           const char *entry_path) {
-  return ny_build_std_source_ex(modules, module_count, mode, verbose, entry_path, true);
+  return ny_build_std_source_ex(modules, module_count, mode, verbose,
+                                entry_path, true);
 }
 
 static const char *std_symbol_qname(arena_t *arena, const char *pkg,
@@ -2361,8 +2793,8 @@ static const char *std_symbol_qname(arena_t *arena, const char *pkg,
   return out;
 }
 
-static void append_c_symbol(stmt_t *s, const char *pkg, char **hdr,
-                            size_t *len, size_t *capv, arena_t *scratch) {
+static void append_c_symbol(stmt_t *s, const char *pkg, char **hdr, size_t *len,
+                            size_t *capv, arena_t *scratch) {
   if (!s)
     return;
   if (s->kind == NY_S_FUNC) {
@@ -2414,9 +2846,10 @@ char *ny_std_generate_c_symbols_header(std_mode_t mode) {
   append_text(&header, &total, &cap,
               "typedef struct { const char *sym; const char *mod; } "
               "nt_std_symbol;");
-  append_text(&header, &total, &cap, "static const nt_std_symbol nt_std_symbols[] = {");
+  append_text(&header, &total, &cap,
+              "static const nt_std_symbol nt_std_symbols[] = {");
   for (size_t i = 0; i < prog.body.len; ++i) {
-    append_c_symbol(prog.body.data[i], "std", &header, &total, &cap,
+    append_c_symbol(prog.body.data[i], "core", &header, &total, &cap,
                     parser.arena);
   }
   append_text(&header, &total, &cap, "    {0, 0}");

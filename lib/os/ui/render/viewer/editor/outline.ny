@@ -1,11 +1,11 @@
 ;; Keywords: editor outline symbols navigation os ui render viewer text
 ;; Outline tree helpers for symbols, headings, and editor navigation.
 ;; References:
-;; - std.os.ui.render.viewer.editor.lsp
-module std.os.ui.render.viewer.editor.outline(ROW_H, symbols, row_y, row_at, icon_for)
-use std.core
-use std.core.str as str
-use std.math (min)
+;; - core.os.ui.render.viewer.editor.lsp
+module core.os.ui.render.viewer.editor.outline(ROW_H, symbols, row_y, row_at, icon_for)
+use core
+use core.str as str
+use core.math (min)
 
 def ROW_H = 28.0
 

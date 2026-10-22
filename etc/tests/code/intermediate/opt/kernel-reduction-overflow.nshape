@@ -1,0 +1,56 @@
+shape optcheck_kernel_reduction_overflow {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle optcheck kernel-family reduction xor trap-guard branch]
+  template ny-test-case
+  flags_matrix "-O0 --color=never; -O3 --color=never; --native-only -O0 --color=never; --native-only -O3 --color=never; --native-backend=llvm --jit --jit-engine=mcjit --color=never"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+;; Adversarial integer-reduction differential for the reduction transform
+;; family.  The checksum folds an xor tree over opposing high-bit counters,
+;; a loop-invariant branch the optimizer may unswitch, and a division whose
+;; zero-divisor trap is owned by a dominating guard fed from runtime data.
+;; Optimizers may unswitch or specialize, but may not reorder the xor/add
+;; chain across the branch, speculate the guarded division (the divisor is
+;; zero twice), or drop the known-answer assertion.
+
+fn run() int {
+   ;; Known-answer guard so a broken reduction cannot pass silently.
+   def probe = [1, 2, 3, 4]
+   mut probe_sum = 0
+   mut p = 0
+   while p < 4 {
+      probe_sum += probe[p] * (p + 1)
+      p += 1
+   }
+   assert(probe_sum == 30, "known-answer reduction")
+
+   def divisors = [3, 0, -2, 5, 0, 7, 1, -4]
+   mut acc = 0
+   mut hi = 2305843009213693951
+   mut lo = -2305843009213693951
+   mut i = 0
+   while i < 64 {
+      hi = hi - 1
+      lo = lo + 1
+      acc = acc ^ (hi + lo) + 31
+      ;; Loop-invariant condition: legal to unswitch, illegal to reorder
+      ;; across the reduction chain.
+      if (i & 1) == 1 {
+         acc = acc + 7
+      }
+      ;; The divisor is zero for i = 1 and i = 4; the guard owns the trap.
+      def d = divisors[i & 7]
+      if d != 0 { acc = acc + 120000 / d } else { acc = acc + 17 }
+      i += 1
+   }
+   acc
+}
+
+def checksum = run()
+print("checksum=", checksum)
+assert(checksum == 891616, "reduction checksum")
+NY
+}

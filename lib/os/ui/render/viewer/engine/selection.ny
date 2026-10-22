@@ -1,12 +1,12 @@
 ;; Keywords: engine selection gizmo picking transform model os ui render viewer scene
 ;; Selection and transform target helpers for engine gizmos and model editing.
 ;; References:
-;; - std.os.ui.render.viewer.engine.state
-;; - std.os.ui.render.viewer.gizmo
-module std.os.ui.render.viewer.engine.selection(selection_bounds_valid, selection_bounds_from_part_bounds, selection_bounds_from_parts, selection_bounds_from_gpu_parts, selection_bounds_from_scene, selection_gizmo_label, selection_gizmo_mode, selection_rect, selection_rect_contains, selection_overlay_rects, selection_overlay_hit_test)
-use std.core
-use std.math
-use std.core.str as str
+;; - core.os.ui.render.viewer.engine.state
+;; - core.os.ui.render.viewer.gizmo
+module core.os.ui.render.viewer.engine.selection(selection_bounds_valid, selection_bounds_from_part_bounds, selection_bounds_from_parts, selection_bounds_from_gpu_parts, selection_bounds_from_scene, selection_gizmo_label, selection_gizmo_mode, selection_rect, selection_rect_contains, selection_overlay_rects, selection_overlay_hit_test)
+use core
+use core.math
+use core.str as str
 
 fn selection_bounds_valid(any v) bool {
    "Returns whether a value can be used as a 3D bounds vector."
@@ -383,5 +383,5 @@ fn selection_bounds_from_scene(any scene_obj) list {
    assert_bounds(selection_bounds_from_scene({"min": [0, 0, 0], "max": [1, 1, 1], "edit_scale": 2.0}), 0.0, 0.0, 0.0, 2.0, 2.0, 2.0, "selection scene edit scale")
    assert_bounds(selection_bounds_from_scene({"min": [0, 0, 0], "max": [1, 1, 1], "fit_scale": 2.0, "fit_tx": 5.0, "fit_ty": 6.0, "fit_tz": 7.0}), 5.0, 6.0, 7.0, 7.0, 8.0, 9.0, "selection scene fit")
    assert_bounds(selection_bounds_from_scene({"children": [{"min": [-500, 0, -400], "max": [500, 80, 400]}, {"min": [600, 0, -10], "max": [620, 20, 10]}]}), -500.0, 0.0, -400.0, 620.0, 80.0, 400.0, "selection hierarchy sponza bounds")
-   print("✓ std.os.ui.render.viewer.engine.selection self-test passed")
+   print("✓ core.os.ui.render.viewer.engine.selection self-test passed")
 }

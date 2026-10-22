@@ -2,20 +2,20 @@
 ;; Symmetric-crypto routines for Salsa20 stream cipher operations.
 ;; Reference: https://cr.yp.to/snuffle/salsa20.pdf
 ;; References:
-;; - std.math.crypto.symmetric
-;; - std.math.crypto
-module std.math.crypto.symmetric.salsa20(salsa20_encrypt, salsa20_decrypt, salsa20_block)
-use std.core
-use std.math.bin (unpack_le32)
+;; - core.math.crypto.symmetric
+;; - core.math.crypto
+module core.math.crypto.symmetric.salsa20(salsa20_encrypt, salsa20_decrypt, salsa20_block)
+use core
+use core.math.bin (unpack_le32)
 
 fn _rotl32(int x, int n) int { ((x << n) | (x >> (32 - n))) & 0xffffffff }
 
 fn _quarter_round(list v, int a, int b, int c, int d) any {
    mut va, vb, vc, vd = v[a], v[b], v[c], v[d]
-   vb = vb ^^ _rotl32((va + vd) & 0xffffffff, 7)
-   vc = vc ^^ _rotl32((vb + va) & 0xffffffff, 9)
-   vd = vd ^^ _rotl32((vc + vb) & 0xffffffff, 13)
-   va = va ^^ _rotl32((vd + vc) & 0xffffffff, 18)
+   vb = vb ^ _rotl32((va + vd) & 0xffffffff, 7)
+   vc = vc ^ _rotl32((vb + va) & 0xffffffff, 9)
+   vd = vd ^ _rotl32((vc + vb) & 0xffffffff, 13)
+   va = va ^ _rotl32((vd + vc) & 0xffffffff, 18)
    v[a] = va
    v[b] = vb
    v[c] = vc
@@ -66,7 +66,7 @@ fn _salsa20_xor_block(list out, list data, int offset, list st) list {
    while j < 64 && (offset + j) < data.len {
       def keystream_word = st[j / 4]
       def keystream_byte = (keystream_word >> (8 * (j % 4))) & 0xff
-      out[offset + j] = data[offset + j] ^^ keystream_byte
+      out[offset + j] = data[offset + j] ^ keystream_byte
       j += 1
    }
    out
@@ -134,5 +134,5 @@ fn salsa20_decrypt(list key, list nonce, int counter, list ciphertext) list {
    def enc = salsa20_encrypt(key, nonce, 0, msg)
    assert(enc != msg, "ciphertext differs")
    assert(salsa20_decrypt(key, nonce, 0, enc) == msg, "roundtrip")
-   print("✓ std.math.crypto.symmetric.salsa20 self-test passed")
+   print("✓ core.math.crypto.symmetric.salsa20 self-test passed")
 }

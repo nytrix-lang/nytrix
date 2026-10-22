@@ -1,0 +1,120 @@
+shape optcheck_kernel_family_combined {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle optcheck kernel-family numeric crypto mutation alias]
+  template ny-test-case
+  flags_matrix "-O0 --color=never; -O3 --color=never; --native-only -O0 --color=never; --native-only -O3 --color=never; --native-backend=llvm --jit --jit-engine=mcjit --color=never"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+mut effect_calls = 0
+
+fn effectful_tick(int value) int {
+  effect_calls += 1
+  value * effect_calls
+}
+
+fn effectful_loop_kernel() int {
+  mut total = 0
+  mut i = 0
+  while i < 17 {
+    total += effectful_tick(i)
+    i += 1
+  }
+  total + effect_calls
+}
+
+fn reduction_kernel() int {
+  def divisors = [3, 0, -2, 5, 0, 7, 1, -4]
+  mut acc = 0
+  mut hi = 2305843009213693951
+  mut lo = -2305843009213693951
+  mut i = 0
+  while i < 64 {
+    hi -= 1
+    lo += 1
+    acc = acc ^ (hi + lo) + 31
+    if (i & 1) == 1 { acc += 7 }
+    def d = divisors[i & 7]
+    if d != 0 { acc += 120000 / d } else { acc += 17 }
+    i += 1
+  }
+  acc
+}
+
+fn list_mutation_kernel() int {
+  mut xs = []
+  mut i = 0
+  while i < 32 {
+    xs = append(xs, (i * 37 + 11) & 0xFFFF)
+    i += 1
+  }
+  mut acc = 0
+  mut j = 0
+  while j < 32 {
+    xs[j] = (xs[j] * 7 + j) & 0xFFFF
+    acc = (acc + xs[j]) & 0xFFFFFFFF
+    if j == 15 {
+      xs = append(xs, 65535)
+      acc = (acc + xs.len()) & 0xFFFFFFFF
+    }
+    j += 1
+  }
+  acc = (acc + xs[32]) & 0xFFFFFFFF
+  acc
+}
+
+fn alias_kernel() int {
+  mut xs = [1, 2, 3, 4]
+  def alias = xs
+  alias[1] = 20
+  xs = append(xs, 5)
+  assert(xs.len() == 5 && alias.len() == 4,
+         "copy-on-write lengths remain independent")
+  assert(xs[1] == 2 && alias[1] == 20,
+         "copy-on-write indexed stores remain independent")
+  xs[3] = 40
+  assert(xs[3] == 40 && alias[3] == 4,
+         "later mutation preserves the original alias")
+  xs[0] + xs[1] + xs[2] + xs[3] + xs[4] +
+      alias[0] + alias[1] + alias[2] + alias[3]
+}
+
+fn rotr32(int value, int amount) int {
+  ((value >> amount) | (value << (32 - amount))) & 0xFFFFFFFF
+}
+
+fn crypto_kernel() int {
+  mut a = 0
+  mut b = 0xFFFFFFFF
+  mut c = 0x01234567
+  mut d = 0x89ABCDEF
+  mut round = 0
+  while round < 48 {
+    def t = (d + round + 0x9E3779B9) & 0xFFFFFFFF
+    d = c
+    c = b
+    b = (a + rotr32(t, 7) + b) & 0xFFFFFFFF
+    a = t ^ 0xFFFFFFFF
+    b = b ^ rotr32(a, (round & 15) + 1)
+    round += 1
+  }
+  (a + (b * 3) + (c * 5) + (d * 7)) & 0xFFFFFFFF
+}
+
+def reduction = reduction_kernel()
+def mutation = list_mutation_kernel()
+def aliasing = alias_kernel()
+def crypto = crypto_kernel()
+def effects = effectful_loop_kernel()
+print("kernels=", reduction, ",", mutation, ",", aliasing, ",", crypto,
+      ",", effects)
+assert(reduction == 891616, "combined reduction checksum")
+assert(mutation == 196992, "combined list mutation checksum")
+assert(aliasing == 79, "combined alias checksum")
+assert(crypto == 1942488320, "combined crypto checksum")
+assert(effects == 1649 && effect_calls == 17,
+       "effectful loop calls stay ordered and observable")
+NY
+}

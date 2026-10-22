@@ -1,11 +1,11 @@
 ;; Keywords: block-cipher mode ige math crypto
 ;; Block-mode routines for IGE bit-flipping analysis.
 ;; References:
-;; - std.math.crypto.block.mode
-;; - std.math.crypto
-module std.math.crypto.block.mode.ige(ige_bit_flipping)
-use std.core
-use std.math.bin
+;; - core.math.crypto.block.mode
+;; - core.math.crypto
+module core.math.crypto.block.mode.ige(ige_bit_flipping)
+use core
+use core.math.bin
 
 fn ige_bit_flipping(any iv1, any iv2, list ct, int pos, int old_byte, int new_byte) list {
    "Flip a byte in IGE-decrypted plaintext by modifying ciphertext bytes.
@@ -21,7 +21,7 @@ fn ige_bit_flipping(any iv1, any iv2, list ct, int pos, int old_byte, int new_by
    new_byte: desired byte value after modification
    Returns modified ciphertext byte list."
    def block_size = 16
-   def diff = bxor(old_byte, new_byte)
+   def diff = old_byte ^ new_byte
    def block_idx = pos / block_size
    def byte_offset = pos % block_size
    mut modified_ct = clone(ct)
@@ -30,12 +30,12 @@ fn ige_bit_flipping(any iv1, any iv2, list ct, int pos, int old_byte, int new_by
    def ct_len = ct.len
    if target_pos < ct_len {
       def orig_ct_byte = modified_ct[target_pos]
-      modified_ct[target_pos] = bxor(orig_ct_byte, diff)
+      modified_ct[target_pos] = orig_ct_byte ^ diff
    }
    if ct_block < (ct_len / block_size) {
       def next_block_start = ct_block * block_size + byte_offset
       def prev_next_byte = modified_ct[next_block_start]
-      modified_ct[next_block_start] = bxor(prev_next_byte, diff)
+      modified_ct[next_block_start] = prev_next_byte ^ diff
    }
    modified_ct
 }

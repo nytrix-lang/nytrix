@@ -1,0 +1,35 @@
+shape operator_identity_survives_chained_module_reexport {
+  family "runtime/modules/use"
+  generator "regression"
+  features ["ny", "test", "modules", "operator", "reexport"]
+  template ny-test-case
+  flags_matrix "-no-std --native --run; -no-std --native-backend=llvm --jit --jit-engine=mcjit; -no-std --native-backend=llvm --jit --jit-engine=orc; -no-std --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+struct Meter { int value }
+module OperatorProvider(pick_left, pick_right) {
+  fn pick_left(Meter left, Meter right) Meter {
+    return left
+  }
+  fn pick_right(Meter left, Meter right) Meter {
+    return right
+  }
+  operator Meter + Meter: Meter = pick_left
+  operator Meter - Meter: Meter = pick_right
+}
+module OperatorBridge(pick_left, pick_right) {
+  use OperatorProvider (pick_left, pick_right)
+}
+use OperatorBridge (pick_left, pick_right)
+fn apply_operator_with_shadow(Meter left, Meter right) Meter {
+  def pick_left = right
+  left + right
+}
+def Meter left = Meter({"value": 19})
+def Meter right = Meter({"value": 23})
+assert(left + right == left && left - right == right,
+       "re-exported operator targets receive their selected operand positions")
+assert(apply_operator_with_shadow(left, right) == left,
+       "local value shadowing the operator target does not change dispatch")
+NY
+}

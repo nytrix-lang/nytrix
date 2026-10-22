@@ -1,11 +1,11 @@
 ;; Keywords: time datetime timestamps os
 ;; Os Time for Nytrix
 ;; References:
-;; - std.os
-module std.os.time(time, now, unix, now_ms, sleep, msleep, ticks, monotonic_ns, Instant, instant, since_ns, since_ms, Timer, timer, timer_start, elapsed_ns, elapsed_ms, elapsed_sec, reset, _is_leap, _days_in_month, _days_in_year, _pad2, _pad4, format, format_time)
-use std.core
-use std.os.sys
-use std.core.str
+;; - core.os
+module core.os.time(time, now, unix, now_ms, sleep, msleep, ticks, monotonic_ns, Instant, instant, since_ns, since_ms, Timer, timer, timer_start, elapsed_ns, elapsed_ms, elapsed_sec, reset, _is_leap, _days_in_month, _days_in_year, _pad2, _pad4, format, format_time)
+use core
+use core.os.sys
+use core.str
 
 fn _is_leap(int y) int {
    ((y % 4) == 0 && ((y % 100) != 0 || (y % 400) == 0)) ? 1 : 0
@@ -67,9 +67,16 @@ fn sleep(int s) any {
    msleep(s * 1000)
 }
 
+@inline
 fn ticks() int {
    "Returns a high-resolution monotonic tick count in nanoseconds. Useful for precise timing and benchmarking."
-   __ticks_ns()
+   ;; The dynamic-ABI tick entry returns the tagged encoding; this raw
+   ;; entrypoint returns plain nanoseconds so `t1 - t0` is the true elapsed
+   ;; time.  Inlining the raw call into every caller keeps the result in the
+   ;; raw integer ABI even when this module function itself is reached
+   ;; through a dynamic/module boundary (a boxed result doubled or shifted
+   ;; self-timed measurements by the machine uptime).
+   __monotonic_ns_raw()
 }
 
 fn now() int {
@@ -159,5 +166,5 @@ fn format(any ts) str {
    assert(elapsed_ns(t) >= 0, "time timer elapsed")
    def start = Instant()
    assert(since_ns(start) >= 0, "time instant since")
-   print("✓ std.os.time self-test passed")
+   print("✓ core.os.time self-test passed")
 }

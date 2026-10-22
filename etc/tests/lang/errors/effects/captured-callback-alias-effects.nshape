@@ -1,0 +1,33 @@
+shape captured_callback_alias_effects_reach_the_caller {
+  family "typing/effects"
+  generator "regression"
+  features ["ny" "test" "typing" "effects" "callback" "alias" "capture"]
+  template ny-test-case
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_fail
+  expect_message "declared @effects(alloc) but inferred effects=io|alloc"
+  source ny <<'NY'
+@effects(io)
+fn print_answer() int {
+  print("answer\n")
+  42
+}
+
+@effects(e)
+fn run_eff(fnptr callback) int {
+  callback()
+}
+
+fn make_aliased_wrapped_callback(fnptr callback) fnptr {
+  def captured = callback
+  return fn() { captured() }
+}
+
+@effects(alloc)
+fn invoke_aliased_wrapped_io_callback() int {
+  run_eff(make_aliased_wrapped_callback(print_answer))
+}
+
+invoke_aliased_wrapped_io_callback()
+NY
+}

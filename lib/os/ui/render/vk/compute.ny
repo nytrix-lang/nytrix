@@ -1,7 +1,7 @@
 ;; Keywords: render vulkan gpu compute os ui
 ;; Vulkan compatibility facade for backend-neutral compute sidecar descriptors.
-module std.os.ui.render.vk.compute(compute_caps, compute_workgroups, gltf_material_compute_shader, speculative_gi_probe_shader, ibl_prefilter_shader, brdf_lut_shader, transmission_blur_shader, material_ext_resolve_shader, refraction_resolve_shader, compute_pass_desc, compute_feature_mask, COMPUTE_FEATURE_REFRACTION, COMPUTE_FEATURE_TRANSMISSION, COMPUTE_FEATURE_VOLUME, COMPUTE_FEATURE_DIFFUSE_TRANSMISSION, COMPUTE_FEATURE_SPECULAR_GI, COMPUTE_FEATURE_MESH_INSTANCING)
-use std.os.ui.render.compute as render_compute
+module core.os.ui.render.vk.compute(compute_caps, compute_workgroups, gltf_material_compute_shader, speculative_gi_probe_shader, ibl_prefilter_shader, brdf_lut_shader, transmission_blur_shader, material_ext_resolve_shader, refraction_resolve_shader, compute_pass_desc, compute_feature_mask, COMPUTE_FEATURE_REFRACTION, COMPUTE_FEATURE_TRANSMISSION, COMPUTE_FEATURE_VOLUME, COMPUTE_FEATURE_DIFFUSE_TRANSMISSION, COMPUTE_FEATURE_SPECULAR_GI, COMPUTE_FEATURE_MESH_INSTANCING)
+use core.os.ui.render.compute as render_compute
 
 def COMPUTE_FEATURE_REFRACTION = render_compute.COMPUTE_FEATURE_REFRACTION
 def COMPUTE_FEATURE_TRANSMISSION = render_compute.COMPUTE_FEATURE_TRANSMISSION

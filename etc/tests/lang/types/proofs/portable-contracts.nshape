@@ -1,0 +1,1610 @@
+shape portable_proof_contracts {
+  family "runtime/proofs"
+  generator "program"
+  features ["proofs", "requires", "division", "fin", "index", "loop-flow", "backend-parity"]
+  timeout 180
+  template ny-test-case
+  expect compile_and_run
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  source ny <<'NY'
+use core
+
+def values = [10, 20, 30, 40]
+def module_upper = 10
+
+module ProofProvider(below_default) {
+  def int upper_bound = 10
+  fn below_default(int value, int upper = upper_bound + 2) int
+      requires value < upper {
+    value
+  }
+}
+use ProofProvider as proof_provider
+
+module PredicateProvider(is_positive) {
+  @pure
+  fn is_positive(int value) bool {
+    value > 0
+  }
+}
+use PredicateProvider as predicate_provider
+
+impl int {
+  @pure
+  fn contract_is_positive(self value) bool {
+    value > 0
+  }
+
+  fn contract_value(self value, int minimum) int requires value > minimum {
+    value
+  }
+
+  fn contract_pair(self first, int second, int third) int
+      requires first > 0 && second > 0 && third > 0 {
+    first + second + third
+  }
+}
+
+fn natsum(int n) int requires n >= 0 {
+  n * (n + 1) / 2
+}
+
+fn half_bounded(int value) int requires value / 2 <= 5 {
+  value
+}
+
+fn remainder_bounded(int value) int requires value % 5 <= 4 {
+  value
+}
+
+fn forward_remainder_bounded(int value) int
+    requires value >= -100 && value <= 100 {
+  remainder_bounded(value)
+}
+
+fn remainder_negative_divisor_bounded(int value)
+    int requires value % -5 >= -4 {
+  value
+}
+
+fn forward_remainder_negative_divisor_bounded(int value)
+    int requires value >= -100 && value <= 100 {
+  remainder_negative_divisor_bounded(value)
+}
+
+fn remainder_by_bounded_divisor(int value, int divisor) int
+    requires value % divisor <= 4 {
+  value
+}
+
+fn forward_remainder_by_bounded_divisor(int value, int divisor) int
+    requires value >= 0 && value <= 100 && divisor >= 1 && divisor <= 5 {
+  remainder_by_bounded_divisor(value, divisor)
+}
+
+fn remainder_by_negative_divisor(int value, int divisor) int
+    requires value % divisor >= -4 {
+  value
+}
+
+fn forward_remainder_by_negative_divisor(int value, int divisor) int
+    requires value >= -100 && value <= 100 && divisor >= -5 && divisor <= -1 {
+  remainder_by_negative_divisor(value, divisor)
+}
+
+fn remainder_by_minus_one(int value) int requires value % -1 == 0 {
+  value
+}
+
+fn forward_remainder_by_minus_one(int value) int
+    requires value >= -100 && value <= 100 {
+  remainder_by_minus_one(value)
+}
+
+fn forward_half_bounded(int value) int requires value >= 0 && value <= 10 {
+  half_bounded(value)
+}
+
+fn divided_value_bounded(int value, int divisor) int
+    requires value / divisor <= 10 {
+  value
+}
+
+fn forward_divided_value_bounded(int value, int divisor)
+    int requires value >= 0 && value <= 10 && divisor >= 1 {
+  divided_value_bounded(value, divisor)
+}
+
+fn negative_divided_value_bounded(int value, int divisor) int
+    requires value / divisor >= -4 {
+  value
+}
+
+fn forward_negative_divided_value_bounded(int value, int divisor) int
+    requires value >= -9 && value <= -1 && divisor >= 2 && divisor <= 5 {
+  negative_divided_value_bounded(value, divisor)
+}
+
+fn quotient_with_negative_divisor_nonpositive(int value, int divisor) int
+    requires value / divisor <= 0 {
+  value
+}
+
+fn forward_quotient_with_negative_divisor(int value, int divisor) int
+    requires value >= 0 && divisor <= -1 {
+  quotient_with_negative_divisor_nonpositive(value, divisor)
+}
+
+fn quotient_with_two_negative_operands_nonnegative(int value, int divisor) int
+    requires value / divisor >= 0 {
+  value
+}
+
+fn forward_quotient_with_two_negative_operands(int value, int divisor) int
+    requires value >= -9 && value <= 0 && divisor <= -1 {
+  quotient_with_two_negative_operands_nonnegative(value, divisor)
+}
+
+fn strictly_greater_after_increment(int value) int
+    requires value + 1 > value {
+  value
+}
+
+fn sum_from_contract(int n) int requires n > 0 {
+  natsum(n)
+}
+
+fn below_default(int value, int upper = 10) int requires value < upper {
+  value
+}
+
+fn below_parameter_default(int value, int upper = value + 1) int
+    requires value < upper {
+  value
+}
+
+fn below_parameter_chain(int value, int upper = value + 1,
+                         int limit = upper + 1) int
+    requires value < limit {
+  value
+}
+
+fn positive_pair(int first, int second) int
+    requires first > 0 && second > 0 {
+  first + second
+}
+
+fn forward_mixed_arguments(int value) int requires value > 0 {
+  positive_pair(value, second: 1)
+}
+
+fn forward_named_then_positional(int value) int requires value > 0 {
+  positive_pair(first: value, 1)
+}
+
+fn forward_mixed_method(int value) int requires value > 0 {
+  value.contract_pair(1, third: 2)
+}
+
+fn forward_named_then_positional_method(int value) int requires value > 0 {
+  value.contract_pair(third: 2, 1)
+}
+
+fn forward_default(int value) int requires value < 10 {
+  below_default(value)
+}
+
+fn forward_named_default(int value) int requires value < 10 {
+  below_default(value: value)
+}
+
+fn forward_parameter_default(int value) int
+    requires value >= 0 && value < 10 {
+  below_parameter_default(value: value)
+}
+
+fn forward_parameter_default_chain(int value) int
+    requires value >= 0 && value < 10 {
+  below_parameter_chain(value: value)
+}
+
+fn forward_positional_parameter_default_chain(int value) int
+    requires value >= 0 && value < 10 {
+  below_parameter_chain(value)
+}
+
+fn below_module_default(int value, int upper = module_upper) int
+    requires value < upper {
+  value
+}
+
+fn forward_module_default(int value) int requires value < 10 {
+  below_module_default(value: value)
+}
+
+fn forward_imported_module_default(int value) int requires value < 12 {
+  proof_provider.below_default(value: value)
+}
+
+fn increment_from_bounded_contract(int n) int requires n >= 0 && n <= 100 {
+  natsum(n + 1)
+}
+
+fn decrement_from_bounded_contract(int n) int requires n >= 1 && n <= 100 {
+  natsum(n - 1)
+}
+
+fn guarded(int x, int y) int requires x > 0 || !(y > 0) {
+  1
+}
+
+fn greater_than_int(int lhs, int rhs) int requires lhs > rhs {
+  lhs - rhs
+}
+
+fn loop_guarded_relation(int x, int y) int {
+  mut total = 0
+  mut i = 0
+  while x > y && i < 2 {
+    total += greater_than_int(x, y)
+    i += 1
+  }
+  total
+}
+
+fn positive(int value) int requires value > 0 {
+  value
+}
+
+fn disjunctive_loop_guard(int value) int {
+  mut calls = 0
+  while (value > 0 || value > 1) && calls < 1 {
+    positive(value)
+    calls += 1
+  }
+  calls
+}
+
+fn disjunctive_for_guard(int value) int {
+  mut calls = 0
+  for (mut i = 0 value > 0 && i < 1 i += 1) {
+    positive(value)
+    calls += 1
+  }
+  calls
+}
+
+fn within(int index, int limit) int requires index >= 0 && index < limit {
+  index + 1
+}
+
+fn local_loop(int n) int requires n >= 0 && n <= 100 {
+  mut i = 0
+  mut total = 0
+  while i >= 0 && i < n {
+    total += within(i, n)
+    i += 1
+  }
+  total
+}
+
+fn local_for_loop(int n) int requires n >= 0 && n <= 100 {
+  mut total = 0
+  for (mut i = 0 i >= 0 && i < n i += 1) {
+    total += within(i, n)
+  }
+  total
+}
+
+fn within_inclusive(int index, int limit) int
+    requires index >= 0 && index <= limit {
+  index
+}
+
+fn iterable_range_loop(int limit) int
+    requires limit < 9223372036854775807 {
+  mut total = 0
+  for index in 0..limit {
+    total += within_inclusive(index, limit)
+  }
+  total
+}
+
+fn finite_iterable_range_loop(Fin<6> limit) int {
+  mut total = 0
+  for index in 0..limit {
+    total += within_inclusive(index, limit)
+  }
+  total
+}
+
+fn parameter_loop(int n) int {
+  mut total = 0
+  while n > 0 && n <= 100 {
+    total += within(0, n)
+    n -= 1
+  }
+  total
+}
+
+fn labeled_positive(int n, str label) int requires n > 0 {
+  n
+}
+
+fn forward_unused_label(int n, str label) int requires n > 0 {
+  labeled_positive(n: n, label: label)
+}
+
+fn forward_swapped(int x, int y) int requires y > 0 {
+  guarded(y, x)
+}
+
+fn forward_named(int x, int y) int requires y > 0 {
+  guarded(y: x, x: y)
+}
+
+fn forward_method(int n) int requires n > 0 {
+  n.contract_value(minimum: 0)
+}
+
+fn select_value(Fin<4> index) int {
+  values[index]
+}
+
+fn needs_nonnegative(int value) int requires value >= 0 {
+  value
+}
+
+fn forwards_fin_range(Fin<4> index) int {
+  needs_nonnegative(index)
+}
+
+fn needs_bounded_square(Fin<10> value) int
+    requires value * value <= 81 {
+  value
+}
+
+fn forwards_bounded_square(Fin<10> value) int {
+  needs_bounded_square(value)
+}
+
+fn needs_bounded_integer_square(int value) int
+    requires value * value <= 81 {
+  value
+}
+
+fn forwards_bounded_integer_square(int value) int
+    requires value >= -9 && value <= 9 {
+  needs_bounded_integer_square(value)
+}
+
+fn needs_square_from_combined_bounds(int value) int
+    requires value * value <= 36 {
+  value
+}
+
+fn forwards_square_from_combined_bounds(int value, int offset) int
+    requires value >= 0 && value <= 20 && offset >= 4 && offset <= 4 &&
+             value + offset <= 10 {
+  needs_square_from_combined_bounds(value)
+}
+
+fn forwards_negative_square_from_combined_bounds(int value, int offset) int
+    requires value >= -20 && value <= 0 && offset >= 4 && offset <= 4 &&
+             value + offset >= -2 {
+  needs_square_from_combined_bounds(value)
+}
+
+fn forwards_square_from_chained_bounds(int value, int middle, int offset) int
+    requires value >= 0 && value <= 30 && middle >= 0 && middle <= 30 &&
+             offset >= 4 && offset <= 4 && value + middle <= 10 &&
+             middle + offset <= 8 {
+  needs_square_from_combined_bounds(value)
+}
+
+fn needs_bounded_product(int left, int right) int
+    requires left * right <= 6 {
+  left + right
+}
+
+fn forwards_bounded_product(int left, int right) int
+    requires left >= 0 && left <= 2 && right >= 1 && right <= 3 {
+  needs_bounded_product(left, right)
+}
+
+fn needs_bounded_complement_product(Fin<11> value) int
+    requires value * (10 - value) <= 25 {
+  value
+}
+
+fn forwards_bounded_complement_product(Fin<11> value) int {
+  needs_bounded_complement_product(value)
+}
+
+@pure
+fn positive_refinement(int value) bool {
+  value > 0
+}
+
+@pure
+fn PositiveInput(int value) bool {
+  value > 0
+}
+
+fn positive_refinement_requires(int value) int requires PositiveInput(value) {
+  value
+}
+
+@pure
+fn pure_positive_predicate(int value) bool {
+  value > 0
+}
+
+@pure
+fn local_alias_positive_predicate(int value) bool {
+  def predicate = pure_positive_predicate
+  predicate(value)
+}
+
+fn local_alias_predicate_requires(int value) int
+    requires local_alias_positive_predicate(value) {
+  value
+}
+
+fn forwards_local_alias_predicate(int value) int requires value > 0 {
+  local_alias_predicate_requires(value)
+}
+
+@pure
+fn match_positive_predicate(int value) bool {
+  return match value {
+    0 -> false
+    else { value > 0 }
+  }
+}
+
+fn match_predicate_requires(int value) int
+    requires match_positive_predicate(value) {
+  value
+}
+
+fn forwards_match_predicate(int value) int requires value > 0 {
+  match_predicate_requires(value)
+}
+
+@pure
+fn statement_match_positive_predicate(int value) bool {
+  match value {
+    0 -> false
+    else { value > 0 }
+  }
+}
+
+fn statement_match_predicate_requires(int value) int
+    requires statement_match_positive_predicate(value) {
+  value
+}
+
+fn forwards_statement_match_predicate(int value) int requires value > 0 {
+  statement_match_predicate_requires(value)
+}
+
+@pure
+fn returned_statement_match_positive(int value) bool {
+  match value {
+    0 -> { return false }
+    else { return value > 0 }
+  }
+}
+
+fn returned_statement_match_requires(int value) int
+    requires returned_statement_match_positive(value) {
+  value
+}
+
+fn forwards_returned_statement_match(int value) int requires value > 0 {
+  returned_statement_match_requires(value)
+}
+
+@pure
+fn exhaustive_bool_match_predicate(bool value) bool {
+  return match value {
+    true -> value
+    false -> !value
+  }
+}
+
+fn exhaustive_bool_match_requires(bool value) int
+    requires exhaustive_bool_match_predicate(value) {
+  1
+}
+
+fn forwards_exhaustive_bool_match(bool value) int requires value {
+  exhaustive_bool_match_requires(value)
+}
+
+@pure
+fn exhaustive_boolean_statement_match(bool value) bool {
+  match value {
+    true -> { return value }
+    false -> { return !value }
+  }
+}
+
+fn exhaustive_boolean_statement_requires(bool value) int
+    requires exhaustive_boolean_statement_match(value) {
+  1
+}
+
+fn forwards_exhaustive_boolean_statement(bool value) int requires value {
+  exhaustive_boolean_statement_requires(value)
+}
+
+enum ProofChain { Empty, Link(int value, ProofChain rest) }
+
+@total
+fn proof_chain_length(ProofChain chain) int decreases(chain) {
+  match chain {
+    ProofChain.Empty -> 0
+    ProofChain.Link(_, rest) -> 1 + proof_chain_length(rest)
+  }
+}
+
+@total
+fn proof_chain_alias_length(ProofChain chain) int decreases(chain) {
+  match chain {
+    ProofChain.Empty -> 0
+    ProofChain.Link(_, rest) -> {
+      def smaller = rest
+      def smaller_again = smaller
+      1 + proof_chain_alias_length(smaller_again)
+    }
+  }
+}
+
+@total
+fn proof_chain_nested_length(ProofChain chain) int decreases(chain) {
+  match chain {
+    ProofChain.Empty -> 0
+    ProofChain.Link(_, rest) -> {
+      match rest {
+        ProofChain.Empty -> 1
+        ProofChain.Link(_, next) -> 2 + proof_chain_nested_length(next)
+      }
+    }
+  }
+}
+
+enum ProofTree { Leaf, Branch(ProofTree left, ProofTree right) }
+enum ProofCrossLeft { LeftDone, ToRight(ProofCrossRight next) }
+enum ProofCrossRight { RightDone, ToLeft(ProofCrossLeft next) }
+
+@total
+fn proof_tree_nodes(ProofTree tree) int decreases(tree) {
+  match tree {
+    ProofTree.Leaf -> 1
+    ProofTree.Branch(left, right) ->
+      1 + proof_tree_nodes(left) + proof_tree_nodes(right)
+  }
+}
+
+@total
+fn proof_tree_right_depth(ProofTree tree) int decreases(tree) {
+  match tree {
+    ProofTree.Leaf -> 0
+    ProofTree.Branch(_, right) -> {
+      def right_alias = right
+      match right_alias {
+        ProofTree.Leaf -> 1
+        ProofTree.Branch(_, next) -> 1 + proof_tree_right_depth(next)
+      }
+    }
+  }
+}
+
+@total
+fn proof_tree_tuple_nodes(ProofTree tree, int weight) int
+    decreases((tree, weight)) {
+  match tree {
+    ProofTree.Leaf -> weight
+    ProofTree.Branch(left, right) ->
+      1 + proof_tree_tuple_nodes(left, weight + 1) +
+      proof_tree_tuple_nodes(right, weight - 1)
+  }
+}
+
+@total
+fn proof_tree_tuple_weight_first(int weight, ProofTree tree, int suffix) int
+    decreases((weight, tree, suffix)) {
+  match tree {
+    ProofTree.Leaf -> weight + suffix
+    ProofTree.Branch(left, right) ->
+      1 + proof_tree_tuple_weight_first(weight, left, suffix + 1) +
+      proof_tree_tuple_weight_first(weight, right, suffix + 1)
+  }
+}
+
+@total
+fn proof_cross_left(ProofCrossLeft value) int decreases(value) {
+  match value {
+    ProofCrossLeft.LeftDone -> 0
+    ProofCrossLeft.ToRight(next) -> 1 + proof_cross_right(next)
+  }
+}
+
+@total
+fn proof_cross_right(ProofCrossRight value) int decreases(value) {
+  match value {
+    ProofCrossRight.RightDone -> 0
+    ProofCrossRight.ToLeft(next) -> 1 + proof_cross_left(next)
+  }
+}
+
+@pure
+fn proof_chain_nonempty(ProofChain chain) bool {
+  match chain {
+    ProofChain.Empty -> false
+    ProofChain.Link(_, _) -> true
+  }
+}
+
+@pure
+fn positive_via_helper(int value) bool {
+  pure_positive_predicate(value)
+}
+
+@pure
+fn positive_pair_predicate(int first, int second) bool {
+  first > 0 && second > 0
+}
+
+fn requires_mixed_predicate(int first, int second) int
+    requires positive_pair_predicate(first: first, 1) {
+  first + second
+}
+
+fn requires_mixed_predicate_suffix(int first, int second) int
+    requires positive_pair_predicate(first, second: 1) {
+  first + second
+}
+
+fn forwards_mixed_predicate(int value) int requires value > 0 {
+  requires_mixed_predicate(first: value, 1)
+}
+
+fn forwards_mixed_predicate_suffix(int value) int requires value > 0 {
+  requires_mixed_predicate_suffix(value, second: 1)
+}
+
+fn qualified_predicate_requires(int value) int
+    requires predicate_provider.is_positive(value) {
+  value
+}
+
+fn forwards_qualified_predicate(int value) int requires value > 0 {
+  qualified_predicate_requires(value)
+}
+
+fn method_predicate_requires(int value) int
+    requires value.contract_is_positive() {
+  value
+}
+
+fn forwards_method_predicate(int value) int requires value > 0 {
+  method_predicate_requires(value)
+}
+
+@pure
+fn same_value_predicate(int value, int copy = value) bool {
+  value == copy
+}
+
+fn needs_same_value(int value) int requires same_value_predicate(value) {
+  value
+}
+
+fn forwards_same_value(int value) int {
+  needs_same_value(value)
+}
+
+@pure
+fn local_positive_predicate(int value) bool {
+  def positive = value > 0
+  positive
+}
+
+@pure
+fn local_chain_positive_predicate(int value) bool {
+  def positive = value > 0
+  def below_limit = value < 100
+  positive && below_limit
+}
+
+fn positive_predicate_requires(int value) int
+    requires pure_positive_predicate(value) {
+  value
+}
+
+fn local_predicate_requires(int value) int
+    requires local_positive_predicate(value) {
+  value
+}
+
+fn local_chain_predicate_requires(int value) int
+    requires local_chain_positive_predicate(value) {
+  value
+}
+
+fn chained_predicate_requires(int value) int
+    requires positive_via_helper(value) {
+  value
+}
+
+fn chained_predicate_caller(int value) int requires value > 0 {
+  chained_predicate_requires(value)
+}
+
+fn local_predicate_caller(int value) int requires value > 0 {
+  local_predicate_requires(value)
+}
+
+fn local_chain_predicate_caller(int value)
+    int requires value > 0 && value < 100 {
+  local_chain_predicate_requires(value)
+}
+
+fn forwards_positive_predicate(int value)
+    int requires pure_positive_predicate(value) {
+  value
+}
+
+fn symbolic_pure_predicate_caller(int value) int requires value > 0 {
+  forwards_positive_predicate(value)
+}
+
+@pure
+fn greater_than(int left, int right) bool {
+  left > right
+}
+
+fn needs_greater(int left, int right) int
+    requires greater_than(left, right) {
+  left
+}
+
+fn forward_swapped_greater(int right, int left) int requires right > left {
+  needs_greater(right, left)
+}
+
+@pure
+fn named_greater_than(int left, int right) bool {
+  left > right
+}
+
+fn needs_named_greater(int left, int right) int
+    requires named_greater_than(right: right, left: left) {
+  left
+}
+
+fn forward_named_swapped_greater(int right, int left)
+    int requires right > left {
+  needs_named_greater(left: right, right: left)
+}
+
+@pure
+fn branch_positive_predicate(int value) bool {
+  if value > 0 {
+    return true
+  } else {
+    return false
+  }
+}
+
+fn branch_predicate_requires(int value) int
+    requires branch_positive_predicate(value) {
+  value
+}
+
+fn branch_predicate_caller(int value) int requires value > 0 {
+  branch_predicate_requires(value)
+}
+
+@pure
+fn nested_branch_positive_predicate(int value) bool {
+  if value > 0 {
+    def positive = value > 0
+    if value < 100 {
+      return positive
+    } else {
+      return false
+    }
+  } else {
+    return false
+  }
+}
+
+fn nested_branch_requires(int value) int
+    requires nested_branch_positive_predicate(value) {
+  value
+}
+
+fn nested_branch_caller(int value)
+    int requires value > 0 && value < 100 {
+  nested_branch_requires(value)
+}
+
+@pure
+fn fallthrough_positive_predicate(int value) bool {
+  def positive = value > 0
+  if positive {
+    return true
+  }
+  false
+}
+
+fn fallthrough_predicate_requires(int value) int
+    requires fallthrough_positive_predicate(value) {
+  value
+}
+
+fn fallthrough_predicate_caller(int value) int requires value > 0 {
+  fallthrough_predicate_requires(value)
+}
+
+@pure
+fn nonnegative_early_return_predicate(int value) bool {
+  if value < 0 {
+    return false
+  }
+  true
+}
+
+fn nonnegative_early_return_requires(int value) int
+    requires nonnegative_early_return_predicate(value) {
+  value
+}
+
+fn nonnegative_early_return_caller(int value) int requires value >= 0 {
+  nonnegative_early_return_requires(value)
+}
+
+fn forward_positive_refinement() int {
+  positive_refinement_requires(5)
+}
+
+assert(natsum(5) == 15, "arithmetic requires obligation")
+assert(forward_half_bounded(10) == 10,
+       "positive constant division transports a bounded precondition")
+assert(forward_divided_value_bounded(10, 9223372036854775807i64) == 10,
+       "positive divisor ranges transport caller proofs")
+assert(forward_negative_divided_value_bounded(-9, 2) == -9,
+       "negative truncating division preserves bounded caller proofs")
+assert(forward_quotient_with_negative_divisor(10, -1) == 10,
+       "strictly negative divisor ranges transport bounded division proofs")
+assert(forward_quotient_with_two_negative_operands(-9, -1) == -9,
+       "negative numerator and divisor preserve signed division proofs")
+assert(strictly_greater_after_increment(4) == 4,
+       "constant arithmetic is proven without overflow")
+assert(sum_from_contract(5) == 15, "caller precondition discharges callee")
+assert(forward_default(9) == 9,
+       "caller proof substitutes an omitted closed integer default")
+assert(forward_named_default(8) == 8,
+       "caller proof substitutes an omitted default in a named call")
+assert(forward_parameter_default(9) == 9,
+       "caller proof substitutes an earlier parameter into a default")
+assert(forward_parameter_default_chain(9) == 9,
+       "caller proof propagates a chain of omitted parameter defaults")
+assert(forward_positional_parameter_default_chain(9) == 9,
+       "native lowering expands chained defaults for positional calls")
+assert(forward_mixed_arguments(2) == 3,
+       "caller proof maps positional and named arguments in one call")
+assert(forward_named_then_positional(2) == 3,
+       "caller proof maps positional arguments after named arguments")
+assert(forward_mixed_method(1) == 4,
+       "caller proof maps a positional prefix and named method argument")
+assert(forward_named_then_positional_method(1) == 4,
+       "caller proof maps positional arguments after a named method argument")
+assert(forward_module_default(9) == 9,
+       "caller proof substitutes an immutable callee-module integer constant")
+assert(forward_imported_module_default(11) == 11,
+       "caller proof evaluates a compound default in an imported module")
+assert(increment_from_bounded_contract(0) == 1,
+       "guarded symbolic addition transports its nonoverflow proof")
+assert(decrement_from_bounded_contract(1) == 0,
+       "guarded symbolic subtraction handles the zero boundary")
+assert(forward_swapped(0, 1) == 1, "simultaneous argument substitution")
+assert(forward_named(0, 1) == 1, "named arguments map to formal parameters")
+assert(forward_method(4) == 4, "attached method contract obligation")
+assert(loop_guarded_relation(4, 3) == 2,
+       "loop guard establishes a relational call precondition")
+assert(loop_guarded_relation(3, 4) == 0,
+       "relational loop body remains unreachable when its guard is false")
+assert(disjunctive_loop_guard(1) == 1,
+       "a supported disjunctive loop guard proves its common relation")
+assert(disjunctive_loop_guard(0) == 0,
+       "a false disjunctive loop guard remains unreachable")
+assert(disjunctive_for_guard(1) == 1,
+       "a supported disjunctive C-style for guard proves the shared relation")
+assert(disjunctive_for_guard(0) == 0,
+       "a false disjunctive C-style for guard remains unreachable")
+assert(local_loop(5) == 15,
+       "a loop guard proves a relation between a local index and its bound")
+assert(local_loop(0) == 0,
+       "the relational local loop keeps the empty boundary")
+assert(local_for_loop(5) == 15,
+       "a C-style loop guard proves a relation between index and bound")
+assert(local_for_loop(0) == 0,
+       "the relational C-style loop keeps the empty boundary")
+assert(iterable_range_loop(5) == 15,
+       "iterable range bounds prove a contract for the loop variable")
+assert(finite_iterable_range_loop(5) == 15,
+       "Fin upper bounds make inclusive range-loop facts well founded")
+assert(parameter_loop(5) == 5,
+       "a fresh loop guard proves a contract after parameter mutation")
+assert(forward_unused_label(3, "label") == 3,
+       "an unused noninteger argument does not block integer contract transport")
+assert(select_value(2) == 30, "static list index")
+assert(forwards_fin_range(3) == 3,
+       "Fin<N> contributes its resolved range to caller-side requires proofs")
+assert(forwards_bounded_square(9) == 9,
+       "bounded interval checking proves a nonlinear Fin<N> contract")
+assert(forwards_bounded_integer_square(-9) == -9,
+       "linear caller premises bound nonlinear contract intervals")
+assert(forwards_square_from_combined_bounds(6, 4) == 6,
+       "safe multi-variable premises refine nonlinear contract intervals")
+assert(forwards_negative_square_from_combined_bounds(-6, 4) == -6,
+       "negative linear coefficients refine lower interval bounds")
+assert(forwards_square_from_chained_bounds(6, 4, 4) == 6,
+       "repeated interval refinement propagates through chained relations")
+assert(forwards_bounded_product(2, 3) == 5,
+       "separate linear premise bounds prove a cross-variable product contract")
+assert(forwards_bounded_complement_product(0) == 0,
+       "bounded nonlinear partitioning proves the low endpoint")
+assert(forwards_bounded_complement_product(5) == 5,
+       "bounded nonlinear partitioning proves the interior maximum")
+assert(forwards_bounded_complement_product(10) == 10,
+       "bounded nonlinear partitioning proves the high endpoint")
+assert(forward_remainder_bounded(-97) == -97,
+       "bounded signed remainder intervals prove the modulus range")
+assert(forward_remainder_negative_divisor_bounded(-97) == -97,
+       "signed remainder intervals support negative constant divisors")
+assert(forward_remainder_by_bounded_divisor(97, 5) == 97,
+       "mixed interval premises bound a positive dynamic divisor remainder")
+assert(forward_remainder_by_negative_divisor(-97, -5) == -97,
+       "mixed interval premises bound a negative dynamic divisor remainder")
+assert(forward_remainder_by_minus_one(-97) == -97,
+       "range evidence excludes the remainder overflow endpoint")
+assert(forward_positive_refinement() == 5,
+       "an exact refinement predicate proves a general requires condition")
+assert(positive_refinement_requires(3) == 3,
+       "a top-level exact refinement predicate proves a general requires condition")
+assert(positive_predicate_requires(5) == 5,
+       "a pure predicate call proves a requires condition after substitution")
+assert(forwards_match_predicate(5) == 5,
+       "a pure match predicate proves a symbolic caller implication")
+assert(forwards_statement_match_predicate(6) == 6,
+       "a statement-form pure match predicate proves a caller implication")
+assert(forwards_returned_statement_match(7) == 7,
+       "statement-form match returns compose into a pure caller predicate")
+assert(forwards_exhaustive_bool_match(true) == 1,
+       "an exhaustive boolean match without a default proves a caller implication")
+assert(forwards_exhaustive_boolean_statement(true) == 1,
+       "an exhaustive boolean statement match without a default proves a caller implication")
+assert(proof_chain_nonempty(ProofChain.Link(1, ProofChain.Empty)),
+       "enum constructor patterns are syntax, not impure function calls")
+assert(proof_chain_length(
+           ProofChain.Link(1, ProofChain.Link(2, ProofChain.Empty))) == 2,
+       "recursive calls on a same-enum payload prove structural descent")
+assert(proof_chain_alias_length(
+           ProofChain.Link(1, ProofChain.Link(2, ProofChain.Empty))) == 2,
+       "an immutable local alias chain preserves structural payload descent")
+assert(proof_chain_nested_length(ProofChain.Link(
+           1, ProofChain.Link(2, ProofChain.Link(3, ProofChain.Empty)))) == 3,
+       "nested constructor patterns prove descent through same-enum payloads")
+assert(proof_tree_nodes(ProofTree.Branch(
+           ProofTree.Branch(ProofTree.Leaf, ProofTree.Leaf), ProofTree.Leaf)) ==
+           5,
+       "each same-enum constructor payload proves structural descent")
+assert(proof_tree_right_depth(ProofTree.Branch(
+           ProofTree.Leaf, ProofTree.Branch(ProofTree.Leaf, ProofTree.Leaf))) ==
+           1,
+       "nested matches can descend through a non-first same-enum payload")
+assert(proof_tree_tuple_nodes(ProofTree.Branch(
+           ProofTree.Leaf, ProofTree.Branch(ProofTree.Leaf, ProofTree.Leaf)),
+           3) == 10,
+       "structural descent proves the leading component of a lexicographic measure")
+assert(proof_tree_tuple_weight_first(
+           3, ProofTree.Branch(ProofTree.Leaf, ProofTree.Leaf), 2) == 13,
+       "a middle structural component proves descent despite a changing suffix")
+assert(proof_cross_left(ProofCrossLeft.ToRight(
+           ProofCrossRight.ToLeft(ProofCrossLeft.LeftDone))) == 2,
+       "mutually recursive enum payloads prove structural descent")
+assert(forwards_mixed_predicate(5) == 6,
+       "named then positional arguments inline through a pure predicate")
+assert(forwards_mixed_predicate_suffix(5) == 6,
+       "positional then named arguments inline through a pure predicate")
+assert(forwards_qualified_predicate(5) == 5,
+       "qualified pure predicate calls inline through a requires obligation")
+assert(forwards_method_predicate(5) == 5,
+       "pure attached-method predicates inline through a requires obligation")
+assert(forwards_same_value(17) == 17,
+       "pure predicate default substitutes an earlier parameter")
+assert(chained_predicate_caller(5) == 5,
+       "nested pure predicate calls inline into a symbolic implication")
+assert(local_predicate_caller(5) == 5,
+       "a single immutable local in a pure predicate inlines symbolically")
+assert(forwards_local_alias_predicate(5) == 5,
+       "an immutable local function alias inlines into a requires proof")
+assert(local_chain_predicate_caller(5) == 5,
+       "multiple immutable locals in a pure predicate inline symbolically")
+assert(symbolic_pure_predicate_caller(5) == 5,
+       "a pure predicate body inlines into a symbolic caller implication")
+assert(forward_swapped_greater(2, 1) == 2,
+       "predicate inlining preserves swapped formal-to-actual names")
+assert(forward_named_swapped_greater(2, 1) == 2,
+       "predicate inlining maps named arguments by parameter identity")
+assert(branch_predicate_caller(5) == 5,
+       "pure branch predicate inlines into a symbolic caller implication")
+assert(nested_branch_caller(5) == 5,
+       "nested pure branch predicate inlines into a symbolic caller implication")
+assert(fallthrough_predicate_caller(5) == 5,
+       "pure early-return predicate inlines with its fallthrough value")
+assert(nonnegative_early_return_caller(0) == 0,
+       "false early return plus true fallthrough proves nonnegativity at zero")
+NY
+}
+
+shape portable_indirect_pure_predicate_proof {
+  family "runtime/proofs"
+  generator "program"
+  features ["proofs", "requires", "indirect-call", "effect-row", "backend-parity"]
+  template ny-test-case
+  expect compile_and_run
+  flags_matrix "--native --run --no-strict-types; --native-backend=llvm --jit --jit-engine=mcjit --no-strict-types; --native-backend=llvm --jit --jit-engine=orc --no-strict-types; --native-only --no-strict-types"
+  source ny <<'NY'
+@pure
+fn positive_predicate(int value) bool {
+  value > 0
+}
+
+@effects(e)
+fn invoke_predicate(fnptr predicate, int value) bool {
+  predicate(value)
+}
+
+fn indirect_predicate_requires(int value) int
+    requires invoke_predicate(positive_predicate, value) {
+  value
+}
+
+fn forwards_indirect_predicate(int value) int requires value > 0 {
+  indirect_predicate_requires(value)
+}
+
+assert(forwards_indirect_predicate(5) == 5,
+       "a direct pure function actual discharges an indirect predicate call")
+NY
+}
+
+shape portable_structural_measure_non_descending_rejected {
+  family "runtime/proofs"
+  generator "error"
+  features ["proofs", "decreases", "structural-measure", "backend-parity"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "recursive termination is not certified"
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  source ny <<'NY'
+enum ProofChain { Empty, Link(int value, ProofChain rest) }
+
+@total
+fn proof_chain_stuck(ProofChain chain) int decreases(chain) {
+  match chain {
+    ProofChain.Empty -> 0
+    ProofChain.Link(_, _) -> proof_chain_stuck(chain)
+  }
+}
+
+print(proof_chain_stuck(ProofChain.Link(1, ProofChain.Empty)))
+NY
+}
+
+shape portable_structural_measure_rebound_payload_rejected {
+  family "runtime/proofs"
+  generator "error"
+  features ["proofs", "decreases", "structural-measure", "backend-parity"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "recursive termination is not certified"
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  source ny <<'NY'
+enum ProofChain { Empty, Link(int value, ProofChain rest) }
+
+@total
+fn proof_chain_rebound(ProofChain chain) int decreases(chain) {
+  match chain {
+    ProofChain.Empty -> 0
+    ProofChain.Link(_, rest) -> {
+      mut rest = chain
+      proof_chain_rebound(rest)
+    }
+  }
+}
+
+print(proof_chain_rebound(ProofChain.Link(1, ProofChain.Empty)))
+NY
+}
+
+shape portable_structural_measure_mutable_alias_rejected {
+  family "runtime/proofs"
+  generator "error"
+  features ["proofs", "decreases", "structural-measure", "mutable-alias", "backend-parity"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "recursive termination is not certified"
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  source ny <<'NY'
+enum ProofChain { Empty, Link(int value, ProofChain rest) }
+
+@total
+fn proof_chain_mutable_alias(ProofChain chain) int decreases(chain) {
+  match chain {
+    ProofChain.Empty -> 0
+    ProofChain.Link(_, rest) -> {
+      mut smaller = rest
+      smaller = chain
+      proof_chain_mutable_alias(smaller)
+    }
+  }
+}
+
+print(proof_chain_mutable_alias(ProofChain.Link(1, ProofChain.Empty)))
+NY
+}
+
+shape portable_structural_measure_shadowed_alias_rejected {
+  family "runtime/proofs"
+  generator "error"
+  features ["proofs", "decreases", "structural-measure", "shadowing", "backend-parity"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "recursive termination is not certified"
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  source ny <<'NY'
+enum ProofChain { Empty, Link(int value, ProofChain rest) }
+
+@total
+fn proof_chain_shadowed_alias(ProofChain chain) int decreases(chain) {
+  match chain {
+    ProofChain.Empty -> 0
+    ProofChain.Link(_, rest) -> {
+      def smaller = rest
+      if true {
+        def smaller = chain
+        return proof_chain_shadowed_alias(smaller)
+      }
+      1 + proof_chain_shadowed_alias(smaller)
+    }
+  }
+}
+
+print(proof_chain_shadowed_alias(ProofChain.Link(1, ProofChain.Empty)))
+NY
+}
+
+shape portable_structural_measure_shadowed_sibling_rejected {
+  family "runtime/proofs"
+  generator "error"
+  features ["proofs", "decreases", "structural-measure", "shadowing", "backend-parity"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "recursive termination is not certified"
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  source ny <<'NY'
+enum ProofTree { Leaf, Branch(ProofTree left, ProofTree right) }
+
+@total
+fn proof_tree_shadowed(ProofTree tree) int decreases(tree) {
+  match tree {
+    ProofTree.Leaf -> 1
+    ProofTree.Branch(left, right) -> {
+      def left = tree
+      proof_tree_shadowed(left)
+    }
+  }
+}
+
+print(proof_tree_shadowed(ProofTree.Branch(ProofTree.Leaf, ProofTree.Leaf)))
+NY
+}
+
+shape portable_tuple_structural_measure_non_descending_rejected {
+  family "runtime/proofs"
+  generator "error"
+  features ["proofs", "decreases", "structural-measure", "lexicographic", "backend-parity"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "recursive termination is not certified"
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  source ny <<'NY'
+enum ProofTree { Leaf, Branch(ProofTree left, ProofTree right) }
+
+@total
+fn proof_tree_tuple_stuck(ProofTree tree, int weight) int
+    decreases((tree, weight)) {
+  match tree {
+    ProofTree.Leaf -> 0
+    ProofTree.Branch(_, _) -> proof_tree_tuple_stuck(tree, weight - 1)
+  }
+}
+
+print(proof_tree_tuple_stuck(ProofTree.Branch(ProofTree.Leaf, ProofTree.Leaf), 1))
+NY
+}
+
+shape portable_tuple_structural_measure_prefix_change_rejected {
+  family "runtime/proofs"
+  generator "error"
+  features ["proofs", "decreases", "structural-measure", "lexicographic", "backend-parity"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "recursive termination is not certified"
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  source ny <<'NY'
+enum ProofTree { Leaf, Branch(ProofTree left, ProofTree right) }
+
+@total
+fn proof_tree_tuple_prefix_increases(int weight, ProofTree tree) int
+    decreases((weight, tree)) {
+  match tree {
+    ProofTree.Leaf -> weight
+    ProofTree.Branch(left, _) ->
+      proof_tree_tuple_prefix_increases(weight + 1, left)
+  }
+}
+
+print(proof_tree_tuple_prefix_increases(
+          1, ProofTree.Branch(ProofTree.Leaf, ProofTree.Leaf)))
+NY
+}
+
+shape portable_structural_measure_iterator_shadow_rejected {
+  family "runtime/proofs"
+  generator "error"
+  features ["proofs", "decreases", "structural-measure", "loop-shadowing", "backend-parity"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "recursive termination is not certified"
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  source ny <<'NY'
+enum ProofChain { Empty, Link(int value, ProofChain rest) }
+
+@total
+fn proof_chain_iterator_shadow(ProofChain chain, list<ProofChain> values) int
+    decreases(chain) {
+  match chain {
+    ProofChain.Empty -> 0
+    ProofChain.Link(_, rest) -> {
+      for rest in values {
+        proof_chain_iterator_shadow(rest, values)
+      }
+      0
+    }
+  }
+}
+
+print(proof_chain_iterator_shadow(ProofChain.Link(1, ProofChain.Empty), []))
+NY
+}
+
+shape portable_nested_structural_measure_non_descending_rejected {
+  family "runtime/proofs"
+  generator "error"
+  features ["proofs", "decreases", "structural-measure", "backend-parity"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "recursive termination is not certified"
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  source ny <<'NY'
+enum ProofChain { Empty, Link(int value, ProofChain rest) }
+
+@total
+fn proof_chain_nested_stuck(ProofChain chain) int decreases(chain) {
+  match chain {
+    ProofChain.Empty -> 0
+    ProofChain.Link(_, rest) -> {
+      match rest {
+        ProofChain.Empty -> 1
+        ProofChain.Link(_, next) -> proof_chain_nested_stuck(chain)
+      }
+    }
+  }
+}
+
+print(proof_chain_nested_stuck(ProofChain.Link(
+    1, ProofChain.Link(2, ProofChain.Empty))))
+NY
+}
+
+shape portable_contract_wide_guard_rejected {
+  family "runtime/proofs"
+  generator "error"
+  features ["proofs", "requires", "integer-boundary", "backend-parity"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "precondition"
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  source ny <<'NY'
+use core
+
+fn negative(int n) int requires n < 0 {
+  n
+}
+
+fn forward(int n) int requires n == 9223372036854775807 {
+  if n < 9223372036854775808 {
+    return negative(n)
+  }
+  0
+}
+
+print(forward(9223372036854775807i64))
+NY
+}
+
+shape portable_contract_overflowing_relation_remains_unknown {
+  family "runtime/proofs"
+  generator "error"
+  features ["proofs", "requires", "nonlinear", "overflow", "backend-parity"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "precondition"
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  source ny <<'NY'
+fn needs_square(int value) int requires value * value <= 36 {
+  value
+}
+
+fn forwards_square(int value, int offset) int
+    requires value >= 0 && offset >= 4 && offset <= 4 && value + offset <= 10 {
+  needs_square(value)
+}
+
+fn main() int {
+  forwards_square(6, 4)
+  0
+}
+NY
+}
+
+shape portable_contract_division_outside_range_rejected {
+  family "runtime/proofs"
+  generator "error"
+  features ["proofs", "requires", "division", "backend-parity"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "precondition"
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  source ny <<'NY'
+fn half_bounded(int value) int requires value / 2 <= 5 {
+  value
+}
+
+fn forward(int value) int requires value >= 0 && value <= 12 {
+  half_bounded(value)
+}
+
+fn main() int {
+  forward(12)
+  0
+}
+NY
+}
+
+shape portable_wide_constant_is_not_saturated_proof {
+  family "runtime/proofs"
+  generator "error"
+  features ["proofs", "integer-boundary", "backend-parity"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "outside the signed-i64 proof fragment"
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  source ny <<'NY'
+use core
+assert_compile(9223372036854775807 == 9223372036854775808)
+NY
+}
+
+shape portable_range_match_pure_predicate {
+  family "runtime/proofs"
+  generator "program"
+  features ["proofs", "requires", "match", "range-pattern", "backend-parity"]
+  template ny-test-case
+  expect compile_and_run
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  source ny <<'NY'
+@pure
+fn positive_in_range(int value) bool {
+  return match value {
+    1..10 -> true
+    else { false }
+  }
+}
+
+fn requires_range(int value) int requires positive_in_range(value) {
+  value
+}
+
+fn forwards_range(int value) int requires value >= 1 && value <= 10 {
+  requires_range(value)
+}
+
+assert(forwards_range(5) == 5, "closed integer range matches refine requires")
+assert(forwards_range(1) == 1, "the lower range-match endpoint is included")
+assert(forwards_range(10) == 10, "the upper range-match endpoint is included")
+NY
+}
+
+shape portable_finite_match_exhaustiveness {
+  family "runtime/proofs"
+  generator "program"
+  features ["proofs", "requires", "match", "finite-range", "backend-parity"]
+  template ny-test-case
+  expect compile_and_run
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  source ny <<'NY'
+@pure
+fn finite_positive(Fin<4> value) bool {
+  return match value {
+    0 -> false
+    1..3 -> true
+  }
+}
+
+fn needs_finite_positive(Fin<4> value) int requires finite_positive(value) {
+  value
+}
+
+fn forwards_finite_match(Fin<4> value) int
+    requires value >= 1 {
+  needs_finite_positive(value)
+}
+
+assert(forwards_finite_match(3) == 3,
+       "exhaustive Fin patterns prove the predicate without a default")
+NY
+}
+
+shape portable_pure_predicate_if_initializer {
+  family "runtime/proofs"
+  generator "program"
+  features ["proofs", "requires", "pure-predicate", "if-initializer", "backend-parity"]
+  template ny-test-case
+  expect compile_and_run
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  source ny <<'NY'
+@pure
+fn positive_from_local(int value) bool {
+  if (def is_positive = value > 0 is_positive) {
+    return true
+  } else {
+    return false
+  }
+}
+
+fn requires_positive_local(int value) int
+    requires positive_from_local(value) {
+  value
+}
+
+fn forwards_positive_local(int value) int requires value >= 1 {
+  requires_positive_local(value)
+}
+
+@pure
+fn positive_from_early_guard(int value) bool {
+  if (def is_positive = value > 0 is_positive) {
+    return true
+  }
+  return false
+}
+
+fn requires_positive_early_guard(int value) int
+    requires positive_from_early_guard(value) {
+  value
+}
+
+fn forwards_positive_early_guard(int value) int requires value >= 1 {
+  requires_positive_early_guard(value)
+}
+
+assert(forwards_positive_local(1) == 1,
+       "pure predicate expansion substitutes immutable if initializer")
+assert(forwards_positive_early_guard(2) == 2,
+       "pure early-return guard substitutes immutable if initializer")
+NY
+}
+
+shape portable_nested_expression_match_predicate {
+  family "runtime/proofs"
+  generator "program"
+  features ["proofs", "requires", "pure-predicate", "match", "expression", "backend-parity"]
+  template ny-test-case
+  expect compile_and_run
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  source ny <<'NY'
+@pure
+fn nested_positive(int value) bool {
+  return (match value {
+    0 -> false
+    else { value > 0 }
+  }) || false
+}
+
+fn requires_nested_positive(int value) int requires nested_positive(value) {
+  value
+}
+
+fn forwards_nested_positive(int value) int requires value >= 1 {
+  requires_nested_positive(value)
+}
+
+@pure
+fn preserve_boolean(bool value) bool { value }
+
+@pure
+fn nested_match_argument(int value) bool {
+  return preserve_boolean(match value {
+    0 -> false
+    else { value > 0 }
+  })
+}
+
+fn requires_nested_match_argument(int value) int
+    requires nested_match_argument(value) {
+  value
+}
+
+fn forwards_nested_match_argument(int value) int requires value >= 1 {
+  requires_nested_match_argument(value)
+}
+
+assert(forwards_nested_positive(3) == 3,
+       "a match nested in a boolean expression is lowered for proof")
+assert(forwards_nested_match_argument(4) == 4,
+       "a match nested in a pure-call argument is lowered for proof")
+NY
+}
+
+shape portable_statement_range_match_predicate {
+  family "runtime/proofs"
+  generator "program"
+  features ["proofs", "requires", "pure-predicate", "match", "range-pattern", "statement-match", "backend-parity"]
+  template ny-test-case
+  expect compile_and_run
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  source ny <<'NY'
+@pure
+fn positive_statement_range(int value) bool {
+  match value {
+    1..10 -> { return true }
+    else { return false }
+  }
+}
+
+fn requires_statement_range(int value) int
+    requires positive_statement_range(value) {
+  value
+}
+
+fn forwards_statement_range(int value) int
+    requires value >= 1 && value <= 10 {
+  requires_statement_range(value)
+}
+
+assert(forwards_statement_range(1) == 1,
+       "statement range match includes its lower endpoint")
+assert(forwards_statement_range(10) == 10,
+       "statement range match includes its upper endpoint")
+NY
+}

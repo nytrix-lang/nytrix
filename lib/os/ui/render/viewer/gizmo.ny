@@ -1,13 +1,13 @@
 ;; Keywords: viewer gizmo transform axis rotate os ui render
 ;; Shared transform gizmo geometry, handles, and drawing helpers.
 ;; References:
-;; - std.os.ui.render.viewer.gui
-;; - std.os.ui.render.matrix
-module std.os.ui.render.viewer.gizmo(compact_view, metrics, metrics_screen, draw_box, draw_box_corners, draw_axes, project_point, axis_tangent, hit_test, hit_test_screen, draw_overlay)
-use std.core
-use std.math (PI, abs, clamp, cos, max, min, sin, sqrt)
-use std.os.ui.render.dump as ui_profile
-use std.os.ui.render as render
+;; - core.os.ui.render.viewer.gui
+;; - core.os.ui.render.matrix
+module core.os.ui.render.viewer.gizmo(compact_view, metrics, metrics_screen, draw_box, draw_box_corners, draw_axes, project_point, axis_tangent, hit_test, hit_test_screen, draw_overlay)
+use core
+use core.math (PI, abs, clamp, cos, max, min, sin, sqrt)
+use core.os.ui.render.dump as ui_profile
+use core.os.ui.render as render
 
 fn compact_view(win_w, win_h) bool {
    "Returns whether the viewport needs compact gizmos."
@@ -112,7 +112,7 @@ fn _ring_steps(win_w, win_h) int {
    48
 }
 
-fn _draw_ring(px, py, pz, radius, plane, col, thickness, win_w, win_h) bool {
+fn _draw_ring(f64 px, f64 py, f64 pz, f64 radius, int plane, any col, f64 thickness, any win_w, any win_h) bool {
    def steps = _ring_steps(win_w, win_h)
    mut i = 0
    mut prev = [px, py, pz]
@@ -129,7 +129,7 @@ fn _draw_ring(px, py, pz, radius, plane, col, thickness, win_w, win_h) bool {
    true
 }
 
-fn _draw_ring_band(px, py, pz, radius, plane, col, thickness, win_w, win_h) bool {
+fn _draw_ring_band(f64 px, f64 py, f64 pz, f64 radius, int plane, any col, f64 thickness, any win_w, any win_h) bool {
    def halo = [float(col.get(0, 1.0)), float(col.get(1, 1.0)), float(col.get(2, 1.0)), float(col.get(3, 1.0)) * 0.22]
    _draw_ring(px, py, pz, radius, plane, halo, thickness * 2.40, win_w, win_h)
    _draw_ring(px, py, pz, radius, plane, col, thickness, win_w, win_h)
@@ -339,7 +339,7 @@ fn draw_axes(px, py, pz, span, axis_len, axis_thick, handle_size, red, green, bl
    if !compact { render.draw_cube([px, py, pz], max(handle_size * 0.72, axis_thick * 2.4), center) }
    if int(mode) == 1 {
       def ring_r = max(axis_len * 0.92, span * 0.58)
-      def ring_thick = axis_thick * 1.22
+      def f64 ring_thick = axis_thick * 1.22
       _draw_ring_band(px, py, pz, ring_r, 0, red_c, ring_thick, win_w, win_h)
       _draw_ring_band(px, py, pz, ring_r, 1, green_c, ring_thick, win_w, win_h)
       _draw_ring_band(px, py, pz, ring_r, 2, blue_c, ring_thick, win_w, win_h)
@@ -509,7 +509,7 @@ fn draw_overlay(mvp, win_w, win_h, px, py, pz, axis_len, mode) bool {
       render.draw_circle_lines(cx, cy, 25.0, blue, 2.0, 40)
       return true
    }
-   def l = axis_len * (int(mode) == 2 ? 0.68 : 0.78)
+   def f64 l = axis_len * (int(mode) == 2 ? 0.68 : 0.78)
    _draw_overlay_axis(mvp, win_w, win_h, px, py, pz, 1.0, 0.0, 0.0, l, red)
    _draw_overlay_axis(mvp, win_w, win_h, px, py, pz, 0.0, 1.0, 0.0, l, green)
    _draw_overlay_axis(mvp, win_w, win_h, px, py, pz, 0.0, 0.0, 1.0, l, blue)
@@ -523,5 +523,5 @@ fn draw_overlay(mvp, win_w, win_h, px, py, pz, axis_len, mode) bool {
    def id = [4, 4, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0]
    assert(bool(hit_test(id, 100, 100, [-1, -1, -1, 1, 1, 1], 0, 50, 50).get("hit", false)), "viewer gizmo center hit")
    assert(int(hit_test(id, 100, 100, [-1, -1, -1, 1, 1, 1], 0, 80, 50).get("axis", 0)) == 1, "viewer gizmo x hit")
-   print("✓ std.os.ui.render.viewer.gizmo self-test passed")
+   print("✓ core.os.ui.render.viewer.gizmo self-test passed")
 }

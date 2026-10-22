@@ -1,14 +1,14 @@
 ;; Keywords: editor runner build command output os ui render viewer text
 ;; Build and run command helpers for editor-integrated tooling.
 ;; References:
-;; - std.os.ui.render.viewer.editor.terminal
-module std.os.ui.render.viewer.editor.runner(command_for, run_file, run_text, section_at, output_name, output_text)
-use std.core
-use std.core.common as common
-use std.core.str as str
-use std.os (file_exists, file_remove, file_write, pid, ticks)
-use std.os.path as ospath
-use std.os.subprocess (run_capture)
+;; - core.os.ui.render.viewer.editor.terminal
+module core.os.ui.render.viewer.editor.runner(command_for, run_file, run_text, section_at, output_name, output_text)
+use core
+use core.common as common
+use core.str as str
+use core.os (file_exists, file_remove, file_write, pid, ticks)
+use core.os.path as ospath
+use core.os.subprocess (run_capture)
 
 fn _ext_key(str path) str {
    def ext = str.lower(ospath.extname(path))

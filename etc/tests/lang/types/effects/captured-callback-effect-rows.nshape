@@ -1,0 +1,60 @@
+shape captured_callback_rows_flow_through_closures {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "callback", "closure", "capture"]
+  template ny-test-case
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+@effects(cap(read))
+fn read_resource() int {
+  7
+}
+
+@effects(alloc, e)
+fn invoke_captured(fnptr callback) int {
+  def captured = fn() { callback() }
+  captured()
+}
+
+@effects(alloc, cap(read))
+fn matching() int {
+  invoke_captured(read_resource)
+}
+
+assert(matching() == 7, "captured callback effect row is substituted")
+NY
+}
+
+shape captured_callback_rows_cannot_exceed_the_owner_contract {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "callback", "closure", "capture", "negative"]
+  template ny-test-case
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_fail
+  expect_message "effect contract violation"
+  source ny <<'NY'
+use core
+
+@effects(cap(read))
+fn read_resource() int {
+  7
+}
+
+@effects(alloc, e)
+fn invoke_captured(fnptr callback) int {
+  def captured = fn() { callback() }
+  captured()
+}
+
+@effects(alloc, cap(write))
+fn underdeclared() int {
+  invoke_captured(read_resource)
+}
+
+underdeclared()
+NY
+}

@@ -4,11 +4,11 @@
 ;; - https://en.wikipedia.org/wiki/Number-theoretic_transform
 ;; - https://cacr.uwaterloo.ca/hac/about/chap14.pdf
 ;; References:
-;; - std.math.crypto
-module std.math.crypto.ntt(ntt, intt, ntt_mul, ntt_is_power_of_2, ntt_get_root)
-use std.core
-use std.math.nt
-use std.math.bin as bin
+;; - core.math.crypto
+module core.math.crypto.ntt(ntt, intt, ntt_mul, ntt_is_power_of_2, ntt_get_root)
+use core
+use core.math.nt
+use core.math.bin as bin
 
 fn ntt_is_power_of_2(int n) bool {
    "Returns true when n is a positive power of two."

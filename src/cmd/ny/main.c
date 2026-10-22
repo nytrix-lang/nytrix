@@ -3,25 +3,27 @@
  * perf, doc, make, pkg, new), option parsing, signal handling, hot-reload
  * loop, and the interactive REPL when no subcommand is given.
  */
-#include "base/common.h"
 #include "base/args.h"
+#include "base/common.h"
+#include "base/debug.h"
 #include "base/intern.h"
 #include "base/loader.h"
 #include "base/options.h"
 #include "base/util.h"
-#include "code/native/llvm/jit.h"
-#include "code/incremental/incremental.h"
-#include "code/native/native.h"
-#include "code/priv.h"
 #include "cmd/ny/pkg.h"
-#include "cmd/fmt/fmt.h"
-#include "cmd/make/make.h"
-#include "cmd/perf/perf.h"
-#include "cmd/test/test.h"
-#include "cmd/web/web.h"
-#include "code/parse/parser.h"
-#include "code/runtime/shared.h"
-#include "code/wire/pipe.h"
+#include "cmd/ny/test.h"
+#include "code/backend/ir/test/opt/test.h"
+#include "code/backend/native.h"
+#include "code/backend/wire/incremental/incremental.h"
+#include "code/lang/llvm/jit.h"
+#include "code/lang/parse/parser.h"
+#include "code/lang/pipeline.h"
+#include "code/lang/pipeline/native.h"
+#include "code/lang/priv.h"
+#include "code/lang/runtime/runtime.h"
+#include "code/lang/runtime/shared.h"
+#include "code/lang/types/test.h"
+#include <nytrix/nytrix.h>
 #ifndef _WIN32
 #include <sys/mman.h>
 #include <sys/resource.h>
@@ -31,23 +33,23 @@
 #include <errno.h>
 #include <signal.h>
 #include <stdarg.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdint.h>
 #ifdef _WIN32
 #include <direct.h>
 #include <process.h>
 #else
-#include <sys/stat.h>
 #include <sys/select.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #ifdef __linux__
 #include <sys/inotify.h>
 #endif
 #ifdef __APPLE__
-#include <sys/event.h>
 #include <fcntl.h>
+#include <sys/event.h>
 #endif
 #endif
 #ifdef _WIN32
@@ -55,7 +57,8 @@
 #endif
 
 extern int64_t rt_trace_dump(int64_t n);
-extern int64_t rt_trace_get_call_stack(int64_t *fn, int64_t *f, int64_t *l, int count);
+extern int64_t rt_trace_get_call_stack(int64_t *fn, int64_t *f, int64_t *l,
+                                       int count);
 extern int64_t rt_trace_get_frames(int64_t *f, int64_t *l, int64_t *c,
                                    int64_t *fn, int count);
 extern int g_trace_requested;
@@ -127,7 +130,8 @@ static void write_dec(int64_t v) {
 static void handle_timeout(int sig);
 #endif
 
-static void write_ny_signal_frame(int64_t file, int64_t line, int64_t col, int64_t func) {
+static void write_ny_signal_frame(int64_t file, int64_t line, int64_t col,
+                                  int64_t func) {
   const char *file_ptr = (const char *)(uintptr_t)file;
   const char *func_ptr = (const char *)(uintptr_t)func;
   if (!file_ptr || !*file_ptr)
@@ -166,24 +170,27 @@ static void write_ny_signal_debug_help(void) {
   write_str(clr(NY_CLR_GRAY));
   write_str("Debug filter:");
   write_str(clr(NY_CLR_RESET));
-  write_str(" set NYTRIX_TRACE_FILTER=module_or_function_tail to reduce trace noise.\n");
+  write_str(" set NYTRIX_TRACE_FILTER=module_or_function_tail to reduce trace "
+            "noise.\n");
   write_str(clr(NY_CLR_GRAY));
   write_str("Import/debug help:");
   write_str(clr(NY_CLR_RESET));
-  write_str(" set NYTRIX_DIAG_UNDEF=1, NYTRIX_TRACE_IMPORTS=1, or NYTRIX_STD_CACHE=0.\n");
+  write_str(" set NYTRIX_DIAG_UNDEF=1, NYTRIX_TRACE_IMPORTS=1, or "
+            "NYTRIX_STD_CACHE=0.\n");
 }
 
 static void handle_segv(int sig) {
   signal(sig, SIG_DFL);
+  ny_dbg_crash_flush(sig, NULL);
 
   const char *name = (sig == SIGSEGV)   ? "SegmentationFault"
                      : (sig == SIGABRT) ? "AbortError"
                      : (sig == SIGFPE)  ? "FloatingPointError"
 #ifdef SIGBUS
-                     : (sig == SIGBUS)  ? "BusError"
+                     : (sig == SIGBUS) ? "BusError"
 #endif
-                     : (sig == SIGILL)  ? "IllegalInstructionError"
-                                        : "SignalError";
+                     : (sig == SIGILL) ? "IllegalInstructionError"
+                                       : "SignalError";
 
   int64_t files[32], lines[32], cols[32], funcs[32];
   int count = rt_trace_get_frames(files, lines, cols, funcs, 16);
@@ -197,7 +204,8 @@ static void handle_segv(int sig) {
   int repeats = 0;
   int have_last = 0;
   for (int i = count - 1; i >= 0; i--) {
-    if (have_last && files[i] == last_file && lines[i] == last_line && funcs[i] == last_func) {
+    if (have_last && files[i] == last_file && lines[i] == last_line &&
+        funcs[i] == last_func) {
       repeats++;
       continue;
     }
@@ -239,7 +247,8 @@ static void ny_sanitizer_death_callback(void) {
   int repeats = 0;
   int have_last = 0;
   for (int i = count - 1; i >= 0; i--) {
-    if (have_last && files[i] == last_file && lines[i] == last_line && funcs[i] == last_func) {
+    if (have_last && files[i] == last_file && lines[i] == last_line &&
+        funcs[i] == last_func) {
       repeats++;
       continue;
     }
@@ -260,7 +269,8 @@ static void ny_install_signal_handlers(void) {
 
   (void)signal(SIGPIPE, SIG_IGN);
   static char g_sigstack[65536];
-  stack_t ss = {.ss_sp = g_sigstack, .ss_size = sizeof(g_sigstack), .ss_flags = 0};
+  stack_t ss = {
+      .ss_sp = g_sigstack, .ss_size = sizeof(g_sigstack), .ss_flags = 0};
   (void)sigaltstack(&ss, NULL);
 
   struct sigaction sa;
@@ -358,7 +368,8 @@ static void ny_env_append_unique(const char *name, const char *extra) {
   free(buf);
 }
 
-static void ny_env_append_semicolon_unique(const char *name, const char *extra) {
+static void ny_env_append_semicolon_unique(const char *name,
+                                           const char *extra) {
   if (!name || !*name || !extra || !*extra)
     return;
   const char *cur = getenv(name);
@@ -425,7 +436,8 @@ static void ny_strip_matching_quotes(char *s) {
 static char *ny_config_expand_value(const char *value) {
   if (!value)
     return NULL;
-  if (value[0] != '~' || (value[1] != '/' && value[1] != '\\' && value[1] != '\0'))
+  if (value[0] != '~' ||
+      (value[1] != '/' && value[1] != '\\' && value[1] != '\0'))
     return ny_strdup(value);
 #ifdef _WIN32
   const char *home = getenv("USERPROFILE");
@@ -447,7 +459,8 @@ static char *ny_config_expand_value(const char *value) {
   return out;
 }
 
-static void ny_config_path_join(char *out, size_t out_sz, const char *a, const char *b) {
+static void ny_config_path_join(char *out, size_t out_sz, const char *a,
+                                const char *b) {
   if (!out || out_sz == 0)
     return;
   if (!a || !*a) {
@@ -492,7 +505,8 @@ static void ny_config_candidate(int idx, char *out, size_t out_sz) {
     const char *explicit_path = getenv("NYTRIX_CONFIG");
     if (!explicit_path || !*explicit_path)
       explicit_path = getenv("NY_CONFIG");
-    snprintf(out, out_sz, "%s", explicit_path && *explicit_path ? explicit_path : "");
+    snprintf(out, out_sz, "%s",
+             explicit_path && *explicit_path ? explicit_path : "");
     return;
   }
   if (idx == 1) {
@@ -614,7 +628,8 @@ typedef struct {
   int writes;
 } ny_env_config_t;
 
-static void ny_env_config_set(ny_env_config_t *cfg, const char *key, const char *value) {
+static void ny_env_config_set(ny_env_config_t *cfg, const char *key,
+                              const char *value) {
   ny_setenv_force(key, value);
   if (cfg && key && *key && value)
     cfg->writes++;
@@ -626,11 +641,13 @@ static void ny_env_config_unset(ny_env_config_t *cfg, const char *key) {
     cfg->writes++;
 }
 
-static void ny_env_config_set_bool(ny_env_config_t *cfg, const char *key, bool value) {
+static void ny_env_config_set_bool(ny_env_config_t *cfg, const char *key,
+                                   bool value) {
   ny_env_config_set(cfg, key, value ? "1" : "0");
 }
 
-static void ny_env_config_set_int(ny_env_config_t *cfg, const char *key, int value) {
+static void ny_env_config_set_int(ny_env_config_t *cfg, const char *key,
+                                  int value) {
   char buf[32];
   snprintf(buf, sizeof(buf), "%d", value);
   ny_env_config_set(cfg, key, buf);
@@ -765,7 +782,7 @@ static int ny_mkdir_one(const char *path) {
   return 0;
 }
 
-static void ny_mkdir_p(const char *path) {
+static void ny_ui_mkdir_p(const char *path) {
   if (!path || !*path)
     return;
   char *buf = strdup(path);
@@ -807,7 +824,7 @@ static void ny_mkdir_p_parent(const char *path) {
   }
   if (last && last != buf) {
     *last = '\0';
-    ny_mkdir_p(buf);
+    ny_ui_mkdir_p(buf);
   }
   free(buf);
 }
@@ -833,14 +850,16 @@ static void ny_enable_ui_auto_dump_env(bool immediate) {
                        "NYTRIX_FAST", "0", NULL);
   if (immediate)
     ny_setenv_force("NYTRIX_AUTO_DUMP_IMMEDIATE", "1");
-  ny_setenv_default_many("NYTRIX_AUTO_DUMP_MIN_ELAPSED_SEC", "0", "NY_PNG_ENCODE_LEVEL", "1",
-                         NULL);
+  ny_setenv_default_many("NYTRIX_AUTO_DUMP_MIN_ELAPSED_SEC", "0",
+                         "NY_PNG_ENCODE_LEVEL", "1", NULL);
 }
 
-static void ny_enable_ui_profile_env(const char *profile_dir, bool render_trace) {
-  ny_setenv_force_many("NY_SCENE_PROFILE_TRACE", "1", "NY_UI_PROFILE_TRACE", "1",
-                       "NY_UI_PROFILE_DEEP", "1", "NY_UI_PROFILE_DUMP", "1",
-                       "NY_VK_PROFILE_TRACE", "1", "NY_VK_PROFILE_DUMP", "1", NULL);
+static void ny_enable_ui_profile_env(const char *profile_dir,
+                                     bool render_trace) {
+  ny_setenv_force_many("NY_SCENE_PROFILE_TRACE", "1", "NY_UI_PROFILE_TRACE",
+                       "1", "NY_UI_PROFILE_DEEP", "1", "NY_UI_PROFILE_DUMP",
+                       "1", "NY_VK_PROFILE_TRACE", "1", "NY_VK_PROFILE_DUMP",
+                       "1", NULL);
   if (profile_dir && *profile_dir) {
     char *ui_path = ny_join_path_file(profile_dir, "ui_profile.jsonl");
     char *vk_path = ny_join_path_file(profile_dir, "vk_profile.jsonl");
@@ -855,9 +874,11 @@ static void ny_enable_ui_profile_env(const char *profile_dir, bool render_trace)
   }
   if (render_trace) {
     ny_setenv_force("NYTRIX_VK_MARKERS", "1");
-    ny_setenv_default_many("NY_UI_FRAME_PRINT_EVERY", "1", "NY_VK_PROFILE_EVERY", "1", NULL);
+    ny_setenv_default_many("NY_UI_FRAME_PRINT_EVERY", "1",
+                           "NY_VK_PROFILE_EVERY", "1", NULL);
   } else {
-    ny_setenv_default_many("NY_UI_FRAME_PRINT_EVERY", "120", "NY_VK_PROFILE_EVERY", "120", NULL);
+    ny_setenv_default_many("NY_UI_FRAME_PRINT_EVERY", "120",
+                           "NY_VK_PROFILE_EVERY", "120", NULL);
   }
 }
 
@@ -869,18 +890,20 @@ static void ny_enable_ui_nosurface_headless_env(void) {
 }
 
 static void ny_enable_ui_surface_headless_env(void) {
-  ny_setenv_force_many("NY_UI_HEADLESS", "1", "NYTRIX_VK_ALLOW_HEADLESS", "0", NULL);
-  ny_setenv_default_many("NY_UI_HEADLESS_GUI", "1", "NY_UI_HEADLESS_MATCH_WINDOW", "1", NULL);
+  ny_setenv_force_many("NY_UI_HEADLESS", "1", "NYTRIX_VK_ALLOW_HEADLESS", "0",
+                       NULL);
+  ny_setenv_default_many("NY_UI_HEADLESS_GUI", "1",
+                         "NY_UI_HEADLESS_MATCH_WINDOW", "1", NULL);
 }
 
 static void ny_enable_ui_nosurface_bench_env(bool profile) {
   ny_enable_ui_nosurface_headless_env();
-  ny_setenv_force_many("NY_UI_REAL_HEADLESS_SIM", "1", "NY_UI_BENCH", "1", "NY_UI_FPS_LOG",
-                       profile ? "0" : "1", NULL);
+  ny_setenv_force_many("NY_UI_REAL_HEADLESS_SIM", "1", "NY_UI_BENCH", "1",
+                       "NY_UI_FPS_LOG", profile ? "0" : "1", NULL);
   if (profile)
     ny_setenv_force("NY_UI_BENCH_PROFILE", "1");
-  ny_setenv_default_many("NY_UI_MSAA", "4", "NYTRIX_VK_NOSURFACE_LOAD_PASS", "1",
-                         "NYTRIX_VK_NOSURFACE_REPLAY", "1", NULL);
+  ny_setenv_default_many("NY_UI_MSAA", "4", "NYTRIX_VK_NOSURFACE_LOAD_PASS",
+                         "1", "NYTRIX_VK_NOSURFACE_REPLAY", "1", NULL);
 }
 
 typedef struct {
@@ -905,7 +928,8 @@ typedef struct {
 } ny_ui_bridge_state_t;
 
 static int ny_ui_bridge_take_value(const char *a, int *i, int argc, char **argv,
-                                   const char **out, const char *fallback_error) {
+                                   const char **out,
+                                   const char *fallback_error) {
   char err[160];
   err[0] = '\0';
   if (ny_arg_take_value(a, i, argc, argv, out, err, sizeof(err)))
@@ -914,12 +938,14 @@ static int ny_ui_bridge_take_value(const char *a, int *i, int argc, char **argv,
   return 2;
 }
 
-static bool ny_ui_bridge_handle_toggle(ny_ui_bridge_state_t *st, const char *a) {
+static bool ny_ui_bridge_handle_toggle(ny_ui_bridge_state_t *st,
+                                       const char *a) {
   if (ny_arg_match(a, "--dump", NULL)) {
     st->want_dump = true;
     return true;
   }
-  if (ny_arg_match(a, "--frame-hash", NULL) || ny_arg_match(a, "--fbhash", NULL)) {
+  if (ny_arg_match(a, "--frame-hash", NULL) ||
+      ny_arg_match(a, "--fbhash", NULL)) {
     st->want_dump = true;
     st->frame_hash = true;
     return true;
@@ -941,7 +967,8 @@ static bool ny_ui_bridge_handle_toggle(ny_ui_bridge_state_t *st, const char *a) 
     ny_enable_ui_surface_headless_env();
     return true;
   }
-  if (ny_arg_match(a, "--ms-profile", NULL) || ny_arg_match(a, "--msprofile", NULL) ||
+  if (ny_arg_match(a, "--ms-profile", NULL) ||
+      ny_arg_match(a, "--msprofile", NULL) ||
       ny_arg_match(a, "--profile-ms", NULL)) {
     st->ms_profile = true;
     return true;
@@ -970,7 +997,8 @@ static bool ny_ui_bridge_handle_toggle(ny_ui_bridge_state_t *st, const char *a) 
     ny_enable_ui_nosurface_headless_env();
     return true;
   }
-  if (ny_arg_match(a, "--headless-sim", NULL) || ny_arg_match(a, "--real-headless", NULL)) {
+  if (ny_arg_match(a, "--headless-sim", NULL) ||
+      ny_arg_match(a, "--real-headless", NULL)) {
     ny_enable_ui_nosurface_bench_env(false);
     return true;
   }
@@ -984,20 +1012,23 @@ static bool ny_ui_bridge_handle_toggle(ny_ui_bridge_state_t *st, const char *a) 
     ny_enable_ui_surface_headless_env();
     return true;
   }
-  if (ny_arg_match(a, "--fast-material-batch", NULL) || ny_arg_match(a, "--fast-batch", NULL)) {
+  if (ny_arg_match(a, "--fast-material-batch", NULL) ||
+      ny_arg_match(a, "--fast-batch", NULL)) {
     ny_setenv_force("NY_UI_VERTEX_MATERIAL_BATCH", "1");
     return true;
   }
   return false;
 }
 
-static int ny_ui_bridge_handle_value(ny_ui_bridge_state_t *st, const char *a, int *i, int argc,
-                                     char **argv, bool *handled) {
+static int ny_ui_bridge_handle_value(ny_ui_bridge_state_t *st, const char *a,
+                                     int *i, int argc, char **argv,
+                                     bool *handled) {
   const char *v = NULL;
   *handled = false;
   if (ny_arg_match_with_value(a, "--set")) {
     *handled = true;
-    int rc = ny_ui_bridge_take_value(a, i, argc, argv, &v, "missing value for --set");
+    int rc = ny_ui_bridge_take_value(a, i, argc, argv, &v,
+                                     "missing value for --set");
     if (rc != 0)
       return rc;
     ny_setenv_keyval(v);
@@ -1005,7 +1036,8 @@ static int ny_ui_bridge_handle_value(ny_ui_bridge_state_t *st, const char *a, in
   }
   if (ny_arg_match_with_value(a, "--timeout")) {
     *handled = true;
-    int rc = ny_ui_bridge_take_value(a, i, argc, argv, &v, "missing value for --timeout");
+    int rc = ny_ui_bridge_take_value(a, i, argc, argv, &v,
+                                     "missing value for --timeout");
     if (rc != 0)
       return rc;
     ny_setenv_force("NY_UI_TIMEOUT", v);
@@ -1013,7 +1045,8 @@ static int ny_ui_bridge_handle_value(ny_ui_bridge_state_t *st, const char *a, in
   }
   if (ny_arg_match_with_value(a, "--dump-path")) {
     *handled = true;
-    int rc = ny_ui_bridge_take_value(a, i, argc, argv, &v, "missing value for --dump-path");
+    int rc = ny_ui_bridge_take_value(a, i, argc, argv, &v,
+                                     "missing value for --dump-path");
     if (rc != 0)
       return rc;
     st->dump_path = v;
@@ -1022,7 +1055,8 @@ static int ny_ui_bridge_handle_value(ny_ui_bridge_state_t *st, const char *a, in
   }
   if (ny_arg_match_with_value(a, "--dump-dir")) {
     *handled = true;
-    int rc = ny_ui_bridge_take_value(a, i, argc, argv, &v, "missing value for --dump-dir");
+    int rc = ny_ui_bridge_take_value(a, i, argc, argv, &v,
+                                     "missing value for --dump-dir");
     if (rc != 0)
       return rc;
     st->dump_dir = v;
@@ -1030,7 +1064,8 @@ static int ny_ui_bridge_handle_value(ny_ui_bridge_state_t *st, const char *a, in
   }
   if (ny_arg_match_with_value(a, "--dump-models")) {
     *handled = true;
-    int rc = ny_ui_bridge_take_value(a, i, argc, argv, &v, "missing value for --dump-models");
+    int rc = ny_ui_bridge_take_value(a, i, argc, argv, &v,
+                                     "missing value for --dump-models");
     if (rc != 0)
       return rc;
     st->dump_models = v;
@@ -1039,8 +1074,8 @@ static int ny_ui_bridge_handle_value(ny_ui_bridge_state_t *st, const char *a, in
   }
   if (ny_arg_match_with_value(a, "--dump-settle-frames")) {
     *handled = true;
-    int rc =
-        ny_ui_bridge_take_value(a, i, argc, argv, &v, "missing value for --dump-settle-frames");
+    int rc = ny_ui_bridge_take_value(a, i, argc, argv, &v,
+                                     "missing value for --dump-settle-frames");
     if (rc != 0)
       return rc;
     ny_setenv_force("NYTRIX_AUTO_DUMP_DELAY_FRAMES", v);
@@ -1049,7 +1084,8 @@ static int ny_ui_bridge_handle_value(ny_ui_bridge_state_t *st, const char *a, in
   }
   if (ny_arg_match_with_value(a, "--dump-png-level")) {
     *handled = true;
-    int rc = ny_ui_bridge_take_value(a, i, argc, argv, &v, "missing value for --dump-png-level");
+    int rc = ny_ui_bridge_take_value(a, i, argc, argv, &v,
+                                     "missing value for --dump-png-level");
     if (rc != 0)
       return rc;
     ny_setenv_force("NY_PNG_ENCODE_LEVEL", v);
@@ -1057,7 +1093,8 @@ static int ny_ui_bridge_handle_value(ny_ui_bridge_state_t *st, const char *a, in
   }
   if (ny_arg_match_with_value(a, "--gui-shot")) {
     *handled = true;
-    int rc = ny_ui_bridge_take_value(a, i, argc, argv, &v, "missing value for --gui-shot");
+    int rc = ny_ui_bridge_take_value(a, i, argc, argv, &v,
+                                     "missing value for --gui-shot");
     if (rc != 0)
       return rc;
     st->gui_shot = v;
@@ -1066,7 +1103,8 @@ static int ny_ui_bridge_handle_value(ny_ui_bridge_state_t *st, const char *a, in
   }
   if (ny_arg_match_with_value(a, "--gui-layout")) {
     *handled = true;
-    int rc = ny_ui_bridge_take_value(a, i, argc, argv, &v, "missing value for --gui-layout");
+    int rc = ny_ui_bridge_take_value(a, i, argc, argv, &v,
+                                     "missing value for --gui-layout");
     if (rc != 0)
       return rc;
     ny_setenv_force("NY_UI_GUI_LAYOUT", v);
@@ -1074,7 +1112,8 @@ static int ny_ui_bridge_handle_value(ny_ui_bridge_state_t *st, const char *a, in
   }
   if (ny_arg_match_with_value(a, "--profile-dir")) {
     *handled = true;
-    int rc = ny_ui_bridge_take_value(a, i, argc, argv, &v, "missing value for --profile-dir");
+    int rc = ny_ui_bridge_take_value(a, i, argc, argv, &v,
+                                     "missing value for --profile-dir");
     if (rc != 0)
       return rc;
     st->profile_dir = v;
@@ -1084,7 +1123,8 @@ static int ny_ui_bridge_handle_value(ny_ui_bridge_state_t *st, const char *a, in
       ny_arg_match_with_value(a, "--expect-fb-hash") ||
       ny_arg_match_with_value(a, "--check-frame-hash")) {
     *handled = true;
-    int rc = ny_ui_bridge_take_value(a, i, argc, argv, &v, "missing value for frame hash");
+    int rc = ny_ui_bridge_take_value(a, i, argc, argv, &v,
+                                     "missing value for frame hash");
     if (rc != 0)
       return rc;
     ny_setenv_force("NY_UI_EXPECT_FRAME_HASH", v);
@@ -1097,15 +1137,18 @@ static int ny_ui_bridge_handle_value(ny_ui_bridge_state_t *st, const char *a, in
 
 static void ny_ui_bridge_resolve_defaults(ny_ui_bridge_state_t *st) {
   if ((!st->dump_path || !*st->dump_path) && st->frame_hash) {
-    st->default_dump_path = ny_join_path_file(ny_default_cache_root_dir(), "fb_hash/frame.png");
+    st->default_dump_path =
+        ny_join_path_file(ny_default_cache_root_dir(), "fb_hash/frame.png");
     if (st->default_dump_path)
       st->dump_path = st->default_dump_path;
-  } else if ((!st->dump_path || !*st->dump_path) && st->gui_shot && *st->gui_shot) {
+  } else if ((!st->dump_path || !*st->dump_path) && st->gui_shot &&
+             *st->gui_shot) {
     st->default_dump_path = ny_ui_default_gui_dump_path(st->gui_shot);
     if (st->default_dump_path)
       st->dump_path = st->default_dump_path;
   } else if ((!st->dump_path || !*st->dump_path) && st->want_dump) {
-    st->default_dump_path = ny_join_path_file(ny_default_cache_root_dir(), "fb/fb_dump.png");
+    st->default_dump_path =
+        ny_join_path_file(ny_default_cache_root_dir(), "fb/fb_dump.png");
     if (st->default_dump_path)
       st->dump_path = st->default_dump_path;
   }
@@ -1138,7 +1181,7 @@ static void ny_ui_bridge_apply_env(ny_ui_bridge_state_t *st) {
       ny_setenv_force("NY_UI_PROOF_SKYBOX", "0");
   }
   if (st->dump_dir && *st->dump_dir) {
-    ny_mkdir_p(st->dump_dir);
+    ny_ui_mkdir_p(st->dump_dir);
     ny_setenv_force("NY_UI_DUMP_DIR", st->dump_dir);
     if (st->dump_all)
       ny_setenv_force("NY_UI_BATCH_DUMP_DIR", st->dump_dir);
@@ -1170,11 +1213,12 @@ static void ny_ui_bridge_apply_env(ny_ui_bridge_state_t *st) {
       ny_setenv_force("NY_UI_GUI_AUTO_DUMP", st->dump_path);
   }
   if (st->profile_dir && *st->profile_dir)
-    ny_mkdir_p(st->profile_dir);
+    ny_ui_mkdir_p(st->profile_dir);
   if (st->ms_profile || st->render_trace)
     ny_enable_ui_profile_env(st->profile_dir, st->render_trace);
   if (st->nosurface_profile && st->profile_dir && *st->profile_dir) {
-    char *bench_path = ny_join_path_file(st->profile_dir, "bench_profile.jsonl");
+    char *bench_path =
+        ny_join_path_file(st->profile_dir, "bench_profile.jsonl");
     if (bench_path) {
       ny_setenv_force("NY_UI_BENCH_PROFILE_DUMP_PATH", bench_path);
       free(bench_path);
@@ -1188,8 +1232,10 @@ static void ny_ui_bridge_apply_env(ny_ui_bridge_state_t *st) {
   ny_setenv_force("NYTRIX_RUN_ARG_BRIDGE", "1");
 }
 
-static int ny_bridge_ui_script_args_to_env(const ny_options *opt, int argc, char **argv) {
-  if (!opt || !opt->input_file || !ny_input_file_looks_like_engine(opt->input_file))
+static int ny_bridge_ui_script_args_to_env(const ny_options *opt, int argc,
+                                           char **argv) {
+  if (!opt || !opt->input_file ||
+      !ny_input_file_looks_like_engine(opt->input_file))
     return 0;
 
   ny_ui_bridge_state_t st = {0};
@@ -1215,7 +1261,8 @@ static int ny_bridge_ui_script_args_to_env(const ny_options *opt, int argc, char
   return 0;
 }
 
-static void ny_apply_cli_env_config(ny_env_config_t *env, ny_options *opt, bool trace_requested) {
+static void ny_apply_cli_env_config(ny_env_config_t *env, ny_options *opt,
+                                    bool trace_requested) {
   if (opt->safe_mode) {
     opt->verify_module = true;
     ny_env_config_set(env, "NYTRIX_STRICT_DIAGNOSTICS", "1");
@@ -1227,13 +1274,11 @@ static void ny_apply_cli_env_config(ny_env_config_t *env, ny_options *opt, bool 
     ny_env_config_set(env, "NYTRIX_ALIAS_REQUIRE_NO_ESCAPE", "1");
   }
 
-  if (opt->trace_exec || trace_requested) {
+  if (opt->trace_exec || trace_requested || opt->debug_everything) {
     ny_env_config_set(env, "NYTRIX_TRACE", "1");
     g_trace_requested = 1;
     if (opt->verbose)
       fprintf(stderr, "NYTRIX: tracing active\n");
-  } else {
-    ny_env_config_unset(env, "NYTRIX_TRACE");
   }
   if (opt->effect_require_known)
     ny_env_config_set(env, "NYTRIX_EFFECT_REQUIRE_KNOWN", "1");
@@ -1250,9 +1295,9 @@ static void ny_apply_cli_env_config(ny_env_config_t *env, ny_options *opt, bool 
   if (opt->opt_profile)
     ny_env_config_set(env, "NYTRIX_OPT_PROFILE", opt->opt_profile);
   if (opt->opt_profile && strcmp(opt->opt_profile, "peak") == 0) {
-    ny_env_append_unique(
-        "NYTRIX_HOST_CFLAGS",
-        "-Ofast -march=native -mtune=native -fno-math-errno -fno-trapping-math -funroll-loops");
+    ny_env_append_unique("NYTRIX_HOST_CFLAGS",
+                         "-Ofast -march=native -mtune=native -fno-math-errno "
+                         "-fno-trapping-math -funroll-loops");
     ny_env_append_unique("NYTRIX_HOST_LDFLAGS", "-march=native -mtune=native");
 #if !(defined(__APPLE__) && (defined(__aarch64__) || defined(__arm64__)))
     ny_env_config_set(env, "NYTRIX_JIT_FAST_ISEL", "1");
@@ -1265,8 +1310,12 @@ static void ny_apply_cli_env_config(ny_env_config_t *env, ny_options *opt, bool 
   }
   if (opt->profiler_mode) {
     ny_env_config_set(env, "NYTRIX_PROFILER", "1");
+    if (opt->profiler_output_mode)
+      ny_env_config_set(env, "NYTRIX_PROFILE_MODE", opt->profiler_output_mode);
     ny_env_config_set(env, "NYTRIX_MEM_STATS", "1");
   }
+  if (opt->emit_report_path)
+    ny_env_config_set(env, "NYTRIX_EMIT_REPORT", opt->emit_report_path);
   if (opt->profiler_mode || opt->jit_perf_map)
     ny_env_config_set(env, "NYTRIX_JIT_PERF_MAP", "1");
   if (opt->jit_fast_isel)
@@ -1276,9 +1325,11 @@ static void ny_apply_cli_env_config(ny_env_config_t *env, ny_options *opt, bool 
   if (opt->jit_code_model)
     ny_env_config_set(env, "NYTRIX_JIT_CODE_MODEL", opt->jit_code_model);
   if (opt->std_builtin_ops >= 0)
-    ny_env_config_set_bool(env, "NYTRIX_STD_BUILTIN_OPS", opt->std_builtin_ops != 0);
+    ny_env_config_set_bool(env, "NYTRIX_STD_BUILTIN_OPS",
+                           opt->std_builtin_ops != 0);
   if (opt->compiler_asserts >= 0)
-    ny_env_config_set_bool(env, "NYTRIX_COMPILER_ASSERTS", opt->compiler_asserts != 0);
+    ny_env_config_set_bool(env, "NYTRIX_COMPILER_ASSERTS",
+                           opt->compiler_asserts != 0);
   if (opt->debug_locals >= 0)
     ny_env_config_set_bool(env, "NYTRIX_DEBUG_LOCALS", opt->debug_locals != 0);
   if (opt->dwarf_version >= 2 && opt->dwarf_version <= 5)
@@ -1287,7 +1338,8 @@ static void ny_apply_cli_env_config(ny_env_config_t *env, ny_options *opt, bool 
     ny_env_config_set_bool(env, "NYTRIX_DWARF_SPLIT_INLINING",
                            opt->dwarf_split_inlining != 0);
   if (opt->dwarf_profile_info >= 0)
-    ny_env_config_set_bool(env, "NYTRIX_DWARF_PROFILE_INFO", opt->dwarf_profile_info != 0);
+    ny_env_config_set_bool(env, "NYTRIX_DWARF_PROFILE_INFO",
+                           opt->dwarf_profile_info != 0);
   if (opt->host_cflags)
     ny_env_config_set(env, "NYTRIX_HOST_CFLAGS", opt->host_cflags);
   if (opt->host_ldflags)
@@ -1307,7 +1359,8 @@ static void ny_apply_cli_env_config(ny_env_config_t *env, ny_options *opt, bool 
   if (opt->gpu_async >= 0)
     ny_env_config_set_bool(env, "NYTRIX_GPU_ASYNC", opt->gpu_async != 0);
   if (opt->gpu_fast_math >= 0)
-    ny_env_config_set_bool(env, "NYTRIX_GPU_FAST_MATH", opt->gpu_fast_math != 0);
+    ny_env_config_set_bool(env, "NYTRIX_GPU_FAST_MATH",
+                           opt->gpu_fast_math != 0);
   if (opt->fast_math >= 0)
     ny_env_config_set_bool(env, "NYTRIX_FAST_MATH", opt->fast_math != 0);
   if (opt->accel_target)
@@ -1319,11 +1372,14 @@ static void ny_apply_cli_env_config(ny_env_config_t *env, ny_options *opt, bool 
   if (opt->thread_count > 0)
     ny_env_config_set_int(env, "NYTRIX_PARALLEL_THREADS", opt->thread_count);
   if (opt->parallel_min_work > 0)
-    ny_env_config_set_int(env, "NYTRIX_PARALLEL_MIN_WORK", opt->parallel_min_work);
+    ny_env_config_set_int(env, "NYTRIX_PARALLEL_MIN_WORK",
+                          opt->parallel_min_work);
 
   ny_env_config_set_bool(env, "NYTRIX_GC", opt->enable_gc);
-  ny_env_config_set(env, "NYTRIX_HEAP_POLICY", ny_heap_policy_name(opt->heap_policy));
+  ny_env_config_set(env, "NYTRIX_HEAP_POLICY",
+                    ny_heap_policy_name(opt->heap_policy));
   ny_env_config_set_bool(env, "NYTRIX_RC_GC", opt->heap_policy == NY_HEAP_RC);
+  rt_rc_set_enabled(opt->heap_policy == NY_HEAP_RC);
   /*
    * Advisory borrow checking is independent from RAII cleanup.
    */
@@ -1348,36 +1404,181 @@ static bool ny_argv_has_flag(int argc, char **argv, const char *flag) {
   return false;
 }
 
-static int ny_find_unified_command_index(int argc, char **argv, int *out_rc) {
-  for (int i = 1; i < argc; ++i) {
-    const char *a = argv[i];
-    if (!a || !*a)
-      continue;
+static int ny_apply_unified_color_options(int argc, char **argv, int scan_end,
+                                          int *out_rc) {
+  for (int i = 1; i < scan_end; ++i) {
     int color_mode = -2;
     int color_idx = i;
-    char err[256];
-    int color_rc = ny_arg_consume_color(&color_idx, argc, argv, &color_mode, err, sizeof(err));
+    char err[256] = {0};
+    int color_rc = ny_arg_consume_color(&color_idx, argc, argv, &color_mode,
+                                        err, sizeof(err));
     if (color_rc < 0) {
       fprintf(stderr, "%sny:%s %s\n", clr(NY_CLR_RED), clr(NY_CLR_RESET),
               err[0] ? err : "invalid color option");
       if (out_rc)
         *out_rc = 2;
-      return -1;
+      return 0;
     }
     if (color_rc > 0) {
       ny_arg_apply_color_mode(color_mode);
       i = color_idx;
-      continue;
     }
-    if (strcmp(a, "--") == 0 || a[0] == '-')
-      return 0;
-    return i;
   }
+  return 1;
+}
+
+static int ny_exec_standalone_tool(int argc, char **argv, int cmd_i,
+                                   const char *tool_name, int *out_rc) {
+  if (!argv || cmd_i < 1 || cmd_i >= argc || !tool_name || !out_rc)
+    return 0;
+  char path[PATH_MAX];
+  const char *self = argv[0] ? argv[0] : "";
+  const char *slash = strrchr(self, '/');
+#ifdef _WIN32
+  const char *backslash = strrchr(self, '\\');
+  if (!slash || (backslash && backslash > slash))
+    slash = backslash;
+#endif
+  if (slash) {
+    size_t prefix = (size_t)(slash - self) + 1;
+    int n =
+        snprintf(path, sizeof(path), "%.*s%s%s", (int)prefix, self, tool_name,
+#ifdef _WIN32
+                 ".exe"
+#else
+                 ""
+#endif
+        );
+    if (n < 0 || (size_t)n >= sizeof(path)) {
+      *out_rc = 127;
+      return 1;
+    }
+  } else {
+    snprintf(path, sizeof(path), "%s%s", tool_name,
+#ifdef _WIN32
+             ".exe"
+#else
+             ""
+#endif
+    );
+  }
+  char **tool_argv =
+      (char **)calloc((size_t)(argc - cmd_i) + 1, sizeof(char *));
+  if (!tool_argv) {
+    fprintf(stderr, "%sny:%s out of memory dispatching %s\n", clr(NY_CLR_RED),
+            clr(NY_CLR_RESET), tool_name);
+    *out_rc = 1;
+    return 1;
+  }
+  tool_argv[0] = path;
+  int count = 1;
+  for (int i = cmd_i + 1; i < argc; ++i)
+    tool_argv[count++] = argv[i];
+  tool_argv[count] = NULL;
+#ifndef _WIN32
+  execv(path, tool_argv);
+  fprintf(stderr, "%sny:%s could not start %s: %s\n", clr(NY_CLR_RED),
+          clr(NY_CLR_RESET), path, strerror(errno));
+  free(tool_argv);
+  *out_rc = 127;
+#else
+  intptr_t rc = _spawnv(_P_WAIT, path, (const char *const *)tool_argv);
+  free(tool_argv);
+  *out_rc = rc < 0 ? 127 : (int)rc;
+#endif
+  return 1;
+}
+
+static int ny_unified_route(const char *command, bool after_leading_args) {
+  if (strcmp(command, "fmt") == 0 || strcmp(command, "format") == 0)
+    return 1;
+  if (strcmp(command, "test") == 0 || strcmp(command, "tests") == 0)
+    return 2;
+  if (strcmp(command, "perf") == 0 || strcmp(command, "bench") == 0)
+    return 3;
+  if (strcmp(command, "doc") == 0 || strcmp(command, "docs") == 0 ||
+      strcmp(command, "web") == 0)
+    return 4;
+  if (strcmp(command, "make") == 0 || strcmp(command, "build") == 0)
+    return 5;
+  if (strcmp(command, "pkg") == 0)
+    return 6;
+  if (strcmp(command, "new") == 0)
+    return 7;
+  if (strcmp(command, "get") == 0 || strcmp(command, "install") == 0)
+    return after_leading_args ? 8 : 10;
+  if (strcmp(command, "lsp") == 0)
+    return 9;
   return 0;
 }
 
-static int ny_dispatch_tool_from(int (*fn)(int, char **), int argc, char **argv, int cmd_i) {
-  return fn(argc - cmd_i, argv + cmd_i);
+/*
+ * Keep command recognition in the native launcher path.  This used to
+ * synthesize and execute a Ny program for every invocation, which booted the
+ * core library before native C tools could even print help or start a build.
+ */
+static int ny_select_unified_command(int argc, char **argv, int *out_cmd_i,
+                                     int *out_route, int *out_scan_end) {
+  if (argc < 1 || !argv || !out_cmd_i || !out_route || !out_scan_end)
+    return 0;
+  int command_i = 0;
+  int scan_end = 1;
+  bool skip_next = false;
+  for (int i = 1; i < argc; ++i) {
+    const char *arg = argv[i] ? argv[i] : "";
+    if (skip_next) {
+      skip_next = false;
+      scan_end = i + 1;
+      continue;
+    }
+    if (!*arg) {
+      scan_end = i + 1;
+      continue;
+    }
+    if (strcmp(arg, "--color") == 0 || strcmp(arg, "--color=") == 0 ||
+        strcmp(arg, "--no-color") == 0 || strncmp(arg, "--color=", 8) == 0) {
+      if (strcmp(arg, "--color") == 0 || strcmp(arg, "--color=") == 0)
+        skip_next = true;
+      scan_end = i + 1;
+      continue;
+    }
+    if (strcmp(arg, "--") == 0 || arg[0] == '-') {
+      scan_end = i;
+      break;
+    }
+    command_i = i;
+    scan_end = i;
+    break;
+  }
+  *out_cmd_i = command_i;
+  *out_route =
+      command_i > 0 ? ny_unified_route(argv[command_i], command_i != 1) : 0;
+  *out_scan_end = scan_end;
+  return 1;
+}
+
+/*
+ * Compiler options are not command names. Avoid starting the embedded Ny
+ * command classifier for these invocations; the compiler must remain
+ * bootstrappable while its stdlib bundle and tool dispatcher are rebuilt.
+ * The classifier still owns command-first invocations and the shared color
+ * options that may precede them.
+ */
+static bool ny_args_may_select_unified_command(int argc, char **argv) {
+  for (int i = 1; i < argc; ++i) {
+    const char *arg = argv[i];
+    if (!arg || !*arg)
+      continue;
+    if (strcmp(arg, "--color") == 0) {
+      if (i + 1 < argc)
+        ++i;
+      continue;
+    }
+    if (strcmp(arg, "--no-color") == 0 || strncmp(arg, "--color=", 8) == 0)
+      continue;
+    return arg[0] != '-';
+  }
+  return false;
 }
 
 static int ny_dispatch_pkg_alias(int argc, char **argv, int cmd_i) {
@@ -1396,50 +1597,68 @@ static int ny_dispatch_pkg_alias(int argc, char **argv, int cmd_i) {
 }
 
 static bool ny_try_unified_tool(int argc, char **argv, int *out_rc) {
-  if (argc < 2 || !argv)
+  if (argc < 2 || !argv || !ny_args_may_select_unified_command(argc, argv))
     return false;
-  int cmd_i = ny_find_unified_command_index(argc, argv, out_rc);
-  if (cmd_i < 0)
+  int cmd_i = 0, route = 0, scan_end = 0;
+  int selected =
+      ny_select_unified_command(argc, argv, &cmd_i, &route, &scan_end);
+  if (selected <= 0) {
+    /*
+     * Compiler invocations and ordinary options reach the compiler parser.
+     * Explicit subcommands remain fail-closed so bad dispatch is visible.
+     */
+    const char *first = argv[1];
+    size_t first_len = first ? strlen(first) : 0;
+    bool compiler_invocation =
+        first &&
+        (first[0] == '-' ||
+         (first_len >= 3 && strcmp(first + first_len - 3, ".ny") == 0));
+    if (compiler_invocation)
+      return false;
+    fprintf(stderr, "%sny:%s command dispatch failed\n", clr(NY_CLR_RED),
+            clr(NY_CLR_RESET));
+    *out_rc = 2;
+    return true;
+  }
+  if (!ny_apply_unified_color_options(argc, argv, scan_end, out_rc))
     return true;
   if (cmd_i == 0)
     return false;
-  const char *cmd = argv[cmd_i];
-  if (strcmp(cmd, "fmt") == 0 || strcmp(cmd, "format") == 0) {
-    *out_rc = ny_dispatch_tool_from(ny_fmt_main, argc, argv, cmd_i);
-    return true;
+  if (route == 1) {
+    return ny_exec_standalone_tool(argc, argv, cmd_i, "ny-fmt", out_rc) != 0;
   }
-  if (strcmp(cmd, "test") == 0 || strcmp(cmd, "tests") == 0) {
-    *out_rc = ny_dispatch_tool_from(ny_test_main, argc, argv, cmd_i);
-    return true;
+  if (route == 2) {
+    return ny_exec_standalone_tool(argc, argv, cmd_i, "ny-test", out_rc) != 0;
   }
-  if (strcmp(cmd, "perf") == 0 || strcmp(cmd, "bench") == 0) {
-    *out_rc = ny_dispatch_tool_from(ny_perf_main, argc, argv, cmd_i);
-    return true;
+  if (route == 3) {
+    return ny_exec_standalone_tool(argc, argv, cmd_i, "ny-perf", out_rc) != 0;
   }
-  if (strcmp(cmd, "doc") == 0 || strcmp(cmd, "docs") == 0 || strcmp(cmd, "web") == 0) {
-    *out_rc = ny_dispatch_tool_from(ny_web_main, argc, argv, cmd_i);
-    return true;
+  if (route == 4) {
+    return ny_exec_standalone_tool(argc, argv, cmd_i, "ny-doc", out_rc) != 0;
   }
-  if (strcmp(cmd, "make") == 0 || strcmp(cmd, "build") == 0) {
-    *out_rc = ny_dispatch_tool_from(ny_make_main, argc, argv, cmd_i);
-    return true;
+  if (route == 5) {
+    return ny_exec_standalone_tool(argc, argv, cmd_i, "ny-make", out_rc) != 0;
   }
-  if (strcmp(cmd, "pkg") == 0) {
+  if (route == 6) {
     *out_rc = ny_pkg_main(argc - cmd_i, argv + cmd_i);
     return true;
   }
-  if (strcmp(cmd, "new") == 0) {
+  if (route == 7) {
     *out_rc = ny_new_main(argc - cmd_i, argv + cmd_i);
     return true;
   }
-  if (strcmp(cmd, "get") == 0 || strcmp(cmd, "install") == 0) {
-    *out_rc = cmd_i == 1 ? ny_pkg_main(argc, argv) : ny_dispatch_pkg_alias(argc, argv, cmd_i);
+  if (route == 8) {
+    *out_rc = ny_dispatch_pkg_alias(argc, argv, cmd_i);
     return true;
   }
-  if (strcmp(cmd, "lsp") == 0) {
-    fprintf(stderr, "%sny:%s LSP remains a separate binary; run `ny-lsp`.\n", clr(NY_CLR_YELLOW),
-            clr(NY_CLR_RESET));
+  if (route == 9) {
+    fprintf(stderr, "%sny:%s LSP remains a separate binary; run `ny-lsp`.\n",
+            clr(NY_CLR_YELLOW), clr(NY_CLR_RESET));
     *out_rc = 2;
+    return true;
+  }
+  if (route == 10) {
+    *out_rc = ny_pkg_main(argc, argv);
     return true;
   }
   return false;
@@ -1484,20 +1703,20 @@ static int ny_incremental_selftest(void) {
    * save/load round-trip. Uses only the incremental C API over temp files.
    */
   char dir[PATH_MAX];
-snprintf(dir, sizeof(dir), "%s/ny-inc-self-%ld", ny_get_temp_dir(),
-         (long)getpid());
+  snprintf(dir, sizeof(dir), "%s/ny-inc-self-%ld", ny_get_temp_dir(),
+           (long)getpid());
   ny_ensure_dir_recursive(dir);
   char path_leaf[PATH_MAX], path_mid[PATH_MAX], path_root[PATH_MAX];
   snprintf(path_root, sizeof(path_root), "%s/a.ny", dir); /* depends on b */
   snprintf(path_mid, sizeof(path_mid), "%s/b.ny", dir);   /* depends on c */
   snprintf(path_leaf, sizeof(path_leaf), "%s/c.ny", dir);
   const char *fails = NULL;
-#define SELFCHECK(cond)                              \
-  do {                                               \
-    if (!(cond)) {                                   \
-      fails = #cond;                                 \
-      goto cleanup;                                  \
-    }                                                \
+#define SELFCHECK(cond)                                                        \
+  do {                                                                         \
+    if (!(cond)) {                                                             \
+      fails = #cond;                                                           \
+      goto cleanup;                                                            \
+    }                                                                          \
   } while (0)
 
   FILE *f = fopen(path_root, "w");
@@ -1543,9 +1762,8 @@ snprintf(dir, sizeof(dir), "%s/ny-inc-self-%ld", ny_get_temp_dir(),
   SELFCHECK(changed_count == 1);
   char **rset = NULL;
   size_t rset_count = 0;
-  SELFCHECK(ny_incremental_compute_recompile_set(&g, (const char **)changed,
-                                                 changed_count, &rset,
-                                                 &rset_count));
+  SELFCHECK(ny_incremental_compute_recompile_set(
+      &g, (const char **)changed, changed_count, &rset, &rset_count));
   SELFCHECK(rset_count == 3); /* leaf + mid + root */
 
   /*
@@ -1564,9 +1782,11 @@ snprintf(dir, sizeof(dir), "%s/ny-inc-self-%ld", ny_get_temp_dir(),
   ny_incremental_free_graph(&g);
   {
     size_t i;
-    for (i = 0; i < rset_count; i++) free(rset[i]);
+    for (i = 0; i < rset_count; i++)
+      free(rset[i]);
     free(rset);
-    for (i = 0; i < changed_count; i++) free(changed[i]);
+    for (i = 0; i < changed_count; i++)
+      free(changed[i]);
     free(changed);
   }
   remove(graph_path);
@@ -1588,36 +1808,81 @@ static char *ny_doctor_which(const char *name) {
   char cmd[512];
   snprintf(cmd, sizeof(cmd), "which '%s' 2>/dev/null", name);
   FILE *fp = popen(cmd, "r");
-  if (!fp) return NULL;
+  if (!fp)
+    return NULL;
   char buf[4096] = {0};
   size_t n = fread(buf, 1, sizeof(buf) - 1, fp);
   pclose(fp);
-  if (n == 0) return NULL;
-  while (n > 0 && (buf[n - 1] == '\n' || buf[n - 1] == '\r')) buf[--n] = '\0';
+  if (n == 0)
+    return NULL;
+  while (n > 0 && (buf[n - 1] == '\n' || buf[n - 1] == '\r'))
+    buf[--n] = '\0';
   return n > 0 ? ny_strdup(buf) : NULL;
 }
 
-static void ny_doctor_check(bool required, const char *label, const char *tool, const char *fallback) {
+static void ny_cli_rule(void) {
+  const char *rule = ny_ui_glyph("─", "-");
+  int width = ny_ui_width();
+  for (int i = 0; i < width; ++i)
+    fputs(rule, stdout);
+  fputc('\n', stdout);
+}
+
+static void ny_cli_header(const char *title, const char *subtitle) {
+  printf("%s%s%s Nytrix %s%s%s %s%s%s\n", clr(NY_CLR_MAGENTA),
+         ny_ui_mark("brand"), clr(NY_CLR_RESET), clr(NY_CLR_GRAY),
+         ny_ui_glyph("·", "/"), clr(NY_CLR_RESET), clr(NY_CLR_CYAN),
+         title ? title : "", clr(NY_CLR_RESET));
+  if (subtitle && *subtitle)
+    printf("  %s%s%s\n", clr(NY_CLR_GRAY), subtitle, clr(NY_CLR_RESET));
+  ny_cli_rule();
+}
+
+static void ny_cli_section(const char *title) {
+  const char *mark = ny_ui_mark("section");
+  const char *rule = ny_ui_glyph("─", "-");
+  const char *icon_name = ny_ui_section_icon(title);
+  const char *icon = icon_name ? ny_ui_icon(icon_name) : "";
+  int prefix = 1 + 1 + (int)strlen(icon) + (int)strlen(title ? title : "") + 1 +
+               (icon_name ? 1 : 0);
+  printf("%s%s %s%s %s%s%s%s ", clr(NY_CLR_MAGENTA), mark,
+         icon_name ? clr(NY_CLR_CYAN) : "", icon, clr(NY_CLR_BOLD),
+         title ? title : "", clr(NY_CLR_RESET),
+         icon_name ? clr(NY_CLR_RESET) : "");
+  for (int i = prefix; i < ny_ui_width(); ++i)
+    fputs(rule, stdout);
+  fputc('\n', stdout);
+}
+
+static void ny_doctor_check(bool required, const char *label, const char *tool,
+                            const char *fallback) {
   char *path = ny_doctor_which(tool);
-  if (!path && fallback) path = ny_doctor_which(fallback);
-  printf("  %s %-18s %-10s %s\n", path ? "✓" : "✗", label, required ? "[required]" : "[optional]", path ? path : "(not found)");
+  if (!path && fallback)
+    path = ny_doctor_which(fallback);
+  printf("  %s%s%s %-18s %-10s %s\n", clr(path ? NY_CLR_GREEN : NY_CLR_RED),
+         ny_ui_mark(path ? "success" : "error"), clr(NY_CLR_RESET), label,
+         required ? "[required]" : "[optional]", path ? path : "(not found)");
   free(path);
 }
 
-static void ny_doctor_file_check(bool required, const char *label, const char *path) {
+static void ny_doctor_file_check(bool required, const char *label,
+                                 const char *path) {
   int ok = access(path, F_OK) == 0;
-  printf("  %s %-18s %-10s %s\n", ok ? "✓" : "✗", label, required ? "[required]" : "[optional]", ok ? path : "(not found)");
+  printf("  %s%s%s %-18s %-10s %s\n", clr(ok ? NY_CLR_GREEN : NY_CLR_RED),
+         ny_ui_mark(ok ? "success" : "error"), clr(NY_CLR_RESET), label,
+         required ? "[required]" : "[optional]", ok ? path : "(not found)");
 }
 
 static void ny_run_doctor(void) {
-  printf("Nytrix Doctor — system toolchain diagnostics\n\n");
-  printf("Core tools:\n");
+  ny_cli_header("Doctor", "system toolchain diagnostics");
+  ny_cli_section("Core tools");
   ny_doctor_check(true, "cmake", "cmake", NULL);
   ny_doctor_check(true, "clang", "clang", NULL);
   ny_doctor_check(true, "ninja", "ninja", NULL);
   ny_doctor_check(true, "pkg-config", "pkg-config", "pkgconf");
   ny_doctor_check(true, "llvm-config", "llvm-config", NULL);
-  printf("\nWASM / web tooling:\n");
+  fputc('\n', stdout);
+  ny_cli_section("WASM / web tooling");
   ny_doctor_check(false, "wasm-ld", "wasm-ld", NULL);
   ny_doctor_check(false, "wasm-opt", "wasm-opt", NULL);
   ny_doctor_check(false, "wasm-objdump", "wasm-objdump", NULL);
@@ -1628,44 +1893,64 @@ static void ny_run_doctor(void) {
   {
     char *clang = ny_doctor_which("clang");
     if (clang) {
-      int ok = system("clang --target=wasm32-unknown-unknown -x c -c -o /dev/null - </dev/null 2>/dev/null") == 0;
-      printf("  %s %-18s %s\n", ok ? "✓" : "✗", "clang+wasm32", ok ? "[optional] clang wasm32 backend OK" : "[optional] clang lacks wasm32 target");
+      int ok = system("clang --target=wasm32-unknown-unknown -x c -c -o "
+                      "/dev/null - </dev/null 2>/dev/null") == 0;
+      printf("  %s%s%s %-18s %s\n", clr(ok ? NY_CLR_GREEN : NY_CLR_RED),
+             ny_ui_mark(ok ? "success" : "error"), clr(NY_CLR_RESET),
+             "clang+wasm32",
+             ok ? "[optional] clang wasm32 backend OK"
+                : "[optional] clang lacks wasm32 target");
       free(clang);
     }
   }
-  printf("\nCross-compilation:\n");
+  fputc('\n', stdout);
+  ny_cli_section("Cross-compilation");
   ny_doctor_check(false, "qemu-aarch64", "qemu-aarch64", NULL);
   ny_doctor_check(false, "qemu-arm", "qemu-arm", NULL);
   ny_doctor_check(false, "qemu-riscv64", "qemu-riscv64", NULL);
   ny_doctor_check(false, "qemu-x86_64", "qemu-x86_64", NULL);
   ny_doctor_check(false, "wine", "wine", NULL);
-  ny_doctor_check(false, "aarch64-linux-gnu-gcc", "aarch64-linux-gnu-gcc", NULL);
-  ny_doctor_check(false, "arm-linux-gnueabihf-gcc", "arm-linux-gnueabihf-gcc", NULL);
-  ny_doctor_check(false, "riscv64-linux-gnu-gcc", "riscv64-linux-gnu-gcc", NULL);
-  ny_doctor_check(false, "x86_64-w64-mingw32-gcc", "x86_64-w64-mingw32-gcc", NULL);
+  ny_doctor_check(false, "aarch64-linux-gnu-gcc", "aarch64-linux-gnu-gcc",
+                  NULL);
+  ny_doctor_check(false, "arm-linux-gnueabihf-gcc", "arm-linux-gnueabihf-gcc",
+                  NULL);
+  ny_doctor_check(false, "riscv64-linux-gnu-gcc", "riscv64-linux-gnu-gcc",
+                  NULL);
+  ny_doctor_check(false, "x86_64-w64-mingw32-gcc", "x86_64-w64-mingw32-gcc",
+                  NULL);
 #ifdef __linux__
-  printf("\nDisplay:\n");
-  printf("  %s display server\n", (getenv("DISPLAY") || getenv("WAYLAND_DISPLAY")) ? "✓" : "✗");
+  fputc('\n', stdout);
+  ny_cli_section("Display");
+  {
+    int ok = getenv("DISPLAY") || getenv("WAYLAND_DISPLAY");
+    printf("  %s%s%s display server\n", clr(ok ? NY_CLR_GREEN : NY_CLR_RED),
+           ny_ui_mark(ok ? "success" : "error"), clr(NY_CLR_RESET));
+  }
 #endif
-  printf("\nBuilt tools:\n");
+  fputc('\n', stdout);
+  ny_cli_section("Built tools");
   ny_doctor_file_check(false, "ny", "build/release/ny");
   ny_doctor_file_check(false, "ny-fmt", "build/release/ny-fmt");
   ny_doctor_file_check(false, "ny-test", "build/release/ny-test");
-  ny_doctor_file_check(false, "std.ny", "build/std.ny");
-  printf("\nQuick reference:\n");
+  ny_doctor_file_check(false, "core.ny", "build/core.ny");
+  fputc('\n', stdout);
+  ny_cli_section("Quick reference");
   printf("  ny --wasm file.ny               # compile to WebAssembly\n");
   printf("  ny --host-triple=aarch64-linux-gnu file.ny  # cross-compile\n");
-  printf("  ny --profile-time --runs=N file.ny       # benchmark compilation\n");
-  printf("\nDoctor complete.\n");
+  printf(
+      "  ny --profile-time --runs=N file.ny       # benchmark compilation\n");
+  printf("\n%s%s%s Doctor complete.\n", clr(NY_CLR_GREEN),
+         ny_ui_mark("success"), clr(NY_CLR_RESET));
 }
 
 static void ny_run_env(void) {
-  printf("Nytrix environment\n");
+  ny_cli_header("Environment", "resolved host, toolchain, and overrides");
   /*
    * Root / host
    */
   const char *root = getenv("NYTRIX_ROOT");
-  if (!root || !*root) root = ny_src_root();
+  if (!root || !*root)
+    root = ny_src_root();
   printf("  root:                %s\n", root ? root : "(unknown)");
 #ifdef __linux__
   {
@@ -1685,7 +1970,8 @@ static void ny_run_env(void) {
   /*
    * Toolchain
    */
-  printf("\nToolchain:\n");
+  fputc('\n', stdout);
+  ny_cli_section("Toolchain");
   ny_doctor_check(false, "cmake", "cmake", NULL);
   ny_doctor_check(false, "ninja", "ninja", NULL);
   ny_doctor_check(false, "clang", "clang", NULL);
@@ -1694,36 +1980,50 @@ static void ny_run_env(void) {
   /*
    * Key overrides
    */
-  printf("\nOverrides (set):\n");
-  static const char *keys[] = {
-    "NYTRIX_CC", "CC", "CXX", "NYTRIX_HOST_TRIPLE",
-    "NYTRIX_HOST_CFLAGS", "NYTRIX_HOST_LDFLAGS",
-    "NYTRIX_STD_PATH", "NYTRIX_BUILD_STD_PATH",
-    "NYTRIX_BUILD_JOBS", "NYTRIX_CONFIG", "NY_CONFIG",
-    "NYTRIX_PKG_HOME", "NYTRIX_PKG_PATH", "NYTRIX_CROSS_RUNNER",
-    NULL
-  };
+  fputc('\n', stdout);
+  ny_cli_section("Overrides (set)");
+  static const char *keys[] = {"NYTRIX_CC",
+                               "CC",
+                               "CXX",
+                               "NYTRIX_HOST_TRIPLE",
+                               "NYTRIX_HOST_CFLAGS",
+                               "NYTRIX_HOST_LDFLAGS",
+                               "NYTRIX_CORE_PATH",
+                               "NYTRIX_STD_PATH",
+                               "NYTRIX_BUILD_STD_PATH",
+                               "NYTRIX_BUILD_JOBS",
+                               "NYTRIX_CONFIG",
+                               "NY_CONFIG",
+                               "NYTRIX_PKG_HOME",
+                               "NYTRIX_PKG_PATH",
+                               "NYTRIX_CROSS_RUNNER",
+                               NULL};
   for (int i = 0; keys[i]; i++) {
     const char *v = getenv(keys[i]);
-    if (v && *v) printf("  %-22s %s\n", keys[i], v);
+    if (v && *v)
+      printf("  %-22s %s\n", keys[i], v);
   }
-  printf("\nEnv complete.\n");
+  printf("\n%s%s%s Environment complete.\n", clr(NY_CLR_GREEN),
+         ny_ui_mark("success"), clr(NY_CLR_RESET));
 }
 
 static void ny_run_targets(void) {
-  printf("Nytrix cross-compilation targets (use with --cross=<name>):\n\n");
+  ny_cli_header("Targets",
+                "cross-compilation presets; use with --cross=<name>");
   static const char *presets[][3] = {
-    {"linux-x64",       "x86_64-linux-gnu",       "qemu-x86_64"},
-    {"linux-x86_64",    "x86_64-linux-gnu",       "qemu-x86_64"},
-    {"linux-arm64",     "aarch64-linux-gnu",      "qemu-aarch64"},
-    {"linux-aarch64",   "aarch64-linux-gnu",      "qemu-aarch64"},
-    {"linux-armhf",     "arm-linux-gnueabihf",    "qemu-arm"},
-    {"linux-arm",       "arm-linux-gnueabihf",    "qemu-arm"},
-    {"linux-riscv64",   "riscv64-linux-gnu",       "qemu-riscv64"},
-    {"windows-x64",     "x86_64-w64-windows-gnu", "wine"},
+      {"linux-x64", "x86_64-linux-gnu", "qemu-x86_64"},
+      {"linux-x86_64", "x86_64-linux-gnu", "qemu-x86_64"},
+      {"linux-arm64", "aarch64-linux-gnu", "qemu-aarch64"},
+      {"linux-aarch64", "aarch64-linux-gnu", "qemu-aarch64"},
+      {"linux-armhf", "arm-linux-gnueabihf", "qemu-arm"},
+      {"linux-arm", "arm-linux-gnueabihf", "qemu-arm"},
+      {"linux-riscv64", "riscv64-linux-gnu", "qemu-riscv64"},
+      {"windows-x64", "x86_64-w64-windows-gnu", "wine"},
   };
   int np = sizeof(presets) / sizeof(presets[0]);
-  printf("  %-20s %-30s %s\n", "PRESET", "TRIPLE", "RUNNER");
+  ny_cli_section("Presets");
+  printf("  %s%-20s %-30s %s%s\n", clr(NY_CLR_BOLD), "PRESET", "TRIPLE",
+         "RUNNER", clr(NY_CLR_RESET));
   for (int i = 0; i < np; i++) {
     char *runner_path = ny_doctor_which(presets[i][2]);
     printf("  %-20s %-30s %s\n", presets[i][0], presets[i][1],
@@ -1732,7 +2032,8 @@ static void ny_run_targets(void) {
   }
   printf("\n  Usage: ny --cross=<preset> [--cross-run] file.ny\n");
   printf("  Raw triples also accepted: ny --cross=aarch64-linux-gnu file.ny\n");
-  printf("\nTargets complete.\n");
+  printf("\n%s%s%s Targets complete.\n", clr(NY_CLR_GREEN),
+         ny_ui_mark("success"), clr(NY_CLR_RESET));
 }
 
 static void ny_run_wasm_info(const char *path) {
@@ -1757,13 +2058,70 @@ static void ny_run_wasm_info(const char *path) {
   char line[1024];
   int in_import = 0, in_export = 0;
   while (fgets(line, sizeof(line), fp)) {
-    if (strstr(line, "Import[")) { in_import = 1; continue; }
-    if (strstr(line, "Export[")) { in_import = 0; in_export = 1; continue; }
-    if (line[0] != ' ' && line[0] != '\t') { in_import = 0; in_export = 0; }
-    if (in_import || in_export) printf("  %s", line);
+    if (strstr(line, "Import[")) {
+      in_import = 1;
+      continue;
+    }
+    if (strstr(line, "Export[")) {
+      in_import = 0;
+      in_export = 1;
+      continue;
+    }
+    if (line[0] != ' ' && line[0] != '\t') {
+      in_import = 0;
+      in_export = 0;
+    }
+    if (in_import || in_export)
+      printf("  %s", line);
   }
   int rc = pclose(fp);
-  if (rc != 0) fprintf(stderr, "ny: wasm-objdump exited %d\n", rc);
+  if (rc != 0)
+    fprintf(stderr, "ny: wasm-objdump exited %d\n", rc);
+}
+
+static void ny_report_peak_rss(const ny_options *opt) {
+  if (!opt || !opt->report_peak_rss)
+    return;
+#ifdef _WIN32
+  if (opt->verbosity >= 6)
+    ny_dbg_heuristic_event(
+        "RESOURCE", "process CPU/RSS metrics unavailable on this platform");
+  else
+    fprintf(stderr, "peak-rss: unavailable on this platform\n");
+#else
+  struct rusage usage;
+  if (getrusage(RUSAGE_SELF, &usage) != 0) {
+    if (opt->verbosity >= 6)
+      ny_dbg_heuristic_event("RESOURCE", "getrusage failed: %s",
+                             strerror(errno));
+    else
+      perror("getrusage");
+    return;
+  }
+  /*
+   * Linux reports KiB; macOS reports bytes.
+   */
+#ifdef __APPLE__
+  unsigned long long bytes = (unsigned long long)usage.ru_maxrss;
+#else
+  unsigned long long bytes = (unsigned long long)usage.ru_maxrss * 1024ULL;
+#endif
+  if (opt->verbosity >= 6) {
+    double user_ms = (double)usage.ru_utime.tv_sec * 1000.0 +
+                     (double)usage.ru_utime.tv_usec / 1000.0;
+    double system_ms = (double)usage.ru_stime.tv_sec * 1000.0 +
+                       (double)usage.ru_stime.tv_usec / 1000.0;
+    ny_dbg_heuristic_event(
+        "RESOURCE",
+        "process user_cpu=%.1fms system_cpu=%.1fms peak_rss=%.1fMiB (%llu "
+        "bytes) context_switches=%ld voluntary/%ld involuntary",
+        user_ms, system_ms, (double)bytes / (1024.0 * 1024.0), bytes,
+        usage.ru_nvcsw, usage.ru_nivcsw);
+  } else {
+    fprintf(stderr, "peak-rss: %llu bytes (%.1f MiB)\n", bytes,
+            (double)bytes / (1024.0 * 1024.0));
+  }
+#endif
 }
 
 int main(int argc, char **argv, char **envp) {
@@ -1774,8 +2132,8 @@ int main(int argc, char **argv, char **envp) {
   struct rlimit rl;
   if (getrlimit(RLIMIT_STACK, &rl) == 0) {
     /*
-     * Limitless: request infinite stack like real compilers (no artificial cap).
-     * OS will enforce practical limits.
+     * Limitless: request infinite stack like real compilers (no artificial
+     * cap). OS will enforce practical limits.
      */
     rlim_t want = RLIM_INFINITY;
     if (rl.rlim_cur != RLIM_INFINITY) {
@@ -1792,12 +2150,13 @@ int main(int argc, char **argv, char **envp) {
     return unified_rc;
   if (ny_argv_has_flag(argc, argv, "--native-vector-selftest")) {
     char selftest_err[256] = {0};
-    if (!ny_native_vector_selftest(selftest_err, sizeof(selftest_err))) {
+    if (!nyr_vector_selftest(selftest_err, sizeof(selftest_err))) {
       fprintf(stderr, "native vector selftest: %s\n",
               selftest_err[0] ? selftest_err : "failed");
       return 1;
     }
-    puts("native register selftest: x86-64 XMM and AArch64 scalar FP/NEON allocation and encoding passed");
+    puts("native register selftest: x86-64 XMM and AArch64 scalar FP/NEON "
+         "allocation and encoding passed");
     return 0;
   }
   if (ny_argv_has_flag(argc, argv, "--incremental-selftest")) {
@@ -1805,9 +2164,26 @@ int main(int argc, char **argv, char **envp) {
   }
   if (ny_argv_has_flag(argc, argv, "--proof-solver-selftest"))
     return ny_proof_solver_differential_selftest();
+  if (ny_argv_has_flag(argc, argv, "--proof-policy-selftest"))
+    return ny_proof_policy_differential_selftest();
+  if (ny_argv_has_flag(argc, argv, "--type-row-test"))
+    return ny_type_row_algebra_test();
+  if (ny_argv_has_flag(argc, argv, "--nytrix-embed-test"))
+    return nytrix_embedding_test();
+  for (int i = 1; i < argc; ++i) {
+    static const char option[] = "--ir-opt-test";
+    static const char option_prefix[] = "--ir-opt-test=";
+    if (strcmp(argv[i], option) == 0) {
+      const char *name =
+          i + 1 < argc && argv[i + 1][0] != '-' ? argv[i + 1] : NULL;
+      return nyr_ir_opt_test_run(name);
+    }
+    if (strncmp(argv[i], option_prefix, sizeof(option_prefix) - 1) == 0)
+      return nyr_ir_opt_test_run(argv[i] + sizeof(option_prefix) - 1);
+  }
 
-  bool trace_requested =
-      ny_argv_has_flag(argc, argv, "-trace") || ny_argv_has_flag(argc, argv, "--trace");
+  bool trace_requested = ny_argv_has_flag(argc, argv, "-trace") ||
+                         ny_argv_has_flag(argc, argv, "--trace");
   if (ny_argv_has_flag(argc, argv, "--doctor")) {
     ny_run_doctor();
     return 0;
@@ -1834,7 +2210,8 @@ int main(int argc, char **argv, char **envp) {
     int dst = 1;
     expanded_argv[0] = argv[0];
     for (int i = 1; i < argc; i++) {
-      if (strcmp(argv[i], "--wasm") == 0) continue;
+      if (strcmp(argv[i], "--wasm") == 0)
+        continue;
       expanded_argv[dst++] = argv[i];
     }
     expanded_argv[dst++] = (char *)"--native-backend=wasm";
@@ -1842,6 +2219,34 @@ int main(int argc, char **argv, char **envp) {
     expanded_argv[dst] = NULL;
     argv = expanded_argv;
     argc = dst;
+  }
+  /*
+   * Parse --dbg-baseline[=PATH] early and strip it from argv: it records this
+   * run's wall time + peak RSS into PATH (default .ny-baseline.json) as JSON,
+   * or compares against an existing record and reports regressions. The
+   * comparison is wall-clock advisory (±20% tolerance); CI can treat the
+   * exit hint as a gate.
+   */
+  const char *dbg_baseline_path = NULL;
+  {
+    static char *baseline_argv[256];
+    int dst = 1;
+    baseline_argv[0] = argv[0];
+    for (int i = 1; i < argc; i++) {
+      if (strncmp(argv[i], "--dbg-baseline", 14) == 0 &&
+          (argv[i][14] == '\0' || argv[i][14] == '=')) {
+        dbg_baseline_path =
+            argv[i][14] == '=' ? argv[i] + 15 : ".ny-baseline.json";
+        continue;
+      }
+      if (dst < 255)
+        baseline_argv[dst++] = argv[i];
+    }
+    baseline_argv[dst] = NULL;
+    if (dbg_baseline_path) {
+      argv = baseline_argv;
+      argc = dst;
+    }
   }
   /*
    * Parse --profile-time and --runs=N early, then strip them from argv so
@@ -1854,7 +2259,8 @@ int main(int argc, char **argv, char **envp) {
     for (int i = 1; i < argc; i++) {
       if (strncmp(argv[i], "--runs=", 7) == 0) {
         profile_runs = atoi(argv[i] + 7);
-        if (profile_runs < 1) profile_runs = 1;
+        if (profile_runs < 1)
+          profile_runs = 1;
         break;
       }
     }
@@ -1863,8 +2269,10 @@ int main(int argc, char **argv, char **envp) {
      */
     int dst = 1;
     for (int i = 1; i < argc; i++) {
-      if (strcmp(argv[i], "--profile-time") == 0) continue;
-      if (strncmp(argv[i], "--runs=", 7) == 0) continue;
+      if (strcmp(argv[i], "--profile-time") == 0)
+        continue;
+      if (strncmp(argv[i], "--runs=", 7) == 0)
+        continue;
       argv[dst++] = argv[i];
     }
     argc = dst;
@@ -1886,18 +2294,18 @@ int main(int argc, char **argv, char **envp) {
      * Resolve preset names (e.g. "linux-arm64" → "aarch64-linux-gnu")
      */
     static const char *presets[][3] = {
-      {"linux-x64",       "x86_64-linux-gnu",       "qemu-x86_64"},
-      {"linux-x86_64",    "x86_64-linux-gnu",       "qemu-x86_64"},
-      {"x86_64-linux",    "x86_64-linux-gnu",       "qemu-x86_64"},
-      {"linux-arm64",     "aarch64-linux-gnu",      "qemu-aarch64"},
-      {"linux-aarch64",   "aarch64-linux-gnu",      "qemu-aarch64"},
-      {"aarch64-linux",   "aarch64-linux-gnu",      "qemu-aarch64"},
-      {"linux-armhf",     "arm-linux-gnueabihf",    "qemu-arm"},
-      {"linux-arm",       "arm-linux-gnueabihf",    "qemu-arm"},
-      {"linux-riscv64",   "riscv64-linux-gnu",       "qemu-riscv64"},
-      {"riscv64-linux",   "riscv64-linux-gnu",       "qemu-riscv64"},
-      {"windows-x64",     "x86_64-w64-windows-gnu", "wine"},
-      {"windows-x86_64",  "x86_64-w64-windows-gnu", "wine"},
+        {"linux-x64", "x86_64-linux-gnu", "qemu-x86_64"},
+        {"linux-x86_64", "x86_64-linux-gnu", "qemu-x86_64"},
+        {"x86_64-linux", "x86_64-linux-gnu", "qemu-x86_64"},
+        {"linux-arm64", "aarch64-linux-gnu", "qemu-aarch64"},
+        {"linux-aarch64", "aarch64-linux-gnu", "qemu-aarch64"},
+        {"aarch64-linux", "aarch64-linux-gnu", "qemu-aarch64"},
+        {"linux-armhf", "arm-linux-gnueabihf", "qemu-arm"},
+        {"linux-arm", "arm-linux-gnueabihf", "qemu-arm"},
+        {"linux-riscv64", "riscv64-linux-gnu", "qemu-riscv64"},
+        {"riscv64-linux", "riscv64-linux-gnu", "qemu-riscv64"},
+        {"windows-x64", "x86_64-w64-windows-gnu", "wine"},
+        {"windows-x86_64", "x86_64-w64-windows-gnu", "wine"},
     };
     int np = sizeof(presets) / sizeof(presets[0]);
     for (int p = 0; p < np; p++) {
@@ -1916,14 +2324,16 @@ int main(int argc, char **argv, char **envp) {
     cross_run = true;
     int dst = 1;
     for (int i = 1; i < argc; i++) {
-      if (strcmp(argv[i], "--cross-run") == 0) continue;
+      if (strcmp(argv[i], "--cross-run") == 0)
+        continue;
       argv[dst++] = argv[i];
     }
     argc = dst;
   }
   if (cross_triple) {
     if (!cross_triple || !*cross_triple) {
-      fprintf(stderr, "ny: --cross requires a target triple (e.g. --cross=aarch64-linux-gnu)\n");
+      fprintf(stderr, "ny: --cross requires a target triple (e.g. "
+                      "--cross=aarch64-linux-gnu)\n");
       return 2;
     }
     /*
@@ -1941,7 +2351,8 @@ int main(int argc, char **argv, char **envp) {
       free(cc_path);
     }
     /*
-     * If cross-run, find QEMU/Wine.  Use preset runner if available, else probe.
+     * If cross-run, find QEMU/Wine.  Use preset runner if available, else
+     * probe.
      */
     if (cross_run) {
       const char *runner = cross_qemu;
@@ -1952,9 +2363,11 @@ int main(int argc, char **argv, char **envp) {
           runner = "qemu-arm";
         else if (strstr(cross_triple, "riscv64"))
           runner = "qemu-riscv64";
-        else if (strstr(cross_triple, "x86_64") || strstr(cross_triple, "amd64"))
+        else if (strstr(cross_triple, "x86_64") ||
+                 strstr(cross_triple, "amd64"))
           runner = "qemu-x86_64";
-        else if (strstr(cross_triple, "windows") || strstr(cross_triple, "mingw"))
+        else if (strstr(cross_triple, "windows") ||
+                 strstr(cross_triple, "mingw"))
           runner = "wine";
       }
       if (runner) {
@@ -1972,7 +2385,8 @@ int main(int argc, char **argv, char **envp) {
     int dst = 1;
     xargv[0] = argv[0];
     for (int j = 1; j < argc; j++) {
-      if (strncmp(argv[j], "--cross=", 8) == 0) continue;
+      if (strncmp(argv[j], "--cross=", 8) == 0)
+        continue;
       xargv[dst++] = argv[j];
     }
     xargv[dst++] = (char *)"--host-triple";
@@ -1999,25 +2413,118 @@ int main(int argc, char **argv, char **envp) {
   }
   ny_install_signal_handlers();
 
+  /*
+   * NYTRIX_TRACE is the single trace control: -trace forces it on, a
+   * deliberate user value (e.g. NYTRIX_TRACE=all) survives, and nothing is
+   * force-cleared behind the user's back.
+   */
   if (trace_requested) {
     ny_setenv_force("NYTRIX_TRACE", "1");
-  } else {
-    ny_unsetenv_force("NYTRIX_TRACE");
   }
   rt_trace_refresh_env();
 
   ny_options opt;
   ny_options_init(&opt);
   ny_options_parse(&opt, argc, argv);
+  bool gpu_backend_arg_seen = false;
+  for (int i = 1; i < argc; ++i) {
+    if (strcmp(argv[i], "--gpu-backend") == 0 ||
+        strncmp(argv[i], "--gpu-backend=", 14) == 0) {
+      gpu_backend_arg_seen = true;
+      break;
+    }
+  }
+  if (!gpu_backend_arg_seen)
+    opt.gpu_backend = NULL;
+  /*
+   * Counted -v forms and the legacy --verbose=N option populate separate
+   * fields.  Use the stronger level everywhere, including diagnostics that
+   * run before native lowering reinitializes the debug subsystem.
+   */
+  if (opt.verbosity > opt.verbose)
+    opt.verbose = opt.verbosity;
+  /*
+   * Level six is the source-focused investigation profile: keep the normal
+   * compiler path, but collect timings and one process resource summary. A
+   * bounded call graph gives context without dumping the linked stdlib graph.
+   * Explicit callgraph depth/output choices remain untouched.
+   */
+  if (opt.verbose >= 6) {
+    /*
+     * Activate every centralized compiler trace by default. Individual
+     * NY_TRACE_<FEATURE>=0 settings remain authoritative and can quiet a
+     * noisy subsystem during a focused investigation. The legacy import
+     * tracer logs every stdlib alias (often thousands); keep it quiet unless
+     * the user explicitly requests it, while the loader still reports cache
+     * and dependency summaries.
+     */
+    ny_setenv_force("NY_TRACE_DEEP", "1");
+    ny_setenv("NYTRIX_TRACE_IMPORTS", "0", 0);
+    opt.do_timing = true;
+    opt.report_peak_rss = true;
+    if (!opt.callgraph) {
+      opt.callgraph = true;
+      opt.callgraph_depth = 3;
+    }
+    if (opt.strip_override != 1)
+      opt.debug_symbols = true;
+    /*
+     * Retain a reproducible source/IR bundle only when this compile fails.
+     */
+    opt.dump_on_error = true;
+  }
+  /*
+   * At the highest verbosity include the per-pass NYIR report.  This is
+   * opt-in-by-verbosity and does not request persistent debug artifacts.
+   */
+  if (opt.verbose >= 5 && !opt.dbg_format_json)
+    opt.nyr_pass_stats = true;
   verbose_enabled = opt.verbose;
+  ny_dbg_init_from_verbosity(opt.verbose);
+  ny_dbg_set_filter(opt.dbg_filter);
+  ny_dbg_set_delta_only(opt.dbg_delta_only);
+  ny_dbg_set_json(opt.dbg_format_json);
+  if (opt.nyr_bisect) {
+    ny_setenv_force("NY_TRACE_BISECT", "1");
+    ny_dbg_set_flag(NY_DBG_PASS, true);
+    ny_dbg_set_flag(NY_DBG_VERIFY, true);
+  }
+  if (opt.nyr_fingerprint) {
+    ny_setenv_force("NY_TRACE_FINGERPRINT", "1");
+    /*
+     * Default on with --nyir-fingerprint: execution profiling validates
+     * growth candidates before they are called regressions.
+     */
+    ny_setenv_force("NYTRIX_FINGERPRINT_PROFILE", "1");
+    ny_dbg_set_flag(NY_DBG_PASS, true);
+  }
+  if (opt.nyr_flaky_check) {
+    ny_setenv_force("NY_TRACE_FLAKY_PASS", "1");
+    ny_dbg_set_flag(NY_DBG_PASS, true);
+  }
+  if (opt.dbg_unify_trace)
+    ny_dbg_set_flag(NY_DBG_TYPE_DETAIL, true);
+  if (opt.dbg_trait_resolve)
+    ny_dbg_set_flag(NY_DBG_TRAIT, true);
+  if (opt.dbg_abi)
+    ny_dbg_set_flag(NY_DBG_ABI, true);
+  if (opt.dbg_elf_dump)
+    ny_dbg_set_flag(NY_DBG_ELF, true);
+  if (opt.dbg_regalloc_heat)
+    ny_dbg_set_flag(NY_DBG_REGALLOC, true);
+  if (opt.dbg_stack_layout)
+    ny_dbg_set_flag(NY_DBG_MEM, true);
   color_mode = opt.color_mode;
 
   if (opt.mode == NY_MODE_REPL && !opt.safe_mode) {
-    bool effect_policy_explicit = ny_argv_has_flag(argc, argv, "--effect-require-known") ||
-                                  ny_argv_has_flag(argc, argv, "--no-effect-require-known");
-    bool alias_policy_explicit = ny_argv_has_flag(argc, argv, "--alias-require-known") ||
-                                 ny_argv_has_flag(argc, argv, "--no-alias-require-known");
-    bool alias_escape_explicit = ny_argv_has_flag(argc, argv, "--alias-require-no-escape");
+    bool effect_policy_explicit =
+        ny_argv_has_flag(argc, argv, "--effect-require-known") ||
+        ny_argv_has_flag(argc, argv, "--no-effect-require-known");
+    bool alias_policy_explicit =
+        ny_argv_has_flag(argc, argv, "--alias-require-known") ||
+        ny_argv_has_flag(argc, argv, "--no-alias-require-known");
+    bool alias_escape_explicit =
+        ny_argv_has_flag(argc, argv, "--alias-require-no-escape");
     if (!effect_policy_explicit)
       opt.effect_require_known = false;
     if (!alias_policy_explicit)
@@ -2042,13 +2549,13 @@ int main(int argc, char **argv, char **envp) {
    * one directly must not fall through to the REPL/default source pipeline:
    * that would recreate the AST boundary this option is intended to bypass.
    */
-  if (opt.mode == NY_MODE_RUN && opt.nyir_run_bin_path &&
-      !opt.nyir_dump_bin && !opt.command_string && !opt.input_file) {
-    char nyir_err[512] = {0};
-    if (!ny_native_eval_ir_binary_file(opt.nyir_run_bin_path, &opt, nyir_err,
-                                       sizeof(nyir_err))) {
+  if (opt.mode == NY_MODE_RUN && opt.nyr_run_bin_path && !opt.nyr_dump_bin &&
+      !opt.command_string && !opt.input_file) {
+    char nyr_err[512] = {0};
+    if (!ny_pipeline_eval_ir_binary_file(opt.nyr_run_bin_path, &opt, nyr_err,
+                                         sizeof(nyr_err))) {
       fprintf(stderr, "Error: NYIR binary run failed: %s\n",
-              nyir_err[0] ? nyir_err : "unknown error");
+              nyr_err[0] ? nyr_err : "unknown error");
       return 1;
     }
     return 0;
@@ -2056,7 +2563,8 @@ int main(int argc, char **argv, char **envp) {
 
   if (!opt.command_string && !opt.input_file && opt.mode != NY_MODE_REPL &&
       opt.mode != NY_MODE_HELP && opt.mode != NY_MODE_VERSION &&
-      opt.mode != NY_MODE_BUNDLE && opt.mode != NY_MODE_CLEAN_CACHE) {
+      opt.mode != NY_MODE_VERSION_ID && opt.mode != NY_MODE_BUNDLE &&
+      opt.mode != NY_MODE_CLEAN_CACHE) {
     opt.mode = NY_MODE_REPL;
   }
 
@@ -2091,7 +2599,7 @@ int main(int argc, char **argv, char **envp) {
   int exit_code = 0;
   char watched_path[4096] = {0};
   if (opt.input_file) {
-    strncpy(watched_path, opt.input_file, sizeof(watched_path)-1);
+    strncpy(watched_path, opt.input_file, sizeof(watched_path) - 1);
   } else if (opt.command_string) {
     watching = false; // no file to watch for -e
   }
@@ -2099,7 +2607,8 @@ int main(int argc, char **argv, char **envp) {
   long long last_mtime = 0;
   if (watching && watched_path[0]) {
     struct stat st0;
-    if (stat(watched_path, &st0) == 0) last_mtime = (long long)st0.st_mtime;
+    if (stat(watched_path, &st0) == 0)
+      last_mtime = (long long)st0.st_mtime;
   }
 
   /*
@@ -2111,6 +2620,7 @@ int main(int argc, char **argv, char **envp) {
     opt.emit_ir_path = tmp_ir;
   }
 
+  ny_tick_t dbg_t0 = ny_ticks_now();
   do {
     if (profile_runs > 0) {
       double min_t = 1e99, max_t = 0.0, sum_t = 0.0;
@@ -2121,35 +2631,117 @@ int main(int argc, char **argv, char **envp) {
         ny_tick_t t0 = ny_ticks_now();
         exit_code = ny_pipeline_run(&opt);
         double elapsed = ny_ticks_elapsed_sec(t0);
-        fprintf(stderr, "%.3fs%s\n", elapsed, exit_code != 0 ? " (FAILED)" : "");
-        if (elapsed < min_t) min_t = elapsed;
-        if (elapsed > max_t) max_t = elapsed;
+        fprintf(stderr, "%.3fs%s\n", elapsed,
+                exit_code != 0 ? " (FAILED)" : "");
+        if (elapsed < min_t)
+          min_t = elapsed;
+        if (elapsed > max_t)
+          max_t = elapsed;
         sum_t += elapsed;
       }
-      fprintf(stderr,
-              "profile-time summary: min=%.3fs  mean=%.3fs  max=%.3fs  runs=%d\n",
-              min_t, sum_t / profile_runs, max_t, profile_runs);
+      fprintf(
+          stderr,
+          "profile-time summary: min=%.3fs  mean=%.3fs  max=%.3fs  runs=%d\n",
+          min_t, sum_t / profile_runs, max_t, profile_runs);
+      ny_report_peak_rss(&opt);
       break;
     }
     exit_code = ny_pipeline_run(&opt);
-    if (!watching) break;
+    ny_report_peak_rss(&opt);
+    if (dbg_baseline_path) {
+      double elapsed = ny_ticks_elapsed_sec(dbg_t0);
+      size_t rss = 0;
+      {
+        FILE *sm = fopen("/proc/self/status", "r");
+        if (sm) {
+          char l[256];
+          while (fgets(l, sizeof(l), sm))
+            if (strncmp(l, "VmHWM:", 6) == 0)
+              rss = (size_t)strtoull(l + 6, NULL, 10);
+          fclose(sm);
+        }
+      }
+      const char *bench_src = opt.input_file ? opt.input_file : "<inline>";
+      unsigned long long src_hash = 1469598103934665603ULL;
+      {
+        FILE *sf = opt.input_file ? fopen(opt.input_file, "rb") : NULL;
+        if (sf) {
+          int ch;
+          while ((ch = fgetc(sf)) != EOF) {
+            src_hash ^= (unsigned char)ch;
+            src_hash *= 1099511628211ULL;
+          }
+          fclose(sf);
+        }
+      }
+      char rec[512];
+      snprintf(rec, sizeof(rec),
+               "{\"source\":\"%s\",\"source_hash\":\"%016llx\","
+               "\"wall_sec\":%.3f,\"rss_kb\":%zu}\n",
+               bench_src, src_hash, elapsed, rss);
+      FILE *old = fopen(dbg_baseline_path, "r");
+      if (old) {
+        char ob[512] = {0};
+        size_t n = fread(ob, 1, sizeof(ob) - 1, old);
+        fclose(old);
+        ob[n] = '\0';
+        const char *hashp = strstr(ob, "\"source_hash\":\"");
+        const char *wallp = strstr(ob, "\"wall_sec\":");
+        if (!hashp || !wallp ||
+            strncmp(hashp + 15,
+                    rec + (strstr(rec, "\"source_hash\":\"") - rec) + 15,
+                    16) != 0) {
+          fprintf(stderr, "dbg-baseline: source changed since baseline; "
+                          "rewriting baseline\n");
+        } else if (wallp) {
+          double base_wall = strtod(wallp + 11, NULL);
+          double ratio = base_wall > 0 ? elapsed / base_wall : 1.0;
+          if (ratio > 1.20) {
+            fprintf(stderr,
+                    "dbg-baseline: REGRESSION %.3fs vs baseline %.3fs "
+                    "(%.0f%% of baseline, tolerance 120%%)\n",
+                    elapsed, base_wall, ratio * 100.0);
+            if (exit_code == 0)
+              exit_code = 3;
+          } else {
+            fprintf(stderr,
+                    "dbg-baseline: ok %.3fs vs baseline %.3fs "
+                    "(%.0f%%)\n",
+                    elapsed, base_wall, ratio * 100.0);
+          }
+        }
+      }
+      FILE *nf = fopen(dbg_baseline_path, "w");
+      if (nf) {
+        fputs(rec, nf);
+        fclose(nf);
+      } else {
+        fprintf(stderr, "dbg-baseline: cannot write %s\n", dbg_baseline_path);
+      }
+    }
+    if (!watching)
+      break;
 
     /*
      * Real file watcher + mtime fallback for --watch / --hot-reload
-     * Linux: inotify, macOS: kqueue, Windows: change notification, else: mtime poll
+     * Linux: inotify, macOS: kqueue, Windows: change notification, else: mtime
+     * poll
      */
     const char *watcher_label =
 #if defined(__linux__)
-      "inotify";
+        "inotify";
 #elif defined(__APPLE__)
-      "kqueue";
+        "kqueue";
 #elif defined(_WIN32)
-      "win32+mtime";
+        "win32+mtime";
 #else
-      "poll";
+        "poll";
 #endif
-    fprintf(stderr, "[hot] watching for changes to '%s' (poll=%dms, watcher=%s). Press Ctrl-C to exit.\n",
-            watched_path[0] ? watched_path : "<stdin>", opt.watch_poll_ms, watcher_label);
+    fprintf(stderr,
+            "[hot] watching for changes to '%s' (poll=%dms, watcher=%s). Press "
+            "Ctrl-C to exit.\n",
+            watched_path[0] ? watched_path : "<stdin>", opt.watch_poll_ms,
+            watcher_label);
     fflush(stderr);
 
     bool changed = false;
@@ -2162,32 +2754,71 @@ int main(int argc, char **argv, char **envp) {
     {
       int ifd = -1, iwd = -1;
       const char *wt = watched_path[0] ? watched_path : ".";
-      char wdir[4096]; strncpy(wdir, wt, sizeof(wdir)-1); wdir[sizeof(wdir)-1] = '\0';
-      char *sl = strrchr(wdir, '/'); if (sl && sl != wdir) *sl='\0'; else { strncpy(wdir, ".", sizeof(wdir)-1); wdir[sizeof(wdir)-1]='\0'; }
-      ifd = inotify_init1(IN_NONBLOCK | IN_CLOEXEC); if (ifd < 0) ifd = inotify_init();
-      if (ifd >= 0) iwd = inotify_add_watch(ifd, wdir[0]?wdir:".", IN_MODIFY|IN_CREATE|IN_DELETE|IN_MOVED_TO|IN_CLOSE_WRITE|IN_ATTRIB);
+      char wdir[4096];
+      strncpy(wdir, wt, sizeof(wdir) - 1);
+      wdir[sizeof(wdir) - 1] = '\0';
+      char *sl = strrchr(wdir, '/');
+      if (sl && sl != wdir)
+        *sl = '\0';
+      else {
+        strncpy(wdir, ".", sizeof(wdir) - 1);
+        wdir[sizeof(wdir) - 1] = '\0';
+      }
+      ifd = inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
+      if (ifd < 0)
+        ifd = inotify_init();
+      if (ifd >= 0)
+        iwd = inotify_add_watch(ifd, wdir[0] ? wdir : ".",
+                                IN_MODIFY | IN_CREATE | IN_DELETE |
+                                    IN_MOVED_TO | IN_CLOSE_WRITE | IN_ATTRIB);
       if (ifd >= 0 && iwd >= 0) {
-        char ebuf[4096]; long long t0 = (long long)time(NULL);
+        char ebuf[4096];
+        long long t0 = (long long)time(NULL);
         while (!changed) {
-          fd_set r; FD_ZERO(&r); FD_SET(ifd, &r);
+          fd_set r;
+          FD_ZERO(&r);
+          FD_SET(ifd, &r);
           struct timeval tv = {0, poll_ms * 1000};
-          if (select(ifd+1, &r, 0, 0, &tv) > 0) {
+          if (select(ifd + 1, &r, 0, 0, &tv) > 0) {
             int n = (int)read(ifd, ebuf, sizeof(ebuf));
-            int off=0; while (off+16 <= n) {
-              uint32_t m = *(uint32_t*)(ebuf+off+4), nl=*(uint32_t*)(ebuf+off+12);
-              const char *nm = (nl>0 && off+16+nl<=(uint32_t)n) ? (ebuf+off+16) : "";
-              if (strstr(nm,".ny") || (watched_path[0]&&strstr(watched_path,nm)) || (m&(IN_MODIFY|IN_CREATE|IN_CLOSE_WRITE))) {
-                struct stat st; if (watched_path[0]&&stat(watched_path,&st)==0 && (long long)st.st_mtime != last_mtime) { changed=true; last_mtime=(long long)st.st_mtime; }
-                else if (watched_path[0]==0) changed=true;
+            int off = 0;
+            while (off + 16 <= n) {
+              uint32_t m = *(uint32_t *)(ebuf + off + 4),
+                       nl = *(uint32_t *)(ebuf + off + 12);
+              const char *nm = (nl > 0 && off + 16 + nl <= (uint32_t)n)
+                                   ? (ebuf + off + 16)
+                                   : "";
+              if (strstr(nm, ".ny") ||
+                  (watched_path[0] && strstr(watched_path, nm)) ||
+                  (m & (IN_MODIFY | IN_CREATE | IN_CLOSE_WRITE))) {
+                struct stat st;
+                if (watched_path[0] && stat(watched_path, &st) == 0 &&
+                    (long long)st.st_mtime != last_mtime) {
+                  changed = true;
+                  last_mtime = (long long)st.st_mtime;
+                } else if (watched_path[0] == 0)
+                  changed = true;
               }
               off += 16 + (int)nl;
             }
           }
-          if (!changed && watched_path[0]) { struct stat st; if (stat(watched_path,&st)==0 && (long long)st.st_mtime!=last_mtime){changed=true;last_mtime=(long long)st.st_mtime;} }
-          if (!changed) usleep((useconds_t)(poll_ms*500));
-          if ((long long)time(NULL)-t0 > 30) break;
+          if (!changed && watched_path[0]) {
+            struct stat st;
+            if (stat(watched_path, &st) == 0 &&
+                (long long)st.st_mtime != last_mtime) {
+              changed = true;
+              last_mtime = (long long)st.st_mtime;
+            }
+          }
+          if (!changed)
+            usleep((useconds_t)(poll_ms * 500));
+          if ((long long)time(NULL) - t0 > 30)
+            break;
         }
-        if (iwd>=0) inotify_rm_watch(ifd,iwd); if (ifd>=0) close(ifd);
+        if (iwd >= 0)
+          inotify_rm_watch(ifd, iwd);
+        if (ifd >= 0)
+          close(ifd);
       }
     }
 #elif defined(__APPLE__)
@@ -2199,11 +2830,14 @@ int main(int argc, char **argv, char **envp) {
       int vfd = -1;
       if (kq >= 0 && watched_path[0]) {
         vfd = open(watched_path, O_EVTONLY | O_CLOEXEC);
-        if (vfd < 0) vfd = open(watched_path, O_EVTONLY);
+        if (vfd < 0)
+          vfd = open(watched_path, O_EVTONLY);
         if (vfd >= 0) {
           struct kevent ev;
           EV_SET(&ev, vfd, EVFILT_VNODE, EV_ADD | EV_CLEAR,
-                 NOTE_WRITE | NOTE_DELETE | NOTE_RENAME | NOTE_ATTRIB | NOTE_EXTEND, 0, NULL);
+                 NOTE_WRITE | NOTE_DELETE | NOTE_RENAME | NOTE_ATTRIB |
+                     NOTE_EXTEND,
+                 0, NULL);
           kevent(kq, &ev, 1, NULL, 0, NULL);
           struct kevent out[4];
           long long t0 = (long long)time(NULL);
@@ -2211,25 +2845,40 @@ int main(int argc, char **argv, char **envp) {
           while (!changed) {
             int n = kevent(kq, NULL, 0, out, 4, &ts);
             if (n > 0) {
-              for (int i=0; i<n; i++) {
-                if (out[i].fflags & (NOTE_WRITE|NOTE_DELETE|NOTE_RENAME|NOTE_ATTRIB)) {
+              for (int i = 0; i < n; i++) {
+                if (out[i].fflags &
+                    (NOTE_WRITE | NOTE_DELETE | NOTE_RENAME | NOTE_ATTRIB)) {
                   struct stat st;
-                  if (watched_path[0] && stat(watched_path, &st)==0) {
-                    if ((long long)st.st_mtime != last_mtime) { changed = true; last_mtime = (long long)st.st_mtime; }
-                  } else { changed = true; }
+                  if (watched_path[0] && stat(watched_path, &st) == 0) {
+                    if ((long long)st.st_mtime != last_mtime) {
+                      changed = true;
+                      last_mtime = (long long)st.st_mtime;
+                    }
+                  } else {
+                    changed = true;
+                  }
                 }
               }
             }
             if (!changed && watched_path[0]) {
-              struct stat st; if (stat(watched_path,&st)==0 && (long long)st.st_mtime != last_mtime) {changed=true; last_mtime=(long long)st.st_mtime;}
+              struct stat st;
+              if (stat(watched_path, &st) == 0 &&
+                  (long long)st.st_mtime != last_mtime) {
+                changed = true;
+                last_mtime = (long long)st.st_mtime;
+              }
             }
-            if (!changed) usleep((useconds_t)(poll_ms * 500));
-            if ((long long)time(NULL) - t0 > 30) break;
+            if (!changed)
+              usleep((useconds_t)(poll_ms * 500));
+            if ((long long)time(NULL) - t0 > 30)
+              break;
           }
         }
       }
-      if (vfd >= 0) close(vfd);
-      if (kq >= 0) close(kq);
+      if (vfd >= 0)
+        close(vfd);
+      if (kq >= 0)
+        close(kq);
     }
 #elif defined(_WIN32)
     /*
@@ -2238,30 +2887,53 @@ int main(int argc, char **argv, char **envp) {
     {
       HANDLE h = INVALID_HANDLE_VALUE;
       if (watched_path[0]) {
-        char dir[4096]; strncpy(dir, watched_path, sizeof(dir)-1); dir[sizeof(dir)-1] = '\0';
-        char *sl = strrchr(dir, '\\'); if (!sl) sl = strrchr(dir, '/');
-        if (sl) *sl = 0; else { strncpy(dir, ".", sizeof(dir)-1); dir[sizeof(dir)-1] = '\0'; }
+        char dir[4096];
+        strncpy(dir, watched_path, sizeof(dir) - 1);
+        dir[sizeof(dir) - 1] = '\0';
+        char *sl = strrchr(dir, '\\');
+        if (!sl)
+          sl = strrchr(dir, '/');
+        if (sl)
+          *sl = 0;
+        else {
+          strncpy(dir, ".", sizeof(dir) - 1);
+          dir[sizeof(dir) - 1] = '\0';
+        }
         h = FindFirstChangeNotificationA(dir, FALSE,
-              FILE_NOTIFY_CHANGE_LAST_WRITE | FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_DIR_NAME);
+                                         FILE_NOTIFY_CHANGE_LAST_WRITE |
+                                             FILE_NOTIFY_CHANGE_FILE_NAME |
+                                             FILE_NOTIFY_CHANGE_DIR_NAME);
       }
       long long t0 = (long long)time(NULL);
       while (!changed) {
         if (h != INVALID_HANDLE_VALUE) {
           if (WaitForSingleObject(h, poll_ms) == WAIT_OBJECT_0) {
             struct stat st;
-            if (watched_path[0] && stat(watched_path, &st)==0 && (long long)st.st_mtime != last_mtime) {
-              changed = true; last_mtime = (long long)st.st_mtime;
-            } else { changed = true; }
+            if (watched_path[0] && stat(watched_path, &st) == 0 &&
+                (long long)st.st_mtime != last_mtime) {
+              changed = true;
+              last_mtime = (long long)st.st_mtime;
+            } else {
+              changed = true;
+            }
             FindNextChangeNotification(h);
           }
         }
         if (!changed && watched_path[0]) {
-          struct stat st; if (stat(watched_path,&st)==0 && (long long)st.st_mtime != last_mtime){ changed=true; last_mtime=(long long)st.st_mtime; }
+          struct stat st;
+          if (stat(watched_path, &st) == 0 &&
+              (long long)st.st_mtime != last_mtime) {
+            changed = true;
+            last_mtime = (long long)st.st_mtime;
+          }
         }
-        if (!changed) Sleep(poll_ms / 2);
-        if ((long long)time(NULL)-t0 > 30) break;
+        if (!changed)
+          Sleep(poll_ms / 2);
+        if ((long long)time(NULL) - t0 > 30)
+          break;
       }
-      if (h != INVALID_HANDLE_VALUE) FindCloseChangeNotification(h);
+      if (h != INVALID_HANDLE_VALUE)
+        FindCloseChangeNotification(h);
     }
 #else
     /*
@@ -2315,17 +2987,17 @@ int main(int argc, char **argv, char **envp) {
     } else {
       char cmd[4096];
       snprintf(cmd, sizeof(cmd),
-        "%s --target=wasm32 -O2 -nostdlib "
-        "-Wl,--no-entry -Wl,--export-memory -Wl,--allow-undefined "
-        "-Wl,--export-if-defined=_ny_top_entry "
-        "-Wl,--export-if-defined=main "
-        "-Wl,--export-if-defined=ny_web_init "
-        "-Wl,--export-if-defined=ny_web_main "
-        "-Wl,--export-if-defined=ny_web_frame "
-        "-Wl,--export-if-defined=ny_web_render "
-        "-Wl,--initial-memory=16777216 -Wl,--max-memory=67108864 "
-        "-o '%s' '%s' 2>&1",
-        clang, opt.emit_wasm_path, ir);
+               "%s --target=wasm32 -O2 -nostdlib "
+               "-Wl,--no-entry -Wl,--export-memory -Wl,--allow-undefined "
+               "-Wl,--export-if-defined=_ny_top_entry "
+               "-Wl,--export-if-defined=main "
+               "-Wl,--export-if-defined=ny_web_init "
+               "-Wl,--export-if-defined=ny_web_main "
+               "-Wl,--export-if-defined=ny_web_frame "
+               "-Wl,--export-if-defined=ny_web_render "
+               "-Wl,--initial-memory=16777216 -Wl,--max-memory=67108864 "
+               "-o '%s' '%s' 2>&1",
+               clang, opt.emit_wasm_path, ir);
       free(clang);
       int rc = system(cmd);
       if (rc != 0) {

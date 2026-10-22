@@ -1,0 +1,27 @@
+shape comptime_generated_attributes {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "comptime", "attributes", "codegen"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-only; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.clock (ticks)
+
+comptime template cached_square(name) {
+   @cache fn ${name}(int value) int {
+      return value * value
+   }
+}
+
+comptime emit cached_square(ident("generated_cached_square"))
+
+def seed = ticks() % 1000
+def expected = seed * seed
+assert(generated_cached_square(seed) == expected,
+       "generated @cache function computes its value")
+assert(generated_cached_square(seed) == expected,
+       "generated @cache function accepts repeated calls")
+NY
+}

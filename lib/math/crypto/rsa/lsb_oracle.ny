@@ -6,11 +6,11 @@
 ;; - https://people.csail.mit.edu/rivest/Rsapaper.pdf
 ;; - https://crypto.stanford.edu/~dabo/pubs/papers/RSA-survey.pdf
 ;; References:
-;; - std.math.crypto.rsa
-;; - std.math.crypto
-module std.math.crypto.rsa.lsb_oracle(lsb_oracle_attack, lsb_oracle_recover_from_bits, lsb_oracle_variant_attack)
-use std.math.nt
-use std.math.crypto.rsa.op (compute_phi, compute_d)
+;; - core.math.crypto.rsa
+;; - core.math.crypto
+module core.math.crypto.rsa.lsb_oracle(lsb_oracle_attack, lsb_oracle_recover_from_bits, lsb_oracle_variant_attack)
+use core.math.nt
+use core.math.crypto.rsa.op (compute_phi, compute_d)
 
 fn lsb_oracle_recover_from_bits(any n, list bits) any {
    "Recover plaintext from a recorded RSA parity-oracle bit transcript.

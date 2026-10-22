@@ -1,0 +1,55 @@
+shape expression_effect_aggregation {
+  family "runtime/language/types"
+  generator "embedded"
+  features ["ny", "effects", "expression", "match", "ternary", "sizeof"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-only; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+mut effect_value_calls = 0
+
+@effects(io, write)
+fn effect_value() int {
+   effect_value_calls += 1
+   print("effect branch")
+   return 7
+}
+
+@effects(io, write)
+fn ternary_effect(bool selected) int {
+   return selected ? effect_value() : 0
+}
+
+@effects(io, write)
+fn match_effect(bool selected) int {
+   return match selected {
+      true -> effect_value()
+      _ -> 0
+   }
+}
+
+@effects(none)
+fn sizeof_unevaluated_effect() int {
+   return sizeof(effect_value())
+}
+
+@effects(none)
+fn quoted_effect_is_runtime_pure() int {
+   def quoted = quote{ effect_value() }
+   return 1
+}
+
+assert(ternary_effect(true) == 7 && ternary_effect(false) == 0,
+       "ternary branches run with the declared union effect")
+assert(match_effect(true) == 7 && match_effect(false) == 0,
+       "match arms run with the declared union effect")
+def calls_before_sizeof = effect_value_calls
+assert(sizeof_unevaluated_effect() > 0 &&
+       effect_value_calls == calls_before_sizeof,
+       "sizeof does not evaluate its effectful expression operand")
+assert(quoted_effect_is_runtime_pure() == 1,
+       "quoted effectful syntax does not run at runtime")
+NY
+}

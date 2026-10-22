@@ -1,0 +1,24 @@
+shape test_io {
+  family "runtime/execution"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+assert(__nanosleep(0) == -1, "__nanosleep rejects tagged zero timespec")
+assert(__write_buffered(-1, "x", 1) < 0, "__write_buffered reports invalid fd")
+mut odd_io_buf = malloc(8)
+store8(odd_io_buf, 65, 0)
+store8(odd_io_buf, 65, 1)
+assert(__write_off(1, odd_io_buf, 1, 0) == 1,
+   "__write_off preserves aligned raw buffer pointers")
+assert(__write_off(1, ptr_add(odd_io_buf, 1), 1, 0) == 1,
+   "__write_off preserves odd raw buffer pointers")
+free(odd_io_buf)
+assert(__print_flush() == 1, "__print_flush returns tagged success")
+print("✓ runtime io tests passed")
+NY
+}

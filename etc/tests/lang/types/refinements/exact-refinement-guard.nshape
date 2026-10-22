@@ -1,0 +1,26 @@
+shape exact_refinement_guard {
+  family "runtime/language"
+  generator "embedded"
+  features ["ny", "test", "typing", "refinement", "guard", "alias"]
+  template ny-test-case
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+refine Positive = int where(value) { value > 0 }
+fn accept_positive(Positive value) int { value }
+
+fn exact_refinement_guard(int value) int {
+  if Positive(value) {
+    def alias = value
+    accept_positive(alias)
+  } else {
+    0
+  }
+}
+
+assert(exact_refinement_guard(6) == 6,
+       "an exact refinement guard and immutable alias carry the refinement")
+NY
+}

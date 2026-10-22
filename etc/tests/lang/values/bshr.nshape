@@ -1,0 +1,25 @@
+shape bshr_counts {
+  family "runtime/values"
+  generator "embedded"
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  features ["ny", "test", "bitwise"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+fn logical_right_shift(int value, int count) int {
+   bshr(value, count)
+}
+
+def word = 0x510e527f
+assert(bshr(word, 6) == 21248329,
+       "bshr preserves an odd raw shift count")
+assert(logical_right_shift(word, 6) == 21248329,
+       "typed bshr parameters stay raw")
+assert(logical_right_shift(word, -1) == word,
+       "negative bshr count leaves value unchanged")
+assert(logical_right_shift(word, 64) == 0,
+       "oversized bshr count yields zero")
+NY
+}

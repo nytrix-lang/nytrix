@@ -1,0 +1,70 @@
+shape doc_meta_collect {
+  family "runtime/compiler"
+  generator "regression"
+  features ["ny", "doc", "metadata", "discovery", "bounded"]
+  template ny-test-case
+  flags "--native-backend=x86_64"
+  flags_matrix "--native --run; --native-only; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.compiler.tools.doc.meta as doc_meta
+use core.os (file_write, file_remove, temp_dir, pid)
+use core.os.fs as fs
+use core.os.path as path
+
+def root = path.join(temp_dir(), "doc-meta-collect-" + to_str(pid()))
+def learn = path.join(root, "learn")
+def hidden = path.join(root, ".git")
+def empty_root = path.join(root, "empty-root")
+def empty_child = path.join(empty_root, "child")
+def unreadable_doc = path.join(root, "unreadable.md")
+assert(is_ok(fs.make_dir(root)) && is_ok(fs.make_dir(learn)) &&
+       is_ok(fs.make_dir(hidden)) && is_ok(fs.make_dir(empty_root)) &&
+       is_ok(fs.make_dir(empty_child)), "create isolated documentation tree")
+def home = path.join(root, "zeta.md")
+def guide = path.join(learn, "quick-start.md")
+def ignored = path.join(hidden, "ignored.md")
+unwrap(file_write(home, ";; Home page\n;; Keywords: Ny, Docs\n\n# Home\n"))
+unwrap(file_write(guide, "Content\n;; not header metadata\n"))
+unwrap(file_write(ignored, ";; Hidden\n"))
+
+def pages = doc_meta.collect(root)
+def file_root = doc_meta.collect(home)
+assert(is_list(pages) && pages.len == 2 &&
+       pages.get(0).get("route") == "learn/quick-start" &&
+       pages.get(0).get("title") == "Learn / Quick Start" &&
+       pages.get(1).get("route") == "zeta" &&
+       pages.get(1).get("title") == "Home page" &&
+       pages.get(1).get("keywords") == ["ny", "docs"],
+       "collection is route-sorted, skips hidden trees, and extracts metadata")
+assert(is_nil(file_root),
+       "collection rejects an existing file where a directory root is required")
+assert(is_list(fs.list_dir_checked(empty_child)) &&
+       fs.list_dir_checked(empty_child).len == 0 &&
+       is_nil(fs.list_dir_checked(home)) && is_list(fs.list_dir(home)) &&
+       fs.list_dir(home).len == 0,
+       "checked listing distinguishes empty directories from open failures; list_dir stays compatible")
+def depth_limited = doc_meta.collect(root, 0)
+def entries_limited = doc_meta.collect(root, 32, 1)
+def missing_root = doc_meta.collect(path.join(root, "missing"))
+assert(is_nil(depth_limited) && is_nil(entries_limited) &&
+       is_nil(missing_root),
+       "collection rejects depth, entry, and invalid-root bounds")
+assert(is_nil(doc_meta.collect(empty_root, 0)),
+       "depth limit includes empty nested directories")
+assert(is_ok(fs.make_dir(unreadable_doc)) && is_nil(doc_meta.collect(root)),
+       "collection fails instead of silently skipping unreadable documents")
+
+file_remove(home)
+file_remove(guide)
+file_remove(ignored)
+fs.remove_dir(hidden)
+fs.remove_dir(learn)
+fs.remove_dir(empty_child)
+fs.remove_dir(empty_root)
+fs.remove_dir(unreadable_doc)
+fs.remove_dir(root)
+print("✓ documentation metadata collection tests passed")
+NY
+}

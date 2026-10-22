@@ -1,0 +1,23 @@
+shape raw_pointer_requires_an_explicit_string_type {
+  family "runtime/values"
+  generator "embedded"
+  features ["ny", "test", "runtime", "ffi", "provenance"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+fn any_id(any value) any { value }
+
+def raw = malloc_raw(8)
+assert(raw != nil, "raw allocation for C-string-shaped bytes")
+store8(raw, 88, 0)
+store8(raw, 0, 1)
+assert(!is_str(any_id(raw)),
+       "readable raw memory needs an explicit string type")
+assert(to_str(any_id(raw)) != "X",
+       "formatting does not infer a C string from raw allocation contents")
+free_raw(raw)
+0
+NY
+}

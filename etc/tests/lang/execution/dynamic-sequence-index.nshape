@@ -1,0 +1,23 @@
+shape test_dynamic_sequence_index {
+  family "runtime/execution"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+fn fold(xs) {
+   mut i = 0
+   mut total = 0
+   while i < 10 {
+      total += xs[i % xs.len]
+      i += 1
+   }
+   total
+}
+
+assert(fold([7, 8, 9]) == 79, "dynamic sequence modulo index")
+print("✓ dynamic sequence index passed")
+NY
+}

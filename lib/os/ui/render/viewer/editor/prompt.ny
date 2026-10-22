@@ -1,19 +1,19 @@
 ;; Keywords: editor prompt input modal command os ui render viewer text
 ;; Prompt and inline input helpers for editor commands.
 ;; References:
-;; - std.os.ui.render.viewer.editor.commands
-module std.os.ui.render.viewer.editor.prompt(
+;; - core.os.ui.render.viewer.editor.commands
+module core.os.ui.render.viewer.editor.prompt(
    context_actions, context_actions_for, context_state, context_open, context_close, context_is_open,
    context_entry, context_x, context_y, context_clamp, context_hit, context_hover,
    rename_state, rename_start, rename_close, rename_is_open,
    rename_entry, rename_text, rename_rel, rename_handle_key, rename_handle_char
 )
 
-use std.core
-use std.core.str as str
-use std.math (max, min)
-use std.os.ui.window
-use std.os.ui.window.consts as key
+use core
+use core.str as str
+use core.math (max, min)
+use core.os.ui.window
+use core.os.ui.window.consts as key
 
 def _FILE_ACTIONS = [
    ["Open", "open", "RET", "file", "Open the selected file in a buffer."],

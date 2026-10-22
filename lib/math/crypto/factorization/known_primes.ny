@@ -2,12 +2,12 @@
 ;; Integer-factorization routines for factorization from known or partially known primes.
 ;; Includes reusable small-prime, Mersenne-prime, and candidate-GCD scans.
 ;; References:
-;; - std.math.crypto.factorization
-;; - std.math.crypto
-module std.math.crypto.factorization.known_primes(factor_by_known_primes, factor_moduli_by_known_primes, factor_small_prime_q, factor_mersenne_prime_modulus, factor_by_prime_file, factor_moduli_by_prime_file, factor_smallq, factor_mersenne_primes, factor_system_primes_gcd)
-use std.math.nt
-use std.os (file_read)
-use std.core.str (split, strip)
+;; - core.math.crypto.factorization
+;; - core.math.crypto
+module core.math.crypto.factorization.known_primes(factor_by_known_primes, factor_moduli_by_known_primes, factor_small_prime_q, factor_mersenne_prime_modulus, factor_by_prime_file, factor_moduli_by_prime_file, factor_smallq, factor_mersenne_primes, factor_system_primes_gcd)
+use core.math.nt
+use core.os (file_read)
+use core.str (split, strip)
 
 fn _z(any x) any { is_bigint(x) ? x : Z(x) }
 
@@ -133,7 +133,10 @@ fn factor_moduli_by_prime_file(any moduli, str path, bool require_semiprime=true
          if ps.len == 0 { return [] }
          factor_moduli_by_known_primes(moduli, ps, require_semiprime)
       }
-      err(ignorederr) -> { ignorederr [] }
+      err(ignorederr) -> {
+         ignorederr
+         []
+      }
    }
 }
 

@@ -1,0 +1,25 @@
+shape ownership_allowance_guard_reassignment_positive {
+  family "language/ownership"
+  generator "regression"
+  features ["ownership", "allowance", "guard", "positive"]
+  template ny-test-case
+  flags_matrix "--ownership-strict --native --run; --ownership-strict --native-backend=llvm --jit --jit-engine=mcjit; --ownership-strict --native-backend=llvm --jit --jit-engine=orc; --ownership-strict --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+layout AllowanceGuard {
+   i32 value
+}
+@allowance(x, [1,2])
+fn generated(any raw, int x) int {
+   def before = x
+   layout guard AllowanceGuard value = raw else {
+      x = 7
+   }
+   return before + x
+}
+assert(generated(nil, 3) == 10, "fallback reassignment starts a new epoch")
+assert(generated(AllowanceGuard(5), 3) == 6,
+       "guard success keeps the unsplit use interval")
+NY
+}

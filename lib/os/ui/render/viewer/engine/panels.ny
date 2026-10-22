@@ -1,15 +1,15 @@
 ;; Keywords: engine panels layout inspector hierarchy os ui render viewer scene
 ;; Panel layout helpers for hierarchy, inspector, profile, and viewport UI regions.
 ;; References:
-;; - std.os.ui.render.viewer.engine.state
-;; - std.os.ui.render.viewer.gui
-module std.os.ui.render.viewer.engine.panels(console_body, probe_body, workspace_body, profiler_body, gallery_body)
-use std.core
-use std.core.str as str
-use std.math (clamp, max, min, sin)
-use std.os.ui.render.viewer.gui as gui
-use std.os.ui.render.viewer.editor.colorpicker as colorpicker
-use std.os.ui.render as render
+;; - core.os.ui.render.viewer.engine.state
+;; - core.os.ui.render.viewer.gui
+module core.os.ui.render.viewer.engine.panels(console_body, probe_body, workspace_body, profiler_body, gallery_body)
+use core
+use core.str as str
+use core.math (clamp, max, min, sin)
+use core.os.ui.render.viewer.gui as gui
+use core.os.ui.render.viewer.editor.colorpicker as colorpicker
+use core.os.ui.render as render
 
 fn _action(action="", input="", command="") dict {
    {"action": action, "input": input, "command": command}
@@ -85,6 +85,10 @@ fn probe_body(state) dict {
    def scene = _txt(state.get("scene", ""), "")
    def fps = _num(state.get("fps", 0.0))
    def probe_w = _num(state.get("probe_w", 480.0), 480.0)
+   def int rect_x = int(r.get(0, 0.0))
+   def int rect_y = int(r.get(1, 0.0))
+   def int rect_w = int(r.get(2, 0.0))
+   def int rect_h = int(r.get(3, 0.0))
    def card_w = _num(state.get("card_w", 120.0), 120.0)
    def win_w = _num(state.get("win_w", 1.0), 1.0)
    def win_h = _num(state.get("win_h", 1.0), 1.0)
@@ -96,10 +100,10 @@ fn probe_body(state) dict {
    gui.text("shot: " + shot)
    gui.text("mouse: (" + to_str(int(mx)) + ", " + to_str(int(my)) + ")")
    gui.text("scroll: (" + to_str(sx) + ", " + to_str(sy) + ")")
-   gui.text("last rect: x=" + to_str(int(r.get(0, 0.0))) +
-      " y=" + to_str(int(r.get(1, 0.0))) +
-      " w=" + to_str(int(r.get(2, 0.0))) +
-      " h=" + to_str(int(r.get(3, 0.0))))
+   gui.text("last rect: x=" + to_str(rect_x) +
+      " y=" + to_str(rect_y) +
+      " w=" + to_str(rect_w) +
+      " h=" + to_str(rect_h))
    gui.text("scene: " + scene)
    gui.text("fps: " + to_str(fps))
    gui.stat_card("probe_hover_card", "Hover", hovered, "active " + active, card_w, 64.0, [0.58, 0.86, 1.0, 1.0])
@@ -118,7 +122,7 @@ fn probe_body(state) dict {
    _action()
 }
 
-fn workspace_body(canvas_h, grid, major, cam_x, cam_y, cam_z, font) list {
+fn workspace_body(f64 canvas_h, f64 grid, int major, f64 cam_x, f64 cam_y, f64 cam_z, int font) list {
    "Runs the workspace body operation."
    gui.text_colored("Viewport helpers", [0.84, 0.84, 0.84, 1.0])
    gui.text("Grid and framing helpers for scene composition.")
@@ -308,5 +312,5 @@ fn gallery_body(state) dict {
 #main {
    def a = _action("x", "in", "cmd")
    assert(a.get("action", "") == "x" && a.get("command", "") == "cmd", "viewer panels action")
-   print("✓ std.os.ui.render.viewer.engine.panels self-test passed")
+   print("✓ core.os.ui.render.viewer.engine.panels self-test passed")
 }

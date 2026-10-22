@@ -1,0 +1,65 @@
+shape fmt_audit_branch_hazards_parity {
+  family "probe/tools"
+  generator "embedded"
+  features ["formatter", "audit", "branch-hazards", "parity"]
+  template ny-test-case
+  flags "--native-only"
+  timeout 90
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.subprocess (run_capture)
+use core.str as str
+def ny = env("NYTRIX_NY_FULL_BIN")
+def fmt = env("NYTRIX_TEST_FMT_BIN")
+def cmake = env("NYTRIX_CMAKE_COMMAND")
+def dir = temp_dir() + "/fmt-branch-hazards-" + to_str(pid())
+def made = run_capture([cmake, "-E", "make_directory", dir], [], nil, false)
+assert(made.get("code", 127) == 0, "create branch hazards directory")
+def path = dir + "/branch-hazards.ny"
+assert(is_ok(file_write(path,
+   "fn branch_hazards(int x) {\n   if (x = 1) { return 1 }\n" +
+   "   while (x = 2) { break }\n   if x = 3 { return 3 }\n" +
+   "   if true { return 4 }\n   if false { return 5 }\n" +
+   "   if nil { return 6 }\n   if 0 { return 7 }\n   if 1 { return 8 }\n" +
+   "   if (x == 1) { return 9 }\n   elif (x == 2) { return 10 }\n" +
+   "   elif (x == 3) { return 11 }\n   elif (x == 2) { return 12 }\n" +
+   "   if (x != 1) { return 13 }\n   if (text == \"a=b\") { return 14 }\n" +
+   "   if ((same == same) && ready) { return 15 }\n" +
+   "   if (calculate(same) == calculate(same)) { return 16 }\n" +
+   "   if (x > 0 && x > 0) { return 17 }\n" +
+   "   if (x == 1 && x == 2) { return 18 }\n" +
+   "   if (x != 1 || x != 2) { return 19 }\n" +
+   "   if (text == \"x == 1 && x == 2\") { return 20 }\n}\n" +
+   "fn returns_int() : int { return nil }\n" +
+   "fn returns_int_again() : int {\n   return nil\n   return nil\n}\n" +
+   "fn returns_any() : any { return nil }\n" +
+   "fn returns_optional() : int|nil { return nil }\n" +
+   "fn returns_text() : str { def text = \"return nil\" }\n" +
+   "fn loop_progress(int limit) {\n   mut int i = 0\n" +
+   "   while (i < limit) {\n      work(i)\n   }\n" +
+   "   while (i < limit) {\n      i += 1\n   }\n}\n")),
+   "write branch hazard source")
+def c = run_capture([fmt, "--bugs", "--json", path], [], nil, false)
+def embedded = run_capture([ny, "fmt", "--bugs", "--json", path], [], nil, false)
+def output = embedded.get("stdout", "")
+assert(c.get("code", 127) == 0 && embedded.get("code", 127) == 0 &&
+       c.get("stdout", "") == output, "branch-hazard audit parity: " + output)
+for expected in [
+   "NYAUD1101", "assignment-like '=' inside branch condition",
+   "NYAUD1102", "constant branch condition", "NYAUD1108",
+   "branch condition repeats line 11", "NYAUD1109",
+   "condition repeats operand 'x > 0' around &&", "NYAUD1110",
+   "condition compares 'same' with itself using ==",
+   "NYAUD1111", "condition requires 'x' to equal both 1 and 2",
+   "NYAUD1112", "condition is always true: 'x' cannot be both 1 and 2",
+   "NYAUD1106", "statement after line", "NYAUD1105",
+   "return nil in function declared as int", "NYAUD1107",
+   "loop counter 'i' is not advanced in this while block"] {
+   assert(str.find(output, expected) >= 0, "missing " + expected + ": " + output)
+}
+def cleanup = run_capture([cmake, "-E", "rm", "-rf", dir], [], nil, false)
+assert(cleanup.get("code", 127) == 0, "remove branch hazards directory")
+print("FMT_AUDIT_BRANCH_HAZARDS_PARITY_OK")
+NY
+}

@@ -1,0 +1,39 @@
+shape multiple_callback_effect_rows_are_unioned {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "row", "callback", "soundness"]
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_fail
+  expect_message "effect contract violation"
+  source ny <<'NY'
+@effects(io)
+fn io_callback() int {
+  print("io callback\n")
+  1
+}
+
+@effects(alloc)
+fn allocating_callback() int {
+  def values = [1]
+  values[0]
+}
+
+@effects(e)
+fn invoke_both(fnptr first, fnptr second) int {
+  first()
+  second()
+}
+
+@effects(e)
+fn relay_both(fnptr first, fnptr second) int {
+  invoke_both(first, second)
+}
+
+@effects(io)
+fn caller() int {
+  relay_both(io_callback, allocating_callback)
+}
+
+caller()
+NY
+}

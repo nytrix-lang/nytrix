@@ -1,53 +1,60 @@
-<!-- nytrix-doc: {"audience":"contributor","featured":true,"group":"spec","order":45,"summary":"The Nytrix IR (NYIR) specification: SSA/CFG invariants, verification authority, pass ordering, and optimization presets."} -->
+<!-- nytrix-doc: {"audience":"contributor","featured":true,"group":"spec","order":45,"summary":"NYIR SSA and CFG invariants, verification, optimizer diagnostics, and native lowering."} -->
 # Nytrix IR (NYIR)
 
-Nytrix IR (NYIR) is the intermediate representation for SSA-based optimization, analysis, and native code generation in Nytrix.
-
-The public interface is defined in `src/code/ir/ir.h`. The executable verifier in `src/code/ir/verify.c` is the authoritative correctness boundary when prose and implementation differ.
+NYIR is the compiler's SSA representation for target-independent analysis and
+optimization. The public C API is declared in [`nyr.md`](nyr.md) and
+`src/include/nyr/`. The verifier in `src/code/backend/ir/verify.c` is the
+executable authority for IR validity.
 
 ## Invariants
 
-1. **Instruction Sequence & SSA Values**: A function owns a contiguous instruction array where `len <= cap`. Value identifiers are non-negative integers bounded by `next_value`.
-2. **Single SSA Definition**: Every value is defined exactly once. Every operand use must refer to a dominating definition, except across control-flow joins handled by PHIs.
-3. **CFG & Block Structure**: Block labels are unique, branch targets exist, and block terminators match successor edges in the CFG.
-4. **PHI Ownership**: PHI nodes appear only at block headers, containing exactly one incoming `(predecessor_label, value)` pair per CFG predecessor.
-5. **Memory Ownership**: Instruction-owned payload arrays (`extra_args`, `arg_sizes`, `phi_incoming`) are deep-copied and destroyed using `nyir_inst_discard` or `nyir_erase_instruction`.
-6. **Raw Integer Model**: Typed scalar integers are raw 64-bit integers (`i64`). Dynamic `NyValue` tagging occurs only at explicit lowering boundaries.
-7. **Derived View Invalidation**: CFG, use-def chains, type maps, and range facts are derived views that must be rebuilt or refreshed after mutating instructions or edges.
+- Each value is defined once and used only where its definition dominates the
+  use; control-flow joins use PHI inputs.
+- Block labels are unique, branch targets exist, and terminators agree with CFG
+  successors.
+- PHIs appear at block headers and have one input for each predecessor.
+- Instruction-owned payloads are copied and released with the public
+  instruction lifecycle helpers.
+- Typed scalar integers use raw 64-bit values. Dynamic tagging occurs only at
+  explicit representation boundaries.
+- CFGs, use-def chains, type maps, and range facts are derived state. Rebuild or
+  invalidate them after changing instructions or edges.
 
-## Optimization Presets
+The verifier checks structural and operation contracts. It does not prove that
+a source-level ownership or effect claim was justified; those checks belong to
+shared semantic analysis.
 
-Presets are defined in `src/code/ir/opt/pipeline.c`:
+## Optimization and target lowering
 
-| Level | Goal | Description & Passes |
-| :--- | :--- | :--- |
-| **O0** | Normalize | Compacts instruction streams and lowers PHIs if required by the target encoder. |
-| **O1** | Local Cleanup | Constant folding, peephole rewrites, copy propagation, CFG simplification, and dead code elimination (DCE). |
-| **O2** | Balanced Optimization | Adds Common Subexpression Elimination (CSE), Dead Store Elimination (DSE), `mem2reg`, Sparse Conditional Constant Propagation (SCCP), function inlining, loop canonicalization, SCEV-lite, Inductive Range Check Elimination (IRCE), and Loop-Invariant Code Motion (LICM). |
-| **O3** | Aggressive Native | Preserves SSA through loop analysis, loop vectorization, SLP vectorization, loop unrolling, and scalar/memory cleanup. |
+The NYIR pipeline has optimization levels selected by the compiler. The exact
+pass list and ordering are implementation details owned by
+`src/code/backend/ir/opt/`; inspect that source or the compiler's pass
+statistics when changing the pipeline. A transform must preserve verifier
+validity and observable program behavior.
 
-## Pass Ordering Constraints
+Machine lowering, register allocation, and object emission happen after
+NYIR optimization. Keep target registers and calling conventions out of
+Target-independent transforms. `-flto` on the native path selects the
+whole-program NYIR pipeline; it is not LLVM bitcode LTO.
 
-- **CFG Simplification & DCE** run early so downstream analyses operate on canonical, reachable blocks.
-- **`mem2reg`** precedes scalar/loop analysis so SSA PHIs expose value flow to SCCP, CSE, and LICM.
-- **Inlining** runs before scalar and loop optimization so newly exposed call boundaries and constants are simplified.
-- **Loop Rotation** precedes SCEV and IRCE to guarantee canonical loop headers and induction structures.
-- **Vectorization** runs before Induction Variable (IV) elimination because vector patterns require canonical source induction variables and affine memory addresses.
-- **Loop Unrolling** precedes SLP vectorization so unrolled independent operations can be packed together.
-- **PHI Elimination** is the final stage, executed only for backends that require explicit local-memory form.
+## Inspect and verify
 
-## Verification & Tooling
+Use `ny --help` for the exact option surface. Useful diagnostics include:
 
 ```bash
-# Run executable oracle verification
-./make ny --native-only --native-result-oracle fixture.ny
-
-# Run per-pass oracle isolation
-./make ny --native-only --native-oracle-per-pass fixture.ny
-
-# Dump text NYIR
-./make ny --nyir-dump=/tmp/out.nyir fixture.ny
-
-# Verify NYIR verifier during pass development
-./make ny --nyir-verify fixture.ny
+ny --native-only --nyir-verify file.ny
+ny --native-only --nyir-dump=build/trace.nyir file.ny
+ny --native-only --nyir-pass-stats file.ny
+ny --native-only --nyir-track-value=12 file.ny
+ny --native-only --regalloc-heat file.ny
 ```
+
+`--nyir-verify` checks optimized IR after passes. `--nyir-pass-stats` reports
+per-pass changes and timing; `--nyir-track-value` follows an SSA value; and
+`--regalloc-heat` reports machine register pressure and spills. Use
+`--nyir-run` only when investigating the diagnostic VM route, not as proof of
+native or LLVM behavior.
+
+For stage ordering, caches, and execution routes, see
+[Pipeline](pipeline.md). For the public construction and object API, see
+[Nyr](nyr.md).

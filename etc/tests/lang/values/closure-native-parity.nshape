@@ -1,0 +1,16 @@
+shape closure_native_parity {
+  family "runtime/values"
+  generator "embedded"
+  features [ny native closure callback parity]
+  template ny-test-case
+  flags_matrix "--native-backend=llvm --jit --jit-engine=mcjit; --native-only"
+  expect compile_and_run
+  timeout 25
+  source ny <<'NY'
+use core
+
+def offset = 10
+def add_offset = fn(int x) int { x + offset }
+assert(add_offset(5) == 15, "captured closure preserves environment and scalar ABI")
+NY
+}

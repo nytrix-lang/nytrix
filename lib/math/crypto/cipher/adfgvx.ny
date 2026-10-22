@@ -4,10 +4,10 @@
 ;; Reference:
 ;; - https://en.wikipedia.org/wiki/ADFGVX_cipher
 ;; References:
-;; - std.math.crypto.cipher
-;; - std.math.crypto.analysis
-module std.math.crypto.cipher.adfgvx(adfgvx_encrypt, adfgvx_decrypt, adfgvx_substitute, adfgvx_desubstitute, adfgvx_build_matrix)
-use std.core.str
+;; - core.math.crypto.cipher
+;; - core.math.crypto.analysis
+module core.math.crypto.cipher.adfgvx(adfgvx_encrypt, adfgvx_decrypt, adfgvx_substitute, adfgvx_desubstitute, adfgvx_build_matrix)
+use core.str
 
 def ADFGVX_COORDS = [
    "AA", "AD", "AF", "AG", "AV", "AX",
@@ -251,5 +251,5 @@ fn adfgvx_decrypt(str ciphertext, str matrix, str transposition_key) str {
    def no_key_ct = adfgvx_encrypt("CODE", matrix, "")
    assert(no_key_ct == adfgvx_substitute("CODE", matrix), "empty key skips transposition")
    assert(adfgvx_decrypt(no_key_ct, matrix, "") == "CODE", "empty key decrypt")
-   print("✓ std.math.crypto.cipher.adfgvx self-test passed")
+   print("✓ core.math.crypto.cipher.adfgvx self-test passed")
 }

@@ -1,11 +1,11 @@
 ;; Keywords: number-theory arith math crypto
 ;; Crypto number-theory routines for number-theory arithmetic used by crypto attacks.
 ;; References:
-;; - std.math.crypto.number
-;; - std.math.crypto
-module std.math.crypto.number.arith(int_to_bits_le, bits_to_int_le, floor_div, ceil_div, square_root_or_nil, symmetric_mod, factor_divisors, make_square_free, largest_prime_factor, primitive_pythagorean_triple_for_area, modinv_range, modinv_list, roots_of_unity_mod_prime, rth_roots_mod_prime, least_significant_bits, two_adic_valuation, mod_sqrt_power2, is_blum_prime, has_blum_prime, random_blum_prime)
-use std.math.nt
-use std.math.crypto.gf
+;; - core.math.crypto.number
+;; - core.math.crypto
+module core.math.crypto.number.arith(int_to_bits_le, bits_to_int_le, floor_div, ceil_div, square_root_or_nil, symmetric_mod, factor_divisors, make_square_free, largest_prime_factor, primitive_pythagorean_triple_for_area, modinv_range, modinv_list, roots_of_unity_mod_prime, rth_roots_mod_prime, least_significant_bits, two_adic_valuation, mod_sqrt_power2, is_blum_prime, has_blum_prime, random_blum_prime)
+use core.math.nt
+use core.math.crypto.gf
 
 fn int_to_bits_le(any x, int count) list {
    "Convert integer x to count little-endian bits."

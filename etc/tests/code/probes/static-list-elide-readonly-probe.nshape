@@ -1,0 +1,10 @@
+shape static_list_elide_readonly_probe {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "compiler"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+
+NY
+}

@@ -3,10 +3,10 @@
 ;; Reference:
 ;; - https://en.wikipedia.org/wiki/IEEE_754
 ;; References:
-;; - std.math
-module std.math.float(_box, float, evaluate, int, trunc, is_float, fadd, fsub, fmul, fdiv, flt, fgt, feq, floor, ceil, round, abs, nan_val, inf, is_nan, is_inf)
-use std.core
-use std.core.str (atof)
+;; - core.math
+module core.math.float(_box, float, evaluate, int, trunc, is_float, fadd, fsub, fmul, fdiv, flt, fgt, feq, floor, ceil, round, abs, nan_val, inf, is_nan, is_inf)
+use core
+use core.str (atof)
 
 fn _box(any bits) any {
    "Boxes raw IEEE-754 bits returned by low-level float helpers."
@@ -29,14 +29,14 @@ fn evaluate(any x) any {
 fn int(any x) int {
    "Converts float `x` to a tagged integer by truncating the fractional part."
    if is_int(x) { x }
-   elif !is_float(x) { 0 }
+   elif !__is_float_obj(x) { 0 }
    else { __flt_to_int(x) }
 }
 
 fn trunc(any x) int {
    "Truncates the fractional part of float `x`, returning the result as a tagged integer."
    if is_int(x) { x }
-   elif !is_float(x) { 0 }
+   elif !__is_float_obj(x) { 0 }
    else { __flt_trunc(x) }
 }
 
@@ -122,13 +122,13 @@ fn inf() any {
 
 fn is_nan(any x) bool {
    "Returns true if float `x` is Not-a-Number."
-   if !is_float(x) { return false }
+   if !__is_float_obj(x) { return false }
    __flt_is_nan(x)
 }
 
 fn is_inf(any x) bool {
    "Returns true if float `x` is positive or negative infinity."
-   if !is_float(x) { return false }
+   if !__is_float_obj(x) { return false }
    __flt_is_inf(x)
 }
 
@@ -142,5 +142,5 @@ fn is_inf(any x) bool {
    mut fs = set()
    fs = fs.add(half_a)
    assert(fd.get(half_b, "") == "half" && fs.contains(half_b), "float structural keys")
-   print("✓ std.math.float self-test passed")
+   print("✓ core.math.float self-test passed")
 }

@@ -1,0 +1,24 @@
+shape ownership_rule_linear_consume_every_branch {
+  family "compiler-errors/ownership"
+  generator "error"
+  features ["error", "ownership", "resource", "linear", "branch"]
+  template ny-compile-fail
+  expect compile_fail
+  flags "--ownership-strict"
+  expect_message "linear resource 'file' must be consumed exactly once"
+  source ny <<'NY'
+linear layout File { int fd }
+
+fn consume_one_arm(bool take) int {
+  def File file = File(37)
+  if take {
+    forget(file)
+  } else {
+    file.fd
+  }
+  0
+}
+
+consume_one_arm(true)
+NY
+}

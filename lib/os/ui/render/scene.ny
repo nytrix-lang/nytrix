@@ -1,9 +1,9 @@
 ;; Keywords: scene scenegraph os ui render
 ;; Scene graph data, object transforms, and draw traversal support for UI projects.
 ;; References:
-;; - std.os.ui.render
-;; - std.os.ui.render.matrix
-module std.os.ui.render.scene(
+;; - core.os.ui.render
+;; - core.os.ui.render.matrix
+module core.os.ui.render.scene(
    scene_asset_name_from_gltf_path, first_gltf_in_dir, prefetch_gltf_asset_path, format_name_list,
    load_scene_mesh, load_scene_path, destroy_scene, unload_scene, scene_apply_fit,
    build_material_records, scene_apply_material_tweak, apply_gltf_animation,
@@ -19,32 +19,32 @@ module std.os.ui.render.scene(
    upload_generated_texture
 )
 
-use std.core
-use std.os.fs as osfs
-use std.os.info
-use std.os.path as ospath
-use std.os.thread
-use std.os.time
-use std.math.parse.data.json
-use std.core.str as str
-use std.os.ui.render.dump as ui_profile
-use std.os.ui.assets.catalog as asset_catalog
-use std.math.parse.img as lib_img
-use std.math.parse.3d.gltf as gltf
-use std.core.common as common
-use std.os.ui.render.viewer.term as terminal
-use std.math
-use std.math.float (is_nan, is_inf)
-use std.os.ui.render.camera as ui_camera
-use std.os.ui.render as render
-use std.os.ui.render.atlas as atlas
-use std.os.ui.render.matrix (
+use core
+use core.os.fs as osfs
+use core.os.info
+use core.os.path as ospath
+use core.os.thread
+use core.os.time
+use core.math.parse.data.json
+use core.str as str
+use core.os.ui.render.dump as ui_profile
+use core.os.ui.assets.catalog as asset_catalog
+use core.math.parse.img as lib_img
+use core.math.parse.3d.gltf as gltf
+use core.common as common
+use core.os.ui.render.viewer.term as terminal
+use core.math
+use core.math.float (is_nan, is_inf)
+use core.os.ui.render.camera as ui_camera
+use core.os.ui.render as render
+use core.os.ui.render.atlas as atlas
+use core.os.ui.render.matrix (
    mat4_identity, mat4_identity_into, mat4_translate_into, mat4_scale_into, mat4_mul_into,
    mat4_rotate_x_into, mat4_rotate_y_into, mat4_rotate_z_into
 )
 
-use std.os.ui.render.utils as render_utils
-use std.os.ui.render.shared as render_shared
+use core.os.ui.render.utils as render_utils
+use core.os.ui.render.shared as render_shared
 
 def _SCENE_LIGHT_MAX = render_shared.SCENE_LIGHT_MAX
 def MAX_TEXTURES = render_shared.MAX_TEXTURES
@@ -2621,9 +2621,9 @@ fn _scene_fit_transform_from_bounds(dict mesh) list {
    def wsz=_scene_vec_num(wb_max,2,mxz)-_scene_vec_num(wb_min,2,mnz)
    mut wspan = max(wsx, max(wsy, wsz))
    if wspan < 0.001 { wspan = 10.0 }
-   def tcx = (_scene_vec_num(wb_min, 0, mnx) + _scene_vec_num(wb_max, 0, mxx)) * 0.5
-   def tcy = (_scene_vec_num(wb_min, 1, mny) + _scene_vec_num(wb_max, 1, mxy)) * 0.5
-   def tcz = (_scene_vec_num(wb_min, 2, mnz) + _scene_vec_num(wb_max, 2, mxz)) * 0.5
+   def f64 tcx = (_scene_vec_num(wb_min, 0, mnx) + _scene_vec_num(wb_max, 0, mxx)) * 0.5
+   def f64 tcy = (_scene_vec_num(wb_min, 1, mny) + _scene_vec_num(wb_max, 1, mxy)) * 0.5
+   def f64 tcz = (_scene_vec_num(wb_min, 2, mnz) + _scene_vec_num(wb_max, 2, mxz)) * 0.5
    [mesh,
       mnx,
       mny,
@@ -2649,21 +2649,41 @@ fn _scene_fit_transform_from_bounds(dict mesh) list {
 
 fn _scene_log_fit_camera(any label, any fit, any fit_cam_x, any fit_cam_y, any fit_cam_z, any fit_cam_yaw, any fit_cam_pitch) bool {
    if !_gltf_debug_enabled() { return false }
-   ui_profile.print_text("[gltf] fit " + label + " bounds min=(" +
-      to_str(_scene_fit_info_num(fit, 1, 0.0)) + "," +
-      to_str(_scene_fit_info_num(fit, 2, 0.0)) + "," +
-      to_str(_scene_fit_info_num(fit, 3, 0.0)) +
-      ") max=(" +
-      to_str(_scene_fit_info_num(fit, 4, 0.0)) + "," +
-      to_str(_scene_fit_info_num(fit, 5, 0.0)) + "," +
-      to_str(_scene_fit_info_num(fit, 6, 0.0)) +
-      ") scale=" + to_str(_scene_fit_info_num(fit, 10, 1.0)) +
-      " tx=" + to_str(_scene_fit_info_num(fit, 11, 0.0)) +
-      " ty=" + to_str(_scene_fit_info_num(fit, 12, 0.0)) +
-      " tz=" + to_str(_scene_fit_info_num(fit, 13, 0.0)) +
-      " cam=(" + to_str(fit_cam_x) + "," + to_str(fit_cam_y) + "," + to_str(fit_cam_z) +
-      ") yaw=" + to_str(fit_cam_yaw) +
-      " pitch=" + to_str(fit_cam_pitch))
+   mut b = str.Builder(256)
+   b = str.builder_append(b, "[gltf] fit ")
+   b = str.builder_append(b, label)
+   b = str.builder_append(b, " bounds min=(")
+   b = str.builder_append(b, to_str(_scene_fit_info_num(fit, 1, 0.0)))
+   b = str.builder_append(b, ",")
+   b = str.builder_append(b, to_str(_scene_fit_info_num(fit, 2, 0.0)))
+   b = str.builder_append(b, ",")
+   b = str.builder_append(b, to_str(_scene_fit_info_num(fit, 3, 0.0)))
+   b = str.builder_append(b, ") max=(")
+   b = str.builder_append(b, to_str(_scene_fit_info_num(fit, 4, 0.0)))
+   b = str.builder_append(b, ",")
+   b = str.builder_append(b, to_str(_scene_fit_info_num(fit, 5, 0.0)))
+   b = str.builder_append(b, ",")
+   b = str.builder_append(b, to_str(_scene_fit_info_num(fit, 6, 0.0)))
+   b = str.builder_append(b, ") scale=")
+   b = str.builder_append(b, to_str(_scene_fit_info_num(fit, 10, 1.0)))
+   b = str.builder_append(b, " tx=")
+   b = str.builder_append(b, to_str(_scene_fit_info_num(fit, 11, 0.0)))
+   b = str.builder_append(b, " ty=")
+   b = str.builder_append(b, to_str(_scene_fit_info_num(fit, 12, 0.0)))
+   b = str.builder_append(b, " tz=")
+   b = str.builder_append(b, to_str(_scene_fit_info_num(fit, 13, 0.0)))
+   b = str.builder_append(b, " cam=(")
+   b = str.builder_append(b, to_str(fit_cam_x))
+   b = str.builder_append(b, ",")
+   b = str.builder_append(b, to_str(fit_cam_y))
+   b = str.builder_append(b, ",")
+   b = str.builder_append(b, to_str(fit_cam_z))
+   b = str.builder_append(b, ") yaw=")
+   b = str.builder_append(b, to_str(fit_cam_yaw))
+   b = str.builder_append(b, " pitch=")
+   b = str.builder_append(b, to_str(fit_cam_pitch))
+   ui_profile.print_text(str.builder_to_str(b))
+   str.builder_free(b)
    true
 }
 
@@ -3161,8 +3181,8 @@ fn _bake_vertex_buffer_model(any vptr, int vcnt, any model_m) bool {
       store32_f32(off, m20 * x + m21 * y + m22 * z + m23, _VKR_OFF_Z)
       def nx, ny = _num_or(load32_f32(off, _VKR_OFF_NX), 0.0), _num_or(load32_f32(off, _VKR_OFF_NY), 0.0)
       def nz = _num_or(load32_f32(off, _VKR_OFF_NZ), 1.0)
-      mut nnx, nny = n00 * nx + n10 * ny + n20 * nz, n01 * nx + n11 * ny + n21 * nz
-      mut nnz = n02 * nx + n12 * ny + n22 * nz
+      mut f64 nnx, nny = n00 * nx + n10 * ny + n20 * nz, n01 * nx + n11 * ny + n21 * nz
+      mut f64 nnz = n02 * nx + n12 * ny + n22 * nz
       def nl = sqrt(nnx * nnx + nny * nny + nnz * nnz)
       if nl > 0.000001 { nnx /= nl nny /= nl nnz /= nl }
       store32_f32(off, nnx, _VKR_OFF_NX)
@@ -3623,8 +3643,8 @@ fn _scene_normal_tex_id_from_word(int word) int {
 }
 
 fn _scene_normal_scale_from_word(int word) f64 {
-   def scale_u7 = band(bshr(word, 24), 127)
-   scale_u7 <= 0 ? 1.0 : clamp(float(scale_u7) * 2.0 / 127.0, 0.0, 2.0)
+   def scale_u7 = band(bshr(word, 24), render_shared.MATERIAL_U7_MAX)
+   scale_u7 <= 0 ? 1.0 : clamp(float(scale_u7) * 2.0 / render_shared.MATERIAL_U7_MAX, 0.0, 2.0)
 }
 
 fn _scene_pack_normal_word(any rec, f64 normal_scale, bool double_sided) int {
@@ -3734,7 +3754,10 @@ fn _scene_apply_material_tweak_to_parts(any parts, int mat_idx, dict packed) any
 }
 
 fn _scene_gpu_rec_mat_idx(any rec) int {
-   is_list(rec) ? int(rec.get(47, -1)) : -1
+   if !is_list(rec) { return -1 }
+   if rec.len > 47 { return int(rec.get(47, -1)) }
+   def rec_mesh = rec.get(40, 0)
+   is_dict(rec_mesh) ? int(rec_mesh.get("mat_idx", rec_mesh.get("material_idx", -1))) : -1
 }
 
 fn _scene_apply_material_tweak_to_gpu_parts(any gpu_parts, int mat_idx, dict packed) any {
@@ -4200,8 +4223,8 @@ fn _mat_pack_ext2_tex_word(int ext2_kind, int ext2_id, int ext2_uv_set, dict spe
       while aniso_rot <= -3.141592653589793 { aniso_rot += 6.283185307179586 }
       while aniso_rot > 3.141592653589793 { aniso_rot -= 6.283185307179586 }
       mut rot_bits = 64
-      if abs(aniso_rot)> 0.000001 { rot_bits = int((clamp01((aniso_rot + 3.141592653589793) / 6.283185307179586) * 127.0 + 0.5)) }
-      ext2_tex_word = bor(ext2_tex_word, bshl(band(rot_bits, 127), 17))
+      if abs(aniso_rot)> 0.000001 { rot_bits = int((clamp01((aniso_rot + 3.141592653589793) / 6.283185307179586) * render_shared.MATERIAL_U7_MAX + 0.5)) }
+      ext2_tex_word = bor(ext2_tex_word, bshl(band(rot_bits, render_shared.MATERIAL_U7_MAX), 17))
    }
    bor(ext2_tex_word, bshl(int(ext2_kind), 24))
 }
@@ -4533,12 +4556,12 @@ fn _mat_diffuse_transmission_color_slot(dict spec, int bsdf2_u32, int sheen_colo
    [bor(dt_r, bor(bshl(dt_g, 8), bor(bshl(dt_b, 16), bshl(thick_u8, 24)))), true]
 }
 
-fn _mat_try_aux_tex(dict spec, int current_id, int current_uv_set, list current_uv_xf, int alpha_u32, int candidate_id, str texcoord_key, list candidate_uv_xf, int flag) list {
+fn _mat_try_aux_tex(dict spec, int current_id, int current_uv_set, any current_uv_xf, int alpha_u32, int candidate_id, str texcoord_key, any candidate_uv_xf, int flag) list {
    if current_id >= 0 || candidate_id < 0 { return [current_id, current_uv_set, current_uv_xf, alpha_u32] }
    [candidate_id, _scene_texcoord_one(spec, texcoord_key), candidate_uv_xf, bor(alpha_u32, flag)]
 }
 
-fn _mat_try_emissive_aux_tex(dict spec, int current_id, int current_texcoord, list current_uv_xf, int alpha_u32, int candidate_id, str texcoord_key, list candidate_uv_xf, int flag) list {
+fn _mat_try_emissive_aux_tex(dict spec, int current_id, int current_texcoord, any current_uv_xf, int alpha_u32, int candidate_id, str texcoord_key, any candidate_uv_xf, int flag) list {
    if current_id >= 0 || candidate_id < 0 { return [current_id, current_texcoord, current_uv_xf, alpha_u32] }
    [candidate_id, int(spec.get(texcoord_key, 0)), candidate_uv_xf, bor(alpha_u32, flag)]
 }
@@ -4579,19 +4602,35 @@ fn _mat_log_request_summary(int mi, any spec, str base_path, str base_uri, str n
    def normal_key = _mat_tex_slot_key(spec, base_path, "normal", "normal")
    def mr_key = _mat_tex_slot_key(spec, base_path, "metallic_roughness", "metallic_roughness")
    def occ_key = _mat_tex_slot_key(spec, base_path, "occlusion", "occlusion")
-   ui_profile.print_text("[gltf:matreq] idx=" + to_str(mi) +
-      " base_uri=" + base_uri +
-      " normal_uri=" + normal_uri +
-      " mr_uri=" + mr_uri +
-      " occ_uri=" + occ_uri +
-      " base_key=" + base_key +
-      " normal_key=" + normal_key +
-      " mr_key=" + mr_key +
-      " occ_key=" + occ_key +
-      " base_id=" + to_str(base_id) +
-      " normal_id=" + to_str(normal_id) +
-      " mr_id=" + to_str(met_rough_id) +
-      " occ_id=" + to_str(occlusion_id))
+   mut b = str.Builder(256)
+   b = str.builder_append(b, "[gltf:matreq] idx=")
+   b = str.builder_append(b, to_str(mi))
+   b = str.builder_append(b, " base_uri=")
+   b = str.builder_append(b, base_uri)
+   b = str.builder_append(b, " normal_uri=")
+   b = str.builder_append(b, normal_uri)
+   b = str.builder_append(b, " mr_uri=")
+   b = str.builder_append(b, mr_uri)
+   b = str.builder_append(b, " occ_uri=")
+   b = str.builder_append(b, occ_uri)
+   b = str.builder_append(b, " base_key=")
+   b = str.builder_append(b, base_key)
+   b = str.builder_append(b, " normal_key=")
+   b = str.builder_append(b, normal_key)
+   b = str.builder_append(b, " mr_key=")
+   b = str.builder_append(b, mr_key)
+   b = str.builder_append(b, " occ_key=")
+   b = str.builder_append(b, occ_key)
+   b = str.builder_append(b, " base_id=")
+   b = str.builder_append(b, to_str(base_id))
+   b = str.builder_append(b, " normal_id=")
+   b = str.builder_append(b, to_str(normal_id))
+   b = str.builder_append(b, " mr_id=")
+   b = str.builder_append(b, to_str(met_rough_id))
+   b = str.builder_append(b, " occ_id=")
+   b = str.builder_append(b, to_str(occlusion_id))
+   ui_profile.print_text(str.builder_to_str(b))
+   str.builder_free(b)
    true
 }
 
@@ -4600,18 +4639,33 @@ fn _mat_log_pack_summary(int mi, any spec, bool has_minfo, int base_id, int met_
    def live_trans = has_minfo ? float(spec.get("transmission_factor", 0.0)) : 0.0
    def live_thick = has_minfo ? float(spec.get("thickness_factor", 0.0)) : 0.0
    def live_disp = has_minfo ? float(spec.get("dispersion", 0.0)) : 0.0
-   ui_profile.print_text("[gltf:matpack] idx=" + to_str(mi) +
-      " base=" + to_str(base_id) +
-      " mr=" + to_str(met_rough_id) +
-      " emit=" + to_str(emissive_id) +
-      " ext2=0x" + str.to_hex(ext2_tex_word) +
-      " bsdf0=0x" + str.to_hex(bsdf0_u32) +
-      " bsdf2=0x" + str.to_hex(bsdf2_u32) +
-      " bsdf4=0x" + str.to_hex(bsdf4_u32) +
-      " bsdf5=0x" + str.to_hex(bsdf5_u32) +
-      " trans=" + to_str(live_trans) +
-      " thick=" + to_str(live_thick) +
-      " disp=" + to_str(live_disp))
+   mut b = str.Builder(256)
+   b = str.builder_append(b, "[gltf:matpack] idx=")
+   b = str.builder_append(b, to_str(mi))
+   b = str.builder_append(b, " base=")
+   b = str.builder_append(b, to_str(base_id))
+   b = str.builder_append(b, " mr=")
+   b = str.builder_append(b, to_str(met_rough_id))
+   b = str.builder_append(b, " emit=")
+   b = str.builder_append(b, to_str(emissive_id))
+   b = str.builder_append(b, " ext2=0x")
+   b = str.builder_append(b, str.to_hex(ext2_tex_word))
+   b = str.builder_append(b, " bsdf0=0x")
+   b = str.builder_append(b, str.to_hex(bsdf0_u32))
+   b = str.builder_append(b, " bsdf2=0x")
+   b = str.builder_append(b, str.to_hex(bsdf2_u32))
+   b = str.builder_append(b, " bsdf4=0x")
+   b = str.builder_append(b, str.to_hex(bsdf4_u32))
+   b = str.builder_append(b, " bsdf5=0x")
+   b = str.builder_append(b, str.to_hex(bsdf5_u32))
+   b = str.builder_append(b, " trans=")
+   b = str.builder_append(b, to_str(live_trans))
+   b = str.builder_append(b, " thick=")
+   b = str.builder_append(b, to_str(live_thick))
+   b = str.builder_append(b, " disp=")
+   b = str.builder_append(b, to_str(live_disp))
+   ui_profile.print_text(str.builder_to_str(b))
+   str.builder_free(b)
    true
 }
 
@@ -5553,12 +5607,6 @@ fn _scene_store_gpu_part_model(any base, any model_m) bool {
    true
 }
 
-fn _scene_gpu_rec_mat_idx(list rec) int {
-   if rec.len > 47 { return int(rec.get(47, -1)) }
-   def rec_mesh = rec.get(40, 0)
-   is_dict(rec_mesh) ? int(rec_mesh.get("mat_idx", rec_mesh.get("material_idx", -1))) : -1
-}
-
 fn _scene_store_gpu_part_material(any base, list rec, bool unlit, bool is_points, bool is_lines) bool {
    def rec_mat_idx = _scene_gpu_rec_mat_idx(rec)
    store32(base, rec_mat_idx >= 0 ? rec_mat_idx + 1 : 0, 128)
@@ -5976,32 +6024,60 @@ fn _scene_copy_indices_u32(any iout, int iwrite, any iptr, int icnt, int vcnt, i
 
 fn _scene_merge_part_summary(any part, f64 scene_area_like) str {
    if !is_dict(part) { return "<not-dict>" }
-   def opts = part.get("opts", 0)
-   "vcnt=" + to_str(int(part.get("vcnt", 0))) +
-   " icnt=" + to_str(int(part.get("icnt", 0))) +
-   " idx32=" + to_str(_scene_part_index_u32(part)) +
-   " skin=" + to_str(int(part.get("skin_idx", -1))) +
-   " inst=" + to_str(_scene_part_bool_field(part, "instanced_part", false)) +
-   " backdrop=" + to_str(_scene_part_is_backdrop(part, scene_area_like)) +
-   " bake=" + to_str(_scene_part_model_bakeable(part)) +
-   " prim=" + to_str(int(part.get("primitive_mode", 4))) +
-   " mat=" + to_str(int(part.get("mat_idx", -1))) +
-   " tex=" + to_str(int(part.get("tex_id", -1))) +
-   " color=0x" + str.to_hex(int(part.get("base_color_u32", 0xffffffff))) +
-   " material=0x" + str.to_hex(int(part.get("material_u32", 0x0000ff00))) +
-   " normal=" + to_str(int(part.get("normal_tex_id", -1))) +
-   " normal_word=0x" + str.to_hex(int(part.get("normal_tex_word", render_utils.pack_normal_tex_word(int(part.get("normal_tex_id", -1)), int(part.get("normal_uv_set", 0)))))) +
-   " bsdf0=0x" + str.to_hex(int(part.get("bsdf0_u32", 0))) +
-   " bsdf1=0x" + str.to_hex(int(part.get("bsdf1_u32", 0))) +
-   " ext2=0x" + str.to_hex(int(part.get("ext2_tex_word", 0x80000000))) +
-   " vc=" + to_str(int(part.get("vc_mode", 0))) +
-   " vis=" + to_str(_scene_part_bool_field(part, "visible", true)) +
-   " lines=" + to_str(_scene_part_opt_bool(part, "is_lines", false)) +
-   " points=" + to_str(_scene_part_opt_bool(part, "is_points", false)) +
-   " unlit=" + to_str(_scene_part_opt_bool(part, "unlit", false)) +
-   " no_cull=" + to_str(_scene_part_opt_bool(part, "no_cull", false)) +
-   " double=" + to_str(_scene_part_opt_bool(part, "double_sided", false)) +
-   " flip=" + to_str(_scene_part_opt_bool(part, "flip_winding", false))
+   mut b = str.Builder(512)
+   b = str.builder_append(b, "vcnt=")
+   b = str.builder_append(b, to_str(int(part.get("vcnt", 0))))
+   b = str.builder_append(b, " icnt=")
+   b = str.builder_append(b, to_str(int(part.get("icnt", 0))))
+   b = str.builder_append(b, " idx32=")
+   b = str.builder_append(b, to_str(_scene_part_index_u32(part)))
+   b = str.builder_append(b, " skin=")
+   b = str.builder_append(b, to_str(int(part.get("skin_idx", -1))))
+   b = str.builder_append(b, " inst=")
+   b = str.builder_append(b, to_str(_scene_part_bool_field(part, "instanced_part", false)))
+   b = str.builder_append(b, " backdrop=")
+   b = str.builder_append(b, to_str(_scene_part_is_backdrop(part, scene_area_like)))
+   b = str.builder_append(b, " bake=")
+   b = str.builder_append(b, to_str(_scene_part_model_bakeable(part)))
+   b = str.builder_append(b, " prim=")
+   b = str.builder_append(b, to_str(int(part.get("primitive_mode", 4))))
+   b = str.builder_append(b, " mat=")
+   b = str.builder_append(b, to_str(int(part.get("mat_idx", -1))))
+   b = str.builder_append(b, " tex=")
+   b = str.builder_append(b, to_str(int(part.get("tex_id", -1))))
+   b = str.builder_append(b, " color=0x")
+   b = str.builder_append(b, str.to_hex(int(part.get("base_color_u32", 0xffffffff))))
+   b = str.builder_append(b, " material=0x")
+   b = str.builder_append(b, str.to_hex(int(part.get("material_u32", 0x0000ff00))))
+   b = str.builder_append(b, " normal=")
+   b = str.builder_append(b, to_str(int(part.get("normal_tex_id", -1))))
+   b = str.builder_append(b, " normal_word=0x")
+   b = str.builder_append(b, str.to_hex(int(part.get("normal_tex_word", render_utils.pack_normal_tex_word(int(part.get("normal_tex_id", -1)), int(part.get("normal_uv_set", 0)))))))
+   b = str.builder_append(b, " bsdf0=0x")
+   b = str.builder_append(b, str.to_hex(int(part.get("bsdf0_u32", 0))))
+   b = str.builder_append(b, " bsdf1=0x")
+   b = str.builder_append(b, str.to_hex(int(part.get("bsdf1_u32", 0))))
+   b = str.builder_append(b, " ext2=0x")
+   b = str.builder_append(b, str.to_hex(int(part.get("ext2_tex_word", 0x80000000))))
+   b = str.builder_append(b, " vc=")
+   b = str.builder_append(b, to_str(int(part.get("vc_mode", 0))))
+   b = str.builder_append(b, " vis=")
+   b = str.builder_append(b, to_str(_scene_part_bool_field(part, "visible", true)))
+   b = str.builder_append(b, " lines=")
+   b = str.builder_append(b, to_str(_scene_part_opt_bool(part, "is_lines", false)))
+   b = str.builder_append(b, " points=")
+   b = str.builder_append(b, to_str(_scene_part_opt_bool(part, "is_points", false)))
+   b = str.builder_append(b, " unlit=")
+   b = str.builder_append(b, to_str(_scene_part_opt_bool(part, "unlit", false)))
+   b = str.builder_append(b, " no_cull=")
+   b = str.builder_append(b, to_str(_scene_part_opt_bool(part, "no_cull", false)))
+   b = str.builder_append(b, " double=")
+   b = str.builder_append(b, to_str(_scene_part_opt_bool(part, "double_sided", false)))
+   b = str.builder_append(b, " flip=")
+   b = str.builder_append(b, to_str(_scene_part_opt_bool(part, "flip_winding", false)))
+   def result = str.builder_to_str(b)
+   str.builder_free(b)
+   result
 }
 
 fn _scene_free_two(any a, any b) int {
@@ -8272,5 +8348,5 @@ fn scene_fast_color_reuse_ready(any group) bool {
    posed["anim_playing"] = true
    assert(!_scene_fast_supported(posed), "scene fast rejects playing skinned pose")
    assert(!scene_fast_color_reuse_ready(0), "scene fast reuse cold")
-   print("✓ std.os.ui.render.scene self-test passed")
+   print("✓ core.os.ui.render.scene self-test passed")
 }

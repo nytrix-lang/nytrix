@@ -2,5 +2,5 @@
 ;; Crypto facade: encodings, hashes, symmetric ciphers, RSA/ECC helpers,
 ;; lattice/factorization helpers, PRNGs, and text/side-channel analysis.
 ;; References:
-;; - std.math
-module std.math.crypto(analysis, block, cipher, ct, dlp, ecc, encoding, factorization, hash, hnp, lattice, number, prng, protocol, public_key, rsa, support, symmetric)
+;; - core.math
+module core.math.crypto(analysis, block, cipher, ct, dlp, ecc, encoding, factorization, hash, hnp, lattice, number, prng, protocol, public_key, rsa, support, symmetric)

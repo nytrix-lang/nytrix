@@ -1,0 +1,513 @@
+;; Keywords: dict map core
+;; Dictionary operations for lookup, mutation, deletion, merging, and compatibility calls.
+;; References:
+;; - core
+module core.dict_mod(dict, dict_len, dict_get, dict_exists, dict_set, dict_remove, dict_has, dict_del, dict_pop, dict_popitem, dict_clone, dict_merge, dict_items, dict_keys, dict_values, dict_setdefault, dict_clear)
+use core.primitives
+use core.error
+
+@inline
+fn is_dict(any x) bool {
+   "Internal: returns **true** when `x` is a dictionary object."
+   def tag = __runtime_tag("dict")
+   def got = __tagof(x)
+   got == tag || got == __tag(tag)
+}
+
+;; Runtime dictionaries come in two internal layouts:
+;;   managed — _dict_new (d[8]=cap, d[16]=table) used by the stdlib reflect code;
+;;   native  — rt_native_dict_* (d[0]=magic, SwissTable slots) created by `{}`
+;;             literals in native lowering.
+;; Values cross both: a native-magic dict dispatched through an `any` attached
+;; method reaches these readers, so each reader must branch on the layout.
+@inline
+fn _is_native_dict(any d) bool {
+   if !is_dict(d) { return false }
+   __load64_idx(d, -16) == 0x4e59444943544d47
+}
+
+@inline
+fn _dict_native_get(any d, any key, any default) any {
+   if is_str(key) { return __dict_get_str_raw(d, key, default) }
+   return __dict_get_raw(d, key, default)
+}
+
+@inline
+fn _dict_native_has(any d, any key) bool {
+   if is_str(key) { return __dict_has_str_raw(d, key) != 0 }
+   return __dict_has_raw(d, key) != 0
+}
+
+@inline
+fn _dict_native_set(any d, any key, any val) any {
+   if is_str(key) { return __dict_set_str_raw(d, key, val) }
+   return __dict_set_raw(d, key, val)
+}
+
+@inline
+fn _dict_native_delete(any d, any key) any {
+   if is_str(key) { return __dict_delete_str_raw(d, key) }
+   return __dict_delete_raw(d, key)
+}
+
+@inline
+fn is_str(any x) bool {
+   "Internal: returns **true** when `x` is a Nytrix string object."
+   __is_str_obj(x)
+}
+
+@inline
+fn to_int(any v) any {
+   "Internal: converts tagged integers to raw ints and leaves other values unchanged."
+   __is_int(v) ? __untag(v) : v
+}
+
+@inline
+fn _dict_store_item(list xs, int index, any value) list {
+   __store_item_fast(xs, index, value)
+   xs
+}
+
+fn _pow2_step(int n, int value) int {
+   if value >= n { return value }
+   _pow2_step(n, value << 1)
+}
+
+fn _pow2(int n) int {
+   if n <= 1 { return 1 }
+   _pow2_step(n, 2)
+}
+
+@noinline
+fn _dict_key_eq(any a, any b) bool {
+   ;; A string literal may cross the interactive/JIT store boundary as a raw
+   ;; C-string pointer.  The stored key then fails the predicate even though
+   ;; the lookup key is a valid string.  Let the runtime string comparator
+   ;; normalize either side whenever one side is known to be text.
+   if is_str(a) || is_str(b) {
+      def str aa = __cstr_to_str(a)
+      def str bb = __cstr_to_str(b)
+      return aa == bb
+   }
+   a == b
+}
+
+@inline
+fn _dict_hash(any x) int {
+   if is_int(x) { return x }
+   if !x { return 0 }
+   if is_str(x) { return __str_hash(x) }
+   if __is_float_obj(x) { return __flt_hash(x) }
+   if is_ptr(x) { return band(bshr(to_int(x), 3), 2147483647) }
+   return 0
+}
+
+@returns_owned
+fn _dict_new(int cap) dict {
+   def tsize = 16 + cap * 24
+   mut t = __malloc(tsize)
+   __memset(t, 0, tsize)
+   __store64_idx(t, -8, __runtime_tag("dict_tbl"))
+   mut p = __malloc(24)
+   __memset(p, 0, 24)
+   __store64_idx(p, -8, __runtime_tag("dict"))
+   __store64_idx(p, 0, 0)
+   __store64_idx(p, 8, cap)
+   __store64_idx(p, 16, t)
+   p
+}
+
+@returns_owned
+fn dict(int cap=8) dict {
+   "Creates a new empty dictionary."
+   _dict_new(_pow2(cap))
+}
+
+@inline
+fn dict_len(dict d) int {
+   "Returns the number of entries in dictionary `d`."
+   if !is_dict(d) { return 0 }
+   if _is_native_dict(d) { return __dict_len_raw(d) }
+   __load64_idx(d, 0)
+}
+
+@inline
+fn _dict_find_off_raw(any t, int cap, any key) int {
+   if cap <= 0 { return -1 }
+   def mask = cap - 1
+   def h = _dict_hash(key)
+   mut idx = h & mask
+   mut first_tomb = -1
+   mut i = 0
+   while i < cap {
+      def off = idx * 24
+      def state = __load64_idx(t, off + 16)
+      if !state {
+         if first_tomb >= 0 { return first_tomb }
+         return off
+      }
+      if state == 1 {
+         def stored = __load64_tagged_idx(t, off)
+         ;; Integer keys are immediate values, so the generic comparator's
+         ;; string normalization and pointer checks are unnecessary here.
+         if is_int(key) {
+            if is_int(stored) && stored == key { return off }
+         } else if _dict_key_eq(stored, key) { return off }
+      }
+      if state == 2 && first_tomb < 0 { first_tomb = off }
+      idx = (idx + 1) & mask
+      i += 1
+   }
+   return first_tomb
+}
+
+@inline
+fn _dict_find_off(dict d, any key) int {
+   _dict_find_off_raw(__load64_idx(d, 16), __load64_idx(d, 8), key)
+}
+
+fn _dict_insert_raw(any t, int cap, any key, any val) {
+   def off = _dict_find_off_raw(t, cap, key)
+   if off < 0 { return }
+   __store64_idx(t, off, key)
+   __store64_idx(t, off + 8, val)
+   __store64_idx(t, off + 16, 1)
+}
+
+@returns_owned
+fn _dict_resize(dict d) dict {
+   def int old_cap = __load64_idx(d, 8)
+   def int new_cap = old_cap < 8 ? 8 : old_cap * 2
+   def old_t = __load64_idx(d, 16)
+   def tsize = 16 + new_cap * 24
+   mut nt = __malloc(tsize)
+   __memset(nt, 0, tsize)
+   __store64_idx(nt, -8, __runtime_tag("dict_tbl"))
+   mut i = 0
+   while i < old_cap {
+      def off = i * 24
+      if __load64_idx(old_t, off + 16) == 1 {
+         _dict_insert_raw(nt, new_cap, __load64_tagged_idx(old_t, off), __load64_tagged_idx(old_t, off + 8))
+      }
+      i += 1
+   }
+   __free(old_t)
+   __store64_idx(d, 8, new_cap)
+   __store64_idx(d, 16, nt)
+   d
+}
+
+fn dict_set(dict d, any key, any val) dict {
+   "Inserts or updates a key/value pair in dictionary `d`."
+   if !is_dict(d) { return d }
+   if _is_native_dict(d) {
+      _dict_native_set(d, key, val)
+      return d
+   }
+   def tc = __load64_idx(d, 0)
+   def int tca = __load64_idx(d, 8)
+   def t = __load64_idx(d, 16)
+   mut off = _dict_find_off_raw(t, tca, key)
+   if off >= 0 && __load64_idx(t, off + 16) == 1 {
+      __store64_idx(t, off + 8, val)
+      return d
+   }
+   if off < 0 || (tc + 1) * 2 > tca {
+      d = _dict_resize(d)
+      return dict_set(d, key, val)
+   }
+   __store64_idx(t, off, key)
+   __store64_idx(t, off + 8, val)
+   __store64_idx(t, off + 16, 1)
+   __store64_idx(d, 0, tc + 1)
+   d
+}
+
+@inline
+fn dict_get(dict d, any key, any default=0) any {
+   "Retrieves the value for `key` in `d`, or returns `default` if not found."
+   if !is_dict(d) { return default }
+   ;; Keep both dictionary layouts on the C probe path. The managed-table
+   ;; implementation in Ny performed a slot-by-slot probe through generic
+   ;; load helpers; the runtime bridge already handles managed and SwissTable
+   ;; dictionaries and normalizes tagged, raw-string, and integer keys.
+   _dict_native_get(d, key, default)
+}
+
+@inline
+fn dict_exists(dict d, any key) bool {
+   "Returns **true** if `key` exists in dictionary `d`."
+   if !is_dict(d) { return false }
+   if _is_native_dict(d) { return _dict_native_has(d, key) }
+   def t = __load64_idx(d, 16)
+   def off = _dict_find_off_raw(t, __load64_idx(d, 8), key)
+   if off < 0 || __load64_idx(t, off + 16) != 1 { return false }
+   true
+}
+
+@inline
+fn dict_has(dict d, any key) bool {
+   "Compatibility bridge for old free helper calls. Prefer `d.contains(key)`."
+   dict_exists(d, key)
+}
+
+@inline
+fn dict_remove(dict d, any key) dict {
+   "Removes `key` from dictionary `d`. Returns the dictionary."
+   if !is_dict(d) { return d }
+   if _is_native_dict(d) {
+      _dict_native_delete(d, key)
+      return d
+   }
+   def t = __load64_idx(d, 16)
+   def off = _dict_find_off_raw(t, __load64_idx(d, 8), key)
+   if off >= 0 && __load64_idx(t, off + 16) == 1 {
+      __store64_idx(t, off, 0)
+      __store64_idx(t, off + 8, 0)
+      __store64_idx(t, off + 16, 2)
+      __store64_idx(d, 0, __load64_idx(d, 0) - 1)
+   }
+   d
+}
+
+@inline
+fn dict_del(dict d, any key) dict {
+   "Compatibility bridge for old free helper calls. Prefer `d.delete(key)`."
+   dict_remove(d, key)
+}
+
+fn dict_pop(dict d, any key, any default=0) any {
+   "Removes and returns the value for `key`, or `default` if not found."
+   if !is_dict(d) { return default }
+   def val = dict_get(d, key, default)
+   dict_remove(d, key)
+   val
+}
+
+fn dict_popitem(dict d) any {
+   "Removes and returns the last inserted [key, value] pair, or 0 if empty."
+   if !is_dict(d) { return 0 }
+   if _is_native_dict(d) {
+      def n = __dict_len_raw(d)
+      if n <= 0 { return 0 }
+      def keys = __dict_keys_raw(d)
+      def key = __load_item(keys, 0)
+      def val = _dict_native_get(d, key, 0)
+      _dict_native_delete(d, key)
+      return [key, val]
+   }
+   def cap = __load64_idx(d, 8)
+   def t = __load64_idx(d, 16)
+   mut i = cap - 1
+   while i >= 0 {
+      def off = i * 24
+      if __load64_idx(t, off + 16) == 1 {
+         def key = __load64_tagged_idx(t, off)
+         def val = __load64_tagged_idx(t, off + 8)
+         __store64_idx(t, off, 0)
+         __store64_idx(t, off + 8, 0)
+         __store64_idx(t, off + 16, 2)
+         __store64_idx(d, 0, __load64_idx(d, 0) - 1)
+         return [key, val]
+      }
+      i -= 1
+   }
+   0
+}
+
+fn dict_setdefault(dict d, any key, any default=0) any {
+   "Returns the value for `key`, or sets and returns `default` if not found."
+   if !is_dict(d) { return default }
+   if dict_exists(d, key) { return dict_get(d, key, default) }
+   d = dict_set(d, key, default)
+   default
+}
+
+@returns_owned
+fn dict_clone(dict d) dict {
+   "Creates a shallow copy of dictionary `d`."
+   if !is_dict(d) { return d }
+   if _is_native_dict(d) { return __dict_clone_raw(d) }
+   ;; The non-native layout stores its length in the first word.  Read it
+   ;; directly here: dict_len is an inline-only helper and must not escape as
+   ;; an unresolved JIT symbol when this fallback is outlined.
+   def dict out = dict(__load64_idx(d, 0) * 2 + 1)
+   return dict_merge(out, d)
+}
+
+fn dict_clear(dict d) dict {
+   "Removes all entries from dictionary `d`."
+   if !is_dict(d) { return d }
+   if _is_native_dict(d) { return __dict_clear_raw(d) }
+   def cap = __load64_idx(d, 8)
+   def t = __load64_idx(d, 16)
+   mut i = 0
+   while i < cap {
+      def off = i * 24
+      __store64_idx(t, off, 0)
+      __store64_idx(t, off + 8, 0)
+      __store64_idx(t, off + 16, 0)
+      i += 1
+   }
+   __store64_idx(d, 0, 0)
+   d
+}
+
+fn dict_merge(dict dst, dict src) dict {
+   "Merges `src` into `dst` (overwriting duplicate keys). Returns merged dictionary."
+   if !is_dict(dst) || !is_dict(src) { return dst }
+   if _is_native_dict(src) {
+      if _is_native_dict(dst) { return __dict_merge_raw(dst, src) }
+      ;; dst is managed — iterate native src via keys/values
+      def src_keys = __dict_keys_raw(src)
+      def src_n = __list_len(src_keys)
+      mut i = 0
+      while i < src_n {
+         def k = __load_item(src_keys, i)
+         dst = dict_set(dst, k, _dict_native_get(src, k, 0))
+         i += 1
+      }
+      return dst
+   }
+   ;; src is managed
+   if _is_native_dict(dst) {
+      def cap = __load64_idx(src, 8)
+      def t = __load64_idx(src, 16)
+      mut i = 0
+      while i < cap {
+         def off = i * 24
+         if __load64_idx(t, off + 16) == 1 { _dict_native_set(dst, __load64_tagged_idx(t, off), __load64_tagged_idx(t, off + 8)) }
+         i += 1
+      }
+      return dst
+   }
+   def cap = __load64_idx(src, 8)
+   def t = __load64_idx(src, 16)
+   mut i = 0
+   while i < cap {
+      def off = i * 24
+      if __load64_idx(t, off + 16) == 1 { dst = dict_set(dst, __load64_tagged_idx(t, off), __load64_tagged_idx(t, off + 8)) }
+      i += 1
+   }
+   dst
+}
+
+@inline
+@returns_owned
+fn _dict_pair(any a, any b) list {
+   mut p = __list_new(2)
+   _dict_store_item(p, 0, a)
+   _dict_store_item(p, 1, b)
+   __list_set_len(p, 2)
+   p
+}
+
+@returns_owned
+fn dict_items(dict d) list {
+   "Returns a list of [key, value] pairs."
+   if !is_dict(d) { return __list_new(0) }
+   if _is_native_dict(d) {
+      def n = __dict_len_raw(d)
+      mut out = __list_new(n)
+      def keys = __dict_keys_raw(d)
+      mut i = 0
+      while i < n {
+         def k = __load_item(keys, i)
+         _dict_store_item(out, i, _dict_pair(k, _dict_native_get(d, k, 0)))
+         i += 1
+      }
+      __list_set_len(out, n)
+      return out
+   }
+   def n = __load64_idx(d, 0)
+   mut out = __list_new(n)
+   def cap = __load64_idx(d, 8)
+   def t = __load64_idx(d, 16)
+   mut i = 0
+   mut pos = 0
+   while i < cap {
+      def off = i * 24
+      if __load64_idx(t, off + 16) == 1 {
+         _dict_store_item(out, pos, _dict_pair(__load64_tagged_idx(t, off), __load64_tagged_idx(t, off + 8)))
+         pos += 1
+      }
+      i += 1
+   }
+   __list_set_len(out, pos)
+   out
+}
+
+@returns_owned
+fn dict_keys(dict d) list {
+   "Returns a list of keys."
+   if !is_dict(d) { return __list_new(0) }
+   if _is_native_dict(d) { return __dict_keys_raw(d) }
+   def n = __load64_idx(d, 0)
+   mut out = __list_new(n)
+   def cap = __load64_idx(d, 8)
+   def t = __load64_idx(d, 16)
+   mut i = 0
+   mut pos = 0
+   while i < cap {
+      def off = i * 24
+      if __load64_idx(t, off + 16) == 1 {
+         _dict_store_item(out, pos, __load64_tagged_idx(t, off))
+         pos += 1
+      }
+      i += 1
+   }
+   __list_set_len(out, pos)
+   out
+}
+
+@returns_owned
+fn dict_values(dict d) list {
+   "Returns a list of values."
+   if !is_dict(d) { return __list_new(0) }
+   if _is_native_dict(d) { return __dict_values_raw(d) }
+   def n = __load64_idx(d, 0)
+   mut out = __list_new(n)
+   def cap = __load64_idx(d, 8)
+   def t = __load64_idx(d, 16)
+   mut i = 0
+   mut pos = 0
+   while i < cap {
+      def off = i * 24
+      if __load64_idx(t, off + 16) == 1 {
+         _dict_store_item(out, pos, __load64_tagged_idx(t, off + 8))
+         pos += 1
+      }
+      i += 1
+   }
+   __list_set_len(out, pos)
+   out
+}
+
+#main {
+   fn _dict_check(bool cond, str msg) int {
+      if !cond { __panic(msg) }
+      0
+   }
+   mut d = dict(4)
+   _dict_check(dict_len(d) == 0 && !dict_has(d, "a"), "dict empty")
+   d = dict_set(d, "a", 1)
+   d = dict_set(d, "b", 2)
+   d = dict_set(d, "c", 3)
+   _dict_check(dict_len(d) == 3 && dict_has(d, "b") && dict_get(d, "b", 0) == 2 && dict_get(d, "x", 77) == 77, "dict write/read")
+   mut copy = dict_clone(d)
+   copy = dict_set(copy, "b", 22)
+   _dict_check(dict_get(d, "b", 0) == 2 && dict_get(copy, "b", 0) == 22, "dict clone isolates writes")
+   mut other = dict(4)
+   other = dict_set(other, "b", 200)
+   other = dict_set(other, "d", 4)
+   d = dict_merge(d, other)
+   _dict_check(dict_len(d) == 4 && dict_get(d, "b", 0) == 200 && dict_get(d, "d", 0) == 4, "dict merge")
+   d = dict_del(d, "b")
+   _dict_check(!dict_has(d, "b") && dict_len(d) == 3, "dict delete")
+   _dict_check(dict_keys(d).contains("a") && dict_values(d).contains(4) && dict_items(d).len == 3, "dict views")
+   mut fd = dict(8)
+   def half_a, half_b = 0.5, 0.25 + 0.25
+   fd[half_a] = "half"
+   _dict_check(dict_get(fd, half_b, "") == "half", "dict float keys")
+   print("✓ core.dict_mod self-test passed")
+}

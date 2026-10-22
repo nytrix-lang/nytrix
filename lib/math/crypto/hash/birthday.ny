@@ -4,11 +4,11 @@
 ;; - https://www.rfc-editor.org/rfc/rfc1321
 ;; - https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.180-4.pdf
 ;; References:
-;; - std.math.crypto.hash
-;; - std.math.crypto
-module std.math.crypto.hash.birthday(birthday_bound, birthday_collision_prob, find_collision)
-use std.core
-use std.math.nt
+;; - core.math.crypto.hash
+;; - core.math.crypto
+module core.math.crypto.hash.birthday(birthday_bound, birthday_collision_prob, find_collision)
+use core
+use core.math.nt
 
 fn birthday_bound(int n) int {
    "Estimate the number of random samples needed from a space of size n to have a 50% chance of collision.

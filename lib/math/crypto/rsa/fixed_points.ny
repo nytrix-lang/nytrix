@@ -6,11 +6,11 @@
 ;; - https://people.csail.mit.edu/rivest/Rsapaper.pdf
 ;; - https://crypto.stanford.edu/~dabo/pubs/papers/RSA-survey.pdf
 ;; References:
-;; - std.math.crypto.rsa
-;; - std.math.crypto
-module std.math.crypto.rsa.fixed_points(count_fixed_points, find_fixed_points)
-use std.core
-use std.math.nt
+;; - core.math.crypto.rsa
+;; - core.math.crypto
+module core.math.crypto.rsa.fixed_points(count_fixed_points, find_fixed_points)
+use core
+use core.math.nt
 
 fn _find_roots_of_xe_eq_x(any e, any p) list {
    "Find all m in [0, p) such that m^e = m mod p.

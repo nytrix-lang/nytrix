@@ -1,12 +1,12 @@
 ;; Keywords: syntax lua parse highlight
 ;; Lua syntax highlighter
 ;; References:
-;; - std.math.parse.syntax
-;; - std.math.parse.syntax.helpers
-module std.math.parse.syntax.lua(tokenize)
-use std.core
-use std.core.str as str
-use std.math.parse.syntax.helpers as _h
+;; - core.math.parse.syntax
+;; - core.math.parse.syntax.helpers
+module core.math.parse.syntax.lua(tokenize)
+use core
+use core.str as str
+use core.math.parse.syntax.helpers as _h
 
 def KW = "and;break;do;else;elseif;end;false;for;function;goto;if;in;local;nil;not;or;repeat;return;then;true;until;while"
 def FN = "print;type;tostring;tonumber;ipairs;pairs;next;select;unpack;require;assert;error;getmetatable;setmetatable;rawget;rawset;rawequal;rawlen;pcall;xpcall;coroutine;string;table;math;os;io;file;debug;package;utf8;load;loadfile;dofile;collectgarbage"

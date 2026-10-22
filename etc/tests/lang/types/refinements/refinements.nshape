@@ -1,0 +1,223 @@
+shape test_refinements {
+  family "runtime/language"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+;; ============================================================================
+;; NEWT-01: Refinement types, composition, subtyping, ABI preservation
+;; ============================================================================
+refine Even = int where(v) { v % 2 == 0 }
+refine Positive = int where(v) { v > 0 }
+refine PositiveEven = Even where(v) { Positive(v) }
+
+fn preserve_positive(Positive value) Positive { value }
+fn accept_positive(Positive value) int { value }
+fn constant_positive() Positive { 7 }
+def Positive refined_positive = 5
+fn guarded_positive(int value) int {
+   if Positive(value) {
+      def alias = value
+      accept_positive(alias)
+   } else {
+      0
+   }
+}
+fn relational_guarded_positive(int value) int {
+   if value > 0 {
+      accept_positive(value)
+   } else {
+      0
+   }
+}
+fn reversed_relational_guarded_positive(int value) int {
+   if 0 < value {
+      accept_positive(value)
+   } else {
+      0
+   }
+}
+fn reversed_complement_guarded_positive(int value) int {
+   if 0 >= value {
+      0
+   } else {
+      accept_positive(value)
+   }
+}
+fn conjunctive_guarded_positive(int value) int {
+   if value > 0 && value < 10 {
+      accept_positive(value)
+   } else {
+      0
+   }
+}
+fn complementary_guarded_positive(int value) int {
+   if value <= 0 {
+      0
+   } else {
+      accept_positive(value)
+   }
+}
+fn negated_complement_guarded_positive(int value) int {
+   if !(value <= 0) {
+      accept_positive(value)
+   } else {
+      0
+   }
+}
+fn disjunctive_else_guarded_positive(int value) int {
+   if value <= 0 || value == -1 {
+      0
+   } else {
+      accept_positive(value)
+   }
+}
+fn while_guarded_positive(int value) int {
+   while value > 0 {
+      return accept_positive(value)
+   }
+   0
+}
+fn while_conjunctive_guarded_positive(int value) int {
+   while value > 0 && value < 10 {
+      return accept_positive(value)
+   }
+   0
+}
+fn c_for_guarded_positive(int value) int {
+   mut result = 0
+   for (mut i = 0 value > 0 i += 1) {
+      result = accept_positive(value)
+      break
+   }
+   result
+}
+fn c_for_conjunctive_guarded_positive(int value) int {
+   mut result = 0
+   for (mut i = 0 value > 0 && value < 10 i += 1) {
+      result = accept_positive(value)
+      break
+   }
+   result
+}
+fn readonly_mutable_guard_returns_positive(int input) Positive {
+   mut value = input
+   if value > 0 {
+      return value
+   } else {
+      return 1
+   }
+}
+assert(preserve_positive(refined_positive) == 5,
+       "a value already carrying the declared refinement may be returned")
+assert(guarded_positive(5) == 5,
+       "a direct refinement guard proves its immutable local in the true arm")
+assert(relational_guarded_positive(5) == 5,
+       "an exact relational predicate guard proves its immutable local")
+assert(reversed_relational_guarded_positive(5) == 5,
+       "reversed comparison operands transport the same refinement fact")
+assert(reversed_complement_guarded_positive(5) == 5,
+       "a reversed complementary guard proves the false arm")
+assert(conjunctive_guarded_positive(5) == 5,
+       "a true conjunction proves each exact predicate conjunct")
+assert(complementary_guarded_positive(5) == 5,
+       "the false arm of an exact complementary guard proves the refinement")
+assert(negated_complement_guarded_positive(5) == 5,
+       "logical negation carries exact guard polarity into its true arm")
+assert(disjunctive_else_guarded_positive(5) == 5,
+       "the false arm of a disjunction proves each exact complement")
+assert(while_guarded_positive(5) == 5,
+       "an exact while guard proves its immutable local only in the body")
+assert(while_conjunctive_guarded_positive(5) == 5,
+       "a true conjunction transports refinement facts into while bodies")
+assert(c_for_guarded_positive(5) == 5,
+       "an exact C-style for guard proves its immutable local in the body")
+assert(c_for_conjunctive_guarded_positive(5) == 5,
+       "a true conjunction transports refinement facts into C-style for bodies")
+assert(readonly_mutable_guard_returns_positive(5) == 5 &&
+           readonly_mutable_guard_returns_positive(-5) == 1,
+       "a mutable local keeps its guard fact in a proven read-only branch")
+assert(constant_positive() == 7,
+       "a constant return proved by the refinement predicate is accepted")
+def Even x = 2
+
+fn half(Even e) int { e / 2 }
+assert(half(x) == 1, "half(Even)")
+
+;; Subtyping: Even is accepted wherever int is expected (representation-preserving ABI)
+fn add_one(int i) int { i + 1 }
+assert(add_one(x) == 3, "Even <: int subtyping")
+
+;; Composition of refinements
+def PositiveEven pe = 4
+assert(half(pe) == 2, "PositiveEven <: Even")
+
+;; ============================================================================
+;; NEWT-02: Existential refinements (comptime-only exists), membership folding
+;; ============================================================================
+refine EvenEx from int where(v) { exists(k) { v == 2 * k } }
+refine Nat from int where(v) { v >= 0 }
+def EvenEx six = 6
+assert(EvenEx(6), "membership as a value: folds to true")
+assert(!EvenEx(5), "negation folds to true")
+static_assert(EvenEx(six), "folded existential admits witness")
+
+;; ============================================================================
+;; NEWT-03: Evidence-gated erasure (@pure @total)
+;; ============================================================================
+@pure
+@total
+fn sha_block_len() int { 64 }
+def erased_len = comptime{ sha_block_len() }
+assert(erased_len == 64, "evidence-gated erasure of verified pure total function")
+
+;; ============================================================================
+;; NEWT-10: Dependent functions (requires preconditions & Fin<N>)
+;; ============================================================================
+fn lemma nonneg_fin(Fin<4> n) { n >= 0 }
+
+fn natsum(int n) int requires n >= 0 {
+   n * (n + 1) / 2
+}
+
+def Fin<4> fi = 2
+def sum_res = natsum(fi)
+assert(sum_res == 3, "natsum with Fin<4> argument")
+
+;; ============================================================================
+;; NEWT-11: Termination measures (decreases(n))
+;; ============================================================================
+fn countdown(int n) int decreases(n) {
+   if n <= 0 {
+      0
+   } else {
+      countdown(n - 1)
+   }
+}
+
+assert(countdown(10) == 0, "recursive function with decreases measure")
+
+;; ============================================================================
+;; NEWT-13: Trait with comptime-checked law blocks
+;; ============================================================================
+trait Show {
+   fn show(any v) str
+}
+
+struct Point { int x, int y }
+
+impl Show for Point {
+   fn show(p) str {
+      "Point"
+   }
+   law { 1 == 1 }
+}
+
+def Point pt = Point(10, 20)
+assert(show(pt) == "Point", "trait dispatch with verified law block")
+NY
+}

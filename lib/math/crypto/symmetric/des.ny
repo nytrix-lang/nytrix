@@ -2,10 +2,10 @@
 ;; Symmetric-crypto routines for DES block cipher operations.
 ;; Reference: NIST FIPS PUB 46-3, Data Encryption Standard.
 ;; References:
-;; - std.math.crypto.symmetric
-;; - std.math.crypto
-module std.math.crypto.symmetric.des(des_encrypt_block, des_decrypt_block, des_encrypt_ecb, des_decrypt_ecb)
-use std.core
+;; - core.math.crypto.symmetric
+;; - core.math.crypto
+module core.math.crypto.symmetric.des(des_encrypt_block, des_decrypt_block, des_encrypt_ecb, des_decrypt_ecb)
+use core
 
 def _DES_IP = [
    58,50,42,34,26,18,10,2,60,52,44,36,28,20,12,4,
@@ -138,7 +138,7 @@ fn _subkeys(list key) list {
 }
 
 fn _f(int r, int k) int {
-   def x = _permute_int(r, 32, _DES_E) ^^ k
+   def x = _permute_int(r, 32, _DES_E) ^ k
    mut s, box = 0, 0
    while box < 8 {
       def chunk = (x >> (42 - box * 6)) & 63
@@ -155,7 +155,7 @@ fn _crypt_halves(list keys, list block, int off, bool decrypt) list {
    mut round = 0
    while round < 16 {
       def ki = __load_item_fast(keys, decrypt ? 15 - round : round)
-      def next_r = (l ^^ _f(r, ki)) & 0xffffffff
+      def next_r = (l ^ _f(r, ki)) & 0xffffffff
       l, r = r, next_r
       round += 1
    }
@@ -168,7 +168,7 @@ fn _crypt_block_into(list keys, list block, int off, bool decrypt, list out, int
    mut round = 0
    while round < 16 {
       def ki = __load_item_fast(keys, decrypt ? 15 - round : round)
-      def next_r = (l ^^ _f(r, ki)) & 0xffffffff
+      def next_r = (l ^ _f(r, ki)) & 0xffffffff
       l, r = r, next_r
       round += 1
    }

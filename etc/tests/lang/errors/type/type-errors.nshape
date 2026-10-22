@@ -1,0 +1,1981 @@
+shape type-assert-compile-index {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "negative", "diagnostic", "case-assert-compile-index"]
+  template ny-compile-fail
+  expect compile_fail
+  flags "--native-only"
+
+  expect_message "static index proof failed"
+  source ny <<'NY'
+use core
+
+def xs = [1, 2, 3]
+def int i = 4
+assert_compile_index(xs, i, "static index proof failed")
+print(xs)
+NY
+}
+
+shape type-assert-compile-range {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "negative", "diagnostic", "case-assert-compile-range"]
+  template ny-compile-fail
+  expect compile_fail
+  flags "--native-only"
+
+  expect_message "compile-time range assertion failed"
+  source ny <<'NY'
+use core
+
+def int x = 9
+assert_compile_range(x, 0, 3)
+print(x)
+NY
+}
+
+shape safe-mode-range-assert-is-not-an-assumption {
+  family "compiler-errors/safety"
+  generator "error"
+  features ["error", "safety", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+  flags "--safe-mode"
+
+  expect_message "assert_compile_range is not proven in safe mode"
+  source ny <<'NY'
+use core
+
+with ptr p = malloc(8) {
+   def int index = 3
+   assert_compile_range(index, 0, 1, "incorrect range claim")
+   store8(p, 65, index)
+}
+NY
+}
+
+shape safe-mode-unknown-range-assertion-fails-closed {
+  family "compiler-errors/safety"
+  generator "error"
+  features ["error", "safety", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+  flags "--safe-mode"
+
+  expect_message "assert_compile_range is not proven in safe mode"
+  source ny <<'NY'
+use core
+
+fn runtime_index() int { 3 }
+def int index = runtime_index()
+assert_compile_range(index, 0, 7, "unknown range claim")
+NY
+}
+
+shape loop-range-assertion-rejects-false-induction-bound {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "proof", "range", "loop", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+  flags_matrix "--native --run --color=never; --native-backend=llvm --jit --jit-engine=mcjit --color=never; --native-backend=llvm --jit --jit-engine=orc --color=never; --native-only --color=never"
+
+  expect_message "assert_compile_range is not proven for loop execution"
+  source ny <<'NY'
+use core
+
+fn main() int {
+   mut int i = 0
+   while i < 3 {
+      assert_compile_range(i, 0, 1, "false second-iteration bound")
+      i += 1
+   }
+   0
+}
+print(main())
+NY
+}
+
+shape loop-range-assertion-rejects-unknown-induction-start {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "proof", "range", "loop", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+  flags_matrix "--native --run --color=never; --native-backend=llvm --jit --jit-engine=mcjit --color=never; --native-backend=llvm --jit --jit-engine=orc --color=never; --native-only --color=never"
+
+  expect_message "assert_compile_range is not proven for loop execution"
+  source ny <<'NY'
+use core
+
+fn runtime_index() int { 0 }
+fn main() int {
+   mut int i = runtime_index()
+   while i < 3 {
+      assert_compile_range(i, 0, 2, "unknown starting value")
+      i += 1
+   }
+   0
+}
+print(main())
+NY
+}
+
+shape descending-loop-range-assertion-rejects-false-bound {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "proof", "range", "loop", "descending", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+  flags_matrix "--native --run --color=never; --native-backend=llvm --jit --jit-engine=mcjit --color=never; --native-backend=llvm --jit --jit-engine=orc --color=never; --native-only --color=never"
+
+  expect_message "assert_compile_range is not proven for loop execution"
+  source ny <<'NY'
+use core
+
+fn main() int {
+   mut int i = 7
+   while i >= 2 {
+      assert_compile_range(i, 3, 7, "false lower bound")
+      i -= 1
+   }
+   0
+}
+print(main())
+NY
+}
+
+shape type-bad-return {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "negative", "diagnostic", "case-bad-return"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "cannot assign string literal to int"
+  source ny <<'NY'
+use core
+
+fn bad(bool flag) int {
+   if flag { return 1 }
+   return "x"
+}
+
+print(bad(false))
+NY
+}
+
+shape type-int-literal-is-not-bool-return {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "negative", "diagnostic", "case-int-literal-is-not-bool-return"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "return value: expected bool, got int"
+  source ny <<'NY'
+fn wrong() bool {
+   return 1
+}
+wrong()
+NY
+}
+
+shape type-branch-merge-mismatch {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "negative", "diagnostic", "case-branch-merge-mismatch"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "cannot assign string literal to int"
+  source ny <<'NY'
+use core
+
+fn choose(flag, a, b) {
+   if flag { return a }
+   b
+}
+
+def int x = choose(true, 1, "x")
+print(x)
+NY
+}
+
+shape type-c-include-no-implicit-namespace {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "c-frontend", "ffi", "negative", "diagnostic", "case-c-include-no-implicit-namespace"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "undefined symbol 'c.labs'"
+  source ny <<'NY'
+#include <stdlib.h>
+c.labs(-2)
+NY
+}
+
+shape type-call-arg-mismatch {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "negative", "diagnostic", "case-call-arg-mismatch"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "cannot assign string literal to int"
+  source ny <<'NY'
+use core
+
+fn need(int x) int {
+   x
+}
+
+print(need("x"))
+NY
+}
+
+shape type-call-non-function {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "negative", "diagnostic", "case-call-non-function"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "local call: expected callable, got int"
+  source ny <<'NY'
+use core
+
+def int x = 1
+print(x())
+NY
+}
+
+shape type-comptime-mut-capture {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "comptime", "staging", "diagnostic", "case-comptime-mut-capture"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "cannot capture runtime mutable variable 'counter' in compile-time evaluation"
+  source ny <<'NY'
+use core
+mut counter = 0
+
+def bad = comptime{ counter + 1 }
+NY
+}
+
+shape type-comptime-local-mut-capture {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "comptime", "staging", "diagnostic", "case-comptime-local-mut-capture"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "cannot capture runtime mutable variable 'counter' in compile-time evaluation"
+  source ny <<'NY'
+fn bad_mutable_capture() int {
+  mut counter = 0
+  comptime{ counter + 1 }
+}
+
+bad_mutable_capture()
+NY
+}
+
+shape type-decl-string-to-int {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "negative", "diagnostic", "case-decl-string-to-int"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "cannot assign string literal to int"
+  source ny <<'NY'
+use core
+
+def int x = "hi"
+print(x)
+NY
+}
+
+shape type-del-immutable {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "negative", "diagnostic", "case-del-immutable"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "cannot reassign immutable"
+  source ny <<'NY'
+use core
+
+def x = 1
+del x
+NY
+}
+
+shape type-ffi-shadowing {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "negative", "diagnostic", "case-ffi-shadowing"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "cannot assign string literal to int"
+  source ny <<'NY'
+use core
+
+def int value = "not an int"
+print(value)
+NY
+}
+
+shape type-impl-law-failed {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "trait", "law", "backend-parity", "case-impl-law-failed"]
+  template ny-compile-fail
+  expect compile_fail
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect_message "law verification failed"
+  source ny <<'NY'
+use core
+
+trait Show {
+  fn show(any v) str
+}
+
+struct Point { int x, int y }
+
+impl Show for Point {
+  fn show(p) str { "point" }
+  law { 1 == 2 }
+}
+NY
+}
+
+shape type-impl-enum-law-unproved {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "trait", "law", "enum", "soundness", "backend-parity"]
+  template ny-compile-fail
+  expect compile_fail
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect_message "law verification failed"
+  source ny <<'NY'
+use core
+
+trait Show {
+  fn show(any v) str
+}
+
+enum Color { Red, Blue }
+
+impl Show for Color {
+  fn show(v) str { "color" }
+  law { false }
+}
+NY
+}
+
+shape type-impl-method-duplicate {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "negative", "diagnostic", "case-impl-method-duplicate"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "duplicate impl method 'Meter.val/1'"
+  source ny <<'NY'
+use core
+
+impl Meter {
+   fn val(self m) int {
+      m.get("value", 0)
+   }
+}
+
+impl Meter {
+   fn val(self m) int {
+      m.get("other", 0)
+   }
+}
+
+def Meter m = Meter({"value": 1})
+print(m.val)
+NY
+}
+
+shape type-inferred-arithmetic-param {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "negative", "diagnostic", "case-inferred-arithmetic-param"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "cannot assign string literal to int"
+  source ny <<'NY'
+use core
+
+fn add1(x) {
+   x + 1
+}
+
+print(add1("x"))
+NY
+}
+
+shape type-inferred-comparison-param {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "negative", "diagnostic", "case-inferred-comparison-param"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "cannot assign string literal to int"
+  source ny <<'NY'
+use core
+
+fn small(x) {
+   x < 10
+}
+
+print(small("x"))
+NY
+}
+
+shape type-inferred-dict-index-result {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "negative", "diagnostic", "case-inferred-dict-index-result"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "variable declaration: expected str, got int"
+  source ny <<'NY'
+use core
+
+fn getx(d) {
+   d["x"]
+}
+
+def str s = getx({"x": 1})
+print(s)
+NY
+}
+
+shape type-inferred-index-result {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "negative", "diagnostic", "case-inferred-index-result"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "variable declaration: expected str, got int"
+  source ny <<'NY'
+use core
+
+fn first(xs) {
+   xs[0]
+}
+
+def str s = first([1, 2])
+print(s)
+NY
+}
+
+shape type-inferred-nested-index-result {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "negative", "diagnostic", "case-inferred-nested-index-result"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "variable declaration: expected str, got int"
+  source ny <<'NY'
+use core
+
+fn pick(rows) {
+   rows[1][0]
+}
+
+def str s = pick([[1], [2]])
+print(s)
+NY
+}
+
+shape type-inferred-string-index-result {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "negative", "diagnostic", "case-inferred-string-index-result"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "cannot assign string literal to int"
+  source ny <<'NY'
+use core
+
+fn first(xs) {
+   xs[0]
+}
+
+def int c = first("AZ")
+print(c)
+NY
+}
+
+shape type-inferred-string-param {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "negative", "diagnostic", "case-inferred-string-param"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "function argument: expected str, got int"
+  source ny <<'NY'
+use core
+
+fn suffix(x) {
+   x + "!"
+}
+
+print(suffix(1))
+NY
+}
+
+shape type-lambda-arg-mismatch {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "negative", "diagnostic", "case-lambda-arg-mismatch"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "cannot assign string literal to int"
+  source ny <<'NY'
+use core
+
+def f = fn(int x) int {
+   x + 1
+}
+
+print(f("x"))
+NY
+}
+
+shape type-lambda-typo {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "negative", "diagnostic", "case-lambda-typo"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "did you mean keyword 'lambda'"
+  source ny <<'NY'
+def f = lamda(x){ x }
+NY
+}
+
+shape type-layout-member-unknown {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "negative", "diagnostic", "case-layout-member-unknown"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "unknown member 'y' for layout 'HMPair'"
+  source ny <<'NY'
+use core
+
+layout HMPair {
+   i32 x
+}
+
+def *HMPair p = nil
+print(p.y)
+NY
+}
+
+shape type-layout-unknown-field {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "negative", "diagnostic", "case-layout-unknown-field"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "unknown field 'missing' in layout 'BadLayout'"
+  source ny <<'NY'
+use core
+
+layout BadLayout {
+   i32 x
+}
+
+def ptr p = malloc(__layout_size("BadLayout"))
+load_layout(p, "BadLayout", "missing")
+NY
+}
+
+shape type-layout-store-unknown-field {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "negative", "diagnostic", "layout"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "unknown field 'missing' in layout 'BadStoreLayout'"
+  source ny <<'NY'
+use core
+
+layout BadStoreLayout {
+   i32 value
+}
+
+def ptr p = malloc(__layout_size("BadStoreLayout"))
+store_layout_field(p, "BadStoreLayout", "missing", 4)
+NY
+}
+
+shape type_lemma_composition_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "proof", "lemma", "composition", "negative", "case-lemma-composition-negative"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "could not prove"
+  source ny <<'NY'
+use core
+
+fn lemma positive_sum(int x, int y) {
+  x > 0 && x < 100 && y > 0 && y < 100 → x + y > 0
+}
+
+fn lemma inherited_positive(int x, int y) {
+  positive_sum(x, y)
+}
+
+fn read_value() int { 3 }
+prove(inherited_positive(read_value(), 4))
+NY
+}
+
+shape type_lemma_definition_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "proof", "lemma", "definition", "negative", "case-lemma-definition-negative"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "not universally provable"
+  source ny <<'NY'
+use core
+
+fn lemma invalid(int x) {
+  x > 0
+}
+
+prove(invalid(1))
+NY
+}
+
+shape type_lemma_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "proof", "lemma", "negative", "case-lemma-negative"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "not universally provable"
+  source ny <<'NY'
+use core
+
+fn lemma invalid_sum(int x, int y) {
+  x > 0 && y > 0 → x + y < 0
+}
+
+prove(invalid_sum(3, 4))
+NY
+}
+
+shape type-list-index-mismatch {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "negative", "diagnostic", "case-list-index-mismatch"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "variable declaration: expected str, got int"
+  source ny <<'NY'
+use core
+
+def xs = [1, 2, 3]
+def str s = xs[0]
+print(s)
+NY
+}
+
+shape type-list-index-non-int {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "negative", "diagnostic", "case-list-index-non-int"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "cannot assign string literal to int"
+  source ny <<'NY'
+use core
+
+def xs = [1, 2, 3]
+print(xs["x"])
+NY
+}
+
+shape type-loop-body-not-return {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "negative", "diagnostic", "case-loop-body-not-return"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "cannot assign string literal to int"
+  source ny <<'NY'
+use core
+
+fn loop_body_is_not_return() int {
+   mut i = 0
+   while i < 1 {
+      "not the return"
+      i += 1
+   }
+   return "real mismatch"
+}
+
+print(loop_body_is_not_return())
+NY
+}
+
+shape type-member-property-return-mismatch {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "negative", "diagnostic", "case-member-property-return-mismatch"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "variable declaration: expected str, got int"
+  source ny <<'NY'
+use core
+
+impl PropBox {
+   fn value(self box) int {
+      7
+   }
+}
+
+def PropBox box = PropBox({})
+def str s = box.value
+print(s)
+NY
+}
+
+shape type-module-alias-unknown-member {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "negative", "diagnostic", "case-module-alias-unknown-member"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "module 'OnlyPi' has no exported member 'TAU'"
+  source ny <<'NY'
+use core
+module OnlyPi(
+   PI
+){
+   use core.math.scalar (PI)
+}
+
+use OnlyPi as math_alias
+
+print(math_alias.TAU)
+NY
+}
+
+shape type-operator-return-mismatch {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "negative", "diagnostic", "case-operator-return-mismatch"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "operator target 'Wrong.add' returns int but operator declares Wrong"
+  source ny <<'NY'
+use core
+
+impl Wrong {
+   fn add(self a, self b) int {
+      1
+   }
+   operator + self: self = add
+}
+
+print(1)
+NY
+}
+
+shape type-operator-target-arity {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "negative", "diagnostic", "case-operator-target-arity"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "operator target 'Bad.add' must take exactly two arguments"
+  source ny <<'NY'
+use core
+
+impl Bad {
+   fn add(self x) self {
+      x
+   }
+   operator + self: self = add
+}
+
+print(1)
+NY
+}
+
+shape type-operator-unresolved {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "negative", "diagnostic", "case-operator-unresolved"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "unresolved operator '+' for Meter and Meter"
+  source ny <<'NY'
+use core
+
+impl Meter {}
+
+def Meter a = Meter({"value": 1})
+def Meter b = Meter({"value": 2})
+def c = a + b
+print(c)
+NY
+}
+
+shape type-param-string-to-int {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "negative", "diagnostic", "case-param-string-to-int"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "cannot assign string literal to int"
+  source ny <<'NY'
+use core
+
+fn need_int(int x) int {
+   x
+}
+
+need_int("hi")
+NY
+}
+
+shape type-polymorphic-call-mismatch {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "negative", "diagnostic", "case-polymorphic-call-mismatch"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "function argument: expected str, got int"
+  source ny <<'NY'
+use core
+
+fn id(x) {
+   x
+}
+
+fn need_str(str s) str {
+   s
+}
+
+print(need_str(id(1)))
+NY
+}
+
+shape type-polymorphic-return-mismatch {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "negative", "diagnostic", "case-polymorphic-return-mismatch"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "variable declaration: expected str, got int"
+  source ny <<'NY'
+use core
+
+fn id(x) {
+   x
+}
+
+def str s = id(1)
+print(s)
+NY
+}
+
+shape type_proof_call_site_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "proof", "negative", "diagnostic", "case-proof-call-site-negative"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "mapped value ranges do not prove it"
+  source ny <<'NY'
+use core
+
+;; The proof<P> proposition references callee parameter `m`. The witness is
+;; valid for 200 > 100, but the call maps `m` to 50, so the check must reject
+;; the call.
+fn needs_big(int m, proof<m > 100> p) int { 2 }
+def proof big = prove(200 > 100)
+needs_big(50, big)
+NY
+}
+
+shape type_proof_call_site_unknown_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "proof", "unknown", "soundness", "negative", "case-proof-call-site-unknown-negative"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "mapped value ranges do not prove it"
+  source ny <<'NY'
+use core
+
+;; The proposition references no mapped callee parameter and no caller
+;; binding with a known range: `n` is an unconstrained function parameter,
+;; so its range is unknown at the call site.  Unknown must not be accepted
+;; as proof even though the supplied witness proves a literal fact.
+fn needs_big(proof<n > 100> p) int { 2 }
+fn caller(int n) {
+  def proof big = prove(200 > 100)
+  needs_big(big)
+}
+caller(200)
+NY
+}
+
+shape type_requires_unknown_native_call_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "proof", "requires", "unknown", "native", "soundness"]
+  template ny-compile-fail
+  expect compile_fail
+  flags "--native-only"
+
+  expect_message "'requires' condition is false or unproved for native lowering"
+  source ny <<'NY'
+use core
+
+fn positive(int n) int requires n > 0 { n }
+
+;; The argument is an unconstrained caller parameter. The native backend has
+;; no proof context here, so it must reject the call instead of treating an
+;; unknown requires condition as satisfied.
+fn forward(int x) int {
+  positive(x)
+}
+
+forward(1)
+NY
+}
+
+shape type_total_recursive_measure_is_not_a_proof {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "termination", "total", "soundness"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "recursive termination is not certified"
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  source ny <<'NY'
+use core
+
+;; The canonical guarded countdown has a well-founded measure certificate.
+;; An unrelated unmeasured recursive function must still be rejected.
+@total
+fn count_down(int n) int decreases(n) {
+  if n <= 0 { return 0 }
+  count_down(n - 1)
+}
+
+@total
+fn spin(int n) int {
+  spin(n)
+}
+
+count_down(4)
+NY
+}
+
+shape type_total_recursive_increasing_measure_is_not_proven {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "termination", "total", "soundness", "backend-parity"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "recursive termination is not certified"
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  source ny <<'NY'
+@total
+fn count_up(int n) int decreases(n) {
+  if n <= 0 { return 0 }
+  count_up(n + 1)
+}
+
+count_up(1)
+NY
+}
+
+shape type_total_recursive_overloaded_decrement_is_not_proven {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "termination", "total", "soundness", "operator", "backend-parity"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "recursive termination is not certified"
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  source ny <<'NY'
+use core
+
+impl int {
+  fn subtract(self left, int right) int { left }
+  operator - int: int = subtract
+}
+
+@total
+fn count_down(int n) int decreases(n) {
+  if n <= 0 { return 0 }
+  count_down(n - 1)
+}
+
+count_down(2)
+NY
+}
+
+shape type_total_recursive_overloaded_comparison_is_not_proven {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "termination", "total", "soundness", "operator", "backend-parity"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "recursive termination is not certified"
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  source ny <<'NY'
+use core
+
+impl int {
+  fn reversed_compare(self left, int right) bool { true }
+  operator >= int: bool = reversed_compare
+}
+
+@total
+fn count_down(int n) int decreases(n) {
+  if 0 >= n {
+    return 0
+  } else {
+    return count_down(n - 1)
+  }
+}
+
+count_down(2)
+NY
+}
+
+shape type_total_recursive_overloaded_less_than_is_not_proven {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "termination", "total", "soundness", "operator", "backend-parity"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "recursive termination is not certified"
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  source ny <<'NY'
+use core
+
+impl int {
+  fn less_than(self left, int right) bool { true }
+  operator < int: bool = less_than
+}
+
+@total
+fn count_down(int n) int decreases(n) {
+  if n < 0 {
+    return 0
+  } else {
+    return count_down(n - 1)
+  }
+}
+
+count_down(2)
+NY
+}
+
+shape type_total_recursive_zero_decrement_is_not_proven {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "termination", "total", "soundness", "negative", "backend-parity"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "recursive termination is not certified"
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  source ny <<'NY'
+use core
+
+@total
+fn count_down(int n) int decreases(n) {
+  if n <= 0 {
+    return 0
+  } else {
+    return count_down(n - 0)
+  }
+}
+
+count_down(2)
+NY
+}
+
+shape type_proof_loop_index_soundness_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "proof", "loop", "soundness", "negative", "range", "case-proof-loop-index-soundness-negative"]
+  template ny-compile-fail
+  expect compile_fail
+  flags "--native-only"
+
+  expect_message "prove condition must be known at compile time"
+  source ny <<'NY'
+use core
+
+;; A loop index advances every iteration, so a range-based proof inside the
+;; body may only rely on the loop bound, never on the pre-loop value.  With a
+;; known bound the index spans [0, 9], so `i < 9` is false at i = 9 and must be
+;; rejected; with a runtime bound the index range is unknown and the same
+;; claim must also be rejected instead of inheriting the stale [0, 0] range.
+fn known_bound(int n) int {
+  mut int i = 0
+  while i < 10 {
+    prove(i < 9, "i reaches 9")
+    i += 1
+  }
+  0
+}
+known_bound(0)
+NY
+}
+
+shape type-proof-proposition-mismatch {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "proof", "negative", "diagnostic", "case-proof-proposition-mismatch"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "expected proof<binary:<(int:0,int:5)>, got proof<binary:!=(int:0,int:5)>"
+  source ny <<'NY'
+fn require_positive(proof<5 > 0> p) {}
+def proof nonzero = prove(5 != 0)
+require_positive(nonzero)
+NY
+}
+
+shape type_proof_range_division_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "proof", "range", "arithmetic", "negative", "case-proof-range-division-negative"]
+  template ny-compile-fail
+  expect compile_fail
+  flags "--native-only"
+  expect_message "proof obligation failed"
+  source ny <<'NY'
+use core
+
+def int n = -12
+prove(n / 3 >= 0)
+NY
+}
+
+shape type_proof_solver_ge_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "proof", "solver", "comparison", "soundness", "case-proof-solver-ge-negative"]
+  template ny-compile-fail
+  flags "--proof-solver=presburger"
+  expect compile_fail
+
+  expect_message "reject 5 >= 6"
+  source ny <<'NY'
+use core
+prove(5 >= 6, "reject 5 >= 6")
+NY
+}
+
+shape type_proof_solver_gt_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "proof", "solver", "comparison", "soundness", "case-proof-solver-gt-negative"]
+  template ny-compile-fail
+  flags "--proof-solver=presburger"
+  expect compile_fail
+
+  expect_message "reject 5 > 6"
+  source ny <<'NY'
+use core
+prove(5 > 6, "reject 5 > 6")
+NY
+}
+
+shape type_proof_solver_le_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "proof", "solver", "comparison", "soundness", "case-proof-solver-le-negative"]
+  template ny-compile-fail
+  flags "--proof-solver=presburger"
+  expect compile_fail
+
+  expect_message "reject 5 <= 3"
+  source ny <<'NY'
+use core
+prove(5 <= 3, "reject 5 <= 3")
+NY
+}
+
+shape type_proof_solver_lt_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "proof", "solver", "comparison", "soundness", "case-proof-solver-lt-negative"]
+  template ny-compile-fail
+  flags "--proof-solver=presburger"
+  expect compile_fail
+
+  expect_message "reject 5 < 4"
+  source ny <<'NY'
+use core
+prove(5 < 4, "reject 5 < 4")
+NY
+}
+
+shape type_proof_solver_ne_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "proof", "solver", "comparison", "soundness", "case-proof-solver-ne-negative"]
+  template ny-compile-fail
+  flags "--proof-solver=presburger"
+  expect compile_fail
+
+  expect_message "reject 5 != 5"
+  source ny <<'NY'
+use core
+prove(5 != 5, "reject 5 != 5")
+NY
+}
+
+shape type_proof_solver_soundness_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "proof", "soundness", "negative", "solver", "case-proof-solver-soundness-negative"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "solver must reject 5 >= 6"
+  source ny <<'NY'
+use core
+
+;; The Presburger solver must only accept genuine proofs: the negation of the
+;; proposition must be unsatisfiable under the known ranges.  These constant
+;; claims are false, so prove() must reject them even though they carry no
+;; free variables.
+prove(5 >= 6, "solver must reject 5 >= 6")
+NY
+}
+
+shape type-prove-dynamic {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "proof", "negative", "diagnostic", "case-prove-dynamic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "prove condition must be known at compile time"
+  source ny <<'NY'
+fn require_witness(bool condition) proof {
+   prove(condition)
+}
+NY
+}
+
+shape type-prove-false {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "proof", "negative", "diagnostic", "case-prove-false"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "expected proof failure"
+  source ny <<'NY'
+def proof impossible = prove(false, "expected proof failure")
+NY
+}
+
+shape type_proves_unknown_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "proof", "postcondition", "unknown", "soundness", "case-proves-unknown-negative"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "is not proved for a returned value range"
+  source ny <<'NY'
+use core
+
+;; An unconstrained parameter gives `x + 1` no range that establishes the
+;; positive post-condition.  Unknown must be rejected rather than accepted.
+@proves(result > 0)
+fn positive_unknown(int x) int { x + 1 }
+positive_unknown(4)
+NY
+}
+
+shape type-refinement-obligation {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "refinement", "obligation", "case-refinement-obligation"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "refinement obligation failed"
+  source ny <<'NY'
+use core
+
+refine Even = int where (v) { v % 2 == 0 }
+def Even bad = 3
+NY
+}
+
+shape type-refinement-return-unknown {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "refinement", "unknown", "fail-closed"]
+  template ny-compile-fail
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_fail
+  expect_message "refinement obligation is not proved"
+  source ny <<'NY'
+use core
+
+refine Positive = int where(value) { value > 0 }
+
+fn unsound(int value) Positive {
+   value
+}
+
+unsound(5)
+NY
+}
+
+shape type-refinement-argument-unknown {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "refinement", "unknown", "fail-closed"]
+  template ny-compile-fail
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_fail
+  expect_message "refinement obligation is not proved"
+  source ny <<'NY'
+use core
+
+refine Positive = int where(value) { value > 0 }
+
+fn consume(Positive value) int { value }
+fn forward_unknown(int value) int { consume(value) }
+
+forward_unknown(5)
+NY
+}
+
+shape type-refinement-mutation-unknown {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "refinement", "mutation", "fail-closed"]
+  template ny-compile-fail
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_fail
+  expect_message "refinement obligation is not proved"
+  source ny <<'NY'
+use core
+
+refine Positive = int where(value) { value > 0 }
+
+fn overwrite_unknown(int value) int {
+   mut Positive current = 5
+   current = value
+   current
+}
+
+overwrite_unknown(8)
+NY
+}
+
+shape type_requires_obligation {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "requires", "obligation", "case-requires-obligation"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "precondition"
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  source ny <<'NY'
+use core
+
+fn natsum(int n) int requires n >= 0 {
+   n * (n + 1) / 2
+}
+
+natsum(-1)
+NY
+}
+
+shape type_requires_unknown_obligation_all_routes {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "requires", "obligation", "unknown", "backend-parity"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "precondition"
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  source ny <<'NY'
+use core
+
+fn positive(int n) int requires n > 0 { n }
+
+fn forward(int value) int {
+  positive(value)
+}
+
+forward(1)
+NY
+}
+
+shape type_requires_caller_precondition_must_imply_callee_all_routes {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "requires", "implication", "backend-parity"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "precondition"
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  source ny <<'NY'
+use core
+
+fn nonnegative(int n) int requires n >= 0 { n }
+
+fn too_weak(int n) int requires n >= -1 {
+  nonnegative(n)
+}
+
+too_weak(-1)
+NY
+}
+
+shape type_requires_argument_substitution_is_simultaneous {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "requires", "implication", "soundness"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "precondition"
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  source ny <<'NY'
+use core
+
+fn guarded(int x, int y) int requires x > 0 || !(y > 0) {
+  1
+}
+
+fn invalid_forward(int x, int y) int requires x > 0 && y == 0 {
+  guarded(y, x)
+}
+
+invalid_forward(1, 0)
+NY
+}
+
+shape type_requires_named_argument_substitution_does_not_assume_formal_order {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "requires", "named-arguments", "soundness"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "precondition"
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  source ny <<'NY'
+use core
+
+fn needs_left(int left, int right) int requires left > 0 {
+  left
+}
+
+fn invalid_named_forward(int x, int y) int requires y > 0 {
+  needs_left(right: y, left: x)
+}
+
+invalid_named_forward(0, 1)
+NY
+}
+
+shape type_requires_attached_method_does_not_assume_unknown_receiver {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "requires", "attached-method", "soundness"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "precondition"
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  source ny <<'NY'
+use core
+
+impl int {
+  fn contract_value(self value) int requires value > 0 {
+    value
+  }
+}
+
+fn invalid_method_call(int n) int requires n == 0 {
+  n.contract_value()
+}
+
+invalid_method_call(0)
+NY
+}
+
+shape type_requires_named_attached_method_uses_explicit_argument {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "requires", "named-arguments", "attached-method", "soundness"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "precondition"
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  source ny <<'NY'
+use core
+
+impl int {
+  fn greater_than(self value, int minimum) int requires value > minimum {
+    value
+  }
+}
+
+fn invalid_named_method(int n) int requires n > 0 {
+  n.greater_than(minimum: n + 1)
+}
+
+invalid_named_method(1)
+NY
+}
+
+shape type_requires_proof_does_not_reuse_precondition_after_parameter_mutation {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "requires", "mutation", "soundness"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "precondition"
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  source ny <<'NY'
+use core
+
+fn positive(int x) int requires x > 0 {
+  x
+}
+
+fn invalid_forward(int n) int requires n > 0 {
+  n = 0
+  positive(n)
+}
+
+invalid_forward(1)
+NY
+}
+
+shape type_requires_proof_does_not_reuse_precondition_after_parameter_shadowing {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "requires", "shadowing", "soundness"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "precondition"
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  source ny <<'NY'
+use core
+
+fn positive(int x) int requires x > 0 {
+  x
+}
+
+fn invalid_forward(int n) int requires n > 0 {
+  if true {
+    def n = 0
+    positive(n)
+  }
+  0
+}
+
+invalid_forward(1)
+NY
+}
+
+shape type_requires_proof_does_not_reuse_precondition_after_iterator_binding {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "requires", "shadowing", "soundness"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "precondition"
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  source ny <<'NY'
+use core
+
+fn positive(int x) int requires x > 0 {
+  x
+}
+
+fn invalid_forward(int n) int requires n > 0 {
+  for n in [0] {
+    positive(n)
+  }
+  0
+}
+
+invalid_forward(1)
+NY
+}
+
+shape type_requires_proof_does_not_reuse_precondition_after_lambda_parameter_shadowing {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "requires", "shadowing", "soundness"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "precondition"
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  source ny <<'NY'
+use core
+
+fn positive(int x) int requires x > 0 {
+  x
+}
+
+fn invalid_forward(int n) int requires n > 0 {
+  def call = fn(n) {
+    positive(n)
+  }
+  call(0)
+}
+
+invalid_forward(1)
+NY
+}
+
+shape type_requires_division_by_zero_does_not_discharge_contract {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "requires", "division", "soundness"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "precondition"
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  source ny <<'NY'
+use core
+
+fn needs_nonzero(int n) int requires 1 / n == 0 {
+  1
+}
+
+fn zero_only(int n) int requires n == 0 {
+  needs_nonzero(n)
+}
+
+zero_only(0)
+NY
+}
+
+shape type_requires_integer_overflow_does_not_prove_strict_growth {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "requires", "overflow", "soundness"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "precondition"
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  source ny <<'NY'
+use core
+
+fn strictly_greater_after_increment(int value) int
+    requires value + 1 > value {
+  value
+}
+
+fn invalid_forward(int n) int requires n >= 0 {
+  strictly_greater_after_increment(n)
+}
+
+NY
+}
+
+shape type_requires_custom_integer_operator_is_not_proved_as_builtin {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "requires", "operator", "soundness"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "precondition"
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  source ny <<'NY'
+use core
+
+impl int {
+  fn subtract_instead(self left, self right) int {
+    left - right
+  }
+  operator + self: int = subtract_instead
+}
+
+fn positive_increment(int value) int requires value + 1 > value {
+  value
+}
+
+positive_increment(4)
+NY
+}
+
+shape type-strict-dynamic-arithmetic {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "negative", "diagnostic", "case-strict-dynamic-arithmetic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "hm-strict-dynamic-arithmetic"
+  flags "--strict-types"
+  source ny <<'NY'
+use core
+
+fn add_one(any x) {
+   x + 1
+}
+
+add_one(1)
+NY
+}
+
+shape type-strict-dynamic-index {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "negative", "diagnostic", "case-strict-dynamic-index"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "hm-strict-dynamic-index"
+  flags "--strict-types"
+  source ny <<'NY'
+use core
+
+fn read_index(any x) {
+   x[0]
+}
+
+read_index(1)
+NY
+}
+
+shape type-strict-dynamic-member {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "negative", "diagnostic", "case-strict-dynamic-member"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "hm-strict-dynamic-member"
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  source ny <<'NY'
+use core
+
+fn read_member(any x) {
+   x.missing
+}
+
+read_member(1)
+NY
+}
+
+shape type-strict-dynamic-member-shadowed-module {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "negative", "diagnostic", "strict-types", "shadowing"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "hm-strict-dynamic-member"
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  source ny <<'NY'
+use core
+
+def any std = 1
+std.missing
+NY
+}
+
+shape type-strict-dynamic-member-native {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "negative", "diagnostic", "strict-types", "native"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "hm-strict-dynamic-member"
+  flags "--strict-types --native-only"
+  source ny <<'NY'
+use core
+
+fn read_member(any x) {
+   x.missing
+}
+
+read_member(1)
+NY
+}
+
+shape type-strict-heterogeneous-dict {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "negative", "diagnostic", "case-strict-heterogeneous-dict"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "hm-strict-heterogeneous-dict"
+  flags "--strict-types"
+  source ny <<'NY'
+use core
+
+def cfg = {"name": "ny", "version": 1}
+print(cfg)
+NY
+}
+
+shape type-strict-result-payload {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "negative", "diagnostic", "case-strict-result-payload"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "hm-strict-result-payload"
+  flags "--strict-types"
+  source ny <<'NY'
+use core
+
+fn bad_unwrap(any x) {
+   unwrap(x)
+}
+
+bad_unwrap(1)
+NY
+}
+
+shape type-strict-dynamic-propagation {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "negative", "diagnostic", "case-strict-dynamic-propagation"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "hm-strict-result-payload"
+  flags "--strict-types"
+  source ny <<'NY'
+use core
+
+fn bad_propagate(any value) {
+   value?
+}
+
+bad_propagate(ok(1))
+NY
+}
+
+shape type-strict-unsupported-expression {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "negative", "diagnostic", "case-strict-unsupported-expression"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "hm-strict-unsupported-expression"
+  flags "--strict-types"
+  source ny <<'NY'
+use core
+
+fn unresolved_receiver() { .missing }
+
+unresolved_receiver()
+NY
+}
+
+shape type-strict-unknown-call {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "negative", "diagnostic", "case-strict-unknown-call"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "hm-strict-dynamic-call"
+  flags "--strict-types"
+  source ny <<'NY'
+use core
+
+does_not_exist_strict(1)
+NY
+}
+
+shape type-undefined-call {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "negative", "diagnostic", "case-undefined-call"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "undefined symbol"
+  source ny <<'NY'
+use core
+
+does_not_exist(1, 2)
+NY
+}
+
+shape type-effect-capability-name-too-long {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "effects", "capability", "length-boundary", "soundness"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "exceeds the 63-byte limit"
+  source ny <<'NY'
+@effects(io, cap(abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ab))
+fn invalid_capability() int {
+  1
+}
+
+invalid_capability()
+NY
+}

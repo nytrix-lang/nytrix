@@ -1,0 +1,30 @@
+shape shadowed_set_idx_call_does_not_preserve_mutable_refinement
+  family "compiler-errors/types"
+  generator "error"
+  features [error typing refinement shadowed set_idx mutable negative]
+  template ny-compile-fail
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  expect compile_fail
+  expect_message "refinement obligation"
+  source ny <<'NY'
+use core
+
+refine PositiveFirst = list where(items) { items[0] > 0 }
+fn require_positive_first(PositiveFirst items) int { return items.len }
+
+fn set_idx(list<int> original, int index, int value) list<int> {
+  [-1]
+}
+
+fn invalid_after_shadowed_set_idx() int {
+  mut list<int> items = [5]
+  if PositiveFirst(items) {
+    items = set_idx(items, 0, 5)
+    return require_positive_first(items)
+  }
+  0
+}
+
+invalid_after_shadowed_set_idx()
+NY
+}

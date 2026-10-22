@@ -1,0 +1,34 @@
+shape type_operator_xor_unresolved {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "operator", "xor", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "unresolved operator '^' for Meter and Meter"
+  source ny <<'NY'
+use core
+
+impl Meter {}
+def Meter a = Meter({"value": 1})
+def Meter b = Meter({"value": 2})
+def c = a ^ b
+print(c)
+NY
+}
+
+shape type_operator_power_alias_unresolved {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "operator", "power", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "unresolved operator '**' for Meter and int"
+  source ny <<'NY'
+use core
+
+impl Meter {}
+def Meter a = Meter({"value": 1})
+def value = a ^^ 2
+print(value)
+NY
+}

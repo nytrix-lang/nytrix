@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "base/json.h"
 
 typedef struct {
   char *data;
@@ -85,21 +86,28 @@ static inline bool ny_strbuf_append_c(ny_strbuf_t *b, char c) {
   return true;
 }
 
-static inline bool ny_strbuf_appendf(ny_strbuf_t *b, const char *fmt, ...) {
+static inline bool ny_strbuf_vappendf(ny_strbuf_t *b, const char *fmt,
+                                      va_list ap) {
   if (!b || !fmt)
     return false;
-  va_list ap;
-  va_start(ap, fmt);
-  int n = vsnprintf(NULL, 0, fmt, ap);
-  va_end(ap);
+  va_list copy;
+  va_copy(copy, ap);
+  int n = vsnprintf(NULL, 0, fmt, copy);
+  va_end(copy);
   if (n < 0 || (size_t)n == SIZE_MAX ||
       !ny_strbuf_reserve(b, (size_t)n + 1))
     return false;
-  va_start(ap, fmt);
   vsnprintf(b->data + b->len, (size_t)n + 1, fmt, ap);
-  va_end(ap);
   b->len += (size_t)n;
   return true;
+}
+
+static inline bool ny_strbuf_appendf(ny_strbuf_t *b, const char *fmt, ...) {
+  va_list ap;
+  va_start(ap, fmt);
+  bool ok = ny_strbuf_vappendf(b, fmt, ap);
+  va_end(ap);
+  return ok;
 }
 
 static inline bool ny_strbuf_json_str(ny_strbuf_t *b, const char *s) {
@@ -110,37 +118,10 @@ static inline bool ny_strbuf_json_str(ny_strbuf_t *b, const char *s) {
   if (!ny_strbuf_append_c(b, '"'))
     return false;
   for (const unsigned char *p = (const unsigned char *)s; *p; ++p) {
-    switch (*p) {
-    case '"':
-      if (!ny_strbuf_append(b, "\\\""))
-        return false;
-      break;
-    case '\\':
-      if (!ny_strbuf_append(b, "\\\\"))
-        return false;
-      break;
-    case '\n':
-      if (!ny_strbuf_append(b, "\\n"))
-        return false;
-      break;
-    case '\r':
-      if (!ny_strbuf_append(b, "\\r"))
-        return false;
-      break;
-    case '\t':
-      if (!ny_strbuf_append(b, "\\t"))
-        return false;
-      break;
-    default:
-      if (*p < 0x20) {
-        if (!ny_strbuf_appendf(b, "\\u%04x", (unsigned)*p))
-          return false;
-      } else {
-        if (!ny_strbuf_append_c(b, (char)*p))
-          return false;
-      }
-      break;
-    }
+    char escaped[7];
+    size_t n = ny_json_escape_byte(*p, escaped);
+    if (!ny_strbuf_append_n(b, escaped, n))
+      return false;
   }
   return ny_strbuf_append_c(b, '"');
 }

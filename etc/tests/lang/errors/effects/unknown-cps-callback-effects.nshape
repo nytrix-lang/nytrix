@@ -1,0 +1,22 @@
+shape unknown_cps_callback_effects_remain_unknown {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "unknown", "callback", "cps"]
+  template ny-test-case
+  flags_matrix "--effect-require-known"
+  expect compile_fail
+  expect_message "effect policy violation in 'std.project.invoke': effects are unknown"
+  source ny <<'NY'
+use core.cps as cps
+module std.project(
+  invoke
+)
+
+fn invoke(fnptr transform) any {
+  def computation = cps.cps_map(cps.cps_return(1), transform)
+  cps.cps_run(computation)
+}
+
+print("unreachable")
+NY
+}

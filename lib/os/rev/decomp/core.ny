@@ -1,6 +1,6 @@
 ;; Keywords: decompiler elf disassembly lifting analysis pseudocode
 ;; Public decompiler facade: ELF inspection, lifting, analysis, and Ny pseudocode.
-module std.os.rev.decomp(
+module core.os.rev.decomp(
    sleep, msleep,
    tool_status, plan, analyze, load, elf_header, sections, section, section_bytes,
    segments, symbols, relocations, import_sites, data_refs, xrefs, xrefs_to, globals, search, crackme_targets, crackme_solve, crackme_solve_all, crackme_report, with_renames, with_notes, notes, note_at, functions, imports, strings, entry, arch, arch_profile, disassemble,
@@ -12,29 +12,29 @@ module std.os.rev.decomp(
    demangle, workspace, report,
 )
 
-use std.core
-use std.core.str as str
-use std.os as os
-use std.os.path as path
-use std.os.time as ostime
-use std.os.disasm as dasm
-use std.math.smt as smt
-use std.os.rev.strings as rev_strings
-use std.os.rev.decomp.tools (tool_status, demangle)
-use std.os.rev.decomp.elf_types (machine, file_type, symbol_bind, symbol_type, segment_perms)
-use std.os.rev.decomp.bytes (_u16, _u32, _u64, _slice, _slice_list, _cstring)
-use std.os.rev.decomp.source (_read, _source_data, _looks_path)
-use std.os.rev.decomp.collections (_list_has, _append_unique, _append_all_unique, _symbols_intersect)
-use std.os.rev.decomp.cfg_sets (_set_intersection, _same_set, _list_without, _set_difference)
-use std.os.rev.decomp.symbols (_symbol_is_name_char, _symbol_token_ok, _symbols_from_text, _slice_symbol_aliases)
-use std.os.rev.decomp.annotations (_safe_name, _rename_map, _rename_name, _rename_addr, with_renames, _note_key, _note_record, with_notes, notes, note_at)
-use std.os.rev.decomp.graph (_cg_edge_key, _cg_add_edge, _cg_successors, _cg_predecessors, _cg_reaches, _cg_has_self_edge, _cg_components)
-use std.os.rev.decomp.text (_clean_outer_balanced_parens_wrap, _clean_balanced_delimiters, _clean_strip_outer_balanced_parens, _clean_strip_outer_parens, _clean_top_level_find, _clean_top_level_split, _clean_literal_int_value)
-use std.os.rev.decomp.arithmetic (_ny_infix_operator, _clean_paren, _clean_literal_zero, _clean_literal_one, _clean_same_expr_text, _clean_const_mul_expr, _clean_div_expr_parts, _clean_const_mul_text, _clean_add_scaled_expr, _clean_sub_mod_expr, _clean_mba_same_expr, _clean_mba_pair_expr, _clean_mba_const_mul_expr, _clean_mba_scaled_pair_expr, _clean_mba_pair_same_unordered, _clean_mba_pair_sum, _clean_mba_pair_xor, _clean_mba_xor_pair_expr, _clean_mba_add_expr, _clean_mba_sub_expr, _clean_mba_expr_once, _clean_simplify_mba_expr, _clean_binary_expr)
-use std.os.rev.decomp.render_text (_clean_token_char, _clean_replace_token, _clean_replace_token_code, _clean_apply_render_renames, _clean_normalize_rip_relative_data_symbols)
-use std.os.rev.decomp.structure (_clean_next_nonblank_index, _clean_compact_blank_lines, _clean_structure_report, _clean_balance_trailing_braces, _clean_switch_block_at, _clean_drop_repeated_switches)
-use std.os.rev.symbolic as sym
-use std.os.rev.decomp.elf (
+use core
+use core.str as str
+use core.os as os
+use core.os.path as path
+use core.os.time as ostime
+use core.os.disasm as dasm
+use core.math.smt as smt
+use core.os.rev.strings as rev_strings
+use core.os.rev.decomp.tools (tool_status, demangle)
+use core.os.rev.decomp.elf_types (machine, file_type, symbol_bind, symbol_type, segment_perms)
+use core.os.rev.decomp.bytes (_u16, _u32, _u64, _slice, _slice_list, _cstring)
+use core.os.rev.decomp.source (_read, _source_data, _looks_path)
+use core.os.rev.decomp.collections (_list_has, _append_unique, _append_all_unique, _symbols_intersect)
+use core.os.rev.decomp.cfg_sets (_set_intersection, _same_set, _list_without, _set_difference)
+use core.os.rev.decomp.symbols (_symbol_is_name_char, _symbol_token_ok, _symbols_from_text, _slice_symbol_aliases)
+use core.os.rev.decomp.annotations (_safe_name, _rename_map, _rename_name, _rename_addr, with_renames, _note_key, _note_record, with_notes, notes, note_at)
+use core.os.rev.decomp.graph (_cg_edge_key, _cg_add_edge, _cg_successors, _cg_predecessors, _cg_reaches, _cg_has_self_edge, _cg_components)
+use core.os.rev.decomp.text (_clean_outer_balanced_parens_wrap, _clean_balanced_delimiters, _clean_strip_outer_balanced_parens, _clean_strip_outer_parens, _clean_top_level_find, _clean_top_level_split, _clean_literal_int_value)
+use core.os.rev.decomp.arithmetic (_ny_infix_operator, _clean_paren, _clean_literal_zero, _clean_literal_one, _clean_same_expr_text, _clean_const_mul_expr, _clean_div_expr_parts, _clean_const_mul_text, _clean_add_scaled_expr, _clean_sub_mod_expr, _clean_mba_same_expr, _clean_mba_pair_expr, _clean_mba_const_mul_expr, _clean_mba_scaled_pair_expr, _clean_mba_pair_same_unordered, _clean_mba_pair_sum, _clean_mba_pair_xor, _clean_mba_xor_pair_expr, _clean_mba_add_expr, _clean_mba_sub_expr, _clean_mba_expr_once, _clean_simplify_mba_expr, _clean_binary_expr)
+use core.os.rev.decomp.render_text (_clean_token_char, _clean_replace_token, _clean_replace_token_code, _clean_apply_render_renames, _clean_normalize_rip_relative_data_symbols)
+use core.os.rev.decomp.structure (_clean_next_nonblank_index, _clean_compact_blank_lines, _clean_structure_report, _clean_balance_trailing_braces, _clean_switch_block_at, _clean_drop_repeated_switches)
+use core.os.rev.symbolic as sym
+use core.os.rev.decomp.elf (
    analyze, arch, arch_profile, disassemble, disassemble_function, elf_header,
    entry, executable_sections, flirt_apply, flirt_match, flirt_signature,
    flirt_signatures, function_at, function_extent, function_ranges, functions,
@@ -42,12 +42,12 @@ use std.os.rev.decomp.elf (
    section_bytes, sections, segments, sleep, strings, symbols,
 )
 
-use std.os.rev.decomp.cfg (basic_blocks, cfg, cfg_control_dependence, cfg_dominators, cfg_loops, cfg_postdominators, jump_tables)
-use std.os.rev.decomp.abi
-use std.os.rev.decomp.smt_proofs
-use std.os.rev.decomp.syscalls
-use std.os.rev.decomp.type_library
-use std.os.rev.decomp.summary
+use core.os.rev.decomp.cfg (basic_blocks, cfg, cfg_control_dependence, cfg_dominators, cfg_loops, cfg_postdominators, jump_tables)
+use core.os.rev.decomp.abi
+use core.os.rev.decomp.smt_proofs
+use core.os.rev.decomp.syscalls
+use core.os.rev.decomp.type_library
+use core.os.rev.decomp.summary
 
 fn arch(any source) str {
    "Return the recovered binary architecture rather than the host architecture."
@@ -63,8 +63,8 @@ fn _hex_operand_to_addr(str ops) int {
    dasm.target_address(ops)
 }
 
-fn _row_target(str arch_name, list row) int {
-   dasm.target_address(row, arch_name)
+fn _row_target(str arch_name, int row_base, str operands) int {
+   dasm.target_address(operands, arch_name, row_base)
 }
 
 fn _rip_memory_target(list row) int {
@@ -114,7 +114,7 @@ fn _call_name_for_row(dict bin, list row) str {
       if rn.len > 0 { return rn }
       return "call_indirect"
    }
-   def caddr = _row_target(arch(bin), row)
+   def caddr = _row_target(arch(bin), int(row[0]), row[2])
    if caddr != 0 {
       def iname = _import_name_for_addr(bin, caddr)
       if iname.len > 0 { return iname }
@@ -1039,7 +1039,7 @@ fn call_targets(any source, any target=0, int max_bytes=512) list {
                out = out.append({"from": r[0], "operand": r[2], "target": mem, "name": name, "kind": "import_indirect"})
             }
          } else {
-            def addr = _row_target(a, r)
+            def addr = _row_target(a, int(r[0]), r[2])
             if addr != 0 {
                def iname = _import_name_for_addr(bin, addr)
                out = out.append({"from": r[0], "operand": r[2], "target": addr, "name": iname.len > 0 ? iname : _name_for_addr(bin, addr), "kind": iname.len > 0 ? "import_plt" : "direct"})
@@ -1440,13 +1440,13 @@ fn _lift_row(dict bin, list r) dict {
       "target": 0, "target_name": "", "effect": ""}
    if ref.len > 0 { row = row.set("ref", ref).set("ref_kind", ref.get("kind", "")).set("ref_name", ref.get("name", "")).set("ref_target", ref.get("target", 0)) }
    if op == "call" {
-      def caddr = str.find(ops, "[") >= 0 ? 0 : _row_target(a, r)
+      def caddr = str.find(ops, "[") >= 0 ? 0 : _row_target(a, int(r[0]), r[2])
       def mem = str.find(ops, "[") >= 0 ? _rip_memory_target(r) : 0
       row = row.set("target", caddr).set("mem_target", mem).set("target_name", _call_name_for_row(bin, r)).set("effect", "call")
    } elif op == "syscall" {
       row = row.set("effect", _syscall_lift_effect(fam))
    } elif op == "branch" {
-      def baddr = str.find(ops, "[") >= 0 ? 0 : _row_target(a, r)
+      def baddr = str.find(ops, "[") >= 0 ? 0 : _row_target(a, int(r[0]), r[2])
       def cond = _branch_condition(a, m)
       row = row.set("target", baddr).set("condition", cond).set("effect", cond == "always" ? (baddr == 0 ? "jump_indirect" : "jump") : "branch")
       if baddr == 0 && cond == "always" {
@@ -3425,7 +3425,7 @@ fn _labels_for_rows(list rows, str a="x86_64") dict {
    while i < rows.len {
       def r = rows[i]
       if dasm.instruction_kind(a, r[1]) == "branch" {
-         def t = str.find(r[2], "[") >= 0 ? 0 : _row_target(a, r)
+         def t = str.find(r[2], "[") >= 0 ? 0 : _row_target(a, int(r[0]), r[2])
          if t >= first && t < last { m = m.set(to_str(t), _label_name(t)) }
       }
       i += 1
@@ -8173,16 +8173,23 @@ fn _state_dispatcher_window(list rows, int switch_idx) list {
    out
 }
 
-fn _state_target_case(list entries, int target) int {
+fn _state_target_map(any entries) dict {
+   mut targets = dict()
    mut i = 0
    while i < entries.len {
-      if int(entries[i].get("target", 0)) == target { return int(entries[i].get("index", i)) }
+      def entry = entries[i]
+      def target = to_str(int(entry.get("target", 0)))
+      if !targets.contains(target) { targets = targets.set(target, int(entry.get("index", i))) }
       i += 1
    }
-   -1
+   targets
 }
 
-fn _state_entry_indices(list rows, list entries) list {
+fn _state_target_case(dict targets, int target) int {
+   targets.get(to_str(target), -1)
+}
+
+fn _state_entry_indices(list rows, any entries) list {
    mut out = []
    mut i = 0
    while i < entries.len {
@@ -8264,7 +8271,7 @@ fn _state_transition_unique(list xs, dict rec) list {
    xs
 }
 
-fn _state_case_model(dict bin, list rows, dict swrow, dict entry, list entries, list entry_indices, list dispatcher_addrs) dict {
+fn _state_case_model(dict bin, list rows, dict swrow, dict entry, dict target_states, list entry_indices, list dispatcher_addrs) dict {
    def family = swrow.get("family", _rows_family(rows))
    def selector = _switch_selector_name(swrow)
    def aliases = _state_selector_aliases(family, selector)
@@ -8313,7 +8320,7 @@ fn _state_case_model(dict bin, list rows, dict swrow, dict entry, list entries, 
                      "site": int(r.get("addr", 0))})
             }
          } elif to > 0 {
-            def target_state = _state_target_case(entries, to)
+            def target_state = _state_target_case(target_states, to)
             if target_state >= 0 {
                transitions = _state_transition_unique(transitions, {"kind": "case_jump",
                      "from_state": state, "to_state": target_state, "guard": guard,
@@ -8326,7 +8333,7 @@ fn _state_case_model(dict bin, list rows, dict swrow, dict entry, list entries, 
       i += 1
    }
    if transitions.len == 0 && terminals.len == 0 && end < rows.len {
-      def fall_state = _state_target_case(entries, int(rows[end].get("addr", 0)))
+      def fall_state = _state_target_case(target_states, int(rows[end].get("addr", 0)))
       if fall_state >= 0 {
          transitions = transitions.append({"kind": "fallthrough", "from_state": state,
                "to_state": fall_state, "guard": "", "site": int(rows[end - 1].get("addr", 0))})
@@ -8375,11 +8382,12 @@ fn _state_machines_from_rows(dict bin, list rows) list {
          def entries = jt.get("entries", [])
          if entries.len >= 2 {
             def entry_indices = _state_entry_indices(rows, entries)
+            def target_states = _state_target_map(entries)
             def dispatcher_addrs = _state_dispatcher_window(rows, i)
             mut cases = []
             mut ei = 0
             while ei < entries.len {
-               def c = _state_case_model(bin, rows, r, entries[ei], entries, entry_indices, dispatcher_addrs)
+               def c = _state_case_model(bin, rows, r, entries[ei], target_states, entry_indices, dispatcher_addrs)
                if c.len > 0 { cases = cases.append(c) }
                ei += 1
             }
@@ -9881,8 +9889,8 @@ fn _clean_table_mismatch_text(dict bin, dict sig, list rows, int idx, str pad) s
    b = str.builder_append(b, pad + "perm = " + perm_expr + "\n")
    b = str.builder_append(b, pad + "expected = " + expected0 + "\n")
    b = str.builder_append(b, pad + idx_name + " = " + idx_name + " + 1\n")
-   b = str.builder_append(b, pad + "expected = expected ^^ " + key_expr + "\n")
-   b = str.builder_append(b, pad + acc_name + " = " + acc_name + " | (" + input_expr + " ^^ expected)\n")
+   b = str.builder_append(b, pad + "expected = expected ^ " + key_expr + "\n")
+   b = str.builder_append(b, pad + acc_name + " = " + acc_name + " | (" + input_expr + " ^ expected)\n")
    def out = str.builder_to_str(b)
    str.builder_free(b)
    out
@@ -11303,7 +11311,7 @@ fn _clean_test_expr(str lhs, str rhs, str cond, str op) str {
 
 fn _clean_xor_one_base(str expr) str {
    def e = _clean_strip_outer_parens(expr)
-   def p = str.find(e, " ^^ ")
+   def p = str.find(e, " ^ ")
    if p < 0 { return "" }
    def left = str.strip(slice(e, 0, p, 1))
    def right = str.strip(slice(e, p + 4, e.len, 1))
@@ -11618,7 +11626,7 @@ fn _clean_condition_operand(str expr) str {
    def e = str.strip(expr)
    if (str.find(e, " & ") >= 0 || str.find(e, " | ") >= 0 ||
       str.find(e, " << ") >= 0 || str.find(e, " >> ") >= 0 ||
-      str.find(e, " ^^ ") >= 0){ return _clean_paren(e) }
+      str.find(e, " ^ ") >= 0){ return _clean_paren(e) }
    e
 }
 
@@ -14935,7 +14943,7 @@ fn _clean_parenthesize_mixed_bitwise_assigns(str text) str {
          if p > 0 {
             def left = str.strip(slice(rhs, 0, p, 1))
             def right = str.strip(slice(rhs, p + 3, rhs.len, 1))
-            if _clean_top_level_find(right, " ^^ ") > 0 && !_clean_outer_balanced_parens_wrap(right) {
+            if _clean_top_level_find(right, " ^ ") > 0 && !_clean_outer_balanced_parens_wrap(right) {
                b = str.builder_append(b, _clean_line_indent(lines[i]) + parts.get("lhs", "") +
                   " = " + left + " | (" + right + ")\n")
                changed = true
@@ -14980,7 +14988,7 @@ fn _clean_stack_canary_condition(str expr0) str {
       elif lv.get("ok", false) && int(lv.get("value", 0)) == 0 { xor_expr = right }
       if xor_expr.len > 0 {
          def x = _clean_strip_outer_parens(xor_expr)
-         def xp = _clean_top_level_find(x, " ^^ ")
+         def xp = _clean_top_level_find(x, " ^ ")
          if xp > 0 {
             def xl = str.strip(slice(x, 0, xp, 1))
             def xr = str.strip(slice(x, xp + 4, x.len, 1))
@@ -15037,10 +15045,10 @@ fn _clean_stack_canary_bare_xor_assignment(str line0) bool {
    def parts = _clean_rendered_assignment_parts(line0)
    if parts.len == 0 || !_clean_rendered_value_temp_reg(parts.get("lhs", "")) { return false }
    def rhs = _clean_strip_outer_parens(parts.get("rhs", ""))
-   def p = _clean_top_level_find(rhs, " ^^ ")
+   def p = _clean_top_level_find(rhs, " ^ ")
    if p < 0 { return false }
    def left = str.strip(slice(rhs, 0, p, 1))
-   def right = str.strip(slice(rhs, p + 4, rhs.len, 1))
+   def right = str.strip(slice(rhs, p + 3, rhs.len, 1))
    def lhs_aliases = _slice_symbol_aliases(parts.get("lhs", ""))
    if (left == "mem_fs(0x28)" && _clean_rendered_value_temp_reg(right) &&
       _symbols_intersect(_slice_symbol_aliases(right), lhs_aliases)){
@@ -17785,7 +17793,7 @@ fn _clean_inline_condition_copy_candidate(str lhs, str rhs0) bool {
    if (str.find(rhs, " + ") >= 0 || str.find(rhs, " - ") >= 0 ||
       str.find(rhs, " * ") >= 0 || str.find(rhs, " / ") >= 0 ||
       str.find(rhs, " % ") >= 0 || str.find(rhs, " & ") >= 0 ||
-      str.find(rhs, " | ") >= 0 || str.find(rhs, " ^^ ") >= 0 ||
+      str.find(rhs, " | ") >= 0 || str.find(rhs, " ^ ") >= 0 ||
       str.find(rhs, "<<") >= 0 || str.find(rhs, ">>") >= 0 ||
       str.find(rhs, "==") >= 0 || str.find(rhs, "!=") >= 0 ||
       str.find(rhs, " <= ") >= 0 || str.find(rhs, " >= ") >= 0 ||
@@ -18102,13 +18110,13 @@ fn _clean_eval_const_binary(str op, int left, int right) dict {
    }
    if op == " & " { return {"ok": true, "value": left & right} }
    if op == " | " { return {"ok": true, "value": left | right} }
-   if op == " ^^ " { return {"ok": true, "value": left ^^ right} }
+   if op == " ^ " { return {"ok": true, "value": left ^ right} }
    {"ok": false}
 }
 
 fn _clean_fold_local_const_rhs(str lhs, str rhs0, int known) dict {
    def rhs = _clean_strip_outer_parens(rhs0)
-   def ops = [" ^^ ", " << ", " >> ", " + ", " - ", " * ", " / ", " % ", " & ", " | "]
+   def ops = [" ^ ", " << ", " >> ", " + ", " - ", " * ", " / ", " % ", " & ", " | "]
    mut i = 0
    while i < ops.len {
       def op = ops[i]
@@ -18122,7 +18130,7 @@ fn _clean_fold_local_const_rhs(str lhs, str rhs0, int known) dict {
          }
          def lv = _clean_literal_int_value(left)
          if (_clean_same_expr_text(right, lhs) && lv.get("ok", false) &&
-            (op == " + " || op == " * " || op == " & " || op == " | " || op == " ^^ ")){
+            (op == " + " || op == " * " || op == " & " || op == " | " || op == " ^ ")){
             return _clean_eval_const_binary(op, int(lv.get("value", 0)), known)
          }
       }
@@ -18180,7 +18188,7 @@ fn _clean_fold_const_expr_value(str expr0) dict {
    def expr = _clean_strip_outer_parens(expr0)
    def lit = _clean_literal_int_value(expr)
    if lit.get("ok", false) { return lit }
-   def ops = [" | ", " ^^ ", " & ", " << ", " >> ", " + ", " - ", " * ", " / ", " % "]
+   def ops = [" | ", " ^ ", " & ", " << ", " >> ", " + ", " - ", " * ", " / ", " % "]
    mut i = 0
    while i < ops.len {
       def op = ops[i]
@@ -18212,7 +18220,7 @@ fn _clean_fold_const_expr_text(str expr0) str {
       }
       i += 1
    }
-   def ops = [" | ", " ^^ ", " & ", " << ", " >> ", " + ", " - ", " * ", " / ", " % "]
+   def ops = [" | ", " ^ ", " & ", " << ", " >> ", " + ", " - ", " * ", " / ", " % "]
    i = 0
    while i < ops.len {
       def op = ops[i]
@@ -19062,7 +19070,7 @@ fn _clean_rendered_no_compare_ops(str rhs) bool {
 fn _clean_rendered_binary_expr_parts(str rhs0) dict {
    def rhs = str.strip(rhs0)
    if rhs.len == 0 || !_clean_rendered_no_compare_ops(rhs) { return dict() }
-   def ops = [" & ", " | ", " ^^ ", " + ", " - ", " * ", " / ", " % ", " << ", " >> "]
+   def ops = [" & ", " | ", " ^ ", " + ", " - ", " * ", " / ", " % ", " << ", " >> "]
    mut i = 0
    while i < ops.len {
       def op = ops[i]
@@ -19101,7 +19109,7 @@ fn _clean_self_condition_arith_expr(str lhs0, str base_rhs0, str arith_rhs0) str
    def r = parts.get("rhs", "")
    def op = parts.get("op", "")
    if l == lhs { return "(" + base + op + r + ")" }
-   if r == lhs && (op == " & " || op == " | " || op == " ^^ " || op == " + " || op == " * ") {
+   if r == lhs && (op == " & " || op == " | " || op == " ^ " || op == " + " || op == " * ") {
       return "(" + l + op + base + ")"
    }
    if r == lhs && (op == " - " || op == " / " || op == " % ") {
@@ -20336,13 +20344,44 @@ fn _clean_collapse_staged_byte_sum_loop_at(list lines, int i) dict {
    if str.strip(lines[i + 11]) != "}" { return dict() }
    def len_reg = len_copy.get("lhs", "")
    def pad = _clean_line_indent(lines[i])
-   def body = pad + base_reg + " = " + base_rhs + "\n" +
-   pad + len_reg + " = 0\n" +
-   pad + acc_reg + " = 0\n" +
-   pad + "while " + base_reg + "[" + len_reg + "] != 0{\n" +
-   pad + "  " + acc_reg + " = " + acc_reg + " + sext8(" + base_reg + "[" + len_reg + "])\n" +
-   pad + "  " + len_reg + " = " + len_reg + " + 1\n" +
-   pad + "}\n"
+   mut body_builder = str.Builder(256 + pad.len * 8 + base_rhs.len + base_reg.len * 2 + len_reg.len * 4 + acc_reg.len * 3)
+   body_builder = str.builder_append(body_builder, pad)
+   body_builder = str.builder_append(body_builder, base_reg)
+   body_builder = str.builder_append(body_builder, " = ")
+   body_builder = str.builder_append(body_builder, base_rhs)
+   body_builder = str.builder_append(body_builder, "\n")
+   body_builder = str.builder_append(body_builder, pad)
+   body_builder = str.builder_append(body_builder, len_reg)
+   body_builder = str.builder_append(body_builder, " = 0\n")
+   body_builder = str.builder_append(body_builder, pad)
+   body_builder = str.builder_append(body_builder, acc_reg)
+   body_builder = str.builder_append(body_builder, " = 0\n")
+   body_builder = str.builder_append(body_builder, pad)
+   body_builder = str.builder_append(body_builder, "while ")
+   body_builder = str.builder_append(body_builder, base_reg)
+   body_builder = str.builder_append(body_builder, "[")
+   body_builder = str.builder_append(body_builder, len_reg)
+   body_builder = str.builder_append(body_builder, "] != 0{\n")
+   body_builder = str.builder_append(body_builder, pad)
+   body_builder = str.builder_append(body_builder, "  ")
+   body_builder = str.builder_append(body_builder, acc_reg)
+   body_builder = str.builder_append(body_builder, " = ")
+   body_builder = str.builder_append(body_builder, acc_reg)
+   body_builder = str.builder_append(body_builder, " + sext8(")
+   body_builder = str.builder_append(body_builder, base_reg)
+   body_builder = str.builder_append(body_builder, "[")
+   body_builder = str.builder_append(body_builder, len_reg)
+   body_builder = str.builder_append(body_builder, "])\n")
+   body_builder = str.builder_append(body_builder, pad)
+   body_builder = str.builder_append(body_builder, "  ")
+   body_builder = str.builder_append(body_builder, len_reg)
+   body_builder = str.builder_append(body_builder, " = ")
+   body_builder = str.builder_append(body_builder, len_reg)
+   body_builder = str.builder_append(body_builder, " + 1\n")
+   body_builder = str.builder_append(body_builder, pad)
+   body_builder = str.builder_append(body_builder, "}\n")
+   def body = str.builder_to_str(body_builder)
+   str.builder_free(body_builder)
    {"ok": true, "text": body, "skip_to": i + 12}
 }
 
@@ -21272,8 +21311,8 @@ fn _clean_collapse_indexed_compare_return_loops(str text) str {
 
 fn _clean_indexed_data_byte_rotate_verify(str text) str {
    if (str.find(text, "while (arg0[local_4] != 0)") < 0 ||
-      str.find(text, "local_5 = local_4 ^^ arg0[local_4]") < 0 ||
-      str.find(text, "eax = eax ^^ 9") < 0 ||
+      str.find(text, "local_5 = local_4 ^ arg0[local_4]") < 0 ||
+      str.find(text, "eax = eax ^ 9") < 0 ||
       str.find(text, "eax = eax & 3") < 0 ||
       str.find(text, "local_5 = local_5 + 8") < 0 ||
       str.find(text, "return local_4 == ") < 0){
@@ -21304,8 +21343,8 @@ fn _clean_indexed_data_byte_rotate_verify(str text) str {
    "fn " + fn_name + "(input){\n" +
    "  i = 0\n" +
    "  while input[i] != 0{\n" +
-   "    b = i ^^ input[i]\n" +
-   "    b = rol(b, (i ^^ 9) & 3) + 8\n" +
+   "    b = i ^ input[i]\n" +
+   "    b = rol(b, (i ^ 9) & 3) + 8\n" +
    "    if " + table + "[i] != b{\n" +
    "      return 0\n" +
    "    }\n" +
@@ -21380,30 +21419,20 @@ fn _clean_collapse_cadet_main(str text, any opts=dict()) str {
    def prompt = _clean_data_label_or_self(opts, "data_80489e0")
    def nope = _clean_data_label_or_self(opts, "data_8048a08")
    def yes = _clean_data_label_or_self(opts, "data_8048a2a")
-   "fn main(){\n" +
-   "  if transmit_all(1, " + welcome + ", 0x1f) != 0{\n" +
-   "    _terminate(0)\n" +
-   "  }\n" +
-   "  while true{\n" +
-   "    if transmit_all(1, " + prompt + ", 0x25) != 0{\n" +
-   "      _terminate(0)\n" +
-   "    }\n" +
-   "    result = check()\n" +
-   "    if result == -1{\n" +
-   "      break\n" +
-   "    }\n" +
-   "    if result == 0{\n" +
-   "      if transmit_all(1, " + nope + ", 0x21) != 0{\n" +
-   "        _terminate(0)\n" +
-   "      }\n" +
-   "    } else {\n" +
-   "      if transmit_all(1, " + yes + ", 0x1d) != 0{\n" +
-   "        _terminate(0)\n" +
-   "      }\n" +
-   "    }\n" +
-   "  }\n" +
-   "  return 0\n" +
-   "}\n"
+   mut body = str.Builder(512 + welcome.len + prompt.len + nope.len + yes.len)
+   body = str.builder_append(body, "fn main(){\n")
+   body = str.builder_append(body, "  if transmit_all(1, ")
+   body = str.builder_append(body, welcome)
+   body = str.builder_append(body, ", 0x1f) != 0{\n    _terminate(0)\n  }\n  while true{\n    if transmit_all(1, ")
+   body = str.builder_append(body, prompt)
+   body = str.builder_append(body, ", 0x25) != 0{\n      _terminate(0)\n    }\n    result = check()\n    if result == -1{\n      break\n    }\n    if result == 0{\n      if transmit_all(1, ")
+   body = str.builder_append(body, nope)
+   body = str.builder_append(body, ", 0x21) != 0{\n        _terminate(0)\n      }\n    } else {\n      if transmit_all(1, ")
+   body = str.builder_append(body, yes)
+   body = str.builder_append(body, ", 0x1d) != 0{\n        _terminate(0)\n      }\n    }\n  }\n  return 0\n}\n")
+   def out = str.builder_to_str(body)
+   str.builder_free(body)
+   out
 }
 
 fn _clean_collapse_mma_simplehash_main(str text) str {
@@ -23102,17 +23131,13 @@ fn _clean_byte_castless_value(str expr0) str {
 
 fn _clean_low_byte_expr(str expr0) str {
    def expr = _clean_strip_outer_parens(expr0)
-   mut p = _clean_top_level_find(expr, " ^^ ")
-   mut plen = 4
-   if p < 0 {
-      p = _clean_top_level_find(expr, " ^ ")
-      plen = 3
-   }
+   def p = _clean_top_level_find(expr, " ^ ")
+   def plen = 3
    if p < 0 { return "" }
    def left = _clean_byte_castless_value(slice(expr, 0, p, 1))
    def right = _clean_byte_castless_value(slice(expr, p + plen, expr.len, 1))
    if left.len == 0 || right.len == 0 { return "" }
-   left + " ^^ " + right
+   left + " ^ " + right
 }
 
 fn _clean_byte_at_low_expr(str rhs0) str {
@@ -23185,7 +23210,7 @@ fn _clean_simplify_rendered_byte_casts(str text) str {
          if end > 0 {
             def inner = str.strip(slice(text, i + 6, end - 1, 1))
             if (_clean_rendered_byteish_expr(inner) &&
-               str.find(inner, " ^^ ") < 0 && str.find(inner, " & ") < 0 &&
+               str.find(inner, " ^ ") < 0 && str.find(inner, " & ") < 0 &&
                str.find(inner, " | ") < 0 && str.find(inner, " << ") < 0 &&
                str.find(inner, " >> ") < 0){
                b = str.builder_append(b, inner)
@@ -23200,7 +23225,7 @@ fn _clean_simplify_rendered_byte_casts(str text) str {
          if end > 0 {
             def inner = _clean_strip_outer_balanced_parens(str.strip(slice(text, i + 5, end - 1, 1)))
             if (_clean_rendered_byteish_expr(inner) &&
-               str.find(inner, " ^^ ") < 0 && str.find(inner, " & ") < 0 &&
+               str.find(inner, " ^ ") < 0 && str.find(inner, " & ") < 0 &&
                str.find(inner, " | ") < 0 && str.find(inner, " << ") < 0 &&
                str.find(inner, " >> ") < 0){
                b = str.builder_append(b, "sext8(" + inner + ")")

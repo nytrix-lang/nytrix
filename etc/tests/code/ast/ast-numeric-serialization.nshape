@@ -1,0 +1,40 @@
+shape ast_numeric_serialization {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "ast", "serialization", "float", "int"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.compiler.ast (parse_ast, parse_ast_snapshot)
+
+def source = "def precise = 1.2345678901234567\ndef tiny = 0.00000000012345678901234567\ndef wide = 9223372036854775807"
+def raw = __parse_ast(source)
+assert(raw.contains("1.2345678901234567"), "AST preserves binary64 precision")
+assert(raw.contains("1.2345678901234568e-10"), "AST preserves small nonzero floats")
+assert(raw.contains("9223372036854775807"), "AST preserves the full signed integer width")
+free(raw)
+def tree = parse_ast(source)
+def precise = tree.get(0).get("exprs").get(0)
+def tiny = tree.get(1).get("exprs").get(0)
+assert(precise.get("kind") == "float" && precise.get("value") > 1.2345678901 &&
+       precise.get("value") < 1.2345678902, "decoded AST retains precise float values")
+assert(tiny.get("value") > 0.00000000012345678 &&
+       tiny.get("value") < 0.00000000012345680, "decoded AST does not round tiny values to zero")
+def snapshot = parse_ast_snapshot(source)
+assert(snapshot.get("nodes").get(0).get("exprs").get(0).get("value") ==
+       precise.get("value"), "versioned snapshots use the same precise literal serializer")
+def wide_source = "def big = 123456789012345678901234567890\ndef bits = 0xffffffffffffffff"
+def wide_nodes = parse_ast_snapshot(wide_source).get("nodes")
+def big = wide_nodes.get(0).get("exprs").get(0)
+def bits = wide_nodes.get(1).get("exprs").get(0)
+assert(big.get("integer_outside_i64") && is_nil(big.get("value")) &&
+       big.get("numeric_text") == "123456789012345678901234567890",
+       "AST exposes exact oversized decimal text instead of a saturated integer")
+assert(bits.get("integer_outside_i64") && is_nil(bits.get("value")) &&
+       bits.get("numeric_text") == "0xffffffffffffffff",
+       "AST preserves the radix of integers above the signed range")
+assert(parse_ast(wide_source).get(0).get("exprs").get(0).get("numeric_text") ==
+       big.get("numeric_text"), "legacy AST serialization also preserves oversized integers")
+NY
+}

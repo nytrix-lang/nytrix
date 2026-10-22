@@ -5,11 +5,11 @@
 ;; - https://people.csail.mit.edu/rivest/Rsapaper.pdf
 ;; - https://crypto.stanford.edu/~dabo/pubs/papers/RSA-survey.pdf
 ;; References:
-;; - std.math.crypto.rsa
-;; - std.math.crypto
-module std.math.crypto.rsa.multiprime(multiprime_phi, multiprime_decrypt, repeated_prime_factor, repeated_prime_phi)
-use std.core
-use std.math.nt
+;; - core.math.crypto.rsa
+;; - core.math.crypto
+module core.math.crypto.rsa.multiprime(multiprime_phi, multiprime_decrypt, repeated_prime_factor, repeated_prime_phi)
+use core
+use core.math.nt
 
 fn multiprime_phi(list primes) any {
    "Compute Euler's totient for multi-prime RSA where N = p1 * p2 * ... * pk.
@@ -89,5 +89,5 @@ fn repeated_prime_phi(any p, int r) any {
    assert(pp != nil, "repeated_prime_factor")
    assert(pp.get(0) == Z(13) && pp.get(1) == 3, "repeated_prime_factor result")
    assert(repeated_prime_phi(Z(13), 3) == Z(13) * Z(13) * Z(12), "repeated_prime_phi")
-   print("✓ std.math.crypto.rsa.multiprime self-test passed")
+   print("✓ core.math.crypto.rsa.multiprime self-test passed")
 }

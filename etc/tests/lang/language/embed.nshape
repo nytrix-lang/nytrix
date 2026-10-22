@@ -1,0 +1,26 @@
+shape test_embed {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  expect compile_and_run
+  flags "--strict-types"
+  source ny <<'NY'
+use core.str
+use core.reflect
+
+;; Perform the embed on itself to avoid external fixture dependencies
+def RES = "embedded: " + embed("etc/tests/lang/language/embed.nshape")
+
+if RES.len > 0 && RES.contains("embed test passed") {
+   print("✓ embed test passed")
+} else {
+   print("✗ embed test failed")
+   if RES.len == 0 {
+      print("  Error: RES is empty")
+   } else {
+      print("  Error: 'embed test passed' not found in RES")
+   }
+}
+NY
+}

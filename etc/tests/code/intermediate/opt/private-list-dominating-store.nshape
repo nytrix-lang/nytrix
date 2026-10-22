@@ -1,0 +1,23 @@
+shape optcheck_private_list_dominating_store {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle optcheck list scalar-replacement]
+  template ny-test-case
+  flags "-O3 --native-backend x86_64 --native-oracle-per-pass --native-result-oracle=4057 --nyir-verify"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+fn count(int depth) int {
+   def node = [depth, depth + 1]
+   if depth <= 0 { return node[0] + node[1] }
+   1 + count(depth - 1) + count(depth - 1)
+}
+mut int depth = 4
+mut int checksum = 0
+while depth <= 10 {
+   checksum += count(depth)
+   depth += 1
+}
+checksum
+NY
+}

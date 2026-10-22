@@ -3,13 +3,13 @@
 ;; Reference:
 ;; - https://people.csail.mit.edu/rivest/Rsapaper.pdf
 ;; References:
-;; - std.math.crypto.rsa
-;; - std.math.crypto
-module std.math.crypto.rsa.key(rsa_public_pem_values, rsa_public_pkcs1_der, rsa_public_pkcs1_pem, rsa_private_pem_values, rsa_openssh_public_values)
-use std.core
-use std.math.crypto.encoding.encoding (asn1_parse, asn1_get_integer, asn1_get_sequence, pem_decode)
-use std.math.nt
-use std.core.str
+;; - core.math.crypto.rsa
+;; - core.math.crypto
+module core.math.crypto.rsa.key(rsa_public_pem_values, rsa_public_pkcs1_der, rsa_public_pkcs1_pem, rsa_private_pem_values, rsa_openssh_public_values)
+use core
+use core.math.crypto.encoding.encoding (asn1_parse, asn1_get_integer, asn1_get_sequence, pem_decode)
+use core.math.nt
+use core.str
 
 fn _asn1_int_at(list seq, int idx) any {
    asn1_get_integer(seq[idx])
@@ -17,12 +17,12 @@ fn _asn1_int_at(list seq, int idx) any {
 
 fn _der_len(any n) list {
    if n < 128 { return [n] }
-   def b = Z(n).bytes
+   def b = bigint_to_bytes(Z(n))
    [128 | b.len].concat(b)
 }
 
 fn _der_int(any x) list {
-   mut b = Z(x).bytes
+   mut b = bigint_to_bytes(Z(x))
    if b.len == 0 { b = [0] }
    if (b[0] & 128) != 0 { b = [0].concat(b) }
    [2].concat(_der_len(b.len)).concat(b)

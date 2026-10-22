@@ -1,0 +1,24 @@
+shape imported_call_ignores_unrelated_same_leaf_arity {
+  family "runtime/modules/use"
+  generator "regression"
+  features ["ny", "test", "modules", "call", "arity", "identity"]
+  template ny-test-case
+  flags_matrix "-no-std --native --run; -no-std --native-backend=llvm --jit --jit-engine=mcjit; -no-std --native-backend=llvm --jit --jit-engine=orc; -no-std --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+module OneArgumentProvider(poll) {
+  fn poll(int value) int { return value + 100 }
+}
+module ThreeArgumentProvider(poll) {
+  fn poll(int first, int second, int third) int {
+    return first + second + third
+  }
+}
+module CallConsumer(run) {
+  use ThreeArgumentProvider (poll)
+  fn run() int { return poll(10, 20, 12) }
+}
+use CallConsumer (run)
+assert(run() == 42, "imported call resolves the matching same-leaf arity")
+NY
+}

@@ -1,18 +1,18 @@
 ;; Keywords: platform window backend cocoa macos joystick os ui input
 ;; Cocoa native window backend for macOS windows, input, monitors, and clipboard.
 ;; References:
-;; - std.os.ui.window.platform
-;; - std.os.ui.window
-;; - std.os.ui.window.consts
-module std.os.ui.window.platform.cocoa(available, get_backend_name, get_class, get_selector, shared_application, create_autorelease_pool, drain_autorelease_pool, set_activation_policy_regular, finish_launching, activate_ignoring_other_apps, install_app_delegate, get_monitors, get_primary_monitor, get_monitor_pos, get_monitor_workarea, get_monitor_physical_size, get_monitor_content_scale, get_monitor_name, get_video_mode, get_video_modes, get_gamma_ramp, set_gamma_ramp, current_event, next_event, wait_events, send_event, update_windows, run_app, stop_app, request_user_attention, post_event, get_window_monitor, set_window_monitor, get_key_state, get_mouse_button_state, get_key_name, get_cursor_pos, set_cursor_pos, create_cursor, create_standard_cursor, destroy_cursor, set_cursor, set_window_title, get_window_attrib, set_window_opacity, set_window_resizable, set_window_decorated, set_window_floating, set_window_icon, get_pos, set_pos, get_size, set_size, get_framebuffer_size, get_window_content_scale, create_basic_window, destroy_basic_window, poll_window_events, show_window, hide_window, iconify_window, restore_window, maximize_window, vulkan_supported, vulkan_required_extensions, focus_window, set_clipboard, get_clipboard, set_input_mode, create_surface, objc_msgSend, objc_msgSend_ptr, objc_msgSend_ptr_ptr, objc_msgSend_ptr_i64, get_cocoa_window, get_cocoa_monitor, get_cocoa_view)
-use std.core
-use std.core.mem (cstr)
-use std.core.str as str
-use std.core.common as common
-use std.os.ffi as ffi
-use std.os.ui.window.consts
-use std.os.ui.window.platform.api as backend_api
-use std.os.ui.render.vk.vulkan (vk_create_metal_surface_ext)
+;; - core.os.ui.window.platform
+;; - core.os.ui.window
+;; - core.os.ui.window.consts
+module core.os.ui.window.platform.cocoa(available, get_backend_name, get_class, get_selector, shared_application, create_autorelease_pool, drain_autorelease_pool, set_activation_policy_regular, finish_launching, activate_ignoring_other_apps, install_app_delegate, get_monitors, get_primary_monitor, get_monitor_pos, get_monitor_workarea, get_monitor_physical_size, get_monitor_content_scale, get_monitor_name, get_video_mode, get_video_modes, get_gamma_ramp, set_gamma_ramp, current_event, next_event, wait_events, send_event, update_windows, run_app, stop_app, request_user_attention, post_event, get_window_monitor, set_window_monitor, get_key_state, get_mouse_button_state, get_key_name, get_cursor_pos, set_cursor_pos, create_cursor, create_standard_cursor, destroy_cursor, set_cursor, set_window_title, get_window_attrib, set_window_opacity, set_window_resizable, set_window_decorated, set_window_floating, set_window_icon, get_pos, set_pos, get_size, set_size, get_framebuffer_size, get_window_content_scale, create_basic_window, destroy_basic_window, poll_window_events, show_window, hide_window, iconify_window, restore_window, maximize_window, vulkan_supported, vulkan_required_extensions, focus_window, set_clipboard, get_clipboard, set_input_mode, create_surface, objc_msgSend, objc_msgSend_ptr, objc_msgSend_ptr_ptr, objc_msgSend_ptr_i64, get_cocoa_window, get_cocoa_monitor, get_cocoa_view)
+use core
+use core.mem (cstr)
+use core.str as str
+use core.common as common
+use core.os.ffi as ffi
+use core.os.ui.window.consts
+use core.os.ui.window.platform.api as backend_api
+use core.os.ui.render.vk.vulkan (vk_create_metal_surface_ext)
 
 fn _handle_from(any v) any {
    if is_dict(v) { return v.get("handle", 0) }
@@ -2234,5 +2234,5 @@ fn get_cocoa_view(any win) any {
       assert(set_window_monitor(win, {"handle": 123}, 0, 0, 10, 10) == win, "cocoa set monitor fallback")
       assert(get_cocoa_window(win) == 0 && get_cocoa_monitor({"handle": 123}) == 123 && get_cocoa_view(win) == 0, "cocoa raw handles")
    }
-   print("✓ std.os.ui.window.platform.cocoa self-test passed")
+   print("✓ core.os.ui.window.platform.cocoa self-test passed")
 }

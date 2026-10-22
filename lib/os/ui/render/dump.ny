@@ -1,9 +1,9 @@
 ;; Keywords: profile profiling tracing os ui render
 ;; UI profiling, tracing, environment toggles, and benchmark logging.
 ;; References:
-;; - std.os.ui.render
-;; - std.os.ui.render.matrix
-module std.os.ui.render.dump(
+;; - core.os.ui.render
+;; - core.os.ui.render.matrix
+module core.os.ui.render.dump(
    save, safe_name, root_dir, path_named, snapshot_path, close_with_dump, snapshot_once,
    auto_dump_enabled, auto_dump_path, auto_dump_delay_frames, auto_dump_pre_frame, auto_dump_post_frame,
    gui_auto_dump_path, gui_auto_dump_delay, gui_auto_dump_exit_enabled, parse_skip_list,
@@ -31,21 +31,21 @@ module std.os.ui.render.dump(
    sim_nosurface_bench_enabled, world_grid_enabled, generated_env_width, gui_scale_env_present
 )
 
-use std.core
-use std.core.error
-use std.core.str as str
-use std.core.common as common
-use std.core.term as term
-use std.math (min)
-use std.math.crypto.encoding.bytes
-use std.math.crypto.hash as hash
-use std.os (file_read)
-use std.os.path as path
-use std.os.path as ospath
-use std.os.sys as ossys
-use std.os.ui.render (request_frame_capture, read_framebuffer, snapshot)
-use std.os.ui.window
-use std.math.parse.img as img_mod
+use core
+use core.error
+use core.str as str
+use core.common as common
+use core.term as cli_term
+use core.math (min)
+use core.math.crypto.encoding.bytes
+use core.math.crypto.hash as hash
+use core.os (file_read)
+use core.os.path as path
+use core.os.path as ospath
+use core.os.sys as ossys
+use core.os.ui.render (request_frame_capture, read_framebuffer, snapshot)
+use core.os.ui.window
+use core.math.parse.img as img_mod
 
 mut _env_bool_cache, _env_int_cache, _env_str_cache = dict(64), dict(32), dict(32)
 mut _dump_path_cache, _counter_values = dict(16), dict(64)
@@ -673,12 +673,12 @@ fn stage_ms_since(int t0) f64 {
 
 fn format_tag(any tag) str {
    "Formats a semantic colored bracket tag for terminal logs."
-   term.log_tag(tag)
+   cli_term.log_tag(tag)
 }
 
 fn colorize_line(any line) str {
    "Applies semantic colors to bracketed tags in a log line."
-   term.log_text(line)
+   cli_term.log_text(line)
 }
 
 fn format_line(any tag, any msg="") str {
@@ -1366,10 +1366,9 @@ fn auto_dump_post_frame(any win, bool done, int frame_count, int delay_frames=8,
    true
 }
 
-fn gui_auto_dump_path(any cli_path="") str {
+fn gui_auto_dump_path(str cli_path="") str {
    "Returns the configured GUI auto-dump path."
-   def cli = to_str(cli_path)
-   if cli.len > 0 { return cli }
+   if cli_path.len > 0 { return cli_path }
    env_trim_cached("NY_UI_GUI_AUTO_DUMP")
 }
 
@@ -1517,5 +1516,5 @@ fn set_framebuffer_hash_line(any line) bool {
    assert(suite_parse_text("shot.png\tpanel\tstate\tnote\tgui\n# skip\n").len == 1, "dump suite parse text")
    assert(gizmo_mode("rotate", 0) == 1 && gizmo_mode("S", 0) == 2 && gizmo_mode("w", 2) == 0 && gizmo_mode("unknown", 7) == 7, "dump gizmo modes")
    assert(is_str(framebuffer_hash_line()), "dump framebuffer hash")
-   print("✓ std.os.ui.render.dump self-test passed")
+   print("✓ core.os.ui.render.dump self-test passed")
 }

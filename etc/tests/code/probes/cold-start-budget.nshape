@@ -1,0 +1,45 @@
+shape cold_start_budget {
+  generator "embedded"
+  family "probe"
+  features ["cold-start", "cache", "budget"]
+  template ny-test-case
+  timeout 900
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.subprocess (run_capture)
+use core.os.time (ticks)
+
+def ny = env("NYTRIX_NY_FULL_BIN")
+def cmake = env("NYTRIX_CMAKE_COMMAND")
+def test_dir = temp_dir() + "/ny-cold-start-budget-" + to_str(pid())
+def source = test_dir + "/cold.ny"
+assert(is_str(ny) && ny.len > 0, "test runner exports the full compiler")
+assert(is_str(cmake) && cmake.len > 0, "CMake exposes its executable path")
+def setup = run_capture([cmake, "-E", "make_directory", test_dir], [], nil, false)
+assert(setup.get("code", 127) == 0, "create cold-start fixture directory")
+unwrap(file_write(source, "print(1)\n"))
+
+def budget_env = env("NYTRIX_COLD_BUDGET_SEC")
+mut budget = 600
+if is_str(budget_env) && budget_env.len > 0 {
+   budget = budget_env.parse_int()
+}
+def start = ticks()
+def result = run_capture(
+   [cmake, "-E", "env", "NYTRIX_STD_CACHE=0",
+    "NYTRIX_STD_BC_CACHE_AUTO=0", "NYTRIX_JIT_CACHE=0", ny, source],
+   [], nil, false)
+def elapsed = (ticks() - start) / 1000000000
+def output = result.get("stdout", "")
+assert(result.get("code", 127) == 0, "cold compile failed: " + output)
+assert(output == "1\n", "cold compile executes the source: " + output)
+assert(elapsed <= budget,
+       "cold compile took " + to_str(elapsed) + "s, over budget " +
+       to_str(budget) + "s")
+print("cold compile ok in " + to_str(elapsed) + "s")
+def cleanup = run_capture([cmake, "-E", "rm", "-rf", test_dir], [], nil, false)
+assert(cleanup.get("code", 127) == 0, "remove cold-start fixture directory")
+NY
+}
+shape cold_start_budget {

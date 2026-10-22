@@ -1,0 +1,26 @@
+shape ownership_allowance_interval_positive {
+  family "runtime/ownership"
+  generator "embedded"
+  features ["ownership", "allowance", "positive", "control-flow", "backend-parity"]
+  template ny-test-case
+  flags_matrix "--ownership-strict --nyir-verify --native --run; --ownership-strict --nyir-verify --native-backend=llvm --jit --jit-engine=mcjit; --ownership-strict --nyir-verify --native-backend=llvm --jit --jit-engine=orc; --ownership-strict --nyir-verify --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+@allowance(x, [1,1])
+fn exactly_once(bool choose_left, int x) int {
+   if choose_left { x } else { x }
+}
+
+@allowance(x, [0,1])
+fn at_most_once(bool use_value, int x) int {
+   if use_value { x } else { 0 }
+}
+
+assert(exactly_once(true, 7) == 7 && exactly_once(false, 9) == 9,
+       "exact-once allowance joins branch paths")
+assert(at_most_once(true, 11) == 11 && at_most_once(false, 13) == 0,
+       "at-most-once allowance accepts the skip path")
+NY
+}

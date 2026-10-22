@@ -1,0 +1,286 @@
+shape ownership-allowance-exceeded {
+  family "compiler-errors/ownership"
+  generator "error"
+  features ["error", "ownership", "negative", "diagnostic", "case-allowance-exceeded"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "ownership allowance exceeded for 'y': observed 2 > allowance 1"
+  flags "--ownership-strict"
+  source ny <<'NY'
+use core
+
+@consumes(y)
+@allowance(y, 1)
+fn twice(any y) any {
+   y + y
+}
+
+twice([1])
+NY
+}
+
+shape ownership-borrow-syntax-release-while-borrowed {
+  family "compiler-errors/ownership"
+  generator "error"
+  features ["error", "ownership", "negative", "diagnostic", "case-borrow-syntax-release-while-borrowed"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "cannot release owned slot 'a' while borrow 'b' is live"
+  flags "--ownership-strict"
+  source ny <<'NY'
+use core
+
+fn bad() int {
+   def a = [1]
+   def b = &a
+   release(a)
+   len(b)
+}
+
+bad()
+NY
+}
+
+shape ownership-double-release {
+  family "compiler-errors/ownership"
+  generator "error"
+  features ["error", "ownership", "negative", "diagnostic", "case-double-release"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "double release of owned slot 'a'"
+  flags "--ownership-strict"
+  source ny <<'NY'
+use core
+
+fn bad() int {
+   def a = [1]
+   release(a)
+   release(a)
+   0
+}
+
+bad()
+NY
+}
+
+shape ownership-forget-while-borrowed {
+  family "compiler-errors/ownership"
+  generator "error"
+  features ["error", "ownership", "negative", "diagnostic", "case-forget-while-borrowed"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "cannot forget owned slot 'a' while borrow 'b' is live"
+  flags "--ownership-strict"
+  source ny <<'NY'
+use core
+
+fn bad() int {
+   def a = [1]
+   def b = borrow(a)
+   forget(a)
+   len(b)
+}
+
+bad()
+NY
+}
+
+shape ownership-move-while-borrowed {
+  family "compiler-errors/ownership"
+  generator "error"
+  features ["error", "ownership", "negative", "diagnostic", "case-move-while-borrowed"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "cannot move owned slot 'a' while borrow 'b' is live"
+  flags "--ownership-strict"
+  source ny <<'NY'
+use core
+
+@returns_owned
+@consumes(x)
+fn adopt(x) { x }
+
+fn bad() int {
+   def a = [1, 2]
+   def b = borrow(a)
+   def c = adopt(a)
+   len(b) + len(c)
+}
+
+bad()
+NY
+}
+
+shape ownership-mutate-while-borrowed {
+  family "compiler-errors/ownership"
+  generator "error"
+  features ["error", "ownership", "negative", "diagnostic", "case-mutate-while-borrowed"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "cannot mutate owned slot 'a' while borrow 'b' is live"
+  flags "--ownership-strict"
+  source ny <<'NY'
+use core
+
+@mutates(x)
+fn touch(x) int {
+   0
+}
+
+fn bad() int {
+   def a = [1, 2]
+   def b = borrow(a)
+   touch(a)
+   len(b)
+}
+
+bad()
+NY
+}
+
+shape ownership-reassign-while-borrowed {
+  family "compiler-errors/ownership"
+  generator "error"
+  features ["error", "ownership", "negative", "diagnostic", "case-reassign-while-borrowed"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "cannot reassign owned slot 'a' while borrow 'b' is live"
+  flags "--ownership-strict"
+  source ny <<'NY'
+use core
+
+fn bad() int {
+   mut a = [1]
+   def b = borrow(a)
+   a = [2]
+   len(b)
+}
+
+bad()
+NY
+}
+
+shape ownership-release-while-borrowed {
+  family "compiler-errors/ownership"
+  generator "error"
+  features ["error", "ownership", "negative", "diagnostic", "case-release-while-borrowed"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "cannot release owned slot 'a' while borrow 'b' is live"
+  flags "--ownership-strict"
+  source ny <<'NY'
+use core
+
+fn bad() int {
+   def a = [1]
+   def b = borrow(a)
+   release(a)
+   len(b)
+}
+
+bad()
+NY
+}
+
+shape ownership-return-local-borrow {
+  family "compiler-errors/ownership"
+  generator "error"
+  features ["error", "ownership", "negative", "diagnostic", "case-return-local-borrow"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "returning borrow of local owner 'a' would outlive its slot"
+  flags "--ownership-strict"
+  source ny <<'NY'
+use core
+
+@borrows(x)
+@returns_borrow(x)
+fn peek(x) { x }
+
+fn bad() {
+   def a = [1]
+   return peek(a)
+}
+
+bad()
+NY
+}
+
+shape ownership-return-owned-without-contract {
+  family "compiler-errors/ownership"
+  generator "error"
+  features ["error", "ownership", "negative", "diagnostic", "case-return-owned-without-contract"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "returning owned slot 'a' requires @returns_owned"
+  flags "--ownership-strict"
+  source ny <<'NY'
+use core
+
+fn bad() {
+   def a = [1]
+   return a
+}
+
+bad()
+NY
+}
+
+shape ownership-return-owner-while-borrowed {
+  family "compiler-errors/ownership"
+  generator "error"
+  features ["error", "ownership", "negative", "diagnostic", "case-return-owner-while-borrowed"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "cannot return owned slot 'a' while borrow 'b' is live"
+  flags "--ownership-strict"
+  source ny <<'NY'
+use core
+
+fn bad() {
+   def a = [1]
+   def b = borrow(a)
+   return a
+}
+
+bad()
+NY
+}
+
+shape ownership-use-after-consume {
+  family "compiler-errors/ownership"
+  generator "error"
+  features ["error", "ownership", "negative", "diagnostic", "case-use-after-consume"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "use after move of owned slot 'a'"
+  flags "--ownership-strict"
+  source ny <<'NY'
+use core
+
+@consumes(x)
+fn take(x) int {
+   0
+}
+
+fn bad() int {
+   def a = [1]
+   take(a)
+   len(a)
+}
+
+bad()
+NY
+}

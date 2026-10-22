@@ -1,0 +1,27 @@
+shape ast_loop_invariant {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "ast", "comptime", "invariant", "origin"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.compiler.ast (parse_ast_snapshot, parse_ast, code_str)
+use core.math.parse.data.json (json_decode)
+
+def source = "comptime template bounded(limit) { fn generated_loop() int {\nmut n=0\nwhile n < ${limit} invariant(n <= ${limit}) { n += 1 }\nreturn n\n} }\ncomptime emit bounded(3)"
+def snapshot = parse_ast_snapshot(source)
+def loop = snapshot.get("nodes").get(0).get("body").get("body").get(1)
+assert(loop.get("test").get("right").get("value") == 3 &&
+       loop.get("invariant").get("right").get("value") == 3,
+       "loop conditions and invariant syntax both substitute template arguments")
+assert(loop.get("invariant").get("source_origin").get("line") == 3 &&
+       loop.get("invariant").get("expansion_origin").get("line") == 6,
+       "generated invariant syntax retains definition and emission origins")
+assert(code_str(json_decode(code_str(snapshot))) == code_str(snapshot),
+       "invariant syntax survives canonical serialization")
+def legacy_loop = parse_ast(source).get(0).get("body").get("body").get(1)
+assert(!dict_exists(legacy_loop, "invariant"),
+       "legacy loop records retain their existing shape")
+NY
+}

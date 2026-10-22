@@ -2,10 +2,10 @@
 ;; Pure-Ny statistical methods and statistical data analysis.
 ;; Demonstrates native speed and elegant expression for numeric algorithms.
 ;; References:
-;; - std.math
-module std.math.stat(mean, median, mode, variance, stddev, cov, corr, quantile, zscore, describe)
-use std.core
-use std.math.float (float, sqrt)
+;; - core.math
+module core.math.stat(mean, median, mode, variance, stddev, cov, corr, quantile, zscore, describe)
+use core
+use core.math.float (float, sqrt)
 
 fn mean(seq xs) f64 {
    "Returns the arithmetic mean of a sequence."
@@ -164,5 +164,5 @@ fn describe(seq xs) dict {
    def stats = describe(data)
    assert_eq(stats.get("count"), 5, "describe count")
    assert_eq(stats.get("mean"), 30.0, "describe mean")
-   print("✓ std.math.stat self-test passed")
+   print("✓ core.math.stat self-test passed")
 }

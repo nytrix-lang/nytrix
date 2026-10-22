@@ -1,0 +1,18 @@
+shape native_float_local_abi {
+  family "runtime/values"
+  generator "embedded"
+  features ["ny", "test", "native", "float", "representation"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+fn content_scale(any value) f64 { 1.5 }
+
+;; A floating call result must not inherit list metadata from a stale
+;; contextual type and receive a typed-buffer length query when stored.
+def scale = content_scale(0)
+assert(scale == 1.5, "inferred float local keeps its f64 ABI")
+NY
+}

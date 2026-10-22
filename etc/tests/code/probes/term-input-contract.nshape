@@ -1,0 +1,19 @@
+shape test_term_input_contract {
+  family "native/backend"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.term
+
+;; A redirected test process is not an interactive terminal.  Neither input
+;; API may manufacture a key or block forever in that state.
+assert(poll_key() == 0)
+assert(get_key() == 0)
+assert(is_quit_key(27))
+assert(is_quit_key(3))
+assert(!is_quit_key(0))
+NY
+}

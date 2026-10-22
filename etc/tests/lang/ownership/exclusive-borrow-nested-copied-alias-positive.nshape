@@ -1,0 +1,26 @@
+shape ownership_exclusive_borrow_nested_copied_alias_positive {
+  family "language/ownership"
+  generator "syntax"
+  features ["ownership", "borrow", "exclusive", "nested", "alias", "positive"]
+  template ny-test-case
+  expect compile_and_run
+  flags "--ownership-strict --native-only --nyir-verify"
+  source ny <<'NY'
+use core
+
+fn nested_copy(bool choose) int {
+  mut int value = 5
+  def borrowed = &mut value
+  if choose {
+    def alias = borrowed
+    def observed = alias
+  } else {
+    value = value + 1
+  }
+  value
+}
+
+assert(nested_copy(true) == 5, "copied borrow remains on its nested path")
+assert(nested_copy(false) == 6, "sibling path ends before owner access")
+NY
+}

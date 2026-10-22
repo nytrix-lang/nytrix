@@ -1,15 +1,15 @@
 ;; Keywords: gpu graphics compute os
 ;; GPU and Accelerator policy.
 ;; References:
-;; - std.os
-module std.os.gpu(gpu_mode, gpu_backend, gpu_offload, gpu_min_work, gpu_async, gpu_fast_math, gpu_available, gpu_should_offload, gpu_offload_status, accel_target, accel_targets, accel_target_available, accel_target_triple, accel_binary_kind, accel_binary_ext, accel_backend, accel_target_status, accel_compile_plan, accel_emit_plan, accel_emit_command, opencl_available, opencl_toolchain_available, opencl_async, opencl_fast_math, opencl_should_offload, opencl_status, opencl_device_policy, opencl_compile_plan, opencl_kernel_plan, opencl_cpu_fallback_plan, opencl_dispatch_plan, opencl_work_groups, GPU_MODE, GPU_BACKEND, GPU_OFFLOAD, GPU_MIN_WORK, GPU_ASYNC, GPU_FAST_MATH, GPU_AVAILABLE, ACCEL_TARGET, ACCEL_OBJECT, OPENCL_AVAILABLE, OPENCL_TOOLCHAIN_AVAILABLE)
-use std.core
-use std.core.str
-use std.os.prim
-use std.core.common as common
+;; - core.os
+module core.os.gpu(gpu_mode, gpu_backend, gpu_offload, gpu_min_work, gpu_async, gpu_fast_math, gpu_available, gpu_should_offload, gpu_offload_status, accel_target, accel_targets, accel_target_available, accel_target_triple, accel_binary_kind, accel_binary_ext, accel_backend, accel_target_status, accel_compile_plan, accel_emit_plan, accel_emit_command, opencl_available, opencl_toolchain_available, opencl_async, opencl_fast_math, opencl_should_offload, opencl_status, opencl_device_policy, opencl_compile_plan, opencl_kernel_plan, opencl_cpu_fallback_plan, opencl_dispatch_plan, opencl_work_groups, GPU_MODE, GPU_BACKEND, GPU_OFFLOAD, GPU_MIN_WORK, GPU_ASYNC, GPU_FAST_MATH, GPU_AVAILABLE, ACCEL_TARGET, ACCEL_OBJECT, OPENCL_AVAILABLE, OPENCL_TOOLCHAIN_AVAILABLE)
+use core
+use core.str
+use core.os.prim as os_prim
+use core.common as common
 
 fn _env_str_or(str key, str fallback) str {
-   def v = env(key)
+   def v = os_prim.env(key)
    mut out = fallback
    if is_str(v) {
       def s = strip(v)
@@ -106,21 +106,21 @@ mut _auto_gpu_backend_cache = "none"
 
 fn _has_opencl_runtime() bool {
    if _opencl_runtime_loaded { return _opencl_runtime_cache }
-   def force = env("NYTRIX_OPENCL_FORCE")
+   def force = os_prim.env("NYTRIX_OPENCL_FORCE")
    if is_str(force) && strip(force).len > 0 {
       _opencl_runtime_cache = _parse_bool_or(force, false)
       _opencl_runtime_loaded = true
       return _opencl_runtime_cache
    }
    mut out = false
-   if IS_WINDOWS {
+   if os_prim.is_windows() {
       if _path_exists("C:\\Windows\\System32\\OpenCL.dll") { out = true }
       elif _path_exists("C:\\Windows\\SysWOW64\\OpenCL.dll") { out = true }
       _opencl_runtime_cache = out
       _opencl_runtime_loaded = true
       return out
    }
-   if IS_MACOS {
+   if os_prim.is_macos() {
       out = _path_exists("/System/Library/Frameworks/OpenCL.framework/OpenCL")
       _opencl_runtime_cache = out
       _opencl_runtime_loaded = true
@@ -146,7 +146,7 @@ fn _has_cuda_runtime() bool {
       return false
    }
    mut out = false
-   if IS_WINDOWS {
+   if os_prim.is_windows() {
       if _path_exists("C:\\Windows\\System32\\nvcuda.dll") { out = true }
       def cp = _env_str_or("CUDA_PATH", "")
       if cp.len > 0 { out = true }
@@ -290,7 +290,7 @@ fn _pick_auto_gpu_backend() str {
    if _has_cuda_runtime() { out = "cuda" }
    elif _has_hip_runtime() { out = "hip" }
    elif _has_opencl_runtime() { out = "opencl" }
-   elif IS_MACOS { out = "metal" }
+   elif os_prim.is_macos() { out = "metal" }
    _auto_gpu_backend_cache = out
    _auto_gpu_backend_loaded = true
    out
@@ -303,7 +303,7 @@ fn _gpu_backend_available(any backend) bool {
    if b == "opencl" { return _has_opencl_runtime() }
    if b == "cuda" { return _has_cuda_runtime() }
    if b == "hip" { return _has_hip_runtime() }
-   if b == "metal" { return IS_MACOS }
+   if b == "metal" { return os_prim.is_macos() }
    false
 }
 
@@ -328,9 +328,9 @@ fn _effective_gpu_min_work() int {
 def GPU_MODE = _normalize_gpu_mode(_env_str_or("NYTRIX_GPU_MODE", "auto"))
 def GPU_BACKEND = _normalize_gpu_backend(_env_str_or("NYTRIX_GPU_BACKEND", "auto"))
 def GPU_OFFLOAD = _normalize_gpu_offload(_env_str_or("NYTRIX_GPU_OFFLOAD", "auto"))
-def GPU_MIN_WORK = common.parse_nonneg_int(env("NYTRIX_GPU_MIN_WORK"))
-def GPU_ASYNC = _parse_bool_or(env("NYTRIX_GPU_ASYNC"), true)
-def GPU_FAST_MATH = _parse_bool_or(env("NYTRIX_GPU_FAST_MATH"), false)
+def GPU_MIN_WORK = common.parse_nonneg_int(os_prim.env("NYTRIX_GPU_MIN_WORK"))
+def GPU_ASYNC = _parse_bool_or(os_prim.env("NYTRIX_GPU_ASYNC"), true)
+def GPU_FAST_MATH = _parse_bool_or(os_prim.env("NYTRIX_GPU_FAST_MATH"), false)
 def GPU_AVAILABLE = _compute_gpu_available()
 def ACCEL_TARGET = _normalize_accel_target(_env_str_or("NYTRIX_ACCEL_TARGET", "auto"))
 def ACCEL_OBJECT = _normalize_accel_object(_env_str_or("NYTRIX_ACCEL_OBJECT", "auto"))
@@ -548,11 +548,11 @@ fn accel_emit_command(any function_name, str ir_path, any out_dir="", any target
 }
 
 fn _opencl_cpu_threads_guess() int {
-   def n1 = common.parse_nonneg_int(env("NYTRIX_LOGICAL_CPUS"))
+   def n1 = common.parse_nonneg_int(os_prim.env("NYTRIX_LOGICAL_CPUS"))
    if n1 > 0 { return n1 }
-   def n2 = common.parse_nonneg_int(env("NUMBER_OF_PROCESSORS"))
+   def n2 = common.parse_nonneg_int(os_prim.env("NUMBER_OF_PROCESSORS"))
    if n2 > 0 { return n2 }
-   def n3 = common.parse_nonneg_int(env("NPROC"))
+   def n3 = common.parse_nonneg_int(os_prim.env("NPROC"))
    if n3 > 0 { return n3 }
    1
 }
@@ -684,5 +684,5 @@ def OPENCL_TOOLCHAIN_AVAILABLE = opencl_toolchain_available()
    def dispatch = opencl_dispatch_plan("scan", 1025, 256)
    assert((dispatch.get("dispatch_backend", "") == "cpu" || dispatch.get("dispatch_backend", "") == "opencl") && is_dict(dispatch.get("fallback")), "opencl dispatch")
    assert(is_dict(opencl_compile_plan("kernel.ll")), "opencl compile plan")
-   print("✓ std.os.gpu self-test passed")
+   print("✓ core.os.gpu self-test passed")
 }

@@ -1,0 +1,64 @@
+shape ny_doc_search_ny_discovery {
+  generator "embedded"
+  family "probe/tools"
+  features ["documentation", "search", "ny-discovery", "fallback"]
+  template ny-test-case
+  flags "--native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.subprocess (run_capture)
+use core.str as str
+
+def doc = env("NYTRIX_TEST_DOC_BIN")
+def full = env("NYTRIX_NY_FULL_BIN")
+def cmake = env("NYTRIX_CMAKE_COMMAND")
+assert(is_str(doc) && doc.len > 0, "CMake exposes the documentation tool")
+assert(is_str(full) && full.len > 0, "test runner exposes the full compiler")
+assert(is_str(cmake) && cmake.len > 0, "CMake exposes its executable path")
+
+def comptime_search = run_capture(
+   [cmake, "-E", "env", "NYTRIX_NY_FULL_BIN=" + full,
+    doc, "search", "--docs", "comptime"], [], nil, false)
+assert(comptime_search.get("code", 127) == 0,
+       "Ny-backed documentation command succeeds: " +
+       comptime_search.get("stdout", ""))
+assert(str.find(comptime_search.get("stdout", ""), "docs/learn/comptime.md") >= 0,
+       "Ny-backed documentation search discovers comptime documentation")
+
+def ranked = run_capture(
+   [cmake, "-E", "env", "NYTRIX_NY_FULL_BIN=" + full,
+    doc, "search", "--docs", "-n", "8", "parser"], [], nil, false)
+assert(ranked.get("code", 127) == 0, "Ny-backed ranking command succeeds")
+def embedded = run_capture(
+   [full, "doc", "search", "--docs", "-n", "8", "parser"], [], nil, false)
+assert(embedded.get("code", 127) == 0,
+       "embedded documentation ranking command succeeds")
+def rank_output = ranked.get("stdout", "")
+def embedded_output = embedded.get("stdout", "")
+assert(rank_output == embedded_output,
+       "standalone and embedded ranking output are identical")
+
+def expected = [
+   "docs/spec/syntax.md#Syntax",
+   "docs/spec/errors.md#Related",
+   "docs/CHANGELOG.md#[0.10] - 2026-10-13",
+]
+mut previous = -1
+for expected_entry in expected {
+   def position = str.find(rank_output, expected_entry)
+   assert(position > previous,
+          "ranking preserves expected result order: " + expected_entry)
+   previous = position
+}
+
+def missing_ny = temp_dir() + "/missing-ny-full-" + to_str(pid())
+def fallback = run_capture(
+   [cmake, "-E", "env", "NYTRIX_NY_FULL_BIN=" + missing_ny,
+    doc, "search", "--docs", "comptime"], [], nil, false)
+assert(fallback.get("code", 127) == 0 &&
+       str.find(fallback.get("stdout", ""), "docs/learn/comptime.md") >= 0,
+       "standalone C search remains available without the Ny collector")
+print("NY_DOC_SEARCH_DISCOVERY_OK")
+NY
+}

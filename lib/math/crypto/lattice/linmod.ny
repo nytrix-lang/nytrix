@@ -4,12 +4,12 @@
 ;; - https://cacr.uwaterloo.ca/hac/about/chap2.pdf
 ;; - https://cacr.uwaterloo.ca/hac/about/chap14.pdf
 ;; References:
-;; - std.math.crypto.lattice
-;; - std.math.crypto
-module std.math.crypto.lattice.linmod(solve_linear_mod)
-use std.core
-use std.math.nt
-use std.math.crypto.lattice.flatter
+;; - core.math.crypto.lattice
+;; - core.math.crypto
+module core.math.crypto.lattice.linmod(solve_linear_mod)
+use core
+use core.math.nt
+use core.math.crypto.lattice.flatter
 
 fn solve_linear_mod(list equations, list bounds) list {
    "Solve Ax = b mod M using lattice reduction(LLL/CVP). equations: list of [[coeffs], target, modulus]. bounds: list of upper bounds per variable. Returns solution vector."

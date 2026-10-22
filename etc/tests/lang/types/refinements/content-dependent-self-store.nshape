@@ -1,0 +1,27 @@
+shape mutable_aggregate_content_predicate_survives_exact_self_store {
+  family "runtime/language"
+  generator "regression"
+  features [ny test typing refinement mutable aggregate content-dependent self-store positive]
+  template ny-test-case
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+refine EqualGap = list where(items) { items[0] == items[1] + 5 }
+@effects(read)
+fn require_equal_gap(EqualGap items) int { return items.len }
+
+fn checked_exact_store() int {
+  mut list<int> items = [10, 5]
+  if EqualGap(items) {
+    items[0] = items[0]
+    return require_equal_gap(items)
+  }
+  0
+}
+
+assert(checked_exact_store() == 2,
+       "an exact self-store preserves a content-dependent aggregate fact")
+NY
+}

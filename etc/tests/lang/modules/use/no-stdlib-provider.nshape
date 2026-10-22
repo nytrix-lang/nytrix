@@ -1,0 +1,19 @@
+shape no_std_import_provider {
+  family "runtime/modules/use"
+  generator "embedded"
+  features ["ny", "test", "modules", "no-stdlib"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+module provider.math(add, read_resource)
+
+fn add(int left, int right) int {
+  left + right
+}
+
+@effects(cap(read))
+fn read_resource() int {
+  7
+}
+NY
+}

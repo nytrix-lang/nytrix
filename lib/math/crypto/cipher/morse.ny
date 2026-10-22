@@ -4,11 +4,11 @@
 ;; Reference:
 ;; - https://www.itu.int/rec/R-REC-M.1677/en
 ;; References:
-;; - std.math.crypto.cipher
-;; - std.math.crypto.analysis
-module std.math.crypto.cipher.morse(morse_encode, morse_decode, morse_encode_char, morse_decode_symbol)
-use std.core
-use std.core.str
+;; - core.math.crypto.cipher
+;; - core.math.crypto.analysis
+module core.math.crypto.cipher.morse(morse_encode, morse_decode, morse_encode_char, morse_decode_symbol)
+use core
+use core.str
 
 def _MORSE_PAIRS = ["A", ".-", "B", "-...", "C", "-.-.", "D", "-..", "E", ".", "F", "..-.", "G", "--.", "H", "....", "I", "..", "J", ".---", "K", "-.-", "L", ".-..", "M", "--", "N", "-.", "O", "---", "P", ".--.", "Q", "--.-", "R", ".-.", "S", "...", "T", "-", "U", "..-", "V", "...-", "W", ".--", "X", "-..-", "Y", "-.--", "Z", "--..", "0", "-----", "1", ".----", "2", "..---", "3", "...--", "4", "....-", "5", ".....", "6", "-....", "7", "--...", "8", "---..", "9", "----.", ".", ".-.-.-", ",", "--..--", "?", "..--..", "'", ".----.", "!", "-.-.--", "/", "-..-.", "(", "-.--.", ")", "-.--.-", "&", ".-...", ":", "---...", ";", "-.-.-.", "=", "-...-", "+", ".-.-.", "-", "-....-", "_", "..--.-", "\"", ".-..-.", "$", "...-..-", "@", ".--.-.",]
 

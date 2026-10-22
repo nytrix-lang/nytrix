@@ -1,16 +1,16 @@
 ;; Keywords: editor window layout panels chrome os ui render viewer text
 ;; Editor window layout, title chrome, and panel sizing helpers.
 ;; References:
-;; - std.os.ui.render.viewer.editor.core
-;; - std.os.ui.render.viewer.gui
-module std.os.ui.render.viewer.editor.window(
+;; - core.os.ui.render.viewer.editor.core
+;; - core.os.ui.render.viewer.gui
+module core.os.ui.render.viewer.editor.window(
    SPLIT_NONE, SPLIT_VERTICAL, SPLIT_HORIZONTAL,
    leaf, root, split_right, split_below, pane_layout, leaves,
    selected, select_next, select_at, delete_selected, balance, resize_selected
 )
 
-use std.core
-use std.math (max, min)
+use core
+use core.math (max, min)
 
 def SPLIT_NONE = "none"
 def SPLIT_VERTICAL = "vertical"

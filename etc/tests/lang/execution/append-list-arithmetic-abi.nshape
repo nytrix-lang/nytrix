@@ -1,0 +1,44 @@
+shape test_append_list_arithmetic_abi {
+  family "runtime/execution"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+source ny <<'NY'
+use core
+
+def n = 20
+mut xs = []
+mut i = 0
+while i < n {
+   xs = append(xs, i)
+   i += 1
+}
+
+mut sum = 0
+i = 0
+while i < n {
+   sum = sum + xs[i]
+   i += 1
+}
+assert(sum == 190, "append-built indexed reads add as raw integer values")
+
+mut weighted = 0
+i = 0
+while i < n {
+   weighted = weighted + xs[i] * (i + 1)
+   i += 1
+}
+assert(weighted == 2660, "indexed read arithmetic composes with multiplication")
+
+mut alias_sum = 0
+i = 0
+while i < n {
+   def item = xs[i]
+   alias_sum += item
+   i += 1
+}
+assert(alias_sum == 190, "indexed read aliases preserve their scalar representation")
+NY
+}

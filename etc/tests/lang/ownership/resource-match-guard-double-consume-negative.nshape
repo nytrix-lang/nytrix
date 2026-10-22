@@ -1,0 +1,33 @@
+shape ownership_rule_affine_match_guard_double_consume {
+  family "compiler-errors/ownership"
+  generator "error"
+  features ["error", "ownership", "resource", "affine", "match", "guard"]
+  template ny-compile-fail
+  expect compile_fail
+  flags "--ownership-strict"
+  expect_message "affine resource 'file' may be consumed at most once"
+  source ny <<'NY'
+use core
+
+affine layout File { int fd }
+
+@consumes(file)
+fn consume_file(File file) bool {
+  forget(file)
+  true
+}
+
+fn bad() int {
+  def File file = File(1)
+  match 0 {
+    0 if consume_file(file) -> {
+      consume_file(file)
+      1
+    }
+    _ -> 0
+  }
+}
+
+bad()
+NY
+}

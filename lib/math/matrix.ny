@@ -2,8 +2,8 @@
 ;; Matrix construction and linear-algebra operations over numeric and modular values.
 ;; Full implementation with operator overloading and crypto primitives
 ;; References:
-;; - std.math
-module std.math.matrix(Matrix, is_matrix, mat_new, mat_get, mat_set, mat_mul, mat_det2,
+;; - core.math
+module core.math.matrix(Matrix, is_matrix, mat_new, mat_get, mat_set, mat_mul, mat_det2,
    mat_print, mat_transpose, mat_identity, mat_add, mat_scale,
    mat4_zero, mat4_identity, mat4_get, mat4_set,
    __add, __sub, __mul, __pow, __neg, __eq, __neq, __str, __len,
@@ -21,10 +21,10 @@ module std.math.matrix(Matrix, is_matrix, mat_new, mat_get, mat_set, mat_mul, ma
    matrix_solve, matrix_solve_mod, matrix_solve_right_mod, matrix_solve_left_mod,
    matrix_lu, matrix_gauss_eliminate,
    _matrix_rows, _matrix_cols, _matrix_data, _matrix_get, _matrix_set)
-use std.core
-use std.core.str as str
-use std.math.big
-use std.math.integer (Z, gcd, mod, inverse_mod, xgcd)
+use core
+use core.str as str
+use core.math.big
+use core.math.integer (Z, gcd as bigint_gcd, mod, inverse_mod, xgcd)
 
 fn is_matrix(any x) bool {
    "Check if x is a matrix."
@@ -773,7 +773,7 @@ fn matrix_determinantal_divisor(any m, int k) any {
       mut cs = _matrix_first_combination(k)
       while cs != nil {
          def d = bigint_abs(_matrix_submatrix_det(m, rs, cs))
-         if d != Z(0) { if g == Z(0) { g = d } else { g = gcd(g, d) } }
+         if d != Z(0) { if g == Z(0) { g = d } else { g = bigint_gcd(g, d) } }
          cs = _matrix_next_combination(cs, cols)
       }
       rs = _matrix_next_combination(rs, rows)
@@ -1813,5 +1813,5 @@ impl list {
    direct[4] = 3.0
    mat4_set(direct, 2, 3, 9.0)
    assert(direct.len == 16 && mat4_get(direct, 0, 1) == 2.0 && mat4_get(direct, 1, 0) == 3.0 && direct[11] == 9.0, "matrix mat4 flat access")
-   print("✓ std.math.matrix self-test passed")
+   print("✓ core.math.matrix self-test passed")
 }

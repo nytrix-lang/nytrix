@@ -5,11 +5,11 @@
 ;; many sealed payloads are some keyed byte stream XORed with a blob,
 ;; sometimes with the nonce/counter tucked into the blob itself.
 ;; References:
-;; - std.math.crypto.protocol
-;; - std.math.crypto
-module std.math.crypto.protocol.seal(seal_digest_bytes, seal_counter_bytes, seal_repeating_key_xor, seal_digest_repeat_xor, seal_counter_xor, seal_hmac_sha256_counter_xor, seal_blake2s_keyed_counter_xor, seal_single_byte_xor, seal_single_byte_add, seal_single_byte_sub, seal_reverse_bytes, seal_mostly_printable_ascii, seal_has_prefix, seal_has_suffix, seal_ascii_envelope)
-use std.math.bin as bin
-use std.math.crypto.hash as hash
+;; - core.math.crypto.protocol
+;; - core.math.crypto
+module core.math.crypto.protocol.seal(seal_digest_bytes, seal_counter_bytes, seal_repeating_key_xor, seal_digest_repeat_xor, seal_counter_xor, seal_hmac_sha256_counter_xor, seal_blake2s_keyed_counter_xor, seal_single_byte_xor, seal_single_byte_add, seal_single_byte_sub, seal_reverse_bytes, seal_mostly_printable_ascii, seal_has_prefix, seal_has_suffix, seal_ascii_envelope)
+use core.math.bin as bin
+use core.math.crypto.hash as hash
 
 fn seal_reverse_bytes(list bs) list {
    "Returns a byte list in reverse order."
@@ -188,7 +188,7 @@ fn seal_single_byte_xor(list blob, int k) list {
    mut out = []
    mut i = 0
    while i < blob.len {
-      out = out.append((blob.get(i) ^^ k) & 255)
+      out = out.append((blob.get(i) ^ k) & 255)
       i += 1
    }
    out
@@ -223,5 +223,5 @@ fn seal_single_byte_sub(list blob, int k) list {
    def rt = seal_counter_xor(ct, key, "sha256", "be4", "seed-counter", 0)
    assert(rt.text == framed, "seal counter roundtrip")
    assert(seal_ascii_envelope(rt, "v1;alg=", "sealed message"), "seal ascii envelope")
-   print("✓ std.math.crypto.protocol.seal self-test passed")
+   print("✓ core.math.crypto.protocol.seal self-test passed")
 }

@@ -5,11 +5,11 @@
 ;; - https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-90Ar1.pdf
 ;; - https://rump2007.cr.yp.to/15-shumow.pdf
 ;; References:
-;; - std.math.crypto.prng
-;; - std.math.crypto
-module std.math.crypto.prng.dual_ec_drbg(dual_ec_drbg_predict, dual_ec_backdoor, dual_ec_backdoor_recover_tail)
-use std.math.nt
-use std.math.crypto.ecc.ecc (ecc_scalar_mult, ecc_sqrt_mod)
+;; - core.math.crypto.prng
+;; - core.math.crypto
+module core.math.crypto.prng.dual_ec_drbg(dual_ec_drbg_predict, dual_ec_backdoor, dual_ec_backdoor_recover_tail)
+use core.math.nt
+use core.math.crypto.ecc.ecc (ecc_scalar_mult, ecc_sqrt_mod)
 
 fn dual_ec_backdoor(list Q, any d, any p) any {
    "Compute the backdoor point P for Dual_EC_DRBG given Q and secret scalar d.
@@ -181,5 +181,5 @@ fn _ec_point_add(any x1, any y1, any x2, any y2, any p) list {
    assert(dual_ec_drbg_predict([1], P, Q, p) == 0, "dual ec prediction")
    assert(dual_ec_drbg_predict([], P, Q, p) == -1, "empty outputs")
    assert(dual_ec_backdoor([1, 1], 0, 7) == [0, 0], "zero scalar")
-   print("✓ std.math.crypto.prng.dual_ec_drbg self-test passed")
+   print("✓ core.math.crypto.prng.dual_ec_drbg self-test passed")
 }

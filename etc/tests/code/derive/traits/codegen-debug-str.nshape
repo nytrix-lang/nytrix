@@ -1,0 +1,39 @@
+shape codegen_debug_str {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "codegen", "reflection", "layout"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-only; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.compiler.codegen (debug_str_for)
+
+layout GeneratedDebugRecord {
+   i32 value
+   bool enabled
+   f32 precision
+}
+layout record LegacyDebugRecord derive(debug_str) {
+   i32 value
+   bool enabled
+   f32 precision
+}
+comptime emit debug_str_for(GeneratedDebugRecord)
+
+def ptr generated = malloc(__layout_size("GeneratedDebugRecord"))
+def ptr legacy = malloc(__layout_size("LegacyDebugRecord"))
+store_layout(generated, "GeneratedDebugRecord", 11, true, 2.5)
+store_layout(legacy, "LegacyDebugRecord", 11, true, 2.5)
+assert(GeneratedDebugRecord_debug_str(generated) ==
+          "GeneratedDebugRecord{value=11, enabled=true, precision=2.5}" &&
+       LegacyDebugRecord_debug_str(legacy) ==
+          "LegacyDebugRecord{value=11, enabled=true, precision=2.5}",
+       "generated and legacy debug strings preserve field order and formatting")
+assert(GeneratedDebugRecord_debug_str(nil) == "<null>" &&
+       LegacyDebugRecord_debug_str(nil) == "<null>",
+       "generated and legacy debug strings preserve null formatting")
+free(generated)
+free(legacy)
+NY
+}

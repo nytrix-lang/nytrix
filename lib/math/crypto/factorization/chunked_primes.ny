@@ -1,13 +1,13 @@
 ;; Keywords: factorization chunked-primes math crypto number-theory
 ;; Integer-factorization routines for structured-prime factorization for chunked or limb-shaped primes.
 ;; References:
-;; - std.math.crypto.factorization
-;; - std.math.crypto
-module std.math.crypto.factorization.chunked_primes(chunked_prime_factor, chunked_prime_factor_params, chunked_prime_factor_with_limb_factors, chunked_low_limb_factors, factor_chunked_primes)
-use std.core
-use std.math.nt (Z, bit_length, gcd, inverse_mod, factor, factordb_factor, is_prime, next_prime)
-use std.math.crypto.factorization.ecm as ecm
-use std.math.crypto.factorization.pollard as pollard
+;; - core.math.crypto.factorization
+;; - core.math.crypto
+module core.math.crypto.factorization.chunked_primes(chunked_prime_factor, chunked_prime_factor_params, chunked_prime_factor_with_limb_factors, chunked_low_limb_factors, factor_chunked_primes)
+use core
+use core.math.nt (Z, bit_length, gcd, inverse_mod, factor, factordb_factor, is_prime, next_prime)
+use core.math.crypto.factorization.ecm as ecm
+use core.math.crypto.factorization.pollard as pollard
 
 fn _chunked_product(list facs) any {
    mut prod = Z(1)

@@ -1,0 +1,132 @@
+shape avr_bounds_checks_execute_and_trap_under_qemu {
+  family "runtime/compiler"
+  generator "cross-runner"
+  features [ny test avr portable-text bounds-check runtime qemu]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os (file_exists, file_remove, file_write, run_capture, temp_dir, pid)
+
+def compiler = env("NYTRIX_NY_FULL_BIN")
+assert(is_str(compiler) && compiler.len > 0,
+       "test runner provides the compiler path")
+def stem = temp_dir() + "/ny-avr-bounds-" + to_str(pid())
+def positive_asm = stem + "-positive.s"
+def negative_asm = stem + "-negative.s"
+def signed_asm = stem + "-signed.s"
+def support_asm = stem + "-support.s"
+def positive_obj = stem + "-positive.o"
+def negative_obj = stem + "-negative.o"
+def signed_obj = stem + "-signed.o"
+def support_obj = stem + "-support.o"
+def positive_elf = stem + "-positive.elf"
+def negative_elf = stem + "-negative.elf"
+def signed_elf = stem + "-signed.elf"
+def startup =
+    ".text\n.global _start\n_start:\n" +
+    "  ldi r16, hi8(0x08ff)\n  out 0x3e, r16\n" +
+    "  ldi r16, lo8(0x08ff)\n  out 0x3d, r16\n" +
+    "  call rt_main\n" +
+    "  ldi r16, 0\n  sts 0x00C5, r16\n" +
+    "  ldi r16, 'E'\n" +
+    "  cpi r18, 85\n  brne 1f\n" +
+    "  cpi r19, 0\n  brne 1f\n" +
+    "  cpi r20, 0\n  brne 1f\n" +
+    "  cpi r21, 0\n  brne 1f\n" +
+    "  cpi r22, 0\n  brne 1f\n" +
+    "  cpi r23, 0\n  brne 1f\n" +
+    "  cpi r24, 0\n  brne 1f\n" +
+    "  cpi r25, 0\n  brne 1f\n" +
+    "  ldi r16, 'U'\n" +
+    "1:\n  ldi r17, 0x00\n  sts 0x00C4, r17\n" +
+    "  ldi r17, 0x06\n  sts 0x00C2, r17\n" +
+    "  ldi r17, 0x08\n  sts 0x00C1, r17\n" +
+    "2:\n  lds r17, 0x00C0\n  sbrs r17, 5\n  rjmp 2b\n" +
+    "  sts 0x00C6, r16\n3:\n  rjmp 3b\n" +
+    ".global rt_malloc_i64\nrt_malloc_i64:\n" +
+    "  ldi r18, lo8(cell)\n  ldi r19, hi8(cell)\n" +
+    "  clr r20\n  clr r21\n  clr r22\n  clr r23\n  clr r24\n  clr r25\n" +
+    "ret\n.bss\n.balign 8\ncell:\n  .zero 8\n"
+assert(is_ok(file_write(support_asm, startup)),
+       "write AVR startup and bounded allocator stub")
+fn program(int index) str {
+  "use core\n" +
+  "fn load_unknown(int idx) int {\n" +
+  "  def p = malloc(8)\n" +
+  "  store64_i(p, 42, 0)\n" +
+  "  load64_i(p, idx)\n" +
+  "}\n" +
+  "load_unknown(" + to_str(index) + ")\n"
+}
+fn compile_program(str source, str output) {
+  run_capture([compiler, "--native-backend=avr", "--native-only",
+               "--no-effect-require-known", "--no-alias-require-known",
+               "--nyir-verify", "--emit-asm=" + output, "-no-std",
+               "-emit-only", "-e", source], [], nil, false)
+}
+def positive_compile = compile_program(program(0), positive_asm)
+def negative_compile = compile_program(program(8), negative_asm)
+def signed_compile = compile_program(program(-1), signed_asm)
+def positive_assemble = run_capture(
+    ["clang", "--target=avr", "-mmcu=atmega328p", "-c", positive_asm,
+     "-o", positive_obj], [], nil, false)
+def negative_assemble = run_capture(
+    ["clang", "--target=avr", "-mmcu=atmega328p", "-c", negative_asm,
+     "-o", negative_obj], [], nil, false)
+def signed_assemble = run_capture(
+    ["clang", "--target=avr", "-mmcu=atmega328p", "-c", signed_asm,
+     "-o", signed_obj], [], nil, false)
+def support_assemble = run_capture(
+    ["clang", "--target=avr", "-mmcu=atmega328p", "-c", support_asm,
+     "-o", support_obj], [], nil, false)
+def positive_link = run_capture(
+    ["ld.lld", "-N", "--image-base=0", "-Ttext=0", "-e", "_start",
+     support_obj, positive_obj, "-o", positive_elf], [], nil, false)
+def negative_link = run_capture(
+    ["ld.lld", "-N", "--image-base=0", "-Ttext=0", "-e", "_start",
+     support_obj, negative_obj, "-o", negative_elf], [], nil, false)
+def signed_link = run_capture(
+    ["ld.lld", "-N", "--image-base=0", "-Ttext=0", "-e", "_start",
+     support_obj, signed_obj, "-o", signed_elf], [], nil, false)
+def positive_run = run_capture(
+    ["timeout", "2s", "qemu-system-avr", "-M", "uno", "-display", "none",
+     "-monitor", "none", "-serial", "stdio", "-bios", positive_elf],
+    [], nil, false)
+def negative_run = run_capture(
+    ["timeout", "2s", "qemu-system-avr", "-M", "uno", "-display", "none",
+     "-monitor", "none", "-serial", "stdio", "-bios", negative_elf],
+    [], nil, false)
+def signed_run = run_capture(
+    ["timeout", "2s", "qemu-system-avr", "-M", "uno", "-display", "none",
+     "-monitor", "none", "-serial", "stdio", "-bios", signed_elf],
+    [], nil, false)
+for path in [positive_asm, negative_asm, signed_asm, support_asm, positive_obj,
+             negative_obj, signed_obj, support_obj, positive_elf, negative_elf,
+             signed_elf] {
+  if file_exists(path) { file_remove(path) }
+}
+assert(positive_compile.get("code", 127) == 0 &&
+       negative_compile.get("code", 127) == 0 &&
+       signed_compile.get("code", 127) == 0 &&
+       positive_assemble.get("code", 127) == 0 &&
+       negative_assemble.get("code", 127) == 0 &&
+       signed_assemble.get("code", 127) == 0 &&
+       support_assemble.get("code", 127) == 0 &&
+       positive_link.get("code", 127) == 0 &&
+       negative_link.get("code", 127) == 0 &&
+       signed_link.get("code", 127) == 0,
+       "AVR bounds-check code assembles and links")
+assert(positive_run.get("code", 0) == 124 &&
+       str_contains(positive_run.get("stdout", ""), "U"),
+       "QEMU executes an in-range AVR bounds check")
+assert(negative_run.get("code", 0) == 124 &&
+       !str_contains(negative_run.get("stdout", ""), "U") &&
+       !str_contains(negative_run.get("stdout", ""), "E"),
+       "QEMU traps before returning from an out-of-range AVR access")
+assert(signed_run.get("code", 0) == 124 &&
+       !str_contains(signed_run.get("stdout", ""), "U") &&
+       !str_contains(signed_run.get("stdout", ""), "E"),
+       "QEMU traps on a negative AVR access offset")
+NY
+}

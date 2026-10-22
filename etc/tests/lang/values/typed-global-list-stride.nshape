@@ -1,0 +1,42 @@
+shape typed_global_list_stride {
+  family "runtime/values"
+  generator "embedded"
+  features ["ny", "test", "native", "list", "representation"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.str
+
+fn read_slot(list<int> values, int index) int {
+   values[index]
+}
+
+def size = 8
+mut list<int> values = list(size)
+mut i = 0
+while i < size {
+   values[i] = (i + 1) * 101
+   i += 1
+}
+
+;; The generic list(size) initializer must not override the declared int
+;; element ABI when indexed writes happen in the synthesized top-level body.
+def saved = values[0]
+values[0] = values[7]
+values[7] = saved
+assert(read_slot(values, 0) == 808, "first slot after swap")
+assert(read_slot(values, 7) == 101, "last slot after swap")
+assert(read_slot(values, 4) == 505, "unmodified slot keeps its stride")
+assert(values[-1] == 101, "typed global negative index wraps")
+mut bounds_error = ""
+try {
+   values[size]
+} catch e {
+   bounds_error = e
+}
+assert(str_contains(bounds_error, "index_read out of range"),
+   "typed global out-of-range index remains catchable")
+NY
+}

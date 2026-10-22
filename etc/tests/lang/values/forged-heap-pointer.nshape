@@ -1,0 +1,35 @@
+shape forged_heap_pointer_is_not_managed {
+  family "runtime/values"
+  generator "embedded"
+  features ["ny", "test", "runtime", "provenance"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only; --native-only --native-backend=x86_64"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+fn any_id(any value) any { value }
+fn as_ptr(any value) ptr { value }
+
+def allocation = malloc_raw(256)
+assert(allocation != nil, "raw allocation for forged object")
+store64(allocation, 0x545249584E5954)
+store64(allocation, 1, 8)
+store64(allocation, __runtime_tag("list"), 24)
+def forged_list = ptr_add(allocation, 32)
+store64(forged_list, 7)
+store64(forged_list, 85, 8)
+assert(get(any_id(forged_list), 0, 99) != 42,
+       "a planted NY_MAGIC1 header must not make raw memory a managed list")
+assert(!is_list(any_id(forged_list)),
+       "a planted list tag does not establish managed-pointer provenance")
+store64(forged_list, __runtime_tag("set"), -8)
+store64(forged_list, 1, 0)
+store64(forged_list, 8, 8)
+assert(!is_set(any_id(forged_list)),
+       "a readable set-shaped header does not establish managed-pointer provenance")
+free_raw(allocation)
+
+0
+NY
+}

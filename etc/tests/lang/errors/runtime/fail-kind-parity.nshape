@@ -1,0 +1,15 @@
+shape fail-kind-parity {
+  family "runtime/errors"
+  generator "embedded"
+  features ["ny", "errors", "c5"]
+  template ny-test-case
+  expect compile_fail
+  expect_message "division by zero"
+  flags_matrix "--native-backend=llvm --jit; --native-only --native-backend=x86_64"
+  source ny <<'NY'
+use core
+def int a = 10
+def int b = 0
+print(a / b)
+NY
+}

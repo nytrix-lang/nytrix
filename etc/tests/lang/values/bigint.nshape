@@ -1,0 +1,124 @@
+shape test_bigint {
+  family "runtime/values"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.reflect
+use core.math.nt
+use core.math.big
+
+;; BigInt regressions:
+;; - printing must show decimal value (not "0")
+;; - type/to_str/eq must work for BigInt values created via different entry points
+def n = 12345
+
+;; Construction paths
+def x1 = __bigint_from_int(n)
+def x2 = bigint_from_int(n)
+def x3 = nt_bigint(n)
+def x4 = Z(n)
+def bigint_tag = __runtime_tag("bigint")
+assert(__tagof(x1) == bigint_tag, "__bigint_from_int tag")
+assert(__tagof(x2) == bigint_tag, "bigint_from_int tag")
+assert(__tagof(x3) == bigint_tag, "nt_bigint tag")
+assert(__tagof(x4) == bigint_tag, "Z tag")
+assert(__bigint_to_str(x1) == "12345", "__bigint_to_str from int")
+assert(__bigint_to_str(x2) == "12345", "__bigint_to_str bigint_from_int")
+assert(__bigint_to_str(x4) == "12345", "__bigint_to_str Z")
+
+;; reflect/type conversions
+assert(type(x4) == "bigint", "type(Z(12345))")
+assert(to_str(x4) == "12345", "to_str(Z(12345))")
+
+;; equality paths
+assert(bigint_eq(Z(2), Z(2)), "bigint_eq basic")
+assert(Z(2) == Z(2), "== bigint basic")
+assert(Z(2) != Z(3), "!= bigint basic")
+
+;; arithmetic sanity
+def mul = bigint_mul(Z(3), Z(4))
+assert(to_str(mul) == "12", "bigint_mul + to_str")
+assert(bigint_to_str(mul) == "12", "bigint_to_str")
+
+;; nth_root sanity
+def r8 = nth_root(Z(8), 3)
+assert(r8 != nil, "nth_root returns")
+assert(r8 == Z(2), "nth_root cbrt(8)")
+;; A fixed Newton iteration cap used to stop above the floor for high degrees.
+def root100 = bigint_pow(Z(33), Z(100))
+assert(bigint_nth_root(root100, 100) == Z(33), "100th root exact")
+assert(bigint_nth_root(root100 - Z(1), 100) == Z(32), "100th root below power")
+assert(bigint_nth_root(root100 + Z(1), 100) == Z(33), "100th root above power")
+assert(bigint_nth_root(-root100, 100) == Z(33), "root uses magnitude")
+assert(bigint_nth_root(Z(15), 2) == Z(3), "square root floor")
+assert(bigint_nth_root(Z(16), 2) == Z(4), "square root exact")
+assert(bigint_nth_root(Z(17), 2) == Z(4), "square root above square")
+assert(bigint_nth_root(Z(0), 100) == Z(0), "root zero")
+assert(bigint_nth_root(Z(17), 0) == Z(0), "root invalid index")
+
+;; BigInt sugar regressions
+def sugar_x = Z(21)
+assert(sugar_x.str == "21", "inferred bigint property str")
+assert(sugar_x.bits == 5, "inferred bigint property bits")
+assert(Z(2).pow_int(8).str == "256", "bigint method on constructor")
+assert(Z(5).xor(Z(2)).str == "7", "bigint xor method")
+assert((Z(2)**Z(8)).str == "256", "bigint power operator")
+assert((Z(5)^Z(2)).str == "7", "bigint xor operator")
+assert((5^Z(2)).str == "7", "int bigint xor operator")
+assert((Z(6)&Z(3)).str == "2", "bigint and bigint operator")
+assert((Z(6)&3).str == "2", "bigint and int operator")
+assert((6&Z(3)).str == "2", "int and bigint operator")
+assert((Z(6)|Z(3)).str == "7", "bigint or bigint operator")
+assert((Z(6)|3).str == "7", "bigint or int operator")
+assert((6|Z(3)).str == "7", "int or bigint operator")
+assert((Z(6)>>Z(1)).str == "3", "bigint right shift bigint count")
+assert((Z(6)>>1).str == "3", "bigint right shift int count")
+assert(Z(4).sqrt_mod(17).powmod(2, 17) == Z(4), "bigint modular sqrt method")
+def qroots = Z(1).quadratic_roots_mod(0, -4, 17)
+assert(qroots.len == 2, "bigint quadratic roots method")
+assert(bigint_xor(Z(255), Z(2)).str == "253", "bigint xor helper")
+assert((Z(8) + Z(13)).str == "21", "bigint operator sugar")
+assert(bigint_add(bigint_mul(Z(1), Z(16)), Z(5)).str == "21", "nt reexported bigint helpers")
+assert(__bigint_submul(Z(20), Z(3), Z(4)) == Z(8), "__bigint_submul direct")
+assert(__bigint_modinv(Z(3), Z(11)) == Z(4), "__bigint_modinv direct")
+assert(__bigint_modinv(Z(2), Z(4)) == Z(0), "__bigint_modinv no inverse")
+assert(__bigint_iroot(Z(27), 3) == Z(3), "__bigint_iroot direct")
+assert(__bigint_clz(Z(1)) == 63, "__bigint_clz single bit")
+assert(__bigint_clz(Z(2)**Z(63)) == 0, "__bigint_clz full top limb")
+assert(__bigint_ctz(Z(40)) == 3, "__bigint_ctz direct")
+
+;; Exported GMP results must preserve zero, sign, and whole-limb boundaries.
+def word_boundary = bigint_pow(Z(2), Z(64))
+assert(bigint_to_str(bigint_sub(word_boundary, Z(1))) ==
+   "18446744073709551615", "largest one-limb magnitude")
+def two_word_boundary = bigint_pow(word_boundary, Z(2))
+assert(bigint_to_str(two_word_boundary) ==
+   "340282366920938463463374607431768211456",
+   "power result retains its third limb at the two-word boundary")
+def negative_boundary =
+   bigint_from_str("-340282366920938463463374607431768211456")
+assert(bigint_to_str(bigint_div(negative_boundary, word_boundary)) ==
+   "-18446744073709551616", "multi-limb quotient retains its negative sign")
+assert(bigint_eq(bigint_from_str("-0"), Z(0)),
+   "zero construction has no negative magnitude")
+
+;; .long and byte conversion regressions
+static_assert([1, 2, 3].long == 0x010203, "static list .long")
+static_assert("ABC".long == 0x414243, "static string .long")
+static_assert(123.long == 123, "static int .long")
+assert([1, 2, 3].long == Z(0x010203), "list .long")
+assert("ABC".long == Z(0x414243), "string .long")
+assert(123.long == Z(123), "int .long")
+assert(1.9.long == Z(1), "float .long")
+def list_long_bytes = [1, 2, 3].long.bytes
+assert(type_shape(list_long_bytes) == "list<int>", ".long.bytes keeps typed byte list")
+assert(list_long_bytes == [1, 2, 3], ".long.bytes roundtrip")
+assert("010203".unhex.long.bytes == [1, 2, 3], ".unhex.long.bytes roundtrip")
+assert([1, 2, 3].long.as_bytes.long.bytes == [1, 2, 3], "bigint bytes aliases chain")
+print("✓ bigint tests passed")
+NY
+}

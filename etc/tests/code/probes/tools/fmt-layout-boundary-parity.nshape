@@ -1,0 +1,137 @@
+shape fmt_layout_boundary_parity {
+  family "probe/tools"
+  generator "embedded"
+  features ["formatter", "layout", "boundaries", "parity"]
+  template ny-test-case
+  flags "--native-only"
+  timeout 120
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.subprocess (run_capture)
+use core.str as str
+def ny = env("NYTRIX_NY_FULL_BIN")
+def fmt = env("NYTRIX_TEST_FMT_BIN")
+def cmake = env("NYTRIX_CMAKE_COMMAND")
+def dir = temp_dir() + "/fmt-layout-boundary-" + to_str(pid())
+def made = run_capture([cmake, "-E", "make_directory", dir], [], nil, false)
+assert(made.get("code", 127) == 0, "create formatter boundary directory")
+
+fn compare(str mode, str path) str {
+   def c = run_capture([fmt, mode, "--json", path], [], nil, false)
+   def embedded = run_capture([ny, "fmt", mode, "--json", path], [], nil, false)
+   def output = embedded.get("stdout", "")
+   assert(c.get("code", 127) == 0 && embedded.get("code", 127) == 0 &&
+          c.get("stdout", "") == output,
+          mode + " parity failed for " + path + ": " + output)
+   return output
+}
+
+def shape_path = dir + "/platform/shape-boundary.ny"
+def made_platform = run_capture(
+   [cmake, "-E", "make_directory", dir + "/platform"], [], nil, false)
+assert(made_platform.get("code", 127) == 0, "create platform source directory")
+def shape_source =
+   "fn boundary(input) {\n" +
+   "   def a = input.get(\"alpha\")\n   def b = input.get(\"beta\")\n" +
+   "   def c = input.get(\"gamma\")\n   def d = input.get(\"delta\")\n" +
+   "   def e = input.get(\"epsilon\")\n   def f = input.get(\"zeta\")\n" +
+   "   def g = input.get(\"eta\")\n   def h = input.get(\"theta\")\n" +
+   "   if is_dict(input) { return a }\n   if is_list(input) { return b }\n" +
+   "   if is_str(input) { return c }\n   return nil\n}\n" +
+   "layout shape Input derive(load) { i64: alpha = 0 }\n" +
+   "fn allocate() ptr {\n   def a = malloc(__layout_size(Input))\n" +
+   "   store_layout(a, 1)\n   def b = malloc(__layout_size(Input))\n" +
+   "   store_layout(b, 2)\n   return a\n}\n" +
+   "fn cleanup() {\n   def a = malloc(16)\n   defer { free(a) }\n" +
+   "   def b = malloc(16)\n   defer { free(b) }\n" +
+   "   builder_free(b)\n   close(b)\n   close(a)\n}\n" +
+   "def table = dict().set(\"a\", 1)\ndef table = dict().set(\"b\", 2)\n" +
+   "def table = dict().set(\"c\", 3)\ndef table = dict().set(\"d\", 4)\n" +
+   "def table = dict().set(\"e\", 5)\ndef table = dict().set(\"f\", 6)\n" +
+   "def key_a = KEY_A == 1\ndef key_b = KEY_B == 2\n" +
+   "def key_c = VK_A == 3\ndef key_d = XK_A == 4\n" +
+   "def key_e = KEY_E == 5\ndef key_f = KEY_F == 6\n" +
+   "def key_g = VK_G == 7\ndef key_h = XK_H == 8\n" +
+   "extern fn native_a() int\nextern fn native_b() int\n" +
+   "extern fn native_c() int\nextern fn native_d() int\nextern fn native_e() int\n" +
+   "if (comptime { return __main() }) { print(\"main only\") }\n" +
+   "if (flag && __main()) { print(\"not a direct main guard\") }\n" +
+   "def fake_guard = \"if (__main()) { fake() }\"\n" +
+   "fn translate_x() int { return 1 }\nfn translate_y() int { return 2 }\n" +
+   "fn translate_z() int { return 3 }\n" +
+   "layout record Probe derive(load) { i64: value = 0 }\n" +
+   "fn Probe_to_str() str { return \"probe\" }\n" +
+   "fn Probe_eq(a, b) bool { return true }\n"
+assert(is_ok(file_write(shape_path, shape_source)), "write boundary source")
+def shape_out = compare("--meta", shape_path)
+for expected in ["NYAUD4101", "NYAUD4102", "NYAUD4103", "NYAUD4105",
+                 "NYAUD4201", "NYAUD4202", "NYAUD4203", "NYAUD4301",
+                 "NYAUD4302", "NYAUD4401", "NYAUD4601", "NYAUD4901",
+                 "NYAUD4701", "NYAUD4801"] {
+   assert(str.find(shape_out, expected) >= 0,
+          "layout boundary finding missing " + expected)
+}
+
+def loads = dir + "/direct-layout-loads.ny"
+mut load_source = "fn unpack(p) int {\n"
+for letter in ["A", "B", "C", "D", "E", "F", "G", "H", "I"] {
+   load_source += "   load_layout(p, " + letter + ")\n"
+}
+load_source += "   return load_layout(p, J)\n}\n"
+assert(is_ok(file_write(loads, load_source)), "write direct layout reads")
+def load_out = compare("--meta", loads)
+assert(str.find(load_out, "NYAUD4104") >= 0, "direct layout-load threshold finding")
+
+def ffi = dir + "/extern-groups.ny"
+assert(is_ok(file_write(ffi,
+   "extern fn grouped_one() int\n\n#include <native.h>\n" +
+   "extern fn grouped_two() int\ndef separator = 1\n" +
+   "extern fn separate_one() int\ndef another_separator = 2\n" +
+   "extern fn separate_two() int\n")),
+   "write extern grouping boundaries")
+def ffi_out = compare("--ffi", ffi)
+assert(str.find(ffi_out,
+       "2 adjacent extern fn declarations: grouped_one, grouped_two") >= 0 &&
+       str.find(ffi_out, "separate_one, separate_two") < 0,
+       "extern grouping must respect adjacency and minimum count")
+
+def diagnostic = dir + "/diagnostic-rules.c"
+def diagnostic_source =
+   "void audit(void) {\n" +
+   "  parser_error(\"syntax\");\n  issue_push(\"issue\");\n" +
+   "  parser_error(\"syntax\");\n  issue_push(\"issue\");\n" +
+   "  parser_error(\"syntax\");\n  issue_push(\"issue\");\n" +
+   "  parser_error(\"syntax\");\n  issue_push(\"issue\");\n" +
+   "  parser_error(\"syntax\");\n  issue_push(\"issue\");\n" +
+   "  parser_error(\"syntax\");\n  issue_push(\"issue\");\n" +
+   "  parser_error(\"syntax\");\n  issue_push(\"issue\");\n" +
+   "  parser_error(\"syntax\");\n  issue_push(\"issue\");\n" +
+   "  parser_error(\"syntax\");\n  issue_push(\"issue\");\n" +
+   "  parser_error(\"syntax\");\n  issue_push(\"issue\");\n" +
+   "  parser_error(\"syntax\");\n  issue_push(\"issue\");\n" +
+   "  parser_error(\"syntax\");\n  issue_push(\"issue\");\n" +
+   "  ny_diag_error(\"type\");\n  ny_diag_error(\"type\");\n" +
+   "  ny_diag_error(\"type\");\n  ny_diag_error(\"type\");\n" +
+   "  ny_diag_error(\"type\");\n  ny_diag_error(\"type\");\n" +
+   "  ny_diag_error(\"type\");\n  ny_diag_error(\"type\");\n" +
+   "  ny_diag_error(\"type\");\n  ny_diag_error(\"type\");\n" +
+   "  ny_diag_fix(\"fix\");\n  ny_diag_fix(\"fix\");\n" +
+   "  ny_diag_fix(\"fix\");\n}\n" +
+   "int translate_x(void) { return 1; }\n" +
+   "int translate_y(void) { return 2; }\n" +
+   "int translate_z(void) { return 3; }\n"
+assert(is_ok(file_write(diagnostic, diagnostic_source)),
+       "write C diagnostic boundary source")
+def diagnostic_out = compare("--meta", diagnostic)
+for expected in ["NYAUD4501", "NYAUD4502", "NYAUD4503", "NYAUD4701",
+                 "move repeated call-shape checks toward comptime diagnostic rule declarations"] {
+   assert(str.find(diagnostic_out, expected) >= 0,
+          "C diagnostic boundary missing " + expected)
+}
+
+def cleanup = run_capture([cmake, "-E", "rm", "-rf", dir], [], nil, false)
+assert(cleanup.get("code", 127) == 0, "remove formatter boundary directory")
+print("FMT_LAYOUT_BOUNDARY_PARITY_OK")
+NY
+}

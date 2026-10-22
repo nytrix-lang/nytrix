@@ -1,0 +1,46 @@
+shape attached_owner_identity {
+  family "runtime/modules"
+  generator "embedded"
+  features ["ny", "modules", "attached-method", "identity", "abi"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+module left(
+   make_left,
+){
+   layout Token { i64 value }
+   impl Token {
+      fn identify(*self token) int { 101 }
+   }
+   fn make_left() *Token {
+      def ptr token = malloc(8)
+      store64_i(token, 1)
+      token
+   }
+}
+
+module right(
+   make_right,
+){
+   layout Token { i64 value }
+   impl Token {
+      fn identify(*self token) int { 202 }
+   }
+   fn make_right() *Token {
+      def ptr token = malloc(8)
+      store64_i(token, 2)
+      token
+   }
+}
+
+def int left_id = left.make_left().identify()
+def int right_id = right.make_right().identify()
+assert(left_id == 101,
+       "left module keeps its attached method owner: " + to_str(left_id))
+assert(right_id == 202,
+       "right module keeps its attached method owner: " + to_str(right_id))
+1 + 2
+NY
+}

@@ -18,6 +18,7 @@
 !LICENSE
 !README.md
 !.editorconfig
+!AGENTS.md
 !make
 *.a
 *.so

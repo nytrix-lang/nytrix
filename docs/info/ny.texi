@@ -29,6 +29,12 @@ MIT License
 @command{ny} runs source, emits native binaries, opens the REPL, and dispatches
 the built-in project tools.
 
+Feature support varies across LLVM, the Nytrix-owned native backend, and
+WebAssembly. See @file{docs/learn/fits.md},
+@file{docs/learn/status.md}, and
+@file{docs/learn/quirks.md} before relying on a backend or partial
+contract.
+
 @menu
 * Run::          Source execution and native output.
 * Subcommands::  Project, package, docs, format, test, and perf tools.
@@ -129,10 +135,14 @@ Print wider source context.
 @item --safe-mode, --safe, --mode=safe
 Use default type checks plus ownership/borrow checks, RC/RAII cleanup, strict
 effect/alias policy, and raw-memory diagnostics.
-@item --strict, --strict-types, --borrow-check, --ownership-strict
-Enable focused static checks.
+@item --strict, --strict-types
+Enable strict type checks or reject selected dynamic type fallbacks.
+@item --borrow-check
+Enable advisory borrow and ownership diagnostics.
+@item --ownership-strict
+Promote supported ownership diagnostics to errors.
 @item --heap=gc, -gc
-Enable the opt-in runtime collector.
+Enable the optional tracing collector. Ownership and RAII are recommended.
 @item --max-errors=N
 Parser error cap. Use @code{0} to disable the cap.
 @end table
@@ -179,8 +189,12 @@ Enable execution tracing.
 Prefer CLI flags in shared scripts. Common environment variables:
 
 @table @code
-@item NYTRIX_STD_PATH, NYTRIX_STD_PREBUILT, NYTRIX_BUILD_STD_PATH
-Stdlib lookup and generated stdlib source.
+@item NYTRIX_CORE_PATH
+Override the installed or generated @file{core.ny} bundle path.
+@item NYTRIX_STD_PATH
+Compatibility alias for @code{NYTRIX_CORE_PATH}.
+@item NYTRIX_STD_PREBUILT, NYTRIX_BUILD_STD_PATH
+Override the generated @file{core.ny} source used by internal build tools.
 @item NYTRIX_HOST_TRIPLE, NYTRIX_ARM_FLOAT_ABI
 Host target tuning.
 @item NYTRIX_HOST_CFLAGS, NYTRIX_HOST_LDFLAGS
@@ -217,6 +231,9 @@ Canonical repository docs:
 @itemize @bullet
 @item @file{docs/README.md}
 @item @file{docs/learn/tooling.md}
+@item @file{docs/learn/fits.md}
+@item @file{docs/learn/status.md}
+@item @file{docs/learn/quirks.md}
 @item @file{docs/learn/performance.md}
 @item @file{docs/spec/units.md}
 @item @file{docs/spec/syntax.md}

@@ -2,8 +2,8 @@
 ;; RSA CRT fault attack routines.
 ;; References:
 ;; - Boneh, DeMillo, Lipton, "On the Importance of Checking Cryptographic Protocols for Faults"
-module std.math.crypto.rsa.crt_fault(crt_fault_known_message, crt_fault_unknown_message, crt_fault_attack, crt_fault_attack_known_message)
-use std.math.nt
+module core.math.crypto.rsa.crt_fault(crt_fault_known_message, crt_fault_unknown_message, crt_fault_attack, crt_fault_attack_known_message)
+use core.math.nt
 
 fn _normalize_pair(any p, any q) list { bigint_le(p, q) ? [p, q] : [q, p] }
 

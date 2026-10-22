@@ -4,16 +4,16 @@
 ;; - https://www.cs.cmu.edu/~afs/cs/project/quake/public/papers/Coppersmith-Crypto96.pdf
 ;; - https://crypto.stanford.edu/~dabo/pubs/papers/lowRSAexp.pdf
 ;; References:
-;; - std.math.crypto.lattice
-;; - std.math.crypto
-module std.math.crypto.lattice.coppersmith(howgrave_graham, coppersmith_univariate, coppersmith_univariate_report, coppersmith_univariate_plan, poly_pow, coppersmith_bivariate, coppersmith_coron_integer_bivariate, coppersmith_herrmann_may_bivariate, coppersmith_multivariate_heuristic)
-use std.core
-use std.math.scalar (ceil, floor, float)
-use std.math.nt
-use std.math.crypto.poly
-use std.math.crypto.lattice.lll
-use std.math.crypto.lattice.small_roots
-use std.math.crypto.lattice.mvpoly
+;; - core.math.crypto.lattice
+;; - core.math.crypto
+module core.math.crypto.lattice.coppersmith(howgrave_graham, coppersmith_univariate, coppersmith_univariate_report, coppersmith_univariate_plan, poly_pow, coppersmith_bivariate, coppersmith_coron_integer_bivariate, coppersmith_herrmann_may_bivariate, coppersmith_multivariate_heuristic)
+use core
+use core.math.scalar (ceil, floor, float)
+use core.math.nt
+use core.math.crypto.poly
+use core.math.crypto.lattice.lll
+use core.math.crypto.lattice.small_roots
+use core.math.crypto.lattice.mvpoly
 
 fn _poly_copy_local(list p) list {
    mut out = []

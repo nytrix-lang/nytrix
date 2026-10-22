@@ -1,12 +1,12 @@
 ;; Keywords: syntax json parse highlight
 ;; JSON syntax highlighter
 ;; References:
-;; - std.math.parse.syntax
-;; - std.math.parse.syntax.helpers
-module std.math.parse.syntax.json(tokenize)
-use std.core
-use std.core.str as str
-use std.math.parse.syntax.helpers as _h
+;; - core.math.parse.syntax
+;; - core.math.parse.syntax.helpers
+module core.math.parse.syntax.json(tokenize)
+use core
+use core.str as str
+use core.math.parse.syntax.helpers as _h
 
 fn tokenize(str source, list out_tokens) list {
    "Runs the tokenize operation."

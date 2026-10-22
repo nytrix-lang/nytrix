@@ -1,0 +1,45 @@
+shape typed_set_methods_have_known_effect_contracts {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "set"]
+  template ny-test-case
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+fn has_key(set items, any key) bool { items.contains(key) }
+fn count_items(set items) int { items.len() }
+fn insert_key(set items, any key) set { items.add(key) }
+fn remove_key(set items, any key) set { items.sub(key) }
+@effects(read, write)
+fn remove_key_alias(set items, any key) set { items.remove(key) }
+@effects(read, write)
+fn delete_key_alias(set items, any key) set { items.delete(key) }
+@effects(read, write)
+fn delete_key_function(set items, any key) set { delete(items, key) }
+fn clear_items(set items) any { items.clear() }
+fn item_values(set items) list { items.values() }
+
+mut items = set()
+items = insert_key(items, "first")
+assert(has_key(items, "first"), "set contains contract")
+assert(count_items(items) == 1, "set len contract")
+assert(item_values(items).len() == 1, "set values contract")
+items = remove_key(items, "first")
+assert(count_items(items) == 0, "set sub contract")
+items = insert_key(items, "remove")
+items = remove_key_alias(items, "remove")
+assert(!has_key(items, "remove"), "set remove dispatch")
+items = insert_key(items, "delete")
+items = delete_key_alias(items, "delete")
+assert(!has_key(items, "delete"), "set delete dispatch")
+items = insert_key(items, "delete-function")
+items = delete_key_function(items, "delete-function")
+assert(!has_key(items, "delete-function"), "generic set delete dispatch")
+items = insert_key(items, "second")
+clear_items(items)
+assert(count_items(items) == 0, "set clear contract")
+print("ok set method effects are known")
+NY
+}

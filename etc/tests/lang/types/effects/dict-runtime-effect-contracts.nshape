@@ -1,0 +1,126 @@
+shape raw_dictionary_runtime_effects_are_precise {
+  family "typing/effects"
+  generator "regression"
+  features ["ny" "test" "typing" "effects" "dict" "runtime-contracts"]
+  template ny-test-case
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+@effects(read)
+fn raw_get(dict values) any {
+  __dict_get_raw(values, "present", 0)
+}
+
+@effects(read)
+fn raw_len(dict values) int {
+  __dict_len_raw(values)
+}
+
+@effects(read)
+fn raw_has(dict values) bool {
+  __dict_has_str_raw(values, "present") != 0
+}
+
+@effects(write, alloc)
+fn raw_set(dict values, any value) {
+  __dict_set_raw(values, "present", value)
+}
+
+@effects(write, alloc)
+fn raw_reserve(dict values, int extra) {
+  __dict_reserve(values, extra)
+}
+
+@effects(write)
+fn raw_delete(dict values) {
+  __dict_delete_str_raw(values, "missing")
+}
+
+@effects(write)
+fn raw_clear(dict values) {
+  __dict_clear_raw(values)
+}
+
+@effects(read, alloc)
+fn raw_keys(dict values) list {
+  __dict_keys_raw(values)
+}
+
+@effects(read, alloc)
+fn raw_values(dict values) list {
+  __dict_values_raw(values)
+}
+
+@effects(read, alloc)
+fn raw_items(dict values) list {
+  __dict_items_raw(values)
+}
+
+@effects(read, alloc)
+fn raw_clone(dict values) dict {
+  __dict_clone_raw(values)
+}
+
+@effects(read, write, alloc)
+fn raw_merge(dict values, dict source) {
+  __dict_merge_raw(values, source)
+}
+
+@effects(read)
+fn raw_list_len(list values) int {
+  __list_len(values)
+}
+
+@effects(read)
+fn raw_list_sum(list values, int end) int {
+  __list_sum_int_range(values, 0, end)
+}
+
+@effects(write, alloc)
+fn raw_list_reserve(list values, int capacity) {
+  __list_reserve(values, capacity)
+}
+
+@effects(write)
+fn raw_list_set_len(list values, int count) {
+  __list_set_len(values, count)
+}
+
+@effects(write)
+fn raw_list_as_tuple(list values) tuple {
+  __list_as_tuple(values)
+}
+
+mut values = dict()
+raw_reserve(values, 8)
+raw_set(values, 17)
+assert(raw_get(values) == 17, "raw dictionary get contract")
+assert(raw_len(values) == 1, "raw dictionary length contract")
+assert(raw_has(values), "raw dictionary has contract")
+assert(raw_keys(values).len() == 1, "raw dictionary keys contract")
+assert(raw_values(values).len() == 1, "raw dictionary values contract")
+assert(raw_items(values).len() == 1, "raw dictionary items contract")
+assert(raw_clone(values).get("present") == 17, "raw dictionary clone contract")
+def public_clone = values.clone()
+assert(public_clone.get("present") == 17 && public_clone.len() == 1,
+       "public dictionary clone preserves its object argument")
+mut source = dict()
+source.set("second", 23)
+raw_merge(values, source)
+assert(raw_len(values) == 2, "raw dictionary merge contract")
+raw_delete(values)
+assert(raw_len(values) == 2, "missing delete leaves dictionary unchanged")
+raw_clear(values)
+assert(raw_len(values) == 0, "raw dictionary clear contract")
+mut numbers = [3, 5, 7]
+assert(raw_list_len(numbers) == 3, "raw list length contract")
+raw_list_sum(numbers, 3)
+raw_list_reserve(numbers, 8)
+raw_list_set_len(numbers, 2)
+assert(raw_list_len(numbers) == 2, "raw list set-length contract")
+assert(raw_list_as_tuple(numbers).len() == 2,
+       "raw list-to-tuple contract")
+NY
+}

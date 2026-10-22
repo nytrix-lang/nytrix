@@ -1,0 +1,12 @@
+shape test_repl_rejected_submission {
+  family "repl"
+  generator "embedded"
+  features ["ny", "test", "repl", "incremental", "state", "errors"]
+  template ny-test-case
+  expect compile_and_run
+  repl_expect "type mismatch\nREPL-REJECTED-SUBMISSION-OK"
+  repl_commands "rejected_value = \"not an integer\"\nrejected_value = rejected_value + 1\nassert(rejected_value == 12, \"a rejected submission leaves prior state usable\")\nfn later_rejected_helper() int { rejected_value + 1 }\nassert(later_rejected_helper() == 13, \"later functions see retained state\")\nprint(\"REPL-REJECTED-SUBMISSION-OK\")"
+  source ny <<'NY'
+mut int rejected_value = 10
+NY
+}

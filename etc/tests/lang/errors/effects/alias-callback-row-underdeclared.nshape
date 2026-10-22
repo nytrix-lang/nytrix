@@ -1,0 +1,30 @@
+shape open_callback_row_survives_local_aliases {
+  family "typing/effects"
+  generator "regression"
+  features ["ny" "test" "typing" "effects" "callback" "alias" "row"]
+  template ny-test-case
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_fail
+  expect_message "declared @effects(none) but inferred effects=io"
+  source ny <<'NY'
+@effects(io)
+fn print_answer() int {
+  print("answer\n")
+  42
+}
+
+@effects(e)
+fn run_eff_through_alias(fnptr callback) int {
+  def captured = callback
+  def forwarded = captured
+  return forwarded()
+}
+
+@effects(none)
+fn invoke_underdeclared() int {
+  run_eff_through_alias(print_answer)
+}
+
+invoke_underdeclared()
+NY
+}

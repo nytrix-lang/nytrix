@@ -1,8 +1,8 @@
 ;; Keywords: net network socket tcp udp http https server client requests curl remote tube process ssh tls transcript context os
 ;; Networking facade for HTTP requests, servers, sockets, tubes, remotes, and shared transport context.
 ;; References:
-;; - std.os
-module std.os.net(
+;; - core.os
+module core.os.net(
    server,
    htons, ipv4_parse, ipv4_format, gethostbyname, socket_connect, socket_bind, socket_bound_port, socket_accept, socket_accept_info,
    socket_set_timeout_ms, socket_set_recv_timeout_ms, socket_set_send_timeout_ms,
@@ -34,14 +34,14 @@ module std.os.net(
    curl_available, curl_request, curl_request_raw, curl_get, curl_fetch
 )
 
-use std.os.net.socket as sock
-use std.os.net.context as netctx
-use std.os.net.remote as rem
-use std.os.net.http as http
-use std.os.net.requests as req
-use std.os.net.curl as curl
-use std.core
-use std.os.net.server as server
+use core.os.net.socket as sock
+use core.os.net.context as netctx
+use core.os.net.remote as rem
+use core.os.net.http as http
+use core.os.net.requests as req
+use core.os.net.curl as curl
+use core
+use core.os.net.server as server
 
 fn htons(int x) { return sock.htons(x) }
 
@@ -315,5 +315,5 @@ fn curl_fetch(str url, int timeout_sec=60, str user_agent="nytrix/1.0") any {
    assert(req_url.get(0) == "example.com" && req_url.get(1) == 443 && req_url.get(2) == "/x", "net requests facade")
    def query = http_parse_query("a=1&b=two")
    assert(query.get("a") == "1" && query.get("b") == "two" && is_bool(curl_available()), "net parse/curl facade")
-   print("✓ std.os.net self-test passed")
+   print("✓ core.os.net self-test passed")
 }

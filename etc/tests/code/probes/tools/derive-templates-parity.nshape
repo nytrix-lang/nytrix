@@ -1,0 +1,191 @@
+shape derive_templates_match_legacy_derive {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "codegen", "derive", "reflection", "layout", "parity"]
+  flags_matrix "--native --run; --native-only; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.compiler.codegen (load_fields_for, zero_for, eq_for, hash_for,
+                               debug_str_for, store_for, default_ctor_for)
+
+;; The old C derive expander and the compiler's Ny templates must expose the
+;; same declarations and preserve the same observable layout behavior.
+fn parity_default_computed() int { return 29 }
+
+layout GeneratedLoadRecord {
+   i32 count
+   bool enabled
+   int wide
+   f32 narrow_float
+   f64 scale
+   str label
+}
+layout record LegacyLoadRecord derive(load) {
+   i32 count
+   bool enabled
+   int wide
+   f32 narrow_float
+   f64 scale
+   str label
+}
+comptime emit load_fields_for(GeneratedLoadRecord)
+
+layout GeneratedZeroRecord {
+   i32 count
+   bool enabled
+}
+layout record LegacyZeroRecord derive(zero, load) {
+   i32 count
+   bool enabled
+}
+comptime emit zero_for(GeneratedZeroRecord)
+comptime emit load_fields_for(GeneratedZeroRecord)
+
+layout GeneratedEqHashRecord {
+   i32 count
+   bool enabled
+   f64 scale
+}
+layout record LegacyEqHashRecord derive(eq, hash) {
+   i32 count
+   bool enabled
+   f64 scale
+}
+comptime emit eq_for(GeneratedEqHashRecord)
+comptime emit hash_for(GeneratedEqHashRecord)
+
+layout GeneratedDebugRecord {
+   i32 count
+   bool enabled
+   f64 scale
+}
+layout record LegacyDebugRecord derive(debug_str) {
+   i32 count
+   bool enabled
+   f64 scale
+}
+comptime emit debug_str_for(GeneratedDebugRecord)
+
+layout GeneratedStoreRecord {
+   i32 count
+   bool enabled
+   int computed = parity_default_computed()
+   f64 scale
+}
+layout record LegacyStoreRecord derive(store, load) {
+   i32 count
+   bool enabled
+   int computed = parity_default_computed()
+   f64 scale
+}
+comptime emit store_for(GeneratedStoreRecord)
+comptime emit load_fields_for(GeneratedStoreRecord)
+
+layout GeneratedDefaultRecord {
+   i32 count = 7
+   bool enabled = true
+   f64 scale
+}
+layout record LegacyDefaultRecord derive(default, load) {
+   i32 count = 7
+   bool enabled = true
+   f64 scale
+}
+comptime emit default_ctor_for(GeneratedDefaultRecord)
+comptime emit load_fields_for(GeneratedDefaultRecord)
+
+def ptr generated_load = malloc(__layout_size("GeneratedLoadRecord"))
+def ptr legacy_load = malloc(__layout_size("LegacyLoadRecord"))
+store_layout(generated_load, "GeneratedLoadRecord", 23, true,
+             900719925474099, 3.5, 1.25, "loaded")
+store_layout(legacy_load, "LegacyLoadRecord", 23, true,
+             900719925474099, 3.5, 1.25, "loaded")
+def generated_fields = GeneratedLoadRecord_load_fields(generated_load)
+assert(generated_fields.get("count") == LegacyLoadRecord_load_count(legacy_load) &&
+       generated_fields.get("enabled") == LegacyLoadRecord_load_enabled(legacy_load) &&
+       generated_fields.get("wide") == LegacyLoadRecord_load_wide(legacy_load) &&
+       generated_fields.get("narrow_float") == LegacyLoadRecord_load_narrow_float(legacy_load) &&
+       generated_fields.get("scale") == LegacyLoadRecord_load_scale(legacy_load) &&
+       generated_fields.get("label") == LegacyLoadRecord_load_label(legacy_load),
+       "load_fields_for agrees with derive(load) for each declared field")
+assert(GeneratedLoadRecord_load_narrow_float(generated_load) ==
+          LegacyLoadRecord_load_narrow_float(legacy_load) &&
+       GeneratedLoadRecord_load_wide(generated_load) ==
+          LegacyLoadRecord_load_wide(legacy_load),
+       "generated field readers preserve narrow-float and wide-integer ABI")
+
+def ptr generated_zero = GeneratedZeroRecord_zero()
+def ptr legacy_zero = LegacyZeroRecord_zero()
+assert(load_layout(generated_zero, "GeneratedZeroRecord", "count") ==
+          load_layout(legacy_zero, "LegacyZeroRecord", "count") &&
+       load_layout(generated_zero, "GeneratedZeroRecord", "enabled") ==
+          load_layout(legacy_zero, "LegacyZeroRecord", "enabled"),
+       "zero_for initializes the same fields as derive(zero)")
+
+def ptr generated_eq_a = malloc(__layout_size("GeneratedEqHashRecord"))
+def ptr generated_eq_b = malloc(__layout_size("GeneratedEqHashRecord"))
+def ptr legacy_eq_a = malloc(__layout_size("LegacyEqHashRecord"))
+def ptr legacy_eq_b = malloc(__layout_size("LegacyEqHashRecord"))
+store_layout(generated_eq_a, "GeneratedEqHashRecord", 11, true, 2.5)
+store_layout(generated_eq_b, "GeneratedEqHashRecord", 11, true, 2.5)
+store_layout(legacy_eq_a, "LegacyEqHashRecord", 11, true, 2.5)
+store_layout(legacy_eq_b, "LegacyEqHashRecord", 11, true, 2.5)
+assert(GeneratedEqHashRecord_eq(generated_eq_a, generated_eq_b) &&
+       LegacyEqHashRecord_eq(legacy_eq_a, legacy_eq_b),
+       "eq_for and derive(eq) accept equal fields")
+assert(GeneratedEqHashRecord_hash(generated_eq_a) ==
+          LegacyEqHashRecord_hash(legacy_eq_a),
+       "hash_for and derive(hash) fold fields in the same order")
+store_layout(generated_eq_b, "GeneratedEqHashRecord", 11, false, 2.5)
+store_layout(legacy_eq_b, "LegacyEqHashRecord", 11, false, 2.5)
+assert(!GeneratedEqHashRecord_eq(generated_eq_a, generated_eq_b) &&
+       !LegacyEqHashRecord_eq(legacy_eq_a, legacy_eq_b),
+       "eq_for and derive(eq) reject differing fields")
+
+def ptr generated_debug = malloc(__layout_size("GeneratedDebugRecord"))
+def ptr legacy_debug = malloc(__layout_size("LegacyDebugRecord"))
+store_layout(generated_debug, "GeneratedDebugRecord", 11, true, 2.5)
+store_layout(legacy_debug, "LegacyDebugRecord", 11, true, 2.5)
+assert(GeneratedDebugRecord_debug_str(generated_debug) ==
+          "GeneratedDebugRecord{count=11, enabled=true, scale=2.5}" &&
+       LegacyDebugRecord_debug_str(legacy_debug) ==
+          "LegacyDebugRecord{count=11, enabled=true, scale=2.5}",
+       "debug_str_for preserves field order and scalar formatting")
+
+def ptr generated_store = malloc(__layout_size("GeneratedStoreRecord"))
+def ptr legacy_store = malloc(__layout_size("LegacyStoreRecord"))
+assert(GeneratedStoreRecord_store(generated_store, 5, true, 29, 4.5) == generated_store &&
+       LegacyStoreRecord_store(legacy_store, 5, true, 29, 4.5) == legacy_store,
+       "store_for and derive(store) return the written destination")
+assert(GeneratedStoreRecord_load_fields(generated_store).get("computed") ==
+          LegacyStoreRecord_load_computed(legacy_store),
+       "store_for preserves computed field values across the layout ABI")
+
+def ptr generated_default = GeneratedDefaultRecord()
+def ptr legacy_default = LegacyDefaultRecord()
+assert(GeneratedDefaultRecord_load_count(generated_default) ==
+          LegacyDefaultRecord_load_count(legacy_default) &&
+       GeneratedDefaultRecord_load_enabled(generated_default) ==
+          LegacyDefaultRecord_load_enabled(legacy_default) &&
+       GeneratedDefaultRecord_load_scale(generated_default) ==
+          LegacyDefaultRecord_load_scale(legacy_default),
+       "default_ctor_for and derive(default) construct the same defaults")
+
+free(generated_load)
+free(legacy_load)
+free(generated_zero)
+free(legacy_zero)
+free(generated_eq_a)
+free(generated_eq_b)
+free(legacy_eq_a)
+free(legacy_eq_b)
+free(generated_debug)
+free(legacy_debug)
+free(generated_store)
+free(legacy_store)
+free(generated_default)
+free(legacy_default)
+NY
+}

@@ -1,0 +1,18 @@
+shape test_cstr_pointer_ownership {
+  family "runtime/values"
+  generator "embedded"
+  features [ny ownership string native-abi]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  timeout 25
+  source ny <<'NY'
+use core
+use core.str
+
+def joined = "compiler" + "ownership"
+assert(joined == "compilerownership", "C-string concatenation borrows both inputs")
+assert(replace("borrowed source", "source", "result") == "borrowed result", "C-string replacement borrows all inputs")
+assert(joined.len == 17, "borrowed inputs remain valid after allocating results")
+NY
+}

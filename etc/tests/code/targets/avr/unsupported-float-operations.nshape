@@ -1,0 +1,46 @@
+shape avr_unimplemented_transcendentals_fail_closed {
+  family "runtime/compiler"
+  generator "regression"
+  features [avr portable-text float fail-closed nyir]
+  template ny-test-case
+  expect run
+  source ny <<'NY'
+use core
+use core.os (file_exists, file_remove, pid, run_capture, temp_dir)
+
+def compiler = env("NYTRIX_NY_FULL_BIN")
+assert(is_str(compiler) && compiler.len > 0,
+       "test runner provides the compiler path")
+
+fn rejects(str name, str source) bool {
+  def asm_path = temp_dir() + "/ny-avr-unsupported-" + to_str(pid()) +
+                 "-" + name + ".s"
+  def result = run_capture(
+      ["sh", "-c", "exec \"$@\" 2>&1", "sh", compiler,
+       "--native-backend=avr", "--native-only", "--nyir-verify",
+       "--emit-asm=" + asm_path, "-no-std", "-emit-only", "-e", source],
+      [], nil, false)
+  def emitted = file_exists(asm_path)
+  def diagnostic = result.get("stdout", "")
+  def rejected_operation =
+      str_contains(diagnostic,
+                   "AVR portable emitter does not support NYIR operation") ||
+      str_contains(diagnostic, "AVR portable emitter rejects call")
+  if emitted { file_remove(asm_path) }
+  assert(result.get("code", 0) != 0 && !emitted &&
+         rejected_operation,
+         "AVR " + name + " is rejected with an NYIR diagnostic and no assembly")
+  true
+}
+
+assert(rejects("f64-sqrt", "(sqrt(4.0) == 2.0 ? 1 : 0)"),
+       "f64 square root must remain fail-closed")
+assert(rejects("f64-sin",
+               "__flt_sin(0.5) + 1.0"),
+       "f64 sine must remain fail-closed")
+assert(rejects("f64-cos",
+               "__flt_cos(0.5) + 1.0"),
+       "f64 cosine must remain fail-closed")
+print("AVR_UNSUPPORTED_FLOAT_OPERATIONS_FAIL_CLOSED_OK")
+NY
+}

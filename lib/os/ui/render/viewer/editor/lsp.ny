@@ -1,19 +1,19 @@
 ;; Keywords: editor lsp diagnostics symbols language os ui render viewer text
 ;; Language-service style diagnostics, symbols, and navigation helpers for editor buffers.
 ;; References:
-;; - std.os.ui.render.viewer.editor.outline
-module std.os.ui.render.viewer.editor.lsp(
+;; - core.os.ui.render.viewer.editor.outline
+module core.os.ui.render.viewer.editor.lsp(
    new, enabled_by_default, command_for, status, start, stop, restart, toggle_popups,
    did_open, did_change, did_save, completion, hover, definition,
    diagnostics_text, diagnostics_from_check, output_name
 )
 
-use std.core
-use std.core.str as str
-use std.os (env)
-use std.os.path as ospath
-use std.os.ui.render.viewer.editor.tools as tools
-use std.math.parse.data.json (json_encode)
+use core
+use core.str as str
+use core.os (env)
+use core.os.path as ospath
+use core.os.ui.render.viewer.editor.tools as tools
+use core.math.parse.data.json (json_encode)
 
 fn _ext_key(str path) str {
    def ext = str.upper(str.str_replace(ospath.extname(path), ".", ""))
@@ -220,7 +220,7 @@ fn output_name(str path) str {
 }
 
 #main {
-   mut st = start(new(), "main.ny", "use std.core\n")
+   mut st = start(new(), "main.ny", "use core\n")
    st = completion(st, "main.ny", 0, 1)
    assert(str.str_contains(to_str(st.get("last_request", "")), "textDocument/completion"), "lsp request")
    assert(status(st).len > 0, "lsp status")

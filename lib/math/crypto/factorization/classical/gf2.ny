@@ -1,12 +1,13 @@
 ;; Keywords: factorization classical gf2 linear-algebra nullspace lanczos wiedemann sparse packed
-;; References: std.math.crypto.factorization.classical
-module std.math.crypto.factorization.classical.gf2(_gf2_append_all, _gf2_block_krylov_candidates, _gf2_block_krylov_core_fields, _gf2_block_krylov_image_report, _gf2_block_krylov_iteration_plan, _gf2_block_krylov_op_fields, _gf2_block_krylov_op_fields_from, _gf2_block_krylov_post_lanczos_fields, _gf2_block_krylov_report, _gf2_block_krylov_report_fields, _gf2_block_krylov_setup, _gf2_block_krylov_solution_fields, _gf2_block_krylov_solution_report, _gf2_block_krylov_sparse_report, _gf2_block_krylov_sparse_setup, _gf2_block_krylov_walk_report, _gf2_columns_to_packed_rows, _gf2_columns_to_rows, _gf2_copy_packed_rows, _gf2_copy_vec, _gf2_copy_words, _gf2_cycle_to_dependency, _gf2_dense_vec_packed_words, _gf2_dense_width, _gf2_dependency_candidates, _gf2_dependency_sparse_pipeline_report, _gf2_expand_precondition_dependency, _gf2_independent_basis_report, _gf2_pack_dense_row, _gf2_pack_rows, _gf2_pack_sparse_row, _gf2_packed_basis_from_pivots, _gf2_packed_bit, _gf2_packed_dot_parity, _gf2_packed_eliminate_pivot, _gf2_packed_eliminate_rows, _gf2_packed_find_pivot, _gf2_packed_is_zero, _gf2_packed_matvec_is_zero, _gf2_packed_matvec_words, _gf2_packed_nonzero_rows, _gf2_packed_rows_nullspace_report, _gf2_packed_set_bit, _gf2_packed_swap_rank, _gf2_packed_to_dense, _gf2_packed_transpose_matvec_words, _gf2_packed_transpose_matvec_words_only, _gf2_packed_width, _gf2_packed_words_equal, _gf2_packed_words_hash, _gf2_packed_xor_inplace, _gf2_pipeline_empty_linear_algebra, _gf2_pipeline_exact_closure, _gf2_pipeline_expand_candidates, _gf2_pipeline_fields, _gf2_pipeline_immediate_linear_algebra, _gf2_pipeline_linear_algebra, _gf2_pipeline_precondition, _gf2_pipeline_verify, _gf2_post_lanczos_prefix_rows, _gf2_precondition_active_cols2, _gf2_precondition_active_rows2, _gf2_precondition_clique_pass, _gf2_precondition_decrement_intersection_counts, _gf2_precondition_find_other_col2, _gf2_precondition_initial_columns, _gf2_precondition_nochange_state, _gf2_precondition_prune_pass, _gf2_precondition_quick_noop, _gf2_precondition_reduced_state, _gf2_precondition_row_counts2, _gf2_precondition_trim_heavy, _gf2_seed_vec, _gf2_seen_packed_words_add, _gf2_sparse_back_eliminate, _gf2_sparse_basis_from_pivots, _gf2_sparse_contains, _gf2_sparse_elim_state, _gf2_sparse_eliminate_row, _gf2_sparse_eliminate_rows, _gf2_sparse_entry_count, _gf2_sparse_from_dense_rows, _gf2_sparse_from_dense_rows_until, _gf2_sparse_insert, _gf2_sparse_insert_pivot, _gf2_sparse_is_clean, _gf2_sparse_matvec, _gf2_sparse_matvec_into, _gf2_sparse_matvec_is_zero, _gf2_sparse_matvec_vec, _gf2_sparse_normalize, _gf2_sparse_remove, _gf2_sparse_tail_rows_report, _gf2_sparse_to_dense, _gf2_sparse_toggle, _gf2_sparse_transpose_matvec, _gf2_sparse_transpose_matvec_into, _gf2_sparse_width, _gf2_sparse_xor, _gf2_vec_is_zero, _gf2_vec_pivot, _gf2_vec_weight, _gf2_verified_basis_report, _gf2_verified_sparse_basis_report, _gf2_word_bits, _gf2_word_count, _gf2_xor_vec, _gf2_xor_vec_into, _gf2_zero_vec, _gf2_zero_words, block_lanczos_gf2_nullspace, block_lanczos_gf2_report, block_wiedemann_gf2_nullspace, block_wiedemann_gf2_report, gf2_dependency_candidates, gf2_dependency_candidates_report, gf2_dependency_pipeline_report, gf2_matrix_precondition_report, gf2_nullspace, gf2_nullspace_report, packed_gf2_matvec_report, packed_gf2_normal_matvec_report, packed_gf2_nullspace, packed_gf2_nullspace_report, sparse_gf2_matvec_report, sparse_gf2_normal_matvec_report, sparse_gf2_nullspace, sparse_gf2_nullspace_report)
-use std.math.nt
-use std.math.scalar as math
-use std.math.matrix as matrix
-use std.math.bin (bit_count)
-use std.os (ticks)
-use std.math.crypto.factorization.classical.misc
+;; Implements dense, sparse, and block Krylov nullspace routines over GF(2).
+;; References: core.math.crypto.factorization.classical
+module core.math.crypto.factorization.classical.gf2(_gf2_append_all, _gf2_block_krylov_candidates, _gf2_block_krylov_core_fields, _gf2_block_krylov_image_report, _gf2_block_krylov_iteration_plan, _gf2_block_krylov_op_fields, _gf2_block_krylov_op_fields_from, _gf2_block_krylov_post_lanczos_fields, _gf2_block_krylov_report, _gf2_block_krylov_report_fields, _gf2_block_krylov_setup, _gf2_block_krylov_solution_fields, _gf2_block_krylov_solution_report, _gf2_block_krylov_sparse_report, _gf2_block_krylov_sparse_setup, _gf2_block_krylov_walk_report, _gf2_columns_to_packed_rows, _gf2_columns_to_rows, _gf2_copy_packed_rows, _gf2_copy_vec, _gf2_copy_words, _gf2_cycle_to_dependency, _gf2_dense_vec_packed_words, _gf2_dense_width, _gf2_dependency_candidates, _gf2_dependency_sparse_pipeline_report, _gf2_expand_precondition_dependency, _gf2_independent_basis_report, _gf2_pack_dense_row, _gf2_pack_rows, _gf2_pack_sparse_row, _gf2_packed_basis_from_pivots, _gf2_packed_bit, _gf2_packed_dot_parity, _gf2_packed_eliminate_pivot, _gf2_packed_eliminate_rows, _gf2_packed_find_pivot, _gf2_packed_is_zero, _gf2_packed_matvec_is_zero, _gf2_packed_matvec_words, _gf2_packed_nonzero_rows, _gf2_packed_rows_nullspace_report, _gf2_packed_set_bit, _gf2_packed_swap_rank, _gf2_packed_to_dense, _gf2_packed_transpose_matvec_words, _gf2_packed_transpose_matvec_words_only, _gf2_packed_width, _gf2_packed_words_equal, _gf2_packed_words_hash, _gf2_packed_xor_inplace, _gf2_pipeline_empty_linear_algebra, _gf2_pipeline_exact_closure, _gf2_pipeline_expand_candidates, _gf2_pipeline_fields, _gf2_pipeline_immediate_linear_algebra, _gf2_pipeline_linear_algebra, _gf2_pipeline_precondition, _gf2_pipeline_verify, _gf2_post_lanczos_prefix_rows, _gf2_precondition_active_cols2, _gf2_precondition_active_rows2, _gf2_precondition_clique_pass, _gf2_precondition_decrement_intersection_counts, _gf2_precondition_find_other_col2, _gf2_precondition_initial_columns, _gf2_precondition_nochange_state, _gf2_precondition_prune_pass, _gf2_precondition_quick_noop, _gf2_precondition_reduced_state, _gf2_precondition_row_counts2, _gf2_precondition_trim_heavy, _gf2_seed_vec, _gf2_seen_packed_words_add, _gf2_sparse_back_eliminate, _gf2_sparse_basis_from_pivots, _gf2_sparse_contains, _gf2_sparse_elim_state, _gf2_sparse_eliminate_row, _gf2_sparse_eliminate_rows, _gf2_sparse_entry_count, _gf2_sparse_from_dense_rows, _gf2_sparse_from_dense_rows_until, _gf2_sparse_insert, _gf2_sparse_insert_pivot, _gf2_sparse_is_clean, _gf2_sparse_matvec, _gf2_sparse_matvec_into, _gf2_sparse_matvec_is_zero, _gf2_sparse_matvec_vec, _gf2_sparse_normalize, _gf2_sparse_remove, _gf2_sparse_tail_rows_report, _gf2_sparse_to_dense, _gf2_sparse_toggle, _gf2_sparse_transpose_matvec, _gf2_sparse_transpose_matvec_into, _gf2_sparse_width, _gf2_sparse_xor, _gf2_vec_is_zero, _gf2_vec_pivot, _gf2_vec_weight, _gf2_verified_basis_report, _gf2_verified_sparse_basis_report, _gf2_word_bits, _gf2_word_count, _gf2_xor_vec, _gf2_xor_vec_into, _gf2_zero_vec, _gf2_zero_words, block_lanczos_gf2_nullspace, block_lanczos_gf2_report, block_wiedemann_gf2_nullspace, block_wiedemann_gf2_report, gf2_dependency_candidates, gf2_dependency_candidates_report, gf2_dependency_pipeline_report, gf2_matrix_precondition_report, gf2_nullspace, gf2_nullspace_report, packed_gf2_matvec_report, packed_gf2_normal_matvec_report, packed_gf2_nullspace, packed_gf2_nullspace_report, sparse_gf2_matvec_report, sparse_gf2_normal_matvec_report, sparse_gf2_nullspace, sparse_gf2_nullspace_report)
+use core.math.nt
+use core.math.scalar as math
+use core.math.matrix as matrix
+use core.math.bin (bit_count)
+use core.os (ticks)
+use core.math.crypto.factorization.classical.misc
 
 fn _gf2_sparse_contains(list row, int col) bool {
    mut i = 0
@@ -179,7 +180,7 @@ fn _gf2_sparse_entry_count(list sparse_rows) int {
 
 fn _gf2_sparse_tail_rows_report(list sparse_rows, int prefix) dict {
    def start = max(0, min(prefix, sparse_rows.len))
-   def n = sparse_rows.len - start
+   def int n = sparse_rows.len - start
    mut rows = list(n)
    __list_set_len(rows, n)
    mut entries = 0
@@ -217,7 +218,7 @@ fn _gf2_sparse_matvec_into(list<list<int>> sparse_rows, list<int> vector, list<i
       mut j = 0
       while j < row.len {
          def col = row[j]
-         acc = acc ^^ (vector[col] & 1)
+         acc = acc ^ (vector[col] & 1)
          j += 1
       }
       out[i] = acc & 1
@@ -233,7 +234,7 @@ fn _gf2_sparse_matvec_is_zero(list<list<int>> sparse_rows, list<int> vector) boo
       mut acc = 0
       mut j = 0
       while j < row.len {
-         acc = acc ^^ (vector[row[j]] & 1)
+         acc = acc ^ (vector[row[j]] & 1)
          j += 1
       }
       if (acc & 1) != 0 { return false }
@@ -253,7 +254,7 @@ fn _gf2_sparse_transpose_matvec(list<list<int>> sparse_rows, list<int> y, int wi
          mut j = 0
          while j < row.len {
             def col = row[j]
-            out[col] = out[col] ^^ 1
+            out[col] = out[col] ^ 1
             j += 1
          }
          entry_xor_ops += row.len
@@ -280,7 +281,7 @@ fn _gf2_sparse_transpose_matvec_into(list<list<int>> sparse_rows, list<int> y, l
          mut j = 0
          while j < row.len {
             def col = row[j]
-            def next = out[col] ^^ 1
+            def next = out[col] ^ 1
             out[col] = next
             nonzero_count += next == 1 ? 1 : -1
             j += 1
@@ -570,7 +571,7 @@ fn _gf2_pack_sparse_row(list row, int width) list {
       def col = int(row.get(i, -1))
       if col >= 0 && col < width {
          def wi, bi = col / wb, col % wb
-         out[wi] = int(out[wi]) ^^ (1 << bi)
+         out[wi] = int(out[wi]) ^ (1 << bi)
       }
       i += 1
    }
@@ -588,7 +589,7 @@ fn _gf2_packed_xor_inplace(list a, list b, int start_word=0) list {
    mut int i = start_word < 0 ? 0 : start_word
    def int n = min(a.len, b.len)
    while i < n {
-      a[i] = int(a[i]) ^^ int(b[i])
+      a[i] = int(a[i]) ^ int(b[i])
       i += 1
    }
    a
@@ -616,7 +617,7 @@ fn _gf2_packed_to_dense(list row, int width) list {
 fn _gf2_packed_set_bit(list row, int col) list {
    if col < 0 { return row }
    def wb, wi = _gf2_word_bits(), col / _gf2_word_bits()
-   if wi >= 0 && wi < row.len { row[wi] = int(row[wi]) ^^ (1 << (col % wb)) }
+   if wi >= 0 && wi < row.len { row[wi] = int(row[wi]) ^ (1 << (col % wb)) }
    row
 }
 
@@ -675,7 +676,7 @@ fn _gf2_packed_dot_parity(list row_words, list vec_words) int {
    mut i = 0
    def limit = min(row_words.len, vec_words.len)
    while i < limit {
-      parity = parity ^^ (bit_count(row_words[i] & vec_words[i]) & 1)
+      parity = parity ^ (bit_count(row_words[i] & vec_words[i]) & 1)
       i += 1
    }
    parity & 1
@@ -706,7 +707,7 @@ fn _gf2_packed_matvec_is_zero(list packed_rows, list vec_words) list {
       mut j = 0
       def limit = min(row.len, vec_words.len)
       while j < limit {
-         parity = parity ^^ (bit_count(int(row[j]) & int(vec_words[j])) & 1)
+         parity = parity ^ (bit_count(int(row[j]) & int(vec_words[j])) & 1)
          j += 1
       }
       word_and_ops += limit
@@ -728,7 +729,7 @@ fn _gf2_packed_transpose_matvec_words(list packed_rows, list y, int width) list 
          mut w = 0
          def limit = min(out_words.len, row.len)
          while w < limit {
-            out_words[w] = out_words[w] ^^ row[w]
+            out_words[w] = out_words[w] ^ row[w]
             word_xor_ops += 1
             w += 1
          }
@@ -750,7 +751,7 @@ fn _gf2_packed_transpose_matvec_words_only(list packed_rows, list y, int width) 
          mut w = 0
          def limit = min(out_words.len, row.len)
          while w < limit {
-            out_words[w] = out_words[w] ^^ row[w]
+            out_words[w] = out_words[w] ^ row[w]
             word_xor_ops += 1
             w += 1
          }
@@ -999,7 +1000,7 @@ fn _gf2_xor_vec(list<int> a, list<int> b) list {
    mut out = list(n)
    mut i = 0
    while i < n {
-      out[i] = (int(a[i]) ^^ int(b[i])) & 1
+      out[i] = (int(a[i]) ^ int(b[i])) & 1
       i += 1
    }
    out
@@ -1056,7 +1057,7 @@ fn _gf2_cycle_to_dependency(list cycle, int width) list {
    mut i = 0
    while i < cycle.len {
       def c = int(cycle.get(i))
-      if c >= 0 && c < width { out[c] = int(out.get(c, 0)) ^^ 1 }
+      if c >= 0 && c < width { out[c] = int(out.get(c, 0)) ^ 1 }
       i += 1
    }
    out
@@ -1971,15 +1972,15 @@ fn _gf2_block_krylov_report(str method, str vector_count_key, bool shifted_seed,
    def w = int(setup.get("width", 0))
    def use_sparse_kernel = bool(setup.get("use_sparse_kernel", false))
    def walk = _gf2_block_krylov_walk_report(use_sparse_kernel, shifted_seed, setup.get("packed_rows", []), setup.get("sparse_work_rows", []), int(setup.get("sparse_work_entries", 0)), w, int(setup.get("block_size", 8)), int(setup.get("iters", 0)))
-   def vectors = walk.get("vectors", [])
-   def vectors_packed = walk.get("vectors_packed", [])
-   def images = walk.get("images", [])
-   def vector_count = vectors_packed.len
-   def image_basis_limit = complete ? 0 : (vector_count > 512 ? max(64, int(setup.get("block_size", 8)) * 8) : max(128, int(setup.get("block_size", 8)) * 16))
-   def image_report = _gf2_block_krylov_image_report(use_sparse_kernel, images, setup.get("sparse_work_rows", []), rows, vector_count, image_basis_limit)
-   def image_la = image_report.get("linear_algebra", dict())
-   def deps = image_la.get("basis", [])
-   def solution = _gf2_block_krylov_solution_report(use_sparse_kernel, rows, setup.get("sparse_rows", []), w, deps, vector_count, vectors, vectors_packed, image_basis_limit, complete, image_la)
+   def list vectors = walk.get("vectors", [])
+   def list vectors_packed = walk.get("vectors_packed", [])
+   def list images = walk.get("images", [])
+   def int vector_count = vectors_packed.len
+   def int image_basis_limit = complete ? 0 : (vector_count > 512 ? max(64, int(setup.get("block_size", 8)) * 8) : max(128, int(setup.get("block_size", 8)) * 16))
+   def dict image_report = _gf2_block_krylov_image_report(use_sparse_kernel, images, setup.get("sparse_work_rows", []), rows, vector_count, image_basis_limit)
+   def dict image_la = image_report.get("linear_algebra", dict())
+   def list deps = image_la.get("basis", [])
+   def dict solution = _gf2_block_krylov_solution_report(use_sparse_kernel, rows, setup.get("sparse_rows", []), w, deps, vector_count, vectors, vectors_packed, image_basis_limit, complete, image_la)
    _finish_report_with(_report(method, 26), t0, _gf2_block_krylov_report_fields(vector_count_key, rows, setup, walk, image_report, solution, vector_count))
 }
 
@@ -2105,7 +2106,7 @@ fn gf2_dependency_candidates(list basis, int width=0, int max_count=4096) list {
 fn _gf2_xor_vec_into(list out, list rhs, int width) any {
    mut i = 0
    while i < width && i < out.len && i < rhs.len {
-      out[i] = (int(out[i]) ^^ int(rhs[i])) & 1
+      out[i] = (int(out[i]) ^ int(rhs[i])) & 1
       i += 1
    }
    nil
@@ -2123,7 +2124,7 @@ fn _gf2_expand_precondition_dependency(list dep, any precondition, int original_
          mut k = 0
          while k < cyc.len {
             def idx = int(cyc.get(k))
-            if idx >= 0 && idx < original_width { out[idx] = int(out.get(idx, 0)) ^^ 1 }
+            if idx >= 0 && idx < original_width { out[idx] = int(out.get(idx, 0)) ^ 1 }
             k += 1
          }
       }
@@ -2334,5 +2335,5 @@ fn _gf2_dependency_sparse_pipeline_report(list sparse_rows, int width, str backe
    assert(tail.get("entries") == 1, "GF2 sparse tail counts entries")
    assert(_gf2_sparse_tail_rows_report(rows, 99).get("rows") == [], "GF2 sparse tail clamps oversized prefix")
    assert(_gf2_sparse_tail_rows_report(rows, -1).get("rows") == rows, "GF2 sparse tail clamps negative prefix")
-   print("✓ std.math.crypto.factorization.classical.gf2 self-test passed")
+   print("✓ core.math.crypto.factorization.classical.gf2 self-test passed")
 }

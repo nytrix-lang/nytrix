@@ -1,0 +1,38 @@
+shape fmt_c_method_audit_parity {
+  family "probe/tools"
+  generator "embedded"
+  features ["formatter", "c-method-audit", "parity"]
+  template ny-test-case
+  flags "--native-only"
+  timeout 90
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.subprocess (run_capture)
+use core.str as str
+def ny = env("NYTRIX_NY_FULL_BIN")
+def fmt = env("NYTRIX_TEST_FMT_BIN")
+def cmake = env("NYTRIX_CMAKE_COMMAND")
+def dir = temp_dir() + "/fmt-c-method-" + to_str(pid())
+def made = run_capture([cmake, "-E", "make_directory", dir], [], nil, false)
+assert(made.get("code", 127) == 0, "create C method directory")
+def path = dir + "/properties.c"
+mut source = "void read_properties(void) {\n"
+for index in 1..12 { source += "   value_" + to_str(index) + ".len();\n" }
+source += "   bytes_to_hex(raw);\n   bytes_to_hex(other);\n   dict_get(values, key);\n}\n"
+assert(is_ok(file_write(path, source)), "write C method audit source")
+def c = run_capture([fmt, "--methods", "--json", path], [], nil, false)
+def embedded = run_capture([ny, "fmt", "--methods", "--json", path], [], nil, false)
+def output = embedded.get("stdout", "")
+assert(c.get("code", 127) == 0 && embedded.get("code", 127) == 0 &&
+       c.get("stdout", "") == output, "C method audit parity")
+for expected in ["NYAUD8101", "NYAUD8102", "NYAUD8001",
+                 "\"method_syntax\": 12", "\"receiver_rewrites\": 2",
+                 "12 zero-argument method call(s)"] {
+   assert(str.find(output, expected) >= 0, "C method finding missing " + expected)
+}
+def cleanup = run_capture([cmake, "-E", "rm", "-rf", dir], [], nil, false)
+assert(cleanup.get("code", 127) == 0, "remove C method directory")
+print("FMT_C_METHOD_AUDIT_PARITY_OK")
+NY
+}

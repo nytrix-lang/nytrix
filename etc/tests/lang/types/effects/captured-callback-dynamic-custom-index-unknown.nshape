@@ -1,0 +1,27 @@
+shape dynamic_callback_index_fails_closed_for_custom_rows {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "callback", "dynamic-index", "capability"]
+  template ny-test-case
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_fail
+  expect_message "effects are unknown"
+  source ny <<'NY'
+use core
+
+@effects(cap("project.storage.read"))
+fn storage_callback() int { 11 }
+
+@effects(cap("project.audit.write"))
+fn audit_callback() int { 12 }
+
+@effects(alloc, read, cap("project.storage.read"))
+fn invoke_dynamic_callback(int index) int {
+  def callbacks = [storage_callback, audit_callback]
+  def captured = callbacks
+  captured[index]()
+}
+
+invoke_dynamic_callback(0)
+NY
+}

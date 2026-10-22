@@ -1,13 +1,13 @@
 ;; Keywords: engine shell workspace layout panels docking os ui render viewer scene
 ;; Docking shell layout and workspace state for multi-panel UI applications.
 ;; References:
-;; - std.os.ui.render.viewer.dock
-;; - std.os.ui.render.viewer.gui
-module std.os.ui.render.viewer.engine.shell(TOOL_IDS, apply_tool_plan, hide_tools, reset_tool_scrolls, sanitize_workspace_state, workspace_visibility, focus_window_ids, capture_layout_state, shot_plan, tiled_layout_plan)
-use std.core
-use std.math (max)
-use std.os.ui.render.viewer.gui as ui_layout
-use std.os.ui.render.viewer.dock as ui_editor
+;; - core.os.ui.render.viewer.dock
+;; - core.os.ui.render.viewer.gui
+module core.os.ui.render.viewer.engine.shell(TOOL_IDS, apply_tool_plan, hide_tools, reset_tool_scrolls, sanitize_workspace_state, workspace_visibility, focus_window_ids, capture_layout_state, shot_plan, tiled_layout_plan)
+use core
+use core.math (max)
+use core.os.ui.render.viewer.gui as ui_layout
+use core.os.ui.render.viewer.dock as ui_editor
 
 def TOOL_IDS = ["editor_main", "profiler", "node_graph", "inspector", "workspace_grid", "asset_browser", "widget_probe", "widget_gallery"]
 
@@ -352,5 +352,5 @@ fn tiled_layout_plan(
    assert(!tiled.get("focus_only", true) && is_dict(tiled.get("editor_main", 0)), "shell tiled layout active")
    assert(is_dict(tiled.get("workspace_grid", 0)) && is_dict(tiled.get("node_graph", 0)) && is_dict(tiled.get("inspector", 0)), "shell workspace tiles")
    assert(!is_dict(tiled.get("widget_gallery", 0)), "shell workspace mode suppresses gallery tile")
-   print("✓ std.os.ui.render.viewer.engine.shell self-test passed")
+   print("✓ core.os.ui.render.viewer.engine.shell self-test passed")
 }

@@ -10,7 +10,13 @@ Use `--native-only` to force the native execution path. Use `-run` or `-o` for
 a native executable. Use the default mode while iterating unless native-only
 behavior itself is what you are checking.
 
-Unsupported native shapes fail with a diagnostic - they never silently fall
+When a source file is passed without `-run`, `-o`, or `-emit-only`,
+`--native-only` compiles through NYIR and executes it with the in-memory native
+JIT. Program output appears only when the source prints. The low byte of the
+top-level result becomes the process exit status. Use `-o` to save an executable
+or `-run` to compile and execute a native artifact.
+
+Unsupported native shapes fail with a diagnostic; they never silently fall
 back to a different execution mode.
 
 ## Portable artifacts
@@ -25,20 +31,27 @@ ny --nyir-run-bin=build/cache/program.nyir
 Capacity is checked before output is written. A program is never silently
 truncated.
 
+The public NYIR construction, verification, optimization, and native object
+API is documented in the [Nyr API reference](nyr.md). Its current
+object-emission target limits are narrower than the full in-tree native backend.
+
 ## Layouts
 
-```ny
+```text
 layout Name {
    Type field,
    Type field2
 }
 ```
 
-Field order is part of the ABI. Reordering fields changes the ABI.
+Field order is part of the ABI. Reordering fields changes the ABI. A by-value
+FFI parameter or result requires a fully materialized LLVM type matching the
+layout; unresolved layout types are rejected instead of being represented by
+an empty placeholder struct. Pointer parameters may use incomplete layouts.
 
 ## Extern blocks
 
-```ny
+```text
 extern "library" {
    fn symbol(Type arg) Type
 }
@@ -48,6 +61,11 @@ extern {
 }
 ```
 
+This declaration runs only when the named library exports the requested
+symbol with the declared ABI and the build links it. The syntax itself does
+not provide a symbol. Native examples need a build command that links the
+selected library.
+
 A bare `extern` names symbols from the current process. The library string
 selects which linked or loaded library provides the symbol.
 
@@ -55,14 +73,14 @@ selects which linked or loaded library provides the symbol.
 
 `#include` imports declarations from C headers:
 
-```ny
+```text
 #include <stdlib.h>
 #include "./ffi.h"
 ```
 
 An optional namespace alias exposes declarations under that name:
 
-```ny
+```text
 #include <stdlib.h> as "c"
 c.malloc(64)
 ```
@@ -82,7 +100,7 @@ available directly. Existing Nytrix names win on collisions.
 
 1. `"path"` resolves relative to the current file.
 2. `<path>` searches `/usr/include`, `/usr/local/include`, and platform paths.
-3. Max depth is 16. Recursive includes inherit the parser's typedef, tag, and
+3. Max depth is 64. Recursive includes inherit the parser's typedef, tag, and
  macro state.
 
 ### Supported C constructs
@@ -128,7 +146,7 @@ macros.
 
 Use `&value` when a C function expects an out pointer:
 
-```ny
+```text
 #include <sys/time.h>
 mut timeval tv = timeval(0, 0)
 gettimeofday(&tv, nil)
@@ -150,7 +168,10 @@ by field in declaration order, which is part of the ABI. Function pointers use
 arguments positionally; the exact varargs behavior belongs to the selected
 backend and is checked at the boundary.
 
-```ny
+Foreign declarations require a matching symbol and native link configuration;
+the REPL does not link arbitrary external libraries.
+
+```text
 extern "library" {
    fn host_call(int a, f64 b) int
 }
@@ -158,14 +179,18 @@ extern "library" {
 def out = host_call(1, 2.0)
 ```
 
-A worked FFI program pairs the declaration with an ownership contract and a
-boundary check:
+A minimal native program checks a C-library call through its declared ABI.
+Save the source as `ffi.ny` and run it on a host with the C runtime available:
+
+```bash
+ny -run ffi.ny
+```
 
 ```ny
-use std.core
+use core
 
 extern "c" {
-   fn abs(int v) int
+   fn abs(int value) int
 }
 
 #main {
@@ -173,9 +198,34 @@ extern "c" {
 }
 ```
 
+For the portable WebAssembly backend, scalar `extern "c"` calls import from
+the `env` module. Parameters and results may be `i64`, `f32`, or `f64`. The
+host must provide matching exports. Unsupported runtime helpers and
+aggregate/vector signatures are rejected during emission.
+
+### Aggregate ABI coverage in the C frontend
+
+The standalone C frontend classifies and lowers by-value aggregate parameters
+and returns using the selected target ABI. The supported aggregate classifiers
+are:
+
+| Target ABI | Supported classes | Fail-closed boundary |
+| --- | --- | --- |
+| SysV x86-64 | INTEGER/SSE eightbyte mixes through two eightbytes; larger values use memory classification | Unsupported field layouts or class shapes are rejected. |
+| AAPCS64 ELF | Homogeneous floating aggregates of one to four `f64` members; integer aggregates through 16 bytes, including 16-byte-aligned values; larger values use memory classification | Unsupported aggregate ABI targets, including AArch64 Windows, are rejected. |
+| Win64 x86-64 | One-eightbyte INTEGER aggregates are direct; larger by-value arguments and returns use the ABI's indirect form | The frontend's current direct aggregate field model is limited to eight-byte shapes; unsupported signatures are rejected. |
+
+The C frontend acceptance suite compiles, links, and runs C caller/compiled
+callee pairs for AAPCS64 under QEMU and Win64 under Wine when those tools are
+available. The matrix covers direct and indirect arguments/returns, positional
+argument boundaries, homogeneous aggregates, unions, and mixed classes. The
+NYIR verifier and in-tree native/JIT route matrix for Nytrix layout values are
+separate checks; passing the C frontend matrix does not imply that every C
+aggregate shape is supported by every native backend.
+
 ## Layout helpers
 
-```ny
+```text
 __layout_size("Name")
 __layout_align("Name")
 __layout_offset("Name", "field")
@@ -196,7 +246,7 @@ Raw load/store helpers:
 
 ## Inline assembly
 
-```ny
+```text
 asm("mov $1, $0", "=r,r", value)
 intrinsic("ctpop.i64", value)
 ```
@@ -296,7 +346,7 @@ Nytrix itself.
 
 Ownership attributes define who allocates and who frees:
 
-```ny
+```text
 @returns_owned
 fn make_buffer(){ malloc(64) }
 
@@ -307,21 +357,6 @@ fn free_buffer(p) int {
    0
 }
 ```
-
-## Unity build boundaries
-
-The compiler uses unity builds (single translation units that `#include`
-other `.c` files) for faster compilation:
-
-- **Runtime** (`src/code/runtime/init.c`): 13 modules - `ast.c`, `bigint.c`,
- `core.c`, `simmd.c`, `ffi.c`, `ffigates.c`, `gc.c`, `math.c`,
- `bigfloat.c`, `memory.c`, `os.c`, `proof.c`, `string.c`.
-- **Pipeline** (`src/code/wire/pipe/init.c`): compilation and bundling stages.
-- **FFI frontend** (`src/code/ffi/`): the Clang bridge and the in-tree C
-  lexer/parser in `src/code/ffi/c/` are compiled as one owned subsystem.
-
-Each module must be self-contained. Changes to a module must not break other
-modules in the same unity build.
 
 ## Related
 

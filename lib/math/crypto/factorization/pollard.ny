@@ -4,14 +4,14 @@
 ;; - https://cacr.uwaterloo.ca/hac/about/chap8.pdf
 ;; - https://crypto.stanford.edu/~dabo/pubs/papers/RSA-survey.pdf
 ;; References:
-;; - std.math.crypto.factorization
-;; - std.math.crypto
-module std.math.crypto.factorization.pollard(pollard_rho, pollard_brent, pollard_brent_report, pollard_rho_iter, pollard_pm1, pollard_pm1_report, pollard_pm1_stage2, pollard_pm1_stage2_report, pollard_p1, pollard_p1_report, williams_pp1, williams_pp1_report, squfof, squfof_report, lehman_factor, lehman_factor_report, pollard_strassen, pollard_strassen_report, batch_gcd_factor_report, batch_gcd_factor, batch_gcd_tree_factor_report, batch_gcd_tree_factor, full_factorization_rho)
-use std.math.nt
-use std.math.simmd as simmd
-use std.math.crypto.number.lucas
-use std.math.crypto.factorization.fermat as fermat
-use std.os.clock (ticks)
+;; - core.math.crypto.factorization
+;; - core.math.crypto
+module core.math.crypto.factorization.pollard(pollard_rho, pollard_brent, pollard_brent_report, pollard_rho_iter, pollard_pm1, pollard_pm1_report, pollard_pm1_stage2, pollard_pm1_stage2_report, pollard_p1, pollard_p1_report, williams_pp1, williams_pp1_report, squfof, squfof_report, lehman_factor, lehman_factor_report, pollard_strassen, pollard_strassen_report, batch_gcd_factor_report, batch_gcd_factor, batch_gcd_tree_factor_report, batch_gcd_tree_factor, full_factorization_rho)
+use core.math.nt
+use core.math.simmd as simmd
+use core.math.crypto.number.lucas
+use core.math.crypto.factorization.fermat as fermat
+use core.os.clock (ticks)
 
 mut _pollard_small_primes_cache = nil
 mut _pollard_prime_powers_cache = nil
@@ -1954,5 +1954,5 @@ fn full_factorization_rho(any n) list {
    def leh = lehman_factor_report(Z(101) * Z(103), 20000, 512)
    assert(leh.get("search_kernel", "") == "residue-stepped-square-filter", "lehman residue kernel")
    assert(leh.get("sqrt_checks", 0) > 0, "lehman sqrt counters")
-   print("✓ std.math.crypto.factorization.pollard self-test passed")
+   print("✓ core.math.crypto.factorization.pollard self-test passed")
 }

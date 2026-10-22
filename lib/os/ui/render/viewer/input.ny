@@ -1,20 +1,20 @@
 ;; Keywords: viewer input mouse keyboard pointer os ui render
 ;; Pointer and keyboard input state helpers shared by viewer UI surfaces.
 ;; References:
-;; - std.os.ui.window
-;; - std.os.ui.render.viewer.keyboard
-module std.os.ui.render.viewer.input(
+;; - core.os.ui.window
+;; - core.os.ui.render.viewer.keyboard
+module core.os.ui.render.viewer.input(
    pad, pad_active, pad_info, draw_gamepad, draw_keyboard
 )
 
-use std.core
-use std.math (clamp, max, min)
-use std.os.ui.render
-use std.os.ui.render.viewer
-use std.os.ui.render.viewer.gamepad
-use std.os.ui.render.viewer.keyboard
-use std.os.ui.render.viewer.widgets
-use std.os.ui.window
+use core
+use core.math (clamp, max, min)
+use core.os.ui.render
+use core.os.ui.render.viewer
+use core.os.ui.render.viewer.gamepad
+use core.os.ui.render.viewer.keyboard
+use core.os.ui.render.viewer.widgets
+use core.os.ui.window
 
 mut _fps_value = -1
 mut _fps_text = "fps 0"
@@ -163,5 +163,5 @@ fn draw_keyboard(any win, any font_title, any font_body, any font_key, str label
 #main {
    assert(!pad_active(0), "empty pad is inactive")
    assert(pad(1040.0, 620.0) > 0.0, "input pad")
-   print("✓ std.os.ui.render.viewer.input self-test passed")
+   print("✓ core.os.ui.render.viewer.input self-test passed")
 }

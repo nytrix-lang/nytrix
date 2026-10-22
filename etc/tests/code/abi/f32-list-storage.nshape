@@ -1,0 +1,20 @@
+shape f32_list_storage_preserves_float_payloads {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "native", "llvm", "list", "f32"]
+  template ny-test-case
+  flags_matrix "--native-only; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.math.bin
+
+def data = malloc(8)
+store32_f32(data, 1.25, 0)
+store32_f32(data, 2.5, 4)
+def values = [f32le(data, 0), f32le(data, 4)]
+assert(values == [1.25, 2.5],
+       "f32 values stored in a dynamic list retain their numeric payload")
+free(data)
+NY
+}

@@ -1,12 +1,11 @@
 ;; Keywords: logic proof certificate persistent index cache stale digest
 ;; Persistent certificate index with strict version and dependency invalidation.
-module std.math.logic.index(
+module core.math.logic.index(
    open, lookup, put, save, size)
-use std.core
-use std.os as os
-use std.os.fs as fs
-use std.math.parse.data.json (json_decode, json_try_decode, json_encode)
-use std.math.logic.certificate as cert
+use core
+use core.os as os
+use core.math.parse.data.json (json_decode, json_try_decode, json_encode)
+use core.math.logic.certificate as cert
 
 fn _fresh(str path, str module_version, str dependency_digest,
    str checker_version) dict {
@@ -17,43 +16,58 @@ fn _fresh(str path, str module_version, str dependency_digest,
 }
 
 fn _matches(dict index, any value) bool {
-   is_dict(value) && value.get("format", "") == "ny-proof-index-v1" &&
-   value.get("module_version", "") == index.get("module_version") &&
-   value.get("dependency_digest", "") == index.get("dependency_digest") &&
-   value.get("checker_version", "") == index.get("checker_version") &&
-   is_dict(value.get("entries", nil))
+   if !is_dict(value) { return false }
+   def str format = value.get("format", "")
+   def str module_version = value.get("module_version", "")
+   def str dependency_digest = value.get("dependency_digest", "")
+   def str checker_version = value.get("checker_version", "")
+   def str expected_module_version = index.get("module_version", "")
+   def str expected_dependency_digest = index.get("dependency_digest", "")
+   def str expected_checker_version = index.get("checker_version", "")
+   def entries = value.get("entries", nil)
+   format == "ny-proof-index-v1" &&
+   module_version == expected_module_version &&
+   dependency_digest == expected_dependency_digest &&
+   checker_version == expected_checker_version && is_dict(entries)
 }
 
 ;; Returns the result of the `open` operation.
 fn open(str path, str module_version, str dependency_digest,
    str checker_version="logic-kernel-v1") dict {
    mut index = _fresh(path, module_version, dependency_digest, checker_version)
-   if !fs.is_file(path) { return index }
-   def decoded = json_try_decode(unwrap(os.file_read(path)))
+   if !os.file_exists(path) { return index }
+   ;; Keep the file payload at its declared string representation.  The
+   ;; generic `unwrap` result is `any`; passing it directly into the JSON
+   ;; parser can preserve the tagged Result payload as an integer word in
+   ;; native lowering, making a valid saved index look like malformed JSON.
+   mut str source = ""
+   match os.file_read(path) {
+      ok(content) -> { source = content }
+      err(_) -> { return index }
+   }
+   def decoded = json_try_decode(source)
    if !decoded.get("ok", false) { return index }
    def loaded = decoded.get("value", 0)
    if !_matches(index, loaded) { return index }
-   ;; Use the dictionary primitive for the replacement so the loaded table
-   ;; is retained across managed/native dictionary layouts.
-   index = dict_set(index, "entries", loaded.get("entries", dict(0)))
+   def source_entries = loaded.get("entries", dict(0))
+   index = dict_set(index, "entries", source_entries)
    index
-}
-
-fn _probe(dict index, str canonical) dict {
-   cert.envelope(canonical, index.get("module_version"),
-      index.get("dependency_digest"), index.get("checker_version"))
 }
 
 ;; Returns the result of the `lookup` operation.
 fn lookup(dict index, str canonical, int max_variables=16,
    int max_nodes=100000, int max_depth=128, int max_steps=1000000,
    int max_memory=100000) any {
-   def probe = _probe(index, canonical)
-   def value = index.get("entries").get(cert.key(probe), nil)
-   if value == nil || cert.check(value, max_variables, max_nodes, max_depth,
-      max_steps, max_memory) == false {
-      return nil
-   }
+   def str module_version = index.get("module_version", "")
+   def str dependency_digest = index.get("dependency_digest", "")
+   def str checker_version = index.get("checker_version", "")
+   def probe = cert.envelope(canonical, module_version, dependency_digest,
+      checker_version)
+   def str probe_key = cert.key(probe)
+   def dict entries = index.get("entries", dict(0))
+   def any value = entries.get(probe_key, nil)
+   if value == nil { return nil }
+   if !cert.check(value) { return nil }
    value
 }
 
@@ -72,8 +86,8 @@ fn _put_impl(dict index, dict certificate, int max_variables=16,
    checker_match == false || checked == false {
       return false
    }
-   def entries = index.get("entries", dict(0))
-   def key = cert.key(certificate)
+   mut entries = index.get("entries", dict(0))
+   def str key = cert.key(certificate)
    entries = dict_set(entries, key, certificate)
    ;; `put` promises an in-place update of the caller-owned index. Rebinding
    ;; this local dictionary only changed the callee's handle, so `save(index)`
@@ -92,15 +106,16 @@ fn put(dict index, dict certificate, int max_variables=16,
 
 ;; Returns true when save.
 fn save(dict index) bool {
-   def path = index.get("path", "")
+   def str path = index.get("path", "")
    if path.len == 0 { return false }
    def tmp = path + ".tmp-" + to_str(pid()) + "-" + to_str(ticks())
-   match file_write(tmp, json_encode({
-            "format":index.get("format"),
-            "module_version":index.get("module_version"),
-            "dependency_digest":index.get("dependency_digest"),
-            "checker_version":index.get("checker_version"),
-            "entries":index.get("entries")})) {
+   def str payload = json_encode({
+         "format":index.get("format"),
+         "module_version":index.get("module_version"),
+         "dependency_digest":index.get("dependency_digest"),
+         "checker_version":index.get("checker_version"),
+         "entries":index.get("entries")})
+   match file_write(tmp, payload) {
       ok(written) -> {
          written
          match fs.rename(tmp, path) {

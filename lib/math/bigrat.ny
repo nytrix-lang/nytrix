@@ -15,9 +15,9 @@
 ;; - https://cacr.uwaterloo.ca/hac/about/chap14.pdf
 ;; - https://en.wikipedia.org/wiki/Arbitrary-precision_arithmetic
 ;; References:
-;; - std.math.crypto
-module std.math.crypto.bigrat(BIG_BASE, big_trim, big_copy, big_cmp, big_gte, big_gt, big_eq, big_sub, big_add, big_add_small, big_mul_small, big_mul, big_mod_digits, big_powmod, big_gcd, big_div_small, big_div, big_from_dec, big_to_dec, big_to_hex, hex_to_ascii, hex_val, int2s, rat_new, rat_zero, rat_one, rat_from_int, rat_from_int_den, rat_sign, rat_num, rat_den, rat_neg, rat_abs, rat_simplify, rat_add, rat_sub, rat_mul, rat_div, rat_cmp, rat_eq, rat_lt, rat_lte, rat_gt, rat_gte, rat_to_float, rat_floor, rat_round)
-use std.core.str (Builder, builder_append, builder_to_str, builder_free, atof)
+;; - core.math.crypto
+module core.math.crypto.bigrat(BIG_BASE, big_trim, big_copy, big_cmp, big_gte, big_gt, big_eq, big_sub, big_add, big_add_small, big_mul_small, big_mul, big_mod_digits, big_powmod, big_gcd, big_div_small, big_div, big_from_dec, big_to_dec, big_to_hex, hex_to_ascii, hex_val, int2s, rat_new, rat_zero, rat_one, rat_from_int, rat_from_int_den, rat_sign, rat_num, rat_den, rat_neg, rat_abs, rat_simplify, rat_add, rat_sub, rat_mul, rat_div, rat_cmp, rat_eq, rat_lt, rat_lte, rat_gt, rat_gte, rat_to_float, rat_floor, rat_round)
+use core.str (Builder, builder_append, builder_to_str, builder_free, atof)
 
 fn BIG_BASE() int { "Returns the internal BigInt limb base." 1000000000 }
 

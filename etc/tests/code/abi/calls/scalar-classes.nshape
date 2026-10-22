@@ -1,0 +1,68 @@
+shape scalar_classes_across_abi_boundaries {
+  family "native/calls"
+  generator "embedded"
+  features ["ny", "test", "abi", "scalar-classes"]
+  template ny-test-case
+  flags_matrix "--native --run --no-effect-require-known; --native-backend=llvm --jit --jit-engine=mcjit --no-effect-require-known; --native-backend=llvm --jit --jit-engine=orc --no-effect-require-known; --native-only --no-effect-require-known; --native-only --native-backend=x86_64 --no-effect-require-known"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.math.float (nan_val, inf, is_nan, is_inf)
+
+fn echo_any(any value) any { value }
+fn forward_f32(f32 value) f32 { value }
+fn forward_f64(f64 value) f64 { value }
+fn invoke_callback(any callback, any value) any { callback(value) }
+fn check_global_f32() bool { global_f32 == 0.0f32 }
+
+mut global_i64 = 0
+mut global_f32 = 0.0f32
+mut global_f64 = 0.0
+mut global_bool = false
+mut global_str = ""
+mut global_list = [0]
+
+global_i64 = 41
+global_f32 = -0.0f32
+global_f64 = -0.0
+global_bool = true
+global_str = "scalar class"
+global_list = [7, 11]
+
+assert(global_i64 == 41, "i64 global store")
+assert(global_f32 == 0.0f32, "f32 global store")
+assert(str(global_f32) == "-0", "f32 global store preserves negative zero")
+assert(check_global_f32(), "function defined before f32 global sees its scalar class")
+assert(global_f64 == 0.0, "f64 global store")
+assert(__flt_unbox_val(global_f64) == __flt_unbox_val(-0.0), "f64 global store preserves negative zero")
+assert(global_bool, "bool global store")
+assert(global_str == "scalar class", "string global store")
+assert(global_list == [7, 11], "list global store")
+
+assert(echo_any(41) == 41, "i64 any formal")
+assert(echo_any(2.5f32) == 2.5, "f32 any formal")
+assert(str(echo_any(-0.0f32)) == "-0", "f32 any formal preserves negative zero")
+assert(echo_any(3.5) == 3.5, "f64 any formal")
+assert(__flt_unbox_val(echo_any(-0.0)) == __flt_unbox_val(-0.0), "f64 any formal preserves negative zero")
+assert(echo_any(true), "bool any formal")
+assert(echo_any("any string") == "any string", "string any formal")
+assert(echo_any([3, 5]) == [3, 5], "list any formal")
+
+def callback = __mark_dynamic_callable_tagged_args(echo_any)
+assert(invoke_callback(callback, 4.5f32) == 4.5, "callback f32 argument and any return")
+assert(str(invoke_callback(callback, -0.0f32)) == "-0", "callback preserves f32 negative zero")
+assert(invoke_callback(callback, 43) == 43, "callback int argument and any return")
+assert(invoke_callback(callback, 5.5) == 5.5, "callback f64 argument and any return")
+assert(__flt_unbox_val(invoke_callback(callback, -0.0)) == __flt_unbox_val(-0.0), "callback preserves negative zero")
+assert(invoke_callback(callback, true), "callback bool argument and any return")
+assert(invoke_callback(callback, "callback string") == "callback string", "callback string argument and any return")
+assert(invoke_callback(callback, [13, 17]) == [13, 17], "callback list argument and any return")
+assert(forward_f32(1.25f32) == 1.25f32, "f32 return")
+assert(forward_f64(2.75) == 2.75, "f64 return")
+
+assert(is_nan(echo_any(nan_val())), "NaN through any formal and return")
+assert(is_inf(echo_any(inf())), "infinity through any formal and return")
+assert(is_nan(invoke_callback(callback, nan_val())), "NaN through callback")
+assert(is_inf(invoke_callback(callback, inf())), "infinity through callback")
+NY
+}

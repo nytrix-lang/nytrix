@@ -2,15 +2,15 @@
 ;; Mach-O loader. Produces the same bin record contract as the ELF loader so
 ;; every decompiler pass (disassembly, lifting, decompilation) works on Mach-O
 ;; binaries unchanged. Supports thin 32/64-bit files and universal (FAT) files.
-module std.os.rev.decomp.macho(macho_header, sections, segments, symbols, functions, imports, relocations, strings, entry, arch, load)
-use std.core
-use std.core.str as str
-use std.os.path as path
-use std.os.disasm as dasm
-use std.os.rev.strings as rev_strings
-use std.os.rev.decomp.tools (tool_status)
-use std.os.rev.decomp.bytes (_u16, _u32, _u64, _slice, _slice_list, _cstring)
-use std.os.rev.decomp.source (_read, _source_data)
+module core.os.rev.decomp.macho(macho_header, sections, segments, symbols, functions, imports, relocations, strings, entry, arch, load)
+use core
+use core.str as str
+use core.os.path as path
+use core.os.disasm as dasm
+use core.os.rev.strings as rev_strings
+use core.os.rev.decomp.tools (tool_status)
+use core.os.rev.decomp.bytes (_u16, _u32, _u64, _slice, _slice_list, _cstring)
+use core.os.rev.decomp.source (_read, _source_data)
 
 def _MH_MAGIC_64 = 0xfeedfacf
 def _MH_MAGIC = 0xfeedface
@@ -424,7 +424,7 @@ fn entry(any source) int {
       if int(c.get("cmd", 0)) == _LC_MAIN {
          def off = int(c.get("offset", 0))
          def entryoff = _u64(b, off + 8, !big)
-         return _image_base(b, h, cmds) + entryoff
+         return int(_image_base(b, h, cmds)) + int(entryoff)
       }
       i += 1
    }
@@ -532,5 +532,5 @@ fn _macho_sample() str {
    def segs = _macho_segments(b, h, cmds)
    assert(segs.len == 1 && int(segs[0].get("vaddr", 0)) == 0x100000000, "macho sample segment")
    assert(entry(b) == 0x100000000, "macho sample entry via LC_MAIN")
-   print("✓ std.os.rev.decomp.macho self-test passed")
+   print("✓ core.os.rev.decomp.macho self-test passed")
 }

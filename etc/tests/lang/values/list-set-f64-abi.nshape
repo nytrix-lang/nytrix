@@ -1,0 +1,20 @@
+shape list_set_f64_abi {
+  family "runtime/values/list"
+  generator "embedded"
+  features ["ny", "test", "list", "f64", "abi"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+fn set_float_after_widen() bool {
+   mut values = [1, 2, 3]
+   values.set(1, 2.5)
+   def any stored = values[1]
+   type(stored) == "float" && __flt_eq(stored, 2.5)
+}
+
+assert(set_float_after_widen(), "list.set stores f64 after integer-list creation")
+NY
+}

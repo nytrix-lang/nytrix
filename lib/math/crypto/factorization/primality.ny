@@ -3,13 +3,13 @@
 ;; Reference:
 ;; - https://cacr.uwaterloo.ca/hac/about/chap4.pdf
 ;; References:
-;; - std.math.crypto.factorization
-;; - std.math.crypto
-module std.math.crypto.factorization.primality(prp_report, prp, euler_prp_report, euler_prp, strong_prp_report, strong_prp, deterministic_miller_rabin64_report, deterministic_miller_rabin64, aprcl_parameter_plan_report, aprcl_jacobi_seed_report, aprcl_jacobi_normalize_report, aprcl_jacobi_mul_report, aprcl_jacobi_square_report, aprcl_jacobi_pow_report, aprcl_primality_report, fibonacci_prp_report, fibonacci_prp, lucas_prp_report, lucas_prp, strong_lucas_prp_report, strong_lucas_prp, extra_strong_lucas_prp_report, extra_strong_lucas_prp, selfridge_prp_report, selfridge_prp, strong_selfridge_prp_report, strong_selfridge_prp, strong_bpsw_prp_report, strong_bpsw_prp, bpsw_prp_report, bpsw_prp, pratt_certificate_report, pratt_certificate, verify_pratt_certificate_report, verify_pratt_certificate, lucas_nplus1_certificate_report, lucas_nplus1_certificate, verify_lucas_nplus1_certificate_report, verify_lucas_nplus1_certificate, pocklington_certificate_report, pocklington_certificate, primality_certificate_report)
-use std.math.nt
-use std.math.crypto.number.lucas as lucas
-use std.math.crypto.factorization.aprcl_data as aprcl_data
-use std.os.clock (ticks)
+;; - core.math.crypto.factorization
+;; - core.math.crypto
+module core.math.crypto.factorization.primality(prp_report, prp, euler_prp_report, euler_prp, strong_prp_report, strong_prp, deterministic_miller_rabin64_report, deterministic_miller_rabin64, aprcl_parameter_plan_report, aprcl_jacobi_seed_report, aprcl_jacobi_normalize_report, aprcl_jacobi_mul_report, aprcl_jacobi_square_report, aprcl_jacobi_pow_report, aprcl_primality_report, fibonacci_prp_report, fibonacci_prp, lucas_prp_report, lucas_prp, strong_lucas_prp_report, strong_lucas_prp, extra_strong_lucas_prp_report, extra_strong_lucas_prp, selfridge_prp_report, selfridge_prp, strong_selfridge_prp_report, strong_selfridge_prp, strong_bpsw_prp_report, strong_bpsw_prp, bpsw_prp_report, bpsw_prp, pratt_certificate_report, pratt_certificate, verify_pratt_certificate_report, verify_pratt_certificate, lucas_nplus1_certificate_report, lucas_nplus1_certificate, verify_lucas_nplus1_certificate_report, verify_lucas_nplus1_certificate, pocklington_certificate_report, pocklington_certificate, primality_certificate_report)
+use core.math.nt
+use core.math.crypto.number.lucas as lucas
+use core.math.crypto.factorization.aprcl_data as aprcl_data
+use core.os.clock (ticks)
 
 mut _pc_mr64_bases_cache = nil
 
@@ -1663,5 +1663,5 @@ fn primality_certificate_report(any n, int max_base=128) dict {
    expect("report method", bpsw.get("method", "") == "strong-bpsw-prp")
    expect("report nested mr", bpsw.get("strong_base2", nil) != nil)
    expect("report nested lucas", bpsw.get("strong_lucas_selfridge", nil) != nil)
-   print("✓ std.math.crypto.factorization.primality self-test passed")
+   print("✓ core.math.crypto.factorization.primality self-test passed")
 }

@@ -1,0 +1,14 @@
+shape native_only_unsupported_deep_aggregate_abi {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 c-frontend ffi aggregate byvalue negative fail-closed backend-parity]
+  template ny-test-case
+  flags_matrix "--c-frontend=nytrix --native --run -no-std; --c-frontend=nytrix --native-backend=llvm --jit --jit-engine=mcjit -no-std; --c-frontend=nytrix --native-backend=llvm --jit --jit-engine=orc -no-std; --c-frontend=nytrix --native-only --native-backend=x86_64 -no-std"
+  expect compile_fail
+  source ny <<'NY'
+#include "etc/tests/lang/interop/c/unsupported-deep-aggregate-byvalue.h" as "c"
+def value = c.make_deep_value()
+def result = c.consume_deep_value(value)
+print(result)
+NY
+}

@@ -1,0 +1,28 @@
+shape memory_callback_row_reaches_caller_contract {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "higher-order", "callback", "row", "memory", "soundness"]
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_fail
+  expect_message "declared @effects(none) but inferred effects="
+  source ny <<'NY'
+use core
+
+@effects(read)
+fn read_memory() int {
+  rt_memcmp_raw(0, 0, 0)
+}
+
+@effects(e)
+fn apply(fnptr callback) int {
+  callback()
+}
+
+@effects(none)
+fn invalid() int {
+  apply(read_memory)
+}
+
+invalid()
+NY
+}

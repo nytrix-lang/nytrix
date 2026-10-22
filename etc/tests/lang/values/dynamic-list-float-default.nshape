@@ -1,0 +1,19 @@
+shape dynamic_list_float_fallback_is_boxed {
+  family "runtime/values"
+  generator "regression"
+  features ["ny", "test", "runtime", "values", "list", "float", "abi"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+fn lookup(any values) any {
+   values.get(4, 2.5)
+}
+
+def result = lookup([1.25])
+assert(float(result) == 2.5, "dynamic list lookup preserves f64 fallback")
+print("DYNAMIC_LIST_FLOAT_DEFAULT_OK")
+NY
+}

@@ -3,10 +3,10 @@
 ;; Reference:
 ;; - "A New LSB Attack on Special-Structured RSA Primes"
 ;; References:
-;; - std.math.crypto.factorization
-;; - std.math.crypto
-module std.math.crypto.factorization.gaa(gaa_factor, nearest_sqrt_int)
-use std.math.nt
+;; - core.math.crypto.factorization
+;; - core.math.crypto
+module core.math.crypto.factorization.gaa(gaa_factor, nearest_sqrt_int)
+use core.math.nt
 
 fn nearest_sqrt_int(any n) any {
    "Return the nearest integer to sqrt(n), rounding to the closer square."

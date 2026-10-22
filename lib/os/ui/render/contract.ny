@@ -1,8 +1,8 @@
 ;; Keywords: render contract backend portable os ui
 ;; Backend-neutral rendering contract metadata. Keep this module lightweight so
 ;; compile-time contract probes do not need to load Vulkan/OpenGL/window stacks.
-module std.os.ui.render.contract(portable_contract, backend_name)
-use std.core
+module core.os.ui.render.contract(portable_contract, backend_name)
+use core
 
 fn backend_name(int backend) str {
    "Returns the stable public name for a renderer backend id."

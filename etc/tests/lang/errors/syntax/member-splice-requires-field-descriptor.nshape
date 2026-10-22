@@ -1,0 +1,13 @@
+shape member_splice_requires_field_descriptor {
+  family "compiler-errors/syntax"
+  generator "error"
+  features ["error", "comptime", "reflection", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "member splice requires a compile-time field descriptor"
+  source ny <<'NY'
+def value = 1
+def member = value.(field)
+NY
+}

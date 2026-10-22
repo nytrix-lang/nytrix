@@ -4,12 +4,12 @@
 ;; - https://netlab.cs.ucla.edu/wiki/files/shannon1949.pdf
 ;; - https://cacr.uwaterloo.ca/hac/about/chap1.pdf
 ;; References:
-;; - std.math.crypto.cipher
-;; - std.math.crypto.analysis
-module std.math.crypto.cipher.playfair(playfair_make_square, playfair_encrypt, playfair_decrypt, playfair_decrypt_offset, playfair_decrypt_both_offsets)
-use std.core
-use std.math.nt
-use std.core.str
+;; - core.math.crypto.cipher
+;; - core.math.crypto.analysis
+module core.math.crypto.cipher.playfair(playfair_make_square, playfair_encrypt, playfair_decrypt, playfair_decrypt_offset, playfair_decrypt_both_offsets)
+use core
+use core.math.nt
+use core.str
 
 fn _playfair_builder_take(list b) str {
    def out = builder_to_str(b)
@@ -254,5 +254,5 @@ fn playfair_decrypt_both_offsets(str ciphertext, list square, bool strip_x=false
    assert(pt == "HIDETHEGOLDINTHETREXESTUMP", "playfair decrypts known ciphertext")
    def offsets = playfair_decrypt_both_offsets("X" + ct, square, false)
    assert(offsets[1] == pt, "offset decrypt recovers shifted ciphertext")
-   print("✓ std.math.crypto.cipher.playfair self-test passed")
+   print("✓ core.math.crypto.cipher.playfair self-test passed")
 }

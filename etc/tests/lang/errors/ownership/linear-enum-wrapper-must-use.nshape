@@ -1,0 +1,24 @@
+shape ownership_linear_enum_wrapper_must_use {
+  family "compiler-errors/ownership"
+  generator "error"
+  features ["error", "ownership", "resource", "linear", "enum", "wrapper"]
+  template ny-compile-fail
+  expect compile_fail
+  flags "--ownership-strict"
+  expect_message "linear resource 'wrapped' must be consumed exactly once"
+  source ny <<'NY'
+linear layout File { int fd }
+enum MaybeFile<T> { Some(T file), None }
+
+fn make_maybe_file() MaybeFile<File> {
+  MaybeFile.Some(File(37))
+}
+
+fn forget() int {
+  def wrapped = make_maybe_file()
+  0
+}
+
+forget()
+NY
+}

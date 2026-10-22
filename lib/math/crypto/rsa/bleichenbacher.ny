@@ -3,12 +3,12 @@
 ;; Reference:
 ;; - Bleichenbacher D., "Chosen Ciphertext Attacks Against Protocols Based on the RSA Encryption Standard PKCS #1"
 ;; References:
-;; - std.math.crypto.rsa
-;; - std.math.crypto
-module std.math.crypto.rsa.bleichenbacher(bleichenbacher_attack, bleichenbacher_signature_suffix_forgery)
-use std.math.nt
-use std.math.crypto.rsa.op (compute_phi, compute_d)
-use std.core.error
+;; - core.math.crypto.rsa
+;; - core.math.crypto
+module core.math.crypto.rsa.bleichenbacher(bleichenbacher_attack, bleichenbacher_signature_suffix_forgery)
+use core.math.nt
+use core.math.crypto.rsa.op (compute_phi, compute_d)
+use core.error
 
 fn _floor_div(any a, any b) any { a / b }
 

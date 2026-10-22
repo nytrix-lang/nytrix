@@ -1,26 +1,26 @@
 ;; Keywords: syntax xml c typescript ts cmake build-system python nytrix language yaml yml bash shell assembly asm markdown md lua json javascript js html markup helpers parse highlight
 ;; Syntax-tokenizer facade for Nytrix, common programming languages, markup, and config formats.
 ;; References:
-;; - std.math.parse
-;; - std.math.parse.syntax.helpers
-module std.math.parse.syntax(TOK_KEYWORD, TOK_TYPE, TOK_STRING, TOK_NUMBER, TOK_COMMENT, TOK_FUNCTION, TOK_OPERATOR, TOK_PUNCT, TOK_VARIABLE, TOK_CONSTANT, TOK_PREPROC, TOK_PARAM, TOK_STRUCT, TOK_PROPERTY, TOK_TEXT, TOK_LABEL, TOK_REGISTER, TOK_DIRECTIVE, TOK_TAG, TOK_ATTR, TOK_KEY, TOK_VALUE, nytrix_tokenize, c_tokenize, python_tokenize, javascript_tokenize, typescript_tokenize, lua_tokenize, bash_tokenize, cmake_tokenize, yaml_tokenize, xml_tokenize, html_tokenize, markdown_tokenize, assembly_tokenize, json_tokenize, tokenize_auto, detect_language)
-use std.core
-use std.core.str as str
-use std.math.parse.syntax.helpers as _h
-use std.math.parse.syntax.nytrix as _nytrix_mod
-use std.math.parse.syntax.c as _c_mod
-use std.math.parse.syntax.python as _python_mod
-use std.math.parse.syntax.javascript as _javascript_mod
-use std.math.parse.syntax.typescript as _typescript_mod
-use std.math.parse.syntax.lua as _lua_mod
-use std.math.parse.syntax.bash as _bash_mod
-use std.math.parse.syntax.cmake as _cmake_mod
-use std.math.parse.syntax.yaml as _yaml_mod
-use std.math.parse.syntax.xml as _xml_mod
-use std.math.parse.syntax.html as _html_mod
-use std.math.parse.syntax.markdown as _markdown_mod
-use std.math.parse.syntax.assembly as _assembly_mod
-use std.math.parse.syntax.json as _json_mod
+;; - core.math.parse
+;; - core.math.parse.syntax.helpers
+module core.math.parse.syntax(TOK_KEYWORD, TOK_TYPE, TOK_STRING, TOK_NUMBER, TOK_COMMENT, TOK_FUNCTION, TOK_OPERATOR, TOK_PUNCT, TOK_VARIABLE, TOK_CONSTANT, TOK_PREPROC, TOK_PARAM, TOK_STRUCT, TOK_PROPERTY, TOK_TEXT, TOK_LABEL, TOK_REGISTER, TOK_DIRECTIVE, TOK_TAG, TOK_ATTR, TOK_KEY, TOK_VALUE, nytrix_tokenize, c_tokenize, python_tokenize, javascript_tokenize, typescript_tokenize, lua_tokenize, bash_tokenize, cmake_tokenize, yaml_tokenize, xml_tokenize, html_tokenize, markdown_tokenize, assembly_tokenize, json_tokenize, tokenize_auto, detect_language)
+use core
+use core.str as str
+use core.math.parse.syntax.helpers as _h
+use core.math.parse.syntax.nytrix as _nytrix_mod
+use core.math.parse.syntax.c as _c_mod
+use core.math.parse.syntax.python as _python_mod
+use core.math.parse.syntax.javascript as _javascript_mod
+use core.math.parse.syntax.typescript as _typescript_mod
+use core.math.parse.syntax.lua as _lua_mod
+use core.math.parse.syntax.bash as _bash_mod
+use core.math.parse.syntax.cmake as _cmake_mod
+use core.math.parse.syntax.yaml as _yaml_mod
+use core.math.parse.syntax.xml as _xml_mod
+use core.math.parse.syntax.html as _html_mod
+use core.math.parse.syntax.markdown as _markdown_mod
+use core.math.parse.syntax.assembly as _assembly_mod
+use core.math.parse.syntax.json as _json_mod
 
 def TOK_KEYWORD = 0
 def TOK_TYPE = 1
@@ -185,5 +185,5 @@ fn _has_token_kind(str source, list toks, str needle, int kind) bool {
    def yaml_toks = tokenize_auto(yaml, "config.yaml", list(0))
    assert(_has_token_kind(yaml, yaml_toks, "name", TOK_KEY), "yaml key token")
    assert(_has_token_kind(yaml, yaml_toks, "nytrix", TOK_VALUE), "yaml value token")
-   print("✓ std.math.parse.syntax self-test passed")
+   print("✓ core.math.parse.syntax self-test passed")
 }

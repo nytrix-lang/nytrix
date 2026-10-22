@@ -1,9 +1,11 @@
-module std.math.sort
-use std.core
+;; Keywords: math sorting merge sort algorithms
+;; Provides a stable Ny implementation of merge sort.
+;; References:
+;; - core
+module core.math.sort
+use core
 
-; Pure-Ny merge sort implementation.
-; Demonstrates that Ny is powerful enough to implement its own algorithms.
-; No C fallback needed — this runs entirely through the Ny runtime.
+;; Merge sort is implemented in Ny and runs through the Ny runtime.
 fn merge(any xs, int left, int mid, int right) any {
    "Merge two sorted halves of xs[left..mid] and xs[mid..right]."
    def len1 = mid - left
@@ -245,5 +247,5 @@ fn _sort_self_test() bool {
 
 #main {
    _sort_self_test()
-   print("✓ std.math.sort self-test passed")
+   print("✓ core.math.sort self-test passed")
 }

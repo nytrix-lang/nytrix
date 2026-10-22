@@ -4,12 +4,12 @@
 ;; - https://people.csail.mit.edu/rivest/Rsapaper.pdf
 ;; - https://crypto.stanford.edu/~dabo/pubs/papers/RSA-survey.pdf
 ;; References:
-;; - std.math.crypto.rsa
-;; - std.math.crypto
-module std.math.crypto.rsa.non_coprime(non_coprime_attack, non_coprime_exponent_attack)
-use std.math.nt
-use std.math.crypto.gf
-use std.math.crypto.factorization.known_phi
+;; - core.math.crypto.rsa
+;; - core.math.crypto
+module core.math.crypto.rsa.non_coprime(non_coprime_attack, non_coprime_exponent_attack)
+use core.math.nt
+use core.math.crypto.gf
+use core.math.crypto.factorization.known_phi
 
 fn _unique_prime_factors(any n) list {
    mut out = []

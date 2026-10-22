@@ -1,14 +1,14 @@
 ;; Keywords: image svg vector parse
 ;; Native SVG image loader for Nytrix using librsvg + cairo.
 ;; References:
-;; - std.math.parse.img
-;; - std.math.parse
-module std.math.parse.img.svg(decode, load_path, available, last_error, backend_name)
-use std.core
-use std.core.dict_mod as dict_mod
-use std.core.str as str
-use std.math
-use std.os as os
+;; - core.math.parse.img
+;; - core.math.parse
+module core.math.parse.img.svg(decode, load_path, available, last_error, backend_name)
+use core
+use core.dict_mod as dict_mod
+use core.str as str
+use core.math as math
+use core.os as os
 
 mut _svg_last_error = ""
 
@@ -109,24 +109,28 @@ fn _parse_tag_attrs(str s, int p) list {
          p += 1
          p = _skip_ws(s, p)
          def quote = load8(s, p)
-         mut vb = Builder(64)
+         mut val = ""
          if quote == 34 || quote == 39 {
             p += 1
+            mut quoted_builder = Builder(64)
             while p < s.len && load8(s, p) != quote {
-               vb = builder_append(vb, chr(load8(s, p)))
+               quoted_builder = builder_append(quoted_builder, chr(load8(s, p)))
                p += 1
             }
+            val = builder_to_str(quoted_builder)
+            builder_free(quoted_builder)
             if p < s.len { p += 1 }
          } else {
+            mut bare_builder = Builder(64)
             while p < s.len {
                def c = load8(s, p)
                if c <= 32 || c == 47 || c == 62 { break }
-               vb = builder_append(vb, chr(c))
+               bare_builder = builder_append(bare_builder, chr(c))
                p += 1
             }
+            val = builder_to_str(bare_builder)
+            builder_free(bare_builder)
          }
-         def val = builder_to_str(vb)
-         builder_free(vb)
          if key.len > 0 { attrs[key] = val }
       } else {
          if key.len > 0 { attrs[key] = true }

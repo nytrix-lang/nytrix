@@ -1,0 +1,46 @@
+shape ownership_rule_borrow_return_contract_positive {
+  family "language/ownership"
+  generator "syntax"
+  features ["ownership", "borrow", "return", "positive"]
+  template ny-test-case
+  expect compile_and_run
+  flags "--ownership-strict"
+  source ny <<'NY'
+use core
+
+@returns_borrow(x)
+fn identity_borrow(any x) any {
+  def ref = &x
+  return ref
+}
+
+@returns_borrow(x)
+fn choose_borrow(bool choose_left, any x) any {
+  def ref = &x
+  if choose_left {
+    ref = &x
+  } else {
+    ref = &x
+  }
+  return ref
+}
+
+@returns_borrow(x)
+fn choose_borrow_match(int arm, any x) any {
+  def ref = &x
+  match arm {
+    0 -> { ref = &x }
+    _ -> { ref = &x }
+  }
+  return ref
+}
+
+def int value = 42
+def ref = identity_borrow(value)
+assert(ref == value, "borrow aliases its source")
+def ref_from_branch = choose_borrow(true, value)
+assert(ref_from_branch == value, "matching branch sources preserve borrow contract")
+def ref_from_match = choose_borrow_match(1, value)
+assert(ref_from_match == value, "matching match sources preserve borrow contract")
+NY
+}

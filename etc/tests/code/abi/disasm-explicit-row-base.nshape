@@ -1,0 +1,17 @@
+shape disasm-explicit-row-base {
+  family "compiler"
+  generator "deterministic"
+  features [disassembly, riscv, targets]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.disasm as dasm
+
+assert(dasm.target_address("12", "riscv", 0x1000) == 0x100c, "RISC-V numeric branch displacement uses the explicit row address")
+assert(dasm.target_address("-4", "riscv", 0x1000) == 0xffc, "negative RISC-V displacement uses the explicit row address")
+assert(dasm.target_address("0x2040", "riscv", 0x1000) == 0x2040, "hex target remains absolute")
+assert(dasm.target_address("12", "x86_64", 0x1000) == 12, "non-RISC-V target remains absolute")
+print("✓ explicit disassembly row base")
+NY
+}

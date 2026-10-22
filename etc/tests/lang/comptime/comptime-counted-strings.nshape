@@ -1,0 +1,27 @@
+shape comptime_counted_strings {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "comptime", "string", "splice", "ast", "nul"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.compiler.ast (parse_ast_snapshot, code_str)
+use core.math.parse.data.json (json_decode)
+
+def snapshot = parse_ast_snapshot("comptime template text(value) {\n def untouched = \"a\\0z\"\n def mixed = \"left\\0${value}:end\"\n def inserted = ${value}\n}\ncomptime emit text(\"b\\0c\")")
+def nodes = snapshot.get("nodes")
+def untouched = nodes.get(0).get("exprs").get(0).get("value")
+def mixed = nodes.get(1).get("exprs").get(0).get("value")
+def inserted = nodes.get(2).get("exprs").get(0).get("value")
+assert(untouched.len == 3 && load8(untouched, 1) == 0 && load8(untouched, 2) == 122,
+       "template cloning preserves an untouched counted literal")
+assert(mixed.len == 12 && load8(mixed, 4) == 0 && load8(mixed, 5) == 98 &&
+       load8(mixed, 6) == 0 && load8(mixed, 7) == 99 && load8(mixed, 11) == 100,
+       "string substitution works after NUL and preserves counted argument bytes")
+assert(inserted.len == 3 && load8(inserted, 1) == 0 && load8(inserted, 2) == 99,
+       "AST string splicing preserves counted template arguments")
+assert(code_str(json_decode(code_str(snapshot))) == code_str(snapshot),
+       "generated counted literals survive canonical code round trips")
+NY
+}

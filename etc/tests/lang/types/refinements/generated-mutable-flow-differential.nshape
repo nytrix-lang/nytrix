@@ -1,0 +1,537 @@
+shape generated_mutable_refinement_flow_differential {
+  family "language/types/refinements"
+  generator "embedded"
+  features ["refinement", "mutable-aggregate", "alias-flow", "closure-provenance", "mutation", "generated", "differential"]
+  timeout 180
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.subprocess as process
+use core.os.prim (env)
+use core.os.thread as thread
+
+def compiler = env("NYTRIX_NY_FULL_BIN")
+def core_bc = env("NYTRIX_TEST_CORE_BC")
+def shared_core_bc = is_str(core_bc) ? core_bc : ""
+assert(is_str(compiler) && compiler.len > 0,
+       "test runner provides the compiler for generated refinement flow cases")
+
+fn flow_shadow(int alias_mode, int closure_mode, int mutation_mode) bool {
+  alias_mode != 2 && closure_mode == 0 &&
+    (mutation_mode == 0 || mutation_mode == 1 || mutation_mode == 4 ||
+    mutation_mode == 6 || mutation_mode == 7 || mutation_mode == 8 ||
+    mutation_mode == 11 || mutation_mode == 12 || mutation_mode == 14 ||
+    mutation_mode == 15 || mutation_mode == 17 || mutation_mode == 19 ||
+    mutation_mode == 23 || mutation_mode == 25 || mutation_mode == 27 ||
+    mutation_mode == 29 || mutation_mode == 31 || mutation_mode == 33 ||
+    mutation_mode == 35 || mutation_mode == 37 || mutation_mode == 39 ||
+    mutation_mode == 42 || mutation_mode == 44 || mutation_mode == 46 ||
+    mutation_mode == 48 || mutation_mode == 51 || mutation_mode == 53 ||
+    mutation_mode == 56 || mutation_mode == 58 || mutation_mode == 59 ||
+    mutation_mode == 63 || mutation_mode == 64 || mutation_mode == 65 ||
+    mutation_mode == 67 || mutation_mode == 68 || mutation_mode == 69 ||
+    mutation_mode == 71 || mutation_mode == 73 || mutation_mode == 76 ||
+    mutation_mode == 78)
+}
+
+fn flow_source(int alias_mode, int closure_mode, int mutation_mode) str {
+  mut str predicate = "refine NonEmpty = list where(items) { items.len > 0 }\n"
+  mut str refinement = "NonEmpty"
+  mut str required_body = "items.len"
+  if mutation_mode == 46 || mutation_mode == 47 {
+    predicate = "def threshold = 3\nrefine AboveThreshold = list where(items) { items[-1] >= threshold }\n"
+    refinement = "AboveThreshold"
+  } else if mutation_mode == 48 || mutation_mode == 49 ||
+             mutation_mode == 50 {
+    predicate = "refine EqualGap = list where(items) { items[0] == items[1] + 5 }\n"
+    refinement = "EqualGap"
+  } else if mutation_mode == 51 || mutation_mode == 52 ||
+             mutation_mode == 59 || mutation_mode == 60 {
+    predicate = "refine EqualTail = list where(items) { items[-2] == items[-1] }\n"
+    refinement = "EqualTail"
+  } else if mutation_mode == 53 || mutation_mode == 54 {
+    predicate = "refine EqualGapPositive = list where(items) { items[0] == items[1] + 5 && items[2] > 0 }\n"
+    refinement = "EqualGapPositive"
+  } else if mutation_mode == 55 || mutation_mode == 56 {
+    predicate = "refine UnequalTail = list where(items) { items[-2] != items[-1] }\n"
+    refinement = "UnequalTail"
+  } else if mutation_mode == 57 || mutation_mode == 58 {
+    predicate = "refine UnequalTailPositive = list where(items) { items[-2] != items[-1] && items[0] > 0 }\n"
+    refinement = "UnequalTailPositive"
+  } else if mutation_mode == 61 {
+    predicate = "refine UnequalTailNegativeBound = list where(items) { items[-2] != items[-1] && items[0] < items[-1] }\n"
+    refinement = "UnequalTailNegativeBound"
+  } else if mutation_mode == 62 || mutation_mode == 63 {
+    predicate = "refine LessThanLast = list where(items) { items[0] < items[-1] }\n"
+    refinement = "LessThanLast"
+  } else if mutation_mode == 64 {
+    predicate = "refine FirstBelowLength = list where(items) { items[0] < items.len }\n"
+    refinement = "FirstBelowLength"
+  } else if mutation_mode == 65 {
+    predicate = "refine LengthAboveFirst = list where(items) { items.len > items[0] }\n"
+    refinement = "LengthAboveFirst"
+  } else if mutation_mode == 66 {
+    predicate = "refine FirstAboveLength = list where(items) { items[0] > items.len }\n"
+    refinement = "FirstAboveLength"
+  } else if mutation_mode == 67 {
+    predicate = "refine FirstAtMostLength = list where(items) { items[0] <= items.len }\n"
+    refinement = "FirstAtMostLength"
+  } else if mutation_mode == 68 {
+    predicate = "refine LengthAtLeastFirst = list where(items) { items.len >= items[0] }\n"
+    refinement = "LengthAtLeastFirst"
+  } else if mutation_mode == 69 || mutation_mode == 70 {
+    predicate = "refine LastBelowLength = list where(items) { items[-1] < items.len }\n"
+    refinement = "LastBelowLength"
+  } else if mutation_mode == 71 || mutation_mode == 72 {
+    predicate = "refine AtMostGap = list where(items) { items[0] <= items[1] + 5 }\n"
+    refinement = "AtMostGap"
+  } else if mutation_mode == 73 || mutation_mode == 74 || mutation_mode == 75 {
+    predicate = "def threshold = 5\nrefine AtMostSymbolic = list where(items) { items[0] <= threshold + 5 }\n"
+    refinement = "AtMostSymbolic"
+    if mutation_mode == 75 {
+      predicate = "mut int threshold = 5\nrefine AtMostSymbolic = list where(items) { items[0] <= threshold + 5 }\n"
+    }
+  } else if mutation_mode == 76 || mutation_mode == 77 {
+    predicate = "def threshold = 5\nrefine LastAtMostSymbolic = list where(items) { items[-1] <= threshold + 5 }\n"
+    refinement = "LastAtMostSymbolic"
+  } else if mutation_mode == 78 || mutation_mode == 79 {
+    predicate = "def threshold = 5\nrefine EqualSymbolic = list where(items) { items[0] == threshold + 5 }\n"
+    refinement = "EqualSymbolic"
+  } else if mutation_mode == 42 || mutation_mode == 43 || mutation_mode == 44 {
+    if mutation_mode == 42 {
+      predicate = "def threshold = 3\nrefine AboveThreshold = list where(items) { items[0] >= threshold }\n"
+    } else {
+      predicate = "def threshold = 3\nrefine AboveThreshold = list where(items) { items[0] > threshold }\n"
+    }
+    refinement = "AboveThreshold"
+  } else if mutation_mode == 41 || mutation_mode == 45 {
+    predicate = "mut int threshold = 3\nrefine AboveThreshold = list where(items) { items[0] > threshold }\n"
+    refinement = "AboveThreshold"
+  } else if mutation_mode == 39 || mutation_mode == 40 {
+    predicate = "def threshold = 3\nrefine AboveThreshold = list where(items) { items[0] > threshold }\n"
+    refinement = "AboveThreshold"
+  } else if mutation_mode == 37 || mutation_mode == 38 {
+    predicate = "refine IndexedAlternative = list where(items) { items[0] > 0 || items[1] < 10 }\n"
+    refinement = "IndexedAlternative"
+  } else if mutation_mode == 33 {
+    predicate = "refine NonEmpty = list where(items) { items.len > 0 }\n"
+    refinement = "NonEmpty"
+  } else if mutation_mode == 34 {
+    predicate = "refine PositiveFirst = list where(items) { items[0] > 0 }\n"
+    refinement = "PositiveFirst"
+  } else if mutation_mode == 35 {
+    predicate = "refine PositiveFirst = list where(items) { items[0] > 0 }\n"
+    refinement = "PositiveFirst"
+  } else if mutation_mode == 36 {
+    predicate = "refine PositiveLast = list where(items) { items[-1] > 0 }\n"
+    refinement = "PositiveLast"
+  } else if mutation_mode == 31 {
+    predicate = "refine PositiveFirst = list where(items) { items[0] > 0 }\n"
+    refinement = "PositiveFirst"
+  } else if mutation_mode == 32 {
+    predicate = "refine PositiveLast = list where(items) { items[-1] > 0 }\n"
+    refinement = "PositiveLast"
+  } else if mutation_mode == 21 || mutation_mode == 22 {
+    predicate = "refine PositiveFirst = list where(items) { items[0] > 0 }\n"
+    refinement = "PositiveFirst"
+  } else if mutation_mode == 19 {
+    predicate = "refine DescendingTail = list where(items) { items[-1] > items[-2] }\n"
+    refinement = "DescendingTail"
+  } else if mutation_mode == 20 {
+    predicate = "refine OrderedEnds = list where(items) { items[0] > items[-1] }\n"
+    refinement = "OrderedEnds"
+  } else if mutation_mode == 17 {
+    predicate = "refine EqualGap = list where(items) { items[0] == items[1] + 5 }\n"
+    refinement = "EqualGap"
+  } else if mutation_mode == 18 {
+    predicate = "refine PositiveLast = list where(items) { items[-1] == 5 }\n"
+    refinement = "PositiveLast"
+  } else if mutation_mode == 23 || mutation_mode == 24 {
+    predicate = "refine BoundedLast = list where(items) { items[-1] > 0 && items[0] < 10 }\n"
+    refinement = "BoundedLast"
+  } else if mutation_mode == 25 || mutation_mode == 26 {
+    if mutation_mode == 25 {
+      predicate = "refine StableFirst = list where(items) { items.len >= 3 && items[0] > 0 }\n"
+      refinement = "StableFirst"
+    } else {
+      predicate = "refine ExactLengthFirst = list where(items) { items.len == 3 && items[0] > 0 }\n"
+      refinement = "ExactLengthFirst"
+    }
+  } else if mutation_mode == 29 || mutation_mode == 30 {
+    predicate = "refine LengthOrFirst = list where(items) { items.len >= 5 || items[0] > 0 }\n"
+    refinement = "LengthOrFirst"
+  } else if mutation_mode >= 15 {
+    predicate = "refine EqualGap = list where(items) { items[0] == items[1] + 5 }\n"
+    refinement = "EqualGap"
+  } else if mutation_mode == 3 || mutation_mode == 6 || mutation_mode == 7 ||
+     mutation_mode == 8 || mutation_mode == 9 || mutation_mode == 10 ||
+     mutation_mode == 11 || mutation_mode == 12 || mutation_mode == 13 ||
+     mutation_mode == 14 {
+    if mutation_mode >= 9 {
+      if mutation_mode >= 12 {
+        predicate = "refine BoundedPair = list where(items) { items[0] > 0 && items[1] < 10 }\n"
+        refinement = "BoundedPair"
+      } else {
+        predicate = "refine PositiveFirst = list where(items) { items[-1] > 0 }\n"
+        refinement = "PositiveFirst"
+      }
+    } else {
+      predicate = "refine PositiveFirst = list where(items) { items[0] > 0 }\n"
+      refinement = "PositiveFirst"
+    }
+    required_body = "items.len"
+  }
+  mut str initial_items = "[4, 5]"
+  mut str generated_header = "fn generated() int {\n"
+  if mutation_mode == 27 || mutation_mode == 28 {
+    generated_header = "fn generated(bool choose) int {\n"
+  }
+  if mutation_mode == 46 || mutation_mode == 47 {
+    initial_items = "[5, 3]"
+  } else if mutation_mode == 39 || mutation_mode == 40 ||
+     mutation_mode == 42 || mutation_mode == 43 || mutation_mode == 44 {
+    initial_items = "[5, 0]"
+  } else if mutation_mode == 41 || mutation_mode == 45 {
+    initial_items = "[5, 0]"
+  } else if mutation_mode == 21 || mutation_mode == 22 {
+    initial_items = "[5]"
+  } else if mutation_mode == 48 || mutation_mode == 49 ||
+             mutation_mode == 50 {
+    initial_items = "[10, 5]"
+  } else if mutation_mode == 51 || mutation_mode == 52 {
+    initial_items = "[5, 5]"
+  } else if mutation_mode == 53 || mutation_mode == 54 {
+    initial_items = "[10, 5, 1]"
+  } else if mutation_mode == 55 || mutation_mode == 56 {
+    initial_items = "[5, 7]"
+  } else if mutation_mode == 57 || mutation_mode == 58 {
+    initial_items = "[5, 7]"
+  } else if mutation_mode == 59 || mutation_mode == 60 {
+    initial_items = "[5, 5]"
+  } else if mutation_mode == 61 {
+    initial_items = "[6, 5, 7]"
+  } else if mutation_mode == 62 || mutation_mode == 63 {
+    initial_items = "[6, 7]"
+  } else if mutation_mode == 64 || mutation_mode == 65 ||
+             mutation_mode == 67 || mutation_mode == 68 {
+    initial_items = "[0]"
+  } else if mutation_mode == 66 {
+    initial_items = "[3, 2]"
+  } else if mutation_mode == 69 || mutation_mode == 70 {
+    initial_items = "[0]"
+  } else if mutation_mode == 71 || mutation_mode == 72 {
+    initial_items = "[10, 5]"
+  } else if mutation_mode == 73 || mutation_mode == 74 || mutation_mode == 75 {
+    initial_items = "[9, 5]"
+  } else if mutation_mode == 76 || mutation_mode == 77 {
+    initial_items = "[9]"
+  } else if mutation_mode == 78 || mutation_mode == 79 {
+    initial_items = "[10]"
+  } else if mutation_mode == 19 {
+    initial_items = "[1, 3, 5]"
+  } else if mutation_mode == 25 || mutation_mode == 26 ||
+             mutation_mode == 29 || mutation_mode == 30 {
+    initial_items = "[4, 5, 6]"
+  } else if mutation_mode >= 15 && mutation_mode <= 22 {
+    initial_items = "[10, 5]"
+  }
+  mut str source = "use core\n" + predicate +
+      "@effects(read)\nfn require_fact(" + refinement +
+      " items) int { return " + required_body + " }\n" +
+      "@effects(read)\nfn inspect(list<int> values) int { return values.len }\n" +
+      "fn preserve_alias(list<int> values) list<int> { return values }\n" +
+      generated_header + "mut list<int> items = " +
+      initial_items + "\n"
+  if mutation_mode == 35 || mutation_mode == 36 {
+    source += "mut list<int> suffix = [0]\n"
+  }
+  if mutation_mode == 21 || mutation_mode == 22 {
+    source = "use core\n" + predicate +
+        "@effects(read)\nfn require_fact(PositiveFirst items) int { return items.len }\n" +
+        "fn generated() int {\nmut list<int> items = [5]\n"
+    if mutation_mode == 21 {
+      source = "use core\n" + predicate +
+          "@effects(read)\nfn require_fact(PositiveFirst items) int { return items.len }\n" +
+          "fn set_idx(list<int> original, int index, int value) list<int> { [-1] }\n" +
+          "fn generated() int {\nmut list<int> items = [5]\n"
+    } else {
+      source = "use core\n" + predicate +
+          "@effects(read)\nfn require_fact(PositiveFirst items) int { return items.len }\n" +
+          "fn append(PositiveFirst original, int value) list<int> { [-1] }\n" +
+          "fn generated() int {\nmut list<int> items = [5]\n"
+    }
+  }
+  if alias_mode == 1 {
+    source += "inspect(items)\n"
+  } else if alias_mode == 2 {
+    source += "preserve_alias(items)\n"
+  }
+  if closure_mode == 1 {
+    source += "def later = fn() { return items.len }\n"
+  }
+  source += "if " + refinement + "(items) {\n"
+  if mutation_mode == 1 {
+    source += "items[0] = 8\n"
+  } else if mutation_mode == 2 {
+    source += "items.pop()\n"
+  } else if mutation_mode == 3 {
+    source += "items[0] = 0\n"
+  } else if mutation_mode == 4 {
+    source += "items = append(items, 9)\n"
+  } else if mutation_mode == 5 {
+    source += "if true {\nitems = []\n}\n"
+  } else if mutation_mode == 6 {
+    source += "items[0] = 8\n"
+  } else if mutation_mode == 7 {
+    source += "items[1] = 8\n"
+  } else if mutation_mode == 8 {
+    source += "items = append(items, 9)\n"
+  } else if mutation_mode == 9 {
+    source += "items[0] = 0\n"
+  } else if mutation_mode == 10 {
+    source += "items = append(items, 0)\n"
+  } else if mutation_mode == 11 {
+    source += "items[-1] = 8\n"
+  } else if mutation_mode == 12 {
+    source += "items[2] = 8\n"
+  } else if mutation_mode == 13 {
+    source += "items[1] = 10\n"
+  } else if mutation_mode == 14 {
+    source += "items[1] = 7\n"
+  } else if mutation_mode == 15 {
+    source += "items[0] = items[0]\n"
+  } else if mutation_mode == 16 {
+    source += "items[0] = items[1]\n"
+  } else if mutation_mode == 17 || mutation_mode == 18 {
+    source += "items = append(items, 99)\n"
+  } else if mutation_mode == 19 {
+    source += "items[-3] = 2\n"
+  } else if mutation_mode == 20 {
+    source += "items[1] = 9\n"
+  } else if mutation_mode == 21 {
+    source += "items = set_idx(items, 0, 5)\n"
+  } else if mutation_mode == 22 {
+    source += "items = append(items, 9)\n"
+  } else if mutation_mode == 23 {
+    source += "items = append(items, 1 + 2)\n"
+  } else if mutation_mode == 24 {
+    source += "items = append(items, 0)\n"
+  } else if mutation_mode == 25 || mutation_mode == 26 {
+    source += "items[1] = 9\nitems = append(items, 8)\n"
+  } else if mutation_mode == 27 {
+    source += "match choose {\ntrue -> { items[0] = items[0] }\n" +
+        "_ -> { items[1] = items[1] }\n}\n"
+  } else if mutation_mode == 28 {
+    source += "match choose {\ntrue -> { items[0] = 0 }\n" +
+        "_ -> { items[1] = items[1] }\n}\n"
+  } else if mutation_mode == 29 {
+    source += "items[1] = 9\nitems = append(items, 8)\n"
+  } else if mutation_mode == 30 {
+    source += "items[0] = 0\nitems = append(items, 8)\n"
+  } else if mutation_mode == 31 {
+    source += "items = items + [8, 9]\n"
+  } else if mutation_mode == 32 {
+    source += "items = items + [8, 0]\n"
+  } else if mutation_mode == 33 {
+    source += "items = [8, 9] + items\n"
+  } else if mutation_mode == 34 {
+    source += "items = [0] + items\n"
+  } else if mutation_mode == 35 || mutation_mode == 36 {
+    source += "items = items + suffix\n"
+  } else if mutation_mode == 37 {
+    source += "items[0] = 3\nitems = append(items, 6)\n"
+  } else if mutation_mode == 38 {
+    source += "items[0] = 0\n"
+  } else if mutation_mode == 39 {
+    source += "items[1] = 8\n"
+  } else if mutation_mode == 40 {
+    source += "items[0] = 0\n"
+  } else if mutation_mode == 41 {
+    source += "threshold = 10\nitems[1] = 8\n"
+  } else if mutation_mode == 42 || mutation_mode == 43 {
+    source += "items[0] = threshold\n"
+  } else if mutation_mode == 44 {
+    source += "items = append(items, 8)\n"
+  } else if mutation_mode == 45 {
+    source += "threshold = 10\nitems = append(items, 8)\n"
+  } else if mutation_mode == 46 {
+    source += "items = append(items, threshold)\n"
+  } else if mutation_mode == 47 {
+    source += "items = append(items, 0)\n"
+  } else if mutation_mode == 48 {
+    source += "items[0] = items[1] + 5\n"
+  } else if mutation_mode == 49 {
+    source += "items[0] = items[1] + 4\n"
+  } else if mutation_mode == 50 {
+    source += "items[0] = items[0] + 5\n"
+  } else if mutation_mode == 51 {
+    source += "items = append(items, items[-1])\n"
+  } else if mutation_mode == 52 {
+    source += "items = append(items, items[-1] + 1)\n"
+  } else if mutation_mode == 53 {
+    source += "items[0] = items[1] + 5\n"
+  } else if mutation_mode == 54 {
+    source += "items[0] = items[1] + 4\n"
+  } else if mutation_mode == 55 {
+    source += "items = append(items, items[-1])\n"
+  } else if mutation_mode == 56 {
+    source += "items = append(items, items[-2])\n"
+  } else if mutation_mode == 57 {
+    source += "items = append(items, items[-1])\n"
+  } else if mutation_mode == 58 {
+    source += "items = append(items, items[-2])\n"
+  } else if mutation_mode == 59 {
+    source += "items = append(items, items[-2])\n"
+  } else if mutation_mode == 60 {
+    source += "items = append(items, items[-2] + 1)\n"
+  } else if mutation_mode == 61 {
+    source += "items = append(items, items[-2])\n"
+  } else if mutation_mode == 62 {
+    source += "items = append(items, items[-2])\n"
+  } else if mutation_mode == 63 {
+    source += "items = append(items, items[-1])\n"
+  } else if mutation_mode == 64 || mutation_mode == 65 ||
+             mutation_mode == 66 || mutation_mode == 67 ||
+             mutation_mode == 68 {
+    source += "items = append(items, 9)\n"
+  } else if mutation_mode == 69 {
+    source += "items = append(items, items[-1])\n"
+  } else if mutation_mode == 70 {
+    source += "items = append(items, items[-1] + 2)\n"
+  } else if mutation_mode == 71 {
+    source += "items[0] = items[1] + 5\n"
+  } else if mutation_mode == 72 {
+    source += "items[0] = items[1] + 6\n"
+  } else if mutation_mode == 73 {
+    source += "items[0] = threshold + 5\n"
+  } else if mutation_mode == 74 {
+    source += "items[0] = threshold + 6\n"
+  } else if mutation_mode == 75 {
+    source += "threshold = 0\nitems[0] = 10\n"
+  } else if mutation_mode == 76 {
+    source += "items = append(items, threshold + 5)\n"
+  } else if mutation_mode == 77 {
+    source += "items = append(items, threshold + 6)\n"
+  } else if mutation_mode == 78 {
+    source += "items[0] = threshold + 5\n"
+  } else if mutation_mode == 79 {
+    source += "items[0] = threshold + 6\n"
+  }
+  source += "return require_fact(items)\n}\n0\n}"
+  if mutation_mode == 27 || mutation_mode == 28 {
+    source += "\ngenerated(true)\n0\n"
+  } else {
+    source += "\ngenerated()\n0\n"
+  }
+  source
+}
+
+fn compile_generated(str source) dict {
+  mut args = []
+  if shared_core_bc.len > 0 {
+    args = args.append("--core-bc")
+    args = args.append(shared_core_bc)
+  }
+  args = args.append("--strict-types")
+  args = args.append("--native-only")
+  args = args.append("--nyir-verify")
+  args = args.append("-emit-only")
+  args = args.append("-c")
+  args = args.append(source)
+  process.run_capture(compiler, args, nil, false)
+}
+
+mut generated_cases = []
+
+fn check_generated(str source, bool expected, str label) int {
+  generated_cases = generated_cases.append([source, expected, label])
+  0
+}
+
+fn run_generated_cases(int first_case) str {
+  mut int case_index = first_case
+  while case_index < generated_cases.len {
+    def test_case = generated_cases.get(case_index, [])
+    def source = test_case.get(0, "")
+    def expected = test_case.get(1, false)
+    def label = test_case.get(2, "")
+    def result = compile_generated(source)
+    def output = result.get("stdout", "")
+    def code = result.get("code", 127)
+    def accepted = code == 0 && str.find(output, "error:") < 0
+    if accepted != expected {
+      return label + " shadow model and compiler disagree (rc=" +
+             to_str(code) + "): " + output +
+             "\ngenerated source:\n" + source
+    }
+    case_index += 4
+  }
+  ""
+}
+
+mut int mutation_mode = 0
+while mutation_mode < 80 {
+  check_generated(flow_source(0, 0, mutation_mode),
+                  flow_shadow(0, 0, mutation_mode),
+                  "generated mutation flow " + to_str(mutation_mode))
+  mutation_mode += 1
+}
+
+mut int alias_mode = 1
+while alias_mode <= 2 {
+  mutation_mode = 0
+  while mutation_mode <= 20 {
+    if mutation_mode == 0 || mutation_mode == 1 || mutation_mode == 3 ||
+       mutation_mode == 4 || mutation_mode == 7 || mutation_mode == 8 ||
+       mutation_mode == 10 || mutation_mode == 11 || mutation_mode == 12 ||
+       mutation_mode == 13 || mutation_mode == 14 || mutation_mode == 15 ||
+       mutation_mode == 16 || mutation_mode == 17 || mutation_mode == 18 ||
+       mutation_mode == 19 || mutation_mode == 20 {
+      check_generated(flow_source(alias_mode, 0, mutation_mode),
+                      flow_shadow(alias_mode, 0, mutation_mode),
+                      "generated alias/mutation flow " + to_str(alias_mode) +
+                          "/" + to_str(mutation_mode))
+    }
+    mutation_mode += 1
+  }
+  alias_mode += 1
+}
+
+mutation_mode = 0
+while mutation_mode <= 20 {
+  if mutation_mode == 0 || mutation_mode == 1 || mutation_mode == 3 ||
+     mutation_mode == 4 || mutation_mode == 7 || mutation_mode == 8 ||
+     mutation_mode == 10 || mutation_mode == 11 || mutation_mode == 12 ||
+     mutation_mode == 13 || mutation_mode == 14 || mutation_mode == 15 ||
+     mutation_mode == 16 || mutation_mode == 17 || mutation_mode == 18 ||
+     mutation_mode == 19 || mutation_mode == 20 {
+    check_generated(flow_source(0, 1, mutation_mode),
+                    flow_shadow(0, 1, mutation_mode),
+                    "generated closure/mutation flow " +
+                        to_str(mutation_mode))
+  }
+  mutation_mode += 1
+}
+
+check_generated(flow_source(2, 1, 0), flow_shadow(2, 1, 0),
+                "generated combined alias and closure escape")
+check_generated(flow_source(0, 0, 21), false,
+                "generated user set_idx return invalidates the refinement")
+check_generated(flow_source(0, 0, 22), false,
+                "generated shadowed append return invalidates the refinement")
+
+def worker0 = thread.thread_spawn(run_generated_cases, 0)
+def worker1 = thread.thread_spawn(run_generated_cases, 1)
+def worker2 = thread.thread_spawn(run_generated_cases, 2)
+def worker3 = thread.thread_spawn(run_generated_cases, 3)
+def failure0 = thread.thread_join(worker0)
+def failure1 = thread.thread_join(worker1)
+def failure2 = thread.thread_join(worker2)
+def failure3 = thread.thread_join(worker3)
+assert(failure0 == "", failure0)
+assert(failure1 == "", failure1)
+assert(failure2 == "", failure2)
+assert(failure3 == "", failure3)
+NY
+}

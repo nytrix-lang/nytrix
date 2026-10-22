@@ -1,0 +1,65 @@
+shape euler9 {
+  family "algorithm"
+  generator "stress"
+  features ["c-vs-ny", "checksum"]
+  template ny-test-case
+  expect compile_and_run
+  ;; Translated from the QBE minic test: minic/test/euler9.c.
+  source ny <<'NY'
+fn gcd(int a, int b) int {
+   while b != 0 {
+      def r = a % b
+      a = b
+      b = r
+   }
+   a
+}
+mut result = 0
+mut m = 2
+while 2 * m * (m + 1) <= 1000 {
+   mut n = 1
+   while n < m {
+      def perimeter = 2 * m * (m + n)
+      if ((m - n) & 1) != 0 && 1000 % perimeter == 0 && gcd(m, n) == 1 {
+         def k = 1000 / perimeter
+         def x = (m * m - n * n) * k
+         def y = (2 * m * n) * k
+         def z = (m * m + n * n) * k
+         result = x * y * z
+      }
+      n += 1
+   }
+   m += 1
+}
+print("checksum=", result)
+NY
+  source c <<'C'
+#include <stdio.h>
+
+static int gcd(int a, int b) {
+  while (b != 0) {
+    int r = a % b;
+    a = b;
+    b = r;
+  }
+  return a;
+}
+
+int main(void) {
+  int result = 0;
+  for (int m = 2; 2 * m * (m + 1) <= 1000; ++m) {
+    for (int n = 1; n < m; ++n) {
+      int perimeter = 2 * m * (m + n);
+      if (((m - n) & 1) != 0 && 1000 % perimeter == 0 && gcd(m, n) == 1) {
+        int k = 1000 / perimeter;
+        int a = (m * m - n * n) * k;
+        int b = 2 * m * n * k;
+        int c = (m * m + n * n) * k;
+        result = a * b * c;
+      }
+    }
+  }
+  printf("checksum=%d\n", result);
+}
+C
+}

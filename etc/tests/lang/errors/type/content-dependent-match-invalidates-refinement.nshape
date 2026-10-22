@@ -1,0 +1,30 @@
+shape mutable_aggregate_content_predicate_rejects_invalidating_match_arm {
+  family "compiler-errors/type"
+  generator "error"
+  features [error type refinement mutable aggregate content-dependent match invalidation negative]
+  template ny-compile-fail
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  expect compile_fail
+  expect_message "refinement obligation is not proved"
+  source ny <<'NY'
+use core
+
+refine EqualGap = list where(items) { items[0] == items[1] + 5 }
+@effects(read)
+fn require_equal_gap(EqualGap items) int { return items.len }
+
+fn invalidating_match_arm(bool choose) int {
+  mut list<int> items = [10, 5]
+  if EqualGap(items) {
+    match choose {
+      true -> { items[0] = 0 }
+      _ -> { items[1] = items[1] }
+    }
+    return require_equal_gap(items)
+  }
+  0
+}
+
+invalidating_match_arm(true)
+NY
+}

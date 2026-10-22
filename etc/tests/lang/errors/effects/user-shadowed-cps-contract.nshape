@@ -1,0 +1,21 @@
+shape user_std_cps_spelling_does_not_inherit_stdlib_effect_contract {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "modules", "identity", "user-shadow"]
+  flags_matrix "--effect-require-known"
+  expect compile_fail
+  expect_message "declared @effects(none) but inferred effects=io"
+  source ny <<'NY'
+module core.cps(cps_run)
+
+fn cps_run() int {
+  print("user module IO\n")
+  1
+}
+
+@effects(none)
+fn call_user_cps() int {
+  core.cps.cps_run()
+}
+NY
+}

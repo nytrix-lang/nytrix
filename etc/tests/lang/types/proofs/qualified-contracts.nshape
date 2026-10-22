@@ -1,0 +1,23 @@
+shape qualified_contract_proofs {
+  family "runtime/proofs"
+  generator "program"
+  features ["proofs", "requires", "module-qualified", "backend-parity"]
+  template ny-test-case
+  expect compile_and_run
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  source ny <<'NY'
+module contracts {
+  export core(positive)
+}
+
+fn positive(int n) int requires n > 0 {
+  n
+}
+
+fn forward(int n) int requires n > 0 {
+  contracts.positive(n)
+}
+
+assert(forward(4) == 4, "qualified callee contract obligation")
+NY
+}

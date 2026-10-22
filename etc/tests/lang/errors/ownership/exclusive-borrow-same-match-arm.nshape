@@ -1,0 +1,27 @@
+shape ownership_exclusive_borrow_same_match_arm {
+  family "compiler-errors/ownership"
+  generator "error"
+  features ["error", "ownership", "negative", "borrow", "exclusive", "match"]
+  template ny-compile-fail
+  expect compile_fail
+  flags "--ownership-strict"
+
+  source ny <<'NY'
+use core
+
+fn bad(int tag) int {
+  mut list value = [4]
+  def exclusive = &mut value
+  match tag {
+    0 -> {
+      value.append(5)
+      def observed = exclusive
+    }
+    _ -> 0
+  }
+  return value[0]
+}
+
+bad(0)
+NY
+}

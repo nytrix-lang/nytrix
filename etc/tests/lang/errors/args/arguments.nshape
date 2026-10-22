@@ -1,0 +1,359 @@
+shape args-invalid-accel-target {
+  family "compiler-errors/args"
+  generator "error"
+  features ["args", "cli", "negative", "diagnostic", "case-invalid-accel-target"]
+  template ny-compile-fail
+  expect compile_fail
+
+  flags "--accel-target=bogus"
+  expect_message "unknown accel target"
+  source ny <<'NY'
+use core
+print("ok")
+NY
+}
+
+shape args-invalid-arm-float-abi {
+  family "compiler-errors/args"
+  generator "error"
+  features ["args", "cli", "negative", "diagnostic", "case-invalid-arm-float-abi"]
+  template ny-compile-fail
+  expect compile_fail
+
+  flags "--arm-float-abi=bogus"
+  expect_message "invalid arm float ABI"
+  source ny <<'NY'
+use core
+print("ok")
+NY
+}
+
+shape args-invalid-c-frontend {
+  family "compiler-errors/args"
+  generator "error"
+  features ["args", "cli", "negative", "diagnostic", "case-invalid-c-frontend"]
+  template ny-compile-fail
+  expect compile_fail
+
+  flags "--c-frontend=bogus"
+  expect_message "invalid C frontend"
+  source ny <<'NY'
+use core
+print("ok")
+NY
+}
+
+shape args-invalid-color {
+  family "compiler-errors/args"
+  generator "error"
+  features ["args", "cli", "negative", "diagnostic", "case-invalid-color"]
+  template ny-compile-fail
+  expect compile_fail
+
+  flags "--color=bogus"
+  expect_message "invalid color mode"
+  source ny <<'NY'
+use core
+print("ok")
+NY
+}
+
+shape args-invalid-dwarf-version {
+  family "compiler-errors/args"
+  generator "error"
+  features ["args", "cli", "negative", "diagnostic", "case-invalid-dwarf-version"]
+  template ny-compile-fail
+  expect compile_fail
+
+  flags "--dwarf-version=abc"
+  expect_message "invalid DWARF version"
+  source ny <<'NY'
+use core
+print("ok")
+NY
+}
+
+shape args-invalid-gpu-mode {
+  family "compiler-errors/args"
+  generator "error"
+  features ["args", "cli", "negative", "diagnostic", "case-invalid-gpu-mode"]
+  template ny-compile-fail
+  expect compile_fail
+
+  flags "--gpu=bogus"
+  expect_message "unknown gpu mode"
+  source ny <<'NY'
+use core
+print("ok")
+NY
+}
+
+shape args-invalid-heap {
+  family "compiler-errors/args"
+  generator "error"
+  features ["args", "cli", "negative", "diagnostic", "case-invalid-heap"]
+  template ny-compile-fail
+  expect compile_fail
+
+  flags "--heap=bogus"
+  expect_message "invalid heap policy"
+  source ny <<'NY'
+use core
+print("ok")
+NY
+}
+
+shape args-invalid-jit-engine {
+  family "compiler-errors/args"
+  generator "error"
+  features ["args", "cli", "negative", "diagnostic", "case-invalid-jit-engine"]
+  template ny-compile-fail
+  expect compile_fail
+
+  flags "--jit-engine=bogus"
+  expect_message "expected orc|mcjit"
+  source ny <<'NY'
+use core
+print("ok")
+NY
+}
+
+shape args-invalid-jit-opt-level {
+  family "compiler-errors/args"
+  generator "error"
+  features ["args", "cli", "negative", "diagnostic", "case-invalid-jit-opt-level"]
+  template ny-compile-fail
+  expect compile_fail
+
+  flags "--jit-opt-level=x"
+  expect_message "invalid JIT opt level: x"
+  source ny <<'NY'
+use core
+print("ok")
+NY
+}
+
+shape args-invalid-max-errors {
+  family "compiler-errors/args"
+  generator "error"
+  features ["args", "cli", "negative", "diagnostic", "case-invalid-max-errors"]
+  template ny-compile-fail
+  expect compile_fail
+
+  flags "--max-errors=abc"
+  expect_message "invalid max errors: abc"
+  source ny <<'NY'
+use core
+print("ok")
+NY
+}
+
+shape args-invalid-native-abi {
+  family "compiler-errors/args"
+  generator "error"
+  features ["args", "cli", "negative", "diagnostic", "case-invalid-native-abi"]
+  template ny-compile-fail
+  expect compile_fail
+
+  flags "--native-abi=bogus"
+  expect_message "invalid native ABI"
+  source ny <<'NY'
+use core
+print("ok")
+NY
+}
+
+shape args-invalid-native-backend {
+  family "compiler-errors/args"
+  generator "error"
+  features ["args", "cli", "negative", "diagnostic", "case-invalid-native-backend"]
+  template ny-compile-fail
+  expect compile_fail
+
+  flags "--native-backend=bogus"
+  expect_message "invalid native backend"
+  source ny <<'NY'
+use core
+print("ok")
+NY
+}
+
+shape args-invalid-native-hot-threshold {
+  family "compiler-errors/args"
+  generator "error"
+  features ["args", "cli", "negative", "diagnostic", "case-invalid-native-hot-threshold"]
+  template ny-compile-fail
+  expect compile_fail
+
+  flags "--native-hot-threshold=abc"
+  expect_message "invalid native hot threshold: abc"
+  source ny <<'NY'
+use core
+print("ok")
+NY
+}
+
+shape args-invalid-native-tier {
+  family "compiler-errors/args"
+  generator "error"
+  features ["args", "cli", "negative", "diagnostic", "case-invalid-native-tier"]
+  template ny-compile-fail
+  expect compile_fail
+
+  flags "--native-tier=bogus"
+  expect_message "invalid native tier"
+  source ny <<'NY'
+use core
+print("ok")
+NY
+}
+
+shape args-invalid-parallel {
+  family "compiler-errors/args"
+  generator "error"
+  features ["args", "cli", "negative", "diagnostic", "case-invalid-parallel"]
+  template ny-compile-fail
+  expect compile_fail
+
+  flags "--parallel=bogus"
+  expect_message "unknown parallel mode"
+  source ny <<'NY'
+use core
+print("ok")
+NY
+}
+
+shape args-invalid-profile {
+  family "compiler-errors/args"
+  generator "error"
+  features ["args", "cli", "negative", "diagnostic", "case-invalid-profile"]
+  template ny-compile-fail
+  expect compile_fail
+
+  flags "--profile=peaked"
+  expect_message "invalid optimization profile: peaked"
+  source ny <<'NY'
+use core
+print("ok")
+NY
+}
+
+shape args-invalid-run-mode {
+  family "compiler-errors/args"
+  generator "error"
+  features ["args", "cli", "negative", "diagnostic", "case-invalid-run-mode"]
+  template ny-compile-fail
+  expect compile_fail
+
+  flags "--run=bogus"
+  expect_message "invalid run mode"
+  source ny <<'NY'
+use core
+print("ok")
+NY
+}
+
+shape args-invalid-runtime-mode {
+  family "compiler-errors/args"
+  generator "error"
+  features ["args", "cli", "negative", "diagnostic", "case-invalid-runtime-mode"]
+  template ny-compile-fail
+  expect compile_fail
+
+  flags "--mode=bogus"
+  expect_message "invalid runtime mode"
+  source ny <<'NY'
+use core
+print("ok")
+NY
+}
+
+shape args-invalid-sanitize {
+  family "compiler-errors/args"
+  generator "error"
+  features ["args", "cli", "negative", "diagnostic", "case-invalid-sanitize"]
+  template ny-compile-fail
+  expect compile_fail
+
+  flags "--sanitize=bogus"
+  expect_message "expected address|undefined|thread|leak"
+  source ny <<'NY'
+use core
+print("ok")
+NY
+}
+
+shape args-invalid-threads-negative {
+  family "compiler-errors/args"
+  generator "error"
+  features ["args", "cli", "negative", "diagnostic", "case-invalid-threads-negative"]
+  template ny-compile-fail
+  expect compile_fail
+
+  flags "--threads=-1"
+  expect_message "invalid thread count: -1"
+  source ny <<'NY'
+use core
+print("ok")
+NY
+}
+
+shape args-invalid-threads {
+  family "compiler-errors/args"
+  generator "error"
+  features ["args", "cli", "negative", "diagnostic", "case-invalid-threads"]
+  template ny-compile-fail
+  expect compile_fail
+
+  flags "--threads=abc"
+  expect_message "invalid thread count"
+  source ny <<'NY'
+use core
+print("ok")
+NY
+}
+
+shape args-invalid-typesolver {
+  family "compiler-errors/args"
+  generator "error"
+  features ["args", "cli", "negative", "diagnostic", "case-invalid-typesolver"]
+  template ny-compile-fail
+  expect compile_fail
+
+  flags "--type-solver=bogus"
+  expect_message "invalid type solver"
+  source ny <<'NY'
+use core
+print("ok")
+NY
+}
+
+shape args-invalid-warn {
+  family "compiler-errors/args"
+  generator "error"
+  features ["args", "cli", "negative", "diagnostic", "case-invalid-warn"]
+  template ny-compile-fail
+  expect compile_fail
+
+  flags "--warn=bogus"
+  expect_message "invalid warning level"
+  source ny <<'NY'
+use core
+print("ok")
+NY
+}
+
+shape args-invalid-watch-poll {
+  family "compiler-errors/args"
+  generator "error"
+  features ["args", "cli", "negative", "diagnostic", "case-invalid-watch-poll"]
+  template ny-compile-fail
+  expect compile_fail
+
+  flags "--watch-poll=abc"
+  expect_message "invalid watch poll interval"
+  source ny <<'NY'
+use core
+print("ok")
+NY
+}

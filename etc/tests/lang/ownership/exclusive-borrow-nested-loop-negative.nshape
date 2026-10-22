@@ -1,0 +1,27 @@
+shape ownership_exclusive_borrow_nested_loop_negative {
+  family "compiler-errors/ownership"
+  generator "error"
+  features ["error", "ownership", "borrow", "exclusive", "liveness", "nested", "loop"]
+  template ny-compile-fail
+  expect compile_fail
+  flags "--ownership-strict"
+
+  source ny <<'NY'
+use core
+
+fn bad(int count) int {
+  mut int value = 9
+  def exclusive = &mut value
+  mut int i = 0
+  while value < count {
+    if i % 2 == 0 {
+      def observed = exclusive
+    }
+    i += 1
+  }
+  value
+}
+
+bad(4)
+NY
+}

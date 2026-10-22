@@ -1,9 +1,9 @@
 ;; Keywords: image png parse
 ;; Portable Network Graphics (PNG) Image Loader and Encoder for Nytrix
 ;; References:
-;; - std.math.parse.img
-;; - std.math.parse
-module std.math.parse.img.png(decode, encode)
+;; - core.math.parse.img
+;; - core.math.parse
+module core.math.parse.img.png(decode, encode)
 #include <png.h>
 extern "png16" {
    fn png_image_begin_read_from_memory(ptr image, ptr memory, u64 size) i32
@@ -14,16 +14,16 @@ extern "png16" {
    fn _png_image_free(ptr image) as "png_image_free"
 }
 
-use std.core
-use std.core.dict_mod
-use std.core.mem as core_mem
-use std.os
-use std.os.sys
-use std.os.path
-use std.math as math
-use std.math.crypto.hash as math_hash
-use std.math.parse.data.zlib as zlib
-use std.core.common as common
+use core
+use core.dict_mod
+use core.mem as core_mem
+use core.os
+use core.os.sys
+use core.os.path
+use core.math as math
+use core.math.crypto.hash as math_hash
+use core.math.parse.data.zlib as zlib
+use core.common as common
 
 mut _png_disable_libpng_cache = -1
 mut _png_stop_early_cache = -1
@@ -636,7 +636,7 @@ fn _join_chunks(any chunks) any {
       def ch = chunks.get(i)
       def clen = ch.len
       if clen > 0 {
-         __copy_mem(to_int(res) + off, to_int(ch), clen)
+         __copy_mem_raw(to_int(res) + off, to_int(ch), clen)
          off += clen
       }
       i += 1
@@ -663,7 +663,7 @@ fn _png_scan_decode_chunks(any data) dict {
          store8(cs, load8(data, p + 5), 1)
          store8(cs, load8(data, p + 6), 2)
          store8(cs, load8(data, p + 7), 3)
-         if length > 0 { __copy_mem(to_int(cs) + 4, to_int(data) + chunk_data, length) }
+         if length > 0 { __copy_mem_raw(to_int(cs) + 4, to_int(data) + chunk_data, length) }
          def want_crc = math_hash.crc32(cs, 0, 0)
          def got_crc = _u32be(data, next_p - 4)
          if want_crc != got_crc { return {"ok": false, "error": "crc mismatch at " + to_str(p)} }
@@ -682,11 +682,11 @@ fn _png_scan_decode_chunks(any data) dict {
          if bit_depth != 1 && bit_depth != 2 && bit_depth != 4 && bit_depth != 8 && bit_depth != 16 { return {"ok": false, "error": "unsupported bit depth " + to_str(bit_depth)} }
       } elif _png_chunk_is(data, p, 80, 76, 84, 69) {
          palette = init_str(malloc(length + 32), length)
-         if length > 0 { __copy_mem(to_int(palette), to_int(data) + chunk_data, length) }
+         if length > 0 { __copy_mem_raw(to_int(palette), to_int(data) + chunk_data, length) }
       } elif _png_chunk_is(data, p, 116, 82, 78, 83) {
          if color_type == 3 {
             palette_alpha = init_str(malloc(length + 32), length)
-            if length > 0 { __copy_mem(to_int(palette_alpha), to_int(data) + chunk_data, length) }
+            if length > 0 { __copy_mem_raw(to_int(palette_alpha), to_int(data) + chunk_data, length) }
          } elif color_type == 0 && length >= 2 {
             trns_gray = _u16be(data, chunk_data)
          } elif color_type == 2 && length >= 6 {
@@ -695,7 +695,7 @@ fn _png_scan_decode_chunks(any data) dict {
          }
       } elif _png_chunk_is(data, p, 73, 68, 65, 84) {
          def chunk = init_str(malloc(length + 32), length)
-         if length > 0 { __copy_mem(to_int(chunk), to_int(data) + chunk_data, length) }
+         if length > 0 { __copy_mem_raw(to_int(chunk), to_int(data) + chunk_data, length) }
          idat_list = idat_list.append(chunk)
       } elif _png_chunk_is(data, p, 73, 69, 78, 68) {
          break
@@ -1203,5 +1203,5 @@ fn encode(any img) any {
    assert(is_str(data) && data.len == 16, "png data size")
    assert(load8(data, 0) == 255 && load8(data, 1) == 0 && load8(data, 2) == 0 && load8(data, 3) == 255, "png first pixel")
    assert(load8(data, 12) == 255 && load8(data, 13) == 255 && load8(data, 14) == 0 && load8(data, 15) == 128, "png alpha pixel")
-   print("✓ std.math.parse.img.png self-test passed")
+   print("✓ core.math.parse.img.png self-test passed")
 }

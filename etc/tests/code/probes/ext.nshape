@@ -1,0 +1,17 @@
+shape ext {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "lang"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.path as ospath
+use core.str as str
+def p = "RiggedSimple.GLTF"
+print("p=" + to_str(p))
+def ext = str.lower(ospath.extname(p))
+assert(ext == ".gltf", "extension lowercases to .gltf")
+print("ext=" + to_str(ospath.extname(p)) + " lower=" + to_str(ext))
+NY
+}

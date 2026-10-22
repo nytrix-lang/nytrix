@@ -1,0 +1,38 @@
+shape static_list_get_any_arithmetic {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "native", "llvm", "dynamic-access", "arithmetic", "abi"]
+  template ny-test-case
+  flags_matrix "--native-only; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+def values = [65, 67, 71, 84]
+mut int total = 0
+mut int index = 0
+while index < values.len {
+   total += values.get(index)
+   index += 1
+}
+assert(total == 287,
+       "arithmetic decodes tagged values returned by a static list get")
+assert(values.get(1, 0) == 67,
+       "a scalar fallback does not decode a present list element twice")
+assert(values.get(8, 13) == 13,
+       "a missing list element preserves an odd scalar fallback")
+
+fn lookup(list xs, int index) int {
+   int(xs.get(index, 0))
+}
+assert(lookup(values, 2) == 71,
+       "a generic list parameter keeps the lookup value until integer conversion")
+
+fn result_frame() list { [1, [53, 71], 5] }
+def frame = result_frame()
+assert(frame.get(0, 0) != 0 && 0 != frame.get(0, 0),
+       "an odd success flag crosses getter comparison decoding once")
+assert(int(frame.get(1).get(1)) == 71 && int(frame.get(2)) == 5,
+       "a heterogeneous callee result preserves nested values and odd offsets")
+NY
+}

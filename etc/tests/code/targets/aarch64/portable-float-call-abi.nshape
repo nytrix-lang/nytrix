@@ -1,0 +1,188 @@
+shape aarch64_portable_text_float_call_uses_aapcs64_registers {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "test", "aarch64", "portable-text", "runtime", "f64", "ffi"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os (file_remove, file_write, run_capture, temp_dir, pid)
+
+def compiler = env("NYTRIX_NY_FULL_BIN")
+assert(is_str(compiler) && compiler.len > 0,
+       "test runner provides the compiler path")
+def stem = temp_dir() + "/ny-aarch64-float-call-" + to_str(pid())
+def asm_path = stem + ".s"
+def start_path = stem + "-start.s"
+def helper_path = stem + "-helper.s"
+def executable = stem
+assert(is_ok(file_write(
+    start_path,
+    ".text\n.globl _start\n.type _start, %function\n_start:\n" +
+    "  bl rt_main\n  asr x0, x0, #1\n  mov x8, #93\n  svc #0\n")),
+    "write AArch64 startup wrapper")
+mut str fp_args_decl = ""
+mut str fp_args_use = ""
+mut str fp_args_values = ""
+for index in 0..63 {
+  if index > 0 {
+    fp_args_decl += ", "
+    fp_args_use += ", "
+    fp_args_values += ", "
+  }
+  def suffix = to_str(index)
+  fp_args_decl += "f64 f" + suffix
+  fp_args_use += "f" + suffix
+  fp_args_values += to_str(index + 1) + ".0"
+}
+assert(is_ok(file_write(
+    helper_path,
+    ".text\n.globl host_f64_sum64\n.type host_f64_sum64, %function\n" +
+    "host_f64_sum64:\n" +
+    "  fadd d0, d0, d1\n  fadd d0, d0, d2\n" +
+    "  fadd d0, d0, d3\n  fadd d0, d0, d4\n" +
+    "  fadd d0, d0, d5\n  fadd d0, d0, d6\n" +
+    "  fadd d0, d0, d7\n  mov x10, #0\n" +
+    "1:\n  cmp x10, #56\n  b.hs 2f\n" +
+    "  ldr d1, [sp, x10, lsl #3]\n" +
+    "  fadd d0, d0, d1\n  add x10, x10, #1\n  b 1b\n" +
+    "2:\n  ret\n" +
+    ".globl host_mixed_sum9\n.type host_mixed_sum9, %function\n" +
+    "host_mixed_sum9:\n" +
+    "  fadd d0, d0, d1\n  fadd d0, d0, d2\n" +
+    "  fadd d0, d0, d3\n  fadd d0, d0, d4\n" +
+    "  fadd d0, d0, d5\n  fadd d0, d0, d6\n" +
+    "  fadd d0, d0, d7\n  ldr d1, [sp]\n" +
+    "  fadd d0, d0, d1\n" +
+    "  add x9, x0, x1\n  add x9, x9, x2\n" +
+    "  add x9, x9, x3\n  add x9, x9, x4\n" +
+    "  add x9, x9, x5\n  add x9, x9, x6\n" +
+    "  add x9, x9, x7\n  ldr x11, [sp, #8]\n" +
+    "  add x9, x9, x11\n  scvtf d2, x9\n" +
+    "  fadd d0, d0, d2\n  ret\n" +
+    ".globl host_f64_add\n.type host_f64_add, %function\n" +
+    "host_f64_add:\n  fadd d0, d0, d1\n  ret\n" +
+    ".globl host_f32_add\n.type host_f32_add, %function\n" +
+    "host_f32_add:\n  fadd s0, s0, s1\n  ret\n" +
+    ".globl host_f64_sum9\n.type host_f64_sum9, %function\n" +
+    "host_f64_sum9:\n" +
+    "  fadd d0, d0, d1\n  fadd d0, d0, d2\n" +
+    "  fadd d0, d0, d3\n  fadd d0, d0, d4\n" +
+    "  fadd d0, d0, d5\n  fadd d0, d0, d6\n" +
+    "  fadd d0, d0, d7\n  ldr d1, [sp]\n" +
+    "  fadd d0, d0, d1\n  ret\n" +
+    ".globl host_i64_sum9\n.type host_i64_sum9, %function\n" +
+    "host_i64_sum9:\n" +
+    "  add x0, x0, x1\n  add x0, x0, x2\n" +
+    "  add x0, x0, x3\n  add x0, x0, x4\n" +
+    "  add x0, x0, x5\n  add x0, x0, x6\n" +
+    "  add x0, x0, x7\n  ldr x9, [sp]\n" +
+    "  add x0, x0, x9\n  ret\n" +
+    ".globl host_i64_sum64\n.type host_i64_sum64, %function\n" +
+    "host_i64_sum64:\n" +
+    "  add x9, x0, x1\n  add x9, x9, x2\n" +
+    "  add x9, x9, x3\n  add x9, x9, x4\n" +
+    "  add x9, x9, x5\n  add x9, x9, x6\n" +
+    "  add x9, x9, x7\n  mov x10, #0\n" +
+    "1:\n  cmp x10, #56\n  b.hs 2f\n" +
+    "  ldr x11, [sp, x10, lsl #3]\n" +
+    "  add x9, x9, x11\n  add x10, x10, #1\n  b 1b\n" +
+    "2:\n  mov x0, x9\n  ret\n")),
+    "write AArch64 scalar ABI helper routines")
+mut str args_decl = ""
+mut str args_use = ""
+mut str args_values = ""
+for index in 0..63 {
+  if index > 0 {
+    args_decl += ", "
+    args_use += ", "
+    args_values += ", "
+  }
+  def suffix = to_str(index)
+  args_decl += "int a" + suffix
+  args_use += "a" + suffix
+  args_values += to_str(index + 1)
+}
+def emitted = run_capture(
+    [compiler, "--native-backend=aarch64", "--native-only", "--nyir-verify",
+     "--emit-asm=" + asm_path, "-no-std", "-emit-only", "-e",
+     "extern \"c\" {\n" +
+     "  fn host_f64_add(f64 left, f64 right) f64\n" +
+     "  fn host_f32_add(f32 left, f32 right) f32\n" +
+     "  fn host_f64_sum9(f64 a, f64 b, f64 c, f64 d, f64 e, " +
+     "f64 f, f64 g, f64 h, f64 i) f64\n" +
+     "  fn host_i64_sum9(int a, int b, int c, int d, int e, " +
+     "int f, int g, int h, int i) int\n" +
+     "  fn host_f64_sum64(" + fp_args_decl + ") f64\n" +
+     "  fn host_i64_sum64(" + args_decl + ") int\n" +
+     "  fn host_mixed_sum9(f64 f0, int i0, f64 f1, int i1, " +
+     "f64 f2, int i2, f64 f3, int i3, f64 f4, int i4, " +
+     "f64 f5, int i5, f64 f6, int i6, f64 f7, int i7, " +
+     "f64 f8, int i8) f64\n" +
+     "}\n" +
+     "@noinline fn invoke(f64 left, f64 right) f64 {\n" +
+     "  host_f64_add(left, right)\n" +
+     "}\n" +
+     "@noinline fn invoke_f32(f32 left, f32 right) f32 {\n" +
+     "  host_f32_add(left, right)\n" +
+     "}\n" +
+     "@noinline fn mixed(int before, f64 left, int after, f64 right) int {\n" +
+     "  if before == 7 && after == 11 &&\n" +
+     "     host_f64_add(left, right) == 3.75 { 0 } else { 1 }\n" +
+     "}\n" +
+     "@noinline fn sum9(f64 a, f64 b, f64 c, f64 d, f64 e, " +
+     "f64 f, f64 g, f64 h, f64 i) f64 {\n" +
+     "  host_f64_sum9(a, b, c, d, e, f, g, h, i)\n" +
+     "}\n" +
+     "@noinline fn sum9i(int a, int b, int c, int d, int e, " +
+     "int f, int g, int h, int i) int {\n" +
+     "  host_i64_sum9(a, b, c, d, e, f, g, h, i)\n" +
+     "}\n" +
+     "@noinline fn ninth(int a, int b, int c, int d, int e, " +
+     "int f, int g, int h, int i) int { i }\n" +
+     "@noinline fn sum64(" + args_decl + ") int {\n" +
+     "  host_i64_sum64(" + args_use + ")\n" +
+     "}\n" +
+     "@noinline fn sum64f(" + fp_args_decl + ") f64 {\n" +
+     "  host_f64_sum64(" + fp_args_use + ")\n" +
+     "}\n" +
+     "@noinline fn mixed_sum9(f64 f0, int i0, f64 f1, int i1, " +
+     "f64 f2, int i2, f64 f3, int i3, f64 f4, int i4, " +
+     "f64 f5, int i5, f64 f6, int i6, f64 f7, int i7, " +
+     "f64 f8, int i8) f64 {\n" +
+     "  host_mixed_sum9(f0, i0, f1, i1, f2, i2, f3, i3, " +
+     "f4, i4, f5, i5, f6, i6, f7, i7, f8, i8)\n" +
+     "}\n" +
+     "(invoke(1.5, 2.25) == 3.75 ? 0 : 1) + " +
+     "((invoke_f32(1.25f32, 2.5f32) == 3.75f32 ? 0 : 2)) + " +
+     "(mixed(7, 1.5, 11, 2.25) * 4) + " +
+     "((sum9(1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0) == 45.0 ? 0 : 8)) + " +
+     "(host_i64_sum9(1, 2, 3, 4, 5, 6, 7, 8, 9) == 45 ? 0 : 16) + " +
+     "(sum9i(1, 2, 3, 4, 5, 6, 7, 8, 9) == 45 ? 0 : 32) + " +
+     "(ninth(1, 2, 3, 4, 5, 6, 7, 8, 9) == 9 ? 0 : 64) + " +
+     "(sum64(" + args_values + ") == 2080 ? 0 : 128) + " +
+     "(sum64f(" + fp_args_values + ") == 2080.0 ? 0 : 256) + " +
+     "(mixed_sum9(1.0, 10, 2.0, 11, 3.0, 12, 4.0, 13, " +
+     "5.0, 14, 6.0, 15, 7.0, 16, 8.0, 17, 9.0, 18) == 171.0 ? 0 : 512)"],
+    [], nil, false)
+def linked = run_capture(
+    ["clang", "--target=aarch64-unknown-linux-gnu", "-march=armv8-a",
+     "-fuse-ld=lld", "-nostdlib", "-static", "-Wl,-e,_start",
+     "-Wl,--build-id=none", "-o", executable, asm_path, start_path,
+     helper_path],
+    [], nil, false)
+def execution = run_capture(["qemu-aarch64", executable], [], nil, false)
+def removed_asm = file_remove(asm_path)
+def removed_start = file_remove(start_path)
+def removed_helper = file_remove(helper_path)
+def removed_executable = file_remove(executable)
+assert(emitted.get("code", 127) == 0 && linked.get("code", 127) == 0,
+       "verified AArch64 float-call module assembles and links")
+assert(execution.get("code", 127) == 0,
+       "AArch64 floating and overflow-argument ABI failure mask: " +
+           to_str(execution.get("code", 127)))
+assert(is_ok(removed_asm) && is_ok(removed_start) &&
+       is_ok(removed_helper) && is_ok(removed_executable),
+       "remove AArch64 float-call artifacts")
+NY
+}

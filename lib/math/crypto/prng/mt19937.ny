@@ -5,18 +5,18 @@
 ;; - https://www.math.sci.hiroshima-u.ac.jp/m-mat/MT/ARTICLES/mt.pdf
 ;; - https://cacr.uwaterloo.ca/hac/about/chap5.pdf
 ;; References:
-;; - std.math.crypto.prng
-;; - std.math.crypto
-module std.math.crypto.prng.mt19937(mt_untemper, mt_temper, mt_clone, mt_predict, mt_generate, mt19937_next, mt_twist_output_candidates, mt19937_smt_recover_state_prefix, py_mt19937_seed_int, py_mt19937_getrandbits, py_getrandbits_unpack_words_full, py_getrandbits_word_constraints, py_random_float_to_mt_parts, py_mt19937_randbytes, py_mt19937_randbelow, py_mt19937_randrange, py_mt19937_sample_range)
-use std.core
-use std.math.nt
-use std.math.scalar (pow)
-use std.math.smt
+;; - core.math.crypto.prng
+;; - core.math.crypto
+module core.math.crypto.prng.mt19937(mt_untemper, mt_temper, mt_clone, mt_predict, mt_generate, mt19937_next, mt_twist_output_candidates, mt19937_smt_recover_state_prefix, py_mt19937_seed_int, py_mt19937_getrandbits, py_getrandbits_unpack_words_full, py_getrandbits_word_constraints, py_random_float_to_mt_parts, py_mt19937_randbytes, py_mt19937_randbelow, py_mt19937_randrange, py_mt19937_sample_range)
+use core
+use core.math.nt
+use core.math.scalar (pow)
+use core.math.smt
 
 fn _untemper_right(any y, int shift) any {
    mut r, i = y & 0xFFFFFFFF, 0
    while i < 6 {
-      r = (y ^^ (r >> shift)) & 0xFFFFFFFF
+      r = (y ^ (r >> shift)) & 0xFFFFFFFF
       i += 1
    }
    r & 0xFFFFFFFF
@@ -25,7 +25,7 @@ fn _untemper_right(any y, int shift) any {
 fn _untemper_left(any y, int shift, any mask) any {
    mut r, i = y & 0xFFFFFFFF, 0
    while i < 6 {
-      r = (y ^^ ((r << shift) & mask)) & 0xFFFFFFFF
+      r = (y ^ ((r << shift) & mask)) & 0xFFFFFFFF
       i += 1
    }
    r & 0xFFFFFFFF
@@ -46,10 +46,10 @@ fn mt_untemper(any y) any {
 fn mt_temper(any s) any {
    "Apply MT19937 tempering to internal state word s. Returns the output value."
    mut y = s & 0xFFFFFFFF
-   y = y ^^ (y >> 11)
-   y = y ^^ ((y << 7) & 0x9D2C5680)
-   y = y ^^ ((y << 15) & 0xEFC60000)
-   y = y ^^ (y >> 18)
+   y = y ^ (y >> 11)
+   y = y ^ ((y << 7) & 0x9D2C5680)
+   y = y ^ ((y << 15) & 0xEFC60000)
+   y = y ^ (y >> 18)
    y & 0xFFFFFFFF
 }
 
@@ -64,8 +64,8 @@ fn mt_twist_output_candidates(any output_i1, any output_i397) list {
    mut msb = 0
    while msb < 2 {
       def y = (msb * 0x80000000) | (mt_i1 & 0x7FFFFFFF)
-      mut word = mt_i397 ^^ (y >> 1)
-      if (y & 1) != 0 { word = word ^^ 0x9908B0DF }
+      mut word = mt_i397 ^ (y >> 1)
+      if (y & 1) != 0 { word = word ^ 0x9908B0DF }
       __store_item_fast(out, msb, mt_temper(word))
       msb += 1
    }
@@ -94,8 +94,8 @@ fn mt_generate(list state) list {
       def hi = __load_item_fast(s, i) & 0x80000000
       def lo = __load_item_fast(s, (i + 1) % 624) & 0x7FFFFFFF
       def y = hi | lo
-      mut val = __load_item_fast(s, (i + 397) % 624) ^^ (y >> 1)
-      if y & 1 != 0 { val = val ^^ 0x9908B0DF }
+      mut val = __load_item_fast(s, (i + 397) % 624) ^ (y >> 1)
+      if y & 1 != 0 { val = val ^ 0x9908B0DF }
       __store_item_fast(s, i, val)
       i += 1
    }
@@ -231,7 +231,7 @@ fn _mt_init_genrand(any seed32) list {
    mut i = 1
    while i < 624 {
       def prev = state.get(i - 1)
-      def t = prev ^^ (prev >> 30)
+      def t = prev ^ (prev >> 30)
       state = state.append((1812433253 * t + i) & 0xFFFFFFFF)
       i += 1
    }
@@ -259,9 +259,9 @@ fn _mt_init_by_array(list keys) list {
    if key_len > 624 { k = key_len }
    while k > 0 {
       def prev = mt.get(i - 1)
-      def t = prev ^^ (prev >> 30)
+      def t = prev ^ (prev >> 30)
       def cur = mt.get(i)
-      mt[i] = ((cur ^^ ((t * 1664525) & 0xFFFFFFFF)) + (keys.get(j) & 0xFFFFFFFF) + j) & 0xFFFFFFFF
+      mt[i] = ((cur ^ ((t * 1664525) & 0xFFFFFFFF)) + (keys.get(j) & 0xFFFFFFFF) + j) & 0xFFFFFFFF
       i += 1
       j += 1
       if i >= 624 {
@@ -274,9 +274,9 @@ fn _mt_init_by_array(list keys) list {
    k = 623
    while k > 0 {
       def prev = mt.get(i - 1)
-      def t = prev ^^ (prev >> 30)
+      def t = prev ^ (prev >> 30)
       def cur = mt.get(i)
-      mt[i] = ((cur ^^ ((t * 1566083941) & 0xFFFFFFFF)) - i) & 0xFFFFFFFF
+      mt[i] = ((cur ^ ((t * 1566083941) & 0xFFFFFFFF)) - i) & 0xFFFFFFFF
       i += 1
       if i >= 624 {
          mt[0] = mt.get(623)
@@ -295,7 +295,7 @@ fn py_mt19937_seed_int(any seed_int) list {
    [st, 624]
 }
 
-fn py_mt19937_getrandbits(list state_orig, int index, int k) list {
+fn py_mt19937_getrandbits(list state_orig, int index, int k) list<any> {
    "Python-compatible getrandbits(k). Returns [value, updated_state, new_index]."
    if k <= 0 { return [0, state_orig, index] }
    def words = (k + 31) / 32
@@ -483,5 +483,5 @@ fn py_mt19937_randbytes(list state_in, int idx_in, int nbytes) list {
    def sample_range = py_mt19937_sample_range(seeded.get(0), seeded.get(1), 10, 4)
    _mt_check(sample_range.get(0) == [7, 8, 6, 2], "mt19937 sample range")
    _mt_check(py_random_float_to_mt_parts(0.6414006161858726) == [86087333, 27, 29680093, 26], "mt19937 float parts")
-   print("✓ std.math.crypto.prng.mt19937 self-test passed")
+   print("✓ core.math.crypto.prng.mt19937 self-test passed")
 }

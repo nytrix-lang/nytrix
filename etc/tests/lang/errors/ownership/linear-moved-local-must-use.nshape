@@ -1,0 +1,20 @@
+shape ownership_rule_linear_moved_local_must_use {
+  family "compiler-errors/ownership"
+  generator "error"
+  features ["error", "ownership", "resource", "linear", "move"]
+  template ny-compile-fail
+  expect compile_fail
+  flags "--ownership-strict"
+  expect_message "linear resource 'second' must be consumed exactly once"
+  source ny <<'NY'
+linear layout File { int fd }
+
+fn forget() int {
+  def File first = File(29)
+  def second = first
+  0
+}
+
+forget()
+NY
+}

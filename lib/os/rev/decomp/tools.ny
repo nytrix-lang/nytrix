@@ -1,10 +1,10 @@
 ;; Keywords: tools demangle cxxfilt subprocess disassembly
 ;; External tool boundary for the Nytrix decompiler.
-module std.os.rev.decomp.tools(tool_status, demangle)
-use std.core
-use std.core.str as str
-use std.os.disasm as dasm
-use std.os.subprocess (run_capture)
+module core.os.rev.decomp.tools(tool_status, demangle)
+use core
+use core.str as str
+use core.os.disasm as dasm
+use core.os.subprocess (run_capture)
 
 fn _available(str name, list args) bool {
    run_capture(name, args, nil, false).get("code", 127) == 0
@@ -34,5 +34,5 @@ fn demangle(str name) str {
 #main {
    assert(demangle("plain_name") == "plain_name", "decompiler tools passthrough")
    assert(is_dict(tool_status()), "decompiler tool status")
-   print("✓ std.os.rev.decomp.tools self-test passed")
+   print("✓ core.os.rev.decomp.tools self-test passed")
 }

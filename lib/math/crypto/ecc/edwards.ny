@@ -6,11 +6,11 @@
 ;; - https://www.secg.org/sec1-v2.pdf
 ;; - https://www.rfc-editor.org/rfc/rfc8032
 ;; References:
-;; - std.math.crypto.ecc
-;; - std.math.crypto
-module std.math.crypto.ecc.edwards(edwards_point_add, edwards_scalar_mult, edwards_is_on_curve, twisted_edwards_add, twisted_edwards_scalar_mult)
-use std.math.nt
-use std.math.crypto.ecc
+;; - core.math.crypto.ecc
+;; - core.math.crypto
+module core.math.crypto.ecc.edwards(edwards_point_add, edwards_scalar_mult, edwards_is_on_curve, twisted_edwards_add, twisted_edwards_scalar_mult)
+use core.math.nt
+use core.math.crypto.ecc
 
 fn edwards_is_on_curve(any x, any y, any d, any p) bool {
    "Check whether(x,y) lies on Edwards curve x^2 + y^2 = 1 + d*x^2*y^2 over F_p."
@@ -108,5 +108,5 @@ fn twisted_edwards_scalar_mult(any k, any P, any a, any d, any p) any {
    assert(TE_Q1[0] == 0 && TE_Q1[1] == 1, "twisted mult 1")
    def TE_Q2 = twisted_edwards_scalar_mult(2, TE_P, a2, d2, p2)
    assert(TE_Q2 == TE_P, "twisted mult 2 identity")
-   print("✓ std.math.crypto.ecc.edwards self-test passed")
+   print("✓ core.math.crypto.ecc.edwards self-test passed")
 }

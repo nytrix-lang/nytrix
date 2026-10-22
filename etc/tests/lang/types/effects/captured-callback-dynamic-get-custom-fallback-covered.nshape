@@ -1,0 +1,31 @@
+shape dynamic_get_custom_callback_fallback_covered {
+  family "typing/effects"
+  generator "regression"
+  features [ny test typing effects callback dynamic-index capability fallback]
+  template ny-test-case
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_and_run
+  timeout 25
+  source ny <<'NY'
+use core
+
+@effects(cap("project.storage.read"))
+fn storage_callback() int {
+  11
+}
+
+@effects(cap("project.audit.write"))
+fn audit_fallback() int {
+  12
+}
+
+@effects(alloc, read, cap("project.storage.read"), cap("project.audit.write"))
+fn invoke_with_fallback(int index) int {
+  def callbacks = [storage_callback]
+  callbacks.get(index, audit_fallback)()
+}
+
+invoke_with_fallback(0)
+0
+NY
+}

@@ -1,16 +1,16 @@
 ;; Keywords: editor selection cursor range text os ui render viewer
 ;; Selection and cursor range helpers for text editing operations.
 ;; References:
-;; - std.os.ui.render.viewer.editor.core
-module std.os.ui.render.viewer.editor.selection(
+;; - core.os.ui.render.viewer.editor.core
+module core.os.ui.render.viewer.editor.selection(
    set_selection_anchor, update_selection, selection_range,
    selection_valid, selection_text, delete_selection
 )
 
-use std.core
-use std.core.str as str
-use std.math (max, min)
-use std.os.ui.render.viewer.editor.core
+use core
+use core.str as str
+use core.math (max, min)
+use core.os.ui.render.viewer.editor.core
 
 fn _copy_lines(list src, int a, int b, list dst, int at) int {
    mut i = a

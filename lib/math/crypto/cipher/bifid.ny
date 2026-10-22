@@ -1,12 +1,12 @@
 ;; Keywords: cipher bifid math crypto
 ;; Bifid cipher decryption and CBC-style variants routines.
 ;; References:
-;; - std.math.crypto.cipher
-;; - std.math.crypto.analysis
-module std.math.crypto.cipher.bifid(bifid_cbc_decrypt, bifid_cbc_decrypt_block, bifid_cbc_unmask)
-use std.core
-use std.core.str
-use std.math.crypto.error
+;; - core.math.crypto.cipher
+;; - core.math.crypto.analysis
+module core.math.crypto.cipher.bifid(bifid_cbc_decrypt, bifid_cbc_decrypt_block, bifid_cbc_unmask)
+use core
+use core.str
+use core.math.crypto.error
 
 fn _bifid_ch(str s, int i) str {
    str_slice(s, i, i + 1, 1)

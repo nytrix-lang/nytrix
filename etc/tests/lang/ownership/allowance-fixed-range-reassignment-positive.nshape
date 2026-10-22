@@ -1,0 +1,35 @@
+shape ownership_allowance_fixed_range_reassignment_positive {
+  family "language/ownership"
+  generator "regression"
+  features [ownership allowance fixed-range reassignment positive]
+  template ny-test-case
+  flags_matrix "--ownership-strict --native --run; --ownership-strict --native-backend=llvm --jit --jit-engine=mcjit; --ownership-strict --native-backend=llvm --jit --jit-engine=orc; --ownership-strict --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+@allowance(x, [1,2])
+fn repeat_epoch(int x) int {
+  def before = x
+  for index in 0..1 {
+    def observed = x
+    x = 7
+  }
+  x
+}
+
+@allowance(y, [2,2])
+fn empty_range_keeps_epoch(int y) int {
+  def before = y
+  for index in 1..0 {
+    y = 9
+  }
+  y
+}
+
+assert(repeat_epoch(3) == 7,
+       "each fixed-range iteration closes one allowance epoch")
+assert(empty_range_keeps_epoch(4) == 4,
+       "an empty fixed range does not create reassignment epochs")
+NY
+}

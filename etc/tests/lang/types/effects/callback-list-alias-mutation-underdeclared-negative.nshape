@@ -1,0 +1,33 @@
+shape callback_list_alias_mutation_keeps_underdeclared_effect_rejected {
+  family "typing/effects"
+  generator "error"
+  features [typing effects callback list alias mutation underdeclared negative]
+  template ny-compile-fail
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_fail
+  expect_message "effect contract violation"
+  source ny <<'NY'
+use core
+
+@effects(none)
+fn pure() int {
+  return 42
+}
+
+@effects(io)
+fn impure() int {
+  print("aliased list callback\n")
+  return 43
+}
+
+@effects(alloc, read, write)
+fn underdeclared() int {
+  mut callbacks = [impure, pure]
+  mut alias = callbacks
+  alias.pop()
+  return alias[0]()
+}
+
+underdeclared()
+NY
+}

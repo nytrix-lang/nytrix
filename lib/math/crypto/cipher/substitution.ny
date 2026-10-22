@@ -4,13 +4,13 @@
 ;; - https://practicalcryptography.com/ciphers/simple-substitution-cipher/
 ;; - https://en.wikipedia.org/wiki/Letter_frequency
 ;; References:
-;; - std.math.crypto.cipher
-;; - std.math.crypto.analysis
-module std.math.crypto.cipher.substitution(substitution_encrypt, substitution_decrypt, substitution_apply_key, substitution_freq_analysis, substitution_key_from_pairs, substitution_freq_key, substitution_crack_freq, substitution_crack_hill, substitution_crack_hill_multistart, substitution_score, substitution_tr)
-use std.core
-use std.core.str
-use std.math.crypto.error
-use std.math.crypto.encoding.xor
+;; - core.math.crypto.cipher
+;; - core.math.crypto.analysis
+module core.math.crypto.cipher.substitution(substitution_encrypt, substitution_decrypt, substitution_apply_key, substitution_freq_analysis, substitution_key_from_pairs, substitution_freq_key, substitution_crack_freq, substitution_crack_hill, substitution_crack_hill_multistart, substitution_score, substitution_tr)
+use core
+use core.str
+use core.math.crypto.error
+use core.math.crypto.encoding.xor
 
 def ENGLISH_FREQ_ORDER = "ETAOINSHRDLCUMWFGYPBVKJXQZ"
 
@@ -372,5 +372,5 @@ fn substitution_score(str text) int {
    assert(key == "BHDGAIJQCKOLMEFNTYPXZRVSUW", "known plaintext fills partial substitution key")
    assert(substitution_decrypt("XQA TZCDO HYFVE", key) == "THE QUICK BROWN", "derived key decrypts known pair")
    print("SUBSTITUTION_KNOWN_PLAINTEXT_OK")
-   print("✓ std.math.crypto.cipher.substitution self-test passed")
+   print("✓ core.math.crypto.cipher.substitution self-test passed")
 }

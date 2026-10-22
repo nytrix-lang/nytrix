@@ -1,0 +1,31 @@
+shape global_call_result_class {
+  family "runtime/values"
+  generator "regression"
+  features ["ny", "global", "dynamic", "abi"]
+  estimate_ms 26000
+  template ny-test-case
+  expect compile_and_run
+  flags_matrix "--native --run -O0; --native --run -O3; --native-backend=llvm --jit --jit-engine=mcjit -O0; --native-backend=llvm --jit --jit-engine=mcjit -O3; --native-backend=llvm --jit --jit-engine=orc -O0; --native-backend=llvm --jit --jit-engine=orc -O3; --native-only -O0; --native-only -O3"
+  timeout 25
+  source ny <<'NY'
+use core
+fn add(a, b) { a + b }
+mut x = 1
+def y = 2
+mut result = add(x, y)
+def immutable = add(x, y)
+fn read_result() bool { result == 3 && immutable == 3 }
+assert(result == 3, "mutable global call result preserves tagged class")
+assert(immutable == 3, "immutable call result agrees with mutable global")
+assert(read_result(), "function reads the same global representation")
+assert(result + 2 == 5, "global result arithmetic")
+result = add(2, 2)
+assert(result == 4, "even tagged result")
+result = add(-5, 2)
+assert(result == -3, "negative tagged result")
+assert(-3 == result, "negative scalar peer on the left")
+assert(result == 0 - 3, "computed scalar peer")
+assert(result != 3, "negative result inequality")
+print("global_call_result_class ok")
+NY
+}

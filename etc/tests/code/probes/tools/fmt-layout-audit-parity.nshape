@@ -1,0 +1,46 @@
+shape fmt_layout_audit_parity {
+  family "probe/tools"
+  generator "embedded"
+  features ["formatter", "layout-audit", "parity"]
+  template ny-test-case
+  flags "--native-only"
+  timeout 60
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.subprocess (run_capture)
+use core.str as str
+def ny = env("NYTRIX_NY_FULL_BIN")
+def fmt = env("NYTRIX_TEST_FMT_BIN")
+def cmake = env("NYTRIX_CMAKE_COMMAND")
+def dir = temp_dir() + "/fmt-layout-audit-" + to_str(pid())
+def made = run_capture([cmake, "-E", "make_directory", dir], [], nil, false)
+assert(made.get("code", 127) == 0, "create layout audit directory")
+def source = dir + "/layout-audit.ny"
+def c_source = dir + "/layout-audit.c"
+mut ny_body = "fn many_reads(values) {\n"
+mut c_body = "void many_reads(void) {\n"
+for index in 1..40 {
+   ny_body += "   def value_" + to_str(index) +
+              " = dict_get(values, " + to_str(index) + ")\n"
+   c_body += "   dict_get(values, " + to_str(index) + ");\n"
+}
+ny_body += "}\n"
+c_body += "}\n"
+assert(is_ok(file_write(source, ny_body)) &&
+       is_ok(file_write(c_source, c_body)), "write layout audit samples")
+def c = run_capture(
+   [fmt, "--audit-mode=layout", "--json", source, c_source], [], nil, false)
+def embedded = run_capture(
+   [ny, "fmt", "--audit-mode=layout", "--json", source, c_source], [], nil, false)
+def output = embedded.get("stdout", "")
+assert(c.get("code", 127) == 0 && embedded.get("code", 127) == 0 &&
+       c.get("stdout", "") == output, "layout audit parity: " + output)
+for expected in ["NYAUD6001", "layout/codegen candidate", "\"dict_gets\": 40"] {
+   assert(str.find(output, expected) >= 0, "layout finding missing " + expected)
+}
+def cleanup = run_capture([cmake, "-E", "rm", "-rf", dir], [], nil, false)
+assert(cleanup.get("code", 127) == 0, "remove layout audit directory")
+print("FMT_LAYOUT_AUDIT_PARITY_OK")
+NY
+}

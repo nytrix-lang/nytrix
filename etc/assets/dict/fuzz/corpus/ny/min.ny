@@ -1,3 +1,3 @@
-use std.core *
+use core *
 fn main(){ 0 }
 main()

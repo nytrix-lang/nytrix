@@ -5,11 +5,11 @@
 ;; where each component is [value_or_nil, bit_length] in little-endian segment
 ;; order, growing toward the most-significant end.
 ;; References:
-;; - std.math.crypto.number
-;; - std.math.crypto
-module std.math.crypto.number.partial(partial_integer_new, partial_integer_add_known, partial_integer_add_unknown, partial_integer_known_lsb, partial_integer_known_msb, partial_integer_known_middle, partial_integer_unknown_lsb, partial_integer_unknown_msb, partial_integer_unknown_middle, partial_integer_matches, partial_integer_sub, partial_integer_known_and_unknowns, partial_integer_unknown_bounds, partial_integer_to_int, partial_integer_to_string_le, partial_integer_to_string_be, partial_integer_to_bits_le, partial_integer_to_bits_be, partial_integer_from_bits_le)
-use std.core
-use std.core.str as str
+;; - core.math.crypto.number
+;; - core.math.crypto
+module core.math.crypto.number.partial(partial_integer_new, partial_integer_add_known, partial_integer_add_unknown, partial_integer_known_lsb, partial_integer_known_msb, partial_integer_known_middle, partial_integer_unknown_lsb, partial_integer_unknown_msb, partial_integer_unknown_middle, partial_integer_matches, partial_integer_sub, partial_integer_known_and_unknowns, partial_integer_unknown_bounds, partial_integer_to_int, partial_integer_to_string_le, partial_integer_to_string_be, partial_integer_to_bits_le, partial_integer_to_bits_be, partial_integer_from_bits_le)
+use core
+use core.str as str
 
 fn _pi_pair(any a, any b) list { [a, b] }
 

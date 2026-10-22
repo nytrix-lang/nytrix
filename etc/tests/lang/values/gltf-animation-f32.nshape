@@ -1,0 +1,44 @@
+shape gltf_animation_f32_widening {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "codegen", "stdlib", "gltf", "animation"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-only; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.math.parse.3d.gltf.animation as animation
+
+def input_ptr = malloc(8)
+store32(input_ptr, 0x00000000, 0)
+store32(input_ptr, 0x3f800000, 4)
+def out_ptr = malloc(24)
+store32(out_ptr, 0x00000000, 0)
+store32(out_ptr, 0x00000000, 4)
+store32(out_ptr, 0x00000000, 8)
+store32(out_ptr, 0x40000000, 12)
+store32(out_ptr, 0x40800000, 16)
+store32(out_ptr, 0x40c00000, 20)
+mut record = [0, 1, input_ptr, out_ptr, 2, 4, 12, 3, 0, 0]
+def midpoint = animation._gltf_anim_fast_value(record, 0.5)
+assert(midpoint == [1.0, 2.0, 3.0],
+       "binary32 animation samples interpolate as f64 values")
+
+def q_ptr = malloc(32)
+store32_f32(q_ptr, 0.0, 0)
+store32_f32(q_ptr, 0.0, 4)
+store32_f32(q_ptr, 0.0, 8)
+store32_f32(q_ptr, 1.0, 12)
+store32_f32(q_ptr, 0.0, 16)
+store32_f32(q_ptr, 0.0, 20)
+store32_f32(q_ptr, 1.0, 24)
+store32_f32(q_ptr, 0.0, 28)
+mut q_record = [0, 2, input_ptr, q_ptr, 2, 4, 16, 4, 0, 0]
+assert(animation._gltf_anim_fast_tuple(q_record, 0) == [0.0, 0.0, 0.0, 1.0] &&
+       animation._gltf_anim_fast_tuple(q_record, 1) == [0.0, 0.0, 1.0, 0.0],
+       "binary32 quaternion endpoint samples decode exactly")
+free(q_ptr)
+free(out_ptr)
+free(input_ptr)
+NY
+}

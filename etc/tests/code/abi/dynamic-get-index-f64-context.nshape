@@ -1,0 +1,31 @@
+shape dynamic_get_integer_index_in_float_context {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "native", "llvm", "dynamic-access", "float-context"]
+  template ny-test-case
+  flags_matrix "--native-only; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+@jit
+fn matrix_sample(any values, int row) f64 {
+   0.0 + values.get(0 * 4 + row, 0.0)
+}
+
+fn lambda_get_fallback() f64 {
+   def values = fn() any { [2.5] }
+   def read = fn() f64 {
+      def dynamic = values()
+      dynamic.get(4, 0.0)
+   }
+   read()
+}
+
+def values = [10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0]
+assert(matrix_sample(values, 2) == 30.0,
+       "integer dynamic-list index stays integral in float context")
+assert(lambda_get_fallback() == 0.0,
+       "float fallback stays tagged through a nested lambda")
+NY
+}

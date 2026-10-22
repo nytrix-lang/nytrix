@@ -1,6 +1,6 @@
 ;; Keywords: render texture image atlas environment mip os ui
 ;; Backend-neutral texture helpers: CPU mip generation, atlas packing, environment images, and upload-job planning.
-module std.os.ui.render.texture(
+module core.os.ui.render.texture(
    tex_job_make, tex_job_queue_make, tex_job_queue_push, tex_job_queue_pop,
    tex_job_result_make, tex_job_cache_key, tex_job_worker_plan, tex_job_upload_plan,
    resize, rgba_mip_level_count, rgba_mip_total_bytes, generate_rgba_mips,
@@ -15,12 +15,12 @@ module std.os.ui.render.texture(
    scene_prefers_gray_proof_bg
 )
 
-use std.core
-use std.core.mem
-use std.math
-use std.os.ui.render.env as render_env
-use std.math.crypto.hash as hash
-use std.math.float (is_nan)
+use core
+use core.mem
+use core.math
+use core.os.ui.render.env as render_env
+use core.math.crypto.hash as hash
+use core.math.float (is_nan)
 
 fn rgba_mip_level_count(int w, int h) int {
    "Returns the number of RGBA mip levels for an image size."
@@ -398,29 +398,42 @@ fn _v3_cross(any a, any b) list {
 }
 
 @jit
+fn _srgb_to_linear_chan_f64(f64 c) f64 {
+   if c <= 0.04045 { return c / 12.92 }
+   float(__flt_pow((c + 0.055) / 1.055, 2.4))
+}
+
+@jit
 fn srgb_to_linear_chan(any x) f64 {
    "Converts a normalized sRGB channel to linear."
-   def c = clamp(float(x), 0.0, 1.0)
-   if c <= 0.04045 { return c / 12.92 }
-   pow((c + 0.055) / 1.055, 2.4)
+   _srgb_to_linear_chan_f64(clamp(float(x), 0.0, 1.0))
+}
+
+@jit
+fn _linear_to_srgb_chan_f64(f64 c) f64 {
+   if is_nan(c) { c = 0.0 }
+   if c < 0.0 { c = 0.0 } elif c > 1.0 { c = 1.0 }
+   if c <= 0.0031308 { return c * 12.92 }
+   1.055 * float(__flt_pow(c, 1.0 / 2.4)) - 0.055
 }
 
 @jit
 fn linear_to_srgb_chan(any x) f64 {
    "Converts a normalized linear channel to sRGB."
-   mut c = float(x)
-   if is_nan(c) { c = 0.0 }
-   if c < 0.0 { c = 0.0 } elif c > 1.0 { c = 1.0 }
-   if c <= 0.0031308 { return c * 12.92 }
-   1.055 * pow(c, 1.0 / 2.4) - 0.055
+   _linear_to_srgb_chan_f64(float(x))
+}
+
+@jit
+fn _linear_to_srgb_u8_f64(f64 x) int {
+   def y = _linear_to_srgb_chan_f64(x)
+   if is_nan(y) { return 0 }
+   clamp(int(y * 255.0 + 0.5), 0, 255)
 }
 
 @jit
 fn linear_to_srgb_u8(any x) int {
    "Converts a normalized linear channel to an 8-bit sRGB channel."
-   def y = linear_to_srgb_chan(x)
-   if is_nan(y) { return 0 }
-   clamp(int(y * 255.0 + 0.5), 0, 255)
+   _linear_to_srgb_u8_f64(float(x))
 }
 
 @jit
@@ -447,39 +460,39 @@ fn image_sample_linear_rgb_uv(any im, any u, any v) list {
    def i00, i10 = ((y0 * w) + x0) * 4, ((y0 * w) + x1) * 4
    def i01, i11 = ((y1 * w) + x0) * 4, ((y1 * w) + x1) * 4
    def c00 = [
-      srgb_to_linear_chan(float(load8(data, i00 + 0) & 255) / 255.0),
-      srgb_to_linear_chan(float(load8(data, i00 + 1) & 255) / 255.0),
-      srgb_to_linear_chan(float(load8(data, i00 + 2) & 255) / 255.0)
+      _srgb_to_linear_chan_f64(float(load8(data, i00 + 0) & 255) / 255.0),
+      _srgb_to_linear_chan_f64(float(load8(data, i00 + 1) & 255) / 255.0),
+      _srgb_to_linear_chan_f64(float(load8(data, i00 + 2) & 255) / 255.0)
    ]
    def c10 = [
-      srgb_to_linear_chan(float(load8(data, i10 + 0) & 255) / 255.0),
-      srgb_to_linear_chan(float(load8(data, i10 + 1) & 255) / 255.0),
-      srgb_to_linear_chan(float(load8(data, i10 + 2) & 255) / 255.0)
+      _srgb_to_linear_chan_f64(float(load8(data, i10 + 0) & 255) / 255.0),
+      _srgb_to_linear_chan_f64(float(load8(data, i10 + 1) & 255) / 255.0),
+      _srgb_to_linear_chan_f64(float(load8(data, i10 + 2) & 255) / 255.0)
    ]
    def c01 = [
-      srgb_to_linear_chan(float(load8(data, i01 + 0) & 255) / 255.0),
-      srgb_to_linear_chan(float(load8(data, i01 + 1) & 255) / 255.0),
-      srgb_to_linear_chan(float(load8(data, i01 + 2) & 255) / 255.0)
+      _srgb_to_linear_chan_f64(float(load8(data, i01 + 0) & 255) / 255.0),
+      _srgb_to_linear_chan_f64(float(load8(data, i01 + 1) & 255) / 255.0),
+      _srgb_to_linear_chan_f64(float(load8(data, i01 + 2) & 255) / 255.0)
    ]
    def c11 = [
-      srgb_to_linear_chan(float(load8(data, i11 + 0) & 255) / 255.0),
-      srgb_to_linear_chan(float(load8(data, i11 + 1) & 255) / 255.0),
-      srgb_to_linear_chan(float(load8(data, i11 + 2) & 255) / 255.0)
+      _srgb_to_linear_chan_f64(float(load8(data, i11 + 0) & 255) / 255.0),
+      _srgb_to_linear_chan_f64(float(load8(data, i11 + 1) & 255) / 255.0),
+      _srgb_to_linear_chan_f64(float(load8(data, i11 + 2) & 255) / 255.0)
    ]
    def a0 = [
-      c00.get(0, 0.0) + (c10.get(0, 0.0) - c00.get(0, 0.0)) * tx,
-      c00.get(1, 0.0) + (c10.get(1, 0.0) - c00.get(1, 0.0)) * tx,
-      c00.get(2, 0.0) + (c10.get(2, 0.0) - c00.get(2, 0.0)) * tx
+      c00[0] + (c10[0] - c00[0]) * tx,
+      c00[1] + (c10[1] - c00[1]) * tx,
+      c00[2] + (c10[2] - c00[2]) * tx
    ]
    def a1 = [
-      c01.get(0, 0.0) + (c11.get(0, 0.0) - c01.get(0, 0.0)) * tx,
-      c01.get(1, 0.0) + (c11.get(1, 0.0) - c01.get(1, 0.0)) * tx,
-      c01.get(2, 0.0) + (c11.get(2, 0.0) - c01.get(2, 0.0)) * tx
+      c01[0] + (c11[0] - c01[0]) * tx,
+      c01[1] + (c11[1] - c01[1]) * tx,
+      c01[2] + (c11[2] - c01[2]) * tx
    ]
    [
-      a0.get(0, 0.0) + (a1.get(0, 0.0) - a0.get(0, 0.0)) * ty,
-      a0.get(1, 0.0) + (a1.get(1, 0.0) - a0.get(1, 0.0)) * ty,
-      a0.get(2, 0.0) + (a1.get(2, 0.0) - a0.get(2, 0.0)) * ty
+      a0[0] + (a1[0] - a0[0]) * ty,
+      a0[1] + (a1[1] - a0[1]) * ty,
+      a0[2] + (a1[2] - a0[2]) * ty
    ]
 }
 
@@ -603,9 +616,9 @@ fn generate_spec_env_slab(any im, int base_w=256) any {
                c2 = c2 / weight
             }
             def dp = off + ((y * w) + x) * 4
-            store8(slab, linear_to_srgb_u8(c0), dp + 0)
-            store8(slab, linear_to_srgb_u8(c1), dp + 1)
-            store8(slab, linear_to_srgb_u8(c2), dp + 2)
+            store8(slab, _linear_to_srgb_u8_f64(c0), dp + 0)
+            store8(slab, _linear_to_srgb_u8_f64(c1), dp + 1)
+            store8(slab, _linear_to_srgb_u8_f64(c2), dp + 2)
             store8(slab, 255, dp + 3)
             x += 1
          }
@@ -660,8 +673,12 @@ fn generate_env_image(int kind=0, int w=1024, int h=512) any {
             def key2_dx = (u - 0.28) / 0.070
             def key2_dy = (v - 0.30) / 0.095
             def key2 = exp(-(key2_dx * key2_dx + key2_dy * key2_dy))
-            def top_strip = exp(-pow((v - 0.17) / 0.040, 2.0)) * exp(-pow((u - 0.50) / 0.32, 6.0))
-            def horizon = exp(-pow((v - 0.50) / 0.11, 2.0)) * 0.012
+            def top_dy = (v - 0.17) / 0.040
+            def top_dx = (u - 0.50) / 0.32
+            def top_dx2 = top_dx * top_dx
+            def top_strip = exp(-(top_dy * top_dy)) * exp(-(top_dx2 * top_dx2 * top_dx2))
+            def horizon_dy = (v - 0.50) / 0.11
+            def horizon = exp(-(horizon_dy * horizon_dy)) * 0.012
             c0 += key1 * 0.10 + key2 * 0.08 + top_strip * 0.034 + horizon
             c1 += key1 * 0.10 + key2 * 0.08 + top_strip * 0.034 + horizon
             c2 += key1 * 0.11 + key2 * 0.09 + top_strip * 0.038 + horizon
@@ -673,9 +690,14 @@ fn generate_env_image(int kind=0, int w=1024, int h=512) any {
             def broad2_dx = (u - 0.28) / 0.18
             def broad2_dy = (v - 0.30) / 0.18
             def broad2 = exp(-(broad2_dx * broad2_dx + broad2_dy * broad2_dy))
-            def top_strip = exp(-pow((v - 0.16) / 0.040, 2.0)) * exp(-pow((u - 0.50) / 0.34, 6.0))
-            def horizon = exp(-pow((v - 0.56) / 0.14, 2.0))
-            def warm_floor = exp(-pow((v - 0.82) / 0.16, 2.0))
+            def top_dy = (v - 0.16) / 0.040
+            def top_dx = (u - 0.50) / 0.34
+            def top_dx2 = top_dx * top_dx
+            def top_strip = exp(-(top_dy * top_dy)) * exp(-(top_dx2 * top_dx2 * top_dx2))
+            def horizon_dy = (v - 0.56) / 0.14
+            def horizon = exp(-(horizon_dy * horizon_dy))
+            def floor_dy = (v - 0.82) / 0.16
+            def warm_floor = exp(-(floor_dy * floor_dy))
             c0 += broad1 * 0.16 + broad2 * 0.12 + top_strip * 0.08 + horizon * 0.06 + warm_floor * 0.05
             c1 += broad1 * 0.12 + broad2 * 0.10 + top_strip * 0.06 + horizon * 0.04 + warm_floor * 0.03
             c2 += broad1 * 0.18 + broad2 * 0.16 + top_strip * 0.10 + horizon * 0.08 + warm_floor * 0.05
@@ -686,11 +708,17 @@ fn generate_env_image(int kind=0, int w=1024, int h=512) any {
             def key_right_dx = (u - 0.78) / 0.095
             def key_right_dy = (v - 0.24) / 0.090
             def key_right = exp(-(key_right_dx * key_right_dx + key_right_dy * key_right_dy))
-            def top_strip = exp(-pow((v - 0.15) / 0.070, 2.0)) * exp(-pow((u - 0.50) / 0.42, 4.0))
-            def mid_soft = exp(-pow((v - 0.44) / 0.16, 2.0)) * exp(-pow((u - 0.50) / 0.36, 4.0))
-            def floor_soft = exp(-pow((v - 0.82) / 0.18, 2.0))
+            def top_dy, top_dx = (v - 0.15) / 0.070, (u - 0.50) / 0.42
+            def top_dx2 = top_dx * top_dx
+            def top_strip = exp(-(top_dy * top_dy)) * exp(-(top_dx2 * top_dx2))
+            def mid_dy, mid_dx = (v - 0.44) / 0.16, (u - 0.50) / 0.36
+            def mid_dx2 = mid_dx * mid_dx
+            def mid_soft = exp(-(mid_dy * mid_dy)) * exp(-(mid_dx2 * mid_dx2))
+            def floor_dy = (v - 0.82) / 0.18
+            def floor_soft = exp(-(floor_dy * floor_dy))
             def center_shadow_x = max(abs((u - 0.50) / 0.25), abs((v - 0.63) / 0.30))
-            def center_shadow = exp(-pow(center_shadow_x, 4.0))
+            def center_shadow_x2 = center_shadow_x * center_shadow_x
+            def center_shadow = exp(-(center_shadow_x2 * center_shadow_x2))
             l += key_left * 1.05 + key_right * 1.00 + top_strip * 0.24 + mid_soft * 0.10 + floor_soft * 0.035
             l -= center_shadow * 0.035
             l = max(l, 0.075)
@@ -712,15 +740,16 @@ fn generate_env_image(int kind=0, int w=1024, int h=512) any {
             def warm_dx = (u - 0.50) / 0.30
             def warm_dy = (v - 0.74) / 0.16
             def warm = exp(-(warm_dx * warm_dx + warm_dy * warm_dy))
-            def horizon = exp(-pow((v - 0.50) / 0.090, 2.0))
+            def horizon_dy = (v - 0.50) / 0.090
+            def horizon = exp(-(horizon_dy * horizon_dy))
             c0 += soft1 * 1.14 + soft2 * 1.14 + fill * 0.30 + warm * 0.04 + horizon * 0.03
             c1 += soft1 * 1.14 + soft2 * 1.14 + fill * 0.30 + warm * 0.04 + horizon * 0.03
             c2 += soft1 * 1.16 + soft2 * 1.16 + fill * 0.31 + warm * 0.03 + horizon * 0.04
          }
          def p = row + x * 4
-         store8(pixels, linear_to_srgb_u8(c0), p + 0)
-         store8(pixels, linear_to_srgb_u8(c1), p + 1)
-         store8(pixels, linear_to_srgb_u8(c2), p + 2)
+         store8(pixels, _linear_to_srgb_u8_f64(c0), p + 0)
+         store8(pixels, _linear_to_srgb_u8_f64(c1), p + 1)
+         store8(pixels, _linear_to_srgb_u8_f64(c2), p + 2)
          store8(pixels, 255, p + 3)
          x += 1
       }

@@ -1,13 +1,13 @@
 ;; Keywords: assets asset-browser catalog os ui
 ;; UI asset facade for catalogs and browser data.
 ;; References:
-;; - std.os.ui
-;; - std.os.ui.assets.catalog
-module std.os.ui.assets(viewer, catalog, batch, GLTF_ASSET_DEFAULT_ROOTS, gltf_asset_root_envs, gltf_asset_roots, catalog_filter_key, catalog_pick_cache, catalog_row_id, catalog_filter, scene_part_count, hierarchy_node_label, hierarchy_node_detail, indent_prefix, virtual_row_range, asset_grid_cols, asset_grid_usable_w, asset_tile_h, asset_grid_content_h, asset_grid_fit_h, asset_grid_view_h, format_name_list, asset_icon_name, asset_detail, asset_dirs_from_env, first_gltf_in_dir, gltf_catalog_make, gltf_catalog_roots, gltf_catalog_scan, gltf_catalog_ensure, gltf_catalog_resolve, gltf_catalog_names)
-use std.core
-use std.os.ui.assets.viewer as viewer
-use std.os.ui.assets.catalog as catalog
-use std.os.ui.assets.batch as batch
+;; - core.os.ui
+;; - core.os.ui.assets.catalog
+module core.os.ui.assets(viewer, catalog, batch, GLTF_ASSET_DEFAULT_ROOTS, gltf_asset_root_envs, gltf_asset_roots, catalog_filter_key, catalog_pick_cache, catalog_row_id, catalog_filter, scene_part_count, hierarchy_node_label, hierarchy_node_detail, indent_prefix, virtual_row_range, asset_grid_cols, asset_grid_usable_w, asset_tile_h, asset_grid_content_h, asset_grid_fit_h, asset_grid_view_h, format_name_list, asset_icon_name, asset_detail, asset_dirs_from_env, first_gltf_in_dir, gltf_catalog_make, gltf_catalog_roots, gltf_catalog_scan, gltf_catalog_ensure, gltf_catalog_resolve, gltf_catalog_names)
+use core
+use core.os.ui.assets.viewer as viewer
+use core.os.ui.assets.catalog as catalog
+use core.os.ui.assets.batch as batch
 
 def list GLTF_ASSET_DEFAULT_ROOTS = viewer.GLTF_ASSET_DEFAULT_ROOTS
 
@@ -85,5 +85,5 @@ fn gltf_catalog_names(dict c, int limit=24) list { catalog.gltf_catalog_names(c,
    assert(gltf_asset_root_envs().len == 4 && gltf_asset_roots(["/definitely/missing"]).len == 0, "assets model root API")
    def cat = gltf_catalog_make(["/definitely/missing"])
    assert(gltf_catalog_roots(cat).len == 0 && gltf_catalog_resolve(cat, "") == "" && first_gltf_in_dir("/definitely/missing") == "", "assets gltf catalog")
-   print("✓ std.os.ui.assets self-test passed")
+   print("✓ core.os.ui.assets self-test passed")
 }

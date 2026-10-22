@@ -1,0 +1,31 @@
+shape dynamic_callback_raw_result {
+  family "runtime/execution"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  flags_matrix "--native --run -O0; --native --run -O3; --native-backend=llvm --jit --jit-engine=mcjit -O0; --native-backend=llvm --jit --jit-engine=mcjit -O3; --native-backend=llvm --jit --jit-engine=orc -O0; --native-backend=llvm --jit --jit-engine=orc -O3; --native-only -O0; --native-only -O3"
+  timeout 25
+  expect compile_and_run
+  source ny <<'NY'
+fn add_typed(int x) int { x + 1 }
+fn add_dynamic(any x) int { to_int(x) + 1 }
+@effects(all)
+fn apply(f, v) { f(v) }
+
+assert(apply(add_typed, 45) == 46,
+   "generic apply preserves an even raw callback result")
+assert(apply(add_typed, 46) == 47,
+   "generic apply preserves an odd raw callback result")
+assert(apply(add_dynamic, 45) == 46,
+   "generic apply preserves a dynamically converted even result")
+def typed_lambda = fn(int x) int { x + 1 }
+assert(typed_lambda(41) == 42, "raw 42 is not a pointer encoding")
+assert(typed_lambda(7) == 8, "raw 8 is not a boolean encoding")
+assert(typed_lambda(1) == 2, "raw 2 is not nil")
+assert(typed_lambda(-4) == -3, "negative raw callback result")
+assert(apply(add_typed, 41) == 42, "raw integer contract through apply")
+def list_sum = fn(list<int> xs) { xs[0] + xs[1] }
+assert(list_sum([4, 5]) == 9, "raw sequence arguments preserve a tagged inferred result")
+assert(list_sum([4, 4]) == 8, "inferred callback result is boxed exactly once")
+NY
+}

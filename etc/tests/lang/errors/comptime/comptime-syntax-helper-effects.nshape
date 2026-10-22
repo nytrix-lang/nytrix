@@ -1,0 +1,21 @@
+shape comptime_syntax_helper_rejects_side_effects {
+  family "compiler-errors/comptime"
+  generator "error"
+  features ["error", "comptime", "code", "helper", "effect", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "comptime template arguments must be literal values or symbols"
+  source ny <<'NY'
+use core.compiler.ast (code_expr)
+
+fn syntax_helper_with_io(any syntax) any {
+   print("syntax helper IO must not run")
+   return code_expr(syntax)
+}
+
+comptime template wants_expression(value: code<expr>) {
+   fn generated_from_effectful_helper() int { return ${value} }
+}
+comptime emit wants_expression(syntax_helper_with_io(quote{42}))
+NY
+}

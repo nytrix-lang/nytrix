@@ -1,16 +1,16 @@
 ;; Keywords: editor tools toolbar commands formatting os ui render viewer text
 ;; Toolbar and tool helpers for editor commands, formatting, and navigation.
 ;; References:
-;; - std.os.ui.render.viewer.editor.commands
-module std.os.ui.render.viewer.editor.tools(
+;; - core.os.ui.render.viewer.editor.commands
+module core.os.ui.render.viewer.editor.tools(
    ny_command, lsp_command, check_file, format_file, debug_command_for, debug_file, status
 )
 
-use std.core
-use std.core.str as str
-use std.os (env, file_exists)
-use std.os.path as ospath
-use std.os.subprocess (run_capture)
+use core
+use core.str as str
+use core.os (env, file_exists)
+use core.os.path as ospath
+use core.os.subprocess (run_capture)
 
 fn _tool(str local, str fallback) str {
    file_exists(local) ? local : fallback

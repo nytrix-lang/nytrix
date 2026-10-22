@@ -1,0 +1,28 @@
+shape comptime_interpreter_length {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "test", "comptime"]
+  flags_matrix "-no-std --native-backend=llvm --jit --jit-engine=mcjit; -no-std --native-backend=llvm --jit --jit-engine=orc"
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+fn ct_string_property_len() int {
+  return "é".len
+}
+
+fn ct_list_property_len() int {
+  def values = [1, 2, 3]
+  return values.len
+}
+
+def property_len = comptime { return ct_string_property_len() }
+def list_len = comptime { return ct_list_property_len() }
+def string_builtin_len = comptime { return len("abcd") }
+def list_builtin_len = comptime { return len([1, 2, 3]) }
+assert(property_len == 2, "comptime string .len counts UTF-8 bytes")
+assert(list_len == 3, "comptime list .len returns its element count")
+assert(string_builtin_len == 4, "comptime len handles string arguments")
+assert(list_builtin_len == 3, "comptime len handles list arguments")
+print("COMPTIME_INTERPRETER_LENGTH_OK")
+NY
+}

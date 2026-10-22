@@ -1,4 +1,4 @@
-use std.core *
+use core *
 mut xs = [1, 2, 3]
 mut int: i = 0
 while(i < 8){

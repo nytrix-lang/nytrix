@@ -1,11 +1,11 @@
 ;; Keywords: number-theory recurrence math crypto
 ;; Crypto number-theory routines for linear recurrence solving modulo integers.
 ;; References:
-;; - std.math.crypto.number
-;; - std.math.crypto
-module std.math.crypto.number.recurrence(linear_recurrence_mod)
-use std.math.integer (Z, mod)
-use std.math.matrix (Matrix, matrix_pow_mod, _matrix_get)
+;; - core.math.crypto.number
+;; - core.math.crypto
+module core.math.crypto.number.recurrence(linear_recurrence_mod)
+use core.math.integer (Z, mod)
+use core.math.matrix (Matrix, matrix_pow_mod, _matrix_get)
 
 fn linear_recurrence_mod(list coeffs, list initials, any n, any modulus) any {
    "Return F(n) mod modulus for F(i)=sum_j coeffs[j]*F(i-j-1)."

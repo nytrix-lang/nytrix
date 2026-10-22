@@ -1,0 +1,24 @@
+shape tagged_member_get {
+  family "runtime/values"
+  generator "regression"
+  features ["ny", "dynamic", "abi", "index"]
+  estimate_ms 26000
+  template ny-test-case
+  expect compile_and_run
+  flags_matrix "--native --run -O0; --native --run -O3; --native-backend=llvm --jit --jit-engine=mcjit -O0; --native-backend=llvm --jit --jit-engine=mcjit -O3; --native-backend=llvm --jit --jit-engine=orc -O0; --native-backend=llvm --jit --jit-engine=orc -O3; --native-only -O0; --native-only -O3"
+  timeout 25
+  source ny <<'NY'
+use core
+fn first(any rows) any { rows[0].get(0) }
+fn second(any rows) any { rows[0].get(1) }
+fn named(any rows) any { rows[0].get("x") }
+fn missing(any rows) any { rows[0].get(9, 7) }
+assert(first([["x", 1]]) == "x", "tagged nested list receiver string element")
+assert(second([["x", 1]]) == 1, "tagged nested list receiver integer element")
+assert(first([[2, 3]]) == 2, "even integer nested element")
+assert(second([[2, 3]]) == 3, "odd integer nested element")
+assert(named([{"x": 3}]) == 3, "tagged dictionary receiver")
+assert(missing([[2, 3]]) == 7, "dynamic accessor fallback is tagged")
+print("tagged_member_get ok")
+NY
+}

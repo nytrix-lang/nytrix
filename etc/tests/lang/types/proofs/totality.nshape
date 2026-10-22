@@ -1,0 +1,685 @@
+shape total_guarded_integer_countdown {
+  family "runtime/proofs"
+  generator "program"
+  features ["proof", "termination", "total", "backend-parity"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+def finite_countdown_bound = 8
+
+@total
+fn count_down(int n) int decreases(n) {
+  if n <= 0 { return 0 }
+  count_down(n - 1)
+}
+
+@total
+fn count_down_else(int n) int decreases(n) {
+  if n <= 0 {
+    return 0
+  } else {
+    return count_down_else(n - 1)
+  }
+}
+
+@total
+fn count_down_reversed_guard(int n) int decreases(n) {
+  if 0 >= n {
+    return 0
+  } else {
+    return count_down_reversed_guard(n - 1)
+  }
+}
+
+@total
+fn count_down_strict_guard(int n) int decreases(n) {
+  if n < 1 {
+    return 0
+  } else {
+    return count_down_strict_guard(n - 1)
+  }
+}
+
+@total
+fn count_down_reversed_strict_guard(int n) int decreases(n) {
+  if 1 > n {
+    return 0
+  } else {
+    return count_down_reversed_strict_guard(n - 1)
+  }
+}
+
+@total
+fn count_down_negative_guard(int n) int decreases(n) {
+  if n < 0 {
+    return 0
+  } else {
+    return count_down_negative_guard(n - 1)
+  }
+}
+
+@total
+fn count_down_reversed_negative_guard(int n) int decreases(n) {
+  if 0 > n {
+    return 0
+  } else {
+    return count_down_reversed_negative_guard(n - 1)
+  }
+}
+
+@total
+fn count_down_by_three(int n) int decreases(n) {
+  if n <= 0 {
+    return 0
+  } else {
+    return count_down_by_three(n - 3)
+  }
+}
+
+@total
+fn bounded_negative_countdown(int n) int decreases(n) {
+  if n <= -10 { return 0 }
+  bounded_negative_countdown(n - 1)
+}
+
+@total
+fn sum_countdown(int n) int decreases(n) {
+  if n <= 0 { return 0 }
+  1 + sum_countdown(n - 1)
+}
+
+@total
+fn boolean_countdown(bool active) int decreases(active) {
+  if active {
+    return boolean_countdown(false)
+  }
+  0
+}
+
+@total
+fn bounded_fin_countdown(Fin<finite_countdown_bound> remaining) int
+    decreases(remaining) {
+  if remaining <= 0 {
+    return 0
+  }
+  bounded_fin_countdown(remaining - 1)
+}
+
+@total
+fn fin_pair_countdown(Fin<finite_countdown_bound> major, int minor) int
+    requires minor >= 0 && minor <= 4
+    decreases((major, minor)) {
+  if minor > 0 {
+    return fin_pair_countdown(major, minor - 1)
+  }
+  if major > 0 {
+    return fin_pair_countdown(major - 1, 4)
+  }
+  0
+}
+
+@total
+fn pair_countdown(int left, int right) int
+    requires left >= 0 && right >= 0 && left <= 100 && right <= 100
+    decreases(left + right) {
+  if left <= 0 {
+    if right <= 0 { return 0 }
+    return pair_countdown(0, right - 1)
+  }
+  pair_countdown(left - 1, right)
+}
+
+@total
+fn scaled_countdown(int n) int
+    requires n >= 0 && n <= 100
+    decreases(2 * n) {
+  if n <= 0 { return 0 }
+  scaled_countdown(n - 1)
+}
+
+@total
+fn offset_scaled_countdown(int n) int
+    requires n >= 0 && n <= 100
+    decreases(2 * n + 3) {
+  if n <= 0 { return 0 }
+  offset_scaled_countdown(n - 1)
+}
+
+@total
+fn bounded_square_countdown(int n) int
+    requires n >= 0 && n <= 1
+    decreases(n * n) {
+  if n <= 0 { return 0 }
+  bounded_square_countdown(n - 1)
+}
+
+@total
+fn bounded_quadratic_countdown(int n) int
+    requires n >= 0 && n <= 1
+    decreases(n * n + n) {
+  if n <= 0 { return 0 }
+  bounded_quadratic_countdown(n - 1)
+}
+
+@total
+fn bounded_complement_product_countdown(int value) int
+    requires value >= 5 && value <= 10
+    decreases(value * (10 - value)) {
+  if value >= 10 { return 0 }
+  bounded_complement_product_countdown(value + 1)
+}
+
+@total
+fn negative_scaled_countdown(int n) int
+    requires n >= -100 && n <= 0
+    decreases(2 * n) {
+  if n <= -100 { return 0 }
+  negative_scaled_countdown(n - 1)
+}
+
+@total
+fn nine_component_countdown(
+    int a, int b, int c, int d, int e, int f, int g, int h, int i) int
+    requires a >= 0 && b >= 0 && c >= 0 && d >= 0 && e >= 0 &&
+             f >= 0 && g >= 0 && h >= 0 && i >= 0
+    decreases((a, b, c, d, e, f, g, h, i)) {
+  if i > 0 {
+    return nine_component_countdown(a, b, c, d, e, f, g, h, i - 1)
+  }
+  0
+}
+
+@total
+fn sixteen_component_countdown(
+    int a, int b, int c, int d, int e, int f, int g, int h,
+    int i, int j, int k, int l, int m, int n, int o, int p) int
+    requires a >= 0 && b >= 0 && c >= 0 && d >= 0 &&
+             e >= 0 && f >= 0 && g >= 0 && h >= 0 &&
+             i >= 0 && j >= 0 && k >= 0 && l >= 0 &&
+             m >= 0 && n >= 0 && o >= 0 && p >= 0
+    decreases((a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p)) {
+  if p > 0 {
+    return sixteen_component_countdown(
+        a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p - 1)
+  }
+  0
+}
+
+@total
+fn lexicographic_countdown(int major, int minor) int
+    requires major >= 0 && minor >= 0
+    decreases((major, minor)) {
+  if minor > 0 {
+    return lexicographic_countdown(major, minor - 1)
+  }
+  if major > 0 {
+    return lexicographic_countdown(major - 1, 10)
+  }
+  0
+}
+
+@total
+fn mixed_boolean_integer_countdown(int remaining, bool active) int
+    requires remaining >= 0 && remaining <= 100
+    decreases((remaining, active)) {
+  if active {
+    return mixed_boolean_integer_countdown(remaining, false)
+  }
+  0
+}
+
+@total
+fn boolean_prefix_integer_countdown(bool active, int remaining) int
+    requires remaining >= 0 && remaining <= 100
+    decreases((active, remaining)) {
+  if active {
+    return boolean_prefix_integer_countdown(false, remaining)
+  }
+  if remaining > 0 {
+    return boolean_prefix_integer_countdown(false, remaining - 1)
+  }
+  0
+}
+
+@total
+fn boolean_stable_prefix_integer_countdown(bool active, int remaining) int
+    requires remaining >= 0 && remaining <= 100
+    decreases((active, remaining)) {
+  if remaining > 0 {
+    return boolean_stable_prefix_integer_countdown(active, remaining - 1)
+  }
+  0
+}
+
+fn require_enabled(bool enabled, int value) int
+    requires enabled && value >= 0 {
+  value
+}
+
+fn forward_enabled(bool enabled, int value) int
+    requires enabled && value >= 0 {
+  require_enabled(enabled, value)
+}
+
+fn forward_not_disabled(bool disabled, int value) int
+    requires !disabled && value >= 0 {
+  require_enabled(!disabled, value)
+}
+
+@total
+fn mutual_left(int n) int decreases(n) {
+  if n <= 0 { return 0 }
+  mutual_right(n - 1)
+}
+
+fn mutual_right(int n) int decreases(n) {
+  if n <= 0 { return 0 }
+  mutual_left(n - 1)
+}
+
+assert(count_down(64) == 0, "guarded countdown is total")
+assert(count_down_else(64) == 0, "guarded countdown return branch is total")
+assert(count_down_else(1) == 0, "recursive return descends to the base case")
+assert(count_down_else(0) == 0, "recursive return accepts the zero boundary")
+assert(count_down_else(-1) == 0, "guarded return handles negative inputs")
+assert(count_down_reversed_guard(64) == 0,
+       "reversed comparison guards the same well-founded countdown")
+assert(count_down_reversed_guard(-1) == 0,
+       "reversed comparison handles negative inputs")
+assert(count_down_strict_guard(64) == 0,
+       "strict integer guard expresses the same base case")
+assert(count_down_strict_guard(-1) == 0,
+       "strict integer guard handles negative inputs")
+assert(count_down_reversed_strict_guard(64) == 0,
+       "reversed strict guard expresses the same base case")
+assert(count_down_reversed_strict_guard(-1) == 0,
+       "reversed strict guard handles negative inputs")
+assert(count_down_negative_guard(64) == 0,
+       "negative-bound guard proves the countdown base case")
+assert(count_down_negative_guard(-1) == 0,
+       "negative-bound guard handles negative inputs")
+assert(count_down_reversed_negative_guard(64) == 0,
+       "reversed negative-bound guard proves the countdown base case")
+assert(count_down_reversed_negative_guard(-1) == 0,
+       "reversed negative-bound guard handles negative inputs")
+assert(count_down_by_three(64) == 0,
+       "positive constant steps prove strict measure descent")
+assert(count_down_by_three(-1) == 0,
+       "positive constant step preserves the negative base case")
+assert(bounded_negative_countdown(-3) == 0,
+       "recursive edges prove a finite lower bound below zero")
+assert(sum_countdown(12) == 12,
+       "a recursive call inside an expression has checked measure evidence")
+assert(boolean_countdown(true) == 0,
+       "finite boolean measures prove true-to-false recursive descent")
+assert(bounded_fin_countdown(7) == 0,
+       "Fin measures use their type-level lower bound for well-founded descent")
+assert(fin_pair_countdown(3, 2) == 0,
+       "lexicographic measures may combine bounded Fin and integer components")
+assert(pair_countdown(3, 4) == 0,
+       "a bounded multi-parameter measure descends on both branch edges")
+assert(scaled_countdown(12) == 0,
+       "an affine arithmetic measure proves bounded countdown descent")
+assert(offset_scaled_countdown(12) == 0,
+       "an affine measure with a constant offset proves bounded descent")
+assert(bounded_square_countdown(1) == 0,
+       "a bounded nonlinear measure proves descent when interval-safe")
+assert(bounded_quadratic_countdown(1) == 0,
+       "bounded nonlinear measures may combine products and sums")
+assert(bounded_complement_product_countdown(5) == 0,
+       "interval splitting proves descent for a bounded complement product")
+assert(negative_scaled_countdown(0) == 0,
+       "an affine measure proves descent on a bounded negative domain")
+assert(nine_component_countdown(1, 1, 1, 1, 1, 1, 1, 1, 2) == 0,
+       "bounded lexicographic measures support more than eight components")
+assert(sixteen_component_countdown(
+           1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2) == 0,
+       "bounded lexicographic measures support sixteen components")
+assert(lexicographic_countdown(8, 7) == 0,
+       "lexicographic tuple measures prove descent on every recursive edge")
+assert(mixed_boolean_integer_countdown(9, true) == 0,
+       "lexicographic tuples may end in a finite boolean after a bounded integer")
+assert(boolean_prefix_integer_countdown(true, 9) == 0,
+       "a finite boolean may prefix a bounded integer lexicographic measure")
+assert(boolean_stable_prefix_integer_countdown(false, 9) == 0,
+       "equal symbolic boolean prefixes continue to the integer component")
+assert(forward_enabled(true, 12) == 12,
+       "boolean contract facts transport to guarded calls")
+assert(forward_not_disabled(false, 13) == 13,
+       "negated boolean contract facts transport to calls")
+assert(mutual_left(13) == 0,
+       "every member of a mutual-recursion component has checked descent")
+NY
+}
+
+shape total_mutual_cycle_requires_every_edge {
+  family "runtime/proofs"
+  generator "error"
+  features ["proof", "termination", "total", "mutual-recursion", "soundness"]
+  template ny-compile-fail
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_fail
+  expect_message "recursive termination is not certified"
+  source ny <<'NY'
+use core
+
+@total
+fn first(int n) int decreases(n) {
+  if n <= 0 { return 0 }
+  second(n - 1)
+}
+
+fn second(int n) int decreases(n) {
+  if n <= 0 { return 0 }
+  first(n)
+}
+
+first(5)
+NY
+}
+
+shape total_recursive_call_cannot_change_measure_identity {
+  family "runtime/proofs"
+  generator "error"
+  features ["proof", "termination", "total", "measure-identity", "soundness"]
+  template ny-compile-fail
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_fail
+  expect_message "recursive termination is not certified"
+  source ny <<'NY'
+use core
+
+@total
+fn bad(int measure, int unrelated) int decreases(measure) {
+  if measure <= 0 { return 0 }
+  bad(unrelated, unrelated)
+}
+
+bad(1, 1)
+NY
+}
+
+shape total_fin_measure_requires_descent {
+  family "runtime/proofs"
+  generator "error"
+  features ["proof", "termination", "total", "Fin", "soundness"]
+  template ny-compile-fail
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_fail
+  expect_message "recursive termination is not certified"
+  source ny <<'NY'
+use core
+
+@total
+fn bad(Fin<8> remaining) int decreases(remaining) {
+  if remaining <= 0 { return 0 }
+  bad(remaining)
+}
+NY
+}
+
+shape total_lexicographic_measure_rejects_increase {
+  family "runtime/proofs"
+  generator "error"
+  features ["proof", "termination", "total", "lexicographic", "soundness"]
+  template ny-compile-fail
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_fail
+  expect_message "recursive termination is not certified"
+  source ny <<'NY'
+use core
+
+@total
+fn bad_lexicographic_countdown(int major, int minor) int
+    decreases((major, minor)) {
+  if minor > 0 {
+    return bad_lexicographic_countdown(major, minor + 1)
+  }
+  0
+}
+NY
+}
+
+shape total_boolean_measure_rejects_non_descent {
+  family "runtime/proofs"
+  generator "error"
+  features ["proof", "termination", "total", "boolean-measure", "soundness"]
+  template ny-compile-fail
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_fail
+  expect_message "recursive termination is not certified"
+  source ny <<'NY'
+use core
+
+@total
+fn boolean_cycle(bool active) int decreases(active) {
+  if active {
+    return boolean_cycle(true)
+  }
+  0
+}
+
+boolean_cycle(true)
+NY
+}
+
+shape total_unbounded_nonlinear_measure_fails_closed {
+  family "runtime/proofs"
+  generator "error"
+  features ["proof", "termination", "total", "nonlinear-measure", "soundness"]
+  template ny-compile-fail
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_fail
+  expect_message "recursive termination is not certified"
+  source ny <<'NY'
+use core
+
+@total
+fn unbounded_quadratic_countdown(int n) int
+    requires n >= 0
+    decreases(n * n + n) {
+  if n <= 0 { return 0 }
+  unbounded_quadratic_countdown(n - 1)
+}
+
+unbounded_quadratic_countdown(2)
+NY
+}
+
+shape total_boolean_measure_rejects_increase {
+  family "runtime/proofs"
+  generator "error"
+  features ["proof", "termination", "total", "boolean-measure", "soundness"]
+  template ny-compile-fail
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_fail
+  expect_message "recursive termination is not certified"
+  source ny <<'NY'
+use core
+
+@total
+fn boolean_increase(bool active) int decreases(active) {
+  if !active {
+    return boolean_increase(true)
+  }
+  0
+}
+
+boolean_increase(false)
+NY
+}
+
+shape total_mixed_boolean_integer_measure_rejects_increase {
+  family "runtime/proofs"
+  generator "error"
+  features ["proof", "termination", "total", "lexicographic", "soundness"]
+  template ny-compile-fail
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_fail
+  expect_message "recursive termination is not certified"
+  source ny <<'NY'
+use core
+
+@total
+fn bad_mixed_measure(int remaining, bool active) int
+    requires remaining >= 0 && remaining <= 100
+    decreases((remaining, active)) {
+  if active {
+    return bad_mixed_measure(remaining, false)
+  }
+  if remaining < 10 {
+    return bad_mixed_measure(remaining + 1, false)
+  }
+  0
+}
+
+bad_mixed_measure(0, true)
+NY
+}
+
+shape total_boolean_prefix_integer_measure_rejects_increase {
+  family "runtime/proofs"
+  generator "error"
+  features ["proof", "termination", "total", "lexicographic", "soundness"]
+  template ny-compile-fail
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_fail
+  expect_message "recursive termination is not certified"
+  source ny <<'NY'
+use core
+
+@total
+fn bad_boolean_prefix(bool active, int remaining) int
+    requires remaining >= 0 && remaining <= 100
+    decreases((active, remaining)) {
+  if active {
+    return bad_boolean_prefix(false, remaining)
+  }
+  if remaining < 100 {
+    return bad_boolean_prefix(false, remaining + 1)
+  }
+  0
+}
+
+bad_boolean_prefix(true, 0)
+NY
+}
+
+shape total_nonlinear_measure_requires_strict_descent {
+  family "runtime/proofs"
+  generator "error"
+  features ["proof", "termination", "total", "nonlinear-measure", "soundness"]
+  template ny-compile-fail
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_fail
+  expect_message "recursive termination is not certified"
+  source ny <<'NY'
+use core
+
+@total
+fn square_cycle(int n) int
+    requires n >= 0 && n <= 1
+    decreases(n * n) {
+  if n <= 0 { return 0 }
+  square_cycle(n)
+}
+
+square_cycle(1)
+NY
+}
+
+shape total_quadratic_measure_requires_strict_descent {
+  family "runtime/proofs"
+  generator "error"
+  features ["proof", "termination", "total", "nonlinear-measure", "soundness"]
+  template ny-compile-fail
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_fail
+  expect_message "recursive termination is not certified"
+  source ny <<'NY'
+use core
+
+@total
+fn quadratic_cycle(int n) int
+    requires n >= 0 && n <= 1
+    decreases(n * n + n) {
+  if n <= 0 { return 0 }
+  quadratic_cycle(n)
+}
+
+quadratic_cycle(1)
+NY
+}
+
+shape total_complement_measure_rejects_increase {
+  family "runtime/proofs"
+  generator "error"
+  features ["proof", "termination", "total", "nonlinear-measure", "soundness"]
+  template ny-compile-fail
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_fail
+  expect_message "recursive termination is not certified"
+  source ny <<'NY'
+use core
+
+@total
+fn bad_complement_product_countdown(int value) int
+    requires value >= 5 && value <= 10
+    decreases(value * (10 - value)) {
+  if value <= 5 { return 0 }
+  bad_complement_product_countdown(value - 1)
+}
+
+bad_complement_product_countdown(10)
+NY
+}
+
+shape total_nonlinear_measure_rejects_custom_operator {
+  family "runtime/proofs"
+  generator "error"
+  features ["proof", "termination", "total", "operator", "soundness"]
+  template ny-compile-fail
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_fail
+  expect_message "recursive termination is not certified"
+  source ny <<'NY'
+use core
+
+impl int {
+  fn add_instead(self left, self right) int { left + right }
+  operator * self: int = add_instead
+}
+
+@total
+fn custom_square(int n) int
+    requires n >= 0 && n <= 1
+    decreases(n * n) {
+  if n <= 0 { return 0 }
+  custom_square(n - 1)
+}
+
+custom_square(1)
+NY
+}
+
+shape bool_requires_rejects_false_actual {
+  family "runtime/proofs"
+  generator "error"
+  features ["proof", "requires", "boolean", "soundness"]
+  template ny-compile-fail
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_fail
+  expect_message "precondition obligation failed"
+  source ny <<'NY'
+use core
+
+fn needs_enabled(bool enabled) int requires enabled {
+  1
+}
+
+needs_enabled(false)
+NY
+}

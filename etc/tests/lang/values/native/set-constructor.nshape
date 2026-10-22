@@ -1,0 +1,16 @@
+shape test_set_constructor {
+  family "native/values"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+def s = set([1, 2, 2, 3])
+assert(type(s) == "set", "set(sequence) should return a set")
+assert(s.len == 3, "set(sequence) should remove duplicate keys")
+assert(s.contains(1) && s.contains(2) && s.contains(3),
+   "set(sequence) should retain every key")
+NY
+}

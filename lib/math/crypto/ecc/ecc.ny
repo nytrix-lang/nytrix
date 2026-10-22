@@ -5,14 +5,14 @@
 ;; Public operations favor correctness and simple affine behavior.
 ;; Jacobian helpers remain exported for callers that need them.
 ;; References:
-;; - std.math.crypto.ecc
-;; - std.math.crypto
-module std.math.crypto.ecc.ecc(ecc_point_add, ecc_point_double, ecc_scalar_mult, ecc_scalar_mult_jacobian,
+;; - core.math.crypto.ecc
+;; - core.math.crypto
+module core.math.crypto.ecc.ecc(ecc_point_add, ecc_point_double, ecc_scalar_mult, ecc_scalar_mult_jacobian,
    ecc_negate, ecc_sub, ecc_is_on_curve, ecc_parameter_recovery,
    ecc_curve_secp256k1, ecc_curve_p256, ecc_curve_p384, ecc_sqrt_mod,
    ecc_to_jacobian, ecc_from_jacobian, ecc_jacobian_add, ecc_jacobian_double,
    ecc_precompute_table, ecc_glv_decompose)
-use std.math.nt
+use core.math.nt
 
 fn ecc_point_add(any P, any Q, any a, any p) any {
    "Add points P and Q in Affine coordinates."
@@ -42,7 +42,10 @@ fn _ecc_scalar_mult_jacobian(any k, list Pj, any a, any p) list {
    mut Pt = Pj
    if bigint_lt(kk, Z(0)) {
       kk = bigint_neg(kk)
-      Pt = [Pt[0], mod_sub(0, Pt[1], p), Pt[2]]
+      def px = Pt[0]
+      def neg_y = mod_sub(0, Pt[1], p)
+      def pz = Pt[2]
+      Pt = [px, neg_y, pz]
    }
    mut R = [Z(0), Z(1), Z(0)]
    def bits = bigint_bit_length(kk)

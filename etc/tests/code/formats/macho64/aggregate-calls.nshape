@@ -1,0 +1,43 @@
+shape x86_64_macho_sysv_aggregate_calls {
+  family "runtime-native"
+  generator "native"
+  features [native object macho x86_64 aggregate sysv nyir]
+  template ny-test-case
+  flags "--c-frontend=nytrix --native-backend x86_64 --host-triple x86_64-apple-darwin --native-abi sysv --nyir-verify -emit-only -o /tmp/nytrix-native-macho64-aggregate-calls.o"
+  expect compile_and_run
+  source ny <<'NY'
+#include "etc/tests/lang/interop/c/internal-byvalue-param-import.h" link "etc/tests/lang/interop/c/sum-pair.so"
+use core
+
+def pair = make_sum_pair()
+assert(sum_pair(pair) == 60, "three-word aggregate argument and return")
+
+def mixed = malloc(16)
+store64_i(mixed, 7)
+store64_f64(mixed, 3.5, 8)
+assert(sum_mixed_pair(mixed) == 10, "mixed integer and SSE aggregate")
+free(mixed)
+
+def sse = malloc(16)
+store64_f64(sse, 1.5)
+store64_f64(sse, 2.5, 8)
+assert(sum_sse_pair(sse) == 4, "two-SSE aggregate")
+free(sse)
+
+def packed = malloc(25)
+store8(packed, 5, 0)
+store64_i(packed, 10, 1)
+store64_i(packed, 20, 9)
+store64_i(packed, 30, 17)
+assert(sum_packed_wide(packed) == 65, "packed memory-class aggregate")
+free(packed)
+
+def aligned = malloc(32)
+store64_i(aligned, 11)
+store64_i(aligned, 22, 8)
+store64_i(aligned, 33, 16)
+assert(sum_aligned_wide(aligned) == 66, "aligned memory-class aggregate")
+free(aligned)
+0
+NY
+}

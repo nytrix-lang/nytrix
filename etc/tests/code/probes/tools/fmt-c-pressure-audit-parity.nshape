@@ -1,0 +1,62 @@
+shape fmt_c_pressure_audit_parity {
+  family "probe/tools"
+  generator "embedded"
+  features ["formatter", "c-pressure-audit", "parity"]
+  template ny-test-case
+  flags "--native-only"
+  timeout 120
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.subprocess (run_capture)
+use core.str as str
+def ny = env("NYTRIX_NY_FULL_BIN")
+def fmt = env("NYTRIX_TEST_FMT_BIN")
+def cmake = env("NYTRIX_CMAKE_COMMAND")
+def dir = temp_dir() + "/fmt-c-pressure-" + to_str(pid())
+def made = run_capture([cmake, "-E", "make_directory", dir], [], nil, false)
+assert(made.get("code", 127) == 0, "create C pressure directory")
+for extension in ["c", "h"] {
+   def path = dir + "/hot." + extension
+   mut source = "void hot(void) {\n"
+   for index in 1..161 {
+      source += "   consume(dict_get(values, " + to_str(index) + "));\n"
+   }
+   source += "}\n"
+   assert(is_ok(file_write(path, source)), "write hot C-family pressure source")
+   for mode in ["bloat", "trim"] {
+      def c = run_capture([fmt, "--" + mode, "--json", path], [], nil, false)
+      def embedded = run_capture(
+         [ny, "fmt", "--" + mode, "--json", path], [], nil, false)
+      assert(c.get("code", 127) == 0 && embedded.get("code", 127) == 0 &&
+             c.get("stdout", "") == embedded.get("stdout", ""),
+             "C-family " + extension + " " + mode + " parity")
+      if mode == "bloat" {
+         def output = embedded.get("stdout", "")
+         for expected in ["\"hot_files\": 1", "\"hot_functions\": 1",
+                          "NYAUD1001", "NYAUD1002"] {
+            assert(str.find(output, expected) >= 0,
+                   "C-family bloat finding missing " + expected)
+         }
+      }
+   }
+}
+def builder = dir + "/builder.c"
+mut source = "void build(void) {\n   for(int i = 0; i < 1; ++i) {\n"
+for index in 1..12 { source += "      append(items, " + to_str(index) + ");\n" }
+source += "   }\n}\n"
+assert(is_ok(file_write(builder, source)), "write C append-builder source")
+def c = run_capture([fmt, "--trim", "--json", builder], [], nil, false)
+def embedded = run_capture([ny, "fmt", "--trim", "--json", builder], [], nil, false)
+def output = embedded.get("stdout", "")
+assert(c.get("code", 127) == 0 && embedded.get("code", 127) == 0 &&
+       c.get("stdout", "") == output, "C append-builder trim parity")
+for expected in ["\"append_builders\": 1", "NYAUD3004",
+                 "build appends 12 time(s) across 1 loop marker(s)"] {
+   assert(str.find(output, expected) >= 0, "append builder finding missing " + expected)
+}
+def cleanup = run_capture([cmake, "-E", "rm", "-rf", dir], [], nil, false)
+assert(cleanup.get("code", 127) == 0, "remove C pressure directory")
+print("FMT_C_PRESSURE_AUDIT_PARITY_OK")
+NY
+}

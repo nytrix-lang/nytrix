@@ -4,10 +4,10 @@
 ;; - https://cims.nyu.edu/~regev/papers/qcrypto.pdf
 ;; - https://cims.nyu.edu/~regev/papers/lwesurvey.pdf
 ;; References:
-;; - std.math.crypto.lattice
-;; - std.math.crypto
-module std.math.crypto.lattice.lwe(lwe_dot_product, lwe_centered_error, lwe_check, lwe_sample, lwe_samples, lwe_matrix_samples, lwe_recover_secret, lwe_brute_force)
-use std.math.nt
+;; - core.math.crypto.lattice
+;; - core.math.crypto
+module core.math.crypto.lattice.lwe(lwe_dot_product, lwe_centered_error, lwe_check, lwe_sample, lwe_samples, lwe_matrix_samples, lwe_recover_secret, lwe_brute_force)
+use core.math.nt
 
 fn _lwe_next(int state) int { (state * 1103515245 + 12345) & 0x7fffffff }
 

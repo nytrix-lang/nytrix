@@ -1,0 +1,495 @@
+shape avr_scalar_calls_execute_under_qemu {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "test", "avr", "portable-text", "scalar-call", "byte-swap",
+            "qemu"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os (file_exists, file_remove, file_write, run_capture, temp_dir, pid)
+
+def compiler = env("NYTRIX_NY_FULL_BIN")
+assert(is_str(compiler) && compiler.len > 0,
+       "test runner provides the compiler path")
+def stem = temp_dir() + "/ny-avr-constant-" + to_str(pid())
+def asm_path = stem + ".s"
+def rotate_asm_path = stem + "-rotate.s"
+def start_path = stem + "-start.s"
+def bswap_asm_path = stem + "-bswap.s"
+def bswap32_asm_path = stem + "-bswap32.s"
+def bswap32_start_path = stem + "-bswap32-start.s"
+def rotate_start_path = stem + "-rotate-start.s"
+def obj_path = stem + ".o"
+def bswap_obj_path = stem + "-bswap.o"
+def bswap32_obj_path = stem + "-bswap32.o"
+def bswap32_start_obj_path = stem + "-bswap32-start.o"
+def rotate_obj_path = stem + "-rotate.o"
+def start_obj_path = stem + "-start.o"
+def rotate_start_obj_path = stem + "-rotate-start.o"
+def elf_path = stem + ".elf"
+def bswap_elf_path = stem + "-bswap.elf"
+def bswap32_elf_path = stem + "-bswap32.elf"
+def rotate_elf_path = stem + "-rotate.elf"
+def compare_asm_path = stem + "-compare.s"
+def compare_start_path = stem + "-compare-start.s"
+def compare_obj_path = stem + "-compare.o"
+def compare_start_obj_path = stem + "-compare-start.o"
+def compare_elf_path = stem + "-compare.elf"
+def rotate32_asm_path = stem + "-rotate32.s"
+def rotate32_start_path = stem + "-rotate32-start.s"
+def rotate32_obj_path = stem + "-rotate32.o"
+def rotate32_start_obj_path = stem + "-rotate32-start.o"
+def rotate32_elf_path = stem + "-rotate32.elf"
+def start_source =
+  ".text\n.global _start\n_start:\n" +
+  "  call rt_main\n" +
+  "  ldi r16, 0\n  sts 0x00C5, r16\n" +
+  "  ldi r16, 103\n  sts 0x00C4, r16\n" +
+  "  ldi r16, 0x06\n  sts 0x00C2, r16\n" +
+  "  ldi r16, 0x08\n  sts 0x00C1, r16\n" +
+  "  cpi r18, 0x11\n  brne 3f\n" +
+  "  cpi r19, 0x0e\n  brne 3f\n" +
+  "  cpi r20, 0x0c\n  brne 3f\n" +
+  "  cpi r21, 0x0a\n  brne 3f\n" +
+  "  cpi r22, 0x08\n  brne 3f\n" +
+  "  cpi r23, 0x06\n  brne 3f\n" +
+  "  cpi r24, 0x04\n  brne 3f\n" +
+  "  cpi r25, 0x02\n  brne 3f\n" +
+  "  ldi r16, 'U'\n  rjmp 4f\n" +
+  "3:\n  ldi r16, 'E'\n" +
+  "4:\n" +
+  "1:\n  lds r17, 0x00C0\n  sbrs r17, 5\n" +
+  "  rjmp 1b\n  sts 0x00C6, r16\n" +
+  "2:\n  rjmp 2b\n"
+assert(is_ok(file_write(start_path, start_source)),
+       "write AVR UART startup wrapper")
+def emitted = run_capture(
+    [compiler, "--native-backend=avr", "--native-only", "--nyir-verify",
+     "--emit-asm=" + asm_path, "-no-std", "-emit-only", "-e",
+     "@noinline\nfn add(int left, int right) int { left + right }\n" +
+     "@noinline\nfn sub(int left, int right) int { left - right }\n" +
+     "@noinline\nfn bit_and(int left, int right) int { left & right }\n" +
+     "@noinline\nfn bit_or(int left, int right) int { left | right }\n" +
+     "@noinline\nfn bit_xor(int left, int right) int { left ^ right }\n" +
+     "@noinline\nfn multiply(int left, int right) int { left * right }\n" +
+     "@noinline\nfn shifts(int value, int count) int {\n" +
+     "  (value << count) + (value >> count)\n}\n" +
+     "@noinline\nfn choose(int condition) int { condition ? 5 : 0 }\n" +
+     "@noinline\nfn local_roundtrip() int {\n" +
+     "  mut int slot = 40\n" +
+     "  slot = slot + 2\n" +
+     "  slot\n" +
+     "}\n" +
+     "@noinline\nfn memory_roundtrip() int {\n" +
+     "  mut int slot = 40\n" +
+     "  def *int pointer = addr_of(slot)\n" +
+     "  store64_i(pointer, 42)\n" +
+     "  load64_i(pointer)\n" +
+     "}\n" +
+     "@noinline\nfn branch(int condition) int {\n" +
+     "  if condition { add(0x0102030405060700, 8) } else { 0 }\n" +
+     "}\n" +
+     "@noinline\nfn merge(int condition) int {\n" +
+     "  mut int result = 0\n" +
+     "  if condition { result = 42 } else { result = 7 }\n" +
+     "  result\n" +
+     "}\n" +
+     "@noinline\nfn compare_mask(int left, int right) int {\n" +
+     "  (left == right ? 1 : 0) + (left != right ? 2 : 0) +\n" +
+     "  (left < right ? 4 : 0) + (left <= right ? 8 : 0) +\n" +
+     "  (left > right ? 16 : 0) + (left >= right ? 32 : 0)\n" +
+     "}\n" +
+     "branch(1) + branch(0) + sub(5, 5) + " +
+     "bit_and(0xf0, 0x0f) + bit_or(1, 2) - 3 + bit_xor(3, 3) + " +
+     "choose(1) + choose(0) - 5 + multiply(0x0102030405060700, 13) - " +
+     "0x0d1a2734414e5b00 + shifts(1, 65) - 2 + shifts(4, 1) - 10 + " +
+     "shifts(0x0102030405060700, 3) - 0x08305880a8d0f8e0 + " +
+     "local_roundtrip() - 42 + memory_roundtrip() - 42 + " +
+     "merge(1) - 42 + merge(0) - 7 + " +
+     "compare_mask(-0x0102030405060700, 0x0102030405060700) - 14 + " +
+     "compare_mask(42, 42) - 41 + " +
+     "compare_mask(0x0102030405060700, -0x0102030405060700) - 50"],
+    [], nil, false)
+def assembled = run_capture(
+    ["clang", "--target=avr", "-mmcu=atmega328p", "-c", asm_path,
+     "-o", obj_path], [], nil, false)
+def start_assembled = run_capture(
+    ["clang", "--target=avr", "-mmcu=atmega328p", "-c", start_path,
+     "-o", start_obj_path], [], nil, false)
+def linked = run_capture(
+    ["ld.lld", "-N", "--image-base=0", "-Ttext=0", "-e", "_start",
+     start_obj_path, obj_path, "-o", elf_path], [], nil, false)
+def execution = run_capture(
+    ["timeout", "2s", "qemu-system-avr", "-M", "uno", "-display", "none",
+     "-monitor", "none", "-serial", "stdio", "-bios", elf_path],
+    [], nil, false)
+assert(emitted.get("code", 127) == 0 &&
+       assembled.get("code", 127) == 0 &&
+       start_assembled.get("code", 127) == 0 &&
+       linked.get("code", 127) == 0,
+       "AVR scalar-call code assembles and links as an executable")
+assert(execution.get("code", 0) == 124 &&
+       str_contains(execution.get("stdout", ""), "U"),
+       "QEMU verifies branches/select, nested calls, local spills, 64-bit " +
+       "arithmetic, bitwise and variable shifts, and every tagged result byte")
+
+def bswap_emitted = run_capture(
+    [compiler, "--native-backend=avr", "--native-only", "--nyir-verify",
+     "--emit-asm=" + bswap_asm_path, "-no-std", "-emit-only", "-e",
+     "intrinsic(\"bswap.i64\", 0x0807060504030201)"],
+    [], nil, false)
+def bswap_assembled = run_capture(
+    ["clang", "--target=avr", "-mmcu=atmega328p", "-c", bswap_asm_path,
+     "-o", bswap_obj_path], [], nil, false)
+def bswap_linked = run_capture(
+    ["ld.lld", "-N", "--image-base=0", "-Ttext=0", "-e", "_start",
+     start_obj_path, bswap_obj_path, "-o", bswap_elf_path],
+    [], nil, false)
+def bswap_execution = run_capture(
+    ["timeout", "2s", "qemu-system-avr", "-M", "uno", "-display", "none",
+     "-monitor", "none", "-serial", "stdio", "-bios", bswap_elf_path],
+    [], nil, false)
+assert(bswap_emitted.get("code", 127) == 0 &&
+       bswap_assembled.get("code", 127) == 0 &&
+       bswap_linked.get("code", 127) == 0,
+       "AVR 64-bit byte-swap code assembles and links; emit=" +
+       to_str(bswap_emitted.get("code", 127)) + " " +
+       bswap_emitted.get("stderr", "") + " asm_exists=" +
+       to_str(file_exists(bswap_asm_path)) + " assemble=" +
+       to_str(bswap_assembled.get("code", 127)) + " " +
+       bswap_assembled.get("stderr", "") + " link=" +
+       to_str(bswap_linked.get("code", 127)) + " " +
+       bswap_linked.get("stderr", ""))
+assert(bswap_execution.get("code", 0) == 124 &&
+       str_contains(bswap_execution.get("stdout", ""), "U"),
+       "QEMU verifies byte order and the tagged i64 result")
+
+def bswap32_start_source =
+  ".text\n.global _start\n_start:\n" +
+  "  call rt_main\n" +
+  "  ldi r16, 0\n  sts 0x00C5, r16\n" +
+  "  ldi r16, 103\n  sts 0x00C4, r16\n" +
+  "  ldi r16, 0x06\n  sts 0x00C2, r16\n" +
+  "  ldi r16, 0x08\n  sts 0x00C1, r16\n" +
+  "  cpi r18, 0x03\n  brne 3f\n" +
+  "  cpi r19, 0x04\n  brne 3f\n" +
+  "  cpi r20, 0x06\n  brne 3f\n" +
+  "  cpi r21, 0x08\n  brne 3f\n" +
+  "  cpi r22, 0\n  brne 3f\n" +
+  "  cpi r23, 0\n  brne 3f\n" +
+  "  cpi r24, 0\n  brne 3f\n" +
+  "  cpi r25, 0\n  brne 3f\n" +
+  "  ldi r16, 'U'\n  rjmp 4f\n" +
+  "3:\n  ldi r16, 'E'\n" +
+  "4:\n" +
+  "1:\n  lds r17, 0x00C0\n  sbrs r17, 5\n" +
+  "  rjmp 1b\n  sts 0x00C6, r16\n" +
+  "2:\n  rjmp 2b\n"
+assert(is_ok(file_write(bswap32_start_path, bswap32_start_source)),
+       "write AVR 32-bit byte-swap startup wrapper")
+def bswap32_emitted = run_capture(
+    [compiler, "--native-backend=avr", "--native-only", "--nyir-verify",
+     "--emit-asm=" + bswap32_asm_path, "-no-std", "-emit-only", "-e",
+     "intrinsic(\"bswap.i32\", 0x01020304)"],
+    [], nil, false)
+def bswap32_assembled = run_capture(
+    ["clang", "--target=avr", "-mmcu=atmega328p", "-c", bswap32_asm_path,
+     "-o", bswap32_obj_path], [], nil, false)
+def bswap32_start_assembled = run_capture(
+    ["clang", "--target=avr", "-mmcu=atmega328p", "-c", bswap32_start_path,
+     "-o", bswap32_start_obj_path], [], nil, false)
+def bswap32_linked = run_capture(
+    ["ld.lld", "-N", "--image-base=0", "-Ttext=0", "-e", "_start",
+     bswap32_start_obj_path, bswap32_obj_path, "-o", bswap32_elf_path],
+    [], nil, false)
+def bswap32_execution = run_capture(
+    ["timeout", "2s", "qemu-system-avr", "-M", "uno", "-display", "none",
+     "-monitor", "none", "-serial", "stdio", "-bios", bswap32_elf_path],
+    [], nil, false)
+assert(bswap32_emitted.get("code", 127) == 0 &&
+       bswap32_assembled.get("code", 127) == 0 &&
+       bswap32_start_assembled.get("code", 127) == 0 &&
+       bswap32_linked.get("code", 127) == 0,
+       "AVR 32-bit byte-swap code assembles and links")
+assert(bswap32_execution.get("code", 0) == 124 &&
+       str_contains(bswap32_execution.get("stdout", ""), "U"),
+       "QEMU verifies 32-bit byte order and zero-extension")
+
+def panic_asm_path = stem + "-panic.s"
+def panic_obj_path = stem + "-panic.o"
+def panic_elf_path = stem + "-panic.elf"
+def panic_emitted = run_capture(
+    [compiler, "--native-backend=avr", "--native-only", "--nyir-verify",
+     "--emit-asm=" + panic_asm_path, "-no-std", "-emit-only", "-e",
+     "panic(\"literal AVR panic\")"],
+    [], nil, false)
+def panic_assembled = run_capture(
+    ["clang", "--target=avr", "-mmcu=atmega328p", "-c", panic_asm_path,
+     "-o", panic_obj_path],
+    [], nil, false)
+def panic_linked = run_capture(
+    ["ld.lld", "-N", "--image-base=0", "-Ttext=0", "-e", "_start",
+     start_obj_path, panic_obj_path, "-o", panic_elf_path],
+    [], nil, false)
+def panic_execution = run_capture(
+    ["timeout", "2s", "qemu-system-avr", "-M", "uno", "-display", "none",
+     "-monitor", "none", "-serial", "stdio", "-bios", panic_elf_path],
+    [], nil, false)
+assert(panic_emitted.get("code", 127) == 0 &&
+       panic_assembled.get("code", 127) == 0 &&
+       panic_linked.get("code", 127) == 0,
+       "AVR literal panic assembles and links; emit rc=" +
+       to_str(panic_emitted.get("code", 127)) + " stderr=" +
+       panic_emitted.get("stderr", ""))
+assert(panic_execution.get("code", 0) == 124 &&
+       !str_contains(panic_execution.get("stdout", ""), "U") &&
+       !str_contains(panic_execution.get("stdout", ""), "E"),
+       "AVR literal panic traps before the startup wrapper returns")
+
+def rotate_start_source =
+  ".text\n.global _start\n_start:\n" +
+  "  call rt_main\n" +
+  "  ldi r16, 0\n  sts 0x00C5, r16\n" +
+  "  ldi r16, 103\n  sts 0x00C4, r16\n" +
+  "  ldi r16, 0x06\n  sts 0x00C2, r16\n" +
+  "  ldi r16, 0x08\n  sts 0x00C1, r16\n" +
+  "  cpi r18, 0xad\n  brne 3f\n" +
+  "  cpi r19, 0x68\n  brne 3f\n" +
+  "  cpi r20, 0x24\n  brne 3f\n" +
+  "  cpi r21, 0x00\n  brne 3f\n" +
+  "  cpi r22, 0x00\n  brne 3f\n" +
+  "  cpi r23, 0x00\n  brne 3f\n" +
+  "  cpi r24, 0x00\n  brne 3f\n" +
+  "  cpi r25, 0x24\n  brne 3f\n" +
+  "  ldi r16, 'U'\n  rjmp 4f\n" +
+  "3:\n  ldi r16, 'E'\n" +
+  "4:\n" +
+  "1:\n  lds r17, 0x00C0\n  sbrs r17, 5\n" +
+  "  rjmp 1b\n  sts 0x00C6, r16\n" +
+  "2:\n  rjmp 2b\n"
+assert(is_ok(file_write(rotate_start_path, rotate_start_source)),
+       "write AVR rotate UART startup wrapper")
+def rotate_emitted = run_capture(
+    [compiler, "--native-backend=avr", "--native-only", "-O3",
+     "--nyir-verify", "--emit-asm=" + rotate_asm_path, "-no-std",
+     "-emit-only", "-e",
+     "@noinline\nfn rotate_right(int value) int {\n" +
+     "  def nonnegative = value & 0x1fffffff\n" +
+     "  (nonnegative >> 8) | (nonnegative << 56)\n" +
+     "}\nrotate_right(0x12345612)"],
+    [], nil, false)
+def rotate_assembled = run_capture(
+    ["clang", "--target=avr", "-mmcu=atmega328p", "-c", rotate_asm_path,
+     "-o", rotate_obj_path], [], nil, false)
+def rotate_start_assembled = run_capture(
+    ["clang", "--target=avr", "-mmcu=atmega328p", "-c", rotate_start_path,
+     "-o", rotate_start_obj_path], [], nil, false)
+def rotate_linked = run_capture(
+    ["ld.lld", "-N", "--image-base=0", "-Ttext=0", "-e", "_start",
+     rotate_start_obj_path, rotate_obj_path, "-o", rotate_elf_path],
+    [], nil, false)
+def rotate_execution = run_capture(
+    ["timeout", "2s", "qemu-system-avr", "-M", "uno", "-display", "none",
+     "-monitor", "none", "-serial", "stdio", "-bios", rotate_elf_path],
+    [], nil, false)
+assert(rotate_emitted.get("code", 127) == 0 &&
+       rotate_assembled.get("code", 127) == 0 &&
+       rotate_start_assembled.get("code", 127) == 0 &&
+       rotate_linked.get("code", 127) == 0,
+       "optimized AVR rotate-right code assembles and links")
+assert(rotate_execution.get("code", 0) == 124 &&
+       str_contains(rotate_execution.get("stdout", ""), "U"),
+       "QEMU verifies optimized 64-bit rotate-right and tagged result")
+
+def rotate32_start_source =
+  ".text\n.global _start\n_start:\n" +
+  "  call rt_main\n" +
+  "  ldi r16, 0\n  sts 0x00C5, r16\n" +
+  "  ldi r16, 103\n  sts 0x00C4, r16\n" +
+  "  ldi r16, 0x06\n  sts 0x00C2, r16\n" +
+  "  ldi r16, 0x08\n  sts 0x00C1, r16\n" +
+  "  cpi r18, 3\n  brne 3f\n" +
+  "  ldi r16, 'U'\n  rjmp 4f\n" +
+  "3:\n  ldi r16, 'E'\n" +
+  "4:\n" +
+  "1:\n  lds r17, 0x00C0\n  sbrs r17, 5\n" +
+  "  rjmp 1b\n  sts 0x00C6, r16\n" +
+  "2:\n  rjmp 2b\n"
+assert(is_ok(file_write(rotate32_start_path, rotate32_start_source)),
+       "write AVR 32-bit rotate UART startup wrapper")
+def rotate32_emitted = run_capture(
+    [compiler, "--native-backend=avr", "--native-only", "-O3",
+     "--nyir-verify", "--emit-asm=" + rotate32_asm_path, "-no-std",
+     "-emit-only", "-e",
+     "@noinline\nfn rotate_right32_zero(int value) int {\n" +
+     "  mut word = value & 0xffffffff\n" +
+     "  ((word >> 0) | (word << 32)) & 0xffffffff\n" +
+     "}\n" +
+     "@noinline\nfn rotate_right32(int value) int {\n" +
+     "  mut word = value & 0xffffffff\n" +
+     "  ((word >> 7) | (word << 25)) & 0xffffffff\n" +
+     "}\n" +
+     "@noinline\nfn rotate_right32_last(int value) int {\n" +
+     "  mut word = value & 0xffffffff\n" +
+     "  ((word >> 31) | (word << 1)) & 0xffffffff\n" +
+     "}\n" +
+     "if rotate_right32_zero(0x007dbeef12345678) == 0x12345678 && " +
+     "rotate_right32(0x007dbeef12345678) == 0xf02468ac && " +
+     "rotate_right32_last(0x007dbeef12345678) == 0x2468acf0 " +
+     "{ 1 } else { 0 }"],
+    [], nil, false)
+def rotate32_assembled = run_capture(
+    ["clang", "--target=avr", "-mmcu=atmega328p", "-c", rotate32_asm_path,
+     "-o", rotate32_obj_path], [], nil, false)
+def rotate32_start_assembled = run_capture(
+    ["clang", "--target=avr", "-mmcu=atmega328p", "-c", rotate32_start_path,
+     "-o", rotate32_start_obj_path], [], nil, false)
+def rotate32_linked = run_capture(
+    ["ld.lld", "-N", "--image-base=0", "-Ttext=0", "-e", "_start",
+     rotate32_start_obj_path, rotate32_obj_path, "-o", rotate32_elf_path],
+    [], nil, false)
+def rotate32_execution = run_capture(
+    ["timeout", "2s", "qemu-system-avr", "-M", "uno", "-display", "none",
+     "-monitor", "none", "-serial", "stdio", "-bios", rotate32_elf_path],
+    [], nil, false)
+assert(rotate32_emitted.get("code", 127) == 0 &&
+       rotate32_assembled.get("code", 127) == 0 &&
+       rotate32_start_assembled.get("code", 127) == 0 &&
+       rotate32_linked.get("code", 127) == 0,
+       "optimized AVR 32-bit rotate-right code assembles and links; emit rc=" +
+       to_str(rotate32_emitted.get("code", 127)) + " stderr=" +
+       rotate32_emitted.get("stderr", ""))
+assert(rotate32_execution.get("code", 0) == 124 &&
+       str_contains(rotate32_execution.get("stdout", ""), "U"),
+       "QEMU verifies 32-bit rotate-right and its runtime comparison")
+
+def compare_start_source =
+  ".text\n.global _start\n_start:\n" +
+  "  call rt_main\n" +
+  "  ldi r16, 0\n  sts 0x00C5, r16\n" +
+  "  ldi r16, 103\n  sts 0x00C4, r16\n" +
+  "  ldi r16, 0x06\n  sts 0x00C2, r16\n" +
+  "  ldi r16, 0x08\n  sts 0x00C1, r16\n" +
+  "  cpi r18, 0x11\n  brne 3f\n" +
+  "  cpi r19, 0\n  brne 3f\n" +
+  "  cpi r20, 0\n  brne 3f\n" +
+  "  cpi r21, 0\n  brne 3f\n" +
+  "  cpi r22, 0\n  brne 3f\n" +
+  "  cpi r23, 0\n  brne 3f\n" +
+  "  cpi r24, 0\n  brne 3f\n" +
+  "  cpi r25, 0\n  brne 3f\n" +
+  "  ldi r16, 'U'\n  rjmp 4f\n" +
+  "3:\n  ldi r16, 'E'\n" +
+  "4:\n" +
+  "1:\n  lds r17, 0x00C0\n  sbrs r17, 5\n" +
+  "  rjmp 1b\n  sts 0x00C6, r16\n" +
+  "2:\n  rjmp 2b\n"
+assert(is_ok(file_write(compare_start_path, compare_start_source)),
+       "write AVR comparison UART startup wrapper")
+def compare_emitted = run_capture(
+    [compiler, "--native-backend=avr", "--native-only", "--nyir-verify",
+     "--emit-asm=" + compare_asm_path, "-no-std", "-emit-only", "-e",
+     "@noinline\nfn equal(int left, int right) int {\n" +
+     "  if left == right { 1 } else { 0 }\n}\n" +
+     "@noinline\nfn not_equal(int left, int right) int {\n" +
+     "  if left != right { 1 } else { 0 }\n}\n" +
+     "@noinline\nfn less(int left, int right) int {\n" +
+     "  if left < right { 1 } else { 0 }\n}\n" +
+     "@noinline\nfn less_equal(int left, int right) int {\n" +
+     "  if left <= right { 1 } else { 0 }\n}\n" +
+     "@noinline\nfn greater(int left, int right) int {\n" +
+     "  if left > right { 1 } else { 0 }\n}\n" +
+     "@noinline\nfn greater_equal(int left, int right) int {\n" +
+     "  if left >= right { 1 } else { 0 }\n}\n" +
+     "equal(5, 5) + not_equal(5, 6) + less(-1, 1) + " +
+     "less_equal(1, 1) + greater(2, 1) + greater_equal(2, 2) + " +
+     "less(0x0100000000000000, 0x0100000000000001) + " +
+     "greater(0x0100000000000001, 0x0100000000000000)"],
+    [], nil, false)
+def compare_assembled = run_capture(
+    ["clang", "--target=avr", "-mmcu=atmega328p", "-c", compare_asm_path,
+     "-o", compare_obj_path], [], nil, false)
+def compare_start_assembled = run_capture(
+    ["clang", "--target=avr", "-mmcu=atmega328p", "-c", compare_start_path,
+     "-o", compare_start_obj_path], [], nil, false)
+def compare_linked = run_capture(
+    ["ld.lld", "-N", "--image-base=0", "-Ttext=0", "-e", "_start",
+     compare_start_obj_path, compare_obj_path, "-o", compare_elf_path],
+    [], nil, false)
+def compare_execution = run_capture(
+    ["timeout", "2s", "qemu-system-avr", "-M", "uno", "-display", "none",
+     "-monitor", "none", "-serial", "stdio", "-bios", compare_elf_path],
+    [], nil, false)
+assert(compare_emitted.get("code", 127) == 0 &&
+       compare_assembled.get("code", 127) == 0 &&
+       compare_start_assembled.get("code", 127) == 0 &&
+       compare_linked.get("code", 127) == 0,
+       "AVR signed comparisons assemble and link")
+assert(compare_execution.get("code", 0) == 124 &&
+       str_contains(compare_execution.get("stdout", ""), "U"),
+       "QEMU verifies all six signed 64-bit comparisons")
+
+def rejected_path = stem + "-unsupported.s"
+def rejected = run_capture(
+    [compiler, "--native-backend=avr", "--native-only", "--nyir-verify",
+     "--emit-asm=" + rejected_path, "-no-std", "-emit-only", "-e",
+     "fn fail(int value) { panic(\"runtime failure \" + to_str(value)) }\n" +
+     "fail(42)"],
+    [], nil, false)
+assert(rejected.get("code", 0) != 0 && !file_exists(rejected_path),
+       "dynamic AVR panic-message formatting fails closed")
+
+def removed_asm = file_remove(asm_path)
+def removed_rotate_asm = file_remove(rotate_asm_path)
+def removed_start = file_remove(start_path)
+def removed_rotate_start = file_remove(rotate_start_path)
+def removed_obj = file_remove(obj_path)
+def removed_rotate_obj = file_remove(rotate_obj_path)
+def removed_start_obj = file_remove(start_obj_path)
+def removed_rotate_start_obj = file_remove(rotate_start_obj_path)
+def removed_elf = file_remove(elf_path)
+def removed_rotate_elf = file_remove(rotate_elf_path)
+def removed_compare_asm = file_remove(compare_asm_path)
+def removed_compare_start = file_remove(compare_start_path)
+def removed_compare_obj = file_remove(compare_obj_path)
+def removed_compare_start_obj = file_remove(compare_start_obj_path)
+def removed_compare_elf = file_remove(compare_elf_path)
+def removed_rotate32_asm = file_remove(rotate32_asm_path)
+def removed_rotate32_start = file_remove(rotate32_start_path)
+def removed_rotate32_obj = file_remove(rotate32_obj_path)
+def removed_rotate32_start_obj = file_remove(rotate32_start_obj_path)
+def removed_rotate32_elf = file_remove(rotate32_elf_path)
+def removed_bswap_asm = file_remove(bswap_asm_path)
+def removed_bswap_obj = file_remove(bswap_obj_path)
+def removed_bswap_elf = file_remove(bswap_elf_path)
+def removed_bswap32_asm = file_remove(bswap32_asm_path)
+def removed_bswap32_start = file_remove(bswap32_start_path)
+def removed_bswap32_obj = file_remove(bswap32_obj_path)
+def removed_bswap32_start_obj = file_remove(bswap32_start_obj_path)
+def removed_bswap32_elf = file_remove(bswap32_elf_path)
+def removed_panic_asm = file_remove(panic_asm_path)
+def removed_panic_obj = file_remove(panic_obj_path)
+def removed_panic_elf = file_remove(panic_elf_path)
+assert(is_ok(removed_asm) && is_ok(removed_rotate_asm) &&
+       is_ok(removed_compare_asm) && is_ok(removed_compare_start) &&
+       is_ok(removed_compare_obj) && is_ok(removed_compare_start_obj) &&
+       is_ok(removed_compare_elf) &&
+       is_ok(removed_start) && is_ok(removed_rotate_start) &&
+       is_ok(removed_panic_asm) && is_ok(removed_panic_obj) &&
+       is_ok(removed_panic_elf) &&
+       is_ok(removed_obj) && is_ok(removed_rotate_obj) &&
+       is_ok(removed_start_obj) && is_ok(removed_rotate_start_obj) &&
+       is_ok(removed_elf) && is_ok(removed_rotate_elf) &&
+       is_ok(removed_bswap_asm) && is_ok(removed_bswap_obj) &&
+       is_ok(removed_bswap_elf) && is_ok(removed_bswap32_asm) &&
+       is_ok(removed_bswap32_start) && is_ok(removed_bswap32_obj) &&
+       is_ok(removed_bswap32_start_obj) && is_ok(removed_bswap32_elf),
+       "remove AVR cross-run artifacts")
+assert(is_ok(removed_rotate32_asm) && is_ok(removed_rotate32_start) &&
+       is_ok(removed_rotate32_obj) && is_ok(removed_rotate32_start_obj) &&
+       is_ok(removed_rotate32_elf),
+       "remove AVR 32-bit rotate artifacts")
+print("AVR_SCALAR_CALL_RUNTIME_OK")
+NY
+}

@@ -1,0 +1,21 @@
+shape value-indexed-user-bound-negative {
+  family "runtime/errors"
+  generator "regression"
+  features ["ny", "native", "indexed", "types", "errors"]
+  template ny-test-case
+  expect compile_fail
+  expect_message "value-indexed bound requires 0 <= value < 3, got 3"
+  flags_matrix "--native-backend=llvm --jit; --native-only --native-backend=x86_64"
+  source ny <<'NY'
+use core
+
+refine Slot = int where (v) { v >= 0 }
+def SLOT_BOUND = 4
+
+fn literal_slot(Slot<3> index) int { index }
+fn symbolic_slot(Slot<SLOT_BOUND> index) int { index }
+
+print(literal_slot(3))
+print(symbolic_slot(4))
+NY
+}

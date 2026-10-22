@@ -1,20 +1,20 @@
 ;; Keywords: block-cipher mode tools math crypto
 ;; Block mode utilities.
 ;; References:
-;; - std.math.crypto.block.mode
-;; - std.math.crypto
-module std.math.crypto.block.mode.tools(detect_block_mode, recover_cbc_iv, cbc_bitflip_delta, cbc_apply_bitflip_delta, addition_block_chaining_roll, addition_block_chaining_unroll)
-use std.core
-use std.math.integer (Z)
-use std.math.crypto.block.mode.ecb
-use std.math.crypto.support.tools as support
+;; - core.math.crypto.block.mode
+;; - core.math.crypto
+module core.math.crypto.block.mode.tools(detect_block_mode, recover_cbc_iv, cbc_bitflip_delta, cbc_apply_bitflip_delta, addition_block_chaining_roll, addition_block_chaining_unroll)
+use core
+use core.math.integer (Z)
+use core.math.crypto.block.mode.ecb
+use core.math.crypto.support.tools as support
 
 fn _xor_prefix(any a, any b) list {
    def n = (a.len < b.len) ? a.len : b.len
    mut out = list(n)
    mut i = 0
    while i < n {
-      out = out.append(a[i] ^^ b[i])
+      out = out.append(a[i] ^ b[i])
       i += 1
    }
    out
@@ -117,7 +117,7 @@ fn recover_cbc_iv(fnptr decrypt_oracle_fn, any ciphertext, int block_size) any {
    mut iv = []
    i = 0
    while i < block_size {
-      iv = iv.append(pt[i] ^^ pt[block_size * 2 + i])
+      iv = iv.append(pt[i] ^ pt[block_size * 2 + i])
       i += 1
    }
    iv

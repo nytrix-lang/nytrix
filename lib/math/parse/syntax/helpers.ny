@@ -1,10 +1,10 @@
 ;; Keywords: syntax helpers parse highlight
 ;; Shared scanning primitives for syntax tokenizers and highlighters.
 ;; References:
-;; - std.math.parse.syntax
-module std.math.parse.syntax.helpers(is_alpha_ch, is_digit_ch, is_alnum_ch, is_space_ch, word_eq, lower_ch, in_list, in_list_ci, add_tok, scan_space, scan_line, scan_quoted, scan_ident, char_in, scan_ident_extra, scan_number, tokenize_c_like)
-use std.core
-use std.core.str as str
+;; - core.math.parse.syntax
+module core.math.parse.syntax.helpers(is_alpha_ch, is_digit_ch, is_alnum_ch, is_space_ch, word_eq, lower_ch, in_list, in_list_ci, add_tok, scan_space, scan_line, scan_quoted, scan_ident, char_in, scan_ident_extra, scan_number, tokenize_c_like)
+use core
+use core.str as str
 
 fn is_alpha_ch(int b) bool {
    "Returns true for ASCII letters and underscore."

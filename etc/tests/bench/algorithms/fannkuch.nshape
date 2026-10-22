@@ -1,0 +1,139 @@
+shape fannkuch {
+  family "perf-real"
+  generator "stress"
+  features ["perf", "c-vs-ny", "checksum"]
+  template ny-test-case
+  flags_matrix "-O0 --native-only; -O1 --native-only; -O2 --native-only; -O3 --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.time
+use core.tbuf (i64buf_new)
+@inline
+fn raw_load(ptr buf, int i) int { load64_i(buf, i * 8) }
+@inline
+fn raw_store(ptr buf, int i, int v) ptr {
+   store64_i(buf, v, i * 8)
+   buf
+}
+;; Fannkuch-redux: permutation flipping (classic CLBG benchmark).
+fn fannkuch(int n) int {
+   mut ptr perm = i64buf_new(n)
+   mut ptr perm1 = i64buf_new(n)
+   mut ptr count = i64buf_new(n)
+   mut int i = 0
+   while i < n {
+      raw_store(perm, i, i)
+      raw_store(perm1, i, i)
+      raw_store(count, i, i)
+      i += 1
+   }
+   mut int maxflips = 0
+   mut int checksum = 0
+   mut int r = n
+   mut int flips = 0
+   mut int k = 0
+   mut int tmp = 0
+   while true {
+      while r != 1 {
+         raw_store(count, r - 1, r)
+         r -= 1
+      }
+      i = 0
+      while i < n {
+         raw_store(perm, i, raw_load(perm1, i))
+         i += 1
+      }
+      flips = 0
+      k = raw_load(perm, 0)
+      while k != 0 {
+         mut int a = 0
+         mut int b = k
+         while a < b {
+            tmp = raw_load(perm, a)
+            raw_store(perm, a, raw_load(perm, b))
+            raw_store(perm, b, tmp)
+            a += 1
+            b -= 1
+         }
+         flips += 1
+         k = raw_load(perm, 0)
+      }
+      if flips > maxflips { maxflips = flips }
+      if (r & 1) == 0 { checksum += flips } else { checksum -= flips }
+      while true {
+         if r == n { return maxflips * 1000000 + checksum }
+         tmp = raw_load(perm1, 0)
+         i = 0
+         while i < r {
+            raw_store(perm1, i, raw_load(perm1, i + 1))
+            i += 1
+         }
+         raw_store(perm1, r, tmp)
+         def remaining = raw_load(count, r) - 1
+         raw_store(count, r, remaining)
+         if remaining > 0 { break }
+         r += 1
+      }
+   }
+   maxflips * 1000000 + checksum
+}
+def int t0 = ticks()
+def r = fannkuch(10)
+def int t1 = ticks()
+print("checksum=", r)
+print("elapsed_ns=", t1 - t0)
+NY
+  source c <<'C'
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+
+static int64_t now_ns(void) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0;
+    return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
+}
+
+static int fannkuch(int n) {
+    int perm[16], perm1[16], count[16];
+    int maxflips = 0, checksum = 0, r = n, flips, k, tmp;
+    for (int i = 0; i < n; i++) { perm[i] = i; perm1[i] = i; count[i] = i; }
+    while (1) {
+        while (r != 1) { count[r-1] = r; r--; }
+        flips = 0;
+        for (int i = 0; i < n; i++) perm[i] = perm1[i];
+        k = perm[0];
+        while (k) {
+            for (int i = 0, j = k; i < j; i++, j--) {
+                tmp = perm[i]; perm[i] = perm[j]; perm[j] = tmp;
+            }
+            flips++;
+            k = perm[0];
+        }
+        if (flips > maxflips) maxflips = flips;
+        if ((r & 1) == 0) checksum += flips; else checksum -= flips;
+        for (;;) {
+            if (r == n) return maxflips * 1000000 + checksum;
+            tmp = perm1[0];
+            for (int i = 0; i < r; i++) perm1[i] = perm1[i+1];
+            perm1[r] = tmp;
+            count[r] = count[r] - 1;
+            if (count[r] > 0) break;
+            r++;
+        }
+    }
+}
+
+int main(void) {
+    int64_t start = now_ns();
+    int r = fannkuch(10);
+    int64_t end = now_ns();
+    printf("checksum=%d\n", r);
+    if (end <= start) end = start + 1;
+    printf("elapsed_ns=%lld\n", (long long)(end - start));
+    return 0;
+}
+C
+}

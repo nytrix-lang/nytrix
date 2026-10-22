@@ -1,13 +1,13 @@
 ;; Keywords: sound source synth os
 ;; Synthetic sound source generation for tones, tests, and procedural audio.
 ;; References:
-;; - std.os.sound.source
-;; - std.os
-module std.os.sound.source.synth(make_sine_source, make_sine_loop_source, make_triangle_source, make_square_source, make_saw_source, make_pulse_source, make_supersaw_source, make_soft_pluck_source, write_synth_wav)
-use std.core
-use std.math
-use std.os.sound.source as source
-use std.os.sound.source.memory as memory
+;; - core.os.sound.source
+;; - core.os
+module core.os.sound.source.synth(make_sine_source, make_sine_loop_source, make_triangle_source, make_square_source, make_saw_source, make_pulse_source, make_supersaw_source, make_soft_pluck_source, write_synth_wav)
+use core
+use core.math
+use core.os.sound.source as source
+use core.os.sound.source.memory as memory
 
 def WAVE_SINE = 1
 def WAVE_TRIANGLE = 2
@@ -31,7 +31,7 @@ fn _phase_wrap01(any x) f64 {
    return v
 }
 
-fn _poly_blep(any t, any dt) f64 {
+fn _poly_blep(f64 t, f64 dt) f64 {
    mut x, d = t + 0.0, dt + 0.0
    if d <= 0.0 { return 0.0 }
    if d > 0.5 { d = 0.5 }
@@ -278,7 +278,7 @@ fn make_supersaw_source(any freq, any dur_secs=2.0, any rate=44100, any amp=0.5,
 }
 
 fn make_soft_pluck_source(any freq, any dur_secs=0.08, any rate=44100, any amp=0.35, any color=0.22) any {
-   "Creates a short stereo attack helper source with fast attack and smooth decay."
+   "Creates a warm piano-like pluck from smoothly decaying sine partials."
    def r = _safe_rate(rate)
    def frames = _safe_stereo_frames(freq, dur_secs, r)
    def bytes = frames * 4
@@ -286,25 +286,46 @@ fn make_soft_pluck_source(any freq, any dur_secs=0.08, any rate=44100, any amp=0
    if !ptr { return 0 }
    def a = clamp01(amp + 0.0)
    def c = clamp01(color + 0.0)
-   mut phase = 0.0
-   def step = (SYNTH_TAU * (freq + 0.0)) / (r + 0.0)
-   mut attack = r / 360
+   def base_step = (SYNTH_TAU * (freq + 0.0)) / (r + 0.0)
+   def second_step = base_step * 2.0004
+   def third_step = base_step * 3.00135
+   def fourth_step = base_step * 4.0032
+   def fifth_step = base_step * 5.00625
+   mut phase1, phase2, phase3, phase4, phase5 = 0.0, 0.0, 0.0, 0.0, 0.0
+   mut attack = r / 80
    if attack < 1 { attack = 1 }
+   mut fade = r / 80
+   if fade < 1 { fade = 1 }
+   if fade > frames { fade = frames }
    mut i = 0
    while i < frames {
       def t = (i + 0.0) / (frames + 0.0)
-      mut e = 1.0 - t
-      e = e * e * e
-      if i < attack { e = e * ((i + 0.0) / (attack + 0.0)) }
-      def saw = _wave_sample(WAVE_SAW, phase, 0.5, step)
-      def tri = _wave_sample(WAVE_TRIANGLE, phase, 0.5, step)
-      def sine = sin(phase)
-      def tone = ((saw * c * 0.30) + (tri * (1.0 - c) * 0.80) + sine * 0.16) * a * e
-      def out = _soft_clip(tone)
+      def fundamental = sin(phase1) * 0.76 / (1.0 + t * 2.4)
+      def second = sin(phase2) * (0.20 + c * 0.08) / (1.0 + t * 7.0)
+      def third = sin(phase3) * (0.06 + c * 0.04) / (1.0 + t * 15.0)
+      def fourth = sin(phase4) * (0.02 + c * 0.02) / (1.0 + t * 26.0)
+      def fifth = sin(phase5) * (0.008 + c * 0.01) / (1.0 + t * 40.0)
+      def sample = fundamental + second + third + fourth + fifth
+      mut attack_gain = 1.0
+      if i < attack {
+         def x = (i + 0.0) / (attack + 0.0)
+         attack_gain = x * x * (3.0 - 2.0 * x)
+      }
+      mut tail_gain = 1.0
+      if i >= frames - fade { tail_gain = (frames - i - 1 + 0.0) / (fade + 0.0) }
+      def out = _soft_clip(sample * a * attack_gain * tail_gain)
       store16(ptr, _round_s16(out), i * 4)
       store16(ptr, _round_s16(out), i * 4 + 2)
-      phase += step
-      while phase >= SYNTH_TAU { phase -= SYNTH_TAU }
+      phase1 += base_step
+      phase2 += second_step
+      phase3 += third_step
+      phase4 += fourth_step
+      phase5 += fifth_step
+      while phase1 >= SYNTH_TAU { phase1 -= SYNTH_TAU }
+      while phase2 >= SYNTH_TAU { phase2 -= SYNTH_TAU }
+      while phase3 >= SYNTH_TAU { phase3 -= SYNTH_TAU }
+      while phase4 >= SYNTH_TAU { phase4 -= SYNTH_TAU }
+      while phase5 >= SYNTH_TAU { phase5 -= SYNTH_TAU }
       i += 1
    }
    memory.make(ptr, bytes, 2, r, 16, 1, 1)
@@ -343,6 +364,9 @@ fn _sound_synth_selftest_stereo(any src, int expected_rate, int expected_min_fra
    assert(_sound_synth_selftest_source(make_saw_source(20.0, 0.05, 1000), 1000, 50), "sound synth saw")
    assert(_sound_synth_selftest_source(make_pulse_source(20.0, 0.05, 1000, 4.0, -0.5, true), 1000, 50), "sound synth pulse")
    assert(_sound_synth_selftest_stereo(make_supersaw_source(20.0, 0.1, 1000, 0.35, 5, 0.01, 0.7, true), 1000, 100), "sound synth supersaw")
-   assert(_sound_synth_selftest_stereo(make_soft_pluck_source(20.0, 0.1, 1000, 0.35, 0.3), 1000, 100), "sound synth pluck")
-   print("✓ std.os.sound.source.synth self-test passed")
+   def pluck = make_soft_pluck_source(20.0, 0.1, 1000, 0.35, 0.3)
+   def pluck_ptr = pluck.get(1).get("ptr")
+   assert(_sound_synth_selftest_stereo(pluck, 1000, 100), "sound synth pluck")
+   assert(load16(pluck_ptr, 0) == 0 && load16(pluck_ptr, 4) != 0 && load16(pluck_ptr, 396) == 0, "sound synth pluck has smooth attack and tail")
+   print("✓ core.os.sound.source.synth self-test passed")
 }

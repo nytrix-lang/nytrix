@@ -1,0 +1,35 @@
+shape captured_callback_rows_survive_literal_dictionary_capture {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "callback", "capture", "container"]
+  template ny-test-case
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_fail
+  expect_message "inferred effects=io|alloc"
+  source ny <<'NY'
+use core
+
+@effects(io)
+fn print_answer() int {
+  print("answer through container\n")
+  42
+}
+
+@effects(alloc, read, e)
+fn make_container_callback(fnptr callback) fnptr {
+  def callbacks = {"run": callback}
+  def captured = callbacks
+  return fn() { captured.get("run")() }
+}
+
+@effects(e)
+fn run_eff(fnptr callback) int { callback() }
+
+@effects(alloc, read)
+fn invoke_container_callback() int {
+  run_eff(make_container_callback(print_answer))
+}
+
+invoke_container_callback()
+NY
+}

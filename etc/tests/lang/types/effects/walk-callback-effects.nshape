@@ -1,0 +1,27 @@
+shape os_walk_calls_include_callback_effects {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "higher-order", "callback", "filesystem"]
+  template ny-test-case
+  flags_matrix "--effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os as os
+
+fn _walk_effect_worker(any value) int { 0 }
+
+fn _walk_effect_callback(str path) int {
+   def handle = os.thread_spawn(_walk_effect_worker, path)
+   os.thread_join(handle)
+   path.len
+}
+
+@effects(io, read, write, alloc, thread)
+fn walk_with_thread_callback() int {
+   os.walk(".", _walk_effect_callback, 0)
+}
+
+assert(walk_with_thread_callback() == 0, "walk callback thread effects")
+NY
+}

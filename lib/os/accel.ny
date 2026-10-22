@@ -1,9 +1,9 @@
 ;; Keywords: accel acceleration offload os
 ;; Accelerator policy facade.
 ;; References:
-;; - std.os
-module std.os.accel(gpu_mode, gpu_backend, gpu_offload, gpu_min_work, gpu_async, gpu_fast_math, gpu_available, gpu_should_offload, gpu_offload_status, accel_target, accel_targets, accel_target_available, accel_target_triple, accel_binary_kind, accel_binary_ext, accel_target_status, accel_compile_plan, opencl_available, opencl_toolchain_available, opencl_async, opencl_fast_math, opencl_should_offload, opencl_status, opencl_device_policy, opencl_compile_plan, opencl_kernel_plan, opencl_cpu_fallback_plan, opencl_dispatch_plan, opencl_work_groups, parallel_mode, parallel_threads, parallel_min_work, parallel_should_threads, parallel_status, GPU_MODE, GPU_BACKEND, GPU_OFFLOAD, GPU_MIN_WORK, GPU_ASYNC, GPU_FAST_MATH, GPU_AVAILABLE, ACCEL_TARGET, ACCEL_OBJECT, OPENCL_AVAILABLE, OPENCL_TOOLCHAIN_AVAILABLE, PARALLEL_MODE, PARALLEL_THREADS, PARALLEL_MIN_WORK)
-use std.os.gpu (
+;; - core.os
+module core.os.accel(gpu_mode, gpu_backend, gpu_offload, gpu_min_work, gpu_async, gpu_fast_math, gpu_available, gpu_should_offload, gpu_offload_status, accel_target, accel_targets, accel_target_available, accel_target_triple, accel_binary_kind, accel_binary_ext, accel_target_status, accel_compile_plan, opencl_available, opencl_toolchain_available, opencl_async, opencl_fast_math, opencl_should_offload, opencl_status, opencl_device_policy, opencl_compile_plan, opencl_kernel_plan, opencl_cpu_fallback_plan, opencl_dispatch_plan, opencl_work_groups, parallel_mode, parallel_threads, parallel_min_work, parallel_should_threads, parallel_status, GPU_MODE, GPU_BACKEND, GPU_OFFLOAD, GPU_MIN_WORK, GPU_ASYNC, GPU_FAST_MATH, GPU_AVAILABLE, ACCEL_TARGET, ACCEL_OBJECT, OPENCL_AVAILABLE, OPENCL_TOOLCHAIN_AVAILABLE, PARALLEL_MODE, PARALLEL_THREADS, PARALLEL_MIN_WORK)
+use core.os.gpu (
    gpu_mode as _os_gpu_mode, gpu_backend as _os_gpu_backend, gpu_offload as _os_gpu_offload,
    gpu_min_work as _os_gpu_min_work, gpu_async as _os_gpu_async, gpu_fast_math as _os_gpu_fast_math,
    gpu_available as _os_gpu_available, gpu_should_offload as _os_gpu_should_offload,
@@ -20,17 +20,17 @@ use std.os.gpu (
    opencl_work_groups as _os_opencl_work_groups,
 )
 
-use std.os.parallel (
+use core.os.parallel (
    parallel_mode as _os_parallel_mode, parallel_threads as _os_parallel_threads,
    parallel_min_work as _os_parallel_min_work, parallel_should_threads as _os_parallel_should_threads,
    parallel_status as _os_parallel_status,
 )
 
-use std.os.gpu as osgpu
-use std.core
-use std.core.str
-use std.core.common as common
-use std.os.prim (env)
+use core.os.gpu as osgpu
+use core
+use core.str
+use core.common as common
+use core.os.prim (env)
 
 fn _accel_env_str_or(str key, str fallback) str {
    def v = env(key)

@@ -1,0 +1,4 @@
+fn repl_loaded_increment(int value) int {
+  value + 1
+}
+assert(repl_loaded_increment(41) == 42, "loaded helper function works")

@@ -4,12 +4,12 @@
 ;; - https://www.rfc-editor.org/rfc/rfc1321
 ;; - https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.180-4.pdf
 ;; References:
-;; - std.math.crypto.hash
-;; - std.math.crypto
-module std.math.crypto.hash.length_extension(md5_padding, sha512_padding, md5_length_extend, sha1_length_extend, sha256_length_extend, sha512_length_extend)
-use std.core
-use std.math.bin
-use std.math.big (bigint_from_str, bigint_to_int)
+;; - core.math.crypto.hash
+;; - core.math.crypto
+module core.math.crypto.hash.length_extension(md5_padding, sha512_padding, md5_length_extend, sha1_length_extend, sha256_length_extend, sha512_length_extend)
+use core
+use core.math.bin
+use core.math.big (bigint_from_str, bigint_to_int)
 
 def _MD5_K = [3614090360, 3905402710, 606105819, 3250441966, 4118548399, 1200080426, 2821735955, 4249261313, 1770035416, 2336552879, 4294925233, 2304563134, 1804603682, 4254626195, 2792965006, 1236535329, 4129170786, 3225465664, 643717713, 3921069994, 3593408605, 38016083, 3634488961, 3889429448, 568446438, 3275163606, 4107603335, 1163531501, 2850285829, 4243563512, 1735328473, 2368359562, 4294588738, 2272392833, 1839030562, 4259657740, 2763975236, 1272893353, 4139469664, 3200236656, 681279174, 3936430074, 3572445317, 76029189, 3654602809, 3873151461, 530742520, 3299628645, 4096336452, 1126891415, 2878612391, 4237533241, 1700485571, 2399980690, 4293915773, 2240044497, 1873313359, 4264355552, 2734768916, 1309151649, 4149444226, 3174756917, 718787259, 3951481745]
 def _MD5_S = [7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21]
@@ -88,13 +88,13 @@ fn md5_length_extend(str orig_hash_hex, int orig_len_bytes, list suffix_bytes) s
       while ri < 64 {
          mut f, g = 0, 0
          if ri < 16 {
-            f, g = ((bb & cc) | ((bb ^^ 4294967295) & dd)), ri
+            f, g = ((bb & cc) | ((bb ^ 4294967295) & dd)), ri
          } elif ri < 32 {
-            f, g = ((dd & bb) | ((dd ^^ 4294967295) & cc)), (5 * ri + 1) % 16
+            f, g = ((dd & bb) | ((dd ^ 4294967295) & cc)), (5 * ri + 1) % 16
          } elif ri < 48 {
-            f, g = (bb ^^ cc ^^ dd), (3 * ri + 5) % 16
+            f, g = (bb ^ cc ^ dd), (3 * ri + 5) % 16
          } else {
-            f, g = (cc ^^ (bb | (dd ^^ 4294967295))), (7 * ri) % 16
+            f, g = (cc ^ (bb | (dd ^ 4294967295))), (7 * ri) % 16
          }
          def gi = off + g * 4
          def M_g = __load_item_fast(M, gi) | (__load_item_fast(M, gi + 1) << 8) | (__load_item_fast(M, gi + 2) << 16) | (__load_item_fast(M, gi + 3) << 24)
@@ -159,7 +159,7 @@ fn sha1_length_extend(str orig_hash_hex, int orig_len_bytes, list suffix_bytes) 
          wi += 1
       }
       while wi < 80 {
-         def v = __load_item_fast(W, wi - 3) ^^ __load_item_fast(W, wi - 8) ^^ __load_item_fast(W, wi - 14) ^^ __load_item_fast(W, wi - 16)
+         def v = __load_item_fast(W, wi - 3) ^ __load_item_fast(W, wi - 8) ^ __load_item_fast(W, wi - 14) ^ __load_item_fast(W, wi - 16)
          __store_item_fast(W, wi, _rotl32(v, 1))
          wi += 1
       }
@@ -173,13 +173,13 @@ fn sha1_length_extend(str orig_hash_hex, int orig_len_bytes, list suffix_bytes) 
          def ki = ri2 < 20 ? 1518500249 : (ri2 < 40 ? 1859775393 : (ri2 < 60 ? 2400959708 : 3395469782))
          mut f2 = 0
          if ri2 < 20 {
-            f2 = ((bb2 & cc2) | ((bb2 ^^ 4294967295) & dd2))
+            f2 = ((bb2 & cc2) | ((bb2 ^ 4294967295) & dd2))
          } elif ri2 < 40 {
-            f2 = (bb2 ^^ cc2 ^^ dd2)
+            f2 = (bb2 ^ cc2 ^ dd2)
          } elif ri2 < 60 {
             f2 = ((bb2 & cc2) | (bb2 & dd2) | (cc2 & dd2))
          } else {
-            f2 = (bb2 ^^ cc2 ^^ dd2)
+            f2 = (bb2 ^ cc2 ^ dd2)
          }
          def temp2 = _u32(_rotl32(aa2, 5) + f2 + ee2 + ki + __load_item_fast(W, ri2))
          ee2 = dd2
@@ -253,8 +253,8 @@ fn sha256_length_extend(str orig_hash_hex, int orig_len_bytes, list suffix_bytes
       while wi2 < 64 {
          def wm15 = __load_item_fast(W2, wi2 - 15)
          def wm2 = __load_item_fast(W2, wi2 - 2)
-         def s0 = _rotr32(wm15, 7) ^^ _rotr32(wm15, 18) ^^ (wm15 >> 3)
-         def s1 = _rotr32(wm2, 17) ^^ _rotr32(wm2, 19) ^^ (wm2 >> 10)
+         def s0 = _rotr32(wm15, 7) ^ _rotr32(wm15, 18) ^ (wm15 >> 3)
+         def s1 = _rotr32(wm2, 17) ^ _rotr32(wm2, 19) ^ (wm2 >> 10)
          def w2 = _u32(__load_item_fast(W2, wi2 - 16) + s0 + __load_item_fast(W2, wi2 - 7) + s1)
          __store_item_fast(W2, wi2, w2)
          wi2 += 1
@@ -269,11 +269,11 @@ fn sha256_length_extend(str orig_hash_hex, int orig_len_bytes, list suffix_bytes
       mut hh3 = h
       mut ri3 = 0
       while ri3 < 64 {
-         def S1 = _rotr32(ee3, 6) ^^ _rotr32(ee3, 11) ^^ _rotr32(ee3, 25)
-         def ch = (ee3 & ff3) ^^ ((ee3 ^^ 4294967295) & gg3)
+         def S1 = _rotr32(ee3, 6) ^ _rotr32(ee3, 11) ^ _rotr32(ee3, 25)
+         def ch = (ee3 & ff3) ^ ((ee3 ^ 4294967295) & gg3)
          def t1 = _u32(hh3 + S1 + ch + __load_item_fast(_SHA256_K, ri3) + __load_item_fast(W2, ri3))
-         def S0 = _rotr32(aa3, 2) ^^ _rotr32(aa3, 13) ^^ _rotr32(aa3, 22)
-         def maj = (aa3 & bb3) ^^ (aa3 & cc3) ^^ (bb3 & cc3)
+         def S0 = _rotr32(aa3, 2) ^ _rotr32(aa3, 13) ^ _rotr32(aa3, 22)
+         def maj = (aa3 & bb3) ^ (aa3 & cc3) ^ (bb3 & cc3)
          def t2 = _u32(S0 + maj)
          hh3 = gg3
          gg3 = ff3
@@ -343,27 +343,27 @@ fn _rotr64_le(any x, int n) any {
 fn _sha512_ch(any x, any y, any z) any {
    def ux, uy = _u64_word_le(x), _u64_word_le(y)
    def uz = _u64_word_le(z)
-   _u64_word_le((ux & uy) ^^ ((_U64_MASK_LE ^^ ux) & uz))
+   _u64_word_le((ux & uy) ^ ((_U64_MASK_LE ^ ux) & uz))
 }
 
 fn _sha512_maj(any x, any y, any z) any {
    def ux, uy = _u64_word_le(x), _u64_word_le(y)
    def uz = _u64_word_le(z)
-   _u64_word_le((ux & uy) ^^ (ux & uz) ^^ (uy & uz))
+   _u64_word_le((ux & uy) ^ (ux & uz) ^ (uy & uz))
 }
 
-fn _sha512_big0(any x) any { _u64_word_le(_rotr64_le(x, 28) ^^ _rotr64_le(x, 34) ^^ _rotr64_le(x, 39)) }
+fn _sha512_big0(any x) any { _u64_word_le(_rotr64_le(x, 28) ^ _rotr64_le(x, 34) ^ _rotr64_le(x, 39)) }
 
-fn _sha512_big1(any x) any { _u64_word_le(_rotr64_le(x, 14) ^^ _rotr64_le(x, 18) ^^ _rotr64_le(x, 41)) }
+fn _sha512_big1(any x) any { _u64_word_le(_rotr64_le(x, 14) ^ _rotr64_le(x, 18) ^ _rotr64_le(x, 41)) }
 
 fn _sha512_small0(any x) any {
    def word = _u64_word_le(x)
-   _u64_word_le(_rotr64_le(word, 1) ^^ _rotr64_le(word, 8) ^^ (word >> 7))
+   _u64_word_le(_rotr64_le(word, 1) ^ _rotr64_le(word, 8) ^ (word >> 7))
 }
 
 fn _sha512_small1(any x) any {
    def word = _u64_word_le(x)
-   _u64_word_le(_rotr64_le(word, 19) ^^ _rotr64_le(word, 61) ^^ (word >> 6))
+   _u64_word_le(_rotr64_le(word, 19) ^ _rotr64_le(word, 61) ^ (word >> 6))
 }
 
 fn _u64_from_bytes_be(list bs, int offset) any {

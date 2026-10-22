@@ -1,22 +1,22 @@
 ;; Keywords: platform window backend linux wayland os ui input
 ;; Wayland native window backend for surfaces, input, monitors, clipboard, and Vulkan surfaces.
 ;; References:
-;; - std.os.ui.window.platform.linux
-;; - std.os.ui.window
-;; - std.os.ui.window.consts
-module std.os.ui.window.platform.linux.wayland(available, get_backend_name, connect_display, disconnect_display, get_registry, destroy_registry, flush, roundtrip, get_fd, dispatch_pending, dispatch, prepare_read, cancel_read, read_events, wait_events, wait_events_queue, create_event_queue, destroy_event_queue, prepare_read_queue, dispatch_queue_pending, create_proxy_wrapper, destroy_proxy_wrapper, set_proxy_queue, get_proxy_user_data, set_proxy_user_data, get_proxy_version, destroy_proxy, bootstrap_globals, destroy_globals, set_globals, vulkan_supported, vulkan_required_extensions, probe_display, presentation_supported, create_surface, create_wl_surface, create_xdg_surface, create_xdg_toplevel, xdg_toplevel_set_title, create_basic_window, destroy_basic_window, poll_window_events, show_window, hide_window, iconify_window, restore_window, maximize_window, get_window_attrib, set_window_opacity, set_window_resizable, set_title, get_size, set_size, get_cursor_pos, set_cursor_pos, set_window_icon, create_cursor, create_standard_cursor, destroy_cursor, set_cursor, get_key_state, get_mouse_button_state, get_key_name, get_window_monitor, set_window_monitor, set_clipboard, get_clipboard, get_gamma_ramp, set_gamma_ramp, get_monitors, get_primary_monitor, get_monitor_pos, get_monitor_workarea, get_monitor_physical_size, get_monitor_content_scale, get_monitor_name, get_wayland_monitor, get_video_mode, get_video_modes, set_input_mode, get_input_mode, get_key_name, get_key_scancode, text_input_enable, text_input_disable, get_window_content_scale, get_window_opacity, get_window_frame_size, request_window_attention, get_seat_capabilities, poll_joystick_events)
-use std.core
-use std.core.mem (cstr)
-use std.core.str as str
-use std.os.ui.render.vk.vulkan (vk_create_wayland_surface_khr, vk_get_physical_device_wayland_presentation_support_khr)
-use std.os.ui.window.consts
-use std.os.ui.window.event as ui_event
-use std.os.ui.window.platform.api
-use std.os.ui.window.platform.linux.x11.keymap as x11_keymap
-use std.os.ui.window.platform.linux.joystick as linux_joystick
-use std.core.common as common
-use std.os.ui.render.dump as ui_profile
-use std.os.ffi as ffi
+;; - core.os.ui.window.platform.linux
+;; - core.os.ui.window
+;; - core.os.ui.window.consts
+module core.os.ui.window.platform.linux.wayland(available, get_backend_name, connect_display, disconnect_display, get_registry, destroy_registry, flush, roundtrip, get_fd, dispatch_pending, dispatch, prepare_read, cancel_read, read_events, wait_events, wait_events_queue, create_event_queue, destroy_event_queue, prepare_read_queue, dispatch_queue_pending, create_proxy_wrapper, destroy_proxy_wrapper, set_proxy_queue, get_proxy_user_data, set_proxy_user_data, get_proxy_version, destroy_proxy, bootstrap_globals, destroy_globals, set_globals, vulkan_supported, vulkan_required_extensions, probe_display, presentation_supported, create_surface, create_wl_surface, create_xdg_surface, create_xdg_toplevel, xdg_toplevel_set_title, create_basic_window, destroy_basic_window, poll_window_events, show_window, hide_window, iconify_window, restore_window, maximize_window, get_window_attrib, set_window_opacity, set_window_resizable, set_title, get_size, set_size, get_cursor_pos, set_cursor_pos, set_window_icon, create_cursor, create_standard_cursor, destroy_cursor, set_cursor, get_key_state, get_mouse_button_state, get_key_name, get_window_monitor, set_window_monitor, set_clipboard, get_clipboard, get_gamma_ramp, set_gamma_ramp, get_monitors, get_primary_monitor, get_monitor_pos, get_monitor_workarea, get_monitor_physical_size, get_monitor_content_scale, get_monitor_name, get_wayland_monitor, get_video_mode, get_video_modes, set_input_mode, get_input_mode, get_key_name, get_key_scancode, text_input_enable, text_input_disable, get_window_content_scale, get_window_opacity, get_window_frame_size, request_window_attention, get_seat_capabilities, poll_joystick_events)
+use core
+use core.mem (cstr)
+use core.str as str
+use core.os.ui.render.vk.vulkan (vk_create_wayland_surface_khr, vk_get_physical_device_wayland_presentation_support_khr)
+use core.os.ui.window.consts
+use core.os.ui.window.event as ui_event
+use core.os.ui.window.platform.api
+use core.os.ui.window.platform.linux.x11.keymap as x11_keymap
+use core.os.ui.window.platform.linux.joystick as linux_joystick
+use core.common as common
+use core.os.ui.debug as ui_profile
+use core.os.ffi as ffi
 
 #linux {
    #link "libwayland-client.so"
@@ -78,8 +78,8 @@ use std.os.ffi as ffi
       fn close(i32 fd) i32
       fn mmap(ptr addr, u64 length, i32 prot, i32 flags, i32 fd, i64 offset) ptr
       fn munmap(ptr addr, u64 length) i32
-      fn pipe(ptr fds) i32
-      fn poll(ptr fds, u64 nfds, i32 timeout) i32
+      fn wayland_pipe(ptr fds) i32 as "pipe"
+      fn wayland_poll(ptr fds, u64 nfds, i32 timeout) i32 as "poll"
       fn read(i32 fd, ptr buf, u64 count) i64
       fn strdup(ptr s) ptr
       fn write(i32 fd, ptr buf, u64 count) i64
@@ -257,11 +257,11 @@ use std.os.ffi as ffi
       "Runs the munmap operation."
       0
    }
-   fn pipe(..._args) any {
+   fn wayland_pipe(..._args) any {
       "Runs the pipe operation."
       return -1
    }
-   fn poll(..._args) any {
+   fn wayland_poll(ptr fds, u64 nfds, i32 timeout) i32 {
       "Polls poll."
       0
    }
@@ -1653,22 +1653,25 @@ fn _ensure_cursor_surface(any globals) any {
    _cursor_surface
 }
 
-comptime table WaylandCursorShapeNames {
-   ARROW_CURSOR -> ["default", "left_ptr", "arrow"]
-   IBEAM_CURSOR -> ["text", "xterm", "ibeam"]
-   CROSSHAIR_CURSOR -> ["crosshair", "cross"]
-   POINTING_HAND_CURSOR -> ["pointer", "hand2", "pointing_hand"]
-   RESIZE_EW_CURSOR -> ["ew-resize", "sb_h_double_arrow", "size_hor"]
-   RESIZE_NS_CURSOR -> ["ns-resize", "sb_v_double_arrow", "size_ver"]
-   RESIZE_NWSE_CURSOR -> ["nwse-resize", "top_left_corner", "size_fdiag"]
-   RESIZE_NESW_CURSOR -> ["nesw-resize", "top_right_corner", "size_bdiag"]
-   RESIZE_ALL_CURSOR -> ["all-scroll", "fleur", "size_all"]
-   NOT_ALLOWED_CURSOR -> ["not-allowed", "crossed_circle", "forbidden"]
+fn _wl_cursor_shape_names(int shape) list {
+   case shape {
+      ARROW_CURSOR -> ["default", "left_ptr", "arrow"]
+      IBEAM_CURSOR -> ["text", "xterm", "ibeam"]
+      CROSSHAIR_CURSOR -> ["crosshair", "cross"]
+      POINTING_HAND_CURSOR -> ["pointer", "hand2", "pointing_hand"]
+      RESIZE_EW_CURSOR -> ["ew-resize", "sb_h_double_arrow", "size_hor"]
+      RESIZE_NS_CURSOR -> ["ns-resize", "sb_v_double_arrow", "size_ver"]
+      RESIZE_NWSE_CURSOR -> ["nwse-resize", "top_left_corner", "size_fdiag"]
+      RESIZE_NESW_CURSOR -> ["nesw-resize", "top_right_corner", "size_bdiag"]
+      RESIZE_ALL_CURSOR -> ["all-scroll", "fleur", "size_all"]
+      NOT_ALLOWED_CURSOR -> ["not-allowed", "crossed_circle", "forbidden"]
+      _ -> ["default", "left_ptr", "arrow"]
+   }
 }
 
 fn _wl_cursor_for_shape(any theme, int shape) any {
    if !theme { return 0 }
-   def names = comptime match WaylandCursorShapeNames(shape, ["default", "left_ptr", "arrow"])
+   def names = _wl_cursor_shape_names(shape)
    if !names { return 0 }
    mut i = 0
    def names_n = names.len
@@ -1813,7 +1816,7 @@ fn _data_device_drop(any data, any device) any {
    def fds = malloc(8)
    if !fds { return 0 }
    memset(fds, 0, 8)
-   if pipe(fds) != 0 { free(fds) return 0 }
+   if wayland_pipe(fds) != 0 { free(fds) return 0 }
    def rfd, wfd = int(load32(fds, 0)), int(load32(fds, 4))
    free(fds)
    wl_proxy_marshal_flags_s_fd(offer, 1, 0, int(get_proxy_version(offer)), 0, cstr("text/uri-list"), wfd)
@@ -1907,7 +1910,7 @@ fn get_clipboard(any win) str {
    if !offer { return "" }
    def pipefd = malloc(8)
    if !pipefd { return "" }
-   if pipe(pipefd) != 0 { free(pipefd) return "" }
+   if wayland_pipe(pipefd) != 0 { free(pipefd) return "" }
    def rfd, wfd = load32(pipefd, 0), load32(pipefd, 4)
    free(pipefd)
    wl_proxy_marshal_flags_s_fd(
@@ -3266,7 +3269,7 @@ fn wait_events(any display, int timeout_ms=-1) int {
    store32(fds, get_fd(display), 0)
    store16(fds, POLLIN, 4)
    store16(fds, 0, 6)
-   def rc = poll(fds, 1, int(timeout_ms))
+   def rc = wayland_poll(fds, 1, int(timeout_ms))
    free(fds)
    if rc <= 0 {
       cancel_read(display)
@@ -3295,10 +3298,10 @@ fn wait_events_queue(any display, any queue, int timeout_ms=-1) int {
       cancel_read(display)
       return -1
    }
-   store32(fds, get_fd(display), 0)
+   store16(fds, get_fd(display), 0)
    store16(fds, POLLIN, 4)
    store16(fds, 0, 6)
-   def rc = poll(fds, 1, int(timeout_ms))
+   def rc = wayland_poll(fds, 1, int(timeout_ms))
    free(fds)
    if rc <= 0 {
       cancel_read(display)
@@ -3790,5 +3793,5 @@ fn get_wayland_monitor(any mon) any {
    assert(get_monitor_name(monitor) == "probe-output" && get_video_mode(monitor).get("w", 0) == 800 && get_video_modes(monitor).len == 1, "wayland monitor mode")
    assert(get_wayland_monitor(monitor) == 123 && !get_gamma_ramp(monitor) && !set_gamma_ramp(monitor, 0), "wayland monitor handles")
    assert(create_surface(0, {"globals": {"handle": 0}, "handle": 0}, 0, 0) == -1, "wayland surface fallback")
-   print("✓ std.os.ui.window.platform.linux.wayland self-test passed")
+   print("✓ core.os.ui.window.platform.linux.wayland self-test passed")
 }

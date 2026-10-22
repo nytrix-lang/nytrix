@@ -1,8 +1,8 @@
 ;; Keywords: source paths files bytes normalization
 ;; Source normalization for decompiler paths, bytes, and analysis records.
-module std.os.rev.decomp.source(_read, _source_data, _looks_path)
-use std.core
-use std.os (file_exists, file_read)
+module core.os.rev.decomp.source(_read, _source_data, _looks_path)
+use core
+use core.os (file_exists, file_read)
 
 fn _read(str p) dict {
    if !file_exists(p) { return {"ok": false, "path": p, "reason": "missing"} }
@@ -37,5 +37,5 @@ fn _looks_path(str s) bool {
 
 #main {
    assert(_source_data({"data": "ELF"}) == "ELF" && !_looks_path("a\x00b"), "source normalization")
-   print("✓ std.os.rev.decomp.source self-test passed")
+   print("✓ core.os.rev.decomp.source self-test passed")
 }

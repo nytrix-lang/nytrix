@@ -1,18 +1,18 @@
 ;; Keywords: assembly assembler disassembly disassembler capstone shellcode machine-code os
 ;; Assembly, disassembly, hexdump, and shellcode utilities backed by native disassembly tools.
 ;; References:
-;; - std.os
-module std.os.disasm(assemble, asm_hex, disasm, disasm_lines, hexdump, unhex,
+;; - core.os
+module core.os.disasm(assemble, asm_hex, disasm, disasm_lines, hexdump, unhex,
    normalize_arch, arch_family, split_operands, instruction_kind, branch_condition,
    arithmetic_operator, clean_operand, operand_kind, memory_operand_parts,
    operand_ny_expr, address_ny_expr, is_zero_register, is_zeroing_idiom, target_address,
    shell_sh, shellcode_sh, shellcode_execve, shellcode_exit, shellcode_write, shellcode_read,
    assembler_available, capstone_available)
-use std.core
-use std.core.str
-use std.os (temp_dir, pid, file_write, file_read, file_remove)
-use std.os.clock (ticks)
-use std.os.subprocess as sub
+use core
+use core.str
+use core.os (temp_dir, pid, file_write, file_read, file_remove)
+use core.os.clock (ticks)
+use core.os.subprocess as sub
 
 #link "libcapstone.so"
 #include <capstone/capstone.h> as "cs_"
@@ -397,7 +397,7 @@ fn arithmetic_operator(str mnemonic) str {
    if startswith(m, "add") { return "+" }
    if startswith(m, "sub") { return "-" }
    if startswith(m, "imul") || startswith(m, "mul") { return "*" }
-   if startswith(m, "xor") || startswith(m, "eor") { return "^^" }
+   if startswith(m, "xor") || startswith(m, "eor") { return "^" }
    if startswith(m, "and") { return "&" }
    if startswith(m, "or") || startswith(m, "orr") { return "|" }
    if startswith(m, "neg") { return "neg" }
@@ -523,10 +523,10 @@ fn _target_text(any row_or_operands) str {
    to_str(row_or_operands)
 }
 
-fn target_address(any row_or_operands, str arch="") int {
-   "Returns a direct code target in an operand string or disassembly row."
+fn target_address(any row_or_operands, str arch="", int explicit_base=0) int {
+   "Returns a direct target; explicit_base supplies the row address for operand strings."
    def ops = _target_text(row_or_operands)
-   def row_base = is_list(row_or_operands) && row_or_operands.len > 0 ? int(row_or_operands[0]) : 0
+   def row_base = is_list(row_or_operands) && row_or_operands.len > 0 ? int(row_or_operands[0]) : explicit_base
    def fam = arch_family(arch)
    mut i = 0
    while i + 2 < ops.len {
@@ -741,5 +741,5 @@ fn shellcode_read(int fd=0, int count=4096) str {
    assert(instruction_kind("x86_64", "neg") == "arith" && arithmetic_operator("neg") == "neg", "disasm x86 neg")
    assert(instruction_kind("x86_64", "xchg") == "assign" && instruction_kind("aarch64", "stp") == "assign" && instruction_kind("aarch64", "ldp") == "assign", "disasm assign kind")
    assert(arithmetic_operator("sdiv") == "/" && instruction_kind("riscv64", "rem") == "arith" && arithmetic_operator("rem") == "%", "disasm non-x86 arithmetic")
-   print("✓ std.os.disasm self-test passed")
+   print("✓ core.os.disasm self-test passed")
 }

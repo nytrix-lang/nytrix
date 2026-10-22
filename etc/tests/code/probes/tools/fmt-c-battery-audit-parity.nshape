@@ -1,0 +1,41 @@
+shape fmt_c_battery_audit_parity {
+  family "probe/tools"
+  generator "embedded"
+  features ["formatter", "c-battery", "audit", "parity"]
+  template ny-test-case
+  flags "--native-only"
+  timeout 60
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.subprocess (run_capture)
+use core.str as str
+def ny = env("NYTRIX_NY_FULL_BIN")
+def fmt = env("NYTRIX_TEST_FMT_BIN")
+def cmake = env("NYTRIX_CMAKE_COMMAND")
+def dir = temp_dir() + "/fmt-c-battery-" + to_str(pid())
+def made = run_capture([cmake, "-E", "make_directory", dir], [], nil, false)
+assert(made.get("code", 127) == 0, "create C battery audit directory")
+def path = dir + "/battery.c"
+assert(is_ok(file_write(path,
+   "int truthy = env(\"FLAG\") == \"true\";\n" +
+   "int normalized = str.lower(str.strip(env(\"FLAG\")));\n" +
+   "int predicate(void) { return true }\nreturn false;\n" +
+   "while(i < len(values)) { break; }\nvoid *unowned = malloc(16);\n" +
+   "fn __add(a, b) { return a + b }\n")),
+   "write C battery source")
+def c = run_capture([fmt, "--batteries", "--json", path], [], nil, false)
+def embedded = run_capture([ny, "fmt", "--batteries", "--json", path],
+                           [], nil, false)
+def output = embedded.get("stdout", "")
+assert(c.get("code", 127) == 0 && embedded.get("code", 127) == 0 &&
+       c.get("stdout", "") == output, "C battery JSON parity")
+for expected in ["NYAUD2001", "NYAUD2002", "NYAUD2003",
+                 "NYAUD2004", "NYAUD2005", "NYAUD2006"] {
+   assert(str.find(output, expected) >= 0, "missing " + expected + ": " + output)
+}
+def cleanup = run_capture([cmake, "-E", "rm", "-rf", dir], [], nil, false)
+assert(cleanup.get("code", 127) == 0, "remove C battery audit directory")
+print("FMT_C_BATTERY_AUDIT_PARITY_OK")
+NY
+}

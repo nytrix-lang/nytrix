@@ -1,0 +1,12 @@
+shape test_repl_inspect_state {
+  family "repl"
+  generator "embedded"
+  features ["ny", "test", "repl", "incremental", "state", "inspection"]
+  template ny-test-case
+  expect compile_and_run
+  repl_expect "--- Persistent Source ---"
+  repl_commands ":vars"
+  source ny <<'NY'
+def state_marker = 42
+NY
+}

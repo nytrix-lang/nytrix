@@ -1,0 +1,44 @@
+shape oracle_signed_divmod_dependent_ops {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle signed divmod dependent-ops boundaries]
+  template ny-test-case
+  flags_matrix "-O3 --native --run; -O3 --native-backend=llvm --jit --jit-engine=mcjit; -O3 --native-backend=llvm --jit --jit-engine=orc; -O3 --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+fn dependent_divmod(i64 value, i64 divisor) i64 {
+  def quotient = value / divisor
+  def remainder = value % divisor
+  if remainder < 0 {
+    quotient + remainder
+  } else {
+    quotient - remainder
+  }
+}
+
+@noinline
+fn signed_half(i64 value) i64 {
+  value / 2
+}
+
+def i64 i64_min = -9223372036854775808
+def i64 i64_max = 9223372036854775807
+assert(signed_half(i64_min) == -4611686018427387904,
+       "minimum divided by two")
+assert(signed_half(i64_max) == 4611686018427387903,
+       "maximum divided by two")
+assert(signed_half(-7) == -3, "negative division truncates toward zero")
+assert(signed_half(-1) == 0, "negative unit divided by two truncates to zero")
+assert(signed_half(7) == 3, "positive division by two")
+assert(dependent_divmod(i64_min, 64) == -144115188075855872,
+       "minimum divided by a positive power of two")
+assert(dependent_divmod(i64_max, 64) == 144115188075855808,
+       "maximum divided by a positive power of two")
+assert(dependent_divmod(-7, 2) == -4,
+       "negative dividend preserves truncating remainder")
+assert(dependent_divmod(i64_min, 3) == -3074457345618258604,
+       "minimum with dynamic non-power-of-two divisor")
+assert(dependent_divmod(i64_max, -3) == -3074457345618258603,
+       "maximum with negative dynamic divisor")
+NY
+}

@@ -1,15 +1,15 @@
 ;; Keywords: render env scene material lighting os ui
 ;; Backend-neutral scene/environment preference helpers.
-module std.os.ui.render.env(
+module core.os.ui.render.env(
    scene_prefers_studio_env, scene_prefers_neutral_env,
    scene_prefers_compare_reflect_env, scene_prefers_compare_visible_env,
    scene_prefers_optical_spec_env, scene_prefers_black_visible_env,
    scene_prefers_gray_proof_bg
 )
 
-use std.core
-use std.core.str as str
-use std.os.prim (env)
+use core
+use core.str as str
+use core.os.prim (env)
 
 fn _scene_key(any name) str { str.lower(str.strip(to_str(name))) }
 

@@ -1,0 +1,39 @@
+shape test_dynamic_top_level_callback {
+  family "native/calls"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only; --native-only --native-backend=x86_64"
+  expect compile_and_run
+  source ny <<'NY'
+;; Regression for plain top-level callbacks whose parameters use the dynamic ABI.
+use core
+
+fn increment_typed(int value) int { value + 1 }
+def typed_cb = __mark_dynamic_callable_raw_result(increment_typed)
+assert(typed_cb(45) == 46, "raw-result marker preserves even typed result")
+assert(typed_cb(46) == 47, "raw-result marker preserves odd typed result")
+
+fn callback(any c, any z, any w, any h) any {
+   [c, z, w, h]
+}
+
+def cb = __mark_dynamic_callable_tagged_args(callback)
+def got = cb(1, [2], 3, 4)
+assert(got[0] == 1, "dynamic callback first argument")
+assert(got[1] == [2], "dynamic callback sequence argument")
+assert(got[2] == 3, "dynamic callback third argument")
+assert(got[3] == 4, "dynamic callback fourth argument")
+
+fn callback6(any a, any b, any c, any d, any e, any f) any {
+   [a, b, c, d, e, f]
+}
+def cb6 = __mark_dynamic_callable_tagged_args(callback6)
+def got6 = cb6(1, [2], 3, 4, 5, 6)
+assert(got6[0] == 1 && got6[1] == [2] && got6[2] == 3,
+   "six-argument dynamic callback preserves its first three values")
+assert(got6[3] == 4 && got6[4] == 5 && got6[5] == 6,
+   "six-argument dynamic callback preserves its final three values")
+print("DYNAMIC-TOP-LEVEL-CALLBACK-OK")
+NY
+}

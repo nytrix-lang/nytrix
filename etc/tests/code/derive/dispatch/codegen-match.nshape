@@ -1,0 +1,108 @@
+shape codegen_match {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "codegen", "reflection", "enum"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-only; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.compiler.codegen (match_gen)
+
+enum Signal {
+   Ready,
+   Running,
+   Done,
+}
+
+enum Message {
+   Empty,
+   Data(int code, str body),
+   Count(int count),
+}
+
+comptime template payload_slots(Enum) {
+   fn ${Enum}_payload_slots() int {
+      mut total = 0
+      comptime variants(Enum) as variant {
+         emit if variant.has_payload {
+            total = total + variant.payload_count
+         }
+      }
+      total
+   }
+}
+
+comptime template payload_present(Enum) {
+   fn ${Enum}_has_payload(Enum value) bool {
+      mut found = false
+      comptime variants(Enum) as variant {
+         emit if variant.has_payload && (match value {
+            variant.pattern -> true
+            _ -> false
+         }) {
+            found = true
+         }
+      }
+      found
+   }
+}
+
+comptime emit match_gen(Signal)
+comptime emit match_gen(Message)
+comptime emit payload_slots(Message)
+comptime emit payload_present(Message)
+
+@effects(alloc)
+fn make_message(int code) Message { Message.Data(code, "factory") }
+
+@effects(none)
+fn preserve_signal(Signal value) Signal { value }
+
+@effects(none)
+fn preserve_message(Message value) Message { value }
+
+module MatchLeft {
+   export core(selected)
+   enum Flag { Ready, Data(int value) }
+   comptime emit match_gen(Flag)
+   fn selected() str { Flag_variant_name(Flag.Data(3)) }
+}
+
+module MatchRight {
+   export core(selected)
+   enum Flag { Ready, Text(str value) }
+   comptime emit match_gen(Flag)
+   fn selected() str { Flag_variant_name(Flag.Text("right")) }
+}
+
+assert(Signal_variant_name(Signal.Ready) == "Ready",
+       "match_gen names the first unit variant")
+assert(Signal_variant_name(Signal.Running) == "Running",
+       "match_gen names a middle unit variant")
+assert(Signal_variant_name(Signal.Done) == "Done",
+       "match_gen names the final unit variant")
+assert(Message_payload_slots() == 3,
+       "variant reflection exposes payload arity")
+assert(Message_variant_name(Message.Empty) == "Empty",
+       "match_gen names a unit variant in a payload enum")
+assert(Message_variant_name(Message.Data(7, "first")) == "Data",
+       "match_gen matches a variant with two payload fields")
+assert(Message_variant_name(Message.Data(-3, "second")) == "Data",
+       "match_gen ignores payload contents")
+assert(Message_variant_name(Message.Count(42)) == "Count",
+       "match_gen distinguishes payload variants with different arities")
+assert(!Message_has_payload(Message.Empty),
+       "reflected expression match recognizes an empty variant")
+assert(Message_has_payload(Message.Data(0, "payload")),
+       "reflected expression match ignores payload values")
+assert(Message_has_payload(Message.Count(-1)),
+       "reflected expression match expands the correct wildcard arity")
+assert(MatchLeft.selected() == "Data" && MatchRight.selected() == "Text",
+       "imported generator belongs to each caller module without collisions")
+assert(Signal_variant_name(preserve_signal(Signal.Running)) == "Running",
+       "unit enum discriminants survive typed return boundaries")
+assert(Message_variant_name(preserve_message(make_message(9))) == "Data",
+       "payload handles survive typed constructor and return boundaries")
+NY
+}

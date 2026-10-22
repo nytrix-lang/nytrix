@@ -1,0 +1,36 @@
+shape xml_attr_probe {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "compiler"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.str as str
+use core.math.parse.data.xml as xml
+
+fn attr_value(str text, str key) str {
+   def needle = key + "=\""
+   def at = str.find(text, needle)
+   if at < 0 { return "" }
+   def start = at + needle.len
+   def stop = str.find_from(text, "\"", start)
+   if stop < 0 { return "" }
+   str.str_slice(text, start, stop)
+}
+
+#main {
+   def svg = "<svg><path stroke-width=\"2\" d=\"M0 0L1 1\"/></svg>"
+   def root = xml.parse(svg)
+   def children = root.get("children", [])
+   def path = children.get(0, {})
+   def attrs = path.get("attr", {})
+   assert(root.get("name", "") == "svg", "XML root name")
+   assert(path.get("name", "") == "path", "XML child name")
+   assert(attrs.get("stroke-width", "") == "2", "XML attribute value")
+   assert(attrs.get("d", "") == "M0 0L1 1", "XML path attribute value")
+   print("stroke-width=" + attrs.get("stroke-width", "") +
+      " d=" + attrs.get("d", ""))
+}
+NY
+}

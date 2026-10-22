@@ -1,0 +1,24 @@
+shape no_std_qualified_module_call_keeps_its_target {
+  family "runtime/modules/use"
+  generator "regression"
+  features ["ny", "test", "modules", "qualified-call", "no-stdlib"]
+  template ny-test-case
+  flags_matrix "-no-std --native --run; -no-std --native-backend=llvm --jit --jit-engine=mcjit; -no-std --native-backend=llvm --jit --jit-engine=orc; -no-std --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+module project.math(add)
+use project.math as math
+
+fn add(int left, int right) int {
+  left + right
+}
+
+assert(project.math.add(20, 22) == 42,
+       "no-stdlib qualified calls retain their module target")
+assert(math.add(19, 23) == 42,
+       "no-stdlib imported aliases retain their qualified call target")
+def add_callback = project.math.add
+assert(add_callback(18, 24) == 42,
+       "no-stdlib qualified function values retain their call target")
+NY
+}

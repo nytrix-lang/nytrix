@@ -4,14 +4,14 @@
 ;; - https://www.secg.org/sec1-v2.pdf
 ;; - https://eprint.iacr.org/2019/023.pdf (HNP via lattice)
 ;; References:
-;; - std.math.crypto.ecc
-;; - std.math.crypto
-module std.math.crypto.ecc.ecdsa(ecdsa_nonce_reuse, ecdsa_recover_key_from_two_sigs, ecdsa_forge_with_known_k, ecdsa_partial_nonce_leak, ecdsa_sign, ecdsa_verify, ecdsa_private_key_from_nonce, ecdsa_nonce_from_private_key, ecdsa_hnp_parse_signature_hex, ecdsa_hnp_parse_line, ecdsa_hnp_sample_residual, ecdsa_hnp_lsb_sample, ecdsa_hnp_msb_sample, ecdsa_hnp_lsb_samples, ecdsa_hnp_msb_samples, ecdsa_hnp_lsb_line, ecdsa_hnp_msb_line, ecdsa_hnp_lsb_lines, ecdsa_hnp_msb_lines, ecdsa_hnp_residuals, ecdsa_hnp_residual_width, ecdsa_hnp_count_valid_samples, ecdsa_hnp_check_samples, ecdsa_hnp_check_lsb_lines, ecdsa_hnp_check_msb_lines, ecdsa_hnp_recover, ecdsa_recover_key_from_lsb_lines, ecdsa_recover_key_from_msb_lines, ecdsa_recover_key_from_nonce_lsb, ecdsa_recover_key_from_nonce_msb)
-use std.math.nt
-use std.math.crypto.ecc.ecc
-use std.math.crypto.hnp.hnp as hnp
-use std.core.str as str
-use std.math.matrix as matrix
+;; - core.math.crypto.ecc
+;; - core.math.crypto
+module core.math.crypto.ecc.ecdsa(ecdsa_nonce_reuse, ecdsa_recover_key_from_two_sigs, ecdsa_forge_with_known_k, ecdsa_partial_nonce_leak, ecdsa_sign, ecdsa_verify, ecdsa_private_key_from_nonce, ecdsa_nonce_from_private_key, ecdsa_hnp_parse_signature_hex, ecdsa_hnp_parse_line, ecdsa_hnp_sample_residual, ecdsa_hnp_lsb_sample, ecdsa_hnp_msb_sample, ecdsa_hnp_lsb_samples, ecdsa_hnp_msb_samples, ecdsa_hnp_lsb_line, ecdsa_hnp_msb_line, ecdsa_hnp_lsb_lines, ecdsa_hnp_msb_lines, ecdsa_hnp_residuals, ecdsa_hnp_residual_width, ecdsa_hnp_count_valid_samples, ecdsa_hnp_check_samples, ecdsa_hnp_check_lsb_lines, ecdsa_hnp_check_msb_lines, ecdsa_hnp_recover, ecdsa_recover_key_from_lsb_lines, ecdsa_recover_key_from_msb_lines, ecdsa_recover_key_from_nonce_lsb, ecdsa_recover_key_from_nonce_msb)
+use core.math.nt
+use core.math.crypto.ecc.ecc
+use core.math.crypto.hnp.hnp as hnp
+use core.str as str
+use core.math.matrix as matrix
 
 fn ecdsa_nonce_reuse(list sig1, list sig2, any msg1, any msg2, any curve_n) any {
    "Recover nonce k and private key d when two ECDSA signatures share the same k.
@@ -415,5 +415,5 @@ fn ecdsa_recover_key_from_nonce_msb(list sig, any msg, any n, any leak, any bits
    def recovered = ecdsa_recover_key_from_two_sigs(sig[0], sig[1], h, sig2[0], sig2[1], h, ecc_p256_n)
    assert(recovered == nil, "nonce reuse with distinct ks returns nil")
    assert(ecdsa_forge_with_known_k(h, k, ecc_p256_G, d, ecc_p256_a, ecc_p256_p, ecc_p256_n) == sig, "forge with known k reproduces signature")
-   print("✓ std.math.crypto.ecc.ecdsa self-test passed")
+   print("✓ core.math.crypto.ecc.ecdsa self-test passed")
 }

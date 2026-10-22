@@ -1,0 +1,85 @@
+shape remote-socket {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "sys"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.str
+use core.os.net.remote as net
+use core.os.net.socket as sock
+use core.os.thread
+use core.os.time
+fn remote_socket_server(list args) int {
+   def port = args.get(0)
+   def state = args.get(1)
+   def bound_port_slot = args.get(2)
+   def s = sock.socket_bind("127.0.0.1", port)
+   if s < 0 {
+      store64_i(state, -1)
+      return -1
+   }
+   def bound_port = sock.socket_bound_port(s)
+   if bound_port <= 0 {
+      sock.close_socket(s)
+      store64_i(state, -1)
+      return -1
+   }
+   store64_i(bound_port_slot, bound_port)
+   store64_i(state, 1)
+   def c = sock.socket_accept(s)
+   if c < 0 {
+      sock.close_socket(s)
+      store64_i(state, -2)
+      return -1
+   }
+   sock.write_socket_all(c, "name: ")
+   def name = sock.read_socket_until(c, "\n", 4096)
+   sock.write_socket_all(c, "hello " + strip(name) + "\nmenu> abcXYZ\n")
+   sock.close_socket(c)
+   sock.close_socket(s)
+   store64_i(state, 2)
+   0
+}
+def requested_port = 0
+def sockaddr_probe = sock._make_sockaddr(sock.ipv4_parse("127.0.0.1"), requested_port)
+assert(load8(sockaddr_probe, 0) == 2 &&
+       load8(sockaddr_probe, 1) == 0, "sockaddr family bytes")
+free(sockaddr_probe)
+def state = malloc(8)
+def bound_port_slot = malloc(8)
+store64_i(state, 0)
+store64_i(bound_port_slot, 0)
+mut server_args = []
+server_args = server_args.append(requested_port)
+server_args = server_args.append(state)
+server_args = server_args.append(bound_port_slot)
+def t = thread_spawn(remote_socket_server, server_args)
+mut waited = 0
+while load64_i(state) == 0 && waited < 2000 {
+   msleep(10)
+   waited += 10
+}
+assert(load64_i(state) == 1, "socket server binds before remote connect")
+def port = load64_i(bound_port_slot)
+assert(port > 0, "socket server publishes bound port")
+def r = net.remote_retry("127.0.0.1", port, 200, 25)
+assert(is_dict(r), "remote returns tube")
+net.set_timeout(r, 2000)
+net.set_chunk_size(r, 8)
+assert(net.sendlineafter(r, "name: ", "ny") == "name: ", "sendlineafter prompt")
+assert(net.recvline(r) == "hello ny\n", "recvline")
+def exp = net.expect(r, ["missing", "abc"])
+assert(exp.get(0) == 1 && exp.get(1) == "menu> abc", "expect hit")
+assert(net.buffered(r) == 4, "buffered suffix")
+assert(net.recvn(r, 4) == "XYZ\n", "recvn buffered")
+assert(net.sendafter(r, "never", "x", 16) == "", "sendafter timeout")
+assert(net.recv_all(r, 1024) == "", "recvall eof")
+net.close(r)
+thread_join(t)
+free(state)
+free(bound_port_slot)
+print("remote socket probe passed")
+NY
+}

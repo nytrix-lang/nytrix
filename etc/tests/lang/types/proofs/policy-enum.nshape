@@ -1,0 +1,34 @@
+shape proof_policy_enum_reflexive {
+  family "runtime/proofs"
+  generator "program"
+  features ["proofs", "policy", "enum", "reflexivity"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+enum Color { Red, Green }
+
+def proof red_reflexive = prove(Color.Red == Color.Red)
+assert(proof_matches(red_reflexive, Color.Red == Color.Red),
+   "identical enum members are reflexively provable")
+
+assert(true, "enum reflexivity complete")
+NY
+}
+
+shape proof_policy_enum_distinct_negative {
+  family "runtime/proofs"
+  generator "program"
+  features ["proofs", "policy", "enum", "fail-closed"]
+  template ny-test-case
+  expect compile_fail
+  source ny <<'NY'
+use core
+
+enum Color { Red, Green }
+
+def proof distinct = prove(Color.Red == Color.Green)
+print("never reached")
+NY
+}

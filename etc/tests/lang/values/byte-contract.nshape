@@ -1,0 +1,35 @@
+shape byte_contract {
+  family "runtime/values"
+  generator "embedded"
+  features ["ny", "byte-abi", "utf8", "raw-pointer"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+def p = zalloc(8)
+assert(p != 0, "byte contract allocation")
+store8(p, 255, 0)
+store8(p, 1, 1)
+store8(p, 0, 2)
+assert(load8(p, 0) == 255, "odd raw byte value")
+assert(load8(p, 1) == 1, "one raw byte value")
+assert(load8(p, 2) == 0, "zero raw byte value")
+
+def euro = "€"
+assert(euro.len == 3, "UTF-8 byte length")
+assert(load8(euro, 0) == 0xe2 && load8(euro, 1) == 0x82 && load8(euro, 2) == 0xac,
+   "UTF-8 byte sequence")
+
+mut b = bytes(3)
+b = bytes_set(b, 0, 255)
+b = bytes_set(b, 1, 1)
+b = bytes_set(b, 2, 0)
+assert(bytes_get(b, 0) == 255 && bytes_get(b, 1) == 1 && bytes_get(b, 2) == 0,
+   "bytes helper values")
+def empty = bytes(0)
+assert(empty.len == 0, "empty bytes length")
+free(p)
+print("BYTE_CONTRACT_OK")
+NY
+}

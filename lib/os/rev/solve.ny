@@ -1,5 +1,6 @@
 ;; Keywords: reverse decompiler solver smt
-module std.os.rev.solve(
+;; Solves constraints extracted from decompiled programs and runtime inputs.
+module core.os.rev.solve(
    status, tool_status, backend_status,
    base64_index, base64_values, bit_sliced_output_writes,
    bit_sliced_ascii_plan, solve_bit_sliced_ascii_transform,
@@ -16,19 +17,19 @@ module std.os.rev.solve(
    solve_mbrainfuzz_template,
 )
 
-use std.core
-use std.core.str as str
-use std.os as os
-use std.math.smt as smt
-use std.math.big as big
-use std.os.rev.decomp as dc
+use core
+use core.str as str
+use core.os as os
+use core.math.smt as smt
+use core.math.big as big
+use core.os.rev.decomp as dc
 
 def _BASE64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
 
 fn status() dict {
    {
       "ok": true,
-      "module": "std.os.rev.solve",
+      "module": "core.os.rev.solve",
       "role": "decompiled-input and byte-constraint solver",
       "z3": smt.z3_available(),
    }
@@ -1257,13 +1258,13 @@ fn _extract_product_key_arithmetic(str text) dict {
       "between(" + name + "[6] - " + name + "[1], 5, 8)",
       "between(" + name + "[2] - " + name + "[1], 0xf, 0x14)",
       "between(" + name + "[8] + " + name + "[3], 0x7d, 0xc3)",
-      "(" + name + "[9] ^^ ord(\"A\")) >= 0x42",
-      "between((" + name + "[10] + " + name + "[9]) ^^ 0x90, 0x19, 0x37)",
-      "between(" + name + "[11] ^^ " + name + "[12], 0x32, 0x50)",
+      "(" + name + "[9] ^ ord(\"A\")) >= 0x42",
+      "between((" + name + "[10] + " + name + "[9]) ^ 0x90, 0x19, 0x37)",
+      "between(" + name + "[11] ^ " + name + "[12], 0x32, 0x50)",
       "between(" + name + "[0] - " + name + "[3], 0x1e, 0x32)",
-      "between(" + name + "[14] ^^ " + name + "[13] ^^ ord(\"R\"), 0x19, 0x23)",
-      "between((" + name + "[15] ^^ " + name + "[1]) & 0x21, 0x1e, 0x28)",
-      "between(((" + name + "[5] ^^ ord(\"C\")) + 0x11) ^^ ord(\"R\"), 0x41, 0x50)",
+      "between(" + name + "[14] ^ " + name + "[13] ^ ord(\"R\"), 0x19, 0x23)",
+      "between((" + name + "[15] ^ " + name + "[1]) & 0x21, 0x1e, 0x28)",
+      "between(((" + name + "[5] ^ ord(\"C\")) + 0x11) ^ ord(\"R\"), 0x41, 0x50)",
    ]
    if !_has_all(text, needles) { return {"ok": false} }
    {"ok": true, "name": name}
@@ -3008,7 +3009,7 @@ fn _x86_write_reg(any ctx, any solver, dict st, str name0, dict value) any {
    def full = regs.get(base, _x86_bv(ctx, 0, 64))
    def full_known = knowns.get(base, false)
    def full_val = int(ints.get(base, 0))
-   def full_cuts = reg_cuts.get(base, [])
+   mut any full_cuts = reg_cuts.get(base, [])
    def full_depth = int(reg_depth.get(base, 0))
    mut out_ast = full
    mut out_known = false
@@ -3260,9 +3261,9 @@ fn _x86_binop(any ctx, str op, dict a0, dict b0, int bits) dict {
    } elif op == "-" {
       ast = smt.bvsub(ctx, a.get("ast", 0), b.get("ast", 0))
       value = int(a.get("value", 0)) - int(b.get("value", 0))
-   } elif op == "^^" || op == "^" || op == "xor" {
+   } elif op == "^" || op == "xor" {
       ast = smt.bvxor(ctx, a.get("ast", 0), b.get("ast", 0))
-      value = int(a.get("value", 0)) ^^ int(b.get("value", 0))
+      value = int(a.get("value", 0)) ^ int(b.get("value", 0))
    } elif op == "&" {
       ast = smt.bvand(ctx, a.get("ast", 0), b.get("ast", 0))
       value = int(a.get("value", 0)) & int(b.get("value", 0))
@@ -3348,7 +3349,7 @@ fn _x86_exec_row(any ctx, any solver, dict st, dict row) bool {
       def bits = row.get("dst_kind", "") == "mem" ? _x86_mem_bits(dst, 64) : _x86_reg_bits(dst)
       def lhs = _x86_operand_value(ctx, st, row, dst, bits)
       def rhs = _x86_operand_value(ctx, st, row, args[1], bits)
-      def op = m == "add" ? "+" : (m == "sub" ? "-" : (m == "xor" ? "^^" : (m == "and" ? "&" : "|")))
+      def op = m == "add" ? "+" : (m == "sub" ? "-" : (m == "xor" ? "^" : (m == "and" ? "&" : "|")))
       def v = _x86_binop(ctx, op, lhs, rhs, bits)
       if row.get("dst_kind", "") == "mem" { _x86_write_mem(ctx, solver, st, row, dst, bits, v) }
       else { _x86_write_reg(ctx, solver, st, dst, v) }
@@ -3538,7 +3539,7 @@ fn _bit_sliced_capture_trace_points(any ctx, dict st, int row, dict points_by_ro
 }
 
 fn _bit_sliced_case_toggle_ascii(int v) int {
-   ((v & 0x40) >> 1) ^^ (v & 255)
+   ((v & 0x40) >> 1) ^ (v & 255)
 }
 
 fn _bit_sliced_mapper_relation(int value, int target_ch) str {

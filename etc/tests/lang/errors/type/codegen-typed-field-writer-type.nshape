@@ -1,0 +1,22 @@
+shape codegen_typed_field_writer_rejects_wrong_type {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "codegen", "layout", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "expected i32, got bool"
+  source ny <<'NY'
+use core.compiler.codegen (store_fields_for, store_for)
+
+layout TypedWriterRecord {
+   i32 count
+}
+
+comptime emit store_fields_for(TypedWriterRecord)
+comptime emit store_for(TypedWriterRecord)
+def ptr record = malloc(__layout_size("TypedWriterRecord"))
+TypedWriterRecord_store_count(record, true)
+TypedWriterRecord_store(record, true)
+NY
+}

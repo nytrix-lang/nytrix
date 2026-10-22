@@ -1,0 +1,127 @@
+shape avr_signed_divmod_executes_under_qemu {
+  family "runtime/compiler"
+  generator "regression"
+  features ["ny", "test", "avr", "portable-text", "divmod", "qemu"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os (file_remove, file_write, run_capture, temp_dir, pid)
+
+def compiler = env("NYTRIX_NY_FULL_BIN")
+assert(is_str(compiler) && compiler.len > 0,
+       "test runner provides the compiler path")
+def stem = temp_dir() + "/ny-avr-divmod-" + to_str(pid())
+def start_path = stem + "-start.s"
+def start_obj = stem + "-start.o"
+def start_source =
+  ".text\n.global _start\n_start:\n" +
+  "  call rt_main\n" +
+  "  ldi r16, 0\n  sts 0x00C5, r16\n" +
+  "  ldi r16, 103\n  sts 0x00C4, r16\n" +
+  "  ldi r16, 0x06\n  sts 0x00C2, r16\n" +
+  "  ldi r16, 0x08\n  sts 0x00C1, r16\n" +
+  "  cpi r18, 31\n  brne 3f\n" +
+  "  cpi r19, 0\n  brne 3f\n" +
+  "  cpi r20, 0\n  brne 3f\n" +
+  "  cpi r21, 0\n  brne 3f\n" +
+  "  cpi r22, 0\n  brne 3f\n" +
+  "  cpi r23, 0\n  brne 3f\n" +
+  "  cpi r24, 0\n  brne 3f\n" +
+  "  cpi r25, 0\n  brne 3f\n" +
+  "  ldi r16, 'U'\n  rjmp 4f\n" +
+  "3:\n  ldi r16, 'E'\n" +
+  "4:\n" +
+  "1:\n  lds r17, 0x00C0\n  sbrs r17, 5\n" +
+  "  rjmp 1b\n  sts 0x00C6, r16\n" +
+  "2:\n  rjmp 2b\n"
+assert(is_ok(file_write(start_path, start_source)),
+       "write AVR UART result wrapper")
+def start_assembled = run_capture(
+    ["clang", "--target=avr", "-mmcu=atmega328p", "-c", start_path,
+     "-o", start_obj],
+    [], nil, false)
+def arithmetic_asm = stem + ".s"
+def arithmetic_obj = stem + ".o"
+def arithmetic_elf = stem + ".elf"
+def arithmetic_source =
+  "use core\n" +
+  "@noinline\nfn pp() int { if 22 / 7 == 3 && 22 % 7 == 1 { 1 } else { 0 } }\n" +
+  "@noinline\nfn np() int { if -22 / 7 == -3 && -22 % 7 == -1 { 1 } else { 0 } }\n" +
+  "@noinline\nfn pn() int { if 22 / -7 == -3 && 22 % -7 == 1 { 1 } else { 0 } }\n" +
+  "@noinline\nfn nn() int { if -22 / -7 == 3 && -22 % -7 == -1 { 1 } else { 0 } }\n" +
+  "def valid = pp() + 2 * np() + 4 * pn() + 8 * nn()\n" +
+  "valid"
+def arithmetic_emitted = run_capture(
+    [compiler, "--native-backend=avr", "--native-only", "-O0",
+     "--nyir-verify", "--emit-asm=" + arithmetic_asm, "-no-std",
+     "-emit-only", "-e", arithmetic_source],
+    [], nil, false)
+def arithmetic_assembled = run_capture(
+    ["clang", "--target=avr", "-mmcu=atmega328p", "-c", arithmetic_asm,
+     "-o", arithmetic_obj],
+    [], nil, false)
+def arithmetic_linked = run_capture(
+    ["ld.lld", "-N", "--image-base=0", "-Ttext=0", "-e", "_start",
+     start_obj, arithmetic_obj, "-o", arithmetic_elf],
+    [], nil, false)
+def arithmetic_execution = run_capture(
+    ["timeout", "2s", "qemu-system-avr", "-M", "uno", "-display", "none",
+     "-monitor", "none", "-serial", "stdio", "-bios", arithmetic_elf],
+    [], nil, false)
+assert(start_assembled.get("code", 127) == 0 &&
+       arithmetic_emitted.get("code", 127) == 0 &&
+       arithmetic_assembled.get("code", 127) == 0 &&
+       arithmetic_linked.get("code", 127) == 0,
+       "AVR signed division and remainder assemble and link")
+assert(arithmetic_execution.get("code", 0) == 124 &&
+       str_contains(arithmetic_execution.get("stdout", ""), "U"),
+       "AVR divmod truncates toward zero and keeps remainder sign")
+
+def zero_asm = stem + "-zero.s"
+def zero_obj = stem + "-zero.o"
+def zero_elf = stem + "-zero.elf"
+def zero_source =
+  "@noinline\nfn divide(int left, int right) int { left / right }\n" +
+  "mut divisor = 1\nwhile divisor > 0 { divisor -= 1 }\ndivide(9, divisor)"
+def zero_emitted = run_capture(
+    [compiler, "--native-backend=avr", "--native-only", "--nyir-verify",
+     "--emit-asm=" + zero_asm, "-no-std", "-emit-only", "-e", zero_source],
+    [], nil, false)
+def zero_assembled = run_capture(
+    ["clang", "--target=avr", "-mmcu=atmega328p", "-c", zero_asm,
+     "-o", zero_obj],
+    [], nil, false)
+def zero_linked = run_capture(
+    ["ld.lld", "-N", "--image-base=0", "-Ttext=0", "-e", "_start",
+     start_obj, zero_obj, "-o", zero_elf],
+    [], nil, false)
+def zero_execution = run_capture(
+    ["timeout", "2s", "qemu-system-avr", "-M", "uno", "-display", "none",
+     "-monitor", "none", "-serial", "stdio", "-bios", zero_elf],
+    [], nil, false)
+assert(zero_emitted.get("code", 127) == 0 &&
+       zero_assembled.get("code", 127) == 0 &&
+       zero_linked.get("code", 127) == 0,
+       "AVR checked division by a dynamic divisor assembles and links")
+assert(zero_execution.get("code", 0) == 124 &&
+       !str_contains(zero_execution.get("stdout", ""), "U") &&
+       !str_contains(zero_execution.get("stdout", ""), "E"),
+       "AVR checked division traps before returning on a zero divisor")
+
+def removed_start = file_remove(start_path)
+def removed_start_obj = file_remove(start_obj)
+def removed_arithmetic_asm = file_remove(arithmetic_asm)
+def removed_arithmetic_obj = file_remove(arithmetic_obj)
+def removed_arithmetic_elf = file_remove(arithmetic_elf)
+def removed_zero_asm = file_remove(zero_asm)
+def removed_zero_obj = file_remove(zero_obj)
+def removed_zero_elf = file_remove(zero_elf)
+assert(is_ok(removed_start) && is_ok(removed_start_obj) &&
+       is_ok(removed_arithmetic_asm) && is_ok(removed_arithmetic_obj) &&
+       is_ok(removed_arithmetic_elf) && is_ok(removed_zero_asm) &&
+       is_ok(removed_zero_obj) && is_ok(removed_zero_elf),
+       "remove AVR divmod cross-run artifacts")
+print("AVR_DIVMOD_RUNTIME_OK")
+NY
+}

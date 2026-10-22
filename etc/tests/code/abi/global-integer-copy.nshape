@@ -1,0 +1,20 @@
+shape top_level_integer_global_copy_preserves_raw_storage {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "test", "native", "llvm", "global", "integer-abi"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-only; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+def base = 4
+mut copied = base
+assert_eq(copied, 4, "an inferred global copy keeps the raw integer value")
+copied += 2
+assert_eq(copied, 6, "raw integer global arithmetic remains untagged")
+
+mut any dynamic = base
+assert_eq(dynamic, 4, "an explicitly dynamic global stays boxed")
+NY
+}

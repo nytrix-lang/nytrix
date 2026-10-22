@@ -1,0 +1,119 @@
+shape raw_memcmp_read_effect_cannot_be_omitted {
+  family "typing/effects"
+  generator "regression"
+  features ["error", "typing", "effects", "runtime", "memory", "negative"]
+  template ny-test-case
+  flags_matrix "--effect-require-known"
+  expect compile_fail
+  expect_message "declared @effects(none) but inferred effects=read"
+  source ny <<'NY'
+use core
+
+@effects(none)
+fn bad_compare() int {
+  rt_memcmp_raw(0, 0, 0)
+}
+
+bad_compare()
+NY
+}
+
+shape raw_memcpy_write_effect_cannot_be_omitted {
+  family "typing/effects"
+  generator "regression"
+  features ["error", "typing", "effects", "runtime", "memory", "negative"]
+  template ny-test-case
+  flags_matrix "--effect-require-known"
+  expect compile_fail
+  expect_message "declared @effects(none) but inferred effects=read|write"
+  source ny <<'NY'
+use core
+
+@effects(none)
+fn bad_copy() int {
+  rt_memcpy_raw(0, 0, 0)
+}
+
+bad_copy()
+NY
+}
+
+shape raw_memset_write_effect_cannot_be_omitted {
+  family "typing/effects"
+  generator "regression"
+  features ["error", "typing", "effects", "runtime", "memory", "negative"]
+  template ny-test-case
+  flags_matrix "--effect-require-known"
+  expect compile_fail
+  expect_message "declared @effects(none) but inferred effects=write"
+  source ny <<'NY'
+use core
+
+@effects(none)
+fn bad_fill() int {
+  rt_memset_raw(0, 0, 0)
+}
+
+bad_fill()
+NY
+}
+
+shape tagged_memcmp_read_effect_cannot_be_omitted {
+  family "typing/effects"
+  generator "regression"
+  features ["error", "typing", "effects", "runtime", "memory", "negative"]
+  template ny-test-case
+  flags_matrix "--effect-require-known"
+  expect compile_fail
+  expect_message "declared @effects(none) but inferred effects=read"
+  source ny <<'NY'
+use core
+
+@effects(none)
+fn bad_compare() int {
+  __memcmp(0, 0, 0)
+}
+
+bad_compare()
+NY
+}
+
+shape tagged_memcpy_read_and_write_effects_cannot_be_omitted {
+  family "typing/effects"
+  generator "regression"
+  features ["error", "typing", "effects", "runtime", "memory", "negative"]
+  template ny-test-case
+  flags_matrix "--effect-require-known"
+  expect compile_fail
+  expect_message "declared @effects(none) but inferred effects=read|write"
+  source ny <<'NY'
+use core
+
+@effects(none)
+fn bad_copy() int {
+  __memcpy(0, 0, 0)
+}
+
+bad_copy()
+NY
+}
+
+shape tagged_memset_write_effect_cannot_be_omitted {
+  family "typing/effects"
+  generator "regression"
+  features ["error", "typing", "effects", "runtime", "memory", "negative"]
+  template ny-test-case
+  flags_matrix "--effect-require-known"
+  expect compile_fail
+  expect_message "declared @effects(none) but inferred effects=write"
+  source ny <<'NY'
+use core
+
+@effects(none)
+fn bad_fill() int {
+  __memset(0, 0, 0)
+}
+
+bad_fill()
+NY
+}

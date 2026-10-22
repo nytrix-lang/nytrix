@@ -1,0 +1,21 @@
+shape ownership_rule_resource_overwrite_live_negative {
+  family "compiler-errors/ownership"
+  generator "error"
+  features ["error", "ownership", "resource", "linear", "move"]
+  template ny-compile-fail
+  expect compile_fail
+  flags "--ownership-strict"
+  expect_message "linear resource 'slot' is overwritten before consumption"
+  source ny <<'NY'
+linear layout File { int fd }
+
+fn overwrite_live() int {
+  mut File slot = File(3)
+  slot = File(4)
+  forget(slot)
+  0
+}
+
+overwrite_live()
+NY
+}

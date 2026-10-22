@@ -1,14 +1,14 @@
 ;; Keywords: window input keyboard mouse gamepad joystick controller os ui
 ;; Gamepad input normalization, button labels, axes, hats, and mapping state.
 ;; References:
-;; - std.os.ui.window.input
-;; - std.os.ui.window
-;; - std.os.ui.window.consts
-module std.os.ui.window.input.gamepad(gamepad_count, gamepads, gamepad_connected, gamepad_mapped, gamepad_name, gamepad_guid, gamepad_axis, gamepad_button, gamepad_axis_count, gamepad_button_count, gamepad_raw_snapshot, gamepad_raw_axis, gamepad_raw_button, gamepad_raw_hat, is_gamepad_connected, is_mapped, get_gamepad_name, get_gamepad_button, get_gamepad_axis, get_gamepad_guid, load_joysticks, get_joysticks, add_gamepad_mapping, get_gamepad_axis_count, get_gamepad_button_count, GAMEPAD_BUTTONS, GAMEPAD_AXES, GAMEPAD_BUTTON_MAP)
-use std.core
-use std.math.float as fmath
-use std.os.ui.window.platform as ui_backend
-use std.core.str as str
+;; - core.os.ui.window.input
+;; - core.os.ui.window
+;; - core.os.ui.window.consts
+module core.os.ui.window.input.gamepad(gamepad_count, gamepads, gamepad_connected, gamepad_mapped, gamepad_name, gamepad_guid, gamepad_axis, gamepad_button, gamepad_axis_count, gamepad_button_count, gamepad_raw_snapshot, gamepad_raw_axis, gamepad_raw_button, gamepad_raw_hat, is_gamepad_connected, is_mapped, get_gamepad_name, get_gamepad_button, get_gamepad_axis, get_gamepad_guid, load_joysticks, get_joysticks, add_gamepad_mapping, get_gamepad_axis_count, get_gamepad_button_count, GAMEPAD_BUTTONS, GAMEPAD_AXES, GAMEPAD_BUTTON_MAP)
+use core
+use core.math.float as fmath
+use core.os.ui.window.platform as ui_backend
+use core.str as str
 
 def _MAX_JOYSTICKS = 16
 def _GAMEPAD_AXIS_COUNT = 6
@@ -102,7 +102,7 @@ fn load_joysticks() i32 {
    mut jid = 0
    mut count = 0
    while jid < 16 {
-      if ui_backend.joystick_present(jid) || _joystick_connected(jid) { count += 1 }
+      if ui_backend.joystick_present(jid) { count += 1 }
       jid += 1
    }
    count
@@ -113,7 +113,7 @@ fn get_joysticks() list {
    mut out = []
    mut jid = 0
    while jid < 16 {
-      if ui_backend.joystick_present(jid) || _joystick_connected(jid) { out = out.append(jid) }
+      if ui_backend.joystick_present(jid) { out = out.append(jid) }
       jid += 1
    }
    out

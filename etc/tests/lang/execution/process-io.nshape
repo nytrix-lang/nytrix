@@ -1,0 +1,75 @@
+shape test_process_io {
+  family "runtime/execution"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.io
+use core.os.subprocess (run_capture)
+use core.os (file_remove, temp_dir)
+use core.os.fs (make_dir, remove_dir)
+use core.os.prim (pid, env)
+
+mut command = "/bin/cat"
+mut arguments = ["/bin/cat"]
+mut expected = "hello world"
+#windows {
+   command = "python"
+   arguments = ["python", "-c", "import sys; print(sys.stdin.read(), end='', flush=True)"]
+   expected = "hello world"
+} #endif
+
+def child = spawn(command, arguments)
+assert(is_dict(child), "process io spawn")
+assert(is_ok(send(child, "hello")), "process io send")
+assert(is_ok(sendline(child, " world")), "process io sendline")
+assert(is_ok(shutdown_send(child)), "process io close stdin")
+def line = recv_line(child)
+assert(strip(line) == expected, "process io read line")
+assert(is_ok(close(child)), "process io wait")
+mut exit_command = "/bin/sh"
+mut exit_arguments = ["/bin/sh", "-c", "exit 7"]
+#windows {
+   exit_command = "cmd"
+   exit_arguments = ["cmd", "/c", "exit", "7"]
+} #endif
+def exiting_child = spawn(exit_command, exit_arguments)
+assert(is_dict(exiting_child), "process io nonzero child spawn")
+def exit_result = close(exiting_child)
+assert(is_ok(exit_result) && unwrap(exit_result) == 7,
+   "waitpid preserves a nonzero child exit status")
+
+fn test_explicit_relative_executable() {
+#windows {
+return
+} #else {
+def relative_directory = temp_dir() + "/nytrix-process-io-" + to_str(pid())
+def relative_program = relative_directory + "/nytrix"
+defer {
+   file_remove(relative_program)
+   remove_dir(relative_directory)
+}
+assert(is_ok(make_dir(relative_directory)),
+   "create isolated relative-executable working directory")
+def compiler = env("NYTRIX_NY_FULL_BIN")
+assert(is_str(compiler) && compiler.len > 0, "runner supplies compiler path")
+def copy_result = run_capture(["cp", compiler, relative_program], [], nil, false)
+assert(copy_result.get("code", 127) == 0, "copy compiler for relative execution")
+def relative_result =
+   run_capture(["sh", "-c", "cd \"$1\" && exec ./nytrix --version",
+               "sh", relative_directory], [], nil, false)
+assert(relative_result.get("code", 127) == 0,
+   "explicit relative executable path preserves current-directory lookup (got " +
+   to_str(relative_result.get("code", 127)) + ")")
+assert(is_ok(file_remove(relative_program)),
+   "remove copied compiler after relative execution")
+assert(is_ok(remove_dir(relative_directory)),
+   "remove isolated relative-executable working directory")
+} #endif
+}
+test_explicit_relative_executable()
+NY
+}

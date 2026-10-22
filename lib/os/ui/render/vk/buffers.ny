@@ -1,15 +1,15 @@
 ;; Keywords: render vulkan gpu buffers os ui
 ;; Vulkan buffer allocation, upload, staging, and lifetime management.
 ;; References:
-;; - std.os.ui.render.vk
-;; - std.os.ui.render
-;; - std.os.ui.render.matrix
-module std.os.ui.render.vk.buffers(create_static_buffer, create_static_index_buffer, create_static_indexed_buffer, buffer_device_address, static_buffer_address, create_gpu_storage_buffer, create_gpu_indirect_buffer, _create_vertex_buffer, _create_staging_buffer, _create_uniform_buffer, _create_descriptor_pool, _find_memory_type, _copy_buffer, _ensure_upload_cb, _begin_upload_cb, _submit_upload_cb)
-use std.core
-use std.core.mem (__copy_mem)
-use std.os.ui.render.dump as ui_profile
-use std.os.ui.render.vk.state
-use std.os.ui.render.vk.vulkan
+;; - core.os.ui.render.vk
+;; - core.os.ui.render
+;; - core.os.ui.render.matrix
+module core.os.ui.render.vk.buffers(create_static_buffer, create_static_index_buffer, create_static_indexed_buffer, buffer_device_address, static_buffer_address, create_gpu_storage_buffer, create_gpu_indirect_buffer, _create_vertex_buffer, _create_staging_buffer, _create_uniform_buffer, _create_descriptor_pool, _find_memory_type, _copy_buffer, _ensure_upload_cb, _begin_upload_cb, _submit_upload_cb)
+use core
+use core.mem (__copy_mem)
+use core.os.ui.render.dump as ui_profile
+use core.os.ui.render.vk.state
+use core.os.ui.render.vk.vulkan
 
 fn _buf_trace_enabled() bool {
    ui_profile.env_truthy_cached("NY_VK_BUFFER_TRACE") || ui_profile.debug_enabled()

@@ -1,0 +1,22 @@
+shape ownership_rule_exclusive_borrow_constant_expression_index_overlap {
+  family "compiler-errors/ownership"
+  generator "error"
+  features ["error", "ownership", "borrow", "exclusive", "constant-index", "overlap"]
+  template ny-compile-fail
+  expect compile_fail
+  flags "--ownership-strict --nyir-verify"
+
+  source ny <<'NY'
+use core
+
+fn borrow_same_computed_index() int {
+  mut list<int> values = [7, 8, 9, 10]
+  def exclusive = &mut values[1 + 1]
+  values[5 - 3] = 12
+  def observed = exclusive
+  observed
+}
+
+borrow_same_computed_index()
+NY
+}

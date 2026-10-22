@@ -1,9 +1,10 @@
 ;; Keywords: platform backend os
 ;; Shared host platform predicates.
 ;; References:
-;; - std.os
-module std.os.platform(is_windows, is_macos, is_linux)
-use std.core
+;; - core.os
+module core.os.platform(is_windows, is_macos, is_linux, IS_WINDOWS, IS_MACOS,
+   IS_LINUX)
+use core
 
 @inline
 fn is_windows() bool {
@@ -34,3 +35,9 @@ fn is_linux() bool {
       false
    } #endif
 }
+
+;; Uppercase aliases keep platform predicates convenient in conditional
+;; module code while the lowercase functions remain callable predicates.
+def IS_WINDOWS = is_windows()
+def IS_MACOS = is_macos()
+def IS_LINUX = is_linux()

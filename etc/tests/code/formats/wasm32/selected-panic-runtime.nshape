@@ -1,0 +1,111 @@
+shape wasm32_selected_static_panic_messages_preserve_the_runtime_branch {
+  family "runtime/compiler"
+  generator "regression"
+  features ["ny", "test", "wasm", "runtime", "panic", "conditional"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os (file_exists, file_remove, run_capture, temp_dir, pid)
+
+def compiler = env("NYTRIX_NY_FULL_BIN")
+assert(is_str(compiler) && compiler.len > 0,
+       "test runner provides the compiler path")
+def stem = temp_dir() + "/ny-wasm-selected-panic-" + to_str(pid())
+def first_wat = stem + "-first.wat"
+def first_wasm = stem + "-first.wasm"
+def second_wat = stem + "-second.wat"
+def second_wasm = stem + "-second.wasm"
+def dynamic_wat = stem + "-dynamic.wat"
+def dynamic_wasm = stem + "-dynamic.wasm"
+def unsupported_wat = stem + "-unsupported.wat"
+
+def first_compile = run_capture(
+    [compiler, "--native-backend=wasm", "--native-only", "-O3",
+     "--nyir-verify", "--emit-asm=" + first_wat, "-no-std", "-emit-only",
+     "-e",
+     "mut condition = 0\nwhile condition < 1 { condition += 1 }\n" +
+     "panic(if condition == 1 { \"selected first panic\" } else " +
+     "{ \"unselected second panic\" })"],
+    [], nil, false)
+def first_assemble =
+    run_capture(["wat2wasm", first_wat, "-o", first_wasm], [], nil, false)
+def first_run =
+    run_capture(["wasmtime", "run", "--invoke", "rt_main", first_wasm],
+                [], nil, false)
+
+def second_compile = run_capture(
+    [compiler, "--native-backend=wasm", "--native-only", "-O3",
+     "--nyir-verify", "--emit-asm=" + second_wat, "-no-std", "-emit-only",
+     "-e",
+     "mut condition = 0\nwhile condition < 2 { condition += 1 }\n" +
+     "panic(if condition == 1 { \"unselected first panic\" } else " +
+     "{ \"selected second panic\" })"],
+    [], nil, false)
+def second_assemble =
+    run_capture(["wat2wasm", second_wat, "-o", second_wasm], [], nil, false)
+def second_run =
+    run_capture(["wasmtime", "run", "--invoke", "rt_main", second_wasm],
+                [], nil, false)
+
+def dynamic_compile = run_capture(
+    [compiler, "--native-backend=wasm", "--native-only", "--nyir-verify",
+     "--emit-asm=" + dynamic_wat, "-no-std", "-emit-only", "-e",
+     "mut value = 27\nwhile value < 28 { value += 1 }\n" +
+     "panic(\"dynamic value: \" + to_str(value) + \"/\" + " +
+     "to_str(-18))"],
+    [], nil, false)
+def dynamic_assemble =
+    run_capture(["wat2wasm", dynamic_wat, "-o", dynamic_wasm], [], nil, false)
+def dynamic_run =
+    run_capture(["wasmtime", "run", "--invoke", "rt_main", dynamic_wasm],
+                [], nil, false)
+
+def unsupported_compile = run_capture(
+    [compiler, "--native-backend=wasm", "--native-only", "--nyir-verify",
+     "--emit-asm=" + unsupported_wat, "-no-std", "-emit-only", "-e",
+     "panic(\"bigint: \" + to_str(-9223372036854775808))"],
+    [], nil, false)
+
+def cleanup_first_wat =
+    if file_exists(first_wat) { is_ok(file_remove(first_wat)) } else { true }
+def cleanup_first_wasm =
+    if file_exists(first_wasm) { is_ok(file_remove(first_wasm)) } else { true }
+def cleanup_second_wat =
+    if file_exists(second_wat) { is_ok(file_remove(second_wat)) } else { true }
+def cleanup_second_wasm =
+    if file_exists(second_wasm) { is_ok(file_remove(second_wasm)) } else { true }
+def cleanup_dynamic_wat =
+    if file_exists(dynamic_wat) { is_ok(file_remove(dynamic_wat)) } else { true }
+def cleanup_dynamic_wasm =
+    if file_exists(dynamic_wasm) { is_ok(file_remove(dynamic_wasm)) } else { true }
+def cleanup_unsupported =
+    if file_exists(unsupported_wat) {
+      is_ok(file_remove(unsupported_wat))
+    } else { true }
+
+assert(first_compile.get("code", 127) == 0 &&
+       first_assemble.get("code", 127) == 0 &&
+       first_run.get("code", 0) != 0 &&
+       str_contains(first_run.get("stdout", ""), "selected first panic"),
+       "runtime-selected Wasm panic preserves the true-arm literal")
+assert(second_compile.get("code", 127) == 0 &&
+       second_assemble.get("code", 127) == 0 &&
+       second_run.get("code", 0) != 0 &&
+       str_contains(second_run.get("stdout", ""), "selected second panic"),
+       "runtime-selected Wasm panic preserves the false-arm literal")
+assert(dynamic_compile.get("code", 127) == 0 &&
+       dynamic_assemble.get("code", 127) == 0 &&
+       dynamic_run.get("code", 0) != 0 &&
+       str_contains(dynamic_run.get("stdout", ""),
+                    "dynamic value: 28/-18"),
+       "Wasm formats dynamic signed integers in constructed panic messages")
+assert(unsupported_compile.get("code", 0) != 0 &&
+       !file_exists(unsupported_wat),
+       "unsupported BigInt panic formatting fails closed")
+assert(cleanup_first_wat && cleanup_first_wasm &&
+       cleanup_second_wat && cleanup_second_wasm && cleanup_dynamic_wat &&
+       cleanup_dynamic_wasm && cleanup_unsupported,
+       "remove generated WebAssembly panic modules")
+NY
+}

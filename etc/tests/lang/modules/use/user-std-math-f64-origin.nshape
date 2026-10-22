@@ -1,0 +1,23 @@
+shape user_std_math_f64_keeps_declared_implementation {
+  family "runtime/modules/use"
+  generator "regression"
+  features ["ny", "test", "modules", "identity", "legacy-llvm", "f64"]
+  template ny-test-case
+  flags_matrix "--native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_and_run
+  source ny <<'NY'
+module core.math(
+  sqrt
+)
+
+fn sqrt(float value) float {
+  value + 10.0
+}
+
+#main {
+  assert(core.math.sqrt(2.0) == 12.0,
+         "user core.math.sqrt must run its declared f64 implementation")
+  0
+}
+NY
+}

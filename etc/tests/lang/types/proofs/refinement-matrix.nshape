@@ -1,0 +1,52 @@
+shape refinement_matrix {
+  family "runtime/proofs"
+  generator "program"
+  features ["proofs", "fin", "range", "index", "safe-mode", "refined-v1"]
+  template ny-test-case
+  flags "--no-strict-types --color=never"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+def values = [10, 20, 30, 40]
+def Fin<4> selected = 2
+assert(values[selected] == 30, "Fin<N> keeps the checked index bound")
+assert(range_proven(selected, 0, 3), "range fact is queryable")
+assert(index_proven(values, selected), "index fact is queryable")
+
+fn lemma positive_sum(int x, int y) {
+   x > 0 && x < 100 && y > 0 && y < 100 → x + y > 0
+}
+
+def proof positive = prove(positive_sum(3, 4), "positive sum")
+assert(proof_matches(positive, positive_sum(3, 4)),
+   "structural proposition matching preserves the witness")
+assert(!proof_matches(positive, positive_sum(3, 5)),
+   "different proposition arguments do not match")
+
+print("refinement matrix ok")
+NY
+}
+
+shape refinement_matrix_safe_mode {
+  family "runtime/proofs"
+  generator "program"
+  features ["proofs", "safe-mode", "raw-bounds"]
+  template ny-test-case
+  flags "--safe-mode --color=never"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+with ptr p = malloc(8) {
+   store8(p, 42, 0)
+   assert(load8(p, 0) == 42, "safe-mode accepts the proven allocation range")
+   def int index = 3
+   assert_compile_range(index, 0, 7, "proven byte range")
+   store8(p, 43, index)
+   assert(load8(p, index) == 43, "safe-mode preserves the proven range")
+}
+
+print("safe refinement matrix ok")
+NY
+}

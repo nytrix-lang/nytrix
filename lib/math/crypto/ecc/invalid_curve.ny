@@ -5,12 +5,12 @@
 ;; - https://www.secg.org/sec1-v2.pdf
 ;; - https://www.rfc-editor.org/rfc/rfc8032
 ;; References:
-;; - std.math.crypto.ecc
-;; - std.math.crypto
-module std.math.crypto.ecc.invalid_curve(invalid_curve_attack, twist_attack, invalid_curve_dlog, invalid_curve_recover_transcript, crt_combine)
-use std.math.nt
-use std.math.crypto.ecc
-use std.math.crypto.ecc.ecc (ecc_point_add, ecc_scalar_mult)
+;; - core.math.crypto.ecc
+;; - core.math.crypto
+module core.math.crypto.ecc.invalid_curve(invalid_curve_attack, twist_attack, invalid_curve_dlog, invalid_curve_recover_transcript, crt_combine)
+use core.math.nt
+use core.math.crypto.ecc
+use core.math.crypto.ecc.ecc (ecc_point_add, ecc_scalar_mult)
 
 fn invalid_curve_attack(fnptr oracle_fn, any Gx, any Gy, any a, any p, list factors) any {
    "Invalid curve attack: recover private key d from an oracle that does scalar multiplication " +

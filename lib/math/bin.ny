@@ -2,8 +2,8 @@
 ;; Binary and byte operations for endian access, bit manipulation, packing, and padding.
 ;; Endian reads/writes, bit operations, packing, padding, and byte codecs.
 ;; References:
-;; - std.math
-module std.math.bin(u8, u16le, u16be, u32le, u32be, u64le, u64be, f32le,
+;; - core.math
+module core.math.bin(u8, u16le, u16be, u32le, u32be, u64le, u64be, f32le,
    unpack_le32, unpack_be32, unpack_le64, unpack_be64,
    p16le, p16be, p32le, p32be, p64le, p64be,
    u16le_vec, u32le_vec, u64le_vec,
@@ -20,12 +20,12 @@ module std.math.bin(u8, u16le, u16be, u32le, u32be, u64le, u64be, f32le,
    swap16, swap32, swap64, to_le16, to_le32, to_le64, to_be16, to_be32, to_be64,
    extract_bits, insert_bits, mask_bits, expand_bits, compress_bits,
    bigint_to_bin_fixed)
-use std.core
-use std.core.error
-use std.core.str
-use std.math.crypto.encoding.base
-use std.math.big
-use std.math.simmd as simmd
+use core
+use core.error
+use core.str
+use core.math.crypto.encoding.base
+use core.math.big
+use core.math.simmd as simmd
 
 fn _bin_max_int(int a, int b) int { a > b ? a : b }
 
@@ -270,7 +270,7 @@ fn _or32(int a, int b) int {
 }
 
 fn _xor32(int a, int b) int {
-   (a & 4294967295) ^^ (b & 4294967295)
+   (a & 4294967295) ^ (b & 4294967295)
 }
 
 fn _not32(int x) int { 4294967295 - (x & 4294967295) }
@@ -323,7 +323,7 @@ fn clear_bit(int x, int n) int {
 
 fn toggle_bit(int x, int n) int {
    "Toggle bit n of x."
-   x ^^ (1 << n)
+   x ^ (1 << n)
 }
 
 fn bit_count(int x) int {
@@ -423,7 +423,7 @@ fn _long_to_bytes(any n, int length=0) list<int> {
    result
 }
 
-fn _bytes_to_hex(list b) str {
+fn _bytes_to_hex(list<int> b) str {
    "Convert bytes list to hex string."
    def n = b.len
    if n <= 0 { return "" }
@@ -648,7 +648,7 @@ fn bytes_to_list(any s) list<int> {
    result
 }
 
-fn _bytes_to_str(list b) str {
+fn _bytes_to_str(list<int> b) str {
    "Convert bytes list to string."
    def n = b.len
    if n <= 0 { return "" }
@@ -665,11 +665,11 @@ fn _bytes_to_str(list b) str {
 
 impl list {
    @inline
-   fn hex(list b) str { _bytes_to_hex(b) }
+   fn hex(list<int> b) str { _bytes_to_hex(b) }
    @inline
    fn base64(list b) str { _bytes_to_base64(b) }
    @inline
-   fn text(list b) str { _bytes_to_str(b) }
+   fn text(list<int> b) str { _bytes_to_str(b) }
    @inline
    fn le32(list b, int i=0) int { unpack_le32(b, i) }
    @inline
@@ -716,8 +716,6 @@ impl bytes {
 impl str {
    @inline
    fn to_bytes(str self) list<int> { _str_to_bytes(self) }
-   @inline
-   fn unhex(str self) list<int> { _hex_to_bytes(self) }
    @inline
    fn long(str self) bigint { _bytes_to_long(_str_to_bytes(self)) }
    @inline
@@ -791,7 +789,7 @@ fn bytes_to_long(list b) bigint { b.long }
 
 fn long_to_bytes(any n, int length=0) list<int> { _long_to_bytes(n, length) }
 
-fn bytes_to_hex(list b) str { b.hex }
+fn bytes_to_hex(list<int> b) str { b.hex }
 
 fn hex_to_bytes(str hex_str) list<int> { _hex_to_bytes(hex_str) }
 
@@ -799,7 +797,7 @@ fn bytes_to_base64(list b) str { b.base64 }
 
 fn base64_to_bytes(str b64_str) list<int> { b64_str.base64_decode }
 
-fn bytes_to_str(list b) str { b.text }
+fn bytes_to_str(list<int> b) str { b.text }
 
 fn str_to_bytes(str s) list<int> { _str_to_bytes(s) }
 

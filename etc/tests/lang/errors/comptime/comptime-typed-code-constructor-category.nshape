@@ -1,0 +1,17 @@
+shape comptime_typed_code_constructor_category_mismatch {
+  family "compiler-errors/comptime"
+  generator "error"
+  features ["error", "comptime", "code", "typed-constructor", "category", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "comptime template code category mismatch"
+  source ny <<'NY'
+comptime template wants_statement(value: code<stmt>) {
+   fn generated_wrong_code_constructor() int {
+      ${value}
+      return 0
+   }
+}
+comptime emit wants_statement(code_expr(quote{ 42 }))
+NY
+}

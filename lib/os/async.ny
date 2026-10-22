@@ -1,43 +1,49 @@
 ;; Keywords: async futures tasks scheduler os
 ;; Async task operations for futures, scheduling, sleeping, waiting, and detaching work.
 ;; References:
-;; - std.os
-module std.os.async(Task, Future, future, async, await, await_all, detach, future_wait, yield_now, sleep_ms, run, backend, state)
+;; - core.os
+module core.os.async(Task, Future, future, async, await, await_all, detach, future_wait, yield_now, sleep_ms, run, backend, state)
 
 ;; Native async uses the stackless cooperative scheduler; browser builds use
 ;; Asyncify.  The public API reports this backend explicitly so callers do not
 ;; assume an OS event loop or cancellation-token implementation.
-use std.core
+use core
 
 fn backend() str {
    "Returns the active async backend name."
    "stackless"
 }
 
+@effects(io, alloc, e)
 fn _task_from_call(fnptr work, any arg=0) any {
+   def callback = __mark_dynamic_callable_tagged_args(work)
    def argv = malloc(8)
    if !argv { return 0 }
    store64(argv, arg, 0)
-   def h = __async_task_new(work, 1, argv)
+   def h = __async_task_new(callback, 1, argv)
    free(argv)
    h
 }
 
+@effects(io, alloc, e)
 fn Task(fnptr work, any arg=0) any {
    "Creates a stackless task for `work(arg)` and schedules it on the cooperative runtime."
    _task_from_call(work, arg)
 }
 
+@effects(io, alloc, e)
 fn Future(fnptr work, any arg=0) any {
    "Compatibility alias for Task(work, arg)."
    Task(work, arg)
 }
 
+@effects(io, alloc, e)
 fn future(fnptr work, any arg=0) any {
    "Compatibility alias for Task(work, arg)."
    Task(work, arg)
 }
 
+@effects(io, alloc, e)
 fn async(fnptr work, any arg=0) any {
    "Creates a stackless task for `work(arg)`."
    Task(work, arg)
@@ -69,6 +75,7 @@ fn await_all(list handles) list {
    out
 }
 
+@effects(io, alloc, e)
 fn detach(fnptr work, any arg=0) any {
    "Schedules a stackless task and returns its handle; the task runs when the scheduler is driven."
    Task(work, arg)
@@ -99,5 +106,5 @@ fn state(any h) int {
    assert(await(yield_now()) == 0, "async yield task")
    assert(await(sleep_ms(1)) == 0, "async sleep task")
    assert(backend() == "stackless", "async backend")
-   print("✓ std.os.async self-test passed")
+   print("✓ core.os.async self-test passed")
 }

@@ -4,17 +4,17 @@
 ;; - https://nvlpubs.nist.gov/nistpubs/Legacy/SP/nistspecialpublication800-38d.pdf
 ;; - https://eprint.iacr.org/2012/453.pdf (Joux nonce reuse)
 ;; References:
-;; - std.math.crypto.block.mode
-;; - std.math.crypto
-module std.math.crypto.block.mode.gcm(gcm_nonce_reuse_decrypt, gcm_recover_keystream,
+;; - core.math.crypto.block.mode
+;; - core.math.crypto
+module core.math.crypto.block.mode.gcm(gcm_nonce_reuse_decrypt, gcm_recover_keystream,
    ghash, gcm_forge_tag, recover_e0, forge_tag_from_known,
    gcm_recover_ectr0_from_sample, gcm_forge_tag_from_known_message,
    gcm_recover_auth_key_one_block, gf128_mult, gf128_inv, gf128_sqrt,
    gcm_ghash, gcm_auth_ghash, gcm_encrypt, gcm_decrypt, gcm_verify_tag)
-use std.core
-use std.math.nt
-use std.math.bin
-use std.math.crypto.symmetric.aes
+use core
+use core.math.nt
+use core.math.bin
+use core.math.crypto.symmetric.aes
 
 fn _gf128_one() list { [128,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0] }
 
@@ -62,13 +62,13 @@ fn _gf128_mult_words(int x0, int x1, int x2, int x3, int y0, int y1, int y2, int
    while i < 128 {
       def bit = _gf128_word_bit(x0, x1, x2, x3, i)
       if bit != 0 {
-         z0, z1 = (z0 ^^ v0) & 0xffffffff, (z1 ^^ v1) & 0xffffffff
-         z2, z3 = (z2 ^^ v2) & 0xffffffff, (z3 ^^ v3) & 0xffffffff
+         z0, z1 = (z0 ^ v0) & 0xffffffff, (z1 ^ v1) & 0xffffffff
+         z2, z3 = (z2 ^ v2) & 0xffffffff, (z3 ^ v3) & 0xffffffff
       }
       def reduce = v3 & 1
       v3, v2 = ((v3 >> 1) | ((v2 & 1) << 31)) & 0xffffffff, ((v2 >> 1) | ((v1 & 1) << 31)) & 0xffffffff
       v1, v0 = ((v1 >> 1) | ((v0 & 1) << 31)) & 0xffffffff, (v0 >> 1) & 0x7fffffff
-      if reduce != 0 { v0 = (v0 ^^ 0xe1000000) & 0xffffffff }
+      if reduce != 0 { v0 = (v0 ^ 0xe1000000) & 0xffffffff }
       i += 1
    }
    [z0, z1, z2, z3]
@@ -89,7 +89,7 @@ fn _gf128_xor(list a, list b) list {
    mut out = []
    mut i = 0
    while i < 16 {
-      out = out.append(a.get(i) ^^ b.get(i))
+      out = out.append(a.get(i) ^ b.get(i))
       i += 1
    }
    out
@@ -139,8 +139,8 @@ fn ghash(list h, list blocks) list {
    mut j = 0
    while j < blocks.len {
       def block = __load_item_fast(blocks, j)
-      y0, y1 = (y0 ^^ _gcm_be32_at_padded(block, 0)) & 0xffffffff, (y1 ^^ _gcm_be32_at_padded(block, 4)) & 0xffffffff
-      y2, y3 = (y2 ^^ _gcm_be32_at_padded(block, 8)) & 0xffffffff, (y3 ^^ _gcm_be32_at_padded(block, 12)) & 0xffffffff
+      y0, y1 = (y0 ^ _gcm_be32_at_padded(block, 0)) & 0xffffffff, (y1 ^ _gcm_be32_at_padded(block, 4)) & 0xffffffff
+      y2, y3 = (y2 ^ _gcm_be32_at_padded(block, 8)) & 0xffffffff, (y3 ^ _gcm_be32_at_padded(block, 12)) & 0xffffffff
       def zw = _gf128_mult_words(y0, y1, y2, y3, h0, h1, h2, h3)
       y0, y1 = __load_item_fast(zw, 0), __load_item_fast(zw, 1)
       y2, y3 = __load_item_fast(zw, 2), __load_item_fast(zw, 3)
@@ -157,8 +157,8 @@ fn gcm_ghash(list h, list data) list {
    mut y0, y1, y2, y3 = 0, 0, 0, 0
    mut p = 0
    while p < data.len {
-      y0, y1 = (y0 ^^ _gcm_be32_at_padded(data, p)) & 0xffffffff, (y1 ^^ _gcm_be32_at_padded(data, p + 4)) & 0xffffffff
-      y2, y3 = (y2 ^^ _gcm_be32_at_padded(data, p + 8)) & 0xffffffff, (y3 ^^ _gcm_be32_at_padded(data, p + 12)) & 0xffffffff
+      y0, y1 = (y0 ^ _gcm_be32_at_padded(data, p)) & 0xffffffff, (y1 ^ _gcm_be32_at_padded(data, p + 4)) & 0xffffffff
+      y2, y3 = (y2 ^ _gcm_be32_at_padded(data, p + 8)) & 0xffffffff, (y3 ^ _gcm_be32_at_padded(data, p + 12)) & 0xffffffff
       def zw = _gf128_mult_words(y0, y1, y2, y3, h0, h1, h2, h3)
       y0, y1 = __load_item_fast(zw, 0), __load_item_fast(zw, 1)
       y2, y3 = __load_item_fast(zw, 2), __load_item_fast(zw, 3)
@@ -171,8 +171,8 @@ fn _gcm_ghash_update_data(int y0, int y1, int y2, int y3, int h0, int h1, int h2
    mut a0, a1, a2, a3 = y0, y1, y2, y3
    mut p = 0
    while p < data.len {
-      a0, a1 = (a0 ^^ _gcm_be32_at_padded(data, p)) & 0xffffffff, (a1 ^^ _gcm_be32_at_padded(data, p + 4)) & 0xffffffff
-      a2, a3 = (a2 ^^ _gcm_be32_at_padded(data, p + 8)) & 0xffffffff, (a3 ^^ _gcm_be32_at_padded(data, p + 12)) & 0xffffffff
+      a0, a1 = (a0 ^ _gcm_be32_at_padded(data, p)) & 0xffffffff, (a1 ^ _gcm_be32_at_padded(data, p + 4)) & 0xffffffff
+      a2, a3 = (a2 ^ _gcm_be32_at_padded(data, p + 8)) & 0xffffffff, (a3 ^ _gcm_be32_at_padded(data, p + 12)) & 0xffffffff
       def zw = _gf128_mult_words(a0, a1, a2, a3, h0, h1, h2, h3)
       a0, a1 = __load_item_fast(zw, 0), __load_item_fast(zw, 1)
       a2, a3 = __load_item_fast(zw, 2), __load_item_fast(zw, 3)
@@ -200,7 +200,7 @@ fn _gcm_xor(list a, list b, any n=nil) list {
    mut out = []
    mut i = 0
    while i < lim {
-      out = out.append(a[i] ^^ b[i])
+      out = out.append(a[i] ^ b[i])
       i += 1
    }
    out
@@ -255,10 +255,10 @@ fn gcm_auth_ghash(list h, list ad, list ciphertext) list {
    def cw = _gcm_ghash_update_data(__load_item_fast(aw, 0), __load_item_fast(aw, 1), __load_item_fast(aw, 2), __load_item_fast(aw, 3), h0, h1, h2, h3, ciphertext)
    def ad_bits = ad.len * 8
    def ct_bits = ciphertext.len * 8
-   def y0 = (__load_item_fast(cw, 0) ^^ ((ad_bits >> 32) & 0xffffffff)) & 0xffffffff
-   def y1 = (__load_item_fast(cw, 1) ^^ (ad_bits & 0xffffffff)) & 0xffffffff
-   def y2 = (__load_item_fast(cw, 2) ^^ ((ct_bits >> 32) & 0xffffffff)) & 0xffffffff
-   def y3 = (__load_item_fast(cw, 3) ^^ (ct_bits & 0xffffffff)) & 0xffffffff
+   def y0 = (__load_item_fast(cw, 0) ^ ((ad_bits >> 32) & 0xffffffff)) & 0xffffffff
+   def y1 = (__load_item_fast(cw, 1) ^ (ad_bits & 0xffffffff)) & 0xffffffff
+   def y2 = (__load_item_fast(cw, 2) ^ ((ct_bits >> 32) & 0xffffffff)) & 0xffffffff
+   def y3 = (__load_item_fast(cw, 3) ^ (ct_bits & 0xffffffff)) & 0xffffffff
    def zw = _gf128_mult_words(y0, y1, y2, y3, h0, h1, h2, h3)
    _gf128_words_to_bytes(__load_item_fast(zw, 0), __load_item_fast(zw, 1), __load_item_fast(zw, 2), __load_item_fast(zw, 3))
 }
@@ -280,7 +280,7 @@ fn gcm_verify_tag(list a, list b) bool {
    mut diff = 0
    mut i = 0
    while i < a.len {
-      diff = diff | (a[i] ^^ b[i])
+      diff = diff | (a[i] ^ b[i])
       i += 1
    }
    diff == 0
@@ -306,7 +306,7 @@ fn gcm_recover_keystream(list ct, list known_pt) list {
    mut ks = []
    mut i = 0
    while i < n {
-      ks = ks.append(ct.get(i) ^^ known_pt.get(i))
+      ks = ks.append(ct.get(i) ^ known_pt.get(i))
       i += 1
    }
    ks
@@ -323,7 +323,7 @@ fn gcm_nonce_reuse_decrypt(list ct1, list tag1, list ct2, list tag2) list {
    mut ks_xor = []
    mut i = 0
    while i < n {
-      ks_xor = ks_xor.append(ct1.get(i) ^^ ct2.get(i))
+      ks_xor = ks_xor.append(ct1.get(i) ^ ct2.get(i))
       i += 1
    }
    [ks_xor, ks_xor]
@@ -339,7 +339,7 @@ fn gcm_forge_tag(list h, list assoc_data, list ct, list ectr0) list {
    mut tag = []
    mut i = 0
    while i < 16 {
-      tag = tag.append(g.get(i) ^^ ectr0.get(i))
+      tag = tag.append(g.get(i) ^ ectr0.get(i))
       i += 1
    }
    tag
@@ -355,7 +355,7 @@ fn gcm_recover_ectr0_from_sample(any h, list assoc_data, list ct, any tag) any {
    mut out = []
    mut i = 0
    while i < 16 {
-      out = out.append(tag.get(i) ^^ forged.get(i))
+      out = out.append(tag.get(i) ^ forged.get(i))
       i += 1
    }
    out
@@ -412,9 +412,9 @@ fn gcm_recover_auth_key_one_block(list a1, list c1, list t1, list a2, list c2, l
    assert(prod.len == 16, "gf128_mult output is 16 bytes")
    def ct1, ct2 = [10, 20, 30, 40], [15, 25, 35, 45]
    def reuse = gcm_nonce_reuse_decrypt(ct1, [], ct2, [])
-   assert(reuse.get(0).get(0) == (10 ^^ 15), "nonce reuse xor")
+   assert(reuse.get(0).get(0) == (10 ^ 15), "nonce reuse xor")
    def ks = gcm_recover_keystream(ct1, [100, 110, 120, 130])
-   assert(ks.get(0) == (10 ^^ 100), "keystream recovery")
+   assert(ks.get(0) == (10 ^ 100), "keystream recovery")
    def hh = [102,233,75,212,239,138,44,59,136,76,250,89,202,52,43,46]
    def cta = [3,136,218,206,96,182,163,146,243,40,194,185,113,178,254,120]
    def ctb = [2,136,218,206,96,182,163,146,243,40,194,185,113,178,254,120]
@@ -430,7 +430,7 @@ fn gcm_recover_auth_key_one_block(list a1, list c1, list t1, list a2, list c2, l
    print("actual tag: " + to_str(empty[1]))
    assert(gcm_decrypt(key, nonce, [], empty[0], empty[1]) == [], "empty decrypt")
    mut bad_tag = empty[1]
-   bad_tag[0] = bad_tag[0] ^^ 1
+   bad_tag[0] = bad_tag[0] ^ 1
    assert(gcm_decrypt(key, nonce, [], empty[0], bad_tag) == nil, "bad tag rejected")
-   print("✓ std.math.crypto.block.mode.gcm self-test passed")
+   print("✓ core.math.crypto.block.mode.gcm self-test passed")
 }

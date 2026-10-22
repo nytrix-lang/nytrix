@@ -1,10 +1,10 @@
 ;; Keywords: factorization special-forms math crypto number-theory
 ;; Integer-factorization routines for factorization for special algebraic forms.
 ;; References:
-;; - std.math.crypto.factorization
-;; - std.math.crypto
-module std.math.crypto.factorization.special_forms(factor_2pn, factor_xyxz)
-use std.math.nt
+;; - core.math.crypto.factorization
+;; - core.math.crypto
+module core.math.crypto.factorization.special_forms(factor_2pn, factor_xyxz)
+use core.math.nt
 
 fn _z(any x) any { is_bigint(x) ? x : Z(x) }
 
@@ -63,5 +63,5 @@ fn factor_xyxz(any n, any base=3, any max_power=nil) any {
    def n = p * q
    assert(factor_xyxz(n, 3, 8) == [p, q], "special forms xyxz factor")
    assert(factor_2pn(Z(11) * Z(13), 3) == [Z(11), Z(13)], "special forms 2pn factor")
-   print("✓ std.math.crypto.factorization.special_forms self-test passed")
+   print("✓ core.math.crypto.factorization.special_forms self-test passed")
 }

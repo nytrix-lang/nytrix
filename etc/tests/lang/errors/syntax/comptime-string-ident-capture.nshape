@@ -1,0 +1,16 @@
+shape comptime_string_ident_capture {
+  family "compiler-errors/comptime"
+  generator "error"
+  features ["error", "comptime", "template", "hygiene"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "interpolation into an identifier requires ident"
+  source ny <<'NY'
+comptime template make_named(name) {
+  fn generated_${name}() int { return 42 }
+}
+
+comptime emit make_named("captured")
+NY
+}

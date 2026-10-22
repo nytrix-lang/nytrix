@@ -1,16 +1,16 @@
 ;; Keywords: engine gizmo transform move rotate scale os ui render viewer scene
 ;; Engine-specific transform gizmo interaction and selected-object manipulation helpers.
 ;; References:
-;; - std.os.ui.render.viewer.gizmo
-;; - std.os.ui.render.scene
-module std.os.ui.render.viewer.engine.gizmo(_draw_scene_world_gizmo, _scene_world_gizmo_pick, _scene_world_gizmo_axis_tangent, _scene_world_gizmo_axis_drag_coord)
-use std.core
-use std.math
-use std.os.ui.render.matrix as rmat
-use std.os.ui.render as gfx
-use std.os.ui.render.viewer.gizmo as viewer_gizmo
-use std.os.ui.render.viewer.engine.selection as ui_selection
-use std.os.ui.render.viewer.engine.state
+;; - core.os.ui.render.viewer.gizmo
+;; - core.os.ui.render.scene
+module core.os.ui.render.viewer.engine.gizmo(_draw_scene_world_gizmo, _scene_world_gizmo_pick, _scene_world_gizmo_axis_tangent, _scene_world_gizmo_axis_drag_coord)
+use core
+use core.math
+use core.os.ui.render.matrix as rmat
+use core.os.ui.render as gfx
+use core.os.ui.render.viewer.gizmo as viewer_gizmo
+use core.os.ui.render.viewer.engine.selection as ui_selection
+use core.os.ui.render.viewer.engine.state
 
 fn _gizmo_selection_bounds() list {
    if !is_dict(active_scene) { return [] }

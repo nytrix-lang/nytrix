@@ -1,0 +1,26 @@
+shape ownership_resource_partial_extraction_positive {
+  family "language/ownership"
+  generator "syntax"
+  features ["ownership", "resource", "linear", "aggregate", "partial-move", "positive"]
+  template ny-test-case
+  expect compile_and_run
+  flags "--ownership-strict --nyir-verify"
+  source ny <<'NY'
+use core
+
+linear layout File { int fd }
+layout ResourcePair { File left, File right, int tag }
+
+fn consume_fields() int {
+  def pair = ResourcePair(File(11), File(22), 7)
+  def File left = pair.left
+  forget(left)
+  def File right = pair.right
+  forget(right)
+  pair.tag
+}
+
+assert(consume_fields() == 7,
+       "each resource field can move and discharge independently")
+NY
+}

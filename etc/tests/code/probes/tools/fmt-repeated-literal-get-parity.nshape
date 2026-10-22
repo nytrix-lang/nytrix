@@ -1,0 +1,63 @@
+shape fmt_repeated_literal_get_parity {
+  generator "embedded"
+  family "probe/tools/fmt"
+  features ["formatter", "literal-key-audit", "c-parity"]
+  template ny-test-case
+  flags "--native-only"
+  timeout 120
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.subprocess (run_capture)
+use core.str as str
+
+def ny = env("NYTRIX_NY_FULL_BIN")
+def fmt = env("NYTRIX_TEST_FMT_BIN")
+def cmake = env("NYTRIX_CMAKE_COMMAND")
+assert(is_str(ny) && ny.len > 0, "test runner exports the full compiler")
+assert(is_str(fmt) && fmt.len > 0, "CTest provides standalone formatter path")
+assert(is_str(cmake) && cmake.len > 0, "CMake exposes its executable path")
+def test_dir = temp_dir() + "/fmt-repeated-get-" + to_str(pid())
+def setup = run_capture([cmake, "-E", "make_directory", test_dir], [], nil, false)
+assert(setup.get("code", 127) == 0, "create formatter test directory")
+
+def source = test_dir + "/repeated-get.ny"
+def text = """
+fn repeated_get(dict values) {
+   def a0 = values.get("alpha")
+   def a1 = values.get("alpha")
+   def a2 = values.get("alpha")
+   def a3 = values.get("alpha")
+   def a4 = values.get("alpha")
+   def b0 = values.get("beta")
+   def b1 = values.get("beta")
+   def b2 = values.get("beta")
+   def b3 = values.get("beta")
+   def c0 = values.get("gamma")
+   def c1 = values.get("gamma")
+   def c2 = values.get("gamma")
+   def single = values.get('single')
+   def ignored = "values.get(alpha)"
+   def escaped = "values.get(\\"alpha\\")"
+   ;; values.get("alpha")
+}
+"""
+assert(is_ok(file_write(source, text)), "write repeated get audit source")
+def c_result = run_capture([fmt, "--trim", "--json", source], [], nil, false)
+def ny_result = run_capture([ny, "fmt", "--trim", "--json", source],
+                            [], nil, false)
+def report = ny_result.get("stdout", "")
+assert(c_result.get("code", 127) == 0 &&
+       ny_result.get("code", 127) == 0 &&
+       c_result.get("stdout", "") == report,
+       "standalone and embedded audit reports differ\nC: " +
+       c_result.get("stdout", "") + "\nNy: " + report)
+assert(str.find(report, "NYAUD3005") >= 0 &&
+       str.find(report, "13 literal-key get() call(s)") >= 0 &&
+       str.find(report, "'alpha' appears 5 time(s)") >= 0,
+       "repeated literal get report has expected rule and counts")
+def cleanup = run_capture([cmake, "-E", "rm", "-rf", test_dir], [], nil, false)
+assert(cleanup.get("code", 127) == 0, "remove formatter test directory")
+print("FMT_REPEATED_LITERAL_GET_PARITY_OK")
+NY
+}

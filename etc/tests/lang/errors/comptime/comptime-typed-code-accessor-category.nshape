@@ -1,0 +1,18 @@
+shape comptime_typed_code_accessor_category_mismatch {
+  family "compiler-errors/comptime"
+  generator "error"
+  features ["error", "comptime", "code", "typed-accessor", "category", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "typed code accessor category mismatch"
+  source ny <<'NY'
+use core.compiler.ast (code_expr_syntax)
+
+comptime template wants_expression(value: code<expr>) {
+   fn generated_wrong_accessor_category() int { return ${value} }
+}
+
+comptime emit wants_expression(
+   code_expr_syntax(quote{ mut answer = 42 }))
+NY
+}

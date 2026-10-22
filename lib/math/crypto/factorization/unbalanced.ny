@@ -6,11 +6,11 @@
 ;; - https://cacr.uwaterloo.ca/hac/about/chap8.pdf
 ;; - https://crypto.stanford.edu/~dabo/pubs/papers/RSA-survey.pdf
 ;; References:
-;; - std.math.crypto.factorization
-;; - std.math.crypto
-module std.math.crypto.factorization.unbalanced(unbalanced_factor, unbalanced_factor_fermat, factor_unbalanced, factor_unbalanced_wheels, detect_unbalanced, estimate_small_factor_bits, factor_three_unbalanced)
-use std.core
-use std.math.nt
+;; - core.math.crypto.factorization
+;; - core.math.crypto
+module core.math.crypto.factorization.unbalanced(unbalanced_factor, unbalanced_factor_fermat, factor_unbalanced, factor_unbalanced_wheels, detect_unbalanced, estimate_small_factor_bits, factor_three_unbalanced)
+use core
+use core.math.nt
 
 fn unbalanced_factor(any n) any {
    "Factor n = p * q where p and q are significantly different in size.
@@ -197,5 +197,5 @@ fn factor_three_unbalanced(any n, any bound1, any bound2) any {
    assert(unbalanced_factor(n) == [p, q] && factor_unbalanced(n, 100) == [p, q] && factor_unbalanced_wheels(n, 100) == [p, q], "unbalanced semiprime")
    assert(detect_unbalanced(n) && !detect_unbalanced(997 * 1009) && estimate_small_factor_bits(n) > 0, "unbalanced detection")
    assert(factor_three_unbalanced(3 * 5 * 997, 10, 20) == [3, 5, 997], "three unbalanced factors")
-   print("✓ std.math.crypto.factorization.unbalanced self-test passed")
+   print("✓ core.math.crypto.factorization.unbalanced self-test passed")
 }

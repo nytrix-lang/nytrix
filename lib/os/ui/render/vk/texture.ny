@@ -1,28 +1,29 @@
 ;; Keywords: render vulkan gpu texture os ui
 ;; Vulkan texture upload, cache, sampling, and image-resource lifetime management.
 ;; References:
-;; - std.os.ui.render.vk
-;; - std.os.ui.render
-;; - std.os.ui.render.matrix
-module std.os.ui.render.vk.texture(create_texture, update_texture_rect, bind_texture, bind_default_texture, texture_size, texture_format, texture_descriptor, material_descriptor, destroy_texture, read_framebuffer, blit_buffer, _record_image_readback_to_buffer, _ensure_readback_slab, create_texture_ex, _create_default_texture, _texture_meta, set_texture_debug_meta, set_texture_protected, create_cubemap, draw_skybox, bindless_sync_texture_slot, last_created_texture_id, texture_count, tex_job_make, tex_job_queue_make, tex_job_queue_push, tex_job_queue_pop, tex_job_result_make, tex_job_cache_key, tex_job_worker_plan, tex_job_upload_plan, resize, rgba_mip_level_count, rgba_mip_total_bytes, generate_rgba_mips, RECT_PACK_HEURISTIC_BL, RECT_PACK_HEURISTIC_BF, rect_pack_init, rect_pack, srgb_to_linear_chan, linear_to_srgb_chan, linear_to_srgb_u8, image_sample_linear_rgb_uv, env_dir_to_uv, generate_spec_env_slab, generate_env_image, generate_neutral_env_image, generate_compare_visible_env_image, generate_compare_reflect_env_image, generate_studio_env_image, scene_prefers_studio_env, scene_prefers_neutral_env, scene_prefers_compare_reflect_env, scene_prefers_compare_visible_env, scene_prefers_optical_spec_env, scene_prefers_black_visible_env, scene_prefers_gray_proof_bg)
-use std.core
-use std.core.mem
-use std.math
-use std.os.ui.render.vk.state
-use std.os.ui.render.dump as ui_profile
-use std.os.ui.render.vk.vulkan
-use std.os.ui.render.vk.buffers (_find_memory_type,
+;; - core.os.ui.render.vk
+;; - core.os.ui.render
+;; - core.os.ui.render.matrix
+module core.os.ui.render.vk.texture(create_texture, update_texture_rect, bind_texture, bind_default_texture, texture_size, texture_format, texture_descriptor, material_descriptor, destroy_texture, read_framebuffer, blit_buffer, _record_image_readback_to_buffer, _ensure_readback_slab, _release_readback_slab, create_texture_ex, _create_default_texture, _texture_meta, set_texture_debug_meta, set_texture_protected, create_cubemap, draw_skybox, bindless_sync_texture_slot, last_created_texture_id, texture_count, tex_job_make, tex_job_queue_make, tex_job_queue_push, tex_job_queue_pop, tex_job_result_make, tex_job_cache_key, tex_job_worker_plan, tex_job_upload_plan, resize, rgba_mip_level_count, rgba_mip_total_bytes, generate_rgba_mips, RECT_PACK_HEURISTIC_BL, RECT_PACK_HEURISTIC_BF, rect_pack_init, rect_pack, srgb_to_linear_chan, linear_to_srgb_chan, linear_to_srgb_u8, image_sample_linear_rgb_uv, env_dir_to_uv, generate_spec_env_slab, generate_env_image, generate_neutral_env_image, generate_compare_visible_env_image, generate_compare_reflect_env_image, generate_studio_env_image, scene_prefers_studio_env, scene_prefers_neutral_env, scene_prefers_compare_reflect_env, scene_prefers_optical_spec_env, scene_prefers_black_visible_env, scene_prefers_gray_proof_bg)
+use core
+use core.mem
+use core.math
+use core.os.ui.render.vk.state
+use core.os.ui.render.vk.renderer as vk_renderer
+use core.os.ui.render.dump as ui_profile
+use core.os.ui.render.vk.vulkan
+use core.os.ui.render.vk.buffers (_find_memory_type,
    _ensure_upload_cb,
    _begin_upload_cb,
    _submit_upload_cb)
-use std.os.ui.render.matrix (mat4_identity)
-use std.os.ui.render.vk.draw (_draw_raw_stream_current_material, draw_rect_tex)
-use std.os.ui.render.vk.pipeline (bind_pipeline, _ensure_skybox_pipeline)
-use std.os.ui.render.vk.renderer (_sync_pc, _flush, set_unlit, set_ortho, set_mvp)
-use std.os.ui.render.vk.utils (__vkr_push_vertex, _vkr_bgra_to_rgba_if_needed)
-use std.os.ui.render.texture as render_texture
-use std.core.str as str
-use std.core.common as common
+use core.os.ui.render.matrix (mat4_identity)
+use core.os.ui.render.vk.draw (_draw_raw_stream_current_material, draw_rect_tex)
+use core.os.ui.render.vk.pipeline (bind_pipeline, _ensure_skybox_pipeline)
+use core.os.ui.render.vk.renderer (_sync_pc, _flush, set_unlit, set_ortho, set_mvp)
+use core.os.ui.render.vk.utils (__vkr_push_vertex, _vkr_bgra_to_rgba_if_needed)
+use core.os.ui.render.texture as render_texture
+use core.str as str
+use core.common as common
 
 mut _last_synced_skybox_tex = -1
 mut _last_synced_skybox_view = 0
@@ -200,7 +201,7 @@ fn _record_image_readback_to_buffer(any cb,
    true
 }
 
-fn _ensure_readback_slab() bool {
+fn _ensure_readback_slab() any {
    if !_readback_slab {
       _readback_slab = malloc(272)
       if _readback_slab {
@@ -213,7 +214,19 @@ fn _ensure_readback_slab() bool {
          _readback_s_info = _readback_slab + 200
       }
    }
-   _readback_slab != 0
+   _readback_slab
+}
+
+fn _release_readback_slab() bool {
+   if _readback_slab { free(_readback_slab) }
+   _readback_slab = 0
+   _readback_ai = 0
+   _readback_cb_p = 0
+   _readback_bi = 0
+   _readback_barrier = 0
+   _readback_region = 0
+   _readback_s_info = 0
+   true
 }
 
 fn _normalize_filter(any filter) int {
@@ -327,7 +340,7 @@ fn _generate_rgba_mips(any src_pixels, int w, int h) any { generate_rgba_mips(sr
 
 fn _mip_byte_count_rgba(int w, int h) int { rgba_mip_total_bytes(w, h) }
 
-fn _ensure_sampler(any filter, any wrap_s=10497, any wrap_t=10497) any {
+fn _ensure_sampler(any filter, any wrap_s=10497, any wrap_t=10497) ?handle {
    def norm = _normalize_filter(filter)
    def uw = _normalize_wrap_mode(wrap_s)
    def vw = _normalize_wrap_mode(wrap_t)
@@ -360,7 +373,7 @@ fn _ensure_sampler(any filter, any wrap_s=10497, any wrap_t=10497) any {
    sampler
 }
 
-fn _texture_sampler(any filter, any wrap_s=10497, any wrap_t=10497) any {
+fn _texture_sampler(any filter, any wrap_s=10497, any wrap_t=10497) ?handle {
    def sampler = _ensure_sampler(filter, wrap_s, wrap_t)
    sampler
 }
@@ -1023,14 +1036,7 @@ fn destroy_texture(any tex_id) any {
 fn read_framebuffer() any {
    "Reads the current swapchain image back to CPU memory. Returns {data, width, height, channels} or 0."
    def force_fresh = common.env_truthy("NY_VK_SNAPSHOT_FRESH")
-   if !force_fresh && _capture_ready && _capture_pixels && _capture_w > 0 && _capture_h > 0 {
-      def res = {"data": _capture_pixels, "width": _capture_w, "height": _capture_h, "bpp": 4}
-      _capture_ready = false
-      _capture_pixels = 0
-      _capture_w = 0
-      _capture_h = 0
-      return res
-   }
+   if !force_fresh { def captured = vk_renderer._take_frame_capture() if captured { return captured } }
    ;; The synchronous fallback path allocates a one-shot command buffer and
    ;; calls vkDeviceWaitIdle from outside the frame graph.  That is fragile on
    ;; X11/Vulkan during resize/close and was the source of trace-time crashes.
@@ -1041,7 +1047,7 @@ fn read_framebuffer() any {
       _capture_request = true
       return 0
    }
-   if _frame_open {
+   if frame_open() {
       _capture_request = true
       return 0
    }
@@ -1054,13 +1060,14 @@ fn read_framebuffer() any {
    def readback_buf = _staging_buffer
    def mapped_data = _staging_map
    mut cb = 0
-   if !_ensure_readback_slab() { return 0 }
-   def ai = _readback_ai
-   def cb_p = _readback_cb_p
-   def bi = _readback_bi
-   def barrier = _readback_barrier
-   def region = _readback_region
-   def s_info = _readback_s_info
+   def ptr readback_slab = _ensure_readback_slab()
+   if !readback_slab { return 0 }
+   def ptr ai = readback_slab
+   def ptr cb_p = ptr_add(readback_slab, 32)
+   def ptr bi = ptr_add(readback_slab, 40)
+   def ptr barrier = ptr_add(readback_slab, 72)
+   def ptr region = ptr_add(readback_slab, 144)
+   def ptr s_info = ptr_add(readback_slab, 200)
    if !ai || !cb_p || !bi || !barrier || !region || !s_info { return 0 }
    memset(ai, 0, 32)
    store32(ai, _vk_stype_command_buffer_allocate_info(), 0)
@@ -1127,7 +1134,7 @@ fn read_framebuffer() any {
 
 fn blit_buffer(any pixels, int w, int h) any {
    "Blits a raw RGBA8 pixel buffer to the full window."
-   if !_frame_open { return 0 }
+   if !frame_open() { return 0 }
    def blit_sz = (_blit_tex_id == -1) ? 0 : texture_size(_blit_tex_id)
    if _blit_tex_id == -1 || !is_list(blit_sz) || blit_sz.get(0, 0) != w || blit_sz.get(1, 0) != h {
       if _blit_tex_id != -1 { destroy_texture(_blit_tex_id) }

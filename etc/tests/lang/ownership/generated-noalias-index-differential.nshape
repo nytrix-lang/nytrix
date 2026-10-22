@@ -1,0 +1,278 @@
+shape ownership_generated_noalias_index_differential {
+  family "language/ownership"
+  generator "embedded"
+  features ["ownership", "borrow", "noalias", "index", "dictionary-key", "generated", "differential"]
+  timeout 180
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.subprocess as process
+use core.os.prim (env)
+use core.os.thread as thread
+
+def compiler = env("NYTRIX_NY_FULL_BIN")
+def core_bc = env("NYTRIX_TEST_CORE_BC")
+def shared_core_bc = is_str(core_bc) ? core_bc : ""
+assert(is_str(compiler) && compiler.len > 0,
+       "test runner provides the compiler used by the noalias differential")
+
+fn compile_generated(str source) dict {
+  mut args = []
+  if shared_core_bc.len > 0 {
+    args = args.append("--core-bc")
+    args = args.append(shared_core_bc)
+  }
+  args = args.append("--ownership-strict")
+  args = args.append("--native-only")
+  args = args.append("--nyir-verify")
+  args = args.append("-c")
+  args = args.append(source)
+  process.run_capture(compiler, args, nil, false)
+}
+
+fn generated_source(int borrow_index, int store_index) str {
+  "use core\nfn generated() int {\n" +
+      "mut list<int> values = [7, 8, 9, 10]\n" +
+      "def exclusive = &mut values[" + to_str(borrow_index) + " + 0]\n" +
+      "values[" + to_str(store_index) + " * 1] = 12\n" +
+      "def observed = exclusive\n0\n}\ngenerated()\n0\n"
+}
+
+mut generated_cases = []
+
+fn queue_case(str source, bool expected, str label) int {
+  generated_cases = generated_cases.append([source, 0, expected, label, ""])
+  0
+}
+
+fn queue_failure(str source, str label, str reason) int {
+  generated_cases = generated_cases.append([source, 1, false, label, reason])
+  0
+}
+
+fn check_pair(int borrow_index, int store_index, bool expected) int {
+  queue_case(generated_source(borrow_index, store_index), expected,
+             "generated noalias index pair borrow=" + to_str(borrow_index) +
+                 " store=" + to_str(store_index))
+}
+
+fn generated_dictionary_source(str borrow_key, str store_key) str {
+  "use core\nfn generated() int {\n" +
+      "mut dict values = {\"alpha\": 7, \"beta\": 8, \"gamma\": 9}\n" +
+      "def exclusive = &mut values[\"" + borrow_key + "\"]\n" +
+      "values[\"" + store_key + "\"] = 12\n" +
+      "def observed = exclusive\n0\n}\ngenerated()\n0\n"
+}
+
+fn check_dictionary_pair(str borrow_key, str store_key, bool expected) int {
+  queue_case(generated_dictionary_source(borrow_key, store_key), expected,
+             "generated dictionary-key pair borrow=" + borrow_key +
+                 " store=" + store_key)
+}
+
+fn generated_dynamic_dictionary_source(bool same_key) str {
+  def store_binding =
+      if same_key { "def store_key = borrow_key\n" }
+      else { "mut str store_key = \"beta\"\n" }
+  "use core\nfn generated() int {\n" +
+      "mut dict values = {\"alpha\": 7, \"beta\": 8}\n" +
+      "mut str borrow_key = \"alpha\"\n" + store_binding +
+      "def exclusive = &mut values[borrow_key]\n" +
+      "values[store_key] = 12\n" +
+      "def observed = exclusive\n0\n}\ngenerated()\n0\n"
+}
+
+fn check_dynamic_dictionary(bool same_key) int {
+  def source = generated_dynamic_dictionary_source(same_key)
+  queue_failure(source, "dynamic dictionary keys must not be assumed disjoint",
+                "exclusive or unverified borrow")
+}
+
+fn returned_borrow_source(int store_index, bool via_local,
+                          bool via_branch, bool via_chain,
+                          bool via_early_return, bool via_match,
+                          bool via_match_alias) str {
+  mut str returned_value = "return borrow_mut(x)"
+  if via_local {
+    returned_value = "def alias = borrow_mut(x)\nreturn alias"
+  }
+  if via_chain {
+    returned_value = "def first = borrow_mut(x)\ndef second = first\n" +
+                     "def third = second\nreturn third"
+  }
+  mut str declaration = "@returns_borrow(x)\n" +
+      "fn mutable_borrow_parameter(any x) any { " +
+      returned_value +
+      " }\n"
+  mut str call = "mutable_borrow_parameter(values[0])"
+  if via_early_return {
+    declaration = "@returns_borrow(x)\n" +
+        "fn mutable_borrow_parameter(bool choose, any x) any {\n" +
+        "if choose { return borrow_mut(x) }\nreturn borrow_mut(x)\n}\n"
+    call = "mutable_borrow_parameter(true, values[0])"
+  }
+  if via_branch {
+    declaration = "@returns_borrow(x)\n" +
+        "fn mutable_borrow_parameter(bool choose, any x) any {\n" +
+        "if choose { return borrow_mut(x) } else { return borrow_mut(x) }\n}\n"
+    call = "mutable_borrow_parameter(true, values[0])"
+  }
+  if via_match {
+    declaration = "@returns_borrow(x)\n" +
+        "fn mutable_borrow_parameter(bool choose, any x) any {\n" +
+        "match choose { true -> { return borrow_mut(x) } " +
+        "_ -> { return borrow_mut(x) } }\n}\n"
+    call = "mutable_borrow_parameter(true, values[0])"
+  }
+  if via_match_alias {
+    declaration = "@returns_borrow(x)\n" +
+        "fn mutable_borrow_parameter(bool choose, any x) any {\n" +
+        "match choose { true -> { def alias = borrow_mut(x)\nreturn alias } " +
+        "_ -> { def alias = borrow_mut(x)\nreturn alias } }\n}\n"
+    call = "mutable_borrow_parameter(true, values[0])"
+  }
+  "use core\n" + declaration +
+      "fn generated() int {\n" +
+      "mut list<int> values = [7, 8]\n" +
+      "def exclusive = " + call + "\n" +
+      "values[" + to_str(store_index) + "] = 12\n" +
+      "def observed = exclusive\n0\n}\ngenerated()\n0\n"
+}
+
+fn check_returned_borrow(int store_index, bool via_local, bool via_branch,
+                         bool via_chain, bool via_early_return,
+                         bool via_match, bool via_match_alias,
+                         bool expected) int {
+  def source = returned_borrow_source(store_index, via_local, via_branch,
+                                      via_chain, via_early_return, via_match,
+                                      via_match_alias)
+  queue_case(
+      source, expected,
+      "generated returned-borrow store index=" + to_str(store_index) +
+          " via_local=" + to_str(via_local) +
+          " via_branch=" + to_str(via_branch) +
+          " via_chain=" + to_str(via_chain) +
+          " via_early_return=" + to_str(via_early_return) +
+          " via_match=" + to_str(via_match) +
+          " via_match_alias=" + to_str(via_match_alias))
+}
+
+fn check_try_returned_borrow(int store_index, bool expected) int {
+  def source =
+      "use core\n@returns_borrow(x)\n" +
+      "fn mutable_borrow_parameter(any x) any {\n" +
+      "try { return borrow_mut(x) } catch _ { return borrow_mut(x) }\n" +
+      "}\nfn generated() int {\n" +
+      "mut list<int> values = [7, 8]\n" +
+      "def exclusive = mutable_borrow_parameter(values[0])\n" +
+      "values[" + to_str(store_index) + "] = 12\n" +
+      "def observed = exclusive\n0\n}\ngenerated()\n0\n"
+  queue_case(source, expected,
+             "@returns_borrow try-return store index=" + to_str(store_index))
+}
+
+fn check_unverified_returned_borrow_body() int {
+  def source =
+      "use core\n@returns_borrow(x)\n" +
+      "fn mutable_borrow_parameter(any x) any {\n" +
+      "def marker = 1\nreturn borrow_mut(x)\n}\n" +
+      "fn generated() int {\n" +
+      "mut list<int> values = [7, 8]\n" +
+      "def exclusive = mutable_borrow_parameter(values[0])\n" +
+      "values[1] = 12\ndef observed = exclusive\n0\n}\n" +
+      "generated()\n0\n"
+  queue_failure(source, "unrecognized @returns_borrow body must fail closed",
+                "exclusive or unverified borrow")
+}
+
+fn check_forwarded_returned_borrow(int store_index, bool expected) int {
+  def source =
+      "use core\n@returns_borrow(x)\n" +
+      "fn direct_borrow(any x) any { return borrow_mut(x) }\n" +
+      "@returns_borrow(x)\n" +
+      "fn forward_borrow(any x) any { return direct_borrow(x) }\n" +
+      "@returns_borrow(x)\n" +
+      "fn forward_again(any x) any { return forward_borrow(x) }\n" +
+      "fn generated() int {\n" +
+      "mut list<int> values = [7, 8]\n" +
+      "def exclusive = forward_again(values[0])\n" +
+      "values[" + to_str(store_index) + "] = 12\n" +
+      "def observed = exclusive\n0\n}\ngenerated()\n0\n"
+  queue_case(source, expected,
+             "generated forwarded returned-borrow store index=" +
+                 to_str(store_index))
+}
+
+fn run_generated_cases(int first_case) str {
+  mut int case_index = first_case
+  while case_index < generated_cases.len {
+    def test_case = generated_cases.get(case_index, [])
+    def source = test_case.get(0, "")
+    def kind = test_case.get(1, 0)
+    def expected = test_case.get(2, false)
+    def label = test_case.get(3, "")
+    def reason = test_case.get(4, "")
+    def result = compile_generated(source)
+    def output = result.get("stdout", "")
+    def accepted = result.get("code", 127) == 0 &&
+                   str.find(output, "error:") < 0
+    if kind == 0 && accepted != expected {
+      return label + " expected=" + to_str(expected) + ": " + output +
+             "\ngenerated source:\n" + source
+    }
+    if kind == 1 && (accepted || str.find(output, reason) < 0) {
+      return label + ": " + output + "\ngenerated source:\n" + source
+    }
+    case_index += 4
+  }
+  ""
+}
+
+check_dynamic_dictionary(true)
+check_dynamic_dictionary(false)
+check_unverified_returned_borrow_body()
+check_forwarded_returned_borrow(1, true)
+check_forwarded_returned_borrow(0, false)
+
+check_pair(1, 2, true)
+check_pair(-1, -2, true)
+check_pair(0, 2, true)
+check_pair(1, 1, false)
+check_pair(-1, -1, false)
+check_pair(-1, 0, false)
+
+check_dictionary_pair("alpha", "beta", true)
+check_dictionary_pair("gamma", "alpha", true)
+check_dictionary_pair("beta", "beta", false)
+
+check_returned_borrow(1, false, false, false, false, false, false, true)
+check_returned_borrow(0, false, false, false, false, false, false, false)
+check_returned_borrow(1, true, false, false, false, false, false, true)
+check_returned_borrow(0, true, false, false, false, false, false, false)
+check_returned_borrow(1, false, true, false, false, false, false, true)
+check_returned_borrow(0, false, true, false, false, false, false, false)
+check_returned_borrow(1, false, false, true, false, false, false, true)
+check_returned_borrow(0, false, false, true, false, false, false, false)
+check_returned_borrow(1, false, false, false, true, false, false, true)
+check_returned_borrow(0, false, false, false, true, false, false, false)
+check_returned_borrow(1, false, false, false, false, true, false, true)
+check_returned_borrow(0, false, false, false, false, true, false, false)
+check_returned_borrow(1, false, false, false, false, false, true, true)
+check_returned_borrow(0, false, false, false, false, false, true, false)
+check_try_returned_borrow(1, true)
+check_try_returned_borrow(0, false)
+def worker0 = thread.thread_spawn(run_generated_cases, 0)
+def worker1 = thread.thread_spawn(run_generated_cases, 1)
+def worker2 = thread.thread_spawn(run_generated_cases, 2)
+def worker3 = thread.thread_spawn(run_generated_cases, 3)
+def failure0 = thread.thread_join(worker0)
+def failure1 = thread.thread_join(worker1)
+def failure2 = thread.thread_join(worker2)
+def failure3 = thread.thread_join(worker3)
+assert(failure0 == "", failure0)
+assert(failure1 == "", failure1)
+assert(failure2 == "", failure2)
+assert(failure3 == "", failure3)
+NY
+}

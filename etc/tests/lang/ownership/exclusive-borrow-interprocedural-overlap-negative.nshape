@@ -1,0 +1,46 @@
+shape ownership_exclusive_borrow_interprocedural_overlap_negative {
+  family "language/ownership"
+  generator "syntax"
+  features ["ownership", "borrow", "exclusive", "interprocedural", "negative"]
+  template ny-test-case
+  expect compile_failure
+  expect_message "borrow is live"
+  flags "--ownership-strict --native-only"
+  source ny <<'NY'
+use core
+
+@returns_borrow(x)
+fn mutable_borrow_parameter(any x) any {
+  def alias = borrow_mut(x)
+  return alias
+}
+
+@returns_borrow(x)
+fn mutable_borrow_parameter_branch(bool choose, any x) any {
+  if choose {
+    return borrow_mut(x)
+  } else {
+    return borrow_mut(x)
+  }
+}
+
+fn conflicting_write() int {
+  mut int value = 41
+  def exclusive = mutable_borrow_parameter(value)
+  value = 42
+  def observed = exclusive
+  observed
+}
+
+fn conflicting_branch_write() int {
+  mut list<int> values = [41, 43]
+  def exclusive = mutable_borrow_parameter_branch(true, values[0])
+  values[0] = 44
+  def observed = exclusive
+  observed
+}
+
+conflicting_write()
+conflicting_branch_write()
+NY
+}

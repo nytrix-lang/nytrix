@@ -1,0 +1,27 @@
+shape ownership_return_borrow_divergent_branch_alias {
+  family "compiler-errors/ownership"
+  generator "error"
+  features ["error", "ownership", "borrow", "return", "branch"]
+  template ny-compile-fail
+  expect compile_fail
+  flags "--ownership-strict"
+  expect_message "returning a borrow requires @returns_borrow(param)"
+  source ny <<'NY'
+use core
+
+@returns_borrow(a)
+fn bad(bool choose_b, any a, any b) any {
+  def borrowed = &a
+  if choose_b {
+    borrowed = &b
+  } else {
+    borrowed = &a
+  }
+  return borrowed
+}
+
+def int left = 1
+def int right = 2
+bad(true, left, right)
+NY
+}

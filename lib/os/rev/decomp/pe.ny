@@ -2,15 +2,16 @@
 ;; Portable Executable loader. Produces the same bin record contract as the ELF
 ;; loader so every decompiler pass (disassembly, lifting, decompilation) works
 ;; on PE binaries unchanged.
-module std.os.rev.decomp.pe(pe_header, sections, segments, symbols, functions, imports, relocations, strings, entry, arch, load)
-use std.core
-use std.core.str as str
-use std.os.path as path
-use std.os.disasm as dasm
-use std.os.rev.strings as rev_strings
-use std.os.rev.decomp.tools (tool_status)
-use std.os.rev.decomp.bytes (_u16, _u32, _u64, _slice, _slice_list, _cstring)
-use std.os.rev.decomp.source (_read, _source_data)
+module core.os.rev.decomp.pe(pe_header, sections, segments, symbols, functions, imports, relocations, strings, entry, arch, load)
+use core
+use core.primitives (band, bshr)
+use core.str as str
+use core.os.path as path
+use core.os.disasm as dasm
+use core.os.rev.strings as rev_strings
+use core.os.rev.decomp.tools (tool_status)
+use core.os.rev.decomp.bytes (_u16, _u32, _u64, _slice, _slice_list, _cstring)
+use core.os.rev.decomp.source (_read, _source_data)
 
 def _PE_MACHINE_I386 = 0x14c
 def _PE_MACHINE_AMD64 = 0x8664
@@ -53,8 +54,9 @@ fn _file_type(int id) str {
 }
 
 fn _sec_perms(int flags) str {
-   ((flags & _SCN_MEM_READ) != 0 ? "r" : "-") + ((flags & _SCN_MEM_WRITE) != 0 ? "w" : "-") +
-   ((flags & _SCN_MEM_EXECUTE) != 0 ? "x" : "-")
+   (band(flags, _SCN_MEM_READ) != 0 ? "r" : "-") +
+   (band(flags, _SCN_MEM_WRITE) != 0 ? "w" : "-") +
+   (band(flags, _SCN_MEM_EXECUTE) != 0 ? "x" : "-")
 }
 
 fn pe_header(any source) dict {
@@ -141,7 +143,7 @@ fn _pe_section_table(str b, dict h) list {
       def base = int(h.get("image_base", 0))
       out = out.append({"index": i + 1, "name": nm, "addr": base + vaddr, "rva": vaddr,
             "offset": rawptr, "size": rsize, "vsize": vsize, "flags": flags,
-            "exec": (flags & _SCN_MEM_EXECUTE) != 0, "load": (flags & 0x00000020) != 0,
+            "exec": band(flags, _SCN_MEM_EXECUTE) != 0, "load": band(flags, 0x00000020) != 0,
             "perms": _sec_perms(flags)})
       i += 1
    }
@@ -256,8 +258,9 @@ fn _imports_from_directories(str b, dict h, list ss) list {
          mut entry = 0
          if bits == 64 { entry = _u64(b, th_off, true) } else { entry = _u32(b, th_off, true) }
          if entry == 0 { break }
-         if (bits == 64 && (entry & 0x8000000000000000) != 0) || (bits != 64 && (entry & 0x80000000) != 0) {
-            def ord = bits == 64 ? (entry & 0xffff) : (entry & 0xffff)
+         if (bits == 64 && band(entry, 0x8000000000000000) != 0) ||
+         (bits != 64 && band(entry, 0x80000000) != 0) {
+            def ord = band(entry, 0xffff)
             out = out.append({"name": "ordinal_" + to_str(ord), "raw_name": dll + "#ordinal_" + to_str(ord),
                   "dll": dll, "ordinal": ord, "iat_rva": thunk_rva + ti * (bits == 64 ? 8 : 4),
                   "iat_addr": base + thunk_rva + ti * (bits == 64 ? 8 : 4), "shndx": 0})
@@ -345,8 +348,8 @@ fn _base_relocations(str b, dict h, list ss) list {
       mut i = 8
       while i + 2 <= blk && off + i + 2 <= end {
          def ent = _u16(b, off + i, true)
-         def typ = ent >> 12
-         def rel = ent & 0xfff
+         def typ = bshr(ent, 12)
+         def rel = band(ent, 0xfff)
          if typ != 0 {
             def addr = base + page + rel
             out = out.append({"index": out.len, "section": ".reloc", "offset": addr,
@@ -432,11 +435,11 @@ fn load(str p, any opts=dict()) dict {
    bin
 }
 
-fn _pe_u16(int v) str { chr(v & 0xff) + chr((v >> 8) & 0xff) }
+fn _pe_u16(int v) str { chr(band(v, 0xff)) + chr(band(bshr(v, 8), 0xff)) }
 
-fn _pe_u32(int v) str { _pe_u16(v) + _pe_u16(v >> 16) }
+fn _pe_u32(int v) str { _pe_u16(v) + _pe_u16(bshr(v, 16)) }
 
-fn _pe_u64(int v) str { _pe_u32(v) + _pe_u32(v >> 32) }
+fn _pe_u64(int v) str { _pe_u32(v) + _pe_u32(bshr(v, 32)) }
 
 fn _pe_name(str s, int n) str {
    mut out = s
@@ -475,5 +478,5 @@ fn _pe_sample() str {
    assert(ss[0].get("exec", false), "pe sample section exec")
    def sg = segments(b)
    assert(sg.len == 1 && sg[0].get("perms", "") == "r-x", "pe sample segment")
-   print("✓ std.os.rev.decomp.pe self-test passed")
+   print("✓ core.os.rev.decomp.pe self-test passed")
 }

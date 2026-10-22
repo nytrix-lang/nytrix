@@ -1,9 +1,9 @@
 ;; Keywords: editor project files tree workspace os ui render viewer text
 ;; Project file tree and workspace helpers for the editor sidebar.
 ;; References:
-;; - std.os.fs
-;; - std.os.path
-module std.os.ui.render.viewer.editor.project(
+;; - core.os.fs
+;; - core.os.path
+module core.os.ui.render.viewer.editor.project(
    TREE_ROW_H, TREE_HEADER_H, MAX_TREE_ROWS,
    new, refresh, refresh_status, refresh_git, toggle, create_file, rename_entry, move_entry,
    trash_entry, undo_file_op, redo_file_op, can_undo_file_op, can_redo_file_op,
@@ -12,13 +12,13 @@ module std.os.ui.render.viewer.editor.project(
    row_y, row_at, file_kind, file_icon, git_code, status_label
 )
 
-use std.core
-use std.core.str as str
-use std.math (max, min)
-use std.os (file_exists, file_read, file_write, getcwd, ticks)
-use std.os.fs as osfs
-use std.os.path as ospath
-use std.os.subprocess (run_capture)
+use core
+use core.str as str
+use core.math (max, min)
+use core.os (file_exists, file_read, file_write, getcwd, ticks)
+use core.os.fs as osfs
+use core.os.path as ospath
+use core.os.subprocess (run_capture)
 
 def TREE_ROW_H = 22.0
 def TREE_HEADER_H = 27.0

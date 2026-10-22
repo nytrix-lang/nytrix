@@ -1,0 +1,26 @@
+shape str_split_words {
+  family "lang"
+  features ["string", "split", "whitespace"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core.str
+
+assert(str.repeat("ab", 3) == "ababab", "repeat copies the full source each time")
+assert(str.repeat("ab", 0) == "", "repeat handles zero repetitions")
+
+def words = str.split_words(" \talpha\t  beta\n gamma\r ")
+assert(words.len == 3, "split_words trims edge whitespace and skips empty fields")
+assert(words.get(0, "") == "alpha", "split_words trims token prefix and suffix")
+assert(words.get(1, "") == "beta", "split_words preserves token order")
+assert(words.get(2, "") == "gamma", "split_words trims final token")
+
+def embedded_space = str.split_words("left\tright")
+assert(embedded_space.len == 1 && embedded_space.get(0, "") == "left\tright",
+       "split_words only separates on literal spaces")
+assert(str.split_words(" \t\r\n ").len == 0,
+       "split_words handles all-whitespace input")
+assert(str.split_words(42).len == 0,
+       "split_words handles non-string input")
+NY
+}

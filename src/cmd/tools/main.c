@@ -13,7 +13,7 @@
 #include <string.h>
 
 #include "base/args.h"
-#include "tool.h"
+#include "cmd/fmt/ui.h"
 
 /*
  * Shared utility code uses the process-wide logging/color state that the
@@ -26,16 +26,19 @@ int verbose_enabled = 0;
 #include "../fmt/fmt.h"
 #endif
 #ifdef NY_TOOL_HAS_PERF
-#include "../perf/perf.h"
+#include "../test/perf/perf.h"
 #endif
 #ifdef NY_TOOL_HAS_TEST
 #include "../test/test.h"
+#endif
+#ifdef NY_TOOL_HAS_FUZZ
+#include "../test/fuzz/core.h"
 #endif
 #ifdef NY_TOOL_HAS_WEB
 #include "../web/web.h"
 #endif
 #ifdef NY_TOOL_HAS_MAKE
-#include "../make/make.h"
+#include "make/make.h"
 #endif
 
 #ifndef NY_TOOL_ENTRY
@@ -78,7 +81,8 @@ static int ny_tool_filter_global_args(int *argc, char **argv) {
   for (int r = 1; r < *argc; r++) {
     int color_mode = -2;
     int color_idx = r;
-    int color_rc = ny_arg_consume_color(&color_idx, *argc, argv, &color_mode, err, sizeof(err));
+    int color_rc = ny_arg_consume_color(&color_idx, *argc, argv, &color_mode,
+                                        err, sizeof(err));
     if (color_rc < 0) {
       nyt_err("ny-tools", "%s", err);
       return 0;
@@ -105,7 +109,8 @@ int main(int argc, char **argv) {
   }
 
   int extra = 0;
-  if (NY_TOOL_ENTRY[0] == '\0' && argc > 1 && argv[1] && strncmp(argv[1], "ny-", 3) == 0)
+  if (NY_TOOL_ENTRY[0] == '\0' && argc > 1 && argv[1] &&
+      strncmp(argv[1], "ny-", 3) == 0)
     extra = 1;
 
   if (strcmp(tool, "fmt") == 0) {
@@ -126,6 +131,10 @@ int main(int argc, char **argv) {
   }
   if (strcmp(tool, "test") == 0) {
 #ifdef NY_TOOL_HAS_TEST
+#ifdef NY_TOOL_HAS_FUZZ
+    if (argc - extra > 1 && strcmp(argv[extra + 1], "fuzz") == 0)
+      return ny_fuzz_main(argc - extra, argv + extra);
+#endif
     return ny_test_main(argc - extra, argv + extra);
 #else
     nyt_err("ny-test", "this binary was built without native test support");

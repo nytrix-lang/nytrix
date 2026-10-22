@@ -1,0 +1,69 @@
+shape codeof_missing_declaration {
+  family "compiler-errors/comptime"
+  generator "error"
+  features ["error", "comptime", "codeof", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "codeof cannot find this declaration"
+  source ny <<'NY'
+comptime template insert_code(declaration) {
+   ${declaration}
+}
+comptime emit insert_code(codeof(missing_declaration))
+NY
+}
+
+shape codeof_rejects_assignment_target {
+  family "compiler-errors/comptime"
+  generator "error"
+  features ["error", "comptime", "codeof", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "codeof cannot find this declaration"
+  source ny <<'NY'
+assignment_only_target = 1
+comptime template insert_code(value) {
+   ${value}
+}
+comptime emit insert_code(codeof(assignment_only_target))
+NY
+}
+
+shape codeof_ambiguous_unqualified_declaration {
+  family "compiler-errors/comptime"
+  generator "error"
+  features ["error", "comptime", "codeof", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "codeof declaration name is ambiguous"
+  source ny <<'NY'
+module CodeofLeft {
+   fn same_name() int { return 1 }
+}
+module CodeofRight {
+   fn same_name() int { return 2 }
+}
+comptime template insert_code(declaration) {
+   ${declaration}
+}
+comptime emit insert_code(codeof(same_name))
+NY
+}
+
+shape codeof_declaration_rejected_in_expression_slot {
+  family "compiler-errors/comptime"
+  generator "error"
+  features ["error", "comptime", "codeof", "splice-category", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "block code cannot be spliced into an expression"
+  source ny <<'NY'
+fn codeof_source() int { return 42 }
+comptime template insert_expression(declaration) {
+   fn invalid_codeof_expression() int {
+      return ${declaration}
+   }
+}
+comptime emit insert_expression(codeof(codeof_source))
+NY
+}

@@ -1,0 +1,27 @@
+shape ownership_allowance_fixed_range_match_reassignment_positive {
+  family "language/ownership"
+  generator "regression"
+  features [ownership allowance fixed-range match reassignment positive]
+  template ny-test-case
+  flags_matrix "--ownership-strict --native --run --nyir-verify; --ownership-strict --native-backend=llvm --jit --jit-engine=mcjit --nyir-verify; --ownership-strict --native-backend=llvm --jit --jit-engine=orc --nyir-verify; --ownership-strict --native-only --nyir-verify"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+@allowance(x, [0,0])
+fn match_reassignment(int selector, int x) int {
+  for index in 0..2 {
+    match selector {
+      0 -> { x = 7 }
+      _ -> { x = 8 }
+    }
+  }
+  0
+}
+
+assert(match_reassignment(0, 3) == 0,
+       "each matched reassignment starts a new zero-use epoch")
+assert(match_reassignment(1, 3) == 0,
+       "the default arm also starts a new allowance epoch")
+NY
+}

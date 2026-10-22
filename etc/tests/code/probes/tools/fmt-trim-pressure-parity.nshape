@@ -1,0 +1,67 @@
+shape fmt_trim_pressure_parity {
+  family "probe/tools"
+  generator "embedded"
+  features ["formatter", "trim", "pressure", "parity"]
+  template ny-test-case
+  flags "--native-only"
+  timeout 90
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.subprocess (run_capture)
+use core.str as str
+def ny = env("NYTRIX_NY_FULL_BIN")
+def fmt = env("NYTRIX_TEST_FMT_BIN")
+def cmake = env("NYTRIX_CMAKE_COMMAND")
+def dir = temp_dir() + "/fmt-trim-pressure-" + to_str(pid())
+def made = run_capture([cmake, "-E", "make_directory", dir], [], nil, false)
+assert(made.get("code", 127) == 0, "create trim pressure directory")
+def pressure = dir + "/pressure.ny"
+mut pressure_source = "fn pressure(values) {\n" +
+   "   def defaulted = values.get(\"fallback\", list())\n" +
+   "   def setting = env(\"MODE\")\n   def buffer = malloc(8)\n" +
+   "   def grown = append([], 1)\n   def selected = true ? 1 : 2\n"
+for index in 1..36 {
+   pressure_source += "   def value_" + to_str(index) +
+      " = dict_get(values, " + to_str(index) + ")\n"
+}
+pressure_source += "   return 0\n}\n"
+def repeated = dir + "/repeated.ny"
+mut repeated_source = "fn repeated(): int {\n"
+for index in 1..21 { repeated_source += "   def stable_value = repeated_pressure_expression()\n" }
+repeated_source += "   return 0\n}\n"
+assert(is_ok(file_write(pressure, pressure_source)) &&
+       is_ok(file_write(repeated, repeated_source)), "write trim pressure sources")
+def trim_c = run_capture([fmt, "--trim", "--json", pressure, repeated], [], nil, false)
+def trim_ny = run_capture([ny, "fmt", "--trim", "--json", pressure, repeated], [], nil, false)
+def trim_output = trim_ny.get("stdout", "")
+assert(trim_c.get("code", 127) == 0 && trim_ny.get("code", 127) == 0 &&
+       trim_c.get("stdout", "") == trim_output, "trim pressure JSON parity")
+mut hot = 0
+for line in str.split(trim_output, "\n") {
+   if str.find(line, "\"code\": \"NYAUD3001\"") >= 0 { hot += 1 }
+}
+for expected in ["\"trim_targets\": 2", "\"dict_gets\": 36",
+                 "\"repeated_lines\": 20", "\"untyped_params\": 1",
+                 "\"missing_returns\": 1"] {
+   assert(str.find(trim_output, expected) >= 0,
+          "trim pressure metric missing " + expected)
+}
+assert(hot == 2, "trim pressure reports exactly two high-pressure functions")
+def bloat_c = run_capture([fmt, "--bloat", "--json", pressure, repeated], [], nil, false)
+def bloat_ny = run_capture([ny, "fmt", "--bloat", "--json", pressure, repeated],
+                           [], nil, false)
+def bloat_output = bloat_ny.get("stdout", "")
+assert(bloat_c.get("code", 127) == 0 && bloat_ny.get("code", 127) == 0 &&
+       bloat_c.get("stdout", "") == bloat_output,
+       "bloat pressure JSON parity")
+for expected in ["\"hot_files\": 1", "\"hot_functions\": 1",
+                 "\"code\": \"NYAUD1001\"", "\"code\": \"NYAUD1002\""] {
+   assert(str.find(bloat_output, expected) >= 0,
+          "bloat pressure finding missing " + expected)
+}
+def cleanup = run_capture([cmake, "-E", "rm", "-rf", dir], [], nil, false)
+assert(cleanup.get("code", 127) == 0, "remove trim pressure directory")
+print("FMT_TRIM_PRESSURE_PARITY_OK")
+NY
+}

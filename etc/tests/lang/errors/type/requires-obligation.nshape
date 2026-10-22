@@ -1,0 +1,17 @@
+shape type-requires-obligation {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "requires", "obligation"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "precondition obligation failed"
+  source ny <<'NY'
+use core
+
+fn natsum(int n) int requires n >= 0 {
+   n * (n + 1) / 2
+}
+
+natsum(-1)
+NY
+}

@@ -1,15 +1,16 @@
 ;; Keywords: render opengl gl draw 2d 3d primitives
-;; References: std.os.ui.render.gl.state std.os.ui.render.gl.texture std.os.ui.render.matrix
-module std.os.ui.render.gl.draw(_store_line_quad, _store_rect, alpha8, ax, base_b, base_g, base_r, batch, bx, c, co, cx0, done, draw_glyph_bitmap_scaled, draw_line, draw_line_3d, draw_line_fast, draw_lines_2d_fast_ptr, draw_lines_raw, draw_points_raw, draw_quad_3d, draw_rect, draw_rect_fast, draw_rect_outline_fast, draw_rect_tex, draw_rect_tex_uv, draw_rect_tex_uv_rot, draw_rects_fast_ptr, draw_triangle_3d, draw_vertices, draw_vertices_indexed_raw, drew, dx, dxs, hs, hw, i, ibase, idx_ty, ix, j, last_x, len, max_batch, nl, nx, p, p2, px, px_off, pxw, rad, rec, rr, s, samples, si, steps, sum_a, sum_b, sum_g, sum_r, sx, sx0, sx1, sy, sy0, sy1, t, verts, x, x0, x1, xx, y, yy)
-use std.core
-use std.math
-use std.os.ui.render.shared as render_shared
-use std.os.ui.render.gl.constants as gl_constants
-use std.os.ui.render.gl.state as gl_state
-use std.os.ui.render.gl.texture as gl_tex
-use std.os.ui.render.matrix
+;; References: core.os.ui.render.gl.state core.os.ui.render.gl.texture core.os.ui.render.matrix
+module core.os.ui.render.gl.draw(_store_line_quad, _store_rect, alpha8, ax, base_b, base_g, base_r, batch, bx, c, co, cx0, done, draw_glyph_bitmap_scaled, draw_line, draw_line_3d, draw_line_fast, draw_lines_2d_fast_ptr, draw_lines_raw, draw_points_raw, draw_quad_3d, draw_rect, draw_rect_fast, draw_rect_outline_fast, draw_rect_tex, draw_rect_tex_uv, draw_rect_tex_uv_rot, draw_rects_fast_ptr, draw_triangle_3d, draw_vertices, draw_vertices_indexed_raw, drew, dx, dxs, hs, hw, i, ibase, idx_ty, ix, j, last_x, len, max_batch, nl, nx, p, p2, px, px_off, pxw, rad, rec, rr, s, samples, si, steps, sum_a, sum_b, sum_g, sum_r, sx, sx0, sx1, sy, sy0, sy1, t, verts, x, x0, x1, xx, y, yy)
+use core
+use core.math
+use core.os.ui.render.shared as render_shared
+use core.os.ui.render.shared (VERTEX_STRIDE)
+use core.os.ui.render.gl.constants as gl_constants
+use core.os.ui.render.gl.state as gl_state
+use core.os.ui.render.gl.texture as gl_tex
+use core.os.ui.render.matrix
 
-def _STRIDE = render_shared.VERTEX_STRIDE
+def _STRIDE = VERTEX_STRIDE
 
 fn draw_vertices(any p, int count, int tex_id=-1, bool use_material=false) bool {
    "Draws packed 64-byte vertices through optimized OpenGL calls."
@@ -20,15 +21,18 @@ fn draw_vertices(any p, int count, int tex_id=-1, bool use_material=false) bool 
       return true
    }
    _enable_draw_state(tex_id, use_material)
+   gl_state._check_gl_error("draw_vertices_state")
    if _upload_dynamic_vertices(p, count) {
       _setup_arrays_vbo(0, !use_material || _material_uses_vertex_color(), use_material && !_current_unlit)
       _ny_glDrawArrays(GL_TRIANGLES, 0, count)
+      gl_state._check_gl_error("draw_vertices")
       ;; Skip defensive unbind: _bind_buffer in state.ny caches the binding,
       ;; so the next draw's _upload_dynamic_vertices will see the same buffer
       ;; already bound and short-circuit. This eliminates 1 glBindBuffer per
       ;; draw call on the hot terminal text path.
    } else {
       if !_draw_immediate_vertices(p, count, GL_TRIANGLES, !use_material || _material_uses_vertex_color(), use_material && !_current_unlit) { return false }
+      gl_state._check_gl_error("draw_vertices_immediate")
    }
    _record_draw(count, false, false)
 }
@@ -236,6 +240,7 @@ fn draw_fan_2d(f64 cx, f64 cy, f64 rx, f64 ry, int segments, f64 start_rad, f64 
 fn draw_ring_2d(f64 cx, f64 cy, f64 inner_r, f64 outer_r, int segments, f64 r, f64 g, f64 b, f64 a) bool {
    "Draws a filled 2D ring with OpenGL."
    if segments < 3 { segments = 3 }
+   if outer_r - inner_r <= 0.0 { return false }
    if _soft_enabled() {
       _record_draw(segments * 6, false, false)
       return true
@@ -287,7 +292,7 @@ fn draw_rect_outline_fast(f64 x, f64 y, f64 w, f64 h, int color_u32, f64 thickne
    draw_vertices(p, 24, -1)
 }
 
-fn draw_rects_fast_ptr(any rects, int count, int stride=20) int {
+fn draw_rects_fast_ptr(ptr rects, int count, int stride=20) int {
    "Draws packed rect records through a batched OpenGL vertex stream."
    if !rects || count <= 0 { return 0 }
    if stride < 20 { stride = 20 }
@@ -304,7 +309,8 @@ fn draw_rects_fast_ptr(any rects, int count, int stride=20) int {
    def max_batch = 2048
    mut done = 0
    while done < count {
-      def batch = min(max_batch, count - done)
+      mut int batch = count - done
+      if batch > max_batch { batch = max_batch }
       _reset_ui_draw_state()
       def p = _ensure_scratch(batch * _STRIDE * 6)
       if !p { return done }
@@ -325,7 +331,7 @@ fn draw_rects_fast_ptr(any rects, int count, int stride=20) int {
    done
 }
 
-fn draw_lines_2d_fast_ptr(any lines, int count, int stride=24) int {
+fn draw_lines_2d_fast_ptr(ptr lines, int count, int stride=24) int {
    "Draws packed 2D line records through a batched OpenGL vertex stream."
    if !lines || count <= 0 { return 0 }
    if stride < 24 { stride = 24 }
@@ -347,7 +353,8 @@ fn draw_lines_2d_fast_ptr(any lines, int count, int stride=24) int {
    def max_batch = 2048
    mut done = 0
    while done < count {
-      def batch = min(max_batch, count - done)
+      mut int batch = count - done
+      if batch > max_batch { batch = max_batch }
       _reset_ui_draw_state()
       def p = _ensure_scratch(batch * _STRIDE * 6)
       if !p { return done }

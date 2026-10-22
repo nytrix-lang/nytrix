@@ -8,23 +8,23 @@ checks under `etc/tests/`.
 
 | Area | Files |
 | --- | --- |
-| Terminal | [conway.ny](../../etc/projects/os/conway.ny), [matrix.ny](../../etc/projects/os/matrix.ny), [ant.ny](../../etc/projects/os/ant.ny) |
-| OS | [args.ny](../../etc/projects/os/args.ny), [server.ny](../../etc/projects/os/server.ny), [ffi.ny](../../etc/projects/os/ffi.ny), [sound.ny](../../etc/projects/os/sound.ny) |
+| Terminal | [conway.ny](../../etc/projects/conway.ny), [matrix.ny](../../etc/projects/matrix.ny), [ant.ny](../../etc/projects/ant.ny) |
+| OS | [args.ny](../../etc/projects/args.ny), [server.ny](../../etc/projects/server.ny), [ffi.ny](../../etc/projects/ffi.ny), [sound.ny](../../etc/projects/sound.ny) |
 | UI | [term.ny](../../etc/projects/ui/term.ny), [input.ny](../../etc/projects/ui/input.ny), [monitor.ny](../../etc/projects/ui/monitor.ny), [engine.ny](../../etc/projects/ui/engine.ny), [editor.ny](../../etc/projects/ui/editor.ny) |
 
 Run one directly:
 
 ```bash
-ny etc/projects/os/conway.ny
+ny etc/projects/conway.ny
 ```
 
 Build a native executable:
 
 ```bash
-ny -o build/conway etc/projects/os/conway.ny
+ny -o build/conway etc/projects/conway.ny
 ```
 
-Build the browser wasm runner:
+Build the browser Wasm runner:
 
 ```bash
 ./make web-demos
@@ -36,16 +36,16 @@ Load a `.wasm` file from the page, or add explicit browser-ready entries to
 
 ## Focused Checks
 
-Runtime checks under `etc/tests/runtime/` are the quickest way to inspect one
-language surface in isolation:
+Focused checks under `etc/tests/` exercise one language surface or runtime
+boundary in isolation:
 
 | Topic | Files |
 | --- | --- |
-| ADTs and matching | [adt.ny](../../etc/tests/runtime/language/adt.ny), [match.ny](../../etc/tests/runtime/language/match.ny) |
-| Concurrency and threads | [concurrency.ny](../../etc/tests/runtime/execution/concurrency.ny), [thread.ny](../../etc/tests/runtime/execution/thread.ny) |
-| Comptime | [comptime.ny](../../etc/tests/runtime/compiler/comptime.ny), [table.ny](../../etc/tests/runtime/values/table.ny) |
-| Native boundary | [ffi.ny](../../etc/tests/interop/ny/ffi.ny), [extern.ny](../../etc/tests/interop/ny/extern.ny), [asm.ny](../../etc/tests/interop/ny/asm.ny) |
-| Ownership and safety | [ownership.ny](../../etc/tests/runtime/ownership/ownership.ny), [safe.ny](../../etc/tests/runtime/ownership/safe.ny), [memory.ny](../../etc/tests/runtime/values/memory.ny) |
+| ADTs and matching | [adt.nshape](../../etc/tests/lang/types/aggregates/adt.nshape), [match.nshape](../../etc/tests/lang/patterns/match.nshape) |
+| Concurrency and threads | [concurrency.nshape](../../etc/tests/lang/concurrency/concurrency.nshape), [thread.nshape](../../etc/tests/lang/concurrency/thread.nshape) |
+| Comptime | [comptime.nshape](../../etc/tests/lang/comptime/comptime.nshape), [table.nshape](../../etc/tests/lang/values/table.nshape) |
+| Native boundary | [ffi.nshape](../../etc/tests/lang/interop/ny/ffi.nshape), [extern.nshape](../../etc/tests/lang/interop/ny/extern.nshape), [asm.nshape](../../etc/tests/lang/interop/ny/asm.nshape) |
+| Ownership and safety | [ownership.nshape](../../etc/tests/lang/memory/ownership.nshape), [safe.nshape](../../etc/tests/lang/memory/safe.nshape), [memory.nshape](../../etc/tests/lang/memory/memory.nshape) |
 
 Run a focused test by pattern:
 
@@ -56,12 +56,17 @@ ny test --pattern ownership
 
 ## Benchmarks
 
-Bench examples live under `etc/tests/bench/`. Use them for rough comparisons:
+Bench examples live under `etc/tests/bench/`. The `.nshape` files are harness
+fixtures, not standalone Nytrix programs. Run them through the benchmark
+runner:
 
 ```bash
 ny perf
-ny -o build/cache/bench/sieve etc/tests/bench/sieve.nshape
+ny test --pattern sieve
 ```
+
+Use the benchmark guide for compiler flags, warmups, checksums, and comparative
+measurements; a single fixture run is only a correctness check.
 
 ## Related
 

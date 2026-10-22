@@ -1,0 +1,15 @@
+shape stdlib_float_predicate_identity {
+  family "runtime/modules/use"
+  generator "regression"
+  features [module identity float predicate]
+  template ny-test-case
+  flags_matrix "--native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only --native-backend=x86_64"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.math.float as floating
+assert(floating.is_float(1.25), "registered float predicate accepts floats")
+assert(!floating.is_float(73), "registered float predicate rejects integers")
+0
+NY
+}

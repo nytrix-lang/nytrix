@@ -1,0 +1,15 @@
+shape gensym_full_prefix {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "comptime", "gensym", "determinism"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-only; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+def first = gensym("temporary_temporary_temporary_temporary_temporary_temporary_temporary_temporary_temporary_temporary_temporary_temporary_temporary_temporary_temporary_temporary_temporary_temporary_temporary_temporary_")
+def second = gensym("temporary_temporary_temporary_temporary_temporary_temporary_temporary_temporary_temporary_temporary_temporary_temporary_temporary_temporary_temporary_temporary_temporary_temporary_temporary_temporary_")
+assert(first == "__ny_gensym_1_temporary_temporary_temporary_temporary_temporary_temporary_temporary_temporary_temporary_temporary_temporary_temporary_temporary_temporary_temporary_temporary_temporary_temporary_temporary_temporary_", "gensym preserves its complete prefix")
+assert(second == "__ny_gensym_2_temporary_temporary_temporary_temporary_temporary_temporary_temporary_temporary_temporary_temporary_temporary_temporary_temporary_temporary_temporary_temporary_temporary_temporary_temporary_temporary_", "long generated names remain deterministic and distinct")
+NY
+}

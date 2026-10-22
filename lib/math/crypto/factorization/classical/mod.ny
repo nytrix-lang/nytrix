@@ -1,11 +1,12 @@
 ;; Keywords: factorization classical qs mpqs siqs gf2 dixon
-;; References: std.math.crypto.factorization.classical.dixon std.math.crypto.factorization.classical.qs std.math.crypto.factorization.classical.gf2
-module std.math.crypto.factorization.classical(dixon_factor, euler_factor, gf2_nullspace, gf2_nullspace_report, sparse_gf2_nullspace, sparse_gf2_nullspace_report, packed_gf2_nullspace, packed_gf2_nullspace_report, sparse_gf2_matvec_report, sparse_gf2_normal_matvec_report, packed_gf2_matvec_report, packed_gf2_normal_matvec_report, gf2_matrix_precondition_report, gf2_dependency_candidates, gf2_dependency_candidates_report, gf2_dependency_pipeline_report, block_lanczos_gf2_nullspace, block_lanczos_gf2_report, block_wiedemann_gf2_nullspace, block_wiedemann_gf2_report, qs_relation_filter_report, qs_multiplier_report, mpqs_multiplier_report, siqs_polynomial_report, siqs_cutoff_tune_report, siqs_relation_report, quadratic_sieve_factor, quadratic_sieve_factor_report, siqs_factor, siqs_factor_report, qs_large_prime_filter_report, qs_batch_cofactor_report, mpqs_sieve_parameter_report, mpqs_source_work_plan_report, mpqs_work_plan_report, mpqs_byte_sieve_report, mpqs_a_divisor_cycle_report, mpqs_source_factor, mpqs_source_factor_report, mpqs_factor, mpqs_factor_report)
-use std.math.crypto.factorization.classical.dixon as dixon
+;; Exposes the classical factorization and quadratic-sieve algorithms.
+;; References: core.math.crypto.factorization.classical.dixon core.math.crypto.factorization.classical.qs core.math.crypto.factorization.classical.gf2
+module core.math.crypto.factorization.classical(dixon_factor, euler_factor, gf2_nullspace, gf2_nullspace_report, sparse_gf2_nullspace, sparse_gf2_nullspace_report, packed_gf2_nullspace, packed_gf2_nullspace_report, sparse_gf2_matvec_report, sparse_gf2_normal_matvec_report, packed_gf2_matvec_report, packed_gf2_normal_matvec_report, gf2_matrix_precondition_report, gf2_dependency_candidates, gf2_dependency_candidates_report, gf2_dependency_pipeline_report, block_lanczos_gf2_nullspace, block_lanczos_gf2_report, block_wiedemann_gf2_nullspace, block_wiedemann_gf2_report, qs_relation_filter_report, qs_multiplier_report, mpqs_multiplier_report, siqs_polynomial_report, siqs_cutoff_tune_report, siqs_relation_report, quadratic_sieve_factor, quadratic_sieve_factor_report, siqs_factor, siqs_factor_report, qs_large_prime_filter_report, qs_batch_cofactor_report, mpqs_sieve_parameter_report, mpqs_source_work_plan_report, mpqs_work_plan_report, mpqs_byte_sieve_report, mpqs_a_divisor_cycle_report, mpqs_source_factor, mpqs_source_factor_report, mpqs_factor, mpqs_factor_report)
+use core.math.crypto.factorization.classical.dixon as dixon
 
 def dixon_factor = dixon.dixon_factor
 def euler_factor = dixon.euler_factor
-use std.math.crypto.factorization.classical.gf2 as gf2
+use core.math.crypto.factorization.classical.gf2 as gf2
 
 def block_lanczos_gf2_nullspace = gf2.block_lanczos_gf2_nullspace
 def block_lanczos_gf2_report = gf2.block_lanczos_gf2_report
@@ -35,7 +36,7 @@ fn sparse_gf2_normal_matvec_report(list sparse_rows, list vector, int width=0) d
 
 def sparse_gf2_nullspace = gf2.sparse_gf2_nullspace
 def sparse_gf2_nullspace_report = gf2.sparse_gf2_nullspace_report
-use std.math.crypto.factorization.classical.qs as qs
+use core.math.crypto.factorization.classical.qs as qs
 
 def mpqs_a_divisor_cycle_report = qs.mpqs_a_divisor_cycle_report
 def mpqs_byte_sieve_report = qs.mpqs_byte_sieve_report
@@ -124,5 +125,5 @@ fn require_factor_pair(any factors, any a, any b, str label) any {
    def plan = mpqs_work_plan_report(8051)
    assert(plan.get("method") == "mpqs-work-plan", "mpqs work plan method")
    assert(dict_has(plan, "requested_max_relations"), "mpqs work plan max rels")
-   print("✓ std.math.crypto.factorization.classical self-test passed")
+   print("✓ core.math.crypto.factorization.classical self-test passed")
 }

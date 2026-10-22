@@ -2,11 +2,11 @@
 ;; Lattice routines for noisy linear relation recovery.
 ;; Useful when most equations are correct but some bits are flipped.
 ;; References:
-;; - std.math.crypto.lattice
-;; - std.math.crypto
-module std.math.crypto.lattice.noisy_linear(score_gf2_candidate, inlier_mask_gf2, solve_noisy_gf2)
-use std.core
-use std.math.crypto.gf as gf
+;; - core.math.crypto.lattice
+;; - core.math.crypto
+module core.math.crypto.lattice.noisy_linear(score_gf2_candidate, inlier_mask_gf2, solve_noisy_gf2)
+use core
+use core.math.crypto.gf as gf
 
 fn _bit(any x) int { int(x) & 1 }
 
@@ -19,7 +19,7 @@ fn _row_dot_gf2(any row, list x) int {
    mut acc = 0
    mut j = 0
    while j < x.len {
-      if _bit(_at(row, j, 0)) != 0 && _bit(x[j]) != 0 { acc = acc ^^ 1 }
+      if _bit(_at(row, j, 0)) != 0 && _bit(x[j]) != 0 { acc = acc ^ 1 }
       j += 1
    }
    acc
@@ -179,5 +179,5 @@ fn solve_noisy_gf2(any A, any b, int rounds=0, any min_inliers=nil, int seed=133
    assert(r != nil && r[0] == [1, 0, 1], "noisy gf2 exact solve")
    assert(score_gf2_candidate(A, b, r[0]) == 4, "noisy gf2 score")
    assert(inlier_mask_gf2(A, b, r[0]) == [1, 1, 1, 1], "noisy gf2 mask")
-   print("✓ std.math.crypto.lattice.noisy_linear self-test passed")
+   print("✓ core.math.crypto.lattice.noisy_linear self-test passed")
 }

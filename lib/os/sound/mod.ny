@@ -1,16 +1,16 @@
 ;; Keywords: sound diag mixer source res os
 ;; Sound facade for sources, mixers, backend selection, and one-shot playback.
 ;; References:
-;; - std.os
-module std.os.sound(init, shutdown, load, play, stop, stop_all, is_playing, set_volume, get_volume, set_pitch, get_pitch, set_pan, get_pan, set_master_volume, get_master_volume, set_fx_enabled, fx_enabled, set_fx_param, get_fx_param, reset_fx, fx_preset, play_oneshot, get_backend_name, web_play, diag, probe, probe_text, print_probe)
-use std.core
-use std.os.sound.backend as snd_backend
-use std.os.sound.res as res
+;; - core.os
+module core.os.sound(init, shutdown, load, play, stop, stop_all, is_playing, set_volume, get_volume, set_pitch, get_pitch, set_pan, get_pan, set_master_volume, get_master_volume, set_fx_enabled, fx_enabled, set_fx_param, get_fx_param, reset_fx, fx_preset, play_oneshot, get_backend_name, web_play, diag, probe, probe_text, print_probe)
+use core
+use core.os.sound.backend as snd_backend
+use core.os.sound.res as res
 
-fn init(any force_async=true) any {
+fn init(bool force_async=true) bool {
    "Initializes module state and starts the async mixer by default."
    res.init()
-   return snd_backend.init(force_async)
+   snd_backend.init(force_async)
 }
 
 fn shutdown() any {
@@ -26,7 +26,7 @@ fn load(any path) any {
 
 fn play(any sound, any pitch=1.0, any vol=1.0, any looping=false, any pan=0.0) any {
    "Plays a sound object. Returns a sound instance handle."
-   return snd_backend.play(sound, pitch, vol, looping, pan)
+   return snd_backend.play(sound, pitch, vol, bool(looping), pan)
 }
 
 fn stop(any inst) any {
@@ -100,9 +100,10 @@ fn get_backend_name() str {
 
 fn web_play(any path) bool {
    "On the browser target, decodes the packed audio asset at `path` and starts
-   one-shot playback through Web Audio. Native desktop returns true as a no-op ;
-   the browser host echoes decode results into data-audio-* attributes."
-   true
+   one-shot playback through Web Audio. Native desktop returns false because
+   playback is unavailable ; the browser host echoes decode results into
+   data-audio-* attributes."
+   __sound_web_play(path)
 }
 
 fn set_fx_enabled(bool enabled=true) any { snd_backend.set_fx_enabled(enabled) }
@@ -116,7 +117,7 @@ fn get_fx_param(str name) f64 { snd_backend.get_fx_param(name) }
 fn reset_fx() any { snd_backend.reset_fx() }
 
 fn fx_preset(str name) any { snd_backend.fx_preset(name) }
-use std.os.sound.diag as diag
+use core.os.sound.diag as diag
 
 fn probe() any {
    "Implements `probe`."

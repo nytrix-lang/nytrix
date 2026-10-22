@@ -53,6 +53,11 @@ int ny_write_file(const char *path, const char *content, size_t len);
 bool ny_write_if_changed(const char *path, const char *content, size_t len);
 void ny_write_text_file(const char *path, const char *contents);
 int ny_copy_file(const char *src, const char *dst);
+bool ny_sha256_file_hex(const char *path, char out[65]);
+/* Creates path and its parents; fails if a component cannot be a directory. */
+bool ny_mkdir_p(const char *path);
+/* Same operation with the POSIX mode used for newly created components. */
+bool ny_mkdir_p_mode(const char *path, unsigned int mode);
 static inline int ny_ensure_dir(const char *path) {
   struct stat st = {0};
   if (stat(path, &st) == -1) {
@@ -66,27 +71,12 @@ static inline int ny_ensure_dir(const char *path) {
 }
 
 static inline void ny_ensure_dir_recursive(const char *path) {
-  if (!path || !*path)
-    return;
-  char tmp[1024];
-  snprintf(tmp, sizeof(tmp), "%s", path);
-  size_t len = strlen(tmp);
-  if (len == 0)
-    return;
-  if (tmp[len - 1] == '/')
-    tmp[len - 1] = 0;
-  for (char *p = tmp + 1; *p; p++) {
-    if (*p != '/')
-      continue;
-    *p = 0;
-    ny_ensure_dir(tmp);
-    *p = '/';
-  }
-  ny_ensure_dir(tmp);
+  (void)ny_mkdir_p(path);
 }
 
 const char *ny_get_temp_dir(void);
-static inline void ny_join_path(char *out, size_t out_len, const char *dir, const char *name) {
+static inline void ny_join_path(char *out, size_t out_len, const char *dir,
+                                const char *name) {
   if (!out || out_len == 0)
     return;
   if (!dir || !*dir) {
@@ -94,13 +84,15 @@ static inline void ny_join_path(char *out, size_t out_len, const char *dir, cons
     return;
   }
   size_t dlen = strlen(dir);
-  int needs_sep = (dlen > 0 && dir[dlen - 1] != '/' && dir[dlen - 1] != '\\') ? 1 : 0;
+  int needs_sep =
+      (dlen > 0 && dir[dlen - 1] != '/' && dir[dlen - 1] != '\\') ? 1 : 0;
   if (needs_sep)
     snprintf(out, out_len, "%s/%s", dir, name ? name : "");
   else
     snprintf(out, out_len, "%s%s", dir, name ? name : "");
 }
-bool ny_extract_line(const char *src, int line, const char **out_start, size_t *out_len);
+bool ny_extract_line(const char *src, int line, const char **out_start,
+                     size_t *out_len);
 
 char *ny_strdup(const char *s);
 
@@ -112,8 +104,9 @@ char *ny_ensure_shared_lib(const char *path);
 static inline bool ny_env_is_truthy(const char *value) {
   if (!value || !*value)
     return false;
-  if (strcmp(value, "0") == 0 || strcmp(value, "false") == 0 || strcmp(value, "False") == 0 ||
-      strcmp(value, "FALSE") == 0 || strcmp(value, "off") == 0 || strcmp(value, "OFF") == 0 ||
+  if (strcmp(value, "0") == 0 || strcmp(value, "false") == 0 ||
+      strcmp(value, "False") == 0 || strcmp(value, "FALSE") == 0 ||
+      strcmp(value, "off") == 0 || strcmp(value, "OFF") == 0 ||
       strcmp(value, "no") == 0 || strcmp(value, "NO") == 0) {
     return false;
   }
@@ -132,15 +125,15 @@ static inline bool ny_symbol_path_char(int c) {
   return isalnum((unsigned char)c) || c == '_' || c == '.';
 }
 bool ny_compiler_asserts_enabled(void);
-void ny_compiler_assert_fail(const char *file, int line, const char *func, const char *cond,
-                             const char *fmt, ...);
+void ny_compiler_assert_fail(const char *file, int line, const char *func,
+                             const char *cond, const char *fmt, ...);
 void ny_compiler_invariant_fail(const char *file, int line, const char *func,
                                 const char *invariant_name,
                                 const char *src_file, int src_line, int src_col,
                                 const char *module_or_fn,
-                                const char *state_detail,
-                                const char *fmt, ...);
-bool ny_str_list_append(char ***list, size_t *len, size_t *cap, const char *str);
+                                const char *state_detail, const char *fmt, ...);
+bool ny_str_list_append(char ***list, size_t *len, size_t *cap,
+                        const char *str);
 void ny_str_list_free(char **list, size_t count);
 
 #define NY_FNV1A64_OFFSET_BASIS UINT64_C(14695981039346656037)
@@ -152,8 +145,12 @@ uint64_t ny_fnv1a64(const void *data, size_t len, uint64_t seed);
 uint64_t ny_fnv1a64_cstr(const char *s, uint64_t seed);
 uint64_t ny_hash64_fast(const void *data, size_t len);
 uint64_t ny_hash64_fast_cstr(const char *s);
-static inline uint64_t ny_hash64(const void *data, size_t len) { return ny_hash64_fast(data, len); }
-static inline uint64_t ny_hash64_cstr(const char *s) { return ny_hash64_fast_cstr(s); }
+static inline uint64_t ny_hash64(const void *data, size_t len) {
+  return ny_hash64_fast(data, len);
+}
+static inline uint64_t ny_hash64_cstr(const char *s) {
+  return ny_hash64_fast_cstr(s);
+}
 static inline uint32_t ny_hash32_cstr(const char *s) {
   uint32_t h = NY_FNV1A32_OFFSET_BASIS;
   for (const unsigned char *p = (const unsigned char *)(s ? s : ""); *p; ++p) {
@@ -166,25 +163,28 @@ static inline uint64_t ny_hash64_u64(uint64_t seed, uint64_t v) {
   return ny_fnv1a64(&v, sizeof(v), seed ? seed : NY_FNV1A64_OFFSET_BASIS);
 }
 
-#define NY_COMPILER_ASSERT(cond, msg)                                                             \
-  do {                                                                                            \
-    if (ny_compiler_asserts_enabled() && !(cond))                                                \
-      ny_compiler_assert_fail(__FILE__, __LINE__, __func__, #cond, "%s", (msg));                 \
+#define NY_COMPILER_ASSERT(cond, msg)                                          \
+  do {                                                                         \
+    if (ny_compiler_asserts_enabled() && !(cond))                              \
+      ny_compiler_assert_fail(__FILE__, __LINE__, __func__, #cond, "%s",       \
+                              (msg));                                          \
   } while (0)
 
-#define NY_COMPILER_ASSERTF(cond, fmt, ...)                                                       \
-  do {                                                                                            \
-    if (ny_compiler_asserts_enabled() && !(cond))                                                \
-      ny_compiler_assert_fail(__FILE__, __LINE__, __func__, #cond, (fmt), ##__VA_ARGS__);       \
+#define NY_COMPILER_ASSERTF(cond, fmt, ...)                                    \
+  do {                                                                         \
+    if (ny_compiler_asserts_enabled() && !(cond))                              \
+      ny_compiler_assert_fail(__FILE__, __LINE__, __func__, #cond, (fmt),      \
+                              ##__VA_ARGS__);                                  \
   } while (0)
 
-#define NY_INVARIANT_ASSERT(cond, inv_name, src_file, src_line, src_col, mod_fn, state, fmt, ...) \
-  do {                                                                                              \
-    if (ny_compiler_asserts_enabled() && !(cond)) {                                                 \
-      ny_compiler_invariant_fail(__FILE__, __LINE__, __func__, (inv_name), (src_file),              \
-                                 (int)(src_line), (int)(src_col), (mod_fn), (state),                \
-                                 (fmt), ##__VA_ARGS__);                                             \
-    }                                                                                               \
+#define NY_INVARIANT_ASSERT(cond, inv_name, src_file, src_line, src_col,       \
+                            mod_fn, state, fmt, ...)                           \
+  do {                                                                         \
+    if (ny_compiler_asserts_enabled() && !(cond)) {                            \
+      ny_compiler_invariant_fail(__FILE__, __LINE__, __func__, (inv_name),     \
+                                 (src_file), (int)(src_line), (int)(src_col),  \
+                                 (mod_fn), (state), (fmt), ##__VA_ARGS__);     \
+    }                                                                          \
   } while (0)
 
 static inline bool ny_add_range_ok(int64_t a, int64_t b, int64_t *out) {
@@ -211,7 +211,8 @@ static inline const char *ny_base_name(const char *path) {
 
 /* Returns heap-allocated joined path; caller must free. */
 static inline char *ny_path_join_alloc(const char *dir, const char *name) {
-  if (!dir || !*dir) return name && *name ? ny_strdup(name) : ny_strdup(".");
+  if (!dir || !*dir)
+    return name && *name ? ny_strdup(name) : ny_strdup(".");
   size_t dlen = strlen(dir);
   int needs_sep = (dir[dlen - 1] != '/' && dir[dlen - 1] != '\\') ? 1 : 0;
   size_t nlen = name ? strlen(name) : 0;
@@ -221,22 +222,30 @@ static inline char *ny_path_join_alloc(const char *dir, const char *name) {
       !ny_size_add_ok(out_len, 1, &out_len))
     return NULL;
   char *out = (char *)malloc(out_len);
-  if (!out) return NULL;
+  if (!out)
+    return NULL;
   memcpy(out, dir, dlen);
-  if (needs_sep) out[dlen] = '/';
+  if (needs_sep)
+    out[dlen] = '/';
   memcpy(out + dlen + (size_t)needs_sep, name ? name : "", nlen + 1);
   return out;
 }
 
-/* Writes directory portion of path into out (modifies in-place if out==path). */
+/* Writes directory portion of path into out (modifies in-place if out==path).
+ */
 static inline void ny_dir_name(char *out, size_t out_len, const char *path) {
-  if (!out || out_len == 0) return;
-  if (!path || !*path) { snprintf(out, out_len, "."); return; }
+  if (!out || out_len == 0)
+    return;
+  if (!path || !*path) {
+    snprintf(out, out_len, ".");
+    return;
+  }
   snprintf(out, out_len, "%s", path);
   char *slash = strrchr(out, '/');
 #ifdef _WIN32
   char *bslash = strrchr(out, '\\');
-  if (bslash && (!slash || bslash > slash)) slash = bslash;
+  if (bslash && (!slash || bslash > slash))
+    slash = bslash;
 #endif
   if (slash) {
     /* Preserve trailing slash for root paths */
@@ -251,15 +260,19 @@ static inline void ny_dir_name(char *out, size_t out_len, const char *path) {
 }
 
 static inline bool ny_is_ident_char(int c) {
-  return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_';
+  return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+         (c >= '0' && c <= '9') || c == '_';
 }
 
 static inline bool ny_name_tail_is(const char *name, const char *tail) {
-  if (!name || !tail) return false;
+  if (!name || !tail)
+    return false;
   size_t nl = strlen(name);
   size_t tl = strlen(tail);
-  if (tl > nl) return false;
-  if (strcmp(name + nl - tl, tail) != 0) return false;
+  if (tl > nl)
+    return false;
+  if (strcmp(name + nl - tl, tail) != 0)
+    return false;
   return tl == nl || name[nl - tl - 1] == '.';
 }
 static inline const char *ny_name_leaf(const char *name) {
@@ -273,8 +286,20 @@ static inline const char *ny_generic_type_leaf(const char *name) {
     return NULL;
   while (*name == '?' || *name == '*')
     name++;
-  const char *leaf = ny_name_leaf(name);
-  return leaf ? leaf : name;
+  /*
+   * Strip module qualification from the generic constructor, not from a
+   * qualified type argument.  Looking for the last dot in the whole string
+   * turns Result<Code<module.Type>, str> into Type>, str>, which breaks
+   * generic-base matching and argument extraction.
+   */
+  const char *end = strchr(name, '<');
+  if (!end)
+    end = name + strlen(name);
+  const char *dot = NULL;
+  for (const char *p = name; p < end; ++p)
+    if (*p == '.')
+      dot = p;
+  return dot ? dot + 1 : name;
 }
 static inline bool ny_generic_type_base_is(const char *name, const char *base) {
   const char *leaf = ny_generic_type_leaf(name);
@@ -301,12 +326,17 @@ static inline char *ny_generic_type_arg_owned(const char *name, size_t index) {
   for (const char *p = start; p <= gt; ++p) {
     bool at_end = p == gt;
     if (!at_end) {
-      if (*p == '<')
+      if (*p == '<') {
         depth++;
-      else if (*p == '>')
-        depth--;
-      else if (*p != ',' || depth != 0)
         continue;
+      }
+      if (*p == '>') {
+        depth--;
+        continue;
+      }
+      if (*p != ',' || depth != 0) {
+        continue;
+      }
     }
     if (current == index) {
       while (start < p && (*start == ' ' || *start == '\t'))
@@ -336,7 +366,7 @@ bool ny_log_should_emit(const char *fmt);
 void ny_complexity_note(const char *file, int line, const char *func,
                         const char *category, const char *detail);
 
-#define NY_COMPLEXITY_NOTE(cat, detail) \
+#define NY_COMPLEXITY_NOTE(cat, detail)                                        \
   ny_complexity_note(__FILE__, __LINE__, __func__, (cat), (detail))
 
 const char *ny_src_root(void);
@@ -344,7 +374,8 @@ const char *ny_default_cache_root_dir(void);
 const char *ny_get_executable_path(void);
 char *ny_get_executable_dir(void);
 
-void ny_print_snippet(const char *src, int line, int col, int len, const char *color);
+void ny_print_snippet(const char *src, int line, int col, int len,
+                      const char *color);
 
 #include <errno.h>
 #ifndef _WIN32
@@ -371,7 +402,8 @@ static inline bool ny_parse_int(const char *s, int *out) {
   char *end = NULL;
   errno = 0;
   long v = strtol(s, &end, 10);
-  if (end == s || *end != '\0' || errno == ERANGE || v < -2147483647L - 1 || v > 2147483647L)
+  if (end == s || *end != '\0' || errno == ERANGE || v < -2147483647L - 1 ||
+      v > 2147483647L)
     return false;
   *out = (int)v;
   return true;

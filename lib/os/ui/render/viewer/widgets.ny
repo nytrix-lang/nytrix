@@ -1,32 +1,32 @@
 ;; Keywords: viewer widgets ui controls panels os render
 ;; Small reusable UI widgets for viewer panels, controls, and editor chrome.
 ;; References:
-;; - std.os.ui.render.viewer.gui
-module std.os.ui.render.viewer.widgets(
+;; - core.os.ui.render.viewer.gui
+module core.os.ui.render.viewer.widgets(
    C_BG, C_PANEL, C_PANEL_ALT, C_BOX, C_LINE, C_TEXT, C_MUTED, C_DIM, C_ACCENT, C_ACCENT_HI,
    C_KEY_IDLE, C_KEY_HOVER, C_KEY_DOWN,
    text_w, text_h, text_right, text_center, hit, fits, preview, limit_text,
    panel, button, text_box, keycap, signal_chip, chip_w, sphere, axis
 )
 
-use std.core
-use std.core.str as str
-use std.math (clamp, max, min)
-use std.os.ui.render as gfx
+use core
+use core.str as str
+use core.math (clamp, max, min)
+use core.os.ui.render as gfx
 
-def C_BG = gfx.color_hex("#000000")
-def C_PANEL = gfx.color_hex("#080808")
-def C_PANEL_ALT = gfx.color_hex("#131318")
+def C_BG = gfx.color_rgb(0.0, 0.0, 0.0)
+def C_PANEL = gfx.color_rgb(0.031, 0.031, 0.031)
+def C_PANEL_ALT = gfx.color_rgb(0.075, 0.075, 0.094)
 def C_BOX = C_PANEL_ALT
-def C_LINE = gfx.color_hex("#2b2634")
-def C_TEXT = gfx.color_hex("#f5f5f6")
-def C_MUTED = gfx.color_hex("#c6c6ca")
-def C_DIM = gfx.color_hex("#15151b")
-def C_ACCENT = gfx.color_hex("#9f86d9")
-def C_ACCENT_HI = gfx.color_hex("#bda9ec")
-def C_KEY_IDLE = gfx.color_hex("#121218")
-def C_KEY_HOVER = gfx.color_hex("#1b1624")
-def C_KEY_DOWN = gfx.color_hex("#332347")
+def C_LINE = gfx.color_rgb(0.169, 0.149, 0.204)
+def C_TEXT = gfx.color_rgb(0.961, 0.961, 0.965)
+def C_MUTED = gfx.color_rgb(0.776, 0.776, 0.792)
+def C_DIM = gfx.color_rgb(0.082, 0.082, 0.106)
+def C_ACCENT = gfx.color_rgb(0.624, 0.525, 0.851)
+def C_ACCENT_HI = gfx.color_rgb(0.741, 0.663, 0.925)
+def C_KEY_IDLE = gfx.color_rgb(0.071, 0.071, 0.094)
+def C_KEY_HOVER = gfx.color_rgb(0.106, 0.086, 0.141)
+def C_KEY_DOWN = gfx.color_rgb(0.200, 0.137, 0.278)
 
 fn text_w(any font, any label, any font_lg=0, any font_md=0, f64 px=9.5) f64 {
    "Estimates text width for fixed-size UI layout."

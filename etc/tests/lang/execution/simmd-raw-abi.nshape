@@ -1,0 +1,29 @@
+shape simmd_raw_abi {
+  family "runtime/execution"
+  generator "embedded"
+  features ["ny", "runtime", "simmd", "abi"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.math.simmd as simmd
+
+assert(simmd.clz64(1) == 63, "simmd clz64 consumes raw odd integer one")
+assert(simmd.ctz64(1) == 0, "simmd ctz64 consumes raw odd integer one")
+assert(simmd.popcnt64(19999) == 9,
+       "simmd popcnt64 consumes raw odd integer words")
+assert(simmd.rotl64(1, 1) == 2, "simmd rotl64 consumes raw arguments")
+assert(simmd.rotr64(2, 1) == 1, "simmd rotr64 consumes raw arguments")
+assert(simmd.bswap64(1) == 0x0100000000000000,
+       "simmd bswap64 returns a raw word")
+assert(simmd.clz32(1) == 31, "simmd clz32 consumes raw odd integer one")
+assert(simmd.ctz32(1) == 0, "simmd ctz32 consumes raw odd integer one")
+assert(simmd.popcnt32(19999) == 9,
+       "simmd popcnt32 consumes raw odd integer words")
+assert(simmd.rotl32(1, 1) == 2, "simmd rotl32 consumes raw arguments")
+assert(simmd.rotr32(2, 1) == 1, "simmd rotr32 consumes raw arguments")
+assert(simmd.bswap32(1) == 0x01000000,
+       "simmd bswap32 returns a raw word")
+NY
+}

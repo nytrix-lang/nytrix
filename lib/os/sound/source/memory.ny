@@ -1,12 +1,12 @@
 ;; Keywords: sound source memory os
 ;; In-memory sound source construction and sample access.
 ;; References:
-;; - std.os.sound.source
-;; - std.os
-module std.os.sound.source.memory(make)
-use std.core
-use std.core.dict
-use std.os.sound.diag as sound_debug
+;; - core.os.sound.source
+;; - core.os
+module core.os.sound.source.memory(make)
+use core
+use core.dict
+use core.os.sound.diag as sound_debug
 
 fn make(ptr data_ptr, int byte_len, int channels, int rate, int bits, int sample_fmt=0, int format_tag=1) list {
    "Creates a data source from a memory buffer."
@@ -24,7 +24,7 @@ fn make(ptr data_ptr, int byte_len, int channels, int rate, int bits, int sample
    }
    data = data.set("sample_fmt", sample_fmt)
    data = data.set("format_tag", format_tag)
-   data = data.set("cursor", 0.0)
+   data = data.set("cursor", 0)
    mut sample_bytes = bits / 8
    if sample_bytes <= 0 { sample_bytes = 1 }
    mut frame_size = sample_bytes * channels

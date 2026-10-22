@@ -1,17 +1,18 @@
 ;; Keywords: platform window backend win32 windows joystick os ui input
 ;; Native Win32 XInput/WinMM joystick backend for Nytrix.
 ;; References:
-;; - std.os.ui.window.platform.win32
-;; - std.os.ui.window
-;; - std.os.ui.window.consts
-module std.os.ui.window.platform.win32.joystick(init, terminate, poll_joysticks, joystick_present, get_joystick_name, get_joystick_guid, get_joystick_axes, get_joystick_buttons, get_joystick_hats, joystick_is_gamepad, get_gamepad_state, get_gamepad_name, set_joystick_callback, update_gamepad_mappings)
-use std.core
-use std.core.mem
-use std.os.time
-use std.os.ffi as ffi
-use std.core.str as str
-use std.os.ui.window.platform.api as backend_api
-use std.os.ui.window.platform.gamepad_map as gamepad_map
+;; - core.os.ui.window.platform.win32
+;; - core.os.ui.window
+;; - core.os.ui.window.consts
+module core.os.ui.window.platform.win32.joystick(init, terminate, poll_joysticks, joystick_present, get_joystick_name, get_joystick_guid, get_joystick_axes, get_joystick_buttons, get_joystick_hats, joystick_is_gamepad, get_gamepad_state, get_gamepad_name, set_joystick_callback, update_gamepad_mappings)
+use core
+use core.mem
+use core.os.time
+use core.os.ffi as ffi
+use core.os.ffi as calls
+use core.str as str
+use core.os.ui.window.platform.api as backend_api
+use core.os.ui.window.platform.gamepad_map as gamepad_map
 
 def XINPUT_MAX_CONTROLLERS = 4
 def ERROR_SUCCESS = 0
@@ -312,17 +313,17 @@ fn _dinput_method(any obj, int index) any {
 
 fn _dinput_release(any obj) int {
    if !obj { return 0 }
-   int(ffi.call1(_dinput_method(obj, 2), obj))
+   int(calls.any1(_dinput_method(obj, 2), obj))
 }
 
 fn _dinput_device_unacquire(any dev) int {
    if !dev { return 0 }
-   int(ffi.call1(_dinput_method(dev, 8), dev))
+   int(calls.any1(_dinput_method(dev, 8), dev))
 }
 
 fn _dinput_device_acquire(any dev) int {
    if !dev { return 1 }
-   int(ffi.call1(_dinput_method(dev, 7), dev))
+   int(calls.any1(_dinput_method(dev, 7), dev))
 }
 
 fn _dinput_init() bool {
@@ -710,7 +711,7 @@ fn _dinput_set_axis_range(any dev, int obj_type) bool {
    store32(dipr, _DINPUT_DIPH_BYID, 12)
    store32(dipr, -32768, 16)
    store32(dipr, 32767, 20)
-   def hr = int(ffi.call3(_dinput_method(dev, 6), dev,
+   def hr = int(calls.any3(_dinput_method(dev, 6), dev,
          ffi.tag_native(_DINPUT_DIPROP_RANGE), dipr))
    free(dipr)
    !_hresult_failed(hr)
@@ -724,7 +725,7 @@ fn _dinput_set_axis_mode_abs(any dev) bool {
    store32(dipd, 0, 8)
    store32(dipd, _DINPUT_DIPH_DEVICE, 12)
    store32(dipd, _DINPUT_DIPROPAXISMODE_ABS, 16)
-   def hr = int(ffi.call3(_dinput_method(dev, 6), dev,
+   def hr = int(calls.any3(_dinput_method(dev, 6), dev,
          ffi.tag_native(_DINPUT_DIPROP_AXISMODE), dipd))
    free(dipd)
    !_hresult_failed(hr)
@@ -834,11 +835,11 @@ fn _dinput_device_cb(ptr di, ptr user) i32 {
    if jid < 0 { return _DINPUT_DIENUM_CONTINUE }
    def out = zalloc(8)
    if !out { return _DINPUT_DIENUM_CONTINUE }
-   def hr = int(ffi.call4(_dinput_method(_dinput_api, 3), _dinput_api, di + 4, out, 0))
+   def hr = int(calls.any4(_dinput_method(_dinput_api, 3), _dinput_api, di + 4, out, 0))
    def dev = load64(out, 0)
    free(out)
    if _hresult_failed(hr) || !dev { return _DINPUT_DIENUM_CONTINUE }
-   if _hresult_failed(ffi.call2(_dinput_method(dev, 11), dev, _dinput_data_format)) {
+   if _hresult_failed(calls.any2(_dinput_method(dev, 11), dev, _dinput_data_format)) {
       _dinput_release(dev)
       return _DINPUT_DIENUM_CONTINUE
    }
@@ -848,7 +849,7 @@ fn _dinput_device_cb(ptr di, ptr user) i32 {
       return _DINPUT_DIENUM_CONTINUE
    }
    store32(caps, _DINPUT_DIDEVCAPS_SIZE, 0)
-   if _hresult_failed(ffi.call2(_dinput_method(dev, 3), dev, caps)) {
+   if _hresult_failed(calls.any2(_dinput_method(dev, 3), dev, caps)) {
       free(caps)
       _dinput_release(dev)
       return _DINPUT_DIENUM_CONTINUE
@@ -865,7 +866,7 @@ fn _dinput_device_cb(ptr di, ptr user) i32 {
    _dinput_enum_button_count = 0
    _dinput_enum_pov_count = 0
    def flags = _DINPUT_DIDFT_AXIS | _DINPUT_DIDFT_BUTTON | _DINPUT_DIDFT_POV
-   def enum_hr = int(ffi.call4(_dinput_method(dev, 4), dev, ffi.tag_native(_dinput_object_cb), 0, flags))
+   def enum_hr = int(calls.any4(_dinput_method(dev, 4), dev, ffi.tag_native(_dinput_object_cb), 0, flags))
    def caps_axes = int(load32(caps, 12))
    _dinput_enum_device = 0
    free(caps)
@@ -889,7 +890,7 @@ fn _dinput_device_cb(ptr di, ptr user) i32 {
 
 fn _dinput_scan() bool {
    if !_dinput_init() { return false }
-   def hr = int(ffi.call5(_dinput_method(_dinput_api, 4), _dinput_api,
+   def hr = int(calls.any5(_dinput_method(_dinput_api, 4), _dinput_api,
          _DINPUT_DI8DEVCLASS_GAMECTRL, ffi.tag_native(_dinput_device_cb), 0,
          _DINPUT_DIEDFL_ALLDEVICES))
    !_hresult_failed(hr)
@@ -911,8 +912,8 @@ fn _dinput_pov_to_hat(any v) int {
 }
 
 fn _dinput_device_state(any dev, any state) int {
-   ffi.call1(_dinput_method(dev, 25), dev)
-   int(ffi.call3(_dinput_method(dev, 9), dev, _DINPUT_DIJOYSTATE_SIZE, state))
+   calls.any1(_dinput_method(dev, 25), dev)
+   int(calls.any3(_dinput_method(dev, 9), dev, _DINPUT_DIJOYSTATE_SIZE, state))
 }
 
 fn _dinput_detect_unsigned_axes(any js, any state, any objects) any {
@@ -1295,7 +1296,7 @@ fn get_joystick_guid(int jid) str {
    _get_js(jid).get("guid", "00000000000000000000000000000000")
 }
 
-fn get_joystick_axes(int jid, any count_ptr) any {
+fn get_joystick_axes(int jid, any count_ptr) ptr {
    "Returns get joystick axes."
    if count_ptr { store32(count_ptr, 0, 0) }
    if !joystick_present(jid) { return 0 }
@@ -1304,7 +1305,7 @@ fn get_joystick_axes(int jid, any count_ptr) any {
    js.get("axes_ptr", 0)
 }
 
-fn get_joystick_buttons(int jid, any count_ptr) any {
+fn get_joystick_buttons(int jid, any count_ptr) ptr {
    "Returns get joystick buttons."
    if count_ptr { store32(count_ptr, 0, 0) }
    if !joystick_present(jid) { return 0 }
@@ -1313,7 +1314,7 @@ fn get_joystick_buttons(int jid, any count_ptr) any {
    js.get("buttons_ptr", 0)
 }
 
-fn get_joystick_hats(int jid, any count_ptr) any {
+fn get_joystick_hats(int jid, any count_ptr) ptr {
    "Returns get joystick hats."
    if count_ptr { store32(count_ptr, 0, 0) }
    if !joystick_present(jid) { return 0 }

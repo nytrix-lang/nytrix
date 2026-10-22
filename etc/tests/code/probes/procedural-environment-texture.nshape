@@ -1,0 +1,42 @@
+shape procedural-environment-texture {
+  family "probe-suite"
+  generator "regression"
+  features ["ny", "ui", "render", "texture"]
+  template ny-test-case
+  expect compile_and_run
+  flags_matrix "--native --run -O0; --native --run -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect_message "ENV-TEXTURE-OK"
+  source ny <<'NY'
+use core
+use core.os.ui.render.texture as texture
+
+;; The first conversion must be correct too: generated skyboxes call this
+;; path before any UI interaction has had a chance to warm the JIT helpers.
+def image = texture.generate_compare_visible_env_image(32, 16)
+assert(image.get("width", 0) == 32, "generated environment width")
+assert(image.get("height", 0) == 16, "generated environment height")
+assert(image.get("channels", 0) == 4, "generated environment channels")
+def data = image.get("data", "")
+assert(data.len == 32 * 16 * 4, "generated environment byte size")
+def p = (4 * 32 + 8) * 4
+assert(
+   (load8(data, p) & 255) == 245 &&
+   (load8(data, p + 1) & 255) == 237 &&
+   (load8(data, p + 2) & 255) == 255 &&
+   (load8(data, p + 3) & 255) == 255,
+   "generated environment first-use sample"
+)
+assert(texture.linear_to_srgb_u8(0.914512) == 245, "public linear-to-sRGB byte conversion")
+assert(
+   texture.linear_to_srgb_chan(0.7) > 0.8543 &&
+   texture.linear_to_srgb_chan(0.7) < 0.8544,
+   "public linear-to-sRGB conversion"
+)
+assert(
+   texture.srgb_to_linear_chan(0.5) > 0.2140 &&
+   texture.srgb_to_linear_chan(0.5) < 0.2141,
+   "public sRGB-to-linear conversion"
+)
+print("ENV-TEXTURE-OK")
+NY
+}

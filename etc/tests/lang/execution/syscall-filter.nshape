@@ -1,0 +1,120 @@
+shape test_syscall_filter {
+  family "runtime/execution"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.sys
+use core.os.ffi as ffi
+use core.os.ffi as calls
+
+; Runtime syscall denylist regression (B-1).
+;
+; The runtime's rt_syscall wrapper denies process-control / memory-protection
+; syscalls so Nytrix programs (and FFI C code reaching __syscall) cannot spawn
+; processes or remap executable memory. On linux/x86_64 the denied raw syscall
+; numbers are: mprotect=10, clone=56, fork=57, vfork=58. Each must return
+; -EPERM (-1) while an allowed syscall (getpid=39) succeeds with a positive pid.
+;
+; This guards against the regression where the inline-syscall path (and its
+; denylist) was compiled out because the rt_x86_64__ / rt_asm__ guard macros
+; were never defined, silently falling back to an unfiltered libc syscall().
+#linux {
+   #x86_64 {
+      ; mprotect(addr=0, len=4096, prot=PROT_READ|PROT_WRITE|PROT_EXEC=7)
+      assert(syscall(10, 0, 4096, 7, 0, 0, 0) == -1, "syscall mprotect denied")
+      ; clone(0,0,0,0,0,0) — must not create a process
+      assert(syscall(56, 0, 0, 0, 0, 0, 0) == -1, "syscall clone denied")
+      ; fork()
+      assert(syscall(57, 0, 0, 0, 0, 0, 0) == -1, "syscall fork denied")
+      ; vfork()
+      assert(syscall(58, 0, 0, 0, 0, 0, 0) == -1, "syscall vfork denied")
+      ; getpid() stays allowed and returns a real positive pid
+      assert(syscall(39, 0, 0, 0, 0, 0, 0) > 0, "syscall getpid allowed")
+      ; A native pointer handle is a raw machine-word syscall argument, not a
+      ; tagged integer. Linux x86_64 open(2) should decode it and report ENOENT.
+      def libc = ffi.dlopen("libc.so.6", ffi.RTLD_NOW())
+      def strdup_fn = ffi.dlsym(libc, "strdup")
+      def missing_path = calls.pointer1(strdup_fn,
+         ffi.cstr("/nytrix-abi-test/no-such-file"))
+      def native_open_result = syscall(2, missing_path, 0, 0, 0, 0, 0)
+      assert(native_open_result == -2,
+         "syscall decodes native handles as pointer arguments")
+      ; openat places its path in argument 2 and scalar flags/mode in arguments
+      ; 3 and 4. Exercise the handle conversion at a different argument slot.
+      def native_openat_result = syscall(257, -100, missing_path, 0, 0, 0, 0)
+      assert(native_openat_result == -2,
+         "openat decodes a native path handle in argument 2")
+      def odd_raw_path = ptr_add(
+         ffi.cstr("xxxxxx/nytrix-abi-test/no-such-raw-file"), 6)
+      def odd_raw_result = syscall(2, odd_raw_path, 0, 0, 0, 0, 0)
+      assert(odd_raw_result == -2,
+         "syscall preserves a readable odd raw pointer")
+      def odd_openat_result = syscall(257, -100, odd_raw_path, 0, 0, 0, 0)
+      assert(odd_openat_result == -2,
+         "openat preserves a readable odd raw pointer in argument 2")
+      ; `write(2)` exercises an integer descriptor, native pointer, and tagged
+      ; byte count in argument positions 1–3 without producing test output.
+      def null_fd = syscall(2, "/dev/null", 1, 0, 0, 0, 0)
+      def write_payload = calls.pointer1(strdup_fn, ffi.cstr("x"))
+      assert(syscall(1, null_fd, write_payload, 1, 0, 0, 0) == 1,
+         "write decodes descriptor, native buffer, and byte count")
+      assert(syscall(3, null_fd, 0, 0, 0, 0, 0) == 0,
+         "close decodes descriptor argument")
+      ffi.free(write_payload)
+      ; mmap uses all six raw-word arguments; arguments 4–6 carry flags, the
+      ; signed fd sentinel, and the page offset.
+      def mapped_page = syscall(9, 0, 4096, 3, 34, -1, 0)
+      assert(mapped_page > 0, "mmap decodes arguments 1 through 6")
+      assert(syscall(11, mapped_page, 4096, 0, 0, 0, 0) == 0,
+         "munmap decodes pointer and length arguments")
+      ; Linux x86_64 futex uses a timeout pointer in argument 4 and a second
+      ; futex pointer in argument 5. A zero timeout returns ETIMEDOUT without
+      ; blocking, and requeue with no waiters validates both addresses safely.
+      def futex_word = malloc(8)
+      def futex_timeout = malloc(16)
+      def futex_word2 = malloc(8)
+      store64_i(futex_word, 0, 0)
+      store64_i(futex_timeout, 0, 0)
+      store64_i(futex_timeout, 0, 8)
+      store64_i(futex_word2, 0, 0)
+      assert(syscall(202, futex_word, 0, 0, futex_timeout, 0, 0) == -110,
+         "futex decodes timeout pointer in argument 4")
+      assert(syscall(202, futex_word, 3, 0, 0, futex_word2, 0) == 0,
+         "futex requeue decodes second address in argument 5")
+      free(futex_word, futex_timeout, futex_word2)
+      ; pselect6's signal-mask descriptor occupies argument 6. Empty fd sets
+      ; and a zero timeout make this a bounded, nonblocking pointer probe.
+      def select_timeout = malloc(16)
+      def signal_mask_arg = malloc(16)
+      store64_i(select_timeout, 0, 0)
+      store64_i(select_timeout, 0, 8)
+      store64_i(signal_mask_arg, 0, 0)
+      store64_i(signal_mask_arg, 8, 8)
+      assert(syscall(270, 0, 0, 0, 0, select_timeout, signal_mask_arg) == 0,
+         "pselect6 decodes signal-mask descriptor in argument 6")
+      free(select_timeout, signal_mask_arg)
+      ffi.free(missing_path)
+      ffi.dlclose(libc)
+      ; Use a path that cannot exist: valid argv/envp vectors must reach the
+      ; host execve call and report its failure result, while malformed sequences return
+      ; EINVAL before any process replacement can happen.
+      def missing = "/nytrix-abi-test/no-such-executable"
+      assert(int(__execve(missing, [missing, "arg"], ["NY_ABI_TEST=1"])) == -1,
+         "execve decodes managed argv and envp")
+      assert(int(__execve(missing, [missing, 1], ["NY_ABI_TEST=1"])) == -22,
+         "execve rejects non-string argv entries")
+      assert(int(__execve(missing, [missing], ["NY_ABI_TEST=1", 1])) == -22,
+         "execve rejects non-string envp entries")
+      print("✓ runtime syscall denylist(linux x86_64) passed")
+   } #else {
+      print("✓ runtime syscall denylist skipped(non-x86_64 linux)")
+   } #endif
+} #else {
+   print("✓ runtime syscall denylist skipped(non-linux)")
+} #endif
+NY
+}

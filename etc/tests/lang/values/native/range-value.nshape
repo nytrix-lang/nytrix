@@ -1,0 +1,14 @@
+shape test_range_value {
+  family "native/values"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+assert((1..5).len == 5, "inclusive range value length")
+assert((1..5).get(0, 0) == 1, "inclusive range first value")
+assert((1..5).get(4, 0) == 5, "inclusive range final value")
+NY
+}

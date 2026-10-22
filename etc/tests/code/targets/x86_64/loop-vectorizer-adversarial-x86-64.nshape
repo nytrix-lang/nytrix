@@ -1,0 +1,64 @@
+shape oracle_loop_vectorizer_adversarial_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle loop-vectorizer entry-global-tbuf overflow effects exits]
+  template ny-test-case
+  flags_matrix "-O0 --native-result-oracle=0; -O1 --native-result-oracle=0; -O2 --native-result-oracle=0; -O3 --native-oracle-per-pass --nyir-verify --native-result-oracle=0"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.tbuf
+
+mut calls = 0
+mut grid = f64buf_new(8)
+mut fill_i = 0
+while fill_i < 8 {
+  f64buf_store(grid, fill_i, float(fill_i + 1))
+  fill_i += 1
+}
+
+fn wrap(i64 start) i64 {
+  mut value = start
+  mut i = 0
+  while i < 5 {
+    value += 1
+    i += 1
+  }
+  value
+}
+
+fn visit(i64 i) i64 {
+  calls += 1
+  i
+}
+
+fn effectful_loop() i64 {
+  mut total = 0
+  mut i = 0
+  while i < 8 {
+    total += visit(i)
+    i += 1
+  }
+  total + calls * 100
+}
+
+fn early_exit() i64 {
+  mut total = 0
+  mut i = 0
+  while i < 8 {
+    if i == 3 { break }
+    total += i
+    i += 1
+  }
+  total
+}
+
+def wrapped = wrap(int(9223372036854775805))
+if wrapped == -9223372036854775806 && effectful_loop() == 828 &&
+   early_exit() == 3 && int(f64buf_load(grid, 7)) == 8 {
+  0
+} else {
+  1
+}
+NY
+}

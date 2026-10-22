@@ -1,0 +1,45 @@
+shape doc_meta_header {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "doc", "metadata", "header", "cli-library"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-only; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.compiler.tools.doc.meta (parse, resolve, render_entry)
+
+@effects(all)
+fn test_header_metadata() {
+   def metadata = parse("# heading\r\n  ;; Keywords: Ny, Compiler parser\r\n;; Example page  \r\n\r\nbody\n;; ignored\n")
+   assert(metadata.get("title") == "Example page  " &&
+          metadata.get("keywords") == ["ny", "compiler", "parser"],
+          "metadata matches initial comment parsing and preserves title spacing")
+   def late = parse("content\n;; Not metadata\n")
+   assert(late.get("title") == "" && late.get("keywords").len == 0,
+          "metadata stops at the first non-comment content line")
+   def unterminated = parse(";; Last header\r\n;; Keywords: Boundary")
+   assert(unterminated.get("title") == "Last header" &&
+          unterminated.get("keywords") == ["boundary"],
+          "metadata consumes a final header line without a newline")
+   def names = ["core.math.sin", "core.math.cos", "core.math.sin"]
+   assert(resolve(names, "core.math.cos").get("index") == 1 &&
+          resolve(names, "math.cos").get("index") == 1,
+          "documentation lookup prefers exact and unique dotted suffix matches")
+   assert(resolve(names, "sin").get("kind") == "ambiguous" &&
+          resolve(names, "missing").get("kind") == "missing",
+          "documentation lookup reports ambiguous and missing names")
+   def rendered = render_entry(3, "core.math.sin", "fn sin(float x) float",
+      "Returns the sine.", false, "<b>", "<m>", "<r>", "<c>", "<g>", "<d>")
+   assert(rendered == "\n<b><m>Function<r> <c>core.math.sin<r>\n  <g>fn sin(float x) float<r>\n  Returns the sine.\n\n",
+          "REPL doc entry layout and styles are composed by Ny")
+   def empty = render_entry(5, "Thing.run", "", "", true,
+      "", "", "", "", "", "")
+   assert(empty == "\nMethod Thing.run\n  (no documentation string available)\n",
+          "REPL doc renderer preserves missing-body and source spacing")
+}
+
+test_header_metadata()
+print("✓ documentation metadata tests passed")
+NY
+}

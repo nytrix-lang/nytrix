@@ -1,0 +1,20 @@
+shape ownership_rule_allowance_interval_try_return {
+  family "compiler-errors/ownership"
+  generator "error"
+  features ["error", "ownership", "negative", "allowance", "interval", "try"]
+  template ny-compile-fail
+  expect compile_fail
+  flags "--ownership-strict"
+  expect_message "ownership allowance below for 'r'"
+  source ny <<'NY'
+use core
+
+@allowance(r, [2,omega])
+fn use_after_try(Result<int,str> r) Result<int,str> {
+  def first = r?
+  return ok(first + r?)
+}
+
+use_after_try(err("stop"))
+NY
+}

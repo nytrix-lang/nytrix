@@ -1,0 +1,23 @@
+shape ownership_exclusive_borrow_copied_alias_positive {
+  family "language/ownership"
+  generator "syntax"
+  features ["ownership", "borrow", "exclusive", "alias", "positive"]
+  template ny-test-case
+  expect compile_and_run
+  expect_message "[noalias]"
+  flags "--ownership-strict --native-only --nyir-verify --nyir-dump"
+  source ny <<'NY'
+use core
+
+fn copied_alias() int {
+  mut int value = 5
+  def borrowed = &mut value
+  def alias = borrowed
+  def observed = alias
+  value = value + 1
+  value
+}
+
+assert(copied_alias() == 6, "borrow liveness follows a copied alias")
+NY
+}

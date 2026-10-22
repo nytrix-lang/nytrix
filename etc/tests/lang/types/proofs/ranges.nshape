@@ -1,0 +1,149 @@
+shape proof_arithmetic_ranges {
+  family "runtime/proofs"
+  generator "program"
+  features ["proof", "range", "arithmetic"]
+  template ny-test-case
+  flags_matrix "--native --run --color=never; --native-backend=llvm --jit --jit-engine=mcjit --color=never; --native-backend=llvm --jit --jit-engine=orc --color=never; --native-only --color=never"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+def int n = 12
+def proof quotient = prove(n / 3 == 4, "non-negative division range")
+assert(proof_matches(quotient, n / 3 == 4), "division proof digest")
+
+def int remainder = 10 % 3
+def proof modulo = prove(remainder == 1, "non-negative modulo range")
+assert(proof_matches(modulo, remainder == 1), "modulo proof digest")
+
+assert(true, "arithmetic range proofs complete")
+NY
+}
+
+shape proof_bitwise_range {
+  family "runtime/proofs"
+  generator "program"
+  features ["proofs", "range", "bitwise"]
+  template ny-test-case
+  flags_matrix "--native --run --color=never; --native-backend=llvm --jit --jit-engine=mcjit --color=never; --native-backend=llvm --jit --jit-engine=orc --color=never; --native-only --color=never"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+;; Bitwise operations and conditional merges retain bounded integer ranges.
+
+;; Bitwise OR: a|b = 7 → range [7,7] fits in u8
+def int a = 3
+def int b = 5
+assert_compile_range(a | b, 0, 255, "or fits in u8")
+
+;; Bitwise XOR (^): 10 ^ 3 = 9 → range [9,9]
+def int x = 10
+def int y = 3
+assert_compile_range(x ^ y, 0, 15, "xor small values")
+
+;; Shifts with exact shift amounts
+def int shift = 2
+assert_compile_range(1 << shift, 0, 16, "shift left bounded")
+assert_compile_range(64 >> shift, 0, 16, "shift right bounded")
+
+;; Bitwise AND with constant mask
+def int m = 0x0f
+assert_compile_range(0xff & m, 0, 15, "and mask")
+
+;; Conditional merge: true ? 10 : 20 → range [10, 20]
+def int val = true ? 10 : 20
+assert_compile_range(val, 0, 100, "conditional range merge")
+
+assert(true, "bitwise range proofs complete")
+NY
+}
+
+shape proof_range {
+  family "runtime/proofs"
+  generator "program"
+  features ["proofs", "range", "loop"]
+  template ny-test-case
+  flags_matrix "--native --run --color=never; --native-backend=llvm --jit --jit-engine=mcjit --color=never; --native-backend=llvm --jit --jit-engine=orc --color=never; --native-only --color=never"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+;; Exact and disjoint integer ranges establish comparison propositions, and
+;; loop counters retain in-bounds facts through the loop body.
+
+;; def-bound exact ranges
+def int n = 5
+def proof pos = prove(n > 0, "n > 0 via range")
+assert(proof_matches(pos, n > 0), "range proof digest")
+
+def int a = 7
+def int b = 7
+def proof eq = prove(a == b, "equal exact ranges")
+
+def int small = 1
+def int big = 100
+def proof lt = prove(small < big, "non-overlapping ranges")
+
+def int x = 3
+def int y = 9
+def proof ne = prove(x != y, "disjoint ranges unequal")
+
+;; Loop counters: prove bounds directly inside the loop body
+;; (previously required comptime{ return ... } or failed to compile)
+fn loop_bounds() int {
+   def xs = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+   mut int i = 0
+   mut int acc = 0
+   while i < xs.len {
+      assert_compile(i >= 0, "loop index non-negative")
+      assert_compile(i < 10, "loop index below bound")
+      acc += xs[i]
+      i += 1
+   }
+   acc
+}
+
+def int r = loop_bounds()
+assert(r == 55, "loop sum")
+
+assert(true, "range proofs complete")
+NY
+}
+
+shape proof_descending_loop_range {
+  family "runtime/proofs"
+  generator "program"
+  features ["proofs", "range", "loop", "descending"]
+  template ny-test-case
+  flags_matrix "--native --run --color=never; --native-backend=llvm --jit --jit-engine=mcjit --color=never; --native-backend=llvm --jit --jit-engine=orc --color=never; --native-only --color=never"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+fn descending_sum() int {
+   mut int i = 7
+   mut int acc = 0
+   while i >= 2 {
+      assert_compile_range(i, 2, 7, "descending induction range")
+      acc += i
+      i -= 1
+   }
+   acc
+}
+
+fn descending_strict_sum() int {
+   mut int i = 7
+   mut int acc = 0
+   while i > 1 {
+      assert_compile_range(i, 2, 7, "strict descending induction range")
+      acc += i
+      i -= 2
+   }
+   acc
+}
+
+assert(descending_sum() == 27, "descending inclusive range and update")
+assert(descending_strict_sum() == 15, "descending strict range and stride")
+NY
+}

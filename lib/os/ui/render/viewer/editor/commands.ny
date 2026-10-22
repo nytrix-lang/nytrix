@@ -1,14 +1,14 @@
 ;; Keywords: editor commands actions keymap palette os ui render viewer text
 ;; Command registry and action dispatch helpers for editor tools and keymaps.
 ;; References:
-;; - std.os.ui.render.viewer.editor.keychord
-module std.os.ui.render.viewer.editor.commands(
+;; - core.os.ui.render.viewer.editor.keychord
+module core.os.ui.render.viewer.editor.commands(
    commands, all_commands, enabled, with_tag, by_id, id_for_chord, which_key, has_id,
    config, set_enabled, is_enabled, toggle, toggles, row_id, row_key, row_tag
 )
 
-use std.core
-use std.core.str as str
+use core
+use core.str as str
 
 def _COMMANDS = [
    ["Save file", "save", "C-s", "write current buffer", "file"],

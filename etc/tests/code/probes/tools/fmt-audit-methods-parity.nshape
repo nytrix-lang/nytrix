@@ -1,0 +1,174 @@
+shape fmt_audit_methods_parity {
+  family "probe/tools"
+  generator "embedded"
+  features ["formatter", "audit-modes", "methods", "parity"]
+  template ny-test-case
+  flags "--native-only"
+  timeout 150
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.subprocess (run_capture)
+use core.str as str
+def ny = env("NYTRIX_NY_FULL_BIN")
+def fmt = env("NYTRIX_TEST_FMT_BIN")
+def cmake = env("NYTRIX_CMAKE_COMMAND")
+def dir = temp_dir() + "/fmt-audit-methods-" + to_str(pid())
+def made = run_capture([cmake, "-E", "make_directory", dir], [], nil, false)
+assert(made.get("code", 127) == 0, "create formatter audit directory")
+
+fn compare(str mode, str path) str {
+   def c = run_capture([fmt, mode, "--json", path], [], nil, false)
+   def embedded = run_capture([ny, "fmt", mode, "--json", path], [], nil, false)
+   def output = embedded.get("stdout", "")
+   assert(c.get("code", 127) == 0 && embedded.get("code", 127) == 0 &&
+          c.get("stdout", "") == output,
+          mode + " audit parity failed: " + output)
+   return output
+}
+
+def methods = dir + "/methods.ny"
+mut method_source = "fn sample(x) {\n"
+method_source +=
+   "   def length = x.len()\n   def root = Z(x).sqrt ()\n" +
+   "   def ordinary = x.get(0)\n" +
+   "   def encoded = bytes_to_hex(x)\n   def decoded = bin.hex_to_bytes(x)\n" +
+   "   def existing = dict_get(x, 0)\n   def updated = set_idx(x, 0, 1)\n" +
+   "   def stored = store_item(x, 1, 2)\n   fn __store_item(v) { return v }\n" +
+   "   mut list output = list(2)\n   output = output.append(x)\n" +
+   "   return 0\n}\n" +
+   "fn string_example() { def text = \".bytes() set_idx(x)\" return 0 }\n" +
+   "fn comment_example() { ;; x.hex() set_idx(x) return 0 }\n"
+assert(is_ok(file_write(methods, method_source)), "write method audit source")
+def method_out = compare("--audit-mode=methods|legacy", methods)
+for expected in ["2 zero-argument method call(s) can be property syntax",
+                 "2 receiver-method rewrite candidate(s)",
+                 "5 legacy free helper call(s)"] {
+   assert(str.find(method_out, expected) >= 0,
+          "method audit finding missing " + expected)
+}
+
+def specialize = dir + "/specialize.ny"
+assert(is_ok(file_write(specialize,
+   "fn specialize_example() {\n   if os() { work() }\n" +
+   "   case __main() { 1 -> one() }\n   comptime_match(table, tag)\n" +
+   "   def text = \"comptime_match(table, tag)\"\n" +
+   "   ;; comptime_match(table, tag)\n   __layout_size(T)\n" +
+   "   __layout_align(T)\n   __layout_offset(T, field)\n   case tag {\n" +
+   "      0 -> a()\n      1 -> b()\n      2 -> c()\n      3 -> d()\n" +
+   "      4 -> e()\n      5 -> f()\n      6 -> g()\n      7 -> h()\n" +
+   "      8 -> i()\n      9 -> j()\n      10 -> k()\n      11 -> l()\n   }\n}\n" +
+   "layout shape Input derive(load) { i64: alpha = 0 }\n")),
+   "write specialization audit source")
+def specialize_out = compare("--audit-mode=specialize|layout|contracts", specialize)
+for expected in ["NYAUD3101", "NYAUD3102", "NYAUD3103", "NYAUD3104",
+                 "NYAUD3105"] {
+   assert(str.find(specialize_out, expected) >= 0,
+          "specialization/layout audit missing " + expected)
+}
+def layout_path = dir + "/layout.ny"
+mut layout_source = "fn layout_example(d) {\n"
+for index in 1..40 {
+   layout_source += "   dict_get(d, " + to_str(index) + ")\n"
+}
+layout_source += "   return 0\n}\n"
+assert(is_ok(file_write(layout_path, layout_source)), "write layout audit source")
+def layout_out = compare("--audit-mode=specialize|layout|contracts", layout_path)
+assert(str.find(layout_out, "NYAUD6001") >= 0,
+       "layout audit did not detect the repeated dictionary access")
+def contract_dir = dir + "/window/platform"
+def contract_made = run_capture(
+   [cmake, "-E", "make_directory", contract_dir], [], nil, false)
+assert(contract_made.get("code", 127) == 0, "create API contract sample directory")
+def contracts = contract_dir + "/contract.ny"
+assert(is_ok(file_write(contracts,
+   "fn create_basic_window() int { return 0 }\n" +
+   "fn destroy_basic_window() int { return 0 }\n" +
+   "fn poll_window_events() int { return 0 }\n" +
+   "fn set_title() int { return 0 }\n" +
+   "fn set_title_again() int { return set_title() }\n")),
+   "write contract audit source")
+def contract_out = compare("--audit-mode=specialize|layout|contracts", contracts)
+assert(str.find(contract_out, "NYAUD6101") >= 0,
+       "contract audit did not detect the platform API pattern")
+
+def trim = dir + "/trim.ny"
+def literal = dir + "/literal.ny"
+def append_loop = dir + "/append-loop.ny"
+def loop_guards = dir + "/loop-guards.c"
+def trivial_main = dir + "/trivial-main.ny"
+def branches = dir + "/independent-branches.ny"
+assert(is_ok(file_write(trim,
+   "fn sample(x) {\n   def length = x.len()\n" +
+   "   def root = Z(x).sqrt ()\n   def ordinary = x.get(0)\n" +
+   "   def encoded = bytes_to_hex(x)\n   def decoded = bin.hex_to_bytes(x)\n" +
+   "   def existing = dict_get(x, 0)\n   def updated = set_idx(x, 0, 1)\n" +
+   "   def stored = store_item(x, 1, 2)\n" +
+   "   mut list output = list(2)\n   output = output.append(x)\n" +
+   "   return length + root\n}\n")),
+   "write trim methods source")
+assert(is_ok(file_write(literal,
+   "def DATA = [[[[[[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]]]]]]\n")),
+   "write nested literal source")
+assert(is_ok(file_write(append_loop,
+   "fn build_items(x) {\n" +
+   "   append(x)\n   append(x)\n   append(x)\n   append(x)\n" +
+   "   append(x)\n   append(x)\n   append(x)\n   append(x)\n" +
+   "   append(x)\n   append(x)\n   append(x)\n   append(x)\n" +
+   "   while(i) { work() }\n}\n")),
+   "write append-loop source")
+assert(is_ok(file_write(loop_guards,
+   "void loop_guards(void) {\n" +
+   "   for (int i = 0; i < n; ++i) {\n      if (skip(i)) {\n" +
+   "         one();\n         two();\n      }\n   }\n" +
+   "   while (active()) {\n      if (ready()) {\n" +
+   "         one();\n         two();\n         three();\n" +
+   "         four();\n      }\n      work();\n   }\n}\n")),
+   "write C loop-guard source")
+assert(is_ok(file_write(trivial_main,
+   "#main {\n   main()\n}\n#main { return main() }\n#main { main(1) }\n")),
+   "write main wrapper source")
+assert(is_ok(file_write(branches,
+   "fn select(mode) bool {\n   if mode == \"ny\" { return true }\n" +
+   "   if mode == \"fmt\" { return true }\n   return false\n}\n")),
+   "write independent-branch source")
+def trim_c = run_capture([fmt, "--trim", "--json", trim, literal, append_loop,
+                          loop_guards, trivial_main, branches], [], nil, false)
+def trim_ny = run_capture([ny, "fmt", "--trim", "--json", trim, literal,
+                           append_loop, loop_guards, trivial_main, branches],
+                          [], nil, false)
+def trim_out = trim_ny.get("stdout", "")
+assert(trim_c.get("code", 127) == 0 && trim_ny.get("code", 127) == 0 &&
+       trim_c.get("stdout", "") == trim_out, "trim audit parity")
+for expected in ["NYAUD3004", "NYAUD3006", "NYAUD3009", "NYAUD3007",
+                 "NYAUD3008", "NYAUD4902", "\"trivial_main_wrappers\": 2"] {
+   assert(str.find(trim_out, expected) >= 0,
+          "trim audit missing " + expected + ": " + trim_out)
+}
+
+def other = dir + "/other.ny"
+assert(is_ok(file_write(other,
+   "def UNUSED_ALPHA = 1\ndef USED_COUNT = 2\n" +
+   "fn use_count() int { return USED_COUNT }\nfn _orphan() int { return 7 }\n" +
+   "extern fn first_symbol() int\n#include <fixture.h>\n" +
+   "extern fn second_symbol() int\nfn after_group() int { return 0 }\n" +
+   "fn _debug_only() int { return 1 }\ninternal(_debug_only)\n" +
+   "fn truthy_env() bool { if env(\"BOOL\") == \"true\" { return true }\n" +
+   "   return false }\ndef normalized = str.lower(str.strip(env(\"MODE\")))\n" +
+   "while(i < len(items)) { work() }\ndef raw = malloc(16)\nwork()\n" +
+   "fn __add(x) { return x }\ndef ignored = \"env() == true and malloc(1) __add(x)\"\n" +
+   ";; env() == \"true\" malloc(1)\n")),
+   "write other audit modes source")
+def other_out = compare("--audit-mode=constants|dead|ffi|profiles|batteries", other)
+for expected in ["NYAUD7301", "UNUSED_ALPHA", "NYAUD7001", "NYAUD5001",
+                 "NYAUD7201", "NYAUD2001", "NYAUD2002", "NYAUD2003",
+                 "NYAUD2004", "NYAUD2005", "NYAUD2006"] {
+   assert(str.find(other_out, expected) >= 0,
+          "other audit mode finding missing " + expected)
+}
+
+def cleanup = run_capture([cmake, "-E", "rm", "-rf", dir], [], nil, false)
+assert(cleanup.get("code", 127) == 0, "remove formatter audit directory")
+print("FMT_AUDIT_METHODS_PARITY_OK")
+NY
+}

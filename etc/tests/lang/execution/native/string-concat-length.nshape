@@ -1,0 +1,16 @@
+shape test_string_concat_length {
+  family "runtime/execution/native"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.reflect
+
+def concatenated = "abc" + "def"
+assert(concatenated.len == 6, "runtime concat property length")
+assert(len(concatenated) == 6, "runtime concat builtin length")
+NY
+}

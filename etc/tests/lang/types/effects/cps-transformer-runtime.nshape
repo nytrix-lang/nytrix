@@ -1,0 +1,26 @@
+shape cps_transformer_factories_invoke_returned_callbacks {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "higher-order", "callback", "cps", "return"]
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core.cps as cps
+
+fn plus_one(value) int {
+  value + 1
+}
+
+fn add(left, right) int {
+  left + right
+}
+
+def unary = cps.cps_transform_unary(plus_one)
+def binary = cps.cps_transform_binary(add)
+
+assert(unary(41, fn(value) { value }) == 42,
+       "unary transformer passes its result to the continuation")
+assert(binary(20, 22, fn(value) { value }) == 42,
+       "binary transformer passes its result to the continuation")
+NY
+}

@@ -1,0 +1,44 @@
+shape polymorphic_row_contract_accounts_for_direct_effects {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "row", "soundness"]
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_fail
+  expect_message "effect contract violation"
+  source ny <<'NY'
+@effects(e)
+fn hidden_io() int {
+  print("direct IO is not represented by the open callback row\n")
+  1
+}
+
+hidden_io()
+NY
+}
+
+shape polymorphic_callback_row_does_not_hide_known_direct_io {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "row", "callback", "soundness"]
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_fail
+  expect_message "effect contract violation"
+  source ny <<'NY'
+fn pure_answer() int {
+  1
+}
+
+@effects(e)
+fn hidden_io(fnptr callback) int {
+  print("direct IO is not represented by the open callback row\n")
+  callback()
+}
+
+@effects(io)
+fn caller() int {
+  hidden_io(pure_answer)
+}
+
+caller()
+NY
+}

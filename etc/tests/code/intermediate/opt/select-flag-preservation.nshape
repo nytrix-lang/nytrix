@@ -1,0 +1,65 @@
+shape select_flag_preservation {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 optimizer if-convert select flags]
+  template ny-test-case
+  flags_matrix "-O2 --native-only; -O3 --native-only; -O2 --jit; -O3 --jit"
+  expect compile_and_run
+  source ny <<'NY'
+fn int_select(int x) int {
+  mut result = 0
+  if x < 0 {
+    result = 1
+  } else { result = 0 }
+  return result
+}
+assert(int_select(-1) == 1, "true integer select must preserve the predicate")
+assert(int_select(1) == 0, "false integer select must preserve the predicate")
+
+fn zero_true_select(int x) int {
+  mut result = x + 7
+  if (x & 1) == 0 {
+    result = 0
+  } else { result = x + 7 }
+  return result
+}
+assert(zero_true_select(2) == 0, "zero true arm must preserve bit-test flags")
+assert(zero_true_select(3) == 10, "nonzero false arm must preserve bit-test flags")
+assert(zero_true_select(-3) == 4, "negative odd input must take the false arm")
+
+fn register_arm_select(int x, int a, int b) int {
+  mut result = b + 13
+  if (x & 1) == 0 {
+    result = a * 3
+  } else { result = b + 13 }
+  return result + a + b
+}
+fn register_arm_select_ne(int x, int a, int b) int {
+  mut result = a * 3
+  if (x & 1) != 0 {
+    result = b + 13
+  } else { result = a * 3 }
+  return result + a + b
+}
+mut parity_input = -16
+while parity_input < 17 {
+  mut expected = 21
+  if parity_input % 2 != 0 { expected = 27 }
+  assert(register_arm_select(parity_input, 4, 5) == expected,
+         "register select must preserve both live arms and EQ flags")
+  assert(register_arm_select_ne(parity_input, 4, 5) == expected,
+         "register select must preserve both live arms and NE flags")
+  parity_input += 1
+}
+
+fn float_select(f64 x) int {
+  mut result = 0
+  if x < 0.0 {
+    result = 1
+  } else { result = 0 }
+  return result
+}
+assert(float_select(-50.0) == 1, "true float select must preserve the predicate")
+assert(float_select(50.0) == 0, "false float select must preserve the predicate")
+NY
+}

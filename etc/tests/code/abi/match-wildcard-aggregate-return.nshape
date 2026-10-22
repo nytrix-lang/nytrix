@@ -1,0 +1,25 @@
+shape match_wildcard_aggregate_return {
+  family "compiler/codegen"
+  generator "embedded"
+  features ["ny", "native", "llvm", "match", "aggregate", "abi"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-only; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_and_run
+  source ny <<'NY'
+fn hsv_rgb(int sector, f64 value, f64 p, f64 q, f64 t) list {
+   case sector {
+      0 -> { return [value, t, p] }
+      1 -> { return [q, value, p] }
+      2 -> { return [p, value, t] }
+      3 -> { return [p, q, value] }
+      4 -> { return [t, p, value] }
+      _ -> { return [value, p, q] }
+   }
+}
+
+def rgb = hsv_rgb(7, 0.8, 0.1, 0.2, 0.3)
+assert(rgb.get(0, 0.0) == 0.8, "wildcard arm returns element zero")
+assert(rgb.get(1, 0.0) == 0.1, "wildcard arm returns element one")
+assert(rgb.get(2, 0.0) == 0.2, "wildcard arm returns element two")
+NY
+}

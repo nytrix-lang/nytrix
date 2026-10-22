@@ -1,0 +1,23 @@
+shape ownership_linear_factory_local_must_use {
+  family "compiler-errors/ownership"
+  generator "error"
+  features ["error", "ownership", "resource", "linear", "inferred", "factory"]
+  template ny-compile-fail
+  expect compile_fail
+  flags "--ownership-strict"
+  expect_message "linear resource 'file' must be consumed exactly once"
+  source ny <<'NY'
+linear layout File { int fd }
+
+fn make_file() File {
+  File(23)
+}
+
+fn forget() int {
+  def file = make_file()
+  0
+}
+
+forget()
+NY
+}

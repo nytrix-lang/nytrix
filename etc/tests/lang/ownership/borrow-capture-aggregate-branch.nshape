@@ -1,0 +1,23 @@
+shape ownership_borrow_capture_aggregate_branch {
+  family "compiler-errors/ownership"
+  generator "error"
+  features ["error", "ownership", "negative", "borrow", "closure", "aggregate", "branch"]
+  template ny-compile-fail
+  expect compile_fail
+  flags "--ownership-strict"
+  expect_message "a second-class borrow cannot be captured by a closure"
+  source ny <<'NY'
+use core
+
+@effects(all)
+fn bad(int x, bool choose) {
+  def ref = &x
+  mut list holder = [x]
+  if choose { holder = [ref] }
+  def later = fn() { holder }
+  later()
+}
+
+bad(1, true)
+NY
+}

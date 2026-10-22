@@ -1,0 +1,24 @@
+shape ownership_rule_exclusive_borrow_overlapping_field_negative {
+  family "compiler-errors/ownership"
+  generator "error"
+  features ["error", "ownership", "borrow", "exclusive", "aggregate", "overlap", "negative"]
+  template ny-compile-fail
+  expect compile_fail
+  flags "--ownership-strict --nyir-verify"
+
+  source ny <<'NY'
+use core
+
+layout Pair { int left, int right }
+
+fn borrow_left() int {
+  mut Pair pair = Pair(5, 8)
+  def exclusive = &mut pair.left
+  def observed_left = pair.left
+  def observed = exclusive
+  pair.right
+}
+
+borrow_left()
+NY
+}

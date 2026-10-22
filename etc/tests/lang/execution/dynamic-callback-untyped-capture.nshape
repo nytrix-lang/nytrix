@@ -1,0 +1,16 @@
+shape nyir_map_invokes_captured_untyped_callback {
+  family "runtime/execution"
+  generator "regression"
+  features ["ny", "test", "runtime", "callback", "abi", "nyir"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+def base = 100
+def values = range(3).map(fn(i) { i + base })
+assert(values == [100, 101, 102],
+       "NYIR resolves captured untyped callbacks passed through map")
+NY
+}

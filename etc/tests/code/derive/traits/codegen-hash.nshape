@@ -1,0 +1,35 @@
+shape codegen_hash {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "codegen", "reflection", "layout"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-only; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.compiler.codegen (hash_for)
+
+layout GeneratedHashRecord {
+   i32 value
+   bool enabled
+   f32 precision
+}
+layout record LegacyHashRecord derive(hash) {
+   i32 value
+   bool enabled
+   f32 precision
+}
+comptime emit hash_for(GeneratedHashRecord)
+
+def ptr generated = malloc(__layout_size("GeneratedHashRecord"))
+def ptr legacy = malloc(__layout_size("LegacyHashRecord"))
+store_layout(generated, "GeneratedHashRecord", 31, true, 2.5)
+store_layout(legacy, "LegacyHashRecord", 31, true, 2.5)
+assert(GeneratedHashRecord_hash(generated) == LegacyHashRecord_hash(legacy),
+       "Ny hash_for uses the same ordered field fold as derive(hash)")
+assert(GeneratedHashRecord_hash(nil) == 0 && LegacyHashRecord_hash(nil) == 0,
+       "generated and legacy layout hashes return zero for null")
+free(generated)
+free(legacy)
+NY
+}

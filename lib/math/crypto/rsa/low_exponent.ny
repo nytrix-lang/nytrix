@@ -6,10 +6,10 @@
 ;; - https://people.csail.mit.edu/rivest/Rsapaper.pdf
 ;; - https://crypto.stanford.edu/~dabo/pubs/papers/RSA-survey.pdf
 ;; References:
-;; - std.math.crypto.rsa
-;; - std.math.crypto
-module std.math.crypto.rsa.low_exponent(low_exp_attack, low_exp_attack_report, low_exp_cube_root, nth_root)
-use std.math.nt
+;; - core.math.crypto.rsa
+;; - core.math.crypto
+module core.math.crypto.rsa.low_exponent(low_exp_attack, low_exp_attack_report, low_exp_cube_root, nth_root)
+use core.math.nt
 
 fn _low_exp_exp(any e) int { int(e) }
 

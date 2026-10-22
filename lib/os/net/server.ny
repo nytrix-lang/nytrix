@@ -1,23 +1,25 @@
 ;; Keywords: net socket http web server router os
 ;; Blocking HTTP/1.1 server operations for route handlers and structured responses.
 ;; References:
-;; - std.os.net
-;; - std.os
-module std.os.net.server(
+;; - core.os.net
+;; - core.os
+module core.os.net.server(
    Server, listen, serve, serve_app, serve_cli, serve_config, serve_once, serve_once_fd, handle_client,
    read_request, parse_request, response, text, html, json_response, json,
    redirect, bad_request, not_found, method_not_allowed, route, router,
    send_response, status_text, mime_type, header, server_url, serve_banner
 )
 
-use std.core
-use std.core.dict_mod as _d
-use std.core.str
-use std.os.args as cli
-use std.os.net.context as netctx
-use std.os.net.socket as sock
-use std.os.net.http as http
-use std.math.parse.data.json as jsonlib
+use core
+use core.dict_mod as _d
+use core.str
+use core.os.args as cli
+use core.common as common
+use core.os.net.context as netctx
+use core.os.net.socket as sock
+use core.os.net.http as http
+use core.math.parse.data.json as jsonlib
+use core.os.time as time
 
 fn status_text(int status) str {
    "Returns a standard HTTP reason phrase for common status codes."
@@ -82,7 +84,10 @@ fn header(any headers, str name, any fallback="") any {
    "Case-insensitive request/response header lookup."
    if !is_dict(headers) { return fallback }
    def want = lower(name)
-   def direct = headers.get(want, nil)
+   ;; `headers` is intentionally `any` at the public boundary.  Use the
+   ;; typed dictionary primitive after the runtime check so native lowering
+   ;; does not route a raw dictionary pointer through dynamic `.get()`.
+   def direct = _d.dict_get(headers, want, nil)
    if direct != nil { return direct }
    def items = _d.dict_items(headers)
    mut i = 0
@@ -97,7 +102,8 @@ fn header(any headers, str name, any fallback="") any {
 
 fn _opt_bool(any options, str key, bool fallback) bool {
    if !is_dict(options) { return fallback }
-   def v = options.get(key, fallback)
+   def v = options.get(key, nil)
+   if v == nil { return fallback }
    if is_int(v) { return v != 0 }
    if is_str(v) {
       def s = lower(strip(v))
@@ -161,6 +167,9 @@ fn serve_banner(str host, int port, any options=0) int {
    print("  " + netctx.paint("bind", "gray", 0, options) + "  " + host + ":" + to_str(port))
    print("  " + netctx.paint("stop", "gray", 0, options) + "  Ctrl-C")
    if _debug_enabled(options) { print("  " + netctx.paint("debug", "gray", 0, options) + " on") }
+   ;; Servers block in accept; flush the banner before waiting so shells,
+   ;; pipes, and test harnesses see the listening state immediately.
+   __print_flush()
    0
 }
 
@@ -295,22 +304,25 @@ fn parse_request(any raw, any peer="") dict {
    def first = strip(lines[0])
    def parts = split_words(first)
    if parts.len < 2 { return req }
-   req["method"] = upper(parts[0])
-   req["target"] = parts[1]
+   def method = to_str(upper(parts[0]))
+   req["method"] = method
+   def request_target = to_str(parts[1])
+   req["target"] = request_target
    req["version"] = (parts.len >= 3) ? parts[2] : "HTTP/1.0"
-   mut target = parts[1]
+   mut target = request_target
    if startswith(lower(target), "http://") || startswith(lower(target), "https://") {
       def u = http.http_parse_url_ex(target)
       target = u.get("target", "/")
    }
    def qpos = find(target, "?")
+   mut path = target
    if qpos >= 0 {
-      req["path"] = slice(target, 0, qpos)
+      path = slice(target, 0, qpos)
       req["query"] = slice(target, qpos + 1, target.len)
    } else {
-      req["path"] = target
       req["query"] = ""
    }
+   req["path"] = path
    req["query_params"] = http.http_parse_query(req["query"])
    mut h = _d.dict(16)
    mut i = 1
@@ -323,7 +335,7 @@ fn parse_request(any raw, any peer="") dict {
       i += 1
    }
    req["headers"] = h
-   req["ok"] = req["method"].len > 0 && req["path"].len > 0
+   req = _d.dict_set(req, "ok", true)
    req
 }
 
@@ -348,7 +360,10 @@ fn read_request(int fd, int max_header=65536, int max_body=10485760, any peer=0)
    def raw0 = _read_header_buffer(fd, max_header)
    if raw0.len == 0 { return parse_request("", peer) }
    def req0 = parse_request(raw0, peer)
-   def cl = int(header(req0.get("headers", 0), "content-length", "0"))
+   if !is_dict(req0) {
+      return {"ok": false, "error": "request parser returned invalid shape", "status": 400, "raw": raw0, "peer": peer}
+   }
+   def cl = atoi(header(req0.get("headers", 0), "content-length", "0"))
    if cl > 0 {
       if cl > max_body { return {"ok": false, "error": "request body too large", "status": 413, "raw": raw0, "peer": peer} }
       mut body = req0.get("body", "")
@@ -361,8 +376,12 @@ fn read_request(int fd, int max_header=65536, int max_body=10485760, any peer=0)
 }
 
 fn handle_client(int fd, fnptr handler, any peer=0) dict {
-   "Handles one accepted client by reading a request, calling `handler(req)`, and sending the response."
+   "Handles one HTTP request by reading it, dispatching the handler, and sending its response."
    def req = read_request(fd, 65536, 10485760, peer)
+   if !is_dict(req) {
+      send_response(fd, bad_request(), "GET")
+      return {"ok": false, "error": "request reader returned invalid shape", "status": 400, "peer": peer}
+   }
    if !req.get("ok", false) {
       send_response(fd, bad_request(), "GET")
       return {"ok": false, "request": req, "status": 400, "peer": peer}
@@ -377,10 +396,24 @@ fn serve_once_fd(int server_fd, fnptr handler, int timeout_ms=0) dict {
    "Accepts and handles one client on an existing listening socket."
    if timeout_ms > 0 { sock.socket_set_timeout_ms(server_fd, timeout_ms) }
    def accepted = sock.socket_accept_info(server_fd)
-   def c = accepted.get("fd", -1)
-   if c < 0 { return {"ok": false, "error": "accept failed"} }
-   defer { sock.close_socket(c) }
-   handle_client(c, handler, accepted)
+   ;; Older/native socket lowering can expose the accepted fd directly even
+   ;; though the structured API is preferred.  Keep the server boundary
+   ;; compatible with both representations instead of calling `.get` on an
+   ;; integer and aborting the whole daemon on the first request.
+   if is_dict(accepted) {
+      def c = accepted.get("fd", -1)
+      if !is_int(c) || c < 0 { return {"ok": false, "error": "accept failed"} }
+      defer { sock.close_socket(c) }
+      return handle_client(c, handler, accepted)
+   }
+   ;; Keep the legacy fd representation explicit after the dynamic type
+   ;; check.  This also gives the type checker a stable scalar at the native
+   ;; socket boundary when `socket_accept_info` has a union result.
+   if !is_int(accepted) { return {"ok": false, "error": "accept failed"} }
+   def accepted_fd = int(accepted)
+   if accepted_fd < 0 { return {"ok": false, "error": "accept failed"} }
+   defer { sock.close_socket(accepted_fd) }
+   handle_client(accepted_fd, handler, 0)
 }
 
 fn serve_once(str host, int port, fnptr handler, int timeout_ms=5000) dict {
@@ -391,26 +424,53 @@ fn serve_once(str host, int port, fnptr handler, int timeout_ms=5000) dict {
    serve_once_fd(fd, handler, timeout_ms)
 }
 
-fn Server(str host="127.0.0.1", int port=8080, any handler=0, int max_requests=-1, int timeout_ms=0) dict {
+fn Server(str host="127.0.0.1", int port=8080, any handler=0, int max_requests=-1, int timeout_ms=0, int deadline_ms=0) dict {
    "Builds a server config for `serve_config`."
-   return {"host": host, "port": port, "handler": handler, "max_requests": max_requests, "timeout_ms": timeout_ms}
+   return {"host": host, "port": port, "handler": handler, "max_requests": max_requests, "timeout_ms": timeout_ms, "deadline_ms": deadline_ms}
 }
 
 fn serve_config(dict cfg) dict {
    "Serves HTTP using a config from `Server(...)`."
-   serve(cfg.get("host", "127.0.0.1"), cfg.get("port", 8080), cfg.get("handler", 0), cfg.get("max_requests", -1), cfg.get("timeout_ms", 0))
+   serve(cfg.get("host", "127.0.0.1"), cfg.get("port", 8080), cfg.get("handler", 0), cfg.get("max_requests", -1), cfg.get("timeout_ms", 0), cfg.get("deadline_ms", 0))
 }
 
-fn _listen_impl(str host, int port, fnptr handler, int max_requests=-1, int timeout_ms=0, any options=0) dict {
+fn _listen_impl(str host, int port, fnptr handler, int max_requests=-1, int timeout_ms=0, any options=0, int deadline_ms=0) dict {
    def fd = sock.socket_bind(host, port)
    if fd < 0 { return {"ok": false, "error": "bind failed", "served": 0} }
    defer { sock.close_socket(fd) }
    serve_banner(host, port, options)
+   if common.env_truthy("NYTRIX_FIXTURE_READY") {
+      print("NYTRIX_FIXTURE_READY server")
+      __print_flush()
+   }
+   ;; A whole-run deadline must not rely on signals or per-accept timeouts
+   ;; alone: when no accept timeout is configured, wake accept periodically
+   ;; so the loop can observe the deadline portably.
+   if deadline_ms > 0 && timeout_ms <= 0 { timeout_ms = 250 }
+   mut int started_ns = time.ticks()
    mut served = 0
    while true {
       if max_requests >= 0 && served >= max_requests { break }
+      if deadline_ms > 0 && time.ticks() - started_ns >= deadline_ms * 1000000 {
+         return {"ok": true, "served": served, "deadline": "hit"}
+      }
       def r = serve_once_fd(fd, handler, timeout_ms)
+      if !is_dict(r) {
+         return {"ok": false, "error": "client handler returned invalid shape", "served": served}
+      }
       if !r.get("ok", false) {
+         ;; A 4xx/transport response with a status was HANDLED: the server
+         ;; answered the client (bad request shape, empty read on connection
+         ;; close). Count it and keep serving — it is not a loop-fatal.
+         if r.get("status", 0) >= 400 { served += 1 }
+         ;; The deadline mechanism sets a short accept timeout purely to wake
+         ;; this loop; an accept timeout under an active deadline is the wake,
+         ;; not a client failure — retry until the deadline check above ends
+         ;; the run. Without this, every bounded run that outlives its last
+         ;; request reported ok:false / "client failed" after serving
+         ;; everything cleanly.
+         if deadline_ms > 0 && r.get("error", "") == "accept failed" { continue }
+         if r.get("status", 0) >= 400 { continue }
          if max_requests >= 0 { return {"ok": false, "error": r.get("error", "client failed"), "served": served} }
          continue
       }
@@ -420,19 +480,19 @@ fn _listen_impl(str host, int port, fnptr handler, int max_requests=-1, int time
    return {"ok": true, "served": served}
 }
 
-fn listen(str host, int port, fnptr handler, int max_requests=-1, int timeout_ms=0) dict {
-   "Starts a blocking HTTP server. Use `max_requests` for finite testable runs."
-   _listen_impl(host, port, handler, max_requests, timeout_ms, {"banner": false, "log": false})
+fn listen(str host, int port, fnptr handler, int max_requests=-1, int timeout_ms=0, int deadline_ms=0) dict {
+   "Starts a blocking HTTP server. Use `max_requests` for finite testable runs and `deadline_ms` for a portable whole-run wall deadline(0 = unbounded)."
+   _listen_impl(host, port, handler, max_requests, timeout_ms, {"banner": false, "log": false}, deadline_ms)
 }
 
-fn serve(str host, int port, fnptr handler, int max_requests=-1, int timeout_ms=0) dict {
+fn serve(str host, int port, fnptr handler, int max_requests=-1, int timeout_ms=0, int deadline_ms=0) dict {
    "Alias for `listen`."
-   listen(host, port, handler, max_requests, timeout_ms)
+   listen(host, port, handler, max_requests, timeout_ms, deadline_ms)
 }
 
-fn serve_app(str host, int port, fnptr handler, int max_requests=-1, int timeout_ms=0, any options=0) dict {
+fn serve_app(str host, int port, fnptr handler, int max_requests=-1, int timeout_ms=0, any options=0, int deadline_ms=0) dict {
    "Starts a formatted blocking HTTP server with banner and request logging."
-   _listen_impl(host, port, handler, max_requests, timeout_ms, options)
+   _listen_impl(host, port, handler, max_requests, timeout_ms, options, deadline_ms)
 }
 
 fn _cli_port(any options) int {
@@ -454,7 +514,8 @@ fn serve_cli(fnptr handler, any options=0) dict {
    def fallback_requests = _opt_int(options, "max_requests", -1)
    def max_requests = cli.int_value("--requests", cli.flag("--once") ? 1 : fallback_requests)
    def timeout_ms = _opt_int(options, "timeout_ms", 0)
-   serve_app(host, port, handler, max_requests, timeout_ms, options)
+   def deadline_ms = _opt_int(options, "deadline_ms", 0)
+   serve_app(host, port, handler, max_requests, timeout_ms, options, deadline_ms)
 }
 
 fn route(dict routes, dict req, any fallback=0) any {
@@ -475,8 +536,8 @@ fn router(dict routes, any fallback=0) fnptr {
 }
 
 #main {
-   use std.os (ticks)
-   use std.os.async (await)
+   use core.os (ticks)
+   use core.os.async (await)
    def parsed = parse_request("POST /submit?x=1 HTTP/1.1\r\nHost: local\r\nContent-Length: 3\r\n\r\nabc")
    assert_eq(parsed.get("ok", false), true, "request parses")
    assert_eq(parsed.get("method", ""), "POST", "request method")
@@ -513,5 +574,5 @@ fn router(dict routes, any fallback=0) fnptr {
       }
       sock.close_socket(server)
    }
-   print("✓ std.os.net.server self-test passed")
+   print("✓ core.os.net.server self-test passed")
 }

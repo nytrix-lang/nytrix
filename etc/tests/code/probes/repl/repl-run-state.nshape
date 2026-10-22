@@ -1,0 +1,18 @@
+shape repl_run_state {
+  family "repl"
+  generator "embedded"
+  features ["ny", "test", "repl", "run", "state"]
+  template ny-test-case
+  timeout 60
+  repl_expect "REPL-RUN-STATE-OK"
+  repl_commands "mut int run_value = 41\n:run /tmp/nytrix-repl-run-state-helper.ny\nassert(run_value == 42, \"run evaluates against persistent state\")\nprint(\"REPL-RUN-STATE-OK\")"
+  source ny <<'NY'
+use core
+use core.os (file_write)
+
+assert(is_ok(file_write(
+   "/tmp/nytrix-repl-run-state-helper.ny",
+   "run_value = run_value + 1\nif (run_value == 42) {\n  print(\"REPL-RUN-STATE-OK\")\n}\n")),
+   "write helper source for :run")
+NY
+}

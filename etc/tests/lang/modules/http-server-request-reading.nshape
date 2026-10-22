@@ -1,0 +1,34 @@
+shape test_http_server_reads_requests_without_content_length {
+  family "runtime/modules"
+  generator "regression"
+  features ["ny", "test", "stdlib", "http", "server", "request-reader", "content-length"]
+  estimate_ms 19000
+  template ny-test-case
+  flags_matrix "--nyir-verify --native --run; --nyir-verify --native-backend=llvm --jit --jit-engine=mcjit; --nyir-verify --native-backend=llvm --jit --jit-engine=orc; --nyir-verify --native-only"
+  expect compile_and_run
+  timeout 60
+  source ny <<'NY'
+use core
+use core.os.net.server as web
+use core.os.net.socket as sock
+
+def server = sock.socket_bind("127.0.0.1", 0)
+assert(server >= 0, "loopback server binds")
+def port = sock.socket_bound_port(server)
+assert(port > 0, "loopback server reports its ephemeral port")
+def client = sock.socket_connect("127.0.0.1", port)
+assert(client >= 0, "loopback client connects")
+def peer = sock.socket_accept(server)
+assert(peer >= 0, "server accepts the client")
+def raw = "GET /health HTTP/1.1\r\nHost: local\r\n\r\n"
+assert(sock.write_socket_all(client, raw) == raw.len, "client sends the request")
+def request = web.read_request(peer)
+assert(request.get("ok", false) == true,
+       "request without content-length is accepted")
+assert(request.get("method", "") == "GET", "request method survives socket read")
+assert(request.get("path", "") == "/health", "request path survives socket read")
+sock.close_socket(client)
+sock.close_socket(peer)
+sock.close_socket(server)
+NY
+}

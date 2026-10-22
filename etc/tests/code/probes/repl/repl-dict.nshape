@@ -1,0 +1,16 @@
+shape test_repl_dict {
+  family "native/repl"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  expect compile_and_run
+  repl_expect "REPL-DICT-OK"
+  source ny <<'NY'
+use core
+
+def d = {"a": 1, "ok": true}
+assert(d["a"] == 1, "REPL dictionary integer read")
+assert(d["ok"] == true, "REPL dictionary bool read")
+print("REPL-DICT-OK")
+NY
+}

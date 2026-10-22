@@ -1,0 +1,16 @@
+shape nyir_block_scope_shadow {
+  family "runtime-native"
+  generator "native"
+  features ["native", "nyir", "scope", "shadow", "vm"]
+  template ny-test-case
+  flags "--native --run"
+  expect compile_and_run
+  expect_exit 7
+  source ny <<'NY'
+def x = 7
+if 1 {
+  def x = 11
+}
+x
+NY
+}

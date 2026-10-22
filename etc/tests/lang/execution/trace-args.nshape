@@ -1,0 +1,22 @@
+shape test_trace_args {
+  family "runtime/execution"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+fn trace_args(int n, str label) int {
+   n
+}
+
+fn trace_float(f64 value) f64 {
+   value
+}
+
+assert(trace_args(42, "ok") == 42, "trace argument probe returns its value")
+assert(trace_float(1.25) == 1.25, "trace f64 argument probe returns its value")
+print("✓ runtime trace argument probe passed")
+NY
+}

@@ -1,0 +1,29 @@
+shape ownership_allowance_fixed_range_match_upper_bound_negative {
+  family "compiler-errors/ownership"
+  generator "error"
+  features [error ownership allowance fixed-range match upper-bound negative]
+  template ny-compile-fail
+  flags "--ownership-strict --nyir-verify"
+  flags "--ownership-strict --nyir-verify"
+  expect compile_fail
+  expect_message "ownership allowance"
+  source ny <<'NY'
+use core
+
+@allowance(x, [0,3])
+fn too_many_on_one_match_path(int selector, int x) int {
+  for index in 0..1 {
+    match selector {
+      0 -> {
+        def first = x
+        def second = x
+      }
+      _ -> { def only = x }
+    }
+  }
+  0
+}
+
+too_many_on_one_match_path(0, 3)
+NY
+}

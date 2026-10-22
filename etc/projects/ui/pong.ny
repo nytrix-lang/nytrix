@@ -1,332 +1,228 @@
 #!/usr/bin/env ny
 
 ;; Keywords: ui pong game example
-;; Pong example
+;; Single-player arcade Pong with an AI opponent, independently implemented for Nytrix.
+;; Visual inspiration: https://github.com/tsoding/ping-pong-love-remastered
 
-use std.core
-use std.math as math
-use std.os.ui.render as gfx
-use std.os.ui.window as window
-use std.os.ui.window.consts (KEY_W, KEY_S, KEY_UP, KEY_DOWN, KEY_ESCAPE, KEY_P, KEY_R)
-use std.os.ui.window.input (key_down)
+use core
+use core.os (exit)
+use core.os.fixture as fixture
+use core.common as common
+use core.math as math
+use core.os.ui.render as gfx
+use core.os.ui.window as window
+use core.os.ui.window.consts (KEY_W, KEY_S, KEY_ESCAPE, KEY_SPACE, KEY_R)
 
-def WIN_W, WIN_H = 1920, 1080
-def START_W, START_H = 1920.0, 1080.0
+def WIN_W, WIN_H = 1280, 720
+def f64 VIEW_W, VIEW_H = 1280.0, 720.0
+def f64 BALL_SIZE, BALL_SPEED = 20.0, 400.0
+def f64 PADDLE_W, PADDLE_H, PADDLE_MARGIN = 20.0, 120.0, 80.0
+def f64 PADDLE_SPEED, OPPONENT_SPEED, OPPONENT_ERROR, SERVE_TIME = 480.0, 320.0, 18.0, 0.85
+def int NET_COUNT = 51
 
-def PAD_W, PAD_H = 22.0, 146.0
-def PLAYER_MAX, PLAYER_ACCEL, PLAYER_DRAG = 1500.0, 8000.0, 10000.0
-def ENEMY_MAX, ENEMY_ACCEL, ENEMY_DRAG = 640.0, 10500.0, 19500.0
-def ENEMY_ERR, ENEMY_ZONE, ENEMY_STEER = 55.0, 9.0, 140.0
+def BG = gfx.color_hex("#201E18")
+def FG = gfx.color_hex("#F4F1E8")
+def MUTED = gfx.color_hex("#807D75")
 
-def BALL = 20.0
-def BALL_START, BALL_X_MAX, BALL_Y_MAX = 660.0, 950.0, 420.0
-def BALL_ACCEL, ENGLISH = 1.01, 0.052
-
-def BORDER, NET_W, NET_H, NET_STEP = 4.0, 4.0, 18.0, 42.0
-def NET_GAP = 6.0
-def SCORE_Y = 36.0
-def HINT_MARGIN = 74.0
-
-def FONT_SIZE = 36
-def FONT_BIG_SIZE = 88
-def FONT_SMALL_SIZE = 24
-
-def WIN_SCORE = 7
-def SERVE_TIME = 1.6
-
-fn lim(float a, float b) float { math.max(a - b, 0.0) }
-fn mid(float a, float b) float { lim(a, b) * 0.5 }
-
-fn approach(float x, float goal, float step) float {
-   if x < goal { math.min(x + step, goal) } else { math.max(x - step, goal) }
+fn lim(f64 value, f64 lower, f64 upper) f64 {
+   float(math.min(math.max(value, lower), upper))
 }
 
-fn axis(float v, float dir, float max_v, float accel, float drag, float dt) float {
-   approach(v, dir * max_v, (if math.abs(dir) < 0.001 { drag } else { accel }) * dt)
+fn opponent_goal(f64 bx, f64 by, f64 vx, f64 vy, f64 ball, f64 h,
+                 f64 paddle_h, f64 plane, int rally) f64 {
+   def f64 center = by + ball * 0.5
+   if vx <= 0.0 { return (h - paddle_h) * 0.5 }
+   def f64 t = float(math.max((plane - bx) / vx, 0.0))
+   def f64 span = h - ball
+   if span <= 0.0 { return 0.0 }
+   def f64 period = span * 2.0
+   mut f64 folded = (center + vy * t - ball * 0.5) % period
+   if folded < 0.0 { folded += period }
+   if folded > span { folded = period - folded }
+   ;; Keep the predictive opponent fallible and beatable without making it erratic.
+   def f64 variation = float(rally % 5 - 2) * OPPONENT_ERROR
+   lim(ball * 0.5 + folded + variation - paddle_h * 0.5, 0.0, h - paddle_h)
 }
 
-fn wall_v(float y, float v, float max_y) float {
-   if y <= 0.0 && v < 0.0 { 0.0 } else { if y >= max_y && v > 0.0 { 0.0 } else { v } }
+fn place_ball(f64 w, f64 h, f64 size, int rally) {
+   ball_x = (w - size) * 0.5
+   ball_y = (h - size) * 0.5
+   def f64 direction = rally % 2 == 0 ? 1.0 : -1.0
+   ball_vx = direction * BALL_SPEED * scale
+   ball_vy = BALL_SPEED * scale * (rally % 4 < 2 ? 0.23 : -0.23)
 }
 
-fn control_axis() float {
-   mut a = 0.0
-   if key_down(KEY_W) || key_down(KEY_UP) { a -= 1.0 }
-   if key_down(KEY_S) || key_down(KEY_DOWN) { a += 1.0 }
-   a
+if common.env_present("NY_UI_RENDER_BACKEND") {
+   gfx.apply_backend_env()
+} else {
+   gfx.set_backend_type(gfx.BACKEND_GL)
 }
+gfx.apply_backend_argv()
 
-fn steer(float y, float target, float zone, float width) float {
-   def d = target - y
-   if math.abs(d) <= zone { 0.0 } else { math.clamp(d / width, -1.0, 1.0) }
-}
-
-fn overlap(float ax, float ay, float aw, float ah, float bx, float by, float bw,
-           float bh) bool {
-   ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by
-}
-
-fn sweep(float px, float py, float x, float y, float plane, float pad_y) bool {
-   def dx = x - px
-   if math.abs(dx) <= 0.0001 { return false }
-
-   def t = (plane - px) / dx
-   if t < 0.0 || t > 1.0 { return false }
-
-   def iy = py + (y - py) * t
-   iy + BALL >= pad_y && iy <= pad_y + PAD_H
-}
-
-fn reflect(float p, float lo, float hi) float {
-   ;; Reflect p into [lo,hi] with bounce folding (for multi wall hits in predict).
-   def span = hi - lo
-   if span <= 0.0 { return lo }
-   mut x = (p - lo) % (span * 2.0)
-   if x < 0.0 { x += span * 2.0 }
-   if x > span { hi - (x - span) } else { lo + x }
-}
-
-fn predict(float bx, float by, float vx, float vy, float plane, float h) float {
-   ;; Predict ball center y when its x reaches the plane, folding over top/bottom walls.
-   if vx <= 0.0 || plane <= bx {
-      return by + BALL * 0.5
-   }
-   def t = (plane - bx) / vx
-   def py = by + BALL * 0.5 + vy * t
-   reflect(py, BALL * 0.5, h - BALL * 0.5)
-}
-
-fn bias(int rally, int score) float {
-   ;; small varying error to keep enemy human-like, not perfect
-   def offs = [-1.0, -0.6, -0.25, 0.0, 0.25, 0.6, 1.0]
-   offs[(rally * 7 + score) % 7]
-}
-
-fn enemy_goal(int rally, int score, float bx, float by, float vx, float vy,
-              float plane, float h) float {
-   ;; return desired paddle top y; track ball y with lag and error when approaching
-   def pad_c = PAD_H * 0.5
-   def ball_c = by + BALL * 0.5
-   mut aim = h * 0.5
-
-   if vx > 0.0 {
-      ;; crude direct predict (no full reflect for reliability)
-      def t = (plane - bx) / (vx + 0.00001)
-      aim = ball_c + vy * t
-      aim = aim + bias(rally, score) * ENEMY_ERR
-   } else {
-      ;; return toward center slowly when ball is with player
-      aim = math.lerp(h * 0.5, ball_c, 0.15)
-   }
-
-   aim = math.clamp(aim, BALL * 0.5, h - BALL * 0.5)
-   def min_y = 6.0
-   def max_y = math.max(min_y, lim(h, PAD_H) - 6.0)
-   math.clamp(aim - pad_c, min_y, max_y)
-}
-
-fn serve_x(int n) float { if n % 2 == 0 { BALL_START } else { -BALL_START } }
-fn serve_y(int n) float { if n % 4 < 2 { -BALL_START * 0.19 } else { BALL_START * 0.19 } }
-
-fn bounce_y(float by, float py, float old_py, float dt) float {
-   def pad_v = (py - old_py) / dt
-   def hit_y = ((by + BALL * 0.5) - (py + PAD_H * 0.5)) / (PAD_H * 0.5)
-   math.clamp(hit_y * BALL_START + pad_v * ENGLISH, -BALL_Y_MAX, BALL_Y_MAX)
-}
-
-
-fn draw_field(w, h, net_top) {
-   gfx.draw_rect(0.0, 0.0, w, BORDER, gfx.WHITE)
-   gfx.draw_rect(0.0, lim(h, BORDER), w, BORDER, gfx.WHITE)
-
-   mut y = net_top
-   while y < h {
-      gfx.draw_rect(w * 0.5 - NET_W * 0.5, y, NET_W, NET_H, gfx.WHITE)
-      y += NET_STEP
-   }
-}
-
-fn draw_score(int font, int player, int enemy, w, h) {
-   gfx.draw_text_centered(font, f"{player} - {enemy}", w * 0.5, SCORE_Y)
-}
-
-
-def win = gfx.init_window(WIN_W, WIN_H, "Nytrix - Pong", 0, true, false, 1)
+mut win = gfx.init_window(WIN_W, WIN_H, "Ping Pong - Nytrix", 0, true, false, 1)
 if !win { panic("could not create the Pong window") }
-defer { gfx.close_window() }
-
-def font = gfx.font_load_first(["etc/assets/fonts/monocraft.ttf"], FONT_SIZE) ?? 0
-def font_big = gfx.font_load_first(["etc/assets/fonts/monocraft.ttf"], FONT_BIG_SIZE) ?? 0
-defer {
-   if font { gfx.font_destroy(font) }
-   if font_big { gfx.font_destroy(font_big) }
+if is_dict(win) && !!win.get("_mock", false) {
+   if !gfx.begin_frame_clear(BG) { panic("Pong renderer could not begin a frame") }
+   if !gfx.end_frame() { panic("Pong renderer could not present a frame") }
+   gfx.close_window()
+   exit(0)
 }
 
-def sm = gfx.measure_text(font, "0")
-def score_line_h = sm.len > 1 ? sm[1] : 40.0
-def net_top = SCORE_Y + score_line_h * 0.5 + NET_GAP
+fixture.ready("pong")
+def headless = gfx.get_active_backend_name() == "mock"
+def int legacy_frames = common.env_int_clamped("NYTRIX_PONG_MAX_FRAMES", 0, 0, 1000000)
+def int legacy_timeout = common.env_int_clamped("NYTRIX_PONG_TIMEOUT_MS", headless ? 1000 : 0, 0, 3600000)
+def fx = fixture.start_ui(legacy_frames, legacy_timeout, headless && !common.env_present("NYTRIX_PONG_MAX_FRAMES"))
+def int font = gfx.font_load_first(["etc/assets/fonts/monocraft.ttf"], 48) ?? 0
+def int font_small = gfx.font_load_first(["etc/assets/fonts/monocraft.ttf"], 20) ?? 0
 
-mut player_score, enemy_score = 0, 0
-mut player_x, player_y, player_v = 0.0, mid(START_H, PAD_H), 0.0
-mut enemy_x, enemy_y, enemy_v = lim(START_W, PAD_W), mid(START_H, PAD_H), 0.0
-mut ball_x, ball_y = mid(START_W, BALL), mid(START_H, BALL)
-mut ball_vx, ball_vy = BALL_START, BALL_START * 0.19
-mut enemy_target = enemy_y
-mut rally = 0
+mut int player_score = 0
+mut int opponent_score = 0
+mut f64 scale = 1.0
+mut f64 ball_x = 0.0
+mut f64 ball_y = 0.0
+mut f64 ball_vx = 0.0
+mut f64 ball_vy = 0.0
+mut f64 player_y = 0.0
+mut f64 opponent_y = 0.0
+mut f64 serve_t = SERVE_TIME
+mut bool paused = false
+mut bool previous_pause = false
+mut bool previous_reset = false
+mut bool previous_escape = false
+mut bool first_frame = true
+mut bool initialized = false
+mut int rally = 0
 
-;; Gentle serve countdown and state machine: "serve" -> "playing" <-> "paused".
-mut state = "serve"
-mut serve_t = SERVE_TIME
-mut winner = 0
-mut prev_p = false
-mut prev_r = false
-mut prev_esc = false
-
-while !gfx.window_should_close() {
-   gfx.begin_frame_clear(gfx.BLACK)
+while !gfx.window_should_close(win) && fixture.tick_ui(fx) {
+   if fixture.quit_key(fixture.next_ui_key(fx)) { break }
+   if !gfx.begin_frame_clear(BG) { continue }
 
    def fb = gfx.framebuffer_size_f64()
-   def w, h = fb[0], fb[1]
-   def dt = math.clamp(gfx.get_frame_time(), 1.0 / 240.0, 1.0 / 30.0)
-   def pad_max = lim(h, PAD_H)
-   def ball_max = lim(h, BALL)
+   def f64 w = float(fb[0])
+   def f64 h = float(fb[1])
+   scale = float(math.min(w / VIEW_W, h / VIEW_H))
+   if scale <= 0.0 { scale = 1.0 }
+   def f64 ball = BALL_SIZE * scale
+   def f64 paddle_w = PADDLE_W * scale
+   def f64 paddle_h = PADDLE_H * scale
+   def f64 margin = PADDLE_MARGIN * scale
+   def f64 speed = PADDLE_SPEED * scale
+   def f64 player_x = margin
+   def f64 opponent_x = w - margin - paddle_w
+   def f64 dt = float(math.clamp(gfx.get_delta_time(), 1.0 / 240.0, 0.05))
 
    gfx.set_ortho_2d(0.0, w, h, 0.0)
-
-   def p_down = key_down(KEY_P)
-   def r_down = key_down(KEY_R)
-   def esc_down = key_down(KEY_ESCAPE)
-
-   if esc_down && !prev_esc {
-      window.set_should_close(win, true)
+   if !initialized {
+      player_y = (h - paddle_h) * 0.5
+      opponent_y = player_y
+      place_ball(w, h, ball, rally)
+      initialized = true
    }
-   prev_esc = esc_down
-
-   if p_down && !prev_p && state != "serve" {
-      if state == "playing" { state = "pause" }
-      elif state == "pause" { state = "playing" }
-   }
-   prev_p = p_down
-
-   if r_down && !prev_r {
-      player_score, enemy_score = 0, 0
-      state = "serve"
-      serve_t = SERVE_TIME
-      winner = 0
+   def pause_down = window.key_down(win, KEY_SPACE)
+   def reset_down = window.key_down(win, KEY_R)
+   def escape_down = window.key_down(win, KEY_ESCAPE)
+   if escape_down && !previous_escape { window.set_should_close(win, true) }
+   previous_escape = escape_down
+   if pause_down && !previous_pause { paused = !paused }
+   previous_pause = pause_down
+   if reset_down && !previous_reset {
+      player_score, opponent_score = 0, 0
       rally = 0
+      paused = false
+      serve_t = SERVE_TIME
+      place_ball(w, h, ball, rally)
    }
-   prev_r = r_down
+   previous_reset = reset_down
 
-   player_x, enemy_x = 0.0, lim(w, PAD_W)
+   player_y = lim(player_y, 0.0, h - paddle_h)
+   opponent_y = lim(opponent_y, 0.0, h - paddle_h)
+   if window.key_down(win, KEY_W) { player_y -= speed * dt }
+   if window.key_down(win, KEY_S) { player_y += speed * dt }
+   player_y = lim(player_y, 0.0, h - paddle_h)
 
-   def old_py = player_y
-   def old_ey = enemy_y
-   def old_bx = ball_x
-   def old_by = ball_y
-   def player_plane = player_x + PAD_W
-   def enemy_plane = enemy_x - BALL
-
-   if state == "serve" {
-      serve_t -= dt
-      player_v = 0.0
-      enemy_v = 0.0
-      if serve_t <= 0.0 { state = "playing" }
-   }
-
-   if state != "pause" && state != "serve" {
-      player_v = axis(player_v, control_axis(), PLAYER_MAX, PLAYER_ACCEL, PLAYER_DRAG, dt)
-      player_y = math.clamp(player_y + player_v * dt, 0.0, pad_max)
-      player_v = wall_v(player_y, player_v, pad_max)
-
-      if state == "playing" {
-         enemy_target = math.lerp(
-            enemy_target,
-            enemy_goal(rally, player_score + enemy_score, ball_x, ball_y, ball_vx, ball_vy, enemy_plane, h),
-            if ball_vx > 0.0 { 16.0 * dt } else { 5.0 * dt }
+   if !paused {
+      if serve_t > 0.0 {
+         serve_t = float(math.max(0.0, serve_t - dt))
+      } else {
+         def f64 goal = opponent_goal(
+            ball_x, ball_y, ball_vx, ball_vy, ball, h, paddle_h,
+            opponent_x - ball, rally
          )
-
-         enemy_v = axis(enemy_v, steer(enemy_y, enemy_target, ENEMY_ZONE, ENEMY_STEER), ENEMY_MAX, ENEMY_ACCEL, ENEMY_DRAG, dt)
-         enemy_y = math.clamp(enemy_y + enemy_v * dt, 0.0, pad_max)
-         enemy_v = wall_v(enemy_y, enemy_v, pad_max)
+         def f64 delta = goal - opponent_y
+         def f64 step = float(math.min(float(math.abs(delta)), OPPONENT_SPEED * scale * dt))
+         if delta > 0.0 { opponent_y += step }
+         elif delta < 0.0 { opponent_y -= step }
+         opponent_y = lim(opponent_y, 0.0, h - paddle_h)
 
          ball_x += ball_vx * dt
          ball_y += ball_vy * dt
 
-         if ball_y <= 0.0 && ball_vy < 0.0 {
-            ball_y = 0.0
-            ball_vy = math.abs(ball_vy)
-         }
+         if ball_y < 0.0 { ball_y = 0.0 ball_vy = float(math.abs(ball_vy)) }
+         if ball_y + ball > h { ball_y = h - ball ball_vy = -float(math.abs(ball_vy)) }
 
-         if ball_y >= ball_max && ball_vy > 0.0 {
-            ball_y = ball_max
-            ball_vy = -math.abs(ball_vy)
+         if ball_vx < 0.0 && ball_x <= player_x + paddle_w && ball_x + ball >= player_x &&
+            ball_y + ball >= player_y && ball_y <= player_y + paddle_h {
+            ball_x = player_x + paddle_w
+            ball_vx = float(math.abs(ball_vx))
+            def f64 offset = ((ball_y + ball * 0.5) - (player_y + paddle_h * 0.5)) / (paddle_h * 0.5)
+            ball_vy = lim(offset * BALL_SPEED * scale, -BALL_SPEED * scale, BALL_SPEED * scale)
+            rally += 1
          }
-
-         if ball_vx < 0.0 && (
-            overlap(ball_x, ball_y, BALL, BALL, player_x, player_y, PAD_W, PAD_H) ||
-            sweep(old_bx, old_by, ball_x, ball_y, player_plane, player_y)
-         ) {
-            ball_x = player_plane
-            ball_vx = math.min(math.abs(ball_vx) * BALL_ACCEL, BALL_X_MAX)
-            ball_vy = bounce_y(ball_y, player_y, old_py, dt)
+         if ball_vx > 0.0 && ball_x + ball >= opponent_x && ball_x <= opponent_x + paddle_w &&
+            ball_y + ball >= opponent_y && ball_y <= opponent_y + paddle_h {
+            ball_x = opponent_x - ball
+            ball_vx = -float(math.abs(ball_vx))
+            def f64 offset = ((ball_y + ball * 0.5) - (opponent_y + paddle_h * 0.5)) / (paddle_h * 0.5)
+            ball_vy = lim(offset * BALL_SPEED * scale, -BALL_SPEED * scale, BALL_SPEED * scale)
             rally += 1
          }
 
-         if ball_vx > 0.0 && (
-            overlap(ball_x, ball_y, BALL, BALL, enemy_x, enemy_y, PAD_W, PAD_H) ||
-            sweep(old_bx, old_by, ball_x, ball_y, enemy_plane, enemy_y)
-         ) {
-            ball_x = enemy_plane
-            ball_vx = -math.min(math.abs(ball_vx) * BALL_ACCEL, BALL_X_MAX)
-            ball_vy = bounce_y(ball_y, enemy_y, old_ey, dt)
+         if ball_x + ball < 0.0 {
+            opponent_score += 1
             rally += 1
+            place_ball(w, h, ball, rally)
+            serve_t = SERVE_TIME
+         } elif ball_x > w {
+            player_score += 1
+            rally += 1
+            place_ball(w, h, ball, rally)
+            serve_t = SERVE_TIME
          }
-
-         if ball_x + BALL < 0.0 || ball_x > w {
-            if ball_x > w { player_score += 1 } else { enemy_score += 1 }
-
-            def total = player_score + enemy_score
-            ball_x, ball_y = mid(w, BALL), mid(h, BALL)
-            ball_vx, ball_vy = serve_x(total), serve_y(total)
-            player_v, enemy_v = 0.0, 0.0
-            enemy_target = mid(h, PAD_H)
-            rally = 0
-
-            if player_score >= WIN_SCORE || enemy_score >= WIN_SCORE {
-               winner = player_score >= WIN_SCORE ? 1 : 2
-               state = "over"
-            } else {
-               state = "serve"
-               serve_t = SERVE_TIME
-            }
-         }
-
-         ball_y = math.clamp(ball_y, 0.0, ball_max)
-      }
-
-      enemy_y = math.clamp(enemy_y, 0.0, pad_max)
-   } else {
-      ;; Let the player fidget with the paddle while paused
-      if state == "pause" {
-         player_v = axis(player_v, control_axis(), PLAYER_MAX, PLAYER_ACCEL, PLAYER_DRAG, dt)
-         player_y = math.clamp(player_y + player_v * dt, 0.0, pad_max)
-         player_v = wall_v(player_y, player_v, pad_max)
       }
    }
 
-   draw_field(w, h, net_top)
-   gfx.draw_rect(player_x, player_y, PAD_W, PAD_H, gfx.WHITE)
-   gfx.draw_rect(enemy_x, enemy_y, PAD_W, PAD_H, gfx.WHITE)
-   gfx.draw_circle(ball_x + BALL * 0.5, ball_y + BALL * 0.5, BALL * 0.5, gfx.WHITE)
-   draw_score(font, player_score, enemy_score, w, h)
-
-   if state == "pause" {
-      gfx.draw_text_centered(font_big, "PAUSED", w * 0.5, h * 0.44)
-   }
-   if state == "over" {
-      def title = winner == 1 ? "YOU WIN!" : "YOU LOSE"
-      gfx.draw_text_centered(font_big, title, w * 0.5, h * 0.44)
+   def f64 dash_h = h / float(NET_COUNT)
+   mut int dash = 0
+   while dash < NET_COUNT {
+      if dash % 2 == 0 {
+         gfx.draw_rect(w * 0.5 - 1.5 * scale, float(dash) * dash_h, 3.0 * scale, dash_h * 0.56, MUTED)
+      }
+      dash += 1
    }
 
-   gfx.end_frame()
+   gfx.draw_rect(player_x, player_y, paddle_w, paddle_h, FG)
+   gfx.draw_rect(opponent_x, opponent_y, paddle_w, paddle_h, FG)
+   gfx.draw_rect(ball_x, ball_y, ball, ball, FG)
+   def f64 score_y = 44.0 * scale
+   def f64 label_y = 12.0 * scale
+   gfx.draw_text_centered(font_small, "YOU", w * 0.5 - 100.0 * scale, label_y, MUTED)
+   gfx.draw_text_centered(font_small, "CPU", w * 0.5 + 100.0 * scale, label_y, MUTED)
+   gfx.draw_text_centered(font, to_str(player_score), w * 0.5 - 100.0 * scale, score_y, FG)
+   gfx.draw_text_centered(font, to_str(opponent_score), w * 0.5 + 100.0 * scale, score_y, FG)
+
+   if paused { gfx.draw_text_centered(font, "PAUSED", w * 0.5, h * 0.5 - 24.0 * scale, FG) }
+   elif serve_t > 0.0 { gfx.draw_text_centered(font_small, "W/S MOVE  -  SPACE PAUSE", w * 0.5, h - 28.0 * scale, MUTED) }
+   else { gfx.draw_text_centered(font_small, "W/S MOVE  -  SPACE PAUSE  -  R RESET", w * 0.5, h - 28.0 * scale, MUTED) }
+
+   if !gfx.end_frame() { panic("Pong renderer could not present a frame") }
+   if first_frame {
+      if !window.show(win) { panic("Pong window could not be shown") }
+      first_frame = false
+   }
 }
+
+if font > 0 { gfx.font_destroy(font) }
+if font_small > 0 { gfx.font_destroy(font_small) }
+gfx.close_window()
+exit(fixture.exit_status(fx))

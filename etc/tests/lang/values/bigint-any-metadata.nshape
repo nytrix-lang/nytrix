@@ -1,0 +1,61 @@
+shape bigint_any_metadata {
+  family "runtime/values"
+  generator "embedded"
+  features ["ny", "test", "bigint", "any", "abi", "metadata"]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit -O3; --native-backend=llvm --jit --jit-engine=orc -O3"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.math.big
+
+fn check(any value) {
+  assert(__tagof(value) == __runtime_tag("bigint"), "bigint tag across any")
+  assert(value.len == 0, "numeric object has no sequence length")
+  assert(bigint_to_str(value) == "25", "bigint value across any")
+}
+fn forward(bigint value) { check(value) }
+fn dynamic_tag(any value) int { __tagof(value) }
+fn shadow(int value) int {
+  assert(dynamic_tag(value) != __runtime_tag("bigint"), "scalar binding wins")
+  value
+}
+def value = bigint_from_int(25)
+check(value)
+check(bigint_add(bigint_from_int(20), bigint_from_int(5)))
+forward(value)
+assert(shadow(7) == 7, "lexical scalar binding")
+;; Literal strings retain the existing expanded-argument transport tag.
+assert(dynamic_tag("text") == 121, "dynamic string transport tag")
+assert(bigint_to_str(value) == "25", "input preserved")
+print("ok bigint any metadata")
+NY
+}
+shape bigint_zero_divisor {
+  family "runtime/values"
+  generator "embedded"
+  features ["ny", "test", "bigint", "division", "zero"]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit -O3; --native-backend=llvm --jit --jit-engine=orc -O3"
+  expect compile_and_run
+  expect_exit 1
+  source ny <<'NY'
+use core
+use core.math.big
+bigint_div(bigint_from_int(25), 0)
+NY
+}
+shape bigint_zero_modulus {
+  family "runtime/values"
+  generator "embedded"
+  features ["ny", "test", "bigint", "modulo", "zero"]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit -O3; --native-backend=llvm --jit --jit-engine=orc -O3"
+  expect compile_and_run
+  expect_exit 1
+  source ny <<'NY'
+use core
+use core.math.big
+bigint_mod(bigint_from_int(25), bigint_from_int(0))
+NY
+}

@@ -4,8 +4,8 @@
 ;; - https://cacr.uwaterloo.ca/hac/about/chap2.pdf
 ;; - https://cacr.uwaterloo.ca/hac/about/chap14.pdf
 ;; References:
-;; - std.math.crypto
-module std.math.crypto.poly(poly_add, poly_mod_add, poly_mul, poly_eval, poly_small_roots, poly_gcd,
+;; - core.math.crypto
+module core.math.crypto.poly(poly_add, poly_mod_add, poly_mul, poly_eval, poly_small_roots, poly_gcd,
    poly_set_at, poly_derivative_mod, poly_mod_eval,
    poly_mod_gcd, poly_mod_div, poly_mod_mul, poly_mod_pow, poly_factor_cz,
    poly_subproduct_tree, poly_multipoint_eval, poly_interpolate, poly_hgcd,
@@ -13,9 +13,9 @@ module std.math.crypto.poly(poly_add, poly_mod_add, poly_mul, poly_eval, poly_sm
    poly_resultant_quadratic_xn_minus_const_mod, poly_mod_roots,
    poly2_new, poly2_add, poly2_mul, poly2_eval,
    poly2_to_univariate_x, poly2_to_univariate_y, poly2_resultant_x)
-use std.math.nt
-use std.math.crypto.ntt as ntt
-use std.math.matrix
+use core.math.nt
+use core.math.crypto.ntt as ntt
+use core.math.matrix
 
 fn poly_set_at(list poly, int idx, any val) list {
    "Internal: Set polynomial coefficient at index idx to val. Returns modified polynomial."

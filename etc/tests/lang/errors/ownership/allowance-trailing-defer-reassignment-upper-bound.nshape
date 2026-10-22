@@ -1,0 +1,23 @@
+shape ownership_allowance_trailing_defer_reassignment_checks_pre_exit_epoch {
+  family "compiler-errors/ownership"
+  generator "error"
+  features [error ownership allowance trailing-defer reassignment upper-bound]
+  template ny-compile-fail
+  flags_matrix "--ownership-strict --native --run --nyir-verify; --ownership-strict --native-backend=llvm --jit --jit-engine=mcjit --nyir-verify; --ownership-strict --native-backend=llvm --jit --jit-engine=orc --nyir-verify; --ownership-strict --native-only --nyir-verify"
+  expect compile_fail
+  expect_message "ownership allowance exceeded"
+  source ny <<'NY'
+use core
+
+@allowance(x, [0,1])
+fn too_many_before_defer(int x) {
+  x
+  x
+  defer {
+    x = 7
+  }
+}
+
+too_many_before_defer(3)
+NY
+}

@@ -4,4 +4,4 @@
 ;; References:
 ;; - https://cacr.uwaterloo.ca/hac/about/chap8.pdf
 ;; - https://crypto.stanford.edu/~dabo/pubs/papers/RSA-survey.pdf
-module std.math.crypto.factorization(fermat, pollard, known_phi, twin_primes, roca, unbalanced, xor, hybrid_factor, complex_multiplication, gaa, branch_and_prune, implicit, base_conversion, shor, fixed_sum, special_forms, sequence_gcd, classical, known_primes, ecm, primality, aprcl_data, nfs, chunked_primes, quadratic_form)
+module core.math.crypto.factorization(fermat, pollard, known_phi, twin_primes, roca, unbalanced, xor, hybrid_factor, complex_multiplication, gaa, branch_and_prune, implicit, base_conversion, shor, fixed_sum, special_forms, sequence_gcd, classical, known_primes, ecm, primality, aprcl_data, nfs, chunked_primes, quadratic_form)

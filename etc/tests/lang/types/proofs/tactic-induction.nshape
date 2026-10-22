@@ -1,0 +1,48 @@
+shape tactic_induction {
+  family "runtime/proofs"
+  generator "program"
+  features ["proofs", "tactics", "induction", "total"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.proof as proof
+use core.tactic as tactic
+
+enum Color { Red, Green }
+
+fn is_primary(Color c) bool {
+  match c {
+    Color.Red -> true
+    Color.Green -> true
+  }
+}
+
+def proof red_arm = prove(is_primary(Color.Red) == true)
+assert(proof_matches(red_arm, is_primary(Color.Red) == true), "red arm proves")
+
+def proof green_arm = prove(is_primary(Color.Green) == true)
+assert(proof_matches(green_arm, is_primary(Color.Green) == true), "green arm proves")
+
+comptime variants(Color) as variant {
+  emit assert(variant.name != "", "variant enumerated")
+}
+
+def combined = tactic.induction_and([proof.solve(proof.obligation("binary:==(int:1,int:1)", "", "fold")), proof.solve(proof.obligation("binary:==(int:2,int:2)", "", "fold"))])
+assert(str(combined.get("verdict")) == "proved", "induction combines forall arms")
+
+@total
+fn countdown(int n) int decreases(n) {
+  if n <= 0 { return 0 }
+  countdown(n - 1)
+}
+
+def measure = tactic.propose_total_pair(3, 2)
+assert(int(get(measure, 0)) == 3, "total measure major proposed")
+assert(int(get(measure, 1)) == 2, "total measure minor proposed")
+assert(countdown(5) == 0, "total countdown still checks")
+
+assert(true, "tactic induction complete")
+NY
+}

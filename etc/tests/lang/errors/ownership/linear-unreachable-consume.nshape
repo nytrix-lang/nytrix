@@ -1,0 +1,20 @@
+shape ownership_rule_linear_unreachable_consume {
+  family "compiler-errors/ownership"
+  generator "error"
+  features ["error", "ownership", "resource", "linear", "return"]
+  template ny-compile-fail
+  expect compile_fail
+  flags "--ownership-strict"
+  expect_message "linear resource 'file' must be consumed exactly once"
+  source ny <<'NY'
+linear layout File { int fd }
+
+fn return_before_consume() int {
+  def File file = File(47)
+  return 0
+  forget(file)
+}
+
+return_before_consume()
+NY
+}

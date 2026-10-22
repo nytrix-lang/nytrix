@@ -1,0 +1,26 @@
+shape ownership_rule_exclusive_borrow_live_try_access {
+  family "compiler-errors/ownership"
+  generator "error"
+  features ["error", "ownership", "borrow", "exclusive", "liveness", "try"]
+  template ny-compile-fail
+  expect compile_fail
+  flags "--ownership-strict"
+
+  source ny <<'NY'
+use core
+
+fn bad_try() int {
+  mut int value = 3
+  def exclusive = &mut value
+  try {
+    if value == 3 {
+      def observed = exclusive
+    }
+  } catch _ {
+  }
+  value
+}
+
+bad_try()
+NY
+}

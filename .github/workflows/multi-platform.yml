@@ -56,9 +56,6 @@ jobs:
       # scheduler deterministic until the standard suite is green; parallel
       # stress remains available locally with NYTRIX_TEST_JOBS=2+.
       NYTRIX_TEST_JOBS: "1"
-      # pidigits requires the GMP-backed BigInt path on the minimal hosted
-      # image; make the choice explicit instead of relying on a stale cache.
-      NYTRIX_USE_GMP: "ON"
     steps:
       - uses: actions/checkout@v4
         with:
@@ -66,20 +63,14 @@ jobs:
       - name: Build and verify Ubuntu runtime dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libz3-dev
-          gmp_header="$(dpkg -L libgmp-dev | awk '/\/gmp\.h$/ {print; exit}')"
-          gmp_library="$(dpkg -L libgmp-dev | awk '/\/libgmp\.so$/ {print; exit}')"
-          test -n "$gmp_header"
-          test -n "$gmp_library"
-          NYTRIX_GMP_INCLUDE="$(dirname "$gmp_header")" \
-          NYTRIX_GMP_LIBRARY="$gmp_library" ./make bin
-          grep -q 'NYTRIX_USE_GMP:BOOL=ON' build/release/CMakeCache.txt
-          grep -q 'NYTRIX_HAS_Z3=1' build/release/compile_commands.json
-          ldd build/release/ny-full | grep -q 'libgmp'
-      - name: Verify Z3 type and proof solver lane
-        run: |
-          ./build/release/ny-test --bin ./build/release/ny --timeout 45 \
-            etc/tests/runtime/proofs/z3-backend.nshape
+          sudo apt-get install -y lcov
+          command -v lcov
+          command -v genhtml
+          ./make bin
+          if nm -u build/release/ny-full | grep -q '__gmp'; then
+            echo "unexpected GMP dependency"
+            exit 1
+          fi
       - run: |
           if [ "${{ inputs.suite }}" = "full-stdlib" ]; then
             ./make test --with-stdlib
@@ -110,30 +101,23 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y valgrind
           ./make bin
-          valgrind --leak-check=full --show-leak-kinds=definite \
+          valgrind --trace-children=yes --leak-check=full --show-leak-kinds=definite \
             --errors-for-leak-kinds=definite --error-exitcode=97 \
-            build/release/ny-full etc/tests/runtime/values/memory-safety-smoke.ny
-      - name: Run coverage smoke
+            build/release/ny-test --bin build/release/ny-full \
+            --pattern memory-safety-smoke
+      - name: Run coverage through the repository driver
         if: ${{ github.event_name == 'workflow_dispatch' && (inputs.checks == 'coverage' || inputs.checks == 'all') }}
         run: |
-          sudo apt-get update
-          sudo apt-get install -y lcov
-          cmake -S . -B build/coverage -G Ninja -DCMAKE_BUILD_TYPE=Debug \
-            -DCMAKE_C_FLAGS="--coverage -O0 -g"
-          cmake --build build/coverage --target ny-full -j 2
-          build/coverage/ny-full_debug \
-            etc/tests/runtime/values/memory-safety-smoke.ny
-          lcov --capture --directory build/coverage --output-file coverage.raw.info
-          lcov --remove coverage.raw.info '/usr/*' --output-file coverage.info
-          genhtml coverage.info --output-directory coverage-html
+          ./make coverage --test --pattern runtime --failures-only
+          ./make coverage --test --pattern user-type-prefix --failures-only
       - name: Upload coverage
         if: ${{ github.event_name == 'workflow_dispatch' && (inputs.checks == 'coverage' || inputs.checks == 'all') }}
         uses: actions/upload-artifact@v4
         with:
           name: coverage-ubuntu
           path: |
-            coverage.info
-            coverage-html/
+            build/coverage/coverage.info
+            build/coverage/coverage-html
 
   test-macos:
     # Keep pushes staged on Ubuntu; run macOS explicitly after Ubuntu is green.

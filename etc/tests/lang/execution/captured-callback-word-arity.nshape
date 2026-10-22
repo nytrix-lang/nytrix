@@ -1,0 +1,102 @@
+shape captured_callback_word_arity {
+  family "runtime/execution"
+  generator "embedded"
+  features ["ny", "test", "abi"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+fn make1(int base) fnptr {
+   def callback = fn(int a1) int { base + a1 }
+   callback
+}
+def cb1 = make1(17)
+assert(cb1(1) == 18, "captured word callback arity 1")
+fn make2(int base) fnptr {
+   def callback = fn(int a1, int a2) int { base + a1 + a2 }
+   callback
+}
+def cb2 = make2(17)
+assert(cb2(1, 2) == 20, "captured word callback arity 2")
+fn make3(int base) fnptr {
+   def callback = fn(int a1, int a2, int a3) int { base + a1 + a2 + a3 }
+   callback
+}
+def cb3 = make3(17)
+assert(cb3(1, 2, 3) == 23, "captured word callback arity 3")
+fn make4(int base) fnptr {
+   def callback = fn(int a1, int a2, int a3, int a4) int { base + a1 + a2 + a3 + a4 }
+   callback
+}
+def cb4 = make4(17)
+assert(cb4(1, 2, 3, 4) == 27, "captured word callback arity 4")
+fn make5(int base) fnptr {
+   def callback = fn(int a1, int a2, int a3, int a4, int a5) int { base + a1 + a2 + a3 + a4 + a5 }
+   callback
+}
+def cb5 = make5(17)
+assert(cb5(1, 2, 3, 4, 5) == 32, "captured word callback arity 5")
+fn make6(int base) fnptr {
+   def callback = fn(int a1, int a2, int a3, int a4, int a5, int a6) int { base + a1 + a2 + a3 + a4 + a5 + a6 }
+   callback
+}
+def cb6 = make6(17)
+assert(cb6(1, 2, 3, 4, 5, 6) == 38, "captured word callback arity 6")
+fn make7(int base) fnptr {
+   def callback = fn(int a1, int a2, int a3, int a4, int a5, int a6, int a7) int { base + a1 + a2 + a3 + a4 + a5 + a6 + a7 }
+   callback
+}
+def cb7 = make7(17)
+assert(cb7(1, 2, 3, 4, 5, 6, 7) == 45, "captured word callback arity 7")
+fn make8(int base) fnptr {
+   def callback = fn(int a1, int a2, int a3, int a4, int a5, int a6, int a7, int a8) int { base + a1 + a2 + a3 + a4 + a5 + a6 + a7 + a8 }
+   callback
+}
+def cb8 = make8(17)
+assert(cb8(1, 2, 3, 4, 5, 6, 7, 8) == 53, "captured word callback arity 8")
+fn make9(int base) fnptr {
+   def callback = fn(int a1, int a2, int a3, int a4, int a5, int a6, int a7, int a8, int a9) int { base + a1 + a2 + a3 + a4 + a5 + a6 + a7 + a8 + a9 }
+   callback
+}
+def cb9 = make9(17)
+assert(cb9(1, 2, 3, 4, 5, 6, 7, 8, 9) == 62, "captured word callback arity 9")
+fn make10(int base) fnptr {
+   def callback = fn(int a1, int a2, int a3, int a4, int a5, int a6, int a7, int a8, int a9, int a10) int { base + a1 + a2 + a3 + a4 + a5 + a6 + a7 + a8 + a9 + a10 }
+   callback
+}
+def cb10 = make10(17)
+assert(cb10(1, 2, 3, 4, 5, 6, 7, 8, 9, 10) == 72, "captured word callback arity 10")
+fn make11(int base) fnptr {
+   def callback = fn(int a1, int a2, int a3, int a4, int a5, int a6, int a7, int a8, int a9, int a10, int a11) int { base + a1 + a2 + a3 + a4 + a5 + a6 + a7 + a8 + a9 + a10 + a11 }
+   callback
+}
+def cb11 = make11(17)
+assert(cb11(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11) == 83, "captured word callback arity 11")
+fn make12(int base) fnptr {
+   def callback = fn(int a1, int a2, int a3, int a4, int a5, int a6, int a7, int a8, int a9, int a10, int a11, int a12) int { base + a1 + a2 + a3 + a4 + a5 + a6 + a7 + a8 + a9 + a10 + a11 + a12 }
+   callback
+}
+def cb12 = make12(17)
+assert(cb12(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12) == 95, "captured word callback arity 12")
+fn make13(int base) fnptr {
+   def callback = fn(int a1, int a2, int a3, int a4, int a5, int a6, int a7, int a8, int a9, int a10, int a11, int a12, int a13) int { base + a1 + a2 + a3 + a4 + a5 + a6 + a7 + a8 + a9 + a10 + a11 + a12 + a13 }
+   callback
+}
+def cb13 = make13(17)
+assert(cb13(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13) == 108, "captured word callback arity 13")
+fn make14(int base) fnptr {
+   def callback = fn(int a1, int a2, int a3, int a4, int a5, int a6, int a7, int a8, int a9, int a10, int a11, int a12, int a13, int a14) int { base + a1 + a2 + a3 + a4 + a5 + a6 + a7 + a8 + a9 + a10 + a11 + a12 + a13 + a14 }
+   callback
+}
+def cb14 = make14(17)
+assert(cb14(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14) == 122, "captured word callback arity 14")
+fn make15(int base) fnptr {
+   def callback = fn(int a1, int a2, int a3, int a4, int a5, int a6, int a7, int a8, int a9, int a10, int a11, int a12, int a13, int a14, int a15) int { base + a1 + a2 + a3 + a4 + a5 + a6 + a7 + a8 + a9 + a10 + a11 + a12 + a13 + a14 + a15 }
+   callback
+}
+def cb15 = make15(17)
+assert(cb15(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15) == 137, "captured word callback arity 15")
+0
+NY
+}

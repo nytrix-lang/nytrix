@@ -1,0 +1,24 @@
+shape ownership_resource_partial_extraction_use_after_move {
+  family "compiler-errors/ownership"
+  generator "error"
+  features ["error", "ownership", "resource", "aggregate", "partial-move", "use-after-move", "negative"]
+  template ny-compile-fail
+  expect compile_fail
+  flags "--ownership-strict"
+  expect_message "linear resource 'pair.left' is used after it was moved"
+  source ny <<'NY'
+use core
+
+linear layout File { int fd }
+layout ResourcePair { File left, int tag }
+
+fn use_moved_field() int {
+  def ResourcePair pair = ResourcePair(File(11), 7)
+  def File left = pair.left
+  forget(left)
+  pair.left.fd
+}
+
+use_moved_field()
+NY
+}

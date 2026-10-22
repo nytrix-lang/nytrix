@@ -1,6 +1,6 @@
 ;; Keywords: render utils gltf material packing mesh os ui
 ;; Backend-neutral render utility routines for material packing and glTF CPU helpers.
-module std.os.ui.render.utils(
+module core.os.ui.render.utils(
    pack_emissive_u32, pack_normal_tex_word, pack_rgba_u32,
    pack_material_scalar_u32, pack_alpha_cutoff_u32,
    gltf_anim_apply_uv_pointer_override,
@@ -11,13 +11,13 @@ module std.os.ui.render.utils(
    pack_bsdf4_u32, pack_bsdf5_u32, pack_bsdf_ext_slab, pack_material_slab
 )
 
-use std.core
-use std.core.mem
-use std.math
-use std.os.ui.render.dump as ui_profile
-use std.os.ui.render.shared as render_shared
-use std.core.common as common
-use std.math.crypto.encoding.bytes
+use core
+use core.mem
+use core.math
+use core.os.ui.render.dump as ui_profile
+use core.os.ui.render.shared as render_shared
+use core.common as common
+use core.math.crypto.encoding.bytes
 
 def MAX_TEXTURES = render_shared.MAX_TEXTURES
 
@@ -95,7 +95,7 @@ fn pack_normal_tex_word(int normal_tex_id, int normal_uv_set, f64 normal_scale=1
    mut scl = float(normal_scale)
    if scl >= 0.0 {
       if scl > 2.0 { scl = 2.0 }
-      def scale_u7 = band(int((scl / 2.0) * 127.0 + 0.5), 127)
+      def scale_u7 = band(int((scl / 2.0) * render_shared.MATERIAL_U7_MAX + 0.5), render_shared.MATERIAL_U7_MAX)
       word = bor(word, bshl(scale_u7, 24))
    }
    if clearcoat_only { word = bor(word, 0x80000000) }
@@ -238,7 +238,7 @@ fn pack_emissive_u32(any emissive_factor, f64 emissive_strength=1.0) int {
    rn | (gn << 8) | (bn << 16) | (scale_u8 << 24)
 }
 
-fn pack_rgba_u32(list v) int {
+fn pack_rgba_u32(any v) int {
    "Packs animated glTF RGBA floats into 0xAARRGGBB."
    def r = int(clamp01(float(v.get(0, 1.0))) * 255.0 + 0.5) & 255
    def g = int(clamp01(float(v.get(1, 1.0))) * 255.0 + 0.5) & 255
@@ -332,8 +332,6 @@ fn _gltf_anim_pack_uv_xf_state(dict st) list {
    [word0, word1]
 }
 
-fn _gltf_anim_uv_slot_group(str slot) str { comptime match GltfAnimUvSlotGroup(slot, "") }
-
 fn _gltf_anim_ext2_kind_for_slot(str slot) int {
    if slot == "transmissionTexture" { return 1 }
    if slot == "sheenRoughnessTexture" { return 2 }
@@ -345,7 +343,7 @@ fn _gltf_anim_ext2_kind_for_slot(str slot) int {
 }
 
 fn _gltf_anim_uv_slot_group_for_material(str slot, any out, any mesh) str {
-   def grp = _gltf_anim_uv_slot_group(slot)
+   def grp = comptime match GltfAnimUvSlotGroup(slot, "")
    if slot == "transmissionTexture" || slot == "diffuseTransmissionTexture" {
       mut euv = int(out.get("emissive_uv_set", 0))
       if is_dict(mesh) { euv = int(mesh.get("emissive_uv_set", euv)) }

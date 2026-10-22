@@ -1,0 +1,21 @@
+shape local_lambda_calls_use_inferred_effects {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "lambda"]
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+@effects(io, alloc)
+fn test_local_lambda_effects() int {
+  def increment = fn(x) { x + 1 }
+  assert(increment(41) == 42, "named local lambda effect summary")
+  assert((fn(x) { x * 2 })(21) == 42, "direct lambda effect summary")
+  def announce = fn() { print("ok effectful lambda\n") }
+  announce()
+  42
+}
+
+assert(test_local_lambda_effects() == 42, "local lambda callbacks are known")
+print("ok local lambda effects are known")
+NY
+}

@@ -1,9 +1,9 @@
 ;; Keywords: viewer app runtime ui editor os render
 ;; Public viewer facade that wires runtime, window, input, and UI helpers together.
 ;; References:
-;; - std.os.ui.render.viewer.runtime
-;; - std.os.ui.render.viewer.loop
-module std.os.ui.render.viewer(
+;; - core.os.ui.render.viewer.runtime
+;; - core.os.ui.render.viewer.loop
+module core.os.ui.render.viewer(
    set_font, begin_text, flush_text, text_run_count, text_char_count,
    FONT_CANDIDATES, TERMINAL_FONT_DEFAULT, TERMINAL_FONT_CANDIDATES,
    default_override, default_font_size, font_filter_mode, default_font_filter,
@@ -18,33 +18,33 @@ module std.os.ui.render.viewer(
    app, batch, bootstrap, idle, loop, runtime
 )
 
-use std.core
-use std.core.common as common
-use std.math (clamp, max)
-use std.os.path as ospath
-use std.os.ui.window.consts
-use std.os.ui.render
-use std.os.ui.window as ui_window
-use std.os.ui.window.native as win_native
-use std.os.ui.render.viewer.term
-use std.os.ui.render.viewer.vterm
-use std.os.ui.render.viewer.gamepad
-use std.os.ui.render.viewer.dock
-use std.os.ui.render.viewer.keyboard
-use std.os.ui.render.viewer.clipboard
-use std.os.ui.render.viewer.widgets
-use std.os.ui.assets.viewer as assets
-use std.os.ui.render.viewer.icons
-use std.os.ui.render.viewer.gizmo
-use std.os.ui.render.viewer.gui
-use std.os.ui.render.viewer.editor
-use std.os.ui.render.viewer.app
-use std.os.ui.render.viewer.batch
-use std.os.ui.render.viewer.bootstrap
-use std.os.ui.render.viewer.idle
-use std.os.ui.render.viewer.loop
-use std.os.ui.render.viewer.runtime
-use std.core.str as str
+use core
+use core.common as common
+use core.math (clamp, max)
+use core.os.path as ospath
+use core.os.ui.window.consts
+use core.os.ui.render
+use core.os.ui.window as ui_window
+use core.os.ui.window.native as win_native
+use core.os.ui.render.viewer.term
+use core.os.ui.render.viewer.vterm
+use core.os.ui.render.viewer.gamepad
+use core.os.ui.render.viewer.dock
+use core.os.ui.render.viewer.keyboard
+use core.os.ui.render.viewer.clipboard
+use core.os.ui.render.viewer.widgets
+use core.os.ui.assets.viewer as assets
+use core.os.ui.render.viewer.icons
+use core.os.ui.render.viewer.gizmo
+use core.os.ui.render.viewer.gui
+use core.os.ui.render.viewer.editor
+use core.os.ui.render.viewer.app
+use core.os.ui.render.viewer.batch
+use core.os.ui.render.viewer.bootstrap
+use core.os.ui.render.viewer.idle
+use core.os.ui.render.viewer.loop
+use core.os.ui.render.viewer.runtime
+use core.str as str
 
 mut font = 0
 mut _text_width_cache = dict(64)
@@ -52,30 +52,30 @@ mut _line_h_cache = -1.0
 mut _text_runs = []
 mut _text_run_count = 0
 mut _text_char_count = 0
-def C_BG = color_hex("#000000")
-def C_PANEL = color_hex("#080808")
-def C_PANEL_ALT = color_hex("#131318")
-def C_IDLE = color_hex("#15151b")
-def C_TEXT = color_hex("#f5f5f6")
-def C_MUTED = color_hex("#c6c6ca")
-def C_SUBTLE = color_hex("#808087")
-def C_ACCENT = color_hex("#9f86d9")
-def C_ACCENT_SOFT = color_hex("#181321")
-def C_ACTIVE = color_hex("#563d7c")
-def C_ACTIVE_SOFT = color_hex("#261b35")
-def C_ACTIVE_HI = color_hex("#bda9ec")
-def C_ACTIVE_RING = color_hex("#6e5a96")
-def C_BLACK = color_hex("#000000")
-def C_MID = color_hex("#282531")
-def C_STICK = color_hex("#101014")
+def C_BG = render.color_rgb(0.0, 0.0, 0.0)
+def C_PANEL = render.color_rgb(0.031, 0.031, 0.031)
+def C_PANEL_ALT = render.color_rgb(0.075, 0.075, 0.094)
+def C_IDLE = render.color_rgb(0.082, 0.082, 0.106)
+def C_TEXT = render.color_rgb(0.961, 0.961, 0.965)
+def C_MUTED = render.color_rgb(0.776, 0.776, 0.792)
+def C_SUBTLE = render.color_rgb(0.502, 0.502, 0.529)
+def C_ACCENT = render.color_rgb(0.624, 0.525, 0.851)
+def C_ACCENT_SOFT = render.color_rgb(0.094, 0.075, 0.129)
+def C_ACTIVE = render.color_rgb(0.337, 0.239, 0.486)
+def C_ACTIVE_SOFT = render.color_rgb(0.149, 0.106, 0.208)
+def C_ACTIVE_HI = render.color_rgb(0.741, 0.663, 0.925)
+def C_ACTIVE_RING = render.color_rgb(0.431, 0.353, 0.588)
+def C_BLACK = render.color_rgb(0.0, 0.0, 0.0)
+def C_MID = render.color_rgb(0.157, 0.145, 0.192)
+def C_STICK = render.color_rgb(0.063, 0.063, 0.078)
 
 ;; Controller-only palette. Keep this isolated from generic GUI button colors.
 ;; Important: face/menu/bumper/D-pad/stick/trigger all reuse this same palette.
 ;; There are no per-button colors, so A/B/X/Y, menu buttons, and bumpers cannot drift
 ;; into green/blue/red depending on the control identity or a shared GUI theme tweak.
-def C_PAD_IDLE = color_hex("#141319")
-def C_PAD_EDGE = color_hex("#272432")
-def C_PAD_DOWN = color_hex("#5d3f8c")
+def C_PAD_IDLE = render.color_rgb(0.078, 0.075, 0.098)
+def C_PAD_EDGE = render.color_rgb(0.153, 0.141, 0.196)
+def C_PAD_DOWN = render.color_rgb(0.365, 0.247, 0.549)
 def C_PAD_DOWN_EDGE = C_PAD_EDGE
 def C_PAD_AXIS = C_PAD_DOWN
 def C_PAD_MARK = C_PAD_DOWN
@@ -401,7 +401,11 @@ fn controller_fit_scale(any w, any h) f64 {
 ;; Returns the result of the `framebuffer_size` operation.
 fn framebuffer_size(any win, any fallback_w=1280, any fallback_h=720) list {
    def fb = ui_window.get_framebuffer_size(win)
-   [max(1.0, float(fb.get(0, fallback_w))), max(1.0, float(fb.get(1, fallback_h)))]
+   mut f64 w = float(fb.get(0, 0))
+   mut f64 h = float(fb.get(1, 0))
+   if w <= 0.0 { w = float(fallback_w) }
+   if h <= 0.0 { h = float(fallback_h) }
+   [max(1.0, w), max(1.0, h)]
 }
 
 ;; Returns the result of the `mouse_view` operation.
@@ -554,5 +558,5 @@ fn text_char_count() int {
    assert(hit(0.0, 0.0, 4.0, 4.0, 2.0, 2.0) && !hit(0.0, 0.0, 4.0, 4.0, 5.0, 2.0), "viewer hit")
    assert(normalize_mod(MOD_CONTROL | 0x100000) == MOD_CONTROL, "viewer mod mask")
    assert(terminal_cell_size(0, 16.0).get(1) >= 16.0, "viewer terminal cell size")
-   print("✓ std.os.ui.render.viewer self-test passed")
+   print("✓ core.os.ui.render.viewer self-test passed")
 }

@@ -1,0 +1,42 @@
+shape ownership_rule_exclusive_borrow_disjoint_branch_positive {
+  family "language/ownership"
+  generator "syntax"
+  features ["ownership", "borrow", "exclusive", "branch", "positive"]
+  template ny-test-case
+  expect compile_and_run
+  flags "--ownership-strict"
+  source ny <<'NY'
+use core
+
+fn disjoint_branch(bool read_borrow) int {
+  mut int value = 5
+  def exclusive = &mut value
+  if read_borrow {
+    def observed = exclusive
+  } else {
+    value = value + 1
+  }
+  value
+}
+
+fn shared_disjoint_branch(bool read_borrow) int {
+  mut int value = 9
+  def shared = &value
+  if read_borrow {
+    def observed = shared
+  } else {
+    value = value + 1
+  }
+  value
+}
+
+assert(disjoint_branch(true) == 5,
+       "the borrow arm reads its alias without touching its source")
+assert(disjoint_branch(false) == 6,
+       "the other arm can mutate the source after path-specific last use")
+assert(shared_disjoint_branch(true) == 9,
+       "the shared-borrow arm reads its alias")
+assert(shared_disjoint_branch(false) == 10,
+       "the other arm can mutate after a path-specific shared last use")
+NY
+}

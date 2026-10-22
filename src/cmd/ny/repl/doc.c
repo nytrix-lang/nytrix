@@ -4,9 +4,9 @@
  */
 #include "base/loader.h"
 #include "base/util.h"
-#include "code/parse/parser.h"
+#include "code/lang/parse/parser.h"
+#include "nytrix/nytrix.h"
 #include "priv.h"
-#include <ctype.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -119,8 +119,8 @@ static int doclist_has_module_docs(const doc_list_t *dl, const char *name) {
   return 0;
 }
 
-void doclist_set(doc_list_t *dl, const char *name, const char *doc, const char *def,
-                 const char *src, int kind) {
+void doclist_set(doc_list_t *dl, const char *name, const char *doc,
+                 const char *def, const char *src, int kind) {
   if (!dl || !name)
     return;
   for (size_t i = 0; i < dl->len; ++i) {
@@ -163,7 +163,8 @@ void doclist_set(doc_list_t *dl, const char *name, const char *doc, const char *
   dl->len += 1;
 }
 
-static void doclist_add_function_entry(doc_list_t *dl, stmt_t *s, const char *prefix, int kind,
+static void doclist_add_function_entry(doc_list_t *dl, stmt_t *s,
+                                       const char *prefix, int kind,
                                        int qualify_with_prefix) {
   if (!dl || !s || s->kind != NY_S_FUNC)
     return;
@@ -179,12 +180,14 @@ static void doclist_add_function_entry(doc_list_t *dl, stmt_t *s, const char *pr
   for (size_t j = 0; j < s->as.fn.params.len; ++j) {
     const char *sep = (j + 1 < s->as.fn.params.len) ? ", " : "";
     const param_t *p = &s->as.fn.params.data[j];
-    const char *vararg = (s->as.fn.is_variadic && j + 1 == s->as.fn.params.len) ? "..." : "";
+    const char *vararg =
+        (s->as.fn.is_variadic && j + 1 == s->as.fn.params.len) ? "..." : "";
     if (p->type && *p->type) {
       repl_doc_buf_appendf(&def, "%s%s %s%s", vararg, p->type, p->name,
                            p->def ? "=..." : "");
     } else {
-      repl_doc_buf_appendf(&def, "%s%s%s", vararg, p->name, p->def ? "=..." : "");
+      repl_doc_buf_appendf(&def, "%s%s%s", vararg, p->name,
+                           p->def ? "=..." : "");
     }
     if (sep[0])
       repl_doc_buf_appendf(&def, "%s", sep);
@@ -195,7 +198,8 @@ static void doclist_add_function_entry(doc_list_t *dl, stmt_t *s, const char *pr
   char *def_buf = repl_doc_buf_take(&def);
   char *src = NULL;
   if (s->as.fn.src_start && s->as.fn.src_end > s->as.fn.src_start) {
-    src = ny_strndup(s->as.fn.src_start, (size_t)(s->as.fn.src_end - s->as.fn.src_start));
+    src = ny_strndup(s->as.fn.src_start,
+                     (size_t)(s->as.fn.src_end - s->as.fn.src_start));
   }
   doclist_set(dl, name, s->as.fn.doc, def_buf, src, kind);
   free(def_buf);
@@ -204,7 +208,8 @@ static void doclist_add_function_entry(doc_list_t *dl, stmt_t *s, const char *pr
   free(owned_name);
 }
 
-void doclist_add_recursive(doc_list_t *dl, ny_stmt_list *body, const char *prefix) {
+void doclist_add_recursive(doc_list_t *dl, ny_stmt_list *body,
+                           const char *prefix) {
   for (size_t i = 0; i < body->len; ++i) {
     stmt_t *s = body->data[i];
     if (s->kind == NY_S_FUNC) {
@@ -216,9 +221,11 @@ void doclist_add_recursive(doc_list_t *dl, ny_stmt_list *body, const char *prefi
       if (owned_name)
         name = owned_name;
       char *src = NULL;
-      if (s->as.module.src_start && s->as.module.src_end > s->as.module.src_start) {
-        src = ny_strndup(s->as.module.src_start,
-                         (size_t)(s->as.module.src_end - s->as.module.src_start));
+      if (s->as.module.src_start &&
+          s->as.module.src_end > s->as.module.src_start) {
+        src =
+            ny_strndup(s->as.module.src_start,
+                       (size_t)(s->as.module.src_end - s->as.module.src_start));
       }
       doclist_set(dl, name, "Module", "module", src, 2);
       if (src)
@@ -261,162 +268,278 @@ static int doclist_show_source(void) {
   return !v || ny_env_truthy(v);
 }
 
-static char *doclist_source_without_leading_docstring(const char *src) {
-  if (!src)
-    return NULL;
-  const char *brace = strchr(src, '{');
-  if (!brace)
-    return NULL;
-  const char *p = brace + 1;
-  while (*p && isspace((unsigned char)*p))
-    p++;
-  if (*p != '"' && *p != '\'')
-    return NULL;
-  char quote = *p++;
-  int escaped = 0;
-  int closed = 0;
-  while (*p) {
-    if (escaped) {
-      escaped = 0;
-    } else if (*p == '\\') {
-      escaped = 1;
-    } else if (*p == quote) {
-      p++;
-      closed = 1;
-      break;
-    }
-    p++;
+static const char *doc_token_style(token_kind kind) {
+  switch (kind) {
+  case NY_T_IDENT: case NY_T_DEF: case NY_T_MUT: case NY_T_FN:
+  case NY_T_RETURN: case NY_T_IF: case NY_T_ELSE: case NY_T_WHILE:
+  case NY_T_FOR: case NY_T_IN: case NY_T_TRUE: case NY_T_FALSE:
+  case NY_T_TRY: case NY_T_CATCH: case NY_T_USE: case NY_T_LAMBDA:
+  case NY_T_DEFER: case NY_T_BREAK: case NY_T_CONTINUE: case NY_T_ELIF:
+  case NY_T_ASM: case NY_T_AS: case NY_T_COMPTIME: case NY_T_STRUCT:
+  case NY_T_MATCH: case NY_T_EMBED: case NY_T_SIZEOF: case NY_T_EXTERN:
+  case NY_T_NIL: case NY_T_DEL: case NY_T_MODULE: case NY_T_ENUM:
+    return clr(NY_CLR_CYAN);
+  case NY_T_NUMBER: return clr(NY_CLR_GREEN);
+  case NY_T_STRING: case NY_T_FSTRING: return clr(NY_CLR_YELLOW);
+  default: return NULL;
   }
-  if (!closed)
-    return NULL;
-  while (*p && *p != '\n')
-    p++;
-  if (*p == '\n')
-    p++;
-  size_t prefix_len = (size_t)(brace - src + 1);
-  size_t rest_len = strlen(p);
-  char *out = malloc(prefix_len + 1 + rest_len + 1);
-  if (!out)
-    return NULL;
-  memcpy(out, src, prefix_len);
-  out[prefix_len] = '\n';
-  memcpy(out + prefix_len + 1, p, rest_len + 1);
-  return out;
 }
 
-static int doclist_dotted_suffix_match(const char *left, size_t left_len, const char *right,
-                                       size_t right_len) {
-  if (left_len > right_len)
-    return left[left_len - right_len - 1] == '.' && strcmp(left + left_len - right_len, right) == 0;
-  if (right_len > left_len)
-    return right[right_len - left_len - 1] == '.' && strcmp(right + right_len - left_len, left) == 0;
-  return 0;
+static int doc_highlight_source(repl_doc_buf_t *out, const char *source,
+                                const char *const *palette) {
+  if (!out || !source) return 0;
+  size_t len = strlen(source), leading = 0;
+  while (leading < len && (source[leading] == ' ' || source[leading] == '\t' ||
+         source[leading] == '\n' || source[leading] == '\r' ||
+         source[leading] == '\f' || source[leading] == '\v')) ++leading;
+  const char *trimmed = source + leading;
+  size_t trimmed_len = len - leading, start = trimmed_len;
+  size_t brace = 0;
+  while (brace < trimmed_len && trimmed[brace] != '{') ++brace;
+  if (brace < trimmed_len) {
+    size_t i = brace + 1;
+    while (i < trimmed_len && (trimmed[i] == ' ' || trimmed[i] == '\t' ||
+           trimmed[i] == '\n' || trimmed[i] == '\r' || trimmed[i] == '\f' ||
+           trimmed[i] == '\v')) ++i;
+    if (i < trimmed_len && (trimmed[i] == '"' || trimmed[i] == '\'')) {
+      char quote = trimmed[i++];
+      int escaped = 0, closed = 0;
+      while (i < trimmed_len) {
+        char c = trimmed[i++];
+        if (escaped) escaped = 0;
+        else if (c == '\\') escaped = 1;
+        else if (c == quote) { closed = 1; break; }
+      }
+      if (closed) {
+        while (i < trimmed_len && trimmed[i] != '\n') ++i;
+        if (i < trimmed_len) ++i;
+        start = i;
+      }
+    }
+  }
+  char *shown = malloc(trimmed_len - start + brace + 3);
+  if (!shown) return 0;
+  size_t n = 0;
+  if (start < trimmed_len) {
+    memcpy(shown, trimmed, brace + 1); n = brace + 1; shown[n++] = '\n';
+    memcpy(shown + n, trimmed + start, trimmed_len - start + 1);
+  } else {
+    memcpy(shown, trimmed, trimmed_len + 1);
+  }
+  lexer_t lexer;
+  lexer_init(&lexer, shown, "<repl-doc>");
+  size_t cursor = 0;
+  int ok = 1;
+  for (;;) {
+    token_t token = lexer_next(&lexer);
+    if (token.kind == NY_T_EOF) break;
+    const char *lexeme = token.lexeme;
+    if (!lexeme || lexeme < shown || lexeme > shown + strlen(shown)) continue;
+    size_t at = (size_t)(lexeme - shown);
+    if (at < cursor || token.len > strlen(shown) - at) continue;
+    if (at > cursor) ok = ok && repl_doc_buf_appendf(out, "%.*s", (int)(at-cursor), shown+cursor);
+    const char *style = doc_token_style(token.kind);
+    if (style && *style) ok = ok && repl_doc_buf_appendf(out, "%s", style);
+    ok = ok && repl_doc_buf_appendf(out, "%.*s", (int)token.len, shown+at);
+    if (style && *style) ok = ok && repl_doc_buf_appendf(out, "%s", palette[10] ? palette[10] : "");
+    cursor = at + token.len;
+    if (!ok) break;
+  }
+  size_t shown_len = strlen(shown);
+  if (ok && cursor < shown_len)
+    ok = repl_doc_buf_appendf(out, "%s", shown + cursor);
+  free(shown);
+  return ok;
+}
+
+static int doclist_name_match(const char *name, const char *query, int suffix) {
+  if (!name || !query) return 0;
+  if (!suffix) {
+    const char *leaf = strrchr(name, '.');
+    leaf = leaf ? leaf + 1 : name;
+    const char *qleaf = strrchr(query, '.');
+    qleaf = qleaf ? qleaf + 1 : query;
+    return strcmp(leaf, qleaf) == 0;
+  }
+  size_t nn = strlen(name), qn = strlen(query);
+  return qn < nn && name[nn - qn - 1] == '.' &&
+         strcmp(name + nn - qn, query) == 0;
+}
+
+/*
+ * Resolve REPL documentation queries directly in C.
+ */
+static int doclist_resolve(const doc_list_t *dl, const char *query,
+                                  int *index_out, char **matches_out,
+                                  char **rendered_out) {
+  if (index_out)
+    *index_out = -1;
+  if (matches_out)
+    *matches_out = NULL;
+  if (rendered_out)
+    *rendered_out = NULL;
+  if (!dl || !query || !*query || !index_out || !matches_out || !rendered_out ||
+      dl->len > 100000)
+    return 0;
+  size_t match_count = 0, only_match = 0;
+  for (size_t i = 0; i < dl->len; ++i)
+    if (dl->data[i].name && strcmp(dl->data[i].name, query) == 0) {
+      *index_out = (int)i;
+      match_count = 1;
+      only_match = i;
+      break;
+    }
+  if (!match_count) {
+    for (size_t i = 0; i < dl->len; ++i) {
+      const char *name = dl->data[i].name;
+      if (!doclist_name_match(name, query, 1)) continue;
+      if (match_count++ == 0) only_match = i;
+    }
+    if (!match_count)
+      for (size_t i = 0; i < dl->len; ++i)
+        if (doclist_name_match(dl->data[i].name, query, 0) &&
+            match_count++ == 0) only_match = i;
+    if (match_count == 1) *index_out = (int)only_match;
+  }
+  repl_doc_buf_t matches = {0}, rendered = {0};
+  int ok = 1;
+  if (match_count) {
+    size_t n = match_count == 1 ? only_match : 0, emitted = 0;
+    for (size_t i = 0; i < dl->len; ++i) {
+      const char *name = dl->data[i].name;
+      if (!name) continue;
+      int mode = 1;
+      if (match_count > 1) {
+        int any_suffix = 0;
+        for (size_t j = 0; j < dl->len; ++j)
+          any_suffix |= doclist_name_match(dl->data[j].name, query, 1);
+        mode = any_suffix ? 1 : 0;
+      }
+      int selected = match_count == 1 ? i == n :
+                     (doclist_name_match(name, query, mode));
+      if (!selected) continue;
+      if (emitted++) ok = ok && repl_doc_buf_appendf(&matches, ",");
+      ok = ok && repl_doc_buf_appendf(&matches, "%zu", i);
+      if (match_count > 1) {
+        const char *y=clr(NY_CLR_YELLOW), *r=clr(NY_CLR_RESET);
+        if (!emitted) ok = 0;
+        if (emitted == 1) ok = ok && repl_doc_buf_appendf(&rendered, "%sMultiple matches found for '%s':%s\n", y?y:"", query, r?r:"");
+        ok = ok && repl_doc_buf_appendf(&rendered, "  - %s\n", name);
+      }
+    }
+  } else {
+    const char *red=clr(NY_CLR_RED), *reset=clr(NY_CLR_RESET);
+    ok = repl_doc_buf_appendf(&rendered, "%sNo documentation found for '%s'%s\n", red?red:"", query, reset?reset:"");
+  }
+  *matches_out = ok ? repl_doc_buf_take(&matches) : NULL;
+  *rendered_out = ok ? repl_doc_buf_take(&rendered) : NULL;
+  free(matches.data); free(rendered.data);
+  if (!*matches_out || !*rendered_out) { free(*matches_out); free(*rendered_out); *matches_out=NULL; *rendered_out=NULL; return 0; }
+  return 1;
+}
+
+static int doclist_render(const ny_doc_entry *entry, int has_source,
+                          const char *source_text, char **rendered_out) {
+  if (rendered_out)
+    *rendered_out = NULL;
+  if (!entry || !entry->name || !rendered_out ||
+      (has_source && !source_text))
+    return 0;
+  static const char *const labels[] = {"Symbol", "Package", "Module",
+                                      "Function", "Symbol", "Method"};
+  const char *label = entry->kind >= 0 && entry->kind < 6
+                          ? labels[entry->kind] : "Symbol";
+  const char *bold=clr(NY_CLR_BOLD), *magenta=clr(NY_CLR_MAGENTA),
+             *reset=clr(NY_CLR_RESET), *cyan=clr(NY_CLR_CYAN),
+             *green=clr(NY_CLR_GREEN), *gray=clr(NY_CLR_GRAY);
+  repl_doc_buf_t rendered = {0};
+  int ok = repl_doc_buf_appendf(&rendered, "\n%s%s%s %s%s%s\n",
+                                bold?bold:"", magenta?magenta:"", label,
+                                cyan?cyan:"", entry->name, reset?reset:"");
+  if (ok && entry->def && entry->def[0])
+    ok = repl_doc_buf_appendf(&rendered, "  %s%s%s\n", green?green:"",
+                              entry->def, reset?reset:"");
+  if (ok && entry->doc && entry->doc[0])
+    ok = repl_doc_buf_appendf(&rendered, "  %s\n", entry->doc);
+  else if (ok)
+    ok = repl_doc_buf_appendf(&rendered, "  %s(no documentation string available)%s\n",
+                              gray?gray:"", reset?reset:"");
+  if (ok && !has_source) ok = repl_doc_buf_appendf(&rendered, "\n");
+  if (ok && has_source) {
+    const char *const source_palette[] = {
+      NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+      reset, bold};
+    ok = repl_doc_buf_appendf(&rendered, "\n%sSource%s\n", bold?bold:"",
+                              reset?reset:"") &&
+         doc_highlight_source(&rendered, source_text, source_palette);
+  }
+  *rendered_out = ok ? repl_doc_buf_take(&rendered) : NULL;
+  free(rendered.data);
+  return *rendered_out != NULL;
 }
 
 int doclist_print(const doc_list_t *dl, const char *name) {
   if (!dl || !name || !*name)
     return 0;
-  const char *base_name = strrchr(name, '.');
-  if (base_name)
-    base_name += 1;
-  else
-    base_name = name;
   int found_idx = -1;
-  for (size_t i = 0; i < dl->len; ++i) {
-    if (strcmp(dl->data[i].name, name) == 0) {
-      found_idx = (int)i;
-      goto found;
+  char *matches = NULL;
+  char *resolution_text = NULL;
+  if (!doclist_resolve(dl, name, &found_idx, &matches,
+                              &resolution_text))
+    return 0;
+  if (found_idx < 0) {
+    if (!matches || !*matches) {
+      free(matches);
+      free(resolution_text);
+      return 0;
     }
-  }
-  int match_idx = -1;
-  int match_count = 0;
-  size_t name_len = strlen(name);
-  for (size_t i = 0; i < dl->len; ++i) {
-    const char *entry_name = dl->data[i].name;
-    size_t entry_len = strlen(entry_name);
-    if (doclist_dotted_suffix_match(entry_name, entry_len, name, name_len)) {
-      match_idx = (int)i;
-      match_count++;
+    if (!resolution_text || !*resolution_text) {
+      free(matches);
+      free(resolution_text);
+      return 0;
     }
-  }
-  if (match_count == 1) {
-    found_idx = match_idx;
-    goto found;
-  } else if (match_count > 1) {
-    printf("%sMultiple matches found for '%s':%s\n", clr(NY_CLR_YELLOW), name, clr(NY_CLR_RESET));
-    for (size_t i = 0; i < dl->len; ++i) {
-      const char *en = dl->data[i].name;
-      size_t el = strlen(en);
-      if (doclist_dotted_suffix_match(en, el, name, name_len)) {
-        printf("  - %s\n", en);
-      }
-    }
+    fputs(resolution_text, stdout);
+    free(matches);
+    free(resolution_text);
     return 1;
   }
-  match_idx = -1;
-  match_count = 0;
-  for (size_t i = 0; i < dl->len; ++i) {
-    const char *entry_name = dl->data[i].name;
-    const char *entry_base = strrchr(entry_name, '.');
-    entry_base = entry_base ? entry_base + 1 : entry_name;
-    if (strcmp(entry_base, base_name) == 0) {
-      match_idx = (int)i;
-      match_count++;
-    }
-  }
-  if (match_count == 1) {
-    found_idx = match_idx;
-    goto found;
-  } else if (match_count > 1) {
-    printf("%sMultiple basename matches found for '%s':%s\n", clr(NY_CLR_YELLOW), name,
-           clr(NY_CLR_RESET));
-    for (size_t i = 0; i < dl->len; ++i) {
-      const char *entry_name = dl->data[i].name;
-      const char *entry_base = strrchr(entry_name, '.');
-      entry_base = entry_base ? entry_base + 1 : entry_name;
-      if (strcmp(entry_base, base_name) == 0)
-        printf("  - %s\n", entry_name);
-    }
-    return 1;
-  }
-  return 0;
-found: {
-  ny_doc_entry *e = &dl->data[found_idx];
-  const char *k_name = "Symbol";
-  if (e->kind == 1)
-    k_name = "Package";
-  else if (e->kind == 2)
-    k_name = "Module";
-  else if (e->kind == 3)
-    k_name = "Function";
-  else if (e->kind == 5)
-    k_name = "Method";
-  printf("\n%s%s%s%s %s%s%s\n", clr(NY_CLR_BOLD), clr(NY_CLR_MAGENTA), k_name,
-         clr(NY_CLR_RESET), clr(NY_CLR_CYAN), e->name, clr(NY_CLR_RESET));
-  if (e->def)
-    printf("  %s%s%s\n", clr(NY_CLR_GREEN), e->def, clr(NY_CLR_RESET));
-  if (e->doc && strlen(e->doc) > 0) {
-    printf("  %s\n", e->doc);
-  } else {
-    printf("  %s(no documentation string available)%s\n", clr(NY_CLR_GRAY), clr(NY_CLR_RESET));
-  }
-  if (e->src && (e->kind == 3 || e->kind == 5) && doclist_show_source()) {
-    printf("\n%sSource%s\n", clr(NY_CLR_BOLD), clr(NY_CLR_RESET));
-    const char *s = e->src;
-    while (*s && isspace((unsigned char)*s))
-      s++;
-    char *clean_src = doclist_source_without_leading_docstring(s);
-    repl_highlight_line(clean_src ? clean_src : s);
-    free(clean_src);
+  free(matches);
+  free(resolution_text);
+  {
+    ny_doc_entry *e = &dl->data[found_idx];
+    int has_source = e->src && (e->kind == 3 || e->kind == 5) &&
+                     doclist_show_source();
+    const char *source = e->src ? e->src : "";
+    char *rendered = NULL;
+    if (!doclist_render(e, has_source, source, &rendered))
+      return 0;
+    fputs(rendered, stdout);
+    free(rendered);
+    if (has_source)
+      printf("\n");
     printf("\n");
+    return 1;
   }
-  printf("\n");
-  return 1;
 }
+
+int doclist_print_missing(const doc_list_t *dl, const char *name) {
+  int found_idx = -1;
+  char *matches = NULL;
+  char *rendered = NULL;
+  if (!doclist_resolve(dl, name, &found_idx, &matches, &rendered))
+    return 0;
+  int missing = found_idx < 0 && (!matches || !*matches);
+  int printed = missing && rendered && *rendered;
+  if (printed)
+    fputs(rendered, stdout);
+  free(matches);
+  free(rendered);
+  return printed;
 }
 
 void add_builtin_docs(doc_list_t *docs) {
-#define RT_DEF(name, p, args, sig, doc) doclist_set(docs, name, doc, sig, NULL, 3);
+#define RT_DEF(name, p, args, sig, doc)                                        \
+  doclist_set(docs, name, doc, sig, NULL, 3);
 #define RT_GV(name, p, t, doc) doclist_set(docs, name, doc, "global", NULL, 4);
 #ifdef _WIN32
 #ifdef rt_argc
@@ -426,7 +549,7 @@ void add_builtin_docs(doc_list_t *docs) {
 #undef rt_argv
 #endif
 #endif
-#include "code/runtime/defs.h"
+#include "code/lang/runtime/defs.h"
 #undef RT_DEF
 #undef RT_GV
 }

@@ -1,0 +1,9 @@
+shape repl_doc_resolution {
+  family "repl"
+  generator "embedded"
+  features ["ny", "test", "repl", "docs"]
+  repl_commands ":doc core.math.float.float\n:doc math.float.float\n:doc float\n:doc name_that_does_not_exist"
+  repl_expect "Function core.math.float.float\nFunction core.math.float.float\nMultiple matches found for 'float'\nNo documentation found for 'name_that_does_not_exist'"
+  source ny <<'NY'
+NY
+}

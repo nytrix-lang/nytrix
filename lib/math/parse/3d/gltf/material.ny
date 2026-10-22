@@ -1,19 +1,19 @@
 ;; Keywords: 3d gltf glb parse
 ;; Submodule: material
-module std.math.parse.3d.gltf.material(_gltf_extract_embedded_image, _gltf_texture_uv_props, _gltf_scene_bounds_new, _gltf_scene_bounds_accum, _gltf_scene_bounds_result, _gltf_indexed_material_slots, _gltf_part_world_bounds, _gltf_scene_bounds_accum_part, _gltf_image_name_lower, _gltf_name_has_any, _gltf_name_is_bad_for_slot, _gltf_name_good_for_slot, _gltf_find_image_uri_by_slot, _gltf_resolve_image_uri, _gltf_texture_filter_from_sampler, _gltf_texture_sampler_info, _gltf_decode_mr_tex_id, _gltf_tex_uri_uv, _gltf_tex_info, _gltf_ext_dict, _gltf_ext_float, _gltf_ext_vec3, _gltf_ext_tex_uv, _gltf_ext_tex_info, _gltf_material_apply_extensions, gltf_material_info, _gltf_u8, _gltf_u8_round, _gltf_pack_u8x4, _gltf_pack_vec3_lane, _gltf_pack_bsdf0, _gltf_pack_bsdf1, _gltf_vec3_needs_factor, _gltf_pack_bsdf2, _gltf_pack_bsdf3, _gltf_pack_bsdf4, _gltf_pack_bsdf5, _gltf_keep_bsdf_record_value, _gltf_keep_ext2_record_value, _gltf_pack_alpha_ext_flags, _gltf_pack_emissive_word, gltf_material_infos, gltf_material_infos_limited, _gltf_indexed_material_fast_record, _gltf_indexed_base_color_state, _gltf_indexed_mr_state, _gltf_indexed_uv_xforms, _gltf_indexed_material_info_record, _gltf_indexed_material_records, _gltf_indexed_copy_i32_fields, _gltf_keep_indexed_bsdf_fields, _gltf_indexed_part_material_defaults, _gltf_indexed_part_material_apply_record, _gltf_indexed_part_material_apply_texrec, _gltf_indexed_part_force_uv_xform, _gltf_indexed_part_material_force_uv0, _gltf_indexed_prim_material_state, _gltf_indexed_mesh_opts, _gltf_indexed_default_color, _gltf_indexed_material_record_setup, _gltf_has_uri, _gltf_material_uri_feature_mask, _gltf_material_gt_feature_mask, _gltf_material_ne_feature_mask, _gltf_material_bool_feature_mask, gltf_material_feature_mask)
-use std.core
-use std.math.bin
-use std.math
-use std.os (file_exists, file_read, file_write)
-use std.os.path as ospath
-use std.math.float (is_nan, is_inf)
-use std.core.str as str
-use std.core.common as common
-use std.core.cache as cache
-use std.math.crypto.hash as lib_hash
-use std.math.parse.3d.gltf.math as gltf_math
-use std.math.parse.3d.gltf.shared as shr
-use std.math.parse.3d.gltf.load as ld
+module core.math.parse.3d.gltf.material(_gltf_extract_embedded_image, _gltf_texture_uv_props, _gltf_scene_bounds_new, _gltf_scene_bounds_accum, _gltf_scene_bounds_result, _gltf_indexed_material_slots, _gltf_part_world_bounds, _gltf_scene_bounds_accum_part, _gltf_image_name_lower, _gltf_name_has_any, _gltf_name_is_bad_for_slot, _gltf_name_good_for_slot, _gltf_find_image_uri_by_slot, _gltf_resolve_image_uri, _gltf_texture_filter_from_sampler, _gltf_texture_sampler_info, _gltf_decode_mr_tex_id, _gltf_tex_uri_uv, _gltf_tex_info, _gltf_ext_dict, _gltf_ext_float, _gltf_ext_vec3, _gltf_ext_tex_uv, _gltf_ext_tex_info, _gltf_material_apply_extensions, gltf_material_info, _gltf_u8, _gltf_u8_round, _gltf_pack_u8x4, _gltf_pack_vec3_lane, _gltf_pack_bsdf0, _gltf_pack_bsdf1, _gltf_vec3_needs_factor, _gltf_pack_bsdf2, _gltf_pack_bsdf3, _gltf_pack_bsdf4, _gltf_pack_bsdf5, _gltf_keep_bsdf_record_value, _gltf_keep_ext2_record_value, _gltf_pack_alpha_ext_flags, _gltf_pack_emissive_word, gltf_material_infos, gltf_material_infos_limited, _gltf_indexed_material_fast_record, _gltf_indexed_base_color_state, _gltf_indexed_mr_state, _gltf_indexed_uv_xforms, _gltf_indexed_material_info_record, _gltf_indexed_material_records, _gltf_indexed_copy_i32_fields, _gltf_keep_indexed_bsdf_fields, _gltf_indexed_part_material_defaults, _gltf_indexed_part_material_apply_record, _gltf_indexed_part_material_apply_texrec, _gltf_indexed_part_force_uv_xform, _gltf_indexed_part_material_force_uv0, _gltf_indexed_prim_material_state, _gltf_indexed_mesh_opts, _gltf_indexed_default_color, _gltf_indexed_material_record_setup, _gltf_has_uri, _gltf_material_uri_feature_mask, _gltf_material_gt_feature_mask, _gltf_material_ne_feature_mask, _gltf_material_bool_feature_mask, gltf_material_feature_mask)
+use core
+use core.math.bin
+use core.math
+use core.os (file_exists, file_read, file_write)
+use core.os.path as ospath
+use core.math.float (is_nan, is_inf)
+use core.str as str
+use core.common as common
+use core.cache as cache
+use core.math.crypto.hash as lib_hash
+use core.math.parse.3d.gltf.math as gltf_math
+use core.math.parse.3d.gltf.shared as shr
+use core.math.parse.3d.gltf.load as ld
 
 fn _gltf_extract_embedded_image(any gltf_data, int img_idx) str {
    shr._gltf_ensure_caches()

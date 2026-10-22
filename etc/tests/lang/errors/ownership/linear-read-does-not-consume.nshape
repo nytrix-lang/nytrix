@@ -1,0 +1,19 @@
+shape ownership_rule_linear_read_does_not_consume {
+  family "compiler-errors/ownership"
+  generator "error"
+  features ["error", "ownership", "resource", "linear", "consume"]
+  template ny-compile-fail
+  expect compile_fail
+  flags "--ownership-strict"
+  expect_message "linear resource 'file' must be consumed exactly once"
+  source ny <<'NY'
+linear layout File { int fd }
+
+fn leak_by_reading() int {
+  def File file = File(31)
+  file.fd
+}
+
+leak_by_reading()
+NY
+}

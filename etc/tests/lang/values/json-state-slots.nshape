@@ -1,0 +1,43 @@
+shape test_json_parser_state_slots {
+  family "runtime/values"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.math.parse.data.json (json_encode, json_try_decode)
+
+def source = "{\"a\": [1, true, \"x\"]}"
+def parsed = json_try_decode(source)
+assert(parsed.get("ok", false), "JSON parser keeps cursor and error in separate state slots")
+assert(parsed.get("pos", 0) == source.len,
+   "JSON parser reports the consumed byte count")
+def value = parsed.get("value", 0)
+assert(value.get("a", [])[2] == "x",
+   "JSON parser preserves nested dynamic values")
+assert(json_encode("text") == "\"text\"",
+   "JSON encoder appends through its opaque runtime builder")
+assert(json_encode({"a": 7}) == "{\"a\":7}",
+   "JSON encoder traverses dictionary keys across list representations")
+def numbers = json_try_decode("{\"precise\":1.2345678901234567,\"tiny\":1.2345678901234568e-10,\"zero\":0,\"null\":null}")
+assert(numbers.get("ok", false), "JSON accepts precise decimal and exponent numbers")
+def numeric_values = numbers.get("value")
+def precise = numeric_values.get("precise")
+def tiny = numeric_values.get("tiny")
+assert(precise > 1.2345678901 && precise < 1.2345678902,
+   "JSON float decoding preserves fractional precision")
+assert(tiny > 0.00000000012345678 && tiny < 0.00000000012345680,
+   "JSON exponent decoding preserves small nonzero values")
+assert(is_nil(numeric_values.get("null")) && !is_nil(numeric_values.get("zero")),
+   "decoded JSON null and integer zero remain distinct")
+def nul_result = json_try_decode("{\"text\":\"a\\u0000z\"}")
+def nul_text = nul_result.get("value").get("text")
+assert(nul_result.get("ok") && nul_text.len == 3 &&
+       load8(nul_text, 1) == 0 && load8(nul_text, 2) == 122,
+   "JSON unicode NUL retains subsequent bytes and counted string length")
+assert(json_encode(nul_text) == "\"a\\u0000z\"",
+   "JSON encoding preserves a decoded NUL byte")
+NY
+}

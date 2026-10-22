@@ -1,0 +1,122 @@
+shape ownership_rule_exclusive_borrow_disjoint_fields_positive {
+  family "language/ownership"
+  generator "syntax"
+  features ["ownership", "borrow", "exclusive", "aggregate", "disjoint-fields", "positive"]
+  template ny-test-case
+  expect compile_and_run
+  flags "--ownership-strict --nyir-verify --nyir-dump"
+  expect_message "[noalias]"
+  source ny <<'NY'
+use core
+
+layout Pair { int left, int right }
+
+fn borrow_left(bool read_borrow) int {
+  mut Pair pair = Pair(5, 8)
+  def exclusive = &mut pair.left
+  if read_borrow {
+    def observed = exclusive
+  } else {
+    def observed_right = pair.right
+  }
+  pair.left + pair.right
+}
+
+assert(borrow_left(true) == 13,
+       "the borrow arm reads its aliased field")
+assert(borrow_left(false) == 13,
+       "a disjoint field stays accessible on the other branch")
+NY
+}
+
+shape ownership_exclusive_borrow_disjoint_compound_index_write {
+  family "language/ownership"
+  generator "syntax"
+  features ["ownership", "borrow", "exclusive", "compound-write", "disjoint-index"]
+  template ny-test-case
+  expect compile_and_run
+  flags "--ownership-strict --nyir-verify"
+  expect_message "[noalias]"
+  source ny <<'NY'
+use core
+
+fn update_disjoint_element() int {
+  mut list<int> values = [5, 8]
+  def exclusive = &mut values[0]
+  values[1] += 1
+  def observed = exclusive
+  values[0] + values[1]
+}
+
+assert(update_disjoint_element() == 14,
+       "compound write to a disjoint element is allowed while the borrow lives")
+NY
+}
+
+shape ownership_exclusive_borrow_overlapping_compound_index_write {
+  family "compiler-errors/ownership"
+  generator "error"
+  features ["error", "ownership", "borrow", "exclusive", "compound-write", "overlap"]
+  template ny-compile-fail
+  expect compile_fail
+  flags "--ownership-strict --nyir-verify"
+  source ny <<'NY'
+use core
+
+fn update_borrowed_element() int {
+  mut list<int> values = [5, 8]
+  def exclusive = &mut values[0]
+  values[0] += 1
+  def observed = exclusive
+  values[0] + values[1]
+}
+
+update_borrowed_element()
+NY
+}
+
+shape ownership_exclusive_borrow_disjoint_compound_constant_expression_index {
+  family "language/ownership"
+  generator "syntax"
+  features [ownership borrow exclusive compound-write constant-expression-index disjoint]
+  template ny-test-case
+  expect compile_and_run
+  flags "--ownership-strict --nyir-verify"
+  expect_message "[noalias]"
+  source ny <<'NY'
+use core
+
+fn update_computed_disjoint_element() int {
+  mut list<int> values = [5, 8, 9]
+  def exclusive = &mut values[0]
+  values[1 + 1] += 1
+  def observed = exclusive
+  values[0] + values[2]
+}
+
+assert(update_computed_disjoint_element() == 15,
+       "constant-expression compound writes remain disjoint from the live borrow")
+NY
+}
+
+shape ownership_exclusive_borrow_overlapping_compound_constant_expression_index {
+  family "compiler-errors/ownership"
+  generator "error"
+  features [error ownership borrow exclusive compound-write constant-expression-index overlap]
+  template ny-compile-fail
+  expect compile_fail
+  flags "--ownership-strict --nyir-verify"
+  source ny <<'NY'
+use core
+
+fn update_computed_borrowed_element() int {
+  mut list<int> values = [5, 8, 9]
+  def exclusive = &mut values[1 + 1]
+  values[5 - 3] += 1
+  def observed = exclusive
+  values[0] + values[2]
+}
+
+update_computed_borrowed_element()
+NY
+}

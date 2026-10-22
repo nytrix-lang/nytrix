@@ -1,0 +1,35 @@
+shape nyir_tbuf_f64_store_round_trip {
+  family "codegen/ir/nyir"
+  generator "embedded"
+  features ["ny", "test", "nyir", "abi", "f64", "list"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+fn as_dynamic_list(any values) any { values }
+
+fn reserved_store_round_trip() bool {
+   mut values = as_dynamic_list([0, 0, 0])
+   __store_item_fast(values, 0, 1.5)
+   __store_item_fast(values, 1, -2.25)
+   __store_item_fast(values, 2, 3.75)
+   type(values[0]) == "float" && __flt_eq(values[0], 1.5) &&
+      __flt_eq(values[1], -2.25) && __flt_eq(values[2], 3.75)
+}
+
+mut values = as_dynamic_list([0, 0, 0])
+__store_item_fast(values, 0, 1.5)
+__store_item_fast(values, 1, -2.25)
+__store_item_fast(values, 2, 3.75)
+assert(type(values[0]) == "float",
+       "fast stores preserve the first float's dynamic tag")
+assert(__flt_eq(values[0], 1.5) && __flt_eq(values[1], -2.25) &&
+       __flt_eq(values[2], 3.75),
+       "fast stores round-trip f64 values through descriptor lists")
+assert(reserved_store_round_trip(),
+       "fast stores round-trip through a reserved descriptor buffer")
+
+NY
+}

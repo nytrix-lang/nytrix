@@ -1,0 +1,52 @@
+shape licm-math {
+  family "perf-real"
+  generator "stress"
+  features ["perf", "licm", "c-vs-ny", "native", "checksum", "time"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.time
+;; Loop-invariant computation (a*b + c/d) that LICM should hoist.
+def N = 1000000 * argc()
+def a = 123 + argc()
+def b = 456 + argc()
+def c = 1000 + argc()
+def d = 7 + argc()
+def int t0 = ticks()
+mut acc = 0
+mut i = 0
+while i < N {
+   acc += (a * b + c / d) + i
+   i += 1
+}
+def int t1 = ticks()
+print("checksum=", acc)
+print("elapsed_ns=", t1 - t0)
+NY
+  source c <<'C'
+#include <stdint.h>
+#include <stdio.h>
+#include <time.h>
+
+static int64_t now_ns(void) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0;
+    return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
+}
+
+int main(int argc, char **argv) {
+    (void)argv;
+    int64_t a = 123 + argc, b = 456 + argc, c = 1000 + argc, d = 7 + argc;
+    int64_t N = 1000000LL * argc;
+    int64_t start = now_ns();
+    volatile int64_t acc = 0;
+    for (int64_t i = 0; i < N; i++) acc += (a * b + c / d) + i;
+    int64_t end = now_ns();
+    printf("checksum=%lld\n", (long long)acc);
+    if (end <= start) end = start + 1;
+    printf("elapsed_ns=%lld\n", (long long)(end - start));
+    return 0;
+}
+C
+}

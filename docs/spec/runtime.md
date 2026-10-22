@@ -23,11 +23,12 @@ concurrency, cleanup, and effect metadata.
 ownership diagnostics to errors and adds RC/RAII cleanup, strict effect/alias
 policy, and stricter raw-memory diagnostics.
 
-Ordinary compilation runs the ownership/provenance pass in advisory mode by
-default. It warns about tracked use-after-move, double release, releasing or
-mutating an observed value, and escaping borrows, but it does not change the
-heap policy or insert cleanup. This makes common lifetime mistakes visible
-without turning small scripts into an annotation exercise.
+Ordinary compilation leaves ownership/provenance analysis disabled by default.
+`--borrow-check` enables advisory diagnostics without changing heap policy or
+inserting cleanup. `--ownership` enables ownership tracking and RAII cleanup;
+`--ownership-strict` promotes supported ownership diagnostics to errors.
+`--safe-mode` enables strict ownership checks and RC/RAII cleanup together
+with strict effect/alias policy and tracked raw-memory diagnostics.
 
 ```bash
 ny --safe-mode file.ny
@@ -39,6 +40,8 @@ returns them through an ownership contract. Raw memory loads and stores against
 a compiler-tracked allocation require a proven byte range:
 
 ```ny
+use core
+
 with ptr p = malloc(8){
    def int i = 3
    assert_compile_range(i, 0, 7, "byte index")
@@ -55,6 +58,49 @@ exceeds the allocation size, compilation fails.
 The runtime manages ordinary values. Raw pointers, handles, layouts, and FFI
 strings cross into native memory and native lifetime rules.
 
+## Runtime global registry
+
+`globals()` returns the runtime registry installed by `set_globals()`. It is
+not a reflection of lexical scope, imported modules, or all compiled
+functions. The registry is empty until a caller installs a dictionary, and
+functions are not exported into it automatically. Code that looks up a
+callable by name must handle a missing entry or install the entry explicitly.
+`set_globals()` replaces the registry pointer; it does not alter name
+resolution in Ny source.
+
+## Runtime bridge representations
+
+Runtime entry points have explicit tagged or raw variants where callers use
+different machine representations. The C names below describe the boundary;
+source-level intrinsics can be routed to a backend-specific variant during
+lowering.
+
+| Entry point | Arguments and result |
+| --- | --- |
+| `__list_len` / `rt_list_len` | Returns a tagged Ny integer. Native NYIR sequence operations use `rt_tbuf_len_raw` and receive a raw count. |
+| `__read_off` / `__write_off` | Legacy tagged entry points decode the integer descriptor, byte count, and offset, resolve the buffer pointer, and return a tagged integer result (including errors). Native lowering may route typed calls to the corresponding `_raw` entry, which takes and returns raw integers. |
+| `__syscall` / `rt_syscall` | Takes seven Ny dynamic values and returns a tagged Ny integer on every platform. Native NYIR lowers this call to `rt_syscall_raw`, which takes machine-word arguments, preserves addresses that are already readable, and decodes an encoded native pointer handle when the encoded word is unreadable but its payload is readable. Linux denies `mprotect`, `clone`, `fork`, and `vfork`; unsupported hosts return tagged `-1`. |
+| `__execve` / `rt_execve` | Decodes the path's tagged/native-handle representation, validates each managed or native list/tuple vector entry as a string, and builds temporary null-terminated C vectors for the OS call. |
+| `rt_call0_ptr` / `rt_call1_ptr` | Call native FFI functions with pointer return values and encode non-null results as native handles. These are pointer-return bridges; closure callbacks use the `rt_call*` callback family instead. |
+| `__proof_cert_digest` / `__proof_cert_check` | Accept registered Ny strings as borrowed, read-only inputs; ownership stays with the caller. The checker requires tagged integer digest and budget arguments and returns a tagged boolean. |
+
+Dynamic callback values are interned opaque IDs. Their bool, tagged-argument,
+and raw-result flags occupy separate value bits; code-address bits are not
+reused for callback metadata. The runtime does not own the callback code, so
+its module must remain loaded while a callback value can be invoked. Captured
+closures retain their separate heap closure and environment representation.
+
+The proof checker validates the certificate digest before parsing, rejects
+non-canonical encodings, and applies node, variable-metadata, depth, step, and
+working-set limits. Its ABI is exercised by
+`etc/tests/lang/types/proofs/proof-runtime-abi.nshape` on the NYIR VM,
+native NYIR, and legacy LLVM paths.
+
+The compatibility `rt_list_len` implementation can read both legacy managed
+list headers and native tbuf headers, but its result stays tagged. Code that
+stores a raw count must use a raw length bridge and must not infer the result
+representation from the list layout.
+
 ## Heap policy
 
 The default heap path uses the native runtime allocator for runtime-managed
@@ -63,33 +109,38 @@ sets, tuples, and ordinary result values return managed Nytrix objects. Raw
 buffers, external handles, FFI pointers, and memory returned by native APIs
 still follow the owning API's explicit native ownership rules.
 
-Enable the nursery/tenured GC with `-gc` or `--heap=gc`; the CLI sets the
-runtime `NYTRIX_GC` switch from that policy.
+Choose one reclamation policy for a compilation:
+
+| Policy | Option | Reclamation model |
+| --- | --- | --- |
+| Manual | `--heap=manual` | The program or owning API is responsible for cleanup. |
+| RAII | `--heap=raii` | Inserts cleanup at supported scope exits; recommended for resource handles. |
+| Reference counting | `--heap=rc` | Tracked ownership uses reference-counted cleanup. |
+| Tracing GC (optional) | `--heap=gc` | Reclaims supported managed object graphs. |
+
+Tracing GC is optional and not recommended for resource management. Prefer
+ownership contracts and RAII for resources. Cleanup support is partial; see
+[implementation status](../learn/status.md#feature-boundaries).
+`--safe-mode` enables strict ownership and RC/RAII cleanup without tracing GC.
+
+Enable it with `-gc` or `--heap=gc`.
 
 ```bash
 ny -gc file.ny
 NYTRIX_GC_NURSERY_SIZE=64M NYTRIX_GC_TENURED_SIZE=512M ny --heap=gc file.ny
 ```
 
-With GC disabled, the collector reserves no nursery or tenured spaces. With GC
-enabled, configure the nursery, tenured space, and large-object threshold with
-`NYTRIX_GC_NURSERY_SIZE`, `NYTRIX_GC_TENURED_SIZE`, and
-`NYTRIX_GC_LOS_THRESHOLD`. Size values accept bytes, `K`, `M`, or `G`.
+GC tuning variables are `NYTRIX_GC_NURSERY_SIZE`,
+`NYTRIX_GC_TENURED_SIZE`, and `NYTRIX_GC_LOS_THRESHOLD` (sizes accept bytes,
+`K`, `M`, or `G`).
 
 ### Collector mechanics
 
-In GC mode the collector adds a 16-byte collector header before the ordinary
-runtime prefix and moves supported heap objects between the nursery and the
-tenured space. Managed Nytrix objects are scanned and relocated; the collector
-keeps its own header so the ordinary prefix and object layout stay unchanged.
-Large objects above `NYTRIX_GC_LOS_THRESHOLD` are not moved; they are tracked
-directly.
+GC mode adds a 16-byte collector header before the ordinary prefix. It moves
+supported managed objects; large objects are tracked without moving.
 
-GC mode changes allocation for managed Nytrix objects. Native handles and raw
-buffers still need cleanup. Pair native allocations that escape the managed
-object model with the owning API's cleanup function, `with` scopes, or a
-`release` / `forget` contract. A raw buffer or handle is not traced and is not
-moved; do not cache its address across a GC boundary.
+GC does not manage native handles or raw buffers. Use the owning API,
+`with`, `release`, or `forget`; do not retain raw addresses across a GC point.
 
 ## Ownership
 
@@ -97,7 +148,7 @@ Declare ownership contracts with attributes. Compiler and runtime modes check
 them. Resource APIs define whether a value is borrowed, owned, released, or
 intentionally forgotten.
 
-```ny
+```text
 def b = borrow(a)
 def c = &a
 def o = own(value)
@@ -114,16 +165,16 @@ forget(o)
 `release` consumes and drops an owned value. `forget` consumes an owned value
 without dropping it.
 
-Ownership diagnostics run by default:
+Ownership diagnostics and cleanup are explicit options:
 
 ```bash
-ny file.ny                         # advisory diagnostics, no cleanup changes
+ny --borrow-check file.ny          # advisory diagnostics, no cleanup changes
 ny --ownership-strict file.ny      # diagnostics become errors
 ny --ownership file.ny             # RAII cleanup plus diagnostics
 ny --safe-mode file.ny             # strict safety profile
 ```
 
-`--borrow-check` explicitly enables the default advisory pass. It reports
+`--borrow-check` enables the advisory pass. It reports
 moves, releases, borrow escapes, use after move, and double release without
 forcing RAII cleanup. `--ownership-strict` promotes these diagnostics to
 errors and enables stricter tracking such as rejecting implicit borrows from
@@ -155,6 +206,8 @@ object. Choose one of two conventions for a public API and do not mix them:
 - Functional mutator: clone, mutate the clone, and return it.
 
 ```ny
+use core
+
 ; In-place: mutates caller's dict, returns it
 fn add_name(any input, str name) any {
    input.set("name", name)
@@ -174,7 +227,7 @@ fn with_name(any input, str name) any {
 `defer` and `with` provide cleanup. `with` uses the resource spelling
 `with Type name = value { ... }`.
 
-```ny
+```text
 defer { cleanup() }
 with Resource r = open_resource() { use(r) }
 ```
@@ -189,14 +242,16 @@ scope should be visibly bounded.
 
 The runtime and standard library include stackless async tasks, OS threads,
 atomics, queues, channels, and network async helpers. Shared state uses
-synchronization APIs from `std.core` and `std.os`.
+synchronization APIs from `core` and `core.os`.
 
 ### Async tasks
 
 `async` starts a stackless task and `await` waits for its value:
 
 ```ny
-use std.os.async (async, await)
+use core
+
+use core.os.async (async, await)
 
 fn plus_one(x){ x + 1 }
 
@@ -208,26 +263,34 @@ The callable form is also supported: `async(fn_value, arg...)` and
 `await(handle)`. `await_all(handles)` waits for a list of handles.
 `future(fn_value, arg...)` and `Future(fn_value, arg...)` are compatibility
 constructors for joinable async handles. `sleep_ms(ms)` and `yield_now()` are
-async scheduling helpers in `std.os.async`.
+async scheduling helpers in `core.os.async`.
 
 Async socket helpers return awaitable handles for connect, accept, read, write,
 and read-until operations.
 
-On the browser target, `std.os.time.msleep(ms)` uses the runner's Asyncify
+On the browser target, `core.os.time.msleep(ms)` uses the runner's Asyncify
 bridge to yield to the browser event loop and resume the suspended Wasm stack
 after the delay. It does not block the browser thread. The fixture
-`etc/tests/native/web/time-sleep.ny` verifies this behavior.
+`etc/tests/lang/interop/web/time.nshape:test_time_sleep` verifies this behavior.
 
 ### Threads and mutexes
 
-`std.os.thread` spawns OS threads. `thread_spawn(fn_value, arg)` joins with
+`core.os.thread` spawns OS threads. `thread_spawn(fn_value, arg)` joins with
 `thread_join(handle)`. `thread_spawn_call(fn_value, args)` passes a list of
 arguments. Protect shared mutable state with `mutex_new`, `mutex_lock`, and
 `mutex_unlock`; free the mutex with `mutex_free`.
 
+Native thread and async callback entry points carry callback representation and
+result representation as separate ABI arguments. Result kinds distinguish raw
+integer scalars, already-tagged dynamic values, and raw booleans. The runtime
+converts raw results to canonical dynamic values before `thread_join` or
+`await` exposes them; callback argument counts contain only the argument count.
+The callback ABI rejects non-integer flags, raw-function flags outside `0` or
+`1`, and unknown result kinds before starting the callback.
+
 ```ny
-use std.core
-use std.os.thread
+use core
+use core.os.thread
 
 fn worker(any arg) any { arg }
 
@@ -245,7 +308,7 @@ blocking forms, `chan_try_send` and `chan_try_recv` are nonblocking, and
 `chan_close`, `chan_closed`, and `chan_len` manage lifecycle and capacity.
 
 ```ny
-use std.core
+use core
 
 def ch = channel(4)
 assert(chan_send(ch, "ny"), "send")
@@ -282,7 +345,7 @@ owner can leave scope before the worker completes.
 
 ### Atomics
 
-`std.os.atomic` provides lock-free cells for simple shared counters. The current
+`core.os.atomic` provides lock-free cells for simple shared counters. The current
 `atomic_i64` operations are sequentially consistent: each atomic operation
 participates in one global order consistent with program order. There is no
 source-level relaxed/acquire/release ordering selector yet.
@@ -293,7 +356,8 @@ operate on it, with an optional byte `offset` into the cell. Free the cell with
 `atomic_free`.
 
 ```ny
-use std.os.atomic
+use core
+use core.os.atomic
 
 def counter = atomic_i64(0)
 assert(atomic_add(counter, 1) == 1, "atomic increment")
@@ -306,13 +370,59 @@ Attributes describe declaration metadata: linkage, codegen hints, purity,
 effects, hot/cold markers, accelerator/vectorization hints, and ownership
 contracts.
 
-```ny
+```text
 @pure
-@effects(none|io|alloc|ffi|thread|all)
+@effects(none|io|alloc|ffi|thread|read|write|all)
 @async_effects
 ```
 
-`@pure` is shorthand for `@effects(none)`.
+`@pure` is shorthand for `@effects(none)`. `read`/`read_memory` and
+`write`/`write_memory` denote memory effects.
+
+## Terminal canvas contract
+
+`core.term.canvas(width, height)` returns an opaque native handle. The
+caller owns the handle and must call `canvas_free` exactly once after its last
+use. The handle is outside the managed heap: it is not retained or reclaimed by
+GC. Allocation failure returns `0`; canvas operations on an invalid or
+out-of-bounds cell are no-ops. `canvas_clear` resets cells to spaces and clears
+their color and bold attributes.
+
+Each canvas coordinate is one **code-point cell**, not one grapheme cluster or
+measured terminal column. `canvas_set` stores the first UTF-8 code point in
+`ch`; `canvas_print` walks the input by code point and advances one canvas
+column for each. Valid code points occupy one cell even when terminals display
+them as two columns; combining marks also occupy their own cell. Invalid UTF-8
+is replaced by U+FFFD. Keep canvas text to printable, single-column code points
+when alignment matters. Newlines, tabs, and other control characters are not
+expanded into rows or spaces.
+
+The native cell buffer uses an eight-byte, zero-filled slot per cell. UTF-8
+bytes occupy the start of that slot; foreground color and bold are stored in
+separate per-cell arrays. `canvas_set` and `canvas_print` clamp color indices to
+0–255 and store bold as false/true. `canvas_refresh` writes rows to stdout. On
+an interactive terminal it homes the cursor, emits ANSI SGR when attributes
+change, resets attributes at the end, and separates rows with CR/LF. In
+non-interactive output it writes plain cell bytes with LF row separators and
+omits color and bold sequences.
+
+For interactive canvas loops, the draw callback borrows the canvas handle and
+z-buffer passed to it. Use them only during the callback and do not free or
+retain them: terminal resize replaces both, and loop exit frees the canvas. The
+callback's return value is ignored. It may retain its own application state
+outside those borrowed arguments.
+
+The loop sets canvas height to terminal rows minus one, reserving the final
+terminal row for application-owned status or legend output. `canvas_refresh`
+homes the cursor and writes only the canvas rows; it does not clear or write the
+reserved row. A resize clears the screen before the next callback, so redraw
+application-owned row content after a resize.
+
+Canvas color `0` selects the terminal default/reset. Nonzero indices map to the
+basic ANSI foreground palette with `30 + (index % 8)`; indices therefore cycle
+through black, red, green, yellow, blue, magenta, cyan, and white. Bold is SGR
+attribute 1. This canvas index mapping is separate from `color_names()` and
+`get_color_name()`, whose list also includes gray and starts at black index 0.
 
 ## Related
 

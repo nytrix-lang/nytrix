@@ -1,18 +1,20 @@
 ;; Keywords: fs filesystem files os
 ;; Filesystem Management for Nytrix
 ;; References:
-;; - std.os
-module std.os.fs
+;; - core.os
+module core.os.fs
 
 ;; The portable filesystem surface currently includes file checks, traversal,
 ;; rename, and single-directory creation/removal. Unsupported platform-specific
 ;; operations stay outside this module until their syscall contracts are
 ;; available on every supported host.
-use std.core
-use std.core as core
-use std.os
-use std.os.path as ospath
-use std.core.str
+use core
+use core as core
+use core.os
+use core.os.platform as os_platform
+use core.os.time as ostime
+use core.os.path as ospath
+use core.str
 
 fn is_file(any path) bool {
    "Returns true if the given `path` exists and points to a regular file."
@@ -28,14 +30,14 @@ fn is_dir(any path) bool {
    if !is_str(path) { return false }
    if path == "." || path == ".." { return true }
    def p = ospath.normalize(path)
-   __untag(__is_dir(p)) == 1
+   __is_dir(p) == 1
 }
 
-fn list_dir(any path) list {
-   "Returns a list of filenames contained within the directory at `path`. Excludes '.' and '..' entries."
-   if !is_str(path) { return list(0) }
+fn list_dir_checked(any path) any {
+   "Returns directory entries, or nil when the path cannot be opened as a directory. Excludes '.' and '..'."
+   if !is_str(path) { return nil }
    def p, h = ospath.normalize(path), __dir_open(p)
-   if !h { return list(0) }
+   if !h { return nil }
    mut files = list(8)
    while 1 {
       def name = __dir_read(h)
@@ -45,6 +47,13 @@ fn list_dir(any path) list {
    }
    __dir_close(h)
    return files
+}
+
+fn list_dir(any path) list {
+   "Returns directory entries; returns an empty list when the path cannot be opened."
+   def files = list_dir_checked(path)
+   if is_list(files) { return files }
+   return list(0)
 }
 
 fn walk(any root, any cb, int max_depth=-1, any visited=nil) int {
@@ -133,7 +142,7 @@ fn _fs_selftest_walk_hit(any _path) int {
    walk(".", _fs_selftest_walk_hit, 0)
    assert(_fs_selftest_walk_hits == 1, "fs walk max_depth zero")
    unwrap(file_remove(fp))
-   print("✓ std.os.fs self-test passed")
+   print("✓ core.os.fs self-test passed")
 }
 
 ;; File watching via real platform watchers (inotify on linux; poll fallback elsewhere)
@@ -232,23 +241,7 @@ fn watch_has_change(any evs, int want_mask=IN_MODIFY) bool {
    false
 }
 
-#main {
-   ;; previous selftest already ran; add minimal watcher smoke if possible
-   def wfd = watch_init(O_NONBLOCK)
-   if wfd >= 0 {
-      def wd = watch_add(wfd, ".", IN_MODIFY | IN_CREATE | IN_DELETE)
-      if wd >= 0 {
-         ;; non-destructive: just rm it
-         watch_rm(wfd, wd)
-      }
-      __close(wfd)
-      print("✓ std.os.fs.watch primitives self-test passed")
-   }
-}
-
 ;; Portable watch facade with best-effort platform backends.
-use std.os.platform as platform
-
 def WATCH_MODIFY = 0x00000002
 def WATCH_CREATE = 0x00000100
 def WATCH_DELETE = 0x00000200
@@ -323,7 +316,7 @@ fn watch_create(str path) any {
    "Portable create(real when available)."
    if !is_str(path) { return nil }
    def p = ospath.normalize(path)
-   if platform.is_linux() {
+   if os_platform.is_linux() {
       def fd = watch_init(O_NONBLOCK)
       if fd > 0 {
          def m = bor(bor(IN_MODIFY, IN_CREATE), bor(IN_DELETE, IN_ATTRIB))
@@ -338,10 +331,10 @@ fn watch_create(str path) any {
          }
          __close(fd)
       }
-   } elif platform.is_macos() {
+   } elif os_platform.is_macos() {
       def h = _kqueue_vnode(p)
       if h != nil { return h }
-   } elif platform.is_windows() {
+   } elif os_platform.is_windows() {
       def h = _win32_watch(p)
       if h != nil { return h }
    }
@@ -397,13 +390,35 @@ fn watch_poll(any h) list {
 }
 
 ;; Returns the result of the `watch_has_event` operation.
-fn watch_has_event(any h) bool { watch_poll(h).len > 0 }
+fn watch_has_event(any h) bool {
+   "Returns true when a filesystem watcher has a pending event."
+   watch_poll(h).len > 0
+}
+
+fn watch_wait_any(any h, int timeout_ms=200) bool {
+   "Waits up to `timeout_ms` for a filesystem watcher event."
+   if timeout_ms <= 0 { return watch_has_event(h) }
+   mut waited = 0
+   while waited < timeout_ms {
+      if watch_has_event(h) { return true }
+      ostime.msleep(1)
+      waited += 1
+   }
+   watch_has_event(h)
+}
 
 #main {
-   def w = watch_create(".")
-   if w {
-      watch_poll(w)
-      watch_close(w)
-      print("✓ std.os.fs.watch facade self-test passed")
+   def wfd = watch_init(O_NONBLOCK)
+   if wfd >= 0 {
+      def wd = watch_add(wfd, ".", IN_MODIFY | IN_CREATE | IN_DELETE)
+      if wd >= 0 { watch_rm(wfd, wd) }
+      __close(wfd)
+      print("✓ core.os.fs.watch primitives self-test passed")
+   }
+   def watcher = watch_create(".")
+   if watcher {
+      watch_poll(watcher)
+      watch_close(watcher)
+      print("✓ core.os.fs watch self-test passed")
    }
 }

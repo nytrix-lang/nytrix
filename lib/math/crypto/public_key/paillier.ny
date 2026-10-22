@@ -3,12 +3,12 @@
 ;; Reference:
 ;; - P. Paillier, Public-Key Cryptosystems Based on Composite Degree Residuosity Classes.
 ;; References:
-;; - std.math.crypto.public_key
-;; - std.math.crypto
+;; - core.math.crypto.public_key
+;; - core.math.crypto
 ;; - inspiration from crypto-commons (asymmetric)
-module std.math.crypto.public_key.paillier(paillier_keygen, paillier_encrypt, paillier_decrypt, paillier_encrypt_default, paillier_add, paillier_mul_plain, paillier_rerandomize)
-use std.core
-use std.math.nt
+module core.math.crypto.public_key.paillier(paillier_keygen, paillier_encrypt, paillier_decrypt, paillier_encrypt_default, paillier_add, paillier_mul_plain, paillier_rerandomize)
+use core
+use core.math.nt
 
 fn _paillier_l(any u, any n) bigint {
    (Z(u) - Z(1)) / Z(n)
@@ -103,5 +103,5 @@ fn paillier_rerandomize(any c, any n, any r) bigint {
    assert(paillier_decrypt(fresh, key) == Z(12), "paillier rerandomized decrypt")
    def wrapped = paillier_encrypt_default(80, key, 5)
    assert(paillier_decrypt(wrapped, key) == Z(3), "paillier message reduced modulo n")
-   print("✓ std.math.crypto.public_key.paillier self-test passed")
+   print("✓ core.math.crypto.public_key.paillier self-test passed")
 }

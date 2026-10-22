@@ -1,0 +1,301 @@
+shape captured_callback_divergent_rows_are_joined {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "callback", "capture", "branch"]
+  template ny-test-case
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+@effects(io)
+fn io_callback() int {
+  print("io callback\n")
+  42
+}
+
+@effects(none)
+fn pure_callback() int {
+  7
+}
+
+@effects(alloc, e)
+fn make_divergent_callback(bool choose_pure) fnptr {
+  mut selected = io_callback
+  if choose_pure {
+    selected = pure_callback
+  } else {
+    selected = io_callback
+  }
+  def first_wrapper = fn() { selected() }
+  def forwarded = first_wrapper
+  return fn() { forwarded() }
+}
+
+@effects(alloc, e)
+fn make_loop_divergent_callback(bool choose_io) fnptr {
+  mut selected = pure_callback
+  mut once = choose_io
+  while once {
+    selected = io_callback
+    once = false
+  }
+  def first_wrapper = fn() { selected() }
+  def forwarded = first_wrapper
+  return fn() { forwarded() }
+}
+
+@effects(alloc, e)
+fn make_match_divergent_callback(bool choose_io) fnptr {
+  mut selected = pure_callback
+  match choose_io {
+    true -> { selected = io_callback }
+    else { selected = pure_callback }
+  }
+  def first_wrapper = fn() { selected() }
+  def forwarded = first_wrapper
+  return fn() { forwarded() }
+}
+
+@effects(e)
+fn run_eff(fnptr callback) int {
+  callback()
+}
+
+@effects(io, alloc)
+fn invoke_divergent_callback(bool choose_pure) int {
+  run_eff(make_divergent_callback(choose_pure))
+}
+
+@effects(io, alloc)
+fn invoke_loop_divergent_callback(bool choose_io) int {
+  run_eff(make_loop_divergent_callback(choose_io))
+}
+
+@effects(io, alloc)
+fn invoke_match_divergent_callback(bool choose_io) int {
+  run_eff(make_match_divergent_callback(choose_io))
+}
+
+invoke_divergent_callback(true)
+invoke_divergent_callback(false)
+invoke_loop_divergent_callback(false)
+invoke_loop_divergent_callback(true)
+invoke_match_divergent_callback(false)
+invoke_match_divergent_callback(true)
+print("divergent callback effect rows joined")
+NY
+}
+
+shape captured_callback_divergent_rows_require_the_union {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "callback", "capture", "branch", "negative"]
+  template ny-test-case
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_fail
+  expect_message "effect contract violation"
+  source ny <<'NY'
+use core
+
+@effects(io)
+fn io_callback() int {
+  print("io callback\n")
+  42
+}
+
+@effects(none)
+fn pure_callback() int {
+  7
+}
+
+@effects(alloc, e)
+fn make_divergent_callback(bool choose_pure) fnptr {
+  mut selected = io_callback
+  if choose_pure {
+    selected = pure_callback
+  } else {
+    selected = io_callback
+  }
+  return fn() { selected() }
+}
+
+@effects(alloc, e)
+fn make_loop_divergent_callback(bool choose_io) fnptr {
+  mut selected = pure_callback
+  mut once = choose_io
+  while once {
+    selected = io_callback
+    once = false
+  }
+  return fn() { selected() }
+}
+
+@effects(alloc, e)
+fn make_match_divergent_callback(bool choose_io) fnptr {
+  mut selected = pure_callback
+  match choose_io {
+    true -> { selected = io_callback }
+    else { selected = pure_callback }
+  }
+  def first_wrapper = fn() { selected() }
+  def forwarded = first_wrapper
+  return fn() { forwarded() }
+}
+
+@effects(e)
+fn run_eff(fnptr callback) int {
+  callback()
+}
+
+@effects(alloc)
+fn invoke_match_divergent_callback(bool choose_io) int {
+  run_eff(make_match_divergent_callback(choose_io))
+}
+
+invoke_match_divergent_callback(false)
+NY
+}
+
+shape captured_callback_try_rows_are_joined {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "callback", "capture", "try"]
+  template ny-test-case
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+@effects(io)
+fn io_callback() int {
+  print("try callback\n")
+  42
+}
+
+@effects(none)
+fn pure_callback() int {
+  7
+}
+
+@effects(alloc, e)
+fn make_try_callback(bool choose_io) fnptr {
+  mut selected = pure_callback
+  try {
+    def completed = choose_io
+  } catch err {
+    selected = io_callback
+  }
+  return fn() { selected() }
+}
+
+@effects(e)
+fn run_eff(fnptr callback) int {
+  callback()
+}
+
+@effects(io, alloc)
+fn invoke_try_callback(bool choose_io) int {
+  run_eff(make_try_callback(choose_io))
+}
+
+assert(1 == 1, "try-catch callback rows are checked at function boundaries")
+NY
+}
+
+shape captured_callback_try_rows_require_the_union {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "callback", "capture", "try", "negative"]
+  template ny-test-case
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_fail
+  expect_message "effect contract violation"
+  source ny <<'NY'
+use core
+
+@effects(io)
+fn io_callback() int {
+  print("try callback\n")
+  42
+}
+
+@effects(none)
+fn pure_callback() int {
+  7
+}
+
+@effects(alloc, e)
+fn make_try_callback() fnptr {
+  mut selected = pure_callback
+  try {
+    def completed = true
+  } catch err {
+    selected = io_callback
+  }
+  return fn() { selected() }
+}
+
+@effects(e)
+fn run_eff(fnptr callback) int {
+  callback()
+}
+
+@effects(alloc)
+fn underdeclared_try_callback() int {
+  run_eff(make_try_callback())
+}
+
+underdeclared_try_callback()
+NY
+}
+
+shape captured_callback_try_intermediate_state_fails_closed {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "callback", "capture", "try", "negative"]
+  template ny-test-case
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_fail
+  expect_message "effect contract violation"
+  source ny <<'NY'
+use core
+
+@effects(io)
+fn io_callback() int {
+  print("intermediate try callback\n")
+  42
+}
+
+@effects(none)
+fn pure_callback() int {
+  7
+}
+
+@effects(alloc, e)
+fn make_try_callback() fnptr {
+  mut selected = pure_callback
+  try {
+    selected = io_callback
+    pure_callback()
+    selected = pure_callback
+  } catch err {
+    selected()
+    selected = pure_callback
+  }
+  return fn() { selected() }
+}
+
+@effects(e)
+fn run_eff(fnptr callback) int {
+  callback()
+}
+
+@effects(alloc)
+fn underdeclared_try_callback() int {
+  run_eff(make_try_callback())
+}
+
+underdeclared_try_callback()
+NY
+}

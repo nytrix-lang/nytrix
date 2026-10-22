@@ -1,0 +1,22 @@
+shape user_std_static_list_keeps_user_origin {
+  family "runtime/modules/use"
+  generator "embedded"
+  features ["ny", "test", "modules", "identity", "static-list"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+module std.project(
+  selected
+)
+
+fn selected(int index) int {
+  def values = [13, 29, 47]
+  values[index]
+}
+
+#main {
+  assert(selected(1) == 29, "std-spelled user module keeps its static list value")
+  0
+}
+NY
+}

@@ -1,0 +1,44 @@
+shape imported_refinement_guard_is_portable {
+  family "runtime/modules/use"
+  generator "regression"
+  features ["ny", "test", "modules", "refinement", "relational-guard"]
+  template ny-test-case
+  flags_matrix "-no-std --native --run; -no-std --native-backend=llvm --jit --jit-engine=mcjit; -no-std --native-backend=llvm --jit --jit-engine=orc; -no-std --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use "./portable-refinement-provider.ny" as provider
+
+fn accept_positive(provider.Positive value) int { value }
+fn guarded_imported_refinement(int value) int {
+  if value > 0 {
+    accept_positive(value)
+  } else {
+    0
+  }
+}
+assert(guarded_imported_refinement(5) == 5,
+       "the imported refinement predicate is available to guarded calls")
+NY
+}
+
+shape imported_refinement_weaker_guard_fails_closed {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "modules", "refinement", "negative"]
+  template ny-compile-fail
+  flags_matrix "-no-std --native --run; -no-std --native-backend=llvm --jit --jit-engine=mcjit; -no-std --native-backend=llvm --jit --jit-engine=orc; -no-std --native-only"
+  expect compile_fail
+  expect_message "refinement obligation is not proved"
+  source ny <<'NY'
+use "./portable-refinement-provider.ny" as provider
+
+fn accept_positive(provider.Positive value) int { value }
+fn weak_imported_guard(int value) int {
+  if value >= 0 {
+    accept_positive(value)
+  } else {
+    0
+  }
+}
+NY
+}

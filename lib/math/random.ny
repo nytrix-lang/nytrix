@@ -1,14 +1,14 @@
 ;; Keywords: random rng pseudorandom math
 ;; Math Random for Nytrix
 ;; References:
-;; - std.math
-module std.math.random(rand, seed, random, uniform, randint, randrange, choice, shuffle, sample, new, next, float, int)
-use std.core
-use std.math
-use std.core.reflect
-use std.math.float
-use std.math.float as flt
-use std.math.simmd as simmd
+;; - core.math
+module core.math.random(rand, seed, random, uniform, randint, randrange, choice, shuffle, sample, new, next, float, int)
+use core
+use core.math
+use core.reflect
+use core.math.float
+use core.math.float as flt
+use core.math.simmd as simmd
 
 fn rand() int {
    "Return a random 63-bit positive integer using the global system RNG."
@@ -115,8 +115,8 @@ fn next(list ctx) int {
    "Advances state and returns a 32-bit random integer. Modifies ctx list in-place."
    mut s0, s1 = ctx.get(0), ctx.get(1)
    def res = (_rotl32((s0 * 0x9E3779BB) & 0xFFFFFFFF, 5) * 5) & 0xFFFFFFFF
-   s1 = s1 ^^ s0
-   ctx.set(0, (_rotl32(s0, 26) ^^ s1 ^^ ((s1 << 9) & 0xFFFFFFFF)) & 0xFFFFFFFF)
+   s1 = s1 ^ s0
+   ctx.set(0, (_rotl32(s0, 26) ^ s1 ^ ((s1 << 9) & 0xFFFFFFFF)) & 0xFFFFFFFF)
    ctx.set(1, _rotl32(s1, 13))
    res
 }
@@ -145,5 +145,5 @@ fn int(list ctx, int a, int b) int {
    assert(a != b, "random state advances")
    def bounded = int(ctx, 2, 6)
    assert(bounded >= 2 && bounded <= 6, "random context int bounds")
-   print("✓ std.math.random self-test passed")
+   print("✓ core.math.random self-test passed")
 }

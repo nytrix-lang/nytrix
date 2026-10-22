@@ -1,12 +1,13 @@
 ;; Keywords: platform window backend opengl glx os ui input
 ;; GLX context creation for the X11 window backend.
 ;; References:
-;; - std.os.ui.window.platform.opengl
-;; - std.os.ui.window
-;; - std.os.ui.window.consts
-module std.os.ui.window.platform.opengl.glx(create_context, destroy_context, make_current, swap_buffers, swap_interval, get_proc_address, choose_fb_config, get_visual, get_visual_depth)
-use std.core
-use std.core.mem (cstr)
+;; - core.os.ui.window.platform.opengl
+;; - core.os.ui.window
+;; - core.os.ui.window.consts
+module core.os.ui.window.platform.opengl.glx(create_context, destroy_context, make_current, swap_buffers, swap_interval, get_proc_address, choose_fb_config, get_visual, get_visual_depth)
+use core.os.ffi as calls
+use core
+use core.mem (cstr)
 
 #linux {
    #link "libGL.so"
@@ -26,6 +27,12 @@ use std.core.mem (cstr)
       fn XFree(ptr data) i32
    }
 } #endif
+
+fn _glx_raw(any value) int {
+   if __is_int(value) { return __untag(value) }
+   value
+}
+
 #windows {
    fn glXChooseFBConfig(any _display, int _screen, any _attrs, any _count) any {
       "Runs the glXChooseFBConfig operation."
@@ -130,13 +137,13 @@ fn choose_fb_config(any display, any screen, any attrs=0) any {
       i += 1
    }
    store32(attr_list, 0, final_attrs_n * 4)
-   def configs = glXChooseFBConfig(display, int(screen), attr_list, count_ptr)
+   def configs = glXChooseFBConfig(_glx_raw(display), int(screen), _glx_raw(attr_list), _glx_raw(count_ptr))
    def count = load32(count_ptr, 0)
    mut res = 0
    if configs && count > 0 {
       res = load64(configs, 0)
    }
-   if configs { XFree(configs) }
+   if configs { XFree(_glx_raw(configs)) }
    free(count_ptr)
    free(attr_list)
    res
@@ -145,20 +152,20 @@ fn choose_fb_config(any display, any screen, any attrs=0) any {
 fn get_visual(any display, any fbconfig) any {
    "Returns the X11 Visual* for a GLX framebuffer config."
    if !fbconfig { return 0 }
-   def info = glXGetVisualFromFBConfig(display, fbconfig)
+   def info = glXGetVisualFromFBConfig(_glx_raw(display), _glx_raw(fbconfig))
    if !info { return 0 }
    def visual = load64(info, 0)
-   XFree(info)
+   XFree(_glx_raw(info))
    visual
 }
 
 fn get_visual_depth(any display, any fbconfig) int {
    "Returns the X11 visual depth for a GLX framebuffer config."
    if !fbconfig { return 0 }
-   def info = glXGetVisualFromFBConfig(display, fbconfig)
+   def info = glXGetVisualFromFBConfig(_glx_raw(display), _glx_raw(fbconfig))
    if !info { return 0 }
    def depth = load32_h(info, 20)
-   XFree(info)
+   XFree(_glx_raw(info))
    depth
 }
 
@@ -168,7 +175,7 @@ fn get_fbconfig_attrib(any display, any config, any attr) int {
    def value = malloc(4)
    if !value { return 0 }
    store32(value, 0, 0)
-   glXGetFBConfigAttrib(display, config, attr, value)
+   glXGetFBConfigAttrib(_glx_raw(display), _glx_raw(config), int(attr), _glx_raw(value))
    def res = load32(value, 0)
    free(value)
    res
@@ -177,25 +184,25 @@ fn get_fbconfig_attrib(any display, any config, any attr) int {
 fn create_context(any display, any fbconfig, any share=0, bool direct=true) any {
    "Creates create context."
    if !fbconfig { return 0 }
-   glXCreateNewContext(display, fbconfig, 0x8014, share, direct ? 1 : 0)
+   glXCreateNewContext(_glx_raw(display), _glx_raw(fbconfig), 0x8014, _glx_raw(share), direct ? 1 : 0)
 }
 
 fn destroy_context(any display, any ctx) bool {
    "Destroys destroy context."
    if !ctx { return false }
-   glXDestroyContext(display, ctx)
+   glXDestroyContext(_glx_raw(display), _glx_raw(ctx))
    true
 }
 
 fn make_current(any display, any win, any ctx) bool {
    "Builds make current."
-   glXMakeCurrent(display, win, ctx) != 0
+   glXMakeCurrent(_glx_raw(display), int(win), _glx_raw(ctx)) != 0
 }
 
 fn swap_buffers(any display, any win) bool {
    "Runs the swap buffers operation."
    if !win { return false }
-   glXSwapBuffers(display, win)
+   glXSwapBuffers(_glx_raw(display), int(win))
    true
 }
 
@@ -203,11 +210,11 @@ fn swap_interval(any interval) bool {
    "Runs the swap interval operation."
    #linux {
       def name_mesa = cstr("glXSwapIntervalMESA")
-      def proc_mesa = glXGetProcAddress(name_mesa)
-      if proc_mesa { __call1_ptr(proc_mesa, int(interval)) return true }
+      def proc_mesa = glXGetProcAddress(_glx_raw(name_mesa))
+      if proc_mesa { calls.pointer1(proc_mesa, int(interval)) return true }
       def name_sgi = cstr("glXSwapIntervalSGI")
-      def proc_sgi = glXGetProcAddress(name_sgi)
-      if proc_sgi { __call1_ptr(proc_sgi, int(interval)) return true }
+      def proc_sgi = glXGetProcAddress(_glx_raw(name_sgi))
+      if proc_sgi { calls.pointer1(proc_sgi, int(interval)) return true }
    }
    false
 }
@@ -217,14 +224,14 @@ fn get_proc_address(any name) any {
    def proc_name = to_str(name)
    if !startswith(proc_name, "gl") { return 0 }
    def s = cstr(proc_name)
-   def addr = glXGetProcAddress(s)
+   def addr = glXGetProcAddress(_glx_raw(s))
    if addr { return addr }
-   glXGetProcAddressARB(s)
+   glXGetProcAddressARB(_glx_raw(s))
 }
 
 #main {
    assert(get_visual(0, 0) == 0, "glx visual fallback")
    assert(get_fbconfig_attrib(0, 0, 0) == 0, "glx attrib fallback")
    assert(create_context(0, 0) == 0 && !destroy_context(0, 0), "glx context fallback")
-   print("✓ std.os.ui.window.platform.opengl.glx self-test passed")
+   print("✓ core.os.ui.window.platform.opengl.glx self-test passed")
 }

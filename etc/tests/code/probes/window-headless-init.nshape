@@ -1,0 +1,46 @@
+shape runtime-window-headless-init {
+  family "runtime/device"
+  generator "embedded"
+  features ["ny", "sys"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core.common as common
+use core.os.ui.window as window
+use core.os.ui.window.native as native
+use core.os.ui.window.platform as platform
+
+#linux {
+   if common.env_trim("DISPLAY").len == 0 &&
+      common.env_trim("WAYLAND_DISPLAY").len == 0 &&
+      common.env_lower("NY_UI_BACKEND") != "none" {
+      assert(native.get_backend_name() == "none", "headless selects no native backend")
+      assert(!window.available(), "automatic headless backend is unavailable")
+      assert(!native.init(), "headless native init reports unavailable")
+      assert(!window.open_window("headless-probe", 0, 0, 320, 240, 0),
+         "headless window creation reports unavailable")
+      platform.init_hint(platform.PLATFORM, platform.PLATFORM_NULL)
+      assert(window.available(), "explicit null backend remains available")
+      assert(native.init(), "explicit null backend initializes")
+   }
+}
+
+NY
+}
+
+shape runtime_window_explicit_null_backend_init {
+  family "runtime/device"
+  generator "embedded"
+  features ["ny", "sys", "window", "null-backend", "headless"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core.os.ui.window as window
+use core.os.ui.window.native as native
+use core.os.ui.window.platform as platform
+
+platform.init_hint(platform.PLATFORM, platform.PLATFORM_NULL)
+assert(window.available(), "explicit null backend is available")
+assert(native.init(), "explicit null backend initializes without a display")
+NY
+}

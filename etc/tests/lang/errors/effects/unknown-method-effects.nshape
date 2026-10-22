@@ -1,0 +1,20 @@
+shape unknown_method_effects_are_not_reported_as_known {
+  family "typing/effects"
+  generator "regression"
+  features ["ny" "test" "typing" "effects" "unknown" "method"]
+  template ny-test-case
+  flags_matrix "--effect-require-known"
+  expect compile_fail
+  expect_message "effect policy violation in 'std.project.invoke': effects are unknown"
+  source ny <<'NY'
+module std.project(
+  invoke
+)
+
+fn invoke(any receiver) {
+  receiver.missing_method()
+}
+
+print("unreachable")
+NY
+}

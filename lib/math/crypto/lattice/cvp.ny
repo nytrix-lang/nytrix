@@ -3,18 +3,18 @@
 ;; Reference:
 ;; - https://cims.nyu.edu/~regev/teaching/lattices_fall_2004/ln/cvp.pdf
 ;; References:
-;; - std.math.crypto.lattice
-;; - std.math.crypto
-module std.math.crypto.lattice.cvp(build_lattice, solve_inequality, solve_inequality_ex, cvp, cvp_report, cvp_babai, cvp_babai_report, cvp_enumerate, cvp_enumerate_report, cvp_list_gso_count_report, cvp_gso_bound_report, affine_cvp, bounded, bounded_ex, qary_lattice, reduce_mod_p, solve_weighted_bounds, solve_multi_mod_linear, solve_underconstrained_linear, enum_brute, mod_arc_is_inside, mod_arc_has_solution, mod_arc_optf, mod_arc_solve_range)
-use std.math.nt
-use std.math.big
-use std.math.scalar as math
-use std.math.matrix as matrix
-use std.math.crypto.lattice.flatter
-use std.math.crypto.lattice.lll as lllcore
-use std.core.str (atof)
-use std.os.clock (ticks)
-use std.os.prim (env)
+;; - core.math.crypto.lattice
+;; - core.math.crypto
+module core.math.crypto.lattice.cvp(build_lattice, solve_inequality, solve_inequality_ex, cvp, cvp_report, cvp_babai, cvp_babai_report, cvp_enumerate, cvp_enumerate_report, cvp_list_gso_count_report, cvp_gso_bound_report, affine_cvp, bounded, bounded_ex, qary_lattice, reduce_mod_p, solve_weighted_bounds, solve_multi_mod_linear, solve_underconstrained_linear, enum_brute, mod_arc_is_inside, mod_arc_has_solution, mod_arc_optf, mod_arc_solve_range)
+use core.math.nt
+use core.math.big
+use core.math.scalar as math
+use core.math.matrix as matrix
+use core.math.crypto.lattice.flatter
+use core.math.crypto.lattice.lll as lllcore
+use core.str (atof)
+use core.os.clock (ticks)
+use core.os.prim (env)
 
 fn _cvp_set_fields(dict out, list fields) dict {
    mut i = 0
@@ -2041,23 +2041,6 @@ fn _cvp_beam_enabled() bool {
    is_str(v) && (v == "1" || v == "true" || v == "yes")
 }
 
-fn _cvp_beam_push(list states, list cand, int width) list {
-   if states.len < width { return states.append(cand) }
-   mut worst_i = 0
-   mut worst = _cvp_float(states[0][0])
-   mut i = 1
-   while i < states.len {
-      def cost = _cvp_float(states[i][0])
-      if cost > worst {
-         worst = cost
-         worst_i = i
-      }
-      i += 1
-   }
-   if _cvp_float(cand[0]) < worst { states[worst_i] = cand }
-   states
-}
-
 fn _cvp_gso_beam_report(list basis, list target, list seed, any seed_norm, int max_nodes) dict {
    def n = basis.len
    mut out = dict(14)
@@ -2070,17 +2053,18 @@ fn _cvp_gso_beam_report(list basis, list target, list seed, any seed_norm, int m
    def coeff_cap = _cvp_beam_bound()
    def gso = _cvp_gso_mu_profile(basis)
    def coords = _cvp_gso_target_coords(target, gso)
-   mut states = [[0.0, _zero_vec(n)]]
+   mut states = [_zero_vec(n)]
+   mut costs = [0.0]
    mut nodes = 0
    mut hit_limit = false
    mut idx = n - 1
    while idx >= 0 && !hit_limit {
       mut next_states = []
+      mut next_costs = []
       mut si = 0
       while si < states.len && !hit_limit {
-         def st = states[si]
-         def coeffs = st[1]
-         def partial = _cvp_float(st[0])
+         def coeffs = states[si]
+         def partial = _cvp_float(costs[si])
          def norm_i = max(0.000001, _cvp_float(_at(gso.get("norms_sq", []), idx, Z(0))))
          def center = _cvp_center_tail(idx, coeffs, coords, gso.get("mu"), n)
          def bound = min(coeff_cap, int(math.floor(math.sqrt(max(0.0, _cvp_float(seed_norm) - partial) / norm_i))) + 1)
@@ -2093,7 +2077,26 @@ fn _cvp_gso_beam_report(list basis, list target, list seed, any seed_norm, int m
             def cost = partial + norm_i * delta * delta
             if cost <= _cvp_float(seed_norm) {
                def next_coeffs = coeffs.set(idx, c)
-               next_states = _cvp_beam_push(next_states, [cost, next_coeffs], width)
+               if next_states.len < width {
+                  next_states = next_states.append(next_coeffs)
+                  next_costs = next_costs.append(cost)
+               } else {
+                  mut worst_i = 0
+                  mut worst = _cvp_float(next_costs[0])
+                  mut wi = 1
+                  while wi < next_costs.len {
+                     def candidate_cost = _cvp_float(next_costs[wi])
+                     if candidate_cost > worst {
+                        worst = candidate_cost
+                        worst_i = wi
+                     }
+                     wi += 1
+                  }
+                  if cost < worst {
+                     next_states[worst_i] = next_coeffs
+                     next_costs[worst_i] = cost
+                  }
+               }
                nodes += 1
                if nodes >= max_nodes { hit_limit = true }
             }
@@ -2101,7 +2104,12 @@ fn _cvp_gso_beam_report(list basis, list target, list seed, any seed_norm, int m
          }
          si += 1
       }
-      if next_states.len == 0 { hit_limit = true } else { states = next_states }
+      if next_states.len == 0 {
+         hit_limit = true
+      } else {
+         states = next_states
+         costs = next_costs
+      }
       idx -= 1
    }
    mut best_v = seed
@@ -2109,7 +2117,7 @@ fn _cvp_gso_beam_report(list basis, list target, list seed, any seed_norm, int m
    mut best_coeffs = _zero_vec(n)
    mut i = 0
    while i < states.len {
-      def coeffs = states[i][1]
+      def coeffs = states[i]
       def v = _cvp_center_vector(basis, coeffs, target.len)
       def nr = _cvp_distance_sq(v, target)
       if nr < best_norm {
@@ -3388,5 +3396,5 @@ fn mod_arc_solve_range(any A, any M, any L, any R, any S, any E, int max_solutio
       ai += 1
    }
    assert(arc_ok, "modular arc solver results satisfy interval")
-   print("✓ std.math.crypto.lattice.cvp self-test passed")
+   print("✓ core.math.crypto.lattice.cvp self-test passed")
 }

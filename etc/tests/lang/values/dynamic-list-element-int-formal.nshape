@@ -1,0 +1,29 @@
+shape test_dynamic_list_element_int_formal {
+  family "runtime/values"
+  generator "embedded"
+  features ["ny", "test", "native", "regression"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+fn guarded_div(int numerator, int denominator) int {
+   if denominator != 0 { numerator / denominator } else { 17 }
+}
+
+fn run() int {
+   def data = [3, 0, -2, 5, 0, 7, 1, -4]
+   mut acc = 0
+   mut i = 0
+   while i < 8 {
+      acc += guarded_div(120000, data[i])
+      i += 1
+   }
+   acc
+}
+
+assert(run() == 111176, "dynamic list elements decode at int formals")
+print("ok dynamic list element int formal")
+NY
+}

@@ -1,7 +1,7 @@
 ;; Keywords: elf machine symbols segments permissions
 ;; Stable ELF classification helpers shared by decompiler passes.
-module std.os.rev.decomp.elf_types(machine, file_type, symbol_bind, symbol_type, segment_perms)
-use std.core
+module core.os.rev.decomp.elf_types(machine, file_type, symbol_bind, symbol_type, segment_perms)
+use core
 
 fn machine(int id) str {
    case id {
@@ -52,5 +52,5 @@ fn segment_perms(int flags) str {
 #main {
    assert(machine(62) == "x86_64" && file_type(2) == "executable", "ELF classifications")
    assert(symbol_bind(0x20) == "weak" && segment_perms(5) == "r-x", "ELF metadata")
-   print("✓ std.os.rev.decomp.elf_types self-test passed")
+   print("✓ core.os.rev.decomp.elf_types self-test passed")
 }

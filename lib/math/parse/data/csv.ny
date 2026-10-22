@@ -3,11 +3,11 @@
 ;; Reference:
 ;; - https://www.rfc-editor.org/rfc/rfc4180.html
 ;; References:
-;; - std.math.parse.data
-;; - std.math.parse
-module std.math.parse.data.csv(decode, encode)
-use std.core
-use std.core.str as str
+;; - core.math.parse.data
+;; - core.math.parse
+module core.math.parse.data.csv(decode, encode)
+use core
+use core.str as str
 
 fn decode(any data, str sep=",") list {
    "Decodes a CSV string into a list of lists."
@@ -119,5 +119,5 @@ fn encode(list rows, str sep=",") str {
    def out = encode([["a", "b,c"], ["quote", "x\"y"]])
    assert(str.str_contains(out, "\"b,c\""), "csv quotes separator")
    assert(str.str_contains(out, "\"x\"\"y\""), "csv escapes quote")
-   print("✓ std.math.parse.data.csv self-test passed")
+   print("✓ core.math.parse.data.csv self-test passed")
 }

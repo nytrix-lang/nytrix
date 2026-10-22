@@ -1,0 +1,41 @@
+shape cps_transform_unary_preserves_callback_effects {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "higher-order", "callback", "cps", "transform"]
+  flags_matrix "--effect-require-known"
+  expect compile_fail
+  expect_message "declared @effects(alloc) but inferred effects=io|alloc"
+  source ny <<'SRC'
+use core.cps as cps
+
+@effects(alloc)
+fn transformed_unary() int {
+  def transformed = cps.cps_transform_unary(fn(value) {
+    print("unary transform")
+    value + 1
+  })
+  transformed(41, fn(value) { value })
+}
+SRC
+}
+
+shape cps_transform_binary_preserves_callback_effects {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "higher-order", "callback", "cps", "transform"]
+  flags_matrix "--effect-require-known"
+  expect compile_fail
+  expect_message "declared @effects(alloc) but inferred effects=io|alloc"
+  source ny <<'SRC'
+use core.cps as cps
+
+@effects(alloc)
+fn transformed_binary() int {
+  def transformed = cps.cps_transform_binary(fn(left, right) {
+    print("binary transform")
+    left + right
+  })
+  transformed(20, 22, fn(value) { value })
+}
+SRC
+}

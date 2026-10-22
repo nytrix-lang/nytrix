@@ -1,0 +1,129 @@
+shape codegen_default_values {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "codegen", "reflection", "layout"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-only; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.compiler.codegen (defaults_for, default_for, default_ctor_for,
+                      load_fields_for)
+
+fn computed_default() int { return 29 }
+
+layout GeneratedDefaults {
+   i32 count = 37
+   bool enabled = true
+   int computed = computed_default()
+   f32 narrow_scale = 3.5
+   i32 implicit_count
+   bool implicit_enabled
+   f32 implicit_narrow_scale
+   f64 scale
+   str label
+}
+layout record LegacyDefaults derive(default, load) {
+   i32 count = 37
+   bool enabled = true
+   int computed = computed_default()
+   f32 narrow_scale = 3.5
+   i32 implicit_count
+   bool implicit_enabled
+   f32 implicit_narrow_scale
+   f64 scale
+   str label
+}
+layout GeneratedDefaultCtor {
+   i32 count = 7
+   bool enabled = true
+   f64 scale
+}
+layout record LegacyDefaultCtor derive(default, load) {
+   i32 count = 7
+   bool enabled = true
+   f64 scale
+}
+comptime emit defaults_for(GeneratedDefaults)
+comptime emit default_for(GeneratedDefaults)
+comptime emit load_fields_for(GeneratedDefaults)
+comptime emit default_ctor_for(GeneratedDefaultCtor)
+comptime emit load_fields_for(GeneratedDefaultCtor)
+comptime template default_expr_absence_for(Layout) {
+   fn ${Layout}_implicit_default_syntax_is_nil() bool {
+      mut result = true
+      comptime fields(Layout) as field {
+         emit if !field.has_default {
+            result = result && field.default_expr == nil
+         }
+      }
+      result
+   }
+}
+comptime emit default_expr_absence_for(GeneratedDefaults)
+def ptr legacy = LegacyDefaults()
+def ptr generated_default = GeneratedDefaults()
+def ptr legacy_ctor = LegacyDefaultCtor()
+def ptr generated_ctor = GeneratedDefaultCtor()
+def ptr generated_override = GeneratedDefaultCtor(11, false, 2.5)
+def values = GeneratedDefaults_defaults()
+assert(GeneratedDefaults_implicit_default_syntax_is_nil(),
+       "field.default_expr uses nil for fields without explicit syntax")
+assert(values.get("count") == LegacyDefaults_load_count(legacy),
+       "Ny default generator preserves explicit integer defaults")
+assert(values.get("enabled") == LegacyDefaults_load_enabled(legacy),
+       "Ny default generator preserves explicit boolean defaults")
+assert(values.get("computed") == LegacyDefaults_load_computed(legacy),
+       "Ny default generator preserves computed initializer expressions")
+assert(to_str(values.get("narrow_scale")) == "3.5" &&
+       to_str(LegacyDefaults_load_narrow_scale(legacy)) == "3.5",
+       "Ny default generator preserves explicit f32 defaults")
+assert(values.get("implicit_enabled") ==
+          LegacyDefaults_load_implicit_enabled(legacy),
+       "Ny default generator preserves implicit boolean defaults")
+assert(values.get("implicit_count") == LegacyDefaults_load_implicit_count(legacy),
+       "Ny default generator preserves implicit integer defaults")
+assert(to_str(values.get("implicit_narrow_scale")) == "0" &&
+       to_str(LegacyDefaults_load_implicit_narrow_scale(legacy)) == "0",
+       "Ny default generator preserves implicit f32 defaults")
+assert(values.get("scale") == LegacyDefaults_load_scale(legacy),
+       "Ny default generator preserves implicit float defaults")
+assert(values.get("label") == LegacyDefaults_load_label(legacy),
+       "Ny default generator preserves implicit string defaults")
+assert(GeneratedDefaults_load_count(generated_default) ==
+          LegacyDefaults_load_count(legacy) &&
+       GeneratedDefaults_load_enabled(generated_default) ==
+          LegacyDefaults_load_enabled(legacy) &&
+       GeneratedDefaults_load_computed(generated_default) ==
+          LegacyDefaults_load_computed(legacy) &&
+       GeneratedDefaults_load_narrow_scale(generated_default) ==
+          LegacyDefaults_load_narrow_scale(legacy) &&
+       GeneratedDefaults_load_implicit_count(generated_default) ==
+          LegacyDefaults_load_implicit_count(legacy) &&
+       GeneratedDefaults_load_implicit_enabled(generated_default) ==
+          LegacyDefaults_load_implicit_enabled(legacy) &&
+       GeneratedDefaults_load_implicit_narrow_scale(generated_default) ==
+          LegacyDefaults_load_implicit_narrow_scale(legacy) &&
+       GeneratedDefaults_load_scale(generated_default) ==
+          LegacyDefaults_load_scale(legacy) &&
+       GeneratedDefaults_load_label(generated_default) ==
+          LegacyDefaults_load_label(legacy),
+       "Ny default constructor matches the C-derived field defaults")
+assert(GeneratedDefaultCtor_load_count(generated_ctor) ==
+          LegacyDefaultCtor_load_count(legacy_ctor) &&
+       GeneratedDefaultCtor_load_enabled(generated_ctor) ==
+          LegacyDefaultCtor_load_enabled(legacy_ctor) &&
+       GeneratedDefaultCtor_load_scale(generated_ctor) ==
+          LegacyDefaultCtor_load_scale(legacy_ctor),
+       "field-spliced constructor defaults match C derive(default)")
+assert(GeneratedDefaultCtor_load_count(generated_override) == 11 &&
+       !GeneratedDefaultCtor_load_enabled(generated_override) &&
+       GeneratedDefaultCtor_load_scale(generated_override) == 2.5,
+       "field-spliced constructor parameters override their defaults")
+free(generated_default)
+free(legacy)
+free(generated_ctor)
+free(generated_override)
+free(legacy_ctor)
+NY
+}

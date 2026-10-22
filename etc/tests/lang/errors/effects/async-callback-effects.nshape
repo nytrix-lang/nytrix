@@ -1,0 +1,94 @@
+shape async_task_composes_worker_effects {
+  family "typing/effects"
+  generator "regression"
+  features ["ny" "test" "typing" "effects" "higher-order" "callback" "async"]
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known"
+  expect compile_fail
+  expect_message "declared @effects(alloc) but inferred effects=io|alloc|thread"
+  source ny <<'NY'
+use core
+use core.os.async as tasks
+use core.os.thread as thread
+@effects(alloc)
+fn async_task_with_thread_worker() any {
+   tasks.Task(fn() { thread.thread_spawn(fn() { 0 }) })
+}
+async_task_with_thread_worker()
+NY
+}
+
+shape async_future_composes_worker_effects {
+  family "typing/effects"
+  generator "regression"
+  features ["ny" "test" "typing" "effects" "higher-order" "callback" "async"]
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known"
+  expect compile_fail
+  expect_message "declared @effects(alloc) but inferred effects=io|alloc|thread"
+  source ny <<'NY'
+use core
+use core.os.async as tasks
+use core.os.thread as thread
+@effects(alloc)
+fn async_future_with_thread_worker() any {
+   tasks.Future(fn() { thread.thread_spawn(fn() { 0 }) })
+}
+async_future_with_thread_worker()
+NY
+}
+
+shape async_future_lowercase_composes_worker_effects {
+  family "typing/effects"
+  generator "regression"
+  features ["ny" "test" "typing" "effects" "higher-order" "callback" "async"]
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known"
+  expect compile_fail
+  expect_message "declared @effects(alloc) but inferred effects=io|alloc|thread"
+  source ny <<'NY'
+use core
+use core.os.async as tasks
+use core.os.thread as thread
+@effects(alloc)
+fn async_future_with_thread_worker() any {
+   tasks.future(fn() { thread.thread_spawn(fn() { 0 }) })
+}
+async_future_with_thread_worker()
+NY
+}
+
+shape async_alias_composes_worker_effects {
+  family "typing/effects"
+  generator "regression"
+  features ["ny" "test" "typing" "effects" "higher-order" "callback" "async"]
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known"
+  expect compile_fail
+  expect_message "declared @effects(alloc) but inferred effects=io|alloc|thread"
+  source ny <<'NY'
+use core
+use core.os.async as tasks
+use core.os.thread as thread
+@effects(alloc)
+fn async_alias_with_thread_worker() any {
+   tasks.async(fn() { thread.thread_spawn(fn() { 0 }) })
+}
+async_alias_with_thread_worker()
+NY
+}
+
+shape async_detach_composes_worker_effects {
+  family "typing/effects"
+  generator "regression"
+  features ["ny" "test" "typing" "effects" "higher-order" "callback" "async"]
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known"
+  expect compile_fail
+  expect_message "declared @effects(alloc) but inferred effects=io|alloc|thread"
+  source ny <<'NY'
+use core
+use core.os.async as tasks
+use core.os.thread as thread
+@effects(alloc)
+fn async_detach_with_thread_worker() any {
+   tasks.detach(fn() { thread.thread_spawn(fn() { 0 }) })
+}
+async_detach_with_thread_worker()
+NY
+}

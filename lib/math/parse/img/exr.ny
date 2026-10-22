@@ -1,16 +1,17 @@
 ;; Keywords: image exr openexr hdr parse
 ;; OpenEXR image loader implemented in Ny via dynamic FFI.
 ;; References:
-;; - std.math.parse.img
-;; - std.math.parse
-module std.math.parse.img.exr(decode, decode_bytes, load_path, available, last_error, backend_name)
-use std.core
-use std.core.dict_mod
-use std.math
-use std.os
-use std.os.path as ospath
-use std.os.ffi (dlopen_checked, dlsym, RTLD_NOW, RTLD_GLOBAL, call0_ptr, call1, call1_ptr, call3, call4, call5, cstr)
-use std.core.str as str
+;; - core.math.parse.img
+;; - core.math.parse
+module core.math.parse.img.exr(decode, decode_bytes, load_path, available, last_error, backend_name)
+use core
+use core.dict_mod
+use core.math
+use core.os
+use core.os.path as ospath
+use core.os.ffi (dlopen_checked, dlsym, RTLD_NOW, RTLD_GLOBAL, cstr)
+use core.os.ffi as calls
+use core.str as str
 
 def _EXR_PIXEL_SIZE = 8
 def _EXR_MAGIC_0 = 118
@@ -49,7 +50,7 @@ fn backend_name() str {
 
 fn _exr_error_message(str fallback="OpenEXR error") str {
    if _ptr_ImfErrorMessage {
-      def msg_ptr = call0_ptr(_ptr_ImfErrorMessage)
+      def msg_ptr = calls.pointer0(_ptr_ImfErrorMessage)
       if msg_ptr {
          def msg = str.cstr_to_str(msg_ptr)
          if is_str(msg) && msg.len > 0 { return msg }
@@ -156,7 +157,7 @@ fn _alpha_to_u8(any v) int {
 }
 
 fn _cleanup_input(any in_p) int {
-   if in_p && _ptr_ImfCloseInputFile { call1(_ptr_ImfCloseInputFile, in_p) }
+   if in_p && _ptr_ImfCloseInputFile { calls.any1(_ptr_ImfCloseInputFile, in_p) }
    0
 }
 
@@ -175,7 +176,7 @@ fn _read_data_window(any hdr) any {
       if y_max_p { free(y_max_p) }
       return 0
    }
-   call5(_ptr_ImfHeaderDataWindow, hdr, x_min_p, y_min_p, x_max_p, y_max_p)
+   calls.any5(_ptr_ImfHeaderDataWindow, hdr, x_min_p, y_min_p, x_max_p, y_max_p)
    def x_min, y_min = load32(x_min_p, 0), load32(y_min_p, 0)
    def x_max, y_max = load32(x_max_p, 0), load32(y_max_p, 0)
    free(x_min_p, y_min_p, x_max_p, y_max_p)
@@ -189,10 +190,10 @@ fn load_path(any path) any {
    if !file_exists(path) { return _set_error("EXR file not found: " + to_str(path)) }
    if !_exr_load_dyn() { return 0 }
    if !_ensure_half_luts() { return _set_error("out of memory building EXR conversion LUTs") }
-   def in_p = call1_ptr(_ptr_ImfOpenInputFile, cstr(path))
+   def in_p = calls.pointer1(_ptr_ImfOpenInputFile, cstr(path))
    if !in_p { return _set_error(_exr_error_message("failed to open EXR: " + path)) }
    defer { _cleanup_input(in_p) }
-   def hdr = call1_ptr(_ptr_ImfInputHeader, in_p)
+   def hdr = calls.pointer1(_ptr_ImfInputHeader, in_p)
    if !hdr { return _set_error(_exr_error_message("failed to read EXR header: " + path)) }
    def win = _read_data_window(hdr)
    if !win || win.len < 4 { return _set_error("failed to read EXR data window") }
@@ -210,9 +211,9 @@ fn load_path(any path) any {
    defer { free(half_mem) }
    def fb_base = half_mem + lead_px * _EXR_PIXEL_SIZE + 32
    def pix_ptr = fb_base + shift_px * _EXR_PIXEL_SIZE
-   def set_ok = call4(_ptr_ImfInputSetFrameBuffer, in_p, fb_base, 1, w)
+   def set_ok = calls.any4(_ptr_ImfInputSetFrameBuffer, in_p, fb_base, 1, w)
    if int(set_ok) == 0 { return _set_error(_exr_error_message("failed to set EXR framebuffer")) }
-   def read_ok = call3(_ptr_ImfInputReadPixels, in_p, y_min, y_max)
+   def read_ok = calls.any3(_ptr_ImfInputReadPixels, in_p, y_min, y_max)
    if int(read_ok) == 0 { return _set_error(_exr_error_message("failed reading EXR pixels")) }
    def rgba_len = pixel_count * 4
    def rgba_ptr = malloc(rgba_len + 32)

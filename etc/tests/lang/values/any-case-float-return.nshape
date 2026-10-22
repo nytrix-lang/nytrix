@@ -1,0 +1,20 @@
+shape any_case_float_return {
+  family "runtime/values"
+  generator "embedded"
+  features ["ny", "test", "runtime", "abi"]
+  flags_matrix "--native --run; --native-only; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+fn any_case_float(any tag) any {
+  case tag {
+    1 -> 1.25
+    _ -> 0.5
+  }
+}
+
+assert(any_case_float(1) == 1.25, "case tail float is boxed for any return")
+assert(any_case_float(2) == 0.5, "default case tail float is boxed for any return")
+print("ANY_CASE_FLOAT_RETURN_OK")
+NY
+}

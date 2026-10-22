@@ -1,0 +1,41 @@
+shape ownership_allowance_fixed_range_if_reassignment_positive {
+  family "language/ownership"
+  generator "regression"
+  features [ownership allowance fixed-range conditional-reassignment positive]
+  template ny-test-case
+  flags_matrix "--ownership-strict --native --run --nyir-verify; --ownership-strict --native-backend=llvm --jit --jit-engine=mcjit --nyir-verify; --ownership-strict --native-backend=llvm --jit --jit-engine=orc --nyir-verify; --ownership-strict --native-only --nyir-verify"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+@allowance(x, [1,2])
+fn repeat_epoch(bool choose, int x) int {
+  def before = x
+  for index in 0..1 {
+    if choose { x = 7 } else { x = 8 }
+    def during = x
+  }
+  def after = x
+  0
+}
+
+@allowance(y, [0,3])
+fn optional_repeat_epoch(bool choose, int y) int {
+  for index in 0..1 {
+    if choose { y = 7 }
+    def during = y
+  }
+  def after = y
+  0
+}
+
+assert(repeat_epoch(true, 3) == 0,
+       "conditional reassignment validates each fixed-loop allowance epoch")
+assert(repeat_epoch(false, 3) == 0,
+       "both conditional paths satisfy the same allowance interval")
+assert(optional_repeat_epoch(true, 3) == 0,
+       "one-sided branch reassignments satisfy the bounded loop interval")
+assert(optional_repeat_epoch(false, 3) == 0,
+       "the unmodified loop path is included in the allowance join")
+NY
+}

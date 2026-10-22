@@ -1,0 +1,798 @@
+shape matching_capability_rows_are_accepted {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "capability", "row"]
+  template ny-test-case
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+@effects(cap(read))
+fn read_resource() int {
+  1
+}
+
+@effects(cap(read))
+fn forward_read() int {
+  read_resource()
+}
+
+assert(forward_read() == 1, "matching named effect row is accepted")
+NY
+}
+
+shape maximum_capability_effect_name_is_accepted {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "capability", "row", "boundary"]
+  template ny-test-case
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+@effects(cap(abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789a))
+fn maximum_named_effect() int {
+  7
+}
+
+@effects(cap(abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789a))
+fn forward_maximum_named_effect() int {
+  maximum_named_effect()
+}
+
+assert(forward_maximum_named_effect() == 7, "63-byte capability identity survives forwarding")
+NY
+}
+
+shape mismatched_capability_rows_are_rejected {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "capability", "row", "negative"]
+  template ny-test-case
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_fail
+  expect_message "effect contract violation"
+  source ny <<'NY'
+use core
+
+@effects(cap(read))
+fn read_resource() int {
+  1
+}
+
+@effects(cap(write))
+fn misdeclared() int {
+  read_resource()
+}
+
+misdeclared()
+NY
+}
+
+shape qualified_module_effect_rows_require_their_module_owner {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "capability", "modules", "negative"]
+  template ny-test-case
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_fail
+  expect_message "effect contract violation"
+  source ny <<'NY'
+module project.math(read_resource) {
+  @effects(cap(read))
+  fn read_resource() int {
+    7
+  }
+}
+
+@effects(cap(read))
+fn underdeclared() int {
+  project.math.read_resource()
+}
+
+underdeclared()
+NY
+}
+
+shape module_owned_capability_rows_match_qualified_contracts {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "capability", "modules"]
+  template ny-test-case
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+module project.storage(read_resource) {
+  @effects(cap(read))
+  fn read_resource() int {
+    9
+  }
+}
+
+@effects(cap("project.storage.read"))
+fn matching_module_owner() int {
+  project.storage.read_resource()
+}
+
+assert(matching_module_owner() == 9, "module-owned capability identity resolves")
+NY
+}
+
+shape module_owned_capability_rows_survive_callback_aliases {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "capability", "modules", "callback", "alias"]
+  template ny-test-case
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+module project.storage(read_resource) {
+  @effects(cap(read))
+  fn read_resource() int {
+    9
+  }
+}
+
+@effects(cap("project.storage.read"))
+fn matching_module_callback_owner() int {
+  def reader = project.storage.read_resource
+  reader()
+}
+
+assert(matching_module_callback_owner() == 9, "module-owned effect identity survives callback aliasing")
+NY
+}
+
+shape nested_module_function_effect_rows_use_lexical_call_names {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "capability", "modules", "nested"]
+  template ny-test-case
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+module project.storage(read_resource, nested_forward) {
+  @effects(cap(read))
+  fn read_resource() int {
+    9
+  }
+
+  @effects(cap(read))
+  fn nested_forward() int {
+    @effects(cap(read))
+    fn local_read() int {
+      read_resource()
+    }
+    local_read()
+  }
+}
+
+@effects(cap("project.storage.read"))
+fn matching_nested_module_owner() int {
+  project.storage.nested_forward()
+}
+
+assert(matching_nested_module_owner() == 9, "nested module effect rows retain lexical calls")
+NY
+}
+
+shape nested_module_function_cannot_underdeclare_sibling_effects {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "capability", "modules", "nested", "negative"]
+  template ny-test-case
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_fail
+  expect_message "effect contract violation"
+  source ny <<'NY'
+module project.storage(read_resource, nested_forward) {
+  @effects(cap(read))
+  fn read_resource() int {
+    9
+  }
+
+  @effects(cap(read))
+  fn nested_forward() int {
+    @effects(none)
+    fn local_read() int {
+      read_resource()
+    }
+    local_read()
+  }
+}
+
+@effects(cap("project.storage.read"))
+fn underdeclared_nested_owner() int {
+  project.storage.nested_forward()
+}
+
+underdeclared_nested_owner()
+NY
+}
+
+shape custom_effects_do_not_disappear_through_inferred_helpers {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "capability", "row", "negative", "transitive"]
+  template ny-test-case
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_fail
+  expect_message "effect contract violation"
+  source ny <<'NY'
+use core
+
+@effects(cap(read))
+fn read_resource() int {
+  1
+}
+
+fn inferred_helper() int {
+  read_resource()
+}
+
+@effects(none)
+fn underdeclared() int {
+  inferred_helper()
+}
+
+underdeclared()
+NY
+}
+
+shape custom_effect_rows_substitute_through_callback_parameters {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "capability", "row", "callback"]
+  template ny-test-case
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+@effects(cap(read))
+fn read_resource() int {
+  1
+}
+
+@effects(e)
+fn run_callback(fnptr callback) int {
+  callback()
+}
+
+@effects(cap(read), e)
+fn matching_callback_row() int {
+  def reader = read_resource
+  run_callback(reader)
+}
+
+matching_callback_row()
+NY
+}
+
+shape custom_callback_rows_cannot_escape_narrow_contracts {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "capability", "row", "callback", "negative"]
+  template ny-test-case
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_fail
+  expect_message "effect contract violation"
+  source ny <<'NY'
+use core
+
+@effects(cap(read))
+fn read_resource() int {
+  1
+}
+
+@effects(e)
+fn run_callback(fnptr callback) int {
+  callback()
+}
+
+@effects(none)
+fn underdeclared_callback_row() int {
+  def reader = read_resource
+  run_callback(reader)
+}
+
+underdeclared_callback_row()
+NY
+}
+
+shape custom_callback_aliases_cannot_escape_narrow_contracts {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "capability", "row", "alias", "negative"]
+  template ny-test-case
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_fail
+  expect_message "effect contract violation"
+  source ny <<'NY'
+use core
+
+@effects(cap(read))
+fn read_resource() int {
+  1
+}
+
+@effects(none)
+fn underdeclared_alias_call() int {
+  def reader = read_resource
+  reader()
+}
+
+underdeclared_alias_call()
+NY
+}
+
+shape divergent_custom_callback_alias_rows_fail_closed {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "capability", "row", "callback", "control-flow", "negative"]
+  template ny-test-case
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_fail
+  expect_message "effect contract violation"
+  source ny <<'NY'
+use core
+
+@effects(cap(read))
+fn read_resource() int {
+  1
+}
+
+@effects(cap(write))
+fn write_resource() int {
+  2
+}
+
+@effects(e)
+fn run_callback(fnptr callback) int {
+  callback()
+}
+
+@effects(none)
+fn underdeclared_branch(bool choose_write) int {
+  mut callback = read_resource
+  if choose_write {
+    callback = write_resource
+  }
+  run_callback(callback)
+}
+
+underdeclared_branch(false)
+NY
+}
+
+shape nested_custom_effect_calls_respect_the_caller_row {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "capability", "row", "nested", "negative"]
+  template ny-test-case
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_fail
+  expect_message "effect contract violation"
+  source ny <<'NY'
+use core
+
+@effects(none)
+fn underdeclared_nested_effect() int {
+  @effects(cap(read))
+  fn read_resource() int {
+    1
+  }
+  read_resource()
+}
+
+underdeclared_nested_effect()
+NY
+}
+
+shape same_custom_callback_rows_survive_control_flow_joins {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "capability", "row", "callback", "control-flow"]
+  template ny-test-case
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+@effects(cap(read))
+fn read_resource() int {
+  1
+}
+
+@effects(e)
+fn run_callback(fnptr callback) int {
+  callback()
+}
+
+@effects(cap(read))
+fn branch_alias_same_callback_row(bool choose_other) int {
+  mut callback = read_resource
+  if choose_other {
+    callback = read_resource
+  }
+  run_callback(callback)
+}
+
+;; The declaration is effect-checked even though mutable fnptr invocation is
+;; not the runtime behavior this row-analysis regression exercises.
+assert(read_resource() == 1, "same custom callback rows survive branch joins")
+NY
+}
+
+shape underdeclared_custom_callback_row_survives_branch_join {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "capability", "row", "callback", "control-flow", "negative"]
+  template ny-test-case
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_fail
+  expect_message "effect contract violation"
+  source ny <<'NY'
+use core
+
+@effects(cap(read))
+fn read_resource() int {
+  1
+}
+
+@effects(e)
+fn run_callback(fnptr callback) int {
+  callback()
+}
+
+@effects(cap(write))
+fn underdeclared_branch_alias(bool choose_other) int {
+  mut callback = read_resource
+  if choose_other {
+    callback = read_resource
+  }
+  run_callback(callback)
+}
+
+underdeclared_branch_alias(false)
+NY
+}
+
+shape divergent_custom_callback_rows_union_at_if_join {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "capability", "row", "callback", "control-flow"]
+  template ny-test-case
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+@effects(cap(read))
+fn read_resource() int {
+  1
+}
+
+@effects(cap(write))
+fn write_resource() int {
+  2
+}
+
+@effects(e)
+fn run_callback(fnptr callback) int {
+  callback()
+}
+
+@effects(cap(read), cap(write))
+fn branch_row_union(bool choose_write) int {
+  mut callback = read_resource
+  if choose_write {
+    callback = write_resource
+  }
+  run_callback(callback)
+}
+
+assert(read_resource() == 1, "branch row union preserves normal execution")
+NY
+}
+
+shape divergent_custom_callback_rows_union_at_loop_and_match_joins {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "capability", "row", "callback", "control-flow"]
+  template ny-test-case
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+@effects(cap(read))
+fn read_resource() int {
+  1
+}
+
+@effects(cap(write))
+fn write_resource() int {
+  2
+}
+
+@effects(e)
+fn run_callback(fnptr callback) int {
+  callback()
+}
+
+@effects(cap(read), cap(write))
+fn loop_row_union() int {
+  mut callback = read_resource
+  for index in 0..1 {
+    callback = write_resource
+  }
+  run_callback(callback)
+}
+
+@effects(cap(read), cap(write))
+fn match_row_union(bool choose_write) int {
+  mut callback = read_resource
+  match choose_write {
+    true -> { callback = write_resource }
+    else { callback = read_resource }
+  }
+  run_callback(callback)
+}
+
+assert(read_resource() == 1, "loop and match joins retain both callback rows")
+NY
+}
+
+shape nested_custom_effect_contract_is_accepted_by_matching_caller {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "capability", "row", "nested"]
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+@effects(io, cap(read))
+fn outer() int {
+  @effects(io, cap(read))
+  fn inner() int {
+    7
+  }
+  inner()
+}
+
+assert(outer() == 7, "nested custom effect contract is accepted")
+NY
+}
+
+shape nested_custom_effect_row_survives_local_callable_alias {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "capability", "row", "nested", "callback", "alias"]
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+@effects(cap(read))
+fn outer() int {
+  @effects(cap(read))
+  fn inner() int {
+    7
+  }
+  def callback = inner
+  callback()
+}
+
+assert(outer() == 7, "nested capability row survives local aliasing")
+NY
+}
+
+shape nested_custom_effect_row_cannot_escape_through_local_alias {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "capability", "row", "nested", "callback", "alias", "negative"]
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_fail
+  expect_message "effect contract violation"
+  source ny <<'NY'
+use core
+
+@effects(none)
+fn outer() int {
+  @effects(cap(read))
+  fn inner() int {
+    7
+  }
+  def callback = inner
+  callback()
+}
+
+outer()
+NY
+}
+
+shape nested_open_effect_variable_remains_fail_closed {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "row", "nested", "negative"]
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_fail
+  expect_message "effect contract violation"
+  source ny <<'NY'
+use core
+
+@effects(none)
+fn outer() int {
+  @effects(e)
+  fn inner() int {
+    7
+  }
+  inner()
+}
+
+outer()
+NY
+}
+
+shape returned_callback_containers_union_branch_effect_rows {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "capability", "row", "callback", "container", "control-flow"]
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+@effects(cap(read))
+fn read_resource() int {
+  1
+}
+
+@effects(cap(write))
+fn write_resource() int {
+  2
+}
+
+fn choose_callback(bool choose_write) tuple {
+  if choose_write {
+    return (write_resource, read_resource)
+  }
+  return (read_resource, write_resource)
+}
+
+@effects(e)
+fn run_callback(fnptr callback) int {
+  callback()
+}
+
+@effects(alloc, cap(read), cap(write))
+fn invoke_returned_callback(bool choose_write, int index) int {
+  def callbacks = choose_callback(choose_write)
+  run_callback(callbacks[index])
+}
+
+0
+NY
+}
+
+shape returned_callback_container_cannot_escape_narrow_effect_row {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "capability", "row", "callback", "container", "control-flow", "negative"]
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_fail
+  expect_message "effect contract violation"
+  source ny <<'NY'
+use core
+
+@effects(cap(read))
+fn read_resource() int {
+  1
+}
+
+@effects(cap(write))
+fn write_resource() int {
+  2
+}
+
+fn choose_callback(bool choose_write) tuple {
+  if choose_write {
+    return (write_resource, read_resource)
+  }
+  return (read_resource, write_resource)
+}
+
+@effects(e)
+fn run_callback(fnptr callback) int {
+  callback()
+}
+
+@effects(alloc, cap(read))
+fn invoke_returned_callback(bool choose_write, int index) int {
+  def callbacks = choose_callback(choose_write)
+  run_callback(callbacks[index])
+}
+
+invoke_returned_callback(false)
+NY
+}
+
+shape ternary_callback_closure_rows_are_joined {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "capability", "row", "callback", "closure", "control-flow"]
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+@effects(cap(read))
+fn read_resource() int {
+  1
+}
+
+@effects(cap(write))
+fn write_resource() int {
+  2
+}
+
+@effects(cap(read), cap(write))
+fn invoke_selected_callback(bool choose_write) int {
+  def callback = choose_write ? write_resource : read_resource
+  callback()
+}
+@effects(cap(read), cap(write))
+fn invoke_literal_selected_callback(bool choose_write) int {
+  def callback =
+      choose_write ? (true ? write_resource : read_resource) : read_resource
+  callback()
+}
+
+assert(invoke_selected_callback(false) == 1, "ternary callback keeps read row")
+assert(invoke_selected_callback(true) == 2, "ternary callback keeps write row")
+assert(invoke_literal_selected_callback(false) == 1,
+       "literal ternary callback keeps the selected read ABI")
+assert(invoke_literal_selected_callback(true) == 2,
+       "nested literal ternary callback keeps the selected write ABI")
+NY
+}
+
+shape ternary_callback_closure_underdeclared_row_is_rejected {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "capability", "row", "callback", "closure", "negative"]
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_fail
+  expect_message "effect contract violation"
+  source ny <<'NY'
+use core
+
+@effects(cap(read))
+fn read_resource() int {
+  1
+}
+
+@effects(cap(write))
+fn write_resource() int {
+  2
+}
+
+@effects(cap(read))
+fn invoke_selected_callback(bool choose_write) int {
+  def callback = choose_write ? write_resource : read_resource
+  callback()
+}
+
+invoke_selected_callback(false)
+NY
+}

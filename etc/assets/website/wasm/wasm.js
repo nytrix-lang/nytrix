@@ -679,7 +679,7 @@
     } catch (_) { setStatus("webglStatus", "WebGL lost", "warn"); }
   }
 
-  // Mirror of rt_runtime_tag_raw_name (src/code/runtime/shared.h) — maps Ny type name strings to
+  // Mirror of rt_runtime_tag_raw_name (src/code/lang/runtime/shared.h) — maps Ny type name strings to
   // their integer tag values used by the runtime. Must stay in sync with shared.h constants.
   function nyRuntimeTagRaw(name) {
     switch (name) {
@@ -910,6 +910,33 @@
   }
 
   function makeWebImports(meta, memoryRef) {
+    globalThis.__nyWebDicts ||= Object.create(null);
+    globalThis.__nyWebTbufs ||= Object.create(null);
+    globalThis.__nyWebNextDict ||= 0x70000000;
+    const cString = (value) => {
+      const p = ny.ptr(value);
+      if (p <= 0) return "";
+      const bytes = ny.u8(memoryRef);
+      let end = p;
+      while (end < bytes.length && bytes[end] !== 0) end++;
+      return dec.decode(bytes.subarray(p, end));
+    };
+    const webObjectTags = new Set([100n, 101n, 102n, 103n, 104n, 105n, 106n,
+      107n, 108n, 110n, 111n, 120n, 121n, 122n, 130n, 131n, 150n]);
+    const isManagedWebPointer = (value) => {
+      const p = ny.ptr(value);
+      if (globalThis.__nyWebDicts[p] || globalThis.__nyWebTbufs[p]) return true;
+      const memory = ny.u8(memoryRef);
+      if (!Number.isSafeInteger(p) || p < 16 || p + 8 > memory.byteLength) return false;
+      return webObjectTags.has(ny.tagof(memoryRef, value));
+    };
+    const anyToI64 = (value) => {
+      if (typeof value !== "bigint") return 0n;
+      const v = BigInt.asIntN(64, value);
+      if ((v & 1n) === 1n) return v >> 1n;
+      if (isManagedWebPointer(v)) return v;
+      return v;
+    };
     return {
       ny_web_canvas_width: () => ny.tag(stage.width),
       ny_web_canvas_height: () => ny.tag(stage.height),
@@ -996,12 +1023,12 @@
       return BigInt(out);
     };
     return {
-      "std.os.ui.render.init_window": () => ny.tag(1),
-      "std.os.ui.render.close_window": () => { asyncifyRef.closed = true; return NY_TRUE; },
-      "std.os.ui.window.set_window_fullscreen": (_win, enabled) => bool(requestFullscreen(ny.int(enabled) !== 0)),
-      "std.os.ui.window.is_window_fullscreen": () => bool(fullscreenActive()),
-      "std.os.ui.window.set_input_exclusive": (_win, enabled) => bool(requestPointerLock(ny.int(enabled) !== 0)),
-      "std.os.ui.render.font_load_first": (paths, size = 0n) => {
+      "core.os.ui.render.init_window": () => ny.tag(1),
+      "core.os.ui.render.close_window": () => { asyncifyRef.closed = true; return NY_TRUE; },
+      "core.os.ui.window.set_window_fullscreen": (_win, enabled) => bool(requestFullscreen(ny.int(enabled) !== 0)),
+      "core.os.ui.window.is_window_fullscreen": () => bool(fullscreenActive()),
+      "core.os.ui.window.set_input_exclusive": (_win, enabled) => bool(requestPointerLock(ny.int(enabled) !== 0)),
+      "core.os.ui.render.font_load_first": (paths, size = 0n) => {
         const count = ny.listLen(memoryRef, paths);
         for (let i = 0; i < count; i++) {
           const path = ny.text(memoryRef, ny.listGet(memoryRef, paths, ny.tag(i), 0n), 0);
@@ -1013,68 +1040,68 @@
         }
         return ny.tag(0);
       },
-      "std.os.ui.render.window_should_close": () => bool(asyncifyRef.closed),
-      "std.os.ui.window.set_should_close": () => { asyncifyRef.closed = true; return 0n; },
-      "std.os.ui.window.close": () => { asyncifyRef.closed = true; return NY_TRUE; },
-      "std.os.ui.window.input.key_down": (key) => bool(input.codes.has(ny.int(key))),
-      "std.os.ui.window.input.key_pressed": (key) => {
+      "core.os.ui.render.window_should_close": () => bool(asyncifyRef.closed),
+      "core.os.ui.window.set_should_close": () => { asyncifyRef.closed = true; return 0n; },
+      "core.os.ui.window.close": () => { asyncifyRef.closed = true; return NY_TRUE; },
+      "core.os.ui.window.input.key_down": (key) => bool(input.codes.has(ny.int(key))),
+      "core.os.ui.window.input.key_pressed": (key) => {
         const code = ny.int(key);
         const pressed = input.pressed.has(code);
         if (pressed) input.pressed.delete(code);
         return bool(pressed);
       },
-      "std.os.ui.window.input.mouse_pos": () => list2f(input.mouse[0], input.mouse[1]),
-      "std.os.ui.window.input.mouse_button_down": (button = 0n) => bool(input.buttons.has(ny.int(button))),
-      "std.os.ui.window.input.mouse_button_pressed": (button = 0n) => {
+      "core.os.ui.window.input.mouse_pos": () => list2f(input.mouse[0], input.mouse[1]),
+      "core.os.ui.window.input.mouse_button_down": (button = 0n) => bool(input.buttons.has(ny.int(button))),
+      "core.os.ui.window.input.mouse_button_pressed": (button = 0n) => {
         const code = ny.int(button);
         const pressed = input.pressedButtons.has(code);
         if (pressed) input.pressedButtons.delete(code);
         return bool(pressed);
       },
-      "std.os.ui.window.scroll_pos": () => list2f(input.scroll[0], input.scroll[1]),
-      "std.os.ui.window.input.touch_count": () => ny.tag(input.touches.size),
-      "std.os.ui.window.input.touch_pos": (index = 0n) => {
+      "core.os.ui.window.scroll_pos": () => list2f(input.scroll[0], input.scroll[1]),
+      "core.os.ui.window.input.touch_count": () => ny.tag(input.touches.size),
+      "core.os.ui.window.input.touch_pos": (index = 0n) => {
         const i = ny.int(index);
         if (i < 0 || i >= input.touches.size) return list2f(0, 0);
         const pos = Array.from(input.touches.values())[i];
         return list2f(pos[0], pos[1]);
       },
-      "std.os.ui.window.input.touch_active": (index = 0n) => bool(ny.int(index) >= 0 && ny.int(index) < input.touches.size),
-      "std.os.ui.window.gamepad_count": () => ny.tag(readGamepads().length),
-      "std.os.ui.window.gamepad_connected": (pad = 0n) => bool(ny.int(pad) >= 0 && ny.int(pad) < readGamepads().length),
-      "std.os.ui.window.gamepad_name": (pad = 0n) => {
+      "core.os.ui.window.input.touch_active": (index = 0n) => bool(ny.int(index) >= 0 && ny.int(index) < input.touches.size),
+      "core.os.ui.window.gamepad_count": () => ny.tag(readGamepads().length),
+      "core.os.ui.window.gamepad_connected": (pad = 0n) => bool(ny.int(pad) >= 0 && ny.int(pad) < readGamepads().length),
+      "core.os.ui.window.gamepad_name": (pad = 0n) => {
         const p = readGamepads()[ny.int(pad)];
         return p ? ny.string(memoryRef, String(p.id || "")) : ny.string(memoryRef, "");
       },
-      "std.os.ui.window.gamepad_guid": (pad = 0n) => {
+      "core.os.ui.window.gamepad_guid": (pad = 0n) => {
         const p = readGamepads()[ny.int(pad)];
         return p ? ny.string(memoryRef, String(p.mapping || "standard")) : ny.string(memoryRef, "");
       },
-      "std.os.ui.window.gamepad_axis_count": (pad = 0n) => {
+      "core.os.ui.window.gamepad_axis_count": (pad = 0n) => {
         const p = readGamepads()[ny.int(pad)];
         return p ? ny.tag((p.axes || []).length) : ny.tag(0);
       },
-      "std.os.ui.window.gamepad_button_count": (pad = 0n) => {
+      "core.os.ui.window.gamepad_button_count": (pad = 0n) => {
         const p = readGamepads()[ny.int(pad)];
         return p ? ny.tag((p.buttons || []).length) : ny.tag(0);
       },
-      "std.os.ui.window.gamepad_axis": (pad, axis) => {
+      "core.os.ui.window.gamepad_axis": (pad, axis) => {
         const p = readGamepads()[ny.int(pad)];
         const a = p ? (p.axes || [])[ny.int(axis)] : 0;
         return ny.fltFromNumber(memoryRef, Math.abs(a) < 1e-6 ? 0 : a);
       },
-      "std.os.ui.window.gamepad_button": (pad, button) => {
+      "core.os.ui.window.gamepad_button": (pad, button) => {
         const p = readGamepads()[ny.int(pad)];
         const b = p ? (p.buttons || [])[ny.int(button)] : null;
         return bool(b && !!b.pressed);
       },
-      "std.os.ui.window.test_report_touch": (count, x, y) => {
+      "core.os.ui.window.test_report_touch": (count, x, y) => {
         canvas.dataset.touchCount = String(Number(BigInt.asIntN(64, BigInt(count || 0))));
         canvas.dataset.touchX = String(ny.numeric(memoryRef, x));
         canvas.dataset.touchY = String(ny.numeric(memoryRef, y));
         return NY_TRUE;
       },
-      "std.os.ui.window.test_report_gamepad": (count, buttonA, leftX) => {
+      "core.os.ui.window.test_report_gamepad": (count, buttonA, leftX) => {
         const pads = readGamepads();
         const padCount = pads.length;
         let mappedButtonA = 0;
@@ -1089,34 +1116,34 @@
         canvas.setAttribute("data-gamepad-leftX", String(mappedLeftX));
         return NY_TRUE;
       },
-      "std.os.ui.render.begin_frame_clear": (fill) => {
+      "core.os.ui.render.begin_frame_clear": (fill) => {
         frameTouched = true;
         setStageSize();
         ctx.fillStyle = color(fill, "rgba(0,0,0,1)");
         ctx.fillRect(0, 0, stage.width, stage.height);
         return NY_TRUE;
       },
-      "std.os.ui.render.framebuffer_size_f64": () => list2f(stage.width, stage.height),
-      "std.os.ui.render.get_framebuffer_size": () => list2i(stage.width, stage.height),
-      "std.os.ui.render.get_frame_time": () => webFrameDt,
-      "std.os.ui.render.set_ortho_2d": () => 0n,
-      "std.os.ui.render.matrix.mat4_identity": () => ny.tag(0),
-      "std.os.ui.render.camera_init": (position) => {
+      "core.os.ui.render.framebuffer_size_f64": () => list2f(stage.width, stage.height),
+      "core.os.ui.render.get_framebuffer_size": () => list2i(stage.width, stage.height),
+      "core.os.ui.render.get_frame_time": () => webFrameDt,
+      "core.os.ui.render.set_ortho_2d": () => 0n,
+      "core.os.ui.render.matrix.mat4_identity": () => ny.tag(0),
+      "core.os.ui.render.camera_init": (position) => {
         if (webgl3d && ny.listLen(memoryRef, position) >= 3) {
           webgl3d.cameraPosition = [0, 1, 2].map((i) => ny.numeric(memoryRef, ny.listGet(memoryRef, position, ny.tag(i), 0n)));
         }
         return ny.tag(1);
       },
-      "std.os.ui.render.begin_mode_3d": () => bool(beginWebgl3d()),
-      "std.os.ui.render.end_mode_3d": () => { if (webgl3d) webgl3d.active = false; return NY_TRUE; },
-      "std.os.ui.render.draw_cube": (position, size, fill) => bool(drawCube(memoryRef, position, size, fill)),
-      "std.os.ui.render.draw_rect": (x, y, w, h, fill) => {
+      "core.os.ui.render.begin_mode_3d": () => bool(beginWebgl3d()),
+      "core.os.ui.render.end_mode_3d": () => { if (webgl3d) webgl3d.active = false; return NY_TRUE; },
+      "core.os.ui.render.draw_cube": (position, size, fill) => bool(drawCube(memoryRef, position, size, fill)),
+      "core.os.ui.render.draw_rect": (x, y, w, h, fill) => {
         frameTouched = true;
         ctx.fillStyle = color(fill, "rgba(255,255,255,1)");
         ctx.fillRect(x, y, w, h);
         return 0n;
       },
-      "std.os.ui.render.draw_circle": (x, y, radius, fill) => {
+      "core.os.ui.render.draw_circle": (x, y, radius, fill) => {
         frameTouched = true;
         ctx.fillStyle = color(fill, "rgba(255,255,255,1)");
         ctx.beginPath();
@@ -1124,7 +1151,7 @@
         ctx.fill();
         return 0n;
       },
-      "std.os.ui.render.draw_text": (fontId, text, x, y, fill) => {
+      "core.os.ui.render.draw_text": (fontId, text, x, y, fill) => {
         frameTouched = true;
         ctx.fillStyle = color(fill, "rgba(255,255,255,1)");
         const font = assetFonts.get(ny.int(fontId));
@@ -1134,7 +1161,7 @@
         ctx.fillText(ny.text(memoryRef, text, 0), Math.round(x), Math.round(y));
         return 0n;
       },
-      "std.os.ui.render.measure_text": (fontId, text) => {
+      "core.os.ui.render.measure_text": (fontId, text) => {
         const font = assetFonts.get(ny.int(fontId));
         const size = font ? Math.max(1, Math.round(font.size)) : 35;
         ctx.font = font ? `${size}px "${font.family}", monospace` : "35px 'Nytrix Monocraft', ui-monospace, monospace";
@@ -1143,7 +1170,7 @@
         const descent = Number(metrics.actualBoundingBoxDescent || size * 0.2);
         return list2f(Number(metrics.width), ascent + descent);
       },
-      "std.os.ui.render.draw_text_centered": (fontId, text, cx, cy, fill) => {
+      "core.os.ui.render.draw_text_centered": (fontId, text, cx, cy, fill) => {
         frameTouched = true;
         ctx.fillStyle = color(fill, "rgba(255,255,255,1)");
         const font = assetFonts.get(ny.int(fontId));
@@ -1156,7 +1183,7 @@
         ctx.textBaseline = "top";
         return 0n;
       },
-      "std.os.ui.render.texture_create_rgba": (w, h, pixels, format, filter, wrap_s, wrap_t, use_mipmaps) => {
+      "core.os.ui.render.texture_create_rgba": (w, h, pixels, format, filter, wrap_s, wrap_t, use_mipmaps) => {
         const width = ny.int(w);
         const height = ny.int(h);
         const total = width * height * 4;
@@ -1180,15 +1207,15 @@
         g2dTextures.set(id, { canvas: cvs, w: width, h: height, filter });
         return ny.tag(id);
       },
-      "std.os.ui.render.texture_size": (tex) => {
+      "core.os.ui.render.texture_size": (tex) => {
         const t = g2dTextures.get(ny.int(tex));
         return list2i(t ? t.w : 0, t ? t.h : 0);
       },
-      "std.os.ui.render.texture_destroy": (tex) => {
+      "core.os.ui.render.texture_destroy": (tex) => {
         g2dTextures.delete(ny.int(tex));
         return NY_TRUE;
       },
-      "std.os.ui.render.draw_texture": (texId, x, y, scale, fill) => {
+      "core.os.ui.render.draw_texture": (texId, x, y, scale, fill) => {
         const t = g2dTextures.get(ny.int(texId));
         if (!t) return 0n;
         frameTouched = true;
@@ -1200,11 +1227,11 @@
           t.h * Math.max(0.001, scale));
         return 0n;
       },
-      "std.os.ui.render.get_pixel": (x, y) => {
+      "core.os.ui.render.get_pixel": (x, y) => {
         const data = ctx.getImageData(Math.round(Number(x)), Math.round(Number(y)), 1, 1).data;
         return list4f(data[0] / 255, data[1] / 255, data[2] / 255, data[3] / 255);
       },
-      "std.os.ui.render.end_frame": () => {
+      "core.os.ui.render.end_frame": () => {
         framePresented = true;
         present();
         if (asyncifyRef.controller) {
@@ -1303,10 +1330,49 @@
   function makeRuntimeImports(meta, memoryRef, asyncifyRef) {
     const virtualFiles = new Map();
     const webSockets = new Map();
+    const mutexes = new Set();
+    let nextMutex = 0x70000000;
     let nextWebSocket = 1;
     const persistedPrefix = "nytrix.vfs.";
     const persistedDirPrefix = "nytrix.vfs.dir.";
     let nextVirtualFd = 0x10000;
+    const runtimeAnyToI64 = (value) => {
+      if (typeof value !== "bigint") return 0n;
+      const v = BigInt.asIntN(64, value);
+      return (v & 1n) === 1n ? v >> 1n : v;
+    };
+    const runtimeCString = (value) => {
+      const p = ny.ptr(value);
+      if (p <= 0) return "";
+      const bytes = ny.u8(memoryRef);
+      let end = p;
+      while (end < bytes.length && bytes[end] !== 0) end++;
+      return dec.decode(bytes.subarray(p, end));
+    };
+    const runtimeText = (value) => {
+      const tag = ny.tagof(memoryRef, value);
+      return tag === 120n || tag === 121n
+        ? ny.text(memoryRef, value, 0)
+        : runtimeCString(value);
+    };
+    const runtimeAnyToCstr = (value) => {
+      const bytes = enc.encode(ny.valueToString(memoryRef, value) + "\0");
+      const p = ny.alloc(memoryRef, bytes.length);
+      ny.u8(memoryRef).set(bytes, p);
+      return BigInt(p);
+    };
+    const runtimeCstrLen = (value) => {
+      const tag = ny.tagof(memoryRef, value);
+      if (tag === 120n || tag === 121n) {
+        return BigInt(enc.encode(ny.text(memoryRef, value, 0)).length);
+      }
+      const p = ny.ptr(value);
+      if (p <= 0) return 0n;
+      const bytes = ny.u8(memoryRef);
+      let end = p;
+      while (end < bytes.length && bytes[end] !== 0) end++;
+      return BigInt(end - p);
+    };
     const assetPath = (value) => {
       const path = String(value || "").replaceAll("\\", "/");
       return path.startsWith("./") ? path.slice(2) : path;
@@ -1435,6 +1501,24 @@
       persistBytes(handle.path, handle.bytes);
       return ny.tag(count);
     };
+    const virtualWriteRaw = (fd, ptr, len, off) => {
+      const handle = virtualFiles.get(Number(BigInt.asIntN(64, BigInt(fd || 0))));
+      if (!handle || !handle.writable) return -13n;
+      const start = Math.max(0, handle.offset);
+      const count = Math.max(0, Number(BigInt.asIntN(64, BigInt(len || 0))));
+      const source = ny.ptr(ptr) + Math.max(0, Number(BigInt.asIntN(64, BigInt(off || 0))));
+      const mem = ny.u8(memoryRef);
+      if (source < 0 || source + count > mem.byteLength) return -14n;
+      if (start + count > handle.bytes.length) {
+        const next = new Uint8Array(start + count);
+        next.set(handle.bytes);
+        handle.bytes = next;
+      }
+      handle.bytes.set(mem.subarray(source, source + count), start);
+      handle.offset = start + count;
+      persistBytes(handle.path, handle.bytes);
+      return BigInt(count);
+    };
     const webFetch = (url) => {
       if (!asyncifyRef.controller)
         throw new Error("browser fetch requires Asyncify instrumentation");
@@ -1560,7 +1644,7 @@
     };
     return {
       rt_argc: () => ny.tag(refreshRunArgv(meta).length),
-      "std.core.primitives.argc": () => ny.tag(refreshRunArgv(meta).length),
+      "core.primitives.argc": () => ny.tag(refreshRunArgv(meta).length),
       rt_argv: () => 0n,
       rt_runtime_tag: (v) => {
         // rt_runtime_tag receives a tagged Ny string and returns a tagged integer tag.
@@ -1568,16 +1652,279 @@
         const name = ny.text(memoryRef, v, 0);
         return ny.tag(nyRuntimeTagRaw(name));
       },
-      "std.core.primitives.runtime_tag_raw": (v) => {
+      "core.primitives.runtime_tag_raw": (v) => {
         // Surface-level runtime_tag_raw — called from module-init for global def constants
         // like _CORE_TAG_LIST = runtime_tag_raw("list"). Receives tagged Ny string, returns
-        // tagged integer matching rt_runtime_tag_raw_name in src/code/runtime/shared.h.
+        // tagged integer matching rt_runtime_tag_raw_name in src/code/lang/runtime/shared.h.
         const name = ny.text(memoryRef, v, 0);
         return ny.tag(nyRuntimeTagRaw(name));
       },
       rt_malloc: (size) => BigInt(ny.alloc(memoryRef, ny.int(size))),
+      rt_malloc_i64: (size) => BigInt(ny.alloc(memoryRef, Math.max(0, ny.int(size)))),
+      rt_ptr_add_i64: (pointer, offset) => BigInt.asIntN(64, BigInt(pointer || 0) + BigInt(offset || 0)),
+      rt_copy_mem_raw: (destination, source, length) => {
+        const mem = ny.u8(memoryRef);
+        const dst = Number(BigInt.asIntN(64, BigInt(destination || 0)));
+        const src = Number(BigInt.asIntN(64, BigInt(source || 0)));
+        const n = Math.max(0, Number(BigInt.asIntN(64, BigInt(length || 0))));
+        if (dst >= 0 && src >= 0 && dst + n <= mem.length && src + n <= mem.length)
+          mem.set(mem.slice(src, src + n), dst);
+        return BigInt(destination || 0);
+      },
+      rt_result_ok: (value) => result(104, value),
+      rt_result_err: (value) => result(105, value),
+      rt_result_unwrap_raw: (value) => {
+        const pointer = ny.ptr(value);
+        return pointer > 0 ? runtimeAnyToI64(ny.readI64(memoryRef, pointer)) : 0n;
+      },
+      rt_web_test_report_touch: (count, x, y) => {
+        const sourceNumber = (value) => ny.tagof(memoryRef, value) === 110n
+          ? ny.flt(memoryRef, value)
+          : Number(BigInt.asIntN(64, BigInt(value || 0)));
+        canvas.dataset.touchCount = String(sourceNumber(count));
+        canvas.dataset.touchX = String(sourceNumber(x));
+        canvas.dataset.touchY = String(sourceNumber(y));
+        return NY_TRUE;
+      },
+      rt_web_test_report_gamepad: (count, buttonA, leftX) => {
+        canvas.setAttribute("data-gamepad-count", String(ny.int(count)));
+        canvas.setAttribute("data-gamepad-buttonA", ny.numeric(memoryRef, buttonA) ? "1" : "0");
+        canvas.setAttribute("data-gamepad-leftX", String(ny.numeric(memoryRef, leftX)));
+        return NY_TRUE;
+      },
+      rt_value_get_tagged: (value, key, fallback = 0n) => {
+        const table = globalThis.__nyWebDicts[ny.ptr(value)];
+        if (table) {
+          const tag = ny.tagof(memoryRef, key);
+          const name = tag === 120n || tag === 121n ? ny.text(memoryRef, key, 0) : runtimeCString(key);
+          return table.has(name) ? table.get(name) : fallback;
+        }
+        const index = runtimeAnyToI64(key);
+        const tbuf = globalThis.__nyWebTbufs[ny.ptr(value)];
+        if (tbuf) {
+          const i = Number(index);
+          const at = i < 0 ? tbuf.count + i : i;
+          return at >= 0 && at < tbuf.count ? BigInt(tbuf.values[at] || 0) : fallback;
+        }
+        return ny.listGet(memoryRef, value, ny.tag(Number(index)), fallback);
+      },
+      rt_init_str_raw: (value, length) => {
+        const p = ny.ptr(value);
+        const n = ny.int(length);
+        const bytes = ny.u8(memoryRef);
+        if (p > 16 && n >= 0 && p <= bytes.length) {
+          const view = new DataView(bytes.buffer);
+          view.setBigInt64(p - 8, 120n, true);
+          view.setBigInt64(p - 16, ny.tag(n), true);
+        }
+        return value;
+      },
       rt_realloc: (_ptr, size) => BigInt(ny.alloc(memoryRef, ny.int(size))),
       rt_free: () => 0n,
+      rt_alloc_string: (value) => ny.string(memoryRef, runtimeCString(value)),
+      rt_cstr_to_str: (value) => ny.string(memoryRef, runtimeCString(value)),
+      rt_cstr_len: runtimeCstrLen,
+      rt_cstr_eq: (left, right) => BigInt(runtimeText(left) === runtimeText(right) ? 1 : 0),
+      rt_cstr_replace: (value, oldValue, newValue) => {
+        const source = runtimeCString(value);
+        const oldText = runtimeCString(oldValue);
+        const newText = runtimeCString(newValue);
+        const replaced = oldText ? source.split(oldText).join(newText) : source;
+        const bytes = enc.encode(replaced + "\0");
+        const ptr = ny.alloc(memoryRef, bytes.length);
+        ny.u8(memoryRef).set(bytes, ptr);
+        return BigInt(ptr);
+      },
+      rt_cstr_concat: (left, right) => ny.string(memoryRef, runtimeText(left) + runtimeText(right)),
+      rt_any_to_i64: runtimeAnyToI64,
+      rt_i64_to_cstr_raw: (value) => {
+        const bytes = enc.encode(String(Number(BigInt.asIntN(64, BigInt(value || 0))) + "\0"));
+        const pointer = ny.alloc(memoryRef, bytes.length);
+        if (!pointer) return 0n;
+        ny.u8(memoryRef).set(bytes, pointer);
+        return BigInt(pointer);
+      },
+      rt_any_to_cstr: runtimeAnyToCstr,
+      rt_untag: runtimeAnyToI64,
+      rt_tag: (value) => (BigInt.asIntN(64, BigInt(value || 0)) << 1n) | 1n,
+      rt_box_i64: (value) => ny.tag(ny.int(value)),
+      rt_value_tag: (value) => {
+        const v = BigInt.asIntN(64, BigInt(value || 0));
+        if (v === 0n) return 0n;
+        const tag = ny.tagof(memoryRef, v);
+        if (tag > 0n) return tag === 121n ? 120n : tag;
+        if (ny.isFloat(memoryRef, v)) return 110n;
+        return (v & 1n) === 1n ? 1n : 3n;
+      },
+      rt_i64_max: (left, right) => BigInt.asIntN(64, BigInt(left)) > BigInt.asIntN(64, BigInt(right)) ? BigInt(left) : BigInt(right),
+      rt_atoi: (value) => {
+        const match = runtimeText(value).trimStart().match(/^[+-]?\d+/);
+        if (!match) return 0n;
+        const parsed = BigInt(match[0]);
+        return parsed > 0x7fffffffffffffffn ? 0x7fffffffffffffffn
+          : parsed < -0x8000000000000000n ? -0x8000000000000000n : parsed;
+      },
+      rt_atof: (value) => Number.parseFloat(runtimeText(value)) || 0,
+      rt_tty_isatty: () => ny.tag(0),
+      rt_tty_isatty_raw: () => 0n,
+      rt_monotonic_ns_raw: () => BigInt(Math.floor(performance.now() * 1e6)),
+      rt_time_seconds: () => BigInt(Math.floor(Date.now() / 2000) * 2),
+      rt_time_milliseconds: () => BigInt(Math.floor(Date.now() / 2) * 2),
+      rt_ticks_ns: () => BigInt(Math.floor(performance.now() * 5e5) * 2),
+      rt_msleep_ms: (ms = 0n) => {
+        if (!asyncifyRef.controller)
+          throw new Error("rt_msleep_ms requires Asyncify instrumentation");
+        asyncifyRef.controller.sleep(ny.int(ms));
+        return ny.tag(0);
+      },
+      rt_mutex_new: () => {
+        const handle = nextMutex;
+        nextMutex += 8;
+        mutexes.add(handle);
+        return BigInt(handle);
+      },
+      rt_mutex_lock64: (handle) => mutexes.has(ny.ptr(handle)) ? 0n : -1n,
+      rt_mutex_unlock64: (handle) => mutexes.has(ny.ptr(handle)) ? 0n : -1n,
+      rt_mutex_free: (handle) => { mutexes.delete(ny.ptr(handle)); return 0n; },
+      rt_envc_raw: () => 0n,
+      rt_envp: () => 0n,
+      rt_argv_get: (index) => {
+        const args = refreshRunArgv(meta);
+        const i = ny.int(index);
+        return i >= 0 && i < args.length ? ny.string(memoryRef, args[i]) : 0n;
+      },
+      rt_argvp: () => 0n,
+      rt_args_raw: () => {
+        const args = refreshRunArgv(meta);
+        const out = ny.list(memoryRef, args.length);
+        args.forEach((arg, i) => ny.listSet(memoryRef, out, ny.tag(i), ny.string(memoryRef, arg)));
+        ny.listSetLen(memoryRef, out, args.length);
+        return out;
+      },
+      rt_len_strict: (value) => {
+        const p = ny.ptr(value);
+        if (globalThis.__nyWebDicts[p]) return ny.tag(globalThis.__nyWebDicts[p].size);
+        const tag = ny.tagof(memoryRef, value);
+        if (tag === 100n) return ny.tag(ny.listLen(memoryRef, value));
+        if (tag === 120n || tag === 121n) return ny.tag(ny.text(memoryRef, value, 0).length);
+        return ny.tag(0);
+      },
+      rt_any_eq: (left, right) => ny.bool(ny.equal(memoryRef, left, right)),
+      rt_any_add: (left, right) => {
+        const leftTag = ny.tagof(memoryRef, left);
+        const rightTag = ny.tagof(memoryRef, right);
+        if (leftTag === 120n || leftTag === 121n || rightTag === 120n || rightTag === 121n) {
+          return ny.string(memoryRef, ny.valueToString(memoryRef, left) + ny.valueToString(memoryRef, right));
+        }
+        const asFloat = ny.isFloat(memoryRef, left) || ny.isFloat(memoryRef, right);
+        return ny.numericResult(memoryRef,
+          ny.numeric(memoryRef, left) + ny.numeric(memoryRef, right), asFloat);
+      },
+      rt_f64_max: (a, b) => Math.max(Number(a), Number(b)),
+      rt_len: (value) => {
+        const p = ny.ptr(value);
+        if (globalThis.__nyWebDicts[p]) return ny.tag(globalThis.__nyWebDicts[p].size);
+        const tag = ny.tagof(memoryRef, value);
+        if (tag === 100n) return ny.tag(ny.listLen(memoryRef, value));
+        if (tag === 120n || tag === 121n) return ny.tag(ny.text(memoryRef, value, 0).length);
+        return ny.tag(0);
+      },
+      rt_dict_new_raw: () => {
+        let handle = globalThis.__nyWebNextDict >>> 0;
+        while (globalThis.__nyWebDicts[handle]) handle = (handle + 8) >>> 0;
+        globalThis.__nyWebNextDict = (handle + 8) >>> 0;
+        globalThis.__nyWebDicts[handle] = new Map();
+        return BigInt(handle);
+      },
+      rt_dict_get_str_raw: (dict, key, fallback = 0n) => {
+        const table = globalThis.__nyWebDicts[ny.ptr(dict)];
+        if (!table) return fallback;
+        const tag = ny.tagof(memoryRef, key);
+        const name = tag === 120n || tag === 121n ? ny.text(memoryRef, key, 0) : runtimeCString(key);
+        return table.has(name) ? table.get(name) : fallback;
+      },
+      rt_native_dict_set_str_compact: (dict, key, value) => {
+        const handle = ny.ptr(dict);
+        const table = globalThis.__nyWebDicts[handle];
+        if (!table) return dict;
+        const type = ny.tagof(memoryRef, key);
+        const name = (type === 120n || type === 121n) ? ny.text(memoryRef, key, 0) : runtimeCString(key);
+        table.set(name, value);
+        return dict;
+      },
+      rt_tbuf_new_raw: (count = 0n, elemSize = 8n) => {
+        const n = Math.max(0, ny.int(count));
+        const stride = Math.max(1, ny.int(elemSize));
+        const p = ny.alloc(memoryRef, Math.max(32, n * stride + 32)) + 16;
+        globalThis.__nyWebTbufs[p] = { count: n, capacity: n, stride, values: Array(n).fill(0n) };
+        return BigInt(p);
+      },
+      rt_list_new_raw: (capacity = 0n) => {
+        const cap = Math.max(0, ny.int(capacity));
+        const p = ny.alloc(memoryRef, Math.max(32, cap * 8 + 32)) + 16;
+        globalThis.__nyWebTbufs[p] = { count: 0, capacity: cap, stride: 8, values: [] };
+        return BigInt(p);
+      },
+      rt_tbuf_len_raw: (buffer) => BigInt(globalThis.__nyWebTbufs[ny.ptr(buffer)]?.count || 0),
+      rt_value_get_index_raw: (value, index, fallback = 0n) => {
+        const i = ny.int(index);
+        const v = BigInt.asIntN(64, BigInt(value || 0));
+        const tag = ny.tagof(memoryRef, v);
+        if (tag === 120n || tag === 121n) {
+          const bytes = enc.encode(ny.text(memoryRef, v, 0));
+          const at = i < 0 ? bytes.length + i : i;
+          if (at < 0 || at >= bytes.length) return fallback;
+          let end = at + 1;
+          while (end < bytes.length && (bytes[end] & 0xc0) === 0x80) end++;
+          let start = at;
+          while (start > 0 && (bytes[start] & 0xc0) === 0x80) start--;
+          return ny.string(memoryRef, dec.decode(bytes.subarray(start, end)));
+        }
+        const table = globalThis.__nyWebTbufs[ny.ptr(v)];
+        if (table) {
+          const at = i < 0 ? table.count + i : i;
+          return at >= 0 && at < table.count ? BigInt(table.values[at] || 0) : fallback;
+        }
+        return ny.listGet(memoryRef, v, ny.tag(i), fallback);
+      },
+      rt_tbuf_append_tagged: (buffer, value) => {
+        const table = globalThis.__nyWebTbufs[ny.ptr(buffer)];
+        if (!table) return buffer;
+        table.values[table.count++] = value;
+        table.capacity = Math.max(table.capacity || 0, table.count);
+        return buffer;
+      },
+      rt_tbuf_append_raw: (buffer, value) => {
+        const table = globalThis.__nyWebTbufs[ny.ptr(buffer)];
+        if (!table) return buffer;
+        table.values[table.count++] = value;
+        table.capacity = Math.max(table.capacity || 0, table.count);
+        return buffer;
+      },
+      rt_tbuf_set_i64_raw: (buffer, index, value) => {
+        const table = globalThis.__nyWebTbufs[ny.ptr(buffer)];
+        const i = ny.int(index);
+        if (!table || i < 0 || i >= (table.capacity || table.count)) return buffer;
+        while (table.values.length <= i) table.values.push(0n);
+        table.values[i] = BigInt(value || 0);
+        table.count = Math.max(table.count, i + 1);
+        return buffer;
+      },
+      rt_tbuf_set_tagged: (buffer, index, value) => {
+        const table = globalThis.__nyWebTbufs[ny.ptr(buffer)];
+        const i = ny.int(index);
+        if (!table || i < 0 || i >= (table.capacity || table.count)) return buffer;
+        while (table.values.length <= i) table.values.push(0n);
+        table.values[i] = value;
+        table.count = Math.max(table.count, i + 1);
+        return buffer;
+      },
+      rt_tbuf_index_any_raw: (buffer, index) => {
+        const table = globalThis.__nyWebTbufs[ny.ptr(buffer)];
+        const i = ny.int(index);
+        if (!table || i < 0 || i >= table.count) return 0n;
+        return table.values[i] || 0n;
+      },
       __access: (path) => virtualBytes(virtualPath(path)) || virtualDirectory(virtualPath(path)).length ? ny.tag(0) : ny.tag(-2),
       __open: (path, flags = 0n) => {
         const logical = virtualPath(path);
@@ -1592,13 +1939,56 @@
         virtualFiles.set(fd, { path: logical, bytes, offset: (rawFlags & 1024) ? bytes.length : 0, writable });
         return ny.tag(fd);
       },
+      rt_open_raw: (path, flags = 0n, _mode = 0n) => {
+        const logical = assetPath(runtimeCString(path));
+        const rawFlags = Number(BigInt.asIntN(64, BigInt(flags || 0)));
+        const writable = (rawFlags & 3) !== 0;
+        let bytes = virtualBytes(logical);
+        if (!bytes && !(rawFlags & 64)) return -2n;
+        if (!bytes) bytes = new Uint8Array(0);
+        else bytes = new Uint8Array(bytes);
+        if ((rawFlags & 512) !== 0 && writable) bytes = new Uint8Array(0);
+        const fd = nextVirtualFd++;
+        virtualFiles.set(fd, { path: logical, bytes, offset: (rawFlags & 1024) ? bytes.length : 0, writable });
+        return BigInt(fd);
+      },
+      rt_file_exists_raw: (path) => {
+        const logical = virtualPath(runtimeCString(path));
+        const exists = virtualBytes(logical) !== null || virtualDirectoryExists(logical);
+        canvas.dataset.vfsExists = exists ? "1" : "0";
+        return exists ? 1n : 0n;
+      },
       __read_off: (fd, ptr, len, off = 0n) => virtualRead(fd, ptr, len, off),
+      rt_read_off_raw: (fd, ptr, len, off = 0n) => {
+        const handle = virtualFiles.get(Number(BigInt.asIntN(64, BigInt(fd || 0))));
+        if (!handle) return -9n;
+        const start = Math.max(0, handle.offset);
+        const count = Math.max(0, Math.min(Number(BigInt.asIntN(64, BigInt(len || 0))), handle.bytes.length - start));
+        const dest = ny.ptr(ptr) + Math.max(0, Number(BigInt.asIntN(64, BigInt(off || 0))));
+        const mem = ny.u8(memoryRef);
+        if (dest < 0 || dest + count > mem.byteLength) return -14n;
+        mem.set(handle.bytes.subarray(start, start + count), dest);
+        handle.offset = start + count;
+        return BigInt(count);
+      },
+      rt_write_off_raw: virtualWriteRaw,
       __write_off: (fd, ptr, len, off = 0n) => virtualWrite(fd, ptr, len, off),
       __close: (fd) => virtualFiles.delete(ny.int(fd)) ? ny.tag(0) : ny.tag(-9),
+      rt_close_raw: (fd) => virtualFiles.delete(Number(BigInt.asIntN(64, BigInt(fd || 0)))) ? 0n : -9n,
       __unlink: (path) => {
         const logical = virtualPath(path);
         if (storedBytes(logical) == null) return ny.tag(-2);
         removePersisted(logical);
+        return ny.tag(0);
+      },
+      rt_unlink: (path) => {
+        const logical = assetPath(runtimeCString(path));
+        if (storedBytes(logical) == null) {
+          canvas.dataset.vfsRemoved = "0";
+          return ny.tag(-2);
+        }
+        removePersisted(logical);
+        canvas.dataset.vfsRemoved = "1";
         return ny.tag(0);
       },
       __rename: (oldPath, newPath) => {
@@ -1618,18 +2008,36 @@
         if (!virtualDirectoryExists(parent) || !persistDir(logical)) return ny.tag(-2);
         return ny.tag(0);
       },
+      rt_mkdir: (path) => {
+        const logical = assetPath(runtimeText(path)).replace(/^\/+|\/+$/g, "");
+        if (!logical || virtualDirectoryExists(logical)) return ny.tag(-17);
+        const slash = logical.lastIndexOf("/");
+        const parent = slash > 0 ? logical.slice(0, slash) : ".";
+        return ny.tag(virtualDirectoryExists(parent) && persistDir(logical) ? 0 : -2);
+      },
       __rmdir: (path) => {
         const logical = virtualPath(path).replace(/^\/+|\/+$/g, "");
         if (!logical || !storedDir(logical)) return ny.tag(-2);
         if (virtualDirectory(logical).length) return ny.tag(-39);
         return removePersistedDir(logical) ? ny.tag(0) : ny.tag(-5);
       },
+      rt_rmdir: (path) => {
+        const logical = assetPath(runtimeText(path)).replace(/^\/+|\/+$/g, "");
+        if (!logical || !storedDir(logical)) return ny.tag(-2);
+        if (virtualDirectory(logical).length) return ny.tag(-39);
+        return removePersistedDir(logical) ? ny.tag(0) : ny.tag(-5);
+      },
       __is_dir: (path) => ny.tag(virtualDirectoryExists(virtualPath(path)) ? 1 : 0),
+      rt_is_dir: (path) => {
+        const logical = assetPath(runtimeText(path));
+        return virtualDirectoryExists(logical) ? 1n : 0n;
+      },
       __dir_open: (path) => {
-        const names = virtualDirectory(virtualPath(path));
-        if (!names.length) return 0n;
+        const logical = virtualPath(path);
+        if (!virtualDirectoryExists(logical)) return 0n;
+        const names = virtualDirectory(logical);
         const fd = nextVirtualFd++;
-        virtualFiles.set(fd, { path: virtualPath(path), entries: names, index: 0, directory: true, writable: false });
+        virtualFiles.set(fd, { path: logical, entries: names, index: 0, directory: true, writable: false });
         return ny.tag(fd);
       },
       __dir_read: (fd) => {
@@ -1638,6 +2046,19 @@
         return ny.string(memoryRef, handle.entries[handle.index++]);
       },
       __dir_close: (fd) => virtualFiles.delete(ny.int(fd)) ? ny.tag(0) : ny.tag(-9),
+      rt_dir_open: (path) => {
+        const logical = assetPath(runtimeText(path));
+        if (!virtualDirectoryExists(logical)) return 0n;
+        const fd = nextVirtualFd++;
+        virtualFiles.set(fd, { path: logical, entries: virtualDirectory(logical), index: 0, directory: true, writable: false });
+        return BigInt(fd);
+      },
+      rt_dir_read: (fd) => {
+        const handle = virtualFiles.get(Number(BigInt.asIntN(64, BigInt(fd || 0))));
+        if (!handle || !handle.directory || handle.index >= handle.entries.length) return 0n;
+        return ny.string(memoryRef, handle.entries[handle.index++]);
+      },
+      rt_dir_close: (fd) => virtualFiles.delete(Number(BigInt.asIntN(64, BigInt(fd || 0)))) ? ny.tag(0) : -1n,
       rt_memset: (dst, val, count) => { ny.u8(memoryRef).fill(Number(val) & 255, ny.ptr(dst), ny.ptr(dst) + ny.ptr(count)); return 0n; },
       rt_memcpy: (dst, src, count) => { ny.u8(memoryRef).copyWithin(ny.ptr(dst), ny.ptr(src), ny.ptr(src) + ny.ptr(count)); return 0n; },
       rt_load8_idx: (base, idx) => BigInt(ny.u8(memoryRef)[ny.ptr(base) + ny.int(idx)] || 0),
@@ -1667,30 +2088,35 @@
       },
       rt_is_err: (v) => ny.bool(ny.tagof(memoryRef, v) === 105n),
       rt_unwrap: (v) => ny.readI64(memoryRef, ny.ptr(v)) || v,
-      "std.os.file_read": (path) => {
+      "core.os.file_read": (path) => {
         const requested = ny.text(memoryRef, path, 0);
         const logical = assetPath(requested);
         const bytes = virtualBytes(logical);
         return bytes ? result(104, ny.string(memoryRef, dec.decode(bytes))) : result(105, ny.tag(-2));
       },
-      "std.os.file_write": (path, content) => {
+      "core.os.file_write": (path, content) => {
         const logical = assetPath(ny.text(memoryRef, path, 0));
         const bytes = enc.encode(ny.text(memoryRef, content, 0));
         return persistBytes(logical, bytes) ? result(104, ny.tag(bytes.length)) : result(105, ny.tag(-5));
       },
-      "std.os.file_exists": (path) => {
+      "core.os.file_exists": (path) => {
         const logical = assetPath(ny.text(memoryRef, path, 0));
         const exists = virtualBytes(logical) !== null || virtualDirectory(logical).length > 0;
         canvas.dataset.vfsExists = exists ? "1" : "0";
         return ny.bool(exists);
       },
-      "std.os.file_remove": (path) => {
+      "ny_fn_core.os.file_exists": (path) => {
+        const logical = assetPath(ny.text(memoryRef, path, 0));
+        const exists = virtualBytes(logical) !== null || virtualDirectory(logical).length > 0;
+        return ny.bool(exists);
+      },
+      "core.os.file_remove": (path) => {
         const logical = assetPath(ny.text(memoryRef, path, 0));
         const removed = storedBytes(logical) !== null && removePersisted(logical);
         canvas.dataset.vfsRemoved = removed ? "1" : "0";
         return removed ? result(104, ny.tag(0)) : result(105, ny.tag(-2));
       },
-      "std.os.file_rename": (oldPath, newPath) => {
+      "core.os.file_rename": (oldPath, newPath) => {
         const oldName = assetPath(ny.text(memoryRef, oldPath, 0));
         const newName = assetPath(ny.text(memoryRef, newPath, 0));
         const bytes = storedBytes(oldName);
@@ -1698,13 +2124,13 @@
         removePersisted(oldName);
         return result(104, ny.tag(0));
       },
-      "std.os.pid": () => ny.tag(1),
-      "std.os.fs.is_dir": (path) => {
+      "core.os.pid": () => ny.tag(1),
+      "core.os.fs.is_dir": (path) => {
         const value = virtualPath(path);
         const exists = virtualDirectoryExists(value);
         return ny.bool(exists);
       },
-      "std.os.fs.list_dir": (path) => {
+      "core.os.fs.list_dir": (path) => {
         const names = virtualDirectory(virtualPath(path));
         const out = ny.list(memoryRef, names.length);
         for (let i = 0; i < names.length; i++)
@@ -1712,7 +2138,7 @@
         ny.listSetLen(memoryRef, out, names.length);
         return out;
       },
-      "std.os.fs.make_dir": (path) => {
+      "core.os.fs.make_dir": (path) => {
         const logical = virtualPath(path).replace(/^\/+|\/+$/g, "");
         if (!logical || virtualDirectoryExists(logical)) {
           return result(105, ny.tag(-17));
@@ -1722,7 +2148,7 @@
         const made = virtualDirectoryExists(parent) && persistDir(logical);
         return made ? result(104, ny.tag(0)) : result(105, ny.tag(-2));
       },
-      "std.os.fs.remove_dir": (path) => {
+      "core.os.fs.remove_dir": (path) => {
         const logical = virtualPath(path).replace(/^\/+|\/+$/g, "");
         if (!logical || !storedDir(logical)) {
           return result(105, ny.tag(-2));
@@ -1757,7 +2183,22 @@
         if (want === 121n && ny.tagof(memoryRef, v) === 120n) return NY_TRUE;
         return ny.bool(ny.tagof(memoryRef, v) === want);
       },
+      rt_native_has_tag: (v, tag) => {
+        let want = BigInt.asIntN(64, BigInt(tag || 0));
+        if ((want < 100n || want > 150n) && (want & 1n) === 1n) want >>= 1n;
+        if (want === 110n) return ny.bool(ny.isFloat(memoryRef, v));
+        if (want === 121n && ny.tagof(memoryRef, v) === 120n) return NY_TRUE;
+        return ny.bool(ny.tagof(memoryRef, v) === want);
+      },
       rt_is_float_obj: (v) => ny.bool(ny.isFloat(memoryRef, v)),
+      rt_is_str_obj: (v) => {
+        const tag = ny.tagof(memoryRef, v);
+        return ny.bool(tag === 120n || tag === 121n);
+      },
+      rt_is_ny_obj: (v) => {
+        const tag = ny.tagof(memoryRef, v);
+        return ny.bool(tag !== 0n && tag !== 110n);
+      },
       rt_bigint_from_str: (v) => ny.tag(parseInt(ny.text(memoryRef, v, 0), 10) || 0),
       rt_bigint_to_int: (v) => v,
       rt_fix_fn_ptr: (v) => v,
@@ -1783,72 +2224,119 @@
       rt_flt_from_int: (v) => ny.fltFromNumber(memoryRef, ny.int(v)),
       rt_flt_to_int: (v) => ny.tag(Math.trunc(ny.flt(memoryRef, v))),
       rt_flt_trunc: (v) => ny.tag(Math.trunc(ny.flt(memoryRef, v))),
-      "std.core.pow": (a, b) => ny.fltFromNumber(memoryRef, Math.pow(ny.numeric(memoryRef, a), ny.numeric(memoryRef, b))),
+      "core.pow": (a, b) => ny.fltFromNumber(memoryRef, Math.pow(ny.numeric(memoryRef, a), ny.numeric(memoryRef, b))),
       rt_print_int: (v) => { appendStdout(String(ny.int(v))); return v; },
       rt_print_str_raw: (v) => { appendStdout(ny.valueToString(memoryRef, v)); return v; },
       rt_print_newline: () => { flushStdout(); return 1n; },
+      rt_exit: () => { flushStdout(); return 1n; },
       rt_panic: () => { resetBrowserBoundary(); throw new Error("Ny wasm panic"); },
-      "std.core.panic": (message = 0n) => { resetBrowserBoundary(); throw new Error("Ny wasm panic: " + ny.text(memoryRef, message, 0)); },
+      "core.panic": (message = 0n) => { resetBrowserBoundary(); throw new Error("Ny wasm panic: " + ny.text(memoryRef, message, 0)); },
       rt_os_name: () => ny.string(memoryRef, "web"),
       rt_arch_name: () => ny.string(memoryRef, "wasm32"),
       __os_name: () => ny.string(memoryRef, "web"),
       __arch_name: () => ny.string(memoryRef, "wasm32"),
-      "std.os.exit": () => 0n,
-      "std.os.time.ticks": () => ny.tag(Math.trunc(performance.now() * 1000000)),
+      "core.os.exit": () => 0n,
+      "core.os.time.ticks": () => ny.tag(Math.trunc(performance.now() * 1000000)),
       __time_seconds: () => ny.tag(Math.floor(Date.now() / 1000)),
       __time_milliseconds: () => ny.tag(Date.now()),
       __ticks_ns: () => ny.tag(Math.floor(performance.now() * 1000000)),
-      "std.os.time.now": () => ny.tag(Math.floor(Date.now() / 1000)),
-      "std.os.time.unix": () => ny.tag(Math.floor(Date.now() / 1000)),
-      "std.os.time.now_ms": () => ny.tag(Date.now()),
-      "std.os.time.monotonic_ns": () => ny.tag(Math.floor(performance.now() * 1000000)),
-      "std.os.time.msleep": (ms = 0n) => {
+      "core.os.time.now": () => ny.tag(Math.floor(Date.now() / 1000)),
+      "core.os.time.unix": () => ny.tag(Math.floor(Date.now() / 1000)),
+      "core.os.time.now_ms": () => ny.tag(Date.now()),
+      "core.os.time.monotonic_ns": () => ny.tag(Math.floor(performance.now() * 1000000)),
+      "core.os.time.msleep": (ms = 0n) => {
         if (!asyncifyRef.controller)
-          throw new Error("std.os.time.msleep requires Asyncify instrumentation");
+          throw new Error("core.os.time.msleep requires Asyncify instrumentation");
         asyncifyRef.controller.sleep(ny.int(ms));
         return 0n;
       },
-      "std.os.fetch": webFetch,
+      "core.os.fetch": webFetch,
       __web_fetch: webFetch,
-      "std.os.clipboard.write": webClipboardWrite,
-      "std.os.clipboard.read": webClipboardRead,
-      "std.os.set_clipboard_text": webClipboardWrite,
-      "std.os.get_clipboard_text": webClipboardRead,
+      rt_web_fetch: webFetch,
+      "core.os.clipboard.write": webClipboardWrite,
+      "core.os.clipboard.read": webClipboardRead,
+      "core.os.set_clipboard_text": webClipboardWrite,
+      "core.os.get_clipboard_text": webClipboardRead,
       __web_clipboard_write: webClipboardWrite,
       __web_clipboard_read: webClipboardRead,
-      "std.os.websocket.open": websocketOpen,
-      "std.os.websocket.state": websocketState,
-      "std.os.websocket.send": websocketSend,
-      "std.os.websocket.receive": websocketReceive,
-      "std.os.websocket.close": websocketClose,
+      rt_web_clipboard_write: webClipboardWrite,
+      rt_web_clipboard_read: webClipboardRead,
+      "core.os.websocket.open": websocketOpen,
+      "core.os.websocket.state": websocketState,
+      "core.os.websocket.send": websocketSend,
+      "core.os.websocket.receive": websocketReceive,
+      "core.os.websocket.close": websocketClose,
       __websocket_open: websocketOpen,
       __websocket_state: websocketState,
       __websocket_send: websocketSend,
       __websocket_receive: websocketReceive,
       __websocket_close: websocketClose,
-      "std.os.args.first_positive_int": (fallback = 0n) => {
+      rt_websocket_open: websocketOpen,
+      rt_websocket_state: websocketState,
+      rt_websocket_send: websocketSend,
+      rt_websocket_receive: websocketReceive,
+      rt_websocket_close: websocketClose,
+      "core.os.args.first_positive_int": (fallback = 0n) => {
         for (const arg of refreshRunArgv(meta).slice(3)) {
           const n = parseInt(arg, 10);
           if (Number.isFinite(n) && n > 0) return ny.tag(n);
         }
         return fallback;
       },
-      "std.os.prim.env": () => ny.string(memoryRef, ""),
-      "std.os.prim.os": () => ny.string(memoryRef, "web"),
-      "std.os.os": () => ny.string(memoryRef, "web"),
-      "std.os.sound.init": () => {
+      "core.os.prim.env": () => ny.string(memoryRef, ""),
+      "core.os.prim.os": () => ny.string(memoryRef, "web"),
+      "core.os.os": () => ny.string(memoryRef, "web"),
+      "core.os.sound.init": () => {
         const context = ensureAudio();
         return context ? NY_TRUE : NY_FALSE;
       },
-      "std.os.sound.shutdown": () => {
+      rt_sound_init: (forceAsync = 0n) => {
+        void forceAsync;
+        return ensureAudio() ? NY_TRUE : NY_FALSE;
+      },
+      rt_sound_shutdown: () => { shutdownAudio(); return 0n; },
+      rt_sound_web_play: (path) => {
+        const key = ny.text(memoryRef, path, 0);
+        const normalized = String(key || "").replaceAll("\\", "/").replace(/^\.\//, "");
+        const bytes = assetCache.get(normalized) ||
+          assetCache.get(normalized.split("/").pop());
+        const context = bytes ? ensureAudio() : null;
+        if (!bytes || !context) {
+          canvas.setAttribute("data-audio-decode", "0");
+          return NY_FALSE;
+        }
+        const audioBytes = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+        const startSource = (buffer) => {
+          canvas.setAttribute("data-audio-decode", "1");
+          canvas.setAttribute("data-audio-decode-length", String(buffer.length));
+          canvas.setAttribute("data-audio-decode-duration", String(Math.round(buffer.duration * 1000)));
+          const source = context.createBufferSource();
+          source.buffer = buffer;
+          source.connect(context.destination);
+          source.start(0);
+          canvas.setAttribute("data-audio-source-started", "1");
+          if (context.state === "suspended") context.resume().catch(() => {});
+        };
+        const wav = decodeWavPcm(context, audioBytes);
+        if (wav) startSource(wav);
+        else context.decodeAudioData(audioBytes.slice().buffer).then(startSource)
+          .catch(() => canvas.setAttribute("data-audio-decode", "0"));
+        return NY_TRUE;
+      },
+      "core.os.sound.shutdown": () => {
         shutdownAudio();
         return 0n;
       },
-      "std.os.sound.get_backend_name": () => ny.string(memoryRef, ensureAudio() ? "web-audio" : "none"),
-      "std.os.sound.web_play": (path) => {
+      "core.os.sound.get_backend_name": () => ny.string(memoryRef, ensureAudio() ? "web-audio" : "none"),
+      "core.os.sound.web_play": (path) => {
         const key = ny.text(memoryRef, path, 0);
-        const bytes = assetCache.get(key);
-        const context = ensureAudio();
+        // Ny programs commonly refer to a packed asset by its basename while
+        // the web manifest retains the repository-relative path.  Match the
+        // same path/basename rules used by filesystem asset reads.
+        const normalized = String(key || "").replaceAll("\\", "/").replace(/^\.\//, "");
+        const bytes = assetCache.get(normalized) ||
+          assetCache.get(normalized.split("/").pop());
+        const context = bytes ? ensureAudio() : null;
         if (!bytes || !context) {
           canvas.setAttribute("data-audio-decode", "0");
           return NY_FALSE;
@@ -1874,38 +2362,38 @@
           .catch(() => canvas.setAttribute("data-audio-decode", "0"));
         return NY_TRUE;
       },
-      "std.core.dict_mod.dict": () => 0n,
-      "std.os.args.args": () => {
+      "core.dict_mod.dict": () => 0n,
+      "core.os.args.args": () => {
         const argv = refreshRunArgv(meta);
         const lst = ny.list(memoryRef, argv.length);
         ny.listSetLen(memoryRef, lst, argv.length);
         argv.forEach((arg, i) => ny.listSet(memoryRef, lst, ny.tag(i), ny.string(memoryRef, arg)));
         return lst;
       },
-      "std.core.any.len": (v) => ny.tag(ny.listLen(memoryRef, v) || ny.text(memoryRef, v, 0).length),
-      "std.core.get": (lst, idx, fallback = 0n) => ny.listGet(memoryRef, lst, idx, fallback),
-      "std.core.any.get": (lst, idx, fallback = 0n) => ny.listGet(memoryRef, lst, idx, fallback),
-      "std.core.index_read": (lst, idx) => ny.listGet(memoryRef, lst, idx, 0n),
-      "std.core.range.len": (r) => {
+      "core.any.len": (v) => ny.tag(ny.listLen(memoryRef, v) || ny.text(memoryRef, v, 0).length),
+      "core.get": (lst, idx, fallback = 0n) => ny.listGet(memoryRef, lst, idx, fallback),
+      "core.any.get": (lst, idx, fallback = 0n) => ny.listGet(memoryRef, lst, idx, fallback),
+      "core.index_read": (lst, idx) => ny.listGet(memoryRef, lst, idx, 0n),
+      "core.range.len": (r) => {
         const start = ny.int(ny.listGet(memoryRef, r, ny.tag(0), ny.tag(0)));
         const stop = ny.int(ny.listGet(memoryRef, r, ny.tag(1), ny.tag(0)));
         const step = Math.max(1, ny.int(ny.listGet(memoryRef, r, ny.tag(2), ny.tag(1))));
         return ny.tag(Math.max(0, Math.ceil((stop - start) / step)));
       },
-      "std.core.malloc": (size) => BigInt(ny.alloc(memoryRef, ny.int(size))),
-      "std.core.free": () => 0n,
-      "std.core.assert": (cond, msg = 0n) => {
+      "core.malloc": (size) => BigInt(ny.alloc(memoryRef, ny.int(size))),
+      "core.free": () => 0n,
+      "core.assert": (cond, msg = 0n) => {
         if (BigInt(cond || 0) === NY_FALSE || BigInt(cond || 0) === 0n) throw new Error("assert failed: " + ny.text(memoryRef, msg, 0));
         return cond;
       },
-      "std.core.assert_eq": (a, b, msg = 0n) => {
+      "core.assert_eq": (a, b, msg = 0n) => {
         if (BigInt(a || 0) !== BigInt(b || 0) && ny.numeric(memoryRef, a) !== ny.numeric(memoryRef, b)) {
           throw new Error("assert_eq failed: " + ny.text(memoryRef, msg, 0));
         }
         return a;
       },
-      "std.core.eq": (a, b) => ny.bool(ny.equal(memoryRef, a, b)),
-      "std.core.contains": (container, item) => {
+      "core.eq": (a, b) => ny.bool(ny.equal(memoryRef, a, b)),
+      "core.contains": (container, item) => {
         const containerTag = ny.tagof(memoryRef, container);
         const itemTag = ny.tagof(memoryRef, item);
         if ((containerTag === 120n || containerTag === 121n) &&
@@ -1914,37 +2402,37 @@
         }
         return NY_FALSE;
       },
-      "std.core.lt": (a, b) => ny.bool(ny.numeric(memoryRef, a) < ny.numeric(memoryRef, b)),
-      "std.core.le": (a, b) => ny.bool(ny.numeric(memoryRef, a) <= ny.numeric(memoryRef, b)),
-      "std.core.ge": (a, b) => ny.bool(ny.numeric(memoryRef, a) >= ny.numeric(memoryRef, b)),
-      "std.core.gt": (a, b) => ny.bool(ny.numeric(memoryRef, a) > ny.numeric(memoryRef, b)),
-      "std.math.max": (a, b) => ny.numericResult(memoryRef, Math.max(ny.numeric(memoryRef, a), ny.numeric(memoryRef, b)), ny.isFloat(memoryRef, a) || ny.isFloat(memoryRef, b)),
-      "std.math.min": (a, b) => ny.numericResult(memoryRef, Math.min(ny.numeric(memoryRef, a), ny.numeric(memoryRef, b)), ny.isFloat(memoryRef, a) || ny.isFloat(memoryRef, b)),
-      "std.math.abs": (a) => ny.numericResult(memoryRef, Math.abs(ny.numeric(memoryRef, a)), ny.isFloat(memoryRef, a)),
-      "std.math.clamp": (v, lo, hi) => ny.numericResult(memoryRef, Math.min(Math.max(ny.numeric(memoryRef, v), ny.numeric(memoryRef, lo)), ny.numeric(memoryRef, hi)), ny.isFloat(memoryRef, v) || ny.isFloat(memoryRef, lo) || ny.isFloat(memoryRef, hi)),
-      "std.math.lerp": (a, b, t) => ny.numericResult(memoryRef, ny.numeric(memoryRef, a) + (ny.numeric(memoryRef, b) - ny.numeric(memoryRef, a)) * ny.numeric(memoryRef, t), ny.isFloat(memoryRef, a) || ny.isFloat(memoryRef, b) || ny.isFloat(memoryRef, t)),
-      "std.core.is_str": (v) => {
+      "core.lt": (a, b) => ny.bool(ny.numeric(memoryRef, a) < ny.numeric(memoryRef, b)),
+      "core.le": (a, b) => ny.bool(ny.numeric(memoryRef, a) <= ny.numeric(memoryRef, b)),
+      "core.ge": (a, b) => ny.bool(ny.numeric(memoryRef, a) >= ny.numeric(memoryRef, b)),
+      "core.gt": (a, b) => ny.bool(ny.numeric(memoryRef, a) > ny.numeric(memoryRef, b)),
+      "core.math.max": (a, b) => ny.numericResult(memoryRef, Math.max(ny.numeric(memoryRef, a), ny.numeric(memoryRef, b)), ny.isFloat(memoryRef, a) || ny.isFloat(memoryRef, b)),
+      "core.math.min": (a, b) => ny.numericResult(memoryRef, Math.min(ny.numeric(memoryRef, a), ny.numeric(memoryRef, b)), ny.isFloat(memoryRef, a) || ny.isFloat(memoryRef, b)),
+      "core.math.abs": (a) => ny.numericResult(memoryRef, Math.abs(ny.numeric(memoryRef, a)), ny.isFloat(memoryRef, a)),
+      "core.math.clamp": (v, lo, hi) => ny.numericResult(memoryRef, Math.min(Math.max(ny.numeric(memoryRef, v), ny.numeric(memoryRef, lo)), ny.numeric(memoryRef, hi)), ny.isFloat(memoryRef, v) || ny.isFloat(memoryRef, lo) || ny.isFloat(memoryRef, hi)),
+      "core.math.lerp": (a, b, t) => ny.numericResult(memoryRef, ny.numeric(memoryRef, a) + (ny.numeric(memoryRef, b) - ny.numeric(memoryRef, a)) * ny.numeric(memoryRef, t), ny.isFloat(memoryRef, a) || ny.isFloat(memoryRef, b) || ny.isFloat(memoryRef, t)),
+      "core.is_str": (v) => {
         const tag = ny.tagof(memoryRef, v);
         return ny.bool(tag === 120n || tag === 121n);
       },
-      "std.core.atoi": (v) => ny.tag(parseInt(ny.text(memoryRef, v, 0), 10) || 0),
-      "std.core.to_str": (v) => ny.string(memoryRef, ny.valueToString(memoryRef, v)),
-      "std.core.reflect.to_str": (v) => ny.string(memoryRef, ny.valueToString(memoryRef, v)),
-      "std.core.reflect.div": (a, b) => ny.tag(Math.trunc(ny.numeric(memoryRef, a) / Math.max(1, ny.numeric(memoryRef, b)))),
-      "std.core.reflect.eq": (a, b) => ny.bool(ny.equal(memoryRef, a, b)),
-      "std.core.type": (v) => ny.tag(Number(ny.tagof(memoryRef, v))),
-      "std.core.ok": (v) => v,
-      "std.core.term.write_str": () => 0n,
-      "std.core.term.color": (s) => s || 0n,
-      "std.core.term.tui_begin": () => 0n,
-      "std.core.term.tui_end": () => 0n,
-      "std.core.term.poll_key": () => ny.tag(0),
-      "std.core.term.is_quit_key": () => ny.tag(0),
-      "std.core.term.canvas": () => 0n,
-      "std.core.term.canvas_clear": () => 0n,
-      "std.core.term.canvas_set": () => 0n,
-      "std.core.term.canvas_refresh": () => 0n,
-      "std.core.term.get_terminal_size": () => 0n,
+      "core.atoi": (v) => ny.tag(parseInt(ny.text(memoryRef, v, 0), 10) || 0),
+      "core.to_str": (v) => ny.string(memoryRef, ny.valueToString(memoryRef, v)),
+      "core.reflect.to_str": (v) => ny.string(memoryRef, ny.valueToString(memoryRef, v)),
+      "core.reflect.div": (a, b) => ny.tag(Math.trunc(ny.numeric(memoryRef, a) / Math.max(1, ny.numeric(memoryRef, b)))),
+      "core.reflect.eq": (a, b) => ny.bool(ny.equal(memoryRef, a, b)),
+      "core.type": (v) => ny.tag(Number(ny.tagof(memoryRef, v))),
+      "core.ok": (v) => v,
+      "core.term.write_str": () => 0n,
+      "core.term.color": (s) => s || 0n,
+      "core.term.tui_begin": () => 0n,
+      "core.term.tui_end": () => 0n,
+      "core.term.poll_key": () => ny.tag(0),
+      "core.term.is_quit_key": () => ny.tag(0),
+      "core.term.canvas": () => 0n,
+      "core.term.canvas_clear": () => 0n,
+      "core.term.canvas_set": () => 0n,
+      "core.term.canvas_refresh": () => 0n,
+      "core.term.get_terminal_size": () => 0n,
       __multi3: (out, aLo, aHi, bLo, bHi) => {
         const mask = (1n << 64n) - 1n;
         const a = (BigInt.asIntN(64, BigInt(aHi || 0)) << 64n) | (BigInt(aLo || 0) & mask);
@@ -1966,7 +2454,20 @@
       if (imp.kind === "memory") imports[imp.module][imp.name] = memoryRef.memory;
       else if (imp.kind === "table") imports[imp.module][imp.name] = new WebAssembly.Table({ initial: 0, element: "anyfunc" });
       else if (imp.kind === "global") imports[imp.module][imp.name] = new WebAssembly.Global({ value: "i64", mutable: true }, 0n);
-      else if (imp.kind === "function") imports[imp.module][imp.name] = host[imp.name] || (() => { throw new Error(`${meta.id}: unsupported import ${imp.module}.${imp.name}`); });
+      else if (imp.kind === "function") {
+        /* Never turn an unresolved host capability into a successful zero.
+         * The wasm module must either have an explicit adapter above or fail
+         * at instantiation with the exact missing module and symbol. This
+         * keeps unsupported runtime features observable instead of silently
+         * corrupting later state. */
+        imports[imp.module][imp.name] = host[imp.name] || (() => {
+          if (/^(?:FT_|egl[A-Z]|gl[A-Z]|vk[A-Z]|wl_[a-z]|jack_[a-z]|pa_[a-z]|snd_[a-z])/.test(imp.name) ||
+              ["_setjmp", "poll", "xkb_state_mod_index_is_active"].includes(imp.name)) {
+            throw new Error(`${meta.id}: native renderer import ${imp.module}.${imp.name} is unreachable in the browser`);
+          }
+          throw new Error(`${meta.id}: unsupported import ${imp.module}.${imp.name}`);
+        });
+      }
     }
     return { imports, asyncifyRef };
   }
@@ -1979,7 +2480,7 @@
    * with `#touch-selftest`, this routine dispatches a real TouchEvent
    * sequence on the canvas after the app starts; the fixture reads the touch
    * state through the public input facade and echoes it back via
-   * `std.os.ui.window.test_report_touch` into data-touch-* attributes, which
+   * `core.os.ui.window.test_report_touch` into data-touch-* attributes, which
    * the harness greps out of --dump-dom.
    */
   function scheduleTouchSelftest(canvas) {
@@ -2145,7 +2646,7 @@
       resetBrowserBoundary();
       currentRuntime = null;
       setKernelStatus("Error", "warn");
-      resetOutput([currentMeta.id, "runtime error", err.stack || err.message]);
+      resetOutput([currentMeta.id, "runtime error", err.message || err.stack]);
       if (wantsCliStage(currentMeta, currentRuntime)) refreshCliStage();
       else drawStatusSurface("Runtime Error", [err.message]);
     }

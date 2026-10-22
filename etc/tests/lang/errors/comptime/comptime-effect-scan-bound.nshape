@@ -1,0 +1,535 @@
+shape comptime_effect_scan_bound_fails_closed {
+  family "runtime/errors"
+  generator "regression"
+  features ["ny" "test" "comptime" "effects" "call-graph-bound"]
+  template ny-test-case
+  flags_matrix "--no-effect-require-known --native --run; --no-effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --no-effect-require-known --native-backend=llvm --jit --jit-engine=orc; --no-effect-require-known --native-only"
+  expect compile_fail
+  expect_message "comptime effect analysis is incomplete; cannot verify that the expression is IO-free"
+  source ny <<'NY'
+fn scan_0(fnptr cb) int {
+  cb()
+  return scan_1(cb)
+}
+fn scan_1(fnptr cb) int {
+  cb()
+  return scan_2(cb)
+}
+fn scan_2(fnptr cb) int {
+  cb()
+  return scan_3(cb)
+}
+fn scan_3(fnptr cb) int {
+  cb()
+  return scan_4(cb)
+}
+fn scan_4(fnptr cb) int {
+  cb()
+  return scan_5(cb)
+}
+fn scan_5(fnptr cb) int {
+  cb()
+  return scan_6(cb)
+}
+fn scan_6(fnptr cb) int {
+  cb()
+  return scan_7(cb)
+}
+fn scan_7(fnptr cb) int {
+  cb()
+  return scan_8(cb)
+}
+fn scan_8(fnptr cb) int {
+  cb()
+  return scan_9(cb)
+}
+fn scan_9(fnptr cb) int {
+  cb()
+  return scan_10(cb)
+}
+fn scan_10(fnptr cb) int {
+  cb()
+  return scan_11(cb)
+}
+fn scan_11(fnptr cb) int {
+  cb()
+  return scan_12(cb)
+}
+fn scan_12(fnptr cb) int {
+  cb()
+  return scan_13(cb)
+}
+fn scan_13(fnptr cb) int {
+  cb()
+  return scan_14(cb)
+}
+fn scan_14(fnptr cb) int {
+  cb()
+  return scan_15(cb)
+}
+fn scan_15(fnptr cb) int {
+  cb()
+  return scan_16(cb)
+}
+fn scan_16(fnptr cb) int {
+  cb()
+  return scan_17(cb)
+}
+fn scan_17(fnptr cb) int {
+  cb()
+  return scan_18(cb)
+}
+fn scan_18(fnptr cb) int {
+  cb()
+  return scan_19(cb)
+}
+fn scan_19(fnptr cb) int {
+  cb()
+  return scan_20(cb)
+}
+fn scan_20(fnptr cb) int {
+  cb()
+  return scan_21(cb)
+}
+fn scan_21(fnptr cb) int {
+  cb()
+  return scan_22(cb)
+}
+fn scan_22(fnptr cb) int {
+  cb()
+  return scan_23(cb)
+}
+fn scan_23(fnptr cb) int {
+  cb()
+  return scan_24(cb)
+}
+fn scan_24(fnptr cb) int {
+  cb()
+  return scan_25(cb)
+}
+fn scan_25(fnptr cb) int {
+  cb()
+  return scan_26(cb)
+}
+fn scan_26(fnptr cb) int {
+  cb()
+  return scan_27(cb)
+}
+fn scan_27(fnptr cb) int {
+  cb()
+  return scan_28(cb)
+}
+fn scan_28(fnptr cb) int {
+  cb()
+  return scan_29(cb)
+}
+fn scan_29(fnptr cb) int {
+  cb()
+  return scan_30(cb)
+}
+fn scan_30(fnptr cb) int {
+  cb()
+  return scan_31(cb)
+}
+fn scan_31(fnptr cb) int {
+  cb()
+  return scan_32(cb)
+}
+fn scan_32(fnptr cb) int {
+  cb()
+  return scan_33(cb)
+}
+fn scan_33(fnptr cb) int {
+  cb()
+  return scan_34(cb)
+}
+fn scan_34(fnptr cb) int {
+  cb()
+  return scan_35(cb)
+}
+fn scan_35(fnptr cb) int {
+  cb()
+  return scan_36(cb)
+}
+fn scan_36(fnptr cb) int {
+  cb()
+  return scan_37(cb)
+}
+fn scan_37(fnptr cb) int {
+  cb()
+  return scan_38(cb)
+}
+fn scan_38(fnptr cb) int {
+  cb()
+  return scan_39(cb)
+}
+fn scan_39(fnptr cb) int {
+  cb()
+  return scan_40(cb)
+}
+fn scan_40(fnptr cb) int {
+  cb()
+  return scan_41(cb)
+}
+fn scan_41(fnptr cb) int {
+  cb()
+  return scan_42(cb)
+}
+fn scan_42(fnptr cb) int {
+  cb()
+  return scan_43(cb)
+}
+fn scan_43(fnptr cb) int {
+  cb()
+  return scan_44(cb)
+}
+fn scan_44(fnptr cb) int {
+  cb()
+  return scan_45(cb)
+}
+fn scan_45(fnptr cb) int {
+  cb()
+  return scan_46(cb)
+}
+fn scan_46(fnptr cb) int {
+  cb()
+  return scan_47(cb)
+}
+fn scan_47(fnptr cb) int {
+  cb()
+  return scan_48(cb)
+}
+fn scan_48(fnptr cb) int {
+  cb()
+  return scan_49(cb)
+}
+fn scan_49(fnptr cb) int {
+  cb()
+  return scan_50(cb)
+}
+fn scan_50(fnptr cb) int {
+  cb()
+  return scan_51(cb)
+}
+fn scan_51(fnptr cb) int {
+  cb()
+  return scan_52(cb)
+}
+fn scan_52(fnptr cb) int {
+  cb()
+  return scan_53(cb)
+}
+fn scan_53(fnptr cb) int {
+  cb()
+  return scan_54(cb)
+}
+fn scan_54(fnptr cb) int {
+  cb()
+  return scan_55(cb)
+}
+fn scan_55(fnptr cb) int {
+  cb()
+  return scan_56(cb)
+}
+fn scan_56(fnptr cb) int {
+  cb()
+  return scan_57(cb)
+}
+fn scan_57(fnptr cb) int {
+  cb()
+  return scan_58(cb)
+}
+fn scan_58(fnptr cb) int {
+  cb()
+  return scan_59(cb)
+}
+fn scan_59(fnptr cb) int {
+  cb()
+  return scan_60(cb)
+}
+fn scan_60(fnptr cb) int {
+  cb()
+  return scan_61(cb)
+}
+fn scan_61(fnptr cb) int {
+  cb()
+  return scan_62(cb)
+}
+fn scan_62(fnptr cb) int {
+  cb()
+  return scan_63(cb)
+}
+fn scan_63(fnptr cb) int {
+  cb()
+  return scan_64(cb)
+}
+fn scan_64(fnptr cb) int {
+  cb()
+  return scan_65(cb)
+}
+fn scan_65(fnptr cb) int {
+  cb()
+  return scan_66(cb)
+}
+fn scan_66(fnptr cb) int {
+  cb()
+  return scan_67(cb)
+}
+fn scan_67(fnptr cb) int {
+  cb()
+  return scan_68(cb)
+}
+fn scan_68(fnptr cb) int {
+  cb()
+  return scan_69(cb)
+}
+fn scan_69(fnptr cb) int {
+  cb()
+  return scan_70(cb)
+}
+fn scan_70(fnptr cb) int {
+  cb()
+  return scan_71(cb)
+}
+fn scan_71(fnptr cb) int {
+  cb()
+  return scan_72(cb)
+}
+fn scan_72(fnptr cb) int {
+  cb()
+  return scan_73(cb)
+}
+fn scan_73(fnptr cb) int {
+  cb()
+  return scan_74(cb)
+}
+fn scan_74(fnptr cb) int {
+  cb()
+  return scan_75(cb)
+}
+fn scan_75(fnptr cb) int {
+  cb()
+  return scan_76(cb)
+}
+fn scan_76(fnptr cb) int {
+  cb()
+  return scan_77(cb)
+}
+fn scan_77(fnptr cb) int {
+  cb()
+  return scan_78(cb)
+}
+fn scan_78(fnptr cb) int {
+  cb()
+  return scan_79(cb)
+}
+fn scan_79(fnptr cb) int {
+  cb()
+  return scan_80(cb)
+}
+fn scan_80(fnptr cb) int {
+  cb()
+  return scan_81(cb)
+}
+fn scan_81(fnptr cb) int {
+  cb()
+  return scan_82(cb)
+}
+fn scan_82(fnptr cb) int {
+  cb()
+  return scan_83(cb)
+}
+fn scan_83(fnptr cb) int {
+  cb()
+  return scan_84(cb)
+}
+fn scan_84(fnptr cb) int {
+  cb()
+  return scan_85(cb)
+}
+fn scan_85(fnptr cb) int {
+  cb()
+  return scan_86(cb)
+}
+fn scan_86(fnptr cb) int {
+  cb()
+  return scan_87(cb)
+}
+fn scan_87(fnptr cb) int {
+  cb()
+  return scan_88(cb)
+}
+fn scan_88(fnptr cb) int {
+  cb()
+  return scan_89(cb)
+}
+fn scan_89(fnptr cb) int {
+  cb()
+  return scan_90(cb)
+}
+fn scan_90(fnptr cb) int {
+  cb()
+  return scan_91(cb)
+}
+fn scan_91(fnptr cb) int {
+  cb()
+  return scan_92(cb)
+}
+fn scan_92(fnptr cb) int {
+  cb()
+  return scan_93(cb)
+}
+fn scan_93(fnptr cb) int {
+  cb()
+  return scan_94(cb)
+}
+fn scan_94(fnptr cb) int {
+  cb()
+  return scan_95(cb)
+}
+fn scan_95(fnptr cb) int {
+  cb()
+  return scan_96(cb)
+}
+fn scan_96(fnptr cb) int {
+  cb()
+  return scan_97(cb)
+}
+fn scan_97(fnptr cb) int {
+  cb()
+  return scan_98(cb)
+}
+fn scan_98(fnptr cb) int {
+  cb()
+  return scan_99(cb)
+}
+fn scan_99(fnptr cb) int {
+  cb()
+  return scan_100(cb)
+}
+fn scan_100(fnptr cb) int {
+  cb()
+  return scan_101(cb)
+}
+fn scan_101(fnptr cb) int {
+  cb()
+  return scan_102(cb)
+}
+fn scan_102(fnptr cb) int {
+  cb()
+  return scan_103(cb)
+}
+fn scan_103(fnptr cb) int {
+  cb()
+  return scan_104(cb)
+}
+fn scan_104(fnptr cb) int {
+  cb()
+  return scan_105(cb)
+}
+fn scan_105(fnptr cb) int {
+  cb()
+  return scan_106(cb)
+}
+fn scan_106(fnptr cb) int {
+  cb()
+  return scan_107(cb)
+}
+fn scan_107(fnptr cb) int {
+  cb()
+  return scan_108(cb)
+}
+fn scan_108(fnptr cb) int {
+  cb()
+  return scan_109(cb)
+}
+fn scan_109(fnptr cb) int {
+  cb()
+  return scan_110(cb)
+}
+fn scan_110(fnptr cb) int {
+  cb()
+  return scan_111(cb)
+}
+fn scan_111(fnptr cb) int {
+  cb()
+  return scan_112(cb)
+}
+fn scan_112(fnptr cb) int {
+  cb()
+  return scan_113(cb)
+}
+fn scan_113(fnptr cb) int {
+  cb()
+  return scan_114(cb)
+}
+fn scan_114(fnptr cb) int {
+  cb()
+  return scan_115(cb)
+}
+fn scan_115(fnptr cb) int {
+  cb()
+  return scan_116(cb)
+}
+fn scan_116(fnptr cb) int {
+  cb()
+  return scan_117(cb)
+}
+fn scan_117(fnptr cb) int {
+  cb()
+  return scan_118(cb)
+}
+fn scan_118(fnptr cb) int {
+  cb()
+  return scan_119(cb)
+}
+fn scan_119(fnptr cb) int {
+  cb()
+  return scan_120(cb)
+}
+fn scan_120(fnptr cb) int {
+  cb()
+  return scan_121(cb)
+}
+fn scan_121(fnptr cb) int {
+  cb()
+  return scan_122(cb)
+}
+fn scan_122(fnptr cb) int {
+  cb()
+  return scan_123(cb)
+}
+fn scan_123(fnptr cb) int {
+  cb()
+  return scan_124(cb)
+}
+fn scan_124(fnptr cb) int {
+  cb()
+  return scan_125(cb)
+}
+fn scan_125(fnptr cb) int {
+  cb()
+  return scan_126(cb)
+}
+fn scan_126(fnptr cb) int {
+  cb()
+  return scan_127(cb)
+}
+fn scan_127(fnptr cb) int {
+  cb()
+  return scan_128(cb)
+}
+fn scan_128(fnptr cb) int {
+  cb()
+  return scan_129(cb)
+}
+fn scan_129(fnptr cb) int {
+  cb()
+  print("deep helper IO")
+  return 1
+}
+fn safe_callback() int { return 0 }
+def value = comptime { return scan_0(safe_callback) }
+print(value)
+NY
+}

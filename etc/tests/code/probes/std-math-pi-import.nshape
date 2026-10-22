@@ -1,0 +1,16 @@
+shape std_math_pi_import {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "compiler"]
+  template ny-test-case
+  expect compile_and_run
+  ci optional
+  source ny <<'NY'
+use core
+use core.math as math
+
+assert(math.PI > 3.14 && math.PI < 3.15, "core.math PI export")
+assert(math.TAU > 6.28 && math.TAU < 6.29, "core.math TAU export")
+print("core.math aliased constants ok")
+NY
+}

@@ -1,0 +1,46 @@
+shape canonical_code_str {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "comptime", "ast", "serialization", "canonical"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-only; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.compiler.ast (code_str)
+use core.str (atof)
+use core.math.parse.data.json (json_decode, json_encode)
+
+def first = json_decode("{\"z\":[{\"c\":3,\"a\":1},false],\"b\":\"line\\nnext\",\"a\":{\"b\":2,\"a\":1}}")
+def second = json_decode("{\"a\":{\"a\":1,\"b\":2},\"b\":\"line\\nnext\",\"z\":[{\"a\":1,\"c\":3},false]}")
+def canonical = "{\"a\":{\"a\":1,\"b\":2},\"b\":\"line\\nnext\",\"z\":[{\"a\":1,\"c\":3},false]}"
+assert(code_str(first) == canonical && code_str(second) == canonical,
+       "canonical code sorts nested object keys independent of insertion order")
+assert(code_str(json_decode(code_str(first))) == canonical,
+       "canonical code is stable after decoding")
+assert(code_str({"z":0,"aa":2,"a":1,"b":3}) ==
+       "{\"a\":1,\"aa\":2,\"b\":3,\"z\":0}",
+       "canonical key order is lexical, including prefix keys")
+def folded = comptime { return {"z":0,"a":1} }
+assert(code_str(folded) == "{\"a\":1,\"z\":0}",
+       "comptime dictionaries preserve dynamic integer slots")
+assert(code_str([]) == "[]" && code_str(dict()) == "{}",
+       "canonical code handles empty containers")
+assert(json_encode(0) == "0" && json_encode(nil) == "null" &&
+       json_encode(false) == "false",
+       "JSON keeps integer zero, nil, and false distinct")
+def float_record = json_decode("{\"value\":0.10000000000000001}")
+assert(code_str(float_record) == "{\"value\":0.10000000000000001}" &&
+       code_str(json_decode(code_str(float_record))) == code_str(float_record),
+       "canonical JSON preserves round-trip f64 precision")
+def negative_zero = json_decode("{\"value\":-0.0}")
+assert(code_str(negative_zero) == "{\"value\":-0.0}" &&
+       code_str(json_decode(code_str(negative_zero))) == code_str(negative_zero),
+       "canonical JSON preserves floating negative zero")
+assert(code_str({1:"invalid"}) == "" && code_str(42) == "",
+       "canonical code rejects nonstring object keys and scalar code")
+assert(code_str({"value":atof("inf")}) == "" &&
+       code_str({"value":atof("nan")}) == "",
+       "canonical code rejects non-JSON floating point values")
+NY
+}

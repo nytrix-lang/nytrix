@@ -1,0 +1,40 @@
+shape comptime_clone_declarations {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "comptime", "template", "control-flow", "module"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-only; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+comptime template jump(name, target) {
+   fn ${name}() int {
+      goto ${target}
+      return 0
+      ${target}:
+      return 9
+   }
+}
+comptime emit jump(ident("generated_jump"), ident("finish"))
+assert(generated_jump() == 9, "template cloning substitutes labels and gotos")
+
+comptime template generated_module(name) {
+   module ${name} {
+      fn value() int { return 11 }
+   }
+}
+comptime emit generated_module(ident("GeneratedModule"))
+assert(GeneratedModule.value() == 11,
+       "template cloning preserves generated module bodies")
+
+comptime template generated_import(alias, name) {
+   use core.math.scalar as ${alias}
+   fn ${name}() number { return ${alias}.min(2, 3) }
+}
+comptime emit generated_import(ident("generated_math"),
+                                ident("generated_constant"))
+assert(generated_constant() == 2,
+       "template cloning substitutes module aliases in generated imports")
+NY
+}

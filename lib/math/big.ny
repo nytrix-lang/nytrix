@@ -1,13 +1,13 @@
 ;; Keywords: big bigint bignum math
 ;; arbitrary-precision integer and native binary floating-point arithmetic.
 ;; References:
-;; - std.math
-module std.math.big(is_bigint, bigint, bigint_from_int, bigint_from_str, bigint_to_str,
+;; - core.math
+module core.math.big(is_bigint, bigint, bigint_from_int, bigint_from_str, bigint_to_str,
    bigint_add, bigint_sub, bigint_mul, bigint_div, bigint_mod, bigint_cmp,
    bigint_eq, bigint_neq, bigint_lt, bigint_le, bigint_gt, bigint_ge,
    bigint_neg, bigint_abs, bigint_clone, bigint_pow, bigint_divmod,
    bigint_bit_length, bigint_to_int, bigint_random, bigint_random_bits,
-   bigint_lshift, bigint_or, bigint_xor, bigint_popcount, bigint_nth_root,
+   bigint_lshift, bigint_rshift, bigint_and, bigint_or, bigint_xor, bigint_popcount, bigint_nth_root,
    _big_make, _big_digits, _big_sign, _big_abs_cmp,
    _big_from_int, _big_add_abs, _big_sub_abs, _big_mul_abs, _big_mul_small, _big_add_small, _digits_prepend,
    _big_divmod_abs,
@@ -15,9 +15,9 @@ module std.math.big(is_bigint, bigint, bigint_from_int, bigint_from_str, bigint_
    bf_from_int, bf_from_float, bf_to_float, bf_to_str, bf_precision,
    bf_add, bf_sub, bf_mul, bf_div, bf_neg, bf_abs, bf_sign,
    bf_eq, bf_lt, bf_gt, bf_le, bf_ge, bf_sqrt, bf_pow_int)
-use std.core
-use std.core.str
-use std.math.float (float)
+use core
+use core.str
+use core.math.float (float)
 
 def _TAG_BIGINT = __runtime_tag("bigint")
 def _TAG_LIST = __runtime_tag("list")
@@ -45,9 +45,9 @@ fn _big_randint(int a, int b) int {
 }
 
 fn _big_is_rt(any x) bool {
-   ; Loop- and call-carried runtime BigInt handles keep their concrete object
-   ; tag even when generic any provenance is unavailable to __has_tag.
-   __tagof(x) == _TAG_BIGINT
+   ; Use the runtime's provenance-checked BigInt tag check. Generic tag
+   ; classification also probes dictionaries, sets, and sequence handles.
+   __is_bigint(x)
 }
 
 fn _big_zero() bigint { __bigint_from_int(0) }
@@ -98,7 +98,7 @@ fn _big_from_int(int n) bigint { __bigint_from_int(n) }
 
 fn bigint(any x) bigint {
    "Converts an integer, string, or existing bigint to a BigInt object."
-   if _big_is_rt(x) || is_bigint(x) { return x }
+   if __is_bigint(x) || is_bigint(x) { return x }
    if is_int(x) { return __bigint_from_int(x) }
    if is_str(x) { return bigint_from_str(x) }
    _big_zero()
@@ -200,14 +200,20 @@ fn _big_sub_abs(any a, any b) any {
    _big_make(1, trimmed, true)
 }
 
+@inline
 fn bigint_add(any a, any b) bigint {
    "Adds two BigInts together."
-   __bigint_add(bigint(a), bigint(b))
+   def lhs = is_int(a) ? a : bigint(a)
+   def rhs = is_int(b) ? b : bigint(b)
+   __bigint_add(lhs, rhs)
 }
 
+@inline
 fn bigint_sub(any a, any b) bigint {
    "Subtracts BigInt `b` from BigInt `a`."
-   __bigint_sub(bigint(a), bigint(b))
+   def lhs = is_int(a) ? a : bigint(a)
+   def rhs = is_int(b) ? b : bigint(b)
+   __bigint_sub(lhs, rhs)
 }
 
 fn _big_mul_abs(any a, any b) any {
@@ -248,9 +254,15 @@ fn _big_mul_abs(any a, any b) any {
    _big_make(1, trimmed, true)
 }
 
+@inline
 fn bigint_mul(any a, any b) bigint {
    "Multiplies two BigInts."
-   __bigint_mul(bigint(a), bigint(b))
+   ;; The runtime arithmetic accepts tagged integers directly. Preserve that
+   ;; representation instead of allocating a temporary BigInt for a scalar
+   ;; factor (common in fixed-point and limb algorithms).
+   def lhs = is_int(a) ? a : bigint(a)
+   def rhs = is_int(b) ? b : bigint(b)
+   __bigint_mul(lhs, rhs)
 }
 
 fn _big_mul_small(any a, int m) any {
@@ -342,18 +354,23 @@ fn _big_divmod_abs(any a, any b) list {
    return [q, r]
 }
 
+@inline
 fn bigint_div(any a, any b) bigint {
    "Integer division of BigInts."
-   def bb = bigint(b)
-   if __bigint_cmp(bb, _big_zero()) == 0 { panic("bigint division by zero") }
-   __bigint_div(bigint(a), bb)
+   ;; Small integer divisors have a dedicated runtime path and need no heap
+   ;; BigInt wrapper.
+   def aa = is_int(a) ? a : bigint(a)
+   def bb = is_int(b) ? b : bigint(b)
+   if __bigint_cmp(bb, 0) == 0 { panic("bigint division by zero") }
+   __bigint_div(aa, bb)
 }
 
 fn bigint_mod(any a, any b) bigint {
    "Modulo of BigInts."
-   def bb = bigint(b)
-   if __bigint_cmp(bb, _big_zero()) == 0 { panic("bigint division by zero") }
-   __bigint_mod(bigint(a), bb)
+   def aa = is_int(a) ? a : bigint(a)
+   def bb = is_int(b) ? b : bigint(b)
+   if __bigint_cmp(bb, 0) == 0 { panic("bigint division by zero") }
+   __bigint_mod(aa, bb)
 }
 
 fn bigint_cmp(any a, any b) int {
@@ -405,14 +422,16 @@ fn bigint_neg(any a) bigint {
 
 fn bigint_abs(bigint a) bigint {
    "Absolute value of BigInt."
-   def x = bigint(a)
-   if bigint_cmp(x, _big_zero()) < 0 { return bigint_neg(x) }
-   x
+   ;; `a` is a BigInt handle.  Re-constructing it through bigint(a) would
+   ;; reinterpret the handle word as an integer value (bit length of the
+   ;; pointer, not of the number), so compare and negate the handle itself.
+   if bigint_cmp(a, _big_zero()) < 0 { return bigint_neg(a) }
+   a
 }
 
 fn bigint_clone(bigint a) bigint {
    "Clone BigInt."
-   bigint_add(bigint(a), _big_zero())
+   bigint_add(a, _big_zero())
 }
 
 fn bigint_pow(any a, any b) bigint {
@@ -426,16 +445,22 @@ fn bigint_divmod(any a, any b) list {
 }
 
 fn bigint_bit_length(bigint a) int {
-   "Number of bits needed to represent BigInt."
+   "Number of bits in the absolute magnitude; zero has bit length zero."
    __bigint_bitlen(bigint_abs(a))
 }
 
 fn bigint_to_int(any a) int {
    "Convert BigInt to int(may overflow for large values)."
-   if is_int(a) { return to_int(a) }
-   ; __bigint_to_int returns a tagged integer at the runtime boundary, while
-   ; this public helper promises a raw `int` for arithmetic and loop tests.
-   __untag(__bigint_to_int(bigint(a)))
+   ;; Tagged bigint handles are odd words, indistinguishable from tagged
+   ;; small ints at the raw is_int parity check — routing a handle through
+   ;; the int fast path decoded the handle word as the value.  The runtime
+   ;; tag is the authority.
+   if type(a) == "int" { return to_int(a) }
+   ; The internal conversion bridge returns a raw i64 for arithmetic, and
+   ; its BIGINT_VALUES ABI decodes tagged handles directly — re-wrapping a
+   ; handle through the bigint() constructor would read the handle word as
+   ; an integer value.
+   __bigint_to_int(a)
 }
 
 fn bigint_random(any n) bigint {
@@ -460,71 +485,41 @@ fn bigint_random_bits(int bits) bigint {
 
 fn bigint_lshift(bigint a, int n) bigint {
    "Left shift: a << n(multiply by 2^n)."
-   bigint_mul(bigint(a), bigint_pow(bigint_from_int(2), bigint_from_int(n)))
+   bigint_mul(a, bigint_pow(bigint_from_int(2), bigint_from_int(n)))
+}
+
+fn bigint_rshift(bigint a, int n) bigint {
+   "Arithmetic right shift in the BigInt domain."
+   if n <= 0 { return a }
+   bigint_div(a, bigint_pow(bigint_from_int(2), bigint_from_int(n)))
 }
 
 fn bigint_or(bigint a, bigint b) bigint {
    "Bitwise OR for non-negative BigInts."
-   __bigint_or(bigint(a), bigint(b))
+   __bigint_or(a, b)
+}
+
+fn bigint_and(bigint a, bigint b) bigint {
+   "Bitwise AND for non-negative BigInts."
+   __bigint_and(a, b)
 }
 
 fn bigint_xor(bigint a, bigint b) bigint {
    "Bitwise XOR for non-negative BigInts."
-   __bigint_xor(bigint(a), bigint(b))
+   __bigint_xor(a, b)
 }
 
 fn bigint_popcount(bigint a) int {
-   "Count set bits in a non-negative BigInt."
+   "Count set bits in the absolute magnitude of a BigInt."
    __bigint_popcount(bigint_abs(a))
 }
 
-fn _big_pow_small(any base, int exp) bigint {
-   mut acc = bigint_from_int(1)
-   mut i = 0
-   while i < exp {
-      acc = bigint_mul(acc, base)
-      i += 1
-   }
-   acc
-}
-
 fn bigint_nth_root(bigint a, int n) bigint {
-   "Integer n-th root using Newton iteration."
-   def aa = bigint_abs(a)
+   "Returns the floor of the n-th root of |a|; zero for nonpositive n."
    if n <= 0 { return bigint_from_int(0) }
-   if bigint_eq(aa, bigint_from_int(0)) { return bigint_from_int(0) }
-   if n == 1 { return bigint_clone(aa) }
-   def n_big = bigint_from_int(n)
-   def nm1_big = bigint_from_int(n - 1)
-   def bits = bigint_bit_length(aa)
-   def guess_bits = (bits + n - 1) / n + 1
-   mut x = bigint_pow(bigint_from_int(2), bigint_from_int(guess_bits))
-   mut hi_bound = x
-   while true {
-      def x_nm1 = _big_pow_small(x, n - 1)
-      if bigint_eq(x_nm1, bigint_from_int(0)) { return bigint_from_int(0) }
-      def term = bigint_div(aa, x_nm1)
-      def y = bigint_div(bigint_add(bigint_mul(nm1_big, x), term), n_big)
-      if bigint_ge(y, x) {
-         mut lo = x
-         mut hi = hi_bound
-         if bigint_gt(_big_pow_small(lo, n), aa) {
-            hi = lo
-            lo = bigint_div(lo, bigint_from_int(2))
-         }
-         while bigint_gt(_big_pow_small(lo, n), aa) {
-            hi = lo
-            lo = bigint_div(lo, bigint_from_int(2))
-         }
-         while bigint_lt(lo, hi) {
-            def mid = bigint_div(bigint_add(bigint_add(lo, hi), bigint_from_int(1)), bigint_from_int(2))
-            if bigint_le(_big_pow_small(mid, n), aa) { lo = mid } else { hi = bigint_sub(mid, bigint_from_int(1)) }
-         }
-         return lo
-      }
-      hi_bound = x
-      x = y
-   }
+   def aa = bigint_abs(a)
+   if n == 2 { return __bigint_isqrt(aa) }
+   __bigint_iroot(aa, bigint_from_int(n))
 }
 
 impl bigint {
@@ -542,6 +537,12 @@ impl bigint {
    fn pow_int(bigint a, int b) bigint { bigint_pow(a, b) }
    fn xor(bigint a, bigint b) bigint { bigint_xor(a, b) }
    fn xor_int(bigint a, int b) bigint { bigint_xor(a, bigint(b)) }
+   fn rshift(bigint a, int b) bigint { bigint_rshift(a, b) }
+   fn rshift_bigint(bigint a, bigint b) bigint { bigint_rshift(a, bigint_to_int(b)) }
+   fn and(bigint a, bigint b) bigint { bigint_and(a, b) }
+   fn and_int(bigint a, int b) bigint { bigint_and(a, bigint(b)) }
+   fn or(bigint a, bigint b) bigint { bigint_or(a, b) }
+   fn or_int(bigint a, int b) bigint { bigint_or(a, bigint(b)) }
    fn cmp(bigint a, bigint b) int { bigint_cmp(a, b) }
    fn eq(bigint a, bigint b) bool { bigint_eq(a, b) }
    fn ne(bigint a, bigint b) bool { bigint_neq(a, b) }
@@ -566,10 +567,16 @@ impl bigint {
    operator / int: bigint = div_int
    operator % bigint: bigint = rem
    operator % int: bigint = rem_int
-   operator ^ bigint: bigint = pow
-   operator ^ int: bigint = pow_int
-   operator ^^ bigint: bigint = xor
-   operator ^^ int: bigint = xor_int
+   operator ** bigint: bigint = pow
+   operator ** int: bigint = pow_int
+   operator ^ bigint: bigint = xor
+   operator ^ int: bigint = xor_int
+   operator >> int: bigint = rshift
+   operator >> bigint: bigint = rshift_bigint
+   operator & bigint: bigint = and
+   operator & int: bigint = and_int
+   operator | bigint: bigint = or
+   operator | int: bigint = or_int
    operator == bigint: bool = eq
    operator != bigint: bool = ne
    operator < bigint: bool = lt
@@ -586,13 +593,17 @@ impl int {
    fn rem_bigint(int a, bigint b) bigint { bigint_mod(a, b) }
    fn pow_bigint(int a, bigint b) bigint { bigint_pow(a, b) }
    fn xor_bigint(int a, bigint b) bigint { bigint_xor(bigint(a), b) }
+   fn and_bigint(int a, bigint b) bigint { bigint_and(bigint(a), b) }
+   fn or_bigint(int a, bigint b) bigint { bigint_or(bigint(a), b) }
    operator + bigint: bigint = add_bigint
    operator - bigint: bigint = sub_bigint
    operator * bigint: bigint = mul_bigint
    operator / bigint: bigint = div_bigint
    operator % bigint: bigint = rem_bigint
-   operator ^ bigint: bigint = pow_bigint
-   operator ^^ bigint: bigint = xor_bigint
+   operator ** bigint: bigint = pow_bigint
+   operator ^ bigint: bigint = xor_bigint
+   operator & bigint: bigint = and_bigint
+   operator | bigint: bigint = or_bigint
 }
 
 def BF_PRECISION = 256
@@ -660,5 +671,5 @@ fn bf_pow_int(any a, int n) any { "Returns a^n for an integer exponent." __bigfl
    assert(bigint_to_str(bigint_mul(bigint(12), bigint(12))) == "144", "bigint mul")
    assert(bigint_to_str(bigint_pow(bigint(2), bigint(10))) == "1024", "bigint pow")
    assert(bigint_cmp(bigint(-1), bigint(0)) < 0, "bigint comparison")
-   print("✓ std.math.big self-test passed")
+   print("✓ core.math.big self-test passed")
 }

@@ -1,14 +1,14 @@
 ;; Keywords: backends backend dispatch math
 ;; Optional native math backend discovery.
 ;; References:
-;; - std.math
-module std.math.backends(backend_mode, native_enabled, backend_command, backend_cli_available, backend_ffi_available, backend_available, backend_kind, backend_version, backend_last_error, backend_report, backend_dlopen_checked, backend_clear_cache, flint_available, pari_available, z3_available)
-use std.core
-use std.os
-use std.os.path as ospath
-use std.os.ffi (RTLD_NOW, RTLD_GLOBAL, dlopen_checked, dlopen_any, dlclose)
-use std.core.str as str
-use std.core.common as common
+;; - core.math
+module core.math.backends(backend_mode, native_enabled, backend_command, backend_cli_available, backend_ffi_available, backend_available, backend_kind, backend_version, backend_last_error, backend_report, backend_dlopen_checked, backend_clear_cache, flint_available, pari_available, z3_available)
+use core
+use core.os
+use core.os.path as ospath
+use core.os.ffi (RTLD_NOW, RTLD_GLOBAL, dlopen_checked, dlopen_any, dlclose)
+use core.str as str
+use core.common as common
 
 mut _backend_cache = dict(16)
 mut _backend_errors = dict(16)
@@ -126,7 +126,7 @@ fn backend_dlopen_checked(any name, any lib="", any required_symbol="") any {
    "Open a backend library when native backends are enabled; returns a handle or 0."
    def n = _backend_norm(name)
    if _backend_removed_lattice_cli(n) {
-      _backend_set_error(n, "external lattice backend removed; use std.math.crypto.lattice")
+      _backend_set_error(n, "external lattice backend removed; use core.math.crypto.lattice")
       return 0
    }
    if !native_enabled(n) {
@@ -171,7 +171,7 @@ fn backend_cli_available(any name) bool {
    "Return true when a backend command is available."
    def n = _backend_norm(name)
    if _backend_removed_lattice_cli(n) {
-      _backend_set_error(n, "external lattice CLI backend removed; use std.math.crypto.lattice")
+      _backend_set_error(n, "external lattice CLI backend removed; use core.math.crypto.lattice")
       return false
    }
    def mode = backend_mode(n)

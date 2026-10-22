@@ -1,0 +1,1003 @@
+shape test_comptime {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.compiler.ast (
+   parse_ast, parse_ast_snapshot, parse_code as ast_parse_code, code_str,
+   code_kind as ast_code_kind,
+   code_category, code_name, code_has_attribute, code_expr, code_stmt,
+   code_decl, code_ident, code_expr_syntax)
+use core.math.parse.data.json (json_decode)
+use core.compiler.codegen (json_for, soa_for)
+use core.error
+use core.reflect
+use core.dict
+use core.io
+use core.str
+
+
+;; comptime (Test)
+mut v1 = comptime{ return 1 + 2 + 3 }
+assert(v1 == 6, "comptime basic")
+mut v2 = comptime{ def x = 10 }
+assert(is_nil(v2), "comptime fallthrough is nil")
+mut v3 = comptime{
+   mut sum = 0
+   mut i = 0
+   while i < 5 {
+      sum = sum + i
+      i += 1
+   }
+   if sum == 10 { return sum }
+   return 0
+}
+
+assert(v3 == 10, "comptime control flow")
+mut v4 = comptime{
+   def inner = comptime{ return 5 }
+   return inner * 2
+}
+
+assert(v4 == 10, "comptime nested")
+def run_ast = parse_ast("def value = #run 1")
+def comptime_ast = parse_ast("def value = comptime 1")
+def nested_ast = parse_ast("def value = comptime { return #run 2 }")
+assert(is_nil(parse_ast("def incomplete =")),
+       "AST parser rejects malformed source without returning a partial tree")
+assert(is_nil(parse_ast("def q = quote $ { x }")) &&
+       is_nil(parse_ast("def q = quote ${ x }")),
+       "quote uses one braced body syntax with ${...} reserved for splices")
+assert(is_nil(parse_ast("def incomplete =")) &&
+       is_nil(parse_ast("def incomplete =")),
+       "diagnostic de-duplication does not hide repeated parse failures")
+def isolated_code = ast_parse_code("fn answer() int { return 42 }")
+assert(is_list(isolated_code) && isolated_code.len == 1 &&
+       str(isolated_code.get(0).get("type")) == "func",
+       "parse_code returns a complete declaration AST")
+assert(ast_code_kind(isolated_code.get(0)) == "func" &&
+       code_name(isolated_code.get(0)) == "answer",
+       "AST code helpers expose declaration kind and name")
+def multiple_code = ast_parse_code("def answer = 42\nfn read_answer() int { return answer }")
+assert(is_list(multiple_code) && multiple_code.len == 2,
+       "parse_code accepts multiple complete declarations")
+def decorated_code = ast_parse_code("@inline fn decorated_answer() int { return 42 }")
+assert(is_list(decorated_code) && decorated_code.len == 1 &&
+       str(decorated_code.get(0).get("type")) == "func",
+       "parse_code accepts decorated declarations as complete code")
+assert(is_nil(ast_parse_code("print(1)")),
+       "parse_code rejects executable top-level statements")
+assert(is_nil(ast_parse_code("")), "parse_code rejects empty input")
+assert(is_nil(ast_parse_code("@inline fn good() int { return 1 }\ndef bad =")),
+       "parse_code rejects malformed input after a decorated declaration")
+assert(is_nil(ast_parse_code("fn good() int { return 1 }\ndef bad =")),
+       "parse_code rejects malformed source without partial declarations")
+for malformed_source in [
+   "fn broken(",
+   "layout Broken { int value",
+   "enum Broken { First",
+   "@inline fn decorated_broken() int { return 1"
+] {
+   assert(is_nil(ast_parse_code(malformed_source)),
+          "parse_code rejects malformed declaration syntax")
+}
+def ast_snapshot = parse_ast_snapshot("fn snapshot_target() int {\n  return 7\n}")
+def snapshot_fn = ast_snapshot.get("nodes").get(0)
+def snapshot_return = snapshot_fn.get("body").get("body").get(0)
+def snapshot_value = snapshot_return.get("value")
+assert(str(ast_snapshot.get("schema")) == "nytrix.ast" &&
+       int(ast_snapshot.get("version")) == 1 &&
+       str(snapshot_fn.get("source_origin").get("file")) == "<parse_ast>" &&
+       int(snapshot_fn.get("source_origin").get("line")) == 1 &&
+       int(snapshot_fn.get("source_origin").get("column")) == 1 &&
+       int(snapshot_return.get("source_origin").get("line")) == 2 &&
+       int(snapshot_return.get("source_origin").get("column")) == 3 &&
+       int(snapshot_value.get("source_origin").get("line")) == 2 &&
+       int(snapshot_value.get("source_origin").get("column")) == 10,
+       "versioned AST snapshot includes nested source origins")
+def generated_snapshot = parse_ast_snapshot(
+   "comptime template make(name) {\n fn ${name}() int { return 7 }\n}\ncomptime emit make(ident(\"expanded_origin\"))")
+def generated_origin_fn = generated_snapshot.get("nodes").get(0)
+def generated_origin_return = generated_origin_fn.get("body").get("body").get(0)
+def generated_origin_value = generated_origin_return.get("value")
+assert(code_name(generated_origin_fn) == "expanded_origin" &&
+       int(generated_origin_fn.get("source_origin").get("line")) == 2 &&
+       int(generated_origin_fn.get("expansion_origin").get("line")) == 4 &&
+       int(generated_origin_return.get("source_origin").get("line")) == 2 &&
+       int(generated_origin_return.get("expansion_origin").get("line")) == 4 &&
+       int(generated_origin_value.get("source_origin").get("line")) == 2 &&
+       int(generated_origin_value.get("expansion_origin").get("line")) == 4,
+       "generated declarations and expressions preserve definition and emission origins")
+def canonical_code = code_str(ast_snapshot)
+def code_snapshot_roundtrip = json_decode(canonical_code)
+def roundtrip_origin = code_snapshot_roundtrip.get("nodes").get(0).get("source_origin")
+assert(canonical_code == code_str(code_snapshot_roundtrip) &&
+       str(code_snapshot_roundtrip.get("schema")) == "nytrix.ast" &&
+       int(code_snapshot_roundtrip.get("version")) == 1 &&
+       int(roundtrip_origin.get("line")) == 1,
+       "code_str preserves versioned AST origins in canonical JSON")
+assert(is_nil(parse_ast_snapshot("def incomplete =")),
+       "versioned AST snapshot rejects malformed source")
+assert(run_ast.get(0).get("exprs").get(0).get("origin") == "hash_run",
+       "AST keeps #run provenance")
+assert(comptime_ast.get(0).get("exprs").get(0).get("origin") == "comptime",
+       "AST keeps comptime provenance")
+def nested_outer = nested_ast.get(0).get("exprs").get(0)
+def nested_run = nested_outer.get("body").get("body").get(0).get("value")
+assert(nested_outer.get("origin") == "comptime" &&
+       nested_run.get("origin") == "hash_run",
+       "AST keeps nested #run provenance")
+def quote_ast = parse_ast("def q = quote {\ndef x = 1\nx + ${x}\n}")
+def quote_node = quote_ast.get(0).get("exprs").get(0)
+def quote_body = quote_node.get("body").get("body")
+def quote_binary = quote_body.get(1).get("expr_t")
+assert(quote_node.get("syntax_ctx") > 0 &&
+       quote_binary.get("left").get("syntax_ctx") ==
+           quote_node.get("syntax_ctx") &&
+       quote_binary.get("right").get("syntax_ctx") == 0,
+       "AST reflection preserves introduced and spliced scope marks")
+def quote_snapshot = parse_ast_snapshot(
+   "def q = quote {\ndef x = 1\nx + ${x}\n}")
+def quote_snapshot_json = code_str(quote_snapshot)
+def quote_snapshot_roundtrip = json_decode(quote_snapshot_json)
+def roundtrip_quote = quote_snapshot_roundtrip.get("nodes").get(0).get("exprs").get(0)
+def roundtrip_quote_binary = roundtrip_quote.get("body").get("body").get(1).get("expr_t")
+assert(quote_snapshot_json == code_str(quote_snapshot_roundtrip) &&
+       int(quote_snapshot_roundtrip.get("version")) == 1 &&
+       code_category(roundtrip_quote) == "mixed" &&
+       str(roundtrip_quote.get("code_type").get("schema")) == "nytrix.code" &&
+       int(roundtrip_quote.get("code_type").get("version")) == 1 &&
+       int(roundtrip_quote.get("source_origin").get("line")) == 1 &&
+       int(roundtrip_quote_binary.get("left").get("syntax_ctx")) ==
+          int(roundtrip_quote.get("syntax_ctx")) &&
+       int(roundtrip_quote_binary.get("right").get("syntax_ctx")) == 0,
+       "canonical quote round-trip preserves schema, origins, and splice marks")
+def quote_category_snapshot = parse_ast_snapshot(
+   "def e = quote{42}\ndef s = quote{return 1}\n" +
+   "def d = quote{fn quoted_decl() int { return 1 }}\n" +
+   "def z = quote{ }\n")
+def quote_categories = quote_category_snapshot.get("nodes")
+assert(code_category(quote_categories.get(0).get("exprs").get(0)) == "expr" &&
+       code_category(quote_categories.get(1).get("exprs").get(0)) == "stmt" &&
+       code_category(quote_categories.get(2).get("exprs").get(0)) == "decl" &&
+       code_category(quote_categories.get(3).get("exprs").get(0)) == "empty",
+       "versioned quote code types distinguish expression, statement, declaration, and empty code")
+def ct_list = comptime{ [1, 2, 4, 8] }
+assert_eq(to_str(ct_list), "[1, 2, 4, 8]", "comptime list materializes")
+assert_eq(ct_list[2], 4, "comptime list index")
+def ct_words = comptime{ ["a", "b"] }
+assert_eq(to_str(ct_words), "[\"a\", \"b\"]", "comptime string list matches runtime rendering")
+def ct_range = comptime{ range(4) }
+assert_eq(type(ct_range), "range", "comptime imported range type")
+assert_eq(ct_range.len, 4, "comptime imported range length")
+def ct_local_mut = comptime{
+   mut total = 1
+   total = total + 2
+   total
+}
+assert(ct_local_mut == 3, "comptime may mutate its own local binding")
+def ct_mapped = comptime{ range(4).map(fn(i) { i + 1 }) }
+assert_eq(to_str(ct_mapped), "[1, 2, 3, 4]", "comptime imports std range map")
+def ct_base = comptime{ 2**5 }
+def ct_shifted = comptime{ range(4).map(fn(i) { i + ct_base }) }
+assert_eq(to_str(ct_shifted), "[32, 33, 34, 35]", "comptime folds prior immutable constant")
+print("✓ comptime tests passed")
+
+;; Test basic integer operations in comptime
+;; Addition
+mut v_add = comptime{ return 10 + 20 }
+assert(v_add == 30, "comptime add")
+
+;; Subtraction
+mut v_sub = comptime{ return 50 - 20 }
+assert(v_sub == 30, "comptime sub")
+
+;; Multiplication
+mut v_mul = comptime{ return 6 * 5 }
+assert(v_mul == 30, "comptime mul")
+
+;; Division
+mut v_div = comptime{ return 60 / 2 }
+assert(v_div == 30, "comptime div")
+
+;; Modulo
+mut v_mod = comptime{ return 35 % 32 }
+assert(v_mod == 3, "comptime mod")
+
+;; Comparisons
+mut v_lt = comptime{ return 10 < 20 }
+assert(v_lt == true, "comptime lt")
+mut v_le = comptime{ return 20 <= 20 }
+assert(v_le == true, "comptime le")
+mut v_gt = comptime{ return 30 > 20 }
+assert(v_gt == true, "comptime gt")
+mut v_ge = comptime{ return 20 >= 20 }
+assert(v_ge == true, "comptime ge")
+mut ct_os = "unknown"
+#linux { ct_os = "linux" }
+#elif macos { ct_os = "macos" }
+#elif windows { ct_os = "windows" }
+#endif
+assert(ct_os == __os_name(), "comptime #if os select")
+mut ct_pick = comptime{
+   #linux { return 7 }
+   #else { return 9 }
+   #endif
+}
+
+#linux { assert(ct_pick == 7, "comptime #if nested") }
+#else { assert(ct_pick == 9, "comptime #if nested") }
+#endif
+mut v_guard_div0 = comptime{
+   def d = [0][0]
+   if d == 0 { return -99 }
+   return 100 / d
+}
+
+assert(v_guard_div0 == -99, "comptime guarded div0")
+mut v_guard_mod0 = comptime{
+   def d = [0][0]
+   if d == 0 { return 321 }
+   return 100 % d
+}
+
+assert(v_guard_mod0 == 321, "comptime guarded mod0")
+static_assert((3 * 7) == 21, "static_assert folded arithmetic")
+static_assert(comptime{ return 2 * 21 == 42 }, "static_assert comptime block")
+assert_compile((4 * 11) == 44, "assert_compile folded arithmetic")
+def ct_range_values = [10, 20, 30]
+def int ct_range_idx = 1
+assert_compile(range_proven(ct_range_idx, 1, 1), "range_proven exact binding")
+assert_compile(index_proven(ct_range_values, ct_range_idx), "index_proven static list")
+
+fn ct_accept_proof(proof witness) int { 42 }
+def proof ct_true_witness = prove((6 * 7) == 42, "compile-time proof witness")
+assert(ct_accept_proof(ct_true_witness) == 42, "proof witness parameter")
+assert(proof_matches(ct_true_witness, (6 * 7) == 42),
+   "proof witness retains its canonical proposition digest")
+assert(!proof_matches(ct_true_witness, (6 * 8) == 48),
+   "proof witness rejects a different true proposition")
+assert_compile_range(ct_range_idx + 1, 2, 2, "assert_compile_range expression")
+assert_compile_index(ct_range_values, ct_range_idx, "assert_compile_index static list")
+
+fn static_range_sum() int {
+   def xs = [1, 2, 3, 4]
+   mut int i = 0
+   mut int acc = 0
+   while i < xs.len {
+      assert_compile_range(i, 0, 3, "loop index range proof")
+      assert_compile_index(xs, i, "loop index bounds proof")
+      acc += xs[i]
+      i += 1
+   }
+   acc
+}
+
+assert(static_range_sum() == 10, "compile-time loop range assertions")
+
+comptime diagnostic rule bad_layout_store {
+   when call.name == "store_layout" && !is_literal(call.arg(1))
+   error "store_layout needs a string literal layout name"
+   fix "use store_layout(dst, \"LayoutName\", ...)"
+}
+
+fn static_branch_select() int {
+   if comptime { return true }{
+      return 11
+   } else {
+      return missing_static_branch_symbol()
+   }
+}
+
+assert(static_branch_select() == 11, "comptime if prunes dead branch")
+
+fn static_case_select() int {
+   case comptime{ return 2 } {
+      1 -> { return missing_static_case_symbol() }
+      2 -> { return 22 }
+      _ -> { return missing_static_case_default() }
+   }
+}
+
+assert(static_case_select() == 22, "comptime case emits selected arm only")
+
+fn static_case_range_select() int {
+   case comptime{ return 0xffc1 } {
+      0x30..0x39 -> { return missing_static_range_digit() }
+      0xffbe..0xffc9 -> { return 33 }
+      _ -> { return missing_static_range_default() }
+   }
+}
+
+assert(static_case_range_select() == 33, "comptime case range emits selected arm only")
+
+layout CtReflectRecord {
+   i32 a
+   f64 b
+   bool c
+   [u8, 8] payload
+   i32 tagged align(8) = 7
+}
+
+layout CtReflectJsonRecord {
+   i32 answer
+   bool active
+}
+
+layout CtReflectSoaRecord {
+   i32 id
+   bool active
+}
+
+comptime emit json_for(CtReflectJsonRecord)
+def ptr ct_json_record = malloc(__layout_size("CtReflectJsonRecord"))
+store_layout(ct_json_record, "CtReflectJsonRecord", 42, true)
+def ct_json_value = CtReflectJsonRecord_json_value(ct_json_record)
+assert(ct_json_value.get("answer") == 42 && ct_json_value.get("active") == true,
+       "Ny codegen emits a typed layout-to-dict adapter")
+free(ct_json_record)
+
+comptime emit soa_for(CtReflectSoaRecord)
+def ptr ct_soa_row0 = malloc(__layout_size("CtReflectSoaRecord"))
+def ptr ct_soa_row1 = malloc(__layout_size("CtReflectSoaRecord"))
+store_layout(ct_soa_row0, "CtReflectSoaRecord", 7, true)
+store_layout(ct_soa_row1, "CtReflectSoaRecord", 8, false)
+def ct_soa_columns = CtReflectSoaRecord_soa([ct_soa_row0, ct_soa_row1])
+def ct_soa_active = ct_soa_columns.get("active")
+assert(ct_soa_columns.get("id") == [7, 8] &&
+       ct_soa_active.len == 2 && is_bool(ct_soa_active[0]) &&
+       ct_soa_active[0] && is_bool(ct_soa_active[1]) && !ct_soa_active[1],
+       "Ny codegen groups layout values into field columns")
+free(ct_soa_row0)
+free(ct_soa_row1)
+
+mut reflect_field_count = 0
+mut reflect_field_index_sum = 0
+mut reflect_field_type_hits = 0
+mut reflect_array_len = 0
+mut reflect_default_hits = 0
+mut reflect_default_text_hits = 0
+mut reflect_explicit_align = 0
+
+comptime fields(CtReflectRecord) as f {
+   emit assert(__layout_offset("CtReflectRecord", f.name) == f.offset, "comptime fields offset")
+   emit reflect_field_count += 1
+   emit reflect_field_index_sum += f.index
+   emit if f.type == "i32" || f.type == "f64" || f.type == "bool" {
+      reflect_field_type_hits += 1
+   }
+   emit if f.is_array && f.array_len_known { reflect_array_len += f.array_len }
+   emit if f.has_default {
+      reflect_default_hits += 1
+      if f.default_src == "7" { reflect_default_text_hits += 1 }
+   }
+   emit if f.align > 0 { reflect_explicit_align += f.align }
+}
+
+assert(reflect_field_count == 5, "comptime fields count")
+assert(reflect_field_index_sum == 10, "comptime fields index sum")
+assert(reflect_field_type_hits == 4, "comptime fields type names")
+assert(reflect_array_len == 8, "comptime fields array extent")
+assert(reflect_default_hits == 1, "comptime fields default metadata")
+assert(reflect_default_text_hits == 1, "comptime fields default source")
+assert(reflect_explicit_align == 8, "comptime fields explicit alignment")
+
+module CtReflectExports(alpha, beta){
+   fn alpha() int { return 1 }
+   fn beta() int { return 2 }
+}
+
+mut reflect_export_count = 0
+mut reflect_export_seen = 0
+
+comptime exports(CtReflectExports) as name {
+   emit reflect_export_count += 1
+   emit if name == "alpha" { reflect_export_seen += 1 }
+   emit if name == "beta" { reflect_export_seen += 10 }
+}
+
+assert(reflect_export_count == 2, "comptime exports count")
+assert(reflect_export_seen == 11, "comptime exports names")
+
+comptime template make_axis_family(axis_name, axis_value){
+   fn ct_axis_${axis_name}() str {
+      "Generated comptime axis family test."
+      return axis_value
+   }
+}
+
+for axis in comptime ["x", "y", "z"] {
+   emit make_axis_family(ident(axis), axis)
+}
+
+assert(ct_axis_x() == "x", "comptime function family string splice x")
+assert(ct_axis_y() == "y", "comptime function family string splice y")
+assert(ct_axis_z() == "z", "comptime function family string splice z")
+
+comptime template make_mul_family(n_name, n){
+   fn ct_mul_${n_name}(int v) int {
+      "Generated comptime multiply family test."
+      return v * n
+   }
+}
+
+for n in comptime [2, 3, 5] {
+   emit make_mul_family(ident(n), n)
+}
+
+assert(ct_mul_2(7) == 14, "comptime function family int splice 2")
+assert(ct_mul_3(7) == 21, "comptime function family int splice 3")
+assert(ct_mul_5(7) == 35, "comptime function family int splice 5")
+
+comptime template clamp_num(T, name){
+   fn name(T v, T lo, T hi) T {
+      if v < lo { return lo }
+      if v > hi { return hi }
+      return v
+   }
+}
+
+comptime emit clamp_num(int, ct_clamp_int)
+comptime emit clamp_num(f64, ct_clamp_f64)
+assert(ct_clamp_int(-5, 0, 9) == 0, "comptime template symbol fn/type lower bound")
+assert(ct_clamp_int(12, 0, 9) == 9, "comptime template symbol fn/type upper bound")
+assert(ct_clamp_int(7, 0, 9) == 7, "comptime template symbol fn/type inside")
+assert(ct_clamp_f64(-1.5, 0.25, 2.0) == 0.25, "comptime template f64 type lower bound")
+assert(ct_clamp_f64(1.5, 0.25, 2.0) == 1.5, "comptime template f64 type inside")
+
+comptime template make_named_suffix(T, name){
+   fn ${name}_twice(T v) T {
+      return v + v
+   }
+}
+
+comptime emit make_named_suffix(int, ct_named)
+assert(ct_named_twice(6) == 12, "comptime template spliced suffix fn name")
+
+comptime template make_decorated_declaration() {
+   @trace
+   @memoize
+   @inline fn generated_inline_answer() int { return 42 }
+}
+
+comptime emit make_decorated_declaration()
+assert(generated_inline_answer() == 42,
+       "template expansion preserves inline, trace, and memoize attributes")
+comptime template classify_generated_attributes(has_trace, has_memoize) {
+   fn ct_generated_has_trace() bool { return has_trace }
+   fn ct_generated_has_memoize() bool { return has_memoize }
+}
+comptime emit classify_generated_attributes(
+   code_has_attribute(codeof(generated_inline_answer), "trace"),
+   code_has_attribute(codeof(generated_inline_answer), "memoize"))
+assert(ct_generated_has_trace() && ct_generated_has_memoize(),
+       "codeof reflection sees attributes preserved on generated declarations")
+def reflected_attribute_node =
+   parse_ast("@trace @memoize(3) fn reflected_attrs() int { return 1 }").get(0)
+assert(code_has_attribute(reflected_attribute_node, "trace") &&
+       code_has_attribute(reflected_attribute_node, "memoize") &&
+       !code_has_attribute(reflected_attribute_node, "inline"),
+       "AST reflection queries attributes on parsed declarations")
+
+comptime template make_derived_shape(name, default_value) {
+   layout shape ${name} derive(default, load, store, zero, eq, hash, debug_str) pack(4) {
+      int value = ${default_value}
+   }
+}
+
+comptime emit make_derived_shape(GeneratedTemplateShape, 5)
+def ptr generated_shape_default = GeneratedTemplateShape()
+assert(GeneratedTemplateShape_load_value(generated_shape_default) == 5,
+       "template expansion substitutes source defaults used by layout derives")
+def ptr generated_shape_zero = GeneratedTemplateShape_zero()
+def ptr generated_shape_same = GeneratedTemplateShape_zero()
+assert(GeneratedTemplateShape_load_value(generated_shape_zero) == 0,
+       "template expansion preserves derived zero attribute")
+GeneratedTemplateShape_store(generated_shape_zero, 19)
+GeneratedTemplateShape_store(generated_shape_same, 19)
+assert(GeneratedTemplateShape_load_value(generated_shape_zero) == 19 &&
+       GeneratedTemplateShape_eq(generated_shape_zero, generated_shape_same) &&
+       GeneratedTemplateShape_hash(generated_shape_zero) ==
+          GeneratedTemplateShape_hash(generated_shape_same) &&
+       GeneratedTemplateShape_debug_str(generated_shape_zero).len > 0,
+       "template expansion preserves all supported layout derives")
+GeneratedTemplateShape_store(generated_shape_same, 20)
+assert(!GeneratedTemplateShape_eq(generated_shape_zero, generated_shape_same),
+       "template expansion preserves derived equality")
+free(generated_shape_zero)
+free(generated_shape_same)
+free(generated_shape_default)
+
+comptime template make_interpolated_label(label) {
+   fn generated_template_label() str {
+      return "label:${label}"
+   }
+}
+
+comptime emit make_interpolated_label("ready")
+assert(generated_template_label() == "label:ready",
+       "template string splice interpolates scalar text")
+
+fn code_splice_add3(int a, int b, int c) int {
+   return a + b + c
+}
+
+fn syntax_expr_forward(any syntax) any {
+   return code_expr(syntax)
+}
+
+fn syntax_expr_forward_twice(any syntax) any {
+   return syntax_expr_forward(syntax)
+}
+
+fn syntax_expr_local_forward(any syntax) any {
+   def wrapped = code_expr(syntax)
+   def forwarded = wrapped
+   return forwarded
+}
+
+fn syntax_expr_accessor_forward(any syntax) any {
+   return code_expr_syntax(syntax)
+}
+
+fn syntax_expr_typed_forward(any syntax) Result<Code<CodeExpr>, str> {
+   return code_expr(syntax)
+}
+
+fn syntax_expr_unwrap_forward(any syntax) Code<CodeExpr> {
+   return unwrap(code_expr(syntax))
+}
+
+fn syntax_expr_local_unwrap_forward(any syntax) Code<CodeExpr> {
+   def wrapped = code_expr(syntax)
+   return unwrap(wrapped)
+}
+
+fn ordinary_code_value() Code<CodeExpr> {
+   return unwrap(code_expr(quote{ 40 + 2 }))
+}
+
+fn ordinary_code_value_forward() Code<CodeExpr> {
+   def value = ordinary_code_value()
+   return value
+}
+
+fn syntax_stmt_accessor_forward(any syntax) any {
+   return code_stmt_syntax(syntax)
+}
+
+fn syntax_decl_accessor_forward(any syntax) any {
+   return code_decl_syntax(syntax)
+}
+
+fn syntax_ident_accessor_forward(any syntax) any {
+   return code_ident_syntax(syntax)
+}
+
+comptime template make_single_code_value(value: code<expr>) {
+   fn code_single_value() int {
+      return ${value}
+   }
+}
+
+comptime emit make_single_code_value(quote{42})
+assert(code_single_value() == 42, "single expression code splice")
+
+comptime template make_typed_code_value(value: code<expr>) {
+   fn code_typed_value() int {
+      return ${value}
+   }
+}
+
+comptime emit make_typed_code_value(code_expr(quote{40 + 2}))
+assert(code_typed_value() == 42,
+       "typed Code<Expr> constructor splices through its AST category")
+
+comptime emit make_typed_code_value(ordinary_code_value())
+assert(code_typed_value() == 42,
+       "ordinary Ny function Code<Expr> return value splices")
+
+comptime emit make_typed_code_value(ordinary_code_value_forward())
+assert(code_typed_value() == 42,
+       "ordinary Ny helper can forward a returned Code<Expr> value")
+
+comptime emit make_typed_code_value(
+   syntax_expr_forward_twice(quote{40 + 2}))
+assert(code_typed_value() == 42,
+       "ordinary pure Ny helper calls can return typed expression syntax")
+
+comptime emit make_typed_code_value(
+   syntax_expr_local_forward(quote{40 + 2}))
+assert(code_typed_value() == 42,
+       "ordinary pure Ny helpers can forward syntax through immutable locals")
+
+comptime emit make_typed_code_value(
+   syntax_expr_accessor_forward(quote{40 + 2}))
+assert(code_typed_value() == 42,
+       "validated typed expression accessors can supply splice syntax")
+
+comptime emit make_typed_code_value(
+   syntax_expr_typed_forward(quote{40 + 2}))
+assert(code_typed_value() == 42,
+       "ordinary helpers can return a typed Result<Code<Expr>> for splicing")
+
+comptime emit make_typed_code_value(
+   syntax_expr_unwrap_forward(quote{40 + 2}))
+assert(code_typed_value() == 42,
+       "ordinary helpers can unwrap and return typed Code<Expr> for splicing")
+
+comptime emit make_typed_code_value(
+   syntax_expr_local_unwrap_forward(quote{40 + 2}))
+assert(code_typed_value() == 42,
+       "ordinary helpers can unwrap a local typed Code<Expr> for splicing")
+
+comptime template make_shadowed_typed_code_value(value: code<expr>) {
+   fn code_typed_shadow_value() int { return ${value} }
+}
+
+fn code_expr_syntax(any syntax) any {
+   return quote{ 99 }
+}
+
+comptime emit make_shadowed_typed_code_value(code_expr_syntax(quote{40 + 2}))
+assert(code_typed_shadow_value() == 99,
+       "local code_expr_syntax declaration shadows the AST accessor")
+
+comptime template make_typed_code_statement(value: code<stmt>) {
+   fn code_typed_statement() int {
+      mut result = 0
+      ${value}
+      return result
+   }
+}
+
+comptime emit make_typed_code_statement(
+   code_stmt(quote{ result = 40 + 2 }))
+assert(code_typed_statement() == 42,
+       "typed Code<Stmt> constructor splices statement syntax")
+
+comptime emit make_typed_code_statement(
+   syntax_stmt_accessor_forward(quote{ result = 40 + 2 }))
+assert(code_typed_statement() == 42,
+       "typed statement syntax accessor forwards matching code")
+
+comptime template make_typed_code_declaration(value: code<decl>) {
+   ${value}
+}
+
+comptime emit make_typed_code_declaration(
+   code_decl(quote{ fn code_typed_declaration() int { return 42 } }))
+assert(code_typed_declaration() == 42,
+       "typed Code<Decl> constructor splices declaration syntax")
+
+comptime emit make_typed_code_declaration(
+   syntax_decl_accessor_forward(
+      quote{ fn code_typed_declaration() int { return 42 } }))
+assert(code_typed_declaration() == 42,
+       "typed declaration syntax accessor forwards matching code")
+
+comptime template make_typed_code_identifier(name: code<ident>) {
+   fn ${name}() int { return 42 }
+}
+
+comptime emit make_typed_code_identifier(code_ident(code_typed_ident))
+assert(code_typed_ident() == 42,
+       "typed Code<Ident> constructor splices identifier syntax")
+
+comptime emit make_typed_code_identifier(
+   syntax_ident_accessor_forward(code_typed_ident))
+assert(code_typed_ident() == 42,
+       "typed identifier syntax accessor forwards matching code")
+
+comptime template make_quote_spliced_code(value: code<expr>) {
+   fn code_quote_splice() any {
+      return quote{ ${value} }
+   }
+}
+
+comptime emit make_quote_spliced_code(quote{42})
+assert(code_quote_splice() == 42,
+       "quote splice uses dollar-brace syntax inside templates")
+
+comptime template make_code_value_list(values: code<expr>) {
+   fn code_splice_values() list {
+      return [${values}]
+   }
+}
+
+comptime emit make_code_value_list([quote{10}, quote{20}, quote{12}])
+assert(code_splice_values() == [10, 20, 12],
+       "sequence splice preserves expression order and arity")
+
+comptime emit make_code_value_list(
+   code_expr([quote{10}, quote{20}, quote{12}]))
+assert(code_splice_values() == [10, 20, 12],
+       "typed expression-code constructor preserves sequence splicing")
+
+comptime template make_empty_code_value_list(values: code<expr>) {
+   fn empty_code_splice_values() list {
+      return [${values}]
+   }
+}
+
+comptime emit make_empty_code_value_list([])
+assert(empty_code_splice_values() == [], "sequence splice permits zero values")
+
+comptime emit make_empty_code_value_list(code_expr([]))
+assert(empty_code_splice_values() == [],
+       "typed expression code preserves an empty sequence")
+
+comptime template make_code_splice_call(values: code<expr>) {
+   fn code_splice_sum() int {
+      return code_splice_add3(${values})
+   }
+}
+
+comptime emit make_code_splice_call([quote{10}, quote{20}, quote{12}])
+assert(code_splice_sum() == 42, "sequence splice expands call arguments")
+
+comptime template make_code_splice_statements(values: code<stmt>) {
+   fn code_splice_statements() int {
+      mut total = 0
+      ${values}
+      return total
+   }
+}
+
+comptime emit make_code_splice_statements([
+   quote{ total = total + 10 },
+   quote{ total = total + 20 },
+   quote{ total = total + 12 }
+])
+assert(code_splice_statements() == 42,
+       "sequence splice expands statements inside a generated function")
+
+comptime template make_code_splice_declarations(values: code<decl>) {
+   ${values}
+}
+
+comptime emit make_code_splice_declarations([
+   quote{ fn code_splice_decl_a() int { return 17 } },
+   quote{ fn code_splice_decl_b() int { return 25 } }
+])
+assert(code_splice_decl_a() + code_splice_decl_b() == 42,
+       "sequence splice expands declaration blocks")
+
+comptime template backend_contract_impl(Contract){
+   fn gen_${native_prefix_ident}_backend_name() {
+      return native_prefix
+   }
+   fn gen_${native_prefix_ident}_${Contract}_score() int {
+      return event_table + key_table
+   }
+}
+
+module CtGeneratedBackend generated from CtBackendSpec {
+   export core(gen_ctgen_backend_name, gen_ctgen_CtWindowContract_score, manual_backend_code)
+   native_prefix = "ctgen"
+   native_prefix_ident = ident("ctgen")
+   event_table = 40
+   key_table = 2
+   fn manual_backend_code() int {
+      7
+   }
+   emit backend_contract_impl(CtWindowContract)
+}
+
+assert(CtGeneratedBackend.gen_ctgen_backend_name() == "ctgen", "generated module string property")
+assert(CtGeneratedBackend.gen_ctgen_CtWindowContract_score() == 42, "generated module table properties")
+assert(CtGeneratedBackend.manual_backend_code() == 7, "generated module handwritten escape hatch")
+
+fn ct_codeof_source() int { return 37 }
+def ct_codeof_assignment_target = 1
+ct_codeof_assignment_target = 2
+def ct_hygiene_identifier_target = 40
+fn ct_hygiene_sum(int left, int right) int { left + right }
+def ct_hygiene_list_left = 17
+def ct_hygiene_list_right = 25
+comptime template make_hygienic_identifier_ref(name: code<ident>) {
+   fn ct_hygiene_identifier_ref() int {
+      def ct_hygiene_identifier_target = 2
+      return ${name}
+   }
+}
+comptime emit make_hygienic_identifier_ref(
+   ident(ct_hygiene_identifier_target))
+assert(ct_hygiene_identifier_ref() == 40,
+       "explicit identifier code preserves caller scope across a quoted local")
+comptime template make_hygienic_string_identifier_ref(name: code<ident>) {
+   fn ct_hygiene_string_identifier_ref() int {
+      def ct_hygiene_identifier_target = 2
+      return ${name}
+   }
+}
+comptime emit make_hygienic_string_identifier_ref(
+   ident("ct_hygiene_identifier_target"))
+assert(ct_hygiene_string_identifier_ref() == 40,
+       "string-built identifier code uses the ident call-site scope mark")
+comptime template make_hygienic_identifier_list(values) {
+   fn ct_hygiene_identifier_list() int {
+      def ct_hygiene_list_left = 1
+      def ct_hygiene_list_right = 1
+      return ct_hygiene_sum(${values})
+   }
+}
+comptime emit make_hygienic_identifier_list([
+   ident(ct_hygiene_list_left), ident(ct_hygiene_list_right)])
+assert(ct_hygiene_identifier_list() == 42,
+       "identifier code sequences preserve each source scope mark")
+comptime template describe_code(kind, name) {
+   fn ct_code_kind() str { return kind }
+   fn ct_code_name() str { return name }
+}
+comptime emit describe_code(code_kind(codeof(ct_codeof_source)),
+                            code_name(codeof(ct_codeof_source)))
+assert(ct_code_kind() == "func" && ct_code_name() == "ct_codeof_source",
+       "codeof supports compile-time kind and name queries")
+comptime template describe_code_categories(expression, statement, declaration,
+                                             identifier, sequence, mixed, empty) {
+   fn ct_code_categories() tuple {
+      return (expression, statement, declaration, identifier, sequence, mixed,
+              empty)
+   }
+}
+comptime emit describe_code_categories(
+   code_category(quote{10}), code_category(quote{return 1}),
+   code_category(codeof(ct_codeof_source)),
+   code_category(ident(ct_hygiene_list_left)),
+   code_category([quote{10}, quote{20}]),
+   code_category([quote{10}, quote{return 1}]), code_category([]))
+assert(ct_code_categories() == ("expr", "stmt", "decl", "ident", "expressions",
+                                "mixed", "empty"),
+       "compile-time code_category agrees with typed AST categories and sequence kinds")
+comptime template describe_assignment_code(name) {
+   fn ct_codeof_assignment_name() str { return name }
+}
+comptime emit describe_assignment_code(
+   code_name(codeof(ct_codeof_assignment_target)))
+assert(ct_codeof_assignment_name() == "ct_codeof_assignment_target",
+       "codeof resolves a variable declaration despite a later assignment")
+comptime template classify_code_node(kind) {
+   fn ct_code_node_kind() str { return kind }
+}
+comptime emit classify_code_node(code_kind(quote{10}))
+assert(ct_code_node_kind() == "literal",
+       "code_kind preserves the expression node kind for scalar code")
+comptime template classify_code_node_kinds(literal, binary, identifier) {
+   fn ct_code_literal_kind() str { return literal }
+   fn ct_code_binary_kind() str { return binary }
+   fn ct_code_ident_kind() str { return identifier }
+}
+comptime emit classify_code_node_kinds(code_kind(quote{10}),
+                                       code_kind(quote{1 + 2}),
+                                       code_kind(quote{code_identifier}))
+assert(ct_code_literal_kind() == "literal" &&
+       ct_code_binary_kind() == "binary" &&
+       ct_code_ident_kind() == "ident",
+       "code_kind preserves scalar literal, operator, and identifier node kinds")
+comptime template classify_code_sequence(kind) {
+   fn ct_code_sequence_kind() str { return kind }
+}
+comptime emit classify_code_sequence(code_kind([quote{10}, quote{20}]))
+assert(ct_code_sequence_kind() == "expressions",
+       "code_kind classifies homogeneous expression code sequences")
+comptime template classify_identifier_sequence(kind) {
+   fn ct_identifier_sequence_kind() str { return kind }
+}
+comptime emit classify_identifier_sequence(
+   code_kind([ident(ct_hygiene_list_left), ident(ct_hygiene_list_right)]))
+assert(ct_identifier_sequence_kind() == "expressions",
+       "code_kind classifies identifier code as expressions")
+comptime template classify_code_statement(kind) {
+   fn ct_code_statement_kind() str { return kind }
+}
+comptime emit classify_code_statement(code_kind([quote{return 1}]))
+assert(ct_code_statement_kind() == "statements",
+       "code_kind classifies homogeneous statement code sequences")
+comptime template classify_code_mixed(kind) {
+   fn ct_code_mixed_kind() str { return kind }
+}
+comptime emit classify_code_mixed(code_kind([quote{10}, quote{return 1}]))
+assert(ct_code_mixed_kind() == "mixed",
+       "code_kind rejects mixed syntax categories in code sequences")
+comptime template classify_code_empty(kind) {
+   fn ct_code_empty_kind() str { return kind }
+}
+comptime emit classify_code_empty(code_kind([]))
+assert(ct_code_empty_kind() == "empty",
+       "code_kind classifies empty code sequences")
+comptime template classify_code_declaration(kind) {
+   fn ct_code_declaration_kind() str { return kind }
+}
+comptime emit classify_code_declaration(
+   code_kind(parse_code("fn parsed_kind_decl() int { return 1 }")))
+assert(ct_code_declaration_kind() == "declarations",
+       "code_kind classifies parsed declaration sequences")
+comptime template classify_unnameable_code(kind, scalar_name, multi_name,
+                                            multi_has_trace, identifier_kind) {
+   fn ct_code_invalid_kind() str { return kind }
+   fn ct_code_scalar_name() str { return scalar_name }
+   fn ct_code_multi_name() str { return multi_name }
+   fn ct_code_multi_has_trace() bool { return multi_has_trace }
+   fn ct_code_identifier_kind() str { return identifier_kind }
+}
+comptime emit classify_unnameable_code(
+   code_kind(42), code_name(quote{42}),
+   code_name(parse_code("fn first() int { return 1 } fn second() int { return 2 }")),
+   code_has_attribute(parse_code("fn first() int { return 1 } fn second() int { return 2 }"), "trace"),
+   code_kind(ident(ct_hygiene_list_left)))
+assert(ct_code_invalid_kind() == "invalid" && ct_code_scalar_name() == "" &&
+       ct_code_multi_name() == "" && !ct_code_multi_has_trace() &&
+       ct_code_identifier_kind() == "ident",
+       "compile-time code queries return neutral results for non-declarations and identifier code")
+comptime template copy_declaration(declaration) {
+   ${declaration}
+}
+module CtCodeofCopy generated from CtBackendSpec {
+   export core(ct_codeof_source)
+   emit copy_declaration(codeof(ct_codeof_source))
+}
+assert(CtCodeofCopy.ct_codeof_source() == 37,
+       "codeof exposes a prior declaration as hygienic code for insertion")
+
+def comptime_dict = comptime{
+   return {"ok":true, "nested":{"answer":42}}
+}
+
+assert(comptime_dict.get("ok"), "comptime dictionary boolean")
+assert(comptime_dict.get("nested").get("answer") == 42,
+   "comptime nested dictionary")
+def comptime_dict_duplicate = comptime{
+   return {"key":1, "key":2}
+}
+assert(comptime_dict_duplicate.get("key") == 2 &&
+       comptime_dict_duplicate.len == 1,
+   "comptime dictionary literals preserve last-write and unique length")
+def ok_pow = comptime{ 2**8 }
+assert(ok_pow == 256, "NEWT-09 modal staging law immutable fold")
+
+fn code_expr(any syntax) any { return quote{ 101 } }
+comptime template emit_shadowed_constructor(value: code<expr>) {
+   fn shadowed_constructor_value() int { return ${value} }
+}
+comptime emit emit_shadowed_constructor(code_expr(quote{ 1 + 2 }))
+assert(shadowed_constructor_value() == 101,
+       "local code_expr declaration shadows the typed constructor")
+
+fn parse_code(any source) any {
+   return quote{ fn shadowed_parse_code_value() int { return 103 } }
+}
+comptime template emit_shadowed_parse_code(value: code<decl>) {
+   ${value}
+}
+comptime emit emit_shadowed_parse_code(parse_code("ignored"))
+assert(shadowed_parse_code_value() == 103,
+       "local parse_code declaration shadows isolated parsing")
+
+fn code_kind(any syntax) str { return "local-kind" }
+comptime template emit_shadowed_query(kind) {
+   fn shadowed_query_kind() str { return kind }
+}
+comptime emit emit_shadowed_query(code_kind(quote{ 1 + 2 }))
+assert(shadowed_query_kind() == "local-kind",
+       "local code_kind declaration shadows the compile-time query")
+
+fn unwrap(any value) any { return quote{ 107 } }
+fn syntax_expr_shadowed_unwrap(any syntax) any {
+   def wrapped = code_expr(syntax)
+   return unwrap(wrapped)
+}
+comptime template make_shadowed_unwrap_code_value(value: code<expr>) {
+   fn code_typed_shadow_unwrap_value() int { return ${value} }
+}
+comptime emit make_shadowed_unwrap_code_value(
+   syntax_expr_shadowed_unwrap(quote{ 1 + 2 }))
+assert(code_typed_shadow_unwrap_value() == 107,
+       "local unwrap declaration shadows typed-code unwrapping")
+
+print("✓ comptime ops tests passed")
+NY
+}

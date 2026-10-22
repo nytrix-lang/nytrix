@@ -4,10 +4,10 @@
 ;; - https://www.pcg-random.org/paper.html
 ;; Covers the common pcg32 XSH-RR generator: 64-bit LCG state, 32-bit output.
 ;; References:
-;; - std.math.crypto.prng
-;; - std.math.crypto
-module std.math.crypto.prng.pcg(pcg32_default_multiplier, pcg32_step, pcg32_output, pcg32_next, pcg32_stream_increment, pcg32_advance, pcg32_rewind, poly_pcg_choose_window, poly_pcg_newton_coeffs, poly_pcg_eval_next, poly_pcg_advance_from_states)
-use std.math.nt
+;; - core.math.crypto.prng
+;; - core.math.crypto
+module core.math.crypto.prng.pcg(pcg32_default_multiplier, pcg32_step, pcg32_output, pcg32_next, pcg32_stream_increment, pcg32_advance, pcg32_rewind, poly_pcg_choose_window, poly_pcg_newton_coeffs, poly_pcg_eval_next, poly_pcg_advance_from_states)
+use core.math.nt
 
 fn _PCG64_MOD() bigint { Z("18446744073709551616") }
 
@@ -42,7 +42,7 @@ fn pcg32_step(any state, any inc) bigint {
 fn pcg32_output(any state) bigint {
    "Compute the pcg32 XSH-RR output from a pre-advanced/internal state."
    def s = _u64(state)
-   def xorshifted = _u32(((s >> Z(18)) ^^ s) >> Z(27))
+   def xorshifted = _u32(((s >> Z(18)) ^ s) >> Z(27))
    def rot = int(s >> Z(59))
    _rotr32(xorshifted, rot)
 }
@@ -206,5 +206,5 @@ fn poly_pcg_advance_from_states(list states, int steps, any modulus=(Z(1) << 128
    def pair = pcg32_next(st0, inc)
    assert(pcg32_rewind(pair.get(0), inc) == st0, "pcg rewind")
    assert(pcg32_advance(st0, inc, 1) == pair.get(0), "pcg advance")
-   print("✓ std.math.crypto.prng.pcg self-test passed")
+   print("✓ core.math.crypto.prng.pcg self-test passed")
 }

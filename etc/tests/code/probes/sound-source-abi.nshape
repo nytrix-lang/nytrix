@@ -1,0 +1,90 @@
+shape sound_source_abi {
+  family "runtime/system/sound"
+  generator "embedded"
+  features ["sound", "source", "metadata", "wav", "abi"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only --native-backend=x86_64"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.sound.backend as sound_backend
+use core.os.sound.source as sound_source
+use core.os.sound.mixer as sound_mixer
+use core.os.sound.source.synth
+
+def tone = make_sine_source(440.0, 0.01, 48000, 0.25, false)
+assert(is_list(tone) && tone.get(0) == "SOUND_SOURCE", "generated source is tagged")
+assert(sound_source.source_channels(tone) == 1, "generated source channel metadata")
+assert(sound_source.source_rate(tone) == 48000, "generated source rate metadata")
+assert(sound_source.source_bits(tone) == 16, "generated source bit-depth metadata")
+assert(sound_source.source_length(tone) == 480, "generated source frame metadata")
+assert(sound_backend.get_master_volume() == 1.0, "sound backend defaults to audible master gain")
+
+def info = sound_source.sound_info(tone)
+assert(is_dict(info), "structured sound info is a dictionary")
+assert(info.get("channels") == 1, "sound info channels")
+assert(info.get("rate") == 48000, "sound info rate")
+assert(info.get("bits") == 16, "sound info bit depth")
+assert(info.get("frames") == 480, "sound info frame count")
+def duration_error = info.get("duration") - 0.01
+assert(abs(duration_error) < 0.000000001, "sound info duration")
+
+def wav = sound_source.wav_bytes(tone)
+assert(is_bytes(wav), "WAV serializer returns a binary buffer")
+assert(wav.len == 1004, "WAV contains the fixed header and PCM payload")
+assert(memcmp(wav, "RIFF", 4) == 0 && memcmp(wav + 8, "WAVE", 4) == 0, "WAV signature")
+assert(load32(wav, 4) == 996 && load32(wav, 24) == 48000, "WAV RIFF size and rate")
+assert(load16(wav, 22) == 1 && load16(wav, 34) == 16, "WAV channels and sample width")
+assert(load32(wav, 40) == 960, "WAV PCM byte count")
+
+def mixer_tone = make_sine_source(440.0, 0.1, 48000, 0.25, false)
+def mixer_data = mixer_tone.get(1)
+def mixer_samples = mixer_data.get("ptr")
+def mixer_buf = malloc(256 * 4)
+assert(mixer_buf, "mixer output allocation")
+def old_fx_enabled = sound_mixer.fx_enabled()
+sound_mixer.set_fx_enabled(false)
+mut mixer_inst = list()
+mixer_inst = mixer_inst.append(mixer_tone)
+mixer_inst = mixer_inst.append(0.0)
+mixer_inst = mixer_inst.append(1.0)
+mixer_inst = mixer_inst.append(1.0)
+mixer_inst = mixer_inst.append(false)
+mixer_inst = mixer_inst.append(0.0)
+mixer_inst = mixer_inst.append(1)
+mut mixer_active = list()
+mixer_active = mixer_active.append(mixer_inst)
+mixer_active = sound_mixer.mix_sounds(mixer_buf, 256 * 4, mixer_active, 1.0, 0, 48000, 1)
+mut frame = 0
+mut mixer_matches_source = true
+while frame < 256 {
+   if load16(mixer_buf, frame * 4) != load16(mixer_samples, frame * 2) ||
+      load16(mixer_buf, frame * 4 + 2) != load16(mixer_samples, frame * 2) {
+      mixer_matches_source = false
+      break
+   }
+   frame += 1
+}
+assert(mixer_matches_source, "mono S16 mixer preserves samples in both output channels")
+assert(mixer_active.get(0).get(1) == 256.0, "S16 mixer cursor advances as a float")
+mixer_active = sound_mixer.mix_sounds(mixer_buf, 256 * 4, mixer_active, 1.0, 0, 48000, 1)
+mut second_period_matches_source = true
+frame = 0
+while frame < 224 {
+   if load16(mixer_buf, frame * 4) != load16(mixer_samples, (frame + 256) * 2) ||
+      load16(mixer_buf, frame * 4 + 2) != load16(mixer_samples, (frame + 256) * 2) {
+      second_period_matches_source = false
+      break
+   }
+   frame += 1
+}
+assert(second_period_matches_source, "S16 mixer outputs successive source frames across periods")
+assert(mixer_active.get(0).get(1) == 512.0, "S16 mixer retains the second period cursor")
+sound_mixer.set_fx_enabled(old_fx_enabled)
+free(mixer_buf)
+
+assert(len(sound_source.wav_bytes(["SOUND_SOURCE", 0])) == 0, "WAV rejects malformed source metadata")
+assert(!__sound_web_play("unavailable-on-native.wav"), "native Web Audio reports unavailable")
+assert(sound_source.sound_info(0) == 0, "sound info rejects non-source values")
+NY
+}

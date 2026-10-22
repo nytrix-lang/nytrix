@@ -1,19 +1,19 @@
 ;; Keywords: editor palette command search actions os ui render viewer text
 ;; Command palette filtering, ranking, and action dispatch helpers.
 ;; References:
-;; - std.os.ui.render.viewer.editor.commands
-module std.os.ui.render.viewer.editor.palette(
+;; - core.os.ui.render.viewer.editor.commands
+module core.os.ui.render.viewer.editor.palette(
    commands, matches, which_key,
    state, open, close, is_open, query, index, set_index,
    scroll, visible, set_visible, scroll_by, visible_matches,
    state_matches, selected, handle_key, handle_char
 )
 
-use std.core
-use std.core.str as str
-use std.os.ui.render.viewer.editor.commands as cmd
-use std.os.ui.window
-use std.os.ui.window.consts as key
+use core
+use core.str as str
+use core.os.ui.render.viewer.editor.commands as cmd
+use core.os.ui.window
+use core.os.ui.window.consts as key
 
 ;; Returns the result of the `commands` operation.
 fn commands() list {

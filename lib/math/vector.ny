@@ -1,13 +1,13 @@
 ;; Keywords: vector linear-algebra math
 ;; Vector construction and vector algebra for 2D, 3D, and 4D numeric values.
 ;; References:
-;; - std.math
-module std.math.vector(vec2, vec3, vec4, Vector2, Vector3, Vector4, vec2_canonical, vec3_canonical, vec4_canonical, canonical, dim, at, set, x, y, z, w, xyz, is_vector, is_vec2, is_vec3, is_vec4, type_name, runtime_type, v_add, v_sub, v_mul, v_div, add, sub, mul, div, scale, divs, dot, dot3, hadamard, hadamard_div, cross3, len2, length3, magnitude, normalize, normalize3, lerp, op)
-use std.core as core
-use std.core
-use std.math.float (float)
+;; - core.math
+module core.math.vector(vec2, vec3, vec4, Vector2, Vector3, Vector4, vec2_canonical, vec3_canonical, vec4_canonical, canonical, dim, at, set, x, y, z, w, xyz, is_vector, is_vec2, is_vec3, is_vec4, type_name, runtime_type, v_add, v_sub, v_mul, v_div, add, sub, mul, div, scale, divs, dot, dot3, hadamard, hadamard_div, cross3, len2, length3, magnitude, normalize, normalize3, lerp, op)
+use core as core
+use core
+use core.math.float (float)
 
-fn _vec_sqrt(number x) f64 { __flt_sqrt(float(x)) }
+fn _vec_sqrt(any x) f64 { __flt_sqrt(float(x)) }
 
 @pure
 @jit
@@ -43,6 +43,7 @@ fn _typed_vec(str t, any x0, any y0, any z0=0, any w0=0) dict {
    dict_set(d, "y", y0)
    if n >= 3 { dict_set(d, "z", z0) }
    if n >= 4 { dict_set(d, "w", w0) }
+   __vec_mark(d, n)
    d
 }
 
@@ -62,7 +63,14 @@ fn Vector3(...args) vec3 {
    def n = args.len
    if n == 0 { return _typed_vec("vec3", 0.0, 0.0, 0.0) }
    def x = args.get(0, 0.0)
-   mut y, z = args.get(1, nil), args.get(2, nil)
+   if is_vector(x) { if n == 1 { return _typed_vec("vec3", at(x, 0, 0.0), at(x, 1, 0.0), at(x, 2, 0.0)) } }
+   if n >= 3 {
+      def y = args.get(1, 0.0)
+      def z = args.get(2, 0.0)
+      return _typed_vec("vec3", x, y, z)
+   }
+   mut y = args.get(1, nil)
+   mut z = args.get(2, nil)
    if is_vector(x) { if y == nil { if z == nil { return _typed_vec("vec3", at(x, 0, 0.0), at(x, 1, 0.0), at(x, 2, 0.0)) } } }
    if y == nil { y = 0.0 }
    if z == nil { z = 0.0 }
@@ -265,11 +273,15 @@ fn _zip2_op(any av, any bv, int op) any {
       if op == 2 { return __flt_mul(av, bv) }
       if op == 3 { return __flt_div(av, bv) }
    }
+   ;; Division always has floating-point vector semantics.  The generic core
+   ;; bridge can lower boxed f64 components as integer words on the native
+   ;; route, turning a nonzero divisor into zero.  Convert both operands
+   ;; explicitly before calling the float primitive.
+   if op == 3 { return __flt_div(float(av), float(bv)) }
    case op {
       0 -> core.add(av, bv)
       1 -> core.sub(av, bv)
       2 -> core.mul(av, bv)
-      3 -> core.div(core.mul(av, 1.0), core.mul(bv, 1.0))
       _ -> nil
    }
 }
@@ -288,23 +300,57 @@ fn _vector_shape_out(list out, int n, bool typed) any {
 fn _zip2(any a, any b, int op) any {
    if !is_vector(a) { return [] }
    if !is_vector(b) { return [] }
-   def both_list = is_list(a) && is_list(b)
-   def na, nb = both_list ? __list_len(a) : dim(a), both_list ? __list_len(b) : dim(b)
+   ;; Keep list/list arithmetic on its compact sequence path.  Avoid merging
+   ;; this representation decision into a local boolean: `is_list` results
+   ;; cross the dynamic ABI, and a tagged boolean join can otherwise select
+   ;; the list path for dict-backed named vectors.
+   ;; The nominal vector marker is a stronger representation check than
+   ;; `is_list` on the native route: dict-backed vec2/vec3/vec4 values can be
+   ;; mistaken for lists after a dynamic boolean join.
+   if _dict_dim(a) > 0 { if _dict_dim(b) > 0 {
+         def da = _dict_dim(a)
+         def db = _dict_dim(b)
+         def n = (da < db) ? da : db
+         ;; Build named-vector results directly.  The list scratch path below is
+         ;; designed for ordinary sequences; routing typed dict vectors through
+         ;; it loses boxed f64 elements on the LLVM JIT path.
+         if n == 2 { return Vector2(_zip2_op(at(a, 0, 0), at(b, 0, 0), op), _zip2_op(at(a, 1, 0), at(b, 1, 0), op)) }
+         if n == 3 { return Vector3(_zip2_op(at(a, 0, 0), at(b, 0, 0), op), _zip2_op(at(a, 1, 0), at(b, 1, 0), op), _zip2_op(at(a, 2, 0), at(b, 2, 0), op)) }
+         if n == 4 { return Vector4(_zip2_op(at(a, 0, 0), at(b, 0, 0), op), _zip2_op(at(a, 1, 0), at(b, 1, 0), op), _zip2_op(at(a, 2, 0), at(b, 2, 0), op), _zip2_op(at(a, 3, 0), at(b, 3, 0), op)) }
+         mut out = list(n)
+         mut i = 0
+         while i < n {
+            __store_item_fast(out, i, _zip2_op(at(a, i, 0), at(b, i, 0), op))
+            i += 1
+         }
+         __list_set_len(out, n)
+         return _vector_shape_out(out, n, true)
+      } }
+   if is_list(a) {
+      if is_list(b) {
+         def na = __list_len(a)
+         def nb = __list_len(b)
+         def n = (na < nb) ? na : nb
+         mut out = list(n)
+         mut i = 0
+         while i < n {
+            __store_item_fast(out, i, _zip2_op(__load_item_fast(a, i), __load_item_fast(b, i), op))
+            i += 1
+         }
+         __list_set_len(out, n)
+         return out
+      }
+   }
+   def na = dim(a)
+   def nb = dim(b)
    def n = (na < nb) ? na : nb
    mut out = list(n)
    mut i = 0
-   if both_list {
-      while i < n {
-         __store_item_fast(out, i, _zip2_op(__load_item_fast(a, i), __load_item_fast(b, i), op))
-         i += 1
-      }
-   } else {
-      while i < n {
-         __store_item_fast(out, i, _zip2_op(at(a, i, 0), at(b, i, 0), op))
-         i += 1
-      }
+   while i < n {
+      out = out.append(_zip2_op(at(a, i, 0), at(b, i, 0), op))
+      i += 1
    }
-   _vector_shape_out(out, n, !both_list)
+   _vector_shape_out(out, n, true)
 }
 
 @pure
@@ -341,7 +387,7 @@ fn v_mul(any a, any b) any {
    "Returns the product of vector `a` and `b`. If `b` is a scalar, performs scaling. If `b` is a vector, performs a dot product."
    def out = _mul_vector(a, b)
    if out != nil { return out }
-   scale(a, b)
+   _scale_vector(a, b)
 }
 
 @pure
@@ -388,39 +434,79 @@ fn div(any a, any b) any {
    core.div(a, b)
 }
 
-@pure
-@jit
 @inline
 fn _scalar_op(any v, any s, int op) any {
+   if is_float(v) && is_float(s) {
+      if op == 0 { return __flt_mul(v, s) }
+      return __flt_div(v, s)
+   }
    op == 0 ? core.mul(v, s) : core.div(core.mul(v, 1.0), core.mul(s, 1.0))
 }
 
+@inline
 fn _map_s(any v, any s, int op) any {
    if !is_vector(v) { return [] }
-   def list_src = is_list(v)
-   def n = list_src ? __list_len(v) : dim(v)
+   ;; Keep the dynamic list decision out of a merged boolean local.  A
+   ;; tagged false from `is_list` was being read as true after the join and
+   ;; shaped dict-backed vectors as lists.
+   if _dict_dim(v) > 0 {
+      def n = _dict_dim(v)
+      mut out = list(n)
+      mut i = 0
+      while i < n {
+         out = out.append(_scalar_op(at(v, i, 0), s, op))
+         i += 1
+      }
+      return _vector_shape_out(out, n, true)
+   }
+   if is_list(v) {
+      def n = v.len
+      mut out = list(n)
+      mut i = 0
+      while i < n {
+         __store_item_fast(out, i, _scalar_op(__load_item_fast(v, i), s, op))
+         i += 1
+      }
+      __list_set_len(out, n)
+      return out
+   }
+   def n = dim(v)
    mut out = list(n)
    mut i = 0
    while i < n {
-      def value = list_src ? __load_item_fast(v, i) : at(v, i, 0)
-      __store_item_fast(out, i, _scalar_op(value, s, op))
+      out = out.append(_scalar_op(at(v, i, 0), s, op))
       i += 1
    }
-   _vector_shape_out(out, n, !list_src)
+   _vector_shape_out(out, n, true)
 }
 
 @pure
 @jit
 fn scale(any v, any s) any {
    "Multiplies vector `v` by scalar `s`."
-   _map_s(v, s, 0)
+   _scale_vector(v, s)
 }
+
+fn _scale_vector(any v, any s) any { _map_s(v, s, 0) }
 
 @pure
 @jit
 fn divs(any v, any s) any {
    "Divides vector `v` by scalar `s`."
    _map_s(v, s, 1)
+}
+
+;; Keep boxed-float products on the typed float bridge.  The generic
+;; integer-shaped `core.add`/`core.mul` path can reinterpret a float handle
+;; as an i64.
+fn _vec_dot_prod(any av, any bv) any {
+   if is_float(av) && is_float(bv) { return __flt_mul(av, bv) }
+   core.mul(av, bv)
+}
+
+fn _vec_dot_add(any acc, any prod) any {
+   if is_float(prod) { return __flt_add(float(acc), prod) }
+   core.add(acc, prod)
 }
 
 @pure
@@ -437,12 +523,12 @@ fn dot(any a, any b) any {
    mut i = 0
    if both_list {
       while i < n {
-         acc = core.add(acc, core.mul(__load_item_fast(a, i), __load_item_fast(b, i)))
+         acc = _vec_dot_add(acc, _vec_dot_prod(__load_item_fast(a, i), __load_item_fast(b, i)))
          i += 1
       }
    } else {
       while i < n {
-         acc = core.add(acc, core.mul(at(a, i, 0), at(b, i, 0)))
+         acc = _vec_dot_add(acc, _vec_dot_prod(at(a, i, 0), at(b, i, 0)))
          i += 1
       }
    }
@@ -453,7 +539,7 @@ fn dot(any a, any b) any {
 @jit
 fn dot3(any a, any b) any {
    "Returns the 3D dot product without generic loop overhead."
-   core.add(core.add(core.mul(x(a), x(b)), core.mul(y(a), y(b))), core.mul(z(a), z(b)))
+   _vec_dot_add(_vec_dot_add(_vec_dot_prod(x(a), x(b)), _vec_dot_prod(y(a), y(b))), _vec_dot_prod(z(a), z(b)))
 }
 
 impl vec2 {
@@ -471,7 +557,7 @@ impl vec2 {
    fn dot(self a, self b) f64 { dot(a, b) }
    @pure
    @jit
-   fn scale(self v, f64 s) self { scale(v, s) }
+   fn scale(self v, f64 s) self { _scale_vector(v, s) }
    @pure
    @jit
    fn divs(self v, f64 s) self { divs(v, s) }
@@ -501,7 +587,7 @@ impl vec3 {
    fn dot(self a, self b) f64 { dot3(a, b) }
    @pure
    @jit
-   fn scale(self v, f64 s) self { scale(v, s) }
+   fn scale(self v, f64 s) self { _scale_vector(v, s) }
    @pure
    @jit
    fn divs(self v, f64 s) self { divs(v, s) }
@@ -531,7 +617,7 @@ impl vec4 {
    fn dot(self a, self b) f64 { dot(a, b) }
    @pure
    @jit
-   fn scale(self v, f64 s) self { scale(v, s) }
+   fn scale(self v, f64 s) self { _scale_vector(v, s) }
    @pure
    @jit
    fn divs(self v, f64 s) self { divs(v, s) }
@@ -549,13 +635,13 @@ impl vec4 {
 impl f64 {
    @pure
    @jit
-   fn scale_vec2(self s, vec2 v) vec2 { scale(v, s) }
+   fn scale_vec2(self s, vec2 v) vec2 { _scale_vector(v, s) }
    @pure
    @jit
-   fn scale_vec3(self s, vec3 v) vec3 { scale(v, s) }
+   fn scale_vec3(self s, vec3 v) vec3 { _scale_vector(v, s) }
    @pure
    @jit
-   fn scale_vec4(self s, vec4 v) vec4 { scale(v, s) }
+   fn scale_vec4(self s, vec4 v) vec4 { _scale_vector(v, s) }
    operator * vec2: vec2 = scale_vec2
    operator * vec3: vec3 = scale_vec3
    operator * vec4: vec4 = scale_vec4
@@ -638,15 +724,15 @@ fn normalize(any v) any {
 @jit
 fn lerp(any a, any b, f64 t) any {
    "Linearly interpolates between vectors `a` and `b` using factor `t` (usually in range [0, 1])."
-   v_add(a, scale(v_sub(b, a), t))
+   v_add(a, _scale_vector(v_sub(b, a), t))
 }
 
 fn _mul_vector(any a, any b) any {
    if is_vector(a) {
       if is_vector(b) { return dot(a, b) }
-      if is_int(b) || is_float(b) { return scale(a, b) }
+      if is_int(b) || is_float(b) { return _scale_vector(a, b) }
    }
-   if is_vector(b) { if is_int(a) || is_float(a) { return scale(b, a) } }
+   if is_vector(b) { if is_int(a) || is_float(a) { return _scale_vector(b, a) } }
    nil
 }
 
@@ -683,7 +769,7 @@ fn op(str name, any a, any b=0) any {
       "dot3" -> { return dot3(a, b) }
       "cross" -> { return cross3(a, b) }
       "cross3" -> { return cross3(a, b) }
-      "neg" -> { return scale(a, -1) }
+      "neg" -> { return _scale_vector(a, -1) }
       "normalize" -> { return normalize(a) }
       "normalize3" -> { return normalize3(a) }
       _ -> { return nil }
@@ -695,5 +781,5 @@ fn op(str name, any a, any b=0) any {
    assert(v2.get("x") == 7 && v2.get("y") == 8, "Vector2 canonicalizes list")
    def v3 = vec3_canonical([1, 2, 3])
    assert(dim(v3) == 3 && v3.get("z") == 3, "vec3 canonicalizes list")
-   print("✓ std.math.vector self-test passed")
+   print("✓ core.math.vector self-test passed")
 }

@@ -4,10 +4,10 @@
 ;; - https://cacr.uwaterloo.ca/hac/about/chap8.pdf
 ;; - https://www.cryptopp.com/wiki/LUC_Cryptography
 ;; References:
-;; - std.math.crypto.number
-;; - std.math.crypto
-module std.math.crypto.number.lucas(lucas_uv_mod, lucas_u_mod, lucas_v_mod, lucas_encrypt, lucas_apply_exponent_chain, lucas_private_modulus_from_factors, lucas_combine_exponent_chain, lucas_decrypt, lucas_decrypt_exponent_chain)
-use std.math.nt
+;; - core.math.crypto.number
+;; - core.math.crypto
+module core.math.crypto.number.lucas(lucas_uv_mod, lucas_u_mod, lucas_v_mod, lucas_encrypt, lucas_apply_exponent_chain, lucas_private_modulus_from_factors, lucas_combine_exponent_chain, lucas_decrypt, lucas_decrypt_exponent_chain)
+use core.math.nt
 
 fn _z(any x) bigint { is_bigint(x) ? x : Z(x) }
 

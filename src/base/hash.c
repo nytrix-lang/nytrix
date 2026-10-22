@@ -33,7 +33,15 @@ uint64_t ny_hash_cstrv(uint64_t h, const char *const *vals, size_t len) {
 uint64_t ny_hash_envv(uint64_t h, const char *const *env_names, size_t len) {
   if (!env_names)
     return h;
-  for (size_t i = 0; i < len; ++i)
-    h = ny_fnv1a64_cstr(getenv(env_names[i]), h);
+  for (size_t i = 0; i < len; ++i) {
+    const char *name = env_names[i];
+    const char *value = name ? getenv(name) : NULL;
+    h = ny_fnv1a64_cstr(name, h);
+    h = ny_hash64_u64(h, value ? 1 : 0);
+    if (value) {
+      h = ny_hash64_u64(h, (uint64_t)strlen(value));
+      h = ny_fnv1a64_cstr(value, h);
+    }
+  }
   return h;
 }

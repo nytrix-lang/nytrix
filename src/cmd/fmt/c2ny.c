@@ -91,7 +91,7 @@ typedef struct {
 
 static const char *const cny_pp_ops[] = {
     "...", ">>=", "<<=", "->", "++", "--", "<<", ">>", "<=", ">=", "==", "!=",
-    "&&", "||", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "##", NULL};
+    "&&",  "||",  "+=",  "-=", "*=", "/=", "%=", "&=", "|=", "^=", "##", NULL};
 
 static int cny_is_ppop(const char *s, size_t n) {
   for (int i = 0; cny_pp_ops[i]; i++) {
@@ -109,44 +109,62 @@ static long long cny_esc(const char **q) {
   const char *p = *q;
   char c = *p++;
   switch (c) {
-    case 'n': return '\n';
-    case 't': return '\t';
-    case 'r': return '\r';
-    case 'a': return '\a';
-    case 'b': return '\b';
-    case 'f': return '\f';
-    case 'v': return '\v';
-    case '\\': return '\\';
-    case '\'': return '\'';
-    case '"': return '"';
-    case '?': return '?';
-    case '0': case '1': case '2': case '3': case '4':
-    case '5': case '6': case '7': {
-      long long v = c - '0';
-      int k = 0;
-      while (k < 2 && *p >= '0' && *p <= '7') {
-        v = v * 8 + (*p - '0');
-        p++;
-        k++;
-      }
-      *q = p;
-      return v;
+  case 'n':
+    return '\n';
+  case 't':
+    return '\t';
+  case 'r':
+    return '\r';
+  case 'a':
+    return '\a';
+  case 'b':
+    return '\b';
+  case 'f':
+    return '\f';
+  case 'v':
+    return '\v';
+  case '\\':
+    return '\\';
+  case '\'':
+    return '\'';
+  case '"':
+    return '"';
+  case '?':
+    return '?';
+  case '0':
+  case '1':
+  case '2':
+  case '3':
+  case '4':
+  case '5':
+  case '6':
+  case '7': {
+    long long v = c - '0';
+    int k = 0;
+    while (k < 2 && *p >= '0' && *p <= '7') {
+      v = v * 8 + (*p - '0');
+      p++;
+      k++;
     }
-    case 'x': {
-      long long v = 0;
-      int any = 0;
-      while (isxdigit((unsigned char)*p)) {
-        char d = *p++;
-        v = v * 16 + (d <= '9' ? d - '0' : (tolower((unsigned char)d) - 'a' + 10));
-        any = 1;
-      }
-      if (!any)
-        return -1;
-      *q = p;
-      return v;
+    *q = p;
+    return v;
+  }
+  case 'x': {
+    long long v = 0;
+    int any = 0;
+    while (isxdigit((unsigned char)*p)) {
+      char d = *p++;
+      v = v * 16 +
+          (d <= '9' ? d - '0' : (tolower((unsigned char)d) - 'a' + 10));
+      any = 1;
     }
-    default:
-      return (unsigned char)c;
+    if (!any)
+      return -1;
+    *q = p;
+    return v;
+  }
+  default:
+    return (unsigned char)c;
   }
 }
 
@@ -285,8 +303,8 @@ static void cny_lex(const char *src, size_t n, cny_toks_t *out) {
         i++;
       int kind = CNTK_INT;
       for (size_t k = start; k < i; k++) {
-        if (src[k] == '.' || src[k] == 'e' || src[k] == 'E' ||
-            src[k] == 'p' || src[k] == 'P')
+        if (src[k] == '.' || src[k] == 'e' || src[k] == 'E' || src[k] == 'p' ||
+            src[k] == 'P')
           kind = CNTK_FLT;
       }
       cny_toks_push(out, kind, src + start, i - start, line);
@@ -329,12 +347,11 @@ static int cny_word_eq(const char *s, size_t n, const char *w) {
 }
 
 static int cny_is_type_kw(const char *s, size_t n) {
-  static const char *const kws[] = {"void",  "char", "short", "int",
-                                    "long",  "float", "double", "signed",
-                                    "unsigned", "bool", "_Bool", "struct",
-                                    "enum",  "union", "const", "volatile",
-                                    "register", "static", "extern", "inline",
-                                    "restrict", "_Atomic", NULL};
+  static const char *const kws[] = {
+      "void",   "char",   "short",    "int",      "long",     "float",
+      "double", "signed", "unsigned", "bool",     "_Bool",    "struct",
+      "enum",   "union",  "const",    "volatile", "register", "static",
+      "extern", "inline", "restrict", "_Atomic",  NULL};
   for (int i = 0; kws[i]; i++)
     if (cny_word_eq(s, n, kws[i]))
       return 1;
@@ -343,9 +360,9 @@ static int cny_is_type_kw(const char *s, size_t n) {
 
 static int cny_is_known_type(const char *s, size_t n) {
   static const char *const types[] = {
-      "size_t", "ssize_t", "ptrdiff_t", "intptr_t", "uintptr_t",
-      "int8_t", "uint8_t", "int16_t", "uint16_t", "int32_t", "uint32_t",
-      "int64_t", "uint64_t", "wchar_t", NULL};
+      "size_t",   "ssize_t", "ptrdiff_t", "intptr_t", "uintptr_t",
+      "int8_t",   "uint8_t", "int16_t",   "uint16_t", "int32_t",
+      "uint32_t", "int64_t", "uint64_t",  "wchar_t",  NULL};
   for (int i = 0; types[i]; i++)
     if (cny_word_eq(s, n, types[i]))
       return 1;
@@ -399,14 +416,22 @@ static const char *cny_layout_type(const char *s, size_t n) {
     return "u8";
   if (cny_word_eq(s, n, "size_t"))
     return "u64";
-  if (cny_word_eq(s, n, "int8_t")) return "i8";
-  if (cny_word_eq(s, n, "uint8_t")) return "u8";
-  if (cny_word_eq(s, n, "int16_t")) return "i16";
-  if (cny_word_eq(s, n, "uint16_t")) return "u16";
-  if (cny_word_eq(s, n, "int32_t")) return "i32";
-  if (cny_word_eq(s, n, "uint32_t")) return "u32";
-  if (cny_word_eq(s, n, "int64_t")) return "i64";
-  if (cny_word_eq(s, n, "uint64_t")) return "u64";
+  if (cny_word_eq(s, n, "int8_t"))
+    return "i8";
+  if (cny_word_eq(s, n, "uint8_t"))
+    return "u8";
+  if (cny_word_eq(s, n, "int16_t"))
+    return "i16";
+  if (cny_word_eq(s, n, "uint16_t"))
+    return "u16";
+  if (cny_word_eq(s, n, "int32_t"))
+    return "i32";
+  if (cny_word_eq(s, n, "uint32_t"))
+    return "u32";
+  if (cny_word_eq(s, n, "int64_t"))
+    return "i64";
+  if (cny_word_eq(s, n, "uint64_t"))
+    return "u64";
   return NULL;
 }
 
@@ -426,9 +451,9 @@ typedef struct {
   const cny_tok_t *toks;
   size_t nt;
   size_t ti;
-  cny_sb_t *out;   /* final output */
-  cny_sb_t ln;     /* current line buffer */
-  cny_sb_t warn;   /* pending warning comment text (without ';;') */
+  cny_sb_t *out; /* final output */
+  cny_sb_t ln;   /* current line buffer */
+  cny_sb_t warn; /* pending warning comment text (without ';;') */
   int indent;
   int errors;
   int in_main;
@@ -448,9 +473,9 @@ typedef struct {
   /*
    * #if stack
    */
-  char *if_taken;      /* current branch taken? */
-  char *if_ever;       /* any branch taken yet? */
-  char *if_parent;     /* was parent active when #if pushed? */
+  char *if_taken;  /* current branch taken? */
+  char *if_ever;   /* any branch taken yet? */
+  char *if_parent; /* was parent active when #if pushed? */
   size_t nif;
   size_t cif;
 } cny_t;
@@ -463,8 +488,7 @@ static const cny_tok_t *cny_peek(const cny_t *p, size_t k) {
 
 static int cny_at(const cny_t *p, const char *text) {
   const cny_tok_t *t = cny_cur(p);
-  return t->kind == CNTK_PUNCT && t->n == 1 && *t->s == text[0] &&
-         text[1] == 0;
+  return t->kind == CNTK_PUNCT && t->n == 1 && *t->s == text[0] && text[1] == 0;
 }
 
 static int cny_at_word(const cny_t *p, const char *w) {
@@ -494,8 +518,8 @@ static void cny_emit_node(cny_t *p, const cny_sb_t *b) {
   cny_sb_add(&p->ln, b->data ? b->data : "");
 }
 
-static void cny_warn_at(cny_t *p, int line, const char *kind,
-                        const char *fmt, ...) {
+static void cny_warn_at(cny_t *p, int line, const char *kind, const char *fmt,
+                        ...) {
   char buf[512];
   va_list ap;
   va_start(ap, fmt);
@@ -665,10 +689,6 @@ static void cny_emit_tok_value(cny_sb_t *b, const cny_tok_t *t) {
   }
   if (t->kind == CNTK_IDENT && cny_word_eq(t->s, t->n, "NULL")) {
     cny_sb_add(b, "nil");
-    return;
-  }
-  if (t->kind == CNTK_PUNCT && t->n == 1 && *t->s == '^') {
-    cny_sb_add(b, "^^");
     return;
   }
   cny_sb_addn(b, t->s, t->n);
@@ -922,8 +942,8 @@ static long long cny_ce_shift(cny_cexpr_t *e) {
   long long v = cny_ce_add(e);
   while (e->i < e->n) {
     const cny_tok_t *t = &e->t[e->i];
-    if (t->kind == CNTK_PUNCT && (cny_word_eq(t->s, t->n, "<<") ||
-                                  cny_word_eq(t->s, t->n, ">>"))) {
+    if (t->kind == CNTK_PUNCT &&
+        (cny_word_eq(t->s, t->n, "<<") || cny_word_eq(t->s, t->n, ">>"))) {
       int left = *t->s == '<';
       e->i++;
       long long r = cny_ce_add(e);
@@ -941,16 +961,15 @@ static long long cny_ce_rel(cny_cexpr_t *e) {
   long long v = cny_ce_shift(e);
   while (e->i < e->n) {
     const cny_tok_t *t = &e->t[e->i];
-    if (t->kind == CNTK_PUNCT && t->n == 1 &&
-        (*t->s == '<' || *t->s == '>')) {
+    if (t->kind == CNTK_PUNCT && t->n == 1 && (*t->s == '<' || *t->s == '>')) {
       int lt = *t->s == '<';
       e->i++;
       long long r = cny_ce_shift(e);
       if (!e->ok)
         return 0;
       v = lt ? v < r : v > r;
-    } else if (t->kind == CNTK_PUNCT &&
-               (cny_word_eq(t->s, t->n, "<=") || cny_word_eq(t->s, t->n, ">="))) {
+    } else if (t->kind == CNTK_PUNCT && (cny_word_eq(t->s, t->n, "<=") ||
+                                         cny_word_eq(t->s, t->n, ">="))) {
       int le = *t->s == '<';
       e->i++;
       long long r = cny_ce_shift(e);
@@ -1127,7 +1146,6 @@ static int cny_binop(cny_t *p, const char **optext) {
       {"||", CNP_LOR, CNP_LOR},
       {"&&", CNP_LAND, CNP_LAND},
       {"|", CNP_BOR, CNP_BOR},
-      {"^^", CNP_XOR, CNP_XOR},
       {"^", CNP_XOR, CNP_XOR},
       {"&", CNP_BAND, CNP_BAND},
       {"==", CNP_EQ, CNP_EQ},
@@ -1389,14 +1407,15 @@ static void cny_prefix(cny_t *p, cny_sb_t *n, int *level, int root) {
      * unexpected punct
      */
     p->errors++;
-    cny_warn_at(p, t->line, "unsupported", "unexpected token '%.*s'",
-                (int)t->n, t->s);
+    cny_warn_at(p, t->line, "unsupported", "unexpected token '%.*s'", (int)t->n,
+                t->s);
     *level = CNP_ATOM;
     return;
   }
   if (t->kind == CNTK_DIRECTIVE) {
     p->errors++;
-    cny_warn_at(p, t->line, "unsupported", "preprocessor directive inside a "
+    cny_warn_at(p, t->line, "unsupported",
+                "preprocessor directive inside a "
                 "function body");
     cny_advance(p);
     *level = CNP_ATOM;
@@ -1502,8 +1521,8 @@ static void cny_expr_node(cny_t *p, cny_sb_t *n, int *level, int minprec,
     if (root) {
       const cny_tok_t *t = cny_cur(p);
       if (t->kind == CNTK_PUNCT &&
-          (t->n == 1 && (*t->s == '=' || *t->s == '&' || *t->s == '|' ||
-                         *t->s == '^')) &&
+          (t->n == 1 &&
+           (*t->s == '=' || *t->s == '&' || *t->s == '|' || *t->s == '^')) &&
           !(t->n == 2)) {
         char op = *t->s;
         if (op == '=' || (op == '&' && !cny_at(p, "&")) ||
@@ -1539,11 +1558,16 @@ static void cny_expr_node(cny_t *p, cny_sb_t *n, int *level, int minprec,
         int is_shift_left = cny_word_eq(t->s, t->n, "<<=");
         int is_shift_right = cny_word_eq(t->s, t->n, ">>=");
         const char *op2 = NULL;
-        if (is_shift_left) op2 = "<<";
-        else if (is_shift_right) op2 = ">>";
-        else if (op == '&') op2 = "&";
-        else if (op == '|') op2 = "|";
-        else if (op == '^') op2 = "^^";
+        if (is_shift_left)
+          op2 = "<<";
+        else if (is_shift_right)
+          op2 = ">>";
+        else if (op == '&')
+          op2 = "&";
+        else if (op == '|')
+          op2 = "|";
+        else if (op == '^')
+          op2 = "^";
         cny_advance(p);
         int rlevel = 0;
         cny_expr_node(p, n, &rlevel, CNP_ASSIGN, 0);
@@ -1555,7 +1579,8 @@ static void cny_expr_node(cny_t *p, cny_sb_t *n, int *level, int minprec,
         (void)rhs;
         cny_sb_add(n, " = ");
         /*
-         * we need the lvalue again; simplest: leave the compound as-is plus marker
+         * we need the lvalue again; simplest: leave the compound as-is plus
+         * marker
          */
         p->errors++;
         cny_warn_at(p, t->line, "unsupported", "compound assignment '%.*s'",
@@ -1569,23 +1594,11 @@ static void cny_expr_node(cny_t *p, cny_sb_t *n, int *level, int minprec,
     if (prec < 0 || prec < minprec)
       break;
     cny_advance(p);
-    /*
-     * rewrite ^ to ^^
-     */
-    int is_xor = strcmp(optext, "^") == 0;
-    if (is_xor)
-      optext = "^^";
     cny_sb_add(n, " ");
     cny_sb_add(n, optext);
     cny_sb_add(n, " ");
     int rlevel = 0;
     cny_expr_node(p, n, &rlevel, prec + 1, 0);
-    if (is_xor) {
-      /*
-       * Ny ^^ precedence is unknown; parenthesize compound operands
-       * operand parens are added by the caller when needed via level checks
-       */
-    }
     *level = prec;
   }
   /*
@@ -1647,11 +1660,10 @@ static int cny_parse_name(cny_t *p, cny_sb_t *name, int *is_ptr) {
       cny_advance(p);
       continue;
     }
-    if (t->kind == CNTK_IDENT &&
-        (cny_word_eq(t->s, t->n, "const") ||
-         cny_word_eq(t->s, t->n, "volatile") ||
-         cny_word_eq(t->s, t->n, "restrict") ||
-         cny_word_eq(t->s, t->n, "register"))) {
+    if (t->kind == CNTK_IDENT && (cny_word_eq(t->s, t->n, "const") ||
+                                  cny_word_eq(t->s, t->n, "volatile") ||
+                                  cny_word_eq(t->s, t->n, "restrict") ||
+                                  cny_word_eq(t->s, t->n, "register"))) {
       cny_advance(p);
       continue;
     }
@@ -1676,8 +1688,7 @@ static void cny_parse_expr_statement(cny_t *p) {
   while (!cny_at(p, ";") && cny_cur(p)->kind != CNTK_EOF) {
     const cny_tok_t *t = cny_cur(p);
     if (t->kind == CNTK_PUNCT && t->n == 1 && *t->s == '}') {
-      cny_warn_at(p, t->line, "unsupported",
-                  "missing ';' before '}'");
+      cny_warn_at(p, t->line, "unsupported", "missing ';' before '}'");
       return;
     }
     cny_advance(p);
@@ -1886,7 +1897,8 @@ static void cny_parse_switch(cny_t *p) {
       cny_sb_t newlab = {0};
       int new_default = 0;
       if (!cny_case_label(p, &newlab, &new_default)) {
-        cny_warn_at(p, cny_cur(p)->line, "unsupported", "malformed switch label");
+        cny_warn_at(p, cny_cur(p)->line, "unsupported",
+                    "malformed switch label");
         cny_advance(p);
         continue;
       }
@@ -1903,8 +1915,9 @@ static void cny_parse_switch(cny_t *p) {
           free(newlab.data);
           continue;
         }
-        cny_warn_at(p, cny_cur(p)->line, "unsupported",
-                    "fall-through from a case into default is not representable");
+        cny_warn_at(
+            p, cny_cur(p)->line, "unsupported",
+            "fall-through from a case into default is not representable");
       }
       /*
        * close current arm
@@ -1940,8 +1953,8 @@ static void cny_parse_switch(cny_t *p) {
      * trailing break detection: drop a `break;` right before a label or '}'
      */
     if (cny_at_word(p, "break") &&
-        (cny_peek(p, 1)->kind == CNTK_PUNCT &&
-         cny_peek(p, 1)->n == 1 && *cny_peek(p, 1)->s == ';') &&
+        (cny_peek(p, 1)->kind == CNTK_PUNCT && cny_peek(p, 1)->n == 1 &&
+         *cny_peek(p, 1)->s == ';') &&
         (cny_peek(p, 2)->kind == CNTK_IDENT &&
          (cny_word_eq(cny_peek(p, 2)->s, cny_peek(p, 2)->n, "case") ||
           cny_word_eq(cny_peek(p, 2)->s, cny_peek(p, 2)->n, "default")))) {
@@ -1950,10 +1963,10 @@ static void cny_parse_switch(cny_t *p) {
       continue;
     }
     if (cny_at_word(p, "break") &&
-        (cny_peek(p, 1)->kind == CNTK_PUNCT &&
-         cny_peek(p, 1)->n == 1 && *cny_peek(p, 1)->s == ';') &&
-        (cny_peek(p, 2)->kind == CNTK_PUNCT &&
-         cny_peek(p, 2)->n == 1 && *cny_peek(p, 2)->s == '}')) {
+        (cny_peek(p, 1)->kind == CNTK_PUNCT && cny_peek(p, 1)->n == 1 &&
+         *cny_peek(p, 1)->s == ';') &&
+        (cny_peek(p, 2)->kind == CNTK_PUNCT && cny_peek(p, 2)->n == 1 &&
+         *cny_peek(p, 2)->s == '}')) {
       cny_advance(p); /* break */
       cny_advance(p); /* ; */
       continue;
@@ -2073,8 +2086,8 @@ static void cny_parse_for(cny_t *p) {
       size_t j = init_start;
       while (j < init_end && cny_is_type_kw(p->toks[j].s, p->toks[j].n))
         j++;
-      while (j < init_end && p->toks[j].kind == CNTK_PUNCT && p->toks[j].n == 1 &&
-             *p->toks[j].s == '*')
+      while (j < init_end && p->toks[j].kind == CNTK_PUNCT &&
+             p->toks[j].n == 1 && *p->toks[j].s == '*')
         j++;
       if (j < init_end && p->toks[j].kind == CNTK_IDENT) {
         cny_sb_addn(&initvar, p->toks[j].s, p->toks[j].n);
@@ -2124,7 +2137,8 @@ static void cny_parse_for(cny_t *p) {
              * find the identifier before
              */
             size_t s = k;
-            while (s > 0 && u[s - 1] != ' ') s--;
+            while (s > 0 && u[s - 1] != ' ')
+              s--;
             /*
              * remove trailing ++ and add += 1
              */
@@ -2221,8 +2235,7 @@ static void cny_parse_for(cny_t *p) {
     cny_emit(p, "}");
     cny_flush(p);
     if (cond.len == 0 && upd.len == 0) {
-      cny_warn_at(p, line, "unsupported",
-                  "for(;;) has no exit condition");
+      cny_warn_at(p, line, "unsupported", "for(;;) has no exit condition");
     }
   }
   free(initvar.data);
@@ -2235,8 +2248,7 @@ static void cny_parse_return(cny_t *p) {
   int line = cny_cur(p)->line;
   cny_advance(p);
   cny_emit(p, "return");
-  if (!cny_at(p, ";") && cny_cur(p)->kind != CNTK_EOF &&
-      !cny_at(p, "}")) {
+  if (!cny_at(p, ";") && cny_cur(p)->kind != CNTK_EOF && !cny_at(p, "}")) {
     cny_emit(p, " ");
     cny_parse_expr_stmt_value(p, NULL);
   }
@@ -2348,8 +2360,7 @@ static void cny_parse_statement(cny_t *p) {
       return;
     }
     if (cny_word_eq(t->s, t->n, "typedef") ||
-        cny_word_eq(t->s, t->n, "struct") ||
-        cny_word_eq(t->s, t->n, "enum")) {
+        cny_word_eq(t->s, t->n, "struct") || cny_word_eq(t->s, t->n, "enum")) {
       /*
        * nested type declaration
        */
@@ -2399,8 +2410,7 @@ static void cny_parse_local_decl(cny_t *p) {
   int struct_ty = 0;
   while (cny_cur(p)->kind == CNTK_IDENT && cny_type_token(p)) {
     const cny_tok_t *t = cny_cur(p);
-    if (cny_word_eq(t->s, t->n, "struct") ||
-        cny_word_eq(t->s, t->n, "union") ||
+    if (cny_word_eq(t->s, t->n, "struct") || cny_word_eq(t->s, t->n, "union") ||
         cny_word_eq(t->s, t->n, "enum")) {
       struct_ty = 1;
       if (cny_word_eq(t->s, t->n, "union"))
@@ -2545,7 +2555,8 @@ static void cny_parse_local_decl(cny_t *p) {
    * multiple declarators `int a, b;`
    */
   if (cny_at(p, ",")) {
-    cny_warn_at(p, line, "unsupported", "multiple declarators in one "
+    cny_warn_at(p, line, "unsupported",
+                "multiple declarators in one "
                 "declaration; only the first is converted");
     while (!cny_at(p, ";") && cny_cur(p)->kind != CNTK_EOF)
       cny_advance(p);
@@ -2784,7 +2795,8 @@ static void cny_parse_enum(cny_t *p) {
 }
 
 /*
- * parse declaration specifiers into `spec` (mapped scalar type), return 1 if any
+ * parse declaration specifiers into `spec` (mapped scalar type), return 1 if
+ * any
  */
 static int cny_parse_decl_specs(cny_t *p, cny_sb_t *spec, int *is_struct,
                                 int *is_void, int *is_ptr) {
@@ -2794,8 +2806,7 @@ static int cny_parse_decl_specs(cny_t *p, cny_sb_t *spec, int *is_struct,
   int any = 0;
   while (cny_cur(p)->kind == CNTK_IDENT && cny_type_token(p)) {
     const cny_tok_t *t = cny_cur(p);
-    if (cny_word_eq(t->s, t->n, "struct") ||
-        cny_word_eq(t->s, t->n, "union") ||
+    if (cny_word_eq(t->s, t->n, "struct") || cny_word_eq(t->s, t->n, "union") ||
         cny_word_eq(t->s, t->n, "enum")) {
       *is_struct = 1;
       any = 1;
@@ -2875,7 +2886,8 @@ static void cny_parse_function(cny_t *p, const cny_sb_t *spec, int is_void) {
     } else {
       for (;;) {
         if (cny_at(p, "...")) {
-          cny_warn_at(p, cny_cur(p)->line, "unsupported", "variadic parameters");
+          cny_warn_at(p, cny_cur(p)->line, "unsupported",
+                      "variadic parameters");
           cny_advance(p);
           break;
         }
@@ -2891,7 +2903,8 @@ static void cny_parse_function(cny_t *p, const cny_sb_t *spec, int is_void) {
            * lone void param
            */
         } else if (pname_ok && pname.len) {
-          cny_sb_add(&params, pptr ? "any " : (pspec.len ? pspec.data : "any "));
+          cny_sb_add(&params,
+                     pptr ? "any " : (pspec.len ? pspec.data : "any "));
           cny_sb_add(&params, pname.data);
         } else {
           cny_sb_add(&params, "any");
@@ -2963,8 +2976,7 @@ static void cny_parse_function(cny_t *p, const cny_sb_t *spec, int is_void) {
       p->in_func = 0;
     }
   } else {
-    cny_warn_at(p, line, "unsupported", "function prototype for %s",
-                name.data);
+    cny_warn_at(p, line, "unsupported", "function prototype for %s", name.data);
     cny_skip_to_semi(p);
   }
   free(params.data);
@@ -3088,8 +3100,7 @@ static void cny_handle_directive(cny_t *p) {
     return;
   }
   if (n >= 6 && memcmp(s, "else", 4) == 0) {
-    if (p->nif > 0 && !p->if_taken[p->nif - 1] &&
-        !p->if_ever[p->nif - 1]) {
+    if (p->nif > 0 && !p->if_taken[p->nif - 1] && !p->if_ever[p->nif - 1]) {
       p->if_taken[p->nif - 1] = p->if_parent[p->nif - 1];
       p->if_ever[p->nif - 1] = 1;
     } else {
@@ -3505,36 +3516,36 @@ static int cny_convert(const char *src, size_t n, cny_sb_t *out) {
  * missing statement newlines, broken const evaluation, and case fall-through
  */
 static int c2ny_selftest(void) {
-  static const char probe[] =
-      "#define BASE 10\n"
-      "int fact(int n) {\n"
-      "  int r = 1;\n"
-      "  for (int i = 1; i <= n; i += 1) {\n"
-      "    r = r * i;\n"
-      "  }\n"
-      "  return r;\n"
-      "}\n"
-      "enum Color { RED, GREEN = 5, BLUE };\n"
-      "int classify(int x) {\n"
-      "  int c = 0;\n"
-      "  switch (x) {\n"
-      "    case 1:\n"
-      "      c = 10;\n"
-      "      break;\n"
-      "    case 2:\n"
-      "    case 3:\n"
-      "      c = 20;\n"
-      "      break;\n"
-      "    default:\n"
-      "      c = -1;\n"
-      "      break;\n"
-      "  }\n"
-      "  return c;\n"
-      "}\n"
-      "int sizes(void) {\n"
-      "  int a[4];\n"
-      "  return a[3] + 2;\n"
-      "}\n";
+  static const char probe[] = "#define BASE 10\n"
+                              "int fact(int n) {\n"
+                              "  int r = 1;\n"
+                              "  for (int i = 1; i <= n; i += 1) {\n"
+                              "    r = r * i;\n"
+                              "  }\n"
+                              "  return r;\n"
+                              "}\n"
+                              "enum Color { RED, GREEN = 5, BLUE };\n"
+                              "int classify(int x) {\n"
+                              "  int c = 0;\n"
+                              "  switch (x) {\n"
+                              "    case 1:\n"
+                              "      c = 10;\n"
+                              "      break;\n"
+                              "    case 2:\n"
+                              "    case 3:\n"
+                              "      c = 20;\n"
+                              "      break;\n"
+                              "    default:\n"
+                              "      c = -1;\n"
+                              "      break;\n"
+                              "  }\n"
+                              "  return c;\n"
+                              "}\n"
+                              "int sizes(void) {\n"
+                              "  int a[4];\n"
+                              "  return a[3] + 2;\n"
+                              "}\n"
+                              "int bit_xor(int a, int b) { return a ^ b; }\n";
   cny_sb_t out = {0};
   if (cny_convert(probe, sizeof(probe) - 1, &out) != 0) {
     fprintf(stderr, "ny-fmt c2ny selftest: cny_convert failed\n");
@@ -3554,6 +3565,7 @@ static int c2ny_selftest(void) {
       "2, 3 {\n",
       "_ {\n",
       "mut a = [0, 0, 0, 0]\n",
+      "return a ^ b\n",
   };
   int fail = 0;
   for (size_t i = 0; i < sizeof(need) / sizeof(need[0]); i++) {
@@ -3570,17 +3582,16 @@ static int c2ny_selftest(void) {
     fprintf(stderr, "ny-fmt c2ny selftest: emission leak detected\n");
     fail = 1;
   }
-  static const char unsupported_probe[] =
-      "#define N 1\n"
-      "int unsupported(int *p) {\n"
-      "  goto done;\n"
-      "  return *p;\n"
-      "done:\n"
-      "  return N;\n"
-      "}\n";
+  static const char unsupported_probe[] = "#define N 1\n"
+                                          "int unsupported(int *p) {\n"
+                                          "  goto done;\n"
+                                          "  return *p;\n"
+                                          "done:\n"
+                                          "  return N;\n"
+                                          "}\n";
   cny_sb_t unsupported = {0};
-  int unsupported_rc =
-      cny_convert(unsupported_probe, sizeof(unsupported_probe) - 1, &unsupported);
+  int unsupported_rc = cny_convert(unsupported_probe,
+                                   sizeof(unsupported_probe) - 1, &unsupported);
   const char *unsupported_out = unsupported.data ? unsupported.data : "";
   if (unsupported_rc == 0 ||
       !strstr(unsupported_out, "c2ny: unsupported: goto") ||

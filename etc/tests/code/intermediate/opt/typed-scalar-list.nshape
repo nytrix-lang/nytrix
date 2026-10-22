@@ -1,0 +1,49 @@
+shape optcheck_typed_scalar_list {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle optcheck]
+  template ny-test-case
+  flags "-O3 --native-backend x86_64 --native-result-oracle=0"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+mut inferred_global = [3, 2, 1]
+def int inferred_global_first = inferred_global[0]
+assert(inferred_global_first == 3)
+
+;; Keep raw odd integer elements raw through a global-index loop. A tagged
+;; any read followed by rt_any_to_i64 turns 5 into 2 and skips the first
+;; iteration on the native route.
+mut inferred_global_loop = [3, 5, 1]
+def int inferred_global_key = inferred_global_loop[0]
+mut inferred_global_j = 1
+while inferred_global_j >= 0 &&
+      inferred_global_loop[inferred_global_j] > inferred_global_key {
+  inferred_global_j -= 1
+}
+assert(inferred_global_key == 3)
+assert(inferred_global_j == 0)
+
+;; Rebinding invalidates the literal-layout proof: reads must follow the new
+;; list's dynamic representation instead of reusing the initializer's facts.
+mut inferred_global_rebound = [3, 5, 1]
+inferred_global_rebound = [8, 9, 10]
+def int inferred_global_rebound_first = inferred_global_rebound[0]
+assert(inferred_global_rebound_first == 8)
+
+fn typed_values(int n) int {
+  mut list<int> values = []
+  mut i = 0
+  while i < n {
+    values = append(values, i)
+    i += 1
+  }
+  values[3] = 99
+  values[3] + values.len
+}
+
+assert(typed_values(8) == 107)
+print("typed-scalar-list-ok")
+NY
+}

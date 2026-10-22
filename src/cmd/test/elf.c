@@ -146,9 +146,8 @@ static int shape_expects_compile_failure(const char *path) {
   if (!path || !shape_path_is_nshape(path))
     return 0;
   char *expect = shape_meta_string(path, "expect");
-  int failed = expect &&
-               (!strcmp(expect, "compile_fail") ||
-                !strcmp(expect, "compile_failure"));
+  int failed = expect && (!strcmp(expect, "compile_fail") ||
+                          !strcmp(expect, "compile_failure"));
   free(expect);
   return failed;
 }
@@ -165,9 +164,9 @@ typedef struct {
 
 typedef struct {
   uint32_t *offsets;
-  char     *names;
-  uint32_t  count;
-  size_t    names_len;
+  char *names;
+  uint32_t count;
+  size_t names_len;
 } ny_test_ar_symtab_t;
 
 static bool test_link_ret_is_f64(ny_test_link_ret_kind_t kind) {
@@ -199,9 +198,9 @@ static unsigned test_link_ret_bits(ny_test_link_ret_kind_t kind) {
 }
 
 static ny_test_proc_t run_one_start(const char *bin, const char *path,
-                                    const char *exec_path,
-                                    const char *std_path, const char *std_bc,
-                                    const char *output_path) {
+                                    const char *exec_path, const char *std_path,
+                                    const char *std_bc, const char *output_path,
+                                    int matrix_variant) {
   char flags_buf[1024];
   char *flags = NULL;
   char *expect = NULL;
@@ -217,15 +216,23 @@ static ny_test_proc_t run_one_start(const char *bin, const char *path,
     matrix_count = split_flag_matrix_rows(matrix_buf, matrix_rows, 64);
   }
   flags_buf[0] = '\0';
+  char policy_flags[1024] = {0};
   char *flagv[32];
   int flagc = 0;
   int has_native_backend = 0;
+  int explicit_executor = 0;
   if ((flags && *flags) || matrix_count > 0) {
+    int selected_variant =
+        matrix_count > 0 && matrix_variant < matrix_count ? matrix_variant : 0;
     snprintf(flags_buf, sizeof(flags_buf), "%s%s%s", flags ? flags : "",
              flags && *flags ? " " : "",
-             matrix_count > 0 ? matrix_rows[0] : "");
+             matrix_count > 0 ? matrix_rows[selected_variant] : "");
     trim_inplace(flags_buf);
+    snprintf(policy_flags, sizeof(policy_flags), "%s", flags_buf);
     has_native_backend = native_backend_explicit(flags_buf);
+    explicit_executor =
+        flags_contain_native_backend_word(flags_buf, "--nyir-run") ||
+        flags_contain_native_backend_word(flags_buf, "--jit");
     flagc = split_words(flags_buf, flagv, 32);
   }
   free(matrix);
@@ -235,7 +242,8 @@ static ny_test_proc_t run_one_start(const char *bin, const char *path,
    * Remove that temporary artifact before compiling so a successful run can
    * never validate an object left by an older compiler or fixture revision.
    */
-  if (expect && strncmp(expect, "object_link_run_", 16) == 0) {
+  if (expect && (strncmp(expect, "object_link_run_", 16) == 0 ||
+                 strncmp(expect, "object_host_link_run_", 21) == 0)) {
     for (int i = 0; i + 1 < flagc; ++i) {
       if (strcmp(flagv[i], "-o") == 0) {
         remove(flagv[i + 1]);
@@ -245,6 +253,7 @@ static ny_test_proc_t run_one_start(const char *bin, const char *path,
   }
 
   char *argv[80];
+  char core_path_arg[PATH_MAX + 16];
   int argc = 0;
   argv[argc++] = (char *)bin;
   push_test_warn_arg(argv, &argc, 80);
@@ -253,45 +262,53 @@ static ny_test_proc_t run_one_start(const char *bin, const char *path,
     argv[argc++] = "--parallel=off";
   }
   if (std_path) {
-    argv[argc++] = "--std";
-    argv[argc++] = (char *)std_path;
+    snprintf(core_path_arg, sizeof(core_path_arg), "--core-path=%s", std_path);
+    argv[argc++] = core_path_arg;
   }
   if (std_bc) {
-    argv[argc++] = "--std-bc";
+    argv[argc++] = "--core-bc";
     argv[argc++] = (char *)std_bc;
   }
-  /*
-   * Probe-suite metadata identifies an embedded source contract.  Use the
-   * same native executor in the parallel pass that replay uses after source
-   * materialization; do not infer this from fixture names.
-   */
-  if (shape_path_is_nshape(path) && argc < 78) {
-    char *family = shape_meta_string(path, "family");
-    if (family && strcmp(family, "probe-suite") == 0)
-      argv[argc++] = "--native-only";
-    free(family);
-  }
+  if (path_is_probe_test(path) && !explicit_executor && argc < 78)
+    argv[argc++] = "--native-only";
   if (path_is_native_test(path) && !has_native_backend && argc < 78) {
     argv[argc++] = "--native-backend";
     argv[argc++] = "x86_64";
   }
   for (int i = 0; i < flagc && argc < 76; i++)
     argv[argc++] = flagv[i];
+  int requested_native = 0;
+  if (test_path_is_benchmark(path))
+    requested_native = test_env_truthy("NYTRIX_TEST_BENCHMARK_NATIVE");
+  else if (test_path_is_runtime_domain(path))
+    requested_native = test_env_truthy("NYTRIX_TEST_RUNTIME_NATIVE") &&
+                       !shape_requests_jit(path);
+  else if (path_is_stdlib_source(path))
+    requested_native = test_env_truthy("NYTRIX_TEST_STD_NATIVE");
+  if (requested_native && !explicit_executor &&
+      !shape_expects_compile_failure(path) &&
+      !native_only_explicit(policy_flags) &&
+      !native_backend_is_llvm(policy_flags) &&
+      !flags_contain_native_backend_word(policy_flags, "--emit-asm") &&
+      argc < 78)
+    argv[argc++] = "--native-only";
   /*
    * Native nshape fixtures select an encoder with --native-backend, but
    * ordinary execution would otherwise fall through to the legacy LLVM JIT.
-   * Keep the initial parallel run on the same deterministic native executor
-   * as the blocking retry path; explicit LLVM fixtures remain untouched.
+   * Explicit LLVM fixtures retain their declared executor.
    */
-  if (path_is_native_test(path) && !shape_expects_compile_failure(path) &&
-      !native_only_explicit(flags_buf) &&
-      !native_backend_is_llvm(flags_buf) &&
-      !flags_contain_native_backend_word(flags_buf, "--emit-asm") && argc < 78)
+  if (path_is_native_test(path) && !explicit_executor &&
+      !shape_expects_compile_failure(path) &&
+      !native_only_explicit(policy_flags) &&
+      !native_backend_is_llvm(policy_flags) &&
+      !flags_contain_native_backend_word(policy_flags, "--emit-asm") &&
+      argc < 78)
     argv[argc++] = "--native-only";
   argv[argc++] = (char *)(exec_path && *exec_path ? exec_path : path);
   argv[argc] = NULL;
 #ifdef _WIN32
-  ny_test_proc_t proc = ny_test_spawn_argv(argv, output_path, output_path ? 0 : 1);
+  ny_test_proc_t proc =
+      ny_test_spawn_argv(argv, output_path, output_path ? 0 : 1);
   error_meta_free(flags, expect);
   return proc;
 #else
@@ -304,19 +321,19 @@ static ny_test_proc_t run_one_start(const char *bin, const char *path,
     (void)setpgid(0, 0);
     apply_test_child_env();
     if (output_path) {
-        int fd = open(output_path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-        if (fd >= 0) {
-            dup2(fd, STDOUT_FILENO);
-            dup2(fd, STDERR_FILENO);
-            close(fd);
-        }
+      int fd = open(output_path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+      if (fd >= 0) {
+        dup2(fd, STDOUT_FILENO);
+        dup2(fd, STDERR_FILENO);
+        close(fd);
+      }
     } else {
-        int devnull = open("/dev/null", O_WRONLY);
-        if (devnull >= 0) {
-            dup2(devnull, STDOUT_FILENO);
-            dup2(devnull, STDERR_FILENO);
-            close(devnull);
-        }
+      int devnull = open("/dev/null", O_WRONLY);
+      if (devnull >= 0) {
+        dup2(devnull, STDOUT_FILENO);
+        dup2(devnull, STDERR_FILENO);
+        close(devnull);
+      }
     }
     execv(bin, argv);
     _exit(127);
@@ -345,8 +362,10 @@ static int child_status_rc(int status) {
  * the path before writing so concurrent probes never replace another probe's
  * executable between its chmod and exec.
  */
-static bool test_write_unique_executable(char path[PATH_MAX], const char *prefix,
-                                         const unsigned char *data, size_t len) {
+static bool test_write_unique_executable(char path[PATH_MAX],
+                                         const char *prefix,
+                                         const unsigned char *data,
+                                         size_t len) {
 #ifdef _WIN32
   (void)path;
   (void)prefix;
@@ -354,7 +373,8 @@ static bool test_write_unique_executable(char path[PATH_MAX], const char *prefix
   (void)len;
   return false;
 #else
-  int written = snprintf(path, PATH_MAX, "%s/%s-XXXXXX", nyt_temp_dir(), prefix);
+  int written =
+      snprintf(path, PATH_MAX, "%s/%s-XXXXXX", nyt_temp_dir(), prefix);
   if (written < 0 || written >= PATH_MAX)
     return false;
   int fd = mkstemp(path);
@@ -372,6 +392,93 @@ static bool test_write_unique_executable(char path[PATH_MAX], const char *prefix
 #endif
 }
 
+static int test_internal_elf64_aot_host_link_run(
+    const char *obj_path, ny_test_link_ret_kind_t ret_kind,
+    const char *expected, const char *shape_path, const char *archive_path) {
+#if !defined(__linux__)
+  (void)obj_path;
+  (void)ret_kind;
+  (void)expected;
+  (void)shape_path;
+  (void)archive_path;
+  return 2;
+#else
+  if (ret_kind == NY_TEST_LINK_RET_F64 || ret_kind == NY_TEST_LINK_RET_F32)
+    return 2;
+  const char *ny_full = getenv("NYTRIX_NY_FULL_BIN");
+  if (!ny_full || !*ny_full)
+    return 2;
+  char runtime_dir[PATH_MAX];
+  snprintf(runtime_dir, sizeof(runtime_dir), "%s", ny_full);
+  char *slash = strrchr(runtime_dir, '/');
+  if (!slash)
+    return 2;
+  *slash = '\0';
+  char runtime_lib[PATH_MAX];
+  int runtime_len = snprintf(runtime_lib, sizeof(runtime_lib),
+                             "%s/libnytrixrt.so", runtime_dir);
+  if (runtime_len < 0 || (size_t)runtime_len >= sizeof(runtime_lib) ||
+      !nyt_is_file(runtime_lib))
+    return 2;
+
+  char exe_path[PATH_MAX];
+  const unsigned char reserved_byte = 0;
+  if (!test_write_unique_executable(exe_path, "ny-host-link-run",
+                                    &reserved_byte, sizeof(reserved_byte)))
+    return 2;
+
+  char rpath_arg[PATH_MAX + 32];
+  int rpath_len =
+      snprintf(rpath_arg, sizeof(rpath_arg), "-Wl,-rpath,%s", runtime_dir);
+  if (rpath_len < 0 || (size_t)rpath_len >= sizeof(rpath_arg)) {
+    remove(exe_path);
+    return 2;
+  }
+  char *link_argv[9];
+  int link_argc = 0;
+  link_argv[link_argc++] = "cc";
+  link_argv[link_argc++] = "-no-pie";
+  link_argv[link_argc++] = "-o";
+  link_argv[link_argc++] = exe_path;
+  link_argv[link_argc++] = (char *)obj_path;
+  if (archive_path && *archive_path)
+    link_argv[link_argc++] = (char *)archive_path;
+  link_argv[link_argc++] = runtime_lib;
+  link_argv[link_argc++] = rpath_arg;
+  link_argv[link_argc] = NULL;
+  int link_rc = run_debug_argv(link_argv, 30, 1);
+  if (link_rc != 0) {
+    remove(exe_path);
+    fprintf(stderr, "object link/run: host ELF64 link failed rc=%d for %s\n",
+            link_rc, disp_path(shape_path));
+    return 1;
+  }
+
+  char *end = NULL;
+  long long expected_value = strtoll(expected, &end, 10);
+  if (!end || end == expected || *end) {
+    remove(exe_path);
+    return 2;
+  }
+  if (expected_value < -255 || expected_value > 255) {
+    remove(exe_path);
+    return 2;
+  }
+  int expected_exit = (int)((unsigned long long)expected_value & 0xffu);
+  char *run_argv[] = {exe_path, NULL};
+  int run_rc = run_debug_argv(run_argv, 30, 0);
+  remove(exe_path);
+  if (run_rc != expected_exit) {
+    fprintf(stderr,
+            "object link/run: host ELF64 exit mismatch got=%d expected=%d "
+            "for %s\n",
+            run_rc, expected_exit, disp_path(shape_path));
+    return 1;
+  }
+  return 0;
+#endif
+}
+
 static bool test_u8(unsigned char **p, size_t *n, unsigned char v) {
   if (!p || !*p || !n || *n == 0)
     return false;
@@ -380,7 +487,8 @@ static bool test_u8(unsigned char **p, size_t *n, unsigned char v) {
   return true;
 }
 
-static bool test_emit(unsigned char **p, size_t *n, const unsigned char *data, size_t len) {
+static bool test_emit(unsigned char **p, size_t *n, const unsigned char *data,
+                      size_t len) {
   if (!p || !*p || !n || *n < len)
     return false;
   memmove(*p, data, len);
@@ -396,7 +504,7 @@ static bool test_u32le(unsigned char **p, size_t *n, uint32_t v) {
 }
 
 static bool test_u64le(unsigned char **p, size_t *n, uint64_t v) {
-  unsigned char b[8] = {(unsigned char)v, (unsigned char)(v >> 8),
+  unsigned char b[8] = {(unsigned char)v,         (unsigned char)(v >> 8),
                         (unsigned char)(v >> 16), (unsigned char)(v >> 24),
                         (unsigned char)(v >> 32), (unsigned char)(v >> 40),
                         (unsigned char)(v >> 48), (unsigned char)(v >> 56)};
@@ -435,8 +543,8 @@ static bool test_has_unsupported_external_runtime_symbol(const char *obj_path) {
   return has;
 }
 
-static bool test_link_add_def(ny_test_link_sym_t *defs, size_t *def_count, const char *name,
-                              uint64_t off) {
+static bool test_link_add_def(ny_test_link_sym_t *defs, size_t *def_count,
+                              const char *name, uint64_t off) {
   if (!defs || !def_count || !name)
     return false;
   int existing = test_link_sym_index(defs, *def_count, name);
@@ -456,66 +564,67 @@ static bool test_link_add_def(ny_test_link_sym_t *defs, size_t *def_count, const
 }
 
 static bool test_link_is_memset_symbol(const char *name) {
-  return name && (strcmp(name, "memset") == 0 ||
-                  strcmp(name, "__memset") == 0 ||
-                  strcmp(name, "ny_fn_memset") == 0);
+  return name &&
+         (strcmp(name, "memset") == 0 || strcmp(name, "__memset") == 0 ||
+          strcmp(name, "ny_fn_memset") == 0);
 }
 
 static bool test_link_is_memcpy_symbol(const char *name) {
-  return name && (strcmp(name, "memcpy") == 0 ||
-                  strcmp(name, "__memcpy") == 0 ||
-                  strcmp(name, "ny_fn_memcpy") == 0);
+  return name &&
+         (strcmp(name, "memcpy") == 0 || strcmp(name, "__memcpy") == 0 ||
+          strcmp(name, "ny_fn_memcpy") == 0);
 }
 
 static bool test_link_is_memmove_symbol(const char *name) {
-  return name && (strcmp(name, "memmove") == 0 ||
-                  strcmp(name, "__memmove") == 0 ||
-                  strcmp(name, "ny_fn_memmove") == 0);
+  return name &&
+         (strcmp(name, "memmove") == 0 || strcmp(name, "__memmove") == 0 ||
+          strcmp(name, "ny_fn_memmove") == 0);
 }
 
 static bool test_link_is_memchr_symbol(const char *name) {
-  return name && (strcmp(name, "memchr") == 0 ||
-                  strcmp(name, "__memchr") == 0 ||
-                  strcmp(name, "ny_fn_memchr") == 0);
+  return name &&
+         (strcmp(name, "memchr") == 0 || strcmp(name, "__memchr") == 0 ||
+          strcmp(name, "ny_fn_memchr") == 0);
 }
 
 static bool test_link_is_memcmp_symbol(const char *name) {
-  return name && (strcmp(name, "memcmp") == 0 ||
-                  strcmp(name, "__memcmp") == 0 ||
-                  strcmp(name, "ny_fn_memcmp") == 0);
+  return name &&
+         (strcmp(name, "memcmp") == 0 || strcmp(name, "__memcmp") == 0 ||
+          strcmp(name, "ny_fn_memcmp") == 0);
 }
 
 static bool test_link_is_strlen_symbol(const char *name) {
-  return name && (strcmp(name, "strlen") == 0 ||
-                  strcmp(name, "__strlen") == 0 ||
-                  strcmp(name, "ny_fn_strlen") == 0);
+  return name &&
+         (strcmp(name, "strlen") == 0 || strcmp(name, "__strlen") == 0 ||
+          strcmp(name, "ny_fn_strlen") == 0);
 }
 
 static bool test_link_is_strcmp_symbol(const char *name) {
-  return name && (strcmp(name, "strcmp") == 0 ||
-                  strcmp(name, "__strcmp") == 0 ||
-                  strcmp(name, "ny_fn_strcmp") == 0);
+  return name &&
+         (strcmp(name, "strcmp") == 0 || strcmp(name, "__strcmp") == 0 ||
+          strcmp(name, "ny_fn_strcmp") == 0);
 }
 
 static bool test_link_is_strchr_symbol(const char *name) {
-  return name && (strcmp(name, "strchr") == 0 ||
-                  strcmp(name, "__strchr") == 0 ||
-                  strcmp(name, "ny_fn_strchr") == 0);
+  return name &&
+         (strcmp(name, "strchr") == 0 || strcmp(name, "__strchr") == 0 ||
+          strcmp(name, "ny_fn_strchr") == 0);
 }
 
 static bool test_link_is_realloc_symbol(const char *name) {
-  return name && (strcmp(name, "realloc") == 0 ||
-                  strcmp(name, "__realloc") == 0 ||
-                  strcmp(name, "ny_fn_realloc") == 0);
+  return name &&
+         (strcmp(name, "realloc") == 0 || strcmp(name, "__realloc") == 0 ||
+          strcmp(name, "ny_fn_realloc") == 0);
 }
 
 static bool test_link_is_calloc_symbol(const char *name) {
-  return name && (strcmp(name, "calloc") == 0 ||
-                  strcmp(name, "__calloc") == 0 ||
-                  strcmp(name, "ny_fn_calloc") == 0);
+  return name &&
+         (strcmp(name, "calloc") == 0 || strcmp(name, "__calloc") == 0 ||
+          strcmp(name, "ny_fn_calloc") == 0);
 }
 
-static bool test_emit_malloc_stub(unsigned char *dst, size_t cap, size_t *out_len) {
+static bool test_emit_malloc_stub(unsigned char *dst, size_t cap,
+                                  size_t *out_len) {
   unsigned char *p = dst;
   size_t n = cap;
   const unsigned char code[] = {
@@ -536,7 +645,8 @@ static bool test_emit_malloc_stub(unsigned char *dst, size_t cap, size_t *out_le
   return true;
 }
 
-static bool test_emit_free_stub(unsigned char *dst, size_t cap, size_t *out_len) {
+static bool test_emit_free_stub(unsigned char *dst, size_t cap,
+                                size_t *out_len) {
   unsigned char *p = dst;
   size_t n = cap;
   const unsigned char code[] = {
@@ -550,17 +660,18 @@ static bool test_emit_free_stub(unsigned char *dst, size_t cap, size_t *out_len)
   return true;
 }
 
-static bool test_emit_realloc_stub(unsigned char *dst, size_t cap, size_t *out_len) {
+static bool test_emit_realloc_stub(unsigned char *dst, size_t cap,
+                                   size_t *out_len) {
   unsigned char *p = dst;
   size_t n = cap;
   const unsigned char code[] = {
       /*
        * entry: rdi=payload (ptr, 0=nil), rsi=state, rdx=type_info, rcx=n
        */
-      0x48, 0x85, 0xc9,                         /* test %rcx,%rcx (n) */
-      0x74, 0x7a,                               /* je ret_zero (n == 0) */
-      0x48, 0x85, 0xff,                         /* test %rdi,%rdi (payload) */
-      0x74, 0x52,                               /* je alloc_fresh (payload == 0 -> nil) */
+      0x48, 0x85, 0xc9, /* test %rcx,%rcx (n) */
+      0x74, 0x7a,       /* je ret_zero (n == 0) */
+      0x48, 0x85, 0xff, /* test %rdi,%rdi (payload) */
+      0x74, 0x52,       /* je alloc_fresh (payload == 0 -> nil) */
       /*
        * have_ptr: realloc existing allocation
        */
@@ -607,8 +718,8 @@ static bool test_emit_realloc_stub(unsigned char *dst, size_t cap, size_t *out_l
       /*
        * ret_zero: return NULL
        */
-      0x31, 0xc0,                               /* xor %eax,%eax */
-      0xc3                                      /* ret */
+      0x31, 0xc0, /* xor %eax,%eax */
+      0xc3        /* ret */
   };
   if (!test_emit(&p, &n, code, sizeof(code)))
     return false;
@@ -617,7 +728,8 @@ static bool test_emit_realloc_stub(unsigned char *dst, size_t cap, size_t *out_l
   return true;
 }
 
-static bool test_emit_calloc_stub(unsigned char *dst, size_t cap, size_t *out_len) {
+static bool test_emit_calloc_stub(unsigned char *dst, size_t cap,
+                                  size_t *out_len) {
   unsigned char *p = dst;
   size_t n = cap;
   const unsigned char code[] = {
@@ -642,7 +754,8 @@ static bool test_emit_calloc_stub(unsigned char *dst, size_t cap, size_t *out_le
   return true;
 }
 
-static bool test_emit_memset_stub(unsigned char *dst, size_t cap, size_t *out_len) {
+static bool test_emit_memset_stub(unsigned char *dst, size_t cap,
+                                  size_t *out_len) {
   unsigned char *p = dst;
   size_t n = cap;
   const unsigned char code[] = {
@@ -662,7 +775,8 @@ static bool test_emit_memset_stub(unsigned char *dst, size_t cap, size_t *out_le
   return true;
 }
 
-static bool test_emit_memcpy_stub(unsigned char *dst, size_t cap, size_t *out_len) {
+static bool test_emit_memcpy_stub(unsigned char *dst, size_t cap,
+                                  size_t *out_len) {
   unsigned char *p = dst;
   size_t n = cap;
   const unsigned char code[] = {
@@ -684,7 +798,8 @@ static bool test_emit_memcpy_stub(unsigned char *dst, size_t cap, size_t *out_le
   return true;
 }
 
-static bool test_emit_memmove_stub(unsigned char *dst, size_t cap, size_t *out_len) {
+static bool test_emit_memmove_stub(unsigned char *dst, size_t cap,
+                                   size_t *out_len) {
   unsigned char *p = dst;
   size_t n = cap;
   const unsigned char code[] = {
@@ -717,7 +832,8 @@ static bool test_emit_memmove_stub(unsigned char *dst, size_t cap, size_t *out_l
   return true;
 }
 
-static bool test_emit_memchr_stub(unsigned char *dst, size_t cap, size_t *out_len) {
+static bool test_emit_memchr_stub(unsigned char *dst, size_t cap,
+                                  size_t *out_len) {
   unsigned char *p = dst;
   size_t n = cap;
   const unsigned char code[] = {
@@ -741,7 +857,8 @@ static bool test_emit_memchr_stub(unsigned char *dst, size_t cap, size_t *out_le
   return true;
 }
 
-static bool test_emit_memcmp_stub(unsigned char *dst, size_t cap, size_t *out_len) {
+static bool test_emit_memcmp_stub(unsigned char *dst, size_t cap,
+                                  size_t *out_len) {
   unsigned char *p = dst;
   size_t n = cap;
   const unsigned char code[] = {
@@ -767,7 +884,8 @@ static bool test_emit_memcmp_stub(unsigned char *dst, size_t cap, size_t *out_le
   return true;
 }
 
-static bool test_emit_strlen_stub(unsigned char *dst, size_t cap, size_t *out_len) {
+static bool test_emit_strlen_stub(unsigned char *dst, size_t cap,
+                                  size_t *out_len) {
   unsigned char *p = dst;
   size_t n = cap;
   const unsigned char code[] = {
@@ -785,7 +903,8 @@ static bool test_emit_strlen_stub(unsigned char *dst, size_t cap, size_t *out_le
   return true;
 }
 
-static bool test_emit_strcmp_stub(unsigned char *dst, size_t cap, size_t *out_len) {
+static bool test_emit_strcmp_stub(unsigned char *dst, size_t cap,
+                                  size_t *out_len) {
   unsigned char *p = dst;
   size_t n = cap;
   const unsigned char code[] = {
@@ -810,7 +929,8 @@ static bool test_emit_strcmp_stub(unsigned char *dst, size_t cap, size_t *out_le
   return true;
 }
 
-static bool test_emit_strchr_stub(unsigned char *dst, size_t cap, size_t *out_len) {
+static bool test_emit_strchr_stub(unsigned char *dst, size_t cap,
+                                  size_t *out_len) {
   unsigned char *p = dst;
   size_t n = cap;
   const unsigned char code[] = {
@@ -833,7 +953,8 @@ static bool test_emit_strchr_stub(unsigned char *dst, size_t cap, size_t *out_le
   return true;
 }
 
-static bool test_emit_malloc_stub32(unsigned char *dst, size_t cap, size_t *out_len) {
+static bool test_emit_malloc_stub32(unsigned char *dst, size_t cap,
+                                    size_t *out_len) {
   unsigned char *p = dst;
   size_t n = cap;
   const unsigned char code[] = {
@@ -862,7 +983,8 @@ static bool test_emit_malloc_stub32(unsigned char *dst, size_t cap, size_t *out_
   return true;
 }
 
-static bool test_emit_memset_stub32(unsigned char *dst, size_t cap, size_t *out_len) {
+static bool test_emit_memset_stub32(unsigned char *dst, size_t cap,
+                                    size_t *out_len) {
   unsigned char *p = dst;
   size_t n = cap;
   const unsigned char code[] = {
@@ -887,7 +1009,8 @@ static bool test_emit_memset_stub32(unsigned char *dst, size_t cap, size_t *out_
   return true;
 }
 
-static bool test_emit_memcpy_stub32(unsigned char *dst, size_t cap, size_t *out_len) {
+static bool test_emit_memcpy_stub32(unsigned char *dst, size_t cap,
+                                    size_t *out_len) {
   unsigned char *p = dst;
   size_t n = cap;
   const unsigned char code[] = {
@@ -916,7 +1039,8 @@ static bool test_emit_memcpy_stub32(unsigned char *dst, size_t cap, size_t *out_
   return true;
 }
 
-static bool test_emit_memmove_stub32(unsigned char *dst, size_t cap, size_t *out_len) {
+static bool test_emit_memmove_stub32(unsigned char *dst, size_t cap,
+                                     size_t *out_len) {
   unsigned char *p = dst;
   size_t n = cap;
   const unsigned char code[] = {
@@ -958,7 +1082,8 @@ static bool test_emit_memmove_stub32(unsigned char *dst, size_t cap, size_t *out
   return true;
 }
 
-static bool test_emit_memchr_stub32(unsigned char *dst, size_t cap, size_t *out_len) {
+static bool test_emit_memchr_stub32(unsigned char *dst, size_t cap,
+                                    size_t *out_len) {
   unsigned char *p = dst;
   size_t n = cap;
   const unsigned char code[] = {
@@ -987,7 +1112,8 @@ static bool test_emit_memchr_stub32(unsigned char *dst, size_t cap, size_t *out_
   return true;
 }
 
-static bool test_emit_memcmp_stub32(unsigned char *dst, size_t cap, size_t *out_len) {
+static bool test_emit_memcmp_stub32(unsigned char *dst, size_t cap,
+                                    size_t *out_len) {
   unsigned char *p = dst;
   size_t n = cap;
   const unsigned char code[] = {
@@ -1022,7 +1148,8 @@ static bool test_emit_memcmp_stub32(unsigned char *dst, size_t cap, size_t *out_
   return true;
 }
 
-static bool test_emit_strlen_stub32(unsigned char *dst, size_t cap, size_t *out_len) {
+static bool test_emit_strlen_stub32(unsigned char *dst, size_t cap,
+                                    size_t *out_len) {
   unsigned char *p = dst;
   size_t n = cap;
   const unsigned char code[] = {
@@ -1043,7 +1170,8 @@ static bool test_emit_strlen_stub32(unsigned char *dst, size_t cap, size_t *out_
   return true;
 }
 
-static bool test_emit_strcmp_stub32(unsigned char *dst, size_t cap, size_t *out_len) {
+static bool test_emit_strcmp_stub32(unsigned char *dst, size_t cap,
+                                    size_t *out_len) {
   unsigned char *p = dst;
   size_t n = cap;
   const unsigned char code[] = {
@@ -1076,7 +1204,8 @@ static bool test_emit_strcmp_stub32(unsigned char *dst, size_t cap, size_t *out_
   return true;
 }
 
-static bool test_emit_strchr_stub32(unsigned char *dst, size_t cap, size_t *out_len) {
+static bool test_emit_strchr_stub32(unsigned char *dst, size_t cap,
+                                    size_t *out_len) {
   unsigned char *p = dst;
   size_t n = cap;
   const unsigned char code[] = {
@@ -1104,32 +1233,35 @@ static bool test_emit_strchr_stub32(unsigned char *dst, size_t cap, size_t *out_
   return true;
 }
 
-static bool test_emit_realloc_stub32(unsigned char *dst, size_t cap, size_t *out_len) {
+static bool test_emit_realloc_stub32(unsigned char *dst, size_t cap,
+                                     size_t *out_len) {
   unsigned char *p = dst;
   size_t n = cap;
   const unsigned char code[] = {
       /*
-       * Stack at entry: [esp]=ret, [esp+4]=payload (ptr, 0=nil), [esp+8]=state, [esp+12]=type_info, [esp+16]=n
+       * Stack at entry: [esp]=ret, [esp+4]=payload (ptr, 0=nil), [esp+8]=state,
+       * [esp+12]=type_info, [esp+16]=n
        */
-      0x8b, 0x4c, 0x24, 0x10,       /* mov 16(%esp),%ecx  <- size (n) */
-      0x85, 0xc9,                   /* test %ecx,%ecx */
-      0x74, 0x77,                   /* je ret_zero (n == 0) */
+      0x8b, 0x4c, 0x24, 0x10, /* mov 16(%esp),%ecx  <- size (n) */
+      0x85, 0xc9,             /* test %ecx,%ecx */
+      0x74, 0x77,             /* je ret_zero (n == 0) */
       /*
        * nil == payload == 0 (type_info carries a nonzero tag)
        */
-      0x8b, 0x44, 0x24, 0x04,       /* mov 4(%esp),%eax  <- payload */
-      0x85, 0xc0,                   /* test %eax,%eax */
-      0x74, 0x48,                   /* je alloc_fresh (payload == 0 -> nil) */
-      0x90, 0x90, 0x90, 0x90,       /* nop (was the stale type_info check) */
-      0x90, 0x90, 0x90, 0x90,       /* nop */
+      0x8b, 0x44, 0x24, 0x04, /* mov 4(%esp),%eax  <- payload */
+      0x85, 0xc0,             /* test %eax,%eax */
+      0x74, 0x48,             /* je alloc_fresh (payload == 0 -> nil) */
+      0x90, 0x90, 0x90, 0x90, /* nop (was the stale type_info check) */
+      0x90, 0x90, 0x90, 0x90, /* nop */
       /*
        * have_ptr: realloc existing allocation
        */
-      0x53,                         /* push %ebx */
-      0x56,                         /* push %esi */
-      0x57,                         /* push %edi */
-      0x55,                         /* push %ebp */
-      0x8b, 0x74, 0x24, 0x14,       /* mov 20(%esp),%esi  <- payload (after 4 pushes) */
+      0x53, /* push %ebx */
+      0x56, /* push %esi */
+      0x57, /* push %edi */
+      0x55, /* push %ebp */
+      0x8b, 0x74, 0x24,
+      0x14, /* mov 20(%esp),%esi  <- payload (after 4 pushes) */
       0x8b, 0x4c, 0x24, 0x20,       /* mov 32(%esp),%ecx  <- size (n) */
       0x51,                         /* push %ecx */
       0x56,                         /* push %esi */
@@ -1188,7 +1320,8 @@ static bool test_emit_realloc_stub32(unsigned char *dst, size_t cap, size_t *out
   return true;
 }
 
-static bool test_emit_calloc_stub32(unsigned char *dst, size_t cap, size_t *out_len) {
+static bool test_emit_calloc_stub32(unsigned char *dst, size_t cap,
+                                    size_t *out_len) {
   unsigned char *p = dst;
   size_t n = cap;
   const unsigned char code[] = {
@@ -1221,7 +1354,8 @@ static bool test_emit_calloc_stub32(unsigned char *dst, size_t cap, size_t *out_
   return true;
 }
 
-static bool test_emit_free_stub32(unsigned char *dst, size_t cap, size_t *out_len) {
+static bool test_emit_free_stub32(unsigned char *dst, size_t cap,
+                                  size_t *out_len) {
   unsigned char *p = dst;
   size_t n = cap;
   const unsigned char code[] = {
@@ -1238,8 +1372,7 @@ static bool test_emit_free_stub32(unsigned char *dst, size_t cap, size_t *out_le
 static size_t test_emit_harness(unsigned char *dst, size_t cap,
                                 ny_test_link_ret_kind_t ret_kind,
                                 const char *expected, uint64_t text_base,
-                                uint64_t harness_off,
-                                uint64_t rt_main_off) {
+                                uint64_t harness_off, uint64_t rt_main_off) {
   unsigned char *p = dst;
   size_t n = cap;
   if (test_link_ret_is_f64(ret_kind)) {
@@ -1251,15 +1384,18 @@ static size_t test_emit_harness(unsigned char *dst, size_t cap,
     size_t call_disp = (size_t)(p - dst);
     if (!test_u32le(&p, &n, 0))
       return 0;
-    if (!test_emit(&p, &n, (const unsigned char[]){0x66, 0x48, 0x0f, 0x7e, 0xc0}, 5) ||
+    if (!test_emit(&p, &n,
+                   (const unsigned char[]){0x66, 0x48, 0x0f, 0x7e, 0xc0}, 5) ||
         !test_emit(&p, &n, (const unsigned char[]){0x48, 0xb9}, 2) ||
         !test_u64le(&p, &n, bits) ||
-        !test_emit(&p, &n, (const unsigned char[]){0x48, 0x31, 0xff, 0x48, 0x39, 0xc8,
-                                                   0x40, 0x0f, 0x95, 0xc7},
+        !test_emit(&p, &n,
+                   (const unsigned char[]){0x48, 0x31, 0xff, 0x48, 0x39, 0xc8,
+                                           0x40, 0x0f, 0x95, 0xc7},
                    10) ||
-        !test_emit(&p, &n, (const unsigned char[]){0xb8, 0x3c, 0x00, 0x00, 0x00,
-                                                   0x0f, 0x05},
-                   7))
+        !test_emit(
+            &p, &n,
+            (const unsigned char[]){0xb8, 0x3c, 0x00, 0x00, 0x00, 0x0f, 0x05},
+            7))
       return 0;
     uint64_t call_site = text_base + harness_off + call_disp;
     int64_t rel = (int64_t)(text_base + rt_main_off) - (int64_t)(call_site + 4);
@@ -1273,14 +1409,13 @@ static size_t test_emit_harness(unsigned char *dst, size_t cap,
     size_t call_disp = (size_t)(p - dst);
     if (!test_u32le(&p, &n, 0))
       return 0;
-    if (!test_emit(&p, &n, (const unsigned char[]){0x66, 0x0f, 0x7e, 0xc0,
-                                                   0x3d},
-                   5) ||
+    if (!test_emit(&p, &n,
+                   (const unsigned char[]){0x66, 0x0f, 0x7e, 0xc0, 0x3d}, 5) ||
         !test_u32le(&p, &n, bits) ||
-        !test_emit(&p, &n, (const unsigned char[]){0x48, 0x31, 0xff,
-                                                   0x40, 0x0f, 0x95, 0xc7,
-                                                   0xb8, 0x3c, 0x00, 0x00, 0x00,
-                                                   0x0f, 0x05},
+        !test_emit(&p, &n,
+                   (const unsigned char[]){0x48, 0x31, 0xff, 0x40, 0x0f, 0x95,
+                                           0xc7, 0xb8, 0x3c, 0x00, 0x00, 0x00,
+                                           0x0f, 0x05},
                    14))
       return 0;
     uint64_t call_site = text_base + harness_off + call_disp;
@@ -1297,29 +1432,37 @@ static size_t test_emit_harness(unsigned char *dst, size_t cap,
     if (bits == 64) {
       if (!test_emit(&p, &n, (const unsigned char[]){0x48, 0xb9}, 2) ||
           !test_u64le(&p, &n, val) ||
-          !test_emit(&p, &n, (const unsigned char[]){0x48, 0x31, 0xff, 0x48, 0x39, 0xc8,
-                                                     0x40, 0x0f, 0x95, 0xc7},
+          !test_emit(&p, &n,
+                     (const unsigned char[]){0x48, 0x31, 0xff, 0x48, 0x39, 0xc8,
+                                             0x40, 0x0f, 0x95, 0xc7},
                      10))
         return 0;
     } else if (bits == 32) {
       if (!test_emit(&p, &n, (const unsigned char[]){0x3d}, 1) ||
           !test_u32le(&p, &n, (uint32_t)val) ||
-          !test_emit(&p, &n, (const unsigned char[]){0x40, 0x0f, 0x95, 0xc7}, 4))
+          !test_emit(&p, &n, (const unsigned char[]){0x40, 0x0f, 0x95, 0xc7},
+                     4))
         return 0;
     } else if (bits == 16) {
       if (!test_emit(&p, &n, (const unsigned char[]){0x66, 0x3d}, 2) ||
-          !test_emit(&p, &n, (const unsigned char[]){(unsigned char)val,
-                                                     (unsigned char)(val >> 8)}, 2) ||
-          !test_emit(&p, &n, (const unsigned char[]){0x40, 0x0f, 0x95, 0xc7}, 4))
+          !test_emit(&p, &n,
+                     (const unsigned char[]){(unsigned char)val,
+                                             (unsigned char)(val >> 8)},
+                     2) ||
+          !test_emit(&p, &n, (const unsigned char[]){0x40, 0x0f, 0x95, 0xc7},
+                     4))
         return 0;
     } else {
-      if (!test_emit(&p, &n, (const unsigned char[]){0x3c, (unsigned char)val,
-                                                     0x40, 0x0f, 0x95, 0xc7}, 6))
+      if (!test_emit(&p, &n,
+                     (const unsigned char[]){0x3c, (unsigned char)val, 0x40,
+                                             0x0f, 0x95, 0xc7},
+                     6))
         return 0;
     }
-    if (!test_emit(&p, &n, (const unsigned char[]){0xb8, 0x3c, 0x00, 0x00, 0x00,
-                                                   0x0f, 0x05},
-                   7))
+    if (!test_emit(
+            &p, &n,
+            (const unsigned char[]){0xb8, 0x3c, 0x00, 0x00, 0x00, 0x0f, 0x05},
+            7))
       return 0;
     uint64_t call_site = text_base + harness_off + call_disp;
     int64_t rel = (int64_t)(text_base + rt_main_off) - (int64_t)(call_site + 4);
@@ -1331,8 +1474,7 @@ static size_t test_emit_harness(unsigned char *dst, size_t cap,
 static size_t test_emit_harness32(unsigned char *dst, size_t cap,
                                   ny_test_link_ret_kind_t ret_kind,
                                   const char *expected, uint32_t text_base,
-                                  uint32_t harness_off,
-                                  uint32_t rt_main_off) {
+                                  uint32_t harness_off, uint32_t rt_main_off) {
   unsigned char *p = dst;
   size_t n = cap;
   if (!test_u8(&p, &n, 0xe8))
@@ -1344,57 +1486,55 @@ static size_t test_emit_harness32(unsigned char *dst, size_t cap,
     double d = strtod(expected, NULL);
     uint64_t bits = 0;
     memmove(&bits, &d, sizeof(bits));
-    if (!test_emit(&p, &n, (const unsigned char[]){0x83, 0xec, 0x08,
-                                                   0xdd, 0x1c, 0x24,
-                                                   0x8b, 0x04, 0x24,
-                                                   0x3d},
+    if (!test_emit(&p, &n,
+                   (const unsigned char[]){0x83, 0xec, 0x08, 0xdd, 0x1c, 0x24,
+                                           0x8b, 0x04, 0x24, 0x3d},
                    10) ||
         !test_u32le(&p, &n, (uint32_t)bits) ||
         !test_emit(&p, &n, (const unsigned char[]){0x0f, 0x85}, 2))
       return 0;
     size_t jne_low_disp = (size_t)(p - dst);
     if (!test_u32le(&p, &n, 0) ||
-        !test_emit(&p, &n, (const unsigned char[]){0x8b, 0x44, 0x24, 0x04,
-                                                   0x3d},
-                   5) ||
+        !test_emit(&p, &n,
+                   (const unsigned char[]){0x8b, 0x44, 0x24, 0x04, 0x3d}, 5) ||
         !test_u32le(&p, &n, (uint32_t)(bits >> 32)) ||
         !test_emit(&p, &n, (const unsigned char[]){0x0f, 0x85}, 2))
       return 0;
     size_t jne_high_disp = (size_t)(p - dst);
     if (!test_u32le(&p, &n, 0) ||
-        !test_emit(&p, &n, (const unsigned char[]){0x83, 0xc4, 0x08,
-                                                   0x31, 0xdb,
-                                                   0xb8, 0x01, 0x00, 0x00, 0x00,
-                                                   0xcd, 0x80},
+        !test_emit(&p, &n,
+                   (const unsigned char[]){0x83, 0xc4, 0x08, 0x31, 0xdb, 0xb8,
+                                           0x01, 0x00, 0x00, 0x00, 0xcd, 0x80},
                    12))
       return 0;
     size_t fail_off = (size_t)(p - dst);
-    if (!test_emit(&p, &n, (const unsigned char[]){0x83, 0xc4, 0x08,
-                                                   0xbb, 0x01, 0x00, 0x00, 0x00,
-                                                   0xb8, 0x01, 0x00, 0x00, 0x00,
-                                                   0xcd, 0x80},
+    if (!test_emit(&p, &n,
+                   (const unsigned char[]){0x83, 0xc4, 0x08, 0xbb, 0x01, 0x00,
+                                           0x00, 0x00, 0xb8, 0x01, 0x00, 0x00,
+                                           0x00, 0xcd, 0x80},
                    15))
       return 0;
-    int32_t low_rel = (int32_t)((int64_t)fail_off - (int64_t)(jne_low_disp + 4));
-    int32_t high_rel = (int32_t)((int64_t)fail_off - (int64_t)(jne_high_disp + 4));
+    int32_t low_rel =
+        (int32_t)((int64_t)fail_off - (int64_t)(jne_low_disp + 4));
+    int32_t high_rel =
+        (int32_t)((int64_t)fail_off - (int64_t)(jne_high_disp + 4));
     memmove(dst + jne_low_disp, &low_rel, 4);
     memmove(dst + jne_high_disp, &high_rel, 4);
   } else if (test_link_ret_is_f32(ret_kind)) {
     float f = strtof(expected, NULL);
     uint32_t bits = 0;
     memmove(&bits, &f, sizeof(bits));
-    if (!test_emit(&p, &n, (const unsigned char[]){0x83, 0xec, 0x04,
-                                                   0xd9, 0x1c, 0x24,
-                                                   0x8b, 0x04, 0x24,
-                                                   0x83, 0xc4, 0x04,
-                                                   0x3d},
+    if (!test_emit(&p, &n,
+                   (const unsigned char[]){0x83, 0xec, 0x04, 0xd9, 0x1c, 0x24,
+                                           0x8b, 0x04, 0x24, 0x83, 0xc4, 0x04,
+                                           0x3d},
                    13) ||
         !test_u32le(&p, &n, bits) ||
-        !test_emit(&p, &n, (const unsigned char[]){0x0f, 0x95, 0xc3,
-                                                  0x0f, 0xb6, 0xdb,
-                                                  0xb8, 0x01, 0x00, 0x00, 0x00,
-                                                  0xcd, 0x80},
-                  13))
+        !test_emit(&p, &n,
+                   (const unsigned char[]){0x0f, 0x95, 0xc3, 0x0f, 0xb6, 0xdb,
+                                           0xb8, 0x01, 0x00, 0x00, 0x00, 0xcd,
+                                           0x80},
+                   13))
       return 0;
   } else if (ret_kind == NY_TEST_LINK_RET_I64) {
     uint64_t val = (uint64_t)strtoull(expected, NULL, 0);
@@ -1413,19 +1553,21 @@ static size_t test_emit_harness32(unsigned char *dst, size_t cap,
       return 0;
     size_t jne_high_disp = (size_t)(p - dst);
     if (!test_u32le(&p, &n, 0) ||
-        !test_emit(&p, &n, (const unsigned char[]){0x31, 0xdb,
-                                                   0xb8, 0x01, 0x00, 0x00, 0x00,
-                                                   0xcd, 0x80},
+        !test_emit(&p, &n,
+                   (const unsigned char[]){0x31, 0xdb, 0xb8, 0x01, 0x00, 0x00,
+                                           0x00, 0xcd, 0x80},
                    9))
       return 0;
     size_t fail_off = (size_t)(p - dst);
-    if (!test_emit(&p, &n, (const unsigned char[]){0xbb, 0x01, 0x00, 0x00, 0x00,
-                                                   0xb8, 0x01, 0x00, 0x00, 0x00,
-                                                   0xcd, 0x80},
+    if (!test_emit(&p, &n,
+                   (const unsigned char[]){0xbb, 0x01, 0x00, 0x00, 0x00, 0xb8,
+                                           0x01, 0x00, 0x00, 0x00, 0xcd, 0x80},
                    12))
       return 0;
-    int32_t low_rel = (int32_t)((int64_t)fail_off - (int64_t)(jne_low_disp + 4));
-    int32_t high_rel = (int32_t)((int64_t)fail_off - (int64_t)(jne_high_disp + 4));
+    int32_t low_rel =
+        (int32_t)((int64_t)fail_off - (int64_t)(jne_low_disp + 4));
+    int32_t high_rel =
+        (int32_t)((int64_t)fail_off - (int64_t)(jne_high_disp + 4));
     memmove(dst + jne_low_disp, &low_rel, 4);
     memmove(dst + jne_high_disp, &high_rel, 4);
   } else {
@@ -1437,32 +1579,34 @@ static size_t test_emit_harness32(unsigned char *dst, size_t cap,
     if (bits == 16) {
       p -= 5;
       n += 5;
-      if (!test_emit(&p, &n, (const unsigned char[]){0x66, 0x3d,
-                                                     (unsigned char)val,
-                                                     (unsigned char)(val >> 8)}, 4))
+      if (!test_emit(&p, &n,
+                     (const unsigned char[]){0x66, 0x3d, (unsigned char)val,
+                                             (unsigned char)(val >> 8)},
+                     4))
         return 0;
     } else if (bits == 8) {
       p -= 5;
       n += 5;
-      if (!test_emit(&p, &n, (const unsigned char[]){0x3c, (unsigned char)val}, 2))
+      if (!test_emit(&p, &n, (const unsigned char[]){0x3c, (unsigned char)val},
+                     2))
         return 0;
     }
-    if (!test_emit(&p, &n, (const unsigned char[]){0x0f, 0x95, 0xc3,
-                                                  0x0f, 0xb6, 0xdb,
-                                                  0xb8, 0x01, 0x00, 0x00, 0x00,
-                                                  0x89, 0xd9,
-                                                  0xcd, 0x80},
-                  15))
-     return 0;
+    if (!test_emit(&p, &n,
+                   (const unsigned char[]){0x0f, 0x95, 0xc3, 0x0f, 0xb6, 0xdb,
+                                           0xb8, 0x01, 0x00, 0x00, 0x00, 0x89,
+                                           0xd9, 0xcd, 0x80},
+                   15))
+      return 0;
   }
   uint32_t call_site = text_base + harness_off + (uint32_t)call_disp;
-  int32_t rel = (int32_t)((int64_t)(text_base + rt_main_off) -
-                          (int64_t)(call_site + 4));
+  int32_t rel =
+      (int32_t)((int64_t)(text_base + rt_main_off) - (int64_t)(call_site + 4));
   memmove(dst + call_disp, &rel, 4);
   return (size_t)(p - dst);
 }
 
-static bool test_ar_read_symtab(const unsigned char *data, size_t size, ny_test_ar_symtab_t *out) {
+static bool test_ar_read_symtab(const unsigned char *data, size_t size,
+                                ny_test_ar_symtab_t *out) {
   if (!data || size < 8 || memcmp(data, "!<arch>\n", 8) != 0)
     return false;
   size_t off = 8;
@@ -1473,7 +1617,8 @@ static bool test_ar_read_symtab(const unsigned char *data, size_t size, ny_test_
     if (hdr.ar_fmag[0] != 0x60 || hdr.ar_fmag[1] != 0x0a)
       return false;
     char sz_buf[11];
-    memmove(sz_buf, hdr.ar_size, 10); sz_buf[10] = '\0';
+    memmove(sz_buf, hdr.ar_size, 10);
+    sz_buf[10] = '\0';
     long raw_size = atol(sz_buf);
     if (raw_size < 0)
       return false;
@@ -1492,7 +1637,8 @@ static bool test_ar_read_symtab(const unsigned char *data, size_t size, ny_test_
   ny_test_ar_hdr_t sh;
   memmove(&sh, data + first_sym_off, sizeof(sh));
   char ssz[11];
-  memmove(ssz, sh.ar_size, 10); ssz[10] = '\0';
+  memmove(ssz, sh.ar_size, 10);
+  ssz[10] = '\0';
   long sym_size = atol(ssz);
   if (sym_size < 4)
     return false;
@@ -1554,52 +1700,57 @@ static uint32_t test_ar_find_symbol(const ny_test_ar_symtab_t *st,
   return 0;
 }
 
-static unsigned char *test_ar_extract_member(const unsigned char *data, size_t size,
-                                              uint32_t member_off, size_t *out_size) {
+static unsigned char *test_ar_extract_member(const unsigned char *data,
+                                             size_t size, uint32_t member_off,
+                                             size_t *out_size) {
   if (!data || member_off > size ||
       sizeof(ny_test_ar_hdr_t) > size - member_off) {
-    if (out_size) *out_size = 0;
+    if (out_size)
+      *out_size = 0;
     return NULL;
   }
   ny_test_ar_hdr_t hdr;
   memmove(&hdr, data + member_off, sizeof(hdr));
   if (hdr.ar_fmag[0] != 0x60 || hdr.ar_fmag[1] != 0x0a) {
-    if (out_size) *out_size = 0;
+    if (out_size)
+      *out_size = 0;
     return NULL;
   }
   char sz_buf[11];
-  memmove(sz_buf, hdr.ar_size, 10); sz_buf[10] = '\0';
+  memmove(sz_buf, hdr.ar_size, 10);
+  sz_buf[10] = '\0';
   long raw_size = atol(sz_buf);
   if (raw_size < 0) {
-    if (out_size) *out_size = 0;
+    if (out_size)
+      *out_size = 0;
     return NULL;
   }
   size_t member_size = (size_t)raw_size;
   size_t data_off = member_off + sizeof(ny_test_ar_hdr_t);
   if (member_size > size - data_off) {
-    if (out_size) *out_size = 0;
+    if (out_size)
+      *out_size = 0;
     return NULL;
   }
   unsigned char *buf = (unsigned char *)malloc(member_size);
   if (!buf) {
-    if (out_size) *out_size = 0;
+    if (out_size)
+      *out_size = 0;
     return NULL;
   }
   memmove(buf, data + data_off, member_size);
-  if (out_size) *out_size = member_size;
+  if (out_size)
+    *out_size = member_size;
   return buf;
 }
 
-static bool test_link_extract_elf64_archive_member(const unsigned char *archive_data,
-                                                   size_t archive_size,
-                                                   uint32_t member_off,
-                                                   unsigned char **text_io,
-                                                   size_t *text_cap_io,
-                                                   size_t *linked_text_len_io,
-                                                   ny_test_link_sym_t *defs,
-                                                   size_t *def_count_io) {
+static bool test_link_extract_elf64_archive_member(
+    const unsigned char *archive_data, size_t archive_size, uint32_t member_off,
+    unsigned char **text_io, size_t *text_cap_io, size_t *linked_text_len_io,
+    ny_test_link_sym_t *defs, size_t *def_count_io) {
   size_t member_size = 0;
-  unsigned char *member = test_ar_extract_member(archive_data, archive_size, member_off, &member_size);
+  unsigned char *member = test_ar_extract_member(archive_data, archive_size,
+                                                 member_off, &member_size);
   if (!member || member_size == 0) {
     free(member);
     return false;
@@ -1609,15 +1760,16 @@ static bool test_link_extract_elf64_archive_member(const unsigned char *archive_
   if (member_size < sizeof(meh))
     goto done;
   memmove(&meh, member, sizeof(meh));
-  if (meh.e_ident[0] != 0x7f || meh.e_ident[1] != 'E' || meh.e_ident[2] != 'L' ||
-      meh.e_ident[3] != 'F' || meh.e_ident[4] != 2 || meh.e_ident[5] != 1 ||
-      meh.e_type != 1 || meh.e_machine != 62 ||
+  if (meh.e_ident[0] != 0x7f || meh.e_ident[1] != 'E' ||
+      meh.e_ident[2] != 'L' || meh.e_ident[3] != 'F' || meh.e_ident[4] != 2 ||
+      meh.e_ident[5] != 1 || meh.e_type != 1 || meh.e_machine != 62 ||
       meh.e_shentsize != sizeof(ny_test_elf64_shdr_t) ||
-      !ny_test_elf_range_u64(meh.e_shoff,
-                             (uint64_t)meh.e_shnum * sizeof(ny_test_elf64_shdr_t),
-                             member_size))
+      !ny_test_elf_range_u64(
+          meh.e_shoff, (uint64_t)meh.e_shnum * sizeof(ny_test_elf64_shdr_t),
+          member_size))
     goto done;
-  ny_test_elf64_shdr_t *msh = (ny_test_elf64_shdr_t *)(void *)(member + meh.e_shoff);
+  ny_test_elf64_shdr_t *msh =
+      (ny_test_elf64_shdr_t *)(void *)(member + meh.e_shoff);
   if (meh.e_shstrndx >= meh.e_shnum ||
       !ny_test_elf_range_u64(msh[meh.e_shstrndx].sh_offset,
                              msh[meh.e_shstrndx].sh_size, member_size))
@@ -1625,12 +1777,19 @@ static bool test_link_extract_elf64_archive_member(const unsigned char *archive_
   const char *mshstr = (const char *)(member + msh[meh.e_shstrndx].sh_offset);
   int mtext_i = -1, mrodata_i = -1, mdata_i = -1, msym_i = -1, mstr_i = -1;
   for (int mi = 0; mi < meh.e_shnum; ++mi) {
-    const char *mn = msh[mi].sh_name < msh[meh.e_shstrndx].sh_size ? mshstr + msh[mi].sh_name : "";
-    if (strcmp(mn, ".text") == 0) mtext_i = mi;
-    else if (strcmp(mn, ".rodata") == 0) mrodata_i = mi;
-    else if (strcmp(mn, ".data") == 0) mdata_i = mi;
-    else if (strcmp(mn, ".symtab") == 0) msym_i = mi;
-    else if (strcmp(mn, ".strtab") == 0) mstr_i = mi;
+    const char *mn = msh[mi].sh_name < msh[meh.e_shstrndx].sh_size
+                         ? mshstr + msh[mi].sh_name
+                         : "";
+    if (strcmp(mn, ".text") == 0)
+      mtext_i = mi;
+    else if (strcmp(mn, ".rodata") == 0)
+      mrodata_i = mi;
+    else if (strcmp(mn, ".data") == 0)
+      mdata_i = mi;
+    else if (strcmp(mn, ".symtab") == 0)
+      msym_i = mi;
+    else if (strcmp(mn, ".strtab") == 0)
+      mstr_i = mi;
   }
   if (mtext_i < 0 || msym_i < 0 || mstr_i < 0 ||
       !ny_test_elf_range_u64(msh[mtext_i].sh_offset, msh[mtext_i].sh_size,
@@ -1656,7 +1815,8 @@ static bool test_link_extract_elf64_archive_member(const unsigned char *archive_
   size_t total_needed = data_off + mdata_len;
   if (total_needed > *text_cap_io) {
     size_t new_cap = *text_cap_io ? *text_cap_io : 4096;
-    while (new_cap < total_needed + 4096) new_cap *= 2;
+    while (new_cap < total_needed + 4096)
+      new_cap *= 2;
     unsigned char *nt = (unsigned char *)realloc(*text_io, new_cap);
     if (!nt)
       goto done;
@@ -1665,28 +1825,40 @@ static bool test_link_extract_elf64_archive_member(const unsigned char *archive_
   }
   memmove(*text_io + append_off, member + msh[mtext_i].sh_offset, mtext_len);
   if (mrodata_i >= 0)
-    memmove(*text_io + rodata_off, member + msh[mrodata_i].sh_offset, mrodata_len);
+    memmove(*text_io + rodata_off, member + msh[mrodata_i].sh_offset,
+            mrodata_len);
   if (mdata_i >= 0)
     memmove(*text_io + data_off, member + msh[mdata_i].sh_offset, mdata_len);
 
-  ny_test_elf64_sym_t *msym = (ny_test_elf64_sym_t *)(void *)(member + msh[msym_i].sh_offset);
-  size_t msym_count = msh[msym_i].sh_entsize ? (size_t)(msh[msym_i].sh_size / msh[msym_i].sh_entsize) : 0;
+  ny_test_elf64_sym_t *msym =
+      (ny_test_elf64_sym_t *)(void *)(member + msh[msym_i].sh_offset);
+  size_t msym_count =
+      msh[msym_i].sh_entsize
+          ? (size_t)(msh[msym_i].sh_size / msh[msym_i].sh_entsize)
+          : 0;
   const char *mstrtab = (const char *)(member + msh[mstr_i].sh_offset);
   size_t mstrtab_len = (size_t)msh[mstr_i].sh_size;
   for (size_t mj = 0; mj < msym_count && mj < 4096; ++mj) {
-    if (msym[mj].st_name >= mstrtab_len) continue;
+    if (msym[mj].st_name >= mstrtab_len)
+      continue;
     const char *mn = mstrtab + msym[mj].st_name;
-    if (!mn[0]) continue;
+    if (!mn[0])
+      continue;
     uint16_t sym_sec = (uint16_t)msym[mj].st_shndx;
     size_t sym_base_off;
-    if (sym_sec == (uint16_t)mtext_i) sym_base_off = append_off;
-    else if (mrodata_i >= 0 && sym_sec == (uint16_t)mrodata_i) sym_base_off = rodata_off;
-    else if (mdata_i >= 0 && sym_sec == (uint16_t)mdata_i) sym_base_off = data_off;
-    else continue;
+    if (sym_sec == (uint16_t)mtext_i)
+      sym_base_off = append_off;
+    else if (mrodata_i >= 0 && sym_sec == (uint16_t)mrodata_i)
+      sym_base_off = rodata_off;
+    else if (mdata_i >= 0 && sym_sec == (uint16_t)mdata_i)
+      sym_base_off = data_off;
+    else
+      continue;
     if (*def_count_io >= 256)
       goto done;
     if (test_link_sym_index(defs, *def_count_io, mn) < 0) {
-      snprintf(defs[*def_count_io].name, sizeof(defs[*def_count_io].name), "%s", mn);
+      snprintf(defs[*def_count_io].name, sizeof(defs[*def_count_io].name), "%s",
+               mn);
       defs[*def_count_io].off = (uint64_t)(sym_base_off + msym[mj].st_value);
       defs[*def_count_io].shndx = sym_sec == (uint16_t)mtext_i ? 1 : 2;
       defs[*def_count_io].defined = true;
@@ -1700,16 +1872,13 @@ done:
   return ok;
 }
 
-static bool test_link_extract_elf32_archive_member(const unsigned char *archive_data,
-                                                   size_t archive_size,
-                                                   uint32_t member_off,
-                                                   unsigned char **text_io,
-                                                   size_t *text_cap_io,
-                                                   size_t *linked_text_len_io,
-                                                   ny_test_link_sym_t *defs,
-                                                   size_t *def_count_io) {
+static bool test_link_extract_elf32_archive_member(
+    const unsigned char *archive_data, size_t archive_size, uint32_t member_off,
+    unsigned char **text_io, size_t *text_cap_io, size_t *linked_text_len_io,
+    ny_test_link_sym_t *defs, size_t *def_count_io) {
   size_t member_size = 0;
-  unsigned char *member = test_ar_extract_member(archive_data, archive_size, member_off, &member_size);
+  unsigned char *member = test_ar_extract_member(archive_data, archive_size,
+                                                 member_off, &member_size);
   if (!member || member_size == 0) {
     free(member);
     return false;
@@ -1719,15 +1888,16 @@ static bool test_link_extract_elf32_archive_member(const unsigned char *archive_
   if (member_size < sizeof(meh))
     goto done;
   memmove(&meh, member, sizeof(meh));
-  if (meh.e_ident[0] != 0x7f || meh.e_ident[1] != 'E' || meh.e_ident[2] != 'L' ||
-      meh.e_ident[3] != 'F' || meh.e_ident[4] != 1 || meh.e_ident[5] != 1 ||
-      meh.e_type != 1 || meh.e_machine != 3 ||
+  if (meh.e_ident[0] != 0x7f || meh.e_ident[1] != 'E' ||
+      meh.e_ident[2] != 'L' || meh.e_ident[3] != 'F' || meh.e_ident[4] != 1 ||
+      meh.e_ident[5] != 1 || meh.e_type != 1 || meh.e_machine != 3 ||
       meh.e_shentsize != sizeof(ny_test_elf32_shdr_t) ||
       !ny_test_elf_range_u64(
           meh.e_shoff, (uint64_t)meh.e_shnum * sizeof(ny_test_elf32_shdr_t),
           member_size))
     goto done;
-  ny_test_elf32_shdr_t *msh = (ny_test_elf32_shdr_t *)(void *)(member + meh.e_shoff);
+  ny_test_elf32_shdr_t *msh =
+      (ny_test_elf32_shdr_t *)(void *)(member + meh.e_shoff);
   if (meh.e_shstrndx >= meh.e_shnum ||
       !ny_test_elf_range_u64(msh[meh.e_shstrndx].sh_offset,
                              msh[meh.e_shstrndx].sh_size, member_size))
@@ -1735,12 +1905,19 @@ static bool test_link_extract_elf32_archive_member(const unsigned char *archive_
   const char *mshstr = (const char *)(member + msh[meh.e_shstrndx].sh_offset);
   int mtext_i = -1, mrodata_i = -1, mdata_i = -1, msym_i = -1, mstr_i = -1;
   for (int mi = 0; mi < meh.e_shnum; ++mi) {
-    const char *mn = msh[mi].sh_name < msh[meh.e_shstrndx].sh_size ? mshstr + msh[mi].sh_name : "";
-    if (strcmp(mn, ".text") == 0) mtext_i = mi;
-    else if (strcmp(mn, ".rodata") == 0) mrodata_i = mi;
-    else if (strcmp(mn, ".data") == 0) mdata_i = mi;
-    else if (strcmp(mn, ".symtab") == 0) msym_i = mi;
-    else if (strcmp(mn, ".strtab") == 0) mstr_i = mi;
+    const char *mn = msh[mi].sh_name < msh[meh.e_shstrndx].sh_size
+                         ? mshstr + msh[mi].sh_name
+                         : "";
+    if (strcmp(mn, ".text") == 0)
+      mtext_i = mi;
+    else if (strcmp(mn, ".rodata") == 0)
+      mrodata_i = mi;
+    else if (strcmp(mn, ".data") == 0)
+      mdata_i = mi;
+    else if (strcmp(mn, ".symtab") == 0)
+      msym_i = mi;
+    else if (strcmp(mn, ".strtab") == 0)
+      mstr_i = mi;
   }
   if (mtext_i < 0 || msym_i < 0 || mstr_i < 0 ||
       !ny_test_elf_range_u64(msh[mtext_i].sh_offset, msh[mtext_i].sh_size,
@@ -1750,11 +1927,11 @@ static bool test_link_extract_elf32_archive_member(const unsigned char *archive_
       !ny_test_elf_range_u64(msh[mstr_i].sh_offset, msh[mstr_i].sh_size,
                              member_size) ||
       (mrodata_i >= 0 &&
-       !ny_test_elf_range_u64(msh[mrodata_i].sh_offset,
-                              msh[mrodata_i].sh_size, member_size)) ||
+       !ny_test_elf_range_u64(msh[mrodata_i].sh_offset, msh[mrodata_i].sh_size,
+                              member_size)) ||
       (mdata_i >= 0 &&
-       !ny_test_elf_range_u64(msh[mdata_i].sh_offset,
-                              msh[mdata_i].sh_size, member_size)))
+       !ny_test_elf_range_u64(msh[mdata_i].sh_offset, msh[mdata_i].sh_size,
+                              member_size)))
     goto done;
 
   size_t append_off = *linked_text_len_io;
@@ -1766,7 +1943,8 @@ static bool test_link_extract_elf32_archive_member(const unsigned char *archive_
   size_t total_needed = data_off + mdata_len;
   if (total_needed > *text_cap_io) {
     size_t new_cap = *text_cap_io ? *text_cap_io : 4096;
-    while (new_cap < total_needed + 4096) new_cap *= 2;
+    while (new_cap < total_needed + 4096)
+      new_cap *= 2;
     unsigned char *nt = (unsigned char *)realloc(*text_io, new_cap);
     if (!nt)
       goto done;
@@ -1775,28 +1953,40 @@ static bool test_link_extract_elf32_archive_member(const unsigned char *archive_
   }
   memmove(*text_io + append_off, member + msh[mtext_i].sh_offset, mtext_len);
   if (mrodata_i >= 0)
-    memmove(*text_io + rodata_off, member + msh[mrodata_i].sh_offset, mrodata_len);
+    memmove(*text_io + rodata_off, member + msh[mrodata_i].sh_offset,
+            mrodata_len);
   if (mdata_i >= 0)
     memmove(*text_io + data_off, member + msh[mdata_i].sh_offset, mdata_len);
 
-  ny_test_elf32_sym_t *msym = (ny_test_elf32_sym_t *)(void *)(member + msh[msym_i].sh_offset);
-  size_t msym_count = msh[msym_i].sh_entsize ? (size_t)(msh[msym_i].sh_size / msh[msym_i].sh_entsize) : 0;
+  ny_test_elf32_sym_t *msym =
+      (ny_test_elf32_sym_t *)(void *)(member + msh[msym_i].sh_offset);
+  size_t msym_count =
+      msh[msym_i].sh_entsize
+          ? (size_t)(msh[msym_i].sh_size / msh[msym_i].sh_entsize)
+          : 0;
   const char *mstrtab = (const char *)(member + msh[mstr_i].sh_offset);
   size_t mstrtab_len = (size_t)msh[mstr_i].sh_size;
   for (size_t mj = 0; mj < msym_count && mj < 4096; ++mj) {
-    if (msym[mj].st_name >= mstrtab_len) continue;
+    if (msym[mj].st_name >= mstrtab_len)
+      continue;
     const char *mn = mstrtab + msym[mj].st_name;
-    if (!mn[0]) continue;
+    if (!mn[0])
+      continue;
     uint16_t sym_sec = (uint16_t)msym[mj].st_shndx;
     size_t sym_base_off;
-    if (sym_sec == (uint16_t)mtext_i) sym_base_off = append_off;
-    else if (mrodata_i >= 0 && sym_sec == (uint16_t)mrodata_i) sym_base_off = rodata_off;
-    else if (mdata_i >= 0 && sym_sec == (uint16_t)mdata_i) sym_base_off = data_off;
-    else continue;
+    if (sym_sec == (uint16_t)mtext_i)
+      sym_base_off = append_off;
+    else if (mrodata_i >= 0 && sym_sec == (uint16_t)mrodata_i)
+      sym_base_off = rodata_off;
+    else if (mdata_i >= 0 && sym_sec == (uint16_t)mdata_i)
+      sym_base_off = data_off;
+    else
+      continue;
     if (*def_count_io >= 256)
       goto done;
     if (test_link_sym_index(defs, *def_count_io, mn) < 0) {
-      snprintf(defs[*def_count_io].name, sizeof(defs[*def_count_io].name), "%s", mn);
+      snprintf(defs[*def_count_io].name, sizeof(defs[*def_count_io].name), "%s",
+               mn);
       defs[*def_count_io].off = (uint64_t)(sym_base_off + msym[mj].st_value);
       defs[*def_count_io].shndx = 1;
       defs[*def_count_io].defined = true;
@@ -1810,7 +2000,8 @@ done:
   return ok;
 }
 
-static bool test_link_archive_offset_seen(const uint32_t *offsets, size_t count, uint32_t member_off) {
+static bool test_link_archive_offset_seen(const uint32_t *offsets, size_t count,
+                                          uint32_t member_off) {
   for (size_t i = 0; i < count; ++i)
     if (offsets[i] == member_off)
       return true;
@@ -1819,10 +2010,15 @@ static bool test_link_archive_offset_seen(const uint32_t *offsets, size_t count,
 
 static int test_internal_elf32_link_run(const char *obj_path,
                                         ny_test_link_ret_kind_t ret_kind,
-                                        const char *expected, const char *shape_path,
+                                        const char *expected,
+                                        const char *shape_path,
                                         const char *archive_path) {
 #ifndef __linux__
-  (void)obj_path; (void)ret_kind; (void)expected; (void)shape_path; (void)archive_path;
+  (void)obj_path;
+  (void)ret_kind;
+  (void)expected;
+  (void)shape_path;
+  (void)archive_path;
   return 2;
 #else
   ny_test_ar_symtab_t ar_st;
@@ -1836,31 +2032,48 @@ static int test_internal_elf32_link_run(const char *obj_path,
       return 2;
     archive_size = (size_t)ar_stbuf.st_size;
     archive_data = (unsigned char *)malloc(archive_size);
-    if (!archive_data) return 2;
+    if (!archive_data)
+      return 2;
     FILE *arf = fopen(archive_path, "rb");
-    if (!arf) { free(archive_data); return 2; }
+    if (!arf) {
+      free(archive_data);
+      return 2;
+    }
     bool arok = fread(archive_data, 1, archive_size, arf) == archive_size;
     fclose(arf);
     if (!arok || !test_ar_read_symtab(archive_data, archive_size, &ar_st)) {
-      free(archive_data); archive_data = NULL; ar_st.count = 0;
+      free(archive_data);
+      archive_data = NULL;
+      ar_st.count = 0;
     }
   }
 
   struct stat st;
-  if (stat(obj_path, &st) != 0 || st.st_size <= 0 || st.st_size > 16 * 1024 * 1024)
-    { free(archive_data); test_ar_free_symtab(&ar_st); return 2; }
+  if (stat(obj_path, &st) != 0 || st.st_size <= 0 ||
+      st.st_size > 16 * 1024 * 1024) {
+    free(archive_data);
+    test_ar_free_symtab(&ar_st);
+    return 2;
+  }
   FILE *f = fopen(obj_path, "rb");
-  if (!f)
-    { free(archive_data); test_ar_free_symtab(&ar_st); return 2; }
+  if (!f) {
+    free(archive_data);
+    test_ar_free_symtab(&ar_st);
+    return 2;
+  }
   unsigned char *obj = (unsigned char *)malloc((size_t)st.st_size);
   if (!obj) {
-    fclose(f); free(archive_data); test_ar_free_symtab(&ar_st);
+    fclose(f);
+    free(archive_data);
+    test_ar_free_symtab(&ar_st);
     return 2;
   }
   bool ok = fread(obj, 1, (size_t)st.st_size, f) == (size_t)st.st_size;
   fclose(f);
   if (!ok || (size_t)st.st_size < sizeof(ny_test_elf32_ehdr_t)) {
-    free(obj); free(archive_data); test_ar_free_symtab(&ar_st);
+    free(obj);
+    free(archive_data);
+    test_ar_free_symtab(&ar_st);
     return 2;
   }
   ny_test_elf32_ehdr_t eh;
@@ -1872,27 +2085,33 @@ static int test_internal_elf32_link_run(const char *obj_path,
       !ny_test_elf_range_u64(
           eh.e_shoff, (uint64_t)eh.e_shnum * sizeof(ny_test_elf32_shdr_t),
           (uint64_t)st.st_size)) {
-    free(obj); free(archive_data); test_ar_free_symtab(&ar_st);
+    free(obj);
+    free(archive_data);
+    test_ar_free_symtab(&ar_st);
     return 2;
   }
-  ny_test_elf32_shdr_t *sh =
-      (ny_test_elf32_shdr_t *)(void *)(obj + eh.e_shoff);
+  ny_test_elf32_shdr_t *sh = (ny_test_elf32_shdr_t *)(void *)(obj + eh.e_shoff);
   if (eh.e_shstrndx >= eh.e_shnum ||
       !ny_test_elf_range_u64(sh[eh.e_shstrndx].sh_offset,
-                             sh[eh.e_shstrndx].sh_size,
-                             (uint64_t)st.st_size)) {
-    free(obj); free(archive_data); test_ar_free_symtab(&ar_st);
+                             sh[eh.e_shstrndx].sh_size, (uint64_t)st.st_size)) {
+    free(obj);
+    free(archive_data);
+    test_ar_free_symtab(&ar_st);
     return 2;
   }
   const char *shstr = (const char *)(obj + sh[eh.e_shstrndx].sh_offset);
   int text_i = -1, sym_i = -1, str_i = -1, rel_i = -1;
   for (int i = 0; i < eh.e_shnum; ++i) {
-    const char *name = sh[i].sh_name < sh[eh.e_shstrndx].sh_size
-                           ? shstr + sh[i].sh_name : "";
-    if (strcmp(name, ".text") == 0) text_i = i;
-    else if (strcmp(name, ".symtab") == 0) sym_i = i;
-    else if (strcmp(name, ".strtab") == 0) str_i = i;
-    else if (strcmp(name, ".rel.text") == 0) rel_i = i;
+    const char *name =
+        sh[i].sh_name < sh[eh.e_shstrndx].sh_size ? shstr + sh[i].sh_name : "";
+    if (strcmp(name, ".text") == 0)
+      text_i = i;
+    else if (strcmp(name, ".symtab") == 0)
+      sym_i = i;
+    else if (strcmp(name, ".strtab") == 0)
+      str_i = i;
+    else if (strcmp(name, ".rel.text") == 0)
+      rel_i = i;
   }
   if (text_i < 0 || sym_i < 0 || str_i < 0 ||
       !ny_test_elf_range_u64(sh[text_i].sh_offset, sh[text_i].sh_size,
@@ -1901,19 +2120,26 @@ static int test_internal_elf32_link_run(const char *obj_path,
                              (uint64_t)st.st_size) ||
       !ny_test_elf_range_u64(sh[str_i].sh_offset, sh[str_i].sh_size,
                              (uint64_t)st.st_size)) {
-    free(obj); free(archive_data); test_ar_free_symtab(&ar_st);
+    free(obj);
+    free(archive_data);
+    test_ar_free_symtab(&ar_st);
     return 2;
   }
   size_t text_len = sh[text_i].sh_size;
   size_t text_cap = text_len + 4096;
   unsigned char *text = (unsigned char *)malloc(text_cap);
   if (!text) {
-    free(obj); free(archive_data); test_ar_free_symtab(&ar_st);
+    free(obj);
+    free(archive_data);
+    test_ar_free_symtab(&ar_st);
     return 2;
   }
   memmove(text, obj + sh[text_i].sh_offset, text_len);
-  ny_test_elf32_sym_t *sym = (ny_test_elf32_sym_t *)(void *)(obj + sh[sym_i].sh_offset);
-  size_t sym_count = sh[sym_i].sh_entsize ? (size_t)(sh[sym_i].sh_size / sh[sym_i].sh_entsize) : 0;
+  ny_test_elf32_sym_t *sym =
+      (ny_test_elf32_sym_t *)(void *)(obj + sh[sym_i].sh_offset);
+  size_t sym_count = sh[sym_i].sh_entsize
+                         ? (size_t)(sh[sym_i].sh_size / sh[sym_i].sh_entsize)
+                         : 0;
   const char *strtab = (const char *)(obj + sh[str_i].sh_offset);
   size_t strtab_len = sh[str_i].sh_size;
   ny_test_link_sym_t defs[256];
@@ -1927,8 +2153,13 @@ static int test_internal_elf32_link_run(const char *obj_path,
     if (!name[0])
       continue;
     if (sym[i].st_shndx == (uint16_t)text_i) {
-      if (def_count >= sizeof(defs) / sizeof(defs[0]))
-        { free(text); free(obj); free(archive_data); test_ar_free_symtab(&ar_st); return 2; }
+      if (def_count >= sizeof(defs) / sizeof(defs[0])) {
+        free(text);
+        free(obj);
+        free(archive_data);
+        test_ar_free_symtab(&ar_st);
+        return 2;
+      }
       snprintf(defs[def_count].name, sizeof(defs[def_count].name), "%s", name);
       defs[def_count].off = sym[i].st_value;
       defs[def_count].shndx = sym[i].st_shndx;
@@ -1940,17 +2171,32 @@ static int test_internal_elf32_link_run(const char *obj_path,
       def_count++;
     }
   }
-  if (!have_rt_main)
-    { free(text); free(obj); free(archive_data); test_ar_free_symtab(&ar_st); return 2; }
+  if (!have_rt_main) {
+    free(text);
+    free(obj);
+    free(archive_data);
+    test_ar_free_symtab(&ar_st);
+    return 2;
+  }
   const uint32_t base = 0x08048000u + 0x1000u;
   size_t linked_text_len = text_len;
-#define ELF32_AR_FAIL do { free(text); free(obj); free(archive_data); test_ar_free_symtab(&ar_st); return 2; } while(0)
+#define ELF32_AR_FAIL                                                          \
+  do {                                                                         \
+    free(text);                                                                \
+    free(obj);                                                                 \
+    free(archive_data);                                                        \
+    test_ar_free_symtab(&ar_st);                                               \
+    return 2;                                                                  \
+  } while (0)
   if (rel_i >= 0) {
     if (!ny_test_elf_range_u64(sh[rel_i].sh_offset, sh[rel_i].sh_size,
                                (uint64_t)st.st_size))
       ELF32_AR_FAIL;
-    ny_test_elf32_rel_t *rel = (ny_test_elf32_rel_t *)(void *)(obj + sh[rel_i].sh_offset);
-    size_t rel_count = sh[rel_i].sh_entsize ? (size_t)(sh[rel_i].sh_size / sh[rel_i].sh_entsize) : 0;
+    ny_test_elf32_rel_t *rel =
+        (ny_test_elf32_rel_t *)(void *)(obj + sh[rel_i].sh_offset);
+    size_t rel_count = sh[rel_i].sh_entsize
+                           ? (size_t)(sh[rel_i].sh_size / sh[rel_i].sh_entsize)
+                           : 0;
     for (size_t i = 0; i < rel_count; ++i) {
       uint32_t type = rel[i].r_info & 0xffu;
       uint32_t si = rel[i].r_info >> 8;
@@ -1966,117 +2212,156 @@ static int test_internal_elf32_link_run(const char *obj_path,
         uint32_t member_off = test_ar_find_symbol(&ar_st, name);
         if (member_off) {
           size_t member_size = 0;
-          unsigned char *member = test_ar_extract_member(archive_data, archive_size,
-                                                         member_off, &member_size);
+          unsigned char *member = test_ar_extract_member(
+              archive_data, archive_size, member_off, &member_size);
           if (member && member_size > 0) {
             ny_test_elf32_ehdr_t meh;
             if (member_size >= sizeof(meh)) {
               memmove(&meh, member, sizeof(meh));
-              if (meh.e_ident[0] == 0x7f && meh.e_ident[1] == 'E' && meh.e_ident[2] == 'L' &&
-                  meh.e_ident[3] == 'F' && meh.e_ident[4] == 1 && meh.e_ident[5] == 1 &&
+              if (meh.e_ident[0] == 0x7f && meh.e_ident[1] == 'E' &&
+                  meh.e_ident[2] == 'L' && meh.e_ident[3] == 'F' &&
+                  meh.e_ident[4] == 1 && meh.e_ident[5] == 1 &&
                   meh.e_type == 1 && meh.e_machine == 3 &&
                   meh.e_shentsize == sizeof(ny_test_elf32_shdr_t) &&
-                  ny_test_elf_range_u64(
-                      meh.e_shoff,
-                      (uint64_t)meh.e_shnum * sizeof(ny_test_elf32_shdr_t),
-                      member_size)) {
+                  ny_test_elf_range_u64(meh.e_shoff,
+                                        (uint64_t)meh.e_shnum *
+                                            sizeof(ny_test_elf32_shdr_t),
+                                        member_size)) {
                 ny_test_elf32_shdr_t *msh =
                     (ny_test_elf32_shdr_t *)(void *)(member + meh.e_shoff);
                 if (meh.e_shstrndx < meh.e_shnum &&
                     ny_test_elf_range_u64(msh[meh.e_shstrndx].sh_offset,
-                                           msh[meh.e_shstrndx].sh_size,
-                                           member_size)) {
+                                          msh[meh.e_shstrndx].sh_size,
+                                          member_size)) {
                   const char *mshstr =
                       (const char *)(member + msh[meh.e_shstrndx].sh_offset);
-                  int mtext_i = -1, mrodata_i = -1, mdata_i = -1,
-                      msym_i = -1, mstr_i = -1, mrel_i = -1;
+                  int mtext_i = -1, mrodata_i = -1, mdata_i = -1, msym_i = -1,
+                      mstr_i = -1, mrel_i = -1;
                   for (int mi = 0; mi < meh.e_shnum; ++mi) {
                     const char *mn =
                         msh[mi].sh_name < msh[meh.e_shstrndx].sh_size
-                            ? mshstr + msh[mi].sh_name : "";
-                    if (strcmp(mn, ".text") == 0) mtext_i = mi;
-                    else if (strcmp(mn, ".rodata") == 0) mrodata_i = mi;
-                    else if (strcmp(mn, ".data") == 0) mdata_i = mi;
-                    else if (strcmp(mn, ".symtab") == 0) msym_i = mi;
-                    else if (strcmp(mn, ".strtab") == 0) mstr_i = mi;
-                    else if (strcmp(mn, ".rel.text") == 0) mrel_i = mi;
+                            ? mshstr + msh[mi].sh_name
+                            : "";
+                    if (strcmp(mn, ".text") == 0)
+                      mtext_i = mi;
+                    else if (strcmp(mn, ".rodata") == 0)
+                      mrodata_i = mi;
+                    else if (strcmp(mn, ".data") == 0)
+                      mdata_i = mi;
+                    else if (strcmp(mn, ".symtab") == 0)
+                      msym_i = mi;
+                    else if (strcmp(mn, ".strtab") == 0)
+                      mstr_i = mi;
+                    else if (strcmp(mn, ".rel.text") == 0)
+                      mrel_i = mi;
                   }
                   if (mtext_i >= 0 && msym_i >= 0 && mstr_i >= 0 &&
                       ny_test_elf_range_u64(msh[mtext_i].sh_offset,
-                                             msh[mtext_i].sh_size, member_size) &&
+                                            msh[mtext_i].sh_size,
+                                            member_size) &&
                       ny_test_elf_range_u64(msh[msym_i].sh_offset,
-                                             msh[msym_i].sh_size, member_size) &&
+                                            msh[msym_i].sh_size, member_size) &&
                       ny_test_elf_range_u64(msh[mstr_i].sh_offset,
-                                             msh[mstr_i].sh_size, member_size) &&
+                                            msh[mstr_i].sh_size, member_size) &&
                       (mrodata_i < 0 ||
                        ny_test_elf_range_u64(msh[mrodata_i].sh_offset,
-                                             msh[mrodata_i].sh_size, member_size)) &&
-                      (mdata_i < 0 ||
-                       ny_test_elf_range_u64(msh[mdata_i].sh_offset,
-                                             msh[mdata_i].sh_size, member_size))) {
+                                             msh[mrodata_i].sh_size,
+                                             member_size)) &&
+                      (mdata_i < 0 || ny_test_elf_range_u64(
+                                          msh[mdata_i].sh_offset,
+                                          msh[mdata_i].sh_size, member_size))) {
                     size_t append_off = linked_text_len;
                     size_t mtext_len = (size_t)msh[mtext_i].sh_size;
-                    size_t mrodata_len = mrodata_i >= 0 ? (size_t)msh[mrodata_i].sh_size : 0;
-                    size_t mdata_len = mdata_i >= 0 ? (size_t)msh[mdata_i].sh_size : 0;
+                    size_t mrodata_len =
+                        mrodata_i >= 0 ? (size_t)msh[mrodata_i].sh_size : 0;
+                    size_t mdata_len =
+                        mdata_i >= 0 ? (size_t)msh[mdata_i].sh_size : 0;
                     size_t rodata_off = append_off + mtext_len;
                     size_t data_off = rodata_off + mrodata_len;
                     size_t total_needed = data_off + mdata_len;
                     if (total_needed > text_cap) {
                       size_t new_cap = text_cap;
-                      while (new_cap < total_needed + 4096) new_cap *= 2;
-                      unsigned char *nt = (unsigned char *)realloc(text, new_cap);
-                      if (!nt) { free(member); ELF32_AR_FAIL; }
-                      text = nt; text_cap = new_cap;
+                      while (new_cap < total_needed + 4096)
+                        new_cap *= 2;
+                      unsigned char *nt =
+                          (unsigned char *)realloc(text, new_cap);
+                      if (!nt) {
+                        free(member);
+                        ELF32_AR_FAIL;
+                      }
+                      text = nt;
+                      text_cap = new_cap;
                     }
-                    memmove(text + append_off, member + msh[mtext_i].sh_offset, mtext_len);
+                    memmove(text + append_off, member + msh[mtext_i].sh_offset,
+                            mtext_len);
                     if (mrodata_i >= 0)
-                      memmove(text + rodata_off, member + msh[mrodata_i].sh_offset, mrodata_len);
+                      memmove(text + rodata_off,
+                              member + msh[mrodata_i].sh_offset, mrodata_len);
                     if (mdata_i >= 0)
-                      memmove(text + data_off, member + msh[mdata_i].sh_offset, mdata_len);
-                    ny_test_elf32_sym_t *msym = (ny_test_elf32_sym_t *)(void *)(member + msh[msym_i].sh_offset);
-                    size_t msym_count = msh[msym_i].sh_entsize ? (size_t)(msh[msym_i].sh_size / msh[msym_i].sh_entsize) : 0;
-                    const char *mstrtab = (const char *)(member + msh[mstr_i].sh_offset);
+                      memmove(text + data_off, member + msh[mdata_i].sh_offset,
+                              mdata_len);
+                    ny_test_elf32_sym_t *msym =
+                        (ny_test_elf32_sym_t *)(void *)(member +
+                                                        msh[msym_i].sh_offset);
+                    size_t msym_count = msh[msym_i].sh_entsize
+                                            ? (size_t)(msh[msym_i].sh_size /
+                                                       msh[msym_i].sh_entsize)
+                                            : 0;
+                    const char *mstrtab =
+                        (const char *)(member + msh[mstr_i].sh_offset);
                     size_t mstrtab_len = (size_t)msh[mstr_i].sh_size;
                     for (size_t mj = 0; mj < msym_count && mj < 4096; ++mj) {
-                      if (msym[mj].st_name >= mstrtab_len) continue;
+                      if (msym[mj].st_name >= mstrtab_len)
+                        continue;
                       const char *mn = mstrtab + msym[mj].st_name;
-                      if (!mn[0]) continue;
+                      if (!mn[0])
+                        continue;
                       uint16_t sym_sec = (uint16_t)msym[mj].st_shndx;
                       size_t sym_base_off;
                       if (sym_sec == (uint16_t)mtext_i) {
                         sym_base_off = append_off;
-                      } else if (mrodata_i >= 0 && sym_sec == (uint16_t)mrodata_i) {
+                      } else if (mrodata_i >= 0 &&
+                                 sym_sec == (uint16_t)mrodata_i) {
                         sym_base_off = rodata_off;
                       } else if (mdata_i >= 0 && sym_sec == (uint16_t)mdata_i) {
                         sym_base_off = data_off;
                       } else {
                         continue;
                       }
-                      if (def_count >= 256) { free(member); ELF32_AR_FAIL; }
-                      if (def_count == 0 || test_link_sym_index(defs, def_count, mn) < 0) {
-                        snprintf(defs[def_count].name, sizeof(defs[def_count].name), "%s", mn);
-                        defs[def_count].off = (uint32_t)(sym_base_off + msym[mj].st_value);
+                      if (def_count >= 256) {
+                        free(member);
+                        ELF32_AR_FAIL;
+                      }
+                      if (def_count == 0 ||
+                          test_link_sym_index(defs, def_count, mn) < 0) {
+                        snprintf(defs[def_count].name,
+                                 sizeof(defs[def_count].name), "%s", mn);
+                        defs[def_count].off =
+                            (uint32_t)(sym_base_off + msym[mj].st_value);
                         defs[def_count].shndx = 1;
                         defs[def_count].defined = true;
                         def_count++;
                       }
                     }
                     size_t member_linked_len = data_off + mdata_len;
-                    member_linked_len = append_off + ((member_linked_len - append_off + 15u) & ~15u);
+                    member_linked_len =
+                        append_off +
+                        ((member_linked_len - append_off + 15u) & ~15u);
                     /*
-                     * Reserve this member before satisfying its own archive dependencies.
-                     * Otherwise a dependency member can be appended at the same offset and
-                     * overwrite the member we just copied, making the original symbol point
-                     * at the dependency body on ELF32 transitive archive links.
+                     * Reserve this member before satisfying its own archive
+                     * dependencies. Otherwise a dependency member can be
+                     * appended at the same offset and overwrite the member we
+                     * just copied, making the original symbol point at the
+                     * dependency body on ELF32 transitive archive links.
                      */
                     if (linked_text_len < member_linked_len)
                       linked_text_len = member_linked_len;
-                    if (mrel_i >= 0 &&
-                        ny_test_elf_range_u64(msh[mrel_i].sh_offset,
-                                              msh[mrel_i].sh_size,
-                                              member_size)) {
+                    if (mrel_i >= 0 && ny_test_elf_range_u64(
+                                           msh[mrel_i].sh_offset,
+                                           msh[mrel_i].sh_size, member_size)) {
                       ny_test_elf32_rel_t *mrel =
-                          (ny_test_elf32_rel_t *)(void *)(member + msh[mrel_i].sh_offset);
+                          (ny_test_elf32_rel_t
+                               *)(void *)(member + msh[mrel_i].sh_offset);
                       size_t mrel_count = msh[mrel_i].sh_entsize
                                               ? (size_t)(msh[mrel_i].sh_size /
                                                          msh[mrel_i].sh_entsize)
@@ -2089,7 +2374,8 @@ static int test_internal_elf32_link_run(const char *obj_path,
                             msym[msi].st_name >= mstrtab_len ||
                             !ny_test_elf_range_u64(mrel[mj].r_offset, 4,
                                                    mtext_len)) {
-                          free(member); ELF32_AR_FAIL;
+                          free(member);
+                          ELF32_AR_FAIL;
                         }
                         uint16_t sym_ndx = (uint16_t)msym[msi].st_shndx;
                         uint64_t msaddr = 0;
@@ -2097,82 +2383,160 @@ static int test_internal_elf32_link_run(const char *obj_path,
                         if (sym_ndx == (uint16_t)mtext_i) {
                           msaddr = base + append_off + msym[msi].st_value;
                           msec_sym = true;
-                        } else if (mrodata_i >= 0 && sym_ndx == (uint16_t)mrodata_i) {
+                        } else if (mrodata_i >= 0 &&
+                                   sym_ndx == (uint16_t)mrodata_i) {
                           msaddr = base + rodata_off + msym[msi].st_value;
                           msec_sym = true;
-                        } else if (mdata_i >= 0 && sym_ndx == (uint16_t)mdata_i) {
+                        } else if (mdata_i >= 0 &&
+                                   sym_ndx == (uint16_t)mdata_i) {
                           msaddr = base + data_off + msym[msi].st_value;
                           msec_sym = true;
                         }
                         if (!msec_sym) {
-                          int mdi = test_link_sym_index(defs, def_count, mstrtab + msym[msi].st_name);
+                          int mdi = test_link_sym_index(
+                              defs, def_count, mstrtab + msym[msi].st_name);
                           if (mdi < 0) {
                             const char *mtarget = mstrtab + msym[msi].st_name;
                             if (archive_data && ar_st.count > 0) {
-                              uint32_t dep_off = test_ar_find_symbol(&ar_st, mtarget);
+                              uint32_t dep_off =
+                                  test_ar_find_symbol(&ar_st, mtarget);
                               if (dep_off && dep_off != member_off) {
-                                if (!test_link_extract_elf32_archive_member(archive_data, archive_size, dep_off,
-                                                                            &text, &text_cap, &linked_text_len,
-                                                                            defs, &def_count)) {
-                                  free(member); ELF32_AR_FAIL;
+                                if (!test_link_extract_elf32_archive_member(
+                                        archive_data, archive_size, dep_off,
+                                        &text, &text_cap, &linked_text_len,
+                                        defs, &def_count)) {
+                                  free(member);
+                                  ELF32_AR_FAIL;
                                 }
                                 member_linked_len = linked_text_len;
-                                mdi = test_link_sym_index(defs, def_count, mtarget);
+                                mdi = test_link_sym_index(defs, def_count,
+                                                          mtarget);
                               }
                             }
                             if (mdi < 0 &&
-                                (strcmp(mtarget, "malloc") == 0 || test_link_is_memset_symbol(mtarget) ||
-                                test_link_is_memcpy_symbol(mtarget) || test_link_is_memmove_symbol(mtarget) ||
-                                test_link_is_memchr_symbol(mtarget) || test_link_is_memcmp_symbol(mtarget) ||
-                                test_link_is_strlen_symbol(mtarget) || test_link_is_strcmp_symbol(mtarget) ||
-                                test_link_is_strchr_symbol(mtarget) || test_link_is_realloc_symbol(mtarget) ||
-                                test_link_is_calloc_symbol(mtarget) || strcmp(mtarget, "free") == 0)) {
-                              size_t stub_off = (member_linked_len + 15u) & ~15u;
+                                (strcmp(mtarget, "malloc") == 0 ||
+                                 test_link_is_memset_symbol(mtarget) ||
+                                 test_link_is_memcpy_symbol(mtarget) ||
+                                 test_link_is_memmove_symbol(mtarget) ||
+                                 test_link_is_memchr_symbol(mtarget) ||
+                                 test_link_is_memcmp_symbol(mtarget) ||
+                                 test_link_is_strlen_symbol(mtarget) ||
+                                 test_link_is_strcmp_symbol(mtarget) ||
+                                 test_link_is_strchr_symbol(mtarget) ||
+                                 test_link_is_realloc_symbol(mtarget) ||
+                                 test_link_is_calloc_symbol(mtarget) ||
+                                 strcmp(mtarget, "free") == 0)) {
+                              size_t stub_off =
+                                  (member_linked_len + 15u) & ~15u;
                               if (stub_off + 256 > text_cap) {
                                 size_t new_cap = text_cap;
-                                while (new_cap < stub_off + 4096) new_cap *= 2;
-                                unsigned char *nt = (unsigned char *)realloc(text, new_cap);
-                                if (!nt) { free(member); ELF32_AR_FAIL; }
-                                text = nt; text_cap = new_cap;
+                                while (new_cap < stub_off + 4096)
+                                  new_cap *= 2;
+                                unsigned char *nt =
+                                    (unsigned char *)realloc(text, new_cap);
+                                if (!nt) {
+                                  free(member);
+                                  ELF32_AR_FAIL;
+                                }
+                                text = nt;
+                                text_cap = new_cap;
                               }
                               if (stub_off > member_linked_len)
-                                memset(text + member_linked_len, 0x90, stub_off - member_linked_len);
+                                memset(text + member_linked_len, 0x90,
+                                       stub_off - member_linked_len);
                               size_t slen = 0;
                               bool emitted = false;
-                              if (strcmp(mtarget, "malloc") == 0) emitted = test_emit_malloc_stub32(text + stub_off, text_cap - stub_off, &slen);
-                              else if (strcmp(mtarget, "free") == 0) emitted = test_emit_free_stub32(text + stub_off, text_cap - stub_off, &slen);
-                              else if (test_link_is_memset_symbol(mtarget)) emitted = test_emit_memset_stub32(text + stub_off, text_cap - stub_off, &slen);
-                              else if (test_link_is_memcpy_symbol(mtarget)) emitted = test_emit_memcpy_stub32(text + stub_off, text_cap - stub_off, &slen);
-                              else if (test_link_is_memmove_symbol(mtarget)) emitted = test_emit_memmove_stub32(text + stub_off, text_cap - stub_off, &slen);
-                              else if (test_link_is_memchr_symbol(mtarget)) emitted = test_emit_memchr_stub32(text + stub_off, text_cap - stub_off, &slen);
-                              else if (test_link_is_memcmp_symbol(mtarget)) emitted = test_emit_memcmp_stub32(text + stub_off, text_cap - stub_off, &slen);
-                              else if (test_link_is_strlen_symbol(mtarget)) emitted = test_emit_strlen_stub32(text + stub_off, text_cap - stub_off, &slen);
-                              else if (test_link_is_strcmp_symbol(mtarget)) emitted = test_emit_strcmp_stub32(text + stub_off, text_cap - stub_off, &slen);
-                              else if (test_link_is_strchr_symbol(mtarget)) emitted = test_emit_strchr_stub32(text + stub_off, text_cap - stub_off, &slen);
-                              else if (test_link_is_realloc_symbol(mtarget)) emitted = test_emit_realloc_stub32(text + stub_off, text_cap - stub_off, &slen);
-                              else if (test_link_is_calloc_symbol(mtarget)) emitted = test_emit_calloc_stub32(text + stub_off, text_cap - stub_off, &slen);
-                              if (!emitted || slen == 0 || !test_link_add_def(defs, &def_count, mtarget, (uint32_t)stub_off))
-                                { free(member); ELF32_AR_FAIL; }
+                              if (strcmp(mtarget, "malloc") == 0)
+                                emitted = test_emit_malloc_stub32(
+                                    text + stub_off, text_cap - stub_off,
+                                    &slen);
+                              else if (strcmp(mtarget, "free") == 0)
+                                emitted = test_emit_free_stub32(
+                                    text + stub_off, text_cap - stub_off,
+                                    &slen);
+                              else if (test_link_is_memset_symbol(mtarget))
+                                emitted = test_emit_memset_stub32(
+                                    text + stub_off, text_cap - stub_off,
+                                    &slen);
+                              else if (test_link_is_memcpy_symbol(mtarget))
+                                emitted = test_emit_memcpy_stub32(
+                                    text + stub_off, text_cap - stub_off,
+                                    &slen);
+                              else if (test_link_is_memmove_symbol(mtarget))
+                                emitted = test_emit_memmove_stub32(
+                                    text + stub_off, text_cap - stub_off,
+                                    &slen);
+                              else if (test_link_is_memchr_symbol(mtarget))
+                                emitted = test_emit_memchr_stub32(
+                                    text + stub_off, text_cap - stub_off,
+                                    &slen);
+                              else if (test_link_is_memcmp_symbol(mtarget))
+                                emitted = test_emit_memcmp_stub32(
+                                    text + stub_off, text_cap - stub_off,
+                                    &slen);
+                              else if (test_link_is_strlen_symbol(mtarget))
+                                emitted = test_emit_strlen_stub32(
+                                    text + stub_off, text_cap - stub_off,
+                                    &slen);
+                              else if (test_link_is_strcmp_symbol(mtarget))
+                                emitted = test_emit_strcmp_stub32(
+                                    text + stub_off, text_cap - stub_off,
+                                    &slen);
+                              else if (test_link_is_strchr_symbol(mtarget))
+                                emitted = test_emit_strchr_stub32(
+                                    text + stub_off, text_cap - stub_off,
+                                    &slen);
+                              else if (test_link_is_realloc_symbol(mtarget))
+                                emitted = test_emit_realloc_stub32(
+                                    text + stub_off, text_cap - stub_off,
+                                    &slen);
+                              else if (test_link_is_calloc_symbol(mtarget))
+                                emitted = test_emit_calloc_stub32(
+                                    text + stub_off, text_cap - stub_off,
+                                    &slen);
+                              if (!emitted || slen == 0 ||
+                                  !test_link_add_def(defs, &def_count, mtarget,
+                                                     (uint32_t)stub_off)) {
+                                free(member);
+                                ELF32_AR_FAIL;
+                              }
                               member_linked_len = stub_off + slen;
-                              mdi = test_link_sym_index(defs, def_count, mtarget);
+                              mdi =
+                                  test_link_sym_index(defs, def_count, mtarget);
                             }
                           }
-                          if (mdi < 0) { free(member); ELF32_AR_FAIL; }
+                          if (mdi < 0) {
+                            free(member);
+                            ELF32_AR_FAIL;
+                          }
                           msaddr = base + defs[mdi].off;
                         }
                         int32_t old_val = 0;
-                        memmove(&old_val, member + msh[mtext_i].sh_offset + mrel[mj].r_offset, 4);
+                        memmove(&old_val,
+                                member + msh[mtext_i].sh_offset +
+                                    mrel[mj].r_offset,
+                                4);
                         if (mtype == 1) {
                           int64_t aval = (int64_t)msaddr + (int64_t)old_val;
-                          if (aval < INT32_MIN || aval > INT32_MAX) { free(member); ELF32_AR_FAIL; }
+                          if (aval < INT32_MIN || aval > INT32_MAX) {
+                            free(member);
+                            ELF32_AR_FAIL;
+                          }
                           int32_t av32 = (int32_t)aval;
-                          memmove(text + append_off + mrel[mj].r_offset, &av32, 4);
+                          memmove(text + append_off + mrel[mj].r_offset, &av32,
+                                  4);
                         } else {
-                          uint64_t mpaddr = base + append_off + mrel[mj].r_offset;
-                          int64_t mval = (int64_t)msaddr - (int64_t)mpaddr + (int64_t)old_val;
-                          if (mval < INT32_MIN || mval > INT32_MAX) { free(member); ELF32_AR_FAIL; }
+                          uint64_t mpaddr =
+                              base + append_off + mrel[mj].r_offset;
+                          int64_t mval = (int64_t)msaddr - (int64_t)mpaddr +
+                                         (int64_t)old_val;
+                          if (mval < INT32_MIN || mval > INT32_MAX) {
+                            free(member);
+                            ELF32_AR_FAIL;
+                          }
                           int32_t mv32 = (int32_t)mval;
-                          memmove(text + append_off + mrel[mj].r_offset, &mv32, 4);
+                          memmove(text + append_off + mrel[mj].r_offset, &mv32,
+                                  4);
                         }
                       }
                     }
@@ -2190,42 +2554,58 @@ static int test_internal_elf32_link_run(const char *obj_path,
         size_t stub_off = (linked_text_len + 15u) & ~15u;
         if (stub_off + 256 > text_cap) {
           size_t new_cap = text_cap;
-          while (new_cap < stub_off + 4096) new_cap *= 2;
+          while (new_cap < stub_off + 4096)
+            new_cap *= 2;
           unsigned char *nt = (unsigned char *)realloc(text, new_cap);
-          if (!nt) ELF32_AR_FAIL;
-          text = nt; text_cap = new_cap;
+          if (!nt)
+            ELF32_AR_FAIL;
+          text = nt;
+          text_cap = new_cap;
         }
         if (stub_off > linked_text_len)
           memset(text + linked_text_len, 0x90, stub_off - linked_text_len);
         size_t stub_len = 0;
         bool emitted = false;
         if (strcmp(name, "malloc") == 0)
-          emitted = test_emit_malloc_stub32(text + stub_off, text_cap - stub_off, &stub_len);
+          emitted = test_emit_malloc_stub32(text + stub_off,
+                                            text_cap - stub_off, &stub_len);
         else if (strcmp(name, "free") == 0)
-          emitted = test_emit_free_stub32(text + stub_off, text_cap - stub_off, &stub_len);
+          emitted = test_emit_free_stub32(text + stub_off, text_cap - stub_off,
+                                          &stub_len);
         else if (test_link_is_memset_symbol(name))
-          emitted = test_emit_memset_stub32(text + stub_off, text_cap - stub_off, &stub_len);
+          emitted = test_emit_memset_stub32(text + stub_off,
+                                            text_cap - stub_off, &stub_len);
         else if (test_link_is_memcpy_symbol(name))
-          emitted = test_emit_memcpy_stub32(text + stub_off, text_cap - stub_off, &stub_len);
+          emitted = test_emit_memcpy_stub32(text + stub_off,
+                                            text_cap - stub_off, &stub_len);
         else if (test_link_is_memmove_symbol(name))
-          emitted = test_emit_memmove_stub32(text + stub_off, text_cap - stub_off, &stub_len);
+          emitted = test_emit_memmove_stub32(text + stub_off,
+                                             text_cap - stub_off, &stub_len);
         else if (test_link_is_memchr_symbol(name))
-          emitted = test_emit_memchr_stub32(text + stub_off, text_cap - stub_off, &stub_len);
+          emitted = test_emit_memchr_stub32(text + stub_off,
+                                            text_cap - stub_off, &stub_len);
         else if (test_link_is_memcmp_symbol(name))
-          emitted = test_emit_memcmp_stub32(text + stub_off, text_cap - stub_off, &stub_len);
+          emitted = test_emit_memcmp_stub32(text + stub_off,
+                                            text_cap - stub_off, &stub_len);
         else if (test_link_is_strlen_symbol(name))
-          emitted = test_emit_strlen_stub32(text + stub_off, text_cap - stub_off, &stub_len);
+          emitted = test_emit_strlen_stub32(text + stub_off,
+                                            text_cap - stub_off, &stub_len);
         else if (test_link_is_strcmp_symbol(name))
-          emitted = test_emit_strcmp_stub32(text + stub_off, text_cap - stub_off, &stub_len);
+          emitted = test_emit_strcmp_stub32(text + stub_off,
+                                            text_cap - stub_off, &stub_len);
         else if (test_link_is_strchr_symbol(name))
-          emitted = test_emit_strchr_stub32(text + stub_off, text_cap - stub_off, &stub_len);
+          emitted = test_emit_strchr_stub32(text + stub_off,
+                                            text_cap - stub_off, &stub_len);
         else if (test_link_is_realloc_symbol(name))
-          emitted = test_emit_realloc_stub32(text + stub_off, text_cap - stub_off, &stub_len);
+          emitted = test_emit_realloc_stub32(text + stub_off,
+                                             text_cap - stub_off, &stub_len);
         else if (test_link_is_calloc_symbol(name))
-          emitted = test_emit_calloc_stub32(text + stub_off, text_cap - stub_off, &stub_len);
+          emitted = test_emit_calloc_stub32(text + stub_off,
+                                            text_cap - stub_off, &stub_len);
         else
           ELF32_AR_FAIL;
-        if (!emitted || stub_len == 0 || !test_link_add_def(defs, &def_count, name, (uint32_t)stub_off))
+        if (!emitted || stub_len == 0 ||
+            !test_link_add_def(defs, &def_count, name, (uint32_t)stub_off))
           ELF32_AR_FAIL;
         linked_text_len = stub_off + stub_len;
       }
@@ -2235,60 +2615,88 @@ static int test_internal_elf32_link_run(const char *obj_path,
       uint32_t si = rel[i].r_info >> 8;
       if (type != 2 || si >= sym_count ||
           !ny_test_elf_range_u64(rel[i].r_offset, 4, text_len) ||
-          sym[si].st_name >= strtab_len) ELF32_AR_FAIL;
+          sym[si].st_name >= strtab_len)
+        ELF32_AR_FAIL;
       const char *name = strtab + sym[si].st_name;
       int di = test_link_sym_index(defs, def_count, name);
-      if (di < 0) ELF32_AR_FAIL;
+      if (di < 0)
+        ELF32_AR_FAIL;
       int32_t addend = 0;
       memmove(&addend, text + rel[i].r_offset, 4);
       int64_t val = (int64_t)(base + (uint32_t)defs[di].off) + addend -
                     (int64_t)(base + rel[i].r_offset);
-      if (val < INT32_MIN || val > INT32_MAX) ELF32_AR_FAIL;
+      if (val < INT32_MIN || val > INT32_MAX)
+        ELF32_AR_FAIL;
       int32_t v32 = (int32_t)val;
       memmove(text + rel[i].r_offset, &v32, 4);
     }
   }
   size_t harness_off = (linked_text_len + 15u) & ~15u;
-  if (harness_off >= text_cap) ELF32_AR_FAIL;
+  if (harness_off >= text_cap)
+    ELF32_AR_FAIL;
   memset(text + linked_text_len, 0x90, harness_off - linked_text_len);
-  size_t harness_len = test_emit_harness32(text + harness_off, text_cap - harness_off,
-                                           ret_kind, expected, base, (uint32_t)harness_off,
-                                           rt_main_off);
-  if (harness_len == 0) ELF32_AR_FAIL;
+  size_t harness_len =
+      test_emit_harness32(text + harness_off, text_cap - harness_off, ret_kind,
+                          expected, base, (uint32_t)harness_off, rt_main_off);
+  if (harness_len == 0)
+    ELF32_AR_FAIL;
   size_t code_len = harness_off + harness_len;
   size_t file_off = 0x1000;
   size_t file_len = file_off + code_len;
   unsigned char *exe = (unsigned char *)calloc(1, file_len);
-  if (!exe) ELF32_AR_FAIL;
+  if (!exe)
+    ELF32_AR_FAIL;
   ny_test_elf32_ehdr_t oh = {0};
-  oh.e_ident[0] = 0x7f; oh.e_ident[1] = 'E'; oh.e_ident[2] = 'L'; oh.e_ident[3] = 'F';
-  oh.e_ident[4] = 1; oh.e_ident[5] = 1; oh.e_ident[6] = 1;
-  oh.e_type = 2; oh.e_machine = 3; oh.e_version = 1;
-  oh.e_entry = base + (uint32_t)harness_off; oh.e_phoff = sizeof(oh);
-  oh.e_ehsize = sizeof(oh); oh.e_phentsize = sizeof(ny_test_elf32_phdr_t); oh.e_phnum = 1;
+  oh.e_ident[0] = 0x7f;
+  oh.e_ident[1] = 'E';
+  oh.e_ident[2] = 'L';
+  oh.e_ident[3] = 'F';
+  oh.e_ident[4] = 1;
+  oh.e_ident[5] = 1;
+  oh.e_ident[6] = 1;
+  oh.e_type = 2;
+  oh.e_machine = 3;
+  oh.e_version = 1;
+  oh.e_entry = base + (uint32_t)harness_off;
+  oh.e_phoff = sizeof(oh);
+  oh.e_ehsize = sizeof(oh);
+  oh.e_phentsize = sizeof(ny_test_elf32_phdr_t);
+  oh.e_phnum = 1;
   ny_test_elf32_phdr_t ph = {0};
-  ph.p_type = 1; ph.p_offset = (uint32_t)file_off; ph.p_vaddr = base;
-  ph.p_paddr = base; ph.p_filesz = (uint32_t)code_len; ph.p_memsz = (uint32_t)code_len;
-  ph.p_flags = 5; ph.p_align = 0x1000;
+  ph.p_type = 1;
+  ph.p_offset = (uint32_t)file_off;
+  ph.p_vaddr = base;
+  ph.p_paddr = base;
+  ph.p_filesz = (uint32_t)code_len;
+  ph.p_memsz = (uint32_t)code_len;
+  ph.p_flags = 5;
+  ph.p_align = 0x1000;
   memmove(exe, &oh, sizeof(oh));
   memmove(exe + oh.e_phoff, &ph, sizeof(ph));
   memmove(exe + file_off, text, code_len);
   char exe_path[PATH_MAX];
-  ok = test_write_unique_executable(exe_path, "ny-internal-link-run-elf32",
-                                    exe, file_len);
-  free(exe); free(text); free(obj); free(archive_data); test_ar_free_symtab(&ar_st);
+  ok = test_write_unique_executable(exe_path, "ny-internal-link-run-elf32", exe,
+                                    file_len);
+  free(exe);
+  free(text);
+  free(obj);
+  free(archive_data);
+  test_ar_free_symtab(&ar_st);
   if (!ok)
     return 2;
   char *run_argv[] = {exe_path, NULL};
   int rc = run_debug_argv(run_argv, 30, 0);
   if (test_env_truthy("NYTRIX_TEST_KEEP_INTERNAL_LINK"))
-    fprintf(stderr, "object link/run: kept internal ELF32 executable %s\n", exe_path);
+    fprintf(stderr, "object link/run: kept internal ELF32 executable %s\n",
+            exe_path);
   else
     remove(exe_path);
-  if (rc == 126 || rc == 127 || rc == 128 + SIGSEGV || rc == 128 + SIGILL || rc == 128 + SIGBUS)
+  if (rc == 126 || rc == 127 || rc == 128 + SIGSEGV || rc == 128 + SIGILL ||
+      rc == 128 + SIGBUS)
     return 2;
   if (rc != 0) {
-    fprintf(stderr, "object link/run: internal ELF32 executable failed rc=%d for %s\n",
+    fprintf(stderr,
+            "object link/run: internal ELF32 executable failed rc=%d for %s\n",
             rc, disp_path(shape_path));
     return 1;
   }
@@ -2311,11 +2719,11 @@ static void test_a64_put32(unsigned char *dst, size_t *len, uint32_t word) {
 
 static void test_a64_mov_imm(unsigned char *dst, size_t *len, unsigned reg,
                              uint64_t value) {
-  test_a64_put32(dst, len,
-                 test_a64_movz(reg, (unsigned)(value & 0xffffu), 0));
+  test_a64_put32(dst, len, test_a64_movz(reg, (unsigned)(value & 0xffffu), 0));
   for (unsigned shift = 16; shift < 64; shift += 16) {
     unsigned part = (unsigned)((value >> shift) & 0xffffu);
-    if (part) test_a64_put32(dst, len, test_a64_movk(reg, part, shift));
+    if (part)
+      test_a64_put32(dst, len, test_a64_movk(reg, part, shift));
   }
 }
 
@@ -2329,7 +2737,10 @@ static int test_internal_aarch64_elf64_link_run(
     const char *obj_path, ny_test_link_ret_kind_t ret_kind,
     const char *expected, const char *shape_path) {
 #ifndef __linux__
-  (void)obj_path; (void)ret_kind; (void)expected; (void)shape_path;
+  (void)obj_path;
+  (void)ret_kind;
+  (void)expected;
+  (void)shape_path;
   return 2;
 #else
   struct stat st;
@@ -2337,41 +2748,50 @@ static int test_internal_aarch64_elf64_link_run(
       st.st_size > 16 * 1024 * 1024)
     return 2;
   FILE *in = fopen(obj_path, "rb");
-  if (!in) return 2;
+  if (!in)
+    return 2;
   unsigned char *obj = (unsigned char *)malloc((size_t)st.st_size);
-  if (!obj) { fclose(in); return 2; }
+  if (!obj) {
+    fclose(in);
+    return 2;
+  }
   bool ok = fread(obj, 1, (size_t)st.st_size, in) == (size_t)st.st_size;
   fclose(in);
   if (!ok || (size_t)st.st_size < sizeof(ny_test_elf64_ehdr_t)) {
-    free(obj); return 2;
+    free(obj);
+    return 2;
   }
   ny_test_elf64_ehdr_t eh;
   memmove(&eh, obj, sizeof(eh));
-  if (eh.e_ident[0] != 0x7f || eh.e_ident[1] != 'E' ||
-      eh.e_ident[2] != 'L' || eh.e_ident[3] != 'F' ||
-      eh.e_machine != 183 || eh.e_shentsize != sizeof(ny_test_elf64_shdr_t) ||
+  if (eh.e_ident[0] != 0x7f || eh.e_ident[1] != 'E' || eh.e_ident[2] != 'L' ||
+      eh.e_ident[3] != 'F' || eh.e_machine != 183 ||
+      eh.e_shentsize != sizeof(ny_test_elf64_shdr_t) ||
       !ny_test_elf_range_u64(
           eh.e_shoff, (uint64_t)eh.e_shnum * sizeof(ny_test_elf64_shdr_t),
           (uint64_t)st.st_size)) {
-    free(obj); return 2;
+    free(obj);
+    return 2;
   }
-  ny_test_elf64_shdr_t *sh =
-      (ny_test_elf64_shdr_t *)(void *)(obj + eh.e_shoff);
+  ny_test_elf64_shdr_t *sh = (ny_test_elf64_shdr_t *)(void *)(obj + eh.e_shoff);
   if (eh.e_shstrndx >= eh.e_shnum ||
       !ny_test_elf_range_u64(sh[eh.e_shstrndx].sh_offset,
-                             sh[eh.e_shstrndx].sh_size,
-                             (uint64_t)st.st_size)) {
-    free(obj); return 2;
+                             sh[eh.e_shstrndx].sh_size, (uint64_t)st.st_size)) {
+    free(obj);
+    return 2;
   }
   const char *shstr = (const char *)(obj + sh[eh.e_shstrndx].sh_offset);
   int text_i = -1, sym_i = -1, str_i = -1, rela_i = -1;
   for (int i = 0; i < eh.e_shnum; ++i) {
-    const char *name = sh[i].sh_name < sh[eh.e_shstrndx].sh_size
-                           ? shstr + sh[i].sh_name : "";
-    if (strcmp(name, ".text") == 0) text_i = i;
-    else if (strcmp(name, ".symtab") == 0) sym_i = i;
-    else if (strcmp(name, ".strtab") == 0) str_i = i;
-    else if (strcmp(name, ".rela.text") == 0) rela_i = i;
+    const char *name =
+        sh[i].sh_name < sh[eh.e_shstrndx].sh_size ? shstr + sh[i].sh_name : "";
+    if (strcmp(name, ".text") == 0)
+      text_i = i;
+    else if (strcmp(name, ".symtab") == 0)
+      sym_i = i;
+    else if (strcmp(name, ".strtab") == 0)
+      str_i = i;
+    else if (strcmp(name, ".rela.text") == 0)
+      rela_i = i;
   }
   if (text_i < 0 || sym_i < 0 || str_i < 0 ||
       !ny_test_elf_range_u64(sh[text_i].sh_offset, sh[text_i].sh_size,
@@ -2380,18 +2800,24 @@ static int test_internal_aarch64_elf64_link_run(
                              (uint64_t)st.st_size) ||
       !ny_test_elf_range_u64(sh[str_i].sh_offset, sh[str_i].sh_size,
                              (uint64_t)st.st_size)) {
-    free(obj); return 2;
+    free(obj);
+    return 2;
   }
   size_t text_len = (size_t)sh[text_i].sh_size;
   unsigned char *text = (unsigned char *)malloc(text_len + 256);
-  if (!text) { free(obj); return 2; }
+  if (!text) {
+    free(obj);
+    return 2;
+  }
   memmove(text, obj + sh[text_i].sh_offset, text_len);
   if (sh[sym_i].sh_entsize != sizeof(ny_test_elf64_sym_t) ||
       (rela_i >= 0 &&
        (sh[rela_i].sh_entsize != sizeof(ny_test_elf64_rela_t) ||
         !ny_test_elf_range_u64(sh[rela_i].sh_offset, sh[rela_i].sh_size,
                                (uint64_t)st.st_size)))) {
-    free(text); free(obj); return 2;
+    free(text);
+    free(obj);
+    return 2;
   }
   ny_test_elf64_sym_t *sym =
       (ny_test_elf64_sym_t *)(void *)(obj + sh[sym_i].sh_offset);
@@ -2403,14 +2829,18 @@ static int test_internal_aarch64_elf64_link_run(
   uint64_t rt_main_off = 0;
   bool have_rt_main = false;
   for (size_t i = 0; i < sym_count; ++i) {
-    if (sym[i].st_name >= strtab_len ||
-        sym[i].st_shndx != (uint16_t)text_i) continue;
+    if (sym[i].st_name >= strtab_len || sym[i].st_shndx != (uint16_t)text_i)
+      continue;
     if (strcmp(strtab + sym[i].st_name, "rt_main") == 0) {
       rt_main_off = sym[i].st_value;
       have_rt_main = true;
     }
   }
-  if (!have_rt_main) { free(text); free(obj); return 2; }
+  if (!have_rt_main) {
+    free(text);
+    free(obj);
+    return 2;
+  }
   size_t rela_count = rela_i >= 0 && sh[rela_i].sh_entsize
                           ? (size_t)(sh[rela_i].sh_size / sh[rela_i].sh_entsize)
                           : 0;
@@ -2420,10 +2850,11 @@ static int test_internal_aarch64_elf64_link_run(
         (ny_test_elf64_rela_t *)(void *)(obj + sh[rela_i].sh_offset) + i;
     uint32_t type = (uint32_t)(r->r_info & 0xffffffffu);
     uint32_t si = (uint32_t)(r->r_info >> 32);
-    if (si >= sym_count || text_len < 4 ||
-        r->r_offset > text_len - 4 ||
+    if (si >= sym_count || text_len < 4 || r->r_offset > text_len - 4 ||
         sym[si].st_shndx != (uint16_t)text_i) {
-      free(text); free(obj); return 2;
+      free(text);
+      free(obj);
+      return 2;
     }
     uint32_t insn = 0;
     memmove(&insn, text + r->r_offset, sizeof(insn));
@@ -2431,33 +2862,36 @@ static int test_internal_aarch64_elf64_link_run(
     uint64_t place_addr = base + r->r_offset;
     switch (type) {
     case 283: { /* R_AARCH64_CALL26 */
-      int64_t delta = (int64_t)symbol_addr + r->r_addend -
-                      (int64_t)place_addr;
+      int64_t delta = (int64_t)symbol_addr + r->r_addend - (int64_t)place_addr;
       if ((delta & 3) || delta / 4 < -(1 << 25) || delta / 4 >= (1 << 25)) {
-        free(text); free(obj); return 2;
+        free(text);
+        free(obj);
+        return 2;
       }
-      insn = (insn & 0xfc000000u) |
-             ((uint32_t)(delta / 4) & 0x03ffffffu);
+      insn = (insn & 0xfc000000u) | ((uint32_t)(delta / 4) & 0x03ffffffu);
       break;
     }
     case 275: { /* R_AARCH64_ADR_PREL_PG_HI21 */
-      int64_t page_delta =
-          ((int64_t)(symbol_addr & ~UINT64_C(0xfff)) -
-           (int64_t)(place_addr & ~UINT64_C(0xfff))) >> 12;
+      int64_t page_delta = ((int64_t)(symbol_addr & ~UINT64_C(0xfff)) -
+                            (int64_t)(place_addr & ~UINT64_C(0xfff))) >>
+                           12;
       if (page_delta < -(1 << 20) || page_delta >= (1 << 20)) {
-        free(text); free(obj); return 2;
+        free(text);
+        free(obj);
+        return 2;
       }
       uint32_t imm = (uint32_t)page_delta;
-      insn = (insn & 0x9f00001fu) |
-             ((imm & 0x3u) << 29) | ((imm & 0x1ffffcu) << 3);
+      insn = (insn & 0x9f00001fu) | ((imm & 0x3u) << 29) |
+             ((imm & 0x1ffffcu) << 3);
       break;
     }
     case 277: /* R_AARCH64_ADD_ABS_LO12_NC */
-      insn = (insn & 0xffc003ffu) |
-             ((uint32_t)(symbol_addr & 0xfffu) << 10);
+      insn = (insn & 0xffc003ffu) | ((uint32_t)(symbol_addr & 0xfffu) << 10);
       break;
     default:
-      free(text); free(obj); return 2;
+      free(text);
+      free(obj);
+      return 2;
     }
     memmove(text + r->r_offset, &insn, sizeof(insn));
   }
@@ -2467,7 +2901,9 @@ static int test_internal_aarch64_elf64_link_run(
   size_t hlen = 0;
   int64_t call_words = ((int64_t)rt_main_off - (int64_t)harness_off) / 4;
   if (call_words < -(1 << 25) || call_words >= (1 << 25)) {
-    free(text); free(obj); return 2; /* unsupported -> fallback */
+    free(text);
+    free(obj);
+    return 2; /* unsupported -> fallback */
   }
   test_a64_put32(harness, &hlen,
                  0x94000000u | ((uint32_t)call_words & 0x03ffffffu));
@@ -2497,48 +2933,76 @@ static int test_internal_aarch64_elf64_link_run(
   } else {
     test_a64_put32(harness, &hlen, 0xeb01001fu); /* cmp x0,x1 */
   }
-  test_a64_put32(harness, &hlen, 0x9a9f07e0u); /* cset x0,ne */
+  test_a64_put32(harness, &hlen, 0x9a9f07e0u);             /* cset x0,ne */
   test_a64_put32(harness, &hlen, test_a64_movz(8, 93, 0)); /* exit */
-  test_a64_put32(harness, &hlen, 0xd4000001u); /* svc #0 */
+  test_a64_put32(harness, &hlen, 0xd4000001u);             /* svc #0 */
   memmove(text + harness_off, harness, hlen);
   size_t code_len = harness_off + hlen;
   const size_t file_off = 0x1000;
   size_t file_len = file_off + code_len;
   unsigned char *exe = (unsigned char *)calloc(1, file_len);
-  if (!exe) { free(text); free(obj); return 2; }
+  if (!exe) {
+    free(text);
+    free(obj);
+    return 2;
+  }
   ny_test_elf64_ehdr_t oh = {0};
-  oh.e_ident[0] = 0x7f; oh.e_ident[1] = 'E'; oh.e_ident[2] = 'L'; oh.e_ident[3] = 'F';
-  oh.e_ident[4] = 2; oh.e_ident[5] = 1; oh.e_ident[6] = 1;
-  oh.e_type = 2; oh.e_machine = 183; oh.e_version = 1;
-  oh.e_entry = base + harness_off; oh.e_phoff = sizeof(oh);
-  oh.e_ehsize = sizeof(oh); oh.e_phentsize = sizeof(ny_test_elf64_phdr_t); oh.e_phnum = 1;
+  oh.e_ident[0] = 0x7f;
+  oh.e_ident[1] = 'E';
+  oh.e_ident[2] = 'L';
+  oh.e_ident[3] = 'F';
+  oh.e_ident[4] = 2;
+  oh.e_ident[5] = 1;
+  oh.e_ident[6] = 1;
+  oh.e_type = 2;
+  oh.e_machine = 183;
+  oh.e_version = 1;
+  oh.e_entry = base + harness_off;
+  oh.e_phoff = sizeof(oh);
+  oh.e_ehsize = sizeof(oh);
+  oh.e_phentsize = sizeof(ny_test_elf64_phdr_t);
+  oh.e_phnum = 1;
   ny_test_elf64_phdr_t ph = {0};
-  ph.p_type = 1; ph.p_flags = 5; ph.p_offset = file_off; ph.p_vaddr = base;
-  ph.p_paddr = base; ph.p_filesz = code_len; ph.p_memsz = code_len; ph.p_align = 0x1000;
-  memmove(exe, &oh, sizeof(oh)); memmove(exe + oh.e_phoff, &ph, sizeof(ph));
+  ph.p_type = 1;
+  ph.p_flags = 5;
+  ph.p_offset = file_off;
+  ph.p_vaddr = base;
+  ph.p_paddr = base;
+  ph.p_filesz = code_len;
+  ph.p_memsz = code_len;
+  ph.p_align = 0x1000;
+  memmove(exe, &oh, sizeof(oh));
+  memmove(exe + oh.e_phoff, &ph, sizeof(ph));
   memmove(exe + file_off, text, code_len);
   char exe_path[PATH_MAX];
   ok = test_write_unique_executable(exe_path, "ny-aarch64-internal-link", exe,
                                     file_len);
-  free(exe); free(text); free(obj);
-  if (!ok) return 2;
+  free(exe);
+  free(text);
+  free(obj);
+  if (!ok)
+    return 2;
 #if defined(__aarch64__)
   char *argv[] = {exe_path, NULL};
   int rc = run_debug_argv(argv, 30, 0);
 #else
   const char *emulator = getenv("NYTRIX_TEST_EMULATOR");
-  if (!emulator || !*emulator) emulator = "qemu-aarch64";
+  if (!emulator || !*emulator)
+    emulator = "qemu-aarch64";
   char *argv[] = {(char *)emulator, exe_path, NULL};
   int rc = run_debug_argv(argv, 30, strchr(emulator, '/') ? 0 : 1);
 #endif
   if (test_env_truthy("NYTRIX_TEST_KEEP_INTERNAL_LINK"))
-    fprintf(stderr, "object link/run: kept AArch64 ELF executable %s\n", exe_path);
+    fprintf(stderr, "object link/run: kept AArch64 ELF executable %s\n",
+            exe_path);
   else
     remove(exe_path);
-  if (rc == 126 || rc == 127) return 2;
+  if (rc == 126 || rc == 127)
+    return 2;
   if (rc != 0) {
     fprintf(stderr,
-            "object link/run: internal AArch64 ELF executable failed rc=%d for %s\n",
+            "object link/run: internal AArch64 ELF executable failed rc=%d for "
+            "%s\n",
             rc, disp_path(shape_path));
     return 1;
   }
@@ -2548,10 +3012,15 @@ static int test_internal_aarch64_elf64_link_run(
 
 static int test_internal_elf64_link_run(const char *obj_path,
                                         ny_test_link_ret_kind_t ret_kind,
-                                        const char *expected, const char *shape_path,
+                                        const char *expected,
+                                        const char *shape_path,
                                         const char *archive_path) {
 #ifndef __linux__
-  (void)obj_path; (void)ret_kind; (void)expected; (void)shape_path; (void)archive_path;
+  (void)obj_path;
+  (void)ret_kind;
+  (void)expected;
+  (void)shape_path;
+  (void)archive_path;
   return 2;
 #else
   if (test_has_unsupported_external_runtime_symbol(obj_path))
@@ -2569,30 +3038,57 @@ static int test_internal_elf64_link_run(const char *obj_path,
     }
     archive_size = (size_t)ar_stbuf.st_size;
     archive_data = (unsigned char *)malloc(archive_size);
-    if (!archive_data) return 2;
+    if (!archive_data)
+      return 2;
     FILE *arf = fopen(archive_path, "rb");
-    if (!arf) { free(archive_data); return 2; }
+    if (!arf) {
+      free(archive_data);
+      return 2;
+    }
     bool arok = fread(archive_data, 1, archive_size, arf) == archive_size;
     fclose(arf);
     if (!arok || !test_ar_read_symtab(archive_data, archive_size, &ar_st)) {
-      fprintf(stderr, "AR: failed to read symtab from %s (arok=%d)\n", archive_path, arok);
+      fprintf(stderr, "AR: failed to read symtab from %s (arok=%d)\n",
+              archive_path, arok);
       free(archive_data);
       archive_data = NULL;
       ar_st.count = 0;
     }
   }
   struct stat st;
-  if (stat(obj_path, &st) != 0 || st.st_size <= 0 || st.st_size > 16 * 1024 * 1024)
-    { free(archive_data); test_ar_free_symtab(&ar_st); return 2; }
+  if (stat(obj_path, &st) != 0 || st.st_size <= 0 ||
+      st.st_size > 16 * 1024 * 1024) {
+    free(archive_data);
+    test_ar_free_symtab(&ar_st);
+    return 2;
+  }
   FILE *f = fopen(obj_path, "rb");
-  if (!f) { free(archive_data); test_ar_free_symtab(&ar_st); return 2; }
+  if (!f) {
+    free(archive_data);
+    test_ar_free_symtab(&ar_st);
+    return 2;
+  }
   unsigned char *obj = (unsigned char *)malloc((size_t)st.st_size);
-  if (!obj) { fclose(f); free(archive_data); test_ar_free_symtab(&ar_st); return 2; }
+  if (!obj) {
+    fclose(f);
+    free(archive_data);
+    test_ar_free_symtab(&ar_st);
+    return 2;
+  }
   bool ok = fread(obj, 1, (size_t)st.st_size, f) == (size_t)st.st_size;
   fclose(f);
-  if (!ok) { free(obj); free(archive_data); test_ar_free_symtab(&ar_st); return 2; }
-  if ((size_t)st.st_size < sizeof(ny_test_elf64_ehdr_t))
-    { free(obj); free(archive_data); test_ar_free_symtab(&ar_st); return 2; }
+  if (!ok) {
+    free(obj);
+    free(archive_data);
+    test_ar_free_symtab(&ar_st);
+    return 2;
+  }
+  if ((size_t)st.st_size < sizeof(ny_test_elf64_ehdr_t)) {
+    free(obj);
+    free(archive_data);
+    test_ar_free_symtab(&ar_st);
+    return 2;
+  }
   ny_test_elf64_ehdr_t eh;
   memmove(&eh, obj, sizeof(eh));
   if (eh.e_ident[0] != 0x7f || eh.e_ident[1] != 'E' || eh.e_ident[2] != 'L' ||
@@ -2600,24 +3096,38 @@ static int test_internal_elf64_link_run(const char *obj_path,
       eh.e_type != 1 || eh.e_machine != 62 ||
       eh.e_shentsize != sizeof(ny_test_elf64_shdr_t) ||
       eh.e_shoff > (uint64_t)st.st_size ||
-      eh.e_shnum > ((uint64_t)st.st_size - eh.e_shoff) /
-                       sizeof(ny_test_elf64_shdr_t))
-    { free(obj); free(archive_data); test_ar_free_symtab(&ar_st); return 2; }
+      eh.e_shnum >
+          ((uint64_t)st.st_size - eh.e_shoff) / sizeof(ny_test_elf64_shdr_t)) {
+    free(obj);
+    free(archive_data);
+    test_ar_free_symtab(&ar_st);
+    return 2;
+  }
   ny_test_elf64_shdr_t *sh = (ny_test_elf64_shdr_t *)(void *)(obj + eh.e_shoff);
   if (eh.e_shstrndx >= eh.e_shnum ||
       sh[eh.e_shstrndx].sh_offset > (uint64_t)st.st_size ||
       sh[eh.e_shstrndx].sh_size >
-          (uint64_t)st.st_size - sh[eh.e_shstrndx].sh_offset)
-    { free(obj); free(archive_data); test_ar_free_symtab(&ar_st); return 2; }
+          (uint64_t)st.st_size - sh[eh.e_shstrndx].sh_offset) {
+    free(obj);
+    free(archive_data);
+    test_ar_free_symtab(&ar_st);
+    return 2;
+  }
   const char *shstr = (const char *)(obj + sh[eh.e_shstrndx].sh_offset);
   int text_i = -1, data_i = -1, sym_i = -1, str_i = -1, rela_i = -1;
   for (int i = 0; i < eh.e_shnum; ++i) {
-    const char *name = sh[i].sh_name < sh[eh.e_shstrndx].sh_size ? shstr + sh[i].sh_name : "";
-    if (strcmp(name, ".text") == 0) text_i = i;
-    else if (strcmp(name, ".data") == 0) data_i = i;
-    else if (strcmp(name, ".symtab") == 0) sym_i = i;
-    else if (strcmp(name, ".strtab") == 0) str_i = i;
-    else if (strcmp(name, ".rela.text") == 0) rela_i = i;
+    const char *name =
+        sh[i].sh_name < sh[eh.e_shstrndx].sh_size ? shstr + sh[i].sh_name : "";
+    if (strcmp(name, ".text") == 0)
+      text_i = i;
+    else if (strcmp(name, ".data") == 0)
+      data_i = i;
+    else if (strcmp(name, ".symtab") == 0)
+      sym_i = i;
+    else if (strcmp(name, ".strtab") == 0)
+      str_i = i;
+    else if (strcmp(name, ".rela.text") == 0)
+      rela_i = i;
   }
   if (text_i < 0 || sym_i < 0 || str_i < 0 ||
       !ny_test_elf_range_u64(sh[text_i].sh_offset, sh[text_i].sh_size,
@@ -2628,38 +3138,59 @@ static int test_internal_elf64_link_run(const char *obj_path,
                              (uint64_t)st.st_size) ||
       (data_i >= 0 &&
        !ny_test_elf_range_u64(sh[data_i].sh_offset, sh[data_i].sh_size,
-                              (uint64_t)st.st_size)))
-    { free(obj); free(archive_data); test_ar_free_symtab(&ar_st); return 2; }
+                              (uint64_t)st.st_size))) {
+    free(obj);
+    free(archive_data);
+    test_ar_free_symtab(&ar_st);
+    return 2;
+  }
   size_t text_len = (size_t)sh[text_i].sh_size;
   size_t data_len = data_i >= 0 ? (size_t)sh[data_i].sh_size : 0;
   unsigned char *data = data_len ? (unsigned char *)malloc(data_len) : NULL;
   if (data_len && !data) {
-    free(obj); free(archive_data); test_ar_free_symtab(&ar_st); return 2;
+    free(obj);
+    free(archive_data);
+    test_ar_free_symtab(&ar_st);
+    return 2;
   }
   if (data_len)
     memmove(data, obj + sh[data_i].sh_offset, data_len);
   size_t text_cap = text_len + 4096;
   unsigned char *text = (unsigned char *)malloc(text_cap);
   if (!text) {
-    free(data); free(obj); free(archive_data); test_ar_free_symtab(&ar_st);
+    free(data);
+    free(obj);
+    free(archive_data);
+    test_ar_free_symtab(&ar_st);
     return 2;
   }
   memmove(text, obj + sh[text_i].sh_offset, text_len);
-  ny_test_elf64_sym_t *sym = (ny_test_elf64_sym_t *)(void *)(obj + sh[sym_i].sh_offset);
-  size_t sym_count = sh[sym_i].sh_entsize ? (size_t)(sh[sym_i].sh_size / sh[sym_i].sh_entsize) : 0;
+  ny_test_elf64_sym_t *sym =
+      (ny_test_elf64_sym_t *)(void *)(obj + sh[sym_i].sh_offset);
+  size_t sym_count = sh[sym_i].sh_entsize
+                         ? (size_t)(sh[sym_i].sh_size / sh[sym_i].sh_entsize)
+                         : 0;
   const char *strtab = (const char *)(obj + sh[str_i].sh_offset);
   size_t strtab_len = (size_t)sh[str_i].sh_size;
-#define TEST_AR_FAIL \
-  do { free(text); free(data); free(obj); free(archive_data); \
-       test_ar_free_symtab(&ar_st); return 2; } while (0)
+#define TEST_AR_FAIL                                                           \
+  do {                                                                         \
+    free(text);                                                                \
+    free(data);                                                                \
+    free(obj);                                                                 \
+    free(archive_data);                                                        \
+    test_ar_free_symtab(&ar_st);                                               \
+    return 2;                                                                  \
+  } while (0)
   ny_test_link_sym_t defs[256];
   size_t def_count = 0;
   uint64_t rt_main_off = 0;
   bool have_rt_main = false;
   for (size_t i = 0; i < sym_count && i < 4096; ++i) {
-    if (sym[i].st_name >= strtab_len) continue;
+    if (sym[i].st_name >= strtab_len)
+      continue;
     const char *name = strtab + sym[i].st_name;
-    if (!name[0]) continue;
+    if (!name[0])
+      continue;
     bool is_text = sym[i].st_shndx == (uint16_t)text_i;
     bool is_data = data_i >= 0 && sym[i].st_shndx == (uint16_t)data_i;
     bool is_abs = sym[i].st_shndx == TEST_LINK_SH_ABS;
@@ -2667,8 +3198,7 @@ static int test_internal_elf64_link_run(const char *obj_path,
       continue;
     size_t section_len = is_data ? data_len : text_len;
     if (!is_abs &&
-        !ny_test_elf_range_u64(sym[i].st_value, sym[i].st_size,
-                               section_len))
+        !ny_test_elf_range_u64(sym[i].st_value, sym[i].st_size, section_len))
       TEST_AR_FAIL;
     if (def_count >= sizeof(defs) / sizeof(defs[0]))
       TEST_AR_FAIL;
@@ -2699,17 +3229,22 @@ static int test_internal_elf64_link_run(const char *obj_path,
   uint32_t extracted_offsets[256];
   size_t extracted_count = 0;
 
-  { // Pass 1: extract all members that define symbols reachable from main object
+  { // Pass 1: extract all members that define symbols reachable from main
+    /*
+     * object
+     */
     bool more;
     do {
       more = false;
       for (size_t ri = 0; ri < max_rela; ++ri) {
-        ny_test_elf64_rela_t *r = (ny_test_elf64_rela_t *)(void *)(obj + sh[rela_i].sh_offset) + ri;
+        ny_test_elf64_rela_t *r =
+            (ny_test_elf64_rela_t *)(void *)(obj + sh[rela_i].sh_offset) + ri;
         uint32_t rtype = (uint32_t)(r->r_info & 0xffffffffu);
         uint32_t rsi = (uint32_t)(r->r_info >> 32);
         if ((rtype != 2 && rtype != 4) || rsi >= sym_count ||
             !ny_test_elf_range_u64(r->r_offset, 4, text_len) ||
-            sym[rsi].st_name >= strtab_len) TEST_AR_FAIL;
+            sym[rsi].st_name >= strtab_len)
+          TEST_AR_FAIL;
         const char *rname = strtab + sym[rsi].st_name;
         if (test_link_sym_index(defs, def_count, rname) >= 0)
           continue;
@@ -2718,110 +3253,159 @@ static int test_internal_elf64_link_run(const char *obj_path,
           if (member_off) {
             bool already = false;
             for (size_t ei = 0; ei < extracted_count; ++ei) {
-              if (extracted_offsets[ei] == member_off) { already = true; break; }
+              if (extracted_offsets[ei] == member_off) {
+                already = true;
+                break;
+              }
             }
             if (!already) {
               size_t member_size = 0;
-              unsigned char *member = test_ar_extract_member(archive_data, archive_size,
-                                                             member_off, &member_size);
+              unsigned char *member = test_ar_extract_member(
+                  archive_data, archive_size, member_off, &member_size);
               if (member && member_size > 0) {
                 ny_test_elf64_ehdr_t meh;
                 if (member_size >= sizeof(meh)) {
                   memmove(&meh, member, sizeof(meh));
-                  if (meh.e_ident[0] == 0x7f && meh.e_ident[1] == 'E' && meh.e_ident[2] == 'L' &&
-                      meh.e_ident[3] == 'F' && meh.e_ident[4] == 2 && meh.e_ident[5] == 1 &&
+                  if (meh.e_ident[0] == 0x7f && meh.e_ident[1] == 'E' &&
+                      meh.e_ident[2] == 'L' && meh.e_ident[3] == 'F' &&
+                      meh.e_ident[4] == 2 && meh.e_ident[5] == 1 &&
                       meh.e_type == 1 && meh.e_machine == 62 &&
                       meh.e_shentsize == sizeof(ny_test_elf64_shdr_t) &&
-                      ny_test_elf_range_u64(
-                          meh.e_shoff,
-                          (uint64_t)meh.e_shnum * sizeof(ny_test_elf64_shdr_t),
-                          member_size)) {
+                      ny_test_elf_range_u64(meh.e_shoff,
+                                            (uint64_t)meh.e_shnum *
+                                                sizeof(ny_test_elf64_shdr_t),
+                                            member_size)) {
                     ny_test_elf64_shdr_t *msh =
                         (ny_test_elf64_shdr_t *)(void *)(member + meh.e_shoff);
                     if (meh.e_shstrndx < meh.e_shnum &&
                         ny_test_elf_range_u64(msh[meh.e_shstrndx].sh_offset,
-                                               msh[meh.e_shstrndx].sh_size,
-                                               member_size)) {
+                                              msh[meh.e_shstrndx].sh_size,
+                                              member_size)) {
                       const char *mshstr =
-                          (const char *)(member + msh[meh.e_shstrndx].sh_offset);
+                          (const char *)(member +
+                                         msh[meh.e_shstrndx].sh_offset);
                       int mtext_i = -1, mrodata_i = -1, mdata_i = -1,
                           msym_i = -1, mstr_i = -1;
                       for (int mi = 0; mi < meh.e_shnum; ++mi) {
                         const char *mn =
                             msh[mi].sh_name < msh[meh.e_shstrndx].sh_size
-                                ? mshstr + msh[mi].sh_name : "";
-                        if (strcmp(mn, ".text") == 0) mtext_i = mi;
-                        else if (strcmp(mn, ".rodata") == 0) mrodata_i = mi;
-                        else if (strcmp(mn, ".data") == 0) mdata_i = mi;
-                        else if (strcmp(mn, ".symtab") == 0) msym_i = mi;
-                        else if (strcmp(mn, ".strtab") == 0) mstr_i = mi;
+                                ? mshstr + msh[mi].sh_name
+                                : "";
+                        if (strcmp(mn, ".text") == 0)
+                          mtext_i = mi;
+                        else if (strcmp(mn, ".rodata") == 0)
+                          mrodata_i = mi;
+                        else if (strcmp(mn, ".data") == 0)
+                          mdata_i = mi;
+                        else if (strcmp(mn, ".symtab") == 0)
+                          msym_i = mi;
+                        else if (strcmp(mn, ".strtab") == 0)
+                          mstr_i = mi;
                       }
                       if (mtext_i >= 0 && msym_i >= 0 && mstr_i >= 0 &&
                           ny_test_elf_range_u64(msh[mtext_i].sh_offset,
-                                                 msh[mtext_i].sh_size, member_size) &&
+                                                msh[mtext_i].sh_size,
+                                                member_size) &&
                           ny_test_elf_range_u64(msh[msym_i].sh_offset,
-                                                 msh[msym_i].sh_size, member_size) &&
+                                                msh[msym_i].sh_size,
+                                                member_size) &&
                           ny_test_elf_range_u64(msh[mstr_i].sh_offset,
-                                                 msh[mstr_i].sh_size, member_size) &&
+                                                msh[mstr_i].sh_size,
+                                                member_size) &&
                           (mrodata_i < 0 ||
                            ny_test_elf_range_u64(msh[mrodata_i].sh_offset,
-                                                 msh[mrodata_i].sh_size, member_size)) &&
+                                                 msh[mrodata_i].sh_size,
+                                                 member_size)) &&
                           (mdata_i < 0 ||
                            ny_test_elf_range_u64(msh[mdata_i].sh_offset,
-                                                 msh[mdata_i].sh_size, member_size))) {
+                                                 msh[mdata_i].sh_size,
+                                                 member_size))) {
                         size_t append_off = linked_text_len;
                         size_t mtext_len = (size_t)msh[mtext_i].sh_size;
-                        size_t mrodata_len = mrodata_i >= 0 ? (size_t)msh[mrodata_i].sh_size : 0;
-                        size_t mdata_len = mdata_i >= 0 ? (size_t)msh[mdata_i].sh_size : 0;
+                        size_t mrodata_len =
+                            mrodata_i >= 0 ? (size_t)msh[mrodata_i].sh_size : 0;
+                        size_t mdata_len =
+                            mdata_i >= 0 ? (size_t)msh[mdata_i].sh_size : 0;
                         size_t rodata_off = append_off + mtext_len;
                         size_t data_off = rodata_off + mrodata_len;
                         size_t total_needed = data_off + mdata_len;
                         if (total_needed > text_cap) {
                           size_t new_cap = text_cap;
-                          while (new_cap < total_needed + 4096) new_cap *= 2;
-                          unsigned char *nt = (unsigned char *)realloc(text, new_cap);
-                          if (!nt) { free(member); TEST_AR_FAIL; }
-                          text = nt; text_cap = new_cap;
+                          while (new_cap < total_needed + 4096)
+                            new_cap *= 2;
+                          unsigned char *nt =
+                              (unsigned char *)realloc(text, new_cap);
+                          if (!nt) {
+                            free(member);
+                            TEST_AR_FAIL;
+                          }
+                          text = nt;
+                          text_cap = new_cap;
                         }
-                        memmove(text + append_off, member + msh[mtext_i].sh_offset, mtext_len);
+                        memmove(text + append_off,
+                                member + msh[mtext_i].sh_offset, mtext_len);
                         if (mrodata_i >= 0)
-                          memmove(text + rodata_off, member + msh[mrodata_i].sh_offset, mrodata_len);
+                          memmove(text + rodata_off,
+                                  member + msh[mrodata_i].sh_offset,
+                                  mrodata_len);
                         if (mdata_i >= 0)
-                          memmove(text + data_off, member + msh[mdata_i].sh_offset, mdata_len);
+                          memmove(text + data_off,
+                                  member + msh[mdata_i].sh_offset, mdata_len);
                         ny_test_elf64_sym_t *msym =
-                            (ny_test_elf64_sym_t *)(void *)(member + msh[msym_i].sh_offset);
-                        size_t msym_count = msh[msym_i].sh_entsize
-                                                ? (size_t)(msh[msym_i].sh_size / msh[msym_i].sh_entsize) : 0;
-                        const char *mstrtab = (const char *)(member + msh[mstr_i].sh_offset);
+                            (ny_test_elf64_sym_t
+                                 *)(void *)(member + msh[msym_i].sh_offset);
+                        size_t msym_count =
+                            msh[msym_i].sh_entsize
+                                ? (size_t)(msh[msym_i].sh_size /
+                                           msh[msym_i].sh_entsize)
+                                : 0;
+                        const char *mstrtab =
+                            (const char *)(member + msh[mstr_i].sh_offset);
                         size_t mstrtab_len = (size_t)msh[mstr_i].sh_size;
-                        for (size_t mj = 0; mj < msym_count && mj < 4096; ++mj) {
-                          if (msym[mj].st_name >= mstrtab_len) continue;
+                        for (size_t mj = 0; mj < msym_count && mj < 4096;
+                             ++mj) {
+                          if (msym[mj].st_name >= mstrtab_len)
+                            continue;
                           const char *mn = mstrtab + msym[mj].st_name;
-                          if (!mn[0]) continue;
+                          if (!mn[0])
+                            continue;
                           uint16_t sym_sec = (uint16_t)msym[mj].st_shndx;
                           if (sym_sec != (uint16_t)mtext_i &&
-                              (mrodata_i < 0 || sym_sec != (uint16_t)mrodata_i) &&
+                              (mrodata_i < 0 ||
+                               sym_sec != (uint16_t)mrodata_i) &&
                               (mdata_i < 0 || sym_sec != (uint16_t)mdata_i))
                             continue;
-                          if (def_count >= 256) { free(member); TEST_AR_FAIL; }
-                          if (def_count == 0 || test_link_sym_index(defs, def_count, mn) < 0) {
-                            snprintf(defs[def_count].name, sizeof(defs[def_count].name), "%s", mn);
-                            defs[def_count].off = sym_sec == (uint16_t)mtext_i
-                                                      ? (append_off + msym[mj].st_value)
-                                                      : (sym_sec == (uint16_t)mrodata_i
-                                                             ? (rodata_off + msym[mj].st_value)
-                                                             : (data_off + msym[mj].st_value));
-                            defs[def_count].shndx = sym_sec == (uint16_t)mtext_i ? 1 : 2;
+                          if (def_count >= 256) {
+                            free(member);
+                            TEST_AR_FAIL;
+                          }
+                          if (def_count == 0 ||
+                              test_link_sym_index(defs, def_count, mn) < 0) {
+                            snprintf(defs[def_count].name,
+                                     sizeof(defs[def_count].name), "%s", mn);
+                            defs[def_count].off =
+                                sym_sec == (uint16_t)mtext_i
+                                    ? (append_off + msym[mj].st_value)
+                                    : (sym_sec == (uint16_t)mrodata_i
+                                           ? (rodata_off + msym[mj].st_value)
+                                           : (data_off + msym[mj].st_value));
+                            defs[def_count].shndx =
+                                sym_sec == (uint16_t)mtext_i ? 1 : 2;
                             defs[def_count].defined = true;
                             def_count++;
                           }
                         }
-                        if (extracted_count >= 256) { free(member); TEST_AR_FAIL; }
+                        if (extracted_count >= 256) {
+                          free(member);
+                          TEST_AR_FAIL;
+                        }
                         snprintf(extracted_symbols[extracted_count], 256, "%s",
                                  rname);
                         extracted_offsets[extracted_count++] = member_off;
                         linked_text_len = data_off + mdata_len;
-                        linked_text_len = append_off + ((linked_text_len - append_off + 15u) & ~15u);
+                        linked_text_len =
+                            append_off +
+                            ((linked_text_len - append_off + 15u) & ~15u);
                         more = true;
                       }
                     }
@@ -2839,93 +3423,129 @@ static int test_internal_elf64_link_run(const char *obj_path,
   { // Pass 2: process relocation for all extracted members
     for (size_t ei = 0; ei < extracted_count; ++ei) {
       size_t member_size = 0;
-      unsigned char *member = test_ar_extract_member(archive_data, archive_size,
-                                                     extracted_offsets[ei], &member_size);
-      if (!member || member_size == 0) TEST_AR_FAIL;
+      unsigned char *member = test_ar_extract_member(
+          archive_data, archive_size, extracted_offsets[ei], &member_size);
+      if (!member || member_size == 0)
+        TEST_AR_FAIL;
       ny_test_elf64_ehdr_t meh;
-      if (member_size < sizeof(meh)) { free(member); TEST_AR_FAIL; }
+      if (member_size < sizeof(meh)) {
+        free(member);
+        TEST_AR_FAIL;
+      }
       memmove(&meh, member, sizeof(meh));
-      if (meh.e_ident[0] != 0x7f || meh.e_ident[1] != 'E' || meh.e_ident[2] != 'L' ||
-          meh.e_ident[3] != 'F' || meh.e_ident[4] != 2 || meh.e_ident[5] != 1 ||
-          meh.e_type != 1 || meh.e_machine != 62 ||
+      if (meh.e_ident[0] != 0x7f || meh.e_ident[1] != 'E' ||
+          meh.e_ident[2] != 'L' || meh.e_ident[3] != 'F' ||
+          meh.e_ident[4] != 2 || meh.e_ident[5] != 1 || meh.e_type != 1 ||
+          meh.e_machine != 62 ||
           meh.e_shentsize != sizeof(ny_test_elf64_shdr_t) ||
-          !ny_test_elf_range_u64(meh.e_shoff,
-                                 (uint64_t)meh.e_shnum * sizeof(ny_test_elf64_shdr_t),
-                                 member_size)) {
-        free(member); TEST_AR_FAIL;
+          !ny_test_elf_range_u64(
+              meh.e_shoff, (uint64_t)meh.e_shnum * sizeof(ny_test_elf64_shdr_t),
+              member_size)) {
+        free(member);
+        TEST_AR_FAIL;
       }
       ny_test_elf64_shdr_t *msh =
           (ny_test_elf64_shdr_t *)(void *)(member + meh.e_shoff);
       if (meh.e_shstrndx >= meh.e_shnum ||
           !ny_test_elf_range_u64(msh[meh.e_shstrndx].sh_offset,
                                  msh[meh.e_shstrndx].sh_size, member_size)) {
-        free(member); TEST_AR_FAIL;
+        free(member);
+        TEST_AR_FAIL;
       }
       const char *mshstr =
           (const char *)(member + msh[meh.e_shstrndx].sh_offset);
-      int mtext_i = -1, mrodata_i = -1, mdata_i = -1, msym_i = -1, mstr_i = -1, mrela_i = -1;
+      int mtext_i = -1, mrodata_i = -1, mdata_i = -1, msym_i = -1, mstr_i = -1,
+          mrela_i = -1;
       for (int mi = 0; mi < meh.e_shnum; ++mi) {
         const char *mn = msh[mi].sh_name < msh[meh.e_shstrndx].sh_size
-                             ? mshstr + msh[mi].sh_name : "";
-        if (strcmp(mn, ".text") == 0) mtext_i = mi;
-        else if (strcmp(mn, ".rodata") == 0) mrodata_i = mi;
-        else if (strcmp(mn, ".data") == 0) mdata_i = mi;
-        else if (strcmp(mn, ".symtab") == 0) msym_i = mi;
-        else if (strcmp(mn, ".strtab") == 0) mstr_i = mi;
-        else if (strcmp(mn, ".rela.text") == 0) mrela_i = mi;
+                             ? mshstr + msh[mi].sh_name
+                             : "";
+        if (strcmp(mn, ".text") == 0)
+          mtext_i = mi;
+        else if (strcmp(mn, ".rodata") == 0)
+          mrodata_i = mi;
+        else if (strcmp(mn, ".data") == 0)
+          mdata_i = mi;
+        else if (strcmp(mn, ".symtab") == 0)
+          msym_i = mi;
+        else if (strcmp(mn, ".strtab") == 0)
+          mstr_i = mi;
+        else if (strcmp(mn, ".rela.text") == 0)
+          mrela_i = mi;
       }
       if (mtext_i < 0 || msym_i < 0 || mstr_i < 0 ||
-          !ny_test_elf_range_u64(msh[mtext_i].sh_offset, msh[mtext_i].sh_size, member_size) ||
-          !ny_test_elf_range_u64(msh[msym_i].sh_offset, msh[msym_i].sh_size, member_size) ||
-          !ny_test_elf_range_u64(msh[mstr_i].sh_offset, msh[mstr_i].sh_size, member_size) ||
-          (mrodata_i >= 0 && !ny_test_elf_range_u64(msh[mrodata_i].sh_offset, msh[mrodata_i].sh_size, member_size)) ||
-          (mdata_i >= 0 && !ny_test_elf_range_u64(msh[mdata_i].sh_offset, msh[mdata_i].sh_size, member_size))) {
-        free(member); TEST_AR_FAIL;
+          !ny_test_elf_range_u64(msh[mtext_i].sh_offset, msh[mtext_i].sh_size,
+                                 member_size) ||
+          !ny_test_elf_range_u64(msh[msym_i].sh_offset, msh[msym_i].sh_size,
+                                 member_size) ||
+          !ny_test_elf_range_u64(msh[mstr_i].sh_offset, msh[mstr_i].sh_size,
+                                 member_size) ||
+          (mrodata_i >= 0 &&
+           !ny_test_elf_range_u64(msh[mrodata_i].sh_offset,
+                                  msh[mrodata_i].sh_size, member_size)) ||
+          (mdata_i >= 0 &&
+           !ny_test_elf_range_u64(msh[mdata_i].sh_offset, msh[mdata_i].sh_size,
+                                  member_size))) {
+        free(member);
+        TEST_AR_FAIL;
       }
       size_t mtext_len = (size_t)msh[mtext_i].sh_size;
       size_t mrodata_len = mrodata_i >= 0 ? (size_t)msh[mrodata_i].sh_size : 0;
       size_t mdata_len = mdata_i >= 0 ? (size_t)msh[mdata_i].sh_size : 0;
-      ny_test_elf64_sym_t *msym = (ny_test_elf64_sym_t *)(void *)(member + msh[msym_i].sh_offset);
-      size_t msym_count = msh[msym_i].sh_entsize ? (size_t)(msh[msym_i].sh_size / msh[msym_i].sh_entsize) : 0;
+      ny_test_elf64_sym_t *msym =
+          (ny_test_elf64_sym_t *)(void *)(member + msh[msym_i].sh_offset);
+      size_t msym_count =
+          msh[msym_i].sh_entsize
+              ? (size_t)(msh[msym_i].sh_size / msh[msym_i].sh_entsize)
+              : 0;
       const char *mstrtab = (const char *)(member + msh[mstr_i].sh_offset);
       size_t mstrtab_len = (size_t)msh[mstr_i].sh_size;
       size_t append_off = UINTPTR_MAX;
       for (size_t mj = 0; mj < msym_count && append_off == UINTPTR_MAX; ++mj) {
-        if (msym[mj].st_name >= mstrtab_len) continue;
+        if (msym[mj].st_name >= mstrtab_len)
+          continue;
         const char *mn = mstrtab + msym[mj].st_name;
-        if (!mn[0] || strcmp(mn, extracted_symbols[ei]) != 0) continue;
+        if (!mn[0] || strcmp(mn, extracted_symbols[ei]) != 0)
+          continue;
         int mdi = test_link_sym_index(defs, def_count, mn);
-        if (mdi < 0) continue;
+        if (mdi < 0)
+          continue;
         uint16_t sym_sec = (uint16_t)msym[mj].st_shndx;
         if (sym_sec == (uint16_t)mtext_i) {
           append_off = (size_t)(defs[mdi].off - msym[mj].st_value);
         } else if (mrodata_i >= 0 && sym_sec == (uint16_t)mrodata_i) {
           append_off = (size_t)(defs[mdi].off - msym[mj].st_value - mtext_len);
         } else if (mdata_i >= 0 && sym_sec == (uint16_t)mdata_i) {
-          append_off = (size_t)(defs[mdi].off - msym[mj].st_value - mtext_len - mrodata_len);
+          append_off = (size_t)(defs[mdi].off - msym[mj].st_value - mtext_len -
+                                mrodata_len);
         }
       }
-      if (append_off == UINTPTR_MAX) { free(member); TEST_AR_FAIL; }
+      if (append_off == UINTPTR_MAX) {
+        free(member);
+        TEST_AR_FAIL;
+      }
       size_t rodata_off = append_off + mtext_len;
       size_t data_off = rodata_off + mrodata_len;
       size_t member_linked_len = data_off + mdata_len;
-      member_linked_len = append_off + ((member_linked_len - append_off + 15u) & ~15u);
+      member_linked_len =
+          append_off + ((member_linked_len - append_off + 15u) & ~15u);
       if (mrela_i >= 0 &&
           ny_test_elf_range_u64(msh[mrela_i].sh_offset, msh[mrela_i].sh_size,
                                 member_size)) {
         ny_test_elf64_rela_t *mrela =
             (ny_test_elf64_rela_t *)(void *)(member + msh[mrela_i].sh_offset);
-        size_t mrela_count = msh[mrela_i].sh_entsize
-                                 ? (size_t)(msh[mrela_i].sh_size /
-                                            msh[mrela_i].sh_entsize)
-                                 : 0;
+        size_t mrela_count =
+            msh[mrela_i].sh_entsize
+                ? (size_t)(msh[mrela_i].sh_size / msh[mrela_i].sh_entsize)
+                : 0;
         for (size_t mj = 0; mj < mrela_count; ++mj) {
           uint32_t mtype = (uint32_t)(mrela[mj].r_info & 0xffffffffu);
           uint32_t msi = (uint32_t)(mrela[mj].r_info >> 32);
-          if ((mtype != 2 && mtype != 4 && mtype != 11) ||
-              msi >= msym_count || msym[msi].st_name >= mstrtab_len ||
+          if ((mtype != 2 && mtype != 4 && mtype != 11) || msi >= msym_count ||
+              msym[msi].st_name >= mstrtab_len ||
               !ny_test_elf_range_u64(mrela[mj].r_offset, 4, mtext_len)) {
-            free(member); TEST_AR_FAIL;
+            free(member);
+            TEST_AR_FAIL;
           }
           uint16_t sym_ndx = (uint16_t)msym[msi].st_shndx;
           uint64_t msaddr = 0;
@@ -2933,8 +3553,7 @@ static int test_internal_elf64_link_run(const char *obj_path,
           if (sym_ndx == (uint16_t)mtext_i) {
             msaddr = base + append_off + msym[msi].st_value;
             msec_sym = true;
-          } else if (mrodata_i >= 0 &&
-                     sym_ndx == (uint16_t)mrodata_i) {
+          } else if (mrodata_i >= 0 && sym_ndx == (uint16_t)mrodata_i) {
             msaddr = base + rodata_off + msym[msi].st_value;
             msec_sym = true;
           } else if (mdata_i >= 0 && sym_ndx == (uint16_t)mdata_i) {
@@ -2942,17 +3561,22 @@ static int test_internal_elf64_link_run(const char *obj_path,
             msec_sym = true;
           }
           if (!msec_sym) {
-            int mdi = test_link_sym_index(defs, def_count, mstrtab + msym[msi].st_name);
+            int mdi = test_link_sym_index(defs, def_count,
+                                          mstrtab + msym[msi].st_name);
             if (mdi < 0) {
               const char *mtarget = mstrtab + msym[msi].st_name;
               if (archive_data && ar_st.count > 0) {
                 uint32_t dep_off = test_ar_find_symbol(&ar_st, mtarget);
-                if (dep_off && !test_link_archive_offset_seen(extracted_offsets, extracted_count, dep_off)) {
-                  if (extracted_count >= sizeof(extracted_offsets) / sizeof(extracted_offsets[0]) ||
-                      !test_link_extract_elf64_archive_member(archive_data, archive_size, dep_off,
-                                                              &text, &text_cap, &linked_text_len,
-                                                              defs, &def_count)) {
-                    free(member); TEST_AR_FAIL;
+                if (dep_off &&
+                    !test_link_archive_offset_seen(extracted_offsets,
+                                                   extracted_count, dep_off)) {
+                  if (extracted_count >= sizeof(extracted_offsets) /
+                                             sizeof(extracted_offsets[0]) ||
+                      !test_link_extract_elf64_archive_member(
+                          archive_data, archive_size, dep_off, &text, &text_cap,
+                          &linked_text_len, defs, &def_count)) {
+                    free(member);
+                    TEST_AR_FAIL;
                   }
                   snprintf(extracted_symbols[extracted_count], 256, "%s",
                            mtarget);
@@ -2961,101 +3585,180 @@ static int test_internal_elf64_link_run(const char *obj_path,
                   mdi = test_link_sym_index(defs, def_count, mtarget);
                 }
               }
-              if (mdi < 0 &&
-                  (strcmp(mtarget, "malloc") == 0 || test_link_is_memset_symbol(mtarget) ||
-                  test_link_is_memcpy_symbol(mtarget) || test_link_is_memmove_symbol(mtarget) ||
-                  test_link_is_memchr_symbol(mtarget) || test_link_is_memcmp_symbol(mtarget) ||
-                  test_link_is_strlen_symbol(mtarget) || test_link_is_strcmp_symbol(mtarget) ||
-                  test_link_is_strchr_symbol(mtarget) || test_link_is_realloc_symbol(mtarget) ||
-                  test_link_is_calloc_symbol(mtarget) || strcmp(mtarget, "free") == 0)) {
+              if (mdi < 0 && (strcmp(mtarget, "malloc") == 0 ||
+                              test_link_is_memset_symbol(mtarget) ||
+                              test_link_is_memcpy_symbol(mtarget) ||
+                              test_link_is_memmove_symbol(mtarget) ||
+                              test_link_is_memchr_symbol(mtarget) ||
+                              test_link_is_memcmp_symbol(mtarget) ||
+                              test_link_is_strlen_symbol(mtarget) ||
+                              test_link_is_strcmp_symbol(mtarget) ||
+                              test_link_is_strchr_symbol(mtarget) ||
+                              test_link_is_realloc_symbol(mtarget) ||
+                              test_link_is_calloc_symbol(mtarget) ||
+                              strcmp(mtarget, "free") == 0)) {
                 size_t stub_off = (member_linked_len + 15u) & ~15u;
                 if (stub_off + 256 > text_cap) {
                   size_t new_cap = text_cap;
-                  while (new_cap < stub_off + 4096) new_cap *= 2;
+                  while (new_cap < stub_off + 4096)
+                    new_cap *= 2;
                   unsigned char *nt = (unsigned char *)realloc(text, new_cap);
-                  if (!nt) { free(member); TEST_AR_FAIL; }
-                  text = nt; text_cap = new_cap;
+                  if (!nt) {
+                    free(member);
+                    TEST_AR_FAIL;
+                  }
+                  text = nt;
+                  text_cap = new_cap;
                 }
                 if (stub_off > member_linked_len)
-                  memset(text + member_linked_len, 0x90, stub_off - member_linked_len);
+                  memset(text + member_linked_len, 0x90,
+                         stub_off - member_linked_len);
                 size_t slen = 0;
                 bool emitted = false;
-                if (strcmp(mtarget, "malloc") == 0) emitted = test_emit_malloc_stub(text + stub_off, text_cap - stub_off, &slen);
-                else if (strcmp(mtarget, "free") == 0) emitted = test_emit_free_stub(text + stub_off, text_cap - stub_off, &slen);
-                else if (test_link_is_memset_symbol(mtarget)) emitted = test_emit_memset_stub(text + stub_off, text_cap - stub_off, &slen);
-                else if (test_link_is_memcpy_symbol(mtarget)) emitted = test_emit_memcpy_stub(text + stub_off, text_cap - stub_off, &slen);
-                else if (test_link_is_memmove_symbol(mtarget)) emitted = test_emit_memmove_stub(text + stub_off, text_cap - stub_off, &slen);
-                else if (test_link_is_memchr_symbol(mtarget)) emitted = test_emit_memchr_stub(text + stub_off, text_cap - stub_off, &slen);
-                else if (test_link_is_memcmp_symbol(mtarget)) emitted = test_emit_memcmp_stub(text + stub_off, text_cap - stub_off, &slen);
-                else if (test_link_is_strlen_symbol(mtarget)) emitted = test_emit_strlen_stub(text + stub_off, text_cap - stub_off, &slen);
-                else if (test_link_is_strcmp_symbol(mtarget)) emitted = test_emit_strcmp_stub(text + stub_off, text_cap - stub_off, &slen);
-                else if (test_link_is_strchr_symbol(mtarget)) emitted = test_emit_strchr_stub(text + stub_off, text_cap - stub_off, &slen);
-                else if (test_link_is_realloc_symbol(mtarget)) emitted = test_emit_realloc_stub(text + stub_off, text_cap - stub_off, &slen);
-                else if (test_link_is_calloc_symbol(mtarget)) emitted = test_emit_calloc_stub(text + stub_off, text_cap - stub_off, &slen);
-                if (!emitted || slen == 0 || !test_link_add_def(defs, &def_count, mtarget, stub_off))
-                  { free(member); TEST_AR_FAIL; }
+                if (strcmp(mtarget, "malloc") == 0)
+                  emitted = test_emit_malloc_stub(text + stub_off,
+                                                  text_cap - stub_off, &slen);
+                else if (strcmp(mtarget, "free") == 0)
+                  emitted = test_emit_free_stub(text + stub_off,
+                                                text_cap - stub_off, &slen);
+                else if (test_link_is_memset_symbol(mtarget))
+                  emitted = test_emit_memset_stub(text + stub_off,
+                                                  text_cap - stub_off, &slen);
+                else if (test_link_is_memcpy_symbol(mtarget))
+                  emitted = test_emit_memcpy_stub(text + stub_off,
+                                                  text_cap - stub_off, &slen);
+                else if (test_link_is_memmove_symbol(mtarget))
+                  emitted = test_emit_memmove_stub(text + stub_off,
+                                                   text_cap - stub_off, &slen);
+                else if (test_link_is_memchr_symbol(mtarget))
+                  emitted = test_emit_memchr_stub(text + stub_off,
+                                                  text_cap - stub_off, &slen);
+                else if (test_link_is_memcmp_symbol(mtarget))
+                  emitted = test_emit_memcmp_stub(text + stub_off,
+                                                  text_cap - stub_off, &slen);
+                else if (test_link_is_strlen_symbol(mtarget))
+                  emitted = test_emit_strlen_stub(text + stub_off,
+                                                  text_cap - stub_off, &slen);
+                else if (test_link_is_strcmp_symbol(mtarget))
+                  emitted = test_emit_strcmp_stub(text + stub_off,
+                                                  text_cap - stub_off, &slen);
+                else if (test_link_is_strchr_symbol(mtarget))
+                  emitted = test_emit_strchr_stub(text + stub_off,
+                                                  text_cap - stub_off, &slen);
+                else if (test_link_is_realloc_symbol(mtarget))
+                  emitted = test_emit_realloc_stub(text + stub_off,
+                                                   text_cap - stub_off, &slen);
+                else if (test_link_is_calloc_symbol(mtarget))
+                  emitted = test_emit_calloc_stub(text + stub_off,
+                                                  text_cap - stub_off, &slen);
+                if (!emitted || slen == 0 ||
+                    !test_link_add_def(defs, &def_count, mtarget, stub_off)) {
+                  free(member);
+                  TEST_AR_FAIL;
+                }
                 member_linked_len = stub_off + slen;
                 mdi = test_link_sym_index(defs, def_count, mtarget);
               }
             }
-            if (mdi < 0) { free(member); TEST_AR_FAIL; }
+            if (mdi < 0) {
+              free(member);
+              TEST_AR_FAIL;
+            }
             msaddr = base + defs[mdi].off;
           }
           if (mtype == 11) {
             int64_t aval = (int64_t)msaddr + mrela[mj].r_addend;
-            if (aval < INT32_MIN || aval > INT32_MAX) { free(member); TEST_AR_FAIL; }
+            if (aval < INT32_MIN || aval > INT32_MAX) {
+              free(member);
+              TEST_AR_FAIL;
+            }
             int32_t av32 = (int32_t)aval;
             memmove(text + append_off + mrela[mj].r_offset, &av32, 4);
           } else {
             uint64_t mpaddr = base + append_off + mrela[mj].r_offset;
-            int64_t mval = (int64_t)msaddr + mrela[mj].r_addend - (int64_t)mpaddr;
-            if (mval < INT32_MIN || mval > INT32_MAX) { free(member); TEST_AR_FAIL; }
+            int64_t mval =
+                (int64_t)msaddr + mrela[mj].r_addend - (int64_t)mpaddr;
+            if (mval < INT32_MIN || mval > INT32_MAX) {
+              free(member);
+              TEST_AR_FAIL;
+            }
             int32_t mv32 = (int32_t)mval;
             memmove(text + append_off + mrela[mj].r_offset, &mv32, 4);
           }
         }
       }
-      linked_text_len = linked_text_len > member_linked_len ? linked_text_len : member_linked_len;
+      linked_text_len = linked_text_len > member_linked_len ? linked_text_len
+                                                            : member_linked_len;
       free(member);
     }
   }
   for (size_t i = 0; i < max_rela; ++i) {
-    ny_test_elf64_rela_t *r = (ny_test_elf64_rela_t *)(void *)(obj + sh[rela_i].sh_offset) + i;
+    ny_test_elf64_rela_t *r =
+        (ny_test_elf64_rela_t *)(void *)(obj + sh[rela_i].sh_offset) + i;
     uint32_t type = (uint32_t)(r->r_info & 0xffffffffu);
     uint32_t si = (uint32_t)(r->r_info >> 32);
     if ((type != 2 && type != 4) || si >= sym_count ||
         !ny_test_elf_range_u64(r->r_offset, 4, text_len) ||
-        sym[si].st_name >= strtab_len) TEST_AR_FAIL;
+        sym[si].st_name >= strtab_len)
+      TEST_AR_FAIL;
     const char *name = strtab + sym[si].st_name;
     if (test_link_sym_index(defs, def_count, name) >= 0)
       continue;
     size_t stub_off = (linked_text_len + 15u) & ~15u;
     if (stub_off + 256 > text_cap) {
       size_t new_cap = text_cap;
-      while (new_cap < stub_off + 4096) new_cap *= 2;
+      while (new_cap < stub_off + 4096)
+        new_cap *= 2;
       unsigned char *nt = (unsigned char *)realloc(text, new_cap);
-      if (!nt) TEST_AR_FAIL;
-      text = nt; text_cap = new_cap;
+      if (!nt)
+        TEST_AR_FAIL;
+      text = nt;
+      text_cap = new_cap;
     }
     if (stub_off > linked_text_len)
       memset(text + linked_text_len, 0x90, stub_off - linked_text_len);
     size_t stub_len = 0;
     bool emitted = false;
-    if (strcmp(name, "malloc") == 0) emitted = test_emit_malloc_stub(text + stub_off, text_cap - stub_off, &stub_len);
-    else if (strcmp(name, "free") == 0) emitted = test_emit_free_stub(text + stub_off, text_cap - stub_off, &stub_len);
-    else if (test_link_is_memset_symbol(name)) emitted = test_emit_memset_stub(text + stub_off, text_cap - stub_off, &stub_len);
-    else if (test_link_is_memcpy_symbol(name)) emitted = test_emit_memcpy_stub(text + stub_off, text_cap - stub_off, &stub_len);
-    else if (test_link_is_memmove_symbol(name)) emitted = test_emit_memmove_stub(text + stub_off, text_cap - stub_off, &stub_len);
-    else if (test_link_is_memchr_symbol(name)) emitted = test_emit_memchr_stub(text + stub_off, text_cap - stub_off, &stub_len);
-    else if (test_link_is_memcmp_symbol(name)) emitted = test_emit_memcmp_stub(text + stub_off, text_cap - stub_off, &stub_len);
-    else if (test_link_is_strlen_symbol(name)) emitted = test_emit_strlen_stub(text + stub_off, text_cap - stub_off, &stub_len);
-    else if (test_link_is_strcmp_symbol(name)) emitted = test_emit_strcmp_stub(text + stub_off, text_cap - stub_off, &stub_len);
-    else if (test_link_is_strchr_symbol(name)) emitted = test_emit_strchr_stub(text + stub_off, text_cap - stub_off, &stub_len);
-    else if (test_link_is_realloc_symbol(name)) emitted = test_emit_realloc_stub(text + stub_off, text_cap - stub_off, &stub_len);
-    else if (test_link_is_calloc_symbol(name)) emitted = test_emit_calloc_stub(text + stub_off, text_cap - stub_off, &stub_len);
+    if (strcmp(name, "malloc") == 0)
+      emitted = test_emit_malloc_stub(text + stub_off, text_cap - stub_off,
+                                      &stub_len);
+    else if (strcmp(name, "free") == 0)
+      emitted =
+          test_emit_free_stub(text + stub_off, text_cap - stub_off, &stub_len);
+    else if (test_link_is_memset_symbol(name))
+      emitted = test_emit_memset_stub(text + stub_off, text_cap - stub_off,
+                                      &stub_len);
+    else if (test_link_is_memcpy_symbol(name))
+      emitted = test_emit_memcpy_stub(text + stub_off, text_cap - stub_off,
+                                      &stub_len);
+    else if (test_link_is_memmove_symbol(name))
+      emitted = test_emit_memmove_stub(text + stub_off, text_cap - stub_off,
+                                       &stub_len);
+    else if (test_link_is_memchr_symbol(name))
+      emitted = test_emit_memchr_stub(text + stub_off, text_cap - stub_off,
+                                      &stub_len);
+    else if (test_link_is_memcmp_symbol(name))
+      emitted = test_emit_memcmp_stub(text + stub_off, text_cap - stub_off,
+                                      &stub_len);
+    else if (test_link_is_strlen_symbol(name))
+      emitted = test_emit_strlen_stub(text + stub_off, text_cap - stub_off,
+                                      &stub_len);
+    else if (test_link_is_strcmp_symbol(name))
+      emitted = test_emit_strcmp_stub(text + stub_off, text_cap - stub_off,
+                                      &stub_len);
+    else if (test_link_is_strchr_symbol(name))
+      emitted = test_emit_strchr_stub(text + stub_off, text_cap - stub_off,
+                                      &stub_len);
+    else if (test_link_is_realloc_symbol(name))
+      emitted = test_emit_realloc_stub(text + stub_off, text_cap - stub_off,
+                                       &stub_len);
+    else if (test_link_is_calloc_symbol(name))
+      emitted = test_emit_calloc_stub(text + stub_off, text_cap - stub_off,
+                                      &stub_len);
     else
       TEST_AR_FAIL;
-    if (!emitted || stub_len == 0 || !test_link_add_def(defs, &def_count, name, stub_off))
+    if (!emitted || stub_len == 0 ||
+        !test_link_add_def(defs, &def_count, name, stub_off))
       TEST_AR_FAIL;
     linked_text_len = stub_off + stub_len;
   }
@@ -3065,15 +3768,18 @@ static int test_internal_elf64_link_run(const char *obj_path,
       (file_off + harness_off + 256u + 0xfffu) & ~(size_t)0xfffu;
   const uint64_t data_base = base + (data_file_off - file_off);
   for (size_t i = 0; i < max_rela; ++i) {
-    ny_test_elf64_rela_t *r = (ny_test_elf64_rela_t *)(void *)(obj + sh[rela_i].sh_offset) + i;
+    ny_test_elf64_rela_t *r =
+        (ny_test_elf64_rela_t *)(void *)(obj + sh[rela_i].sh_offset) + i;
     uint32_t type = (uint32_t)(r->r_info & 0xffffffffu);
     uint32_t si = (uint32_t)(r->r_info >> 32);
     if ((type != 2 && type != 4) || si >= sym_count ||
         !ny_test_elf_range_u64(r->r_offset, 4, text_len) ||
-        sym[si].st_name >= strtab_len) TEST_AR_FAIL;
+        sym[si].st_name >= strtab_len)
+      TEST_AR_FAIL;
     const char *name = strtab + sym[si].st_name;
     int di = test_link_sym_index(defs, def_count, name);
-    if (di < 0) TEST_AR_FAIL;
+    if (di < 0)
+      TEST_AR_FAIL;
     uint64_t saddr;
     if (defs[di].shndx == TEST_LINK_SH_ABS)
       saddr = defs[di].off;
@@ -3083,44 +3789,69 @@ static int test_internal_elf64_link_run(const char *obj_path,
       saddr = base + defs[di].off;
     uint64_t paddr = base + r->r_offset;
     int64_t val = (int64_t)saddr + r->r_addend - (int64_t)paddr;
-    if (val < INT32_MIN || val > INT32_MAX) TEST_AR_FAIL;
+    if (val < INT32_MIN || val > INT32_MAX)
+      TEST_AR_FAIL;
     int32_t v32 = (int32_t)val;
     memmove(text + r->r_offset, &v32, 4);
   }
   if (harness_off + 256 > text_cap) {
     size_t new_cap = text_cap;
-    while (new_cap < harness_off + 4096) new_cap *= 2;
+    while (new_cap < harness_off + 4096)
+      new_cap *= 2;
     unsigned char *new_text = (unsigned char *)realloc(text, new_cap);
-    if (!new_text) TEST_AR_FAIL;
+    if (!new_text)
+      TEST_AR_FAIL;
     text = new_text;
     text_cap = new_cap;
   }
   memset(text + linked_text_len, 0x90, harness_off - linked_text_len);
-  size_t harness_len = test_emit_harness(text + harness_off, text_cap - harness_off,
-                                         ret_kind, expected, base, harness_off, rt_main_off);
-  if (harness_len == 0) TEST_AR_FAIL;
+  size_t harness_len =
+      test_emit_harness(text + harness_off, text_cap - harness_off, ret_kind,
+                        expected, base, harness_off, rt_main_off);
+  if (harness_len == 0)
+    TEST_AR_FAIL;
   size_t code_len = harness_off + harness_len;
   size_t file_len = data_len ? data_file_off + data_len : file_off + code_len;
   unsigned char *exe = (unsigned char *)calloc(1, file_len);
-  if (!exe) TEST_AR_FAIL;
+  if (!exe)
+    TEST_AR_FAIL;
   ny_test_elf64_ehdr_t oh = {0};
-  oh.e_ident[0] = 0x7f; oh.e_ident[1] = 'E'; oh.e_ident[2] = 'L'; oh.e_ident[3] = 'F';
-  oh.e_ident[4] = 2; oh.e_ident[5] = 1; oh.e_ident[6] = 1;
-  oh.e_type = 2; oh.e_machine = 62; oh.e_version = 1;
-  oh.e_entry = base + harness_off; oh.e_phoff = sizeof(oh);
-  oh.e_ehsize = sizeof(oh); oh.e_phentsize = sizeof(ny_test_elf64_phdr_t);
+  oh.e_ident[0] = 0x7f;
+  oh.e_ident[1] = 'E';
+  oh.e_ident[2] = 'L';
+  oh.e_ident[3] = 'F';
+  oh.e_ident[4] = 2;
+  oh.e_ident[5] = 1;
+  oh.e_ident[6] = 1;
+  oh.e_type = 2;
+  oh.e_machine = 62;
+  oh.e_version = 1;
+  oh.e_entry = base + harness_off;
+  oh.e_phoff = sizeof(oh);
+  oh.e_ehsize = sizeof(oh);
+  oh.e_phentsize = sizeof(ny_test_elf64_phdr_t);
   oh.e_phnum = data_len ? 2 : 1;
   ny_test_elf64_phdr_t ph = {0};
-  ph.p_type = 1; ph.p_flags = 5; ph.p_offset = file_off; ph.p_vaddr = base;
-  ph.p_paddr = base; ph.p_filesz = code_len; ph.p_memsz = code_len; ph.p_align = 0x1000;
+  ph.p_type = 1;
+  ph.p_flags = 5;
+  ph.p_offset = file_off;
+  ph.p_vaddr = base;
+  ph.p_paddr = base;
+  ph.p_filesz = code_len;
+  ph.p_memsz = code_len;
+  ph.p_align = 0x1000;
   memmove(exe, &oh, sizeof(oh));
   memmove(exe + oh.e_phoff, &ph, sizeof(ph));
   if (data_len) {
     ny_test_elf64_phdr_t data_ph = {0};
-    data_ph.p_type = 1; data_ph.p_flags = 6;
-    data_ph.p_offset = data_file_off; data_ph.p_vaddr = data_base;
-    data_ph.p_paddr = data_base; data_ph.p_filesz = data_len;
-    data_ph.p_memsz = data_len; data_ph.p_align = 0x1000;
+    data_ph.p_type = 1;
+    data_ph.p_flags = 6;
+    data_ph.p_offset = data_file_off;
+    data_ph.p_vaddr = data_base;
+    data_ph.p_paddr = data_base;
+    data_ph.p_filesz = data_len;
+    data_ph.p_memsz = data_len;
+    data_ph.p_align = 0x1000;
     memmove(exe + oh.e_phoff + sizeof(ph), &data_ph, sizeof(data_ph));
   }
   memmove(exe + file_off, text, code_len);
@@ -3129,22 +3860,31 @@ static int test_internal_elf64_link_run(const char *obj_path,
   char exe_path[PATH_MAX];
   ok = test_write_unique_executable(exe_path, "ny-internal-link-run", exe,
                                     file_len);
-  free(exe); free(text); free(data); free(obj); free(archive_data); test_ar_free_symtab(&ar_st);
-  if (!ok) return 2;
+  free(exe);
+  free(text);
+  free(data);
+  free(obj);
+  free(archive_data);
+  test_ar_free_symtab(&ar_st);
+  if (!ok)
+    return 2;
   char *run_argv[] = {exe_path, NULL};
   int rc = run_debug_argv(run_argv, 30, 0);
   if (test_env_truthy("NYTRIX_TEST_KEEP_INTERNAL_LINK"))
-    fprintf(stderr, "object link/run: kept internal ELF executable %s\n", exe_path);
+    fprintf(stderr, "object link/run: kept internal ELF executable %s\n",
+            exe_path);
   else
     remove(exe_path);
-  if (rc == 126 || rc == 127 || rc == 128 + SIGSEGV ||
-      rc == 128 + SIGILL || rc == 128 + SIGBUS)
+  if (rc == 126 || rc == 127 || rc == 128 + SIGSEGV || rc == 128 + SIGILL ||
+      rc == 128 + SIGBUS)
     return 2;
   if (rc != 0) {
     if (test_link_ret_is_f64(ret_kind) || test_link_ret_is_f32(ret_kind))
       return 2;
-    fprintf(stderr, "object link/run: internal ELF linker executable failed rc=%d for %s\n",
-            rc, disp_path(shape_path));
+    fprintf(
+        stderr,
+        "object link/run: internal ELF linker executable failed rc=%d for %s\n",
+        rc, disp_path(shape_path));
     return 1;
   }
   return 0;

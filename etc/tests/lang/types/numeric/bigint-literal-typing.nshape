@@ -1,0 +1,31 @@
+shape bigint_literal_typing {
+  family "runtime/language"
+  generator "embedded"
+  features ["ny", "test", "bigint", "typing"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+def direct = 4611686018427387904
+def direct_alias = direct
+def boundary_add = 4611686018427387903 + 1
+def boundary_sub_base = -4611686018427387904
+def boundary_sub = boundary_sub_base - 1
+def boundary_mul = 4611686018427387903 * 2
+
+assert(type(direct) == "bigint", "large literal type")
+assert(type(direct_alias) == "bigint", "large literal alias type")
+assert(type(boundary_add) == "bigint", "addition overflow type")
+assert(type(boundary_sub_base) == "bigint", "negative boundary type")
+assert(type(boundary_sub) == "bigint", "subtraction overflow type")
+assert(type(boundary_mul) == "bigint", "multiplication overflow type")
+assert(to_str(direct) == "4611686018427387904", "large literal value")
+assert(to_str(boundary_add) == "4611686018427387904", "addition value")
+assert(to_str(boundary_sub) == "-4611686018427387905", "subtraction value")
+assert(to_str(boundary_mul) == "9223372036854775806", "multiplication value")
+
+def small_max = 4611686018427387903
+assert(type(small_max) == "int", "tagged integer maximum remains int")
+NY
+}

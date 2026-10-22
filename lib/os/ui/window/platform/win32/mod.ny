@@ -1,19 +1,19 @@
 ;; Keywords: platform window backend win32 windows joystick os ui input
 ;; Win32 native window backend for Windows windows, events, monitors, clipboard, and Vulkan surfaces.
 ;; References:
-;; - std.os.ui.window.platform
-;; - std.os.ui.window
-;; - std.os.ui.window.consts
-module std.os.ui.window.platform.win32(available, get_backend_name, module_handle, primary_screen_size, init_dpi_awareness, init_timer, get_timer_value, get_timer_frequency, utf16_from_utf8, utf8_from_utf16, translate_vk_key, translate_message, translate_messages, get_key_state, get_mouse_button_state, get_key_name, get_window_style, get_window_ex_style, ensure_window_class, create_basic_window, destroy_basic_window, show_window, hide_window, set_title, set_window_icon, get_pos, set_pos, get_size, get_framebuffer_size, set_size, iconify_window, restore_window, maximize_window, focus_window, request_window_attention, get_window_attrib, is_window_focused, is_window_iconified, is_window_visible, is_window_maximized, is_window_hovered, get_window_opacity, set_window_opacity, set_window_resizable, set_window_decorated, set_window_floating, set_clipboard, get_clipboard, get_cursor_pos, set_cursor_pos, create_cursor, create_standard_cursor, destroy_cursor, set_cursor, cursor_visible, get_monitors, get_primary_monitor, get_monitor_pos, get_monitor_workarea, get_monitor_physical_size, get_monitor_content_scale, get_monitor_name, get_video_mode, get_video_modes, get_gamma_ramp, set_gamma_ramp, get_window_monitor, set_window_monitor, set_input_mode, set_window_size_limits, poll_messages, pump_window_messages, poll_window_events, vulkan_supported, vulkan_required_extensions, create_surface, set_video_mode, restore_video_mode, get_win32_window, get_win32_monitor, get_win32_adapter)
-use std.core
-use std.core.mem (cstr)
-use std.core.str as str
-use std.os.ui.window.platform.api as backend_api
-use std.os.ui.window.consts as ui_consts
-use std.os.ui.window.event as ui_event
-use std.core.common as common
-use std.math (abs)
-use std.os.ui.render.vk.vulkan (vk_create_win32_surface_khr)
+;; - core.os.ui.window.platform
+;; - core.os.ui.window
+;; - core.os.ui.window.consts
+module core.os.ui.window.platform.win32(available, get_backend_name, module_handle, primary_screen_size, init_dpi_awareness, init_timer, get_timer_value, get_timer_frequency, utf16_from_utf8, utf8_from_utf16, translate_vk_key, translate_message, translate_messages, get_key_state, get_mouse_button_state, get_key_name, get_window_style, get_window_ex_style, ensure_window_class, create_basic_window, destroy_basic_window, show_window, hide_window, set_title, set_window_icon, get_pos, set_pos, get_size, get_framebuffer_size, set_size, iconify_window, restore_window, maximize_window, focus_window, request_window_attention, get_window_attrib, is_window_focused, is_window_iconified, is_window_visible, is_window_maximized, is_window_hovered, get_window_opacity, set_window_opacity, set_window_resizable, set_window_decorated, set_window_floating, set_clipboard, get_clipboard, get_cursor_pos, set_cursor_pos, create_cursor, create_standard_cursor, destroy_cursor, set_cursor, cursor_visible, get_monitors, get_primary_monitor, get_monitor_pos, get_monitor_workarea, get_monitor_physical_size, get_monitor_content_scale, get_monitor_name, get_video_mode, get_video_modes, get_gamma_ramp, set_gamma_ramp, get_window_monitor, set_window_monitor, set_input_mode, set_window_size_limits, poll_messages, pump_window_messages, poll_window_events, vulkan_supported, vulkan_required_extensions, create_surface, set_video_mode, restore_video_mode, get_win32_window, get_win32_monitor, get_win32_adapter)
+use core
+use core.mem (cstr)
+use core.str as str
+use core.os.ui.window.platform.api as backend_api
+use core.os.ui.window.consts as ui_consts
+use core.os.ui.window.event as ui_event
+use core.common as common
+use core.math (abs)
+use core.os.ui.render.vk.vulkan (vk_create_win32_surface_khr)
 
 fn _handle_from(any v) any {
    if is_dict(v) { return v.get("handle", 0) }
@@ -3800,5 +3800,5 @@ fn get_win32_adapter(any mon) any {
       assert(poll_window_events(win) == [win, []], "win32 event poll fallback")
       assert(create_surface(0, win, 0, 0) == -1, "win32 surface fallback")
    }
-   print("✓ std.os.ui.window.platform.win32 self-test passed")
+   print("✓ core.os.ui.window.platform.win32 self-test passed")
 }

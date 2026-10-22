@@ -3,12 +3,12 @@
 ;; Reference:
 ;; - https://people.csail.mit.edu/rivest/Rsapaper.pdf
 ;; References:
-;; - std.math.crypto.rsa
-;; - std.math.crypto
-module std.math.crypto.rsa.lcg_rng(rsa_lcg_factor_power2)
-use std.core
-use std.math.nt
-use std.math.crypto.number.arith (two_adic_valuation, mod_sqrt_power2)
+;; - core.math.crypto.rsa
+;; - core.math.crypto
+module core.math.crypto.rsa.lcg_rng(rsa_lcg_factor_power2)
+use core
+use core.math.nt
+use core.math.crypto.number.arith (two_adic_valuation, mod_sqrt_power2)
 
 fn rsa_lcg_factor_power2(any n, any mult, any inc, int modulus_bits=512, int max_gap=4096) list {
    "Recover [p, q, gap] when p*q == n and q follows p after gap LCG steps modulo 2^modulus_bits.

@@ -1,0 +1,45 @@
+shape native_i64_memory_binop {
+  family "runtime-native"
+  generator "native"
+  features ["native", "nyir", "i64", "x86_64", "regression"]
+  template ny-test-case
+  flags "--native-only --native-backend=x86_64 -O3 --nyir-verify --no-progress"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+fn exercise(int a, int b) {
+   def sum = a + b
+   def difference = a - b
+   def product = a * b
+   def shared = a & b
+   def joined = a | b
+   def toggled = a ^ b
+   assert(sum - b == a, "dynamic addition")
+   assert(difference + b == a, "dynamic subtraction")
+   assert(product / a == b, "dynamic multiplication")
+   assert(joined == shared + toggled, "dynamic bitwise operations")
+}
+
+fn exercise_shifts(int count) {
+   assert((1 << count) >> count == 1, "dynamic left shift")
+   assert((-8 >> count) < 0, "dynamic arithmetic right shift")
+}
+
+mut i = 1
+while i <= 32 {
+   def a = 2000 + i * 17
+   def b = i * 3 - 50
+   exercise(a, b)
+   i += 1
+}
+
+mut shift = 0
+while shift < 63 {
+   exercise_shifts(shift)
+   shift += 1
+}
+
+0
+NY
+}

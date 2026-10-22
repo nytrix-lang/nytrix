@@ -1,0 +1,16 @@
+shape test_sequence_string_abi {
+  family "runtime/execution"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.iter as it
+
+fn concat_seq(seq xs, seq ys) { xs + ys }
+assert(concat_seq("ab", "cd") == "abcd", "seq string concatenation")
+assert(it.chain("ab", "cd") == "abcd", "iterator string chain")
+print("✓ sequence string ABI passed")
+NY
+}

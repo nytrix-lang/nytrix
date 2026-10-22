@@ -1,0 +1,53 @@
+shape mutable_aggregate_reversed_length_bound_survives_store_and_append {
+  family "runtime/language"
+  generator "regression"
+  features [ny test typing refinement mutable aggregate reversed length lower bound positive]
+  template ny-test-case
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+refine AtLeastThree = list where(items) { 3 <= items.len }
+fn require_at_least_three(AtLeastThree items) int { return items.len }
+
+fn checked_length() int {
+  mut list<int> items = [2, 4, 6]
+  if AtLeastThree(items) {
+    items[1] = 9
+    items = append(items, 8)
+    return require_at_least_three(items)
+  }
+  0
+}
+
+assert(checked_length() == 4,
+       "reversed length lower bounds survive element stores and append")
+NY
+}
+
+shape mutable_aggregate_reversed_length_bound_expires_after_shrink {
+  family "compiler-errors/types"
+  generator "error"
+  features [error typing refinement mutable aggregate reversed length lower bound invalidation negative]
+  template ny-compile-fail
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  expect compile_fail
+  expect_message "refinement obligation"
+  source ny <<'NY'
+use core
+
+refine AtLeastThree = list where(items) { 3 < items.len }
+fn require_at_least_three(AtLeastThree items) int { return items.len }
+
+fn invalid_after_shrink() int {
+  mut list<int> items = [2, 4, 6]
+  if AtLeastThree(items) {
+    items.pop()
+    return require_at_least_three(items)
+  }
+  0
+}
+invalid_after_shrink()
+NY
+}

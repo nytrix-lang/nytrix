@@ -1,7 +1,7 @@
 ;; Keywords: linux syscalls abi arguments pseudocode
 ;; Linux syscall number, ABI, and argument-name decoding for pseudocode.
-module std.os.rev.decomp.syscalls *
-use std.core
+module core.os.rev.decomp.syscalls *
+use core
 
 fn _syscall_name_x86_64(int nr) str {
    case nr {

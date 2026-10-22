@@ -1,20 +1,20 @@
 ;; Keywords: render vulkan gpu utils os ui
 ;; Vulkan utility routines for handles, memory, layout transitions, and debug formatting.
 ;; References:
-;; - std.os.ui.render.vk
-;; - std.os.ui.render
-;; - std.os.ui.render.matrix
-module std.os.ui.render.vk.utils(__vkr_push_rect_tex_fast, __vkr_push_quad_xyuv_fast, __vkr_push_rect_outline_fast, _vkr_color_u32, __vkr_pack_color, _vkr_store_vertex, __vkr_push_vertex, __vkr_push_rect_tex, _init_quad_template, __vkr_push_rect, __vkr_push_line, __vkr_push_line_sdf, __vkr_push_rect_sdf, _check_debug_env, _dbg_handle, _get_vertex_offset, _get_local_vertex_map, _advance_vertex_offset, _vkr_bind_dynamic_vertex_buffer, _vkr_pipeline_known, _vkr_bind_pipeline_if_needed, _pack_color, _push_vertex, _vkr_safe_f32_limit, _vkr_bgra_to_rgba_if_needed, store_mat4_cm_raw, pack_emissive_u32, pack_normal_tex_word, pack_rgba_u32, pack_material_scalar_u32, pack_alpha_cutoff_u32, gltf_anim_apply_uv_pointer_override, gltf_anim_apply_material_pointer_overrides, gltf_expand_indexed_vertices, gltf_rewind_triangle_vertices, gltf_sync_drawable_part_from_raw, gltf_sync_drawable_parts_from_raw, pack_bsdf0_u32, pack_bsdf1_u32, pack_bsdf2_u32, pack_bsdf3_u32, pack_bsdf4_u32, pack_bsdf5_u32, pack_bsdf_ext_slab, pack_material_slab)
-use std.core
-use std.core.mem
-use std.math
-use std.os.ui.render.dump as ui_profile
-use std.os.ui.render.shared as render_shared
-use std.os.ui.render.vk.state
-use std.os.ui.render.vk.vulkan (cmd_bind_vertex_buffers, cmd_bind_pipeline)
-use std.core.common as common
-use std.core.str (to_hex)
-use std.os.ui.render.utils as render_utils
+;; - core.os.ui.render.vk
+;; - core.os.ui.render
+;; - core.os.ui.render.matrix
+module core.os.ui.render.vk.utils(__vkr_push_rect_tex_fast, __vkr_push_quad_xyuv_fast, __vkr_push_rect_outline_fast, _vkr_color_u32, __vkr_pack_color, _vkr_store_vertex, __vkr_push_vertex, __vkr_push_rect_tex, _init_quad_template, __vkr_push_rect, __vkr_push_line, __vkr_push_line_sdf, __vkr_push_rect_sdf, _check_debug_env, _dbg_handle, _get_vertex_offset, _get_local_vertex_map, _advance_vertex_offset, _vkr_bind_dynamic_vertex_buffer, _vkr_pipeline_known, _vkr_bind_pipeline_if_needed, _pack_color, _push_vertex, _vkr_safe_f32_limit, _vkr_bgra_to_rgba_if_needed, store_mat4_cm_raw, pack_emissive_u32, pack_normal_tex_word, pack_rgba_u32, pack_material_scalar_u32, pack_alpha_cutoff_u32, gltf_anim_apply_uv_pointer_override, gltf_anim_apply_material_pointer_overrides, gltf_expand_indexed_vertices, gltf_rewind_triangle_vertices, gltf_sync_drawable_part_from_raw, gltf_sync_drawable_parts_from_raw, pack_bsdf0_u32, pack_bsdf1_u32, pack_bsdf2_u32, pack_bsdf3_u32, pack_bsdf4_u32, pack_bsdf5_u32, pack_bsdf_ext_slab, pack_material_slab)
+use core
+use core.mem
+use core.math
+use core.os.ui.render.dump as ui_profile
+use core.os.ui.render.shared as render_shared
+use core.os.ui.render.vk.state
+use core.os.ui.render.vk.vulkan (cmd_bind_vertex_buffers, cmd_bind_pipeline)
+use core.common as common
+use core.str (to_hex)
+use core.os.ui.render.utils as render_utils
 
 mut _cached_ubo_env = -1
 mut _cached_renderdoc_env = -1
@@ -151,10 +151,7 @@ fn _vkr_write_quad_xyuv_template(any p, any x0, any y0, any x1, any y1, any u1, 
 }
 
 fn _vkr_color_u32(any c) int {
-   if is_int(c) { return c }
-   if is_float(c) { return __flt_to_int(c) }
-   if !is_list(c) { return 0xFFFFFFFF }
-   _pack_color(c.get(0, 1.0), c.get(1, 1.0), c.get(2, 1.0), c.get(3, 1.0))
+   render_shared.color_u32(c)
 }
 
 @pure
@@ -432,9 +429,9 @@ fn _vkr_pipeline_known(any p) bool {
 }
 
 @inline
-fn _vkr_bind_pipeline_if_needed(any cb, any target) bool {
+fn _vkr_bind_pipeline_if_needed(?handle cb, ?handle target) bool {
    if !cb || !target { return false }
-   _vkr_pipe_diag("before known")
+   _vkr_pipe_diag("before known target=0x" + to_hex(target) + " default=0x" + to_hex(_pipeline) + " unlit_nocull=0x" + to_hex(_unlit_nocull_pipeline))
    if !_vkr_pipeline_known(target) {
       ;; Custom pipeline: not in the built-in list but still a valid handle.
       ;; Bind it directly so custom shaders (user pipelines) work natively.

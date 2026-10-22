@@ -1,0 +1,16 @@
+shape comptime_ident_invalid_fragment {
+  family "compiler-errors/comptime"
+  generator "error"
+  features ["error", "comptime", "template", "hygiene"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "ident(...) requires a nonempty identifier fragment"
+  source ny <<'NY'
+comptime template make_named(name) {
+  fn generated_${name}() int { return 42 }
+}
+
+comptime emit make_named(ident("bad-name"))
+NY
+}

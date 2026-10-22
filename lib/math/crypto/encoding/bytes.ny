@@ -3,10 +3,10 @@
 ;; Reference:
 ;; - https://www.rfc-editor.org/rfc/rfc7468
 ;; References:
-;; - std.math.crypto.encoding
-;; - std.math.crypto
-module std.math.crypto.encoding.bytes(bytes, bytes_set, bytes_get)
-use std.core
+;; - core.math.crypto.encoding
+;; - core.math.crypto
+module core.math.crypto.encoding.bytes(bytes, bytes_set, bytes_get)
+use core
 
 @returns_owned
 fn bytes(int n) bytes {
@@ -51,5 +51,5 @@ fn bytes_get(bytes b, int i) int {
    assert(bytes_get(b, 3) == 68, "bytes_set ignores out-of-range index")
    assert(bytes_get(b, -1) == 0, "bytes_get negative index")
    assert(bytes_get(b, 4) == 0, "bytes_get out of range")
-   print("✓ std.math.crypto.encoding.bytes self-test passed")
+   print("✓ core.math.crypto.encoding.bytes self-test passed")
 }

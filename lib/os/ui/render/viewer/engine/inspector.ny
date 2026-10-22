@@ -1,17 +1,18 @@
 ;; Keywords: engine inspector properties transform material os ui render viewer scene
 ;; Inspector UI helpers for transforms, materials, camera, and view settings.
 ;; References:
-;; - std.os.ui.render.viewer.engine.state
-;; - std.os.ui.render.scene
-module std.os.ui.render.viewer.engine.inspector(TAB_ITEMS, COUNTER_PROPS, draw_body)
-use std.core
-use std.core.str as str
-use std.math (clamp, floor, max)
-use std.os.ui.render.viewer.app as ui_app
-use std.os.ui.render.viewer.gui as gui
-use std.os.ui.render.viewer.editor.colorpicker as colorpicker
-use std.os.ui.render.viewer.icons as icons
-use std.os.ui.render.dump as ui_profile
+;; - core.os.ui.render.viewer.engine.state
+;; - core.os.ui.render.scene
+module core.os.ui.render.viewer.engine.inspector(TAB_ITEMS, COUNTER_PROPS, draw_body)
+use core
+use core.str as str
+use core.math (clamp, floor, max)
+use core.os.ui.render.viewer.app as ui_app
+use core.os.ui.render.viewer.gui as gui
+use core.os.ui.render.viewer.editor.colorpicker as colorpicker
+use core.os.ui.render.viewer.icons as icons
+use core.os.ui.render.dump as ui_profile
+use core.os.ui.render.shared as render_shared
 
 def list TAB_ITEMS = ["Scene", "View", "Profile"]
 def list COUNTER_PROPS = [
@@ -295,8 +296,8 @@ fn _material_occlusion_strength(any raw, any rec) f64 {
 }
 
 fn _normal_scale_from_word(int word) f64 {
-   def packed = band(bshr(word, 24), 127)
-   packed <= 0 ? 1.0 : clamp(float(packed) * 2.0 / 127.0, 0.0, 2.0)
+   def packed = band(bshr(word, 24), render_shared.MATERIAL_U7_MAX)
+   packed <= 0 ? 1.0 : clamp(float(packed) * 2.0 / render_shared.MATERIAL_U7_MAX, 0.0, 2.0)
 }
 
 fn _material_normal_scale(any raw, any rec) f64 {

@@ -1,0 +1,30 @@
+shape ownership_exclusive_borrow_interprocedural_match_overlap_negative {
+  family "language/ownership"
+  generator "syntax"
+  features [ownership borrow exclusive interprocedural match negative]
+  template ny-test-case
+  expect compile_failure
+  expect_message "borrow is live"
+  flags "--ownership-strict --native-only --nyir-verify"
+  source ny <<'NY'
+use core
+
+@returns_borrow(x)
+fn mutable_borrow_parameter_match(bool choose, any x) any {
+  match choose {
+    true -> { return borrow_mut(x) }
+    _ -> { return borrow_mut(x) }
+  }
+}
+
+fn overlapping_write() int {
+  mut list<int> values = [41, 43]
+  def exclusive = mutable_borrow_parameter_match(false, values[0])
+  values[0] = 44
+  def observed = exclusive
+  observed
+}
+
+overlapping_write()
+NY
+}

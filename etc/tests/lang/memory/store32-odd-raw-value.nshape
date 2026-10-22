@@ -1,0 +1,22 @@
+shape test_store32_odd_raw_value {
+  family "runtime/values"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+def p = malloc(8)
+assert(p != 0, "malloc")
+memset(p, 0, 8)
+def ip = 16777343
+store32(p, ip, 0)
+assert(load8(p, 0) == 127, "odd raw low byte")
+assert(load8(p, 1) == 0, "odd raw second byte")
+assert(load8(p, 2) == 0, "odd raw third byte")
+assert(load8(p, 3) == 1, "odd raw high byte")
+free(p)
+print("store32 odd raw value passed")
+NY
+}

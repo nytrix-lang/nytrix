@@ -1,0 +1,26 @@
+shape ownership_resource_partial_extraction_double_move {
+  family "compiler-errors/ownership"
+  generator "error"
+  features ["error", "ownership", "resource", "aggregate", "partial-move", "double-move", "negative"]
+  template ny-compile-fail
+  expect compile_fail
+  flags "--ownership-strict"
+  expect_message "linear resource 'pair.left' may be consumed at most once"
+  source ny <<'NY'
+use core
+
+linear layout File { int fd }
+layout ResourcePair { File left, int tag }
+
+fn move_field_twice() int {
+  def ResourcePair pair = ResourcePair(File(11), 7)
+  def File first = pair.left
+  def File second = pair.left
+  forget(first)
+  forget(second)
+  0
+}
+
+move_field_twice()
+NY
+}

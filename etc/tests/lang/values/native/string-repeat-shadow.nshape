@@ -1,0 +1,23 @@
+shape native_string_repeat_uses_shadowed_local {
+  family "native/values"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.error
+
+def piece = "top"
+fn repeated() str {
+  def piece = "longer"
+  mut result = ""
+  for i in 0..9 {
+    result = result + piece
+  }
+  result
+}
+assert_eq(repeated(), "longerlongerlongerlongerlongerlongerlongerlongerlongerlonger")
+assert_eq(repeated().len, 60)
+NY
+}

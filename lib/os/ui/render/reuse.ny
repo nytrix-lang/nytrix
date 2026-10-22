@@ -1,18 +1,18 @@
 ;; Keywords: render reuse cache scratch allocation os ui
 ;; Reusable render scratch storage for reducing per-frame allocations in UI drawing paths.
 ;; References:
-;; - std.os.ui.render
-;; - std.os.ui.render.viewer.batch
-module std.os.ui.render.reuse(
+;; - core.os.ui.render
+;; - core.os.ui.render.viewer.batch
+module core.os.ui.render.reuse(
    make, reset, events_seen, ready_frames, reused_frames,
    note_events_seen, mark_event_seen, abs_gt, size_stable,
    input_active, capture_active, dynamic_active,
    candidate, should_present, note_full_draw, try_present
 )
 
-use std.core
-use std.os.ui.render.dump as ui_profile
-use std.os.ui.render as gfx
+use core
+use core.os.ui.render.dump as ui_profile
+use core.os.ui.render as gfx
 
 fn make() dict {
    "Creates frame-reuse controller state."
@@ -253,5 +253,5 @@ fn try_present(dict st, any opts) bool {
    st = make()
    def posed = {"enabled": true, "gui_frame": true, "win_w": 800, "win_h": 450, "static_pose_ready": true, "skin_count": 1, "animation_count": 1}
    assert(candidate(st, posed), "viewer idle static skinned pose")
-   print("✓ std.os.ui.render.reuse self-test passed")
+   print("✓ core.os.ui.render.reuse self-test passed")
 }

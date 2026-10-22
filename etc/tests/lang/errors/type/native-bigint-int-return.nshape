@@ -1,0 +1,20 @@
+shape native_bigint_int_return_rejects_promotion {
+  family "compiler-errors/native-abi"
+  generator "error"
+  features ["error", "native", "bigint", "negative", "diagnostic"]
+  template ny-compile-fail
+  flags "--native-only"
+  expect compile_fail
+  expect_message "implicit return value: expected int, got bigint"
+  source ny <<'NY'
+use core
+
+fn invalid() int {
+  mut value = 9223372036854775807
+  value = value + 1
+  value * 3
+}
+
+print(invalid())
+NY
+}

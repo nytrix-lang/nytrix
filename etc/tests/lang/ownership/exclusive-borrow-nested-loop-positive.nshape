@@ -1,0 +1,26 @@
+shape ownership_exclusive_borrow_nested_loop_positive {
+  family "runtime/ownership"
+  generator "regression"
+  features ["ownership", "borrow", "exclusive", "liveness", "nested", "positive"]
+  template ny-test-case
+  expect compile_and_run
+  flags "--ownership-strict"
+  source ny <<'NY'
+use core
+
+fn good(int count) int {
+  mut int value = 9
+  def exclusive = &mut value
+  mut int i = 0
+  while i < count {
+    if i % 2 == 0 {
+      def observed = exclusive
+    }
+    i += 1
+  }
+  value
+}
+
+assert(good(4) == 9, "nested loop borrow expires after the loop")
+NY
+}

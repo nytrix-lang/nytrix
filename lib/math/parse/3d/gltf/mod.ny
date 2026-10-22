@@ -1,8 +1,7 @@
 ;; Keywords: 3d gltf glb parse
 ;; glTF 2.0 loader with proper indexed primitive expansion
-;; References: std.math.parse.3d
-module std.math.parse.3d.gltf(
-   load_gltf,
+;; References: core.math.parse.3d
+module core.math.parse.3d.gltf(
    load_gltf_file,
    parse_gltf_str,
    gltf_mesh_count,
@@ -56,15 +55,13 @@ module std.math.parse.3d.gltf(
    GLTF_TYPE_MAT4
 )
 
-use std.math.parse.3d.gltf.shared as sub_shared
-use std.math.parse.3d.gltf.load as sub_load
-use std.math.parse.3d.gltf.material as sub_material
-use std.math.parse.3d.gltf.animation as sub_anim
-use std.math.parse.3d.gltf.scene as sub_scene
-use std.math.parse.3d.gltf.mesh as sub_mesh
-use std.math.parse.3d.gltf.math as math
-
-fn load_gltf(any a, any b) any = sub_load.load_gltf(a, b)
+use core.math.parse.3d.gltf.shared as sub_shared
+use core.math.parse.3d.gltf.load as sub_load
+use core.math.parse.3d.gltf.material as sub_material
+use core.math.parse.3d.gltf.animation as sub_anim
+use core.math.parse.3d.gltf.scene as sub_scene
+use core.math.parse.3d.gltf.mesh as sub_mesh
+use core.math.parse.3d.gltf.math as math
 
 fn load_gltf_file(any a) any = sub_load.load_gltf_file(a)
 

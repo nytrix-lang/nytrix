@@ -7,7 +7,7 @@
 #endif
 #include "base/loader.h"
 #include "base/util.h"
-#include "code/parse/lexer.h"
+#include "code/lang/parse/lexer.h"
 #include "priv.h"
 #include <ctype.h>
 #include <stdio.h>
@@ -48,7 +48,8 @@ static int repl_visual_advance(int col, unsigned char ch) {
   return col + 1;
 }
 
-static void pos_to_linecol(const char *line, int pos, int *out_row, int *out_col) {
+static void pos_to_linecol(const char *line, int pos, int *out_row,
+                           int *out_col) {
   int row = 0;
   int col = 0;
   if (pos < 0)
@@ -175,7 +176,8 @@ static int has_param_name_after_type(const char *line, size_t pos) {
 }
 
 static int sig_word_is_type(const char *line, size_t start, size_t end) {
-  return is_builtin_type_name(line + start, end - start) || has_param_name_after_type(line, end) ||
+  return is_builtin_type_name(line + start, end - start) ||
+         has_param_name_after_type(line, end) ||
          prev_non_ws_char(line, start) == '<';
 }
 
@@ -191,10 +193,12 @@ static int is_known_name(const char *name, size_t len, int *out_kind) {
         *out_kind = g_repl_docs->data[i].kind;
       return 1;
     }
-    if (elen > len && en[elen - len - 1] == '.' && memcmp(en + elen - len, name, len) == 0) {
+    if (elen > len && en[elen - len - 1] == '.' &&
+        memcmp(en + elen - len, name, len) == 0) {
       suffix_match_idx = (int)i;
     }
-    if (len > elen && name[len - elen - 1] == '.' && memcmp(name + len - elen, en, elen) == 0) {
+    if (len > elen && name[len - elen - 1] == '.' &&
+        memcmp(name + len - elen, en, elen) == 0) {
       suffix_match_idx = (int)i;
     }
   }
@@ -346,7 +350,8 @@ static int is_builtin_type_name(const char *s, size_t len) {
   case 'i':
     return (len == 3 && !memcmp(s, "int", 3)) ||
            (len == 2 && (!memcmp(s, "i8", 2))) ||
-           (len == 3 && (!memcmp(s, "i16", 3) || !memcmp(s, "i32", 3) || !memcmp(s, "i64", 3)));
+           (len == 3 && (!memcmp(s, "i16", 3) || !memcmp(s, "i32", 3) ||
+                         !memcmp(s, "i64", 3)));
   case 'l':
     return len == 4 && !memcmp(s, "list", 4);
   case 'n':
@@ -366,7 +371,8 @@ static int is_builtin_type_name(const char *s, size_t len) {
     return len == 5 && !memcmp(s, "tuple", 5);
   case 'u':
     return (len == 2 && !memcmp(s, "u8", 2)) ||
-           (len == 3 && (!memcmp(s, "u16", 3) || !memcmp(s, "u32", 3) || !memcmp(s, "u64", 3)));
+           (len == 3 && (!memcmp(s, "u16", 3) || !memcmp(s, "u32", 3) ||
+                         !memcmp(s, "u64", 3)));
   case 'v':
     return len == 4 && !memcmp(s, "void", 4);
   default:
@@ -418,13 +424,117 @@ static const char *style_ansi(int style) {
   }
 }
 
-static void style_mark(unsigned char *styles, size_t start, size_t end, unsigned char style) {
+static void style_mark(unsigned char *styles, size_t start, size_t end,
+                       unsigned char style) {
   for (size_t i = start; i < end; i++)
     styles[i] = style;
 }
 
-void repl_highlight_line_ex(const char *line, int cursor_pos, const char *ml_prompt, int sel_start,
-                            int sel_end, int sel_mode) {
+typedef struct {
+  int enabled;
+  int block;
+  int row_min;
+  int row_max;
+  int col_min;
+  int col_max;
+  int start;
+  int end;
+} repl_selection_bounds_t;
+
+static repl_selection_bounds_t repl_selection_bounds(const char *line,
+                                                     int sel_start, int sel_end,
+                                                     int sel_mode) {
+  repl_selection_bounds_t bounds = {0};
+  bounds.enabled = sel_start >= 0 && sel_end >= 0;
+  bounds.block = bounds.enabled && sel_mode == REPL_SEL_BLOCK;
+  bounds.start = sel_start;
+  bounds.end = sel_end;
+  if (bounds.block) {
+    int row0 = 0, col0 = 0, row1 = 0, col1 = 0;
+    pos_to_linecol(line, sel_start, &row0, &col0);
+    pos_to_linecol(line, sel_end, &row1, &col1);
+    bounds.row_min = row0 < row1 ? row0 : row1;
+    bounds.row_max = row0 > row1 ? row0 : row1;
+    bounds.col_min = col0 < col1 ? col0 : col1;
+    bounds.col_max = col0 > col1 ? col0 : col1;
+  }
+  return bounds;
+}
+
+static int repl_selection_contains(const repl_selection_bounds_t *bounds,
+                                   size_t index, int row, int col) {
+  if (!bounds->enabled)
+    return 0;
+  if (!bounds->block)
+    return (int)index >= bounds->start && (int)index < bounds->end;
+  return row >= bounds->row_min && row <= bounds->row_max &&
+         col >= bounds->col_min && col < bounds->col_max;
+}
+
+static void repl_set_highlight_state(int want_sel, int want_style,
+                                     int *active_sel, int *active_style) {
+  if (want_sel == *active_sel && want_style == *active_style)
+    return;
+  fputs(CLR_RESET, stdout);
+  if (want_sel)
+    fputs(CLR_SELECT, stdout);
+  if (want_style != ST_NONE)
+    fputs(style_ansi(want_style), stdout);
+  *active_sel = want_sel;
+  *active_style = want_style;
+}
+
+static void repl_emit_highlighted_char(const char *line, size_t index,
+                                       int *col) {
+  if (line[index] == '\t') {
+    for (int k = 0; k < REPL_TAB_VISUAL_WIDTH; ++k)
+      fputc(' ', stdout);
+  } else {
+    fwrite(line + index, 1, 1, stdout);
+  }
+  *col = repl_visual_advance(*col, (unsigned char)line[index]);
+}
+
+static void repl_emit_highlighted_line(const char *line, size_t line_len,
+                                       const char *ml_prompt,
+                                       const unsigned char *styles,
+                                       int sel_start, int sel_end,
+                                       int sel_mode) {
+  int fst = 1;
+  int active_style = ST_NONE;
+  int active_sel = 0;
+  int row = 0;
+  int col = 0;
+  repl_selection_bounds_t bounds =
+      repl_selection_bounds(line, sel_start, sel_end, sel_mode);
+  for (size_t j = 0; j < line_len; j++) {
+    if (fst)
+      fst = 0;
+    else if (line[j - 1] == '\n' && ml_prompt)
+      fputs(ml_prompt, stdout);
+    if (line[j] == '\n') {
+      if (active_sel || active_style != ST_NONE) {
+        fputs(CLR_RESET, stdout);
+        active_sel = 0;
+        active_style = ST_NONE;
+      }
+      printf("\033[K\n");
+      row++;
+      col = 0;
+      continue;
+    }
+    int want_sel = repl_selection_contains(&bounds, j, row, col);
+    repl_set_highlight_state(want_sel, styles[j], &active_sel, &active_style);
+    repl_emit_highlighted_char(line, j, &col);
+  }
+  if (active_sel || active_style != ST_NONE)
+    fputs(CLR_RESET, stdout);
+  printf("\033[K");
+}
+
+void repl_highlight_line_ex(const char *line, int cursor_pos,
+                            const char *ml_prompt, int sel_start, int sel_end,
+                            int sel_mode) {
   if (!line || !*line)
     return;
   if (!is_color_enabled()) {
@@ -507,7 +617,8 @@ void repl_highlight_line_ex(const char *line, int cursor_pos, const char *ml_pro
     }
     if (isalpha((unsigned char)line[i]) || line[i] == '_') {
       size_t start = i;
-      while (line[i] && (isalnum((unsigned char)line[i]) || line[i] == '_' || line[i] == '.'))
+      while (line[i] && (isalnum((unsigned char)line[i]) || line[i] == '_' ||
+                         line[i] == '.'))
         i++;
       size_t len = i - start;
       unsigned char style = ST_NONE;
@@ -518,12 +629,14 @@ void repl_highlight_line_ex(const char *line, int cursor_pos, const char *ml_pro
         expect_fn_name = 0;
         expect_fn_lparen = next == '(';
       } else if (expect_return_type &&
-                 (word_eq_lit(line + start, len, "case") || word_eq_lit(line + start, len, "as"))) {
+                 (word_eq_lit(line + start, len, "case") ||
+                  word_eq_lit(line + start, len, "as"))) {
         style = ST_KEYWORD;
         expect_return_type = 0;
       } else if (expect_return_type && !is_keyword(line + start, len)) {
         style = ST_TYPE;
-      } else if (fn_sig_depth > 0 && !fn_sig_default && !is_keyword(line + start, len)) {
+      } else if (fn_sig_depth > 0 && !fn_sig_default &&
+                 !is_keyword(line + start, len)) {
         style = sig_word_is_type(line, start, i) ? ST_TYPE : ST_MEMBER;
       } else if (is_keyword(line + start, len)) {
         style = ST_KEYWORD;
@@ -580,64 +693,8 @@ void repl_highlight_line_ex(const char *line, int cursor_pos, const char *ml_pro
   if (match_pos >= 0 && (size_t)match_pos < line_len)
     styles[match_pos] = ST_MATCH;
 
-  int fst = 1;
-  int active_style = ST_NONE;
-  int active_sel = 0;
-  int block_r0 = 0, block_c0 = 0, block_r1 = 0, block_c1 = 0;
-  int row = 0;
-  int col = 0;
-  if (sel_mode == REPL_SEL_BLOCK && sel_start >= 0 && sel_end >= 0) {
-    pos_to_linecol(line, sel_start, &block_r0, &block_c0);
-    pos_to_linecol(line, sel_end, &block_r1, &block_c1);
-  }
-  for (size_t j = 0; j < line_len; j++) {
-    if (fst)
-      fst = 0;
-    else if (line[j - 1] == '\n' && ml_prompt)
-      fputs(ml_prompt, stdout);
-    if (line[j] == '\n') {
-      if (active_sel || active_style != ST_NONE) {
-        fputs(CLR_RESET, stdout);
-        active_sel = 0;
-        active_style = ST_NONE;
-      }
-      printf("\033[K\n");
-      row++;
-      col = 0;
-      continue;
-    }
-    int want_sel = 0;
-    if (sel_mode == REPL_SEL_BLOCK && sel_start >= 0 && sel_end >= 0) {
-      int rmin = block_r0 < block_r1 ? block_r0 : block_r1;
-      int rmax = block_r0 > block_r1 ? block_r0 : block_r1;
-      int cmin = block_c0 < block_c1 ? block_c0 : block_c1;
-      int cmax = block_c0 > block_c1 ? block_c0 : block_c1;
-      want_sel = (row >= rmin && row <= rmax && col >= cmin && col < cmax);
-    } else {
-      want_sel = (sel_start >= 0 && (int)j >= sel_start && (int)j < sel_end);
-    }
-    int want_style = styles[j];
-    if (want_sel != active_sel || want_style != active_style) {
-      fputs(CLR_RESET, stdout);
-      if (want_sel)
-        fputs(CLR_SELECT, stdout);
-      if (want_style != ST_NONE)
-        fputs(style_ansi(want_style), stdout);
-      active_sel = want_sel;
-      active_style = want_style;
-    }
-    if (line[j] == '\t') {
-      for (int k = 0; k < REPL_TAB_VISUAL_WIDTH; ++k)
-        fputc(' ', stdout);
-      col = repl_visual_advance(col, (unsigned char)line[j]);
-    } else {
-      fwrite(line + j, 1, 1, stdout);
-      col = repl_visual_advance(col, (unsigned char)line[j]);
-    }
-  }
-  if (active_sel || active_style != ST_NONE)
-    fputs(CLR_RESET, stdout);
-  printf("\033[K");
+  repl_emit_highlighted_line(line, line_len, ml_prompt, styles, sel_start,
+                             sel_end, sel_mode);
   free(styles);
 }
 
@@ -688,9 +745,11 @@ void repl_display_match_list(char **matches, int len, int max_arg) {
         color = CLR_BUILTIN;
       } else if (is_keyword(m, strlen(m))) {
         color = CLR_KEYWORD;
-      } else if (!strcmp(m, "int") || !strcmp(m, "float") || !strcmp(m, "str") ||
-                 !strcmp(m, "list") || !strcmp(m, "dict") || !strcmp(m, "set") ||
-                 !strcmp(m, "tuple") || !strcmp(m, "bytes") || !strcmp(m, "bool")) {
+      } else if (!strcmp(m, "int") || !strcmp(m, "float") ||
+                 !strcmp(m, "str") || !strcmp(m, "list") ||
+                 !strcmp(m, "dict") || !strcmp(m, "set") ||
+                 !strcmp(m, "tuple") || !strcmp(m, "bytes") ||
+                 !strcmp(m, "bool")) {
         color = CLR_TYPE;
       } else if (strncmp(m, "__", 2) == 0) {
         color = CLR_BUILTIN;

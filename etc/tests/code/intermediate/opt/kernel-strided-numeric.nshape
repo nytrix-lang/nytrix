@@ -1,0 +1,37 @@
+shape optcheck_kernel_strided_numeric {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle optcheck kernel-family strided numeric bounds mutation]
+  template ny-test-case
+  flags_matrix "-O0 --color=never; -O3 --color=never; --native-only -O0 --color=never; --native-only -O3 --color=never; --native-backend=llvm --jit --jit-engine=mcjit --color=never"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+;; Interleaved lanes force a stride-two access pattern. Each iteration writes
+;; both streams and reads them back; bounds-sensitive loop transforms must
+;; preserve the lane pairing and the final odd/even boundary values.
+mut values = []
+mut i = 0
+while i < 64 {
+   values = append(values, (i * 29 + 7) & 0xFFFF)
+   i += 1
+}
+
+mut checksum = 0
+mut lane = 0
+while lane < 32 {
+   def even_index = lane * 2
+   def odd_index = even_index + 1
+   def even = (values[even_index] * 3 + lane) & 0xFFFF
+   def odd = (values[odd_index] * 5 - lane) & 0xFFFF
+   values[even_index] = even
+   values[odd_index] = odd
+   checksum = (checksum + values[even_index] * 7 + values[odd_index] * 11) & 0xFFFFFFFF
+   lane += 1
+}
+checksum = (checksum + values[0] + values[63]) & 0xFFFFFFFF
+print("checksum=", checksum)
+assert(checksum == 2261608, "strided numeric checksum")
+NY
+}

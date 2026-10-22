@@ -1,12 +1,12 @@
 ;; Keywords: factorization primality aprcl jacobi-sums math crypto number-theory
 ;; Integer-factorization routines for APRCL Jacobi-sum constants and proof data.
 ;; References:
-;; - std.math.crypto.factorization
-;; - std.math.crypto
-module std.math.crypto.factorization.aprcl_data(aprcl_q_prime_table, aprcl_jacobi_table_report, aprcl_jacobi_seed_full_report, aprcl_pair_congruence_report, aprcl_proof_report, verify_aprcl_proof_report)
-use std.core
-use std.math.nt
-use std.os.clock (ticks)
+;; - core.math.crypto.factorization
+;; - core.math.crypto
+module core.math.crypto.factorization.aprcl_data(aprcl_q_prime_table, aprcl_jacobi_table_report, aprcl_jacobi_seed_full_report, aprcl_pair_congruence_report, aprcl_proof_report, verify_aprcl_proof_report)
+use core
+use core.math.nt
+use core.os.clock (ticks)
 
 mut _aprcl_sls_cache = nil
 mut _aprcl_jpqs_cache = nil

@@ -5,10 +5,10 @@
 ;; - https://people.csail.mit.edu/rivest/Rsapaper.pdf
 ;; - https://crypto.stanford.edu/~dabo/pubs/papers/RSA-survey.pdf
 ;; References:
-;; - std.math.crypto.rsa
-;; - std.math.crypto
-module std.math.crypto.rsa.common_modulus(common_modulus_attack, common_modulus_attack_root, common_modulus_attack_report, common_modulus_scan_same_n, common_modulus_related_message_attack, common_modulus_related_message_scan, same_n_huge_e_attack, same_n_huge_e_scan)
-use std.math.nt
+;; - core.math.crypto.rsa
+;; - core.math.crypto
+module core.math.crypto.rsa.common_modulus(common_modulus_attack, common_modulus_attack_root, common_modulus_attack_report, common_modulus_scan_same_n, common_modulus_related_message_attack, common_modulus_related_message_scan, same_n_huge_e_attack, same_n_huge_e_scan)
+use core.math.nt
 
 fn common_modulus_attack_root(number N, number e1, number c1, number e2, number c2) any {
    "Recover plaintext m from two ciphertexts under the same modulus N.

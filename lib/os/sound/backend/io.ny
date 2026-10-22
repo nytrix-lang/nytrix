@@ -1,19 +1,19 @@
 ;; Keywords: sound backend io input output stream os
 ;; Shared sound backend I/O contracts and sample-buffer transfer operations.
 ;; References:
-;; - std.os.sound.backend
-;; - std.os
-module std.os.sound.backend.io(create, connect, connect_backend, disconnect, get_output_device_count, get_output_device, get_default_output_device_index, outstream_create, outstream_open, outstream_start, outstream_stop, outstream_write, outstream_write_frames, outstream_destroy, get_backend_name, FORMAT_S16LE, FORMAT_FLOAT32LE)
-use std.core
-use std.core.dict_mod
-use std.os
-use std.core.common as common
-use std.os.sound.diag as sound_debug
-use std.os.sound.backend.alsa as audio_alsa
-use std.os.sound.backend.pulse as audio_pulse
-use std.os.sound.backend.jack as audio_jack
-use std.os.sound.backend.winmm as audio_winmm
-use std.os.sound.backend.shared as shared
+;; - core.os.sound.backend
+;; - core.os
+module core.os.sound.backend.io(create, connect, connect_backend, disconnect, get_output_device_count, get_output_device, get_default_output_device_index, outstream_create, outstream_open, outstream_start, outstream_stop, outstream_write, outstream_write_frames, outstream_destroy, get_backend_name, FORMAT_S16LE, FORMAT_FLOAT32LE)
+use core
+use core.dict_mod
+use core.os
+use core.common as common
+use core.os.sound.diag as sound_debug
+use core.os.sound.backend.alsa as audio_alsa
+use core.os.sound.backend.pulse as audio_pulse
+use core.os.sound.backend.jack as audio_jack
+use core.os.sound.backend.winmm as audio_winmm
+use core.os.sound.backend.shared as shared
 
 def FORMAT_S16LE = 1
 def FORMAT_FLOAT32LE = 2
@@ -32,7 +32,7 @@ fn _set_backend(dict ctx, int id, str name) dict {
 fn _connect_backend(dict ctx, str backend) any {
    mut id = 0
    mut name = ""
-   mut new_ctx = 0
+   mut any new_ctx = 0
    if eq(backend, "pulse") {
       id = 1
       name = "pulse"
@@ -61,7 +61,7 @@ fn connect_backend(any ctx, str backend) any {
 }
 
 fn _connect_linux_desktop(dict ctx, bool allow_jack=false) any {
-   mut nctx = _connect_backend(ctx, "pulse")
+   mut any nctx = _connect_backend(ctx, "pulse")
    if nctx { return nctx }
    nctx = _connect_backend(ctx, "alsa")
    if nctx { return nctx }
@@ -72,20 +72,14 @@ fn _connect_linux_desktop(dict ctx, bool allow_jack=false) any {
    0
 }
 
-fn _stream_backend(any stream) any {
-   if !stream { return 0 }
-   def device = stream.get("device")
-   if !device { return 0 }
-   def ctx = device.get("ctx")
-   if !ctx { return 0 }
-   ctx.get("backend")
+fn _stream_backend(dict stream) any {
+   stream.get("backend", 0)
 }
 
 fn _stream_frame_bytes(dict stream) int {
    def channels = stream.get("channels")
-   def bps = stream.get("bits_per_sample", 16)
-   mut sample_bytes = bps / 8
-   if sample_bytes <= 0 { sample_bytes = 2 }
+   def format = stream.get("format", FORMAT_S16LE)
+   def sample_bytes = (format == FORMAT_FLOAT32LE) ? 4 : 2
    channels * sample_bytes
 }
 
@@ -140,7 +134,7 @@ fn get_output_device_count(any ctx) int {
    "Gets output device count."
    if !ctx { return 0 }
    def devices = ctx.get("devices", 0)
-   if devices == 0 { return 0 }
+   if !is_list(devices) { return 0 }
    def n = devices.len
    if sound_debug.enabled() { print("Sound: get_output_device_count: count=" + to_str(n)) }
    n
@@ -150,6 +144,7 @@ fn get_output_device(any ctx, int index) any {
    "Gets output device."
    if !ctx { return 0 }
    def devices = ctx.get("devices", list())
+   if !is_list(devices) { return 0 }
    if index < 0 || index >= devices.len { return 0 }
    devices.get(index)
 }
@@ -193,11 +188,13 @@ fn outstream_open(any stream, int format, int sample_rate, int channels, ?fnptr 
    if !ctx { return false }
    def backend = ctx.get("backend", 0)
    if sound_debug.enabled() { print("Sound: outstream_open: backend=" + to_str(backend)) }
-   if backend == 1 { if audio_pulse.stream_open(stream) { return stream } else { return 0 } }
-   if backend == 2 { if audio_alsa.stream_open(stream) { return stream } else { return 0 } }
-   if backend == 4 { if audio_jack.stream_open(stream) { return stream } else { return 0 } }
-   if backend == 3 { if audio_winmm.stream_open(stream) { return stream } else { return 0 } }
-   0
+   mut any opened = 0
+   if backend == 1 { opened = audio_pulse.stream_open(stream) }
+   elif backend == 2 { opened = audio_alsa.stream_open(stream) }
+   elif backend == 4 { opened = audio_jack.stream_open(stream) }
+   elif backend == 3 { opened = audio_winmm.stream_open(stream) }
+   if opened { opened = opened.set("backend", backend) }
+   return opened
 }
 
 fn outstream_start(any stream) bool {
@@ -250,9 +247,8 @@ fn outstream_write(any stream, any buf, int bytes) bool {
    false
 }
 
-fn outstream_write_frames(any stream, any buf, int frames) bool {
+fn outstream_write_frames(dict stream, any buf, int frames) bool {
    "Writes frames to the output stream."
-   if !stream { return false }
    def b = _stream_backend(stream)
    if !b { return false }
    def handle = stream.get("handle")
@@ -279,6 +275,18 @@ fn get_backend_name(any ctx) str {
 }
 
 #main {
+   mut s16_stereo = dict(2)
+   s16_stereo = s16_stereo.set("format", FORMAT_S16LE)
+   s16_stereo = s16_stereo.set("channels", 2)
+   mut f32_stereo = dict(2)
+   f32_stereo = f32_stereo.set("format", FORMAT_FLOAT32LE)
+   f32_stereo = f32_stereo.set("channels", 2)
+   def s16_mono = s16_stereo.set("channels", 1)
+   def f32_mono = f32_stereo.set("channels", 1)
+   assert(_stream_frame_bytes(s16_stereo) == 4 && _stream_frame_bytes(s16_mono) == 2,
+      "sound backend S16 frame sizing")
+   assert(_stream_frame_bytes(f32_stereo) == 8 && _stream_frame_bytes(f32_mono) == 4,
+      "sound backend F32 frame sizing")
    def ctx = create()
    assert(is_dict(ctx) && get_backend_name(ctx) == "none", "sound backend io ctx")
    assert(get_output_device_count(ctx) == 0 && get_default_output_device_index(ctx) == 0 && get_output_device(ctx, 0) == 0, "sound backend io empty devices")
@@ -297,5 +305,5 @@ fn get_backend_name(any ctx) str {
    free(buf)
    assert(shared.init_output_device(create(), false, "No Device", "none") == 0, "sound backend io init false")
    assert(is_dict(shared.init_output_device(create(), true, "Ready Device", "ready")), "sound backend io init true")
-   print("✓ std.os.sound.backend.io self-test passed")
+   print("✓ core.os.sound.backend.io self-test passed")
 }

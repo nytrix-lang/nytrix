@@ -1,0 +1,27 @@
+shape impl_self_return_class_survives_chained_calls {
+  family "codegen/abi/calls"
+  generator "embedded"
+  features ["ny", "test", "codegen", "abi", "scalar-classes"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only; --native-only --native-backend=x86_64"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+impl SelfBox {
+   fn value(self box) int {
+      box.get("value", 0)
+   }
+   fn add(self a, self b) self {
+      SelfBox({"value": a.value + b.value})
+   }
+}
+
+def SelfBox a = SelfBox({"value": 5})
+def SelfBox b = SelfBox({"value": 8})
+def SelfBox direct = a.add(b)
+assert(direct.value == 13, "impl self method result class survives a local")
+assert(a.add(b).value == 13, "impl self method result class survives a chained call")
+0
+NY
+}

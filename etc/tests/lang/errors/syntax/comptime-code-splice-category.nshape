@@ -1,0 +1,20 @@
+shape comptime_code_splice_category {
+  family "compiler-errors/comptime"
+  generator "error"
+  features ["error", "comptime", "quote", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "expression sequence splice requires expression code"
+  source ny <<'NY'
+comptime template invalid_code_sequence(values) {
+  fn invalid_code_sequence_result() list {
+    return [${values}]
+  }
+}
+
+comptime emit invalid_code_sequence([
+  quote{ fn not_an_expression() int { return 1 } }
+])
+NY
+}

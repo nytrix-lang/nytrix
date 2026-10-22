@@ -1,7 +1,17 @@
+(* Parser-oriented summary, not a semantic specification. Keep syntax updates
+   aligned with src/code/lang/parse/lexer.c and src/code/lang/parse/stmt/core.c. *)
+
 source ::= { stmt } EOF
 
 ignored ::= whitespace | newline | comment | shebang | line_directive
-comment ::= ';' { any_char - newline } newline
+comment ::= line_comment | delimited_comment | marker_comment
+line_comment ::= ';' { any_char - newline } [newline]
+delimited_comment ::= ';' ('{' { any_char } '}'
+                       | '<' { any_char } '>'
+                       | '[' { any_char } ']'
+                       | '(' { any_char } ')') [space] ';'
+marker_comment ::= ';' marker newline { any_char } newline marker [space] ';'
+marker ::= (letter | '_') { letter | digit | '_' }
 shebang ::= '#!' { any_char - newline } newline
 line_directive ::= '#' ['line'] number [string] newline
 
@@ -57,6 +67,7 @@ stmt ::= block
        | layout_decl
        | layout_guard
        | enum_decl
+       | trait_decl
        | comptime_stmt
        | if_stmt
        | while_stmt
@@ -191,16 +202,21 @@ enum_item ::= identifier ['(' [enum_fields] ')'] ['=' expr]
 enum_fields ::= enum_field { ',' enum_field } [',']
 enum_field ::= type_ref identifier
 
-impl_stmt ::= 'impl' type_ref { ',' type_ref } '{' { impl_member [','] } '}'
-impl_member ::= attr_fn | fn_decl | operator_decl
+trait_decl ::= 'trait' path '{' { trait_signature } '}'
+trait_signature ::= attribute* 'fn' path '(' [params] ')' [type_ref]
+
+impl_stmt ::= 'impl' [path 'for'] type_ref { ',' type_ref }
+              '{' { impl_member [','] } '}'
+impl_member ::= attr_fn | fn_decl | operator_decl | law_block
+law_block ::= 'law' block
 
 operator_decl ::= 'operator' operator_form
 operator_form ::= type_ref operator type_ref ':' type_ref '=' path
                 | operator type_ref ':' type_ref '=' path
 
-operator ::= '+' | '-' | '*' | '/' | '%' | '^'
+operator ::= '+' | '-' | '*' | '**' | '^^' | '/' | '%' | '^'
            | '==' | '!=' | '<' | '<=' | '>' | '>='
-           | '&' | '|' | '^^' | '<<' | '>>'
+           | '&' | '|' | '<<' | '>>'
 
 comptime_stmt ::= comptime_table
                 | comptime_template
@@ -284,7 +300,7 @@ continue_stmt ::= 'continue'
 goto_stmt ::= 'goto' identifier
 label_stmt ::= identifier ':'
 
-with_stmt ::= 'with' type_ref ':' identifier '=' expr block
+with_stmt ::= 'with' type_ref identifier '=' expr block
 
 macro_stmt ::= identifier ['(' [expr { ',' expr } [',']] ')'] block
 
@@ -312,8 +328,8 @@ equality ::= relation { ('==' | '!=') relation }
 relation ::= additive { ('<' | '<=' | '>' | '>=' | '..') additive }
 additive ::= multiplicative { ('+' | '-') multiplicative }
 multiplicative ::= bitwise { ('*' | '/' | '%') bitwise }
-bitwise ::= power { ('|' | '&' | '^^' | '<<' | '>>') power }
-power ::= pow_prefix ['^' power]
+bitwise ::= power { ('|' | '&' | '^' | '<<' | '>>') power }
+power ::= pow_prefix ['**' power]
 
 pow_prefix ::= ('-' | '!' | '~') power
              | unary

@@ -2,11 +2,11 @@
 ;; glTF-specific matrix and vector math for column-major transforms.
 ;; lists with an optional trailing tag, not the generic std matrix shape.
 ;; References:
-;; - std.math.parse.3d
-;; - std.math.parse
-module std.math.parse.3d.gltf.math(mat4_identity, mat4_mul, node_local_matrix, mat4_apply_pos, mat4_apply_dir, mat4_from_trs, mat4_inverse_affine, mat4_transform_point, mat4_transform_dir, safe_model_mat4)
-use std.core
-use std.math
+;; - core.math.parse.3d
+;; - core.math.parse
+module core.math.parse.3d.gltf.math(mat4_identity, mat4_mul, node_local_matrix, mat4_apply_pos, mat4_apply_dir, mat4_from_trs, mat4_inverse_affine, mat4_transform_point, mat4_transform_dir, safe_model_mat4)
+use core
+use core.math
 
 fn mat4_identity() list {
    "Runs the mat4 identity operation."
@@ -16,14 +16,15 @@ fn mat4_identity() list {
 @jit
 fn mat4_mul(any a, any b) list {
    "Runs the mat4 mul operation."
-   mut o, c = [0.0, 0.0, 0.0, 0.0,  0.0, 0.0, 0.0, 0.0,  0.0, 0.0, 0.0, 0.0,  0.0, 0.0, 0.0, 0.0, "mat4", 400], 0
+   mut o = [0.0, 0.0, 0.0, 0.0,  0.0, 0.0, 0.0, 0.0,  0.0, 0.0, 0.0, 0.0,  0.0, 0.0, 0.0, 0.0, "mat4", 400]
+   mut int c = 0
    while c < 4 {
-      mut r = 0
+      mut int r = 0
       while r < 4 {
-         def val = (0.0 + a.get(0 * 4 + r, 0.0)) * (0.0 + b.get(c * 4 + 0, 0.0)) +
-         (0.0 + a.get(1 * 4 + r, 0.0)) * (0.0 + b.get(c * 4 + 1, 0.0)) +
-         (0.0 + a.get(2 * 4 + r, 0.0)) * (0.0 + b.get(c * 4 + 2, 0.0)) +
-         (0.0 + a.get(3 * 4 + r, 0.0)) * (0.0 + b.get(c * 4 + 3, 0.0))
+         def val = (0.0 + a.get(int(0 * 4 + r), 0.0)) * (0.0 + b.get(int(c * 4 + 0), 0.0)) +
+         (0.0 + a.get(int(1 * 4 + r), 0.0)) * (0.0 + b.get(int(c * 4 + 1), 0.0)) +
+         (0.0 + a.get(int(2 * 4 + r), 0.0)) * (0.0 + b.get(int(c * 4 + 2), 0.0)) +
+         (0.0 + a.get(int(3 * 4 + r), 0.0)) * (0.0 + b.get(int(c * 4 + 3), 0.0))
          o[r + c * 4] = val
          r += 1
       }

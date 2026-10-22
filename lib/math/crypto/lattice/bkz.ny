@@ -5,21 +5,21 @@
 ;; - https://www.iacr.org/archive/crypto2011/68410061/68410061.pdf
 ;; - https://web.cs.elte.hu/~lovasz/scans/lll.pdf
 ;; References:
-;; - std.math.crypto.lattice
-;; - std.math.crypto
-module std.math.crypto.lattice.bkz(bkz, svp_enumerate, svp_enumerate_report, svp_report, bkz_backend_report, svp_kernel, svp_kernel_report, svp_gram, svp_gram_report, bkz_gram, bkz_gram_report, bkz_gram_reduce_report, dual_svp, dual_svp_report, dual_svp_norm, dual_svp_reduce, dual_svp_reduce_report, bkz_projected_block_report, bkz_rerandomize_block_report, svp_pruning_profile, svp_pruning_calibration_report, svp_pruning_optimize, svp_pruning_optimize_report, bkz_strategy, bkz_strategy_report, bkz_reduce_report, bkz_report)
-use std.core
-use std.math.matrix
-use std.math.nt
-use std.math.big (bigint_bit_length, bigint_to_int)
-use std.math (abs)
-use std.math.scalar as math
-use std.math.crypto.lattice.lll
-use std.math.crypto.lattice.lll (dot_product)
-use std.math.float
-use std.os.clock (ticks)
-use std.os.prim (env)
-use std.os.thread (thread_spawn, thread_join)
+;; - core.math.crypto.lattice
+;; - core.math.crypto
+module core.math.crypto.lattice.bkz(bkz, svp_enumerate, svp_enumerate_report, svp_report, bkz_backend_report, svp_kernel, svp_kernel_report, svp_gram, svp_gram_report, bkz_gram, bkz_gram_report, bkz_gram_reduce_report, dual_svp, dual_svp_report, dual_svp_norm, dual_svp_reduce, dual_svp_reduce_report, bkz_projected_block_report, bkz_rerandomize_block_report, svp_pruning_profile, svp_pruning_calibration_report, svp_pruning_optimize, svp_pruning_optimize_report, bkz_strategy, bkz_strategy_report, bkz_reduce_report, bkz_report)
+use core
+use core.math.matrix
+use core.math.nt
+use core.math.big (bigint_bit_length, bigint_to_int)
+use core.math (abs)
+use core.math.scalar as math
+use core.math.crypto.lattice.lll
+use core.math.crypto.lattice.lll (dot_product)
+use core.math.float
+use core.os.clock (ticks)
+use core.os.prim (env)
+use core.os.thread (thread_spawn, thread_join)
 
 fn _bkz_set_fields(dict out, list fields) dict {
    mut i = 0
@@ -3819,5 +3819,5 @@ fn bkz_report(any basis, int block_size=10, any delta=0.75, str method="auto", a
    assert(pruning.get("profile", []).len == 6, "svp pruning profile length")
    def cal = svp_pruning_calibration_report(6, 32.0, 2000, {"shape": "sqrt", "target_success_probability": 0.75, "preprocessing_nodes": 25})
    assert(cal.get("method", "") == "pruning-calibration-report", "svp calibration method")
-   print("✓ std.math.crypto.lattice.bkz self-test passed")
+   print("✓ core.math.crypto.lattice.bkz self-test passed")
 }

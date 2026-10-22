@@ -1,0 +1,25 @@
+shape loop_call_uses_current_argument {
+  family "compiler/optimizer"
+  generator "program"
+  features [optimizer interprocedural loop mutable-argument regression]
+  template ny-test-case
+  flags_matrix "-O0 --color=never; -O3 --color=never; --native-only -O0 --color=never; --native-only -O3 --color=never"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+fn twice(int x) int {
+   x * 2
+}
+
+mut d = 1
+mut checksum = 0
+while d <= 3 {
+   checksum = checksum * 10 + twice(d)
+   d += 1
+}
+assert(checksum == 246, "loop call receives the current mutable value")
+assert(d == 4, "loop induction state remains current")
+print("checksum=", checksum)
+NY
+}

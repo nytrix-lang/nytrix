@@ -1,0 +1,20 @@
+shape test_repl_list_iteration {
+  family "repl"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  expect compile_and_run
+  repl_expect "REPL-LIST-ITERATION-OK"
+  source ny <<'NY'
+use core
+
+mut seen = ""
+for i in [1, 2, 3, 4, 5] {
+   print(i)
+   seen = seen + to_str(i)
+}
+
+assert(seen == "12345", "REPL list iteration preserves dynamic integer elements")
+print("REPL-LIST-ITERATION-OK")
+NY
+}

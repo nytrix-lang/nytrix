@@ -1,11 +1,11 @@
 ;; Keywords: cipher atbash math crypto
 ;; Classical cipher routines for Atbash text transformation.
 ;; References:
-;; - std.math.crypto.cipher
-;; - std.math.crypto.analysis
-module std.math.crypto.cipher.atbash(atbash_char, atbash_text)
-use std.core
-use std.core.str
+;; - core.math.crypto.cipher
+;; - core.math.crypto.analysis
+module core.math.crypto.cipher.atbash(atbash_char, atbash_text)
+use core
+use core.str
 
 fn atbash_char(str ch) str {
    "Mirror a single ASCII alphabetic character through the Atbash mapping."
@@ -31,5 +31,5 @@ fn atbash_text(str s) str {
 #main {
    assert(atbash_text("XIBKGLTIZKSRV") == "CRYPTOGRAPHIE", "atbash upper")
    assert(atbash_text("zyx") == "abc", "atbash lower")
-   print("✓ std.math.crypto.cipher.atbash self-test passed")
+   print("✓ core.math.crypto.cipher.atbash self-test passed")
 }

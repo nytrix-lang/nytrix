@@ -4,12 +4,12 @@
 ;; - https://nvlpubs.nist.gov/nistpubs/Legacy/SP/nistspecialpublication800-38a.pdf
 ;; - https://iacr.org/archive/eurocrypt2002/23320530/cbc02_e02d.pdf
 ;; References:
-;; - std.math.crypto.block.mode
-;; - std.math.crypto
-module std.math.crypto.block.mode.cbc(cbc_bit_flipping, cbc_bit_flip_byte, cbc_padding_oracle_step, cbc_padding_oracle_decrypt, cbc_padding_oracle_decrypt_block, cbc_mac_forge, cbc_mac_length_extension, cbc_and_cbc_mac_forge)
-use std.core
-use std.math.bin
-use std.math.crypto.block.mode.tools
+;; - core.math.crypto.block.mode
+;; - core.math.crypto
+module core.math.crypto.block.mode.cbc(cbc_bit_flipping, cbc_bit_flip_byte, cbc_padding_oracle_step, cbc_padding_oracle_decrypt, cbc_padding_oracle_decrypt_block, cbc_mac_forge, cbc_mac_length_extension, cbc_and_cbc_mac_forge)
+use core
+use core.math.bin
+use core.math.crypto.block.mode.tools
 
 fn _cbc_pair(list iv, list ct) list {
    mut out = []
@@ -23,14 +23,14 @@ fn cbc_bit_flip_byte(list iv, list ct, int block_size, int pt_block_idx, int byt
    Modifies the preceding ciphertext block(or IV for block 0).
    iv: IV byte list. ct: ciphertext byte list. block_size: e.g. 16.
    Returns [modified_iv, modified_ct]."
-   def diff = old_byte ^^ new_byte
+   def diff = old_byte ^ new_byte
    mut new_iv = clone(iv)
    mut new_ct = clone(ct)
    case pt_block_idx {
-      0 -> { new_iv[byte_offset] = iv[byte_offset] ^^ diff }
+      0 -> { new_iv[byte_offset] = iv[byte_offset] ^ diff }
       _ -> {
          def prev_block_start = (pt_block_idx - 1) * block_size
-         new_ct[prev_block_start + byte_offset] = ct[prev_block_start + byte_offset] ^^ diff
+         new_ct[prev_block_start + byte_offset] = ct[prev_block_start + byte_offset] ^ diff
       }
    }
    _cbc_pair(new_iv, new_ct)
@@ -74,16 +74,16 @@ fn cbc_padding_oracle_step(list prev_block, list ct_block, int block_size, list 
    while ri < known_bytes.len {
       def byte_pos = block_size - 1 - ri
       def pt_byte = known_bytes[ri]
-      mod_prev[byte_pos] = prev_block[byte_pos] ^^ pt_byte ^^ pad_val
+      mod_prev[byte_pos] = prev_block[byte_pos] ^ pt_byte ^ pad_val
       ri += 1
    }
    mut guess = 0
    while guess < 256 {
       mod_prev[target_idx] = guess
       if oracle_fn(mod_prev, ct_block) {
-         def pt = guess ^^ pad_val ^^ prev_block[target_idx]
+         def pt = guess ^ pad_val ^ prev_block[target_idx]
          if pad_val == 1 {
-            mod_prev[target_idx] = guess ^^ 1
+            mod_prev[target_idx] = guess ^ 1
             if !oracle_fn(mod_prev, ct_block) { return pt }
          } else {
             return pt
@@ -170,7 +170,7 @@ fn cbc_mac_forge(list msg1, list tag1, list msg2, list tag2) list {
    mut i = 0
    while i < msg2.len {
       def tb = (i < tlen) ? tag1[i] : 0
-      msg2_xor = msg2_xor.append(msg2[i] ^^ tb)
+      msg2_xor = msg2_xor.append(msg2[i] ^ tb)
       i += 1
    }
    mut forged = clone(msg1)
@@ -190,7 +190,7 @@ fn cbc_mac_length_extension(list msg1, list tag1, list msg2, int block_size) lis
    def tlen = tag1.len
    mut i = 0
    while i < tlen && i < mod_msg2.len {
-      mod_msg2[i] = mod_msg2[i] ^^ tag1[i]
+      mod_msg2[i] = mod_msg2[i] ^ tag1[i]
       i += 1
    }
    mut extended = clone(msg1)
@@ -240,5 +240,5 @@ fn cbc_and_cbc_mac_forge(list iv, list ct, list tag, list target_msg) list {
    assert(detect_block_mode([1,2,3,4, 4,3,2,1], 4) == "cbc_or_ctr", "detect non-ecb")
    assert(detect_block_mode([1,2,3], 4) == "too_short", "detect too short")
    print("block_mode_cbc_probe ok")
-   print("✓ std.math.crypto.block.mode.cbc self-test passed")
+   print("✓ core.math.crypto.block.mode.cbc self-test passed")
 }

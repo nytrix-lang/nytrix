@@ -1,0 +1,60 @@
+shape ny_unified_dispatch_parity {
+  generator "embedded"
+  family "probe/tools"
+  features ["cli", "command-aliases", "argument-parsing"]
+  template ny-test-case
+  flags "--native-only"
+  timeout 180
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.subprocess (run_capture)
+use core.str as str
+
+def ny = env("NYTRIX_NY_FULL_BIN")
+assert(is_str(ny) && ny.len > 0, "test runner exports the full compiler")
+
+fn assert_alias(str canonical, str alias) {
+   def canonical_result = run_capture([ny, canonical, "--help"], [], nil, false)
+   def alias_result = run_capture([ny, alias, "--help"], [], nil, false)
+   assert(canonical_result.get("code", 127) == 0 &&
+          alias_result.get("code", 127) == 0 &&
+          canonical_result.get("stdout", "") == alias_result.get("stdout", ""),
+          "unified command alias differs: " + canonical + "/" + alias +
+          "\ncanonical: " + canonical_result.get("stdout", "") +
+          "\nalias: " + alias_result.get("stdout", ""))
+}
+
+assert_alias("fmt", "format")
+assert_alias("test", "tests")
+assert_alias("perf", "bench")
+assert_alias("doc", "docs")
+assert_alias("make", "build")
+
+for command in ["get", "install"] {
+   def result = run_capture([ny, command, "--help"], [], nil, false)
+   def text = result.get("stdout", "")
+   assert(result.get("code", 0) == 2 && str.find(text, "add needs") >= 0,
+          "package alias reaches package parsing: " + command + "\n" + text)
+}
+
+def plain = run_capture([ny, "format", "--help"], [], nil, false)
+def leading = run_capture([ny, "--color=auto", "format", "--help"],
+                          [], nil, false)
+assert(leading.get("code", 127) == plain.get("code", 0) &&
+       leading.get("stdout", "") == plain.get("stdout", ""),
+       "leading global color option changes unified dispatch")
+def separated = run_capture([ny, "--color", "auto", "format", "--help"],
+                            [], nil, false)
+assert(separated.get("code", 127) == plain.get("code", 0) &&
+       separated.get("stdout", "") == plain.get("stdout", ""),
+       "separated leading color value changes unified dispatch")
+
+def invalid = run_capture([ny, "--color", "invalid", "fmt", "--help"],
+                          [], nil, false)
+assert(invalid.get("code", 0) == 2 &&
+       str.find(invalid.get("stdout", ""), "invalid color mode") >= 0,
+       "invalid leading color option loses its diagnostic")
+print("NY_UNIFIED_DISPATCH_PARITY_OK")
+NY
+}

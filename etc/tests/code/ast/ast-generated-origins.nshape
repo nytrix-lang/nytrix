@@ -1,0 +1,333 @@
+shape every_generated_syntax_node_keeps_both_origins {
+  family "runtime/compiler"
+  generator "regression"
+  features ["ny" "ast" "reflection" "origin" "template"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.compiler.ast (parse_ast_snapshot)
+
+fn missing_generated_origin(any value, str path) str {
+   if is_list(value) {
+      mut i = 0
+      while i < value.len {
+         def missing = missing_generated_origin(value.get(i), path + "[" + to_str(i) + "]")
+         if missing != "" { return missing }
+         i += 1
+      }
+   return ""
+}
+   if !is_dict(value) { return "" }
+   if value.contains("type") && is_str(value.get("type")) &&
+      (!value.contains("source_origin") || !value.contains("expansion_origin")) {
+      return path
+   }
+   def keys = dict_keys(value)
+   mut i = 0
+   while i < keys.len {
+      def key = str(keys.get(i))
+      def missing = missing_generated_origin(value.get(key), path + "." + key)
+      if missing != "" { return missing }
+      i += 1
+   }
+   ""
+}
+
+fn source_line_for_identifier(any value, str name) int {
+   if is_list(value) {
+      mut i = 0
+      while i < value.len {
+         def line = source_line_for_identifier(value.get(i), name)
+         if line > 0 { return line }
+         i += 1
+      }
+      return -1
+   }
+   if !is_dict(value) { return -1 }
+   if value.contains("type") && value.get("type") == "ident" &&
+      value.contains("name") && value.get("name") == name {
+      def origin = value.get("source_origin")
+      if is_dict(origin) && origin.contains("line") {
+         return int(origin.get("line"))
+      }
+   }
+   def keys = dict_keys(value)
+   mut i = 0
+   while i < keys.len {
+      def line = source_line_for_identifier(value.get(str(keys.get(i))), name)
+      if line > 0 { return line }
+      i += 1
+   }
+   -1
+}
+
+fn source_line_for_literal(any value, int literal) int {
+   if is_list(value) {
+      mut i = 0
+      while i < value.len {
+         def line = source_line_for_literal(value.get(i), literal)
+         if line > 0 { return line }
+         i += 1
+      }
+      return -1
+   }
+   if !is_dict(value) { return -1 }
+   if value.contains("type") && value.get("type") == "literal" &&
+      value.contains("value") && value.get("value") == literal {
+      def origin = value.get("source_origin")
+      if is_dict(origin) && origin.contains("line") {
+         return int(origin.get("line"))
+      }
+   }
+   def keys = dict_keys(value)
+   mut i = 0
+   while i < keys.len {
+      def line = source_line_for_literal(value.get(str(keys.get(i))), literal)
+      if line > 0 { return line }
+      i += 1
+   }
+   -1
+}
+
+def generated = parse_ast_snapshot("comptime template tagged() { @inline fn generated(int value=7) int { def result = value + 1; if result > 0 { return result } else { return 0 } } }\ncomptime emit tagged()")
+assert(missing_generated_origin(generated, "generated") == "",
+       "every generated syntax node retains definition and emission origins")
+def directly_emitted_quote = parse_ast_snapshot(
+   "comptime emit quote{ fn directly_emitted_quote() int { return 1 } }")
+assert(missing_generated_origin(directly_emitted_quote,
+                                "direct_quote") == "",
+       "directly emitted quote syntax retains source and emission origins")
+def directly_emitted_quote_expression = parse_ast_snapshot(
+   "comptime emit quote{ 1 + 2 }")
+assert(missing_generated_origin(directly_emitted_quote_expression,
+                                "direct_quote_expression") == "",
+       "directly emitted quote expressions retain both origins")
+def generated_layout = parse_ast_snapshot("comptime template layout_decl(Default) { layout GeneratedLayout { int value=${Default} } }\ncomptime emit layout_decl(7)")
+def generated_struct = parse_ast_snapshot("comptime template struct_decl() { struct GeneratedStruct { int value } }\ncomptime emit struct_decl()")
+def generated_enum = parse_ast_snapshot("comptime template enum_decl() { enum GeneratedEnum<T> { Item(T value), Empty } }\ncomptime emit enum_decl()")
+def generated_indexed_enum = parse_ast_snapshot(
+   "comptime template indexed_enum_decl(Name, Index) {\n" +
+   "  enum ${Name}(Index) { Zero, One(Index payload) }\n" +
+   "}\ncomptime emit indexed_enum_decl(GeneratedIndexEnum, u64)")
+def generated_module = parse_ast_snapshot("comptime template module_decl() { module GeneratedModule { fn inner() int { return 1 } } }\ncomptime emit module_decl()")
+def generated_use = parse_ast_snapshot("comptime template use_decl() { use core.math.scalar (min as minimum) }\ncomptime emit use_decl()")
+def generated_link = parse_ast_snapshot(
+   "comptime template link_decl(Suffix) { extern #link \"lib-${Suffix}.so\" }\n" +
+   "comptime emit link_decl(\"codec\")")
+def generated_external = parse_ast_snapshot(
+   "comptime template external_decl(Suffix) {\n" +
+   "  extern fn GeneratedExternal() int as \"symbol_${Suffix}@ABI\"\n" +
+   "}\ncomptime emit external_decl(\"shim\")")
+def generated_pointer_type = parse_ast_snapshot(
+   "comptime template pointer_type_decl(Name, Element) {\n" +
+   "  fn ${Name}(*Element value) *Element { return value }\n" +
+   "  fn ${Name}_nullable(?*Element value) ?*Element { return value }\n" +
+   "}\ncomptime emit pointer_type_decl(GeneratedPointerType, u64)")
+def generated_generic_type = parse_ast_snapshot(
+   "comptime template generic_type_decl(Name, Element) {\n" +
+   "  fn ${Name}(Box<List<Element>> value) Box<List<Element>> { return value }\n" +
+   "}\ncomptime emit generic_type_decl(GeneratedGenericType, u64)")
+def generated_numeric_generic_type = parse_ast_snapshot(
+   "comptime template numeric_generic_type_decl(Name, Capacity) {\n" +
+   "  fn ${Name}(Buffer<Capacity> value) Buffer<Capacity> { return value }\n" +
+   "}\ncomptime emit numeric_generic_type_decl(GeneratedNumericGenericType, 16)")
+assert(missing_generated_origin(generated_layout, "layout") == "" &&
+       missing_generated_origin(generated_struct, "struct") == "" &&
+       missing_generated_origin(generated_enum, "enum") == "" &&
+       missing_generated_origin(generated_indexed_enum, "indexed_enum") == "" &&
+       missing_generated_origin(generated_module, "module") == "" &&
+       missing_generated_origin(generated_use, "use") == "" &&
+       missing_generated_origin(generated_link, "link") == "" &&
+       missing_generated_origin(generated_external, "extern") == "",
+       "all generated declaration families retain source and emission origins recursively")
+assert(generated_link.get("nodes").get(0).get("lib") == "lib-codec.so",
+       "template cloning interpolates link library strings without identifier restrictions")
+assert(generated_external.get("nodes").get(0).get("link_name") == "symbol_shim@ABI",
+       "template cloning interpolates external symbol strings without identifier restrictions")
+def pointer_type_node = generated_pointer_type.get("nodes").get(0)
+assert(pointer_type_node.get("return") == "*u64" &&
+       pointer_type_node.get("params").get(0).get("type") == "*u64",
+       "template type substitution preserves pointer constructors")
+def nullable_pointer_type_node = generated_pointer_type.get("nodes").get(1)
+assert(nullable_pointer_type_node.get("return") == "?*u64" &&
+       nullable_pointer_type_node.get("params").get(0).get("type") == "?*u64",
+       "template type substitution preserves nullable pointer constructors")
+def generic_type_node = generated_generic_type.get("nodes").get(0)
+assert(generic_type_node.get("return") == "Box<List<u64>>" &&
+       generic_type_node.get("params").get(0).get("type") == "Box<List<u64>>",
+       "template type substitution reaches nested generic type arguments")
+def numeric_generic_type_node = generated_numeric_generic_type.get("nodes").get(0)
+assert(numeric_generic_type_node.get("return") == "Buffer<16>" &&
+       numeric_generic_type_node.get("params").get(0).get("type") == "Buffer<16>",
+       "template type substitution retains numeric layout arguments")
+assert(generated_layout.get("nodes").get(0).get("fields").get(0).get("default_src") == "7",
+       "template cloning substitutes layout default source text")
+def indexed_enum_node = generated_indexed_enum.get("nodes").get(0)
+assert(indexed_enum_node.get("indexed_family") &&
+       indexed_enum_node.get("index_param") == "u64" &&
+       indexed_enum_node.get("items").get(1).get("fields").get(0).get("type") == "u64",
+       "template cloning substitutes indexed-family and enum payload types")
+def index_param_node = indexed_enum_node.get("index_param_node")
+assert(index_param_node.get("type") == "type" &&
+       index_param_node.get("name") == "u64" &&
+       index_param_node.get("source_origin").get("line") == 2 &&
+       index_param_node.get("expansion_origin").get("line") == 4,
+       "indexed-family type syntax retains definition and emission origins")
+def generated_type_declarations = parse_ast_snapshot(
+   "comptime template type_decls() {\n" +
+   "  refine GeneratedPositive = int where(value) { value > 0 }\n" +
+   "  refine GeneratedEven = int where(value) { exists(k) { value == 2 * k } }\n" +
+   "  trait GeneratedShow { fn show(any value) str }\n" +
+   "  struct GeneratedPoint { int x }\n" +
+   "  impl GeneratedShow for GeneratedPoint { fn show(any value) str { return \"point\" } law { 1 == 1 } }\n" +
+   "}\ncomptime emit type_decls()")
+assert(missing_generated_origin(generated_type_declarations,
+                                "type_declarations") == "",
+       "generated refinement, trait, struct and implementation syntax retains both origins")
+def generated_layout_guard = parse_ast_snapshot(
+   "layout GuardOriginLayout { int value }\n" +
+   "comptime template guarded() {\n" +
+   "  fn generated_guard(any source) any {\n" +
+   "    layout guard GuardOriginLayout value = source else { return nil }\n" +
+   "    return value\n" +
+   "  }\n" +
+   "}\ncomptime emit guarded()")
+assert(missing_generated_origin(generated_layout_guard.get("nodes").get(1),
+                                "layout_guard") == "",
+       "generated layout guards retain origins in their value and fallback")
+def generated_control_flow = parse_ast_snapshot(
+   "comptime template control() {\n" +
+   "  fn generated_control(bool fail=false) int {\n" +
+   "    mut answer = 0\n" +
+   "    def default_zero\n" +
+   "    ++answer\n" +
+   "    --answer\n" +
+   "    def compile_time_value = #comptime 1 + 2\n" +
+"    for (mut i = 0 i < 4 i += 1) {\n" +
+   "      if i == 1 { continue }\n" +
+   "      if i == 3 { break }\n" +
+   "      answer += i\n" +
+   "    }\n" +
+   "    while answer < 2 { answer += 1 }\n" +
+   "    def callback = fn(int value) int { return value + 1 }\n" +
+   "    def lambda_callback = lambda(int value) int { return value + 2 }\n" +
+   "    def quoted = quote { answer + ${answer} }\n" +
+   "    answer += callback(1)\n" +
+   "    def rendered = f\"answer={answer}, again={answer + 1}\"\n" +
+   "    def assembled = asm(\"mov $1, $0\", \"=r,r\", answer)\n" +
+   "    def embedded = embed(\"etc/tests/code/ast/ast-generated-origins.nshape\")\n" +
+   "    def logical = fail && answer > 0 || !fail\n" +
+   "    def byte_size = sizeof(int)\n" +
+   "    def dereferenced = *answer\n" +
+   "    def propagated = callback(1)?\n" +
+   "    def inferred = .value\n" +
+   "    def aggregate = (answer, [answer, 2], {\"answer\": answer}, {answer, 2})\n" +
+   "    def selected = aggregate[1][0] + aggregate[2].get(\"answer\")\n" +
+   "    def conditional = fail ? -selected : selected\n" +
+   "    match fail { true -> { answer = -1 } _ -> { answer = 1 } }\n" +
+   "    try { if fail { panic(\\\"generated\\\") } } catch err { answer = -2 }\n" +
+   "    defer { answer += 0 }\n" +
+   "    goto generated_finish\n" +
+   "    answer = 99\n" +
+   "    generated_finish:\n" +
+   "    return answer\n" +
+   "  }\n}\ncomptime emit control()")
+assert(missing_generated_origin(generated_control_flow, "control_flow") == "",
+       "generated loops, match, try, defer and nested expressions retain both origins")
+def generated_deref_assignments = parse_ast_snapshot(
+   "comptime template deref_assignments() {\n" +
+   "  fn generated_deref_assignments(ptr value) int {\n" +
+   "    *value += 1\n" +
+   "    *value -= 1\n" +
+   "    return 0\n" +
+   "  }\n" +
+   "}\ncomptime emit deref_assignments()")
+assert(missing_generated_origin(generated_deref_assignments,
+                                "deref_assignments") == "",
+       "generated dereference compound assignments retain source and emission origins")
+def generated_linkage_declarations = parse_ast_snapshot(
+   "comptime template linkage() {\n" +
+   "  #define GENERATED_ORIGIN_FLAG 1\n" +
+   "  #link \"m\"\n" +
+   "  extern fn generated_strlen(str text) int as \"strlen\"\n" +
+   "  fn lemma generated_nonnegative(int value) { value >= 0 → value >= 0 }\n" +
+   "  operator + int: int = generated_add\n" +
+   "}\ncomptime emit linkage()")
+assert(missing_generated_origin(generated_linkage_declarations,
+                                "linkage_declarations") == "",
+       "generated define, link, extern, and lemma nodes retain both origins")
+def generated_include = parse_ast_snapshot(
+   "comptime template include_header() { #include \"generated_header.h\" }\n" +
+   "comptime emit include_header()")
+assert(missing_generated_origin(generated_include, "generated_include") == "",
+       "generated include directives retain source and emission origins")
+def generated_reflection_nodes = parse_ast_snapshot(
+   "layout OriginReflectionLayout { i32 value }\n" +
+   "comptime template reflected_member() {\n" +
+   "  fn generated_member(ptr value) any {\n" +
+   "    comptime fields(OriginReflectionLayout) as field {\n" +
+   "      emit def reflected_offset = field.offset\n" +
+   "      emit return value.(field)\n" +
+   "    }\n" +
+   "    return nil\n" +
+   "  }\n" +
+   "}\ncomptime emit reflected_member()")
+def generated_reflection_function = generated_reflection_nodes.get("nodes").get(1)
+def reflection_missing = missing_generated_origin(
+   generated_reflection_function, "generated_reflection")
+assert(reflection_missing == "",
+       "synthesized field-load callees and arguments carry both origins: " +
+       reflection_missing)
+def generated_variant_reflection = parse_ast_snapshot(
+   "enum OriginVariantEnum { Item(int value), Empty }\n" +
+   "comptime template reflected_payload() {\n" +
+   "  fn generated_payload() any {\n" +
+   "    mut result = []\n" +
+   "    comptime variants(OriginVariantEnum) as variant {\n" +
+   "      emit result = result.append(variant.payload_fields)\n" +
+   "    }\n" +
+   "    result\n" +
+   "  }\n" +
+   "}\ncomptime emit reflected_payload()")
+def generated_payload_function = generated_variant_reflection.get("nodes").get(1)
+def payload_missing = missing_generated_origin(
+   generated_payload_function, "generated_payload")
+assert(payload_missing == "",
+       "synthesized variant payload tuples and values carry both origins: " +
+       payload_missing)
+def generated_scalar_splice = parse_ast_snapshot(
+   "comptime template scalar_statement(value) {\n" +
+   "  fn generated_scalar_statement() int {\n" +
+   "    emit ${value}\n" +
+   "    return 0\n" +
+   "  }\n" +
+   "}\ncomptime emit scalar_statement(7)")
+def generated_scalar_function = generated_scalar_splice.get("nodes").get(0)
+def scalar_missing = missing_generated_origin(
+   generated_scalar_function, "generated_scalar_statement")
+assert(scalar_missing == "",
+       "scalar sequence splices synthesize expressions with both origins: " +
+       scalar_missing)
+assert(source_line_for_literal(generated_scalar_function, 7) == 7,
+       "literal splice source origin points to its template argument")
+def generated_identifier_sequence = parse_ast_snapshot(
+   "fn origin_identifier_identity(int value) int { return value }\n" +
+   "def origin_identifier_value = 7\n" +
+   "comptime template identifier_arguments(args) {\n" +
+   "  fn generated_identifier_arguments() int {\n" +
+   "    return origin_identifier_identity(${args})\n" +
+   "  }\n" +
+   "}\ncomptime emit identifier_arguments([ident(origin_identifier_value)])")
+def generated_identifier_function =
+   generated_identifier_sequence.get("nodes").get(2)
+def identifier_missing = missing_generated_origin(
+   generated_identifier_function, "generated_identifier_arguments")
+assert(identifier_missing == "",
+       "identifier sequence splices preserve source and emission origins: " +
+       identifier_missing)
+assert(source_line_for_identifier(generated_identifier_function,
+                                  "origin_identifier_value") == 8,
+       "identifier splice source origin points to its template argument")
+NY
+}

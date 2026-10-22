@@ -2,10 +2,10 @@
 ;; Encoding routines for ASCII conversion and scoring operations.
 ;; Reference:
 ;; References:
-;; - std.math.crypto.encoding
-;; - std.math.crypto
-module std.math.crypto.encoding.ascii(lowercase, uppercase, letters, digits, hexdigits, octdigits, punctuation, whitespace, printable)
-use std.core
+;; - core.math.crypto.encoding
+;; - core.math.crypto
+module core.math.crypto.encoding.ascii(lowercase, uppercase, letters, digits, hexdigits, octdigits, punctuation, whitespace, printable)
+use core
 
 def lowercase   = "abcdefghijklmnopqrstuvwxyz"
 def uppercase   = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
@@ -24,5 +24,5 @@ def printable   = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXY
    assert(digits == "0123456789", "digits")
    assert(hexdigits == "0123456789abcdefABCDEF", "hexdigits")
    assert(octdigits == "01234567", "octdigits")
-   print("✓ std.math.crypto.encoding.ascii self-test passed")
+   print("✓ core.math.crypto.encoding.ascii self-test passed")
 }

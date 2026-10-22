@@ -1,0 +1,106 @@
+shape fmt_structure_parity {
+  family "probe/tools"
+  generator "embedded"
+  features ["formatter", "structure", "repair", "parity"]
+  template ny-test-case
+  flags "--native-only"
+  timeout 90
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.subprocess (run_capture)
+use core.str as str
+
+def ny = env("NYTRIX_NY_FULL_BIN")
+def fmt = env("NYTRIX_TEST_FMT_BIN")
+def cmake = env("NYTRIX_CMAKE_COMMAND")
+assert(is_str(ny) && is_str(fmt) && is_str(cmake),
+       "CTest provides formatter executables")
+def dir = temp_dir() + "/fmt-structure-" + to_str(pid())
+def made = run_capture([cmake, "-E", "make_directory", dir], [], nil, false)
+assert(made.get("code", 127) == 0, "create formatter structure directory")
+
+def nested = dir + "/nested-unclosed.ny"
+def multiple = dir + "/multiple-swallowed-closes.ny"
+def net_two = dir + "/swallowed-net-two.ny"
+def crlf = dir + "/crlf.ny"
+def multibyte = dir + "/multibyte-fix-offset.ny"
+def block_comment = dir + "/semicolon-block-comment.ny"
+def nested_source = "fn outer() {\n  if ready {\n  }\n"
+def multiple_source =
+   "fn outer() {\n  if ready {\n    ; } // close if\n  ; } // close function\n"
+def net_two_source =
+   "fn outer() {\n  if ready {\n    if nested {\n      ; } } // close two scopes\n"
+def crlf_source = "fn outer() {\r\n  ; } // close function\r\n"
+def multibyte_source = "fn outer() {\n  def label = \"é\"; } // close function\n"
+def block_source = "fn outer() {\n  ;{ ignored { } };\n}\n"
+fn write_cases() {
+   assert(is_ok(file_write(nested, nested_source)) &&
+          is_ok(file_write(multiple, multiple_source)) &&
+          is_ok(file_write(net_two, net_two_source)) &&
+          is_ok(file_write(crlf, crlf_source)) &&
+          is_ok(file_write(multibyte, multibyte_source)) &&
+          is_ok(file_write(block_comment, block_source)),
+          "write formatter structure cases")
+}
+write_cases()
+def oracle = run_capture(
+   [fmt, "--check", "--verbose", nested, multiple, net_two, crlf,
+    multibyte, block_comment], [], nil, false)
+def embedded = run_capture(
+   [ny, "fmt", "--check", "--verbose", nested, multiple, net_two, crlf,
+    multibyte, block_comment], [], nil, false)
+assert(oracle.get("code", 127) == 1 && embedded.get("code", 127) == 1 &&
+       oracle.get("stdout", "") == embedded.get("stdout", ""),
+       "batched structural diagnostics parity")
+
+write_cases()
+def fix_oracle = run_capture(
+   [fmt, "--check", "--fix", nested, multiple, net_two, crlf, block_comment],
+   [], nil, false)
+def oracle_text = unwrap(file_read(nested)) + unwrap(file_read(multiple)) +
+   unwrap(file_read(net_two)) + unwrap(file_read(crlf)) +
+   unwrap(file_read(block_comment))
+write_cases()
+def fix_embedded = run_capture(
+   [ny, "fmt", "--check", "--fix", nested, multiple, net_two, crlf, block_comment],
+   [], nil, false)
+def embedded_text = unwrap(file_read(nested)) + unwrap(file_read(multiple)) +
+   unwrap(file_read(net_two)) + unwrap(file_read(crlf)) +
+   unwrap(file_read(block_comment))
+mut oracle_repairs = 0
+mut embedded_repairs = 0
+mut oracle_summary = ""
+mut embedded_summary = ""
+for line in str.split(fix_oracle.get("stdout", ""), "\n") {
+   if str.find(line, "fixed semicolon removed") >= 0 {
+      oracle_repairs += 1
+   } else { oracle_summary += line + "\n" }
+}
+for line in str.split(fix_embedded.get("stdout", ""), "\n") {
+   if str.find(line, "fixed semicolon removed") >= 0 {
+      embedded_repairs += 1
+   } else { embedded_summary += line + "\n" }
+}
+assert(fix_oracle.get("code", 127) == 1 && fix_embedded.get("code", 127) == 1 &&
+       oracle_summary == embedded_summary && oracle_repairs == embedded_repairs &&
+       oracle_text == embedded_text,
+       "batched structural repair parity")
+
+def unicode_path = dir + "/unicode.ny"
+def unicode_source = "fn main() {\n  def label = \"é\"\n  print(label)\n}\n"
+assert(is_ok(file_write(unicode_path, unicode_source)), "write UTF-8 formatter input")
+def unicode_c = run_capture([fmt, "--fix", unicode_path], [], nil, false)
+def c_text = unwrap(file_read(unicode_path))
+assert(is_ok(file_write(unicode_path, unicode_source)), "restore UTF-8 formatter input")
+def unicode_ny = run_capture([ny, "fmt", "--fix", unicode_path], [], nil, false)
+assert(unicode_c.get("code", 127) == 0 && unicode_ny.get("code", 127) == 0 &&
+       unicode_c.get("stdout", "") == unicode_ny.get("stdout", "") &&
+       c_text == unwrap(file_read(unicode_path)),
+       "UTF-8 source formatting and fix offsets match")
+
+def cleanup = run_capture([cmake, "-E", "rm", "-rf", dir], [], nil, false)
+assert(cleanup.get("code", 127) == 0, "remove formatter structure directory")
+print("FMT_STRUCTURE_PARITY_OK")
+NY
+}

@@ -1,0 +1,194 @@
+shape adt-duplicate-field {
+  family "compiler-errors/adt"
+  generator "error"
+  features ["error", "adt", "negative", "diagnostic", "case-duplicate-field"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "duplicate enum payload field"
+  source ny <<'NY'
+use core
+
+enum Bad {
+   A(int x, int x),
+   B
+}
+
+print(1)
+NY
+}
+
+shape adt-duplicate-variant {
+  family "compiler-errors/adt"
+  generator "error"
+  features ["error", "adt", "negative", "diagnostic", "case-duplicate-variant"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "redefinition of enum member 'A' in enum 'Bad'"
+  source ny <<'NY'
+use core
+
+enum Bad {
+   A,
+   A
+}
+
+print(1)
+NY
+}
+
+shape adt-generic-type-mismatch {
+  family "compiler-errors/adt"
+  generator "error"
+  features ["error", "adt", "negative", "diagnostic", "case-generic-type-mismatch"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "type mismatch: expected 'Option<int>', got 'Option<str>'"
+  source ny <<'NY'
+use core
+
+enum Option<T> {
+   Some(T value),
+   None
+}
+
+def Option<int> x = Option.Some("hi")
+print(x)
+NY
+}
+
+shape adt-match-field-must-bind {
+  family "compiler-errors/adt"
+  generator "error"
+  features ["error", "adt", "negative", "diagnostic", "case-match-field-must-bind"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "ADT match field 'radius' must bind to an identifier or '_'"
+  source ny <<'NY'
+use core
+
+enum Shape {
+   Circle(int radius),
+   Empty
+}
+
+def s = Shape.Circle(1)
+match s {
+   Shape.Circle(1) -> 1
+   Shape.Empty -> 0
+}
+NY
+}
+
+shape adt-match-non-exhaustive {
+  family "compiler-errors/adt"
+  generator "error"
+  features ["error", "adt", "negative", "diagnostic", "case-match-non-exhaustive"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "non-exhaustive match for enum 'Shape' (missing: Empty)"
+  source ny <<'NY'
+use core
+
+enum Shape {
+   Circle(int radius),
+   Empty
+}
+
+def s = Shape.Circle(1)
+match s {
+   Shape.Circle(r) -> r
+}
+NY
+}
+
+shape adt-match-unknown-field {
+  family "compiler-errors/adt"
+  generator "error"
+  features ["error", "adt", "negative", "diagnostic", "case-match-unknown-field"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "unknown field 'diameter' in ADT match pattern 'Shape.Circle'"
+  source ny <<'NY'
+use core
+
+enum Shape {
+   Circle(int radius),
+   Empty
+}
+
+def s = Shape.Circle(1)
+match s {
+   Shape.Circle(diameter: d) -> d
+   Shape.Empty -> 0
+}
+NY
+}
+
+shape adt-missing-constructor-field {
+  family "compiler-errors/adt"
+  generator "error"
+  features ["error", "adt", "negative", "diagnostic", "case-missing-constructor-field"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "missing field 'radius' for ADT variant 'Shape.Circle'"
+  source ny <<'NY'
+use core
+
+enum Shape {
+   Circle(int radius),
+   Empty
+}
+
+def x = Shape.Circle()
+print(x)
+NY
+}
+
+shape adt-positional-constructor {
+  family "compiler-errors/adt"
+  generator "error"
+  features ["error", "adt", "negative", "diagnostic", "case-positional-constructor"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "too many positional fields for ADT variant 'Shape.Circle'"
+  source ny <<'NY'
+use core
+
+enum Shape {
+   Circle(int radius),
+   Empty
+}
+
+def x = Shape.Circle(1, 2)
+print(x)
+NY
+}
+
+shape adt-unknown-constructor-field {
+  family "compiler-errors/adt"
+  generator "error"
+  features ["error", "adt", "negative", "diagnostic", "case-unknown-constructor-field"]
+  template ny-compile-fail
+  expect compile_fail
+
+  expect_message "unknown field 'diameter' for ADT variant 'Shape.Circle'"
+  source ny <<'NY'
+use core
+
+enum Shape {
+   Circle(int radius),
+   Empty
+}
+
+def x = Shape.Circle(diameter: 2)
+print(x)
+NY
+}

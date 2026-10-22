@@ -1,0 +1,32 @@
+shape codegen_table {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "codegen", "reflection", "layout"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-only; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.compiler.codegen (table_gen)
+
+layout TableRecord {
+   i32 id
+   bool active
+   f32 precision
+   f64 ratio
+}
+comptime emit table_gen(TableRecord)
+
+def ptr table_row0 = malloc(__layout_size("TableRecord"))
+def ptr table_row1 = malloc(__layout_size("TableRecord"))
+store_layout(table_row0, "TableRecord", 7, true, 1.25, 1.5)
+store_layout(table_row1, "TableRecord", 8, false, 2.5, 2.25)
+def table_data = TableRecord_table_data([table_row0, table_row1])
+assert(table_data.get("headers") == ["id", "active", "precision", "ratio"] &&
+       table_data.get("rows") == [["7", "true", "1.25", "1.5"],
+                                   ["8", "false", "2.5", "2.25"]],
+       "table_gen preserves field and row order")
+free(table_row0)
+free(table_row1)
+NY
+}

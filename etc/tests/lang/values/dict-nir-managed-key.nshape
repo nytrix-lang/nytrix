@@ -1,0 +1,53 @@
+shape test_dict_nir_managed_key {
+  family "runtime/values"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+def d = dict_set(dict(4), 7, 42)
+assert(dict_len(d) == 1, "managed dictionary insert count")
+assert(dict_exists(d, 7), "managed dictionary finds tagged integer key")
+assert(to_str(dict_get(d, 7, 0)) == "42",
+   "managed dictionary returns a dynamic integer value")
+assert(to_str(dict_values(d)[0]) == "42",
+   "dictionary value projection preserves tagged integer values")
+assert(to_str(dict_keys(d)[0]) == "7",
+   "dictionary key projection decodes tagged integer keys")
+assert(to_str(dict_items(d)[0][0]) == "7",
+   "dictionary item projection decodes tagged integer keys")
+assert(to_str(dict_items(d)[0][1]) == "42",
+   "dictionary item projection preserves tagged integer values")
+def with_zero = dict_set(d, 0, 0)
+assert(dict_len(with_zero) == 2, "zero is distinct from a missing key")
+assert(dict_len(d) == 2 && to_str(dict_get(d, 0, -1)) == "0",
+   "dictionary setter result aliases and mutates the receiver")
+assert(to_str(dict_get(with_zero, 0, -1)) == "0",
+   "managed dictionary preserves integer zero as a key and value")
+def string_dict = dict(2)
+def with_string = __dict_set_str_raw(string_dict, "alias", 9)
+assert(to_str(dict_get(string_dict, "alias", -1)) == "9" &&
+       to_str(dict_get(with_string, "alias", -1)) == "9",
+   "string-key setter result aliases and mutates the receiver")
+def copied = dict_clone(d)
+assert(to_str(dict_get(copied, 7, 0)) == "42",
+   "managed dictionary clone preserves key and value representations")
+def merged = dict_merge(dict(4), d)
+assert(to_str(dict_get(merged, 7, 0)) == "42",
+   "managed dictionary merge preserves key and value representations")
+def removed = dict_remove(dict_clone(d), 7)
+assert(dict_len(removed) == 1, "managed dictionary removes tagged integer keys")
+assert(to_str(dict_pop(dict_clone(d), 7, 0)) == "42",
+   "managed dictionary pop returns the tagged value")
+def popped = dict_clone(d)
+assert(to_str(dict_pop(popped, 7, -9)) == "42",
+   "dictionary pop preserves a value with a nonzero default")
+assert(!dict_exists(popped, 7), "dictionary pop deletes its key")
+assert(to_str(dict_pop(popped, 7, -9)) == "-9",
+   "dictionary pop preserves the dynamic missing-key default")
+assert(to_str(dict_pop(popped, 0, -9)) == "0",
+   "dictionary pop preserves zero keys and values")
+NY
+}

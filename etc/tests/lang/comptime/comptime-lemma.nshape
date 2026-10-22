@@ -1,0 +1,17 @@
+shape comptime_generated_lemma {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "comptime", "lemma", "proof"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-only; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+comptime template identity(name, number) {
+   fn lemma ${name}(int x) { x == ${number} → x == ${number} }
+}
+comptime emit identity(ident("generated_identity"), 3)
+def proof p = prove(generated_identity(3))
+assert(proof_matches(p, generated_identity(3)), "generated lemma")
+NY
+}

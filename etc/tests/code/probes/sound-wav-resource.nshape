@@ -1,0 +1,32 @@
+shape sound_wav_resource_roundtrip {
+  family "runtime/system/sound"
+  generator "embedded"
+  features ["sound", "resource", "wav", "decoder"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os as os
+use core.os.sound as sound
+use core.os.sound.source as sound_source
+use core.os.sound.source.synth
+
+def tone = make_sine_source(440.0, 0.01, 48000, 0.25, false)
+def path = os.temp_dir() + "/ny-sound-wav-" + to_str(os.pid()) + "-" +
+           to_str(os.ticks()) + ".wav"
+assert(write_synth_wav(tone, path), "generated WAV is written")
+
+def loaded = sound.load(path)
+assert(loaded, "written WAV is decoded into a sound source")
+assert(is_list(loaded), "decoded WAV remains a sound source value")
+assert(sound_source.sound_info(loaded), "decoded source has sound metadata")
+assert(sound_source.source_length(loaded) == 480, "decoded frame count")
+assert(sound_source.source_rate(loaded) == 48000, "decoded sample rate")
+assert(sound_source.source_channels(loaded) == 1, "decoded channel count")
+
+match os.file_remove(path) {
+  ok(_) -> {}
+  err(code) -> panic("could not remove generated WAV: " + to_str(code))
+}
+NY
+}

@@ -3,19 +3,19 @@
 ;; This variant uses AES blocks with an MD5-derived chaining mask:
 ;; the first mask is the IV, then each next mask is MD5(cipher_block).
 ;; References:
-;; - std.math.crypto.block.attack
-;; - std.math.crypto
-module std.math.crypto.block.attack.cnv(cnv_md5_cbc_encrypt, cnv_md5_cbc_decrypt, cnv_cookie_iv_from_name)
-use std.core
-use std.math.bin (pkcs7_pad, pkcs7_unpad)
-use std.math.crypto.hash as hash
-use std.math.crypto.symmetric.aes
+;; - core.math.crypto.block.attack
+;; - core.math.crypto
+module core.math.crypto.block.attack.cnv(cnv_md5_cbc_encrypt, cnv_md5_cbc_decrypt, cnv_cookie_iv_from_name)
+use core
+use core.math.bin (pkcs7_pad, pkcs7_unpad)
+use core.math.crypto.hash as hash
+use core.math.crypto.symmetric.aes
 
 fn _cnv_xor_block(list a, list b) list {
    mut out = []
    mut i = 0
    while i < 16 {
-      out = out.append(a[i] ^^ b[i])
+      out = out.append(a[i] ^ b[i])
       i += 1
    }
    out

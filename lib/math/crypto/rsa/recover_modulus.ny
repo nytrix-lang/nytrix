@@ -2,8 +2,8 @@
 ;; RSA modulus recovery from oracle samples routines.
 ;; References:
 ;; - Oracle technique based on gcd(m^e - c) and gcd(enc(m)^2 - enc(m^2)).
-module std.math.crypto.rsa.recover_modulus(recover_modulus_known_e, recover_modulus_unknown_e)
-use std.math.nt
+module core.math.crypto.rsa.recover_modulus(recover_modulus_known_e, recover_modulus_unknown_e)
+use core.math.nt
 
 fn recover_modulus_known_e(fnptr encrypt_fn, any e, list samples=[2, 3, 5, 7]) any {
    "Recover modulus n from oracle encrypt_fn(m)=m^e mod n when e is known."

@@ -9,8 +9,8 @@ case "$subject" in
 esac
 
 length=${#subject}
-if [ "$length" -gt 72 ]; then
-  printf '%s\n' "commit-msg: subject is ${length} characters; limit is 72." >&2
+if [ "$length" -gt 68 ]; then
+  printf '%s\n' "commit-msg: subject is ${length} characters; limit is 68." >&2
   exit 1
 fi
 

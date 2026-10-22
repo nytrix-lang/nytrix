@@ -1,0 +1,19 @@
+shape ownership_rule_allowance_interval_below {
+  family "compiler-errors/ownership"
+  generator "error"
+  features ["error", "ownership", "negative", "allowance", "interval"]
+  template ny-compile-fail
+  expect compile_fail
+  flags "--ownership-strict"
+  expect_message "ownership allowance below for 'x'"
+  source ny <<'NY'
+use core
+
+@allowance(x, [1,1])
+fn not_used_on_every_path(bool cond, int x) int {
+  if cond { x } else { 0 }
+}
+
+not_used_on_every_path(true, 5)
+NY
+}

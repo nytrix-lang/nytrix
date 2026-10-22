@@ -1,0 +1,117 @@
+shape portable_contract_more_than_eight_variables_proved {
+  family "runtime/proofs"
+  generator "program"
+  features ["proofs", "requires", "bounded-variable-capacity", "backend-parity"]
+  template ny-test-case
+  expect compile_and_run
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  source ny <<'NY'
+fn nine_variable_requires(
+    int a, int b, int c, int d, int e, int f, int g, int h, int i)
+    int requires a >= 0 && b >= 0 && c >= 0 && d >= 0 && e >= 0 &&
+                f >= 0 && g >= 0 && h >= 0 && i >= 0 {
+  a
+}
+
+fn forwards_nine_variable_requires(
+    int a, int b, int c, int d, int e, int f, int g, int h, int i)
+    int requires a >= 0 && b >= 0 && c >= 0 && d >= 0 && e >= 0 &&
+                f >= 0 && g >= 0 && h >= 0 && i >= 0 {
+  nine_variable_requires(a, b, c, d, e, f, g, h, i)
+}
+
+fn sixteen_variable_requires(
+    int a, int b, int c, int d, int e, int f, int g, int h,
+    int i, int j, int k, int l, int m, int n, int o, int p)
+    int requires a >= 0 && b >= 0 && c >= 0 && d >= 0 &&
+                e >= 0 && f >= 0 && g >= 0 && h >= 0 &&
+                i >= 0 && j >= 0 && k >= 0 && l >= 0 &&
+                m >= 0 && n >= 0 && o >= 0 && p >= 0 {
+  a
+}
+
+fn forwards_sixteen_variable_requires(
+    int a, int b, int c, int d, int e, int f, int g, int h,
+    int i, int j, int k, int l, int m, int n, int o, int p)
+    int requires a >= 0 && b >= 0 && c >= 0 && d >= 0 &&
+                e >= 0 && f >= 0 && g >= 0 && h >= 0 &&
+                i >= 0 && j >= 0 && k >= 0 && l >= 0 &&
+                m >= 0 && n >= 0 && o >= 0 && p >= 0 {
+  sixteen_variable_requires(a, b, c, d, e, f, g, h,
+                            i, j, k, l, m, n, o, p)
+}
+
+assert(forwards_nine_variable_requires(1, 2, 3, 4, 5, 6, 7, 8, 9) == 1,
+       "contract proof binding covers more than eight distinct variables")
+assert(forwards_sixteen_variable_requires(
+           1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16) == 1,
+       "all bounded proof variables receive independently checked bindings")
+NY
+}
+
+shape portable_contract_missing_ninth_variable_rejected {
+  family "runtime/proofs"
+  generator "error"
+  features ["proofs", "requires", "bounded-variable-capacity", "backend-parity"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "precondition"
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  source ny <<'NY'
+fn nine_variable_requires(
+    int a, int b, int c, int d, int e, int f, int g, int h, int i)
+    int requires a >= 0 && b >= 0 && c >= 0 && d >= 0 && e >= 0 &&
+                f >= 0 && g >= 0 && h >= 0 && i >= 0 {
+  a
+}
+
+fn missing_ninth_variable(int a, int b, int c, int d, int e, int f, int g, int h)
+    int requires a >= 0 && b >= 0 && c >= 0 && d >= 0 && e >= 0 &&
+                f >= 0 && g >= 0 && h >= 0 {
+  nine_variable_requires(a, b, c, d, e, f, g, h, -1)
+}
+
+fn main() int {
+  missing_ninth_variable(1, 2, 3, 4, 5, 6, 7, 8)
+  0
+}
+NY
+}
+
+shape portable_contract_above_variable_budget_fails_closed {
+  family "runtime/proofs"
+  generator "error"
+  features ["proofs", "requires", "bounded-variable-capacity", "fail-closed"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "precondition"
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  source ny <<'NY'
+fn seventeen_variable_requires(
+    int a, int b, int c, int d, int e, int f, int g, int h,
+    int i, int j, int k, int l, int m, int n, int o, int p, int q)
+    int requires a >= 0 && b >= 0 && c >= 0 && d >= 0 &&
+                e >= 0 && f >= 0 && g >= 0 && h >= 0 &&
+                i >= 0 && j >= 0 && k >= 0 && l >= 0 &&
+                m >= 0 && n >= 0 && o >= 0 && p >= 0 && q >= 0 {
+  a
+}
+
+fn forwards_seventeen_variable_requires(
+    int a, int b, int c, int d, int e, int f, int g, int h,
+    int i, int j, int k, int l, int m, int n, int o, int p, int q)
+    int requires a >= 0 && b >= 0 && c >= 0 && d >= 0 &&
+                e >= 0 && f >= 0 && g >= 0 && h >= 0 &&
+                i >= 0 && j >= 0 && k >= 0 && l >= 0 &&
+                m >= 0 && n >= 0 && o >= 0 && p >= 0 && q >= 0 {
+  seventeen_variable_requires(a, b, c, d, e, f, g, h,
+                              i, j, k, l, m, n, o, p, q)
+}
+
+fn main() int {
+  forwards_seventeen_variable_requires(
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17)
+  0
+}
+NY
+}

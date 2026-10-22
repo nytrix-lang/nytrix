@@ -1,0 +1,12 @@
+shape test_repl_load_state {
+  family "repl"
+  generator "embedded"
+  features ["ny", "test", "repl", "incremental", "state", "load"]
+  template ny-test-case
+  expect compile_and_run
+  repl_expect "Loaded etc/tests/code/probes/repl/repl-loaded-helper.txt\nREPL-LOAD-STATE-OK"
+  repl_commands ":load etc/tests/code/probes/repl/repl-loaded-helper.txt\nassert(repl_loaded_increment(41) == 42, \"loaded declarations become available to later submissions\")\nprint(\"REPL-LOAD-STATE-OK\")"
+  source ny <<'NY'
+1 + 1
+NY
+}

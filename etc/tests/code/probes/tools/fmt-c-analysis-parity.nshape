@@ -1,0 +1,49 @@
+shape fmt_c_analysis_parity {
+  family "probe/tools"
+  generator "embedded"
+  features ["formatter", "c-analysis", "parity"]
+  template ny-test-case
+  flags "--native-only"
+  timeout 90
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.subprocess (run_capture)
+use core.str as str
+def ny = env("NYTRIX_NY_FULL_BIN")
+def fmt = env("NYTRIX_TEST_FMT_BIN")
+def cmake = env("NYTRIX_CMAKE_COMMAND")
+def dir = temp_dir() + "/fmt-c-analysis-" + to_str(pid())
+def made = run_capture([cmake, "-E", "make_directory", dir], [], nil, false)
+assert(made.get("code", 127) == 0, "create C analysis directory")
+def source = dir + "/analysis.c"
+mut body = "int prototype(int);\nstatic int private_helper(int x) { return x; }\n" +
+   "int public_a(void) { return private_helper(1); }\n" +
+   "int public_b(void) { const char *s = \"int fake() {\"; return s != 0; }\n" +
+   "int duplicate(void) { return 1; }\nint duplicate(void) { return 2; }\n" +
+   "int long_function(void) {\n"
+for line in 1..185 { body += "  work(" + to_str(line) + ");\n" }
+body += "  return 0;\n}\n"
+assert(is_ok(file_write(source, body)) &&
+       is_ok(file_write(dir + "/analysis.h",
+          "int header_prototype(int);\n" +
+          "static inline int header_helper(void) { return 1; }\n" +
+          "int header_api(void) { return header_helper(); }\n")),
+       "write C and header fixtures")
+def header = dir + "/analysis.h"
+def c = run_capture([fmt, "--analyze", "--json", source, header], [], nil, false)
+def embedded = run_capture([ny, "fmt", "--analyze", "--json", source, header],
+                           [], nil, false)
+def output = embedded.get("stdout", "")
+assert(c.get("code", 127) == 0 && embedded.get("code", 127) == 0 &&
+       c.get("stdout", "") == output, "C analysis JSON parity: " + output)
+for expected in ["\"c_functions\": 8", "\"c_files\": 1", "\"h_files\": 1",
+                 "\"long_functions\": 1", "\"duplicate_names\": 1",
+                 "\"code\": \"NYFMT3100\""] {
+   assert(str.find(output, expected) >= 0, "missing " + expected + ": " + output)
+}
+def cleanup = run_capture([cmake, "-E", "rm", "-rf", dir], [], nil, false)
+assert(cleanup.get("code", 127) == 0, "remove C analysis directory")
+print("FMT_C_ANALYSIS_PARITY_OK")
+NY
+}

@@ -1,8 +1,8 @@
 ;; Keywords: decompiler text expressions delimiters parsing
 ;; Balanced-delimiter primitives used by safe pseudocode expression cleanup.
-module std.os.rev.decomp.text *
-use std.core
-use std.core.str as str
+module core.os.rev.decomp.text *
+use core
+use core.str as str
 
 fn _clean_outer_balanced_parens_wrap(str expr0) bool {
    def expr = str.strip(expr0)
@@ -190,5 +190,5 @@ fn _clean_literal_int_value(str raw) dict {
    assert(_clean_top_level_find("call(a + b) + c", " + ") == 11, "top-level find")
    assert(_clean_top_level_split("a, call(b, c), d", ",").len == 3, "top-level split")
    assert(_clean_literal_int_value("(-0x10)").get("value", 0) == -16, "integer literal")
-   print("✓ std.os.rev.decomp.text self-test passed")
+   print("✓ core.os.rev.decomp.text self-test passed")
 }

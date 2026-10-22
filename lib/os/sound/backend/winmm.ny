@@ -1,14 +1,14 @@
 ;; Keywords: sound backend winmm os
 ;; WinMM sound backend for Windows audio playback.
 ;; References:
-;; - std.os.sound.backend
-;; - std.os
-module std.os.sound.backend.winmm(is_available, init, shutdown, stream_open, stream_start, stream_stop, write)
-use std.core
-use std.core.dict_mod
-use std.os
-use std.os.time
-use std.os.sound.backend.shared as backend_shared
+;; - core.os.sound.backend
+;; - core.os
+module core.os.sound.backend.winmm(is_available, init, shutdown, stream_open, stream_start, stream_stop, write)
+use core
+use core.dict_mod
+use core.os
+use core.os.time
+use core.os.sound.backend.shared as backend_shared
 
 #windows {
    #link "winmm"

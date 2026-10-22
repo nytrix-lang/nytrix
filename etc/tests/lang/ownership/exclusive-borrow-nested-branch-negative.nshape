@@ -1,0 +1,26 @@
+shape ownership_exclusive_borrow_nested_branch_negative {
+  family "compiler-errors/ownership"
+  generator "error"
+  features ["error", "ownership", "borrow", "exclusive", "nested-branch", "negative"]
+  template ny-compile-fail
+  expect compile_fail
+  flags "--ownership-strict"
+
+  source ny <<'NY'
+use core
+
+fn nested_conflict(bool outer, bool inner) int {
+  mut int value = 5
+  def exclusive = &mut value
+  if outer {
+    if inner {
+      value = value + 1
+    }
+    def observed = exclusive
+  }
+  value
+}
+
+nested_conflict(true, true)
+NY
+}

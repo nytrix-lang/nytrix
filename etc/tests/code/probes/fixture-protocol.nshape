@@ -1,0 +1,76 @@
+shape interactive_fixture_protocol {
+  family "runtime/system/fixture"
+  generator "embedded"
+  features ["interactive", "frame-budget", "timeout", "input", "protocol"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.fixture as fixture
+use core.os.time as time
+
+def fx = fixture.start(8, 0, 0)
+assert(fixture.is_interactive(fx) == 0, "captured test output is non-interactive")
+assert(fixture.tick(fx) == 1, "piped fixture admits one frame")
+assert(fixture.tick(fx) == 0, "piped fixture stops at its one-frame budget")
+assert(fixture.quit_key(27) && fixture.quit_key(3) &&
+   fixture.quit_key(113) && fixture.quit_key(81), "shared quit-key mapping")
+assert(!fixture.quit_key(0), "no-key input does not quit")
+assert(fixture.exit_status(fx) == 0, "normal frame budget exits successfully")
+def clocked = fixture.start(3, 0, 60000)
+assert(fixture.tick(clocked) == 1, "raw tick timestamp survives dynamic state")
+def ui = fixture.start_ui(0, 0, true)
+assert(fixture.tick_ui(ui) == 1, "headless GUI admits its first frame")
+assert(fixture.tick_ui(ui) == 0, "headless GUI stops after one frame")
+assert(fixture.exit_status(ui) == 0, "headless GUI budget is a successful exit")
+assert(fixture.next_ui_key(ui) == -1, "UI fixture does not poll terminal input")
+def timed = fixture.start_ui(0, 1, false)
+time.msleep(5)
+assert(fixture.tick_ui(timed) == 0, "fixture deadline stops frame admission")
+assert(fixture.exit_status(timed) == 124, "fixture deadline reports timeout status")
+NY
+}
+
+shape fixture_canvas_loop_native {
+  family "runtime/system/fixture"
+  generator "embedded"
+  features ["interactive", "canvas-loop", "native"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.fixture as fixture
+
+mut canvas_frames = 0
+fn fixture_draw_probe(c, z, w, h) { canvas_frames += 1 }
+assert(fixture.canvas_loop(fixture_draw_probe, 1, 0, 2000) == 0,
+   "canvas loop returns fixture status")
+assert(canvas_frames == 1, "canvas loop draws one bounded frame")
+NY
+}
+
+shape fixture_state_crosses_fnptr_boundary {
+  family "runtime/system/fixture"
+  generator "embedded"
+  features ["frame-budget", "fnptr-state-boundary"]
+  template ny-test-case
+  flags_matrix "--run"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.fixture as fixture
+
+mut canvas_frames = 0
+fn fixture_draw_probe(c, z, w, h) { canvas_frames += 1 }
+@effects(all)
+fn draw_one_frame(fnptr draw, list state) int {
+   if fixture.tick(state) { draw(0, 0, 0, 0) }
+   fixture.exit_status(state)
+}
+assert(draw_one_frame(fixture_draw_probe, fixture.start(1, 0, 2000)) == 0,
+   "start state crosses the callback call boundary")
+assert(canvas_frames == 1, "cross-boundary callback draws one admitted frame")
+NY
+}

@@ -295,33 +295,33 @@ const MARKDOWN_DOC_LABELS = new Map([
 ]);
 const API_NAMESPACE_SUMMARIES = new Map(
   Object.entries({
-    "std.core":
+    "core":
       "Core values, collections, strings, assertions, reflection, terminal helpers, queues, and channels.",
-    "std.math":
+    "core.math":
       "Numbers, vectors, matrices, finite fields, number theory, and analysis helpers.",
-    "std.math.crypto":
+    "core.math.crypto":
       "Encodings, hashes, symmetric ciphers, RSA/ECC helpers, number theory, and analysis utilities.",
-    "std.math.crypto.factorization":
+    "core.math.crypto.factorization":
       "Fermat, Pollard, ECM, primality, and known-prime helpers.",
-    "std.math.crypto.lattice":
+    "core.math.crypto.lattice":
       "LLL, CVP, BKZ, basis matrices, and reduction reports.",
-    "std.os":
+    "core.os":
       "Files, paths, processes, environment, time, threads, async work, networking, UI, and native boundaries.",
-    "std.os.net":
+    "core.os.net":
       "HTTP clients, HTTP servers, sockets, TLS transport, tubes, transcripts, and remote process helpers.",
-    "std.os.sound":
+    "core.os.sound":
       "Audio devices, formats, playback helpers, and sound-facing native integration.",
-    "std.os.ui":
+    "core.os.ui":
       "Windows, input, rendering, terminal UI, scenes, and platform backends.",
-    "std.math.parse":
+    "core.math.parse":
       "Structured data, source syntax, images, fonts, compressed data, and 3D asset parsing.",
-    "std.math.parse.data":
+    "core.math.parse.data":
       "JSON, YAML, TOML, CSV, XML, SQL, zlib, and related data-format helpers.",
-    "std.math.parse.img":
+    "core.math.parse.img":
       "Image codecs, metadata, loading, saving, and pixel format utilities.",
-    "std.math.parse.syntax":
+    "core.math.parse.syntax":
       "Tokenizers and highlighters for Nytrix and common source formats.",
-    "std.math.parse.3d":
+    "core.math.parse.3d":
       "3D asset loading, glTF scene inspection, meshes, materials, and asset workflow helpers.",
   }),
 );
@@ -512,7 +512,7 @@ function moduleIconName(route) {
   )
     return "network";
   if (r.includes(".net.curl") || r.includes(".net.requests")) return "globe";
-  if (r.includes(".net") || r === "std.os.net") return "cloud";
+  if (r.includes(".net") || r === "core.os.net") return "cloud";
   if (r.includes(".sound")) return "sound";
   if (r.includes(".ui") || r.includes(".window") || r.includes(".render"))
     return "window";
@@ -541,7 +541,7 @@ function moduleIconName(route) {
   if (r.includes(".ffi") || r.includes(".disasm")) return "cpu";
   if (r.includes(".process") || r.includes(".io") || r.includes(".term"))
     return "terminal";
-  if (r.includes(".os") || r === "std.os") return "terminal";
+  if (r.includes(".os") || r === "core.os") return "terminal";
   if (r.includes(".lattice") || r.includes(".factor") || r.includes(".math"))
     return "math";
   if (r.includes(".parse")) return "file";
@@ -2042,7 +2042,7 @@ function renderHeroUpdates() {
 }
 
 function renderReferenceSection(title, desc) {
-  const apiCards = ["std.core", "std.os", "std.math"]
+  const apiCards = ["core", "core.os", "core.math"]
     .map((route) => {
       const mod = moduleByName.get(route);
       return renderApiCard(

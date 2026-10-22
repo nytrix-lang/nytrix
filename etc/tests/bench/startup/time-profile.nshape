@@ -1,0 +1,27 @@
+shape bench_time_profile {
+  family "runtime-native"
+  generator "native"
+  features ["native", "time", "phase", "checksum"]
+  template ny-test-case
+  flags "--native-backend x86_64 -time -vv"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+mut x = 0
+for i in 0..100 {
+  x += i
+}
+print("checksum=", x)
+NY
+  source c <<'C'
+#include <stdio.h>
+
+int main(void) {
+  int x = 0;
+  for (int i = 0; i <= 100; i++)
+    x += i;
+  printf("checksum=%d\n", x);
+  return 0;
+}
+C
+}

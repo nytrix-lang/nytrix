@@ -1,0 +1,70 @@
+shape ownership_allowance_fixed_cstyle_reassignment_positive {
+  family "language/ownership"
+  generator "regression"
+  features [ownership allowance fixed-cstyle reassignment positive]
+  template ny-test-case
+  flags_matrix "--ownership-strict --native --run; --ownership-strict --native-backend=llvm --jit --jit-engine=mcjit; --ownership-strict --native-backend=llvm --jit --jit-engine=orc; --ownership-strict --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+@allowance(x, [1,2])
+fn cstyle_inclusive_epoch(int x) int {
+  def before = x
+  for (mut index = 1 index <= 3 ++index) {
+    def observed = x
+    x = 7
+  }
+  x
+}
+
+@allowance(y, [2,2])
+fn cstyle_empty_loop_keeps_epoch(int y) int {
+  def before = y
+  for (mut index = 3 index < 3 ++index) {
+    y = 9
+  }
+  y
+}
+
+@allowance(z, [1,2])
+fn counted_while_epochs(int z) int {
+  def before = z
+  while (mut index = 0 index <= 2 ++index) {
+    def observed = z
+    z = 9
+  }
+  z
+}
+
+@allowance(w, [1,2])
+fn descending_counted_loop_epochs(int w) int {
+  def before = w
+  while (mut index = 3 index >= 1 --index) {
+    def observed = w
+    w = 11
+  }
+  w
+}
+
+@allowance(v, [2,2])
+fn empty_descending_counted_loop(int v) int {
+  def before = v
+  while (mut index = 0 index > 0 --index) {
+    v = 12
+  }
+  v
+}
+
+assert(cstyle_inclusive_epoch(4) == 7,
+       "C-style inclusive loops split every reassignment epoch")
+assert(cstyle_empty_loop_keeps_epoch(5) == 5,
+       "an empty C-style loop creates no reassignment epoch")
+assert(counted_while_epochs(6) == 9,
+       "a bounded counted while loop splits reassignment epochs")
+assert(descending_counted_loop_epochs(10) == 11,
+       "descending counted loops split reassignment epochs")
+assert(empty_descending_counted_loop(13) == 13,
+       "an empty descending loop does not split an allowance epoch")
+NY
+}

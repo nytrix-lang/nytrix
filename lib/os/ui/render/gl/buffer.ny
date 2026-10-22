@@ -1,13 +1,13 @@
 ;; Keywords: render opengl gl buffer vbo ibo static
-;; References: std.os.ui.render.gl.state std.os.ui.render.gl.texture
-module std.os.ui.render.gl.buffer(base, bytes, cp, create_static_buffer, create_static_index_buffer, create_static_indexed_buffer, destroy_static_buffer, draw_static_buffer, draw_static_buffer_indexed, draw_static_buffer_indexed_raw, draw_static_buffer_raw, h, ib, id, idx_ty, sip, sp, stride, use_u32, vb)
-use std.core
-use std.math
-use std.os.ffi as ffi
-use std.os.ui.render.shared as render_shared
-use std.os.ui.render.gl.constants as gl_constants
-use std.os.ui.render.gl.state as gl_state
-use std.os.ui.render.gl.texture as gl_tex
+;; References: core.os.ui.render.gl.state core.os.ui.render.gl.texture
+module core.os.ui.render.gl.buffer(base, bytes, cp, create_static_buffer, create_static_index_buffer, create_static_indexed_buffer, destroy_static_buffer, draw_static_buffer, draw_static_buffer_indexed, draw_static_buffer_indexed_raw, draw_static_buffer_raw, h, ib, id, idx_ty, sip, sp, stride, use_u32, vb)
+use core
+use core.math
+use core.os.ffi as ffi
+use core.os.ui.render.shared as render_shared
+use core.os.ui.render.gl.constants as gl_constants
+use core.os.ui.render.gl.state as gl_state
+use core.os.ui.render.gl.texture as gl_tex
 
 def _STRIDE = render_shared.VERTEX_STRIDE
 
@@ -21,7 +21,7 @@ fn create_static_buffer(?ptr src_ptr, int count) any {
       memcpy(cp, src_ptr, bytes)
       return {"backend": "gl", "handle": cp, "offset": 0, "count": count, "soft": true, "soft_ptr": cp}
    }
-   if !src_ptr || count <= 0 || !_has("glGenBuffers") { return 0 }
+   if !src_ptr || count <= 0 || !gl_state._has("glGenBuffers") { return 0 }
    def id = _gen_name("glGenBuffers")
    if id <= 0 { return 0 }
    _bind_buffer(GL_ARRAY_BUFFER, id)
@@ -41,7 +41,7 @@ fn create_static_index_buffer(?ptr idx_ptr, int idx_count, bool use_u32=false) a
       memcpy(cp, idx_ptr, bytes)
       return {"backend": "gl", "ibuf": cp, "ioffset": 0, "index_count": idx_count, "index_type_u32": use_u32, "soft": true, "soft_ibuf": cp}
    }
-   if !idx_ptr || idx_count <= 0 || !_has("glGenBuffers") { return 0 }
+   if !idx_ptr || idx_count <= 0 || !gl_state._has("glGenBuffers") { return 0 }
    def id = _gen_name("glGenBuffers")
    if id <= 0 { return 0 }
    def stride = use_u32 ? 4 : 2

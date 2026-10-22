@@ -1,0 +1,26 @@
+shape ownership_rule_exclusive_borrow_dynamic_index_overlap_negative {
+  family "compiler-errors/ownership"
+  generator "error"
+  features ["error", "ownership", "borrow", "exclusive", "dynamic-index", "overlap"]
+  template ny-compile-fail
+  expect compile_fail
+  flags "--ownership-strict --nyir-verify"
+
+  source ny <<'NY'
+use core
+
+layout Pair { int left, int right }
+
+fn borrow_dynamic_member() int {
+  mut list<Pair> values = [Pair(7, 8)]
+  def borrowed_index = 0
+  def access_index = 0
+  def exclusive = &mut values[borrowed_index].left
+  values[access_index].left
+  def observed = exclusive
+  observed
+}
+
+borrow_dynamic_member()
+NY
+}

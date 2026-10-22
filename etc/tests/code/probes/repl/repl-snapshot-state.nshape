@@ -1,0 +1,11 @@
+shape repl_snapshot_state {
+  family "repl"
+  generator "embedded"
+  features ["ny", "test", "repl", "snapshot", "state"]
+  template ny-test-case
+  timeout 60
+  repl_expect "REPL-SNAPSHOT-STATE-OK"
+  repl_commands "mut int snapshot_value = 40\nmut snapshot_items = [7]\nfn snapshot_next() int { snapshot_value + 2 }\n:expand snapshot_value = 99\nassert(snapshot_value == 40, \"expansion does not execute or mutate state\")\n:save /tmp/nytrix-repl-snapshot-state.ny\n:reset\n:load /tmp/nytrix-repl-snapshot-state.ny\nassert(snapshot_value == 40 && snapshot_items[0] == 7, \"saved source reloads state\")\nassert(snapshot_next() == 42, \"saved source reloads functions\")\n:snapshot /tmp/nytrix-repl-snapshot-state.nys\nsnapshot_value = 99\n:reset\n:load /tmp/nytrix-repl-snapshot-state.nys\nassert(snapshot_value == 40, \"snapshot restores scalar bindings\")\nassert(snapshot_items[0] == 7 && snapshot_items.len == 1, \"snapshot restores aggregate bindings\")\nassert(snapshot_next() == 42, \"snapshot restores functions\")\nsnapshot_value = snapshot_next()\nsnapshot_items = snapshot_items.append(snapshot_value)\nassert(snapshot_value == 42 && snapshot_items[1] == 42, \"restored state remains mutable\")\nprint(\"REPL-SNAPSHOT-STATE-OK\")"
+  source ny <<'NY'
+NY
+}

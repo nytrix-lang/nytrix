@@ -3,11 +3,11 @@
 ;; - https://www.rfc-editor.org/rfc/rfc4648
 ;; - https://cacr.uwaterloo.ca/hac/about/chap1.pdf
 ;; References:
-;; - std.math.crypto.encoding
-;; - std.math.crypto
-module std.math.crypto.encoding.uu(uu_decode_line)
-use std.core
-use std.core.str
+;; - core.math.crypto.encoding
+;; - core.math.crypto
+module core.math.crypto.encoding.uu(uu_decode_line)
+use core
+use core.str
 
 fn uu_decode_line(any line) str {
    "Decode one uuencoded line to text."
@@ -31,5 +31,5 @@ fn uu_decode_line(any line) str {
 
 #main {
    assert(uu_decode_line("#06)C") == "Abc", "uu line")
-   print("✓ std.math.crypto.encoding.uu self-test passed")
+   print("✓ core.math.crypto.encoding.uu self-test passed")
 }

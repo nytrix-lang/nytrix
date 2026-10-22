@@ -1,0 +1,66 @@
+shape f64_scalar_abi_followup {
+  family "runtime/language/types"
+  generator "embedded"
+  features ["ny", "test", "f64", "abi", "optimizer", "vector"]
+  template ny-test-case
+  flags_matrix "--native --run -O0; --native --run -O1; --native --run -O2; --run=aot -O0"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.set_mod as set_mod
+use core.math.vector as vec
+
+fn typed_list_size(list xs) int { xs.len }
+fn typed_dict_size(dict d) int { d.len }
+fn typed_tuple_size(tuple t) int { t.len }
+fn typed_set_has_x(set s) bool { contains(s, "x") }
+fn typed_bytes_size(bytes b) int { b.len }
+fn typed_list_index_sum(list xs) int {
+   mut i = 0
+   mut acc = 0
+   while i < xs.len { acc += xs[i] i += 1 }
+   acc
+}
+fn test_typed_collections() {
+   assert(typed_list_size([1, 2, 3]) == 3, "typed list")
+   assert(typed_dict_size(set(dict(4), "a", 1)) == 1, "typed dict")
+   assert(typed_tuple_size((1, 2, 3)) == 3, "typed tuple")
+   mut set s = set_mod.set()
+   s = set_mod.add(s, "x")
+   assert(typed_set_has_x(s), "typed set")
+   assert(s.len == 1, "set len")
+   assert(typed_bytes_size(bytes(4)) == 4, "typed bytes")
+   assert(typed_list_index_sum([1, 2, 3, 4]) == 10, "typed list index")
+}
+
+fn hm_sum_typed_f64(list<f64> xs) f64 {
+   mut s = 0.0
+   mut i = 0
+   while i < xs.len {
+      s += xs[i]
+      i += 1
+   }
+   s
+}
+
+test_typed_collections()
+assert(hm_sum_typed_f64([1.0, 2.5, 3.5]) == 7.0,
+       "f64 list ABI after typed collection lowering")
+
+fn typed_vector_f64_list_division() bool {
+   def list<f64> scaled = vec.divs([4.0, 5.0, 6.0], 2.0)
+   scaled[0] == 2.0 && scaled[1] == 2.5 && scaled[2] == 3.0
+}
+assert(typed_vector_f64_list_division(),
+       "inlined f64 typed fast-slot vector arithmetic")
+
+fn typed_vec3_scalar_division() bool {
+   def vec3 source = vec.Vector3(4.0, 5.0, 6.0)
+   def vec3 half = source / 2.0
+   half.x == 2.0 && half.y == 2.5 && half.z == 3.0
+}
+assert(typed_vec3_scalar_division(),
+       "typed vec3 scalar division preserves f64 fields")
+print("F64_SCALAR_ABI_OK")
+NY
+}

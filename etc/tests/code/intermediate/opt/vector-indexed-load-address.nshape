@@ -1,0 +1,34 @@
+shape opt_vector_indexed_load_keeps_address {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 opt vector loop indexed-load bounds correctness]
+  template ny-test-case
+  flags_matrix "--native-only --native-backend=x86_64 --native-tier=baseline -O3 --native-result-oracle=0 --nyir-verify --no-progress; --native-only --native-backend=x86_64 --native-tier=opt -O3 --native-result-oracle=0 --nyir-verify --no-progress; --native-backend=llvm --jit --jit-engine=orc -O3 --no-progress"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+fn vector_indexed_sum() int {
+  def int width = 100
+  mut list<int> values = []
+  mut int i = 0
+  while i < width * width {
+    values = append(values, i)
+    i += 1
+  }
+  mut int total = 0
+  mut int row = 0
+  while row < width {
+    mut int column = 0
+    while column < width {
+      total += values[row * width + column]
+      column += 1
+    }
+    row += 1
+  }
+  total == 49995000 ? 0 : 1
+}
+
+vector_indexed_sum()
+NY
+}

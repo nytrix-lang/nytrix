@@ -3,14 +3,14 @@
 ;; Reference:
 ;; - https://www.ntru.org/f/ntru-20190330.pdf
 ;; References:
-;; - std.math.crypto.lattice
-;; - std.math.crypto
-module std.math.crypto.lattice.ntru(ntru_centered, ntru_circulant_rows, ntru_cyclic_convolution, ntru_poly_neg_mod, ntru_poly_xgcd_mod, ntru_cyclic_inverse_mod, ntru_public_key_lattice_basis, ntru_is_ternary, ntru_slice, ntru_bits_to_text, ntru_decrypt_blocks_with_f, ntru_recover_ternary_key_rows, ntru_recover_text_from_public_key_lattice, ntru_recover_text_from_known_plaintext)
-use std.core
-use std.math.nt (Z)
-use std.math.integer (inverse_mod)
-use std.math.crypto.poly (poly_mod_add, poly_mod_div, poly_mod_mul)
-use std.math.crypto.lattice.lll as lllmod
+;; - core.math.crypto.lattice
+;; - core.math.crypto
+module core.math.crypto.lattice.ntru(ntru_centered, ntru_circulant_rows, ntru_cyclic_convolution, ntru_poly_neg_mod, ntru_poly_xgcd_mod, ntru_cyclic_inverse_mod, ntru_public_key_lattice_basis, ntru_is_ternary, ntru_slice, ntru_bits_to_text, ntru_decrypt_blocks_with_f, ntru_recover_ternary_key_rows, ntru_recover_text_from_public_key_lattice, ntru_recover_text_from_known_plaintext)
+use core
+use core.math.nt (Z)
+use core.math.integer (inverse_mod)
+use core.math.crypto.poly (poly_mod_add, poly_mod_div, poly_mod_mul)
+use core.math.crypto.lattice.lll as lllmod
 
 fn _ntru_has_len(list xs, int n) bool { n >= 0 && xs.len >= n }
 
@@ -522,5 +522,5 @@ fn ntru_recover_text_from_public_key_lattice(list h, list ciphertexts, int n, an
    def qrep = lllmod.lll_quality_report(basis)
    assert(qrep.contains("size_reduced"), "ntru lattice lll quality size_reduced")
    assert(qrep.contains("ok"), "ntru lattice lll quality ok field")
-   print("✓ std.math.crypto.lattice.ntru self-test passed")
+   print("✓ core.math.crypto.lattice.ntru self-test passed")
 }

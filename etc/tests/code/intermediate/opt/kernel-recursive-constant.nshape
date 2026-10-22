@@ -1,0 +1,30 @@
+shape optcheck_kernel_recursive_constant {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle optcheck kernel-family recursion constant arguments overflow masked]
+  template ny-test-case
+  flags_matrix "-O0 --color=never; -O3 --color=never; --native-only -O0 --color=never; --native-only -O3 --color=never; --native-backend=llvm --jit --jit-engine=mcjit --color=never"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+;; Recursive constant-call kernel with explicit 32-bit wrapping. The constant
+;; depth and edge seeds exercise specialization without permitting unbounded
+;; recursion or signed-overflow assumptions.
+fn rec_mix(int depth, int seed) int {
+   if depth <= 0 { return (seed ^ 0xA5A5A5A5) & 0xFFFFFFFF }
+   def left = rec_mix(depth - 1, (seed * 33 + depth) & 0xFFFFFFFF)
+   def right = rec_mix(depth - 1, (seed ^ (depth * 0x9E3779B9)) & 0xFFFFFFFF)
+   (((left * 5 + right * 3 + depth) ^ (left >> (depth & 7))) & 0xFFFFFFFF)
+}
+
+mut checksum = 0
+mut seed = 0
+while seed < 8 {
+   checksum = (checksum + rec_mix(8, seed * 0x1F123BB5)) & 0xFFFFFFFF
+   seed += 1
+}
+print("checksum=", checksum)
+assert(checksum == 3979291040, "recursive constant checksum")
+NY
+}

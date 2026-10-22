@@ -1,0 +1,416 @@
+shape generated_string_content_refinement_differential {
+  family "language/types/refinements"
+  generator "embedded"
+  features ["refinement", "mutable-aggregate", "string-content", "store", "generated", "differential"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.subprocess as process
+use core.os.prim (env)
+use core.os.thread as thread
+
+def compiler = env("NYTRIX_NY_FULL_BIN")
+def core_bc = env("NYTRIX_TEST_CORE_BC")
+def shared_core_bc = is_str(core_bc) ? core_bc : ""
+assert(is_str(compiler) && compiler.len > 0,
+       "test runner provides the compiler for generated content cases")
+
+fn generated_source(int index, str value) str {
+  "use core\n" +
+      "refine SafeFirst = list where(items) { items[0] == \"safe\" }\n" +
+      "@effects(read) fn require_fact(SafeFirst items) int { return items.len }\n" +
+      "fn generated() int {\nmut list<str> items = [\"safe\", \"other\"]\n" +
+      "if SafeFirst(items) {\nitems[" + to_str(index) + "] = \"" + value +
+      "\"\nreturn require_fact(items)\n}\n0\n}\ngenerated()\n0\n"
+}
+
+fn generated_boolean_source(int index, bool value) str {
+  def value_text = if value { "true" } else { "false" }
+  "use core\n" +
+      "refine TrueFirst = list where(items) { items[0] == true }\n" +
+      "@effects(read) fn require_fact(TrueFirst items) int { return items.len }\n" +
+      "fn generated() int {\nmut list<bool> items = [true, false]\n" +
+      "if TrueFirst(items) {\nitems[" + to_str(index) + "] = " + value_text +
+      "\nreturn require_fact(items)\n}\n0\n}\ngenerated()\n0\n"
+}
+
+fn generated_string_append_source(str value) str {
+  "use core\n" +
+      "refine SafeLast = list where(items) { items[-1] == \"safe\" }\n" +
+      "@effects(read) fn require_fact(SafeLast items) int { return items.len }\n" +
+      "fn generated() int {\nmut list<str> items = [\"other\", \"safe\"]\n" +
+      "if SafeLast(items) {\nitems = append(items, \"" + value +
+      "\")\nreturn require_fact(items)\n}\n0\n}\ngenerated()\n0\n"
+}
+
+fn generated_boolean_append_source(bool value) str {
+  def value_text = if value { "true" } else { "false" }
+  "use core\n" +
+      "refine TrueLast = list where(items) { items[-1] == true }\n" +
+      "@effects(read) fn require_fact(TrueLast items) int { return items.len }\n" +
+      "fn generated() int {\nmut list<bool> items = [false, true]\n" +
+      "if TrueLast(items) {\nitems = append(items, " + value_text +
+      ")\nreturn require_fact(items)\n}\n0\n}\ngenerated()\n0\n"
+}
+
+fn generated_not_equal_store_source(str value) str {
+  "use core\n" +
+      "refine NotUnsafeFirst = list where(items) { items[0] != \"unsafe\" }\n" +
+      "@effects(read) fn require_fact(NotUnsafeFirst items) int { return items.len }\n" +
+      "fn generated() int { mut list<str> items = [\"safe\", \"other\"]\n" +
+      "if NotUnsafeFirst(items) { items[0] = \"" + value +
+      "\"\nreturn require_fact(items) }\n0 }\ngenerated()\n0\n"
+}
+
+fn generated_not_equal_append_source(str value) str {
+  "use core\n" +
+      "refine NotUnsafeLast = list where(items) { items[-1] != \"unsafe\" }\n" +
+      "@effects(read) fn require_fact(NotUnsafeLast items) int { return items.len }\n" +
+      "fn generated() int { mut list<str> items = [\"other\", \"safe\"]\n" +
+      "if NotUnsafeLast(items) { items = append(items, \"" + value +
+      "\")\nreturn require_fact(items) }\n0 }\ngenerated()\n0\n"
+}
+
+fn generated_boolean_not_equal_store_source(bool value) str {
+  def value_text = if value { "true" } else { "false" }
+  "use core\n" +
+      "refine NotFalseFirst = list where(items) { items[0] != false }\n" +
+      "@effects(read) fn require_fact(NotFalseFirst items) int { return items.len }\n" +
+      "fn generated() int { mut list<bool> items = [true, false]\n" +
+      "if NotFalseFirst(items) { items[0] = " + value_text +
+      "\nreturn require_fact(items) }\n0 }\ngenerated()\n0\n"
+}
+
+fn generated_boolean_not_equal_append_source(bool value) str {
+  def value_text = if value { "true" } else { "false" }
+  "use core\n" +
+      "refine NotFalseLast = list where(items) { items[-1] != false }\n" +
+      "@effects(read) fn require_fact(NotFalseLast items) int { return items.len }\n" +
+      "fn generated() int { mut list<bool> items = [false, true]\n" +
+      "if NotFalseLast(items) { items = append(items, " + value_text +
+      ")\nreturn require_fact(items) }\n0 }\ngenerated()\n0\n"
+}
+
+fn generated_string_conjunction_source(int index, str value) str {
+  "use core\n" +
+      "refine SafePair = list where(items) { items[0] == \"safe\" && items[1] == \"sound\" }\n" +
+      "@effects(read) fn require_fact(SafePair items) int { return items.len }\n" +
+      "fn generated() int { mut list<str> items = [\"safe\", \"sound\", \"other\"]\n" +
+      "if SafePair(items) { items[" + to_str(index) + "] = \"" + value +
+      "\"\nreturn require_fact(items) }\n0 }\ngenerated()\n0\n"
+}
+
+fn generated_symbolic_string_source(bool append_value, bool proving) str {
+  def value = if proving { "expected" } else { "other" }
+  def index = if append_value { "-1" } else { "0" }
+  def initial_items =
+      if append_value { "[\"other\", \"safe\"]" } else { "[\"safe\", \"other\"]" }
+  def mutation = if append_value {
+    "items = append(items, " + value + ")"
+  } else {
+    "items[" + index + "] = " + value
+  }
+  "use core\ndef expected = \"safe\"\ndef other = \"unsafe\"\n" +
+      "refine ExpectedFirst = list where(items) { items[" + index +
+      "] == expected }\n" +
+      "@effects(read) fn require_fact(ExpectedFirst items) int { return items.len }\n" +
+      "fn generated() int { mut list<str> items = " + initial_items + "\n" +
+      "if ExpectedFirst(items) { " + mutation +
+      "\nreturn require_fact(items) }\n0 }\ngenerated()\n0\n"
+}
+
+fn generated_symbolic_boolean_source(bool append_value, bool proving) str {
+  def value = if proving { "expected" } else { "other" }
+  def index = if append_value { "-1" } else { "0" }
+  def initial_items =
+      if append_value { "[false, true]" } else { "[true, false]" }
+  def mutation = if append_value {
+    "items = append(items, " + value + ")"
+  } else {
+    "items[" + index + "] = " + value
+  }
+  "use core\ndef expected = true\ndef other = false\n" +
+      "refine ExpectedFirst = list where(items) { items[" + index +
+      "] == expected }\n" +
+      "@effects(read) fn require_fact(ExpectedFirst items) int { return items.len }\n" +
+      "fn generated() int { mut list<bool> items = " + initial_items + "\n" +
+      "if ExpectedFirst(items) { " + mutation +
+      "\nreturn require_fact(items) }\n0 }\ngenerated()\n0\n"
+}
+
+fn generated_symbolic_not_equal_string_source(bool append_value,
+                                              bool proving) str {
+  def value = if proving { "safe" } else { "forbidden" }
+  def index = if append_value { "-1" } else { "0" }
+  def initial_items =
+      if append_value { "[\"other\", \"safe\"]" } else { "[\"safe\", \"other\"]" }
+  def mutation = if append_value {
+    "items = append(items, " + value + ")"
+  } else {
+    "items[" + index + "] = " + value
+  }
+  "use core\ndef safe = \"safe\"\ndef forbidden = \"unsafe\"\n" +
+      "refine NotForbidden = list where(items) { items[" + index +
+      "] != forbidden }\n" +
+      "@effects(read) fn require_fact(NotForbidden items) int { return items.len }\n" +
+      "fn generated() int { mut list<str> items = " + initial_items + "\n" +
+      "if NotForbidden(items) { " + mutation +
+      "\nreturn require_fact(items) }\n0 }\ngenerated()\n0\n"
+}
+
+fn generated_symbolic_not_equal_boolean_source(bool append_value,
+                                                bool proving) str {
+  def value = if proving { "safe" } else { "forbidden" }
+  def index = if append_value { "-1" } else { "0" }
+  def initial_items = if append_value { "[false, true]" } else { "[true, false]" }
+  def mutation = if append_value {
+    "items = append(items, " + value + ")"
+  } else {
+    "items[" + index + "] = " + value
+  }
+  "use core\ndef safe = true\ndef forbidden = false\n" +
+      "refine NotForbidden = list where(items) { items[" + index +
+      "] != forbidden }\n" +
+      "@effects(read) fn require_fact(NotForbidden items) int { return items.len }\n" +
+      "fn generated() int { mut list<bool> items = " + initial_items + "\n" +
+      "if NotForbidden(items) { " + mutation +
+      "\nreturn require_fact(items) }\n0 }\ngenerated()\n0\n"
+}
+
+fn generated_symbolic_not_equal_integer_source(bool append_value,
+                                                bool proving) str {
+  def value = if proving { "safe" } else { "forbidden" }
+  def index = if append_value { "-1" } else { "0" }
+  def initial_items = if append_value { "[4, 3]" } else { "[3, 4]" }
+  def mutation = if append_value {
+    "items = append(items, " + value + ")"
+  } else {
+    "items[" + index + "] = " + value
+  }
+  "use core\ndef safe = 3\ndef forbidden = 5\n" +
+      "refine NotForbidden = list where(items) { items[" + index +
+      "] != forbidden }\n" +
+      "@effects(read) fn require_fact(NotForbidden items) int { return items.len }\n" +
+      "fn generated() int { mut list<int> items = " + initial_items + "\n" +
+      "if NotForbidden(items) { " + mutation +
+      "\nreturn require_fact(items) }\n0 }\ngenerated()\n0\n"
+}
+
+fn generated_symbolic_greater_integer_source(bool append_value,
+                                              bool proving) str {
+  def value = if proving { "safe" } else { "unsafe" }
+  def index = if append_value { "-1" } else { "0" }
+  def initial_items = if append_value { "[1, 9]" } else { "[9, 1]" }
+  def mutation = if append_value {
+    "items = append(items, " + value + ")"
+  } else {
+    "items[" + index + "] = " + value
+  }
+  "use core\ndef threshold = 1 + 2\ndef safe = 2 + 3\ndef unsafe = 3 - 1\n" +
+      "refine AboveThreshold = list where(items) { items[" + index +
+      "] > threshold }\n" +
+      "@effects(read) fn require_fact(AboveThreshold items) int { return items.len }\n" +
+      "fn generated() int { mut list<int> items = " + initial_items + "\n" +
+      "if AboveThreshold(items) { " + mutation +
+      "\nreturn require_fact(items) }\n0 }\ngenerated()\n0\n"
+}
+
+fn compile_generated(str source) dict {
+  mut args = []
+  if shared_core_bc.len > 0 {
+    args = args.append("--core-bc")
+    args = args.append(shared_core_bc)
+  }
+  args = args.append("--strict-types")
+  args = args.append("--native-only")
+  args = args.append("--nyir-verify")
+  args = args.append("-emit-only")
+  args = args.append("-c")
+  args = args.append(source)
+  process.run_capture(compiler, args, nil, false)
+}
+
+mut generated_cases = []
+
+fn queue_generated_source(str source, bool expected, str label) int {
+  generated_cases = generated_cases.append([source, expected, label])
+  0
+}
+
+fn check_generated_store(int index, str value, bool expected, str label) int {
+  queue_generated_source(generated_source(index, value), expected, label)
+}
+
+fn check_generated_source(str source, bool expected, str label) int {
+  queue_generated_source(source, expected, label)
+}
+
+fn check_generated_boolean_store(int index, bool value, bool expected,
+                                 str label) int {
+  queue_generated_source(generated_boolean_source(index, value), expected,
+                         label)
+}
+
+fn run_generated_cases(int first_case) str {
+  mut int case_index = first_case
+  while case_index < generated_cases.len {
+    def test_case = generated_cases.get(case_index, [])
+    def source = test_case.get(0, "")
+    def expected = test_case.get(1, false)
+    def label = test_case.get(2, "")
+    def result = compile_generated(source)
+    def output = result.get("stdout", "")
+    def code = result.get("code", 127)
+    def accepted = code == 0 && str.find(output, "error:") < 0
+    if accepted != expected {
+      return label + " expected accepted=" + to_str(expected) + " (rc=" +
+             to_str(code) + "): " + output +
+             "\ngenerated source:\n" + source
+    }
+    case_index += 4
+  }
+  ""
+}
+
+check_generated_store(1, "other", true,
+                      "disjoint write preserves string content fact")
+check_generated_store(0, "safe", true,
+                      "proving write preserves string content fact")
+check_generated_store(0, "unsafe", false,
+                      "violating write expires string content fact")
+check_generated_boolean_store(1, false, true,
+                              "disjoint write preserves boolean content fact")
+check_generated_boolean_store(0, true, true,
+                              "proving write preserves boolean content fact")
+check_generated_boolean_store(0, false, false,
+                              "violating write expires boolean content fact")
+check_generated_source(generated_string_append_source("safe"), true,
+                       "matching string append preserves last-element fact")
+check_generated_source(generated_string_append_source("unsafe"), false,
+                       "violating string append expires last-element fact")
+check_generated_source(
+    "use core\nrefine SafeFirst = list where(items) { items[0] == \"safe\" }\n" +
+        "@effects(read) fn require_fact(SafeFirst items) int { return items.len }\n" +
+        "fn generated() int { mut list<str> items = [\"safe\", \"other\"]\n" +
+        "if SafeFirst(items) { items = append(items, \"other\")\n" +
+        "return require_fact(items) }\n0 }\ngenerated()\n0\n",
+    true, "append preserves nonnegative string content fact")
+check_generated_source(generated_boolean_append_source(true), true,
+                       "matching boolean append preserves last-element fact")
+check_generated_source(generated_boolean_append_source(false), false,
+                       "violating boolean append expires last-element fact")
+check_generated_source(generated_not_equal_store_source("safe"), true,
+                       "proving string store preserves inequality fact")
+check_generated_source(generated_not_equal_store_source("unsafe"), false,
+                       "violating string store expires inequality fact")
+check_generated_source(generated_not_equal_append_source("safe"), true,
+                       "proving string append preserves inequality fact")
+check_generated_source(generated_not_equal_append_source("unsafe"), false,
+                       "violating string append expires inequality fact")
+check_generated_source(generated_boolean_not_equal_store_source(true), true,
+                       "proving boolean store preserves inequality fact")
+check_generated_source(generated_boolean_not_equal_store_source(false), false,
+                       "violating boolean store expires inequality fact")
+check_generated_source(generated_boolean_not_equal_append_source(true), true,
+                       "proving boolean append preserves inequality fact")
+check_generated_source(generated_boolean_not_equal_append_source(false), false,
+                       "violating boolean append expires inequality fact")
+check_generated_source(generated_string_conjunction_source(2, "other"), true,
+                       "disjoint store preserves every content conjunct")
+check_generated_source(generated_string_conjunction_source(0, "safe"), true,
+                       "proving store preserves every content conjunct")
+check_generated_source(generated_string_conjunction_source(1, "sound"), true,
+                       "second proving store preserves every content conjunct")
+check_generated_source(generated_string_conjunction_source(1, "unsafe"), false,
+                       "violating store expires a content conjunction")
+check_generated_source(generated_symbolic_string_source(false, true), true,
+                       "same immutable string bound preserves a store fact")
+check_generated_source(generated_symbolic_string_source(false, false), false,
+                       "different immutable string bound expires a store fact")
+check_generated_source(generated_symbolic_string_source(true, true), true,
+                       "same immutable string bound preserves an append fact")
+check_generated_source(generated_symbolic_string_source(true, false), false,
+                       "different immutable string bound expires an append fact")
+check_generated_source(generated_symbolic_boolean_source(false, true), true,
+                       "same immutable boolean bound preserves a store fact")
+check_generated_source(generated_symbolic_boolean_source(false, false), false,
+                       "different immutable boolean bound expires a store fact")
+check_generated_source(generated_symbolic_boolean_source(true, true), true,
+                       "same immutable boolean bound preserves an append fact")
+check_generated_source(generated_symbolic_boolean_source(true, false), false,
+                       "different immutable boolean bound expires an append fact")
+check_generated_source(generated_symbolic_not_equal_string_source(false, true),
+                       true, "distinct immutable string preserves inequality store")
+check_generated_source(generated_symbolic_not_equal_string_source(false, false),
+                       false, "equal immutable string expires inequality store")
+check_generated_source(generated_symbolic_not_equal_string_source(true, true),
+                       true, "distinct immutable string preserves inequality append")
+check_generated_source(generated_symbolic_not_equal_string_source(true, false),
+                       false, "equal immutable string expires inequality append")
+check_generated_source(
+    generated_symbolic_not_equal_boolean_source(false, true), true,
+    "distinct immutable boolean preserves inequality store")
+check_generated_source(
+    generated_symbolic_not_equal_boolean_source(false, false), false,
+    "equal immutable boolean expires inequality store")
+check_generated_source(
+    generated_symbolic_not_equal_boolean_source(true, true), true,
+    "distinct immutable boolean preserves inequality append")
+check_generated_source(
+    generated_symbolic_not_equal_boolean_source(true, false), false,
+    "equal immutable boolean expires inequality append")
+check_generated_source(
+    "use core\n" +
+        "refine NotSame = list where(items) { items[0] != items[1] }\n" +
+        "@effects(read) fn require_fact(NotSame items) int { return items.len }\n" +
+        "fn generated() int { mut list<str> items = [\"safe\", \"unsafe\"]\n" +
+        "if NotSame(items) { items[0] = items[1]\n" +
+        "return require_fact(items) }\n0 }\ngenerated()\n0\n",
+    false, "unknown dynamic values cannot prove inequality preservation")
+check_generated_source(
+    "use core\ndef safe = \"safe\"\ndef forbidden = \"unsafe\"\n" +
+        "refine NotForbidden = list where(items) { items[-1] != forbidden }\n" +
+        "@effects(read) fn require_fact(NotForbidden items) int { return items.len }\n" +
+        "fn generated() int { mut list<str> items = [\"other\", \"safe\"]\n" +
+        "if NotForbidden(items) { def safe = \"unsafe\"\n" +
+        "items[-1] = safe\nreturn require_fact(items) }\n0 }\ngenerated()\n0\n",
+    false, "local literal shadow cannot use a global value proof")
+check_generated_source(
+    "use core\ndef forbidden = \"unsafe\"\n" +
+        "refine NotForbidden = list where(items) { items[-1] != forbidden }\n" +
+        "@effects(read) fn require_fact(NotForbidden items) int { return items.len }\n" +
+        "fn generated(str safe) int { mut list<str> items = [\"other\", \"safe\"]\n" +
+        "if NotForbidden(items) { items[-1] = safe\n" +
+        "return require_fact(items) }\n0 }\ngenerated(\"unsafe\")\n0\n",
+    false, "parameter literal shadow cannot use a global value proof")
+check_generated_source(generated_symbolic_not_equal_integer_source(false, true),
+                       true, "distinct immutable integer preserves inequality store")
+check_generated_source(generated_symbolic_not_equal_integer_source(false, false),
+                       false, "equal immutable integer expires inequality store")
+check_generated_source(generated_symbolic_not_equal_integer_source(true, true),
+                       true, "distinct immutable integer preserves inequality append")
+check_generated_source(generated_symbolic_not_equal_integer_source(true, false),
+                       false, "equal immutable integer expires inequality append")
+check_generated_source(generated_symbolic_greater_integer_source(false, true),
+                       true, "greater immutable integer preserves relational store")
+check_generated_source(generated_symbolic_greater_integer_source(false, false),
+                       false, "lower immutable integer expires relational store")
+check_generated_source(generated_symbolic_greater_integer_source(true, true),
+                       true, "greater immutable integer preserves relational append")
+check_generated_source(generated_symbolic_greater_integer_source(true, false),
+                       false, "lower immutable integer expires relational append")
+def worker0 = thread.thread_spawn(run_generated_cases, 0)
+def worker1 = thread.thread_spawn(run_generated_cases, 1)
+def worker2 = thread.thread_spawn(run_generated_cases, 2)
+def worker3 = thread.thread_spawn(run_generated_cases, 3)
+def failure0 = thread.thread_join(worker0)
+def failure1 = thread.thread_join(worker1)
+def failure2 = thread.thread_join(worker2)
+def failure3 = thread.thread_join(worker3)
+assert(failure0 == "", failure0)
+assert(failure1 == "", failure1)
+assert(failure2 == "", failure2)
+assert(failure3 == "", failure3)
+NY
+}

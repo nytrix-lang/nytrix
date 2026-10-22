@@ -1,0 +1,23 @@
+shape eprint_varargs_abi {
+  family "runtime/execution"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+fn eprint_one(any value) int {
+   eprint(value)
+   0
+}
+fn eprint_many(any left, any right) int {
+   eprint("pair", left, right)
+   0
+}
+assert(eprint() == 0, "zero-argument eprint uses the variadic list ABI")
+assert(eprint_one("one") == 0,
+   "one variadic eprint argument uses the list ABI inside a function")
+assert(eprint_many(4, true) == 0,
+   "multiple mixed eprint arguments preserve string locals inside a function")
+NY
+}

@@ -1,0 +1,54 @@
+shape no_std_imported_effect_row_is_preserved {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "capability", "modules", "no-stdlib"]
+  flags_matrix "-no-std --effect-require-known --native --run; -no-std --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; -no-std --effect-require-known --native-backend=llvm --jit --jit-engine=orc; -no-std --effect-require-known --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use "./no-stdlib-provider.ny" as provider
+
+@effects(cap("provider.math.read"))
+fn forward_read() int {
+  provider.math.read_resource()
+}
+assert(forward_read() == 7, "imported capability row is preserved")
+NY
+}
+
+shape no_std_imported_effect_row_cannot_escape_narrow_contract {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "capability", "modules", "no-stdlib", "negative"]
+  flags_matrix "-no-std --effect-require-known --native --run; -no-std --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; -no-std --effect-require-known --native-backend=llvm --jit --jit-engine=orc; -no-std --effect-require-known --native-only"
+  expect compile_fail
+  expect_message "effect contract violation"
+  source ny <<'NY'
+use "./no-stdlib-provider.ny" as provider
+
+@effects(none)
+fn underdeclared() int {
+  provider.math.read_resource()
+}
+
+underdeclared()
+NY
+}
+
+shape no_std_imported_capability_identity_is_not_collapsed {
+  family "typing/effects"
+  generator "regression"
+  features ["ny", "test", "typing", "effects", "capability", "modules", "no-stdlib", "negative"]
+  flags_matrix "-no-std --effect-require-known --native --run; -no-std --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; -no-std --effect-require-known --native-backend=llvm --jit --jit-engine=orc; -no-std --effect-require-known --native-only"
+  expect compile_fail
+  expect_message "effect contract violation"
+  source ny <<'NY'
+use "./no-stdlib-provider.ny" as provider
+
+@effects(cap("other.resource.read"))
+fn wrong_capability() int {
+  provider.math.read_resource()
+}
+
+wrong_capability()
+NY
+}

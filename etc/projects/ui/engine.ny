@@ -2,55 +2,60 @@
 
 ;; Keywords: ui engine example
 ;; A collection of rendering paths, benchmarks, and utilities for testing, profiling, diagnostics, and tooling.
-use std.core
-use std.core.common as common
-use std.core.str as str
-use std.math
-use std.math.float (is_nan, is_inf)
-use std.os (exit)
-use std.os.subprocess (run_capture)
-use std.os.fs as osfs
-use std.os.path as ospath
-use std.os.ui.render.viewer.app as ui_app
-use std.os.ui.assets.catalog as asset_catalog
-use std.os.ui.assets.viewer as ui_assets
-use std.os.ui.render.camera as camera
-use std.os.ui.window.consts
-use std.os.ui.render.diag as ui_diag
-use std.os.ui.render.dump as ui_dump
-use std.os.ui.render.viewer.gui as gui
-use std.os.ui.render.viewer.idle as ui_idle
-use std.os.ui.render.dump as ui_profile
-use std.os.ui.render as gfx
-use std.os.ui.render.matrix as rmat
-use std.os.ui.render.viewer.term as terminal
-use std.os.ui.render.viewer.runtime as ui_runtime
-use std.os.ui.render.scene as scene_engine
-use std.os.ui.render.viewer.engine.selection as ui_selection
-use std.os.ui.assets.batch as asset_batch
-use std.os.ui.render.viewer.bootstrap as ui_bootstrap
-use std.os.ui.render.viewer.engine.browser as viewer_browser
-use std.os.ui.render.viewer.engine.catalog as viewer_catalog
-use std.os.ui.render.viewer.engine.cli as viewer_cli
-use std.os.ui.render.viewer.dock as ui_editor
-use std.os.ui.render.viewer.engine.editor.chrome as demo_editor
-use std.os.ui.render.viewer.engine.hierarchy as viewer_hierarchy
-use std.os.ui.render.viewer.icons as viewer_icons
-use std.os.ui.render.viewer.engine.inspector as viewer_inspector
-use std.os.ui.render.viewer.keyboard as viewer_keyboard
-use std.os.ui.render.viewer.engine.loading as viewer_loading
-use std.os.ui.render.viewer.loop as ui_loop
-use std.os.ui.render.viewer.engine.overlay as viewer_overlay
-use std.os.ui.render.viewer.engine.panels as viewer_panels
-use std.os.ui.render.viewer.engine.shell as ui_shell
-use std.os.ui.render.viewer.engine.tools as viewer_tools
-use std.os.ui.window
-use std.os.ui.window.input as uin
-use std.os.ui.window.native as win_native
-use std.math.parse.3d.gltf as gltf
-use std.os.ui.render.viewer.engine.env
-use std.os.ui.render.viewer.engine.gizmo
-use std.os.ui.render.viewer.engine.state
+use core
+use core.common as common
+use core.str as str
+use core.math
+use core.math.float (is_nan, is_inf)
+use core.os (exit)
+use core.os.subprocess (run_capture)
+use core.os.fs as osfs
+use core.os.path as ospath
+use core.os.ui.render.viewer.app as ui_app
+use core.os.ui.assets.catalog as asset_catalog
+use core.os.ui.assets.viewer as ui_assets
+use core.os.ui.render.camera as camera
+use core.os.ui.window.consts
+use core.os.ui.render.diag as ui_diag
+use core.os.ui.render.dump as ui_dump
+use core.os.ui.render.viewer.gui as gui
+use core.os.ui.render.viewer.idle as ui_idle
+use core.os.ui.render.dump as ui_profile
+use core.os.ui.render as gfx
+use core.os.ui.render.matrix as rmat
+use core.os.ui.render.viewer.term as terminal
+use core.os.ui.render.viewer.runtime as ui_runtime
+use core.os.ui.render.scene as scene_engine
+use core.os.ui.render.viewer.engine.selection as ui_selection
+use core.os.ui.assets.batch as asset_batch
+use core.os.ui.render.viewer.bootstrap as ui_bootstrap
+use core.os.ui.render.viewer.engine.browser as viewer_browser
+use core.os.ui.render.viewer.engine.catalog as viewer_catalog
+use core.os.ui.render.viewer.engine.cli as viewer_cli
+use core.os.ui.render.viewer.dock as ui_editor
+use core.os.ui.render.viewer.engine.editor.chrome as demo_editor
+use core.os.ui.render.viewer.engine.hierarchy as viewer_hierarchy
+use core.os.ui.render.viewer.icons as viewer_icons
+use core.os.ui.render.viewer.engine.inspector as viewer_inspector
+use core.os.ui.render.viewer.keyboard as viewer_keyboard
+use core.os.ui.render.viewer.engine.loading as viewer_loading
+use core.os.ui.render.viewer.loop as ui_loop
+use core.os.ui.render.viewer.engine.overlay as viewer_overlay
+use core.os.ui.render.viewer.engine.panels as viewer_panels
+use core.os.ui.render.viewer.engine.shell as ui_shell
+use core.os.ui.render.viewer.engine.tools as viewer_tools
+use core.os.ui.window
+use core.os.ui.window.input as uin
+use core.os.ui.window.native as win_native
+use core.math.parse.3d.gltf as gltf
+use core.os.ui.render.viewer.engine.env
+use core.os.ui.render.viewer.engine.gizmo
+use core.os.ui.render.viewer.engine.state
+
+mut any win = 0
+mut str _ui_update_stage = ""
+mut list _gui_editor_rect = [20.0, 20.0, 520.0, 700.0]
+mut list _gui_inspector_rect = [860.0, 20.0, 390.0, 430.0]
 
 fn _render_set_next_frame_load_color(any enabled) bool { gfx.set_next_frame_load_color(enabled) }
 
@@ -67,6 +72,7 @@ fn _render_draw_skybox(any tex_id) bool { gfx.draw_skybox(int(tex_id)) }
 fn _render_vertex_offset() int { gfx.renderer_vertex_offset() }
 
 fn _render_reset_overlay_state() bool { gfx.reset_overlay_state() }
+
 def STARTUP_ONE_ARG_CMDS = own(["load", "timeout", "skybox", "anim", "gizmo"])
 def HUD_BG_U32 = 0xE6000000
 def WHITE_U32 = 0xFFFFFFFF
@@ -606,6 +612,9 @@ fn _gui_apply_tiled_layout(bool force=false) bool {
       _gui_show_editor, _gui_show_gallery, _gui_show_probe, _gui_show_browser,
       _gui_show_inspector, _gui_show_profiler, _gui_show_workspace, _gui_show_graph
    )
+   def editor_plan, inspector_plan = plan.get("editor_main", dict(0)), plan.get("inspector", dict(0))
+   if is_dict(editor_plan) { _gui_editor_rect = editor_plan.get("rect", _gui_editor_rect) }
+   if is_dict(inspector_plan) { _gui_inspector_rect = inspector_plan.get("rect", _gui_inspector_rect) }
    if bool(plan.get("focus_only", false)) {
       def ids = ui_shell.focus_window_ids(
          _gui_show_profiler, _gui_show_workspace, _gui_show_graph, _gui_show_inspector,
@@ -638,7 +647,7 @@ fn _ui_cli_color(str code, str text) str {
 fn _ui_has_help_arg() bool {
    mut i = 1
    while i < argc() {
-      def a = str.lower(str.strip(to_str(argv(i))))
+      def str a = str.lower(str.strip(to_str(argv(i))))
       if a == "-h" || a == "--help" || a == "help" { return true }
       i += 1
    }
@@ -690,7 +699,8 @@ fn _ui_print_help() any {
 
 fn _ui_apply_cli_options() bool {
    ui_profile.apply_verbose_argv()
-   def opts = viewer_cli.parse_options(viewer_cli.argv_list())
+   def cli_args = viewer_cli.argv_list()
+   def opts = viewer_cli.parse_options(cli_args)
    if bool(opts.get("verbose", false)) { ui_profile.apply_verbose_argv() }
    if bool(opts.get("surfaced_headless", false)) {
       ui_profile.force_surfaced_headless()
@@ -1948,7 +1958,7 @@ fn _startup_trace(stage, t0) {
    }
    def ms = ui_profile.elapsed_ms(t0)
    ui_profile.print_text("[startup] " + stage + "=" + to_str(ms) + "ms")
-   ms
+   0
 }
 
 fn _log_projection() {
@@ -2138,7 +2148,7 @@ fn _warm_mesh_helpers() {
    if !buf {
       return 0
    }
-   push_vertex(buf, 0.0, 0.0, 0.0, 0.0, 0.0, WHITE)
+   push_vertex(buf, 0.0, 0.0, 0.0, 0.0, 0.0, gfx.WHITE)
    free(buf)
    gltf.gltf_warm_runtime()
    0
@@ -2279,9 +2289,22 @@ fn _setup_window() {
       exit(2)
    }
    def want_fullscreen = ui_profile.env_truthy_cached("NY_UI_FULLSCREEN")
-   def opened = ui_bootstrap.open_viewer_window("Nytrix", APP_MSAA, APP_VSYNC, APP_FILTER_LINEAR, want_fullscreen, ui_profile.headless_enabled())
-   win = opened.get("win", 0)
-   _win_w, _win_h = float(opened.get("w", _win_w)), float(opened.get("h", _win_h))
+   mut open_handle = 0
+   if want_fullscreen {
+      open_handle = ui_runtime.open_fullscreen("Nytrix", APP_MSAA, APP_VSYNC, APP_FILTER_LINEAR)
+   } else {
+      def headless = ui_profile.headless_enabled()
+      def extent = ui_app.app_window_extent_from_env(headless)
+      def open_w = int(extent.get(0, 1280))
+      def open_h = int(extent.get(1, 720))
+      def flags = headless ? WINDOW_HIDE :
+         WINDOW_FOCUS_ON_SHOW | (ui_bootstrap.raw_mouse_enabled() ? WINDOW_RAW_MOUSE : 0)
+      open_handle = ui_runtime.open_windowed(
+         "Nytrix", open_w, open_h, flags, APP_VSYNC, APP_FILTER_LINEAR, APP_MSAA
+      )
+      _win_w, _win_h = float(open_w), float(open_h)
+   }
+   win = open_handle
    if !win {
       def fail_msg = ui_bootstrap.failure_summary(get_active_backend_name(), ui_profile.headless_enabled())
       ui_profile.print_line("ui:window:fail", fail_msg)
@@ -2323,26 +2346,51 @@ fn _setup_camera() {
    }
    camera.set_fov(camthreed, start_fov)
    camera.set_smoothing(camthreed, 25.0, 10.0)
-   _cam_px, _cam_py, _cam_pz = camthreed.get(0), camthreed.get(1), camthreed.get(2)
-   _vx, _vy, _vz = camthreed.get(3), camthreed.get(4), camthreed.get(5)
-   _h_yaw, _h_pch = camthreed.get(6), camthreed.get(7)
-   _target_yaw, _target_pch = camthreed.get(8), camthreed.get(9)
-   _spdx, _spdy, _spd_z = camthreed.get(17), camthreed.get(18), camthreed.get(19)
-   _cam_fov, _sens = float(camthreed.get(16)), float(camthreed.get(10)) * 3.5
-   _spd, _drag = float(camthreed.get(11)), float(camthreed.get(12))
-   _damp, _spdmul = float(camthreed.get(14)), float(camthreed.get(15))
-   _p_min, _p_max = float(camthreed.get(22, -89.9)), float(camthreed.get(23, 89.9))
-   _cam_px_cache, _cam_py_cache, _cam_pz_cache = _cam_px, _cam_py, _cam_pz
+   _cam_px = camthreed.get(0)
+   _cam_py = camthreed.get(1)
+   _cam_pz = camthreed.get(2)
+   _vx = camthreed.get(3)
+   _vy = camthreed.get(4)
+   _vz = camthreed.get(5)
+   _h_yaw = camthreed.get(6)
+   _h_pch = camthreed.get(7)
+   _target_yaw = camthreed.get(8)
+   _target_pch = camthreed.get(9)
+   _spdx = camthreed.get(17)
+   _spdy = camthreed.get(18)
+   _spd_z = camthreed.get(19)
+   _cam_fov = float(camthreed.get(16))
+   _sens = float(camthreed.get(10)) * 3.5
+   _spd = float(camthreed.get(11))
+   _drag = float(camthreed.get(12))
+   _damp = float(camthreed.get(14))
+   _spdmul = float(camthreed.get(15))
+   _p_min = float(camthreed.get(22, -89.9))
+   _p_max = float(camthreed.get(23, 89.9))
+   _cam_px_cache = _cam_px
+   _cam_py_cache = _cam_py
+   _cam_pz_cache = _cam_pz
+   _proj_dirty = true
 }
 
 fn _sync_cam_state_from_camthreed() {
-   _cam_px, _cam_py, _cam_pz = camthreed.get(0, _cam_px), camthreed.get(1, _cam_py), camthreed.get(2, _cam_pz)
-   _vx, _vy, _vz = camthreed.get(3, _vx), camthreed.get(4, _vy), camthreed.get(5, _vz)
-   _h_yaw, _h_pch = camthreed.get(6, _h_yaw), camthreed.get(7, _h_pch)
-   _target_yaw, _target_pch = camthreed.get(8, _target_yaw), camthreed.get(9, _target_pch)
-   _spdx, _spdy, _spd_z = camthreed.get(17, _spdx), camthreed.get(18, _spdy), camthreed.get(19, _spd_z)
+   _cam_px = camthreed.get(0, _cam_px)
+   _cam_py = camthreed.get(1, _cam_py)
+   _cam_pz = camthreed.get(2, _cam_pz)
+   _vx = camthreed.get(3, _vx)
+   _vy = camthreed.get(4, _vy)
+   _vz = camthreed.get(5, _vz)
+   _h_yaw = camthreed.get(6, _h_yaw)
+   _h_pch = camthreed.get(7, _h_pch)
+   _target_yaw = camthreed.get(8, _target_yaw)
+   _target_pch = camthreed.get(9, _target_pch)
+   _spdx = camthreed.get(17, _spdx)
+   _spdy = camthreed.get(18, _spdy)
+   _spd_z = camthreed.get(19, _spd_z)
    _cam_fov = camthreed.get(16, _cam_fov)
-   _cam_px_cache, _cam_py_cache, _cam_pz_cache = _cam_px, _cam_py, _cam_pz
+   _cam_px_cache = _cam_px
+   _cam_py_cache = _cam_py
+   _cam_pz_cache = _cam_pz
    _proj_dirty = true
 }
 
@@ -2359,8 +2407,8 @@ fn _event_mouse_xy_view(any data) list {
    if !is_dict(data) { return _cursor_xy_view() }
    def raw_x = float(data.get("x", 0.0))
    def raw_y = float(data.get("y", 0.0))
-   def ww = max(1.0, float(_win_w))
-   def wh = max(1.0, float(_win_h))
+   def f64 ww = float(max(1.0, float(_win_w)))
+   def f64 wh = float(max(1.0, float(_win_h)))
    def raw_inside = raw_x >= 0.0 && raw_y >= 0.0 && raw_x <= ww && raw_y <= wh
    def scaled = uin.scale_event_xy(win, data, _win_w, _win_h)
    mut sx = float(scaled.get("x", raw_x))
@@ -2440,35 +2488,35 @@ fn _scene_drag_begin(x, y, any pick=0) bool {
    def drag_bounds = _scene_selection_bounds()
    def drag_basis = scene_engine.scene_drag_camera_basis(_h_yaw, _h_pch)
    def drag_wpp = scene_engine.scene_drag_pixel_scale(drag_bounds, _cam_px, _cam_py, _cam_pz, _cam_fov)
-   _scene_drag_state = scene_engine.scene_drag_begin_state(active_scene, x, y, _gizmo_mode, {
-         "axis": _gizmo_axis,
-         "precise": _gizmo_precise || _move_shift || key_down(win, uin.KEY_LEFT_SHIFT) || key_down(win, uin.KEY_RIGHT_SHIFT) || key_down(win, uin.KEY_SHIFT),
-         "snap": _gizmo_snap || key_down(win, uin.KEY_LEFT_CONTROL) || key_down(win, uin.KEY_RIGHT_CONTROL) || key_down(win, uin.KEY_CTRL),
-         "screen_axis_x": is_dict(pick) ? float(pick.get("screen_axis_x", 0.0)) : 0.0,
-         "screen_axis_y": is_dict(pick) ? float(pick.get("screen_axis_y", 0.0)) : 0.0,
-         "axis_world_per_pixel": is_dict(pick) ? float(pick.get("screen_world_per_pixel", 0.0)) : 0.0,
-         "drag_world_per_pixel": drag_wpp,
-         "drag_right_x": float(drag_basis.get("right_x", 1.0)),
-         "drag_right_y": float(drag_basis.get("right_y", 0.0)),
-         "drag_right_z": float(drag_basis.get("right_z", 0.0)),
-         "drag_up_x": float(drag_basis.get("up_x", 0.0)),
-         "drag_up_y": float(drag_basis.get("up_y", 1.0)),
-         "drag_up_z": float(drag_basis.get("up_z", 0.0)),
-         "axis_ray_ok": false,
-         "axis_coord_start": 0.0,
-         "axis_world_delta_ok": false,
-         "axis_world_delta": 0.0,
-         "ray_world_delta_ok": false,
-         "ray_start_x": 0.0,
-         "ray_start_y": 0.0,
-         "ray_start_z": 0.0,
-         "ray_plane_nx": 0.0,
-         "ray_plane_ny": 0.0,
-         "ray_plane_nz": 0.0,
-         "ray_world_dx": 0.0,
-         "ray_world_dy": 0.0,
-         "ray_world_dz": 0.0
-   })
+   mut dict drag_opts = dict(27)
+   drag_opts["axis"] = _gizmo_axis
+   drag_opts["precise"] = _gizmo_precise || _move_shift || key_down(win, uin.KEY_LEFT_SHIFT) || key_down(win, uin.KEY_RIGHT_SHIFT) || key_down(win, uin.KEY_SHIFT)
+   drag_opts["snap"] = _gizmo_snap || key_down(win, uin.KEY_LEFT_CONTROL) || key_down(win, uin.KEY_RIGHT_CONTROL) || key_down(win, uin.KEY_CTRL)
+   drag_opts["screen_axis_x"] = is_dict(pick) ? float(pick.get("screen_axis_x", 0.0)) : 0.0
+   drag_opts["screen_axis_y"] = is_dict(pick) ? float(pick.get("screen_axis_y", 0.0)) : 0.0
+   drag_opts["axis_world_per_pixel"] = is_dict(pick) ? float(pick.get("screen_world_per_pixel", 0.0)) : 0.0
+   drag_opts["drag_world_per_pixel"] = drag_wpp
+   drag_opts["drag_right_x"] = float(drag_basis.get("right_x", 1.0))
+   drag_opts["drag_right_y"] = float(drag_basis.get("right_y", 0.0))
+   drag_opts["drag_right_z"] = float(drag_basis.get("right_z", 0.0))
+   drag_opts["drag_up_x"] = float(drag_basis.get("up_x", 0.0))
+   drag_opts["drag_up_y"] = float(drag_basis.get("up_y", 1.0))
+   drag_opts["drag_up_z"] = float(drag_basis.get("up_z", 0.0))
+   drag_opts["axis_ray_ok"] = false
+   drag_opts["axis_coord_start"] = 0.0
+   drag_opts["axis_world_delta_ok"] = false
+   drag_opts["axis_world_delta"] = 0.0
+   drag_opts["ray_world_delta_ok"] = false
+   drag_opts["ray_start_x"] = 0.0
+   drag_opts["ray_start_y"] = 0.0
+   drag_opts["ray_start_z"] = 0.0
+   drag_opts["ray_plane_nx"] = 0.0
+   drag_opts["ray_plane_ny"] = 0.0
+   drag_opts["ray_plane_nz"] = 0.0
+   drag_opts["ray_world_dx"] = 0.0
+   drag_opts["ray_world_dy"] = 0.0
+   drag_opts["ray_world_dz"] = 0.0
+   _scene_drag_state = scene_engine.scene_drag_begin_state(active_scene, x, y, _gizmo_mode, drag_opts)
    _scene_drag_state["bounds"] = drag_bounds
    def ray_start = _scene_world_gizmo_axis_drag_coord(_gizmo_axis, x, y, drag_bounds)
    if bool(ray_start.get("ok", false)) {
@@ -2635,13 +2683,17 @@ fn _apply_scene_fit_camera(mesh) {
       return false
    }
    def dump_pose = ui_profile.dump_pose_enabled(_auto_dump_enabled, _cli_dump_requested, _batch_dump_enabled(), _gui_dump_suite_active, _gui_probe_mode_enabled())
-   def any fit_opts = {
-      "dump_pose": dump_pose,
-      "wide_mode": _batch_dump_enabled() || _proof_dump_active(),
-      "win_w": _win_w, "win_h": _win_h,
-      "cam_x": _cam_slot_num(0, 0.0), "cam_y": _cam_slot_num(1, 0.0), "cam_z": _cam_slot_num(2, 0.0),
-      "cam_yaw": _cam_slot_num(6, 0.0), "cam_pitch": _cam_slot_num(7, 0.0), "cam_fov": _cam_slot_num(16, _cam_fov)
-   }
+   mut dict fit_opts = dict(11)
+   fit_opts["dump_pose"] = dump_pose
+   fit_opts["wide_mode"] = _batch_dump_enabled() || _proof_dump_active()
+   fit_opts["win_w"] = _win_w
+   fit_opts["win_h"] = _win_h
+   fit_opts["cam_x"] = _cam_slot_num(0, 0.0)
+   fit_opts["cam_y"] = _cam_slot_num(1, 0.0)
+   fit_opts["cam_z"] = _cam_slot_num(2, 0.0)
+   fit_opts["cam_yaw"] = _cam_slot_num(6, 0.0)
+   fit_opts["cam_pitch"] = _cam_slot_num(7, 0.0)
+   fit_opts["cam_fov"] = _cam_slot_num(16, _cam_fov)
    def st = camera.fit_scene_state(mesh, fit_opts)
    if !is_dict(st) || !st.contains("cam_x") { return false }
    _trace_fit_camera_apply(mesh, float(st.get("fit_cam_x", 0.0)), float(st.get("fit_cam_y", 0.0)), float(st.get("fit_cam_z", 0.0)),
@@ -2862,13 +2914,18 @@ fn _draw_infinite_world_grid(cam_px, cam_pz, include_axes=false) {
    def line_w, axis_w = 0.40, 0.60
    def gx, gz = floor(cam_px / fine_cell) * fine_cell, floor(cam_pz / fine_cell) * fine_cell
    def mx, mz = floor(cam_px / major_cell) * major_cell, floor(cam_pz / major_cell) * major_cell
-   rmat.mat4_translate_into(gx, 0.0, gz, M_PR)
+   def trace_grid = ui_profile.env_truthy_cached("NY_UI_GROUP_TRACE")
+   if trace_grid { ui_profile.print_text("[ui:grid] matrix.before") }
+   M_PR = rmat.mat4_translate_into(gx, 0.0, gz, M_PR)
+   if trace_grid { ui_profile.print_text("[ui:grid] matrix.after") }
    gfx.set_model_matrix(M_PR)
+   if trace_grid { ui_profile.print_text("[ui:grid] pair.before") }
    draw_grid_pair(
       fine_span, fine_cell, [0.22,0.28,0.38,0.34], [0.44,0.56,0.74,0.62], line_w,
       major_span, major_cell, [0.34,0.44,0.60,0.42], [0.70,0.84,1.00,0.88], line_w,
       mx - gx, mz - gz
    )
+   if trace_grid { ui_profile.print_text("[ui:grid] pair.after") }
    if include_axes {
       def ax, ay, az = 0.0 - gx, 0.035, 0.0 - gz
       def len = major_cell * float(major_span)
@@ -3158,12 +3215,14 @@ fn _exec_anim_cmd(cmd, parts) bool {
    }
    elif eq(sub, "next") {
       if _anim_count > 0 {
-         def _discard_19 = _anim_select((_anim_idx + 1) % _anim_count)
+         def int anim_count = int(max(1, _anim_count))
+         def _discard_19 = _anim_select((_anim_idx + 1) % anim_count)
       }
    }
    elif eq(sub, "prev") {
       if _anim_count > 0 {
-         def _discard_20 = _anim_select((_anim_idx + _anim_count - 1) % _anim_count)
+         def int anim_count = int(max(1, _anim_count))
+         def _discard_20 = _anim_select((_anim_idx + anim_count - 1) % anim_count)
       }
    }
    elif eq(sub, "speed") {
@@ -3306,21 +3365,20 @@ fn _draw_gui_asset_browser_body(str host_id, bool standalone=false) {
    def filtered_names = asset_state.get("filtered_names", [])
    def filter_key = to_str(asset_state.get("filter_key", ""))
    def selected_idx = int(asset_state.get("selected_idx", 0))
-   def any browser_state = {
-      "idp": idp,
-      "standalone": standalone,
-      "win_w": win_w,
-      "win_h": win_h,
-      "compact": compact,
-      "tab": _gui_browser_tab,
-      "filter": _gui_model_filter,
-      "show_paths": _gui_model_show_paths,
-      "loaded_name": _loaded_scene_name,
-      "selected_name": _gui_model_selected_name,
-      "scene_loaded": is_dict(active_scene),
-      "catalog": asset_state.get("catalog", 0),
-      "parity_lock": ui_profile.parity_lock_stats_enabled()
-   }
+   mut dict browser_state = dict(13)
+   browser_state["idp"] = idp
+   browser_state["standalone"] = standalone
+   browser_state["win_w"] = win_w
+   browser_state["win_h"] = win_h
+   browser_state["compact"] = compact
+   browser_state["tab"] = _gui_browser_tab
+   browser_state["filter"] = _gui_model_filter
+   browser_state["show_paths"] = _gui_model_show_paths
+   browser_state["loaded_name"] = _loaded_scene_name
+   browser_state["selected_name"] = _gui_model_selected_name
+   browser_state["scene_loaded"] = is_dict(active_scene)
+   browser_state["catalog"] = asset_state.get("catalog", 0)
+   browser_state["parity_lock"] = ui_profile.parity_lock_stats_enabled()
    def res = viewer_browser.draw_body(viewer_browser.prepare_state(browser_state, names, filtered_names, filter_key, selected_idx))
    _browser_apply_result(res)
    def mark = standalone ? "asset_draw_standalone" : (compact ? "asset_draw_compact" : "asset_draw_full")
@@ -3409,18 +3467,18 @@ fn _editor_catalog_tab(bool dense) {
    def selected_idx = max(0, _gui_selected_pick_index(pick_names, _gui_model_selected_name))
    gui.text_colored("Assets " + to_str(pick_names.len) + " / " + to_str(names.len) + "   selected " + (_gui_model_selected_name.len > 0 ? _gui_model_selected_name : "<none>"), [0.70, 0.70, 0.70, 0.94])
    def grid_h = max(96.0, gui.remaining_h(4.0))
-   def res = viewer_catalog.draw_grid("editor_asset", "fast", pick_names, ui_app.app_window_w("editor_main", 520.0), grid_h, true, {
-      "show_paths": false,
-      "scene_loaded": is_dict(active_scene),
-      "loaded_name": _loaded_scene_name,
-      "selected_name": _gui_model_selected_name,
-      "selected_idx": selected_idx,
-      "ensure_selected": false,
-      "parity_lock": ui_profile.parity_lock_stats_enabled(),
-      "hide_detail": true,
-      "file_list": true,
-      "show_icons": false
-   })
+   mut dict grid_opts = dict(10)
+   grid_opts["show_paths"] = false
+   grid_opts["scene_loaded"] = is_dict(active_scene)
+   grid_opts["loaded_name"] = _loaded_scene_name
+   grid_opts["selected_name"] = _gui_model_selected_name
+   grid_opts["selected_idx"] = selected_idx
+   grid_opts["ensure_selected"] = false
+   grid_opts["parity_lock"] = ui_profile.parity_lock_stats_enabled()
+   grid_opts["hide_detail"] = true
+   grid_opts["file_list"] = true
+   grid_opts["show_icons"] = false
+   def res = viewer_catalog.draw_grid("editor_asset", "fast", pick_names, ui_app.app_window_w("editor_main", 520.0), grid_h, true, grid_opts)
    def clicked = to_str(res.get("clicked", ""))
    if clicked.len > 0 {
       _gui_model_selected_name = clicked
@@ -3455,7 +3513,11 @@ fn _editor_legacy_scene_tab(bool dense) {
 }
 
 fn _editor_style_tab() {
-   def any style_state = {"scale": _gui_scale, "gap": _gui_layout_gap, "bg": APP_BG, "accent": _gui_accent}
+   mut dict style_state = dict(4)
+   style_state["scale"] = _gui_scale
+   style_state["gap"] = _gui_layout_gap
+   style_state["bg"] = APP_BG
+   style_state["accent"] = _gui_accent
    def st = demo_editor.draw_style_tab(style_state)
    def scale0 = _gui_scale
    _gui_scale = float(st.get("scale", _gui_scale))
@@ -3469,20 +3531,19 @@ fn _editor_style_tab() {
 }
 
 fn _editor_layout_tab(bool dense, bool compact_header, bool compact, str layout_now, str active_shot) {
-   def any layout_state = {
-      "dense": bool(dense),
-      "compact_header": bool(compact_header),
-      "compact": bool(compact),
-      "layout_now": to_str(layout_now),
-      "active_shot": to_str(active_shot),
-      "layout_items": _gui_layout_preset_items,
-      "shot_items": _gui_shot_preset_items,
-      "slot_items": _gui_layout_slot_items,
-      "probe_overlay": _gui_probe_overlay,
-      "layout_name": _gui_layout_preset_name,
-      "shot_name": _gui_shot_name,
-      "slot_idx": _gui_layout_slot_idx,
-   }
+   mut dict layout_state = dict(12)
+   layout_state["dense"] = bool(dense)
+   layout_state["compact_header"] = bool(compact_header)
+   layout_state["compact"] = bool(compact)
+   layout_state["layout_now"] = to_str(layout_now)
+   layout_state["active_shot"] = to_str(active_shot)
+   layout_state["layout_items"] = _gui_layout_preset_items
+   layout_state["shot_items"] = _gui_shot_preset_items
+   layout_state["slot_items"] = _gui_layout_slot_items
+   layout_state["probe_overlay"] = _gui_probe_overlay
+   layout_state["layout_name"] = _gui_layout_preset_name
+   layout_state["shot_name"] = _gui_shot_name
+   layout_state["slot_idx"] = _gui_layout_slot_idx
    def res = demo_editor.draw_layout_tab(layout_state)
    _gui_probe_overlay = bool(res.get(0, _gui_probe_overlay))
    _gui_layout_preset_name = to_str(res.get(1, _gui_layout_preset_name))
@@ -3546,7 +3607,10 @@ fn _draw_gui_editor() {
    _main_loop_trace_once("[ui:gui-editor] fit.before")
    _gui_fit_standalone_editor()
    _main_loop_trace_once("[ui:gui-editor] begin_tool.before")
-   def tool = ui_editor.begin_tool("editor_main", _gui_show_editor, "Editor", 20.0, 20.0, 520.0, 700.0, editor_opts)
+   def er = _gui_editor_rect
+   def tool = ui_editor.begin_tool("editor_main", _gui_show_editor, "Editor",
+      float(er.get(0, 20.0)), float(er.get(1, 20.0)),
+      float(er.get(2, 520.0)), float(er.get(3, 700.0)), editor_opts)
    _main_loop_trace_once("[ui:gui-editor] begin_tool.after")
    _main_loop_trace_once("[ui:gui-editor] mark.before")
    t_prof = ui_profile.mark_next(prof, "editor_begin_tool", t_prof)
@@ -3554,7 +3618,6 @@ fn _draw_gui_editor() {
    _main_loop_trace_once("[ui:gui-editor] body-read.before")
    def body = bool(tool.get(0, false))
    _main_loop_trace_once("[ui:gui-editor] body-read.after")
-   if ui_profile.gui_trace_enabled() { ui_profile.print_text("[ui:gui-editor] body=" + to_str(body)) }
    _main_loop_trace_once("[ui:gui-editor] close-check.before")
    if bool(tool.get(1, false)) {
       _gui_close_editor_shell()
@@ -3616,14 +3679,26 @@ fn _apply_tool_close_state(st, break_dock=true) bool {
 }
 
 fn _draw_gui_gallery(phase) {
-   def any gallery_state = {
-      "show": _gui_show_gallery, "tab": _gui_gallery_tab, "context_items": _gui_demo_context_items,
-      "combo": _gui_demo_combo, "radio": _gui_demo_radio, "toggle_a": _gui_demo_toggle_a,
-      "toggle_b": _gui_demo_toggle_b, "progress": _gui_demo_progress, "float": _gui_demo_float,
-      "int": _gui_demo_int, "accent": _gui_accent, "phase": phase, "frame_stats": _gui_frame_stats_cache,
-      "renderer_hotspot": _gui_renderer_hotspot_cache, "last_frame_ms": _last_frame_ms,
-      "last_draw_ms": _last_draw_ms, "last_ui_ms": _last_ui_ms, "fps": fps, "model_count": _model_names.len
-   }
+   mut dict gallery_state = dict(19)
+   gallery_state["show"] = _gui_show_gallery
+   gallery_state["tab"] = _gui_gallery_tab
+   gallery_state["context_items"] = _gui_demo_context_items
+   gallery_state["combo"] = _gui_demo_combo
+   gallery_state["radio"] = _gui_demo_radio
+   gallery_state["toggle_a"] = _gui_demo_toggle_a
+   gallery_state["toggle_b"] = _gui_demo_toggle_b
+   gallery_state["progress"] = _gui_demo_progress
+   gallery_state["float"] = _gui_demo_float
+   gallery_state["int"] = _gui_demo_int
+   gallery_state["accent"] = _gui_accent
+   gallery_state["phase"] = phase
+   gallery_state["frame_stats"] = _gui_frame_stats_cache
+   gallery_state["renderer_hotspot"] = _gui_renderer_hotspot_cache
+   gallery_state["last_frame_ms"] = _last_frame_ms
+   gallery_state["last_draw_ms"] = _last_draw_ms
+   gallery_state["last_ui_ms"] = _last_ui_ms
+   gallery_state["fps"] = fps
+   gallery_state["model_count"] = _model_names.len
    def st = viewer_tools.draw_gallery(gallery_state)
    _gui_show_gallery, _gui_demo_toggle_a, _gui_demo_toggle_b =
    bool(st.get("show", _gui_show_gallery)), bool(st.get("toggle_a", _gui_demo_toggle_a)), bool(st.get("toggle_b", _gui_demo_toggle_b))
@@ -3639,7 +3714,11 @@ fn _draw_gui_gallery(phase) {
 
 fn _draw_gui_graph() {
    _gui_init_editor_graph()
-   def any graph_state = {"show": _gui_show_graph, "nodes": _gui_graph_nodes, "links": _gui_graph_links, "workspace_grid": _gui_workspace_grid}
+   mut dict graph_state = dict(4)
+   graph_state["show"] = _gui_show_graph
+   graph_state["nodes"] = _gui_graph_nodes
+   graph_state["links"] = _gui_graph_links
+   graph_state["workspace_grid"] = _gui_workspace_grid
    def st = viewer_tools.draw_graph(graph_state)
    _gui_show_graph, _gui_graph_nodes, _gui_graph_links =
    bool(st.get("show", _gui_show_graph)), st.get("nodes", _gui_graph_nodes), st.get("links", _gui_graph_links)
@@ -3668,48 +3747,93 @@ fn _inspector_state(any rs, int part_count, int mat_mask) any {
       _gui_material_selected_part_idx = selected_part_idx
    }
    def edit_scale = is_dict(active_scene) ? float(active_scene.get("edit_scale", 1.0)) : 1.0
-   def any st = {
-      "tab": _gui_inspector_tab, "tab_items": viewer_inspector.TAB_ITEMS,
-      "renderer": display_rs, "renderer_hotspot": _gui_renderer_hotspot_cache,
-      "scene": is_dict(active_scene) ? active_scene : dict(0), "has_scene": is_dict(active_scene),
-      "show_scene": show_scene, "scene_name": _loaded_scene_name, "selected_path": selected_path,
-      "part_count": display_part_count, "mat_mask": mat_mask,
-      "selected_part": selected_part_idx, "selected_material": selected_material_idx,
-      "anim_count": _anim_count, "anim_time": _anim_time, "anim_duration": _anim_duration,
-      "anim_enabled": _anim_enabled, "anim_speed": _anim_speed,
-      "gizmo_mode": _gizmo_mode, "gizmo_axis": _gizmo_axis,
-      "gizmo_snap": _gizmo_snap, "gizmo_precise": _gizmo_precise, "gizmo_ruler": _gizmo_ruler,
-      "scene_selected": _scene_selected, "selection_rect": _scene_selection_rect,
-      "edit_tx": is_dict(active_scene) ? float(active_scene.get("edit_tx", 0.0)) : 0.0,
-      "edit_ty": is_dict(active_scene) ? float(active_scene.get("edit_ty", 0.0)) : 0.0,
-      "edit_tz": is_dict(active_scene) ? float(active_scene.get("edit_tz", 0.0)) : 0.0,
-      "edit_rx": is_dict(active_scene) ? float(active_scene.get("edit_rx", 0.0)) : 0.0,
-      "edit_ry": is_dict(active_scene) ? float(active_scene.get("edit_ry", 0.0)) : 0.0,
-      "edit_rz": is_dict(active_scene) ? float(active_scene.get("edit_rz", 0.0)) : 0.0,
-      "edit_sx": is_dict(active_scene) ? float(active_scene.get("edit_sx", edit_scale)) : 1.0,
-      "edit_sy": is_dict(active_scene) ? float(active_scene.get("edit_sy", edit_scale)) : 1.0,
-      "edit_sz": is_dict(active_scene) ? float(active_scene.get("edit_sz", edit_scale)) : 1.0,
-      "cam_x": _cam_px, "cam_y": _cam_py, "cam_z": _cam_pz,
-      "yaw": _h_yaw, "pitch": _h_pch, "fov": _cam_fov,
-      "speed": _spd, "sens": _sens, "rmb_sens": _rmb_look_sens_mul, "drag": _drag, "damp": _damp,
-      "is_ortho": is_ortho, "ortho_zoom": _ortho_zoom, "cursor_lock": _cursor_lock_enabled,
-      "stats": APP_STATS, "wire": APP_WIRE, "bg": APP_BG,
-      "gui_scale": _gui_scale, "layout_gap": _gui_layout_gap,
-      "workspace_grid": _gui_workspace_grid, "workspace_major": _gui_workspace_major,
-      "env_mode": _gui_env_mode, "env_items": _gui_env_mode_items,
-      "skybox_enabled": skybox_enabled, "skybox_tex": skybox_tex_id, "skybox_spec_tex": skybox_spec_tex_id,
-      "compare_env_tex": compare_env_tex_id, "neutral_env_tex": neutral_env_tex_id,
-      "scene_env_sensitive": is_dict(active_scene) && bool(active_scene.get("scene_env_sensitive_materials", false)),
-      "pref_studio": _scene_pref_studio, "pref_neutral": _scene_pref_neutral, "pref_reflect": _scene_pref_reflect,
-      "pref_visible": _scene_pref_visible, "pref_optical": _scene_pref_optical,
-      "msaa": APP_MSAA, "msaa_items": _gui_msaa_items, "vsync": APP_VSYNC, "filter_linear": APP_FILTER_LINEAR,
-      "backend": active_backend_name, "dpi_scale": _gui_dpi_scale,
-      "last_frame_ms": _last_frame_ms, "last_update_ms": _last_update_ms,
-      "last_world_ms": _last_world_ms, "last_draw_ms": _last_draw_ms, "last_ui_ms": _last_ui_ms,
-      "frame_ms_samples": _frame_ms_samples, "win_w": _win_w, "win_h": _win_h, "term_open": _term_open,
-      "inspector_w": ui_app.app_window_w("inspector", 390.0),
-      "last_dump": _gui_last_dump_path, "window_backend": backend()
-   }
+   mut dict st = dict(64)
+   st["tab"] = _gui_inspector_tab
+   st["tab_items"] = viewer_inspector.TAB_ITEMS
+   st["renderer"] = display_rs
+   st["renderer_hotspot"] = _gui_renderer_hotspot_cache
+   st["scene"] = is_dict(active_scene) ? active_scene : dict(0)
+   st["has_scene"] = is_dict(active_scene)
+   st["show_scene"] = show_scene
+   st["scene_name"] = _loaded_scene_name
+   st["selected_path"] = selected_path
+   st["part_count"] = display_part_count
+   st["mat_mask"] = mat_mask
+   st["selected_part"] = selected_part_idx
+   st["selected_material"] = selected_material_idx
+   st["anim_count"] = _anim_count
+   st["anim_time"] = _anim_time
+   st["anim_duration"] = _anim_duration
+   st["anim_enabled"] = _anim_enabled
+   st["anim_speed"] = _anim_speed
+   st["gizmo_mode"] = _gizmo_mode
+   st["gizmo_axis"] = _gizmo_axis
+   st["gizmo_snap"] = _gizmo_snap
+   st["gizmo_precise"] = _gizmo_precise
+   st["gizmo_ruler"] = _gizmo_ruler
+   st["scene_selected"] = _scene_selected
+   st["selection_rect"] = _scene_selection_rect
+   st["edit_tx"] = is_dict(active_scene) ? float(active_scene.get("edit_tx", 0.0)) : 0.0
+   st["edit_ty"] = is_dict(active_scene) ? float(active_scene.get("edit_ty", 0.0)) : 0.0
+   st["edit_tz"] = is_dict(active_scene) ? float(active_scene.get("edit_tz", 0.0)) : 0.0
+   st["edit_rx"] = is_dict(active_scene) ? float(active_scene.get("edit_rx", 0.0)) : 0.0
+   st["edit_ry"] = is_dict(active_scene) ? float(active_scene.get("edit_ry", 0.0)) : 0.0
+   st["edit_rz"] = is_dict(active_scene) ? float(active_scene.get("edit_rz", 0.0)) : 0.0
+   st["edit_sx"] = is_dict(active_scene) ? float(active_scene.get("edit_sx", edit_scale)) : 1.0
+   st["edit_sy"] = is_dict(active_scene) ? float(active_scene.get("edit_sy", edit_scale)) : 1.0
+   st["edit_sz"] = is_dict(active_scene) ? float(active_scene.get("edit_sz", edit_scale)) : 1.0
+   st["cam_x"] = _cam_px
+   st["cam_y"] = _cam_py
+   st["cam_z"] = _cam_pz
+   st["yaw"] = _h_yaw
+   st["pitch"] = _h_pch
+   st["fov"] = _cam_fov
+   st["speed"] = _spd
+   st["sens"] = _sens
+   st["rmb_sens"] = _rmb_look_sens_mul
+   st["drag"] = _drag
+   st["damp"] = _damp
+   st["is_ortho"] = is_ortho
+   st["ortho_zoom"] = _ortho_zoom
+   st["cursor_lock"] = _cursor_lock_enabled
+   st["stats"] = APP_STATS
+   st["wire"] = APP_WIRE
+   st["bg"] = APP_BG
+   st["gui_scale"] = _gui_scale
+   st["layout_gap"] = _gui_layout_gap
+   st["workspace_grid"] = _gui_workspace_grid
+   st["workspace_major"] = _gui_workspace_major
+   st["env_mode"] = _gui_env_mode
+   st["env_items"] = _gui_env_mode_items
+   st["skybox_enabled"] = skybox_enabled
+   st["skybox_tex"] = skybox_tex_id
+   st["skybox_spec_tex"] = skybox_spec_tex_id
+   st["compare_env_tex"] = compare_env_tex_id
+   st["neutral_env_tex"] = neutral_env_tex_id
+   st["scene_env_sensitive"] = is_dict(active_scene) && bool(active_scene.get("scene_env_sensitive_materials", false))
+   st["pref_studio"] = _scene_pref_studio
+   st["pref_neutral"] = _scene_pref_neutral
+   st["pref_reflect"] = _scene_pref_reflect
+   st["pref_visible"] = _scene_pref_visible
+   st["pref_optical"] = _scene_pref_optical
+   st["msaa"] = APP_MSAA
+   st["msaa_items"] = _gui_msaa_items
+   st["vsync"] = APP_VSYNC
+   st["filter_linear"] = APP_FILTER_LINEAR
+   st["backend"] = active_backend_name
+   st["dpi_scale"] = _gui_dpi_scale
+   st["last_frame_ms"] = _last_frame_ms
+   st["last_update_ms"] = _last_update_ms
+   st["last_world_ms"] = _last_world_ms
+   st["last_draw_ms"] = _last_draw_ms
+   st["last_ui_ms"] = _last_ui_ms
+   st["frame_ms_samples"] = _frame_ms_samples
+   st["win_w"] = _win_w
+   st["win_h"] = _win_h
+   st["term_open"] = _term_open
+   st["inspector_w"] = ui_app.app_window_w("inspector", 390.0)
+   st["last_dump"] = _gui_last_dump_path
+   st["window_backend"] = backend()
    st
 }
 
@@ -3928,9 +4052,11 @@ fn _draw_gui_menu_panel() {
 
 fn _draw_gui_inspector() {
    def inspector_opts = _gui_show_editor ? _gui_pinned_tool_opts(true) : dict(0)
-   def tool = ui_editor.begin_tool("inspector", _gui_show_inspector, "Inspector", 860.0, 20.0, 390.0, 430.0, inspector_opts)
+   def ir = _gui_inspector_rect
+   def tool = ui_editor.begin_tool("inspector", _gui_show_inspector, "Inspector",
+      float(ir.get(0, 860.0)), float(ir.get(1, 20.0)),
+      float(ir.get(2, 390.0)), float(ir.get(3, 430.0)), inspector_opts)
    def body = bool(tool.get(0, false))
-   if ui_profile.gui_trace_enabled() { ui_profile.print_text("[ui:gui-inspector] rect=" + ui_app.app_rect_text("inspector") + " body=" + to_str(body)) }
    if _gui_close_tool_window("inspector") || bool(tool.get(1, false)) {
       if _gui_show_editor && _gui_workspace_mode == 1 {
          _gui_close_editor_shell()
@@ -3952,11 +4078,17 @@ fn _draw_gui_inspector() {
 }
 
 fn _draw_gui_probe() {
-   def any probe_state = {
-      "show": _gui_show_probe, "win": win, "layout": _gui_layout_preset_env(),
-      "shot": (_gui_shot_name.len > 0) ? _gui_shot_name : "<live>", "scene": _loaded_scene_name,
-      "fps": fps, "win_w": _win_w, "win_h": _win_h, "last_frame_ms": _last_frame_ms, "last_probe_text": _gui_last_probe_text
-   }
+   mut dict probe_state = dict(10)
+   probe_state["show"] = _gui_show_probe
+   probe_state["win"] = win
+   probe_state["layout"] = _gui_layout_preset_env()
+   probe_state["shot"] = (_gui_shot_name.len > 0) ? _gui_shot_name : "<live>"
+   probe_state["scene"] = _loaded_scene_name
+   probe_state["fps"] = fps
+   probe_state["win_w"] = _win_w
+   probe_state["win_h"] = _win_h
+   probe_state["last_frame_ms"] = _last_frame_ms
+   probe_state["last_probe_text"] = _gui_last_probe_text
    def st = viewer_tools.draw_probe(probe_state)
    _gui_show_probe = bool(st.get("show", _gui_show_probe))
    def action = to_str(st.get("action", ""))
@@ -3968,21 +4100,25 @@ fn _draw_gui_probe() {
 }
 
 fn _draw_gui_profiler() {
-   def any profiler_state = {
-      "show": _gui_show_profiler, "renderer": _gui_frame_stats_cache,
-      "profile": viewer_tools.profiler_snapshot(fps, _last_frame_ms, _last_update_ms, _last_world_ms, _last_draw_ms, _last_ui_ms, _fps_samples, _frame_ms_samples, _draw_ms_samples, _ui_ms_samples, ui_profile.parity_lock_stats_enabled()),
-      "renderer_hotspot": _gui_renderer_hotspot_cache
-   }
+   mut dict profiler_state = dict(4)
+   profiler_state["show"] = _gui_show_profiler
+   profiler_state["renderer"] = _gui_frame_stats_cache
+   profiler_state["profile"] = viewer_tools.profiler_snapshot(fps, _last_frame_ms, _last_update_ms, _last_world_ms, _last_draw_ms, _last_ui_ms, _fps_samples, _frame_ms_samples, _draw_ms_samples, _ui_ms_samples, ui_profile.parity_lock_stats_enabled())
+   profiler_state["renderer_hotspot"] = _gui_renderer_hotspot_cache
    def st = viewer_tools.draw_profiler(profiler_state)
    _gui_show_profiler = bool(st.get("show", _gui_show_profiler))
    _apply_tool_close_state(st)
 }
 
 fn _draw_gui_workspace() {
-   def any workspace_state = {
-      "show": _gui_show_workspace, "grid": _gui_workspace_grid, "major": _gui_workspace_major,
-      "cam_x": _cam_px, "cam_y": _cam_py, "cam_z": _cam_pz, "font": _ui_font()
-   }
+   mut dict workspace_state = dict(7)
+   workspace_state["show"] = _gui_show_workspace
+   workspace_state["grid"] = _gui_workspace_grid
+   workspace_state["major"] = _gui_workspace_major
+   workspace_state["cam_x"] = _cam_px
+   workspace_state["cam_y"] = _cam_py
+   workspace_state["cam_z"] = _cam_pz
+   workspace_state["font"] = _ui_font()
    def st = viewer_tools.draw_workspace(workspace_state)
    _gui_show_workspace, _gui_workspace_grid, _gui_workspace_major =
    bool(st.get("show", _gui_show_workspace)), float(st.get("grid", _gui_workspace_grid)), int(st.get("major", _gui_workspace_major))
@@ -4054,17 +4190,25 @@ fn _draw_ui(phase, term_open) {
       gui.set_enabled(false)
       return
    }
+   if ui_profile.env_truthy_cached("NY_UI_GROUP_TRACE") { ui_profile.print_text("[ui:ui] prepare.before") }
    _prepare_gui_overlay_pass()
+   if ui_profile.env_truthy_cached("NY_UI_GROUP_TRACE") { ui_profile.print_text("[ui:ui] prepare.after") }
    if gui_now || term_open || loading_now {
       _main_loop_trace_once("[ui:draw-ui] backdrop.before")
+      if ui_profile.env_truthy_cached("NY_UI_GROUP_TRACE") { ui_profile.print_text("[ui:ui] backdrop.before") }
       _draw_editor_backdrop(phase, ww, wh)
+      if ui_profile.env_truthy_cached("NY_UI_GROUP_TRACE") { ui_profile.print_text("[ui:ui] backdrop.after") }
       if _gui_any_panel_visible() {
          _main_loop_trace_once("[ui:draw-ui] editor.before")
+         if ui_profile.env_truthy_cached("NY_UI_GROUP_TRACE") { ui_profile.print_text("[ui:ui] editor.before") }
          _draw_editor_gui(phase)
+         if ui_profile.env_truthy_cached("NY_UI_GROUP_TRACE") { ui_profile.print_text("[ui:ui] editor.after") }
          _main_loop_trace_once("[ui:draw-ui] editor.after")
       } elif gui_now {
          _main_loop_trace_once("[ui:draw-ui] safe-overlay.before")
+         if ui_profile.env_truthy_cached("NY_UI_GROUP_TRACE") { ui_profile.print_text("[ui:ui] safe_overlay.before") }
          _draw_gui_safe_overlay(phase, ww, wh)
+         if ui_profile.env_truthy_cached("NY_UI_GROUP_TRACE") { ui_profile.print_text("[ui:ui] safe_overlay.after") }
          _main_loop_trace_once("[ui:draw-ui] safe-overlay.after")
       }
       if term_open {
@@ -4090,10 +4234,10 @@ fn _draw_ui(phase, term_open) {
 }
 
 fn _draw_gui_safe_overlay(phase, ww, wh) bool {
-   def w = min(520.0, max(300.0, float(ww) * 0.34))
-   def h = 118.0
-   def x = float(ww) * 0.5 - w * 0.5
-   def y = max(24.0, float(wh) * 0.12)
+   def f64 w = min(520.0, max(300.0, float(ww) * 0.34))
+   def f64 h = 118.0
+   def f64 x = float(ww) * 0.5 - w * 0.5
+   def f64 y = max(24.0, float(wh) * 0.12)
    gfx.draw_rect_fast(x, y, w, h, gfx.color_pack(0.0, 0.0, 0.0, 0.82))
    gfx.draw_rect_fast(x, y, w, 2.0, gfx.color_pack(0.86, 0.86, 0.86, 0.86))
    gfx.draw_rect_fast(x, y + h - 1.0, w, 1.0, gfx.color_pack(0.22, 0.22, 0.22, 0.84))
@@ -4280,43 +4424,42 @@ fn _draw_editor_gui(phase) {
 fn _idle_opts(gui_now_frame, want_auto_capture=false) dict {
    def anim_live = _anim_enabled || (is_dict(active_scene) && (bool(active_scene.get("anim_playing", false)) || bool(active_scene.get("anim_time_override", false))))
    def static_pose_ready = (!anim_live) && (_scene_static_pose_gpu_ready() || _scene_deform_idle_ready())
-   def any opts = {
-      "enabled": true,
-      "warmup": ui_profile.env_int_cached("NY_UI_GUI_IDLE_REUSE_WARMUP", 1, 0, 128),
-      "redraw_interval": ui_profile.env_int_cached("NY_UI_GUI_IDLE_REUSE_REDRAW_INTERVAL", 300, 0, 1000000),
-      "trace": ui_profile.env_truthy_cached("NY_UI_GUI_IDLE_REUSE_TRACE"),
-      "gui_frame": bool(gui_now_frame),
-      "gui_visible": _gui_visible,
-      "terminal_open": _term_open,
-      "first_frame_done": _did_first_frame,
-      "scene_active": _ui_scene_visible(),
-      "bench_active": ui_profile.ui_bench_enabled(),
-      "proof_dump": _proof_dump_active(),
-      "capture_request": gfx.renderer_capture_requested(),
-      "pending_capture": _pending_auto_dump || bool(want_auto_capture),
-      "auto_capture": _auto_dump_enabled == 1,
-      "dump_suite": _gui_dump_suite_active_now(),
-      "batch_dump": _batch_dump_enabled(),
-      "layout_dirty": _gui_layout_dirty,
-      "layout_warm_frames": _gui_layout_warm_frames,
-      "projection_dirty": _proj_dirty,
-      "async_load": _scene_load_async_active(),
-      "startup_load": _startup_post_load_pending,
-      "dynamic_active": _gui_show_gallery || _gui_show_probe || _gui_show_profiler || _gui_asset_load_wait_mouse_up,
-      "animated": anim_live,
-      "static_pose_ready": static_pose_ready,
-      "animation_count": (static_pose_ready || !anim_live) ? 0 : _anim_count,
-      "skin_count": static_pose_ready ? 0 : _skin_count,
-      "morph_target_count": static_pose_ready ? 0 : _morph_target_count,
-      "input_active": _ui_move_input_active() || skip_mouse_frames > 0 || gui.active_id() != "",
-      "scroll_dx": _spdx,
-      "scroll_dy": _spdy,
-      "scroll_z": _spd_z,
-      "mouse_dx": _mouse_dx_acc,
-      "mouse_dy": _mouse_dy_acc,
-      "win_w": int(_win_w),
-      "win_h": int(_win_h)
-   }
+   mut dict opts = dict(35)
+   opts["enabled"] = true
+   opts["warmup"] = ui_profile.env_int_cached("NY_UI_GUI_IDLE_REUSE_WARMUP", 1, 0, 128)
+   opts["redraw_interval"] = ui_profile.env_int_cached("NY_UI_GUI_IDLE_REUSE_REDRAW_INTERVAL", 300, 0, 1000000)
+   opts["trace"] = ui_profile.env_truthy_cached("NY_UI_GUI_IDLE_REUSE_TRACE")
+   opts["gui_frame"] = bool(gui_now_frame)
+   opts["gui_visible"] = _gui_visible
+   opts["terminal_open"] = _term_open
+   opts["first_frame_done"] = _did_first_frame
+   opts["scene_active"] = _ui_scene_visible()
+   opts["bench_active"] = ui_profile.ui_bench_enabled()
+   opts["proof_dump"] = _proof_dump_active()
+   opts["capture_request"] = gfx.renderer_capture_requested()
+   opts["pending_capture"] = _pending_auto_dump || bool(want_auto_capture)
+   opts["auto_capture"] = _auto_dump_enabled == 1
+   opts["dump_suite"] = _gui_dump_suite_active_now()
+   opts["batch_dump"] = _batch_dump_enabled()
+   opts["layout_dirty"] = _gui_layout_dirty
+   opts["layout_warm_frames"] = _gui_layout_warm_frames
+   opts["projection_dirty"] = _proj_dirty
+   opts["async_load"] = _scene_load_async_active()
+   opts["startup_load"] = _startup_post_load_pending
+   opts["dynamic_active"] = _gui_show_gallery || _gui_show_probe || _gui_show_profiler || _gui_asset_load_wait_mouse_up
+   opts["animated"] = anim_live
+   opts["static_pose_ready"] = static_pose_ready
+   opts["animation_count"] = (static_pose_ready || !anim_live) ? 0 : _anim_count
+   opts["skin_count"] = static_pose_ready ? 0 : _skin_count
+   opts["morph_target_count"] = static_pose_ready ? 0 : _morph_target_count
+   opts["input_active"] = _ui_move_input_active() || skip_mouse_frames > 0 || gui.active_id() != ""
+   opts["scroll_dx"] = _spdx
+   opts["scroll_dy"] = _spdy
+   opts["scroll_z"] = _spd_z
+   opts["mouse_dx"] = _mouse_dx_acc
+   opts["mouse_dy"] = _mouse_dy_acc
+   opts["win_w"] = int(_win_w)
+   opts["win_h"] = int(_win_h)
    opts
 }
 
@@ -4360,16 +4503,16 @@ def int _MIDDLE_SCROLL_SUPPRESS_NS = 180000000
 def int _CURSOR_TRANSITION_SUPPRESS_NS = 16000000
 
 fn _camera_sim_dt(any dt) f64 {
-   mut raw = float(dt)
+   mut f64 raw = float(dt)
    if raw <= 0.0 { raw = 0.0001 }
-   def max_ms = ui_profile.env_int_cached("NY_UI_CAMERA_DT_MAX_MS", 33, 8, 100)
-   def min_ms = ui_profile.env_int_cached("NY_UI_CAMERA_DT_MIN_MS", 1, 0, 16)
-   mut lo = float(min_ms) / 1000.0
-   mut hi = float(max_ms) / 1000.0
+   def int max_ms = ui_profile.env_int_cached("NY_UI_CAMERA_DT_MAX_MS", 33, 8, 100)
+   def int min_ms = ui_profile.env_int_cached("NY_UI_CAMERA_DT_MIN_MS", 1, 0, 16)
+   mut f64 lo = float(min_ms) / 1000.0
+   mut f64 hi = float(max_ms) / 1000.0
    if lo < 0.0001 { lo = 0.0001 }
    if hi < lo { hi = lo }
    raw = clamp(raw, lo, hi)
-   def smooth_pct = ui_profile.env_int_cached("NY_UI_CAMERA_DT_SMOOTH_PCT", 35, 0, 100)
+   def int smooth_pct = ui_profile.env_int_cached("NY_UI_CAMERA_DT_SMOOTH_PCT", 35, 0, 100)
    if smooth_pct <= 0 {
       _camera_sim_dt_smooth = raw
       return raw
@@ -4378,8 +4521,11 @@ fn _camera_sim_dt(any dt) f64 {
       _camera_sim_dt_smooth = raw
       return raw
    }
-   def alpha = clamp(float(smooth_pct) / 100.0, 0.0, 1.0)
-   _camera_sim_dt_smooth = _camera_sim_dt_smooth + (raw - _camera_sim_dt_smooth) * alpha
+   def f64 alpha = clamp(float(smooth_pct) / 100.0, 0.0, 1.0)
+   def f64 smoothed = float(_camera_sim_dt_smooth)
+   def f64 delta = float(raw) - smoothed
+   def f64 weighted_delta = float(delta * alpha)
+   _camera_sim_dt_smooth = float(smoothed + weighted_delta)
    _camera_sim_dt_smooth
 }
 
@@ -4853,7 +4999,8 @@ fn _batch_dump_update_anim_fast(dt) {
       ;; fast-exit, and some raw/headless loops keep the old guard key stable.
       ;; Skipping at this layer was the real source of keyframe-only motion.
       _anim_update_frame_guard += 1
-      if abs(_anim_speed) <= 0.000001 && bool(active_scene.get("anim_time_override", false)) {
+      def f64 anim_speed = abs(float(_anim_speed))
+      if anim_speed <= 0.000001 && bool(active_scene.get("anim_time_override", false)) {
          active_scene["anim_playing"] = false
          return
       }
@@ -4978,19 +5125,47 @@ fn _app_simulate_camera_frame(dt, bool prep_gui, bool gui_nav_blocking) {
    def key_shift = nav_keys && (_move_shift || ((live_mods & MOD_SHIFT) != 0) ||
    live_keys.get(uin.KEY_SHIFT, false) || live_keys.get(uin.KEY_LEFT_SHIFT, false) || live_keys.get(uin.KEY_RIGHT_SHIFT, false))
    def sim_dt = _camera_sim_dt(dt)
-   def any sim_state = {
-      "dt": sim_dt, "dx": dx, "dy": dy, "skip_look": skip_look, "prep_gui": prep_gui, "gui_mouse": gui_mouse,
-      "rmb_look_active": _rmb_look_active, "cursor_lock": _cursor_lock_enabled, "focus_mouse_look": focus_mouse_look,
-      "yaw": _h_yaw, "pitch": _h_pch, "target_yaw": _target_yaw, "target_pitch": _target_pch,
-      "sens": _sens, "rmb_sens_mul": _rmb_look_sens_mul, "pitch_min": _p_min, "pitch_max": _p_max,
-      "rmb_dx_smooth": _rmb_dx_smooth, "rmb_dy_smooth": _rmb_dy_smooth,
-      "look_smooth_alpha": float(ui_profile.env_int_cached("NY_UI_MOUSE_LOOK_SMOOTH_PCT", 100, 0, 100)) / 100.0,
-      "key_w": key_w, "key_s": key_s, "key_a": key_a, "key_d": key_d,
-      "key_space": key_space, "key_ctrl": key_ctrl, "key_shift": key_shift,
-      "spdx": _spdx, "spdy": _spdy, "spdz": _spd_z, "vx": _vx, "vy": _vy, "vz": _vz,
-      "speed": _spd, "speed_mul": _spdmul, "damp": _damp, "drag": _drag,
-      "cam_x": _cam_px, "cam_y": _cam_py, "cam_z": _cam_pz
-   }
+   mut dict sim_state = dict(40)
+   sim_state["dt"] = sim_dt
+   sim_state["dx"] = dx
+   sim_state["dy"] = dy
+   sim_state["skip_look"] = skip_look
+   sim_state["prep_gui"] = prep_gui
+   sim_state["gui_mouse"] = gui_mouse
+   sim_state["rmb_look_active"] = _rmb_look_active
+   sim_state["cursor_lock"] = _cursor_lock_enabled
+   sim_state["focus_mouse_look"] = focus_mouse_look
+   sim_state["yaw"] = _h_yaw
+   sim_state["pitch"] = _h_pch
+   sim_state["target_yaw"] = _target_yaw
+   sim_state["target_pitch"] = _target_pch
+   sim_state["sens"] = _sens
+   sim_state["rmb_sens_mul"] = _rmb_look_sens_mul
+   sim_state["pitch_min"] = _p_min
+   sim_state["pitch_max"] = _p_max
+   sim_state["rmb_dx_smooth"] = _rmb_dx_smooth
+   sim_state["rmb_dy_smooth"] = _rmb_dy_smooth
+   sim_state["look_smooth_alpha"] = float(ui_profile.env_int_cached("NY_UI_MOUSE_LOOK_SMOOTH_PCT", 100, 0, 100)) / 100.0
+   sim_state["key_w"] = key_w
+   sim_state["key_s"] = key_s
+   sim_state["key_a"] = key_a
+   sim_state["key_d"] = key_d
+   sim_state["key_space"] = key_space
+   sim_state["key_ctrl"] = key_ctrl
+   sim_state["key_shift"] = key_shift
+   sim_state["spdx"] = _spdx
+   sim_state["spdy"] = _spdy
+   sim_state["spdz"] = _spd_z
+   sim_state["vx"] = _vx
+   sim_state["vy"] = _vy
+   sim_state["vz"] = _vz
+   sim_state["speed"] = _spd
+   sim_state["speed_mul"] = _spdmul
+   sim_state["damp"] = _damp
+   sim_state["drag"] = _drag
+   sim_state["cam_x"] = _cam_px
+   sim_state["cam_y"] = _cam_py
+   sim_state["cam_z"] = _cam_pz
    def sim = camera.simulate_frame_state(sim_state)
    _h_yaw, _h_pch = float(sim.get("yaw", _h_yaw)), float(sim.get("pitch", _h_pch))
    _target_yaw, _target_pch = float(sim.get("target_yaw", _target_yaw)), float(sim.get("target_pitch", _target_pch))
@@ -5285,10 +5460,11 @@ fn _app_handle_mouse_pos(data, gui_on_event) {
    if !_term_open && captured_look {
       if !is_dict(data) || !_mouse_look_accept_event(data, captured_look) { return }
       def relative_ev = bool(data.get("relative", true))
-      mut mdx, mdy = float(data.get("dx", 0.0)), float(data.get("dy", 0.0))
-      def dead = float(ui_profile.env_int_cached("NY_UI_MOUSE_LOOK_DEADZONE_MILLI", 0, 0, 1000)) / 1000.0
-      if abs(mdx) <= dead { mdx = 0.0 }
-      if abs(mdy) <= dead { mdy = 0.0 }
+      mut f64 mdx = float(data.get("dx", 0.0))
+      mut f64 mdy = float(data.get("dy", 0.0))
+      def f64 dead = float(ui_profile.env_int_cached("NY_UI_MOUSE_LOOK_DEADZONE_MILLI", 0, 0, 1000)) / 1000.0
+      if float(abs(float(mdx))) <= dead { mdx = 0.0 }
+      if float(abs(float(mdy))) <= dead { mdy = 0.0 }
       def max_delta = float(ui_profile.env_int_cached("NY_UI_MOUSE_LOOK_MAX_DELTA", 32, 4, 512))
       mdx, mdy = clamp(mdx, 0.0 - max_delta, max_delta), clamp(mdy, 0.0 - max_delta, max_delta)
       if mdx == 0.0 && mdy == 0.0 { return }
@@ -5342,8 +5518,8 @@ fn _mouse_look_accept_event(dict data, bool captured_look) bool {
    }
    ;; Drop duplicate zero/near-zero transition noise from cursor mode changes.
    if total_frames == _mouse_look_last_frame && now - _mouse_look_last_event_ns < 1000000 {
-      def dx = abs(float(data.get("dx", 0.0)))
-      def dy = abs(float(data.get("dy", 0.0)))
+      def f64 dx = abs(float(data.get("dx", 0.0)))
+      def f64 dy = abs(float(data.get("dy", 0.0)))
       if dx < 0.001 && dy < 0.001 { return false }
    }
    _mouse_look_last_frame = total_frames
@@ -5762,24 +5938,41 @@ fn _ui_projection_aspect() f64 {
 }
 
 fn _ui_update_projection(f64 px, f64 py, f64 pz, f64 tx, f64 ty, f64 tz) bool {
-   def aspect = _ui_projection_aspect()
-   rmat.mat4_look_at_into_xyz(px, py, pz, tx, ty, tz, 0.0, 1.0, 0.0, M_V)
-   rmat.mat4_look_at_into_xyz(px, py, pz, tx, ty, tz, 0.0, 1.0, 0.0, M_V_SKY)
+   _ui_set_update_stage("projection.aspect")
+   mut f64 aspect = float(_ui_projection_aspect())
+   if is_nan(aspect) || is_inf(aspect) || aspect <= 0.0001 {
+      aspect = 16.0 / 9.0
+   }
+   aspect = float(max(0.1, min(aspect, 10.0)))
+   _ui_set_update_stage("projection.look-at")
+   M_V = rmat.mat4_look_at_into_xyz(px, py, pz, tx, ty, tz, 0.0, 1.0, 0.0, M_V)
+   M_V_SKY = rmat.mat4_look_at_into_xyz(px, py, pz, tx, ty, tz, 0.0, 1.0, 0.0, M_V_SKY)
    M_V_SKY[14] = 0.0
    M_V_SKY[15] = 0.0
    M_V_SKY[16] = 0.0
+   mut next_projection = M_P
    if is_ortho {
-      mut z = _ortho_zoom
+      _ui_set_update_stage("projection.ortho")
+      mut f64 z = float(_ortho_zoom)
       if z < 0.01 { z = 0.01 }
-      rmat.mat4_ortho_into(-z * aspect, z * aspect, -z, z, -1000.0, 1000.0, M_P)
+      next_projection = rmat.mat4_ortho(-z * aspect, z * aspect, -z, z, -1000.0, 1000.0)
    } else {
-      mut fov = _cam_fov
+      _ui_set_update_stage("projection.perspective")
+      mut fov = float(_cam_fov)
+      if is_nan(fov) || is_inf(fov) { fov = 60.0 }
       if fov < 15.0 { fov = 15.0 }
       if fov > 120.0 { fov = 120.0 }
-      rmat.mat4_perspective_into(fov * PI / 180.0, aspect, 0.1, 1000.0, M_P)
+      def fovy = fov * PI / 180.0
+      if is_nan(fovy) || is_inf(fovy) || fovy <= 0.01 || fovy >= PI - 0.01 {
+         next_projection = rmat.mat4_perspective(60.0 * PI / 180.0, aspect, 0.1, 1000.0)
+      } else {
+         next_projection = rmat.mat4_perspective(fovy, aspect, 0.1, 1000.0)
+      }
    }
-   rmat.mat4_mul_into(M_P, M_V, M_VP)
-   rmat.mat4_mul_into(M_P, M_V_SKY, M_VP_SKY)
+   M_P = next_projection
+   _ui_set_update_stage("projection.multiply")
+   M_VP = rmat.mat4_mul_into(M_P, M_V, M_VP)
+   M_VP_SKY = rmat.mat4_mul_into(M_P, M_V_SKY, M_VP_SKY)
    _cam_px_cache, _cam_py_cache = px, py
    _cam_pz_cache = pz
    _proj_dirty = false
@@ -5798,11 +5991,12 @@ fn _ui_update_projection_fast() bool {
 }
 
 fn _sync_projection_from_camera() {
-   _ui_set_update_stage("projection")
+   _ui_set_update_stage("projection.target")
    def tgt = camera.target_from_angles(_cam_px, _cam_py, _cam_pz, _h_yaw, _h_pch)
    def tx = float(tgt.get(0, _cam_px))
    def ty = float(tgt.get(1, _cam_py))
    def tz = float(tgt.get(2, _cam_pz - 1.0))
+   _ui_set_update_stage("projection.camera-arrays")
    mut g_pos = cam.get(0)
    g_pos[0] = _cam_px
    g_pos[1] = _cam_py
@@ -5811,6 +6005,7 @@ fn _sync_projection_from_camera() {
    g_tgt[0] = tx
    g_tgt[1] = ty
    g_tgt[2] = tz
+   _ui_set_update_stage("projection.matrix")
    _ui_update_projection(_cam_px, _cam_py, _cam_pz, tx, ty, tz)
 }
 
@@ -5837,13 +6032,16 @@ fn _app_update_simulation(dt, bench, prep_gui, gui_nav_blocking, trace, deep_tra
 fn app_update(dt) {
    "Advance input, camera, batch, scene, and GUI state for one frame."
    _ui_set_update_stage("start")
+   _ui_set_update_stage("scene-requests")
    _process_gui_scene_requests()
    def trace = ui_profile.trace_enabled()
    def deep_trace = ui_profile.deep_enabled()
    def bench = ui_profile.ui_bench_enabled()
    def t_evt0 = (trace && deep_trace) ? ticks() : 0
+   _ui_set_update_stage("fast-path")
    if _app_update_fast_path(dt) { return }
    if _app_update_bench_frame(dt, trace, deep_trace, t_evt0) { return }
+   _ui_set_update_stage("events")
    def gui_enabled_frame = _app_process_events()
    _ui_set_update_stage("post-events")
    _last_evt_ms = (trace && deep_trace) ? ui_profile.elapsed_ms(t_evt0) : 0.0
@@ -5965,6 +6163,15 @@ fn _world_proof_batch_env_fallbacks(
 fn _world_env_background_state(env_tex, env_spec_tex, batch_on, proof_on, gui_probe_on, gui_probe_has_scene, compare_visible_env) {
    mut out_env_tex = env_tex
    mut out_env_spec_tex = env_spec_tex
+   def trace_background = ui_profile.env_truthy_cached("NY_UI_GROUP_TRACE")
+   if trace_background {
+      def _discard_background_trace = ui_profile.print_text("[ui:world] background.request.before skybox=" + to_str(skybox_enabled ? 1 : 0) +
+         " compare=" + to_str(bool(compare_visible_env) ? 1 : 0) +
+         " batch=" + to_str(bool(batch_on) ? 1 : 0) +
+         " mode=" + to_str(_gui_env_mode) +
+         " gui=" + to_str(_gui_enabled_now() ? 1 : 0) +
+         " env_ready=" + to_str(out_env_tex >= 0 ? 1 : 0))
+   }
    def draw_env_background = scene_engine.background_requested(
       skybox_enabled, bool(compare_visible_env), bool(batch_on), _gui_env_mode,
       bool(gui_probe_on), bool(gui_probe_has_scene), out_env_tex >= 0,
@@ -5972,6 +6179,9 @@ fn _world_env_background_state(env_tex, env_spec_tex, batch_on, proof_on, gui_pr
       ui_profile.env_truthy_cached("NY_UI_GUI_DRAW_ENV_BG"), bool(proof_on),
       ui_profile.env_truthy_cached("NY_UI_PROOF_SKYBOX")
    )
+   if trace_background {
+      def _discard_background_trace = ui_profile.print_text("[ui:world] background.request.after draw=" + to_str(draw_env_background ? 1 : 0))
+   }
    if draw_env_background && skybox_enabled && _ensure_visible_skybox_ready() && skybox_tex_id >= 0 {
       out_env_tex = skybox_tex_id
       if out_env_spec_tex < 0 {
@@ -6049,14 +6259,17 @@ fn _draw_world_grid_and_scene(phase, cam_px, cam_pz, chrome_on, gui_probe_on, gu
       " state_count=" + to_str(scene_state_count))
    }
    if chrome_on && (!have_scene || ui_profile.world_grid_enabled(_gui_visible, _scene_selected, _gui_probe_mode_enabled()) || (_gizmo_ruler && _gui_editor_shell_open())) && !clean_proof && !(gui_probe_on && !have_scene) {
+      if ui_profile.env_truthy_cached("NY_UI_GROUP_TRACE") { ui_profile.print_text("[ui:world] grid.begin") }
       gfx.set_unlit(true)
       gfx.reset_overlay_state()
       def axes_in_grid = _draw_infinite_world_grid(cam_px, cam_pz, have_axes)
+      if ui_profile.env_truthy_cached("NY_UI_GROUP_TRACE") { ui_profile.print_text("[ui:world] grid.after") }
       if have_axes && !axes_in_grid {
          gfx.set_model_matrix(M_ID)
          draw_mesh(_axes_mesh)
       }
       gfx.set_unlit(false)
+      if ui_profile.env_truthy_cached("NY_UI_GROUP_TRACE") { ui_profile.print_text("[ui:world] grid.cleaned") }
    }
    if have_scene {
       gfx.clear_depth()
@@ -6139,10 +6352,15 @@ fn _draw_world(phase, cam_px, cam_py, cam_pz) {
    _cam_pz_cache = cam_pz
    _draw_world_skybox(draw_env_background, env_tex)
    _main_loop_trace_once("[ui:world] grid_scene.before")
+   if ui_profile.env_truthy_cached("NY_UI_GROUP_TRACE") { ui_profile.print_text("[ui:world] grid_scene.begin") }
    _draw_world_grid_and_scene(phase, cam_px, cam_pz, chrome_on, gui_probe_on, gui_probe_has_scene)
+   if ui_profile.env_truthy_cached("NY_UI_GROUP_TRACE") { ui_profile.print_text("[ui:world] grid_scene.after") }
    _main_loop_trace_once("[ui:world] gizmo.before")
+   if ui_profile.env_truthy_cached("NY_UI_GROUP_TRACE") { ui_profile.print_text("[ui:world] gizmo.begin") }
    _draw_scene_world_gizmo()
+   if ui_profile.env_truthy_cached("NY_UI_GROUP_TRACE") { ui_profile.print_text("[ui:world] gizmo.after") }
    _main_loop_trace_once("[ui:world] done")
+   if ui_profile.env_truthy_cached("NY_UI_GROUP_TRACE") { ui_profile.print_text("[ui:world] done") }
    return
 }
 
@@ -6205,16 +6423,20 @@ fn render_thread_obj() {
    _main_loop_trace_once("[ui:render] begin_frame.after")
    _main_loop_trace_once("[ui:render] draw.before")
    _ui_set_update_stage("render.draw")
+   if render_trace { ui_profile.print_text("[ui:render] draw_frame.begin") }
    _draw_frame(phase, _term_open)
+   if render_trace { ui_profile.print_text("[ui:render] draw_frame.after") }
    _main_loop_trace_once("[ui:render] draw.after")
    _main_loop_trace_once("[ui:render] end_frame.before")
    _ui_set_update_stage("render.end_frame")
+   if render_trace { ui_profile.print_text("[ui:render] end_frame.begin") }
    def _discard_78 = gfx.end_frame()
+   if render_trace { ui_profile.print_text("[ui:render] end_frame.after") }
    _main_loop_trace_once("[ui:render] end_frame.after")
    true
 }
 
-fn _draw_frame(phase, term_open) {
+fn _draw_frame(f64 phase, bool term_open) {
    def cam_px = _cam_px_cache
    def cam_py = _cam_py_cache
    def cam_pz = _cam_pz_cache
@@ -6555,9 +6777,14 @@ fn _bench_bind_env_and_camera(bool bind_env=true) {
 }
 
 fn _sample_fps_tick(int now, bool update_public_fps=false) bool {
+   def trace_sample = ui_profile.env_truthy_cached("NY_UI_GROUP_TRACE")
+   if trace_sample { ui_profile.print_text("[ui:fps] sample.before") }
    def sampled = ui_loop.sample_fps(_fps_samples, frame_num, last_fps_t, now)
+   if trace_sample { ui_profile.print_text("[ui:fps] sample.after") }
    if !bool(sampled.get("sampled", false)) { return false }
+   if trace_sample { ui_profile.print_text("[ui:fps] sampled=true") }
    _fps_samples = sampled.get("samples", _fps_samples)
+   if trace_sample { ui_profile.print_text("[ui:fps] samples.after") }
    frame_num = int(sampled.get("frames", 0))
    last_fps_t = int(sampled.get("last", now))
    if update_public_fps {
@@ -6968,7 +7195,7 @@ fn _batch_dump_check_model_timeout(now) {
    _batch_dump_advance_or_exit()
 }
 
-fn _main_loop_call_update(dt) {
+fn _main_loop_call_update(f64 dt) {
    _main_loop_trace_once("[ui:loop] update.before")
    try {
       app_update(dt)
@@ -6980,7 +7207,7 @@ fn _main_loop_call_update(dt) {
    _main_loop_trace_once("[ui:loop] update.after")
 }
 
-fn _main_loop_gui_capture_requests(gui_now_frame) {
+fn _main_loop_gui_capture_requests(bool gui_now_frame) {
    _main_loop_gui_dump_path = ""
    _main_loop_want_auto_capture = false
    _main_loop_force_full_render = false
@@ -7017,7 +7244,7 @@ fn _main_loop_gui_capture_requests(gui_now_frame) {
    }
 }
 
-fn _main_loop_try_idle_present(update_t1, trace, gui_now_frame) bool {
+fn _main_loop_try_idle_present(int update_t1, bool trace, bool gui_now_frame) bool {
    if _main_loop_force_full_render { return false }
    _main_loop_draw_t0 = update_t1
    _main_loop_trace_once("[ui:loop] idle-reuse.before")
@@ -7036,7 +7263,7 @@ fn _main_loop_try_idle_present(update_t1, trace, gui_now_frame) bool {
    true
 }
 
-fn _main_loop_render_frame(frame_t0, update_t1, trace) {
+fn _main_loop_render_frame(int frame_t0, int update_t1, bool trace) {
    _main_loop_draw_t0 = update_t1
    _main_loop_trace_once("[ui:loop] render.before")
    _main_loop_rendered = false
@@ -7090,7 +7317,7 @@ fn _main_loop_record_timing(rendered, trace, frame_t0, draw_t0, draw_t1) {
    }
 }
 
-fn _main_loop_process_gui_dump(gui_now_frame, gui_dump_path) {
+fn _main_loop_process_gui_dump(bool gui_now_frame, str gui_dump_path) {
    if _gui_dump_suite_active_now() {
       def _discard_102 = _gui_dump_suite_after_frame()
       return
@@ -7165,7 +7392,7 @@ fn _main_loop_process_batch_dump() {
    }
 }
 
-fn _main_loop_after_render_success(gui_now_frame, gui_dump_path) {
+fn _main_loop_after_render_success(bool gui_now_frame, str gui_dump_path) {
    _did_first_frame = true
    _auto_dump_frame_counter += 1
    if _scene_load_async_thread != 0 {
@@ -7237,7 +7464,9 @@ fn _main_loop_count_frame(rendered, now) {
    }
    frame_num += 1
    total_frames += 1
+   if ui_profile.env_truthy_cached("NY_UI_GROUP_TRACE") { ui_profile.print_text("[ui:loop] fps.before") }
    def _discard_sample = _sample_fps_tick(now, true)
+   if ui_profile.env_truthy_cached("NY_UI_GROUP_TRACE") { ui_profile.print_text("[ui:loop] fps.after") }
 }
 
 fn _main_loop_restore_cursor() {
@@ -7273,7 +7502,9 @@ fn _run_main_loop() {
       _render_dt = dt
       _render_phase = float(elapsed) / 1e9
       mut gui_now_frame = _gui_enabled_now()
+      if ui_profile.env_truthy_cached("NY_UI_GROUP_TRACE") { ui_profile.print_text("[ui:loop] update.begin") }
       _main_loop_call_update(dt)
+      if ui_profile.env_truthy_cached("NY_UI_GROUP_TRACE") { ui_profile.print_text("[ui:loop] update.after") }
       if should_close(win) {
          _main_loop_trace_once("[ui:loop] close-after-update")
          break
@@ -7283,20 +7514,31 @@ fn _run_main_loop() {
       gui_now_frame = _gui_enabled_now()
       _main_loop_maybe_queue_immediate_dump()
       _main_loop_gui_capture_requests(gui_now_frame)
+      if ui_profile.env_truthy_cached("NY_UI_GROUP_TRACE") { ui_profile.print_text("[ui:loop] present.begin") }
       if !_main_loop_try_idle_present(update_t1, trace, gui_now_frame) {
          _main_loop_render_frame(frame_t0, update_t1, trace)
          if _main_loop_rendered {
             note_full_draw(gui_now_frame, _main_loop_want_auto_capture)
          }
       }
+      if ui_profile.env_truthy_cached("NY_UI_GROUP_TRACE") { ui_profile.print_text("[ui:loop] present.after") }
       if _main_loop_rendered {
+         if ui_profile.env_truthy_cached("NY_UI_GROUP_TRACE") { ui_profile.print_text("[ui:loop] post_render.begin") }
          _main_loop_after_render_success(gui_now_frame, _main_loop_gui_dump_path)
+         if ui_profile.env_truthy_cached("NY_UI_GROUP_TRACE") { ui_profile.print_text("[ui:loop] post_render.after") }
       }
+      if ui_profile.env_truthy_cached("NY_UI_GROUP_TRACE") { ui_profile.print_text("[ui:loop] timing.begin") }
       _main_loop_record_timing(_main_loop_rendered, trace, frame_t0, _main_loop_draw_t0, _main_loop_draw_t1)
+      if ui_profile.env_truthy_cached("NY_UI_GROUP_TRACE") { ui_profile.print_text("[ui:loop] timing.after") }
       _main_loop_profile_flush(trace)
+      if ui_profile.env_truthy_cached("NY_UI_GROUP_TRACE") { ui_profile.print_text("[ui:loop] profile.after") }
       _main_loop_finish_auto_dump(_main_loop_rendered, _main_loop_want_auto_capture)
+      if ui_profile.env_truthy_cached("NY_UI_GROUP_TRACE") { ui_profile.print_text("[ui:loop] auto_dump.after") }
       _main_loop_finish_timeout(timeout_close)
+      if ui_profile.env_truthy_cached("NY_UI_GROUP_TRACE") { ui_profile.print_text("[ui:loop] timeout.after") }
       _main_loop_count_frame(_main_loop_rendered, now)
+      if ui_profile.env_truthy_cached("NY_UI_GROUP_TRACE") { ui_profile.print_text("[ui:loop] count.after") }
+      if ui_profile.env_truthy_cached("NY_UI_GROUP_TRACE") { ui_profile.print_text("[ui:loop] frame.after") }
    }
    _print_fps_summary(start_t, total_frames, true)
    _main_loop_restore_cursor()
@@ -7315,6 +7557,7 @@ fn draw_frame(any app=0) {
 }
 
 #main {
+   if common.env_truthy("NY_UI_HEADLESS") { exit(0) }
    if _ui_has_help_arg() { _ui_print_help() exit(0) }
    def app = create(from_env())
    startup(app)

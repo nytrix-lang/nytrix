@@ -1,0 +1,19 @@
+shape test_bigint_overflow_arithmetic_chain {
+  family "native/values"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+fn promoted_chain() {
+  mut value = 9223372036854775807
+  value = value + 1
+  value * 3
+}
+
+assert(to_str(promoted_chain()) == "27670116110564327424", "overflow-promoted bigint survives a later multiply")
+NY
+}

@@ -3,19 +3,19 @@
 ;; Reference:
 ;; - https://www.rfc-editor.org/rfc/rfc7519
 ;; References:
-;; - std.math.crypto.protocol
-;; - std.math.crypto
-module std.math.crypto.protocol.jwt(jwt_base64url_encode_bytes, jwt_base64url_encode_str, jwt_base64url_decode_bytes, jwt_base64url_decode_str, jwt_decode_header_json, jwt_decode_payload_json, jwt_decode_unverified, jwt_signing_input, jwt_alg_none_json, jwt_hs256_json, jwt_hs256_confusion_json, jwt_hs256_verify)
-use std.core
-use std.math.bin as bin
-use std.math.crypto.hash (sha256_hmac)
-use std.math.parse.data.json
-use std.core.str as str
-use std.math.nt
-use std.math.crypto.ecc.ecc
-use std.math.crypto.ecc.smart_attack
-use std.math.crypto.number.partial
-use std.math.crypto.protocol.seal
+;; - core.math.crypto.protocol
+;; - core.math.crypto
+module core.math.crypto.protocol.jwt(jwt_base64url_encode_bytes, jwt_base64url_encode_str, jwt_base64url_decode_bytes, jwt_base64url_decode_str, jwt_decode_header_json, jwt_decode_payload_json, jwt_decode_unverified, jwt_signing_input, jwt_alg_none_json, jwt_hs256_json, jwt_hs256_confusion_json, jwt_hs256_verify)
+use core
+use core.math.bin as bin
+use core.math.crypto.hash (sha256_hmac)
+use core.math.parse.data.json
+use core.str as str
+use core.math.nt
+use core.math.crypto.ecc.ecc
+use core.math.crypto.ecc.smart_attack
+use core.math.crypto.number.partial
+use core.math.crypto.protocol.seal
 
 fn _strip_b64_padding(str s) str {
    mut n = s.len
@@ -151,5 +151,5 @@ fn jwt_hs256_verify(str token, str secret) bool {
    assert(G.len == 2, "G is ec point")
    assert(ed.len == 2, "ed is ec point")
    assert(ed == ed, "ec_eq self")
-   print("✓ std.math.crypto.protocol.jwt self-test passed")
+   print("✓ core.math.crypto.protocol.jwt self-test passed")
 }

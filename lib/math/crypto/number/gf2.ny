@@ -3,10 +3,10 @@
 ;; Reference:
 ;; - https://en.wikipedia.org/wiki/Gaussian_elimination
 ;; References:
-;; - std.math.crypto.number
-;; - std.math.crypto
-module std.math.crypto.number.gf2(gf2_solve, gf2_solve_full_rank)
-use std.math.nt
+;; - core.math.crypto.number
+;; - core.math.crypto
+module core.math.crypto.number.gf2(gf2_solve, gf2_solve_full_rank)
+use core.math.nt
 
 fn _gf2_parity(any x) int { bigint_popcount(Z(x)) & 1 }
 
@@ -33,7 +33,7 @@ fn gf2_solve(list rows, list rhs, int ncols) any {
          def p = bit_length(v) - 1
          if basis[p] != Z(0) {
             v = bigint_xor(v, basis[p])
-            r = r ^^ brhs[p]
+            r = r ^ brhs[p]
          } else {
             basis[p] = v
             brhs[p] = r
@@ -50,7 +50,7 @@ fn gf2_solve(list rows, list rhs, int ncols) any {
    while i < ncols {
       if basis[i] != Z(0) {
          def low = basis[i] & ((Z(1) << i) - Z(1))
-         def bit = brhs[i] ^^ _gf2_parity(low & sol)
+         def bit = brhs[i] ^ _gf2_parity(low & sol)
          if bit == 1 { sol += Z(1) << i }
       }
       i += 1

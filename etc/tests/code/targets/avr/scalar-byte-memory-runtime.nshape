@@ -1,0 +1,76 @@
+shape avr_scalar_byte_memory_executes_under_qemu {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "test", "avr", "portable-text", "memory", "byte", "qemu"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os (file_write, run_capture, temp_dir, pid)
+
+def compiler = env("NYTRIX_NY_FULL_BIN")
+assert(is_str(compiler) && compiler.len > 0,
+       "test runner provides the compiler path")
+def stem = temp_dir() + "/ny-avr-byte-memory-" + to_str(pid())
+def asm_path = stem + ".s"
+def start_path = stem + "-start.s"
+def obj_path = stem + ".o"
+def start_obj_path = stem + "-start.o"
+def elf_path = stem + ".elf"
+
+def emitted = run_capture(
+    [compiler, "--native-backend=avr", "--native-only", "--nyir-verify",
+     "--emit-asm=" + asm_path, "-no-std", "-emit-only", "-e",
+     "@noinline\nfn memory_roundtrip() int {\n" +
+     "  mut int slot = 40\n" +
+     "  def *int pointer = addr_of(slot)\n" +
+     "  store8(pointer, 42)\n" +
+     "  load8(pointer, 0)\n" +
+     "}\nmemory_roundtrip()"],
+    [], nil, false)
+assert(is_ok(file_write(
+    start_path,
+    ".text\n.global _start\n_start:\n" +
+    "  call rt_main\n" +
+    "  ldi r16, 0\n  sts 0x00C5, r16\n" +
+    "  ldi r16, 103\n  sts 0x00C4, r16\n" +
+    "  ldi r16, 0x06\n  sts 0x00C2, r16\n" +
+    "  ldi r16, 0x08\n  sts 0x00C1, r16\n" +
+    "  cpi r18, 0x55\n  brne 3f\n" +
+    "  cpi r19, 0x00\n  brne 3f\n" +
+    "  cpi r20, 0x00\n  brne 3f\n" +
+    "  cpi r21, 0x00\n  brne 3f\n" +
+    "  cpi r22, 0x00\n  brne 3f\n" +
+    "  cpi r23, 0x00\n  brne 3f\n" +
+    "  cpi r24, 0x00\n  brne 3f\n" +
+    "  cpi r25, 0x00\n  brne 3f\n" +
+    "  ldi r16, 'U'\n  rjmp 4f\n" +
+    "3:\n  ldi r16, 'E'\n" +
+    "4:\n" +
+    "1:\n  lds r17, 0x00C0\n  sbrs r17, 5\n" +
+    "  rjmp 1b\n  sts 0x00C6, r16\n" +
+    "2:\n  rjmp 2b\n")),
+    "write AVR UART startup wrapper")
+def assembled = run_capture(
+    ["clang", "--target=avr", "-mmcu=atmega328p", "-c", asm_path,
+     "-o", obj_path], [], nil, false)
+def start_assembled = run_capture(
+    ["clang", "--target=avr", "-mmcu=atmega328p", "-c", start_path,
+     "-o", start_obj_path], [], nil, false)
+def linked = run_capture(
+    ["ld.lld", "-N", "--image-base=0", "-Ttext=0", "-e", "_start",
+     start_obj_path, obj_path, "-o", elf_path], [], nil, false)
+def execution = run_capture(
+    ["timeout", "2s", "qemu-system-avr", "-M", "uno", "-display", "none",
+     "-monitor", "none", "-serial", "stdio", "-bios", elf_path],
+    [], nil, false)
+assert(emitted.get("code", 127) == 0 &&
+       assembled.get("code", 127) == 0 &&
+       start_assembled.get("code", 127) == 0 &&
+       linked.get("code", 127) == 0,
+       "AVR byte-memory code assembles and links as an executable")
+assert(execution.get("code", 0) == 124 &&
+       str_contains(execution.get("stdout", ""), "U"),
+       "QEMU verifies byte store/load through the tagged-result ABI")
+NY
+}

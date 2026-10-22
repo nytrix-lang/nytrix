@@ -1,0 +1,19 @@
+shape ownership_rule_affine_resource_at_most_once {
+  family "compiler-errors/ownership"
+  generator "error"
+  features ["error", "ownership", "resource", "affine"]
+  template ny-compile-fail
+  expect compile_fail
+  flags "--ownership-strict"
+  expect_message "affine resource 'socket' may be consumed at most once"
+  source ny <<'NY'
+affine layout Socket { int fd }
+
+fn duplicate(Socket socket) int {
+  forget(socket)
+  forget(socket)
+}
+
+duplicate(Socket(7))
+NY
+}

@@ -1,15 +1,15 @@
 ;; Keywords: sound backend alsa os
 ;; ALSA sound backend for Linux audio playback.
 ;; References:
-;; - std.os.sound.backend
-;; - std.os
-module std.os.sound.backend.alsa(is_available, init, shutdown, stream_open, stream_start, stream_stop, write)
-use std.core
-use std.core.mem (cstr)
-use std.core.dict_mod
-use std.core.common as common
-use std.os.sound.diag as sound_debug
-use std.os.sound.backend.shared as backend_shared
+;; - core.os.sound.backend
+;; - core.os
+module core.os.sound.backend.alsa(is_available, init, shutdown, stream_open, stream_start, stream_stop, write)
+use core
+use core.mem (cstr)
+use core.dict_mod
+use core.common as common
+use core.os.sound.diag as sound_debug
+use core.os.sound.backend.shared as backend_shared
 
 #linux {
    #link "libasound.so"
@@ -56,14 +56,10 @@ def SND_PCM_STREAM_PLAYBACK = 0
 def SND_PCM_FORMAT_S16_LE = 2
 def SND_PCM_FORMAT_FLOAT_LE = 14
 def SND_PCM_ACCESS_RW_INTERLEAVED = 3
-mut _lib = 0
-mut _avail = -1
 
 fn is_available() bool {
    "Returns whether the ALSA backend is available on this host."
-   def state = backend_shared.probe_linux_library_once(_avail, _lib, "asound", "snd_pcm_open")
-   _avail, _lib = state.get(0), state.get(1)
-   _avail == 1
+   backend_shared.probe_linux_library("libasound.so", "snd_pcm_open") == 1
 }
 
 fn _push_unique(list lst, any item) list {
@@ -87,7 +83,6 @@ fn _build_candidates(any dev_id) list {
    out = _push_unique(out, "front")
    out = _push_unique(out, "plughw:0,0")
    out = _push_unique(out, "hw:0,0")
-   out = _push_unique(out, "null")
    out
 }
 
@@ -124,7 +119,7 @@ fn stream_open(any stream) any {
    def rate = stream.get("sample_rate")
    def channels = stream.get("channels")
    def pcm_ptr = malloc(8)
-   mut opened = 0
+   mut ?ptr opened = 0
    mut chosen = ""
    mut tries = _build_candidates(dev_id)
    mut i = 0
@@ -135,7 +130,7 @@ fn stream_open(any stream) any {
       def rc = snd_pcm_open(pcm_ptr, cand_c, SND_PCM_STREAM_PLAYBACK, 0)
       if sound_debug.enabled() { print(f"ALSA: snd_pcm_open returned {rc}") }
       if rc >= 0 {
-         def pcm = load64(pcm_ptr, 0)
+         mut ?ptr pcm = load64(pcm_ptr, 0)
          if sound_debug.enabled() { print(f"ALSA: pcm handle = {pcm}") }
          if pcm != 0 {
             def serr = snd_pcm_set_params(pcm, alsa_fmt, SND_PCM_ACCESS_RW_INTERLEAVED, channels, rate, 1, _latency_us())
@@ -163,14 +158,14 @@ fn stream_open(any stream) any {
 
 fn stream_start(any stream) bool {
    "Prepares an ALSA playback stream for writes."
-   def pcm = stream.get("handle")
+   mut ?ptr pcm = stream.get("handle")
    if !pcm { return false }
    snd_pcm_prepare(pcm) >= 0
 }
 
 fn stream_stop(any stream) any {
    "Drains and closes an ALSA playback stream."
-   def pcm = stream.get("handle")
+   mut ?ptr pcm = stream.get("handle")
    if pcm { snd_pcm_drain(pcm) }
    if pcm { snd_pcm_close(pcm) }
    stream = stream.set("handle", 0)
@@ -179,14 +174,15 @@ fn stream_stop(any stream) any {
 fn write(any pcm, any buf, int frames, int frame_bytes=4) bool {
    "Writes interleaved audio frames to ALSA, recovering transient write errors when possible."
    if !pcm { return false }
+   mut ?ptr pcm_handle = pcm
    mut ptr = buf
    mut left = frames
    mut fb = frame_bytes
    if fb <= 0 { fb = 4 }
    while left > 0 {
-      def written = snd_pcm_writei(pcm, ptr, left)
+      def written = snd_pcm_writei(pcm_handle, ptr, left)
       if written < 0 {
-         def rec = snd_pcm_recover(pcm, int(written), 0)
+         def rec = snd_pcm_recover(pcm_handle, int(written), 0)
          if rec < 0 { return false }
          continue
       }

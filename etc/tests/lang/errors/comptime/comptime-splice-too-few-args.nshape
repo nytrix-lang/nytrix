@@ -1,0 +1,15 @@
+shape comptime_splice_too_few_call_arguments {
+  family "compiler-errors/comptime"
+  generator "error"
+  features ["error", "comptime", "code", "splice", "arity", "negative", "diagnostic"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "function call"
+  source ny <<'NY'
+fn splice_pair(int left, int right) int { left + right }
+comptime template call_pair(args: code<expr>) {
+   fn generated_too_few_arguments() int { return splice_pair(${args}) }
+}
+comptime emit call_pair([quote{1}])
+NY
+}

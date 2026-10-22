@@ -1,9 +1,9 @@
 ;; Keywords: atomic concurrency lock-free os
 ;; First-class atomic 64-bit slots for shared counters and synchronization flags.
 ;; References:
-;; - std.os
-module std.os.atomic(atomic_i64, atomic_free, atomic_load, atomic_store, atomic_add, atomic_sub, atomic_exchange, atomic_compare_exchange)
-use std.core
+;; - core.os
+module core.os.atomic(atomic_i64, atomic_free, atomic_load, atomic_store, atomic_add, atomic_sub, atomic_exchange, atomic_compare_exchange)
+use core
 
 fn atomic_i64(int initial=0) ptr {
    "Allocates an atomic Ny integer slot initialized to `initial`."
@@ -59,5 +59,5 @@ fn atomic_compare_exchange(ptr cell, any expected, any desired, int offset=0) bo
    assert(atomic_sub(c, 2) == 3, "atomic sub old")
    assert(atomic_load(c) == 1, "atomic sub updated")
    atomic_free(c)
-   print("✓ std.os.atomic self-test passed")
+   print("✓ core.os.atomic self-test passed")
 }

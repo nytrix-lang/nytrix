@@ -1,9 +1,9 @@
-use std.core
-use std.os
-use std.os.args
-use std.core.str as str
-use std.os.path as path
-use std.core.glob as glob
+use core
+use core.os
+use core.os.args
+use core.str as str
+use core.os.path as path
+use core.glob as glob
 
 fn _input_path(){
    if(argc() > 2){
