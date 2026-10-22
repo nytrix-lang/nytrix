@@ -3,7 +3,7 @@
 
 Types describe the values a binding, parameter, return value, or container may
 hold. Start with the concrete type you expect; use `?T` only when absence is a
-real result, and use `any` only at a deliberately dynamic boundary.
+possible result, and use `any` at a dynamic boundary.
 
 ## Everyday forms
 
@@ -16,6 +16,7 @@ real result, and use `any` only at a deliberately dynamic boundary.
 | `struct Name` | A Nytrix record value. | Ordinary program data. |
 | `enum Name` | A finite set of variants. | State and alternatives. |
 | `layout Name` | An ABI-shaped record. | FFI and raw memory only. |
+
 Pointers (`*T`), `handle`, and `fnptr` are distinct. Use `layout` for a
 record whose field order and representation are part of an ABI; use `struct`
 for an ordinary Nytrix value. Do not use a handle as a pointer unless the
@@ -30,8 +31,7 @@ layout Pixel {
 }
 ```
 
-The full boundary contract—headers, ownership, strings, packing, and
-alignment—is in [Native](native.md).
+See [Native](native.md) for headers, ownership, strings, packing, and alignment.
 
 ## Proof and refinement types
 
@@ -164,18 +164,12 @@ The acceptance boundary is exercised by paired positive and negative cases:
 | Refinement construction and transport | [`refinements.nshape`](../../etc/tests/lang/types/refinements/refinements.nshape), [`refinement-interface.nshape`](../../etc/tests/lang/comptime/reflection/refinement-interface.nshape) | [`type-errors.nshape`](../../etc/tests/lang/errors/type/type-errors.nshape), [`relational-refinement-guard.nshape`](../../etc/tests/lang/errors/type/relational-refinement-guard.nshape) cover unknown, mutation, and closure boundaries |
 | Caller obligations across execution routes | [`portable-contracts.nshape`](../../etc/tests/lang/types/proofs/portable-contracts.nshape), [`portable-contract-binding-capacity.nshape`](../../etc/tests/lang/types/proofs/portable-contract-binding-capacity.nshape) | [`portable-contracts-errors.nshape`](../../etc/tests/lang/types/proofs/portable-contracts-errors.nshape), [`proof-call-site-unknown-negative.nshape`](../../etc/tests/lang/errors/type/proof-call-site-unknown-negative.nshape) |
 
-These fixtures define the supported calculus and its fail-closed edges. A new
-accepted syntax or transport path must add a positive case and a paired false
-or unknown case before it is documented as supported.
-
-For **`requires` / `decreases` / `@total`** enforcement levels and trait **`law`**
-checking, see [Implementation status](../learn/status.md). For
-**`trait` / `impl`** syntax, see [Traits and impl](traits.md).
-
-Networking in the stdlib is documented under [Networking](../learn/networking.md)
-(HTTP, sockets, tubes, browser WebSocket). There is no MQTT client today.
-
-See [Comptime](comptime.md) for compile-time assertions and proof construction rules.
+These fixtures cover the supported calculus and its fail-closed edges.
+Function preconditions and termination measures are described in
+[Functions](functions.md#preconditions-and-termination-measures); trait laws
+are described in [Traits and impl](traits.md#law-blocks).
+See [Comptime](comptime.md#compile-time-proofs) for compile-time assertions and
+proof construction rules.
 
 ## Related
 

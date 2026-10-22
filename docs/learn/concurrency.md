@@ -84,7 +84,7 @@ produced and consumed in order.
 
 Protect shared mutable state with a mutex:
 
-```text
+```ny
 mutex_new()
 mutex_lock(m)
 ; guarded access to shared state

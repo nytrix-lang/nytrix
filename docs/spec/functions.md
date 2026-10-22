@@ -11,13 +11,13 @@ boundaries.
 type annotation precedes the binding name. `del` clears a mutable binding; it
 does not free an object.
 
-```text
+```ny
 def name = expression
 mut name = expression
 def Type name = expression
 mut Type name = expression
 
-def name(parameters) { body }
+fn name(parameters) { body }
 fn name(parameters) Type { body }
 fn name(parameters) Type = expression
 ```
@@ -32,7 +32,7 @@ Parameters may be inferred or explicitly typed. A parameter can have a default;
 left to right. Omitted defaults are evaluated at the call site in declaration
 order.
 
-```text
+```ny
 name
 Type name
 name = default
@@ -71,7 +71,7 @@ the extent the checker or selected backend implements them; see
 | Require compile-time evaluation | `@consteval` | Mark a function for compile-time-safe evaluation. |
 | Lower eligible IO calls as tasks | `@async_effects` | Request stackless task lowering for supported direct calls. |
 | Run work on a thread | `@thread` | Statement-position calls detach; value-position calls join on supported routes. |
-| Set a per-function optimization level | `@optimize(0|1|2|3)` | Override NYIR optimization level for that function. |
+| Set a per-function optimization level | `@optimize(0)`, `@optimize(1)`, `@optimize(2)`, `@optimize(3)` | Override NYIR optimization level for that function. |
 | Guide call handling | `@inline`, `@noinline`, `@tailcall`, `@flatten` | Request supported inlining, tail-call, or flattening behavior. |
 | Mark frequency or timing intent | `@hot`, `@cold`, `@constant_time` | Provide compiler policy metadata; target support varies. |
 | Request accelerator code | `@accel`, `@accel(spirv)` | Request a validated accelerator path or receive an unsupported-target error. |
@@ -79,6 +79,27 @@ the extent the checker or selected backend implements them; see
 
 Use semantic contracts for portable behavior. Optimization hints do not replace
 measurement or change source-level operator precedence.
+
+### Effect rows
+
+An effect row records labels and, for an open row, a row variable. Calling a
+function contributes its latent effects; creating a closure does not execute
+its body. Effects describe work, not permission to access a resource, and do
+not replace ownership or synchronization rules.
+
+The type layer implements open-row unification and serialized rows. Direct
+calls through a user helper's `fnptr` parameter can propagate known callback
+rows through supported positional and named arguments, aliases, inline lambdas,
+and returned callbacks. Some local aliases retain or join rows across branches,
+loops, and matches. Imported rows are identified by qualified function name and
+arity.
+
+This is bounded callback analysis, not general callback provenance. Unknown or
+escaping callbacks, unsupported control-flow joins, re-export identity, and
+arbitrary captured callback flows remain conservative. Built-in effects still
+enter analysis through fixed masks. The declared mask contract remains the
+user-facing boundary; effect handlers and higher-rank row polymorphism are not
+provided by this mechanism.
 
 ## Preconditions and termination measures
 

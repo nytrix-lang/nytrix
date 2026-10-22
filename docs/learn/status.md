@@ -1,46 +1,80 @@
-<!-- nytrix-doc: {"audience":"user","featured":true,"group":"learn","order":12,"summary":"Execution routes, opt-in checks, and backend-specific limits in the current compiler."} -->
-# Implementation status
+<!-- nytrix-doc: {"audience":"user","featured":true,"group":"learn","order":12,"summary":"Choose an execution route and assess Nytrix's current feature and target limits."} -->
+# Status and execution routes
 
-Nytrix shares parsing and semantic checks across execution routes, but backend
-support is not uniform. A passing program on one route is evidence for that
-program and route only. Read the [specification](../spec/index.md) for the
-language contract; use the focused fixture linked from a spec when a limit
-matters.
+Nytrix is experimental. Its parser and semantic checks are shared across
+execution routes, but code generation and host APIs have route-specific limits.
+For a project, test the features, ABI signatures, and host services it needs on
+the target it will use.
+
+## Where Nytrix fits
+
+Small tools, native experiments, and compiler research can use C interop and
+compiler inspection while adapting to compiler changes. APIs, package support,
+and target coverage are still changing; pin a commit for reproducible builds.
+
+Do not treat the bounded proof, ownership, or effect analyses as general formal
+verification. Do not assume a program that runs through LLVM also runs through
+the owned native backend or in a browser.
 
 ## Execution routes
 
-| Command | Route | Boundary |
+| Goal | Command | Boundary |
 | --- | --- | --- |
-| `ny file.ny` | Default development route; LLVM JIT on supported builds | Use this for ordinary run-and-check work. |
-| `ny -run file.ny` | Builds and runs a native executable | Target and ABI support depend on the selected native backend. |
-| `ny -o app file.ny` | Emits a native executable without running it | The output still requires a compatible host or target runner. |
-| `ny --native-only file.ny` | NYIR optimization and native lowering, without LLVM code generation | Unsupported shapes fail on this route; there is no LLVM fallback. |
-| `ny --wasm file.ny` | WebAssembly target | Only the documented Wasm imports and runtime surface are available. |
-| `./make web-test` | Browser build and execution checks | This exercises the browser host contract, not general desktop APIs. |
+| Run a file during development | `ny file.ny` | Default route; LLVM JIT on supported builds. |
+| Build and run an executable | `ny -run file.ny` | AOT compilation followed by execution. |
+| Save an executable | `ny -o app file.ny` | AOT compilation without execution; needs a compatible target to run. |
+| Require the owned native path | `ny --native-only file.ny` | NYIR and native JIT; unsupported shapes fail without LLVM fallback. |
+| Emit WebAssembly | `ny --wasm file.ny` | Wasm target with explicit imports and its supported runtime surface. |
+| Test browser behavior | `./make web-test` | Browser host contract and browser-specific fixtures. |
+| Inspect interpreted NYIR | `ny --nyir-run file.ny` | Diagnostic VM, not native or LLVM execution. |
 
-Check `ny --help` and `./make --help` for the installed command surface. The
-[Native specification](../spec/native.md) describes target and ABI boundaries;
-[Browser](browser.md) covers browser capabilities.
+`-o` implies compile-only. Combine `--native-only` with `-run` or `-o` when
+checking an AOT artifact rather than native JIT execution. Command defaults
+and available backends depend on the build; `ny --help` reports its options.
+See [Native](../spec/native.md) for target and ABI rules, [REPL](repl.md) for
+interactive execution, and [Browser](browser.md) for browser capabilities.
 
 ## Feature boundaries
 
-| Area | Current boundary | Start here |
+| Area | Current boundary | Reference |
 | --- | --- | --- |
-| Type checking, traits, and overloads | Shared semantic checks run before backend selection; native lowering still has target- and shape-specific limits. | [Types](../spec/types.md), [Traits](../spec/traits.md) |
-| Refinements and proofs | The solver accepts a bounded calculus. Unknown or unsupported obligations are not proof. | [Types](../spec/types.md), [Proofs](proofs.md) |
-| Effects and ownership | Contracts and checks are opt-in or partial in documented areas; do not treat an annotation as runtime enforcement unless its spec says so. | [Functions](../spec/functions.md), [Ownership](ownership.md), [Effects](effect.md) |
-| Compile-time generation | Evaluation and syntax are bounded; generated declarations still pass through normal checking. | [Comptime](../spec/comptime.md), [Comptime guide](comptime.md) |
-| C interop and aggregate ABI | Supported declarations and calling conventions depend on the frontend, target, and signature shape. | [Native](../spec/native.md) |
-| UI, audio, and networking | Host capabilities differ across native and browser routes. Check the API contract and its fixture for the target you ship. | [UI](ui.md), [Networking](networking.md), [Browser](browser.md) |
+| Types, traits, and overloads | Shared semantic checks precede backend selection; lowering still has target- and shape-specific limits. | [Types](../spec/types.md), [Traits](../spec/traits.md) |
+| Refinements and proofs | A bounded calculus; false and unknown proof obligations are not evidence. | [Types](../spec/types.md#proof-and-refinement-types), [Proofs](proofs.md) |
+| Preconditions and termination | `requires`, `decreases`, and `@total` have distinct checks; a measure alone is not a termination proof. | [Function contracts](../spec/functions.md#preconditions-and-termination-measures) |
+| Trait laws | Checked in shared trait validation with the proof solver and compile-time Boolean evaluation. | [Law blocks](../spec/traits.md#law-blocks) |
+| Effects | Declared masks and bounded callback-row propagation; not arbitrary callback provenance or resource authorization. | [Effects](effect.md), [Effect rows](../spec/functions.md#effect-rows) |
+| Ownership | Opt-in borrow, move, and allowance checks; aggregate and alias tracking is partial. Cleanup policy is separate. | [Ownership](../spec/ownership.md), [Heap policy](../spec/runtime.md#heap-policy) |
+| Compile-time generation | Bounded evaluation and syntax insertion; generated declarations pass through normal checks. | [Comptime](../spec/comptime.md) |
+| C interop | Declaration import and aggregate ABI support depend on frontend, target, and signature. | [Native](../spec/native.md) |
+| UI, audio, and networking | Host capabilities differ between native and browser routes. | [UI](ui.md), [Networking](networking.md), [Browser](browser.md) |
 
-## How to verify a claim
+## Evaluate a project
 
-1. Find the owning rule in the [specification index](../spec/index.md).
-2. Identify the exact backend, target, and flags used by your program.
-3. Run the focused fixture linked from that rule, or add a minimal fixture for
-   the unsupported shape.
-4. Treat historical changelog results as dated evidence, not a statement about
-   the current checkout.
+1. List its required targets, ABI signatures, host services, and language features.
+2. Read their contracts in the [specification](../spec/index.md), including
+   unsupported cases.
+3. Compile and run a small representative program through the route you will ship.
+4. Keep checks for the boundaries the application relies on, including expected
+   failures and cleanup.
 
-A fixture proves its tested inputs and routes. It does not establish complete
-support for a feature family.
+[Testing](testing.md) explains focused fixtures. A fixture covers its declared
+inputs and execution routes, not every member of a feature family. Changelog
+results are historical evidence, not a test of the current checkout.
+
+## Documentation smoke limitations
+
+The 2026-10-22 manual smoke used `build/release/ny-full`
+(`0.10.0+git.60f30d2f0220`) on the default LLVM route, with
+`NYTRIX_STD_CACHE=0` and `NYTRIX_STD_BC_CACHE_AUTO=0`. It exposed these
+source-shape failures. They are implementation limits, not changes to the
+language contracts:
+
+| Source shape | Observed failure |
+| --- | --- |
+| Reassigning `counts = counts.set(...)` on a mutable `dict()` accumulator | The cookbook's two-increment check read `0` instead of `2`. In-place mutation is shown in the cookbook; the setter-return path is not established by that example. |
+| A top-level `def any boxed = nil` followed by `is_nil(boxed)` and `type(boxed)` | The value-specification example failed its dynamic nil identity assertion. |
+| Defers appending to a local string captured from a function | The control-flow example did not produce the specified `"ba"` at scope exit. |
+| `atomic_add` followed by `atomic_load` on an `atomic_i64` cell | The runtime example did not read the updated value `1`, including with qualified calls to `core.os.atomic`. |
+
+The affected examples describe the intended contract and identify their known
+failures. These observations cover only the tested route and compiler revision.

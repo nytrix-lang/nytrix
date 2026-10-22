@@ -148,7 +148,7 @@ Declare ownership contracts with attributes. Compiler and runtime modes check
 them. Resource APIs define whether a value is borrowed, owned, released, or
 intentionally forgotten.
 
-```text
+```ny
 def b = borrow(a)
 def c = &a
 def o = own(value)
@@ -227,7 +227,7 @@ fn with_name(any input, str name) any {
 `defer` and `with` provide cleanup. `with` uses the resource spelling
 `with Type name = value { ... }`.
 
-```text
+```ny
 defer { cleanup() }
 with Resource r = open_resource() { use(r) }
 ```
@@ -355,14 +355,22 @@ source-level relaxed/acquire/release ordering selector yet.
 operate on it, with an optional byte `offset` into the cell. Free the cell with
 `atomic_free`.
 
+The updated-value assertion in this contract example fails on the default LLVM
+route, including with a qualified module import; see
+[known documentation smoke limitations](../learn/status.md#documentation-smoke-limitations).
+
 ```ny
 use core
-use core.os.atomic
+use core.os.atomic as atomic
 
-def counter = atomic_i64(0)
-assert(atomic_add(counter, 1) == 1, "atomic increment")
-atomic_free(counter)
+def counter = atomic.atomic_i64(0)
+assert(atomic.atomic_add(counter, 1) == 0, "atomic add returns previous value")
+assert(atomic.atomic_load(counter) == 1, "atomic increment stored")
+atomic.atomic_free(counter)
 ```
+
+`atomic_add`, `atomic_sub`, and `atomic_exchange` return the previous value.
+Use `atomic_load` to read the updated cell.
 
 ## Attributes and effects
 
@@ -370,7 +378,7 @@ Attributes describe declaration metadata: linkage, codegen hints, purity,
 effects, hot/cold markers, accelerator/vectorization hints, and ownership
 contracts.
 
-```text
+```ny
 @pure
 @effects(none|io|alloc|ffi|thread|read|write|all)
 @async_effects

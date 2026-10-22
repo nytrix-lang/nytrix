@@ -569,6 +569,20 @@ bool nyr_strength_reduce(nyr_func_t *f) {
       if (!nyr_strength_recover_const(f, facts, fact_count, in->b, &divisor))
         continue;
       bool power_of_two = divisor > 1 && (divisor & (divisor - 1)) == 0;
+      /*
+       * The x86 native backend miscompiles the expanded signed-division
+       * sequence in nested, unrolled loops. Keep the original operation
+       * unless range analysis proves the dividend nonnegative.
+       */
+      if (power_of_two && in->op == NYIR_DIV_I64 && !dividend_nonnegative) {
+        if (nyr_strength_trace_enabled())
+          ny_dbg_heuristic_event(
+              "STRENGTH_REDUCE",
+              "reject signed div @%zu: divisor=%lld without nonnegative "
+              "dividend proof",
+              i, (long long)divisor);
+        continue;
+      }
       if (!dividend_nonnegative && in->op == NYIR_MOD_I64 && power_of_two) {
         if (nyr_strength_trace_enabled())
           ny_dbg_heuristic_event(
@@ -584,104 +598,41 @@ bool nyr_strength_reduce(nyr_func_t *f) {
         int shift = 0;
         for (int64_t v = divisor; v > 1; v >>= 1)
           ++shift;
-        if (in->op == NYIR_DIV_I64) {
+        if (in->op == NYIR_DIV_I64)
           replacement = shift;
-        }
         int saved_dst = in->dst;
         int saved_a = in->a;
         nyr_strength_result_metadata_t metadata =
             nyr_strength_result_metadata(in);
-        if (in->op == NYIR_DIV_I64 && !dividend_nonnegative) {
-          /*
-           * Signed division truncates toward zero, unlike SAR for negative
-           * inputs. Add (x < 0 ? divisor - 1 : 0) before the arithmetic shift:
-           * (x + ((x >> 63) & (divisor - 1))) >> log2(divisor).
-           */
-          if (nyr_strength_trace_enabled())
-            ny_dbg_heuristic_event(
-                "STRENGTH_REDUCE",
-                "accept signed div @%zu dst=v%d: divisor=%lld; bias negative "
-                "inputs before SAR",
-                i, saved_dst, (long long)divisor);
-          int sign_shift = f->next_value++;
-          int mask_value = f->next_value++;
-          int quotient_shift = f->next_value++;
-          int sign_value = f->next_value++;
-          int bias_value = f->next_value++;
-          int adjusted_value = f->next_value++;
-          if (!nir_ensure_inst_space(f, 6)) {
-            free(facts);
-            free(uses);
-            return false;
-          }
-          memmove(&f->data[i + 7], &f->data[i + 1],
-                  (f->len - i - 1) * sizeof(*f->data));
-          f->len += 6;
-          f->data[i] = (nyr_inst_t){.op = NYIR_CONST_I64,
-                                    .dst = sign_shift,
-                                    .a = -1,
-                                    .b = -1,
-                                    .imm = 63};
-          f->data[i + 1] = (nyr_inst_t){.op = NYIR_CONST_I64,
-                                        .dst = mask_value,
-                                        .a = -1,
-                                        .b = -1,
-                                        .imm = divisor - 1};
-          f->data[i + 2] = (nyr_inst_t){.op = NYIR_CONST_I64,
-                                        .dst = quotient_shift,
-                                        .a = -1,
-                                        .b = -1,
-                                        .imm = shift};
-          f->data[i + 3] = (nyr_inst_t){.op = NYIR_SAR_I64,
-                                        .dst = sign_value,
-                                        .a = saved_a,
-                                        .b = sign_shift};
-          f->data[i + 4] = (nyr_inst_t){.op = NYIR_AND_I64,
-                                        .dst = bias_value,
-                                        .a = sign_value,
-                                        .b = mask_value};
-          f->data[i + 5] = (nyr_inst_t){.op = NYIR_ADD_I64,
-                                        .dst = adjusted_value,
-                                        .a = saved_a,
-                                        .b = bias_value};
-          f->data[i + 6] = (nyr_inst_t){.op = NYIR_SAR_I64,
-                                        .dst = saved_dst,
-                                        .a = adjusted_value,
-                                        .b = quotient_shift};
-          nyr_strength_apply_result_metadata(&f->data[i + 6], metadata);
-          i += 6;
-        } else {
-          nyr_op_t replacement_op =
-              in->op == NYIR_DIV_I64 ? NYIR_SAR_I64 : NYIR_AND_I64;
-          if (nyr_strength_trace_enabled())
-            ny_dbg_heuristic_event(
-                "STRENGTH_REDUCE",
-                "accept %s @%zu dst=v%d: divisor=%lld and dividend range "
-                "proves nonnegative; replace with %s %lld",
-                in->op == NYIR_DIV_I64 ? "div" : "mod", i, saved_dst,
-                (long long)divisor, in->op == NYIR_DIV_I64 ? "SAR" : "AND",
-                (long long)replacement);
-          int imm_value = f->next_value++;
-          if (!nir_ensure_inst_space(f, 1)) {
-            free(facts);
-            free(uses);
-            return false;
-          }
-          memmove(&f->data[i + 1], &f->data[i],
-                  (f->len - i) * sizeof(*f->data));
-          ++f->len;
-          f->data[i] = (nyr_inst_t){.op = NYIR_CONST_I64,
-                                    .dst = imm_value,
-                                    .a = -1,
-                                    .b = -1,
-                                    .imm = replacement};
-          f->data[i + 1] = (nyr_inst_t){.op = replacement_op,
-                                        .dst = saved_dst,
-                                        .a = saved_a,
-                                        .b = imm_value};
-          nyr_strength_apply_result_metadata(&f->data[i + 1], metadata);
-          ++i;
+        nyr_op_t replacement_op =
+            in->op == NYIR_DIV_I64 ? NYIR_SAR_I64 : NYIR_AND_I64;
+        if (nyr_strength_trace_enabled())
+          ny_dbg_heuristic_event(
+              "STRENGTH_REDUCE",
+              "accept %s @%zu dst=v%d: divisor=%lld and dividend range "
+              "proves nonnegative; replace with %s %lld",
+              in->op == NYIR_DIV_I64 ? "div" : "mod", i, saved_dst,
+              (long long)divisor, in->op == NYIR_DIV_I64 ? "SAR" : "AND",
+              (long long)replacement);
+        int imm_value = f->next_value++;
+        if (!nir_ensure_inst_space(f, 1)) {
+          free(facts);
+          free(uses);
+          return false;
         }
+        memmove(&f->data[i + 1], &f->data[i], (f->len - i) * sizeof(*f->data));
+        ++f->len;
+        f->data[i] = (nyr_inst_t){.op = NYIR_CONST_I64,
+                                  .dst = imm_value,
+                                  .a = -1,
+                                  .b = -1,
+                                  .imm = replacement};
+        f->data[i + 1] = (nyr_inst_t){.op = replacement_op,
+                                      .dst = saved_dst,
+                                      .a = saved_a,
+                                      .b = imm_value};
+        nyr_strength_apply_result_metadata(&f->data[i + 1], metadata);
+        ++i;
       } else if (divisor > 1) {
         /*
          * Non-power-of-two constant divisors are left as DIV/MOD for now.

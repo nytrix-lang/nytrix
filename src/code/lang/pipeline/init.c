@@ -2781,6 +2781,10 @@ int ny_pipeline_run(ny_options *opt) {
     }
     goto exit_success;
   }
+  if (opt->dump_ast && !opt->dump_ast_typed) {
+    ny_ast_dump_tree(stdout, &prog, parse_name, opt->dump_ast_filter, false);
+    goto exit_success;
+  }
   if (!ny_validate_loop_compile_ranges(&prog)) {
     dump_debug_bundle(opt, user_src, NULL, "proof",
                       "loop range proof validation failed");
@@ -2857,12 +2861,16 @@ int ny_pipeline_run(ny_options *opt) {
         semantic_errors = 1;
       }
     }
+    if (semantic_errors == 0 && opt->dump_ast_typed)
+      ny_ast_dump_tree(stdout, &prog, parse_name, opt->dump_ast_filter, true);
     codegen_dispose(&cg);
     memset(&cg, 0, sizeof(cg));
     if (semantic_errors > 0) {
       exit_code = 1;
       goto exit_success;
     }
+    if (opt->dump_ast)
+      goto exit_success;
   }
 
   /*
@@ -2926,8 +2934,8 @@ int ny_pipeline_run(ny_options *opt) {
      * ordinary pipeline's behavior.
      */
     if (opt->nyr_run && !(opt->nyr_dump_text || opt->nyr_dump_bin ||
-                           (opt->nyr_run_bin_path &&
-                            opt->nyr_run_bin_path[0] && opt->nyr_dump_bin))) {
+                          (opt->nyr_run_bin_path && opt->nyr_run_bin_path[0] &&
+                           opt->nyr_dump_bin))) {
       exit_code = 0;
       goto exit_success;
     }
@@ -3114,12 +3122,6 @@ int ny_pipeline_run(ny_options *opt) {
     }
   }
 
-  if (opt->dump_ast) {
-    for (size_t i = 0; i < prog.body.len; i++) {
-      stmt_t *s = prog.body.data[i];
-      printf("  [%zu] Kind=%d\n", i, s->kind);
-    }
-  }
   bool parallel_modules = false;
 #ifndef _WIN32
   ny_module_list mods = {0};
@@ -3267,6 +3269,11 @@ int ny_pipeline_run(ny_options *opt) {
     goto exit_success;
   }
 
+  if (opt->dump_ast_typed) {
+    ny_ast_dump_tree(stdout, &prog, parse_name, opt->dump_ast_filter, true);
+    if (opt->dump_ast)
+      goto exit_success;
+  }
   if (opt->emit_refinement_interface_path) {
     char interface_error[256] = {0};
     if (!ny_refinement_interface_export(
@@ -3692,8 +3699,8 @@ skip_compilation:
      * so stop here.
      */
     if (opt->nyr_run && !(opt->nyr_dump_text || opt->nyr_dump_bin ||
-                           (opt->nyr_run_bin_path &&
-                            opt->nyr_run_bin_path[0] && opt->nyr_dump_bin))) {
+                          (opt->nyr_run_bin_path && opt->nyr_run_bin_path[0] &&
+                           opt->nyr_dump_bin))) {
       exit_code = 0;
       goto exit_success;
     }

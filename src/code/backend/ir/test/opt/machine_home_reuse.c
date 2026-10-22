@@ -5,8 +5,6 @@
 #include "code/backend/object/internal.h"
 #include "support.h"
 
-#include <sys/mman.h>
-
 static bool check_literal_home_elision(const ny_native_target_info_t *target) {
   nyr_func_t ir;
   nyr_mach_func_t mach = {0};
@@ -42,13 +40,12 @@ static bool check_literal_home_elision(const ny_native_target_info_t *target) {
   }
   void *mapping = MAP_FAILED;
   if (ok) {
-    mapping = mmap(NULL, code.len, PROT_READ | PROT_WRITE,
-                   MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    mapping = nyr_opt_execmem_alloc(code.len);
     ok = mapping != MAP_FAILED;
   }
   if (ok) {
     memcpy(mapping, code.data, code.len);
-    ok = mprotect(mapping, code.len, PROT_READ | PROT_EXEC) == 0;
+    ok = nyr_opt_execmem_protect(mapping, code.len) == 0;
   }
   if (ok) {
     typedef int64_t (*fn_t)(void);
@@ -61,7 +58,7 @@ static bool check_literal_home_elision(const ny_native_target_info_t *target) {
             "relocations=%zu error=%s\n",
             home_stores, reloc_count, err[0] ? err : "runtime or assertion");
   if (mapping != MAP_FAILED)
-    munmap(mapping, code.len);
+    nyr_opt_execmem_free(mapping, code.len);
   nyr_obj_free(&code);
   nyr_mach_func_free(&mach);
   nyr_ir_func_free(&ir);
@@ -84,16 +81,6 @@ check_indexed_address_forwarding(const ny_native_target_info_t *target) {
   if (ok)
     ir.param_types[0] = ir.param_types[1] = NYIR_PARAM_I64;
   int base = ok ? nyr_ir_emit(&ir, (nyr_inst_t){.op = NYIR_LOAD_LOCAL,
-                                               .dst = -1,
-                                               .a = -1,
-                                               .b = -1,
-                                               .c = -1,
-                                               .d = -1,
-                                               .e = -1,
-                                               .f = -1,
-                                               .imm = 0})
-                : -1;
-  int index = ok ? nyr_ir_emit(&ir, (nyr_inst_t){.op = NYIR_LOAD_LOCAL,
                                                 .dst = -1,
                                                 .a = -1,
                                                 .b = -1,
@@ -101,19 +88,29 @@ check_indexed_address_forwarding(const ny_native_target_info_t *target) {
                                                 .d = -1,
                                                 .e = -1,
                                                 .f = -1,
-                                                .imm = 1})
+                                                .imm = 0})
+                : -1;
+  int index = ok ? nyr_ir_emit(&ir, (nyr_inst_t){.op = NYIR_LOAD_LOCAL,
+                                                 .dst = -1,
+                                                 .a = -1,
+                                                 .b = -1,
+                                                 .c = -1,
+                                                 .d = -1,
+                                                 .e = -1,
+                                                 .f = -1,
+                                                 .imm = 1})
                  : -1;
   int scale = ok ? nyr_opt_const(&ir, 8) : -1;
   int offset = ok ? nyr_opt_binop(&ir, NYIR_MUL_I64, index, scale) : -1;
   int address = ok ? nyr_opt_binop(&ir, NYIR_ADD_I64, base, offset) : -1;
   int loaded = ok ? nyr_ir_emit(&ir, (nyr_inst_t){.op = NYIR_LOAD_I64,
-                                                 .dst = -1,
-                                                 .a = address,
-                                                 .b = -1,
-                                                 .c = -1,
-                                                 .d = -1,
-                                                 .e = -1,
-                                                 .f = -1})
+                                                  .dst = -1,
+                                                  .a = address,
+                                                  .b = -1,
+                                                  .c = -1,
+                                                  .d = -1,
+                                                  .e = -1,
+                                                  .f = -1})
                   : -1;
   if (ok && loaded >= 0)
     nyr_opt_ret(&ir, loaded);
@@ -143,13 +140,12 @@ check_indexed_address_forwarding(const ny_native_target_info_t *target) {
   }
   void *mapping = MAP_FAILED;
   if (ok) {
-    mapping = mmap(NULL, code.len, PROT_READ | PROT_WRITE,
-                   MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    mapping = nyr_opt_execmem_alloc(code.len);
     ok = mapping != MAP_FAILED;
   }
   if (ok) {
     memcpy(mapping, code.data, code.len);
-    ok = mprotect(mapping, code.len, PROT_READ | PROT_EXEC) == 0;
+    ok = nyr_opt_execmem_protect(mapping, code.len) == 0;
   }
   if (ok) {
     int64_t cells[] = {11, 17, 29, 41};
@@ -165,7 +161,7 @@ check_indexed_address_forwarding(const ny_native_target_info_t *target) {
             err[0] ? err : "runtime or assertion");
 
   if (mapping != MAP_FAILED)
-    munmap(mapping, code.len);
+    nyr_opt_execmem_free(mapping, code.len);
   nyr_obj_free(&code);
   nyr_mach_func_free(&mach);
   nyr_ir_func_free(&ir);
@@ -264,13 +260,12 @@ check_uncolored_add_address_forwarding(const ny_native_target_info_t *target) {
   }
   void *mapping = MAP_FAILED;
   if (ok) {
-    mapping = mmap(NULL, code.len, PROT_READ | PROT_WRITE,
-                   MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    mapping = nyr_opt_execmem_alloc(code.len);
     ok = mapping != MAP_FAILED;
   }
   if (ok) {
     memcpy(mapping, code.data, code.len);
-    ok = mprotect(mapping, code.len, PROT_READ | PROT_EXEC) == 0;
+    ok = nyr_opt_execmem_protect(mapping, code.len) == 0;
   }
   if (ok) {
     int64_t cells[] = {11, 17, 29, 41};
@@ -285,7 +280,7 @@ check_uncolored_add_address_forwarding(const ny_native_target_info_t *target) {
             indexed_loads, address_adds, reloc_count,
             err[0] ? err : "runtime or assertion");
   if (mapping != MAP_FAILED)
-    munmap(mapping, code.len);
+    nyr_opt_execmem_free(mapping, code.len);
   nyr_obj_free(&code);
   nyr_mach_func_free(&mach);
   return ok;
@@ -363,16 +358,6 @@ check_float_load_index_reuse(const ny_native_target_info_t *target) {
     ir.param_types[2] = NYIR_PARAM_I64;
   }
   int base = ok ? nyr_ir_emit(&ir, (nyr_inst_t){.op = NYIR_LOAD_LOCAL,
-                                               .dst = -1,
-                                               .a = -1,
-                                               .b = -1,
-                                               .c = -1,
-                                               .d = -1,
-                                               .e = -1,
-                                               .f = -1,
-                                               .imm = 0})
-                : -1;
-  int index = ok ? nyr_ir_emit(&ir, (nyr_inst_t){.op = NYIR_LOAD_LOCAL,
                                                 .dst = -1,
                                                 .a = -1,
                                                 .b = -1,
@@ -380,9 +365,9 @@ check_float_load_index_reuse(const ny_native_target_info_t *target) {
                                                 .d = -1,
                                                 .e = -1,
                                                 .f = -1,
-                                                .imm = 1})
-                 : -1;
-  int output = ok ? nyr_ir_emit(&ir, (nyr_inst_t){.op = NYIR_LOAD_LOCAL,
+                                                .imm = 0})
+                : -1;
+  int index = ok ? nyr_ir_emit(&ir, (nyr_inst_t){.op = NYIR_LOAD_LOCAL,
                                                  .dst = -1,
                                                  .a = -1,
                                                  .b = -1,
@@ -390,7 +375,17 @@ check_float_load_index_reuse(const ny_native_target_info_t *target) {
                                                  .d = -1,
                                                  .e = -1,
                                                  .f = -1,
-                                                 .imm = 2})
+                                                 .imm = 1})
+                 : -1;
+  int output = ok ? nyr_ir_emit(&ir, (nyr_inst_t){.op = NYIR_LOAD_LOCAL,
+                                                  .dst = -1,
+                                                  .a = -1,
+                                                  .b = -1,
+                                                  .c = -1,
+                                                  .d = -1,
+                                                  .e = -1,
+                                                  .f = -1,
+                                                  .imm = 2})
                   : -1;
   int scale = ok ? nyr_opt_const(&ir, 8) : -1;
   int offset = ok ? nyr_opt_binop(&ir, NYIR_MUL_I64, index, scale) : -1;
@@ -398,14 +393,14 @@ check_float_load_index_reuse(const ny_native_target_info_t *target) {
   int first =
       address0 >= 0
           ? nyr_ir_emit(&ir, (nyr_inst_t){.op = NYIR_LOAD_I64,
-                                         .dst = -1,
-                                         .a = address0,
-                                         .b = -1,
-                                         .c = -1,
-                                         .d = -1,
-                                         .e = -1,
-                                         .f = -1,
-                                         .scalar_class = NYIR_SCALAR_F64})
+                                          .dst = -1,
+                                          .a = address0,
+                                          .b = -1,
+                                          .c = -1,
+                                          .d = -1,
+                                          .e = -1,
+                                          .f = -1,
+                                          .scalar_class = NYIR_SCALAR_F64})
           : -1;
   int doubled =
       first >= 0 ? nyr_opt_binop(&ir, NYIR_ADD_F64, first, first) : -1;
@@ -414,28 +409,28 @@ check_float_load_index_reuse(const ny_native_target_info_t *target) {
   int second =
       address1 >= 0
           ? nyr_ir_emit(&ir, (nyr_inst_t){.op = NYIR_LOAD_I64,
-                                         .dst = -1,
-                                         .a = address1,
-                                         .b = -1,
-                                         .c = -1,
-                                         .d = -1,
-                                         .e = -1,
-                                         .f = -1,
-                                         .scalar_class = NYIR_SCALAR_F64})
+                                          .dst = -1,
+                                          .a = address1,
+                                          .b = -1,
+                                          .c = -1,
+                                          .d = -1,
+                                          .e = -1,
+                                          .f = -1,
+                                          .scalar_class = NYIR_SCALAR_F64})
           : -1;
   int sum =
       second >= 0 ? nyr_opt_binop(&ir, NYIR_ADD_F64, doubled, second) : -1;
   int zero = sum >= 0 ? nyr_opt_const(&ir, 0) : -1;
   if (ok && sum >= 0 && output >= 0 && zero >= 0) {
     nyr_ir_emit(&ir, (nyr_inst_t){.op = NYIR_STORE_I64,
-                                 .dst = -1,
-                                 .a = output,
-                                 .b = -1,
-                                 .c = sum,
-                                 .d = -1,
-                                 .e = -1,
-                                 .f = -1,
-                                 .scalar_class = NYIR_SCALAR_F64});
+                                  .dst = -1,
+                                  .a = output,
+                                  .b = -1,
+                                  .c = sum,
+                                  .d = -1,
+                                  .e = -1,
+                                  .f = -1,
+                                  .scalar_class = NYIR_SCALAR_F64});
     nyr_opt_ret(&ir, zero);
   } else {
     ok = false;
@@ -471,13 +466,12 @@ check_float_load_index_reuse(const ny_native_target_info_t *target) {
   }
   void *mapping = MAP_FAILED;
   if (ok) {
-    mapping = mmap(NULL, code.len, PROT_READ | PROT_WRITE,
-                   MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    mapping = nyr_opt_execmem_alloc(code.len);
     ok = mapping != MAP_FAILED;
   }
   if (ok) {
     memcpy(mapping, code.data, code.len);
-    ok = mprotect(mapping, code.len, PROT_READ | PROT_EXEC) == 0;
+    ok = nyr_opt_execmem_protect(mapping, code.len) == 0;
   }
   if (ok) {
     double cells[4] = {0.0, 3.5, 0.0, 0.0};
@@ -494,7 +488,7 @@ check_float_load_index_reuse(const ny_native_target_info_t *target) {
             indexed_loads, index_moves, reloc_count,
             err[0] ? err : "runtime or assertion");
   if (mapping != MAP_FAILED)
-    munmap(mapping, code.len);
+    nyr_opt_execmem_free(mapping, code.len);
   nyr_obj_free(&code);
   nyr_mach_func_free(&mach);
   nyr_ir_func_free(&ir);
@@ -518,34 +512,34 @@ static bool check_indexed_integer_store_source_preserved(
     for (size_t i = 0; i < 3; ++i)
       ir.param_types[i] = NYIR_PARAM_I64;
   int base = ok ? nyr_ir_emit(&ir, (nyr_inst_t){.op = NYIR_LOAD_LOCAL,
-                                               .dst = -1,
-                                               .a = -1,
-                                               .b = -1,
-                                               .c = -1,
-                                               .d = -1,
-                                               .e = -1,
-                                               .f = -1,
-                                               .imm = 0})
+                                                .dst = -1,
+                                                .a = -1,
+                                                .b = -1,
+                                                .c = -1,
+                                                .d = -1,
+                                                .e = -1,
+                                                .f = -1,
+                                                .imm = 0})
                 : -1;
   int index = ok ? nyr_ir_emit(&ir, (nyr_inst_t){.op = NYIR_LOAD_LOCAL,
-                                                .dst = -1,
-                                                .a = -1,
-                                                .b = -1,
-                                                .c = -1,
-                                                .d = -1,
-                                                .e = -1,
-                                                .f = -1,
-                                                .imm = 1})
+                                                 .dst = -1,
+                                                 .a = -1,
+                                                 .b = -1,
+                                                 .c = -1,
+                                                 .d = -1,
+                                                 .e = -1,
+                                                 .f = -1,
+                                                 .imm = 1})
                  : -1;
   int value = ok ? nyr_ir_emit(&ir, (nyr_inst_t){.op = NYIR_LOAD_LOCAL,
-                                                .dst = -1,
-                                                .a = -1,
-                                                .b = -1,
-                                                .c = -1,
-                                                .d = -1,
-                                                .e = -1,
-                                                .f = -1,
-                                                .imm = 2})
+                                                 .dst = -1,
+                                                 .a = -1,
+                                                 .b = -1,
+                                                 .c = -1,
+                                                 .d = -1,
+                                                 .e = -1,
+                                                 .f = -1,
+                                                 .imm = 2})
                  : -1;
   int zero = ok ? nyr_opt_const(&ir, 0) : -1;
   int scale = ok ? nyr_opt_const(&ir, 8) : -1;
@@ -553,16 +547,16 @@ static bool check_indexed_integer_store_source_preserved(
   int address = ok ? nyr_opt_binop(&ir, NYIR_ADD_I64, base, offset) : -1;
   if (ok && address >= 0 && value >= 0 && zero >= 0) {
     nyr_ir_emit(&ir, (nyr_inst_t){.op = NYIR_STORE_I64,
-                                 .dst = -1,
-                                 .a = address,
-                                 .b = -1,
-                                 .c = value,
-                                 .d = -1,
-                                 .e = -1,
-                                 .f = -1,
-                                 .effects = NYIR_EFFECT_WRITE_MEMORY |
-                                            NYIR_EFFECT_MAY_TRAP,
-                                 .scalar_class = NYIR_SCALAR_I64_RAW});
+                                  .dst = -1,
+                                  .a = address,
+                                  .b = -1,
+                                  .c = value,
+                                  .d = -1,
+                                  .e = -1,
+                                  .f = -1,
+                                  .effects = NYIR_EFFECT_WRITE_MEMORY |
+                                             NYIR_EFFECT_MAY_TRAP,
+                                  .scalar_class = NYIR_SCALAR_I64_RAW});
     nyr_opt_ret(&ir, zero);
   } else {
     ok = false;
@@ -595,13 +589,12 @@ static bool check_indexed_integer_store_source_preserved(
   ok = ok && symbol >= 0 && reloc_count == 0;
   void *mapping = MAP_FAILED;
   if (ok) {
-    mapping = mmap(NULL, code.len, PROT_READ | PROT_WRITE,
-                   MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    mapping = nyr_opt_execmem_alloc(code.len);
     ok = mapping != MAP_FAILED;
   }
   if (ok) {
     memcpy(mapping, code.data, code.len);
-    ok = mprotect(mapping, code.len, PROT_READ | PROT_EXEC) == 0;
+    ok = nyr_opt_execmem_protect(mapping, code.len) == 0;
   }
   if (ok) {
     int64_t cells[] = {11, 17, 29, 41};
@@ -624,7 +617,7 @@ static bool check_indexed_integer_store_source_preserved(
             "relocations=%zu error=%s\n",
             reloc_count, err[0] ? err : "runtime or assertion");
   if (mapping != MAP_FAILED)
-    munmap(mapping, code.len);
+    nyr_opt_execmem_free(mapping, code.len);
   nyr_obj_free(&code);
   nyr_mach_func_free(&mach);
   nyr_ir_func_free(&ir);
@@ -649,16 +642,6 @@ static bool check_indexed_float_store_address_forwarding(
     ir.param_types[1] = NYIR_PARAM_I64;
   }
   int base = ok ? nyr_ir_emit(&ir, (nyr_inst_t){.op = NYIR_LOAD_LOCAL,
-                                               .dst = -1,
-                                               .a = -1,
-                                               .b = -1,
-                                               .c = -1,
-                                               .d = -1,
-                                               .e = -1,
-                                               .f = -1,
-                                               .imm = 0})
-                : -1;
-  int index = ok ? nyr_ir_emit(&ir, (nyr_inst_t){.op = NYIR_LOAD_LOCAL,
                                                 .dst = -1,
                                                 .a = -1,
                                                 .b = -1,
@@ -666,7 +649,17 @@ static bool check_indexed_float_store_address_forwarding(
                                                 .d = -1,
                                                 .e = -1,
                                                 .f = -1,
-                                                .imm = 1})
+                                                .imm = 0})
+                : -1;
+  int index = ok ? nyr_ir_emit(&ir, (nyr_inst_t){.op = NYIR_LOAD_LOCAL,
+                                                 .dst = -1,
+                                                 .a = -1,
+                                                 .b = -1,
+                                                 .c = -1,
+                                                 .d = -1,
+                                                 .e = -1,
+                                                 .f = -1,
+                                                 .imm = 1})
                  : -1;
   int value = ok ? nyr_opt_const_f64(&ir, 7.25) : -1;
   int zero = ok ? nyr_opt_const(&ir, 0) : -1;
@@ -675,14 +668,14 @@ static bool check_indexed_float_store_address_forwarding(
   int address = ok ? nyr_opt_binop(&ir, NYIR_ADD_I64, base, offset) : -1;
   if (ok && address >= 0 && value >= 0 && zero >= 0) {
     nyr_ir_emit(&ir, (nyr_inst_t){.op = NYIR_STORE_I64,
-                                 .dst = -1,
-                                 .a = address,
-                                 .b = -1,
-                                 .c = value,
-                                 .d = -1,
-                                 .e = -1,
-                                 .f = -1,
-                                 .scalar_class = NYIR_SCALAR_F64});
+                                  .dst = -1,
+                                  .a = address,
+                                  .b = -1,
+                                  .c = value,
+                                  .d = -1,
+                                  .e = -1,
+                                  .f = -1,
+                                  .scalar_class = NYIR_SCALAR_F64});
     nyr_opt_ret(&ir, zero);
   } else {
     ok = false;
@@ -713,13 +706,12 @@ static bool check_indexed_float_store_address_forwarding(
   }
   void *mapping = MAP_FAILED;
   if (ok) {
-    mapping = mmap(NULL, code.len, PROT_READ | PROT_WRITE,
-                   MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    mapping = nyr_opt_execmem_alloc(code.len);
     ok = mapping != MAP_FAILED;
   }
   if (ok) {
     memcpy(mapping, code.data, code.len);
-    ok = mprotect(mapping, code.len, PROT_READ | PROT_EXEC) == 0;
+    ok = nyr_opt_execmem_protect(mapping, code.len) == 0;
   }
   if (ok) {
     uint64_t cells[4] = {0, 0, 0, 0};
@@ -738,7 +730,7 @@ static bool check_indexed_float_store_address_forwarding(
             err[0] ? err : "runtime or assertion");
 
   if (mapping != MAP_FAILED)
-    munmap(mapping, code.len);
+    nyr_opt_execmem_free(mapping, code.len);
   nyr_obj_free(&code);
   nyr_mach_func_free(&mach);
   nyr_ir_func_free(&ir);
@@ -874,13 +866,12 @@ check_cross_block_value_register_reuse(const ny_native_target_info_t *target) {
   void *mapping = MAP_FAILED;
   int64_t actual = INT64_MIN;
   if (built) {
-    mapping = mmap(NULL, code.len, PROT_READ | PROT_WRITE,
-                   MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    mapping = nyr_opt_execmem_alloc(code.len);
     built = mapping != MAP_FAILED;
   }
   if (built) {
     memcpy(mapping, code.data, code.len);
-    built = mprotect(mapping, code.len, PROT_READ | PROT_EXEC) == 0;
+    built = nyr_opt_execmem_protect(mapping, code.len) == 0;
   }
   if (built) {
     typedef int64_t (*fn_t)(int64_t);
@@ -898,7 +889,7 @@ check_cross_block_value_register_reuse(const ny_native_target_info_t *target) {
             symbol >= 0 ? defs[symbol].size : 0, reloc_count,
             err[0] ? err : "runtime or encoding");
   if (mapping != MAP_FAILED)
-    munmap(mapping, code.len);
+    nyr_opt_execmem_free(mapping, code.len);
   nyr_obj_free(&code);
   nyr_mach_func_free(&mach);
   return built;
@@ -921,17 +912,24 @@ static size_t home_test_frame_loads(const nyr_obj_buf_t *code,
   return count;
 }
 
-static bool home_test_symbol_has_bytes(const nyr_obj_buf_t *code,
-                                       const nyr_x64_obj_symbol_def_t *symbol,
-                                       const unsigned char *needle,
-                                       size_t needle_len) {
-  if (!code || !symbol || !needle || needle_len == 0 ||
-      symbol->off > code->len || symbol->size > code->len - symbol->off)
+static bool
+home_test_symbol_has_sse_opcode(const nyr_obj_buf_t *code,
+                                const nyr_x64_obj_symbol_def_t *symbol,
+                                unsigned char opcode) {
+  if (!code || !symbol || symbol->off > code->len ||
+      symbol->size > code->len - symbol->off)
     return false;
   const unsigned char *bytes = code->data + symbol->off;
-  for (size_t i = 0; i + needle_len <= symbol->size; ++i)
-    if (memcmp(bytes + i, needle, needle_len) == 0)
+  for (size_t i = 0; i + 2 < symbol->size; ++i) {
+    if (bytes[i] != 0x66)
+      continue;
+    size_t opcode_offset = i + 1;
+    if (opcode_offset < symbol->size && (bytes[opcode_offset] & 0xf0) == 0x40)
+      ++opcode_offset;
+    if (opcode_offset + 1 < symbol->size && bytes[opcode_offset] == 0x0f &&
+        bytes[opcode_offset + 1] == opcode)
       return true;
+  }
   return false;
 }
 
@@ -1044,37 +1042,43 @@ check_vector_disjoint_loop_home(const ny_native_target_info_t *target) {
       (!enable_prior || enable_saved) && (!carry_prior || carry_saved);
   built = built && env_saved;
   if (built)
-    built = setenv("NYTRIX_FORCE_STACK_GPR", "1", 1) == 0 &&
-            unsetenv("NYTRIX_DISABLE_LOOP_GPR") == 0 &&
-            setenv("NYTRIX_ENABLE_LOOP_GPR", "1", 1) == 0 &&
-            setenv("NYTRIX_GPR_LOOP_CARRY", "0", 1) == 0 &&
+    built = nyr_opt_setenv("NYTRIX_FORCE_STACK_GPR", "1") == 0 &&
+            nyr_opt_unsetenv("NYTRIX_DISABLE_LOOP_GPR") == 0 &&
+            nyr_opt_setenv("NYTRIX_ENABLE_LOOP_GPR", "1") == 0 &&
+            nyr_opt_setenv("NYTRIX_GPR_LOOP_CARRY", "0") == 0 &&
             nyr_x64_mach_append_function(
                 &stack_code, stack_defs, &stack_def_count, stack_relocs,
                 &stack_reloc_count, &mach, target, "vector_loop_stack", false,
                 err, sizeof(err));
   if (built)
-    built = unsetenv("NYTRIX_FORCE_STACK_GPR") == 0 &&
+    built = nyr_opt_unsetenv("NYTRIX_FORCE_STACK_GPR") == 0 &&
             nyr_x64_mach_append_function(&loop_code, loop_defs, &loop_def_count,
                                          loop_relocs, &loop_reloc_count, &mach,
                                          target, "vector_loop_home", false, err,
                                          sizeof(err));
+  const char *loop_enabled = getenv("NYTRIX_ENABLE_LOOP_GPR");
+  const char *loop_disabled = getenv("NYTRIX_DISABLE_LOOP_GPR");
+  const char *loop_carry = getenv("NYTRIX_GPR_LOOP_CARRY");
+  bool loop_env_ok = loop_enabled && strcmp(loop_enabled, "1") == 0 &&
+                     !loop_disabled && loop_carry &&
+                     strcmp(loop_carry, "0") == 0;
   if (env_saved) {
     if (force_prior)
-      setenv("NYTRIX_FORCE_STACK_GPR", force_saved, 1);
+      nyr_opt_setenv("NYTRIX_FORCE_STACK_GPR", force_saved);
     else
-      unsetenv("NYTRIX_FORCE_STACK_GPR");
+      nyr_opt_unsetenv("NYTRIX_FORCE_STACK_GPR");
     if (disable_prior)
-      setenv("NYTRIX_DISABLE_LOOP_GPR", disable_saved, 1);
+      nyr_opt_setenv("NYTRIX_DISABLE_LOOP_GPR", disable_saved);
     else
-      unsetenv("NYTRIX_DISABLE_LOOP_GPR");
+      nyr_opt_unsetenv("NYTRIX_DISABLE_LOOP_GPR");
     if (enable_prior)
-      setenv("NYTRIX_ENABLE_LOOP_GPR", enable_saved, 1);
+      nyr_opt_setenv("NYTRIX_ENABLE_LOOP_GPR", enable_saved);
     else
-      unsetenv("NYTRIX_ENABLE_LOOP_GPR");
+      nyr_opt_unsetenv("NYTRIX_ENABLE_LOOP_GPR");
     if (carry_prior)
-      setenv("NYTRIX_GPR_LOOP_CARRY", carry_saved, 1);
+      nyr_opt_setenv("NYTRIX_GPR_LOOP_CARRY", carry_saved);
     else
-      unsetenv("NYTRIX_GPR_LOOP_CARRY");
+      nyr_opt_unsetenv("NYTRIX_GPR_LOOP_CARRY");
   }
   free(force_saved);
   free(disable_saved);
@@ -1095,25 +1099,24 @@ check_vector_disjoint_loop_home(const ny_native_target_info_t *target) {
       loop_symbol >= 0
           ? home_test_frame_loads(&loop_code, &loop_defs[loop_symbol])
           : 0;
-  static const unsigned char packed_i64_add[] = {0x66, 0x0f, 0xd4};
-  static const unsigned char packed_f64_add[] = {0x66, 0x0f, 0x58};
+  bool has_packed_i64_add =
+      loop_symbol >= 0 && home_test_symbol_has_sse_opcode(
+                              &loop_code, &loop_defs[loop_symbol], 0xd4);
+  bool has_packed_f64_add =
+      loop_symbol >= 0 && home_test_symbol_has_sse_opcode(
+                              &loop_code, &loop_defs[loop_symbol], 0x58);
   void *mapping = MAP_FAILED;
   if (built)
-    built =
-        stack_symbol >= 0 && loop_symbol >= 0 && stack_reloc_count == 0 &&
-        loop_reloc_count == 0 && stack_loads > loop_loads &&
-        home_test_symbol_has_bytes(&loop_code, &loop_defs[loop_symbol],
-                                   packed_i64_add, sizeof(packed_i64_add)) &&
-        !home_test_symbol_has_bytes(&loop_code, &loop_defs[loop_symbol],
-                                    packed_f64_add, sizeof(packed_f64_add));
+    built = stack_symbol >= 0 && loop_symbol >= 0 && stack_reloc_count == 0 &&
+            loop_reloc_count == 0 && stack_loads > loop_loads &&
+            has_packed_i64_add && !has_packed_f64_add;
   if (built) {
-    mapping = mmap(NULL, loop_code.len, PROT_READ | PROT_WRITE,
-                   MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    mapping = nyr_opt_execmem_alloc(loop_code.len);
     built = mapping != MAP_FAILED;
   }
   if (built) {
     memcpy(mapping, loop_code.data, loop_code.len);
-    built = mprotect(mapping, loop_code.len, PROT_READ | PROT_EXEC) == 0;
+    built = nyr_opt_execmem_protect(mapping, loop_code.len) == 0;
   }
   int64_t actual = INT64_MIN;
   if (built) {
@@ -1125,15 +1128,18 @@ check_vector_disjoint_loop_home(const ny_native_target_info_t *target) {
   if (!built)
     fprintf(stderr,
             "[machine-home-reuse] vector-disjoint loop home failed: "
-            "result=%lld stack-loads=%zu loop-loads=%zu error=%s\n",
-            (long long)actual, stack_loads, loop_loads,
+            "result=%lld stack-loads=%zu loop-loads=%zu symbols=%d,%d "
+            "relocations=%zu,%zu packed-add=%d,%d env=%d error=%s\n",
+            (long long)actual, stack_loads, loop_loads, stack_symbol,
+            loop_symbol, stack_reloc_count, loop_reloc_count,
+            has_packed_i64_add, has_packed_f64_add, loop_env_ok,
             err[0] ? err : "encoding, allocation, or runtime");
   else
     printf("[machine-home-reuse] vector-disjoint loop home reduced frame "
            "loads: %zu -> %zu; result=%lld\n",
            stack_loads, loop_loads, (long long)actual);
   if (mapping != MAP_FAILED)
-    munmap(mapping, loop_code.len);
+    nyr_opt_execmem_free(mapping, loop_code.len);
   nyr_obj_free(&stack_code);
   nyr_obj_free(&loop_code);
   nyr_mach_func_free(&mach);
@@ -1159,14 +1165,14 @@ int main(void) {
     ir.param_types[0] = NYIR_PARAM_I64;
 
   int arg = ok ? nyr_ir_emit(&ir, (nyr_inst_t){.op = NYIR_LOAD_LOCAL,
-                                              .dst = -1,
-                                              .a = -1,
-                                              .b = -1,
-                                              .c = -1,
-                                              .d = -1,
-                                              .e = -1,
-                                              .f = -1,
-                                              .imm = 0})
+                                               .dst = -1,
+                                               .a = -1,
+                                               .b = -1,
+                                               .c = -1,
+                                               .d = -1,
+                                               .e = -1,
+                                               .f = -1,
+                                               .imm = 0})
                : -1;
   int one = ok ? nyr_opt_const(&ir, 1) : -1;
   int sum = ok ? nyr_opt_binop(&ir, NYIR_ADD_I64, arg, one) : -1;
@@ -1204,13 +1210,12 @@ int main(void) {
             symbol, def_count, reloc_count);
   void *mapping = MAP_FAILED;
   if (ok) {
-    mapping = mmap(NULL, code.len, PROT_READ | PROT_WRITE,
-                   MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    mapping = nyr_opt_execmem_alloc(code.len);
     ok = mapping != MAP_FAILED;
   }
   if (ok) {
     memcpy(mapping, code.data, code.len);
-    ok = mprotect(mapping, code.len, PROT_READ | PROT_EXEC) == 0;
+    ok = nyr_opt_execmem_protect(mapping, code.len) == 0;
   }
   if (ok) {
     typedef int64_t (*fn_t)(int64_t);
@@ -1245,7 +1250,7 @@ int main(void) {
            "addresses; dynamic integer and float stores preserve indexed "
            "values; vector-disjoint loop homes reduce frame loads\n");
   if (mapping != MAP_FAILED)
-    munmap(mapping, code.len);
+    nyr_opt_execmem_free(mapping, code.len);
   nyr_obj_free(&code);
   nyr_mach_func_free(&mach);
   nyr_ir_func_free(&ir);

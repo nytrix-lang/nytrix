@@ -2883,10 +2883,12 @@ int64_t rt_bytes_set_raw(int64_t buffer, int64_t index, int64_t value) {
 int64_t rt_cstr_len(int64_t value) {
   if (!value)
     return 0;
-  /* Raw pointers to LLVM's static C-string literals are readable too, and
+  /*
+   * Raw pointers to LLVM's static C-string literals are readable too, and
    * their preceding bytes can accidentally look like a Ny string header.
    * Only trust the tagged-string predicate after allocator/SSO provenance has
-   * established that this word is a runtime string value. */
+   * established that this word is a runtime string value.
+   */
   if ((rt_heap_object_ptr(value) && is_v_str(value)) || rt_is_sso_string(value))
     return (int64_t)rt_tagged_str_len(value);
   uintptr_t raw = (uintptr_t)value;
@@ -3033,20 +3035,24 @@ static bool rt_set_layout(int64_t value) {
 }
 
 static ny_native_dict_t *ny_native_dict_ptr(int64_t value) {
-  /* Native dictionaries are process-lifetime objects. Repeated typed stores
+  /*
+   * Native dictionaries are process-lifetime objects. Repeated typed stores
    * to one receiver can therefore bypass the registry hash and atomic probe
-   * after the first validated lookup on each thread. */
+   * after the first validated lookup on each thread.
+   */
   uintptr_t address = (uintptr_t)value;
   if (address < 4096 || address >= UINT64_C(0x0000800000000000) || address < 16)
     return NULL;
   if (address == ny_native_dict_last_address && ny_native_dict_last)
     return ny_native_dict_last;
   ny_native_dict_t *dict = ny_native_dict_registry_find(address);
-  /* Registry entries are installed only by rt_dict_new_raw, and native
+  /*
+   * Registry entries are installed only by rt_dict_new_raw, and native
    * dictionary objects have process lifetime.  A hit therefore proves both
    * the address and the private header provenance; avoid repeating the magic,
    * capacity, and length checks on every typed get/set in a hot loop.  Values
-   * from any other source still take the fully checked compatibility path. */
+   * from any other source still take the fully checked compatibility path.
+   */
   if (dict) {
     ny_native_dict_last_address = 0;
     ny_native_dict_last = dict;
@@ -3071,8 +3077,10 @@ static ny_native_dict_t *ny_native_dict_ptr(int64_t value) {
   return dict;
 }
 
-/* Keep the repeat-store cache check in the hot setter's caller. A miss still
- * takes the complete provenance-checked lookup above. */
+/*
+ * Keep the repeat-store cache check in the hot setter's caller. A miss still
+ * takes the complete provenance-checked lookup above.
+ */
 static inline ny_native_dict_t *ny_native_dict_cached_ptr(int64_t value) {
   uintptr_t address = (uintptr_t)value;
   if (address == ny_native_dict_last_address && ny_native_dict_last)
@@ -3136,8 +3144,10 @@ static bool ny_native_dict_resize(ny_native_dict_t *dict, int64_t capacity) {
   dict->slots = slots;
   dict->ctrl = ctrl;
   dict->capacity = capacity;
-  /* Keep the existing integer load-factor rule exact while avoiding its
-   * multiply/compare sequence on every insertion. */
+  /*
+   * Keep the existing integer load-factor rule exact while avoiding its
+   * multiply/compare sequence on every insertion.
+   */
   dict->resize_at = (capacity * 7 + 9) / 10 - 1;
   dict->length = 0;
   if (old_slots) {
@@ -3152,13 +3162,17 @@ static bool ny_native_dict_resize(ny_native_dict_t *dict, int64_t capacity) {
       slots[pos] = old_slots[i];
       ctrl[pos] = old_control;
     }
-    /* The SIMD probe reads up to 16 bytes from the starting control index.
-     * Mirror the prefix once instead of branching on every rehashed slot. */
+    /*
+     * The SIMD probe reads up to 16 bytes from the starting control index.
+     * Mirror the prefix once instead of branching on every rehashed slot.
+     */
     size_t mirror_len = capacity < 16 ? (size_t)capacity : 16;
     for (size_t i = 0; i < mirror_len; ++i)
       ctrl[(size_t)capacity + i] = ctrl[i];
-    /* Rehash preserves the number of live entries. Avoid a memory increment
-     * for every copied slot; the old length already accounts for tombstones. */
+    /*
+     * Rehash preserves the number of live entries. Avoid a memory increment
+     * for every copied slot; the old length already accounts for tombstones.
+     */
     dict->length = old_length;
     free(old_slots);
   }
@@ -4648,8 +4662,7 @@ int64_t rt_native_dict_set_nir_i64_raw_int(int64_t value, int64_t key,
  * Lowering selects this bridge only when both the key and value are proven
  * raw integers. Skip dynamic key classification on the native dictionary
  * hot path; preserve the checked bridge for other dictionary layouts.
- */
-/* Keep the checked compatibility path out of the native integer setter's hot
+ * Keep the checked compatibility path out of the native integer setter's hot
  * block. Native dictionaries are the common case after NYIR lowers a literal
  * dictionary, while this fallback must retain managed-dictionary key boxing.
  */
@@ -6590,12 +6603,12 @@ int64_t rt_cstr_to_str(int64_t p_v) {
    * native-handle encoding, so after resolving any unreadable native handle,
    * validate the resulting pointer as a counted string before falling back
    * to NUL-terminated C-string handling.
-   */
-  /* `p_v` is also used for raw pointers to static LLVM string constants.
+   * `p_v` is also used for raw pointers to static LLVM string constants.
    * Header probing such a pointer can mistake adjacent constant data for a
    * tagged-string header. Managed strings and SSO values have explicit
    * runtime provenance; other readable addresses go through the C-string
-   * conversion below. */
+   * conversion below.
+   */
   if ((rt_heap_object_ptr(raw) && is_v_str(raw)) || rt_is_sso_string(raw))
     return raw;
   /*

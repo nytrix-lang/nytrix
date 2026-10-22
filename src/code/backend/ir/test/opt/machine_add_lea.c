@@ -1,8 +1,9 @@
-/* Three-operand sums must preserve live inputs and wrapping i64 semantics. */
+/*
+ * Three-operand sums must preserve live inputs and wrapping i64 semantics.
+ */
 #include "code/backend/ir/machine.h"
 #include "code/backend/object/internal.h"
 #include "support.h"
-#include <sys/mman.h>
 
 static bool check_sum(const ny_native_target_info_t *target, bool registers,
                       int64_t constant) {
@@ -22,9 +23,14 @@ static bool check_sum(const ny_native_target_info_t *target, bool registers,
   int inputs[2];
   for (int i = 0; i < 2; ++i)
     inputs[i] = nyr_ir_emit(&ir, (nyr_inst_t){.op = NYIR_LOAD_LOCAL,
-                                            .dst = -1, .a = -1, .b = -1,
-                                            .c = -1, .d = -1, .e = -1,
-                                            .f = -1, .imm = i});
+                                              .dst = -1,
+                                              .a = -1,
+                                              .b = -1,
+                                              .c = -1,
+                                              .d = -1,
+                                              .e = -1,
+                                              .f = -1,
+                                              .imm = i});
   int rhs = registers ? inputs[1] : nyr_opt_const(&ir, constant);
   int sum = nyr_opt_binop(&ir, NYIR_ADD_I64, inputs[0], rhs);
   int result = nyr_opt_binop(&ir, NYIR_XOR_I64, sum, inputs[0]);
@@ -33,8 +39,8 @@ static bool check_sum(const ny_native_target_info_t *target, bool registers,
   bool ok = nyr_opt_verify(&ir, "machine-add-lea") &&
             nyr_mach_lower_nir(&ir, &mach, target->caps, err, sizeof(err)) &&
             nyr_x64_mach_append_function(&code, defs, &def_count, relocs,
-                                         &reloc_count, &mach, target,
-                                         "add_lea", false, err, sizeof(err));
+                                         &reloc_count, &mach, target, "add_lea",
+                                         false, err, sizeof(err));
   int symbol = ok ? nyr_x64_obj_def_index(defs, def_count, "add_lea") : -1;
   ok = ok && symbol >= 0 && reloc_count == 0;
   bool saw_lea = false;
@@ -47,13 +53,12 @@ static bool check_sum(const ny_native_target_info_t *target, bool registers,
   }
   void *mapping = MAP_FAILED;
   if (ok) {
-    mapping = mmap(NULL, code.len, PROT_READ | PROT_WRITE,
-                   MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    mapping = nyr_opt_execmem_alloc(code.len);
     ok = mapping != MAP_FAILED;
   }
   if (ok) {
     memcpy(mapping, code.data, code.len);
-    ok = mprotect(mapping, code.len, PROT_READ | PROT_EXEC) == 0;
+    ok = nyr_opt_execmem_protect(mapping, code.len) == 0;
   }
   if (ok) {
     typedef int64_t (*fn_t)(int64_t, int64_t);
@@ -70,7 +75,7 @@ static bool check_sum(const ny_native_target_info_t *target, bool registers,
     fprintf(stderr, "[machine-add-lea] registers=%d constant=%lld lea=%d %s\n",
             registers, (long long)constant, saw_lea, err);
   if (mapping != MAP_FAILED)
-    munmap(mapping, code.len);
+    nyr_opt_execmem_free(mapping, code.len);
   nyr_obj_free(&code);
   nyr_mach_func_free(&mach);
   nyr_ir_func_free(&ir);
@@ -84,9 +89,11 @@ int main(void) {
   const nyr_target_request_t request = nyr_target_request_make(
       NY_NATIVE_BACKEND_X86_64, NY_NATIVE_ABI_SYSV, "x86_64-linux-gnu", false);
   ny_native_target_info_t target = {0};
-  bool ok = nyr_target_info_init(&target, &request) && check_sum(&target, true, 0);
-  const int64_t constants[] = {0, 1, -1, 127, 128, -128, -129,
-                               INT32_MIN, INT32_MAX, INT64_MIN, INT64_MAX};
+  bool ok =
+      nyr_target_info_init(&target, &request) && check_sum(&target, true, 0);
+  const int64_t constants[] = {0,         1,         -1,       127,
+                               128,       -128,      -129,     INT32_MIN,
+                               INT32_MAX, INT64_MIN, INT64_MAX};
   for (size_t i = 0; ok && i < sizeof(constants) / sizeof(constants[0]); ++i)
     ok = check_sum(&target, false, constants[i]);
   return ok ? 0 : 1;

@@ -10,12 +10,14 @@ contract from an earlier layer.
 
 | Concern | Primary location | Responsibility |
 | --- | --- | --- |
+| Configuration and diagnostics | `src/base/` | Options, source diagnostics, tracing, and process configuration |
 | Parsing | `src/code/lang/parse/` | Tokens, AST construction, and source diagnostics |
 | Types and contracts | `src/code/lang/types/` | Type inference, refinements, proofs, effects, and ownership checks |
 | Language lowering | `src/code/lang/lower.c`, `src/code/lang/lower/` | Convert checked source constructs into compiler IR |
 | NYIR | `src/code/backend/ir/` | NYIR verification, optimization, interpretation, and reports |
 | Machine code | `src/code/backend/machine/`, `src/code/backend/object/` | Target lowering, register allocation, object encoding, and linking support |
 | LLVM integration | `src/code/backend/llvm/` | LLVM emission and compatibility code |
+| Source-oriented LLVM compatibility | `src/code/lang/llvm/` | Compatibility emitter and compile-time interpreter |
 | Build pipeline | `src/code/lang/pipeline/`, `src/code/backend/wire/` | Stage orchestration, caches, and compilation artifacts |
 | Runtime | `src/code/lang/runtime/` | Allocation, managed values, platform services, and runtime helpers |
 | C frontend | `src/code/lang/c/` | Clang integration and the in-tree C frontend |

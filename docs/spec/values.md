@@ -2,7 +2,7 @@
 # Values
 
 Values include literals, strings, collections, functions, and native handles.
-This page gives the shared value rules; module docs define exported helpers.
+Module documentation defines the helpers for each value type.
 
 ## Literal classes
 
@@ -45,6 +45,15 @@ use core
 assert(nil != 0, "nil identity")
 assert(!nil && !0, "falsy values")
 assert(to_str(nil) == "nil", "nil string")
+```
+
+Dynamic transport must preserve that identity. This contract example currently
+fails at `"any identity"` on the default LLVM route; see
+[known documentation smoke limitations](../learn/status.md#documentation-smoke-limitations).
+
+```ny
+use core
+
 def any boxed = nil
 assert(is_nil(boxed) && type(boxed) == "nil", "any identity")
 mut d = {"_": 0}
@@ -62,13 +71,13 @@ document whether they expect text or raw bytes.
 
 Formatted strings use expression interpolation:
 
-```text
+```ny
 f"name={name} count={n}"
 ```
 
 A trailing top-level `=` keeps the expression text as a label:
 
-```text
+```ny
 f"{name=}"
 f"{count + 1=}"
 ```
@@ -106,7 +115,7 @@ standard-library helper that fills the list before reading by index.
 
 Lists, tuples, strings, bytes, and ranges support integer indexing:
 
-```text
+```ny
 xs[0]
 xs[-1]
 (4, 5, 6)[1]
@@ -184,7 +193,7 @@ assert_eq(xs, [1, 2], "retained updates")
 | `value ?? fallback` | Nil coalescing - selects fallback when left side is `nil`. |
 | `value?.member` | Optional chaining - returns `nil` when receiver is `nil`. |
 | `dict.get(key, default)` | Safe lookup with fallback for missing keys. |
-| `dict.set(key, value)` | Mutates dict in place, returns the same dict. |
+| `dict.set(key, value)` | Mutates in place. Retaining the generic setter's return has a [known route-specific failure](../learn/status.md#documentation-smoke-limitations). |
 | `list.append(item)` | Returns the updated list; retain the result because growth may replace the value. |
 | `list.extend(other)` | Returns the updated list; retain the result because growth may replace the value. |
 | `clone(value)` | Detached mutable copy of a dict or list. |
@@ -210,7 +219,7 @@ for every value type.
 
 Strings and lists can be repeated with `*`:
 
-```text
+```ny
 "ha" * 3
 [1, 2] * 2
 ```

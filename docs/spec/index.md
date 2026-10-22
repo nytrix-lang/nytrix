@@ -1,10 +1,9 @@
 <!-- nytrix-doc: {"audience":"user","featured":true,"group":"spec","order":0,"summary":"A topic map for Nytrix language contracts and implementation boundaries."} -->
 # Specification
 
-Use these pages for exact syntax and behavior. The specification describes
-current language contracts; it does not imply that every backend accepts every
-program shape. Check [implementation status](../learn/status.md) for known route
-limits, and follow the linked fixtures when a boundary matters.
+Language contracts define syntax and behavior; backend support varies by source
+shape. Check [implementation status](../learn/status.md) for route limits and the
+linked fixtures for tested cases.
 
 ## Language
 
@@ -35,18 +34,15 @@ limits, and follow the linked fixtures when a boundary matters.
 
 ## Compiler reference
 
-These pages describe implementation architecture rather than additional source
-language guarantees:
+Compiler architecture and compile-time facilities:
 
 - [Compile-time execution](comptime.md)
-- [Effect-row implementation boundary](effect-rows.md)
+- [Effect rows](functions.md#effect-rows)
 - [Compiler pipeline](pipeline.md)
 - [NYIR](ir.md)
 
 ## Reading a boundary
 
-A specification claim should point to the owning implementation or a focused
-fixture when behavior is backend-, target-, or source-shape-specific. A fixture
-proves only the input and route it exercises. For adoption guidance, start with
-[Where Nytrix fits](../learn/fits.md); for current support, use
-[Implementation status](../learn/status.md).
+For backend-, target-, or source-shape-specific behavior, follow the owning
+page's implementation and fixture links. The
+[status guide](../learn/status.md) covers adoption and execution-route limits.

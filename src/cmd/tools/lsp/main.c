@@ -1843,8 +1843,10 @@ static void handle_signature(const char *id, const char *body) {
 typedef void (*lsp_symbol_visit_fn)(void *context, int line, int col,
                                     size_t length);
 
-/* Find symbol-path occurrences in code, excluding comments and quoted text.
- * References and rename share this scanner so their result sets stay aligned. */
+/*
+ * Find symbol-path occurrences in code, excluding comments and quoted text.
+ * References and rename share this scanner so their result sets stay aligned.
+ */
 static void visit_code_symbol(const char *text, const char *word,
                               lsp_symbol_visit_fn visit, void *context) {
   if (!text || !word || !*word || !visit)

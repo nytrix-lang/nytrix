@@ -1,14 +1,13 @@
 <!-- nytrix-doc: {"audience":"user","featured":true,"group":"spec","order":22,"summary":"Traits, impl blocks, attached methods, operator declarations, and law verification."} -->
 # Traits and impl
 
-Use **`impl`** to attach methods and operators to your types. Use **`trait`**
-plus **`impl Trait for Type`** when you want a shared method surface and optional
-**`law`** checks at compile time.
+Use `impl` to attach methods and operators to a type. A `trait` declares a
+shared method surface; `impl Trait for Type` provides its implementation and
+can include compile-time `law` checks.
 
 Custom infix spelling lives in [Operators](operators.md). Stdlib receiver calls
 such as `xs.append(...)` are documented module APIs; see
-[Values](values.md#receiver-methods). They are not the same as user **`impl`**
-blocks.
+[Values](values.md#receiver-methods). They are not user-defined `impl` blocks.
 
 ## Where the compiler checks this
 
@@ -71,7 +70,7 @@ to freestanding **`impl`** blocks (same attachment rules).
 
 ## One impl, several owners
 
-```text
+```ny
 impl int, f64 {
    fn twice(self x) self { x + x }
 }
@@ -84,7 +83,7 @@ each additional type in the comma list (`parse_impl_stmt`).
 
 Contract (signatures only):
 
-```text
+```ny
 trait Show {
    fn show(any v) str
 }
@@ -94,6 +93,10 @@ Implementation:
 
 ```ny
 use core
+
+trait Show {
+   fn show(any value) str
+}
 
 enum Point { Origin }
 
@@ -106,19 +109,18 @@ def pt = Point.Origin
 assert(show(pt) == "Point", "trait dispatch")
 ```
 
-- **`trait`** bodies allow **signatures only** (no executable bodies).
-- **`impl Trait for Type`** supplies bodies. The **`for`** form sets
-  `impl.trait_name` in the AST; plain **`impl Type { … }`** does not.
-- Trait calls use **free-function** syntax (`show(value)`), not only
-  `value.show()`. Resolution ties the value type to a visible
-  **`impl Trait for Type`**.
+- `trait` bodies allow signatures only, without executable bodies.
+- `impl Trait for Type` supplies bodies. The `for` form sets `impl.trait_name`
+  in the AST; plain `impl Type { … }` does not.
+- Trait calls support free-function syntax (`show(value)`) as well as
+  `value.show()`. Resolution ties the value type to a visible `impl Trait for Type`.
 
 Fixtures: `etc/tests/lang/types/aggregates/types.nshape` (ADT methods),
 `etc/tests/lang/types/refinements/refinements.nshape` (trait + law + `requires` samples).
 
 ## Law blocks
 
-```text
+```ny
 trait Show {
    fn show(any value) str
 }
@@ -156,7 +158,7 @@ Operators never change precedence. They only pick a **target function** for a
 
 Left type is the impl owner. Omit the left operand type:
 
-```text
+```ny
 impl Meter {
    operator + self: self = add_meters
    operator ** int: self = pow_meters
@@ -168,7 +170,7 @@ impl Meter {
 
 ### Top level
 
-```text
+```ny
 operator vec3 + vec3: vec3 = v_add
 ```
 
@@ -193,7 +195,7 @@ Parameters such as **`numeric`**, **`sequence`**, **`indexable`**, **`iterable`*
 and **`allocator`** are **static capability constraints** on ordinary functions.
 They are not dynamic trait objects:
 
-```text
+```ny
 fn len_of(sequence xs) int { len(xs) }
 ```
 
@@ -207,8 +209,8 @@ See `etc/tests/lang/types/aggregates/types.nshape` and [Types](types.md).
 | `operator-target-missing` | Define the function named after `=` |
 | `operator-target-arity` | Target must take exactly two arguments |
 | `operator-unresolved` | Add `impl` operator or use types with a built-in op |
-| `impl-method-duplicate` | One method name + arity per owner in user code |
-| `law verification failed` | Strengthen law, use comptime-true props, or fix enum fallback risk |
+| `impl-method-duplicate` | Keep one declaration of each attached method name per owner; arity does not distinguish overloads |
+| `law verification failed` | Fix a false law or express it within the supported proof calculus; unknown propositions are rejected |
 
 ## Related
 

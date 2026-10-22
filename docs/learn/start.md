@@ -8,6 +8,15 @@ already have Nytrix installed, confirm which executable is on your path:
 ny --version
 ```
 
+From a source checkout, build and install first:
+
+```bash
+./make
+./make install
+```
+
+See [Build Nytrix](build.md) for toolchain checks and build configuration.
+
 ## Run a program
 
 Create `hello.ny`:

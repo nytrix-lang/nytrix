@@ -147,8 +147,10 @@ static void build_ssa_strided_sum(nyr_func_t *f) {
   f->data[sum_phi].phi_incoming[1].value = next_sum;
 }
 
-/* A counted loop with a branch diamond and a nonmember block between its
- * header and body in lexical order. */
+/*
+ * A counted loop with a branch diamond and a nonmember block between its
+ * header and body in lexical order.
+ */
 static void build_ssa_multiblock_branch_sum(nyr_func_t *f, bool divide_by_two) {
   nyr_opt_begin(f);
   int zero = nyr_opt_const(f, 0);
@@ -240,7 +242,9 @@ static void build_ssa_induction_division(nyr_func_t *f, int64_t start) {
   f->data[sum_phi].phi_incoming[1].value = next_sum;
 }
 
-/* Clone both an unlabeled in-loop fallthrough and an unlabeled loop exit. */
+/*
+ * Clone both an unlabeled in-loop fallthrough and an unlabeled loop exit.
+ */
 static void build_ssa_unlabeled_fallthrough(nyr_func_t *f) {
   nyr_opt_begin(f);
   int zero = nyr_opt_const(f, 0);

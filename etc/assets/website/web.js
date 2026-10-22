@@ -174,6 +174,7 @@ const docLeafTitle = (doc) => {
 const MARKDOWN_DOC_PRIORITY = [
   "README",
   "learn/start",
+  "learn/status",
   "learn/programs",
   "learn/repl",
   "learn/examples",
@@ -185,13 +186,12 @@ const MARKDOWN_DOC_PRIORITY = [
   "learn/performance",
   "learn/comptime",
   "learn/proofs",
-  "learn/effects",
+  "learn/effect",
   "learn/ownership",
   "learn/native",
-  "learn/diagnostics",
   "learn/testing",
   "learn/troubleshooting",
-  "spec/language",
+  "spec/index",
   "spec/units",
   "spec/pipeline",
   "spec/values",
@@ -207,6 +207,8 @@ const MARKDOWN_DOC_PRIORITY = [
   "spec/runtime",
   "spec/syntax",
   "CHANGELOG",
+  "CONTRIBUTE",
+  "TODO",
   "NY",
   "NYTRIX",
 ];
@@ -215,14 +217,14 @@ const MARKDOWN_DOC_PRIORITY = [
 const OVERVIEW_DOC_ROUTES = {
   learn: new Set([
     "learn/start",
+    "learn/status",
     "learn/examples",
     "learn/library",
     "learn/native",
     "learn/testing",
     "learn/ui",
     "learn/comptime",
-    "learn/proofs",
-    "learn/effects",
+    "learn/effect",
     "learn/ownership",
     "learn/performance",
     "learn/tooling",
@@ -250,7 +252,10 @@ const DOC_CARD_SUMMARIES = new Map(
   Object.entries({
     README: "Docs map and command index.",
     CHANGELOG: "Release notes and maintenance checks.",
+    CONTRIBUTE: "Contributor workflow and technical reference.",
+    TODO: "Open work and acceptance criteria.",
     "learn/start": "Build, run, and check one file.",
+    "learn/status": "Experimental status, execution routes, and feature limits.",
     "learn/programs": "Scripts, modules, imports, entrypoints.",
     "learn/repl": "Interactive probes and completions.",
     "learn/examples": "Small runnable Nytrix programs.",
@@ -262,13 +267,12 @@ const DOC_CARD_SUMMARIES = new Map(
     "learn/performance": "Compile-time and runtime measurement.",
     "learn/comptime": "Comptime tables, templates, and generated code.",
     "learn/proofs": "Compile-time facts and proof witnesses.",
-    "learn/effects": "Effect contracts and checked boundaries.",
+    "learn/effect": "Effect contracts and checked boundaries.",
     "learn/ownership": "Borrowing, transfer, and cleanup contracts.",
     "learn/native": "C ABI, layouts, pointers, handles.",
-    "learn/diagnostics": "Import, type, runtime, and FFI failures.",
     "learn/testing": "Executable assertions and test runs.",
     "learn/troubleshooting": "Common failures and quick fixes.",
-    "spec/language": "Specification index and execution model.",
+    "spec/index": "Language and compiler reference index.",
     "spec/units": "Source units, imports, modules, and execution.",
     "spec/pipeline": "How source becomes a checked program and running artifact.",
     "spec/values": "Literals, strings, containers, equality.",
@@ -286,8 +290,10 @@ const DOC_CARD_SUMMARIES = new Map(
   }),
 );
 const MARKDOWN_DOC_LABELS = new Map([
+  ["TODO", "Open work"],
+  ["CONTRIBUTE", "Contributing"],
+  ["CHANGELOG", "Changelog"],
   ["learn/comptime", "Comptime"],
-  ["learn/syntax", "Syntax"],
   ["spec/units", "Units"],
   ["spec/pipeline", "Pipeline"],
   ["spec/memory", "Memory"],
@@ -467,37 +473,73 @@ const collapseIcon = () =>
   `<span class="collapse-icon">${icon("chevron", "ico ico-xs")}</span>`;
 
 function docIconName(route) {
-  const r = String(route || "");
-  if (r === "README" || r === "Overview") return "book";
-  if (r.includes("quick-reference")) return "list";
-  if (r.includes("repl")) return "terminal";
-  if (r.includes("editor")) return "window";
-  if (r.includes("performance")) return "timer";
-  if (r.includes("start")) return "play";
-  if (r.includes("program")) return "file";
-  if (r.includes("example")) return "code";
-  if (r.includes("idiom")) return "layers";
-  if (r.includes("data") || r.includes("value")) return "database";
-  if (r.includes("library")) return "library";
-  if (r.includes("network")) return "network";
-  if (r.includes("package")) return "package";
-  if (r.includes("metaprogram") || r.includes("comptime")) return "cpu";
-  if (r.includes("native") || r.includes("runtime")) return "shield";
-  if (
-    r.includes("diagnostic") ||
-    r.includes("troubleshoot") ||
-    r.includes("error")
-  )
-    return "alert";
-  if (r.includes("test")) return "check";
-  if (r.includes("tooling") || r.includes("tool")) return "gear";
-  if (r.includes("import")) return "package";
-  if (r.includes("module")) return "layers";
-  if (r.includes("pattern")) return "route";
-  if (r.includes("syntax") || r.includes("function") || r.includes("control"))
-    return "code";
-  if (r.includes("release") || r.includes("CHANGELOG")) return "route";
-  return "file";
+  const name = String(route || "").toLowerCase();
+  const topic = name.slice(name.lastIndexOf("/") + 1);
+  switch (topic) {
+    case "readme":
+    case "overview":
+    case "index":
+    case "cookbook":
+    case "ny":
+      return "book";
+    case "todo": return "checklist";
+    case "contribute": return "git-branch";
+    case "changelog":
+    case "measurements":
+      return "history";
+    case "architecture":
+    case "pipeline":
+    case "concurrency":
+    case "control-flow":
+      return "workflow";
+    case "debugging": return "bug";
+    case "quirks": return "list";
+    case "repl": return "terminal";
+    case "ui": return "window";
+    case "performance": return "gauge";
+    case "proofs":
+    case "effect":
+    case "traits":
+      return "shield";
+    case "ownership": return "lock";
+    case "build": return "wrench";
+    case "browser": return "globe";
+    case "status": return "info";
+    case "start": return "play";
+    case "programs": return "folder";
+    case "examples":
+    case "syntax":
+    case "functions":
+      return "code";
+    case "numbers":
+    case "operators":
+      return "math";
+    case "values": return "database";
+    case "library": return "library";
+    case "networking": return "network";
+    case "packages": return "package";
+    case "comptime":
+    case "native":
+    case "runtime":
+    case "nyr":
+    case "nytrix":
+      return "cpu";
+    case "errors":
+    case "troubleshooting":
+      return "alert";
+    case "testing": return "check";
+    case "tooling": return "gear";
+    case "types":
+    case "units":
+    case "memory":
+    case "ir":
+      return "layers";
+    case "tour":
+    case "patterns":
+      return "route";
+    case "linker": return "link";
+    default: return "file";
+  }
 }
 
 function moduleIconName(route) {
@@ -553,14 +595,6 @@ function moduleIconName(route) {
   if (r.includes(".test") || r.includes(".assert")) return "check";
   if (r.includes(".alloc") || r.includes(".cache")) return "cpu";
   return "box";
-}
-
-function pageIconName(title) {
-  const t = String(title || "");
-  if (t === "Tags" || t.startsWith("Tag /")) return "tag";
-  if (t.includes("Search")) return "search";
-  if (t.includes("Manual")) return "book";
-  return docIconName(t.includes("/") ? t : t.toLowerCase());
 }
 
 function importHref(imp) {
@@ -1492,6 +1526,17 @@ function rewriteMarkdownDocLinks() {
       if (isExternalHref(rawHref)) {
         link.setAttribute("target", "_blank");
         link.setAttribute("rel", "noopener noreferrer");
+      } else {
+        const source = new URL(rawHref, `https://repo.invalid/docs/${baseRoute}.md`);
+        if (/^\/(?:src|lib|etc|docs\/info)\//.test(source.pathname)) {
+          const kind = source.pathname.endsWith("/") ? "tree" : "blob";
+          link.setAttribute(
+            "href",
+            `https://github.com/nytrix-lang/nytrix/${kind}/main${source.pathname}${source.hash}`,
+          );
+          link.setAttribute("target", "_blank");
+          link.setAttribute("rel", "noopener noreferrer");
+        }
       }
     });
 }
@@ -1626,34 +1671,27 @@ function setupDesktopNav() {
 function toggleNavCategory(categoryId) {
   const categoryElement = $(categoryId);
   const gtitleElement = categoryElement.previousElementSibling;
-  if (categoryElement.classList.contains("active")) {
-    categoryElement.classList.remove("active");
-    gtitleElement.classList.remove("active", "open");
-  } else {
-    categoryElement.classList.add("active");
-    gtitleElement.classList.add("active", "open");
-  }
+  const expanded = categoryElement.classList.toggle("active");
+  gtitleElement.classList.toggle("active", expanded);
+  gtitleElement.classList.toggle("open", expanded);
+  const control = gtitleElement.matches("button")
+    ? gtitleElement
+    : gtitleElement.querySelector(".nav-toggle");
+  control.setAttribute("aria-expanded", String(expanded));
 }
 
 function toggleNavModule(moduleId, moduleName = null) {
   const moduleElement = $(moduleId);
-  const gtitleElement = moduleElement.previousElementSibling;
-  if (!moduleElement || !gtitleElement) return;
-  if (moduleElement.classList.contains("active")) {
-    moduleElement.classList.remove("active");
-    gtitleElement.classList.remove("active", "open");
-  } else {
-    if (moduleName && !moduleElement.dataset.loaded) {
-      const mod = moduleByName.get(moduleName);
-      if (mod) {
-        const depth = Number(moduleElement.dataset.symbolDepth || "0");
-        moduleElement.innerHTML = renderSymbolNavItems(mod, depth);
-        moduleElement.dataset.loaded = "1";
-      }
+  if (!moduleElement) return;
+  if (!moduleElement.classList.contains("active") && moduleName && !moduleElement.dataset.loaded) {
+    const mod = moduleByName.get(moduleName);
+    if (mod) {
+      const depth = Number(moduleElement.dataset.symbolDepth || "0");
+      moduleElement.innerHTML = renderSymbolNavItems(mod, depth);
+      moduleElement.dataset.loaded = "1";
     }
-    moduleElement.classList.add("active");
-    gtitleElement.classList.add("active", "open");
   }
+  toggleNavCategory(moduleId);
 }
 
 function toggleOverviewModule(moduleId) {
@@ -1727,10 +1765,10 @@ function renderTagSection(depth = 0) {
     const selected = tagEntries.find((entry) => entry.tag === currentTag);
     if (selected) visible.unshift(selected);
   }
-  let html = `<div class="gtitle collapsible ${active ? "active" : open ? "open" : ""}" style="padding-left: ${12 + depth * 10}px;" onclick="toggleNavCategory('${tagId}')"><span class="nav-label">${icon("tag", "ico nav-ico")}<span>TAGS</span></span>${collapseIcon()}</div>`;
-  html += `<div id="${tagId}" class="collapsible-content ${open ? "active" : ""}">`;
-  html += `<a class="item tags-index-item ${current === "Tags" ? "active" : ""}" href="${routeHash("tags")}" onclick="selectTagIndex();event.preventDefault();" style="padding-left: ${12 + (depth + 1) * 10}px;"><span class="nav-label">${icon("list", "ico nav-ico")}<span>All tags</span></span><span class="tag-count">${tagEntries.length}</span></a>`;
-  html += `<div class="tag-nav-cloud" style="padding-left: ${12 + (depth + 1) * 10}px;">`;
+  let html = `<button type="button" class="gtitle is-folder is-root collapsible ${active ? "active" : open ? "open" : ""}" style="--nav-depth: ${depth};" aria-controls="${tagId}" aria-expanded="${open}" onclick="toggleNavCategory('${tagId}')"><span class="nav-label">${icon("tag", "ico nav-ico")}<span>TAGS</span></span>${collapseIcon()}</button>`;
+  html += `<div id="${tagId}" class="collapsible-content ${open ? "active" : ""}" style="--nav-depth: ${depth};">`;
+  html += `<a class="item tags-index-item ${current === "Tags" ? "active" : ""}" aria-current="${current === "Tags" ? "page" : "false"}" href="${routeHash("tags")}" onclick="selectTagIndex();event.preventDefault();" style="--nav-depth: ${depth + 1};"><span class="nav-label">${icon("list", "ico nav-ico")}<span>All tags</span></span><span class="tag-count">${tagEntries.length}</span></a>`;
+  html += `<div class="tag-nav-cloud" style="--nav-depth: ${depth + 1};">`;
   visible.forEach((entry) => {
     const itemActive = current === `tag::${entry.tag}`;
     html += `<a class="tag-nav-chip ${itemActive ? "active" : ""}" href="${routeHash("tag", entry.tag)}" onclick="selectTag('${jsArg(entry.tag)}');event.preventDefault();">${icon("tag", "ico ico-xs")}<span class="tag-nav-name">${esc(entry.tag)}</span><span class="tag-nav-count">${entry.modules.length}</span></a>`;
@@ -1741,7 +1779,7 @@ function renderTagSection(depth = 0) {
 function renderSourceNavItem(mod, depth) {
   if (!mod || !mod.source) return "";
   const sourceCurrent = current === `${mod.name}::${SOURCE_SYMBOL_ID}`;
-  return `<a class="item is-source ${sourceCurrent ? "active" : ""}" href="${routeHash(mod.name, SOURCE_SYMBOL_ID)}" onclick="selectModule('${jsArg(mod.name)}', '${SOURCE_SYMBOL_ID}');event.preventDefault();" style="padding-left: ${12 + depth * 10}px;"><span class="nav-label">${icon("file", "ico nav-ico")}<span>Source</span></span></a>`;
+  return `<a class="item is-source ${sourceCurrent ? "active" : ""}" aria-current="${sourceCurrent ? "page" : "false"}" href="${routeHash(mod.name, SOURCE_SYMBOL_ID)}" onclick="selectModule('${jsArg(mod.name)}', '${SOURCE_SYMBOL_ID}');event.preventDefault();" style="--nav-depth: ${depth};"><span class="nav-label">${icon("file", "ico nav-ico")}<span>Source</span></span></a>`;
 }
 
 function renderSymbolNavItems(mod, depth) {
@@ -1755,7 +1793,7 @@ function renderSymbolNavItems(mod, depth) {
         current.split("::")[0] === mod.name &&
         (symbolPart === s.name || symbolPart === s.id);
       const isFunction = s.kind === "function";
-      return `<a class="item ${isSymbolCurrent ? "active" : ""} ${isFunction ? "is-function" : ""}" href="${routeHash(mod.name, s.id)}" onclick="selectModule('${jsArg(mod.name)}', '${jsArg(s.id)}');event.preventDefault();" style="padding-left: ${12 + depth * 10}px;"><span class="nav-label">${icon(isFunction ? "code" : "box", "ico nav-ico")}<span>${highlightNavLabel(s.name, s.kind)}</span></span></a>`;
+      return `<a class="item ${isSymbolCurrent ? "active" : ""} ${isFunction ? "is-function" : ""}" aria-current="${isSymbolCurrent ? "page" : "false"}" href="${routeHash(mod.name, s.id)}" onclick="selectModule('${jsArg(mod.name)}', '${jsArg(s.id)}');event.preventDefault();" style="--nav-depth: ${depth};"><span class="nav-label">${icon(isFunction ? "code" : "box", "ico nav-ico")}<span>${highlightNavLabel(s.name, s.kind)}</span></span></a>`;
     })
     .join("");
   return sourceItem + symbolItems;
@@ -1807,7 +1845,7 @@ function renderNav() {
         const label = String(doc.name || "").includes("/")
           ? docLeafTitle(doc)
           : docTitle(doc);
-        html += `<a class="item ${itemActive ? "active" : ""}" href="${routeHash(doc.name)}" onclick="selectModule('${jsArg(doc.name)}');event.preventDefault();" style="padding-left: ${12 + depth * 10}px;"><span class="nav-label">${icon(docIconName(doc.name), "ico nav-ico")}<span>${label}</span></span></a>`;
+        html += `<a class="item ${itemActive ? "active" : ""}" aria-current="${itemActive ? "page" : "false"}" href="${routeHash(doc.name)}" onclick="selectModule('${jsArg(doc.name)}');event.preventDefault();" style="--nav-depth: ${depth};"><span class="nav-label">${icon(docIconName(doc.name), "ico nav-ico")}<span>${label}</span></span></a>`;
         return;
       }
       const groupPath = entry.node.path;
@@ -1815,8 +1853,8 @@ function renderNav() {
       const active =
         current &&
         (current === groupPath || current.startsWith(groupPath + "/"));
-      html += `<div class="gtitle collapsible ${active ? "active" : ""}" style="padding-left: ${12 + depth * 10}px;" onclick="toggleNavCategory('${groupId}')"><span class="nav-label">${icon("folder", "ico nav-ico")}<span>${docSegmentNavTitle(entry.key)}</span></span>${collapseIcon()}</div>`;
-      html += `<div id="${groupId}" class="collapsible-content ${active ? "active" : ""}">`;
+      html += `<button type="button" class="gtitle is-folder collapsible ${active ? "active" : ""}" style="--nav-depth: ${depth};" aria-controls="${groupId}" aria-expanded="${Boolean(active)}" onclick="toggleNavCategory('${groupId}')"><span class="nav-label">${icon("folder", "ico nav-ico")}<span>${docSegmentNavTitle(entry.key)}</span></span>${collapseIcon()}</button>`;
+      html += `<div id="${groupId}" class="collapsible-content ${active ? "active" : ""}" style="--nav-depth: ${depth};">`;
       html += renderMarkdownDocTree(entry.node, depth + 1);
       html += `</div>`;
     });
@@ -1828,11 +1866,11 @@ function renderNav() {
     const infoId = `nav-info-${depth}`;
     const infoActive = infoDocs.some((doc) => doc.name === current);
     let html = "";
-    html += `<div class="gtitle collapsible ${infoActive ? "active" : ""}" style="padding-left: ${12 + depth * 10}px;" onclick="toggleNavCategory('${infoId}')"><span class="nav-label">${icon("file", "ico nav-ico")}<span>INFO</span></span>${collapseIcon()}</div>`;
-    html += `<div id="${infoId}" class="collapsible-content ${infoActive ? "active" : ""}">`;
+    html += `<button type="button" class="gtitle is-folder ${depth === 0 ? "is-root" : ""} collapsible ${infoActive ? "active" : ""}" style="--nav-depth: ${depth};" aria-controls="${infoId}" aria-expanded="${infoActive}" onclick="toggleNavCategory('${infoId}')"><span class="nav-label">${icon("folder", "ico nav-ico")}<span>INFO</span></span>${collapseIcon()}</button>`;
+    html += `<div id="${infoId}" class="collapsible-content ${infoActive ? "active" : ""}" style="--nav-depth: ${depth};">`;
     infoDocs.forEach((doc) => {
       const itemActive = current === doc.name;
-      html += `<a class="item ${itemActive ? "active" : ""}" href="${routeHash(doc.name)}" onclick="selectModule('${jsArg(doc.name)}');event.preventDefault();" style="padding-left: ${12 + (depth + 1) * 10}px;"><span class="nav-label">${icon("file", "ico nav-ico")}<span>${docTitle(doc)}</span></span></a>`;
+      html += `<a class="item ${itemActive ? "active" : ""}" aria-current="${itemActive ? "page" : "false"}" href="${routeHash(doc.name)}" onclick="selectModule('${jsArg(doc.name)}');event.preventDefault();" style="--nav-depth: ${depth + 1};"><span class="nav-label">${icon(docIconName(doc.name), "ico nav-ico")}<span>${docTitle(doc)}</span></span></a>`;
     });
     html += `</div>`;
     return html;
@@ -1877,9 +1915,10 @@ function renderNav() {
           (overviewMod &&
             overviewMod.markdown_docs.some((d) => d.name === current));
         const hasHomeDocs = miscDocs.length > 0 || infoDocs.length > 0;
-        nodeHtml += `<div class="gtitle ${hasHomeDocs ? "collapsible" : ""} ${isActive ? "active" : ""}" style="padding-left: ${12 + depth * 10}px;" ${hasHomeDocs ? `onclick="toggleNavCategory('${categoryId}')"` : ""}><span class="nav-label">${icon("home", "ico nav-ico")}<span>${esc(key)}</span></span>${hasHomeDocs ? collapseIcon() : ""}</div>`;
+        const homeTag = hasHomeDocs ? "button" : "div";
+        nodeHtml += `<${homeTag} class="gtitle is-folder ${depth === 0 ? "is-root" : ""} ${hasHomeDocs ? "collapsible" : ""} ${isActive ? "active" : ""}" style="--nav-depth: ${depth};" ${hasHomeDocs ? `type="button" aria-controls="${categoryId}" aria-expanded="${Boolean(isActive)}" onclick="toggleNavCategory('${categoryId}')"` : ""}><span class="nav-label">${icon("home", "ico nav-ico")}<span>${esc(key)}</span></span>${hasHomeDocs ? collapseIcon() : ""}</${homeTag}>`;
         if (hasHomeDocs) {
-          nodeHtml += `<div id="${categoryId}" class="collapsible-content ${isActive ? "active" : ""}">`;
+          nodeHtml += `<div id="${categoryId}" class="collapsible-content ${isActive ? "active" : ""}" style="--nav-depth: ${depth};">`;
           const homeDocTree = docTreeCache || buildDocTree(miscDocs);
           const rootGroups = {
             entries: homeDocTree.entries.filter(
@@ -1916,9 +1955,9 @@ function renderNav() {
           current && (current === m.name || current.startsWith(`${m.name}::`));
         const moduleActive = isModuleCurrent;
 
-        nodeHtml += `<div class="gtitle ${hasNavItems ? "collapsible" : ""} ${moduleActive ? "active" : ""}" style="padding-left: ${12 + depth * 10}px;" ${hasNavItems ? `onclick="toggleNavModule('${moduleId}', '${jsArg(m.name)}')"` : ""}><span class="nav-label" onclick="selectModule('${jsArg(m.name)}');event.stopPropagation();" style="cursor: pointer; flex: 1;">${icon(moduleIconName(m.name), "ico nav-ico")}<span>${highlightNavLabel(key, "module")}</span></span>${hasNavItems ? collapseIcon() : ""}</div>`;
+        nodeHtml += `<div class="gtitle is-module ${hasNavItems ? "collapsible" : ""} ${moduleActive ? "active" : ""}" style="--nav-depth: ${depth};"><a class="nav-label" aria-current="${current === m.name ? "page" : "false"}" href="${routeHash(m.name)}" onclick="selectModule('${jsArg(m.name)}');event.preventDefault();">${icon(moduleIconName(m.name), "ico nav-ico")}<span>${highlightNavLabel(key, "module")}</span></a>${hasNavItems ? `<button type="button" class="nav-toggle" aria-label="Toggle ${esc(m.name)} symbols" aria-controls="${moduleId}" aria-expanded="${Boolean(moduleActive)}" onclick="toggleNavModule('${moduleId}', '${jsArg(m.name)}')">${collapseIcon()}</button>` : ""}</div>`;
         if (hasNavItems) {
-          nodeHtml += `<div id="${moduleId}" class="collapsible-content ${moduleActive ? "active" : ""}" data-symbol-depth="${depth + 1}" ${moduleActive ? `data-loaded="1"` : ""}>`;
+          nodeHtml += `<div id="${moduleId}" class="collapsible-content ${moduleActive ? "active" : ""}" style="--nav-depth: ${depth};" data-symbol-depth="${depth + 1}" ${moduleActive ? `data-loaded="1"` : ""}>`;
           if (moduleActive) nodeHtml += renderSymbolNavItems(m, depth + 1);
           nodeHtml += `</div>`;
         }
@@ -1934,9 +1973,9 @@ function renderNav() {
         );
         const navTarget = categoryModule ? categoryModule.name : newPath;
 
-        nodeHtml += `<div class="gtitle ${hasChildren ? "collapsible" : ""} ${isActive ? "active" : isOpen ? "open" : ""}" style="padding-left: ${12 + depth * 10}px;" ${hasChildren ? `onclick="toggleNavCategory('${categoryId}')"` : ""}><span class="nav-label" onclick="selectModule('${jsArg(navTarget)}');event.stopPropagation();" style="cursor: pointer; flex: 1;">${icon(moduleIconName(navTarget), "ico nav-ico")}<span>${highlightNavLabel(key, "module")}</span></span>${hasChildren ? collapseIcon() : ""}</div>`;
+        nodeHtml += `<div class="gtitle is-folder ${depth === 0 ? "is-root" : ""} ${hasChildren ? "collapsible" : ""} ${isActive ? "active" : isOpen ? "open" : ""}" style="--nav-depth: ${depth};"><a class="nav-label" aria-current="${current === navTarget ? "page" : "false"}" href="${routeHash(navTarget)}" onclick="selectModule('${jsArg(navTarget)}');event.preventDefault();">${icon("folder", "ico nav-ico")}<span>${highlightNavLabel(key, "module")}</span></a>${hasChildren ? `<button type="button" class="nav-toggle" aria-label="Toggle ${esc(navTarget)} namespace" aria-controls="${categoryId}" aria-expanded="${Boolean(isOpen)}" onclick="toggleNavCategory('${categoryId}')">${collapseIcon()}</button>` : ""}</div>`;
         if (hasChildren)
-          nodeHtml += `<div id="${categoryId}" class="collapsible-content ${isOpen ? "active" : ""}">`;
+          nodeHtml += `<div id="${categoryId}" class="collapsible-content ${isOpen ? "active" : ""}" style="--nav-depth: ${depth};">`;
 
         currentCategory._modules.forEach((m) => {
           if (hasChildren && m.name === newPath) return;
@@ -1950,12 +1989,12 @@ function renderNav() {
           const moduleShortName = m.name.split(".").pop();
 
           if (hasNavItems) {
-            nodeHtml += `<div class="gtitle collapsible ${moduleActive ? "active" : ""}" style="padding-left: ${12 + (depth + 1) * 10}px;" onclick="toggleNavModule('${moduleId}', '${jsArg(m.name)}')"><span class="nav-label" onclick="selectModule('${jsArg(m.name)}');event.stopPropagation();" style="cursor: pointer; flex: 1;">${icon(moduleIconName(m.name), "ico nav-ico")}<span>${highlightNavLabel(moduleShortName, "module")}</span></span>${collapseIcon()}</div>`;
-            nodeHtml += `<div id="${moduleId}" class="collapsible-content ${moduleActive ? "active" : ""}" data-symbol-depth="${depth + 2}" ${moduleActive ? `data-loaded="1"` : ""}>`;
+            nodeHtml += `<div class="gtitle is-module collapsible ${moduleActive ? "active" : ""}" style="--nav-depth: ${depth + 1};"><a class="nav-label" aria-current="${current === m.name ? "page" : "false"}" href="${routeHash(m.name)}" onclick="selectModule('${jsArg(m.name)}');event.preventDefault();">${icon(moduleIconName(m.name), "ico nav-ico")}<span>${highlightNavLabel(moduleShortName, "module")}</span></a><button type="button" class="nav-toggle" aria-label="Toggle ${esc(m.name)} symbols" aria-controls="${moduleId}" aria-expanded="${Boolean(moduleActive)}" onclick="toggleNavModule('${moduleId}', '${jsArg(m.name)}')">${collapseIcon()}</button></div>`;
+            nodeHtml += `<div id="${moduleId}" class="collapsible-content ${moduleActive ? "active" : ""}" style="--nav-depth: ${depth + 1};" data-symbol-depth="${depth + 2}" ${moduleActive ? `data-loaded="1"` : ""}>`;
             if (moduleActive) nodeHtml += renderSymbolNavItems(m, depth + 2);
             nodeHtml += `</div>`;
           } else {
-            nodeHtml += `<a class="item${current === m.name ? " active" : ""}" href="${routeHash(m.name)}" onclick="selectModule('${jsArg(m.name)}');event.preventDefault();" style="padding-left: ${12 + (depth + 1) * 10}px;"><span class="nav-label">${icon(moduleIconName(m.name), "ico nav-ico")}<span>${highlightNavLabel(moduleShortName, "module")}</span></span></a>`;
+            nodeHtml += `<a class="item${current === m.name ? " active" : ""}" aria-current="${current === m.name ? "page" : "false"}" href="${routeHash(m.name)}" onclick="selectModule('${jsArg(m.name)}');event.preventDefault();" style="--nav-depth: ${depth + 1};"><span class="nav-label">${icon(moduleIconName(m.name), "ico nav-ico")}<span>${highlightNavLabel(moduleShortName, "module")}</span></span></a>`;
           }
         });
 
@@ -1966,11 +2005,14 @@ function renderNav() {
     return nodeHtml;
   }
 
-  $("nav").innerHTML = renderTagSection(0) + renderTree(navTreeCache, 0, "");
+  const nav = $("nav");
+  nav.innerHTML = renderTagSection(0) + renderTree(navTreeCache, 0, "");
+  const selected = nav.querySelector('[aria-current="page"]');
+  if (selected) selected.scrollIntoView({ block: "nearest", inline: "nearest" });
 }
 
-function header(title, desc, stats) {
-  return `<div class="header"><div class="header-top"><div class="header-copy"><div class="mod-label">${icon("book", "ico ico-xs")}<span>MANUAL</span></div><div class="title">${esc(title)}</div><div class="desc">${esc(desc || "Language manual and API reference.")}</div><div class="stats">${esc(stats)}</div></div></div></div>`;
+function header(title, desc, stats, symbol) {
+  return `<div class="header"><div class="header-top"><div class="header-copy"><div class="mod-label">${icon(symbol, "ico ico-xs")}<span>MANUAL</span></div><div class="title">${esc(title)}</div><div class="desc">${esc(desc || "Language manual and API reference.")}</div>${stats ? `<div class="stats">${esc(stats)}</div>` : ""}</div></div></div>`;
 }
 
 function renderDocCard(doc, tone = "") {
@@ -1995,7 +2037,7 @@ function renderDocGroup(title, docs, desc = "") {
 function renderProjectCard(doc) {
   if (!doc) return "";
   const route = String(doc.name || "CHANGELOG");
-  return `<a class="project-card" href="${routeHash(route)}" data-select-module="${esc(route)}"><div class="project-card-icon">${icon("route", "ico ico-lg")}</div><div><div class="doc-card-kicker">Manual</div><div class="project-card-title">${esc(markdownDocLabel(doc))}</div><p>${esc(markdownDocCardSummary(doc))}</p></div><div class="project-card-route">${esc(route)}</div></a>`;
+  return `<a class="project-card" href="${routeHash(route)}" data-select-module="${esc(route)}"><div class="project-card-icon">${icon(docIconName(route), "ico ico-lg")}</div><div><div class="doc-card-kicker">Manual</div><div class="project-card-title">${esc(markdownDocLabel(doc))}</div><p>${esc(markdownDocCardSummary(doc))}</p></div><div class="project-card-route">${esc(route)}</div></a>`;
 }
 
 function renderProjectSection(docs, title = "Project", desc = "") {
@@ -2147,6 +2189,7 @@ function renderDocsHome(overviewMod) {
     "Nytrix",
     "Manual, specification, and source-linked API reference.",
     "Manual · API · source",
+    "book",
   );
   html += `<div class="docs-home">`;
   html += `<section class="docs-hero"><div class="docs-hero-copy overview-hero-lead"><div class="docs-eyebrow">${icon("zap", "ico ico-xs")}<span>Overview</span></div><div class="overview-source overview-lead markdown-content">${overviewLeadHtml}</div><div class="hero-actions"><a class="hero-action hero-action-github primary" href="https://github.com/nytrix-lang/nytrix" target="_blank" rel="noopener noreferrer">${icon("github", "ico ico-xs")}<span>GitHub</span></a><a class="hero-action hero-action-start" href="${routeHash("learn/start")}" data-select-module="learn/start">${icon("play", "ico ico-xs")}<span>Start</span></a>${renderHeroUpdates()}</div>${overviewQuickStartHtml}</div>${heroPanel}</section>`;
@@ -2359,7 +2402,11 @@ function findAnchor(anchor) {
 function scrollToAnchor(anchor) {
   setTimeout(() => {
     const target = findAnchor(anchor);
-    if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
+    if (!target) return;
+    for (let parent = target.parentElement; parent; parent = parent.parentElement) {
+      if (parent.tagName === "DETAILS") parent.open = true;
+    }
+    target.scrollIntoView({ behavior: "smooth", block: "start" });
   }, 60);
 }
 
@@ -2435,9 +2482,7 @@ function buildDocOutlines() {
     const outline = document.createElement("div");
     outline.className = "doc-outline";
     outline.innerHTML = `<div class="doc-outline-title">CONTENTS</div>${links}`;
-    const title = section.querySelector(".md-title");
-    if (title) title.insertAdjacentElement("afterend", outline);
-    else section.prepend(outline);
+    section.prepend(outline);
   });
 }
 
@@ -2450,14 +2495,14 @@ function renderOverviewPage(overviewMod, specificDocName = null) {
     ? overviewMod.markdown_docs.find((d) => d.name === specificDocName)
     : null;
   const title = selectedDoc
-    ? selectedDoc.title || selectedDoc.name
+    ? markdownDocLabel(selectedDoc)
     : specificDocName || overviewMod.name;
   setPageTitle(title);
   let html = header(
     title,
     selectedDoc ? markdownDocSummary(selectedDoc) : overviewMod.module_doc,
-    `Manual page`,
     "",
+    docIconName(specificDocName),
   );
   const docsToRender = specificDocName
     ? overviewMod.markdown_docs.filter((d) => d.name === specificDocName && !isOverviewDoc(d))
@@ -2469,7 +2514,7 @@ function renderOverviewPage(overviewMod, specificDocName = null) {
       doc.format === "html" ? doc.html : marked.parse(doc.html),
     );
     const cls = doc.format === "html" ? "html-content" : "markdown-content";
-    html += `<div class="md-section" id="md-${esc(doc.name)}" data-doc-route="${esc(doc.name)}"><div class="md-title">${docTitle(doc)}</div><div class="${cls}">${body}</div></div>`;
+    html += `<div class="md-section" id="md-${esc(doc.name)}" data-doc-route="${esc(doc.name)}"><div class="${cls}">${body}</div></div>`;
   });
   if (specificDocName) html += renderDocPager(specificDocName);
   setHTML("content", html);
@@ -2496,7 +2541,7 @@ function renderModuleContent(mod, selectedId = null) {
         : `${syms.length} public symbols · ${internalCount} internal hidden`
       : `${allSyms.length} symbols`
     : "Namespace";
-  let html = header(mod.name, moduleDocSummary(mod), stats, mod.orig_file);
+  let html = header(mod.name, moduleDocSummary(mod), stats, moduleIconName(mod.name));
   html += renderModuleDoc(mod);
   if (allSyms.length || mod.source)
     html += moduleToolbar(
@@ -2542,7 +2587,7 @@ function renderCategoryOverview(categoryPath) {
   if (categoryModules.length === 0) {
     setHTML(
       "content",
-      header(categoryPath, "Namespace", "No entries") +
+      header(categoryPath, "Namespace", "No entries", moduleIconName(categoryPath)) +
         `<div class="empty">No modules found.</div>`,
     );
     return;
@@ -2575,6 +2620,7 @@ function renderCategoryOverview(categoryPath) {
     categoryPath,
     categorySummary,
     "Namespace",
+    moduleIconName(categoryPath),
   );
   if (categoryModule) html += renderModuleDoc(categoryModule);
   if (childGroups.size) {
@@ -2606,6 +2652,7 @@ function renderTagPage(tag) {
     `Tag / ${tag}`,
     `Entries marked with ${tag}.`,
     "Tag",
+    "tag",
   );
   if (!modules.length) {
     setHTML("content", html + `<div class="empty">No modules found.</div>`);
@@ -2634,6 +2681,7 @@ function renderTagIndexPage() {
     "Tags",
     "Keyword index for API namespaces.",
     "Index",
+    "tag",
   );
   if (!entries.length) {
     setHTML("content", html + `<div class="empty">No tags found.</div>`);
@@ -2733,8 +2781,8 @@ function selectModule(name, symbolNameOrId = null, options = {}) {
 
   renderNav();
 
-  if (options.scrollAnchor) {
-    scrollToAnchor(options.scrollAnchor);
+  if (options.scrollAnchor || (isMarkdown && symbolNameOrId)) {
+    scrollToAnchor(options.scrollAnchor || symbolNameOrId);
   } else if (symbolNameOrId) {
     setTimeout(() => {
       const symbolElement = $(actualId);
@@ -2783,7 +2831,7 @@ function doSearch() {
     );
   });
   const hits = scored.slice(0, SEARCH_LIMIT).map((hit) => hit.row);
-  let html = header("Search", `Query: ${q}`, `${hits.length} matches`);
+  let html = header("Search", `Query: ${q}`, `${hits.length} matches`, "search");
   if (!hits.length) {
     setHTML("content", html + `<div class="empty">No matches found.</div>`);
     return;
@@ -2967,6 +3015,7 @@ function routeFromHash() {
 }
 
 document.addEventListener("keydown", (e) => {
+  if (e.defaultPrevented) return;
   if (e.key === "Escape") {
     const aside = $("aside");
     if (isDesktopNav()) {
@@ -2985,6 +3034,10 @@ document.addEventListener("keydown", (e) => {
   if (
     targetTag === "INPUT" ||
     targetTag === "TEXTAREA" ||
+    targetTag === "SELECT" ||
+    targetTag === "BUTTON" ||
+    targetTag === "A" ||
+    targetTag === "SUMMARY" ||
     (e.target && e.target.isContentEditable)
   )
     return;

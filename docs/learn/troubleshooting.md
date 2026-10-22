@@ -73,4 +73,4 @@ Prefer local services in tests. For an import failure, compare the import name
 with the manifest dependency, then inspect `ny pkg path` and the lockfile.
 
 See [Native](native.md), [Networking](networking.md), [Packages](packages.md),
-[Execution routes](routes.md), and [Testing](testing.md).
+[Execution routes](status.md#execution-routes), and [Testing](testing.md).

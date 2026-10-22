@@ -4177,7 +4177,7 @@ fn end_window() any {
    prepare_input(0, 320.0, 240.0)
    begin_frame()
    assert(begin_window("probe", "Probe", 8.0, 8.0, 280.0, 210.0,
-      {"closable": false, "resizable": false, "collapsed": true, "collapsible": false, "titlebar": false}), "gui begin window expands pinned panel")
+         {"closable": false, "resizable": false, "collapsed": true, "collapsible": false, "titlebar": false}), "gui begin window expands pinned panel")
    assert(remaining_h() > 0.0, "gui remaining height")
    assert(!icon_button("icon", -1, "Run", 72.0, 32.0, false), "gui icon button idle")
    assert(!selectable("row", "Row", false, 180.0, 34.0, "Detail", -1), "gui selectable idle")

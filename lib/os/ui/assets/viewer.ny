@@ -70,11 +70,9 @@ def list UI_FONT_CANDIDATES = [
    "/usr/share/fonts/TTF/DejaVuSansMono.ttf"
 ]
 
-;; Ordered local development roots. Environment roots still take precedence.
-;; `tmp/assets/models` is intentionally optional: releases do not ship tmp/.
+;; Repository-managed asset cache. Environment roots take precedence.
 def list GLTF_ASSET_DEFAULT_ROOTS = [
-   "build/cache/assets/models",
-   "tmp/assets/models"
+   "build/cache/assets/models"
 ]
 
 fn mono_font(int size, candidates=0, int font_filter=-1) int {
@@ -100,7 +98,7 @@ fn gltf_asset_root_envs() list {
 }
 
 fn gltf_asset_roots(any defaults=GLTF_ASSET_DEFAULT_ROOTS) list {
-   "Returns configured glTF asset roots. Environment roots take precedence; local builds use build/cache/assets/models then optional tmp/assets/models."
+   "Returns configured glTF asset roots. Environment roots take precedence over build/cache/assets/models."
    asset_catalog.asset_dirs_from_env(defaults, gltf_asset_root_envs())
 }
 

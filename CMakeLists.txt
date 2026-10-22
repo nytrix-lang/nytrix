@@ -515,7 +515,7 @@ if (NYTRIX_USE_LLVM)
     if (DEFINED ENV{LLVM_CONFIG} AND EXISTS "$ENV{LLVM_CONFIG}")
       set(LLVM_CONFIG_EXE "$ENV{LLVM_CONFIG}")
     elseif(APPLE)
-      foreach(_brew_llvm_version 22 21 20 19 18)
+      foreach(_brew_llvm_version 23 22 21 20 19 18)
         if(EXISTS "/opt/homebrew/opt/llvm@${_brew_llvm_version}/bin/llvm-config")
           set(LLVM_CONFIG_EXE "/opt/homebrew/opt/llvm@${_brew_llvm_version}/bin/llvm-config")
           break()
@@ -531,7 +531,7 @@ if (NYTRIX_USE_LLVM)
       endif()
     else()
       find_program(LLVM_CONFIG_EXE
-                   NAMES llvm-config-22 llvm-config-21 llvm-config-20 llvm-config-19
+                   NAMES llvm-config-23 llvm-config-22 llvm-config-21 llvm-config-20 llvm-config-19
                          llvm-config-18 llvm-config-17 llvm-config-16 llvm-config
                    PATHS "$ENV{MSYSTEM_PREFIX}/bin" "$ENV{MINGW_PREFIX}/bin"
                          "C:/msys64/ucrt64/bin" "C:/msys64/clang64/bin"
@@ -540,7 +540,9 @@ if (NYTRIX_USE_LLVM)
                          "C:/tools/msys64/clang64/bin" "C:/tools/msys64/mingw64/bin"
                          "C:/tools/msys64/clangarm64/bin"
                          "C:/Program Files/LLVM/bin"
-                         "C:/tools/llvm/bin" "/opt/homebrew/opt/llvm@20/bin"
+                         "C:/tools/llvm/bin" "/opt/homebrew/opt/llvm@23/bin"
+                         "/usr/local/opt/llvm@23/bin" "/opt/homebrew/opt/llvm@22/bin"
+                         "/usr/local/opt/llvm@22/bin" "/opt/homebrew/opt/llvm@20/bin"
                          "/usr/local/opt/llvm@20/bin" "/opt/homebrew/opt/llvm/bin"
                          "/usr/local/opt/llvm/bin")
     endif()
@@ -562,9 +564,9 @@ if (NYTRIX_USE_LLVM)
       if (LLVM_VERSION_RAW MATCHES "^([0-9]+)")
         set(NYTRIX_LLVM_VERSION_MAJOR "${CMAKE_MATCH_1}")
         if (NYTRIX_LLVM_VERSION_MAJOR VERSION_LESS 16 OR
-            NYTRIX_LLVM_VERSION_MAJOR VERSION_GREATER 22)
+            NYTRIX_LLVM_VERSION_MAJOR VERSION_GREATER 23)
           message(FATAL_ERROR
-            "Unsupported LLVM ${LLVM_VERSION_RAW}. Nytrix supports LLVM 16 through 22; "
+            "Unsupported LLVM ${LLVM_VERSION_RAW}. Nytrix supports LLVM 16 through 23; "
             "set LLVM_CONFIG to a supported llvm-config binary.")
         endif()
       endif()
@@ -1197,6 +1199,7 @@ set(SRC_COMPILER
   ${SRC_REPL}
   ${SRC_WIRE}
   "${NYTRIX_ROOT}/src/code/lang/parse/ast.c"
+  "${NYTRIX_ROOT}/src/code/lang/parse/dump.c"
   "${NYTRIX_ROOT}/src/code/lang/parse/lexer.c"
   "${NYTRIX_ROOT}/src/code/lang/parse/shared.c"
   "${NYTRIX_ROOT}/src/code/lang/types/pipeline/init.c"
@@ -1235,6 +1238,7 @@ list(REMOVE_ITEM SRC_COMPILER
   ${LLVM_EXPR_SOURCES})
 list(REMOVE_ITEM PARSE_AMALGAMATION_SOURCES
   "${NYTRIX_ROOT}/src/code/lang/parse/ast.c"
+  "${NYTRIX_ROOT}/src/code/lang/parse/dump.c"
   "${NYTRIX_ROOT}/src/code/lang/parse/lexer.c"
   "${NYTRIX_ROOT}/src/code/lang/parse/shared.c")
 list(REMOVE_ITEM TYPING_PIPELINE_SOURCES
@@ -1387,6 +1391,13 @@ else()
 endif()
 if (WIN32)
   add_compile_definitions(_CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_WARNINGS PATH_MAX=4096)
+  # The POSIX compiler raises RLIMIT_STACK for compiler/import frames. PE
+  # executables need their reserve set at link time; pages commit on demand.
+  if (MSVC)
+    add_link_options(/STACK:67108864)
+  else()
+    add_link_options(-Wl,--stack,67108864)
+  endif()
 endif()
 
 # Binaries prefer a core bundle beside the executable, then use this path as
@@ -1635,6 +1646,12 @@ if (NYTRIX_USE_LLVM)
     target_link_options(ny-full PRIVATE "-Wl,--disable-new-dtags")
   endif()
   if (WIN32)
+    # Match ELF -rdynamic: JIT-emitted runtime calls include internal
+    # helpers that are intentionally absent from the public FFI registry.
+    set_target_properties(ny-full PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
+    if (NOT MSVC)
+      target_link_options(ny-full PRIVATE -Wl,--export-all-symbols)
+    endif()
     # Set PDB properties for Windows builds
     set_target_properties(ny-full PROPERTIES
       PDB_NAME "$<TARGET_FILE_BASE_NAME:ny-full>.pdb"
@@ -1688,7 +1705,8 @@ set_target_properties(ny PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
   OUTPUT_NAME_DEBUG "ny_debug"
 )
-if (NYTRIX_BUILD_SHARED AND NOT WIN32 AND NYTRIX_USE_LLVM AND
+# The native checker object emitter currently produces ELF, not Mach-O.
+if (NYTRIX_BUILD_SHARED AND UNIX AND NOT APPLE AND NYTRIX_USE_LLVM AND
     CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64|amd64|aarch64|arm64)$")
   find_library(NYTRIX_CORE_BC_CHECKER_CRYPTO_LIBRARY NAMES crypto)
   if(NYTRIX_CORE_BC_CHECKER_CRYPTO_LIBRARY)
@@ -2095,6 +2113,11 @@ if (NYTRIX_BUILD_LSP)
     target_link_options(ny-lsp PRIVATE "-Wl,--disable-new-dtags")
   endif()
   if (WIN32)
+    set_target_properties(ny-lsp PROPERTIES
+      ENABLE_EXPORTS ON WINDOWS_EXPORT_ALL_SYMBOLS ON)
+    if (NOT MSVC)
+      target_link_options(ny-lsp PRIVATE -Wl,--export-all-symbols)
+    endif()
     # Set PDB properties for Windows builds
     set_target_properties(ny-lsp PROPERTIES
       PDB_NAME "$<TARGET_FILE_BASE_NAME:ny-lsp>.pdb"

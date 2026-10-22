@@ -3632,7 +3632,9 @@ static bool lu_scalar_pure_op(const nyr_inst_t *in) {
   }
 }
 
-/* Division may trap, so preserve its original block and iteration order. */
+/*
+ * Division may trap, so preserve its original block and iteration order.
+ */
 static bool lu_clone_ordered_division(const nyr_inst_t *in) {
   return in && in->op == NYIR_DIV_I64 && !in->symbol && !in->extra_args &&
          !in->arg_sizes && !in->phi_incoming &&
@@ -3706,7 +3708,9 @@ static bool lu_try_clone_cfg(nyr_func_t *work, const nyr_scev_loop_t *loop,
     return lu_clone_reject(loop, "code-size");
   }
 
-  /* Outside control may enter only through the unique loop preheader. */
+  /*
+   * Outside control may enter only through the unique loop preheader.
+   */
   size_t preheader_edges = 0;
   for (size_t b = 0; b < nb; ++b) {
     for (size_t e = cfg->succ_offsets[b]; e < cfg->succ_offsets[b + 1]; ++e) {
@@ -3721,7 +3725,9 @@ static bool lu_try_clone_cfg(nyr_func_t *work, const nyr_scev_loop_t *loop,
   if (preheader_edges != 1)
     return lu_clone_reject(loop, "preheader-edge-count");
 
-  /* The header has one counted-loop guard and one false edge out. */
+  /*
+   * The header has one counted-loop guard and one false edge out.
+   */
   size_t guard = SIZE_MAX, guard_true = SIZE_MAX, exit_block = SIZE_MAX;
   size_t header_exit_branch = SIZE_MAX;
   bool synthesize_exit_label = false;
@@ -3899,7 +3905,9 @@ static bool lu_try_clone_cfg(nyr_func_t *work, const nyr_scev_loop_t *loop,
     maps[i] = -1;
   for (size_t i = 0; i < trips * nb; ++i)
     labels[i] = -1;
-  /* Identify the outer recurrences; nested-loop PHIs remain ordinary PHIs. */
+  /*
+   * Identify the outer recurrences; nested-loop PHIs remain ordinary PHIs.
+   */
   reject_stage = "header PHI setup";
   for (size_t i = cfg->block_start[h]; i < cfg->block_end[h]; ++i) {
     const nyr_inst_t *phi = &work->data[i];
@@ -3921,7 +3929,9 @@ static bool lu_try_clone_cfg(nyr_func_t *work, const nyr_scev_loop_t *loop,
   if (phi_init[loop->iv] < 0 || phi_next[loop->iv] < 0)
     goto done;
 
-  /* Values defined inside the loop may escape only through a header PHI. */
+  /*
+   * Values defined inside the loop may escape only through a header PHI.
+   */
   reject_stage = "loop-local value escape";
   for (size_t b = first_block; b <= last_block; ++b) {
     if (!members[b])
@@ -3958,8 +3968,10 @@ static bool lu_try_clone_cfg(nyr_func_t *work, const nyr_scev_loop_t *loop,
     }
   }
 
-  /* Preserve source labels where possible. Fallthrough blocks have no source
-   * label; give them one so cloned branches can target them explicitly. */
+  /*
+   * Preserve source labels where possible. Fallthrough blocks have no source
+   * label; give them one so cloned branches can target them explicitly.
+   */
   reject_stage = "clone labels";
   for (size_t k = 0; k < trips; ++k) {
     for (size_t b = first_block; b <= last_block; ++b) {
@@ -3975,7 +3987,9 @@ static bool lu_try_clone_cfg(nyr_func_t *work, const nyr_scev_loop_t *loop,
     }
   }
 
-  /* Make a fresh SSA mapping for every clone, including nested-loop PHIs. */
+  /*
+   * Make a fresh SSA mapping for every clone, including nested-loop PHIs.
+   */
   reject_stage = "SSA mapping";
   int next_value = work->next_value;
   for (size_t k = 0; k < trips; ++k) {
@@ -4178,7 +4192,9 @@ static bool lu_try_clone_cfg(nyr_func_t *work, const nyr_scev_loop_t *loop,
         clones[clone_len++] = copy;
       }
 
-      /* Convert implicit fallthroughs into explicit clone-local branches. */
+      /*
+       * Convert implicit fallthroughs into explicit clone-local branches.
+       */
       if (b == h)
         continue; /* the counted guard was replaced by an unconditional edge */
       if (branch_if != SIZE_MAX) {
@@ -4241,7 +4257,9 @@ static bool lu_try_clone_cfg(nyr_func_t *work, const nyr_scev_loop_t *loop,
     }
   }
 
-  /* Rewire exit PHIs to the final cloned latch. */
+  /*
+   * Rewire exit PHIs to the final cloned latch.
+   */
   reject_stage = "exit PHI remapping";
   for (size_t i = cfg->block_start[exit_block]; i < cfg->block_end[exit_block];
        ++i) {

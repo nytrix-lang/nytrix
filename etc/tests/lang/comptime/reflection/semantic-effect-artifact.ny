@@ -106,14 +106,14 @@ comptime template semantic_artifact_generated() {
 comptime emit semantic_artifact_generated()
 
 fn semantic_effect_if_init() i32 {
-   if (semantic_effect_value() > 0) {
+   if semantic_effect_value() > 0 {
       return 1
    }
    return 0
 }
 
 fn semantic_effect_while_init() i32 {
-   while (semantic_effect_value() > 1) {
+   while semantic_effect_value() > 1 {
       break
    }
    return 0

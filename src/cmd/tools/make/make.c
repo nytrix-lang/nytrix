@@ -102,13 +102,13 @@ static int make_lstat(const char *path, struct stat *st) {
 
 static const char *default_fuzz_shape_dir(void) {
   struct stat st;
-  if (stat("tmp/tests/fuzz/shapes", &st) == 0)
-    return "tmp/tests/fuzz/shapes";
-  if (stat("etc/tests/shapes", &st) == 0)
-    return "etc/tests/shapes";
+  if (stat("build/cache/tests/shapes", &st) == 0)
+    return "build/cache/tests/shapes";
+  if (stat("etc/tests/code/probes", &st) == 0)
+    return "etc/tests/code/probes";
   if (stat("etc/tests", &st) == 0)
     return "etc/tests";
-  return "tmp/tests/fuzz/shapes";
+  return "build/cache/tests/fuzz/shapes";
 }
 
 static int build_line_progress(const char *line, const char **rest) {
@@ -788,8 +788,8 @@ static int run_test_tool(const char *root, const char *kind, int jobs,
   ny_setenv("NYTRIX_TEST_STD_REPL", "1", 1);
   int cold = nyt_env_truthy("NYTRIX_TEST_COLD");
   const char *exec_cache_env = getenv("NYTRIX_TEST_EXEC_CACHE");
-  int exec_cache = !cold &&
-                   (!exec_cache_env || nyt_env_truthy("NYTRIX_TEST_EXEC_CACHE"));
+  int exec_cache =
+      !cold && (!exec_cache_env || nyt_env_truthy("NYTRIX_TEST_EXEC_CACHE"));
   ny_setenv("NYTRIX_TEST_CACHE", cold ? "0" : "1", 1);
   ny_setenv("NYTRIX_TEST_NO_NATIVE_CACHE", (cold || !exec_cache) ? "1" : "0",
             1);
@@ -800,16 +800,17 @@ static int run_test_tool(const char *root, const char *kind, int jobs,
   else if (!getenv("NYTRIX_STD_CACHE"))
     ny_setenv("NYTRIX_STD_CACHE", "1", 1);
 
-  nyt_msg("TEST", NYT_MAGENTA,
-          "make test: fixture-flag matrix with runtime/repl/error/bench "
-          "suites; result_cache %s, "
-          "exec_cache %s, std_cache %s (set NYTRIX_TEST_EXEC_CACHE=0 to disable "
-          "binary caches)",
-          cold ? "off" : "on", (!cold && exec_cache) ? "on" : "off",
-          (getenv("NYTRIX_STD_CACHE") &&
-           strcmp(getenv("NYTRIX_STD_CACHE"), "0") == 0)
-              ? "off"
-              : "on");
+  nyt_msg(
+      "TEST", NYT_MAGENTA,
+      "make test: fixture-flag matrix with runtime/repl/error/bench "
+      "suites; result_cache %s, "
+      "exec_cache %s, std_cache %s (set NYTRIX_TEST_EXEC_CACHE=0 to disable "
+      "binary caches)",
+      cold ? "off" : "on", (!cold && exec_cache) ? "on" : "off",
+      (getenv("NYTRIX_STD_CACHE") &&
+       strcmp(getenv("NYTRIX_STD_CACHE"), "0") == 0)
+          ? "off"
+          : "on");
   if (jobs > 0) {
     nyt_msg("RUN", NYT_CYAN, "tests: bin=ny jobs=%d timeout=auto", jobs);
   } else {

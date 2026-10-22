@@ -1,7 +1,5 @@
 <!-- nytrix-doc: {"audience":"user","featured":false,"group":"overview","order":0,"summary":"A statically typed native language with explicit machine boundaries."} -->
-# Think freely. Control precisely.
-
-Native · Explicit · Ownership · Interop · Paradigms
+# Nytrix manual
 
 <!-- overview:quick-start -->
 
@@ -16,13 +14,14 @@ Native · Explicit · Ownership · Interop · Paradigms
 
 <!-- overview:body -->
 
-> Concise by default. Flexible by design. Explicit when it matters.
+Nytrix is an experimental statically typed language with native compilation,
+compile-time source generation, and C interoperability.
 
 <!-- overview:cards {"kind":"learn","title":"Learn","summary":"Build and run a program, then choose a focused workflow."} -->
 
 <!-- overview:cards {"kind":"spec","title":"Specification","summary":"Exact language behavior, grammar, and diagnostics."} -->
 
-<!-- overview:cards {"kind":"project","title":"Project","summary":"Release notes and tracked public work."} -->
+<!-- overview:cards {"kind":"project","title":"Project","summary":"Contributing, open work, and release notes."} -->
 
 <!-- overview:cards {"kind":"reference","title":"Reference","summary":"Source-linked standard-library entry points."} -->
 

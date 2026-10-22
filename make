@@ -28,10 +28,10 @@ sys.dont_write_bytecode = True
 os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
 os.environ["MESA_VK_IGNORE_CONFORMANCE_WARNING"] = "true"
 
-os.environ.setdefault("PYTHONPYCACHEPREFIX", str(Path(tempfile.gettempdir()) / "nytrix-pycache"))
+ROOT = Path(__file__).resolve().parent
+os.environ.setdefault("PYTHONPYCACHEPREFIX", str(ROOT / "build" / "cache" / "python"))
 sys.pycache_prefix = os.environ["PYTHONPYCACHEPREFIX"]
 
-ROOT = Path(__file__).resolve().parent
 QUIET_BOOTSTRAP = False
 LOADED_CONFIGS: list[Path] = []
 ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
@@ -2036,6 +2036,7 @@ def _check_llvm_headers() -> tuple[bool, str | None]:
         "/usr/include",
         "/usr/local/include",
         "/opt/homebrew/include",
+        "/usr/lib/llvm-23/include",
         "/usr/lib/llvm-22/include",
         "/usr/lib/llvm-21/include",
         "/usr/lib/llvm-20/include",
@@ -2448,6 +2449,8 @@ def configure_macos_llvm_env() -> None:
     if os.environ.get("LLVM_CONFIG"):
         return
     prefixes = [
+        Path("/opt/homebrew/opt/llvm@23"),
+        Path("/usr/local/opt/llvm@23"),
         Path("/opt/homebrew/opt/llvm@22"),
         Path("/usr/local/opt/llvm@22"),
         Path("/opt/homebrew/opt/llvm@21"),
@@ -5512,7 +5515,7 @@ def _run_test_impl(build_root: Path, kind: str, jobs: int, extra: list[str]) -> 
     os.environ.setdefault("NYTRIX_TEST_DEBUG_FAILURES", "0")
     os.environ.setdefault("NYTRIX_TEST_DEBUGGER_ALL", "0")
     os.environ.setdefault(
-        "NYTRIX_TEST_DIAG_DIR", str(ROOT / "tmp" / "diagnostics" / "tests")
+        "NYTRIX_TEST_DIAG_DIR", str(build_root / "diagnostics" / "tests")
     )
     os.environ["NYTRIX_TEST_INCLUDE_BENCHMARK"] = "1"
     # Benchmark fixtures use full stress inputs, so run their correctness
@@ -5732,8 +5735,8 @@ def _stats_display_path(path: str) -> str:
     return json.dumps(path, ensure_ascii=False) if not path.isprintable() else path
 
 def _backlog_stats() -> dict[str, object] | None:
-    """Summarize the active Nytrix skill TODO queue."""
-    todo = ROOT / ".agent" / "skills" / "nytrix" / "references" / "TODO.md"
+    """Summarize the public contributor work queue."""
+    todo = ROOT / "docs" / "TODO.md"
     if not todo.is_file():
         return None
     sections: list[dict[str, object]] = []
@@ -5759,7 +5762,7 @@ def _backlog_stats() -> dict[str, object] | None:
     if not sections:
         return None
     return {
-        "path": "agent TODO queue",
+        "path": "docs/TODO.md",
         "sections": sections,
         "open": sum(int(s["open"]) for s in sections),
         "done": sum(int(s["done"]) for s in sections),
@@ -6306,7 +6309,7 @@ _COMMAND_USAGE: dict[str, tuple[str, str, list[tuple[str, list[tuple[str, str]]]
         ],
     ),
     "check": (
-        "Usage: ./make check [test options]",
+        "Usage: ./make check [test options] [--no-test-suite]",
         "run the fail-closed repository quality gate (hygiene, tidy, format, audit, build, and tests)",
         [
             ("What it does", [
@@ -6314,8 +6317,9 @@ _COMMAND_USAGE: dict[str, tuple[str, str, list[tuple[str, list[tuple[str, str]]]
                 ("2", "run ny-fmt --tidy"),
                 ("3", "verify formatting and parser checks"),
                 ("4", "run the source audit"),
-                ("5", "build ny, ny-full, ny-test, and ny-fmt"),
-                ("6", "run the test suite; any failure stops the command"),
+                ("5", "build the tools required by the selected check mode"),
+                ("6", "run ./make test --with-stdlib --with-replay --with-bench --cold; any failure stops the command"),
+                ("--no-test-suite", "skip the full suite for fast build-and-source checks, such as CI"),
                 ("Report", "prints every fixture result; full phase logs go to build/check-reports/<run>"),
             ]),
             ("Environment", [
@@ -6323,7 +6327,8 @@ _COMMAND_USAGE: dict[str, tuple[str, str, list[tuple[str, list[tuple[str, str]]]
                 ("NYTRIX_CHECK_REPORT_DIR", "override the full quality-report directory"),
             ]),
             ("Examples", [
-                ("./make check", "run the complete gate with stdlib tests and failure replay"),
+                ("./make check", "run the complete cold gate with stdlib tests, failure replay, and benchmarks"),
+                ("./make check --no-test-suite", "run hygiene, format, audit, and build checks only"),
                 ("NYTRIX_CHECK_COMPACT=1 ./make check", "show only failing fixture rows"),
             ]),
         ],
@@ -6396,7 +6401,7 @@ _COMMAND_USAGE: dict[str, tuple[str, str, list[tuple[str, list[tuple[str, str]]]
                 ("NYTRIX_TEST_TIMEOUT=NNN", "default per-fixture timeout (60s)"),
                 ("NYTRIX_TEST_JOBS=N", "automatic fixture workers; default is bounded by CPU and available RAM"),
                 ("NYTRIX_TEST_BENCH_TIMEOUT=NNN", "override benchmark fixture timeout"),
-                ("NYTRIX_TEST_DIAG_DIR", "failure artifact root (default ./tmp/diagnostics/tests)"),
+                ("NYTRIX_TEST_DIAG_DIR", "failure artifact root (default build/diagnostics/tests)"),
                 ("NYTRIX_TEST_DEBUG_FAILURES=0", "disable automatic failure replay artifacts"),
                 ("NYTRIX_TEST_DEBUGGER_ALL=0", "disable debugger replay while keeping trace/asm dumps"),
                 ("NYTRIX_TEST_DEBUG_VERBOSE=1", "opt into full debugger maps/disassembly; compact is the default"),
@@ -6964,7 +6969,7 @@ def _runtime_search_dirs() -> list[Path]:
     for part in raw.split(os.pathsep):
         if part.strip():
             dirs.append(Path(part).expanduser())
-    for tool in ("llvm-config-21", "llvm-config", "llvm-config-22", "llvm-config-20", "llvm-config-19", "llvm-config-18", "llvm-config-17", "llvm-config-16"):
+    for tool in ("llvm-config-23", "llvm-config-22", "llvm-config-21", "llvm-config-20", "llvm-config-19", "llvm-config-18", "llvm-config-17", "llvm-config-16", "llvm-config"):
         t = which(tool)
         if not t:
             continue
@@ -8043,8 +8048,8 @@ def _vendor_lib_dir(build_root: Path) -> Path:
 
 def _llvm_major_version_raw() -> str:
     """Return the major version of the system LLVM (e.g. '22'), or empty string."""
-    for tool in ("llvm-config", "llvm-config-22", "llvm-config-21", "llvm-config-20",
-                  "llvm-config-19", "llvm-config-18", "llvm-config-17", "llvm-config-16"):
+    for tool in ("llvm-config-23", "llvm-config-22", "llvm-config-21", "llvm-config-20",
+                  "llvm-config-19", "llvm-config-18", "llvm-config-17", "llvm-config-16", "llvm-config"):
         t = which(tool)
         if not t:
             continue
@@ -8653,7 +8658,11 @@ def main() -> int:
         elif cmd in ("fmt", "analyze", "tidy", "audit"):
             targets = ["ny-fmt"]
         elif cmd == "check":
-            targets = ["ny", "ny-full", "ny-test", "ny-fmt"]
+            targets = (
+                ["ny", "ny-fmt"]
+                if "--no-test-suite" in extra
+                else ["ny", "ny-full", "ny-test", "ny-fmt"]
+            )
         elif cmd in ("test", "asan", "ubsan"):
             targets = ["ny", "ny-full", "ny-test"]
         elif cmd == "fuzz":
@@ -8749,20 +8758,33 @@ def main() -> int:
             if rc == 0:
                 rc = run_check_tool(build_root, active_kind, "audit", ["--audit"], report_dir)
             if rc == 0:
-                # Fail-closed: the gate always runs the suite cold.  A warm
-                # run is result-cache-only after compiler changes and has
-                # repeatedly reported green while a cold run was red; cache
-                # hits must never satisfy the gate.
-                os.environ["NYTRIX_TEST_COLD"] = "1"
-                os.environ.setdefault("NYTRIX_CHECK_COMPACT", "0")
-                check_test_args = list(extra)
-                if "--with-stdlib" not in check_test_args and "--no-stdlib" not in check_test_args:
-                    check_test_args.append("--with-stdlib")
-                if "--with-replay" not in check_test_args:
-                    check_test_args.append("--with-replay")
-                log("TEST", "check gate: running cold with stdlib and failure replay")
-                rc = run_test(build_root, active_kind, requested_jobs,
-                              check_test_args)
+                if "--no-test-suite" in extra:
+                    step("skip full test suite (--no-test-suite)")
+                else:
+                    # A warm result-cache run is not evidence that changed
+                    # compiler code still works. Keep the default gate cold,
+                    # include stdlib/replay coverage, and show benchmark
+                    # results as part of the same live run.
+                    os.environ["NYTRIX_TEST_COLD"] = "1"
+                    os.environ.setdefault("NYTRIX_CHECK_COMPACT", "0")
+                    check_test_args = [
+                        arg for arg in extra if arg != "--no-test-suite"
+                    ]
+                    if "--with-stdlib" not in check_test_args and "--no-stdlib" not in check_test_args:
+                        check_test_args.append("--with-stdlib")
+                    if "--with-replay" not in check_test_args:
+                        check_test_args.append("--with-replay")
+                    if "--with-bench" not in check_test_args and "--no-bench" not in check_test_args:
+                        check_test_args.append("--with-bench")
+                    if "--cold" not in check_test_args:
+                        check_test_args.append("--cold")
+                    log(
+                        "TEST",
+                        "check gate: " + shlex.join(["./make", "test", *check_test_args]),
+                    )
+                    rc = run_test(
+                        build_root, active_kind, requested_jobs, check_test_args
+                    )
         elif cmd == "tidy":
             # Strip only NUL bytes from C/H sources so Clang does not
             # crash with "null character ignored".  Keep all valid UTF-8

@@ -3193,7 +3193,9 @@ static bool nyr_port_header(nyr_port_ctx_t *c) {
         return false;
     unsigned frame_lo = (unsigned)c->frame_bytes & 0xffu;
     unsigned frame_hi = ((unsigned)c->frame_bytes >> 8) & 0xffu;
-    /* Keep Y at the frame base and leave the call stack below its locals. */
+    /*
+     * Keep Y at the frame base and leave the call stack below its locals.
+     */
     return nyr_put(c->w, "\tpush\tr28\n\tp"
                          "ush\tr29\n"
                          "\tin\tr28, 61\n"

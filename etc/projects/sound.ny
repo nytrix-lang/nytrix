@@ -11,8 +11,17 @@ use core.os.sound (
    shutdown as sound_shutdown
 )
 use core.os.sound.source.synth (make_sine_source, write_synth_wav)
+use core.os.fs as fs
 
-def output = "tmp/workspace/artifacts/run-results/sound-generated.wav"
+if !fs.is_dir("build") && is_err(fs.make_dir("build")) {
+   print("output directory creation failed: build")
+   exit(1)
+}
+if !fs.is_dir("build/examples") && is_err(fs.make_dir("build/examples")) {
+   print("output directory creation failed: build/examples")
+   exit(1)
+}
+def output = "build/examples/sound-generated.wav"
 def tone = make_sine_source(440.0, 1.2, 48000, 0.04, false)
 if !tone {
    print("tone generation failed")

@@ -2091,9 +2091,11 @@ static expr_t *parse_expr_impl(parser_t *p, int prec) {
     expr_t *right = p_parse_expr(p, op.kind == NY_T_POW ? pcur : pcur + 1);
 
     if (op.kind == NY_T_QUESTION_QUESTION) {
-      /* Nil coalescing selects the left value unless it is exactly nil. Keep
+      /*
+       * Nil coalescing selects the left value unless it is exactly nil. Keep
        * the branch value itself unchanged so falsy values such as 0, false,
-       * and the empty string do not select the fallback. */
+       * and the empty string do not select the fallback.
+       */
       expr_t *nil = expr_new(p->arena, NY_E_LITERAL, op);
       if (!nil)
         return NULL;

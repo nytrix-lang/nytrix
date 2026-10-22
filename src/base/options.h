@@ -140,6 +140,7 @@ typedef struct {
   bool profiler_mode;
   bool report_peak_rss;
   bool dump_ast;
+  const char *dump_ast_filter;
   bool expand;
   bool expand_json;
   ny_desugar_mode_t ny_desugar;
@@ -326,7 +327,7 @@ typedef struct {
   const char *jit_engine; /* --jit-engine=orc|mcjit (default: mcjit) */
   bool jit_fast_isel;     /* --jit-fast-isel: JIT fast instruction selection */
   const char *jit_code_model; /* --jit-code-model=small|kernel|medium|large */
-  int jit_opt_level;   /* --jit-opt-level=N: JIT optimization level (0..3) */
+  int jit_opt_level; /* --jit-opt-level=N: JIT optimization level (0..3) */
   bool jit_opt_level_explicit;
   bool jit_perf_map;   /* --jit-perf-map: emit /tmp/perf-<pid>.map */
   bool zero_init;      /* --zero-init: zero all managed heap allocations */

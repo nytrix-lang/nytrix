@@ -13,19 +13,17 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/mman.h>
 
-static int emit(nyr_func_t *f, nyr_op_t op, int a, int b, int c,
-                int64_t imm) {
+static int emit(nyr_func_t *f, nyr_op_t op, int a, int b, int c, int64_t imm) {
   return nyr_ir_emit(f, (nyr_inst_t){.op = op,
-                                    .dst = -1,
-                                    .a = a,
-                                    .b = b,
-                                    .c = c,
-                                    .d = -1,
-                                    .e = -1,
-                                    .f = -1,
-                                    .imm = imm});
+                                     .dst = -1,
+                                     .a = a,
+                                     .b = b,
+                                     .c = c,
+                                     .d = -1,
+                                     .e = -1,
+                                     .f = -1,
+                                     .imm = imm});
 }
 
 int main(void) {
@@ -106,8 +104,8 @@ int main(void) {
       opt.native_backend, opt.native_abi, opt.host_triple, opt.opt_size);
   ny_native_target_info_t target;
   bool target_ok = nyr_target_info_init(&target, &target_request);
-  bool lowered =
-      target_ok && nyr_mach_lower_nir(&ir, &mach, target.caps, err, sizeof(err));
+  bool lowered = target_ok &&
+                 nyr_mach_lower_nir(&ir, &mach, target.caps, err, sizeof(err));
   bool appended =
       lowered && nyr_x64_mach_append_function(
                      &code, defs, &def_count, relocs, &reloc_count, &mach,
@@ -118,13 +116,12 @@ int main(void) {
   ok = ok && symbol >= 0 && reloc_count == 0;
   void *mapping = MAP_FAILED;
   if (ok) {
-    mapping = mmap(NULL, code.len, PROT_READ | PROT_WRITE,
-                   MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    mapping = nyr_opt_execmem_alloc(code.len);
     ok = mapping != MAP_FAILED;
   }
   if (ok) {
     memcpy(mapping, code.data, code.len);
-    ok = mprotect(mapping, code.len, PROT_READ | PROT_EXEC) == 0;
+    ok = nyr_opt_execmem_protect(mapping, code.len) == 0;
   }
   int64_t machine_result = -1;
   if (ok) {
@@ -140,7 +137,7 @@ int main(void) {
     fprintf(stderr, "[vec8-reduce-loop] machine=%lld expected=496 (%s)\n",
             (long long)machine_result, err[0] ? err : "runtime mismatch");
   if (mapping != MAP_FAILED)
-    munmap(mapping, code.len);
+    nyr_opt_execmem_free(mapping, code.len);
   nyr_obj_free(&code);
   nyr_mach_func_free(&mach);
   nyr_ir_func_free(&ir);

@@ -5,7 +5,8 @@ repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
 compiler="${NYTRIX_NY_FULL_BIN:-$repo_root/build/release/ny-full}"
-work="$(mktemp -d "$repo_root/tmp/workspace/work/d1-bpf-kernel-smoke.XXXXXX")"
+mkdir -p "$repo_root/build/cache/scratch"
+work="$(mktemp -d "$repo_root/build/cache/scratch/bpf-kernel-smoke.XXXXXX")"
 trap 'rm -rf "$work"' EXIT
 
 program='fn rotate_right32_8(int value) int {

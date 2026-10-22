@@ -51,23 +51,11 @@ function in the in-process native JIT, resolving external symbols from the
 current process. It is intended for trusted code, not as a sandbox. The JIT
 runner currently requires a host x86-64 backend.
 
-On Linux x86-64, `nyr_link_elf64_executable` can link a single self-contained
-ELF64 relocatable object into a static executable without starting a linker
-process. Its no-argument entry function returns an `i64`, whose low byte is
-used as the process exit code. The current linker handles the x86-64 absolute
-and PC-relative relocations emitted for simple NYIR functions; unresolved
-strong symbols, unsupported relocations, writable executable sections, and
-other object formats are rejected with an error. It does not yet replace the
-compiler driver's normal application link, which combines runtime objects,
-libraries, startup files, platform flags, and user link options.
-`nyr_link_elf64_executable_objects` extends this path to multiple ELF objects
-and static archives, lazily extracting members that satisfy unresolved strong
-symbols. It resolves global and weak symbols as one static executable. It
-still rejects unresolved strong symbols, unsupported relocations, and
-shared-library inputs.
-See the [linker design and current capability boundary](linker.md) for the
-format architecture, performance criteria, and default-transition
-requirements.
+`nyr_link` links existing objects and archives. Host Linux x86-64 requests can
+use the in-process ELF linker; other requests invoke external LLVM tools.
+The [linking reference](linker.md) defines request fields, path selection,
+entry-point conventions, and rejected inputs. Linking does not replace the
+compiler driver's application build or supply a target runtime automatically.
 
 ## Brainfuck frontend
 
@@ -143,19 +131,6 @@ x86-64 ELF, COFF, or Mach-O and AArch64 ELF by target triple. The standalone
 API preserves target ABI metadata for AArch64; frontends must classify
 aggregate signatures according to AAPCS64 before emitting them. Text assembly
 and `nyr_jit_run` currently require a host x86-64 backend.
-
-`nyr_link` links object files and static archives into executables, shared
-libraries, or static archives. Host Linux x86-64 executable requests with an
-entry symbol use the in-process ELF linker. Other format and target requests
-use `clang` with LLD, `wasm-ld`, or `llvm-ar`, selected from the target triple
-and output kind. These tools are launched directly without a shell. Set
-`NYR_LINK_CLANG`, `NYR_LINK_WASM_LD`, or `NYR_LINK_AR` to select tool paths.
-Cross-target linking still requires a compatible linker and any target sysroot
-or runtime libraries; pass library files as ordinary inputs. Wasm shared
-libraries are rejected. For non-native ELF, COFF, Mach-O, and Wasm executable
-requests, `entry_symbol` is the raw platform linker entry symbol. The native
-in-process ELF entry instead follows `nyr_link_elf64_executable`'s no-argument
-`i64` convention.
 
 `nyr_host_target` reports object-emission capabilities, not whether external
 linker tools are installed. The API does not claim full target coverage,

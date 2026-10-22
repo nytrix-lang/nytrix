@@ -2211,8 +2211,10 @@ void nyr_set_inline_callees(const nyr_inline_callee_t *callees,
         summaries[i].optimization_credit += 3;
     }
   }
-  /* Resolve nested closure boundaries once, rather than rescanning every
-   * target body for each call site of the enclosing helper. */
+  /*
+   * Resolve nested closure boundaries once, rather than rescanning every
+   * target body for each call site of the enclosing helper.
+   */
   for (size_t i = 0; i < count; ++i) {
     const nyr_func_t *func = callees[i].func;
     if (!func)
@@ -4106,9 +4108,11 @@ static uint64_t nyr_inline_label_hash(int64_t label) {
   return hash ^ (hash >> 31);
 }
 
-/* Build the same capped backward-branch depth hint for every instruction in
+/*
+ * Build the same capped backward-branch depth hint for every instruction in
  * one linear pass. Call-site queries then become O(1) instead of rescanning
- * every branch and label in the function. */
+ * every branch and label in the function.
+ */
 static bool nyr_inline_compute_loop_depths(const nyr_func_t *f,
                                             uint8_t **out_depths) {
   if (!out_depths)
@@ -5144,9 +5148,11 @@ bool nyr_inline_general(nyr_func_t *f) {
                           "call-site effects exceed cloned body summary");
         continue;
       }
-      /* Expansion ancestry is needed only for calls with a registered body
+      /*
+       * Expansion ancestry is needed only for calls with a registered body
        * whose effects can be cloned. Runtime and rejected calls stay on the
-       * allocation-free scan path. */
+       * allocation-free scan path.
+       */
       if (!expansions) {
         expansions = ny_malloc_array(f->len, sizeof(*expansions));
         if (!expansions) {
@@ -5241,15 +5247,19 @@ bool nyr_inline_general(nyr_func_t *f) {
       }
     }
     if (budget_exhausted) {
-      /* Calls copied from a just-spliced body may have been skipped by the
-       * insertion cursor. Keep the hint conservative when stopping early. */
+      /*
+       * Calls copied from a just-spliced body may have been skipped by the
+       * insertion cursor. Keep the hint conservative when stopping early.
+       */
       f->has_symbol_calls = true;
       break;
     }
     if (!changed) {
-      /* This complete, non-mutating pass observed every remaining direct
+      /*
+       * This complete, non-mutating pass observed every remaining direct
        * symbol call. Clear stale hints so later inliner stages can skip a
-       * large function after its final eligible call has disappeared. */
+       * large function after its final eligible call has disappeared.
+       */
       f->has_symbol_calls = saw_symbol_call;
       break;
     }

@@ -5,8 +5,6 @@
 #include "code/backend/object/internal.h"
 #include "support.h"
 
-#include <sys/mman.h>
-
 static int64_t f64_bits(double value) {
   int64_t bits = 0;
   memcpy(&bits, &value, sizeof(bits));
@@ -21,25 +19,25 @@ static int64_t f32_bits(float value) {
 
 static int emit_const(nyr_func_t *ir, nyr_op_t op, int64_t bits) {
   return nyr_ir_emit(ir, (nyr_inst_t){.op = op,
-                                     .dst = -1,
-                                     .a = -1,
-                                     .b = -1,
-                                     .c = -1,
-                                     .d = -1,
-                                     .e = -1,
-                                     .f = -1,
-                                     .imm = bits});
+                                      .dst = -1,
+                                      .a = -1,
+                                      .b = -1,
+                                      .c = -1,
+                                      .d = -1,
+                                      .e = -1,
+                                      .f = -1,
+                                      .imm = bits});
 }
 
 static int emit_unary(nyr_func_t *ir, nyr_op_t op, int value) {
   return nyr_ir_emit(ir, (nyr_inst_t){.op = op,
-                                     .dst = -1,
-                                     .a = value,
-                                     .b = -1,
-                                     .c = -1,
-                                     .d = -1,
-                                     .e = -1,
-                                     .f = -1});
+                                      .dst = -1,
+                                      .a = value,
+                                      .b = -1,
+                                      .c = -1,
+                                      .d = -1,
+                                      .e = -1,
+                                      .f = -1});
 }
 
 int main(void) {
@@ -90,13 +88,12 @@ int main(void) {
   ok = ok && symbol >= 0 && reloc_count == 0;
   void *mapping = MAP_FAILED;
   if (ok) {
-    mapping = mmap(NULL, code.len, PROT_READ | PROT_WRITE,
-                   MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    mapping = nyr_opt_execmem_alloc(code.len);
     ok = mapping != MAP_FAILED;
   }
   if (ok) {
     memcpy(mapping, code.data, code.len);
-    ok = mprotect(mapping, code.len, PROT_READ | PROT_EXEC) == 0;
+    ok = nyr_opt_execmem_protect(mapping, code.len) == 0;
   }
   if (ok) {
     typedef int64_t (*fn_t)(void);
@@ -107,7 +104,7 @@ int main(void) {
     fprintf(stderr, "[machine-float-to-i64] failed: %s\n",
             err[0] ? err : "conversion result or emission mismatch");
   if (mapping != MAP_FAILED)
-    munmap(mapping, code.len);
+    nyr_opt_execmem_free(mapping, code.len);
   free(assembly.data);
   nyr_obj_free(&code);
   nyr_mach_func_free(&mach);

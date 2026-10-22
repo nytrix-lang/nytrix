@@ -33,8 +33,8 @@ statistics when changing the pipeline. A transform must preserve verifier
 validity and observable program behavior.
 
 Machine lowering, register allocation, and object emission happen after
-NYIR optimization. Keep target registers and calling conventions out of
-Target-independent transforms. `-flto` on the native path selects the
+NYIR optimization. Target-independent transforms do not select target registers
+or calling conventions. `-flto` on the native path selects the
 whole-program NYIR pipeline; it is not LLVM bitcode LTO.
 
 ## Inspect and verify

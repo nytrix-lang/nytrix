@@ -799,6 +799,19 @@ bool nyr_jit_cache_load(const char *path,
 #endif
 }
 
+static nyr_abi_t nyr_native_jit_abi(nyr_abi_t abi, const char *triple) {
+  /*
+   * A live JIT without a target override calls the host C runtime.
+   */
+#if defined(_WIN32) && (defined(__x86_64__) || defined(_M_X64))
+  if (abi == NY_NATIVE_ABI_AUTO && (!triple || !*triple))
+    return NY_NATIVE_ABI_WIN64;
+#else
+  (void)triple;
+#endif
+  return abi;
+}
+
 #ifndef NYR_NO_EVAL
 bool nyr_jit_compile(nyr_backend_module_t *module, const ny_options *opt,
                      const char *stencil_cache_path, nyr_jit_image_t *image,
@@ -808,7 +821,7 @@ bool nyr_jit_compile(nyr_backend_module_t *module, const ny_options *opt,
   nyr_x64_obj_reloc_t *relocs = NULL;
   nyr_set_cf_mem2reg_enabled(!opt || opt->native_enable_cf_mem2reg);
   nyr_set_pass_controls(opt ? opt->nyr_disable_pass : NULL,
-                         opt ? opt->nyr_stop_after : NULL);
+                        opt ? opt->nyr_stop_after : NULL);
   nyr_set_verify_each_pass(opt && opt->nyr_ir_verify);
   nyr_set_rollback_on_verify_fail(opt && opt->nyr_rollback_on_verify_fail);
   nyr_set_global_inst_cap(opt ? opt->nyr_global_inst_cap : 0);
@@ -823,7 +836,9 @@ bool nyr_jit_compile(nyr_backend_module_t *module, const ny_options *opt,
     return false;
   }
   const nyr_target_request_t target_request = nyr_target_request_make(
-      opt->native_backend, opt->native_abi, opt->host_triple, opt->opt_size);
+      opt->native_backend,
+      nyr_native_jit_abi(opt->native_abi, opt->host_triple), opt->host_triple,
+      opt->opt_size);
   ny_native_target_info_t target;
   if (!nyr_target_info_init(&target, &target_request)) {
     nyr_set_error(err, err_len, "native JIT: backend is disabled");
@@ -1086,7 +1101,8 @@ bool nyr_jit_run(const nyr_func_t *func, int64_t *result, char *err,
   if (!nyr_host_target(&host, err, err_len))
     return false;
   nyr_target_request_t request = nyr_target_request_make(
-      NY_NATIVE_BACKEND_X86_64, NY_NATIVE_ABI_AUTO, host.target, false);
+      NY_NATIVE_BACKEND_X86_64, nyr_native_jit_abi(NY_NATIVE_ABI_AUTO, NULL),
+      host.target, false);
   ny_native_target_info_t target;
   if (!nyr_target_info_init(&target, &request) ||
       target.target != NY_NATIVE_TARGET_X86_64 ||
@@ -1103,10 +1119,8 @@ bool nyr_jit_run(const nyr_func_t *func, int64_t *result, char *err,
 
   nyr_obj_buf_t code = {0};
   size_t def_count = 0, reloc_count = 0;
-  nyr_x64_obj_symbol_def_t *defs =
-      calloc(NY_NATIVE_MAX_DEFS, sizeof(*defs));
-  nyr_x64_obj_reloc_t *relocs =
-      calloc(NY_X64_OBJ_MAX_RELOCS, sizeof(*relocs));
+  nyr_x64_obj_symbol_def_t *defs = calloc(NY_NATIVE_MAX_DEFS, sizeof(*defs));
+  nyr_x64_obj_reloc_t *relocs = calloc(NY_X64_OBJ_MAX_RELOCS, sizeof(*relocs));
   if (!defs || !relocs) {
     free(defs);
     free(relocs);
@@ -1116,8 +1130,8 @@ bool nyr_jit_run(const nyr_func_t *func, int64_t *result, char *err,
   }
 
   bool built = nyr_x64_obj_build_bundle(
-      &copy, NULL, NULL, 0, &target, "rt_main", false, &code, defs,
-      &def_count, relocs, &reloc_count, err, err_len);
+      &copy, NULL, NULL, 0, &target, "rt_main", false, &code, defs, &def_count,
+      relocs, &reloc_count, err, err_len);
   nyr_func_destroy(&copy);
   if (!built) {
     nyr_obj_free(&code);

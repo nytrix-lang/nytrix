@@ -382,7 +382,6 @@ fn split_words(any s) list {
    while start < n && _is_ws(load8(s, start)) { start += 1 }
    mut int end = n
    while end > start && _is_ws(load8(s, end - 1)) { end -= 1 }
-
    ;; Count nonempty tokens first so the result has its final capacity. Keep
    ;; the historical rule: literal spaces separate words; other whitespace is
    ;; trimmed only at the edges of each word.
@@ -403,7 +402,6 @@ fn split_words(any s) list {
          if token_end > token_start { count += 1 }
       }
    }
-
    mut out = list(count)
    scan = start
    while scan < end {

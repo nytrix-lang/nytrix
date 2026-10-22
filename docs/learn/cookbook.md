@@ -131,13 +131,15 @@ growth can return a replacement list value.
 use core
 
 mut counts = dict()
-counts = counts.set("a", counts.get("a", 0) + 1)
-counts = counts.set("a", counts.get("a", 0) + 1)
+counts.set("a", int(counts.get("a", 0)) + 1)
+counts.set("a", int(counts.get("a", 0)) + 1)
 assert_eq(counts.get("a", 0), 2, "counted twice")
 ```
 
 Use `dict()` for a mutable accumulator and `get(key, default)` for the missing
-key case.
+key case. Dictionary updates mutate the object in place. Reassigning the
+generic setter's return currently has a
+[known default-route failure](status.md#documentation-smoke-limitations).
 
 ## Sort in place or as a copy
 
@@ -248,8 +250,8 @@ assert_compile_index(xs, i, "index bounds")
 assert(xs[i] == 20, "indexed value")
 ```
 
-Compile-time proofs turn a range or index fact into a checked boundary before
-the native store happens.
+`assert_compile_index` requires a proven bound before the indexed read. An
+unknown bound fails compilation; the assertion does not assume it is true.
 
 ## Wrap a C call
 

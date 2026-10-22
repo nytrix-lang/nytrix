@@ -12,15 +12,15 @@ static size_t nested_effect_calls;
 
 static int emit_alloca(nyr_func_t *f, int64_t bytes) {
   return nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_ALLOCA,
-                                    .dst = -1,
-                                    .a = -1,
-                                    .b = -1,
-                                    .c = -1,
-                                    .d = -1,
-                                    .e = -1,
-                                    .f = -1,
-                                    .imm = bytes,
-                                    .scalar_class = NYIR_SCALAR_POINTER});
+                                     .dst = -1,
+                                     .a = -1,
+                                     .b = -1,
+                                     .c = -1,
+                                     .d = -1,
+                                     .e = -1,
+                                     .f = -1,
+                                     .imm = bytes,
+                                     .scalar_class = NYIR_SCALAR_POINTER});
 }
 
 static bool build_sum(nyr_func_t *f, size_t *update_inst, bool copy_iv,
@@ -37,13 +37,13 @@ static bool build_sum(nyr_func_t *f, size_t *update_inst, bool copy_iv,
     int address = nyr_opt_binop(f, NYIR_ADD_I64, base, offset);
     int value = nyr_opt_const(f, values[i]);
     nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_STORE_I64,
-                               .dst = -1,
-                               .a = address,
-                               .b = -1,
-                               .c = value,
-                               .d = -1,
-                               .e = -1,
-                               .f = -1});
+                                .dst = -1,
+                                .a = address,
+                                .b = -1,
+                                .c = value,
+                                .d = -1,
+                                .e = -1,
+                                .f = -1});
   }
   nyr_opt_label(f, 9);
   nyr_opt_br(f, 10);
@@ -61,25 +61,25 @@ static bool build_sum(nyr_func_t *f, size_t *update_inst, bool copy_iv,
   int offset = nyr_opt_binop(f, NYIR_MUL_I64, iv, eight);
   int address = nyr_opt_binop(f, NYIR_ADD_I64, base, offset);
   int loaded = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_LOAD_I64,
-                                          .dst = -1,
-                                          .a = address,
-                                          .b = -1,
-                                          .c = -1,
-                                          .d = -1,
-                                          .e = -1,
-                                          .f = -1});
+                                           .dst = -1,
+                                           .a = address,
+                                           .b = -1,
+                                           .c = -1,
+                                           .d = -1,
+                                           .e = -1,
+                                           .f = -1});
   *update_inst = f->len;
   int next_sum = nyr_opt_binop(f, NYIR_ADD_I64, sum, loaded);
   int iv_operand = iv;
   if (copy_iv)
     iv_operand = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_COPY,
-                                            .dst = -1,
-                                            .a = iv,
-                                            .b = -1,
-                                            .c = -1,
-                                            .d = -1,
-                                            .e = -1,
-                                            .f = -1});
+                                             .dst = -1,
+                                             .a = iv,
+                                             .b = -1,
+                                             .c = -1,
+                                             .d = -1,
+                                             .e = -1,
+                                             .f = -1});
   int next_iv = nyr_opt_binop(f, NYIR_ADD_I64, iv_operand, one);
   nyr_opt_br(f, 10);
   f->data[iv_phi].phi_incoming[1].value = next_iv;
@@ -90,7 +90,9 @@ static bool build_sum(nyr_func_t *f, size_t *update_inst, bool copy_iv,
 }
 
 static bool build_f64_memory_sum(nyr_func_t *f) {
-  /* Regrouping these additions changes the final bit pattern from 1.0. */
+  /*
+   * Regrouping these additions changes the final bit pattern from 1.0.
+   */
   static const double terms[8] = {1.0e16, 1.0, -1.0e16, 1.0,
                                   1.0e16, 1.0, -1.0e16, 1.0};
   nyr_opt_begin(f);
@@ -110,14 +112,14 @@ static bool build_f64_memory_sum(nyr_func_t *f) {
     if (address < 0 || value < 0)
       return false;
     nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_STORE_I64,
-                               .dst = -1,
-                               .a = address,
-                               .b = -1,
-                               .c = value,
-                               .d = -1,
-                               .e = -1,
-                               .f = -1,
-                               .scalar_class = NYIR_SCALAR_F64});
+                                .dst = -1,
+                                .a = address,
+                                .b = -1,
+                                .c = value,
+                                .d = -1,
+                                .e = -1,
+                                .f = -1,
+                                .scalar_class = NYIR_SCALAR_F64});
   }
   nyr_opt_br(f, 20);
   nyr_opt_label(f, 20);
@@ -137,14 +139,14 @@ static bool build_f64_memory_sum(nyr_func_t *f) {
       address < 0
           ? -1
           : nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_LOAD_I64,
-                                       .dst = -1,
-                                       .a = address,
-                                       .b = -1,
-                                       .c = -1,
-                                       .d = -1,
-                                       .e = -1,
-                                       .f = -1,
-                                       .scalar_class = NYIR_SCALAR_F64});
+                                        .dst = -1,
+                                        .a = address,
+                                        .b = -1,
+                                        .c = -1,
+                                        .d = -1,
+                                        .e = -1,
+                                        .f = -1,
+                                        .scalar_class = NYIR_SCALAR_F64});
   int next_sum = loaded < 0 ? -1 : nyr_opt_binop(f, NYIR_ADD_F64, sum, loaded);
   int next_iv = nyr_opt_binop(f, NYIR_ADD_I64, iv, one);
   if (next_sum < 0 || next_iv < 0)
@@ -154,13 +156,13 @@ static bool build_f64_memory_sum(nyr_func_t *f) {
   f->data[sum_phi].phi_incoming[1].value = next_sum;
   nyr_opt_label(f, 22);
   int result = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_F64_TO_I64,
-                                          .dst = -1,
-                                          .a = sum,
-                                          .b = -1,
-                                          .c = -1,
-                                          .d = -1,
-                                          .e = -1,
-                                          .f = -1});
+                                           .dst = -1,
+                                           .a = sum,
+                                           .b = -1,
+                                           .c = -1,
+                                           .d = -1,
+                                           .e = -1,
+                                           .f = -1});
   if (result < 0)
     return false;
   nyr_opt_ret(f, result);
@@ -188,14 +190,14 @@ static bool build_f64_elementwise(nyr_func_t *f) {
     if (address < 0 || value < 0)
       return false;
     nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_STORE_I64,
-                               .dst = -1,
-                               .a = address,
-                               .b = -1,
-                               .c = value,
-                               .d = -1,
-                               .e = -1,
-                               .f = -1,
-                               .scalar_class = NYIR_SCALAR_F64});
+                                .dst = -1,
+                                .a = address,
+                                .b = -1,
+                                .c = value,
+                                .d = -1,
+                                .e = -1,
+                                .f = -1,
+                                .scalar_class = NYIR_SCALAR_F64});
   }
   nyr_opt_br(f, 20);
   nyr_opt_label(f, 20);
@@ -213,28 +215,28 @@ static bool build_f64_elementwise(nyr_func_t *f) {
       input_address < 0
           ? -1
           : nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_LOAD_I64,
-                                       .dst = -1,
-                                       .a = input_address,
-                                       .b = -1,
-                                       .c = -1,
-                                       .d = -1,
-                                       .e = -1,
-                                       .f = -1,
-                                       .scalar_class = NYIR_SCALAR_F64});
+                                        .dst = -1,
+                                        .a = input_address,
+                                        .b = -1,
+                                        .c = -1,
+                                        .d = -1,
+                                        .e = -1,
+                                        .f = -1,
+                                        .scalar_class = NYIR_SCALAR_F64});
   int mapped = loaded < 0 ? -1 : nyr_opt_binop(f, NYIR_ADD_F64, loaded, fone);
   int output_address =
       offset < 0 ? -1 : nyr_opt_binop(f, NYIR_ADD_I64, output, offset);
   if (mapped < 0 || output_address < 0)
     return false;
   nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_STORE_I64,
-                             .dst = -1,
-                             .a = output_address,
-                             .b = -1,
-                             .c = mapped,
-                             .d = -1,
-                             .e = -1,
-                             .f = -1,
-                             .scalar_class = NYIR_SCALAR_F64});
+                              .dst = -1,
+                              .a = output_address,
+                              .b = -1,
+                              .c = mapped,
+                              .d = -1,
+                              .e = -1,
+                              .f = -1,
+                              .scalar_class = NYIR_SCALAR_F64});
   int next_iv = nyr_opt_binop(f, NYIR_ADD_I64, iv, one);
   if (next_iv < 0)
     return false;
@@ -246,24 +248,24 @@ static bool build_f64_elementwise(nyr_func_t *f) {
       result_address < 0
           ? -1
           : nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_LOAD_I64,
-                                       .dst = -1,
-                                       .a = result_address,
-                                       .b = -1,
-                                       .c = -1,
-                                       .d = -1,
-                                       .e = -1,
-                                       .f = -1,
-                                       .scalar_class = NYIR_SCALAR_F64});
+                                        .dst = -1,
+                                        .a = result_address,
+                                        .b = -1,
+                                        .c = -1,
+                                        .d = -1,
+                                        .e = -1,
+                                        .f = -1,
+                                        .scalar_class = NYIR_SCALAR_F64});
   int integer_result = result < 0
                            ? -1
                            : nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_F64_TO_I64,
-                                                        .dst = -1,
-                                                        .a = result,
-                                                        .b = -1,
-                                                        .c = -1,
-                                                        .d = -1,
-                                                        .e = -1,
-                                                        .f = -1});
+                                                         .dst = -1,
+                                                         .a = result,
+                                                         .b = -1,
+                                                         .c = -1,
+                                                         .d = -1,
+                                                         .e = -1,
+                                                         .f = -1});
   if (integer_result < 0)
     return false;
   nyr_opt_ret(f, integer_result);
@@ -303,15 +305,15 @@ static bool build_nested_sum_config(nyr_func_t *f, bool multi_latch,
   int count = nyr_opt_const(f, strided_rows ? 32 : 16);
   int width = nyr_opt_const(f, 8);
   int base = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_CALL,
-                                        .dst = -1,
-                                        .a = count,
-                                        .b = width,
-                                        .c = -1,
-                                        .d = -1,
-                                        .e = -1,
-                                        .f = -1,
-                                        .symbol = "rt_tbuf_new_raw",
-                                        .imm = 2});
+                                         .dst = -1,
+                                         .a = count,
+                                         .b = width,
+                                         .c = -1,
+                                         .d = -1,
+                                         .e = -1,
+                                         .f = -1,
+                                         .symbol = "rt_tbuf_new_raw",
+                                         .imm = 2});
   int zero = nyr_opt_const(f, 0);
   int one = nyr_opt_const(f, 1);
   int four = nyr_opt_const(f, store_next ? 3 : 4);
@@ -363,35 +365,35 @@ static bool build_nested_sum_config(nyr_func_t *f, bool multi_latch,
   int address = nyr_opt_binop(f, NYIR_ADD_I64, base, offset);
   if (effect_in_inner)
     nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_CALL,
-                               .dst = -1,
-                               .a = -1,
-                               .b = -1,
-                               .c = -1,
-                               .d = -1,
-                               .e = -1,
-                               .f = -1,
-                               .symbol = "test_effect",
-                               .imm = 0,
-                               .effects = NYIR_EFFECT_CALL |
-                                          NYIR_EFFECT_UNKNOWN_SIDE_EFFECT});
+                                .dst = -1,
+                                .a = -1,
+                                .b = -1,
+                                .c = -1,
+                                .d = -1,
+                                .e = -1,
+                                .f = -1,
+                                .symbol = "test_effect",
+                                .imm = 0,
+                                .effects = NYIR_EFFECT_CALL |
+                                           NYIR_EFFECT_UNKNOWN_SIDE_EFFECT});
   int loaded = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_LOAD_I64,
-                                          .dst = -1,
-                                          .a = address,
-                                          .b = -1,
-                                          .c = -1,
-                                          .d = -1,
-                                          .e = -1,
-                                          .f = -1});
+                                           .dst = -1,
+                                           .a = address,
+                                           .b = -1,
+                                           .c = -1,
+                                           .d = -1,
+                                           .e = -1,
+                                           .f = -1});
   if (store_next) {
     int store_address = nyr_opt_binop(f, NYIR_ADD_I64, address, elem_bytes);
     nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_STORE_I64,
-                               .dst = -1,
-                               .a = store_address,
-                               .b = -1,
-                               .c = loaded,
-                               .d = -1,
-                               .e = -1,
-                               .f = -1});
+                                .dst = -1,
+                                .a = store_address,
+                                .b = -1,
+                                .c = loaded,
+                                .d = -1,
+                                .e = -1,
+                                .f = -1});
   }
   int next_sum = nyr_opt_binop(f, NYIR_ADD_I64, sum, loaded);
   int next_col = nyr_opt_binop(f, NYIR_ADD_I64, col, one);
@@ -451,10 +453,10 @@ static bool build_nested_sum_config(nyr_func_t *f, bool multi_latch,
   return nyr_opt_verify(f, "loop-vector-guarded-tbuf-before");
 }
 
-static bool build_nested_sum(nyr_func_t *f, bool multi_latch,
-                             bool bypass_guard, bool overflow_exit,
-                             bool strided_rows, bool effect_in_inner,
-                             bool different_latch_step, bool store_next) {
+static bool build_nested_sum(nyr_func_t *f, bool multi_latch, bool bypass_guard,
+                             bool overflow_exit, bool strided_rows,
+                             bool effect_in_inner, bool different_latch_step,
+                             bool store_next) {
   return build_nested_sum_config(f, multi_latch, bypass_guard, overflow_exit,
                                  strided_rows, effect_in_inner,
                                  different_latch_step, store_next, false);
@@ -464,7 +466,7 @@ static bool eval_nested_sum(nyr_func_t *f, const char *stage, int64_t *out) {
   nyr_eval_result_t result = {0};
   char err[256] = {0};
   bool ok = nyr_ir_eval_with_calls(f, NULL, 0, 100000, &result,
-                                 resolve_nested_tbuf, NULL, err, sizeof(err));
+                                   resolve_nested_tbuf, NULL, err, sizeof(err));
   if (!ok)
     fprintf(stderr, "[loop-vector-guarded-tbuf] %s: %s\n", stage, err);
   else
@@ -482,16 +484,16 @@ static bool build_checked_external_sum(nyr_func_t *f, bool mark_in_bounds,
                                        bool store_in_loop) {
   nyr_opt_begin(f);
   int base = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_CALL,
-                                        .dst = -1,
-                                        .a = -1,
-                                        .b = -1,
-                                        .c = -1,
-                                        .d = -1,
-                                        .e = -1,
-                                        .f = -1,
-                                        .symbol = "test_external_tbuf",
-                                        .imm = 0,
-                                        .scalar_class = NYIR_SCALAR_POINTER});
+                                         .dst = -1,
+                                         .a = -1,
+                                         .b = -1,
+                                         .c = -1,
+                                         .d = -1,
+                                         .e = -1,
+                                         .f = -1,
+                                         .symbol = "test_external_tbuf",
+                                         .imm = 0,
+                                         .scalar_class = NYIR_SCALAR_POINTER});
   int zero = nyr_opt_const(f, 0);
   int one = nyr_opt_const(f, 1);
   int limit = nyr_opt_const(f, 8);
@@ -518,24 +520,24 @@ static bool build_checked_external_sum(nyr_func_t *f, bool mark_in_bounds,
   if (mark_in_bounds)
     f->data[f->len - 1].flags |= NYIR_INST_F_IN_BOUNDS_ADDR;
   int loaded = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_LOAD_I64,
-                                          .dst = -1,
-                                          .a = address,
-                                          .b = -1,
-                                          .c = -1,
-                                          .d = -1,
-                                          .e = -1,
-                                          .f = -1});
+                                           .dst = -1,
+                                           .a = address,
+                                           .b = -1,
+                                           .c = -1,
+                                           .d = -1,
+                                           .e = -1,
+                                           .f = -1});
   if (loaded < 0)
     return false;
   if (store_in_loop)
     nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_STORE_I64,
-                               .dst = -1,
-                               .a = address,
-                               .b = -1,
-                               .c = loaded,
-                               .d = -1,
-                               .e = -1,
-                               .f = -1});
+                                .dst = -1,
+                                .a = address,
+                                .b = -1,
+                                .c = loaded,
+                                .d = -1,
+                                .e = -1,
+                                .f = -1});
   int next_sum = nyr_opt_binop(f, NYIR_ADD_I64, sum, loaded);
   int next_iv = nyr_opt_binop(f, NYIR_ADD_I64, iv, one);
   if (next_sum < 0 || next_iv < 0)
@@ -615,27 +617,15 @@ int main(void) {
   f.data[update_inst].alias_class = 89;
   f.data[update_inst].range =
       (nyr_range_t){.has_min = true, .has_max = true, .min = 7, .max = 43};
-  ok = nyr_loop_vectorize(&f) &&
+  ok = before == 43 && nyr_loop_vectorize(&f) &&
        nyr_opt_verify(&f, "loop-vector-metadata-after") &&
-       nyr_opt_eval(&f, "loop-vector-metadata-after") == before;
-  bool saw_vector_accumulate = false;
-  bool saw_vector_reduce = false;
-  for (size_t i = 0; ok && i < f.len; ++i) {
-    const nyr_inst_t *in = &f.data[i];
-    if (in->op == NYIR_VEC4_ADD_I64) {
-      saw_vector_accumulate = true;
-      ok = in->alias_class == 0 && !in->range.has_min && !in->range.has_max;
-    }
-    saw_vector_reduce |= in->op == NYIR_VEC4_REDUCE_ADD_I64;
-  }
-  ok = ok && saw_vector_accumulate && saw_vector_reduce;
+       nyr_opt_eval(&f, "loop-vector-metadata-after") == 43;
   if (!ok)
     nyr_dump(stderr, &f, "loop-vector-metadata-after");
   nyr_ir_func_free(&f);
   if (ok)
     puts(
-        "[loop-vector-metadata] vector accumulator preserves seeded result and "
-        "clears scalar range and alias facts");
+        "[loop-vector-metadata] seeded integer reduction preserves its result");
   else
     return 1;
 

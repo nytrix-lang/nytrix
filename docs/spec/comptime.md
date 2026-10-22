@@ -5,7 +5,7 @@ Compile-time forms run during compilation and produce tables, matches, templates
 
 ## Compile-time blocks
 
-```text
+```ny
 comptime { body }
 ```
 
@@ -55,7 +55,7 @@ For runtime data, put the value inside the block or bind it first as an immutabl
 
 ## Tables
 
-```text
+```ny
 comptime table Name {
    pattern -> value
    _ -> fallback
@@ -64,13 +64,14 @@ comptime table Name {
 
 `#table Name { ... }` is the concise spelling of a comptime table.
 
-Compile-time tables make static dispatch visible. Use them for lookup surfaces, generated classifier logic, and branch-free native output.
+Compile-time tables describe static dispatch and generated classifiers. Their
+declaration does not guarantee branch-free output.
 
 The compiler also emits a compatibility helper named from the table. For `comptime table KeyMap`, call `_key_map(key)` or `_key_map(key, fallback)`. Prefer `comptime match KeyMap(key, fallback)` in new code.
 
 ## Match helpers
 
-```text
+```ny
 comptime match Name(key, fallback)
 ```
 
@@ -79,7 +80,7 @@ comptime match Name(key, fallback)
 
 ## Templates
 
-```text
+```ny
 comptime template name(args) {
    declarations
 }
@@ -87,8 +88,7 @@ comptime template name(args) {
 
 `#template name(args) { ... }` is an alias for this declaration.
 
-Templates are hygienic AST templates. Template bodies generate declarations
-as AST nodes. The canonical forms are `comptime template`
+Hygienic templates generate declarations as AST nodes. Use `comptime template`
 for a generator, `comptime emit` for insertion, `quote { ... }` for syntax,
 and `${value}` for a splice. The same splice form is used for template
 parameters, quoted AST insertion, and scalar interpolation inside template
@@ -109,7 +109,7 @@ strings, rather than scope-marked `code<ident>` values.
 
 `quote` produces syntax that can be spliced into a template. It preserves scope
 marks and source origins and checks expression, statement, and declaration
-categories at insertion. The library also provides first-class
+categories at insertion. The library provides typed
 `core.compiler.ast.Code<T>` values with distinct `CodeExpr`, `CodeStmt`, `CodeDecl`,
 and `CodeIdent` marker types. `code_expr`, `code_stmt`, `code_decl`, and
 `code_ident` validate the syntax category before constructing a value; typed
@@ -152,6 +152,8 @@ even when the quote appears in a template. Expanded call argument counts are
 checked by the normal call validator after expansion; too few and too many
 arguments both fail compilation.
 
+### Generated identifiers
+
 For generated names, a bare symbol argument is already an identifier. Convert
 a compile-time string or scalar explicitly with `ident(value)`:
 
@@ -192,6 +194,8 @@ inside the string and does not parse or capture code. It also lets compiler
 generated helper strings refer to a layout name that is supplied when the
 surrounding template expands.
 
+### Parsing and inspecting syntax
+
 `core.compiler.ast.parse_code(source)` is the declaration-only companion to
 `parse_ast`. It returns versioned declaration records only when the source is
 well formed and every top-level node is a declaration; empty input, executable
@@ -231,8 +235,8 @@ declared named file- or module-level declaration. Its result can be inserted
 into a declaration sequence with `${...}`; expression positions reject
 declaration code, and unqualified names that resolve ambiguously require
 module qualification. The captured syntax retains its source token and scope
-marks. `codeof` currently supplies syntax for insertion; queries over
-compiler-resolved facts remain open.
+marks. `codeof` supplies syntax for insertion, not compiler-resolved semantic
+facts.
 
 ## Library code generation
 
@@ -293,8 +297,10 @@ Nested `try` bodies, handlers, deferred cleanup, and while-loop invariants
 are cloned recursively. Versioned loop snapshots expose the parsed `invariant`
 expression and its origins; this syntax record is not a proof certificate.
 `match_gen` handles unit and payload enums through typed match patterns. The
-remaining Ny reflection APIs and byte-for-byte compatibility with older C-owned
-expansions are still roadmap work.
+syntax snapshot and semantic artifact APIs below expose different information:
+parsed source structure and checked compiler facts, respectively.
+
+### Syntax snapshots
 
 `core.compiler.ast.parse_ast_snapshot(source)` returns a versioned syntax envelope
 with schema `nytrix.ast`, version `1`, and a `nodes` list. Each syntax node has
@@ -340,6 +346,8 @@ The legacy `parse_ast` list shape remains unchanged. Syntax snapshot records
 are decoded JSON values; compiler semantic facts are exposed by the separate
 typed-artifact API below.
 
+### Semantic artifacts
+
 The compiler's HM artifact contains the type, representation, ownership,
 effect, layout, origin, and proof-obligation records used by tooling. The
 `core.compiler.reflect.semantic` module reads a `typed_ast.v1` HM artifact emitted
@@ -355,7 +363,7 @@ instead of choosing a record arbitrarily.
 
 ## Emit
 
-```text
+```ny
 comptime emit name(args)
 for axis in comptime ["x", "y", "z"] {
    emit make_axis_family(axis)
@@ -369,7 +377,7 @@ that position by the ordinary compiler pipeline. There is no separate
 emit-context mode. Compile-time `for` iterates a compile-time list and lets
 the body emit declarations for each value.
 
-```text
+```ny
 for axis in comptime ["x", "y"] {
    #insert make_axis_family(axis)
 }
@@ -382,10 +390,10 @@ list. By default, each parameter carries the field's declared default or its
 implicit scalar default. Add `required` when every generated parameter must be
 provided, as for a fixed-arity store function:
 
-```text
+```ny
 comptime template store_for(Layout) {
    fn ${Layout}_store(ptr out, comptime fields(Layout, required)) ptr {
-      // generated body
+      ; generated body
    }
 }
 ```
@@ -394,7 +402,7 @@ Field-sequence parameters preserve field types, declaration order, source
 origins, and the splice's syntax context. The generated function then passes
 through ordinary type checking and backend lowering.
 
-```text
+```ny
 comptime fields(LayoutName) as f {
    emit assert(__layout_offset("LayoutName", f.name) == f.offset, "field")
 }
@@ -457,7 +465,7 @@ outside that descriptor scope is rejected with a source-located diagnostic.
 
 ## Diagnostic rules
 
-```text
+```ny
 comptime diagnostic rule bad_layout_store {
    when call.name == "store_layout" && !is_literal(call.arg(1))
    error "store_layout needs a string literal layout name"
@@ -472,7 +480,7 @@ Diagnostic rules let compile-time code reject a known bad call pattern. The curr
 
 Compile-time assertions move safety checks into compilation. The `proof` type in [Types](types.md) provides the carrier for dependent and refinement facts backed by the same engine.
 
-```text
+```ny
 assert_compile((4 * 11) == 44, "folded arithmetic")
 static_assert((3 * 7) == 21, "folded arithmetic")
 assert_compile_range(i, 0, 3, "loop index range")
@@ -496,7 +504,7 @@ See [Types](types.md) for `proof` type, dependent params, and refinement.
 
 ## Generated modules
 
-```text
+```ny
 module pkg.generated generated from Spec {
    native_prefix = "x"
    emit make_backend(Contract)
@@ -508,15 +516,13 @@ The concise `#insert` spelling can insert a quoted declaration in their body.
 
 ## Boundaries
 
-Compile-time work emits declarations. Generated names stay stable, and emitted public surfaces stay visible.
-
 ### Evaluation bounds
 
-The comptime evaluator guarantees termination through:
+Compile-time evaluation has these bounds:
 
-- **Recursion depth limit:** 64 levels. Deeper recursion returns `false` (evaluation failed) rather than diverging.
-- **Range length limit:** 65,536 elements.
-- **Overflow checks:** every arithmetic operation in the fast evaluator uses checked (`__builtin_*_overflow`) or bounded arithmetic.
+- Recursion is limited to 64 levels; deeper evaluation returns `false`.
+- Ranges contain at most 65,536 elements.
+- Fast-evaluator arithmetic uses checked (`__builtin_*_overflow`) or bounded operations.
 
 The evaluator also has a deterministic compilation-wide fuel budget. It
 defaults to 1,000,000 evaluation steps and can be set with
@@ -562,17 +568,13 @@ seconds, 15 wall-clock seconds, 1 GiB of address space, and one MiB of combined
 output. Failed desugaring returns no rewritten source; the parent compiles only
 the complete rewritten text after the child exits successfully.
 
-Future compiler-driver APIs callable from `#run` remain unavailable. They
-must provide isolated sessions, parent-child budget accounting, cancellation,
-and transactional publication before they are exposed. Any future result cache
-must key exact source and origin, compiler and standard-library identities,
-semantic options, and the parent's remaining resource budget.
+Compiler-driver APIs callable from `#run` are not available.
 
 ## Platform selection
 
 Platform guards select source at compile time:
 
-```text
+```ny
 #linux { os_tag = "linux" }
 #elif macos { os_tag = "macos" }
 #elif windows { os_tag = "windows" }
@@ -586,7 +588,7 @@ Guard names include OS families and CPU families. `comptime{ ... }` can call com
 
 ## Embedded files
 
-```text
+```ny
 def text = embed("etc/tests/lang/language/embed.nshape")
 ```
 
@@ -596,7 +598,7 @@ def text = embed("etc/tests/lang/language/embed.nshape")
 
 `core.compiler.syntax` exposes the runtime/comptime syntax registry used by the extension tests:
 
-```text
+```ny
 use core.compiler.syntax as syntax
 
 mut reg = syntax.new_registry()
@@ -612,7 +614,9 @@ Heap results cross the comptime boundary by value. Strings, lists, tuples, range
 
 ## Debugging generated code
 
-When behavior depends on macros, comptime, or generation, inspect the expanded form. Validate the generated source directly and diagnose the first real error rather than patching secondary symptoms.
+`ny --expand file.ny` shows expanded source. Compile and run that source on the
+intended backend when isolating a generation error; expansion alone does not
+check runtime behavior.
 
 ## Related
 

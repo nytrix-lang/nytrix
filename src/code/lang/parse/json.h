@@ -2,6 +2,11 @@
 
 #include "code/lang/parse/ast.h"
 #include <stdbool.h>
+#include <stdio.h>
+
+/* Stream the selected source declarations; filter is a name substring. */
+void ny_ast_dump_tree(FILE *out, const program_t *prog, const char *filename,
+                      const char *filter, bool typed);
 
 char *ny_ast_to_json(program_t *prog);
 char *ny_ast_to_json_versioned(program_t *prog);

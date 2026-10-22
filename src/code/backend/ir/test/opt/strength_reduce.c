@@ -167,6 +167,8 @@ static bool test_signed_power_of_two_division_without_nonnegative_proof(void) {
     case NYIR_DIV_I64:
       ++div_count;
       break;
+    case NYIR_CONST_I64:
+      break;
     case NYIR_SAR_I64:
       ++sar_count;
       break;
@@ -179,14 +181,43 @@ static bool test_signed_power_of_two_division_without_nonnegative_proof(void) {
     default:
       break;
     }
-  ok = ok && div_count == 0 && sar_count == 2 && and_count == 1 &&
-       add_count == 1;
+  ok = ok && div_count == 1 && sar_count == 0 && and_count == 0 &&
+       add_count == 0;
   for (size_t i = 0; ok && i < sizeof(inputs) / sizeof(inputs[0]); ++i)
     ok = before[i] == eval_input(&f, inputs[i]);
   if (!ok) {
-    fprintf(stderr, "[strength-reduce] signed power-of-two division did not "
-                    "preserve truncation semantics\n");
+    fprintf(stderr, "[strength-reduce] signed power-of-two division without "
+                    "a nonnegative proof should remain unchanged\n");
     nyr_dump(stderr, &f, "strength-reduce/signed-div");
+  }
+  nyr_ir_func_free(&f);
+  return ok;
+}
+
+static bool test_power_of_two_rewrite_preserves_dividend(void) {
+  nyr_func_t f;
+  nyr_opt_begin(&f);
+  int dividend = nyr_opt_const(&f, 12);
+  int divisor = nyr_opt_const(&f, 8);
+  int quotient = nyr_opt_binop(&f, NYIR_DIV_I64, dividend, divisor);
+  int remainder = nyr_opt_binop(&f, NYIR_MOD_I64, dividend, divisor);
+  int result = nyr_opt_binop(&f, NYIR_ADD_I64, quotient, remainder);
+  nyr_opt_ret(&f, result);
+
+  int64_t before = eval_input(&f, 0);
+  bool ok = nyr_opt_verify(&f, "strength-reduce/power-two-before") &&
+            nyr_strength_reduce(&f) &&
+            nyr_opt_verify(&f, "strength-reduce/power-two-after");
+  const nyr_inst_t *quotient_def = find_def(&f, quotient);
+  const nyr_inst_t *remainder_def = find_def(&f, remainder);
+  ok = ok && quotient_def && quotient_def->op == NYIR_SAR_I64 &&
+       quotient_def->a == dividend && remainder_def &&
+       remainder_def->op == NYIR_AND_I64 && remainder_def->a == dividend &&
+       eval_input(&f, 0) == before;
+  if (!ok) {
+    fprintf(stderr,
+            "[strength-reduce] power-of-two rewrite lost its dividend\n");
+    nyr_dump(stderr, &f, "strength-reduce/power-two-operands");
   }
   nyr_ir_func_free(&f);
   return ok;
@@ -195,9 +226,10 @@ static bool test_signed_power_of_two_division_without_nonnegative_proof(void) {
 int main(void) {
   if (!test_wraparound_reassociation() ||
       !test_shared_intermediate_is_not_rewritten() ||
-      !test_signed_power_of_two_division_without_nonnegative_proof())
+      !test_signed_power_of_two_division_without_nonnegative_proof() ||
+      !test_power_of_two_rewrite_preserves_dividend())
     return 1;
-  puts("[strength-reduce] wrapping reassociation, use checks, and signed "
-       "power-of-two division ok");
+  puts("[strength-reduce] wrapping reassociation, use checks, and conservative "
+       "signed division ok");
   return 0;
 }

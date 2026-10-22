@@ -38,5 +38,5 @@ request metadata or tube transcript when reproducing failures.
 
 Native sockets and process APIs are not automatically available in a browser
 build. Browser `fetch` and WebSocket operations also depend on browser policy
-and user permissions. Use [Execution routes](routes.md) and
+and user permissions. Use [Execution routes](status.md#execution-routes) and
 [Implementation status](status.md) to check the target you intend to ship.

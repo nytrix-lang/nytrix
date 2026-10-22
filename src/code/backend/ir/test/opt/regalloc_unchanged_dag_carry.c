@@ -2,6 +2,7 @@
  * An unchanged SSA scalar may remain resident through a diamond and join.
  */
 #include "code/backend/ir/machine.h"
+#include "support.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -110,7 +111,7 @@ int main(void) {
 
   bool ok =
       (!had_prior_env || saved_env) &&
-      setenv("NYTRIX_GPR_DAG_CARRY", "1", 1) == 0 &&
+      nyr_opt_setenv("NYTRIX_GPR_DAG_CARRY", "1") == 0 &&
       nyr_mach_alloc_typed_vreg(&mach, NYR_MACH_TYPE_I64, &value) &&
       nyr_mach_alloc_typed_vreg(&mach, NYR_MACH_TYPE_I64, &condition) &&
       nyr_mach_alloc_typed_vreg(&mach, NYR_MACH_TYPE_I64, &one) &&
@@ -190,9 +191,9 @@ int main(void) {
   ok = ok && rejects_loop_definition_carry();
 
   if (had_prior_env)
-    setenv("NYTRIX_GPR_DAG_CARRY", saved_env, 1);
+    nyr_opt_setenv("NYTRIX_GPR_DAG_CARRY", saved_env);
   else
-    unsetenv("NYTRIX_GPR_DAG_CARRY");
+    nyr_opt_unsetenv("NYTRIX_GPR_DAG_CARRY");
   free(saved_env);
   nyr_mach_regalloc_free(&alloc);
   nyr_mach_func_free(&mach);

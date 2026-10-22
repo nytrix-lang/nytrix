@@ -859,7 +859,9 @@ static void mach_allocate_loop_gprs(nyr_x64_mach_enc_t *e, const char *name) {
   if (selected) {
     e->loop_gpr = colors;
     colors = NULL;
-    /* Spill ordinary values occupying colors reserved for loop homes. */
+    /*
+     * Spill ordinary values occupying colors reserved for loop homes.
+     */
     for (size_t i = 0; i < e->regalloc.segment_len; ++i) {
       nyr_mach_live_segment_t *s = &e->regalloc.segments[i];
       if (s->vreg >= m->vreg_len || e->loop_gpr[s->vreg] >= 0 || s->color < 0 ||
@@ -1762,7 +1764,9 @@ static void mach_invalidate_call_clobbered_colors(nyr_x64_mach_enc_t *e) {
   }
 }
 
-/* Dedicated loop registers bridge canonical homes around calls. */
+/*
+ * Dedicated loop registers bridge canonical homes around calls.
+ */
 static bool mach_loop_gprs_call_home(nyr_x64_mach_enc_t *e, bool restore) {
   if (!e || !e->loop_gpr)
     return true;
@@ -1869,8 +1873,7 @@ static bool mach_vreg_requires_home_after_def(nyr_x64_mach_enc_t *e,
    * later block. Loop-resident registers survive ordinary CFG edges, but not
    * every generated edge (notably cloned/alternate paths) proves that the
    * register alone is a valid home for all future consumers.
-   */
-  /*
+   *
    * A proven immediate consumer can use the just-computed RAX value even
    * when linear scan marked its segment spilled. Do not let the conservative
    * spill-home rule force a write that mach_commit_vreg will then forward.
@@ -2024,7 +2027,9 @@ static bool mach_alu_preg_imm(nyr_x64_mach_enc_t *e, nyr_mach_opcode_t op,
          mach_i32(e, (int32_t)imm);
 }
 
-/* Emit dst = src * imm directly for the small LEA-friendly odd constants. */
+/*
+ * Emit dst = src * imm directly for the small LEA-friendly odd constants.
+ */
 static bool mach_mul_preg_imm_from_preg(nyr_x64_mach_enc_t *e, int dst, int src,
                                         int64_t imm) {
   unsigned scale = imm == 3 ? 1 : imm == 5 ? 2 : imm == 9 ? 3 : 0;
@@ -2454,9 +2459,11 @@ static bool mach_sib_lea_mem(const nyr_x64_mach_enc_t *e, uint32_t vreg,
        def->src2.as.imm != 8) ||
       (!is_load && !is_store))
     SIB_LEA_REJECT("unsupported LEA/use shape");
-  /* Eliding the LEA is valid only if this is its sole use. In particular,
+  /*
+   * Eliding the LEA is valid only if this is its sole use. In particular,
    * load/store pairs need the address value to remain materialized between
-   * the two operations. */
+   * the two operations.
+   */
   for (size_t i = def_index + 1; i < e->mach->inst_len; ++i) {
     if (i != use_index && mach_inst_uses_vreg(&e->mach->insts[i], vreg))
       SIB_LEA_REJECT("address has another use");
@@ -2471,10 +2478,12 @@ static bool mach_sib_lea_mem(const nyr_x64_mach_enc_t *e, uint32_t vreg,
   return true;
 }
 
-/* Decompose an indexed LEA at a memory use even when the address also feeds
+/*
+ * Decompose an indexed LEA at a memory use even when the address also feeds
  * another memory operation (for example, the load and store of an array
  * element swap).  Unlike mach_sib_lea_mem(), this never licenses deleting or
- * moving the LEA: it only lets this one access encode its address as SIB. */
+ * moving the LEA: it only lets this one access encode its address as SIB.
+ */
 static bool mach_sib_lea_mem_use(const nyr_x64_mach_enc_t *e, uint32_t vreg,
                                  size_t use_index,
                                  const nyr_mach_operand_t **base_out,
@@ -2512,9 +2521,11 @@ static bool mach_sib_lea_mem_use(const nyr_x64_mach_enc_t *e, uint32_t vreg,
   return true;
 }
 
-/* A multi-use address LEA may be omitted only if every use is itself a
+/*
+ * A multi-use address LEA may be omitted only if every use is itself a
  * memory address in this block.  Each access can then reconstruct the same
- * SIB address directly from the LEA's SSA inputs. */
+ * SIB address directly from the LEA's SSA inputs.
+ */
 static bool mach_sib_lea_all_uses_mem(const nyr_x64_mach_enc_t *e,
                                       uint32_t vreg, size_t def_index) {
   if (!e || !e->mach || vreg >= e->mach->vreg_len ||
@@ -2727,10 +2738,12 @@ static bool mach_sib_query(nyr_x64_mach_enc_t *e,
   if (indexed_lea) {
     int bp = mach_vreg_preg(e, lea_base->as.reg);
     int ip = mach_vreg_preg(e, lea_index->as.reg);
-    /* Only consume values whose current segments are already resident.
+    /*
+     * Only consume values whose current segments are already resident.
      * A skipped LEA can outlive either input's segment, in which case its
      * canonical-home fallback below is still required. R12 is a valid SIB
-     * index with REX.X set; only RSP (register 4) means no index. */
+     * index with REX.X set; only RSP (register 4) means no index.
+     */
     if (bp >= 0 && ip >= 0 && ip != 4) {
       *base_preg = (unsigned)bp;
       *idx_preg = (unsigned)ip;
@@ -2927,9 +2940,11 @@ static bool mach_store_value_preg(nyr_x64_mach_enc_t *e,
                                         3,  12, 13, 14, 15, 0, 10};
   if (!e || !addr || !value || !preg_out)
     return false;
-  /* A store reads its address and value without clobbering either register.
+  /*
+   * A store reads its address and value without clobbering either register.
    * Use a resident value directly, including when it is also an address
-   * operand; moving it to a scratch would only introduce copies and spills. */
+   * operand; moving it to a scratch would only introduce copies and spills.
+   */
   if (value->kind == NYR_MACH_OPERAND_VREG) {
     int preg = mach_vreg_preg(e, value->as.reg);
     if (preg >= 0) {
@@ -3941,8 +3956,10 @@ static bool mach_vreg_can_forward_to_next_rax(const nyr_x64_mach_enc_t *e,
     const nyr_mach_inst_t *use = &e->mach->insts[i];
     if (mach_inst_uses_vreg(use, vreg)) {
       bool direct_source = mach_op_is_vreg(&use->src0, vreg);
-      /* The LEA encoder consumes a register index from RAX first, copies it
-       * to the reserved index register, and only then loads the base. */
+      /*
+       * The LEA encoder consumes a register index from RAX first, copies it
+       * to the reserved index register, and only then loads the base.
+       */
       bool direct_lea_index = use->opcode == NYR_MACH_LEA &&
                               mach_op_is_vreg(&use->src1, vreg) &&
                               use->src0.kind == NYR_MACH_OPERAND_VREG &&
@@ -3979,8 +3996,10 @@ static bool mach_vreg_can_forward_to_next_rax(const nyr_x64_mach_enc_t *e,
           return false;
       return true;
     }
-    /* V256 ALU instructions use vector registers only, preserving RAX and
-     * allowing its cached value to reach the later scalar LEA index use. */
+    /*
+     * V256 ALU instructions use vector registers only, preserving RAX and
+     * allowing its cached value to reach the later scalar LEA index use.
+     */
     bool vector_alu =
         use->dst.kind == NYR_MACH_OPERAND_VREG &&
         mach_vreg_is_v256(e->mach, use->dst.as.reg) &&
@@ -4957,6 +4976,24 @@ static bool mach_vector_copy(nyr_x64_mach_enc_t *e,
   return mach_store_xmm_v128(e, dst_off, d);
 }
 
+static bool mach_vector_load_single_use_reduction(const nyr_x64_mach_enc_t *e,
+                                                  uint32_t vreg) {
+  if (!e || !e->mach || vreg >= e->mach->vreg_len)
+    return false;
+  size_t block = mach_block_for_inst(e, e->cur_inst);
+  for (size_t i = e->cur_inst + 1; i < e->mach->inst_len; ++i) {
+    const nyr_mach_inst_t *next = &e->mach->insts[i];
+    if (mach_block_for_inst(e, i) != block)
+      return false;
+    if (!mach_inst_uses_vreg(next, vreg))
+      continue;
+    return next->opcode == NYR_MACH_REDUCE_ADD &&
+           next->src1.kind == NYR_MACH_OPERAND_VREG &&
+           next->src1.as.reg == vreg;
+  }
+  return false;
+}
+
 static bool mach_vector_load(nyr_x64_mach_enc_t *e, const nyr_mach_inst_t *in,
                              int dst_off) {
   int assigned = in->dst.kind == NYR_MACH_OPERAND_VREG
@@ -4973,8 +5010,14 @@ static bool mach_vector_load(nyr_x64_mach_enc_t *e, const nyr_mach_inst_t *in,
     return mach_err(e, "x64 machine form encode: vector load from pointer");
   }
   if (assigned >= 0) {
-    /* Keep the canonical home current for later split/spilled segments. */
-    if (!mach_store_xmm_v128(e, dst_off, d))
+    /*
+     * Later split/spilled segments need the canonical home. A vector pair
+     * consumed only by the immediately following reduction stays resident in
+     * its assigned XMM register, so publishing an otherwise unread home here
+     * would add a stack store on every loop iteration.
+     */
+    if (!mach_vector_load_single_use_reduction(e, in->dst.as.reg) &&
+        !mach_store_xmm_v128(e, dst_off, d))
       return false;
     if (e->vec_color_seeded)
       e->vec_color_seeded[in->dst.as.reg] = true;
@@ -5349,8 +5392,10 @@ static bool mach_vector_ymm_rhs_load(const nyr_x64_mach_enc_t *e,
     if (mach_inst_uses_vreg(&e->mach->insts[i], load->dst.as.reg))
       return false;
 
-  /* Initially restrict the fold to addresses the current YMM load path can
-   * encode without materializing a scratch address. */
+  /*
+   * Initially restrict the fold to addresses the current YMM load path can
+   * encode without materializing a scratch address.
+   */
   if (load->src0.kind == NYR_MACH_OPERAND_FRAME)
     return true;
   if (load->src0.kind != NYR_MACH_OPERAND_VREG)
@@ -5391,7 +5436,8 @@ static bool mach_vector_ymm_fp_binop(nyr_x64_mach_enc_t *e,
   } else {
     return mach_err(e, "x64: unsupported ymm f64 binop src0");
   }
-  /* AVX is three-operand here: VEX.vvvv carries src0, so don't copy it to dst.
+  /*
+   * AVX is three-operand here: VEX.vvvv carries src0, so don't copy it to dst.
    */
   unsigned char vex3 = (unsigned char)((((~a_reg) & 0xfu) << 3) | 0x05u);
   const nyr_mach_inst_t *folded_load = NULL;
@@ -5823,8 +5869,10 @@ static void mach_allocate_loop_fprs(nyr_x64_mach_enc_t *e, const char *name) {
     const nyr_mach_block_t *block = &m->blocks[b];
     for (size_t n = 0; n < block->inst_count; ++n) {
       const nyr_mach_inst_t *in = &m->insts[block->first_inst + n];
-      /* Conversions may use low XMM scratch registers. Model the clobber in
-       * loop-home dataflow instead of disabling loop homes for the function. */
+      /*
+       * Conversions may use low XMM scratch registers. Model the clobber in
+       * loop-home dataflow instead of disabling loop homes for the function.
+       */
       if (in->opcode == NYR_MACH_SHUFFLE || in->opcode == NYR_MACH_FMA ||
           in->opcode == NYR_MACH_SQRT)
         goto done;
@@ -5880,9 +5928,11 @@ static void mach_allocate_loop_fprs(nyr_x64_mach_enc_t *e, const char *name) {
   }
   if (!count)
     goto done;
-  /* Destructive scalar operations may reuse a dying left operand. Only
+  /*
+   * Destructive scalar operations may reuse a dying left operand. Only
    * coalesce complete classes whose allocator intervals never overlap,
-   * except at that instruction's read-before-write endpoint. */
+   * except at that instruction's read-before-write endpoint.
+   */
   for (size_t i = 0; i < m->inst_len; ++i) {
     const nyr_mach_inst_t *in = &m->insts[i];
     if (in->dst.kind != NYR_MACH_OPERAND_VREG ||
@@ -6275,7 +6325,9 @@ static bool mach_spill_params(nyr_x64_mach_enc_t *e) {
         ny_dbg_heuristic_event("X64_PARAM_DIRECT", "skip home slot=%zu", slot);
         ny_dbg_exit_context(e->debug_name);
       }
-      /* The entry LOAD copies this argument straight into its assigned preg. */
+      /*
+       * The entry LOAD copies this argument straight into its assigned preg.
+       */
     } else if (from_stack) {
       int incoming = is_win ? 16 + (int)ordinal * 8 : 16 + (int)stack_arg * 8;
       if (is_fp) {
@@ -7240,10 +7292,12 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
                                         mach_vreg_home_off(e, in->dst.as.reg)))
                 return false;
             }
-            /* Seeding and copying between non-RAX registers preserve RAX.
+            /*
+             * Seeding and copying between non-RAX registers preserve RAX.
              * Retain its cached home only if this definition cannot replace
              * the value stored at that same home. Segment-end stores still
-             * invalidate the cache through their existing path. */
+             * invalidate the cache through their existing path.
+             */
             if (saved_rax_valid && dp != 0 && sp != 0 &&
                 saved_rax_off != mach_vreg_home_off(e, in->dst.as.reg)) {
               e->last_rax_valid = true;
@@ -7540,15 +7594,19 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
         break;
       case NYR_MACH_LEA: {
         /*
-         * The vector load encoder consumes a pointer value in a GPR; it does
-         * not fold an indexed LEA into the memory operand. Keep this address
-         * definition materialized even when the following vector load is its
-         * only use, or the load reads an uninitialized vreg home.
+         * YMM loads in the vector fast path fold indexed LEAs through
+         * mach_sib_query. Other vector load paths still need the pointer
+         * materialized in its home.
          */
+        const nyr_mach_inst_t *next = e->cur_inst + 1 < mach->inst_len
+                                          ? &mach->insts[e->cur_inst + 1]
+                                          : NULL;
         bool next_is_vector_load =
-            e->cur_inst + 1 < mach->inst_len &&
-            mach->insts[e->cur_inst + 1].opcode == NYR_MACH_LOAD &&
-            mach_is_v128(mach, &mach->insts[e->cur_inst + 1].dst);
+            next && next->opcode == NYR_MACH_LOAD &&
+            mach_is_v128(mach, &next->dst) &&
+            !(e->vec_fast_path &&
+              (mach_v128_type(mach, &next->dst) == NYR_MACH_TYPE_V256_F64 ||
+               mach_v128_type(mach, &next->dst) == NYR_MACH_TYPE_V256_I64));
         if (in->dst.kind == NYR_MACH_OPERAND_VREG && !next_is_vector_load &&
             ((mach_sib_lea_mem(e, in->dst.as.reg, e->cur_inst + 1, NULL, NULL,
                                NULL, NULL)) ||
@@ -7872,11 +7930,14 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
             if (bp >= 0 && ip >= 0 && ip != 4 &&
                 mach_seed_colored_preg(e, base->as.reg) &&
                 mach_seed_colored_preg(e, index->as.reg)) {
-              /* Consume loop-resident address operands directly in SIB. */
+              /*
+               * Consume loop-resident address operands directly in SIB.
+               */
               e->pending_sib_base = (unsigned)bp;
               e->pending_sib_index = (unsigned)ip;
             } else {
-              /* Otherwise materialize the address pair in reserved scratches.
+              /*
+               * Otherwise materialize the address pair in reserved scratches.
                */
               if (!mach_load_op_preg(e, index, 10) ||
                   !mach_load_op_rax(e, base))
@@ -8235,8 +8296,10 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
                                                                          : 0)
                                                           : 0;
               if (in->opcode == NYR_MACH_ADD && dp != ap) {
-                /* lea dst,[src+imm] is the three-operand form of a wrapping
-                 * sum. Encode the SIB explicitly for RSP/R12 bases. */
+                /*
+                 * lea dst,[src+imm] is the three-operand form of a wrapping
+                 * sum. Encode the SIB explicitly for RSP/R12 bases.
+                 */
                 unsigned mod = fold >= INT8_MIN && fold <= INT8_MAX ? 1u : 2u;
                 unsigned base = (unsigned)ap & 7u;
                 if (!mach_rex(e, true, dp >= 8, false, ap >= 8) ||
@@ -8263,9 +8326,11 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
                 return false;
               int bp = mach_vreg_preg(e, in->src1.as.reg);
               if (bp >= 0) {
-                /* A three-register sum needs no copy before the ADD.
+                /*
+                 * A three-register sum needs no copy before the ADD.
                  * Machine arithmetic has no implicit flag consumer; compare
-                 * fusion establishes its own flags at the later CMP. */
+                 * fusion establishes its own flags at the later CMP.
+                 */
                 if (in->opcode == NYR_MACH_ADD && dp != ap && dp != bp &&
                     bp != 4) {
                   ny_x64_mem_addr_t sum = {(unsigned)ap, bp, 1, 0};
@@ -9095,11 +9160,13 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
         nyr_native_mach_div_record(false);
         break;
       case NYR_MACH_SELECT: {
-        /* Seed the true arm before establishing the predicate flags.
+        /*
+         * Seed the true arm before establishing the predicate flags.
          * Rematerializing a zero in its assigned register uses XOR, which
          * would otherwise overwrite the bit-test flags below. Operand live
          * ranges overlap at this instruction, so subsequent operand loads
-         * cannot reuse this register for a different live value. */
+         * cannot reuse this register for a different live value.
+         */
         int true_preg = -1;
         if (in->src1.kind == NYR_MACH_OPERAND_VREG) {
           if (!mach_seed_colored_preg(e, in->src1.as.reg))
@@ -9123,10 +9190,12 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
                                      ? e->select_test_src[in->src0.as.reg]
                                      : -1;
         if (fused_test_src >= 0) {
-          /* Both arms are live at SELECT, so seed them before establishing
+          /*
+           * Both arms are live at SELECT, so seed them before establishing
            * flags. Select directly into the allocated result register;
            * when it aliases the true arm, invert the condition instead of
-           * destroying that arm with the initial false-value copy. */
+           * destroying that arm with the initial false-value copy.
+           */
           if (true_preg >= 0 && in->src2.kind == NYR_MACH_OPERAND_VREG &&
               in->dst.kind == NYR_MACH_OPERAND_VREG) {
             if (!mach_seed_colored_preg(e, in->src2.as.reg) ||
@@ -9169,7 +9238,9 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
                 !mach_i32(e, 1))
               return false;
           } else if (test_preg > 0) {
-            /* Test the already-resident low bit without staging it in RAX. */
+            /*
+             * Test the already-resident low bit without staging it in RAX.
+             */
             if (!mach_rex(e, true, false, false, test_preg >= 8) ||
                 !mach_u8(e, 0xf7) ||
                 !mach_u8(e, (unsigned char)(0xc0 | (test_preg & 7))) ||
@@ -9484,8 +9555,10 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
       case NYR_MACH_CALL: {
         if (in->src0.kind != NYR_MACH_OPERAND_SYMBOL || !in->src0.as.symbol)
           return mach_err(e, "x64 machine form encode: call needs symbol");
-        /* Publish ordinary colored values before the ABI call. Dedicated
-         * loop values use their explicit canonical-home bridge. */
+        /*
+         * Publish ordinary colored values before the ABI call. Dedicated
+         * loop values use their explicit canonical-home bridge.
+         */
         if (!mach_loop_gprs_call_home(e, false) ||
             !mach_flush_colored_to_home(e) || !mach_flush_float_to_home(e) ||
             !mach_flush_vector_to_home(e))
@@ -9833,9 +9906,11 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
               !mach_u8(e, 0xc4) || !mach_i32(e, (int32_t)stack_bytes))
             return false;
         }
-        /* Argument placement can re-seed a caller-saved color after the
+        /*
+         * Argument placement can re-seed a caller-saved color after the
          * pre-call flush. Invalidate those colors, then restore dedicated
-         * loop values from their canonical homes. */
+         * loop values from their canonical homes.
+         */
         mach_invalidate_call_clobbered_colors(e);
         if (!mach_loop_gprs_call_home(e, true))
           return false;

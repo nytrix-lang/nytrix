@@ -7,7 +7,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define NY_C_MAX_PARAMS 32
+/* Keep C/FFI signature metadata aligned with the maximum NYIR call arity. */
+#define NY_C_MAX_PARAMS 64
 #define NY_C_MAX_TYPEDEFS 1024
 #define NY_C_MAX_DEFINES 256
 #define NY_C_MAX_FUNC_MACROS 128

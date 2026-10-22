@@ -77,16 +77,18 @@ static size_t ifc_arm_cost(const nyr_func_t *f, const ifc_arm_t *arm) {
   for (size_t i = 0; i < arm->count; ++i) {
     nyr_op_t op = f->data[arm->insts[i]].op;
     if (op == NYIR_MUL_I64)
-      cost += 3;
+      cost += 4;
     else if (op != NYIR_CONST_I64 && op != NYIR_COPY)
       ++cost;
   }
   return cost;
 }
 
-/* Source lowering can leave empty forward blocks on either diamond edge,
+/*
+ * Source lowering can leave empty forward blocks on either diamond edge,
  * including an unlabeled fallthrough block after BR_IF. The exclusive-edge
- * check below still requires a unique predecessor through every bridge. */
+ * check below still requires a unique predecessor through every bridge.
+ */
 static size_t ifc_resolve_empty_bridges(const nyr_func_t *f,
                                         const nyr_cfg_t *cfg, size_t block) {
   for (size_t hops = 0;
@@ -306,9 +308,11 @@ static bool ifc_rewrite(nyr_func_t *f, size_t branch,
     zero = f->next_value++;
     condition = f->next_value++;
   }
-  /* The SELECT replaces the PHI result, so keep facts attached to that
+  /*
+   * The SELECT replaces the PHI result, so keep facts attached to that
    * result.  The incoming-edge allocation remains owned by the old PHI and
-   * must not be copied to the scalar instruction. */
+   * must not be copied to the scalar instruction.
+   */
   nyr_inst_t select = phi;
   select.op = NYIR_SELECT_I64;
   select.a = condition;

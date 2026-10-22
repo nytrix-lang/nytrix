@@ -1,116 +1,108 @@
-<!-- nytrix-doc: {"audience":"contributor","featured":false,"group":"spec","order":46,"summary":"Current linker support, design boundaries, and requirements for broader target coverage."} -->
+<!-- nytrix-doc: {"audience":"contributor","featured":false,"group":"spec","order":46,"summary":"Link request fields, tool selection, and the in-process ELF executable linker."} -->
 # Linking
 
-This page distinguishes the implemented linker API from the proposed
-general-purpose design. The implementation section describes what callers can
-use today. The remaining sections describe design goals and acceptance criteria;
-they are not promises of current support.
+The [Nyr C API](nyr.md) links object files and static archives through an
+in-process ELF linker or external LLVM tools. Source compilation and the
+compiler driver's application-link path are separate.
 
-## Current implementation
+Declarations are in [`<nyr/nyr.h>`](../../src/include/nyr/nyr.h);
+dispatch and ELF linking are implemented in
+[`linker.c`](../../src/code/backend/object/linker.c).
 
-The public `nyr_link_elf64_executable` and
-`nyr_link_elf64_executable_objects` APIs provide an initial Linux x86-64
-backend slice. They link ELF objects and lazily extract static archive members
-into a static executable, resolving global and weak definitions across selected
-objects. Selected members are parsed directly from the loaded archive buffer,
-without temporary object files. Unresolved strong symbols and unsupported
-relocations are rejected.
+## Link requests
 
-This slice does not implement shared libraries or the shared cross-format link
-graph, and it does not replace the compiler driver's normal application link.
-Keep the platform linker as the default for general builds until runtime
-objects, shared libraries, startup rules, and user link options work through the
-in-process path and pass the cross-target conformance suite.
+`nyr_link(request, err, err_len)` accepts a `nyr_link_request_t`:
 
-## API and architecture goals
+| Field | Meaning |
+| --- | --- |
+| `input_paths`, `input_count` | Nonempty array of object or archive paths. Runtime and library files can be supplied as inputs. |
+| `output_path` | Required output file path. |
+| `target_triple` | Explicit target triple, or `NULL` for the host default. |
+| `entry_symbol` | Optional executable entry symbol; its calling convention depends on the selected path. |
+| `kind` | `NYR_LINK_EXECUTABLE`, `NYR_LINK_SHARED_LIBRARY`, or `NYR_LINK_STATIC_ARCHIVE`. |
 
-`nyr_emit_object_for_target` remains a relocatable-object API. Linking has a
-separate request API so a frontend can select an executable, shared library,
-static library, or relocatable output and receive structured errors.
+The call returns `true` on success and clears a supplied nonempty error
+buffer. On failure it returns `false` and writes a diagnostic when a buffer is
+available. Paths and request storage remain caller-owned for the call.
 
-Keep link policy independent from object formats. A shared layer should own
-input discovery, symbol precedence, archive extraction, dead-strip reachability,
-diagnostics, deterministic ordering, and output transactions. Format backends
-should own object parsing, relocation semantics, section layout, and final-file
-serialization. Target ABI rules must be explicit target data rather than
-inferred from the host running the linker.
+### Path selection
 
-The request model should describe inputs and intent rather than expose a raw
-linker command line. Inputs include relocatable objects, static archives,
-shared-library interfaces, and runtime objects. Options include entry points,
-export visibility, search paths, whole-archive groups, dead stripping, debug
-data, PIE/static mode, runtime paths, deployment targets, and target-specific
-ABI choices. Unsupported options must produce explicit diagnostics; they must
-never be silently ignored.
+| Request | Implementation |
+| --- | --- |
+| Linux x86-64 host executable, `target_triple == NULL`, and an entry symbol | In-process ELF linker. |
+| Static archive output | `llvm-ar rcs`. |
+| Wasm executable | `wasm-ld`; uses `--no-entry` when no entry is supplied. |
+| Other executable or shared-library output | `clang -fuse-ld=lld`, with target and output-kind options. |
+| Wasm shared library | Rejected. |
 
-The shared symbol graph should model local, global, and weak binding; visibility;
-common symbols; archive extraction; duplicate-definition precedence;
-undefined-symbol reporting; and versioned dynamic symbols where supported.
-Output policy must account for TLS, unwind and exception metadata,
-constructors/destructors, stack protection, build identifiers, and debug
-sections. Each format backend must declare the features it implements and
-rejects.
+An explicit target triple selects the external path even if it names the
+host. The API launches tools directly, without a shell. `NYR_LINK_CLANG`,
+`NYR_LINK_WASM_LD`, and `NYR_LINK_AR` override their executable paths.
+Cross-target links still require compatible tools, input objects, and any
+necessary target runtime or sysroot.
 
-ELF, Mach-O, COFF/PE, and Wasm can share graph and policy code, but their
-relocation, loader, and metadata rules remain format-specific. Diagnostics for
-unsupported features should identify the input path, symbol or relocation, and
-target.
+For external executable links, `entry_symbol` names the platform entry rather
+than a C `main` function. Mach-O requests add the platform's leading underscore.
+An explicit entry or shared-library request omits normal startup libraries
+through `-nostdlib`; callers supply required libraries as inputs. The request
+structure has no general-purpose linker-argument or library-search-path field.
 
-## Implementation sequence
+## In-process ELF executables
 
-1. Turn the ELF slice into a reusable link graph for multiple objects, with
-   deterministic strong/weak resolution and clear unresolved/duplicate-symbol
-   diagnostics.
-2. Add archive indexing and lazy extraction, then link Nytrix runtime objects
-   and ordinary C objects through the same graph.
-3. Add ELF executable and shared-library policies: dynamic symbols and versions,
-   PLT/GOT, TLS, PIE, startup objects, unwind data, constructors, and debug
-   information. Add static archive and relocatable output modes.
-4. Add independent Mach-O, COFF/PE, and Wasm backends with relocation tests and
-   native execution or format validation.
-5. Integrate the driver through capability checks. Select the in-process path
-   only when it implements the full request; retain the compatibility path for
-   other requests until the conformance corpus is complete.
-6. Profile representative small and large links. Parallelize measured hot
-   phases, then add incremental reuse after output determinism and cache
-   invalidation are tested.
+`nyr_link_elf64_executable` links one ELF64 x86-64 relocatable object.
+`nyr_link_elf64_executable_objects` accepts several objects and static archives.
+These entry points are available on Linux x86-64 and do not start an external
+linker.
 
-## Performance
+The entry function takes no arguments and returns an `i64`. The linker adds a
+startup stub that calls it and uses the low byte of its result as the process
+exit status. This is not the platform's raw process-entry convention.
 
-Measure cold and warm links across small programs, large object sets, large
-archives, debug-heavy outputs, and programs with many shared libraries. Track
-wall time, peak RSS, bytes read and written, and worker utilization. Compare
-equivalent outputs and options with the platform linker. No speed claim is
-valid without a reproducible corpus and correctness checks.
+The linker resolves global and weak definitions across selected inputs and
+lazily extracts archive members needed by unresolved strong references. It
+parses selected members from the loaded archive buffer, without temporary
+object files. Duplicate strong definitions, unresolved strong symbols,
+unsupported relocations, writable executable sections, and unsupported object
+formats are errors.
 
-Use memory-mapped or otherwise low-copy inputs, compact string and symbol
-tables, and per-link allocation arenas where measurements support them. Parallel
-parsing, archive indexing, independent relocation, and output writing must
-preserve deterministic symbol selection and diagnostics. Incremental linking is
-a later layer: cache validated input identities and dependency edges so
-unchanged inputs can skip discovery and relocation.
+This path produces a static executable. It does not provide shared-library
+loading, ordinary C startup, or the compiler driver's full runtime and link
+options. Use the external request path or the compiler driver when those are
+needed.
 
-## Acceptance criteria
+### Request example
 
-Do not describe the linker as general-purpose or select it unconditionally
-until each advertised target and output mode meets these criteria:
+This C fragment requires an existing ELF64 x86-64 object defining
+`int64_t answer(void)`. Run the resulting executable on Linux x86-64:
 
-- A shared request and diagnostic API with explicit target triples and no
-  host-target inference.
-- Relocatable objects, static archives, static and dynamic executables, and
-  shared libraries, including normal startup objects and compiler runtimes.
-- The platform's symbol rules, relocation set, TLS model, unwind and exception
-  metadata, initialization arrays, PIE rules, and dynamic-loader metadata.
-  Unsupported constructs are rejected before output is written.
-- Archive groups, whole-archive behavior, library search, weak/common symbols,
-  symbol visibility/versioning, and deterministic duplicate handling.
-- Atomic output replacement, bounded resource use, malformed-input fuzzing,
-  conformance tests, and executable tests on each target.
-- Cold/warm performance and peak-RSS measurements on a published corpus.
-  Memory mapping and parallel work are used where profiles show a benefit, with
-  a serial path for small links where worker setup costs more.
+```c
+#include <nyr/nyr.h>
 
-Acceptance is per capability: ELF x86-64 executable support does not imply ELF
-shared-library support or support for Mach-O, COFF/PE, and Wasm. The driver
-should select the in-process linker only when the entire request is inside the
-tested capability set.
+const char *inputs[] = {"answer.o"};
+nyr_link_request_t request = {
+    .input_paths = inputs,
+    .input_count = 1,
+    .output_path = "answer",
+    .target_triple = NULL,
+    .entry_symbol = "answer",
+    .kind = NYR_LINK_EXECUTABLE,
+};
+char error[256] = {0};
+bool linked = nyr_link(&request, error, sizeof(error));
+```
+
+## Coverage
+
+The [public API acceptance program](../../src/code/backend/ir/test/public_acceptance.c)
+executes linked outputs and checks multiple objects, archive extraction,
+strong/weak resolution, duplicate definitions, and unresolved-symbol errors.
+Run it after building the acceptance target:
+
+```bash
+cmake --build build/release --target nyr-backend-ir-acceptance
+build/release/nyr-backend-ir-acceptance
+```
+
+Object emission and linking have separate capability boundaries. A target's
+object writer being available does not establish that the corresponding
+external linker, startup objects, or runtime libraries are installed.

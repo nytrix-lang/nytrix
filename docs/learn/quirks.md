@@ -44,4 +44,4 @@ Python. Each item links to the page with the complete contract.
 | `@thread` depends on call position | A statement-position call detaches; using the call as a value joins and returns its result. | [Functions](../spec/functions.md#attributes), [Concurrency](concurrency.md) |
 | Proof clauses are not a full theorem prover | `requires`, `decreases`, `law`, and `@total` have different checks and backend gaps. Check the current matrix before relying on them as a safety boundary. | [Proofs](proofs.md), [Implementation status](status.md) |
 
-For the overall maturity and intended use, see [Where Nytrix fits today](fits.md).
+For maturity and intended use, see [Where Nytrix fits](status.md#where-nytrix-fits).

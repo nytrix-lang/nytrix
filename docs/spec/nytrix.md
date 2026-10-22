@@ -16,9 +16,9 @@ host-managed.
 ## Running complete programs
 
 `nytrix_embed_run_source` and `nytrix_embed_run_file` compile and run a
-complete Ny program in-process through the full pipeline — parse, type,
-verify, optimize, and execute. The source string or file is the whole program,
-exactly as if the `ny` CLI had run it: the program's `main` (or its top-level
+complete Ny program in-process: parse, type, verify, optimize, and execute.
+The source string or file is the whole program, as with the `ny` CLI:
+the program's `main` (or its top-level
 statements) executes, diagnostics go to stderr in CLI format, and the call
 returns the program's exit status.
 
@@ -28,8 +28,7 @@ one is active is rejected with -1. Independent concurrent compiler sessions
 are not available. Values do not automatically cross the source-run boundary:
 the program's globals and spawned threads are not returned to the host after
 the call. A host callback can explicitly keep supported scalar or byte-string
-values in a value handle. The examples below are raw C snippets in this
-reference; there is no separate embedding demo source under `src`.
+values in a value handle.
 
 The source API and compile-only artifact API are independent entry points.
 Keep compile artifacts alive until the host has consumed them, but release
@@ -256,8 +255,8 @@ Raw pointers stored inside a value remain host-owned, and the handle does not
 copy or free them. The C embedding test covers an aggregate handle across a
 moving collection.
 
-The public shared-library build exports this API — the VM, the `nytrix_embed_`
-program runners, and the Nyr API — from `nytrixrt`. Consumers include the
-installed headers and link `nytrixrt`. Standalone NYIR frontends that need
+The `nytrixrt` shared library exports the VM, `nytrix_embed_` program runners,
+and Nyr API. Consumers include the installed headers and link `nytrixrt`.
+Standalone NYIR frontends that need
 verification, optimization, interpretation, and object emission without the
 Ny runtime should use the [Nyr API](nyr.md).

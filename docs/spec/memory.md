@@ -1,8 +1,8 @@
 <!-- nytrix-doc: {"audience":"user","featured":true,"group":"spec","order":45,"summary":"Runtime value representation, allocation prefixes, container slots, and ABI conversion boundaries."} -->
 # Memory
 
-This is the runtime representation contract used by compiler and runtime work.
-It is not a license to depend on internal addresses from ordinary Nytrix source.
+Compiler and runtime code share these representation rules. Ordinary Nytrix
+programs must use the public APIs instead of depending on internal addresses.
 
 ## Values
 
@@ -51,9 +51,8 @@ header manually.
 Dynamic containers contain both tagged values and raw implementation fields.
 For a dictionary, logical count and capacity slots are tagged integer values;
 the table slot is a raw heap pointer. A list stores its logical length as a
-tagged value and its elements as dynamic values. Mixing these forms-for
-example, untagging a raw table pointer as if it were capacity-corrupts the
-representation.
+tagged value and its elements as dynamic values. Untagging a raw table pointer
+as if it were capacity corrupts the representation.
 
 A dictionary object with `n` entries uses:
 

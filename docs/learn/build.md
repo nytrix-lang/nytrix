@@ -51,14 +51,12 @@ a different build configuration.
 
 ## Common failures
 
-- **Missing compiler or linker:** run `./make doctor`; install the reported host
-  development tools, then rebuild.
-- **Wrong binary after a source change:** run `./make bin` from the repository
-  root and check which executable is on `PATH` with `./make env`.
-- **Target mismatch:** check `./make targets` and the native target matrix before
-  changing ABI flags.
-- **Unexpected cached result:** reproduce with the documented cache controls
-  for the relevant test or compiler path; do not delete unrelated build data.
+| Failure | Check |
+| --- | --- |
+| Missing compiler or linker | Run `./make doctor`, install the reported host development tools, and rebuild. |
+| Wrong binary after a source change | Run `./make bin` from the repository root; use `./make env` to check `PATH`. |
+| Target mismatch | Check `./make targets` and the native target matrix before changing ABI flags. |
+| Unexpected cached result | Use the documented cache controls for the failing path; preserve unrelated build data. |
 
 See [Tooling](tooling.md) for format/test commands and
 [Troubleshooting](troubleshooting.md) for source and runtime diagnostics.

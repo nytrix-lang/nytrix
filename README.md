@@ -4,10 +4,6 @@
 
 # Nytrix
 
-**Think freely. Control precisely.**
-
-Native · Explicit · Ownership · Interop · Paradigms
-
 [![Version](https://img.shields.io/badge/version-0.10.0-2f6fed)](docs/CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Platforms](https://img.shields.io/badge/Linux%20%7C%20macOS%20%7C%20Windows-x86__64%20%7C%20arm64-lightgrey)](#install)
@@ -19,7 +15,7 @@ Native · Explicit · Ownership · Interop · Paradigms
 Nytrix is an experimental statically typed language for native code,
 compile-time generation, and explicit machine-level interfaces.
 
-See the [Nytrix Manual](docs/README.md) for guides, specification, and API reference.
+The [manual](docs/README.md) covers language rules, tools, and the library.
 
 ## First program
 
@@ -139,19 +135,17 @@ Compiler contributors can start with the [contribution guide](docs/CONTRIBUTE.md
 
 Nytrix is experimental. Feature support varies across LLVM, the Nytrix-owned
 native backend, and WebAssembly. Before choosing a backend or relying on
-partial contracts, read [Where Nytrix fits today](docs/learn/fits.md),
-[Implementation status](docs/learn/status.md), and the
+partial contracts, read [Status and execution routes](docs/learn/status.md) and the
 [language quick reference](docs/learn/quirks.md).
 
 Pin a commit for reproducible builds and check the [Changelog](docs/CHANGELOG.md) before upgrading.
 
 ## Community
 
-Use [Discord](https://discord.gg/XQDR6DZWb), GitHub issues, or [nytrixlang@gmail.com](mailto:nytrixlang@gmail.com) for questions, bug reports, ideas, and documentation feedback.
+Ask questions on [Discord](https://discord.gg/XQDR6DZWb), report bugs through
+GitHub issues, or write to [nytrixlang@gmail.com](mailto:nytrixlang@gmail.com).
 
 Send security reports privately by email with the affected commit, platform, command, and a minimal proof of concept.
-
-Feature direction can be discussed on Discord or by email.
 
 ## License
 
