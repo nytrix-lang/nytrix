@@ -1,0 +1,25 @@
+shape procedure_fallthrough {
+  family "runtime/compiler"
+  generator "regression"
+  features [ny return control-flow floating-point]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --nyr-run"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+mut observed = 0.0
+fn update(bool early) {
+   if early { return }
+   if !early { observed = 2.5 }
+}
+assert(is_nil(update(true)), "early procedure return is nil")
+assert(is_nil(update(false)), "fallthrough does not return a branch's float")
+assert(observed == 2.5, "fallthrough preserves branch effects")
+fn value(bool condition) f64 {
+   if condition { return 1.5 }
+   2.5
+}
+assert(value(true) == 1.5 && value(false) == 2.5,
+       "explicit and implicit expression returns retain their values")
+NY
+}

@@ -4,8 +4,8 @@ shape test_repl_multiline_submission {
   features ["ny", "test", "repl", "incremental", "multiline"]
   template ny-test-case
   expect compile_and_run
-  repl_expect "REPL-MULTILINE-SUBMISSION-OK"
-  repl_commands "fn repl_multiline_double(int value) int {\n  value * 2\n}\nassert(repl_multiline_double(21) == 42, \"multiline declaration is accepted across terminal input lines\")\nprint(\"REPL-MULTILINE-SUBMISSION-OK\")"
+  repl_expect "\"ciao\""
+  repl_commands "fn repl_multiline_double(int value) int {\n  value * 2\n}\nassert(repl_multiline_double(21) == 42, \"multiline declaration is accepted across terminal input lines\")\nfn repl_dup_block(a) { (a, a) }\nassert(repl_dup_block(1) == (1, 1), \"named block functions retain their tuple result\")\nrepl_dup_block(1)\nfn repl_dup_expr(a) (a, a)\nassert(repl_dup_expr(1) == (1, 1), \"named expression-bodied functions return their expression\")\nrepl_dup_expr(1)\nbraced_id = fn(x) { x }\nassert(braced_id(3) == 3, \"braced anonymous function remains valid in the REPL\")\nbraced_id(3)\nbraced_id = fn(x) x\nassert(braced_id(4) == 4, \"brace-free anonymous function parses at REPL EOF and can replace a binding\")\nexpr_id = fn(x) x + 1\nassert(expr_id(2) == 3, \"brace-free anonymous function parses in the REPL\")\nexpr_id(\"ciao\")\nnested = fn(x) fn(y) x + y\nassert(nested(2)(3) == 5, \"nested brace-free functions retain lexical parameters\")\nprint(\"REPL-MULTILINE-SUBMISSION-OK\")"
   source ny <<'NY'
 1 + 1
 NY

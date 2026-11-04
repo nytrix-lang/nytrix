@@ -12,9 +12,15 @@ use core.os.ui.render.atlas as atlas
 use core.os.ui.assets.viewer as assets
 use core.math.parse.img.svg as svg
 
-mut _cache = dict(32)
-mut _sprite_cache = dict(64)
+mut dict _cache = dict(32)
+mut dict _sprite_cache = dict(64)
 mut _atlas = 0
+
+fn _ensure_caches() int {
+   if !is_dict(_cache) { _cache = dict(32) }
+   if !is_dict(_sprite_cache) { _sprite_cache = dict(64) }
+   0
+}
 
 fn clear_cache() int {
    "Clears cached icon texture ids."
@@ -37,24 +43,27 @@ fn stable_texture_id(candidate) int {
    tex_id
 }
 
-fn icon_tex(name) int {
+fn icon_tex(name, int raster_size=32) int {
    "Loads or returns the cached texture id for a named SVG icon."
+   _ensure_caches()
    def trace = ui_profile.env_truthy_cached("NY_GUI_ICON_TRACE")
    def key = str.lower(str.strip(to_str(name)))
    if key.len == 0 { return -1 }
-   if _cache.contains(key) {
-      def cached = int(_cache.get(key, -1))
+   raster_size = int(max(16, min(1024, raster_size)))
+   def cache_key = key + "@" + to_str(raster_size)
+   if _cache.contains(cache_key) {
+      def cached = int(_cache.get(cache_key, -1))
       if cached >= 0 { return cached }
       if cached == -2 { return -1 }
    }
    def path = assets.icon_path(key)
    if !osfs.is_file(path) {
       if trace { ui_profile.print_text("[gui:icon] missing key=" + key + " path=" + path) }
-      _cache[key] = -2
+      _cache[cache_key] = -2
       return -1
    }
    mut tex = -1
-   def im = svg.load_path(path)
+   def im = svg.load_path(path, raster_size)
    if im && is_dict(im) {
       tex = render.texture_upload_image_ex(im, path, 37, false, false, 1, 33071, 33071, "gui_icon:" + key, true)
       tex = stable_texture_id(tex)
@@ -62,10 +71,13 @@ fn icon_tex(name) int {
       ui_profile.print_text("[gui:icon] svg-decode-failed key=" + key + " path=" + path + " err=" + svg.last_error())
    }
    if tex > 0 {
-      _cache[key] = tex
+      _cache[cache_key] = tex
       if trace { ui_profile.print_text("[gui:icon] loaded key=" + key + " tex=" + to_str(tex) + " path=" + path) }
-   } elif trace {
-      ui_profile.print_text("[gui:icon] load-failed key=" + key + " path=" + path)
+   } else {
+      ;; SVG decode or upload failures are stable for an immutable asset. Keep
+      ;; a negative cache entry so every redraw does not repeat the costly load.
+      _cache[cache_key] = -2
+      if trace { ui_profile.print_text("[gui:icon] load-failed key=" + key + " path=" + path) }
    }
    tex
 }
@@ -100,11 +112,14 @@ fn _sprite_record(int tex, any uv, str key) dict {
 
 fn icon_sprite(name) any {
    "Loads or returns an atlas sprite for a named SVG icon."
+   _ensure_caches()
    def trace = ui_profile.env_truthy_cached("NY_GUI_ICON_TRACE")
    def key = str.lower(str.strip(to_str(name)))
    if key.len == 0 { return -1 }
    if _sprite_cache.contains(key) {
-      return _sprite_live(_sprite_cache.get(key, 0))
+      def cached = _sprite_cache.get(key, 0)
+      if !is_dict(cached) { return -1 }
+      return _sprite_live(cached)
    }
    def path = assets.icon_path(key)
    if !osfs.is_file(path) {
@@ -112,7 +127,7 @@ fn icon_sprite(name) any {
       _sprite_cache[key] = -1
       return -1
    }
-   def im = svg.load_path(path)
+   def im = svg.load_path(path, 32)
    if !im || !is_dict(im) {
       if trace { ui_profile.print_text("[gui:icon] svg-sprite-decode-failed key=" + key + " path=" + path + " err=" + svg.last_error()) }
       _sprite_cache[key] = -1
@@ -135,6 +150,7 @@ fn icon_sprite(name) any {
 
 fn warm_sprites(any names) int {
    "Loads a batch of SVG icon sprites and flushes the atlas once."
+   _ensure_caches()
    if !is_list(names) { return 0 }
    def trace = ui_profile.env_truthy_cached("NY_GUI_ICON_TRACE")
    def a = _icon_atlas()
@@ -153,7 +169,7 @@ fn warm_sprites(any names) int {
                if trace { ui_profile.print_text("[gui:icon] missing sprite key=" + key + " path=" + path) }
                _sprite_cache[key] = -1
             } else {
-               def im = svg.load_path(path)
+               def im = svg.load_path(path, 32)
                if !im || !is_dict(im) {
                   if trace { ui_profile.print_text("[gui:icon] svg-sprite-decode-failed key=" + key + " path=" + path + " err=" + svg.last_error()) }
                   _sprite_cache[key] = -1

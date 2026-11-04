@@ -196,6 +196,37 @@ include(CheckCSourceCompiles)
 
 set(NYTRIX_ROOT "${CMAKE_CURRENT_LIST_DIR}")
 
+# Compile the shared section/row catalog into static entries. Bootstrap help
+# reads the same catalog before either executable exists.
+set(NYTRIX_NYC_HELP "${NYTRIX_ROOT}/src/code/lang/parse/c/help.txt")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${NYTRIX_NYC_HELP}")
+file(STRINGS "${NYTRIX_NYC_HELP}" _nyc_help_lines)
+set(_nyc_help_rows "")
+foreach(_line IN LISTS _nyc_help_lines)
+  if(_line MATCHES "^\\[([^]]+)\\]$")
+    set(_kind NY_HELP_SECTION)
+    set(_label "${CMAKE_MATCH_1}")
+    set(_description "")
+  elseif(_line MATCHES "^([^|]+)\\|(.*)$")
+    set(_kind NY_HELP_ITEM)
+    set(_label "${CMAKE_MATCH_1}")
+    set(_description "${CMAKE_MATCH_2}")
+  elseif(NOT _line STREQUAL "")
+    set(_kind NY_HELP_TEXT)
+    set(_label "${_line}")
+    set(_description "")
+  else()
+    continue()
+  endif()
+  foreach(_field _label _description)
+    string(REPLACE "\\" "\\\\" ${_field} "${${_field}}")
+    string(REPLACE "\"" "\\\"" ${_field} "${${_field}}")
+  endforeach()
+  string(APPEND _nyc_help_rows "  {${_kind}, \"${_label}\", \"${_description}\"},\n")
+endforeach()
+file(GENERATE OUTPUT "${CMAKE_BINARY_DIR}/include/nyc_help.h" CONTENT
+  "#ifndef NYTRIX_NYC_HELP_H\n#define NYTRIX_NYC_HELP_H\n#include \"base/help.h\"\nstatic const ny_help_entry_t nyc_compiler_help[] = {\n${_nyc_help_rows}};\n#endif\n")
+
 add_compile_definitions(_GNU_SOURCE)
 
 option(NYTRIX_USE_LLVM "Enable LLVM backend and tooling" ON)
@@ -963,8 +994,7 @@ else()
 endif()
 if (NYTRIX_USE_LLVM)
   add_custom_command(
-    OUTPUT "${CORE_NY}"
-    BYPRODUCTS "${CORE_SYMBOLS}"
+    OUTPUT "${CORE_NY}" "${CORE_SYMBOLS}"
     COMMAND ${_NYTRIX_STD_ENV} $<TARGET_FILE:ny> --bundle-core="${CORE_NY}" --bundle-symbols="${CORE_SYMBOLS}" --verbose=${_NYTRIX_STD_VERBOSE_LEVEL}
     WORKING_DIRECTORY "${NYTRIX_ROOT}"
     DEPENDS ny ${STD_SOURCES}
@@ -991,6 +1021,16 @@ if(NOT DEFINED NYTRIX_CORE_BC OR NOT DEFINED NYTRIX_CORE_NY OR
    NOT DEFINED NYTRIX_C_COMPILER OR
    NOT DEFINED NYTRIX_CORE_BC_CONFIG_HASH)
   message(FATAL_ERROR "missing core bitcode builder arguments")
+endif()
+
+set(_std_threads 16)
+if(DEFINED ENV{NYTRIX_CORE_BC_THREADS} AND
+   NOT "$ENV{NYTRIX_CORE_BC_THREADS}" STREQUAL "")
+  if(NOT "$ENV{NYTRIX_CORE_BC_THREADS}" MATCHES
+     "^([1-9]|[1-5][0-9]|6[0-4])$")
+    message(FATAL_ERROR "NYTRIX_CORE_BC_THREADS must be an integer from 1 to 64")
+  endif()
+  set(_std_threads "$ENV{NYTRIX_CORE_BC_THREADS}")
 endif()
 
 file(LOCK "${NYTRIX_CORE_BC}.lock" GUARD PROCESS TIMEOUT 1800
@@ -1085,9 +1125,12 @@ set(_pending_artifact "${NYTRIX_CORE_BC}.pending")
 file(REMOVE "${_pending_artifact}" "${_pending_artifact}.links")
 execute_process(
   COMMAND "${CMAKE_COMMAND}" -E env
-    NYTRIX_STD_THREADS=16
+    "NYTRIX_STD_THREADS=${_std_threads}"
     NYTRIX_STD_BC_EMIT_BODIES=1
     "${_compiler_path}"
+    # Consumer compilation optimizes core.bc after linking; avoid optimizing
+    # the same module once during generation and again for every consumer.
+    -O0
     -std full
     "--core-path=${NYTRIX_CORE_NY}"
     -emit-only
@@ -1162,9 +1205,9 @@ file(GLOB SRC_SEMA CONFIGURE_DEPENDS "${NYTRIX_ROOT}/src/sema/*.c")
 file(GLOB SRC_CODE CONFIGURE_DEPENDS
   "${NYTRIX_ROOT}/src/code/*.c"
   "${NYTRIX_ROOT}/src/code/lang/parse/frontend/*.c"
-  "${NYTRIX_ROOT}/src/code/lang/c/c_lex.c"
-  "${NYTRIX_ROOT}/src/code/lang/c/c_parse.c"
-  "${NYTRIX_ROOT}/src/code/lang/c/clang.c"
+  "${NYTRIX_ROOT}/src/code/lang/parse/c/lex.c"
+  "${NYTRIX_ROOT}/src/code/lang/parse/c/declarations.c"
+  "${NYTRIX_ROOT}/src/code/lang/parse/c/clang.c"
   "${NYTRIX_ROOT}/src/code/lang/llvm/*.c"
   "${NYTRIX_ROOT}/src/code/lang/llvm/calls/*.c"
   "${NYTRIX_ROOT}/src/code/lang/llvm/comptime/*.c"
@@ -1177,7 +1220,10 @@ file(GLOB SRC_CODE CONFIGURE_DEPENDS
   "${NYTRIX_ROOT}/src/code/backend/ir/*.c"
   "${NYTRIX_ROOT}/src/code/backend/ir/opt/*.c"
   "${NYTRIX_ROOT}/src/code/backend/object/*.c"
-  "${NYTRIX_ROOT}/src/code/backend/machine/*.c")
+  "${NYTRIX_ROOT}/src/code/backend/machine/*.c"
+  "${NYTRIX_ROOT}/src/code/backend/arch/*/machine.c"
+  "${NYTRIX_ROOT}/src/code/backend/arch/*/object.c"
+  "${NYTRIX_ROOT}/src/code/backend/arch/*/format.c")
 file(GLOB SRC_REPL CONFIGURE_DEPENDS "${NYTRIX_ROOT}/src/cmd/ny/repl/*.c")
 file(GLOB SRC_WIRE CONFIGURE_DEPENDS "${NYTRIX_ROOT}/src/code/backend/wire/*.c")
 
@@ -1207,9 +1253,9 @@ set(SRC_COMPILER
   "${NYTRIX_ROOT}/src/code/lang/pipeline/init.c"
   "${NYTRIX_ROOT}/src/code/lang/pipeline/build.c"
   "${NYTRIX_ROOT}/src/code/lang/pipeline/native.c"
-  "${NYTRIX_ROOT}/src/code/lang/pipeline/native_vm.c"
+  "${NYTRIX_ROOT}/src/code/lang/pipeline/vm.c"
   "${NYTRIX_ROOT}/src/code/lang/pipeline/emit.c"
-  "${NYTRIX_ROOT}/src/code/lang/pipeline/x86_64_legacy.c"
+  "${NYTRIX_ROOT}/src/code/backend/arch/x86_64/ast.c"
   "${NYTRIX_ROOT}/src/code/lang/pipeline/embed.c"
   "${NYTRIX_ROOT}/src/code/backend/ir/public.c"
 )
@@ -1262,12 +1308,12 @@ set_source_files_properties(
   "${NYTRIX_ROOT}/src/code/lang/pipeline/init.c"
   PROPERTIES OBJECT_DEPENDS "${WIRE_PIPE_SOURCES}")
 
-set(RT_INIT "${NYTRIX_ROOT}/src/code/lang/runtime/init.c")
-file(GLOB RT_SOURCES CONFIGURE_DEPENDS "${NYTRIX_ROOT}/src/code/lang/runtime/*.c")
-file(GLOB RT_HEADERS CONFIGURE_DEPENDS "${NYTRIX_ROOT}/src/code/lang/runtime/*.h")
+set(RT_INIT "${NYTRIX_ROOT}/src/code/backend/runtime/init.c")
+file(GLOB RT_SOURCES CONFIGURE_DEPENDS "${NYTRIX_ROOT}/src/code/backend/runtime/*.c")
+file(GLOB RT_HEADERS CONFIGURE_DEPENDS "${NYTRIX_ROOT}/src/code/backend/runtime/*.h")
 list(REMOVE_ITEM RT_SOURCES "${RT_INIT}")
 
-# Runtime is compiled via src/code/lang/runtime/init.c (which #includes the other runtime/*.c
+# Runtime is compiled via src/code/backend/runtime/init.c (which #includes the other runtime/*.c
 # files). Mark all runtime sources/headers as dependencies so Ninja rebuilds
 # ny/ny_debug when any runtime unit changes.
 set_source_files_properties("${RT_INIT}" PROPERTIES
@@ -1427,7 +1473,7 @@ if (NYTRIX_USE_LLVM)
   nytrix_apply_size_flags(nytrix_compiler)
   target_include_directories(nytrix_compiler PRIVATE
     "${NYTRIX_ROOT}/src"
-    "${NYTRIX_ROOT}/src/code/lang/runtime"
+    "${NYTRIX_ROOT}/src/code/backend/runtime"
     "${NYTRIX_ROOT}/src/include"
     "${CMAKE_BINARY_DIR}/include"
     "${CMAKE_BINARY_DIR}"
@@ -1504,7 +1550,7 @@ else()
     "${NYTRIX_ROOT}/src"
     "${NYTRIX_ROOT}/src/code"
     "${NYTRIX_ROOT}/src/code/lang/types"
-    "${NYTRIX_ROOT}/src/code/lang/runtime"
+    "${NYTRIX_ROOT}/src/code/backend/runtime"
     "${NYTRIX_ROOT}/src/base"
     "${NYTRIX_ROOT}/src/include"
     "${CMAKE_BINARY_DIR}/include"
@@ -1543,7 +1589,7 @@ nytrix_apply_size_flags(nytrix_runtime)
 target_include_directories(nytrix_runtime PRIVATE
   "${NYTRIX_ROOT}/src"
   "${NYTRIX_ROOT}/src/include"
-  "${NYTRIX_ROOT}/src/code/lang/runtime"
+  "${NYTRIX_ROOT}/src/code/backend/runtime"
   "${CMAKE_BINARY_DIR}"
 )
 if (NYTRIX_USE_LLVM AND NYTRIX_LLVM_INCLUDE)
@@ -1614,7 +1660,7 @@ if (NYTRIX_USE_LLVM)
   target_include_directories(ny-full PRIVATE
     "${NYTRIX_ROOT}/src"
     "${NYTRIX_ROOT}/src/cmd/tools"
-    "${NYTRIX_ROOT}/src/code/lang/runtime"
+    "${NYTRIX_ROOT}/src/code/backend/runtime"
     "${NYTRIX_ROOT}/src/include"
     "${CMAKE_BINARY_DIR}"
   )
@@ -1738,6 +1784,18 @@ if (BUILD_TESTING)
 endif()
 
 if (BUILD_TESTING AND NYTRIX_USE_LLVM)
+  add_test(
+    NAME ny-native-from-nyr
+    COMMAND "${CMAKE_COMMAND}"
+      "-DNY_FULL=$<TARGET_FILE:ny-full>"
+      "-DWORK_DIR=${CMAKE_BINARY_DIR}/native-from-nyr-test"
+      "-DEXE_SUFFIX=${CMAKE_EXECUTABLE_SUFFIX}"
+      -P "${NYTRIX_ROOT}/etc/tests/code/intermediate/ny/native-from-nyr.cmake"
+  )
+  set_tests_properties(ny-native-from-nyr PROPERTIES
+    WORKING_DIRECTORY "${NYTRIX_ROOT}"
+    TIMEOUT 300
+  )
   nytrix_add_nshape_test(
     repl-cold-stdlib-imports
     etc/tests/code/probes/repl/repl-cold-imports.nshape
@@ -1757,7 +1815,7 @@ if (BUILD_TESTING AND NYTRIX_USE_LLVM)
   endif()
   nytrix_add_nshape_test(
     ny-cold-start-budget
-    etc/tests/code/probes/cold-start-budget.nshape
+    etc/tests/code/probes/performance/cold-start-budget.nshape
     900
   )
   nytrix_add_nshape_test(
@@ -1847,6 +1905,7 @@ if (BUILD_TESTING AND NYTRIX_USE_LLVM)
       "-DNY=$<TARGET_FILE:ny-full>"
       "-DTEST_DIR=${CMAKE_BINARY_DIR}/ny-fmt-cloc"
       -P "${NYTRIX_ROOT}/CMakeLists.txt"
+    WORKING_DIRECTORY "${NYTRIX_ROOT}"
   )
   nytrix_add_nshape_test(
     ny-fmt-format-parity
@@ -2010,6 +2069,9 @@ function(nytrix_add_tool tool_target tool_name)
   elseif ("${tool_name}" STREQUAL "test")
     list(APPEND _tool_sources
       "${NYTRIX_ROOT}/src/cmd/test/init.c"
+      "${NYTRIX_ROOT}/src/cmd/test/perf/compare.c"
+      "${NYTRIX_ROOT}/src/cmd/test/perf/compiler.c"
+      "${NYTRIX_ROOT}/src/cmd/test/ui.c"
       "${NYTRIX_ROOT}/src/cmd/test/fuzz/analyze.c"
       "${NYTRIX_ROOT}/src/cmd/test/fuzz/compare/main.c"
       "${NYTRIX_ROOT}/src/cmd/test/fuzz/generate.c"
@@ -2027,7 +2089,11 @@ function(nytrix_add_tool tool_target tool_name)
       "${NYTRIX_ROOT}/src/base/process.c"
     )
   elseif ("${tool_name}" STREQUAL "make")
-    list(APPEND _tool_sources "${NYTRIX_ROOT}/src/cmd/tools/make/make.c")
+    list(APPEND _tool_sources
+      "${NYTRIX_ROOT}/src/cmd/tools/make/make.c"
+      "${NYTRIX_ROOT}/src/cmd/tools/make/help.c"
+      "${NYTRIX_ROOT}/src/code/backend/bare/generate.c"
+    )
   endif()
   add_executable(${tool_target}
     ${_tool_sources}
@@ -2047,11 +2113,12 @@ function(nytrix_add_tool tool_target tool_name)
     target_compile_definitions(${tool_target} PRIVATE NY_TOOL_HAS_WEB=1)
   elseif ("${tool_name}" STREQUAL "make")
     target_compile_definitions(${tool_target} PRIVATE NY_TOOL_HAS_MAKE=1)
+    target_include_directories(${tool_target} PRIVATE "${CMAKE_BINARY_DIR}/include")
   endif()
   target_include_directories(${tool_target} PRIVATE
     "${NYTRIX_ROOT}/src"
     "${NYTRIX_ROOT}/src/include"
-    "${NYTRIX_ROOT}/src/code/lang/runtime"
+    "${NYTRIX_ROOT}/src/code/backend/runtime"
     "${CMAKE_BINARY_DIR}"
   )
   if (MSVC)
@@ -2080,6 +2147,11 @@ endif()
 nytrix_add_tool(ny-doc "doc")
 nytrix_add_tool(ny-make "make")
 
+# The fixture runner invokes sibling tools for CLI parity and discovery probes.
+# Building ny-test must make every standalone CLI route available in a fresh
+# build tree.
+add_dependencies(ny-test ny-fmt ny-perf ny-doc ny-make)
+
 if (NYTRIX_BUILD_LSP)
   add_executable(ny-lsp
     "${NYTRIX_ROOT}/src/cmd/tools/lsp/main.c"
@@ -2090,7 +2162,7 @@ if (NYTRIX_BUILD_LSP)
   target_include_directories(ny-lsp PRIVATE
     "${NYTRIX_ROOT}/src"
     "${NYTRIX_ROOT}/src/include"
-    "${NYTRIX_ROOT}/src/code/lang/runtime"
+    "${NYTRIX_ROOT}/src/code/backend/runtime"
     "${CMAKE_BINARY_DIR}"
   )
   if (WIN32)
@@ -2155,7 +2227,7 @@ add_dependencies(ny-dap nytrix_version_header)
 target_include_directories(ny-dap PRIVATE
   "${NYTRIX_ROOT}/src"
   "${NYTRIX_ROOT}/src/include"
-  "${NYTRIX_ROOT}/src/code/lang/runtime"
+  "${NYTRIX_ROOT}/src/code/backend/runtime"
   "${CMAKE_BINARY_DIR}"
 )
 set_target_properties(ny-dap PROPERTIES
@@ -2278,6 +2350,10 @@ endif()
         endif()
       endif()
     endforeach()
+    # Also add LLVM lib directory for DLLs like libLLVM-22.dll
+    if(NYTRIX_LLVM_LIBDIR AND IS_DIRECTORY "${NYTRIX_LLVM_LIBDIR}")
+      list(APPEND _runtime_dirs "${NYTRIX_LLVM_LIBDIR}")
+    endif()
     if(TARGET ZLIB::ZLIB)
       get_target_property(_zlib_loc ZLIB::ZLIB IMPORTED_LOCATION)
       get_target_property(_zlib_implib ZLIB::ZLIB IMPORTED_IMPLIB)
@@ -2438,7 +2514,7 @@ if (NYTRIX_USE_LLVM)
   target_include_directories(ny-module-identity-test PRIVATE
     "${NYTRIX_ROOT}/src"
     "${NYTRIX_ROOT}/src/include"
-    "${NYTRIX_ROOT}/src/code/lang/runtime"
+    "${NYTRIX_ROOT}/src/code/backend/runtime"
     "${CMAKE_BINARY_DIR}"
   )
   get_target_property(_ny_identity_compile_defs ny-full COMPILE_DEFINITIONS)
@@ -2488,7 +2564,7 @@ if (NYTRIX_USE_LLVM)
     add_dependencies(ny-backend-scaling-test nytrix_version_header std)
     target_include_directories(ny-backend-scaling-test PRIVATE
       "${NYTRIX_ROOT}/src"
-      "${NYTRIX_ROOT}/src/code/lang/runtime"
+      "${NYTRIX_ROOT}/src/code/backend/runtime"
       "${NYTRIX_ROOT}/src/include"
       "${CMAKE_BINARY_DIR}"
     )
@@ -2533,7 +2609,7 @@ if (NYTRIX_USE_LLVM)
     add_dependencies(ny-tv-smt-test nytrix_version_header std)
     target_include_directories(ny-tv-smt-test PRIVATE
       "${NYTRIX_ROOT}/src"
-      "${NYTRIX_ROOT}/src/code/lang/runtime"
+      "${NYTRIX_ROOT}/src/code/backend/runtime"
       "${NYTRIX_ROOT}/src/include"
       "${CMAKE_BINARY_DIR}"
     )
@@ -2588,7 +2664,7 @@ if (NYTRIX_BUILD_SHARED AND NOT WIN32 AND NYTRIX_USE_LLVM)
   target_include_directories(nytrixrt PRIVATE
     "${NYTRIX_ROOT}/src"
     "${NYTRIX_ROOT}/src/include"
-    "${NYTRIX_ROOT}/src/code/lang/runtime"
+    "${NYTRIX_ROOT}/src/code/backend/runtime"
     "${CMAKE_BINARY_DIR}"
   )
   if (NYTRIX_LLVM_INCLUDE)
@@ -2631,14 +2707,24 @@ if (NYTRIX_BUILD_SHARED AND NOT WIN32 AND NYTRIX_USE_LLVM)
   endif()
 
   if(BUILD_TESTING)
+    add_executable(nytrix-float-registry
+      "${NYTRIX_ROOT}/src/code/backend/runtime/tests/float_registry.c")
+    target_include_directories(nytrix-float-registry PRIVATE
+      "${NYTRIX_ROOT}/src" "${NYTRIX_ROOT}/src/include")
+    target_compile_options(nytrix-float-registry PRIVATE -Wall -Wextra -Werror)
+    target_link_libraries(nytrix-float-registry PRIVATE nytrixrt)
+    add_test(NAME nytrix-float-registry COMMAND nytrix-float-registry)
+    set_tests_properties(nytrix-float-registry PROPERTIES TIMEOUT 30)
     add_test(NAME nytrix-embed-api
       COMMAND ny-full --nytrix-embed-test)
-    set_tests_properties(nytrix-embed-api PROPERTIES TIMEOUT 60)
+    set_tests_properties(nytrix-embed-api PROPERTIES
+      WORKING_DIRECTORY "${NYTRIX_ROOT}"
+      TIMEOUT 60)
     add_executable(nytrix-embed-gc-handles
-      "${NYTRIX_ROOT}/src/code/lang/runtime/tests/embed_handle.c")
+      "${NYTRIX_ROOT}/src/code/backend/runtime/tests/embed_handle.c")
     target_include_directories(nytrix-embed-gc-handles PRIVATE
       "${NYTRIX_ROOT}/src"
-      "${NYTRIX_ROOT}/src/code/lang/runtime"
+      "${NYTRIX_ROOT}/src/code/backend/runtime"
       "${NYTRIX_ROOT}/src/include")
     target_compile_options(nytrix-embed-gc-handles PRIVATE
       -Wall -Wextra -Werror)
@@ -2650,12 +2736,20 @@ if (NYTRIX_BUILD_SHARED AND NOT WIN32 AND NYTRIX_USE_LLVM)
 endif()
 
 if (NYTRIX_CORE_BC_CHECKER)
+  set(NYTRIX_CORE_BC_CHECKER_SOURCE
+    "${CMAKE_BINARY_DIR}/ny-core-bc-check.ny")
+  file(WRITE "${NYTRIX_CORE_BC_CHECKER_SOURCE}"
+    "use core.compiler.tools.core_bc_cache (run_checker)\n"
+    "#main {\n"
+    "  run_checker()\n"
+    "}\n")
   add_custom_command(
     OUTPUT "${NYTRIX_CORE_BC_CHECKER_OBJECT}"
     COMMAND "$<TARGET_FILE:ny-full>" --native-only -O0
       "--output=${NYTRIX_CORE_BC_CHECKER_OBJECT}"
-      "${NYTRIX_ROOT}/src/cmd/ny/core_bc_cache.ny"
-    DEPENDS ny-full "${NYTRIX_ROOT}/src/cmd/ny/core_bc_cache.ny"
+      "${NYTRIX_CORE_BC_CHECKER_SOURCE}"
+    DEPENDS ny-full "${NYTRIX_CORE_BC_CHECKER_SOURCE}"
+      "${NYTRIX_ROOT}/lib/compiler/tools/core_bc_cache.ny"
     WORKING_DIRECTORY "${NYTRIX_ROOT}"
     COMMENT "Compiling Ny shared-core cache checker"
     VERBATIM
@@ -2681,7 +2775,11 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
     "${NYTRIX_ROOT}/src/code/backend/ir/opt/*.c"
     "${NYTRIX_ROOT}/src/code/backend/machine/*.c"
     "${NYTRIX_ROOT}/src/code/backend/object/*.c"
+    "${NYTRIX_ROOT}/src/code/backend/arch/*/machine.c"
+    "${NYTRIX_ROOT}/src/code/backend/arch/*/object.c"
+    "${NYTRIX_ROOT}/src/code/backend/arch/*/format.c"
     "${NYTRIX_ROOT}/src/code/backend/target.c"
+    "${NYTRIX_ROOT}/src/code/backend/ops.c"
   )
   list(FILTER NYR_SOURCES EXCLUDE REGEX
     "/(emit|tier|report|oracle|portable|embedding)\\.c$")
@@ -2726,11 +2824,14 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
     list(REMOVE_ITEM NYR_LINK_LIBRARIES OpenMP::OpenMP_C)
     set_property(TARGET nyr PROPERTY LINK_LIBRARIES "${NYR_LINK_LIBRARIES}")
   endif()
-  if(EXISTS "${NYTRIX_ROOT}/src/code/backend/ir/test/public_acceptance.c")
+  # public_acceptance.c requires elf.h and other Linux-specific headers
+  if(EXISTS "${NYTRIX_ROOT}/src/code/backend/ir/test/public_acceptance.c" AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set(NYR_PUBLIC_ACCEPTANCE_SOURCE
       "${NYTRIX_ROOT}/src/code/backend/ir/test/public_acceptance.c")
     add_executable(nyr-backend-ir-acceptance
       "${NYR_PUBLIC_ACCEPTANCE_SOURCE}")
+    target_include_directories(nyr-backend-ir-acceptance PRIVATE
+      "${NYTRIX_ROOT}/src")
     target_link_libraries(nyr-backend-ir-acceptance PRIVATE nyr m)
     if(BUILD_TESTING)
       add_test(NAME nyr-backend-ir-acceptance
@@ -2746,6 +2847,7 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
       add_executable(nyr-shared-api-acceptance
         "${NYR_PUBLIC_ACCEPTANCE_SOURCE}")
       target_include_directories(nyr-shared-api-acceptance PRIVATE
+        "${NYTRIX_ROOT}/src"
         "${NYTRIX_ROOT}/src/include")
       target_link_libraries(nyr-shared-api-acceptance PRIVATE nytrixrt m)
       add_test(NAME nyr-shared-api-acceptance
@@ -2765,7 +2867,9 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
     endif()
   endif()
 
-  add_executable(nyc "${NYTRIX_ROOT}/src/code/lang/c/nyc.c")
+  add_executable(nyc "${NYTRIX_ROOT}/src/code/lang/parse/c/nyc.c")
+  add_dependencies(ny nyc)
+  add_dependencies(ny-test nyc)
   add_dependencies(nyc nyr)
   target_include_directories(nyc PRIVATE
     "${NYTRIX_ROOT}/src"
@@ -2775,15 +2879,16 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
   target_compile_options(nyc PRIVATE -Wall -Wextra -Werror)
   target_link_options(nyc PRIVATE -Wl,--gc-sections)
   target_sources(nyc PRIVATE
-    "${NYTRIX_ROOT}/src/code/lang/c/c_lex.c"
-    "${NYTRIX_ROOT}/src/code/lang/c/c_abi.c"
-    "${NYTRIX_ROOT}/src/code/lang/c/nyc_frontend.c"
+    "${NYTRIX_ROOT}/src/code/lang/parse/c/lex.c"
+    "${NYTRIX_ROOT}/src/code/lang/parse/c/aggregate.c"
+    "${NYTRIX_ROOT}/src/code/lang/parse/c/parse.c"
   )
   target_link_libraries(nyc PRIVATE nyr m)
   if(BUILD_TESTING)
     find_program(NYR_LLD_LINK_EXECUTABLE NAMES lld-link)
     find_program(NYR_LD64_LLD_EXECUTABLE NAMES ld64.lld)
-    set(NYR_C_TEST_DIR "${NYTRIX_ROOT}/src/code/lang/c/tests")
+    find_program(NYR_READELF_EXECUTABLE NAMES readelf llvm-readelf)
+    set(NYR_C_TEST_DIR "${NYTRIX_ROOT}/src/code/lang/parse/c/tests")
     set(NYR_C_TEST_OUTPUT_DIR "${CMAKE_BINARY_DIR}/nyr-c-tests")
     add_test(
       NAME nyr-c-frontend
@@ -2792,6 +2897,9 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
         "-DCC=${CMAKE_C_COMPILER}"
         "-DSOURCE_DIR=${NYR_C_TEST_DIR}"
         "-DBINARY_DIR=${NYR_C_TEST_OUTPUT_DIR}"
+        "-DOBJDUMP=${CMAKE_OBJDUMP}"
+        "-DREADELF=${NYR_READELF_EXECUTABLE}"
+        "-DLD=${CMAKE_LINKER}"
         "-DLLD_LINK=${NYR_LLD_LINK_EXECUTABLE}"
         "-DLD64_LLD=${NYR_LD64_LLD_EXECUTABLE}"
         -P "${NYR_C_TEST_DIR}/run.cmake"
@@ -2799,7 +2907,7 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
     set_tests_properties(nyr-c-frontend PROPERTIES TIMEOUT 120)
     add_executable(ny-c-lexer-test
       "${NYR_C_TEST_DIR}/lexer.c"
-      "${NYTRIX_ROOT}/src/code/lang/c/c_lex.c"
+      "${NYTRIX_ROOT}/src/code/lang/parse/c/lex.c"
     )
     target_include_directories(ny-c-lexer-test PRIVATE
       "${NYTRIX_ROOT}/src"

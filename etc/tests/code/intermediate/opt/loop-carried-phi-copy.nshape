@@ -3,7 +3,7 @@ shape opt_loop_carried_phi_copy_is_preserved {
   generator "native"
   features [native x86_64 oracle optcheck loop phi regalloc correctness]
   template ny-test-case
-  flags_matrix "--native-only --native-backend=x86_64 --native-tier=baseline -O0 --native-result-oracle=0 --nyir-verify --no-progress --color=never; --native-only --native-backend=x86_64 --native-tier=opt -O3 --native-result-oracle=0 --nyir-verify --no-progress --color=never"
+  flags_matrix "--native-only --native-backend=x86_64 --native-tier=baseline -O0 --native-result-oracle=0 --nyr-verify --no-progress --color=never; --native-only --native-backend=x86_64 --native-tier=opt -O3 --native-result-oracle=0 --nyr-verify --no-progress --color=never"
   expect compile_and_run
   source ny <<'NY'
 use core.tbuf

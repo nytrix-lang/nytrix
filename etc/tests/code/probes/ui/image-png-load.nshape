@@ -1,0 +1,32 @@
+shape image_png_load {
+  family "runtime/ui"
+  generator "regression"
+  features [ny image png file bytes dispatch]
+  template ny-test-case
+  timeout 120
+  flags_matrix "--native-only -O0; --native-only -O3; --native --run -O0; --native-backend=llvm --jit --jit-engine=mcjit -O0; --native-backend=llvm --jit --jit-engine=orc -O0; --nyr-run"
+  expect compile_and_run
+  expect_message "IMAGE-PNG-LOAD-OK"
+  source ny <<'NY'
+use core
+use core.os
+use core.math.parse.img as img
+use core.math.parse.img.png as png
+
+;; Independent 2x2 RGBA PNG: red, half-alpha green, blue, transparent white.
+def path = "etc/tests/code/probes/ui/fixtures/ui-rgba.png"
+def data = file_read(path)
+assert(is_ok(data) && len(unwrap(data)) == 78, "file read preserves PNG bytes")
+def direct = png.decode(unwrap(data))
+assert(is_dict(direct), "PNG decoder accepts fixture")
+def loaded = img.load(path)
+assert(is_dict(loaded), "image loader dispatches an on-disk PNG")
+assert(int(loaded.get("width")) == 2 && int(loaded.get("height")) == 2, "image dimensions")
+def pixels = loaded.get("data")
+assert(len(pixels) == 16, "decoded RGBA buffer size")
+assert(load8(pixels, 0) == 255 && load8(pixels, 1) == 0 && load8(pixels, 2) == 0 && load8(pixels, 3) == 255, "red pixel")
+assert(load8(pixels, 4) == 0 && load8(pixels, 5) == 255 && load8(pixels, 6) == 0 && load8(pixels, 7) == 128, "green half-alpha pixel")
+assert(load8(pixels, 10) == 255 && load8(pixels, 11) == 255 && load8(pixels, 15) == 0, "blue and transparent pixels")
+print("IMAGE-PNG-LOAD-OK")
+NY
+}

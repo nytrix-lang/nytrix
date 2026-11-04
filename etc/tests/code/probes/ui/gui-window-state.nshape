@@ -1,0 +1,26 @@
+shape gui-window-state {
+  family "probe-suite"
+  generator "regression"
+  features ["ny", "render", "gui", "window"]
+  template ny-test-case
+  expect compile_and_run
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  timeout 180
+  expect_stdout "GUI-WINDOW-STATE-OK"
+  source ny <<'NY'
+use core
+use core.os.ui.render.viewer.gui as gui
+gui.apply_window_rect("first", [20.0, 30.0, 320.0, 240.0])
+def first = gui.window_rect("first")
+assert(float(first.get(0)) == 20.0 && float(first.get(1)) == 30.0, "cold window state retains position")
+assert(float(first.get(2)) == 320.0 && float(first.get(3)) == 240.0, "cold window state retains size")
+gui.show_window("first", false)
+assert(!gui.window_visible("first"), "window visibility persists")
+gui.apply_window_rect("second", [40.0, 50.0, 400.0, 300.0])
+gui.show_window("first", true)
+assert(gui.window_visible("first"), "window can be shown again")
+assert(float(gui.window_rect("first").get(0)) == 20.0, "initialization preserves another window")
+assert(float(gui.window_rect("second").get(2)) == 400.0, "windows retain independent geometry")
+print("GUI-WINDOW-STATE-OK")
+NY
+}

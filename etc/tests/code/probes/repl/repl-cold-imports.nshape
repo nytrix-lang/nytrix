@@ -55,7 +55,9 @@ assert(result.get("code", 127) == 0 &&
        str.find(output, "failed during compilation") < 0 &&
        str.find(output, "Segmentation fault") < 0 &&
        str.find(output, "panic") < 0,
-       "cold REPL imports failed: " + output)
+       "cold REPL imports failed (exit=" + to_str(result.get("code", 127)) +
+          ", input-bytes=" + to_str(script.len) + ", argv=" +
+          repr(result.get("argv", [])) + "): " + output)
 print("REPL-COLD-IMPORTS-OK")
 NY
 }

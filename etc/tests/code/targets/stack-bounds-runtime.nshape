@@ -26,11 +26,31 @@ fn stack_compile_args(str compiler, str backend, str abi,
                       str output, int index) list {
   mut args = [compiler, "--no-effect-require-known",
               "--no-alias-require-known", "--native-backend=" + backend,
-              "--native-only", "--nyir-verify", "--emit-asm=" + output,
+              "--native-only", "--nyr-verify", "--emit-asm=" + output,
               "-no-std", "-emit-only", "-e", checked_program(index)]
   if abi.len > 0 {
     args.append("--native-abi=" + abi)
   }
+  args
+}
+
+fn stack_link_args(str backend, str triple, str output, str assembly_path,
+                   str startup, str runtime_obj) list {
+  mut args = ["clang", "--target=" + triple]
+  if backend == "mips" {
+    args.append("-mno-abicalls")
+    args.append("-fno-pic")
+  }
+  args.append("-fuse-ld=lld")
+  args.append("-nostdlib")
+  args.append("-static")
+  args.append("-Wl,-e,_start")
+  args.append("-Wl,--build-id=none")
+  args.append("-o")
+  args.append(output)
+  args.append(assembly_path)
+  args.append(startup)
+  args.append(runtime_obj)
   args
 }
 
@@ -90,36 +110,23 @@ fn check_target(str backend, str triple, str qemu, str abi,
   def positive_link =
       if runtime_build.get("code", 127) == 0 &&
          positive_emit.get("code", 127) == 0 {
-        run_capture(["clang", "--target=" + triple] +
-                    (if backend == "mips"
-                     { ["-mno-abicalls", "-fno-pic"] } else { [] }) +
-                    ["-fuse-ld=lld",
-                     "-nostdlib", "-static", "-Wl,-e,_start",
-                     "-Wl,--build-id=none", "-o", positive_exe, positive_asm,
-                     start_path, runtime_obj], [], nil, false)
+        run_capture(stack_link_args(backend, triple, positive_exe,
+                                    positive_asm, start_path, runtime_obj),
+                    [], nil, false)
       } else { run_capture(["false"], [], nil, false) }
   def negative_link =
       if runtime_build.get("code", 127) == 0 &&
          negative_emit.get("code", 127) == 0 {
-        run_capture(["clang", "--target=" + triple] +
-                    (if backend == "mips"
-                     { ["-mno-abicalls", "-fno-pic"] } else { [] }) +
-                    ["-fuse-ld=lld",
-                     "-nostdlib", "-static", "-Wl,-e,_start",
-                     "-Wl,--build-id=none", "-o", negative_exe, negative_asm,
-                     start_path, runtime_obj], [], nil, false)
+        run_capture(stack_link_args(backend, triple, negative_exe,
+                                    negative_asm, start_path, runtime_obj),
+                    [], nil, false)
       } else { run_capture(["false"], [], nil, false) }
   def negative_index_link =
       if runtime_build.get("code", 127) == 0 &&
          negative_index_emit.get("code", 127) == 0 {
-        run_capture(["clang", "--target=" + triple] +
-                    (if backend == "mips"
-                     { ["-mno-abicalls", "-fno-pic"] } else { [] }) +
-                    ["-fuse-ld=lld",
-                     "-nostdlib", "-static", "-Wl,-e,_start",
-                     "-Wl,--build-id=none", "-o", negative_index_exe,
-                     negative_index_asm, start_path, runtime_obj], [], nil,
-                    false)
+        run_capture(stack_link_args(backend, triple, negative_index_exe,
+                                    negative_index_asm, start_path, runtime_obj),
+                    [], nil, false)
       } else { run_capture(["false"], [], nil, false) }
   def positive_run =
       if positive_link.get("code", 127) == 0 {

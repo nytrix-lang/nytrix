@@ -1753,12 +1753,11 @@ static int cmd_public_compiler_known_bugs(int argc, char **argv) {
        "-1", "0", "o3_peak"}};
   static const compiler_known_process_bug_t process_specs[] = {
       {"NY-006", "core.os.args.argv out-of-range runtime crash",
-       "etc/tests/code/probes/argv-oob.nshape", "crash", NULL, NULL, 8.0},
+       "etc/tests/code/probes/cli/argv-oob.nshape", "crash", NULL, NULL, 8.0},
       {"NY-007", "core.math.parse.syntax CMake tokenizer timeout on tiny seed",
        "etc/tests/lang/parsing/cmake-tokenizer-hang.nshape", "timeout", NULL,
        NULL, 5.0},
-      {"NY-005",
-       "bare core.dict import fails without prior core import",
+      {"NY-005", "bare core.dict import fails without prior core import",
        "etc/tests/lang/modules/bare-dict-import.nshape", "compile_error",
        "Could not load core.ny or standard library source files",
        "etc/tests/lang/modules/bare-dict-import-baseline.nshape", 8.0}};
@@ -2692,7 +2691,7 @@ static int cmd_public_compiler_std_audit(int argc, char **argv) {
   string_list_t simmd_defs = {0}, simmd_refs = {0},
                 simmd_missing_wrappers = {0}, simmd_unknown_refs = {0};
   char *defs_path = NULL, *lib_dir = NULL, *rt_dir = NULL;
-  (void)asprintf(&defs_path, "%s/src/code/lang/runtime/defs.h", root);
+  (void)asprintf(&defs_path, "%s/src/code/backend/runtime/defs.h", root);
   (void)asprintf(&lib_dir, "%s/lib", root);
   (void)asprintf(&rt_dir, "%s/etc/tests/runtime", root);
   file_buf_t defs_file = {0};
@@ -2700,7 +2699,8 @@ static int cmd_public_compiler_std_audit(int argc, char **argv) {
   if (ok) {
     audit_extract_runtime_defs(defs_file.data, &defs, &duplicate_defs);
   } else {
-    (void)string_list_push_copy(&scan_errors, "src/code/lang/runtime/defs.h");
+    (void)string_list_push_copy(&scan_errors,
+                                "src/code/backend/runtime/defs.h");
   }
   if (lib_dir && !collect_regular_files_recursive(lib_dir, &files))
     (void)string_list_push_copy(&scan_errors, "lib");
@@ -4170,7 +4170,8 @@ static char *promote_real_db_source(
   char *case_dir = NULL, *dst_ny = NULL;
   bool path_ok = asprintf(&case_dir, "%s/cases/%s", corpus_dir, id) >= 0 &&
                  asprintf(&dst_ny, "%s/case.ny", case_dir) >= 0;
-  if (!path_ok || !ny_mkdir_p(case_dir) || !copy_file_bytes(source_path, dst_ny)) {
+  if (!path_ok || !ny_mkdir_p(case_dir) ||
+      !copy_file_bytes(source_path, dst_ny)) {
     str_buf_t fail = {0};
     (void)sb_append(
         &fail,
@@ -4919,7 +4920,8 @@ static int cmd_public_synth_creal(int argc, char **argv) {
         bool path_ok =
             asprintf(&case_dir, "%s/%s", out_dir, generated_name) >= 0 &&
             asprintf(&dst_c, "%s/%s.c", case_dir, generated_name) >= 0;
-        if (!path_ok || !ny_mkdir_p(case_dir) || !copy_file_bytes(src_c, dst_c)) {
+        if (!path_ok || !ny_mkdir_p(case_dir) ||
+            !copy_file_bytes(src_c, dst_c)) {
           char *row =
               make_worker_failure_row(generated_name, "creal-copy", 1, "",
                                       "failed to copy Creal C source");

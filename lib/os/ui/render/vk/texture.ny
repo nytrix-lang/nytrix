@@ -277,8 +277,8 @@ fn _store_texture_slot(int tex_id, any tex, any ds, int format) bool {
       _textures[tex_id] = tex
       _texture_ds_cache[tex_id] = ds
    } else {
-      _textures = _textures.append(tex)
-      _texture_ds_cache = _texture_ds_cache.append(ds)
+      _textures = __append(_textures, tex)
+      _texture_ds_cache = __append(_texture_ds_cache, ds)
    }
    if _texture_fmt_cache != 0 { store8(_texture_fmt_cache, format, tex_id) }
    true
@@ -344,6 +344,9 @@ fn _ensure_sampler(any filter, any wrap_s=10497, any wrap_t=10497) ?handle {
    def norm = _normalize_filter(filter)
    def uw = _normalize_wrap_mode(wrap_s)
    def vw = _normalize_wrap_mode(wrap_t)
+   def sampler_key = to_str(norm) + ":" + to_str(uw) + ":" + to_str(vw)
+   def cached_sampler = _sampler_cache.get(sampler_key, 0)
+   if cached_sampler { return int(cached_sampler) }
    if uw == 0 && vw == 0 {
       def cur = norm ? _linear_sampler : _nearest_sampler
       if cur { return cur }
@@ -365,6 +368,7 @@ fn _ensure_sampler(any filter, any wrap_s=10497, any wrap_t=10497) ?handle {
       return 0
    }
    def sampler = load64_h(sampler_ptr, 0)
+   if sampler { _sampler_cache[sampler_key] = sampler }
    if uw == 0 && vw == 0 {
       if norm { _linear_sampler = sampler }
       else { _nearest_sampler = sampler }
@@ -1028,7 +1032,7 @@ fn destroy_texture(any tex_id) any {
    _textures[tex_id] = 0
    _texture_ds_cache[tex_id] = 0
    if _texture_fmt_cache != 0 && tex_id >= 0 && tex_id < _max_textures_value() { store8(_texture_fmt_cache, 0, tex_id) }
-   _free_texture_ids = _free_texture_ids.append(tex_id)
+   _free_texture_ids = __append(_free_texture_ids, tex_id)
    _material_ds_cache = dict(64)
    0
 }

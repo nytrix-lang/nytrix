@@ -7,11 +7,15 @@ shape bench_straight {
   source ny <<'NY'
 use core
 use core.os.time
+; Repeat a branch-free integer kernel with runtime input so every backend
+; measures real work rather than folding the entire sum to a constant.
+mut int x = (argc() - 1) ^ 798673882
+mut int i = 0
 def int t0 = ticks()
-mut x = 0
-mut i = 1
-while i <= 100 {
-  x += i
+while i < 8192 {
+  x = (x ^ (x << 13)) & 2147483647
+  x ^= x >> 17
+  x = (x ^ (x << 5)) & 2147483647
   i += 1
 }
 def int t1 = ticks()
@@ -29,13 +33,21 @@ static int64_t now_ns(void) {
   return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
 }
 
-int main(void) {
+int main(int argc, char **argv) {
+  (void)argv;
+  /* Same runtime seed, 31-bit recurrence, rounds, and timed region as Ny.
+     Masking keeps each signed shift in range; argc == 1 yields 5050. */
+  int64_t x = ((int64_t)argc - 1) ^ 798673882;
+  int64_t i = 0;
   int64_t t0 = now_ns();
-  int x = 0;
-  for (int i = 1; i <= 100; i++)
-    x += i;
+  while (i < 8192) {
+    x = (x ^ (x << 13)) & 2147483647;
+    x ^= x >> 17;
+    x = (x ^ (x << 5)) & 2147483647;
+    i++;
+  }
   int64_t t1 = now_ns();
-  printf("checksum=%d\n", x);
+  printf("checksum=%lld\n", (long long)x);
   printf("elapsed_ns=%lld\n", (long long)(t1 - t0));
   return 0;
 }

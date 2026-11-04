@@ -4,7 +4,7 @@ shape ownership_rule_exclusive_borrow_constant_expression_index_overlap {
   features ["error", "ownership", "borrow", "exclusive", "constant-index", "overlap"]
   template ny-compile-fail
   expect compile_fail
-  flags "--ownership-strict --nyir-verify"
+  flags "--ownership-strict --nyr-verify"
 
   source ny <<'NY'
 use core

@@ -248,7 +248,7 @@ fn _arithmetic_eval(any expression, dict state, int depth) any {
    if !_consume(state, depth) { return nil }
    if is_int(expression) || is_float(expression) { return expression }
    if !prolog.is_term(expression) { return nil }
-   def name = expression.get("name")
+   def str name = expression.get("name")
    def list args = expression.get("args")
    if name == "neg" && args.len == 1 {
       def value = _arithmetic_eval(_list_at(args, 0), state, depth + 1)
@@ -317,10 +317,14 @@ fn _linear_holds(any constraint, dict assignment, dict state) bool {
 }
 
 fn _finite_walk(list names, any domains, int index, dict assignment,
-   any predicate, dict state, int depth) any {
+   fnptr predicate, dict state, int depth) any {
    if !_consume(state, depth) { return nil }
    if index >= names.len {
-      if predicate(assignment) { return assignment }
+      def callback_result = predicate(assignment)
+      ;; Indirect predicates can return the native bool ABI (0/1), while the
+      ;; dynamic branch condition expects a canonical tagged bool. Normalize
+      ;; at this callback boundary so a true witness is not treated as false.
+      if bool(callback_result) { return assignment }
       return nil
    }
    def name = to_str(_list_at(names, index))
@@ -329,14 +333,14 @@ fn _finite_walk(list names, any domains, int index, dict assignment,
    while i < values.len {
       def found = _finite_walk(names, domains, index + 1,
          assignment.set(name, _list_at(values, i)), predicate, state, depth + 1)
-      if found != nil || !state.get("decided") { return found }
+      if is_dict(found) || !state.get("decided") { return found }
       i += 1
    }
    nil
 }
 
 ;; Returns the result of the `finite` operation.
-fn finite(any domains, any predicate, int max_steps=100000,
+fn finite(any domains, fnptr predicate, int max_steps=100000,
    int max_nodes=100000, int max_depth=128, int max_variables=32,
    int max_memory=1000000) dict {
    def list names = domains.keys()
@@ -366,7 +370,7 @@ fn finite(any domains, any predicate, int max_steps=100000,
       "nodes":0, "max_steps":max_steps, "max_nodes":max_nodes,
       "max_depth":max_depth, "memory":cells, "max_memory":max_memory}
    def assignment = _finite_walk(names, domains, 0, dict(16), predicate, state, 0)
-   def found = assignment != nil
+   def found = is_dict(assignment)
    if found { state["reason"] = "witness" }
    def evidence = {"domains":domains, "assignment":assignment,
       "exhausted":state.get("decided") && !found}

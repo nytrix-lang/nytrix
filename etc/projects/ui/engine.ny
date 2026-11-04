@@ -2,12 +2,16 @@
 
 ;; Keywords: ui engine example
 ;; A collection of rendering paths, benchmarks, and utilities for testing, profiling, diagnostics, and tooling.
+;; Replay state includes scene selection, transforms, camera/matrices, and
+;; per-frame framebuffer hashes. Cross-route tests load a fixed asset, apply
+;; scripted events, and compare engine state and rendered frames.
 use core
 use core.common as common
 use core.str as str
 use core.math
 use core.math.float (is_nan, is_inf)
 use core.os (exit)
+use core.os.args as process_args
 use core.os.subprocess (run_capture)
 use core.os.fs as osfs
 use core.os.path as ospath
@@ -95,6 +99,7 @@ mut bool _gui_asset_state_cache_has_scene = false
 mut dict _gui_asset_state_cache = own(dict(0))
 
 fn create(any config) dict {
+   ensure_matrices()
    "Create a shared demo UI app context."
    {"config": config}
 }
@@ -151,7 +156,7 @@ fn _proof_dump_active() bool {
 }
 
 fn _chrome_visible() bool {
-   !ui_profile.nosurface_enabled() || ui_profile.headless_gui_enabled()
+   (!_batch_dump_enabled() && !ui_profile.nosurface_enabled()) || ui_profile.headless_gui_enabled()
 }
 
 fn _gui_enabled_now() bool {
@@ -645,9 +650,10 @@ fn _ui_cli_color(str code, str text) str {
 }
 
 fn _ui_has_help_arg() bool {
+   def cli_argv = process_args.args()
    mut i = 1
-   while i < argc() {
-      def str a = str.lower(str.strip(to_str(argv(i))))
+   while i < cli_argv.len {
+      def str a = str.lower(str.strip(to_str(cli_argv.get(i, ""))))
       if a == "-h" || a == "--help" || a == "help" { return true }
       i += 1
    }
@@ -693,7 +699,7 @@ fn _ui_print_help() any {
    print("")
    print(_ui_cli_color("1;33", "Examples"))
    print("  ./make ny etc/projects/ui/engine.ny -v -vk load BoxAnimated")
-   print("  ./make ny etc/projects/ui/engine.ny --headless --dump load Avocado")
+   print("  ./make ny etc/projects/ui/engine.ny --headless --inspect load Avocado")
    0
 }
 
@@ -1309,8 +1315,7 @@ fn _snapshot_ok(path) {
       def res = run_capture(["mkdir", "-p", dir], [], nil, false)
       if !bool(res.get("ok", false)) && !osfs.is_dir(dir) { return false }
    }
-   if gfx.snapshot(out_path) { return true }
-   osfs.is_file(out_path)
+   gfx.snapshot(out_path)
 }
 
 fn _gui_take_snapshot() {
@@ -1418,6 +1423,7 @@ fn _ui_static_update_clean() bool {
    if _proj_dirty || _ui_view_input_active() { return false }
    if _term_open || _gui_enabled_now() || _scene_load_async_active() { return false }
    if _batch_dump_enabled() || _gui_dump_suite_active || _pending_auto_dump { return false }
+   if _auto_dump_enabled == 1 && !_auto_dump_done { return false }
    if _anim_enabled { return false }
    if _anim_count > 0 && !_scene_static_pose_gpu_ready() && !_scene_deform_idle_ready() { return false }
    if _scene_deform_blocks_static() { return false }
@@ -2101,7 +2107,6 @@ fn _set_timeout() {
 
 fn _init_fonts() {
    def t0 = (_ui_debug_enabled == 1) ? ticks() : 0
-   def editor_paths = ui_assets.EDITOR_FONT_CANDIDATES
    _gui_dpi_scale = _ui_auto_dpi_scale()
    if !ui_profile.gui_scale_env_present() {
       _gui_scale = ui_app.app_gui_scale_for_window(_win_w, _win_h, _gui_dpi_scale)
@@ -2120,22 +2125,15 @@ fn _init_fonts() {
          " ui_filter=" + to_str(ui_font_filter) +
       " title_filter=" + to_str(title_font_filter))
    }
+   def editor_paths = ui_assets.EDITOR_FONT_CANDIDATES
    res_font = ui_assets.editor_font(base_font_sz, editor_paths, font_filter)
    res_font_ui = ui_assets.editor_font(ui_font_sz, editor_paths, ui_font_filter)
    res_font_title = ui_assets.editor_font(title_font_sz, editor_paths, title_font_filter)
    res_font_small = ui_assets.editor_font(small_font_sz, editor_paths, ui_font_filter)
-   if !res_font {
-      ui_runtime.dbg("ui", "font fallback active")
-   }
-   if !res_font_ui {
-      res_font_ui = ui_assets.editor_font(ui_font_sz, editor_paths, ui_font_filter)
-   }
-   if !res_font_title {
-      res_font_title = _ui_font()
-   }
-   if !res_font_small {
-      res_font_small = _ui_font()
-   }
+   if !res_font { ui_runtime.dbg("ui", "font fallback active") }
+   if !res_font_ui { res_font_ui = ui_assets.editor_font(ui_font_sz, editor_paths, ui_font_filter) }
+   if !res_font_title { res_font_title = _ui_font() }
+   if !res_font_small { res_font_small = _ui_font() }
    if _ui_debug_enabled == 1 {
       def ms = ui_profile.elapsed_ms(t0)
       _dbg_ui("[ui] fonts: done base_id=" + to_str(res_font) + " ui_id=" + to_str(res_font_ui) +
@@ -2255,6 +2253,14 @@ fn _startup_exec_env_cmds() {
 fn _apply_startup_render_env() bool {
    gfx.apply_backend_env()
    if _cli_render_backend.len > 0 { gfx.apply_backend_name(_cli_render_backend) }
+   if common.env_truthy("NYTRIX_UI_REPLAY") {
+      def replay_backend = common.env_lower("NYTRIX_UI_REPLAY_BACKEND")
+      if replay_backend == "gl" {
+         gfx.set_backend_type(gfx.BACKEND_GL)
+      } elif replay_backend == "" || replay_backend == "mock" {
+         gfx.set_backend_type(gfx.BACKEND_MOCK)
+      }
+   }
    def cfg = ui_app.app_startup_render_config(APP_MSAA, APP_VSYNC, APP_FILTER_LINEAR)
    APP_MSAA = int(cfg.get("msaa", APP_MSAA))
    APP_VSYNC = bool(cfg.get("vsync", APP_VSYNC))
@@ -2295,8 +2301,12 @@ fn _setup_window() {
    } else {
       def headless = ui_profile.headless_enabled()
       def extent = ui_app.app_window_extent_from_env(headless)
-      def open_w = int(extent.get(0, 1280))
-      def open_h = int(extent.get(1, 720))
+      mut open_w = int(extent.get(0, 1280))
+      mut open_h = int(extent.get(1, 720))
+      if ui_profile.env_truthy_cached("NYTRIX_UI_REPLAY") {
+         open_w = ui_profile.env_int_cached("NYTRIX_FIXTURE_WIDTH", open_w, 1, 16384)
+         open_h = ui_profile.env_int_cached("NYTRIX_FIXTURE_HEIGHT", open_h, 1, 16384)
+      }
       def flags = headless ? WINDOW_HIDE :
          WINDOW_FOCUS_ON_SHOW | (ui_bootstrap.raw_mouse_enabled() ? WINDOW_RAW_MOUSE : 0)
       open_handle = ui_runtime.open_windowed(
@@ -2314,7 +2324,9 @@ fn _setup_window() {
    _dbg_ui("[ui] startup: window opened")
    active_backend_name = get_active_backend_name()
    set_clear_color(APP_BG)
-   if !gfx.backend_capabilities().get("double_buffered", false) {
+   def renderer_caps = gfx.backend_capabilities()
+   def replay_mock = ui_profile.env_truthy_cached("NYTRIX_UI_REPLAY") && active_backend_name == "mock"
+   if !renderer_caps.get("double_buffered", false) && !replay_mock {
       def fail_msg = ui_bootstrap.failure_summary(active_backend_name, ui_profile.headless_enabled())
       eprint("[ui] GPU renderer is required: " + fail_msg)
       exit(1)
@@ -2346,19 +2358,19 @@ fn _setup_camera() {
    }
    camera.set_fov(camthreed, start_fov)
    camera.set_smoothing(camthreed, 25.0, 10.0)
-   _cam_px = camthreed.get(0)
-   _cam_py = camthreed.get(1)
-   _cam_pz = camthreed.get(2)
-   _vx = camthreed.get(3)
-   _vy = camthreed.get(4)
-   _vz = camthreed.get(5)
-   _h_yaw = camthreed.get(6)
-   _h_pch = camthreed.get(7)
-   _target_yaw = camthreed.get(8)
-   _target_pch = camthreed.get(9)
-   _spdx = camthreed.get(17)
-   _spdy = camthreed.get(18)
-   _spd_z = camthreed.get(19)
+   _cam_px = float(camthreed.get(0))
+   _cam_py = float(camthreed.get(1))
+   _cam_pz = float(camthreed.get(2))
+   _vx = float(camthreed.get(3))
+   _vy = float(camthreed.get(4))
+   _vz = float(camthreed.get(5))
+   _h_yaw = float(camthreed.get(6))
+   _h_pch = float(camthreed.get(7))
+   _target_yaw = float(camthreed.get(8))
+   _target_pch = float(camthreed.get(9))
+   _spdx = float(camthreed.get(17))
+   _spdy = float(camthreed.get(18))
+   _spd_z = float(camthreed.get(19))
    _cam_fov = float(camthreed.get(16))
    _sens = float(camthreed.get(10)) * 3.5
    _spd = float(camthreed.get(11))
@@ -2374,20 +2386,20 @@ fn _setup_camera() {
 }
 
 fn _sync_cam_state_from_camthreed() {
-   _cam_px = camthreed.get(0, _cam_px)
-   _cam_py = camthreed.get(1, _cam_py)
-   _cam_pz = camthreed.get(2, _cam_pz)
-   _vx = camthreed.get(3, _vx)
-   _vy = camthreed.get(4, _vy)
-   _vz = camthreed.get(5, _vz)
-   _h_yaw = camthreed.get(6, _h_yaw)
-   _h_pch = camthreed.get(7, _h_pch)
-   _target_yaw = camthreed.get(8, _target_yaw)
-   _target_pch = camthreed.get(9, _target_pch)
-   _spdx = camthreed.get(17, _spdx)
-   _spdy = camthreed.get(18, _spdy)
-   _spd_z = camthreed.get(19, _spd_z)
-   _cam_fov = camthreed.get(16, _cam_fov)
+   _cam_px = float(camthreed.get(0, _cam_px))
+   _cam_py = float(camthreed.get(1, _cam_py))
+   _cam_pz = float(camthreed.get(2, _cam_pz))
+   _vx = float(camthreed.get(3, _vx))
+   _vy = float(camthreed.get(4, _vy))
+   _vz = float(camthreed.get(5, _vz))
+   _h_yaw = float(camthreed.get(6, _h_yaw))
+   _h_pch = float(camthreed.get(7, _h_pch))
+   _target_yaw = float(camthreed.get(8, _target_yaw))
+   _target_pch = float(camthreed.get(9, _target_pch))
+   _spdx = float(camthreed.get(17, _spdx))
+   _spdy = float(camthreed.get(18, _spdy))
+   _spd_z = float(camthreed.get(19, _spd_z))
+   _cam_fov = float(camthreed.get(16, _cam_fov))
    _cam_px_cache = _cam_px
    _cam_py_cache = _cam_py
    _cam_pz_cache = _cam_pz
@@ -2921,8 +2933,8 @@ fn _draw_infinite_world_grid(cam_px, cam_pz, include_axes=false) {
    gfx.set_model_matrix(M_PR)
    if trace_grid { ui_profile.print_text("[ui:grid] pair.before") }
    draw_grid_pair(
-      fine_span, fine_cell, [0.22,0.28,0.38,0.34], [0.44,0.56,0.74,0.62], line_w,
-      major_span, major_cell, [0.34,0.44,0.60,0.42], [0.70,0.84,1.00,0.88], line_w,
+      fine_span, fine_cell, [0.42,0.50,0.64,0.58], [0.60,0.72,0.90,0.78], line_w,
+      major_span, major_cell, [0.50,0.60,0.76,0.68], [0.82,0.92,1.00,0.96], line_w,
       mx - gx, mz - gz
    )
    if trace_grid { ui_profile.print_text("[ui:grid] pair.after") }
@@ -2959,7 +2971,7 @@ fn _apply_batch_scene_clear_color(name) {
    return
 }
 
-fn _auto_dump_ready_now() {
+fn _auto_dump_ready_now() bool {
    if _scene_load_async_active() || _startup_post_load_pending {
       return false
    }
@@ -3071,8 +3083,24 @@ fn _exec_projection_camera_cmd(cmd, parts) bool {
 fn _exec_selection_cmd(cmd, parts) bool {
    if eq(cmd, "autofit") || eq(cmd, "fit") { def _discard_16 = _cmd_autofit(true) return true }
    if eq(cmd, "lookat") || eq(cmd, "focus") || eq(cmd, "frame") { def _discard_17 = _cmd_lookat(true) return true }
+   if eq(cmd, "translate") {
+      if is_dict(active_scene) {
+         active_scene["edit_tx"] = str.atof(to_str(parts.get(1, "0")))
+         active_scene["edit_ty"] = str.atof(to_str(parts.get(2, "0")))
+         active_scene["edit_tz"] = str.atof(to_str(parts.get(3, "0")))
+         _scene_selection_bounds_cache_clear()
+         _scene_edit_redraw(3)
+         if ui_profile.env_truthy_cached("NYTRIX_UI_REPLAY") {
+            print("NYTRIX_ENGINE_ACTION type=translate value=" +
+               to_str(active_scene.get("edit_tx", 0.0)) + "," +
+               to_str(active_scene.get("edit_ty", 0.0)) + "," +
+               to_str(active_scene.get("edit_tz", 0.0)))
+         }
+      }
+      return true
+   }
    if eq(cmd, "select") {
-      if !_scene_editor_tools_enabled() {
+      if !_scene_editor_tools_enabled() && !ui_profile.env_truthy_cached("NYTRIX_UI_REPLAY") {
          _scene_clear_selection("cmd select ignored")
          terminal.log("Selection: editor closed")
          return true
@@ -3080,6 +3108,9 @@ fn _exec_selection_cmd(cmd, parts) bool {
       _scene_selected = is_dict(active_scene) && show_scene
       _sync_cursor_state("cmd select")
       terminal.log(_scene_selected ? "Selection: scene" : "Selection: none")
+      if ui_profile.env_truthy_cached("NYTRIX_UI_REPLAY") {
+         print("NYTRIX_ENGINE_ACTION type=select selected=" + to_str(_scene_selected))
+      }
       return true
    }
    if eq(cmd, "gizmo") {
@@ -3444,7 +3475,7 @@ fn _editor_draw_header(rs, layout_now, active_shot, editor_w, editor_h, card_w) 
    header_stats["frame_ms"] = _last_frame_ms
    def display_fps = ui_profile.parity_lock_stats_enabled() ? 0 : fps
    def scene_label = _loaded_scene_name.len > 0 ? _loaded_scene_name : "No scene"
-   gui.text_colored("Nytrix Editor", [0.94, 0.94, 0.94, 0.98])
+   gui.text_colored("Nytrix Engine", [0.94, 0.94, 0.94, 0.98])
    gui.text_colored(scene_label + "  " + to_str(int(display_fps)) + " fps  " + to_str(layout_now), [0.66, 0.66, 0.66, 0.90])
    def selected = gui.tab_strip("engine_editor_tabs", _gui_editor_tab_items, _gui_editor_tab, max(320.0, float(editor_w) - 28.0), 30.0)
    selected
@@ -4679,6 +4710,9 @@ fn _note_first_frame_render_result(bool rendered) {
 
 fn _startup_config_env() {
    _ui_apply_cli_options()
+   ;; Keep the first surfaced frame on the editor's readable default even if
+   ;; an imported state module was initialized from the legacy black default.
+   APP_BG = [0.055, 0.070, 0.095, 1.0]
    _ui_debug_enabled = (ui_profile.env_truthy_cached("NY_UI_DEBUG") || _startup_trace_enabled()) ? 1 : 0
    APP_STATS = ui_profile.env_toggle_cached("NY_UI_STATS", APP_STATS)
    if (!ui_profile.env_present_cached("NY_UI_STATS") && ui_profile.env_truthy_cached("NY_UI_STATS_AUTO") &&
@@ -4900,11 +4934,15 @@ fn _startup_exec_commands_and_scene() {
       show_scene = _loaded_scene_name.len > 0
       _clear_anim_state()
       if show_scene {
+         if ui_profile.env_truthy_cached("NYTRIX_UI_REPLAY") {
+            print("NYTRIX_ENGINE_ACTION type=load asset=" + _loaded_scene_name)
+         }
          def _discard_12 = _dbg_ui("[ui] startup env load: " + _loaded_scene_name)
       }
    }
-   if !show_scene && argc() > 2 && eq(str.lower(to_str(argv(1))), "load") {
-      _loaded_scene_name = str.strip(to_str(argv(2)))
+   def startup_argv = viewer_cli.argv_list()
+   if !show_scene && startup_argv.len > 2 && eq(str.lower(to_str(startup_argv.get(1, ""))), "load") {
+      _loaded_scene_name = str.strip(to_str(startup_argv.get(2, "")))
       show_scene = _loaded_scene_name.len > 0
       _clear_anim_state()
       _cli_scene_requested = true
@@ -5207,7 +5245,7 @@ fn _app_run_bench_sim(dt, trace, deep_trace) {
 
 fn _app_pump_bench_events() {
    mut e = _app_next_event()
-   _cam_fov = camthreed.get(16)
+   _cam_fov = float(camthreed.get(16))
    while e != 0 {
       def typ = event_type(e)
       def data = event_data(e)
@@ -5759,7 +5797,7 @@ fn _app_process_events() {
    _ui_set_update_stage("event.poll")
    mut e = _app_next_event()
    ui_idle.note_events_seen(e != 0)
-   _cam_fov = camthreed.get(16)
+   _cam_fov = float(camthreed.get(16))
    _ui_set_update_stage("gui.enable")
    mut gui_enabled_frame = _gui_enabled_now()
    gui.set_enabled(gui_enabled_frame)
@@ -6377,7 +6415,7 @@ fn _present_loading_frame(label) {
    ok
 }
 
-fn render_thread_obj() {
+fn render_thread_obj() bool {
    "Draw one full renderer frame for the current UI state."
    def phase = _render_phase
    if phase < 0.0 { return false }
@@ -7223,9 +7261,7 @@ fn _main_loop_gui_capture_requests(bool gui_now_frame) {
          + " path_len=" + to_str(_main_loop_gui_dump_path.len)
          + " delay=" + to_str(ui_dump.gui_auto_dump_delay())
          + " want=" + to_str(want_gui_capture)
-         + " suite=" + to_str(_gui_dump_suite_active_now())
-         + " auto_enabled=" + to_str(_auto_dump_enabled)
-      + " pending_auto=" + to_str(_pending_auto_dump))
+         + " suite=" + to_str(_gui_dump_suite_active_now()))
    }
    mut want_gui_suite_capture = false
    if _gui_dump_suite_active_now() {
@@ -7458,12 +7494,63 @@ fn _main_loop_finish_timeout(timeout_close) {
    }
 }
 
+fn _ui_replay_matrix_text(any matrix) str {
+   if !is_list(matrix) { return "none" }
+   mut str out = ""
+   mut i = 2
+   def end = min(matrix.len, 18)
+   while i < end {
+      if i > 2 { out += "," }
+      out += to_str(float(matrix[i]))
+      i += 1
+   }
+   out
+}
+
 fn _main_loop_count_frame(rendered, now) {
    if !rendered {
       return
    }
    frame_num += 1
    total_frames += 1
+   if ui_profile.env_truthy_cached("NYTRIX_UI_REPLAY") {
+      mut scene_state = " transform=none"
+      if is_dict(active_scene) {
+         scene_state = " transform=" + to_str(active_scene.get("edit_tx", 0.0)) + "," +
+            to_str(active_scene.get("edit_ty", 0.0)) + "," +
+            to_str(active_scene.get("edit_tz", 0.0)) + "," +
+            to_str(active_scene.get("edit_rx", 0.0)) + "," +
+            to_str(active_scene.get("edit_ry", 0.0)) + "," +
+            to_str(active_scene.get("edit_rz", 0.0)) + "," +
+            to_str(active_scene.get("edit_scale", 1.0))
+      }
+      mut str replay_state = "NYTRIX_ENGINE_STATE frame=" + to_str(total_frames)
+      def str replay_scene_name = _loaded_scene_name.len > 0 ? _loaded_scene_name : "<none>"
+      replay_state += " scene=" + replay_scene_name
+      replay_state += " loaded=" + to_str(is_dict(active_scene))
+      replay_state += " selected=" + to_str(_scene_selected) + scene_state
+      replay_state += " cam=" + to_str(camthreed.get(0, 0.0)) + "," +
+         to_str(camthreed.get(1, 0.0)) + "," + to_str(camthreed.get(2, 0.0))
+      replay_state += " cam_index=" + to_str(float(camthreed[0])) + "," +
+         to_str(float(camthreed[1])) + "," + to_str(float(camthreed[2]))
+      if is_dict(active_scene) {
+         replay_state += " fit_cam=" + to_str(active_scene.get("fit_cam_x", 0.0)) + "," +
+            to_str(active_scene.get("fit_cam_y", 0.0)) + "," +
+            to_str(active_scene.get("fit_cam_z", 0.0))
+         replay_state += " scene_bounds=" + to_str(camera.mesh_fit_bounds(active_scene))
+      } else {
+         replay_state += " fit_cam=none"
+         replay_state += " scene_bounds=none"
+      }
+      replay_state += " view=" + _ui_replay_matrix_text(M_V)
+      replay_state += " projection=" + _ui_replay_matrix_text(M_P)
+      replay_state += " view_projection=" + _ui_replay_matrix_text(M_VP)
+      print(replay_state)
+   }
+   if ui_profile.env_truthy_cached("NYTRIX_UI_REPLAY") &&
+      total_frames >= ui_profile.env_int_cached("NYTRIX_FIXTURE_FRAMES", 3, 1, 100000) {
+      set_should_close(win, true)
+   }
    if ui_profile.env_truthy_cached("NY_UI_GROUP_TRACE") { ui_profile.print_text("[ui:loop] fps.before") }
    def _discard_sample = _sample_fps_tick(now, true)
    if ui_profile.env_truthy_cached("NY_UI_GROUP_TRACE") { ui_profile.print_text("[ui:loop] fps.after") }
@@ -7488,14 +7575,23 @@ fn _run_main_loop() {
       }
       _main_loop_trace_once("[ui:loop] pump.before")
       poll_events()
+      if ui_profile.env_truthy_cached("NYTRIX_UI_REPLAY") {
+         window.replay_window_frame(win)
+      }
       _main_loop_trace_once("[ui:loop] pump.after")
       def frame_t0 = ticks()
       def now = frame_t0
       mut dt = float(now - last_upd_t) / 1e9
+      if ui_profile.env_truthy_cached("NYTRIX_UI_REPLAY") {
+         dt = float(ui_profile.env_int_cached("NYTRIX_FIXTURE_FRAME_MS", 16, 1, 1000)) / 1000.0
+      }
       if dt > 0.1 { dt = 0.016 }
       if dt < 0.0001 { dt = 0.0001 }
       last_upd_t = now
-      def elapsed = now - start_t
+      mut elapsed = now - start_t
+      if ui_profile.env_truthy_cached("NYTRIX_UI_REPLAY") {
+         elapsed = int(float(total_frames) * dt * 1000000000.0)
+      }
       def trace = ui_profile.trace_enabled()
       def timeout_close = _main_loop_timeout_close(elapsed)
       _batch_dump_check_model_timeout(now)
@@ -7505,7 +7601,9 @@ fn _run_main_loop() {
       if ui_profile.env_truthy_cached("NY_UI_GROUP_TRACE") { ui_profile.print_text("[ui:loop] update.begin") }
       _main_loop_call_update(dt)
       if ui_profile.env_truthy_cached("NY_UI_GROUP_TRACE") { ui_profile.print_text("[ui:loop] update.after") }
-      if should_close(win) {
+      if should_close(win) &&
+      (!ui_profile.env_truthy_cached("NYTRIX_UI_REPLAY") ||
+      total_frames >= ui_profile.env_int_cached("NYTRIX_FIXTURE_FRAMES", 5, 1, 1000000)) {
          _main_loop_trace_once("[ui:loop] close-after-update")
          break
       }
@@ -7557,10 +7655,11 @@ fn draw_frame(any app=0) {
 }
 
 #main {
-   if common.env_truthy("NY_UI_HEADLESS") { exit(0) }
+   if common.env_truthy("NY_UI_HEADLESS") && !common.env_truthy("NYTRIX_UI_REPLAY") { exit(0) }
    if _ui_has_help_arg() { _ui_print_help() exit(0) }
    def app = create(from_env())
    startup(app)
    maybe_run(app)
    run(app)
+   exit(0)
 }

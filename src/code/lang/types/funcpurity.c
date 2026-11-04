@@ -63,7 +63,7 @@ static const ny_builtin_effect_contract_t ny_builtin_effect_contracts[] = {
   {name, effects, NY_BUILTIN_EFFECT_QUERY_RUN},
 #define NY_BUILTIN_OPTIONAL_HOF(name, effects)                                 \
   {name, effects, NY_BUILTIN_EFFECT_OPTIONAL_HOF},
-#include "code/lang/runtime/contracts.c"
+#include "code/lang/builtin.h"
 #undef NY_BUILTIN_OPTIONAL_HOF
 #undef NY_BUILTIN_QUERY_RUN
 #undef NY_BUILTIN_QUERY_PIPE
@@ -7448,10 +7448,15 @@ static bool ny_purity_match_pattern(codegen_t *cg, expr_t *pattern,
     enum_member_def_t *member =
         full_name ? lookup_enum_member_owner(cg, full_name, NULL) : NULL;
     if (member) {
-      if (pattern->kind == NY_E_MEMBER || pattern->kind == NY_E_IDENT)
+      /* Enum constructor patterns (member/memcall) are syntax, not calls.
+       * Always pure regardless of payload bindings. */
+      if (pattern->kind == NY_E_MEMBER || pattern->kind == NY_E_IDENT ||
+          pattern->kind == NY_E_MEMCALL)
         return true;
-      if (!allow_payload_bindings || !member->has_payload)
-        return false;
+      /* Fall through to payload binding only if explicitly allowed. */
+      if (!allow_payload_bindings)
+        return ny_expr_check_safe_internal(cg, pattern, local_names, local_hashes,
+                                            local_bloom, memo_safe_only);
       call_arg_t *args = NULL;
       size_t count = 0;
       if (!ny_expr_call_args(pattern, &args, &count) ||

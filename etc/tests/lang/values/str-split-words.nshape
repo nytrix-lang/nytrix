@@ -8,6 +8,33 @@ use core.str
 
 assert(str.repeat("ab", 3) == "ababab", "repeat copies the full source each time")
 assert(str.repeat("ab", 0) == "", "repeat handles zero repetitions")
+assert(str.repeat("ab", -3) == "", "repeat treats negative counts as empty")
+assert(str.repeat("", 4) == "", "repeat preserves empty strings")
+assert(str.repeat("é🙂", 3) == "é🙂é🙂é🙂",
+       "repeat preserves multi-byte UTF-8 content")
+def str repeated_block = str.repeat("0123456789abcdef", 64)
+assert(repeated_block.len == 1024 &&
+       repeated_block[0] == "0" && repeated_block[16] == "0" &&
+       repeated_block[1023] == "f",
+       "repeat preserves full blocks and the final byte")
+def str non_aligned_block = str.repeat("abcde", 1000)
+assert(non_aligned_block.len == 5000 &&
+       non_aligned_block[4095] == "a" &&
+       non_aligned_block[4096] == "b" &&
+       non_aligned_block[4999] == "e",
+       "repeat keeps source alignment across copy-block boundaries")
+assert(str.ascii_is_space(32) && str.ascii_is_digit(48),
+       "ASCII predicates return true through the library path")
+assert(!str.ascii_is_space(97) && !str.ascii_is_digit(65),
+       "ASCII predicates reject nonmatching bytes through the library path")
+assert(str.str_add("alpha", " beta") == "alpha beta",
+       "str_add preserves both input strings")
+assert(str.find("alpha beta", " ") == 5,
+       "find locates a literal separator after a nonmatch")
+assert(str.split("alpha beta", " ").len == 2,
+       "split preserves both sides of a literal separator")
+assert(str.strip(" \talpha\t ") == "alpha",
+       "strip trims ASCII whitespace from both edges")
 
 def words = str.split_words(" \talpha\t  beta\n gamma\r ")
 assert(words.len == 3, "split_words trims edge whitespace and skips empty fields")

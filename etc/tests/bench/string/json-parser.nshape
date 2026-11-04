@@ -32,12 +32,6 @@ fn parse_numbers(str json, int n) int {
             if ch < 48 || ch > 57 { break }
             num = num * 10 + (ch - 48)
             pos += 1
-            if pos < n {
-               ch = load8(json, pos)
-               if ch < 48 || ch > 57 { break }
-               num = num * 10 + (ch - 48)
-               pos += 1
-            }
          }
          cnt += 1
          s += num

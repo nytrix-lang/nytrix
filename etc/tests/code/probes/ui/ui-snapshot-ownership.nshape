@@ -1,0 +1,77 @@
+shape ui_snapshot_ownership {
+  family "runtime/ui"
+  generator "regression"
+  features [ui framebuffer png crc ownership capture]
+  template ny-test-case
+  timeout 180
+  flags_matrix "--native-only -O0; --native-backend=llvm --jit --jit-engine=mcjit -O0; --native-backend=llvm --jit --jit-engine=orc -O0; --nyr-run"
+  expect compile_and_run
+  expect_message "UI-SNAPSHOT-OWNERSHIP-OK"
+  source ny <<'NY'
+use core
+use core.os
+use core.math.crypto.hash as hash
+use core.math.parse.img.png as png
+use core.os.ui.render as gfx
+
+fn be32(any bytes, int offset) int {
+   (load8(bytes, offset) << 24) | (load8(bytes, offset + 1) << 16) |
+   (load8(bytes, offset + 2) << 8) | load8(bytes, offset + 3)
+}
+
+gfx.set_backend_type(gfx.BACKEND_MOCK)
+assert(gfx.init_window(16, 16, "capture ownership", 0, false, false, 1))
+def path = temp_dir() + "/nytrix-capture-ownership-" + to_str(ticks()) + ".png"
+defer { file_remove(path) }
+mut ptr retained = 0
+def int center = (8 * 16 + 8) * 4
+mut int frame = 0
+while frame < 3 {
+   assert(gfx.begin_frame_clear([0.0, 0.0, 0.0, 1.0]))
+   gfx.set_ortho_2d(0.0, 16.0, 0.0, 16.0)
+   def color = frame == 0 ? [1.0, 0.0, 0.0, 1.0] :
+      (frame == 1 ? [0.0, 1.0, 0.0, 1.0] : [0.0, 0.0, 1.0, 1.0])
+   assert(gfx.draw_rect(4.0, 4.0, 8.0, 8.0, color))
+   assert(gfx.end_frame())
+   def fb = gfx.read_framebuffer()
+   def ptr pixels = __ffi_untag_ptr(fb.get("data", 0))
+   assert(pixels, "readback owns a pixel buffer")
+   if frame == 0 { retained = pixels }
+   def int retained_red = int(load8(retained, center))
+   def int retained_green = int(load8(retained, center + 1))
+   assert(retained_red == 255 && retained_green == 0,
+          "later frames preserve an outstanding readback (frame " +
+          to_str(frame) + ": red=" + to_str(retained_red) +
+          ", green=" + to_str(retained_green) + ")")
+   assert(gfx.snapshot(path), "capture the current frame")
+   def read = file_read(path)
+   assert(is_ok(read))
+   def encoded = unwrap(read)
+   assert(be32(encoded, 16) == 16 && be32(encoded, 20) == 16 &&
+          load8(encoded, 25) == 6, "PNG dimensions and RGBA channel metadata")
+   mut int offset = 8
+   mut int chunks = 0
+   while offset + 12 <= encoded.len {
+      def int size = be32(encoded, offset)
+      assert(size >= 0 && offset + 12 + size <= encoded.len, "bounded PNG chunk")
+      assert(hash.crc32(encoded, offset + 4, size + 4) == be32(encoded, offset + 8 + size),
+             "independent CRC verifies every PNG chunk")
+      offset += size + 12
+      chunks += 1
+   }
+   assert(offset == encoded.len && chunks >= 3, "complete PNG chunk stream")
+   def decoded = png.decode(encoded)
+   assert(is_dict(decoded), "capture decodes as an image")
+   def data = decoded.get("data")
+   assert(load8(data, center + frame) == 255 && load8(data, center + 3) == 255,
+          "each capture contains this frame's colored geometry")
+   assert(load8(data, 0) == 0 && load8(data, 1) == 0 && load8(data, 2) == 0,
+          "clear background is distinct from captured geometry")
+   if frame != 0 { free(pixels) }
+   frame += 1
+}
+free(retained)
+gfx.close_window()
+print("UI-SNAPSHOT-OWNERSHIP-OK")
+NY
+}

@@ -3,7 +3,7 @@ shape aarch64_elf64_internal_link_run_f32_to_i64 {
   generator "native"
   template ny-test-case
   features [native object elf64 aarch64 aapcs64 qemu f32 conversion]
-  flags "--native-backend aarch64 --nyir-verify -emit-only -o /tmp/nytrix-aarch64-f32-to-i64.o"
+  flags "--native-backend aarch64 --nyr-verify -emit-only -o /tmp/nytrix-aarch64-f32-to-i64.o"
   expect object_link_run_i64_0
 source ny <<'NY'
 @noinline

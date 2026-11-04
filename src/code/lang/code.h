@@ -169,6 +169,8 @@ static inline void ny_fun_sig_free_members(fun_sig *sig) {
     free((void *)sig->llvm_name);
   if (sig->return_type)
     free((void *)sig->return_type);
+  if (sig->dependent_return_param)
+    free((void *)sig->dependent_return_param);
   if (sig->abi_return_type)
     free((void *)sig->abi_return_type);
   if (sig->inferred_return_type)
@@ -254,6 +256,10 @@ static inline void assigned_name_add(assigned_name_list *names,
   vec_push(hashes, hash);
   ny_name_bloom_add(bloom, hash);
 }
+
+void ny_collect_assigned_names_stmt(stmt_t *stmt, assigned_name_list *out_names,
+                                    assigned_hash_list *out_hashes,
+                                    uint64_t out_bloom[4]);
 
 typedef struct label_binding {
   const char *name;

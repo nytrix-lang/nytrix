@@ -6,6 +6,8 @@ shape any_case_float_return {
   template ny-test-case
   expect compile_and_run
   source ny <<'NY'
+use core
+
 fn any_case_float(any tag) any {
   case tag {
     1 -> 1.25
@@ -13,8 +15,35 @@ fn any_case_float(any tag) any {
   }
 }
 
+fn any_case_mixed(any tag) any {
+  case tag {
+    1 -> 7
+    _ -> 0.5
+  }
+}
+
+fn any_early_mixed(any tag) any {
+  if tag == 1 { return 7 }
+  return 0.5
+}
+
 assert(any_case_float(1) == 1.25, "case tail float is boxed for any return")
 assert(any_case_float(2) == 0.5, "default case tail float is boxed for any return")
+assert(any_case_mixed(1) == 7, "case tail integer is boxed for any return")
+assert(any_case_mixed(2) == 0.5, "mixed default float is boxed for any return")
+assert(any_early_mixed(1) == 7, "early integer return is boxed for any return")
+assert(any_early_mixed(2) == 0.5, "early float return is boxed for any return")
+
+def selector = argv(1).len + 1
+if selector == 1 {
+  assert(any_case_float(selector) == 1.25, "runtime selector preserves case float")
+  assert(any_case_mixed(selector) == 7, "runtime selector preserves case integer")
+  assert(any_early_mixed(selector) == 7, "runtime selector preserves early integer return")
+} else {
+  assert(any_case_float(selector) == 0.5, "runtime selector preserves default float")
+  assert(any_case_mixed(selector) == 0.5, "runtime selector preserves mixed default float")
+  assert(any_early_mixed(selector) == 0.5, "runtime selector preserves early float return")
+}
 print("ANY_CASE_FLOAT_RETURN_OK")
 NY
 }

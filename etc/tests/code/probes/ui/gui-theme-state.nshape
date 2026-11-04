@@ -1,0 +1,22 @@
+shape gui-theme-state {
+  family "probe-suite"
+  generator "regression"
+  features ["ny", "render", "gui"]
+  template ny-test-case
+  expect compile_and_run
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect_stdout "GUI-THEME-STATE-OK"
+  source ny <<'NY'
+use core
+use core.os.ui.render.viewer.gui as gui
+def initial = gui.accent()
+assert(is_list(initial) && initial.len == 4, "default palette exists")
+assert(float(initial.get(0)) == 0.76, "default accent")
+gui.set_accent([0.2, 0.4, 0.6, 0.8])
+def changed = gui.accent()
+assert(float(changed.get(0)) == 0.2 && float(changed.get(1)) == 0.4, "red and green")
+assert(float(changed.get(2)) == 0.6 && float(changed.get(3)) == 0.8, "blue and alpha")
+assert(float(gui.accent().get(0)) == 0.2, "initialization preserves chosen accent")
+print("GUI-THEME-STATE-OK")
+NY
+}

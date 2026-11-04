@@ -33,7 +33,8 @@ NY
 #include <stdlib.h>
 #include <time.h>
 
-typedef struct { int key; int used; } Slot;
+/* Store both 64-bit keys and values, as the Ny dictionary does. */
+typedef struct { int64_t key; int64_t value; int used; } Slot;
 
 static int64_t now_ns(void) {
   struct timespec ts;
@@ -74,19 +75,20 @@ int main(void) {
     while (tbl[h].used) h = (h + 1) & (capacity - 1);
     tbl[h].used = 1;
     tbl[h].key = i;
+    tbl[h].value = i;
   }
   int64_t t1 = now_ns();
-  int checksum = 0;
+  int64_t checksum = 0;
   const int probes[] = {0, n / 2, n - 1};
   for (size_t i = 0; i < sizeof(probes) / sizeof(probes[0]); ++i) {
     unsigned h = hash_int((unsigned)probes[i]) & (capacity - 1);
     while (tbl[h].used && tbl[h].key != probes[i])
       h = (h + 1) & (capacity - 1);
     if (!tbl[h].used) { free(tbl); return 3; }
-    checksum += tbl[h].key;
+    checksum += tbl[h].value;
   }
   free(tbl);
-  printf("checksum=%d\n", checksum);
+  printf("checksum=%lld\n", (long long)checksum);
   printf("elapsed_ns=%lld\n", (long long)(t1 - t0));
   return 0;
 }

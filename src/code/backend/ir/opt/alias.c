@@ -206,6 +206,9 @@ bool nyr_alias_analysis(nyr_func_t *f) {
     bool malformed_call_args = false;
     for (size_t i = 0; i < f->len; ++i) {
       const nyr_inst_t *in = &f->data[i];
+      if (in->op == NYIR_INLINE_ASM && in->imm > 0 &&
+          (size_t)(in->imm - 1) < (size_t)nslots)
+        escaped[in->imm - 1] = true;
       if (in->op == NYIR_CALL) {
         const int args[] = {in->a, in->b, in->c, in->d, in->e, in->f};
         for (size_t k = 0; k < sizeof(args) / sizeof(args[0]); ++k)
@@ -456,7 +459,8 @@ static bool alias_sink_stores(nyr_func_t *f) {
   bool changed = false;
   for (size_t i = 0; i + 1 < f->len; ++i) {
     nyr_inst_t *st = &f->data[i];
-    if (st->op != NYIR_STORE_I64)
+    if (st->op != NYIR_STORE_I64 ||
+        (nyr_effective_effects(st) & NYIR_EFFECT_VOLATILE))
       continue;
     int addr = st->a;
     int val = st->c;
@@ -496,6 +500,16 @@ static bool alias_sink_stores(nyr_func_t *f) {
           break;
         }
       }
+      unsigned effects = nyr_effective_effects(next);
+      if (next->op == NYIR_LOAD_I64 || next->op == NYIR_STORE_I64)
+        effects &= ~(NYIR_EFFECT_READ_MEMORY | NYIR_EFFECT_WRITE_MEMORY);
+      if (effects &
+          (NYIR_EFFECT_READ_MEMORY | NYIR_EFFECT_WRITE_MEMORY |
+           NYIR_EFFECT_CALL | NYIR_EFFECT_CONTROL | NYIR_EFFECT_MAY_TRAP |
+           NYIR_EFFECT_VOLATILE | NYIR_EFFECT_ALLOCATION | NYIR_EFFECT_IO |
+           NYIR_EFFECT_THREAD | NYIR_EFFECT_FFI | NYIR_EFFECT_FENV |
+           NYIR_EFFECT_UNKNOWN_SIDE_EFFECT))
+        break;
       /*
        * If next instruction reads the value being stored, can't sink past
        */

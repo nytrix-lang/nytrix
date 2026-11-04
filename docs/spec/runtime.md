@@ -4,6 +4,14 @@
 Runtime behavior covers execution modes, memory boundaries, ownership,
 concurrency, cleanup, and effect metadata.
 
+> **Note:** Usually unnecessary for programs; see [Values](values.md) and [Implementation status](../learn/status.md).
+
+## Contents
+
+- [Execution modes and safety](#execution-modes)
+- [Heap and ownership](#heap-policy)
+- [Concurrency and effects](#concurrency)
+
 ## Execution modes
 
 | Mode | Command | Meaning |
@@ -13,25 +21,24 @@ concurrency, cleanup, and effect metadata.
 | Inline | `ny -c 'code'` | Compile and run inline source. |
 | Inline REPL | `ny -ic 'code'`, `ny -ci 'code'` | Compile inline source, then continue in the REPL. |
 | REPL batch | `ny --repl < file.ny` | Compile stdin source once through the REPL batch path. |
-| Native run | `ny -run file.ny` | Build a temporary executable and run it. |
-| Native output | `ny -o app file.ny` | Emit a native executable. |
-| Explicit REPL | `ny -i`, `ny --interactive`, `ny --plain-repl` | Interactive evaluation. |
+| Native run | `ny --run=aot file.ny` | Build a temporary executable and run it. |
+| Native output | `ny --output=app file.ny` | Emit a native executable. |
+| Explicit REPL | `ny --repl`, `ny --plain-repl` | Interactive evaluation. |
 
 ## Safety profile
 
-`--safe-mode` gives Nytrix its compile-time safety profile. It promotes
+`--mode=safe` gives Nytrix its compile-time safety profile. It promotes
 ownership diagnostics to errors and adds RC/RAII cleanup, strict effect/alias
 policy, and stricter raw-memory diagnostics.
 
 Ordinary compilation leaves ownership/provenance analysis disabled by default.
 `--borrow-check` enables advisory diagnostics without changing heap policy or
-inserting cleanup. `--ownership` enables ownership tracking and RAII cleanup;
-`--ownership-strict` promotes supported ownership diagnostics to errors.
-`--safe-mode` enables strict ownership checks and RC/RAII cleanup together
+inserting cleanup. `--heap=raii` enables ownership tracking and RAII cleanup;
+`--ownership-check=strict` promotes supported ownership diagnostics to errors.
+`--mode=safe` enables strict ownership checks and RC/RAII cleanup together
 with strict effect/alias policy and tracked raw-memory diagnostics.
 
 ```bash
-ny --safe-mode file.ny
 ny --mode=safe file.ny
 ```
 
@@ -118,12 +125,19 @@ Choose one reclamation policy for a compilation:
 | Reference counting | `--heap=rc` | Tracked ownership uses reference-counted cleanup. |
 | Tracing GC (optional) | `--heap=gc` | Reclaims supported managed object graphs. |
 
+The default policy is `manual`; tracing GC is not enabled unless `-gc` or
+`--heap=gc` is selected. Disabling GC does not make unreachable managed values
+reclaim themselves: the manual policy does not reclaim them, and RAII/reference
+counting reclaim only allocations covered by their supported ownership
+tracking. Choose GC only when automatic reclamation of supported object graphs
+is useful; use explicit ownership and cleanup for resources.
+
 Tracing GC is optional and not recommended for resource management. Prefer
 ownership contracts and RAII for resources. Cleanup support is partial; see
 [implementation status](../learn/status.md#feature-boundaries).
-`--safe-mode` enables strict ownership and RC/RAII cleanup without tracing GC.
+`--mode=safe` enables strict ownership and RC/RAII cleanup without tracing GC.
 
-Enable it with `-gc` or `--heap=gc`.
+Enable it with `--heap=gc`.
 
 ```bash
 ny -gc file.ny
@@ -169,16 +183,16 @@ Ownership diagnostics and cleanup are explicit options:
 
 ```bash
 ny --borrow-check file.ny          # advisory diagnostics, no cleanup changes
-ny --ownership-strict file.ny      # diagnostics become errors
-ny --ownership file.ny             # RAII cleanup plus diagnostics
-ny --safe-mode file.ny             # strict safety profile
+ny --ownership-check=strict file.ny # diagnostics become errors
+ny --heap=raii file.ny             # RAII cleanup plus diagnostics
+ny --mode=safe file.ny             # strict safety profile
 ```
 
 `--borrow-check` enables the advisory pass. It reports
 moves, releases, borrow escapes, use after move, and double release without
-forcing RAII cleanup. `--ownership-strict` promotes these diagnostics to
+forcing RAII cleanup. `--ownership-check=strict` promotes these diagnostics to
 errors and enables stricter tracking such as rejecting implicit borrows from
-mutable slots. `--ownership` (alias for `--heap=raii`) enables automatic
+mutable slots. `--heap=raii` enables automatic
 runtime cleanup in addition to the analysis.
 
 Use `--no-borrow-check` only for a legacy migration boundary. The compiler
@@ -228,8 +242,17 @@ fn with_name(any input, str name) any {
 `with Type name = value { ... }`.
 
 ```ny
+use core
+
+fn cleanup() {}
+
 defer { cleanup() }
-with Resource r = open_resource() { use(r) }
+mut seen = 0
+with ptr buf = malloc(8) {
+   store8(buf, 65, 0)
+   seen = load8(buf, 0)
+}
+assert(seen == 65, "with releases a scoped pointer")
 ```
 
 `defer` runs its body when the current scope exits, including early returns and
@@ -353,11 +376,8 @@ source-level relaxed/acquire/release ordering selector yet.
 `atomic_i64(initial)` creates a cell; `atomic_load`, `atomic_store`,
 `atomic_add`, `atomic_sub`, `atomic_exchange`, and `atomic_compare_exchange`
 operate on it, with an optional byte `offset` into the cell. Free the cell with
-`atomic_free`.
-
-The updated-value assertion in this contract example fails on the default LLVM
-route, including with a qualified module import; see
-[known documentation smoke limitations](../learn/status.md#documentation-smoke-limitations).
+`atomic_free`. Cells hold tagged language words: every operation preserves the
+tag, so loads read back the stored value.
 
 ```ny
 use core
@@ -370,13 +390,17 @@ atomic.atomic_free(counter)
 ```
 
 `atomic_add`, `atomic_sub`, and `atomic_exchange` return the previous value.
-Use `atomic_load` to read the updated cell.
+Use `atomic_load` to read the updated cell. This contract example is the gate
+fixture `etc/tests/lang/memory/atomic-cell-contract.nshape`.
 
 ## Attributes and effects
 
 Attributes describe declaration metadata: linkage, codegen hints, purity,
 effects, hot/cold markers, accelerator/vectorization hints, and ownership
 contracts.
+
+> **Note:** These are attribute syntax forms; an attribute must precede a
+> function declaration.
 
 ```ny
 @pure

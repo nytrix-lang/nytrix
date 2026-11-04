@@ -27,6 +27,7 @@ fn compile_module_case(str label, str output, str parallel, str cache_root,
                        str config, str extra_env="", str expected_trace="",
                        int jobs=0) {
    mut argv = [cmake, "-E", "env",
+               "--unset=NYTRIX_TEST_MODE",
                "NYTRIX_CACHE_DIR=" + cache_root,
                "NYTRIX_TRACE_CACHE=1",
                "NYTRIX_JIT_CACHE=0"]

@@ -4,6 +4,20 @@ module core.math.logic.prolog(
    variable, term, fact, rule, is_variable, is_term, is_clause,
    substitute, unify, bindings, query)
 use core
+use core.str as core_str
+
+fn _logic_str_eq(any left, any right) bool {
+   def str a = core_str.cstr_to_str(left)
+   def str b = core_str.cstr_to_str(right)
+   core_str._str_eq(a, b)
+}
+
+fn _logic_value_eq(any left, any right) bool {
+   if is_str(left) && is_str(right) {
+      return _logic_str_eq(left, right)
+   }
+   left == right
+}
 
 ;; Returns the result of the `variable` operation.
 fn variable(str name) dict {
@@ -36,7 +50,7 @@ fn rule(dict head, list body) dict {
 
 ;; Returns true when is variable.
 fn is_variable(any value) bool {
-   if !is_dict(value) || value.get("kind", "") != "variable" {
+   if !is_dict(value) || !_logic_str_eq(value.get("kind", ""), "variable") {
       return false
    }
    def name = value.get("name", 0)
@@ -46,7 +60,7 @@ fn is_variable(any value) bool {
 ;; Returns true when is term.
 fn is_term(any value) bool {
    if !is_dict(value) ||
-   value.get("kind", "") != "term" ||
+   !_logic_str_eq(value.get("kind", ""), "term") ||
    !is_list(value.get("args", 0)) {
       return false
    }
@@ -57,7 +71,7 @@ fn is_term(any value) bool {
 
 ;; Returns true when is clause.
 fn is_clause(any value) bool {
-   if !is_dict(value) || value.get("kind", "") != "clause" ||
+   if !is_dict(value) || !_logic_str_eq(value.get("kind", ""), "clause") ||
    !is_term(value.get("head", 0)) || !is_list(value.get("body", 0)) {
       return false
    }
@@ -103,7 +117,7 @@ fn substitute(any value, dict substitution) any {
 
 fn _occurs(str name, any value, dict substitution) bool {
    def walked = _walk(value, substitution)
-   if is_variable(walked) { return walked.get("name") == name }
+   if is_variable(walked) { return _logic_str_eq(walked.get("name"), name) }
    if !is_term(walked) { return false }
    def term_args = walked.get("args")
    mut i = 0
@@ -118,7 +132,7 @@ fn _unify(any left, any right, dict substitution) dict {
    def a = _walk(left, substitution)
    def b = _walk(right, substitution)
    if is_variable(a) {
-      if is_variable(b) && a.get("name") == b.get("name") {
+      if is_variable(b) && _logic_str_eq(a.get("name"), b.get("name")) {
          return {"ok":true, "substitution":substitution}
       }
       if _occurs(a.get("name"), b, substitution) {
@@ -130,7 +144,8 @@ fn _unify(any left, any right, dict substitution) dict {
    }
    if is_variable(b) { return _unify(b, a, substitution) }
    if is_term(a) || is_term(b) {
-      if !is_term(a) || !is_term(b) || a.get("name") != b.get("name") ||
+      if !is_term(a) || !is_term(b) ||
+      !_logic_str_eq(a.get("name"), b.get("name")) ||
       a.get("args").len != b.get("args").len {
          return {"ok":false, "substitution":substitution, "reason":"term mismatch"}
       }
@@ -144,7 +159,7 @@ fn _unify(any left, any right, dict substitution) dict {
       }
       return {"ok":true, "substitution":out}
    }
-   if a == b { return {"ok":true, "substitution":substitution} }
+   if _logic_value_eq(a, b) { return {"ok":true, "substitution":substitution} }
    return {"ok":false, "substitution":substitution, "reason":"value mismatch"}
 }
 
@@ -192,7 +207,8 @@ fn _solve(list knowledge, list goals, dict substitution, dict state,
    }
    state["nodes"] = state.get("nodes") + 1
    if depth > state.get("peak_depth") { state["peak_depth"] = depth }
-   def cells = 1 + goals.len + substitution.len
+   def int goal_count = goals.len
+   def cells = 1 + goal_count + substitution.len
    if state.get("memory_cells") + cells > state.get("max_memory_cells") {
       state["complete"] = false
       state["reason"] = "memory limit"
@@ -212,13 +228,13 @@ fn _solve(list knowledge, list goals, dict substitution, dict state,
       state["reason"] = "solution limit"
       return nil
    }
-   if goals.len == 0 {
+   if goal_count == 0 {
       def sol = dict_clone(substitution)
       state["solutions"] = state.get("solutions").append(sol)
       return nil
    }
-   def goal = substitute(goals[0], substitution)
-   def rest = goals.slice(1, goals.len, 1)
+   def goal = substitute(goals.get(0, nil), substitution)
+   def rest = goals.slice(1, goal_count, 1)
    mut i = 0
    while i < knowledge.len {
       if state.get("steps") >= state.get("max_steps") {
@@ -235,8 +251,9 @@ fn _solve(list knowledge, list goals, dict substitution, dict state,
       def matched = _unify(goal, clause.get("head"), branch_subst)
       if matched.get("ok") {
          def next_goals = clause.get("body") + rest
-         _solve(knowledge, next_goals, matched.get("substitution"), state,
-            depth + 1)
+         def dict next_substitution =
+         dict_clone(matched.get("substitution", dict(0)))
+         _solve(knowledge, next_goals, next_substitution, state, depth + 1)
       }
       if state.get("solutions").len >= state.get("max_solutions") {
          state["complete"] = false
@@ -265,7 +282,9 @@ fn bindings(list variables, dict substitution) dict {
 fn _variables_add(list variables, dict value) list {
    mut i = 0
    while i < variables.len {
-      if variables[i].get("name") == value.get("name") { return variables }
+      if _logic_str_eq(variables[i].get("name"), value.get("name")) {
+         return variables
+      }
       i += 1
    }
    variables = variables.append(value)
@@ -322,7 +341,7 @@ fn query(list knowledge, any goals, int max_steps=10000,
       "nodes":0, "max_nodes":max_nodes,
       "max_memory_cells":max_memory_cells, "memory_cells":0,
       "peak_memory_cells":0, "complete":true, "reason":"exhausted"}
-   _solve(knowledge, goal_list, {}, state, 0)
+   _solve(knowledge, goal_list, dict(0), state, 0)
    mut answers = []
    i = 0
    while i < state.get("solutions").len {

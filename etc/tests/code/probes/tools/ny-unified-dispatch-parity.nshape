@@ -32,10 +32,20 @@ assert_alias("doc", "docs")
 assert_alias("make", "build")
 
 for command in ["get", "install"] {
-   def result = run_capture([ny, command, "--help"], [], nil, false)
-   def text = result.get("stdout", "")
-   assert(result.get("code", 0) == 2 && str.find(text, "add needs") >= 0,
-          "package alias reaches package parsing: " + command + "\n" + text)
+   def canonical = run_capture([ny, "pkg", command, "--help"], [], nil, false)
+   def alias = run_capture([ny, command, "--help"], [], nil, false)
+   def canonical_code = int(canonical.get("code", 127))
+   def alias_code = int(alias.get("code", 127))
+   assert(canonical_code == 0 && alias_code == 0,
+          "package help command failed: pkg " + command +
+          " (canonical=" + to_str(canonical_code) +
+          ", alias=" + to_str(alias_code) + ")")
+   def canonical_text = to_str(canonical.get("stdout", ""))
+   def alias_text = to_str(alias.get("stdout", ""))
+   assert(canonical_text == alias_text &&
+          str.find(alias_text, "Usage: ny pkg " + command) >= 0 &&
+          str.find(alias_text, "Packages") >= 0,
+          "package alias help differs from canonical command: " + command)
 }
 
 def plain = run_capture([ny, "format", "--help"], [], nil, false)

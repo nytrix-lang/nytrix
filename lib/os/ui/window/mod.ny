@@ -3,7 +3,7 @@
 ;; References:
 ;; - core.os.ui
 ;; - core.os.ui.window.consts
-module core.os.ui.window(BACKEND_NY, backend, available, EVENT_NONE, EVENT_KEY_PRESSED, EVENT_KEY_RELEASED, EVENT_KEY_CHAR, EVENT_MOUSE_BUTTON_PRESSED, EVENT_MOUSE_BUTTON_RELEASED, EVENT_MOUSE_SCROLL, EVENT_MOUSE_POS_CHANGED, EVENT_WINDOW_MOVED, EVENT_WINDOW_RESIZED, EVENT_FOCUS_IN, EVENT_FOCUS_OUT, EVENT_MOUSE_ENTER, EVENT_MOUSE_LEAVE, EVENT_WINDOW_REFRESH, EVENT_QUIT, EVENT_DATA_DROP, EVENT_DATA_DRAG, EVENT_WINDOW_MAXIMIZED, EVENT_WINDOW_MINIMIZED, EVENT_WINDOW_RESTORED, EVENT_SCALE_UPDATED, EVENT_MONITOR_CONNECTED, EVENT_MONITOR_DISCONNECTED, WINDOW_NORMAL, WINDOW_NO_BORDER, WINDOW_NO_RESIZE, WINDOW_ALLOW_DND, WINDOW_HIDE_MOUSE, WINDOW_FULLSCREEN, WINDOW_TRANSPARENT, WINDOW_CENTER, WINDOW_RAW_MOUSE, WINDOW_SCALE_TO_MONITOR, WINDOW_HIDE, WINDOW_MAXIMIZE, WINDOW_CENTER_CURSOR, WINDOW_FLOATING, WINDOW_FOCUS_ON_SHOW, WINDOW_MINIMIZE, WINDOW_FOCUS, WINDOW_CAPTURE_MOUSE, WINDOW_CPU, WINDOW_VULKAN, CLIENT_API, NO_API, CURSOR_NORMAL, CURSOR_HIDDEN, CURSOR_DISABLED, ARROW_CURSOR, IBEAM_CURSOR, CROSSHAIR_CURSOR, POINTING_HAND_CURSOR, RESIZE_EW_CURSOR, RESIZE_NS_CURSOR, RESIZE_NWSE_CURSOR, RESIZE_NESW_CURSOR, RESIZE_ALL_CURSOR, NOT_ALLOWED_CURSOR, KEY_NULL, KEY_ESCAPE, KEY_ESC, KEY_ENTER, KEY_TAB, KEY_BACKSPACE, KEY_SPACE, KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT, KEY_PAGE_UP, KEY_PAGE_DOWN, KEY_HOME, KEY_END, KEY_INSERT, KEY_DELETE, KEY_CAPS_LOCK, KEY_SCROLL_LOCK, KEY_NUM_LOCK, KEY_PRINT_SCREEN, KEY_PAUSE, KEY_MENU, KEY_F1, KEY_F2, KEY_F3, KEY_F4, KEY_F5, KEY_F6, KEY_F7, KEY_F8, KEY_F9, KEY_F10, KEY_F11, KEY_F12, KEY_F13, KEY_F14, KEY_F15, KEY_F16, KEY_F17, KEY_F18, KEY_F19, KEY_F20, KEY_F21, KEY_F22, KEY_F23, KEY_F24, KEY_F25, KEY_KP_0, KEY_KP_1, KEY_KP_2, KEY_KP_3, KEY_KP_4, KEY_KP_5, KEY_KP_6, KEY_KP_7, KEY_KP_8, KEY_KP_9, KEY_KP_ADD, KEY_KP_SUBTRACT, KEY_KP_MULTIPLY, KEY_KP_DIVIDE, KEY_KP_DECIMAL, KEY_KP_ENTER, KEY_KP_EQUAL, KEY_LEFT_SHIFT, KEY_RIGHT_SHIFT, KEY_LEFT_CONTROL, KEY_RIGHT_CONTROL, KEY_LEFT_ALT, KEY_RIGHT_ALT, KEY_LEFT_SUPER, KEY_RIGHT_SUPER, KEY_SHIFT, KEY_CTRL, KEY_ALT, KEY_SUPER, KEY_GRAVE, KEY_MINUS, KEY_EQUAL, KEY_APOSTROPHE, KEY_COMMA, KEY_PERIOD, KEY_SLASH, KEY_SEMICOLON, KEY_LEFT_BRACKET, KEY_BACKSLASH, KEY_RIGHT_BRACKET, KEY_0, KEY_1, KEY_2, KEY_3, KEY_4, KEY_5, KEY_6, KEY_7, KEY_8, KEY_9, KEY_A, KEY_B, KEY_C, KEY_D, KEY_E, KEY_F, KEY_G, KEY_H, KEY_I, KEY_J, KEY_K, KEY_L, KEY_M, KEY_N, KEY_O, KEY_P, KEY_Q, KEY_R, KEY_S, KEY_T, KEY_U, KEY_V, KEY_W, KEY_X, KEY_Y, KEY_Z, KEY_WORLD_1, KEY_WORLD_2, MOD_SHIFT, MOD_CONTROL, MOD_ALT, MOD_SUPER, MOD_META, get_monitors, get_primary_monitor, get_monitor_pos, get_monitor_workarea, get_monitor_physical_size, get_monitor_content_scale, get_monitor_name, get_video_mode, get_video_modes, get_monitor_resolution, get_monitor_rect, get_monitor_desktop_bounds, get_monitor_index_at, get_current_monitor_index, get_current_monitor, move_to_monitor, set_gamma, get_gamma_ramp, set_gamma_ramp, get_window_monitor, set_window_monitor, set_window_fullscreen, toggle_window_fullscreen, set_window_borderless, toggle_window_borderless, primary_mode, default_window_size, fit_to_workarea, open_window, create, show, hide, iconify, restore, maximize, id, title, set_title, pos, size, get_framebuffer_size, get_window_content_scale, get_window_scale_dpi, window_flags, has_window_flag, set_window_flag, toggle_window_flag, window_attrib, window_state, is_window_visible, is_window_focused, is_window_minimized, is_window_maximized, is_window_resizable, is_window_decorated, is_window_floating, is_window_fullscreen, is_window_borderless, window_vsync, set_window_vsync, toggle_window_vsync, toggle_window_resizable, toggle_window_decorated, toggle_window_floating, set_icon, move, resize, should_close, set_should_close, close, quit, exit_key, set_exit_key, key_state, key_name, key_down, key_pressed, get_modifiers, mod_down, mouse_pos, mouse_down, mouse_pressed, joystick_present, get_joystick_name, get_joystick_guid, get_joystick_axes, get_joystick_buttons, get_joystick_hats, joystick_is_gamepad, get_gamepad_state, get_gamepad_name, get_gamepad_guid, gamepad_count, gamepads, gamepad_connected, gamepad_mapped, gamepad_name, gamepad_guid, gamepad_axis, gamepad_button, gamepad_axis_count, gamepad_button_count, set_joystick_callback, update_gamepad_mappings, add_gamepad_mapping, JOYSTICK_1, JOYSTICK_2, JOYSTICK_3, JOYSTICK_4, JOYSTICK_5, JOYSTICK_6, JOYSTICK_7, JOYSTICK_8, JOYSTICK_9, JOYSTICK_10, JOYSTICK_11, JOYSTICK_12, JOYSTICK_13, JOYSTICK_14, JOYSTICK_15, JOYSTICK_16, JOYSTICK_LAST, JOYSTICK_HAT_BUTTONS, GAMEPAD_BUTTON_A, GAMEPAD_BUTTON_B, GAMEPAD_BUTTON_X, GAMEPAD_BUTTON_Y, GAMEPAD_BUTTON_LEFT_BUMPER, GAMEPAD_BUTTON_RIGHT_BUMPER, GAMEPAD_BUTTON_BACK, GAMEPAD_BUTTON_START, GAMEPAD_BUTTON_GUIDE, GAMEPAD_BUTTON_LEFT_THUMB, GAMEPAD_BUTTON_RIGHT_THUMB, GAMEPAD_BUTTON_DPAD_UP, GAMEPAD_BUTTON_DPAD_RIGHT, GAMEPAD_BUTTON_DPAD_DOWN, GAMEPAD_BUTTON_DPAD_LEFT, GAMEPAD_BUTTON_LAST, GAMEPAD_BUTTON_CROSS, GAMEPAD_BUTTON_SQUARE, GAMEPAD_BUTTON_TRIANGLE, GAMEPAD_AXIS_LEFT_X, GAMEPAD_AXIS_LEFT_Y, GAMEPAD_AXIS_RIGHT_X, GAMEPAD_AXIS_RIGHT_Y, GAMEPAD_AXIS_LEFT_TRIGGER, GAMEPAD_AXIS_RIGHT_TRIGGER, GAMEPAD_AXIS_LAST, set_cursor_mode, create_cursor, create_standard_cursor, destroy_cursor, set_cursor, cursor_pos, scroll_pos, touch_count, touch_pos, touch_active, test_report_touch, test_report_gamepad, mouse_state, set_cursor_pos, center_cursor, show_centered_cursor, sync_cursor, focus, transparent_framebuffer, set_window_opacity, set_window_resizable, set_window_decorated, set_window_floating, set_input_exclusive, match_chord, bind, push_event, check_event, event_type, event_window, event_window_id, event_data, event_key_is, on_key, poll_events, count_open, last, get_win, swap_buffers, make_current, blit_buffer, blit_software, update_input, set_blit_handler, set_clipboard, get_clipboard, get_error, get_proc_address, window_hint, window_hint_string, get_x11_display, get_x11_window, set_x11_selection_string, get_x11_selection_string)
+module core.os.ui.window(BACKEND_NY, backend, available, EVENT_NONE, EVENT_KEY_PRESSED, EVENT_KEY_RELEASED, EVENT_KEY_CHAR, EVENT_MOUSE_BUTTON_PRESSED, EVENT_MOUSE_BUTTON_RELEASED, EVENT_MOUSE_SCROLL, EVENT_MOUSE_POS_CHANGED, EVENT_WINDOW_MOVED, EVENT_WINDOW_RESIZED, EVENT_FOCUS_IN, EVENT_FOCUS_OUT, EVENT_MOUSE_ENTER, EVENT_MOUSE_LEAVE, EVENT_WINDOW_REFRESH, EVENT_QUIT, EVENT_DATA_DROP, EVENT_DATA_DRAG, EVENT_WINDOW_MAXIMIZED, EVENT_WINDOW_MINIMIZED, EVENT_WINDOW_RESTORED, EVENT_SCALE_UPDATED, EVENT_MONITOR_CONNECTED, EVENT_MONITOR_DISCONNECTED, WINDOW_NORMAL, WINDOW_NO_BORDER, WINDOW_NO_RESIZE, WINDOW_ALLOW_DND, WINDOW_HIDE_MOUSE, WINDOW_FULLSCREEN, WINDOW_TRANSPARENT, WINDOW_CENTER, WINDOW_RAW_MOUSE, WINDOW_SCALE_TO_MONITOR, WINDOW_HIDE, WINDOW_MAXIMIZE, WINDOW_CENTER_CURSOR, WINDOW_FLOATING, WINDOW_FOCUS_ON_SHOW, WINDOW_MINIMIZE, WINDOW_FOCUS, WINDOW_CAPTURE_MOUSE, WINDOW_CPU, WINDOW_VULKAN, CLIENT_API, NO_API, CURSOR_NORMAL, CURSOR_HIDDEN, CURSOR_DISABLED, ARROW_CURSOR, IBEAM_CURSOR, CROSSHAIR_CURSOR, POINTING_HAND_CURSOR, RESIZE_EW_CURSOR, RESIZE_NS_CURSOR, RESIZE_NWSE_CURSOR, RESIZE_NESW_CURSOR, RESIZE_ALL_CURSOR, NOT_ALLOWED_CURSOR, KEY_NULL, KEY_ESCAPE, KEY_ESC, KEY_ENTER, KEY_TAB, KEY_BACKSPACE, KEY_SPACE, KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT, KEY_PAGE_UP, KEY_PAGE_DOWN, KEY_HOME, KEY_END, KEY_INSERT, KEY_DELETE, KEY_CAPS_LOCK, KEY_SCROLL_LOCK, KEY_NUM_LOCK, KEY_PRINT_SCREEN, KEY_PAUSE, KEY_MENU, KEY_F1, KEY_F2, KEY_F3, KEY_F4, KEY_F5, KEY_F6, KEY_F7, KEY_F8, KEY_F9, KEY_F10, KEY_F11, KEY_F12, KEY_F13, KEY_F14, KEY_F15, KEY_F16, KEY_F17, KEY_F18, KEY_F19, KEY_F20, KEY_F21, KEY_F22, KEY_F23, KEY_F24, KEY_F25, KEY_KP_0, KEY_KP_1, KEY_KP_2, KEY_KP_3, KEY_KP_4, KEY_KP_5, KEY_KP_6, KEY_KP_7, KEY_KP_8, KEY_KP_9, KEY_KP_ADD, KEY_KP_SUBTRACT, KEY_KP_MULTIPLY, KEY_KP_DIVIDE, KEY_KP_DECIMAL, KEY_KP_ENTER, KEY_KP_EQUAL, KEY_LEFT_SHIFT, KEY_RIGHT_SHIFT, KEY_LEFT_CONTROL, KEY_RIGHT_CONTROL, KEY_LEFT_ALT, KEY_RIGHT_ALT, KEY_LEFT_SUPER, KEY_RIGHT_SUPER, KEY_SHIFT, KEY_CTRL, KEY_ALT, KEY_SUPER, KEY_GRAVE, KEY_MINUS, KEY_EQUAL, KEY_APOSTROPHE, KEY_COMMA, KEY_PERIOD, KEY_SLASH, KEY_SEMICOLON, KEY_LEFT_BRACKET, KEY_BACKSLASH, KEY_RIGHT_BRACKET, KEY_0, KEY_1, KEY_2, KEY_3, KEY_4, KEY_5, KEY_6, KEY_7, KEY_8, KEY_9, KEY_A, KEY_B, KEY_C, KEY_D, KEY_E, KEY_F, KEY_G, KEY_H, KEY_I, KEY_J, KEY_K, KEY_L, KEY_M, KEY_N, KEY_O, KEY_P, KEY_Q, KEY_R, KEY_S, KEY_T, KEY_U, KEY_V, KEY_W, KEY_X, KEY_Y, KEY_Z, KEY_WORLD_1, KEY_WORLD_2, MOD_SHIFT, MOD_CONTROL, MOD_ALT, MOD_SUPER, MOD_META, get_monitors, get_primary_monitor, get_monitor_pos, get_monitor_workarea, get_monitor_physical_size, get_monitor_content_scale, get_monitor_name, get_video_mode, get_video_modes, get_monitor_resolution, get_monitor_rect, get_monitor_desktop_bounds, get_monitor_index_at, get_current_monitor_index, get_current_monitor, move_to_monitor, set_gamma, get_gamma_ramp, set_gamma_ramp, get_window_monitor, set_window_monitor, set_window_fullscreen, toggle_window_fullscreen, set_window_borderless, toggle_window_borderless, primary_mode, default_window_size, fit_to_workarea, open_window, create, show, hide, iconify, restore, maximize, id, title, set_title, pos, size, get_framebuffer_size, get_window_content_scale, get_window_scale_dpi, window_flags, has_window_flag, set_window_flag, toggle_window_flag, window_attrib, window_state, is_window_visible, is_window_focused, is_window_minimized, is_window_maximized, is_window_resizable, is_window_decorated, is_window_floating, is_window_fullscreen, is_window_borderless, window_vsync, set_window_vsync, toggle_window_vsync, toggle_window_resizable, toggle_window_decorated, toggle_window_floating, set_icon, move, resize, should_close, set_should_close, close, quit, exit_key, set_exit_key, key_state, key_name, key_down, key_pressed, get_modifiers, mod_down, mouse_pos, mouse_down, mouse_pressed, joystick_present, get_joystick_name, get_joystick_guid, get_joystick_axes, get_joystick_buttons, get_joystick_hats, joystick_is_gamepad, get_gamepad_state, get_gamepad_name, get_gamepad_guid, gamepad_count, gamepads, gamepad_connected, gamepad_mapped, gamepad_name, gamepad_guid, gamepad_axis, gamepad_button, gamepad_axis_count, gamepad_button_count, set_joystick_callback, update_gamepad_mappings, add_gamepad_mapping, JOYSTICK_1, JOYSTICK_2, JOYSTICK_3, JOYSTICK_4, JOYSTICK_5, JOYSTICK_6, JOYSTICK_7, JOYSTICK_8, JOYSTICK_9, JOYSTICK_10, JOYSTICK_11, JOYSTICK_12, JOYSTICK_13, JOYSTICK_14, JOYSTICK_15, JOYSTICK_16, JOYSTICK_LAST, JOYSTICK_HAT_BUTTONS, GAMEPAD_BUTTON_A, GAMEPAD_BUTTON_B, GAMEPAD_BUTTON_X, GAMEPAD_BUTTON_Y, GAMEPAD_BUTTON_LEFT_BUMPER, GAMEPAD_BUTTON_RIGHT_BUMPER, GAMEPAD_BUTTON_BACK, GAMEPAD_BUTTON_START, GAMEPAD_BUTTON_GUIDE, GAMEPAD_BUTTON_LEFT_THUMB, GAMEPAD_BUTTON_RIGHT_THUMB, GAMEPAD_BUTTON_DPAD_UP, GAMEPAD_BUTTON_DPAD_RIGHT, GAMEPAD_BUTTON_DPAD_DOWN, GAMEPAD_BUTTON_DPAD_LEFT, GAMEPAD_BUTTON_LAST, GAMEPAD_BUTTON_CROSS, GAMEPAD_BUTTON_SQUARE, GAMEPAD_BUTTON_TRIANGLE, GAMEPAD_AXIS_LEFT_X, GAMEPAD_AXIS_LEFT_Y, GAMEPAD_AXIS_RIGHT_X, GAMEPAD_AXIS_RIGHT_Y, GAMEPAD_AXIS_LEFT_TRIGGER, GAMEPAD_AXIS_RIGHT_TRIGGER, GAMEPAD_AXIS_LAST, set_cursor_mode, create_cursor, create_standard_cursor, destroy_cursor, set_cursor, cursor_pos, scroll_pos, touch_count, touch_pos, touch_active, test_report_touch, test_report_gamepad, mouse_state, set_cursor_pos, center_cursor, show_centered_cursor, sync_cursor, focus, transparent_framebuffer, set_window_opacity, set_window_resizable, set_window_decorated, set_window_floating, set_input_exclusive, match_chord, bind, push_event, check_event, event_type, event_window, event_window_id, event_data, event_key_is, on_key, poll_events, count_open, last, get_win, swap_buffers, make_current, blit_buffer, blit_software, update_input, set_blit_handler, set_clipboard, get_clipboard, get_error, get_proc_address, window_hint, window_hint_string, get_x11_display, get_x11_window, set_x11_selection_string, get_x11_selection_string, replay_advance_frame, replay_window_frame)
 use core
 use core.dict_mod
 use core.os.ui.window.consts (
@@ -121,8 +121,12 @@ fn _key_poll_at(i32 idx) i32 {
    }
 }
 
-mut _windows = 0
-mut _window_registry = 0
+mut list _windows = []
+mut dict _window_registry = dict(16)
+mut int _replay_poll_frame = 1
+mut int _replay_events_applied_frame = 0
+mut str _replay_events_cache = "\x00"
+mut list _replay_events_rows = []
 mut _backend_ready = false
 mut _raw_key_query_cache = dict(32)
 mut _scancode_query_cache = dict(32)
@@ -169,15 +173,15 @@ fn _ensure_window_registry() dict {
    _window_registry
 }
 
-fn _set_window_registry(any handle, any win) any {
+fn _set_window_registry(u64 handle, any win) any {
    _window_registry = _ensure_window_registry()
    _window_registry[handle] = win
    win
 }
 
-fn _get_handle(any win) any {
-   if is_dict(win) { return win.get("handle", 0) }
-   win
+fn _get_handle(any win) u64 {
+   if is_dict(win) { return int(win.get("handle", 0)) }
+   int(win)
 }
 
 fn _get_win(any win) any {
@@ -2070,10 +2074,10 @@ fn key_down(any win, int k) bool {
    "Returns true if key `k` is currently held down in `win`."
    win = _get_win(win)
    if !_is_window(win) { return false }
-   if win.get("_mock", false) { return false }
    def nk = _normalize_key(k)
    def ks = win.get("key_states", 0)
    if is_dict(ks) && ks.get(nk, false) { return true }
+   if win.get("_mock", false) { return false }
    def scs = win.get("scancode_states", 0)
    def qsc = _scancodes_for_query(nk)
    def qsc_n = qsc.len
@@ -2321,6 +2325,7 @@ fn poll_events() bool {
    ui_backend.poll_events()
    def windows_n = windows.len
    def native_events = ui_backend.uses_native_events()
+   def replay = common.env_truthy("NYTRIX_UI_REPLAY")
    mut i = 0
    while i < windows_n {
       def raw_win = windows.get(i, 0)
@@ -2347,13 +2352,104 @@ fn poll_events() bool {
             while j < native_events_n {
                def ne = queued_native_events.get(j)
                if ev.is_event(ne) {
-                  push_event(poll_handle, ev.event_type(ne), ev.event_data(ne))
+                  push_event(win, ev.event_type(ne), ev.event_data(ne))
                }
                j += 1
             }
          }
       }
+      if replay && _replay_events_applied_frame != _replay_poll_frame && win.get("_mock", false) {
+         _replay_apply_frame(win, _replay_poll_frame)
+         win = _get_win(win)
+         _replay_events_applied_frame = _replay_poll_frame
+      }
       _check_native_state(win)
+      i += 1
+   }
+   true
+}
+
+fn replay_advance_frame() bool {
+   "Advances the test-only mock-window replay clock after a rendered frame."
+   if common.env_truthy("NYTRIX_UI_REPLAY") {
+      _replay_poll_frame += 1
+      _replay_events_applied_frame = 0
+   }
+   true
+}
+
+fn replay_window_frame(any win) bool {
+   "Applies one replay event batch to the render target and eligible replay windows."
+   win = _get_win(win)
+   if !common.env_truthy("NYTRIX_UI_REPLAY") ||
+   _replay_events_applied_frame == _replay_poll_frame ||
+   !_is_window(win) {
+      return false
+   }
+   def windows = _ensure_windows()
+   def replay_null = ui_backend.get_backend_name() == "none"
+   def active_handle = win.get("handle", 0)
+   _replay_apply_frame(win, _replay_poll_frame)
+   mut i = 0
+   while i < windows.len {
+      def target = windows.get(i)
+      if _is_window(target) && target.get("handle", 0) != active_handle &&
+      (target.get("_mock", false) || replay_null) {
+         update_input(target)
+         ;; One script record may be applied to many windows, but is reported
+         ;; once in the replay trace.
+         _replay_apply_frame(target, _replay_poll_frame, false)
+      }
+      i += 1
+   }
+   _replay_events_applied_frame = _replay_poll_frame
+   true
+}
+
+fn _replay_load_events() list {
+   "Loads a test-only event script. Records use frame,type,arg1,arg2,arg3 and are separated by semicolons."
+   def raw = common.env_trim("NYTRIX_FIXTURE_EVENTS")
+   if raw == _replay_events_cache { return _replay_events_rows }
+   _replay_events_cache = raw
+   _replay_events_rows = []
+   if raw.len == 0 { return _replay_events_rows }
+   def records = str.split(raw, ";")
+   mut i = 0
+   while i < records.len {
+      def fields = str.split(records.get(i), ",")
+      if fields.len >= 2 {
+         _replay_events_rows = _replay_events_rows.append(fields)
+      }
+      i += 1
+   }
+   _replay_events_rows
+}
+
+fn _replay_apply_frame(any win, int frame, bool report_events=true) bool {
+   "Applies events scheduled for this replay poll frame to one window."
+   def rows = _replay_load_events()
+   mut i = 0
+   while i < rows.len {
+      def row = rows.get(i)
+      if common.parse_nonneg_int(row[0]) == frame {
+         def kind = str.lower(str.strip(row[1]))
+         def a = row.len > 2 ? common.parse_nonneg_int(row[2]) : 0
+         def b = row.len > 3 ? common.parse_nonneg_int(row[3]) : 0
+         def c = row.len > 4 ? common.parse_nonneg_int(row[4]) : 0
+         if report_events {
+            print("NYTRIX_UI_EVENT frame=" + to_str(frame) + " type=" + kind)
+         }
+         case kind {
+            "key_down", "key_press" -> push_event(win, EVENT_KEY_PRESSED, {"key": a, "mod": b})
+            "key_up", "key_release" -> push_event(win, EVENT_KEY_RELEASED, {"key": a, "mod": b})
+            "mouse_move" -> push_event(win, EVENT_MOUSE_POS_CHANGED, [a, b])
+            "mouse_down", "mouse_press" -> push_event(win, EVENT_MOUSE_BUTTON_PRESSED, {"button": a, "x": b, "y": c})
+            "mouse_up", "mouse_release" -> push_event(win, EVENT_MOUSE_BUTTON_RELEASED, {"button": a, "x": b, "y": c})
+            "resize" -> resize(win, a, b)
+            "close" -> push_event(win, EVENT_QUIT, 0)
+            _ -> 0
+         }
+      }
       i += 1
    }
    true

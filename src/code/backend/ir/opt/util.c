@@ -18,6 +18,19 @@
 #include <stdlib.h>
 #include <string.h>
 
+bool nyr_cfg_block_for_label(const nyr_cfg_t *cfg, int64_t label,
+                             size_t *out_block) {
+  if (!cfg)
+    return false;
+  for (size_t b = 0; b < cfg->block_count; ++b)
+    if (cfg->block_label[b] == label) {
+      if (out_block)
+        *out_block = b;
+      return true;
+    }
+  return false;
+}
+
 size_t nyr_local_slot_count(const nyr_func_t *f) {
   if (!f)
     return 0;
@@ -38,7 +51,7 @@ size_t nyr_local_slot_count(const nyr_func_t *f) {
 }
 
 static int nyr_local_slot_from_value(const nyr_func_t *f, const int *defs,
-                                      int value) {
+                                     int value) {
   if (!f || !defs)
     return -1;
   for (unsigned depth = 0; depth < 16 && value >= 0 && value < f->next_value;
@@ -57,8 +70,8 @@ static int nyr_local_slot_from_value(const nyr_func_t *f, const int *defs,
 }
 
 static void nyr_mark_local_escape(nyr_local_escape_info_t *info,
-                                   size_t slot_count, int slot, size_t pc,
-                                   bool from_call, bool returned, bool stored) {
+                                  size_t slot_count, int slot, size_t pc,
+                                  bool from_call, bool returned, bool stored) {
   if (!info || slot < 0 || (size_t)slot >= slot_count)
     return;
   nyr_local_escape_info_t *e = &info[slot];
@@ -92,8 +105,8 @@ static void nyr_mark_local_escape(nyr_local_escape_info_t *info,
 }
 
 bool nyr_analyze_local_escapes(const nyr_func_t *f,
-                                nyr_local_escape_info_t *info,
-                                size_t slot_count) {
+                               nyr_local_escape_info_t *info,
+                               size_t slot_count) {
   if (!f || (!info && slot_count))
     return false;
   for (size_t i = 0; i < slot_count; ++i) {
@@ -110,6 +123,14 @@ bool nyr_analyze_local_escapes(const nyr_func_t *f,
     if (in->op == NYIR_ADDR_LOCAL && in->imm >= 0 &&
         (size_t)in->imm < slot_count) {
       nyr_local_escape_info_t *e = &info[in->imm];
+      e->address_taken = true;
+      e->escapes = true;
+      if (e->first_escape_pc == SIZE_MAX)
+        e->first_escape_pc = pc;
+    }
+    if (in->op == NYIR_INLINE_ASM && in->imm > 0 &&
+        (size_t)(in->imm - 1) < slot_count) {
+      nyr_local_escape_info_t *e = &info[in->imm - 1];
       e->address_taken = true;
       e->escapes = true;
       if (e->first_escape_pc == SIZE_MAX)
@@ -211,29 +232,39 @@ bool nir_collect_consts(const nyr_func_t *f, bool *known, int64_t *value) {
   return true;
 }
 
+static void nir_free_inst_metadata(nyr_inst_t *in) {
+  if (in->extra_args)
+    free(in->extra_args);
+  if (in->arg_sizes)
+    free(in->arg_sizes);
+  if (in->phi_incoming)
+    free(in->phi_incoming);
+}
+
 void nir_make_copy(nyr_inst_t *in, int src) {
   int dst = in->dst;
   nyr_debug_loc_t debug = in->debug;
   nyr_scalar_class_t scalar_class = in->scalar_class;
   uint8_t semantic_ownership = in->semantic_ownership;
   bool semantic_mutable = in->semantic_mutable;
+  nir_free_inst_metadata(in);
   /*
    * Range and alias classes describe the old producer and its operands. The
    * helper cannot prove they hold for `src`, so leave both unknown until their
    * analyses recompute facts for the rewritten instruction.
    */
   *in = (nyr_inst_t){.op = NYIR_COPY,
-                      .dst = dst,
-                      .a = src,
-                      .b = -1,
-                      .c = -1,
-                      .d = -1,
-                      .e = -1,
-                      .f = -1,
-                      .scalar_class = scalar_class,
-                      .semantic_ownership = semantic_ownership,
-                      .semantic_mutable = semantic_mutable,
-                      .debug = debug};
+                     .dst = dst,
+                     .a = src,
+                     .b = -1,
+                     .c = -1,
+                     .d = -1,
+                     .e = -1,
+                     .f = -1,
+                     .scalar_class = scalar_class,
+                     .semantic_ownership = semantic_ownership,
+                     .semantic_mutable = semantic_mutable,
+                     .debug = debug};
 }
 
 void nir_make_const(nyr_inst_t *in, int64_t value) {
@@ -248,6 +279,7 @@ void nir_make_const(nyr_inst_t *in, int64_t value) {
   nyr_scalar_class_t scalar_class = in->scalar_class;
   uint8_t semantic_ownership = in->semantic_ownership;
   bool semantic_mutable = in->semantic_mutable;
+  nir_free_inst_metadata(in);
   *in = (nyr_inst_t){
       .op = NYIR_CONST_I64,
       .dst = dst,
@@ -271,19 +303,20 @@ void nir_make_f64_const(nyr_inst_t *in, int64_t bitcast) {
   nyr_scalar_class_t scalar_class = in->scalar_class;
   uint8_t semantic_ownership = in->semantic_ownership;
   bool semantic_mutable = in->semantic_mutable;
+  nir_free_inst_metadata(in);
   *in = (nyr_inst_t){.op = NYIR_CONST_F64,
-                      .dst = dst,
-                      .a = -1,
-                      .b = -1,
-                      .c = -1,
-                      .d = -1,
-                      .e = -1,
-                      .f = -1,
-                      .imm = bitcast,
-                      .scalar_class = scalar_class,
-                      .semantic_ownership = semantic_ownership,
-                      .semantic_mutable = semantic_mutable,
-                      .debug = debug};
+                     .dst = dst,
+                     .a = -1,
+                     .b = -1,
+                     .c = -1,
+                     .d = -1,
+                     .e = -1,
+                     .f = -1,
+                     .imm = bitcast,
+                     .scalar_class = scalar_class,
+                     .semantic_ownership = semantic_ownership,
+                     .semantic_mutable = semantic_mutable,
+                     .debug = debug};
 }
 
 void nir_make_f32_const(nyr_inst_t *in, int64_t bitcast) {
@@ -292,19 +325,20 @@ void nir_make_f32_const(nyr_inst_t *in, int64_t bitcast) {
   nyr_scalar_class_t scalar_class = in->scalar_class;
   uint8_t semantic_ownership = in->semantic_ownership;
   bool semantic_mutable = in->semantic_mutable;
+  nir_free_inst_metadata(in);
   *in = (nyr_inst_t){.op = NYIR_CONST_F32,
-                      .dst = dst,
-                      .a = -1,
-                      .b = -1,
-                      .c = -1,
-                      .d = -1,
-                      .e = -1,
-                      .f = -1,
-                      .imm = bitcast,
-                      .scalar_class = scalar_class,
-                      .semantic_ownership = semantic_ownership,
-                      .semantic_mutable = semantic_mutable,
-                      .debug = debug};
+                     .dst = dst,
+                     .a = -1,
+                     .b = -1,
+                     .c = -1,
+                     .d = -1,
+                     .e = -1,
+                     .f = -1,
+                     .imm = bitcast,
+                     .scalar_class = scalar_class,
+                     .semantic_ownership = semantic_ownership,
+                     .semantic_mutable = semantic_mutable,
+                     .debug = debug};
 }
 
 void nyr_clear_derived_facts(nyr_inst_t *in) {
@@ -523,7 +557,7 @@ bool nyr_inst_payload_free(const nyr_inst_t *in) {
 }
 
 bool nyr_const_i64(const nyr_func_t *f, const int *defs, int value,
-                    int64_t *out) {
+                   int64_t *out) {
   if (!f || !defs || value < 0 || value >= f->next_value || defs[value] < 0)
     return false;
   const nyr_inst_t *in = &f->data[(size_t)defs[value]];
@@ -541,8 +575,7 @@ static bool nir_fact_singleton(const nyr_value_fact_t *facts, size_t count,
   return nyr_value_fact_singleton(&facts[value], out);
 }
 
-static bool nir_intersect_cmp_bound(nyr_range_t *r, nyr_cmp_t cmp,
-                                    int64_t c) {
+static bool nir_intersect_cmp_bound(nyr_range_t *r, nyr_cmp_t cmp, int64_t c) {
   if (!r)
     return false;
   nyr_range_t next = *r;
@@ -589,6 +622,43 @@ static bool nir_intersect_cmp_bound(nyr_range_t *r, nyr_cmp_t cmp,
   return true;
 }
 
+void nir_range_query_cache_free(nir_range_query_cache_t *cache) {
+  if (!cache)
+    return;
+  nyr_cfg_free(&cache->cfg);
+  free(cache->defs);
+  free(cache->snapshot);
+  *cache = (nir_range_query_cache_t){0};
+}
+
+static bool nir_range_query_prepare(const nyr_func_t *f,
+                                    nir_range_query_cache_t *cache) {
+  if (cache->func == f && cache->data == f->data && cache->len == f->len &&
+      cache->next_value == f->next_value && cache->defs && cache->snapshot &&
+      memcmp(cache->snapshot, f->data, f->len * sizeof(*f->data)) == 0)
+    return true;
+  nir_range_query_cache_free(cache);
+  if (f->len > SIZE_MAX / sizeof(*cache->snapshot))
+    return false;
+  if (!nyr_cfg_build_topology(f, &cache->cfg) || !cache->cfg.block_count ||
+      !(cache->defs = nyr_build_defs(f))) {
+    nir_range_query_cache_free(cache);
+    return false;
+  }
+  cache->snapshot = malloc((f->len ? f->len : 1) * sizeof(*cache->snapshot));
+  if (!cache->snapshot) {
+    nir_range_query_cache_free(cache);
+    return false;
+  }
+  if (f->len)
+    memcpy(cache->snapshot, f->data, f->len * sizeof(*f->data));
+  cache->func = f;
+  cache->data = f->data;
+  cache->len = f->len;
+  cache->next_value = f->next_value;
+  return true;
+}
+
 /*
  * Refine an interval along a chain of unique-predecessor CFG edges.  This is
  * intentionally local: joins retain the globally merged interval, while a
@@ -599,31 +669,26 @@ static bool nir_intersect_cmp_bound(nyr_range_t *r, nyr_cmp_t cmp,
 static void nir_refine_range_from_edges(const nyr_func_t *f,
                                         const nyr_value_fact_t *facts,
                                         int value, size_t at,
-                                        nyr_range_t *range) {
+                                        nyr_range_t *range,
+                                        nir_range_query_cache_t *cache) {
   if (!f || !facts || !range || at >= f->len || value < 0 ||
       value >= f->next_value)
     return;
-  nyr_cfg_t cfg = {0};
-  if (!nyr_cfg_build_topology(f, &cfg) || !cfg.block_count) {
-    nyr_cfg_free(&cfg);
+  if (!nir_range_query_prepare(f, cache))
     return;
-  }
-  int *defs = nyr_build_defs(f);
-  if (!defs) {
-    nyr_cfg_free(&cfg);
-    return;
-  }
+  const nyr_cfg_t *cfg = &cache->cfg;
+  const int *defs = cache->defs;
   int root_value = nir_strip_copy_value(f, defs, value);
-  size_t child = cfg.inst_block[at];
-  for (unsigned depth = 0; depth < 8 && child < cfg.block_count; ++depth) {
-    size_t pb = cfg.pred_offsets[child], pe = cfg.pred_offsets[child + 1];
+  size_t child = cfg->inst_block[at];
+  for (unsigned depth = 0; depth < 8 && child < cfg->block_count; ++depth) {
+    size_t pb = cfg->pred_offsets[child], pe = cfg->pred_offsets[child + 1];
     if (pe - pb != 1)
       break;
-    size_t pred = cfg.pred_blocks[pb];
-    if (pred >= cfg.block_count || pred == child)
+    size_t pred = cfg->pred_blocks[pb];
+    if (pred >= cfg->block_count || pred == child)
       break;
-    size_t start = cfg.block_start[pred];
-    size_t end = cfg.block_end[pred];
+    size_t start = cfg->block_start[pred];
+    size_t end = cfg->block_end[pred];
     if (end <= start) {
       child = pred;
       continue;
@@ -656,11 +721,11 @@ static void nir_refine_range_from_edges(const nyr_func_t *f,
       int cdef = defs[cond->a];
       const nyr_inst_t *cmp = &f->data[(size_t)cdef];
       if (cmp->op == NYIR_CMP_I64) {
-        bool true_edge = cfg.block_label[child] == cond->imm;
+        bool true_edge = cfg->block_label[child] == cond->imm;
         bool false_edge = false;
         if (!true_edge) {
           if (fallback)
-            false_edge = cfg.block_label[child] == fallback->imm;
+            false_edge = cfg->block_label[child] == fallback->imm;
           else
             false_edge = pred + 1 == child;
         }
@@ -693,12 +758,14 @@ static void nir_refine_range_from_edges(const nyr_func_t *f,
     }
     child = pred;
   }
-  free(defs);
-  nyr_cfg_free(&cfg);
 }
 
-bool nir_value_range_at(const nyr_func_t *f, const nyr_value_fact_t *facts,
-                        int value, size_t at, nyr_range_t *out) {
+bool nir_value_range_at_cached(const nyr_func_t *f,
+                               const nyr_value_fact_t *facts, int value,
+                               size_t at, nyr_range_t *out,
+                               nir_range_query_cache_t *cache) {
+  if (!cache)
+    return nir_value_range_at(f, facts, value, at, out);
   if (!f || !facts || !out || value < 0 || value >= f->next_value)
     return false;
   bool have = false;
@@ -710,9 +777,24 @@ bool nir_value_range_at(const nyr_func_t *f, const nyr_value_fact_t *facts,
   }
   if (!have)
     *out = (nyr_range_t){0};
+  /*
+   * Intersecting edge bounds cannot narrow a singleton. Contradictory
+   * bounds are ignored by nir_intersect_cmp_bound, so they cannot change it
+   * either. Avoid rebuilding the CFG and definition map for this common case.
+   */
+  if (out->has_min && out->has_max && out->min == out->max)
+    return true;
   if (at < f->len)
-    nir_refine_range_from_edges(f, facts, value, at, out);
+    nir_refine_range_from_edges(f, facts, value, at, out, cache);
   return out->has_min || out->has_max;
+}
+
+bool nir_value_range_at(const nyr_func_t *f, const nyr_value_fact_t *facts,
+                        int value, size_t at, nyr_range_t *out) {
+  nir_range_query_cache_t cache = {0};
+  bool result = nir_value_range_at_cached(f, facts, value, at, out, &cache);
+  nir_range_query_cache_free(&cache);
+  return result;
 }
 
 bool nir_operands_same_value(const nyr_func_t *f, int a, int b, size_t at) {
@@ -807,16 +889,16 @@ bool nir_rewrite_shl(nyr_func_t *f, size_t *i, int src, int shift) {
   memmove(&f->data[*i + 1], &f->data[*i], (f->len - *i) * sizeof(nyr_inst_t));
   f->len++;
   f->data[*i] = (nyr_inst_t){.op = NYIR_CONST_I64,
-                              .dst = shift_val,
-                              .a = -1,
-                              .b = -1,
-                              .imm = (int64_t)shift};
+                             .dst = shift_val,
+                             .a = -1,
+                             .b = -1,
+                             .imm = (int64_t)shift};
   (*i)++;
   f->data[*i] = (nyr_inst_t){.op = NYIR_SHL_I64,
-                              .dst = dst,
-                              .a = src,
-                              .b = shift_val,
-                              .effects = NYIR_EFFECT_NONE};
+                             .dst = dst,
+                             .a = src,
+                             .b = shift_val,
+                             .effects = NYIR_EFFECT_NONE};
   return true;
 }
 
@@ -840,18 +922,17 @@ bool nir_rewrite_neg(nyr_func_t *f, size_t *i, int src) {
       f->data = new_data;
       f->cap = new_cap;
     }
-    memmove(&f->data[*i + 1], &f->data[*i],
-            (f->len - *i) * sizeof(nyr_inst_t));
+    memmove(&f->data[*i + 1], &f->data[*i], (f->len - *i) * sizeof(nyr_inst_t));
     f->len++;
     f->data[*i] = (nyr_inst_t){
         .op = NYIR_CONST_I64, .dst = zero, .a = -1, .b = -1, .imm = 0};
     (*i)++;
   }
   f->data[*i] = (nyr_inst_t){.op = NYIR_SUB_I64,
-                              .dst = dst,
-                              .a = zero,
-                              .b = src,
-                              .effects = NYIR_EFFECT_NONE};
+                             .dst = dst,
+                             .a = zero,
+                             .b = src,
+                             .effects = NYIR_EFFECT_NONE};
   return true;
 }
 
@@ -994,7 +1075,7 @@ bool nyr_compact_if_sparse(nyr_func_t *f) {
 }
 
 size_t nyr_block_last_non_nop(const nyr_func_t *f, const nyr_cfg_t *cfg,
-                               size_t block) {
+                              size_t block) {
   if (!f || !cfg || block >= cfg->block_count)
     return 0;
   size_t start = cfg->block_start[block];
@@ -1052,6 +1133,8 @@ uint64_t nyr_debug_fingerprint(const nyr_func_t *f) {
   for (size_t i = 0; i < f->param_count; ++i)
     NIR_HASH(f->param_abi ? f->param_abi[i] : 0);
   NIR_HASH(f->return_aggregate_size);
+  NIR_HASH(f->i386_regparm);
+  NIR_HASH(f->i386_wide_params);
   NIR_HASH(f->return_aggregate_classes[0]);
   NIR_HASH(f->return_aggregate_classes[1]);
   NIR_HASH(f->source_param_count);
@@ -1072,6 +1155,7 @@ uint64_t nyr_debug_fingerprint(const nyr_func_t *f) {
     NIR_HASH(in->flags);
     NIR_HASH(in->effects);
     NIR_HASH(in->scalar_class);
+    NIR_HASH(in->i386_wide_args);
     NIR_HASH(in->semantic_ownership);
     NIR_HASH(in->semantic_mutable);
     NIR_HASH(in->alias_class);
@@ -1157,8 +1241,8 @@ void nyr_pass_tag(char *buf, size_t n, const char *pass_name) {
  * is valid (no div-by-zero).
  */
 bool nyr_float_fold_binary(nyr_op_t op, int64_t a_imm, int64_t b_imm,
-                            unsigned char kind, int64_t *out_imm,
-                            unsigned char *out_kind) {
+                           unsigned char kind, int64_t *out_imm,
+                           unsigned char *out_kind) {
   if (kind != 2 && kind != 3)
     return false;
   bool is_f32 = kind == 3;

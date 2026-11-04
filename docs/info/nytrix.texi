@@ -76,9 +76,9 @@ Execution modes are:
 JIT run one file.
 @item ny -c 'source'
 Run inline source.
-@item ny -run file.ny
+@item ny --run=aot file.ny
 Build and run a temporary native executable.
-@item ny -o app file.ny
+@item ny --output=app file.ny
 Emit a native executable.
 @item ny, ny -i, ny --plain-repl
 Open the REPL.
@@ -112,7 +112,7 @@ T<A, B>
 ?T
 *T
 fnptr
-seq | sequence
+sequence
 numeric
 indexable
 iterable
@@ -185,18 +185,19 @@ Ordinary values are runtime-managed. Raw pointers, handles, layouts, and FFI
 strings cross into native lifetime rules.
 
 @table @code
-@item --strict-types
-Reject selected dynamic type fallbacks while keeping default type checks.
+@item --check=types
+Enable strict type checks.
 @item --borrow-check
 Enable advisory borrow and ownership diagnostics.
-@item --ownership-strict
+@item --ownership-check=strict
 Promote supported ownership diagnostics to errors; not every lifetime rule is
 complete.
-@item --safe-mode
+@item --mode=safe
 Use default type checks plus ownership/borrow checks, RC/RAII cleanup, strict
 effect/alias policy, and raw-memory diagnostics.
-@item --heap=gc
-Enable the optional tracing collector. Ownership and RAII are recommended.
+@item --heap=manual|raii|rc|gc
+Select the heap ownership policy. Manual ownership is the default; tracing
+garbage collection is an optional explicit policy.
 @end table
 
 Ownership helpers include @code{borrow(x)}, @code{&x}, @code{own(x)},

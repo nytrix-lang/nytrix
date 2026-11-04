@@ -1,10 +1,9 @@
 /*
  * Regression coverage for memory-address alias classes and pointer escapes.
  */
-#include "code/backend/ir/opt/loop.h"
 #include "code/backend/ir/opt/util.h"
-#include "code/lang/parse/ast.h"
 #include "support.h"
+#include <inttypes.h>
 
 static bool run_memory_address_classes(void) {
   static const nyr_op_t accesses[] = {
@@ -16,65 +15,28 @@ static bool run_memory_address_classes(void) {
   nyr_func_t f;
   nyr_opt_begin(&f);
   int value = nyr_opt_const(&f, 9);
-  int global_a = nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_ADDR_SYMBOL,
-                                             .dst = -1,
-                                             .a = -1,
-                                             .b = -1,
-                                             .c = -1,
-                                             .d = -1,
-                                             .e = -1,
-                                             .f = -1,
-                                             .symbol = "shared_global"});
-  int global_a_again = nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_ADDR_SYMBOL,
-                                                   .dst = -1,
-                                                   .a = -1,
-                                                   .b = -1,
-                                                   .c = -1,
-                                                   .d = -1,
-                                                   .e = -1,
-                                                   .f = -1,
-                                                   .symbol = "shared_global"});
-  int global_b = nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_ADDR_SYMBOL,
-                                             .dst = -1,
-                                             .a = -1,
-                                             .b = -1,
-                                             .c = -1,
-                                             .d = -1,
-                                             .e = -1,
-                                             .f = -1,
-                                             .symbol = "other_global"});
+  int global_a = nyr_opt_emit_symbol(&f, NYIR_ADDR_SYMBOL, "shared_global");
+  int global_a_again =
+      nyr_opt_emit_symbol(&f, NYIR_ADDR_SYMBOL, "shared_global");
+  int global_b = nyr_opt_emit_symbol(&f, NYIR_ADDR_SYMBOL, "other_global");
   size_t access_at[sizeof(accesses) / sizeof(accesses[0])];
   for (size_t i = 0; i < sizeof(accesses) / sizeof(accesses[0]); ++i) {
     int addr = (i & 1u) ? global_a_again : global_a;
     access_at[i] = f.len;
     nyr_ir_emit(&f, (nyr_inst_t){.op = accesses[i],
-                                .dst = -1,
-                                .a = addr,
-                                .b = value,
-                                .c = -1,
-                                .d = -1,
-                                .e = -1,
-                                .f = -1,
-                                .imm = 8});
+                                 .dst = -1,
+                                 .a = addr,
+                                 .b = value,
+                                 .c = -1,
+                                 .d = -1,
+                                 .e = -1,
+                                 .f = -1,
+                                 .imm = 8});
   }
   size_t other_load_at = f.len;
-  nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_LOAD_I64,
-                              .dst = -1,
-                              .a = global_b,
-                              .b = -1,
-                              .c = -1,
-                              .d = -1,
-                              .e = -1,
-                              .f = -1});
+  nyr_opt_emit_abc(&f, NYIR_LOAD_I64, global_b, -1, -1);
   size_t unknown_load_at = f.len;
-  nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_LOAD_I64,
-                              .dst = -1,
-                              .a = value,
-                              .b = -1,
-                              .c = -1,
-                              .d = -1,
-                              .e = -1,
-                              .f = -1});
+  nyr_opt_emit_abc(&f, NYIR_LOAD_I64, value, -1, -1);
 
   bool ok = nyr_alias_analysis(&f);
   uint32_t shared_class = f.data[access_at[0]].alias_class;
@@ -97,26 +59,18 @@ static bool run_memory_address_classes(void) {
 static bool run_local_address_escape(size_t argument_index) {
   nyr_func_t f;
   nyr_opt_begin(&f);
-  int local_addr = nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_ADDR_LOCAL,
-                                               .dst = -1,
-                                               .a = -1,
-                                               .b = -1,
-                                               .c = -1,
-                                               .d = -1,
-                                               .e = -1,
-                                               .f = -1,
-                                               .imm = 0});
+  int local_addr = nyr_opt_emit_imm(&f, NYIR_ADDR_LOCAL, 0);
   int filler = nyr_opt_const(&f, 0);
   nyr_inst_t call = {.op = NYIR_CALL,
-                      .dst = -1,
-                      .a = -1,
-                      .b = -1,
-                      .c = -1,
-                      .d = -1,
-                      .e = -1,
-                      .f = -1,
-                      .imm = (int64_t)argument_index + 1,
-                      .symbol = "unknown_pointer_consumer"};
+                     .dst = -1,
+                     .a = -1,
+                     .b = -1,
+                     .c = -1,
+                     .d = -1,
+                     .e = -1,
+                     .f = -1,
+                     .imm = (int64_t)argument_index + 1,
+                     .symbol = "unknown_pointer_consumer"};
   int args[6] = {filler, filler, filler, filler, filler, filler};
   if (argument_index < 6) {
     args[argument_index] = local_addr;
@@ -159,51 +113,43 @@ static bool run_derived_local_address_escape(nyr_op_t derive_op,
                                              size_t argument_index) {
   nyr_func_t f;
   nyr_opt_begin(&f);
-  int local_addr = nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_ADDR_LOCAL,
-                                               .dst = -1,
-                                               .a = -1,
-                                               .b = -1,
-                                               .c = -1,
-                                               .d = -1,
-                                               .e = -1,
-                                               .f = -1,
-                                               .imm = 0});
+  int local_addr = nyr_opt_emit_imm(&f, NYIR_ADDR_LOCAL, 0);
   int derived_addr = local_addr;
   if (derive_op == NYIR_COPY) {
     derived_addr =
         nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_COPY,
-                                    .dst = -1,
-                                    .a = local_addr,
-                                    .b = -1,
-                                    .c = -1,
-                                    .d = -1,
-                                    .e = -1,
-                                    .f = -1,
-                                    .scalar_class = NYIR_SCALAR_POINTER});
+                                     .dst = -1,
+                                     .a = local_addr,
+                                     .b = -1,
+                                     .c = -1,
+                                     .d = -1,
+                                     .e = -1,
+                                     .f = -1,
+                                     .scalar_class = NYIR_SCALAR_POINTER});
   } else {
     int offset = nyr_opt_const(&f, 8);
     derived_addr =
         nyr_ir_emit(&f, (nyr_inst_t){.op = derive_op,
-                                    .dst = -1,
-                                    .a = local_addr,
-                                    .b = offset,
-                                    .c = -1,
-                                    .d = -1,
-                                    .e = -1,
-                                    .f = -1,
-                                    .scalar_class = NYIR_SCALAR_POINTER});
+                                     .dst = -1,
+                                     .a = local_addr,
+                                     .b = offset,
+                                     .c = -1,
+                                     .d = -1,
+                                     .e = -1,
+                                     .f = -1,
+                                     .scalar_class = NYIR_SCALAR_POINTER});
   }
   int filler = nyr_opt_const(&f, 0);
   nyr_inst_t call = {.op = NYIR_CALL,
-                      .dst = -1,
-                      .a = filler,
-                      .b = filler,
-                      .c = filler,
-                      .d = filler,
-                      .e = filler,
-                      .f = filler,
-                      .imm = (int64_t)argument_index + 1,
-                      .symbol = "unknown_pointer_consumer"};
+                     .dst = -1,
+                     .a = filler,
+                     .b = filler,
+                     .c = filler,
+                     .d = filler,
+                     .e = filler,
+                     .f = filler,
+                     .imm = (int64_t)argument_index + 1,
+                     .symbol = "unknown_pointer_consumer"};
   if (argument_index < 6) {
     int *args[] = {&call.a, &call.b, &call.c, &call.d, &call.e, &call.f};
     *args[argument_index] = derived_addr;
@@ -235,67 +181,37 @@ static bool run_local_address_escape_through_sink(nyr_op_t derive_op,
                                                   bool store_value) {
   nyr_func_t f;
   nyr_opt_begin(&f);
-  int local_addr = nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_ADDR_LOCAL,
-                                               .dst = -1,
-                                               .a = -1,
-                                               .b = -1,
-                                               .c = -1,
-                                               .d = -1,
-                                               .e = -1,
-                                               .f = -1,
-                                               .imm = 0});
+  int local_addr = nyr_opt_emit_imm(&f, NYIR_ADDR_LOCAL, 0);
   int escaped_value = local_addr;
   if (derive_op == NYIR_COPY) {
     escaped_value =
         nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_COPY,
-                                    .dst = -1,
-                                    .a = local_addr,
-                                    .b = -1,
-                                    .c = -1,
-                                    .d = -1,
-                                    .e = -1,
-                                    .f = -1,
-                                    .scalar_class = NYIR_SCALAR_POINTER});
+                                     .dst = -1,
+                                     .a = local_addr,
+                                     .b = -1,
+                                     .c = -1,
+                                     .d = -1,
+                                     .e = -1,
+                                     .f = -1,
+                                     .scalar_class = NYIR_SCALAR_POINTER});
   } else if (derive_op == NYIR_ADD_I64 || derive_op == NYIR_SUB_I64) {
     int offset = nyr_opt_const(&f, 8);
     escaped_value =
         nyr_ir_emit(&f, (nyr_inst_t){.op = derive_op,
-                                    .dst = -1,
-                                    .a = local_addr,
-                                    .b = offset,
-                                    .c = -1,
-                                    .d = -1,
-                                    .e = -1,
-                                    .f = -1,
-                                    .scalar_class = NYIR_SCALAR_POINTER});
+                                     .dst = -1,
+                                     .a = local_addr,
+                                     .b = offset,
+                                     .c = -1,
+                                     .d = -1,
+                                     .e = -1,
+                                     .f = -1,
+                                     .scalar_class = NYIR_SCALAR_POINTER});
   }
   if (store_value) {
-    int global_addr = nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_ADDR_SYMBOL,
-                                                  .dst = -1,
-                                                  .a = -1,
-                                                  .b = -1,
-                                                  .c = -1,
-                                                  .d = -1,
-                                                  .e = -1,
-                                                  .f = -1,
-                                                  .symbol = "escape_sink"});
-    nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_STORE_I64,
-                                .dst = -1,
-                                .a = global_addr,
-                                .b = -1,
-                                .c = escaped_value,
-                                .d = -1,
-                                .e = -1,
-                                .f = -1});
+    int global_addr = nyr_opt_emit_symbol(&f, NYIR_ADDR_SYMBOL, "escape_sink");
+    nyr_opt_emit_abc(&f, NYIR_STORE_I64, global_addr, -1, escaped_value);
   } else {
-    nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_RET,
-                                .dst = -1,
-                                .a = escaped_value,
-                                .b = -1,
-                                .c = -1,
-                                .d = -1,
-                                .e = -1,
-                                .f = -1});
+    nyr_opt_emit_abc(&f, NYIR_RET, escaped_value, -1, -1);
   }
   bool ok = nyr_alias_analysis(&f) &&
             f.data[(size_t)local_addr].alias_class == 0 &&
@@ -313,24 +229,9 @@ static bool run_recomputed_facts_clear_stale_classes(void) {
   nyr_func_t f;
   nyr_opt_begin(&f);
   size_t address_at = f.len;
-  int address = nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_ADDR_SYMBOL,
-                                            .dst = -1,
-                                            .a = -1,
-                                            .b = -1,
-                                            .c = -1,
-                                            .d = -1,
-                                            .e = -1,
-                                            .f = -1,
-                                            .symbol = "was_a_pointer"});
+  int address = nyr_opt_emit_symbol(&f, NYIR_ADDR_SYMBOL, "was_a_pointer");
   size_t load_at = f.len;
-  nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_LOAD_I64,
-                              .dst = -1,
-                              .a = address,
-                              .b = -1,
-                              .c = -1,
-                              .d = -1,
-                              .e = -1,
-                              .f = -1});
+  nyr_opt_emit_abc(&f, NYIR_LOAD_I64, address, -1, -1);
   bool ok = nyr_alias_analysis(&f) && f.data[address_at].alias_class != 0 &&
             f.data[load_at].alias_class == f.data[address_at].alias_class;
   /*
@@ -352,24 +253,17 @@ static bool run_rewrite_clears_derived_alias_class(void) {
   nyr_opt_begin(&f);
   int address =
       nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_ADDR_LOCAL,
-                                  .dst = -1,
-                                  .a = -1,
-                                  .b = -1,
-                                  .c = -1,
-                                  .d = -1,
-                                  .e = -1,
-                                  .f = -1,
-                                  .imm = 0,
-                                  .scalar_class = NYIR_SCALAR_POINTER});
+                                   .dst = -1,
+                                   .a = -1,
+                                   .b = -1,
+                                   .c = -1,
+                                   .d = -1,
+                                   .e = -1,
+                                   .f = -1,
+                                   .imm = 0,
+                                   .scalar_class = NYIR_SCALAR_POINTER});
   size_t folded_at = f.len;
-  int folded = nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_SUB_I64,
-                                           .dst = -1,
-                                           .a = address,
-                                           .b = address,
-                                           .c = -1,
-                                           .d = -1,
-                                           .e = -1,
-                                           .f = -1});
+  int folded = nyr_opt_emit_abc(&f, NYIR_SUB_I64, address, address, -1);
   bool ok = nyr_alias_analysis(&f) && f.data[folded_at].alias_class != 0;
   nir_make_const(&f.data[folded_at], 0);
   ok = ok && f.data[folded_at].op == NYIR_CONST_I64 &&
@@ -402,13 +296,13 @@ static bool run_rewrite_clears_derived_alias_class(void) {
    * contract while retaining semantic representation and ownership facts.
    */
   f.data[folded_at] = (nyr_inst_t){.op = NYIR_ADD_I64,
-                                    .dst = folded,
-                                    .a = address,
-                                    .b = address,
-                                    .alias_class = 17,
-                                    .scalar_class = NYIR_SCALAR_F64,
-                                    .semantic_ownership = NY_SEM_OWN_OWNED,
-                                    .semantic_mutable = true};
+                                   .dst = folded,
+                                   .a = address,
+                                   .b = address,
+                                   .alias_class = 17,
+                                   .scalar_class = NYIR_SCALAR_F64,
+                                   .semantic_ownership = NY_SEM_OWN_OWNED,
+                                   .semantic_mutable = true};
   nir_make_f64_const(&f.data[folded_at], 0);
   ok = ok && f.data[folded_at].op == NYIR_CONST_F64 &&
        f.data[folded_at].alias_class == 0 &&
@@ -418,15 +312,15 @@ static bool run_rewrite_clears_derived_alias_class(void) {
 
   f.data[folded_at] =
       (nyr_inst_t){.op = NYIR_ADD_I64,
-                    .dst = folded,
-                    .a = address,
-                    .b = address,
-                    .alias_class = 17,
-                    .scalar_class = NYIR_SCALAR_F32,
-                    .semantic_ownership = NY_SEM_OWN_BORROWED,
-                    .semantic_mutable = true,
-                    .debug = (nyr_debug_loc_t){
-                        .file = "<f32-rewrite>", .line = 19, .column = 7}};
+                   .dst = folded,
+                   .a = address,
+                   .b = address,
+                   .alias_class = 17,
+                   .scalar_class = NYIR_SCALAR_F32,
+                   .semantic_ownership = NY_SEM_OWN_BORROWED,
+                   .semantic_mutable = true,
+                   .debug = (nyr_debug_loc_t){
+                       .file = "<f32-rewrite>", .line = 19, .column = 7}};
   nir_make_f32_const(&f.data[folded_at], 0);
   ok = ok && f.data[folded_at].op == NYIR_CONST_F32 &&
        f.data[folded_at].alias_class == 0 &&
@@ -449,87 +343,64 @@ static bool run_rewrite_clears_derived_alias_class(void) {
 static bool run_private_global_promotion_invalidates_alias_classes(void) {
   nyr_func_t f;
   nyr_opt_begin(&f);
-  int address = nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_ADDR_SYMBOL,
-                                            .dst = -1,
-                                            .a = -1,
-                                            .b = -1,
-                                            .c = -1,
-                                            .d = -1,
-                                            .e = -1,
-                                            .f = -1,
-                                            .symbol = "private_global"});
+  int address = nyr_opt_emit_symbol(&f, NYIR_ADDR_SYMBOL, "private_global");
   int loaded =
       nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_LOAD_I64,
-                                  .dst = -1,
-                                  .a = address,
-                                  .b = -1,
-                                  .c = -1,
-                                  .d = -1,
-                                  .e = -1,
-                                  .f = -1,
-                                  .scalar_class = NYIR_SCALAR_I64_RAW});
+                                   .dst = -1,
+                                   .a = address,
+                                   .b = -1,
+                                   .c = -1,
+                                   .d = -1,
+                                   .e = -1,
+                                   .f = -1,
+                                   .scalar_class = NYIR_SCALAR_I64_RAW});
   f.data[1].range =
       (nyr_range_t){.has_min = true, .has_max = true, .min = 0, .max = 0};
   int one = nyr_opt_const(&f, 1);
   int updated = nyr_opt_binop(&f, NYIR_ADD_I64, loaded, one);
-  nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_STORE_I64,
-                              .dst = -1,
-                              .a = address,
-                              .b = -1,
-                              .c = updated,
-                              .d = -1,
-                              .e = -1,
-                              .f = -1});
+  nyr_opt_emit_abc(&f, NYIR_STORE_I64, address, -1, updated);
   int f64_address =
-      nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_ADDR_SYMBOL,
-                                  .dst = -1,
-                                  .a = -1,
-                                  .b = -1,
-                                  .c = -1,
-                                  .d = -1,
-                                  .e = -1,
-                                  .f = -1,
-                                  .symbol = "private_f64_global"});
+      nyr_opt_emit_symbol(&f, NYIR_ADDR_SYMBOL, "private_f64_global");
   int f64_initial = nyr_opt_const_f64(&f, 1.0);
   nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_STORE_I64,
-                              .dst = -1,
-                              .a = f64_address,
-                              .b = -1,
-                              .c = f64_initial,
-                              .d = -1,
-                              .e = -1,
-                              .f = -1,
-                              .scalar_class = NYIR_SCALAR_F64});
+                               .dst = -1,
+                               .a = f64_address,
+                               .b = -1,
+                               .c = f64_initial,
+                               .d = -1,
+                               .e = -1,
+                               .f = -1,
+                               .scalar_class = NYIR_SCALAR_F64});
   int f64_loaded =
       nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_LOAD_I64,
-                                  .dst = -1,
-                                  .a = f64_address,
-                                  .b = -1,
-                                  .c = -1,
-                                  .d = -1,
-                                  .e = -1,
-                                  .f = -1,
-                                  .scalar_class = NYIR_SCALAR_F64});
+                                   .dst = -1,
+                                   .a = f64_address,
+                                   .b = -1,
+                                   .c = -1,
+                                   .d = -1,
+                                   .e = -1,
+                                   .f = -1,
+                                   .scalar_class = NYIR_SCALAR_F64});
   int f64_two = nyr_opt_const_f64(&f, 2.0);
   int f64_updated =
       nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_ADD_F64,
-                                  .dst = -1,
-                                  .a = f64_loaded,
-                                  .b = f64_two,
-                                  .c = -1,
-                                  .d = -1,
-                                  .e = -1,
-                                  .f = -1,
-                                  .scalar_class = NYIR_SCALAR_F64});
+                                   .dst = -1,
+                                   .a = f64_loaded,
+                                   .b = f64_two,
+                                   .c = -1,
+                                   .d = -1,
+                                   .e = -1,
+                                   .f = -1,
+                                   .scalar_class = NYIR_SCALAR_F64});
   nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_STORE_I64,
-                              .dst = -1,
-                              .a = f64_address,
-                              .b = -1,
-                              .c = f64_updated,
-                              .d = -1,
-                              .e = -1,
-                              .f = -1,
-                              .scalar_class = NYIR_SCALAR_F64});
+                               .dst = -1,
+                               .a = f64_address,
+                               .b = -1,
+                               .c = f64_updated,
+                               .d = -1,
+                               .e = -1,
+                               .f = -1,
+                               .scalar_class = NYIR_SCALAR_F64});
   nyr_opt_ret(&f, updated);
 
   bool ok = nyr_alias_analysis(&f) && f.data[0].alias_class != 0 &&
@@ -579,32 +450,32 @@ static bool run_const_fold_invalidates_alias_classes(void) {
   int six = nyr_opt_const(&f, 6);
   int seven = nyr_opt_const(&f, 7);
   int sum = nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_ADD_I64,
-                                        .dst = -1,
-                                        .a = six,
-                                        .b = seven,
-                                        .c = -1,
-                                        .d = -1,
-                                        .e = -1,
-                                        .f = -1,
-                                        .alias_class = 41,
-                                        .scalar_class = NYIR_SCALAR_I64_RAW,
-                                        .semantic_ownership = NY_SEM_OWN_OWNED,
-                                        .semantic_mutable = true});
+                                         .dst = -1,
+                                         .a = six,
+                                         .b = seven,
+                                         .c = -1,
+                                         .d = -1,
+                                         .e = -1,
+                                         .f = -1,
+                                         .alias_class = 41,
+                                         .scalar_class = NYIR_SCALAR_I64_RAW,
+                                         .semantic_ownership = NY_SEM_OWN_OWNED,
+                                         .semantic_mutable = true});
   int fone = nyr_opt_const_f64(&f, 1.0);
   int ftwo = nyr_opt_const_f64(&f, 2.0);
   int fsum =
       nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_ADD_F64,
-                                  .dst = -1,
-                                  .a = fone,
-                                  .b = ftwo,
-                                  .c = -1,
-                                  .d = -1,
-                                  .e = -1,
-                                  .f = -1,
-                                  .alias_class = 42,
-                                  .scalar_class = NYIR_SCALAR_F64,
-                                  .semantic_ownership = NY_SEM_OWN_BORROWED,
-                                  .semantic_mutable = true});
+                                   .dst = -1,
+                                   .a = fone,
+                                   .b = ftwo,
+                                   .c = -1,
+                                   .d = -1,
+                                   .e = -1,
+                                   .f = -1,
+                                   .alias_class = 42,
+                                   .scalar_class = NYIR_SCALAR_F64,
+                                   .semantic_ownership = NY_SEM_OWN_BORROWED,
+                                   .semantic_mutable = true});
   nyr_opt_ret(&f, sum);
 
   bool ok =
@@ -633,18 +504,19 @@ static bool run_cvp_invalidates_alias_classes(void) {
   nyr_func_t f;
   nyr_opt_begin(&f);
   int source = nyr_opt_const(&f, 19);
-  int copy = nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_COPY,
-                                         .dst = -1,
-                                         .a = source,
-                                         .b = -1,
-                                         .c = -1,
-                                         .d = -1,
-                                         .e = -1,
-                                         .f = -1,
-                                         .alias_class = 43,
-                                         .scalar_class = NYIR_SCALAR_I64_RAW,
-                                         .semantic_ownership = NY_SEM_OWN_OWNED,
-                                         .semantic_mutable = true});
+  int copy =
+      nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_COPY,
+                                   .dst = -1,
+                                   .a = source,
+                                   .b = -1,
+                                   .c = -1,
+                                   .d = -1,
+                                   .e = -1,
+                                   .f = -1,
+                                   .alias_class = 43,
+                                   .scalar_class = NYIR_SCALAR_I64_RAW,
+                                   .semantic_ownership = NY_SEM_OWN_OWNED,
+                                   .semantic_mutable = true});
   nyr_opt_ret(&f, copy);
 
   bool ok = nyr_cvp(&f) && f.data[(size_t)copy].op == NYIR_CONST_I64 &&
@@ -677,32 +549,25 @@ static bool run_redundant_load_forwarding_invalidates_range(void) {
   nyr_opt_begin(&f);
   int local_seed = nyr_opt_const(&f, 0);
   nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_STORE_LOCAL,
-                              .dst = -1,
-                              .a = local_seed,
-                              .b = -1,
-                              .c = -1,
-                              .d = -1,
-                              .e = -1,
-                              .f = -1,
-                              .imm = 0});
-  int address = nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_ADDR_SYMBOL,
-                                            .dst = -1,
-                                            .a = -1,
-                                            .b = -1,
-                                            .c = -1,
-                                            .d = -1,
-                                            .e = -1,
-                                            .f = -1,
-                                            .symbol = "shared"});
-  int first = nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_LOAD_I64,
-                                          .dst = -1,
-                                          .a = address,
-                                          .b = -1,
-                                          .c = -1,
-                                          .d = -1,
-                                          .e = -1,
-                                          .f = -1,
-                                          .scalar_class = NYIR_SCALAR_I64_RAW});
+                               .dst = -1,
+                               .a = local_seed,
+                               .b = -1,
+                               .c = -1,
+                               .d = -1,
+                               .e = -1,
+                               .f = -1,
+                               .imm = 0});
+  int address = nyr_opt_emit_symbol(&f, NYIR_ADDR_SYMBOL, "shared");
+  int first =
+      nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_LOAD_I64,
+                                   .dst = -1,
+                                   .a = address,
+                                   .b = -1,
+                                   .c = -1,
+                                   .d = -1,
+                                   .e = -1,
+                                   .f = -1,
+                                   .scalar_class = NYIR_SCALAR_I64_RAW});
   size_t second_at = f.len;
   nyr_ir_emit(
       &f,
@@ -739,34 +604,27 @@ static bool run_sroa_invalidates_address_alias_classes(void) {
   nyr_opt_begin(&f);
   int address =
       nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_ADDR_LOCAL,
-                                  .dst = -1,
-                                  .a = -1,
-                                  .b = -1,
-                                  .c = -1,
-                                  .d = -1,
-                                  .e = -1,
-                                  .f = -1,
-                                  .imm = 0,
-                                  .scalar_class = NYIR_SCALAR_POINTER});
+                                   .dst = -1,
+                                   .a = -1,
+                                   .b = -1,
+                                   .c = -1,
+                                   .d = -1,
+                                   .e = -1,
+                                   .f = -1,
+                                   .imm = 0,
+                                   .scalar_class = NYIR_SCALAR_POINTER});
   int value = nyr_opt_const(&f, 7);
-  nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_STORE_I64,
-                              .dst = -1,
-                              .a = address,
-                              .b = -1,
-                              .c = value,
-                              .d = -1,
-                              .e = -1,
-                              .f = -1});
+  nyr_opt_emit_abc(&f, NYIR_STORE_I64, address, -1, value);
   int loaded =
       nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_LOAD_I64,
-                                  .dst = -1,
-                                  .a = address,
-                                  .b = -1,
-                                  .c = -1,
-                                  .d = -1,
-                                  .e = -1,
-                                  .f = -1,
-                                  .scalar_class = NYIR_SCALAR_I64_RAW});
+                                   .dst = -1,
+                                   .a = address,
+                                   .b = -1,
+                                   .c = -1,
+                                   .d = -1,
+                                   .e = -1,
+                                   .f = -1,
+                                   .scalar_class = NYIR_SCALAR_I64_RAW});
   nyr_opt_ret(&f, loaded);
   bool alias_ok = nyr_alias_analysis(&f);
   /*
@@ -805,6 +663,62 @@ static bool run_sroa_invalidates_address_alias_classes(void) {
   return ok;
 }
 
+static bool run_sroa_phi_null_incoming(void) {
+  nyr_func_t f;
+  nyr_opt_begin(&f);
+  int initial = nyr_opt_const(&f, 42);
+  nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_STORE_LOCAL,
+                               .dst = -1,
+                               .a = initial,
+                               .b = -1,
+                               .c = -1,
+                               .d = -1,
+                               .e = -1,
+                               .f = -1,
+                               .imm = 0});
+  int address = nyr_opt_emit_imm(&f, NYIR_ADDR_LOCAL, 0);
+  int false_value = nyr_opt_const(&f, 0);
+  nyr_opt_br_if(&f, false_value, 20);
+  nyr_opt_label(&f, 10);
+  nyr_opt_br(&f, 30);
+  nyr_opt_label(&f, 30);
+  size_t phi_at = f.len;
+  nyr_opt_phi(&f, 10, address, 20, -1);
+  int merged_address = f.next_value - 1;
+  int loaded = nyr_opt_emit_abc(&f, NYIR_LOAD_I64, merged_address, -1, -1);
+  nyr_opt_ret(&f, loaded);
+  nyr_opt_label(&f, 20);
+  int null = nyr_opt_const(&f, 0);
+  f.data[phi_at].phi_incoming[1].value = null;
+  nyr_opt_br(&f, 30);
+
+  bool ok = nyr_opt_verify(&f, "sroa-null-phi/before") &&
+            nyr_opt_eval(&f, "sroa-null-phi/before") == 42 &&
+            nyr_sroa_scalar(&f);
+  if (ok) {
+    nyr_refresh_metadata(&f);
+    ok = nyr_opt_verify(&f, "sroa-null-phi/after") &&
+         nyr_opt_eval(&f, "sroa-null-phi/after") == 42;
+  }
+  bool promoted = false;
+  for (size_t i = 0; ok && i < f.len; ++i) {
+    const nyr_inst_t *in = &f.data[i];
+    if (in->dst == loaded) {
+      promoted = in->op == NYIR_LOAD_LOCAL && in->imm == 0;
+      break;
+    }
+  }
+  ok = ok && promoted;
+  if (!ok) {
+    fprintf(
+        stderr,
+        "[alias-contracts] null PHI input blocked local pointer promotion\n");
+    nyr_dump(stderr, &f, "sroa-null-phi");
+  }
+  nyr_ir_func_free(&f);
+  return ok;
+}
+
 static bool run_phi_elim_invalidates_alias_class(void) {
   nyr_func_t f;
   nyr_opt_begin(&f);
@@ -831,8 +745,7 @@ static bool run_phi_elim_invalidates_alias_class(void) {
   f.data[phi_at].debug =
       (nyr_debug_loc_t){.file = phi_source, .line = 21, .column = 8};
   bool ok = nyr_opt_verify(&f, "alias-contracts/phi-before") &&
-            nyr_phi_elim(&f) &&
-            nyr_opt_verify(&f, "alias-contracts/phi-after");
+            nyr_phi_elim(&f) && nyr_opt_verify(&f, "alias-contracts/phi-after");
   bool saw_result = false;
   size_t located_stores = 0;
   for (size_t i = 0; i < f.len; ++i) {
@@ -945,51 +858,50 @@ static bool run_isle_rewrites_reconcile_derived_facts(void) {
   nyr_opt_begin(&f);
   int address =
       nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_ADDR_LOCAL,
-                                  .dst = -1,
-                                  .a = -1,
-                                  .b = -1,
-                                  .c = -1,
-                                  .d = -1,
-                                  .e = -1,
-                                  .f = -1,
-                                  .imm = 0,
-                                  .scalar_class = NYIR_SCALAR_POINTER});
+                                   .dst = -1,
+                                   .a = -1,
+                                   .b = -1,
+                                   .c = -1,
+                                   .d = -1,
+                                   .e = -1,
+                                   .f = -1,
+                                   .imm = 0,
+                                   .scalar_class = NYIR_SCALAR_POINTER});
   int zero = nyr_opt_const(&f, 0);
   int one = nyr_opt_const(&f, 1);
   size_t add_zero_at = f.len;
   int add_zero = nyr_ir_emit(
-      &f,
-      (nyr_inst_t){.op = NYIR_ADD_I64,
-                    .dst = -1,
-                    .a = address,
-                    .b = zero,
-                    .c = -1,
-                    .d = -1,
-                    .e = -1,
-                    .f = -1,
-                    .scalar_class = NYIR_SCALAR_POINTER,
-                    .semantic_ownership = NY_SEM_OWN_BORROWED,
-                    .semantic_mutable = true,
-                    .range = {.has_min = true,
-                              .has_max = true,
-                              .min = INT64_MIN,
-                              .max = INT64_MAX},
-                    .debug = {.file = debug_file, .line = 23, .column = 5}});
+      &f, (nyr_inst_t){.op = NYIR_ADD_I64,
+                       .dst = -1,
+                       .a = address,
+                       .b = zero,
+                       .c = -1,
+                       .d = -1,
+                       .e = -1,
+                       .f = -1,
+                       .scalar_class = NYIR_SCALAR_POINTER,
+                       .semantic_ownership = NY_SEM_OWN_BORROWED,
+                       .semantic_mutable = true,
+                       .range = {.has_min = true,
+                                 .has_max = true,
+                                 .min = INT64_MIN,
+                                 .max = INT64_MAX},
+                       .debug = {.file = debug_file, .line = 23, .column = 5}});
   size_t add_self_at = f.len;
   int add_self =
       nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_ADD_I64,
-                                  .dst = -1,
-                                  .a = address,
-                                  .b = address,
-                                  .c = -1,
-                                  .d = -1,
-                                  .e = -1,
-                                  .f = -1,
-                                  .scalar_class = NYIR_SCALAR_POINTER,
-                                  .range = {.has_min = true,
-                                            .has_max = true,
-                                            .min = INT64_MIN,
-                                            .max = INT64_MAX}});
+                                   .dst = -1,
+                                   .a = address,
+                                   .b = address,
+                                   .c = -1,
+                                   .d = -1,
+                                   .e = -1,
+                                   .f = -1,
+                                   .scalar_class = NYIR_SCALAR_POINTER,
+                                   .range = {.has_min = true,
+                                             .has_max = true,
+                                             .min = INT64_MIN,
+                                             .max = INT64_MAX}});
   nyr_opt_ret(&f, zero);
   bool ok = address >= 0 && zero >= 0 && one >= 0 && add_zero >= 0 &&
             add_self >= 0 && nyr_opt_verify(&f, "isle-facts-before") &&
@@ -1120,15 +1032,15 @@ static bool run_inline_constant_rewrite_preserves_facts(void) {
   nyr_opt_begin(&caller);
   size_t call_at = caller.len;
   int result = nyr_ir_emit(&caller, (nyr_inst_t){.op = NYIR_CALL,
-                                                .dst = -1,
-                                                .a = -1,
-                                                .b = -1,
-                                                .c = -1,
-                                                .d = -1,
-                                                .e = -1,
-                                                .f = -1,
-                                                .imm = 0,
-                                                .symbol = callee_name});
+                                                 .dst = -1,
+                                                 .a = -1,
+                                                 .b = -1,
+                                                 .c = -1,
+                                                 .d = -1,
+                                                 .e = -1,
+                                                 .f = -1,
+                                                 .imm = 0,
+                                                 .symbol = callee_name});
   nyr_opt_ret(&caller, result);
   caller.data[call_at].scalar_class = NYIR_SCALAR_I64_RAW;
   caller.data[call_at].semantic_ownership = NY_SEM_OWN_BORROWED;
@@ -1178,24 +1090,16 @@ static bool check_local_load_rewrite(const char *name,
   nyr_opt_begin(&f);
   int value = nyr_opt_const(&f, 42);
   nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_STORE_LOCAL,
-                              .dst = -1,
-                              .a = value,
-                              .b = -1,
-                              .c = -1,
-                              .d = -1,
-                              .e = -1,
-                              .f = -1,
-                              .imm = 0});
+                               .dst = -1,
+                               .a = value,
+                               .b = -1,
+                               .c = -1,
+                               .d = -1,
+                               .e = -1,
+                               .f = -1,
+                               .imm = 0});
   size_t load_at = f.len;
-  int loaded = nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_LOAD_LOCAL,
-                                           .dst = -1,
-                                           .a = -1,
-                                           .b = -1,
-                                           .c = -1,
-                                           .d = -1,
-                                           .e = -1,
-                                           .f = -1,
-                                           .imm = 0});
+  int loaded = nyr_opt_emit_imm(&f, NYIR_LOAD_LOCAL, 0);
   f.data[load_at].scalar_class = NYIR_SCALAR_I64_RAW;
   f.data[load_at].semantic_ownership = NY_SEM_OWN_OWNED;
   f.data[load_at].semantic_mutable = true;
@@ -1237,6 +1141,183 @@ static bool run_memory_ssa_forward_reconciles_derived_facts(void) {
   return check_local_load_rewrite("memory-ssa-facts", nyr_memory_ssa_forward);
 }
 
+static void memory_ssa_store_local(nyr_func_t *f, int local, int value) {
+  nyr_inst_t store = nyr_opt_inst(NYIR_STORE_LOCAL);
+  store.a = value;
+  store.imm = local;
+  nyr_ir_emit(f, store);
+}
+
+static bool run_memory_ssa_join_insertions_keep_block_ranges(void) {
+  nyr_func_t f;
+  nyr_opt_begin(&f);
+  int condition = nyr_opt_const(&f, 1);
+  int overwrite = nyr_opt_const(&f, 99);
+  nyr_opt_br_if(&f, condition, 1);
+
+  nyr_opt_label(&f, 10);
+  int left0 = nyr_opt_const(&f, 10);
+  int left1 = nyr_opt_const(&f, 20);
+  int left2 = nyr_opt_const(&f, 30);
+  memory_ssa_store_local(&f, 0, left0);
+  memory_ssa_store_local(&f, 1, left1);
+  memory_ssa_store_local(&f, 2, left2);
+  nyr_opt_br(&f, 2);
+
+  nyr_opt_label(&f, 1);
+  int right0 = nyr_opt_const(&f, 40);
+  int right1 = nyr_opt_const(&f, 50);
+  int right2 = nyr_opt_const(&f, 60);
+  memory_ssa_store_local(&f, 0, right0);
+  memory_ssa_store_local(&f, 1, right1);
+  memory_ssa_store_local(&f, 2, right2);
+  nyr_opt_br(&f, 2);
+
+  nyr_opt_label(&f, 3);
+  nyr_opt_label(&f, 2);
+  nyr_opt_br_if(&f, condition, 4);
+  memory_ssa_store_local(&f, 0, overwrite);
+  int fallthrough = nyr_opt_emit_imm(&f, NYIR_LOAD_LOCAL, 0);
+  nyr_opt_ret(&f, fallthrough);
+
+  nyr_opt_label(&f, 4);
+  int taken = nyr_opt_emit_imm(&f, NYIR_LOAD_LOCAL, 0);
+  nyr_opt_ret(&f, taken);
+
+  bool ok = condition >= 0 && overwrite >= 0 && left0 >= 0 && left1 >= 0 &&
+            left2 >= 0 && right0 >= 0 && right1 >= 0 && right2 >= 0 &&
+            fallthrough >= 0 && taken >= 0 &&
+            nyr_opt_verify(&f, "memory-ssa-join-before") &&
+            nyr_opt_eval(&f, "memory-ssa-join-before") == 40;
+  if (ok)
+    ok = nyr_memory_ssa_forward(&f);
+  size_t phi_count = 0;
+  for (size_t i = 0; ok && i < f.len; ++i)
+    phi_count += f.data[i].op == NYIR_PHI;
+  ok = ok && phi_count == 3 && nyr_opt_verify(&f, "memory-ssa-join-after") &&
+       nyr_opt_eval(&f, "memory-ssa-join-after") == 40;
+  if (!ok) {
+    fprintf(
+        stderr,
+        "[alias-contracts] memory SSA join rewrites crossed block bounds\n");
+    nyr_dump(stderr, &f, "memory-ssa-join-block-ranges");
+  }
+  nyr_ir_func_free(&f);
+  return ok;
+}
+
+static bool run_memory_ssa_equal_constants_use_a_join_phi(void) {
+  for (int branch = 0; branch <= 1; ++branch) {
+    nyr_func_t f;
+    nyr_opt_begin(&f);
+    int condition = nyr_opt_const(&f, branch);
+    int left = nyr_opt_const(&f, 73);
+    int right = nyr_opt_const(&f, 73);
+    nyr_opt_br_if(&f, condition, 1);
+    memory_ssa_store_local(&f, 0, left);
+    nyr_opt_br(&f, 2);
+    nyr_opt_label(&f, 1);
+    memory_ssa_store_local(&f, 0, right);
+    nyr_opt_br(&f, 2);
+    nyr_opt_label(&f, 2);
+    int loaded = nyr_opt_emit_imm(&f, NYIR_LOAD_LOCAL, 0);
+    nyr_opt_ret(&f, loaded);
+
+    bool ok = condition >= 0 && left >= 0 && right >= 0 && loaded >= 0 &&
+              nyr_opt_verify(&f, "memory-ssa-equal-constant-before") &&
+              nyr_opt_eval(&f, "memory-ssa-equal-constant-before") == 73 &&
+              nyr_memory_ssa_forward(&f) &&
+              nyr_opt_verify(&f, "memory-ssa-equal-constant-after") &&
+              nyr_opt_eval(&f, "memory-ssa-equal-constant-after") == 73;
+    size_t phi_count = 0;
+    for (size_t i = 0; ok && i < f.len; ++i)
+      phi_count += f.data[i].op == NYIR_PHI;
+    ok = ok && phi_count == 1;
+    if (!ok) {
+      fprintf(stderr,
+              "[alias-contracts] equal branch constants forwarded without "
+              "a dominating definition\n");
+      nyr_dump(stderr, &f, "memory-ssa-equal-constant-join");
+      nyr_ir_func_free(&f);
+      return false;
+    }
+    nyr_ir_func_free(&f);
+  }
+  return true;
+}
+
+static bool run_memory_ssa_empty_join_boundary_keeps_phi_in_block(void) {
+  for (int bypass_join = 0; bypass_join <= 1; ++bypass_join) {
+    nyr_func_t f;
+    nyr_opt_begin(&f);
+    int bypass = nyr_opt_const(&f, bypass_join);
+    int select = nyr_opt_const(&f, 1);
+    int left = nyr_opt_const(&f, 11);
+    int right = nyr_opt_const(&f, 22);
+    nyr_opt_br_if(&f, bypass, 2);
+    nyr_opt_br_if(&f, select, 1);
+    memory_ssa_store_local(&f, 0, left);
+    nyr_opt_br(&f, 3);
+    nyr_opt_label(&f, 1);
+    memory_ssa_store_local(&f, 0, right);
+    nyr_opt_br(&f, 3);
+    nyr_opt_label(&f, 3);
+    nyr_opt_label(&f, 2);
+    int loaded = nyr_opt_emit_imm(&f, NYIR_LOAD_LOCAL, 0);
+    nyr_opt_ret(&f, loaded);
+
+    int64_t expected = bypass_join ? 0 : 22;
+    bool ok =
+        bypass >= 0 && select >= 0 && left >= 0 && right >= 0 && loaded >= 0 &&
+        nyr_opt_verify(&f, "memory-ssa-empty-boundary-before") &&
+        nyr_opt_eval(&f, "memory-ssa-empty-boundary-before") == expected &&
+        nyr_memory_ssa_forward(&f) &&
+        nyr_opt_verify(&f, "memory-ssa-empty-boundary-after") &&
+        nyr_opt_eval(&f, "memory-ssa-empty-boundary-after") == expected;
+    if (!ok) {
+      fprintf(stderr,
+              "[alias-contracts] inserted PHI escaped an empty join block\n");
+      nyr_dump(stderr, &f, "memory-ssa-empty-join-boundary");
+      nyr_ir_func_free(&f);
+      return false;
+    }
+    nyr_ir_func_free(&f);
+  }
+  return true;
+}
+
+static bool run_memory_ssa_self_loop_not_forwarded(void) {
+  nyr_func_t f;
+  nyr_opt_begin(&f);
+  nyr_opt_label(&f, 0);
+  int loaded = nyr_opt_emit_imm(&f, NYIR_LOAD_LOCAL, 0);
+  int stored = nyr_opt_const(&f, 7);
+  int condition = nyr_opt_const(&f, 0);
+  memory_ssa_store_local(&f, 0, stored);
+  nyr_opt_br_if(&f, condition, 0);
+  nyr_opt_ret(&f, loaded);
+
+  bool ok = loaded >= 0 && stored >= 0 && condition >= 0 &&
+            nyr_opt_verify(&f, "memory-ssa-self-loop-before") &&
+            nyr_opt_eval(&f, "memory-ssa-self-loop-before") == 0 &&
+            nyr_memory_ssa_forward(&f) &&
+            nyr_opt_verify(&f, "memory-ssa-self-loop-after") &&
+            nyr_opt_eval(&f, "memory-ssa-self-loop-after") == 0;
+  bool load_retained = false;
+  for (size_t i = 0; ok && i < f.len; ++i) {
+    if (f.data[i].dst == loaded && f.data[i].op == NYIR_LOAD_LOCAL)
+      load_retained = true;
+  }
+  ok = ok && load_retained;
+  if (!ok) {
+    fprintf(stderr,
+            "[alias-contracts] memory SSA forwarded across a self-loop edge\n");
+    nyr_dump(stderr, &f, "memory-ssa-self-loop");
+  }
+  nyr_ir_func_free(&f);
+  return ok;
+}
+
 static bool run_mem2reg_rewrites_reconcile_derived_facts(void) {
   return check_local_load_rewrite("mem2reg-facts", nyr_mem2reg);
 }
@@ -1250,6 +1331,7 @@ int main(void) {
             run_cvp_invalidates_alias_classes() &&
             run_redundant_load_forwarding_invalidates_range() &&
             run_sroa_invalidates_address_alias_classes() &&
+            run_sroa_phi_null_incoming() &&
             run_phi_elim_invalidates_alias_class() &&
             run_strength_reduce_preserves_result_facts() &&
             run_null_check_fold_preserves_result_facts() &&
@@ -1258,6 +1340,10 @@ int main(void) {
             run_phi_pruning_reconciles_derived_facts() &&
             run_inline_constant_rewrite_preserves_facts() &&
             run_memory_ssa_forward_reconciles_derived_facts() &&
+            run_memory_ssa_join_insertions_keep_block_ranges() &&
+            run_memory_ssa_equal_constants_use_a_join_phi() &&
+            run_memory_ssa_empty_join_boundary_keeps_phi_in_block() &&
+            run_memory_ssa_self_loop_not_forwarded() &&
             run_mem2reg_rewrites_reconcile_derived_facts() &&
             run_derived_local_address_escape(NYIR_COPY, 0) &&
             run_derived_local_address_escape(NYIR_ADD_I64, 0) &&

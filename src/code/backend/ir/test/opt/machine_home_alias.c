@@ -12,22 +12,8 @@ int main(void) {
   char err[256] = {0};
   nyr_opt_begin(&ir);
   int source_address = nyr_opt_const(&ir, (int64_t)(intptr_t)&alias_source);
-  int source = nyr_ir_emit(&ir, (nyr_inst_t){.op = NYIR_LOAD_I64,
-                                            .dst = -1,
-                                            .a = source_address,
-                                            .b = -1,
-                                            .c = -1,
-                                            .d = -1,
-                                            .e = -1,
-                                            .f = -1});
-  int alias = nyr_ir_emit(&ir, (nyr_inst_t){.op = NYIR_COPY,
-                                           .dst = -1,
-                                           .a = source,
-                                           .b = -1,
-                                           .c = -1,
-                                           .d = -1,
-                                           .e = -1,
-                                           .f = -1});
+  int source = nyr_opt_emit_abc(&ir, NYIR_LOAD_I64, source_address, -1, -1);
+  int alias = nyr_opt_emit_abc(&ir, NYIR_COPY, source, -1, -1);
   int take_copy = nyr_opt_const(&ir, 1);
   nyr_opt_br_if(&ir, take_copy, 2);
   nyr_opt_br(&ir, 1);

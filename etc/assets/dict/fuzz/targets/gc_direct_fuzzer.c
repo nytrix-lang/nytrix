@@ -16,7 +16,7 @@
 
 #ifndef NYTRIX_GC_C
 #error                                                                         \
-    "compile with -DNYTRIX_GC_C=\\\"/path/to/nytrix/src/code/lang/runtime/gc.c\\\""
+    "compile with -DNYTRIX_GC_C=\\\"/path/to/nytrix/src/code/backend/runtime/gc.c\\\""
 #endif
 
 __thread uintptr_t rt_heap_ptr_cache_keys[1u << 13] = {0};
@@ -1141,7 +1141,7 @@ int main(int argc, char **argv) {
   if (seconds > 0) {
     snprintf(replay_args, sizeof(replay_args),
              "--seed %" PRIu64 " --threads %d --seconds %d --mode %s "
-                               "--minor-every %d --major-every %d%s%s",
+             "--minor-every %d --major-every %d%s%s",
              seed, threads, seconds, mode_name(forced_mode), minor_every,
              major_every, require_promotions ? " --require-promotions" : "",
              validate_gc ? " --validate-gc" : "");

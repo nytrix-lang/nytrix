@@ -10,8 +10,9 @@ use core.os.fixture as fixture
 use core.common as common
 use core.math as math
 use core.os.ui.render as gfx
+use core.os.ui.render.dump as ui_dump
 use core.os.ui.window as window
-use core.os.ui.window.consts (KEY_W, KEY_S, KEY_ESCAPE, KEY_SPACE, KEY_R)
+use core.os.ui.window.consts (KEY_W, KEY_S, KEY_ESCAPE, KEY_SPACE, KEY_R, WINDOW_MAXIMIZE)
 
 def WIN_W, WIN_H = 1280, 720
 def f64 VIEW_W, VIEW_H = 1280.0, 720.0
@@ -59,9 +60,9 @@ if common.env_present("NY_UI_RENDER_BACKEND") {
 }
 gfx.apply_backend_argv()
 
-mut win = gfx.init_window(WIN_W, WIN_H, "Ping Pong - Nytrix", 0, true, false, 1)
+mut win = gfx.init_window(WIN_W, WIN_H, "Ping Pong - Nytrix", WINDOW_MAXIMIZE, true, false, 1)
 if !win { panic("could not create the Pong window") }
-if is_dict(win) && !!win.get("_mock", false) {
+if is_dict(win) && !!win.get("_mock", false) && !common.env_truthy("NYTRIX_UI_REPLAY") {
    if !gfx.begin_frame_clear(BG) { panic("Pong renderer could not begin a frame") }
    if !gfx.end_frame() { panic("Pong renderer could not present a frame") }
    gfx.close_window()
@@ -71,10 +72,16 @@ if is_dict(win) && !!win.get("_mock", false) {
 fixture.ready("pong")
 def headless = gfx.get_active_backend_name() == "mock"
 def int legacy_frames = common.env_int_clamped("NYTRIX_PONG_MAX_FRAMES", 0, 0, 1000000)
+def int dump_delay = ui_dump.auto_dump_delay_frames(8)
 def int legacy_timeout = common.env_int_clamped("NYTRIX_PONG_TIMEOUT_MS", headless ? 1000 : 0, 0, 3600000)
 def fx = fixture.start_ui(legacy_frames, legacy_timeout, headless && !common.env_present("NYTRIX_PONG_MAX_FRAMES"))
-def int font = gfx.font_load_first(["etc/assets/fonts/monocraft.ttf"], 48) ?? 0
-def int font_small = gfx.font_load_first(["etc/assets/fonts/monocraft.ttf"], 20) ?? 0
+def bool replay = common.env_truthy("NYTRIX_UI_REPLAY")
+def bool trace = common.env_truthy("NYTRIX_PONG_TRACE")
+def int trace_every = common.env_int_clamped("NYTRIX_PONG_TRACE_EVERY", 30, 1, 600)
+mut int font = gfx.font_load_first(["etc/assets/fonts/monocraft.ttf"], 48) ?? 0
+mut int font_small = gfx.font_load_first(["etc/assets/fonts/monocraft.ttf"], 20) ?? 0
+mut int score_font_size = 48
+mut int label_font_size = 20
 
 mut int player_score = 0
 mut int opponent_score = 0
@@ -93,24 +100,70 @@ mut bool previous_escape = false
 mut bool first_frame = true
 mut bool initialized = false
 mut int rally = 0
+mut int replay_frame = 0
+mut bool dump_done = false
+mut f64 previous_w = 0.0
+mut f64 previous_h = 0.0
 
 while !gfx.window_should_close(win) && fixture.tick_ui(fx) {
+   def int frame_started = ticks()
+   window.poll_events()
    if fixture.quit_key(fixture.next_ui_key(fx)) { break }
    if !gfx.begin_frame_clear(BG) { continue }
 
-   def fb = gfx.framebuffer_size_f64()
-   def f64 w = float(fb[0])
-   def f64 h = float(fb[1])
+   ;; Read the live native framebuffer, not the GL renderer's cached extent;
+   ;; Wayland configure events can resize the window between frames.
+   def fb = window.get_framebuffer_size(win)
+   def f64 w = float(fb.get(0, WIN_W))
+   def f64 h = float(fb.get(1, WIN_H))
+   def f64 previous_scale = scale
    scale = float(math.min(w / VIEW_W, h / VIEW_H))
    if scale <= 0.0 { scale = 1.0 }
+   if initialized && previous_w > 0.0 && previous_h > 0.0 &&
+      (w != previous_w || h != previous_h) {
+      ;; Preserve relative object centers and speed when framebuffer size or
+      ;; DPI changes. Retaining old pixel positions can strand the ball outside
+      ;; the resized court, especially during the serve countdown.
+      def f64 old_ball = BALL_SIZE * previous_scale
+      def f64 new_ball = BALL_SIZE * scale
+      ball_x = (float(ball_x) + float(old_ball) * 0.5) * w / previous_w - float(new_ball) * 0.5
+      ball_y = (float(ball_y) + float(old_ball) * 0.5) * h / previous_h - float(new_ball) * 0.5
+      ball_x = lim(ball_x, 0.0, w - new_ball)
+      ball_y = lim(ball_y, 0.0, h - new_ball)
+      player_y = (player_y + PADDLE_H * previous_scale * 0.5) * h / previous_h - PADDLE_H * scale * 0.5
+      opponent_y = (opponent_y + PADDLE_H * previous_scale * 0.5) * h / previous_h - PADDLE_H * scale * 0.5
+      ball_vx *= scale / previous_scale
+      ball_vy *= scale / previous_scale
+   }
+   previous_w, previous_h = w, h
+   def int next_score_size = int(math.max(16.0, math.floor(48.0 * scale + 0.5)))
+   def int next_label_size = int(math.max(10.0, math.floor(20.0 * scale + 0.5)))
+   if next_score_size != score_font_size {
+      def next_font = gfx.font_load_first(["etc/assets/fonts/monocraft.ttf"], next_score_size)
+      if next_font > 0 {
+         if font > 0 { gfx.font_destroy(font) }
+         font = next_font
+         score_font_size = next_score_size
+      }
+   }
+   if next_label_size != label_font_size {
+      def next_font = gfx.font_load_first(["etc/assets/fonts/monocraft.ttf"], next_label_size)
+      if next_font > 0 {
+         if font_small > 0 { gfx.font_destroy(font_small) }
+         font_small = next_font
+         label_font_size = next_label_size
+      }
+   }
    def f64 ball = BALL_SIZE * scale
    def f64 paddle_w = PADDLE_W * scale
    def f64 paddle_h = PADDLE_H * scale
-   def f64 margin = PADDLE_MARGIN * scale
+   ;; Keep a useful side inset on very wide Wayland allocations while still
+   ;; scaling the court proportionally in narrow and portrait windows.
+   def f64 margin = lim(PADDLE_MARGIN * scale, w * 0.05, w * 0.12)
    def f64 speed = PADDLE_SPEED * scale
    def f64 player_x = margin
    def f64 opponent_x = w - margin - paddle_w
-   def f64 dt = float(math.clamp(gfx.get_delta_time(), 1.0 / 240.0, 0.05))
+   def f64 dt = float(math.clamp(gfx.get_delta_time(), 0.0, 0.05))
 
    gfx.set_ortho_2d(0.0, w, h, 0.0)
    if !initialized {
@@ -215,10 +268,36 @@ while !gfx.window_should_close(win) && fixture.tick_ui(fx) {
    elif serve_t > 0.0 { gfx.draw_text_centered(font_small, "W/S MOVE  -  SPACE PAUSE", w * 0.5, h - 28.0 * scale, MUTED) }
    else { gfx.draw_text_centered(font_small, "W/S MOVE  -  SPACE PAUSE  -  R RESET", w * 0.5, h - 28.0 * scale, MUTED) }
 
+   if replay || (trace && replay_frame % trace_every == 0) {
+      def live_window_size = window.size(win)
+      def live_framebuffer_size = window.get_framebuffer_size(win)
+      print("NYTRIX_UI_APP_STATE demo=pong frame=" + to_str(replay_frame + 1) +
+         " scale=" + to_str(scale) + " ball=" + to_str(ball_x) + "," + to_str(ball_y) +
+         " velocity=" + to_str(ball_vx) + "," + to_str(ball_vy) +
+         " paddles=" + to_str(player_y) + "," + to_str(opponent_y) +
+         " score=" + to_str(player_score) + ":" + to_str(opponent_score) +
+         " serve=" + to_str(serve_t) + " rally=" + to_str(rally) +
+         " fonts=" + to_str(score_font_size) + "," + to_str(label_font_size) +
+         " dash=" + to_str(dash_h) + " size=" + to_str(w) + "x" + to_str(h) +
+         " api=" + to_str(live_window_size.get(0, 0)) + "x" + to_str(live_window_size.get(1, 0)) +
+         " fb=" + to_str(live_framebuffer_size.get(0, 0)) + "x" + to_str(live_framebuffer_size.get(1, 0)) +
+         " paused=" + to_str(paused) + " w=" + to_str(window.key_down(win, KEY_W)) +
+         " s=" + to_str(window.key_down(win, KEY_S)))
+   }
+   ui_dump.auto_dump_pre_frame(dump_done, replay_frame, dump_delay)
    if !gfx.end_frame() { panic("Pong renderer could not present a frame") }
+   replay_frame += 1
+   dump_done = ui_dump.auto_dump_post_frame(win, dump_done, replay_frame, dump_delay, "build/cache/fb/ui/pong.png")
    if first_frame {
       if !window.show(win) { panic("Pong window could not be shown") }
       first_frame = false
+   }
+   ;; Vsync is advisory on some window routes. Bound CPU use when presentation
+   ;; returns immediately, using real elapsed time rather than advancing the
+   ;; simulation by an artificial minimum delta.
+   if !replay {
+      def int remaining = 8333333 - (ticks() - frame_started)
+      if remaining > 0 { msleep((remaining + 999999) / 1000000) }
    }
 }
 

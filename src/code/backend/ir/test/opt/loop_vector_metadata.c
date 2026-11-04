@@ -3,12 +3,30 @@
  */
 #include "code/backend/ir/opt/loop.h"
 #include "support.h"
+#include <stdlib.h>
+#include <string.h>
 
 static int64_t values[8] = {1, 2, 3, 4, 5, 6, 7, 8};
-static int64_t nested_values[32] = {1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11,
-                                    12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
-                                    23, 24, 25, 26, 27, 28, 29, 30, 31, 32};
+static int64_t nested_values[128];
 static size_t nested_effect_calls;
+
+static bool check_vec8_set1_i64_semantics(void) {
+  nyr_func_t f;
+  nyr_opt_begin(&f);
+  int scalar = nyr_opt_const(&f, 9);
+  int zero = nyr_opt_const(&f, 0);
+  int vector = nyr_opt_emit_abc(&f, NYIR_VEC8_SET1_I64, scalar, -1, -1);
+  int sum = nyr_opt_emit_abc(&f, NYIR_VEC8_REDUCE_ADD_I64, zero, vector, -1);
+  nyr_opt_ret(&f, sum);
+  bool ok = nyr_opt_verify(&f, "vec8-set1-i64") &&
+            nyr_opt_eval(&f, "vec8-set1-i64") == 36;
+  if (!ok)
+    nyr_dump(stderr, &f, "vec8-set1-i64-failed");
+  nyr_ir_func_free(&f);
+  if (ok)
+    puts("[vec8-set1-i64] four-lane broadcast and reduction semantics pass");
+  return ok;
+}
 
 static int emit_alloca(nyr_func_t *f, int64_t bytes) {
   return nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_ALLOCA,
@@ -24,7 +42,7 @@ static int emit_alloca(nyr_func_t *f, int64_t bytes) {
 }
 
 static bool build_sum(nyr_func_t *f, size_t *update_inst, bool copy_iv,
-                      int64_t seed) {
+                      int64_t seed, int chain, bool boolean_guard) {
   nyr_opt_begin(f);
   int base = emit_alloca(f, 64);
   int limit = nyr_opt_const(f, 8);
@@ -36,14 +54,77 @@ static bool build_sum(nyr_func_t *f, size_t *update_inst, bool copy_iv,
     int offset = nyr_opt_const(f, (int64_t)i * 8);
     int address = nyr_opt_binop(f, NYIR_ADD_I64, base, offset);
     int value = nyr_opt_const(f, values[i]);
-    nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_STORE_I64,
-                                .dst = -1,
-                                .a = address,
-                                .b = -1,
-                                .c = value,
-                                .d = -1,
-                                .e = -1,
-                                .f = -1});
+    nyr_opt_emit_abc(f, NYIR_STORE_I64, address, -1, value);
+  }
+  nyr_opt_label(f, 9);
+  nyr_opt_br(f, 10);
+  nyr_opt_label(f, 10);
+  size_t iv_phi = f->len;
+  int iv = f->next_value;
+  nyr_opt_phi(f, 9, zero, 11, zero);
+  size_t sum_phi = f->len;
+  int sum = f->next_value;
+  nyr_opt_phi(f, 9, sum_seed, 11, sum_seed);
+  int cond = nyr_opt_cmp(f, iv, limit, NYIR_CMP_LT);
+  if (boolean_guard)
+    cond = nyr_opt_cmp(f, cond, zero, NYIR_CMP_NE);
+  nyr_opt_br_if(f, cond, 11);
+  nyr_opt_br(f, 12);
+  nyr_opt_label(f, 11);
+  int offset = nyr_opt_binop(f, NYIR_MUL_I64, iv, eight);
+  int address = nyr_opt_binop(f, NYIR_ADD_I64, base, offset);
+  int loaded = nyr_opt_emit_abc(f, NYIR_LOAD_I64, address, -1, -1);
+  *update_inst = f->len;
+  int next_sum = nyr_opt_binop(f, NYIR_ADD_I64, sum, loaded);
+  if (chain) {
+    f->data[f->len - 1].scalar_class = NYIR_SCALAR_I64_RAW;
+    if (chain == 2) {
+      nyr_opt_emit_imm(f, NYIR_STORE_LOCAL, 0);
+      f->data[f->len - 1].a = next_sum;
+    }
+    next_sum = nyr_opt_binop(f, NYIR_ADD_I64, next_sum, sum_seed);
+    f->data[f->len - 1].scalar_class = NYIR_SCALAR_I64_RAW;
+  }
+  int iv_operand = iv;
+  if (copy_iv)
+    iv_operand = nyr_opt_emit_abc(f, NYIR_COPY, iv, -1, -1);
+  int next_iv = nyr_opt_binop(f, NYIR_ADD_I64, iv_operand, one);
+  nyr_opt_br(f, 10);
+  f->data[iv_phi].phi_incoming[1].value = next_iv;
+  f->data[sum_phi].phi_incoming[1].value = next_sum;
+  nyr_opt_label(f, 12);
+  int result = sum;
+  if (chain == 2) {
+    int observed = nyr_opt_emit_imm(f, NYIR_LOAD_LOCAL, 0);
+    result = nyr_opt_binop(f, NYIR_ADD_I64, sum, observed);
+  }
+  nyr_opt_ret(f, result);
+  return nyr_opt_verify(f, "loop-vector-metadata-before");
+}
+
+static bool build_variable_sum(nyr_func_t *f) {
+  nyr_opt_begin(f);
+  f->param_types = malloc(sizeof(*f->param_types));
+  if (!f->param_types)
+    return false;
+  f->param_count = 1;
+  f->param_types[0] = NYIR_PARAM_I64;
+  int base = emit_alloca(f, 512);
+  int limit = nyr_opt_emit_imm(f, NYIR_LOAD_LOCAL, 0);
+  int zero = nyr_opt_const(f, 0);
+  int sum_seed = nyr_opt_const(f, 0);
+  int one = nyr_opt_const(f, 1);
+  int eight = nyr_opt_const(f, 8);
+  if (base < 0 || limit < 0 || zero < 0 || sum_seed < 0 || one < 0 || eight < 0)
+    return false;
+  for (int i = 0; i < 64; ++i) {
+    int offset = nyr_opt_const(f, (int64_t)i * 8);
+    int address =
+        offset < 0 ? -1 : nyr_opt_binop(f, NYIR_ADD_I64, base, offset);
+    int value = nyr_opt_const(f, values[i % 8]);
+    if (address < 0 || value < 0)
+      return false;
+    nyr_opt_emit_abc(f, NYIR_STORE_I64, address, -1, value);
   }
   nyr_opt_label(f, 9);
   nyr_opt_br(f, 10);
@@ -59,34 +140,52 @@ static bool build_sum(nyr_func_t *f, size_t *update_inst, bool copy_iv,
   nyr_opt_br(f, 12);
   nyr_opt_label(f, 11);
   int offset = nyr_opt_binop(f, NYIR_MUL_I64, iv, eight);
-  int address = nyr_opt_binop(f, NYIR_ADD_I64, base, offset);
-  int loaded = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_LOAD_I64,
-                                           .dst = -1,
-                                           .a = address,
-                                           .b = -1,
-                                           .c = -1,
-                                           .d = -1,
-                                           .e = -1,
-                                           .f = -1});
-  *update_inst = f->len;
-  int next_sum = nyr_opt_binop(f, NYIR_ADD_I64, sum, loaded);
-  int iv_operand = iv;
-  if (copy_iv)
-    iv_operand = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_COPY,
-                                             .dst = -1,
-                                             .a = iv,
-                                             .b = -1,
-                                             .c = -1,
-                                             .d = -1,
-                                             .e = -1,
-                                             .f = -1});
-  int next_iv = nyr_opt_binop(f, NYIR_ADD_I64, iv_operand, one);
+  int address = offset < 0 ? -1 : nyr_opt_binop(f, NYIR_ADD_I64, base, offset);
+  int loaded =
+      address < 0 ? -1 : nyr_opt_emit_abc(f, NYIR_LOAD_I64, address, -1, -1);
+  int next_sum = loaded < 0 ? -1 : nyr_opt_binop(f, NYIR_ADD_I64, sum, loaded);
+  int next_iv = nyr_opt_binop(f, NYIR_ADD_I64, iv, one);
+  if (next_sum < 0 || next_iv < 0)
+    return false;
   nyr_opt_br(f, 10);
   f->data[iv_phi].phi_incoming[1].value = next_iv;
   f->data[sum_phi].phi_incoming[1].value = next_sum;
   nyr_opt_label(f, 12);
   nyr_opt_ret(f, sum);
-  return nyr_opt_verify(f, "loop-vector-metadata-before");
+  return nyr_opt_verify(f, "loop-vector-variable-sum-before");
+}
+
+static bool check_variable_reduction_tails(void) {
+  nyr_func_t f;
+  if (!build_variable_sum(&f)) {
+    fprintf(stderr, "[loop-vector-variable-sum] failed to build input IR\n");
+    nyr_ir_func_free(&f);
+    return false;
+  }
+  int64_t expected[] = {145, 172};
+  int64_t limits[] = {33, 39};
+  bool ok = nyr_loop_vectorize(&f);
+  if (!ok)
+    fprintf(stderr, "[loop-vector-variable-sum] vectorization failed\n");
+  ok = ok && nyr_opt_verify(&f, "loop-vector-variable-sum-after");
+  ok = ok && f.vectorized_loops > 0;
+  for (size_t i = 0; ok && i < sizeof(limits) / sizeof(limits[0]); ++i) {
+    int64_t locals[1] = {limits[i]};
+    nyr_eval_result_t result = {0};
+    char err[256] = {0};
+    ok = nyr_ir_eval(&f, locals, 1, 500, &result, err, sizeof(err)) &&
+         result.result == expected[i];
+    if (!ok)
+      fprintf(stderr, "[loop-vector-variable-sum] limit=%lld result=%lld: %s\n",
+              (long long)limits[i], (long long)result.result, err);
+    nyr_eval_result_free(&result);
+  }
+  if (!ok)
+    nyr_dump(stderr, &f, "loop-vector-variable-sum-after");
+  nyr_ir_func_free(&f);
+  if (ok)
+    puts("[loop-vector-variable-sum] vector reduction and scalar tails pass");
+  return ok;
 }
 
 static bool build_f64_memory_sum(nyr_func_t *f) {
@@ -155,14 +254,7 @@ static bool build_f64_memory_sum(nyr_func_t *f) {
   f->data[iv_phi].phi_incoming[1].value = next_iv;
   f->data[sum_phi].phi_incoming[1].value = next_sum;
   nyr_opt_label(f, 22);
-  int result = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_F64_TO_I64,
-                                           .dst = -1,
-                                           .a = sum,
-                                           .b = -1,
-                                           .c = -1,
-                                           .d = -1,
-                                           .e = -1,
-                                           .f = -1});
+  int result = nyr_opt_emit_abc(f, NYIR_F64_TO_I64, sum, -1, -1);
   if (result < 0)
     return false;
   nyr_opt_ret(f, result);
@@ -256,20 +348,120 @@ static bool build_f64_elementwise(nyr_func_t *f) {
                                         .e = -1,
                                         .f = -1,
                                         .scalar_class = NYIR_SCALAR_F64});
-  int integer_result = result < 0
-                           ? -1
-                           : nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_F64_TO_I64,
-                                                         .dst = -1,
-                                                         .a = result,
-                                                         .b = -1,
-                                                         .c = -1,
-                                                         .d = -1,
-                                                         .e = -1,
-                                                         .f = -1});
+  int integer_result =
+      result < 0 ? -1 : nyr_opt_emit_abc(f, NYIR_F64_TO_I64, result, -1, -1);
   if (integer_result < 0)
     return false;
   nyr_opt_ret(f, integer_result);
   return nyr_opt_verify(f, "loop-vector-f64-elementwise-before");
+}
+
+static bool build_nested_f64_update(nyr_func_t *f) {
+  nyr_opt_begin(f);
+  int count = nyr_opt_const(f, 128);
+  int width = nyr_opt_const(f, 8);
+  int base = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_CALL,
+                                         .dst = -1,
+                                         .a = count,
+                                         .b = width,
+                                         .c = -1,
+                                         .d = -1,
+                                         .e = -1,
+                                         .f = -1,
+                                         .symbol = "rt_tbuf_new_raw",
+                                         .imm = 2});
+  int zero = nyr_opt_const(f, 0);
+  int one = nyr_opt_const(f, 1);
+  int rows = nyr_opt_const(f, 2);
+  int columns = nyr_opt_const(f, 64);
+  int row_bytes = nyr_opt_const(f, 512);
+  int element_bytes = nyr_opt_const(f, 8);
+  int final_offset = nyr_opt_const(f, 1016);
+  int two_f64 = nyr_opt_const_f64(f, 2.0);
+  if (base < 0 || zero < 0 || one < 0 || rows < 0 || columns < 0 ||
+      row_bytes < 0 || element_bytes < 0 || final_offset < 0 || two_f64 < 0)
+    return false;
+
+  nyr_opt_label(f, 9);
+  nyr_opt_br(f, 10);
+  nyr_opt_label(f, 10);
+  size_t row_phi = f->len;
+  int row = f->next_value;
+  nyr_opt_phi(f, 9, zero, 22, zero);
+  int row_cond = nyr_opt_cmp(f, row, rows, NYIR_CMP_LT);
+  nyr_opt_br_if(f, row_cond, 20);
+  nyr_opt_br(f, 30);
+
+  nyr_opt_label(f, 20);
+  int row_offset = nyr_opt_binop(f, NYIR_MUL_I64, row, row_bytes);
+  nyr_opt_br(f, 11);
+  nyr_opt_label(f, 11);
+  size_t column_phi = f->len;
+  int column = f->next_value;
+  nyr_opt_phi(f, 20, zero, 21, zero);
+  int column_cond = nyr_opt_cmp(f, column, columns, NYIR_CMP_LT);
+  nyr_opt_br_if(f, column_cond, 21);
+  nyr_opt_br(f, 22);
+
+  nyr_opt_label(f, 21);
+  int column_offset = nyr_opt_binop(f, NYIR_MUL_I64, column, element_bytes);
+  int byte_offset = nyr_opt_binop(f, NYIR_ADD_I64, row_offset, column_offset);
+  int load_address = nyr_opt_binop(f, NYIR_ADD_I64, base, byte_offset);
+  int loaded = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_LOAD_I64,
+                                           .dst = -1,
+                                           .a = load_address,
+                                           .b = -1,
+                                           .c = -1,
+                                           .d = -1,
+                                           .e = -1,
+                                           .f = -1,
+                                           .scalar_class = NYIR_SCALAR_F64});
+  int updated =
+      loaded < 0 ? -1 : nyr_opt_binop(f, NYIR_MUL_F64, loaded, two_f64);
+  int store_address = nyr_opt_binop(f, NYIR_ADD_I64, base, byte_offset);
+  if (row_offset < 0 || column_offset < 0 || byte_offset < 0 ||
+      load_address < 0 || loaded < 0 || updated < 0 || store_address < 0)
+    return false;
+  nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_STORE_I64,
+                              .dst = -1,
+                              .a = store_address,
+                              .b = -1,
+                              .c = updated,
+                              .d = -1,
+                              .e = -1,
+                              .f = -1,
+                              .scalar_class = NYIR_SCALAR_F64});
+  int next_column = nyr_opt_binop(f, NYIR_ADD_I64, column, one);
+  nyr_opt_br(f, 11);
+  f->data[column_phi].phi_incoming[1].value = next_column;
+  nyr_opt_label(f, 22);
+  int next_row = nyr_opt_binop(f, NYIR_ADD_I64, row, one);
+  nyr_opt_br(f, 10);
+  f->data[row_phi].phi_incoming[1].value = next_row;
+
+  nyr_opt_label(f, 30);
+  int result_address = nyr_opt_binop(f, NYIR_ADD_I64, base, final_offset);
+  int result =
+      result_address < 0
+          ? -1
+          : nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_LOAD_I64,
+                                        .dst = -1,
+                                        .a = result_address,
+                                        .b = -1,
+                                        .c = -1,
+                                        .d = -1,
+                                        .e = -1,
+                                        .f = -1,
+                                        .scalar_class = NYIR_SCALAR_F64});
+  int integer_result =
+      result < 0 ? -1 : nyr_opt_emit_abc(f, NYIR_F64_TO_I64, result, -1, -1);
+  if (integer_result < 0)
+    return false;
+  nyr_opt_ret(f, integer_result);
+  bool verified = nyr_opt_verify(f, "loop-vector-dynamic-f64-update-before");
+  if (!verified)
+    nyr_dump(stderr, f, "loop-vector-dynamic-f64-update-before");
+  return verified;
 }
 
 static bool resolve_nested_tbuf(void *ctx, const char *symbol,
@@ -288,7 +480,8 @@ static bool resolve_nested_tbuf(void *ctx, const char *symbol,
     return true;
   }
   if (!symbol || strcmp(symbol, "rt_tbuf_new_raw") != 0 || arg_count != 2 ||
-      (args[0] != 16 && args[0] != 32) || args[1] != 8 || !result) {
+      (args[0] != 16 && args[0] != 32 && args[0] != 128) || args[1] != 8 ||
+      !result) {
     snprintf(err, err_len, "unexpected test allocation call");
     return false;
   }
@@ -376,24 +569,10 @@ static bool build_nested_sum_config(nyr_func_t *f, bool multi_latch,
                                 .imm = 0,
                                 .effects = NYIR_EFFECT_CALL |
                                            NYIR_EFFECT_UNKNOWN_SIDE_EFFECT});
-  int loaded = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_LOAD_I64,
-                                           .dst = -1,
-                                           .a = address,
-                                           .b = -1,
-                                           .c = -1,
-                                           .d = -1,
-                                           .e = -1,
-                                           .f = -1});
+  int loaded = nyr_opt_emit_abc(f, NYIR_LOAD_I64, address, -1, -1);
   if (store_next) {
     int store_address = nyr_opt_binop(f, NYIR_ADD_I64, address, elem_bytes);
-    nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_STORE_I64,
-                                .dst = -1,
-                                .a = store_address,
-                                .b = -1,
-                                .c = loaded,
-                                .d = -1,
-                                .e = -1,
-                                .f = -1});
+    nyr_opt_emit_abc(f, NYIR_STORE_I64, store_address, -1, loaded);
   }
   int next_sum = nyr_opt_binop(f, NYIR_ADD_I64, sum, loaded);
   int next_col = nyr_opt_binop(f, NYIR_ADD_I64, col, one);
@@ -480,6 +659,14 @@ static void reset_nested_values(void) {
     nested_values[i] = (int64_t)i + 1;
 }
 
+static void reset_nested_f64_values(void) {
+  for (size_t i = 0; i < sizeof(nested_values) / sizeof(nested_values[0]);
+       ++i) {
+    double value = (double)(i + 1);
+    memcpy(&nested_values[i], &value, sizeof(value));
+  }
+}
+
 static bool build_checked_external_sum(nyr_func_t *f, bool mark_in_bounds,
                                        bool store_in_loop) {
   nyr_opt_begin(f);
@@ -519,25 +706,11 @@ static bool build_checked_external_sum(nyr_func_t *f, bool mark_in_bounds,
     return false;
   if (mark_in_bounds)
     f->data[f->len - 1].flags |= NYIR_INST_F_IN_BOUNDS_ADDR;
-  int loaded = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_LOAD_I64,
-                                           .dst = -1,
-                                           .a = address,
-                                           .b = -1,
-                                           .c = -1,
-                                           .d = -1,
-                                           .e = -1,
-                                           .f = -1});
+  int loaded = nyr_opt_emit_abc(f, NYIR_LOAD_I64, address, -1, -1);
   if (loaded < 0)
     return false;
   if (store_in_loop)
-    nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_STORE_I64,
-                                .dst = -1,
-                                .a = address,
-                                .b = -1,
-                                .c = loaded,
-                                .d = -1,
-                                .e = -1,
-                                .f = -1});
+    nyr_opt_emit_abc(f, NYIR_STORE_I64, address, -1, loaded);
   int next_sum = nyr_opt_binop(f, NYIR_ADD_I64, sum, loaded);
   int next_iv = nyr_opt_binop(f, NYIR_ADD_I64, iv, one);
   if (next_sum < 0 || next_iv < 0)
@@ -550,7 +723,77 @@ static bool build_checked_external_sum(nyr_func_t *f, bool mark_in_bounds,
   return nyr_opt_verify(f, "loop-vector-checked-external-before");
 }
 
+static bool check_chained_reductions(void) {
+  const int64_t seeds[] = {7, INT64_MAX - 5, INT64_MIN + 7};
+  for (size_t k = 0; k < sizeof(seeds) / sizeof(seeds[0]); ++k) {
+    for (int chain = 1; chain <= 2; ++chain) {
+      nyr_func_t f;
+      size_t update = 0;
+      if (!build_sum(&f, &update, false, seeds[k], chain, false))
+        return false;
+      uint64_t sum = (uint64_t)seeds[k];
+      uint64_t observed = 0;
+      for (size_t i = 0; i < 8; ++i) {
+        observed = sum + (uint64_t)values[i];
+        sum = observed + (uint64_t)seeds[k];
+      }
+      uint64_t expected = sum + (chain == 2 ? observed : 0);
+      bool ok =
+          (uint64_t)nyr_opt_eval(&f, "chained-reduction-before") == expected &&
+          nyr_loop_vectorize(&f) &&
+          nyr_opt_verify(&f, "chained-reduction-after") &&
+          (uint64_t)nyr_opt_eval(&f, "chained-reduction-after") == expected &&
+          (chain == 2 || f.vectorized_loops > 0);
+      if (ok && chain == 1) {
+        bool vector_reduction = false;
+        for (size_t i = 0; i < f.len; ++i) {
+          const nyr_inst_t *in = &f.data[i];
+          vector_reduction |= in->op == NYIR_VEC4_REDUCE_ADD_I64 ||
+                              in->op == NYIR_VEC8_REDUCE_ADD_I64;
+        }
+        ok = vector_reduction;
+      }
+      if (!ok)
+        nyr_dump(stderr, &f, "chained-reduction-failed");
+      nyr_ir_func_free(&f);
+      if (!ok)
+        return false;
+    }
+  }
+  puts("[chained-reduction] wrapping sums and shared intermediate observations "
+       "pass");
+  return true;
+}
+
+static bool check_boolean_guard_vectorizes(void) {
+  nyr_func_t f;
+  size_t update = 0;
+  if (!build_sum(&f, &update, false, 7, 0, true))
+    return false;
+  int64_t before = nyr_opt_eval(&f, "loop-vector-ne-zero-before");
+  bool ok = before == 43 && nyr_loop_vectorize(&f) &&
+            nyr_opt_verify(&f, "loop-vector-ne-zero-after") &&
+            nyr_opt_eval(&f, "loop-vector-ne-zero-after") == before &&
+            f.vectorized_loops > 0;
+  bool saw_vector_load = false;
+  for (size_t i = 0; ok && i < f.len; ++i)
+    saw_vector_load |= f.data[i].op == NYIR_VEC4_LOAD_I64 ||
+                       f.data[i].op == NYIR_VEC8_LOAD_I64;
+  ok = ok && saw_vector_load;
+  if (!ok)
+    nyr_dump(stderr, &f, "loop-vector-ne-zero-after");
+  nyr_ir_func_free(&f);
+  if (ok)
+    puts("[loop-vector-ne-zero] NE(comparison, 0) loop guard vectorizes");
+  return ok;
+}
+
 int main(void) {
+  if (!check_vec8_set1_i64_semantics())
+    return 1;
+  if (!check_chained_reductions() || !check_variable_reduction_tails() ||
+      !check_boolean_guard_vectorizes())
+    return 1;
   nyr_func_t f;
   if (!build_f64_memory_sum(&f)) {
     nyr_ir_func_free(&f);
@@ -608,8 +851,54 @@ int main(void) {
   puts("[loop-vector-f64-elementwise] four-lane memory and arithmetic "
        "preserve result");
 
+  if (!build_nested_f64_update(&f))
+    return 1;
+  reset_nested_f64_values();
+  int64_t dynamic_before = 0, dynamic_after = 0;
+  ok = eval_nested_sum(&f, "dynamic-f64-before", &dynamic_before) &&
+       dynamic_before == 256;
+  reset_nested_f64_values();
+  ok = ok && nyr_loop_vectorize(&f) &&
+       nyr_opt_verify(&f, "loop-vector-dynamic-f64-update-after") &&
+       eval_nested_sum(&f, "dynamic-f64-after", &dynamic_after) &&
+       dynamic_after == dynamic_before;
+  for (size_t i = 0; ok && i < 128; ++i) {
+    double actual = 0.0;
+    memcpy(&actual, &nested_values[i], sizeof(actual));
+    ok = actual == (double)(i + 1) * 2.0;
+  }
+  bool saw_dynamic_f64_load = false;
+  bool saw_dynamic_f64_store = false;
+  bool saw_dynamic_f64_mul = false;
+  for (size_t i = 0; ok && i < f.len; ++i) {
+    saw_dynamic_f64_load |= f.data[i].op == NYIR_VEC4_LOAD_F64;
+    saw_dynamic_f64_store |= f.data[i].op == NYIR_VEC4_STORE_F64;
+    saw_dynamic_f64_mul |= f.data[i].op == NYIR_VEC4_MUL_F64;
+  }
+  ok = ok && f.vectorized_loops > 0 && saw_dynamic_f64_load &&
+       saw_dynamic_f64_store && saw_dynamic_f64_mul;
+  if (!ok) {
+    fprintf(stderr,
+            "[loop-vector-dynamic-f64-update] before=%lld after=%lld "
+            "attempted=%zu rejected=%zu vectorized=%zu\n",
+            (long long)dynamic_before, (long long)dynamic_after,
+            f.vectorize_attempted_loops, f.vectorize_rejected_loops,
+            f.vectorized_loops);
+    nyr_dump(stderr, &f, "loop-vector-dynamic-f64-update-after");
+  }
+  nyr_ir_func_free(&f);
+  reset_nested_values();
+  if (!ok) {
+    fputs("[loop-vector-dynamic-f64-update] matched nested load/store stream "
+          "did not vectorize with the same result\n",
+          stderr);
+    return 1;
+  }
+  puts("[loop-vector-dynamic-f64-update] matched nested buffer stream "
+       "vectorizes with the same result");
+
   size_t update_inst = 0;
-  if (!build_sum(&f, &update_inst, false, 7)) {
+  if (!build_sum(&f, &update_inst, false, 7, 0, false)) {
     nyr_ir_func_free(&f);
     return 1;
   }
@@ -634,7 +923,7 @@ int main(void) {
   /*
    * Candidate recognition follows COPY chains, so IV-step rewriting must too.
    */
-  if (!build_sum(&f, &update_inst, true, 7)) {
+  if (!build_sum(&f, &update_inst, true, 7, 0, false)) {
     nyr_ir_func_free(&f);
     return 1;
   }
@@ -682,7 +971,8 @@ int main(void) {
   for (size_t i = 0; ok && i < f.len; ++i)
     saw_write_vector_load |= f.data[i].op == NYIR_VEC4_LOAD_I64 ||
                              f.data[i].op == NYIR_VEC8_LOAD_I64;
-  ok = ok && !saw_write_vector_load;
+  ok = ok && !saw_write_vector_load && f.vectorize_attempted_loops > 0 &&
+       f.vectorized_loops == 0;
   if (!ok)
     nyr_dump(stderr, &f, "loop-vector-checked-write-after");
   nyr_ir_func_free(&f);

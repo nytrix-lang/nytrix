@@ -5,6 +5,8 @@ Keep the failing command, source, flags, and first useful diagnostic. Reduce the
 input until one import, type, runtime service, or native boundary owns the
 failure.
 
+Prerequisites: the failing command and its expected result.
+
 ## Triage
 
 1. Rerun the command without changing its route or flags.
@@ -30,7 +32,7 @@ entry.
 ## Type and contract failures
 
 Read the first source-located diagnostic. If a value is dynamic, add the
-required type annotation or use a checked conversion. Use `--strict-types` to
+required type annotation or use a checked conversion. Use `--check=types` to
 reject supported dynamic type cliffs. For proof, effect, or ownership
 boundaries, read the corresponding spec; an unknown obligation is not evidence
 that the program is safe.
@@ -57,8 +59,8 @@ FFI calls when the native contract requires them.
 Run borrow checking when values cross resource or FFI boundaries:
 
 ```bash
-ny --borrow-check --ownership-strict file.ny
-ny --safe-mode file.ny
+ny --borrow-check --ownership-check=strict file.ny
+ny --mode=safe file.ny
 ```
 
 For native failures, check ABI layout, pointer lifetime, handle ownership, and
@@ -74,3 +76,9 @@ with the manifest dependency, then inspect `ny pkg path` and the lockfile.
 
 See [Native](native.md), [Networking](networking.md), [Packages](packages.md),
 [Execution routes](status.md#execution-routes), and [Testing](testing.md).
+
+Next:
+
+- [Testing](testing.md) — confirm the reproducer and route.
+- [Implementation status](status.md) — check known limitations.
+- [Debugging](debugging.md) — inspect a compiler failure.

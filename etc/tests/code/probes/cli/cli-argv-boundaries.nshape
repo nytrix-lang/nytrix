@@ -1,0 +1,218 @@
+shape cli_program_arguments_preserve_boundaries {
+  family "probe-suite"
+  generator "regression"
+  features ["cli", "argv", "jit", "aot", "native"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os (file_remove, file_write, pid, temp_dir)
+use core.os.subprocess (run_capture)
+
+def compiler = env("NYTRIX_NY_FULL_BIN")
+assert(is_str(compiler) && compiler.len > 0,
+       "test runner provides the compiler path")
+def code =
+    "assert(argc() == 9, \"argument count\")\n" +
+    "assert(argv(0) == \"-c\", \"inline argv zero\")\n" +
+    "assert(argv(1) == \"p\", \"first argument\")\n" +
+    "assert(argv(2) == \"q r\", \"spaced argument\")\n" +
+    "assert(argv(3) == \"\", \"empty argument\")\n" +
+    "assert(argv(4) == \"-x\", \"leading dash argument\")\n" +
+    "assert(argv(5) == \"--\", \"later separator is data\")\n" +
+    "assert(argv(6) == \"ü\", \"unicode-safe argument\")\n" +
+    "assert(argv(7) == \"--emit-asm=x\", \"compiler-like argument\")\n" +
+    "assert(argv(8) == \"@file\", \"response-file-like argument\")\n" +
+    "print(\"CLI_ARGS_OK\")\n"
+def args = ["--", "p", "q r", "", "-x", "--", "ü", "--emit-asm=x", "@file"]
+def jit = run_capture([compiler, "-c", code] + args, [], nil, false)
+assert(int(jit.get("code", 127)) == 0 &&
+       str(jit.get("stdout", "")).contains("CLI_ARGS_OK"),
+       "JIT inline arguments retain exact boundaries")
+def aot = run_capture([compiler, "--run=aot", "-c", code] + args,
+                      [], nil, false)
+assert(int(aot.get("code", 127)) == 0 &&
+       str(aot.get("stdout", "")).contains("CLI_ARGS_OK"),
+       "AOT inline arguments retain exact boundaries")
+def legacy_aot = run_capture([compiler, "-run", "-c", code] + args,
+                             [], nil, false)
+assert(int(legacy_aot.get("code", 127)) == 0 &&
+       str(legacy_aot.get("stdout", "")).contains("CLI_ARGS_OK"),
+       "legacy -run forwards exact inline arguments")
+def native = run_capture([compiler, "--run=native", "-c", code] + args,
+                         [], nil, false)
+assert(int(native.get("code", 127)) == 0 &&
+       str(native.get("stdout", "")).contains("CLI_ARGS_OK"),
+       "native inline arguments retain exact boundaries")
+def exit7_jit = run_capture([compiler, "-c", "exit(7)"], [], nil, false)
+def exit255_jit = run_capture([compiler, "-c", "exit(255)"], [], nil, false)
+def exit7_aot =
+    run_capture([compiler, "--run=aot", "-c", "exit(7)"], [], nil, false)
+def exit255_aot =
+    run_capture([compiler, "--run=aot", "-c", "exit(255)"], [], nil, false)
+def exit7_native =
+    run_capture([compiler, "--run=native", "-c", "exit(7)"], [], nil, false)
+def exit255_native =
+    run_capture([compiler, "--run=native", "-c", "exit(255)"], [], nil, false)
+assert(int(exit7_jit.get("code", 127)) == 7 &&
+       int(exit255_jit.get("code", 127)) == 255 &&
+       int(exit7_aot.get("code", 127)) == 7 &&
+       int(exit255_aot.get("code", 127)) == 255 &&
+       int(exit7_native.get("code", 127)) == 7 &&
+       int(exit255_native.get("code", 127)) == 255,
+       "inline JIT, AOT, and native execution preserve exit status 7 and 255")
+def signal_code =
+    "#link \"c\"\nextern fn raise(int signal) int as \"raise\"\nraise(15)\n"
+def signal_jit = run_capture([compiler, "-c", signal_code], [], nil, false)
+def signal_aot =
+    run_capture([compiler, "--run=aot", "-c", signal_code], [], nil, false)
+def signal_native =
+    run_capture([compiler, "--run=native", "-c", signal_code], [], nil, false)
+assert(int(signal_jit.get("code", 127)) == 143 &&
+       int(signal_aot.get("code", 127)) == 143 &&
+       int(signal_native.get("code", 127)) == 143,
+       "JIT, AOT, and native propagate SIGTERM as exit status 143")
+def cross_tools = run_capture(
+    ["sh", "-c",
+     "command -v qemu-x86_64 && command -v x86_64-linux-gnu-gcc"],
+    [], nil, false)
+if int(cross_tools.get("code", 1)) == 0 {
+  def cross = run_capture(
+      [compiler, "--cross=linux-x64", "--cross-run", "-c", code] + args,
+      [], nil, false)
+  assert(int(cross.get("code", 127)) == 0 &&
+         str(cross.get("stdout", "")).contains("CLI_ARGS_OK"),
+         "cross-run forwards exact inline arguments")
+}
+def script = temp_dir() + "/ny-cli-argv-" + to_str(pid()) + ".ny"
+def script_code =
+    "assert(argv(0) == \"" + script + "\", \"script argv zero\")\n" +
+    "assert(argc() == 9, \"script argument count\")\n" +
+    "assert(argv(1) == \"p\" && argv(2) == \"q r\", \"script arguments\")\n" +
+    "assert(argv(3) == \"\" && argv(4) == \"-x\", \"script empty/dash args\")\n" +
+    "assert(argv(5) == \"--\" && argv(6) == \"ü\", \"script separator/unicode\")\n" +
+    "assert(argv(7) == \"--emit-asm=x\", \"script compiler-like argument\")\n" +
+    "assert(argv(8) == \"@file\", \"script response-file-like argument\")\n" +
+    "print(\"CLI_ARGS_OK\")\n"
+assert(is_ok(file_write(script, script_code)), "write CLI argv script")
+def script_run = run_capture(
+    [compiler, script, "--", "p", "q r", "", "-x", "--", "ü",
+     "--emit-asm=x", "@file"], [], nil, false)
+assert(int(script_run.get("code", 127)) == 0 &&
+       str(script_run.get("stdout", "")).contains("CLI_ARGS_OK"),
+       "file script reports its path and consumes the immediate separator")
+def watched_script = run_capture(
+    ["timeout", "2s", compiler, "--watch", script, "p", "q r", "", "-x",
+     "--", "ü", "--emit-asm=x", "@file"],
+    [], nil, false)
+assert(int(watched_script.get("code", 127)) == 124 &&
+       str(watched_script.get("stdout", "")).contains("CLI_ARGS_OK"),
+       "watch mode runs the script once with its original arguments")
+assert(is_ok(file_remove(script)), "remove CLI argv script")
+def shebang_script = temp_dir() + "/ny-cli-shebang-" + to_str(pid())
+defer {
+   def _remove_shebang_script = file_remove(shebang_script)
+}
+def shebang_code =
+    "#!/usr/bin/env " + compiler + "\n" +
+    "assert(argv(0) == \"" + shebang_script + "\", \"shebang argv zero\")\n" +
+    "assert(argc() == 9, \"shebang argument count\")\n" +
+    "assert(argv(1) == \"p\" && argv(2) == \"q r\", " +
+    "\"shebang first and spaced arguments\")\n" +
+    "assert(argv(3) == \"\" && argv(4) == \"-x\", " +
+    "\"shebang empty and leading-dash arguments\")\n" +
+    "assert(argv(5) == \"--\" && argv(6) == \"ü\", " +
+    "\"shebang separator and unicode arguments\")\n" +
+    "assert(argv(7) == \"--emit-asm=x\" && argv(8) == \"@file\", " +
+    "\"shebang compiler-like and response-file-like arguments\")\n" +
+    "print(\"CLI_SHEBANG_ARGS_OK\")\n"
+assert(is_ok(file_write(shebang_script, shebang_code)),
+       "write interpreter-driven CLI argv script")
+def shebang_chmod = run_capture(["chmod", "+x", shebang_script], [], nil, false)
+assert(int(shebang_chmod.get("code", 127)) == 0,
+       "mark interpreter-driven script executable")
+def shebang_run = run_capture(
+    [shebang_script, "p", "q r", "", "-x", "--", "ü", "--emit-asm=x",
+     "@file"],
+    [], nil, false)
+assert(int(shebang_run.get("code", 127)) == 0 &&
+       str(shebang_run.get("stdout", "")).contains("CLI_SHEBANG_ARGS_OK"),
+       "shebang interpreter preserves script argv zero and arguments")
+assert(is_ok(file_remove(shebang_script)),
+       "remove interpreter-driven CLI argv script")
+def binary = temp_dir() + "/ny-cli-argv-" + to_str(pid())
+def binary_code =
+    "assert(argv(0) == \"" + binary + "\", \"compiled argv zero\")\n" +
+    "assert(argc() == 9, \"compiled argument count\")\n" +
+    "assert(argv(1) == \"p\", \"compiled first argument\")\n" +
+    "assert(argv(2) == \"q r\", \"compiled spaced argument\")\n" +
+    "assert(argv(3) == \"\", \"compiled empty argument\")\n" +
+    "assert(argv(4) == \"-x\", \"compiled leading dash argument\")\n" +
+    "assert(argv(5) == \"--\", \"compiled later separator is data\")\n" +
+    "assert(argv(6) == \"ü\", \"compiled unicode-safe argument\")\n" +
+    "assert(argv(7) == \"--emit-asm=x\", \"compiled flag-like argument\")\n" +
+    "assert(argv(8) == \"@file\", \"compiled response-file-like argument\")\n" +
+    "print(\"CLI_ARGS_OK\")\n"
+def compile_binary = run_capture([compiler, "-o", binary, "-c", binary_code],
+                                 [], nil, false)
+assert(int(compile_binary.get("code", 127)) == 0,
+       "compile executable argument fixture")
+def executable = run_capture(
+    [binary, "p", "q r", "", "-x", "--", "ü", "--emit-asm=x",
+     "@file"],
+    [], nil, false)
+assert(int(executable.get("code", 127)) == 0 &&
+       str(executable.get("stdout", "")).contains("CLI_ARGS_OK"),
+       "compiled executable receives its invoked path and exact arguments")
+assert(is_ok(file_remove(binary)), "remove CLI argv executable")
+def exit_binary = temp_dir() + "/ny-cli-exit-" + to_str(pid())
+defer {
+   def _remove_exit_binary = file_remove(exit_binary)
+}
+def compile_exit7 =
+    run_capture([compiler, "-o", exit_binary, "-c", "exit(7)"],
+                [], nil, false)
+def compiled_exit7 = run_capture([exit_binary], [], nil, false)
+def compile_exit255 =
+    run_capture([compiler, "-o", exit_binary, "-c", "exit(255)"],
+                [], nil, false)
+def compiled_exit255 = run_capture([exit_binary], [], nil, false)
+def compile_signal =
+    run_capture([compiler, "-o", exit_binary, "-c", signal_code],
+                [], nil, false)
+def compiled_signal = run_capture([exit_binary], [], nil, false)
+assert(int(compile_exit7.get("code", 127)) == 0 &&
+       int(compiled_exit7.get("code", 127)) == 7 &&
+       int(compile_exit255.get("code", 127)) == 0 &&
+       int(compiled_exit255.get("code", 127)) == 255 &&
+       int(compile_signal.get("code", 127)) == 0 &&
+       int(compiled_signal.get("code", 127)) == 143,
+       "compiled executables preserve exit statuses 7, 255, and 128+signal")
+def stdin_code =
+    "assert(argc() == 9, \"stdin argument count\")\n" +
+    "assert(argv(0) == \"-\", \"stdin argv zero\")\n" +
+    "assert(argv(1) == \"p\", \"stdin first argument\")\n" +
+    "assert(argv(2) == \"q r\", \"stdin spaced argument\")\n" +
+    "assert(argv(3) == \"\", \"stdin empty argument\")\n" +
+    "assert(argv(4) == \"-x\", \"stdin leading dash argument\")\n" +
+    "assert(argv(5) == \"--\", \"stdin later separator is data\")\n" +
+    "assert(argv(6) == \"ü\", \"stdin unicode argument\")\n" +
+    "assert(argv(7) == \"--emit-asm=x\", \"stdin compiler-like argument\")\n" +
+    "assert(argv(8) == \"@file\", \"stdin response-file-like argument\")\n" +
+    "print(\"CLI_STDIN_ARGS_OK\")\n"
+def stdin_run = run_capture(
+    [compiler, "-", "--", "p", "q r", "", "-x", "--", "ü",
+     "--emit-asm=x", "@file"],
+                            [], stdin_code, false)
+assert(int(stdin_run.get("code", 127)) == 0 &&
+       str(stdin_run.get("stdout", "")).contains("CLI_STDIN_ARGS_OK"),
+       "stdin source receives argv with '-' as argv zero")
+def repl_stdin_run = run_capture(
+    [compiler, "--repl", "--", "p", "q r", "", "-x", "--", "ü",
+     "--emit-asm=x", "@file"], [], stdin_code, false)
+assert(int(repl_stdin_run.get("code", 127)) == 0 &&
+       str(repl_stdin_run.get("stdout", "")).contains("CLI_STDIN_ARGS_OK"),
+       "one-shot REPL stdin receives the same normalized argv")
+print("CLI_PROGRAM_ARGUMENT_BOUNDARIES_OK")
+NY
+}

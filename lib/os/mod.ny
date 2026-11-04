@@ -21,7 +21,7 @@
 ;; Native and browser targets share this facade, but not every host capability.
 ;; Browser fetch, clipboard, and WebSockets depend on origin policy and
 ;; permissions. Unavailable operations return documented failure values.
-module core.os(pid, ppid, env, environ, getcwd, uid, gid, file_read, file_write, file_exists, file_append, file_remove, file_rename, os, arch, argv, args, path_sep, path_has_sep, path_is_abs, path_join, path_normalize, path_basename, path_dirname, path_extname, path_splitext, path_resolve_repo_asset, temp_dir, home_dir, config_dir, data_dir, cache_dir, is_file, is_dir, list_dir, walk, time, now, unix, now_ms, sleep, msleep, ticks, monotonic_ns, Instant, instant, since_ns, since_ms, Timer, timer, timer_start, elapsed_ns, elapsed_ms, elapsed_sec, format, format_time, run, popen, waitpid, spawn, send, sendline, recv, recv_line, recv_all, shutdown_send, close, run_capture, check_output, output, check_lines, shell, shell_lines, gpu_mode, gpu_backend, gpu_offload, gpu_min_work, gpu_async, gpu_fast_math, gpu_available, gpu_should_offload, gpu_offload_status, accel_target, accel_targets, accel_target_available, accel_target_triple, accel_binary_kind, accel_binary_ext, accel_backend, accel_target_status, accel_compile_plan, accel_emit_plan, accel_emit_command, parallel_mode, parallel_threads, parallel_min_work, parallel_should_threads, parallel_status, scheduler_policy, scheduler_status, work_stealing_enabled, work_stealing_plan, work_queue, work_queue_push, work_queue_pop, work_queue_steal, thread_spawn, thread_spawn_call, thread_launch, thread_launch_call, thread_join, mutex_new, mutex_lock, mutex_unlock, mutex_free, hardware_threads, atomic_i64, atomic_free, atomic_load, atomic_store, atomic_add, atomic_sub, atomic_exchange, atomic_compare_exchange, thread_budget, future, async, await, await_all, detach, future_wait, async_yield_now, async_sleep_ms, async_run, async_backend, async_state, parallel_map, parallel_map_indexed, parallel_each, chunk_ranges, opencl_available, opencl_toolchain_available, opencl_async, opencl_fast_math, opencl_should_offload, opencl_status, opencl_device_policy, opencl_compile_plan, opencl_kernel_plan, opencl_cpu_fallback_plan, opencl_dispatch_plan, opencl_work_groups, OS, ARCH, IS_LINUX, IS_MACOS, IS_WINDOWS, IS_X86_64, IS_AARCH64, IS_ARM, GPU_MODE, GPU_BACKEND, GPU_OFFLOAD, GPU_MIN_WORK, GPU_ASYNC, GPU_FAST_MATH, GPU_AVAILABLE, ACCEL_TARGET, ACCEL_OBJECT, PARALLEL_MODE, PARALLEL_THREADS, PARALLEL_MIN_WORK, SCHEDULER_POLICY, HARDWARE_THREADS, OPENCL_AVAILABLE, OPENCL_TOOLCHAIN_AVAILABLE, hardware_status, set_clipboard_text, get_clipboard_text, exit, fetch)
+module core.os(pid, ppid, env, environ, getcwd, uid, gid, file_read, file_read_lines, file_write, file_exists, file_append, file_remove, file_rename, os, arch, argv, args, path_sep, path_has_sep, path_is_abs, path_join, path_normalize, path_basename, path_dirname, path_extname, path_splitext, path_resolve_repo_asset, temp_dir, home_dir, config_dir, data_dir, cache_dir, is_file, is_dir, list_dir, walk, time, now, unix, now_ms, sleep, msleep, ticks, monotonic_ns, Instant, instant, since_ns, since_ms, Timer, timer, timer_start, elapsed_ns, elapsed_ms, elapsed_sec, format, format_time, run, popen, waitpid, spawn, send, sendline, recv, recv_line, recv_all, shutdown_send, close, run_capture, check_output, output, check_lines, shell, shell_lines, gpu_mode, gpu_backend, gpu_offload, gpu_min_work, gpu_async, gpu_fast_math, gpu_available, gpu_should_offload, gpu_offload_status, accel_target, accel_targets, accel_target_available, accel_target_triple, accel_binary_kind, accel_binary_ext, accel_backend, accel_target_status, accel_compile_plan, accel_emit_plan, accel_emit_command, parallel_mode, parallel_threads, parallel_min_work, parallel_should_threads, parallel_status, scheduler_policy, scheduler_status, work_stealing_enabled, work_stealing_plan, work_queue, work_queue_push, work_queue_pop, work_queue_steal, thread_spawn, thread_spawn_call, thread_launch, thread_launch_call, thread_join, mutex_new, mutex_lock, mutex_unlock, mutex_free, hardware_threads, atomic_i64, atomic_free, atomic_load, atomic_store, atomic_add, atomic_sub, atomic_exchange, atomic_compare_exchange, thread_budget, future, async, await, await_all, detach, future_wait, async_yield_now, async_sleep_ms, async_run, async_backend, async_state, parallel_map, parallel_map_indexed, parallel_each, chunk_ranges, opencl_available, opencl_toolchain_available, opencl_async, opencl_fast_math, opencl_should_offload, opencl_status, opencl_device_policy, opencl_compile_plan, opencl_kernel_plan, opencl_cpu_fallback_plan, opencl_dispatch_plan, opencl_work_groups, OS, ARCH, IS_LINUX, IS_MACOS, IS_WINDOWS, IS_X86_64, IS_AARCH64, IS_ARM, GPU_MODE, GPU_BACKEND, GPU_OFFLOAD, GPU_MIN_WORK, GPU_ASYNC, GPU_FAST_MATH, GPU_AVAILABLE, ACCEL_TARGET, ACCEL_OBJECT, PARALLEL_MODE, PARALLEL_THREADS, PARALLEL_MIN_WORK, SCHEDULER_POLICY, HARDWARE_THREADS, OPENCL_AVAILABLE, OPENCL_TOOLCHAIN_AVAILABLE, hardware_status, set_clipboard_text, get_clipboard_text, exit, fetch)
 use core
 use core.common as common
 use core.error
@@ -661,7 +661,7 @@ fn _file_write_impl(str path, any content, int flags) Result<int, int> {
       off += w
    }
    sys_close_quiet(fd)
-   ok(__tag(off))
+   ok(off)
 }
 
 fn getcwd() str {
@@ -696,7 +696,9 @@ fn file_read(str path) Result<str, int> {
    def int fd = _open_raw_with_retry(p, 0, 0)
    if fd < 0 { return err(__tag(fd)) }
    mut int cap = 4096
-   mut ptr base = malloc(cap)
+   ;; The returned value must own a Nytrix length sidecar. A raw malloc buffer
+   ;; cannot become a string by __init_str_raw, which only retags managed data.
+   mut any base = bytes_new_raw(cap)
    if base == 0 {
       sys_close_quiet(fd)
       return err(__tag(-1))
@@ -704,40 +706,55 @@ fn file_read(str path) Result<str, int> {
    mut ptr buf = base
    def ptr tmp = malloc(4096)
    if tmp == 0 {
-      free(base)
       sys_close_quiet(fd)
       return err(__tag(-1))
    }
    mut int tlen = 0
-   while true {
-      def int count = __read_off(fd, tmp, 4096, 0)
+   mut int count = __read_fd_raw(fd, tmp, 4096)
+   while count != 0 {
       if count < 0 {
          free(tmp)
-         free(base)
          sys_close_quiet(fd)
          return err(__tag(count))
       }
       if count == 0 { break }
       if tlen + count >= cap {
          while tlen + count >= cap { cap = cap * 2 }
-         def nbase = realloc(base, cap)
+         def any nbase = bytes_new_raw(cap)
          if nbase == 0 {
             free(tmp)
-            free(base)
             sys_close_quiet(fd)
             return err(__tag(-1))
          }
+         mut ptr nbuf = nbase
+         __copy_mem(nbuf, buf, tlen)
          base = nbase
-         buf = base
+         buf = nbuf
       }
       __copy_mem(ptr_add(buf, tlen), tmp, count)
       tlen = tlen + count
+      count = __read_fd_raw(fd, tmp, 4096)
    }
    free(tmp)
    store8(buf, 0, tlen)
    sys_close_quiet(fd)
-   def str final = __init_str_raw(buf, tlen)
+   def str final = init_str(buf, tlen)
    return ok(final)
+}
+
+fn file_read_lines(str path, bool keep_empty=false) Result<list, int> {
+   "Reads a text file as lines, trimming surrounding whitespace and omitting blank lines by default."
+   mut text = ""
+   match file_read(path) {
+      ok(value) -> { text = value }
+      err(code) -> { return err(code) }
+   }
+   mut lines = []
+   for piece in str.split(text, "\n") {
+      def line = str.strip(piece)
+      if keep_empty || line.len > 0 { lines = lines.append(line) }
+   }
+   return ok(lines)
 }
 
 fn file_write(str path, any content) Result<int, int> {

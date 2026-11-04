@@ -8,26 +8,19 @@
 
 static int emit_tbuf_new(nyr_func_t *f, int count, int width) {
   return nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_CALL,
-                                    .dst = -1,
-                                    .a = count,
-                                    .b = width,
-                                    .c = -1,
-                                    .d = -1,
-                                    .e = -1,
-                                    .f = -1,
-                                    .symbol = "rt_tbuf_new_raw",
-                                    .imm = 2});
+                                     .dst = -1,
+                                     .a = count,
+                                     .b = width,
+                                     .c = -1,
+                                     .d = -1,
+                                     .e = -1,
+                                     .f = -1,
+                                     .symbol = "rt_tbuf_new_raw",
+                                     .imm = 2});
 }
 
 static void emit_bounds_check(nyr_func_t *f, int base, int offset, int bytes) {
-  nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_BOUNDS_CHECK,
-                             .dst = -1,
-                             .a = base,
-                             .b = offset,
-                             .c = bytes,
-                             .d = -1,
-                             .e = -1,
-                             .f = -1});
+  nyr_opt_emit_abc(f, NYIR_BOUNDS_CHECK, base, offset, bytes);
 }
 static void build_matrix(nyr_func_t *f, bool overflow_adjacent) {
   nyr_opt_begin(f);
@@ -109,43 +102,57 @@ static void build_asserted_nested_tbuf_matrix(nyr_func_t *f,
     abort();
   f->param_count = 1;
   f->param_types[0] = NYIR_PARAM_I64;
-  int count = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_LOAD_LOCAL,
-                                         .dst = -1,
-                                         .a = -1,
-                                         .b = -1,
-                                         .c = -1,
-                                         .d = -1,
-                                         .e = -1,
-                                         .f = -1,
-                                         .imm = 0});
+  int count = nyr_opt_emit_imm(f, NYIR_LOAD_LOCAL, 0);
   int zero = nyr_opt_const(f, 0);
   int one = nyr_opt_const(f, 1);
   int rows = nyr_opt_const(f, 100);
   int columns = nyr_opt_const(f, column_limit);
   int width = nyr_opt_const(f, 8);
-  int base = emit_tbuf_new(f, count, width);
+  int two = nyr_opt_const(f, 2);
+  int tagged_count = nyr_opt_binop(f, NYIR_MUL_I64, count, two);
+  tagged_count = nyr_opt_binop(f, NYIR_ADD_I64, tagged_count, one);
+  int base = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_CALL,
+                                         .dst = -1,
+                                         .a = tagged_count,
+                                         .b = -1,
+                                         .c = -1,
+                                         .d = -1,
+                                         .e = -1,
+                                         .f = -1,
+                                         .symbol = "rt_list_new",
+                                         .imm = 1});
+  base = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_CALL,
+                                     .dst = -1,
+                                     .a = base,
+                                     .b = count,
+                                     .c = -1,
+                                     .d = -1,
+                                     .e = -1,
+                                     .f = -1,
+                                     .symbol = "rt_list_set_len_raw",
+                                     .imm = 2});
   int length = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_CALL,
-                                          .dst = -1,
-                                          .a = base,
-                                          .b = -1,
-                                          .c = -1,
-                                          .d = -1,
-                                          .e = -1,
-                                          .f = -1,
-                                          .symbol = "rt_len_strict",
-                                          .imm = 1});
+                                           .dst = -1,
+                                           .a = base,
+                                           .b = -1,
+                                           .c = -1,
+                                           .d = -1,
+                                           .e = -1,
+                                           .f = -1,
+                                           .symbol = "rt_len_strict",
+                                           .imm = 1});
   int minimum = nyr_opt_const(f, 10000);
   int enough = nyr_opt_cmp(f, length, minimum, NYIR_CMP_GE);
   nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_CALL,
-                             .dst = -1,
-                             .a = enough,
-                             .b = zero,
-                             .c = -1,
-                             .d = -1,
-                             .e = -1,
-                             .f = -1,
-                             .symbol = "rt_assert_cstr",
-                             .imm = 2});
+                              .dst = -1,
+                              .a = enough,
+                              .b = zero,
+                              .c = -1,
+                              .d = -1,
+                              .e = -1,
+                              .f = -1,
+                              .symbol = "rt_assert_cstr",
+                              .imm = 2});
 
   nyr_opt_br(f, 10);
   nyr_opt_label(f, 10);
@@ -202,25 +209,25 @@ static void build_affine_constant(nyr_func_t *f, int64_t bound, bool use_shift,
   int base;
   if (list_wrappers) {
     base = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_CALL,
-                                      .dst = -1,
-                                      .a = three,
-                                      .b = -1,
-                                      .c = -1,
-                                      .d = -1,
-                                      .e = -1,
-                                      .f = -1,
-                                      .symbol = "rt_list_new_raw",
-                                      .imm = 1});
+                                       .dst = -1,
+                                       .a = three,
+                                       .b = -1,
+                                       .c = -1,
+                                       .d = -1,
+                                       .e = -1,
+                                       .f = -1,
+                                       .symbol = "rt_list_new_raw",
+                                       .imm = 1});
     int sized = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_CALL,
-                                           .dst = -1,
-                                           .a = base,
-                                           .b = three,
-                                           .c = -1,
-                                           .d = -1,
-                                           .e = -1,
-                                           .f = -1,
-                                           .symbol = "rt_list_set_len_raw",
-                                           .imm = 2});
+                                            .dst = -1,
+                                            .a = base,
+                                            .b = three,
+                                            .c = -1,
+                                            .d = -1,
+                                            .e = -1,
+                                            .f = -1,
+                                            .symbol = "rt_list_set_len_raw",
+                                            .imm = 2});
     base = sized;
   } else {
     base = emit_tbuf_new(f, three, eight);
@@ -233,24 +240,18 @@ static void build_affine_constant(nyr_func_t *f, int64_t bound, bool use_shift,
   nyr_opt_br_if(f, keep_going, 11);
   nyr_opt_ret(f, zero);
   nyr_opt_label(f, 11);
-  int offset = use_shift ? nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_SHL_I64,
-                                                      .dst = -1,
-                                                      .a = iv,
-                                                      .b = nyr_opt_const(f, 3),
-                                                      .c = -1,
-                                                      .d = -1,
-                                                      .e = -1,
-                                                      .f = -1})
-                         : nyr_opt_binop(f, NYIR_MUL_I64, iv, eight);
+  int offset =
+      use_shift ? nyr_opt_emit_abc(f, NYIR_SHL_I64, iv, nyr_opt_const(f, 3), -1)
+                : nyr_opt_binop(f, NYIR_MUL_I64, iv, eight);
   nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_BOUNDS_CHECK,
-                             .dst = -1,
-                             .a = base,
-                             .b = offset,
-                             .c = -1,
-                             .d = -1,
-                             .e = -1,
-                             .f = -1,
-                             .imm = bound});
+                              .dst = -1,
+                              .a = base,
+                              .b = offset,
+                              .c = -1,
+                              .d = -1,
+                              .e = -1,
+                              .f = -1,
+                              .imm = bound});
   int next = nyr_opt_binop(f, NYIR_ADD_I64, iv, one);
   nyr_opt_br(f, 10);
   for (size_t i = 0; i < f->len; ++i) {
@@ -329,32 +330,25 @@ static void build_nested_dynamic_init(nyr_func_t *f, int64_t outer_start,
   int eight = nyr_opt_const(f, 8);
   int bytes = nyr_opt_const(f, 32);
   int base = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_ALLOCA,
-                                        .dst = -1,
-                                        .a = -1,
-                                        .b = -1,
-                                        .c = -1,
-                                        .d = -1,
-                                        .e = -1,
-                                        .f = -1,
-                                        .imm = 32,
-                                        .scalar_class = NYIR_SCALAR_POINTER});
+                                         .dst = -1,
+                                         .a = -1,
+                                         .b = -1,
+                                         .c = -1,
+                                         .d = -1,
+                                         .e = -1,
+                                         .f = -1,
+                                         .imm = 32,
+                                         .scalar_class = NYIR_SCALAR_POINTER});
   for (int64_t i = 0; i < 4; ++i) {
     int offset = nyr_opt_const(f, i * 8);
     int value = nyr_opt_const(f, i + 1);
     int address = nyr_opt_binop(f, NYIR_ADD_I64, base, offset);
-    nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_STORE_I64,
-                               .dst = -1,
-                               .a = address,
-                               .b = -1,
-                               .c = value,
-                               .d = -1,
-                               .e = -1,
-                               .f = -1});
+    nyr_opt_emit_abc(f, NYIR_STORE_I64, address, -1, value);
   }
   int initial_sum = nyr_opt_const(f, 0);
-  nyr_ir_emit(f,
-            (nyr_inst_t){
-                .op = NYIR_STORE_LOCAL, .dst = -1, .a = initial_sum, .imm = 0});
+  nyr_ir_emit(
+      f, (nyr_inst_t){
+             .op = NYIR_STORE_LOCAL, .dst = -1, .a = initial_sum, .imm = 0});
 
   nyr_opt_br(f, 10);
   nyr_opt_label(f, 10);
@@ -382,20 +376,13 @@ static void build_nested_dynamic_init(nyr_func_t *f, int64_t outer_start,
     emit_bounds_check(f, base, offset, bytes);
   if (!check_false_edge) {
     int address = nyr_opt_binop(f, NYIR_ADD_I64, base, offset);
-    int value = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_LOAD_I64,
-                                           .dst = -1,
-                                           .a = address,
-                                           .b = -1,
-                                           .c = -1,
-                                           .d = -1,
-                                           .e = -1,
-                                           .f = -1});
-    int sum =
-        nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_LOAD_LOCAL, .dst = -1, .imm = 0});
+    int value = nyr_opt_emit_abc(f, NYIR_LOAD_I64, address, -1, -1);
+    int sum = nyr_ir_emit(
+        f, (nyr_inst_t){.op = NYIR_LOAD_LOCAL, .dst = -1, .imm = 0});
     int next_sum = nyr_opt_binop(f, NYIR_ADD_I64, sum, value);
-    nyr_ir_emit(f,
-              (nyr_inst_t){
-                  .op = NYIR_STORE_LOCAL, .dst = -1, .a = next_sum, .imm = 0});
+    nyr_ir_emit(
+        f, (nyr_inst_t){
+               .op = NYIR_STORE_LOCAL, .dst = -1, .a = next_sum, .imm = 0});
   }
   int inner_next = nyr_opt_binop(f, NYIR_SUB_I64, inner, one);
   nyr_opt_br(f, 20);
@@ -465,7 +452,7 @@ static bool check_nested_dynamic_init(const char *name, int64_t outer_start,
       defs && nyr_cfg_build(&f, &cfg) && nyr_scev_analyze(&f, &scev) &&
       check_at < f.len &&
       nyr_scev_affine_at_cfg(&f, &scev, defs, &cfg, f.data[check_at].b,
-                              check_at, &offset_range);
+                             check_at, &offset_range);
   free(defs);
   nyr_scev_free(&scev);
   nyr_cfg_free(&cfg);
@@ -533,56 +520,56 @@ static void build_set_len_header_loop(nyr_func_t *f, bool mutate_length,
   int eight = nyr_opt_const(f, 8);
   int neg24 = nyr_opt_const(f, -24);
   int base = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_CALL,
-                                        .dst = -1,
-                                        .a = three,
-                                        .b = -1,
-                                        .c = -1,
-                                        .d = -1,
-                                        .e = -1,
-                                        .f = -1,
-                                        .symbol = "rt_list_new_raw",
-                                        .imm = 1});
+                                         .dst = -1,
+                                         .a = three,
+                                         .b = -1,
+                                         .c = -1,
+                                         .d = -1,
+                                         .e = -1,
+                                         .f = -1,
+                                         .symbol = "rt_list_new_raw",
+                                         .imm = 1});
   if (local_root) {
     (void)nyr_ir_emit(
         f,
         (nyr_inst_t){.op = NYIR_STORE_LOCAL, .dst = -1, .a = base, .imm = 0});
-    base =
-        nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_LOAD_LOCAL, .dst = -1, .imm = 0});
+    base = nyr_ir_emit(
+        f, (nyr_inst_t){.op = NYIR_LOAD_LOCAL, .dst = -1, .imm = 0});
   }
   if (local_escape) {
     (void)nyr_ir_emit(f,
-                    (nyr_inst_t){.op = NYIR_ADDR_LOCAL, .dst = -1, .imm = 0});
+                      (nyr_inst_t){.op = NYIR_ADDR_LOCAL, .dst = -1, .imm = 0});
   }
   if (borrow_wrapper) {
     nyr_inst_t borrow = {.op = NYIR_CALL,
-                          .dst = -1,
-                          .a = base,
-                          .b = -1,
-                          .c = -1,
-                          .d = -1,
-                          .e = -1,
-                          .f = -1,
-                          .symbol = "wrap_borrow",
-                          .imm = 1,
-                          .flags = NYIR_INST_F_EFFECTS_KNOWN,
-                          .effects = NYIR_EFFECT_NONE};
+                         .dst = -1,
+                         .a = base,
+                         .b = -1,
+                         .c = -1,
+                         .d = -1,
+                         .e = -1,
+                         .f = -1,
+                         .symbol = "wrap_borrow",
+                         .imm = 1,
+                         .flags = NYIR_INST_F_EFFECTS_KNOWN,
+                         .effects = NYIR_EFFECT_NONE};
     nyr_call_arg_contract_set(&borrow, 0, NYIR_ARG_CONTRACT_RETURNS_BORROW);
     base = nyr_ir_emit(f, borrow);
     f->data[f->len - 1].effects = NYIR_EFFECT_CALL;
   }
   if (mutating_borrow) {
     nyr_inst_t borrow = {.op = NYIR_CALL,
-                          .dst = -1,
-                          .a = base,
-                          .b = -1,
-                          .c = -1,
-                          .d = -1,
-                          .e = -1,
-                          .f = -1,
-                          .symbol = "mutating_borrow",
-                          .imm = 1,
-                          .flags = NYIR_INST_F_EFFECTS_KNOWN,
-                          .effects = NYIR_EFFECT_WRITE_MEMORY};
+                         .dst = -1,
+                         .a = base,
+                         .b = -1,
+                         .c = -1,
+                         .d = -1,
+                         .e = -1,
+                         .f = -1,
+                         .symbol = "mutating_borrow",
+                         .imm = 1,
+                         .flags = NYIR_INST_F_EFFECTS_KNOWN,
+                         .effects = NYIR_EFFECT_WRITE_MEMORY};
     nyr_call_arg_contract_set(&borrow, 0, NYIR_ARG_CONTRACT_RETURNS_BORROW);
     base = nyr_ir_emit(f, borrow);
     f->data[f->len - 1].effects = NYIR_EFFECT_CALL | NYIR_EFFECT_WRITE_MEMORY;
@@ -593,78 +580,78 @@ static void build_set_len_header_loop(nyr_func_t *f, bool mutate_length,
         (nyr_inst_t){.op = NYIR_STORE_LOCAL, .dst = -1, .a = base, .imm = 0});
     if (local_conflict) {
       int other = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_CALL,
-                                             .dst = -1,
-                                             .a = three,
-                                             .b = -1,
-                                             .c = -1,
-                                             .d = -1,
-                                             .e = -1,
-                                             .f = -1,
-                                             .symbol = "rt_list_new_raw",
-                                             .imm = 1});
+                                              .dst = -1,
+                                              .a = three,
+                                              .b = -1,
+                                              .c = -1,
+                                              .d = -1,
+                                              .e = -1,
+                                              .f = -1,
+                                              .symbol = "rt_list_new_raw",
+                                              .imm = 1});
       (void)nyr_ir_emit(
           f, (nyr_inst_t){
                  .op = NYIR_STORE_LOCAL, .dst = -1, .a = other, .imm = 0});
     }
-    base =
-        nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_LOAD_LOCAL, .dst = -1, .imm = 0});
+    base = nyr_ir_emit(
+        f, (nyr_inst_t){.op = NYIR_LOAD_LOCAL, .dst = -1, .imm = 0});
   }
   base = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_CALL,
-                                    .dst = -1,
-                                    .a = base,
-                                    .b = three,
-                                    .c = -1,
-                                    .d = -1,
-                                    .e = -1,
-                                    .f = -1,
-                                    .symbol = "rt_list_set_len_raw",
-                                    .imm = 2});
+                                     .dst = -1,
+                                     .a = base,
+                                     .b = three,
+                                     .c = -1,
+                                     .d = -1,
+                                     .e = -1,
+                                     .f = -1,
+                                     .symbol = "rt_list_set_len_raw",
+                                     .imm = 2});
   /*
    * The read-only, trapping length observer cannot change the following
    * header value; keeping it explicit exercises effect-based call handling.
    */
   (void)nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_CALL,
-                                   .dst = -1,
-                                   .a = base,
-                                   .b = -1,
-                                   .c = -1,
-                                   .d = -1,
-                                   .e = -1,
-                                   .f = -1,
-                                   .symbol = "rt_tbuf_len_raw",
-                                   .imm = 1});
+                                    .dst = -1,
+                                    .a = base,
+                                    .b = -1,
+                                    .c = -1,
+                                    .d = -1,
+                                    .e = -1,
+                                    .f = -1,
+                                    .symbol = "rt_tbuf_len_raw",
+                                    .imm = 1});
   if (mutating_append) {
     nyr_inst_t append = {.op = NYIR_CALL,
-                          .dst = -1,
-                          .a = base,
-                          .b = one,
-                          .c = -1,
-                          .d = -1,
-                          .e = -1,
-                          .f = -1,
-                          .symbol = "rt_tbuf_append_i64_raw",
-                          .imm = 2,
-                          .flags = NYIR_INST_F_EFFECTS_KNOWN,
-                          .effects =
-                              NYIR_EFFECT_CALL | NYIR_EFFECT_READ_MEMORY |
-                              NYIR_EFFECT_WRITE_MEMORY |
-                              NYIR_EFFECT_ALLOCATION | NYIR_EFFECT_MAY_TRAP};
+                         .dst = -1,
+                         .a = base,
+                         .b = one,
+                         .c = -1,
+                         .d = -1,
+                         .e = -1,
+                         .f = -1,
+                         .symbol = "rt_tbuf_append_i64_raw",
+                         .imm = 2,
+                         .flags = NYIR_INST_F_EFFECTS_KNOWN,
+                         .effects = NYIR_EFFECT_CALL | NYIR_EFFECT_READ_MEMORY |
+                                    NYIR_EFFECT_WRITE_MEMORY |
+                                    NYIR_EFFECT_ALLOCATION |
+                                    NYIR_EFFECT_MAY_TRAP};
     nyr_call_arg_contract_set(&append, 0, NYIR_ARG_CONTRACT_RETURNS_BORROW);
     base = nyr_ir_emit(f, append);
   }
   if (mutate_length) {
     nyr_inst_t mutate = {.op = NYIR_CALL,
-                          .dst = -1,
-                          .a = base,
-                          .b = three,
-                          .c = one,
-                          .d = -1,
-                          .e = -1,
-                          .f = -1,
-                          .symbol = "rt_tbuf_set_i64_raw",
-                          .imm = 3,
-                          .flags = NYIR_INST_F_EFFECTS_KNOWN,
-                          .effects = NYIR_EFFECT_WRITE_MEMORY};
+                         .dst = -1,
+                         .a = base,
+                         .b = three,
+                         .c = one,
+                         .d = -1,
+                         .e = -1,
+                         .f = -1,
+                         .symbol = "rt_tbuf_set_i64_raw",
+                         .imm = 3,
+                         .flags = NYIR_INST_F_EFFECTS_KNOWN,
+                         .effects = NYIR_EFFECT_WRITE_MEMORY};
     nyr_call_arg_contract_set(&mutate, 0, NYIR_ARG_CONTRACT_RETURNS_BORROW);
     base = nyr_ir_emit(f, mutate);
     f->data[f->len - 1].effects = NYIR_EFFECT_CALL | NYIR_EFFECT_WRITE_MEMORY;
@@ -679,23 +666,9 @@ static void build_set_len_header_loop(nyr_func_t *f, bool mutate_length,
   nyr_opt_ret(f, zero);
   nyr_opt_label(f, 11);
   int header = nyr_opt_binop(f, NYIR_ADD_I64, base, neg24);
-  int length = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_LOAD_I64,
-                                          .dst = -1,
-                                          .a = header,
-                                          .b = -1,
-                                          .c = -1,
-                                          .d = -1,
-                                          .e = -1,
-                                          .f = -1});
+  int length = nyr_opt_emit_abc(f, NYIR_LOAD_I64, header, -1, -1);
   int bytes = nyr_opt_binop(f, NYIR_MUL_I64, length, eight);
-  int offset = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_SHL_I64,
-                                          .dst = -1,
-                                          .a = iv,
-                                          .b = nyr_opt_const(f, 3),
-                                          .c = -1,
-                                          .d = -1,
-                                          .e = -1,
-                                          .f = -1});
+  int offset = nyr_opt_emit_abc(f, NYIR_SHL_I64, iv, nyr_opt_const(f, 3), -1);
   emit_bounds_check(f, base, offset, bytes);
   int next = nyr_opt_binop(f, NYIR_ADD_I64, iv, one);
   nyr_opt_br(f, 10);
@@ -728,14 +701,7 @@ static void build_loop_carried_append_unknown_length(nyr_func_t *f) {
 
   nyr_opt_label(f, 20);
   int header = nyr_opt_binop(f, NYIR_ADD_I64, current, neg24);
-  int length = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_LOAD_I64,
-                                          .dst = -1,
-                                          .a = header,
-                                          .b = -1,
-                                          .c = -1,
-                                          .d = -1,
-                                          .e = -1,
-                                          .f = -1});
+  int length = nyr_opt_emit_abc(f, NYIR_LOAD_I64, header, -1, -1);
   int bytes = nyr_opt_binop(f, NYIR_MUL_I64, length, eight);
   int offset = nyr_opt_binop(f, NYIR_MUL_I64, two, eight);
   emit_bounds_check(f, current, offset, bytes);
@@ -743,20 +709,20 @@ static void build_loop_carried_append_unknown_length(nyr_func_t *f) {
 
   nyr_opt_label(f, 11);
   nyr_inst_t append = {.op = NYIR_CALL,
-                        .dst = -1,
-                        .a = current,
-                        .b = iv,
-                        .c = -1,
-                        .d = -1,
-                        .e = -1,
-                        .f = -1,
-                        .symbol = "rt_tbuf_append_i64_raw",
-                        .imm = 2,
-                        .flags = NYIR_INST_F_EFFECTS_KNOWN,
-                        .effects = NYIR_EFFECT_CALL | NYIR_EFFECT_READ_MEMORY |
-                                   NYIR_EFFECT_WRITE_MEMORY |
-                                   NYIR_EFFECT_ALLOCATION |
-                                   NYIR_EFFECT_MAY_TRAP};
+                       .dst = -1,
+                       .a = current,
+                       .b = iv,
+                       .c = -1,
+                       .d = -1,
+                       .e = -1,
+                       .f = -1,
+                       .symbol = "rt_tbuf_append_i64_raw",
+                       .imm = 2,
+                       .flags = NYIR_INST_F_EFFECTS_KNOWN,
+                       .effects = NYIR_EFFECT_CALL | NYIR_EFFECT_READ_MEMORY |
+                                  NYIR_EFFECT_WRITE_MEMORY |
+                                  NYIR_EFFECT_ALLOCATION |
+                                  NYIR_EFFECT_MAY_TRAP};
   nyr_call_arg_contract_set(&append, 0, NYIR_ARG_CONTRACT_RETURNS_BORROW);
   int appended = nyr_ir_emit(f, append);
   int next = nyr_opt_binop(f, NYIR_ADD_I64, iv, one);
@@ -780,50 +746,43 @@ static void build_post_load_append(nyr_func_t *f) {
   int eight = nyr_opt_const(f, 8);
   int neg24 = nyr_opt_const(f, -24);
   int base = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_CALL,
-                                        .dst = -1,
-                                        .a = three,
-                                        .b = -1,
-                                        .c = -1,
-                                        .d = -1,
-                                        .e = -1,
-                                        .f = -1,
-                                        .symbol = "rt_list_new_raw",
-                                        .imm = 1});
+                                         .dst = -1,
+                                         .a = three,
+                                         .b = -1,
+                                         .c = -1,
+                                         .d = -1,
+                                         .e = -1,
+                                         .f = -1,
+                                         .symbol = "rt_list_new_raw",
+                                         .imm = 1});
   base = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_CALL,
-                                    .dst = -1,
-                                    .a = base,
-                                    .b = three,
-                                    .c = -1,
-                                    .d = -1,
-                                    .e = -1,
-                                    .f = -1,
-                                    .symbol = "rt_list_set_len_raw",
-                                    .imm = 2});
+                                     .dst = -1,
+                                     .a = base,
+                                     .b = three,
+                                     .c = -1,
+                                     .d = -1,
+                                     .e = -1,
+                                     .f = -1,
+                                     .symbol = "rt_list_set_len_raw",
+                                     .imm = 2});
   int header = nyr_opt_binop(f, NYIR_ADD_I64, base, neg24);
-  int length = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_LOAD_I64,
-                                          .dst = -1,
-                                          .a = header,
-                                          .b = -1,
-                                          .c = -1,
-                                          .d = -1,
-                                          .e = -1,
-                                          .f = -1});
+  int length = nyr_opt_emit_abc(f, NYIR_LOAD_I64, header, -1, -1);
   int bytes = nyr_opt_binop(f, NYIR_MUL_I64, length, eight);
   nyr_inst_t append = {.op = NYIR_CALL,
-                        .dst = -1,
-                        .a = base,
-                        .b = one,
-                        .c = -1,
-                        .d = -1,
-                        .e = -1,
-                        .f = -1,
-                        .symbol = "rt_tbuf_append_i64_raw",
-                        .imm = 2,
-                        .flags = NYIR_INST_F_EFFECTS_KNOWN,
-                        .effects = NYIR_EFFECT_CALL | NYIR_EFFECT_READ_MEMORY |
-                                   NYIR_EFFECT_WRITE_MEMORY |
-                                   NYIR_EFFECT_ALLOCATION |
-                                   NYIR_EFFECT_MAY_TRAP};
+                       .dst = -1,
+                       .a = base,
+                       .b = one,
+                       .c = -1,
+                       .d = -1,
+                       .e = -1,
+                       .f = -1,
+                       .symbol = "rt_tbuf_append_i64_raw",
+                       .imm = 2,
+                       .flags = NYIR_INST_F_EFFECTS_KNOWN,
+                       .effects = NYIR_EFFECT_CALL | NYIR_EFFECT_READ_MEMORY |
+                                  NYIR_EFFECT_WRITE_MEMORY |
+                                  NYIR_EFFECT_ALLOCATION |
+                                  NYIR_EFFECT_MAY_TRAP};
   nyr_call_arg_contract_set(&append, 0, NYIR_ARG_CONTRACT_RETURNS_BORROW);
   (void)nyr_ir_emit(f, append);
 
@@ -901,15 +860,7 @@ static void build_runtime_length_guard(nyr_func_t *f, int allocation_length,
       abort();
     f->param_count = 1;
     f->param_types[0] = NYIR_PARAM_I64;
-    count = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_LOAD_LOCAL,
-                                       .dst = -1,
-                                       .a = -1,
-                                       .b = -1,
-                                       .c = -1,
-                                       .d = -1,
-                                       .e = -1,
-                                       .f = -1,
-                                       .imm = 0});
+    count = nyr_opt_emit_imm(f, NYIR_LOAD_LOCAL, 0);
   } else {
     count = nyr_opt_const(f, allocation_length);
   }
@@ -922,16 +873,16 @@ static void build_runtime_length_guard(nyr_func_t *f, int allocation_length,
   bool strict_length = mutation >= 13 && mutation <= 19;
   int length =
       nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_CALL,
-                                 .dst = -1,
-                                 .a = base,
-                                 .b = -1,
-                                 .c = -1,
-                                 .d = -1,
-                                 .e = -1,
-                                 .f = -1,
-                                 .symbol = strict_length ? "rt_len_strict"
-                                                         : "rt_tbuf_len_raw",
-                                 .imm = 1});
+                                  .dst = -1,
+                                  .a = base,
+                                  .b = -1,
+                                  .c = -1,
+                                  .d = -1,
+                                  .e = -1,
+                                  .f = -1,
+                                  .symbol = strict_length ? "rt_len_strict"
+                                                          : "rt_tbuf_len_raw",
+                                  .imm = 1});
   nyr_cmp_t guard_cmp = NYIR_CMP_GE;
   if (false_edge) {
     guard_cmp = mutation == 5   ? NYIR_CMP_EQ
@@ -949,15 +900,15 @@ static void build_runtime_length_guard(nyr_func_t *f, int allocation_length,
   bool assertion_guard = mutation >= 17;
   if (assertion_guard) {
     (void)nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_CALL,
-                                     .dst = -1,
-                                     .a = guarded,
-                                     .b = zero,
-                                     .c = -1,
-                                     .d = -1,
-                                     .e = -1,
-                                     .f = -1,
-                                     .symbol = "rt_assert_cstr",
-                                     .imm = 2});
+                                      .dst = -1,
+                                      .a = guarded,
+                                      .b = zero,
+                                      .c = -1,
+                                      .d = -1,
+                                      .e = -1,
+                                      .f = -1,
+                                      .symbol = "rt_assert_cstr",
+                                      .imm = 2});
   } else {
     nyr_opt_br_if(f, guarded, false_edge ? 20 : 11);
     if (!false_edge) {
@@ -975,51 +926,44 @@ static void build_runtime_length_guard(nyr_func_t *f, int allocation_length,
     nyr_opt_label(f, 30);
   if (mutation == 1) {
     base = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_CALL,
-                                      .dst = -1,
-                                      .a = base,
-                                      .b = zero,
-                                      .c = -1,
-                                      .d = -1,
-                                      .e = -1,
-                                      .f = -1,
-                                      .symbol = "rt_list_set_len_raw",
-                                      .imm = 2});
+                                       .dst = -1,
+                                       .a = base,
+                                       .b = zero,
+                                       .c = -1,
+                                       .d = -1,
+                                       .e = -1,
+                                       .f = -1,
+                                       .symbol = "rt_list_set_len_raw",
+                                       .imm = 2});
   } else if (mutation == 2 || mutation == 16 || mutation == 19) {
     base = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_CALL,
-                                      .dst = -1,
-                                      .a = base,
-                                      .b = one,
-                                      .c = -1,
-                                      .d = -1,
-                                      .e = -1,
-                                      .f = -1,
-                                      .symbol = "rt_tbuf_append_i64_raw",
-                                      .imm = 2});
+                                       .dst = -1,
+                                       .a = base,
+                                       .b = one,
+                                       .c = -1,
+                                       .d = -1,
+                                       .e = -1,
+                                       .f = -1,
+                                       .symbol = "rt_tbuf_append_i64_raw",
+                                       .imm = 2});
   } else if (mutation == 3 || mutation == 15 || mutation == 18) {
-    (void)nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_CALL,
-                                     .flags = NYIR_INST_F_EFFECTS_KNOWN,
-                                     .effects = NYIR_EFFECT_CALL |
-                                                NYIR_EFFECT_WRITE_MEMORY |
-                                                NYIR_EFFECT_UNKNOWN_SIDE_EFFECT,
-                                     .dst = -1,
-                                     .a = base,
-                                     .b = zero,
-                                     .c = -1,
-                                     .d = -1,
-                                     .e = -1,
-                                     .f = -1,
-                                     .symbol = "unknown_mutator",
-                                     .imm = 2});
+    (void)nyr_ir_emit(
+        f, (nyr_inst_t){.op = NYIR_CALL,
+                        .flags = NYIR_INST_F_EFFECTS_KNOWN,
+                        .effects = NYIR_EFFECT_CALL | NYIR_EFFECT_WRITE_MEMORY |
+                                   NYIR_EFFECT_UNKNOWN_SIDE_EFFECT,
+                        .dst = -1,
+                        .a = base,
+                        .b = zero,
+                        .c = -1,
+                        .d = -1,
+                        .e = -1,
+                        .f = -1,
+                        .symbol = "unknown_mutator",
+                        .imm = 2});
   }
   int header = nyr_opt_binop(f, NYIR_ADD_I64, base, neg24);
-  int length_now = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_LOAD_I64,
-                                              .dst = -1,
-                                              .a = header,
-                                              .b = -1,
-                                              .c = -1,
-                                              .d = -1,
-                                              .e = -1,
-                                              .f = -1});
+  int length_now = nyr_opt_emit_abc(f, NYIR_LOAD_I64, header, -1, -1);
   int bytes = nyr_opt_binop(f, NYIR_MUL_I64, length_now, bytes_per_element);
   int offset = nyr_opt_binop(f, NYIR_MUL_I64, index_value, width);
   emit_bounds_check(f, base, offset, bytes);
@@ -1154,14 +1098,7 @@ static bool check_copied_base_reverse_index(void) {
   int base = emit_tbuf_new(&f, four, eight);
   int header_offset = nyr_opt_const(&f, -24);
   int header = nyr_opt_binop(&f, NYIR_ADD_I64, base, header_offset);
-  int length = nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_LOAD_I64,
-                                           .dst = -1,
-                                           .a = header,
-                                           .b = -1,
-                                           .c = -1,
-                                           .d = -1,
-                                           .e = -1,
-                                           .f = -1});
+  int length = nyr_opt_emit_abc(&f, NYIR_LOAD_I64, header, -1, -1);
   int bytes = nyr_opt_binop(&f, NYIR_MUL_I64, length, eight);
   nyr_opt_br(&f, 10);
   nyr_opt_label(&f, 10);
@@ -1172,14 +1109,7 @@ static bool check_copied_base_reverse_index(void) {
   nyr_opt_label(&f, 20);
   nyr_opt_ret(&f, zero);
   nyr_opt_label(&f, 11);
-  int copied_base = nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_COPY,
-                                                .dst = -1,
-                                                .a = base,
-                                                .b = -1,
-                                                .c = -1,
-                                                .d = -1,
-                                                .e = -1,
-                                                .f = -1});
+  int copied_base = nyr_opt_emit_abc(&f, NYIR_COPY, base, -1, -1);
   int reverse = nyr_opt_binop(&f, NYIR_SUB_I64, three, iv);
   int offset = nyr_opt_binop(&f, NYIR_SHL_I64, reverse, nyr_opt_const(&f, 3));
   emit_bounds_check(&f, copied_base, offset, bytes);
@@ -1237,23 +1167,15 @@ static int build_normalized_local(nyr_func_t *f, int64_t initial) {
   int len = nyr_opt_const(f, 8);
   int seed = nyr_opt_const(f, initial);
   nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_STORE_LOCAL,
-                             .dst = -1,
-                             .a = seed,
-                             .b = -1,
-                             .c = -1,
-                             .d = -1,
-                             .e = -1,
-                             .f = -1,
-                             .imm = 0});
-  int index = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_LOAD_LOCAL,
-                                         .dst = -1,
-                                         .a = -1,
-                                         .b = -1,
-                                         .c = -1,
-                                         .d = -1,
-                                         .e = -1,
-                                         .f = -1,
-                                         .imm = 0});
+                              .dst = -1,
+                              .a = seed,
+                              .b = -1,
+                              .c = -1,
+                              .d = -1,
+                              .e = -1,
+                              .f = -1,
+                              .imm = 0});
+  int index = nyr_opt_emit_imm(f, NYIR_LOAD_LOCAL, 0);
   int negative = nyr_opt_cmp(f, index, zero, NYIR_CMP_LT);
   int wrapped = nyr_opt_binop(f, NYIR_ADD_I64, index, len);
   int normalized = nyr_opt_select(f, negative, wrapped, index);
@@ -1266,28 +1188,12 @@ static void build_guarded_normalization(nyr_func_t *f, int *normalized_out) {
   int zero = nyr_opt_const(f, 0);
   int len = nyr_opt_const(f, 8);
   int negative_result = nyr_opt_const(f, -77);
-  int guard_index = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_LOAD_LOCAL,
-                                               .dst = -1,
-                                               .a = -1,
-                                               .b = -1,
-                                               .c = -1,
-                                               .d = -1,
-                                               .e = -1,
-                                               .f = -1,
-                                               .imm = 0});
+  int guard_index = nyr_opt_emit_imm(f, NYIR_LOAD_LOCAL, 0);
   int nonnegative = nyr_opt_cmp(f, guard_index, zero, NYIR_CMP_GE);
   nyr_opt_br_if(f, nonnegative, 10);
   nyr_opt_br(f, 20);
   nyr_opt_label(f, 10);
-  int index = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_LOAD_LOCAL,
-                                         .dst = -1,
-                                         .a = -1,
-                                         .b = -1,
-                                         .c = -1,
-                                         .d = -1,
-                                         .e = -1,
-                                         .f = -1,
-                                         .imm = 0});
+  int index = nyr_opt_emit_imm(f, NYIR_LOAD_LOCAL, 0);
   int is_negative = nyr_opt_cmp(f, index, zero, NYIR_CMP_LT);
   int wrapped = nyr_opt_binop(f, NYIR_ADD_I64, index, len);
   int normalized = nyr_opt_select(f, is_negative, wrapped, index);
@@ -1301,30 +1207,14 @@ static int build_normalization_with_alternate_pred(nyr_func_t *f) {
   nyr_opt_begin(f);
   int zero = nyr_opt_const(f, 0);
   int len = nyr_opt_const(f, 8);
-  int index = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_LOAD_LOCAL,
-                                         .dst = -1,
-                                         .a = -1,
-                                         .b = -1,
-                                         .c = -1,
-                                         .d = -1,
-                                         .e = -1,
-                                         .f = -1,
-                                         .imm = 0});
+  int index = nyr_opt_emit_imm(f, NYIR_LOAD_LOCAL, 0);
   int nonnegative = nyr_opt_cmp(f, index, zero, NYIR_CMP_GE);
   nyr_opt_br_if(f, nonnegative, 10);
   nyr_opt_br(f, 20);
   nyr_opt_label(f, 20);
   nyr_opt_br(f, 10); /* Bypass the guard into the same select block. */
   nyr_opt_label(f, 10);
-  int selected_index = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_LOAD_LOCAL,
-                                                  .dst = -1,
-                                                  .a = -1,
-                                                  .b = -1,
-                                                  .c = -1,
-                                                  .d = -1,
-                                                  .e = -1,
-                                                  .f = -1,
-                                                  .imm = 0});
+  int selected_index = nyr_opt_emit_imm(f, NYIR_LOAD_LOCAL, 0);
   int is_negative = nyr_opt_cmp(f, selected_index, zero, NYIR_CMP_LT);
   int wrapped = nyr_opt_binop(f, NYIR_ADD_I64, selected_index, len);
   int normalized = nyr_opt_select(f, is_negative, wrapped, selected_index);

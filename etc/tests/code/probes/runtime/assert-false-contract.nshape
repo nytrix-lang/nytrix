@@ -1,0 +1,24 @@
+shape native_assert_uses_boolean_truthiness {
+  family "probe-suite"
+  generator "regression"
+  features ["ny", "native", "assert", "boolean", "runtime"]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.subprocess (run_capture)
+
+def compiler = env("NYTRIX_NY_FULL_BIN")
+assert(is_str(compiler) && compiler.len > 0,
+       "test runner provides the compiler path")
+def rejected = run_capture([compiler, "-c",
+   "assert(false, \"native false assertion\")"], [], nil, false)
+def accepted = run_capture([compiler, "-c",
+   "assert(true, \"native true assertion\")"], [], nil, false)
+assert(int(rejected.get("code", 0)) != 0 &&
+       int(accepted.get("code", 1)) == 0,
+       "native assert rejects false and accepts true")
+print("NATIVE-ASSERT-TRUTHINESS-OK")
+NY
+}

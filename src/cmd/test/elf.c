@@ -230,9 +230,7 @@ static ny_test_proc_t run_one_start(const char *bin, const char *path,
     trim_inplace(flags_buf);
     snprintf(policy_flags, sizeof(policy_flags), "%s", flags_buf);
     has_native_backend = native_backend_explicit(flags_buf);
-    explicit_executor =
-        flags_contain_native_backend_word(flags_buf, "--nyir-run") ||
-        flags_contain_native_backend_word(flags_buf, "--jit");
+    explicit_executor = flags_explicit_executor(flags_buf);
     flagc = split_words(flags_buf, flagv, 32);
   }
   free(matrix);
@@ -307,8 +305,8 @@ static ny_test_proc_t run_one_start(const char *bin, const char *path,
   argv[argc++] = (char *)(exec_path && *exec_path ? exec_path : path);
   argv[argc] = NULL;
 #ifdef _WIN32
-  ny_test_proc_t proc =
-      ny_test_spawn_argv(argv, output_path, output_path ? 0 : 1);
+  ny_test_proc_t proc = ny_test_spawn_argv(
+      argv, output_path, output_path ? 0 : 1, !test_path_is_benchmark(path));
   error_meta_free(flags, expect);
   return proc;
 #else
@@ -319,7 +317,7 @@ static ny_test_proc_t run_one_start(const char *bin, const char *path,
      * signal tests must not be able to terminate ny-test with kill(0, sig).
      */
     (void)setpgid(0, 0);
-    apply_test_child_env();
+    apply_test_child_env(!test_path_is_benchmark(path));
     if (output_path) {
       int fd = open(output_path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
       if (fd >= 0) {
@@ -563,64 +561,57 @@ static bool test_link_add_def(ny_test_link_sym_t *defs, size_t *def_count,
   return true;
 }
 
-static bool test_link_is_memset_symbol(const char *name) {
+/*
+ * Memory prototype naming: a bare root, double-underscored, or ny_fn_-prefixed
+ * spelling all identify the same runtime symbol family.
+ */
+static bool test_link_is_memproto_symbol(const char *name, const char *base) {
+  size_t blen = strlen(base);
   return name &&
-         (strcmp(name, "memset") == 0 || strcmp(name, "__memset") == 0 ||
-          strcmp(name, "ny_fn_memset") == 0);
+         (strcmp(name, base) == 0 ||
+          (name[0] == '_' && name[1] == '_' && strcmp(name + 2, base) == 0) ||
+          (strncmp(name, "ny_fn_", 6) == 0 && strlen(name) == 6 + blen &&
+           strcmp(name + 6, base) == 0));
+}
+
+static bool test_link_is_memset_symbol(const char *name) {
+  return test_link_is_memproto_symbol(name, "memset");
 }
 
 static bool test_link_is_memcpy_symbol(const char *name) {
-  return name &&
-         (strcmp(name, "memcpy") == 0 || strcmp(name, "__memcpy") == 0 ||
-          strcmp(name, "ny_fn_memcpy") == 0);
+  return test_link_is_memproto_symbol(name, "memcpy");
 }
 
 static bool test_link_is_memmove_symbol(const char *name) {
-  return name &&
-         (strcmp(name, "memmove") == 0 || strcmp(name, "__memmove") == 0 ||
-          strcmp(name, "ny_fn_memmove") == 0);
+  return test_link_is_memproto_symbol(name, "memmove");
 }
 
 static bool test_link_is_memchr_symbol(const char *name) {
-  return name &&
-         (strcmp(name, "memchr") == 0 || strcmp(name, "__memchr") == 0 ||
-          strcmp(name, "ny_fn_memchr") == 0);
+  return test_link_is_memproto_symbol(name, "memchr");
 }
 
 static bool test_link_is_memcmp_symbol(const char *name) {
-  return name &&
-         (strcmp(name, "memcmp") == 0 || strcmp(name, "__memcmp") == 0 ||
-          strcmp(name, "ny_fn_memcmp") == 0);
+  return test_link_is_memproto_symbol(name, "memcmp");
 }
 
 static bool test_link_is_strlen_symbol(const char *name) {
-  return name &&
-         (strcmp(name, "strlen") == 0 || strcmp(name, "__strlen") == 0 ||
-          strcmp(name, "ny_fn_strlen") == 0);
+  return test_link_is_memproto_symbol(name, "strlen");
 }
 
 static bool test_link_is_strcmp_symbol(const char *name) {
-  return name &&
-         (strcmp(name, "strcmp") == 0 || strcmp(name, "__strcmp") == 0 ||
-          strcmp(name, "ny_fn_strcmp") == 0);
+  return test_link_is_memproto_symbol(name, "strcmp");
 }
 
 static bool test_link_is_strchr_symbol(const char *name) {
-  return name &&
-         (strcmp(name, "strchr") == 0 || strcmp(name, "__strchr") == 0 ||
-          strcmp(name, "ny_fn_strchr") == 0);
+  return test_link_is_memproto_symbol(name, "strchr");
 }
 
 static bool test_link_is_realloc_symbol(const char *name) {
-  return name &&
-         (strcmp(name, "realloc") == 0 || strcmp(name, "__realloc") == 0 ||
-          strcmp(name, "ny_fn_realloc") == 0);
+  return test_link_is_memproto_symbol(name, "realloc");
 }
 
 static bool test_link_is_calloc_symbol(const char *name) {
-  return name &&
-         (strcmp(name, "calloc") == 0 || strcmp(name, "__calloc") == 0 ||
-          strcmp(name, "ny_fn_calloc") == 0);
+  return test_link_is_memproto_symbol(name, "calloc");
 }
 
 static bool test_emit_malloc_stub(unsigned char *dst, size_t cap,

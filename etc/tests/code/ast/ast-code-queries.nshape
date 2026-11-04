@@ -101,9 +101,12 @@ assert(json_decode(signature[6][1][2]).get("value") == 2,
        "code_signature preserves default syntax")
 assert(signature[6][1][3] != "",
        "code_signature preserves parameter source origin")
-assert(signature[7][2][0][0] == "trace" &&
-       code_signature(expression) == nil,
-       "code_signature includes attributes and rejects nondeclarations")
+assert(signature[7][2][0][0] == "trace",
+       "code_signature includes function attributes")
+def signature_expression = parse_ast(
+   "def signature_value = 1 + 2").get(0).get("exprs").get(0)
+assert(is_nil(code_signature(signature_expression)),
+       "code_signature rejects nondeclarations")
 def lambda_code = parse_ast(
    "def transform = fn(int input) int { return input }").get(0)
    .get("exprs").get(0)
@@ -122,14 +125,18 @@ assert(extern_signature[2] == "extern" &&
 def contract_decl = parse_code(
    "fn bounded(int n) int requires n >= 0 decreases n { return n }")
 def contract_view = code_contract(contract_decl)
-assert(is_tuple(contract_view) && contract_view[0] == "nytrix.ast.contract" &&
-       contract_view[1] == 1 &&
-       json_decode(contract_view[2]).get("type") == "binary" &&
-       json_decode(contract_view[3]).get("name") == "n" &&
-       code_contract(lambda_code) == nil &&
-       code_contract(signature_decl)[2] == "" &&
+assert(is_tuple(contract_view) &&
+       contract_view[0] == "nytrix.ast.contract" && contract_view[1] == 1,
+       "code_contract returns a versioned contract tuple")
+assert(json_decode(contract_view[2]).get("type") == "binary",
+       "code_contract preserves the requires expression")
+assert(json_decode(contract_view[3]).get("name") == "n",
+       "code_contract preserves the decreases expression")
+assert(is_nil(code_contract(lambda_code)),
+       "code_contract rejects anonymous lambda syntax")
+assert(code_contract(signature_decl)[2] == "" &&
        code_contract(signature_decl)[3] == "",
-       "code_contract preserves function requires and decreases syntax")
+       "code_contract preserves absent clauses as empty syntax")
 fn preserve_expr_code(Code<CodeExpr> value) Code<CodeExpr> { value }
 fn preserve_stmt_code(Code<CodeStmt> value) Code<CodeStmt> { value }
 fn preserve_decl_code(Code<CodeDecl> value) Code<CodeDecl> { value }
@@ -285,15 +292,21 @@ assert(while_init.get("init").get("type") == "var" &&
 def expression = parse_ast("def value = 1 + 2").get(0).get("exprs").get(0)
 def statement = parse_ast("return 1").get(0)
 
-assert(code_kind(declaration) == "declarations" &&
-       code_kind(expression) == "binary" &&
-       code_kind([expression, expression]) == "expressions" &&
-       code_kind([statement, statement]) == "statements" &&
-       code_kind([assignment]) == "statements" &&
-       code_name(assignment) == "" &&
-       code_kind([expression, statement]) == "mixed" &&
-       code_kind([]) == "empty" && code_kind(42) == "invalid",
-       "code_kind classifies syntax nodes and homogeneous or invalid sequences")
+assert(code_kind(declaration) == "declarations",
+       "code_kind classifies declaration sequences")
+assert(code_kind(expression) == "binary",
+       "code_kind reports an expression node type")
+assert(code_kind([expression, expression]) == "expressions",
+       "code_kind classifies homogeneous expression sequences")
+assert(code_kind([statement, statement]) == "statements",
+       "code_kind classifies homogeneous statement sequences")
+assert(code_kind([assignment]) == "statements" &&
+       code_name(assignment) == "",
+       "code_kind classifies assignment statement sequences")
+assert(code_kind([expression, statement]) == "mixed",
+       "code_kind rejects mixed syntax sequences")
+assert(code_kind([]) == "empty" && code_kind(42) == "invalid",
+       "code_kind classifies empty and invalid values")
 assert(code_name(declaration) == "answer" &&
        code_name(declaration.get(0)) == "answer" &&
        code_name(expression) == "" && code_name(two_declarations) == "",

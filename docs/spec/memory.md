@@ -4,6 +4,25 @@
 Compiler and runtime code share these representation rules. Ordinary Nytrix
 programs must use the public APIs instead of depending on internal addresses.
 
+> **Note:** Usually unnecessary unless implementing runtime code or diagnosing
+> a representation boundary.
+
+> **Warning:** Never construct internal headers in applications; use the owning API.
+
+## Contents
+
+- [Runtime layouts and values](#runtime-layout-at-a-glance)
+- [Container slots](#container-slots)
+- [Function and ABI boundaries](#function-and-abi-boundaries)
+
+## Runtime layout at a glance
+
+| Mode | Layout before object body |
+| --- | --- |
+| Default allocator | 32-byte runtime prefix |
+| Tracing GC | 16-byte GC header, then 32-byte runtime prefix |
+| Container fields | Representation depends on the slot; some fields are tagged values and others are raw pointers |
+
 ## Values
 
 A dynamic `NyValue` uses a tagged representation. A small integer `n` is
@@ -46,6 +65,14 @@ The runtime header/prefix layout is internal. Code must allocate and release
 through its owning runtime or library operation rather than constructing a
 header manually.
 
+The native NYIR optimizer can replace a bounded, fixed-size typed-buffer
+allocation with function-local stack storage when it proves that the buffer
+does not escape and every use stays within the payload. The promoted storage is
+zeroed at the original allocation point, including when that point is inside a
+loop. Unknown calls, returns, merged pointers, and unproven offsets prevent
+promotion. This is a conservative optimization, not a source-level lifetime
+guarantee; ordinary values and buffers still follow their selected heap policy.
+
 ## Container slots
 
 Dynamic containers contain both tagged values and raw implementation fields.
@@ -81,6 +108,12 @@ tagged. Entering a dynamic boundary boxes a raw integer; leaving one unboxes it
 only after an integer check. Function lowering applies the corresponding
 conversion at typed/dynamic boundaries, including parameters, returns, and
 loads.
+
+Native raw-allocation entries consume an untagged byte count. A typed integer
+passes unchanged; an integer carried through `any` is checked and decoded
+exactly once. The compiler's standard-library runtime alias and its argument
+conversion must select the same ABI, even when generated core declarations
+retain a legacy link name. This does not rewrite explicit user C bindings.
 
 | Boundary | Value form | Rule |
 | --- | --- | --- |

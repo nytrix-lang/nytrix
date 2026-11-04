@@ -42,4 +42,3 @@ while gen < gens {
 if gens > 0 { write_str(color(str.builder_to_str(art), "magenta")) }
 str.builder_free(art)
 write_str("\n")
-0

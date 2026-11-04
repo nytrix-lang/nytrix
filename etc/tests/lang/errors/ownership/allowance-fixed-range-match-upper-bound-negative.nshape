@@ -3,8 +3,8 @@ shape ownership_allowance_fixed_range_match_upper_bound_negative {
   generator "error"
   features [error ownership allowance fixed-range match upper-bound negative]
   template ny-compile-fail
-  flags "--ownership-strict --nyir-verify"
-  flags "--ownership-strict --nyir-verify"
+  flags "--ownership-strict --nyr-verify"
+  flags "--ownership-strict --nyr-verify"
   expect compile_fail
   expect_message "ownership allowance"
   source ny <<'NY'

@@ -33,13 +33,13 @@ def source = root + "/etc/tests/code/formats/coff64/aggregate-call-probe.ny"
 def compile = run_capture(
    [ny, "--c-frontend=nytrix", "--native-only",
     "--native-backend", "x86_64", "--host-triple", "x86_64-w64-windows-gnu",
-    "--native-abi", "win64", "--nyir-verify", "-no-std", "-emit-only",
+    "--native-abi", "win64", "--nyr-verify", "-no-std", "-emit-only",
     "-o", object, source],
    [], nil, false)
 assert(compile.get("code", 127) == 0 && fs.is_file(object),
        "compile Win64 aggregate probe: " + compile.get("stdout", ""))
 
-def host = root + "/src/code/lang/c/tests/win64-ny-aggregate-host.c"
+def host = root + "/src/code/lang/parse/c/tests/win64-ny-aggregate-host.c"
 def link = run_capture(
    [cc, "-std=c11", "-Wall", "-Wextra", "-Werror", "-I", root,
     "-o", executable, host, object],

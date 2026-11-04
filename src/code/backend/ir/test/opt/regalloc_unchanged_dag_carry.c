@@ -99,19 +99,84 @@ static bool rejects_loop_definition_carry(void) {
   return ok;
 }
 
+static bool rejects_call_crossing_carry(void) {
+  nyr_mach_func_t mach = {0};
+  nyr_mach_regalloc_t alloc = {0};
+  nyr_mach_reg_t value, condition;
+  uint32_t entry, left, right, join;
+  char err[256] = {0};
+  nyr_mach_operand_t callee = {
+      .kind = NYR_MACH_OPERAND_SYMBOL,
+      .as.symbol = "carry_barrier",
+  };
+  bool ok =
+      nyr_mach_alloc_typed_vreg(&mach, NYR_MACH_TYPE_I64, &value) &&
+      nyr_mach_alloc_typed_vreg(&mach, NYR_MACH_TYPE_I64, &condition) &&
+      nyr_mach_begin_block(&mach, 0, &entry) && entry == 0 &&
+      emit(&mach, NYR_MACH_COPY, vreg(value), imm(42),
+           (nyr_mach_operand_t){0}) &&
+      emit(&mach, NYR_MACH_COPY, vreg(condition), imm(1),
+           (nyr_mach_operand_t){0}) &&
+      emit(&mach, NYR_MACH_BR_IF, (nyr_mach_operand_t){0}, vreg(condition),
+           block(2)) &&
+      nyr_mach_begin_block(&mach, 1, &left) && left == 1 &&
+      emit(&mach, NYR_MACH_BR, (nyr_mach_operand_t){0},
+           (nyr_mach_operand_t){0}, block(3)) &&
+      nyr_mach_begin_block(&mach, 2, &right) && right == 2 &&
+      nyr_mach_emit(&mach, (nyr_mach_inst_t){
+                                .opcode = NYR_MACH_CALL,
+                                .src0 = callee,
+                                .effects = NYR_MACH_EFFECT_CALL,
+                            }) &&
+      emit(&mach, NYR_MACH_BR, (nyr_mach_operand_t){0},
+           (nyr_mach_operand_t){0}, block(3)) &&
+      nyr_mach_begin_block(&mach, 3, &join) && join == 3 &&
+      emit(&mach, NYR_MACH_RET, (nyr_mach_operand_t){0}, vreg(value),
+           (nyr_mach_operand_t){0}) &&
+      nyr_mach_verify(&mach, 0, err, sizeof(err)) &&
+      nyr_mach_regalloc_build_callee_saved_gpr(&mach, 5, &alloc);
+  const nyr_mach_live_segment_t *entry_value =
+      ok ? nyr_mach_regalloc_segment_at(&alloc, value,
+                                        mach.blocks[entry].first_inst)
+         : NULL;
+  const nyr_mach_live_segment_t *left_value =
+      ok ? nyr_mach_regalloc_segment_at(&alloc, value,
+                                        mach.blocks[left].first_inst)
+         : NULL;
+  const nyr_mach_live_segment_t *right_value =
+      ok ? nyr_mach_regalloc_segment_at(&alloc, value,
+                                        mach.blocks[right].first_inst)
+         : NULL;
+  const nyr_mach_live_segment_t *join_value =
+      ok ? nyr_mach_regalloc_segment_at(&alloc, value,
+                                        mach.blocks[join].first_inst)
+         : NULL;
+  ok = ok && entry_value && left_value && right_value && join_value &&
+       !left_value->acyclic_carried && !right_value->acyclic_carried &&
+       !join_value->acyclic_carried;
+  if (!ok)
+    fprintf(stderr,
+            "[regalloc-unchanged-dag-carry] call-crossing value was carried: "
+            "left=%d right=%d join=%d error=%s\n",
+            left_value ? left_value->acyclic_carried : -1,
+            right_value ? right_value->acyclic_carried : -1,
+            join_value ? join_value->acyclic_carried : -1,
+            err[0] ? err : "call barrier exclusion failed");
+  else
+    puts("[regalloc-unchanged-dag-carry] call-crossing value stays home-backed");
+  nyr_mach_regalloc_free(&alloc);
+  nyr_mach_func_free(&mach);
+  return ok;
+}
+
 int main(void) {
   nyr_mach_func_t mach = {0};
   nyr_mach_regalloc_t alloc = {0};
   nyr_mach_reg_t value, condition, one, two, left_result, right_result;
   uint32_t entry, left, right, join;
   char err[256] = {0};
-  const char *prior_env = getenv("NYTRIX_GPR_DAG_CARRY");
-  char *saved_env = prior_env ? strdup(prior_env) : NULL;
-  bool had_prior_env = prior_env != NULL;
 
   bool ok =
-      (!had_prior_env || saved_env) &&
-      nyr_opt_setenv("NYTRIX_GPR_DAG_CARRY", "1") == 0 &&
       nyr_mach_alloc_typed_vreg(&mach, NYR_MACH_TYPE_I64, &value) &&
       nyr_mach_alloc_typed_vreg(&mach, NYR_MACH_TYPE_I64, &condition) &&
       nyr_mach_alloc_typed_vreg(&mach, NYR_MACH_TYPE_I64, &one) &&
@@ -188,13 +253,9 @@ int main(void) {
             err[0] ? err : "cross-block carry oracle failed");
   else
     puts("[regalloc-unchanged-dag-carry] diamond stays in one register");
-  ok = ok && rejects_loop_definition_carry();
+  ok = ok && rejects_loop_definition_carry() &&
+       rejects_call_crossing_carry();
 
-  if (had_prior_env)
-    nyr_opt_setenv("NYTRIX_GPR_DAG_CARRY", saved_env);
-  else
-    nyr_opt_unsetenv("NYTRIX_GPR_DAG_CARRY");
-  free(saved_env);
   nyr_mach_regalloc_free(&alloc);
   nyr_mach_func_free(&mach);
   return ok ? 0 : 1;

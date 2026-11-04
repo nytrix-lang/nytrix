@@ -250,8 +250,7 @@ static bool ny_should_use_aot_cache(const ny_options *opt) {
     return false;
   if (opt->dump_on_error || opt->dump_diagnose)
     return false;
-  if (opt->trace_exec || opt->dump_docs || opt->dump_funcs ||
-      opt->dump_symbols || opt->dump_stats || opt->emit_ir_pre_path ||
+  if (opt->trace_exec || opt->dump_funcs || opt->emit_ir_pre_path ||
       opt->emit_asm_path || opt->callgraph || opt->native_tier_report ||
       opt->native_result_oracle || opt->native_dump_ir || opt->nyr_run ||
       opt->nyr_metadata_report || opt->emit_report_path ||
@@ -263,8 +262,7 @@ static bool ny_should_use_aot_cache(const ny_options *opt) {
   if (!ny_env_enabled_default_on("NYTRIX_AOT_CACHE"))
     return false;
   if (opt->dump_ast || opt->expand || opt->dump_llvm || opt->dump_tokens ||
-      opt->dump_docs || opt->dump_funcs || opt->dump_symbols ||
-      opt->dump_stats || opt->emit_ir_path || opt->emit_asm_path)
+      opt->dump_funcs || opt->emit_ir_path || opt->emit_asm_path)
     return false;
   return true;
 }
@@ -286,8 +284,7 @@ static bool ny_should_use_jit_cache(const ny_options *opt) {
     return false;
   if (opt->dump_on_error || opt->dump_diagnose)
     return false;
-  if (opt->trace_exec || opt->dump_docs || opt->dump_funcs ||
-      opt->dump_symbols || opt->dump_stats || opt->emit_ir_pre_path ||
+  if (opt->trace_exec || opt->dump_funcs || opt->emit_ir_pre_path ||
       opt->emit_asm_path || opt->callgraph || opt->native_tier_report ||
       opt->native_result_oracle || opt->native_dump_ir || opt->nyr_run ||
       opt->nyr_metadata_report || opt->emit_report_path ||
@@ -364,21 +361,21 @@ static time_t ny_runtime_latest_mtime(const char *root) {
   if (!root || !*root)
     return 0;
   static const char *const deps[] = {
-      "src/code/lang/runtime/init.c",
-      "src/code/lang/runtime/ast.c",
-      "src/code/lang/runtime/bigint.c",
-      "src/code/lang/runtime/core.c",
-      "src/code/lang/runtime/ffi.c",
-      "src/code/lang/runtime/ffigates.c",
-      "src/code/lang/runtime/gc.c",
-      "src/code/lang/runtime/math.c",
-      "src/code/lang/runtime/memory.c",
-      "src/code/lang/runtime/os.c",
-      "src/code/lang/runtime/simmd.c",
-      "src/code/lang/runtime/string.c",
-      "src/code/lang/runtime/shared.h",
-      "src/code/lang/runtime/runtime.h",
-      "src/code/lang/runtime/defs.h",
+      "src/code/backend/runtime/init.c",
+      "src/code/backend/runtime/ast.c",
+      "src/code/backend/runtime/bigint.c",
+      "src/code/backend/runtime/core.c",
+      "src/code/backend/runtime/ffi.c",
+      "src/code/backend/runtime/ffigates.c",
+      "src/code/backend/runtime/gc.c",
+      "src/code/backend/runtime/math.c",
+      "src/code/backend/runtime/memory.c",
+      "src/code/backend/runtime/os.c",
+      "src/code/backend/runtime/simmd.c",
+      "src/code/backend/runtime/string.c",
+      "src/code/backend/runtime/shared.h",
+      "src/code/backend/runtime/runtime.h",
+      "src/code/backend/runtime/defs.h",
       "src/code/lang/parse/ast.h",
       "src/code/lang/parse/json.h",
       "src/code/lang/parse/parser.h",
@@ -598,7 +595,7 @@ static int ny_write_file_atomic(const char *path, const char *content,
     return -1;
   char tmp[4096];
 #ifndef _WIN32
-  snprintf(tmp, sizeof(tmp), "%s.XXXXXX", path);
+  snprintf(tmp, sizeof(tmp), "%s.tmp.%ld.XXXXXX", path, (long)getpid());
   int fd = mkstemp(tmp);
   if (fd < 0)
     return -1;
@@ -616,7 +613,8 @@ static int ny_write_file_atomic(const char *path, const char *content,
     if (rand_s(&r) != 0) {
       r = (unsigned int)rand();
     }
-    snprintf(tmp, sizeof(tmp), "%s.tmp.%u.%llu", path, r,
+    snprintf(tmp, sizeof(tmp), "%s.tmp.%lu.%u.%llu", path,
+             (unsigned long)GetCurrentProcessId(), r,
              (unsigned long long)ny_ticks_now());
     fd = _open(tmp, _O_CREAT | _O_EXCL | _O_WRONLY | _O_BINARY,
                _S_IREAD | _S_IWRITE);
@@ -644,10 +642,7 @@ static int ny_write_file_atomic(const char *path, const char *content,
     (void)unlink(tmp);
     return -1;
   }
-#ifdef _WIN32
-  (void)unlink(path);
-#endif
-  if (rename(tmp, path) != 0) {
+  if (!ny_cache_publish_file(tmp, path)) {
     (void)unlink(tmp);
     return -1;
   }
@@ -677,8 +672,17 @@ static uint64_t ny_build_std_cache_path(const ny_options *opt,
   if (!out || out_len == 0)
     return 0;
   out[0] = '\0';
+  /*
+   * The same generated bundle can arrive through an executable-relative
+   * absolute path or the working-directory fallback. Normalize before both
+   * keying and deciding whether generated-file metadata is relevant.
+   */
+  char canonical_prebuilt[PATH_MAX];
+  if (prebuilt_path && *prebuilt_path &&
+      ny_realpath(prebuilt_path, canonical_prebuilt))
+    prebuilt_path = canonical_prebuilt;
   uint64_t h = NY_FNV1A64_OFFSET_BASIS;
-  h = ny_fnv1a64_cstr("std-cache-v14", h);
+  h = ny_fnv1a64_cstr("std-cache-v16", h);
   h = ny_hash64_u64(h, (uint64_t)std_mode);
   if (opt) {
     const unsigned opt_fields[] = {
@@ -722,9 +726,19 @@ static uint64_t ny_build_std_cache_path(const ny_options *opt,
     h = ny_hash_envv(h, envs, sizeof(envs) / sizeof(envs[0]));
   }
   h = ny_fnv1a64_cstr(ny_src_root(), h);
-  h = ny_fnv1a64_cstr(opt ? opt->argv0 : NULL, h);
-  h = ny_hash64_u64(h,
-                    (uint64_t)ny_file_mtime_or_zero(opt ? opt->argv0 : NULL));
+  /*
+   * A frozen test compiler has a PID-specific name but retains the executable
+   * bytes and timestamps. Bind to the producing build, not its routing name.
+   */
+  const char *executable = ny_get_executable_path();
+  if (!executable || !*executable)
+    executable = opt ? opt->argv0 : NULL;
+  struct stat compiler;
+  if (executable && stat(executable, &compiler) == 0) {
+    h = ny_hash64_u64(h, (uint64_t)compiler.st_mtime);
+    h = ny_hash64_u64(h, ny_stat_mtime_nsec(&compiler));
+    h = ny_hash64_u64(h, (uint64_t)compiler.st_size);
+  }
 
   /*
    * This cache is used only when the source has no local imports. Its
@@ -1051,6 +1065,7 @@ typedef struct {
   char *name;
   char *bc_path;
   char *cache_path;
+  intptr_t cache_lock;
   bool persistent;
 #ifndef _WIN32
   pid_t pid;
@@ -1193,8 +1208,8 @@ static void ny_module_mark_dependency_closure(const program_t *prog,
   }
 }
 
-static void ny_module_list_fingerprint(const program_t *prog,
-                                       ny_module_list *list) {
+static void __attribute__((unused))
+ny_module_list_fingerprint(const program_t *prog, ny_module_list *list) {
   if (!prog || !list)
     return;
   uint64_t *own = calloc(list->len ? list->len : 1, sizeof(uint64_t));
@@ -1278,6 +1293,8 @@ static NY_UNUSED_FUNC bool ny_parallel_modules_enabled(const ny_options *opt) {
 static void ny_module_job_free(ny_module_job *job) {
   if (!job)
     return;
+  ny_cache_read_unlock(job->cache_lock);
+  job->cache_lock = 0;
   free(job->name);
   free(job->bc_path);
   free(job->cache_path);
@@ -1463,15 +1480,18 @@ static bool ny_spawn_module_job(const ny_options *opt, const char *module_name,
   if (!ny_module_cache_path(opt, module_name, source_fingerprint, cache_path,
                             sizeof(cache_path)))
     return false;
-  if (ny_access(cache_path, R_OK) == 0) {
+  intptr_t cache_lock = ny_cache_read_lock(cache_path);
+  if (cache_lock && ny_access(cache_path, R_OK) == 0) {
     job->name = ny_strdup(module_name);
     job->bc_path = ny_strdup(cache_path);
+    job->cache_lock = cache_lock;
     job->persistent = true;
     job->exit_code = 0;
     if (ny_env_enabled("NYTRIX_TRACE_CACHE"))
       fprintf(stderr, "module cache hit: %s\n", module_name);
     return job->name && job->bc_path;
   }
+  ny_cache_read_unlock(cache_lock);
   char *san = ny_sanitize_modname(module_name);
   if (!san)
     return false;
@@ -1483,8 +1503,8 @@ static bool ny_spawn_module_job(const ny_options *opt, const char *module_name,
    * atomic even when the system temp directory and the cache use different
    * filesystems.
    */
-  snprintf(bc_path, sizeof(bc_path), "%s.tmp.%s.%ld.%llu", cache_path, san,
-           (long)getpid(), (unsigned long long)seq);
+  snprintf(bc_path, sizeof(bc_path), "%s.tmp.%ld.%llu.%s", cache_path,
+           (long)getpid(), (unsigned long long)seq, san);
   free(san);
   char emit_bc_arg[1100];
   char emit_mod_arg[1100];
@@ -1593,7 +1613,7 @@ static bool ny_spawn_module_job(const ny_options *opt, const char *module_name,
 static bool ny_module_job_publish_cache(ny_module_job *job) {
   if (!job || job->persistent || !job->bc_path || !job->cache_path)
     return job && job->persistent;
-  if (rename(job->bc_path, job->cache_path) != 0) {
+  if (!ny_cache_publish_file(job->bc_path, job->cache_path)) {
     if (ny_env_enabled("NYTRIX_TRACE_CACHE"))
       fprintf(stderr, "module cache publish failed: %s: %s\n",
               job->name ? job->name : "<module>", strerror(errno));

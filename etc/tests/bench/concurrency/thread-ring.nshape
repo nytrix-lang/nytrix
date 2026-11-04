@@ -56,24 +56,33 @@ fn ring_worker(ptr ctx) int {
 
 def slots = i64buf_new(N)
 def mus = i64buf_new(N)
+def handles = i64buf_new(N)
+def contexts = malloc(N * 24)
 mut i = 0
 while i < N {
    ;; __mutex_new returns a tagged handle; untag to get raw pointer for i64buf storage.
    store64_i(mus, __untag(__mutex_new()), i * 8)
    i += 1
 }
-def int t0 = ticks()
 store64(slots, HOPS, 0)
-def handles = i64buf_new(N)
 i = 0
 while i < N {
-   def ctx = malloc(24)
+   def ctx = contexts + i * 24
    store64(ctx, slots, 0)
    store64(ctx, mus, 8)
    store64(ctx, i, 16)
+   i += 1
+}
+def int launch0 = ticks()
+i = 0
+while i < N {
+   def ctx = contexts + i * 24
    store64(handles, thread_spawn(ring_worker, ctx), i * 8)
    i += 1
 }
+def int launch1 = ticks()
+def int t0 = ticks()
+store64(slots, HOPS, 0)
 i = 0
 while i < N {
    __thread_join(load64(handles, i * 8))
@@ -81,6 +90,7 @@ while i < N {
 }
 def int t1 = ticks()
 print("checksum=", HOPS)
+print("launch_ns=", launch1 - launch0)
 print("elapsed_ns=", t1 - t0)
 NY
   source c <<'C'
@@ -100,44 +110,56 @@ static int64_t now_ns(void) {
 #define HOPS 1000
 
 static pthread_mutex_t mu[N];
-static int slots[N];
+static int64_t slots[N];
+struct ring_context {
+  int64_t *slots;
+  pthread_mutex_t *mus;
+  int64_t id;
+};
 
 static void *worker(void *arg) {
-  int id = (int)(long)arg;
+  struct ring_context *ctx = (struct ring_context *)arg;
+  int id = (int)ctx->id;
+  int64_t *slots = ctx->slots;
+  pthread_mutex_t *mus = ctx->mus;
   int next = (id + 1) % N;
   long hops = 0;
   for (;;) {
-    pthread_mutex_lock(&mu[id]);
-    int t = slots[id];
+    pthread_mutex_lock(&mus[id]);
+    int64_t t = slots[id];
     if (t == 0) {
-      pthread_mutex_unlock(&mu[id]);
+      pthread_mutex_unlock(&mus[id]);
       continue;
     }
     slots[id] = 0;
-    pthread_mutex_unlock(&mu[id]);
+    pthread_mutex_unlock(&mus[id]);
 
-    pthread_mutex_lock(&mu[next]);
+    pthread_mutex_lock(&mus[next]);
     if (t == -1) {
       slots[next] = -1;
-      pthread_mutex_unlock(&mu[next]);
+      pthread_mutex_unlock(&mus[next]);
       return (void *)(uintptr_t)hops;
     }
     hops++;
     slots[next] = (t == 1) ? -1 : t - 1;
-    pthread_mutex_unlock(&mu[next]);
+    pthread_mutex_unlock(&mus[next]);
   }
 }
 
 int main(void) {
   pthread_t th[N];
+  struct ring_context ctx[N];
   for (int i = 0; i < N; i++) {
     pthread_mutex_init(&mu[i], NULL);
     slots[i] = 0;
+    ctx[i] = (struct ring_context){slots, mu, i};
   }
+  int64_t launch0 = now_ns();
+  for (int i = 0; i < N; i++)
+    pthread_create(&th[i], NULL, worker, &ctx[i]);
+  int64_t launch1 = now_ns();
   int64_t t0 = now_ns();
   slots[0] = HOPS;
-  for (int i = 0; i < N; i++)
-    pthread_create(&th[i], NULL, worker, (void *)(long)i);
   long sum = 0;
   for (int i = 0; i < N; i++) {
     void *r;
@@ -146,6 +168,7 @@ int main(void) {
   }
   int64_t t1 = now_ns();
   printf("checksum=%d\n", HOPS);
+  printf("launch_ns=%lld\n", (long long)(launch1 - launch0));
   printf("elapsed_ns=%lld\n", (long long)(t1 - t0));
   return 0;
 }

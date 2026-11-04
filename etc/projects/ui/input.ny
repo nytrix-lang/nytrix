@@ -3,6 +3,7 @@
 ;; Keywords: ui input keyboard gamepad controller example
 ;; Unified input visualizer. Tab switches keyboard/gamepad; active inputs can auto-follow.
 use core
+use core.common as common
 use core.os (exit)
 use core.os.fixture as fixture
 use core.math (max)
@@ -92,14 +93,14 @@ fn cached_pad_info(any pad_state, list rows, int jid, str sig) dict {
 while !render.window_should_close(win) && fixture.tick_ui(fx) {
    if fixture.quit_key(fixture.next_ui_key(fx)) { break }
    if !render.begin_frame_clear(widgets.C_BG) { continue }
-   if mock_backend {
+   if mock_backend && !common.env_truthy("NYTRIX_UI_REPLAY") {
       render.draw_text(font_title, "Nytrix Input", 24.0, 24.0, widgets.C_TEXT)
       render.end_frame()
       continue
    }
    def dt = render.get_delta_time()
    fps_state = ui_runtime.fps_tick(fps_state, dt)
-   def fps = ui_runtime.fps_current(fps_state, dt)
+   def fps = common.env_truthy("NYTRIX_UI_REPLAY") ? 0 : ui_runtime.fps_current(fps_state, dt)
    def fb = render.framebuffer_size_f64(START_W, START_H)
    def sw = max(1.0, float(fb.get(0, START_W)))
    def sh = max(1.0, float(fb.get(1, START_H)))
@@ -136,7 +137,7 @@ while !render.window_should_close(win) && fixture.tick_ui(fx) {
    ui_dump.auto_dump_pre_frame(auto_dump_done, frame_count, auto_dump_delay)
    render.end_frame()
    frame_count += 1
-   if frame_count >= 4 { gamepad.refresh(false) }
+   if frame_count >= 4 && !common.env_truthy("NYTRIX_UI_REPLAY") { gamepad.refresh(false) }
    auto_dump_done = ui_dump.auto_dump_post_frame(win, auto_dump_done, frame_count, auto_dump_delay, "build/cache/fb/ui/input.png")
    ui_runtime.close_on_timeout(win, int(fps_state.get("start", 0)), timeout_limit)
 }

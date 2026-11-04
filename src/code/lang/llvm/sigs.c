@@ -1,6 +1,6 @@
 #include "base/loader.h"
 #include "base/util.h"
-#include "code/lang/c/clang.h"
+#include "code/lang/parse/c/clang.h"
 #include "code/lang/code.h"
 #include "code/lang/parse/proof.h"
 #include "code/lang/priv.h"
@@ -124,6 +124,8 @@ void collect_sigs(codegen_t *cg, stmt_t *s) {
     sig.link_name = s->as.fn.link_name ? ny_strdup(s->as.fn.link_name) : NULL;
     sig.return_type =
         s->as.fn.return_type ? ny_strdup(s->as.fn.return_type) : NULL;
+    sig.dependent_return_param =
+        s->as.fn.dependent_return_param ? ny_strdup(s->as.fn.dependent_return_param) : NULL;
     sig.returns_owned = s->as.fn.attr_returns_owned;
     ny_fun_sig_copy_contracts(&sig, &s->as.fn);
     {

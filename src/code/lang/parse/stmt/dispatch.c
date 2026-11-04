@@ -454,6 +454,20 @@ static stmt_t *p_parse_stmt_raw(parser_t *p) {
     if (id_len == 6 && strncmp(id, "refine", 6) == 0) {
       return parse_refine_stmt(p);
     }
+    if (id_len == 4 && strncmp(id, "type", 4) == 0 && next.kind == NY_T_IDENT) {
+      /* `type Name<T> = ...` / `type Elem(list<T>) = T` would declare a
+       * type-level function. Reject the whole line with one diagnostic. */
+      token_t first = p->cur;
+      parser_error(p, first,
+                   "type-level definitions ('type Name ... = ...') are not "
+                   "supported",
+                   "name a refinement with 'refine Name = Base where (v) "
+                   "{ ... }' or use the concrete type");
+      int line = first.line;
+      while (p->cur.kind != NY_T_EOF && p->cur.line == line)
+        parser_advance(p);
+      return NULL;
+    }
     if (id_len == 5 && strncmp(id, "trait", 5) == 0) {
       return parse_trait(p);
     }

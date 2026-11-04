@@ -160,7 +160,9 @@ fn cursor_scope(any font_sm, str title, str idle_label, str down_label, f64 x, f
 }
 
 fn _draw_flag_cell(any font_sm, f64 x, f64 y, f64 w, str label, bool active) int {
-   def fill = active ? render.color_alpha(widgets.C_ACCENT, 0.55) : render.color_alpha(widgets.C_PANEL_ALT, 0.70)
+   ;; Keep compact labels legible on renderers where translucent fills blend
+   ;; inconsistently with the monitor map beneath them.
+   def fill = active ? widgets.C_KEY_DOWN : widgets.C_PANEL_ALT
    def border = active ? widgets.C_ACCENT_HI : widgets.C_LINE
    render.draw_rect(x, y, w, 24.0, fill)
    render.draw_rect_lines(x, y, w, 24.0, border, active ? 2.0 : 1.0)
@@ -211,7 +213,7 @@ fn draw_dpi_info(any font_sm, f64 x, f64 y, f64 w, f64 h, list ws, list fb, list
 
 fn draw_monitor_info(any font_body, any font_sm, any row, f64 x, f64 y, f64 w, f64 h, bool active, f64 scale) int {
    "Draws one monitor tile in the desktop overview."
-   def fill = active ? render.color_alpha(widgets.C_ACCENT, 0.24) : widgets.C_PANEL
+   def fill = active ? widgets.C_KEY_DOWN : widgets.C_PANEL
    def border = active ? widgets.C_ACCENT : widgets.C_LINE
    render.draw_rect(x, y, w, h, fill)
    render.draw_rect_lines(x, y, w, h, border, active ? 4.0 : 2.0)

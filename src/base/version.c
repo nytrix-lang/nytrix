@@ -34,6 +34,8 @@
 #define NYTRIX_STD_FILES 0
 #endif
 
+const char *ny_version_string(void) { return NYTRIX_VERSION; }
+
 const char *ny_version_id(void) {
   static char id[1024];
   char std_short[13];

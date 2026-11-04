@@ -1,0 +1,73 @@
+/*
+ * Keep the internal x86-64 decoder inverse to the VEX move forms emitted by
+ * the vector encoder, including high vector-register extensions.
+ */
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+
+extern const char *nyr_internal_x64_disasm(const unsigned char *bytes,
+                                           int64_t length, int64_t address);
+
+int main(void) {
+  static const unsigned char encoded[] = {
+      0xc4, 0xe1, 0x7e, 0x6f, 0x85, 0,    0, 0, 0, /* vmovdqu ymm0, [rbp] */
+      0xc4, 0x61, 0x7e, 0x7f, 0x85, 0,    0, 0, 0, /* vmovdqu [rbp], ymm8 */
+      0xc4, 0x61, 0x7d, 0x6f, 0xc1,                /* vmovdqa ymm8, ymm1 */
+      0xc4, 0xe1, 0x7d, 0xd4, 0xc1,                /* vpaddq ymm0, ymm0, ymm1 */
+      0xc4, 0xe2, 0x7d, 0x19, 0x85, 0,    0, 0, 0, /* vbroadcastsd ymm0,[rbp] */
+      0xc4, 0xe2, 0xf5, 0xa8, 0xc2,       /* vfmadd213pd ymm0,ymm1,ymm2 */
+      0xc4, 0xe3, 0x7d, 0x19, 0xc1, 0x01, /* vextractf128 xmm1,ymm0,1 */
+      0xc4, 0xe1, 0x79, 0xd4, 0xc1,       /* vpaddq xmm0, xmm0, xmm1 */
+      0xc4, 0xe2, 0xf1, 0xa8, 0xc2,       /* vfmadd213pd xmm0,xmm1,xmm2 */
+      0xc4, 0xe1, 0x75, 0x58, 0xc2,       /* vaddpd ymm0,ymm1,ymm2 */
+      0xc4, 0xe1, 0x72, 0x58, 0xc2,       /* vaddss xmm0,xmm1,xmm2 */
+      0xc4, 0xe2, 0xfd, 0x59, 0x85, 0,    0, 0, 0, /* vpbroadcastq */
+  };
+  const char *listing =
+      nyr_internal_x64_disasm(encoded, (int64_t)sizeof(encoded), 0x1000);
+  if (!strstr(listing, "4096\tvmovdqu\tymm0, ymmword ptr [rbp+0]\t9\n") ||
+      !strstr(listing, "4105\tvmovdqu\tymmword ptr [rbp+0], ymm8\t9\n") ||
+      !strstr(listing, "4114\tvmovdqa\tymm8, ymm1\t5\n") ||
+      !strstr(listing, "4119\tvpaddq\tymm0, ymm0, ymm1\t5\n") ||
+      !strstr(listing, "4124\tvbroadcastsd\tymm0, qword ptr [rbp+0]\t9\n") ||
+      !strstr(listing, "4133\tvfmadd213pd\tymm0, ymm1, ymm2\t5\n") ||
+      !strstr(listing, "4138\tvextractf128\txmm1, ymm0, 1\t6\n") ||
+      !strstr(listing, "4144\tvpaddq\txmm0, xmm0, xmm1\t5\n") ||
+      !strstr(listing, "4149\tvfmadd213pd\txmm0, xmm1, xmm2\t5\n") ||
+      !strstr(listing, "4154\tvaddpd\tymm0, ymm1, ymm2\t5\n") ||
+      !strstr(listing, "4159\tvaddss\txmm0, xmm1, xmm2\t5\n") ||
+      !strstr(listing, "4164\tvpbroadcastq\tymm0, qword ptr [rbp+0]\t9\n") ||
+      strstr(listing, "\tunsupported\t")) {
+    fprintf(stderr, "[x64-disasm-vex] encoded VEX listing mismatch:\n%s",
+            listing);
+    return 1;
+  }
+  static const unsigned char unsupported[] = {0xc4, 0xe1, 0x7d, 0x77, 0xc0};
+  listing = nyr_internal_x64_disasm(unsupported, (int64_t)sizeof(unsupported),
+                                    0x2000);
+  if (!strstr(listing, "\tunsupported\t")) {
+    fprintf(stderr,
+            "[x64-disasm-vex] unsupported VEX encoding was not rejected:\n%s",
+            listing);
+    return 1;
+  }
+  static const unsigned char vex2_forms[] = {
+      0xc5, 0xfd, 0x10, 0x45, 0xf8, /* vmovupd ymm0, [rbp-8] */
+      0xc5, 0xfd, 0x11, 0x45, 0xf8, /* vmovupd [rbp-8], ymm0 */
+      0xc5, 0xf9, 0x28, 0xc1,       /* vmovapd xmm0, xmm1 */
+      0xc5, 0xf5, 0x58, 0xc2,       /* vaddpd ymm0, ymm1, ymm2 */
+  };
+  listing = nyr_internal_x64_disasm(vex2_forms, sizeof(vex2_forms), 0x1800);
+  if (!strstr(listing, "6144\tvmovupd\tymm0, ymmword ptr [rbp-8]\t5\n") ||
+      !strstr(listing, "6149\tvmovupd\tymmword ptr [rbp-8], ymm0\t5\n") ||
+      !strstr(listing, "6154\tvmovapd\txmm0, xmm1\t4\n") ||
+      !strstr(listing, "6158\tvaddpd\tymm0, ymm1, ymm2\t4\n") ||
+      strstr(listing, "\tunsupported\t")) {
+    fprintf(stderr, "[x64-disasm-vex] two-byte VEX decode mismatch:\n%s",
+            listing);
+    return 1;
+  }
+  puts("[x64-disasm-vex] emitted VEX forms decode to hand-checked listings");
+  return 0;
+}

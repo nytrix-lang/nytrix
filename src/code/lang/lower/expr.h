@@ -114,9 +114,8 @@ static const stmt_t *nyr_namespace_function_value(nyr_builder_impl_t *b,
   const char *module_alias =
       bound_value ? NULL : nyr_resolve_use_alias(b, root->as.ident.name);
   if (!module_alias && !bound_value) {
-    nyr_builder_impl_t probe = *b;
-    probe.source_file = NULL;
-    module_alias = nyr_resolve_use_alias(&probe, root->as.ident.name);
+    module_alias = nyr_resolve_use_alias_with_source_file(
+        b, root->as.ident.name, NULL, true);
   }
   bool module_namespace =
       (!bound_value && module_alias) ||
@@ -223,7 +222,16 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
   switch (e->kind) {
   case NY_E_LITERAL:
     if (e->as.literal.kind == NY_LIT_BOOL)
-      return nyr_emit_const(b, e->as.literal.as.b ? 1 : 0);
+      /* This producer is raw 0/1 even in imported functions with unresolved
+       * semantic stamps. Ternary joins use this fact to box literal arms
+       * when the other arm returns a tagged language boolean. */
+      return nyr_ir_emit(&b->nyir,
+                         (nyr_inst_t){.op = NYIR_CONST_I64,
+                                      .dst = -1,
+                                      .a = -1,
+                                      .b = -1,
+                                      .imm = e->as.literal.as.b ? 1 : 0,
+                                      .scalar_class = NYIR_SCALAR_I64_RAW});
     if (e->as.literal.kind == NY_LIT_FLOAT)
       return e->as.literal.hint == NY_LIT_HINT_F32
                  ? nyr_emit_const_f32(b, e->as.literal.as.f)
@@ -241,11 +249,11 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
         return nyr_fail(b, "native NYIR lower: string table full or OOM"), -1;
       }
       int addr = nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_ADDR_SYMBOL,
-                                                   .dst = -1,
-                                                   .a = -1,
-                                                   .b = -1,
-                                                   .imm = 0,
-                                                   .symbol = sym});
+                                                    .dst = -1,
+                                                    .a = -1,
+                                                    .b = -1,
+                                                    .imm = 0,
+                                                    .symbol = sym});
       if (addr < 0) {
         return nyr_fail(b, NY_NATIVE_ALLOC_FAIL), -1;
       }
@@ -288,11 +296,11 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
         const char *sym = nyr_strtab_intern(digits, digits_len, NULL, 0);
         int addr =
             sym ? nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_ADDR_SYMBOL,
-                                                    .dst = -1,
-                                                    .a = -1,
-                                                    .b = -1,
-                                                    .imm = 0,
-                                                    .symbol = sym})
+                                                     .dst = -1,
+                                                     .a = -1,
+                                                     .b = -1,
+                                                     .imm = 0,
+                                                     .symbol = sym})
                 : -1;
         if (addr < 0) {
           return nyr_fail(b, NY_NATIVE_ALLOC_FAIL), -1;
@@ -304,11 +312,11 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
         const char *sym = nyr_strtab_intern(digits, digits_len, NULL, 0);
         int addr =
             sym ? nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_ADDR_SYMBOL,
-                                                    .dst = -1,
-                                                    .a = -1,
-                                                    .b = -1,
-                                                    .imm = 0,
-                                                    .symbol = sym})
+                                                     .dst = -1,
+                                                     .a = -1,
+                                                     .b = -1,
+                                                     .imm = 0,
+                                                     .symbol = sym})
                 : -1;
         if (addr < 0) {
           return nyr_fail(b, NY_NATIVE_ALLOC_FAIL), -1;
@@ -358,10 +366,10 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
     if (!sym)
       return -1;
     int addr = nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_ADDR_SYMBOL,
-                                                 .dst = -1,
-                                                 .a = -1,
-                                                 .b = -1,
-                                                 .symbol = sym});
+                                                  .dst = -1,
+                                                  .a = -1,
+                                                  .b = -1,
+                                                  .symbol = sym});
     int length = nyr_emit_const(b, (int64_t)len);
     int tag = nyr_emit_const(b, TAG_STR_CONST);
     if (addr < 0 || length < 0 || tag < 0)
@@ -409,11 +417,11 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
         const char *global_name = nyr_global_symbol(b, e->as.ident.name);
         if (global_name) {
           int addr = nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_ADDR_SYMBOL,
-                                                       .dst = -1,
-                                                       .a = -1,
-                                                       .b = -1,
-                                                       .imm = 0,
-                                                       .symbol = global_name});
+                                                        .dst = -1,
+                                                        .a = -1,
+                                                        .b = -1,
+                                                        .imm = 0,
+                                                        .symbol = global_name});
           if (addr < 0)
             return -1;
           int value = nyr_load_global_scalar(b, addr, global_name, e);
@@ -434,11 +442,11 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
           if (global_name) {
             int addr =
                 nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_ADDR_SYMBOL,
-                                                  .dst = -1,
-                                                  .a = -1,
-                                                  .b = -1,
-                                                  .imm = 0,
-                                                  .symbol = global_name});
+                                                   .dst = -1,
+                                                   .a = -1,
+                                                   .b = -1,
+                                                   .imm = 0,
+                                                   .symbol = global_name});
             if (addr < 0)
               return -1;
             int value = nyr_load_global_scalar(b, addr, global_name, e);
@@ -472,11 +480,11 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
                                     : NULL;
       if (global_name) {
         int addr = nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_ADDR_SYMBOL,
-                                                     .dst = -1,
-                                                     .a = -1,
-                                                     .b = -1,
-                                                     .imm = 0,
-                                                     .symbol = global_name});
+                                                      .dst = -1,
+                                                      .a = -1,
+                                                      .b = -1,
+                                                      .imm = 0,
+                                                      .symbol = global_name});
         if (addr < 0)
           return -1;
         int value = nyr_load_global_scalar(b, addr, global_name, e);
@@ -501,11 +509,11 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
         return nyr_fail(b, "native NYIR lower: function symbol too long"), -1;
       }
       int addr = nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_ADDR_SYMBOL,
-                                                   .dst = -1,
-                                                   .a = -1,
-                                                   .b = -1,
-                                                   .imm = 0,
-                                                   .symbol = function_symbol});
+                                                    .dst = -1,
+                                                    .a = -1,
+                                                    .b = -1,
+                                                    .imm = 0,
+                                                    .symbol = function_symbol});
       if (addr < 0) {
         return nyr_fail(b, NY_NATIVE_ALLOC_FAIL), -1;
       }
@@ -532,11 +540,11 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
         goto skip_exact_global;
       const char *global_name = nyr_globaltab_name(e->as.ident.name);
       int addr = nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_ADDR_SYMBOL,
-                                                   .dst = -1,
-                                                   .a = -1,
-                                                   .b = -1,
-                                                   .imm = 0,
-                                                   .symbol = global_name});
+                                                    .dst = -1,
+                                                    .a = -1,
+                                                    .b = -1,
+                                                    .imm = 0,
+                                                    .symbol = global_name});
       if (addr < 0)
         return -1;
       int value = nyr_load_global_scalar(b, addr, global_name, e);
@@ -549,11 +557,11 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
       const char *global_name = nyr_global_symbol(b, e->as.ident.name);
       if (global_name) {
         int addr = nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_ADDR_SYMBOL,
-                                                     .dst = -1,
-                                                     .a = -1,
-                                                     .b = -1,
-                                                     .imm = 0,
-                                                     .symbol = global_name});
+                                                      .dst = -1,
+                                                      .a = -1,
+                                                      .b = -1,
+                                                      .imm = 0,
+                                                      .symbol = global_name});
         if (addr < 0)
           return -1;
         int value = nyr_load_global_scalar(b, addr, global_name, e);
@@ -565,11 +573,11 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
       const char *global_name = nyr_globaltab_name_tail(e->as.ident.name);
       if (global_name) {
         int addr = nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_ADDR_SYMBOL,
-                                                     .dst = -1,
-                                                     .a = -1,
-                                                     .b = -1,
-                                                     .imm = 0,
-                                                     .symbol = global_name});
+                                                      .dst = -1,
+                                                      .a = -1,
+                                                      .b = -1,
+                                                      .imm = 0,
+                                                      .symbol = global_name});
         if (addr < 0)
           return -1;
         int value = nyr_load_global_scalar(b, addr, global_name, e);
@@ -636,11 +644,11 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
             nyr_strtab_intern(platform, strlen(platform), NULL, 0);
         int addr =
             sym ? nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_ADDR_SYMBOL,
-                                                    .dst = -1,
-                                                    .a = -1,
-                                                    .b = -1,
-                                                    .imm = 0,
-                                                    .symbol = sym})
+                                                     .dst = -1,
+                                                     .a = -1,
+                                                     .b = -1,
+                                                     .imm = 0,
+                                                     .symbol = sym})
                 : -1;
         int length = nyr_emit_const(b, (int64_t)strlen(platform));
         int tag = nyr_emit_const(b, 121);
@@ -719,12 +727,13 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
         text[n++] = *p == '_' ? '.' : (char)tolower((unsigned char)*p);
       text[n] = '\0';
       const char *sym = nyr_strtab_intern(text, n, NULL, 0);
-      int addr = sym ? nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_ADDR_SYMBOL,
-                                                         .dst = -1,
-                                                         .a = -1,
-                                                         .b = -1,
-                                                         .symbol = sym})
-                     : -1;
+      int addr =
+          sym ? nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_ADDR_SYMBOL,
+                                                   .dst = -1,
+                                                   .a = -1,
+                                                   .b = -1,
+                                                   .symbol = sym})
+              : -1;
       return addr < 0 ? -1 : addr;
     }
     if (!l) {
@@ -736,11 +745,11 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
       if (leaf && strcmp(leaf, "zalloc") == 0) {
         int addr =
             nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_ADDR_SYMBOL,
-                                              .dst = -1,
-                                              .a = -1,
-                                              .b = -1,
-                                              .imm = 0,
-                                              .symbol = "rt_zalloc_raw"});
+                                               .dst = -1,
+                                               .a = -1,
+                                               .b = -1,
+                                               .imm = 0,
+                                               .symbol = "rt_zalloc_raw"});
         if (addr < 0)
           nyr_fail(b, NY_NATIVE_ALLOC_FAIL);
         return addr;
@@ -803,11 +812,11 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
         symbol = function_symbol;
       }
       int addr = nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_ADDR_SYMBOL,
-                                                   .dst = -1,
-                                                   .a = -1,
-                                                   .b = -1,
-                                                   .imm = 0,
-                                                   .symbol = symbol});
+                                                    .dst = -1,
+                                                    .a = -1,
+                                                    .b = -1,
+                                                    .imm = 0,
+                                                    .symbol = symbol});
       if (addr < 0) {
         return nyr_fail(b, NY_NATIVE_ALLOC_FAIL), -1;
       }
@@ -1112,10 +1121,18 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
         if (zero < 0)
           return -1;
         return nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_CMP_F64,
-                                                 .dst = -1,
-                                                 .a = rv,
-                                                 .b = zero,
-                                                 .cmp = NYIR_CMP_EQ});
+                                                  .dst = -1,
+                                                  .a = rv,
+                                                  .b = zero,
+                                                  .cmp = NYIR_CMP_EQ});
+      }
+      if (nyr_expr_is_bool(b, e->as.unary.right)) {
+        /* Bool values can cross a local/global boundary as raw 0/1 or as
+         * tagged immediates. Normalize both representations in one runtime
+         * helper so the optimizer cannot apply raw-int facts to a tagged
+         * false immediate. */
+        return nyr_emit_runtime_call(b, "rt_bool_not", rv, -1, -1, 1,
+                                     NYIR_SCALAR_I64_RAW);
       }
       int truthy = nyr_emit_truthy(b, rv);
       return truthy < 0 ? -1 : nyr_emit_is_zero(b, truthy);
@@ -1130,14 +1147,14 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
       return nyr_ir_emit(
           &b->nyir,
           (nyr_inst_t){.op = NYIR_XOR_I64,
-                        .dst = -1,
-                        .a = rv,
-                        .b = mask,
-                        /* This branch is selected only for a proven raw
-                         * scalar operand.  Keep its physical ABI explicit;
-                         * an `any` use-site annotation must not turn the
-                         * raw zero result of ~(-1) into tagged nil. */
-                        .scalar_class = NYIR_SCALAR_I64_RAW});
+                       .dst = -1,
+                       .a = rv,
+                       .b = mask,
+                       /* This branch is selected only for a proven raw
+                        * scalar operand.  Keep its physical ABI explicit;
+                        * an `any` use-site annotation must not turn the
+                        * raw zero result of ~(-1) into tagged nil. */
+                       .scalar_class = NYIR_SCALAR_I64_RAW});
     }
     return nyr_fail(b, "native NYIR lower: unsupported unary operator '%s'",
                     e->as.unary.op),
@@ -1365,10 +1382,12 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
      * normalized at that boundary, so lower the value using its physical
      * representation instead of inlining the wrapper and decoding twice. */
     if (e->as.call.args.len == 1 && e->as.call.args.data[0].val &&
-        nyr_raw_bitwise_value(b, e->as.call.args.data[0].val, 0) &&
+        (nyr_raw_bitwise_value(b, e->as.call.args.data[0].val, 0) ||
+         nyr_expr_is_raw_dynamic_read(b, e->as.call.args.data[0].val)) &&
         ny_native_call_leaf(e) && strcmp(ny_native_call_leaf(e), "int") == 0 &&
         e->as.call.args.len == 1 && e->as.call.args.data[0].val) {
       const expr_t *arg_expr = e->as.call.args.data[0].val;
+      bool raw_dynamic_read = nyr_expr_is_raw_dynamic_read(b, arg_expr);
       int value = nyr_lower_expr(b, arg_expr);
       if (value < 0)
         return -1;
@@ -1378,6 +1397,11 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
       if (cls == NYIR_SCALAR_F32)
         return nyr_emit_f32_to_i64(b, value);
       if (cls == NYIR_SCALAR_I64_RAW)
+        return value;
+      /* Indexed scalar-list slots and raw memory reads already contain the
+       * payload word. rt_any_to_i64 guesses from the low bit and would halve
+       * odd raw integers as if they were tagged. */
+      if (raw_dynamic_read)
         return value;
       if (cls == NYIR_SCALAR_I64_TAGGED || nyr_expr_is_any(b, arg_expr))
         return nyr_emit_runtime_call(b, "rt_any_to_i64", value, -1, -1, 1,
@@ -1510,11 +1534,11 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
         return nyr_fail(b, "native NYIR lower: string table full or OOM"), -1;
       }
       int addr = nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_ADDR_SYMBOL,
-                                                   .dst = -1,
-                                                   .a = -1,
-                                                   .b = -1,
-                                                   .imm = 0,
-                                                   .symbol = sym});
+                                                    .dst = -1,
+                                                    .a = -1,
+                                                    .b = -1,
+                                                    .imm = 0,
+                                                    .symbol = sym});
       if (addr < 0)
         nyr_fail(b, NY_NATIVE_ALLOC_FAIL);
       return addr;
@@ -1531,11 +1555,11 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
           return nyr_fail(b, "native NYIR lower: string table full or OOM"), -1;
         }
         part_val = nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_ADDR_SYMBOL,
-                                                     .dst = -1,
-                                                     .a = -1,
-                                                     .b = -1,
-                                                     .imm = 0,
-                                                     .symbol = sym});
+                                                      .dst = -1,
+                                                      .a = -1,
+                                                      .b = -1,
+                                                      .imm = 0,
+                                                      .symbol = sym});
       } else {
         const expr_t *sub = parts->data[i].as.e;
         part_val = nyr_lower_expr(b, sub);
@@ -1564,6 +1588,12 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
             return -1;
         } else if (nyr_expr_is_bool(b, sub)) {
           part_val = nyr_emit_runtime_call(b, "rt_bool_to_cstr", part_val, -1,
+                                           -1, 1, 0);
+          if (part_val < 0)
+            return -1;
+        } else if (nyr_expr_is_list(b, sub) || nyr_expr_is_dict(b, sub) ||
+                   nyr_expr_is_set(b, sub)) {
+          part_val = nyr_emit_runtime_call(b, "rt_any_to_cstr", part_val, -1,
                                            -1, 1, 0);
           if (part_val < 0)
             return -1;
@@ -1818,11 +1848,18 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
      * integer payloads after crossing a function or nested-list boundary. */
     if (all_constant && has_numeric_constant) {
       bool all_f64_literal = true;
-      for (size_t i = 0; i < count; ++i)
-        if (e->as.list_like.data[i]->as.literal.kind != NY_LIT_FLOAT) {
+      for (size_t i = 0; i < count; ++i) {
+        const expr_t *literal = e->as.list_like.data[i];
+        if (literal && literal->kind == NY_E_UNARY && literal->as.unary.op &&
+            (strcmp(literal->as.unary.op, "+") == 0 ||
+             strcmp(literal->as.unary.op, "-") == 0))
+          literal = literal->as.unary.right;
+        if (!literal || literal->kind != NY_E_LITERAL ||
+            literal->as.literal.kind != NY_LIT_FLOAT) {
           all_f64_literal = false;
           break;
         }
+      }
       if (all_f64_literal)
         all_constant = false;
       if (b->current_list_elem_f64 && !all_f64_literal)
@@ -1841,9 +1878,16 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
       bool all_raw_i64 = !b->force_dynamic_list;
       for (size_t i = 0; i < count; ++i) {
         const expr_t *element = e->as.list_like.data[i];
+        const expr_t *scalar = element;
+        if (scalar && scalar->kind == NY_E_UNARY && scalar->as.unary.op &&
+            (strcmp(scalar->as.unary.op, "+") == 0 ||
+             strcmp(scalar->as.unary.op, "-") == 0))
+          scalar = scalar->as.unary.right;
+        bool float_literal = scalar && scalar->kind == NY_E_LITERAL &&
+                             scalar->as.literal.kind == NY_LIT_FLOAT;
         bool element_is_callable = nyr_expr_is_callable_value(b, element);
-        bool element_f64 =
-            b->current_list_elem_f64 || nyr_expr_is_f64(b, element);
+        bool element_f64 = b->current_list_elem_f64 || float_literal ||
+                           nyr_expr_is_f64(b, element);
         if (!element_f64) {
           all_f64 = false;
         }
@@ -1853,8 +1897,8 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
          * transient literals such as `[i]` in hot loops. */
         if (nyr_expr_is_any(b, element) || nyr_expr_is_cstr(b, element) ||
             nyr_expr_is_dict(b, element) || nyr_expr_is_list(b, element) ||
-            element_is_callable || nyr_expr_is_f64(b, element) ||
-            nyr_expr_is_f32(b, element) ||
+            element_is_callable || float_literal ||
+            nyr_expr_is_f64(b, element) || nyr_expr_is_f32(b, element) ||
             (element->semantic.resolved &&
              (element->semantic.rep == NY_SEM_REP_OBJECT ||
               element->semantic.rep == NY_SEM_REP_POINTER ||
@@ -2350,6 +2394,28 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
      * string is a raw C-string at this lowering boundary, so lower only
      * actual slices here.  The previous `!stop` condition classified plain
      * `s[i]` as `s[i:]`, returning a suffix instead of one character. */
+    const expr_t *slice_step = e->as.index.step;
+    const expr_t *slice_stop = e->as.index.stop;
+    bool omitted_stop = slice_stop && slice_stop->kind == NY_E_LITERAL &&
+                        slice_stop->as.literal.kind == NY_LIT_INT &&
+                        slice_stop->as.literal.as.i == 0x3fffffff;
+    bool reverse_step = slice_step && slice_step->kind == NY_E_LITERAL &&
+                        slice_step->as.literal.kind == NY_LIT_INT &&
+                        slice_step->as.literal.as.i == -1;
+    reverse_step |= slice_step && slice_step->kind == NY_E_UNARY &&
+                    slice_step->as.unary.op &&
+                    strcmp(slice_step->as.unary.op, "-") == 0 &&
+                    slice_step->as.unary.right &&
+                    slice_step->as.unary.right->kind == NY_E_LITERAL &&
+                    slice_step->as.unary.right->as.literal.kind == NY_LIT_INT &&
+                    slice_step->as.unary.right->as.literal.as.i == 1;
+    if (e->as.index.target && nyr_expr_is_cstr(b, e->as.index.target) &&
+        !e->as.index.start && omitted_stop && reverse_step) {
+      int string = nyr_lower_expr(b, e->as.index.target);
+      return string < 0 ? -1
+                        : nyr_emit_runtime_call(b, "rt_cstr_reverse", string,
+                                                -1, -1, 1, 0);
+    }
     if (e->as.index.target && nyr_expr_is_cstr(b, e->as.index.target) &&
         (e->as.index.stop || e->as.index.step) &&
         (!e->as.index.step ||
@@ -2408,7 +2474,11 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
         non_int_index = true;
       }
     }
-    if (target_is_seq && non_int_index) {
+    /* A dynamic range can lose the static sequence fact even though the
+     * range fast path below still applies. Validate an obviously invalid
+     * scalar index before selecting any raw sequence accessor. */
+    if (non_int_index &&
+        (target_is_seq || nyr_expr_is_range(b, e->as.index.target))) {
       return nyr_emit_runtime_call(b, "rt_index_key_error", -1, -1, -1, 0, 0);
     }
     if (e->as.index.target && !nyr_expr_is_bytes(b, e->as.index.target) &&
@@ -2495,10 +2565,14 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
         e->as.index.target) {
       int target = nyr_lower_expr(b, e->as.index.target);
       int key = nyr_lower_expr(b, e->as.index.start);
+      /* Booleans lower to raw 0/1; the tagged bridge would read raw 1 as the
+       * tagged integer 0. Box them so it raises the integer-index error. */
+      if (key >= 0 && nyr_expr_is_bool(b, e->as.index.start))
+        key = nyr_box_bool(b, key);
       int fallback = nyr_emit_const(b, rt_tag_v(0));
       if (target < 0 || key < 0 || fallback < 0)
         return -1;
-      return nyr_emit_runtime_call(b, "rt_value_get_tagged", target, key,
+      return nyr_emit_runtime_call(b, "rt_value_index_read_tagged", target, key,
                                    fallback, 3, 0);
     }
     if (!target_is_seq && e->as.index.target &&
@@ -2529,8 +2603,9 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
                           (e->as.index.start->kind == NY_E_LITERAL &&
                            e->as.index.start->as.literal.kind == NY_LIT_STR);
         int value = nyr_emit_runtime_call(
-            b, string_key ? "rt_dict_get_str_raw" : "rt_value_get_tagged", dict,
-            key, fallback, 3, 0);
+            b,
+            string_key ? "rt_dict_get_str_raw" : "rt_value_index_read_tagged",
+            dict, key, fallback, 3, 0);
         /* The bridge exposes a canonical dynamic value and the read stays on
          * that ABI: `expr_is_any` advertises dictionary indexing as dynamic,
          * so print/equality render the word as-is and raw consumers (scalar
@@ -2662,7 +2737,7 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
         return nyr_emit_runtime_call(b, "rt_tbuf_index_any_raw", base, idx, -1,
                                      2, 0);
       if (local && local->is_any)
-        return nyr_emit_runtime_call(b, "rt_value_get_index_raw", base, idx, 0,
+        return nyr_emit_runtime_call(b, "rt_value_index_read_raw", base, idx, 0,
                                      3, 0);
     }
     /* A mutable inferred global integer list is stored in raw elem-8 slots.
@@ -2769,8 +2844,8 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
             : NULL;
     if (dynamic_ident_local && !dynamic_ident_local->type_name &&
         !dynamic_ident_local->is_list && !e->as.index.stop && !e->as.index.step)
-      return nyr_emit_runtime_call(b, "rt_value_get_index_raw", base, idx, 0, 3,
-                                   0);
+      return nyr_emit_runtime_call(b, "rt_value_index_read_raw", base, idx, 0,
+                                   3, 0);
     bool explicit_scalar_index_target = false;
     if (e->as.index.target && e->as.index.target->kind == NY_E_IDENT &&
         e->as.index.target->as.ident.name) {
@@ -3005,7 +3080,7 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
          * elem-8 payloads when boxing the result.
          */
         if (target_l && target_l->is_any && !target_l->is_list) {
-          return nyr_emit_runtime_call(b, "rt_value_get_index_raw", base, idx,
+          return nyr_emit_runtime_call(b, "rt_value_index_read_raw", base, idx,
                                        0, 3, 0);
         }
         if (target_l && target_l->is_any && !target_l->is_list &&
@@ -3088,13 +3163,13 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
                   zero < 0 ? -1 : nyr_emit_cmp_i64(b, NYIR_CMP_LT, idx, zero);
               int wrapped = is_neg < 0 ? -1 : nyr_emit_add_i64(b, idx, count);
               int adj_idx =
-                  wrapped < 0
-                      ? -1
-                      : nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_SELECT_I64,
-                                                          .dst = -1,
-                                                          .a = is_neg,
-                                                          .b = wrapped,
-                                                          .c = idx});
+                  wrapped < 0 ? -1
+                              : nyr_ir_emit(&b->nyir,
+                                            (nyr_inst_t){.op = NYIR_SELECT_I64,
+                                                         .dst = -1,
+                                                         .a = is_neg,
+                                                         .b = wrapped,
+                                                         .c = idx});
               if (adj_idx < 0)
                 nyr_fail(b, NY_NATIVE_ALLOC_FAIL);
               int off8 = adj_idx < 0 ? -1
@@ -3278,7 +3353,7 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
            (local->type_name && (strcmp(local->type_name, "list") == 0 ||
                                  strcmp(local->type_name, "seq") == 0)));
       if (dynamic_receiver)
-        return nyr_emit_runtime_call(b, "rt_value_get_index_raw", base, idx, 0,
+        return nyr_emit_runtime_call(b, "rt_value_index_read_raw", base, idx, 0,
                                      3, 0);
     }
     if (is_negative || unknown_target) {
@@ -3702,13 +3777,8 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
       const bool bound_value =
           nyr_find_local(b, alias) != NULL || global_value != NULL;
       const char *module = bound_value ? NULL : nyr_resolve_use_alias(b, alias);
-      if (!module && !bound_value) {
-        nyr_builder_t probe = *b;
-        probe.source_file = NULL;
-        probe.locals = NULL;
-        probe.local_count = probe.local_cap = 0;
-        module = nyr_resolve_use_alias(&probe, alias);
-      }
+      if (!module && !bound_value)
+        module = nyr_resolve_use_alias_global(b, alias);
       if (module) {
         char canonical[512];
         int n = snprintf(canonical, sizeof(canonical), "%s.%s", module,
@@ -4196,9 +4266,9 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
         int shifted =
             one < 0 ? -1
                     : nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_SHL_I64,
-                                                        .dst = -1,
-                                                        .a = key,
-                                                        .b = one});
+                                                         .dst = -1,
+                                                         .a = key,
+                                                         .b = one});
         key = shifted < 0 ? -1 : nyr_emit_binop(b, NYIR_OR_I64, shifted, one);
       }
       int fallback = e->as.memcall.args.len == 2
@@ -4350,11 +4420,11 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
       int list = nyr_lower_expr(b, e->as.memcall.target);
       int start = nyr_lower_expr(b, e->as.memcall.args.data[0].val);
       int stop = nyr_lower_expr(b, e->as.memcall.args.data[1].val);
-      int out = list < 0 || start < 0 || stop < 0
-                    ? -1
-                    : nyr_emit_runtime_call(
-                          b, string_slice ? "rt_cstr_slice" : "rt_tbuf_slice",
-                          list, start, stop, 3, 0);
+      int out = list < 0 || start < 0 || stop < 0 ? -1
+                : string_slice ? nyr_emit_runtime_call(b, "rt_cstr_slice", list,
+                                                       start, stop, 3, 0)
+                               : nyr_emit_runtime_call(b, "rt_tbuf_slice", list,
+                                                       start, stop, 3, 0);
       if (out < 0)
         return -1;
       if (string_slice)
@@ -5171,6 +5241,8 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
       int target = nyr_lower_expr(b, e->as.member.target);
       if (target < 0)
         return -1;
+      if (nyr_expr_is_canonical_dynamic_value(b, e->as.member.target))
+        return nyr_emit_runtime_call(b, "rt_len_strict", target, -1, -1, 1, 0);
       /* Typed/native strings use the raw C-string ABI.  The generic length
        * helper intentionally also understands buffers and tagged containers,
        * but its object probe can reject a headerless string constant that has
@@ -5332,12 +5404,12 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
           return nyr_ir_emit(
               &b->nyir,
               (nyr_inst_t){.op = NYIR_LOAD_I64,
-                            .dst = -1,
-                            .a = address,
-                            .b = -1,
-                            .c = -1,
-                            .scalar_class = ny_native_scalar_class_from_sem_rep(
-                                nyr_rep_for_type(b, field->type_name))});
+                           .dst = -1,
+                           .a = address,
+                           .b = -1,
+                           .c = -1,
+                           .scalar_class = ny_native_scalar_class_from_sem_rep(
+                               nyr_rep_for_type(b, field->type_name))});
         }
       }
     }
@@ -5463,13 +5535,9 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
             memcpy(root_name, member_name, root_len);
             root_name[root_len] = '\0';
             resolved_root = nyr_resolve_use_alias(b, root_name);
-            if (!resolved_root) {
-              nyr_builder_impl_t probe = *b;
-              probe.cache_owner =
-                  b->cache_owner ? b->cache_owner : (nyr_builder_t *)b;
-              probe.source_file = NULL;
-              resolved_root = nyr_resolve_use_alias(&probe, root_name);
-            }
+            if (!resolved_root)
+              resolved_root = nyr_resolve_use_alias_with_source_file(
+                  b, root_name, NULL, true);
           }
         }
         int n = canonical_name[0]
@@ -5496,11 +5564,11 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
                                                               : member_name);
       if (symbol) {
         int addr = nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_ADDR_SYMBOL,
-                                                     .dst = -1,
-                                                     .a = -1,
-                                                     .b = -1,
-                                                     .imm = 0,
-                                                     .symbol = symbol});
+                                                      .dst = -1,
+                                                      .a = -1,
+                                                      .b = -1,
+                                                      .imm = 0,
+                                                      .symbol = symbol});
         if (addr < 0)
           return -1;
         int value = nyr_load_global_scalar(b, addr, symbol, e);
@@ -5554,6 +5622,9 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
             nyr_find_local(b, e->as.member.target->as.ident.name) &&
             nyr_find_local(b, e->as.member.target->as.ident.name)->is_bytes)))
         return nyr_emit_runtime_call(b, "rt_len", target, -1, -1, 1, 0);
+      if (target >= 0 &&
+          nyr_expr_is_canonical_dynamic_value(b, e->as.member.target))
+        return nyr_emit_runtime_call(b, "rt_len_strict", target, -1, -1, 1, 0);
       if (target >= 0 && nyr_expr_is_cstr(b, e->as.member.target)) {
         int dynamic_length = nyr_peek_dyn_fact(b, target, NYR_FACT_DYN_STR_LEN);
         if (dynamic_length >= 0)
@@ -5772,7 +5843,10 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
             }
           }
         }
-        int value = outer ? nyr_load_local_value(b, outer->slot) : -1;
+        int value = outer ? (capture_abi.capture_by_ref
+                                 ? nyr_emit_local_home_addr(b, outer)
+                                 : nyr_load_local_value(b, outer->slot))
+                          : -1;
         if (!outer) {
           /* Root immutable bindings may be emitted as module storage rather
            * than an entry-frame local.  They are still valid closure inputs;
@@ -5782,12 +5856,13 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
            * the lambda, preserving shared-state semantics. */
           const char *global = nyr_global_symbol(b, lambda->capture_names[i]);
           if (global) {
-            int addr = nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_ADDR_SYMBOL,
-                                                         .dst = -1,
-                                                         .a = -1,
-                                                         .b = -1,
-                                                         .imm = 0,
-                                                         .symbol = global});
+            int addr =
+                nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_ADDR_SYMBOL,
+                                                   .dst = -1,
+                                                   .a = -1,
+                                                   .b = -1,
+                                                   .imm = 0,
+                                                   .symbol = global});
             value = addr < 0
                         ? -1
                         : (capture_abi.is_f64 ? nyr_emit_load_f64(b, addr)
@@ -5836,7 +5911,8 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
          * their IEEE bits in the generic word slot; the lambda entry restores
          * the F64 lane with rt_f64_from_bits. A direct F64 memory store here
          * would claim a floating memory class for an untyped malloc block. */
-        if (value >= 0 && (capture_abi.is_f64 || capture_abi.is_f32)) {
+        if (value >= 0 && !capture_abi.capture_by_ref &&
+            (capture_abi.is_f64 || capture_abi.is_f32)) {
           nyr_scalar_class_t value_class = nyr_value_scalar_class(b, value);
           int as_f64 = value;
           if (value_class == NYIR_SCALAR_F32)
@@ -5867,11 +5943,11 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
           closure < 0
               ? -1
               : nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_ADDR_SYMBOL,
-                                                  .dst = -1,
-                                                  .a = -1,
-                                                  .b = -1,
-                                                  .imm = 0,
-                                                  .symbol = function_symbol});
+                                                   .dst = -1,
+                                                   .a = -1,
+                                                   .b = -1,
+                                                   .imm = 0,
+                                                   .symbol = function_symbol});
       int tag_off = closure < 0 ? -1 : nyr_emit_const(b, -8);
       int tag_addr = closure < 0 || tag_off < 0
                          ? -1
@@ -5891,11 +5967,11 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
                            : closure;
     }
     int addr = nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_ADDR_SYMBOL,
-                                                 .dst = -1,
-                                                 .a = -1,
-                                                 .b = -1,
-                                                 .imm = 0,
-                                                 .symbol = function_symbol});
+                                                  .dst = -1,
+                                                  .a = -1,
+                                                  .b = -1,
+                                                  .imm = 0,
+                                                  .symbol = function_symbol});
     if (addr < 0)
       nyr_fail(b, NY_NATIVE_ALLOC_FAIL);
     return result_marker
@@ -6053,6 +6129,12 @@ static int nyr_lower_expr(nyr_builder_t *b, const expr_t *e) {
     nyr_scalar_class_t producer_class = nyr_value_scalar_class(b, value);
     bool concrete_float_producer =
         producer_class == NYIR_SCALAR_F32 || producer_class == NYIR_SCALAR_F64;
+    /* Comparisons always produce raw 0/1, including the comparison which
+     * decodes rt_any_eq's boxed boolean. Imported library expressions can
+     * still have a conservative tagged-dynamic semantic stamp. Applying that
+     * stamp here makes branch truthiness read raw true (1) as tagged zero. */
+    bool raw_predicate_producer =
+        inst->op == NYIR_CMP_I64 || inst->op == NYIR_CMP_F64;
     bool raw_integer_producer =
         b->last_arith_expr == e && b->last_arith_raw &&
         (inst->op == NYIR_ADD_I64 || inst->op == NYIR_SUB_I64 ||
@@ -6078,7 +6160,7 @@ static int nyr_lower_expr(nyr_builder_t *b, const expr_t *e) {
                                concrete_float_producer || raw_integer_producer;
     if (inst->scalar_class == NYIR_SCALAR_UNKNOWN && concrete_float_producer)
       inst->scalar_class = producer_class;
-    if (raw_integer_producer || raw_integer_literal)
+    if (raw_integer_producer || raw_integer_literal || raw_predicate_producer)
       inst->scalar_class = NYIR_SCALAR_I64_RAW;
     else if (!class_authoritative)
       inst->scalar_class = ny_native_scalar_class_from_sem_rep(semantic.rep);
@@ -6171,6 +6253,16 @@ static int nyr_lower_logical(nyr_builder_t *b, const expr_t *left,
   if (!nyr_emit_label(b, end_label))
     return -1;
   int merged = nyr_load_local_value(b, result_slot);
+  /* The short-circuit result is a canonical raw 0/1 boolean.  The temporary
+   * local has no source declaration from which later truthiness lowering can
+   * recover that fact, so keep it on the load itself.  This matters when a
+   * refinement predicate is materialized by a call before it reaches a
+   * branch: treating raw true (1) as a tagged integer makes it look false. */
+  if (merged >= 0 && b->nyir.len > 0) {
+    nyr_inst_t *load = &b->nyir.data[b->nyir.len - 1];
+    if (load->op == NYIR_LOAD_LOCAL && load->dst == merged)
+      load->scalar_class = NYIR_SCALAR_I64_RAW;
+  }
   return merged;
 }
 
@@ -6302,12 +6394,13 @@ static int nyr_lower_coalesce(nyr_builder_t *b, const expr_t *coalesce,
   int fallback_label = b->next_label++;
   int end_label = b->next_label++;
   int nil = nyr_emit_const(b, NY_IMM_NIL);
-  int is_nil = nil < 0 ? -1
-                       : nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_CMP_I64,
-                                                           .dst = -1,
-                                                           .a = left_val,
-                                                           .b = nil,
-                                                           .cmp = NYIR_CMP_EQ});
+  int is_nil = nil < 0
+                   ? -1
+                   : nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_CMP_I64,
+                                                        .dst = -1,
+                                                        .a = left_val,
+                                                        .b = nil,
+                                                        .cmp = NYIR_CMP_EQ});
   if (is_nil < 0 || !nyr_emit_br_if(b, is_nil, fallback_label))
     return -1;
   if (dynamic_join &&
@@ -6391,11 +6484,16 @@ static int nyr_lower_ternary(nyr_builder_t *b, const expr_t *cond,
   bool false_dynamic_input = false_expr->kind == NY_E_BINARY &&
                              (nyr_expr_is_any(b, false_expr->as.binary.left) ||
                               nyr_expr_is_any(b, false_expr->as.binary.right));
-  bool dynamic_join = nyr_expr_is_any(b, true_expr) ||
-                      nyr_expr_is_canonical_dynamic_value(b, true_expr) ||
-                      nyr_expr_is_any(b, false_expr) ||
-                      nyr_expr_is_canonical_dynamic_value(b, false_expr) ||
-                      true_dynamic_input || false_dynamic_input;
+  bool dynamic_join =
+      nyr_expr_is_any(b, true_expr) ||
+      nyr_expr_is_canonical_dynamic_value(b, true_expr) ||
+      nyr_expr_is_any(b, false_expr) ||
+      nyr_expr_is_canonical_dynamic_value(b, false_expr) ||
+      true_dynamic_input || false_dynamic_input ||
+      /* Bool-returning calls use boxed immediates whereas
+       * literals and comparisons use raw predicates. Give
+       * both arms one representation before the PHI. */
+      (nyr_expr_is_bool(b, true_expr) && nyr_expr_is_bool(b, false_expr));
   if (true_val >= 0 && dynamic_join &&
       nyr_value_scalar_class(b, true_val) == NYIR_SCALAR_I64_RAW)
     true_val = nyr_expr_is_bool(b, true_expr)

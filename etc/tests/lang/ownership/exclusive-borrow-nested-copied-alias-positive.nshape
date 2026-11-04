@@ -4,7 +4,7 @@ shape ownership_exclusive_borrow_nested_copied_alias_positive {
   features ["ownership", "borrow", "exclusive", "nested", "alias", "positive"]
   template ny-test-case
   expect compile_and_run
-  flags "--ownership-strict --native-only --nyir-verify"
+  flags "--ownership-strict --native-only --nyr-verify"
   source ny <<'NY'
 use core
 

@@ -3,6 +3,7 @@
  * manages stdlib discovery, and owns the compilation-unit lifecycle.
  */
 #include "base/loader.h"
+#include "base/remote.h"
 #include "base/common.h"
 #include "base/debug.h"
 #include "base/trace.h"
@@ -595,7 +596,7 @@ static char *ny_std_get_cache_path(void) {
   static char path[1024];
   const char *root = ny_default_cache_root_dir();
   if (!root || !*root)
-    /* memory leak patched */ /* memory leak patched */ return NULL;
+    return NULL;
   snprintf(path, sizeof(path), "%s/loader.idx", root);
   return path;
 }
@@ -822,7 +823,7 @@ static int ny_cstr_ptr_cmp(const void *a, const void *b) {
   const char *aa = *(const char *const *)a;
   const char *bb = *(const char *const *)b;
   if (!aa && !bb)
-    /* memory leak patched */ /* memory leak patched */ return 0;
+    return 0;
   if (!aa)
     return -1;
   if (!bb)
@@ -893,13 +894,13 @@ uint32_t ny_std_module_features(size_t idx) {
 
 const char *ny_std_module_name(size_t idx) {
   if (idx >= ny_std_module_count())
-    /* memory leak patched */ /* memory leak patched */ return NULL;
+    return NULL;
   return ny_std_mods[idx].name;
 }
 
 const char *ny_std_module_path(size_t idx) {
   if (idx >= ny_std_module_count())
-    /* memory leak patched */ /* memory leak patched */ return NULL;
+    return NULL;
   return ny_std_mods[idx].path;
 }
 
@@ -1015,7 +1016,7 @@ size_t ny_std_package_count(void) {
 const char *ny_std_package_name(size_t idx) {
   ny_std_init_packages();
   if (idx >= ny_std_pkgs_len)
-    /* memory leak patched */ /* memory leak patched */ return NULL;
+    return NULL;
   return ny_std_pkgs[idx];
 }
 
@@ -1311,13 +1312,13 @@ static bool ny_mod_ident_char(char c) {
 char *ny_read_declared_module_name(const char *path) {
   FILE *f = fopen(path, "rb");
   if (!f)
-    /* memory leak patched */ /* memory leak patched */ return NULL;
+    return NULL;
 
   char buf[4096];
   size_t n = fread(buf, 1, sizeof(buf) - 1, f);
   fclose(f);
   if (n <= 0)
-    /* memory leak patched */ /* memory leak patched */ return NULL;
+    return NULL;
   buf[n] = '\0';
   const char *p = buf;
   while (*p) {
@@ -1357,7 +1358,7 @@ char *ny_read_declared_module_name(const char *path) {
     }
     break;
   }
-  /* memory leak patched */ /* memory leak patched */ return NULL;
+  return NULL;
 }
 
 static void append_text(char **buf, size_t *len, size_t *cap, const char *txt) {
@@ -1392,7 +1393,7 @@ static const char *last_sep(const char *path) {
 
 static char *ny_modname_from_path(const char *path) {
   if (!path)
-    /* memory leak patched */ /* memory leak patched */ return NULL;
+    return NULL;
   const char *last_slash = last_sep(path);
   const char *start = last_slash ? last_slash + 1 : path;
   char *name = ny_strdup(start);
@@ -1437,13 +1438,13 @@ static char *ny_bundle_module_name(const char *raw, const char *path,
 
 static char *find_local_module_in_base(const char *name, const char *base_dir) {
   if (!name || !*name)
-    /* memory leak patched */ /* memory leak patched */ return NULL;
+    return NULL;
   if (!base_dir || !*base_dir)
     base_dir = ".";
   size_t base_len = strlen(base_dir);
   size_t name_len = strlen(name);
   if (base_len + 1 + name_len + 8 >= 4096)
-    /* memory leak patched */ /* memory leak patched */ return NULL;
+    return NULL;
   char path[4096];
   memmove(path, base_dir, base_len);
   path[base_len] = '/';
@@ -1503,7 +1504,7 @@ static char *find_local_module_in_base(const char *name, const char *base_dir) {
         return ny_strdup(sib_mod);
     }
   }
-  /* memory leak patched */ /* memory leak patched */ return NULL;
+  return NULL;
 }
 
 static char *find_module_in_project_package_roots(const char *name,
@@ -1519,13 +1520,13 @@ static char *find_module_in_project_package_roots(const char *name,
     if (local)
       return local;
   }
-  /* memory leak patched */ /* memory leak patched */ return NULL;
+  return NULL;
 }
 
 static char *find_module_in_package_path_list(const char *name,
                                               const char *paths) {
   if (!paths || !*paths)
-    /* memory leak patched */ /* memory leak patched */ return NULL;
+    return NULL;
   const char *p = paths;
   while (*p) {
     while (*p == ':' || *p == ';')
@@ -1542,7 +1543,7 @@ static char *find_module_in_package_path_list(const char *name,
         return local;
     }
   }
-  /* memory leak patched */ /* memory leak patched */ return NULL;
+  return NULL;
 }
 
 static char *find_module_in_global_package_roots(const char *name) {
@@ -1587,7 +1588,7 @@ static char *find_module_in_global_package_roots(const char *name) {
       return local;
   }
 #endif
-  /* memory leak patched */ /* memory leak patched */ return NULL;
+  return NULL;
 }
 
 static char *find_local_module(const char *name, const char *base_dir) {
@@ -1633,11 +1634,11 @@ static char *find_local_module(const char *name, const char *base_dir) {
 
 static char *find_project_demo_module(const char *name, const char *base_dir) {
   if (!name || !*name)
-    /* memory leak patched */ /* memory leak patched */ return NULL;
+    return NULL;
   const char *leaf = strrchr(name, '.');
   leaf = (leaf && leaf[1]) ? leaf + 1 : name;
   if (!leaf || !*leaf)
-    /* memory leak patched */ /* memory leak patched */ return NULL;
+    return NULL;
 
   char cur[4096];
   snprintf(cur, sizeof(cur), "%s", (base_dir && *base_dir) ? base_dir : ".");
@@ -1673,145 +1674,18 @@ static char *find_project_demo_module(const char *name, const char *base_dir) {
     }
     *slash = '\0';
   }
-  /* memory leak patched */ /* memory leak patched */ return NULL;
-}
-
-#ifndef _WIN32
-#include <dlfcn.h>
-#endif
-
-typedef void *(*curl_easy_init_t)(void);
-typedef int (*curl_easy_setopt_t)(void *, int, ...);
-typedef int (*curl_easy_perform_t)(void *);
-typedef void (*curl_easy_cleanup_t)(void *);
-typedef const char *(*curl_easy_strerror_t)(int);
-typedef int (*curl_global_init_t)(long);
-
-#define NY_CURL_GLOBAL_ALL 3L
-#define NY_CURLOPT_URL 10002
-#define NY_CURLOPT_WRITEDATA 10001
-#define NY_CURLOPT_FOLLOWLOCATION 52
-#define NY_CURLOPT_USERAGENT 10018
-#define NY_CURLOPT_FAILONERROR 10194
-#define NY_CURLOPT_TIMEOUT 10013
-
-static char *resolve_remote_module(const char *url) {
-  static void *curl_handle = NULL;
-  static curl_easy_init_t f_init = NULL;
-  static curl_easy_setopt_t f_setopt = NULL;
-  static curl_easy_perform_t f_perform = NULL;
-  static curl_easy_cleanup_t f_cleanup = NULL;
-  static curl_easy_strerror_t f_strerror = NULL;
-  static curl_global_init_t f_global_init = NULL;
-  static bool curl_initialized = false;
-  static bool curl_failed = false;
-
-  if (curl_failed)
-    /* memory leak patched */ /* memory leak patched */ return NULL;
-
-  if (!curl_handle) {
-#ifdef _WIN32
-    curl_handle = LoadLibraryA("libcurl.dll");
-    if (!curl_handle)
-      curl_handle = LoadLibraryA("curl.dll");
-#else
-    curl_handle = dlopen("libcurl.so.4", RTLD_LAZY);
-    if (!curl_handle)
-      curl_handle = dlopen("libcurl.so", RTLD_LAZY);
-#endif
-    if (!curl_handle) {
-      NY_LOG_INFO("libcurl not found, remote module loading disabled\n");
-      curl_failed = true;
-      /* memory leak patched */ /* memory leak patched */ return NULL;
-    }
-#ifdef _WIN32
-    f_init = (curl_easy_init_t)GetProcAddress(curl_handle, "curl_easy_init");
-    f_setopt =
-        (curl_easy_setopt_t)GetProcAddress(curl_handle, "curl_easy_setopt");
-    f_perform =
-        (curl_easy_perform_t)GetProcAddress(curl_handle, "curl_easy_perform");
-    f_cleanup =
-        (curl_easy_cleanup_t)GetProcAddress(curl_handle, "curl_easy_cleanup");
-    f_strerror =
-        (curl_easy_strerror_t)GetProcAddress(curl_handle, "curl_easy_strerror");
-    f_global_init =
-        (curl_global_init_t)GetProcAddress(curl_handle, "curl_global_init");
-#else
-    f_init = (curl_easy_init_t)dlsym(curl_handle, "curl_easy_init");
-    f_setopt = (curl_easy_setopt_t)dlsym(curl_handle, "curl_easy_setopt");
-    f_perform = (curl_easy_perform_t)dlsym(curl_handle, "curl_easy_perform");
-    f_cleanup = (curl_easy_cleanup_t)dlsym(curl_handle, "curl_easy_cleanup");
-    f_strerror = (curl_easy_strerror_t)dlsym(curl_handle, "curl_easy_strerror");
-    f_global_init = (curl_global_init_t)dlsym(curl_handle, "curl_global_init");
-#endif
-  }
-
-  if (!curl_initialized && f_global_init) {
-    f_global_init(NY_CURL_GLOBAL_ALL);
-    curl_initialized = true;
-  }
-
-  if (!url)
-    /* memory leak patched */ /* memory leak patched */ return NULL;
-
-  uint64_t h = ny_hash64_cstr(url);
-  char cache_dir[1024];
-  const char *root = ny_default_cache_root_dir();
-  snprintf(cache_dir, sizeof(cache_dir), "%s/remote",
-           root && *root ? root : ny_get_temp_dir());
-  ny_ensure_dir_recursive(cache_dir);
-
-  char cache_path[1024];
-  snprintf(cache_path, sizeof(cache_path), "%s/%016llx.ny", cache_dir,
-           (unsigned long long)h);
-
-  struct stat st;
-  bool reload = ny_env_enabled("NYTRIX_REMOTE_RELOAD");
-  if (!reload && stat(cache_path, &st) == 0) {
-    return ny_strdup(cache_path);
-  }
-
-  NY_LOG_INFO("Downloading remote module: %s\n", url);
-  void *curl = f_init();
-  if (!curl)
-    /* memory leak patched */ /* memory leak patched */ return NULL;
-
-  FILE *fp = fopen(cache_path, "wb");
-  if (!fp) {
-    f_cleanup(curl);
-    /* memory leak patched */ /* memory leak patched */ return NULL;
-  }
-
-  f_setopt(curl, NY_CURLOPT_URL, url);
-  f_setopt(curl, NY_CURLOPT_WRITEDATA, fp);
-  f_setopt(curl, NY_CURLOPT_FOLLOWLOCATION, 1L);
-  f_setopt(curl, NY_CURLOPT_USERAGENT, "nytrix-compiler/1.0");
-  f_setopt(curl, NY_CURLOPT_FAILONERROR, 1L);
-  f_setopt(curl, NY_CURLOPT_TIMEOUT, 60L);
-
-  int res_code = f_perform(curl);
-  fclose(fp);
-  f_cleanup(curl);
-
-  if (res_code != 0) {
-    fprintf(stderr, "Error: Failed to download remote module: %s (%s)\n", url,
-            f_strerror(res_code));
-    unlink(cache_path);
-    /* memory leak patched */ /* memory leak patched */ return NULL;
-  }
-
-  return ny_strdup(cache_path);
+  return NULL;
 }
 
 static char *resolve_module_path(const char *raw, const char *base_dir,
                                  bool prefer_local, bool *is_std_out) {
   if (!raw)
-    /* memory leak patched */ /* memory leak patched */ return NULL;
+    return NULL;
 
   if (strncmp(raw, "http://", 7) == 0 || strncmp(raw, "https://", 8) == 0) {
     if (is_std_out)
       *is_std_out = false;
-    return resolve_remote_module(raw);
+    return ny_resolve_remote_module(raw);
   }
 
   bool explicit_core =
@@ -1851,14 +1725,14 @@ static char *resolve_module_path(const char *raw, const char *base_dir,
     return ny_strdup(ny_std_mods[idx].path);
   }
   if (!prefer_local || explicit_pkg)
-    /* memory leak patched */ /* memory leak patched */ return NULL;
+    return NULL;
   char *local = find_local_module(raw, base_dir);
   if (local) {
     if (is_std_out)
       *is_std_out = false;
     return local;
   }
-  /* memory leak patched */ /* memory leak patched */ return NULL;
+  return NULL;
 }
 
 static char *dir_from_path(const char *path) {
@@ -2299,18 +2173,18 @@ static int ny_std_load_threads(size_t work_items) {
 static char *ny_build_module_chunk(const char *path, const char *name,
                                    size_t *out_len, bool append_module_use) {
   if (!path || !name)
-    /* memory leak patched */ /* memory leak patched */ return NULL;
+    return NULL;
   if (ny_std_trace_enabled()) {
     fprintf(stderr, "STD_TRACE chunk: %s\n", path);
   }
   char *txt = ny_read_file(path);
   if (!txt)
-    /* memory leak patched */ /* memory leak patched */ return NULL;
+    return NULL;
   size_t total = 0, cap = strlen(txt) + 256;
   char *bundle = malloc(cap);
   if (!bundle) {
     free(txt);
-    /* memory leak patched */ /* memory leak patched */ return NULL;
+    return NULL;
   }
   bundle[0] = '\0';
   char line_buf[1024];
@@ -2401,7 +2275,7 @@ static void *ny_std_source_worker(void *arg) {
     e->bundle_txt = ny_build_module_chunk(e->path, e->name, &e->bundle_len,
                                           ctx->append_module_uses);
   }
-  /* memory leak patched */ /* memory leak patched */ return NULL;
+  return NULL;
 }
 #endif
 
@@ -2530,7 +2404,7 @@ char *ny_build_std_source_ex(const char **modules, size_t module_count,
   NY_LOG_V1("Standard library: mode=%s explicit_modules=%zu\n", mode_name,
             module_count);
   if (mode == STD_MODE_NONE && module_count == 0)
-    /* memory leak patched */ /* memory leak patched */ return NULL;
+    return NULL;
   ny_std_init_modules();
   char *prebuilt_src = NULL;
   if (ny_std_find_module_by_name("core.mod") < 0) {
@@ -2629,7 +2503,7 @@ char *ny_build_std_source_ex(const char **modules, size_t module_count,
       free((void *)mods.path_idx_ht);
     if (mods.entries)
       free(mods.entries);
-    /* memory leak patched */ /* memory leak patched */ return NULL;
+    return NULL;
   }
 #ifndef _WIN32
   if (mods.len > 0) {
@@ -2696,7 +2570,7 @@ char *ny_build_std_source_ex(const char **modules, size_t module_count,
     cap += strlen(prebuilt_src);
   char *bundle = malloc(cap);
   if (!bundle)
-    /* memory leak patched */ /* memory leak patched */ return NULL;
+    return NULL;
   bundle[0] = '\0';
   if (prebuilt_src) {
     total = strlen(prebuilt_src);
@@ -2831,7 +2705,7 @@ static void append_c_symbol(stmt_t *s, const char *pkg, char **hdr, size_t *len,
 char *ny_std_generate_c_symbols_header(std_mode_t mode) {
   char *bundle = ny_build_std_source_ex(NULL, 0, mode, 0, NULL, false);
   if (!bundle)
-    /* memory leak patched */ /* memory leak patched */ return NULL;
+    return NULL;
   parser_t parser;
   parser_init(&parser, bundle, "<std>");
   program_t prog = parse_program(&parser);
@@ -2839,7 +2713,7 @@ char *ny_std_generate_c_symbols_header(std_mode_t mode) {
   char *header = malloc(cap);
   if (!header) {
     free(bundle);
-    /* memory leak patched */ /* memory leak patched */ return NULL;
+    return NULL;
   }
   header[0] = '\0';
   append_text(&header, &total, &cap, "#pragma once");

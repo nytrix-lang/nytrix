@@ -1,0 +1,11 @@
+shape repl_ticks_f64_conversion {
+  family "repl"
+  generator "embedded"
+  features ["ny", "test", "repl", "time", "f64", "regression"]
+  template ny-test-case
+  timeout 60
+  repl_expect "0.000128617"
+  repl_commands "use core.os.time (ticks)\nmut start = ticks()\nmut checksum = 0\nfor i in range(50000) { checksum += i }\ndef seconds = (ticks() - start) * 0.000000001\nassert(seconds > 0.0 && seconds < 30.0, \"nanosecond delta converts to seconds\")\nprint(128617.0 * 0.000000001)\nprint(\"TICKS-F64-OK\")"
+  source ny <<'NY'
+NY
+}

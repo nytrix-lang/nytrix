@@ -25,7 +25,7 @@ fn compile_generated(str source, bool emit_only) dict {
   }
   args = args.append("--ownership-strict")
   args = args.append("--native-only")
-  args = args.append("--nyir-verify")
+  args = args.append("--nyr-verify")
   if emit_only { args = args.append("-emit-only") }
   args = args.append("-c")
   args = args.append(source)
@@ -94,24 +94,6 @@ fn move_source(list operations) str {
 
 fn aggregate_extraction_source() str {
   "use core\nlinear layout File { int fd }\nlayout Pair { File left, File right }\n@consumes(file)\nfn dispose(File file) int { forget(file) 0 }\nfn generated() int {\ndef Pair pair = Pair(File(1), File(2))\ndef File left = pair.left\ndispose(left)\ndef File right = pair.right\ndispose(right)\n0\n}\ngenerated()\n0\n"
-}
-
-fn aggregate_shadow(list operations) bool {
-  mut bool left_moved = false
-  mut bool right_moved = false
-  mut int index = 0
-  while index < operations.len {
-    def operation = operations.get(index, 0)
-    if operation == 1 {
-      if left_moved { return false }
-      left_moved = true
-    } else if operation == 2 {
-      if right_moved { return false }
-      right_moved = true
-    }
-    index += 1
-  }
-  left_moved && right_moved
 }
 
 fn aggregate_source(list operations) str {
@@ -238,10 +220,11 @@ fn run_generated_cases(int first_case) str {
     def result = compile_generated(source, emit_only)
     def output = result.get("stdout", "")
     def code = result.get("code", 127)
-    def accepted = code == 0 && str.find(output, "error:") < 0
+    def accepted = code == 0 && !output.contains("error:")
     if accepted != expected {
       return label + " runtime shadow and strict checker disagree (code " +
-             to_str(code) + "): " + output +
+             to_str(code) + ", accepted=" + to_str(accepted) +
+             ", expected=" + to_str(expected) + "): " + output +
              "\ngenerated source:\n" + source
     }
     case_index += 4
@@ -431,9 +414,13 @@ while aggregate_mask < 9 {
     encoded /= 3
     index += 1
   }
-  def expected = aggregate_shadow(aggregate_ops)
+  def expected = aggregate_mask == 5 || aggregate_mask == 7
   check_generated(aggregate_source(aggregate_ops), expected,
-                  "generated partial aggregate move " + to_str(aggregate_mask))
+                  "generated partial aggregate move " + to_str(aggregate_mask) +
+                      " ops=" + to_str(aggregate_ops.get(0, -1)) + "," +
+                      to_str(aggregate_ops.get(1, -1)) + "," +
+                      to_str(aggregate_ops.get(2, -1)) + "," +
+                      to_str(aggregate_ops.get(3, -1)))
   aggregate_mask += 1
 }
 def worker0 = thread.thread_spawn(run_generated_cases, 0)

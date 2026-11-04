@@ -1,10 +1,27 @@
 <!-- nytrix-doc: {"audience":"user","featured":false,"group":"learn","order":112,"summary":"Choose borrowed or owned APIs and check cleanup at resource boundaries."} -->
 # Ownership
 
-Use a borrow when the callee needs temporary access. Transfer ownership when the
-callee must retain, release, or return responsibility for a resource. Ownership
-analysis is opt-in and bounded; see the [specification](../spec/ownership.md)
-for supported rules.
+Ownership contracts say whether a callee borrows a value temporarily or takes
+responsibility for it. Analysis is opt-in and bounded; see the
+[specification](../spec/ownership.md) for supported rules.
+
+Prerequisites: [Tour](tour.md) for bindings and function calls.
+
+## Borrow a value
+
+The borrowed value remains available through its owner:
+
+```ny
+use core
+
+def source = [1, 2, 3]
+def view = borrow(source)
+assert_eq(len(view), 3, "borrowed length")
+assert_eq(len(source), 3, "owner remains available")
+```
+
+This behavior is also covered by
+[`ownership.nshape`](../../etc/tests/lang/memory/ownership.nshape).
 
 ## Choose the contract
 
@@ -26,13 +43,13 @@ owned value when the lifetime cannot be tied to an argument.
 
 ```bash
 ny --borrow-check file.ny
-ny --borrow-check --ownership-strict file.ny
-ny --safe-mode file.ny
+ny --borrow-check --ownership-check=strict file.ny
+ny --mode=safe file.ny
 ```
 
 `--borrow-check` reports supported issues without selecting RAII cleanup.
-`--ownership-strict` promotes those diagnostics to errors. `--ownership` also
-selects ownership-aware cleanup; `--safe-mode` enables the broader safety
+`--ownership-check=strict` promotes those diagnostics to errors.
+`--heap=raii` selects ownership-aware cleanup; `--mode=safe` enables the broader safety
 profile. These modes do not turn unsupported source shapes into proven-safe
 ones.
 
@@ -46,3 +63,9 @@ Test both valid and invalid use for the resource and control-flow shape you
 rely on. A pass on one backend does not prove every alias or aggregate form.
 See [Testing](testing.md) for focused fixture commands and
 [Implementation status](status.md) for known limits.
+
+Next:
+
+- [Ownership specification](../spec/ownership.md) — checker rules and limits.
+- [Runtime](../spec/runtime.md#ownership) — ownership modes and cleanup.
+- [Testing](testing.md) — exercise the exact source shape.

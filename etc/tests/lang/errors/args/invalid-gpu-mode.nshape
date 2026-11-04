@@ -6,7 +6,7 @@ shape args-invalid-gpu-mode {
   expect compile_fail
 
   flags "--gpu=bogus"
-  expect_message "unknown gpu mode"
+  expect_message "invalid --gpu"
   source ny <<'NY'
 use core
 print("ok")

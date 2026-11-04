@@ -14,22 +14,9 @@ bool nyr_sroa_scalar(nyr_func_t *f);
 bool nyr_escape_sroa(nyr_func_t *f);
 
 /*
- * True when value v is defined by CONST_I64 0 (nil immediate).  Nil cannot
- * address a frame slot, so a PHI edge carrying it does not alias the slot
- * carried by the other edges.  Any other unmapped value (including other
- * constants) is treated as unknown to stay fail-closed.
+ * `pt` holds a local slot, -1 for unknown provenance, or this null marker.
  */
-static bool sroa_value_is_null_const(const nyr_func_t *f, int v) {
-  if (!f || v < 0 || v >= f->next_value)
-    return false;
-  for (size_t i = 0; i < f->len; ++i) {
-    const nyr_inst_t *in = &f->data[i];
-    if (in->dst == v) {
-      return in->op == NYIR_CONST_I64 && in->imm == 0;
-    }
-  }
-  return false;
-}
+#define SROA_PT_NULL_CONST (-2)
 
 bool nyr_sroa_unified(nyr_func_t *f) {
   if (!f || f->len == 0)
@@ -65,6 +52,7 @@ bool nyr_sroa_unified(nyr_func_t *f) {
         pt[i] = -1;
         mark_pt[i] = -1;
       }
+      bool null_consts_indexed = false;
       for (size_t i = 0; i < f->len; ++i) {
         const nyr_inst_t *in = &f->data[i];
         if (in->op == NYIR_ADDR_LOCAL && in->dst >= 0 && in->imm >= 0) {
@@ -96,7 +84,20 @@ bool nyr_sroa_unified(nyr_func_t *f) {
               continue;
             }
             if (pt[vv] < 0) {
-              if (!sroa_value_is_null_const(f, vv))
+              /*
+               * PHI inputs can be defined later in linear order. Build this
+               * index lazily: PHIs with only tracked inputs need no scan.
+               */
+              if (!null_consts_indexed) {
+                for (size_t j = 0; j < f->len; ++j) {
+                  const nyr_inst_t *candidate = &f->data[j];
+                  if (candidate->op == NYIR_CONST_I64 && candidate->imm == 0 &&
+                      candidate->dst >= 0 && (size_t)candidate->dst < nv)
+                    pt[candidate->dst] = SROA_PT_NULL_CONST;
+                }
+                null_consts_indexed = true;
+              }
+              if (pt[vv] != SROA_PT_NULL_CONST)
                 unknown = true;
               continue;
             }
@@ -188,16 +189,16 @@ bool nyr_sroa_unified(nyr_func_t *f) {
             bool mutable_fact = in->semantic_mutable;
             nyr_debug_loc_t debug = in->debug;
             *in = (nyr_inst_t){.op = NYIR_LOAD_LOCAL,
-                                .dst = in->dst,
-                                .a = -1,
-                                .b = -1,
-                                .imm = pt[in->a],
-                                .scalar_class = scalar_class,
-                                .semantic_ownership = ownership,
-                                .semantic_mutable = mutable_fact,
-                                .alias_class = 0,
-                                .debug = debug,
-                                .range = range};
+                               .dst = in->dst,
+                               .a = -1,
+                               .b = -1,
+                               .imm = pt[in->a],
+                               .scalar_class = scalar_class,
+                               .semantic_ownership = ownership,
+                               .semantic_mutable = mutable_fact,
+                               .alias_class = 0,
+                               .debug = debug,
+                               .range = range};
           } else if (in->op == NYIR_STORE_I64 && in->a >= 0 &&
                      (size_t)in->a < nv && pt[in->a] >= 0 &&
                      (size_t)pt[in->a] < slot_count && !pt_escaped[pt[in->a]] &&
@@ -206,15 +207,15 @@ bool nyr_sroa_unified(nyr_func_t *f) {
             bool mutable_fact = in->semantic_mutable;
             nyr_debug_loc_t debug = in->debug;
             *in = (nyr_inst_t){.op = NYIR_STORE_LOCAL,
-                                .dst = -1,
-                                .a = in->c,
-                                .b = -1,
-                                .c = -1,
-                                .imm = pt[in->a],
-                                .semantic_ownership = ownership,
-                                .semantic_mutable = mutable_fact,
-                                .alias_class = 0,
-                                .debug = debug};
+                               .dst = -1,
+                               .a = in->c,
+                               .b = -1,
+                               .c = -1,
+                               .imm = pt[in->a],
+                               .semantic_ownership = ownership,
+                               .semantic_mutable = mutable_fact,
+                               .alias_class = 0,
+                               .debug = debug};
           }
         }
         free(pt_escaped);

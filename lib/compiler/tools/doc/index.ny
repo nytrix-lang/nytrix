@@ -7,15 +7,16 @@ module core.compiler.tools.doc.index(markdown_sections, markdown_index_rows)
 use core
 use core.str as str
 
-fn _space(int byte) bool {
-   byte == 32 || (byte >= 9 && byte <= 13)
+fn _space(int byte) int {
+   if byte == 32 || (byte >= 9 && byte <= 13) { return 1 }
+   return 0
 }
 
 fn _trim(str value) str {
    mut int start = 0
    mut int stop = value.len
-   while start < stop && _space(load8(value, start)) { start += 1 }
-   while stop > start && _space(load8(value, stop - 1)) { stop -= 1 }
+   while start < stop && _space(load8(value, start)) != 0 { start += 1 }
+   while stop > start && _space(load8(value, stop - 1)) != 0 { stop -= 1 }
    str.str_slice(value, start, stop)
 }
 
@@ -32,15 +33,15 @@ fn _heading(str body, int start, int stop) str {
       hashes += 1
    }
    if hashes < 1 || hashes > 6 || pos + hashes >= stop ||
-   !_space(load8(body, pos + hashes)) {
+   _space(load8(body, pos + hashes)) == 0 {
       return ""
    }
    pos += hashes
-   while pos < stop && _space(load8(body, pos)) { pos += 1 }
+   while pos < stop && _space(load8(body, pos)) != 0 { pos += 1 }
    mut int end = stop
-   while end > pos && _space(load8(body, end - 1)) { end -= 1 }
+   while end > pos && _space(load8(body, end - 1)) != 0 { end -= 1 }
    while end > pos && load8(body, end - 1) == 35 { end -= 1 }
-   while end > pos && _space(load8(body, end - 1)) { end -= 1 }
+   while end > pos && _space(load8(body, end - 1)) != 0 { end -= 1 }
    if end <= pos { return "" }
    mut ptr title = str.Builder(end - pos)
    while pos < end {

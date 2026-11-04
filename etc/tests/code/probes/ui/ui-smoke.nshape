@@ -1,0 +1,130 @@
+defaults {
+  family "runtime-ui"
+  generator "embedded"
+  features [ui replay native jit vm bounded]
+  template ny-test-case
+  flags "--native --run -O0 --no-progress"
+  timeout 420
+  expect compile_and_run
+  expect_message "UI-REPLAY-OK"
+}
+
+shape ui_replay_animation {
+  source ny <<'NY'
+use core
+use core.os.subprocess (run_capture)
+def test_bin = env("NYTRIX_NY_TEST_BIN")
+def compiler = env("NYTRIX_NY_FULL_BIN")
+assert(is_str(test_bin) && test_bin.len > 0, "runner provides ny-test executable")
+assert(is_str(compiler) && compiler.len > 0, "runner provides compiler")
+def result = run_capture([test_bin, "ui-replay", "--compiler", compiler, "--apps", "animation", "--timeout", "290"], [], nil, false)
+print(result.get("stdout", ""))
+print(result.get("stderr", ""))
+assert(int(result.get("code", 127)) == 0, "animation native, JIT, and VM replay pass")
+NY
+}
+
+shape ui_replay_editor {
+  source ny <<'NY'
+use core
+use core.os.subprocess (run_capture)
+def test_bin = env("NYTRIX_NY_TEST_BIN")
+def compiler = env("NYTRIX_NY_FULL_BIN")
+assert(is_str(test_bin) && test_bin.len > 0, "runner provides ny-test executable")
+assert(is_str(compiler) && compiler.len > 0, "runner provides compiler")
+def result = run_capture([test_bin, "ui-replay", "--compiler", compiler, "--apps", "editor", "--timeout", "290"], [], nil, false)
+print(result.get("stdout", ""))
+print(result.get("stderr", ""))
+assert(int(result.get("code", 127)) == 0, "editor native, JIT, and VM replay pass")
+NY
+}
+
+shape ui_replay_engine {
+  source ny <<'NY'
+use core
+use core.os.subprocess (run_capture)
+def test_bin = env("NYTRIX_NY_TEST_BIN")
+def compiler = env("NYTRIX_NY_FULL_BIN")
+assert(is_str(test_bin) && test_bin.len > 0, "runner provides ny-test executable")
+assert(is_str(compiler) && compiler.len > 0, "runner provides compiler")
+def result = run_capture([test_bin, "ui-replay", "--compiler", compiler, "--apps", "engine", "--timeout", "290"], [], nil, false)
+print(result.get("stdout", ""))
+print(result.get("stderr", ""))
+assert(int(result.get("code", 127)) == 0, "engine native, JIT, and VM replay pass")
+NY
+}
+
+shape ui_replay_input {
+  source ny <<'NY'
+use core
+use core.os.subprocess (run_capture)
+def test_bin = env("NYTRIX_NY_TEST_BIN")
+def compiler = env("NYTRIX_NY_FULL_BIN")
+assert(is_str(test_bin) && test_bin.len > 0, "runner provides ny-test executable")
+assert(is_str(compiler) && compiler.len > 0, "runner provides compiler")
+def result = run_capture([test_bin, "ui-replay", "--compiler", compiler, "--apps", "input", "--timeout", "290"], [], nil, false)
+print(result.get("stdout", ""))
+print(result.get("stderr", ""))
+assert(int(result.get("code", 127)) == 0, "input native, JIT, and VM replay pass")
+NY
+}
+
+shape ui_replay_monitor {
+  source ny <<'NY'
+use core
+use core.os.subprocess (run_capture)
+def test_bin = env("NYTRIX_NY_TEST_BIN")
+def compiler = env("NYTRIX_NY_FULL_BIN")
+assert(is_str(test_bin) && test_bin.len > 0, "runner provides ny-test executable")
+assert(is_str(compiler) && compiler.len > 0, "runner provides compiler")
+def result = run_capture([test_bin, "ui-replay", "--compiler", compiler, "--apps", "monitor", "--timeout", "290"], [], nil, false)
+print(result.get("stdout", ""))
+print(result.get("stderr", ""))
+assert(int(result.get("code", 127)) == 0, "monitor native, JIT, and VM replay pass")
+NY
+}
+
+shape ui_replay_pong {
+  source ny <<'NY'
+use core
+use core.os.subprocess (run_capture)
+def test_bin = env("NYTRIX_NY_TEST_BIN")
+def compiler = env("NYTRIX_NY_FULL_BIN")
+assert(is_str(test_bin) && test_bin.len > 0, "runner provides ny-test executable")
+assert(is_str(compiler) && compiler.len > 0, "runner provides compiler")
+def result = run_capture([test_bin, "ui-replay", "--compiler", compiler, "--apps", "pong", "--timeout", "290"], [], nil, false)
+print(result.get("stdout", ""))
+print(result.get("stderr", ""))
+assert(int(result.get("code", 127)) == 0, "pong native, JIT, and VM replay pass")
+NY
+}
+
+shape ui_replay_synth {
+  source ny <<'NY'
+use core
+use core.os.subprocess (run_capture)
+def test_bin = env("NYTRIX_NY_TEST_BIN")
+def compiler = env("NYTRIX_NY_FULL_BIN")
+assert(is_str(test_bin) && test_bin.len > 0, "runner provides ny-test executable")
+assert(is_str(compiler) && compiler.len > 0, "runner provides compiler")
+def result = run_capture([test_bin, "ui-replay", "--compiler", compiler, "--apps", "synth", "--timeout", "290"], [], nil, false)
+print(result.get("stdout", ""))
+print(result.get("stderr", ""))
+assert(int(result.get("code", 127)) == 0, "synth native, JIT, and VM replay pass")
+NY
+}
+
+shape ui_replay_term {
+  source ny <<'NY'
+use core
+use core.os.subprocess (run_capture)
+def test_bin = env("NYTRIX_NY_TEST_BIN")
+def compiler = env("NYTRIX_NY_FULL_BIN")
+assert(is_str(test_bin) && test_bin.len > 0, "runner provides ny-test executable")
+assert(is_str(compiler) && compiler.len > 0, "runner provides compiler")
+def result = run_capture([test_bin, "ui-replay", "--compiler", compiler, "--apps", "term", "--timeout", "290"], [], nil, false)
+print(result.get("stdout", ""))
+print(result.get("stderr", ""))
+assert(int(result.get("code", 127)) == 0, "term native, JIT, and VM replay pass")
+NY
+}

@@ -1,9 +1,11 @@
 <!-- nytrix-doc: {"audience":"user","featured":false,"group":"learn","order":108,"summary":"Declare and check observable work at function boundaries."} -->
 # Effects
 
-Effects state which observable work a function may perform. Put the contract on
-the function that owns the boundary, then run strict checks in the target that
-requires it.
+An effect contract names the observable work a function may perform and gives
+the compiler a boundary to check. Put it on the function that owns that
+boundary, then run strict checks in the target that requires it.
+
+Prerequisites: basic function syntax from the [Tour](tour.md).
 
 ## Declare a contract
 
@@ -59,17 +61,16 @@ construction for other call shapes. See
 ## Check a target
 
 ```bash
-ny --strict-types file.ny
-ny --safe-mode file.ny
+ny --check=types file.ny
+ny --mode=safe file.ny
 ```
 
 The compiler rejects inferred `io`, `alloc`, `ffi`, or `thread` effects outside
 the declared mask. Run the strict checks in the target that requires the
 contract.
 
-## Related
+Next:
 
 - [Functions](../spec/functions.md#attributes)
 - [Runtime](../spec/runtime.md#attributes-and-effects)
 - [Ownership](ownership.md)
-- [Effect rows](../spec/functions.md#effect-rows)

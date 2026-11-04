@@ -5,6 +5,8 @@ Choose the highest-level API that still exposes the data your program needs.
 The standard library provides HTTP requests, local servers, process/network
 tubes, and raw sockets. Browser networking uses a separate host contract.
 
+Prerequisites: a compiler and a target that provides the network API in use.
+
 ## Choose a layer
 
 | Need | Starting point | Notes |
@@ -40,3 +42,9 @@ Native sockets and process APIs are not automatically available in a browser
 build. Browser `fetch` and WebSocket operations also depend on browser policy
 and user permissions. Use [Execution routes](status.md#execution-routes) and
 [Implementation status](status.md) to check the target you intend to ship.
+
+Next:
+
+- [Library](library.md) — find current networking signatures.
+- [Browser](browser.md) — check browser host and permissions.
+- [Testing](testing.md) — exercise error and timeout paths.

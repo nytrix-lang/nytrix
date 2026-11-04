@@ -15,16 +15,16 @@
 #include "base/trace.h"
 #include "base/util.h"
 #include "code/backend/abi.h"
+#include "code/backend/ast.h"
 #include "code/backend/internal.h"
 #include "code/backend/ir/internal.h"
-#include "code/lang/c/c.h"
+#include "code/backend/runtime/aliases.h"
+#include "code/backend/runtime/shared.h"
+#include "code/lang/parse/c/c.h"
 #include "code/lang/parse/frontend/visitor.h"
 #include "code/lang/parse/proof.h"
-#include "code/lang/pipeline/legacy_backend.h"
 #include "code/lang/pipeline/native.h"
 #include "code/lang/priv.h"
-#include "code/lang/runtime/aliases.h"
-#include "code/lang/runtime/shared.h"
 #include "code/lang/types/pipeline.h"
 #include "code/lang/types/policy.h"
 
@@ -216,6 +216,7 @@ typedef enum {
   NY_NATIVE_LEAF_STORE64,
   NY_NATIVE_LEAF_STORE64_H,
   NY_NATIVE_LEAF_STORE64_IDX,
+  NY_NATIVE_LEAF_IS_BOOL,
   NY_NATIVE_LEAF_IS_STR,
   NY_NATIVE_LEAF_PROVE,
   NY_NATIVE_LEAF_STATIC_ASSERT,
@@ -269,6 +270,8 @@ static ny_native_leaf_kind_t ny_native_leaf_kind(const char *leaf) {
       {"store16", NY_NATIVE_LEAF_STORE16},
       {"__store16_idx", NY_NATIVE_LEAF_STORE16},
       {"load32", NY_NATIVE_LEAF_LOAD32},
+      {"load32_h", NY_NATIVE_LEAF_LOAD32},
+      {"__load32_h", NY_NATIVE_LEAF_LOAD32},
       {"__load32_idx", NY_NATIVE_LEAF_LOAD32},
       {"store32", NY_NATIVE_LEAF_STORE32},
       {"__store32_idx", NY_NATIVE_LEAF_STORE32},
@@ -283,6 +286,7 @@ static ny_native_leaf_kind_t ny_native_leaf_kind(const char *leaf) {
       {"store64", NY_NATIVE_LEAF_STORE64},
       {"__store64_h", NY_NATIVE_LEAF_STORE64_H},
       {"__store64_idx", NY_NATIVE_LEAF_STORE64_IDX},
+      {"is_bool", NY_NATIVE_LEAF_IS_BOOL},
       {"__is_str_obj", NY_NATIVE_LEAF_IS_STR},
       /*
        * Proof and layout intrinsics: one declarative row per spelling keeps
@@ -313,7 +317,7 @@ static ny_native_leaf_kind_t ny_native_leaf_kind(const char *leaf) {
 }
 /*
  * Runtime builtins are exported by their C implementation names in
- * src/code/lang/runtime/defs.h.  Canonical declarations use that generated
+ * src/code/backend/runtime/defs.h.  Canonical declarations use that generated
  * table; aliases with distinct native ABI bridges are listed explicitly below.
  */
 #define NY_RT_SYMBOL_CACHE_BITS 13
@@ -357,6 +361,7 @@ const nyr_runtime_alias_t nyr_runtime_aliases[] = {
     {"__bigint_xor", "rt_bigint_xor"},
     {"__bytes_new", "rt_bytes_new"},
     {"__bytes_set_raw", "rt_bytes_set_raw"},
+    {"__calloc_raw", "rt_calloc_raw_i64"},
     {"__close", "rt_close_raw"},
     {"__complex_imag", "rt_complex_im_f64"},
     {"__complex_real", "rt_complex_re_f64"},
@@ -455,7 +460,7 @@ const nyr_runtime_alias_t nyr_runtime_aliases[] = {
     {"__str_concat", "rt_str_concat"},
     {"__str_eq", "rt_str_eq"},
     {"__str_len", "rt_cstr_len"},
-    {"__syscall", "rt_syscall_raw"},
+    {"__syscall", "rt_syscall"},
     {"__syscall_raw", "rt_syscall_raw"},
     {"__tag", "rt_tag"},
     {"__tagof", "rt_value_tag"},
@@ -520,6 +525,7 @@ const nyr_runtime_alias_t nyr_runtime_aliases[] = {
     {"core.bytes.long", "rt_long"},
     {"core.bytes_get", "rt_bytes_get_raw"},
     {"core.bytes_set", "rt_bytes_set_raw"},
+    {"core.compiler.syntax.type.is_bool", "rt_is_bool_obj"},
     {"core.compiler.syntax.type.is_str", "rt_is_str_obj"},
     {"core.contains", "rt_contains_raw"},
     {"core.dict_mod.dict_len", "rt_dict_len_raw"},
@@ -540,7 +546,17 @@ const nyr_runtime_alias_t nyr_runtime_aliases[] = {
     {"core.reflect.__value_get_index_raw", "rt_value_get_index_raw"},
     {"core.reflect.globals", "rt_globals_get"},
     {"core.set_mod.len", "rt_set_len_raw"},
+    {"core.str.chr", "rt_str_chr"},
     {"core.str.long", "rt_long"},
+    /*
+     * Method-call dispatch lowers through this alias; it must target the
+     * raw-count entry. The stdlib binds `__str_repeat` to `rt_str_repeat_raw`
+     * (lib/str.ny) because typed callers pass untagged i64 counts, and the
+     * tagged entry `rt_str_repeat` would wrongly halve odd raw counts via
+     * RT_UNTAG_INT (raw 3 looks tagged, become 1).
+     */
+    {"core.str.repeat", "rt_str_repeat_raw"},
+
     {"core.term.canvas", "rt_canvas"},
     {"core.term.canvas_clear", "rt_canvas_clear"},
     {"core.term.canvas_free", "rt_canvas_free"},
@@ -594,6 +610,7 @@ const nyr_runtime_alias_t nyr_runtime_aliases[] = {
     {"rt_box_i64", "rt_box_i64"},
     {"rt_bytes_index_read_raw", "rt_bytes_index_read_raw"},
     {"rt_bytes_new", "rt_bytes_new"},
+    {"rt_calloc_raw", "rt_calloc_raw_i64"},
     {"rt_cstr_index_read_raw", "rt_cstr_index_read_raw"},
     {"rt_dict_get_str_raw", "rt_dict_get_str_raw"},
     {"rt_free", "rt_free"},
@@ -689,1585 +706,1380 @@ static const char *ny_native_runtime_symbol_impl(const char *name) {
   if (strcmp(name, n) == 0)                                                    \
     return #implementation;
 #define RT_GV(n, implementation, type, doc)
-#include "code/lang/runtime/defs.h"
+#include "code/backend/runtime/defs.h"
 #undef RT_GV
 #undef RT_DEF
   return NULL;
 }
 
+/*
+ * One line per native ABI bridge entry. Expansion is token-identical to the
+ * hand-written multi-line spreads that used to fill this table: the NULL
+ * vm_call initializer `{0}` comes last for ENTRY (struct order: name, ABI
+ * flags, VM call kind, vm_call), and ENTRY_FN takes the VM call kind plus
+ * the named VM function slot as its last two arguments. The canonical
+ * declaration source remains the generated table in
+ * src/code/backend/runtime/defs.h; this table is hand-maintained.
+ */
+#define NY_NATIVE_ENTRY(name, flags, call_abi) {name, flags, call_abi, {0}}
+#define NY_NATIVE_ENTRY_FN(name, flags, call_abi, call_member, fn)             \
+  {                                                                            \
+    name, flags, call_abi, { .call_member = fn }                               \
+  }
+
 const ny_native_runtime_abi_decl_t ny_native_runtime_abi_decls[] = {
-    {"rt_any_add",
-     NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(0) | NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(1) |
-         NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_any_collection_remove_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(0) |
-         NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(1) |
-         NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
-     NY_NATIVE_VM_I64_BINARY_TO_I64,
-     {.i64_binary_i64 = rt_any_collection_remove_raw}},
-    {"rt_any_div",
-     NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(0) | NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(1) |
-         NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_any_eq",
-     NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(0) | NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(1),
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_any_len",
-     NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(0),
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_any_mod",
-     NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(0) | NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(1) |
-         NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_any_mul",
-     NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(0) | NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(1) |
-         NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_any_tag",
-     NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(0),
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_any_to_cstr",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_VALUE_CONVERSION |
-         NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(0) |
-         NY_NATIVE_RUNTIME_ABI_RESULT_CSTR,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_any_to_f64",
-     NY_NATIVE_RUNTIME_ABI_RESULT_F64 | NY_NATIVE_RUNTIME_ABI_VALUE_CONVERSION,
-     NY_NATIVE_VM_I64_UNARY_TO_F64,
-     {.i64_unary_f64 = rt_any_to_f64}},
-    {"rt_any_to_i64",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_VALUE_CONVERSION |
-         NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(0) |
-         NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
-     NY_NATIVE_VM_I64_UNARY_TO_I64,
-     {.i64_unary_i64 = rt_any_to_i64}},
-    {"rt_arch_name",
-     NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_args_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_atof",
-     NY_NATIVE_RUNTIME_ABI_RESULT_F64,
-     NY_NATIVE_VM_I64_UNARY_TO_F64,
-     {.i64_unary_f64 = rt_atof}},
-    {"rt_bigfloat_abs",
-     NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
-     NY_NATIVE_VM_I64_UNARY_TO_I64,
-     {.i64_unary_i64 = rt_bigfloat_abs}},
-    {"rt_bigfloat_add",
-     NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
-     NY_NATIVE_VM_I64_BINARY_TO_I64,
-     {.i64_binary_i64 = rt_bigfloat_add}},
-    {"rt_bigfloat_cmp_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_bigfloat_div",
-     NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
-     NY_NATIVE_VM_I64_BINARY_TO_I64,
-     {.i64_binary_i64 = rt_bigfloat_div}},
-    {"rt_bigfloat_from_f64",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(1) |
-         NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
-     NY_NATIVE_VM_F64_I64_TO_I64,
-     {.f64_i64_i64 = rt_bigfloat_from_f64}},
-    {"rt_bigfloat_from_value_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_VALUE_CONVERSION |
-         NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(0) |
-         NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_bigfloat_is",
-     NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
-     NY_NATIVE_VM_I64_UNARY_TO_I64,
-     {.i64_unary_i64 = rt_bigfloat_is}},
-    {"rt_bigfloat_mul",
-     NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
-     NY_NATIVE_VM_I64_BINARY_TO_I64,
-     {.i64_binary_i64 = rt_bigfloat_mul}},
-    {"rt_bigfloat_neg",
-     NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
-     NY_NATIVE_VM_I64_UNARY_TO_I64,
-     {.i64_unary_i64 = rt_bigfloat_neg}},
-    {"rt_bigfloat_one",
-     NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
-     NY_NATIVE_VM_I64_UNARY_TO_I64,
-     {.i64_unary_i64 = rt_bigfloat_one}},
-    {"rt_bigfloat_pow_int_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
-     NY_NATIVE_VM_I64_BINARY_TO_I64,
-     {.i64_binary_i64 = rt_bigfloat_pow_int_raw}},
-    {"rt_bigfloat_precision_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_RAW_WORD,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_bigfloat_sqrt",
-     NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
-     NY_NATIVE_VM_I64_UNARY_TO_I64,
-     {.i64_unary_i64 = rt_bigfloat_sqrt}},
-    {"rt_bigfloat_sub",
-     NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
-     NY_NATIVE_VM_I64_BINARY_TO_I64,
-     {.i64_binary_i64 = rt_bigfloat_sub}},
-    {"rt_bigfloat_to_f64_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(0) |
-         NY_NATIVE_RUNTIME_ABI_RESULT_F64 |
-         NY_NATIVE_RUNTIME_ABI_VALUE_CONVERSION,
-     NY_NATIVE_VM_I64_UNARY_TO_F64,
-     {.i64_unary_f64 = rt_bigfloat_to_f64_raw}},
-    {"rt_bigfloat_to_str",
-     NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
-     NY_NATIVE_VM_I64_UNARY_TO_I64,
-     {.i64_unary_i64 = rt_bigfloat_to_str}},
-    {"rt_bigfloat_zero",
-     NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
-     NY_NATIVE_VM_I64_UNARY_TO_I64,
-     {.i64_unary_i64 = rt_bigfloat_zero}},
-    {"rt_bigint_add",
-     NY_NATIVE_RUNTIME_ABI_BIGINT_VALUES | NY_NATIVE_RUNTIME_ABI_RESULT_BIGINT,
-     NY_NATIVE_VM_I64_BINARY_TO_I64,
-     {.i64_binary_i64 = rt_bigint_add}},
-    {"rt_bigint_and",
-     NY_NATIVE_RUNTIME_ABI_BIGINT_VALUES | NY_NATIVE_RUNTIME_ABI_RESULT_BIGINT,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_bigint_bitlen_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT |
-         NY_NATIVE_RUNTIME_ABI_BIGINT_VALUES,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_bigint_clz",
-     NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_INT,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_bigint_cmp_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT |
-         NY_NATIVE_RUNTIME_ABI_BIGINT_VALUES,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_bigint_ctz",
-     NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_INT,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_bigint_div",
-     NY_NATIVE_RUNTIME_ABI_BIGINT_VALUES | NY_NATIVE_RUNTIME_ABI_RESULT_BIGINT,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_bigint_from_i64_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_VALUE_CONVERSION |
-         NY_NATIVE_RUNTIME_ABI_RESULT_BIGINT,
-     NY_NATIVE_VM_I64_UNARY_TO_I64,
-     {.i64_unary_i64 = rt_bigint_from_i64_raw}},
-    {"rt_bigint_from_int",
-     NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(0) |
-         NY_NATIVE_RUNTIME_ABI_VALUE_CONVERSION |
-         NY_NATIVE_RUNTIME_ABI_RESULT_BIGINT,
-     NY_NATIVE_VM_I64_UNARY_TO_I64,
-     {.i64_unary_i64 = rt_bigint_from_int}},
-    {"rt_bigint_iroot",
-     NY_NATIVE_RUNTIME_ABI_BIGINT_VALUES | NY_NATIVE_RUNTIME_ABI_RESULT_BIGINT,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_bigint_jacobi",
-     NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_INT,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_bigint_kronecker",
-     NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_INT,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_bigint_legendre",
-     NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_INT,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_bigint_mod",
-     NY_NATIVE_RUNTIME_ABI_BIGINT_VALUES | NY_NATIVE_RUNTIME_ABI_RESULT_BIGINT,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_bigint_modinv",
-     NY_NATIVE_RUNTIME_ABI_BIGINT_VALUES | NY_NATIVE_RUNTIME_ABI_RESULT_BIGINT,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_bigint_mul",
-     NY_NATIVE_RUNTIME_ABI_BIGINT_VALUES | NY_NATIVE_RUNTIME_ABI_RESULT_BIGINT,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_bigint_neg_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_BIGINT_VALUES |
-         NY_NATIVE_RUNTIME_ABI_RESULT_BIGINT,
-     NY_NATIVE_VM_I64_UNARY_TO_I64,
-     {.i64_unary_i64 = rt_bigint_neg_raw}},
-    {"rt_bigint_or",
-     NY_NATIVE_RUNTIME_ABI_BIGINT_VALUES | NY_NATIVE_RUNTIME_ABI_RESULT_BIGINT,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_bigint_pow",
-     NY_NATIVE_RUNTIME_ABI_BIGINT_VALUES | NY_NATIVE_RUNTIME_ABI_RESULT_BIGINT,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_bigint_sub",
-     NY_NATIVE_RUNTIME_ABI_BIGINT_VALUES | NY_NATIVE_RUNTIME_ABI_RESULT_BIGINT,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_bigint_submul",
-     NY_NATIVE_RUNTIME_ABI_BIGINT_VALUES | NY_NATIVE_RUNTIME_ABI_RESULT_BIGINT,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_bigint_to_cstr_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_BIGINT_VALUES |
-         NY_NATIVE_RUNTIME_ABI_RESULT_CSTR,
-     NY_NATIVE_VM_I64_UNARY_TO_I64,
-     {.i64_unary_i64 = rt_bigint_to_cstr_raw}},
-    {"rt_bigint_to_i64_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT |
-         NY_NATIVE_RUNTIME_ABI_VALUE_CONVERSION |
-         NY_NATIVE_RUNTIME_ABI_BIGINT_VALUES,
-     NY_NATIVE_VM_I64_UNARY_TO_I64,
-     {.i64_unary_i64 = rt_bigint_to_i64_raw}},
-    {"rt_bigint_to_int",
-     NY_NATIVE_RUNTIME_ABI_BIGINT_VALUES |
-         NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
-     NY_NATIVE_VM_I64_UNARY_TO_I64,
-     {.i64_unary_i64 = rt_bigint_to_int}},
-    {"rt_bigint_to_str",
-     NY_NATIVE_RUNTIME_ABI_BIGINT_VALUES | NY_NATIVE_RUNTIME_ABI_RESULT_CSTR,
-     NY_NATIVE_VM_I64_UNARY_TO_I64,
-     {.i64_unary_i64 = rt_bigint_to_str}},
-    {"rt_bigint_xor",
-     NY_NATIVE_RUNTIME_ABI_BIGINT_VALUES | NY_NATIVE_RUNTIME_ABI_RESULT_BIGINT,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_bool_to_cstr",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_CSTR,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_box_i64",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_bshr_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_RAW_WORD,
-     NY_NATIVE_VM_I64_BINARY_TO_I64,
-     {.i64_binary_i64 = rt_bshr_raw}},
-    {"rt_bytes_get_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_bytes_index_read_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_bytes_new",
-     NY_NATIVE_RUNTIME_ABI_RESULT_CSTR,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_bytes_new_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_CSTR,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_bytes_set_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_CSTR,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_call0_i32",
-     NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES |
-         NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_INT,
-     NY_NATIVE_VM_I64_UNARY_TO_I64,
-     {.i64_unary_i64 = rt_call0_i32}},
-    {"rt_call0_ptr",
-     NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES,
-     NY_NATIVE_VM_I64_UNARY_TO_I64,
-     {.i64_unary_i64 = rt_call0_ptr}},
-    {"rt_call0_void",
-     NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES,
-     NY_NATIVE_VM_I64_UNARY_TO_I64,
-     {.i64_unary_i64 = rt_call0_void}},
-    {"rt_call10_void",
-     NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES,
-     NY_NATIVE_VM_I64_UNDECENARY_TO_I64,
-     {.i64_undecenary_i64 = rt_call10_void}},
-    {"rt_call1_f32_void",
-     NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES,
-     NY_NATIVE_VM_I64_BINARY_TO_I64,
-     {.i64_binary_i64 = rt_call1_f32_void}},
-    {"rt_call1_i64",
-     NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES,
-     NY_NATIVE_VM_I64_BINARY_TO_I64,
-     {.i64_binary_i64 = rt_call1_i64}},
-    {"rt_call1_ptr",
-     NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES,
-     NY_NATIVE_VM_I64_BINARY_TO_I64,
-     {.i64_binary_i64 = rt_call1_ptr}},
-    {"rt_call1_u32",
-     NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES,
-     NY_NATIVE_VM_I64_BINARY_TO_I64,
-     {.i64_binary_i64 = rt_call1_u32}},
-    {"rt_call1_u32_void",
-     NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES,
-     NY_NATIVE_VM_I64_BINARY_TO_I64,
-     {.i64_binary_i64 = rt_call1_u32_void}},
-    {"rt_call1_void",
-     NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES,
-     NY_NATIVE_VM_I64_BINARY_TO_I64,
-     {.i64_binary_i64 = rt_call1_void}},
-    {"rt_call2_f32_void",
-     NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES,
-     NY_NATIVE_VM_I64_TERNARY_TO_I64,
-     {.i64_ternary_i64 = rt_call2_f32_void}},
-    {"rt_call2_ptr",
-     NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES,
-     NY_NATIVE_VM_I64_TERNARY_TO_I64,
-     {.i64_ternary_i64 = rt_call2_ptr}},
-    {"rt_call2_ptr_u32",
-     NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES,
-     NY_NATIVE_VM_I64_TERNARY_TO_I64,
-     {.i64_ternary_i64 = rt_call2_ptr_u32}},
-    {"rt_call2_void",
-     NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES,
-     NY_NATIVE_VM_I64_TERNARY_TO_I64,
-     {.i64_ternary_i64 = rt_call2_void}},
-    {"rt_call3_f32_void",
-     NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES,
-     NY_NATIVE_VM_I64_QUATERNARY_TO_I64,
-     {.i64_quaternary_i64 = rt_call3_f32_void}},
-    {"rt_call3_ptr",
-     NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES,
-     NY_NATIVE_VM_I64_QUATERNARY_TO_I64,
-     {.i64_quaternary_i64 = rt_call3_ptr}},
-    {"rt_call3_ptr_ptr_u32",
-     NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES,
-     NY_NATIVE_VM_I64_QUATERNARY_TO_I64,
-     {.i64_quaternary_i64 = rt_call3_ptr_ptr_u32}},
-    {"rt_call3_ptr_u32_ptr",
-     NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES,
-     NY_NATIVE_VM_I64_QUATERNARY_TO_I64,
-     {.i64_quaternary_i64 = rt_call3_ptr_u32_ptr}},
-    {"rt_call3_ptr_u64_ptr",
-     NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES,
-     NY_NATIVE_VM_I64_QUATERNARY_TO_I64,
-     {.i64_quaternary_i64 = rt_call3_ptr_u64_ptr}},
-    {"rt_call3_ptr_u64_ptr_i32",
-     NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES |
-         NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_INT,
-     NY_NATIVE_VM_I64_QUATERNARY_TO_I64,
-     {.i64_quaternary_i64 = rt_call3_ptr_u64_ptr_i32}},
-    {"rt_call3_void",
-     NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES,
-     NY_NATIVE_VM_I64_QUATERNARY_TO_I64,
-     {.i64_quaternary_i64 = rt_call3_void}},
-    {"rt_call4_f32_void",
-     NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES,
-     NY_NATIVE_VM_I64_QUINARY_TO_I64,
-     {.i64_quinary_i64 = rt_call4_f32_void}},
-    {"rt_call4_ptr",
-     NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES,
-     NY_NATIVE_VM_I64_QUINARY_TO_I64,
-     {.i64_quinary_i64 = rt_call4_ptr}},
-    {"rt_call4_ptr_ptr_ptr_ptr_i32",
-     NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES |
-         NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_INT,
-     NY_NATIVE_VM_I64_QUINARY_TO_I64,
-     {.i64_quinary_i64 = rt_call4_ptr_ptr_ptr_ptr_i32}},
-    {"rt_call4_ptr_ptr_ptr_ptr_void",
-     NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES,
-     NY_NATIVE_VM_I64_QUINARY_TO_I64,
-     {.i64_quinary_i64 = rt_call4_ptr_ptr_ptr_ptr_void}},
-    {"rt_call4_ptr_ptr_ptr_u64_i32",
-     NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES |
-         NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_INT,
-     NY_NATIVE_VM_I64_QUINARY_TO_I64,
-     {.i64_quinary_i64 = rt_call4_ptr_ptr_ptr_u64_i32}},
-    {"rt_call4_ptr_u32_u64_ptr_i32",
-     NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES |
-         NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_INT,
-     NY_NATIVE_VM_I64_QUINARY_TO_I64,
-     {.i64_quinary_i64 = rt_call4_ptr_u32_u64_ptr_i32}},
-    {"rt_call4_ptr_u64_ptr_ptr_i32",
-     NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES |
-         NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_INT,
-     NY_NATIVE_VM_I64_QUINARY_TO_I64,
-     {.i64_quinary_i64 = rt_call4_ptr_u64_ptr_ptr_i32}},
-    {"rt_call4_void",
-     NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES,
-     NY_NATIVE_VM_I64_QUINARY_TO_I64,
-     {.i64_quinary_i64 = rt_call4_void}},
-    {"rt_call5_ptr",
-     NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES,
-     NY_NATIVE_VM_I64_SENARY_TO_I64,
-     {.i64_senary_i64 = rt_call5_ptr}},
-    {"rt_call5_ptr_ptr_ptr_u64_i32_i32",
-     NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES |
-         NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_INT,
-     NY_NATIVE_VM_I64_SENARY_TO_I64,
-     {.i64_senary_i64 = rt_call5_ptr_ptr_ptr_u64_i32_i32}},
-    {"rt_call5_void",
-     NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES,
-     NY_NATIVE_VM_I64_SENARY_TO_I64,
-     {.i64_senary_i64 = rt_call5_void}},
-    {"rt_call6_void",
-     NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES,
-     NY_NATIVE_VM_I64_SEPTENARY_TO_I64,
-     {.i64_septenary_i64 = rt_call6_void}},
-    {"rt_call7_void",
-     NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES,
-     NY_NATIVE_VM_I64_OCTARY_TO_I64,
-     {.i64_octary_i64 = rt_call7_void}},
-    {"rt_call8_void",
-     NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES,
-     NY_NATIVE_VM_I64_NONARY_TO_I64,
-     {.i64_nonary_i64 = rt_call8_void}},
-    {"rt_call9_void",
-     NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES,
-     NY_NATIVE_VM_I64_DECENARY_TO_I64,
-     {.i64_decenary_i64 = rt_call9_void}},
+    NY_NATIVE_ENTRY("rt_any_add",
+                    NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(0) |
+                        NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(1) |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY_FN("rt_any_collection_remove_raw",
+                       NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                           NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(0) |
+                           NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(1) |
+                           NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
+                       NY_NATIVE_VM_I64_BINARY_TO_I64, i64_binary_i64,
+                       rt_any_collection_remove_raw),
+    NY_NATIVE_ENTRY("rt_any_div",
+                    NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(0) |
+                        NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(1) |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_any_eq",
+                    NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(0) |
+                        NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(1),
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_any_len", NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(0),
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_any_mod",
+                    NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(0) |
+                        NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(1) |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_any_mul",
+                    NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(0) |
+                        NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(1) |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_any_tag", NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(0),
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_any_to_cstr",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_VALUE_CONVERSION |
+                        NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(0) |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_CSTR,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY_FN("rt_any_to_f64",
+                       NY_NATIVE_RUNTIME_ABI_RESULT_F64 |
+                           NY_NATIVE_RUNTIME_ABI_VALUE_CONVERSION,
+                       NY_NATIVE_VM_I64_UNARY_TO_F64, i64_unary_f64,
+                       rt_any_to_f64),
+    NY_NATIVE_ENTRY_FN("rt_any_to_i64",
+                       NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                           NY_NATIVE_RUNTIME_ABI_VALUE_CONVERSION |
+                           NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(0) |
+                           NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
+                       NY_NATIVE_VM_I64_UNARY_TO_I64, i64_unary_i64,
+                       rt_any_to_i64),
+    NY_NATIVE_ENTRY("rt_arch_name", NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_args_raw", NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY_FN("rt_atof", NY_NATIVE_RUNTIME_ABI_RESULT_F64,
+                       NY_NATIVE_VM_I64_UNARY_TO_F64, i64_unary_f64, rt_atof),
+    NY_NATIVE_ENTRY_FN("rt_atoi",
+                       NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                           NY_NATIVE_RUNTIME_ABI_VALUE_CONVERSION |
+                           NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
+                       NY_NATIVE_VM_I64_UNARY_TO_I64, i64_unary_i64, rt_atoi),
+    NY_NATIVE_ENTRY_FN(
+        "rt_bigfloat_abs", NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
+        NY_NATIVE_VM_I64_UNARY_TO_I64, i64_unary_i64, rt_bigfloat_abs),
+    NY_NATIVE_ENTRY_FN(
+        "rt_bigfloat_add", NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
+        NY_NATIVE_VM_I64_BINARY_TO_I64, i64_binary_i64, rt_bigfloat_add),
+    NY_NATIVE_ENTRY("rt_bigfloat_cmp_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY_FN(
+        "rt_bigfloat_div", NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
+        NY_NATIVE_VM_I64_BINARY_TO_I64, i64_binary_i64, rt_bigfloat_div),
+    NY_NATIVE_ENTRY_FN("rt_bigfloat_from_f64",
+                       NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                           NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(1) |
+                           NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
+                       NY_NATIVE_VM_F64_I64_TO_I64, f64_i64_i64,
+                       rt_bigfloat_from_f64),
+    NY_NATIVE_ENTRY("rt_bigfloat_from_value_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_VALUE_CONVERSION |
+                        NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(0) |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY_FN(
+        "rt_bigfloat_is", NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
+        NY_NATIVE_VM_I64_UNARY_TO_I64, i64_unary_i64, rt_bigfloat_is),
+    NY_NATIVE_ENTRY_FN(
+        "rt_bigfloat_mul", NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
+        NY_NATIVE_VM_I64_BINARY_TO_I64, i64_binary_i64, rt_bigfloat_mul),
+    NY_NATIVE_ENTRY_FN(
+        "rt_bigfloat_neg", NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
+        NY_NATIVE_VM_I64_UNARY_TO_I64, i64_unary_i64, rt_bigfloat_neg),
+    NY_NATIVE_ENTRY_FN(
+        "rt_bigfloat_one", NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
+        NY_NATIVE_VM_I64_UNARY_TO_I64, i64_unary_i64, rt_bigfloat_one),
+    NY_NATIVE_ENTRY_FN("rt_bigfloat_pow_int_raw",
+                       NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                           NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
+                       NY_NATIVE_VM_I64_BINARY_TO_I64, i64_binary_i64,
+                       rt_bigfloat_pow_int_raw),
+    NY_NATIVE_ENTRY("rt_bigfloat_precision_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_RAW_WORD,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY_FN(
+        "rt_bigfloat_sqrt", NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
+        NY_NATIVE_VM_I64_UNARY_TO_I64, i64_unary_i64, rt_bigfloat_sqrt),
+    NY_NATIVE_ENTRY_FN(
+        "rt_bigfloat_sub", NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
+        NY_NATIVE_VM_I64_BINARY_TO_I64, i64_binary_i64, rt_bigfloat_sub),
+    NY_NATIVE_ENTRY_FN("rt_bigfloat_to_f64_raw",
+                       NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                           NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(0) |
+                           NY_NATIVE_RUNTIME_ABI_RESULT_F64 |
+                           NY_NATIVE_RUNTIME_ABI_VALUE_CONVERSION,
+                       NY_NATIVE_VM_I64_UNARY_TO_F64, i64_unary_f64,
+                       rt_bigfloat_to_f64_raw),
+    NY_NATIVE_ENTRY_FN(
+        "rt_bigfloat_to_str", NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
+        NY_NATIVE_VM_I64_UNARY_TO_I64, i64_unary_i64, rt_bigfloat_to_str),
+    NY_NATIVE_ENTRY_FN(
+        "rt_bigfloat_zero", NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
+        NY_NATIVE_VM_I64_UNARY_TO_I64, i64_unary_i64, rt_bigfloat_zero),
+    NY_NATIVE_ENTRY_FN("rt_bigint_add",
+                       NY_NATIVE_RUNTIME_ABI_BIGINT_VALUES |
+                           NY_NATIVE_RUNTIME_ABI_RESULT_BIGINT,
+                       NY_NATIVE_VM_I64_BINARY_TO_I64, i64_binary_i64,
+                       rt_bigint_add),
+    NY_NATIVE_ENTRY("rt_bigint_and",
+                    NY_NATIVE_RUNTIME_ABI_BIGINT_VALUES |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_BIGINT,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_bigint_bitlen_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT |
+                        NY_NATIVE_RUNTIME_ABI_BIGINT_VALUES,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_bigint_clz", NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_INT,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_bigint_cmp_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT |
+                        NY_NATIVE_RUNTIME_ABI_BIGINT_VALUES,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_bigint_ctz", NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_INT,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_bigint_div",
+                    NY_NATIVE_RUNTIME_ABI_BIGINT_VALUES |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_BIGINT,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY_FN("rt_bigint_from_i64_raw",
+                       NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                           NY_NATIVE_RUNTIME_ABI_VALUE_CONVERSION |
+                           NY_NATIVE_RUNTIME_ABI_RESULT_BIGINT,
+                       NY_NATIVE_VM_I64_UNARY_TO_I64, i64_unary_i64,
+                       rt_bigint_from_i64_raw),
+    NY_NATIVE_ENTRY_FN("rt_bigint_from_int",
+                       NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(0) |
+                           NY_NATIVE_RUNTIME_ABI_VALUE_CONVERSION |
+                           NY_NATIVE_RUNTIME_ABI_RESULT_BIGINT,
+                       NY_NATIVE_VM_I64_UNARY_TO_I64, i64_unary_i64,
+                       rt_bigint_from_int),
+    NY_NATIVE_ENTRY("rt_bigint_iroot",
+                    NY_NATIVE_RUNTIME_ABI_BIGINT_VALUES |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_BIGINT,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_bigint_jacobi", NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_INT,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_bigint_kronecker",
+                    NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_INT,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_bigint_legendre",
+                    NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_INT,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_bigint_mod",
+                    NY_NATIVE_RUNTIME_ABI_BIGINT_VALUES |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_BIGINT,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_bigint_modinv",
+                    NY_NATIVE_RUNTIME_ABI_BIGINT_VALUES |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_BIGINT,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_bigint_mul",
+                    NY_NATIVE_RUNTIME_ABI_BIGINT_VALUES |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_BIGINT,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_bigint_mul_div_small",
+                    NY_NATIVE_RUNTIME_ABI_BIGINT_VALUES |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_BIGINT,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY_FN("rt_bigint_neg_raw",
+                       NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                           NY_NATIVE_RUNTIME_ABI_BIGINT_VALUES |
+                           NY_NATIVE_RUNTIME_ABI_RESULT_BIGINT,
+                       NY_NATIVE_VM_I64_UNARY_TO_I64, i64_unary_i64,
+                       rt_bigint_neg_raw),
+    NY_NATIVE_ENTRY("rt_bigint_or",
+                    NY_NATIVE_RUNTIME_ABI_BIGINT_VALUES |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_BIGINT,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_bigint_pow",
+                    NY_NATIVE_RUNTIME_ABI_BIGINT_VALUES |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_BIGINT,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_bigint_sub",
+                    NY_NATIVE_RUNTIME_ABI_BIGINT_VALUES |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_BIGINT,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_bigint_submul",
+                    NY_NATIVE_RUNTIME_ABI_BIGINT_VALUES |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_BIGINT,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY_FN("rt_bigint_to_cstr_raw",
+                       NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                           NY_NATIVE_RUNTIME_ABI_BIGINT_VALUES |
+                           NY_NATIVE_RUNTIME_ABI_RESULT_CSTR,
+                       NY_NATIVE_VM_I64_UNARY_TO_I64, i64_unary_i64,
+                       rt_bigint_to_cstr_raw),
+    NY_NATIVE_ENTRY_FN("rt_bigint_to_i64_raw",
+                       NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                           NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT |
+                           NY_NATIVE_RUNTIME_ABI_VALUE_CONVERSION |
+                           NY_NATIVE_RUNTIME_ABI_BIGINT_VALUES,
+                       NY_NATIVE_VM_I64_UNARY_TO_I64, i64_unary_i64,
+                       rt_bigint_to_i64_raw),
+    NY_NATIVE_ENTRY_FN("rt_bigint_to_int",
+                       NY_NATIVE_RUNTIME_ABI_BIGINT_VALUES |
+                           NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
+                       NY_NATIVE_VM_I64_UNARY_TO_I64, i64_unary_i64,
+                       rt_bigint_to_int),
+    NY_NATIVE_ENTRY_FN(
+        "rt_bigint_to_str",
+        NY_NATIVE_RUNTIME_ABI_BIGINT_VALUES | NY_NATIVE_RUNTIME_ABI_RESULT_CSTR,
+        NY_NATIVE_VM_I64_UNARY_TO_I64, i64_unary_i64, rt_bigint_to_str),
+    NY_NATIVE_ENTRY("rt_bigint_xor",
+                    NY_NATIVE_RUNTIME_ABI_BIGINT_VALUES |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_BIGINT,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY_FN("rt_bool_not",
+                       NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                           NY_NATIVE_RUNTIME_ABI_RESULT_RAW_WORD,
+                       NY_NATIVE_VM_I64_UNARY_TO_I64, i64_unary_i64,
+                       rt_bool_not),
+    NY_NATIVE_ENTRY("rt_bool_to_cstr",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_CSTR,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_box_i64",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY_FN("rt_bshr_raw",
+                       NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                           NY_NATIVE_RUNTIME_ABI_RESULT_RAW_WORD,
+                       NY_NATIVE_VM_I64_BINARY_TO_I64, i64_binary_i64,
+                       rt_bshr_raw),
+    NY_NATIVE_ENTRY("rt_bytes_get_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_SOURCE_PREFERRED,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_bytes_index_read_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_bytes_new", NY_NATIVE_RUNTIME_ABI_RESULT_CSTR,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_bytes_new_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_CSTR,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_bytes_set_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_CSTR,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY_FN("rt_call0_i32",
+                       NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES |
+                           NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_INT,
+                       NY_NATIVE_VM_I64_UNARY_TO_I64, i64_unary_i64,
+                       rt_call0_i32),
+    NY_NATIVE_ENTRY_FN("rt_call0_ptr", NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES,
+                       NY_NATIVE_VM_I64_UNARY_TO_I64, i64_unary_i64,
+                       rt_call0_ptr),
+    NY_NATIVE_ENTRY_FN("rt_call0_void", NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES,
+                       NY_NATIVE_VM_I64_UNARY_TO_I64, i64_unary_i64,
+                       rt_call0_void),
+    NY_NATIVE_ENTRY_FN("rt_call10_void", NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES,
+                       NY_NATIVE_VM_I64_UNDECENARY_TO_I64, i64_undecenary_i64,
+                       rt_call10_void),
+    NY_NATIVE_ENTRY_FN("rt_call1_f32_void", NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES,
+                       NY_NATIVE_VM_I64_BINARY_TO_I64, i64_binary_i64,
+                       rt_call1_f32_void),
+    NY_NATIVE_ENTRY_FN("rt_call1_i64", NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES,
+                       NY_NATIVE_VM_I64_BINARY_TO_I64, i64_binary_i64,
+                       rt_call1_i64),
+    NY_NATIVE_ENTRY_FN("rt_call1_ptr", NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES,
+                       NY_NATIVE_VM_I64_BINARY_TO_I64, i64_binary_i64,
+                       rt_call1_ptr),
+    NY_NATIVE_ENTRY_FN("rt_call1_u32", NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES,
+                       NY_NATIVE_VM_I64_BINARY_TO_I64, i64_binary_i64,
+                       rt_call1_u32),
+    NY_NATIVE_ENTRY_FN("rt_call1_u32_void", NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES,
+                       NY_NATIVE_VM_I64_BINARY_TO_I64, i64_binary_i64,
+                       rt_call1_u32_void),
+    NY_NATIVE_ENTRY_FN("rt_call1_void", NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES,
+                       NY_NATIVE_VM_I64_BINARY_TO_I64, i64_binary_i64,
+                       rt_call1_void),
+    NY_NATIVE_ENTRY_FN("rt_call2_f32_void", NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES,
+                       NY_NATIVE_VM_I64_TERNARY_TO_I64, i64_ternary_i64,
+                       rt_call2_f32_void),
+    NY_NATIVE_ENTRY_FN("rt_call2_ptr", NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES,
+                       NY_NATIVE_VM_I64_TERNARY_TO_I64, i64_ternary_i64,
+                       rt_call2_ptr),
+    NY_NATIVE_ENTRY_FN("rt_call2_ptr_u32", NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES,
+                       NY_NATIVE_VM_I64_TERNARY_TO_I64, i64_ternary_i64,
+                       rt_call2_ptr_u32),
+    NY_NATIVE_ENTRY_FN("rt_call2_void", NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES,
+                       NY_NATIVE_VM_I64_TERNARY_TO_I64, i64_ternary_i64,
+                       rt_call2_void),
+    NY_NATIVE_ENTRY_FN("rt_call3_f32_void", NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES,
+                       NY_NATIVE_VM_I64_QUATERNARY_TO_I64, i64_quaternary_i64,
+                       rt_call3_f32_void),
+    NY_NATIVE_ENTRY_FN("rt_call3_ptr", NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES,
+                       NY_NATIVE_VM_I64_QUATERNARY_TO_I64, i64_quaternary_i64,
+                       rt_call3_ptr),
+    NY_NATIVE_ENTRY_FN("rt_call3_ptr_ptr_u32",
+                       NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES,
+                       NY_NATIVE_VM_I64_QUATERNARY_TO_I64, i64_quaternary_i64,
+                       rt_call3_ptr_ptr_u32),
+    NY_NATIVE_ENTRY_FN("rt_call3_ptr_u32_ptr",
+                       NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES,
+                       NY_NATIVE_VM_I64_QUATERNARY_TO_I64, i64_quaternary_i64,
+                       rt_call3_ptr_u32_ptr),
+    NY_NATIVE_ENTRY_FN("rt_call3_ptr_u64_ptr",
+                       NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES,
+                       NY_NATIVE_VM_I64_QUATERNARY_TO_I64, i64_quaternary_i64,
+                       rt_call3_ptr_u64_ptr),
+    NY_NATIVE_ENTRY_FN("rt_call3_ptr_u64_ptr_i32",
+                       NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES |
+                           NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_INT,
+                       NY_NATIVE_VM_I64_QUATERNARY_TO_I64, i64_quaternary_i64,
+                       rt_call3_ptr_u64_ptr_i32),
+    NY_NATIVE_ENTRY_FN("rt_call3_void", NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES,
+                       NY_NATIVE_VM_I64_QUATERNARY_TO_I64, i64_quaternary_i64,
+                       rt_call3_void),
+    NY_NATIVE_ENTRY_FN("rt_call4_f32_void", NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES,
+                       NY_NATIVE_VM_I64_QUINARY_TO_I64, i64_quinary_i64,
+                       rt_call4_f32_void),
+    NY_NATIVE_ENTRY_FN("rt_call4_ptr", NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES,
+                       NY_NATIVE_VM_I64_QUINARY_TO_I64, i64_quinary_i64,
+                       rt_call4_ptr),
+    NY_NATIVE_ENTRY_FN("rt_call4_ptr_ptr_ptr_ptr_i32",
+                       NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES |
+                           NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_INT,
+                       NY_NATIVE_VM_I64_QUINARY_TO_I64, i64_quinary_i64,
+                       rt_call4_ptr_ptr_ptr_ptr_i32),
+    NY_NATIVE_ENTRY_FN("rt_call4_ptr_ptr_ptr_ptr_void",
+                       NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES,
+                       NY_NATIVE_VM_I64_QUINARY_TO_I64, i64_quinary_i64,
+                       rt_call4_ptr_ptr_ptr_ptr_void),
+    NY_NATIVE_ENTRY_FN("rt_call4_ptr_ptr_ptr_u64_i32",
+                       NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES |
+                           NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_INT,
+                       NY_NATIVE_VM_I64_QUINARY_TO_I64, i64_quinary_i64,
+                       rt_call4_ptr_ptr_ptr_u64_i32),
+    NY_NATIVE_ENTRY_FN("rt_call4_ptr_u32_u64_ptr_i32",
+                       NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES |
+                           NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_INT,
+                       NY_NATIVE_VM_I64_QUINARY_TO_I64, i64_quinary_i64,
+                       rt_call4_ptr_u32_u64_ptr_i32),
+    NY_NATIVE_ENTRY_FN("rt_call4_ptr_u64_ptr_ptr_i32",
+                       NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES |
+                           NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_INT,
+                       NY_NATIVE_VM_I64_QUINARY_TO_I64, i64_quinary_i64,
+                       rt_call4_ptr_u64_ptr_ptr_i32),
+    NY_NATIVE_ENTRY_FN("rt_call4_void", NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES,
+                       NY_NATIVE_VM_I64_QUINARY_TO_I64, i64_quinary_i64,
+                       rt_call4_void),
+    NY_NATIVE_ENTRY_FN("rt_call5_ptr", NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES,
+                       NY_NATIVE_VM_I64_SENARY_TO_I64, i64_senary_i64,
+                       rt_call5_ptr),
+    NY_NATIVE_ENTRY_FN("rt_call5_ptr_ptr_ptr_u64_i32_i32",
+                       NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES |
+                           NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_INT,
+                       NY_NATIVE_VM_I64_SENARY_TO_I64, i64_senary_i64,
+                       rt_call5_ptr_ptr_ptr_u64_i32_i32),
+    NY_NATIVE_ENTRY_FN("rt_call5_void", NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES,
+                       NY_NATIVE_VM_I64_SENARY_TO_I64, i64_senary_i64,
+                       rt_call5_void),
+    NY_NATIVE_ENTRY_FN("rt_call6_void", NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES,
+                       NY_NATIVE_VM_I64_SEPTENARY_TO_I64, i64_septenary_i64,
+                       rt_call6_void),
+    NY_NATIVE_ENTRY_FN("rt_call7_void", NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES,
+                       NY_NATIVE_VM_I64_OCTARY_TO_I64, i64_octary_i64,
+                       rt_call7_void),
+    NY_NATIVE_ENTRY_FN("rt_call8_void", NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES,
+                       NY_NATIVE_VM_I64_NONARY_TO_I64, i64_nonary_i64,
+                       rt_call8_void),
+    NY_NATIVE_ENTRY_FN("rt_call9_void", NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES,
+                       NY_NATIVE_VM_I64_DECENARY_TO_I64, i64_decenary_i64,
+                       rt_call9_void),
+    NY_NATIVE_ENTRY("rt_calloc_raw", NY_NATIVE_RUNTIME_ABI_RESULT_POINTER,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_calloc_raw_i64",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_POINTER,
+                    NY_NATIVE_VM_CALL_NONE),
     {"rt_canvas", 0, NY_NATIVE_VM_CALL_NONE, {0}},
     {"rt_canvas_clear", 0, NY_NATIVE_VM_CALL_NONE, {0}},
     {"rt_canvas_free", 0, NY_NATIVE_VM_CALL_NONE, {0}},
     {"rt_canvas_print", 0, NY_NATIVE_VM_CALL_NONE, {0}},
     {"rt_canvas_refresh", 0, NY_NATIVE_VM_CALL_NONE, {0}},
     {"rt_canvas_set", 0, NY_NATIVE_VM_CALL_NONE, {0}},
-    {"rt_clear_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_clone_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_close_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_color_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_complex_abs2",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
-     NY_NATIVE_VM_I64_UNARY_TO_I64,
-     {.i64_unary_i64 = rt_complex_abs2}},
-    {"rt_complex_add",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_I64_BINARY_TO_I64,
-     {.i64_binary_i64 = rt_complex_add}},
-    {"rt_complex_conj",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_I64_UNARY_TO_I64,
-     {.i64_unary_i64 = rt_complex_conj}},
-    {"rt_complex_div",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_I64_BINARY_TO_I64,
-     {.i64_binary_i64 = rt_complex_div}},
-    {"rt_complex_eq",
-     0,
-     NY_NATIVE_VM_I64_BINARY_TO_I64,
-     {.i64_binary_i64 = rt_complex_eq}},
-    {"rt_complex_im_bits",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_RAW_WORD,
-     NY_NATIVE_VM_I64_UNARY_TO_I64,
-     {.i64_unary_i64 = rt_complex_im_bits}},
-    {"rt_complex_im_f64",
-     NY_NATIVE_RUNTIME_ABI_RESULT_F64,
-     NY_NATIVE_VM_I64_UNARY_TO_F64,
-     {.i64_unary_f64 = rt_complex_im_f64}},
-    {"rt_complex_imag",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
-     NY_NATIVE_VM_I64_UNARY_TO_I64,
-     {.i64_unary_i64 = rt_complex_imag}},
-    {"rt_complex_mul",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_I64_BINARY_TO_I64,
-     {.i64_binary_i64 = rt_complex_mul}},
-    {"rt_complex_new",
-     NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(0) | NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(1),
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_complex_new_bits",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_I64_BINARY_TO_I64,
-     {.i64_binary_i64 = rt_complex_new_bits}},
-    {"rt_complex_re_bits",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_RAW_WORD,
-     NY_NATIVE_VM_I64_UNARY_TO_I64,
-     {.i64_unary_i64 = rt_complex_re_bits}},
-    {"rt_complex_re_f64",
-     NY_NATIVE_RUNTIME_ABI_RESULT_F64,
-     NY_NATIVE_VM_I64_UNARY_TO_F64,
-     {.i64_unary_f64 = rt_complex_re_f64}},
-    {"rt_complex_real",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
-     NY_NATIVE_VM_I64_UNARY_TO_I64,
-     {.i64_unary_i64 = rt_complex_real}},
-    {"rt_contains_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_copy_mem_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_cos_f64",
-     NY_NATIVE_RUNTIME_ABI_RESULT_F64,
-     NY_NATIVE_VM_F64_UNARY_TO_F64,
-     {.f64_unary_f64 = rt_cos_f64}},
-    {"rt_cstr_builder_append",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_I64_BINARY_TO_I64,
-     {.i64_binary_i64 = rt_cstr_builder_append}},
-    {"rt_cstr_builder_append_known",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_I64_TERNARY_TO_I64,
-     {.i64_ternary_i64 = rt_cstr_builder_append_known}},
-    {"rt_cstr_builder_finalize",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_I64_UNARY_TO_I64,
-     {.i64_unary_i64 = rt_cstr_builder_finalize}},
-    {"rt_cstr_builder_new",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_POINTER,
-     NY_NATIVE_VM_I64_UNARY_TO_I64,
-     {.i64_unary_i64 = rt_cstr_builder_new}},
-    {"rt_cstr_builder_repeat_known",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_POINTER,
-     NY_NATIVE_VM_I64_QUATERNARY_TO_I64,
-     {.i64_quaternary_i64 = rt_cstr_builder_repeat_known}},
-    {"rt_cstr_concat",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_CSTR,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
+    NY_NATIVE_ENTRY("rt_clear_raw", NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_clone_raw", NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_close_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_color_raw", NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY_FN("rt_complex_abs2",
+                       NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                           NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
+                       NY_NATIVE_VM_I64_UNARY_TO_I64, i64_unary_i64,
+                       rt_complex_abs2),
+    NY_NATIVE_ENTRY_FN(
+        "rt_complex_add", NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
+        NY_NATIVE_VM_I64_BINARY_TO_I64, i64_binary_i64, rt_complex_add),
+    NY_NATIVE_ENTRY_FN(
+        "rt_complex_conj", NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
+        NY_NATIVE_VM_I64_UNARY_TO_I64, i64_unary_i64, rt_complex_conj),
+    NY_NATIVE_ENTRY_FN(
+        "rt_complex_div", NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
+        NY_NATIVE_VM_I64_BINARY_TO_I64, i64_binary_i64, rt_complex_div),
+    NY_NATIVE_ENTRY_FN("rt_complex_eq", 0, NY_NATIVE_VM_I64_BINARY_TO_I64,
+                       i64_binary_i64, rt_complex_eq),
+    NY_NATIVE_ENTRY_FN("rt_complex_im_bits",
+                       NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                           NY_NATIVE_RUNTIME_ABI_RESULT_RAW_WORD,
+                       NY_NATIVE_VM_I64_UNARY_TO_I64, i64_unary_i64,
+                       rt_complex_im_bits),
+    NY_NATIVE_ENTRY_FN("rt_complex_im_f64", NY_NATIVE_RUNTIME_ABI_RESULT_F64,
+                       NY_NATIVE_VM_I64_UNARY_TO_F64, i64_unary_f64,
+                       rt_complex_im_f64),
+    NY_NATIVE_ENTRY_FN("rt_complex_imag",
+                       NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                           NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
+                       NY_NATIVE_VM_I64_UNARY_TO_I64, i64_unary_i64,
+                       rt_complex_imag),
+    NY_NATIVE_ENTRY_FN(
+        "rt_complex_mul", NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
+        NY_NATIVE_VM_I64_BINARY_TO_I64, i64_binary_i64, rt_complex_mul),
+    NY_NATIVE_ENTRY("rt_complex_new",
+                    NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(0) |
+                        NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(1),
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY_FN(
+        "rt_complex_new_bits", NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
+        NY_NATIVE_VM_I64_BINARY_TO_I64, i64_binary_i64, rt_complex_new_bits),
+    NY_NATIVE_ENTRY_FN("rt_complex_re_bits",
+                       NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                           NY_NATIVE_RUNTIME_ABI_RESULT_RAW_WORD,
+                       NY_NATIVE_VM_I64_UNARY_TO_I64, i64_unary_i64,
+                       rt_complex_re_bits),
+    NY_NATIVE_ENTRY_FN("rt_complex_re_f64", NY_NATIVE_RUNTIME_ABI_RESULT_F64,
+                       NY_NATIVE_VM_I64_UNARY_TO_F64, i64_unary_f64,
+                       rt_complex_re_f64),
+    NY_NATIVE_ENTRY_FN("rt_complex_real",
+                       NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                           NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
+                       NY_NATIVE_VM_I64_UNARY_TO_I64, i64_unary_i64,
+                       rt_complex_real),
+    NY_NATIVE_ENTRY("rt_contains_raw", NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_copy_mem_raw", NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY_FN("rt_cos_f64", NY_NATIVE_RUNTIME_ABI_RESULT_F64,
+                       NY_NATIVE_VM_F64_UNARY_TO_F64, f64_unary_f64,
+                       rt_cos_f64),
+    NY_NATIVE_ENTRY_FN(
+        "rt_cstr_builder_append", NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
+        NY_NATIVE_VM_I64_BINARY_TO_I64, i64_binary_i64, rt_cstr_builder_append),
+    NY_NATIVE_ENTRY_FN("rt_cstr_builder_append_known",
+                       NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
+                       NY_NATIVE_VM_I64_TERNARY_TO_I64, i64_ternary_i64,
+                       rt_cstr_builder_append_known),
+    NY_NATIVE_ENTRY_FN(
+        "rt_cstr_builder_finalize", NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
+        NY_NATIVE_VM_I64_UNARY_TO_I64, i64_unary_i64, rt_cstr_builder_finalize),
+    NY_NATIVE_ENTRY_FN("rt_cstr_builder_new",
+                       NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                           NY_NATIVE_RUNTIME_ABI_RESULT_POINTER,
+                       NY_NATIVE_VM_I64_UNARY_TO_I64, i64_unary_i64,
+                       rt_cstr_builder_new),
+    NY_NATIVE_ENTRY_FN("rt_cstr_builder_repeat_known",
+                       NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                           NY_NATIVE_RUNTIME_ABI_RESULT_POINTER,
+                       NY_NATIVE_VM_I64_QUATERNARY_TO_I64, i64_quaternary_i64,
+                       rt_cstr_builder_repeat_known),
+    NY_NATIVE_ENTRY("rt_cstr_concat",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_CSTR,
+                    NY_NATIVE_VM_CALL_NONE),
     {"rt_cstr_eq", 0, NY_NATIVE_VM_CALL_NONE, {0}},
-    {"rt_cstr_get_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_cstr_index_read_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_cstr_len",
-     NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_cstr_replace",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_CSTR,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
+    NY_NATIVE_ENTRY("rt_cstr_get_raw", NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_cstr_index_read_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_CSTR,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_cstr_len", NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_cstr_replace",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_CSTR,
+                    NY_NATIVE_VM_CALL_NONE),
     {"rt_cstr_to_str", 0, NY_NATIVE_VM_CALL_NONE, {0}},
-    {"rt_dict_clear_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_dict_clone_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_dict_delete_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_dict_delete_str_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_dict_get_i64_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_dict_get_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(0) |
-         NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(2),
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_dict_get_str_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(2) |
-         NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_dict_has_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_dict_has_str_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_dict_items_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_TYPED_BUFFER,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_dict_keys_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_TYPED_BUFFER,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_dict_len_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_RAW_WORD,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_dict_merge_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(0) |
-         NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(1) |
-         NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_dict_new_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_dict_set_i64_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_dict_set_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_dict_set_str_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_dict_values_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_TYPED_BUFFER,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_dir_open",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_POINTER,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_envc_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_execve",
-     NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_INT,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_exit", 0, NY_NATIVE_VM_CALL_NONE, {0}},
-    {"rt_f64_bits",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_RAW_WORD,
-     NY_NATIVE_VM_F64_UNARY_TO_I64,
-     {.f64_unary_i64 = rt_f64_bits}},
-    {"rt_f64_ceil",
-     NY_NATIVE_RUNTIME_ABI_RESULT_F64,
-     NY_NATIVE_VM_F64_UNARY_TO_F64,
-     {.f64_unary_f64 = rt_f64_ceil}},
-    {"rt_f64_floor",
-     NY_NATIVE_RUNTIME_ABI_RESULT_F64,
-     NY_NATIVE_VM_F64_UNARY_TO_F64,
-     {.f64_unary_f64 = rt_f64_floor}},
-    {"rt_f64_from_bits",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING | NY_NATIVE_RUNTIME_ABI_RESULT_F64,
-     NY_NATIVE_VM_I64_UNARY_TO_F64,
-     {.i64_unary_f64 = rt_f64_from_bits}},
-    {"rt_f64_max",
-     NY_NATIVE_RUNTIME_ABI_RESULT_F64,
-     NY_NATIVE_VM_F64_BINARY_TO_F64,
-     {.f64_binary_f64 = rt_f64_max}},
-    {"rt_f64_min",
-     NY_NATIVE_RUNTIME_ABI_RESULT_F64,
-     NY_NATIVE_VM_F64_BINARY_TO_F64,
-     {.f64_binary_f64 = rt_f64_min}},
-    {"rt_f64_pow",
-     NY_NATIVE_RUNTIME_ABI_RESULT_F64,
-     NY_NATIVE_VM_F64_BINARY_TO_F64,
-     {.f64_binary_f64 = rt_f64_pow}},
-    {"rt_f64_round",
-     NY_NATIVE_RUNTIME_ABI_RESULT_F64,
-     NY_NATIVE_VM_F64_UNARY_TO_F64,
-     {.f64_unary_f64 = rt_f64_round}},
-    {"rt_f64_to_cstr_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_CSTR,
-     NY_NATIVE_VM_F64_UNARY_TO_I64,
-     {.f64_unary_i64 = rt_f64_to_cstr_raw}},
-    {"rt_f64_to_i64",
-     NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
-     NY_NATIVE_VM_F64_UNARY_TO_I64,
-     {.f64_unary_i64 = rt_f64_to_i64}},
-    {"rt_f64_to_json_str",
-     NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(0) | NY_NATIVE_RUNTIME_ABI_RESULT_CSTR,
-     NY_NATIVE_VM_I64_UNARY_TO_I64,
-     {.i64_unary_i64 = rt_f64_to_json_str}},
-    {"rt_ffi_call0",
-     NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES,
-     NY_NATIVE_VM_I64_UNARY_TO_I64,
-     {.i64_unary_i64 = rt_ffi_call0}},
-    {"rt_ffi_call1",
-     NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES,
-     NY_NATIVE_VM_I64_BINARY_TO_I64,
-     {.i64_binary_i64 = rt_ffi_call1}},
-    {"rt_file_exists",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_file_exists_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_flt_box_val",
-     NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_flt_unbox_double",
-     NY_NATIVE_RUNTIME_ABI_RESULT_F64,
-     NY_NATIVE_VM_I64_UNARY_TO_F64,
-     {.i64_unary_f64 = rt_flt_unbox_double}},
-    {"rt_fmod_f64",
-     NY_NATIVE_RUNTIME_ABI_RESULT_F64,
-     NY_NATIVE_VM_F64_BINARY_TO_F64,
-     {.f64_binary_f64 = rt_fmod_f64}},
+    NY_NATIVE_ENTRY("rt_dict_clear_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_dict_clone_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_dict_delete_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_dict_delete_str_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_dict_get_i64_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_dict_get_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(0) |
+                        NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(2),
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_dict_get_str_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(2) |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_dict_has_raw", NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_dict_has_str_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_dict_items_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_TYPED_BUFFER,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_dict_keys_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_TYPED_BUFFER,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_dict_len_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_RAW_WORD,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_dict_merge_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(0) |
+                        NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(1) |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_dict_new_raw", NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_dict_set_i64_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_dict_set_raw", NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_dict_set_str_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_dict_values_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_TYPED_BUFFER,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_dir_close",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(0) |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_dir_open",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_POINTER,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_envc_raw", NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_execve", NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_INT,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_exit",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(0),
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY_FN("rt_f64_bits",
+                       NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                           NY_NATIVE_RUNTIME_ABI_RESULT_RAW_WORD,
+                       NY_NATIVE_VM_F64_UNARY_TO_I64, f64_unary_i64,
+                       rt_f64_bits),
+    NY_NATIVE_ENTRY_FN("rt_f64_ceil", NY_NATIVE_RUNTIME_ABI_RESULT_F64,
+                       NY_NATIVE_VM_F64_UNARY_TO_F64, f64_unary_f64,
+                       rt_f64_ceil),
+    NY_NATIVE_ENTRY_FN("rt_f64_floor", NY_NATIVE_RUNTIME_ABI_RESULT_F64,
+                       NY_NATIVE_VM_F64_UNARY_TO_F64, f64_unary_f64,
+                       rt_f64_floor),
+    NY_NATIVE_ENTRY_FN("rt_f64_from_bits",
+                       NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                           NY_NATIVE_RUNTIME_ABI_RESULT_F64,
+                       NY_NATIVE_VM_I64_UNARY_TO_F64, i64_unary_f64,
+                       rt_f64_from_bits),
+    NY_NATIVE_ENTRY_FN("rt_f64_max", NY_NATIVE_RUNTIME_ABI_RESULT_F64,
+                       NY_NATIVE_VM_F64_BINARY_TO_F64, f64_binary_f64,
+                       rt_f64_max),
+    NY_NATIVE_ENTRY_FN("rt_f64_min", NY_NATIVE_RUNTIME_ABI_RESULT_F64,
+                       NY_NATIVE_VM_F64_BINARY_TO_F64, f64_binary_f64,
+                       rt_f64_min),
+    NY_NATIVE_ENTRY_FN("rt_f64_pow", NY_NATIVE_RUNTIME_ABI_RESULT_F64,
+                       NY_NATIVE_VM_F64_BINARY_TO_F64, f64_binary_f64,
+                       rt_f64_pow),
+    NY_NATIVE_ENTRY_FN("rt_f64_round", NY_NATIVE_RUNTIME_ABI_RESULT_F64,
+                       NY_NATIVE_VM_F64_UNARY_TO_F64, f64_unary_f64,
+                       rt_f64_round),
+    NY_NATIVE_ENTRY_FN("rt_f64_to_cstr_raw",
+                       NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                           NY_NATIVE_RUNTIME_ABI_RESULT_CSTR,
+                       NY_NATIVE_VM_F64_UNARY_TO_I64, f64_unary_i64,
+                       rt_f64_to_cstr_raw),
+    NY_NATIVE_ENTRY_FN("rt_f64_to_i64", NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
+                       NY_NATIVE_VM_F64_UNARY_TO_I64, f64_unary_i64,
+                       rt_f64_to_i64),
+    NY_NATIVE_ENTRY_FN(
+        "rt_f64_to_json_str",
+        NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(0) | NY_NATIVE_RUNTIME_ABI_RESULT_CSTR,
+        NY_NATIVE_VM_I64_UNARY_TO_I64, i64_unary_i64, rt_f64_to_json_str),
+    NY_NATIVE_ENTRY_FN("rt_ffi_call0", NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES,
+                       NY_NATIVE_VM_I64_UNARY_TO_I64, i64_unary_i64,
+                       rt_ffi_call0),
+    NY_NATIVE_ENTRY_FN("rt_ffi_call1", NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES,
+                       NY_NATIVE_VM_I64_BINARY_TO_I64, i64_binary_i64,
+                       rt_ffi_call1),
+    NY_NATIVE_ENTRY("rt_ffi_untag_ptr",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(0) |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_file_exists",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_file_exists_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_flt_box_val", NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY_FN("rt_flt_unbox_double", NY_NATIVE_RUNTIME_ABI_RESULT_F64,
+                       NY_NATIVE_VM_I64_UNARY_TO_F64, i64_unary_f64,
+                       rt_flt_unbox_double),
+    NY_NATIVE_ENTRY_FN("rt_fmod_f64", NY_NATIVE_RUNTIME_ABI_RESULT_F64,
+                       NY_NATIVE_VM_F64_BINARY_TO_F64, f64_binary_f64,
+                       rt_fmod_f64),
     {"rt_free", 0, NY_NATIVE_VM_CALL_NONE, {0}},
-    {"rt_free_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_gc_stat_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_gc_tag_bytes_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
+    NY_NATIVE_ENTRY("rt_free_raw", NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_gc_stat_raw", NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_gc_tag_bytes_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
+                    NY_NATIVE_VM_CALL_NONE),
     {"rt_globals_get", 0, NY_NATIVE_VM_CALL_NONE, {0}},
     {"rt_globals_set", 0, NY_NATIVE_VM_CALL_NONE, {0}},
-    {"rt_i64_max",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
-     NY_NATIVE_VM_I64_BINARY_TO_I64,
-     {.i64_binary_i64 = rt_i64_max}},
-    {"rt_i64_to_cstr_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_CSTR,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
+    NY_NATIVE_ENTRY("rt_handle_valid",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(0) |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY_FN("rt_i64_max",
+                       NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                           NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
+                       NY_NATIVE_VM_I64_BINARY_TO_I64, i64_binary_i64,
+                       rt_i64_max),
+    NY_NATIVE_ENTRY("rt_i64_to_cstr_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_CSTR,
+                    NY_NATIVE_VM_CALL_NONE),
     {"rt_index_key_error", 0, NY_NATIVE_VM_CALL_NONE, {0}},
     {"rt_init_str", 0, NY_NATIVE_VM_CALL_NONE, {0}},
-    {"rt_init_str_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_is_dir",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
+    NY_NATIVE_ENTRY("rt_init_str_raw", NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_is_dir",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
+                    NY_NATIVE_VM_CALL_NONE),
     {"rt_is_float_obj", 0, NY_NATIVE_VM_CALL_NONE, {0}},
-    {"rt_len",
-     NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_len_strict",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_list_new_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_TYPED_BUFFER,
-     NY_NATIVE_VM_I64_UNARY_TO_I64,
-     {.i64_unary_i64 = rt_list_new_raw}},
-    {"rt_list_new_sized",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_TYPED_BUFFER,
-     NY_NATIVE_VM_I64_UNARY_TO_I64,
-     {.i64_unary_i64 = rt_list_new_sized}},
-    {"rt_list_new_sized_uninit",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_TYPED_BUFFER,
-     NY_NATIVE_VM_I64_UNARY_TO_I64,
-     {.i64_unary_i64 = rt_list_new_sized_uninit}},
-    {"rt_list_set_len_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_load32_f64",
-     NY_NATIVE_RUNTIME_ABI_RESULT_F64,
-     NY_NATIVE_VM_I64_BINARY_TO_F64,
-     {.i64_binary_f64 = rt_load32_f64}},
+    NY_NATIVE_ENTRY("rt_len", NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_len_strict",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY_FN("rt_list_new_i64_range",
+                       NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                           NY_NATIVE_RUNTIME_ABI_RESULT_TYPED_BUFFER,
+                       NY_NATIVE_VM_I64_UNARY_TO_I64, i64_unary_i64,
+                       rt_list_new_i64_range),
+    NY_NATIVE_ENTRY_FN("rt_list_new_raw",
+                       NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                           NY_NATIVE_RUNTIME_ABI_RESULT_TYPED_BUFFER,
+                       NY_NATIVE_VM_I64_UNARY_TO_I64, i64_unary_i64,
+                       rt_list_new_raw),
+    NY_NATIVE_ENTRY_FN("rt_list_new_sized",
+                       NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                           NY_NATIVE_RUNTIME_ABI_RESULT_TYPED_BUFFER,
+                       NY_NATIVE_VM_I64_UNARY_TO_I64, i64_unary_i64,
+                       rt_list_new_sized),
+    NY_NATIVE_ENTRY_FN("rt_list_new_sized_uninit",
+                       NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                           NY_NATIVE_RUNTIME_ABI_RESULT_TYPED_BUFFER,
+                       NY_NATIVE_VM_I64_UNARY_TO_I64, i64_unary_i64,
+                       rt_list_new_sized_uninit),
+    NY_NATIVE_ENTRY("rt_list_set_len_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY_FN("rt_load32_f64", NY_NATIVE_RUNTIME_ABI_RESULT_F64,
+                       NY_NATIVE_VM_I64_BINARY_TO_F64, i64_binary_f64,
+                       rt_load32_f64),
     {"rt_load_item", 0, NY_NATIVE_VM_CALL_NONE, {0}},
     {"rt_load_item_any", 0, NY_NATIVE_VM_CALL_NONE, {0}},
-    {"rt_long",
-     NY_NATIVE_RUNTIME_ABI_VALUE_CONVERSION,
-     NY_NATIVE_VM_I64_UNARY_TO_I64,
-     {.i64_unary_i64 = rt_long}},
-    {"rt_long_list_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_malloc",
-     NY_NATIVE_RUNTIME_ABI_RESULT_POINTER,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_malloc_i64",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_POINTER,
-     NY_NATIVE_VM_I64_UNARY_TO_I64,
-     {.i64_unary_i64 = rt_malloc_i64}},
-    {"rt_malloc_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_POINTER,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_malloc_raw_i64",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_POINTER,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_memcmp_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_memcpy_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_memset_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_monotonic_ns_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_RAW_WORD |
-         NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
-     NY_NATIVE_VM_I64_NULLARY_TO_I64,
-     {.i64_nullary_i64 = rt_monotonic_ns_raw}},
+    NY_NATIVE_ENTRY_FN("rt_long", NY_NATIVE_RUNTIME_ABI_VALUE_CONVERSION,
+                       NY_NATIVE_VM_I64_UNARY_TO_I64, i64_unary_i64, rt_long),
+    NY_NATIVE_ENTRY("rt_long_list_raw", NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_malloc", NY_NATIVE_RUNTIME_ABI_RESULT_POINTER,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY_FN("rt_malloc_i64",
+                       NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                           NY_NATIVE_RUNTIME_ABI_RESULT_POINTER,
+                       NY_NATIVE_VM_I64_UNARY_TO_I64, i64_unary_i64,
+                       rt_malloc_i64),
+    NY_NATIVE_ENTRY("rt_malloc_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_POINTER,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_malloc_raw_i64",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_POINTER,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_memcmp_raw", NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_memcpy_raw", NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_memset_raw", NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY_FN("rt_monotonic_ns_raw",
+                       NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                           NY_NATIVE_RUNTIME_ABI_RESULT_RAW_WORD |
+                           NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
+                       NY_NATIVE_VM_I64_NULLARY_TO_I64, i64_nullary_i64,
+                       rt_monotonic_ns_raw),
     {"rt_mutex_free", 0, NY_NATIVE_VM_CALL_NONE, {0}},
-    {"rt_mutex_lock64",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
+    NY_NATIVE_ENTRY("rt_mutex_lock64", NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
+                    NY_NATIVE_VM_CALL_NONE),
     {"rt_mutex_new", 0, NY_NATIVE_VM_CALL_NONE, {0}},
-    {"rt_mutex_unlock64",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_native_dict_set_nir_i64",
-     0,
-     NY_NATIVE_VM_I64_TERNARY_TO_I64,
-     {.i64_ternary_i64 = rt_native_dict_set_nir_i64}},
-    {"rt_native_dict_set_nir_i64_raw_int",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_I64_TERNARY_TO_I64,
-     {.i64_ternary_i64 = rt_native_dict_set_nir_i64_raw_int}},
-    {"rt_native_dict_set_nir_i64_raw_int_key",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_I64_TERNARY_TO_I64,
-     {.i64_ternary_i64 = rt_native_dict_set_nir_i64_raw_int_key}},
-    {"rt_native_dict_set_str_compact",
-     0,
-     NY_NATIVE_VM_I64_TERNARY_TO_I64,
-     {.i64_ternary_i64 = rt_native_dict_set_str_compact}},
-    {"rt_native_has_tag",
-     0,
-     NY_NATIVE_VM_I64_BINARY_TO_I64,
-     {.i64_binary_i64 = rt_native_has_tag}},
-    {"rt_native_is_int",
-     0,
-     NY_NATIVE_VM_I64_UNARY_TO_I64,
-     {.i64_unary_i64 = rt_native_is_int}},
-    {"rt_open_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_RAW_WORD |
-         NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_os_name",
-     NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
+    NY_NATIVE_ENTRY("rt_mutex_unlock64",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY_FN("rt_native_dict_set_nir_i64", 0,
+                       NY_NATIVE_VM_I64_TERNARY_TO_I64, i64_ternary_i64,
+                       rt_native_dict_set_nir_i64),
+    NY_NATIVE_ENTRY_FN("rt_native_dict_set_nir_i64_raw_int",
+                       NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
+                       NY_NATIVE_VM_I64_TERNARY_TO_I64, i64_ternary_i64,
+                       rt_native_dict_set_nir_i64_raw_int),
+    NY_NATIVE_ENTRY_FN("rt_native_dict_set_nir_i64_raw_int_key",
+                       NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
+                       NY_NATIVE_VM_I64_TERNARY_TO_I64, i64_ternary_i64,
+                       rt_native_dict_set_nir_i64_raw_int_key),
+    NY_NATIVE_ENTRY_FN("rt_native_dict_set_str_compact", 0,
+                       NY_NATIVE_VM_I64_TERNARY_TO_I64, i64_ternary_i64,
+                       rt_native_dict_set_str_compact),
+    NY_NATIVE_ENTRY_FN("rt_native_has_tag", 0, NY_NATIVE_VM_I64_BINARY_TO_I64,
+                       i64_binary_i64, rt_native_has_tag),
+    NY_NATIVE_ENTRY_FN("rt_native_is_int", 0, NY_NATIVE_VM_I64_UNARY_TO_I64,
+                       i64_unary_i64, rt_native_is_int),
+    NY_NATIVE_ENTRY("rt_open_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_RAW_WORD |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_os_name", NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
+                    NY_NATIVE_VM_CALL_NONE),
     {"rt_print_cstr", 0, NY_NATIVE_VM_CALL_NONE, {0}},
-    {"rt_print_f64_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_F64_UNARY_TO_I64,
-     {.f64_unary_i64 = rt_print_f64_raw}},
-    {"rt_print_flush_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_print_i64_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_print_str_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_proof_cert_check",
-     NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_proof_cert_digest",
-     NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES |
-         NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_INT,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_proof_policy_check",
-     NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_proof_policy_digest_hex",
-     NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES |
-         NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_proof_policy_solve",
-     NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES |
-         NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_ptr_add_i64",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_POINTER,
-     NY_NATIVE_VM_I64_BINARY_TO_I64,
-     {.i64_binary_i64 = rt_ptr_add_i64}},
-    {"rt_ptr_sub_i64",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_POINTER,
-     NY_NATIVE_VM_I64_BINARY_TO_I64,
-     {.i64_binary_i64 = rt_ptr_sub_i64}},
-    {"rt_range_index_read_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_range_len_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
-     NY_NATIVE_VM_I64_UNARY_TO_I64,
-     {.i64_unary_i64 = rt_range_len_raw}},
-    {"rt_range_new_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_range_values_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_read_fd_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_RAW_WORD |
-         NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_read_off_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_RAW_WORD |
-         NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_realloc",
-     NY_NATIVE_RUNTIME_ABI_RESULT_POINTER,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_realloc_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_POINTER,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_request_native_oracle_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_request_tv_checks_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
+    NY_NATIVE_ENTRY_FN(
+        "rt_print_f64_raw", NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
+        NY_NATIVE_VM_F64_UNARY_TO_I64, f64_unary_i64, rt_print_f64_raw),
+    NY_NATIVE_ENTRY("rt_print_flush_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_print_i64_raw", NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_print_str_raw", NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_proof_cert_check", NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_proof_cert_digest",
+                    NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_INT,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_proof_policy_check",
+                    NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_proof_policy_digest_hex",
+                    NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_proof_policy_solve",
+                    NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY_FN("rt_ptr_add_i64",
+                       NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                           NY_NATIVE_RUNTIME_ABI_RESULT_POINTER,
+                       NY_NATIVE_VM_I64_BINARY_TO_I64, i64_binary_i64,
+                       rt_ptr_add_i64),
+    NY_NATIVE_ENTRY_FN("rt_ptr_sub_i64",
+                       NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                           NY_NATIVE_RUNTIME_ABI_RESULT_POINTER,
+                       NY_NATIVE_VM_I64_BINARY_TO_I64, i64_binary_i64,
+                       rt_ptr_sub_i64),
+    NY_NATIVE_ENTRY("rt_range_index_read_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY_FN("rt_range_len_raw",
+                       NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                           NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
+                       NY_NATIVE_VM_I64_UNARY_TO_I64, i64_unary_i64,
+                       rt_range_len_raw),
+    NY_NATIVE_ENTRY("rt_range_new_raw", NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_range_values_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY_FN("rt_read_fd_raw",
+                       NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                           NY_NATIVE_RUNTIME_ABI_RESULT_RAW_WORD |
+                           NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
+                       NY_NATIVE_VM_I64_TERNARY_TO_I64, i64_ternary_i64,
+                       rt_read_fd_raw),
+    NY_NATIVE_ENTRY_FN("rt_read_off_raw",
+                       NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                           NY_NATIVE_RUNTIME_ABI_RESULT_RAW_WORD |
+                           NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
+                       NY_NATIVE_VM_I64_QUATERNARY_TO_I64, i64_quaternary_i64,
+                       rt_read_off_raw),
+    NY_NATIVE_ENTRY("rt_realloc", NY_NATIVE_RUNTIME_ABI_RESULT_POINTER,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_realloc_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_POINTER,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_request_native_oracle_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_request_tv_checks_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
+                    NY_NATIVE_VM_CALL_NONE),
     {"rt_result_err", 0, NY_NATIVE_VM_CALL_NONE, {0}},
     {"rt_result_ok", 0, NY_NATIVE_VM_CALL_NONE, {0}},
-    {"rt_result_unwrap_or_any",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
-     NY_NATIVE_VM_I64_BINARY_TO_I64,
-     {.i64_binary_i64 = rt_result_unwrap_or_any}},
-    {"rt_result_unwrap_or_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_I64_BINARY_TO_I64,
-     {.i64_binary_i64 = rt_result_unwrap_or_raw}},
-    {"rt_result_unwrap_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_runtime_alloc_count_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_runtime_realloc_count_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_runtime_tag_raw_value",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_sequence_len_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_I64_UNARY_TO_I64,
-     {.i64_unary_i64 = rt_sequence_len_raw}},
-    {"rt_set_add_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_TYPED_BUFFER,
-     NY_NATIVE_VM_I64_BINARY_TO_I64,
-     {.i64_binary_i64 = rt_set_add_raw}},
-    {"rt_set_from_sequence",
-     0,
-     NY_NATIVE_VM_I64_UNARY_TO_I64,
-     {.i64_unary_i64 = rt_set_from_sequence}},
-    {"rt_set_len_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_RAW_WORD,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_set_new",
-     0,
-     NY_NATIVE_VM_I64_UNARY_TO_I64,
-     {.i64_unary_i64 = rt_set_new}},
-    {"rt_set_remove",
-     0,
-     NY_NATIVE_VM_I64_BINARY_TO_I64,
-     {.i64_binary_i64 = rt_set_remove}},
-    {"rt_set_remove_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_TYPED_BUFFER,
-     NY_NATIVE_VM_I64_BINARY_TO_I64,
-     {.i64_binary_i64 = rt_set_remove_raw}},
-    {"rt_shl_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_RAW_WORD,
-     NY_NATIVE_VM_I64_BINARY_TO_I64,
-     {.i64_binary_i64 = rt_shl_raw}},
-    {"rt_shr_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_RAW_WORD,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_simmd_bswap32_i64",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
-     NY_NATIVE_VM_I64_UNARY_TO_I64,
-     {.i64_unary_i64 = rt_simmd_bswap32_i64}},
-    {"rt_simmd_bswap64_i64",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
-     NY_NATIVE_VM_I64_UNARY_TO_I64,
-     {.i64_unary_i64 = rt_simmd_bswap64_i64}},
-    {"rt_simmd_byte_class_reduce_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
-     NY_NATIVE_VM_I64_SEPTENARY_TO_I64,
-     {.i64_septenary_i64 = rt_simmd_byte_class_reduce_raw}},
-    {"rt_simmd_clz32_i64",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
-     NY_NATIVE_VM_I64_UNARY_TO_I64,
-     {.i64_unary_i64 = rt_simmd_clz32_i64}},
-    {"rt_simmd_clz64_i64",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
-     NY_NATIVE_VM_I64_UNARY_TO_I64,
-     {.i64_unary_i64 = rt_simmd_clz64_i64}},
-    {"rt_simmd_ctz32_i64",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
-     NY_NATIVE_VM_I64_UNARY_TO_I64,
-     {.i64_unary_i64 = rt_simmd_ctz32_i64}},
-    {"rt_simmd_ctz64_i64",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
-     NY_NATIVE_VM_I64_UNARY_TO_I64,
-     {.i64_unary_i64 = rt_simmd_ctz64_i64}},
-    {"rt_simmd_i32_sqlscan_sum_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
-     NY_NATIVE_VM_I64_SENARY_TO_I64,
-     {.i64_senary_i64 = rt_simmd_i32_sqlscan_sum_raw}},
-    {"rt_simmd_popcnt32_i64",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
-     NY_NATIVE_VM_I64_UNARY_TO_I64,
-     {.i64_unary_i64 = rt_simmd_popcnt32_i64}},
-    {"rt_simmd_popcnt64_i64",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
-     NY_NATIVE_VM_I64_UNARY_TO_I64,
-     {.i64_unary_i64 = rt_simmd_popcnt64_i64}},
-    {"rt_simmd_rotl32_i64",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
-     NY_NATIVE_VM_I64_BINARY_TO_I64,
-     {.i64_binary_i64 = rt_simmd_rotl32_i64}},
-    {"rt_simmd_rotl64_i64",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
-     NY_NATIVE_VM_I64_BINARY_TO_I64,
-     {.i64_binary_i64 = rt_simmd_rotl64_i64}},
-    {"rt_simmd_rotr32_i64",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
-     NY_NATIVE_VM_I64_BINARY_TO_I64,
-     {.i64_binary_i64 = rt_simmd_rotr32_i64}},
-    {"rt_simmd_rotr64_i64",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
-     NY_NATIVE_VM_I64_BINARY_TO_I64,
-     {.i64_binary_i64 = rt_simmd_rotr64_i64}},
-    {"rt_sin_f64",
-     NY_NATIVE_RUNTIME_ABI_RESULT_F64,
-     NY_NATIVE_VM_F64_UNARY_TO_F64,
-     {.f64_unary_f64 = rt_sin_f64}},
-    {"rt_sound_backend_name",
-     NY_NATIVE_RUNTIME_ABI_SOURCE_PREFERRED,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_sound_init",
-     NY_NATIVE_RUNTIME_ABI_SOURCE_PREFERRED,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_sound_shutdown",
-     NY_NATIVE_RUNTIME_ABI_SOURCE_PREFERRED,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_sound_web_play",
-     NY_NATIVE_RUNTIME_ABI_SOURCE_PREFERRED,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_spawn_pipe",
-     NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES | NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_sqrt_f64",
-     NY_NATIVE_RUNTIME_ABI_RESULT_F64,
-     NY_NATIVE_VM_F64_UNARY_TO_F64,
-     {.f64_unary_f64 = rt_sqrt_f64}},
-    {"rt_store32_f64",
-     0,
-     NY_NATIVE_VM_I64_I64_F64_TO_I64,
-     {.i64_i64_f64_i64 = rt_store32_f64}},
+    NY_NATIVE_ENTRY_FN("rt_result_unwrap_or_any",
+                       NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                           NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
+                       NY_NATIVE_VM_I64_BINARY_TO_I64, i64_binary_i64,
+                       rt_result_unwrap_or_any),
+    NY_NATIVE_ENTRY_FN("rt_result_unwrap_or_raw",
+                       NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
+                       NY_NATIVE_VM_I64_BINARY_TO_I64, i64_binary_i64,
+                       rt_result_unwrap_or_raw),
+    NY_NATIVE_ENTRY("rt_result_unwrap_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_runtime_alloc_count_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_runtime_realloc_count_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_runtime_tag_raw_value",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY_FN(
+        "rt_sequence_len_raw", NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
+        NY_NATIVE_VM_I64_UNARY_TO_I64, i64_unary_i64, rt_sequence_len_raw),
+    NY_NATIVE_ENTRY_FN("rt_set_add_raw",
+                       NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                           NY_NATIVE_RUNTIME_ABI_RESULT_TYPED_BUFFER,
+                       NY_NATIVE_VM_I64_BINARY_TO_I64, i64_binary_i64,
+                       rt_set_add_raw),
+    NY_NATIVE_ENTRY_FN("rt_set_from_sequence", 0, NY_NATIVE_VM_I64_UNARY_TO_I64,
+                       i64_unary_i64, rt_set_from_sequence),
+    NY_NATIVE_ENTRY("rt_set_len_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_RAW_WORD,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY_FN("rt_set_new", 0, NY_NATIVE_VM_I64_UNARY_TO_I64,
+                       i64_unary_i64, rt_set_new),
+    NY_NATIVE_ENTRY_FN("rt_set_remove", 0, NY_NATIVE_VM_I64_BINARY_TO_I64,
+                       i64_binary_i64, rt_set_remove),
+    NY_NATIVE_ENTRY_FN("rt_set_remove_raw",
+                       NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                           NY_NATIVE_RUNTIME_ABI_RESULT_TYPED_BUFFER,
+                       NY_NATIVE_VM_I64_BINARY_TO_I64, i64_binary_i64,
+                       rt_set_remove_raw),
+    NY_NATIVE_ENTRY_FN("rt_shl_raw",
+                       NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                           NY_NATIVE_RUNTIME_ABI_RESULT_RAW_WORD,
+                       NY_NATIVE_VM_I64_BINARY_TO_I64, i64_binary_i64,
+                       rt_shl_raw),
+    NY_NATIVE_ENTRY("rt_shr_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_RAW_WORD,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY_FN("rt_simmd_bswap32_i64",
+                       NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                           NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
+                       NY_NATIVE_VM_I64_UNARY_TO_I64, i64_unary_i64,
+                       rt_simmd_bswap32_i64),
+    NY_NATIVE_ENTRY_FN("rt_simmd_bswap64_i64",
+                       NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                           NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
+                       NY_NATIVE_VM_I64_UNARY_TO_I64, i64_unary_i64,
+                       rt_simmd_bswap64_i64),
+    NY_NATIVE_ENTRY_FN("rt_simmd_byte_class_reduce_raw",
+                       NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                           NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
+                       NY_NATIVE_VM_I64_SEPTENARY_TO_I64, i64_septenary_i64,
+                       rt_simmd_byte_class_reduce_raw),
+    NY_NATIVE_ENTRY_FN("rt_simmd_clz32_i64",
+                       NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                           NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
+                       NY_NATIVE_VM_I64_UNARY_TO_I64, i64_unary_i64,
+                       rt_simmd_clz32_i64),
+    NY_NATIVE_ENTRY_FN("rt_simmd_clz64_i64",
+                       NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                           NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
+                       NY_NATIVE_VM_I64_UNARY_TO_I64, i64_unary_i64,
+                       rt_simmd_clz64_i64),
+    NY_NATIVE_ENTRY_FN("rt_simmd_ctz32_i64",
+                       NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                           NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
+                       NY_NATIVE_VM_I64_UNARY_TO_I64, i64_unary_i64,
+                       rt_simmd_ctz32_i64),
+    NY_NATIVE_ENTRY_FN("rt_simmd_ctz64_i64",
+                       NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                           NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
+                       NY_NATIVE_VM_I64_UNARY_TO_I64, i64_unary_i64,
+                       rt_simmd_ctz64_i64),
+    NY_NATIVE_ENTRY_FN("rt_simmd_i32_sqlscan_sum_raw",
+                       NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                           NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
+                       NY_NATIVE_VM_I64_SENARY_TO_I64, i64_senary_i64,
+                       rt_simmd_i32_sqlscan_sum_raw),
+    NY_NATIVE_ENTRY_FN("rt_simmd_popcnt32_i64",
+                       NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                           NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
+                       NY_NATIVE_VM_I64_UNARY_TO_I64, i64_unary_i64,
+                       rt_simmd_popcnt32_i64),
+    NY_NATIVE_ENTRY_FN("rt_simmd_popcnt64_i64",
+                       NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                           NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
+                       NY_NATIVE_VM_I64_UNARY_TO_I64, i64_unary_i64,
+                       rt_simmd_popcnt64_i64),
+    NY_NATIVE_ENTRY_FN("rt_simmd_rotl32_i64",
+                       NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                           NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
+                       NY_NATIVE_VM_I64_BINARY_TO_I64, i64_binary_i64,
+                       rt_simmd_rotl32_i64),
+    NY_NATIVE_ENTRY_FN("rt_simmd_rotl64_i64",
+                       NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                           NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
+                       NY_NATIVE_VM_I64_BINARY_TO_I64, i64_binary_i64,
+                       rt_simmd_rotl64_i64),
+    NY_NATIVE_ENTRY_FN("rt_simmd_rotr32_i64",
+                       NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                           NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
+                       NY_NATIVE_VM_I64_BINARY_TO_I64, i64_binary_i64,
+                       rt_simmd_rotr32_i64),
+    NY_NATIVE_ENTRY_FN("rt_simmd_rotr64_i64",
+                       NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                           NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
+                       NY_NATIVE_VM_I64_BINARY_TO_I64, i64_binary_i64,
+                       rt_simmd_rotr64_i64),
+    NY_NATIVE_ENTRY_FN("rt_sin_f64", NY_NATIVE_RUNTIME_ABI_RESULT_F64,
+                       NY_NATIVE_VM_F64_UNARY_TO_F64, f64_unary_f64,
+                       rt_sin_f64),
+    NY_NATIVE_ENTRY("rt_sound_backend_name",
+                    NY_NATIVE_RUNTIME_ABI_SOURCE_PREFERRED,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_sound_init", NY_NATIVE_RUNTIME_ABI_SOURCE_PREFERRED,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_sound_shutdown", NY_NATIVE_RUNTIME_ABI_SOURCE_PREFERRED,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_sound_web_play", NY_NATIVE_RUNTIME_ABI_SOURCE_PREFERRED,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_spawn_pipe",
+                    NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY_FN("rt_sqrt_f64", NY_NATIVE_RUNTIME_ABI_RESULT_F64,
+                       NY_NATIVE_VM_F64_UNARY_TO_F64, f64_unary_f64,
+                       rt_sqrt_f64),
+    NY_NATIVE_ENTRY_FN("rt_store32_f64", 0, NY_NATIVE_VM_I64_I64_F64_TO_I64,
+                       i64_i64_f64_i64, rt_store32_f64),
     {"rt_store_item", 0, NY_NATIVE_VM_CALL_NONE, {0}},
     {"rt_store_item_fast", 0, NY_NATIVE_VM_CALL_NONE, {0}},
-    {"rt_store_item_fast_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_str_builder_append",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(1) |
-         NY_NATIVE_RUNTIME_ABI_RESULT_POINTER,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_str_builder_append_byte",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_POINTER,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_str_builder_free",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_RAW_WORD,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_str_builder_new",
-     NY_NATIVE_RUNTIME_ABI_RESULT_POINTER,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_str_builder_to_str",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
+    NY_NATIVE_ENTRY("rt_store_item_fast_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_str_builder_append",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(1) |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_POINTER,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_str_builder_append_byte",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_POINTER,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_str_builder_free",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_RAW_WORD,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_str_builder_new", NY_NATIVE_RUNTIME_ABI_RESULT_POINTER,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_str_builder_to_str",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
+                    NY_NATIVE_VM_CALL_NONE),
     {"rt_str_byte", 0, NY_NATIVE_VM_CALL_NONE, {0}},
-    {"rt_syscall",
-     NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_syscall_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT |
-         NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(1) |
-         NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(2) |
-         NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(3) |
-         NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(4) |
-         NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(5) |
-         NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(6),
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_tag",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
-     NY_NATIVE_VM_I64_UNARY_TO_I64,
-     {.i64_unary_i64 = rt_tag}},
+    NY_NATIVE_ENTRY("rt_str_chr", NY_NATIVE_RUNTIME_ABI_RESULT_CSTR,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_str_repeat", NY_NATIVE_RUNTIME_ABI_RESULT_CSTR,
+                    NY_NATIVE_VM_CALL_NONE),
+    /*
+     * Raw-count twin (see the core.str.repeat alias note above).
+     */
+    NY_NATIVE_ENTRY("rt_str_repeat_raw", NY_NATIVE_RUNTIME_ABI_RESULT_CSTR,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_syscall", NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_syscall_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY_FN("rt_tag",
+                       NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                           NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
+                       NY_NATIVE_VM_I64_UNARY_TO_I64, i64_unary_i64, rt_tag),
     {"rt_tag_or_raw_int", 0, NY_NATIVE_VM_CALL_NONE, {0}},
-    {"rt_tbuf_append_i64_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_TYPED_BUFFER,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_tbuf_append_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_TYPED_BUFFER,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_tbuf_append_tagged",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_TYPED_BUFFER,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_tbuf_clear_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_TYPED_BUFFER,
-     NY_NATIVE_VM_I64_UNARY_TO_I64,
-     {.i64_unary_i64 = rt_tbuf_clear_raw}},
-    {"rt_tbuf_clone_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_TYPED_BUFFER,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_tbuf_concat_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_TYPED_BUFFER,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_tbuf_extend",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_TYPED_BUFFER,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_tbuf_get_any",
-     0,
-     NY_NATIVE_VM_I64_TERNARY_TO_I64,
-     {.i64_ternary_i64 = rt_tbuf_get_any}},
-    {"rt_tbuf_index_any",
-     0,
-     NY_NATIVE_VM_I64_BINARY_TO_I64,
-     {.i64_binary_i64 = rt_tbuf_index_any}},
-    {"rt_tbuf_index_any_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
-     NY_NATIVE_VM_I64_BINARY_TO_I64,
-     {.i64_binary_i64 = rt_tbuf_index_any_raw}},
-    {"rt_tbuf_index_f64",
-     NY_NATIVE_RUNTIME_ABI_RESULT_F64,
-     NY_NATIVE_VM_I64_BINARY_TO_F64,
-     {.i64_binary_f64 = rt_tbuf_index_f64}},
-    {"rt_tbuf_index_read_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_tbuf_len_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
-     NY_NATIVE_VM_I64_UNARY_TO_I64,
-     {.i64_unary_i64 = rt_tbuf_len_raw}},
-    {"rt_tbuf_new_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_TYPED_BUFFER,
-     NY_NATIVE_VM_I64_BINARY_TO_I64,
-     {.i64_binary_i64 = rt_tbuf_new_raw}},
-    {"rt_tbuf_new_typed_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_TYPED_BUFFER,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_tbuf_pop_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_tbuf_reserve",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_TYPED_BUFFER,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_tbuf_set_f64_bits",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_TYPED_BUFFER,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_tbuf_set_i64_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_TYPED_BUFFER,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_tbuf_set_tagged",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_TYPED_BUFFER,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_tbuf_swap",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_TYPED_BUFFER,
-     NY_NATIVE_VM_I64_TERNARY_TO_I64,
-     {.i64_ternary_i64 = rt_tbuf_swap}},
-    {"rt_tbuf_to_cstr",
-     0,
-     NY_NATIVE_VM_I64_UNARY_TO_I64,
-     {.i64_unary_i64 = rt_tbuf_to_cstr}},
-    {"rt_terminal_size_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
+    NY_NATIVE_ENTRY("rt_tbuf_append_i64_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_TYPED_BUFFER,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_tbuf_append_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_TYPED_BUFFER,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_tbuf_append_tagged",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_TYPED_BUFFER,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY_FN("rt_tbuf_clear_raw",
+                       NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                           NY_NATIVE_RUNTIME_ABI_RESULT_TYPED_BUFFER,
+                       NY_NATIVE_VM_I64_UNARY_TO_I64, i64_unary_i64,
+                       rt_tbuf_clear_raw),
+    NY_NATIVE_ENTRY("rt_tbuf_clone_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_TYPED_BUFFER,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_tbuf_concat_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_TYPED_BUFFER,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_tbuf_extend",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_TYPED_BUFFER,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY_FN("rt_tbuf_get_any", 0, NY_NATIVE_VM_I64_TERNARY_TO_I64,
+                       i64_ternary_i64, rt_tbuf_get_any),
+    NY_NATIVE_ENTRY_FN("rt_tbuf_index_any", 0, NY_NATIVE_VM_I64_BINARY_TO_I64,
+                       i64_binary_i64, rt_tbuf_index_any),
+    NY_NATIVE_ENTRY_FN("rt_tbuf_index_any_raw",
+                       NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                           NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
+                       NY_NATIVE_VM_I64_BINARY_TO_I64, i64_binary_i64,
+                       rt_tbuf_index_any_raw),
+    NY_NATIVE_ENTRY_FN("rt_tbuf_index_f64", NY_NATIVE_RUNTIME_ABI_RESULT_F64,
+                       NY_NATIVE_VM_I64_BINARY_TO_F64, i64_binary_f64,
+                       rt_tbuf_index_f64),
+    NY_NATIVE_ENTRY("rt_tbuf_index_read_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY_FN("rt_tbuf_is_raw",
+                       NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                           NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
+                       NY_NATIVE_VM_I64_UNARY_TO_I64, i64_unary_i64,
+                       rt_tbuf_is_raw),
+    NY_NATIVE_ENTRY_FN("rt_tbuf_len_raw",
+                       NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                           NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
+                       NY_NATIVE_VM_I64_UNARY_TO_I64, i64_unary_i64,
+                       rt_tbuf_len_raw),
+    NY_NATIVE_ENTRY_FN("rt_tbuf_new_raw",
+                       NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                           NY_NATIVE_RUNTIME_ABI_RESULT_TYPED_BUFFER,
+                       NY_NATIVE_VM_I64_BINARY_TO_I64, i64_binary_i64,
+                       rt_tbuf_new_raw),
+    NY_NATIVE_ENTRY("rt_tbuf_new_typed_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_TYPED_BUFFER,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_tbuf_pop_raw", NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_tbuf_reserve",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_TYPED_BUFFER,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_tbuf_set_f64_bits",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_TYPED_BUFFER,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_tbuf_set_i64_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_TYPED_BUFFER,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_tbuf_set_tagged",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_TYPED_BUFFER,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY_FN("rt_tbuf_swap",
+                       NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                           NY_NATIVE_RUNTIME_ABI_RESULT_TYPED_BUFFER,
+                       NY_NATIVE_VM_I64_TERNARY_TO_I64, i64_ternary_i64,
+                       rt_tbuf_swap),
+    NY_NATIVE_ENTRY_FN("rt_tbuf_to_cstr", 0, NY_NATIVE_VM_I64_UNARY_TO_I64,
+                       i64_unary_i64, rt_tbuf_to_cstr),
+    NY_NATIVE_ENTRY("rt_terminal_size_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
+                    NY_NATIVE_VM_CALL_NONE),
     {"rt_thread_join", 0, NY_NATIVE_VM_CALL_NONE, {0}},
     {"rt_thread_launch_call", 0, NY_NATIVE_VM_CALL_NONE, {0}},
     {"rt_thread_spawn_call", 0, NY_NATIVE_VM_CALL_NONE, {0}},
-    {"rt_thread_spawn_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_ticks_ns",
-     0,
-     NY_NATIVE_VM_I64_NULLARY_TO_I64,
-     {.i64_nullary_i64 = rt_ticks_ns}},
-    {"rt_time_milliseconds",
-     NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_INT,
-     NY_NATIVE_VM_I64_NULLARY_TO_I64,
-     {.i64_nullary_i64 = rt_time_milliseconds}},
-    {"rt_time_seconds",
-     NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_INT,
-     NY_NATIVE_VM_I64_NULLARY_TO_I64,
-     {.i64_nullary_i64 = rt_time_seconds}},
-    {"rt_to_str",
-     0,
-     NY_NATIVE_VM_I64_UNARY_TO_I64,
-     {.i64_unary_i64 = rt_to_str}},
-    {"rt_trace_allocations_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_trace_arg_f64",
-     0,
-     NY_NATIVE_VM_F64_UNARY_TO_I64,
-     {.f64_unary_i64 = rt_trace_arg_f64}},
+    NY_NATIVE_ENTRY("rt_thread_spawn_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY_FN("rt_ticks_ns", 0, NY_NATIVE_VM_I64_NULLARY_TO_I64,
+                       i64_nullary_i64, rt_ticks_ns),
+    NY_NATIVE_ENTRY_FN(
+        "rt_time_milliseconds", NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_INT,
+        NY_NATIVE_VM_I64_NULLARY_TO_I64, i64_nullary_i64, rt_time_milliseconds),
+    NY_NATIVE_ENTRY_FN(
+        "rt_time_seconds", NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_INT,
+        NY_NATIVE_VM_I64_NULLARY_TO_I64, i64_nullary_i64, rt_time_seconds),
+    NY_NATIVE_ENTRY_FN("rt_to_str", 0, NY_NATIVE_VM_I64_UNARY_TO_I64,
+                       i64_unary_i64, rt_to_str),
+    NY_NATIVE_ENTRY("rt_trace_allocations_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY_FN("rt_trace_arg_f64", 0, NY_NATIVE_VM_F64_UNARY_TO_I64,
+                       f64_unary_i64, rt_trace_arg_f64),
     {"rt_trace_arg_f64_bits", 0, NY_NATIVE_VM_CALL_NONE, {0}},
     {"rt_trace_arg_i64", 0, NY_NATIVE_VM_CALL_NONE, {0}},
     {"rt_trace_arg_tagged", 0, NY_NATIVE_VM_CALL_NONE, {0}},
-    {"rt_trace_count_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_trace_cpu_ns_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_trace_dump_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_trace_enter_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_trace_exclusive_cpu_ns_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_trace_exclusive_ns_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_trace_exit_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_trace_func_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_trace_inclusive_ns_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_trace_loc_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_trace_reset_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_trace_ret_i64_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_trace_ret_u64_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_trace_ret_void_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_trace_sampled_rss_delta_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_trace_sampled_rss_peak_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_tty_isatty_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_tty_pending_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_tty_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_tty_raw_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
+    NY_NATIVE_ENTRY("rt_trace_count_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_trace_cpu_ns_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_trace_dump_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_trace_enter_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_trace_exclusive_cpu_ns_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_trace_exclusive_ns_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_trace_exit_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_trace_func_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_trace_inclusive_ns_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_trace_loc_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_trace_reset_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_trace_ret_f64_bits",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_trace_ret_i64_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_trace_ret_ptr",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_POINTER,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_trace_ret_tagged",
+                    NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_trace_ret_u64_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_trace_ret_void_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_trace_sampled_rss_delta_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_trace_sampled_rss_peak_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_tty_isatty_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_tty_pending_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_tty_raw", NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_tty_raw_raw", NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
+                    NY_NATIVE_VM_CALL_NONE),
     {"rt_type_name_tagged", 0, NY_NATIVE_VM_CALL_NONE, {0}},
-    {"rt_untag",
-     NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_unwrap",
-     NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_value_get_index_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_I64_TERNARY_TO_I64,
-     {.i64_ternary_i64 = rt_value_get_index_raw}},
+    NY_NATIVE_ENTRY("rt_untag", NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_unwrap", NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY_FN("rt_value_get_index_raw",
+                       NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
+                       NY_NATIVE_VM_I64_TERNARY_TO_I64, i64_ternary_i64,
+                       rt_value_get_index_raw),
+    NY_NATIVE_ENTRY_FN("rt_value_index_read_raw",
+                       NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
+                       NY_NATIVE_VM_I64_TERNARY_TO_I64, i64_ternary_i64,
+                       rt_value_index_read_raw),
+    NY_NATIVE_ENTRY_FN("rt_value_index_read_tagged",
+                       NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
+                       NY_NATIVE_VM_I64_TERNARY_TO_I64, i64_ternary_i64,
+                       rt_value_index_read_tagged),
     {"rt_value_is_ptr", 0, NY_NATIVE_VM_CALL_NONE, {0}},
-    {"rt_value_tag",
-     0,
-     NY_NATIVE_VM_I64_UNARY_TO_I64,
-     {.i64_unary_i64 = rt_value_tag}},
-    {"rt_value_to_f64",
-     NY_NATIVE_RUNTIME_ABI_RESULT_F64,
-     NY_NATIVE_VM_I64_BINARY_TO_F64,
-     {.i64_binary_f64 = rt_value_to_f64}},
-    {"rt_vec_add_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_vec_div_component_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_vec_div_scalar_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_vec_dot_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING | NY_NATIVE_RUNTIME_ABI_RESULT_F64,
-     NY_NATIVE_VM_I64_BINARY_TO_F64,
-     {.i64_binary_f64 = rt_vec_dot_raw}},
-    {"rt_vec_mark_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_vec_mul_scalar_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_I64_F64_TO_I64,
-     {.i64_f64_i64 = rt_vec_mul_scalar_raw}},
-    {"rt_vec_sub_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_wait4",
-     NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES |
-         NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_INT,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_wait_process",
-     NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES |
-         NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_INT,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_web_test_report_gamepad",
-     NY_NATIVE_RUNTIME_ABI_SOURCE_PREFERRED,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_web_test_report_touch",
-     NY_NATIVE_RUNTIME_ABI_SOURCE_PREFERRED,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_write_buffered_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_write_fd_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_RAW_WORD |
-         NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_write_off",
-     NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES |
-         NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_INT,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_write_off_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_RAW_WORD |
-         NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
-     NY_NATIVE_VM_CALL_NONE,
-     {0}},
-    {"rt_zalloc_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-         NY_NATIVE_RUNTIME_ABI_RESULT_POINTER,
-     NY_NATIVE_VM_I64_UNARY_TO_I64,
-     {.i64_unary_i64 = rt_zalloc_raw}},
-    {"rt_zfree_raw",
-     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-     NY_NATIVE_VM_I64_UNARY_TO_I64,
-     {.i64_unary_i64 = rt_zfree_raw}},
+    NY_NATIVE_ENTRY_FN("rt_value_tag", 0, NY_NATIVE_VM_I64_UNARY_TO_I64,
+                       i64_unary_i64, rt_value_tag),
+    NY_NATIVE_ENTRY_FN("rt_value_to_f64", NY_NATIVE_RUNTIME_ABI_RESULT_F64,
+                       NY_NATIVE_VM_I64_BINARY_TO_F64, i64_binary_f64,
+                       rt_value_to_f64),
+    NY_NATIVE_ENTRY("rt_vec_add_raw", NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_vec_div_component_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_vec_div_scalar_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY_FN("rt_vec_dot_raw",
+                       NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                           NY_NATIVE_RUNTIME_ABI_RESULT_F64,
+                       NY_NATIVE_VM_I64_BINARY_TO_F64, i64_binary_f64,
+                       rt_vec_dot_raw),
+    NY_NATIVE_ENTRY("rt_vec_mark_raw", NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY_FN(
+        "rt_vec_mul_scalar_raw", NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
+        NY_NATIVE_VM_I64_F64_TO_I64, i64_f64_i64, rt_vec_mul_scalar_raw),
+    NY_NATIVE_ENTRY("rt_vec_sub_raw", NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_wait4",
+                    NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_INT,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_wait_process",
+                    NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_INT,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_web_test_report_gamepad",
+                    NY_NATIVE_RUNTIME_ABI_SOURCE_PREFERRED,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_web_test_report_touch",
+                    NY_NATIVE_RUNTIME_ABI_SOURCE_PREFERRED,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_write_buffered_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_write_fd_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_RAW_WORD |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_write_off",
+                    NY_NATIVE_RUNTIME_ABI_TAGGED_VALUES |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_INT,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_write_off_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_RAW_WORD |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY_FN("rt_zalloc_raw",
+                       NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                           NY_NATIVE_RUNTIME_ABI_RESULT_POINTER,
+                       NY_NATIVE_VM_I64_UNARY_TO_I64, i64_unary_i64,
+                       rt_zalloc_raw),
+    NY_NATIVE_ENTRY_FN("rt_zfree_raw", NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
+                       NY_NATIVE_VM_I64_UNARY_TO_I64, i64_unary_i64,
+                       rt_zfree_raw),
 };
 const size_t ny_native_runtime_abi_decl_count =
     sizeof(ny_native_runtime_abi_decls) /
@@ -2608,6 +2420,7 @@ const ny_native_runtime_arg_abi_decl_t ny_native_runtime_arg_abi_decls[] = {
      NYIR_ARG_CONTRACT_BORROWS | (NYIR_ARG_CONTRACT_BORROWS << 2)},
     {"rt_bigint_mul", 0, 0, 0, 0, 0, 0,
      NYIR_ARG_CONTRACT_BORROWS | (NYIR_ARG_CONTRACT_BORROWS << 2)},
+    {"rt_bigint_mul_div_small", 0, 0, 0, 0, 0, 0, NYIR_ARG_CONTRACT_BORROWS},
     {"rt_bigint_neg_raw", 0, 0, 0, 0, 0, 0, NYIR_ARG_CONTRACT_BORROWS},
     {"rt_bigint_or", 0, 0, 0, 0, 0, 0,
      NYIR_ARG_CONTRACT_BORROWS | (NYIR_ARG_CONTRACT_BORROWS << 2)},
@@ -2868,8 +2681,7 @@ const ny_native_runtime_arg_abi_decl_t ny_native_runtime_arg_abi_decls[] = {
     {"rt_str_builder_free", 0, 0, 0, 0, 0, 0, NYIR_ARG_CONTRACT_CONSUMES},
     {"rt_str_builder_to_str", 0, 0, 0, 0, 0, 0, NYIR_ARG_CONTRACT_BORROWS},
     {"rt_str_byte", 0, 0, 0, 0, 0, 0, NYIR_ARG_CONTRACT_BORROWS},
-    {"rt_syscall_raw", 0, (uint16_t)((1u << 7) - 1u),
-     (uint16_t)(((1u << 7) - 1u) & ~1u), 0, 0, 0, 0},
+    {"rt_syscall_raw", 0, (uint16_t)((1u << 7) - 1u), 0, 0, 0, 0, 0},
     {"rt_tbuf_append_i64_raw", 0, 0, 0, 0, 0, 0,
      NYIR_ARG_CONTRACT_RETURNS_BORROW},
     {"rt_tbuf_append_raw", 0, 0, 0, 0, 0, 0,
@@ -2892,6 +2704,7 @@ const ny_native_runtime_arg_abi_decl_t ny_native_runtime_arg_abi_decls[] = {
      NYIR_ARG_CONTRACT_RETURNS_BORROW},
     {"rt_tbuf_index_f64", 0, 0, 0, 0, 0, 0, NYIR_ARG_CONTRACT_BORROWS},
     {"rt_tbuf_index_read_raw", 0, 0, 0, 0, 0, 0, NYIR_ARG_CONTRACT_BORROWS},
+    {"rt_tbuf_is_raw", 0, 0, 0, 0, 0, 0, NYIR_ARG_CONTRACT_BORROWS},
     {"rt_tbuf_len_raw", 0, 0, 0, 0, 0, 0, NYIR_ARG_CONTRACT_BORROWS},
     {"rt_tbuf_pop_raw", 0, 0, 0, 0, 0, 0, NYIR_ARG_CONTRACT_BORROWS},
     {"rt_tbuf_reserve", 0, 0, 0, 0, 0, 0, NYIR_ARG_CONTRACT_RETURNS_BORROW},
@@ -2906,6 +2719,12 @@ const ny_native_runtime_arg_abi_decl_t ny_native_runtime_arg_abi_decls[] = {
     {"rt_to_str", 0, 0, 0, 0, 0, 0, NYIR_ARG_CONTRACT_RETURNS_BORROW},
     {"rt_unwrap", 0, 0, 0, 0, 0, 0, NYIR_ARG_CONTRACT_RETURNS_BORROW},
     {"rt_value_get_index_raw", 0, 0, 0, 0, 0, 0,
+     NYIR_ARG_CONTRACT_RETURNS_BORROW |
+         (NYIR_ARG_CONTRACT_RETURNS_BORROW << 4)},
+    {"rt_value_index_read_raw", 0, 0, 0, 0, 0, 0,
+     NYIR_ARG_CONTRACT_RETURNS_BORROW |
+         (NYIR_ARG_CONTRACT_RETURNS_BORROW << 4)},
+    {"rt_value_index_read_tagged", 0, 0, 0, 0, 0, 0,
      NYIR_ARG_CONTRACT_RETURNS_BORROW |
          (NYIR_ARG_CONTRACT_RETURNS_BORROW << 4)},
     {"rt_value_is_ptr", 0, 0, 0, 0, 0, 0, NYIR_ARG_CONTRACT_BORROWS},
@@ -3180,6 +2999,9 @@ typedef struct {
   bool is_bigint;    /* bigint handle, not a raw integer payload */
   bool is_dict;      /* dictionary handle used by string/integer indexing */
   bool is_capture;   /* value lives in a lambda environment slot */
+  bool is_mut_binding; /* source binding permits assignment */
+  bool capture_by_ref; /* environment slot contains a local-home pointer */
+  bool capture_ref_is_env_bits; /* pointed-to capture stores float bits */
   size_t capture_index;
   bool is_list; /* shared native list value: pointer slot + length slot */
   const expr_t *callable_expr; /* direct lambda/function value initializer */
@@ -4096,6 +3918,11 @@ typedef struct {
   bool dyn_list;
 } ny_dynlist_cache_ent_t;
 
+typedef struct ny_dynlist_probe_frame {
+  const expr_t *expr;
+  const struct ny_dynlist_probe_frame *previous;
+} ny_dynlist_probe_frame_t;
+
 #define NY_TOP_MUT_FACTS_MAX 512
 typedef struct {
   const program_t *prog;
@@ -4197,6 +4024,8 @@ typedef struct {
 } ny_native_fn_context_id_cache_entry_t;
 
 #define NY_SCALAR_PROBE_CACHE_SIZE 4096
+#define NY_ANY_PROBE_STACK_LIMIT 256
+#define NY_DYNLIST_PROBE_STACK_LIMIT 256
 typedef struct {
   const expr_t *expr;
   uint32_t generation;
@@ -4463,6 +4292,10 @@ struct nyr_builder_impl_t {
       scalar_probe_cache[NY_SCALAR_PROBE_CACHE_SIZE];
   uint32_t scalar_probe_generation;
   size_t scalar_probe_active;
+  const expr_t *any_probe_stack[NY_ANY_PROBE_STACK_LIMIT];
+  size_t any_probe_depth;
+  const ny_dynlist_probe_frame_t *dynlist_probe_stack;
+  size_t dynlist_probe_depth;
   ny_native_cstr_query_cache_entry_t cstr_query_cache[NY_CSTR_QUERY_CACHE_SIZE];
   uint32_t cstr_query_generation;
   size_t type_query_cache_count;
@@ -5206,6 +5039,8 @@ static void nyr_builder_dispose(nyr_builder_impl_t *b) {
   b->dynlist_cache = NULL;
   b->dynlist_cache_len = 0;
   b->dynlist_cache_cap = 0;
+  b->dynlist_probe_stack = NULL;
+  b->dynlist_probe_depth = 0;
   b->dynlist_name_slots = NULL;
   b->dynlist_name_slot_cap = 0;
   b->top_mut_facts = NULL;
@@ -5509,6 +5344,8 @@ static nyr_local_t *nyr_find_expr_local(nyr_builder_impl_t *b,
  * defined here but calls helpers defined later in the file.
  */
 static bool ny_native_type_name_is_list(const char *name);
+static const char *nyr_expr_type_name(const nyr_builder_impl_t *b,
+                                      const expr_t *e);
 static bool nyr_expr_is_list(const nyr_builder_impl_t *b, const expr_t *e);
 static bool nyr_expr_is_dict(const nyr_builder_impl_t *b, const expr_t *e);
 static bool nyr_expr_is_set(const nyr_builder_impl_t *b, const expr_t *e);
@@ -5681,9 +5518,17 @@ static bool nyr_expr_is_cstr(nyr_builder_impl_t *b, const expr_t *e);
 static bool nyr_expr_is_bytes(const nyr_builder_impl_t *b, const expr_t *e);
 static bool nyr_expr_is_ptr(const nyr_builder_impl_t *b, const expr_t *e);
 static bool nyr_expr_is_bool(nyr_builder_impl_t *b, const expr_t *e);
+static const stmt_t *nyr_find_refine_in_prog(const nyr_builder_impl_t *b,
+                                             const program_t *prog,
+                                             const char *name);
 static int nyr_box_bool(nyr_builder_impl_t *b, int reg);
 static const char *nyr_resolve_use_alias(const nyr_builder_impl_t *b,
                                          const char *alias);
+static const char *nyr_resolve_use_alias_global(const nyr_builder_impl_t *b,
+                                                const char *alias);
+static const char *nyr_resolve_use_alias_with_source_file(
+    const nyr_builder_impl_t *b, const char *alias, const char *source_file,
+    bool check_local);
 static bool nyr_expr_is_any(nyr_builder_impl_t *b, const expr_t *e);
 static bool nyr_expr_is_raw_integer_conversion(nyr_builder_impl_t *b,
                                                const expr_t *e);
@@ -5703,6 +5548,8 @@ static bool nyr_expr_is_canonical_dynamic_value(nyr_builder_impl_t *b,
 static bool nyr_expr_is_dict_read(nyr_builder_impl_t *b, const expr_t *e);
 static bool nyr_stmt_uses_ident(const stmt_t *s, const char *name);
 static bool nyr_expr_is_range(const nyr_builder_impl_t *b, const expr_t *e);
+static const expr_t *nyr_find_unshadowed_top_level_value(
+    const nyr_builder_impl_t *b, const char *name);
 static const expr_t *nyr_find_top_level_value(const nyr_builder_impl_t *b,
                                               const char *name);
 static const expr_t *
@@ -6707,7 +6554,41 @@ static bool nyr_index_of_promoted_top_mut(nyr_builder_impl_t *b,
          nyr_top_mut_is_append_int_list(b, e->as.index.target->as.ident.name);
 }
 
+static const char *nyr_expr_type_name(const nyr_builder_impl_t *b,
+                                      const expr_t *e);
+
+static bool nyr_expr_is_dyn_list_core(nyr_builder_impl_t *b, const expr_t *e);
+
 static bool nyr_expr_is_dyn_list(nyr_builder_impl_t *b, const expr_t *e) {
+  if (!b || !e)
+    return false;
+  /*
+   * Global/member alias resolution can revisit an expression through a
+   * cyclic binding. These are the only recursive alias edges below; avoid
+   * paying for a recursion scan on ordinary expression classification.
+   */
+  if (e->kind != NY_E_IDENT && e->kind != NY_E_MEMBER)
+    return nyr_expr_is_dyn_list_core(b, e);
+  if (b->dynlist_probe_depth >= NY_DYNLIST_PROBE_STACK_LIMIT)
+    return true;
+  for (const ny_dynlist_probe_frame_t *frame = b->dynlist_probe_stack; frame;
+       frame = frame->previous)
+    if (frame->expr == e)
+      return true;
+
+  ny_dynlist_probe_frame_t frame = {
+      .expr = e,
+      .previous = b->dynlist_probe_stack,
+  };
+  b->dynlist_probe_stack = &frame;
+  ++b->dynlist_probe_depth;
+  bool result = nyr_expr_is_dyn_list_core(b, e);
+  --b->dynlist_probe_depth;
+  b->dynlist_probe_stack = frame.previous;
+  return result;
+}
+
+static bool nyr_expr_is_dyn_list_core(nyr_builder_impl_t *b, const expr_t *e) {
   if (!e)
     return false;
   if (e->kind == NY_E_LIST || e->kind == NY_E_TUPLE) {
@@ -6834,6 +6715,38 @@ static bool nyr_expr_is_dyn_list(nyr_builder_impl_t *b, const expr_t *e) {
     if (leaf && (strcmp(leaf, "list") == 0 || strcmp(leaf, "color") == 0 ||
                  strcmp(leaf, "get_terminal_size") == 0))
       return true;
+    /*
+     * unwrap(Result<list, E>) and unwrap_or(Result<list, E>, default) with an
+     * unparameterized or non-scalar list yield a dynamic descriptor list at
+     * runtime.
+     */
+    if (leaf &&
+        (strcmp(leaf, "unwrap") == 0 || strcmp(leaf, "__unwrap") == 0 ||
+         strcmp(leaf, "unwrap_or") == 0 || strcmp(leaf, "__unwrap_or") == 0) &&
+        e->as.call.args.len >= 1) {
+      const char *result_type =
+          nyr_expr_type_name(b, e->as.call.args.data[0].val);
+      if (result_type && strncmp(result_type, "Result<", 7) == 0) {
+        const char *lt = strchr(result_type, '<');
+        const char *comma = lt ? strchr(lt + 1, ',') : NULL;
+        if (lt && comma && comma > lt + 1) {
+          const char *start = lt + 1;
+          while (start < comma && (*start == ' ' || *start == '\t'))
+            ++start;
+          const char *end = comma;
+          while (end > start && (end[-1] == ' ' || end[-1] == '\t'))
+            --end;
+          size_t len = (size_t)(end - start);
+          char ok_type[64];
+          if (len < sizeof(ok_type)) {
+            memcpy(ok_type, start, len);
+            ok_type[len] = '\0';
+            if (ny_native_type_name_is_dyn_list(ok_type))
+              return true;
+          }
+        }
+      }
+    }
     /*
      * These dictionary projections return tagged descriptor buffers even
      * though their source declarations use the unparameterized `list` type.
@@ -7439,6 +7352,12 @@ static bool nyr_param_abi(const nyr_builder_impl_t *b, const stmt_t *fn,
           ? NYIR_PARAM_F64
       : (ny_native_type_name_is_f32(type) || (!type && rep == NY_SEM_REP_F32))
           ? NYIR_PARAM_F32
+      : (type && (ny_type_is(type, "u8") || ny_type_is(type, "bool")) &&
+         b->options && b->options->native_backend == NY_NATIVE_BACKEND_X86_64)
+          ? NYIR_PARAM_U8
+      : (type && ny_type_is(type, "i8") && b->options &&
+         b->options->native_backend == NY_NATIVE_BACKEND_X86_64)
+          ? NYIR_PARAM_I8
           : NYIR_PARAM_I64;
   *out = (nyr_param_abi_t){
       .rep = rep,
@@ -7620,18 +7539,18 @@ static bool nyr_push_ctrl(nyr_builder_impl_t *b, nyr_op_t op, int a,
                           int64_t imm) {
   size_t before = b->nyir.len;
   nyr_ir_emit(&b->nyir,
-            (nyr_inst_t){.op = op, .dst = -1, .a = a, .b = -1, .imm = imm});
+              (nyr_inst_t){.op = op, .dst = -1, .a = a, .b = -1, .imm = imm});
   return b->nyir.len != before || nyr_fail(b, NY_NATIVE_ALLOC_FAIL);
 }
 
 static int nyr_push_val(nyr_builder_impl_t *b, nyr_op_t op, int a, int b_arg,
                         int64_t imm, const char *symbol) {
   int v = nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = op,
-                                            .dst = -1,
-                                            .a = a,
-                                            .b = b_arg,
-                                            .imm = imm,
-                                            .symbol = symbol});
+                                             .dst = -1,
+                                             .a = a,
+                                             .b = b_arg,
+                                             .imm = imm,
+                                             .symbol = symbol});
   if (v < 0)
     nyr_fail(b, NY_NATIVE_ALLOC_FAIL);
   return v;
@@ -7654,21 +7573,24 @@ static int nyr_emit_enum_tag(nyr_builder_impl_t *b, const stmt_t *enum_stmt,
     if (enum_stmt->as.enu.items.data[i].fields.len)
       return value;
   return nyr_ir_emit(&b->nyir,
-                   (nyr_inst_t){.op = NYIR_COPY,
-                                 .dst = -1,
-                                 .a = value,
-                                 .b = -1,
-                                 .scalar_class = NYIR_SCALAR_I64_RAW});
+                     (nyr_inst_t){.op = NYIR_COPY,
+                                  .dst = -1,
+                                  .a = value,
+                                  .b = -1,
+                                  .scalar_class = NYIR_SCALAR_I64_RAW});
 }
 
 static inline int nyr_emit_binop(nyr_builder_impl_t *b, nyr_op_t op, int a,
                                  int rhs);
 static inline int nyr_emit_cmp_i64(nyr_builder_impl_t *b, nyr_cmp_t cmp, int a,
                                    int rhs) {
-  int v = nyr_ir_emit(
-      &b->nyir,
-      (nyr_inst_t){
-          .op = NYIR_CMP_I64, .dst = -1, .a = a, .b = rhs, .cmp = cmp});
+  int v =
+      nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_CMP_I64,
+                                         .dst = -1,
+                                         .a = a,
+                                         .b = rhs,
+                                         .cmp = cmp,
+                                         .scalar_class = NYIR_SCALAR_I64_RAW});
   if (v < 0)
     nyr_fail(b, NY_NATIVE_ALLOC_FAIL);
   return v;
@@ -7783,17 +7705,27 @@ static bool nyr_value_is_dynamic(const nyr_builder_impl_t *b, int value) {
 }
 
 static nyr_scalar_class_t nyr_value_scalar_class(const nyr_builder_impl_t *b,
-                                                  int value);
+                                                 int value);
 
 static int nyr_emit_truthy(nyr_builder_impl_t *b, int value) {
   if (value < 0)
     return -1;
   nyr_scalar_class_t scalar_class = nyr_value_scalar_class(b, value);
   bool dynamic = nyr_value_is_dynamic(b, value);
+  bool language_bool = false;
+  const nyr_inst_t *producer = NULL;
+  if (nyr_def_of(b, value, &producer) && producer->op == NYIR_LOAD_LOCAL) {
+    for (size_t i = b->local_count; i > 0; --i) {
+      if (b->locals[i - 1].slot == producer->imm) {
+        language_bool = b->locals[i - 1].is_bool;
+        break;
+      }
+    }
+  }
   int truthy = nyr_emit_cmp_i64(b, NYIR_CMP_NE, value, nyr_emit_const(b, 0));
   if (truthy < 0)
     return -1;
-  if (dynamic || scalar_class == NYIR_SCALAR_I64_TAGGED) {
+  if (dynamic || language_bool || scalar_class == NYIR_SCALAR_I64_TAGGED) {
     int not_false = nyr_emit_cmp_i64(b, NYIR_CMP_NE, value,
                                      nyr_emit_const(b, NY_IMM_FALSE));
     if (not_false < 0)
@@ -7806,8 +7738,7 @@ static int nyr_emit_truthy(nyr_builder_impl_t *b, int value) {
    * Tagged integer zero is 1, whereas a comparison's raw true is also 1.
    * Only the tagged carrier may test that word as false.
    */
-  bool tagged_integer = dynamic && scalar_class == NYIR_SCALAR_I64_TAGGED;
-  const nyr_inst_t *producer = NULL;
+  bool tagged_integer = scalar_class == NYIR_SCALAR_I64_TAGGED;
   if (dynamic && nyr_def_of(b, value, &producer) &&
       producer->op == NYIR_LOAD_LOCAL) {
     for (size_t i = b->local_count; i > 0; --i) {
@@ -7859,7 +7790,7 @@ static bool nyr_value_is_f64(const nyr_builder_impl_t *b, int value,
 static bool nyr_value_is_f32(const nyr_builder_impl_t *b, int value,
                              unsigned depth);
 static nyr_scalar_class_t nyr_value_scalar_class(const nyr_builder_impl_t *b,
-                                                  int value);
+                                                 int value);
 static int nyr_emit_i64_to_f64(nyr_builder_impl_t *b, int v);
 static int nyr_emit_f32_to_f64(nyr_builder_impl_t *b, int value);
 static int nyr_emit_f64_to_f32(nyr_builder_impl_t *b, int value);
@@ -7953,11 +7884,11 @@ static bool nyr_emit_ret(nyr_builder_impl_t *b, int value) {
   }
   size_t before = b->nyir.len;
   nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_RET,
-                                    .dst = -1,
-                                    .a = value,
-                                    .b = -1,
-                                    .flags = 0,
-                                    .scalar_class = ret_class});
+                                     .dst = -1,
+                                     .a = value,
+                                     .b = -1,
+                                     .flags = 0,
+                                     .scalar_class = ret_class});
   if (b->nyir.len == before)
     return nyr_fail(b, NY_NATIVE_ALLOC_FAIL);
   b->emitted_return = true;
@@ -7984,11 +7915,11 @@ static int nyr_emit_cstr_const(nyr_builder_impl_t *b, const char *s) {
     return nyr_fail(b, "native NYIR lower: string table full or OOM"), -1;
   }
   int addr = nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_ADDR_SYMBOL,
-                                               .dst = -1,
-                                               .a = -1,
-                                               .b = -1,
-                                               .imm = 0,
-                                               .symbol = sym});
+                                                .dst = -1,
+                                                .a = -1,
+                                                .b = -1,
+                                                .imm = 0,
+                                                .symbol = sym});
   if (addr < 0) {
     return nyr_fail(b, NY_NATIVE_ALLOC_FAIL), -1;
   }
@@ -8010,6 +7941,8 @@ static int nyr_emit_const_f32(nyr_builder_impl_t *b, double value) {
                       ny_native_f32_bits((float)value), NULL);
 }
 static int nyr_emit_i64_to_f64(nyr_builder_impl_t *b, int value) {
+  if (nyr_value_is_f64(b, value, 0))
+    return value;
   return nyr_push_val(b, NYIR_I64_TO_F64, value, -1, 0, NULL);
 }
 static int nyr_emit_f64_to_i64(nyr_builder_impl_t *b, int value) {
@@ -8091,11 +8024,11 @@ static void nyr_record_global_dyn_tag(nyr_builder_impl_t *b, const char *name,
 static int nyr_emit_load8(nyr_builder_impl_t *b, int addr) {
   int value =
       nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_LOAD_I64,
-                                        .dst = -1,
-                                        .a = addr,
-                                        .b = -1,
-                                        .scalar_class = NYIR_SCALAR_I64_RAW,
-                                        .flags = NYIR_INST_F_MEM_BYTE});
+                                         .dst = -1,
+                                         .a = addr,
+                                         .b = -1,
+                                         .scalar_class = NYIR_SCALAR_I64_RAW,
+                                         .flags = NYIR_INST_F_MEM_BYTE});
   if (value < 0)
     nyr_fail(b, NY_NATIVE_ALLOC_FAIL);
   return value;
@@ -8104,10 +8037,21 @@ static int nyr_emit_load8(nyr_builder_impl_t *b, int addr) {
 static int nyr_emit_load_f64(nyr_builder_impl_t *b, int addr) {
   int value =
       nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_LOAD_I64,
-                                        .dst = -1,
-                                        .a = addr,
-                                        .b = -1,
-                                        .scalar_class = NYIR_SCALAR_F64});
+                                         .dst = -1,
+                                         .a = addr,
+                                         .b = -1,
+                                         .scalar_class = NYIR_SCALAR_F64});
+  if (value < 0)
+    nyr_fail(b, NY_NATIVE_ALLOC_FAIL);
+  return value;
+}
+static int nyr_emit_load_f32(nyr_builder_impl_t *b, int addr) {
+  int value =
+      nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_LOAD_I64,
+                                         .dst = -1,
+                                         .a = addr,
+                                         .b = -1,
+                                         .scalar_class = NYIR_SCALAR_F32});
   if (value < 0)
     nyr_fail(b, NY_NATIVE_ALLOC_FAIL);
   return value;
@@ -8116,36 +8060,49 @@ static int nyr_emit_addr_local(nyr_builder_impl_t *b, int slot,
                                const char *symbol) {
   return nyr_push_val(b, NYIR_ADDR_LOCAL, -1, -1, slot, symbol);
 }
+static int nyr_emit_local_home_addr(nyr_builder_impl_t *b,
+                                    const nyr_local_t *local) {
+  if (!b || !local)
+    return -1;
+  if (!local->is_capture || b->closure_env_slot < 0)
+    return nyr_emit_addr_local(b, local->slot, local->name);
+  int env = nyr_load_local_value(b, b->closure_env_slot);
+  int off = env < 0 ? -1 : nyr_emit_const(b, (int64_t)local->capture_index * 8);
+  int cell = env < 0 || off < 0 ? -1 : nyr_emit_add_i64(b, env, off);
+  if (cell < 0)
+    return -1;
+  return local->capture_by_ref ? nyr_emit_load_i64(b, cell) : cell;
+}
 static bool nyr_emit_store_i64(nyr_builder_impl_t *b, int addr, int value) {
   size_t before = b->nyir.len;
   nyr_ir_emit(&b->nyir,
-            (nyr_inst_t){.op = NYIR_STORE_I64,
-                          .dst = -1,
-                          .a = addr,
-                          .b = -1,
-                          .c = value,
-                          .scalar_class = nyr_value_scalar_class(b, value)});
+              (nyr_inst_t){.op = NYIR_STORE_I64,
+                           .dst = -1,
+                           .a = addr,
+                           .b = -1,
+                           .c = value,
+                           .scalar_class = nyr_value_scalar_class(b, value)});
   return b->nyir.len != before || nyr_fail(b, NY_NATIVE_ALLOC_FAIL);
 }
 static bool nyr_emit_store8(nyr_builder_impl_t *b, int addr, int value) {
   size_t before = b->nyir.len;
   nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_STORE_I64,
-                                    .dst = -1,
-                                    .a = addr,
-                                    .b = -1,
-                                    .c = value,
-                                    .flags = NYIR_INST_F_MEM_BYTE});
+                                     .dst = -1,
+                                     .a = addr,
+                                     .b = -1,
+                                     .c = value,
+                                     .flags = NYIR_INST_F_MEM_BYTE});
   return b->nyir.len != before || nyr_fail(b, NY_NATIVE_ALLOC_FAIL);
 }
 
 static bool nyr_emit_store_f64(nyr_builder_impl_t *b, int addr, int value) {
   size_t before = b->nyir.len;
   nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_STORE_I64,
-                                    .dst = -1,
-                                    .a = addr,
-                                    .b = -1,
-                                    .c = value,
-                                    .scalar_class = NYIR_SCALAR_F64});
+                                     .dst = -1,
+                                     .a = addr,
+                                     .b = -1,
+                                     .c = value,
+                                     .scalar_class = NYIR_SCALAR_F64});
   return b->nyir.len != before || nyr_fail(b, NY_NATIVE_ALLOC_FAIL);
 }
 
@@ -8164,11 +8121,11 @@ static bool nyr_emit_bounds_check_value(nyr_builder_impl_t *b, int base,
     return true;
   size_t before = b->nyir.len;
   nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_BOUNDS_CHECK,
-                                    .dst = -1,
-                                    .a = base,
-                                    .b = offset,
-                                    .c = byte_len_value,
-                                    .imm = byte_len});
+                                     .dst = -1,
+                                     .a = base,
+                                     .b = offset,
+                                     .c = byte_len_value,
+                                     .imm = byte_len});
   return b->nyir.len != before || nyr_fail(b, NY_NATIVE_ALLOC_FAIL);
 }
 
@@ -8178,7 +8135,7 @@ static bool nyr_emit_bounds_check(nyr_builder_impl_t *b, int base, int offset,
 }
 
 static nyr_scalar_class_t nyr_value_scalar_class(const nyr_builder_impl_t *b,
-                                                  int value);
+                                                 int value);
 static bool nyr_value_is_f64(const nyr_builder_impl_t *b, int value,
                              unsigned depth);
 static bool nyr_value_is_f32(const nyr_builder_impl_t *b, int value,
@@ -8211,7 +8168,7 @@ nyr_runtime_formal_contracts(const char *symbol, int argc,
          ++i) {
       if (callback_abi->arg_ownership == NY_NATIVE_ABI_BORROWED)
         nyr_call_arg_contract_set_packed(contracts, i + 1,
-                                          NYIR_ARG_CONTRACT_BORROWS);
+                                         NYIR_ARG_CONTRACT_BORROWS);
     }
   }
   if (ffi_callback_abi && argc > 0 &&
@@ -8224,9 +8181,54 @@ nyr_runtime_formal_contracts(const char *symbol, int argc,
       if (ffi_callback_abi->arg_ownership[i] ==
           RT_FFI_CALLBACK_OWNERSHIP_BORROWED)
         nyr_call_arg_contract_set_packed(contracts, i + 1,
-                                          NYIR_ARG_CONTRACT_BORROWS);
+                                         NYIR_ARG_CONTRACT_BORROWS);
     }
   }
+}
+
+typedef struct nyr_resolved_call_contract_t {
+  const char *canonical_callee;
+  const char *runtime_symbol;
+  const ny_param_list *formal_parameters;
+  size_t source_arity;
+  size_t formal_arity;
+  size_t expanded_arity;
+  const int *expanded_args;
+  uint32_t *expanded_arg_sizes;
+  const uint64_t *formal_arg_classes;
+  const uint64_t *actual_arg_ownership;
+  const uint64_t *formal_arg_contracts;
+  const char *declared_result_type;
+  ny_sem_rep_t result_semantic_rep;
+  bool result_semantic_resolved;
+  nyr_scalar_class_t result_class;
+  bool has_aggregate_return;
+  bool has_sret;
+  uint32_t aggregate_return_size;
+  ny_sysv_agg_class_t aggregate_return_classes[2];
+  uint32_t source_effects;
+  bool source_effects_known;
+  uint8_t result_ownership;
+} nyr_resolved_call_contract_t;
+
+static nyr_resolved_call_contract_t nyr_runtime_call_contract(
+    const char *symbol, int argc, const int *args,
+    const uint64_t *formal_arg_classes, const uint64_t *actual_arg_ownership,
+    const uint64_t *formal_arg_contracts, nyr_scalar_class_t result_class) {
+  return (nyr_resolved_call_contract_t){
+      .canonical_callee = symbol,
+      .runtime_symbol = symbol,
+      .source_arity = argc > 0 ? (size_t)argc : 0,
+      .formal_arity = argc > 0 ? (size_t)argc : 0,
+      .expanded_arity = argc > 0 ? (size_t)argc : 0,
+      .expanded_args = args,
+      .formal_arg_classes = formal_arg_classes,
+      .actual_arg_ownership = actual_arg_ownership,
+      .formal_arg_contracts = formal_arg_contracts,
+      .result_semantic_rep = NY_SEM_REP_UNRESOLVED,
+      .result_class = result_class,
+      .result_ownership = NY_SEM_OWN_UNKNOWN,
+  };
 }
 
 static int nyr_emit_runtime_call(nyr_builder_impl_t *b, const char *symbol,
@@ -8400,11 +8402,11 @@ static int nyr_emit_runtime_call(nyr_builder_impl_t *b, const char *symbol,
        * numeric tagging operation that would corrupt the address.
        */
       a = nyr_ir_emit(&b->nyir,
-                    (nyr_inst_t){.op = NYIR_COPY,
-                                  .dst = -1,
-                                  .a = a,
-                                  .b = -1,
-                                  .scalar_class = NYIR_SCALAR_OBJECT});
+                      (nyr_inst_t){.op = NYIR_COPY,
+                                   .dst = -1,
+                                   .a = a,
+                                   .b = -1,
+                                   .scalar_class = NYIR_SCALAR_OBJECT});
       if (a < 0)
         return -1;
     }
@@ -8507,10 +8509,10 @@ static int nyr_emit_runtime_call(nyr_builder_impl_t *b, const char *symbol,
          * for odd object/pointer addresses.
          */
         args[i] = nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_COPY,
-                                                    .dst = -1,
-                                                    .a = args[i],
-                                                    .b = -1,
-                                                    .scalar_class = formal});
+                                                     .dst = -1,
+                                                     .a = args[i],
+                                                     .b = -1,
+                                                     .scalar_class = formal});
         if (args[i] < 0)
           return -1;
       }
@@ -8566,21 +8568,33 @@ static int nyr_emit_runtime_call(nyr_builder_impl_t *b, const char *symbol,
     if (actual != NYIR_SCALAR_UNKNOWN)
       nyr_call_arg_class_set(packed_arg_classes, 0, actual);
   }
+  const int runtime_args[3] = {a, b_arg, c};
+  const uint64_t no_argument_ownership[NYIR_CALL_MAX_ARGS / 32] = {0};
+  const nyr_resolved_call_contract_t call_contract = nyr_runtime_call_contract(
+      symbol, argc, runtime_args, packed_arg_classes, no_argument_ownership,
+      packed_arg_contracts, return_class);
   int value = nyr_ir_emit(
       &b->nyir,
       (nyr_inst_t){
           .op = NYIR_CALL,
           .dst = -1,
-          .a = a,
-          .b = b_arg,
-          .c = c,
-          .imm = argc,
+          .a = call_contract.expanded_args[0],
+          .b = call_contract.expanded_arity > 1 ? call_contract.expanded_args[1]
+                                                : -1,
+          .c = call_contract.expanded_arity > 2 ? call_contract.expanded_args[2]
+                                                : -1,
+          .imm = (int64_t)call_contract.expanded_arity,
           .flags = NYIR_INST_F_EXTERN,
-          .scalar_class = return_class,
-          .arg_scalar_classes = {packed_arg_classes[0], packed_arg_classes[1],
-                                 packed_arg_classes[2], packed_arg_classes[3]},
-          .arg_contracts = {packed_arg_contracts[0], packed_arg_contracts[1]},
-          .symbol = symbol});
+          .scalar_class = call_contract.result_class,
+          .arg_scalar_classes = {call_contract.formal_arg_classes[0],
+                                 call_contract.formal_arg_classes[1],
+                                 call_contract.formal_arg_classes[2],
+                                 call_contract.formal_arg_classes[3]},
+          .arg_ownership = {call_contract.actual_arg_ownership[0],
+                            call_contract.actual_arg_ownership[1]},
+          .arg_contracts = {call_contract.formal_arg_contracts[0],
+                            call_contract.formal_arg_contracts[1]},
+          .symbol = call_contract.runtime_symbol});
   if (value < 0)
     nyr_fail(b, NY_NATIVE_ALLOC_FAIL);
   return value;
@@ -8605,23 +8619,37 @@ static int nyr_emit_runtime_call4(nyr_builder_impl_t *b, const char *symbol,
   for (int i = 0; i < argc && i < NYIR_CALL_MAX_ARGS; ++i)
     if (ny_native_runtime_abi_arg_is_f64(abi, (unsigned)i))
       nyr_call_arg_class_set(packed_arg_classes, (size_t)i, NYIR_SCALAR_F64);
+  const int runtime_args[5] = {a, b_arg, c, d, e_arg};
+  const uint64_t no_argument_ownership[NYIR_CALL_MAX_ARGS / 32] = {0};
+  const nyr_resolved_call_contract_t call_contract = nyr_runtime_call_contract(
+      symbol, argc, runtime_args, packed_arg_classes, no_argument_ownership,
+      packed_arg_contracts, return_class);
   int value = nyr_ir_emit(
       &b->nyir,
       (nyr_inst_t){
           .op = NYIR_CALL,
           .dst = -1,
-          .a = a,
-          .b = b_arg,
-          .c = c,
-          .d = d,
-          .e = e_arg,
-          .imm = argc,
+          .a = call_contract.expanded_args[0],
+          .b = call_contract.expanded_arity > 1 ? call_contract.expanded_args[1]
+                                                : -1,
+          .c = call_contract.expanded_arity > 2 ? call_contract.expanded_args[2]
+                                                : -1,
+          .d = call_contract.expanded_arity > 3 ? call_contract.expanded_args[3]
+                                                : -1,
+          .e = call_contract.expanded_arity > 4 ? call_contract.expanded_args[4]
+                                                : -1,
+          .imm = (int64_t)call_contract.expanded_arity,
           .flags = NYIR_INST_F_EXTERN,
-          .scalar_class = return_class,
-          .arg_scalar_classes = {packed_arg_classes[0], packed_arg_classes[1],
-                                 packed_arg_classes[2], packed_arg_classes[3]},
-          .arg_contracts = {packed_arg_contracts[0], packed_arg_contracts[1]},
-          .symbol = symbol});
+          .scalar_class = call_contract.result_class,
+          .arg_scalar_classes = {call_contract.formal_arg_classes[0],
+                                 call_contract.formal_arg_classes[1],
+                                 call_contract.formal_arg_classes[2],
+                                 call_contract.formal_arg_classes[3]},
+          .arg_ownership = {call_contract.actual_arg_ownership[0],
+                            call_contract.actual_arg_ownership[1]},
+          .arg_contracts = {call_contract.formal_arg_contracts[0],
+                            call_contract.formal_arg_contracts[1]},
+          .symbol = call_contract.runtime_symbol});
   if (value < 0)
     nyr_fail(b, NY_NATIVE_ALLOC_FAIL);
   return value;
@@ -8656,32 +8684,48 @@ static int nyr_emit_runtime_call_argv(nyr_builder_impl_t *b, const char *symbol,
   for (int i = 0; i < argc; ++i)
     if (ny_native_runtime_abi_arg_is_f64(abi, (unsigned)i))
       nyr_call_arg_class_set(packed_arg_classes, (size_t)i, NYIR_SCALAR_F64);
+  const uint64_t no_argument_ownership[NYIR_CALL_MAX_ARGS / 32] = {0};
+  const nyr_resolved_call_contract_t call_contract = nyr_runtime_call_contract(
+      symbol, argc, args, packed_arg_classes, no_argument_ownership,
+      packed_arg_contracts, return_class);
   if (argc > 6) {
-    extra = (int *)malloc((size_t)(argc - 6) * sizeof(*extra));
+    extra = (int *)malloc((call_contract.expanded_arity - 6) * sizeof(*extra));
     if (!extra) {
       return nyr_fail(b, NY_NATIVE_ALLOC_FAIL), -1;
     }
-    for (int k = 6; k < argc; ++k)
-      extra[k - 6] = args[k];
+    for (size_t k = 6; k < call_contract.expanded_arity; ++k)
+      extra[k - 6] = call_contract.expanded_args[k];
   }
   nyr_inst_t inst = (nyr_inst_t){
       .op = NYIR_CALL,
       .dst = -1,
-      .a = args[0],
-      .b = argc > 1 ? args[1] : -1,
-      .c = argc > 2 ? args[2] : -1,
-      .d = argc > 3 ? args[3] : -1,
-      .e = argc > 4 ? args[4] : -1,
-      .f = argc > 5 ? args[5] : -1,
-      .imm = argc,
+      .a = call_contract.expanded_args[0],
+      .b = call_contract.expanded_arity > 1 ? call_contract.expanded_args[1]
+                                            : -1,
+      .c = call_contract.expanded_arity > 2 ? call_contract.expanded_args[2]
+                                            : -1,
+      .d = call_contract.expanded_arity > 3 ? call_contract.expanded_args[3]
+                                            : -1,
+      .e = call_contract.expanded_arity > 4 ? call_contract.expanded_args[4]
+                                            : -1,
+      .f = call_contract.expanded_arity > 5 ? call_contract.expanded_args[5]
+                                            : -1,
+      .imm = (int64_t)call_contract.expanded_arity,
       .extra_args = extra,
-      .extra_args_len = argc > 6 ? argc - 6 : 0,
+      .extra_args_len = call_contract.expanded_arity > 6
+                            ? call_contract.expanded_arity - 6
+                            : 0,
       .flags = NYIR_INST_F_EXTERN,
-      .scalar_class = return_class,
-      .arg_scalar_classes = {packed_arg_classes[0], packed_arg_classes[1],
-                             packed_arg_classes[2], packed_arg_classes[3]},
-      .arg_contracts = {packed_arg_contracts[0], packed_arg_contracts[1]},
-      .symbol = symbol};
+      .scalar_class = call_contract.result_class,
+      .arg_scalar_classes = {call_contract.formal_arg_classes[0],
+                             call_contract.formal_arg_classes[1],
+                             call_contract.formal_arg_classes[2],
+                             call_contract.formal_arg_classes[3]},
+      .arg_ownership = {call_contract.actual_arg_ownership[0],
+                        call_contract.actual_arg_ownership[1]},
+      .arg_contracts = {call_contract.formal_arg_contracts[0],
+                        call_contract.formal_arg_contracts[1]},
+      .symbol = call_contract.runtime_symbol};
   int value = nyr_ir_emit(&b->nyir, inst);
   if (value < 0) {
     free(extra);
@@ -9423,9 +9467,12 @@ static bool nyr_expr_is_f64_core(nyr_builder_impl_t *b, const expr_t *e,
         leaf ? nyr_find_user_function((nyr_builder_t *)b, leaf) : NULL;
     if (ufn && ufn->as.fn.return_type)
       return ny_native_type_name_is_f64(ufn->as.fn.return_type);
-    if (leaf && (strcmp(leaf, "__flt_sin") == 0 ||
-                 strcmp(leaf, "__flt_cos") == 0 || strcmp(leaf, "sin") == 0 ||
-                 strcmp(leaf, "cos") == 0 || strcmp(leaf, "sqrt") == 0))
+    if (leaf &&
+        (strcmp(leaf, "__flt_sin") == 0 || strcmp(leaf, "__flt_cos") == 0 ||
+         strcmp(leaf, "__flt_tan") == 0 || strcmp(leaf, "__flt_atan") == 0 ||
+         strcmp(leaf, "sin") == 0 || strcmp(leaf, "cos") == 0 ||
+         strcmp(leaf, "tan") == 0 || strcmp(leaf, "atan") == 0 ||
+         strcmp(leaf, "sqrt") == 0))
       return true;
   }
   if (e->kind == NY_E_MEMBER && e->as.member.target && e->as.member.name &&
@@ -9470,9 +9517,12 @@ static bool nyr_expr_is_f64_core(nyr_builder_impl_t *b, const expr_t *e,
           leaf ? nyr_find_user_function((nyr_builder_t *)b, leaf) : NULL;
       if (ufn && ufn->as.fn.return_type)
         return ny_native_type_name_is_f64(ufn->as.fn.return_type);
-      if (leaf && (strcmp(leaf, "__flt_sin") == 0 ||
-                   strcmp(leaf, "__flt_cos") == 0 || strcmp(leaf, "sin") == 0 ||
-                   strcmp(leaf, "cos") == 0 || strcmp(leaf, "sqrt") == 0))
+      if (leaf &&
+          (strcmp(leaf, "__flt_sin") == 0 || strcmp(leaf, "__flt_cos") == 0 ||
+           strcmp(leaf, "__flt_tan") == 0 || strcmp(leaf, "__flt_atan") == 0 ||
+           strcmp(leaf, "sin") == 0 || strcmp(leaf, "cos") == 0 ||
+           strcmp(leaf, "tan") == 0 || strcmp(leaf, "atan") == 0 ||
+           strcmp(leaf, "sqrt") == 0))
         return true;
     }
   }
@@ -9562,12 +9612,12 @@ static bool nyr_expr_is_f64_core(nyr_builder_impl_t *b, const expr_t *e,
            (strcmp(leaf, "load32_f32") == 0 ||
             strcmp(leaf, "load64_f64") == 0 || strcmp(leaf, "atof") == 0 ||
             strcmp(leaf, "strtod") == 0 || strcmp(leaf, "sin") == 0 ||
-            strcmp(leaf, "cos") == 0 || strcmp(leaf, "sqrt") == 0 ||
-            strcmp(leaf, "__flt_inf") == 0 || strcmp(leaf, "__flt_nan") == 0 ||
+            strcmp(leaf, "cos") == 0 || strcmp(leaf, "tan") == 0 ||
+            strcmp(leaf, "atan") == 0 || strcmp(leaf, "sqrt") == 0 ||
             strcmp(leaf, "__flt_abs") == 0 || strcmp(leaf, "__flt_sin") == 0 ||
             strcmp(leaf, "__flt_cos") == 0 || strcmp(leaf, "__flt_tan") == 0 ||
-            strcmp(leaf, "__flt_exp") == 0 || strcmp(leaf, "__flt_log") == 0 ||
-            strcmp(leaf, "__flt_pow") == 0 ||
+            strcmp(leaf, "__flt_atan") == 0 || strcmp(leaf, "__flt_exp") == 0 ||
+            strcmp(leaf, "__flt_log") == 0 || strcmp(leaf, "__flt_pow") == 0 ||
             strcmp(leaf, "__flt_atan2") == 0 ||
             strcmp(leaf, "__flt_fmod") == 0)))
         return true;
@@ -10108,8 +10158,7 @@ static bool nyr_expr_is_bigint(nyr_builder_impl_t *b, const expr_t *e) {
      * core.math.nt.Z); resolve through the LEAF so the guard fires for
      * qualified spellings too.
      */
-    const char *guard_leaf =
-        ny_name_leaf(e->as.call.callee->as.ident.name);
+    const char *guard_leaf = ny_name_leaf(e->as.call.callee->as.ident.name);
     const stmt_t *callee_fn =
         guard_leaf ? nyr_find_user_function((nyr_builder_t *)b, guard_leaf)
                    : NULL;
@@ -10327,9 +10376,27 @@ static bool nyr_expr_is_cstr_impl(nyr_builder_impl_t *b, const expr_t *e) {
    */
   if (e->kind == NY_E_CALL && ny_native_call_leaf(e)) {
     const char *leaf = ny_native_call_leaf(e);
-    if (strcmp(leaf, "to_str") == 0 || strcmp(leaf, "type") == 0)
+    if (strcmp(leaf, "to_str") == 0 || strcmp(leaf, "type") == 0 ||
+        strcmp(leaf, "reverse") == 0)
       return true;
   }
+  /*
+   * Member call to `reverse` on a string returns a string.  Handle this
+   * before the generic type-name query since the impl returns `any`.
+   */
+  if (e->kind == NY_E_MEMCALL && e->as.memcall.name &&
+      strcmp(e->as.memcall.name, "reverse") == 0 &&
+      nyr_expr_is_cstr(b, e->as.memcall.target))
+    return true;
+  /*
+   * Member calls to `take`/`drop` on a string return a string.
+   * Their stdlib impls declare `str` but the generic core.iter returns `any`.
+   */
+  if (e->kind == NY_E_MEMCALL && e->as.memcall.name &&
+      (strcmp(e->as.memcall.name, "take") == 0 ||
+       strcmp(e->as.memcall.name, "drop") == 0) &&
+      nyr_expr_is_cstr(b, e->as.memcall.target))
+    return true;
   /*
    * Type-name inference consults representation predicates while walking an
    * unresolved call.  Only let the classifier start that query from outside
@@ -10361,9 +10428,54 @@ static bool nyr_expr_is_cstr_impl(nyr_builder_impl_t *b, const expr_t *e) {
         e->as.call.callee->kind == NY_E_IDENT) {
       callee_name = e->as.call.callee->as.ident.name;
       callee_leaf = ny_native_call_leaf(e);
+    } else if (e->kind == NY_E_CALL && e->as.call.callee &&
+               e->as.call.callee->kind == NY_E_MEMBER) {
+      char qualified[512];
+      if (nyr_qualified_expr(e->as.call.callee, qualified, sizeof(qualified)))
+        callee_name = qualified;
+      callee_leaf = ny_native_call_leaf(e);
     } else if (e->kind == NY_E_MEMCALL) {
-      callee_name = e->as.memcall.name;
+      char qualified[512];
+      const expr_t *target = e->as.memcall.target;
+      const char *target_alias =
+          target && target->kind == NY_E_IDENT ? target->as.ident.name : NULL;
+      const char *module =
+          target_alias ? nyr_resolve_use_alias(b, target_alias) : NULL;
+      if (module && e->as.memcall.name) {
+        int n = snprintf(qualified, sizeof(qualified), "%s.%s", module,
+                         e->as.memcall.name);
+        if (n > 0 && (size_t)n < sizeof(qualified))
+          callee_name = qualified;
+      } else if (target &&
+                 nyr_qualified_expr(target, qualified, sizeof(qualified))) {
+        size_t used = strlen(qualified);
+        int n = snprintf(qualified + used, sizeof(qualified) - used, ".%s",
+                         e->as.memcall.name ? e->as.memcall.name : "");
+        if (n > 0 && (size_t)n < sizeof(qualified) - used)
+          callee_name = qualified;
+      }
+      if (!callee_name)
+        callee_name = e->as.memcall.name;
       callee_leaf = e->as.memcall.name;
+    }
+    char canonical_name[512];
+    if (callee_name) {
+      const char *dot = strchr(callee_name, '.');
+      if (dot && dot != callee_name) {
+        size_t prefix_len = (size_t)(dot - callee_name);
+        char prefix[256];
+        if (prefix_len < sizeof(prefix)) {
+          memcpy(prefix, callee_name, prefix_len);
+          prefix[prefix_len] = '\0';
+          const char *module = nyr_resolve_use_alias(b, prefix);
+          if (module) {
+            int n = snprintf(canonical_name, sizeof(canonical_name), "%s%s",
+                             module, dot);
+            if (n > 0 && (size_t)n < sizeof(canonical_name))
+              callee_name = canonical_name;
+          }
+        }
+      }
     }
     const char *cstr_symbol =
         callee_name
@@ -10680,6 +10792,19 @@ static bool nyr_expr_is_cstr(nyr_builder_impl_t *b, const expr_t *e) {
   return value;
 }
 
+static const expr_t *nyr_bool_body_tail(const stmt_t *body) {
+  if (!body)
+    return NULL;
+  if (body->kind == NY_S_EXPR)
+    return body->as.expr.expr;
+  if (body->kind == NY_S_RETURN)
+    return body->as.ret.value;
+  if (body->kind == NY_S_BLOCK && body->as.block.body.len > 0)
+    return nyr_bool_body_tail(
+        body->as.block.body.data[body->as.block.body.len - 1]);
+  return NULL;
+}
+
 /*
  * True when the expression produces a boolean value (a comparison, logical
  * operation, boolean literal, or boolean unary).  These lower to a raw 0/1
@@ -10702,16 +10827,34 @@ static bool nyr_expr_is_bool(nyr_builder_impl_t *b, const expr_t *e) {
       e->semantic.canonical_callee_stmt->as.fn.return_type &&
       strcmp(e->semantic.canonical_callee_stmt->as.fn.return_type, "bool") == 0)
     return true;
+  /* `R(x)` for a refinement R is a membership test, whatever base type R
+   * refines (a refinement of a refinement used to inherit its int base). */
+  if (e->kind == NY_E_CALL && e->as.call.args.len == 1 && b && b->prog &&
+      e->as.call.callee && e->as.call.callee->kind == NY_E_IDENT &&
+      e->as.call.callee->as.ident.name &&
+      !nyr_find_user_function(b, e->as.call.callee->as.ident.name) &&
+      nyr_find_refine_in_prog(b, b->prog, e->as.call.callee->as.ident.name))
+    return true;
   if (e->kind == NY_E_CALL || e->kind == NY_E_MEMCALL) {
     const char *type = nyr_expr_type_name(b, e);
     if (type && strcmp(type, "bool") == 0)
       return true;
   }
+  /*
+   * `true` and `false` are identifiers in the AST, but are emitted as
+   * tagged boolean immediates.
+   */
+  if (e->kind == NY_E_IDENT && e->as.ident.name &&
+      (strcmp(e->as.ident.name, "true") == 0 ||
+       strcmp(e->as.ident.name, "false") == 0))
+    return true;
   switch (e->kind) {
   case NY_E_LITERAL:
     return e->as.literal.kind == NY_LIT_BOOL;
   case NY_E_BINARY:
-    return nyr_cmp(e->as.binary.op, &(nyr_cmp_t){0});
+    return nyr_cmp(e->as.binary.op, &(nyr_cmp_t){0}) ||
+           (e->as.binary.op && (strcmp(e->as.binary.op, "&&") == 0 ||
+                                strcmp(e->as.binary.op, "||") == 0));
   case NY_E_LOGICAL:
     return true;
   case NY_E_UNARY:
@@ -10719,6 +10862,20 @@ static bool nyr_expr_is_bool(nyr_builder_impl_t *b, const expr_t *e) {
   case NY_E_TERNARY:
     return nyr_expr_is_bool(b, e->as.ternary.true_expr) &&
            nyr_expr_is_bool(b, e->as.ternary.false_expr);
+  case NY_E_MATCH:
+    if (e->as.match.arms.len == 0 && !e->as.match.default_conseq)
+      return false;
+    for (size_t i = 0; i < e->as.match.arms.len; ++i) {
+      const expr_t *tail = nyr_bool_body_tail(e->as.match.arms.data[i].conseq);
+      if (!tail || !nyr_expr_is_bool(b, tail))
+        return false;
+    }
+    if (e->as.match.default_conseq) {
+      const expr_t *tail = nyr_bool_body_tail(e->as.match.default_conseq);
+      if (!tail || !nyr_expr_is_bool(b, tail))
+        return false;
+    }
+    return true;
   case NY_E_CALL: {
     const char *leaf = ny_native_call_leaf(e);
     if (leaf &&
@@ -10816,10 +10973,21 @@ static bool nyr_expr_is_bool(nyr_builder_impl_t *b, const expr_t *e) {
      * value, so follow its initializer for classification.  Do not chase
      * ident->ident chains (bounded, cycle-free).
      */
-    nyr_local_t *l = nyr_find_local(b, e->as.ident.name);
-    if (l)
-      return l->is_bool;
-    const expr_t *g = nyr_find_top_level_value(b, e->as.ident.name);
+    nyr_local_t *l =
+        nyr_find_local_ctx(b, e->as.ident.name, e->as.ident.syntax_ctx);
+    if (!l)
+      l = nyr_find_local_nearest(b, e->as.ident.name);
+    if (l) {
+      const char *type = nyr_expr_type_name(b, e);
+      if (l->is_bool || (l->type_name && strcmp(l->type_name, "bool") == 0) ||
+          (type && strcmp(type, "bool") == 0))
+        return true;
+      const expr_t *init = nyr_find_unshadowed_top_level_value(b, e->as.ident.name);
+      if (init && init != e && nyr_expr_is_bool(b, init))
+        return true;
+      return false;
+    }
+    const expr_t *g = nyr_find_unshadowed_top_level_value(b, e->as.ident.name);
     if (g && g != e && g->kind != NY_E_IDENT)
       return nyr_expr_is_bool(b, g);
     return false;
@@ -11347,10 +11515,9 @@ static bool nyr_expr_is_any_core(nyr_builder_impl_t *b, const expr_t *e) {
      * letting that annotation win here causes the native caller to tag the
      * raw return a second time (and breaks `__store_item(...) == value`).
      */
-    const char *store_leaf =
-        e->semantic.canonical_callee
-            ? ny_name_leaf(e->semantic.canonical_callee)
-            : ny_native_call_leaf(e);
+    const char *store_leaf = e->semantic.canonical_callee
+                                 ? ny_name_leaf(e->semantic.canonical_callee)
+                                 : ny_native_call_leaf(e);
     if (store_leaf && (strcmp(store_leaf, "__store_item") == 0 ||
                        strcmp(store_leaf, "__store_item_fast") == 0))
       return false;
@@ -11583,12 +11750,7 @@ static bool nyr_expr_is_any_core(nyr_builder_impl_t *b, const expr_t *e) {
     const char *ns_module =
         ns_alias ? nyr_resolve_use_alias(b, ns_alias) : NULL;
     if (!ns_module && ns_alias && !nyr_find_local(b, ns_alias)) {
-      nyr_builder_impl_t probe = *b;
-      probe.cache_owner = b->cache_owner ? b->cache_owner : b;
-      probe.source_file = NULL;
-      probe.locals = NULL;
-      probe.local_count = probe.local_cap = 0;
-      ns_module = nyr_resolve_use_alias(&probe, ns_alias);
+      ns_module = nyr_resolve_use_alias_global(b, ns_alias);
     }
     if (!ns_fn && ns_module) {
       char qualified[512];
@@ -11881,12 +12043,7 @@ static bool nyr_expr_is_any_core(nyr_builder_impl_t *b, const expr_t *e) {
       const stmt_t *qfn = e->semantic.canonical_callee_stmt;
       const char *module = alias ? nyr_resolve_use_alias(b, alias) : NULL;
       if (!module && alias && !nyr_find_local(b, alias)) {
-        nyr_builder_impl_t probe = *b;
-        probe.cache_owner = b->cache_owner ? b->cache_owner : b;
-        probe.source_file = NULL;
-        probe.locals = NULL;
-        probe.local_count = probe.local_cap = 0;
-        module = nyr_resolve_use_alias(&probe, alias);
+        module = nyr_resolve_use_alias_global(b, alias);
       }
       if (!qfn && module) {
         char qualified[512];
@@ -11913,15 +12070,29 @@ static bool nyr_expr_is_any(nyr_builder_impl_t *b, const expr_t *e) {
   if (!b || !e)
     return false;
   ny_native_scalar_probe_enter(b);
+  nyr_builder_impl_t *probe_owner = b->cache_owner ? b->cache_owner : b;
+  if (probe_owner->any_probe_depth >= NY_ANY_PROBE_STACK_LIMIT) {
+    ny_native_scalar_probe_leave(b);
+    return false;
+  }
+  for (size_t i = 0; i < probe_owner->any_probe_depth; ++i) {
+    if (probe_owner->any_probe_stack[i] == e) {
+      ny_native_scalar_probe_leave(b);
+      return false;
+    }
+  }
+  probe_owner->any_probe_stack[probe_owner->any_probe_depth++] = e;
   bool value = false;
   bool cacheable = e->kind != NY_E_IDENT;
   if (cacheable && ny_native_scalar_probe_get(b, e, 16, 0, &value)) {
+    --probe_owner->any_probe_depth;
     ny_native_scalar_probe_leave(b);
     return value;
   }
   value = nyr_expr_is_any_core(b, e);
   if (cacheable)
     ny_native_scalar_probe_put(b, e, 16, 0, value);
+  --probe_owner->any_probe_depth;
   ny_native_scalar_probe_leave(b);
   return value;
 }
@@ -11939,6 +12110,13 @@ static bool nyr_expr_is_raw_dynamic_read(nyr_builder_impl_t *b,
   if (!e)
     return false;
   if (e->kind == NY_E_CALL && ny_native_call_leaf(e)) {
+    /*
+     * Builtin int()/to_int() results are raw integers. Preserve that result
+     * representation through generic append lowering so an odd raw value is
+     * not sent to the tagged append helper and untagged a second time.
+     */
+    if (nyr_expr_is_raw_integer_conversion(b, e))
+      return true;
     const char *leaf = ny_native_call_leaf(e);
     ny_native_leaf_kind_t kind = ny_native_leaf_kind(leaf);
     if (strcmp(leaf, "__load64_tagged_idx") == 0)
@@ -11973,7 +12151,9 @@ static bool nyr_expr_is_raw_dynamic_read(nyr_builder_impl_t *b,
           e->as.index.target->as.ident.name) {
         const nyr_local_t *target_local =
             nyr_find_local(b, e->as.index.target->as.ident.name);
-        if (target_local && (target_local->is_any || target_local->is_dyn_list))
+        if (target_local && target_local->is_dyn_list)
+          return true;
+        if (target_local && target_local->is_any)
           return false;
         if (nyr_local_is_dynamic_sequence(target_local))
           return false;
@@ -15145,8 +15325,26 @@ nyr_find_top_level_value_uncached(const nyr_builder_impl_t *b,
   return nyr_find_imported_value(b, name);
 }
 
+/*
+ * Identifier classification (is it a dict/list/set/range/bool...?) must
+ * honour lexical scope: inside a function a local binding shadows every
+ * top-level value of the same name, including those of other flattened
+ * modules. Without this an `int c` parameter looked like a dict and a loop
+ * counter `i` like another module's global. Script top-level code keeps the
+ * global view, where top-level variables are both slots and module values.
+ */
+static const expr_t *nyr_find_unshadowed_top_level_value(
+    const nyr_builder_impl_t *b, const char *name) {
+  if (b && name && b->current_fn_name &&
+      strcmp(b->current_fn_name, "rt_main") != 0 &&
+      strcmp(b->current_fn_name, "_ny_top_entry") != 0 &&
+      nyr_find_local((nyr_builder_t *)b, name))
+    return NULL;
+  return nyr_find_top_level_value(b, name);
+}
+
 static const expr_t *nyr_find_top_level_value(const nyr_builder_impl_t *b,
-                                              const char *name) {
+                                                   const char *name) {
   if (!b || !b->prog || !name)
     return NULL;
   nyr_builder_impl_t *mutable_b =
@@ -15971,7 +16169,8 @@ static const char *nyr_use_alias_in_stmt(const nyr_builder_impl_t *b,
 }
 
 static const char *nyr_resolve_use_alias_uncached(const nyr_builder_impl_t *b,
-                                                  const char *alias) {
+                                                  const char *alias,
+                                                  const char *source_file) {
   if (!b || !b->prog || !alias)
     return NULL;
   if (b->module_name && *b->module_name) {
@@ -16040,8 +16239,7 @@ static const char *nyr_resolve_use_alias_uncached(const nyr_builder_impl_t *b,
     const stmt_t *stmt = b->prog->body.data[i];
     if (!stmt || stmt->kind != NY_S_USE)
       continue;
-    const char *found =
-        nyr_use_alias_in_stmt(b, stmt, alias, 0, b->source_file);
+    const char *found = nyr_use_alias_in_stmt(b, stmt, alias, 0, source_file);
     if (found) {
       if (stmt->as.use.alias && stmt->as.use.imports.len == 0 &&
           (found[0] == '.' || strchr(found, '/')))
@@ -16055,8 +16253,8 @@ static const char *nyr_resolve_use_alias_uncached(const nyr_builder_impl_t *b,
     }
   }
   for (size_t i = 0; i < b->prog->body.len; ++i) {
-    const char *found = nyr_use_alias_in_stmt(b, b->prog->body.data[i], alias,
-                                              0, b->source_file);
+    const char *found =
+        nyr_use_alias_in_stmt(b, b->prog->body.data[i], alias, 0, source_file);
     if (found) {
       const char *canonical = nyr_use_module_canonical(b, found);
       size_t alias_len = strlen(alias);
@@ -16072,8 +16270,8 @@ static const char *nyr_resolve_use_alias_uncached(const nyr_builder_impl_t *b,
       continue;
     if (stmt->as.use.alias || stmt->as.use.imports.len != 0)
       continue;
-    if (b->source_file && stmt->tok.filename &&
-        !nyr_same_source_file(b->source_file, stmt->tok.filename))
+    if (source_file && stmt->tok.filename &&
+        !nyr_same_source_file(source_file, stmt->tok.filename))
       continue;
     char candidate[512];
     int n = snprintf(candidate, sizeof(candidate), "%s.%s", stmt->as.use.module,
@@ -16269,8 +16467,9 @@ static bool ny_native_alias_cache_grow(nyr_builder_impl_t *owner) {
   return true;
 }
 
-static const char *nyr_resolve_use_alias(const nyr_builder_impl_t *b,
-                                         const char *alias) {
+static const char *nyr_resolve_use_alias_with_source_file(
+    const nyr_builder_impl_t *b, const char *alias, const char *source_file,
+    bool check_local) {
   if (!b || !b->prog || !alias)
     return NULL;
   nyr_builder_impl_t *owner =
@@ -16282,7 +16481,7 @@ static const char *nyr_resolve_use_alias(const nyr_builder_impl_t *b,
       owner->resolve_alias_prefilter_rejects++;
     return NULL;
   }
-  if (nyr_find_local((nyr_builder_t *)b, alias)) {
+  if (check_local && nyr_find_local((nyr_builder_t *)b, alias)) {
     if (owner->resolve_alias_stats_enabled)
       owner->resolve_alias_local_shadows++;
     return NULL;
@@ -16297,23 +16496,22 @@ static const char *nyr_resolve_use_alias(const nyr_builder_impl_t *b,
   if (!owner->resolve_alias_cache) {
     if (owner->resolve_alias_stats_enabled)
       owner->resolve_alias_uncached_scans++;
-    return nyr_resolve_use_alias_uncached(b, alias);
+    return nyr_resolve_use_alias_uncached(b, alias, source_file);
   }
   size_t cap = owner->resolve_alias_cache_cap;
   if (owner->resolve_alias_cache_len >= cap - cap * 3 / 10) {
     if (!ny_native_alias_cache_grow(owner)) {
       if (owner->resolve_alias_stats_enabled)
         owner->resolve_alias_uncached_scans++;
-      return nyr_resolve_use_alias_uncached(b, alias);
+      return nyr_resolve_use_alias_uncached(b, alias, source_file);
     }
     cap = owner->resolve_alias_cache_cap;
   }
   size_t slot =
-      ny_alias_cache_hash(b->source_file, b->module_name, alias) & (cap - 1);
+      ny_alias_cache_hash(source_file, b->module_name, alias) & (cap - 1);
   while (owner->resolve_alias_cache[slot].resolved) {
     if (ny_native_alias_cache_key_equal(&owner->resolve_alias_cache[slot],
-                                        b->source_file, b->module_name,
-                                        alias)) {
+                                        source_file, b->module_name, alias)) {
       if (owner->resolve_alias_stats_enabled)
         owner->resolve_alias_cache_hits++;
       return owner->resolve_alias_cache[slot].result;
@@ -16324,11 +16522,11 @@ static const char *nyr_resolve_use_alias(const nyr_builder_impl_t *b,
     owner->resolve_alias_cache_misses++;
     owner->resolve_alias_uncached_scans++;
   }
-  const char *res = nyr_resolve_use_alias_uncached(b, alias);
+  const char *res = nyr_resolve_use_alias_uncached(b, alias, source_file);
   const char *owned_alias = nyr_builder_own_string(owner, alias);
   if (owned_alias) {
     owner->resolve_alias_cache[slot] =
-        (ny_resolve_alias_cache_entry_t){.source_file = b->source_file,
+        (ny_resolve_alias_cache_entry_t){.source_file = source_file,
                                          .module_name = b->module_name,
                                          .alias = owned_alias,
                                          .result = res,
@@ -16337,6 +16535,17 @@ static const char *nyr_resolve_use_alias(const nyr_builder_impl_t *b,
     owner->resolve_alias_cache_len++;
   }
   return res;
+}
+
+static const char *nyr_resolve_use_alias(const nyr_builder_impl_t *b,
+                                         const char *alias) {
+  return nyr_resolve_use_alias_with_source_file(
+      b, alias, b ? b->source_file : NULL, true);
+}
+
+static const char *nyr_resolve_use_alias_global(const nyr_builder_impl_t *b,
+                                                const char *alias) {
+  return nyr_resolve_use_alias_with_source_file(b, alias, NULL, false);
 }
 
 static const stmt_t *nyr_find_module(const stmt_t *s, const char *name,
@@ -16990,12 +17199,8 @@ static const expr_t *nyr_resolve_member_expr(const nyr_builder_impl_t *b,
    */
   char module[512];
   const char *resolved = nyr_resolve_use_alias(b, root);
-  if (!resolved) {
-    nyr_builder_impl_t probe = *b;
-    probe.cache_owner = b->cache_owner ? b->cache_owner : (nyr_builder_t *)b;
-    probe.source_file = NULL;
-    resolved = nyr_resolve_use_alias(&probe, root);
-  }
+  if (!resolved)
+    resolved = nyr_resolve_use_alias_with_source_file(b, root, NULL, true);
   size_t mlen = (size_t)snprintf(module, sizeof(module), "%s",
                                  resolved ? resolved : root);
   if (mlen >= sizeof(module))
@@ -17120,9 +17325,9 @@ static bool nyr_expr_is_list(const nyr_builder_impl_t *b, const expr_t *e) {
         const expr_t *global =
             e->tok.filename ? nyr_find_top_level_value_in_source(
                                   b, e->as.ident.name, e->tok.filename)
-                            : nyr_find_top_level_value(b, e->as.ident.name);
+                            : nyr_find_unshadowed_top_level_value(b, e->as.ident.name);
         if (!global)
-          global = nyr_find_top_level_value(b, e->as.ident.name);
+          global = nyr_find_unshadowed_top_level_value(b, e->as.ident.name);
         for (unsigned depth = 0;
              global && global->kind == NY_E_IDENT && depth < 64; ++depth) {
           const char *name = global->as.ident.name;
@@ -17161,6 +17366,44 @@ static bool nyr_expr_is_list(const nyr_builder_impl_t *b, const expr_t *e) {
           fn = nyr_find_user_function((nyr_builder_t *)b, qualified);
           if (!fn)
             fn = nyr_find_imported_function((nyr_builder_t *)b, qualified);
+        }
+      }
+    }
+    /*
+     * unwrap(Result<list, E>) and unwrap_or(Result<list, E>, default) yield a
+     * list at runtime even though unwrap's declared return type is `any`.
+     * Check the Ok-type extracted from the argument's Result spelling so that
+     * `for s in unwrap(file_read_lines(...))` is accepted here in the
+     * typed_buffer block where the callee-stmt return_type check resolves to
+     * `any` and would otherwise return false.
+     */
+    if (e->kind == NY_E_CALL && e->as.call.args.len >= 1) {
+      const char *leaf = ny_native_call_leaf(e);
+      if (leaf &&
+          (strcmp(leaf, "unwrap") == 0 || strcmp(leaf, "__unwrap") == 0 ||
+           strcmp(leaf, "unwrap_or") == 0 ||
+           strcmp(leaf, "__unwrap_or") == 0)) {
+        const char *result_type =
+            nyr_expr_type_name(b, e->as.call.args.data[0].val);
+        if (result_type && strncmp(result_type, "Result<", 7) == 0) {
+          const char *lt = strchr(result_type, '<');
+          const char *comma = lt ? strchr(lt + 1, ',') : NULL;
+          if (lt && comma && comma > lt + 1) {
+            const char *start = lt + 1;
+            while (start < comma && (*start == ' ' || *start == '\t'))
+              ++start;
+            const char *end = comma;
+            while (end > start && (end[-1] == ' ' || end[-1] == '\t'))
+              --end;
+            size_t len = (size_t)(end - start);
+            char ok_type[64];
+            if (len < sizeof(ok_type)) {
+              memcpy(ok_type, start, len);
+              ok_type[len] = '\0';
+              if (ny_native_type_name_is_list(ok_type))
+                return true;
+            }
+          }
         }
       }
     }
@@ -17210,11 +17453,22 @@ static bool nyr_expr_is_list(const nyr_builder_impl_t *b, const expr_t *e) {
                                strcmp(e->as.memcall.name, "push") == 0 ||
                                strcmp(e->as.memcall.name, "concat") == 0 ||
                                strcmp(e->as.memcall.name, "insert") == 0 ||
-                               strcmp(e->as.memcall.name, "reverse") == 0 ||
                                strcmp(e->as.memcall.name, "sort") == 0 ||
                                strcmp(e->as.memcall.name, "sorted") == 0 ||
                                strcmp(e->as.memcall.name, "clear") == 0))
       return true;
+    if (e->as.memcall.name && strcmp(e->as.memcall.name, "reverse") == 0) {
+      /*
+       * Namespace calls such as `it.reverse(xs)` are represented as member
+       * calls too; their first argument, rather than the module alias, carries
+       * the result shape. Preserve strings as strings at the dynamic boundary.
+       */
+      const expr_t *sequence = e->as.memcall.args.len > 0
+                                   ? e->as.memcall.args.data[0].val
+                                   : e->as.memcall.target;
+      return nyr_expr_is_list(b, sequence) ||
+             nyr_expr_is_cstr((nyr_builder_impl_t *)b, sequence);
+    }
     if (e->as.memcall.name && strcmp(e->as.memcall.name, "clone") == 0)
       return nyr_expr_is_list(b, e->as.memcall.target) &&
              !nyr_expr_is_dict(b, e->as.memcall.target);
@@ -17260,9 +17514,9 @@ static bool nyr_expr_is_list(const nyr_builder_impl_t *b, const expr_t *e) {
     const expr_t *global = e->tok.filename
                                ? nyr_find_top_level_value_in_source(
                                      b, e->as.ident.name, e->tok.filename)
-                               : nyr_find_top_level_value(b, e->as.ident.name);
+                               : nyr_find_unshadowed_top_level_value(b, e->as.ident.name);
     if (!global)
-      global = nyr_find_top_level_value(b, e->as.ident.name);
+      global = nyr_find_unshadowed_top_level_value(b, e->as.ident.name);
     /*
      * Follow top-level aliases before classifying the value.  A global
      * `mut alias = source` has no local fact table entry, so stopping at the
@@ -17349,10 +17603,12 @@ static bool nyr_expr_is_ptr(const nyr_builder_impl_t *b, const expr_t *e) {
     const char *leaf = ny_native_call_leaf(e);
     if (leaf &&
         (strcmp(leaf, "malloc") == 0 || strcmp(leaf, "malloc_raw") == 0 ||
-         strcmp(leaf, "__malloc") == 0 || strcmp(leaf, "__malloc_raw") == 0 ||
-         strcmp(leaf, "rt_malloc") == 0 || strcmp(leaf, "rt_zalloc_raw") == 0 ||
-         strcmp(leaf, "realloc") == 0 || strcmp(leaf, "__realloc") == 0 ||
-         strcmp(leaf, "__ptr_add") == 0 || strcmp(leaf, "__ptr_sub") == 0))
+         strcmp(leaf, "calloc_raw") == 0 || strcmp(leaf, "__malloc") == 0 ||
+         strcmp(leaf, "__malloc_raw") == 0 ||
+         strcmp(leaf, "__calloc_raw") == 0 || strcmp(leaf, "rt_malloc") == 0 ||
+         strcmp(leaf, "rt_zalloc_raw") == 0 || strcmp(leaf, "realloc") == 0 ||
+         strcmp(leaf, "__realloc") == 0 || strcmp(leaf, "__ptr_add") == 0 ||
+         strcmp(leaf, "__ptr_sub") == 0))
       return true;
     const stmt_t *fn =
         leaf ? nyr_find_user_function((nyr_builder_t *)b, leaf) : NULL;
@@ -17460,6 +17716,14 @@ static bool nyr_expr_is_dict(const nyr_builder_impl_t *b, const expr_t *e) {
     if (local && (local->semantic_rep == NY_SEM_REP_OBJECT || local->is_dict))
       return true;
     /*
+     * A local binding shadows every top-level value of the same name. Falling
+     * through to the global lookup made an `int c` parameter look like a
+     * dictionary whenever some flattened module had a dict-valued top-level
+     * `c`, so f-strings formatted the raw integer as a tagged value.
+     */
+    if (local)
+      return false;
+    /*
      * The type registry globals start as `nil` and are populated with
      * dictionaries by `_types_init`.  Their declaration therefore carries no
      * useful container representation, but all accesses are dictionary
@@ -17471,6 +17735,13 @@ static bool nyr_expr_is_dict(const nyr_builder_impl_t *b, const expr_t *e) {
          !strcmp(e->as.ident.name, "TYPE_ALIASES") ||
          !strcmp(e->as.ident.name, "TYPE_GROUPS")))
       return true;
+    /*
+     * The type registry globals start as `nil` and are populated with
+     * dictionaries by `_types_init`.  Their declaration therefore carries no
+     * useful container representation, but all accesses are dictionary
+     * operations.  Keep that backend-known invariant explicit so `.set` and
+     * `.get` do not fall through to the typed-buffer ABI.
+     */
     const expr_t *global = nyr_find_top_level_value(b, e->as.ident.name);
     /*
      * Follow immutable-style global aliases to their initializer.  Stopping
@@ -17521,19 +17792,43 @@ static bool nyr_expr_is_set(const nyr_builder_impl_t *b, const expr_t *e) {
         nyr_find_local((nyr_builder_t *)b, e->as.ident.name);
     if (local && local->type_name && strcmp(local->type_name, "set") == 0)
       return true;
+    /*
+     * A declared local shadows any same-named top-level value.
+     */
+    if (local && local->type_name)
+      return false;
     const expr_t *global = e->tok.filename
                                ? nyr_find_top_level_value_in_source(
                                      b, e->as.ident.name, e->tok.filename)
-                               : nyr_find_top_level_value(b, e->as.ident.name);
+                               : nyr_find_unshadowed_top_level_value(b, e->as.ident.name);
     if (!global)
-      global = nyr_find_top_level_value(b, e->as.ident.name);
-    return global && global != e && nyr_expr_is_set(b, global);
+      global = nyr_find_unshadowed_top_level_value(b, e->as.ident.name);
+    /*
+     * Follow top-level aliases without allowing malformed or cyclic
+     * initializers to recurse indefinitely during lowering.
+     */
+    const expr_t *current = e;
+    for (unsigned depth = 0; global && depth < 16; ++depth) {
+      if (global == current)
+        return false;
+      if (global->kind != NY_E_IDENT)
+        return nyr_expr_is_set(b, global);
+      if (!global->as.ident.name)
+        return false;
+      current = global;
+      global = nyr_find_top_level_value(b, global->as.ident.name);
+    }
   }
   return false;
 }
 
-static bool nyr_expr_is_tuple(const nyr_builder_impl_t *b, const expr_t *e) {
-  if (!b || !e)
+/*
+ * Global aliases and clone wrappers can form recursive type queries. Bound
+ * both paths and conservatively classify cycles/deep chains as non-tuples.
+ */
+static bool nyr_expr_is_tuple_depth(const nyr_builder_impl_t *b,
+                                    const expr_t *e, unsigned depth) {
+  if (!b || !e || depth >= 64)
     return false;
   if (e->kind == NY_E_TUPLE)
     return true;
@@ -17542,7 +17837,7 @@ static bool nyr_expr_is_tuple(const nyr_builder_impl_t *b, const expr_t *e) {
     if (leaf && strcmp(leaf, "tuple") == 0)
       return true;
     if (leaf && strcmp(leaf, "clone") == 0 && e->as.call.args.len == 1)
-      return nyr_expr_is_tuple(b, e->as.call.args.data[0].val);
+      return nyr_expr_is_tuple_depth(b, e->as.call.args.data[0].val, depth + 1);
     const stmt_t *fn =
         leaf ? nyr_find_user_function((nyr_builder_t *)b, leaf) : NULL;
     return fn && fn->as.fn.return_type &&
@@ -17553,15 +17848,36 @@ static bool nyr_expr_is_tuple(const nyr_builder_impl_t *b, const expr_t *e) {
         nyr_find_local((nyr_builder_t *)b, e->as.ident.name);
     if (local && local->type_name && strcmp(local->type_name, "tuple") == 0)
       return true;
+    /*
+     * A declared local shadows any same-named top-level value.
+     */
+    if (local && local->type_name)
+      return false;
     const expr_t *global = e->tok.filename
                                ? nyr_find_top_level_value_in_source(
                                      b, e->as.ident.name, e->tok.filename)
                                : nyr_find_top_level_value(b, e->as.ident.name);
     if (!global)
       global = nyr_find_top_level_value(b, e->as.ident.name);
-    return global && global != e && nyr_expr_is_tuple(b, global);
+    const expr_t *current = e;
+    for (unsigned alias_depth = 0;
+         global && alias_depth < 16 && depth + alias_depth < 64;
+         ++alias_depth) {
+      if (global == current)
+        return false;
+      if (global->kind != NY_E_IDENT)
+        return nyr_expr_is_tuple_depth(b, global, depth + alias_depth + 1);
+      if (!global->as.ident.name)
+        return false;
+      current = global;
+      global = nyr_find_top_level_value(b, global->as.ident.name);
+    }
   }
   return false;
+}
+
+static bool nyr_expr_is_tuple(const nyr_builder_impl_t *b, const expr_t *e) {
+  return nyr_expr_is_tuple_depth(b, e, 0);
 }
 
 static const expr_t *nyr_resolve_list_literal(const nyr_builder_impl_t *b,
@@ -17580,7 +17896,7 @@ static const expr_t *nyr_resolve_list_literal(const nyr_builder_impl_t *b,
     const stmt_t *top_stmt = nyr_find_top_level_var_stmt(b, e->as.ident.name);
     if (top_stmt && top_stmt->kind == NY_S_VAR && top_stmt->as.var.is_mut)
       return NULL;
-    const expr_t *v = nyr_find_top_level_value(b, e->as.ident.name);
+    const expr_t *v = nyr_find_unshadowed_top_level_value(b, e->as.ident.name);
     if (v && v != e)
       return nyr_resolve_list_literal(b, v, depth + 1);
     return NULL;
@@ -17610,7 +17926,7 @@ static const expr_t *nyr_resolve_dict_literal(const nyr_builder_impl_t *b,
     const stmt_t *top_stmt = nyr_find_top_level_var_stmt(b, e->as.ident.name);
     if (top_stmt && top_stmt->kind == NY_S_VAR && top_stmt->as.var.is_mut)
       return NULL;
-    const expr_t *v = nyr_find_top_level_value(b, e->as.ident.name);
+    const expr_t *v = nyr_find_unshadowed_top_level_value(b, e->as.ident.name);
     if (v && v != e)
       return nyr_resolve_dict_literal(b, v, depth + 1);
     return NULL;
@@ -18295,6 +18611,16 @@ static bool nyr_eval_proof_i64_env(const nyr_builder_impl_t *b, const expr_t *e,
     if (e->as.literal.kind == NY_LIT_INT) {
       if (e->as.literal.integer_outside_i64)
         return false;
+      /*
+       * nil parses as a NY_LIT_INT zero literal (tok NY_T_NIL), but under
+       * the proof discipline nil is not an i64 integer: the proof
+       * evaluator must refuse it so consumers never fold a nil into a
+       * proven integer zero. The nil identity invariant is documented in
+       * spec/values.md; ABI sites that need nil as a value re-derive it
+       * from the token kind instead of this evaluator.
+       */
+      if (e->tok.kind == NY_T_NIL)
+        return false;
       *out = e->as.literal.as.i;
       return true;
     }
@@ -18874,10 +19200,16 @@ static void ny_native_register_const_defs(nyr_builder_impl_t *fold_cache,
       if (!folded && init->kind == NY_E_MEMBER && module_name && *module_name)
         folded = nyr_fold_module_alias_int(prog, module_name, init, &value, 1);
       bool is_tag = false;
+      bool is_float = false;
       if (!folded && init->kind == NY_E_LITERAL &&
           init->as.literal.kind == NY_LIT_FLOAT) {
-        value = ny_native_f64_bits(init->as.literal.as.f);
+        bool is_f32 = init->as.literal.hint == NY_LIT_HINT_F32 ||
+                      (i < s->as.var.types.len && s->as.var.types.data[i] &&
+                       strcmp(s->as.var.types.data[i], "f32") == 0);
+        value = is_f32 ? ny_native_f32_bits((float)init->as.literal.as.f)
+                       : ny_native_f64_bits(init->as.literal.as.f);
         folded = true;
+        is_float = true;
       }
       if (!folded && nyr_fold_runtime_tag(init, &value)) {
         folded = true;
@@ -18889,7 +19221,8 @@ static void ny_native_register_const_defs(nyr_builder_impl_t *fold_cache,
          * handles, not raw constant i64s.  Leave their initializer visible
          * to lowering so it can materialize the handle.
          */
-        if (value < (INT64_C(1) << 62) && value > -(INT64_C(1) << 62)) {
+        if (is_float ||
+            (value < (INT64_C(1) << 62) && value > -(INT64_C(1) << 62))) {
           /*
            * Keep module constants qualified.  Registering every module
            * export under its leaf name makes the first collected `FLAG` win
@@ -19121,10 +19454,10 @@ static int nyr_emit_known_list_pop_len(nyr_builder_impl_t *b, int list) {
   if (zero < 0)
     return -1;
   int nonempty = nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_CMP_I64,
-                                                   .dst = -1,
-                                                   .a = base_len,
-                                                   .b = zero,
-                                                   .cmp = NYIR_CMP_GT});
+                                                    .dst = -1,
+                                                    .a = base_len,
+                                                    .b = zero,
+                                                    .cmp = NYIR_CMP_GT});
   if (nonempty < 0) {
     return nyr_fail(b, NY_NATIVE_ALLOC_FAIL), -1;
   }
@@ -19205,8 +19538,7 @@ ny_native_scalar_class_from_sem_rep(ny_sem_rep_t rep) {
   }
 }
 
-static const nyr_inst_t *nyr_reg_def_inst(const nyr_builder_impl_t *b,
-                                           int reg);
+static const nyr_inst_t *nyr_reg_def_inst(const nyr_builder_impl_t *b, int reg);
 
 static bool nyr_store_local_value(nyr_builder_impl_t *b, int slot, int value) {
   nyr_local_t *capture = nyr_find_local_slot(b, slot);
@@ -19215,6 +19547,34 @@ static bool nyr_store_local_value(nyr_builder_impl_t *b, int slot, int value) {
     int off =
         env < 0 ? -1 : nyr_emit_const(b, (int64_t)capture->capture_index * 8);
     int addr = env < 0 || off < 0 ? -1 : nyr_emit_add_i64(b, env, off);
+    if (addr >= 0 && capture->capture_by_ref) {
+      addr = nyr_emit_load_i64(b, addr);
+      if (addr < 0)
+        return false;
+      if (!capture->capture_ref_is_env_bits) {
+        nyr_scalar_class_t value_class = nyr_value_scalar_class(b, value);
+        if (capture->is_f64 || capture->is_f32) {
+          int as_f64 = value;
+          if (value_class == NYIR_SCALAR_F32)
+            as_f64 = nyr_emit_f32_to_f64(b, value);
+          else if (value_class == NYIR_SCALAR_I64_TAGGED)
+            as_f64 = nyr_emit_runtime_call(b, "rt_any_to_f64", value, -1, -1, 1,
+                                           NYIR_SCALAR_F64);
+          else if (value_class != NYIR_SCALAR_F64)
+            as_f64 = nyr_emit_i64_to_f64(b, value);
+          if (as_f64 < 0)
+            return false;
+          if (capture->is_f32 &&
+              nyr_value_scalar_class(b, as_f64) == NYIR_SCALAR_F64) {
+            as_f64 = nyr_emit_f64_to_f32(b, as_f64);
+            if (as_f64 < 0)
+              return false;
+          }
+          value = as_f64;
+        }
+        return nyr_emit_store_i64(b, addr, value);
+      }
+    }
     if (addr >= 0 && (capture->is_f64 || capture->is_f32)) {
       nyr_scalar_class_t value_class = nyr_value_scalar_class(b, value);
       int as_f64 = value;
@@ -19241,6 +19601,23 @@ static bool nyr_store_local_value(nyr_builder_impl_t *b, int slot, int value) {
       (local && !local->is_capture && !local->is_any && !local->is_bool &&
        !local->is_bigint && local->semantic_rep == NY_SEM_REP_RAW_INT);
   nyr_scalar_class_t incoming_class = nyr_value_scalar_class(b, value);
+  /*
+   * A source bool local has a raw 0/1 storage ABI. Calls to declared-bool
+   * Ny functions return canonical tagged booleans, so normalize at the
+   * assignment boundary before storing or merging that value.
+   */
+  const nyr_inst_t *incoming_def = NULL;
+  bool bool_immediate =
+      nyr_def_of(b, value, &incoming_def) &&
+      incoming_def->op == NYIR_CONST_I64 &&
+      (incoming_def->imm == NY_IMM_FALSE || incoming_def->imm == NY_IMM_TRUE);
+  if (local && local->is_bool && !local->is_any &&
+      (incoming_class == NYIR_SCALAR_I64_TAGGED || bool_immediate)) {
+    value = nyr_emit_truthy(b, value);
+    if (value < 0)
+      return nyr_fail(b, NY_NATIVE_ALLOC_FAIL);
+    incoming_class = NYIR_SCALAR_I64_RAW;
+  }
   bool inferred_handle_slot = local && !local->is_capture && !local->is_any &&
                               (incoming_class == NYIR_SCALAR_POINTER ||
                                incoming_class == NYIR_SCALAR_TYPED_BUFFER);
@@ -19335,11 +19712,11 @@ static bool nyr_store_local_value(nyr_builder_impl_t *b, int slot, int value) {
       local->semantic_rep == NY_SEM_REP_AGGREGATE &&
       nyr_value_scalar_class(b, value) == NYIR_SCALAR_I64_RAW) {
     value = nyr_ir_emit(&b->nyir,
-                      (nyr_inst_t){.op = NYIR_COPY,
-                                    .dst = -1,
-                                    .a = value,
-                                    .b = -1,
-                                    .scalar_class = NYIR_SCALAR_AGGREGATE});
+                        (nyr_inst_t){.op = NYIR_COPY,
+                                     .dst = -1,
+                                     .a = value,
+                                     .b = -1,
+                                     .scalar_class = NYIR_SCALAR_AGGREGATE});
     if (value < 0)
       return nyr_fail(b, NY_NATIVE_ALLOC_FAIL);
   }
@@ -19368,10 +19745,10 @@ static bool nyr_store_local_value(nyr_builder_impl_t *b, int slot, int value) {
       nyr_value_scalar_class(b, value) == NYIR_SCALAR_AGGREGATE) {
     value =
         nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_COPY,
-                                          .dst = -1,
-                                          .a = value,
-                                          .b = -1,
-                                          .scalar_class = NYIR_SCALAR_OBJECT});
+                                           .dst = -1,
+                                           .a = value,
+                                           .b = -1,
+                                           .scalar_class = NYIR_SCALAR_OBJECT});
     if (value < 0)
       return nyr_fail(b, NY_NATIVE_ALLOC_FAIL);
   }
@@ -19385,6 +19762,7 @@ static bool nyr_store_local_value(nyr_builder_impl_t *b, int slot, int value) {
   if (local && b->nyir.len > 0) {
     nyr_inst_t *in = &b->nyir.data[b->nyir.len - 1];
     if (in->op == NYIR_STORE_LOCAL && in->imm == slot) {
+      in->scalar_class = nyr_value_scalar_class(b, value);
       nyr_scalar_class_t local_class = ny_native_scalar_class_from_sem_rep(
           local->is_f64   ? NY_SEM_REP_F64
           : local->is_f32 ? NY_SEM_REP_F32
@@ -19499,10 +19877,10 @@ static bool nyr_store_local_value(nyr_builder_impl_t *b, int slot, int value) {
         local->list_len_slot = b->next_local_slot++;
       size_t length_before = b->nyir.len;
       nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_STORE_LOCAL,
-                                        .dst = -1,
-                                        .a = list_len,
-                                        .b = -1,
-                                        .imm = local->list_len_slot});
+                                         .dst = -1,
+                                         .a = list_len,
+                                         .b = -1,
+                                         .imm = local->list_len_slot});
       if (b->nyir.len == length_before)
         return nyr_fail(b, NY_NATIVE_ALLOC_FAIL);
     }
@@ -19517,6 +19895,22 @@ static int nyr_load_local_value(nyr_builder_impl_t *b, int slot) {
     int off =
         env < 0 ? -1 : nyr_emit_const(b, (int64_t)capture->capture_index * 8);
     int addr = env < 0 || off < 0 ? -1 : nyr_emit_add_i64(b, env, off);
+    bool ref_env_bits = false;
+    if (addr >= 0 && capture->capture_by_ref) {
+      addr = nyr_emit_load_i64(b, addr);
+      if (addr < 0)
+        return -1;
+      ref_env_bits = capture->capture_ref_is_env_bits;
+      if (!ref_env_bits) {
+        int value = capture->is_f64   ? nyr_emit_load_f64(b, addr)
+                    : capture->is_f32 ? nyr_emit_load_f32(b, addr)
+                                      : nyr_emit_load_i64(b, addr);
+        if (value >= 0 && capture->semantic_rep == NY_SEM_REP_RAW_INT &&
+            b->nyir.len > 0 && b->nyir.data[b->nyir.len - 1].dst == value)
+          b->nyir.data[b->nyir.len - 1].scalar_class = NYIR_SCALAR_I64_RAW;
+        return value;
+      }
+    }
     int value = addr < 0 ? -1 : nyr_emit_load_i64(b, addr);
     if (value >= 0 && (capture->is_f64 || capture->is_f32)) {
       value = nyr_emit_runtime_call(b, "rt_f64_from_bits", value, -1, -1, 1,
@@ -19677,10 +20071,10 @@ static int nyr_load_local_value(nyr_builder_impl_t *b, int slot) {
   if (local && local->is_list && local->list_len_slot >= 0) {
     int length =
         nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_LOAD_LOCAL,
-                                          .dst = -1,
-                                          .a = -1,
-                                          .b = -1,
-                                          .imm = local->list_len_slot});
+                                           .dst = -1,
+                                           .a = -1,
+                                           .b = -1,
+                                           .imm = local->list_len_slot});
     if (length < 0 || !nyr_record_list_len_fact(b, v, length)) {
       return nyr_fail(b, NY_NATIVE_ALLOC_FAIL), -1;
     }
@@ -19699,11 +20093,13 @@ static int nyr_emit_is_zero(nyr_builder_impl_t *b, int value) {
   int zero = nyr_emit_const(b, 0);
   if (zero < 0)
     return -1;
-  int v = nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_CMP_I64,
-                                            .dst = -1,
-                                            .a = value,
-                                            .b = zero,
-                                            .cmp = NYIR_CMP_EQ});
+  int v =
+      nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_CMP_I64,
+                                         .dst = -1,
+                                         .a = value,
+                                         .b = zero,
+                                         .cmp = NYIR_CMP_EQ,
+                                         .scalar_class = NYIR_SCALAR_I64_RAW});
   if (v < 0)
     nyr_fail(b, NY_NATIVE_ALLOC_FAIL);
   return v;
@@ -20854,6 +21250,8 @@ static bool nyr_ast_layout_query_depth(const nyr_builder_impl_t *b,
     return false;
   if (forced)
     aggregate_align = forced;
+  if (aggregate_align == 0)
+    aggregate_align = 1;
   if (size_out)
     *size_out = nyr_align_up(offset, aggregate_align);
   if (align_out)
@@ -21159,8 +21557,8 @@ static bool nyr_find_enum_member(const nyr_builder_impl_t *b, const char *name,
 
 static inline int nyr_emit_binop(nyr_builder_impl_t *b, nyr_op_t op, int a,
                                  int rhs) {
-  int v =
-      nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = op, .dst = -1, .a = a, .b = rhs});
+  int v = nyr_ir_emit(&b->nyir,
+                      (nyr_inst_t){.op = op, .dst = -1, .a = a, .b = rhs});
   if (v < 0)
     nyr_fail(b, NY_NATIVE_ALLOC_FAIL);
   return v;
@@ -22976,11 +23374,11 @@ static inline int nyr_emit_const_cstr(nyr_builder_impl_t *b, const char *s) {
     return nyr_fail(b, "native NYIR lower: string table full or OOM");
   }
   int addr = nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_ADDR_SYMBOL,
-                                               .dst = -1,
-                                               .a = -1,
-                                               .b = -1,
-                                               .imm = 0,
-                                               .symbol = sym});
+                                                .dst = -1,
+                                                .a = -1,
+                                                .b = -1,
+                                                .imm = 0,
+                                                .symbol = sym});
   if (addr < 0)
     nyr_fail(b, NY_NATIVE_ALLOC_FAIL);
   return addr;
@@ -23077,6 +23475,15 @@ nyr_value_scalar_class_impl(const nyr_builder_impl_t *b,
           (prev->op == NYIR_ADDR_LOCAL && prev->imm == def->imm))
         break;
     }
+    /*
+     * Typed bool locals use raw 0/1 storage. A control-flow merge can hide
+     * the reaching store from this local scan, so preserve that declared
+     * storage contract instead of letting the type map infer a tagged word.
+     */
+    const nyr_local_t *local =
+        nyr_find_local_slot((nyr_builder_impl_t *)b, (int)def->imm);
+    if (local && local->is_bool && !local->is_any)
+      return NYIR_SCALAR_I64_RAW;
   }
 
   /*
@@ -23150,7 +23557,7 @@ nyr_value_scalar_class_impl(const nyr_builder_impl_t *b,
 }
 
 static nyr_scalar_class_t nyr_value_scalar_class(const nyr_builder_impl_t *b,
-                                                  int value) {
+                                                 int value) {
   if (!b || value < 0)
     return NYIR_SCALAR_UNKNOWN;
   /*
@@ -23201,9 +23608,13 @@ static int nyr_lower_dict_key(nyr_builder_impl_t *b, const expr_t *e) {
   bool raw_integer = integer_literal ||
                      (e && e->semantic.rep == NY_SEM_REP_RAW_INT) ||
                      nyr_value_scalar_class(b, key) == NYIR_SCALAR_I64_RAW;
+  /* Booleans lower to raw 0/1. Dynamic keys carry the boolean immediates, so
+   * box them: a raw 1 would be read as tagged integer 0 by the tagged index
+   * bridge (and alias integer keys in dictionaries). */
+  if (key >= 0 && e && nyr_expr_is_bool(b, e))
+    return nyr_box_bool(b, key);
   if (key < 0 || !e || nyr_expr_is_cstr(b, e) ||
-      nyr_expr_is_immutable_nil(b, e, 0) || nyr_expr_is_bool(b, e) ||
-      !raw_integer)
+      nyr_expr_is_immutable_nil(b, e, 0) || !raw_integer)
     return key;
   int one = nyr_emit_const(b, 1);
   if (one < 0)
@@ -23218,6 +23629,10 @@ static int nyr_lower_dict_key(nyr_builder_impl_t *b, const expr_t *e) {
       &b->nyir,
       (nyr_inst_t){.op = NYIR_OR_I64, .dst = -1, .a = shifted, .b = one});
 }
+
+static bool nyr_expr_is_callable_value(nyr_builder_t *b, const expr_t *e);
+static const char *nyr_callable_storage_marker(const nyr_builder_t *b,
+                                               const stmt_t *callable_fn);
 
 #include "lower/call.h" /* call ABI lowering */
 
@@ -23284,7 +23699,7 @@ static bool nyr_expr_is_range(const nyr_builder_impl_t *b, const expr_t *e) {
         }
       }
     }
-    const expr_t *global = nyr_find_top_level_value(b, e->as.ident.name);
+    const expr_t *global = nyr_find_unshadowed_top_level_value(b, e->as.ident.name);
     return global && global != e && global->kind != NY_E_IDENT &&
            nyr_expr_is_range(b, global);
   }

@@ -23,7 +23,18 @@
 
 static int ny_trace_resolve_enabled(void);
 
+static int ny_trace_resolve_verbose_enabled(void) {
+  static int cached = -1;
+  if (cached >= 0)
+    return cached;
+  const char *value = getenv("NYTRIX_TRACE_RESOLVE_VERBOSE");
+  cached = value && value[0] && strcmp(value, "0") != 0 ? 1 : 0;
+  return cached;
+}
+
 static void ny_trace_resolve_emit(const char *fmt, ...) {
+  if (!ny_trace_resolve_verbose_enabled())
+    return;
   char detail[1024];
   va_list ap;
   va_start(ap, fmt);
@@ -33,6 +44,27 @@ static void ny_trace_resolve_emit(const char *fmt, ...) {
   if (len && detail[len - 1] == '\n')
     detail[len - 1] = '\0';
   ny_trace_line("RESOLVE", "%s", detail);
+}
+
+static void ny_trace_resolve_path_add(char *path, size_t cap,
+                                      const char *action) {
+  if (!path || !cap || !action)
+    return;
+  size_t len = strlen(path);
+  if (len >= cap)
+    return;
+  snprintf(path + len, cap - len, "%s%s", len ? ">" : "", action);
+}
+
+static void ny_trace_resolve_result(const char *name, const char *path,
+                                    const char *result,
+                                    const char *resolved_name) {
+  if (resolved_name)
+    ny_trace_line("RESOLVE", "lookup name='%s' path=%s result=%s target='%s'",
+                  name, path && *path ? path : "-", result, resolved_name);
+  else
+    ny_trace_line("RESOLVE", "lookup name='%s' path=%s result=%s", name,
+                  path && *path ? path : "-", result);
 }
 
 #define NY_LOOKUP_CACHE_SLOTS 8192u
@@ -612,7 +644,8 @@ static void *ny_lookup_try_scoped_or_alias(codegen_t *cg, const char *name,
                       name);
     if (nw > 0 && (size_t)nw < sizeof(scoped)) {
       if (ny_trace_resolve_enabled()) {
-        ny_trace_resolve_emit("scoped '%s' -> try '%s'\n", name, scoped);
+        ny_trace_resolve_emit("scoped_try name='%s' candidate='%s'\n", name,
+                              scoped);
       }
       void *scoped_res = recurse(cg, scoped, ctx);
       if (scoped_res)
@@ -622,8 +655,8 @@ static void *ny_lookup_try_scoped_or_alias(codegen_t *cg, const char *name,
     if (scoped_alias_full && *scoped_alias_full &&
         strcmp(scoped_alias_full, scoped) != 0) {
       if (ny_trace_resolve_enabled()) {
-        ny_trace_resolve_emit("scoped alias '%s' -> try '%s'\n", scoped,
-                              scoped_alias_full);
+        ny_trace_resolve_emit("scoped_alias_try name='%s' candidate='%s'\n",
+                              scoped, scoped_alias_full);
       }
       void *scoped_alias_res = recurse(cg, scoped_alias_full, ctx);
       if (scoped_alias_res)
@@ -637,7 +670,8 @@ static void *ny_lookup_try_scoped_or_alias(codegen_t *cg, const char *name,
   if (strcmp(alias_full, name) == 0)
     return NULL;
   if (ny_trace_resolve_enabled()) {
-    ny_trace_resolve_emit("alias '%s' -> try '%s'\n", name, alias_full);
+    ny_trace_resolve_emit("alias_try name='%s' target='%s'\n", name,
+                          alias_full);
   }
   return recurse(cg, alias_full, ctx);
 }
@@ -1633,7 +1667,7 @@ void add_builtins(codegen_t *cg) {
 #endif
 #endif
 
-#include "code/lang/runtime/defs.h"
+#include "code/backend/runtime/defs.h"
 
 #undef RT_DEF
 #undef RT_DEF_F64
@@ -1782,9 +1816,8 @@ static codegen_t *g_lookup_cg_stack[MAX_LOOKUP_DEPTH];
 fun_sig *lookup_fun(codegen_t *cg, const char *name, uint64_t hash) {
   if (!name || !*name)
     return NULL;
-  if (ny_trace_resolve_enabled()) {
-    ny_trace_resolve_emit("lookup_fun name='%s'\n", name);
-  }
+  bool trace_resolve = ny_trace_resolve_enabled();
+  char trace_path[192] = {0};
   bool builtin_runtime_name = (name[0] == '_' && name[1] == '_');
   bool qualified = strchr(name, '.') != NULL;
   bool cacheable =
@@ -1792,15 +1825,35 @@ fun_sig *lookup_fun(codegen_t *cg, const char *name, uint64_t hash) {
   fun_sig *cached = NULL;
   if (cacheable) {
     int cache_state = ny_fun_cache_get(cg, name, hash, &cached);
-    if (cache_state == 1)
+    if (cache_state == 1) {
+      if (trace_resolve) {
+        ny_trace_resolve_path_add(trace_path, sizeof(trace_path), "cache");
+        ny_trace_resolve_result(name, trace_path, "hit",
+                                cached ? cached->name : NULL);
+        ny_trace_resolve_emit(
+            "function_cache name='%s' state=hit cached='%s'\n", name,
+            cached && cached->name ? cached->name : "");
+      }
       return cached;
-    if (cache_state == 0)
+    }
+    if (cache_state == 0) {
+      if (trace_resolve) {
+        ny_trace_resolve_path_add(trace_path, sizeof(trace_path), "cache");
+        ny_trace_resolve_result(name, trace_path, "miss", NULL);
+        ny_trace_resolve_emit(
+            "function_cache name='%s' state=miss cached=nil\n", name);
+      }
       return NULL;
+    }
   }
 
   for (int i = g_lookup_depth - 1; i >= 0; --i) {
     if (g_lookup_cg_stack[i] == cg && g_lookup_name_stack[i] &&
         strcmp(g_lookup_name_stack[i], name) == 0) {
+      if (trace_resolve) {
+        ny_trace_resolve_path_add(trace_path, sizeof(trace_path), "cycle");
+        ny_trace_resolve_result(name, trace_path, "miss", NULL);
+      }
       return NULL;
     }
   }
@@ -1813,6 +1866,10 @@ fun_sig *lookup_fun(codegen_t *cg, const char *name, uint64_t hash) {
                       "in symbol resolution",
                       name);
     }
+    if (trace_resolve) {
+      ny_trace_resolve_path_add(trace_path, sizeof(trace_path), "depth_limit");
+      ny_trace_resolve_result(name, trace_path, "miss", NULL);
+    }
     return NULL;
   }
   g_lookup_name_stack[g_lookup_depth] = name;
@@ -1823,8 +1880,11 @@ fun_sig *lookup_fun(codegen_t *cg, const char *name, uint64_t hash) {
   bool tried_scoped_or_alias = false;
 
   if (!builtin_runtime_name && !qualified && cg->current_module_name) {
+    if (trace_resolve)
+      ny_trace_resolve_path_add(trace_path, sizeof(trace_path), "scoped_alias");
     if (ny_trace_resolve_enabled()) {
-      ny_trace_resolve_emit("0 scoped/alias-first '%s'\n", name);
+      ny_trace_resolve_emit("step=0 action=scoped_alias_first name='%s'\n",
+                            name);
     }
     tried_scoped_or_alias = true;
     res = ny_lookup_try_scoped_or_alias(
@@ -1834,8 +1894,11 @@ fun_sig *lookup_fun(codegen_t *cg, const char *name, uint64_t hash) {
   }
 
   res = lookup_fun_exact(cg, name);
+  if (trace_resolve)
+    ny_trace_resolve_path_add(trace_path, sizeof(trace_path), "exact");
   if (ny_trace_resolve_enabled()) {
-    ny_trace_resolve_emit("1 exact '%s' -> %s\n", name, res ? "hit" : "miss");
+    ny_trace_resolve_emit("step=1 action=exact name='%s' result=%s\n", name,
+                          res ? "hit" : "miss");
   }
   if (res && !ny_block_implicit_std_symbol(cg, name, res->name))
     goto end;
@@ -1843,8 +1906,10 @@ fun_sig *lookup_fun(codegen_t *cg, const char *name, uint64_t hash) {
 
   const char *alias_full = resolve_import_alias(cg, name);
   if (alias_full && *alias_full && strcmp(alias_full, name) != 0) {
+    if (trace_resolve)
+      ny_trace_resolve_path_add(trace_path, sizeof(trace_path), "import_alias");
     if (ny_trace_resolve_enabled()) {
-      ny_trace_resolve_emit("qualified/import alias '%s' -> try '%s'\n", name,
+      ny_trace_resolve_emit("qualified_alias name='%s' target='%s'\n", name,
                             alias_full);
     }
     res = lookup_fun(cg, alias_full, 0);
@@ -1856,9 +1921,12 @@ fun_sig *lookup_fun(codegen_t *cg, const char *name, uint64_t hash) {
     goto end;
 
   if (!tried_scoped_or_alias) {
+    if (trace_resolve)
+      ny_trace_resolve_path_add(trace_path, sizeof(trace_path), "scoped_alias");
     if (ny_trace_resolve_enabled()) {
-      ny_trace_resolve_emit("2 scoped/alias '%s' qualified=%d\n", name,
-                            qualified ? 1 : 0);
+      ny_trace_resolve_emit(
+          "step=2 action=scoped_alias name='%s' qualified=%d\n", name,
+          qualified ? 1 : 0);
     }
     res = ny_lookup_try_scoped_or_alias(
         cg, name, qualified, ny_lookup_fun_recurse, hash ? &hash : NULL);
@@ -1866,8 +1934,10 @@ fun_sig *lookup_fun(codegen_t *cg, const char *name, uint64_t hash) {
       goto end;
   }
 
+  if (trace_resolve)
+    ny_trace_resolve_path_add(trace_path, sizeof(trace_path), "member_alias");
   if (ny_trace_resolve_enabled()) {
-    ny_trace_resolve_emit("3 member-alias '%s'\n", name);
+    ny_trace_resolve_emit("step=3 action=member_alias name='%s'\n", name);
   }
   const char *dot = qualified ? strchr(name, '.') : NULL;
   if (dot) {
@@ -1921,8 +1991,11 @@ fun_sig *lookup_fun(codegen_t *cg, const char *name, uint64_t hash) {
   }
 
   if (!res && !qualified && cg->current_module_name) {
+    if (trace_resolve)
+      ny_trace_resolve_path_add(trace_path, sizeof(trace_path),
+                                "current_module");
     if (ny_trace_resolve_enabled()) {
-      ny_trace_resolve_emit("4 current-module '%s'\n", name);
+      ny_trace_resolve_emit("step=4 action=current_module name='%s'\n", name);
     }
     char mod_buf[256];
     snprintf(mod_buf, sizeof(mod_buf), "%s.%s", cg->current_module_name, name);
@@ -1931,8 +2004,10 @@ fun_sig *lookup_fun(codegen_t *cg, const char *name, uint64_t hash) {
       goto end;
   }
   if (!res && !qualified) {
+    if (trace_resolve)
+      ny_trace_resolve_path_add(trace_path, sizeof(trace_path), "tail_find");
     if (ny_trace_resolve_enabled()) {
-      ny_trace_resolve_emit("5 tail-find '%s'\n", name);
+      ny_trace_resolve_emit("step=5 action=tail_find name='%s'\n", name);
     }
     res = ny_fun_tail_find(cg, name);
     if (res && ny_tail_result_blocked_by_export_profile(cg, res->name, name))
@@ -1941,8 +2016,10 @@ fun_sig *lookup_fun(codegen_t *cg, const char *name, uint64_t hash) {
       goto end;
   }
   if (!res && cg->parent) {
+    if (trace_resolve)
+      ny_trace_resolve_path_add(trace_path, sizeof(trace_path), "parent");
     if (ny_trace_resolve_enabled()) {
-      ny_trace_resolve_emit("6 parent '%s'\n", name);
+      ny_trace_resolve_emit("step=6 action=parent name='%s'\n", name);
     }
     fun_sig *p = lookup_fun(cg->parent, name, hash);
     if (p && p->value) {
@@ -1959,13 +2036,18 @@ fun_sig *lookup_fun(codegen_t *cg, const char *name, uint64_t hash) {
     }
   }
 end:
-  if (ny_trace_resolve_enabled()) {
-    ny_trace_resolve_emit("lookup_fun name='%s' => %s\n", name,
-                          res ? "hit" : "miss");
-  }
   if (res && !ny_sig_in_current_sigs(cg, res) && !cg->parent) {
     res = NULL;
+    if (trace_resolve)
+      ny_trace_resolve_path_add(trace_path, sizeof(trace_path),
+                                "export_filter");
   }
+  if (ny_trace_resolve_enabled())
+    ny_trace_resolve_emit("lookup_result name='%s' result=%s\n", name,
+                          res ? "hit" : "miss");
+  if (trace_resolve)
+    ny_trace_resolve_result(name, trace_path, res ? "hit" : "miss",
+                            res ? res->name : NULL);
   if (res)
     ny_mark_import_alias_used(cg, name, res->name);
   g_lookup_depth--;
@@ -1981,8 +2063,8 @@ fun_sig *lookup_use_module_fun(codegen_t *cg, const char *name, size_t argc) {
     return NULL;
   const char *alias_full = resolve_import_alias(cg, name);
   if (ny_trace_resolve_enabled()) {
-    ny_trace_resolve_emit("use-module-fun name='%s' argc=%zu alias=%s%s%s\n",
-                          name, argc, alias_full ? "'" : "(nil)",
+    ny_trace_resolve_emit("use_module name='%s' argc=%zu alias=%s%s%s\n", name,
+                          argc, alias_full ? "'" : "(nil)",
                           alias_full ? alias_full : "", alias_full ? "'" : "");
   }
   if (alias_full) {
@@ -2001,7 +2083,7 @@ const char *resolve_import_alias(codegen_t *cg, const char *name) {
   if (cacheable) {
     int cache_state = ny_alias_cache_get(cg, name, &cached);
     if (ny_trace_resolve_enabled()) {
-      ny_trace_resolve_emit("alias name='%s' cache_state=%d cached=%s%s%s\n",
+      ny_trace_resolve_emit("alias_cache name='%s' state=%d cached=%s%s%s\n",
                             name, cache_state, cached ? "'" : "(nil)",
                             cached ? cached : "", cached ? "'" : "");
     }
@@ -2020,7 +2102,7 @@ const char *resolve_import_alias(codegen_t *cg, const char *name) {
   if (!res && !strchr(name, '.'))
     res = ny_resolve_used_module_export_alias(cg, name);
   if (ny_trace_resolve_enabled()) {
-    ny_trace_resolve_emit("alias name='%s' -> %s%s%s\n", name,
+    ny_trace_resolve_emit("alias_result name='%s' target=%s%s%s\n", name,
                           res ? "'" : "(nil)", res ? res : "", res ? "'" : "");
   }
   if (cacheable)
@@ -2359,7 +2441,69 @@ static int typo_distance_if_relevant(const char *want, const char *cand) {
   size_t diff = (wl > cl) ? (wl - cl) : (cl - wl);
   if (diff > 2)
     return 99;
-  return ny_levenshtein(want, cand);
+  /*
+   * Suggestions are only emitted within distance two. Keep the dynamic
+   * program inside that diagonal band: O(max(wl, cl)) work and constant
+   * storage instead of filling an O(wl * cl) matrix for every symbol.
+   */
+  if (wl < cl) {
+    const char *tmp = want;
+    want = cand;
+    cand = tmp;
+    size_t len = wl;
+    wl = cl;
+    cl = len;
+  }
+
+  enum { MAX_DISTANCE = 2, BAND_WIDTH = MAX_DISTANCE * 2 + 1 };
+  int prev[BAND_WIDTH];
+  int curr[BAND_WIDTH];
+  size_t prev_lo = 0;
+  size_t prev_hi = cl < MAX_DISTANCE ? cl : MAX_DISTANCE;
+  for (size_t j = prev_lo; j <= prev_hi; ++j)
+    prev[j % BAND_WIDTH] = (int)j;
+
+  for (size_t i = 1; i <= wl; ++i) {
+    size_t lo = i > MAX_DISTANCE ? i - MAX_DISTANCE : 0;
+    size_t hi = cl;
+    if (i <= SIZE_MAX - MAX_DISTANCE && hi > i + MAX_DISTANCE)
+      hi = i + MAX_DISTANCE;
+
+    for (size_t j = lo; j <= hi; ++j) {
+      int best = MAX_DISTANCE + 1;
+      if (j == 0) {
+        best = i <= MAX_DISTANCE ? (int)i : MAX_DISTANCE + 1;
+      } else {
+        if (j >= prev_lo && j <= prev_hi) {
+          int deletion = prev[j % BAND_WIDTH] + 1;
+          if (deletion < best)
+            best = deletion;
+        }
+        if (j > lo) {
+          int insertion = curr[(j - 1) % BAND_WIDTH] + 1;
+          if (insertion < best)
+            best = insertion;
+        }
+        if (j - 1 >= prev_lo && j - 1 <= prev_hi) {
+          int substitution =
+              prev[(j - 1) % BAND_WIDTH] + (want[i - 1] != cand[j - 1]);
+          if (substitution < best)
+            best = substitution;
+        }
+        if (best > MAX_DISTANCE)
+          best = MAX_DISTANCE + 1;
+      }
+      curr[j % BAND_WIDTH] = best;
+    }
+    prev_lo = lo;
+    prev_hi = hi;
+    int *tmp = prev;
+    memcpy(prev, curr, sizeof(prev));
+    memcpy(curr, tmp, sizeof(curr));
+  }
+  return cl >= prev_lo && cl <= prev_hi && prev[cl % BAND_WIDTH] <= MAX_DISTANCE
+             ? prev[cl % BAND_WIDTH]
+             : MAX_DISTANCE + 1;
 }
 
 static void maybe_add_suggestion(const char **s1, int *d1, const char **s2,
@@ -2379,32 +2523,6 @@ static void maybe_add_suggestion(const char **s1, int *d1, const char **s2,
     *s2 = cand;
     *d2 = dist;
   }
-}
-
-static int levenshtein(const char *s, const char *t) {
-  int ls = (int)strlen(s), lt = (int)strlen(t);
-  int *d = (int *)alloca(sizeof(int) * (ls + 1) * (lt + 1));
-  for (int i = 0; i <= ls; i++)
-    d[i * (lt + 1)] = i;
-  for (int j = 0; j <= lt; j++)
-    d[j] = j;
-  for (int j = 1; j <= lt; j++) {
-    for (int i = 1; i <= ls; i++) {
-      if (s[i - 1] == t[j - 1])
-        d[i * (lt + 1) + j] = d[(i - 1) * (lt + 1) + (j - 1)];
-      else {
-        int a = d[(i - 1) * (lt + 1) + j] + 1;
-        int b = d[i * (lt + 1) + (j - 1)] + 1;
-        int c = d[(i - 1) * (lt + 1) + (j - 1)] + 1;
-        if (b < a)
-          a = b;
-        if (c < a)
-          a = c;
-        d[i * (lt + 1) + j] = a;
-      }
-    }
-  }
-  return d[ls * (lt + 1) + lt];
 }
 
 static int ny_diag_undef_enabled(void) {
@@ -2673,7 +2791,7 @@ void report_undef_symbol(codegen_t *cg, const char *name, token_t tok) {
       ny_diag_fix("use the exact spelling '%s'", fn);
       return;
     }
-    int d = levenshtein(query, tail);
+    int d = typo_distance_if_relevant(query, tail);
     if (d < best_fd) {
       best_fd = d;
       best_f = fn;

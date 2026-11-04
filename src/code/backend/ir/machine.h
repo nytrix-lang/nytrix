@@ -7,6 +7,7 @@
 #include <stdio.h>
 
 #include <nyr/ir.h>
+#include "code/backend/abi.h"
 
 /*
  * Target-specific machine IR between NYIR and object emission. It owns virtual
@@ -123,6 +124,9 @@ typedef enum {
   NYR_MACH_INLINE_ASM,
   NYR_MACH_INTRINSIC,
   NYR_MACH_REDUCE_ADD,
+  NYR_MACH_VA_SAVE,
+  NYR_MACH_VA_START,
+  NYR_MACH_VA_ARG,
 } nyr_mach_opcode_t;
 
 typedef enum {
@@ -139,11 +143,16 @@ typedef struct {
   nyr_mach_operand_t src0;
   nyr_mach_operand_t src1;
   nyr_mach_operand_t src2;
+  int64_t immediate;
   nyr_mach_operand_t *args;
   uint32_t *arg_sizes;
   size_t args_len;
   bool call_is_extern;
   bool call_has_sret;
+  bool call_is_variadic;
+  /* Resolved once during NYIR legalization; machine encoders must not
+   * rediscover runtime operations from symbol names. */
+  ny_native_runtime_op_t runtime_operation;
   nyr_mach_cond_t condition;
   uint64_t call_clobbers;
   bool byte_width;
@@ -195,6 +204,9 @@ typedef struct {
 } nyr_mach_func_t;
 
 void nyr_mach_func_free(nyr_mach_func_t *func);
+/* Marks parameter slots in a caller-zeroed frame_slot_len bitmap. */
+bool nyr_mach_param_slots(const nyr_mach_func_t *mach, bool *params);
+
 bool nyr_mach_alloc_vreg(nyr_mach_func_t *func, nyr_mach_reg_class_t reg_class,
                          nyr_mach_reg_t *out);
 bool nyr_mach_alloc_typed_vreg(nyr_mach_func_t *func, nyr_mach_type_t type,
@@ -209,10 +221,20 @@ bool nyr_mach_begin_block(nyr_mach_func_t *func, uint32_t label, uint32_t *out);
 bool nyr_mach_emit(nyr_mach_func_t *func, nyr_mach_inst_t inst);
 bool nyr_mach_verify(const nyr_mach_func_t *func, unsigned caps, char *err,
                      size_t err_len);
+/* Return the verified x64 allocator-color clobbers for one machine op. */
+/* Color mask an instruction clobbers through fixed registers or calls, for a
+ * function the caller has already verified. Same contract as below. */
+uint64_t nyr_mach_inst_fixed_clobbers(const nyr_mach_func_t *mach,
+                                      const nyr_mach_inst_t *in,
+                                      nyr_mach_reg_class_t reg_class);
+bool nyr_mach_regalloc_fixed_clobbers(const nyr_mach_func_t *func, size_t pc,
+                                      nyr_mach_reg_class_t reg_class,
+                                      bool preserve_gpr_calls, uint64_t *out);
 const char *nyr_mach_opcode_name(nyr_mach_opcode_t op);
 void nyr_mach_dump(const nyr_mach_func_t *func, FILE *out);
 bool nyr_mach_schedule_post_ra(nyr_mach_func_t *func);
 bool nyr_mach_schedule_post_ra_selftest(void);
+bool nyr_mach_sink_edge_adds_selftest(void);
 
 typedef struct {
   size_t eligible_functions;
@@ -263,6 +285,7 @@ typedef struct {
   size_t *live_in;
   size_t *live_out;
   size_t block_count;
+  bool x64_rhs_tie;
 } nyr_mach_regalloc_t;
 
 bool nyr_mach_regalloc_build(const nyr_mach_func_t *mach, size_t color_count,
@@ -274,6 +297,14 @@ bool nyr_mach_regalloc_build_class(const nyr_mach_func_t *mach,
                                    nyr_mach_reg_class_t reg_class,
                                    size_t color_count,
                                    nyr_mach_regalloc_t *out);
+/* x86 two-address encoders can preserve selected dying rhs operands. */
+bool nyr_mach_regalloc_build_x64_class(const nyr_mach_func_t *mach,
+                                       nyr_mach_reg_class_t reg_class,
+                                       size_t color_count,
+                                       nyr_mach_regalloc_t *out);
+bool nyr_mach_regalloc_verify(const nyr_mach_func_t *mach,
+                              const nyr_mach_regalloc_t *alloc,
+                              nyr_mach_reg_class_t reg_class);
 void nyr_mach_regalloc_free(nyr_mach_regalloc_t *alloc);
 const nyr_mach_live_segment_t *
 nyr_mach_regalloc_segment_at(const nyr_mach_regalloc_t *alloc, uint32_t vreg,

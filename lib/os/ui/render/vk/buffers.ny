@@ -298,7 +298,7 @@ fn _create_descriptor_pool() bool {
    if !pool_ci { return false }
    defer { free(pool_ci) }
    store32(pool_ci, _vk_descriptor_pool_create_info_type(), 0)
-   store32(pool_ci, _vk_descriptor_pool_free_descriptor_set(), 16)
+   store32(pool_ci, _vk_descriptor_pool_free_descriptor_set() | (_bindless_enabled ? 2 : 0), 16)
    store32(pool_ci, max_sets + _frames_in_flight() + 64, 20)
    store32(pool_ci, 2, 24)
    store64_h(pool_ci, pool_sizes, 32)
@@ -403,7 +403,10 @@ fn _submit_upload_cb(any cb) bool {
       _buf_trace("reset upload fence failed code=" + to_str(reset_res))
       return false
    }
-   def submit_res = queue_submit(_graphics_queue, 1, _upload_si, _upload_fence)
+   ;; Use the same owned handle slot for reset, submission, and wait. Keeping
+   ;; another global copy is unnecessary and can diverge from the slot.
+   def ?handle fence = load64_h(_upload_fence_ptr, 0)
+   def submit_res = queue_submit(_graphics_queue, 1, _upload_si, fence)
    if submit_res != 0 {
       _buf_trace("submit upload command buffer failed code=" + to_str(submit_res))
       return false

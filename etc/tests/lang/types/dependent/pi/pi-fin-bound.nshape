@@ -1,0 +1,19 @@
+shape pi_fin_bound_checking {
+  family "runtime/language"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+fn bounded_id(Fin<4> n) i32 requires n >= 0 && n < 4 {
+  n
+}
+
+def result = bounded_id(2)
+assert_eq(result, 2, "Fin<N> bound checking against dependent return")
+print("✓ pi-fin-bound ok")
+NY
+}

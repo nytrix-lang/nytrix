@@ -13,7 +13,7 @@ def STDERR_FD = 2
 fn syscall(any num, any a=0, any b=0, any c=0, any d=0, any e=0, any f=0) int {
    "Performs a raw Linux syscall(`num`) with up to 6 arguments and returns the raw kernel result."
    #linux {
-      mut n = int(num)
+      mut n = num
       #aarch64 {
          n = case int(num){
             39 -> 172
@@ -33,9 +33,6 @@ fn syscall(any num, any a=0, any b=0, any c=0, any d=0, any e=0, any f=0) int {
             _ -> int(num)
          }
       } #endif
-      ; `int(num)` already carries the language integer ABI at this legacy
-      ; runtime boundary. Re-tagging it here double-encodes the syscall
-      ; number (39 becomes 79), causing getpid to dispatch as syscall 79.
       return __syscall(n, a, b, c, d, e, f)
    } #else {
       return -1

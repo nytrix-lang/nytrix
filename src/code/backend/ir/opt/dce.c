@@ -22,7 +22,9 @@ static void dce_mark_operands(const nyr_inst_t *in, size_t nv, bool *used,
                               int *work, size_t *work_len) {
   dce_mark_value(in->a, nv, used, work, work_len);
   dce_mark_value(in->b, nv, used, work, work_len);
-  dce_mark_value(in->c, nv, used, work, work_len);
+  if (!(in->op == NYIR_INLINE_ASM &&
+        (in->imm == -14 || in->imm == -82 || in->imm == -83)))
+    dce_mark_value(in->c, nv, used, work, work_len);
   dce_mark_value(in->d, nv, used, work, work_len);
   dce_mark_value(in->e, nv, used, work, work_len);
   dce_mark_value(in->f, nv, used, work, work_len);
@@ -34,7 +36,16 @@ static void dce_mark_operands(const nyr_inst_t *in, size_t nv, bool *used,
 
 static void dce_mark_operands_linear(const nyr_inst_t *in, size_t nv,
                                      bool *used) {
-  const int fixed[] = {in->a, in->b, in->c, in->d, in->e, in->f};
+  const int fixed[] = {
+      in->a,
+      in->b,
+      in->op == NYIR_INLINE_ASM &&
+              (in->imm == -14 || in->imm == -82 || in->imm == -83)
+          ? -1
+          : in->c,
+      in->d,
+      in->e,
+      in->f};
   for (size_t k = 0; k < sizeof(fixed) / sizeof(fixed[0]); ++k)
     if (fixed[k] >= 0 && (size_t)fixed[k] < nv)
       used[fixed[k]] = true;
@@ -147,6 +158,10 @@ bool nyr_dce(nyr_func_t *f) {
     if ((in->op == NYIR_LABEL || in->op == NYIR_BR || in->op == NYIR_BR_IF) &&
         in->imm >= 0 && in->imm > max_label)
       max_label = in->imm;
+    if (in->op == NYIR_INLINE_ASM &&
+        (in->imm == -14 || in->imm == -82 || in->imm == -83) && in->c >= 0 &&
+        in->c > max_label)
+      max_label = in->c;
     for (size_t k = 0; k < in->phi_incoming_len; ++k)
       if (in->phi_incoming[k].predecessor_label > max_label)
         max_label = in->phi_incoming[k].predecessor_label;
@@ -169,6 +184,10 @@ bool nyr_dce(nyr_func_t *f) {
       if ((in->op == NYIR_BR || in->op == NYIR_BR_IF) && in->imm >= 0 &&
           in->imm <= max_label)
         label_referenced[in->imm] = true;
+      if (in->op == NYIR_INLINE_ASM &&
+          (in->imm == -14 || in->imm == -82 || in->imm == -83) && in->c >= 0 &&
+          in->c <= max_label)
+        label_referenced[in->c] = true;
       for (size_t k = 0; k < in->phi_incoming_len; ++k) {
         int64_t label = in->phi_incoming[k].predecessor_label;
         if (label >= 0 && label <= max_label)

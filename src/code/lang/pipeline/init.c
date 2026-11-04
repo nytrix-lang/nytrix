@@ -71,6 +71,41 @@
 #include <ctype.h>
 #include <stdarg.h>
 
+static void ny_log_saved_artifact(const char *path, const char *kind) {
+  struct stat st;
+  if (path && strcmp(path, "-") != 0 && stat(path, &st) == 0 &&
+      st.st_size >= 0) {
+    uintmax_t bytes = (uintmax_t)st.st_size;
+    char display_size[64];
+    if (bytes >= UINT64_C(1000000))
+      snprintf(display_size, sizeof(display_size), "%.2f MB",
+               (double)bytes / 1000000.0);
+    else if (bytes >= UINT64_C(1000))
+      snprintf(display_size, sizeof(display_size), "%.2f KB",
+               (double)bytes / 1000.0);
+    else
+      snprintf(display_size, sizeof(display_size), "%" PRIuMAX " bytes", bytes);
+    if (bytes >= UINT64_C(1000))
+      NY_LOG_SUCCESS("Saved %s: %s (%s; %" PRIuMAX " bytes)\n", kind, path,
+                     display_size, bytes);
+    else
+      NY_LOG_SUCCESS("Saved %s: %s (%s)\n", kind, path, display_size);
+    return;
+  }
+  NY_LOG_SUCCESS("Saved %s: %s\n", kind ? kind : "artifact",
+                 path ? path : "(unknown)");
+}
+
+static void ny_log_saved_native_artifact(const char *path) {
+#ifdef _WIN32
+  ny_log_saved_artifact(path, "EXE");
+#elif defined(__APPLE__)
+  ny_log_saved_artifact(path, "Mach-O");
+#else
+  ny_log_saved_artifact(path, "ELF");
+#endif
+}
+
 static bool ny_pipeline_write_callgraph_for_program(const program_t *prog,
                                                     const ny_options *opt,
                                                     char *err, size_t err_len) {
@@ -540,8 +575,9 @@ static int ny_run_native_only(const program_t *prog, const ny_options *opt,
   bool linked = ny_builder_link(
       cc, obj, rto, NULL, NULL, 0, (const char *const *)opt->link_dirs.data,
       opt->link_dirs.len, links.items, links.len, output_path,
-      opt->strip_override == 1, opt->debug_symbols, opt->gprof == 1,
-      opt->sanitize);
+      opt->strip_override == 1,
+      opt->opt_size && !opt->debug_symbols && opt->gprof != 1,
+      opt->debug_symbols, opt->gprof == 1, opt->sanitize);
   unlink(obj);
   unlink(rto);
   if (!linked) {
@@ -584,8 +620,10 @@ char *ny_pipeline_native_cache_path(const char *source, const ny_options *opt) {
       !ny_env_enabled_default_on("NYTRIX_STENCIL_CACHE") || opt->emit_only ||
       opt->output_file || opt->strict_types || opt->ownership_strict ||
       opt->trace_exec || opt->dump_tokens || opt->dump_ast || opt->expand ||
-      opt->dump_llvm || opt->dump_funcs || opt->dump_symbols ||
-      opt->dump_stats || opt->emit_ir_path || opt->emit_bc_path ||
+      opt->dump_llvm || opt->dump_funcs || opt->nyr_dump_text ||
+      opt->nyr_dump_raw || opt->nyr_dump_cfg || opt->nyr_dump_stats ||
+      opt->nyr_pass_stats || opt->nyr_dump_bin || opt->emit_ir_path ||
+      opt->emit_bc_path ||
       opt->emit_asm_path || opt->native_dump_ir || opt->callgraph ||
       opt->native_tier_report || opt->native_result_oracle ||
       opt->native_oracle_per_pass || opt->native_tv_seed_trials ||
@@ -2861,6 +2899,11 @@ int ny_pipeline_run(ny_options *opt) {
         semantic_errors = 1;
       }
     }
+    if (cg.had_error) {
+      codegen_dispose(&cg);
+      exit_code = 1;
+      goto exit_success;
+    }
     if (semantic_errors == 0 && opt->dump_ast_typed)
       ny_ast_dump_tree(stdout, &prog, parse_name, opt->dump_ast_filter, true);
     codegen_dispose(&cg);
@@ -3930,8 +3973,9 @@ skip_compilation:
               cc, obj, rto, NULL, NULL, 0,
               (const char *const *)opt->link_dirs.data, opt->link_dirs.len,
               (const char *const *)merged_libs.data, merged_libs.len,
-              output_path, link_strip, opt->debug_symbols, opt->gprof == 1,
-              opt->sanitize)) {
+              output_path, link_strip,
+              opt->opt_size && !opt->debug_symbols && opt->gprof != 1,
+              opt->debug_symbols, opt->gprof == 1, opt->sanitize)) {
         ny_progress_task_end(progress_node);
         maybe_log_phase_time(opt->do_timing, "Link:", t_link);
         unlink(obj);

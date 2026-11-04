@@ -32,40 +32,30 @@ static bool resolve_test_call(void *userdata, const char *symbol,
 
 static void build_indirect_call(nyr_func_t *f) {
   nyr_opt_begin(f);
-  int target = nyr_ir_emit(f, (nyr_inst_t){
-                                .op = NYIR_ADDR_SYMBOL,
-                                .dst = -1,
-                                .a = -1,
-                                .b = -1,
-                                .c = -1,
-                                .d = -1,
-                                .e = -1,
-                                .f = -1,
-                                .symbol = "__ny_lambda_devirt_target",
-                            });
+  int target =
+      nyr_opt_emit_symbol(f, NYIR_ADDR_SYMBOL, "__ny_lambda_devirt_target");
   int argument = nyr_opt_const(f, 37);
   int result = nyr_ir_emit(f, (nyr_inst_t){
-                                .op = NYIR_CALL,
-                                .dst = -1,
-                                .a = argument,
-                                .b = target,
-                                .c = -1,
-                                .d = -1,
-                                .e = -1,
-                                .f = -1,
-                                .imm = 2,
-                                .effects = NYIR_EFFECT_CALL,
-                            });
+                                  .op = NYIR_CALL,
+                                  .dst = -1,
+                                  .a = argument,
+                                  .b = target,
+                                  .c = -1,
+                                  .d = -1,
+                                  .e = -1,
+                                  .f = -1,
+                                  .imm = 2,
+                                  .effects = NYIR_EFFECT_CALL,
+                              });
   nyr_call_arg_class_set(f->data[f->len - 1].arg_scalar_classes, 0,
-                          NYIR_SCALAR_I64_RAW);
+                         NYIR_SCALAR_I64_RAW);
   nyr_call_arg_class_set(f->data[f->len - 1].arg_scalar_classes, 1,
-                          NYIR_SCALAR_CLOSURE);
+                         NYIR_SCALAR_CLOSURE);
   nyr_call_arg_ownership_set(&f->data[f->len - 1], 0, NY_SEM_OWN_OWNED);
   nyr_call_arg_ownership_set(&f->data[f->len - 1], 1, NY_SEM_OWN_BORROWED);
   nyr_call_arg_contract_set(&f->data[f->len - 1], 0,
-                             NYIR_ARG_CONTRACT_CONSUMES);
-  nyr_call_arg_contract_set(&f->data[f->len - 1], 1,
-                             NYIR_ARG_CONTRACT_BORROWS);
+                            NYIR_ARG_CONTRACT_CONSUMES);
+  nyr_call_arg_contract_set(&f->data[f->len - 1], 1, NYIR_ARG_CONTRACT_BORROWS);
   nyr_opt_ret(f, result);
 }
 
@@ -74,36 +64,62 @@ static void build_extra_arg_indirect_call(nyr_func_t *f) {
   int args[7];
   for (size_t i = 0; i < 6; ++i)
     args[i] = nyr_opt_const(f, (int64_t)(11 + i * 11));
-  args[6] = nyr_ir_emit(f, (nyr_inst_t){
-                             .op = NYIR_ADDR_SYMBOL,
-                             .dst = -1,
-                             .a = -1,
-                             .b = -1,
-                             .c = -1,
-                             .d = -1,
-                             .e = -1,
-                             .f = -1,
-                             .symbol = "__ny_lambda_devirt_target",
-                         });
+  args[6] =
+      nyr_opt_emit_symbol(f, NYIR_ADDR_SYMBOL, "__ny_lambda_devirt_target");
   int *extra_args = malloc(sizeof(*extra_args));
   if (!extra_args)
     exit(2);
   extra_args[0] = args[6];
   int result = nyr_ir_emit(f, (nyr_inst_t){
-                                .op = NYIR_CALL,
-                                .dst = -1,
-                                .a = args[0],
-                                .b = args[1],
-                                .c = args[2],
-                                .d = args[3],
-                                .e = args[4],
-                                .f = args[5],
-                                .imm = 7,
-                                .extra_args = extra_args,
-                                .extra_args_len = 1,
-                                .effects = NYIR_EFFECT_CALL,
-                            });
+                                  .op = NYIR_CALL,
+                                  .dst = -1,
+                                  .a = args[0],
+                                  .b = args[1],
+                                  .c = args[2],
+                                  .d = args[3],
+                                  .e = args[4],
+                                  .f = args[5],
+                                  .imm = 7,
+                                  .extra_args = extra_args,
+                                  .extra_args_len = 1,
+                                  .effects = NYIR_EFFECT_CALL,
+                              });
   nyr_opt_ret(f, result);
+}
+
+static bool test_explicit_indirect_call_ignores_data_args(void) {
+  nyr_func_t f = {0};
+  nyr_opt_begin(&f);
+  int target = nyr_opt_const(&f, 0);
+  int data_arg = nyr_opt_emit_symbol(&f, NYIR_ADDR_SYMBOL, "global_data");
+  int result = nyr_ir_emit(&f, (nyr_inst_t){
+                                   .op = NYIR_CALL,
+                                   .dst = -1,
+                                   .a = target,
+                                   .b = data_arg,
+                                   .c = -1,
+                                   .d = -1,
+                                   .e = -1,
+                                   .f = -1,
+                                   .imm = 2,
+                                   .flags = NYIR_INST_F_INDIRECT,
+                                   .effects = NYIR_EFFECT_CALL,
+                               });
+  nyr_opt_ret(&f, result);
+  bool ok = nyr_devirtualize(&f);
+  const nyr_inst_t *call = NULL;
+  for (size_t i = 0; ok && i < f.len; ++i)
+    if (f.data[i].op == NYIR_CALL)
+      call = &f.data[i];
+  ok = ok && call && !call->symbol &&
+       (call->flags & NYIR_INST_F_INDIRECT) != 0 && call->a == target &&
+       call->b == data_arg && call->imm == 2;
+  if (!ok)
+    fprintf(stderr,
+            "[devirtualize] explicit indirect call mistook a data argument "
+            "for its callee\n");
+  nyr_ir_func_free(&f);
+  return ok;
 }
 
 static bool evaluate(nyr_func_t *f, const char *expected_symbol,
@@ -120,7 +136,7 @@ static bool evaluate(nyr_func_t *f, const char *expected_symbol,
            expected_arg_count * sizeof(*expected_args));
   char err[256] = {0};
   bool ok = nyr_ir_eval_with_calls(f, NULL, 0, 500, &result, resolve_test_call,
-                                 &ctx, err, sizeof(err));
+                                   &ctx, err, sizeof(err));
   if (!ok || !ctx.saw_call) {
     fprintf(stderr, "[devirtualize] execution failed: %s\n",
             err[0] ? err : "call resolver was not reached");
@@ -204,7 +220,8 @@ static bool test_extra_arg_target(int opt_level) {
 }
 
 int main(void) {
-  return test_pipeline_level(1) && test_pipeline_level(2) &&
+  return test_explicit_indirect_call_ignores_data_args() &&
+                 test_pipeline_level(1) && test_pipeline_level(2) &&
                  test_pipeline_level(3) && test_extra_arg_target(1) &&
                  test_extra_arg_target(2) && test_extra_arg_target(3)
              ? 0

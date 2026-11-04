@@ -241,17 +241,17 @@ fn fmod(number a, number b) f64 {
    __flt_fmod(float(a), float(b))
 }
 
-fn floor(number x) f64 {
+fn floor(number x) int {
    "Floor function."
    __flt_floor(float(x))
 }
 
-fn ceil(number x) f64 {
+fn ceil(number x) int {
    "Ceiling function."
    __flt_ceil(float(x))
 }
 
-fn round(number x) f64 {
+fn round(number x) int {
    "Round to nearest integer."
    __flt_round(float(x))
 }

@@ -22,7 +22,7 @@ LLVMValueRef codegen_emit_string_or_array_global(codegen_t *cg,
   const char *str_bytes = nyr_strtab_get(name, &str_len);
   if (str_bytes) {
     LLVMValueRef str_const =
-        LLVMConstString(str_bytes, (unsigned)str_len, false);
+        LLVMConstStringInContext2(cg->ctx, str_bytes, (unsigned)str_len, false);
     LLVMValueRef sym = LLVMAddGlobal(cg->module, LLVMTypeOf(str_const), name);
     LLVMSetInitializer(sym, str_const);
     LLVMSetGlobalConstant(sym, true);
@@ -80,7 +80,7 @@ LLVMValueRef codegen_emit_string_or_array_global(codegen_t *cg,
   }
 
   LLVMValueRef bytes_const =
-      LLVMConstString((const char *)buf, (unsigned)total_bytes, true);
+      LLVMConstStringInContext2(cg->ctx, (const char *)buf, (unsigned)total_bytes, true);
   char raw_name[128];
   snprintf(raw_name, sizeof(raw_name), "%s.raw", name);
   LLVMValueRef base_global =

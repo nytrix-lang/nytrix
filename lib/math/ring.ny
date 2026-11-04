@@ -114,9 +114,17 @@ impl zmod {
    operator != zmod: bool = different
 }
 
-fn is_poly_ring(any x) bool { "Returns true for polynomial ring dictionaries." is_dict(x) && x.get("__type", "") == "poly_ring" }
+fn is_poly_ring(any x) bool {
+   "Returns true for polynomial ring dictionaries."
+   if !is_dict(x) { return false }
+   return x.get("__type", "") == "poly_ring"
+}
 
-fn is_poly_elem(any x) bool { "Returns true for polynomial element dictionaries." is_dict(x) && x.get("__type", "") == "poly_elem" }
+fn is_poly_elem(any x) bool {
+   "Returns true for polynomial element dictionaries."
+   if !is_dict(x) { return false }
+   return x.get("__type", "") == "poly_elem"
+}
 
 fn PolynomialRing(any base=nil, str name="x") poly_ring {
    "Create a univariate polynomial ring over ZZ, GF(p), or Zmod(n)."

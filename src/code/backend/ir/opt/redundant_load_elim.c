@@ -10,6 +10,59 @@
 #include "base/compat.h"
 #include "code/backend/ir/internal.h"
 #include "code/backend/ir/opt/util.h"
+
+static bool rle_same_address(const nyr_func_t *f, const int *definition,
+                             int lhs, int rhs, unsigned depth,
+                             unsigned *budget) {
+  if (lhs == rhs)
+    return f && lhs >= 0 && lhs < f->next_value;
+  if (!f || !definition || !budget || !*budget || lhs < 0 || rhs < 0 ||
+      depth >= 32 ||
+      lhs >= f->next_value || rhs >= f->next_value)
+    return false;
+  --*budget;
+  int li = definition[lhs];
+  int ri = definition[rhs];
+  if (li < 0 || ri < 0)
+    return false;
+  const nyr_inst_t *l = &f->data[li];
+  const nyr_inst_t *r = &f->data[ri];
+  if (l->op != r->op)
+    return false;
+  if (l->op == NYIR_LOAD_LOCAL) {
+    if (l->imm != r->imm || l->scalar_class != r->scalar_class)
+      return false;
+    size_t begin = li < ri ? (size_t)li : (size_t)ri;
+    size_t end = li < ri ? (size_t)ri : (size_t)li;
+    for (size_t i = begin + 1; i < end; ++i)
+      if (f->data[i].op == NYIR_STORE_LOCAL && f->data[i].imm == l->imm)
+        return false;
+    return true;
+  }
+  if (l->op == NYIR_CONST_I64)
+    return l->imm == r->imm;
+  if (l->op == NYIR_COPY)
+    return rle_same_address(f, definition, l->a, r->a, depth + 1, budget);
+  switch (l->op) {
+  case NYIR_ADD_I64:
+  case NYIR_MUL_I64:
+    /*
+     * Integer add/multiply are commutative, and frontends can build the
+     * same indexed address with operands in either order.
+     */
+    return (rle_same_address(f, definition, l->a, r->a, depth + 1, budget) &&
+            rle_same_address(f, definition, l->b, r->b, depth + 1, budget)) ||
+           (rle_same_address(f, definition, l->a, r->b, depth + 1, budget) &&
+            rle_same_address(f, definition, l->b, r->a, depth + 1, budget));
+  case NYIR_SUB_I64:
+  case NYIR_SHL_I64:
+    return rle_same_address(f, definition, l->a, r->a, depth + 1, budget) &&
+           rle_same_address(f, definition, l->b, r->b, depth + 1, budget);
+  default:
+    return false;
+  }
+}
+
 /*
  * Redundant Load Elimination: after a STORE_LOCAL to slot S, if the
  * next LOAD_LOCAL from S has no intervening side effects, replace
@@ -24,26 +77,48 @@ bool nyr_redundant_load_elim(nyr_func_t *f) {
   if (!f || f->next_value <= 0)
     return true;
   size_t count = nyr_max_local(f);
-  if (!count)
-    return true;
+  bool has_memory_address = false;
+  for (size_t i = 0; i < f->len; ++i) {
+    nyr_op_t op = f->data[i].op;
+    if (op == NYIR_LOAD_I64 || op == NYIR_STORE_I64 ||
+        op == NYIR_VEC4_LOAD_F64 || op == NYIR_VEC8_LOAD_F32 ||
+        op == NYIR_VEC4_LOAD_I64 || op == NYIR_VEC8_LOAD_I64 ||
+        op == NYIR_VEC4_STORE_F64 || op == NYIR_VEC8_STORE_F32 ||
+        op == NYIR_VEC4_STORE_I64 || op == NYIR_VEC8_STORE_I64) {
+      has_memory_address = true;
+      break;
+    }
+  }
 
-  int *available_value = (int *)malloc(count * sizeof(*available_value));
+  int *available_value =
+      count ? (int *)malloc(count * sizeof(*available_value)) : NULL;
   unsigned *available_epoch =
-      (unsigned *)calloc(count, sizeof(*available_epoch));
-  bool *escaped = (bool *)calloc(count, sizeof(*escaped));
+      count ? (unsigned *)calloc(count, sizeof(*available_epoch)) : NULL;
+  bool *escaped = count ? (bool *)calloc(count, sizeof(*escaped)) : NULL;
   uint32_t *value_alias =
       (uint32_t *)calloc((size_t)f->next_value, sizeof(*value_alias));
-  if (!available_value || !available_epoch || !escaped || !value_alias) {
+  int *definition =
+      has_memory_address
+          ? (int *)malloc((size_t)f->next_value * sizeof(*definition))
+          : NULL;
+  if ((count && (!available_value || !available_epoch || !escaped)) ||
+      !value_alias || (has_memory_address && !definition)) {
     free(available_value);
     free(available_epoch);
     free(escaped);
     free(value_alias);
+    free(definition);
     return false;
   }
+  if (definition)
+    for (int v = 0; v < f->next_value; ++v)
+      definition[v] = -1;
   for (size_t i = 0; i < f->len; ++i) {
     const nyr_inst_t *in = &f->data[i];
     if (in->dst < 0 || in->dst >= f->next_value)
       continue;
+    if (definition)
+      definition[in->dst] = (int)i;
     switch (in->op) {
     case NYIR_ADDR_LOCAL:
     case NYIR_ADDR_SYMBOL:
@@ -89,6 +164,9 @@ bool nyr_redundant_load_elim(nyr_func_t *f) {
   } ny_mem_avail_t;
   ny_mem_avail_t mem_avail[NY_MEM_FORWARD_MAX];
   size_t mem_avail_count = 0;
+  int vector_addr = -1;
+  int vector_value = -1;
+  nyr_op_t vector_store_op = NYIR_NOP;
 
   unsigned epoch = 1;
   for (size_t i = 0; i < f->len; ++i) {
@@ -96,8 +174,11 @@ bool nyr_redundant_load_elim(nyr_func_t *f) {
     if (in->op == NYIR_LABEL || in->op == NYIR_BR || in->op == NYIR_BR_IF ||
         in->op == NYIR_RET) {
       mem_avail_count = 0;
+      vector_addr = vector_value = -1;
+      vector_store_op = NYIR_NOP;
       if (++epoch == 0) {
-        memset(available_epoch, 0, count * sizeof(*available_epoch));
+        if (count)
+          memset(available_epoch, 0, count * sizeof(*available_epoch));
         epoch = 1;
       }
       continue;
@@ -108,6 +189,8 @@ bool nyr_redundant_load_elim(nyr_func_t *f) {
                  NYIR_EFFECT_UNKNOWN_SIDE_EFFECT | NYIR_EFFECT_IO |
                  NYIR_EFFECT_FFI)) {
         mem_avail_count = 0;
+        vector_addr = vector_value = -1;
+        vector_store_op = NYIR_NOP;
       }
       /*
        * A call can mutate a local through an escaped address or captured
@@ -115,13 +198,17 @@ bool nyr_redundant_load_elim(nyr_func_t *f) {
        * aliases held by the callee, so do not carry STORE_LOCAL forwarding
        * facts across call boundaries.
        */
-      memset(available_epoch, 0, count * sizeof(*available_epoch));
+      if (count)
+        memset(available_epoch, 0, count * sizeof(*available_epoch));
       continue;
     }
     if (in->op == NYIR_STORE_I64) {
+      vector_addr = vector_value = -1;
+      vector_store_op = NYIR_NOP;
       int addr = in->a;
       int val = in->c;
-      unsigned flags = in->flags & NYIR_INST_F_MEM_BYTE;
+      unsigned flags = in->flags & (NYIR_INST_F_MEM_BYTE | NYIR_INST_F_MEM_U16 |
+                                    NYIR_INST_F_MEM_I32);
       /*
        * A store through one SSA address kills every other cached
        * address entry: distinct SSA values can denote the same memory
@@ -165,6 +252,8 @@ bool nyr_redundant_load_elim(nyr_func_t *f) {
      * that class; unknown destination or cached classes remain barriers.
      */
     if (in->op == NYIR_COPY_STRUCT) {
+      vector_addr = vector_value = -1;
+      vector_store_op = NYIR_NOP;
       uint32_t dest_alias =
           in->a >= 0 && in->a < f->next_value ? value_alias[in->a] : 0;
       if (!dest_alias) {
@@ -187,16 +276,49 @@ bool nyr_redundant_load_elim(nyr_func_t *f) {
     if (in->op == NYIR_VEC4_STORE_F64 || in->op == NYIR_VEC8_STORE_F32 ||
         in->op == NYIR_VEC4_STORE_I64 || in->op == NYIR_VEC8_STORE_I64) {
       mem_avail_count = 0;
+      vector_addr = in->a;
+      vector_value = in->b >= 0 ? in->b : in->c;
+      vector_store_op = in->op;
       continue;
+    }
+    if (in->op == NYIR_VEC4_LOAD_F64 || in->op == NYIR_VEC8_LOAD_F32 ||
+        in->op == NYIR_VEC4_LOAD_I64 || in->op == NYIR_VEC8_LOAD_I64) {
+      bool matching_type = (in->op == NYIR_VEC4_LOAD_F64 &&
+                            vector_store_op == NYIR_VEC4_STORE_F64) ||
+                           (in->op == NYIR_VEC8_LOAD_F32 &&
+                            vector_store_op == NYIR_VEC8_STORE_F32) ||
+                           (in->op == NYIR_VEC4_LOAD_I64 &&
+                            vector_store_op == NYIR_VEC4_STORE_I64) ||
+                           (in->op == NYIR_VEC8_LOAD_I64 &&
+                            vector_store_op == NYIR_VEC8_STORE_I64);
+      if (matching_type && vector_value >= 0 && in->dst >= 0 && definition &&
+          rle_same_address(f, definition, in->a, vector_addr, 0,
+                           &(unsigned){128})) {
+        nir_make_copy(in, vector_value);
+        in->alias_class =
+            vector_value < f->next_value ? value_alias[vector_value] : 0;
+      }
+      continue;
+    }
+    if (vector_value >= 0 &&
+        (nyr_effective_effects(in) &
+         (NYIR_EFFECT_WRITE_MEMORY | NYIR_EFFECT_ALLOCATION |
+          NYIR_EFFECT_UNKNOWN_SIDE_EFFECT | NYIR_EFFECT_IO |
+          NYIR_EFFECT_FFI))) {
+      vector_addr = vector_value = -1;
+      vector_store_op = NYIR_NOP;
     }
     if (in->op == NYIR_LOAD_I64 && in->dst >= 0 &&
         !(in->effects & NYIR_EFFECT_VOLATILE)) {
       int addr = in->a;
-      unsigned flags = in->flags & NYIR_INST_F_MEM_BYTE;
+      unsigned flags = in->flags & (NYIR_INST_F_MEM_BYTE | NYIR_INST_F_MEM_U16 |
+                                    NYIR_INST_F_MEM_I32);
       if (addr >= 0) {
         bool forwarded = false;
         for (size_t m = 0; m < mem_avail_count; ++m) {
-          if (mem_avail[m].addr == addr && mem_avail[m].flags == flags &&
+          if (mem_avail[m].flags == flags &&
+              rle_same_address(f, definition, addr, mem_avail[m].addr, 0,
+                               &(unsigned){128}) &&
               mem_avail[m].scalar_class == in->scalar_class) {
             /*
              * Replace the load through the shared shape constructor so
@@ -233,6 +355,7 @@ bool nyr_redundant_load_elim(nyr_func_t *f) {
     if (in->imm < 0 || (size_t)in->imm >= count)
       continue;
     size_t slot = (size_t)in->imm;
+
     if (in->op == NYIR_ADDR_LOCAL || escaped[slot]) {
       available_epoch[slot] = 0;
       continue;
@@ -264,5 +387,6 @@ bool nyr_redundant_load_elim(nyr_func_t *f) {
   free(available_epoch);
   free(escaped);
   free(value_alias);
+  free(definition);
   return true;
 }

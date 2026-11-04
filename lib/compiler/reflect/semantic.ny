@@ -88,19 +88,20 @@ fn _semantic_freeze(any value, int depth) dict {
 }
 
 fn _semantic_schema_known(str schema, any version) bool {
-   if !is_int(version) || type(version) == "bool" || version != 1 {
+   if !is_int(version) || int(version) != 1 {
       return false
    }
-   schema == "nytrix.semantic.call-effects" ||
-   schema == "nytrix.semantic.callable-effects" ||
-   schema == "nytrix.semantic.expression-effects" ||
-   schema == "nytrix.semantic.expressions" ||
-   schema == "nytrix.semantic.layouts" ||
-   schema == "nytrix.semantic.obligations" ||
-   schema == "nytrix.semantic.proof-obligations" ||
-   schema == "nytrix.semantic.signature" ||
-   schema == "nytrix.semantic.statement-effects" ||
-   schema == "nytrix.semantic.statements"
+   if schema == "nytrix.semantic.call-effects" { return true }
+   if schema == "nytrix.semantic.callable-effects" { return true }
+   if schema == "nytrix.semantic.expression-effects" { return true }
+   if schema == "nytrix.semantic.expressions" { return true }
+   if schema == "nytrix.semantic.layouts" { return true }
+   if schema == "nytrix.semantic.obligations" { return true }
+   if schema == "nytrix.semantic.proof-obligations" { return true }
+   if schema == "nytrix.semantic.signature" { return true }
+   if schema == "nytrix.semantic.statement-effects" { return true }
+   if schema == "nytrix.semantic.statements" { return true }
+   false
 }
 
 fn _semantic_schemas_supported(any value, int depth) bool {
@@ -177,18 +178,37 @@ fn semantic_snapshot(str source) dict {
          "error":"expected a typed_ast.v1 HM artifact"}
    }
    def typed = root.get("typed")
-   if !is_dict(typed) || typed.get("schema") != "typed_ast.v1" ||
-   typed.get("engine") != "type-pipeline-v1" ||
-   !is_list(typed.get("functions")) ||
-   !(is_list(typed.get("layouts")) ||
-      (is_dict(typed.get("layouts")) &&
-         typed.get("layouts").get("schema") ==
-         "nytrix.semantic.layouts" &&
-         typed.get("layouts").get("version") == 1 &&
-         is_list(typed.get("layouts").get("items")))) ||
-   !is_list(typed.get("diagnostics")) {
+   if !is_dict(typed) {
       return {"ok":false, "value":nil,
-         "error":"typed semantic facts have an unsupported shape"}
+         "error":"typed semantic facts have an unsupported shape: typed record"}
+   }
+   if typed.get("schema") != "typed_ast.v1" {
+      return {"ok":false, "value":nil,
+         "error":"typed semantic facts have an unsupported shape: typed schema"}
+   }
+   if typed.get("engine") != "type-pipeline-v1" {
+      return {"ok":false, "value":nil,
+         "error":"typed semantic facts have an unsupported shape: typed engine"}
+   }
+   if !is_list(typed.get("functions")) {
+      return {"ok":false, "value":nil,
+         "error":"typed semantic facts have an unsupported shape: functions"}
+   }
+   def layouts = typed.get("layouts")
+   if !is_list(layouts) {
+      if !is_dict(layouts) {
+         return {"ok":false, "value":nil,
+            "error":"typed semantic facts have an unsupported shape"}
+      }
+      if layouts.get("schema") != "nytrix.semantic.layouts" ||
+      layouts.get("version") != 1 || !is_list(layouts.get("items")) {
+         return {"ok":false, "value":nil,
+            "error":"typed semantic facts have an unsupported shape"}
+      }
+   }
+   if !is_list(typed.get("diagnostics")) {
+      return {"ok":false, "value":nil,
+         "error":"typed semantic facts have an unsupported shape: diagnostics"}
    }
    if !_semantic_value_within_depth(typed, 0) {
       return {"ok":false, "value":nil,
@@ -210,68 +230,81 @@ fn semantic_snapshot(str source) dict {
 
 fn semantic_get(any record, str key, any fallback=nil) any {
    "Reads a named field from a frozen semantic record."
-   if !is_tuple(record) || record.len != 3 ||
-   record.get(0) != "nytrix.reflect.record" || record.get(1) != 1 {
-      return fallback
-   }
-   def pairs = record.get(2)
-   mut i = 0
-   while i < pairs.len {
-      def pair = pairs.get(i)
-      if pair.get(0) == key { return pair.get(1) }
-      i += 1
+   if is_tuple(record) && record.len == 3 &&
+   str(record.get(0)) == "nytrix.reflect.record" &&
+   int(record.get(1)) == 1 {
+      def pairs = record.get(2)
+      mut i = 0
+      while i < pairs.len {
+         def pair = pairs.get(i)
+         if is_tuple(pair) && pair.len == 2 && is_str(pair.get(0)) &&
+         str(pair.get(0)) == key { return pair.get(1) }
+         i += 1
+      }
    }
    fallback
+}
+
+fn _semantic_tagged(any value, str tag) bool {
+   if !is_tuple(value) || value.len != 3 { return false }
+   def actual_tag = value.get(0)
+   def version = value.get(1)
+   str(actual_tag) == tag && str(version) == "1"
+}
+
+fn _semantic_versioned(any value, str schema) bool {
+   str(semantic_get(value, "schema", "")) == schema &&
+   str(semantic_get(value, "version")) == "1"
 }
 
 fn _semantic_origin_matches(any origin, int line, int column, str file) bool {
    def origin_line = semantic_get(origin, "line")
    def origin_column = semantic_get(origin, "column")
    def origin_file = semantic_get(origin, "file")
-   if type(origin_line) != "int" || type(origin_column) != "int" ||
-   type(origin_file) != "str" { return false }
-   origin_line == line && (column <= 0 || origin_column == column) &&
-   (file == "" || origin_file == file)
+   if !is_int(origin_line) { return false }
+   if !is_int(origin_column) { return false }
+   if !is_str(origin_file) { return false }
+   if int(origin_line) != line { return false }
+   if column > 0 && int(origin_column) != column { return false }
+   if file == "" { return true }
+   str(origin_file) == file
 }
 
 fn semantic_items(any sequence) tuple {
    "Returns the immutable items of a frozen semantic sequence, or an empty tuple."
-   if is_tuple(sequence) && sequence.len == 3 &&
-   sequence.get(0) == "nytrix.reflect.record" && sequence.get(1) == 1 {
+   if _semantic_tagged(sequence, "nytrix.reflect.record") {
       def items = semantic_get(sequence, "items")
-      if is_tuple(items) && items.len == 3 &&
-      items.get(0) == "nytrix.reflect.sequence" && items.get(1) == 1 {
+      if _semantic_tagged(items, "nytrix.reflect.sequence") {
          return items.get(2)
       }
    }
-   if !is_tuple(sequence) || sequence.len != 3 ||
-   sequence.get(0) != "nytrix.reflect.sequence" || sequence.get(1) != 1 {
+   if !_semantic_tagged(sequence, "nytrix.reflect.sequence") {
       return _semantic_tuple([])
    }
    sequence.get(2)
 }
 
 fn _semantic_typed(any snapshot) any {
-   if !is_tuple(snapshot) || snapshot.len != 3 ||
-   snapshot.get(0) != "nytrix.reflect.semantic" || snapshot.get(1) != 1 {
+   if !_semantic_tagged(snapshot, "nytrix.reflect.semantic") {
       return nil
    }
    snapshot.get(2)
 }
 
 fn _semantic_find_named(tuple records, str name, str owner="") any {
-   mut found = nil
+   mut found_index = -1
    mut i = 0
    while i < records.len {
       def record = records.get(i)
       if str(semantic_get(record, "name", "")) == name &&
       (owner == "" || str(semantic_get(record, "owner", "")) == owner) {
-         if !is_nil(found) { return nil }
-         found = record
+         if found_index >= 0 { return nil }
+         found_index = i
       }
       i += 1
    }
-   found
+   if found_index >= 0 { return records.get(found_index) }
+   nil
 }
 
 fn semantic_functions(any snapshot) tuple {
@@ -290,19 +323,20 @@ fn semantic_find_function_at(any snapshot, str name, int line,
    int column=0, str file="") any {
    "Finds one function by name and authored declaration location; ambiguity returns nil."
    def functions = semantic_functions(snapshot)
-   mut found = nil
+   mut found_index = -1
    mut i = 0
    while i < functions.len {
       def function_record = functions.get(i)
       def origin = semantic_get(function_record, "source_origin")
       if str(semantic_get(function_record, "name", "")) == name &&
       _semantic_origin_matches(origin, line, column, file) {
-         if !is_nil(found) { return nil }
-         found = function_record
+         if found_index >= 0 { return nil }
+         found_index = i
       }
       i += 1
    }
-   found
+   if found_index >= 0 { return functions.get(found_index) }
+   nil
 }
 
 fn semantic_layouts(any snapshot) tuple {
@@ -315,7 +349,7 @@ fn semantic_layouts(any snapshot) tuple {
 fn semantic_find_layout(any snapshot, str name, str owner="") any {
    "Finds one resolved layout by name and optional owner; ambiguous names return nil."
    def layouts = semantic_layouts(snapshot)
-   mut found = nil
+   mut found_index = -1
    mut i = 0
    while i < layouts.len {
       def layout_record = layouts.get(i)
@@ -323,20 +357,19 @@ fn semantic_find_layout(any snapshot, str name, str owner="") any {
       def declared_name = str(semantic_get(layout_record, "declared_name", full_name))
       if (full_name == name || declared_name == name) &&
       (owner == "" || str(semantic_get(layout_record, "owner", "")) == owner) {
-         if !is_nil(found) { return nil }
-         found = layout_record
+         if found_index >= 0 { return nil }
+         found_index = i
       }
       i += 1
    }
-   found
+   if found_index >= 0 { return layouts.get(found_index) }
+   nil
 }
 
 fn semantic_signature(any function_record) any {
    "Returns a function's versioned semantic signature, or nil when absent or unsupported."
    def signature = semantic_get(function_record, "semantic_signature")
-   if semantic_get(signature, "schema", "") !=
-   "nytrix.semantic.signature" ||
-   semantic_get(signature, "version") != 1 {
+   if !_semantic_versioned(signature, "nytrix.semantic.signature") {
       return nil
    }
    signature
@@ -396,9 +429,9 @@ fn semantic_expression_effects(any expression) any {
 fn semantic_expression_custom_effect_row(any expression) any {
    "Returns a closed inferred custom effect row string, or nil when unknown."
    def effects = semantic_expression_effects(expression)
-   if semantic_get(effects, "schema") !=
-   "nytrix.semantic.expression-effects" ||
-   semantic_get(effects, "version") != 1 { return nil }
+   if !_semantic_versioned(effects, "nytrix.semantic.expression-effects") {
+      return nil
+   }
    def row = semantic_get(effects, "inferred_custom_row")
    if is_str(row) { return row }
    nil
@@ -408,19 +441,21 @@ fn semantic_find_expression(any function_record, str kind, int line,
    int column=0, str file="") any {
    "Finds one expression by kind and source location; ambiguous matches return nil."
    def expressions = semantic_expressions(function_record)
-   mut found = nil
+   mut found_index = -1
    mut i = 0
    while i < expressions.len {
       def expression = expressions.get(i)
       def origin = semantic_get(expression, "source_origin")
-      if str(semantic_get(expression, "kind", "")) == kind &&
-      _semantic_origin_matches(origin, line, column, file) {
-         if !is_nil(found) { return nil }
-         found = expression
+      if str(semantic_get(expression, "kind", "")) == kind {
+         if _semantic_origin_matches(origin, line, column, file) {
+            if found_index >= 0 { return nil }
+            found_index = i
+         }
       }
       i += 1
    }
-   found
+   if found_index >= 0 { return expressions.get(found_index) }
+   nil
 }
 
 fn semantic_calls(any function_record) tuple {
@@ -443,18 +478,19 @@ fn semantic_find_call(any function_record, int line, int column=0,
    str file="") any {
    "Finds one call expression by source location; ambiguous matches return nil."
    def calls = semantic_calls(function_record)
-   mut found = nil
+   mut found_index = -1
    mut i = 0
    while i < calls.len {
       def call = calls.get(i)
       def origin = semantic_get(call, "source_origin")
       if _semantic_origin_matches(origin, line, column, file) {
-         if !is_nil(found) { return nil }
-         found = call
+         if found_index >= 0 { return nil }
+         found_index = i
       }
       i += 1
    }
-   found
+   if found_index >= 0 { return calls.get(found_index) }
+   nil
 }
 
 fn semantic_call_effects(any call) any {
@@ -462,15 +498,17 @@ fn semantic_call_effects(any call) any {
    def kind = str(semantic_get(call, "kind", ""))
    if kind != "call" && kind != "memcall" { return nil }
    def effects = semantic_get(call, "callee_effects")
-   if semantic_get(effects, "schema") == "nytrix.semantic.call-effects" &&
-   semantic_get(effects, "version") == 1 { return effects }
+   if _semantic_versioned(effects, "nytrix.semantic.call-effects") {
+      return effects
+   }
    nil
 }
 
 fn semantic_call_effect_row(any call) any {
    "Returns a known serialized effect row for a direct or member call, or nil."
    def effects = semantic_call_effects(call)
-   if semantic_get(effects, "known") != true { return nil }
+   def known = semantic_get(effects, "known")
+   if str(known) != "true" { return nil }
    def row = semantic_get(effects, "row")
    if is_str(row) { return row }
    nil
@@ -486,9 +524,7 @@ fn semantic_obligations(any function_record) tuple {
       def facts = semantic_get(expression, "obligations")
       def kind = str(semantic_get(expression, "kind", ""))
       if (kind == "call" || kind == "memcall") &&
-      semantic_get(facts, "schema", "") ==
-      "nytrix.semantic.obligations" &&
-      semantic_get(facts, "version") == 1 &&
+      _semantic_versioned(facts, "nytrix.semantic.obligations") &&
       (!is_nil(semantic_get(facts, "requires")) ||
          !is_nil(semantic_get(facts, "decreases"))) {
          obligations = obligations.append(facts)
@@ -503,9 +539,7 @@ fn semantic_callable_effects(any snapshot) tuple {
    def typed = _semantic_typed(snapshot)
    if is_nil(typed) { return _semantic_tuple([]) }
    def table = semantic_get(typed, "callable_effects")
-   if semantic_get(table, "schema", "") !=
-   "nytrix.semantic.callable-effects" ||
-   semantic_get(table, "version") != 1 {
+   if !_semantic_versioned(table, "nytrix.semantic.callable-effects") {
       return _semantic_tuple([])
    }
    semantic_items(table)
@@ -515,33 +549,25 @@ fn _semantic_callable_matches(any record, str name, int arity) bool {
    if str(semantic_get(record, "name", "")) != name { return false }
    if arity < 0 { return true }
    def record_arity = semantic_get(record, "arity")
-   if type(record_arity) != "int" || type(record_arity) == "bool" {
-      return false
-   }
-   if record_arity == arity { return true }
-   bool(semantic_get(record, "variadic", false)) && arity > record_arity
+   if str(record_arity) == to_str(arity) { return true }
+   str(semantic_get(record, "variadic", false)) == "true" &&
+   arity > int(record_arity)
 }
 
 fn semantic_find_callable_effect(any snapshot, str name, int arity=0) any {
    "Finds one callable effect row by name and argument count; ambiguous matches return nil."
    if name == "" { return nil }
    def rows = semantic_callable_effects(snapshot)
-   mut found = nil
-   mut i = 0
-   while i < rows.len {
-      def row = rows.get(i)
-      if _semantic_callable_matches(row, name, arity) {
-         if !is_nil(found) { return nil }
-         found = row
-      }
-      i += 1
-   }
-   found
+   def found = _semantic_find_named(rows, name)
+   if is_nil(found) { return nil }
+   if _semantic_callable_matches(found, name, arity) { return found }
+   nil
 }
 
 fn semantic_callable_effect_row(any callable) any {
    "Returns the closed serialized effect row of a callable record, or nil."
-   if semantic_get(callable, "known") != true { return nil }
+   def known = semantic_get(callable, "known")
+   if str(known) != "true" { return nil }
    def row = semantic_get(callable, "row")
    if is_str(row) { return row }
    nil
@@ -552,9 +578,7 @@ fn semantic_proof_obligations(any snapshot) tuple {
    def typed = _semantic_typed(snapshot)
    if is_nil(typed) { return _semantic_tuple([]) }
    def table = semantic_get(typed, "proof_obligations")
-   if semantic_get(table, "schema", "") !=
-   "nytrix.semantic.proof-obligations" ||
-   semantic_get(table, "version") != 1 {
+   if !_semantic_versioned(table, "nytrix.semantic.proof-obligations") {
       return _semantic_tuple([])
    }
    semantic_items(table)
@@ -571,62 +595,62 @@ fn _semantic_find_proof_record(any snapshot, str kind, int line, int column,
       return nil
    }
    def records = semantic_proof_obligations(snapshot)
-   mut found = nil
+   mut found_index = -1
    mut i = 0
    while i < records.len {
       def record = records.get(i)
       if str(semantic_get(record, "kind", "")) == kind &&
-      (line <= 0 || _semantic_origin_line(record) == line) &&
-      (column <= 0 ||
-         semantic_get(semantic_get(record, "source_origin"), "column") ==
-         column) &&
-      (file == "" ||
-         str(semantic_get(semantic_get(record, "source_origin"), "file", "")) ==
-         file) {
-         if !is_nil(found) { return nil }
-         found = record
+      _semantic_origin_matches(semantic_get(record, "source_origin"),
+         line, column, file) {
+         if found_index >= 0 { return nil }
+         found_index = i
       }
       i += 1
    }
-   found
+   if found_index >= 0 { return records.get(found_index) }
+   nil
 }
 
 fn semantic_find_lemma(any snapshot, str name, int line=0) any {
    "Finds one lemma obligation by name and optional source line."
    if name == "" { return nil }
    def records = semantic_proof_obligations(snapshot)
-   mut found = nil
+   mut found_index = -1
    mut i = 0
    while i < records.len {
       def record = records.get(i)
-      if semantic_get(record, "kind", "") == "lemma" &&
-      semantic_get(record, "name", "") == name &&
-      (line <= 0 || _semantic_origin_line(record) == line) {
-         if !is_nil(found) { return nil }
-         found = record
+      if str(semantic_get(record, "kind", "")) == "lemma" &&
+      str(semantic_get(record, "name", "")) == name &&
+      _semantic_origin_matches(semantic_get(record, "source_origin"),
+         line, 0, "") {
+         if found_index >= 0 { return nil }
+         found_index = i
       }
       i += 1
    }
-   found
+   if found_index >= 0 { return records.get(found_index) }
+   nil
 }
 
 fn semantic_find_fin_bound(any snapshot, str name, int line=0) any {
    "Finds one Fin<N> parameter-domain record by name and optional source line."
    if name == "" { return nil }
    def records = semantic_proof_obligations(snapshot)
-   mut found = nil
+   mut found_index = -1
    mut i = 0
    while i < records.len {
       def record = records.get(i)
-      if semantic_get(record, "kind", "") == "fin-bound" &&
-      semantic_get(record, "name", "") == name &&
-      (line <= 0 || _semantic_origin_line(record) == line) {
-         if !is_nil(found) { return nil }
-         found = record
+      if str(semantic_get(record, "kind", "")) == "fin-bound" &&
+      str(semantic_get(record, "name", "")) == name &&
+      _semantic_origin_matches(semantic_get(record, "source_origin"),
+         line, 0, "") {
+         if found_index >= 0 { return nil }
+         found_index = i
       }
       i += 1
    }
-   found
+   if found_index >= 0 { return records.get(found_index) }
+   nil
 }
 
 fn semantic_find_invariant(any snapshot, int line, int column=0,
@@ -640,7 +664,7 @@ fn semantic_find_law(any snapshot, str trait_name, str type_name,
    "Finds one impl law obligation by trait and type names; ambiguous matches return nil."
    if trait_name == "" && type_name == "" { return nil }
    def records = semantic_proof_obligations(snapshot)
-   mut found = nil
+   mut found_index = -1
    mut i = 0
    while i < records.len {
       def record = records.get(i)
@@ -649,13 +673,15 @@ fn semantic_find_law(any snapshot, str trait_name, str type_name,
          str(semantic_get(record, "trait", "")) == trait_name) &&
       (type_name == "" ||
          str(semantic_get(record, "type", "")) == type_name) &&
-      (line <= 0 || _semantic_origin_line(record) == line) {
-         if !is_nil(found) { return nil }
-         found = record
+      _semantic_origin_matches(semantic_get(record, "source_origin"),
+         line, 0, "") {
+         if found_index >= 0 { return nil }
+         found_index = i
       }
       i += 1
    }
-   found
+   if found_index >= 0 { return records.get(found_index) }
+   nil
 }
 
 fn semantic_find_obligation(any record, str kind, int line,
@@ -672,18 +698,20 @@ fn semantic_find_obligation(any record, str kind, int line,
    }
    if !is_nil(_semantic_typed(record)) {
       def functions = semantic_functions(record)
-      mut found = nil
+      mut found_obligation = nil
       mut i = 0
       while i < functions.len {
-         def candidate = semantic_find_obligation(functions.get(i), kind, line,
-            column, file)
-         if !is_nil(candidate) {
-            if !is_nil(found) { return nil }
-            found = candidate
+         def call = semantic_find_call(functions.get(i), line, column, file)
+         if !is_nil(call) {
+            def obligation = semantic_get(call, "obligations")
+            if !is_nil(semantic_get(obligation, kind)) {
+               if !is_nil(found_obligation) { return nil }
+               found_obligation = obligation
+            }
          }
          i += 1
       }
-      return found
+      return found_obligation
    }
    def call = semantic_find_call(record, line, column, file)
    if is_nil(call) { return nil }
@@ -700,9 +728,9 @@ fn semantic_statement_effects(any function_record) tuple {
 
 fn semantic_statement_custom_effect_row(any statement) any {
    "Returns a closed inferred custom effect row string, or nil when unknown."
-   if semantic_get(statement, "schema") !=
-   "nytrix.semantic.statement-effects" ||
-   semantic_get(statement, "version") != 1 { return nil }
+   if !_semantic_versioned(statement, "nytrix.semantic.statement-effects") {
+      return nil
+   }
    def row = semantic_get(statement, "inferred_custom_row")
    if is_str(row) { return row }
    nil
@@ -712,19 +740,20 @@ fn semantic_find_statement_effect(any function_record, str kind, int line,
    int column=0, str file="") any {
    "Finds one statement effect record by kind and source location; ambiguous matches return nil."
    def statements = semantic_statement_effects(function_record)
-   mut found = nil
+   mut found_index = -1
    mut i = 0
    while i < statements.len {
       def statement = statements.get(i)
       def origin = semantic_get(statement, "source_origin")
       if str(semantic_get(statement, "kind", "")) == kind &&
       _semantic_origin_matches(origin, line, column, file) {
-         if !is_nil(found) { return nil }
-         found = statement
+         if found_index >= 0 { return nil }
+         found_index = i
       }
       i += 1
    }
-   found
+   if found_index >= 0 { return statements.get(found_index) }
+   nil
 }
 
 fn semantic_diagnostics(any snapshot) tuple {
@@ -739,18 +768,19 @@ fn semantic_find_diagnostic(any snapshot, str code, str file="",
    "Finds one diagnostic by stable code and optional source location; ambiguity returns nil."
    if code == "" { return nil }
    def diagnostics = semantic_diagnostics(snapshot)
-   mut found = nil
+   mut found_index = -1
    mut i = 0
    while i < diagnostics.len {
       def diagnostic = diagnostics.get(i)
       if str(semantic_get(diagnostic, "code", "")) == code &&
       (file == "" || str(semantic_get(diagnostic, "file", "")) == file) &&
-      (line <= 0 || semantic_get(diagnostic, "line") == line) &&
-      (column <= 0 || semantic_get(diagnostic, "col") == column) {
-         if !is_nil(found) { return nil }
-         found = diagnostic
+      (line <= 0 || str(semantic_get(diagnostic, "line")) == to_str(line)) &&
+      (column <= 0 || str(semantic_get(diagnostic, "col")) == to_str(column)) {
+         if found_index >= 0 { return nil }
+         found_index = i
       }
       i += 1
    }
-   found
+   if found_index >= 0 { return diagnostics.get(found_index) }
+   nil
 }

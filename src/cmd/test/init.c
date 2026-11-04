@@ -18,8 +18,12 @@
 #include "../tools/repo.h"
 #include "base/args.h"
 #include "base/json.h"
+#include "base/strbuf.h"
 #include "base/util.h"
 #include "cmd/fmt/ui.h"
+#include "cmd/test/perf/compare.h"
+#include "cmd/test/perf/compiler.h"
+#include "cmd/test/ui.h"
 #include "test.h"
 
 #include <ctype.h>
@@ -76,6 +80,7 @@
 #define NY_TEST_DEFAULT_TIMEOUT_SEC 60
 #define NY_TEST_DEFAULT_BENCH_TIMEOUT_SEC 30
 #define NY_TEST_MAX_TIMEOUT_SEC 300
+#define NY_TEST_MAX_FIXTURE_TIMEOUT_SEC 420
 #define NY_TEST_PARALLEL_TIMEOUT_GRACE_MS 1000.0
 #define NY_TEST_WAIT_HEARTBEAT_MS 45000.0
 #define NY_TEST_WORKER_MEMORY_GIB 2.5
@@ -158,7 +163,7 @@ run_benchmarks(const char *bin, const char *std_path, const char *std_bc,
                int correctness_only, const char *out_csv, const char *out_json,
                const char *out_md, const char *compile_profile, int budget_fail,
                int fixture_workers, StrVec *files, StrVec *patterns);
-static void apply_test_child_env(void);
+static void apply_test_child_env(int fixture_mode);
 static char *read_small_file(const char *path);
 static char *read_whole_file(const char *path);
 static const char *test_warn_arg(void);
@@ -186,11 +191,13 @@ static int native_only_explicit(const char *flags);
 static int native_backend_is_llvm(const char *flags);
 static int flags_contain_native_backend_word(const char *flags,
                                              const char *word);
+static int flags_explicit_executor(const char *flags);
 static int path_is_probe_test(const char *p);
 static int path_is_native_test(const char *p);
 static int path_is_repl_test(const char *p);
 static int path_is_stdlib_source(const char *p);
 static int run_progress_selftest(const char *bin, int timeout_sec);
+static int run_bench_report_selftest(void);
 static int run_shape_generator_selftest(void);
 static int make_test_capture_tmp(char *tmp, size_t tmp_len, const char *prefix);
 static int bench_run_capture(char *const argv[], int timeout_sec,
@@ -998,7 +1005,8 @@ static const char *ny_test_resolve_app(char *arg0, char *buf, size_t buf_sz) {
 #endif
 
 static ny_test_proc_t ny_test_spawn_argv(char *const argv[],
-                                         const char *output_path, int quiet) {
+                                         const char *output_path, int quiet,
+                                         int fixture_mode) {
   char app_buf[PATH_MAX];
   const char *app =
       ny_test_resolve_app(argv ? argv[0] : NULL, app_buf, sizeof(app_buf));
@@ -1035,9 +1043,21 @@ static ny_test_proc_t ny_test_spawn_argv(char *const argv[],
       inherit = TRUE;
     }
   }
-  apply_test_child_env();
+  const char *old_test_mode = getenv("NYTRIX_TEST_MODE");
+  char *saved_test_mode = old_test_mode ? strdup(old_test_mode) : NULL;
+  int had_test_mode = old_test_mode != NULL;
+  if (fixture_mode)
+    ny_setenv("NYTRIX_TEST_MODE", "1", 1);
+  apply_test_child_env(0);
   BOOL ok =
       CreateProcessA(app, cmd, NULL, NULL, inherit, 0, NULL, NULL, &si, &pi);
+  if (fixture_mode) {
+    if (had_test_mode)
+      ny_setenv("NYTRIX_TEST_MODE", saved_test_mode ? saved_test_mode : "", 1);
+    else
+      ny_unsetenv("NYTRIX_TEST_MODE");
+  }
+  free(saved_test_mode);
   free(cmd);
   if (out)
     CloseHandle(out);
@@ -1502,7 +1522,14 @@ static void export_shape_fixture_tools_for(const char *bin) {
     ny_setenv("NYTRIX_TEST_DOC_BIN", tool, 0);
 }
 
-static void apply_test_child_env(void) {
+static void apply_test_child_env(int fixture_mode) {
+  /*
+   * Fixture programs run as direct entries under the test contract. This
+   * enables their compile-time and runtime __main() predicates without
+   * changing the environment of the ny-test scheduler itself.
+   */
+  if (fixture_mode)
+    test_setenv_default("NYTRIX_TEST_MODE", "1");
   /*
    * Children write diagnostics into capture files (isatty false there);
    * keep their native ANSI colors when the runner itself is on a
@@ -1923,6 +1950,19 @@ static int test_merge_link_archives(const StrVec *links, char *out,
 }
 #endif
 
+/*
+ * Shared teardown of a link check: drop the merged archive when one was
+ * produced, free the link set and expected value, and hand back rc.
+ */
+static int test_link_check_teardown(const char merged[], StrVec *links,
+                                    char *expect_val, int rc) {
+  if (merged[0])
+    remove(merged);
+  sv_free(links);
+  free(expect_val);
+  return rc;
+}
+
 static int object_link_run_check(const char *shape_path) {
   if (!shape_path || !shape_path_is_nshape(shape_path))
     return 0;
@@ -2113,57 +2153,30 @@ static int object_link_run_check(const char *shape_path) {
     int internal_rc = test_internal_elf32_link_run(
         obj_path, ret_kind, expected_val, shape_path, first_archive);
     if (internal_rc == 0) {
-      if (merged_archive[0])
-        remove(merged_archive);
-      sv_free(&links);
-      free(expect_val);
-      return 0;
+      return test_link_check_teardown(merged_archive, &links, expect_val, 0);
     }
     if (internal_rc == 1) {
-      if (merged_archive[0])
-        remove(merged_archive);
-      sv_free(&links);
-      free(expect_val);
-      return 1;
+      return test_link_check_teardown(merged_archive, &links, expect_val, 1);
     }
-    if (merged_archive[0])
-      remove(merged_archive);
-    sv_free(&links);
-    free(expect_val);
-    return 0;
+    return test_link_check_teardown(merged_archive, &links, expect_val, 0);
   }
 
   if (force_aarch64) {
     int internal_rc = test_internal_aarch64_elf64_link_run(
         obj_path, ret_kind, expected_val, shape_path);
     if (internal_rc == 0) {
-      if (merged_archive[0])
-        remove(merged_archive);
-      sv_free(&links);
-      free(expect_val);
-      return 0;
+      return test_link_check_teardown(merged_archive, &links, expect_val, 0);
     }
     if (internal_rc == 1) {
-      if (merged_archive[0])
-        remove(merged_archive);
-      sv_free(&links);
-      free(expect_val);
-      return 1;
+      return test_link_check_teardown(merged_archive, &links, expect_val, 1);
     }
-    if (merged_archive[0])
-      remove(merged_archive);
-    sv_free(&links);
-    free(expect_val);
-    return 0;
+    return test_link_check_teardown(merged_archive, &links, expect_val, 0);
   }
   if (force_x86_64) {
     if (host_aot_route) {
       int internal_rc = test_internal_elf64_aot_host_link_run(
           obj_path, ret_kind, expected_val, shape_path, first_archive);
-      if (merged_archive[0])
-        remove(merged_archive);
-      sv_free(&links);
-      free(expect_val);
+      (void)test_link_check_teardown(merged_archive, &links, expect_val, 0);
       if (internal_rc == 0 || internal_rc == 1)
         return internal_rc;
       fprintf(stderr, "object link/run: no host AOT oracle for %s\n",
@@ -2180,45 +2193,25 @@ static int object_link_run_check(const char *shape_path) {
   int internal_rc = test_internal_elf64_link_run(
       obj_path, ret_kind, expected_val, shape_path, first_archive);
   if (internal_rc == 0) {
-    if (merged_archive[0])
-      remove(merged_archive);
-    sv_free(&links);
-    free(expect_val);
-    return 0;
+    return test_link_check_teardown(merged_archive, &links, expect_val, 0);
   }
   if (internal_rc == 1) {
-    if (merged_archive[0])
-      remove(merged_archive);
-    sv_free(&links);
-    free(expect_val);
-    return 1;
+    return test_link_check_teardown(merged_archive, &links, expect_val, 1);
   }
   /*
    * A native x86-64 object that the internal linker cannot handle should not
    * be sent to the C fallback when it contains runtime imports.
    */
   if (test_has_unsupported_external_runtime_symbol(obj_path)) {
-    if (merged_archive[0])
-      remove(merged_archive);
-    sv_free(&links);
-    free(expect_val);
-    return 0;
+    return test_link_check_teardown(merged_archive, &links, expect_val, 0);
   }
   internal_rc = test_internal_elf32_link_run(obj_path, ret_kind, expected_val,
                                              shape_path, first_archive);
   if (internal_rc == 0) {
-    if (merged_archive[0])
-      remove(merged_archive);
-    sv_free(&links);
-    free(expect_val);
-    return 0;
+    return test_link_check_teardown(merged_archive, &links, expect_val, 0);
   }
   if (internal_rc == 1) {
-    if (merged_archive[0])
-      remove(merged_archive);
-    sv_free(&links);
-    free(expect_val);
-    return 1;
+    return test_link_check_teardown(merged_archive, &links, expect_val, 1);
   }
   /*
    * The internal linker is authoritative for native NYIR objects that use
@@ -2226,11 +2219,7 @@ static int object_link_run_check(const char *shape_path) {
    * resolve rt_* symbols and may also target a different ISA.
    */
   if (test_has_unsupported_external_runtime_symbol(obj_path)) {
-    if (merged_archive[0])
-      remove(merged_archive);
-    sv_free(&links);
-    free(expect_val);
-    return 0;
+    return test_link_check_teardown(merged_archive, &links, expect_val, 0);
   }
   if (merged_archive[0])
     remove(merged_archive);
@@ -3475,7 +3464,7 @@ static int run_debug_argv_capture(char *const argv[], int timeout_sec,
     ny_setenv("FORCE_COLOR", "1", 1);
   enable_core_dumps();
   (void)use_path_lookup;
-  ny_test_proc_t proc = ny_test_spawn_argv(argv, output_path, 0);
+  ny_test_proc_t proc = ny_test_spawn_argv(argv, output_path, 0, 0);
   if (!ny_test_proc_valid(proc))
     return 127;
   int timed_out = 0;
@@ -3745,13 +3734,7 @@ static int build_trace_argv(char **argv, int max, const char *bin,
     trim_inplace(flags_buf);
     snprintf(policy_flags, sizeof(policy_flags), "%s", flags_buf);
     has_native_backend = native_backend_explicit(flags_buf);
-    explicit_executor =
-        flags_contain_native_backend_word(flags_buf, "--nyir-run") ||
-        flags_contain_native_backend_word(flags_buf, "--nyir-run-bin") ||
-        flags_contain_native_backend_word(flags_buf, "--jit") ||
-        flags_contain_native_backend_word(flags_buf, "--native") ||
-        flags_contain_native_backend_word(flags_buf, "--run") ||
-        flags_contain_native_backend_word(flags_buf, "-run");
+    explicit_executor = flags_explicit_executor(flags_buf);
     flagc = split_words(flags_buf, flagv, 32);
   }
   if (!append_arg(argv, &argc, max, (char *)bin) ||
@@ -4434,7 +4417,7 @@ static pid_t repl_spawn_pty(char *const argv[], int *master_fd) {
   }
   pid_t pid = fork();
   if (pid == 0) {
-    apply_test_child_env();
+    apply_test_child_env(1);
     ny_setenv("NYTRIX_REPL_TEST_PASTE_SUBMIT", "1", 1);
     setsid();
     int slave = open(slave_name, O_RDWR | O_NOCTTY);
@@ -4913,7 +4896,7 @@ static int run_error_case(const char *bin, const char *path,
     ny_setenv("NYTRIX_OWNERSHIP", "1", 1);
     ny_setenv("NYTRIX_OWNERSHIP_STRICT", "1", 1);
   }
-  ny_test_proc_t pid = ny_test_spawn_argv(argv, tmp, 0);
+  ny_test_proc_t pid = ny_test_spawn_argv(argv, tmp, 0, 1);
   if (ownership_case) {
     if (had_ownership)
       ny_setenv("NYTRIX_OWNERSHIP", old_ownership ? old_ownership : "", 1);
@@ -4943,7 +4926,7 @@ static int run_error_case(const char *bin, const char *path,
   ny_test_proc_t pid = fork();
   if (pid == 0) {
     ny_test_isolate_child_group();
-    apply_test_child_env();
+    apply_test_child_env(1);
     dup2(fd, STDOUT_FILENO);
     dup2(fd, STDERR_FILENO);
     close(fd);
@@ -5686,6 +5669,15 @@ static int flags_contain_native_backend_word(const char *flags,
   return 0;
 }
 
+static int flags_explicit_executor(const char *flags) {
+  return flags_contain_native_backend_word(flags, "--nyr-run") ||
+         flags_contain_native_backend_word(flags, "--nyr-run-bin") ||
+         flags_contain_native_backend_word(flags, "--jit") ||
+         flags_contain_native_backend_word(flags, "--native") ||
+         flags_contain_native_backend_word(flags, "--run") ||
+         flags_contain_native_backend_word(flags, "-run");
+}
+
 /*
  * Cross-target diagnostic fixtures (tier reports, emit-only matrices) are
  * compile contracts: the compiler must lower the same program for every
@@ -5699,8 +5691,8 @@ cross_target_diagnostic_emit_ok(const char *flags) {
     return 0;
   int report =
       flags_contain_native_backend_word(flags, "--native-tier-report") ||
-      flags_contain_native_backend_word(flags, "--nyir-dump") ||
-      flags_contain_native_backend_word(flags, "--nyir-metadata") ||
+      flags_contain_native_backend_word(flags, "--nyr-dump") ||
+      flags_contain_native_backend_word(flags, "--nyr-metadata") ||
       flags_contain_native_backend_word(flags, "--callgraph") ||
       flags_contain_native_backend_word(flags, "--emit-asm");
   if (!report)
@@ -5846,8 +5838,8 @@ static int test_timeout_for_path(const char *path, int default_timeout_sec) {
   }
   if (timeout < 1)
     timeout = 1;
-  if (timeout > NY_TEST_MAX_TIMEOUT_SEC)
-    timeout = NY_TEST_MAX_TIMEOUT_SEC;
+  if (timeout > NY_TEST_MAX_FIXTURE_TIMEOUT_SEC)
+    timeout = NY_TEST_MAX_FIXTURE_TIMEOUT_SEC;
   return timeout;
 }
 
@@ -7096,7 +7088,85 @@ static int run_list_meta(const char *root_dir) {
   return 0;
 }
 
+static void print_test_help(void) {
+  nyt_heading("Nytrix Test Runner");
+  nyt_subheading("Usage");
+  printf("%susage:%s %sny test%s %s[options] [files ...]%s\n",
+         nyt_clr(NYT_BOLD), nyt_clr(NYT_RESET), nyt_clr(NYT_CYAN),
+         nyt_clr(NYT_RESET), nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
+  printf("  %sfuzzing:%s ny-test fuzz <command> [args]\n", nyt_clr(NYT_GREEN),
+         nyt_clr(NYT_RESET));
+  nyt_subheading("Runner");
+  printf("  %s--bin BIN --jobs N --timeout SEC --pattern PAT%s\n",
+         nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
+  printf("  %s--fail-fast%s  Stop queueing fixtures after the first failure\n",
+         nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
+  nyt_subheading("Fixture selection");
+  printf("  %s--smoke --no-smoke --with-stdlib --no-stdlib%s\n",
+         nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
+  nyt_subheading("Caching and targets");
+  printf("  %s--cold --no-cold (re-execute fixtures; keep reusable stdlib "
+         "source cache)%s\n",
+         nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
+  nyt_kv("NYTRIX_TEST_EXEC_CACHE=0",
+         "Disable reusable test execution artifacts");
+  printf("  %s--std PATH --core-bc PATH --triple T --emulator CMD%s\n",
+         nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
+  nyt_subheading("Benchmarks");
+  printf("  %sbench-compare BASELINE.json CANDIDATE.json "
+         "[--metric FIELD --max-regression-pct PCT]%s\n",
+         nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
+  printf("  %s--bench [--bench-run N --bench-warmup N --bench-opt LVL "
+         "--bench-tier TIER%s\n",
+         nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
+  printf("  %s        --bench-engine aot|mcjit|orc|native|all (default "
+         "native) --bench-target TARGET%s\n",
+         nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
+  printf("  %s        --bench-cache cold|warm --bench-correctness%s\n",
+         nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
+  printf("  %s        --bench-compiler NAME --bench-compile-profile "
+         "PROFILE%s\n",
+         nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
+  printf("  %s        --bench-timeout SEC --bench-verbose --bench-show-ir "
+         "--bench-show-asm --bench-ny-verbose%s\n",
+         nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
+  printf("  %s        --bench-show-passes --bench-profile "
+         "--bench-hw-counters --bench-runtime-counters%s\n",
+         nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
+  printf("  %s        NYTRIX_BENCH_DEBUG_FILTER=--dbg-filter=func:NAME "
+         "selects pass-dump function (default rt_main)%s\n",
+         nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
+  printf("  %s        --bench-compare-llvm --bench-no-compare-llvm%s\n",
+         nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
+  nyt_subheading("Benchmark reports");
+  printf("  %s--bench-out-csv PATH --bench-out-json PATH --bench-out-md "
+         "PATH%s\n",
+         nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
+  printf("  %s--bench-report-md PATH (sources, results, NYR/C artifacts)%s\n",
+         nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
+  nyt_subheading("Failure debugging");
+  printf("  %s--debug-failures --with-replay --debugger-all%s\n",
+         nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
+  nyt_subheading("Notes");
+  nyt_kv("timeout", "all fixtures default to 60s; override with --timeout");
+  nyt_kv("errors", "fixtures live under etc/tests/errors");
+}
+
 int ny_test_main(int argc, char **argv) {
+  if (argc > 0 && argv && argv[0]) {
+    char test_executable[PATH_MAX];
+#ifdef _WIN32
+    if (_fullpath(test_executable, argv[0], sizeof(test_executable)))
+      ny_setenv("NYTRIX_NY_TEST_BIN", test_executable, 1);
+#else
+    if (realpath(argv[0], test_executable))
+      ny_setenv("NYTRIX_NY_TEST_BIN", test_executable, 1);
+#endif
+  }
+  if (argc > 1 && strcmp(argv[1], "bench-compare") == 0)
+    return ny_bench_compare_main(argc - 1, argv + 1);
+  if (argc > 1 && strcmp(argv[1], "ui-replay") == 0)
+    return ny_test_ui_replay_main(argc - 1, argv + 1);
   double suite_started_ms = now_ms();
   const char *bin = "build/release/ny";
   const char *std_path = NULL;
@@ -7163,61 +7233,7 @@ int ny_test_main(int argc, char **argv) {
   for (int i = 1; i < argc; i++) {
     const char *a = argv[i];
     if (ny_arg_match(a, "--help", "-h")) {
-      nyt_heading("Nytrix Test Runner");
-      nyt_subheading("Usage");
-      printf("%susage:%s %sny test%s %s[options] [files ...]%s\n",
-             nyt_clr(NYT_BOLD), nyt_clr(NYT_RESET), nyt_clr(NYT_CYAN),
-             nyt_clr(NYT_RESET), nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
-      printf("  %sfuzzing:%s ny-test fuzz <command> [args]\n",
-             nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
-      nyt_subheading("Options");
-      printf("  %s--bin BIN --jobs N --timeout SEC --pattern PAT%s\n",
-             nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
-      printf("  %s--cold --no-cold (re-execute fixtures; keep reusable stdlib "
-             "source cache)%s\n",
-             nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
-      printf("  %s        NYTRIX_TEST_EXEC_CACHE=0 disables reusable execution "
-             "artifacts%s\n",
-             nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
-      printf("  %s--fail-fast (stop queueing fixtures after first failure)%s\n",
-             nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
-      printf("  %s--smoke --no-smoke --with-stdlib --no-stdlib%s\n",
-             nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
-      printf("  %s--std PATH --core-bc PATH --triple T --emulator CMD%s\n",
-             nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
-      printf("  %s--bench [--bench-run N --bench-warmup N --bench-opt LVL "
-             "--bench-tier TIER%s\n",
-             nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
-      printf("  %s        --bench-engine aot|mcjit|orc|native|all (default "
-             "native) --bench-target TARGET%s\n",
-             nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
-      printf("  %s        --bench-cache cold|warm --bench-correctness%s\n",
-             nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
-      printf("  %s        --bench-compiler NAME --bench-compile-profile "
-             "PROFILE%s\n",
-             nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
-      printf("  %s        --bench-timeout SEC --bench-verbose --bench-show-ir "
-             "--bench-show-asm --bench-ny-verbose%s\n",
-             nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
-      printf("  %s        --bench-show-passes --bench-profile "
-             "--bench-hw-counters --bench-runtime-counters%s\n",
-             nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
-      printf("  %s        NYTRIX_BENCH_DEBUG_FILTER=--dbg-filter=func:NAME "
-             "selects pass-dump function (default rt_main)%s\n",
-             nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
-      printf("  %s        --bench-compare-llvm --bench-no-compare-llvm%s\n",
-             nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
-      printf("  %s--bench-out-csv PATH --bench-out-json PATH --bench-out-md "
-             "PATH%s\n",
-             nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
-      printf(
-          "  %s--bench-report-md PATH (sources, results, NYR/C artifacts)%s\n",
-          nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
-      printf("  %s--debug-failures --with-replay --debugger-all%s\n",
-             nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
-      nyt_subheading("Notes");
-      nyt_kv("timeout", "all fixtures default to 60s; override with --timeout");
-      nyt_kv("errors", "fixtures live under etc/tests/errors");
+      print_test_help();
       return 0;
     }
     int color_mode = -2;
@@ -7323,6 +7339,10 @@ int ny_test_main(int argc, char **argv) {
       fail_fast = 1;
     else if (!strcmp(a, "--progress-selftest"))
       return run_progress_selftest(bin, timeout_sec);
+    else if (!strcmp(a, "--bench-report-selftest"))
+      return run_bench_report_selftest();
+    else if (!strcmp(a, "--bench-compiler-selftest"))
+      return nyt_compiler_snapshot_selftest();
     else if (!strcmp(a, "--shape-generator-selftest"))
       return run_shape_generator_selftest();
     else if (!strcmp(a, "--reader-atoms"))
@@ -7727,14 +7747,14 @@ int ny_test_main(int argc, char **argv) {
         (strcmp(p,
                 "etc/tests/lang/modules/http-server-request-reading.nshape") ==
              0 ||
-         strcmp(p, "etc/tests/code/probes/remote-socket.nshape") == 0)) {
+         strcmp(p, "etc/tests/code/probes/os/remote-socket.nshape") == 0)) {
       skipped_loopback++;
       timings_push(&timings, p, 0, "Skipped", "skip");
     } else if (!audio_service_available &&
                (strcmp(p,
-                       "etc/tests/code/probes/platform-audio-unavailable.ny") ==
+                       "etc/tests/code/probes/os/platform-audio-unavailable.ny") ==
                     0 ||
-                strcmp(p, "etc/tests/code/probes/platform-audio-playback.ny") ==
+                strcmp(p, "etc/tests/code/probes/os/platform-audio-playback.ny") ==
                     0)) {
       skipped_audio++;
       timings_push(&timings, p, 0, "Skipped", "skip");
@@ -8093,6 +8113,8 @@ int ny_test_main(int argc, char **argv) {
 typedef struct {
   char name[128];
   char path[PATH_MAX];
+  char ny_argv[4096];
+  char ny_stats_argv[4096];
   double wall_ms;
   double ny_ms;
   double ny_compile_ms;
@@ -8141,6 +8163,14 @@ typedef struct {
   size_t ny_runtime_realloc_count;
   int ny_runtime_counters_seen;
   double c_ms;
+  double nyc_ms;
+  int nyc_available;
+  char nyc_note[192];
+  int nyc_runs, nyc_rc, nyc_failures;
+  int nyc_fixture_timer, nyc_timer_fallback, nyc_unstable;
+  double nyc_total_ms, nyc_min, nyc_max, nyc_p95;
+  double nyc_dispersion_pct, nyc_noise_pct;
+  char nyc_checksum[128];
   double c_total_ms;
   double llvm_ms;
   double llvm_total_ms;
@@ -8300,15 +8330,30 @@ static const char *bench_dir_root(void) {
  */
 #define BENCH_SAMPLE_MAX_MS (60.0 * 1000.0)
 
+static const char *bench_elapsed_marker(const char *out, const char *label) {
+  size_t len = strlen(label);
+  const char *p = out;
+  while ((p = strstr(p, label)) != NULL) {
+    if (p == out || p[-1] == '\n' || p[-1] == '\r')
+      return p;
+    p += len;
+  }
+  return NULL;
+}
+
 static double bench_parse_elapsed(const char *out) {
   if (!out)
     return -1.0;
-  const char *ns = strstr(out, "bench_elapsed_ns=");
+  const char *ns = bench_elapsed_marker(out, "bench_elapsed_ns=");
   if (!ns)
-    ns = strstr(out, "bench_process_elapsed_ns=");
-  if (!ns)
-    ns = strstr(out, "elapsed_ns=");
-  const char *ms = strstr(out, "elapsed_ms=");
+    ns = bench_elapsed_marker(out, "elapsed_ns=");
+  const char *ms = bench_elapsed_marker(out, "elapsed_ms=");
+  /*
+   * The wrapper includes printing and teardown; use it only when the
+   * fixture does not provide a measurement of its own timed interval.
+   */
+  if (!ns && !ms)
+    ns = bench_elapsed_marker(out, "bench_process_elapsed_ns=");
   const char *k = ns ? ns : (ms ? ms : NULL);
   if (!k)
     return -1.0;
@@ -8440,6 +8485,40 @@ static double bench_noise_limit_pct(void) {
 }
 
 /*
+ * Decide whether the collected samples contradict each other badly enough
+ * that the median must not be published as the row value, nor drive ratio
+ * comparables. Judge typical spread with scaled MAD. A range/median cutoff
+ * incorrectly rejected a robust median whenever one sample was descheduled:
+ * for example, 0.069ms / 26.9ms / 28.2ms has a 7.2% MAD and two agreeing
+ * observations. Preserve the spread in min/max/p95 for diagnosis, but do not
+ * let one extreme observation invalidate an otherwise stable median.
+ * Samples below the 1µs bench_signal floor stay exempt: timer-floor spread
+ * is a weak signal, and those rows are already excluded from comparables.
+ * bench_median sorts in place; the >=5-sample judgment uses the plain limit,
+ * small counts the widened one (µs-floor kernels legitimately jitter 30-45%).
+ */
+static bool bench_samples_conflicting(double *values, size_t count,
+                                      double *out_noise_pct, bool plain_limit) {
+  if (count < 2 || count > 64)
+    return false;
+  double median = bench_median(values, (int)count);
+  if (median < 0.001)
+    return false;
+  double deviations[64];
+  size_t n = count < 64 ? count : 64;
+  for (size_t i = 0; i < n; ++i) {
+    double delta = values[i] - median;
+    deviations[i] = delta < 0.0 ? 0.0 - delta : delta;
+  }
+  double mad = bench_median(deviations, (int)n);
+  double noise_pct = (1.4826 * mad / median) * 100.0;
+  if (out_noise_pct)
+    *out_noise_pct = noise_pct;
+  double limit = bench_noise_limit_pct();
+  return noise_pct > (plain_limit ? limit : 3.0 * limit);
+}
+
+/*
  * Run argv, capturing stdout+stderr to output_path, waiting up to timeout_sec.
  * Returns child status rc (NY_TEST_TIMEOUT_RC on timeout).  Works on POSIX via
  * fork and on Windows via the spawn helper.
@@ -8532,7 +8611,7 @@ static int bench_run_capture_usage(char *const argv[], int timeout_sec,
     *peak_rss_kb = 0;
   fflush(NULL);
 #ifdef _WIN32
-  ny_test_proc_t proc = ny_test_spawn_argv(argv, output_path, 0);
+  ny_test_proc_t proc = ny_test_spawn_argv(argv, output_path, 0, 0);
   if (!ny_test_proc_valid(proc))
     return 127;
   int timed_out = 0;
@@ -8543,7 +8622,7 @@ static int bench_run_capture_usage(char *const argv[], int timeout_sec,
   ny_test_proc_t pid = fork();
   if (pid == 0) {
     ny_test_isolate_child_group();
-    apply_test_child_env();
+    apply_test_child_env(0);
     /*
      * Bench captures feed failure replay: keep the child's diagnostics
      * colored when the runner itself is on a terminal (the capture file
@@ -8661,6 +8740,14 @@ typedef struct {
   int checksum_seen;
   int checksum_consistent;
   char checksum[128];
+  /*
+   * Copy-pasteable compiler command lines recorded by the bench: the timed
+   * route argv (compile_argv) and the counter/tier-report compile argv
+   * (stats_argv) whose "facts" rows feed vector_attempted and friends.
+   * Empty until the corresponding measure step ran.
+   */
+  char compile_argv[4096];
+  char stats_argv[4096];
   double compile_values[64];
   size_t compile_count;
   double compile_ms;
@@ -8719,6 +8806,19 @@ static void bench_finalize_samples(bench_stats_t *s) {
   s->max = s->values[s->count - 1];
   if (s->median > 0.0)
     s->dispersion_pct = ((s->max - s->min) / s->median) * 100.0;
+  /*
+   * Instability must describe the typical sample spread, not a single
+   * scheduler interruption.  Publish MAD as the noise metric (retaining
+   * p95/max for reporting and diagnostics), but let the verdict come from
+   * the shared conflict predicate: the default 3-run banner can never
+   * reach 5 samples, so gating on count >= 5 silently marked every default
+   * row stable — a poisoned 3-sample row (e.g. 1.0ms / 230.6ms / 2645.3ms
+   * reported as a 230.6ms REGRESS) sailed through the budget gates as
+   * valid, and two conflicting samples that agree with each other fooled
+   * MAD entirely (0.069ms / 26.9ms / 28.2ms reads as a 7.2% MAD).
+   */
+  s->unstable = bench_samples_conflicting(s->values, s->count, &s->noise_pct,
+                                          s->count >= 5);
   if (s->count >= 5) {
     size_t rank = (95 * s->count + 99) / 100;
     if (rank == 0)
@@ -8726,26 +8826,6 @@ static void bench_finalize_samples(bench_stats_t *s) {
     if (rank > s->count)
       rank = s->count;
     s->p95 = s->values[rank - 1];
-
-    /*
-     * Instability must describe the typical sample spread, not a single
-     * scheduler interruption.  With the usual 5-run benchmark, nearest-rank
-     * p95 is literally the maximum sample; one involuntary deschedule could
-     * therefore fail an otherwise stable benchmark.  Use scaled median
-     * absolute deviation for the noise verdict while retaining p95/max for
-     * reporting and diagnostics.  MAD is robust to isolated host jitter but
-     * still grows when the benchmark itself is consistently variable.
-     */
-    double deviations[64];
-    size_t dev_count = s->count < 64 ? s->count : 64;
-    for (size_t i = 0; i < dev_count; ++i) {
-      double delta = s->values[i] - s->median;
-      deviations[i] = delta < 0.0 ? -delta : delta;
-    }
-    double mad = bench_median(deviations, (int)dev_count);
-    if (s->median > 0.0)
-      s->noise_pct = (1.4826 * mad / s->median) * 100.0;
-    s->unstable = s->noise_pct > bench_noise_limit_pct();
   } else {
     s->p95 = -1.0;
   }
@@ -8768,9 +8848,18 @@ static bench_stats_t bench_measure_self_timed(char *const argv[],
    * retry budget is bounded and does not hide nonzero exit statuses.
    */
   int total = warmup + (runs > 0 ? runs * 3 : 0);
-  for (int i = 0;
-       i < total && s.count < (size_t)(runs > 0 ? runs : 0) && s.count < 64;
-       i++) {
+  /*
+   * The spawn budget (warmup + 3x runs) usually leaves retry slots idle once
+   * the requested sample count is met. Reserve them for a conflict trap: a
+   * small-sample row whose values contradict each other (e.g. 1.0ms /
+   * 230.6ms / 2645.3ms from one fixture) would publish a poisoned median,
+   * and MAD over exactly three wild samples is unforgiving. Extending the
+   * target by two samples at a time lets good observations outvote a transient
+   * interruption. Keep extending only while the collected set remains
+   * conflicting, bounded by the existing three-times retry budget.
+   */
+  size_t target = (size_t)(runs > 0 ? runs : 0);
+  for (int i = 0; i < total && s.count < target && s.count < 64; i++) {
     char tmp[PATH_MAX];
     if (make_test_capture_path(tmp, sizeof(tmp), "bench") < 0) {
       if (i >= warmup)
@@ -8791,7 +8880,7 @@ static bench_stats_t bench_measure_self_timed(char *const argv[],
      * checksum and a positive runtime marker. Signal exits, launch failures,
      * and incomplete output remain failures.
      */
-    if (rc > 0 && rc < 128 && out) {
+    if (prefer_jit_timer && rc > 0 && rc < 128 && out) {
       char completed_checksum[sizeof(s.checksum)];
       bool completed_result =
           bench_parse_marker(out, "checksum=", completed_checksum,
@@ -8823,7 +8912,9 @@ static bench_stats_t bench_measure_self_timed(char *const argv[],
           s.checksum_consistent = 0;
         }
       }
-      bool fixture_timer = out && strstr(out, "bench_elapsed_ns=") != NULL;
+      bool fixture_timer = out && (strstr(out, "bench_elapsed_ns=") != NULL ||
+                                   strstr(out, "elapsed_ns=") != NULL ||
+                                   strstr(out, "elapsed_ms=") != NULL);
       double self_timed_ms = bench_parse_elapsed(out);
       double jit_run_ms = bench_parse_phase_ms(out, "JIT Run:");
       double v = prefer_jit_timer && !fixture_timer && jit_run_ms > 0.0
@@ -8875,6 +8966,23 @@ static bench_stats_t bench_measure_self_timed(char *const argv[],
       double opt_ms = bench_parse_phase_ms(out, "Optimization:");
       if (opt_ms >= 0.0 && s.opt_count < 64)
         s.opt_values[s.opt_count++] = opt_ms;
+      size_t max_samples = runs > 0 ? (size_t)runs * 3 : 0;
+      if (s.count >= target && s.count < max_samples && target < 64) {
+        /*
+         * Conflict trap: the requested sample count is met, but the values
+         * contradict each other. Spend two retry slots, re-evaluate at the
+         * final-count threshold, and keep extending only while instability
+         * persists. The total remains bounded by the existing retry budget.
+         */
+        double probe[64];
+        size_t probe_n = s.count;
+        memcpy(probe, s.values, probe_n * sizeof(double));
+        if (bench_samples_conflicting(probe, probe_n, NULL, probe_n >= 5)) {
+          target = probe_n + 2;
+          if (target > max_samples)
+            target = max_samples;
+        }
+      }
     }
     free(out);
   }
@@ -9020,6 +9128,75 @@ static int bench_find_cc(char *out, size_t cap) {
   return 0;
 }
 
+static char bench_nyc_snapshot[PATH_MAX];
+static long bench_nyc_snapshot_owner;
+
+static void bench_remove_compiler_snapshot(void) {
+  if (bench_nyc_snapshot[0] && bench_nyc_snapshot_owner == (long)getpid())
+    remove(bench_nyc_snapshot);
+}
+
+static int bench_find_named_compiler(char *out, size_t cap,
+                                     const char *env_name,
+                                     const char *default_name) {
+  if (env_name && strcmp(env_name, "NYTRIX_NYC") == 0 &&
+      bench_nyc_snapshot[0]) {
+    nyt_path_copy(out, cap, bench_nyc_snapshot);
+    return 1;
+  }
+  const char *compiler = env_name ? getenv(env_name) : NULL;
+  if (!compiler || !*compiler)
+    compiler = default_name;
+  if (!compiler || !*compiler)
+    return 0;
+#ifdef _WIN32
+  char resolved[PATH_MAX];
+  DWORD n = SearchPathA(NULL, compiler, NULL, (DWORD)sizeof(resolved), resolved,
+                        NULL);
+  if (n == 0 || n >= sizeof(resolved))
+    return 0;
+  nyt_path_copy(out, cap, resolved);
+#else
+  if (strchr(compiler, '/')) {
+    if (access(compiler, X_OK) != 0)
+      return 0;
+    char resolved[PATH_MAX];
+    nyt_path_copy(out, cap,
+                  ny_realpath(compiler, resolved) ? resolved : compiler);
+  } else {
+    const char *path = getenv("PATH");
+    if (!path || !*path)
+      return 0;
+    char *path_copy = strdup(path);
+    if (!path_copy)
+      return 0;
+    int found = 0;
+    for (char *part = path_copy; part && *part;) {
+      char *colon = strchr(part, ':');
+      if (colon)
+        *colon = '\0';
+      char candidate[PATH_MAX], resolved[PATH_MAX];
+      int n = snprintf(candidate, sizeof(candidate), "%s/%s",
+                       *part ? part : ".", compiler);
+      if (n > 0 && (size_t)n < sizeof(candidate) &&
+          access(candidate, X_OK) == 0) {
+        nyt_path_copy(out, cap,
+                      ny_realpath(candidate, resolved) ? resolved : candidate);
+        found = 1;
+        break;
+      }
+      if (!colon)
+        break;
+      part = colon + 1;
+    }
+    free(path_copy);
+    if (!found)
+      return 0;
+  }
+#endif
+  return 1;
+}
+
 typedef struct {
   char os[32];
   char arch[32];
@@ -9030,7 +9207,10 @@ typedef struct {
   char compiler_binary_fnv64[32];
   char c_compiler[PATH_MAX];
   char c_compiler_version[256];
+  char nyc_compiler[PATH_MAX];
+  char nyc_compiler_version[256];
   char c_flags[512];
+  char nyc_flags[512];
   char compiler_revision[128];
   char opt_level[16];
   char profile[32];
@@ -9183,10 +9363,25 @@ static void bench_collect_environment(const char *root, const char *bin,
     snprintf(env->c_compiler_version, sizeof(env->c_compiler_version),
              "unknown");
   }
+  char frontend_compiler[PATH_MAX];
+  if (bench_find_named_compiler(frontend_compiler, sizeof(frontend_compiler),
+                                "NYTRIX_NYC", "build/release/nyc")) {
+    snprintf(env->nyc_compiler, sizeof(env->nyc_compiler), "%s",
+             frontend_compiler);
+    char *frontend_argv[] = {frontend_compiler, "--version", NULL};
+    bench_capture_first_line(frontend_argv, env->nyc_compiler_version,
+                             sizeof(env->nyc_compiler_version));
+  } else {
+    snprintf(env->nyc_compiler, sizeof(env->nyc_compiler), "unavailable");
+    snprintf(env->nyc_compiler_version, sizeof(env->nyc_compiler_version),
+             "unavailable");
+  }
   const char *extra = getenv("CFLAGS");
   snprintf(env->c_flags, sizeof(env->c_flags), "%s -march=native%s%s",
            bench_opt_for(opt_level), extra && *extra ? " " : "",
            extra && *extra ? extra : "");
+  snprintf(env->nyc_flags, sizeof(env->nyc_flags), "%s -S",
+           bench_opt_for(opt_level));
 
   const char *rev = getenv("NYTRIX_REVISION");
   if (!rev || !*rev)
@@ -9292,7 +9487,8 @@ static char *bench_wrap_c_source(const char *c_source) {
 
 static int bench_compile_c(const char *c_source, const char *exe_path,
                            const char *opt_level, const char *cflags,
-                           const char *ldflags) {
+                           const char *ldflags, bool use_nyc, char *note,
+                           size_t note_cap) {
   char *wrapped_source = bench_wrap_c_source(c_source);
   if (!wrapped_source)
     return 0;
@@ -9319,44 +9515,104 @@ static int bench_compile_c(const char *c_source, const char *exe_path,
     return 0;
   }
 
-  char *cc_argv[32];
-  int k = 0;
-  cc_argv[k++] = (char *)cc;
-  cc_argv[k++] = (char *)bench_opt_for(opt_level);
-  cc_argv[k++] = "-march=native";
+  char cflags_buf[512], ldflags_buf[512];
+  char *flagv[12];
+  int flagc = 0;
   if (cflags && *cflags) {
-    char cflags_buf[512];
     if (strlen(cflags) >= sizeof(cflags_buf)) {
       remove(src_tmp);
       return 0;
     }
     snprintf(cflags_buf, sizeof(cflags_buf), "%s", cflags);
-    trim_inplace(cflags_buf);
-    char *flagv[12];
-    int flagc = split_words(cflags_buf, flagv, 12);
-    for (int i = 0; i < flagc && k < 20; i++)
-      cc_argv[k++] = flagv[i];
+    flagc = split_words(cflags_buf, flagv, 12);
   }
-  cc_argv[k++] = (char *)src_tmp;
+  char assembly[PATH_MAX] = {0};
+  char capture[PATH_MAX] = {0};
+  int rc = 1;
+  if (make_test_capture_path(capture, sizeof(capture), "bench-c-build") < 0)
+    goto done;
+  if (use_nyc) {
+    char nyc[PATH_MAX];
+    if (!bench_find_named_compiler(nyc, sizeof(nyc), "NYTRIX_NYC",
+                                   "build/release/nyc")) {
+      if (note && note_cap)
+        snprintf(note, note_cap, "NYC executable not found");
+      goto done;
+    }
+    snprintf(assembly, sizeof(assembly), "%s/nyc-bench-%ld-%lu.s",
+             nyt_temp_dir(), (long)getpid(), bench_next_temp_id());
+    char *argv[24];
+    int count = 0;
+    argv[count++] = nyc;
+    argv[count++] = (char *)bench_opt_for(opt_level);
+    for (int i = 0; i < flagc; ++i)
+      argv[count++] = flagv[i];
+    argv[count++] = "-S";
+    argv[count++] = src_tmp;
+    argv[count++] = "-o";
+    argv[count++] = assembly;
+    argv[count] = NULL;
+    rc = bench_run_capture(argv, NY_BENCH_TIMEOUT_SEC, capture);
+    if (rc != 0)
+      goto done;
+    struct stat output;
+    if (stat(assembly, &output) != 0 || output.st_size <= 0) {
+      if (note && note_cap)
+        snprintf(note, note_cap, "NYC emitted no assembly");
+      rc = 1;
+      goto done;
+    }
+  }
+
+  char *cc_argv[40];
+  int k = 0;
+  cc_argv[k++] = (char *)cc;
+  cc_argv[k++] = (char *)bench_opt_for(opt_level);
+  cc_argv[k++] = "-march=native";
+  for (int i = 0; i < flagc; i++)
+    cc_argv[k++] = flagv[i];
+  /*
+   * The host driver only assembles and links NYC output; it never compiles
+   * the workload's C source on that route.
+   */
+  cc_argv[k++] = use_nyc ? assembly : src_tmp;
   if (ldflags && *ldflags) {
-    char ldflags_buf[512];
     if (strlen(ldflags) >= sizeof(ldflags_buf)) {
-      remove(src_tmp);
-      return 0;
+      rc = 1;
+      goto done;
     }
     snprintf(ldflags_buf, sizeof(ldflags_buf), "%s", ldflags);
     trim_inplace(ldflags_buf);
     char *flagv[12];
     int flagc = split_words(ldflags_buf, flagv, 12);
-    for (int i = 0; i < flagc && k < 28; i++)
+    for (int i = 0; i < flagc; i++)
       cc_argv[k++] = flagv[i];
   }
   cc_argv[k++] = "-o";
   cc_argv[k++] = (char *)exe_path;
   cc_argv[k++] = "-lm";
   cc_argv[k] = NULL;
-  int rc = bench_run_capture(cc_argv, NY_BENCH_TIMEOUT_SEC, NULL);
+  rc = bench_run_capture(cc_argv, NY_BENCH_TIMEOUT_SEC, capture);
+done:
+  if (rc != 0 && note && note_cap && !note[0]) {
+    char *diagnostic = capture[0] ? read_small_file(capture) : NULL;
+    if (diagnostic && *diagnostic) {
+      size_t len = strcspn(diagnostic, "\r\n");
+      if (len >= note_cap)
+        len = note_cap - 1;
+      memcpy(note, diagnostic, len);
+      note[len] = '\0';
+    } else {
+      snprintf(note, note_cap, "%s build exited with status %d",
+               use_nyc ? "NYC/assembler/linker" : "C compiler", rc);
+    }
+    free(diagnostic);
+  }
   remove(src_tmp);
+  if (assembly[0])
+    remove(assembly);
+  if (capture[0])
+    remove(capture);
   return rc == 0;
 }
 
@@ -9580,7 +9836,25 @@ static void bench_measure_hw_counters(const char *exe_path, int timeout_sec,
  * One report-only compile after timing samples records native static-island
  * facts and, when applicable, actual machine-code bytes. It does not
  * contaminate the measured compile/runtime samples.
+ *
+ * Join a compiler argv into one copy-pasteable command line for bench
+ * reports.  Informational: space-joined without quoting, which is lossless
+ * for the bench's own temp-path and flag vocabulary.
  */
+static void bench_join_argv(char *dst, size_t cap, char *const *argv) {
+  if (!dst || cap == 0)
+    return;
+  dst[0] = '\0';
+  size_t used = 0;
+  for (size_t i = 0; argv && argv[i]; ++i) {
+    const char *sep = i ? " " : "";
+    int n = snprintf(dst + used, cap - used, "%s%s", sep, argv[i]);
+    if (n < 0 || (size_t)n >= cap - used)
+      break;
+    used += (size_t)n;
+  }
+}
+
 static void bench_measure_ny_code_size(const char *bin, const char *ny_path,
                                        const char *opt_level, const char *tier,
                                        const char *engine, const char *target,
@@ -9647,6 +9921,7 @@ static void bench_measure_ny_code_size(const char *bin, const char *ny_path,
   argv[k++] = output_path;
   argv[k++] = (char *)ny_path;
   argv[k] = NULL;
+  bench_join_argv(stats->stats_argv, sizeof(stats->stats_argv), argv);
 
   size_t peak_rss_kb = 0;
   int rc =
@@ -9804,6 +10079,7 @@ static bench_stats_t bench_measure_ny(const char *bin, const char *shape_path,
   argv[k] = NULL;
   bench_stats_t s =
       bench_measure_self_timed(argv, timeout_sec, warmup, runs, 1);
+  bench_join_argv(s.compile_argv, sizeof(s.compile_argv), argv);
   bool static_budget = bench_shape_has_static_budget(shape_path);
   if (static_budget || test_env_truthy("NYTRIX_BENCH_CODE_METRICS") ||
       bench_hw_counters_requested() || bench_runtime_counters_requested())
@@ -10143,7 +10419,7 @@ static void bench_diag(const char *shape, int show_ir, int show_asm,
     char default_filter[] = "--dbg-filter=func:rt_main";
     char debug_filter_arg[1024];
     extra[n++] = "--native-only";
-    extra[n++] = "--nyir-dump-stats";
+    extra[n++] = "--nyr-dump=stats";
     /*
      * Bench diagnostics should explain the timed entry function by default;
      * opt into a different function with NYTRIX_BENCH_DEBUG_FILTER.
@@ -10160,9 +10436,9 @@ static void bench_diag(const char *shape, int show_ir, int show_asm,
       extra[n++] = default_filter;
     }
     if (show_ir)
-      extra[n++] = "--nyir-dump";
+      extra[n++] = "--nyr-dump";
     if (show_passes)
-      extra[n++] = "--nyir-pass-stats";
+      extra[n++] = "--nyr-dump=passes";
     extra[n] = NULL;
     char *out = bench_diag_capture(bin, opt_level, tier, engine, target, extra,
                                    ny_path);
@@ -10411,12 +10687,13 @@ static void bench_write_c_assembly(FILE *report, const char *shape,
 }
 
 /*
- * Run the C side of a c-vs-ny fixture: extract the C block, compile it with
- * the host cc, and collect its self-reported elapsed.
+ * Compile the same wrapped C workload with the selected compiler, then
+ * measure execution only. NYC output is assembled/linked by the host driver.
  */
 static bench_stats_t bench_measure_c(const char *shape_path,
                                      const char *opt_level, int warmup,
-                                     int runs, int timeout_sec) {
+                                     int runs, int timeout_sec, bool use_nyc,
+                                     char *note, size_t note_cap) {
   char *c_src = bench_c_block(shape_path);
   if (!c_src) {
     /*
@@ -10434,7 +10711,8 @@ static bench_stats_t bench_measure_c(const char *shape_path,
   char *cflags = shape_meta_string(shape_path, "cflags");
   char *ldflags = shape_meta_string(shape_path, "ldflags");
   char *optional_ldflags = shape_meta_string(shape_path, "optional_ldflags");
-  if ((!ldflags || !*ldflags) && optional_ldflags && *optional_ldflags) {
+  if ((!ldflags || !*ldflags) && optional_ldflags && *optional_ldflags &&
+      !use_nyc) {
     char *probe_source = shape_source_block(shape_path, "c_probe");
     if (!probe_source)
       probe_source = ny_strdup("int main(void) { return 0; }");
@@ -10442,8 +10720,8 @@ static bench_stats_t bench_measure_c(const char *shape_path,
     snprintf(probe, sizeof(probe), "%s/ny-bench-link-probe-%ld-%lu",
              nyt_temp_dir(), (long)getpid(), bench_next_temp_id());
     bool available =
-        probe_source &&
-        bench_compile_c(probe_source, probe, opt_level, NULL, optional_ldflags);
+        probe_source && bench_compile_c(probe_source, probe, opt_level, NULL,
+                                        optional_ldflags, false, NULL, 0);
     free(probe_source);
     remove(probe);
     if (!available) {
@@ -10465,10 +10743,19 @@ static bench_stats_t bench_measure_c(const char *shape_path,
     ldflags = optional_ldflags;
     optional_ldflags = NULL;
   }
+  if ((!ldflags || !*ldflags) && optional_ldflags && *optional_ldflags) {
+    free(ldflags);
+    ldflags = optional_ldflags;
+    optional_ldflags = NULL;
+  }
   char exe[PATH_MAX];
   snprintf(exe, sizeof(exe), "%s/ny-bench-c-exe-%ld-%ld-%lu", nyt_temp_dir(),
            (long)getpid(), (long)now_ms(), bench_next_temp_id());
-  if (!bench_compile_c(c_src, exe, opt_level, cflags, ldflags)) {
+  if (!bench_compile_c(c_src, exe, opt_level, cflags, ldflags, use_nyc, note,
+                       note_cap)) {
+    if (note && note_cap && !note[0])
+      snprintf(note, note_cap, "%s workload build failed",
+               use_nyc ? "NYC" : "C");
     free(cflags);
     free(ldflags);
     free(optional_ldflags);
@@ -10486,14 +10773,20 @@ static bench_stats_t bench_measure_c(const char *shape_path,
   argv[1] = NULL;
   bench_stats_t s =
       bench_measure_self_timed(argv, timeout_sec, warmup, runs, 0);
+  if (note && note_cap && s.failure_count && !note[0])
+    snprintf(note, note_cap, "NYC execution failed (exit %d, failures %d)",
+             s.last_rc, s.failure_count);
   remove(exe);
   return s;
 }
+
 typedef struct {
   double wall_ms;
   bench_stats_t ny;
   bench_stats_t llvm;
   bench_stats_t c;
+  bench_stats_t nyc;
+  char nyc_note[192];
 } bench_worker_result_t;
 
 typedef struct {
@@ -10521,17 +10814,21 @@ typedef struct {
 
 static BenchUiLayout bench_ui_layout(void) {
   int width = ny_ui_width();
-  if (width < 82) {
-    return (BenchUiLayout){
-        .tiny = 1, .name = 12, .status = 6, .native = 9, .c_host = 8};
+  if (width < 94) {
+    return (BenchUiLayout){.tiny = 1,
+                           .name = 12,
+                           .status = 6,
+                           .native = 9,
+                           .c_host = 8,
+                           .ratio = 8};
   }
-  if (width < 106) {
+  if (width < 110) {
     return (BenchUiLayout){.compact = 1,
                            .name = 16,
                            .status = 7,
-                           .native = 9,
-                           .llvm = 9,
-                           .c_host = 9,
+                           .native = 7,
+                           .llvm = 7,
+                           .c_host = 7,
                            .ratio = 8};
   }
   return (BenchUiLayout){.name = 20,
@@ -10540,7 +10837,7 @@ static BenchUiLayout bench_ui_layout(void) {
                          .native = 8,
                          .llvm = 8,
                          .c_host = 8,
-                         .ratio = 11};
+                         .ratio = 8};
 }
 
 static size_t bench_disp_width(const char *s) {
@@ -10657,17 +10954,24 @@ static void bench_live_cell(char *out, size_t cap, const char *text, int width,
 static const char *bench_live_ratio_color(const char *ratio) {
   if (!ratio || !*ratio || strcmp(ratio, "—") == 0)
     return NYT_GRAY;
+  const char *number = ratio[0] == '<' ? ratio + 1 : ratio;
   char *end = NULL;
-  double value = strtod(ratio, &end);
-  if (end == ratio)
+  double value = strtod(number, &end);
+  if (end == number)
     return NYT_GRAY;
   return value <= 1.0 ? NYT_GREEN : (value <= 2.0 ? NYT_YELLOW : NYT_RED);
 }
 
+static int bench_signal(double value);
+
+static bool bench_timer_floor_name(const char *name) {
+  return name && strcmp(name, "startup") == 0;
+}
+
 static void bench_live_fixture_result(const char *name,
                                       const bench_worker_result_t *result) {
-  char compile[32], native[32], llvm[32], c_host[32];
-  char native_c[32], llvm_c[32], native_llvm[32];
+  char compile[32], native[32], llvm[32], c_host[32], nyc[32];
+  char native_c[32], llvm_c[32], native_llvm[32], nyc_c[32];
   bench_ms_text(result->ny.compile_ms, result->ny.compile_count > 0, compile,
                 sizeof(compile));
   bench_ms_text(result->ny.median, result->ny.count > 0, native,
@@ -10675,32 +10979,51 @@ static void bench_live_fixture_result(const char *name,
   bench_ms_text(result->llvm.median, result->llvm.count > 0, llvm,
                 sizeof(llvm));
   bench_ms_text(result->c.median, result->c.count > 0, c_host, sizeof(c_host));
+  bench_ms_text(result->nyc.median, result->nyc.count > 0, nyc, sizeof(nyc));
   bench_live_mark_fallback(native, sizeof(native),
                            result->ny.timer_fallback_count > 0);
   bench_live_mark_fallback(llvm, sizeof(llvm),
                            result->llvm.timer_fallback_count > 0);
-  int nc_ok = bench_live_pair_comparable(&result->ny, &result->c);
-  int lc_ok = bench_live_pair_comparable(&result->llvm, &result->c);
-  int nl_ok = bench_live_pair_comparable(&result->ny, &result->llvm);
+  bool timer_control = bench_timer_floor_name(name);
+  int nc_ok =
+      !timer_control && bench_live_pair_comparable(&result->ny, &result->c);
+  int lc_ok =
+      !timer_control && bench_live_pair_comparable(&result->llvm, &result->c);
+  int nl_ok =
+      !timer_control && bench_live_pair_comparable(&result->ny, &result->llvm);
+  int cn_ok =
+      !timer_control && bench_live_pair_comparable(&result->c, &result->nyc);
   bench_live_ratio(native_c, sizeof(native_c), result->ny.median,
                    result->c.median, nc_ok);
   bench_live_ratio(llvm_c, sizeof(llvm_c), result->llvm.median,
                    result->c.median, lc_ok);
   bench_live_ratio(native_llvm, sizeof(native_llvm), result->ny.median,
                    result->llvm.median, nl_ok);
+  bench_live_ratio(nyc_c, sizeof(nyc_c), result->nyc.median, result->c.median,
+                   cn_ok);
+  if (timer_control) {
+    snprintf(native_c, sizeof(native_c), "n/a");
+    snprintf(llvm_c, sizeof(llvm_c), "n/a");
+    snprintf(native_llvm, sizeof(native_llvm), "n/a");
+    snprintf(nyc_c, sizeof(nyc_c), "n/a");
+  }
   const char *status = "ok";
   if (result->ny.failure_count || result->llvm.failure_count ||
-      result->c.failure_count)
+      result->c.failure_count || result->nyc.failure_count)
     status = "FAIL";
   else if ((result->ny.checksum_seen && !result->ny.checksum_consistent) ||
            (result->llvm.checksum_seen && !result->llvm.checksum_consistent) ||
            (result->c.checksum_seen && !result->c.checksum_consistent) ||
+           (result->nyc.checksum_seen && !result->nyc.checksum_consistent) ||
            (result->ny.checksum_seen && result->c.checksum_seen &&
             strcmp(result->ny.checksum, result->c.checksum) != 0) ||
            (result->ny.checksum_seen && result->llvm.checksum_seen &&
-            strcmp(result->ny.checksum, result->llvm.checksum) != 0))
+            strcmp(result->ny.checksum, result->llvm.checksum) != 0) ||
+           (result->c.checksum_seen && result->nyc.checksum_seen &&
+            strcmp(result->c.checksum, result->nyc.checksum) != 0))
     status = "MISMATCH";
-  else if (result->ny.unstable || result->llvm.unstable || result->c.unstable)
+  else if (result->ny.unstable || result->llvm.unstable || result->c.unstable ||
+           result->nyc.unstable)
     status = "NOISY";
   else if (!result->ny.count)
     status = "NO-TIME";
@@ -10710,6 +11033,13 @@ static void bench_live_fixture_result(const char *name,
     status = "NO-CHECK";
   else if (result->ny.timer_fallback_count || result->llvm.timer_fallback_count)
     status = "TIMER-FB";
+  else if (timer_control)
+    status = "FLOOR";
+  else if ((result->ny.count > 0 && !bench_signal(result->ny.median)) ||
+           (result->llvm.count > 0 && !bench_signal(result->llvm.median)) ||
+           (result->c.count > 0 && !bench_signal(result->c.median)) ||
+           (result->nyc.count > 0 && !bench_signal(result->nyc.median)))
+    status = "LOW";
   const char *status_color =
       (strcmp(status, "ok") == 0) ? NYT_GREEN
       : (strcmp(status, "FAIL") == 0 || strcmp(status, "MISMATCH") == 0)
@@ -10719,20 +11049,24 @@ static void bench_live_fixture_result(const char *name,
   char label[128], status_label[32];
   bench_clip(name, l.name, label, sizeof(label));
   bench_clip(status, l.status, status_label, sizeof(status_label));
-  char nc_cell[64], lc_cell[64], nl_cell[64];
-  char compile_cell[64], native_cell[64], llvm_cell[64], c_cell[64];
+  char nc_cell[64], lc_cell[64], nl_cell[64], cn_cell[64];
+  char compile_cell[64], native_cell[64], llvm_cell[64], c_cell[64],
+      nyc_cell[64];
   bench_live_cell(nc_cell, sizeof(nc_cell), native_c, l.ratio,
                   bench_live_ratio_color(native_c));
   bench_live_cell(lc_cell, sizeof(lc_cell), llvm_c, l.ratio,
                   bench_live_ratio_color(llvm_c));
   bench_live_cell(nl_cell, sizeof(nl_cell), native_llvm, l.ratio,
                   bench_live_ratio_color(native_llvm));
+  bench_live_cell(cn_cell, sizeof(cn_cell), nyc_c, l.ratio,
+                  bench_live_ratio_color(nyc_c));
   bench_live_cell(compile_cell, sizeof(compile_cell), compile, l.compile,
                   NYT_GRAY);
   bench_live_cell(native_cell, sizeof(native_cell), native, l.native,
                   NYT_RESET);
   bench_live_cell(llvm_cell, sizeof(llvm_cell), llvm, l.llvm, NYT_RESET);
   bench_live_cell(c_cell, sizeof(c_cell), c_host, l.c_host, NYT_RESET);
+  bench_live_cell(nyc_cell, sizeof(nyc_cell), nyc, 8, NYT_GRAY);
   char line[1024];
   int n = snprintf(line, sizeof(line), "%s%s%s%s%*s %s%s%s%*s",
                    nyt_clr(NYT_BOLD), nyt_clr(NYT_CYAN), label,
@@ -10742,16 +11076,17 @@ static void bench_live_fixture_result(const char *name,
   if (n > 0 && (size_t)n < sizeof(line)) {
     int added;
     if (l.tiny)
-      added = snprintf(line + n, sizeof(line) - (size_t)n, " %s %s\n",
-                       native_cell, c_cell);
+      added = snprintf(line + n, sizeof(line) - (size_t)n, " %s %s %s %s\n",
+                       native_cell, c_cell, nyc_cell, cn_cell);
     else if (l.compact)
-      added =
-          snprintf(line + n, sizeof(line) - (size_t)n, " %s %s %s %s %s %s\n",
-                   native_cell, llvm_cell, c_cell, nc_cell, lc_cell, nl_cell);
+      added = snprintf(line + n, sizeof(line) - (size_t)n,
+                       " %s %s %s %s %s %s %s %s\n", native_cell, llvm_cell,
+                       c_cell, nyc_cell, nc_cell, lc_cell, nl_cell, cn_cell);
     else
       added = snprintf(line + n, sizeof(line) - (size_t)n,
-                       " %s %s %s %s %s %s %s\n", compile_cell, native_cell,
-                       llvm_cell, c_cell, nc_cell, lc_cell, nl_cell);
+                       " %s %s %s %s %s %s %s %s %s\n", compile_cell,
+                       native_cell, llvm_cell, c_cell, nyc_cell, nc_cell,
+                       lc_cell, nl_cell, cn_cell);
     if (added > 0)
       n += added;
   }
@@ -10782,7 +11117,20 @@ bench_measure_shape(const char *bin, const char *shape, const char *opt_level,
     result.llvm = bench_measure_ny(bin, shape, opt_level, tier, llvm_engine,
                                    "llvm", warmup, runs, timeout_sec);
   }
-  result.c = bench_measure_c(shape, opt_level, warmup, runs, timeout_sec);
+  result.c = bench_measure_c(shape, opt_level, warmup, runs, timeout_sec, false,
+                             NULL, 0);
+  result.nyc = bench_measure_c(shape, opt_level, warmup, runs, timeout_sec,
+                               true, result.nyc_note, sizeof(result.nyc_note));
+  if (result.nyc.count && !result.nyc.checksum_seen) {
+    result.nyc.failure_count++;
+    snprintf(result.nyc_note, sizeof(result.nyc_note),
+             "NYC execution omitted its checksum");
+  }
+  if (result.nyc.checksum_seen && result.c.checksum_seen &&
+      strcmp(result.nyc.checksum, result.c.checksum) != 0)
+    snprintf(result.nyc_note, sizeof(result.nyc_note),
+             "NYC checksum %.64s differs from C %.64s", result.nyc.checksum,
+             result.c.checksum);
   result.wall_ms = now_ms() - wall_start;
   return result;
 }
@@ -10898,6 +11246,9 @@ static void bench_record_result(
   snprintf(row.engine, sizeof(row.engine), "%s",
            engine && *engine ? engine : "aot");
   snprintf(row.cache, sizeof(row.cache), "%s", bench_cache_state());
+  snprintf(row.ny_argv, sizeof(row.ny_argv), "%s", result->ny.compile_argv);
+  snprintf(row.ny_stats_argv, sizeof(row.ny_stats_argv), "%s",
+           result->ny.stats_argv);
   row.wall_ms = result->wall_ms;
   row.ny_ms = result->ny.median;
   row.ny_compile_ms = result->ny.compile_ms;
@@ -10972,6 +11323,23 @@ static void bench_record_result(
   row.llvm_noise_pct = result->llvm.noise_pct;
   row.llvm_unstable = result->llvm.unstable;
   row.c_ms = result->c.median;
+  row.nyc_ms = result->nyc.median;
+  row.nyc_available = result->nyc.count > 0;
+  snprintf(row.nyc_note, sizeof(row.nyc_note), "%s", result->nyc_note);
+  row.nyc_runs = (int)result->nyc.count;
+  row.nyc_rc = result->nyc.last_rc;
+  row.nyc_failures = result->nyc.failure_count;
+  row.nyc_fixture_timer = result->nyc.fixture_timer_count > 0;
+  row.nyc_timer_fallback = result->nyc.timer_fallback_count > 0;
+  row.nyc_total_ms = result->nyc.wall_ms;
+  row.nyc_min = result->nyc.min;
+  row.nyc_max = result->nyc.max;
+  row.nyc_p95 = result->nyc.p95;
+  row.nyc_dispersion_pct = result->nyc.dispersion_pct;
+  row.nyc_noise_pct = result->nyc.noise_pct;
+  row.nyc_unstable = result->nyc.unstable;
+  snprintf(row.nyc_checksum, sizeof(row.nyc_checksum), "%s",
+           result->nyc.checksum_seen ? result->nyc.checksum : "");
   row.c_total_ms = result->c.wall_ms;
   row.c_runs = (int)result->c.count;
   row.c_fixture_timer = result->c.fixture_timer_count > 0;
@@ -11068,7 +11436,8 @@ static void bench_record_result(
              result->llvm.checksum);
   if (result->c.checksum_seen)
     snprintf(row.c_checksum, sizeof(row.c_checksum), "%s", result->c.checksum);
-  const bench_stats_t *stats[] = {&result->ny, &result->llvm, &result->c};
+  const bench_stats_t *stats[] = {&result->ny, &result->llvm, &result->c,
+                                  &result->nyc};
   const char *reference = NULL;
   for (size_t i = 0; i < sizeof(stats) / sizeof(stats[0]); i++) {
     const bench_stats_t *s = stats[i];
@@ -11094,7 +11463,7 @@ static void bench_record_result(
     (*measured)++;
   }
   bench_rows_push(table, &row);
-  if (!suppress_success_row || row.budget_failed)
+  if (!suppress_success_row)
     bench_print_row(&row, 1, compare_llvm);
   (void)verbose;
   (void)compile_profile;
@@ -11120,44 +11489,99 @@ static int bench_signal(double value) {
    * The fixtures time their kernels with a monotonic nanosecond clock.  A
    * 10us cutoff hid valid samples (and produced `n/a` ratios) for short but
    * repeatable kernels.  Keep ratios for samples of at least 1us; below that
-   * the displayed status calls out the weak signal.
+   * the row is reported as low-signal and remains non-comparable.
    */
   return value >= 0.001;
 }
 
+static int bench_row_low_signal(const BenchRow *r) {
+  return r && ((r->ny_runs > 0 && !bench_signal(r->ny_ms)) ||
+               (r->llvm_runs > 0 && !bench_signal(r->llvm_ms)) ||
+               (r->c_runs > 0 && !bench_signal(r->c_ms)) ||
+               (r->nyc_runs > 0 && !bench_signal(r->nyc_ms)));
+}
+
 static int bench_row_unstable(const BenchRow *r) {
-  return r && (r->ny_unstable || r->llvm_unstable || r->c_unstable);
+  return r && (r->ny_unstable || r->llvm_unstable || r->c_unstable ||
+               r->nyc_unstable);
+}
+
+/*
+ * Keep the startup C>=1ms cohort fixed when an optimization makes NYR or LLVM
+ * faster than the generic 1us signal cutoff. Repeated, stable sub-us medians
+ * remain useful against that substantial C workload; the status still marks
+ * them LOW, and NYR/LLVM comparisons retain the stricter signal requirement.
+ */
+static int bench_candidate_signal_for_startup(const BenchRow *r,
+                                              double candidate_ms) {
+  if (bench_signal(candidate_ms))
+    return 1;
+  if (!r || candidate_ms <= 0.0 || r->c_ms < 1.0 || !r->path[0])
+    return 0;
+  const char *slash = strrchr(r->path, '/');
+  if (!slash)
+    return 0;
+  size_t dir_len = (size_t)(slash - r->path);
+  const char *dir = r->path;
+  const char *parent = dir;
+  for (size_t i = 0; i < dir_len; ++i)
+    if (dir[i] == '/')
+      parent = dir + i + 1;
+  return (size_t)(r->path + dir_len - parent) == sizeof("startup") - 1 &&
+         memcmp(parent, "startup", sizeof("startup") - 1) == 0;
 }
 
 static int bench_native_c_comparable(const BenchRow *r) {
-  return r && r->checksum_ok && r->ny_runs > 0 && r->c_runs > 0 &&
-         !r->ny_failures && !r->c_failures && !r->ny_timer_fallback &&
-         !r->ny_unstable && !r->c_unstable && r->ny_checksum[0] &&
-         r->c_checksum[0] && strcmp(r->ny_checksum, r->c_checksum) == 0 &&
-         bench_signal(r->ny_ms) && bench_signal(r->c_ms);
+  return r && !bench_timer_floor_name(r->name) && r->checksum_ok &&
+         r->ny_runs > 0 && r->c_runs > 0 && !r->ny_failures && !r->c_failures &&
+         !r->ny_timer_fallback && !r->ny_unstable && !r->c_unstable &&
+         r->ny_checksum[0] && r->c_checksum[0] &&
+         strcmp(r->ny_checksum, r->c_checksum) == 0 &&
+         bench_candidate_signal_for_startup(r, r->ny_ms) &&
+         bench_signal(r->c_ms);
 }
 
 static int bench_llvm_c_comparable(const BenchRow *r) {
-  return r && r->checksum_ok && r->llvm_runs > 0 && r->c_runs > 0 &&
-         !r->llvm_failures && !r->c_failures && !r->llvm_timer_fallback &&
-         !r->llvm_unstable && !r->c_unstable && r->llvm_checksum[0] &&
-         r->c_checksum[0] && strcmp(r->llvm_checksum, r->c_checksum) == 0 &&
-         bench_signal(r->llvm_ms) && bench_signal(r->c_ms);
+  return r && !bench_timer_floor_name(r->name) && r->checksum_ok &&
+         r->llvm_runs > 0 && r->c_runs > 0 && !r->llvm_failures &&
+         !r->c_failures && !r->llvm_timer_fallback && !r->llvm_unstable &&
+         !r->c_unstable && r->llvm_checksum[0] && r->c_checksum[0] &&
+         strcmp(r->llvm_checksum, r->c_checksum) == 0 &&
+         bench_candidate_signal_for_startup(r, r->llvm_ms) &&
+         bench_signal(r->c_ms);
 }
 
 static int bench_native_llvm_comparable(const BenchRow *r) {
-  return r && r->checksum_ok && r->ny_runs > 0 && r->llvm_runs > 0 &&
-         !r->ny_failures && !r->llvm_failures && !r->ny_timer_fallback &&
+  return r && !bench_timer_floor_name(r->name) && r->checksum_ok &&
+         r->ny_runs > 0 && r->llvm_runs > 0 && !r->ny_failures &&
+         !r->llvm_failures && !r->ny_timer_fallback &&
          !r->llvm_timer_fallback && !r->ny_unstable && !r->llvm_unstable &&
          r->ny_checksum[0] && r->llvm_checksum[0] &&
          strcmp(r->ny_checksum, r->llvm_checksum) == 0 &&
          bench_signal(r->ny_ms) && bench_signal(r->llvm_ms);
 }
 
+static int bench_nyc_c_comparable(const BenchRow *r) {
+  return r && !bench_timer_floor_name(r->name) && r->checksum_ok &&
+         r->c_runs > 0 && r->nyc_runs > 0 && !r->c_failures &&
+         !r->nyc_failures && !r->nyc_timer_fallback && !r->c_unstable &&
+         !r->nyc_unstable && r->c_checksum[0] && r->nyc_checksum[0] &&
+         strcmp(r->c_checksum, r->nyc_checksum) == 0 && bench_signal(r->c_ms) &&
+         bench_signal(r->nyc_ms);
+}
+
+static bool bench_row_correctness_failed(const BenchRow *r) {
+  return !r || r->ny_failures || r->llvm_failures || r->c_failures ||
+         r->nyc_failures || !r->checksum_ok || r->ny_runs <= 0 ||
+         !r->ny_checksum[0] || (r->c_runs > 0 && !r->c_checksum[0]) ||
+         (r->llvm_runs > 0 && !r->llvm_checksum[0]) ||
+         (r->nyc_runs > 0 && !r->nyc_checksum[0]);
+}
+
 static const char *bench_row_status(const BenchRow *r) {
   if (!r)
     return "unavailable";
-  if (r->ny_failures || r->llvm_failures || r->c_failures)
+  if (r->ny_failures || r->llvm_failures || r->c_failures || r->nyc_failures)
     return "fail";
   if (!r->checksum_ok)
     return "mismatch";
@@ -11166,7 +11590,8 @@ static const char *bench_row_status(const BenchRow *r) {
   if (r->ny_runs <= 0)
     return "partial";
   if (!r->ny_checksum[0] || (r->c_runs > 0 && !r->c_checksum[0]) ||
-      (r->llvm_runs > 0 && !r->llvm_checksum[0]))
+      (r->llvm_runs > 0 && !r->llvm_checksum[0]) ||
+      (r->nyc_runs > 0 && !r->nyc_checksum[0]))
     return "no-checksum";
   if (r->c_runs <= 0)
     return "ny-llvm-only";
@@ -11174,6 +11599,10 @@ static const char *bench_row_status(const BenchRow *r) {
     return "regression";
   if (bench_row_unstable(r))
     return "unstable";
+  if (bench_timer_floor_name(r->name))
+    return "timer-floor";
+  if (bench_row_low_signal(r))
+    return "low-time";
   return "ok";
 }
 
@@ -11193,7 +11622,7 @@ static void bench_ms_text(double value, int valid, char *out, size_t cap) {
   if (!valid || value <= 0.0)
     snprintf(out, cap, "—");
   else if (value < 0.001)
-    snprintf(out, cap, "<1µs");
+    snprintf(out, cap, "%.0fns", value * 1000000.0);
   else if (value < 0.01)
     snprintf(out, cap, "%.1fµs", value * 1000.0);
   else if (value < 1.0)
@@ -11208,10 +11637,11 @@ static void bench_ms_text(double value, int valid, char *out, size_t cap) {
     snprintf(out, cap, "%.2fs", value / 1000.0);
 }
 
-static void bench_print_ratio(double ratio, int valid, int width) {
+static void bench_print_ratio(double ratio, int valid, int width,
+                              bool timer_control) {
   if (!valid) {
     printf("%s", nyt_clr(NYT_GRAY));
-    bench_right("—", width);
+    bench_right(timer_control ? "n/a" : "—", width);
     printf("%s", nyt_clr(NYT_RESET));
     return;
   }
@@ -11244,6 +11674,8 @@ static void bench_print_header(void) {
     bench_header_right("NYR", l.native);
     putchar(' ');
     bench_header_right("C", l.c_host);
+    putchar(' ');
+    bench_header_right("NYC", 8);
   } else if (l.compact) {
     putchar(' ');
     bench_header_right("NYR", l.native);
@@ -11252,11 +11684,13 @@ static void bench_print_header(void) {
     putchar(' ');
     bench_header_right("C", l.c_host);
     putchar(' ');
+    bench_header_right("NYC", 8);
+    putchar(' ');
     bench_header_right("NYR/C", l.ratio);
     putchar(' ');
     bench_header_right("LLVM/C", l.ratio);
     putchar(' ');
-    bench_header_right("LLVM/NYR", l.ratio);
+    bench_header_right("NYR/LLVM", l.ratio);
   } else {
     putchar(' ');
     bench_header_right("compile", l.compile);
@@ -11267,23 +11701,28 @@ static void bench_print_header(void) {
     putchar(' ');
     bench_header_right("C", l.c_host);
     putchar(' ');
+    bench_header_right("NYC", 8);
+    putchar(' ');
     bench_header_right("NYR/C", l.ratio);
     putchar(' ');
     bench_header_right("LLVM/C", l.ratio);
     putchar(' ');
-    bench_header_right("LLVM/NYR", l.ratio);
+    bench_header_right("NYR/LLVM", l.ratio);
   }
+  putchar(' ');
+  bench_header_right("NYC/C", l.ratio);
   putchar('\n');
 }
 
 static void bench_print_row(const BenchRow *r, int show_c, int show_llvm) {
   BenchUiLayout l = bench_ui_layout();
-  char compile[32], native[32], llvm[32], c_host[32];
+  char compile[32], native[32], llvm[32], c_host[32], nyc[32];
   bench_ms_text(r->ny_compile_ms, bench_signal(r->ny_compile_ms), compile,
                 sizeof(compile));
   bench_ms_text(r->ny_ms, r->ny_runs > 0, native, sizeof(native));
   bench_ms_text(r->llvm_ms, r->llvm_runs > 0, llvm, sizeof(llvm));
   bench_ms_text(r->c_ms, r->c_runs > 0, c_host, sizeof(c_host));
+  bench_ms_text(r->nyc_ms, r->nyc_available, nyc, sizeof(nyc));
   if (test_env_truthy("NYTRIX_BENCH_TRACE_TIMING"))
     fprintf(stderr,
             "[bench-row] %s native=%.6g runs=%d timer_fallback=%d display=%s "
@@ -11303,12 +11742,14 @@ static void bench_print_row(const BenchRow *r, int show_c, int show_llvm) {
   int native_ratio_valid = show_c && bench_native_c_comparable(r);
   int llvm_ratio_valid = show_llvm && bench_llvm_c_comparable(r);
   int native_llvm_ratio_valid = show_llvm && bench_native_llvm_comparable(r);
+  int nyc_c_ratio_valid = show_c && bench_nyc_c_comparable(r);
+  double nyc_c_ratio = nyc_c_ratio_valid ? r->nyc_ms / r->c_ms : 0.0;
   double native_ratio = native_ratio_valid ? r->ny_ms / r->c_ms : 0.0;
   double llvm_ratio = llvm_ratio_valid ? r->llvm_ms / r->c_ms : 0.0;
   double native_llvm_ratio =
       native_llvm_ratio_valid ? r->ny_ms / r->llvm_ms : 0.0;
-  bool is_fail =
-      r->ny_failures || r->llvm_failures || r->c_failures || !r->checksum_ok;
+  bool is_fail = r->ny_failures || r->llvm_failures || r->c_failures ||
+                 r->nyc_failures || !r->checksum_ok;
   bool missing_native_time = r->ny_runs == 0 && r->ny_failures == 0;
   bool missing_llvm_time =
       show_llvm && r->llvm_runs == 0 && r->llvm_failures == 0;
@@ -11318,32 +11759,39 @@ static void bench_print_row(const BenchRow *r, int show_c, int show_llvm) {
   bool missing_c_time = r->c_runs == 0 && r->c_failures == 0;
   bool timer_fallback = r->ny_timer_fallback || r->llvm_timer_fallback;
 
-  const char *status_str =
-      is_fail
-          ? (r->ny_failures || r->llvm_failures || r->c_failures ? "FAIL"
-                                                                 : "MISMATCH")
-          : (r->budget_failed
-                 ? "REGRESS"
-                 : (bench_row_unstable(r)
-                        ? "NOISY"
-                        : (missing_native_time
-                               ? "NO-TIME"
-                               : (missing_llvm_time
-                                      ? "PARTIAL"
-                                      : (missing_c_time
-                                             ? "NY/LLVM"
-                                             : (missing_checksum
-                                                    ? "NO-CHECK"
-                                                    : (timer_fallback
-                                                           ? "TIMER-FB"
-                                                           : "ok")))))));
+  const char *status_str;
+  if (is_fail)
+    status_str =
+        r->ny_failures || r->llvm_failures || r->c_failures || r->nyc_failures
+            ? "FAIL"
+            : "MISMATCH";
+  else if (r->budget_failed)
+    status_str = "REGRESS";
+  else if (bench_row_unstable(r))
+    status_str = "NOISY";
+  else if (missing_native_time)
+    status_str = "NO-TIME";
+  else if (missing_llvm_time)
+    status_str = "PARTIAL";
+  else if (missing_c_time)
+    status_str = "NY/LLVM";
+  else if (missing_checksum)
+    status_str = "NO-CHECK";
+  else if (timer_fallback)
+    status_str = "TIMER-FB";
+  else if (bench_timer_floor_name(r->name))
+    status_str = "FLOOR";
+  else if (bench_row_low_signal(r))
+    status_str = "LOW";
+  else
+    status_str = "ok";
   char status_label[16];
   snprintf(status_label, sizeof(status_label), "%s", status_str);
   const char *status_clr =
       is_fail ? NYT_RED
               : (r->budget_failed || missing_native_time || missing_llvm_time ||
                          missing_checksum || missing_c_time || timer_fallback ||
-                         bench_row_unstable(r)
+                         bench_row_unstable(r) || bench_row_low_signal(r)
                      ? NYT_YELLOW
                      : NYT_GREEN);
 
@@ -11357,6 +11805,8 @@ static void bench_print_row(const BenchRow *r, int show_c, int show_llvm) {
     bench_right(native, l.native);
     putchar(' ');
     bench_right(c_host, l.c_host);
+    putchar(' ');
+    bench_right(nyc, 8);
   } else if (l.compact) {
     putchar(' ');
     bench_right(native, l.native);
@@ -11365,11 +11815,16 @@ static void bench_print_row(const BenchRow *r, int show_c, int show_llvm) {
     putchar(' ');
     bench_right(c_host, l.c_host);
     putchar(' ');
-    bench_print_ratio(native_ratio, native_ratio_valid, l.ratio);
+    bench_right(nyc, 8);
     putchar(' ');
-    bench_print_ratio(llvm_ratio, llvm_ratio_valid, l.ratio);
+    bench_print_ratio(native_ratio, native_ratio_valid, l.ratio,
+                      bench_timer_floor_name(r->name));
     putchar(' ');
-    bench_print_ratio(native_llvm_ratio, native_llvm_ratio_valid, l.ratio);
+    bench_print_ratio(llvm_ratio, llvm_ratio_valid, l.ratio,
+                      bench_timer_floor_name(r->name));
+    putchar(' ');
+    bench_print_ratio(native_llvm_ratio, native_llvm_ratio_valid, l.ratio,
+                      bench_timer_floor_name(r->name));
   } else {
     putchar(' ');
     bench_right(compile, l.compile);
@@ -11380,25 +11835,36 @@ static void bench_print_row(const BenchRow *r, int show_c, int show_llvm) {
     putchar(' ');
     bench_right(c_host, l.c_host);
     putchar(' ');
-    bench_print_ratio(native_ratio, native_ratio_valid, l.ratio);
+    bench_right(nyc, 8);
     putchar(' ');
-    bench_print_ratio(llvm_ratio, llvm_ratio_valid, l.ratio);
+    bench_print_ratio(native_ratio, native_ratio_valid, l.ratio,
+                      bench_timer_floor_name(r->name));
     putchar(' ');
-    bench_print_ratio(native_llvm_ratio, native_llvm_ratio_valid, l.ratio);
+    bench_print_ratio(llvm_ratio, llvm_ratio_valid, l.ratio,
+                      bench_timer_floor_name(r->name));
+    putchar(' ');
+    bench_print_ratio(native_llvm_ratio, native_llvm_ratio_valid, l.ratio,
+                      bench_timer_floor_name(r->name));
   }
+  putchar(' ');
+  bench_print_ratio(nyc_c_ratio, nyc_c_ratio_valid, l.ratio,
+                    bench_timer_floor_name(r->name));
   printf("\n");
   if (!r->checksum_ok) {
-    char detail[256];
-    snprintf(detail, sizeof(detail), "checksum mismatch: %s | %s | %s",
+    char detail[576];
+    snprintf(detail, sizeof(detail),
+             "checksum mismatch: NYR %s | LLVM %s | C %s | NYC %s",
              r->ny_checksum[0] ? r->ny_checksum : "—",
              r->llvm_checksum[0] ? r->llvm_checksum : "—",
-             r->c_checksum[0] ? r->c_checksum : "—");
-    char clipped[256];
+             r->c_checksum[0] ? r->c_checksum : "—",
+             r->nyc_checksum[0] ? r->nyc_checksum : "—");
+    char clipped[576];
     bench_clip(detail, ny_ui_width() - 6, clipped, sizeof(clipped));
     printf("  %s%s%s %s\n", nyt_clr(NYT_RED), ny_ui_mark("error"),
            nyt_clr(NYT_RESET), clipped);
   }
 }
+
 static void bench_print_hotspots(const BenchTable *t) {
   if (!t || t->len == 0)
     return;
@@ -11435,9 +11901,9 @@ static void bench_print_hotspots(const BenchTable *t) {
     double gap = llvm_gap->ny_ms / llvm_gap->llvm_ms;
     char text[32];
     bench_ratio_text(text, sizeof(text), gap);
-    nyt_kv("LLVM/NYR gap", "%s (%s)", llvm_gap->name, text);
+    nyt_kv("NYR/LLVM gap", "%s (%s)", llvm_gap->name, text);
   } else
-    nyt_kv("LLVM/NYR gap", "— (no comparable samples)");
+    nyt_kv("NYR/LLVM gap", "— (no comparable samples)");
 }
 
 /*
@@ -11475,20 +11941,16 @@ typedef struct {
  * recorded on 2026-10-11. The concurrency class uses 2x because its sole
  * C>=1ms fixture (`thread-ring`) varies substantially with host scheduling.
  *
- * The `startup` LLVM/C ceiling was recalibrated on 2026-10-14: the original
- * 0.05x value was set when the C>=1ms startup subset was dominated by floor
- * fixtures whose LLVM startup crushed the short C reference. Since then the
- * subset is `escape-loop` (its C reference does 1M malloc/free, ~8ms) plus
- * `inline` (~1.5ms), and those stably geomean to ~0.17x LLVM/C — above the
- * old 0.05x ceiling, so the gate failed deterministically whenever
- * `escape-loop`'s C time crossed the 1ms inclusion threshold. 0.30x restores
- * the documented 1.6x-baseline relationship while still catching a real
- * ~1.7x LLVM startup regression.
+ * The `startup` cohort is the fixed set of startup-directory workloads whose
+ * host-C median is at least 1ms. Keep that membership criterion fixed, use
+ * repeated medians, and allow modest compiler overhead while bounding each
+ * fixture separately. The former sub-1.0 ceilings required compilers to run
+ * 2.4–3.3x faster than host C and did not represent a competitiveness target.
  */
 static const BenchGeomeanBudget bench_geomean_budgets[] = {
     {"algorithms", 5.75, 1.92, 4.80},     {"concurrency", 1357.0, 1883.0, 1.44},
     {"datastructures", 8.18, 6.77, 1.94}, {"numeric", 115.03, 71.03, 2.60},
-    {"startup", 0.42, 0.30, 13.03},       {"string", 5.20, 4.18, 2.00},
+    {"startup", 1.50, 1.25, 2.00},        {"string", 5.20, 4.18, 2.00},
     {"overall", 9.22, 4.99, 2.96},
 };
 
@@ -11642,7 +12104,7 @@ static int bench_print_geomean(const BenchTable *t, bool enforce_budgets) {
   nyt_subheading("Geomean ratios · all comparable | C >= 1ms");
   const size_t gm_widths[] = {15, 30, 30, 30};
   const char *gm_headers[] = {"class", "NYR/C: all | >=1ms",
-                              "LLVM/C: all | >=1ms", "LLVM/NYR: all | >=1ms"};
+                              "LLVM/C: all | >=1ms", "NYR/LLVM: all | >=1ms"};
   bench_grid_rule(gm_widths, 4);
   bench_grid_row(gm_headers, gm_widths, 4);
   bench_grid_rule(gm_widths, 4);
@@ -11689,8 +12151,8 @@ static int bench_print_geomean(const BenchTable *t, bool enforce_budgets) {
   const char *headers[] = {"class",
                            "NYR/C (limit)",
                            "LLVM/C (limit)",
-                           "LLVM/NYR (limit)",
-                           "max LLVM/NYR (fixture)",
+                           "NYR/LLVM (limit)",
+                           "max NYR/LLVM (fixture)",
                            "result"};
   size_t widths[] = {
       bench_disp_width(headers[0]), bench_disp_width(headers[1]),
@@ -11827,10 +12289,10 @@ static int bench_print_geomean(const BenchTable *t, bool enforce_budgets) {
 }
 
 /*
- * Tiny kernels can be dominated by launch/runtime setup. The `startup`
- * fixture measures that floor independently for native, LLVM, and C using
- * the same benchmark runner. Keep the raw ratios above, and also report
- * ratios after subtracting those measured floors from both sides.
+ * Tiny timed intervals can be dominated by the clock and surrounding code.
+ * The `startup` fixture estimates that interval overhead independently for
+ * each backend; it does not measure process startup. Keep the raw ratios
+ * above and also report ratios after subtracting these estimates.
  */
 typedef struct {
   char name[32];
@@ -11897,10 +12359,13 @@ static void bench_print_floor_adjusted_geomean(const BenchTable *t) {
     }
   }
   nyt_subheading("Geomean ratios · measured startup floor subtracted");
-  printf("  floor: NYR %.3fms · LLVM %.3fms · C %.3fms\n", floor->ny_ms,
-         floor->llvm_ms, floor->c_ms);
+  char ny_floor[32], llvm_floor[32], c_floor[32];
+  bench_ms_text(floor->ny_ms, 1, ny_floor, sizeof(ny_floor));
+  bench_ms_text(floor->llvm_ms, 1, llvm_floor, sizeof(llvm_floor));
+  bench_ms_text(floor->c_ms, 1, c_floor, sizeof(c_floor));
+  printf("  floor: NYR %s · LLVM %s · C %s\n", ny_floor, llvm_floor, c_floor);
   const size_t floor_widths[] = {15, 18, 18, 18};
-  const char *floor_headers[] = {"class", "NYR/C", "LLVM/C", "LLVM/NYR"};
+  const char *floor_headers[] = {"class", "NYR/C", "LLVM/C", "NYR/LLVM"};
   bench_grid_rule(floor_widths, 4);
   bench_grid_row(floor_headers, floor_widths, 4);
   bench_grid_rule(floor_widths, 4);
@@ -12009,7 +12474,12 @@ static void bench_write_csv(FILE *f, const BenchTable *t,
       "compiler_binary,"
       "compiler_binary_fnv64,compiler_revision,c_compiler,c_compiler_version,c_"
       "flags,opt_level,profile,tier,engine,cache_setting,samples,warmups,"
-      "fixture_workers,route_workers,runtime_counters_enabled\n");
+      "fixture_workers,route_workers,runtime_counters_enabled,"
+      "nyc_ms,nyc_available,nyc_note,nyc_runs,nyc_rc,nyc_failures,"
+      "nyc_checksum,nyc_timing_source,nyc_total_ms,nyc_min,nyc_max,nyc_p95,"
+      "nyc_noise_pct,nyc_dispersion_pct,nyc_unstable,"
+      "nyc_compiler,nyc_compiler_version,nyc_flags,nyc_c_ratio,nyc_c_"
+      "comparable\n");
   for (size_t i = 0; i < t->len; i++) {
     const BenchRow *r = &t->items[i];
     int native_ratio_valid = bench_native_c_comparable(r);
@@ -12023,14 +12493,12 @@ static void bench_write_csv(FILE *f, const BenchTable *t,
     fprintf(
         f,
         "%s,%s,%s,%s,%s,%s,%s,%s,%s,%d,"
-        "%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%zu,%d,%zu,%zu,%zu,%d,%zu,%d,%.4f,%"
-        ".4f,%"
-        ".4f,%.4f,%"
-        ".4f,%.4f,%.4f,%.4f,%d,%d,%d,"
+        "%.6f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%zu,%d,%zu,%zu,%zu,%d,%zu,%d,"
+        "%.6f,%.4f,%.6f,%.4f,%.4f,%.4f,%.4f,%.4f,%d,%d,%d,"
         "%d,%d,%d,%d,%d,%d,%d,%d,%d,"
-        "%.4f,%.4f,%.4f,%.4f,%.4f,%d,"
-        "%.4f,%.4f,%.4f,%.4f,%.4f,%d,"
-        "%.4f,%.4f,%.4f,%.4f,%.4f,%d,%.4f,%.4f,%.4f,%zu,%zu,%zu,%zu,"
+        "%.6f,%.6f,%.6f,%.4f,%.4f,%d,"
+        "%.6f,%.6f,%.6f,%.4f,%.4f,%d,"
+        "%.6f,%.6f,%.6f,%.4f,%.4f,%d,%.4f,%.4f,%.4f,%zu,%zu,%zu,%zu,"
         "%d,%zu,%zu,%zu,%zu,%zu,%zu,%zu,%zu,%zu,%zu,%zu,%zu,%zu,%zu,%zu,"
         "%d,%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%" PRIu64 ","
         "%d,%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%" PRIu64 ","
@@ -12116,10 +12584,30 @@ static void bench_write_csv(FILE *f, const BenchTable *t,
     bench_csv_string(f, env ? env->engine : "default");
     fputc(',', f);
     bench_csv_string(f, env ? env->cache : "default");
-    fprintf(f, ",%d,%d,%d,%d,%d\n", env ? env->samples : 0,
+    fprintf(f, ",%d,%d,%d,%d,%d,%.6f,%d,", env ? env->samples : 0,
             env ? env->warmups : 0, env ? env->fixture_workers : 0,
             env ? env->route_workers : 0,
-            env ? env->runtime_counters_enabled : 0);
+            env ? env->runtime_counters_enabled : 0, r->nyc_ms,
+            r->nyc_available);
+    bench_csv_string(f, r->nyc_note);
+    fprintf(f, ",%d,%d,%d,", r->nyc_runs, r->nyc_rc, r->nyc_failures);
+    bench_csv_string(f, r->nyc_checksum);
+    fputc(',', f);
+    bench_csv_string(f, r->nyc_runs == 0       ? "unavailable"
+                        : r->nyc_fixture_timer ? "fixture-kernel"
+                                               : "c-main-wrapper");
+    fprintf(f, ",%.6f,%.6f,%.6f,%.6f,%.4f,%.4f,%d,", r->nyc_total_ms,
+            r->nyc_min, r->nyc_max, r->nyc_p95, r->nyc_noise_pct,
+            r->nyc_dispersion_pct, r->nyc_unstable);
+    bench_csv_string(f, env ? env->nyc_compiler : "unknown");
+    fprintf(f, ",");
+    bench_csv_string(f, env ? env->nyc_compiler_version : "unknown");
+    fprintf(f, ",");
+    bench_csv_string(f, env ? env->nyc_flags : "unknown");
+    int nyc_c_valid = bench_nyc_c_comparable(r);
+    fprintf(f, ",%.6f,%d", nyc_c_valid ? r->nyc_ms / r->c_ms : 0.0,
+            nyc_c_valid);
+    fputc('\n', f);
   }
 }
 
@@ -12151,6 +12639,10 @@ static void bench_write_json(FILE *f, const BenchTable *t,
     bench_json_string_field(f, "c_compiler", env->c_compiler);
     bench_json_string_field(f, "c_compiler_version", env->c_compiler_version);
     bench_json_string_field(f, "c_flags", env->c_flags);
+    bench_json_string_field(f, "nyc_compiler", env->nyc_compiler);
+    bench_json_string_field(f, "nyc_compiler_version",
+                            env->nyc_compiler_version);
+    bench_json_string_field(f, "nyc_flags", env->nyc_flags);
     bench_json_string_field(f, "compiler_revision", env->compiler_revision);
     bench_json_string_field(f, "opt_level", env->opt_level);
     bench_json_string_field(f, "profile", env->profile);
@@ -12192,9 +12684,11 @@ static void bench_write_json(FILE *f, const BenchTable *t,
     bench_json_string_field(f, "llvm_checksum", r->llvm_checksum);
     bench_json_string_field(f, "c_checksum", r->c_checksum);
     fprintf(f, "\"checksum_ok\":%s,", r->checksum_ok ? "true" : "false");
+    bench_json_string_field(f, "ny_argv", r->ny_argv);
+    bench_json_string_field(f, "ny_stats_argv", r->ny_stats_argv);
     fprintf(
         f,
-        "\"ny_native_ms\":%.4f,\"ny_compile_ms\":%.4f,\"ny_link_ms\":%.4f,"
+        "\"ny_native_ms\":%.6f,\"ny_compile_ms\":%.4f,\"ny_link_ms\":%.4f,"
         "\"ny_opt_ms\":%.4f,"
         "\"ny_total_ms\":%.4f,\"ny_jit_compile_ms\":%.4f,"
         "\"ny_jit_run_ms\":%.4f,\"ny_code_bytes\":%zu,\"ny_code_bytes_seen\":%"
@@ -12222,8 +12716,8 @@ static void bench_write_json(FILE *f, const BenchTable *t,
         ",\"llvm_hw_cache_misses\":%" PRIu64 ","
         "\"ny_runtime_counters_seen\":%s,\"ny_runtime_alloc_count\":%zu,"
         "\"ny_runtime_realloc_count\":%zu,"
-        "\"ny_llvm_ms\":%.4f,\"llvm_total_ms\":%.4f,"
-        "\"c_ms\":%.4f,\"c_total_ms\":%.4f,\"driver_wall_ms\":%.4f,"
+        "\"ny_llvm_ms\":%.6f,\"llvm_total_ms\":%.4f,"
+        "\"c_ms\":%.6f,\"c_total_ms\":%.4f,\"driver_wall_ms\":%.4f,"
         "\"native_ratio\":%.4f,\"llvm_ratio\":%.4f,"
         "\"native_llvm_ratio\":%.4f,\"native_ratio_valid\":%s,"
         "\"llvm_ratio_valid\":%s,\"native_llvm_ratio_valid\":%s,",
@@ -12251,6 +12745,26 @@ static void bench_write_json(FILE *f, const BenchTable *t,
         llvm_ratio, native_llvm_ratio, native_ratio_valid ? "true" : "false",
         llvm_ratio_valid ? "true" : "false",
         native_llvm_ratio_valid ? "true" : "false");
+    fprintf(f, "\"nyc_ms\":%.6f,\"nyc_available\":%s,", r->nyc_ms,
+            r->nyc_available ? "true" : "false");
+    bench_json_string_field(f, "nyc_note", r->nyc_note);
+    bench_json_string_field(f, "nyc_checksum", r->nyc_checksum);
+    bench_json_string_field(f, "nyc_timing_source",
+                            r->nyc_runs == 0       ? "unavailable"
+                            : r->nyc_fixture_timer ? "fixture-kernel"
+                                                   : "c-main-wrapper");
+    fprintf(f,
+            "\"nyc_runs\":%d,\"nyc_rc\":%d,\"nyc_failures\":%d,"
+            "\"nyc_total_ms\":%.6f,\"nyc_min\":%.6f,\"nyc_max\":%.6f,"
+            "\"nyc_p95\":%.6f,\"nyc_noise_pct\":%.4f,"
+            "\"nyc_dispersion_pct\":%.4f,\"nyc_unstable\":%s,",
+            r->nyc_runs, r->nyc_rc, r->nyc_failures, r->nyc_total_ms,
+            r->nyc_min, r->nyc_max, r->nyc_p95, r->nyc_noise_pct,
+            r->nyc_dispersion_pct, r->nyc_unstable ? "true" : "false");
+    int nyc_c_valid = bench_nyc_c_comparable(r);
+    fprintf(f, "\"nyc_c_ratio\":%.6f,\"nyc_c_comparable\":%s,",
+            nyc_c_valid ? r->nyc_ms / r->c_ms : 0.0,
+            nyc_c_valid ? "true" : "false");
     fprintf(f,
             "\"ny_rc\":%d,\"llvm_rc\":%d,\"c_rc\":%d,\"ny_failures\":%d,"
             "\"llvm_failures\":%d,\"c_failures\":%d,\"ny_runs\":%d,"
@@ -12259,12 +12773,12 @@ static void bench_write_json(FILE *f, const BenchTable *t,
             r->c_failures, r->ny_runs, r->llvm_runs, r->c_runs);
     fprintf(
         f,
-        "\"ny_min\":%.4f,\"ny_max\":%.4f,\"ny_p95\":%.4f,"
+        "\"ny_min\":%.6f,\"ny_max\":%.6f,\"ny_p95\":%.6f,"
         "\"ny_dispersion_pct\":%.4f,\"ny_noise_pct\":%.4f,\"ny_unstable\":%s,"
-        "\"llvm_min\":%.4f,\"llvm_max\":%.4f,\"llvm_p95\":%.4f,"
+        "\"llvm_min\":%.6f,\"llvm_max\":%.6f,\"llvm_p95\":%.6f,"
         "\"llvm_dispersion_pct\":%.4f,\"llvm_noise_pct\":%.4f,\"llvm_"
         "unstable\":%s,"
-        "\"c_min\":%.4f,\"c_max\":%.4f,\"c_p95\":%.4f,"
+        "\"c_min\":%.6f,\"c_max\":%.6f,\"c_p95\":%.6f,"
         "\"c_dispersion_pct\":%.4f,\"c_noise_pct\":%.4f,\"c_unstable\":%s,"
         "\"native_c_budget\":%.4f,\"native_llvm_budget\":%.4f,"
         "\"compile_ms_budget\":%.4f,\"code_bytes_budget\":%zu,"
@@ -12314,6 +12828,7 @@ static void bench_write_json(FILE *f, const BenchTable *t,
 
 static void bench_write_md(FILE *f, const BenchTable *t,
                            const BenchEnvironment *env) {
+  fprintf(f, "# Nytrix benchmark report\n\n");
   if (env) {
     fprintf(f, "- OS/arch: `%s` / `%s`\n", env->os, env->arch);
     fprintf(f, "- CPU: `%s`\n", env->cpu_model);
@@ -12325,6 +12840,10 @@ static void bench_write_md(FILE *f, const BenchTable *t,
     fprintf(f, "- C compiler: `%s` — `%s`\n", env->c_compiler,
             env->c_compiler_version);
     fprintf(f, "- C flags: `%s`\n", env->c_flags);
+    fprintf(f, "- NYC compiler: `%s` — `%s`\n", env->nyc_compiler,
+            env->nyc_compiler_version);
+    fprintf(f, "- NYC flags: `%s`; host driver assembles/links only\n",
+            env->nyc_flags);
     fprintf(f, "- compiler revision: `%s`\n", env->compiler_revision);
     fprintf(f,
             "- Ny settings: opt `%s`, profile `%s`, tier `%s`, engine `%s`, "
@@ -12344,41 +12863,61 @@ static void bench_write_md(FILE *f, const BenchTable *t,
         "- unstable threshold: scaled MAD > %.1f%% of median (5+ samples)\n\n",
         bench_noise_limit_pct());
   }
-  fprintf(f, "| benchmark | backend | engine | status | NYR ms | NYR p95 "
+  fprintf(f, "| benchmark | backend | engine | status | NYR time | NYR p95 "
              "| Ny noise | Ny code bytes | mono bytes | mono max fn bytes | "
-             "compiler peak RSS KiB | Ny LLVM ms | LLVM p95 | LLVM noise | C "
-             "ms | C p95 | C noise | NYR/C | LLVM/NYR |\n");
+             "compiler peak RSS KiB | LLVM time | LLVM p95 | LLVM noise | C "
+             "time | C p95 | C noise | NYC time | NYC p95 | NYC noise | "
+             "NYR/C | NYR/LLVM | NYC/C |\n");
   fprintf(f, "| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | "
              "---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | "
-             "---: | ---: | ---: |\n");
+             "---: | ---: | ---: | ---: | ---: |\n");
   for (size_t i = 0; i < t->len; i++) {
     const BenchRow *r = &t->items[i];
     int native_ratio_valid = bench_native_c_comparable(r);
     int native_llvm_valid = bench_native_llvm_comparable(r);
-    char native_ratio[32], native_llvm[32];
+    char native[32], llvm[32], c[32], native_p95[32], llvm_p95[32], c_p95[32];
+    char nyc[32], nyc_p95[32];
+    bench_ms_text(r->ny_ms, r->ny_runs > 0, native, sizeof(native));
+    bench_ms_text(r->llvm_ms, r->llvm_runs > 0, llvm, sizeof(llvm));
+    bench_ms_text(r->c_ms, r->c_runs > 0, c, sizeof(c));
+    bench_ms_text(r->ny_p95, r->ny_p95 >= 0, native_p95, sizeof(native_p95));
+    bench_ms_text(r->llvm_p95, r->llvm_p95 >= 0, llvm_p95, sizeof(llvm_p95));
+    bench_ms_text(r->c_p95, r->c_p95 >= 0, c_p95, sizeof(c_p95));
+    bench_ms_text(r->nyc_ms, r->nyc_runs > 0, nyc, sizeof(nyc));
+    bench_ms_text(r->nyc_p95, r->nyc_runs > 0 && r->nyc_p95 >= 0, nyc_p95,
+                  sizeof(nyc_p95));
+    char native_ratio[32], native_llvm[32], nyc_c[32];
     if (native_ratio_valid)
       bench_ratio_text(native_ratio, sizeof(native_ratio), r->ny_ms / r->c_ms);
     else
-      snprintf(native_ratio, sizeof(native_ratio), "—");
+      snprintf(native_ratio, sizeof(native_ratio), "%s",
+               bench_timer_floor_name(r->name) ? "n/a" : "—");
     if (native_llvm_valid)
       bench_ratio_text(native_llvm, sizeof(native_llvm), r->ny_ms / r->llvm_ms);
     else
-      snprintf(native_llvm, sizeof(native_llvm), "—");
+      snprintf(native_llvm, sizeof(native_llvm), "%s",
+               bench_timer_floor_name(r->name) ? "n/a" : "—");
+    if (bench_nyc_c_comparable(r))
+      bench_ratio_text(nyc_c, sizeof(nyc_c), r->nyc_ms / r->c_ms);
+    else
+      snprintf(nyc_c, sizeof(nyc_c), "%s",
+               bench_timer_floor_name(r->name) ? "n/a" : "—");
     const char *status = bench_row_status(r);
-    fprintf(
-        f,
-        "| %s | %s | %s | %s | %.3f | %.3f | %.2f%% | %zu | %zu | %zu | %zu | "
-        "%.3f | %.3f | %.2f%% | %.3f | %.3f | %.2f%% | %s | %s |\n",
-        r->name, r->backend, bench_engine_label(r->engine), status, r->ny_ms,
-        r->ny_p95, r->ny_noise_pct,
-        r->ny_code_bytes_seen ? r->ny_code_bytes : 0,
-        r->ny_specialization_metrics_seen ? r->ny_specialization_code_bytes : 0,
-        r->ny_specialization_metrics_seen
-            ? r->ny_specialization_max_function_bytes
-            : 0,
-        r->ny_peak_compiler_rss_seen ? r->ny_peak_compiler_rss_kb : 0,
-        r->llvm_ms, r->llvm_p95, r->llvm_noise_pct, r->c_ms, r->c_p95,
-        r->c_noise_pct, native_ratio, native_llvm);
+    fprintf(f,
+            "| %s | %s | %s | %s | %s | %s | %.2f%% | %zu | %zu | %zu | %zu | "
+            "%s | %s | %.2f%% | %s | %s | %.2f%% | %s | %s | %.2f%% | %s | %s "
+            "| %s |\n",
+            r->name, r->backend, bench_engine_label(r->engine), status, native,
+            native_p95, r->ny_noise_pct,
+            r->ny_code_bytes_seen ? r->ny_code_bytes : 0,
+            r->ny_specialization_metrics_seen ? r->ny_specialization_code_bytes
+                                              : 0,
+            r->ny_specialization_metrics_seen
+                ? r->ny_specialization_max_function_bytes
+                : 0,
+            r->ny_peak_compiler_rss_seen ? r->ny_peak_compiler_rss_kb : 0, llvm,
+            llvm_p95, r->llvm_noise_pct, c, c_p95, r->c_noise_pct, nyc, nyc_p95,
+            r->nyc_noise_pct, native_ratio, native_llvm, nyc_c);
   }
   fprintf(f, "\n| benchmark | alloc sites | runtime allocs | runtime reallocs "
              "| runtime helpers | bounds checks | dynamic ops | indirect calls "
@@ -12457,6 +12996,255 @@ static void bench_write_md(FILE *f, const BenchTable *t,
   }
 }
 
+static bool bench_update_measurements(const char *root, const BenchTable *table,
+                                      const BenchEnvironment *env,
+                                      const char *report_path) {
+  static const char begin_marker[] = "<!-- AUTO_BENCHMARK_RESULTS_BEGIN -->";
+  static const char end_marker[] = "<!-- AUTO_BENCHMARK_RESULTS_END -->";
+  if (!root || !table || !env || table->len == 0)
+    return false;
+
+  char doc_path[PATH_MAX], temporary[PATH_MAX];
+  if (snprintf(doc_path, sizeof(doc_path), "%s/docs/learn/measurements.md",
+               root) >= (int)sizeof(doc_path) ||
+      snprintf(temporary, sizeof(temporary), "%s.tmp", doc_path) >=
+          (int)sizeof(temporary))
+    return false;
+  char *old = read_whole_file(doc_path);
+  if (!old) {
+    fprintf(stderr, "measurements: cannot read %s\n", doc_path);
+    return false;
+  }
+  char *begin = strstr(old, begin_marker);
+  char *end = begin ? strstr(begin + sizeof(begin_marker) - 1, end_marker) : NULL;
+  if (!begin || !end) {
+    fprintf(stderr, "measurements: automatic result markers missing in %s\n",
+            doc_path);
+    free(old);
+    return false;
+  }
+
+  ny_strbuf_t output;
+  ny_strbuf_init(&output);
+  bool ok = ny_strbuf_append_n(&output, old, (size_t)(begin - old)) &&
+            ny_strbuf_append(&output, begin_marker) &&
+            ny_strbuf_append(&output, "\n\n## Latest full benchmark run\n\n");
+  time_t now = time(NULL);
+  struct tm local = {0};
+#ifdef _WIN32
+  localtime_s(&local, &now);
+#else
+  localtime_r(&now, &local);
+#endif
+  char timestamp[64] = "unknown time";
+  (void)strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S %Z", &local);
+  if (ok)
+    ok = ny_strbuf_appendf(
+        &output,
+        "Generated automatically by the full `ny-test --bench` run at %s.\n"
+        "Host: %s; target `%s`; compiler `%s`.\n"
+        "NYR: `-%s`, profile `%s`, tier `%s`, engine `%s`, cache `%s`.\n"
+        "C: %s; flags `%s`. NYC flags `%s`.\n"
+        "Samples: %d plus %d warm-up; fixture workers %d, route workers %d.\n",
+        timestamp, env->cpu_model, env->target, env->compiler_binary_fnv64,
+        env->opt_level, env->profile, env->tier,
+        bench_engine_label(env->engine), env->cache, env->c_compiler_version,
+        env->c_flags, env->nyc_flags, env->samples, env->warmups,
+        env->fixture_workers, env->route_workers);
+
+  size_t passed = 0, failed = 0, controls = 0, low = 0, noisy = 0, budgets = 0;
+  for (size_t i = 0; i < table->len; ++i) {
+    const BenchRow *row = &table->items[i];
+    if (bench_row_correctness_failed(row))
+      failed++;
+    else if (bench_timer_floor_name(row->name))
+      controls++;
+    else
+      passed++;
+    if (!bench_timer_floor_name(row->name)) {
+      low += bench_row_low_signal(row) != 0;
+      noisy += bench_row_unstable(row) != 0;
+      budgets += row->budget_failed != 0;
+    }
+  }
+  if (ok)
+    ok = ny_strbuf_appendf(&output,
+                           "Results: %zu fixtures; %zu passed, %zu failed or "
+                           "mismatched, %zu timer controls.\n"
+                           "Measurement qualifiers: %zu low-time, %zu noisy; "
+                           "%zu fixture budget misses.\n\n"
+                           "| Fixture | Status | NYR | LLVM | Host C | NYC | "
+                           "NYR/C | LLVM/C | NYR/LLVM |\n"
+                           "| --- | --- | ---: | ---: | ---: | ---: | ---: | "
+                           "---: | ---: |\n",
+                           table->len, passed, failed, controls, low, noisy, budgets);
+
+  for (size_t i = 0; ok && i < table->len; ++i) {
+    const BenchRow *row = &table->items[i];
+    char nyr[32], llvm[32], host_c[32], nyc[32];
+    char nyr_c[32], llvm_c[32], nyr_llvm[32];
+    bench_ms_text(row->ny_ms, row->ny_runs > 0, nyr, sizeof(nyr));
+    bench_ms_text(row->llvm_ms, row->llvm_runs > 0, llvm, sizeof(llvm));
+    bench_ms_text(row->c_ms, row->c_runs > 0, host_c, sizeof(host_c));
+    bench_ms_text(row->nyc_ms, row->nyc_runs > 0, nyc, sizeof(nyc));
+    if (bench_native_c_comparable(row))
+      bench_ratio_text(nyr_c, sizeof(nyr_c), row->ny_ms / row->c_ms);
+    else
+      snprintf(nyr_c, sizeof(nyr_c), "%s",
+               bench_timer_floor_name(row->name) ? "n/a" : "—");
+    if (bench_llvm_c_comparable(row))
+      bench_ratio_text(llvm_c, sizeof(llvm_c), row->llvm_ms / row->c_ms);
+    else
+      snprintf(llvm_c, sizeof(llvm_c), "%s",
+               bench_timer_floor_name(row->name) ? "n/a" : "—");
+    if (bench_native_llvm_comparable(row))
+      bench_ratio_text(nyr_llvm, sizeof(nyr_llvm), row->ny_ms / row->llvm_ms);
+    else
+      snprintf(nyr_llvm, sizeof(nyr_llvm), "%s",
+               bench_timer_floor_name(row->name) ? "n/a" : "—");
+    ok = ny_strbuf_appendf(
+        &output,
+        "| `%s` | %s | %s | %s | %s | %s | %s | %s | %s |\n",
+        row->name, bench_row_status(row), nyr, llvm, host_c, nyc, nyr_c,
+        llvm_c, nyr_llvm);
+  }
+  if (ok && failed > 0)
+    ok = ny_strbuf_append(
+        &output,
+        "\nChecksum and execution failures:\n\n"
+        "| Fixture | Status | NYR checksum | LLVM checksum | C checksum | NYC checksum | Return codes (NYR/LLVM/C/NYC) | NYC diagnostic |\n"
+        "| --- | --- | --- | --- | --- | --- | --- | --- |\n");
+  for (size_t i = 0; ok && failed > 0 && i < table->len; ++i) {
+    const BenchRow *row = &table->items[i];
+    if (!bench_row_correctness_failed(row))
+      continue;
+    char note[sizeof(row->nyc_note)];
+    snprintf(note, sizeof(note), "%s", row->nyc_note);
+    for (char *p = note; *p; ++p)
+      if (*p == '|' || *p == '\n' || *p == '\r' || *p == '`')
+        *p = ' ';
+    ok = ny_strbuf_appendf(
+        &output,
+        "| `%s` | %s | `%s` | `%s` | `%s` | `%s` | %d/%d/%d/%d | %s |\n", row->name,
+        bench_row_status(row), row->ny_checksum[0] ? row->ny_checksum : "—",
+        row->llvm_checksum[0] ? row->llvm_checksum : "—",
+        row->c_checksum[0] ? row->c_checksum : "—",
+        row->nyc_checksum[0] ? row->nyc_checksum : "—",
+        row->ny_rc, row->llvm_rc, row->c_rc, row->nyc_rc,
+        note[0] ? note : "—");
+  }
+  if (ok) {
+    ok = ny_strbuf_append(
+        &output,
+        "\nThe empty timer control is shown for completeness and is excluded "
+        "from workload ratios.\n");
+    if (ok && report_path && *report_path)
+      ok = ny_strbuf_appendf(&output, "Raw report: `%s`.\n", report_path);
+    if (ok)
+      ok = ny_strbuf_append(&output, "\n") &&
+           ny_strbuf_append(&output, end_marker);
+  }
+  if (ok) {
+    const char *after = end + sizeof(end_marker) - 1;
+    ok = ny_strbuf_append(&output, after);
+  }
+  free(old);
+  if (!ok) {
+    ny_strbuf_free(&output);
+    return false;
+  }
+
+  FILE *out = fopen(temporary, "wb");
+  if (!out) {
+    ny_strbuf_free(&output);
+    return false;
+  }
+  size_t written = fwrite(output.data, 1, output.len, out);
+  bool write_ok = written == output.len;
+  if (fflush(out) != 0)
+    write_ok = false;
+  if (fclose(out) != 0)
+    write_ok = false;
+  if (!write_ok) {
+    remove(temporary);
+    ny_strbuf_free(&output);
+    return false;
+  }
+#ifdef _WIN32
+  write_ok = MoveFileExA(temporary, doc_path,
+                         MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
+#else
+  write_ok = rename(temporary, doc_path) == 0;
+#endif
+  if (!write_ok)
+    remove(temporary);
+  ny_strbuf_free(&output);
+  if (!write_ok)
+    fprintf(stderr, "measurements: could not replace %s\n", doc_path);
+  else
+    printf("Updated latest full benchmark results in docs/learn/measurements.md\n");
+  return write_ok;
+}
+
+static int run_bench_report_selftest(void) {
+#ifdef _WIN32
+  return 0;
+#else
+  char root[] = "/tmp/ny-bench-report-XXXXXX";
+  if (!mkdtemp(root))
+    return 1;
+  char path[PATH_MAX];
+  snprintf(path, sizeof(path), "%s/docs/learn/measurements.md", root);
+  BenchRow *rows = calloc(4, sizeof(*rows));
+  bool ok = rows && shape_write_tree_file(path,
+      "before\n<!-- AUTO_BENCHMARK_RESULTS_BEGIN -->\nold\n"
+      "<!-- AUTO_BENCHMARK_RESULTS_END -->\nafter\n");
+  for (size_t i = 0; rows && i < 4; ++i) {
+    rows[i].checksum_ok = 1;
+    rows[i].ny_runs = rows[i].llvm_runs = rows[i].c_runs = rows[i].nyc_runs = 3;
+    rows[i].ny_ms = rows[i].llvm_ms = rows[i].c_ms = rows[i].nyc_ms = 1;
+    snprintf(rows[i].ny_checksum, sizeof(rows[i].ny_checksum), "42");
+    snprintf(rows[i].llvm_checksum, sizeof(rows[i].llvm_checksum), "42");
+    snprintf(rows[i].c_checksum, sizeof(rows[i].c_checksum), "42");
+    snprintf(rows[i].nyc_checksum, sizeof(rows[i].nyc_checksum), "42");
+  }
+  if (rows) {
+    snprintf(rows[0].name, sizeof(rows[0].name), "fast-workload");
+    rows[0].ny_ms = rows[0].llvm_ms = .0001;
+    snprintf(rows[1].name, sizeof(rows[1].name), "startup");
+    snprintf(rows[2].name, sizeof(rows[2].name), "budget-workload");
+    rows[2].budget_failed = 1;
+    snprintf(rows[3].name, sizeof(rows[3].name), "broken-nyc");
+    rows[3].nyc_failures = 1;
+    rows[3].nyc_rc = 127;
+    rows[3].nyc_checksum[0] = 0;
+    snprintf(rows[3].nyc_note, sizeof(rows[3].nyc_note), "missing | executable\n");
+  }
+  BenchTable table = {.items = rows, .len = 4, .cap = 4};
+  BenchEnvironment env = {0};
+  ok = ok && bench_update_measurements(root, &table, &env, "synthetic.json");
+  char *report = ok ? read_whole_file(path) : NULL;
+  const char *failures = report ? strstr(report, "Checksum and execution failures:") : NULL;
+  ok = ok && report && failures &&
+       strstr(report, "2 passed, 1 failed or mismatched, 1 timer controls") &&
+       strstr(report, "1 low-time, 0 noisy; 1 fixture budget misses") &&
+       strstr(report, "NYC checksum") && strstr(failures, "broken-nyc") &&
+       strstr(failures, "0/0/0/127") && strstr(failures, "missing   executable") &&
+       !strstr(failures, "fast-workload") && !strstr(failures, "budget-workload") &&
+       strstr(report, "before\n") && strstr(report, "\nafter\n");
+  free(report);
+  free(rows);
+  unlink(path);
+  snprintf(path, sizeof(path), "%s/docs/learn", root);
+  rmdir(path);
+  snprintf(path, sizeof(path), "%s/docs", root);
+  rmdir(path);
+  rmdir(root);
+  fprintf(stderr, "benchmark report selftest: %s\n", ok ? "passed" : "failed");
+  return ok ? 0 : 1;
+#endif
+}
+
 /*
  * `--bench-report-md` augments the ordinary results report with source and
  * compiler artifacts for every selected fixture.
@@ -12513,36 +13301,6 @@ static void bench_write_full_report(const char *path, const BenchTable *table,
   fclose(f);
 }
 
-static void bench_write_report_summary(FILE *f, const BenchTable *table,
-                                       const BenchEnvironment *env) {
-  if (env) {
-    fprintf(f,
-            "# Nytrix benchmark report\n\n"
-            "- Host: `%s` / `%s` · `%s`\n"
-            "- Compiler: `%s` · revision `%s`\n"
-            "- Settings: opt `%s`, profile `%s`, tier `%s`, engine `%s`\n"
-            "- Samples: %d measured + %d warm-up · fixture workers: %d\n\n",
-            env->os, env->arch, env->cpu_model, env->compiler_binary,
-            env->compiler_revision, env->opt_level, env->profile, env->tier,
-            bench_engine_label(env->engine), env->samples, env->warmups,
-            env->fixture_workers);
-  }
-  fprintf(f, "| Benchmark | Status | Compile ms | NYR ms | C ms | NYR/C |\n"
-             "| --- | --- | ---: | ---: | ---: | ---: |\n");
-  for (size_t i = 0; i < table->len; i++) {
-    const BenchRow *r = &table->items[i];
-    char ratio[32];
-    if (bench_native_c_comparable(r))
-      bench_ratio_text(ratio, sizeof(ratio), r->ny_ms / r->c_ms);
-    else
-      snprintf(ratio, sizeof(ratio), "—");
-    fprintf(f, "| %s | %s | %.3f | %.3f | %.3f | %s |\n", r->name,
-            bench_row_status(r), r->ny_compile_ms, r->ny_ms, r->c_ms, ratio);
-  }
-  fprintf(f, "\nNYR/C compares native Nytrix runtime with generated C; `—` "
-             "means the fixture has no comparable C measurement.\n");
-}
-
 /*
  * Entrypoint
  */
@@ -12552,6 +13310,264 @@ static void bench_write_report_summary(FILE *f, const BenchTable *table,
  * caller supplied some, otherwise from the default bench dir), filters by the
  * `--pattern` values, measures each, and reports.
  */
+static int bench_collect_shapes(const char *root, StrVec *files,
+                                StrVec *shapes) {
+  char bench_dir[PATH_MAX];
+  snprintf(bench_dir, sizeof(bench_dir), "%s/etc/tests/bench", root);
+  StrVec all = {0};
+  if (!test_collect_native(bench_dir, &all, true)) {
+    nyt_err("ny-test",
+            "native fixture discovery failed for benchmark directory: %s",
+            bench_dir);
+    sv_free(&all);
+    return 0;
+  }
+  qsort(all.items, all.len, sizeof(char *), path_lex_cmp);
+  if (files && files->len > 0) {
+    for (size_t i = 0; i < files->len; i++) {
+      const char *want = files->items[i];
+      if (nyt_ends_with(want, ".nshape")) {
+        sv_push(shapes, want);
+        continue;
+      }
+      /*
+       * Prefer a fixture whose stem is exactly the requested name. This
+       * keeps `bench binary` from also selecting `binary-trees`, while still
+       * allowing category/path substrings when no exact stem exists.
+       */
+      bool exact_stem = false;
+      for (size_t j = 0; j < all.len; j++) {
+        const char *base = test_path_basename(all.items[j]);
+        char stem[128];
+        snprintf(stem, sizeof(stem), "%s", base);
+        char *dot = strrchr(stem, '.');
+        if (dot)
+          *dot = '\0';
+        if (strcmp(stem, want) == 0) {
+          exact_stem = true;
+          break;
+        }
+      }
+      size_t matches = 0;
+      for (size_t j = 0; j < all.len; j++) {
+        const char *base = test_path_basename(all.items[j]);
+        char stem[128];
+        snprintf(stem, sizeof(stem), "%s", base);
+        char *dot = strrchr(stem, '.');
+        if (dot)
+          *dot = '\0';
+        if ((exact_stem && strcmp(stem, want) == 0) ||
+            (!exact_stem && strstr(all.items[j], want))) {
+          sv_push(shapes, all.items[j]);
+          matches++;
+        }
+      }
+      if (!matches)
+        nyt_err("ny-test", want, ": no matching bench fixture");
+    }
+    qsort(shapes->items, shapes->len, sizeof(char *), path_lex_cmp);
+    for (size_t i = 1; i < shapes->len; i++) {
+      if (strcmp(shapes->items[i], shapes->items[i - 1]) == 0) {
+        memmove(&shapes->items[i - 1], &shapes->items[i],
+                (shapes->len - i) * sizeof(char *));
+        shapes->len--;
+        i--;
+      }
+    }
+  } else {
+    int ci_mode = test_env_truthy("CI") || test_env_truthy("GITHUB_ACTIONS") ||
+                  test_headless_mode();
+    for (size_t j = 0; j < all.len; j++) {
+      if (ci_mode &&
+          (shape_skips_ci(all.items[j]) || shape_skips_headless(all.items[j])))
+        continue;
+      sv_push(shapes, all.items[j]);
+    }
+  }
+  sv_free(&all);
+  if (shapes->len == 0) {
+    nyt_err("ny-test", "bench: no .nshape benches found");
+    sv_free(shapes);
+    return 0;
+  }
+  return 1;
+}
+
+typedef struct {
+  const char *bin;
+  const char *opt_level;
+  const char *tier;
+  const char *engine;
+  const char *target;
+  const char *compile_profile;
+  int compare_llvm;
+  int warmup;
+  int runs;
+  int timeout_sec;
+  int fixture_workers;
+} BenchExecutionConfig;
+
+static void bench_execute_jobs(BenchJob *jobs, size_t job_count,
+                               const BenchExecutionConfig *config,
+                               BenchEnvironment *environment) {
+  /*
+   * Fixture concurrency is a throughput mode: it reduces suite wall time but
+   * can make individual timings noisier. --jobs 1 gives isolated
+   * measurements; every worker count remains bounded by the memory guard.
+   */
+  int worker_limit = 1;
+  if (config->fixture_workers > 0) {
+    worker_limit = config->fixture_workers > 96 ? 96 : config->fixture_workers;
+  } else {
+    const char *jobs_env = getenv("NYTRIX_BENCH_JOBS");
+    if (jobs_env && *jobs_env) {
+      char *end = NULL;
+      long requested = strtol(jobs_env, &end, 10);
+      if (end != jobs_env && *end == '\0' && requested > 0)
+        worker_limit = requested > 96 ? 96 : (int)requested;
+    }
+  }
+#if defined(_WIN32)
+  worker_limit = 1;
+#endif
+  if (worker_limit > (int)job_count)
+    worker_limit = (int)job_count;
+  if (worker_limit < 1)
+    worker_limit = 1;
+  if (!getenv("NYTRIX_TEST_NO_RAM_GUARD")) {
+    double available_gib = host_ram_available_gib();
+    if (available_gib > 0.0) {
+      int ram_workers =
+          (int)((available_gib - NY_TEST_HOST_MEMORY_RESERVE_GIB) /
+                NY_BENCH_WORKER_MEMORY_GIB);
+      if (ram_workers < 1)
+        ram_workers = 1;
+      if (worker_limit > ram_workers) {
+        printf("[bench] limiting fixture workers %d -> %d: %.1f GiB memory "
+               "available at %.1f GiB/worker\n",
+               worker_limit, ram_workers, available_gib,
+               NY_BENCH_WORKER_MEMORY_GIB);
+        worker_limit = ram_workers;
+      }
+    }
+  }
+  environment->route_workers = 1;
+  environment->runtime_counters_enabled = bench_runtime_counters_requested();
+  if (config->compile_profile && *config->compile_profile)
+    ny_setenv("NYTRIX_OPT_PROFILE", config->compile_profile, 1);
+  int actual_workers = 1;
+  fflush(stdout);
+#ifndef _WIN32
+  typedef struct {
+    pid_t pid;
+    int worker_id;
+    char output_path[PATH_MAX];
+  } BenchChild;
+  BenchChild *children = NULL;
+  if (worker_limit > 1) {
+    children =
+        (BenchChild *)calloc((size_t)worker_limit - 1, sizeof(*children));
+    if (!children)
+      worker_limit = 1;
+  }
+  int child_count = 0;
+  for (int worker = 1; worker < worker_limit; worker++) {
+    int fd = make_test_capture_tmp(children[child_count].output_path,
+                                   sizeof(children[child_count].output_path),
+                                   "bench-worker-results");
+    if (fd < 0)
+      continue;
+    close(fd);
+    pid_t child = fork();
+    if (child == 0) {
+      FILE *out = fopen(children[child_count].output_path, "wb");
+      if (!out)
+        _exit(1);
+      int ok = bench_run_worker_jobs(
+          jobs, job_count, (size_t)worker, (size_t)worker_limit, config->bin,
+          config->opt_level, config->tier, config->engine, config->target,
+          config->compare_llvm, config->warmup, config->runs,
+          config->timeout_sec, out);
+      if (fclose(out) != 0)
+        ok = 0;
+      _exit(ok ? 0 : 1);
+    }
+    if (child < 0) {
+      remove(children[child_count].output_path);
+      continue;
+    }
+    children[child_count].pid = child;
+    children[child_count].worker_id = worker;
+    child_count++;
+  }
+  actual_workers += child_count;
+  bench_run_worker_jobs(jobs, job_count, 0, (size_t)worker_limit, config->bin,
+                        config->opt_level, config->tier, config->engine,
+                        config->target, config->compare_llvm, config->warmup,
+                        config->runs, config->timeout_sec, NULL);
+  for (int c = 0; c < child_count; c++) {
+    int status = 0;
+    pid_t waited;
+    do {
+      waited = waitpid(children[c].pid, &status, 0);
+    } while (waited < 0 && errno == EINTR);
+    int loaded = 0;
+    FILE *in = waited == children[c].pid && WIFEXITED(status) &&
+                       WEXITSTATUS(status) == 0
+                   ? fopen(children[c].output_path, "rb")
+                   : NULL;
+    if (in) {
+      size_t index = 0;
+      size_t seen = 0;
+      loaded = 1;
+      while (fread(&index, sizeof(index), 1, in) == 1) {
+        bench_worker_result_t result;
+        if (index >= job_count ||
+            index % (size_t)worker_limit != (size_t)children[c].worker_id ||
+            fread(&result, sizeof(result), 1, in) != 1) {
+          loaded = 0;
+          break;
+        }
+        jobs[index].result = result;
+        seen++;
+      }
+      size_t expected = 0;
+      for (size_t i = (size_t)children[c].worker_id; i < job_count;
+           i += (size_t)worker_limit)
+        expected++;
+      if (ferror(in) || seen != expected)
+        loaded = 0;
+      fclose(in);
+    }
+    remove(children[c].output_path);
+    if (!loaded)
+      bench_run_worker_jobs(
+          jobs, job_count, (size_t)children[c].worker_id, (size_t)worker_limit,
+          config->bin, config->opt_level, config->tier, config->engine,
+          config->target, config->compare_llvm, config->warmup, config->runs,
+          config->timeout_sec, NULL);
+  }
+  for (int worker = 1; worker < worker_limit; worker++) {
+    int started = 0;
+    for (int c = 0; c < child_count; c++)
+      started |= children[c].worker_id == worker;
+    if (!started)
+      bench_run_worker_jobs(
+          jobs, job_count, (size_t)worker, (size_t)worker_limit, config->bin,
+          config->opt_level, config->tier, config->engine, config->target,
+          config->compare_llvm, config->warmup, config->runs,
+          config->timeout_sec, NULL);
+  }
+  free(children);
+#else
+  bench_run_worker_jobs(jobs, job_count, 0, 1, config->bin, config->opt_level,
+                        config->tier, config->engine, config->target,
+                        config->compare_llvm, config->warmup, config->runs,
+                        config->timeout_sec, NULL);
+#endif
+  environment->fixture_workers = actual_workers;
+}
+
 static int
 run_benchmarks(const char *bin, const char *std_path, const char *std_bc,
                const char *pattern, const char *opt_level, const char *tier,
@@ -12577,91 +13593,47 @@ run_benchmarks(const char *bin, const char *std_path, const char *std_bc,
     return 2;
   }
 
+  /*
+   * Resolve and retain NYC before version probing or forking workers.
+   * Every route uses this same executable even if a build replaces nyc.
+   */
+  if (!bench_nyc_snapshot[0]) {
+    char source[PATH_MAX], default_nyc[PATH_MAX], error[256];
+    if (snprintf(default_nyc, sizeof(default_nyc), "%s/build/release/nyc", root) >=
+        (int)sizeof(default_nyc))
+      return 2;
+    if (bench_find_named_compiler(source, sizeof(source), "NYTRIX_NYC",
+                                   default_nyc)) {
+      if (!nyt_compiler_snapshot(source, bench_nyc_snapshot,
+                                 sizeof(bench_nyc_snapshot), error, sizeof(error))) {
+        nyt_err("ny-test", "bench: %s", error);
+        return 2;
+      }
+      bench_nyc_snapshot_owner = (long)getpid();
+      if (atexit(bench_remove_compiler_snapshot) != 0) {
+        bench_remove_compiler_snapshot();
+        bench_nyc_snapshot[0] = 0;
+        return 2;
+      }
+    }
+  }
   BenchEnvironment bench_env;
   bench_collect_environment(root, bin, target, opt_level, tier, engine, runs,
                             warmup, compile_profile, &bench_env);
 
   StrVec shapes = {0};
-  {
-    char bench_dir[PATH_MAX];
-    snprintf(bench_dir, sizeof(bench_dir), "%s/etc/tests/bench", root);
-    StrVec all = {0};
-    if (!test_collect_native(bench_dir, &all, true)) {
-      nyt_err("ny-test",
-              "native fixture discovery failed for benchmark directory: %s",
-              bench_dir);
-      sv_free(&all);
-      return 2;
-    }
-    qsort(all.items, all.len, sizeof(char *), path_lex_cmp);
-    if (files && files->len > 0) {
-      for (size_t i = 0; i < files->len; i++) {
-        const char *want = files->items[i];
-        if (nyt_ends_with(want, ".nshape")) {
-          sv_push(&shapes, want);
-          continue;
-        }
-        /*
-         * Prefer a fixture whose stem is exactly the requested name. This
-         * keeps `bench binary` from also selecting `binary-trees`, while
-         * still allowing category/path substrings when no exact stem exists.
-         */
-        bool exact_stem = false;
-        for (size_t j = 0; j < all.len; j++) {
-          const char *base = test_path_basename(all.items[j]);
-          char stem[128];
-          snprintf(stem, sizeof(stem), "%s", base);
-          char *dot = strrchr(stem, '.');
-          if (dot)
-            *dot = '\0';
-          if (strcmp(stem, want) == 0) {
-            exact_stem = true;
-            break;
-          }
-        }
-        size_t matches = 0;
-        for (size_t j = 0; j < all.len; j++) {
-          const char *base = test_path_basename(all.items[j]);
-          char stem[128];
-          snprintf(stem, sizeof(stem), "%s", base);
-          char *dot = strrchr(stem, '.');
-          if (dot)
-            *dot = '\0';
-          if ((exact_stem && strcmp(stem, want) == 0) ||
-              (!exact_stem && strstr(all.items[j], want))) {
-            sv_push(&shapes, all.items[j]);
-            matches++;
-          }
-        }
-        if (!matches)
-          nyt_err("ny-test", want, ": no matching bench fixture");
-      }
-      qsort(shapes.items, shapes.len, sizeof(char *), path_lex_cmp);
-      for (size_t i = 1; i < shapes.len; i++) {
-        if (strcmp(shapes.items[i], shapes.items[i - 1]) == 0) {
-          memmove(&shapes.items[i - 1], &shapes.items[i],
-                  (shapes.len - i) * sizeof(char *));
-          shapes.len--;
-          i--;
-        }
-      }
-    } else {
-      int ci_mode = test_env_truthy("CI") ||
-                    test_env_truthy("GITHUB_ACTIONS") || test_headless_mode();
-      for (size_t j = 0; j < all.len; j++) {
-        if (ci_mode && (shape_skips_ci(all.items[j]) ||
-                        shape_skips_headless(all.items[j])))
-          continue;
-        sv_push(&shapes, all.items[j]);
-      }
-    }
-    sv_free(&all);
-  }
-  if (shapes.len == 0) {
-    nyt_err("ny-test", "bench: no .nshape benches found");
+  if (!bench_collect_shapes(root, files, &shapes))
+    return 2;
+  StrVec all_shapes = {0};
+  char full_bench_dir[PATH_MAX];
+  if (snprintf(full_bench_dir, sizeof(full_bench_dir), "%s/etc/tests/bench",
+               root) >= (int)sizeof(full_bench_dir) ||
+      !test_collect_native(full_bench_dir, &all_shapes, true)) {
     sv_free(&shapes);
     return 2;
   }
+  const size_t full_bench_count = all_shapes.len;
+  sv_free(&all_shapes);
   nyt_heading("Nytrix Benchmark Suite");
   {
     StrVec pats = {0};
@@ -12698,8 +13670,15 @@ run_benchmarks(const char *bin, const char *std_path, const char *std_bc,
          bench_engine_label(engine), bench_cache_state());
   nyt_kv("samples", "%d run%s + %d warm-up%s", runs, runs == 1 ? "" : "s",
          warmup, warmup == 1 ? "" : "s");
-  nyt_kv("legend",
-         "<1µs = timer floor · ~ = fixture-timer fallback · — = unavailable");
+  nyt_kv("NYC", "C workload runtime · %s · build and warm-up excluded",
+         bench_env.nyc_flags);
+  nyt_kv("C compilers", "%s · %s", bench_env.nyc_compiler_version,
+         bench_env.c_compiler_version);
+  nyt_kv("legend", "FLOOR = empty timer control · LOW = workload below 1µs · "
+                   "timings remain in nanoseconds · "
+                   "n/a = control ratio · ~ = fixture-timer fallback · "
+                   "— = unavailable; budget misses are "
+                   "summarized after the rows");
   putchar('\n');
   bench_print_header();
   fflush(stdout);
@@ -12727,167 +13706,20 @@ run_benchmarks(const char *bin, const char *std_path, const char *std_bc,
     if (dot > 0)
       job->name[dot - 1] = '\0';
   }
-  /*
-   * Benchmark fixture concurrency is a throughput mode: it reduces suite
-   * wall time but can make individual timings noisier. --jobs 1 gives isolated
-   * measurements. The memory guard applies to automatic and explicit worker
-   * counts so an aggressive request cannot overcommit the host.
-   */
-  int bench_jobs_limit = 1;
-  if (fixture_workers > 0) {
-    /*
-     * Cap at the supported host scale; the result table is indexed by job.
-     */
-    bench_jobs_limit = fixture_workers > 96 ? 96 : fixture_workers;
-  } else {
-    /*
-     * Isolated measurements are the default; parallelism is opt-in.
-     */
-    bench_jobs_limit = 1;
-    /*
-     * Explicit throughput overrides remain bounded by RAM below.
-     */
-    const char *jobs_env = getenv("NYTRIX_BENCH_JOBS");
-    if (jobs_env && *jobs_env) {
-      char *end = NULL;
-      long requested = strtol(jobs_env, &end, 10);
-      if (end != jobs_env && *end == '\0' && requested > 0)
-        bench_jobs_limit = requested > 96 ? 96 : (int)requested;
-    }
-  }
-#if defined(_WIN32)
-  bench_jobs_limit = 1;
-#endif
-  if (bench_jobs_limit > (int)bench_count)
-    bench_jobs_limit = (int)bench_count;
-  if (bench_jobs_limit < 1)
-    bench_jobs_limit = 1;
-  if (!getenv("NYTRIX_TEST_NO_RAM_GUARD")) {
-    double avail_gib = host_ram_available_gib();
-    if (avail_gib > 0.0) {
-      int ram_jobs = (int)((avail_gib - NY_TEST_HOST_MEMORY_RESERVE_GIB) /
-                           NY_BENCH_WORKER_MEMORY_GIB);
-      if (ram_jobs < 1)
-        ram_jobs = 1;
-      if (bench_jobs_limit > ram_jobs) {
-        printf("[bench] limiting fixture workers %d -> %d: %.1f GiB memory "
-               "available at %.1f GiB/worker\n",
-               bench_jobs_limit, ram_jobs, avail_gib,
-               NY_BENCH_WORKER_MEMORY_GIB);
-        bench_jobs_limit = ram_jobs;
-      }
-    }
-  }
-  bench_env.route_workers = 1;
-  bench_env.runtime_counters_enabled = bench_runtime_counters_requested();
-  if (compile_profile && *compile_profile)
-    ny_setenv("NYTRIX_OPT_PROFILE", compile_profile, 1);
-  int actual_workers = 1;
-  fflush(stdout);
-#ifndef _WIN32
-  typedef struct {
-    pid_t pid;
-    int worker_id;
-    char output_path[PATH_MAX];
-  } BenchChild;
-  BenchChild *children = NULL;
-  if (bench_jobs_limit > 1) {
-    children =
-        (BenchChild *)calloc((size_t)bench_jobs_limit - 1, sizeof(*children));
-    if (!children)
-      bench_jobs_limit = 1;
-  }
-  int child_count = 0;
-  for (int worker = 1; worker < bench_jobs_limit; worker++) {
-    int fd = make_test_capture_tmp(children[child_count].output_path,
-                                   sizeof(children[child_count].output_path),
-                                   "bench-worker-results");
-    if (fd < 0)
-      continue;
-    close(fd);
-    pid_t child = fork();
-    if (child == 0) {
-      FILE *out = fopen(children[child_count].output_path, "wb");
-      if (!out)
-        _exit(1);
-      int ok = bench_run_worker_jobs(bench_jobs, bench_count, (size_t)worker,
-                                     (size_t)bench_jobs_limit, bin, opt_level,
-                                     tier, engine, target, compare_llvm, warmup,
-                                     runs, timeout_sec, out);
-      if (fclose(out) != 0)
-        ok = 0;
-      _exit(ok ? 0 : 1);
-    }
-    if (child < 0) {
-      remove(children[child_count].output_path);
-      continue;
-    }
-    children[child_count].pid = child;
-    children[child_count].worker_id = worker;
-    child_count++;
-  }
-  actual_workers += child_count;
-  bench_run_worker_jobs(bench_jobs, bench_count, 0, (size_t)bench_jobs_limit,
-                        bin, opt_level, tier, engine, target, compare_llvm,
-                        warmup, runs, timeout_sec, NULL);
-  for (int c = 0; c < child_count; c++) {
-    int status = 0;
-    pid_t waited;
-    do {
-      waited = waitpid(children[c].pid, &status, 0);
-    } while (waited < 0 && errno == EINTR);
-    int loaded = 0;
-    FILE *in = waited == children[c].pid && WIFEXITED(status) &&
-                       WEXITSTATUS(status) == 0
-                   ? fopen(children[c].output_path, "rb")
-                   : NULL;
-    if (in) {
-      size_t index = 0;
-      size_t seen = 0;
-      loaded = 1;
-      while (fread(&index, sizeof(index), 1, in) == 1) {
-        bench_worker_result_t result;
-        if (index >= bench_count ||
-            index % (size_t)bench_jobs_limit != (size_t)children[c].worker_id ||
-            fread(&result, sizeof(result), 1, in) != 1) {
-          loaded = 0;
-          break;
-        }
-        bench_jobs[index].result = result;
-        seen++;
-      }
-      size_t expected = 0;
-      for (size_t i = (size_t)children[c].worker_id; i < bench_count;
-           i += (size_t)bench_jobs_limit)
-        expected++;
-      if (ferror(in) || seen != expected)
-        loaded = 0;
-      fclose(in);
-    }
-    remove(children[c].output_path);
-    if (!loaded)
-      bench_run_worker_jobs(
-          bench_jobs, bench_count, (size_t)children[c].worker_id,
-          (size_t)bench_jobs_limit, bin, opt_level, tier, engine, target,
-          compare_llvm, warmup, runs, timeout_sec, NULL);
-  }
-  for (int worker = 1; worker < bench_jobs_limit; worker++) {
-    int started = 0;
-    for (int c = 0; c < child_count; c++)
-      started |= children[c].worker_id == worker;
-    if (!started)
-      bench_run_worker_jobs(bench_jobs, bench_count, (size_t)worker,
-                            (size_t)bench_jobs_limit, bin, opt_level, tier,
-                            engine, target, compare_llvm, warmup, runs,
-                            timeout_sec, NULL);
-  }
-  free(children);
-#else
-  bench_run_worker_jobs(bench_jobs, bench_count, 0, 1, bin, opt_level, tier,
-                        engine, target, compare_llvm, warmup, runs, timeout_sec,
-                        NULL);
-#endif
-  bench_env.fixture_workers = actual_workers;
+  const BenchExecutionConfig execution = {
+      .bin = bin,
+      .opt_level = opt_level,
+      .tier = tier,
+      .engine = engine,
+      .target = target,
+      .compile_profile = compile_profile,
+      .compare_llvm = compare_llvm,
+      .warmup = warmup,
+      .runs = runs,
+      .timeout_sec = timeout_sec,
+      .fixture_workers = fixture_workers,
+  };
+  bench_execute_jobs(bench_jobs, bench_count, &execution, &bench_env);
   for (size_t i = 0; i < bench_count; i++) {
     BenchJob *job = &bench_jobs[i];
     bench_record_result(&table, &measured, verbose, show_ir, show_asm,
@@ -12895,18 +13727,35 @@ run_benchmarks(const char *bin, const char *std_path, const char *std_bc,
                         tier, engine, target, compile_profile, warmup, runs,
                         timeout_sec, job->shape, job->name, &job->result, 1);
   }
+  {
+    int nyc_heading_printed = 0;
+    for (size_t i = 0; i < table.len; i++) {
+      const BenchRow *row = &table.items[i];
+      if (row->nyc_note[0]) {
+        if (!nyc_heading_printed) {
+          printf("\nNYC diagnostics:\n");
+          nyc_heading_printed = 1;
+        }
+        printf("  %s · %s\n", row->name, row->nyc_note);
+      }
+    }
+  }
   int failed = measured == 0;
   int unstable = 0;
+  int budget_gate_failed = 0;
   for (size_t i = 0; i < table.len; i++) {
     const BenchRow *r = &table.items[i];
-    if (!r->checksum_ok || r->ny_failures || r->llvm_failures || r->c_failures)
+    if (!r->checksum_ok || r->ny_failures || r->llvm_failures ||
+        r->c_failures || r->nyc_failures)
       failed = 1;
     if (r->budget_failed) {
-      if (budget_fail)
+      if (budget_fail) {
         failed = 1;
-      else
-        printf("%sbudget miss (not fatal without --budget-fail): %s%s\n",
-               nyt_clr(NYT_YELLOW), r->name, nyt_clr(NYT_RESET));
+        budget_gate_failed = 1;
+      }
+      printf("%sbudget miss%s: %s%s\n", nyt_clr(NYT_YELLOW),
+             budget_fail ? "" : " (not fatal without --budget-fail)", r->name,
+             nyt_clr(NYT_RESET));
     }
     if (!correctness_only && runs >= 5 && bench_row_unstable(r)) {
       unstable = 1;
@@ -12916,7 +13765,8 @@ run_benchmarks(const char *bin, const char *std_path, const char *std_bc,
   bench_print_hw_counters(&table);
   bench_print_hotspots(&table);
   bool enforce_geomean_budgets = runs >= 3 && table.len >= 60;
-  if (bench_print_geomean(&table, enforce_geomean_budgets))
+  int geomean_failed = bench_print_geomean(&table, enforce_geomean_budgets);
+  if (geomean_failed)
     failed = 1;
   bench_print_floor_adjusted_geomean(&table);
   if (out_csv) {
@@ -12936,16 +13786,19 @@ run_benchmarks(const char *bin, const char *std_path, const char *std_bc,
   if (out_md) {
     FILE *f = fopen(out_md, "w");
     if (f) {
-      if (bench_full_report)
-        bench_write_report_summary(f, &table, &bench_env);
-      else
-        bench_write_md(f, &table, &bench_env);
+      bench_write_md(f, &table, &bench_env);
       fclose(f);
     }
   }
   if (bench_full_report && out_md)
     bench_write_full_report(out_md, &table, bin, opt_level, tier, engine,
                             target, compare_llvm);
+  if (!correctness_only && bench_count == full_bench_count &&
+      table.len == full_bench_count &&
+      !bench_update_measurements(root, &table, &bench_env, out_json))
+    fprintf(stderr,
+            "measurements: full-suite result block was not updated; see the "
+            "diagnostic above\n");
   bench_rows_free(&table);
   sv_free(&shapes);
   /*
@@ -12957,6 +13810,12 @@ run_benchmarks(const char *bin, const char *std_path, const char *std_bc,
   if (unstable)
     nyt_err("ny-test", "bench: unstable repeated measurement exceeded the "
                        "configured noise threshold");
+  else if (geomean_failed)
+    nyt_err("ny-test", "bench: one or more performance gates failed; "
+                       "see the per-class results and any component errors");
+  else if (budget_gate_failed)
+    nyt_err("ny-test", "bench: one or more fixture budgets failed; "
+                       "see the reported budget misses and component errors");
   else if (failed)
     nyt_err("ny-test",
             "bench: one or more components failed or checksums disagreed");

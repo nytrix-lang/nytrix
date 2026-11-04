@@ -24,8 +24,7 @@ static size_t phiopt_label_pc(const nyr_func_t *f, int64_t label) {
 /*
  * An arm is deliberately restricted to LABEL, NOPs, and BR join.
  */
-static bool phiopt_empty_arm(const nyr_func_t *f, int64_t label,
-                             int64_t join) {
+static bool phiopt_empty_arm(const nyr_func_t *f, int64_t label, int64_t join) {
   size_t pc = phiopt_label_pc(f, label);
   if (pc == SIZE_MAX)
     return false;
@@ -181,9 +180,6 @@ bool nyr_phiopt(nyr_func_t *f) {
         invalid_selection++;
       continue;
     }
-    free(phi->phi_incoming);
-    phi->phi_incoming = NULL;
-    phi->phi_incoming_len = 0;
     nir_make_copy(phi, selected);
     if (trace)
       rewritten++;

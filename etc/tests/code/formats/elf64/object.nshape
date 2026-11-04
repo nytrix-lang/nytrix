@@ -3,7 +3,7 @@ shape x86_64_elf64_object_writer {
   generator "native"
   features ["native", "object", "elf", "x86_64", "nyir"]
   template ny-test-case
-  flags "--native-backend x86_64 --nyir-verify -emit-only -o /tmp/nytrix-native-elf64-object-smoke.o"
+  flags "--native-backend x86_64 --nyr-verify -emit-only -o /tmp/nytrix-native-elf64-object-smoke.o"
   expect compile_and_run
   source ny <<'NY'
 def x = 99

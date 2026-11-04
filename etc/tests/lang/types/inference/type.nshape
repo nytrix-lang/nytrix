@@ -20,6 +20,12 @@ use core.str
 use core.math.crypto.encoding.bytes
 use core.tbuf
 
+assert(ty.normalize_type_name("num") == "number",
+   "numeric alias resolves to its canonical name")
+assert(ty.type_group("number").len == 4 &&
+       ty.type_group_names().len >= 7 && ty.is_type_group("seq"),
+   "builtin type groups are seeded and queryable")
+
 ;; A user-defined nominal type must not inherit an ABI from its first letter.
 ;; This guards the compiler against classifying `image` as a raw integer merely
 ;; because its name starts with `i`.
@@ -789,7 +795,8 @@ fn test_layout_examples() {
    assert(TypeTextureInfo_load_index(tex_info) == 3, "shape load index")
    assert(TypeTextureInfo_load_texCoord(tex_info) == 1, "shape load tex coord")
    assert(TypeTextureInfo_load_scale(tex_info) == 0.5, "shape load f64")
-   assert(TypeTextureInfo_load_enabled(tex_info) == false, "shape load bool")
+   def bool tex_enabled = TypeTextureInfo_load_enabled(tex_info)
+   assert(tex_enabled == false, "shape load bool: " + to_str(tex_enabled))
    TypeTextureInfo_store(tex_info, 9, 2, 0.25, true)
    assert(TypeTextureInfo_load_index(tex_info) == 9, "shape derive store")
    free(tex_info)

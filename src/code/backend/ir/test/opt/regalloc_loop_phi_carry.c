@@ -267,6 +267,26 @@ int main(void) {
        header_phi->color == latch_phi->color &&
        preheader_source->color == latch_phi->color &&
        latch_source->color == latch_phi->color;
+  if (ok) {
+    nyr_mach_live_segment_t *mutable_latch = NULL;
+    for (size_t i = 0; i < alloc.segment_len; ++i)
+      if (alloc.segments[i].vreg == phi &&
+          alloc.segments[i].block == latch) {
+        mutable_latch = &alloc.segments[i];
+        break;
+      }
+    if (!mutable_latch) {
+      ok = false;
+    } else {
+      int saved_color = mutable_latch->color;
+      mutable_latch->color = (saved_color + 1) % (int)alloc.color_count;
+      bool accepted_broken_backedge =
+          nyr_mach_regalloc_verify(&mach, &alloc, NYR_MACH_REGCLASS_GPR);
+      mutable_latch->color = saved_color;
+      ok = !accepted_broken_backedge &&
+           nyr_mach_regalloc_verify(&mach, &alloc, NYR_MACH_REGCLASS_GPR);
+    }
+  }
   if (!ok)
     fprintf(stderr,
             "[regalloc-loop-phi-carry] loop incoming copies do not share a "

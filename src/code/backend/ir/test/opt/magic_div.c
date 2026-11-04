@@ -180,6 +180,58 @@ static bool verify_magic_division_splits_scratch_color_live_ranges(void) {
   return ok;
 }
 
+static bool verify_pow2_div_keeps_rcx_live_ranges_resident(void) {
+  nyr_mach_func_t mach = {0};
+  nyr_mach_reg_t dividend, divisor, divisor_copy, dynamic_divisor;
+  nyr_mach_reg_t quotient, remainder, dynamic_quotient;
+  uint32_t block = 0;
+  char err[256] = {0};
+  bool ok = nyr_mach_begin_block(&mach, 0, &block) && block == 0;
+  ok = ok && nyr_mach_alloc_typed_vreg(&mach, NYR_MACH_TYPE_I64, &dividend) &&
+       nyr_mach_alloc_typed_vreg(&mach, NYR_MACH_TYPE_I64, &divisor) &&
+       nyr_mach_alloc_typed_vreg(&mach, NYR_MACH_TYPE_I64, &divisor_copy) &&
+       nyr_mach_alloc_typed_vreg(&mach, NYR_MACH_TYPE_I64, &dynamic_divisor) &&
+       nyr_mach_alloc_typed_vreg(&mach, NYR_MACH_TYPE_I64, &quotient) &&
+       nyr_mach_alloc_typed_vreg(&mach, NYR_MACH_TYPE_I64, &remainder) &&
+       nyr_mach_alloc_typed_vreg(&mach, NYR_MACH_TYPE_I64, &dynamic_quotient) &&
+       emit(&mach, NYR_MACH_COPY, vreg(dividend), imm(123456),
+            (nyr_mach_operand_t){0}, NYR_MACH_EFFECT_NONE) &&
+       emit(&mach, NYR_MACH_COPY, vreg(divisor), imm(2),
+            (nyr_mach_operand_t){0}, NYR_MACH_EFFECT_NONE) &&
+       emit(&mach, NYR_MACH_COPY, vreg(divisor_copy), vreg(divisor),
+            (nyr_mach_operand_t){0}, NYR_MACH_EFFECT_NONE);
+  size_t div_pc = mach.inst_len;
+  ok = ok && emit(&mach, NYR_MACH_DIV, vreg(quotient), vreg(dividend),
+                  vreg(divisor_copy), NYR_MACH_EFFECT_NONE);
+  size_t mod_pc = mach.inst_len;
+  ok = ok && emit(&mach, NYR_MACH_MOD, vreg(remainder), vreg(dividend),
+                  vreg(divisor_copy), NYR_MACH_EFFECT_NONE);
+  ok = ok && emit(&mach, NYR_MACH_COPY, vreg(dynamic_divisor), vreg(dividend),
+                  (nyr_mach_operand_t){0}, NYR_MACH_EFFECT_NONE);
+  size_t dynamic_div_pc = mach.inst_len;
+  ok = ok && emit(&mach, NYR_MACH_DIV, vreg(dynamic_quotient), vreg(dividend),
+                  vreg(dynamic_divisor), NYR_MACH_EFFECT_NONE) &&
+       nyr_mach_verify(&mach, 0, err, sizeof(err));
+  uint64_t div_clobbers = 0, mod_clobbers = 0, dynamic_clobbers = 0;
+  ok = ok && nyr_mach_regalloc_fixed_clobbers(
+                 &mach, div_pc, NYR_MACH_REGCLASS_GPR, false, &div_clobbers) &&
+       nyr_mach_regalloc_fixed_clobbers(
+           &mach, mod_pc, NYR_MACH_REGCLASS_GPR, false, &mod_clobbers) &&
+       nyr_mach_regalloc_fixed_clobbers(&mach, dynamic_div_pc,
+                                        NYR_MACH_REGCLASS_GPR, false,
+                                        &dynamic_clobbers) &&
+       div_clobbers == (UINT64_C(1) << 7) /* R11 bias scratch */ &&
+       mod_clobbers == ((UINT64_C(1) << 10) | (UINT64_C(1) << 11)) &&
+       dynamic_clobbers == (UINT64_C(0xf) << 8);
+  if (!ok)
+    fprintf(stderr,
+            "[magic-div] verified clobber masks should distinguish constant "
+            "DIV/MOD and dynamic DIV: %s\n",
+            err[0] ? err : "incorrect fixed-register mask");
+  nyr_mach_func_free(&mach);
+  return ok;
+}
+
 static bool verify_call_clobbers_are_limited_to_live_through_values(void) {
   nyr_mach_func_t mach = {0};
   nyr_mach_regalloc_t alloc = {0};
@@ -286,8 +338,8 @@ static bool verify_nir_constant_pow2_division_lowers_immediate(void) {
   return ok && found;
 }
 
-static bool verify_strength_reduced_signed_pow2_division_fuses(void) {
-  const char *name = "magic-div-strength-reduced-signed-pow2";
+static bool verify_unproven_signed_pow2_division_fuses(void) {
+  const char *name = "magic-div-unproven-signed-pow2";
   nyr_func_t ir;
   nyr_mach_func_t mach = {0};
   char err[256] = {0};
@@ -308,8 +360,10 @@ static bool verify_strength_reduced_signed_pow2_division_fuses(void) {
   nyr_opt_ret(&ir, quotient);
   bool ok = nyr_opt_verify(&ir, name) && nyr_strength_reduce(&ir) &&
             nyr_opt_verify(&ir, "magic-div/strength-reduced");
+  size_t nir_div_count = 0;
   for (size_t i = 0; ok && i < ir.len; ++i)
-    ok = ir.data[i].op != NYIR_DIV_I64;
+    nir_div_count += ir.data[i].op == NYIR_DIV_I64;
+  ok = ok && nir_div_count == 0;
   ok = ok &&
        nyr_mach_lower_nir(&ir, &mach, NY_NATIVE_CAP_MACH_SDIV_POW2, err,
                           sizeof(err)) &&
@@ -328,9 +382,9 @@ static bool verify_strength_reduced_signed_pow2_division_fuses(void) {
   ok = ok && div_count == 1;
   if (!ok)
     fprintf(stderr,
-            "[magic-div] signed power-of-two quotient did not fuse to one "
-            "immediate machine DIV: %s\n",
-            err[0] ? err : "expected one signed DIV by immediate 2");
+            "[magic-div] signed power-of-two division was not fused to an "
+            "immediate: %s\n",
+            err[0] ? err : "expected a fused machine DIV with immediate 2");
   nyr_mach_func_free(&mach);
   nyr_ir_func_free(&ir);
   return ok;
@@ -340,9 +394,10 @@ int main(void) {
   if (!verify_fixed_register_result_is_colorable() ||
       !verify_nonclobbered_value_stays_resident_across_div() ||
       !verify_magic_division_splits_scratch_color_live_ranges() ||
+      !verify_pow2_div_keeps_rcx_live_ranges_resident() ||
       !verify_call_clobbers_are_limited_to_live_through_values() ||
       !verify_nir_constant_pow2_division_lowers_immediate() ||
-      !verify_strength_reduced_signed_pow2_division_fuses())
+      !verify_unproven_signed_pow2_division_fuses())
     return 1;
   nyr_mach_func_t mach = {0};
   nyr_mach_reg_t dividend, divisor, copy0, copy1, quotient, remainder;

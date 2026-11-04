@@ -42,7 +42,7 @@ fn create_texture_ex(
    def id = _gen_name("glGenTextures")
    if id <= 0 { return -1 }
    _bound_tex = -999999
-   bind_texture(id)
+   gl_state.bind_texture(id)
    _call3("glTexParameteri", GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, _filter_value(filter, true, use_mipmaps))
    _call3("glTexParameteri", GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, _filter_value(filter, false, false))
    _call3("glTexParameteri", GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, wrap_s)
@@ -68,7 +68,7 @@ fn update_texture_rect(int tex_id, int x, int y, int w, int h, any pixels) bool 
       if !dst { return false }
       return _soft_update_texture_pixels(dst, tw, x, y, w, h, pixels, int(meta.get("format", 37)))
    }
-   bind_texture(tex_id)
+   gl_state.bind_texture(tex_id)
    _call2("glPixelStorei", GL_UNPACK_ALIGNMENT, 1)
    _call9("glTexSubImage2D", GL_TEXTURE_2D, 0, x, y, w, h, _format_external(int(meta.get("format", 37))), GL_UNSIGNED_BYTE, pixels)
 }

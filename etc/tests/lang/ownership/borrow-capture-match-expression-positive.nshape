@@ -4,7 +4,7 @@ shape ownership_rule_borrow_capture_match_expression_positive {
   features ["ownership", "positive", "borrow", "closure", "match"]
   template ny-test-case
   expect compile_and_run
-  flags "--ownership-strict --nyir-verify"
+  flags "--ownership-strict --nyr-verify"
   source ny <<'NY'
 use core
 

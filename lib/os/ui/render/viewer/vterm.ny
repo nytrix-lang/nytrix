@@ -79,7 +79,7 @@ fn _terminal_prime_range(str text, int first, int last) str {
 fn _terminal_prime_text() str {
    "Builds the terminal atlas warmup string once."
    if _terminal_prime_text_cache.len > 0 { return _terminal_prime_text_cache }
-   mut text = TERMINAL_PRINTABLE_ASCII + "°±×÷·•…‹›←↑→↓↔↕▲△▴▵▶▷▸▹▼▽▾▿◀◁◂◃◆◇●○◦✓✔✗✘"
+   mut text = TERMINAL_PRINTABLE_ASCII + "°±×÷·•…‹›❯←↑→↓↔↕▲△▴▵▶▷▸▹▼▽▾▿◀◁◂◃◆◇●○◦✓✔✗✘"
    text = _terminal_prime_range(text, 0x2500, 0x257f) ;; box drawing
    text = _terminal_prime_range(text, 0x2580, 0x259f) ;; block elements
    text = _terminal_prime_range(text, 0x2800, 0x28ff) ;; braille graphs
@@ -88,6 +88,17 @@ fn _terminal_prime_text() str {
 }
 
 fn _vterm_cell_metrics(int font_id) list<f64> {
+   ;; The terminal can create its backing grid before a renderer and font atlas
+   ;; exist. Return stable 16 px cell metrics during that pre-window phase.
+   mut list<f64> cell = [9.0, 20.0]
+   if font_id != 0 { cell = _vterm_cell_metrics_loaded(font_id) }
+   cell
+}
+
+fn _vterm_cell_metrics_loaded(int font_id) list<f64> {
+   ;; The terminal creates its backing grid before the window and real font atlas
+   ;; exist. Avoid resolving the renderer's implicit default font during that
+   ;; pre-window phase; resize() recomputes metrics once a font is available.
    def f_obj = _font_get(font_id)
    def f_size = (f_obj != 0) ? float(f_obj.get("size", 16.0)) : 16.0
    def ascent  = (f_obj != 0) ? float(f_obj.get("ascent", f_size * 0.80)) : (f_size * 0.80)
@@ -683,7 +694,7 @@ fn new(int cols, int rows, dict fonts, int bg_color=0, int text_color=0) any {
    .set("kbd_stack_alt", [])
    def kg = {"images": dict(8), "inflight": dict(8), "placements": dict(8), "next_id": 1}
    vt = vt.set("kitty_graphics", kg)
-   def fr = fonts.get("regular")
+   def int fr = int(fonts.get("regular", 0))
    def cell = _vterm_cell_metrics(fr)
    def f64 cw = cell[0]
    def f64 ch = cell[1]
@@ -730,10 +741,10 @@ fn _init_palette(ptr p) any {
 }
 
 fn _clear_grid(ptr p, int cols, int rows, int fg, int bg) any {
-   mut i = 0 def n = cols * rows
-   while i < n {
+   def int n = cols * rows
+   for i in 0..(n - 1) {
       def off = i * 16 store32(p, 32, off) store32(p, fg, off + 4)
-      store32(p, bg, off + 8) store32(p, 0, off + 12) i += 1
+      store32(p, bg, off + 8) store32(p, 0, off + 12)
    }
    0
 }
@@ -1094,6 +1105,9 @@ fn idle_sleep_ms(dict vt, int now_ticks=-1) int {
 fn update(dict vt) dict {
    "Reads new PTY data and updates the terminal grid/state."
    mut nvt = vt
+   mut str csi_buf = ""
+   mut int csi_value = int(nvt.get("csi_value", 0))
+   mut int csi_has_value = bool(nvt.get("csi_has_value", false)) ? 1 : 0
    if int(nvt.get("last_update_bytes", 0)) != 0 {
       nvt = nvt.set("last_update_bytes", 0)
    }
@@ -1109,7 +1123,7 @@ fn update(dict vt) dict {
    mutex_lock(lk)
    def int end = load64_i(sh, 16)
    def int read_off = load64_i(sh, 48)
-   def avail = end - read_off
+   def int avail = end - read_off
    if avail <= 0 {
       if end != 0 || read_off != 0 {
          store64(sh, 0, 16)
@@ -1126,29 +1140,23 @@ fn update(dict vt) dict {
       return nvt
    }
    def int parse_limit = int(nvt.get("parse_bytes", 262144))
-   def int max_drain = parse_limit < 4096 ? 4096 : parse_limit
-   def int sz = avail < max_drain ? avail : max_drain
+   mut int max_drain = parse_limit
+   if max_drain < 4096 { max_drain = 4096 }
+   mut int sz = avail
+   if sz > max_drain { sz = max_drain }
    if sz <= 0 {
       mutex_unlock(lk)
       return nvt
    }
-   mut ptr t_buf = nvt.get("drain_buf", 0)
-   mut int t_cap = int(nvt.get("drain_cap", 0))
-   if t_cap < sz {
-      def new_cap = max(sz, t_cap * 2)
-      def ptr new_buf = t_buf ? realloc(t_buf, new_cap) : malloc(new_cap)
-      if !new_buf {
-         mutex_unlock(lk)
-         return nvt
-      }
-      t_buf = new_buf
-      t_cap = new_cap
-      nvt = nvt.set("drain_buf", t_buf)
-      nvt = nvt.set("drain_cap", t_cap)
-      t_buf = nvt.get("drain_buf", 0)
+   def ptr t_buf = malloc(sz)
+   if !t_buf {
+      mutex_unlock(lk)
+      return nvt
    }
    def ptr source = ptr_add(bp, read_off)
-   memmove(t_buf, source, sz)
+   for copy_i in 0..(sz - 1) {
+      store8(t_buf, load8(source, copy_i), copy_i)
+   }
    def int next_off = read_off + sz
    if next_off >= end {
       store64(sh, 0, 16)
@@ -1162,20 +1170,55 @@ fn update(dict vt) dict {
       _vterm_clear_selection_for_output(st)
    }
    mut u_len = load32(st, OFF_UTF8_LEN)
-   mut p = 0
+   mut int consumed_until = 0
    mut co = int(nvt.get("cols", 0))
    mut ro = int(nvt.get("rows", 0))
    mut ptr g = nvt.get("grid", 0)
    mut ptr pal = nvt.get("palette", 0)
    mut dfg = int(nvt.get("def_fg", SYS_TEXT))
    mut dbg = int(nvt.get("def_bg", SYS_BASE))
-   if co <= 0 || ro <= 0 || !g {
+   if co <= 0 {
       store32(st, 0, OFF_UTF8_LEN)
+      free(t_buf)
+      return nvt
+   }
+   if ro <= 0 {
+      store32(st, 0, OFF_UTF8_LEN)
+      free(t_buf)
+      return nvt
+   }
+   if !g {
+      store32(st, 0, OFF_UTF8_LEN)
+      free(t_buf)
       return nvt
    }
    _vterm_clamp_cursor(nvt, st, co, ro)
-   while p < sz {
-      def b = load8(t_buf, p) & 255
+   for byte_pos in 0..(sz - 1) {
+      def int b = load8(t_buf, byte_pos) & 255
+      def bool is_esc = b == 27
+      if is_esc {
+         store32(st, ESC_START, OFF_ESC_STATE)
+         continue
+      }
+      def bool is_cr = b == 13
+      def bool is_lf = b == 10
+      if is_cr {
+         store32(st, 0, OFF_CX)
+         consumed_until = byte_pos + 1
+         continue
+      }
+      if is_lf {
+         mut int cy = load32(st, OFF_CY)
+         def int bottom = load32(st, OFF_BOT)
+         if cy == bottom {
+            nvt = _tscrollup_fast(nvt, st, co, ro, g, dfg, dbg, load32(st, OFF_TOP), 1)
+         } else {
+            cy += 1
+            store32(st, cy, OFF_CY)
+         }
+         consumed_until = byte_pos + 1
+         continue
+      }
       if u_len > 0 {
          if (b & 0xC0) == 0x80 {
             store8(st, b, OFF_UTF8_BUF + u_len)
@@ -1207,7 +1250,7 @@ fn update(dict vt) dict {
          } else {
             nvt = _tputc_fast(nvt, st, co, ro, g, pal, dfg, dbg, 63)
             u_len = 0
-            p -= 1
+            consumed_until = byte_pos + 1
             co = int(nvt.get("cols", co))
             ro = int(nvt.get("rows", ro))
             g = nvt.get("grid", g)
@@ -1216,48 +1259,119 @@ fn update(dict vt) dict {
             dbg = int(nvt.get("def_bg", dbg))
          }
       } else {
-         if load32(st, OFF_ESC_STATE) == 0 && load8(st, OFF_INSERT) == 0 && b >= 32 && b < 127 {
-            mut run_end = p + 1
-            while run_end < sz {
-               def nb = load8(t_buf, run_end) & 255
-               if nb < 32 || nb >= 127 { break }
-               run_end += 1
-            }
-            nvt = _tput_ascii_run_fast(nvt, st, co, ro, g, dfg, dbg, t_buf, p, run_end - p)
-            co = int(nvt.get("cols", co))
-            ro = int(nvt.get("rows", ro))
-            g = nvt.get("grid", g)
-            pal = nvt.get("palette", pal)
-            dfg = int(nvt.get("def_fg", dfg))
-            dbg = int(nvt.get("def_bg", dbg))
-            p = run_end
+         def bool is_cr = b == 13
+         def bool is_lf = b == 10
+         if is_cr {
+            store32(st, 0, OFF_CX)
+            consumed_until = byte_pos + 1
             continue
          }
-         if (b & 0x80) == 0 {
-            nvt = _tputc_fast(nvt, st, co, ro, g, pal, dfg, dbg, b)
-            co = int(nvt.get("cols", co))
-            ro = int(nvt.get("rows", ro))
-            g = nvt.get("grid", g)
-            pal = nvt.get("palette", pal)
-            dfg = int(nvt.get("def_fg", dfg))
-            dbg = int(nvt.get("def_bg", dbg))
-         } elif (b & 0xE0) == 0xC0 || (b & 0xF0) == 0xE0 || (b & 0xF8) == 0xF0 {
-            store8(st, b, OFF_UTF8_BUF)
-            u_len = 1
+         if is_lf {
+            mut int cy = load32(st, OFF_CY)
+            def int bottom = load32(st, OFF_BOT)
+            if cy == bottom {
+               nvt = _tscrollup_fast(nvt, st, co, ro, g, dfg, dbg, load32(st, OFF_TOP), 1)
+            } else {
+               cy += 1
+               store32(st, cy, OFF_CY)
+            }
+            consumed_until = byte_pos + 1
+            continue
+         }
+         def bool starts_csi = load32(st, OFF_ESC_STATE) == ESC_START && b == 91
+         if starts_csi {
+            store32(st, ESC_CSI, OFF_ESC_STATE)
+            store8(st, 0, OFF_CSI_PRIV)
+            csi_buf = ""
+            csi_value = 0
+            csi_has_value = 0
+         } elif load32(st, OFF_ESC_STATE) == ESC_CSI {
+            mut bool csi_final = b >= 64
+            if csi_final { csi_final = b <= 126 }
+            if csi_final {
+               nvt = _tcsihandle_fast(nvt, st, co, ro, g, pal, dfg, dbg, b, csi_has_value != 0 ? to_str(csi_value) : "")
+               csi_buf = ""
+               csi_value = 0
+               csi_has_value = 0
+               store32(st, 0, OFF_ESC_STATE)
+               store8(st, 0, OFF_CSI_PRIV)
+               consumed_until = byte_pos + 1
+               continue
+            }
+            mut bool digit = b >= 48
+            if digit { digit = b <= 57 }
+            if digit {
+               csi_value = csi_value * 10 + b - 48
+               csi_has_value = 1
+            } else {
+               if b == 59 || b == 58 {
+                  csi_value = 0
+                  csi_has_value = 0
+               }
+            }
+            consumed_until = byte_pos + 1
+            continue
          } else {
-            nvt = _tputc_fast(nvt, st, co, ro, g, pal, dfg, dbg, 63)
-            co = int(nvt.get("cols", co))
-            ro = int(nvt.get("rows", ro))
-            g = nvt.get("grid", g)
-            pal = nvt.get("palette", pal)
-            dfg = int(nvt.get("def_fg", dfg))
-            dbg = int(nvt.get("def_bg", dbg))
+            def bool escape_active = load32(st, OFF_ESC_STATE) != 0
+            if escape_active {
+               nvt = _tputc_fast(nvt, st, co, ro, g, pal, dfg, dbg, b)
+               consumed_until = byte_pos + 1
+               continue
+            }
+            def bool is_control = b < 32
+            if is_control {
+               nvt = _tputc_fast(nvt, st, co, ro, g, pal, dfg, dbg, b)
+               consumed_until = byte_pos + 1
+               continue
+            }
+            if b == 127 {
+               nvt = _tputc_fast(nvt, st, co, ro, g, pal, dfg, dbg, b)
+               consumed_until = byte_pos + 1
+               continue
+            }
+            def bool no_esc = true
+            def bool no_insert = int(load8(st, OFF_INSERT)) == 0
+            def bool printable_lo = b >= 32
+            def bool printable_hi = b < 127
+            if no_esc {
+               if no_insert {
+                  if printable_lo {
+                     if printable_hi {
+                        nvt = _tput_ascii_run_fast(nvt, st, co, ro, g, dfg, dbg, t_buf, byte_pos, 1)
+                        consumed_until = byte_pos + 1
+                        continue
+                     }
+                  }
+               }
+            }
+            if (b & 0x80) == 0 {
+               nvt = _tputc_fast(nvt, st, co, ro, g, pal, dfg, dbg, b)
+               co = int(nvt.get("cols", co))
+               ro = int(nvt.get("rows", ro))
+               g = nvt.get("grid", g)
+               pal = nvt.get("palette", pal)
+               dfg = int(nvt.get("def_fg", dfg))
+               dbg = int(nvt.get("def_bg", dbg))
+            } elif (b & 0xE0) == 0xC0 || (b & 0xF0) == 0xE0 || (b & 0xF8) == 0xF0 {
+               store8(st, b, OFF_UTF8_BUF)
+               u_len = 1
+            } else {
+               nvt = _tputc_fast(nvt, st, co, ro, g, pal, dfg, dbg, 63)
+               co = int(nvt.get("cols", co))
+               ro = int(nvt.get("rows", ro))
+               g = nvt.get("grid", g)
+               pal = nvt.get("palette", pal)
+               dfg = int(nvt.get("def_fg", dfg))
+               dbg = int(nvt.get("def_bg", dbg))
+            }
          }
       }
-      p += 1
+      consumed_until = byte_pos + 1
    }
    store32(st, u_len, OFF_UTF8_LEN)
    _vterm_clamp_cursor(nvt, st, co, ro)
+   nvt = nvt.set("esc_buf", csi_buf).set("csi_value", csi_value).set("csi_has_value", csi_has_value)
+   free(t_buf)
    nvt
 }
 
@@ -1675,63 +1789,84 @@ fn _tputc_fast(dict vt, ptr st, int co, int ro, ptr g, ptr pal, int dfg, int dbg
       if u < 32 || u == 127 { return _tcontrolcode_fast(vt, st, co, ro, g, pal, dfg, dbg, u) }
       else { return _tputc_raw_fast(vt, st, co, ro, g, u) }
    } elif s_state == ESC_START {
-      if u == 91 { store32(st, ESC_CSI, OFF_ESC_STATE) store8(st, 0, OFF_CSI_PRIV) return vt.set("esc_buf", "") }
+      def bool csi_start = u == 91
+      if csi_start { store32(st, ESC_CSI, OFF_ESC_STATE) store8(st, 0, OFF_CSI_PRIV) return vt.set("esc_buf", "") }
       if _esc_is_altcharset(u) { store32(st, ESC_ALTCHARSET, OFF_ESC_STATE) return vt }
       if _esc_is_string_start(u) {
          store8(st, u, OFF_ESC_STR_KIND)
          store32(st, ESC_STR, OFF_ESC_STATE)
          return vt.set("esc_buf", "")
       }
-      if u == 99 {
+      def bool reset_terminal = u == 99
+      if reset_terminal {
          _tresetattr_fast(st, dfg, dbg) _tclearregion_fast(st, co, ro, g, dfg, dbg, 0, 0, co - 1, ro - 1)
          store32(st, 0, OFF_CX) store32(st, 0, OFF_CY)
          store32(st, 0, OFF_TOP) store32(st, ro - 1, OFF_BOT)
          store32(st, MODE_WRAP | MODE_UTF8, OFF_MODE) store32(st, 0, OFF_ESC_STATE) return vt
       }
-      if u == 68 { mut nvt = _tnewline_fast(vt, st, co, ro, g, dfg, dbg, false)
+      def bool index_down = u == 68
+      if index_down { mut nvt = _tnewline_fast(vt, st, co, ro, g, dfg, dbg, false)
          store32(st, 0, OFF_ESC_STATE)
          return nvt }
-      if u == 69 {
+      def bool next_line = u == 69
+      if next_line {
          mut nvt = _tnewline_fast(vt, st, co, ro, g, dfg, dbg, true)
          store32(st, 0, OFF_ESC_STATE)
          return nvt
       }
-      if u == 77 {
+      def bool reverse_index = u == 77
+      if reverse_index {
          mut cy = load32(st, OFF_CY)
          mut nvt = vt
          if cy == load32(st, OFF_TOP) { nvt = _tscrolldown_fast(vt, st, co, ro, g, dfg, dbg, load32(st, OFF_TOP), 1) }
          else { store32(st, cy - 1, OFF_CY) }
          store32(st, 0, OFF_ESC_STATE) return nvt
       }
-      if u == 55 {
+      def bool save_cursor = u == 55
+      if save_cursor {
          store32(st, load32(st, OFF_CX), OFF_SAVED_CX) store32(st, load32(st, OFF_CY), OFF_SAVED_CY)
          store32(st, load32(st, OFF_CUR_FG), OFF_SAVED_FG) store32(st, load32(st, OFF_CUR_BG), OFF_SAVED_BG)
          store32(st, load32(st, OFF_CUR_MODE), OFF_SAVED_MODE) store32(st, 0, OFF_ESC_STATE) return vt
       }
-      if u == 56 {
+      def bool restore_cursor = u == 56
+      if restore_cursor {
          store32(st, load32(st, OFF_SAVED_CX), OFF_CX) store32(st, load32(st, OFF_SAVED_CY), OFF_CY)
          store32(st, load32(st, OFF_SAVED_FG), OFF_CUR_FG) store32(st, load32(st, OFF_SAVED_BG), OFF_CUR_BG)
          store32(st, load32(st, OFF_SAVED_MODE), OFF_CUR_MODE) store32(st, 0, OFF_ESC_STATE) return vt
       }
       store32(st, 0, OFF_ESC_STATE) return vt
    } elif s_state == ESC_CSI {
-      if u >= 64 && u <= 126 {
+      def bool csi_final = u >= 64 && u <= 126
+      if csi_final {
          mut nvt = _tcsihandle_fast(vt, st, co, ro, g, pal, dfg, dbg, u, vt.get("esc_buf"))
          store32(st, 0, OFF_ESC_STATE)
          store8(st, 0, OFF_CSI_PRIV)
          return nvt
       }
       else {
-         if u >= 60 && u <= 63 {
+         def bool csi_private = u >= 60 && u <= 63
+         if csi_private {
             store8(st, u, OFF_CSI_PRIV)
             return vt.set("esc_buf", chr(u))
          }
-         if (u >= 48 && u <= 57) || u == 59 || u == 58 { return vt.set("esc_buf", vt.get("esc_buf") + chr(u)) }
+         def bool csi_digit = u >= 48 && u <= 57
+         def bool csi_semicolon = u == 59
+         def bool csi_colon = u == 58
+         if csi_digit { return vt.set("esc_buf", vt.get("esc_buf") + chr(u)) }
+         if csi_semicolon { return vt.set("esc_buf", vt.get("esc_buf") + chr(u)) }
+         if csi_colon { return vt.set("esc_buf", vt.get("esc_buf") + chr(u)) }
          return vt
       }
    } elif s_state == ESC_STR {
       def kind = load8(st, OFF_ESC_STR_KIND)
-      if u == 0x9c || (kind == 93 && u == 7) {
+      def bool string_end = u == 0x9c
+      def bool bell_end = kind == 93 && u == 7
+      if string_end {
+         mut nvt = _tstrhandle(vt, kind, vt.get("esc_buf"))
+         store32(st, 0, OFF_ESC_STATE)
+         store8(st, 0, OFF_ESC_STR_KIND)
+         return nvt
+      } elif bell_end {
          mut nvt = _tstrhandle(vt, kind, vt.get("esc_buf"))
          store32(st, 0, OFF_ESC_STATE)
          store8(st, 0, OFF_ESC_STR_KIND)
@@ -1989,7 +2124,7 @@ fn _tputc_raw_fast(dict vt, ptr st, int co, int ro, ptr g, int u) any {
    nvt
 }
 
-fn _tput_ascii_run_fast(dict vt, ptr st, int co, int ro, ptr g, int dfg, int dbg, any src, int start, int count) any {
+fn _tput_ascii_run_fast(dict vt, ptr st, int co, int ro, ptr g, int dfg, int dbg, ptr src, int start, int count) any {
    if count <= 0 { return vt }
    mut nvt = vt
    mut cx, cy = load32(st, OFF_CX), load32(st, OFF_CY)
@@ -1999,8 +2134,7 @@ fn _tput_ascii_run_fast(dict vt, ptr st, int co, int ro, ptr g, int dfg, int dbg
    def fg = load32(st, OFF_CUR_FG)
    def bg = load32(st, OFF_CUR_BG)
    def md = load32(st, OFF_CUR_MODE) & ~ATTR_WIDE & ~ATTR_WDUMMY & ~ATTR_IMAGE
-   mut i = 0
-   while i < count {
+   for run_i in 0..(count - 1) {
       if cx >= co {
          if wrap {
             cx = 0
@@ -2015,24 +2149,14 @@ fn _tput_ascii_run_fast(dict vt, ptr st, int co, int ro, ptr g, int dfg, int dbg
             cx = co - 1
          }
       }
-      mut span = min(count - i, co - cx)
-      if span <= 0 { span = 1 }
-      mut j = 0
-      while j < span {
-         def cp = load8(src, start + i + j) & 255
-         def off = (cy * co + cx + j) * 16
-         store32(g, cp, off)
-         store32(g, fg, off + 4)
-         store32(g, bg, off + 8)
-         store32(g, md, off + 12)
-         j += 1
-      }
-      store32(st, load8(src, start + i + span - 1) & 255, OFF_LAST_CHAR_C)
-      cx += span
-      i += span
-      if !wrap && cx >= co && i < count {
-         i = count
-      }
+      def int cp = load8(src, start + run_i) & 255
+      def int off = (cy * co + cx) * 16
+      store32(g, cp, off)
+      store32(g, fg, off + 4)
+      store32(g, bg, off + 8)
+      store32(g, md, off + 12)
+      store32(st, cp, OFF_LAST_CHAR_C)
+      cx += 1
    }
    store32(st, cx, OFF_CX)
    store32(st, cy, OFF_CY)
@@ -2140,12 +2264,19 @@ fn _tcsi_args(str buf) list {
       if load8(norm_buf, bi2) == 58 { norm_buf = str.str_slice(norm_buf, 0, bi2) + ";" + str.str_slice(norm_buf, bi2 + 1, norm_buf.len) }
       bi2 += 1
    }
-   def pt = str.split(norm_buf, ";")
    mut ag = []
-   mut i = 0
-   while i < pt.len {
-      def p = str.strip(pt.get(i))
-      ag = ag.append((p.len > 0) ? str.atoi(p) : 0)
+   def int n = norm_buf.len
+   mut int i = 0
+   while i < n {
+      while i < n && load8(norm_buf, i) <= 32 { i += 1 }
+      if i >= n { break }
+      mut int acc = 0
+      while i < n && load8(norm_buf, i) >= 48 && load8(norm_buf, i) <= 57 {
+         acc = acc * 10 + (load8(norm_buf, i) - 48)
+         i += 1
+      }
+      ag = ag.append(acc)
+      while i < n && load8(norm_buf, i) != 59 { i += 1 }
       i += 1
    }
    [ag, (ag.len > 0) ? ag.get(0) : 0, (ag.len > 1) ? ag.get(1) : 0]
@@ -2317,7 +2448,8 @@ fn _tcsihandle_fast(dict vt, ptr st, int co, int ro, ptr g, ptr pal, int dfg, in
    }
    def cleared = _tcsi_clear_ops(vt, st, co, ro, g, dfg, dbg, u, a0)
    if cleared != nil { return cleared }
-   if u == 109 {
+   def bool sgr_command = u == 109
+   if sgr_command {
       _tsetattr_fast(st, pal, dfg, dbg, ag)
       return vt
    }
@@ -2352,20 +2484,24 @@ fn _tcsihandle_fast(dict vt, ptr st, int co, int ro, ptr g, ptr pal, int dfg, in
 }
 
 fn _tsetattr_fast(ptr st, ptr pal, int dfg, int dbg, list ag) any {
-   mut int i = 0 def int n = ag.len if n == 0 { _tresetattr_fast(st, dfg, dbg) return 0 }
+   mut int i = 0
+   def int n = ag.len
+   if n == 0 { _tresetattr_fast(st, dfg, dbg) return 0 }
    while i < n {
-      def a = ag.get(i)
-      mut md = load32(st, OFF_CUR_MODE)
+      def int a = int(ag.get(i, 0))
+      mut int md = load32(st, OFF_CUR_MODE)
       if a == 0 { _tresetattr_fast(st, dfg, dbg) }
       elif a == 1 { store32(st, md | ATTR_BOLD, OFF_CUR_MODE) }
       elif a == 2 { store32(st, md | ATTR_FAINT, OFF_CUR_MODE) }
       elif a == 3 { store32(st, md | ATTR_ITALIC, OFF_CUR_MODE) }
-      elif a == 4 || a == 21 { store32(st, md | ATTR_UNDERLINE, OFF_CUR_MODE) }
-      elif a == 5 || a == 6 { store32(st, md | ATTR_BLINK, OFF_CUR_MODE) }
+      elif a == 4 { store32(st, md | ATTR_UNDERLINE, OFF_CUR_MODE) }
+      elif a == 21 { store32(st, md | ATTR_UNDERLINE, OFF_CUR_MODE) }
+      elif a == 5 { store32(st, md | ATTR_BLINK, OFF_CUR_MODE) }
+      elif a == 6 { store32(st, md | ATTR_BLINK, OFF_CUR_MODE) }
       elif a == 7 { store32(st, md | ATTR_REVERSE, OFF_CUR_MODE) }
       elif a == 8 { store32(st, md | ATTR_INVIS, OFF_CUR_MODE) }
       elif a == 9 { store32(st, md | ATTR_STRIKE, OFF_CUR_MODE) }
-      elif a == 22 { store32(st, md & ~(ATTR_BOLD|ATTR_FAINT), OFF_CUR_MODE) }
+      elif a == 22 { store32(st, md & ~(ATTR_BOLD | ATTR_FAINT), OFF_CUR_MODE) }
       elif a == 23 { store32(st, md & ~ATTR_ITALIC, OFF_CUR_MODE) }
       elif a == 24 { store32(st, md & ~ATTR_UNDERLINE, OFF_CUR_MODE) }
       elif a == 25 { store32(st, md & ~ATTR_BLINK, OFF_CUR_MODE) }
@@ -2373,33 +2509,64 @@ fn _tsetattr_fast(ptr st, ptr pal, int dfg, int dbg, list ag) any {
       elif a == 28 { store32(st, md & ~ATTR_INVIS, OFF_CUR_MODE) }
       elif a == 29 { store32(st, md & ~ATTR_STRIKE, OFF_CUR_MODE) }
       elif a == 53 { store32(st, md | ATTR_STRIKE, OFF_CUR_MODE) }
-      elif a >= 30 && a <= 37 {
-         mut idx = a - 30
-         if (md & ATTR_BOLD) != 0 { idx += 8 }
-         store32(st, load32(pal, idx * 4), OFF_CUR_FG)
-      }
-      elif a == 39 { store32(st, dfg, OFF_CUR_FG) }
-      elif a >= 40 && a <= 47 {
-         mut idx = a - 40
-         if (md & ATTR_BOLD) != 0 { idx += 8 }
-         store32(st, load32(pal, idx * 4), OFF_CUR_BG)
-      }
-      elif a == 49 { store32(st, dbg, OFF_CUR_BG) }
-      elif a >= 90 && a <= 97 { store32(st, load32(pal, (a-90+8)*4), OFF_CUR_FG) }
-      elif a >= 100 && a <= 107 { store32(st, load32(pal, (a-100+8)*4), OFF_CUR_BG) }
-      elif a == 38 || a == 48 {
-         if i + 2 < n {
-            def t = ag.get(i + 1)
-            if t == 5 { store32(st, load32(pal, ag.get(i+2)*4), (a==38)?OFF_CUR_FG:OFF_CUR_BG) i += 2 }
-            elif t == 2 && i+4 < n {
-               def int red = ag.get(i + 2)
-               def int green = ag.get(i + 3)
-               def int blue = ag.get(i + 4)
-               def c = color_pack(float(red)/255.0, float(green)/255.0, float(blue)/255.0, 1.0)
-               store32(st, c, (a==38)?OFF_CUR_FG:OFF_CUR_BG) i += 4
+      else {
+         mut bool foreground_ansi = a >= 30
+         if foreground_ansi { foreground_ansi = a <= 37 }
+         if foreground_ansi {
+            mut int idx = a - 30
+            if (md & ATTR_BOLD) != 0 { idx += 8 }
+            store32(st, load32(pal, idx * 4), OFF_CUR_FG)
+         } else {
+            mut bool background_ansi = a >= 40
+            if background_ansi { background_ansi = a <= 47 }
+            if background_ansi {
+               mut int idx = a - 40
+               if (md & ATTR_BOLD) != 0 { idx += 8 }
+               store32(st, load32(pal, idx * 4), OFF_CUR_BG)
+            } else {
+               mut bool bright_fg = a >= 90
+               if bright_fg { bright_fg = a <= 97 }
+               if bright_fg {
+                  store32(st, load32(pal, (a - 90 + 8) * 4), OFF_CUR_FG)
+               } else {
+                  mut bool bright_bg = a >= 100
+                  if bright_bg { bright_bg = a <= 107 }
+                  if bright_bg {
+                     store32(st, load32(pal, (a - 100 + 8) * 4), OFF_CUR_BG)
+                  } elif a == 39 {
+                     store32(st, dfg, OFF_CUR_FG)
+                  } elif a == 49 {
+                     store32(st, dbg, OFF_CUR_BG)
+                  } else {
+                     def bool ext_fg = a == 38
+                     def bool ext_bg = a == 48
+                     if ext_fg || ext_bg {
+                        if i + 2 < n {
+                           def int kind = int(ag.get(i + 1))
+                           if kind == 5 {
+                              def int color = load32(pal, int(ag.get(i + 2)) * 4)
+                              if ext_fg { store32(st, color, OFF_CUR_FG) }
+                              else { store32(st, color, OFF_CUR_BG) }
+                              i += 2
+                           } elif kind == 2 {
+                              if i + 4 < n {
+                                 def int red = int(ag.get(i + 2))
+                                 def int green = int(ag.get(i + 3))
+                                 def int blue = int(ag.get(i + 4))
+                                 def color = color_pack(float(red) / 255.0, float(green) / 255.0, float(blue) / 255.0, 1.0)
+                                 if ext_fg { store32(st, color, OFF_CUR_FG) }
+                                 else { store32(st, color, OFF_CUR_BG) }
+                                 i += 4
+                              }
+                           }
+                        }
+                     }
+                  }
+               }
             }
          }
-      } i += 1
+      }
+      i += 1
    }
    0
 }
@@ -3110,9 +3277,10 @@ fn send_input(dict vt, str s) any {
    "Sends terminal input, retrying short writes so paste/repeat bursts are not truncated."
    def m = vt.get("master_fd")
    if m < 0 || s.len <= 0 { return 0 }
+   def bytes = cptr(s)
    mut off = 0
    while off < s.len {
-      match sys.sys_write(m, to_int(s) + off, s.len - off) {
+      match sys.sys_write(m, ptr_add(bytes, off), s.len - off) {
          ok(w) -> {
             if w <= 0 { return 0 }
             off += w
@@ -3154,6 +3322,10 @@ fn _get_scratch(int len) any {
 fn _cp_to_str(int cp, list acache) str {
    if cp < 0 || cp > 0x10ffff { return "" }
    if cp < 128 && cp < acache.len { return acache.get(cp, "") }
+   ;; The common right-angle shell prompt glyph is absent from several bundled
+   ;; mono fonts. Use its supported single-cell chevron so the prompt stays
+   ;; legible instead of drawing a missing-glyph box.
+   if cp == 0x276f { return "›" }
    chr(cp)
 }
 
@@ -3262,11 +3434,12 @@ fn _vterm_draw_scrollbar(ptr st, int ro, int hist_len, int scroll_off, any vis, 
    draw_rect(sb_x, thumb_y, sb_w, thumb_h, (scroll_off > 0) ? 0xDD999999 : 0x88999999)
 }
 
-fn _vterm_draw_cpu(dict vt, ptr st, int co, int ro, ptr g, list history, int hist_len, int scroll_off, f64 scroll_frac_r, f64 cw, f64 ch, f64 wh, f64 px, f64 py, int f_reg, f64 gy_reg, any db) any {
+fn _vterm_draw_cpu(dict vt, ptr st, int co, int ro, ptr g, list history, int hist_len, int scroll_off, f64 scroll_frac_r, f64 cw, f64 ch, f64 wh, f64 px, f64 py, int f_reg, f64 gy_reg, any db, bool replay_bars=false) any {
    def acache = vt.get("ascii_cache", [])
    def sel_bg = _vterm_overlay_color(vt, "sel_bg", 0x70aa5544)
    def sel_active = _vterm_selection_visible(vt, st)
    mut text_runs = []
+   mut row_bars = []
    mut s_col, s_row = load32(st, OFF_SEL_SX), load32(st, OFF_SEL_SY)
    mut e_col, e_row = load32(st, OFF_SEL_EX), load32(st, OFF_SEL_EY)
    if sel_active && (s_row > e_row || (s_row == e_row && s_col > e_col)) {
@@ -3293,6 +3466,9 @@ fn _vterm_draw_cpu(dict vt, ptr st, int co, int ro, ptr g, list history, int his
       mut run_x = 0.0
       mut run_fg = 0
       mut run_active = false
+      mut replay_x = 0.0
+      mut replay_fg = 0
+      mut replay_cells = 0
       while c < co {
          def off = c * 16
          def cp = load32(line_ptr, off)
@@ -3311,6 +3487,8 @@ fn _vterm_draw_cpu(dict vt, ptr st, int co, int ro, ptr g, list history, int his
          def rx = floor(px + float(c) * cw + 0.5)
          if rbg != db && rbg != 0 && (rbg & 0xFF000000) != 0 { draw_rect(rx, ry, cw, ch, rbg) }
          if text_visible {
+            if replay_cells == 0 { replay_x = rx replay_fg = rfg }
+            replay_cells += 1
             if !run_active || run_fg != rfg {
                if run_active {
                   text_runs = text_runs.append(str.builder_to_str(run_bld))
@@ -3340,10 +3518,28 @@ fn _vterm_draw_cpu(dict vt, ptr st, int co, int ro, ptr g, list history, int his
          text_runs = text_runs.append(ry + gy_reg)
          text_runs = text_runs.append(run_fg)
       }
+      if replay_cells > 0 {
+         row_bars = row_bars.append(replay_x)
+         row_bars = row_bars.append(ry)
+         row_bars = row_bars.append(replay_fg)
+         row_bars = row_bars.append(replay_cells)
+      }
       r += 1
    }
    if text_runs.len > 0 {
-      draw_text_runs_flat_colors(f_reg, text_runs)
+      if replay_bars {
+         mut i = 0
+         while i + 3 < row_bars.len {
+            def x = float(row_bars.get(i, 0.0))
+            def y = float(row_bars.get(i + 1, 0.0))
+            def color = int(row_bars.get(i + 2, 0))
+            def cells = int(row_bars.get(i + 3, 0))
+            draw_rect_fast(x, y + 8.0, min(max(3.0, float(cells) * 6.5), 4096.0), 2.0, color)
+            i += 4
+         }
+      } else {
+         draw_text_runs_flat_colors(f_reg, text_runs)
+      }
    }
    if load8(st, OFF_CURSOR_VISIBLE) != 0 && scroll_off == 0 && !sel_active {
       _vterm_clamp_cursor(vt, st, co, ro)
@@ -3592,12 +3788,16 @@ fn draw(dict vt, any ww, any wh) any {
    def scroll_frac = vis - float(scroll_i)
    def scroll_frac_r = _snap_scroll_frac(scroll_frac, ch)
    def scroll_off = scroll_i
+   def mock_text_mode = common.env_lower("NY_UI_MOCK_TEXT_FAST")
+   def replay_bars = get_active_backend() == BACKEND_MOCK &&
+   common.env_truthy("NYTRIX_UI_REPLAY") &&
+   (mock_text_mode == "bar" || mock_text_mode == "bars")
    set_unlit(true)
    if get_active_backend() != BACKEND_MOCK { texture_bind_default() }
    draw_rect(px, py, ww, wh, db)
    ;; Keep VTerm on the shared batched text path. The packed atlas line path
    ;; corrupts terminal glyphs on both GL and Vulkan backends.
-   _vterm_draw_cpu(vt, st, co, ro, g, history, hist_len, scroll_off, scroll_frac_r, cw, ch, wh, px, py, f_reg, gy_reg, db)
+   _vterm_draw_cpu(vt, st, co, ro, g, history, hist_len, scroll_off, scroll_frac_r, cw, ch, wh, px, py, f_reg, gy_reg, db, replay_bars)
    _kg_draw_visible_images(vt, co, ro, g, history, hist_len, scroll_off, scroll_frac_r, cw, ch, wh)
    _vterm_draw_scrollbar(st, ro, hist_len, scroll_off, vis, ww, wh, px, py)
    vt
@@ -4353,30 +4553,56 @@ fn _decode_utf8_pending(ptr st, int len) int {
 
 fn put_text(dict vt, str s) dict {
    "Writes write."
-   def ptr st = vt.get("state") def co = vt.get("cols") def ro = vt.get("rows") def ptr g = vt.get("grid")
+   def ptr st = vt.get("state") def int co = int(vt.get("cols")) def int ro = int(vt.get("rows")) def ptr g = vt.get("grid")
    def ptr pal = vt.get("palette") def dfg = vt.get("def_fg") def dbg = vt.get("def_bg")
-   mut i = 0
-   def n = s.len
+   def ptr src = cptr(s)
+   mut int consumed_until = 0
+   def int n = s.len
    mut nvt = vt
    if n > 0 { _vterm_clear_selection_for_output(st) }
-   while i < n {
-      def b0 = load8(s, i) & 255
-      if load32(st, OFF_ESC_STATE) == 0 && load8(st, OFF_INSERT) == 0 && b0 >= 32 && b0 < 127 {
-         mut run_end = i + 1
-         while run_end < n {
-            def nb = load8(s, run_end) & 255
-            if nb < 32 || nb >= 127 { break }
-            run_end += 1
+   for byte_i in 0..(n - 1) {
+      if byte_i < consumed_until { continue }
+      def int i = byte_i
+      def int b0 = load8(src, i) & 255
+      def bool is_cr = b0 == 13
+      def bool is_lf = b0 == 10
+      def bool no_esc = int(load32(st, OFF_ESC_STATE)) == 0
+      def bool no_insert = int(load8(st, OFF_INSERT)) == 0
+      def bool printable_lo = b0 >= 32
+      def bool printable_hi = b0 < 127
+      if no_esc {
+         if no_insert {
+            if printable_lo {
+               if printable_hi {
+                  nvt = _tput_ascii_run_fast(nvt, st, co, ro, g, dfg, dbg, src, i, 1)
+                  consumed_until = i + 1
+                  continue
+               }
+            }
          }
-         nvt = _tput_ascii_run_fast(nvt, st, co, ro, g, dfg, dbg, s, i, run_end - i)
-         i = run_end
+      }
+      if is_cr {
+         store32(st, 0, OFF_CX)
+         consumed_until = i + 1
          continue
       }
-      mut cp = b0
-      mut w = 1
+      if is_lf {
+         mut int cy = load32(st, OFF_CY)
+         def int bottom = load32(st, OFF_BOT)
+         if cy == bottom {
+            nvt = _tscrollup_fast(nvt, st, co, ro, g, dfg, dbg, load32(st, OFF_TOP), 1)
+         } else {
+            cy += 1
+            store32(st, cy, OFF_CY)
+         }
+         consumed_until = i + 1
+         continue
+      }
+      mut int cp = b0
+      mut int w = 1
       if (b0 & 0x80) != 0 {
          if b0 >= 194 && b0 <= 223 && i + 1 < n {
-            def b1 = load8(s, i + 1) & 255
+            def b1 = load8(src, i + 1) & 255
             if _utf8_cont_byte(b1) {
                cp = ((b0 & 31) << 6) | (b1 & 63)
                w = 2
@@ -4384,8 +4610,8 @@ fn put_text(dict vt, str s) dict {
                cp = 63
             }
          } elif b0 >= 224 && b0 <= 239 && i + 2 < n {
-            def b1 = load8(s, i + 1) & 255
-            def b2 = load8(s, i + 2) & 255
+            def b1 = load8(src, i + 1) & 255
+            def b2 = load8(src, i + 2) & 255
             if _utf8_cont_byte(b1) && _utf8_cont_byte(b2) && !(b0 == 224 && b1 < 160) && !(b0 == 237 && b1 >= 160) {
                cp = ((b0 & 15) << 12) | ((b1 & 63) << 6) | (b2 & 63)
                w = 3
@@ -4393,9 +4619,9 @@ fn put_text(dict vt, str s) dict {
                cp = 63
             }
          } elif b0 >= 240 && b0 <= 244 && i + 3 < n {
-            def b1 = load8(s, i + 1) & 255
-            def b2 = load8(s, i + 2) & 255
-            def b3 = load8(s, i + 3) & 255
+            def b1 = load8(src, i + 1) & 255
+            def b2 = load8(src, i + 2) & 255
+            def b3 = load8(src, i + 3) & 255
             if _utf8_cont_byte(b1) && _utf8_cont_byte(b2) && _utf8_cont_byte(b3) && !(b0 == 240 && b1 < 144) && !(b0 == 244 && b1 > 143) {
                cp = ((b0 & 7) << 18) | ((b1 & 63) << 12) | ((b2 & 63) << 6) | (b3 & 63)
                w = 4
@@ -4407,7 +4633,7 @@ fn put_text(dict vt, str s) dict {
          }
       }
       nvt = _tputc_fast(nvt, st, co, ro, g, pal, dfg, dbg, cp)
-      i += w
+      consumed_until = i + w
    }
    nvt
 }
@@ -4433,11 +4659,10 @@ fn resize(dict vt, int cols, int rows) dict {
    _clear_grid(ng, cols, rows, dfg, dbg)
    def int copy_rows = min(rows, old_rows)
    def int copy_cols = min(cols, old_cols)
-   mut r = 0 while r < copy_rows {
+   for r in 0..(copy_rows - 1) {
       def ptr dst = ptr_add(ng, r * cols * 16)
       def ptr src = ptr_add(og, r * old_cols * 16)
       __copy_mem_raw(dst, src, copy_cols * 16)
-      r += 1
    }
    mut nvt = vt.set("grid", ng)
    nvt = nvt.set("cols", cols)
@@ -4456,11 +4681,10 @@ fn resize(dict vt, int cols, int rows) dict {
          mut ptr pnew = malloc(cols * rows * 16)
          if pnew {
             _clear_grid(pnew, cols, rows, dfg, dbg)
-            mut pr = 0 while pr < copy_rows {
+            for pr in 0..(copy_rows - 1) {
                def ptr dst = ptr_add(pnew, pr * cols * 16)
                def ptr src = ptr_add(prim, pr * old_cols * 16)
                __copy_mem_raw(dst, src, copy_cols * 16)
-               pr += 1
             }
             free(prim)
             nvt = nvt.set("primary_grid", pnew)
@@ -4483,7 +4707,7 @@ fn resize(dict vt, int cols, int rows) dict {
    store32(st, cx, OFF_CX) store32(st, cy, OFF_CY)
    mut top = load32(st, OFF_TOP)
    if top >= rows { top = 0 } store32(st, top, OFF_TOP)
-   def fr = nvt.get("fonts").get("regular")
+   def int fr = int(nvt.get("fonts").get("regular", 0))
    def cell = _vterm_cell_metrics(fr)
    if cell[0] > 0.1 {
       nvt = nvt.set("char_w", cell[0])
@@ -4495,7 +4719,7 @@ fn resize(dict vt, int cols, int rows) dict {
 fn set_fonts(dict vt, dict fonts) dict {
    "Replaces terminal fonts and refreshes cell/PTY pixel metrics without changing grid contents."
    mut nvt = vt.set("fonts", fonts)
-   def fr = fonts.get("regular")
+   def int fr = int(fonts.get("regular", 0))
    def cell = _vterm_cell_metrics(fr)
    mut f64 cw = cell[0]
    mut f64 ch = cell[1]
@@ -4541,6 +4765,17 @@ fn _resize_pty(int m, int cols, int rows, int px_w=0, int px_h=0) any {
    vt = put_text(vt, "AB")
    def ptr grid = vt.get("grid")
    assert(load32(grid, 0) == 65 && load32(grid, 16) == 66, "vterm ascii write")
+   mut vt_sgr = new(8, 1, fonts)
+   vt_sgr = put_text(vt_sgr, "\033[32mG\033[36mC\033[0mD")
+   def ptr sgr_grid = vt_sgr.get("grid")
+   def ptr sgr_palette = vt_sgr.get("palette")
+   def ptr sgr_state = vt_sgr.get("state")
+   assert(load32(sgr_grid, 0) == 71 && load32(sgr_grid, 16) == 67 && load32(sgr_grid, 32) == 68,
+      "vterm ascii runs skip ANSI escape bytes")
+   assert(load32(sgr_grid, 4) == load32(sgr_palette, 2 * 4) &&
+      load32(sgr_grid, 20) == load32(sgr_palette, 6 * 4) &&
+      load32(sgr_grid, 36) == vt_sgr.get("def_fg") && load32(sgr_state, OFF_CX) == 3,
+      "vterm ascii runs preserve SGR colors and cursor position")
    vt = put_text(vt, "\r\nCD")
    def ptr newline_grid = vt.get("grid")
    assert(load32(newline_grid, 4 * 16) == 67 && load32(newline_grid, 5 * 16) == 68, "vterm CRLF writes to next row")

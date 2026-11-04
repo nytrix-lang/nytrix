@@ -49,9 +49,15 @@ use core.os.rev.decomp.syscalls
 use core.os.rev.decomp.type_library
 use core.os.rev.decomp.summary
 
+fn _has_decomp_header(any source) bool {
+   if !is_dict(source) { return false }
+   def header = source.get("header", dict())
+   is_dict(header) && header.len > 0
+}
+
 fn arch(any source) str {
    "Return the recovered binary architecture rather than the host architecture."
-   def bin = is_dict(source) && source.contains("header") ? source : load(to_str(source))
+   def bin = _has_decomp_header(source) ? source : load(to_str(source))
    bin.get("header", dict()).get("machine", "unknown")
 }
 
@@ -261,9 +267,9 @@ fn _data_refs_from_rows(dict bin, list rows) list {
    out
 }
 
-fn data_refs(any source, any target=".text", int max_bytes=2048) list {
+fn data_refs(any source, any target=0, int max_bytes=1024) list {
    "Return data/import/string references from a decompiled range."
-   def bin = is_dict(source) && source.contains("header") ? source : load(to_str(source))
+   def bin = _has_decomp_header(source) ? source : load(to_str(source))
    _data_refs_from_rows(bin, disassemble(bin, target, max_bytes))
 }
 
@@ -330,9 +336,9 @@ fn _call_arg_refs(dict bin, any target, int max_bytes) list {
    out
 }
 
-fn xrefs(any source, any targets=0, int max_bytes=4096) list {
+fn xrefs(any source, any targets=0, int max_bytes=65536) list {
    "Return flat recovered import/data/string/jump-table/call-argument xrefs from executable ranges."
-   def bin = is_dict(source) && source.contains("header") ? source : load(to_str(source))
+   def bin = _has_decomp_header(source) ? source : load(to_str(source))
    def ranges = targets == 0 ? executable_sections(bin) : _ref_targets(targets)
    mut out = []
    mut seen = dict()
@@ -475,7 +481,7 @@ fn _call_search_match(dict call, any query) bool {
 
 fn search(any source, any query, any opts=dict()) list {
    "Search recovered analysis views: functions, imports, strings, globals, xrefs, calls, variables, and notes."
-   def bin = is_dict(source) && source.contains("header") ? source : load(to_str(source))
+   def bin = _has_decomp_header(source) ? source : load(to_str(source))
    def q = to_str(query)
    def max_results = int(opts.get("limit", 64))
    def range = opts.get("range", ".text")
@@ -687,7 +693,7 @@ fn crackme_targets(any source, any opts=dict()) dict {
    "Find likely crackme success/failure targets from strings and xrefs.
    Returns classified string records plus `find` and `avoid` address lists that
    can be passed into `symbolic_solve(..., {find:{kind:'addr', addr: ...}})`."
-   def bin = is_dict(source) && source.contains("header") ? source : load(to_str(source), opts)
+   def bin = _has_decomp_header(source) ? source : load(to_str(source), opts)
    if !bin.get("ok", false) { return {"ok": false, "kind": "crackme_targets", "reason": bin.get("reason", "load_failed")} }
    def range = opts.get("range", ".text")
    def max_bytes = int(opts.get("max_bytes", 65536))
@@ -917,7 +923,7 @@ fn crackme_solve(any source, any target=0, any opts=dict()) dict {
    This is the high-level path: strings/xrefs -> find/avoid -> sliced lifted
    solve. The returned record keeps the target candidates beside the solver
    result so scripts can inspect or override the inferred path."
-   def bin = is_dict(source) && source.contains("header") ? source : load(to_str(source), opts)
+   def bin = _has_decomp_header(source) ? source : load(to_str(source), opts)
    if !bin.get("ok", false) { return {"ok": false, "kind": "crackme_solve", "reason": bin.get("reason", "load_failed")} }
    def t = crackme_targets(bin, {"range": opts.get("range", target == 0 ? ".text" : target),
          "max_bytes": int(opts.get("target_bytes", opts.get("max_bytes", 65536)))})
@@ -943,7 +949,7 @@ fn crackme_solve_all(any source, any target=0, any opts=dict()) dict {
    "Crackme-oriented multi-model solve: infer success/failure xrefs, add
    find/avoid predicates, auto-plan symbolic input when needed, and enumerate
    found models with `symbolic_solve_all(...)`."
-   def bin = is_dict(source) && source.contains("header") ? source : load(to_str(source), opts)
+   def bin = _has_decomp_header(source) ? source : load(to_str(source), opts)
    if !bin.get("ok", false) { return {"ok": false, "kind": "crackme_solve_all", "reason": bin.get("reason", "load_failed")} }
    def t = crackme_targets(bin, {"range": opts.get("range", target == 0 ? ".text" : target),
          "max_bytes": int(opts.get("target_bytes", opts.get("max_bytes", 65536)))})
@@ -969,7 +975,7 @@ fn crackme_solve_all(any source, any target=0, any opts=dict()) dict {
 fn crackme_report(any source, any target=0, any opts=dict()) dict {
    "One-call crackme report: classify strings, solve the path, explain the
    chosen route, and return patch-plan metadata for UI/CLI tooling."
-   def bin = is_dict(source) && source.contains("header") ? source : load(to_str(source), opts)
+   def bin = _has_decomp_header(source) ? source : load(to_str(source), opts)
    if !bin.get("ok", false) { return {"ok": false, "kind": "crackme_report", "reason": bin.get("reason", "load_failed")} }
    def range = opts.get("range", target == 0 ? ".text" : target)
    def t = crackme_targets(bin, {"range": range,
@@ -1024,7 +1030,7 @@ fn _name_for_addr(dict bin, int addr) str {
 
 fn call_targets(any source, any target=0, int max_bytes=512) list {
    "Return direct call targets discovered in a section/function/address."
-   def bin = is_dict(source) && source.contains("header") ? source : load(to_str(source))
+   def bin = _has_decomp_header(source) ? source : load(to_str(source))
    def rows = target == 0 ? disassemble(bin, ".text", max_bytes) : disassemble(bin, target, max_bytes)
    def a = arch(bin)
    mut out = []
@@ -1052,6 +1058,10 @@ fn call_targets(any source, any target=0, int max_bytes=512) list {
 }
 
 fn _lift_op(str a, str m) str {
+   if dasm.arch_family(a) == "x86" &&
+   str.startswith(str.lower(str.strip(m)), "lea") {
+      return "assign"
+   }
    dasm.instruction_kind(a, m)
 }
 
@@ -1087,6 +1097,7 @@ fn _operand_kind(str op) str {
    dasm.operand_kind(op)
 }
 
+@returns_owned
 fn _ny_operand(str op) str {
    def s = _clean_operand(op)
    if _operand_kind(s) == "mem" {
@@ -1097,6 +1108,7 @@ fn _ny_operand(str op) str {
    dasm.operand_ny_expr(s)
 }
 
+@returns_owned
 fn _ny_operand_bin(dict bin, str op) str {
    def n = _ny_operand(op)
    if _operand_kind(op) == "imm" { return n }
@@ -1150,6 +1162,7 @@ fn _operand_matches_ref(str op, dict ref) bool {
    _operand_kind(op) == "imm" && _imm_value(op) == int(ref.get("target", 0))
 }
 
+@returns_owned
 fn _ny_operand_ref_bin(dict bin, str op, dict ref) str {
    if _operand_matches_ref(op, ref) {
       def named = _ny_ref_value(ref, false)
@@ -1319,6 +1332,7 @@ fn _zero_flag_condition(str cond) bool {
    cond == "eq" || cond == "ne" || cond == "zero" || cond == "nonzero"
 }
 
+@returns_owned
 fn _attach_compare_context(dict bin, list rows) list {
    mut out = rows
    mut i = 0
@@ -1422,6 +1436,7 @@ fn _pair_writeback_effect(dict bin, str memop, str post, dict ref) str {
    b + " = " + b + " + " + _ny_operand_ref_bin(bin, off, ref)
 }
 
+@returns_owned
 fn _lift_row(dict bin, list r) dict {
    def m = r[1]
    def ops = r[2]
@@ -1473,7 +1488,7 @@ fn _lift_row(dict bin, list r) dict {
          .set("dst_kind", _operand_kind(parts[0])).set("dst2_kind", _operand_kind(parts[1])).set("src_kind", _operand_kind(parts[2]))
          .set("effect", effect)
       } else {
-         row = row.set("effect", _ny_operand_ref_bin(bin, row.get("dst", ""), ref) + " = " + _ny_operand_ref_bin(bin, row.get("src", ""), ref))
+         row = row.set("effect", str(_ny_operand_ref_bin(bin, row.get("dst", ""), ref) + " = " + _ny_operand_ref_bin(bin, row.get("src", ""), ref)))
       }
       if str.startswith(m, "cmov") {
          def cc = _cmov_condition(m)
@@ -1483,15 +1498,6 @@ fn _lift_row(dict bin, list r) dict {
       } elif str.startswith(m, "set") {
          def sc = _setcc_condition(m)
          row = row.set("kind", "setcc").set("condition", sc).set("effect", _ny_operand_ref_bin(bin, row.get("dst", ""), ref) + " = " + (sc.len > 0 ? ("bool(last_cmp." + sc + ")") : "bool(last_cmp)"))
-      } elif m == "lea" && parts.len > 1 {
-         if str.find(row.get("src", ""), "rip") >= 0 {
-            def target = _rip_memory_target(r)
-            def expr = _pc_relative_addr_expr(bin, target, ref)
-            row = row.set("kind", "lea").set("addr_value", target).set("addr_expr", expr)
-            .set("effect", _ny_operand_ref_bin(bin, row.get("dst", ""), ref) + " = " + expr)
-         } else {
-            row = row.set("kind", "lea").set("effect", _ny_operand_ref_bin(bin, row.get("dst", ""), ref) + " = " + _ny_address_operand_ref_bin(bin, row.get("src", ""), ref))
-         }
       } elif str.startswith(m, "xchg") && parts.len > 1 {
          row = row.set("kind", "swap").set("effect", "swap(" + _ny_operand_ref_bin(bin, row.get("dst", ""), ref) + ", " + _ny_operand_ref_bin(bin, row.get("src", ""), ref) + ")")
       } elif (str.startswith(m, "movzx") || str.startswith(m, "movsx")) && parts.len > 1 {
@@ -1562,10 +1568,13 @@ fn _lift_row(dict bin, list r) dict {
          .set("effect", _ny_operand_ref_bin(bin, row.get("dst", ""), ref) + " = " + rot + "(" + _ny_operand_ref_bin(bin, row.get("dst", ""), ref) + ", " + _ny_operand_ref_bin(bin, row.get("src", ""), ref) + ")")
       } else {
          def sym = _arith_symbol(m)
-         row = row.set("operator", sym).set("effect", _ny_operand_ref_bin(bin, row.get("dst", ""), ref) + " = " + _ny_operand_ref_bin(bin, row.get("dst", ""), ref) + " " + _ny_infix_operator(sym) + " " + _ny_operand_ref_bin(bin, row.get("src", ""), ref))
+         row = row.set("operator", sym).set("effect", str(_ny_operand_ref_bin(bin, row.get("dst", ""), ref) + " = " + _ny_operand_ref_bin(bin, row.get("dst", ""), ref) + " " + _ny_infix_operator(sym) + " " + _ny_operand_ref_bin(bin, row.get("src", ""), ref)))
       }
    } elif op == "compare" {
-      row = row.set("effect", "last_cmp = [" + _ny_operand_ref_bin(bin, row.get("dst", ""), ref) + ", " + _ny_operand_ref_bin(bin, row.get("src", ""), ref) + "]")
+      def lhs = str(_ny_operand_ref_bin(bin, row.get("dst", ""), ref))
+      def rhs = str(_ny_operand_ref_bin(bin, row.get("src", ""), ref))
+      def effect = "last_cmp = [" + lhs + ", " + rhs + "]"
+      row = row.set("effect", effect)
    } elif op == "return" {
       row = row.set("effect", "return")
    } elif op == "stack" {
@@ -1573,9 +1582,23 @@ fn _lift_row(dict bin, list r) dict {
       elif m == "pop" { row = row.set("effect", _ny_operand_bin(bin, row.get("dst", "")) + " = pop()") }
       elif m == "leave" { row = row.set("effect", "leave_frame()") }
    }
+   if fam == "x86" && str.startswith(str.lower(str.strip(m)), "lea") && parts.len > 1 {
+      def dst = row.get("dst", "")
+      def src = row.get("src", "")
+      mut effect = _ny_operand_ref_bin(bin, dst, ref) + " = " + dasm.address_ny_expr(src)
+      if str.find(src, "rip") >= 0 {
+         def target = _rip_memory_target(r)
+         def expr = _pc_relative_addr_expr(bin, target, ref)
+         effect = _ny_operand_ref_bin(bin, dst, ref) + " = " + expr
+         row = row.set("addr_value", target).set("addr_expr", expr)
+      }
+      row = row.set("op", "assign").set("kind", "lea").set("effect", effect)
+      .set("dst", dst).set("src", src)
+   }
    row
 }
 
+@returns_owned
 fn _lift_rows(dict bin, list rows) list {
    mut out = []
    mut i = 0
@@ -1598,7 +1621,7 @@ fn _lift_rows(dict bin, list rows) list {
 
 fn lift(any source, any target=0, int max_bytes=1024) list {
    "Lift disassembly rows into compact Nytrix IR rows for later CFG/symbolic passes."
-   def bin = is_dict(source) && source.contains("header") ? source : load(to_str(source))
+   def bin = _has_decomp_header(source) ? source : load(to_str(source))
    _lift_rows(bin, disassemble(bin, target, max_bytes))
 }
 
@@ -2707,7 +2730,7 @@ fn vsa(any source, any target=0, any opts=dict()) dict {
    offset clusters so struct/array/slice recovery can use data instead of
    renderer patterns."
    def max_bytes = int(is_dict(opts) ? opts.get("max_bytes", 1024) : (is_int(opts) ? opts : 1024))
-   def bin = is_dict(source) && source.contains("header") ? source : load(to_str(source))
+   def bin = _has_decomp_header(source) ? source : load(to_str(source))
    def rows = lift(bin, target, max_bytes)
    mut mems = []
    mut i = 0
@@ -3288,7 +3311,7 @@ fn facts(any source, any target=0, any opts=dict()) dict {
    memory shapes. Later SSA, VSA, SMT cleanup, and rewrite passes should consume
    this instead of reparsing pseudocode."
    def max_bytes = int(is_dict(opts) ? opts.get("max_bytes", 1024) : (is_int(opts) ? opts : 1024))
-   def bin = is_dict(source) && source.contains("header") ? source : load(to_str(source))
+   def bin = _has_decomp_header(source) ? source : load(to_str(source))
    def rows = lift(bin, target, max_bytes)
    _facts_from(bin, target, rows, cfg(bin, target, max_bytes))
 }
@@ -3467,7 +3490,7 @@ fn _labels_from_rows(dict bin, list rows, list jts) list {
 
 fn labels(any source, any target=0, int max_bytes=1024) list {
    "Return local labels needed by branch and jump-table targets inside a decompiled range."
-   def bin = is_dict(source) && source.contains("header") ? source : load(to_str(source))
+   def bin = _has_decomp_header(source) ? source : load(to_str(source))
    def rows = disassemble(bin, target, max_bytes)
    def jts = target == 0 ? _jump_tables_from_rows(bin, disassemble(bin, ".text", max_bytes)) : _jump_tables_from_rows(bin, rows)
    _labels_from_rows(bin, rows, jts)
@@ -3487,7 +3510,7 @@ fn _branch_condition_expr(list rows, int idx, str cond) str {
          def mask = 1 << max(0, bit)
          return "(" + lhs + " & " + _hex(mask) + ")" + (cond == "bit_zero" ? " == 0" : " != 0")
       }
-      if br.get("family", "") == "riscv" && args.len > 1 {
+      if str(br.get("family", "")) == "riscv" && args.len > 1 {
          def bop = _cmp_condition_symbol(cond)
          if bop.len > 0 { return _ny_operand(args[0]) + " " + bop + " " + _ny_operand(args[1]) }
       }
@@ -3497,7 +3520,7 @@ fn _branch_condition_expr(list rows, int idx, str cond) str {
    mut j = idx - 1
    while j >= 0 && idx - j <= 8 {
       def r = rows[j]
-      def rop = r.get("op", "")
+      def rop = str(r.get("op", ""))
       if rop == "call" || rop == "branch" || rop == "syscall" || rop == "return" { break }
       if rop == "compare" {
          def lhs = _ny_operand(r.get("dst", ""))
@@ -5741,7 +5764,7 @@ fn _variables_from_rows(dict bin, list rows, dict sig0, str sig_name) list {
 
 fn variables(any source, any target=0, int max_bytes=1024) list {
    "Return decompiler symbols with use sites: locals, params, globals/imports/strings, and labels."
-   def bin = is_dict(source) && source.contains("header") ? source : load(to_str(source))
+   def bin = _has_decomp_header(source) ? source : load(to_str(source))
    def rows = lift(bin, target, max_bytes)
    def tb = _target_bytes(bin, target, max_bytes)
    def sig_name = is_str(target) ? _safe_name(target, "sub") : _safe_name(tb.get("name", ""), "sub")
@@ -7407,7 +7430,7 @@ fn type_recovery(any source, any target=0, any opts=dict()) dict {
    signatures, and optional clean rendered text. It intentionally reports
    evidence instead of inventing source-level names."
    def maxb = int(opts.get("max_bytes", 512))
-   def bin = is_dict(source) && source.contains("header") ? source : load(to_str(source))
+   def bin = _has_decomp_header(source) ? source : load(to_str(source))
    if !bin.get("ok", false) { return {"kind": "type_recovery", "ok": false, "locals": [], "calls": [], "structs": []} }
    def tb = _target_bytes(bin, target, maxb)
    def rows = lift(bin, target, maxb)
@@ -7426,7 +7449,7 @@ fn type_recovery(any source, any target=0, any opts=dict()) dict {
 
 fn function_model(any source, any target=0, int max_bytes=1024) dict {
    "Return Ny decompiler function metadata: rows, labels, refs, CFG, frame, signature, and call args."
-   def bin = is_dict(source) && source.contains("header") ? source : load(to_str(source))
+   def bin = _has_decomp_header(source) ? source : load(to_str(source))
    def tb = _target_bytes(bin, target, max_bytes)
    def raw = disassemble(bin, target, max_bytes)
    def rows = _lift_rows(bin, raw)
@@ -7465,7 +7488,7 @@ fn function_model(any source, any target=0, int max_bytes=1024) dict {
 
 fn function_signature(any source, any target=0, any opts=dict()) dict {
    "Return the ABI signature guess for a function, including local live-in uses and incoming call evidence."
-   def bin = is_dict(source) && source.contains("header") ? source : load(to_str(source))
+   def bin = _has_decomp_header(source) ? source : load(to_str(source))
    def maxb = int(opts.get("max_bytes", 512))
    def tb = _target_bytes(bin, target, maxb)
    def rows = lift(bin, target, maxb)
@@ -7483,7 +7506,7 @@ fn semantic_summary(any source, any target=0, any opts=dict()) dict {
    branch dependencies, input surfaces, crackme targets, and concrete next-step
    recommendations. It is intentionally data-first so UIs/tools do not need to
    parse pseudocode."
-   def bin = is_dict(source) && source.contains("header") ? source : load(to_str(source), opts)
+   def bin = _has_decomp_header(source) ? source : load(to_str(source), opts)
    if !bin.get("ok", false) { return {"ok": false, "kind": "semantic_summary", "reason": bin.get("reason", "load_failed")} }
    def maxb = int(is_dict(opts) ? opts.get("max_bytes", 1024) : 1024)
    def model = function_model(bin, target, maxb)
@@ -7959,7 +7982,7 @@ fn _harness_watch(any spec) any {
 fn symbolic_harness(any source, any target=0, any opts=dict()) dict {
    "Create a decompiler-backed symbolic harness: project, state, simgr, model, and predicates."
    def maxb = int(opts.get("max_bytes", 4096))
-   def bin = is_dict(source) && source.contains("header") ? source : load(to_str(source))
+   def bin = _has_decomp_header(source) ? source : load(to_str(source))
    mut proj = symbolic_project(bin, target, maxb)
    if !proj.get("ok", false) { return proj.set("kind", "symbolic_harness") }
    proj = _apply_harness_project_opts(proj, bin, opts)
@@ -8412,7 +8435,7 @@ fn state_machines(any source, any target=0, int max_bytes=2048) list {
    "Recover switch-dispatcher state machines from lifted rows.
    Each machine records selector, case targets, string clues, and proven
    transitions back to the dispatcher."
-   def bin = is_dict(source) && source.contains("header") ? source : load(to_str(source))
+   def bin = _has_decomp_header(source) ? source : load(to_str(source))
    _state_machines_from_rows(bin, lift(bin, target, max_bytes))
 }
 
@@ -11644,7 +11667,7 @@ fn _clean_branch_condition_expr(dict bin, list rows, int idx, str cond) str {
          def mask = 1 << max(0, bit)
          return "(" + lhs + " & " + _hex(mask) + ")" + (cond == "bit_zero" ? " == 0" : " != 0")
       }
-      if br.get("family", "") == "riscv" && args.len > 1 {
+      if str(br.get("family", "")) == "riscv" && args.len > 1 {
          def bop = _cmp_condition_symbol(cond)
          if bop.len > 0 {
             return _clean_operand_expr_for_branch(bin, rows, idx, idx - 1, args[0]) + " " + bop + " " + _clean_operand_expr_for_branch(bin, rows, idx, idx - 1, args[1])
@@ -11656,7 +11679,7 @@ fn _clean_branch_condition_expr(dict bin, list rows, int idx, str cond) str {
    mut j = idx - 1
    while j >= 0 && idx - j <= 8 {
       def r = rows[j]
-      def rop = r.get("op", "")
+      def rop = str(r.get("op", ""))
       if rop == "call" || rop == "branch" || rop == "syscall" || rop == "return" { break }
       if rop == "compare" {
          if str.startswith(r.get("mnemonic", ""), "test") {
@@ -11731,7 +11754,7 @@ fn _clean_branch_condition_expr_deep(dict bin, list rows, int idx, str cond) str
          def mask = 1 << max(0, bit)
          return "(" + lhs + " & " + _hex(mask) + ")" + (cond == "bit_zero" ? " == 0" : " != 0")
       }
-      if br.get("family", "") == "riscv" && args.len > 1 {
+      if str(br.get("family", "")) == "riscv" && args.len > 1 {
          def bop = _cmp_condition_symbol(cond)
          if bop.len > 0 {
             return _clean_operand_expr_for_branch_deep(bin, rows, idx, idx - 1, args[0]) + " " + bop + " " + _clean_operand_expr_for_branch_deep(bin, rows, idx, idx - 1, args[1])
@@ -11743,7 +11766,7 @@ fn _clean_branch_condition_expr_deep(dict bin, list rows, int idx, str cond) str
    mut j = idx - 1
    while j >= 0 && idx - j <= 8 {
       def r = rows[j]
-      def rop = r.get("op", "")
+      def rop = str(r.get("op", ""))
       if rop == "call" || rop == "branch" || rop == "syscall" || rop == "return" { break }
       if rop == "compare" {
          if str.startswith(r.get("mnemonic", ""), "test") {
@@ -26057,7 +26080,7 @@ fn _pseudo_body(dict bin, list rows, int indent, any opts=dict()) str {
          b = str.builder_append(b, curpad + "; " + _hex(ir.get("addr", 0)) + "  " + m + (ops.len > 0 ? (" " + ops) : "") + "\n")
          b = str.builder_append(b, _du_row_comment(dataflow, i, curpad))
       }
-      def op = ir.get("op", "insn")
+      def op = str(ir.get("op", "insn"))
       if op == "assign" || op == "arith" || op == "compare" || op == "stack" {
          b = str.builder_append(b, clean ? _render_ir_clean_row(bin, lifted, i, curpad, clean_skip, sig) : (curpad + _row_effect_with_sig(bin, sig, lifted, i, ir) + "\n"))
          if !clean && ir.get("ref_kind", "") == "string" {
@@ -26231,7 +26254,7 @@ fn ny_pseudocode(any source, any target=0, any opts=dict()) str {
    "Render compact Nytrix analyst pseudocode for a section/function/address.
    This keeps disassembly comments beside recovered intent so private reversing
    work can be polished directly in Nytrix."
-   mut bin = is_dict(source) && source.contains("header") ? source : load(to_str(source))
+   mut bin = _has_decomp_header(source) ? source : load(to_str(source))
    if opts.contains("renames") { bin = with_renames(bin, opts.get("renames", dict())) }
    mut rows = []
    mut name = "entry_" + str.to_hex(entry(bin), 0)
@@ -26308,14 +26331,129 @@ fn pseudocode(any source, any target=0, any opts=dict()) str {
    ny_pseudocode(source, target, opts)
 }
 
+fn _decompile_local_labels(dict bin, list raw, list lifted) dict {
+   mut labels = dict()
+   def start = raw.len > 0 ? int(raw[0][0]) : 0
+   def last = raw.len > 0 ? raw[raw.len - 1] : []
+   def end = raw.len > 0 ? int(last[0]) + int(last[3]) : start
+   mut i = 0
+   while i < lifted.len {
+      def target = int(lifted[i].get("target", 0))
+      if str(lifted[i].get("op", "")) == "branch" && target >= start && target < end {
+         labels = labels.set(to_str(target),
+            _rename_addr(bin, target, "loc_" + str.to_hex(target, 0)))
+      }
+      i += 1
+   }
+   labels
+}
+
+fn _decompile_structured_rows(dict bin, any target, list raw, list lifted, dict labels) dict {
+   def addr = raw.len > 0 ? int(raw[0][0]) : 0
+   def target_name = is_str(target) ? target :
+   (is_dict(target) ? target.get("name", "sub_" + str.to_hex(addr, 0)) :
+      "sub_" + str.to_hex(addr, 0))
+   mut label_rows = []
+   mut jump_tables = []
+   mut i = 0
+   while i < lifted.len {
+      def row = lifted[i]
+      def label = labels.get(to_str(int(row.get("addr", 0))), "")
+      if label.len > 0 {
+         label_rows = label_rows.append({"addr": int(row.get("addr", 0)), "name": label})
+      }
+      if str(row.get("kind", "")) == "switch" {
+         jump_tables = jump_tables.append(row.get("jump_table", dict()))
+      }
+      i += 1
+   }
+   {
+      "language": "ny", "target": target,
+      "name": addr > 0 ? _rename_addr(bin, addr, _rename_name(bin, target_name)) : target_name,
+      "addr": addr, "rows": lifted,
+      "labels": label_rows, "jump_tables": jump_tables,
+      "cfg": _cfg_from_rows(bin, raw),
+      "analysis_level": "lifted_cfg"
+   }
+}
+
+@returns_owned
+fn _decompile_fast_text(dict bin, any target, list raw, list lifted, dict labels) str {
+   def addr = raw.len > 0 ? int(raw[0][0]) : 0
+   def default_name = "sub_" + str.to_hex(addr, 0)
+   def base_name = is_str(target) ? target :
+   (is_dict(target) ? target.get("name", default_name) : default_name)
+   def safe_name = _safe_name(base_name, default_name)
+   def name = addr > 0 ? _rename_addr(bin, addr, _rename_name(bin, safe_name)) : safe_name
+   def sig = _signature_main_aliases(_signature_guess(lifted), name).set("name", name)
+   mut b = str.Builder(max(128, lifted.len * 48))
+   b = str.builder_append(b, "fn " + name + "(" + _signature_param_text(sig) + "){\n")
+   mut i = 0
+   while i < lifted.len {
+      def row = lifted[i]
+      def mnemonic = row.get("mnemonic", "")
+      def operands = row.get("operands", "")
+      def row_addr = int(row.get("addr", 0))
+      def label = labels.get(to_str(row_addr), "")
+      if label.len > 0 { b = str.builder_append(b, "  " + label + ":\n") }
+      b = str.builder_append(b, "  ; " + _hex(row_addr) + "  " + mnemonic +
+         (operands.len > 0 ? (" " + operands) : "") + "\n")
+      def op = str(row.get("op", "insn"))
+      if op == "assign" || op == "arith" || op == "compare" || op == "stack" {
+         b = str.builder_append(b, "  " + row.get("effect", "") + "\n")
+      } elif op == "call" {
+         b = str.builder_append(b, "  call " + row.get("target_name", "call_target") + "\n")
+      } elif op == "syscall" {
+         b = str.builder_append(b, "  " + row.get("effect", "syscall") + "\n")
+      } elif op == "branch" {
+         def to = int(row.get("target", 0))
+         def condition = str(row.get("condition", ""))
+         def label_name = labels.get(to_str(to), to > 0 ? ("0x" + str.to_hex(to, 0)) : "computed_target")
+         if condition == "always" {
+            b = str.builder_append(b, "  goto " + label_name + "\n")
+         } else {
+            def predicate = _branch_condition_expr(lifted, i, condition)
+            b = str.builder_append(b, "  if " + predicate +
+               "{ goto " + label_name + " }\n")
+         }
+      } elif op == "return" {
+         b = str.builder_append(b, "  return\n")
+      } else {
+         b = str.builder_append(b, "  instruction(\"" + mnemonic +
+            (operands.len > 0 ? (" " + operands) : "") + "\")\n")
+      }
+      i += 1
+   }
+   b = str.builder_append(b, "}\n")
+   def out = str.builder_to_str(b)
+   str.builder_free(b)
+   out
+}
+
 fn decompile(any source, any target=0, any opts=dict()) dict {
-   "Return `{ok, language:'ny', text, analysis}` for a Nytrix decompile request."
-   mut bin = is_dict(source) && source.contains("header") ? source : load(to_str(source))
-   if opts.contains("renames") { bin = with_renames(bin, opts.get("renames", dict())) }
+   "Return quick lifted pseudocode and CFG rows. Use `function_model` for full SSA/VSA/SMT and type analysis."
+   def loaded_bin = _has_decomp_header(source) ? source : load(to_str(source))
+   def bin = opts.contains("renames") ? with_renames(loaded_bin, opts.get("renames", dict())) : loaded_bin
    if !bin.get("ok", false) { return {"ok": false, "text": "", "analysis": bin} }
    def maxb = int(opts.get("max_bytes", 512))
-   {"ok": true, "language": "ny", "text": ny_pseudocode(bin, target, opts),
-      "structured": structured(bin, target, maxb), "analysis": bin}
+   def decoded_rows = disassemble(bin, target, maxb)
+   mut ri = 0
+   while ri < decoded_rows.len {
+      if str(decoded_rows[ri][1]) == "unsupported" {
+         return {"ok": false, "language": "ny", "text": "", "diagnostic": "unsupported instruction in " + to_str(target) + " at " + to_str(decoded_rows[ri][0]) + ": " + to_str(decoded_rows[ri][2]), "analysis": bin}
+      }
+      ri += 1
+   }
+   def lifted = _lift_rows(bin, decoded_rows)
+   def local_labels = _decompile_local_labels(bin, decoded_rows, lifted)
+   if _clean_enabled(opts) {
+      def render_opts = opts.set("rows", decoded_rows).set("lifted", lifted)
+      return {"ok": true, "language": "ny",
+         "text": ny_pseudocode(bin, target, render_opts),
+         "structured": structured(bin, target, maxb), "analysis": bin}
+   }
+   {"ok": true, "language": "ny", "text": _decompile_fast_text(bin, target, decoded_rows, lifted, local_labels),
+      "structured": _decompile_structured_rows(bin, target, decoded_rows, lifted, local_labels), "analysis": bin}
 }
 
 fn _decompile_name_has(str name0, str needle) bool {
@@ -26602,7 +26740,7 @@ fn decompile_all(any source, any opts=dict()) dict {
    Returns {ok, language:'ny', functions, text, analysis} ; this is the
    whole-binary entry point, intentionally bounded by `max_functions` and
    `max_bytes` so scripts can iterate safely on large binaries."
-   mut bin = is_dict(source) && source.contains("header") ? source : load(to_str(source))
+   mut bin = _has_decomp_header(source) ? source : load(to_str(source))
    if opts.contains("renames") { bin = with_renames(bin, opts.get("renames", dict())) }
    if !bin.get("ok", false) { return {"ok": false, "language": "ny", "functions": [], "text": "", "analysis": bin} }
    def max_funcs = int(opts.get("max_functions", 24))
@@ -26678,7 +26816,7 @@ fn flatten_calls(any source, any root=0, int depth=2, int max_functions=24, int 
    "Flatten direct calls from `root` like an angr-style exploration view.
    Returns ordered function nodes and edges without pretending indirect calls are
    resolved."
-   def bin = is_dict(source) && source.contains("header") ? source : load(to_str(source))
+   def bin = _has_decomp_header(source) ? source : load(to_str(source))
    mut queue = []
    if root == 0 { queue = queue.append(function_at(bin, entry(bin))) }
    elif is_dict(root) { queue = queue.append(root) }
@@ -26742,7 +26880,7 @@ fn _cg_name(dict bin, dict f) str {
 
 fn callgraph(any source, int max_functions=64) dict {
    "Build a lightweight callgraph with normalized nodes, edges, roots, leaves, SCCs, and cycles."
-   def bin = is_dict(source) && source.contains("header") ? source : load(to_str(source))
+   def bin = _has_decomp_header(source) ? source : load(to_str(source))
    def fs0 = bin.contains("functions") ? bin.get("functions", []) : recover_functions(bin)
    mut selected = []
    mut node_by_addr = dict()
@@ -26819,7 +26957,7 @@ fn _call_query_name(dict bin, any query) str {
 
 fn callers(any source, any query, int max_functions=128) list {
    "Return normalized callgraph edges that call `query`."
-   def bin = is_dict(source) && source.contains("header") ? source : load(to_str(source))
+   def bin = _has_decomp_header(source) ? source : load(to_str(source))
    def name = _call_query_name(bin, query)
    def g = callgraph(bin, max_functions)
    def edges = g.get("edges", [])
@@ -26836,7 +26974,7 @@ fn callers(any source, any query, int max_functions=128) list {
 
 fn callees(any source, any query, int max_functions=128) list {
    "Return normalized callgraph edges called by `query`."
-   def bin = is_dict(source) && source.contains("header") ? source : load(to_str(source))
+   def bin = _has_decomp_header(source) ? source : load(to_str(source))
    def name = _call_query_name(bin, query)
    def g = callgraph(bin, max_functions)
    def edges = g.get("edges", [])
@@ -26915,7 +27053,7 @@ fn triage(any source, any opts=dict()) dict {
    "Return a bounded whole-binary analyst triage record.
    This is the fast orientation layer: imports by category, callgraph shape,
    crackme targets, and semantic summaries for the first recovered functions."
-   def bin0 = is_dict(source) && source.contains("header") ? source : load(to_str(source), opts)
+   def bin0 = _has_decomp_header(source) ? source : load(to_str(source), opts)
    if !bin0.get("ok", false) { return {"ok": false, "kind": "triage", "reason": bin0.get("reason", "load_failed")} }
    def max_funcs = int(opts.get("max_functions", 8))
    def maxb = int(opts.get("max_bytes", 512))
@@ -27004,7 +27142,7 @@ fn workspace(str p, any opts=dict()) dict {
 
 fn report(any source, int string_limit=12) str {
    "Return a compact human-readable binary report."
-   def bin = is_dict(source) && source.contains("header") ? source : load(to_str(source), {"string_limit": string_limit})
+   def bin = _has_decomp_header(source) ? source : load(to_str(source), {"string_limit": string_limit})
    if !bin.get("ok", false) { return "not an ELF: " + bin.get("reason", "unknown") + "\n" }
    def h = bin.get("header", dict())
    mut b = str.Builder(512)

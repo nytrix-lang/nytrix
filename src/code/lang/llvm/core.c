@@ -9,11 +9,11 @@
  */
 #include "base/util.h"
 #include "code/backend/llvm/bridge.h"
+#include "code/backend/runtime/shared.h"
+#include "code/lang/parse/c/clang.h"
 #include "code/lang/llvm/jit.h"
-#include "code/lang/c/clang.h"
 #include "code/lang/parse/frontend/visitor.h"
 #include "code/lang/priv.h"
-#include "code/lang/runtime/shared.h"
 #include "code/lang/types/typeinfer.h"
 #ifndef _WIN32
 #include <alloca.h>

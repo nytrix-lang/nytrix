@@ -745,11 +745,34 @@ fn _create_graphics_layouts() bool {
       _vk_shader_stage_fragment(),
       0)
    def tex_ci = VkDescriptorSetLayoutCreateInfo(1, tex_binding)
+   mut binding_flags = 0
+   mut binding_info = 0
+   if _bindless_enabled {
+      binding_flags = zalloc(4)
+      binding_info = zalloc(32)
+      if !binding_flags || !binding_info {
+         if binding_flags { free(binding_flags) }
+         if binding_info { free(binding_info) }
+         free(scratch)
+         return false
+      }
+      ;; Features were checked and enabled during device creation. Atlas
+      ;; uploads may update unused slots after this set was bound for a draw.
+      store32(binding_flags, 7, 0)
+      store32(binding_info, VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO, 0)
+      store32(binding_info, 1, 16)
+      store64_h(binding_info, binding_flags, 24)
+      store64_h(tex_ci, binding_info, 8)
+      store32(tex_ci, 2, 16)
+   }
    if _shader_trace_enabled() {
       ui_profile.print_line("vk:layout", "tex_ci_stype=" + to_str(load32(tex_ci, 0)) +
          " tex_count=" + to_str(load32(tex_binding, 8)))
    }
-   if create_descriptor_set_layout(_device, tex_ci, 0, dsl_ptr) != 0 { free(scratch) return false }
+   def tex_layout_result = create_descriptor_set_layout(_device, tex_ci, 0, dsl_ptr)
+   if binding_flags { free(binding_flags) }
+   if binding_info { free(binding_info) }
+   if tex_layout_result != 0 { free(scratch) return false }
    _descriptor_set_layout = load64_h(dsl_ptr, 0)
    def ubo_binding = VkDescriptorSetLayoutBinding(0,
       _vk_descriptor_uniform_buffer(),

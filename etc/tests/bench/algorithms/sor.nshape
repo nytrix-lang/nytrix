@@ -25,43 +25,32 @@ fn run_sor() int {
    }
    def int t0 = ticks()
    mut it = 0
+   mut ptr src = grid
+   mut ptr dst = ngrid
    while it < ITERS {
-      if it % 2 == 0 {
-         mut int r = 1
-         while r < N - 1 {
-            def int r_prev = (r - 1) * N
-            def int r_curr = r * N
-            def int r_next = (r + 1) * N
-            mut int cc = 1
-            while cc < N - 1 {
-               def f64 v = (f64buf_load(grid, r_prev + cc) + f64buf_load(grid, r_next + cc)
-                          + f64buf_load(grid, r_curr + cc - 1) + f64buf_load(grid, r_curr + cc + 1)) * 0.25
-               f64buf_store(ngrid, r_curr + cc, v)
-               cc += 1
-            }
-            r += 1
+      mut int r = 1
+      while r < N - 1 {
+         def int r_prev = (r - 1) * N
+         def int r_curr = r * N
+         def int r_next = (r + 1) * N
+         def int r_left = r_curr - 1
+         def int r_right = r_curr + 1
+         mut int cc = 1
+         while cc < N - 1 {
+            def f64 v = (f64buf_load(src, r_prev + cc) + f64buf_load(src, r_next + cc)
+                       + f64buf_load(src, r_left + cc) + f64buf_load(src, r_right + cc)) * 0.25
+            f64buf_store(dst, r_curr + cc, v)
+            cc += 1
          }
-      } else {
-         mut int r = 1
-         while r < N - 1 {
-            def int r_prev = (r - 1) * N
-            def int r_curr = r * N
-            def int r_next = (r + 1) * N
-            mut int cc = 1
-            while cc < N - 1 {
-               def f64 v = (f64buf_load(ngrid, r_prev + cc) + f64buf_load(ngrid, r_next + cc)
-                          + f64buf_load(ngrid, r_curr + cc - 1) + f64buf_load(ngrid, r_curr + cc + 1)) * 0.25
-               f64buf_store(grid, r_curr + cc, v)
-               cc += 1
-            }
-            r += 1
-         }
+         r += 1
       }
+      def ptr tmp = src
+      src = dst
+      dst = tmp
       it += 1
    }
    def int t1 = ticks()
-   mut ptr result = grid
-   if ITERS % 2 != 0 { result = ngrid }
+   def ptr result = src
    mut checksum = 0
    mut k = 0
    while k < N * N {
@@ -107,9 +96,11 @@ int main(void) {
             int r_prev = (r - 1) * N;
             int r_curr = r * N;
             int r_next = (r + 1) * N;
+            int r_left = r_curr - 1;
+            int r_right = r_curr + 1;
             for (int c = 1; c < N - 1; c++)
                 dst[r_curr + c] = (src[r_prev + c] + src[r_next + c]
-                                  + src[r_curr + c - 1] + src[r_curr + c + 1]) * 0.25;
+                                  + src[r_left + c] + src[r_right + c]) * 0.25;
         }
     }
     int64_t end = now_ns();

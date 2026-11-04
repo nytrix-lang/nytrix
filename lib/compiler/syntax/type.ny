@@ -47,6 +47,11 @@ mut TYPE_ALIASES = nil
 mut TYPE_GROUPS = nil
 mut TYPE_GROUP_ORDER = nil
 
+;; Native mutable bool globals currently read back as false across calls. Use
+;; an integer sentinel so ordinary type queries do not rebuild and erase the
+;; alias/group tables on every call.
+mut int TYPE_REGISTRY_READY = 0
+
 fn _name_in_list(any xs, str name) bool {
    if !(is_list(xs) || is_tuple(xs)) { return false }
    mut i = 0
@@ -59,7 +64,7 @@ fn _name_in_list(any xs, str name) bool {
 
 fn _clone_spec_list(any members) list {
    mut out = list(0)
-   if members == nil { return out }
+   if type_tag(members) == TAG_NIL { return out }
    if is_list(members) || is_tuple(members) {
       mut i = 0
       while i < members.len {
@@ -72,28 +77,43 @@ fn _clone_spec_list(any members) list {
 }
 
 fn _type_name_set(int tag, str name) str {
-   TYPE_NAMES = TYPE_NAMES.set(tag, name)
+   TYPE_NAMES = dict_set(TYPE_NAMES, tag, name)
    name
 }
 
+fn _registry_get(any registry, str name) any {
+   dict_get(registry, __cstr_to_str(name), nil)
+}
+
+fn _registry_set(any registry, str name, any value) dict {
+   dict_set(registry, __cstr_to_str(name), value)
+}
+
 fn _type_alias_set(str name, str target) str {
-   TYPE_ALIASES = TYPE_ALIASES.set(name, target)
-   target
+   def str canonical_target = __cstr_to_str(target)
+   TYPE_ALIASES = _registry_set(TYPE_ALIASES, name, canonical_target)
+   canonical_target
 }
 
 fn _type_group_set(str name, any members) list {
+   def str canonical_name = __cstr_to_str(name)
    def xs = _clone_spec_list(members)
-   TYPE_GROUPS = TYPE_GROUPS.set(name, xs)
-   if !_name_in_list(TYPE_GROUP_ORDER, name) { TYPE_GROUP_ORDER = TYPE_GROUP_ORDER.append(name) }
+   TYPE_GROUPS = _registry_set(TYPE_GROUPS, canonical_name, xs)
+   if !_name_in_list(TYPE_GROUP_ORDER, canonical_name) {
+      TYPE_GROUP_ORDER = TYPE_GROUP_ORDER.append(canonical_name)
+   }
    xs
 }
 
 fn _types_init() int {
-   if TYPE_ALIASES != nil { return 0 }
+   ;; Do not query a string key here: literal C-string and managed-string keys
+   ;; can take different hash paths at the imported module boundary. The int
+   ;; flag plus an actual dictionary is sufficient to detect the seeded state.
+   if TYPE_REGISTRY_READY == 1 { return 0 }
    TYPE_NAMES = dict(32)
    TYPE_ALIASES = dict(64)
    TYPE_GROUPS = dict(32)
-   TYPE_GROUP_ORDER = list(0)
+   TYPE_GROUP_ORDER = list(64)
    _type_name_set(TAG_NIL, "nil")
    _type_name_set(TAG_INT, "int")
    _type_name_set(TAG_FFI_PTR, "ffi_ptr")
@@ -145,6 +165,7 @@ fn _types_init() int {
    _type_group_set("container", ["collection", "bytes", "range"])
    _type_group_set("iterable", ["seq", "set", "dict", "bytes"])
    _type_group_set("indexable", ["seq", "dict", "bytes"])
+   TYPE_REGISTRY_READY = 1
    0
 }
 
@@ -154,8 +175,10 @@ fn normalize_type_name(str name) str {
    mut cur = name
    mut i = 0
    while i < 16 {
-      def next = dict_get(TYPE_ALIASES, cur, nil)
-      if next == nil || next == cur { return cur }
+      ;; Normalize the string representation before hashing: statically known
+      ;; string arguments may cross module calls as raw C-string pointers.
+      def next = _registry_get(TYPE_ALIASES, cur)
+      if type_tag(next) == TAG_NIL || next == cur { return cur }
       cur = next
       i += 1
    }
@@ -200,7 +223,8 @@ fn extend_type_group(str name, any members) list {
    "Adds members to a runtime type group without duplicating existing entries."
    _types_init()
    def key = normalize_type_name(name)
-   mut out = dict_get(TYPE_GROUPS, key, list(0))
+   mut out = _registry_get(TYPE_GROUPS, key)
+   if !is_list(out) { out = list(0) }
    def add = _canonical_spec_list(members)
    mut i = 0
    while i < add.len {
@@ -220,7 +244,7 @@ fn extend_type_group(str name, any members) list {
 fn type_group_members(str name) list {
    "Returns a copy of the members for type group `name`, or an empty list."
    _types_init()
-   def members = dict_get(TYPE_GROUPS, normalize_type_name(name), nil)
+   def members = _registry_get(TYPE_GROUPS, normalize_type_name(name))
    _clone_spec_list(members)
 }
 
@@ -238,13 +262,20 @@ fn type_group_names() list {
 fn type_groups() dict {
    "Returns a shallow copy of the type-group registry."
    _types_init()
-   dict_clone(TYPE_GROUPS)
+   mut out = dict(32)
+   mut i = 0
+   while i < TYPE_GROUP_ORDER.len {
+      def name = TYPE_GROUP_ORDER.get(i, "")
+      out = dict_set(out, name, _registry_get(TYPE_GROUPS, name))
+      i += 1
+   }
+   out
 }
 
 fn is_type_group(str name) bool {
    "Returns true when `name` resolves to a registered type group."
    _types_init()
-   dict_get(TYPE_GROUPS, normalize_type_name(name), nil) != nil
+   type_tag(_registry_get(TYPE_GROUPS, normalize_type_name(name))) != TAG_NIL
 }
 
 fn is_int(any x) bool {
@@ -265,7 +296,7 @@ fn is_bool(any x) bool {
 fn is_nil(any x) bool {
    "Check if x is nil. Integer 0 is NOT nil."
    if __is_int(x) { return false }
-   x == nil
+   type_tag(x) == TAG_NIL
 }
 
 fn is_list(any x) bool {
@@ -346,7 +377,7 @@ fn type_name(any x) str {
    if is_float(x) { return "float" }
    def int tag = type_tag(x)
    def name = dict_get(TYPE_NAMES, tag, nil)
-   if name != nil { return name }
+   if type_tag(name) != TAG_NIL { return name }
    if !x { return "nil" }
    f"unknown({tag})"
 }
@@ -397,8 +428,10 @@ fn _type_name_accepts_at(any x, str name, int depth) bool {
    if depth <= 0 { return false }
    _types_init()
    def n = normalize_type_name(name)
-   def group = dict_get(TYPE_GROUPS, n, nil)
-   if group != nil { return _any_type_spec_at(x, group, depth - 1) }
+   def group = _registry_get(TYPE_GROUPS, n)
+   if type_tag(group) != TAG_NIL {
+      return _any_type_spec_at(x, group, depth - 1)
+   }
    _is_leaf_type(x, n)
 }
 
@@ -456,7 +489,7 @@ mut NEXT_CUSTOM_TAG = 200
 fn register_type(str name) int {
    "Register a new custom type name, returns assigned tag."
    def existing = dict_get(CUSTOM_TYPES, name, nil)
-   if existing != nil { return existing }
+   if type_tag(existing) != TAG_NIL { return existing }
    def tag = NEXT_CUSTOM_TAG
    CUSTOM_TYPES = CUSTOM_TYPES.set(name, tag)
    NEXT_CUSTOM_TAG += 1

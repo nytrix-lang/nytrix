@@ -3,7 +3,7 @@ shape aarch64_elf64_internal_link_run_asm_templates {
   generator "native"
   features [native object elf64 aarch64 internal-link qemu asm constraints templates memory]
   template ny-test-case
-  flags "--native-backend aarch64 --nyir-verify -emit-only -o /tmp/nytrix-aarch64-link-asm.o"
+  flags "--native-backend aarch64 --nyr-verify -emit-only -o /tmp/nytrix-aarch64-link-asm.o"
   expect object_link_run_i64_42
   source ny <<'NY'
 mut x = asm("sub $0, $1, $2", "=r,r,r", 50, 8)

@@ -3,7 +3,7 @@ shape optcheck_private_list_dominating_store {
   generator "native"
   features [native x86_64 oracle optcheck list scalar-replacement]
   template ny-test-case
-  flags "-O3 --native-backend x86_64 --native-oracle-per-pass --native-result-oracle=4057 --nyir-verify"
+  flags "-O3 --native-backend x86_64 --native-oracle-per-pass --native-result-oracle=4057 --nyr-verify"
   expect compile_and_run
   source ny <<'NY'
 use core

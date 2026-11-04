@@ -1,0 +1,42 @@
+shape ui_scene_visibility {
+  family "runtime/ui"
+  generator "regression"
+  features [ny ui render gltf visibility]
+  template ny-test-case
+  expect compile_and_run
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit -O0"
+  expect_stdout "UI-SCENE-VISIBILITY-OK"
+  source ny <<'NY'
+use core
+use core.os.ui.render.scene as scene
+use core.os.ui.render as gfx
+mut rec = [0] * 46
+def ptr slab = zalloc(256)
+rec[37] = 1
+assert(scene._scene_store_gpu_part_material(slab, rec, false, false, false), "pack visible part")
+assert(load32(slab, 228) == 1, "visible part is active in packed draw")
+def group = {"gpu_draw_state": [slab, 1, 1, 1, 0, 0, 0, 0, 0]}
+assert(scene._scene_fast_read_gpu_state(group), "read packed draw state")
+assert(load32(scene._scene_fast_gpu_slab, 228) == 1, "cached draw state retains slab address")
+def int tagged_address = int(slab) * 2 + 1
+assert(int(scene._scene_slab_ptr(tagged_address)) == int(slab), "tagged slab address is normalized")
+def facade_group = {"gpu_draw_state": [tagged_address, 1, 1, 1, 0, 0, 0, 0, 0]}
+assert(gfx._scene_cache_group(facade_group), "facade caches packed GPU state")
+assert(int(gfx._active_scene_gpu_slab) == int(slab), "facade decodes its aligned GPU slab address")
+assert(gfx._scene_update_gpu_visibility_slab(gfx._active_scene_gpu_slab, 1, [], [], false) == 1,
+       "facade updates the live slab used by GPU submission")
+assert(load32(slab, 228) == 1, "facade writes visibility to the original allocation")
+rec[37] = 0
+assert(scene._scene_store_gpu_part_material(slab, rec, false, false, false), "pack hidden part")
+assert(load32(slab, 228) == 0, "hidden part stays inactive")
+def model = [4, 4, 2.0, 0.0, 0.0, 0.0, 0.0, 3.0, 0.0, 0.0, 0.0, 0.0, 4.0, 0.0, 7.0, 11.0, 13.0, 1.0]
+assert(scene._scene_store_gpu_part_model(slab, model), "pack transformed renderer model")
+assert(float(load32_f32(slab, 64)) == 2.0 && float(load32_f32(slab, 84)) == 3.0 &&
+       float(load32_f32(slab, 104)) == 4.0 && float(load32_f32(slab, 124)) == 1.0,
+       "packed model retains scale and homogeneous coordinate")
+assert(float(load32_f32(slab, 112)) == 7.0 && float(load32_f32(slab, 116)) == 11.0 &&
+       float(load32_f32(slab, 120)) == 13.0, "packed model retains translation")
+free(slab)
+print("UI-SCENE-VISIBILITY-OK")
+NY
+}

@@ -69,6 +69,53 @@ int main(void) {
   ok = ok && from && to && from->color >= 0 && from->color == to->color &&
        !from->spill && !to->spill && !to->reload && to->carried &&
        other_in_target;
+  if (ok) {
+    nyr_mach_live_segment_t *mutable_from = NULL;
+    nyr_mach_live_segment_t *mutable_to = NULL;
+    for (size_t i = 0; i < alloc.segment_len; ++i) {
+      nyr_mach_live_segment_t *seg = &alloc.segments[i];
+      if (seg->vreg == value && seg->block == b0)
+        mutable_from = seg;
+      if (seg->vreg == value && seg->block == b2)
+        mutable_to = seg;
+    }
+    if (!mutable_from || !mutable_to) {
+      ok = false;
+    } else {
+      int saved_from_color = mutable_from->color;
+      mutable_from->color = (saved_from_color + 1) % (int)alloc.color_count;
+      bool accepted_wrong_incoming_color =
+          nyr_mach_regalloc_verify(&mach, &alloc, NYR_MACH_REGCLASS_GPR);
+      mutable_from->color = saved_from_color;
+      ok = !accepted_wrong_incoming_color &&
+           nyr_mach_regalloc_verify(&mach, &alloc, NYR_MACH_REGCLASS_GPR);
+      if (ok && mutable_to->start < mach.inst_len - 1) {
+        size_t saved_start = mutable_to->start;
+        size_t saved_end = mutable_to->end;
+        mutable_to->start++;
+        mutable_to->end++;
+        bool accepted_missing_live_in =
+            nyr_mach_regalloc_verify(&mach, &alloc, NYR_MACH_REGCLASS_GPR);
+        mutable_to->start = saved_start;
+        mutable_to->end = saved_end;
+        ok = !accepted_missing_live_in &&
+             nyr_mach_regalloc_verify(&mach, &alloc, NYR_MACH_REGCLASS_GPR);
+      } else {
+        ok = false;
+      }
+      if (ok && mutable_from->end > mutable_from->start) {
+        size_t saved_end = mutable_from->end;
+        mutable_from->end--;
+        bool accepted_missing_live_out =
+            nyr_mach_regalloc_verify(&mach, &alloc, NYR_MACH_REGCLASS_GPR);
+        mutable_from->end = saved_end;
+        ok = !accepted_missing_live_out &&
+             nyr_mach_regalloc_verify(&mach, &alloc, NYR_MACH_REGCLASS_GPR);
+      } else {
+        ok = false;
+      }
+    }
+  }
   if (!ok)
     fprintf(stderr,
             "[regalloc-cfg-edge-carry] unique edge failed to carry value: "
@@ -84,7 +131,7 @@ int main(void) {
             other_in_target ? other_in_target->reload : -1,
             err[0] ? err : "spill/reload contract not coalesced");
   else
-    puts("[regalloc-cfg-edge-carry] non-adjacent CFG edge carries value");
+    puts("[regalloc-cfg-edge-carry] non-adjacent CFG carry verified; mismatched incoming color rejected");
   nyr_mach_regalloc_free(&alloc);
   nyr_mach_func_free(&mach);
   return ok ? 0 : 1;

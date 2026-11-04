@@ -122,6 +122,8 @@ typedef struct binding {
   stmt_t *stmt_t;
   bool is_slot;
   bool is_mut;
+  bool capture_by_ref;
+  bool is_volatile_capture;
   bool is_used;
   bool owned;
   bool is_stable;
@@ -212,7 +214,7 @@ enum ny_effect_bits_t {
   NY_FX_READ_MEMORY = 1u << 4,
   NY_FX_WRITE_MEMORY = 1u << 5,
   NY_FX_ALL = NY_FX_IO | NY_FX_ALLOC | NY_FX_FFI | NY_FX_THREAD |
-              NY_FX_READ_MEMORY | NY_FX_WRITE_MEMORY
+      NY_FX_READ_MEMORY | NY_FX_WRITE_MEMORY
 };
 
 typedef enum ny_type_kind_t {
@@ -223,6 +225,9 @@ typedef enum ny_type_kind_t {
   NY_TYPE_CAPABILITY,
   NY_TYPE_EFFECT_VAR,
   NY_TYPE_ROW,
+  NY_TYPE_DEPENDENT_ARROW,   /* fn(n Fin<N>) Vec<T, n> — return type mentions n */
+  NY_TYPE_SIGMA,             /* exists(n Fin<8>). Vec<f64, n> — dependent pair */
+  NY_TYPE_TYPE,              /* Type — the universe of types (first-class types) */
 } ny_type_kind_t;
 
 typedef struct ny_type_t ny_type_t;
@@ -272,6 +277,22 @@ struct ny_type_t {
       ny_type_t *tail;
       ny_type_arena_t *arena;
     } row;
+    /* Dependent arrow: fn(n Fin<N>) Vec<T, n> — return type mentions param. */
+    struct {
+      const char *param_name;
+      ny_type_t *param_type;
+      ny_type_t *ret_type;
+    } dep_arrow;
+    /* Dependent pair: exists(n Fin<8>). Vec<f64, n>. */
+    struct {
+      const char *index_name;
+      ny_type_t *index_type;
+      ny_type_t *value_type;
+    } sigma;
+    /* First-class type universe value: Type. */
+    struct {
+      const char *name;
+    } type_univ;
   } as;
 };
 
@@ -294,6 +315,11 @@ ny_type_t *ny_type_effect(ny_type_arena_t *arena, uint32_t mask);
 ny_type_t *ny_type_effect_var(ny_type_arena_t *arena);
 ny_type_t *ny_type_row(ny_type_arena_t *arena, const char *label,
                        ny_type_t *field_type, ny_type_t *tail);
+ny_type_t *ny_type_dep_arrow(ny_type_arena_t *arena, const char *param_name,
+                             ny_type_t *param_type, ny_type_t *ret_type);
+ny_type_t *ny_type_sigma(ny_type_arena_t *arena, const char *index_name,
+                         ny_type_t *index_type, ny_type_t *value_type);
+ny_type_t *ny_type_type_univ(ny_type_arena_t *arena, const char *name);
 ny_type_t *ny_type_effect_row_with_builtin_mask(ny_type_arena_t *arena,
                                                 uint32_t mask, ny_type_t *row);
 /* Compose effect sets, unify payloads for duplicate labels, and constrain
@@ -318,6 +344,9 @@ bool ny_type_structurally_equal(ny_type_t *a, ny_type_t *b);
 bool ny_type_occurs(ny_type_t *needle, ny_type_t *haystack);
 bool ny_type_unify(ny_type_t *a, ny_type_t *b);
 const char *ny_type_kind_name(ny_type_kind_t kind);
+bool ny_type_is_dependent_arrow(ny_type_t *type);
+bool ny_type_is_sigma(ny_type_t *type);
+bool ny_type_is_type_univ(ny_type_t *type);
 char *ny_type_to_string(ny_type_t *type);
 /* Stable versioned serialization for closed/open effect rows. */
 char *ny_type_effect_row_serialize(ny_type_t *row);
@@ -384,6 +413,11 @@ struct fun_sig {
    * declarations intentionally target one C symbol with distinct ABIs. */
   const char *llvm_name;
   const char *return_type;
+  /* Name of the value parameter referenced by a dependent return type
+   * (e.g. "n" in `fn(n Fin<4>) Vec<f64, n>`).  Set by the parser and copied
+   * from stmt_func_t in collect_sigs; used later for call-site substitution.
+   */
+  const char *dependent_return_param;
   const char *abi_return_type;
   const char *inferred_return_type;
   ny_str_list param_types;

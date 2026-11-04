@@ -1,0 +1,15 @@
+shape dependent_negative_dependent_pair {
+  family "typing/dependent"
+  generator "error"
+  features [error typing dependent negative]
+  template ny-compile-fail
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_fail
+  expect_message "typed exists binders (dependent pair types) are not supported"
+  source ny <<'NY'
+use core
+;; Unsupported dependent form: must be rejected with a clear diagnostic.
+def p exists(Fin<8> n) list<f64, n> = [1.0]
+print(p)
+NY
+}

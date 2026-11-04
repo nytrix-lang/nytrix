@@ -9,15 +9,7 @@
 #include <time.h>
 
 static int load_local(nyr_func_t *f, int64_t slot) {
-  return nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_LOAD_LOCAL,
-                                    .dst = -1,
-                                    .a = -1,
-                                    .b = -1,
-                                    .c = -1,
-                                    .d = -1,
-                                    .e = -1,
-                                    .f = -1,
-                                    .imm = slot});
+  return nyr_opt_emit_imm(f, NYIR_LOAD_LOCAL, slot);
 }
 
 static int emit_load_i64(nyr_func_t *f, int address);
@@ -36,33 +28,12 @@ static bool build_alloca_case(nyr_func_t *f, int64_t size, int64_t offset,
                                         .imm = size,
                                         .scalar_class = NYIR_SCALAR_POINTER});
   int displacement = nyr_opt_const(f, offset);
-  int address = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_ADD_I64,
-                                           .dst = -1,
-                                           .a = base,
-                                           .b = displacement,
-                                           .c = -1,
-                                           .d = -1,
-                                           .e = -1,
-                                           .f = -1});
+  int address = nyr_opt_emit_abc(f, NYIR_ADD_I64, base, displacement, -1);
   int value = nyr_opt_const(f, stored);
   if (base < 0 || displacement < 0 || address < 0 || value < 0)
     return false;
-  (void)nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_STORE_I64,
-                                   .dst = -1,
-                                   .a = address,
-                                   .b = -1,
-                                   .c = value,
-                                   .d = -1,
-                                   .e = -1,
-                                   .f = -1});
-  int result = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_LOAD_I64,
-                                          .dst = -1,
-                                          .a = address,
-                                          .b = -1,
-                                          .c = -1,
-                                          .d = -1,
-                                          .e = -1,
-                                          .f = -1});
+  (void)nyr_opt_emit_abc(f, NYIR_STORE_I64, address, -1, value);
+  int result = nyr_opt_emit_abc(f, NYIR_LOAD_I64, address, -1, -1);
   if (result < 0)
     return false;
   nyr_opt_ret(f, result);
@@ -132,24 +103,10 @@ static bool build_alloca_vec8_roundtrip(nyr_func_t *f, int64_t offset) {
   int address = nyr_opt_binop(f, NYIR_ADD_I64, allocation, displacement);
   int loaded = address < 0
                    ? -1
-                   : nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_VEC8_LOAD_I64,
-                                                .dst = -1,
-                                                .a = address,
-                                                .b = -1,
-                                                .c = -1,
-                                                .d = -1,
-                                                .e = -1,
-                                                .f = -1});
+                   : nyr_opt_emit_abc(f, NYIR_VEC8_LOAD_I64, address, -1, -1);
   if (allocation < 0 || displacement < 0 || address < 0 || loaded < 0)
     return false;
-  (void)nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_VEC8_STORE_I64,
-                                   .dst = -1,
-                                   .a = address,
-                                   .b = loaded,
-                                   .c = -1,
-                                   .d = -1,
-                                   .e = -1,
-                                   .f = -1});
+  (void)nyr_opt_emit_abc(f, NYIR_VEC8_STORE_I64, address, loaded, -1);
   int result = nyr_opt_const(f, 0);
   if (result < 0)
     return false;
@@ -200,14 +157,7 @@ static bool build_cfg_alloca_case(nyr_func_t *f, int64_t offset,
   if (allocation < 0 || displacement < 0 || address < 0 || value < 0 ||
       condition < 0)
     return false;
-  (void)nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_STORE_I64,
-                                   .dst = -1,
-                                   .a = address,
-                                   .b = -1,
-                                   .c = value,
-                                   .d = -1,
-                                   .e = -1,
-                                   .f = -1});
+  (void)nyr_opt_emit_abc(f, NYIR_STORE_I64, address, -1, value);
   nyr_opt_br_if(f, condition, 1);
   int fallthrough = emit_load_i64(f, address);
   if (fallthrough < 0)
@@ -287,22 +237,8 @@ static bool build_copy_struct_case(nyr_func_t *f, bool manual_copy,
   int second_value = nyr_opt_const(f, 29);
   if (first_value < 0 || second_value < 0)
     return false;
-  (void)nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_STORE_I64,
-                                   .dst = -1,
-                                   .a = source,
-                                   .b = -1,
-                                   .c = first_value,
-                                   .d = -1,
-                                   .e = -1,
-                                   .f = -1});
-  (void)nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_STORE_I64,
-                                   .dst = -1,
-                                   .a = source_second,
-                                   .b = -1,
-                                   .c = second_value,
-                                   .d = -1,
-                                   .e = -1,
-                                   .f = -1});
+  (void)nyr_opt_emit_abc(f, NYIR_STORE_I64, source, -1, first_value);
+  (void)nyr_opt_emit_abc(f, NYIR_STORE_I64, source_second, -1, second_value);
   if (with_branch) {
     int condition = load_local(f, 0);
     int zero = nyr_opt_const(f, 0);
@@ -317,22 +253,8 @@ static bool build_copy_struct_case(nyr_func_t *f, bool manual_copy,
     int second = emit_load_i64(f, change_second_word ? source : source_second);
     if (first < 0 || second < 0)
       return false;
-    (void)nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_STORE_I64,
-                                     .dst = -1,
-                                     .a = destination,
-                                     .b = -1,
-                                     .c = first,
-                                     .d = -1,
-                                     .e = -1,
-                                     .f = -1});
-    (void)nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_STORE_I64,
-                                     .dst = -1,
-                                     .a = destination_second,
-                                     .b = -1,
-                                     .c = second,
-                                     .d = -1,
-                                     .e = -1,
-                                     .f = -1});
+    (void)nyr_opt_emit_abc(f, NYIR_STORE_I64, destination, -1, first);
+    (void)nyr_opt_emit_abc(f, NYIR_STORE_I64, destination_second, -1, second);
   } else {
     (void)nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_COPY_STRUCT,
                                      .dst = -1,
@@ -344,14 +266,7 @@ static bool build_copy_struct_case(nyr_func_t *f, bool manual_copy,
                                      .f = -1,
                                      .imm = 16});
     for (unsigned i = 0; i < 3; ++i)
-      (void)nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_NOP,
-                                       .dst = -1,
-                                       .a = -1,
-                                       .b = -1,
-                                       .c = -1,
-                                       .d = -1,
-                                       .e = -1,
-                                       .f = -1});
+      (void)nyr_opt_emit_abc(f, NYIR_NOP, -1, -1, -1);
   }
   int first_result = emit_load_i64(f, destination);
   int second_result = emit_load_i64(f, destination_second);
@@ -541,14 +456,7 @@ static bool build_addr_local_store(nyr_func_t *f, bool through_address,
   }
   if (through_address) {
     size_t old_len = f->len;
-    (void)nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_STORE_I64,
-                                     .dst = -1,
-                                     .a = address,
-                                     .b = -1,
-                                     .c = value,
-                                     .d = -1,
-                                     .e = -1,
-                                     .f = -1});
+    (void)nyr_opt_emit_abc(f, NYIR_STORE_I64, address, -1, value);
     if (f->len == old_len)
       return false;
   } else {
@@ -684,14 +592,7 @@ static bool build_counted_cfg_alloca_case(nyr_func_t *f, int64_t trips,
   int value = nyr_opt_const(f, stored);
   if (allocation < 0 || value < 0)
     return false;
-  (void)nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_STORE_I64,
-                                   .dst = -1,
-                                   .a = allocation,
-                                   .b = -1,
-                                   .c = value,
-                                   .d = -1,
-                                   .e = -1,
-                                   .f = -1});
+  (void)nyr_opt_emit_abc(f, NYIR_STORE_I64, allocation, -1, value);
   int loaded = emit_load_i64(f, allocation);
   int next_iv = nyr_opt_binop(f, NYIR_ADD_I64, iv, one);
   if (loaded < 0 || next_iv < 0)
@@ -1013,30 +914,9 @@ static bool build_two_alloca_case(nyr_func_t *f, int64_t second_value) {
   int replacement = nyr_opt_const(f, second_value);
   if (first < 0 || first_value < 0 || second < 0 || replacement < 0)
     return false;
-  (void)nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_STORE_I64,
-                                   .dst = -1,
-                                   .a = first,
-                                   .b = -1,
-                                   .c = first_value,
-                                   .d = -1,
-                                   .e = -1,
-                                   .f = -1});
-  (void)nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_STORE_I64,
-                                   .dst = -1,
-                                   .a = second,
-                                   .b = -1,
-                                   .c = replacement,
-                                   .d = -1,
-                                   .e = -1,
-                                   .f = -1});
-  int result = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_LOAD_I64,
-                                          .dst = -1,
-                                          .a = first,
-                                          .b = -1,
-                                          .c = -1,
-                                          .d = -1,
-                                          .e = -1,
-                                          .f = -1});
+  (void)nyr_opt_emit_abc(f, NYIR_STORE_I64, first, -1, first_value);
+  (void)nyr_opt_emit_abc(f, NYIR_STORE_I64, second, -1, replacement);
+  int result = nyr_opt_emit_abc(f, NYIR_LOAD_I64, first, -1, -1);
   if (result < 0)
     return false;
   nyr_opt_ret(f, result);
@@ -1064,15 +944,7 @@ static bool build_uninitialized_local_pointer_load(nyr_func_t *f,
   int pointer = load_local(f, 0);
   if (pointer < 0)
     return false;
-  int discarded = nyr_ir_emit(
-      f, (nyr_inst_t){.op = keep_memory_load ? NYIR_LOAD_I64 : NYIR_COPY,
-                       .dst = -1,
-                       .a = pointer,
-                       .b = -1,
-                       .c = -1,
-                       .d = -1,
-                       .e = -1,
-                       .f = -1});
+  int discarded = nyr_opt_emit_abc(f, keep_memory_load ? NYIR_LOAD_I64 : NYIR_COPY, pointer, -1, -1);
   int allocation =
       nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_ALLOCA,
                                  .dst = -1,
@@ -1170,14 +1042,7 @@ static bool build_select_i64(nyr_func_t *f, bool branch) {
     nyr_opt_label(f, 1);
     nyr_opt_ret(f, true_value);
   } else {
-    int selected = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_SELECT_I64,
-                                              .dst = -1,
-                                              .a = predicate,
-                                              .b = true_value,
-                                              .c = false_value,
-                                              .d = -1,
-                                              .e = -1,
-                                              .f = -1});
+    int selected = nyr_opt_emit_abc(f, NYIR_SELECT_I64, predicate, true_value, false_value);
     if (selected < 0)
       return false;
     nyr_opt_ret(f, selected);
@@ -1431,15 +1296,7 @@ static bool build_byte_swap(nyr_func_t *f, unsigned bytes, bool direct,
   }
   int result = -1;
   if (direct) {
-    result = nyr_ir_emit(
-        f, (nyr_inst_t){.op = bytes == 4 ? NYIR_BSWAP32_I64 : NYIR_BSWAP_I64,
-                         .dst = -1,
-                         .a = input,
-                         .b = -1,
-                         .c = -1,
-                         .d = -1,
-                         .e = -1,
-                         .f = -1});
+    result = nyr_opt_emit_abc(f, bytes == 4 ? NYIR_BSWAP32_I64 : NYIR_BSWAP_I64, input, -1, -1);
   } else {
     int byte_mask = nyr_opt_const(f, 0xff);
     int input_mask = nyr_opt_const(f, bytes == 4 ? INT64_C(0xffffffff) : -1);
@@ -1832,14 +1689,7 @@ static bool build_cfg_sqrt(nyr_func_t *f, bool expected_true) {
   nyr_opt_begin(f);
   int four = nyr_opt_const_f64(f, 4.0);
   int root = four < 0 ? -1
-                      : nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_SQRT_F64,
-                                                   .dst = -1,
-                                                   .a = four,
-                                                   .b = -1,
-                                                   .c = -1,
-                                                   .d = -1,
-                                                   .e = -1,
-                                                   .f = -1});
+                      : nyr_opt_emit_abc(f, NYIR_SQRT_F64, four, -1, -1);
   int two = nyr_opt_const_f64(f, 2.0);
   int equal = root < 0 || two < 0
                   ? -1
@@ -1890,24 +1740,10 @@ static bool build_cfg_trig_predicate(nyr_func_t *f, nyr_op_t trig,
   nyr_opt_begin(f);
   int input = load_local(f, 0);
   int operand = copy_input && input >= 0
-                    ? nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_COPY,
-                                                 .dst = -1,
-                                                 .a = input,
-                                                 .b = -1,
-                                                 .c = -1,
-                                                 .d = -1,
-                                                 .e = -1,
-                                                 .f = -1})
+                    ? nyr_opt_emit_abc(f, NYIR_COPY, input, -1, -1)
                     : input;
   int result = operand < 0 ? -1
-                           : nyr_ir_emit(f, (nyr_inst_t){.op = trig,
-                                                        .dst = -1,
-                                                        .a = operand,
-                                                        .b = -1,
-                                                        .c = -1,
-                                                        .d = -1,
-                                                        .e = -1,
-                                                        .f = -1});
+                           : nyr_opt_emit_abc(f, trig, operand, -1, -1);
   int zero = nyr_opt_const_f64(f, 0.0);
   int predicate = result < 0 || zero < 0
                       ? -1
@@ -1974,26 +1810,10 @@ static bool build_cfg_float_arithmetic(nyr_func_t *f, bool single,
   nyr_opt_begin(f);
   int x = load_local(f, 0);
   int one =
-      single ? nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_CONST_F32,
-                                          .dst = -1,
-                                          .a = -1,
-                                          .b = -1,
-                                          .c = -1,
-                                          .d = -1,
-                                          .e = -1,
-                                          .f = -1,
-                                          .imm = (int64_t)UINT32_C(0x3f800000)})
+      single ? nyr_opt_emit_imm(f, NYIR_CONST_F32, (int64_t)UINT32_C(0x3f800000))
              : nyr_opt_const_f64(f, 1.0);
   int result = nyr_opt_binop(f, op, x, one);
-  int zero = single ? nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_CONST_F32,
-                                                 .dst = -1,
-                                                 .a = -1,
-                                                 .b = -1,
-                                                 .c = -1,
-                                                 .d = -1,
-                                                 .e = -1,
-                                                 .f = -1,
-                                                 .imm = 0})
+  int zero = single ? nyr_opt_emit_imm(f, NYIR_CONST_F32, 0)
                     : nyr_opt_const_f64(f, 0.0);
   int predicate =
       nyr_ir_emit(f, (nyr_inst_t){.op = single ? NYIR_CMP_F32 : NYIR_CMP_F64,
@@ -2053,28 +1873,13 @@ static bool rejects_cfg_float_arithmetic_change(bool single) {
 
 static bool build_float_to_i64(nyr_func_t *f, bool single, int64_t result) {
   nyr_opt_begin(f);
-  int value = single ? nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_CONST_F32,
-                                                  .dst = -1,
-                                                  .a = -1,
-                                                  .b = -1,
-                                                  .c = -1,
-                                                  .d = -1,
-                                                  .e = -1,
-                                                  .f = -1,
-                                                  .imm = (int64_t)UINT32_C(
-                                                      0xc0700000)}) /* -3.75f */
+  int value = single ? nyr_opt_emit_imm(f, NYIR_CONST_F32, (int64_t)UINT32_C(
+      0xc0700000)) /* -3.75f */
                      : nyr_opt_const_f64(f, -3.75);
   int converted =
       value < 0 ? -1
-                : nyr_ir_emit(f, (nyr_inst_t){.op = single ? NYIR_F32_TO_I64
-                                                          : NYIR_F64_TO_I64,
-                                             .dst = -1,
-                                             .a = value,
-                                             .b = -1,
-                                             .c = -1,
-                                             .d = -1,
-                                             .e = -1,
-                                             .f = -1});
+                : nyr_opt_emit_abc(f, single ? NYIR_F32_TO_I64
+                                                          : NYIR_F64_TO_I64, value, -1, -1);
   if (value < 0 || converted < 0)
     return false;
   nyr_opt_label(f,
@@ -2108,23 +1913,9 @@ static bool build_f64_f32_roundtrip_cmp(nyr_func_t *f, double input) {
   int original = nyr_opt_const_f64(f, input);
   int narrowed = original < 0
                      ? -1
-                     : nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_F64_TO_F32,
-                                                  .dst = -1,
-                                                  .a = original,
-                                                  .b = -1,
-                                                  .c = -1,
-                                                  .d = -1,
-                                                  .e = -1,
-                                                  .f = -1});
+                     : nyr_opt_emit_abc(f, NYIR_F64_TO_F32, original, -1, -1);
   int widened = narrowed < 0 ? -1
-                             : nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_F32_TO_F64,
-                                                          .dst = -1,
-                                                          .a = narrowed,
-                                                          .b = -1,
-                                                          .c = -1,
-                                                          .d = -1,
-                                                          .e = -1,
-                                                          .f = -1});
+                             : nyr_opt_emit_abc(f, NYIR_F32_TO_F64, narrowed, -1, -1);
   int same = widened < 0 ? -1
                          : nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_CMP_F64,
                                                       .dst = -1,
@@ -2192,43 +1983,15 @@ static bool build_straightline_float(nyr_func_t *f, int mode) {
     int factor = nyr_opt_const_f64(f, mode == 0 ? 2.0 : 2.5);
     int product = factor < 0 ? -1 : nyr_opt_binop(f, NYIR_MUL_F64, x, factor);
     result = product < 0 ? -1
-                         : nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_F64_TO_I64,
-                                                      .dst = -1,
-                                                      .a = product,
-                                                      .b = -1,
-                                                      .c = -1,
-                                                      .d = -1,
-                                                      .e = -1,
-                                                      .f = -1});
+                         : nyr_opt_emit_abc(f, NYIR_F64_TO_I64, product, -1, -1);
   } else if (mode == 1) { /* (int64)(x + x) */
     int doubled = nyr_opt_binop(f, NYIR_ADD_F64, x, x);
     result = doubled < 0 ? -1
-                         : nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_F64_TO_I64,
-                                                      .dst = -1,
-                                                      .a = doubled,
-                                                      .b = -1,
-                                                      .c = -1,
-                                                      .d = -1,
-                                                      .e = -1,
-                                                      .f = -1});
+                         : nyr_opt_emit_abc(f, NYIR_F64_TO_I64, doubled, -1, -1);
   } else if (mode == 3) { /* (int64)(double)x */
-    int widened = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_I64_TO_F64,
-                                             .dst = -1,
-                                             .a = x,
-                                             .b = -1,
-                                             .c = -1,
-                                             .d = -1,
-                                             .e = -1,
-                                             .f = -1});
+    int widened = nyr_opt_emit_abc(f, NYIR_I64_TO_F64, x, -1, -1);
     result = widened < 0 ? -1
-                         : nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_F64_TO_I64,
-                                                      .dst = -1,
-                                                      .a = widened,
-                                                      .b = -1,
-                                                      .c = -1,
-                                                      .d = -1,
-                                                      .e = -1,
-                                                      .f = -1});
+                         : nyr_opt_emit_abc(f, NYIR_F64_TO_I64, widened, -1, -1);
   } else if (mode == 4) { /* identity */
     result = x;
   }
@@ -2302,23 +2065,9 @@ static bool build_straightline_trig(nyr_func_t *f, nyr_op_t trig,
   int x = load_local(f, 0);
   int operand = x;
   if (copy_input && x >= 0)
-    operand = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_COPY,
-                                         .dst = -1,
-                                         .a = x,
-                                         .b = -1,
-                                         .c = -1,
-                                         .d = -1,
-                                         .e = -1,
-                                         .f = -1});
+    operand = nyr_opt_emit_abc(f, NYIR_COPY, x, -1, -1);
   int applied = operand < 0 ? -1
-                            : nyr_ir_emit(f, (nyr_inst_t){.op = trig,
-                                                         .dst = -1,
-                                                         .a = operand,
-                                                         .b = -1,
-                                                         .c = -1,
-                                                         .d = -1,
-                                                         .e = -1,
-                                                         .f = -1});
+                            : nyr_opt_emit_abc(f, trig, operand, -1, -1);
   int zero = nyr_opt_const_f64(f, 0.0);
   int is_zero = applied < 0 || zero < 0
                     ? -1
@@ -2361,24 +2110,10 @@ static bool checks_straightline_trig_congruence(void) {
 }
 
 static int emit_i64_vector_reduction(nyr_func_t *f, int base, int seed) {
-  int packed = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_VEC4_SET1_I64,
-                                          .dst = -1,
-                                          .a = seed,
-                                          .b = -1,
-                                          .c = -1,
-                                          .d = -1,
-                                          .e = -1,
-                                          .f = -1});
+  int packed = nyr_opt_emit_abc(f, NYIR_VEC4_SET1_I64, seed, -1, -1);
   if (packed < 0)
     return -1;
-  return nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_VEC4_REDUCE_ADD_I64,
-                                    .dst = -1,
-                                    .a = base,
-                                    .b = packed,
-                                    .c = -1,
-                                    .d = -1,
-                                    .e = -1,
-                                    .f = -1});
+  return nyr_opt_emit_abc(f, NYIR_VEC4_REDUCE_ADD_I64, base, packed, -1);
 }
 
 static int emit_scalar_two_lane_sum(nyr_func_t *f, int base, int seed,
@@ -2511,42 +2246,14 @@ static int emit_vector_binary_reduction(nyr_func_t *f, nyr_op_t vector_op,
                                         int base, int lhs, int rhs,
                                         bool vectorized, bool wrong) {
   if (vectorized) {
-    int left = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_VEC4_SET1_I64,
-                                          .dst = -1,
-                                          .a = lhs,
-                                          .b = -1,
-                                          .c = -1,
-                                          .d = -1,
-                                          .e = -1,
-                                          .f = -1});
-    int right = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_VEC4_SET1_I64,
-                                           .dst = -1,
-                                           .a = rhs,
-                                           .b = -1,
-                                           .c = -1,
-                                           .d = -1,
-                                           .e = -1,
-                                           .f = -1});
+    int left = nyr_opt_emit_abc(f, NYIR_VEC4_SET1_I64, lhs, -1, -1);
+    int right = nyr_opt_emit_abc(f, NYIR_VEC4_SET1_I64, rhs, -1, -1);
     int packed = left < 0 || right < 0
                      ? -1
-                     : nyr_ir_emit(f, (nyr_inst_t){.op = vector_op,
-                                                  .dst = -1,
-                                                  .a = left,
-                                                  .b = right,
-                                                  .c = -1,
-                                                  .d = -1,
-                                                  .e = -1,
-                                                  .f = -1});
+                     : nyr_opt_emit_abc(f, vector_op, left, right, -1);
     return packed < 0
                ? -1
-               : nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_VEC4_REDUCE_ADD_I64,
-                                            .dst = -1,
-                                            .a = base,
-                                            .b = packed,
-                                            .c = -1,
-                                            .d = -1,
-                                            .e = -1,
-                                            .f = -1});
+               : nyr_opt_emit_abc(f, NYIR_VEC4_REDUCE_ADD_I64, base, packed, -1);
   }
   nyr_op_t scalar_op = scalar_i64_equivalent(vector_op);
   if (scalar_op == NYIR_OP_COUNT)
@@ -2687,33 +2394,12 @@ static int emit_memory_vector_sum(nyr_func_t *f, bool vectorized,
   if (address < 0 || seed < 0)
     return -1;
   if (vectorized) {
-    int packed = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_VEC4_LOAD_I64,
-                                            .dst = -1,
-                                            .a = address,
-                                            .b = -1,
-                                            .c = -1,
-                                            .d = -1,
-                                            .e = -1,
-                                            .f = -1});
+    int packed = nyr_opt_emit_abc(f, NYIR_VEC4_LOAD_I64, address, -1, -1);
     return packed < 0
                ? -1
-               : nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_VEC4_REDUCE_ADD_I64,
-                                            .dst = -1,
-                                            .a = seed,
-                                            .b = packed,
-                                            .c = -1,
-                                            .d = -1,
-                                            .e = -1,
-                                            .f = -1});
+               : nyr_opt_emit_abc(f, NYIR_VEC4_REDUCE_ADD_I64, seed, packed, -1);
   }
-  int first = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_LOAD_I64,
-                                         .dst = -1,
-                                         .a = address,
-                                         .b = -1,
-                                         .c = -1,
-                                         .d = -1,
-                                         .e = -1,
-                                         .f = -1});
+  int first = nyr_opt_emit_abc(f, NYIR_LOAD_I64, address, -1, -1);
   if (first < 0)
     return -1;
   int result = nyr_opt_binop(f, NYIR_ADD_I64, seed, first);
@@ -2724,14 +2410,7 @@ static int emit_memory_vector_sum(nyr_func_t *f, bool vectorized,
       eight < 0 ? -1 : nyr_opt_binop(f, NYIR_ADD_I64, address, eight);
   int second = second_address < 0
                    ? -1
-                   : nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_LOAD_I64,
-                                                .dst = -1,
-                                                .a = second_address,
-                                                .b = -1,
-                                                .c = -1,
-                                                .d = -1,
-                                                .e = -1,
-                                                .f = -1});
+                   : nyr_opt_emit_abc(f, NYIR_LOAD_I64, second_address, -1, -1);
   return result < 0 || second < 0
              ? -1
              : nyr_opt_binop(f, NYIR_ADD_I64, result, second);
@@ -2777,24 +2456,10 @@ static int emit_memory_vec8_sum(nyr_func_t *f, bool vectorized,
   if (address < 0 || seed < 0)
     return -1;
   if (vectorized) {
-    int packed = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_VEC8_LOAD_I64,
-                                            .dst = -1,
-                                            .a = address,
-                                            .b = -1,
-                                            .c = -1,
-                                            .d = -1,
-                                            .e = -1,
-                                            .f = -1});
+    int packed = nyr_opt_emit_abc(f, NYIR_VEC8_LOAD_I64, address, -1, -1);
     return packed < 0
                ? -1
-               : nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_VEC8_REDUCE_ADD_I64,
-                                            .dst = -1,
-                                            .a = seed,
-                                            .b = packed,
-                                            .c = -1,
-                                            .d = -1,
-                                            .e = -1,
-                                            .f = -1});
+               : nyr_opt_emit_abc(f, NYIR_VEC8_REDUCE_ADD_I64, seed, packed, -1);
   }
   int sum = seed;
   for (unsigned lane = 0; lane < (omit_last_lane ? 3u : 4u); ++lane) {
@@ -2805,14 +2470,7 @@ static int emit_memory_vec8_sum(nyr_func_t *f, bool vectorized,
             : (offset < 0 ? -1
                           : nyr_opt_binop(f, NYIR_ADD_I64, address, offset));
     int value = ptr < 0 ? -1
-                        : nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_LOAD_I64,
-                                                     .dst = -1,
-                                                     .a = ptr,
-                                                     .b = -1,
-                                                     .c = -1,
-                                                     .d = -1,
-                                                     .e = -1,
-                                                     .f = -1});
+                        : nyr_opt_emit_abc(f, NYIR_LOAD_I64, ptr, -1, -1);
     sum = value < 0 ? -1 : nyr_opt_binop(f, NYIR_ADD_I64, sum, value);
     if (sum < 0)
       return -1;
@@ -2923,38 +2581,10 @@ static bool checks_memory_vec8_binary_semantics(void) {
     int left = load_local(&vector, 0);
     int right = load_local(&vector, 1);
     int seed = load_local(&vector, 2);
-    int lhs = nyr_ir_emit(&vector, (nyr_inst_t){.op = NYIR_VEC8_LOAD_I64,
-                                               .dst = -1,
-                                               .a = left,
-                                               .b = -1,
-                                               .c = -1,
-                                               .d = -1,
-                                               .e = -1,
-                                               .f = -1});
-    int rhs = nyr_ir_emit(&vector, (nyr_inst_t){.op = NYIR_VEC8_LOAD_I64,
-                                               .dst = -1,
-                                               .a = right,
-                                               .b = -1,
-                                               .c = -1,
-                                               .d = -1,
-                                               .e = -1,
-                                               .f = -1});
-    int packed = nyr_ir_emit(&vector, (nyr_inst_t){.op = vector_op,
-                                                  .dst = -1,
-                                                  .a = lhs,
-                                                  .b = rhs,
-                                                  .c = -1,
-                                                  .d = -1,
-                                                  .e = -1,
-                                                  .f = -1});
-    int total = nyr_ir_emit(&vector, (nyr_inst_t){.op = NYIR_VEC8_REDUCE_ADD_I64,
-                                                 .dst = -1,
-                                                 .a = seed,
-                                                 .b = packed,
-                                                 .c = -1,
-                                                 .d = -1,
-                                                 .e = -1,
-                                                 .f = -1});
+    int lhs = nyr_opt_emit_abc(&vector, NYIR_VEC8_LOAD_I64, left, -1, -1);
+    int rhs = nyr_opt_emit_abc(&vector, NYIR_VEC8_LOAD_I64, right, -1, -1);
+    int packed = nyr_opt_emit_abc(&vector, vector_op, lhs, rhs, -1);
+    int total = nyr_opt_emit_abc(&vector, NYIR_VEC8_REDUCE_ADD_I64, seed, packed, -1);
     bool built = left >= 0 && right >= 0 && seed >= 0 && lhs >= 0 && rhs >= 0 &&
                  packed >= 0 && total >= 0;
     if (built) {
@@ -2970,22 +2600,8 @@ static bool checks_memory_vec8_binary_semantics(void) {
       int lp = lane ? nyr_opt_binop(&scalar, NYIR_ADD_I64, left, offset) : left;
       int rp =
           lane ? nyr_opt_binop(&scalar, NYIR_ADD_I64, right, offset) : right;
-      int lv = nyr_ir_emit(&scalar, (nyr_inst_t){.op = NYIR_LOAD_I64,
-                                                .dst = -1,
-                                                .a = lp,
-                                                .b = -1,
-                                                .c = -1,
-                                                .d = -1,
-                                                .e = -1,
-                                                .f = -1});
-      int rv = nyr_ir_emit(&scalar, (nyr_inst_t){.op = NYIR_LOAD_I64,
-                                                .dst = -1,
-                                                .a = rp,
-                                                .b = -1,
-                                                .c = -1,
-                                                .d = -1,
-                                                .e = -1,
-                                                .f = -1});
+      int lv = nyr_opt_emit_abc(&scalar, NYIR_LOAD_I64, lp, -1, -1);
+      int rv = nyr_opt_emit_abc(&scalar, NYIR_LOAD_I64, rp, -1, -1);
       int sum = nyr_opt_binop(&scalar, scalar_op, lv, rv);
       total = nyr_opt_binop(&scalar, NYIR_ADD_I64, total, sum);
       built = offset >= 0 && lp >= 0 && rp >= 0 && lv >= 0 && rv >= 0 &&
@@ -3012,26 +2628,12 @@ static bool checks_memory_vec8_binary_semantics(void) {
 
 static int emit_f64_to_i64(nyr_func_t *f, int value) {
   return value < 0 ? -1
-                   : nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_F64_TO_I64,
-                                                .dst = -1,
-                                                .a = value,
-                                                .b = -1,
-                                                .c = -1,
-                                                .d = -1,
-                                                .e = -1,
-                                                .f = -1});
+                   : nyr_opt_emit_abc(f, NYIR_F64_TO_I64, value, -1, -1);
 }
 
 static int emit_load_i64(nyr_func_t *f, int address) {
   return address < 0 ? -1
-                     : nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_LOAD_I64,
-                                                  .dst = -1,
-                                                  .a = address,
-                                                  .b = -1,
-                                                  .c = -1,
-                                                  .d = -1,
-                                                  .e = -1,
-                                                  .f = -1});
+                     : nyr_opt_emit_abc(f, NYIR_LOAD_I64, address, -1, -1);
 }
 
 static bool build_store_load(nyr_func_t *f, int64_t stored_value,
@@ -3227,49 +2829,20 @@ static bool build_vector_store_roundtrip(nyr_func_t *f, unsigned lanes,
   int result = -1;
   if (vectorized) {
     int packed =
-        nyr_ir_emit(f, (nyr_inst_t){.op = lanes == 2 ? NYIR_VEC4_LOAD_I64
-                                                    : NYIR_VEC8_LOAD_I64,
-                                   .dst = -1,
-                                   .a = source,
-                                   .b = -1,
-                                   .c = -1,
-                                   .d = -1,
-                                   .e = -1,
-                                   .f = -1});
+        nyr_opt_emit_abc(f, lanes == 2 ? NYIR_VEC4_LOAD_I64
+                                                    : NYIR_VEC8_LOAD_I64, source, -1, -1);
     if (packed < 0)
       return false;
-    (void)nyr_ir_emit(f, (nyr_inst_t){.op = lanes == 2 ? NYIR_VEC4_STORE_I64
-                                                      : NYIR_VEC8_STORE_I64,
-                                     .dst = -1,
-                                     .a = destination,
-                                     .b = packed,
-                                     .c = -1,
-                                     .d = -1,
-                                     .e = -1,
-                                     .f = -1});
+    (void)nyr_opt_emit_abc(f, lanes == 2 ? NYIR_VEC4_STORE_I64
+                                                      : NYIR_VEC8_STORE_I64, destination, packed, -1);
     int loaded =
-        nyr_ir_emit(f, (nyr_inst_t){.op = lanes == 2 ? NYIR_VEC4_LOAD_I64
-                                                    : NYIR_VEC8_LOAD_I64,
-                                   .dst = -1,
-                                   .a = destination,
-                                   .b = -1,
-                                   .c = -1,
-                                   .d = -1,
-                                   .e = -1,
-                                   .f = -1});
+        nyr_opt_emit_abc(f, lanes == 2 ? NYIR_VEC4_LOAD_I64
+                                                    : NYIR_VEC8_LOAD_I64, destination, -1, -1);
     int zero = nyr_opt_const(f, 0);
     result = loaded < 0 || zero < 0
                  ? -1
-                 : nyr_ir_emit(f, (nyr_inst_t){
-                                    .op = lanes == 2 ? NYIR_VEC4_REDUCE_ADD_I64
-                                                     : NYIR_VEC8_REDUCE_ADD_I64,
-                                    .dst = -1,
-                                    .a = zero,
-                                    .b = loaded,
-                                    .c = -1,
-                                    .d = -1,
-                                    .e = -1,
-                                    .f = -1});
+                 : nyr_opt_emit_abc(f, lanes == 2 ? NYIR_VEC4_REDUCE_ADD_I64
+                                  : NYIR_VEC8_REDUCE_ADD_I64, zero, loaded, -1);
   } else {
     int values[4] = {-1, -1, -1, -1};
     for (unsigned lane = 0; lane < lanes; ++lane) {
@@ -3342,26 +2915,12 @@ static bool emit_copy_to_destination(nyr_func_t *f, int source,
                                      bool vectorized, bool omit_last_store) {
   if (vectorized) {
     int packed =
-        nyr_ir_emit(f, (nyr_inst_t){.op = lanes == 2 ? NYIR_VEC4_LOAD_I64
-                                                    : NYIR_VEC8_LOAD_I64,
-                                   .dst = -1,
-                                   .a = source,
-                                   .b = -1,
-                                   .c = -1,
-                                   .d = -1,
-                                   .e = -1,
-                                   .f = -1});
+        nyr_opt_emit_abc(f, lanes == 2 ? NYIR_VEC4_LOAD_I64
+                                                    : NYIR_VEC8_LOAD_I64, source, -1, -1);
     if (packed < 0)
       return false;
-    (void)nyr_ir_emit(f, (nyr_inst_t){.op = lanes == 2 ? NYIR_VEC4_STORE_I64
-                                                      : NYIR_VEC8_STORE_I64,
-                                     .dst = -1,
-                                     .a = destination,
-                                     .b = packed,
-                                     .c = -1,
-                                     .d = -1,
-                                     .e = -1,
-                                     .f = -1});
+    (void)nyr_opt_emit_abc(f, lanes == 2 ? NYIR_VEC4_STORE_I64
+                                                      : NYIR_VEC8_STORE_I64, destination, packed, -1);
     return true;
   }
 
@@ -3393,28 +2952,13 @@ static int emit_destination_sum(nyr_func_t *f, int destination, unsigned lanes,
                                 bool vectorized) {
   if (vectorized) {
     int loaded =
-        nyr_ir_emit(f, (nyr_inst_t){.op = lanes == 2 ? NYIR_VEC4_LOAD_I64
-                                                    : NYIR_VEC8_LOAD_I64,
-                                   .dst = -1,
-                                   .a = destination,
-                                   .b = -1,
-                                   .c = -1,
-                                   .d = -1,
-                                   .e = -1,
-                                   .f = -1});
+        nyr_opt_emit_abc(f, lanes == 2 ? NYIR_VEC4_LOAD_I64
+                                                    : NYIR_VEC8_LOAD_I64, destination, -1, -1);
     int zero = nyr_opt_const(f, 0);
     return loaded < 0 || zero < 0
                ? -1
-               : nyr_ir_emit(f, (nyr_inst_t){
-                                  .op = lanes == 2 ? NYIR_VEC4_REDUCE_ADD_I64
-                                                   : NYIR_VEC8_REDUCE_ADD_I64,
-                                  .dst = -1,
-                                  .a = zero,
-                                  .b = loaded,
-                                  .c = -1,
-                                  .d = -1,
-                                  .e = -1,
-                                  .f = -1});
+               : nyr_opt_emit_abc(f, lanes == 2 ? NYIR_VEC4_REDUCE_ADD_I64
+                                : NYIR_VEC8_REDUCE_ADD_I64, zero, loaded, -1);
   }
   int sum = nyr_opt_const(f, 0);
   for (unsigned lane = 0; lane < lanes; ++lane) {
@@ -4318,14 +3862,7 @@ static bool build_tv_readonly_memory_call(nyr_func_t *f, bool write_before,
     return false;
   if (write_before) {
     size_t old_len = f->len;
-    (void)nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_STORE_I64,
-                                     .dst = -1,
-                                     .a = address,
-                                     .b = -1,
-                                     .c = value,
-                                     .d = -1,
-                                     .e = -1,
-                                     .f = -1});
+    (void)nyr_opt_emit_abc(f, NYIR_STORE_I64, address, -1, value);
     if (f->len == old_len)
       return false;
   }
@@ -4340,14 +3877,7 @@ static bool build_tv_readonly_memory_call(nyr_func_t *f, bool write_before,
     return false;
   if (write_after) {
     size_t old_len = f->len;
-    (void)nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_STORE_I64,
-                                     .dst = -1,
-                                     .a = address,
-                                     .b = -1,
-                                     .c = value,
-                                     .d = -1,
-                                     .e = -1,
-                                     .f = -1});
+    (void)nyr_opt_emit_abc(f, NYIR_STORE_I64, address, -1, value);
     if (f->len == old_len)
       return false;
   }
@@ -4365,14 +3895,7 @@ static bool build_tv_readonly_memory_capture(nyr_func_t *f, bool write_before,
     return false;
   if (write_before) {
     size_t old_len = f->len;
-    (void)nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_STORE_I64,
-                                     .dst = -1,
-                                     .a = address,
-                                     .b = -1,
-                                     .c = value,
-                                     .d = -1,
-                                     .e = -1,
-                                     .f = -1});
+    (void)nyr_opt_emit_abc(f, NYIR_STORE_I64, address, -1, value);
     if (f->len == old_len)
       return false;
   }
@@ -4406,14 +3929,7 @@ static bool build_tv_readonly_memory_capture(nyr_func_t *f, bool write_before,
     return false;
   if (write_after) {
     size_t old_len = f->len;
-    (void)nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_STORE_I64,
-                                     .dst = -1,
-                                     .a = address,
-                                     .b = -1,
-                                     .c = value,
-                                     .d = -1,
-                                     .e = -1,
-                                     .f = -1});
+    (void)nyr_opt_emit_abc(f, NYIR_STORE_I64, address, -1, value);
     if (f->len == old_len)
       return false;
   }
@@ -4444,14 +3960,7 @@ static bool build_cfg_tv_readonly_memory_call(nyr_func_t *f,
   nyr_opt_label(f, 1);
   if (write_before_call) {
     size_t old_len = f->len;
-    (void)nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_STORE_I64,
-                                     .dst = -1,
-                                     .a = address,
-                                     .b = -1,
-                                     .c = value,
-                                     .d = -1,
-                                     .e = -1,
-                                     .f = -1});
+    (void)nyr_opt_emit_abc(f, NYIR_STORE_I64, address, -1, value);
     if (f->len == old_len)
       return false;
   }
@@ -4466,14 +3975,7 @@ static bool build_cfg_tv_readonly_memory_call(nyr_func_t *f,
     return false;
   if (!write_before_call) {
     size_t old_len = f->len;
-    (void)nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_STORE_I64,
-                                     .dst = -1,
-                                     .a = address,
-                                     .b = -1,
-                                     .c = value,
-                                     .d = -1,
-                                     .e = -1,
-                                     .f = -1});
+    (void)nyr_opt_emit_abc(f, NYIR_STORE_I64, address, -1, value);
     if (f->len == old_len)
       return false;
   }
@@ -4523,14 +4025,7 @@ static bool build_cfg_tv_readonly_memory_capture(nyr_func_t *f,
   nyr_opt_label(f, 1);
   if (write_before_call) {
     size_t old_len = f->len;
-    (void)nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_STORE_I64,
-                                     .dst = -1,
-                                     .a = address,
-                                     .b = -1,
-                                     .c = value,
-                                     .d = -1,
-                                     .e = -1,
-                                     .f = -1});
+    (void)nyr_opt_emit_abc(f, NYIR_STORE_I64, address, -1, value);
     if (f->len == old_len)
       return false;
   }
@@ -4564,14 +4059,7 @@ static bool build_cfg_tv_readonly_memory_capture(nyr_func_t *f,
     return false;
   if (!write_before_call) {
     size_t old_len = f->len;
-    (void)nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_STORE_I64,
-                                     .dst = -1,
-                                     .a = address,
-                                     .b = -1,
-                                     .c = value,
-                                     .d = -1,
-                                     .e = -1,
-                                     .f = -1});
+    (void)nyr_opt_emit_abc(f, NYIR_STORE_I64, address, -1, value);
     if (f->len == old_len)
       return false;
   }
@@ -4702,25 +4190,11 @@ static bool build_memory_f64_vec4_sum(nyr_func_t *f, bool vectorized,
     return false;
   int sum = -1;
   if (vectorized) {
-    int vector = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_VEC4_LOAD_F64,
-                                            .dst = -1,
-                                            .a = address,
-                                            .b = -1,
-                                            .c = -1,
-                                            .d = -1,
-                                            .e = -1,
-                                            .f = -1});
+    int vector = nyr_opt_emit_abc(f, NYIR_VEC4_LOAD_F64, address, -1, -1);
     int zero = nyr_opt_const_f64(f, 0.0);
     sum = vector < 0 || zero < 0
               ? -1
-              : nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_VEC4_REDUCE_ADD_F64,
-                                           .dst = -1,
-                                           .a = zero,
-                                           .b = vector,
-                                           .c = -1,
-                                           .d = -1,
-                                           .e = -1,
-                                           .f = -1});
+              : nyr_opt_emit_abc(f, NYIR_VEC4_REDUCE_ADD_F64, zero, vector, -1);
   } else {
     int zero = nyr_opt_const_f64(f, 0.0);
     sum = zero;
@@ -4777,22 +4251,8 @@ static bool emit_f64_vector_store_copy(nyr_func_t *f, int source,
                                        int destination, bool vectorized,
                                        bool omit_last_store) {
   if (vectorized) {
-    int packed = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_VEC4_LOAD_F64,
-                                            .dst = -1,
-                                            .a = source,
-                                            .b = -1,
-                                            .c = -1,
-                                            .d = -1,
-                                            .e = -1,
-                                            .f = -1});
-    return packed >= 0 && nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_VEC4_STORE_F64,
-                                                     .dst = -1,
-                                                     .a = destination,
-                                                     .b = packed,
-                                                     .c = -1,
-                                                     .d = -1,
-                                                     .e = -1,
-                                                     .f = -1}) >= 0;
+    int packed = nyr_opt_emit_abc(f, NYIR_VEC4_LOAD_F64, source, -1, -1);
+    return packed >= 0 && nyr_opt_emit_abc(f, NYIR_VEC4_STORE_F64, destination, packed, -1) >= 0;
   }
 
   int values[4] = {-1, -1, -1, -1};
@@ -4822,25 +4282,11 @@ static bool emit_f64_vector_store_copy(nyr_func_t *f, int source,
 static int emit_f64_vector_store_sum(nyr_func_t *f, int destination,
                                      bool vectorized) {
   if (vectorized) {
-    int packed = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_VEC4_LOAD_F64,
-                                            .dst = -1,
-                                            .a = destination,
-                                            .b = -1,
-                                            .c = -1,
-                                            .d = -1,
-                                            .e = -1,
-                                            .f = -1});
+    int packed = nyr_opt_emit_abc(f, NYIR_VEC4_LOAD_F64, destination, -1, -1);
     int zero = nyr_opt_const_f64(f, 0.0);
     return packed < 0 || zero < 0
                ? -1
-               : nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_VEC4_REDUCE_ADD_F64,
-                                            .dst = -1,
-                                            .a = zero,
-                                            .b = packed,
-                                            .c = -1,
-                                            .d = -1,
-                                            .e = -1,
-                                            .f = -1});
+               : nyr_opt_emit_abc(f, NYIR_VEC4_REDUCE_ADD_F64, zero, packed, -1);
   }
 
   int sum = nyr_opt_const_f64(f, 0.0);
@@ -4932,14 +4378,7 @@ static bool build_f64_shuffle_lane(nyr_func_t *f, int64_t mask,
   int address = load_local(f, 0);
   int loaded = address < 0
                    ? -1
-                   : nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_VEC4_LOAD_F64,
-                                                .dst = -1,
-                                                .a = address,
-                                                .b = -1,
-                                                .c = -1,
-                                                .d = -1,
-                                                .e = -1,
-                                                .f = -1});
+                   : nyr_opt_emit_abc(f, NYIR_VEC4_LOAD_F64, address, -1, -1);
   int shuffled = loaded < 0
                      ? -1
                      : nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_VEC4_SHUFFLE_F64,
@@ -4953,14 +4392,7 @@ static bool build_f64_shuffle_lane(nyr_func_t *f, int64_t mask,
                                                   .imm = mask});
   if (address < 0 || loaded < 0 || shuffled < 0 || output_lane > 3)
     return false;
-  (void)nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_VEC4_STORE_F64,
-                                   .dst = -1,
-                                   .a = address,
-                                   .b = shuffled,
-                                   .c = -1,
-                                   .d = -1,
-                                   .e = -1,
-                                   .f = -1});
+  (void)nyr_opt_emit_abc(f, NYIR_VEC4_STORE_F64, address, shuffled, -1);
   int offset = nyr_opt_const(f, (int64_t)output_lane * 8);
   int selected_address =
       offset < 0 ? -1 : nyr_opt_binop(f, NYIR_ADD_I64, address, offset);
@@ -5036,45 +4468,17 @@ static bool build_f64_vec4_add(nyr_func_t *f, bool vectorized,
     int rhs_scalar = nyr_opt_const_f64(f, 2.5);
     int lhs = lhs_scalar < 0
                   ? -1
-                  : nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_VEC4_SET1_F64,
-                                               .dst = -1,
-                                               .a = lhs_scalar,
-                                               .b = -1,
-                                               .c = -1,
-                                               .d = -1,
-                                               .e = -1,
-                                               .f = -1});
+                  : nyr_opt_emit_abc(f, NYIR_VEC4_SET1_F64, lhs_scalar, -1, -1);
     int rhs = rhs_scalar < 0
                   ? -1
-                  : nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_VEC4_SET1_F64,
-                                               .dst = -1,
-                                               .a = rhs_scalar,
-                                               .b = -1,
-                                               .c = -1,
-                                               .d = -1,
-                                               .e = -1,
-                                               .f = -1});
+                  : nyr_opt_emit_abc(f, NYIR_VEC4_SET1_F64, rhs_scalar, -1, -1);
     int added = lhs < 0 || rhs < 0
                     ? -1
-                    : nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_VEC4_ADD_F64,
-                                                 .dst = -1,
-                                                 .a = lhs,
-                                                 .b = rhs,
-                                                 .c = -1,
-                                                 .d = -1,
-                                                 .e = -1,
-                                                 .f = -1});
+                    : nyr_opt_emit_abc(f, NYIR_VEC4_ADD_F64, lhs, rhs, -1);
     int zero = nyr_opt_const_f64(f, 0.0);
     sum = added < 0 || zero < 0
               ? -1
-              : nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_VEC4_REDUCE_ADD_F64,
-                                           .dst = -1,
-                                           .a = zero,
-                                           .b = added,
-                                           .c = -1,
-                                           .d = -1,
-                                           .e = -1,
-                                           .f = -1});
+              : nyr_opt_emit_abc(f, NYIR_VEC4_REDUCE_ADD_F64, zero, added, -1);
   } else {
     int zero = nyr_opt_const_f64(f, 0.0);
     int lhs = nyr_opt_const_f64(f, 1.25);
@@ -5138,42 +4542,14 @@ static bool build_cfg_f64_vec4_binary(nyr_func_t *f, bool vectorized,
     if (lhs < 0 || rhs < 0 || op_sum < 0)
       return false;
     if (vectorized) {
-      int left = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_VEC4_SET1_F64,
-                                            .dst = -1,
-                                            .a = lhs,
-                                            .b = -1,
-                                            .c = -1,
-                                            .d = -1,
-                                            .e = -1,
-                                            .f = -1});
-      int right = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_VEC4_SET1_F64,
-                                             .dst = -1,
-                                             .a = rhs,
-                                             .b = -1,
-                                             .c = -1,
-                                             .d = -1,
-                                             .e = -1,
-                                             .f = -1});
+      int left = nyr_opt_emit_abc(f, NYIR_VEC4_SET1_F64, lhs, -1, -1);
+      int right = nyr_opt_emit_abc(f, NYIR_VEC4_SET1_F64, rhs, -1, -1);
       int packed = left < 0 || right < 0
                        ? -1
-                       : nyr_ir_emit(f, (nyr_inst_t){.op = vector_ops[op],
-                                                    .dst = -1,
-                                                    .a = left,
-                                                    .b = right,
-                                                    .c = -1,
-                                                    .d = -1,
-                                                    .e = -1,
-                                                    .f = -1});
+                       : nyr_opt_emit_abc(f, vector_ops[op], left, right, -1);
       op_sum = packed < 0
                    ? -1
-                   : nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_VEC4_REDUCE_ADD_F64,
-                                                .dst = -1,
-                                                .a = op_sum,
-                                                .b = packed,
-                                                .c = -1,
-                                                .d = -1,
-                                                .e = -1,
-                                                .f = -1});
+                   : nyr_opt_emit_abc(f, NYIR_VEC4_REDUCE_ADD_F64, op_sum, packed, -1);
     } else {
       unsigned lanes =
           omit_last_lane && op + 1 == sizeof(vector_ops) / sizeof(vector_ops[0])
@@ -5233,55 +4609,20 @@ static bool build_f64_vec4_fma(nyr_func_t *f, bool vectorized, double addend,
     int addend_scalar = nyr_opt_const_f64(f, addend);
     int lhs = lhs_scalar < 0
                   ? -1
-                  : nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_VEC4_SET1_F64,
-                                               .dst = -1,
-                                               .a = lhs_scalar,
-                                               .b = -1,
-                                               .c = -1,
-                                               .d = -1,
-                                               .e = -1,
-                                               .f = -1});
+                  : nyr_opt_emit_abc(f, NYIR_VEC4_SET1_F64, lhs_scalar, -1, -1);
     int rhs = rhs_scalar < 0
                   ? -1
-                  : nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_VEC4_SET1_F64,
-                                               .dst = -1,
-                                               .a = rhs_scalar,
-                                               .b = -1,
-                                               .c = -1,
-                                               .d = -1,
-                                               .e = -1,
-                                               .f = -1});
+                  : nyr_opt_emit_abc(f, NYIR_VEC4_SET1_F64, rhs_scalar, -1, -1);
     int addend_vector =
         addend_scalar < 0 ? -1
-                          : nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_VEC4_SET1_F64,
-                                                       .dst = -1,
-                                                       .a = addend_scalar,
-                                                       .b = -1,
-                                                       .c = -1,
-                                                       .d = -1,
-                                                       .e = -1,
-                                                       .f = -1});
+                          : nyr_opt_emit_abc(f, NYIR_VEC4_SET1_F64, addend_scalar, -1, -1);
     int fused = lhs < 0 || rhs < 0 || addend_vector < 0
                     ? -1
-                    : nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_VEC4_FMA_F64,
-                                                 .dst = -1,
-                                                 .a = lhs,
-                                                 .b = rhs,
-                                                 .c = addend_vector,
-                                                 .d = -1,
-                                                 .e = -1,
-                                                 .f = -1});
+                    : nyr_opt_emit_abc(f, NYIR_VEC4_FMA_F64, lhs, rhs, addend_vector);
     int zero = nyr_opt_const_f64(f, 0.0);
     sum = fused < 0 || zero < 0
               ? -1
-              : nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_VEC4_REDUCE_ADD_F64,
-                                           .dst = -1,
-                                           .a = zero,
-                                           .b = fused,
-                                           .c = -1,
-                                           .d = -1,
-                                           .e = -1,
-                                           .f = -1});
+              : nyr_opt_emit_abc(f, NYIR_VEC4_REDUCE_ADD_F64, zero, fused, -1);
   } else {
     int lhs = nyr_opt_const_f64(f, 2.0);
     int rhs = nyr_opt_const_f64(f, 3.0);
@@ -5451,41 +4792,13 @@ static bool build_f64_vec4_binary_memory(nyr_func_t *f, nyr_op_t op,
   if (sum < 0)
     return false;
   if (vectorized) {
-    int lhs = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_VEC4_LOAD_F64,
-                                         .dst = -1,
-                                         .a = lhs_address,
-                                         .b = -1,
-                                         .c = -1,
-                                         .d = -1,
-                                         .e = -1,
-                                         .f = -1});
-    int rhs = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_VEC4_LOAD_F64,
-                                         .dst = -1,
-                                         .a = rhs_address,
-                                         .b = -1,
-                                         .c = -1,
-                                         .d = -1,
-                                         .e = -1,
-                                         .f = -1});
+    int lhs = nyr_opt_emit_abc(f, NYIR_VEC4_LOAD_F64, lhs_address, -1, -1);
+    int rhs = nyr_opt_emit_abc(f, NYIR_VEC4_LOAD_F64, rhs_address, -1, -1);
     int result = lhs < 0 || rhs < 0 ? -1
-                                    : nyr_ir_emit(f, (nyr_inst_t){.op = op,
-                                                                 .dst = -1,
-                                                                 .a = lhs,
-                                                                 .b = rhs,
-                                                                 .c = -1,
-                                                                 .d = -1,
-                                                                 .e = -1,
-                                                                 .f = -1});
+                                    : nyr_opt_emit_abc(f, op, lhs, rhs, -1);
     sum = result < 0
               ? -1
-              : nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_VEC4_REDUCE_ADD_F64,
-                                           .dst = -1,
-                                           .a = sum,
-                                           .b = result,
-                                           .c = -1,
-                                           .d = -1,
-                                           .e = -1,
-                                           .f = -1});
+              : nyr_opt_emit_abc(f, NYIR_VEC4_REDUCE_ADD_F64, sum, result, -1);
   } else {
     for (unsigned lane = 0; lane < 4 && sum >= 0; ++lane) {
       int lhs = nyr_opt_const_f64(f, lhs_values[lane]);
@@ -5511,41 +4824,13 @@ static bool build_external_f64_vec4_binary(nyr_func_t *f, nyr_op_t op,
   if (lhs_address < 0 || rhs_address < 0 || sum < 0)
     return false;
   if (vectorized) {
-    int lhs = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_VEC4_LOAD_F64,
-                                         .dst = -1,
-                                         .a = lhs_address,
-                                         .b = -1,
-                                         .c = -1,
-                                         .d = -1,
-                                         .e = -1,
-                                         .f = -1});
-    int rhs = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_VEC4_LOAD_F64,
-                                         .dst = -1,
-                                         .a = rhs_address,
-                                         .b = -1,
-                                         .c = -1,
-                                         .d = -1,
-                                         .e = -1,
-                                         .f = -1});
+    int lhs = nyr_opt_emit_abc(f, NYIR_VEC4_LOAD_F64, lhs_address, -1, -1);
+    int rhs = nyr_opt_emit_abc(f, NYIR_VEC4_LOAD_F64, rhs_address, -1, -1);
     int result = lhs < 0 || rhs < 0 ? -1
-                                    : nyr_ir_emit(f, (nyr_inst_t){.op = op,
-                                                                 .dst = -1,
-                                                                 .a = lhs,
-                                                                 .b = rhs,
-                                                                 .c = -1,
-                                                                 .d = -1,
-                                                                 .e = -1,
-                                                                 .f = -1});
+                                    : nyr_opt_emit_abc(f, op, lhs, rhs, -1);
     sum = result < 0
               ? -1
-              : nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_VEC4_REDUCE_ADD_F64,
-                                           .dst = -1,
-                                           .a = sum,
-                                           .b = result,
-                                           .c = -1,
-                                           .d = -1,
-                                           .e = -1,
-                                           .f = -1});
+              : nyr_opt_emit_abc(f, NYIR_VEC4_REDUCE_ADD_F64, sum, result, -1);
   } else {
     for (unsigned lane = 0; lane < 4 && sum >= 0; ++lane) {
       int offset = nyr_opt_const(f, (int64_t)lane * 8);
@@ -5639,49 +4924,14 @@ static bool build_f64_vec4_fma_memory(nyr_func_t *f) {
   int sum = nyr_opt_const_f64(f, 0.0);
   if (sum < 0)
     return false;
-  int lhs = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_VEC4_LOAD_F64,
-                                       .dst = -1,
-                                       .a = lhs_address,
-                                       .b = -1,
-                                       .c = -1,
-                                       .d = -1,
-                                       .e = -1,
-                                       .f = -1});
-  int rhs = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_VEC4_LOAD_F64,
-                                       .dst = -1,
-                                       .a = rhs_address,
-                                       .b = -1,
-                                       .c = -1,
-                                       .d = -1,
-                                       .e = -1,
-                                       .f = -1});
-  int addend = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_VEC4_LOAD_F64,
-                                          .dst = -1,
-                                          .a = addend_address,
-                                          .b = -1,
-                                          .c = -1,
-                                          .d = -1,
-                                          .e = -1,
-                                          .f = -1});
+  int lhs = nyr_opt_emit_abc(f, NYIR_VEC4_LOAD_F64, lhs_address, -1, -1);
+  int rhs = nyr_opt_emit_abc(f, NYIR_VEC4_LOAD_F64, rhs_address, -1, -1);
+  int addend = nyr_opt_emit_abc(f, NYIR_VEC4_LOAD_F64, addend_address, -1, -1);
   int fused = lhs < 0 || rhs < 0 || addend < 0
                   ? -1
-                  : nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_VEC4_FMA_F64,
-                                               .dst = -1,
-                                               .a = lhs,
-                                               .b = rhs,
-                                               .c = addend,
-                                               .d = -1,
-                                               .e = -1,
-                                               .f = -1});
+                  : nyr_opt_emit_abc(f, NYIR_VEC4_FMA_F64, lhs, rhs, addend);
   sum = fused < 0 ? -1
-                  : nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_VEC4_REDUCE_ADD_F64,
-                                               .dst = -1,
-                                               .a = sum,
-                                               .b = fused,
-                                               .c = -1,
-                                               .d = -1,
-                                               .e = -1,
-                                               .f = -1});
+                  : nyr_opt_emit_abc(f, NYIR_VEC4_REDUCE_ADD_F64, sum, fused, -1);
   int result = sum < 0 ? -1 : emit_f64_to_i64(f, sum);
   if (result < 0)
     return false;
@@ -5729,52 +4979,17 @@ static int build_f64_fma_rounding_sign(nyr_func_t *f, bool fused) {
     int b_scalar = nyr_opt_const_f64(f, 1.0 - delta);
     int c_scalar = nyr_opt_const_f64(f, -1.0);
     int a = a_scalar < 0 ? -1
-                         : nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_VEC4_SET1_F64,
-                                                      .dst = -1,
-                                                      .a = a_scalar,
-                                                      .b = -1,
-                                                      .c = -1,
-                                                      .d = -1,
-                                                      .e = -1,
-                                                      .f = -1});
+                         : nyr_opt_emit_abc(f, NYIR_VEC4_SET1_F64, a_scalar, -1, -1);
     int b = b_scalar < 0 ? -1
-                         : nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_VEC4_SET1_F64,
-                                                      .dst = -1,
-                                                      .a = b_scalar,
-                                                      .b = -1,
-                                                      .c = -1,
-                                                      .d = -1,
-                                                      .e = -1,
-                                                      .f = -1});
+                         : nyr_opt_emit_abc(f, NYIR_VEC4_SET1_F64, b_scalar, -1, -1);
     int c = c_scalar < 0 ? -1
-                         : nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_VEC4_SET1_F64,
-                                                      .dst = -1,
-                                                      .a = c_scalar,
-                                                      .b = -1,
-                                                      .c = -1,
-                                                      .d = -1,
-                                                      .e = -1,
-                                                      .f = -1});
+                         : nyr_opt_emit_abc(f, NYIR_VEC4_SET1_F64, c_scalar, -1, -1);
     int product = a < 0 || b < 0 || c < 0
                       ? -1
-                      : nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_VEC4_FMA_F64,
-                                                   .dst = -1,
-                                                   .a = a,
-                                                   .b = b,
-                                                   .c = c,
-                                                   .d = -1,
-                                                   .e = -1,
-                                                   .f = -1});
+                      : nyr_opt_emit_abc(f, NYIR_VEC4_FMA_F64, a, b, c);
     sum = product < 0
               ? -1
-              : nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_VEC4_REDUCE_ADD_F64,
-                                           .dst = -1,
-                                           .a = sum,
-                                           .b = product,
-                                           .c = -1,
-                                           .d = -1,
-                                           .e = -1,
-                                           .f = -1});
+              : nyr_opt_emit_abc(f, NYIR_VEC4_REDUCE_ADD_F64, sum, product, -1);
   } else {
     int a = nyr_opt_const_f64(f, 1.0 + delta);
     int b = nyr_opt_const_f64(f, 1.0 - delta);
@@ -5864,27 +5079,12 @@ static bool checks_f64_fma_rounding(void) {
 }
 
 static int emit_f32_constant(nyr_func_t *f, uint32_t bits) {
-  return nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_CONST_F32,
-                                    .dst = -1,
-                                    .a = -1,
-                                    .b = -1,
-                                    .c = -1,
-                                    .d = -1,
-                                    .e = -1,
-                                    .f = -1,
-                                    .imm = (int64_t)bits});
+  return nyr_opt_emit_imm(f, NYIR_CONST_F32, (int64_t)bits);
 }
 
 static int emit_vec4_f32_splat(nyr_func_t *f, int scalar) {
   return scalar < 0 ? -1
-                    : nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_VEC8_SET1_F32,
-                                                 .dst = -1,
-                                                 .a = scalar,
-                                                 .b = -1,
-                                                 .c = -1,
-                                                 .d = -1,
-                                                 .e = -1,
-                                                 .f = -1});
+                    : nyr_opt_emit_abc(f, NYIR_VEC8_SET1_F32, scalar, -1, -1);
 }
 
 static int emit_f32_byte_store(nyr_func_t *f, int base, unsigned offset,
@@ -5938,24 +5138,10 @@ static bool build_f32_vec4_memory_result(nyr_func_t *f, bool vectorized,
     int a = emit_vec4_f32_splat(f, a_scalar);
     int b = emit_vec4_f32_splat(f, b_scalar);
     int result = a < 0 || b < 0 ? -1
-                                : nyr_ir_emit(f, (nyr_inst_t){.op = vector_op,
-                                                             .dst = -1,
-                                                             .a = a,
-                                                             .b = b,
-                                                             .c = -1,
-                                                             .d = -1,
-                                                             .e = -1,
-                                                             .f = -1});
+                                : nyr_opt_emit_abc(f, vector_op, a, b, -1);
     if (result < 0)
       return false;
-    (void)nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_VEC8_STORE_F32,
-                                     .dst = -1,
-                                     .a = destination,
-                                     .b = result,
-                                     .c = -1,
-                                     .d = -1,
-                                     .e = -1,
-                                     .f = -1});
+    (void)nyr_opt_emit_abc(f, NYIR_VEC8_STORE_F32, destination, result, -1);
   } else {
     int a = emit_f32_constant(f, a_bits);
     int b = emit_f32_constant(f, b_bits);
@@ -6160,23 +5346,9 @@ static bool build_f32_vec4_fma_result(nyr_func_t *f, bool vectorized,
     int vc = addend < 0 ? -1 : emit_vec4_f32_splat(f, addend);
     result = va < 0 || vb < 0 || vc < 0
                  ? -1
-                 : nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_VEC8_FMA_F32,
-                                              .dst = -1,
-                                              .a = va,
-                                              .b = vb,
-                                              .c = vc,
-                                              .d = -1,
-                                              .e = -1,
-                                              .f = -1});
+                 : nyr_opt_emit_abc(f, NYIR_VEC8_FMA_F32, va, vb, vc);
     if (result >= 0)
-      (void)nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_VEC8_STORE_F32,
-                                       .dst = -1,
-                                       .a = destination,
-                                       .b = result,
-                                       .c = -1,
-                                       .d = -1,
-                                       .e = -1,
-                                       .f = -1});
+      (void)nyr_opt_emit_abc(f, NYIR_VEC8_STORE_F32, destination, result, -1);
   } else {
     result = emit_f32_constant(f, result_bits);
     for (unsigned lane = 0; result >= 0 && lane < 4; ++lane)
@@ -6280,25 +5452,11 @@ static bool checks_f32_vec4_fma_semantics(void) {
 }
 
 static int emit_f32_vector_load(nyr_func_t *f, int address) {
-  return nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_VEC8_LOAD_F32,
-                                    .dst = -1,
-                                    .a = address,
-                                    .b = -1,
-                                    .c = -1,
-                                    .d = -1,
-                                    .e = -1,
-                                    .f = -1});
+  return nyr_opt_emit_abc(f, NYIR_VEC8_LOAD_F32, address, -1, -1);
 }
 
 static int emit_f32_vector_store(nyr_func_t *f, int address, int value) {
-  return nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_VEC8_STORE_F32,
-                                    .dst = -1,
-                                    .a = address,
-                                    .b = value,
-                                    .c = -1,
-                                    .d = -1,
-                                    .e = -1,
-                                    .f = -1});
+  return nyr_opt_emit_abc(f, NYIR_VEC8_STORE_F32, address, value, -1);
 }
 
 static bool build_f32_vec4_fma_distinct_lanes(nyr_func_t *f) {
@@ -6314,14 +5472,7 @@ static bool build_f32_vec4_fma_distinct_lanes(nyr_func_t *f) {
   int addend = emit_f32_vector_load(f, addend_ptr);
   int fused = lhs < 0 || rhs < 0 || addend < 0
                   ? -1
-                  : nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_VEC8_FMA_F32,
-                                               .dst = -1,
-                                               .a = lhs,
-                                               .b = rhs,
-                                               .c = addend,
-                                               .d = -1,
-                                               .e = -1,
-                                               .f = -1});
+                  : nyr_opt_emit_abc(f, NYIR_VEC8_FMA_F32, lhs, rhs, addend);
   if (fused < 0 || emit_f32_vector_store(f, out_ptr, fused) < 0)
     return false;
   int ok = nyr_opt_const(f, 1);
@@ -6389,43 +5540,15 @@ static bool build_f32_vec4_fma_rounding(nyr_func_t *f, bool fused, bool cfg) {
     return false;
   int result = -1;
   if (fused) {
-    result = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_VEC8_FMA_F32,
-                                        .dst = -1,
-                                        .a = a,
-                                        .b = b,
-                                        .c = c,
-                                        .d = -1,
-                                        .e = -1,
-                                        .f = -1});
+    result = nyr_opt_emit_abc(f, NYIR_VEC8_FMA_F32, a, b, c);
   } else {
-    int product = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_VEC8_MUL_F32,
-                                             .dst = -1,
-                                             .a = a,
-                                             .b = b,
-                                             .c = -1,
-                                             .d = -1,
-                                             .e = -1,
-                                             .f = -1});
+    int product = nyr_opt_emit_abc(f, NYIR_VEC8_MUL_F32, a, b, -1);
     result = product < 0 ? -1
-                         : nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_VEC8_ADD_F32,
-                                                      .dst = -1,
-                                                      .a = product,
-                                                      .b = c,
-                                                      .c = -1,
-                                                      .d = -1,
-                                                      .e = -1,
-                                                      .f = -1});
+                         : nyr_opt_emit_abc(f, NYIR_VEC8_ADD_F32, product, c, -1);
   }
   if (result < 0)
     return false;
-  (void)nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_VEC8_STORE_F32,
-                                   .dst = -1,
-                                   .a = destination,
-                                   .b = result,
-                                   .c = -1,
-                                   .d = -1,
-                                   .e = -1,
-                                   .f = -1});
+  (void)nyr_opt_emit_abc(f, NYIR_VEC8_STORE_F32, destination, result, -1);
   int result_pair = emit_load_i64(f, destination);
   if (result_pair < 0)
     return false;
@@ -6511,14 +5634,7 @@ static bool build_f32_vec4_shuffle_result(nyr_func_t *f, bool vectorized,
         if (emit_f32_byte_store(f, destination, lane * 4, value, byte) < 0)
           return false;
     }
-    int input = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_VEC8_LOAD_F32,
-                                           .dst = -1,
-                                           .a = destination,
-                                           .b = -1,
-                                           .c = -1,
-                                           .d = -1,
-                                           .e = -1,
-                                           .f = -1});
+    int input = nyr_opt_emit_abc(f, NYIR_VEC8_LOAD_F32, destination, -1, -1);
     int shuffled = input < 0
                        ? -1
                        : nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_VEC8_SHUFFLE_F32,
@@ -6532,14 +5648,7 @@ static bool build_f32_vec4_shuffle_result(nyr_func_t *f, bool vectorized,
                                                     .imm = mask});
     if (shuffled < 0)
       return false;
-    (void)nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_VEC8_STORE_F32,
-                                     .dst = -1,
-                                     .a = destination,
-                                     .b = shuffled,
-                                     .c = -1,
-                                     .d = -1,
-                                     .e = -1,
-                                     .f = -1});
+    (void)nyr_opt_emit_abc(f, NYIR_VEC8_STORE_F32, destination, shuffled, -1);
   } else {
     for (unsigned lane = 0; lane < 4; ++lane) {
       int value = emit_f32_constant(f, output_bits[lane]);
@@ -6653,14 +5762,7 @@ static bool build_discarded_memory_load(nyr_func_t *f, bool keep_second) {
   nyr_opt_begin(f);
   int address = load_local(f, 0);
   int first = address < 0 ? -1
-                          : nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_LOAD_I64,
-                                                       .dst = -1,
-                                                       .a = address,
-                                                       .b = -1,
-                                                       .c = -1,
-                                                       .d = -1,
-                                                       .e = -1,
-                                                       .f = -1});
+                          : nyr_opt_emit_abc(f, NYIR_LOAD_I64, address, -1, -1);
   if (first < 0)
     return false;
   if (keep_second) {
@@ -6669,14 +5771,7 @@ static bool build_discarded_memory_load(nyr_func_t *f, bool keep_second) {
         eight < 0 ? -1 : nyr_opt_binop(f, NYIR_ADD_I64, address, eight);
     int second = second_address < 0
                      ? -1
-                     : nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_LOAD_I64,
-                                                  .dst = -1,
-                                                  .a = second_address,
-                                                  .b = -1,
-                                                  .c = -1,
-                                                  .d = -1,
-                                                  .e = -1,
-                                                  .f = -1});
+                     : nyr_opt_emit_abc(f, NYIR_LOAD_I64, second_address, -1, -1);
     if (second < 0)
       return false;
   }
@@ -6741,9 +5836,8 @@ static double monotonic_ms(void) {
 }
 
 /*
- * The TODO requires cold solver and fallback cost to be measured separately.
  * Report the first (cold) solver-backed equivalence, a warm repeat, and the
- * interpreter fallback over the same pair.
+ * interpreter fallback over the same pair to keep their costs distinct.
  */
 static void report_costs(void) {
   nyr_func_t a = {0}, b = {0};

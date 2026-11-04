@@ -13,6 +13,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+static bool mach_sink_edge_adds(nyr_mach_func_t *m);
+
 static bool mach_grow(void **data, size_t *cap, size_t elem_size) {
   size_t next = *cap ? *cap * 2 : 8;
   size_t bytes = 0;
@@ -23,6 +25,145 @@ static bool mach_grow(void **data, size_t *cap, size_t elem_size) {
     return false;
   *data = grown;
   *cap = next;
+  return true;
+}
+
+/*
+ * Duplicate a tiny, pure loop guard at a single-block latch. The initial
+ * guard remains in place (including for zero trips); subsequent iterations
+ * branch directly to the body rather than through an unconditional backedge
+ * and a second branch. Do this after phi-edge lowering and copy propagation,
+ * but before allocation: machine vregs, unlike NYIR SSA values, may have
+ * multiple definitions. No memory operations or trapping guards are cloned.
+ */
+static bool mach_rotate_scalar_loops(nyr_mach_func_t *m) {
+  for (size_t b = 2; b < m->block_len; ++b) {
+    nyr_mach_block_t *body = &m->blocks[b];
+    if (!body->inst_count)
+      continue;
+    size_t latch = body->first_inst + body->inst_count - 1;
+    const nyr_mach_inst_t back = m->insts[latch];
+    if (back.opcode != NYR_MACH_BR ||
+        back.src1.kind != NYR_MACH_OPERAND_BLOCK ||
+        back.src1.as.block_index + 2 != b)
+      continue;
+    const nyr_mach_block_t *head = &m->blocks[b - 2];
+    const nyr_mach_block_t *false_edge = &m->blocks[b - 1];
+    size_t guard_count = head->inst_count;
+    size_t count = guard_count + 1;
+    if (guard_count < 2 || count > 6 || false_edge->inst_count != 1)
+      continue;
+    /*
+     * Leave loops that define vector values unrotated: the vector carry
+     * proof needs a latch distinct from the header to keep loop-carried
+     * vectors resident across the backedge.
+     */
+    bool has_vector = false;
+    for (size_t pc = body->first_inst; pc <= latch && !has_vector; ++pc) {
+      const nyr_mach_inst_t *in = &m->insts[pc];
+      has_vector = in->dst.kind == NYR_MACH_OPERAND_VREG &&
+                   in->dst.as.reg < m->vreg_len &&
+                   (m->vreg_types[in->dst.as.reg] == NYR_MACH_TYPE_V256_I64 ||
+                    m->vreg_types[in->dst.as.reg] == NYR_MACH_TYPE_V128_I64 ||
+                    m->vreg_types[in->dst.as.reg] == NYR_MACH_TYPE_V256_F64 ||
+                    m->vreg_types[in->dst.as.reg] == NYR_MACH_TYPE_V128_F64 ||
+                    m->vreg_types[in->dst.as.reg] == NYR_MACH_TYPE_V128_F32);
+    }
+    if (has_vector)
+      continue;
+    const nyr_mach_inst_t *guard = &m->insts[head->first_inst];
+    const nyr_mach_inst_t *cmp = &guard[guard_count - 2];
+    const nyr_mach_inst_t *branch = &guard[guard_count - 1];
+    const nyr_mach_inst_t *exit = &m->insts[false_edge->first_inst];
+    if (cmp->opcode != NYR_MACH_CMP ||
+        cmp->dst.kind != NYR_MACH_OPERAND_VREG ||
+        cmp->dst.reg_class != NYR_MACH_REGCLASS_GPR ||
+        branch->opcode != NYR_MACH_BR_IF ||
+        branch->src0.kind != NYR_MACH_OPERAND_VREG ||
+        branch->src0.as.reg != cmp->dst.as.reg ||
+        branch->src1.kind != NYR_MACH_OPERAND_BLOCK ||
+        branch->src1.as.block_index != b ||
+        branch->args || branch->arg_sizes ||
+        exit->opcode != NYR_MACH_BR ||
+        exit->src1.kind != NYR_MACH_OPERAND_BLOCK ||
+        exit->src1.as.block_index != b + 1 || exit->args || exit->arg_sizes)
+      continue;
+    bool safe = true;
+    for (size_t n = 0; n < count - 2; ++n) {
+      const nyr_mach_inst_t *in = &guard[n];
+      safe &= (in->opcode == NYR_MACH_COPY || in->opcode == NYR_MACH_CMP) &&
+              !in->effects && !in->args && !in->arg_sizes &&
+              in->dst.kind == NYR_MACH_OPERAND_VREG &&
+              in->dst.reg_class == NYR_MACH_REGCLASS_GPR &&
+              (in->src0.kind == NYR_MACH_OPERAND_VREG ||
+               in->src0.kind == NYR_MACH_OPERAND_IMM) &&
+              (in->src1.kind == NYR_MACH_OPERAND_NONE ||
+               in->src1.kind == NYR_MACH_OPERAND_VREG ||
+               in->src1.kind == NYR_MACH_OPERAND_IMM);
+    }
+    for (size_t pc = body->first_inst; pc < latch; ++pc) {
+      nyr_mach_opcode_t op = m->insts[pc].opcode;
+      if (op == NYR_MACH_BR || op == NYR_MACH_BR_IF || op == NYR_MACH_RET ||
+          op == NYR_MACH_TRAP || op == NYR_MACH_CALL)
+        safe = false;
+    }
+    if (!safe)
+      continue;
+    nyr_mach_inst_t cloned[6];
+    memcpy(cloned, guard, guard_count * sizeof(*cloned));
+    cloned[guard_count] = *exit;
+    while (m->inst_cap - m->inst_len < count - 1)
+      if (!mach_grow((void **)&m->insts, &m->inst_cap, sizeof(*m->insts)))
+        return false;
+    memmove(&m->insts[latch + count], &m->insts[latch + 1],
+            (m->inst_len - latch - 1) * sizeof(*m->insts));
+    memcpy(&m->insts[latch], cloned, count * sizeof(*cloned));
+    m->inst_len += count - 1;
+    body->inst_count += count - 1;
+    for (size_t next = b + 1; next < m->block_len; ++next)
+      m->blocks[next].first_inst += count - 1;
+  }
+  return true;
+}
+
+/*
+ * Formal parameters occupy a dense frame-slot prefix. Older hand-built
+ * machine functions infer the prefix from an incoming frame load.
+ */
+bool nyr_mach_param_slots(const nyr_mach_func_t *mach, bool *params) {
+  if (!mach || (!params && mach->frame_slot_len))
+    return false;
+  bool *stored = calloc(mach->frame_slot_len, sizeof(*stored));
+  if (mach->frame_slot_len && !stored)
+    return false;
+  size_t prefix = mach->param_count;
+  if (prefix > mach->frame_slot_len) {
+    free(stored);
+    return false;
+  }
+  for (size_t i = 0; prefix == 0 && i < mach->inst_len; ++i) {
+    const nyr_mach_inst_t *in = &mach->insts[i];
+    if (in->opcode == NYR_MACH_STORE &&
+        in->dst.kind == NYR_MACH_OPERAND_FRAME) {
+      if (in->dst.as.frame_index >= mach->frame_slot_len) {
+        free(stored);
+        return false;
+      }
+      stored[in->dst.as.frame_index] = true;
+    } else if (in->opcode == NYR_MACH_LOAD &&
+               in->src0.kind == NYR_MACH_OPERAND_FRAME) {
+      if (in->src0.as.frame_index >= mach->frame_slot_len) {
+        free(stored);
+        return false;
+      }
+      if (!stored[in->src0.as.frame_index] &&
+          in->src0.as.frame_index + 1 > prefix)
+        prefix = in->src0.as.frame_index + 1;
+    }
+  }
+  for (size_t i = 0; i < prefix; ++i)
+    params[i] = true;
+  free(stored);
   return true;
 }
 
@@ -1105,6 +1246,9 @@ static bool mach_verify_opcode_shape(const nyr_mach_func_t *func,
     if (dt == NYR_MACH_TYPE_V256_F64 &&
         (st == NYR_MACH_TYPE_F64 || st == NYR_MACH_TYPE_NONE))
       return true;
+    if (dt == NYR_MACH_TYPE_V256_I64 &&
+        (st == NYR_MACH_TYPE_I64 || st == NYR_MACH_TYPE_NONE))
+      return true;
     return false;
   }
   case NYR_MACH_CONVERT:
@@ -1206,12 +1350,21 @@ static bool mach_verify_opcode_shape(const nyr_mach_func_t *func,
     if ((inst->opcode == NYR_MACH_SHL || inst->opcode == NYR_MACH_SAR ||
          inst->opcode == NYR_MACH_ROR || inst->opcode == NYR_MACH_ROR32) &&
         inst->src1.kind == NYR_MACH_OPERAND_IMM)
-      return mach_value_type(func, &inst->dst) == NYR_MACH_TYPE_I64 &&
-             mach_value_type(func, &inst->src0) == NYR_MACH_TYPE_I64;
+      return (mach_value_type(func, &inst->dst) == NYR_MACH_TYPE_I64 &&
+              mach_value_type(func, &inst->src0) == NYR_MACH_TYPE_I64) ||
+             (inst->opcode == NYR_MACH_SAR && inst->src1.as.imm >= 0 &&
+              inst->src1.as.imm <= 63 &&
+              mach_value_type(func, &inst->dst) == NYR_MACH_TYPE_V256_I64 &&
+              mach_same_value_type(func, &inst->dst, &inst->src0));
     if (inst->opcode == NYR_MACH_ROR32)
       return mach_value_type(func, &inst->dst) == NYR_MACH_TYPE_I64 &&
              mach_value_type(func, &inst->src0) == NYR_MACH_TYPE_I64 &&
              mach_value_type(func, &inst->src1) == NYR_MACH_TYPE_I64;
+    if (mach_value_type(func, &inst->dst) == NYR_MACH_TYPE_V256_I64 &&
+        (inst->opcode == NYR_MACH_AND || inst->opcode == NYR_MACH_OR ||
+         inst->opcode == NYR_MACH_XOR))
+      return mach_same_value_type(func, &inst->dst, &inst->src0) &&
+             mach_same_value_type(func, &inst->dst, &inst->src1);
     if (mach_is_v128_value(func, &inst->dst))
       return mach_value_type(func, &inst->dst) == NYR_MACH_TYPE_V128_I64 &&
              mach_same_value_type(func, &inst->dst, &inst->src0) &&
@@ -1284,7 +1437,8 @@ static bool mach_verify_opcode_shape(const nyr_mach_func_t *func,
   case NYR_MACH_INLINE_ASM:
     return (inst->effects & NYR_MACH_EFFECT_CALL) != 0 &&
            inst->src0.kind == NYR_MACH_OPERAND_SYMBOL &&
-           (mach_is_none(&inst->dst) || mach_is_value(&inst->dst));
+           (mach_is_none(&inst->dst) || mach_is_value(&inst->dst)) &&
+           (mach_is_none(&inst->src1) || mach_is_value(&inst->src1));
   case NYR_MACH_REDUCE_ADD: {
     nyr_mach_type_t dt = mach_value_type(func, &inst->dst);
     nyr_mach_type_t at = mach_value_type(func, &inst->src0);
@@ -1321,6 +1475,23 @@ static bool mach_verify_opcode_shape(const nyr_mach_func_t *func,
         inst->src2.kind == NYR_MACH_OPERAND_IMM)
       return true; /* COPY_STRUCT */
     return false;
+  case NYR_MACH_VA_SAVE:
+    return inst->effects == NYR_MACH_EFFECT_WRITE_MEMORY &&
+           mach_is_value(&inst->dst) &&
+           inst->src0.kind == NYR_MACH_OPERAND_FRAME &&
+           mach_is_none(&inst->src1) && mach_is_none(&inst->src2);
+  case NYR_MACH_VA_START:
+    return inst->effects ==
+               (NYR_MACH_EFFECT_READ_MEMORY | NYR_MACH_EFFECT_WRITE_MEMORY) &&
+           mach_is_none(&inst->dst) && mach_is_value(&inst->src0) &&
+           mach_is_value(&inst->src1) &&
+           inst->src2.kind == NYR_MACH_OPERAND_IMM;
+  case NYR_MACH_VA_ARG:
+    return inst->effects ==
+               (NYR_MACH_EFFECT_READ_MEMORY | NYR_MACH_EFFECT_WRITE_MEMORY) &&
+           mach_is_value(&inst->dst) && mach_is_value(&inst->src0) &&
+           mach_is_none(&inst->src1) && mach_is_none(&inst->src2) &&
+           (inst->immediate == 0 || inst->immediate == 1);
   default:
     return false;
   }
@@ -1398,6 +1569,12 @@ const char *nyr_mach_opcode_name(nyr_mach_opcode_t op) {
     return "intrinsic";
   case NYR_MACH_REDUCE_ADD:
     return "reduce_add";
+  case NYR_MACH_VA_SAVE:
+    return "va_save";
+  case NYR_MACH_VA_START:
+    return "va_start";
+  case NYR_MACH_VA_ARG:
+    return "va_arg";
   }
   return "???";
 }
@@ -1590,16 +1767,19 @@ bool nyr_mach_verify(const nyr_mach_func_t *func, unsigned caps, char *err,
       return nyr_err(err, err_len,
                      "machine IR verify: incomplete aggregate parameter ABI");
     for (size_t i = 0; i < func->param_count; ++i) {
-      if (func->param_types[i] > NYIR_PARAM_AGGREGATE)
+      if (func->param_types[i] > NYIR_PARAM_I8)
         return nyr_err(err, err_len,
                        "machine IR verify: invalid parameter type metadata");
       uint32_t packed = func->param_abi[i];
       if (func->param_types[i] == NYIR_PARAM_AGGREGATE) {
         uint32_t size = NYIR_ARG_AGG_SIZE(packed);
         uint32_t chunks = (size + 7u) / 8u;
+        if (!chunks)
+          chunks = 1;
         uint32_t home = func->param_aggregate_home_slots[i];
         bool indirect = NYIR_ARG_AGG_CLASS(packed, 0) == NYIR_ARG_CLASS_MEMORY;
-        if (!size ||
+        if ((!size && (NYIR_ARG_AGG_CLASS(packed, 0) != NYIR_ARG_CLASS_NONE ||
+                       NYIR_ARG_AGG_CLASS(packed, 1) != NYIR_ARG_CLASS_NONE)) ||
             (indirect ? home != UINT32_MAX
                       : home == UINT32_MAX || home > func->frame_slot_len ||
                             chunks > func->frame_slot_len - home))
@@ -1671,7 +1851,7 @@ bool nyr_mach_verify(const nyr_mach_func_t *func, unsigned caps, char *err,
     const char *bad_field = NULL;
     const char *bad_operand_name = NULL;
     const nyr_mach_operand_t *bad_operand = NULL;
-    if (inst->opcode > NYR_MACH_REDUCE_ADD)
+    if (inst->opcode > NYR_MACH_VA_ARG)
       bad_field = "opcode";
     else if (inst->condition > NYR_MACH_COND_GE)
       bad_field = "condition";
@@ -1735,7 +1915,7 @@ bool nyr_mach_verify(const nyr_mach_func_t *func, unsigned caps, char *err,
     if (inst->opcode != NYR_MACH_CALL &&
         (inst->args_len != 0 || inst->arg_sizes != NULL ||
          inst->call_is_extern || inst->call_has_sret ||
-         inst->call_clobbers != 0))
+         inst->call_is_variadic || inst->call_clobbers != 0))
       return nyr_err(
           err, err_len,
           "machine IR verify: non-call instruction %zu has arguments", i);
@@ -2239,6 +2419,10 @@ static bool mach_opcode_from_nir(nyr_op_t op, nyr_mach_opcode_t *out) {
   case NYIR_SELECT_I64:
     *out = NYR_MACH_SELECT;
     return true;
+  case NYIR_VA_SAVE:
+  case NYIR_VA_START:
+  case NYIR_VA_ARG:
+    return false;
   case NYIR_I64_TO_F64:
   case NYIR_I64_TO_F32:
   case NYIR_F64_TO_I64:
@@ -2354,6 +2538,8 @@ static nyr_mach_type_t mach_nir_value_type(const nyr_type_map_t *types,
 
 bool nyr_mach_opcode_supported(nyr_op_t op) {
   switch (op) {
+  case NYIR_READ_X86_RSP:
+    return false;
   case NYIR_NOP:
   case NYIR_BOUNDS_CHECK:
   case NYIR_CONST_I64:
@@ -2379,6 +2565,7 @@ bool nyr_mach_opcode_supported(nyr_op_t op) {
   case NYIR_LOAD_LOCAL:
   case NYIR_STORE_LOCAL:
   case NYIR_CALL:
+  case NYIR_INLINE_ASM:
   case NYIR_RET:
   case NYIR_BR:
   case NYIR_BR_IF:
@@ -2431,6 +2618,8 @@ bool nyr_mach_opcode_supported(nyr_op_t op) {
   case NYIR_VEC8_SHUFFLE_F32:
   case NYIR_VEC4_LOAD_I64:
   case NYIR_VEC4_SET1_I64:
+  case NYIR_VEC8_SAR_I64:
+  case NYIR_VEC8_SET1_I64:
   case NYIR_VEC4_STORE_I64:
   case NYIR_VEC4_ADD_I64:
   case NYIR_VEC4_SUB_I64:
@@ -2448,6 +2637,9 @@ bool nyr_mach_opcode_supported(nyr_op_t op) {
   case NYIR_VEC8_XOR_I64:
   case NYIR_VEC4_REDUCE_ADD_I64:
   case NYIR_VEC8_REDUCE_ADD_I64:
+  case NYIR_VA_SAVE:
+  case NYIR_VA_START:
+  case NYIR_VA_ARG:
     return true;
   case NYIR_OP_COUNT:
     return false;
@@ -2756,7 +2948,7 @@ bool nyr_mach_lower_nir(const nyr_func_t *nyir, nyr_mach_func_t *out,
   bool has_aggregate_param = false;
   for (size_t i = 0; i < nyir->param_count; ++i)
     has_aggregate_param |= nyir->param_types[i] == NYIR_PARAM_AGGREGATE;
-  if (has_aggregate_param) {
+  if (nyir->param_count) {
     lowered.param_types =
         ny_malloc_array(nyir->param_count, sizeof(*lowered.param_types));
     lowered.param_abi =
@@ -2768,10 +2960,14 @@ bool nyr_mach_lower_nir(const nyr_func_t *nyir, nyr_mach_func_t *out,
       goto oom;
     memcpy(lowered.param_types, nyir->param_types,
            nyir->param_count * sizeof(*lowered.param_types));
-    memcpy(lowered.param_abi, nyir->param_abi,
+    memset(lowered.param_abi, 0,
            nyir->param_count * sizeof(*lowered.param_abi));
     for (size_t i = 0; i < nyir->param_count; ++i)
       lowered.param_aggregate_home_slots[i] = UINT32_MAX;
+    if (has_aggregate_param) {
+      memcpy(lowered.param_abi, nyir->param_abi,
+             nyir->param_count * sizeof(*lowered.param_abi));
+    }
   }
   if (nyir->next_value > 0) {
     definitions = nyr_build_defs(nyir);
@@ -2936,7 +3132,7 @@ bool nyr_mach_lower_nir(const nyr_func_t *nyir, nyr_mach_func_t *out,
       for (size_t i = 0; i < nyir->len; ++i) {
         const nyr_inst_t *in = &nyir->data[i];
         if ((in->op == NYIR_ADDR_LOCAL || in->op == NYIR_ADDR_SYMBOL ||
-             in->op == NYIR_ALLOCA) &&
+             in->op == NYIR_ALLOCA || in->op == NYIR_VA_SAVE) &&
             in->dst >= 0 && in->dst < nyir->next_value &&
             !pointer_values[in->dst]) {
           pointer_values[in->dst] = true;
@@ -3020,8 +3216,9 @@ bool nyr_mach_lower_nir(const nyr_func_t *nyir, nyr_mach_func_t *out,
       continue;
     size_t chunks = (size + 7u) / 8u;
     uint32_t first = 0;
-    if (!size || !chunks ||
-        !nyr_mach_alloc_typed_frame_slot(&lowered, 8, 8, NYR_MACH_TYPE_I64,
+    if (!chunks)
+      chunks = 1;
+    if (!nyr_mach_alloc_typed_frame_slot(&lowered, 8, 8, NYR_MACH_TYPE_I64,
                                          true, &first))
       goto oom;
     lowered.param_aggregate_home_slots[i] = first;
@@ -3056,6 +3253,9 @@ bool nyr_mach_lower_nir(const nyr_func_t *nyir, nyr_mach_func_t *out,
                                in->c, in->imm, in->symbol);
     if ((in->op == NYIR_LOAD_I64 || in->op == NYIR_STORE_I64) &&
         (in->flags & NYIR_INST_F_MEM_BYTE) && !(caps & NY_NATIVE_CAP_MACH_BYTE))
+      goto done;
+    if ((in->op == NYIR_LOAD_I64 || in->op == NYIR_STORE_I64) &&
+        (in->flags & (NYIR_INST_F_MEM_U16 | NYIR_INST_F_MEM_I32)))
       goto done;
     nyr_mach_inst_t inst = {0};
     inst.source_pc = (uint32_t)i;
@@ -3110,6 +3310,38 @@ bool nyr_mach_lower_nir(const nyr_func_t *nyir, nyr_mach_func_t *out,
       inst.opcode = NYR_MACH_LEA;
       inst.dst = mach_vreg(&lowered, values[in->dst]);
       inst.src0 = mach_frame(last);
+    } else if (in->op == NYIR_VA_SAVE) {
+      uint32_t last = 0;
+      for (size_t slot_index = 0; slot_index < 22; ++slot_index) {
+        uint32_t slot = 0;
+        if (!nyr_mach_alloc_typed_frame_slot(&lowered, 8, 8, NYR_MACH_TYPE_I64,
+                                             true, &slot))
+          goto oom;
+        last = slot;
+      }
+      if (in->dst < 0) {
+        nyr_err(err, err_len, "machine lower: va.save has no destination");
+        goto done;
+      }
+      inst.opcode = NYR_MACH_VA_SAVE;
+      inst.dst = mach_vreg(&lowered, values[in->dst]);
+      inst.src0 = mach_frame(last);
+      inst.effects = NYR_MACH_EFFECT_WRITE_MEMORY;
+    } else if (in->op == NYIR_VA_START) {
+      inst.opcode = NYR_MACH_VA_START;
+      inst.src0 = mach_vreg(&lowered, values[in->a]);
+      inst.src1 = mach_vreg(&lowered, values[in->b]);
+      inst.src2 =
+          (nyr_mach_operand_t){.kind = NYR_MACH_OPERAND_IMM,
+                               .as.imm = (int64_t)((uint64_t)in->imm >> 32)};
+      inst.immediate = (uint32_t)in->imm;
+      inst.effects = NYR_MACH_EFFECT_READ_MEMORY | NYR_MACH_EFFECT_WRITE_MEMORY;
+    } else if (in->op == NYIR_VA_ARG) {
+      inst.opcode = NYR_MACH_VA_ARG;
+      inst.dst = mach_vreg(&lowered, values[in->dst]);
+      inst.src0 = mach_vreg(&lowered, values[in->a]);
+      inst.immediate = in->imm;
+      inst.effects = NYR_MACH_EFFECT_READ_MEMORY | NYR_MACH_EFFECT_WRITE_MEMORY;
     } else if (in->op == NYIR_CAPTURE_RET) {
       /*
        * Secondary ABI return register capture after CALL (SysV selectors).
@@ -3180,13 +3412,19 @@ bool nyr_mach_lower_nir(const nyr_func_t *nyir, nyr_mach_func_t *out,
       inst.src1 = (nyr_mach_operand_t){.kind = NYR_MACH_OPERAND_BLOCK,
                                        .as.block_index = (uint32_t)target};
       inst.effects = NYR_MACH_EFFECT_CONTROL;
+    } else if (in->op == NYIR_INLINE_ASM) {
+      inst.opcode = NYR_MACH_INLINE_ASM;
+      inst.src0 = (nyr_mach_operand_t){.kind = NYR_MACH_OPERAND_SYMBOL,
+                                       .as.symbol = in->symbol};
+      if (in->imm == -32 && in->a >= 0)
+        inst.src1 = mach_vreg(&lowered, values[in->a]);
+      inst.effects = NYR_MACH_EFFECT_CALL;
     } else if (in->op == NYIR_CALL) {
       inst.opcode = NYR_MACH_CALL;
+      inst.runtime_operation = ny_native_runtime_operation(in->symbol);
       if (in->dst >= 0)
         inst.dst = mach_vreg(&lowered, values[in->dst]);
-      inst.src0 = (nyr_mach_operand_t){.kind = NYR_MACH_OPERAND_SYMBOL,
-                                       .as.symbol = in->symbol,
-                                       .relocation = NYR_MACH_RELOC_CALL};
+      bool indirect = (in->flags & NYIR_INST_F_INDIRECT) != 0;
       if (in->imm > 0) {
         int args[NYIR_CALL_MAX_ARGS] = {0};
         int arg_count = 0;
@@ -3198,11 +3436,25 @@ bool nyr_mach_lower_nir(const nyr_func_t *nyir, nyr_mach_func_t *out,
                   args_err[0] ? args_err : NY_NATIVE_UNKNOWN_ERR);
           goto done;
         }
+        if (indirect) {
+          if (arg_count < 1 || in->symbol) {
+            nyr_err(err, err_len,
+                    "machine lower: indirect call is missing its target");
+            goto done;
+          }
+          inst.src0 = mach_vreg(&lowered, values[args[0]]);
+          --arg_count;
+          memmove(args, args + 1, (size_t)arg_count * sizeof(*args));
+        } else {
+          inst.src0 = (nyr_mach_operand_t){.kind = NYR_MACH_OPERAND_SYMBOL,
+                                           .as.symbol = in->symbol,
+                                           .relocation = NYR_MACH_RELOC_CALL};
+        }
         inst.args_len = (size_t)arg_count;
         inst.args = ny_calloc_array(inst.args_len, sizeof(*inst.args));
-        if (!inst.args)
+        if (inst.args_len && !inst.args)
           goto oom;
-        if (in->arg_sizes) {
+        if (in->arg_sizes && inst.args_len) {
           inst.arg_sizes =
               ny_calloc_array(inst.args_len, sizeof(*inst.arg_sizes));
           if (!inst.arg_sizes) {
@@ -3213,11 +3465,21 @@ bool nyr_mach_lower_nir(const nyr_func_t *nyir, nyr_mach_func_t *out,
         for (size_t arg = 0; arg < inst.args_len; ++arg)
           inst.args[arg] = mach_vreg(&lowered, values[args[arg]]);
         if (inst.arg_sizes)
-          memcpy(inst.arg_sizes, in->arg_sizes,
+          memcpy(inst.arg_sizes, in->arg_sizes + (indirect ? 1u : 0u),
                  inst.args_len * sizeof(*inst.arg_sizes));
+      } else {
+        if (indirect) {
+          nyr_err(err, err_len,
+                  "machine lower: indirect call is missing its target");
+          goto done;
+        }
+        inst.src0 = (nyr_mach_operand_t){.kind = NYR_MACH_OPERAND_SYMBOL,
+                                         .as.symbol = in->symbol,
+                                         .relocation = NYR_MACH_RELOC_CALL};
       }
-      inst.call_is_extern = (in->flags & NYIR_INST_F_EXTERN) != 0;
+      inst.call_is_extern = !indirect && (in->flags & NYIR_INST_F_EXTERN) != 0;
       inst.call_has_sret = (in->flags & NYIR_INST_F_SRET) != 0;
+      inst.call_is_variadic = (in->flags & NYIR_INST_F_VARIADIC) != 0;
       inst.effects = NYR_MACH_EFFECT_CALL;
     } else if (in->op == NYIR_SELECT_I64) {
       inst.opcode = NYR_MACH_SELECT;
@@ -3372,6 +3634,15 @@ bool nyr_mach_lower_nir(const nyr_func_t *nyir, nyr_mach_func_t *out,
           goto done;
         }
       }
+    } else if (in->op == NYIR_VEC8_SAR_I64) {
+      if (!(caps & NY_NATIVE_CAP_MACH_AVX2)) {
+        nyr_err(err, err_len, "machine lower: vec8.sar.i64 requires AVX2");
+        goto done;
+      }
+      inst.opcode = NYR_MACH_SAR;
+      inst.dst = mach_vreg(&lowered, values[in->dst]);
+      inst.src0 = mach_vreg(&lowered, values[in->a]);
+      inst.src1 = (nyr_mach_operand_t){.kind = NYR_MACH_OPERAND_IMM, .as.imm = in->imm};
     } else if (in->op == NYIR_VEC4_REDUCE_ADD_F64 ||
                in->op == NYIR_VEC4_REDUCE_ADD_I64 ||
                in->op == NYIR_VEC8_REDUCE_ADD_I64) {
@@ -3393,7 +3664,7 @@ bool nyr_mach_lower_nir(const nyr_func_t *nyir, nyr_mach_func_t *out,
        * Packed vector ALU: one machine op, element type on the vreg.
        */
       if (in->op == NYIR_VEC4_SUB_I64 || in->op == NYIR_VEC4_SUB_F64 ||
-          in->op == NYIR_VEC8_SUB_F32)
+          in->op == NYIR_VEC8_SUB_I64 || in->op == NYIR_VEC8_SUB_F32)
         inst.opcode = NYR_MACH_SUB;
       else if (in->op == NYIR_VEC4_MUL_F64 || in->op == NYIR_VEC8_MUL_F32)
         inst.opcode = NYR_MACH_MUL;
@@ -3404,6 +3675,12 @@ bool nyr_mach_lower_nir(const nyr_func_t *nyir, nyr_mach_func_t *out,
       else if (in->op == NYIR_VEC4_OR_I64)
         inst.opcode = NYR_MACH_OR;
       else if (in->op == NYIR_VEC4_XOR_I64)
+        inst.opcode = NYR_MACH_XOR;
+      else if (in->op == NYIR_VEC8_AND_I64)
+        inst.opcode = NYR_MACH_AND;
+      else if (in->op == NYIR_VEC8_OR_I64)
+        inst.opcode = NYR_MACH_OR;
+      else if (in->op == NYIR_VEC8_XOR_I64)
         inst.opcode = NYR_MACH_XOR;
       else if (in->op == NYIR_VEC4_SHL_I64)
         inst.opcode = NYR_MACH_SHL;
@@ -3446,7 +3723,8 @@ bool nyr_mach_lower_nir(const nyr_func_t *nyir, nyr_mach_func_t *out,
       inst.src0 = mach_vreg(&lowered, values[in->b >= 0 ? in->b : in->c]);
       inst.effects = NYR_MACH_EFFECT_WRITE_MEMORY;
     } else if (in->op == NYIR_VEC4_SET1_F64 || in->op == NYIR_VEC8_SET1_F32 ||
-               in->op == NYIR_VEC4_SET1_I64) {
+               in->op == NYIR_VEC4_SET1_I64 ||
+               in->op == NYIR_VEC8_SET1_I64) {
       /*
        * Broadcast scalar → packed vector via COPY; encoder expands.
        */
@@ -3643,6 +3921,10 @@ bool nyr_mach_lower_nir(const nyr_func_t *nyir, nyr_mach_func_t *out,
   if (!mach_remove_unused_literals(&lowered))
     goto oom;
   mach_compact_nops(&lowered);
+  if (!mach_sink_edge_adds(&lowered))
+    goto oom;
+  if (!mach_rotate_scalar_loops(&lowered))
+    goto oom;
   if (!nyr_mach_verify(&lowered, 0, err, err_len)) {
     if (ny_trace_enabled("NY_TRACE_MACHINE_FAIL")) {
       ny_trace_line("MACHINE_FAIL",
@@ -3752,7 +4034,7 @@ static bool mach_schedule_inst_safe(const nyr_mach_func_t *func,
       inst->effects != NYR_MACH_EFFECT_NONE || inst->args_len != 0 ||
       inst->args != NULL || inst->arg_sizes != NULL ||
       inst->call_clobbers != 0 || inst->call_is_extern || inst->call_has_sret ||
-      mach_schedule_inst_has_fixed_operand(inst) ||
+      inst->call_is_variadic || mach_schedule_inst_has_fixed_operand(inst) ||
       inst->source_pc == UINT32_MAX)
     return false;
   /*
@@ -3840,6 +4122,81 @@ static size_t mach_schedule_operand_uses(const nyr_mach_inst_t *inst,
     if (mach_schedule_value_equal(&inst->args[i], value))
       ++uses;
   return uses;
+}
+
+/*
+ * Delay single-use register additions until their PHI-edge copy. In
+ * particular, computing an induction update after the old IV's final use
+ * permits the encoder to coalesce the update with its loop-home register.
+ * Machine registers may have multiple definitions, so check every crossed
+ * instruction for input redefinitions as well as effects and control flow.
+ */
+static bool mach_sink_edge_adds(nyr_mach_func_t *m) {
+  size_t *defs = calloc(m->vreg_len, sizeof(*defs));
+  size_t *uses = calloc(m->vreg_len, sizeof(*uses));
+  if (m->vreg_len && (!defs || !uses)) {
+    free(defs);
+    free(uses);
+    return false;
+  }
+  for (size_t pc = 0; pc < m->inst_len; ++pc) {
+    const nyr_mach_inst_t *in = &m->insts[pc];
+    if (in->opcode != NYR_MACH_STORE &&
+        in->dst.kind == NYR_MACH_OPERAND_VREG)
+      ++defs[in->dst.as.reg];
+    const nyr_mach_operand_t *ops[] = {&in->src0, &in->src1, &in->src2};
+    for (size_t n = 0; n < 3; ++n)
+      if (ops[n]->kind == NYR_MACH_OPERAND_VREG)
+        ++uses[ops[n]->as.reg];
+    if (in->opcode == NYR_MACH_STORE &&
+        in->dst.kind == NYR_MACH_OPERAND_VREG)
+      ++uses[in->dst.as.reg];
+    for (size_t n = 0; n < in->args_len; ++n)
+      if (in->args[n].kind == NYR_MACH_OPERAND_VREG)
+        ++uses[in->args[n].as.reg];
+  }
+  for (size_t b = 0; b < m->block_len; ++b) {
+    const nyr_mach_block_t *block = &m->blocks[b];
+    size_t end = block->first_inst + block->inst_count;
+    for (size_t pc = end; pc > block->first_inst; ) {
+      --pc;
+      nyr_mach_inst_t add = m->insts[pc];
+      if (add.opcode != NYR_MACH_ADD || add.narrow32 ||
+          !mach_schedule_inst_safe(m, &add) ||
+          add.dst.kind != NYR_MACH_OPERAND_VREG ||
+          add.dst.reg_class != NYR_MACH_REGCLASS_GPR ||
+          mach_value_type(m, &add.dst) != NYR_MACH_TYPE_I64 ||
+          defs[add.dst.as.reg] != 1 || uses[add.dst.as.reg] != 1)
+        continue;
+      /*
+       * Bound both the search and the eventual memmove. The pass is a
+       * scheduling heuristic; distant consumers may keep source order.
+       * Together with the linear use census, this avoids quadratic work
+       * in large generated blocks.
+       */
+      for (size_t next = pc + 1; next < end && next - pc <= 64; ++next) {
+        const nyr_mach_inst_t *in = &m->insts[next];
+        if (in->opcode == NYR_MACH_COPY && in->source_pc == UINT32_MAX &&
+            mach_schedule_value_equal(&in->src0, &add.dst)) {
+          if (next > pc + 1) {
+            memmove(&m->insts[pc], &m->insts[pc + 1],
+                    (next - pc - 1) * sizeof(*m->insts));
+            m->insts[next - 1] = add;
+          }
+          break;
+        }
+        if (!mach_schedule_inst_safe(m, in) ||
+            mach_schedule_inst_reads(in, &add.dst) ||
+            mach_schedule_inst_writes(in, &add.src0) ||
+            mach_schedule_inst_writes(in, &add.src1) ||
+            mach_schedule_inst_writes(in, &add.src2))
+          break;
+      }
+    }
+  }
+  free(defs);
+  free(uses);
+  return true;
 }
 
 static bool mach_schedule_segment(nyr_mach_inst_t *insts, size_t count) {
@@ -4064,7 +4421,7 @@ static bool mach_outline_inst_ok(const nyr_mach_func_t *func,
   if (!func || !inst || inst->effects != NYR_MACH_EFFECT_NONE ||
       inst->condition != NYR_MACH_COND_ALWAYS || inst->args ||
       inst->arg_sizes || inst->args_len || inst->call_is_extern ||
-      inst->call_has_sret || inst->call_clobbers != 0)
+      inst->call_has_sret || inst->call_is_variadic || inst->call_clobbers != 0)
     return false;
   switch (inst->opcode) {
   case NYR_MACH_COPY:
@@ -4360,6 +4717,78 @@ static nyr_mach_operand_t mach_schedule_selftest_vreg(nyr_mach_reg_t reg) {
   return (nyr_mach_operand_t){.kind = NYR_MACH_OPERAND_VREG,
                               .reg_class = NYR_MACH_REGCLASS_GPR,
                               .as.reg = reg};
+}
+
+bool nyr_mach_sink_edge_adds_selftest(void) {
+  /*
+   * Positive case plus an input redefinition, additional result use,
+   * side-effect barrier, and an ordinary (non-edge) copy.
+   */
+  for (unsigned test = 0; test < 5; ++test) {
+    nyr_mach_func_t m = {0};
+    nyr_mach_reg_t regs[4];
+    bool ok = true;
+    for (size_t v = 0; v < 4 && ok; ++v)
+      ok = nyr_mach_alloc_typed_vreg(&m, NYR_MACH_TYPE_I64, &regs[v]);
+    uint32_t block = 0;
+    ok = ok && nyr_mach_begin_block(&m, 0, &block);
+    nyr_mach_inst_t add = {
+        .opcode = NYR_MACH_ADD, .source_pc = 1,
+        .dst = mach_schedule_selftest_vreg(regs[1]),
+        .src0 = mach_schedule_selftest_vreg(regs[0]),
+        .src1 = {.kind = NYR_MACH_OPERAND_IMM, .as.imm = 1}};
+    nyr_mach_inst_t crossed = {
+        .opcode = NYR_MACH_ADD, .source_pc = 2,
+        .dst = mach_schedule_selftest_vreg(regs[test == 1 ? 0 : 2]),
+        .src0 = mach_schedule_selftest_vreg(regs[test == 2 ? 1 : 0]),
+        .src1 = {.kind = NYR_MACH_OPERAND_IMM, .as.imm = 7}};
+    if (test == 3)
+      crossed.effects = NYR_MACH_EFFECT_WRITE_MEMORY;
+    nyr_mach_inst_t copy = {
+        .opcode = NYR_MACH_COPY,
+        .source_pc = test == 4 ? 3 : UINT32_MAX,
+        .dst = mach_schedule_selftest_vreg(regs[3]),
+        .src0 = mach_schedule_selftest_vreg(regs[1])};
+    ok = ok && nyr_mach_emit(&m, add) && nyr_mach_emit(&m, crossed) &&
+         nyr_mach_emit(&m, copy) && mach_sink_edge_adds(&m);
+    ok = ok && m.insts[0].source_pc == (test == 0 ? 2 : 1) &&
+         m.insts[1].source_pc == (test == 0 ? 1 : 2) &&
+         m.insts[2].source_pc == copy.source_pc;
+    nyr_mach_func_free(&m);
+    if (!ok)
+      return false;
+  }
+  const size_t gaps[] = {63, 64, 8192};
+  for (size_t trial = 0; trial < sizeof(gaps) / sizeof(gaps[0]); ++trial) {
+    nyr_mach_func_t m = {0};
+    nyr_mach_reg_t regs[4];
+    bool ok = true;
+    for (size_t v = 0; v < 4 && ok; ++v)
+      ok = nyr_mach_alloc_typed_vreg(&m, NYR_MACH_TYPE_I64, &regs[v]);
+    uint32_t block;
+    ok = ok && nyr_mach_begin_block(&m, 0, &block);
+    nyr_mach_inst_t add = {.opcode = NYR_MACH_ADD, .source_pc = 1,
+        .dst = mach_schedule_selftest_vreg(regs[1]),
+        .src0 = mach_schedule_selftest_vreg(regs[0]),
+        .src1 = {.kind = NYR_MACH_OPERAND_IMM, .as.imm = 1}};
+    ok = ok && nyr_mach_emit(&m, add);
+    nyr_mach_inst_t filler = add;
+    filler.source_pc = 2;
+    filler.dst = mach_schedule_selftest_vreg(regs[2]);
+    for (size_t i = 0; ok && i < gaps[trial]; ++i)
+      ok = nyr_mach_emit(&m, filler);
+    nyr_mach_inst_t copy = {.opcode = NYR_MACH_COPY, .source_pc = UINT32_MAX,
+        .dst = mach_schedule_selftest_vreg(regs[3]),
+        .src0 = mach_schedule_selftest_vreg(regs[1])};
+    ok = ok && nyr_mach_emit(&m, copy) && mach_sink_edge_adds(&m);
+    bool moved = gaps[trial] < 64;
+    ok = ok && m.insts[moved ? gaps[trial] : 0].source_pc == 1 &&
+         m.insts[gaps[trial] + 1].source_pc == UINT32_MAX;
+    nyr_mach_func_free(&m);
+    if (!ok)
+      return false;
+  }
+  return true;
 }
 
 bool nyr_mach_schedule_post_ra_selftest(void) {

@@ -1,0 +1,19 @@
+shape pi_param_dependent_parameter_type {
+  family "runtime/language"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+fn copy(Fin<4> n) int {
+  return n
+}
+
+def result = copy(2)
+assert_eq(result, 2, "dependent parameter type N resolves through Fin<4> arg")
+print("✓ pi-param ok")
+NY
+}

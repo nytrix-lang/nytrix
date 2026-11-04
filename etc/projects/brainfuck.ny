@@ -3,12 +3,13 @@
 ;; Brainfuck frontend built directly on the public Nyr API.
 use core
 use core.str as str
-use core.os (file_read, argv)
+use core.os (file_read, file_remove, temp_dir, pid, exit)
+use core.os.cli as cli
 
 #include <nyr/nyr.h>
-#link "build/release/libnytrixrt.so"
+#link "../../build/release/libnytrixrt.so"
 
-extern "build/release/libnytrixrt.so" {
+extern "../../build/release/libnytrixrt.so" {
   fn api_func_create() ptr as "nyr_func_create"
   fn api_func_free(ptr func) as "nyr_func_free"
   fn api_emit_const_i64(ptr func, int value, ptr value_id, ptr err, int err_len) bool as "nyr_emit_const_i64"
@@ -47,33 +48,51 @@ def N_SCALAR_I64_RAW = 1
 def N_SCALAR_POINTER = 8
 def N_OPT_O2 = 2
 
+mut ptr API_ERROR = 0
+
+fn _check_api(bool ok, str operation) {
+  if ok { return }
+  def detail = API_ERROR ? str.cstr_to_str(API_ERROR) : ""
+  eprint("brainfuck: " + operation +
+         (detail.len > 0 ? ": " + detail : ""))
+  exit(1)
+}
+
 fn _emit_const(ptr func, ptr value_id, int value) int {
   store32(value_id, -1, 0)
-  assert(api_emit_const_i64(func, value, value_id, nil, 0), "Nyr constant")
+  _check_api(api_emit_const_i64(func, value, value_id, API_ERROR, 512),
+             "emit Nyr constant")
   load32(value_id, 0)
 }
 
 fn _emit_binary(ptr func, ptr value_id, int op, int lhs, int rhs, int scalar_class) int {
   store32(value_id, -1, 0)
-  assert(api_emit_binary(func, op, lhs, rhs, scalar_class, value_id, nil, 0), "Nyr binary operation")
+  _check_api(api_emit_binary(func, op, lhs, rhs, scalar_class, value_id,
+                             API_ERROR, 512),
+             "emit Nyr binary operation")
   load32(value_id, 0)
 }
 
 fn _emit_compare(ptr func, ptr value_id, int lhs, int rhs, int cmp) int {
   store32(value_id, -1, 0)
-  assert(api_emit_compare_i64(func, lhs, rhs, cmp, value_id, nil, 0), "Nyr comparison")
+  _check_api(api_emit_compare_i64(func, lhs, rhs, cmp, value_id, API_ERROR,
+                                  512),
+             "emit Nyr comparison")
   load32(value_id, 0)
 }
 
 fn _emit_load_local(ptr func, ptr value_id, int slot) int {
   store32(value_id, -1, 0)
-  assert(api_emit_load_local(func, slot, value_id, nil, 0), "Nyr local load")
+  _check_api(api_emit_load_local(func, slot, value_id, API_ERROR, 512),
+             "load Nyr local")
   load32(value_id, 0)
 }
 
 fn _emit_call(ptr func, ptr value_id, str symbol, ptr args, int argc, int scalar_class) int {
   store32(value_id, -1, 0)
-  assert(api_emit_extern_call(func, symbol, args, argc, scalar_class, value_id, nil, 0), "Nyr external call")
+  _check_api(api_emit_extern_call(func, symbol, args, argc, scalar_class,
+                                  value_id, API_ERROR, 512),
+             "emit Nyr external call")
   load32(value_id, 0)
 }
 
@@ -88,29 +107,32 @@ fn _cell_address(ptr func, ptr value_id) int {
 fn _load_cell(ptr func, ptr value_id) int {
   def address = _cell_address(func, value_id)
   store32(value_id, -1, 0)
-  assert(api_emit_load_i64(func, address, 0, value_id, nil, 0), "Nyr memory load")
+  _check_api(api_emit_load_i64(func, address, 0, value_id, API_ERROR, 512),
+             "load Nyr memory")
   load32(value_id, 0)
 }
 
 fn _store_cell(ptr func, ptr value_id, int value) {
   def address = _cell_address(func, value_id)
-  assert(api_emit_store_i64(func, address, value, 0, nil, 0), "Nyr memory store")
+  _check_api(api_emit_store_i64(func, address, value, 0, API_ERROR, 512),
+             "store Nyr memory")
 }
 
 fn _emit_label(ptr func, int label) {
-  assert(api_emit_label(func, label, nil, 0), "Nyr label")
+  _check_api(api_emit_label(func, label, API_ERROR, 512), "emit Nyr label")
 }
 
 fn _emit_branch(ptr func, int label) {
-  assert(api_emit_branch(func, label, nil, 0), "Nyr branch")
+  _check_api(api_emit_branch(func, label, API_ERROR, 512), "emit Nyr branch")
 }
 
 fn _emit_branch_if(ptr func, int condition, int label) {
-  assert(api_emit_branch_if(func, condition, label, nil, 0), "Nyr conditional branch")
+  _check_api(api_emit_branch_if(func, condition, label, API_ERROR, 512),
+             "emit conditional Nyr branch")
 }
 
 fn _emit_return(ptr func, ptr value_id, int value) {
-  assert(api_emit_return(func, value, nil, 0), "Nyr return")
+  _check_api(api_emit_return(func, value, API_ERROR, 512), "emit Nyr return")
 }
 
 fn _adjust_cell(ptr func, ptr value_id, int delta) {
@@ -135,7 +157,8 @@ fn _move_pointer(ptr func, ptr value_id, int delta) {
   def past_end = _emit_compare(func, value_id, moved, tape_end, N_CMP_GE)
   def invalid = _emit_binary(func, value_id, N_OR_I64, below, past_end, N_SCALAR_I64_RAW)
   _emit_branch_if(func, invalid, BOUNDS_LABEL)
-  assert(api_emit_store_local(func, POINTER_LOCAL, moved, nil, 0), "move tape pointer")
+  _check_api(api_emit_store_local(func, POINTER_LOCAL, moved, API_ERROR, 512),
+             "move tape pointer")
 }
 
 fn _emit_loop_start(ptr func, ptr value_id, int index) {
@@ -175,6 +198,12 @@ fn _emit_input(ptr func, ptr value_id, int index) {
   _emit_label(func, after_label)
 }
 
+fn _release_tape(ptr func, ptr value_id, ptr call_args) {
+  def tape = _emit_load_local(func, value_id, BASE_LOCAL)
+  store32(call_args, tape, 0)
+  _emit_call(func, value_id, "free", call_args, 1, N_SCALAR_POINTER)
+}
+
 fn compile_code(str source, ptr func, ptr value_id, ptr call_args) {
   def cell_count = _emit_const(func, value_id, TAPE_SIZE)
   def cell_size = _emit_const(func, value_id, 8)
@@ -182,8 +211,10 @@ fn compile_code(str source, ptr func, ptr value_id, ptr call_args) {
   store32(call_args, cell_size, 4)
   def tape = _emit_call(func, value_id, "calloc", call_args, 2, N_SCALAR_POINTER)
   def zero = _emit_const(func, value_id, 0)
-  assert(api_emit_store_local(func, BASE_LOCAL, tape, nil, 0), "store tape pointer")
-  assert(api_emit_store_local(func, POINTER_LOCAL, zero, nil, 0), "initialize tape pointer")
+  _check_api(api_emit_store_local(func, BASE_LOCAL, tape, API_ERROR, 512),
+             "store tape pointer")
+  _check_api(api_emit_store_local(func, POINTER_LOCAL, zero, API_ERROR, 512),
+             "initialize tape pointer")
 
   def allocated = _emit_compare(func, value_id, tape, zero, N_CMP_NE)
   _emit_branch_if(func, allocated, ALLOC_LABEL)
@@ -191,7 +222,12 @@ fn compile_code(str source, ptr func, ptr value_id, ptr call_args) {
   _emit_return(func, value_id, alloc_failure)
   _emit_label(func, ALLOC_LABEL)
 
-  mut list<int> stack = list(16)
+  mut int stack_capacity = int(source.len)
+  if stack_capacity < 1 { stack_capacity = 1 }
+  def int stack_bytes = stack_capacity * 8
+  mut ptr stack = malloc(stack_bytes)
+  assert(stack != 0, "allocate Brainfuck loop stack")
+  defer { free(stack) }
   mut int depth = 0
   mut int i = 0
   while i < source.len {
@@ -223,17 +259,19 @@ fn compile_code(str source, ptr func, ptr value_id, ptr call_args) {
         _store_cell(func, value_id, cell_zero)
         i += 3
       } else {
-        if depth == stack.len { stack = stack.append(i) }
-        else { stack[depth] = i }
+        store64_i(stack, i, depth * 8)
         depth += 1
         _emit_loop_start(func, value_id, i)
         i += 1
       }
 
     } else if op == 93 {
-      if depth == 0 { panic("Unexpected ]") }
+      if depth == 0 {
+        eprint("brainfuck: unexpected ']'")
+        exit(2)
+      }
       depth -= 1
-      def open_index = stack[depth]
+      def int open_index = load64_i(stack, depth * 8)
       _emit_loop_end(func, open_index)
       i += 1
 
@@ -250,43 +288,120 @@ fn compile_code(str source, ptr func, ptr value_id, ptr call_args) {
     }
   }
 
-  if depth != 0 { panic("Missing ]") }
+  if depth != 0 {
+    eprint("brainfuck: missing ']'")
+    exit(2)
+  }
+  _release_tape(func, value_id, call_args)
   def success = _emit_const(func, value_id, 0)
   _emit_return(func, value_id, success)
   _emit_label(func, BOUNDS_LABEL)
+  _release_tape(func, value_id, call_args)
   def bounds_error = _emit_const(func, value_id, 1)
   _emit_return(func, value_id, bounds_error)
 }
 
 #main {
-  def source_path = to_str(argv(1))
-  assert(source_path.len > 0, "usage: brainfuck.ny SOURCE.bf < program-input")
-  def source_result = file_read(source_path)
-  assert(is_ok(source_result), "read Brainfuck source")
-  def source = to_str(unwrap(source_result))
+  mut spec = cli.app("brainfuck", "Run Brainfuck source with the Nyr JIT")
+  spec = cli.add(spec,
+    cli.optional_option("asm", "a", "Emit assembly to stderr or PATH", "path",
+                        "", "stderr"))
+  spec = cli.add(spec,
+    cli.option("code", "c", "Use inline Brainfuck CODE", "str", nil))
+  spec = cli.add(spec,
+    cli.positional("source", "Brainfuck source file", "path", false))
+  spec = cli.add(spec, cli.rest("args"))
+
+  def parsed = cli.parse(spec)
+  if !bool(parsed.get("ok", false)) {
+    eprint(cli.format_error(parsed))
+    exit(2)
+  }
+  if bool(parsed.get("help", false)) {
+    print(to_str(parsed.get("text", "")))
+    exit(0)
+  }
+
+  def values = parsed.get("values", {})
+  def inline_source = values.get("code", nil)
+  def has_inline_source = parsed.get("provided", {}).contains("code")
+  def source_path = to_str(values.get("source", ""))
+  if !has_inline_source && source_path.len == 0 {
+    eprint("brainfuck: expected -c CODE or SOURCE.bf")
+    exit(2)
+  }
+  if has_inline_source && source_path.len > 0 {
+    eprint("brainfuck: -c CODE and SOURCE.bf are mutually exclusive")
+    exit(2)
+  }
+  mut str source = ""
+  if has_inline_source {
+    source = to_str(inline_source)
+  } else {
+    def source_result = file_read(source_path)
+    if !is_ok(source_result) {
+      eprint("brainfuck: cannot read source '" + source_path + "'")
+      exit(1)
+    }
+    source = to_str(unwrap(source_result))
+  }
+
+  mut str requested_assembly = ""
+  if parsed.get("provided", {}).contains("asm") {
+    requested_assembly = to_str(values.get("asm", ""))
+  }
+  def assembly_to_stderr =
+    requested_assembly == "stderr" || requested_assembly == "-"
+  mut str assembly_path = requested_assembly
+  if assembly_to_stderr {
+    assembly_path = temp_dir() + "/ny-brainfuck-" + to_str(pid()) + ".s"
+  }
 
   def func = api_func_create()
   def value_id = malloc(4)
   def call_args = malloc(8)
   def jit_result = malloc(8)
-  assert(func != 0 && value_id != 0 && call_args != 0 && jit_result != 0,
+  API_ERROR = malloc(512)
+  assert(func != 0 && value_id != 0 && call_args != 0 && jit_result != 0 &&
+         API_ERROR != 0,
     "allocate Nyr frontend state")
+  mut int error_byte = 0
+  while error_byte < 512 {
+    store8(API_ERROR, 0, error_byte)
+    error_byte += 1
+  }
   defer {
     api_func_free(func)
     free(value_id)
     free(call_args)
     free(jit_result)
+    free(API_ERROR)
+    API_ERROR = 0
   }
 
   compile_code(source, func, value_id, call_args)
-  assert(api_verify(func, nil, 0), "verify Brainfuck NYIR")
-  assert(api_optimize(func, N_OPT_O2, nil, 0), "optimize Brainfuck NYIR")
-  assert(api_verify(func, nil, 0), "verify optimized Brainfuck NYIR")
-  assert(api_emit_assembly(func, "out.s", "rt_main", nil, 0),
-    "emit Nyr assembly")
-  assert(api_jit_run(func, jit_result, nil, 0), "run Brainfuck with Nyr JIT")
-  print("Brainfuck exit:", load64_i(jit_result, 0))
-  def assembly_result = file_read("out.s")
-  assert(is_ok(assembly_result), "read Nyr assembly output")
-  print(to_str(unwrap(assembly_result)))
+  _check_api(api_verify(func, API_ERROR, 512), "verify Brainfuck NYIR")
+  _check_api(api_optimize(func, N_OPT_O2, API_ERROR, 512),
+             "optimize Brainfuck NYIR")
+  _check_api(api_verify(func, API_ERROR, 512), "verify optimized Brainfuck NYIR")
+  if assembly_path != "" {
+    _check_api(api_emit_assembly(func, assembly_path, "rt_main", API_ERROR, 512),
+               "emit Nyr assembly to '" + assembly_path + "'")
+    if assembly_to_stderr {
+      def assembly = file_read(assembly_path)
+      if !is_ok(assembly) {
+        file_remove(assembly_path)
+        eprint("brainfuck: cannot read generated assembly")
+        exit(1)
+      }
+      eprint(to_str(unwrap(assembly)))
+      file_remove(assembly_path)
+    }
+  }
+  _check_api(api_jit_run(func, jit_result, API_ERROR, 512),
+             "run Brainfuck with Nyr JIT")
+  if load64_i(jit_result, 0) != 0 {
+    eprint("Brainfuck runtime error")
+    exit(1)
+  }
 }

@@ -5416,7 +5416,41 @@ static int nyr_lower_match_pattern(nyr_builder_t *b, int test_value,
         int actual_tag =
             nyr_emit_runtime_call(b, "rt_adt_tag", test_value, -1, -1, 1, 0);
         int expected_tag = nyr_emit_const(b, adt_tag);
-        return nyr_emit_cmp(b, actual_tag, expected_tag, NYIR_CMP_EQ);
+        int tag_eq = nyr_emit_cmp(b, actual_tag, expected_tag, NYIR_CMP_EQ);
+        if (tag_eq < 0)
+          return -1;
+        /* Bind each constructor payload field from the ADT object. Field
+         * offsets are 0, 8, 16, ... after the returned pointer; the tag is
+         * stored just before the pointer (returned - 8). Read in declaration
+         * order and bind each non-wildcard field as a raw scalar local. */
+        for (size_t f = 0; f < adt_item->fields.len; ++f) {
+          int field_offset = nyr_emit_const(b, (int64_t)f * 8);
+          if (field_offset < 0)
+            return -1;
+          int addr = nyr_emit_binop(b, NYIR_ADD_I64, test_value, field_offset);
+          if (addr < 0)
+            return -1;
+          int field_val = nyr_ir_emit(
+              &b->nyir, (nyr_inst_t){.op = NYIR_LOAD_I64, .dst = -1, .a = addr});
+          if (field_val < 0)
+            return -1;
+          const char *field_name = adt_item->fields.data[f].name;
+          if (!field_name)
+            return -1;
+          if (strcmp(field_name, "_") == 0)
+            continue;
+          nyr_local_t *local = nyr_bind_local(b, field_name);
+          if (!local)
+            return -1;
+          local->type_name = adt_item->fields.data[f].type_name
+                                 ? adt_item->fields.data[f].type_name
+                                 : "int";
+          local->is_any = ny_native_type_name_is_any(local->type_name);
+          local->semantic_rep = NY_SEM_REP_RAW_INT;
+          if (!nyr_store_local_value(b, local->slot, field_val))
+            return -1;
+        }
+        return tag_eq;
       }
     }
   }

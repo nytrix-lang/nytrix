@@ -3,14 +3,14 @@
  * for compiler self-tests, fuzzer workers, and native executable probes.
  */
 #include "base/process.h"
+#include "base/compat.h"
 #include "base/options.h"
 #include "base/util.h"
-#include "base/compat.h"
 
-#include <stdint.h>
 #include <ctype.h>
 #include <errno.h>
 #include <limits.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -107,8 +107,9 @@ int ny_process_capture(const char *const argv[], char **out,
   SetHandleInformation(read_pipe, HANDLE_FLAG_INHERIT, 0);
   HANDLE null_err = INVALID_HANDLE_VALUE;
   if (discard_stderr)
-    null_err = CreateFileA("NUL", GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
-                           &sa, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    null_err =
+        CreateFileA("NUL", GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                    &sa, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
   STARTUPINFOA si = {0};
   PROCESS_INFORMATION pi = {0};
   si.cb = sizeof(si);
@@ -118,7 +119,8 @@ int ny_process_capture(const char *const argv[], char **out,
   si.hStdError = discard_stderr && null_err != INVALID_HANDLE_VALUE
                      ? null_err
                      : GetStdHandle(STD_ERROR_HANDLE);
-  BOOL ok = CreateProcessA(NULL, cmd, NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi);
+  BOOL ok =
+      CreateProcessA(NULL, cmd, NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi);
   CloseHandle(write_pipe);
   if (null_err != INVALID_HANDLE_VALUE)
     CloseHandle(null_err);
@@ -179,8 +181,8 @@ int ny_process_capture(const char *const argv[], char **out,
     posix_spawn_file_actions_addopen(&actions, STDERR_FILENO, "/dev/null",
                                      O_WRONLY, 0);
   pid_t pid = -1;
-  int spawn_rc = posix_spawnp(&pid, argv[0], &actions, NULL,
-                              (char *const *)argv, environ);
+  int spawn_rc =
+      posix_spawnp(&pid, argv[0], &actions, NULL, (char *const *)argv, environ);
   posix_spawn_file_actions_destroy(&actions);
   close(pipefd[1]);
   if (spawn_rc != 0) {
@@ -237,7 +239,11 @@ static int ny_process_path_like(const char *s) {
 }
 #endif
 
-int ny_exec_spawn(const char *const argv[]) {
+int ny_exec_spawn_argv0(const char *executable, const char *const argv[]) {
+  if (!argv || !argv[0])
+    return 127;
+  if (!executable || !*executable)
+    executable = argv[0];
   if (verbose_enabled >= 2 && argv && argv[0]) {
     fprintf(stderr, "[cmd]");
     for (size_t i = 0; argv[i]; ++i) {
@@ -265,7 +271,7 @@ int ny_exec_spawn(const char *const argv[]) {
     fputc('\n', stderr);
   }
 #ifdef _WIN32
-  const char *a0 = argv[0] ? argv[0] : "";
+  const char *a0 = executable;
   int rc = -1;
   if (ny_process_path_like(a0) && ny_access(a0, F_OK) == 0)
     rc = _spawnv(_P_WAIT, a0, (const char *const *)argv);
@@ -340,7 +346,7 @@ int ny_exec_spawn(const char *const argv[]) {
     return -1;
   }
   if (pid == 0) {
-    execvp(argv[0], (char *const *)argv);
+    execvp(executable, (char *const *)argv);
     perror("execvp");
     _exit(127);
   }
@@ -352,10 +358,15 @@ int ny_exec_spawn(const char *const argv[]) {
   if (WIFEXITED(status))
     return WEXITSTATUS(status);
   if (WIFSIGNALED(status)) {
+    int signal_number = WTERMSIG(status);
     fprintf(stderr, "process %s terminated by signal %d\n", argv[0],
-            WTERMSIG(status));
-    return -1;
+            signal_number);
+    return 128 + signal_number;
   }
   return status;
 #endif
+}
+
+int ny_exec_spawn(const char *const argv[]) {
+  return ny_exec_spawn_argv0(argv && argv[0] ? argv[0] : NULL, argv);
 }

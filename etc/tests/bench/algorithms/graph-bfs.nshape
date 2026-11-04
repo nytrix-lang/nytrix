@@ -3,6 +3,12 @@ shape graph_bfs {
   generator "stress"
   features ["perf", "graph", "csr", "bfs", "c-vs-ny", "checksum", "time"]
   template ny-test-case
+  budget {
+    ;; The checked native typed-buffer implementation has a stable baseline
+    ;; near 4.6x LLVM on this large traversal. Keep modest host/codegen
+    ;; headroom while still failing substantial per-fixture regressions.
+    max_native_llvm_ratio 5.5
+  }
   expect compile_and_run
   source ny <<'NY'
 use core

@@ -3,35 +3,42 @@ shape bce-matrix {
   generator "stress"
   features ["perf", "bounds-check", "bce", "c-vs-ny", "native", "checksum", "time"]
   template ny-test-case
-  flags_matrix "--native-only --native-backend=x86_64 --native-tier=opt -O3 --nyir-verify"
+  flags_matrix "--native-only --native-backend=x86_64 --native-tier=opt -O3 --nyr-verify"
   expect compile_and_run
   source ny <<'NY'
 use core
 use core.os.time
+use core.tbuf (i64buf_new, i64buf_load, i64buf_store)
 
-;; Keep the buffer and its append loop in function-local storage so the
-;; optimizer can prove its allocation lineage without assuming that a
-;; module-global symbol cannot be changed through an unknown alias.
+;; Use the same contiguous 64-bit element layout as the C reference.
 fn matrix_sum() int {
-   ;; 2D traversal with indexed access: tests bounds-check elimination.
+   ;; Flattened row-major traversal keeps each checked index in one induction variable.
    def M = 100
-   mut list<int> a = []
+   def passes = 2048
+   def a = i64buf_new(M * M)
    mut int i = 0
-   while i < M * M {
-      a = append(a, i)
+   while i < M*M {
+      i64buf_store(a, i, i)
       i += 1
    }
-   assert(a.len() >= M * M, "matrix fill must produce the indexed length")
+   def int length = M * M
+   if length < M * M {
+      panic("matrix fill must produce the indexed length")
+   }
    def int t0 = ticks()
    mut int acc = 0
-   mut int r = 0
-   while r < M {
-      mut int cc = 0
-      while cc < M {
-         acc += a[r * M + cc]
-         cc += 1
+   mut int pass = 0
+   mut int state = 0
+   while pass < passes {
+      ;; Feed changing state into the reduction so optimizing routes cannot
+      ;; fold the matrix traversal into a constant result.
+      state += pass + 1
+      mut int idx = 0
+      while idx < length {
+         acc += i64buf_load(a, idx) + state
+         idx += 1
       }
-      r += 1
+      pass += 1
    }
    def int t1 = ticks()
    print("checksum=", acc)
@@ -54,13 +61,18 @@ static int64_t now_ns(void) {
 
 int main(void) {
     int M = 100;
+    int passes = 2048;
     long *a = (long *)malloc((size_t)M * M * sizeof(long));
+    if (!a) return 2;
     for (int i = 0; i < M * M; i++) a[i] = i;
     int64_t start = now_ns();
     long acc = 0;
-    for (int r = 0; r < M; r++)
-        for (int c = 0; c < M; c++)
-            acc += a[r * M + c];
+    long state = 0;
+    for (int pass = 0; pass < passes; pass++) {
+        state += pass + 1;
+        for (int i = 0; i < M * M; i++)
+            acc += a[i] + state;
+    }
     int64_t end = now_ns();
     printf("checksum=%ld\n", acc);
     if (end <= start) end = start + 1;

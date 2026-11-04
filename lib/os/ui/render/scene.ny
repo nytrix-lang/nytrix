@@ -5580,7 +5580,7 @@ fn _scene_store_gpu_part_header(any base, list rec, any pipe, bool is_lines, boo
    true
 }
 
-fn _scene_store_gpu_part_model(any base, any model_m) bool {
+fn _scene_store_gpu_part_model(ptr base, any model_m) bool {
    def n = is_list(model_m) ? model_m.len : 0
    if !base || n <= 0 { return false }
    ;; Runtime/static glTF matrices come in two layouts:
@@ -5640,7 +5640,8 @@ fn _scene_store_gpu_part_material(any base, list rec, bool unlit, bool is_points
    store32(base, int(rec.get(33, 0)), 216) ;; p+80  occlusion_uv_xf1
    store32(base, int(rec.get(34, 0)), 220) ;; p+84  emissive_uv_xf0
    store32(base, int(rec.get(35, 0)), 224) ;; p+88  emissive_uv_xf1
-   store32(base, 0, 228) ;; p+92  reserved
+   ;; Packed draw paths read this slot as the part visibility flag.
+   store32(base, int(rec.get(37, 1)), 228)
    store32(base, int(rec.get(41, 0)), 232) ;; p+96  bsdf4_u32
    store32(base, int(rec.get(24, -1)), 236) ;; p+100 normal_tex_word
    store32(base, int(rec.get(42, 0)), 240) ;; p+104 bsdf5_u32
@@ -5652,10 +5653,15 @@ fn _scene_store_gpu_part_material(any base, list rec, bool unlit, bool is_points
 fn _scene_trace_gpu_part_slab(any base, list rec, int i, bool trace_slab) bool {
    if !trace_slab || i >= 4 { return false }
    ui_profile.print_text("[scene:slab] i=" + to_str(i) +
+      " base=" + to_str(int(__ffi_untag_ptr(base))) +
       " rec0=" + to_str(int(rec.get(0, -1))) +
       " rec12=0x" + str.to_hex(int(rec.get(12, 0xffffffff))) +
       " rec13=0x" + str.to_hex(int(rec.get(13, 0x0000ff00))) +
       " rec24=0x" + str.to_hex(int(rec.get(24, -1))) +
+      " visible=" + to_str(int(rec.get(37, 1))) +
+      " slabVisible=" + to_str(load32_h(base, 228)) +
+      " modelDiag=" + to_str(load32_f32(base, 64)) + "," + to_str(load32_f32(base, 84)) + "," +
+      to_str(load32_f32(base, 104)) + "," + to_str(load32_f32(base, 124)) +
       " slab0=" + to_str(load32_h(base, 0)) +
       " matKey=" + to_str(load32_h(base, 128)) +
       " slabTex=" + to_str(load32_h(base, 156)) +
@@ -5685,6 +5691,10 @@ fn _pack_scene_gpu_parts_slab(list parts, bool no_punctual_lights=false) any {
    mut i = 0
    while i < count {
       def rec = parts.get(i, 0)
+      if i < 4 && common.env_truthy("NY_SCENE_FAST_TRACE") {
+         ui_profile.print_text("[scene:slab] record=" + to_str(i) + " list=" + to_str(is_list(rec)) +
+            " length=" + to_str(is_list(rec) ? len(rec) : 0))
+      }
       if is_list(rec) && rec.len >= 41 {
          def base = slab + (i * 256)
          def flags = int(rec.get(8, 0))
@@ -7935,7 +7945,7 @@ fn unload_scene(any scene, str loaded_scene_name="") bool {
 }
 
 mut _scene_fast_group = 0
-mut _scene_fast_gpu_slab = 0
+mut ptr _scene_fast_gpu_slab = 0
 mut _scene_fast_gpu_count = 0
 mut _scene_fast_gpu_optical_start = 0
 mut _scene_fast_gpu_blend_start = 0
@@ -7943,12 +7953,21 @@ mut _scene_fast_gpu_has_blend = false
 mut _scene_fast_gpu_has_optical = false
 mut _scene_fast_gpu_model_baked = false
 mut _scene_fast_gpu_single_opaque = false
-mut _scene_fast_gpu_light_slab = 0
+mut ptr _scene_fast_gpu_light_slab = 0
 mut _scene_fast_gpu_light_count = 0
 mut _scene_fast_gpu_ready = false
 mut _scene_fast_lights_bound = false
 mut _scene_fast_mask_bound = false
 mut _scene_fast_material_bound = false
+
+fn _scene_slab_ptr(any value) ptr {
+   mut ptr p = __ffi_untag_ptr(value)
+   ;; Packed slab allocations are aligned. Some dynamic list boundaries
+   ;; retain an additional integer tag around the native address.
+   if (int(p) & 1) != 0 { p = __ffi_untag_ptr(p) }
+   p
+}
+
 mut _scene_fast_material_frame = -1
 
 fn scene_fast_reset(any group=0) bool {
@@ -7994,37 +8013,41 @@ fn _scene_fast_supported(group) bool {
 fn _scene_fast_read_gpu_state(group) bool {
    def gpu_state = group.get("gpu_draw_state", 0)
    if is_list(gpu_state) && gpu_state.len >= 9 {
-      _scene_fast_gpu_slab = gpu_state.get(0, 0)
+      _scene_fast_gpu_slab = _scene_slab_ptr(gpu_state.get(0, 0))
       _scene_fast_gpu_count = int(gpu_state.get(1, 0))
       _scene_fast_gpu_optical_start = int(gpu_state.get(2, 0))
       _scene_fast_gpu_blend_start = int(gpu_state.get(3, 0))
       _scene_fast_gpu_has_blend = int(gpu_state.get(4, 0)) != 0
       _scene_fast_gpu_model_baked = int(gpu_state.get(5, 0)) != 0
-      _scene_fast_gpu_light_slab = gpu_state.get(6, 0)
+      _scene_fast_gpu_light_slab = _scene_slab_ptr(gpu_state.get(6, 0))
       _scene_fast_gpu_light_count = int(gpu_state.get(7, 0))
       _scene_fast_gpu_has_optical = int(gpu_state.get(8, 0)) != 0
+      if common.env_truthy("NY_SCENE_FAST_TRACE") {
+         ui_profile.print_text("[scene:fast:slab] base=" + to_str(int(_scene_fast_gpu_slab)) +
+            " visible=" + to_str(load32_h(_scene_fast_gpu_slab, 228)))
+      }
       return true
    }
    if is_list(gpu_state) && gpu_state.len >= 7 {
-      _scene_fast_gpu_slab = gpu_state.get(0, 0)
+      _scene_fast_gpu_slab = _scene_slab_ptr(gpu_state.get(0, 0))
       _scene_fast_gpu_count = int(gpu_state.get(1, 0))
       _scene_fast_gpu_optical_start = int(group.get("gpu_optical_start", 0))
       _scene_fast_gpu_blend_start = int(gpu_state.get(2, 0))
       _scene_fast_gpu_has_blend = int(gpu_state.get(3, 0)) != 0
       _scene_fast_gpu_model_baked = int(gpu_state.get(4, 0)) != 0
-      _scene_fast_gpu_light_slab = gpu_state.get(5, 0)
+      _scene_fast_gpu_light_slab = _scene_slab_ptr(gpu_state.get(5, 0))
       _scene_fast_gpu_light_count = int(gpu_state.get(6, 0))
       _scene_fast_gpu_has_optical = group.get("has_optical", false) ? true : false
       return true
    }
-   _scene_fast_gpu_slab = group.get("gpu_parts_slab", 0)
+   _scene_fast_gpu_slab = _scene_slab_ptr(group.get("gpu_parts_slab", 0))
    _scene_fast_gpu_count = int(group.get("gpu_parts_count", 0))
    _scene_fast_gpu_optical_start = int(group.get("gpu_optical_start", 0))
    _scene_fast_gpu_blend_start = int(group.get("gpu_blend_start", 0))
    _scene_fast_gpu_has_blend = group.get("has_blend", false) ? true : false
    _scene_fast_gpu_has_optical = group.get("has_optical", false) ? true : false
    _scene_fast_gpu_model_baked = group.get("gpu_model_baked", false) ? true : false
-   _scene_fast_gpu_light_slab = group.get("scene_lights_slab", 0)
+   _scene_fast_gpu_light_slab = _scene_slab_ptr(group.get("scene_lights_slab", 0))
    _scene_fast_gpu_light_count = int(group.get("scene_lights_count", 0))
    true
 }

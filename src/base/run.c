@@ -10,8 +10,8 @@
 #endif
 
 #include "base/options.h"
-#include "base/util.h"
 #include "base/process.h"
+#include "base/util.h"
 #include <errno.h>
 #include <stdio.h>
 #include <string.h>
@@ -129,12 +129,14 @@ static void ny_win_forward_pipe(HANDLE pipe, HANDLE dst, uint64_t limit,
   }
 }
 
-int ny_safe_run_spawn(const ny_safe_run_t *sr, const char *const argv[],
-                      const char *workload) {
+int ny_safe_run_spawn_argv0(const ny_safe_run_t *sr, const char *executable,
+                            const char *const argv[], const char *workload) {
   if (!sr || !ny_safe_run_any_set(sr))
-    return ny_exec_spawn(argv);
+    return ny_exec_spawn_argv0(executable, argv);
   if (!argv || !argv[0])
     return 127;
+  if (!executable || !*executable)
+    executable = argv[0];
   if (sr->max_files > 0)
     fprintf(stderr,
             "safe-run: Windows has no Job Object open-file limit; "
@@ -170,8 +172,8 @@ int ny_safe_run_spawn(const ny_safe_run_t *sr, const char *const argv[],
   si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
   si.hStdOutput = out_w;
   si.hStdError = err_w;
-  BOOL created = CreateProcessA(NULL, cmd, NULL, NULL, TRUE, CREATE_SUSPENDED,
-                                NULL, NULL, &si, &pi);
+  BOOL created = CreateProcessA(executable, cmd, NULL, NULL, TRUE,
+                                CREATE_SUSPENDED, NULL, NULL, &si, &pi);
   free(cmd);
   CloseHandle(out_w);
   CloseHandle(err_w);
@@ -824,10 +826,12 @@ static pid_t ny_safe_run_fork(int out_pipe[2], int err_pipe[2]) {
   return 0;
 }
 
-int ny_safe_run_spawn(const ny_safe_run_t *sr, const char *const argv[],
-                      const char *workload) {
+int ny_safe_run_spawn_argv0(const ny_safe_run_t *sr, const char *executable,
+                            const char *const argv[], const char *workload) {
   if (!argv || !argv[0])
     return 127;
+  if (!executable || !*executable)
+    executable = argv[0];
   int out_pipe[2], err_pipe[2];
   pid_t pid = ny_safe_run_fork(out_pipe, err_pipe);
   if (pid < 0)
@@ -835,8 +839,8 @@ int ny_safe_run_spawn(const ny_safe_run_t *sr, const char *const argv[],
   if (pid == 0) {
     if (ny_safe_run_apply_limits(sr) != 0)
       _exit(125);
-    execvp(argv[0], (char *const *)argv);
-    fprintf(stderr, "safe-run: could not execute %s: %s\n", argv[0],
+    execvp(executable, (char *const *)argv);
+    fprintf(stderr, "safe-run: could not execute %s: %s\n", executable,
             strerror(errno));
     _exit(127);
   }
@@ -866,3 +870,9 @@ int ny_safe_run_call(const ny_safe_run_t *sr, ny_safe_run_child_fn fn,
 }
 
 #endif /* _WIN32 / POSIX */
+
+int ny_safe_run_spawn(const ny_safe_run_t *sr, const char *const argv[],
+                      const char *workload) {
+  return ny_safe_run_spawn_argv0(sr, argv && argv[0] ? argv[0] : NULL, argv,
+                                 workload);
+}

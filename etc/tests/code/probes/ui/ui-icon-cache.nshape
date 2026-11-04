@@ -1,0 +1,22 @@
+shape ui-icon-cache {
+  family "probe-suite"
+  generator "regression"
+  features ["ny", "render", "icons"]
+  template ny-test-case
+  expect compile_and_run
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  timeout 180
+  expect_stdout "UI-ICON-CACHE-OK"
+  source ny <<'NY'
+use core
+use core.os.ui.render.viewer.icons as icons
+assert(int(icons.icon_sprite("nytrix-regression-missing-sprite")) == -1, "cold missing sprite")
+assert(int(icons.icon_sprite("nytrix-regression-missing-sprite")) == -1, "cached missing sprite preserves result")
+icons.clear_cache()
+assert(int(icons.icon_sprite("nytrix-regression-missing-sprite")) == -1, "missing sprite after clearing")
+assert(int(icons.icon_sprite("nytrix-regression-missing-sprite")) == -1, "initialized negative cache preserves result")
+assert(icons.icon_tex("nytrix-regression-missing-texture") == -1, "missing texture")
+assert(icons.icon_tex("nytrix-regression-missing-texture") == -1, "cached missing texture")
+print("UI-ICON-CACHE-OK")
+NY
+}

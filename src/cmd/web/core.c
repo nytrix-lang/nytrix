@@ -744,42 +744,54 @@ static char *dedent_clean_code(const char *code, size_t n) {
   return sb.data ? sb.data : strdup("");
 }
 
-static int find_matching_brace(const char *s, size_t open_pos, size_t limit,
-                               size_t *close_pos) {
+/*
+ * One character of the shared string/comment/escape scanner.  Returns true
+ * when the character was consumed by a string or comment state and the
+ * caller must skip delimiter handling.
+ */
+static bool ny_web_scan_step(char c, int *in_string, char *quote,
+                             int *in_comment, int *esc_next) {
+  if (*esc_next) {
+    *esc_next = 0;
+    return true;
+  }
+  if (*in_string && c == '\\') {
+    *esc_next = 1;
+    return true;
+  }
+  if (!*in_string && c == ';') {
+    *in_comment = 1;
+    return true;
+  }
+  if (*in_comment) {
+    if (c == '\n')
+      *in_comment = 0;
+    return true;
+  }
+  if (!*in_string && (c == '"' || c == '\'')) {
+    *in_string = 1;
+    *quote = c;
+    return true;
+  }
+  if (*in_string) {
+    if (c == *quote)
+      *in_string = 0;
+    return true;
+  }
+  return false;
+}
+
+static int find_matching_delim(const char *s, size_t open_pos, size_t limit,
+                               size_t *close_pos, char open, char close) {
   int depth = 0, in_string = 0, in_comment = 0, esc_next = 0;
   char quote = 0;
   for (size_t i = open_pos; i < limit; i++) {
     char c = s[i];
-    if (esc_next) {
-      esc_next = 0;
+    if (ny_web_scan_step(c, &in_string, &quote, &in_comment, &esc_next))
       continue;
-    }
-    if (in_string && c == '\\') {
-      esc_next = 1;
-      continue;
-    }
-    if (!in_string && c == ';') {
-      in_comment = 1;
-      continue;
-    }
-    if (in_comment) {
-      if (c == '\n')
-        in_comment = 0;
-      continue;
-    }
-    if (!in_string && (c == '"' || c == '\'')) {
-      in_string = 1;
-      quote = c;
-      continue;
-    }
-    if (in_string) {
-      if (c == quote)
-        in_string = 0;
-      continue;
-    }
-    if (c == '{')
+    if (c == open)
       depth++;
-    else if (c == '}') {
+    else if (c == close) {
       depth--;
       if (depth == 0) {
         *close_pos = i;
@@ -788,6 +800,16 @@ static int find_matching_brace(const char *s, size_t open_pos, size_t limit,
     }
   }
   return 0;
+}
+
+static int find_matching_brace(const char *s, size_t open_pos, size_t limit,
+                               size_t *close_pos) {
+  return find_matching_delim(s, open_pos, limit, close_pos, '{', '}');
+}
+
+static int find_matching_paren(const char *s, size_t open_pos, size_t limit,
+                               size_t *close_pos) {
+  return find_matching_delim(s, open_pos, limit, close_pos, '(', ')');
 }
 
 typedef struct {
@@ -817,52 +839,6 @@ static size_t ny_web_trim_end_ws(const char *s, size_t start, size_t end) {
   while (end > start && isspace((unsigned char)s[end - 1]))
     end--;
   return end;
-}
-
-static int find_matching_paren(const char *s, size_t open_pos, size_t limit,
-                               size_t *close_pos) {
-  int depth = 0, in_string = 0, in_comment = 0, esc_next = 0;
-  char quote = 0;
-  for (size_t i = open_pos; i < limit; i++) {
-    char c = s[i];
-    if (esc_next) {
-      esc_next = 0;
-      continue;
-    }
-    if (in_string && c == '\\') {
-      esc_next = 1;
-      continue;
-    }
-    if (!in_string && c == ';') {
-      in_comment = 1;
-      continue;
-    }
-    if (in_comment) {
-      if (c == '\n')
-        in_comment = 0;
-      continue;
-    }
-    if (!in_string && (c == '"' || c == '\'')) {
-      in_string = 1;
-      quote = c;
-      continue;
-    }
-    if (in_string) {
-      if (c == quote)
-        in_string = 0;
-      continue;
-    }
-    if (c == '(')
-      depth++;
-    else if (c == ')') {
-      depth--;
-      if (depth == 0) {
-        *close_pos = i;
-        return 1;
-      }
-    }
-  }
-  return 0;
 }
 
 static int parse_fn_decl_at(const char *body, size_t body_n, size_t pos,
@@ -963,33 +939,9 @@ static int ny_brace_depth_at(const char *s, size_t pos) {
   }
   for (size_t i = cursor.scanned; i < pos; i++) {
     char c = s[i];
-    if (cursor.esc_next) {
-      cursor.esc_next = 0;
+    if (ny_web_scan_step(c, &cursor.in_string, &cursor.quote,
+                         &cursor.in_comment, &cursor.esc_next))
       continue;
-    }
-    if (cursor.in_string && c == '\\') {
-      cursor.esc_next = 1;
-      continue;
-    }
-    if (!cursor.in_string && c == ';') {
-      cursor.in_comment = 1;
-      continue;
-    }
-    if (cursor.in_comment) {
-      if (c == '\n')
-        cursor.in_comment = 0;
-      continue;
-    }
-    if (!cursor.in_string && (c == '"' || c == '\'')) {
-      cursor.in_string = 1;
-      cursor.quote = c;
-      continue;
-    }
-    if (cursor.in_string) {
-      if (c == cursor.quote)
-        cursor.in_string = 0;
-      continue;
-    }
     if (c == '{')
       cursor.depth++;
     else if (c == '}' && cursor.depth > 0)
@@ -4916,13 +4868,31 @@ static void render_md_paragraph(sb_t *out, const char *p, size_t len,
   sb_add(out, "</p>\n");
 }
 
+static void render_md_blockquote(sb_t *out, const char *p, size_t len,
+                                 const char *route, int *in_quote) {
+  size_t off = 1;
+  while (off < len && isspace((unsigned char)p[off]))
+    off++;
+  if (!*in_quote) {
+    sb_add(out, "<blockquote class=\"callout\">\n");
+    *in_quote = 1;
+  }
+  sb_add(out, "<p>");
+  markdown_render_inline(out, p + off, len - off, route);
+  sb_add(out, "</p>\n");
+}
+
 static void render_md_line(sb_t *out, const char *p, size_t len,
-                           const char *route, int *in_ul, int *in_table) {
+                           const char *route, int *in_ul, int *in_table,
+                           int *in_quote) {
   if (len == 0) {
     render_md_close_structures(out, in_ul, in_table);
   } else if (p[0] == '#') {
     render_md_close_structures(out, in_ul, in_table);
     render_md_heading(out, p, len, route);
+  } else if (p[0] == '>') {
+    render_md_close_structures(out, in_ul, in_table);
+    render_md_blockquote(out, p, len, route, in_quote);
   } else if (len >= 2 && p[0] == '-' && isspace((unsigned char)p[1])) {
     if (*in_table) {
       sb_add(out, "</tbody></table>\n");
@@ -4971,7 +4941,7 @@ static char *render_markdown_static(const char *md, const char *route) {
    */
   if (source_len < SIZE_MAX - 1)
     (void)ny_strbuf_reserve(&out, source_len + 1);
-  int in_code = 0, in_ul = 0, in_table = 0, in_comment = 0;
+  int in_code = 0, in_ul = 0, in_table = 0, in_comment = 0, in_quote = 0;
   int ordered = 0, list_item = 0;
   sb_t paragraph = {0};
   for (const char *line = md ? md : ""; *line;) {
@@ -4993,6 +4963,11 @@ static char *render_markdown_static(const char *md, const char *route) {
     } else {
       while (len && isspace((unsigned char)p[len - 1]))
         len--;
+      int quote = len > 0 && p[0] == '>';
+      if (in_quote && !quote) {
+        sb_add(&out, "</blockquote>\n");
+        in_quote = 0;
+      }
       if (in_comment || (len >= 4 && !strncmp(p, "<!--", 4))) {
         in_comment = 1;
         for (size_t j = 0; j + 2 < len; j++) {
@@ -5024,8 +4999,8 @@ static char *render_markdown_static(const char *md, const char *route) {
         }
       }
       int raw = markdown_raw_block(p, len);
-      int boundary =
-          !len || p[0] == '#' || p[0] == '|' || fence || marker || raw;
+      int boundary = !len || p[0] == '#' || p[0] == '>' || p[0] == '|' ||
+                     fence || marker || raw;
       if (boundary && paragraph.len) {
         sb_add(&out, list_item ? "<li>" : "<p>");
         markdown_render_inline(&out, paragraph.data, paragraph.len, route);
@@ -5064,7 +5039,7 @@ static char *render_markdown_static(const char *md, const char *route) {
           render_md_code_block(&out, p, len, in_code);
           in_code = !in_code;
         } else {
-          render_md_line(&out, p, len, route, &in_ul, &in_table);
+          render_md_line(&out, p, len, route, &in_ul, &in_table, &in_quote);
         }
       } else {
         if (in_table) {
@@ -5087,6 +5062,8 @@ static char *render_markdown_static(const char *md, const char *route) {
     markdown_render_inline(&out, paragraph.data, paragraph.len, route);
     sb_add(&out, list_item ? "</li>\n" : "</p>\n");
   }
+  if (in_quote)
+    sb_add(&out, "</blockquote>\n");
   free(paragraph.data);
   if (in_ul) {
     sb_add(&out, ordered ? "</ol>\n" : "</ul>\n");
@@ -5149,7 +5126,8 @@ static int write_static_doc_page(const char *out_dir, const char *site,
   sb_add(&html, "\">");
   sb_add(
       &html,
-      "<style>:root{color-scheme:dark}body{margin:0;background:#000;color:#"
+      "<style>:root{color-scheme:light "
+      "dark}body{margin:0;background:#000;color:#"
       "f5f5f6;font:15px/1.62 "
       "system-ui,-apple-system,Segoe "
       "UI,sans-serif}body:before{content:\"\";position:fixed;inset:0;pointer-"
@@ -5183,7 +5161,21 @@ static int write_static_doc_page(const char *out_dir, const char *site,
       "flex;flex-wrap:wrap;gap:6px}.site-links a{display:inline-flex;align-"
       "items:center;min-height:24px;padding:3px 7px;border:1px solid #292832;"
       "background:#020203;font:700 11px ui-monospace,monospace}.site-links "
-      "a.primary{color:#d6d3e6;border-color:rgba(182,160,255,.32)}</style></"
+      "a.primary{color:#d6d3e6;border-color:rgba(182,160,255,.32)}"
+      "blockquote.callout{margin:12px 0;padding:8px 12px;border-left:3px solid "
+      "#b6a0ff;background:#15151d;color:#f5f5f6}"
+      "@media(prefers-color-scheme:light){body{background:#fff;color:#1b1b1f}"
+      "body:before{display:none}a{color:#005ea8}h1,h2,h3,h4{color:#17171b}"
+      "p,li,td{color:#303038}code{background:#f4f4f6;border-color:#d5d5dc;"
+      "color:#202027}pre,table{background:#fafafd;border-color:#d5d5dc}"
+      "td{border-color:#d5d5dc}tr:first-child td{color:#17171b}"
+      ".open{background:#fafafd;color:#272333;border-color:#c7c3d4}"
+      ".site-end{border-color:#d5d5dc}.site-end p{color:#555560}"
+      ".site-links a{background:#fafafd;border-color:#c7c7ce}"
+      ".site-links a.primary{color:#30234f;border-color:#9f91c7}"
+      "blockquote.callout{background:#f3f0ff;color:#202027;border-color:#"
+      "6040a8}}"
+      "</style></"
       "head>"
       "<body><main><a "
       "class=\"open\" "
@@ -6100,23 +6092,25 @@ typedef struct {
 } web_paths_t;
 
 static void web_print_usage(void) {
-  nyt_heading("Nytrix Documentation");
-  printf("%susage:%s %sny doc%s %s[-o OUTPUT] [--site URL] [-s] [-p PORT] "
+  nyt_heading("Nytrix Web and Documentation");
+  nyt_subheading("Usage");
+  printf("%susage:%s %sny web|doc%s %s[-o OUTPUT] [--site URL] [-s] [-p PORT] "
          "[--color MODE] [input]%s\n",
          nyt_clr(NYT_BOLD), nyt_clr(NYT_RESET), nyt_clr(NYT_CYAN),
          nyt_clr(NYT_RESET), nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
-  printf("       %sny doc search%s %s[--input PATH] [--docs|--symbols] [-n "
+  printf("       %sny web|doc search%s %s[--input PATH] [--docs|--symbols] [-n "
          "N] QUERY%s\n",
          nyt_clr(NYT_CYAN), nyt_clr(NYT_RESET), nyt_clr(NYT_GREEN),
          nyt_clr(NYT_RESET));
-  printf("       %sny doc get%s %s[--input PATH] [--docs|--symbols] "
+  printf("       %sny web|doc get%s %s[--input PATH] [--docs|--symbols] "
          "QUERY%s\n\n",
          nyt_clr(NYT_CYAN), nyt_clr(NYT_RESET), nyt_clr(NYT_GREEN),
          nyt_clr(NYT_RESET));
-  printf("Generates the docs portal; %ssearch%s fuzzy-searches docs and "
-         "%sget%s prints the best match.\n",
-         nyt_clr(NYT_CYAN), nyt_clr(NYT_RESET), nyt_clr(NYT_CYAN),
-         nyt_clr(NYT_RESET));
+  nyt_subheading("Commands");
+  nyt_kv("ny web / ny doc", "Build the documentation portal");
+  nyt_kv("ny web|doc search", "Search documentation or exported symbols");
+  nyt_kv("ny web|doc get", "Print the best documentation or symbol match");
+  nyt_kv("Search options", "--docs or --symbols selects the search catalog");
 }
 
 static int web_parse_args(int argc, char **argv, web_opts_t *opts, char *err,

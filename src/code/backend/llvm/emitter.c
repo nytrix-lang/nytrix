@@ -209,11 +209,15 @@ static void ny_llvm_set_nyir_debug_loc(ny_llvm_context_t *cg,
   const char *filename = in->debug.file;
   unsigned line = in->debug.line;
   unsigned column = in->debug.column ? in->debug.column : 1;
-  LLVMMetadataRef scope =
-      cg->debug_scope ? cg->debug_scope(cg->userdata, filename, line, column)
-                      : NULL;
-  if (!scope)
-    scope = function_scope;
+  LLVMMetadataRef scope = cg->debug_scope
+                              ? cg->debug_scope(cg->userdata, function_scope,
+                                                filename, line, column)
+                              : function_scope;
+  if (!scope) {
+    cg->di_loc = NULL;
+    LLVMSetCurrentDebugLocation2(cg->builder, NULL);
+    return;
+  }
   LLVMMetadataRef loc =
       LLVMDIBuilderCreateDebugLocation(cg->context, line, column, scope, NULL);
   cg->di_loc = loc;
@@ -245,7 +249,8 @@ static LLVMTypeRef ny_llvm_vector_type(ny_llvm_context_t *cg, nyr_op_t op) {
   if (op == NYIR_VEC8_LOAD_I64 || op == NYIR_VEC8_STORE_I64 ||
       op == NYIR_VEC8_ADD_I64 || op == NYIR_VEC8_SUB_I64 ||
       op == NYIR_VEC8_AND_I64 || op == NYIR_VEC8_OR_I64 ||
-      op == NYIR_VEC8_XOR_I64 || op == NYIR_VEC8_REDUCE_ADD_I64)
+      op == NYIR_VEC8_XOR_I64 || op == NYIR_VEC8_REDUCE_ADD_I64 ||
+      op == NYIR_VEC8_SET1_I64 || op == NYIR_VEC8_SAR_I64)
     return LLVMVectorType(cg->type_i64, 4);
   return NULL;
 }
@@ -319,6 +324,7 @@ static bool ny_llvm_infer_vector_value_types(ny_llvm_context_t *cg,
     case NYIR_VEC4_SET1_F64:
     case NYIR_VEC8_SET1_F32:
     case NYIR_VEC4_SET1_I64:
+    case NYIR_VEC8_SET1_I64:
       valid = ny_llvm_vector_mark(types, parents, count, in->dst, type);
       break;
     case NYIR_VEC4_STORE_F64:
@@ -333,6 +339,7 @@ static bool ny_llvm_infer_vector_value_types(ny_llvm_context_t *cg,
     case NYIR_VEC8_REDUCE_ADD_I64:
       valid = ny_llvm_vector_mark(types, parents, count, in->b, type);
       break;
+    case NYIR_VEC8_SAR_I64:
     case NYIR_VEC4_SHUFFLE_F64:
     case NYIR_VEC8_SHUFFLE_F32:
       valid = ny_llvm_vector_mark(types, parents, count, in->dst, type) &&
@@ -1441,17 +1448,43 @@ bool ny_llvm_emit_nyir_func(ny_llvm_context_t *cg, nyr_func_t *f,
                                                LLVMPointerType(i8_type, 0), "");
           LLVMValueRef loaded_i8 =
               LLVMBuildLoad2(cg->builder, i8_type, ptr, "");
+          if (in->flags & NYIR_INST_F_MEM_VOLATILE)
+            LLVMSetVolatile(loaded_i8, true);
           vals[in->dst] =
               LLVMBuildZExt(cg->builder, loaded_i8, cg->type_i64, "");
+        } else if (in->flags & NYIR_INST_F_MEM_U16) {
+          LLVMTypeRef i16_type = LLVMInt16TypeInContext(cg->context);
+          LLVMValueRef ptr = LLVMBuildIntToPtr(
+              cg->builder, base, LLVMPointerType(i16_type, 0), "");
+          LLVMValueRef loaded_i16 =
+              LLVMBuildLoad2(cg->builder, i16_type, ptr, "");
+          if (in->flags & NYIR_INST_F_MEM_VOLATILE)
+            LLVMSetVolatile(loaded_i16, true);
+          vals[in->dst] =
+              LLVMBuildZExt(cg->builder, loaded_i16, cg->type_i64, "");
+        } else if (in->flags & NYIR_INST_F_MEM_I32) {
+          LLVMTypeRef i32_type = LLVMInt32TypeInContext(cg->context);
+          LLVMValueRef ptr = LLVMBuildIntToPtr(
+              cg->builder, base, LLVMPointerType(i32_type, 0), "");
+          LLVMValueRef loaded_i32 =
+              LLVMBuildLoad2(cg->builder, i32_type, ptr, "");
+          if (in->flags & NYIR_INST_F_MEM_VOLATILE)
+            LLVMSetVolatile(loaded_i32, true);
+          vals[in->dst] =
+              LLVMBuildSExt(cg->builder, loaded_i32, cg->type_i64, "");
         } else if (in->scalar_class == NYIR_SCALAR_F64) {
           LLVMTypeRef f64_type = LLVMDoubleTypeInContext(cg->context);
           LLVMValueRef ptr = LLVMBuildIntToPtr(
               cg->builder, base, LLVMPointerType(f64_type, 0), "");
           vals[in->dst] = LLVMBuildLoad2(cg->builder, f64_type, ptr, "");
+          if (in->flags & NYIR_INST_F_MEM_VOLATILE)
+            LLVMSetVolatile(vals[in->dst], true);
         } else {
           LLVMValueRef ptr = LLVMBuildIntToPtr(
               cg->builder, base, LLVMPointerType(cg->type_i64, 0), "");
           vals[in->dst] = LLVMBuildLoad2(cg->builder, cg->type_i64, ptr, "");
+          if (in->flags & NYIR_INST_F_MEM_VOLATILE)
+            LLVMSetVolatile(vals[in->dst], true);
         }
       }
       break;
@@ -1473,6 +1506,22 @@ bool ny_llvm_emit_nyir_func(ny_llvm_context_t *cg, nyr_func_t *f,
         LLVMValueRef val_i8 =
             LLVMBuildTrunc(cg->builder, ny_as_i64(cg, vb), i8_type, "");
         LLVMBuildStore(cg->builder, val_i8, ptr);
+      } else if (in->flags & NYIR_INST_F_MEM_U16) {
+        LLVMTypeRef i16_type = LLVMInt16TypeInContext(cg->context);
+        LLVMValueRef ptr = LLVMBuildIntToPtr(cg->builder, base,
+                                             LLVMPointerType(i16_type, 0), "");
+        LLVMValueRef val_i16 =
+            LLVMBuildTrunc(cg->builder, ny_as_i64(cg, vb), i16_type, "");
+        LLVMValueRef store = LLVMBuildStore(cg->builder, val_i16, ptr);
+        if (in->flags & NYIR_INST_F_MEM_VOLATILE)
+          LLVMSetVolatile(store, true);
+      } else if (in->flags & NYIR_INST_F_MEM_I32) {
+        LLVMTypeRef i32_type = LLVMInt32TypeInContext(cg->context);
+        LLVMValueRef ptr = LLVMBuildIntToPtr(cg->builder, base,
+                                             LLVMPointerType(i32_type, 0), "");
+        LLVMValueRef val_i32 =
+            LLVMBuildTrunc(cg->builder, ny_as_i64(cg, vb), i32_type, "");
+        LLVMBuildStore(cg->builder, val_i32, ptr);
       } else if (in->scalar_class == NYIR_SCALAR_F64) {
         LLVMTypeRef f64_type = LLVMDoubleTypeInContext(cg->context);
         LLVMValueRef ptr = LLVMBuildIntToPtr(cg->builder, base,
@@ -1543,6 +1592,8 @@ bool ny_llvm_emit_nyir_func(ny_llvm_context_t *cg, nyr_func_t *f,
     case NYIR_VEC8_AND_I64:
     case NYIR_VEC8_OR_I64:
     case NYIR_VEC8_XOR_I64:
+    case NYIR_VEC8_SAR_I64:
+    case NYIR_VEC8_SET1_I64:
     case NYIR_VEC8_REDUCE_ADD_I64: {
       LLVMTypeRef vector_type = ny_llvm_vector_type(cg, in->op);
       LLVMTypeRef element_type = LLVMGetElementType(vector_type);
@@ -1583,8 +1634,15 @@ bool ny_llvm_emit_nyir_func(ny_llvm_context_t *cg, nyr_func_t *f,
         LLVMSetAlignment(store, 1);
         break;
       }
+      if (in->op == NYIR_VEC8_SAR_I64) {
+        LLVMValueRef lhs = ny_llvm_vector_slot(cg, vals, val_count, in->a, vector_type);
+        LLVMValueRef count = ny_llvm_vector_splat(
+            cg, LLVMConstInt(cg->type_i64, (uint64_t)in->imm, false), vector_type);
+        vals[in->dst] = LLVMBuildAShr(cg->builder, lhs, count, "");
+        break;
+      }
       if (in->op == NYIR_VEC4_SET1_F64 || in->op == NYIR_VEC8_SET1_F32 ||
-          in->op == NYIR_VEC4_SET1_I64) {
+          in->op == NYIR_VEC4_SET1_I64 || in->op == NYIR_VEC8_SET1_I64) {
         LLVMValueRef scalar =
             (in->a >= 0 && (size_t)in->a < val_count) ? vals[in->a] : NULL;
         if (is_float)
@@ -1788,7 +1846,7 @@ bool ny_llvm_emit_nyir_func(ny_llvm_context_t *cg, nyr_func_t *f,
       int call_argc = 0;
       char c_err[128] = {0};
       (void)nyr_call_args(in, (int)val_count, call_args, NYIR_CALL_MAX_ARGS,
-                           &call_argc, c_err, sizeof(c_err));
+                          &call_argc, c_err, sizeof(c_err));
       const char *callee_name = in->symbol ? in->symbol : "unknown_fn";
       /*
        * Lowering selects runtime helpers while declaration identity is
@@ -1861,8 +1919,7 @@ bool ny_llvm_emit_nyir_func(ny_llvm_context_t *cg, nyr_func_t *f,
       bool runtime_symbol = runtime_abi != NULL;
       if (runtime_symbol)
         for (int k = 0; k < call_argc; ++k) {
-          nyr_scalar_class_t arg_class =
-              nyr_call_arg_class_get(in, (size_t)k);
+          nyr_scalar_class_t arg_class = nyr_call_arg_class_get(in, (size_t)k);
           bool argument_flagged_f64 = arg_class == NYIR_SCALAR_F64;
           bool argument_flagged_f32 = arg_class == NYIR_SCALAR_F32;
           bool argument_declared_f64 =
@@ -1942,8 +1999,7 @@ bool ny_llvm_emit_nyir_func(ny_llvm_context_t *cg, nyr_func_t *f,
             : in->scalar_class == NYIR_SCALAR_F32 ? cg->type_f32
                                                   : cg->type_i64;
         for (int k = 0; k < call_argc; ++k) {
-          nyr_scalar_class_t arg_class =
-              nyr_call_arg_class_get(in, (size_t)k);
+          nyr_scalar_class_t arg_class = nyr_call_arg_class_get(in, (size_t)k);
           if (arg_class == NYIR_SCALAR_F64)
             arg_tys[arg_starts[k]] = cg->type_f64;
           else if (arg_class == NYIR_SCALAR_F32)

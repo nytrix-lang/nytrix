@@ -4,6 +4,30 @@
 Patterns describe value dispatch in `case` and `match` forms. A branch can be
 selected by a literal value, literal set, range, wildcard, or value shape.
 
+## Contents
+
+- [Case and match patterns](#case-patterns)
+- [Arm order and exhaustiveness](#arm-order)
+- [Diagnostics](#diagnostics)
+
+> **Note:** The names below are grammar placeholders, not a standalone program.
+
+```ny
+case value { 1 -> "one" }
+match value { Option.Some(item) -> item }
+```
+
+## Rules
+
+1. Use `case` for literal, literal-set, and range dispatch; use `match` for
+   value-shape and ADT-variant dispatch.
+2. Arms run in source order. Put specific arms before broader ones and keep a
+   wildcard fallback last.
+3. A failed guard continues to the next arm. Payload bindings are scoped to
+   the arm that declares them.
+4. ADT `match` must cover every variant. `case` without a wildcard can fall
+   through when no arm matches.
+
 ## Case patterns
 
 `case` performs value dispatch:
@@ -80,6 +104,9 @@ assert(positive_radius(Shape.Circle(0)) == 0, "guard falls through")
 When arms use only literals or ranges, `case` is the direct form.
 
 ## Wildcard
+
+> **Note:** This is a single match-arm form; place it inside a `match` or
+> `case` expression.
 
 ```ny
 _ -> fallback

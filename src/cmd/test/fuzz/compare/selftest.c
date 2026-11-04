@@ -1200,7 +1200,7 @@ selftest_validate_fuzz_reporting(const char *json, string_list_t *errors,
        !status_crt_next_exports || !strstr(status_crt_next_exports, "\"__") ||
        !status_crt_next_definition_file ||
        !strstr(status_crt_next_definition_file,
-               "src/code/lang/runtime/defs.h") ||
+               "src/code/backend/runtime/defs.h") ||
        !status_crt_next_definition_locations ||
        !strstr(status_crt_next_definition_locations, "\"line\"") ||
        !strstr(status_crt_next_definition_locations, "\"signature\"") ||
@@ -7243,7 +7243,7 @@ static void selftest_validate_compiler_std_audit(const char *json,
       (void)string_list_push_copy(
           errors, "compiler std audit trace next exports missing");
     if (!crt_next_definition_file ||
-        !strstr(crt_next_definition_file, "src/code/lang/runtime/defs.h") ||
+        !strstr(crt_next_definition_file, "src/code/backend/runtime/defs.h") ||
         !crt_next_definition_locations ||
         !strstr(crt_next_definition_locations, "\"line\"") ||
         !strstr(crt_next_definition_locations, "\"arity\"") ||
@@ -7253,7 +7253,7 @@ static void selftest_validate_compiler_std_audit(const char *json,
         !strstr(crt_next_inspect_command, "sed -n") ||
         !strstr(crt_next_inspect_command, "rg -n") ||
         !strstr(crt_next_inspect_command,
-                "../nytrix/src/code/lang/runtime/defs.h"))
+                "../nytrix/src/code/backend/runtime/defs.h"))
       (void)string_list_push_copy(
           errors, "compiler std audit CRT next definition details missing");
   } else {
@@ -9505,7 +9505,7 @@ static void selftest_validate_fuzz_all_progress(const char *json,
        !strstr(progress_crt_next_exports, "\"__") ||
        !progress_crt_next_definition_file ||
        !strstr(progress_crt_next_definition_file,
-               "src/code/lang/runtime/defs.h") ||
+               "src/code/backend/runtime/defs.h") ||
        !progress_crt_next_definition_locations ||
        !strstr(progress_crt_next_definition_locations, "\"line\"") ||
        !strstr(progress_crt_next_definition_locations, "\"signature\"") ||
@@ -11773,8 +11773,8 @@ static bool selftest_prepare_spec(const char *name, const char *work_dir) {
         nytrix_scratch_pathf(NULL, "afl_wrappers/ny-core-normalize.sh");
     char *missing_wrapper = nytrix_scratch_pathf(
         NULL, "afl_wrappers/missing-wrapper-selftest-normalize.sh");
-    bool wrapper_ok =
-        wrapper_dir && core_wrapper && missing_wrapper && ny_mkdir_p(wrapper_dir);
+    bool wrapper_ok = wrapper_dir && core_wrapper && missing_wrapper &&
+                      ny_mkdir_p(wrapper_dir);
     if (wrapper_ok && !exists_path(core_wrapper))
       wrapper_ok = write_file_text(core_wrapper, "#!/usr/bin/env sh\nexit 0\n");
     if (wrapper_ok) {
@@ -11834,8 +11834,9 @@ static bool selftest_prepare_spec(const char *name, const char *work_dir) {
                               "\"failure_count\":0,\"engine\":\"nytrix_core\"},"
                               "\"meta\":{\"engine\":\"nytrix_core\"}}\n");
 
-    bool ok = wrapper_ok && ny_mkdir_p(fixture_dir) && ny_mkdir_p(reports_dir) &&
-              ny_mkdir_p(core_hangs) && ny_mkdir_p(missing_hangs) &&
+    bool ok = wrapper_ok && ny_mkdir_p(fixture_dir) &&
+              ny_mkdir_p(reports_dir) && ny_mkdir_p(core_hangs) &&
+              ny_mkdir_p(missing_hangs) &&
               write_file_text(core_saved, "use core\n") &&
               write_file_text(missing_saved, "use core\n") &&
               write_file_text(child_path, child.data ? child.data : "") &&
@@ -11979,8 +11980,9 @@ static bool selftest_prepare_spec(const char *name, const char *work_dir) {
                               "\"failure_count\":0,\"engine\":\"nytrix_core\"},"
                               "\"meta\":{\"engine\":\"nytrix_core\"}}\n");
 
-    bool ok = wrapper_ok && ny_mkdir_p(fixture_dir) && ny_mkdir_p(reports_dir) &&
-              ny_mkdir_p(core_hangs) && ny_mkdir_p(unsafe_hangs) &&
+    bool ok = wrapper_ok && ny_mkdir_p(fixture_dir) &&
+              ny_mkdir_p(reports_dir) && ny_mkdir_p(core_hangs) &&
+              ny_mkdir_p(unsafe_hangs) &&
               write_file_text(core_saved, "use core\n") &&
               write_file_text(unsafe_saved, "use core\n") &&
               write_file_text(child_path, child.data ? child.data : "") &&
@@ -12184,7 +12186,8 @@ static bool selftest_prepare_spec(const char *name, const char *work_dir) {
     if (wrapper_ok)
       (void)chmod(wrapper_path, 0755);
     bool ok = ny_mkdir_p(report_dir) && wrapper_ok && ny_mkdir_p(reports_dir) &&
-              ny_mkdir_p(logs_dir) && ny_mkdir_p(afl_out) && ny_mkdir_p(afl_hangs) &&
+              ny_mkdir_p(logs_dir) && ny_mkdir_p(afl_out) &&
+              ny_mkdir_p(afl_hangs) &&
               write_file_text(stdout_log, "fixture stdout\n") &&
               write_file_text(stderr_log, "fixture stderr\n") &&
               write_file_text(command_log, "fixture command\n") &&
@@ -12293,7 +12296,8 @@ static bool selftest_prepare_spec(const char *name, const char *work_dir) {
                            "\"fuzz-all-coverage\","
                            "\"blocker_gaps\":0,\"failure_count\":0},"
                            "\"meta\":{\"engine\":\"nytrix_core\"}}\n";
-    bool ok = ny_mkdir_p(report_dir) && write_file_text(history_path, history) &&
+    bool ok = ny_mkdir_p(report_dir) &&
+              write_file_text(history_path, history) &&
               write_file_text(worklist_path, worklist) &&
               write_file_text(coverage_path, coverage);
     free(report_dir);
@@ -12379,7 +12383,8 @@ static bool selftest_prepare_spec(const char *name, const char *work_dir) {
         "\"coverage_next_resume_command\":\"rm -f "
         "build/fuzz/all/missing-evidence-stop\","
         "\"failure_count\":0},\"meta\":{\"engine\":\"nytrix_core\"}}\n";
-    bool ok = ny_mkdir_p(report_dir) && write_file_text(history_path, history) &&
+    bool ok = ny_mkdir_p(report_dir) &&
+              write_file_text(history_path, history) &&
               write_file_text(worklist_path, worklist) &&
               write_file_text(coverage_path, coverage);
     free(report_dir);
@@ -12577,7 +12582,8 @@ static bool selftest_prepare_spec(const char *name, const char *work_dir) {
         "\"lane_filter_active\":false,"
         "\"isolation_sentinel\":\"campaign\"},"
         "\"meta\":{\"engine\":\"nytrix_core\"}}\n";
-    bool ok = ny_mkdir_p(campaign_dir) && write_file_text(sentinel_path, sentinel);
+    bool ok =
+        ny_mkdir_p(campaign_dir) && write_file_text(sentinel_path, sentinel);
     free(campaign_dir);
     free(sentinel_path);
     return ok;

@@ -3,6 +3,7 @@ shape test_defer {
   generator "embedded"
   features ["ny", "test"]
   template ny-test-case
+  flags_matrix "--native --run; --native-only; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --nyr-run-profile"
   expect compile_and_run
   source ny <<'NY'
 use core
@@ -52,6 +53,63 @@ fn test_scoping() {
 
 test_scoping()
 assert(log == "IS|ID|OS|", "Defer scoping behavior")
+
+fn deferred_order() str {
+   mut order = ""
+   if true {
+      defer { order = order + "a" }
+      defer { order = order + "b" }
+   }
+   order
+}
+
+assert(deferred_order() == "ba", "deferred writes reach the enclosing local")
+
+fn deferred_int_update() int {
+   mut value = 1
+   {
+      defer { value += 2 }
+   }
+   value
+}
+
+assert(deferred_int_update() == 3, "deferred raw-int update reaches its local")
+
+fn deferred_f64_update() f64 {
+   mut value = 1.5
+   {
+      defer { value = value + 2.25 }
+   }
+   value
+}
+
+assert(deferred_f64_update() == 3.75, "deferred f64 update reaches its local")
+
+fn deferred_f32_update() f32 {
+   mut value = 1.5
+   {
+      defer { value = value + 2.25 }
+   }
+   value
+}
+
+assert(deferred_f32_update() == 3.75, "deferred f32 update reaches its local")
+
+fn deferred_panic_update() str {
+   mut order = ""
+   try {
+      defer { order = order + "d" }
+      panic("defer unwind")
+   } catch err {
+      _ = err
+      order = order + "c"
+   }
+   order
+}
+
+def panic_order = deferred_panic_update()
+assert(panic_order == "dc", "deferred mutation runs before catch: " + panic_order)
+
 assert(__pop_run_defer() == nil, "__pop_run_defer accepts empty stack")
 assert(__push_defer(nil, nil) == nil, "__push_defer accepts null callback")
 assert(__run_defers_to(0) == nil, "__run_defers_to drains null callback")

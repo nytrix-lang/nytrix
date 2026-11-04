@@ -8,13 +8,14 @@ ci windows-skip
   source ny <<'NY'
 use core
 use core.os.time
-;; Tail-recursive sum 1..N: tests tail-call elimination / deep call handling.
-fn tsum(int n, int acc) int {
+;; Tail-recursive recurrence: tests tail-call elimination without letting C
+;; fold a linear sum to a closed form.
+fn tsum(int n, int acc, int salt) int {
    if n == 0 { return acc }
-   tsum(n - 1, acc + n)
+   tsum(n - 1, (acc * 33 + n + salt) % 1000003, salt)
 }
 def int t0 = ticks()
-def r = tsum(20000, 0)
+def r = tsum(20000, 0, 17)
 def int t1 = ticks()
 print("checksum=", r)
 print("elapsed_ns=", t1 - t0)
@@ -30,14 +31,16 @@ static int64_t now_ns(void) {
     return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
 }
 
-static long tsum(long n, long acc) {
+static long tsum(long n, long acc, long salt) {
     if (n == 0) return acc;
-    return tsum(n - 1, acc + n);
+    return tsum(n - 1, (acc * 33 + n + salt) % 1000003, salt);
 }
 
-int main(void) {
+int main(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
     int64_t start = now_ns();
-    long r = tsum(20000, 0);
+    long r = tsum(20000, 0, 17);
     int64_t end = now_ns();
     printf("checksum=%ld\n", r);
     if (end <= start) end = start + 1;

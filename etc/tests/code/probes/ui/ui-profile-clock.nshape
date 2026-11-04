@@ -1,0 +1,29 @@
+shape ui_profile_clock {
+  family "runtime/ui"
+  generator "regression"
+  features [ui profiling clock monotonic timestamp raw]
+  template ny-test-case
+  timeout 300
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit -O0; --native-backend=llvm --jit --jit-engine=orc -O0; --nyr-run"
+  expect compile_and_run
+  expect_message "UI-PROFILE-CLOCK-OK"
+  source ny <<'NY'
+use core
+use core.os
+use core.os.ui.render.dump as profile
+fn consume_timestamp(any label, any started) f64 {
+   label
+   profile.elapsed_ms(started)
+}
+def int started = ticks()
+msleep(10)
+def elapsed = consume_timestamp("consumer", started)
+assert(elapsed >= 1.0 && elapsed < 10000.0, "milliseconds preserve the supplied timestamp")
+def int elapsed_ns = profile.elapsed_ns(started)
+assert(elapsed_ns >= 1000000 && elapsed_ns < 10000000000, "nanoseconds use the same clock encoding")
+def int sampled = profile.now()
+def int after = ticks()
+assert(sampled >= started && sampled <= after, "profiling instants share the public monotonic clock")
+print("UI-PROFILE-CLOCK-OK")
+NY
+}

@@ -1,0 +1,15 @@
+shape dependent_negative_type_level_fn {
+  family "typing/dependent"
+  generator "error"
+  features [error typing dependent negative]
+  template ny-compile-fail
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_fail
+  expect_message "type-level definitions ('type Name ... = ...') are not supported"
+  source ny <<'NY'
+use core
+;; Unsupported dependent form: must be rejected with a clear diagnostic.
+type Bad<T> = Bad<T>
+print(1)
+NY
+}

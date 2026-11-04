@@ -3,7 +3,7 @@ shape optcheck_loop_last_overwrite {
   generator "native"
   features [native x86_64 oracle optcheck loop-last-overwrite]
   template ny-test-case
-  flags "-O3 --native-backend x86_64 --native-oracle-per-pass --native-result-oracle=298 --nyir-verify --nyir-pass-stats"
+  flags "-O3 --native-backend x86_64 --native-oracle-per-pass --native-result-oracle=298 --nyr-verify --nyr-dump=passes"
   expect compile_and_run
   source ny <<'NY'
 fn final_value(i64 flag) i64 {

@@ -7,18 +7,19 @@
 
 static int emit_known_call(nyr_func_t *f, const char *symbol, int arg,
                            unsigned effects) {
-  int dst = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_CALL,
-                                       .dst = -1,
-                                       .a = arg,
-                                       .b = -1,
-                                       .c = -1,
-                                       .d = -1,
-                                       .e = -1,
-                                       .f = -1,
-                                       .imm = 1,
-                                       .symbol = symbol,
-                                       .scalar_class = NYIR_SCALAR_OBJECT,
-                                       .semantic_ownership = NY_SEM_OWN_OWNED});
+  int dst =
+      nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_CALL,
+                                  .dst = -1,
+                                  .a = arg,
+                                  .b = -1,
+                                  .c = -1,
+                                  .d = -1,
+                                  .e = -1,
+                                  .f = -1,
+                                  .imm = 1,
+                                  .symbol = symbol,
+                                  .scalar_class = NYIR_SCALAR_OBJECT,
+                                  .semantic_ownership = NY_SEM_OWN_OWNED});
   if (dst >= 0) {
     f->data[f->len - 1].flags |= NYIR_INST_F_EFFECTS_KNOWN;
     f->data[f->len - 1].effects = effects;
@@ -111,9 +112,9 @@ static bool cse_reuses_local_inputs_across_pure_recursive_calls(void) {
       (nyr_inst_t){.op = NYIR_SUB_I64, .dst = -1, .a = second_load, .b = one});
   int second_call = emit_known_call(&f, "recursive_pure", second_arg, pure);
   int sum = nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_ADD_I64,
-                                        .dst = -1,
-                                        .a = first_call,
-                                        .b = second_call});
+                                         .dst = -1,
+                                         .a = first_call,
+                                         .b = second_call});
   nyr_opt_ret(&f, sum);
   if (first_load < 0 || one < 0 || first_arg < 0 || first_call < 0 ||
       second_load < 0 || second_arg < 0 || second_call < 0 || sum < 0 ||
@@ -182,6 +183,14 @@ static bool cse_preserves_runtime_memory_calls(void) {
        NYIR_EFFECT_CALL | NYIR_EFFECT_WRITE_MEMORY | NYIR_EFFECT_MAY_TRAP},
       {"rt_memcmp_raw",
        NYIR_EFFECT_CALL | NYIR_EFFECT_READ_MEMORY | NYIR_EFFECT_MAY_TRAP},
+      {"rt_tbuf_new_raw",
+       NYIR_EFFECT_CALL | NYIR_EFFECT_ALLOCATION | NYIR_EFFECT_MAY_TRAP},
+      {"rt_tbuf_new_typed_raw",
+       NYIR_EFFECT_CALL | NYIR_EFFECT_ALLOCATION | NYIR_EFFECT_MAY_TRAP},
+      {"rt_cstr_to_str", NYIR_EFFECT_CALL | NYIR_EFFECT_READ_MEMORY |
+                             NYIR_EFFECT_ALLOCATION | NYIR_EFFECT_MAY_TRAP},
+      {"user_function",
+       NYIR_EFFECT_CALL | NYIR_EFFECT_FFI | NYIR_EFFECT_UNKNOWN_SIDE_EFFECT},
   };
   for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
     nyr_func_t f;
@@ -190,16 +199,6 @@ static bool cse_preserves_runtime_memory_calls(void) {
     int source_or_value = nyr_opt_const(&f, 0x2000);
     int length = nyr_opt_const(&f, 8);
     int first = nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_CALL,
-                                            .dst = -1,
-                                            .a = destination,
-                                            .b = source_or_value,
-                                            .c = length,
-                                            .d = -1,
-                                            .e = -1,
-                                            .f = -1,
-                                            .imm = 3,
-                                            .symbol = cases[i].symbol});
-    int second = nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_CALL,
                                              .dst = -1,
                                              .a = destination,
                                              .b = source_or_value,
@@ -209,6 +208,16 @@ static bool cse_preserves_runtime_memory_calls(void) {
                                              .f = -1,
                                              .imm = 3,
                                              .symbol = cases[i].symbol});
+    int second = nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_CALL,
+                                              .dst = -1,
+                                              .a = destination,
+                                              .b = source_or_value,
+                                              .c = length,
+                                              .d = -1,
+                                              .e = -1,
+                                              .f = -1,
+                                              .imm = 3,
+                                              .symbol = cases[i].symbol});
     nyr_opt_ret(&f, second);
     bool ok =
         destination >= 0 && source_or_value >= 0 && length >= 0 && first >= 0 &&

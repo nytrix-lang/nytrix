@@ -57,11 +57,11 @@ Run inline source.
 Run inline source, then continue in the REPL.
 @item ny --repl < file.ny
 Compile stdin source once through the REPL batch path.
-@item ny -run file.ny
+@item ny --run=aot file.ny
 Build a temporary native executable and run it.
-@item ny -o app file.ny
+@item ny --output=app file.ny
 Emit a native executable.
-@item ny -i, ny --interactive, ny --plain-repl
+@item ny --repl, ny --plain-repl
 Start an explicit REPL. @code{--plain-repl} disables line-editing UI.
 @end table
 
@@ -130,47 +130,163 @@ trusted publisher. Inspect active configuration with @code{ny pkg registry} and
 @node Options
 @chapter Options
 
+The complete flag reference is generated from the compiler's option registry:
+run @code{ny --help all}. Use @code{ny --help @var{topic}} or
+@code{ny --help short} for focused help and short-option families.
+
+@section Invocation And Inspection
+
+@table @code
+@item --run=auto|aot|jit|native|none
+Select execution. @code{aot} builds and runs a native executable;
+@code{none} compiles without executing.
+@item --mode=safe|fast|bare
+Select runtime safety and compatibility policy.
+@item --timeout=SECONDS
+Limit program runtime. The legacy @code{-timeout SECONDS} spelling remains
+accepted and resolves to the same option.
+@item --target=HOST|wasm|TRIPLE
+Choose a target preset or host triple.
+@item -c CODE
+Execute inline source. Put program arguments after @code{--}.
+@item @@FILE
+Read compiler arguments from a quoted response file. Nested files are
+supported; @code{--} stops option expansion and preserves following program
+arguments.
+@item --help [TOPIC], --help all, --help=json
+Show concise help, a focused option topic, the full option list, or JSON
+registry metadata.
+@item --presets, +debug, +release, +ci, +inspect, +perf
+List or select a built-in option preset. Later command-line options can
+override preset values.
+@item --completions=bash|zsh|fish
+Print shell completion definitions.
+@item -n, --print-flags[=json]
+Print recognized compiler options in canonical form and show the program
+argument boundary. Output includes provenance for defaults (implicit, with no
+explicit default flags) and the user, project, environment, and command-line
+sources. JSON mode emits the flags, provenance, and program arguments as JSON.
+@end table
+
+@section Configuration Files
+
+Configuration precedence is defaults, user config, project config,
+@env{NYTRIX_FLAGS} (or the compatibility fallback @env{NY_FLAGS}), then
+command-line options. Later values override earlier values according to
+each option's semantics.
+
+The user file is
+@file{~/.config/nytrix/ny.toml} (or the corresponding
+@file{%USERPROFILE%/.config/nytrix/ny.toml} on Windows); the project file is
+@file{./ny.toml}. Files use Nytrix's documented TOML subset, not arbitrary
+TOML: @code{[options]} or @code{[flags]} sections contain option names without
+leading dashes and scalar values, while only the user file may contain an
+@code{[alias]} section. A boolean option uses @code{true} or @code{false};
+list options accept quoted comma-separated values or arrays.
+
+@example
+[options]
+run = "none"
+opt-level = 2
+
+[alias]
+dbg = "-Dnv -Ea -vv"
+@end example
+
+Use @code{ny +dbg file.ny} to expand a user alias. Built-in presets
+(@code{+debug}, @code{+release}, @code{+ci}, @code{+inspect}, and @code{+perf})
+take precedence and cannot be shadowed. Environment flag strings are quoted
+argument lists; they cannot contain positional program arguments or @code{--}.
+
+Project config cannot set registry-marked code-execution or path-injection
+options. Those values are ignored with a warning unless
+@code{--trust-config} appears on the command line before the program input.
+User config and command-line values remain trusted.
+
 @section Diagnostics And Safety
 
 @table @code
 @item --color=auto|always|never
 Control diagnostic color.
-@item --diag-compact --collect-errors
-Collect a dense failure set.
+@item --diag-compact
+Print compact diagnostics.
+@item --collect-errors
+Continue compilation to collect diagnostics.
 @item --diag-rich
 Print wider source context.
-@item --safe-mode, --safe, --mode=safe
-Use default type checks plus ownership/borrow checks, RC/RAII cleanup, strict
-effect/alias policy, and raw-memory diagnostics.
-@item --strict, --strict-types
-Enable strict type checks or reject selected dynamic type fallbacks.
+@item --mode=safe
+Enable the strict runtime safety policy.
+@item --strict
+Enable strict check presets.
+@item --check=LIST
+Select checks such as @code{types}, @code{effects}, @code{alias},
+@code{alias-escape}, @code{ownership}, or @code{shadow}; prefix a supported
+check with @code{no-} to disable it.
 @item --borrow-check
 Enable advisory borrow and ownership diagnostics.
-@item --ownership-strict
-Promote supported ownership diagnostics to errors.
-@item --heap=gc, -gc
-Enable the optional tracing collector. Ownership and RAII are recommended.
-@item --max-errors=N
-Parser error cap. Use @code{0} to disable the cap.
+@item --ownership-check=off|advisory|strict
+Choose the ownership diagnostic level.
+@item --heap=manual|raii|rc|gc
+Choose heap ownership policy. Manual ownership is the default; tracing
+collection is optional and selected only with @code{gc}.
+@item --warn=none|useful|all|error
+Set the compiler warning policy.
 @end table
 
 @section Optimization And Output
 
 @table @code
-@item -O0, -O1, -O2, -O3, -O
-Set optimization level. Native output, JIT, and REPL default to @code{-O0} for
-fast development builds. @code{-O} aliases @code{-O2}.
-@item --profile=speed|balanced|compile|size|none|peak
+@item --opt-level=0|1|2|3|s|z
+Set optimization level. Use an explicit value; a bare @code{-O} is an error.
+@item --opt-profile=speed|balanced|compile|size|none|peak
 Select the optimization profile. @code{peak} favors native benchmark speed over
 compile latency.
+@item --opt=LIST
+Select optimizer features such as @code{dce}, @code{loops},
+@code{internalize}, @code{autotune}, @code{lto}, and @code{fast-math}.
 @item --fast
 High optimization convenience mode with stripped output by default.
-@item -emit-only
-Emit output without executing.
-@item -strip, -no-strip
+@item --release
+Select the size-oriented AOT release preset.
+@item --run=none
+Compile without executing.
+@item --output=PATH
+Write the compiled executable or selected output to a path.
+@item --strip, --no-strip
 Choose stripped or unstripped native output.
 @item -L DIR, -l LIB
 Add native linker search paths and libraries.
+@item --emit=KIND[=PATH],...
+Select outputs: @code{asm}, @code{ir}, @code{bc}, @code{obj},
+@code{wasm}, @code{nyr}, @code{nyr-metadata}, @code{report},
+@code{artifact}, @code{refinement-interface}, @code{effect-interface},
+@code{shapes}, or @code{native-bundle}. Omitted paths are derived from the
+input stem where supported. Wasm output requires a Wasm-compatible target.
+Legacy output switches such as @code{--emit-ir} remain accepted and map to
+their corresponding @code{--emit} kind.
+@end table
+
+@section Backend And Artifact Tuning
+
+@table @code
+@item --gpu-opt=LIST
+Set GPU offload mode and workload threshold, asynchronous dispatch,
+floating-point policy, target, and object format.
+@item --jit-opt=LIST
+Set JIT engine, optimization level, code model, fast instruction selection, and
+performance-map output.
+@item --native-tuning=LIST
+Set native tiering budgets and thresholds or prefer VM/native execution.
+@item --dwarf=LIST
+Set DWARF version and local, split-inlining, and profile-info records.
+@item --nyr-limit=LIST
+Set NYR optimizer instruction/growth limits and VM step/recursion limits.
+@item --nyr-check=LIST
+Select NYR verification and native translation-validation checks.
+@item --nyr-pass=disable:NAME,stop-after:NAME
+Disable a named NYR pass or stop immediately after it.
+@item --use=LIST
+Load validated artifacts, refinement/effect interfaces, or a native bundle.
 @end table
 
 @section Debugging
@@ -178,16 +294,21 @@ Add native linker search paths and libraries.
 @table @code
 @item -v, -vv, -vvv, --debug
 Increase logging.
-@item -time, -prof, -dump-stats
-Print timing, profiling, or compiler statistics.
-@item --dump-ast, --dump-ast-typed, --dump-ast-filter=NAME
-Print the parsed or checked source AST tree without execution. Filter named
-declarations by a case-sensitive substring; the typed form validates types and
-traits before showing available semantic facts.
-@item -dump-tokens, -dump-llvm, -dump-funcs, -dump-symbols
-Inspect compiler/runtime artifacts.
-@item --emit-ir=PATH, --emit-asm=PATH
-Write LLVM IR or assembly.
+@item -time, --prof=timing|stats|gprof|compile|peak-rss
+Print phase timing or select compiler/runtime profiling outputs. The legacy
+@code{-prof} enables the default profiling mode, and @code{-prof=LIST} remains
+accepted as an alias for @code{--prof=LIST}.
+@item --dump=LIST
+Select AST, tokens, LLVM, NYR, VM, function, escape, proof, ABI, stack,
+register-allocation, ELF, call-graph, or expansion inspection output.
+@item --trace=LIST
+Select compiler trace categories such as parsing, inference, LLVM lowering,
+register allocation, and execution.
+@item --nyr-check=LIST
+Select NYR verification, bisect, rollback, fingerprint, and native
+translation-validation checks.
+@item --nyr-pass=disable:NAME,stop-after:NAME
+Control an individual NYR optimizer pass.
 @item --dump-on-error
 Write debug source/IR artifacts on failure.
 @item -trace
@@ -210,6 +331,10 @@ Override the generated @file{core.ny} source used by internal build tools.
 Host target tuning.
 @item NYTRIX_HOST_CFLAGS, NYTRIX_HOST_LDFLAGS
 Host compiler and linker flags.
+@item NYTRIX_FLAGS, NY_FLAGS
+Compiler options inserted after project configuration and before explicit
+command-line options. @code{NY_FLAGS} is used only when @code{NYTRIX_FLAGS}
+is unset or empty.
 @item NYTRIX_TRACE_COMPTIME_MACRO
 Trace native compile-time macro expansion.
 @item NYTRIX_EFFECT_ASYNC_LOWERING
@@ -225,8 +350,8 @@ Use @code{ny --help env} for the full environment list.
 ny --version
 ny -c 'print(1 + 1)'
 ny file.ny
-ny -run file.ny
-ny -O3 --profile=peak -o app bench.ny
+ny --run=aot file.ny
+ny --opt-level=3 --opt-profile=peak --output=app bench.ny
 ny fmt --check lib
 ny fmt --cloc --top 20 lib
 ny doc search --symbols json_decode

@@ -1,0 +1,44 @@
+shape test_refinement_intersection {
+  family "runtime/language"
+  generator "embedded"
+  features ["ny", "test", "refinement"]
+  template ny-test-case
+  flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+;; A refinement of a refinement is an intersection: PositiveEven(x) must
+;; hold Positive(x) and Even(x), at compile time and at run time.
+refine Even = int where (v) { v % 2 == 0 }
+refine Positive = int where (v) { v > 0 }
+refine PositiveEven = Even where (v) { Positive(v) }
+refine SmallPositiveEven = PositiveEven where (v) { v < 100 }
+
+;; Compile-time constant arguments.
+assert(PositiveEven(6), "6 is positive and even")
+assert(!PositiveEven(5), "5 is positive but odd")
+assert(!PositiveEven(-4), "-4 is even but not positive")
+assert(!PositiveEven(0), "0 is even but not positive")
+assert(SmallPositiveEven(42), "three-level chain holds for 42")
+assert(!SmallPositiveEven(102), "outermost conjunct rejects 102")
+assert(!SmallPositiveEven(7), "innermost conjunct rejects 7")
+
+;; Run-time values.
+fn check(int n) bool { PositiveEven(n) }
+mut int hits = 0
+mut int i = -6
+while i <= 10 {
+   if check(i) { hits += 1 }
+   assert(check(i) == (i > 0 && i % 2 == 0), "membership matches the conjunction")
+   i += 1
+}
+assert(hits == 5, "2, 4, 6, 8, 10 are the positive evens in [-6, 10]")
+
+;; Binding still enforces every conjunct.
+def PositiveEven n = 8
+assert(n == 8, "binding a positive even")
+print("ok refinement intersection")
+NY
+
+}

@@ -3,6 +3,76 @@
  */
 #include "support.h"
 
+static bool test_unlabeled_entry(void) {
+  nyr_func_t f;
+  nyr_opt_begin(&f);
+  f.param_count = 1;
+  f.param_types = calloc(1, sizeof(*f.param_types));
+  if (!f.param_types) {
+    nyr_ir_func_free(&f);
+    return false;
+  }
+  f.param_types[0] = NYIR_PARAM_I64;
+
+  int arg = nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_LOAD_LOCAL,
+                                         .dst = -1,
+                                         .a = -1,
+                                         .b = -1,
+                                         .c = -1,
+                                         .d = -1,
+                                         .e = -1,
+                                         .f = -1,
+                                         .imm = 0});
+  if (arg < 0) {
+    nyr_ir_func_free(&f);
+    return false;
+  }
+  nyr_opt_label(&f, 7);
+  int call = nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_CALL,
+                                           .dst = -1,
+                                           .a = arg,
+                                           .b = -1,
+                                           .c = -1,
+                                           .d = -1,
+                                           .e = -1,
+                                           .f = -1,
+                                           .imm = 1,
+                                           .symbol = "recur"});
+  if (call < 0) {
+    nyr_ir_func_free(&f);
+    return false;
+  }
+  nyr_opt_ret(&f, call);
+
+  bool ok = nyr_opt_verify(&f, "tco/entry-before") &&
+            nyr_tail_call(&f, "recur") &&
+            nyr_opt_verify(&f, "tco/entry-after") && f.len > 1;
+  /*
+   * The function entry is either labeled directly or split off as
+   * `br L; L: <old entry>`; the recursive branch must target that label,
+   * never the unrelated later block L7.
+   */
+  int64_t entry = -1;
+  if (ok && f.data[0].op == NYIR_LABEL)
+    entry = f.data[0].imm;
+  else if (ok && f.data[0].op == NYIR_BR && f.data[1].op == NYIR_LABEL &&
+           f.data[1].imm == f.data[0].imm)
+    entry = f.data[1].imm;
+  ok = ok && entry >= 0 && entry != 7;
+  bool branches_to_entry = false;
+  for (size_t i = 1; ok && i < f.len; ++i) {
+    if (f.data[i].op == NYIR_BR && f.data[i].imm == entry)
+      branches_to_entry = true;
+  }
+  ok = ok && branches_to_entry;
+  if (!ok) {
+    fprintf(stderr, "[tail-call] recursive branch skipped the function entry\n");
+    nyr_dump(stderr, &f, "tco/entry-failure");
+  }
+  nyr_ir_func_free(&f);
+  return ok;
+}
+
 int main(void) {
   static const char source[] = "tail-call-origin.ny";
   nyr_func_t f;
@@ -49,5 +119,5 @@ int main(void) {
     nyr_dump(stderr, &f, "tco/debug-failure");
   }
   nyr_ir_func_free(&f);
-  return ok ? 0 : 1;
+  return ok && test_unlabeled_entry() ? 0 : 1;
 }

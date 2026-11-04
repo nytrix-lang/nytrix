@@ -10,19 +10,24 @@
 #include "base/common.h"
 #include "base/curl.h"
 #include <errno.h>
+#include <fcntl.h>
 #include <limits.h>
+#include <signal.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #ifdef _WIN32
+#include "base/dirent.h"
 #include <direct.h>
 #include <io.h>
 #include <process.h>
 #include <windows.h>
 #define access _access
 #else
+#include <dirent.h>
+#include <sys/file.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #endif
@@ -62,6 +67,7 @@ static bool ny_mkdir_one(const char *path, unsigned int mode) {
   if (stat(path, &st) == 0)
     return S_ISDIR(st.st_mode);
 #ifdef _WIN32
+  (void)mode;
   int rc = _mkdir(path);
 #else
   int rc = mkdir(path, (mode_t)mode);
@@ -354,8 +360,8 @@ int ny_write_file(const char *path, const char *content, size_t len) {
   if (!f)
     return -1;
   size_t written = fwrite(content, 1, len, f);
-  fclose(f);
-  return (written == len) ? 0 : -1;
+  int close_status = fclose(f);
+  return (written == len && close_status == 0) ? 0 : -1;
 }
 
 bool ny_write_if_changed(const char *path, const char *content, size_t len) {
@@ -543,8 +549,252 @@ void ny_write_text_file(const char *path, const char *contents) {
 
 static bool nytrix_has_sources(const char *root) {
   char probe[8192];
-  snprintf(probe, sizeof(probe), "%s/src/code/lang/runtime/runtime.h", root);
+  snprintf(probe, sizeof(probe), "%s/src/code/backend/runtime/runtime.h", root);
   return ny_access(probe, R_OK) == 0;
+}
+
+typedef struct {
+  char name[256];
+  uint64_t size;
+  time_t modified;
+} ny_cache_disk_entry;
+
+static bool ny_cache_published_name(const char *name) {
+  if (!name || name[0] == '.')
+    return false;
+  const char *extension = strrchr(name, '.');
+  return extension &&
+         (!strcmp(extension, ".ny") || !strcmp(extension, ".bc") ||
+          !strcmp(extension, ".ll") || !strcmp(extension, ".ir") ||
+          !strcmp(extension, ".so") || !strcmp(extension, ".obj") ||
+          !strcmp(extension, ".manifest") || !strcmp(extension, ".libs"));
+}
+
+static int ny_cache_disk_entry_compare(const void *left, const void *right) {
+  const ny_cache_disk_entry *a = left, *b = right;
+  if (a->modified != b->modified)
+    return a->modified < b->modified ? -1 : 1;
+  return strcmp(a->name, b->name);
+}
+
+static bool ny_cache_disk_stat(const char *path, struct stat *st) {
+#ifdef _WIN32
+  DWORD attributes = GetFileAttributesA(path);
+  if (attributes == INVALID_FILE_ATTRIBUTES ||
+      (attributes & FILE_ATTRIBUTE_REPARSE_POINT))
+    return false;
+  return stat(path, st) == 0 && S_ISREG(st->st_mode);
+#else
+  return lstat(path, st) == 0 && S_ISREG(st->st_mode) &&
+         st->st_uid == geteuid();
+#endif
+}
+
+static void ny_cache_remove_abandoned_temporary(const char *directory,
+                                                const char *name) {
+  const char *marker = strstr(name, ".tmp.");
+  if (!marker || (size_t)(marker - name) >= 256)
+    return;
+  char published[256];
+  memcpy(published, name, (size_t)(marker - name));
+  published[marker - name] = '\0';
+  if (!ny_cache_published_name(published))
+    return;
+  char *end = NULL;
+  errno = 0;
+  unsigned long owner = strtoul(marker + 5, &end, 10);
+  if (errno || end == marker + 5 || !owner || owner > INT_MAX || *end != '.' ||
+      !end[1])
+    return;
+#ifdef _WIN32
+  HANDLE process = OpenProcess(SYNCHRONIZE, FALSE, (DWORD)owner);
+  bool abandoned;
+  if (process) {
+    abandoned = WaitForSingleObject(process, 0) == WAIT_OBJECT_0;
+    CloseHandle(process);
+  } else {
+    abandoned = GetLastError() == ERROR_INVALID_PARAMETER;
+  }
+#else
+  bool abandoned = kill((pid_t)owner, 0) != 0 && errno == ESRCH;
+#endif
+  if (!abandoned)
+    return;
+  char path[PATH_MAX];
+  int n = snprintf(path, sizeof(path), "%s/%s", directory, name);
+  struct stat st;
+  if (n > 0 && (size_t)n < sizeof(path) && ny_cache_disk_stat(path, &st))
+    (void)remove(path);
+}
+
+static intptr_t ny_cache_directory_lock(const char *directory, bool exclusive) {
+  char path[PATH_MAX];
+  int n = snprintf(path, sizeof(path), "%s/.publish.lock", directory);
+  if (n <= 0 || (size_t)n >= sizeof(path))
+    return 0;
+#ifdef _WIN32
+  HANDLE lock =
+      CreateFileA(path, exclusive ? GENERIC_READ | GENERIC_WRITE : GENERIC_READ,
+                  exclusive ? 0 : FILE_SHARE_READ, NULL, OPEN_ALWAYS,
+                  FILE_ATTRIBUTE_NORMAL, NULL);
+  return lock == INVALID_HANDLE_VALUE ? 0 : (intptr_t)lock;
+#else
+  int lock = open(path, O_CREAT | O_RDWR | O_CLOEXEC | O_NOFOLLOW, 0600);
+  if (lock < 0)
+    return 0;
+  /*
+   * A long-running cache consumer must not stall an unrelated compilation
+   * merely to persist its optional result. Readers wait only for publication.
+   */
+  if (flock(lock, exclusive ? (LOCK_EX | LOCK_NB) : LOCK_SH) != 0) {
+    close(lock);
+    return 0;
+  }
+  return (intptr_t)lock + 1;
+#endif
+}
+
+void ny_cache_read_unlock(intptr_t token) {
+  if (!token)
+    return;
+#ifdef _WIN32
+  CloseHandle((HANDLE)token);
+#else
+  close((int)(token - 1));
+#endif
+}
+
+intptr_t ny_cache_read_lock(const char *path) {
+  if (!path)
+    return 0;
+  char directory[PATH_MAX];
+  int n = snprintf(directory, sizeof(directory), "%s", path);
+  if (n <= 0 || (size_t)n >= sizeof(directory))
+    return 0;
+  char *slash = strrchr(directory, '/');
+#ifdef _WIN32
+  char *backslash = strrchr(directory, '\\');
+  if (backslash && (!slash || backslash > slash))
+    slash = backslash;
+#endif
+  if (!slash || slash == directory)
+    return 0;
+  *slash = '\0';
+  return ny_cache_directory_lock(directory, false);
+}
+
+bool ny_cache_publish_file(const char *temporary, const char *destination) {
+  if (!temporary || !destination)
+    return false;
+  char directory[PATH_MAX], path[PATH_MAX];
+  int length = snprintf(directory, sizeof(directory), "%s", destination);
+  if (length <= 0 || (size_t)length >= sizeof(directory))
+    return false;
+  char *slash = strrchr(directory, '/');
+#ifdef _WIN32
+  char *backslash = strrchr(directory, '\\');
+  if (backslash && (!slash || backslash > slash))
+    slash = backslash;
+#endif
+  if (!slash || slash == directory)
+    return false;
+  const char *name = destination + (slash - directory) + 1;
+  size_t key_length = strcspn(name, ".");
+  *slash = '\0';
+  uint64_t limit = UINT64_C(256) * 1024 * 1024;
+  const char *setting = getenv("NYTRIX_CACHE_MAX_MB");
+  if (setting && *setting && setting[0] != '-') {
+    char *end = NULL;
+    errno = 0;
+    unsigned long long mb = strtoull(setting, &end, 10);
+    if (!errno && end != setting && !*end && mb > 0 &&
+        mb <= UINT64_MAX / (1024 * 1024))
+      limit = (uint64_t)mb * 1024 * 1024;
+  }
+  struct stat incoming;
+  if (!ny_cache_disk_stat(temporary, &incoming) || incoming.st_size < 0 ||
+      (uint64_t)incoming.st_size > limit)
+    return false;
+  intptr_t lock = ny_cache_directory_lock(directory, true);
+  if (!lock)
+    return false;
+  bool ok = false;
+  uint64_t bytes = (uint64_t)incoming.st_size;
+  size_t count = 1, entry_count = 0;
+  ny_cache_disk_entry *entries = NULL;
+  DIR *dir = opendir(directory);
+  if (!dir)
+    goto done;
+  struct dirent *entry;
+  while ((entry = readdir(dir)) != NULL) {
+    if (!ny_cache_published_name(entry->d_name)) {
+      ny_cache_remove_abandoned_temporary(directory, entry->d_name);
+      continue;
+    }
+    if (!strcmp(entry->d_name, name))
+      continue;
+    length = snprintf(path, sizeof(path), "%s/%s", directory, entry->d_name);
+    struct stat st;
+    if (length <= 0 || (size_t)length >= sizeof(path) ||
+        !strcmp(path, temporary) || !ny_cache_disk_stat(path, &st) ||
+        st.st_size < 0)
+      continue;
+    uint64_t size = (uint64_t)st.st_size;
+    bytes = size > UINT64_MAX - bytes ? UINT64_MAX : bytes + size;
+    ++count;
+  }
+  closedir(dir);
+  if (bytes > limit || count > 4096) {
+    if (count > SIZE_MAX / sizeof(*entries))
+      goto done;
+    entries = malloc(count * sizeof(*entries));
+    if (!entries)
+      goto done;
+    dir = opendir(directory);
+    if (!dir)
+      goto done;
+    while ((entry = readdir(dir)) != NULL && entry_count < count) {
+      size_t name_length = strlen(entry->d_name);
+      if (!ny_cache_published_name(entry->d_name) ||
+          name_length >= sizeof(entries[0].name) ||
+          (strncmp(entry->d_name, name, key_length) == 0 &&
+           (entry->d_name[key_length] == '.' ||
+            entry->d_name[key_length] == '\0')))
+        continue;
+      length = snprintf(path, sizeof(path), "%s/%s", directory, entry->d_name);
+      struct stat st;
+      if (length <= 0 || (size_t)length >= sizeof(path) ||
+          !strcmp(path, temporary) || !ny_cache_disk_stat(path, &st) ||
+          st.st_size < 0)
+        continue;
+      ny_cache_disk_entry *item = &entries[entry_count++];
+      memcpy(item->name, entry->d_name, name_length + 1);
+      item->size = (uint64_t)st.st_size;
+      item->modified = st.st_mtime;
+    }
+    closedir(dir);
+    qsort(entries, entry_count, sizeof(*entries), ny_cache_disk_entry_compare);
+    for (size_t i = 0; i < entry_count && (bytes > limit || count > 4096);
+         ++i) {
+      length =
+          snprintf(path, sizeof(path), "%s/%s", directory, entries[i].name);
+      if (length > 0 && (size_t)length < sizeof(path) && remove(path) == 0) {
+        bytes -= entries[i].size;
+        --count;
+      }
+    }
+  }
+  if (bytes <= limit && count <= 4096) {
+#ifdef _WIN32
+    ok = MoveFileExA(temporary, destination, MOVEFILE_REPLACE_EXISTING) != 0;
+#else
+    ok = rename(temporary, destination) == 0;
+#endif
+  }
+done:
+  free(entries);
+  ny_cache_read_unlock(lock);
+  return ok;
 }
 
 const char *ny_get_executable_path(void) {
@@ -672,6 +922,14 @@ const char *ny_default_cache_root_dir(void) {
   if (override && *override)
     return ny_cache_path(path, sizeof(path), override);
 
+  const char *src = ny_src_root();
+  if (src && *src && nytrix_has_sources(src)) {
+    char repo_cache[PATH_MAX];
+    ny_join_path(repo_cache, sizeof(repo_cache), src, "build/cache/nytrix");
+    if (ny_mkdir_p(repo_cache) && ny_access(repo_cache, W_OK) == 0)
+      return ny_cache_path(path, sizeof(path), repo_cache);
+  }
+
   const char *xdg = getenv("XDG_CACHE_HOME");
   if (xdg && *xdg) {
     ny_join_path(path, sizeof(path), xdg, "nytrix");
@@ -683,12 +941,6 @@ const char *ny_default_cache_root_dir(void) {
     home = getenv("USERPROFILE");
   if (home && *home) {
     ny_join_path(path, sizeof(path), home, ".cache/nytrix");
-    return path;
-  }
-
-  const char *src = ny_src_root();
-  if (src && *src) {
-    ny_join_path(path, sizeof(path), src, "build/cache/nytrix");
     return path;
   }
 

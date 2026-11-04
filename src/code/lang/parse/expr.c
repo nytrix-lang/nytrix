@@ -2,8 +2,8 @@
  * Expression parser: infix/precedence-climbing expression parsing
  * including operators, calls, lambdas, and dotted-field access.
  */
-#include "base/debug.h"
 #include "base/ascii.h"
+#include "base/debug.h"
 #include "priv.h"
 #include <ctype.h>
 #include <errno.h>
@@ -1283,6 +1283,15 @@ static expr_t *parse_primary(parser_t *p) {
       memcpy(bound, p->cur.lexeme, blen);
       bound[blen] = 0;
       parser_advance(p);
+      if (p->cur.kind != NY_T_RPAREN) {
+        /* `exists(Fin<8> n) T` would be a dependent pair (sigma) type. */
+        parser_error(p, p->cur,
+                     "typed exists binders (dependent pair types) are not "
+                     "supported",
+                     "comptime existentials take a bare binder: "
+                     "'exists(k) { v == 2 * k }'");
+        return NULL;
+      }
       parser_expect(p, NY_T_RPAREN, "')' after exists binder", NULL);
       expr_t *body = NULL;
       if (p->cur.kind == NY_T_LBRACE) {
@@ -1660,7 +1669,7 @@ static expr_t *parse_primary(parser_t *p) {
       (void)expr_parse_type_ref(p, "expected return type after '->'");
     } else
       lam->as.lambda.return_type = parser_parse_return_type_suffix(
-          p, expr_parse_type_ref, "expected return type");
+          p, expr_parse_type_ref, "expected return type", false);
     stmt_t *body = NULL;
     if (p->cur.kind == NY_T_LBRACE) {
       body = p_parse_block(p);

@@ -27,6 +27,9 @@ fn _default_override(any tag, any suffix) str {
    tag_value.len > 0 ? tag_value : common.env_trim(key_shared)
 }
 
+;; `NYTRIX_UI_REPLAY` selects the software mock surface and runs bounded
+;; demo loops without taking the `NY_UI_HEADLESS` early-exit path.
+;; The native `ny-test ui-replay` command checks replay assets and parity.
 fn _headless_enabled() bool {
    _headless_cache = common.cached_env_truthy(_headless_cache, "NY_UI_HEADLESS")
    _headless_cache == 1
@@ -48,10 +51,12 @@ fn _clamp_font_size(any value, any min_size, any max_size) any {
    min(max(value + 0.0, min_f), max_f)
 }
 
-fn default_font_size(any tag, f64 fallback, str suffix="FONT_SIZE", any min_size=8.0, any max_size=96.0) any {
+fn default_font_size(any tag, f64 fallback, str suffix="FONT_SIZE", any min_size=8.0, any max_size=96.0) f64 {
    "Returns a per-viewer font size, overridable through environment variables."
    def raw = _default_override(tag, suffix)
-   raw.len == 0 ? fallback : _clamp_font_size(str.atof(raw), min_size, max_size)
+   if raw.len == 0 { return fallback }
+   def f64 parsed = str.atof(raw)
+   _clamp_font_size(parsed, min_size, max_size)
 }
 
 fn _font_filter_mode(str mode, int fallback) int {
@@ -146,6 +151,12 @@ fn fps_tick(dict state, f64 dt=0.0) dict {
    "Advances an FPS counter and returns the same state object."
    def frames = int(state.get("frames", 0)) + 1
    def total = int(state.get("total", 0)) + 1
+   if common.env_truthy("NYTRIX_UI_REPLAY") {
+      state["frames"] = frames
+      state["total"] = total
+      state["fps"] = dt > 0.00001 ? int(1.0 / dt) : 0
+      return state
+   }
    def now = ticks()
    state["frames"] = frames
    state["total"] = total

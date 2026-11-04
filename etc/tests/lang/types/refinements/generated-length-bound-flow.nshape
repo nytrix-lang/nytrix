@@ -44,7 +44,7 @@ fn check_case(int bound, bool inclusive, bool shrink, bool reversed) int {
   }
   args = args.append("--strict-types")
   args = args.append("--native-only")
-  args = args.append("--nyir-verify")
+  args = args.append("--nyr-verify")
   args = args.append("-emit-only")
   args = args.append("-c")
   args = args.append(source)

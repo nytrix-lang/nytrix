@@ -3,7 +3,7 @@ shape optcheck_loop_unswitch {
   generator "native"
   features [native x86_64 oracle optcheck loop-unswitch]
   template ny-test-case
-  flags "-O3 --native-backend x86_64 --native-oracle-per-pass --native-result-oracle=99 --nyir-verify --nyir-pass-stats"
+  flags "-O3 --native-backend x86_64 --native-oracle-per-pass --native-result-oracle=99 --nyr-verify --nyr-dump=passes"
   expect compile_and_run
   source ny <<'NY'
 fn branch_sum(i64 flag) i64 {

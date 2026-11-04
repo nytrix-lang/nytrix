@@ -3,7 +3,7 @@ shape nyir_value_compact {
   generator "native"
   features ["native", "nyir", "optimizer", "compact"]
   template ny-test-case
-  flags "--native --run --nyir-dump-stats"
+  flags "--native --run --nyr-dump=stats"
   expect compile_and_run
   expect_exit 3
   source ny <<'NY'

@@ -1,0 +1,21 @@
+shape pi_return_dependent_return_type {
+  family "runtime/language"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+refine Vec = int where (v) { v >= 0 }
+
+fn vsum(Fin<4> n) Vec<n> {
+  return n
+}
+
+def result = vsum(2)
+assert_eq(result, 2, "dependent return type Vec<n> resolves through Fin<4> param")
+print("✓ pi-return ok")
+NY
+}

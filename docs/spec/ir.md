@@ -1,10 +1,19 @@
 <!-- nytrix-doc: {"audience":"contributor","featured":true,"group":"spec","order":45,"summary":"NYIR SSA and CFG invariants, verification, optimizer diagnostics, and native lowering."} -->
 # Nytrix IR (NYIR)
 
+> **Note:** Usually needed only for compiler work or when diagnosing a
+> backend-level difference; use source-level specifications for program rules.
+
 NYIR is the compiler's SSA representation for target-independent analysis and
 optimization. The public C API is declared in [`nyr.md`](nyr.md) and
 `src/include/nyr/`. The verifier in `src/code/backend/ir/verify.c` is the
 executable authority for IR validity.
+
+## Contents
+
+- [IR invariants](#invariants)
+- [Optimization and lowering](#optimization-and-target-lowering)
+- [Inspect and verify](#inspect-and-verify)
 
 ## Invariants
 
@@ -42,19 +51,21 @@ whole-program NYIR pipeline; it is not LLVM bitcode LTO.
 Use `ny --help` for the exact option surface. Useful diagnostics include:
 
 ```bash
-ny --native-only --nyir-verify file.ny
-ny --native-only --nyir-dump=build/trace.nyir file.ny
-ny --native-only --nyir-pass-stats file.ny
-ny --native-only --nyir-track-value=12 file.ny
+ny --native-only --nyr-check=verify file.ny
+ny --native-only --nyr-dump-to=build/trace.nyr file.ny
+ny --native-only --inspect file.ny
+ny --native-only --nyr-track-value=12 file.ny
 ny --native-only --regalloc-heat file.ny
 ```
 
-`--nyir-verify` checks optimized IR after passes. `--nyir-pass-stats` reports
-per-pass changes and timing; `--nyir-track-value` follows an SSA value; and
+`--nyr-check=verify` checks optimized IR after passes. `--inspect` reports
+per-pass changes and timing; `--nyr-track-value` follows an SSA value; and
 `--regalloc-heat` reports machine register pressure and spills. Use
-`--nyir-run` only when investigating the diagnostic VM route, not as proof of
+`--nyr-run` only when investigating the diagnostic VM route, not as proof of
 native or LLVM behavior.
 
-For stage ordering, caches, and execution routes, see
-[Pipeline](pipeline.md). For the public construction and object API, see
-[Nyr](nyr.md).
+## Related
+
+- [Pipeline](pipeline.md) for stage ordering, caches, and execution routes.
+- [Nyr](nyr.md) for the public construction and object API.
+- [Memory](memory.md) for value representation boundaries.

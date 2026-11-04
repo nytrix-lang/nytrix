@@ -86,8 +86,7 @@ static nyr_op_t slp_vec8_i64_binop(nyr_op_t op) {
   }
 }
 
-static bool slp_f64_broadcastable(const nyr_func_t *f, const int *defs,
-                                  int v) {
+static bool slp_f64_broadcastable(const nyr_func_t *f, const int *defs, int v) {
   if (!f || !defs || v < 0 || v >= f->next_value || defs[v] < 0)
     return false;
   return f->data[(size_t)defs[v]].op == NYIR_CONST_F64;
@@ -133,8 +132,8 @@ static addr_form_t slp_addr(const nyr_func_t *f, const int *defs, int value,
   return (addr_form_t){.ok = true, .root = value, .offset = 0};
 }
 
-static bool slp_contiguous(const nyr_func_t *f, const int *defs, int a0,
-                           int a1, size_t block_start) {
+static bool slp_contiguous(const nyr_func_t *f, const int *defs, int a0, int a1,
+                           size_t block_start) {
   addr_form_t x = slp_addr(f, defs, a0, block_start, 0);
   addr_form_t y = slp_addr(f, defs, a1, block_start, 0);
   return x.ok && y.ok && x.root == y.root &&
@@ -168,8 +167,7 @@ static bool slp_value_only_used_at(const nyr_use_def_t *uses, int value,
   return true;
 }
 
-static bool slp_no_observable_between(const nyr_func_t *f, size_t a,
-                                      size_t b) {
+static bool slp_no_observable_between(const nyr_func_t *f, size_t a, size_t b) {
   if (!f)
     return false;
   if (a > b) {
@@ -264,24 +262,24 @@ static bool slp_pack_pair(nyr_func_t *f, const int *defs,
      * Lane zero is always the first address, independent of instruction order.
      */
     nyr_inst_discard(&f->data[kill]);
-    f->data[keep] = (nyr_inst_t){
-        .op = f64 ? NYIR_VEC4_LOAD_F64 : NYIR_VEC4_LOAD_I64,
-        .dst = v0,
-        .a = i0.a,
-        .b = -1,
-        .c = -1,
-        .d = -1,
-        .e = -1,
-        .f = -1,
-        .alias_class = i0.alias_class,
-        /*
-         * Keep a source anchor on the packed
-         * operation for debugger and IR diagnostics.
-         * Use the earliest scalar load in program
-         * order, including when lane order differs.
-         */
-        .debug = i0.debug,
-        .effects = NYIR_EFFECT_READ_MEMORY | NYIR_EFFECT_MAY_TRAP};
+    f->data[keep] =
+        (nyr_inst_t){.op = f64 ? NYIR_VEC4_LOAD_F64 : NYIR_VEC4_LOAD_I64,
+                     .dst = v0,
+                     .a = i0.a,
+                     .b = -1,
+                     .c = -1,
+                     .d = -1,
+                     .e = -1,
+                     .f = -1,
+                     .alias_class = i0.alias_class,
+                     /*
+                      * Keep a source anchor on the packed
+                      * operation for debugger and IR diagnostics.
+                      * Use the earliest scalar load in program
+                      * order, including when lane order differs.
+                      */
+                     .debug = i0.debug,
+                     .effects = NYIR_EFFECT_READ_MEMORY | NYIR_EFFECT_MAY_TRAP};
     *out_vec = v0;
     return true;
   }
@@ -349,28 +347,28 @@ static bool slp_pack_pair(nyr_func_t *f, const int *defs,
   size_t kill = d0 > d1 ? d1 : d0;
   if (shared_f64_rhs) {
     f->data[kill] = (nyr_inst_t){.op = NYIR_VEC4_SET1_F64,
-                                  .dst = vb,
-                                  .a = i0.b,
-                                  .b = -1,
-                                  .c = -1,
-                                  .d = -1,
-                                  .e = -1,
-                                  .f = -1,
-                                  .debug = i0.debug,
-                                  .effects = NYIR_EFFECT_NONE};
+                                 .dst = vb,
+                                 .a = i0.b,
+                                 .b = -1,
+                                 .c = -1,
+                                 .d = -1,
+                                 .e = -1,
+                                 .f = -1,
+                                 .debug = i0.debug,
+                                 .effects = NYIR_EFFECT_NONE};
   } else {
     nyr_inst_discard(&f->data[kill]);
   }
   f->data[keep] = (nyr_inst_t){.op = slp_vec_binop(i0.op),
-                                .dst = v0,
-                                .a = va,
-                                .b = vb,
-                                .c = -1,
-                                .d = -1,
-                                .e = -1,
-                                .f = -1,
-                                .debug = i0.debug,
-                                .effects = NYIR_EFFECT_NONE};
+                               .dst = v0,
+                               .a = va,
+                               .b = vb,
+                               .c = -1,
+                               .d = -1,
+                               .e = -1,
+                               .f = -1,
+                               .debug = i0.debug,
+                               .effects = NYIR_EFFECT_NONE};
   *out_vec = v0;
   return true;
 }
@@ -436,15 +434,15 @@ static bool slp_pack_quad_load_i64(nyr_func_t *f, const int *defs,
       nyr_inst_discard(&f->data[at[lane]]);
   f->data[hi] =
       (nyr_inst_t){.op = NYIR_VEC8_LOAD_I64,
-                    .dst = value[0],
-                    .a = addr[0],
-                    .b = -1,
-                    .c = -1,
-                    .d = -1,
-                    .e = -1,
-                    .f = -1,
-                    .debug = debug,
-                    .effects = NYIR_EFFECT_READ_MEMORY | NYIR_EFFECT_MAY_TRAP};
+                   .dst = value[0],
+                   .a = addr[0],
+                   .b = -1,
+                   .c = -1,
+                   .d = -1,
+                   .e = -1,
+                   .f = -1,
+                   .debug = debug,
+                   .effects = NYIR_EFFECT_READ_MEMORY | NYIR_EFFECT_MAY_TRAP};
   *out_vec = value[0];
   return true;
 }
@@ -457,15 +455,10 @@ static bool slp_pack_quad_load_i64(nyr_func_t *f, const int *defs,
  * preserving textual SSA ordering.
  */
 static bool slp_try_store_quad_i64(nyr_func_t *f, const size_t store[4],
-                                   size_t block_start) {
-  if (!f)
+                                   size_t block_start, const int *defs,
+                                   const nyr_use_def_t *uses) {
+  if (!f || !defs || !uses)
     return false;
-  int *defs = nyr_build_defs(f);
-  nyr_use_def_t uses = {0};
-  if (!defs || !nyr_build_use_def(f, &uses)) {
-    free(defs);
-    return false;
-  }
   bool ok = true;
   int store_addr[4], result[4], lhs[4], rhs[4];
   size_t bin_at[4];
@@ -485,7 +478,7 @@ static bool slp_try_store_quad_i64(nyr_func_t *f, const size_t store[4],
     store_addr[lane] = st->a;
     result[lane] = st->c;
     if (result[lane] >= f->next_value || defs[result[lane]] < 0 ||
-        !slp_value_only_used_at(&uses, result[lane], store[lane])) {
+        !slp_value_only_used_at(uses, result[lane], store[lane])) {
       ok = false;
       break;
     }
@@ -556,13 +549,12 @@ static bool slp_try_store_quad_i64(nyr_func_t *f, const size_t store[4],
   }
 
   if (ok)
-    ok =
-        slp_pack_quad_load_i64(f, defs, &uses, lhs, bin_at, block_start, &vlhs);
+    ok = slp_pack_quad_load_i64(f, defs, uses, lhs, bin_at, block_start, &vlhs);
   if (ok) {
     if (same_operands) {
       vrhs = vlhs;
     } else {
-      ok = slp_pack_quad_load_i64(f, defs, &uses, rhs, bin_at, block_start,
+      ok = slp_pack_quad_load_i64(f, defs, uses, rhs, bin_at, block_start,
                                   &vrhs);
     }
   }
@@ -572,50 +564,43 @@ static bool slp_try_store_quad_i64(nyr_func_t *f, const size_t store[4],
       if (bin_at[lane] != max_bin)
         nyr_inst_discard(&f->data[bin_at[lane]]);
     f->data[max_bin] = (nyr_inst_t){.op = slp_vec8_i64_binop(scalar_op),
-                                     .dst = result[0],
-                                     .a = vlhs,
-                                     .b = vrhs,
-                                     .c = -1,
-                                     .d = -1,
-                                     .e = -1,
-                                     .f = -1,
-                                     .debug = bin_debug,
-                                     .effects = NYIR_EFFECT_NONE};
+                                    .dst = result[0],
+                                    .a = vlhs,
+                                    .b = vrhs,
+                                    .c = -1,
+                                    .d = -1,
+                                    .e = -1,
+                                    .f = -1,
+                                    .debug = bin_debug,
+                                    .effects = NYIR_EFFECT_NONE};
     size_t keep = store[3];
     for (size_t lane = 0; lane < 3; ++lane)
       nyr_inst_discard(&f->data[store[lane]]);
     f->data[keep] = (nyr_inst_t){.op = NYIR_VEC8_STORE_I64,
-                                  .dst = -1,
-                                  .a = store_addr[0],
-                                  .b = result[0],
-                                  .c = -1,
-                                  .d = -1,
-                                  .e = -1,
-                                  .f = -1,
-                                  .debug = store_debug,
-                                  .effects = NYIR_EFFECT_WRITE_MEMORY |
-                                             NYIR_EFFECT_MAY_TRAP};
+                                 .dst = -1,
+                                 .a = store_addr[0],
+                                 .b = result[0],
+                                 .c = -1,
+                                 .d = -1,
+                                 .e = -1,
+                                 .f = -1,
+                                 .debug = store_debug,
+                                 .effects = NYIR_EFFECT_WRITE_MEMORY |
+                                            NYIR_EFFECT_MAY_TRAP};
   }
-  nyr_use_def_free(&uses);
-  free(defs);
   return ok;
 }
 
 static bool slp_try_store_pair(nyr_func_t *f, size_t s0, size_t s1,
-                               size_t block_start) {
-  if (!f || s0 >= f->len || s1 >= f->len || s0 == s1)
+                               size_t block_start, const int *defs,
+                               const nyr_use_def_t *uses) {
+  if (!f || !defs || !uses || s0 >= f->len || s1 >= f->len || s0 == s1)
     return false;
   const nyr_inst_t st0 = f->data[s0], st1 = f->data[s1];
   if (st0.op != NYIR_STORE_I64 || st1.op != NYIR_STORE_I64 || st0.c < 0 ||
       st1.c < 0 || !slp_no_effect_between(f, s0, s1))
     return false;
 
-  int *defs = nyr_build_defs(f);
-  nyr_use_def_t uses = {0};
-  if (!defs || !nyr_build_use_def(f, &uses)) {
-    free(defs);
-    return false;
-  }
   bool st0_f64 = st0.scalar_class == NYIR_SCALAR_F64;
   bool st1_f64 = st1.scalar_class == NYIR_SCALAR_F64;
   bool f64 = st0_f64 && st1_f64;
@@ -623,8 +608,8 @@ static bool slp_try_store_pair(nyr_func_t *f, size_t s0, size_t s1,
       st0_f64 == st1_f64 && slp_contiguous(f, defs, st0.a, st1.a, block_start);
   int packed = -1;
   if (ok)
-    ok = slp_pack_pair(f, defs, &uses, st0.c, st1.c, s0, s1, block_start, f64,
-                       0, &packed);
+    ok = slp_pack_pair(f, defs, uses, st0.c, st1.c, s0, s1, block_start, f64, 0,
+                       &packed);
   if (ok) {
     size_t keep = s0 > s1 ? s0 : s1;
     size_t kill = s0 > s1 ? s1 : s0;
@@ -642,8 +627,6 @@ static bool slp_try_store_pair(nyr_func_t *f, size_t s0, size_t s1,
         .debug = st0.debug,
         .effects = NYIR_EFFECT_WRITE_MEMORY | NYIR_EFFECT_MAY_TRAP};
   }
-  nyr_use_def_free(&uses);
-  free(defs);
   return ok;
 }
 
@@ -690,6 +673,14 @@ bool nyr_slp_vectorize(nyr_func_t *f) {
       nyr_ir_func_free(&work);
       return false;
     }
+    int *defs = nyr_build_defs(&work);
+    nyr_use_def_t uses = {0};
+    if (!defs || !nyr_build_use_def(&work, &uses)) {
+      free(defs);
+      nyr_cfg_free(&cfg);
+      nyr_ir_func_free(&work);
+      return false;
+    }
     bool transformed = false;
     for (size_t b = 0; b < cfg.block_count && !transformed; ++b) {
       size_t start = cfg.block_start[b], end = cfg.block_end[b];
@@ -707,18 +698,29 @@ bool nyr_slp_vectorize(nyr_func_t *f) {
               work.data[stores[lane]].op != NYIR_STORE_I64)
             break;
         }
-        if (stores[3] < end && work.data[stores[3]].op == NYIR_STORE_I64) {
+        bool quad_contiguous =
+            stores[3] < end && work.data[stores[3]].op == NYIR_STORE_I64;
+        for (size_t lane = 1; quad_contiguous && lane < 4; ++lane) {
+          const nyr_inst_t *prev = &work.data[stores[lane - 1]];
+          const nyr_inst_t *next = &work.data[stores[lane]];
+          quad_contiguous =
+              prev->scalar_class == next->scalar_class &&
+              slp_contiguous(&work, defs, prev->a, next->a, start);
+        }
+        if (quad_contiguous) {
           ny_dbg_heuristic_event("SLP",
                                  "candidate kind=quad block=%zu "
                                  "stores=%zu,%zu,%zu,%zu lanes=4 type=i64",
                                  b, stores[0], stores[1], stores[2], stores[3]);
           nyr_func_t quad = {0};
           if (!nyr_ir_func_clone(&work, &quad)) {
+            nyr_use_def_free(&uses);
+            free(defs);
             nyr_cfg_free(&cfg);
             nyr_ir_func_free(&work);
             return false;
           }
-          if (slp_try_store_quad_i64(&quad, stores, start)) {
+          if (slp_try_store_quad_i64(&quad, stores, start, defs, &uses)) {
             char err[256] = {0};
             if (nyr_ir_verify(&quad, err, sizeof(err))) {
               ny_dbg_heuristic_event("SLP",
@@ -747,6 +749,9 @@ bool nyr_slp_vectorize(nyr_func_t *f) {
         size_t j = slp_next_store_in_block(&work, i, end);
         if (j >= end || work.data[j].op != NYIR_STORE_I64)
           continue;
+        if (work.data[i].scalar_class != work.data[j].scalar_class ||
+            !slp_contiguous(&work, defs, work.data[i].a, work.data[j].a, start))
+          continue;
 
         ny_dbg_heuristic_event(
             "SLP",
@@ -755,11 +760,13 @@ bool nyr_slp_vectorize(nyr_func_t *f) {
 
         nyr_func_t candidate = {0};
         if (!nyr_ir_func_clone(&work, &candidate)) {
+          nyr_use_def_free(&uses);
+          free(defs);
           nyr_cfg_free(&cfg);
           nyr_ir_func_free(&work);
           return false;
         }
-        if (slp_try_store_pair(&candidate, i, j, start)) {
+        if (slp_try_store_pair(&candidate, i, j, start, defs, &uses)) {
           char err[256] = {0};
           if (nyr_ir_verify(&candidate, err, sizeof(err))) {
             ny_dbg_heuristic_event("SLP",
@@ -786,6 +793,8 @@ bool nyr_slp_vectorize(nyr_func_t *f) {
         }
       }
     }
+    nyr_use_def_free(&uses);
+    free(defs);
     nyr_cfg_free(&cfg);
     if (!transformed)
       break;

@@ -1,0 +1,86 @@
+shape cli_enum_errors_report_complete_choices {
+  family "probe-suite"
+  generator "regression"
+  features ["cli", "options", "diagnostics"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.subprocess (run_capture)
+use core.str as str
+
+def compiler = env("NYTRIX_NY_FULL_BIN")
+def cases = [
+    ["--run=invalid", "auto|aot|jit|native|none"],
+    ["--mode=invalid", "safe|fast|bare"],
+    ["--heap=invalid", "manual|raii|rc|gc"],
+    ["--native-backend=invalid",
+     "llvm|x86_64|x86|aarch64|arm|riscv|wasm|bpf|mips|powerpc|avr|amdgpu"],
+    ["--accel-target=invalid", "none|auto|nvptx|amdgpu|spirv|hsaco"],
+    ["--accel-object=invalid", "auto|none|ptx|o|spv|hsaco"],
+    ["--gpu-target=invalid",
+     "off|none|auto|cuda|nvptx|ptx|hip|rocm|amdgpu|opencl|spirv|vulkan|spv|metal|hsaco|hsa|hsa-code-object|hsa_code_object|gcn|rdna"],
+    ["--arm-float-abi=invalid", "soft|softfp|hard"],
+    ["--dbg-format=invalid", "text|json"],
+    ["--ny-desugar=invalid", "ny|c|off"],
+    ["--native-abi=invalid", "auto|sysv|win64|aapcs"],
+    ["--c-frontend=invalid", "auto|libclang|nytrix"],
+    ["--type-solver=invalid", "auto|hm|z3"],
+    ["--proof-solver=invalid", "none|presburger|z3|auto"],
+    ["--dump-scope=invalid", "program|lib|both"],
+    ["--opt-profile=invalid", "speed|balanced|compile|size|none|peak"],
+    ["--gpu=invalid", "off|auto|opencl"],
+    ["--gpu-backend=invalid", "none|auto|opencl|cuda|hip|metal"],
+    ["--gpu-offload=invalid", "off|auto|on|force"],
+    ["--parallel=invalid", "off|auto|threads|modules"],
+    ["--sanitize=invalid", "address|undefined|thread|leak"],
+    ["--color=invalid", "auto|always|never"],
+    ["--completions=invalid", "bash|zsh|fish"],
+    ["--warn=invalid", "none|useful|all|error"],
+    ["--std=invalid", "none|minimal|full"],
+    ["--stop-after=invalid", "parse|hm|trait|flow|abi|opt"],
+    ["--native-tier=invalid", "auto|baseline|stencil|fast|opt|llvm"],
+    ["--jit-code-model=invalid", "small|kernel|medium|large"],
+    ["--jit-engine=invalid", "orc|mcjit"],
+    ["--jit-opt-level=4", "0|1|2|3"],
+    ["--jit-opt=opt-level=4",
+     "opt-level=0..3|code-model=small|kernel|medium|large"],
+    ["--nyr-limit=unknown=1",
+     "global-inst-cap=N|pass-growth=X|run-steps=N|run-recursion=N"],
+    ["--nyr-check=unknown",
+     "verify|bisect|rollback|flaky|fingerprint|oracle|oracle-per-pass|tv-seed=N|fuzz=N"],
+    ["--nyr-pass=unknown:const_fold",
+     "disable:NAME|stop-after:NAME"],
+    ["--native-tuning=unknown=10",
+     "budget=N|hot=N|cold=N|cache-score=N|prefer=vm|asm"],
+    ["--dwarf=version=6",
+     "version=2..5|locals|no-locals|split-inlining|no-split-inlining|profile-info|no-profile-info"],
+    ["--emit=unknown", "asm[=PATH]|ir[=PATH]|bc[=PATH]|obj[=PATH]|wasm[=PATH]|nyr"],
+    ["--use=unknown=path",
+     "artifact=PATH|refinement-interface=PATH|effect-interface=PATH|native-bundle=PATH"],
+    ["--perf=invalid", "compact|smart|verbose"],
+    ["--prof=invalid", "timing|stats|gprof|compile|peak-rss"],
+    ["--ownership-check=invalid", "off|advisory|strict"],
+    ["--opt=invalid",
+     "dce|loops|internalize|autotune|lto|fast-math|no-dce|no-loops|no-internalize|no-autotune|no-lto|no-fast-math"],
+    ["--check=invalid",
+     "types|effects|alias|alias-escape|ownership|shadow|no-types|no-effects|no-alias|no-alias-escape|no-ownership|no-shadow"],
+    ["--dump-scope=invalid", "program|lib|both"],
+]
+for item in cases {
+  def option = str(item.get(0))
+  def expected = str(item.get(1))
+  def result = run_capture([compiler, option, "-c", "print(1)"], [], nil,
+                           false)
+  def diagnostic =
+      str(result.get("stderr", "")) + str(result.get("stdout", ""))
+  assert(int(result.get("code", 127)) == 2 &&
+         diagnostic.contains(expected) &&
+         !str(result.get("stdout", "")).contains("Usage:"),
+         option + " rejects invalid values with its complete choice list " +
+             "(code=" + to_str(result.get("code", 127)) + ", output=" +
+             diagnostic + ")")
+}
+print("CLI_ENUM_ERRORS_OK")
+NY
+}

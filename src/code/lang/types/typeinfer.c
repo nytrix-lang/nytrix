@@ -420,6 +420,38 @@ ny_type_t *ny_type_apply_bounded(ny_type_arena_t *arena, const char *name,
   return t;
 }
 
+ny_type_t *ny_type_dep_arrow(ny_type_arena_t *arena, const char *param_name,
+                             ny_type_t *param_type, ny_type_t *ret_type) {
+  ny_type_t *t = ny_type_new(arena, NY_TYPE_DEPENDENT_ARROW);
+  if (!t)
+    return NULL;
+  t->as.dep_arrow.param_name =
+      param_name ? ny_type_arena_strdup(arena, param_name) : NULL;
+  t->as.dep_arrow.param_type = param_type;
+  t->as.dep_arrow.ret_type = ret_type;
+  return t;
+}
+
+ny_type_t *ny_type_sigma(ny_type_arena_t *arena, const char *index_name,
+                         ny_type_t *index_type, ny_type_t *value_type) {
+  ny_type_t *t = ny_type_new(arena, NY_TYPE_SIGMA);
+  if (!t)
+    return NULL;
+  t->as.sigma.index_name =
+      index_name ? ny_type_arena_strdup(arena, index_name) : NULL;
+  t->as.sigma.index_type = index_type;
+  t->as.sigma.value_type = value_type;
+  return t;
+}
+
+ny_type_t *ny_type_type_univ(ny_type_arena_t *arena, const char *name) {
+  ny_type_t *t = ny_type_new(arena, NY_TYPE_TYPE);
+  if (!t)
+    return NULL;
+  t->as.type_univ.name = name ? ny_type_arena_strdup(arena, name) : NULL;
+  return t;
+}
+
 ny_type_t *ny_type_find(ny_type_t *type) {
   if (!type)
     return NULL;
@@ -494,6 +526,27 @@ static bool ny_type_structurally_equal_depth(ny_type_t *a, ny_type_t *b,
                                             b->as.row.field_type, depth + 1) &&
            ny_type_structurally_equal_depth(a->as.row.tail, b->as.row.tail,
                                             depth + 1);
+  case NY_TYPE_DEPENDENT_ARROW:
+    return a->as.dep_arrow.param_name && b->as.dep_arrow.param_name &&
+           strcmp(a->as.dep_arrow.param_name, b->as.dep_arrow.param_name) == 0 &&
+           ny_type_structurally_equal_depth(a->as.dep_arrow.param_type,
+                                            b->as.dep_arrow.param_type,
+                                            depth + 1) &&
+           ny_type_structurally_equal_depth(a->as.dep_arrow.ret_type,
+                                            b->as.dep_arrow.ret_type,
+                                            depth + 1);
+  case NY_TYPE_SIGMA:
+    return a->as.sigma.index_name && b->as.sigma.index_name &&
+           strcmp(a->as.sigma.index_name, b->as.sigma.index_name) == 0 &&
+           ny_type_structurally_equal_depth(a->as.sigma.index_type,
+                                            b->as.sigma.index_type,
+                                            depth + 1) &&
+           ny_type_structurally_equal_depth(a->as.sigma.value_type,
+                                            b->as.sigma.value_type,
+                                            depth + 1);
+  case NY_TYPE_TYPE:
+    return a->as.type_univ.name && b->as.type_univ.name &&
+           strcmp(a->as.type_univ.name, b->as.type_univ.name) == 0;
   }
   return false;
 }
@@ -525,6 +578,14 @@ bool ny_type_occurs(ny_type_t *needle, ny_type_t *haystack) {
   case NY_TYPE_ROW:
     return ny_type_occurs(needle, haystack->as.row.field_type) ||
            ny_type_occurs(needle, haystack->as.row.tail);
+  case NY_TYPE_DEPENDENT_ARROW:
+    return ny_type_occurs(needle, haystack->as.dep_arrow.param_type) ||
+           ny_type_occurs(needle, haystack->as.dep_arrow.ret_type);
+  case NY_TYPE_SIGMA:
+    return ny_type_occurs(needle, haystack->as.sigma.index_type) ||
+           ny_type_occurs(needle, haystack->as.sigma.value_type);
+  case NY_TYPE_TYPE:
+    return false;
   }
   return false;
 }
@@ -762,8 +823,29 @@ const char *ny_type_kind_name(ny_type_kind_t kind) {
     return "effect_var";
   case NY_TYPE_ROW:
     return "row";
+  case NY_TYPE_DEPENDENT_ARROW:
+    return "dependent_arrow";
+  case NY_TYPE_SIGMA:
+    return "sigma";
+  case NY_TYPE_TYPE:
+    return "type_univ";
   }
   return "unknown";
+}
+
+bool ny_type_is_dependent_arrow(ny_type_t *type) {
+  type = ny_type_find(type);
+  return type && type->kind == NY_TYPE_DEPENDENT_ARROW;
+}
+
+bool ny_type_is_sigma(ny_type_t *type) {
+  type = ny_type_find(type);
+  return type && type->kind == NY_TYPE_SIGMA;
+}
+
+bool ny_type_is_type_univ(ny_type_t *type) {
+  type = ny_type_find(type);
+  return type && type->kind == NY_TYPE_TYPE;
 }
 
 static char *ny_type_fmt2(const char *fmt, const char *a, const char *b) {
@@ -843,6 +925,44 @@ char *ny_type_to_string(ny_type_t *type) {
     }
     return ny_strdup(buf);
   }
+  case NY_TYPE_DEPENDENT_ARROW: {
+    char *pn = ny_type_to_string(type->as.dep_arrow.param_type);
+    char *rt = ny_type_to_string(type->as.dep_arrow.ret_type);
+    char *out = NULL;
+    int n = snprintf(NULL, 0, "fn(%s %s)->%s",
+                     type->as.dep_arrow.param_name ? type->as.dep_arrow.param_name : "?",
+                     pn ? pn : "any", rt ? rt : "any");
+    if (n > 0) {
+      out = (char *)malloc((size_t)n + 1);
+      if (out)
+        snprintf(out, (size_t)n + 1, "fn(%s %s)->%s",
+                 type->as.dep_arrow.param_name ? type->as.dep_arrow.param_name : "?",
+                 pn ? pn : "any", rt ? rt : "any");
+    }
+    free(pn);
+    free(rt);
+    return out ? out : ny_strdup("any");
+  }
+  case NY_TYPE_SIGMA: {
+    char *it = ny_type_to_string(type->as.sigma.index_type);
+    char *vt = ny_type_to_string(type->as.sigma.value_type);
+    char *out = NULL;
+    int n = snprintf(NULL, 0, "exists(%s %s). %s",
+                     type->as.sigma.index_name ? type->as.sigma.index_name : "?",
+                     it ? it : "any", vt ? vt : "any");
+    if (n > 0) {
+      out = (char *)malloc((size_t)n + 1);
+      if (out)
+        snprintf(out, (size_t)n + 1, "exists(%s %s). %s",
+                 type->as.sigma.index_name ? type->as.sigma.index_name : "?",
+                 it ? it : "any", vt ? vt : "any");
+    }
+    free(it);
+    free(vt);
+    return out ? out : ny_strdup("any");
+  }
+  case NY_TYPE_TYPE:
+    return ny_strdup(type->as.type_univ.name ? type->as.type_univ.name : "Type");
   case NY_TYPE_ARROW: {
     char *p = ny_type_to_string(type->as.arrow.param);
     char *r = ny_type_to_string(type->as.arrow.ret);

@@ -4,7 +4,7 @@ shape ownership_resource_partial_extraction_positive {
   features ["ownership", "resource", "linear", "aggregate", "partial-move", "positive"]
   template ny-test-case
   expect compile_and_run
-  flags "--ownership-strict --nyir-verify"
+  flags "--ownership-strict --nyr-verify"
   source ny <<'NY'
 use core
 

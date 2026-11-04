@@ -147,14 +147,12 @@ typedef struct {
   bool meta_trace;
   bool dump_llvm;
   bool dump_tokens;
-  bool dump_docs;
   bool dump_funcs;
-  bool dump_symbols;
-  bool dump_stats;
   bool dump_on_error;
   bool dump_diagnose;
   bool diag_compact;
   int warn_level;
+  bool warn_all_mode;
   int max_errors;
   const char *dump_dir;
   const char *expand_only;
@@ -166,6 +164,7 @@ typedef struct {
   const char *use_refinement_interface_path;
   const char *emit_effect_interface_path;
   const char *use_effect_interface_path;
+  void *owned_option_values;
   bool extract_code;
   bool extract_json;
   const char *extract_lang;
@@ -188,6 +187,10 @@ typedef struct {
   bool list_fallbacks;
   bool warn_shadow;
   bool help_env;
+  bool print_flags;
+  bool print_flags_json;
+  bool trust_config;
+  const char *help_topic;
   bool debug_symbols;
   bool no_std;
   bool effect_require_known;
@@ -238,6 +241,8 @@ typedef struct {
   int watch_poll_ms;
   const char *native_result_oracle_expected;
   ny_c_frontend_t c_frontend;
+  bool vm_disasm;
+  const char *vm_disasm_filter;
   bool native_dump_ir;
   bool nyr_dump_text;
   bool nyr_dump_raw;
@@ -266,6 +271,7 @@ typedef struct {
   const char *nyr_stop_after;
   bool nyr_dump_bin;
   const char *nyr_dump_bin_path;
+  const char *native_from_nyir_path;
   bool nyr_metadata_report;
   const char *nyr_metadata_report_path;
   const char *nyr_metadata_bin_path;
@@ -308,9 +314,10 @@ typedef struct {
   int parallel_min_work;
   VEC(char *) link_dirs;
   VEC(char *) link_libs;
-  char **args;
+  char **args; /* owned pointer array for the normalized program argv */
   int argc;
   int file_arg_idx;
+  bool program_args_explicitly_separated;
   double timeout;
   bool pending_command_string;
   bool enable_gc;
@@ -321,6 +328,7 @@ typedef struct {
   bool gc_flag_seen;
   ny_heap_policy_t heap_policy;
   ny_runtime_mode_t runtime_mode;
+  bool bare_native_fallback; /* internal: generic native-only bare compile */
   const char *runtime_mode_raw;
   ny_safe_run_t safe_run;
   const char *sanitize;   /* --sanitize=address|undefined|thread|leak */
@@ -334,7 +342,7 @@ typedef struct {
   bool trace_tokens;   /* --trace-tokens: lexer token stream */
   bool trace_parse;    /* --trace-parse: parser rule execution trace */
   bool trace_scope;    /* --trace-scope: binding resolution trace */
-  bool dump_ast_typed; /* --dump-ast-typed: AST dump with inferred types */
+  bool dump_ast_typed; /* --dump-ast=typed: include semantic annotations */
   bool trace_hm;       /* --trace-hm: HM type inference trace */
   bool explain; /* --explain: semantic explanations of compiler decisions */
   const char *explain_topic; /* --explain=topic: specific explanation topic */
@@ -360,10 +368,14 @@ static inline bool ny_options_target_request(const ny_options *opt,
 }
 
 void ny_options_init(ny_options *opt);
+bool ny_options_cli_list_has_item(int argc, char **argv, const char *option,
+                                  const char *wanted);
+void ny_options_validate_conflicts(int argc, char **argv);
 void ny_options_parse(ny_options *opt, int argc, char **argv);
 void ny_options_free(ny_options *opt);
 void ny_options_usage(const char *argv0);
 void ny_options_usage_env(const char *argv0);
+void ny_options_print_help(const char *argv0, const char *topic);
 const char *ny_heap_policy_name(ny_heap_policy_t policy);
 const char *ny_runtime_mode_name(ny_runtime_mode_t mode);
 ny_opt_profile_kind_t ny_opt_profile_kind_from_name(const char *profile_name);
@@ -377,6 +389,8 @@ int ny_opt_profile_name_is_valid(const char *profile_name);
 int ny_safe_run_apply_limits(const ny_safe_run_t *sr);
 int ny_safe_run_spawn(const ny_safe_run_t *sr, const char *const argv[],
                       const char *workload);
+int ny_safe_run_spawn_argv0(const ny_safe_run_t *sr, const char *executable,
+                            const char *const argv[], const char *workload);
 typedef int (*ny_safe_run_child_fn)(void *ctx);
 int ny_safe_run_call(const ny_safe_run_t *sr, ny_safe_run_child_fn fn,
                      void *ctx, const char *workload);

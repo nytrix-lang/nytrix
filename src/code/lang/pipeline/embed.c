@@ -3,9 +3,9 @@
 #include "base/options.h"
 #include "base/util.h"
 #include "code/backend/ir/internal.h"
+#include "code/backend/runtime/gc.h"
+#include "code/backend/runtime/shared.h"
 #include "code/lang/pipeline.h"
-#include "code/lang/runtime/gc.h"
-#include "code/lang/runtime/shared.h"
 
 #include <stdatomic.h>
 #include <stdio.h>

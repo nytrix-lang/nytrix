@@ -1,0 +1,88 @@
+shape brainfuck_output_is_separate_from_optional_assembly {
+  family "probe-suite"
+  timeout 180
+  generator "regression"
+  features ["cli", "brainfuck", "assembly", "output"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os (file_exists, file_read, file_remove, pid, temp_dir)
+use core.os.subprocess (run_capture)
+use core.str as str
+
+def compiler = env("NYTRIX_NY_FULL_BIN")
+def cmake = env("NYTRIX_CMAKE_COMMAND")
+def root = env("NYTRIX_ROOT")
+def project = root + "/etc/projects/brainfuck.ny"
+def working_dir = temp_dir() + "/ny-brainfuck-cli-" + to_str(pid())
+def setup = run_capture([cmake, "-E", "make_directory", working_dir],
+                        [], nil, false)
+assert(int(setup.get("code", 127)) == 0,
+       "create isolated Brainfuck CLI working directory")
+defer {
+  def cleanup = run_capture([cmake, "-E", "remove_directory", working_dir],
+                            [], nil, false)
+  assert(int(cleanup.get("code", 127)) == 0,
+         "remove isolated Brainfuck CLI working directory")
+}
+def code = "++++++++[>++++++++<-]>+."
+def default_run = run_capture(
+    [cmake, "-E", "chdir", working_dir, compiler, project, "-c", code],
+    [], nil, false)
+assert(int(default_run.get("code", 127)) == 0 &&
+       str(default_run.get("stdout", "")) == "A",
+       "default Brainfuck execution writes only its program output")
+assert(!file_exists(working_dir + "/true"),
+       "default Brainfuck execution does not emit assembly")
+def stdout_path = temp_dir() + "/ny-brainfuck-stdout-" + to_str(pid())
+def stderr_path = temp_dir() + "/ny-brainfuck-stderr-" + to_str(pid())
+defer {
+  if file_exists(stdout_path) { def _stdout_cleanup = file_remove(stdout_path) }
+  if file_exists(stderr_path) { def _stderr_cleanup = file_remove(stderr_path) }
+}
+def shell_command =
+    cmake + " -E chdir " + working_dir + " " + compiler + " " + project +
+    " -a -c '" + code + "' > " +
+    stdout_path + " 2> " + stderr_path
+def stderr_assembly = run_capture(["sh", "-c", shell_command], [], nil, false)
+def separated_stdout = file_read(stdout_path)
+def separated_stderr = file_read(stderr_path)
+assert(int(stderr_assembly.get("code", 127)) == 0 &&
+       is_ok(separated_stdout) &&
+       str(unwrap(separated_stdout)) == "A" &&
+       is_ok(separated_stderr) &&
+       str(unwrap(separated_stderr)).contains(".text"),
+       "implicit assembly output uses stderr without mixing with program stdout")
+def help_run = run_capture(
+    [cmake, "-E", "chdir", working_dir, compiler, project, "--help"],
+    [], nil, false)
+assert(int(help_run.get("code", 127)) == 0 &&
+       str(help_run.get("stdout", "")).contains("Usage: brainfuck"),
+       "Brainfuck uses core.cli generated help")
+def no_args = run_capture(
+    [cmake, "-E", "chdir", working_dir, compiler, project], [], nil, false)
+assert(int(no_args.get("code", 127)) == 2,
+       "missing Brainfuck source is a usage error")
+def bad_program = run_capture(
+    [cmake, "-E", "chdir", working_dir, compiler, project, "-c", "]"],
+    [], nil, false)
+assert(int(bad_program.get("code", 127)) == 2,
+       "unmatched closing bracket is a concise usage error")
+
+def assembly_path =
+    temp_dir() + "/ny-brainfuck-" + to_str(pid()) + ".s"
+def assembly_run = run_capture(
+    [cmake, "-E", "chdir", working_dir, compiler, project,
+     "--asm=" + assembly_path, "-c", code], [], nil, false)
+def assembly = file_read(assembly_path)
+assert(int(assembly_run.get("code", 127)) == 0 &&
+       str(assembly_run.get("stdout", "")) == "A" &&
+       is_ok(assembly) &&
+       str(unwrap(assembly)).contains(".text"),
+       "optional assembly is written to a file, not program stdout")
+assert(!file_exists(assembly_path) || is_ok(file_remove(assembly_path)),
+       "remove Brainfuck assembly artifact")
+print("BRAINFUCK_CLI_OK")
+NY
+}

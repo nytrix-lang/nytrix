@@ -1,10 +1,12 @@
 <!-- nytrix-doc: {"audience":"user","featured":false,"group":"learn","order":105,"summary":"Use compile-time assertions, bounded index types, and checked function preconditions."} -->
 # Proofs
 
-Nytrix checks a bounded set of propositions and rejects unknown obligations.
-Use proofs to express a program's preconditions or bounds; the solver is not a
-general theorem prover. [Types](../spec/types.md) lists supported forms and
-regression boundaries.
+Proof contracts express facts callers or constructors must establish, and the
+compiler checks only a bounded subset. The solver rejects obligations it cannot
+prove; it is not a general theorem prover. [Types](../spec/types.md) lists
+supported forms and regression boundaries.
+
+Prerequisites: the [Tour](tour.md) for functions, types, and assertions.
 
 ## Check a compile-time fact
 
@@ -54,3 +56,10 @@ the [type specification](../spec/types.md) and
 When a proof affects memory safety or a public API, run the paired positive and
 negative fixture for the exact construct and backend. A passing example proves
 only that obligation; it does not validate a broader theorem.
+
+Next:
+
+- [Types](../spec/types.md) — refinement and proof type rules.
+- [Functions](../spec/functions.md#preconditions-and-termination-measures) —
+  preconditions and termination measures.
+- [Testing](testing.md) — positive and negative fixtures.

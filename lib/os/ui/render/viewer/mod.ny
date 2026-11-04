@@ -440,10 +440,11 @@ fn default_override(any tag, any suffix) str {
 }
 
 ;; Returns the result of the `default_font_size` operation.
-fn default_font_size(any tag, f64 fallback, str suffix="FONT_SIZE") any {
+fn default_font_size(any tag, f64 fallback, str suffix="FONT_SIZE") f64 {
    def raw = default_override(tag, suffix)
    if raw.len == 0 { return fallback }
-   min(max(str.atof(raw), 8.0), 96.0)
+   def f64 parsed = str.atof(raw)
+   min(max(parsed, 8.0), 96.0)
 }
 
 ;; Returns the result of the `font_filter_mode` operation.

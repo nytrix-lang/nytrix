@@ -19,6 +19,29 @@
 
 #define NYIR_SMT_CFG_MAX_BACKEDGES 8u
 
+#ifdef NYTRIX_HAS_Z3
+/*
+ * DEBUG ORACLE (remove after the in-loop call corruption is fixed): the
+ * bounded CFG walk stops too early for multi-iteration loops; an env window
+ * lets translation validation complete and name a real mismatching pass.
+ */
+static size_t nyr_tv_backedge_budget(void) {
+  static size_t cached;
+  static bool seen;
+  if (!seen) {
+    seen = true;
+    cached = NYIR_SMT_CFG_MAX_BACKEDGES;
+    const char *env = getenv("NYTRIX_TV_MAX_BACKEDGES");
+    if (env && env[0]) {
+      long long parsed = atoll(env);
+      if (parsed > 0)
+        cached = (size_t)parsed;
+    }
+  }
+  return cached;
+}
+#endif
+
 /*
  * Real SMT translation validation for pure i64 straight-line NYIR.
  * With Z3: prove before ≡ after for all free local inputs (bitvector).
@@ -50,8 +73,7 @@ static Z3_ast nyr_smt_ror(Z3_context z3, Z3_ast a, Z3_ast b, unsigned bits) {
   return bits == 32 ? Z3_mk_zero_ext(z3, 32, rotated) : rotated;
 }
 
-static Z3_ast nyr_smt_i64_shift_count(Z3_context z3, Z3_sort bv,
-                                       Z3_ast count) {
+static Z3_ast nyr_smt_i64_shift_count(Z3_context z3, Z3_sort bv, Z3_ast count) {
   return Z3_mk_bvand(z3, count, Z3_mk_int64(z3, 63, bv));
 }
 
@@ -61,7 +83,7 @@ static Z3_ast nyr_smt_i64_shift_count(Z3_context z3, Z3_sort bv,
  * from the result to keep translation validation faithful to execution.
  */
 static Z3_ast nyr_smt_div_defined(Z3_context z3, Z3_sort bv, Z3_ast a,
-                                   Z3_ast b) {
+                                  Z3_ast b) {
   Z3_ast nonzero = Z3_mk_not(z3, Z3_mk_eq(z3, b, Z3_mk_int64(z3, 0, bv)));
   Z3_ast min_overflow =
       Z3_mk_and(z3, 2,
@@ -76,7 +98,7 @@ static Z3_ast nyr_smt_div_defined(Z3_context z3, Z3_sort bv, Z3_ast a,
  * this scalar bounds predicate.
  */
 static Z3_ast nyr_smt_bounds_defined(Z3_context z3, Z3_sort bv, Z3_ast offset,
-                                      Z3_ast byte_len) {
+                                     Z3_ast byte_len) {
   return Z3_mk_and(z3, 2,
                    (Z3_ast[]){Z3_mk_bvsge(z3, offset, Z3_mk_int64(z3, 0, bv)),
                               Z3_mk_bvslt(z3, offset, byte_len)});
@@ -113,7 +135,7 @@ static Z3_ast nyr_smt_bswap(Z3_context z3, Z3_ast a, unsigned bits) {
 }
 
 static Z3_ast nyr_smt_pack_i64_lanes(Z3_context z3, Z3_ast scalar,
-                                      unsigned lanes) {
+                                     unsigned lanes) {
   Z3_ast packed = scalar;
   for (unsigned lane = 1; lane < lanes; ++lane)
     packed = Z3_mk_concat(z3, packed, scalar);
@@ -121,7 +143,7 @@ static Z3_ast nyr_smt_pack_i64_lanes(Z3_context z3, Z3_ast scalar,
 }
 
 static Z3_ast nyr_smt_shuffle_vec4_f64(Z3_context z3, Z3_ast value,
-                                        int64_t mask) {
+                                       int64_t mask) {
   uint64_t selectors = (uint64_t)mask;
   Z3_ast packed = NULL;
   for (unsigned lane = 4; lane-- > 0;) {
@@ -134,7 +156,7 @@ static Z3_ast nyr_smt_shuffle_vec4_f64(Z3_context z3, Z3_ast value,
 }
 
 static Z3_ast nyr_smt_reduce_i64_lanes(Z3_context z3, Z3_ast scalar,
-                                        Z3_ast packed, unsigned lanes) {
+                                       Z3_ast packed, unsigned lanes) {
   Z3_ast sum = scalar;
   for (unsigned lane = 0; lane < lanes; ++lane) {
     unsigned low = lane * 64u;
@@ -145,7 +167,7 @@ static Z3_ast nyr_smt_reduce_i64_lanes(Z3_context z3, Z3_ast scalar,
 }
 
 static Z3_ast nyr_smt_vector_i64_binop(Z3_context z3, nyr_op_t op, Z3_ast lhs,
-                                        Z3_ast rhs, unsigned lanes) {
+                                       Z3_ast rhs, unsigned lanes) {
   Z3_sort lane_sort = Z3_mk_bv_sort(z3, 64);
   Z3_ast packed = NULL;
   for (unsigned lane = lanes; lane-- > 0;) {
@@ -178,6 +200,7 @@ static Z3_ast nyr_smt_vector_i64_binop(Z3_context z3, nyr_op_t op, Z3_ast lhs,
       value = Z3_mk_bvshl(z3, a, nyr_smt_i64_shift_count(z3, lane_sort, b));
       break;
     case NYIR_VEC4_SAR_I64:
+    case NYIR_VEC8_SAR_I64:
       value = Z3_mk_bvashr(z3, a, nyr_smt_i64_shift_count(z3, lane_sort, b));
       break;
     default:
@@ -189,7 +212,7 @@ static Z3_ast nyr_smt_vector_i64_binop(Z3_context z3, nyr_op_t op, Z3_ast lhs,
 }
 
 static Z3_ast nyr_smt_vector_f64_binop(Z3_context z3, nyr_op_t op, Z3_ast lhs,
-                                        Z3_ast rhs, Z3_ast addend) {
+                                       Z3_ast rhs, Z3_ast addend) {
   Z3_ast packed = NULL;
   Z3_ast rounding = Z3_mk_fpa_round_nearest_ties_to_even(z3);
   for (unsigned lane = 4; lane-- > 0;) {
@@ -235,7 +258,7 @@ static Z3_ast nyr_smt_vector_f64_binop(Z3_context z3, nyr_op_t op, Z3_ast lhs,
 }
 
 static Z3_ast nyr_smt_vector_f32_binop(Z3_context z3, nyr_op_t op, Z3_ast lhs,
-                                        Z3_ast rhs, Z3_ast addend) {
+                                       Z3_ast rhs, Z3_ast addend) {
   Z3_ast packed = NULL;
   Z3_ast rounding = Z3_mk_fpa_round_nearest_ties_to_even(z3);
   for (unsigned lane = 4; lane-- > 0;) {
@@ -280,7 +303,7 @@ static Z3_ast nyr_smt_pack_f32_lanes(Z3_context z3, Z3_ast scalar) {
 }
 
 static Z3_ast nyr_smt_shuffle_vec4_f32(Z3_context z3, Z3_ast value,
-                                        int64_t mask) {
+                                       int64_t mask) {
   Z3_ast packed = NULL;
   for (unsigned lane = 4; lane-- > 0;) {
     unsigned shift = lane < 2 ? lane * 2u : 4u + (lane - 2u) * 2u;
@@ -296,7 +319,7 @@ static Z3_ast nyr_smt_shuffle_vec4_f32(Z3_context z3, Z3_ast value,
 }
 
 static Z3_ast nyr_smt_reduce_f64_lanes(Z3_context z3, Z3_ast scalar,
-                                        Z3_ast packed) {
+                                       Z3_ast packed) {
   /*
    * Materialize each rounded sum back to IEEE bits between lanes, matching
    * the scalar NYIR_ADD_F64 sequence (including its NaN representation).
@@ -329,7 +352,7 @@ static Z3_ast nyr_smt_reduce_f64_lanes(Z3_context z3, Z3_ast scalar,
  * bit-level also avoids assuming anything about NaN payloads.
  */
 static Z3_ast nyr_smt_uninterpreted_unary_f64(Z3_context z3, Z3_sort bv,
-                                               const char *name, Z3_ast arg) {
+                                              const char *name, Z3_ast arg) {
   Z3_sort domain[1] = {bv};
   Z3_func_decl function =
       Z3_mk_func_decl(z3, Z3_mk_string_symbol(z3, name), 1, domain, bv);
@@ -377,8 +400,7 @@ static void nyr_smt_memory_free(ny_smt_memory_t *memory) {
   memory->call_count = 0;
 }
 
-static bool nyr_smt_call_supported(const nyr_func_t *f,
-                                    const nyr_inst_t *in) {
+static bool nyr_smt_call_supported(const nyr_func_t *f, const nyr_inst_t *in) {
   unsigned effects = in ? in->effects : 0;
   bool writes_memory = effects == (NYIR_EFFECT_CALL | NYIR_EFFECT_WRITE_MEMORY);
   bool reads_and_writes_memory =
@@ -411,7 +433,7 @@ static bool nyr_smt_call_supported(const nyr_func_t *f,
   int args[NYIR_CALL_MAX_ARGS];
   int argc = 0;
   if (!nyr_call_args(in, f->next_value, args, NYIR_CALL_MAX_ARGS, &argc, NULL,
-                      0) ||
+                     0) ||
       argc != in->imm ||
       in->extra_args_len != (argc > 6 ? (size_t)(argc - 6) : 0))
     return false;
@@ -422,8 +444,8 @@ static bool nyr_smt_call_supported(const nyr_func_t *f,
 }
 
 static bool nyr_smt_call_table_add(Z3_context z3, Z3_sort bv,
-                                    ny_smt_memory_t *memory,
-                                    const nyr_inst_t *in) {
+                                   ny_smt_memory_t *memory,
+                                   const nyr_inst_t *in) {
   size_t arity = (size_t)in->imm;
   bool reads_memory = (in->effects & NYIR_EFFECT_READ_MEMORY) != 0;
   bool writes_memory = (in->effects & NYIR_EFFECT_WRITE_MEMORY) != 0;
@@ -496,9 +518,9 @@ static bool nyr_smt_call_table_add(Z3_context z3, Z3_sort bv,
 }
 
 static bool nyr_smt_call_table_build(Z3_context z3, Z3_sort bv,
-                                      ny_smt_memory_t *memory,
-                                      const nyr_func_t *before,
-                                      const nyr_func_t *after) {
+                                     ny_smt_memory_t *memory,
+                                     const nyr_func_t *before,
+                                     const nyr_func_t *after) {
   size_t capacity = 0;
   for (size_t i = 0; i < before->len; ++i)
     capacity += before->data[i].op == NYIR_CALL;
@@ -533,7 +555,7 @@ nyr_smt_call_find(const ny_smt_memory_t *memory, const nyr_inst_t *in) {
 }
 
 static const nyr_inst_t *nyr_smt_capture_call(const nyr_func_t *f,
-                                                size_t capture_index) {
+                                              size_t capture_index) {
   if (!f || capture_index >= f->len)
     return NULL;
   for (size_t i = capture_index; i > 0; --i) {
@@ -547,16 +569,16 @@ static const nyr_inst_t *nyr_smt_capture_call(const nyr_func_t *f,
 }
 
 static bool nyr_smt_call_result(Z3_context z3, const nyr_func_t *f,
-                                 const nyr_inst_t *in,
-                                 const ny_smt_memory_t *memory, Z3_ast bytes,
-                                 Z3_ast *values, Z3_ast *out, Z3_ast *out_bytes,
-                                 Z3_ast *out_valid) {
+                                const nyr_inst_t *in,
+                                const ny_smt_memory_t *memory, Z3_ast bytes,
+                                Z3_ast *values, Z3_ast *out, Z3_ast *out_bytes,
+                                Z3_ast *out_valid) {
   if (!out || !out_bytes || !out_valid || !nyr_smt_call_supported(f, in))
     return false;
   int arg_ids[NYIR_CALL_MAX_ARGS];
   int argc = 0;
   if (!nyr_call_args(in, f->next_value, arg_ids, NYIR_CALL_MAX_ARGS, &argc,
-                      NULL, 0))
+                     NULL, 0))
     return false;
   Z3_ast args[NYIR_CALL_MAX_ARGS + 1];
   for (int i = 0; i < argc; ++i) {
@@ -592,11 +614,11 @@ static bool nyr_smt_call_result(Z3_context z3, const nyr_func_t *f,
 }
 
 static bool nyr_smt_capture_result(Z3_context z3, Z3_sort bv,
-                                    const nyr_func_t *f,
-                                    const nyr_inst_t *capture,
-                                    size_t capture_index,
-                                    const ny_smt_memory_t *memory, Z3_ast bytes,
-                                    Z3_ast *values, Z3_ast *out) {
+                                   const nyr_func_t *f,
+                                   const nyr_inst_t *capture,
+                                   size_t capture_index,
+                                   const ny_smt_memory_t *memory, Z3_ast bytes,
+                                   Z3_ast *values, Z3_ast *out) {
   const nyr_inst_t *call = nyr_smt_capture_call(f, capture_index);
   if (!out || !capture || capture->imm < 0 || !call ||
       (call->effects & NYIR_EFFECT_WRITE_MEMORY) ||
@@ -605,7 +627,7 @@ static bool nyr_smt_capture_result(Z3_context z3, Z3_sort bv,
   int arg_ids[NYIR_CALL_MAX_ARGS];
   int argc = 0;
   if (!nyr_call_args(call, f->next_value, arg_ids, NYIR_CALL_MAX_ARGS, &argc,
-                      NULL, 0))
+                     NULL, 0))
     return false;
   Z3_ast args[NYIR_CALL_MAX_ARGS + 2];
   args[0] = Z3_mk_int64(z3, capture->imm, bv);
@@ -628,14 +650,14 @@ static bool nyr_smt_capture_result(Z3_context z3, Z3_sort bv,
 }
 
 static Z3_ast nyr_smt_memory_valid_byte(Z3_context z3,
-                                         const ny_smt_memory_t *memory,
-                                         Z3_ast address) {
+                                        const ny_smt_memory_t *memory,
+                                        Z3_ast address) {
   Z3_ast args[1] = {address};
   return Z3_mk_app(z3, memory->valid_byte, 1, args);
 }
 
 static Z3_ast nyr_smt_address_add_const(Z3_context z3, Z3_sort bv,
-                                         Z3_ast address, int64_t offset) {
+                                        Z3_ast address, int64_t offset) {
   /*
    * Normalize offset-zero scalar pointers against vector lane addresses.
    */
@@ -668,7 +690,7 @@ static const nyr_inst_t *nyr_smt_value_def(const nyr_func_t *f, int value) {
 }
 
 static bool nyr_smt_const_i64(const nyr_func_t *f, int value, int64_t *out,
-                               unsigned depth) {
+                              unsigned depth) {
   if (!out || depth >= 64)
     return false;
   const nyr_inst_t *def = nyr_smt_value_def(f, value);
@@ -682,10 +704,10 @@ static bool nyr_smt_const_i64(const nyr_func_t *f, int value, int64_t *out,
 }
 
 static ny_smt_alloca_ptr_t nyr_smt_alloca_ptr(const nyr_func_t *f, int value,
-                                               unsigned depth);
+                                              unsigned depth);
 
-static ny_smt_alloca_ptr_t
-nyr_smt_merge_alloca_ptr(ny_smt_alloca_ptr_t left, ny_smt_alloca_ptr_t right) {
+static ny_smt_alloca_ptr_t nyr_smt_merge_alloca_ptr(ny_smt_alloca_ptr_t left,
+                                                    ny_smt_alloca_ptr_t right) {
   if (left.unknown || right.unknown)
     return ny_smt_unknown_alloca_ptr();
   if (left.alloca_inst < 0 && right.alloca_inst < 0)
@@ -697,7 +719,7 @@ nyr_smt_merge_alloca_ptr(ny_smt_alloca_ptr_t left, ny_smt_alloca_ptr_t right) {
 }
 
 static ny_smt_alloca_ptr_t nyr_smt_alloca_ptr(const nyr_func_t *f, int value,
-                                               unsigned depth) {
+                                              unsigned depth) {
   if (!f || depth >= 64)
     return ny_smt_unknown_alloca_ptr();
   const nyr_inst_t *def = nyr_smt_value_def(f, value);
@@ -765,7 +787,7 @@ static ny_smt_alloca_ptr_t nyr_smt_alloca_ptr(const nyr_func_t *f, int value,
   }
   if (def->op == NYIR_SELECT_I64)
     return nyr_smt_merge_alloca_ptr(nyr_smt_alloca_ptr(f, def->b, depth + 1),
-                                     nyr_smt_alloca_ptr(f, def->c, depth + 1));
+                                    nyr_smt_alloca_ptr(f, def->c, depth + 1));
   if (def->op == NYIR_LOAD_LOCAL) {
     ny_smt_alloca_ptr_t merged = ny_smt_no_alloca_ptr();
     bool has_store = false;
@@ -790,8 +812,7 @@ static ny_smt_alloca_ptr_t nyr_smt_alloca_ptr(const nyr_func_t *f, int value,
   for (size_t i = 0; i < sizeof(operands) / sizeof(operands[0]); ++i) {
     if (operands[i] < 0)
       continue;
-    ny_smt_alloca_ptr_t operand =
-        nyr_smt_alloca_ptr(f, operands[i], depth + 1);
+    ny_smt_alloca_ptr_t operand = nyr_smt_alloca_ptr(f, operands[i], depth + 1);
     if (operand.unknown || operand.alloca_inst >= 0)
       return ny_smt_unknown_alloca_ptr();
   }
@@ -813,10 +834,10 @@ static ny_smt_local_ptr_t ny_smt_unknown_local_ptr(void) {
 }
 
 static ny_smt_local_ptr_t nyr_smt_local_ptr(const nyr_func_t *f, int value,
-                                             unsigned depth);
+                                            unsigned depth);
 
 static ny_smt_local_ptr_t nyr_smt_merge_local_ptr(ny_smt_local_ptr_t left,
-                                                   ny_smt_local_ptr_t right) {
+                                                  ny_smt_local_ptr_t right) {
   if (left.unknown || right.unknown)
     return ny_smt_unknown_local_ptr();
   if (left.slot < 0 && right.slot < 0)
@@ -828,7 +849,7 @@ static ny_smt_local_ptr_t nyr_smt_merge_local_ptr(ny_smt_local_ptr_t left,
 }
 
 static ny_smt_local_ptr_t nyr_smt_local_ptr(const nyr_func_t *f, int value,
-                                             unsigned depth) {
+                                            unsigned depth) {
   if (!f || depth >= 64)
     return ny_smt_unknown_local_ptr();
   const nyr_inst_t *def = nyr_smt_value_def(f, value);
@@ -889,7 +910,7 @@ static ny_smt_local_ptr_t nyr_smt_local_ptr(const nyr_func_t *f, int value,
   }
   if (def->op == NYIR_SELECT_I64)
     return nyr_smt_merge_local_ptr(nyr_smt_local_ptr(f, def->b, depth + 1),
-                                    nyr_smt_local_ptr(f, def->c, depth + 1));
+                                   nyr_smt_local_ptr(f, def->c, depth + 1));
   if (def->op == NYIR_LOAD_LOCAL) {
     ny_smt_local_ptr_t merged = ny_smt_no_local_ptr();
     bool has_store = false;
@@ -922,7 +943,7 @@ static ny_smt_local_ptr_t nyr_smt_local_ptr(const nyr_func_t *f, int value,
 }
 
 static Z3_ast nyr_smt_alloca_base(Z3_context z3, Z3_sort bv,
-                                   size_t inst_index) {
+                                  size_t inst_index) {
   char name[64];
   snprintf(name, sizeof(name), "nyir.tv.alloca.%zu", inst_index);
   return Z3_mk_const(z3, Z3_mk_string_symbol(z3, name), bv);
@@ -935,7 +956,7 @@ static Z3_ast nyr_smt_local_base(Z3_context z3, Z3_sort bv, size_t slot) {
 }
 
 static Z3_ast nyr_smt_symbol_address(Z3_context z3, Z3_sort bv,
-                                      const char *symbol) {
+                                     const char *symbol) {
   static const char prefix[] = "nyir.tv.symbol.";
   if (!symbol)
     return NULL;
@@ -986,7 +1007,7 @@ static bool nyr_smt_alloca_cfg_supported(const nyr_func_t *f) {
       if (!nyr_cfg_is_backedge(&cfg, latch, header))
         continue;
       if (!nyr_cfg_natural_loop_blocks(&cfg, latch, header, members,
-                                        cfg.block_count))
+                                       cfg.block_count))
         goto done;
       bool has_alloca = false;
       for (size_t block = 0; block < cfg.block_count && !has_alloca; ++block) {
@@ -1062,7 +1083,7 @@ done:
 }
 
 static bool nyr_smt_alloca_shapes_match(const nyr_func_t *before,
-                                         const nyr_func_t *after) {
+                                        const nyr_func_t *after) {
   if (!before || !after)
     return false;
   bool before_has_alloca = nyr_smt_has_alloca(before);
@@ -1086,7 +1107,7 @@ static bool nyr_smt_alloca_shapes_match(const nyr_func_t *before,
 }
 
 static void nyr_smt_constrain_allocas(Z3_context z3, Z3_sort bv,
-                                       Z3_solver solver, const nyr_func_t *f) {
+                                      Z3_solver solver, const nyr_func_t *f) {
   for (size_t i = 0; i < f->len; ++i) {
     const nyr_inst_t *alloca = &f->data[i];
     if (alloca->op != NYIR_ALLOCA)
@@ -1113,8 +1134,8 @@ static void nyr_smt_constrain_allocas(Z3_context z3, Z3_sort bv,
 }
 
 static void nyr_smt_constrain_locals(Z3_context z3, Z3_sort bv,
-                                      Z3_solver solver, const nyr_func_t *f,
-                                      size_t nloc) {
+                                     Z3_solver solver, const nyr_func_t *f,
+                                     size_t nloc) {
   for (size_t i = 0; i < nloc; ++i) {
     Z3_ast base = nyr_smt_local_base(z3, bv, i);
     Z3_ast end = Z3_mk_bvadd(z3, base, Z3_mk_int64(z3, 8, bv));
@@ -1144,14 +1165,12 @@ static void nyr_smt_constrain_locals(Z3_context z3, Z3_sort bv,
 }
 
 static Z3_ast nyr_smt_memory_valid_for_value(Z3_context z3, Z3_sort bv,
-                                              const ny_smt_memory_t *memory,
-                                              const nyr_func_t *f,
-                                              bool has_alloca,
-                                              int address_value, Z3_ast address,
-                                              unsigned width) {
-  ny_smt_alloca_ptr_t ptr = has_alloca
-                                ? nyr_smt_alloca_ptr(f, address_value, 0)
-                                : ny_smt_no_alloca_ptr();
+                                             const ny_smt_memory_t *memory,
+                                             const nyr_func_t *f,
+                                             bool has_alloca, int address_value,
+                                             Z3_ast address, unsigned width) {
+  ny_smt_alloca_ptr_t ptr = has_alloca ? nyr_smt_alloca_ptr(f, address_value, 0)
+                                       : ny_smt_no_alloca_ptr();
   if (ptr.unknown)
     return NULL;
   if (ptr.alloca_inst >= 0) {
@@ -1182,11 +1201,11 @@ static Z3_ast nyr_smt_memory_valid_for_value(Z3_context z3, Z3_sort bv,
     Z3_ast chunk_valid = Z3_mk_true(z3);
     for (unsigned i = 0; i < chunk_width; ++i) {
       Z3_ast at = nyr_smt_address_add_const(z3, bv, address,
-                                             (int64_t)chunk_start + (int64_t)i);
+                                            (int64_t)chunk_start + (int64_t)i);
       chunk_valid = Z3_simplify(
           z3, Z3_mk_and(z3, 2,
-                        (Z3_ast[]){chunk_valid, nyr_smt_memory_valid_byte(
-                                                    z3, memory, at)}));
+                        (Z3_ast[]){chunk_valid,
+                                   nyr_smt_memory_valid_byte(z3, memory, at)}));
     }
     valid = Z3_simplify(z3, Z3_mk_and(z3, 2, (Z3_ast[]){valid, chunk_valid}));
   }
@@ -1194,11 +1213,11 @@ static Z3_ast nyr_smt_memory_valid_for_value(Z3_context z3, Z3_sort bv,
 }
 
 static Z3_ast nyr_smt_copy_struct_valid(Z3_context z3, Z3_sort bv,
-                                         const ny_smt_memory_t *memory,
-                                         const nyr_func_t *f, bool has_alloca,
-                                         int dst_value, Z3_ast dst,
-                                         int src_value, Z3_ast src,
-                                         unsigned size) {
+                                        const ny_smt_memory_t *memory,
+                                        const nyr_func_t *f, bool has_alloca,
+                                        int dst_value, Z3_ast dst,
+                                        int src_value, Z3_ast src,
+                                        unsigned size) {
   Z3_ast dst_valid = nyr_smt_memory_valid_for_value(
       z3, bv, memory, f, has_alloca, dst_value, dst, size);
   Z3_ast src_valid = nyr_smt_memory_valid_for_value(
@@ -1221,8 +1240,8 @@ static Z3_ast nyr_smt_copy_struct_valid(Z3_context z3, Z3_sort bv,
 }
 
 static Z3_ast nyr_smt_memory_copy_struct(Z3_context z3, Z3_sort bv,
-                                          Z3_ast bytes, Z3_ast dst, Z3_ast src,
-                                          unsigned size) {
+                                         Z3_ast bytes, Z3_ast dst, Z3_ast src,
+                                         unsigned size) {
   for (unsigned i = 0; i < size; ++i) {
     Z3_ast offset = Z3_mk_int64(z3, i, bv);
     Z3_ast source = Z3_mk_bvadd(z3, src, offset);
@@ -1234,7 +1253,7 @@ static Z3_ast nyr_smt_memory_copy_struct(Z3_context z3, Z3_sort bv,
 }
 
 static Z3_ast nyr_smt_memory_load32(Z3_context z3, Z3_sort bv, Z3_ast bytes,
-                                     Z3_ast address) {
+                                    Z3_ast address) {
   Z3_ast value = NULL;
   for (unsigned i = 0; i < 4; ++i) {
     Z3_ast at = nyr_smt_address_add_const(z3, bv, address, i);
@@ -1244,8 +1263,17 @@ static Z3_ast nyr_smt_memory_load32(Z3_context z3, Z3_sort bv, Z3_ast bytes,
   return value;
 }
 
+static Z3_ast nyr_smt_memory_load16(Z3_context z3, Z3_sort bv, Z3_ast bytes,
+                                    Z3_ast address) {
+  Z3_ast low = Z3_mk_select(z3, bytes, address);
+  Z3_ast high_address = nyr_smt_address_add_const(z3, bv, address, 1);
+  Z3_ast high = Z3_mk_select(z3, bytes, high_address);
+  Z3_ast value = Z3_mk_concat(z3, high, low);
+  return Z3_mk_zero_ext(z3, 48, value);
+}
+
 static Z3_ast nyr_smt_memory_load64(Z3_context z3, Z3_sort bv, Z3_ast bytes,
-                                     Z3_ast address) {
+                                    Z3_ast address) {
   Z3_ast value = NULL;
   for (unsigned i = 0; i < 8; ++i) {
     Z3_ast at = nyr_smt_address_add_const(z3, bv, address, i);
@@ -1260,8 +1288,8 @@ static Z3_ast nyr_smt_memory_load64(Z3_context z3, Z3_sort bv, Z3_ast bytes,
 }
 
 static Z3_ast nyr_smt_memory_store64(Z3_context z3, Z3_sort bv, Z3_ast bytes,
-                                      Z3_ast address, Z3_ast value,
-                                      unsigned width) {
+                                     Z3_ast address, Z3_ast value,
+                                     unsigned width) {
   for (unsigned i = 0; i < width; ++i) {
     Z3_ast at = nyr_smt_address_add_const(z3, bv, address, i);
     Z3_ast byte = Z3_mk_extract(z3, i * 8 + 7, i * 8, value);
@@ -1271,19 +1299,19 @@ static Z3_ast nyr_smt_memory_store64(Z3_context z3, Z3_sort bv, Z3_ast bytes,
 }
 
 static Z3_ast nyr_smt_memory_init_locals(Z3_context z3, Z3_sort bv,
-                                          Z3_ast bytes, Z3_ast *locals,
-                                          size_t nloc) {
+                                         Z3_ast bytes, Z3_ast *locals,
+                                         size_t nloc) {
   if (nloc && !locals)
     return NULL;
   for (size_t i = 0; i < nloc; ++i)
-    bytes = nyr_smt_memory_store64(
-        z3, bv, bytes, nyr_smt_local_base(z3, bv, i), locals[i], 8);
+    bytes = nyr_smt_memory_store64(z3, bv, bytes, nyr_smt_local_base(z3, bv, i),
+                                   locals[i], 8);
   return bytes;
 }
 
 static Z3_ast nyr_smt_memory_store_vec_i64(Z3_context z3, Z3_sort bv,
-                                            Z3_ast bytes, Z3_ast address,
-                                            Z3_ast packed, unsigned lanes) {
+                                           Z3_ast bytes, Z3_ast address,
+                                           Z3_ast packed, unsigned lanes) {
   for (unsigned lane = 0; lane < lanes; ++lane) {
     unsigned low = lane * 64u;
     Z3_ast value = Z3_mk_extract(z3, low + 63u, low, packed);
@@ -1295,7 +1323,7 @@ static Z3_ast nyr_smt_memory_store_vec_i64(Z3_context z3, Z3_sort bv,
 }
 
 static Z3_ast nyr_smt_memory_load_vec2_i64(Z3_context z3, Z3_sort bv,
-                                            Z3_ast bytes, Z3_ast address) {
+                                           Z3_ast bytes, Z3_ast address) {
   Z3_ast second_address = nyr_smt_address_add_const(z3, bv, address, 8);
   Z3_ast first = nyr_smt_memory_load64(z3, bv, bytes, address);
   Z3_ast second = nyr_smt_memory_load64(z3, bv, bytes, second_address);
@@ -1303,7 +1331,7 @@ static Z3_ast nyr_smt_memory_load_vec2_i64(Z3_context z3, Z3_sort bv,
 }
 
 static Z3_ast nyr_smt_memory_load_vec4_i64(Z3_context z3, Z3_sort bv,
-                                            Z3_ast bytes, Z3_ast address) {
+                                           Z3_ast bytes, Z3_ast address) {
   Z3_ast packed = nyr_smt_memory_load64(z3, bv, bytes, address);
   for (unsigned lane = 1; lane < 4; ++lane) {
     Z3_ast lane_address =
@@ -1315,7 +1343,7 @@ static Z3_ast nyr_smt_memory_load_vec4_i64(Z3_context z3, Z3_sort bv,
 }
 
 static Z3_ast nyr_smt_memory_load_vec4_f32(Z3_context z3, Z3_sort bv,
-                                            Z3_ast bytes, Z3_ast address) {
+                                           Z3_ast bytes, Z3_ast address) {
   Z3_ast packed = nyr_smt_memory_load32(z3, bv, bytes, address);
   for (unsigned lane = 1; lane < 4; ++lane) {
     Z3_ast lane_address =
@@ -1327,23 +1355,22 @@ static Z3_ast nyr_smt_memory_load_vec4_f32(Z3_context z3, Z3_sort bv,
 }
 
 static Z3_ast nyr_smt_memory_store_vec_f32(Z3_context z3, Z3_sort bv,
-                                            Z3_ast bytes, Z3_ast address,
-                                            Z3_ast packed) {
+                                           Z3_ast bytes, Z3_ast address,
+                                           Z3_ast packed) {
   for (unsigned lane = 0; lane < 4; ++lane) {
     unsigned low = lane * 32u;
     Z3_ast value = Z3_mk_extract(z3, low + 31u, low, packed);
-    Z3_ast lane_address =
-        nyr_smt_address_add_const(z3, bv, address, lane * 4u);
+    Z3_ast lane_address = nyr_smt_address_add_const(z3, bv, address, lane * 4u);
     bytes = nyr_smt_memory_store64(z3, bv, bytes, lane_address, value, 4);
   }
   return bytes;
 }
 
 static bool nyr_smt_eval_straightline(Z3_context z3, Z3_sort bv,
-                                       const nyr_func_t *f,
-                                       const ny_smt_memory_t *memory,
-                                       Z3_ast *locals, size_t nloc,
-                                       Z3_ast *out_ret, Z3_ast *out_valid) {
+                                      const nyr_func_t *f,
+                                      const ny_smt_memory_t *memory,
+                                      Z3_ast *locals, size_t nloc,
+                                      Z3_ast *out_ret, Z3_ast *out_valid) {
   Z3_ast *vals = NULL;
   Z3_ast *loc = NULL;
   if (f->next_value > 0) {
@@ -1416,21 +1443,38 @@ static bool nyr_smt_eval_straightline(Z3_context z3, Z3_sort bv,
       r = a;
       break;
     case NYIR_LOAD_I64:
-      NYIR_SMT_ADD_MEMORY_VALID(8);
-      r = nyr_smt_memory_load64(z3, bv, bytes, a);
+      NYIR_SMT_ADD_MEMORY_VALID((in->flags & NYIR_INST_F_MEM_BYTE)  ? 1
+                                : (in->flags & NYIR_INST_F_MEM_U16) ? 2
+                                : (in->flags & NYIR_INST_F_MEM_I32) ? 4
+                                                                    : 8);
+      if (in->flags & NYIR_INST_F_MEM_BYTE)
+        r = Z3_mk_zero_ext(
+            z3, 56,
+            Z3_mk_extract(z3, 7, 0, nyr_smt_memory_load32(z3, bv, bytes, a)));
+      else if (in->flags & NYIR_INST_F_MEM_U16)
+        r = nyr_smt_memory_load16(z3, bv, bytes, a);
+      else if (in->flags & NYIR_INST_F_MEM_I32)
+        r = Z3_mk_sign_ext(z3, 32, nyr_smt_memory_load32(z3, bv, bytes, a));
+      else
+        r = nyr_smt_memory_load64(z3, bv, bytes, a);
       break;
     case NYIR_STORE_I64:
-      NYIR_SMT_ADD_MEMORY_VALID((in->flags & NYIR_INST_F_MEM_BYTE) ? 1 : 8);
-      bytes =
-          nyr_smt_memory_store64(z3, bv, bytes, a, select_false,
-                                  (in->flags & NYIR_INST_F_MEM_BYTE) ? 1u : 8u);
+      NYIR_SMT_ADD_MEMORY_VALID((in->flags & NYIR_INST_F_MEM_BYTE)  ? 1
+                                : (in->flags & NYIR_INST_F_MEM_U16) ? 2
+                                : (in->flags & NYIR_INST_F_MEM_I32) ? 4
+                                                                    : 8);
+      bytes = nyr_smt_memory_store64(z3, bv, bytes, a, select_false,
+                                     (in->flags & NYIR_INST_F_MEM_BYTE)  ? 1u
+                                     : (in->flags & NYIR_INST_F_MEM_U16) ? 2u
+                                     : (in->flags & NYIR_INST_F_MEM_I32) ? 4u
+                                                                         : 8u);
       break;
     case NYIR_COPY_STRUCT: {
       if (in->imm <= 0 || (uint64_t)in->imm > UINT_MAX)
         goto unsupported;
       unsigned size = (unsigned)in->imm;
       Z3_ast valid = nyr_smt_copy_struct_valid(z3, bv, memory, f, has_alloca,
-                                                in->a, a, in->b, b, size);
+                                               in->a, a, in->b, b, size);
       if (!valid)
         goto unsupported;
       *out_valid = Z3_mk_and(z3, 2, (Z3_ast[]){*out_valid, valid});
@@ -1455,6 +1499,14 @@ static bool nyr_smt_eval_straightline(Z3_context z3, Z3_sort bv,
       break;
     case NYIR_VEC4_SET1_I64:
       r = nyr_smt_pack_i64_lanes(z3, a, 2);
+      break;
+    case NYIR_VEC8_SAR_I64:
+      r = nyr_smt_vector_i64_binop(
+          z3, in->op, a,
+          nyr_smt_pack_i64_lanes(z3, Z3_mk_int64(z3, in->imm, bv), 4), 4);
+      break;
+    case NYIR_VEC8_SET1_I64:
+      r = nyr_smt_pack_i64_lanes(z3, a, 4);
       break;
     case NYIR_VEC4_REDUCE_ADD_I64:
       r = nyr_smt_reduce_i64_lanes(z3, a, b, 2);
@@ -1535,7 +1587,7 @@ static bool nyr_smt_eval_straightline(Z3_context z3, Z3_sort bv,
       Z3_ast next_bytes = NULL;
       Z3_ast call_valid = NULL;
       if (!nyr_smt_call_result(z3, f, in, memory, bytes, vals, &r, &next_bytes,
-                                &call_valid))
+                               &call_valid))
         goto unsupported;
       bytes = next_bytes;
       *out_valid = Z3_mk_and(z3, 2, (Z3_ast[]){*out_valid, call_valid});
@@ -1727,7 +1779,7 @@ static bool nyr_smt_eval_straightline(Z3_context z3, Z3_sort bv,
       if (in->imm < 0 || (uint64_t)in->imm >= nloc)
         goto unsupported;
       r = nyr_smt_memory_load64(z3, bv, bytes,
-                                 nyr_smt_local_base(z3, bv, (size_t)in->imm));
+                                nyr_smt_local_base(z3, bv, (size_t)in->imm));
       break;
     case NYIR_STORE_LOCAL:
       if (in->imm < 0 || (uint64_t)in->imm >= nloc || !loc || in->a < 0 ||
@@ -1903,9 +1955,9 @@ static bool ny_smt_record_return(Z3_context z3, ny_smt_result_t *out,
 }
 
 static bool nyr_smt_walk_cfg(Z3_context z3, Z3_sort bv, const nyr_func_t *f,
-                              bool has_alloca, size_t nloc,
-                              const bool *memory_locals, ny_smt_path_t *st,
-                              ny_smt_result_t *out) {
+                             bool has_alloca, size_t nloc,
+                             const bool *memory_locals, ny_smt_path_t *st,
+                             ny_smt_result_t *out) {
   const size_t step_limit = f->len * 12u + 64u;
 #define NYIR_SMT_CFG_MEMORY_VALID(width)                                       \
   do {                                                                         \
@@ -1946,8 +1998,8 @@ static bool nyr_smt_walk_cfg(Z3_context z3, Z3_sort bv, const nyr_func_t *f,
     case NYIR_BOUNDS_CHECK: {
       Z3_ast byte_len =
           in->c >= 0 ? select_false : Z3_mk_int64(z3, in->imm, bv);
-      st->path = ny_z3_and2(z3, st->path,
-                            nyr_smt_bounds_defined(z3, bv, b, byte_len));
+      st->path =
+          ny_z3_and2(z3, st->path, nyr_smt_bounds_defined(z3, bv, b, byte_len));
       continue;
     }
     case NYIR_LABEL:
@@ -2000,14 +2052,33 @@ static bool nyr_smt_walk_cfg(Z3_context z3, Z3_sort bv, const nyr_func_t *f,
       r = a;
       break;
     case NYIR_LOAD_I64:
-      NYIR_SMT_CFG_MEMORY_VALID(8);
-      r = nyr_smt_memory_load64(z3, bv, st->bytes, a);
+      NYIR_SMT_CFG_MEMORY_VALID((in->flags & NYIR_INST_F_MEM_BYTE)  ? 1
+                                : (in->flags & NYIR_INST_F_MEM_U16) ? 2
+                                : (in->flags & NYIR_INST_F_MEM_I32) ? 4
+                                                                    : 8);
+      if (in->flags & NYIR_INST_F_MEM_BYTE)
+        r = Z3_mk_zero_ext(
+            z3, 56,
+            Z3_mk_extract(z3, 7, 0,
+                          nyr_smt_memory_load32(z3, bv, st->bytes, a)));
+      else if (in->flags & NYIR_INST_F_MEM_U16)
+        r = nyr_smt_memory_load16(z3, bv, st->bytes, a);
+      else if (in->flags & NYIR_INST_F_MEM_I32)
+        r = Z3_mk_sign_ext(z3, 32, nyr_smt_memory_load32(z3, bv, st->bytes, a));
+      else
+        r = nyr_smt_memory_load64(z3, bv, st->bytes, a);
       break;
     case NYIR_STORE_I64:
-      NYIR_SMT_CFG_MEMORY_VALID((in->flags & NYIR_INST_F_MEM_BYTE) ? 1 : 8);
+      NYIR_SMT_CFG_MEMORY_VALID((in->flags & NYIR_INST_F_MEM_BYTE)  ? 1
+                                : (in->flags & NYIR_INST_F_MEM_U16) ? 2
+                                : (in->flags & NYIR_INST_F_MEM_I32) ? 4
+                                                                    : 8);
       st->bytes =
           nyr_smt_memory_store64(z3, bv, st->bytes, a, select_false,
-                                  (in->flags & NYIR_INST_F_MEM_BYTE) ? 1u : 8u);
+                                 (in->flags & NYIR_INST_F_MEM_BYTE)  ? 1u
+                                 : (in->flags & NYIR_INST_F_MEM_U16) ? 2u
+                                 : (in->flags & NYIR_INST_F_MEM_I32) ? 4u
+                                                                     : 8u);
       break;
     case NYIR_COPY_STRUCT: {
       if (in->imm <= 0 || (uint64_t)in->imm > UINT_MAX)
@@ -2041,6 +2112,14 @@ static bool nyr_smt_walk_cfg(Z3_context z3, Z3_sort bv, const nyr_func_t *f,
     case NYIR_VEC4_SET1_I64:
       r = nyr_smt_pack_i64_lanes(z3, a, 2);
       break;
+    case NYIR_VEC8_SAR_I64:
+      r = nyr_smt_vector_i64_binop(
+          z3, in->op, a,
+          nyr_smt_pack_i64_lanes(z3, Z3_mk_int64(z3, in->imm, bv), 4), 4);
+      break;
+    case NYIR_VEC8_SET1_I64:
+      r = nyr_smt_pack_i64_lanes(z3, a, 4);
+      break;
     case NYIR_VEC4_REDUCE_ADD_I64:
       r = nyr_smt_reduce_i64_lanes(z3, a, b, 2);
       break;
@@ -2070,8 +2149,7 @@ static bool nyr_smt_walk_cfg(Z3_context z3, Z3_sort bv, const nyr_func_t *f,
     case NYIR_VEC4_STORE_F64: {
       Z3_ast packed = in->b >= 0 ? b : select_false;
       NYIR_SMT_CFG_MEMORY_VALID(32);
-      st->bytes =
-          nyr_smt_memory_store_vec_i64(z3, bv, st->bytes, a, packed, 4);
+      st->bytes = nyr_smt_memory_store_vec_i64(z3, bv, st->bytes, a, packed, 4);
       continue;
     }
     case NYIR_VEC4_SET1_F64:
@@ -2119,7 +2197,7 @@ static bool nyr_smt_walk_cfg(Z3_context z3, Z3_sort bv, const nyr_func_t *f,
     case NYIR_CALL: {
       Z3_ast call_valid = NULL;
       if (!nyr_smt_call_result(z3, f, in, &st->memory, st->bytes, st->values,
-                                &r, &st->bytes, &call_valid))
+                               &r, &st->bytes, &call_valid))
         return false;
       st->path = ny_z3_and2(z3, st->path, call_valid);
       break;
@@ -2127,7 +2205,7 @@ static bool nyr_smt_walk_cfg(Z3_context z3, Z3_sort bv, const nyr_func_t *f,
     case NYIR_CAPTURE_RET:
       if (in->imm < 0 || in->imm > 13 ||
           !nyr_smt_capture_result(z3, bv, f, in, inst_index, &st->memory,
-                                   st->bytes, st->values, &r))
+                                  st->bytes, st->values, &r))
         return false;
       break;
     case NYIR_ADD_I64:
@@ -2282,8 +2360,7 @@ static bool nyr_smt_walk_cfg(Z3_context z3, Z3_sort bv, const nyr_func_t *f,
     case NYIR_F32_TO_I64: {
       Z3_ast value = in->op == NYIR_F64_TO_I64 ? ny_z3_f64_from_bits(z3, a)
                                                : ny_z3_f32_from_bits(z3, a);
-      st->path =
-          ny_z3_and2(z3, st->path, nyr_smt_fp_to_i64_defined(z3, value));
+      st->path = ny_z3_and2(z3, st->path, nyr_smt_fp_to_i64_defined(z3, value));
       r = Z3_mk_fpa_to_sbv(z3, Z3_mk_fpa_round_toward_zero(z3), value, 64);
       break;
     }
@@ -2293,17 +2370,15 @@ static bool nyr_smt_walk_cfg(Z3_context z3, Z3_sort bv, const nyr_func_t *f,
       if (!memory_locals || !memory_locals[in->imm])
         r = st->locals[in->imm];
       else
-        r = nyr_smt_memory_load64(
-            z3, bv, st->bytes,
-            nyr_smt_local_base(z3, bv, (size_t)in->imm));
+        r = nyr_smt_memory_load64(z3, bv, st->bytes,
+                                  nyr_smt_local_base(z3, bv, (size_t)in->imm));
       break;
     case NYIR_STORE_LOCAL:
       if (in->imm < 0 || (size_t)in->imm >= nloc || !st->locals)
         return false;
       st->locals[in->imm] = a;
       st->bytes = nyr_smt_memory_store64(
-          z3, bv, st->bytes, nyr_smt_local_base(z3, bv, (size_t)in->imm), a,
-          8);
+          z3, bv, st->bytes, nyr_smt_local_base(z3, bv, (size_t)in->imm), a, 8);
       continue;
     case NYIR_BR: {
       size_t target = ny_smt_label_pc(f, in->imm);
@@ -2325,7 +2400,7 @@ static bool nyr_smt_walk_cfg(Z3_context z3, Z3_sort bv, const nyr_func_t *f,
       if (known == Z3_L_FALSE)
         continue;
       if (known == Z3_L_TRUE) {
-        if (target < st->pc && ++st->backedges > NYIR_SMT_CFG_MAX_BACKEDGES) {
+        if (target < st->pc && ++st->backedges > nyr_tv_backedge_budget()) {
           out->complete = false;
           return true;
         }
@@ -2336,12 +2411,12 @@ static bool nyr_smt_walk_cfg(Z3_context z3, Z3_sort bv, const nyr_func_t *f,
       if (!ny_smt_clone_path(f, nloc, st, &taken))
         return false;
       taken.path = ny_z3_and2(z3, taken.path, cond);
-      if (target < st->pc && ++taken.backedges > NYIR_SMT_CFG_MAX_BACKEDGES)
+      if (target < st->pc && ++taken.backedges > nyr_tv_backedge_budget())
         out->complete = false;
       else {
         taken.pc = target;
         if (!nyr_smt_walk_cfg(z3, bv, f, has_alloca, nloc, memory_locals,
-                               &taken, out)) {
+                              &taken, out)) {
           ny_smt_free_path(&taken);
           return false;
         }
@@ -2367,8 +2442,8 @@ static bool nyr_smt_walk_cfg(Z3_context z3, Z3_sort bv, const nyr_func_t *f,
 }
 
 static bool nyr_smt_eval_cfg(Z3_context z3, Z3_sort bv, const nyr_func_t *f,
-                              const ny_smt_memory_t *memory, Z3_ast *locals,
-                              size_t nloc, ny_smt_result_t *out) {
+                             const ny_smt_memory_t *memory, Z3_ast *locals,
+                             size_t nloc, ny_smt_result_t *out) {
   *out = (ny_smt_result_t){.valid = Z3_mk_false(z3),
                            .value = Z3_mk_int64(z3, 0, bv),
                            .complete = true};
@@ -2398,8 +2473,7 @@ static bool nyr_smt_eval_cfg(Z3_context z3, Z3_sort bv, const nyr_func_t *f,
   }
   for (size_t i = 0; i < f->len; ++i) {
     const nyr_inst_t *in = &f->data[i];
-    if (in->op == NYIR_ADDR_LOCAL && in->imm >= 0 &&
-        (size_t)in->imm < nloc)
+    if (in->op == NYIR_ADDR_LOCAL && in->imm >= 0 && (size_t)in->imm < nloc)
       memory_locals[in->imm] = true;
   }
   st.bytes = nyr_smt_memory_init_locals(z3, bv, st.bytes, st.locals, nloc);
@@ -2409,8 +2483,8 @@ static bool nyr_smt_eval_cfg(Z3_context z3, Z3_sort bv, const nyr_func_t *f,
     return false;
   }
   bool has_alloca = nyr_smt_has_alloca(f);
-  bool ok = nyr_smt_walk_cfg(z3, bv, f, has_alloca, nloc, memory_locals, &st,
-                              out);
+  bool ok =
+      nyr_smt_walk_cfg(z3, bv, f, has_alloca, nloc, memory_locals, &st, out);
   free(memory_locals);
   ny_smt_free_path(&st);
   return ok && out->paths > 0;
@@ -2609,10 +2683,9 @@ static bool nyr_smt_function_supported(const nyr_func_t *f) {
 }
 
 static bool nyr_smt_results_equivalent(Z3_context z3, Z3_solver solver,
-                                        Z3_ast valid_before,
-                                        Z3_ast value_before, Z3_ast valid_after,
-                                        Z3_ast value_after, bool cfg, char *err,
-                                        size_t err_len) {
+                                       Z3_ast valid_before, Z3_ast value_before,
+                                       Z3_ast valid_after, Z3_ast value_after,
+                                       bool cfg, char *err, size_t err_len) {
   bool valid_same = Z3_is_eq_ast(z3, valid_before, valid_after);
   bool value_same = Z3_is_eq_ast(z3, value_before, value_after);
   if (valid_same && value_same)
@@ -2630,10 +2703,10 @@ static bool nyr_smt_results_equivalent(Z3_context z3, Z3_solver solver,
     if (status != Z3_L_FALSE) {
       if (status == Z3_L_TRUE)
         nyr_err(err, err_len, "%s: definedness counterexample",
-                 cfg ? "SMT CFG TV" : "SMT TV");
+                cfg ? "SMT CFG TV" : "SMT TV");
       else
         nyr_err(err, err_len, "%s: solver unknown",
-                 cfg ? "SMT CFG TV" : "SMT TV");
+                cfg ? "SMT CFG TV" : "SMT TV");
       return false;
     }
   }
@@ -2656,7 +2729,7 @@ static bool nyr_smt_results_equivalent(Z3_context z3, Z3_solver solver,
     return true;
   if (status == Z3_L_TRUE)
     nyr_err(err, err_len, "%s: bounded counterexample",
-             cfg ? "SMT CFG TV" : "SMT TV");
+            cfg ? "SMT CFG TV" : "SMT TV");
   else
     nyr_err(err, err_len, "%s: solver unknown", cfg ? "SMT CFG TV" : "SMT TV");
   return false;
@@ -2664,7 +2737,7 @@ static bool nyr_smt_results_equivalent(Z3_context z3, Z3_solver solver,
 #endif
 
 bool nyr_tv_smt_equiv(const nyr_func_t *before, const nyr_func_t *after,
-                       char *err, size_t err_len) {
+                      char *err, size_t err_len) {
   if (err && err_len)
     err[0] = '\0';
   if (!before || !after)
@@ -2673,8 +2746,7 @@ bool nyr_tv_smt_equiv(const nyr_func_t *before, const nyr_func_t *after,
   if (!nyr_is_pure_i64_straightline(before) ||
       !nyr_is_pure_i64_straightline(after))
 #else
-  if (!nyr_smt_function_supported(before) ||
-      !nyr_smt_function_supported(after))
+  if (!nyr_smt_function_supported(before) || !nyr_smt_function_supported(after))
 #endif
     return false;
 #ifdef NYTRIX_HAS_Z3
@@ -2709,9 +2781,8 @@ bool nyr_tv_smt_equiv(const nyr_func_t *before, const nyr_func_t *after,
       nyr_smt_memory_free(&memory);
       Z3_solver_dec_ref(z3, solver);
       Z3_del_context(z3);
-      return nyr_err(
-          err, err_len,
-          "SMT CFG TV: call model allocation or signature conflict");
+      return nyr_err(err, err_len,
+                     "SMT CFG TV: call model allocation or signature conflict");
     }
     Z3_ast *locals = nloc ? calloc(nloc, sizeof(*locals)) : NULL;
     if (nloc && !locals) {
@@ -2741,7 +2812,7 @@ bool nyr_tv_smt_equiv(const nyr_func_t *before, const nyr_func_t *after,
       Z3_solver_dec_ref(z3, solver);
       Z3_del_context(z3);
       return nyr_err(err, err_len,
-                      "SMT CFG TV: bounded exploration incomplete");
+                     "SMT CFG TV: bounded exploration incomplete");
     }
     bool ok = nyr_smt_results_equivalent(
         z3, solver, rb.valid, rb.value, ra.valid, ra.value, true, err, err_len);
@@ -2782,7 +2853,7 @@ bool nyr_tv_smt_equiv(const nyr_func_t *before, const nyr_func_t *after,
     Z3_solver_dec_ref(z3, solver);
     Z3_del_context(z3);
     return nyr_err(err, err_len,
-                    "SMT TV: call model allocation or signature conflict");
+                   "SMT TV: call model allocation or signature conflict");
   }
 
   Z3_ast *locals = NULL;
@@ -2806,9 +2877,9 @@ bool nyr_tv_smt_equiv(const nyr_func_t *before, const nyr_func_t *after,
   Z3_ast valid_b = Z3_mk_true(z3);
   Z3_ast valid_a = Z3_mk_true(z3);
   bool ok_b = nyr_smt_eval_straightline(z3, bv, before, &memory, locals, nloc,
-                                         &ret_b, &valid_b);
+                                        &ret_b, &valid_b);
   bool ok_a = nyr_smt_eval_straightline(z3, bv, after, &memory, locals, nloc,
-                                         &ret_a, &valid_a);
+                                        &ret_a, &valid_a);
   if (!ok_b || !ok_a) {
     free(locals);
     nyr_smt_memory_free(&memory);
@@ -2817,7 +2888,7 @@ bool nyr_tv_smt_equiv(const nyr_func_t *before, const nyr_func_t *after,
     return nyr_tv_equiv_straightline(before, after, 64, err, err_len);
   }
   bool ok = nyr_smt_results_equivalent(z3, solver, valid_b, ret_b, valid_a,
-                                        ret_a, false, err, err_len);
+                                       ret_a, false, err, err_len);
 
   free(locals);
   nyr_smt_memory_free(&memory);

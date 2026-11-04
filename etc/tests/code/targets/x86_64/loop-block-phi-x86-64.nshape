@@ -3,7 +3,7 @@ shape oracle_loop_block_phi_x86_64 {
   generator "native"
   features [native x86_64 oracle loop phi edge-copy block-layout regression]
   template ny-test-case
-  flags_matrix "-O2 --nyir-verify --native-result-oracle=55; -O3 --nyir-verify --native-result-oracle=55"
+  flags_matrix "-O2 --nyr-verify --native-result-oracle=55; -O3 --nyr-verify --native-result-oracle=55"
   expect compile_and_run
   source ny <<'NY'
 fn main() int {

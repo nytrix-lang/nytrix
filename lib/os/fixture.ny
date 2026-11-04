@@ -27,12 +27,16 @@
 ;;   succeeds. A bounded frame/request completion exits successfully;
 ;;   `exit_status` returns 124 on a wall timeout. Apps close resources before
 ;;   returning that status.
+;; Test-only UI replay uses `NYTRIX_UI_REPLAY`, fixed mock-renderer time,
+;; `NYTRIX_FIXTURE_EVENTS` records (`frame,type,arg1,arg2,arg3`, separated
+;; by semicolons), and per-frame framebuffer hashes. Cross-route parity is
+;; exercised by the native `ny-test ui-replay` command.
 module core.os.fixture(start, start_ui, tick, tick_ui, next_ui_key, delay, is_interactive, interactive, quit_key, ready, exit_status, canvas_loop)
 use core
 use core.common as common
 use core.str
 use core.term as cli_term
-use core.os.args as cli
+use core.os.args as process_args
 use core.os.time as time
 
 fn interactive() bool {
@@ -40,7 +44,7 @@ fn interactive() bool {
    __tty_isatty(0) != 0 && __tty_isatty(1) != 0
 }
 
-fn quit_key(any key) bool {
+fn quit_key(int key) bool {
    "Returns true for the shared TUI quit keys(ESC, Ctrl+C, q, Q)."
    key == 27 || key == 3 || key == 113 || key == 81
 }
@@ -80,7 +84,7 @@ fn start(int def_frames=0, int def_frame_ms=0, int def_timeout_ms=0) list {
    NYTRIX_FIXTURE_FRAMES applies ; otherwise the app default, and a
    non-interactive run renders a single frame."
    def live = interactive()
-   def want = cli.first_positive_int()
+   def want = process_args.first_positive_int()
    mut max_frames = def_frames
    if want > 0 {
       max_frames = want
@@ -96,7 +100,7 @@ fn start(int def_frames=0, int def_frame_ms=0, int def_timeout_ms=0) list {
 
 fn start_ui(int def_frames=0, int def_timeout_ms=0, bool headless=false) list {
    "Resolves frame and wall-time budgets for a GUI example. `headless` selects a one-frame default."
-   def want = cli.first_positive_int()
+   def want = process_args.first_positive_int()
    mut max_frames = def_frames
    if want > 0 {
       max_frames = want

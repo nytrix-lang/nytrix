@@ -11,8 +11,8 @@ fn argc() int {
    __argc()
 }
 
-fn argv(int i) any {
-   "Returns the argv string at index `i`, or 0."
+fn argv(int i) str {
+   "Returns the argv string at index `i`, or an empty string when out of range."
    return __argv(i)
 }
 
@@ -35,17 +35,21 @@ fn program() str {
 }
 
 fn positionals_from(list ag) list {
-   "Returns user arguments after argv[0]; if `--` is present, returns only arguments after it."
+   "Returns arguments after argv[0], or only those after the first `--` if present."
    mut out = list(8)
    mut i = 1
-   mut passthrough = false
    while i < ag.len {
-      def item = to_str(ag.get(i))
-      if !passthrough && item == "--" {
-         passthrough = true
-      } else {
-         out = out.append(item)
+      def tok = to_str(ag.get(i))
+      if tok == "--" {
+         out = list(8)
+         i += 1
+         while i < ag.len {
+            out = out.append(to_str(ag.get(i)))
+            i += 1
+         }
+         return out
       }
+      out = out.append(tok)
       i += 1
    }
    out
@@ -68,9 +72,15 @@ fn _args_value_from(list ag, str name, str fallback="") str {
    while i < ag.len {
       def tok = to_str(ag.get(i))
       if tok == "--" { return fallback }
-      def assigned = _args_assignment_value(tok, name)
-      if assigned != nil { return to_str(assigned) }
-      if tok == name { return (i + 1 < ag.len) ? to_str(ag.get(i + 1)) : fallback }
+      def prefix = name + "="
+      if str.startswith(tok, prefix) {
+         return str.str_slice(tok, prefix.len, tok.len)
+      }
+      if tok == name {
+         if i + 1 >= ag.len { return fallback }
+         def candidate = to_str(ag.get(i + 1))
+         return candidate == "-" || !str.startswith(candidate, "-") ? candidate : fallback
+      }
       i += 1
    }
    fallback
@@ -82,13 +92,25 @@ fn value_from(list ag, str name, str fallback="") str {
 }
 
 fn _args_flag_from(list ag, str name) bool {
-   "Returns whether `name` appears in argument list `ag`."
+   "Returns the last positive or `--no-name` setting, including short clusters."
    mut i = 1
+   mut stop = ag.len
    while i < ag.len {
-      def tok = to_str(ag.get(i))
-      if tok == "--" { return false }
-      if tok == name || _args_assignment_value(tok, name) != nil { return true }
+      if to_str(ag.get(i)) == "--" {
+         stop = i
+         break
+      }
       i += 1
+   }
+   i = stop - 1
+   def negated = str.startswith(name, "--") ? "--no-" + str.str_slice(name, 2, name.len) : ""
+   while i > 0 {
+      def tok = to_str(ag.get(i))
+      if tok == name || _args_assignment_value(tok, name) != nil {
+         return true
+      }
+      if negated.len > 0 && tok == negated { return false }
+      i -= 1
    }
    false
 }
@@ -147,11 +169,17 @@ fn first_positive_int(int fallback=0) int {
    assert(is_str(prog) && prog.len > 0, "args argv0")
    assert(argv(0) == prog, "args argv matches")
    assert(program() == prog, "args program")
-   assert(positionals_from(["ny", "a", "--", "--raw"]) == ["a", "--raw"], "args positionals")
+   assert(is_str(argv(-1)) && argv(-1) == "", "args argv negative boundary")
+   assert(is_str(argv(argc())) && argv(argc()) == "", "args argv upper boundary")
+   assert(positionals_from(["ny", "a", "--", "--raw"]) == ["--raw"], "args positionals after separator")
+   assert(positionals_from(["ny", "a", "b"]) == ["a", "b"], "args positionals without separator")
+   assert(positionals_from(["ny", "--", "a", "--", "b"]) == ["a", "--", "b"], "args positionals consume first separator")
    assert(value_from(["ny", "--x", "42"], "--x", "0") == "42", "args value next")
    assert(value_from(["ny", "--x=42"], "--x", "0") == "42", "args value assigned")
    assert(value_from(["ny", "--x"], "--x", "fallback") == "fallback", "args value fallback")
    assert(flag_from(["ny", "--flag"], "--flag"), "args flag")
+   assert(!flag_from(["ny", "--feature", "--no-feature"], "--feature"), "args negated flag")
+   assert(value_from(["ny", "-o=out"], "-o", "") == "out", "args short equals value")
    assert(int_value_from(["ny", "--n", "7"], "--n", 0) == 7, "args int value")
    assert(float_value_from(["ny", "--f", "2.5"], "--f", 0.0) > 2.0, "args float value")
    assert(first_positive_int_from(["ny", "0", "-3", "12"], 5) == 12 && first_positive_int_from(["ny", "0"], 5) == 5, "args first positive int")

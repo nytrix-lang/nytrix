@@ -16,10 +16,12 @@ def _EVENT_NONE = 0
 
 fn is_event(any ev) bool {
    "Returns true when `ev` is a core.os.ui event payload."
-   is_list(ev) && ev.len >= 5 && ev.get(_E_TAG, "") == "core.os.ui.window.event"
+   if !is_list(ev) || ev.len < 5 { return false }
+   def tag = ev.get(_E_TAG, "")
+   is_str(tag) && str(tag) == "core.os.ui.window.event"
 }
 
-fn make_event(i32 kind, any win, i32 win_id=0, any data=0) list {
+fn make_event(i32 kind, any win, int win_id=0, any data=0) list {
    "Constructs an event payload."
    ["core.os.ui.window.event", kind, win, win_id, data]
 }

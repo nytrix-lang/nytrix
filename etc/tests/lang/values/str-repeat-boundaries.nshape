@@ -1,0 +1,44 @@
+shape str_repeat_boundaries {
+  family "lang"
+  features ["string", "repeat", "memory"]
+  template ny-test-case
+  flags_matrix "-O0 --native-only; -O3 --native-only; -O3 --jit --jit-engine=mcjit"
+  expect compile_and_run
+  source ny <<'NY'
+use core.str
+
+fn operator_repeat(str source, int count) str { source * count }
+
+;; Single-byte fill, partial pattern blocks, and sources larger than a block.
+def str single = str.repeat("x", 8193)
+assert(single.len == 8193 && single[0] == "x" && single[8192] == "x",
+       "single-byte repeat fills the entire destination")
+def str odd = operator_repeat("abcde", 1001)
+assert(odd.len == 5005 && odd[4095] == "a" && odd[4096] == "b" && odd[5004] == "e",
+       "operator repeat preserves alignment across partial blocks")
+def str source = str.repeat("ab", 2049) + "z"
+def str large = str.repeat(source, 3)
+assert(large.len == 12297 && large[4098] == "z" && large[4099] == "a" &&
+       large[8197] == "z" && large[8198] == "a" && large[12296] == "z",
+       "large source repeat copies complete and partial doubled prefixes")
+assert(operator_repeat("abc", 0) == "" && operator_repeat("abc", -1) == "",
+       "operator repeat handles nonpositive counts")
+assert(operator_repeat("", 100) == "" && str.repeat("", 100) == "",
+       "empty sources remain empty")
+assert(operator_repeat("é🙂", 3) == "é🙂é🙂é🙂",
+       "operator repeat preserves UTF-8 bytes")
+
+;; Method-call dispatch lowers through the core.str.repeat runtime alias and
+;; must land on the raw-count entry: odd raw counts (and a count of one) used
+;; to be silently halved or dropped by the tagged-count entry's untagging.
+def str method_five = "ny".repeat(5)
+assert(method_five == "nynynynyny", "method repeat handles odd counts")
+def str method_one = "ab".repeat(1)
+assert(method_one == "ab", "method repeat handles a count of one")
+def str method_zero = "ab".repeat(0)
+assert(method_zero == "", "method repeat handles zero")
+mut count3 = 3
+assert("ab".repeat(count3) == "ababab",
+       "method repeat accepts dynamic odd counts")
+NY
+}

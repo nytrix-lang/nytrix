@@ -1498,6 +1498,47 @@ static void repl_paste_string_state_update(char ch, int *in_str, char *quote,
 
 enum { REPL_TAB_VISUAL_WIDTH = 2, REPL_CONT_PROMPT_COLS = 3 };
 
+/*
+ * Advance the visual cursor over one character of the input buffer.  Newlines
+ * restart at the continuation-prompt width, tabs cover their visual width
+ * with the same wrap rule, and UTF-8 continuation bytes advance nothing.
+ */
+static void repl_cursor_advance(char ch, int *row, int *col, int term_cols) {
+  if (ch == '\n') {
+    (*row)++;
+    *col = REPL_CONT_PROMPT_COLS;
+  } else if (ch == '\t') {
+    if (*col >= term_cols) {
+      (*row)++;
+      *col = 0;
+    }
+    *col += REPL_TAB_VISUAL_WIDTH;
+    if (*col > term_cols) {
+      (*row)++;
+      *col -= term_cols;
+    }
+  } else if ((ch & 0xc0) == 0x80) {
+    /*
+     * UTF-8 continuation byte: no visual advance.
+     */
+  } else {
+    if (*col >= term_cols) {
+      (*row)++;
+      *col = 0;
+    }
+    (*col)++;
+  }
+}
+
+/*
+ * Byte index of the start of the line containing pos.
+ */
+static int repl_line_start(const char *buf, int pos) {
+  while (pos > 0 && buf[pos - 1] != '\n')
+    pos--;
+  return pos;
+}
+
 static void calc_cursor(const char *buf, int pos, int term_cols,
                         int prompt_cols, int *r, int *c) {
   int row = 0;
@@ -1507,28 +1548,7 @@ static void calc_cursor(const char *buf, int pos, int term_cols,
     col -= term_cols;
   }
   for (int i = 0; i < pos; i++) {
-    if (buf[i] == '\n') {
-      row++;
-      col = REPL_CONT_PROMPT_COLS;
-    } else if (buf[i] == '\t') {
-      if (col >= term_cols) {
-        row++;
-        col = 0;
-      }
-      col += REPL_TAB_VISUAL_WIDTH;
-      if (col > term_cols) {
-        row++;
-        col -= term_cols;
-      }
-    } else if ((buf[i] & 0xc0) == 0x80) {
-      continue;
-    } else {
-      if (col >= term_cols) {
-        row++;
-        col = 0;
-      }
-      col++;
-    }
+    repl_cursor_advance(buf[i], &row, &col, term_cols);
   }
   *r = row;
   *c = col;
@@ -1560,30 +1580,9 @@ static int visual_to_pos(const char *buf, int len, int target_r, int target_c,
     }
     if (i == len)
       break;
-    if (buf[i] == '\n') {
-      if (row == target_r)
-        return i;
-      row++;
-      col = REPL_CONT_PROMPT_COLS;
-    } else if (buf[i] == '\t') {
-      if (col >= term_cols) {
-        row++;
-        col = 0;
-      }
-      col += REPL_TAB_VISUAL_WIDTH;
-      if (col > term_cols) {
-        row++;
-        col -= term_cols;
-      }
-    } else if ((buf[i] & 0xc0) == 0x80) {
-      continue;
-    } else {
-      if (col >= term_cols) {
-        row++;
-        col = 0;
-      }
-      col++;
-    }
+    if (buf[i] == '\n' && row == target_r)
+      return i;
+    repl_cursor_advance(buf[i], &row, &col, term_cols);
   }
   return len;
 }
@@ -1635,28 +1634,7 @@ static void buf_row_slice(const char *buf, int term_cols, int prompt_cols,
       *out_len = i - s_idx;
       return;
     }
-    if (buf[i] == '\n') {
-      row++;
-      col = REPL_CONT_PROMPT_COLS;
-    } else if (buf[i] == '\t') {
-      if (col >= term_cols) {
-        row++;
-        col = 0;
-      }
-      col += REPL_TAB_VISUAL_WIDTH;
-      if (col > term_cols) {
-        row++;
-        col -= term_cols;
-      }
-    } else if ((buf[i] & 0xc0) == 0x80) {
-      continue;
-    } else {
-      if (col >= term_cols) {
-        row++;
-        col = 0;
-      }
-      col++;
-    }
+    repl_cursor_advance(buf[i], &row, &col, term_cols);
   }
   if (s_idx == -1) {
     *out_start = bytes;
@@ -3592,9 +3570,7 @@ char *ny_readline(const char *prompt) {
       } else {
         int complete = is_input_complete(buf);
         int at_end = (pos == len);
-        int line_start = pos;
-        while (line_start > 0 && buf[line_start - 1] != '\n')
-          line_start--;
+        int line_start = repl_line_start(buf, pos);
         int line_empty = 1;
         for (int i = line_start; i < pos; i++)
           if (!isspace((unsigned char)buf[i])) {
@@ -3695,9 +3671,7 @@ char *ny_readline(const char *prompt) {
       if (!repl_delete_active_selection(buf, &len, &pos, &sel_anchor,
                                         &sel_mode) &&
           pos > 0) {
-        int line_start = pos;
-        while (line_start > 0 && buf[line_start - 1] != '\n')
-          line_start--;
+        int line_start = repl_line_start(buf, pos);
         int all_spaces = 1;
         for (int i = line_start; i < pos; i++)
           if (buf[i] != ' ') {
@@ -3877,9 +3851,7 @@ char *ny_readline(const char *prompt) {
       }
     } else if (k == K_HOME || k == K_CTRL_A || k == K_SHIFT_HOME ||
                k == K_ALT_SHIFT_HOME) {
-      int line_start = pos;
-      while (line_start > 0 && buf[line_start - 1] != '\n')
-        line_start--;
+      int line_start = repl_line_start(buf, pos);
       int indent_end = line_start;
       while (indent_end < len && buf[indent_end] == ' ')
         indent_end++;
@@ -3916,9 +3888,7 @@ char *ny_readline(const char *prompt) {
     } else if (k == K_CTRL_U) {
       if (!repl_delete_active_selection(buf, &len, &pos, &sel_anchor,
                                         &sel_mode)) {
-        int line_start = pos;
-        while (line_start > 0 && buf[line_start - 1] != '\n')
-          line_start--;
+        int line_start = repl_line_start(buf, pos);
         int klen = pos - line_start;
         repl_set_kill_ring(buf + line_start, klen);
         memmove(buf + line_start, buf + pos, len - pos + 1);

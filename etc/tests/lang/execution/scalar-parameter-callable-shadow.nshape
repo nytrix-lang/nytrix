@@ -3,7 +3,7 @@ shape scalar_parameter_callable_shadow {
   generator "regression"
   features [shadowing scalar parameter callable container abi]
   template ny-test-case
-  flags_matrix "--native --run; --native-only --nyir-verify; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
+  flags_matrix "--native --run; --native-only --nyr-verify; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
   expect compile_and_run
   source ny <<'NY'
 use core

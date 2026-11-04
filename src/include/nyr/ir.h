@@ -6,6 +6,13 @@
 #include <stdint.h>
 #include <stdio.h>
 
+enum {
+  NYR_IR_OPT_DISABLE_VECTORIZATION = 1u << 0,
+  /* Permit four-lane i64 loop-vectorization forms when the selected target
+   * advertises AVX2 and the x86 lowering can encode them. */
+  NYR_IR_OPT_AVX2_VECTORIZE = 1u << 1,
+};
+
 /* Language-neutral ownership fact transported on NYIR values and call args.
  * Frontends may derive it from their own type systems; backends consume the
  * explicit fact without depending on a source-language AST. */
@@ -31,7 +38,7 @@ static inline uintptr_t nyr_vm_symbol_handle(const char *symbol) {
 }
 
 static inline uintptr_t nyr_vm_prefixed_symbol_handle(const char *prefix,
-                                                       const char *symbol) {
+                                                      const char *symbol) {
   if (!prefix || !symbol)
     return 0;
   uint64_t hash = UINT64_C(1469598103934665603);
@@ -127,7 +134,7 @@ typedef enum {
   NYIR_VEC4_XOR_I64,
   NYIR_VEC4_SHL_I64,
   NYIR_VEC4_SAR_I64,
-  NYIR_VEC4_REDUCE_ADD_I64, /* dst = scalar a + sum of four lanes in b */
+  NYIR_VEC4_REDUCE_ADD_I64, /* dst = scalar a + sum of two i64 lanes in b */
   /* SIMD vec8 packed i64 (256-bit, 4--i64).  Verifier/type-map/vectorizer
    * are fully wired.  Object encoders lower these through the NIR-fallback
    * path until native ymm (x86-64) / SVE (AArch64) emission is added. */
@@ -138,7 +145,7 @@ typedef enum {
   NYIR_VEC8_AND_I64,
   NYIR_VEC8_OR_I64,
   NYIR_VEC8_XOR_I64,
-  NYIR_VEC8_REDUCE_ADD_I64, /* dst = scalar a + sum of eight lanes in b */
+  NYIR_VEC8_REDUCE_ADD_I64, /* dst = scalar a + sum of four i64 lanes in b */
   /* Bounds check: verifies addr + offset within [base, base+len).
    * .a = base pointer, .b = offset, .imm = byte length.
    * Elided at lowering time when the index type is Fin<N> and
@@ -154,6 +161,23 @@ typedef enum {
   NYIR_ROR32_I64,
   NYIR_BSWAP_I64,
   NYIR_BSWAP32_I64,
+  /* SysV x86-64 C variadic ABI operations emitted by the standalone C
+   * frontend. VA_SAVE snapshots incoming argument registers and returns the
+   * 176-byte register-save area. VA_START initializes a va_list using that
+   * area and the named-parameter register/stack offsets. VA_ARG consumes one
+   * promoted scalar or pointer argument. */
+  NYIR_VA_SAVE,
+  NYIR_VA_START,
+  NYIR_VA_ARG,
+  /* Side-effecting target assembly with optional frontend-lowered operands. */
+  NYIR_INLINE_ASM,
+  /* Read the current x86-64 RSP value without modeling it as memory. */
+  NYIR_READ_X86_RSP,
+  /* dst = {a, a, a, a} (256-bit i64 broadcast). Appended to keep all
+   * previously serialized NYIR opcode numbers stable. */
+  NYIR_VEC8_SET1_I64,
+  /* Four arithmetic i64 shifts by the immediate count (0..63), AVX2. */
+  NYIR_VEC8_SAR_I64,
   NYIR_OP_COUNT,
 } nyr_op_t;
 
@@ -195,6 +219,10 @@ typedef enum {
 #define NYIR_INST_F_EXTERN 1u
 #define NYIR_INST_F_SRET 8u
 #define NYIR_INST_F_MEM_BYTE 32u
+#define NYIR_INST_F_MEM_I32 64u
+#define NYIR_INST_F_MEM_VOLATILE 128u
+#define NYIR_INST_F_MEM_U16 256u
+
 /* Set by nyr_narrow() on scalar-int ALU ops with a proven non-negative u32
  * result, exact `& 0xffffffff` masks, and operations in a low-word expression
  * whose uses are all consumed modulo 2^32. The emitter may use 32-bit
@@ -217,6 +245,17 @@ typedef enum {
  * of exactly one argument. The verifier checks the call's return-borrow
  * contract before accepting the fact. */
 #define NYIR_INST_F_NOALIAS 2048u
+/* NYIR_CALL carries its function address as positional argument zero. */
+#define NYIR_INST_F_INDIRECT 4096u
+/* NYIR_CALL uses the SysV variadic calling convention, including %al's
+ * vector-register argument count on x86-64. */
+#define NYIR_INST_F_VARIADIC 8192u
+/* i386 integer/pointer argument registers: EAX, EDX, ECX. */
+#define NYIR_INST_F_I386_REGPARM_SHIFT 14u
+#define NYIR_INST_F_I386_REGPARM_MASK (3u << NYIR_INST_F_I386_REGPARM_SHIFT)
+/* i386 C scalar widths: unset argument bits denote 32 bits. */
+#define NYIR_INST_F_I386_C_ABI (1u << 17)
+#define NYIR_INST_F_I386_RET32 (1u << 16)
 
 /*
  * Set on integer ALU operations (add/sub/mul/shl) when range analysis proves
@@ -230,6 +269,9 @@ typedef enum {
 #define NYIR_INST_F_IN_BOUNDS_ADDR 512u
 /* Temporary marker used only while nyr_mem2reg renames its own PHIs. */
 #define NYIR_INST_F_MEM2REG_PHI 1024u
+/* Temporary affine-nest proof: this ADD is a loop-invariant address base.
+ * LICM consumes and clears the marker after hoisting the instruction. */
+#define NYIR_INST_F_AFFINE_ADDR_BASE 16u
 
 /* Packed NYIR_CALL aggregate-argument metadata. */
 #define NYIR_ARG_AGG_SIZE_MASK 0x00ffffffu
@@ -353,9 +395,8 @@ typedef struct {
  * anything that must outlive the callback. On success, write the raw NYIR
  * result through `result`. `ctx` is borrowed for the full evaluation. */
 typedef bool (*nyr_call_resolver_t)(void *ctx, const char *symbol,
-                                     const int64_t *args, size_t arg_count,
-                                     int64_t *result, char *err,
-                                     size_t err_len);
+                                    const int64_t *args, size_t arg_count,
+                                    int64_t *result, char *err, size_t err_len);
 
 /* Lowered scalar ABI class. Source semantic reps are mapped to this enum at
  * the AST-to-NYIR boundary; emitters and type maps consume this fact. */
@@ -392,6 +433,7 @@ typedef struct {
   /* NYIR_CALL formal scalar classes, packed as sixteen four-bit entries per
    * word. Kept inline so ordinary instructions do not own another buffer. */
   uint64_t arg_scalar_classes[NYIR_CALL_MAX_ARGS / 16];
+  uint64_t i386_wide_args;
   /* NYIR_CALL actual-value ownership at this call site: thirty-two two-bit
    * entries per word. Zero is UNKNOWN; known entries use ny_sem_ownership_t
    * values from ast.h. This is not the callee formal's borrow/consume
@@ -432,7 +474,7 @@ typedef struct {
 
 static inline void
 nyr_call_arg_class_set(uint64_t packed[NYIR_CALL_MAX_ARGS / 16], size_t arg,
-                        nyr_scalar_class_t scalar_class) {
+                       nyr_scalar_class_t scalar_class) {
   if (!packed || arg >= NYIR_CALL_MAX_ARGS || scalar_class > 15)
     return;
   size_t word = arg / 16;
@@ -441,13 +483,13 @@ nyr_call_arg_class_set(uint64_t packed[NYIR_CALL_MAX_ARGS / 16], size_t arg,
                  ((uint64_t)scalar_class << shift);
 }
 
-static inline nyr_scalar_class_t
-nyr_call_arg_class_get(const nyr_inst_t *inst, size_t arg) {
+static inline nyr_scalar_class_t nyr_call_arg_class_get(const nyr_inst_t *inst,
+                                                        size_t arg) {
   if (!inst || arg >= NYIR_CALL_MAX_ARGS)
     return NYIR_SCALAR_UNKNOWN;
   unsigned shift = (unsigned)(arg % 16) * 4u;
   return (nyr_scalar_class_t)((inst->arg_scalar_classes[arg / 16] >> shift) &
-                               0xfu);
+                              0xfu);
 }
 
 static inline bool nyr_call_arg_classes_present(const nyr_inst_t *inst) {
@@ -460,7 +502,7 @@ static inline bool nyr_call_arg_classes_present(const nyr_inst_t *inst) {
 }
 
 static inline uint8_t nyr_call_arg_ownership_get(const nyr_inst_t *inst,
-                                                  size_t arg) {
+                                                 size_t arg) {
   if (!inst || inst->op != NYIR_CALL || arg >= NYIR_CALL_MAX_ARGS)
     return 0;
   unsigned shift = (unsigned)(arg % 32) * 2u;
@@ -469,7 +511,7 @@ static inline uint8_t nyr_call_arg_ownership_get(const nyr_inst_t *inst,
 
 static inline void
 nyr_call_arg_ownership_set_packed(uint64_t packed[NYIR_CALL_MAX_ARGS / 32],
-                                   size_t arg, uint8_t ownership) {
+                                  size_t arg, uint8_t ownership) {
   if (!packed || arg >= NYIR_CALL_MAX_ARGS || ownership > 3)
     return;
   unsigned shift = (unsigned)(arg % 32) * 2u;
@@ -479,14 +521,14 @@ nyr_call_arg_ownership_set_packed(uint64_t packed[NYIR_CALL_MAX_ARGS / 32],
 }
 
 static inline void nyr_call_arg_ownership_set(nyr_inst_t *inst, size_t arg,
-                                               uint8_t ownership) {
+                                              uint8_t ownership) {
   if (!inst || inst->op != NYIR_CALL || arg >= NYIR_CALL_MAX_ARGS)
     return;
   nyr_call_arg_ownership_set_packed(inst->arg_ownership, arg, ownership);
 }
 
 static inline uint8_t nyr_call_arg_contract_get(const nyr_inst_t *inst,
-                                                 size_t arg) {
+                                                size_t arg) {
   if (!inst || inst->op != NYIR_CALL || arg >= NYIR_CALL_MAX_ARGS)
     return 0;
   unsigned shift = (unsigned)(arg % 32) * 2u;
@@ -495,7 +537,7 @@ static inline uint8_t nyr_call_arg_contract_get(const nyr_inst_t *inst,
 
 static inline void
 nyr_call_arg_contract_set_packed(uint64_t packed[NYIR_CALL_MAX_ARGS / 32],
-                                  size_t arg, uint8_t contract) {
+                                 size_t arg, uint8_t contract) {
   if (!packed || arg >= NYIR_CALL_MAX_ARGS || contract > 3u)
     return;
   unsigned shift = (unsigned)(arg % 32) * 2u;
@@ -504,7 +546,7 @@ nyr_call_arg_contract_set_packed(uint64_t packed[NYIR_CALL_MAX_ARGS / 32],
 }
 
 static inline void nyr_call_arg_contract_set(nyr_inst_t *inst, size_t arg,
-                                              uint8_t contract) {
+                                             uint8_t contract) {
   if (!inst || inst->op != NYIR_CALL || arg >= NYIR_CALL_MAX_ARGS)
     return;
   nyr_call_arg_contract_set_packed(inst->arg_contracts, arg, contract);
@@ -513,7 +555,7 @@ static inline void nyr_call_arg_contract_set(nyr_inst_t *inst, size_t arg,
 /* Decode and validate the positional value IDs carried by a call instruction.
  * Backends share this boundary so a..f/extra_args cannot drift by target. */
 bool nyr_call_args(const nyr_inst_t *in, int value_count, int *args,
-                    size_t args_cap, int *argc_out, char *err, size_t err_len);
+                   size_t args_cap, int *argc_out, char *err, size_t err_len);
 
 typedef struct {
   bool *value_f64;
@@ -545,6 +587,13 @@ typedef enum {
    * storage that the backend prologue fills from the incoming registers or
    * stack area. */
   NYIR_PARAM_AGGREGATE,
+  /* Unsigned byte scalar. The value is zero-extended into NYIR's i64 word
+   * after the target ABI delivers it in the low byte of an integer argument
+   * register or stack slot. */
+  NYIR_PARAM_U8,
+  /* Signed byte scalar, sign-extended into NYIR's i64 word at function entry.
+   */
+  NYIR_PARAM_I8,
 } nyr_param_type_t;
 
 typedef struct {
@@ -580,6 +629,8 @@ typedef struct {
    * in rax. */
   uint32_t return_aggregate_size;
   uint8_t return_aggregate_classes[2];
+  uint8_t i386_regparm;
+  uint64_t i386_wide_params;
   /* Source-level callback arity expansion: each language parameter occupies
    * one value slot plus its hidden list/string/dynamic metadata slots. */
   uint8_t *source_param_widths;
@@ -590,7 +641,8 @@ typedef struct {
 } nyr_func_t;
 
 /* Copy a symbol into function-owned storage. The returned pointer remains
- * valid until nyr_ir_func_free and can be used for names exposed alongside it. */
+ * valid until nyr_ir_func_free and can be used for names exposed alongside it.
+ */
 const char *nyr_func_own_symbol_copy(nyr_func_t *f, const char *symbol);
 
 /**
@@ -627,7 +679,7 @@ typedef struct {
 } nyr_cfg_t;
 
 bool nyr_type_map_init(nyr_type_map_t *map, const nyr_func_t *nyir,
-                        size_t local_count);
+                       size_t local_count);
 void nyr_type_map_free(nyr_type_map_t *map);
 
 #define NYIR_MAX_PASS_STATS 96
@@ -683,63 +735,76 @@ void nyr_cfg_free(nyr_cfg_t *cfg);
 /* Allocates the entry-reachable blocks in deterministic reverse-postorder.
  * The caller owns the returned block array and releases it with free(). */
 bool nyr_cfg_reverse_postorder(const nyr_cfg_t *cfg, size_t **out_blocks,
-                                size_t *out_len);
+                               size_t *out_len);
 bool nyr_cfg_dominates(const nyr_cfg_t *cfg, size_t dominator, size_t block);
 bool nyr_cfg_is_backedge(const nyr_cfg_t *cfg, size_t predecessor,
-                          size_t successor);
+                         size_t successor);
 /* Compute the natural-loop block set for a dominance backedge. `member`
  * must have at least cfg->block_count entries and is cleared before use. */
 bool nyr_cfg_natural_loop_blocks(const nyr_cfg_t *cfg, size_t latch,
-                                  size_t header, bool *member,
-                                  size_t member_count);
+                                 size_t header, bool *member,
+                                 size_t member_count);
 /**
- * Promote initialized, non-address-taken scalar locals to SSA values.
+ * Promote non-address-taken scalar locals to SSA values, including parameter
+ * reads and dead stores. Address-taken locals stay in memory.
  *
  * On success `f` contains owned NYIR_PHI metadata. Optimizers preserve
  * those PHIs; machine lowering destroys them with predecessor-edge copies.
  */
 bool nyr_mem2reg(nyr_func_t *f);
-/* Audit/test override; production nested-SSA promotion remains gated. */
-void nyr_set_nested_mem2reg_enabled(bool enabled);
 bool nyr_validate_constraints(const nyr_func_t *f, char *err, size_t err_len);
-bool nyr_metadata_summary(const nyr_func_t *f,
-                           nyr_metadata_summary_t *summary, char *err,
-                           size_t err_len);
+bool nyr_metadata_summary(const nyr_func_t *f, nyr_metadata_summary_t *summary,
+                          char *err, size_t err_len);
 void nyr_metadata_summary_dump(FILE *out, const char *name,
-                                const nyr_metadata_summary_t *summary);
+                               const nyr_metadata_summary_t *summary);
 bool nyr_analyze_values(const nyr_func_t *f, nyr_value_fact_t *facts,
-                         size_t fact_count, char *err, size_t err_len);
+                        size_t fact_count, char *err, size_t err_len);
 bool nyr_ir_eval(const nyr_func_t *f, int64_t *locals, size_t local_count,
-               size_t max_steps, nyr_eval_result_t *result, char *err,
-               size_t err_len);
+                 size_t max_steps, nyr_eval_result_t *result, char *err,
+                 size_t err_len);
 void nyr_eval_result_dump(FILE *out, const char *name,
-                           const nyr_eval_result_t *result);
+                          const nyr_eval_result_t *result);
 void nyr_eval_result_free(nyr_eval_result_t *result);
 bool nyr_ir_eval_with_calls(const nyr_func_t *f, int64_t *locals,
-                          size_t local_count, size_t max_steps,
-                          nyr_eval_result_t *result,
-                          nyr_call_resolver_t resolver, void *resolver_ctx,
-                          char *err, size_t err_len);
+                            size_t local_count, size_t max_steps,
+                            nyr_eval_result_t *result,
+                            nyr_call_resolver_t resolver, void *resolver_ctx,
+                            char *err, size_t err_len);
+bool nyr_ir_eval_with_calls_profile(const nyr_func_t *f, int64_t *locals,
+                                    size_t local_count, size_t max_steps,
+                                    nyr_eval_result_t *result,
+                                    bool collect_profile,
+                                    nyr_call_resolver_t resolver,
+                                    void *resolver_ctx, char *err,
+                                    size_t err_len);
 void nyr_refresh_metadata(nyr_func_t *f);
 unsigned nyr_inst_effects(const nyr_inst_t *inst);
 void nyr_dump(FILE *out, const nyr_func_t *f, const char *name);
+bool nyr_dump_program_instructions(FILE *out, const nyr_func_t *entry,
+                                   const char *entry_name,
+                                   const nyr_func_t *functions,
+                                   const char *const *function_names,
+                                   size_t function_count,
+                                   const char *name_filter);
 void nyr_dump_compact(FILE *out, const nyr_func_t *f, const char *name);
 /* Compact one-line-per-change dump: before → after. Skips unchanged/nops. */
-void nyr_dump_diff(FILE *out, const nyr_func_t *before,
-                    const nyr_func_t *after, const char *pass_tag);
+void nyr_dump_diff(FILE *out, const nyr_func_t *before, const nyr_func_t *after,
+                   const char *pass_tag);
 /* True when the compact diff contains no instruction changes. */
 bool nyr_diff_is_empty(const nyr_func_t *before, const nyr_func_t *after);
 void nyr_dump_cfg(FILE *out, const nyr_func_t *f, const char *name);
 void nyr_dump_stats(FILE *out, const nyr_opt_stats_t *stats);
 bool nyr_dump_binary(FILE *out, const nyr_func_t *f, const char *name);
 /** Load a versioned NYIR binary into `out`, freeing its old contents.
- * Current output is v11; v1--v7 are normalized into the current opcode table,
+ * Current output is v22; v1--v7 are normalized into the current opcode table,
  * v8 effect metadata is normalized to the current effect model, v10 adds
  * parameter-type serialization, and v11 appends f64 reduction opcodes without
- * renumbering the older serialized opcode table.
+ * renumbering the older serialized opcode table. v20 adds unsigned-byte
+ * parameter metadata, v21 adds signed-byte parameter metadata, and v22 adds
+ * an x86-64 RSP-read instruction.
  * Rejects incompatible format versions and writes a diagnostic to `err`. */
 bool nyr_load_binary(FILE *in, nyr_func_t *out, char *name, size_t name_len,
-                      char *err, size_t err_len);
+                     char *err, size_t err_len);
 bool nyr_const_fold(nyr_func_t *f);
 /* Sparse conditional constant propagation for SSA/PHI NYIR. */
 bool nyr_sccp(nyr_func_t *f);
@@ -749,6 +814,16 @@ bool nyr_dce(nyr_func_t *f);
 bool nyr_cfg_simplify(nyr_func_t *f);
 /* Convert exact, short, side-effect-free i64 diamonds to NYIR_SELECT_I64. */
 bool nyr_if_convert(nyr_func_t *f);
+/* Shorten innermost-loop recurrence chains by exact i64 reassociation. */
+bool nyr_ilp_reassociate(nyr_func_t *f);
+/* Fold finite select chains whose arithmetic progression is proven safe. */
+bool nyr_select_chain_fold(nyr_func_t *f);
+/* Keep directly addressed global slots in locals across call-free loops. */
+bool nyr_loop_global_promote(nyr_func_t *f);
+/* Fold `cmp.f64 eq/ne x, 0.0` when x is provably nonzero. */
+bool nyr_float_zero_guard_fold(nyr_func_t *f);
+/* Widen loops over independent register-only iterations to 4 AVX2 lanes. */
+bool nyr_outer_loop_vectorize(nyr_func_t *f);
 /* Fold boolean PHIs in proven-constant, side-effect-free diamonds. */
 bool nyr_phiopt(nyr_func_t *f);
 bool nyr_compact(nyr_func_t *f);
@@ -795,9 +870,9 @@ bool nyr_get_track_value(int *out);
  * owns any comparison state (VM, native, expected values, auxiliary functions).
  * Returning false aborts the optimization pipeline. */
 typedef bool (*nyr_per_pass_oracle_fn)(const nyr_func_t *f,
-                                        const char *pass_name, void *userdata);
+                                       const char *pass_name, void *userdata);
 void nyr_set_per_pass_oracle(bool enable, nyr_per_pass_oracle_fn fn,
-                              void *userdata);
+                             void *userdata);
 /* Translation-validation seed: after each pass, when both before/after are
  * pure integer straight-line NYIR, compare results across `trials` local
  * input vectors. trials<=0 disables. Diagnostic mode only. */
@@ -808,12 +883,12 @@ bool nyr_is_pure_i64_straightline(const nyr_func_t *f);
  * Returns true when ineligible (not pure straight-line) or all trials match.
  * Returns false with err filled on a concrete mismatch. */
 bool nyr_tv_equiv_straightline(const nyr_func_t *before,
-                                const nyr_func_t *after, int trials, char *err,
-                                size_t err_len);
+                               const nyr_func_t *after, int trials, char *err,
+                               size_t err_len);
 /* Z3 equivalence for supported NYIR; returns false with an empty error when
  * unsupported so the caller can use the bounded interpreter fallback. */
 bool nyr_tv_smt_equiv(const nyr_func_t *before, const nyr_func_t *after,
-                       char *err, size_t err_len);
+                      char *err, size_t err_len);
 bool nyr_memory_ssa_forward(nyr_func_t *f);
 
 /* Roadmap seed passes (bounded, correctness-first). */
@@ -828,8 +903,8 @@ unsigned nyr_call_effect_summary(const nyr_inst_t *inst);
  * stored CALL|UNKNOWN summary with its audited runtime-helper summary. */
 unsigned nyr_effective_effects(const nyr_inst_t *inst);
 bool nyr_effect_summary(const nyr_func_t *f, unsigned *out_mask,
-                         size_t *out_reads, size_t *out_writes,
-                         size_t *out_calls);
+                        size_t *out_reads, size_t *out_writes,
+                        size_t *out_calls);
 bool nyr_null_align_facts(nyr_func_t *f);
 bool nyr_iv_simplify(nyr_func_t *f);
 bool nyr_bounds_check_elim(nyr_func_t *f);
@@ -854,6 +929,7 @@ bool nyr_loop_unswitch(nyr_func_t *f);
 bool nyr_iv_elim(nyr_func_t *f);
 bool nyr_gvn_pre(nyr_func_t *f);
 bool nyr_loop_vectorize(nyr_func_t *f);
+bool nyr_loop_vectorize_avx2(nyr_func_t *f);
 bool nyr_slp_vectorize(nyr_func_t *f);
 bool nyr_alias_store_sink(nyr_func_t *f);
 bool nyr_narrow(nyr_func_t *f);
@@ -899,7 +975,7 @@ bool nyr_rewrite_fuel(nyr_func_t *f);
  */
 bool nyr_egraph_rewrite(nyr_func_t *f);
 void nyr_egraph_stats(unsigned long long *runs,
-                       unsigned long long *fuel_exhausted);
+                      unsigned long long *fuel_exhausted);
 
 typedef struct {
   const char *name;
@@ -908,7 +984,7 @@ typedef struct {
 void nyr_set_inline_callees(const nyr_inline_callee_t *callees, size_t count);
 /** Whether a collected callee can observe a global cell. */
 bool nyr_inline_callees_reference_symbol(const char *symbol,
-                                          const nyr_func_t *exclude);
+                                         const nyr_func_t *exclude);
 /** Promote private raw-int globals used only by the synthesized entry body. */
 bool nyr_promote_private_entry_globals(nyr_func_t *f);
 
@@ -937,11 +1013,18 @@ void nyr_set_fast_math(bool on);
 bool nyr_fast_math(void);
 
 bool nyr_optimize_with_stats(nyr_func_t *f, nyr_opt_stats_t *stats,
-                              int opt_level);
+                             int opt_level);
+bool nyr_optimize_with_stats_options(nyr_func_t *f, nyr_opt_stats_t *stats,
+                                     int opt_level, unsigned options);
 bool nyr_ir_optimize(nyr_func_t *f, int opt_level);
+bool nyr_ir_optimize_with_options(nyr_func_t *f, int opt_level,
+                                  unsigned options);
 /* A NULL dump suppresses optimizer IR dumps while preserving optimization. */
 bool nyr_optimize_debug(nyr_func_t *f, FILE *dump, nyr_opt_stats_t *stats,
-                         int opt_level);
+                        int opt_level);
+bool nyr_optimize_debug_with_options(nyr_func_t *f, FILE *dump,
+                                     nyr_opt_stats_t *stats, int opt_level,
+                                     unsigned options);
 const char *nyr_op_name(nyr_op_t op);
 
 /* Count of local slots referenced in f (LOAD_LOCAL / STORE_LOCAL / ADDR_LOCAL).

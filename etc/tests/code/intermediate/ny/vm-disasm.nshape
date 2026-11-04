@@ -1,0 +1,38 @@
+shape nyr_vm_disassembly {
+  family "runtime-native"
+  generator "native"
+  features ["native", "nyir", "vm", "disassembly"]
+  template ny-test-case
+  flags_matrix "--native --run --nyr-run --vm-disasm=vm_disasm_target -O0; --native --run --nyr-run --vm-disasm=vm_disasm_target -O3"
+  expect compile_and_run
+  expect_exit 0
+  expect_message "function vm_disasm_target"
+  expect_message "result=42"
+  source ny <<'NY'
+fn vm_disasm_target(int value) int {
+   value + 7
+}
+
+vm_disasm_target(35)
+NY
+}
+
+shape nyr_vm_disassembly_instruction_format {
+  family "runtime-native"
+  generator "native"
+  features ["native", "nyir", "vm", "instruction-format"]
+  template ny-test-case
+  flags "--native --run --nyr-run --vm-disasm=vm_disasm_target"
+  expect compile_and_run
+  expect_exit 0
+  expect_message "=add v"
+  expect_message "[abi=i64-raw]"
+  expect_message "result=42"
+  source ny <<'NY'
+fn vm_disasm_target(int value) int {
+   value + 7
+}
+
+vm_disasm_target(35)
+NY
+}

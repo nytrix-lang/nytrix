@@ -124,12 +124,13 @@ fn load(str path, int _req_comp=0) any {
    }
    def res = file_read(path)
    if is_ok(res) {
-      def bytes = unwrap(res)
+      ;; Keep bytes string-typed across the generic Result unwrap ABI.
+      def str bytes = unwrap(res)
       if _image_native_disabled() {
          _image_dbg("native disabled for " + path)
          return 0
       }
-      mut native = 0
+      mut any native = 0
       if _image_lock_native_decode() {
          def mu = _image_decode_mutex()
          if mu { mutex_lock(mu) }

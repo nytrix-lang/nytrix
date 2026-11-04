@@ -193,10 +193,12 @@ fn mt19937_smt_recover_state_prefix(any constraints) dict {
    while i < constraints.len {
       def c = constraints.get(i)
       def idx = int(c.get("index", 0))
-      def kind = c.get("kind", "")
+      def str kind = str(c.get("kind", ""))
       def v = int(c.get("value", 0))
       def out = _mt_smt_temper(ctx, words.get(idx))
-      if kind == "eq" { z3_solver_assert(ctx, s, z3_eq(ctx, out, _mt_smt_bv32u(ctx, v))) } elif kind == "hi" {
+      if kind == "eq" {
+         z3_solver_assert(ctx, s, z3_eq(ctx, out, _mt_smt_bv32u(ctx, v)))
+      } elif kind == "hi" {
          def bits = int(c.get("bits", 0))
          def sh = 32 - bits
          def out_hi = _mt_smt_shr(ctx, out, sh)

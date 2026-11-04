@@ -3,7 +3,7 @@ shape wasm32_native_scalar_assembly {
   generator "native"
   features [native object wasm32 scalar nyir]
   template ny-test-case
-  flags "--native-backend wasm --nyir-verify --emit-asm=/tmp/nytrix-native-wasm32-scalar.s -no-std"
+  flags "--native-backend wasm --nyr-verify --emit-asm=/tmp/nytrix-native-wasm32-scalar.s -no-std"
   expect compile_and_run
   source ny <<'NY'
 fn mix(i64 a, i64 b) i64 {

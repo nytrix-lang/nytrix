@@ -104,7 +104,7 @@ for index in 0..63 {
   args_values += to_str(index + 1)
 }
 def emitted = run_capture(
-    [compiler, "--native-backend=aarch64", "--native-only", "--nyir-verify",
+    [compiler, "--native-backend=aarch64", "--native-only", "--nyr-verify",
      "--emit-asm=" + asm_path, "-no-std", "-emit-only", "-e",
      "extern \"c\" {\n" +
      "  fn host_f64_add(f64 left, f64 right) f64\n" +

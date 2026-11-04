@@ -11,5 +11,6 @@ int ny_process_capture(const char *const argv[], char **out,
 /* Runs argv directly, with platform-specific executable lookup and optional
  * verbose command reporting. Returns the child status or -1 on wait failure. */
 int ny_exec_spawn(const char *const argv[]);
+int ny_exec_spawn_argv0(const char *executable, const char *const argv[]);
 
 #endif

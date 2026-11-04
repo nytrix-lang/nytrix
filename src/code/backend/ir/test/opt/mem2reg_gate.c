@@ -143,14 +143,7 @@ static bool check_address_taken_nested_join(void) {
   nyr_opt_br_if(&f, one, 30);
   nyr_opt_br(&f, 20);
   nyr_opt_label(&f, 30);
-  nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_STORE_I64,
-                              .dst = -1,
-                              .a = addr,
-                              .b = -1,
-                              .c = seven,
-                              .d = -1,
-                              .e = -1,
-                              .f = -1});
+  nyr_opt_emit_abc(&f, NYIR_STORE_I64, addr, -1, seven);
   nyr_opt_br(&f, 40);
   nyr_opt_label(&f, 20);
   nyr_opt_br(&f, 40);
@@ -212,11 +205,73 @@ static bool check_irreducible_join(void) {
   return ok;
 }
 
+static bool check_uninitialized_and_dead_locals(void) {
+  nyr_func_t f;
+  nyr_opt_begin(&f);
+  int value = nyr_opt_const(&f, 73);
+  store(&f, 0, value); /* No read: the definition is dead. */
+  int result = load(&f, 1); /* Uninitialized locals have typed zero values. */
+  nyr_opt_ret(&f, result);
+  bool ok = nyr_opt_verify(&f, "mem2reg-dead/before") &&
+            nyr_opt_eval(&f, "mem2reg-dead/before") == 0 &&
+            nyr_mem2reg(&f) &&
+            nyr_opt_verify(&f, "mem2reg-dead/after") &&
+            nyr_opt_eval(&f, "mem2reg-dead/after") == 0;
+  for (size_t i = 0; i < f.len; ++i)
+    if (f.data[i].op == NYIR_LOAD_LOCAL || f.data[i].op == NYIR_STORE_LOCAL)
+      ok = false;
+  if (!ok) {
+    fprintf(stderr, "uninitialized/dead scalar locals were not promoted\n");
+    nyr_dump(stderr, &f, "mem2reg-dead-failure");
+  }
+  nyr_ir_func_free(&f);
+  return ok;
+}
+
+static bool check_unreachable_local_cleanup(void) {
+  nyr_func_t f;
+  nyr_opt_begin(&f);
+  int zero = nyr_opt_const(&f, 0), nine = nyr_opt_const(&f, 9);
+  nyr_opt_br(&f, 10);
+  nyr_opt_label(&f, 20); /* Dead tail, unreachable from entry. */
+  store(&f, 0, nine);
+  nyr_opt_ret(&f, load(&f, 0));
+  nyr_opt_label(&f, 10);
+  nyr_opt_ret(&f, zero);
+  bool ok = nyr_opt_verify(&f, "mem2reg-unreachable/before") &&
+            nyr_opt_eval(&f, "mem2reg-unreachable/before") == 0 &&
+            nyr_mem2reg(&f) &&
+            nyr_opt_verify(&f, "mem2reg-unreachable/after") &&
+            nyr_opt_eval(&f, "mem2reg-unreachable/after") == 0;
+  for (size_t i = 0; i < f.len; ++i)
+    if (f.data[i].op == NYIR_LOAD_LOCAL || f.data[i].op == NYIR_STORE_LOCAL)
+      ok = false;
+  if (!ok) {
+    fprintf(stderr, "unreachable local state survived promotion\n");
+    nyr_dump(stderr, &f, "mem2reg-unreachable-failure");
+  }
+  nyr_ir_func_free(&f);
+  return ok;
+}
+
 int main(void) {
-  nyr_set_nested_mem2reg_enabled(true);
+  nyr_func_t no_locals;
+  nyr_opt_begin(&no_locals);
+  nyr_opt_ret(&no_locals, nyr_opt_const(&no_locals, 5));
+  uint64_t untouched = nyr_debug_fingerprint(&no_locals);
+  if (!nyr_mem2reg(&no_locals) ||
+      nyr_debug_fingerprint(&no_locals) != untouched ||
+      !nyr_opt_verify(&no_locals, "mem2reg-no-locals"))
+    return 1;
+  nyr_ir_func_free(&no_locals);
+  /*
+   * Default promotion must already handle loop locals in nested CFGs.
+   */
   if (!check_loop(0) || !check_loop(1) || !check_loop(3) || !check_loop(6) ||
       !check_non_dominating_zero_fallback() ||
-      !check_address_taken_nested_join() || !check_irreducible_join())
+      !check_address_taken_nested_join() || !check_irreducible_join() ||
+      !check_uninitialized_and_dead_locals() ||
+      !check_unreachable_local_cleanup())
     return 1;
   nyr_func_t f;
   nyr_opt_begin(&f);
@@ -252,14 +307,6 @@ int main(void) {
   nyr_opt_ret(&f, loaded);
   if (!nyr_opt_verify(&f, "mem2reg-gate/before"))
     return 1;
-  nyr_set_nested_mem2reg_enabled(false);
-  uint64_t rejected = nyr_debug_fingerprint(&f);
-  for (int k = 0; k < 3; ++k)
-    if (!nyr_mem2reg(&f) || nyr_debug_fingerprint(&f) != rejected ||
-        !nyr_opt_verify(&f, "mem2reg-gate/rejected") ||
-        nyr_opt_eval(&f, "mem2reg-gate/rejected") != 42)
-      return 1;
-  nyr_set_nested_mem2reg_enabled(true);
   if (!nyr_mem2reg(&f) || !nyr_opt_verify(&f, "mem2reg-nested/after") ||
       nyr_opt_eval(&f, "mem2reg-nested") != 42)
     return 1;

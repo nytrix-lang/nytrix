@@ -72,13 +72,13 @@ fn _connect_linux_desktop(dict ctx, bool allow_jack=false) any {
    0
 }
 
-fn _stream_backend(dict stream) any {
-   stream.get("backend", 0)
+fn _stream_backend(dict stream) int {
+   int(stream.get("backend", 0))
 }
 
 fn _stream_frame_bytes(dict stream) int {
-   def channels = stream.get("channels")
-   def format = stream.get("format", FORMAT_S16LE)
+   def channels = int(stream.get("channels", 0))
+   def format = int(stream.get("format", FORMAT_S16LE))
    def sample_bytes = (format == FORMAT_FLOAT32LE) ? 4 : 2
    channels * sample_bytes
 }
@@ -121,7 +121,7 @@ fn connect(any ctx) any {
 fn disconnect(any ctx) any {
    "Implements `disconnect`."
    if !ctx { return nil }
-   def b = ctx.get("backend")
+   def b = int(ctx.get("backend", 0))
    if b == 1 { audio_pulse.shutdown(ctx) }
    elif b == 2 { audio_alsa.shutdown(ctx) }
    elif b == 4 { audio_jack.shutdown(ctx) }
@@ -186,7 +186,7 @@ fn outstream_open(any stream, int format, int sample_rate, int channels, ?fnptr 
    def ctx = device.get("ctx", 0)
    if sound_debug.enabled() { print("Sound: outstream_open: ctx=" + to_str(ctx)) }
    if !ctx { return false }
-   def backend = ctx.get("backend", 0)
+   def backend = int(ctx.get("backend", 0))
    if sound_debug.enabled() { print("Sound: outstream_open: backend=" + to_str(backend)) }
    mut any opened = 0
    if backend == 1 { opened = audio_pulse.stream_open(stream) }

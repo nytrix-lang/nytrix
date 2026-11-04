@@ -37,6 +37,13 @@ bool ny_pipeline_eval_ir_for_program(const program_t *program,
 bool ny_pipeline_eval_ir_binary_file(const char *path,
                                      const ny_options *options, char *err,
                                      size_t err_len);
+bool ny_pipeline_dump_vm_ir_for_program(const program_t *program,
+                                        const ny_options *options, char *err,
+                                        size_t err_len);
+bool ny_pipeline_emit_ir_binary_file(const char *input_path,
+                                     const char *output_path,
+                                     const ny_options *options, char *err,
+                                     size_t err_len);
 bool ny_pipeline_dump_ir_for_program(const program_t *program,
                                      const ny_options *options, char *err,
                                      size_t err_len);

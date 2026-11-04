@@ -9,6 +9,32 @@ Custom infix spelling lives in [Operators](operators.md). Stdlib receiver calls
 such as `xs.append(...)` are documented module APIs; see
 [Values](values.md#receiver-methods). They are not user-defined `impl` blocks.
 
+## Contents
+
+- [Methods and trait implementations](#attached-methods-type-local)
+- [Laws and operator declarations](#law-blocks)
+- [Capabilities and diagnostics](#static-capability-parameters-not-traits)
+
+> **Note:** Type names, target names, and function bodies below are grammar
+> placeholders.
+
+```ny
+trait Drawable { fn draw(Shape value) str }
+impl Drawable for Circle { fn draw(Circle value) str { "circle" } }
+operator Circle + Circle: Circle = add
+```
+
+## Rules
+
+1. `impl Type` attaches methods and operators to one owner type; attached
+   method names cannot be overloaded by arity.
+2. A `trait` declares signatures. `impl Trait for Type` supplies method bodies
+   and is the form required for trait dispatch.
+3. `law` propositions are checked at compile time by the bounded proof path;
+   unknown propositions fail validation.
+4. Operator declarations select a target for a fixed spelling and operand-type
+   pair. They never alter parser precedence.
+
 ## Where the compiler checks this
 
 After Hindley-Milner typing, the **trait validation** stage runs before ABI
@@ -158,6 +184,8 @@ Operators never change precedence. They only pick a **target function** for a
 
 Left type is the impl owner. Omit the left operand type:
 
+> **Note:** The target functions are placeholders and are defined elsewhere.
+
 ```ny
 impl Meter {
    operator + self: self = add_meters
@@ -169,6 +197,8 @@ impl Meter {
 `self` on the right side means the owner type (`parse_operator_stmt_with_left`).
 
 ### Top level
+
+> **Note:** `vec3` and `v_add` are declarations from the surrounding program.
 
 ```ny
 operator vec3 + vec3: vec3 = v_add

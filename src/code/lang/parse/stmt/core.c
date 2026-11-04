@@ -1127,6 +1127,46 @@ static const char *parse_func_return_type(parser_t *p) {
   return NULL;
 }
 
+static bool type_ref_contains_ident(const char *type, size_t type_len,
+                                    const char *name) {
+  if (!type || !name || !*name)
+    return false;
+  size_t name_len = strlen(name);
+  for (size_t i = 0; i < type_len;) {
+    unsigned char c = (unsigned char)type[i];
+    bool ident_start = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                       c == '_';
+    if (!ident_start) {
+      ++i;
+      continue;
+    }
+    size_t start = i++;
+    while (i < type_len) {
+      c = (unsigned char)type[i];
+      if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+            (c >= '0' && c <= '9') || c == '_'))
+        break;
+      ++i;
+    }
+    if (i - start == name_len && memcmp(type + start, name, name_len) == 0)
+      return true;
+  }
+  return false;
+}
+
+static const char *func_dependent_return_param(const char *return_type,
+                                                const ny_param_list *params) {
+  if (!return_type || !params)
+    return NULL;
+  size_t type_len = strlen(return_type);
+  for (size_t i = 0; i < params->len; ++i) {
+    const char *name = params->data[i].name;
+    if (type_ref_contains_ident(return_type, type_len, name))
+      return name;
+  }
+  return NULL;
+}
+
 static stmt_t *parse_func(parser_t *p, ny_attribute_list attrs) {
   token_t tok = p->cur;
   parser_expect(p, NY_T_FN, "'fn'", NULL);
@@ -1284,8 +1324,11 @@ static stmt_t *parse_func(parser_t *p, ny_attribute_list attrs) {
     if (p->cur.kind != NY_T_LBRACE && p->cur.kind != NY_T_ASSIGN &&
         p->cur.kind != NY_T_SEMI && p->cur.kind != NY_T_EOF)
       (void)parse_type_ref(p, "expected return type");
-  } else
+  } else {
     fn_stmt->as.fn.return_type = parse_func_return_type(p);
+    fn_stmt->as.fn.dependent_return_param =
+        func_dependent_return_param(fn_stmt->as.fn.return_type, &params);
+  }
   if (p->cur.kind == NY_T_ARROW) {
     parser_error(p, p->cur, "function return types do not use '->'",
                  "write 'fn name(params) RetType { ... }'");
@@ -1645,7 +1688,7 @@ static stmt_t *parse_extern_fn_decl(parser_t *p, token_t tok,
       (void)parse_type_ref(p, "expected return type");
   } else
     return_type = parser_parse_return_type_suffix(p, parse_type_ref,
-                                                  "expected return type");
+                                                  "expected return type", true);
   const char *link_name = NULL;
   if (parser_match(p, NY_T_AS)) {
     if (p->cur.kind == NY_T_STRING) {

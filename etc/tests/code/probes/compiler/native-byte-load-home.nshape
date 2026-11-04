@@ -1,0 +1,28 @@
+shape native_byte_load_home {
+  family "runtime/memory"
+  generator "regression"
+  features [native byte load pointer home reuse]
+  template ny-test-case
+  timeout 120
+  flags_matrix "--native-only -O0; --native-only -O3; --native --run -O0; --native-backend=llvm --jit --jit-engine=mcjit -O0; --native-backend=llvm --jit --jit-engine=orc -O0; --nyr-run"
+  expect compile_and_run
+  expect_message "BYTE-LOAD-HOME-OK"
+  source ny <<'NY'
+use core
+mut ptr retained = 0
+mut int frame = 0
+def int center = (8 * 16 + 8) * 4
+while frame < 3 {
+   def ptr pixels = zalloc(1024)
+   store8(pixels, 255, center)
+   if frame == 0 { retained = pixels }
+   def int red = int(load8(retained, center))
+   def int green = int(load8(retained, center + 1))
+   assert(red == 255 && green == 0, "byte loads survive reuse of address homes")
+   if frame != 0 { free(pixels) }
+   frame += 1
+}
+free(retained)
+print("BYTE-LOAD-HOME-OK")
+NY
+}

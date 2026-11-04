@@ -203,14 +203,6 @@ static bool ny_win_file_exists(const char *path) {
   return true;
 }
 
-static bool ny_win_join_exists(const char *dir, const char *name) {
-  if (!dir || !*dir || !name || !*name)
-    return false;
-  char path[PATH_MAX];
-  snprintf(path, sizeof(path), "%s/%s", dir, name);
-  return ny_win_file_exists(path);
-}
-
 static bool ny_win_path_dirname(const char *path, char *out, size_t out_len) {
   if (!path || !*path || !out || out_len == 0)
     return false;
@@ -322,23 +314,23 @@ static time_t ny_runtime_latest_dep_mtime(const char *root) {
   if (root && *root && cached_valid && strcmp(cached_root, root) == 0)
     return cached_latest;
   static const char *const deps[] = {
-      "src/code/lang/runtime/init.c",
-      "src/code/lang/runtime/ast.c",
-      "src/code/lang/runtime/bigint.c",
-      "src/code/lang/runtime/core.c",
-      "src/code/lang/runtime/ffi.c",
-      "src/code/lang/runtime/ffigates.c",
-      "src/code/lang/runtime/gc.c",
-      "src/code/lang/runtime/math.c",
-      "src/code/lang/runtime/memory.c",
-      "src/code/lang/runtime/os.c",
-      "src/code/lang/runtime/proof.c",
-      "src/code/lang/runtime/simmd.c",
-      "src/code/lang/runtime/string.c",
-      "src/code/lang/runtime/bigfloat.c",
-      "src/code/lang/runtime/shared.h",
-      "src/code/lang/runtime/runtime.h",
-      "src/code/lang/runtime/defs.h",
+      "src/code/backend/runtime/init.c",
+      "src/code/backend/runtime/ast.c",
+      "src/code/backend/runtime/bigint.c",
+      "src/code/backend/runtime/core.c",
+      "src/code/backend/runtime/ffi.c",
+      "src/code/backend/runtime/ffigates.c",
+      "src/code/backend/runtime/gc.c",
+      "src/code/backend/runtime/math.c",
+      "src/code/backend/runtime/memory.c",
+      "src/code/backend/runtime/os.c",
+      "src/code/backend/runtime/proof.c",
+      "src/code/backend/runtime/simmd.c",
+      "src/code/backend/runtime/string.c",
+      "src/code/backend/runtime/bigfloat.c",
+      "src/code/backend/runtime/shared.h",
+      "src/code/backend/runtime/runtime.h",
+      "src/code/backend/runtime/defs.h",
       "src/code/lang/parse/ast.h",
       "src/include/nyr/ir.h",
       "src/code/lang/parse/json.h",
@@ -353,9 +345,19 @@ static time_t ny_runtime_latest_dep_mtime(const char *root) {
       "src/code/lang/parse/proof.c",
       "src/code/lang/parse/stmt/init.c",
       "src/code/lang/parse/stmtflow.c",
+      "src/code/lang/types/proof.c",
+      "src/code/lang/types/policy.c",
+      "src/code/lang/types/policy/check.c",
       "src/code/lang/types/types.h",
       "src/base/common.h",
       "src/base/compat.h",
+      "src/base/util.c",
+      "src/base/debug.c",
+      "src/base/intern.c",
+      "src/base/loader.c",
+      "src/base/progress.c",
+      "src/base/options.c",
+      "src/code/lang/pipeline/build.c",
   };
   time_t latest = 0;
   char full[PATH_MAX];
@@ -386,7 +388,7 @@ static void ny_runtime_cache_path(char *out, size_t out_len, const char *cc,
    * isolated from the ordinary cache.  Such objects carry unresolved ASan or
    * UBSan symbols and must never be restored for an unsanitized link.
    */
-  const char *cache_rev = "rtcache-v12-runtime-parser";
+  const char *cache_rev = "rtcache-v17-runtime-proof-context";
   char dwarf_key[16];
   if (debug)
     snprintf(dwarf_key, sizeof(dwarf_key), "d%d", ny_builder_dwarf_version());
@@ -794,9 +796,13 @@ static bool ny_builder_compile_runtime_archive(
     bool profile, int speed_level, bool native_tune, bool target_windows,
     const char *sanitize_kind, bool has_ccache) {
   static const char *const units[] = {
-      "ast",    "bigint",    "core",        "simmd",        "ffi", "ffigates",
-      "gc",     "math",      "bigfloat",    "memory",       "os",  "proof",
-      "string", "parse_ast", "parse_lexer", "parse_shared",
+      "ast",           "bigint",       "core",        "simmd",
+      "ffi",           "ffigates",     "gc",          "math",
+      "bigfloat",      "memory",       "os",          "proof",
+      "string",        "parse_ast",    "parse_lexer", "parse_shared",
+      "base_util",     "base_debug",   "base_intern", "base_loader",
+      "base_progress", "base_options", "type_proof",  "type_policy",
+      "policy_check",
   };
   char dir[PATH_MAX];
   snprintf(dir, sizeof(dir), "%s/ny_rt_units_%ld", ny_get_temp_dir(),
@@ -813,8 +819,27 @@ static bool ny_builder_compile_runtime_archive(
       snprintf(src[u], sizeof(src[u]), "%s/src/code/lang/parse/lexer.c", root);
     else if (strcmp(unit_path, "parse_shared") == 0)
       snprintf(src[u], sizeof(src[u]), "%s/src/code/lang/parse/shared.c", root);
+    else if (strcmp(unit_path, "base_util") == 0)
+      snprintf(src[u], sizeof(src[u]), "%s/src/base/util.c", root);
+    else if (strcmp(unit_path, "base_debug") == 0)
+      snprintf(src[u], sizeof(src[u]), "%s/src/base/debug.c", root);
+    else if (strcmp(unit_path, "base_intern") == 0)
+      snprintf(src[u], sizeof(src[u]), "%s/src/base/intern.c", root);
+    else if (strcmp(unit_path, "base_loader") == 0)
+      snprintf(src[u], sizeof(src[u]), "%s/src/base/loader.c", root);
+    else if (strcmp(unit_path, "base_progress") == 0)
+      snprintf(src[u], sizeof(src[u]), "%s/src/base/progress.c", root);
+    else if (strcmp(unit_path, "base_options") == 0)
+      snprintf(src[u], sizeof(src[u]), "%s/src/base/options.c", root);
+    else if (strcmp(unit_path, "type_proof") == 0)
+      snprintf(src[u], sizeof(src[u]), "%s/src/code/lang/types/proof.c", root);
+    else if (strcmp(unit_path, "type_policy") == 0)
+      snprintf(src[u], sizeof(src[u]), "%s/src/code/lang/types/policy.c", root);
+    else if (strcmp(unit_path, "policy_check") == 0)
+      snprintf(src[u], sizeof(src[u]), "%s/src/code/lang/types/policy/check.c",
+               root);
     else
-      snprintf(src[u], sizeof(src[u]), "%s/src/code/lang/runtime/%s.c", root,
+      snprintf(src[u], sizeof(src[u]), "%s/src/code/backend/runtime/%s.c", root,
                unit_path);
     snprintf(obj[u], sizeof(obj[u]), "%s/%s.o", dir, units[u]);
     const char *args[64];
@@ -825,6 +850,11 @@ static bool ny_builder_compile_runtime_archive(
     args[n++] = "-std=gnu11";
     args[n++] = debug ? "-g3" : (speed_level >= 2 ? "-O3" : "-Os");
     args[n++] = dwarf_flag;
+    if (!debug && speed_level < 0) {
+      args[n++] = "-fno-unwind-tables";
+      args[n++] = "-fno-asynchronous-unwind-tables";
+      args[n++] = "-fno-ident";
+    }
     args[n++] = debug ? "-fno-omit-frame-pointer" : "-fomit-frame-pointer";
     args[n++] =
         debug ? "-fno-optimize-sibling-calls" : "-foptimize-sibling-calls";
@@ -909,13 +939,11 @@ bool ny_builder_compile_runtime(const char *cc, const char *out_runtime,
   char dwarf_flag[16];
   char cache_obj[PATH_MAX];
   bool target_windows = ny_builder_target_is_windows();
-  if (speed_level < 0)
-    speed_level = 0;
   if (speed_level > 3)
     speed_level = 3;
-  snprintf(runtime_src, sizeof(runtime_src), "%s/src/code/lang/runtime/init.c",
-           root);
-  snprintf(ast_src, sizeof(ast_src), "%s/src/code/lang/runtime/ast.c", root);
+  snprintf(runtime_src, sizeof(runtime_src),
+           "%s/src/code/backend/runtime/init.c", root);
+  snprintf(ast_src, sizeof(ast_src), "%s/src/code/backend/runtime/ast.c", root);
   ny_builder_dwarf_flag(dwarf_flag, sizeof(dwarf_flag), debug);
 #if defined(__arm__) && !defined(__aarch64__)
   const char *arm_float_abi_flag = ny_builder_arm_float_abi_flag();
@@ -1049,6 +1077,11 @@ bool ny_builder_compile_runtime(const char *cc, const char *out_runtime,
   runtime_args[ra_i++] = "-std=gnu11";
   runtime_args[ra_i++] = debug ? "-g3" : (speed_level >= 2 ? "-O3" : "-Os");
   runtime_args[ra_i++] = dwarf_flag;
+  if (!debug && speed_level < 0) {
+    runtime_args[ra_i++] = "-fno-unwind-tables";
+    runtime_args[ra_i++] = "-fno-asynchronous-unwind-tables";
+    runtime_args[ra_i++] = "-fno-ident";
+  }
   runtime_args[ra_i++] =
       debug ? "-fno-omit-frame-pointer" : "-fomit-frame-pointer";
   runtime_args[ra_i++] =
@@ -1099,6 +1132,11 @@ bool ny_builder_compile_runtime(const char *cc, const char *out_runtime,
   runtime_args[ra_i++] = "-std=gnu11";
   runtime_args[ra_i++] = debug ? "-g3" : (speed_level >= 2 ? "-O3" : "-Os");
   runtime_args[ra_i++] = dwarf_flag;
+  if (!debug && speed_level < 0) {
+    runtime_args[ra_i++] = "-fno-unwind-tables";
+    runtime_args[ra_i++] = "-fno-asynchronous-unwind-tables";
+    runtime_args[ra_i++] = "-fno-ident";
+  }
   runtime_args[ra_i++] =
       debug ? "-fno-omit-frame-pointer" : "-fomit-frame-pointer";
   runtime_args[ra_i++] =
@@ -1162,6 +1200,11 @@ bool ny_builder_compile_runtime(const char *cc, const char *out_runtime,
     ast_args[aa_i++] = "-std=gnu11";
     ast_args[aa_i++] = debug ? "-g3" : (speed_level >= 2 ? "-O3" : "-Os");
     ast_args[aa_i++] = dwarf_flag;
+    if (!debug && speed_level < 0) {
+      ast_args[aa_i++] = "-fno-unwind-tables";
+      ast_args[aa_i++] = "-fno-asynchronous-unwind-tables";
+      ast_args[aa_i++] = "-fno-ident";
+    }
     ast_args[aa_i++] =
         debug ? "-fno-omit-frame-pointer" : "-fomit-frame-pointer";
     ast_args[aa_i++] =
@@ -1210,8 +1253,9 @@ bool ny_builder_link(const char *cc, const char *obj_path,
                      const char *const extra_objs[], size_t extra_count,
                      const char *const link_dirs[], size_t link_dir_count,
                      const char *const link_libs[], size_t link_lib_count,
-                     const char *output_path, bool link_strip, bool debug,
-                     bool profile, const char *sanitize_kind) {
+                     const char *output_path, bool link_strip,
+                     bool strip_unwind, bool debug, bool profile,
+                     const char *sanitize_kind) {
 #define NY_MAX_LINK_ARGS 128
   const char *argv[NY_MAX_LINK_ARGS];
   size_t idx = 0;
@@ -1671,6 +1715,25 @@ bool ny_builder_link(const char *cc, const char *obj_path,
     NY_LOG_ERR("Linking failed (exit=%d)\n", rc);
     return false;
   }
+#if !defined(_WIN32) && !defined(__APPLE__)
+  if (strip_unwind && !target_windows) {
+    const char *const strip_argv[] = {"strip",
+                                      "--remove-section=.eh_frame",
+                                      "--remove-section=.eh_frame_hdr",
+                                      "--remove-section=.sframe",
+                                      "--remove-section=.comment",
+                                      output_path,
+                                      NULL};
+    rc = ny_exec_spawn(strip_argv);
+    if (rc != 0) {
+      NY_LOG_ERR("Removing release unwind metadata from %s failed (exit=%d)\n",
+                 output_path, rc);
+      return false;
+    }
+  }
+#else
+  (void)strip_unwind;
+#endif
 #ifdef _WIN32
   ny_win_copy_aot_runtime_dlls(output_path);
 #endif

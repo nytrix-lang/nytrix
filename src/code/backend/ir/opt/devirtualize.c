@@ -18,8 +18,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-static void nyr_devirt_trace(const nyr_func_t *f, size_t at,
-                              const char *action, const char *reason) {
+static void nyr_devirt_trace(const nyr_func_t *f, size_t at, const char *action,
+                             const char *reason) {
   if (!ny_dbg_is_enabled(NY_DBG_HEURISTIC) &&
       !ny_trace_enabled("NY_TRACE_DEVIRT"))
     return;
@@ -129,10 +129,24 @@ bool nyr_devirtualize(nyr_func_t *f) {
       continue;
     }
 
+    /*
+     * C-style indirect calls carry their callee in positional argument zero.
+     * This pass's legacy ABI treats any argument as a candidate target; never
+     * apply that heuristic to the explicit indirect-call form, where an
+     * ordinary data argument could otherwise be mistaken for the callee.
+     * Converting the explicit form also requires removing its target argument
+     * and shifting call metadata, which this pass does not yet model.
+     */
+    if (call->flags & NYIR_INST_F_INDIRECT) {
+      nyr_devirt_trace(f, i, "keep-indirect",
+                       "explicit callee argument is not devirtualized");
+      continue;
+    }
+
     int args[NYIR_CALL_MAX_ARGS];
     int argc = 0;
     if (!nyr_call_args(call, f->next_value, args, NYIR_CALL_MAX_ARGS, &argc,
-                        NULL, 0) ||
+                       NULL, 0) ||
         argc == 0)
       continue;
 
@@ -147,15 +161,15 @@ bool nyr_devirtualize(nyr_func_t *f) {
       if (target_index > 0 &&
           !nyr_devirt_swap_call_args(call, 0, target_index)) {
         nyr_devirt_trace(f, i, "keep-indirect",
-                          "function target has no writable argument slot");
+                         "function target has no writable argument slot");
         continue;
       }
       nyr_devirt_trace(f, i, "devirtualize", fname);
       call->symbol = fname;
     } else {
       nyr_devirt_trace(f, i, "keep-indirect",
-                        "no call argument resolves to a function symbol "
-                        "through the supported COPY chain");
+                       "no call argument resolves to a function symbol "
+                       "through the supported COPY chain");
     }
   }
 

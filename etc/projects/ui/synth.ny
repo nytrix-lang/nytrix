@@ -4,6 +4,7 @@
 ;; Nytrix Synth
 
 use core
+use core.common as common
 use core.os (exit)
 use core.os.fixture (ready, start_ui, tick_ui, quit_key, next_ui_key, exit_status)
 use core.math
@@ -299,8 +300,8 @@ fn active_count() int {
 
 fn update_pointer(any win, f64 view_w, f64 view_h) {
    def mv = viewer.mouse_view(win, view_w, view_h)
-   mx = float(mv.get(2, 0.0))
-   my = float(mv.get(3, 0.0))
+   mx = float(mv.get(2, 0.0)) * view_w / max_f64(1.0, float(mv.get(0, view_w)))
+   my = float(mv.get(3, 0.0)) * view_h / max_f64(1.0, float(mv.get(1, view_h)))
    md = window.mouse_down(win, 0)
    mp = md && !md_prev
    return
@@ -547,17 +548,16 @@ window.set_exit_key(win, KEY_ESCAPE)
 load_fonts()
 
 AUDIO_OK = gfx.get_backend_type() == int(gfx.BACKEND_MOCK) ? false : snd.init(true)
-build_sources()
+if AUDIO_OK { build_sources() }
 init_state()
 set_preset("wide")
 
 print("audio backend=" + snd.get_backend_name() + " ok=" + to_str(AUDIO_OK))
 
-while tick_ui(fx) {
-   window.poll_events()
-   if gfx.window_should_close(win) || quit_key(next_ui_key(fx)) { break }
+while !gfx.window_should_close(win) && tick_ui(fx) {
+   if quit_key(next_ui_key(fx)) { break }
    if !gfx.begin_frame_clear(BG) { continue }
-   if mock_backend {
+   if mock_backend && !common.env_truthy("NYTRIX_UI_REPLAY") {
       text(font_title, "Nytrix Lush Synth", 24.0, 24.0, WHITE)
       gfx.end_frame()
       continue

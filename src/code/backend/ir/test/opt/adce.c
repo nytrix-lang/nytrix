@@ -16,15 +16,7 @@ static bool preserves_dead_arithmetic_trap(nyr_op_t op) {
   nyr_func_t f;
   nyr_opt_begin(&f);
   int one = nyr_opt_const(&f, 1);
-  int divisor = nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_LOAD_LOCAL,
-                                            .dst = -1,
-                                            .a = -1,
-                                            .b = -1,
-                                            .c = -1,
-                                            .d = -1,
-                                            .e = -1,
-                                            .f = -1,
-                                            .imm = 0});
+  int divisor = nyr_opt_emit_imm(&f, NYIR_LOAD_LOCAL, 0);
   int quotient = nyr_opt_binop(&f, op, one, divisor);
   nyr_opt_ret(&f, nyr_opt_const(&f, 7));
   size_t div_index = 0;

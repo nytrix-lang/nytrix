@@ -53,7 +53,9 @@ fn check_identity(bool expected_valid, str label) {
       [checker, bitcode, source, signature, inputs], [], nil, false)
    def code = result.get("code", 127)
    assert((code == 0) == expected_valid,
-          label + " checker result mismatch: " + result.get("stdout", ""))
+          label + " checker result mismatch (exit " + to_str(code) + "): " +
+          result.get("stdout", "") + " source-hash=" + sha256(source) +
+          " inputs=" + unwrap(file_read(inputs)))
 }
 
 refresh_inputs()

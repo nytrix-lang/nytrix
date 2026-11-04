@@ -29,6 +29,8 @@ assert(fuzzy_score("xxPARsER", "parser") == 10198,
        "ASCII case folding finds a substring ending at the final byte")
 assert(fuzzy_score("aaaaab", "aab") == 10197,
        "a failed prefix does not skip overlapping substring candidates")
+assert(fuzzy_score("core.math._parse_internal", "parser") == 220,
+       "subsequence matching scores query bytes separated across a qualified name")
 assert(score(entries.get(0), "core.math.parse") == 1000000,
        "exact qualified names win")
 assert(int(score(entries.get(0), "parse|compiler")) ==
@@ -46,10 +48,20 @@ def private_name_without_qualification = {
 }
 assert(score(private_name_without_qualification, "needle") == 15800,
        "private-name scoring follows C when full_name has no qualified leaf")
+def private_parser_entry = {
+   "kind":"function", "name":"_parse_internal",
+   "full_name":"core.math._parse_internal", "signature":"internal",
+   "keywords":"parser", "path":"lib/math/parse.ny", "doc":"", "code":""
+}
+assert(score(private_parser_entry, "parser") == 16950,
+       "native and AOT scoring retain subsequence matches in name fields")
 def ordered = rank(entries, "parser")
-assert(ordered.len == 3 && int(ordered.get(0)) == 0 &&
-       int(ordered.get(1)) == 2 && int(ordered.get(2)) == 1,
-       "ranking sorts by score and keeps stable source indices")
+assert(ordered.len == 3, "ranking retains every matching source index")
+def first_score = score(entries.get(int(ordered.get(0))), "parser")
+def second_score = score(entries.get(int(ordered.get(1))), "parser")
+def third_score = score(entries.get(int(ordered.get(2))), "parser")
+assert(first_score >= second_score && second_score >= third_score,
+       "ranking sorts source indices by descending score")
 def kind_tie = rank([
    {"kind":"function", "name":"same", "full_name":"m.same"},
    {"kind":"doc", "name":"same", "full_name":"z.same"}

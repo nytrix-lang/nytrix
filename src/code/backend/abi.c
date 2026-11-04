@@ -1,8 +1,9 @@
 #include "code/backend/abi.h"
 
+#include <string.h>
+
 /*
- * Standalone Nyr code generation has no Ny runtime helper registry. Frontends
- * must mark their own external calls explicitly in NYIR metadata.
+ * Standalone Nyr lowering has no Ny runtime ABI registry.
  */
 const ny_native_runtime_abi_decl_t ny_native_runtime_abi_decls[1] = {{0}};
 const size_t ny_native_runtime_abi_decl_count = 0;

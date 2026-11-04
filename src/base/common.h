@@ -1,10 +1,10 @@
 #pragma once
 
 #include "base/compat.h"
+#include <stdarg.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -12,8 +12,8 @@
 #include <strings.h>
 #endif
 #ifndef _WIN32
-#include <unistd.h>
 #include <sys/ioctl.h>
+#include <unistd.h>
 #endif
 
 bool ny_dbg_json_enabled(void);
@@ -88,19 +88,22 @@ extern int color_mode;
 
 static inline bool ny_env_truthy(const char *v) {
   return v && *v && strcmp(v, "0") != 0 && strcasecmp(v, "false") != 0 &&
-         strcasecmp(v, "off") != 0 && strcasecmp(v, "no") != 0 && strcasecmp(v, "never") != 0;
+         strcasecmp(v, "off") != 0 && strcasecmp(v, "no") != 0 &&
+         strcasecmp(v, "never") != 0;
 }
 
 static inline bool ny_color_mode_value(const char *mode, bool *out) {
   if (!mode || !*mode)
     return false;
-  if (strcmp(mode, "always") == 0 || strcmp(mode, "on") == 0 || strcmp(mode, "1") == 0 ||
-      strcasecmp(mode, "true") == 0 || strcasecmp(mode, "yes") == 0) {
+  if (strcmp(mode, "always") == 0 || strcmp(mode, "on") == 0 ||
+      strcmp(mode, "1") == 0 || strcasecmp(mode, "true") == 0 ||
+      strcasecmp(mode, "yes") == 0) {
     *out = true;
     return true;
   }
-  if (strcmp(mode, "never") == 0 || strcmp(mode, "off") == 0 || strcmp(mode, "0") == 0 ||
-      strcasecmp(mode, "false") == 0 || strcasecmp(mode, "no") == 0) {
+  if (strcmp(mode, "never") == 0 || strcmp(mode, "off") == 0 ||
+      strcmp(mode, "0") == 0 || strcasecmp(mode, "false") == 0 ||
+      strcasecmp(mode, "no") == 0) {
     *out = false;
     return true;
   }
@@ -120,7 +123,8 @@ static inline bool ny_color_enabled_for_fd(int fd) {
   if (getenv("NO_COLOR")) {
     return false;
   }
-  if (ny_env_truthy(getenv("CLICOLOR_FORCE")) || ny_env_truthy(getenv("FORCE_COLOR"))) {
+  if (ny_env_truthy(getenv("CLICOLOR_FORCE")) ||
+      ny_env_truthy(getenv("FORCE_COLOR"))) {
     return true;
   }
   const char *term_program = getenv("TERM_PROGRAM");
@@ -199,9 +203,9 @@ static inline const char *ny_ui_section_icon(const char *title) {
   char lowered[96];
   size_t i = 0;
   for (; title[i] && i < sizeof(lowered) - 1; ++i)
-    lowered[i] = (char)((title[i] >= 'A' && title[i] <= 'Z')
-                            ? title[i] + ('a' - 'A')
-                            : title[i]);
+    lowered[i] =
+        (char)((title[i] >= 'A' && title[i] <= 'Z') ? title[i] + ('a' - 'A')
+                                                    : title[i]);
   lowered[i] = '\0';
   if (strstr(lowered, "git") || strstr(lowered, "repositor"))
     return "git";
@@ -221,9 +225,15 @@ static inline const char *ny_ui_section_icon(const char *title) {
     return "check";
   if (strncmp(lowered, "error", 5) == 0 || strncmp(lowered, "fuzz", 4) == 0)
     return "flask";
+  if (strstr(lowered, "validation"))
+    return "flask";
   if (strncmp(lowered, "run", 3) == 0 || strncmp(lowered, "runtime", 7) == 0 ||
       strstr(lowered, "replay"))
     return "play";
+  if (strstr(lowered, "profil"))
+    return "clock";
+  if (strstr(lowered, "stage"))
+    return "build";
   if (strncmp(lowered, "inspect", 7) == 0 || strstr(lowered, "environment"))
     return "search";
   if (strstr(lowered, "toolchain") || strstr(lowered, "override") ||
@@ -315,7 +325,9 @@ static inline int ny_ui_width(void) {
 #define NY_CLR_GRAY NY_CLR_BRIGHT_BLACK
 #define NY_CLR_UNDER "\033[4m"
 
-static inline const char *clr(const char *code) { return color_enabled() ? code : ""; }
+static inline const char *clr(const char *code) {
+  return color_enabled() ? code : "";
+}
 
 extern int verbose_enabled;
 bool ny_log_should_emit(const char *fmt);
@@ -323,7 +335,8 @@ void ny_progress_stderr_lock(void);
 void ny_progress_stderr_unlock(void);
 
 static inline void ny_log_emit_checked(const char *label, const char *color,
-                                       const char *event, const char *fmt, ...) {
+                                       const char *event, const char *fmt,
+                                       ...) {
   if (!fmt || !ny_log_should_emit(fmt))
     return;
   if (ny_dbg_json_enabled()) {
@@ -362,41 +375,47 @@ static inline void ny_log_emit_unchecked(const char *label, const char *color,
   ny_progress_stderr_unlock();
 }
 
-#define NY_LOG_V1(...)                                                                            \
-  do {                                                                                             \
-    if (verbose_enabled >= 1)                                                                      \
-      ny_log_emit_checked(ny_ui_mark("step"), NY_CLR_CYAN, "STEP", __VA_ARGS__);               \
+#define NY_LOG_V1(...)                                                         \
+  do {                                                                         \
+    if (verbose_enabled >= 1)                                                  \
+      ny_log_emit_checked(ny_ui_mark("step"), NY_CLR_CYAN, "STEP",             \
+                          __VA_ARGS__);                                        \
   } while (0)
 
-#define NY_LOG_V2(...)                                                                            \
-  do {                                                                                             \
-    if (verbose_enabled >= 2)                                                                      \
-      ny_log_emit_checked(ny_ui_mark("note"), NY_CLR_MAGENTA, "DETAIL", __VA_ARGS__);          \
+#define NY_LOG_V2(...)                                                         \
+  do {                                                                         \
+    if (verbose_enabled >= 2)                                                  \
+      ny_log_emit_checked(ny_ui_mark("note"), NY_CLR_MAGENTA, "DETAIL",        \
+                          __VA_ARGS__);                                        \
   } while (0)
 
-#define NY_LOG_V3(...)                                                                            \
-  do {                                                                                             \
-    if (verbose_enabled >= 3)                                                                      \
-      ny_log_emit_checked(ny_ui_mark("trace"), NY_CLR_GRAY, "TRACE", __VA_ARGS__);             \
+#define NY_LOG_V3(...)                                                         \
+  do {                                                                         \
+    if (verbose_enabled >= 3)                                                  \
+      ny_log_emit_checked(ny_ui_mark("trace"), NY_CLR_GRAY, "TRACE",           \
+                          __VA_ARGS__);                                        \
   } while (0)
 
 #define NY_LOG_INFO(...) NY_LOG_V1(__VA_ARGS__)
-#define NY_LOG_ERR(...) ny_log_emit_checked(ny_ui_mark("error"), NY_CLR_RED, "ERROR", __VA_ARGS__)
-#define NY_LOG_WARN(...) ny_log_emit_checked(ny_ui_mark("warn"), NY_CLR_YELLOW, "WARNING", __VA_ARGS__)
-#define NY_LOG_SUCCESS(...) ny_log_emit_unchecked(ny_ui_mark("success"), NY_CLR_GREEN, __VA_ARGS__)
+#define NY_LOG_ERR(...)                                                        \
+  ny_log_emit_checked(ny_ui_mark("error"), NY_CLR_RED, "ERROR", __VA_ARGS__)
+#define NY_LOG_WARN(...)                                                       \
+  ny_log_emit_checked(ny_ui_mark("warn"), NY_CLR_YELLOW, "WARNING", __VA_ARGS__)
+#define NY_LOG_SUCCESS(...)                                                    \
+  ny_log_emit_unchecked(ny_ui_mark("success"), NY_CLR_GREEN, __VA_ARGS__)
 
 extern int debug_enabled;
 
 #ifdef DEBUG
-#define NY_LOG_DEBUG(...)                                                                          \
-  do {                                                                                             \
-    if (debug_enabled)                                                                             \
-      ny_log_emit_unchecked(ny_ui_mark("hint"), NY_CLR_GRAY, __VA_ARGS__);                       \
+#define NY_LOG_DEBUG(...)                                                      \
+  do {                                                                         \
+    if (debug_enabled)                                                         \
+      ny_log_emit_unchecked(ny_ui_mark("hint"), NY_CLR_GRAY, __VA_ARGS__);     \
   } while (0)
 #else
-#define NY_LOG_DEBUG(...)                                                                          \
-  do {                                                                                             \
-    (void)0;                                                                                       \
+#define NY_LOG_DEBUG(...)                                                      \
+  do {                                                                         \
+    (void)0;                                                                   \
   } while (0)
 #endif
 
@@ -430,8 +449,8 @@ static inline char *ny_strndup(const char *s, size_t n) {
 /* Legacy vector macros below retain their fatal allocation contract.  New
  * code that can recover from allocation failure must use the explicit
  * ny_vec_*_try helpers, which leave vector storage unchanged on failure. */
-static inline bool ny_vec_reserve_try(void **data, size_t *cap,
-                                      size_t new_cap, size_t elem_size) {
+static inline bool ny_vec_reserve_try(void **data, size_t *cap, size_t new_cap,
+                                      size_t elem_size) {
   if (!data || !cap || elem_size == 0)
     return false;
   if (new_cap <= *cap)
@@ -466,34 +485,34 @@ static inline bool ny_vec_push_try(void **data, size_t *len, size_t *cap,
   return true;
 }
 
-#define vec_reserve_try(vec, new_cap) \
-  ny_vec_reserve_try((void **)&(vec)->data, &(vec)->cap, (new_cap), \
+#define vec_reserve_try(vec, new_cap)                                          \
+  ny_vec_reserve_try((void **)&(vec)->data, &(vec)->cap, (new_cap),            \
                      sizeof(*(vec)->data))
 
-#define vec_reserve_arena_try(arena, vec, new_cap) \
-  ny_vec_reserve_arena_try((arena), (void **)&(vec)->data, (vec)->len, \
+#define vec_reserve_arena_try(arena, vec, new_cap)                             \
+  ny_vec_reserve_arena_try((arena), (void **)&(vec)->data, (vec)->len,         \
                            &(vec)->cap, (new_cap), sizeof(*(vec)->data))
 
-#define VEC(type)                                                                                  \
-  struct {                                                                                         \
-    type *data;                                                                                    \
-    size_t len, cap;                                                                               \
+#define VEC(type)                                                              \
+  struct {                                                                     \
+    type *data;                                                                \
+    size_t len, cap;                                                           \
   }
 
-#define vec_reserve(vec, new_cap) \
-  do { \
-    if (!vec_reserve_try((vec), (new_cap))) { \
-      fprintf(stderr, "oom\n"); \
-      exit(1); \
-    } \
+#define vec_reserve(vec, new_cap)                                              \
+  do {                                                                         \
+    if (!vec_reserve_try((vec), (new_cap))) {                                  \
+      fprintf(stderr, "oom\n");                                                \
+      exit(1);                                                                 \
+    }                                                                          \
   } while (0)
 
-#define vec_reserve_arena(arena, vec, new_cap) \
-  do { \
-    if (!vec_reserve_arena_try((arena), (vec), (new_cap))) { \
-      fprintf(stderr, "oom\n"); \
-      exit(1); \
-    } \
+#define vec_reserve_arena(arena, vec, new_cap)                                 \
+  do {                                                                         \
+    if (!vec_reserve_arena_try((arena), (vec), (new_cap))) {                   \
+      fprintf(stderr, "oom\n");                                                \
+      exit(1);                                                                 \
+    }                                                                          \
   } while (0)
 
 /* Capacity growth is checked before both doubling and byte-size conversion. */
@@ -505,59 +524,59 @@ static inline bool ny_vec_push_try(void **data, size_t *len, size_t *cap,
  * such as `vec_push(v, make_item())`.
  */
 
-#define vec_push(vec, value) \
-  do { \
-    if ((vec)->len == (vec)->cap) { \
-      if ((vec)->cap > SIZE_MAX / 2) { \
-        fprintf(stderr, "oom\n"); \
-        exit(1); \
-      } \
-      vec_reserve((vec), (vec)->cap ? (vec)->cap * 2 : 8); \
-    } \
-    (vec)->data[(vec)->len++] = (value); \
+#define vec_push(vec, value)                                                   \
+  do {                                                                         \
+    if ((vec)->len == (vec)->cap) {                                            \
+      if ((vec)->cap > SIZE_MAX / 2) {                                         \
+        fprintf(stderr, "oom\n");                                              \
+        exit(1);                                                               \
+      }                                                                        \
+      vec_reserve((vec), (vec)->cap ? (vec)->cap * 2 : 8);                     \
+    }                                                                          \
+    (vec)->data[(vec)->len++] = (value);                                       \
   } while (0)
 
-#define vec_free(vec)                                                                              \
-  do {                                                                                             \
-    free((vec)->data);                                                                             \
-    (vec)->data = NULL;                                                                            \
-    (vec)->len = (vec)->cap = 0;                                                                   \
+#define vec_free(vec)                                                          \
+  do {                                                                         \
+    free((vec)->data);                                                         \
+    (vec)->data = NULL;                                                        \
+    (vec)->len = (vec)->cap = 0;                                               \
   } while (0)
 
-#define vec_init(vec)                                                                              \
-  do {                                                                                             \
-    (vec)->data = NULL;                                                                            \
-    (vec)->len = (vec)->cap = 0;                                                                   \
+#define vec_init(vec)                                                          \
+  do {                                                                         \
+    (vec)->data = NULL;                                                        \
+    (vec)->len = (vec)->cap = 0;                                               \
   } while (0)
 
-#define vec_push_arena(arena, vec, value) \
-  do { \
-    if ((vec)->len == (vec)->cap) { \
-      if ((vec)->cap > SIZE_MAX / 2) { \
-        fprintf(stderr, "oom\n"); \
-        exit(1); \
-      } \
-      vec_reserve_arena((arena), (vec), (vec)->cap ? (vec)->cap * 2 : 8); \
-    } \
-    (vec)->data[(vec)->len++] = (value); \
+#define vec_push_arena(arena, vec, value)                                      \
+  do {                                                                         \
+    if ((vec)->len == (vec)->cap) {                                            \
+      if ((vec)->cap > SIZE_MAX / 2) {                                         \
+        fprintf(stderr, "oom\n");                                              \
+        exit(1);                                                               \
+      }                                                                        \
+      vec_reserve_arena((arena), (vec), (vec)->cap ? (vec)->cap * 2 : 8);      \
+    }                                                                          \
+    (vec)->data[(vec)->len++] = (value);                                       \
   } while (0)
 
-#define vec_insert_arena(arena, vec, idx, value) \
-  do { \
-    if ((vec)->len == (vec)->cap) { \
-      if ((vec)->cap > SIZE_MAX / 2) { \
-        fprintf(stderr, "oom\n"); \
-        exit(1); \
-      } \
-      vec_reserve_arena((arena), (vec), (vec)->cap ? (vec)->cap * 2 : 8); \
-    } \
-    size_t _idx = (idx); \
-    if (_idx < (vec)->len) { \
-      memmove((vec)->data + _idx + 1, (vec)->data + _idx, \
-              ((vec)->len - _idx) * sizeof(*(vec)->data)); \
-    } \
-    (vec)->data[_idx] = (value); \
-    (vec)->len++; \
+#define vec_insert_arena(arena, vec, idx, value)                               \
+  do {                                                                         \
+    if ((vec)->len == (vec)->cap) {                                            \
+      if ((vec)->cap > SIZE_MAX / 2) {                                         \
+        fprintf(stderr, "oom\n");                                              \
+        exit(1);                                                               \
+      }                                                                        \
+      vec_reserve_arena((arena), (vec), (vec)->cap ? (vec)->cap * 2 : 8);      \
+    }                                                                          \
+    size_t _idx = (idx);                                                       \
+    if (_idx < (vec)->len) {                                                   \
+      memmove((vec)->data + _idx + 1, (vec)->data + _idx,                      \
+              ((vec)->len - _idx) * sizeof(*(vec)->data));                     \
+    }                                                                          \
+    (vec)->data[_idx] = (value);                                               \
+    (vec)->len++;                                                              \
   } while (0)
 
 typedef struct arena_region_t {
@@ -583,8 +602,7 @@ typedef struct arena_t {
 #endif
 
 static inline size_t arena_align_up_size(size_t v, size_t align) {
-  if (align == 0 || (align & (align - 1)) != 0 ||
-      v > SIZE_MAX - (align - 1))
+  if (align == 0 || (align & (align - 1)) != 0 || v > SIZE_MAX - (align - 1))
     return SIZE_MAX;
   return (v + (align - 1)) & ~(align - 1);
 }
@@ -693,9 +711,9 @@ static inline void *arena_alloc_aligned(arena_t *a, size_t size, size_t align) {
 static inline void *arena_alloc(arena_t *a, size_t size) {
   return arena_alloc_aligned(a, size, sizeof(max_align_t));
 }
-static inline bool ny_vec_reserve_arena_try(
-    arena_t *arena, void **data, size_t len, size_t *cap, size_t new_cap,
-    size_t elem_size) {
+static inline bool ny_vec_reserve_arena_try(arena_t *arena, void **data,
+                                            size_t len, size_t *cap,
+                                            size_t new_cap, size_t elem_size) {
   if (!data || !cap || elem_size == 0 || len > *cap)
     return false;
   if (new_cap <= *cap)
@@ -707,8 +725,7 @@ static inline bool ny_vec_reserve_arena_try(
   if (!ny_size_mul_ok(len, elem_size, &copied_bytes))
     return false;
   void *new_data = NULL;
-  if (!ny_arena_alloc_aligned_try(arena, bytes, sizeof(max_align_t),
-                                  &new_data))
+  if (!ny_arena_alloc_aligned_try(arena, bytes, sizeof(max_align_t), &new_data))
     return false;
   if (*data && copied_bytes)
     memcpy(new_data, *data, copied_bytes);
@@ -728,8 +745,7 @@ static inline bool ny_arena_strndup_try(arena_t *a, const char *s, size_t n,
   if (!ny_size_add_ok(n, 1, &bytes))
     return false;
   char *mem = NULL;
-  if (!ny_arena_alloc_aligned_try(a, bytes, sizeof(max_align_t),
-                                  (void **)&mem))
+  if (!ny_arena_alloc_aligned_try(a, bytes, sizeof(max_align_t), (void **)&mem))
     return false;
   memcpy(mem, s, n);
   mem[n] = '\0';

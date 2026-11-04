@@ -360,6 +360,16 @@ static bool nyr_expr_has_raw_int_abi(const nyr_builder_t *b, const expr_t *e,
       e->as.index.target->as.ident.name &&
       nyr_top_mut_is_append_int_list(b, e->as.index.target->as.ident.name))
     return true;
+  /* An unparameterized `list` stores dynamic elements. Its read accessor
+   * returns a canonical tagged value even when HM retained RAW_INT from a
+   * scalar-looking use. Only explicitly scalar list<T> reads may inherit
+   * that raw-integer fact. */
+  if (e->kind == NY_E_INDEX && e->as.index.target) {
+    const char *sequence_type = nyr_expr_type_name(b, e->as.index.target);
+    if (nyr_expr_is_dyn_list((nyr_builder_t *)b, e->as.index.target) ||
+        ny_native_type_name_is_dyn_list(sequence_type))
+      return false;
+  }
   /* A bigint expression is a handle even when its syntax is an arithmetic
    * binary expression.  Do this check before the raw-int semantic fallback:
    * otherwise a handle produced by `bigint(1) << 62` is boxed a second time
@@ -438,6 +448,12 @@ static bool nyr_expr_has_raw_int_abi(const nyr_builder_t *b, const expr_t *e,
       callee = nyr_find_user_function((nyr_builder_t *)b,
                                       e->as.call.callee->as.ident.name);
     if (callee && callee->kind == NY_S_FUNC) {
+      /* Declared Ny `bool` returns cross the source function boundary as
+       * canonical tagged booleans (nyr_box_bool), even though the source type
+       * itself maps to RAW_INT for locals and arguments. */
+      if (callee->as.fn.return_type &&
+          ny_type_name_is_bool(callee->as.fn.return_type))
+        return false;
       /* An explicit scalar return annotation owns the call ABI.  HM may
        * retain a broader TAGGED_DYNAMIC fact from a compatibility intrinsic
        * in the function body (for example bshr), but the function boundary
@@ -667,6 +683,98 @@ static int nyr_emit_scalar_list_append_fast(nyr_builder_t *b, int list,
   return nyr_load_local_value(b, result_slot);
 }
 
+/*
+ * Native non-dynamic lists store each element in one 8-byte payload word.
+ * Expand pop into ordinary NYIR memory and control-flow operations so the
+ * operation is independent of a target backend's runtime-symbol table.
+ */
+static int nyr_emit_native_list_pop_raw(nyr_builder_t *b, int list) {
+  if (!b || list < 0)
+    return -1;
+  int zero = nyr_emit_const(b, 0);
+  int one = nyr_emit_const(b, 1);
+  int three = nyr_emit_const(b, 3);
+  int neg24 = nyr_emit_const(b, -24);
+  int result_slot = nyr_temp_slot(b);
+  if (zero < 0 || one < 0 || three < 0 || neg24 < 0 || result_slot < 0)
+    return -1;
+
+  int empty_label = b->next_label++;
+  int header_label = b->next_label++;
+  int pop_label = b->next_label++;
+  int end_label = b->next_label++;
+  int nonnull = nyr_emit_cmp_i64(b, NYIR_CMP_NE, list, zero);
+  if (nonnull < 0 || !nyr_emit_br_if(b, nonnull, header_label) ||
+      !nyr_emit_br(b, empty_label) || !nyr_emit_label(b, header_label))
+    return -1;
+
+  int count_addr = nyr_emit_add_i64(b, list, neg24);
+  int count = count_addr < 0 ? -1 : nyr_emit_load_i64(b, count_addr);
+  int has_items =
+      count < 0 ? -1 : nyr_emit_cmp_i64(b, NYIR_CMP_GT, count, zero);
+  if (has_items < 0 || !nyr_emit_br_if(b, has_items, pop_label) ||
+      !nyr_emit_br(b, empty_label) || !nyr_emit_label(b, pop_label))
+    return -1;
+
+  int index = nyr_push_val(b, NYIR_SUB_I64, count, one, 0, NULL);
+  int byte_offset =
+      index < 0 ? -1 : nyr_push_val(b, NYIR_SHL_I64, index, three, 0, NULL);
+  int slot_addr = byte_offset < 0 ? -1 : nyr_emit_add_i64(b, list, byte_offset);
+  int value = slot_addr < 0 ? -1 : nyr_emit_load_i64(b, slot_addr);
+  /* Keep the header address live only at its store. The x86 copy-home
+   * coalescer may otherwise alias this branch-local address temporary with
+   * another value produced in the same diamond, leaving the header pointer
+   * uninitialized on the pop edge. */
+  int update_count_addr = index < 0 ? -1 : nyr_emit_add_i64(b, list, neg24);
+  if (index < 0 || byte_offset < 0 || slot_addr < 0 || value < 0 ||
+      update_count_addr < 0 || !nyr_emit_store_i64(b, slot_addr, zero) ||
+      !nyr_emit_store_i64(b, update_count_addr, index) ||
+      !nyr_store_local_value(b, result_slot, value) ||
+      !nyr_emit_br(b, end_label) || !nyr_emit_label(b, empty_label) ||
+      !nyr_store_local_value(b, result_slot, zero) ||
+      !nyr_emit_br(b, end_label) || !nyr_emit_label(b, end_label))
+    return -1;
+  int result = nyr_load_local_value(b, result_slot);
+  if (result >= 0 && b->nyir.len > 0) {
+    nyr_inst_t *load = &b->nyir.data[b->nyir.len - 1];
+    if (load->op == NYIR_LOAD_LOCAL && load->dst == result)
+      load->scalar_class = NYIR_SCALAR_I64_RAW;
+  }
+  return result;
+}
+
+static int nyr_emit_native_list_length_raw(nyr_builder_t *b, int list) {
+  if (!b || list < 0)
+    return -1;
+  int zero = nyr_emit_const(b, 0);
+  int header_offset = nyr_emit_const(b, -24);
+  int result_slot = nyr_temp_slot(b);
+  if (zero < 0 || header_offset < 0 || result_slot < 0)
+    return -1;
+  int header_label = b->next_label++;
+  int empty_label = b->next_label++;
+  int end_label = b->next_label++;
+  int nonnull = nyr_emit_cmp_i64(b, NYIR_CMP_NE, list, zero);
+  if (nonnull < 0 || !nyr_emit_br_if(b, nonnull, header_label) ||
+      !nyr_emit_br(b, empty_label) || !nyr_emit_label(b, header_label))
+    return -1;
+  int count_addr =
+      header_offset < 0 ? -1 : nyr_emit_add_i64(b, list, header_offset);
+  int count = count_addr < 0 ? -1 : nyr_emit_load_i64(b, count_addr);
+  if (count < 0 || !nyr_store_local_value(b, result_slot, count) ||
+      !nyr_emit_br(b, end_label) || !nyr_emit_label(b, empty_label) ||
+      !nyr_store_local_value(b, result_slot, zero) ||
+      !nyr_emit_br(b, end_label) || !nyr_emit_label(b, end_label))
+    return -1;
+  int result = nyr_load_local_value(b, result_slot);
+  if (result >= 0 && b->nyir.len > 0) {
+    nyr_inst_t *load = &b->nyir.data[b->nyir.len - 1];
+    if (load->op == NYIR_LOAD_LOCAL && load->dst == result)
+      load->scalar_class = NYIR_SCALAR_I64_RAW;
+  }
+  return result;
+}
+
 /* Untyped lists that are currently compact integer buffers can use the same
  * spare-capacity store as typed scalar lists.  The header guard is required:
  * an empty `[]` starts as a descriptor buffer and the first append must go
@@ -815,21 +923,21 @@ static int nyr_emit_proven_elem8_read(nyr_builder_t *b, int base, int idx,
   if (!incoming)
     return -1;
   incoming[0] = (nyr_phi_incoming_t){.predecessor_label = fast_label,
-                                      .value = fast_result};
+                                     .value = fast_result};
   incoming[1] = (nyr_phi_incoming_t){.predecessor_label = slow_label,
-                                      .value = slow_result};
+                                     .value = slow_result};
   int result =
       nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_PHI,
-                                        .dst = -1,
-                                        .a = -1,
-                                        .b = -1,
-                                        .c = -1,
-                                        .d = -1,
-                                        .e = -1,
-                                        .f = -1,
-                                        .phi_incoming = incoming,
-                                        .phi_incoming_len = 2,
-                                        .scalar_class = NYIR_SCALAR_I64_RAW});
+                                         .dst = -1,
+                                         .a = -1,
+                                         .b = -1,
+                                         .c = -1,
+                                         .d = -1,
+                                         .e = -1,
+                                         .f = -1,
+                                         .phi_incoming = incoming,
+                                         .phi_incoming_len = 2,
+                                         .scalar_class = NYIR_SCALAR_I64_RAW});
   if (result < 0) {
     free(incoming);
     return -1;
@@ -870,10 +978,10 @@ static int nyr_emit_proven_elem8_write(nyr_builder_t *b, int base, int index,
   int adjusted = wrapped < 0
                      ? -1
                      : nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_SELECT_I64,
-                                                         .dst = -1,
-                                                         .a = is_negative,
-                                                         .b = wrapped,
-                                                         .c = index});
+                                                          .dst = -1,
+                                                          .a = is_negative,
+                                                          .b = wrapped,
+                                                          .c = index});
   int nonnegative =
       adjusted < 0 ? -1 : nyr_emit_cmp_i64(b, NYIR_CMP_GE, adjusted, zero);
   int below_count = adjusted < 0 || count < 0
@@ -902,19 +1010,19 @@ static int nyr_emit_proven_elem8_write(nyr_builder_t *b, int base, int index,
   incoming[0] =
       (nyr_phi_incoming_t){.predecessor_label = fast_label, .value = base};
   incoming[1] = (nyr_phi_incoming_t){.predecessor_label = slow_label,
-                                      .value = slow_result};
+                                     .value = slow_result};
   int result = nyr_ir_emit(
       &b->nyir, (nyr_inst_t){.op = NYIR_PHI,
-                              .dst = -1,
-                              .a = -1,
-                              .b = -1,
-                              .c = -1,
-                              .d = -1,
-                              .e = -1,
-                              .f = -1,
-                              .phi_incoming = incoming,
-                              .phi_incoming_len = 2,
-                              .scalar_class = nyr_value_scalar_class(b, base)});
+                             .dst = -1,
+                             .a = -1,
+                             .b = -1,
+                             .c = -1,
+                             .d = -1,
+                             .e = -1,
+                             .f = -1,
+                             .phi_incoming = incoming,
+                             .phi_incoming_len = 2,
+                             .scalar_class = nyr_value_scalar_class(b, base)});
   if (result < 0) {
     free(incoming);
     return -1;
@@ -1433,6 +1541,93 @@ static expr_t *nyr_proof_global_literal(nyr_builder_t *b, const char *name) {
   return NULL;
 }
 
+
+/*
+ * Membership test `R(x)` for a refinement `refine R = Base where (v) { p }`.
+ * A refinement of a refinement is an intersection, so R(x) is p[v := x] and
+ * Base(x) when Base is itself a refinement. Each conjunct folds to a constant
+ * when it can be decided at compile time; otherwise both are evaluated (the
+ * predicates are pure) and combined as 0/1 booleans.
+ */
+static bool nyr_refine_const_value(const nyr_builder_t *b, int value,
+                                   int64_t *out) {
+  for (size_t i = b->nyir.len; value >= 0 && i > 0; --i) {
+    const nyr_inst_t *in = &b->nyir.data[i - 1];
+    if (in->dst == value) {
+      if (in->op != NYIR_CONST_I64)
+        return false;
+      *out = in->imm;
+      return true;
+    }
+  }
+  return false;
+}
+
+static int nyr_refine_truthy(nyr_builder_t *b, int value) {
+  int zero = nyr_emit_const(b, 0);
+  if (zero < 0)
+    return -1;
+  return nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_CMP_I64,
+                                            .dst = -1,
+                                            .a = value,
+                                            .b = zero,
+                                            .c = -1,
+                                            .cmp = NYIR_CMP_NE});
+}
+
+static int nyr_lower_refine_membership(nyr_builder_t *b,
+                                       const stmt_t *refine_stmt,
+                                       expr_t *arg_expr, int depth) {
+  if (!refine_stmt || !arg_expr || depth > 32)
+    return nyr_fail(b, "native NYIR lower: refinement chain too deep"), -1;
+  int base_value = -1;
+  bool base_known = false, base_true = true;
+  const char *base_name = refine_stmt->as.refine.base_type;
+  const stmt_t *base_stmt =
+      base_name && b->prog ? nyr_find_refine_in_prog(b, b->prog, base_name)
+                           : NULL;
+  if (base_stmt) {
+    base_value = nyr_lower_refine_membership(b, base_stmt, arg_expr, depth + 1);
+    if (base_value < 0)
+      return -1;
+    int64_t k = 0;
+    if (nyr_refine_const_value(b, base_value, &k)) {
+      base_known = true;
+      base_true = k != 0;
+      if (!base_true)
+        return nyr_emit_const(b, 0);
+    }
+  }
+  expr_t *inst = ny_expr_subst(NULL, refine_stmt->as.refine.predicate,
+                               refine_stmt->as.refine.param, arg_expr);
+  if (!inst)
+    return nyr_fail(b, "native NYIR lower: refinement predicate substitution "
+                       "failed"),
+           -1;
+  int own = -1;
+  ny_ct_fast_val_t fval = ny_ct_fast_none();
+  if (ny_try_eval_comptime_expr_fast(NULL, inst, &fval, 0) &&
+      fval.kind == NY_CT_FAST_BOOL) {
+    if (!fval.b)
+      return nyr_emit_const(b, 0);
+    own = nyr_emit_const(b, 1);
+  } else {
+    own = nyr_lower_expr(b, inst);
+  }
+  if (own < 0 || !base_stmt || base_known)
+    return own;
+  /* Normalize both conjuncts to 0/1 before combining. */
+  int lhs = nyr_refine_truthy(b, base_value);
+  int rhs = nyr_refine_truthy(b, own);
+  if (lhs < 0 || rhs < 0)
+    return -1;
+  return nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_AND_I64,
+                                            .dst = -1,
+                                            .a = lhs,
+                                            .b = rhs,
+                                            .c = -1});
+}
+
 static int nyr_lower_call(nyr_builder_t *b, const expr_t *e) {
   /* A statically known dictionary receiver can use the typed stdlib reader.
    * Keep it ahead of the global and local raw lookup shortcuts, which lose
@@ -1565,11 +1760,8 @@ static int nyr_lower_call(nyr_builder_t *b, const expr_t *e) {
         root->kind == NY_E_IDENT && root->as.ident.name) {
       const char *dot = strchr(qualified, '.');
       if (dot && dot > qualified) {
-        nyr_builder_t probe = *b;
-        probe.source_file = NULL;
-        probe.locals = NULL;
-        probe.local_count = probe.local_cap = 0;
-        const char *module = nyr_resolve_use_alias(&probe, root->as.ident.name);
+        const char *module =
+            nyr_resolve_use_alias_global(b, root->as.ident.name);
         if (module) {
           char canonical[512];
           int n = snprintf(canonical, sizeof(canonical), "%s%s", module, dot);
@@ -1700,7 +1892,7 @@ static int nyr_lower_call(nyr_builder_t *b, const expr_t *e) {
             "function=%s receiver=%s call=add decision=preserve-set-handle",
             b->current_fn_name ? b->current_fn_name : "<entry>", module);
       return nyr_emit_runtime_call(b, "rt_set_add_raw", set_value, key, -1, 2,
-                                   0);
+                                   NYIR_SCALAR_OBJECT);
     }
   }
   if (e->as.call.callee && e->as.call.callee->kind == NY_E_MEMBER &&
@@ -1748,6 +1940,11 @@ static int nyr_lower_call(nyr_builder_t *b, const expr_t *e) {
           return -1;
         if (nyr_value_scalar_class(b, set_value) == NYIR_SCALAR_I64_TAGGED)
           set_value = nyr_emit_runtime_call(b, "rt_untag", set_value, -1, -1, 1,
+                                            NYIR_SCALAR_OBJECT);
+        if (set_value < 0)
+          return -1;
+        if (nyr_value_scalar_class(b, set_value) == NYIR_SCALAR_I64_TAGGED)
+          set_value = nyr_emit_runtime_call(b, "rt_untag", set_value, -1, -1, 1,
                                             NYIR_SCALAR_TYPED_BUFFER);
         if (set_value < 0)
           return -1;
@@ -1758,7 +1955,7 @@ static int nyr_lower_call(nyr_builder_t *b, const expr_t *e) {
               b->current_fn_name ? b->current_fn_name : "<entry>",
               module ? module : alias);
         return nyr_emit_runtime_call(b, "rt_set_add_raw", set_value, key, -1, 2,
-                                     0);
+                                     NYIR_SCALAR_OBJECT);
       }
     }
   }
@@ -1777,7 +1974,8 @@ static int nyr_lower_call(nyr_builder_t *b, const expr_t *e) {
     int right = left < 0 ? -1 : nyr_lower_expr(b, e->as.call.args.data[1].val);
     if (left < 0 || right < 0)
       return -1;
-    return nyr_emit_runtime_call(b, "rt_shl_raw", left, right, -1, 2, 0);
+    return nyr_emit_runtime_call(b, "rt_shl_raw", left, right, -1, 2,
+                                 NYIR_SCALAR_I64_RAW);
   }
   /* __shr/bshr has a tagged interpreter entry, but native operands are raw
    * integers.  Keep the shift count raw as well; otherwise an odd count is
@@ -1791,7 +1989,8 @@ static int nyr_lower_call(nyr_builder_t *b, const expr_t *e) {
     int right = left < 0 ? -1 : nyr_lower_expr(b, e->as.call.args.data[1].val);
     if (left < 0 || right < 0)
       return -1;
-    return nyr_emit_runtime_call(b, "rt_bshr_raw", left, right, -1, 2, 0);
+    return nyr_emit_runtime_call(b, "rt_bshr_raw", left, right, -1, 2,
+                                 NYIR_SCALAR_I64_RAW);
   }
   /* Primitive bitwise helpers are tagged in the interpreter, while native
    * scalar callers (flags, masks, ABI fields) carry raw i64 values. Preserve
@@ -1853,7 +2052,11 @@ static int nyr_lower_call(nyr_builder_t *b, const expr_t *e) {
       e->as.call.args.len == 2 && !e->as.call.args.data[0].name &&
       !e->as.call.args.data[1].name) {
     int ptr = nyr_lower_expr(b, e->as.call.args.data[0].val);
-    int off = ptr < 0 ? -1 : nyr_lower_expr(b, e->as.call.args.data[1].val);
+    if (ptr >= 0 && nyr_expr_is_any(b, e->as.call.args.data[0].val))
+      ptr = nyr_emit_runtime_call(b, "rt_any_to_i64", ptr, -1, -1, 1,
+                                  NYIR_SCALAR_I64_RAW);
+    int off =
+        ptr < 0 ? -1 : nyr_lower_int_value(b, e->as.call.args.data[1].val);
     return off < 0
                ? -1
                : nyr_emit_runtime_call(b, "rt_ptr_add_i64", ptr, off, -1, 2, 0);
@@ -2194,13 +2397,8 @@ static int nyr_lower_call(nyr_builder_t *b, const expr_t *e) {
     bool bound_value = local_value || explicit_global_value;
     if (!bound_value)
       module_alias = nyr_resolve_use_alias(b, alias);
-    if (!module_alias && !bound_value) {
-      nyr_builder_t probe = *b;
-      probe.source_file = NULL;
-      probe.locals = NULL;
-      probe.local_count = probe.local_cap = 0;
-      module_alias = nyr_resolve_use_alias(&probe, alias);
-    }
+    if (!module_alias && !bound_value)
+      module_alias = nyr_resolve_use_alias_global(b, alias);
   }
   /* A qualified module call (`core_ref.get(x)`) is represented by the parser
    * as a member-shaped callee, but semantic attached-method resolution may
@@ -2322,7 +2520,7 @@ static int nyr_lower_call(nyr_builder_t *b, const expr_t *e) {
                 "decision=use-raw-set-add-runtime-entry",
                 b->current_fn_name ? b->current_fn_name : "<entry>", canonical);
           return nyr_emit_runtime_call(b, "rt_set_add_raw", set_value, key, -1,
-                                       2, 0);
+                                       2, NYIR_SCALAR_OBJECT);
         }
         expr_t callee = {.kind = NY_E_IDENT, .tok = e->tok};
         callee.as.ident.name = canonical;
@@ -2369,9 +2567,14 @@ static int nyr_lower_call(nyr_builder_t *b, const expr_t *e) {
           nyr_expr_is_set(b, receiver)) {
         int set = nyr_lower_expr(b, receiver);
         int key = nyr_lower_expr(b, e->as.call.args.data[0].val);
-        return set < 0 || key < 0 ? -1
-                                  : nyr_emit_runtime_call(b, "rt_set_add_raw",
-                                                          set, key, -1, 2, 0);
+        if (set >= 0 &&
+            nyr_value_scalar_class(b, set) == NYIR_SCALAR_I64_TAGGED)
+          set = nyr_emit_runtime_call(b, "rt_untag", set, -1, -1, 1,
+                                      NYIR_SCALAR_OBJECT);
+        return set < 0 || key < 0
+                   ? -1
+                   : nyr_emit_runtime_call(b, "rt_set_add_raw", set, key, -1, 2,
+                                           NYIR_SCALAR_OBJECT);
       }
       if (strcmp(canonical_leaf, "clear") == 0 && e->as.call.args.len == 0 &&
           nyr_expr_is_list(b, receiver)) {
@@ -2453,9 +2656,9 @@ static int nyr_lower_call(nyr_builder_t *b, const expr_t *e) {
           int shifted =
               one < 0 ? -1
                       : nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_SHL_I64,
-                                                          .dst = -1,
-                                                          .a = key,
-                                                          .b = one});
+                                                           .dst = -1,
+                                                           .a = key,
+                                                           .b = one});
           key = shifted < 0 ? -1 : nyr_emit_binop(b, NYIR_OR_I64, shifted, one);
         }
         int fallback = fallback_arg ? nyr_lower_expr(b, fallback_arg->val)
@@ -2472,8 +2675,7 @@ static int nyr_lower_call(nyr_builder_t *b, const expr_t *e) {
             fallback_expr && fallback_expr->kind == NY_E_LITERAL &&
             fallback_expr->as.literal.kind == NY_LIT_INT &&
             fallback_expr->tok.kind != NY_T_NIL;
-        nyr_scalar_class_t fallback_class =
-            nyr_value_scalar_class(b, fallback);
+        nyr_scalar_class_t fallback_class = nyr_value_scalar_class(b, fallback);
         bool fallback_is_float = nyr_expr_is_f64(b, fallback_expr) ||
                                  nyr_expr_is_f32(b, fallback_expr) ||
                                  fallback_class == NYIR_SCALAR_F64 ||
@@ -2528,7 +2730,16 @@ static int nyr_lower_call(nyr_builder_t *b, const expr_t *e) {
              */
             nyr_scalar_class_t key_class = nyr_value_scalar_class(b, key);
             if (key_class == NYIR_SCALAR_I64_RAW) {
-              key = nyr_box_raw_dynamic_value(b, key);
+              /* The list index bridge owns the raw-index ABI and boxes its
+               * fallback internally. This also covers list-producing
+               * temporaries whose element type is dynamic (for example
+               * `split(...).get(1)`). Sending the raw index to the tagged
+               * accessor makes odd indices decode as a different integer. */
+              if (key < 0)
+                return -1;
+              return nyr_emit_runtime_call(b, "rt_value_get_index_raw", dict,
+                                           key, fallback, 3,
+                                           NYIR_SCALAR_I64_TAGGED);
             } else if (key_class == NYIR_SCALAR_F32 ||
                        key_class == NYIR_SCALAR_F64) {
               int f64 = key_class == NYIR_SCALAR_F32
@@ -2787,11 +2998,7 @@ ordinary_call:
         if (!module) {
           /* Expanded stdlib nodes can carry the provider's source filename
            * while the alias declaration belongs to the importing module. */
-          nyr_builder_t probe = *b;
-          probe.source_file = NULL;
-          probe.locals = NULL;
-          probe.local_count = probe.local_cap = 0;
-          module = nyr_resolve_use_alias(&probe, alias);
+          module = nyr_resolve_use_alias_global(b, alias);
         }
         if (module) {
           /*
@@ -2944,6 +3151,29 @@ ordinary_call:
         return nyr_emit_cmp_i64(b, NYIR_CMP_EQ, tag, nil_tag);
       }
     }
+    /*
+     * The proof evaluator folds a top-level `def any x = nil` local mirror
+     * to its declaration-time constant, and nil literals parse as NY_LIT_INT
+     * zero -- so a proven zero here is the NIL IMMEDIATE when the argument
+     * uses the tagged dynamic ABI, not an integer payload. Only raw-integer
+     * ABI arguments may fold NY_IMM_FALSE; tagged-dynamic arguments lower to
+     * the literal nil compare of their runtime word.
+     */
+    bool arg_tagged_dynamic =
+        arg && (arg->semantic.resolved &&
+                arg->semantic.rep == NY_SEM_REP_TAGGED_DYNAMIC);
+    if (arg && arg->kind == NY_E_IDENT && arg->as.ident.name) {
+      nyr_local_t *local = nyr_find_local(b, arg->as.ident.name);
+      if (local && local->is_any)
+        arg_tagged_dynamic = true;
+    }
+    if (arg && arg_tagged_dynamic) {
+      int value = nyr_lower_expr(b, arg);
+      int nilv = value < 0 ? -1 : nyr_emit_const(b, NY_IMM_NIL);
+      return value < 0 || nilv < 0
+                 ? -1
+                 : nyr_emit_cmp_i64(b, NYIR_CMP_EQ, value, nilv);
+    }
     int64_t known = 0;
     if (arg &&
         ((arg->kind == NY_E_LITERAL && arg->as.literal.kind == NY_LIT_INT) ||
@@ -2970,16 +3200,19 @@ ordinary_call:
     if (arg && arg->kind == NY_E_IDENT && arg->as.ident.name)
       arg_local = nyr_find_local(b, arg->as.ident.name);
     if (arg && arg->kind == NY_E_LITERAL && arg->as.literal.kind == NY_LIT_INT)
-      return nyr_emit_const(b, arg->tok.kind == NY_T_NIL ? 0 : 1);
+      return nyr_emit_const(b, arg->tok.kind == NY_T_NIL ? NY_IMM_FALSE
+                                                         : NY_IMM_TRUE);
     if (nyr_expr_has_raw_int_abi(b, arg, 0))
-      return nyr_emit_const(b, 1);
+      return nyr_emit_const(b, NY_IMM_TRUE);
     /* HM can leave a narrowed scalar fact on an explicitly dynamic local,
      * even though the slot still contains its tagged runtime carrier. Keep
      * the predicate dynamic for that slot so its actual tag is inspected. */
     if (arg && !(arg_local && arg_local->is_any) && arg->semantic.resolved &&
         arg->semantic.rep != NY_SEM_REP_TAGGED_DYNAMIC &&
         arg->semantic.rep != NY_SEM_REP_UNRESOLVED)
-      return nyr_emit_const(b, arg->semantic.rep == NY_SEM_REP_RAW_INT ? 1 : 0);
+      return nyr_emit_const(b, arg->semantic.rep == NY_SEM_REP_RAW_INT
+                                   ? NY_IMM_TRUE
+                                   : NY_IMM_FALSE);
     if (arg_local) {
       nyr_local_t *local = arg_local;
       /* A tbuf/any-producing expression can retain a companion tag slot even
@@ -2997,17 +3230,41 @@ ordinary_call:
         int eq3 = nyr_emit_cmp_i64(b, NYIR_CMP_EQ, tag, tag3);
         if (eq1 < 0 || eq3 < 0)
           return -1;
-        return nyr_emit_binop(b, NYIR_OR_I64, eq1, eq3);
+        int is_tagged_int = nyr_emit_binop(b, NYIR_OR_I64, eq1, eq3);
+        return is_tagged_int < 0 ? -1 : nyr_box_bool(b, is_tagged_int);
       }
       if (local && !local->is_any &&
           local->semantic_rep != NY_SEM_REP_UNRESOLVED)
-        return nyr_emit_const(b, local->semantic_rep == NY_SEM_REP_RAW_INT ? 1
-                                                                           : 0);
+        return nyr_emit_const(b, local->semantic_rep == NY_SEM_REP_RAW_INT
+                                     ? NY_IMM_TRUE
+                                     : NY_IMM_FALSE);
     }
     int value = nyr_lower_expr(b, arg);
-    return value < 0 ? -1
+    int result = value < 0
+                     ? -1
                      : nyr_emit_runtime_call(b, "rt_native_is_int", value, -1,
-                                             -1, 1, 0);
+                                             -1, 1, NYIR_SCALAR_I64_RAW);
+    return result < 0 ? -1 : nyr_box_bool(b, result);
+  }
+
+  /* These dictionary probes return a raw C 0/1 word. Keep that ABI visible
+   * to source comparison/boolean lowering instead of applying the generic
+   * tagged-any return contract from the runtime declaration. */
+  if (canon_leaf &&
+      (strcmp(canon_leaf, "__dict_has_raw") == 0 ||
+       strcmp(canon_leaf, "__dict_has_str_raw") == 0) &&
+      e->as.call.args.len == 2 && !e->as.call.args.data[0].name &&
+      !e->as.call.args.data[1].name) {
+    int dict = nyr_lower_expr(b, e->as.call.args.data[0].val);
+    int key = dict < 0 ? -1 : nyr_lower_expr(b, e->as.call.args.data[1].val);
+    return dict < 0 || key < 0
+               ? -1
+               : nyr_emit_runtime_call(
+                     b,
+                     strcmp(canon_leaf, "__dict_has_str_raw") == 0
+                         ? "rt_dict_has_str_raw"
+                         : "rt_dict_has_raw",
+                     dict, key, -1, 2, NYIR_SCALAR_I64_RAW);
   }
 
   /* Wide literals are materialized as BigInt handles by literal lowering.
@@ -3075,9 +3332,10 @@ ordinary_call:
     if (arg && arg->kind == NY_E_LITERAL && arg->as.literal.kind == NY_LIT_INT)
       return nyr_emit_const(b, 0);
     int value = nyr_lower_expr(b, arg);
-    return value < 0 ? -1
-                     : nyr_emit_runtime_call(b, "rt_value_is_ptr", value, -1,
-                                             -1, 1, 0);
+    int predicate = value < 0 ? -1
+                              : nyr_emit_runtime_call(b, "rt_value_is_ptr",
+                                                      value, -1, -1, 1, 0);
+    return predicate < 0 ? -1 : nyr_box_bool(b, predicate);
   }
 
   /* Built-in container predicates must inspect both managed objects and the
@@ -3347,8 +3605,16 @@ ordinary_call:
         return nyr_emit_runtime_call(b, dict_get, target_v, key_v, fallback, 3,
                                      NYIR_SCALAR_I64_TAGGED);
     }
+    bool target_is_split_call =
+        (target->kind == NY_E_MEMCALL && target->as.memcall.name &&
+         strcmp(target->as.memcall.name, "split") == 0) ||
+        (target->kind == NY_E_CALL && target->as.call.callee &&
+         target->as.call.callee->kind == NY_E_MEMBER &&
+         target->as.call.callee->as.member.name &&
+         strcmp(target->as.call.callee->as.member.name, "split") == 0);
     if ((target->kind == NY_E_IDENT || target->kind == NY_E_LIST ||
-         target->kind == NY_E_TUPLE) &&
+         target->kind == NY_E_TUPLE || target_is_split_call ||
+         (target->kind == NY_E_CALL && nyr_expr_is_dyn_list(b, target))) &&
         (nyr_expr_is_list(b, target) || nyr_expr_is_dyn_list(b, target))) {
       /* Native sequence buffers use a raw-index bridge. Keep integer keys
        * unboxed for that ABI; tagged and floating keys are normalized below. */
@@ -3481,15 +3747,15 @@ ordinary_call:
         int shifted =
             one < 0 ? -1
                     : nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_SHL_I64,
-                                                        .dst = -1,
-                                                        .a = value,
-                                                        .b = one});
+                                                         .dst = -1,
+                                                         .a = value,
+                                                         .b = one});
         int tagged = shifted < 0
                          ? -1
                          : nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_OR_I64,
-                                                             .dst = -1,
-                                                             .a = shifted,
-                                                             .b = one});
+                                                              .dst = -1,
+                                                              .a = shifted,
+                                                              .b = one});
         if (tagged < 0)
           return -1;
         value = tagged;
@@ -3583,9 +3849,9 @@ ordinary_call:
                         : nyr_emit_binop(b, NYIR_ADD_I64, object, offset);
       size_t before_store = b->nyir.len;
       (void)nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_STORE_I64,
-                                              .a = address,
-                                              .c = value,
-                                              .dst = -1});
+                                               .a = address,
+                                               .c = value,
+                                               .dst = -1});
       if (address < 0 || b->nyir.len == before_store) {
         return nyr_fail(
                    b, "native NYIR lower: ADT constructor field store failed"),
@@ -3673,6 +3939,17 @@ ordinary_call:
     if (value < 0)
       return -1;
     bool known_bigint = nyr_expr_is_bigint(b, arg_expr);
+    /* Representation-polymorphic helpers can change a container's dynamic
+     * tag (clone(tuple) deliberately returns a list).  A static source type
+     * guess here would report the input tag instead of the produced value. */
+    if (arg_expr && arg_expr->kind == NY_E_CALL &&
+        ny_native_call_leaf(arg_expr)) {
+      const char *producer = ny_native_call_leaf(arg_expr);
+      if (strcmp(producer, "clone") == 0 || strcmp(producer, "sorted") == 0 ||
+          strcmp(producer, "take") == 0)
+        return nyr_emit_runtime_call(b, "rt_type_name", value, -1, -1, 1,
+                                     NYIR_SCALAR_STRING);
+    }
     const nyr_local_t *type_local =
         arg_expr && arg_expr->kind == NY_E_IDENT && arg_expr->as.ident.name
             ? nyr_find_local(b, arg_expr->as.ident.name)
@@ -3800,7 +4077,8 @@ ordinary_call:
       e->as.call.args.len == 1 && !e->as.call.args.data[0].name) {
     int value = nyr_lower_expr(b, e->as.call.args.data[0].val);
     return value < 0 ? -1
-                     : nyr_emit_runtime_call(b, "rt_atoi", value, -1, -1, 1, 0);
+                     : nyr_emit_runtime_call(b, "rt_atoi", value, -1, -1, 1,
+                                             NYIR_SCALAR_I64_RAW);
   }
   if (canon_leaf && strcmp(canon_leaf, "atof") == 0 &&
       !nyr_user_defined_fn(b, name) && e->as.call.args.len == 1 &&
@@ -3837,9 +4115,9 @@ ordinary_call:
     int one = tagged < 0 ? -1 : nyr_emit_const(b, 1);
     return one < 0 ? -1
                    : nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_SAR_I64,
-                                                       .dst = -1,
-                                                       .a = tagged,
-                                                       .b = one});
+                                                        .dst = -1,
+                                                        .a = tagged,
+                                                        .b = one});
   }
   if (canon_leaf && strcmp(canon_leaf, "getlogin") == 0 &&
       !nyr_user_defined_fn(b, name) && e->as.call.args.len == 0) {
@@ -4013,9 +4291,9 @@ ordinary_call:
     int one = nyr_emit_const(b, 1);
     return one < 0 ? -1
                    : nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_SAR_I64,
-                                                       .dst = -1,
-                                                       .a = tagged,
-                                                       .b = one});
+                                                        .dst = -1,
+                                                        .a = tagged,
+                                                        .b = one});
   }
   /* Native integers are already unboxed; floating inputs need a cast and
    * dynamic/any inputs need unboxing. */
@@ -4089,9 +4367,9 @@ ordinary_call:
      * language-level zero result instead of exposing the pointer address. */
     if (nyr_expr_is_cstr(b, arg_expr)) {
       int string = nyr_lower_expr(b, arg_expr);
-      return string < 0
-                 ? -1
-                 : nyr_emit_runtime_call(b, "rt_atoi", string, -1, -1, 1, 0);
+      return string < 0 ? -1
+                        : nyr_emit_runtime_call(b, "rt_atoi", string, -1, -1, 1,
+                                                NYIR_SCALAR_I64_RAW);
     }
     int arg = nyr_lower_int_value(b, arg_expr);
     if (arg < 0)
@@ -4253,11 +4531,11 @@ ordinary_call:
           if (symbol) {
             int address =
                 nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_ADDR_SYMBOL,
-                                                  .dst = -1,
-                                                  .a = -1,
-                                                  .b = -1,
-                                                  .imm = 0,
-                                                  .symbol = symbol});
+                                                   .dst = -1,
+                                                   .a = -1,
+                                                   .b = -1,
+                                                   .imm = 0,
+                                                   .symbol = symbol});
             if (address < 0 || !nyr_emit_store_i64(b, address, updated))
               return -1;
           }
@@ -4524,9 +4802,9 @@ ordinary_call:
       int raw_fn = nyr_emit_const(b, rt_tag_v(1));
       int tagged_result =
           nyr_emit_const(b, rt_tag_v(nyr_fn_result_kind(b, target_fn)));
-      int stack = nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_ALLOCA,
-                                                    .dst = -1,
-                                                    .imm = (int64_t)argc * 8});
+      int stack = nyr_ir_emit(
+          &b->nyir,
+          (nyr_inst_t){.op = NYIR_ALLOCA, .dst = -1, .imm = (int64_t)argc * 8});
       if (argc_value < 0 || raw_fn < 0 || tagged_result < 0 || stack < 0)
         return -1;
       for (int i = 0; i < argc; ++i) {
@@ -4607,7 +4885,7 @@ ordinary_call:
      * particular, dynamic booleans must promote compact elem-8 lists before
      * storing so their provenance is not lost. */
     /* Both private store primitives are lowered from NYIR's unboxed scalar
-     * ABI.  Sending __store_item through the tagged public helper made an odd
+     * ABI. Sending __store_item through the tagged public helper made an odd
      * raw index (1) look like tagged zero and wrote the wrong slot. */
     /* The raw integer ABI cannot identify a pointer from the payload's tag
      * bits: values such as 246 collide with NY_NATIVE_IS.  Select the scalar
@@ -4789,9 +5067,12 @@ ordinary_call:
         if (key < 0)
           return -1;
       }
-      if (!nyr_expr_is_bool(b, value_expr) &&
-          (nyr_expr_has_raw_int_abi(b, value_expr, 0) ||
-           nyr_value_scalar_class(b, value) == NYIR_SCALAR_I64_RAW)) {
+      if (nyr_expr_is_bool(b, value_expr)) {
+        value = nyr_box_bool(b, value);
+        if (value < 0)
+          return -1;
+      } else if (nyr_expr_has_raw_int_abi(b, value_expr, 0) ||
+                 nyr_value_scalar_class(b, value) == NYIR_SCALAR_I64_RAW) {
         value = nyr_emit_runtime_call(b, "rt_tag", value, -1, -1, 1, 0);
         if (value < 0)
           return -1;
@@ -4811,6 +5092,16 @@ ordinary_call:
       }
       return nyr_emit_runtime_call(b, "rt_value_set_tagged", target, key, value,
                                    3, 0);
+    }
+    /* Sequence setters consume a raw index, including the setter whose
+     * item uses the tagged ABI. An `any` index remains boxed even after an
+     * is_int guard; decode its producer representation exactly once. */
+    if (!target_is_dict &&
+        nyr_value_scalar_class(b, key) == NYIR_SCALAR_I64_TAGGED) {
+      key = nyr_emit_runtime_call(b, "rt_any_to_i64", key, -1, -1, 1,
+                                  NYIR_SCALAR_I64_RAW);
+      if (key < 0)
+        return -1;
     }
     bool cloned_for_cow = false;
     nyr_local_t *cow_local = NULL;
@@ -4874,12 +5165,12 @@ ordinary_call:
                                           -1, 1, NYIR_SCALAR_TYPED_BUFFER);
           int addr = copy < 0 ? -1
                               : nyr_ir_emit(&b->nyir,
-                                          (nyr_inst_t){.op = NYIR_ADDR_SYMBOL,
-                                                        .dst = -1,
-                                                        .a = -1,
-                                                        .b = -1,
-                                                        .imm = 0,
-                                                        .symbol = symbol});
+                                            (nyr_inst_t){.op = NYIR_ADDR_SYMBOL,
+                                                         .dst = -1,
+                                                         .a = -1,
+                                                         .b = -1,
+                                                         .imm = 0,
+                                                         .symbol = symbol});
           if (copy < 0 || addr < 0 || !nyr_emit_store_i64(b, addr, copy))
             return -1;
           target = copy;
@@ -5034,6 +5325,26 @@ ordinary_call:
                       stored_value_class == NYIR_SCALAR_F64;
         bool is_f32 = !is_f64 && (nyr_expr_is_f32(b, value_expr) ||
                                   stored_value_class == NYIR_SCALAR_F32);
+        bool callable_value = nyr_expr_is_callable_value(b, value_expr);
+        if (callable_value && !is_f64 && !is_f32) {
+          const nyr_local_t *callable_local =
+              value_expr ? nyr_find_expr_local(b, value_expr) : NULL;
+          const stmt_t *callable_fn = NULL;
+          if (value_expr->kind == NY_E_FN || value_expr->kind == NY_E_LAMBDA) {
+            callable_fn = value_expr->semantic.canonical_callee_stmt;
+          } else if (callable_local && callable_local->callable_name) {
+            callable_fn =
+                nyr_find_user_function(b, callable_local->callable_name);
+          } else if (value_expr->kind == NY_E_IDENT &&
+                     value_expr->as.ident.name) {
+            callable_fn = nyr_find_user_function(b, value_expr->as.ident.name);
+          }
+          value = nyr_emit_runtime_call(
+              b, nyr_callable_storage_marker(b, callable_fn), value, -1, -1, 1,
+              NYIR_SCALAR_I64_TAGGED);
+          if (value < 0)
+            return -1;
+        }
         if (is_f64 || is_f32) {
           if (is_f32)
             value = nyr_emit_f32_to_f64(b, value);
@@ -5045,6 +5356,8 @@ ordinary_call:
                                                    -1, -1, 1, 0);
         } else if (nyr_expr_is_bool(b, value_expr)) {
           value = nyr_box_bool(b, value);
+        } else if (callable_value) {
+          /* The marker already normalized the function pointer and ABI. */
         } else if ((!canonical_value || raw_dynamic_scalar ||
                     raw_dynamic_local) &&
                    (!nyr_expr_is_any(b, value_expr) || raw_dynamic_scalar ||
@@ -5073,11 +5386,11 @@ ordinary_call:
         } else if (global_symbol) {
           int addr =
               nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_ADDR_SYMBOL,
-                                                .dst = -1,
-                                                .a = -1,
-                                                .b = -1,
-                                                .imm = 0,
-                                                .symbol = global_symbol});
+                                                 .dst = -1,
+                                                 .a = -1,
+                                                 .b = -1,
+                                                 .imm = 0,
+                                                 .symbol = global_symbol});
           if (addr < 0 || !nyr_emit_store_i64(b, addr, out))
             return -1;
         }
@@ -5101,6 +5414,30 @@ ordinary_call:
       /* Indexed dictionary stores cross the dynamic ABI. */
       bool raw_dict_integer_item = false;
       bool is_bool_val = nyr_expr_is_bool(b, value_expr);
+      const nyr_local_t *callable_local =
+          value_expr ? nyr_find_expr_local(b, value_expr) : NULL;
+      bool callable_value = nyr_expr_is_callable_value(b, value_expr);
+      if (callable_value &&
+          nyr_value_scalar_class(b, value) != NYIR_SCALAR_F64 &&
+          nyr_value_scalar_class(b, value) != NYIR_SCALAR_F32) {
+        const stmt_t *callable_fn = NULL;
+        if (value_expr->kind == NY_E_FN || value_expr->kind == NY_E_LAMBDA) {
+          callable_fn = value_expr->semantic.canonical_callee_stmt;
+        } else if (callable_local && callable_local->callable_name) {
+          callable_fn =
+              nyr_find_user_function(b, callable_local->callable_name);
+        } else if (value_expr->kind == NY_E_IDENT &&
+                   value_expr->as.ident.name) {
+          callable_fn = nyr_find_user_function(b, value_expr->as.ident.name);
+        }
+        value = nyr_emit_runtime_call(
+            b, nyr_callable_storage_marker(b, callable_fn), value, -1, -1, 1,
+            NYIR_SCALAR_I64_TAGGED);
+        if (value < 0)
+          return -1;
+      } else {
+        callable_value = false;
+      }
       const nyr_local_t *value_local = NULL;
       if (value_expr && value_expr->kind == NY_E_IDENT &&
           value_expr->as.ident.name) {
@@ -5112,7 +5449,7 @@ ordinary_call:
         value = nyr_box_bool(b, value);
         if (value < 0)
           return -1;
-      } else {
+      } else if (!callable_value) {
         bool raw_dict_integer =
             value_expr && ((value_expr->kind == NY_E_LITERAL &&
                             value_expr->as.literal.kind == NY_LIT_INT &&
@@ -5553,6 +5890,9 @@ ordinary_call:
           value_expr->semantic.rep == NY_SEM_REP_RAW_INT) ||
          (append_value_local &&
           append_value_local->semantic_rep == NY_SEM_REP_RAW_INT));
+    if (!append_value_is_raw_integer && value_expr &&
+        nyr_expr_is_raw_integer_conversion(b, value_expr))
+      append_value_is_raw_integer = true;
     bool use_tagged_append =
         (((nyr_expr_is_any(b, value_expr) || value_expr->kind == NY_E_CALL ||
            value_expr->kind == NY_E_MEMCALL) &&
@@ -5778,9 +6118,13 @@ ordinary_call:
       nyr_expr_is_set(b, e->as.call.args.data[0].val)) {
     int set = nyr_lower_expr(b, e->as.call.args.data[0].val);
     int key = set < 0 ? -1 : nyr_lower_expr(b, e->as.call.args.data[1].val);
+    if (set >= 0 && nyr_value_scalar_class(b, set) == NYIR_SCALAR_I64_TAGGED)
+      set = nyr_emit_runtime_call(b, "rt_untag", set, -1, -1, 1,
+                                  NYIR_SCALAR_OBJECT);
     return set < 0 || key < 0
                ? -1
-               : nyr_emit_runtime_call(b, "rt_set_add_raw", set, key, -1, 2, 0);
+               : nyr_emit_runtime_call(b, "rt_set_add_raw", set, key, -1, 2,
+                                       NYIR_SCALAR_OBJECT);
   }
   /* Attached set membership must use the receiver expression directly.
    * Flattening `values.contains(k)` into a generic dotted call loses the
@@ -6123,13 +6467,15 @@ ordinary_call:
              strcmp(dot + 1, "exists") == 0) &&
             e->as.call.args.len == 1) {
           int key = nyr_lower_dict_key(b, e->as.call.args.data[0].val);
-          return key < 0 ? -1
-                         : nyr_emit_runtime_call(
-                               b,
-                               nyr_expr_is_cstr(b, e->as.call.args.data[0].val)
-                                   ? "rt_dict_has_str_raw"
-                                   : "rt_dict_has_raw",
-                               dict, key, -1, 2, NYIR_SCALAR_I64_RAW);
+          if (key < 0)
+            return -1;
+          int has = nyr_emit_runtime_call(
+              b,
+              nyr_expr_is_cstr(b, e->as.call.args.data[0].val)
+                  ? "rt_dict_has_str_raw"
+                  : "rt_dict_has_raw",
+              dict, key, -1, 2, NYIR_SCALAR_I64_RAW);
+          return has < 0 ? -1 : nyr_box_bool(b, has);
         }
         if (strcmp(dot + 1, "get") == 0 &&
             (e->as.call.args.len == 1 || e->as.call.args.len == 2)) {
@@ -6246,10 +6592,10 @@ ordinary_call:
       if (strcmp(dot + 1, "merge") == 0 && e->as.call.args.len == 1) {
         int dict =
             local ? nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_LOAD_LOCAL,
-                                                      .dst = -1,
-                                                      .a = -1,
-                                                      .b = -1,
-                                                      .imm = local->slot})
+                                                       .dst = -1,
+                                                       .a = -1,
+                                                       .b = -1,
+                                                       .imm = local->slot})
                   : -1;
         if (dict >= 0) {
           int other = nyr_lower_expr(b, e->as.call.args.data[0].val);
@@ -6369,16 +6715,15 @@ ordinary_call:
       int list = nyr_lower_expr(b, &target);
       if (list < 0)
         return -1;
-      const char *pop_symbol = nyr_expr_is_dyn_list(b, &target)
-                                   ? "rt_tbuf_pop_any"
-                                   : "rt_tbuf_pop_raw";
-      int out = nyr_emit_runtime_call(b, pop_symbol, list, -1, -1, 1, 0);
+      int out =
+          nyr_expr_is_dyn_list(b, &target)
+              ? nyr_emit_runtime_call(b, "rt_tbuf_pop_any", list, -1, -1, 1, 0)
+              : nyr_emit_native_list_pop_raw(b, list);
       if (out < 0)
         return -1;
       int length = nyr_emit_known_list_pop_len(b, list);
       if (length < 0)
-        length =
-            nyr_emit_runtime_call(b, "rt_tbuf_len_raw", list, -1, -1, 1, 0);
+        length = nyr_emit_native_list_length_raw(b, list);
       nyr_local_t *local = nyr_find_local(b, base_name);
       if (length < 0 || !nyr_record_list_len_fact(b, list, length))
         return -1;
@@ -6509,6 +6854,25 @@ ordinary_call:
       return arg;
     if (nyr_expr_is_cstr(b, arg_expr))
       return arg;
+    /* A canonical dynamic value carries its actual runtime kind in the tag.
+     * Static inference can leave a stale list-shaped fact on a generic
+     * lookup such as dict.get("schema"); routing that tagged string through
+     * rt_tbuf_to_cstr treats its bytes as a sequence and emits zero bytes.
+     * The generic formatter already recognizes tagged strings and buffers. */
+    if (actual_arg_class == NYIR_SCALAR_I64_TAGGED)
+      return nyr_emit_runtime_call(b, "rt_any_to_cstr", arg, -1, -1, 1, 0);
+    if ((nyr_expr_is_list(b, arg_expr) || nyr_expr_is_dyn_list(b, arg_expr)) &&
+        actual_arg_class != NYIR_SCALAR_F32 &&
+        actual_arg_class != NYIR_SCALAR_F64) {
+      int tagged = nyr_emit_runtime_call(b, "rt_tbuf_to_cstr", arg, -1, -1, 1,
+                                         NYIR_SCALAR_I64_TAGGED);
+      return tagged < 0 ? -1
+                        : nyr_emit_runtime_call(b, "rt_any_to_cstr", tagged, -1,
+                                                -1, 1, 0);
+    }
+    if (nyr_expr_is_dict(b, arg_expr) && actual_arg_class != NYIR_SCALAR_F32 &&
+        actual_arg_class != NYIR_SCALAR_F64)
+      return nyr_emit_runtime_call(b, "rt_any_to_cstr", arg, -1, -1, 1, 0);
     /*
      * Route by the argument's actual kind: bools and floats must not go
      * through rt_i64_to_cstr_raw (which would print their raw bits as an
@@ -7283,6 +7647,18 @@ ordinary_call:
                ? -1
                : nyr_emit_cmp_i64(b, NYIR_CMP_EQ, actual, want);
   }
+  if (leaf_kind == NY_NATIVE_LEAF_IS_BOOL && !nyr_user_defined_fn(b, name)) {
+    if (e->as.call.args.len != 1 || e->as.call.args.data[0].name) {
+      return nyr_fail(b, "native NYIR lower: is_bool expects one value"), -1;
+    }
+    const expr_t *arg = e->as.call.args.data[0].val;
+    if (nyr_expr_is_bool(b, (expr_t *)arg))
+      return nyr_emit_const(b, NY_IMM_TRUE);
+    int value = nyr_lower_expr(b, arg);
+    return value < 0 ? -1
+                     : nyr_emit_runtime_call(b, "rt_is_bool_obj", value, -1, -1,
+                                             1, 0);
+  }
   if (leaf_kind == NY_NATIVE_LEAF_IS_STR && !nyr_user_defined_fn(b, name)) {
     if (e->as.call.args.len != 1 || e->as.call.args.data[0].name) {
       return nyr_fail(b, "native NYIR lower: is_str expects one value"), -1;
@@ -7378,10 +7754,10 @@ ordinary_call:
         return -1;
       int cond = nyr_ir_emit(
           &b->nyir, (nyr_inst_t){.op = NYIR_CMP_I64,
-                                  .dst = -1,
-                                  .a = ux,
-                                  .b = uy,
-                                  .cmp = is_max ? NYIR_CMP_GT : NYIR_CMP_LT});
+                                 .dst = -1,
+                                 .a = ux,
+                                 .b = uy,
+                                 .cmp = is_max ? NYIR_CMP_GT : NYIR_CMP_LT});
       int one = nyr_emit_const(b, 1);
       if (cond < 0 || one < 0)
         return -1;
@@ -7421,10 +7797,10 @@ ordinary_call:
        */
       int cond = nyr_ir_emit(
           &b->nyir, (nyr_inst_t){.op = NYIR_CMP_I64,
-                                  .dst = -1,
-                                  .a = x,
-                                  .b = y,
-                                  .cmp = is_max ? NYIR_CMP_GT : NYIR_CMP_LT});
+                                 .dst = -1,
+                                 .a = x,
+                                 .b = y,
+                                 .cmp = is_max ? NYIR_CMP_GT : NYIR_CMP_LT});
       int one = nyr_emit_const(b, 1);
       if (cond < 0 || one < 0)
         return -1;
@@ -7484,34 +7860,34 @@ ordinary_call:
         return -1;
 #define NY_BREV_STEP(xin, sh, msk, cm)                                         \
   do {                                                                         \
-    int _r = nyr_ir_emit(                                                        \
+    int _r = nyr_ir_emit(                                                      \
         &b->nyir,                                                              \
-        (nyr_inst_t){.op = NYIR_SAR_I64, .dst = -1, .a = (xin), .b = (sh)});  \
+        (nyr_inst_t){.op = NYIR_SAR_I64, .dst = -1, .a = (xin), .b = (sh)});   \
     if (_r < 0)                                                                \
       return -1;                                                               \
-    _r = nyr_ir_emit(                                                            \
+    _r = nyr_ir_emit(                                                          \
         &b->nyir,                                                              \
-        (nyr_inst_t){.op = NYIR_AND_I64, .dst = -1, .a = _r, .b = (msk)});    \
+        (nyr_inst_t){.op = NYIR_AND_I64, .dst = -1, .a = _r, .b = (msk)});     \
     if (_r < 0)                                                                \
       return -1;                                                               \
-    _r = nyr_ir_emit(                                                            \
+    _r = nyr_ir_emit(                                                          \
         &b->nyir,                                                              \
-        (nyr_inst_t){.op = NYIR_AND_I64, .dst = -1, .a = _r, .b = (cm)});     \
+        (nyr_inst_t){.op = NYIR_AND_I64, .dst = -1, .a = _r, .b = (cm)});      \
     if (_r < 0)                                                                \
       return -1;                                                               \
-    int _l = nyr_ir_emit(                                                        \
+    int _l = nyr_ir_emit(                                                      \
         &b->nyir,                                                              \
-        (nyr_inst_t){.op = NYIR_AND_I64, .dst = -1, .a = (xin), .b = (cm)});  \
+        (nyr_inst_t){.op = NYIR_AND_I64, .dst = -1, .a = (xin), .b = (cm)});   \
     if (_l < 0)                                                                \
       return -1;                                                               \
-    _l = nyr_ir_emit(                                                            \
+    _l = nyr_ir_emit(                                                          \
         &b->nyir,                                                              \
-        (nyr_inst_t){.op = NYIR_SHL_I64, .dst = -1, .a = _l, .b = (sh)});     \
+        (nyr_inst_t){.op = NYIR_SHL_I64, .dst = -1, .a = _l, .b = (sh)});      \
     if (_l < 0)                                                                \
       return -1;                                                               \
-    (xin) = nyr_ir_emit(                                                         \
+    (xin) = nyr_ir_emit(                                                       \
         &b->nyir,                                                              \
-        (nyr_inst_t){.op = NYIR_OR_I64, .dst = -1, .a = _r, .b = _l});        \
+        (nyr_inst_t){.op = NYIR_OR_I64, .dst = -1, .a = _r, .b = _l});         \
     if ((xin) < 0)                                                             \
       return -1;                                                               \
   } while (0)
@@ -7525,9 +7901,9 @@ ordinary_call:
        */
       {
         int r = nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_SAR_I64,
-                                                  .dst = -1,
-                                                  .a = x,
-                                                  .b = thirtytwo});
+                                                   .dst = -1,
+                                                   .a = x,
+                                                   .b = thirtytwo});
         if (r < 0)
           return -1;
         r = nyr_ir_emit(
@@ -7536,9 +7912,9 @@ ordinary_call:
         if (r < 0)
           return -1;
         int l = nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_SHL_I64,
-                                                  .dst = -1,
-                                                  .a = x,
-                                                  .b = thirtytwo});
+                                                   .dst = -1,
+                                                   .a = x,
+                                                   .b = thirtytwo});
         if (l < 0)
           return -1;
         x = nyr_ir_emit(
@@ -7564,10 +7940,9 @@ ordinary_call:
       /*
        * abs via (x ^ (x>>63)) - (x>>63) arithmetic.
        */
-      int s = nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_SAR_I64,
-                                                .dst = -1,
-                                                .a = x,
-                                                .b = sixtythree});
+      int s = nyr_ir_emit(
+          &b->nyir,
+          (nyr_inst_t){.op = NYIR_SAR_I64, .dst = -1, .a = x, .b = sixtythree});
       if (s < 0)
         return -1;
       int y = nyr_ir_emit(
@@ -7588,7 +7963,10 @@ ordinary_call:
       if (x < 0)
         return -1;
       return nyr_ir_emit(&b->nyir,
-                       (nyr_inst_t){.op = NYIR_BSWAP_I64, .dst = -1, .a = x});
+                         (nyr_inst_t){.op = NYIR_BSWAP_I64,
+                                      .dst = -1,
+                                      .a = x,
+                                      .scalar_class = NYIR_SCALAR_I64_RAW});
     }
     if (iname_len == 9 && memcmp(iname, "bswap.i32", 9) == 0) {
       if (e->as.call.args.len != 2 || e->as.call.args.data[1].name) {
@@ -7598,8 +7976,11 @@ ordinary_call:
       int x = nyr_lower_expr(b, e->as.call.args.data[1].val);
       if (x < 0)
         return -1;
-      return nyr_ir_emit(
-          &b->nyir, (nyr_inst_t){.op = NYIR_BSWAP32_I64, .dst = -1, .a = x});
+      return nyr_ir_emit(&b->nyir,
+                         (nyr_inst_t){.op = NYIR_BSWAP32_I64,
+                                      .dst = -1,
+                                      .a = x,
+                                      .scalar_class = NYIR_SCALAR_I64_RAW});
     }
     if ((iname_len == 8 && memcmp(iname, "fshl.i64", 8) == 0) ||
         (iname_len == 8 && memcmp(iname, "rotl.i64", 8) == 0)) {
@@ -7626,14 +8007,14 @@ ordinary_call:
           (nyr_inst_t){.op = NYIR_AND_I64, .dst = -1, .a = sh_val, .b = c63});
       int inv = sh < 0 ? -1
                        : nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_SUB_I64,
-                                                           .dst = -1,
-                                                           .a = c64,
-                                                           .b = sh});
+                                                            .dst = -1,
+                                                            .a = c64,
+                                                            .b = sh});
       int rsh = inv < 0 ? -1
                         : nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_AND_I64,
-                                                            .dst = -1,
-                                                            .a = inv,
-                                                            .b = c63});
+                                                             .dst = -1,
+                                                             .a = inv,
+                                                             .b = c63});
       int nz = sh < 0 ? -1 : nyr_emit_cmp_i64(b, NYIR_CMP_NE, sh, c0);
       if (sh < 0 || inv < 0 || rsh < 0 || nz < 0)
         return -1;
@@ -7649,21 +8030,21 @@ ordinary_call:
       int fill = sign < 0
                      ? -1
                      : nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_SHL_I64,
-                                                         .dst = -1,
-                                                         .a = sign,
-                                                         .b = sh});
+                                                          .dst = -1,
+                                                          .a = sign,
+                                                          .b = sh});
       int logical = (sar < 0 || fill < 0)
                         ? -1
                         : nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_XOR_I64,
-                                                            .dst = -1,
-                                                            .a = sar,
-                                                            .b = fill});
+                                                             .dst = -1,
+                                                             .a = sar,
+                                                             .b = fill});
       int right = logical < 0
                       ? -1
                       : nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_MUL_I64,
-                                                          .dst = -1,
-                                                          .a = logical,
-                                                          .b = nz});
+                                                           .dst = -1,
+                                                           .a = logical,
+                                                           .b = nz});
       if (left < 0 || right < 0)
         return -1;
       return nyr_ir_emit(
@@ -7695,14 +8076,14 @@ ordinary_call:
           (nyr_inst_t){.op = NYIR_AND_I64, .dst = -1, .a = sh_val, .b = c63});
       int inv = sh < 0 ? -1
                        : nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_SUB_I64,
-                                                           .dst = -1,
-                                                           .a = c64,
-                                                           .b = sh});
+                                                            .dst = -1,
+                                                            .a = c64,
+                                                            .b = sh});
       int lsh = inv < 0 ? -1
                         : nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_AND_I64,
-                                                            .dst = -1,
-                                                            .a = inv,
-                                                            .b = c63});
+                                                             .dst = -1,
+                                                             .a = inv,
+                                                             .b = c63});
       int nz = sh < 0 ? -1 : nyr_emit_cmp_i64(b, NYIR_CMP_NE, sh, c0);
       if (sh < 0 || inv < 0 || lsh < 0 || nz < 0)
         return -1;
@@ -7715,30 +8096,30 @@ ordinary_call:
       int fill0 = sign < 0
                       ? -1
                       : nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_SHL_I64,
-                                                          .dst = -1,
-                                                          .a = sign,
-                                                          .b = lsh});
+                                                           .dst = -1,
+                                                           .a = sign,
+                                                           .b = lsh});
       int fill = fill0 < 0
                      ? -1
                      : nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_MUL_I64,
-                                                         .dst = -1,
-                                                         .a = fill0,
-                                                         .b = nz});
+                                                          .dst = -1,
+                                                          .a = fill0,
+                                                          .b = nz});
       int right = (sar < 0 || fill < 0)
                       ? -1
                       : nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_XOR_I64,
-                                                          .dst = -1,
-                                                          .a = sar,
-                                                          .b = fill});
+                                                           .dst = -1,
+                                                           .a = sar,
+                                                           .b = fill});
       int left0 = nyr_ir_emit(
           &b->nyir,
           (nyr_inst_t){.op = NYIR_SHL_I64, .dst = -1, .a = a_val, .b = lsh});
       int left = left0 < 0
                      ? -1
                      : nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_MUL_I64,
-                                                         .dst = -1,
-                                                         .a = left0,
-                                                         .b = nz});
+                                                          .dst = -1,
+                                                          .a = left0,
+                                                          .b = nz});
       if (left < 0 || right < 0)
         return -1;
       return nyr_ir_emit(
@@ -7765,8 +8146,16 @@ ordinary_call:
                          "optional string message"),
              -1;
     }
-    int condition = nyr_lower_expr(b, e->as.call.args.data[0].val);
+    const expr_t *condition_expr = e->as.call.args.data[0].val;
+    int condition = nyr_lower_expr(b, condition_expr);
     int message = -1;
+    if (condition < 0)
+      return -1;
+    if (nyr_expr_is_bool(b, condition_expr))
+      condition = nyr_box_bool(b, condition);
+    if (condition < 0)
+      return -1;
+    condition = nyr_emit_truthy(b, condition);
     if (condition < 0)
       return -1;
     if (e->as.call.args.len == 2) {
@@ -8041,6 +8430,11 @@ ordinary_call:
        */
       bool arg_arith_raw = arg && arg->kind == NY_E_BINARY &&
                            b->last_arith_expr == arg && b->last_arith_raw;
+      bool bare_raw_integer_print =
+          b->options && b->options->runtime_mode == NY_RUNTIME_MODE_BARE &&
+          b->options->native_backend == NY_NATIVE_BACKEND_X86_64 && !is_bool &&
+          (arg_arith_raw || is_raw_int_arg ||
+           nyr_value_scalar_class(b, raw) == NYIR_SCALAR_I64_RAW);
       /* Set when the argument was already materialized into a C string by
        * the render below; the printer must then take the string entry point.
        * Printing that pointer through rt_print_i64_raw exposes the string's
@@ -8102,10 +8496,13 @@ ordinary_call:
         if (raw < 0)
           return -1;
       } else if (arg_arith_raw && !is_f64_arg && !is_f32_arg) {
-        raw = nyr_emit_runtime_call(b, "rt_i64_to_cstr_raw", raw, -1, -1, 1, 0);
-        if (raw < 0)
-          return -1;
-        arg_rendered_cstr = true;
+        if (!bare_raw_integer_print) {
+          raw =
+              nyr_emit_runtime_call(b, "rt_i64_to_cstr_raw", raw, -1, -1, 1, 0);
+          if (raw < 0)
+            return -1;
+          arg_rendered_cstr = true;
+        }
       } else if (is_any_arg) {
         /* An `any`-classified argument carries the tagged dynamic ABI even
          * when inference also refined it to an integer: its storage slot is
@@ -8116,28 +8513,33 @@ ordinary_call:
         if (raw < 0)
           return -1;
       } else if (is_raw_int_arg) {
-        raw = nyr_emit_runtime_call(b, "rt_i64_to_cstr_raw", raw, -1, -1, 1, 0);
-        if (raw < 0)
-          return -1;
+        if (!bare_raw_integer_print) {
+          raw =
+              nyr_emit_runtime_call(b, "rt_i64_to_cstr_raw", raw, -1, -1, 1, 0);
+          if (raw < 0)
+            return -1;
+        }
       }
-      const char *print_sym = is_bool || is_bigint_arg ||
-                                      nyr_expr_is_cstr(b, arg) || is_list_arg ||
-                                      is_tuple_arg || is_raw_int_arg ||
-                                      is_any_arg || arg_rendered_cstr
-                                  ? "rt_print_cstr"
-                              : (is_f64_arg || is_f32_arg) ? "rt_print_f64_raw"
-                                                           : "rt_print_i64_raw";
+      const char *print_sym =
+          bare_raw_integer_print
+              ? "rt_print_i64_raw"
+              : (is_bool || is_bigint_arg || nyr_expr_is_cstr(b, arg) ||
+                         is_list_arg || is_tuple_arg || is_raw_int_arg ||
+                         is_any_arg || arg_rendered_cstr
+                     ? "rt_print_cstr"
+                 : (is_f64_arg || is_f32_arg) ? "rt_print_f64_raw"
+                                              : "rt_print_i64_raw");
       if (nyr_emit_runtime_call(b, print_sym, raw, -1, -1, 1, 0) < 0)
         return -1;
     }
     if (nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_CALL,
-                                          .dst = -1,
-                                          .a = -1,
-                                          .b = -1,
-                                          .c = -1,
-                                          .imm = 0,
-                                          .flags = NYIR_INST_F_EXTERN,
-                                          .symbol = "rt_print_newline"}) < 0) {
+                                           .dst = -1,
+                                           .a = -1,
+                                           .b = -1,
+                                           .c = -1,
+                                           .imm = 0,
+                                           .flags = NYIR_INST_F_EXTERN,
+                                           .symbol = "rt_print_newline"}) < 0) {
       return nyr_fail(b, NY_NATIVE_ALLOC_FAIL), -1;
     }
     return nyr_emit_const(b, 0);
@@ -8148,6 +8550,9 @@ ordinary_call:
      * currently build for variadic functions.  Format each original argument
      * through the same scalar conversion helpers as print, then write the
      * resulting C string to stderr. */
+    bool bare_x86 = b->options &&
+                    b->options->runtime_mode == NY_RUNTIME_MODE_BARE &&
+                    b->options->native_backend == NY_NATIVE_BACKEND_X86_64;
     for (size_t i = 0; i < e->as.call.args.len; ++i) {
       if (e->as.call.args.data[i].name)
         return nyr_fail(b, "native NYIR lower: eprint accepts positional "
@@ -8156,13 +8561,19 @@ ordinary_call:
       const expr_t *arg = e->as.call.args.data[i].val;
       if (i > 0) {
         int space = nyr_emit_cstr_const(b, " ");
-        int len = space < 0 ? -1
-                            : nyr_emit_runtime_call(b, "rt_cstr_len", space, -1,
-                                                    -1, 1, NYIR_SCALAR_I64_RAW);
-        if (space < 0 || len < 0 ||
-            nyr_emit_runtime_call4(b, "rt_write_off_raw", nyr_emit_const(b, 2),
-                                   space, len, nyr_emit_const(b, 0), -1, 4,
-                                   NYIR_SCALAR_I64_RAW) < 0)
+        int written = -1;
+        if (space >= 0 && bare_x86)
+          written = nyr_emit_runtime_call(b, "rt_print_cstr_stderr_raw", space,
+                                          -1, -1, 1, NYIR_SCALAR_I64_RAW);
+        else if (space >= 0) {
+          int len = nyr_emit_runtime_call(b, "rt_cstr_len", space, -1, -1, 1,
+                                          NYIR_SCALAR_I64_RAW);
+          if (len >= 0)
+            written = nyr_emit_runtime_call4(
+                b, "rt_write_off_raw", nyr_emit_const(b, 2), space, len,
+                nyr_emit_const(b, 0), -1, 4, NYIR_SCALAR_I64_RAW);
+        }
+        if (written < 0)
           return -1;
       }
       bool is_bool = nyr_expr_is_bool(b, arg);
@@ -8178,6 +8589,18 @@ ordinary_call:
       int value = nyr_lower_expr(b, arg);
       if (value < 0)
         return -1;
+      bool bare_raw_integer =
+          b->options && b->options->runtime_mode == NY_RUNTIME_MODE_BARE &&
+          b->options->native_backend == NY_NATIVE_BACKEND_X86_64 && !is_bool &&
+          !is_f64 && !is_f32 && !is_any && !is_bigint &&
+          !nyr_expr_is_cstr(b, arg) &&
+          nyr_value_scalar_class(b, value) == NYIR_SCALAR_I64_RAW;
+      if (bare_raw_integer) {
+        if (nyr_emit_runtime_call(b, "rt_print_i64_stderr_raw", value, -1, -1,
+                                  1, NYIR_SCALAR_I64_RAW) < 0)
+          return -1;
+        continue;
+      }
       if (is_bool)
         value = nyr_emit_runtime_call(b, "rt_bool_to_cstr", value, -1, -1, 1,
                                       NYIR_SCALAR_I64_RAW);
@@ -8200,13 +8623,33 @@ ordinary_call:
                                       NYIR_SCALAR_I64_RAW);
       if (value < 0)
         return -1;
-      int len = nyr_emit_runtime_call(b, "rt_cstr_len", value, -1, -1, 1,
-                                      NYIR_SCALAR_I64_RAW);
-      if (len < 0 ||
-          nyr_emit_runtime_call4(b, "rt_write_off_raw", nyr_emit_const(b, 2),
-                                 value, len, nyr_emit_const(b, 0), -1, 4,
-                                 NYIR_SCALAR_I64_RAW) < 0)
-        return -1;
+      if (bare_x86) {
+        if (nyr_emit_runtime_call(b, "rt_print_cstr_stderr_raw", value, -1, -1,
+                                  1, NYIR_SCALAR_I64_RAW) < 0)
+          return -1;
+      } else {
+        int len = nyr_emit_runtime_call(b, "rt_cstr_len", value, -1, -1, 1,
+                                        NYIR_SCALAR_I64_RAW);
+        if (len < 0 ||
+            nyr_emit_runtime_call4(b, "rt_write_off_raw", nyr_emit_const(b, 2),
+                                   value, len, nyr_emit_const(b, 0), -1, 4,
+                                   NYIR_SCALAR_I64_RAW) < 0)
+          return -1;
+      }
+    }
+    if (bare_x86) {
+      if (nyr_ir_emit(&b->nyir,
+                      (nyr_inst_t){.op = NYIR_CALL,
+                                   .dst = -1,
+                                   .a = -1,
+                                   .b = -1,
+                                   .c = -1,
+                                   .imm = 0,
+                                   .flags = NYIR_INST_F_EXTERN,
+                                   .symbol = "rt_print_newline_stderr_raw"}) <
+          0)
+        return nyr_fail(b, NY_NATIVE_ALLOC_FAIL), -1;
+      return nyr_emit_const(b, 0);
     }
     int newline = nyr_emit_cstr_const(b, "\n");
     int newline_len = newline < 0
@@ -8246,9 +8689,9 @@ ordinary_call:
     int one = tagged < 0 ? -1 : nyr_emit_const(b, 1);
     return one < 0 ? -1
                    : nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_SAR_I64,
-                                                       .dst = -1,
-                                                       .a = tagged,
-                                                       .b = one});
+                                                        .dst = -1,
+                                                        .a = tagged,
+                                                        .b = one});
   }
   if (leaf && (strcmp(leaf, "__argv") == 0 || strcmp(leaf, "argv") == 0) &&
       !nyr_user_defined_fn(b, name)) {
@@ -8287,7 +8730,8 @@ ordinary_call:
      * tagged words doubled every self-timed measurement.  The raw
      * entrypoint returns plain monotonic nanoseconds so `t1 - t0` in user
      * code is the true elapsed time. */
-    return nyr_emit_runtime_call(b, "rt_monotonic_ns_raw", -1, -1, -1, 0, 0);
+    return nyr_emit_runtime_call(b, "rt_monotonic_ns_raw", -1, -1, -1, 0,
+                                 NYIR_SCALAR_I64_RAW);
   }
   if (leaf_kind == NY_NATIVE_LEAF_FLT_SQRT) {
     if (e->as.call.args.len != 1 || e->as.call.args.data[0].name) {
@@ -8355,11 +8799,11 @@ ordinary_call:
     nyr_local_t *l = nyr_find_local(b, local_name);
     if (!l) {
       int v = nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_ADDR_SYMBOL,
-                                                .dst = -1,
-                                                .a = -1,
-                                                .b = -1,
-                                                .imm = 0,
-                                                .symbol = local_name});
+                                                 .dst = -1,
+                                                 .a = -1,
+                                                 .b = -1,
+                                                 .imm = 0,
+                                                 .symbol = local_name});
       if (v < 0)
         nyr_fail(b, NY_NATIVE_ALLOC_FAIL);
       return v;
@@ -8574,6 +9018,9 @@ ordinary_call:
       return nyr_fail(b, "load8 requires pointer and byte offset"), -1;
     }
     int addr = nyr_lower_expr(b, e->as.call.args.data[0].val);
+    if (addr >= 0 && nyr_expr_is_any(b, e->as.call.args.data[0].val))
+      addr = nyr_emit_runtime_call(b, "rt_any_to_i64", addr, -1, -1, 1,
+                                   NYIR_SCALAR_I64_RAW);
     int index = nyr_lower_int_value(b, e->as.call.args.data[1].val);
     int effective =
         (addr < 0 || index < 0) ? -1 : nyr_emit_add_i64(b, addr, index);
@@ -8588,6 +9035,9 @@ ordinary_call:
              -1;
     }
     int base = nyr_lower_expr(b, e->as.call.args.data[0].val);
+    if (base >= 0 && nyr_expr_is_any(b, e->as.call.args.data[0].val))
+      base = nyr_emit_runtime_call(b, "rt_any_to_i64", base, -1, -1, 1,
+                                   NYIR_SCALAR_I64_RAW);
     int offset = e->as.call.args.len == 2
                      ? nyr_lower_int_value(b, e->as.call.args.data[1].val)
                      : nyr_emit_const(b, 0);
@@ -8609,9 +9059,9 @@ ordinary_call:
     int one = tagged < 0 ? -1 : nyr_emit_const(b, 1);
     return one < 0 ? -1
                    : nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_SAR_I64,
-                                                       .dst = -1,
-                                                       .a = tagged,
-                                                       .b = one});
+                                                        .dst = -1,
+                                                        .a = tagged,
+                                                        .b = one});
   }
   if (leaf_kind == NY_NATIVE_LEAF_STORE8) {
     bool intrinsic = leaf && strcmp(leaf, "__store8_idx") == 0;
@@ -8624,6 +9074,9 @@ ordinary_call:
              -1;
     }
     int addr = nyr_lower_expr(b, e->as.call.args.data[0].val);
+    if (addr >= 0 && nyr_expr_is_any(b, e->as.call.args.data[0].val))
+      addr = nyr_emit_runtime_call(b, "rt_any_to_i64", addr, -1, -1, 1,
+                                   NYIR_SCALAR_I64_RAW);
     size_t value_index = intrinsic ? 2u : 1u;
     size_t index_index = intrinsic ? 1u : 2u;
     int value = nyr_lower_int_value(b, e->as.call.args.data[value_index].val);
@@ -8651,6 +9104,9 @@ ordinary_call:
     size_t value_index = intrinsic ? 2u : 1u;
     size_t index_index = intrinsic ? 1u : 2u;
     int addr = nyr_lower_expr(b, e->as.call.args.data[0].val);
+    if (addr >= 0 && nyr_expr_is_any(b, e->as.call.args.data[0].val))
+      addr = nyr_emit_runtime_call(b, "rt_any_to_i64", addr, -1, -1, 1,
+                                   NYIR_SCALAR_I64_RAW);
     int value = nyr_lower_int_value(b, e->as.call.args.data[value_index].val);
     int index =
         e->as.call.args.len > index_index
@@ -8663,9 +9119,9 @@ ordinary_call:
     int shifted = one < 0
                       ? -1
                       : nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_SHL_I64,
-                                                          .dst = -1,
-                                                          .a = value,
-                                                          .b = one});
+                                                           .dst = -1,
+                                                           .a = value,
+                                                           .b = one});
     int tagged =
         shifted < 0 ? -1 : nyr_emit_binop(b, NYIR_OR_I64, shifted, one);
     int zero = nyr_emit_const(b, 0);
@@ -8689,6 +9145,9 @@ ordinary_call:
     size_t value_index = intrinsic ? 2u : 1u;
     size_t index_index = intrinsic ? 1u : 2u;
     int addr = nyr_lower_expr(b, e->as.call.args.data[0].val);
+    if (addr >= 0 && nyr_expr_is_any(b, e->as.call.args.data[0].val))
+      addr = nyr_emit_runtime_call(b, "rt_any_to_i64", addr, -1, -1, 1,
+                                   NYIR_SCALAR_I64_RAW);
     int value = nyr_lower_int_value(b, e->as.call.args.data[value_index].val);
     int index =
         e->as.call.args.len > index_index
@@ -8701,9 +9160,9 @@ ordinary_call:
     int shifted = one < 0
                       ? -1
                       : nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_SHL_I64,
-                                                          .dst = -1,
-                                                          .a = value,
-                                                          .b = one});
+                                                           .dst = -1,
+                                                           .a = value,
+                                                           .b = one});
     int tagged =
         shifted < 0 ? -1 : nyr_emit_binop(b, NYIR_OR_I64, shifted, one);
     int zero = nyr_emit_const(b, 0);
@@ -8723,6 +9182,11 @@ ordinary_call:
              -1;
     }
     int base = nyr_lower_expr(b, e->as.call.args.data[0].val);
+    /* Dictionary/list-held addresses use the dynamic integer carrier, as
+     * they do for 64-bit loads. Decode it before adding a byte offset. */
+    if (base >= 0 && nyr_expr_is_any(b, e->as.call.args.data[0].val))
+      base = nyr_emit_runtime_call(b, "rt_any_to_i64", base, -1, -1, 1,
+                                   NYIR_SCALAR_I64_RAW);
     int offset = e->as.call.args.len == 2
                      ? nyr_lower_int_value(b, e->as.call.args.data[1].val)
                      : nyr_emit_const(b, 0);
@@ -8745,9 +9209,9 @@ ordinary_call:
     int one = tagged < 0 ? -1 : nyr_emit_const(b, 1);
     return one < 0 ? -1
                    : nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_SAR_I64,
-                                                       .dst = -1,
-                                                       .a = tagged,
-                                                       .b = one});
+                                                        .dst = -1,
+                                                        .a = tagged,
+                                                        .b = one});
   }
   if (leaf_kind == NY_NATIVE_LEAF_LOAD64 ||
       leaf_kind == NY_NATIVE_LEAF_LOAD64_IDX) {
@@ -8845,10 +9309,12 @@ ordinary_call:
      * represented as boxed bigints by the language literal lowering; unwrap
      * that representation before writing the C/FFI memory slot. */
     const expr_t *value_expr = e->as.call.args.data[val_idx].val;
-    /* store64 writes a raw slot.  Dynamic producers (callbacks, sequence
-     * reads, and `any` locals) carry tagged integers at this boundary; decode
-     * them once while preserving pointer/string/float handles. */
-    if (value_expr && nyr_expr_is_any(b, value_expr)) {
+    /* store64 writes a raw slot. Dynamic integer producers need decoding,
+     * but function values already contain their code address. Interpreting
+     * an odd callback address as a tagged integer halves it, corrupting C
+     * listener tables such as wl_registry_listener. */
+    if (value_expr && nyr_expr_is_any(b, value_expr) &&
+        !nyr_expr_is_callable_value(b, value_expr)) {
       value = nyr_emit_runtime_call(b, "rt_any_to_i64", value, -1, -1, 1, 0);
       if (value < 0)
         return -1;
@@ -8923,7 +9389,14 @@ ordinary_call:
     if (!nyr_size_fits_i64(layout_value)) {
       return nyr_fail(b, "native NYIR lower: layout value overflows i64"), -1;
     }
-    return nyr_emit_const(b, (int64_t)layout_value);
+    int result = nyr_emit_const(b, (int64_t)layout_value);
+    /* Layout intrinsics have a dynamic return type.  Box small values that
+     * collide with dynamic sentinels (notably alignment 1 == nil's raw word).
+     */
+    if (result >= 0 && layout_value == 1)
+      result = nyr_emit_runtime_call(b, "rt_tag", result, -1, -1, 1,
+                                     NYIR_SCALAR_I64_TAGGED);
+    return result;
   }
   bool store_one_layout_field =
       leaf && ny_native_leaf_kind(leaf) == NY_NATIVE_LEAF_LAYOUT_FIELD_STORE;
@@ -9112,9 +9585,9 @@ ordinary_call:
         int shifted =
             one < 0 ? -1
                     : nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_SHL_I64,
-                                                        .dst = -1,
-                                                        .a = value,
-                                                        .b = one});
+                                                         .dst = -1,
+                                                         .a = value,
+                                                         .b = one});
         value = shifted < 0 ? -1 : nyr_emit_binop(b, NYIR_OR_I64, shifted, one);
         if (value < 0)
           return -1;
@@ -9582,9 +10055,9 @@ ordinary_call:
         int shifted =
             one < 0 ? -1
                     : nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_SHL_I64,
-                                                        .dst = -1,
-                                                        .a = argv[i],
-                                                        .b = one});
+                                                         .dst = -1,
+                                                         .a = argv[i],
+                                                         .b = one});
         argv[i] =
             shifted < 0 ? -1 : nyr_emit_binop(b, NYIR_OR_I64, shifted, one);
       }
@@ -9774,9 +10247,9 @@ ordinary_call:
       int scale = nyr_emit_const(b, 1000);
       value = scale < 0 ? -1
                         : nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_MUL_I64,
-                                                            .dst = -1,
-                                                            .a = value,
-                                                            .b = scale});
+                                                             .dst = -1,
+                                                             .a = value,
+                                                             .b = scale});
     }
     return value < 0
                ? -1
@@ -9863,12 +10336,12 @@ ordinary_call:
     int one = nyr_emit_const(b, 1);
     if (one < 0)
       return -1;
-    int raw =
-        nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_SAR_I64,
-                                          .dst = -1,
-                                          .a = loaded,
-                                          .b = one,
-                                          .scalar_class = NYIR_SCALAR_I64_RAW});
+    int raw = nyr_ir_emit(&b->nyir,
+                          (nyr_inst_t){.op = NYIR_SAR_I64,
+                                       .dst = -1,
+                                       .a = loaded,
+                                       .b = one,
+                                       .scalar_class = NYIR_SCALAR_I64_RAW});
     if (raw < 0)
       return -1;
     if (field_type && ny_native_type_name_is_f32(field_type)) {
@@ -10004,23 +10477,9 @@ ordinary_call:
   const stmt_t *refine_stmt = NULL;
   if (!callee_fn && name && b->prog && e->as.call.args.len == 1)
     refine_stmt = nyr_find_refine_in_prog(b, b->prog, name);
-  if (refine_stmt && e->as.call.args.len == 1) {
-    expr_t *arg_expr = e->as.call.args.data[0].val;
-    ny_ct_fast_val_t fval = ny_ct_fast_none();
-    if (ny_try_eval_comptime_expr_fast(NULL, (expr_t *)e, &fval, 0) &&
-        fval.kind == NY_CT_FAST_BOOL) {
-      return nyr_emit_const(b, fval.b ? 1 : 0);
-    }
-    expr_t *inst = ny_expr_subst(NULL, refine_stmt->as.refine.predicate,
-                                 refine_stmt->as.refine.param, arg_expr);
-    if (inst) {
-      if (ny_try_eval_comptime_expr_fast(NULL, inst, &fval, 0) &&
-          fval.kind == NY_CT_FAST_BOOL) {
-        return nyr_emit_const(b, fval.b ? 1 : 0);
-      }
-      return nyr_lower_expr(b, inst);
-    }
-  }
+  if (refine_stmt && e->as.call.args.len == 1)
+    return nyr_lower_refine_membership(b, refine_stmt,
+                                       e->as.call.args.data[0].val, 0);
   if (!callee_fn && !struct_layout_ctor && !runtime_builtin && !ffi_builtin &&
       !declared_external &&
       ny_builtin_alloc_kind(leaf) == NY_BUILTIN_ALLOC_NONE) {
@@ -10043,6 +10502,7 @@ ordinary_call:
   bool normalized_default_args[NYIR_CALL_MAX_ARGS] = {0};
   call_arg_t *user_args = c ? c->args.data : NULL;
   size_t user_args_len = c ? c->args.len : 0;
+  const size_t source_arity = user_args_len;
   if (c) {
     bool has_named = false;
     for (size_t i = 0; i < c->args.len; ++i)
@@ -10392,15 +10852,15 @@ ordinary_call:
         int shifted =
             one < 0 ? -1
                     : nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_SHL_I64,
-                                                        .dst = -1,
-                                                        .a = value,
-                                                        .b = one});
+                                                         .dst = -1,
+                                                         .a = value,
+                                                         .b = one});
         int tagged = shifted < 0
                          ? -1
                          : nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_OR_I64,
-                                                             .dst = -1,
-                                                             .a = shifted,
-                                                             .b = one});
+                                                              .dst = -1,
+                                                              .a = shifted,
+                                                              .b = one});
         if (tagged < 0 ||
             nyr_emit_runtime_call(b,
                                   field_size == 1   ? "rt_store8_idx"
@@ -10442,8 +10902,10 @@ ordinary_call:
   /* Keep `__list_len` representation-polymorphic for dynamic values, while
    * preserving the typed-buffer fast path when the source argument has a
    * proven static list ABI. */
-  if (b->options && b->options->native_only && leaf &&
-      strcmp(leaf, "__list_len") == 0 && e->as.call.args.len == 1 &&
+  if (b->options &&
+      (b->options->native_only ||
+       b->options->runtime_mode == NY_RUNTIME_MODE_BARE) &&
+      leaf && strcmp(leaf, "__list_len") == 0 && e->as.call.args.len == 1 &&
       e->as.call.args.data[0].val) {
     const expr_t *len_arg = e->as.call.args.data[0].val;
     bool typed_list =
@@ -10452,14 +10914,17 @@ ordinary_call:
       const nyr_local_t *local = nyr_find_local(b, len_arg->as.ident.name);
       typed_list = local && local->is_list && !local->is_any;
     }
-    runtime_symbol = typed_list ? "rt_tbuf_len_raw" : "rt_len";
+    if (typed_list) {
+      int list = nyr_lower_expr(b, len_arg);
+      return list < 0 ? -1 : nyr_emit_native_list_length_raw(b, list);
+    }
+    runtime_symbol = "rt_len";
   }
   const stmt_t *runtime_fn = name ? nyr_find_user_function(b, name) : NULL;
   bool stdlib_runtime_wrapper =
-      !same_module_callee &&
-      ((runtime_fn && ny_is_stdlib_tok(runtime_fn->tok)) ||
-       (e->semantic.canonical_callee_stmt &&
-        ny_is_stdlib_tok(e->semantic.canonical_callee_stmt->tok)));
+      (runtime_fn && ny_is_stdlib_tok(runtime_fn->tok)) ||
+      (e->semantic.canonical_callee_stmt &&
+       ny_is_stdlib_tok(e->semantic.canonical_callee_stmt->tok));
   /* A stdlib wrapper is part of the compiler/runtime ABI, not an ordinary
    * user function merely because expansion left a function declaration in
    * the AST.  Preserve the canonical runtime binding for every such wrapper;
@@ -10574,6 +11039,12 @@ ordinary_call:
                        callee_fn->as.fn.params.len > 0;
   size_t variadic_index = variadic_call ? callee_fn->as.fn.params.len - 1 : 0;
   size_t lowered_user_args = variadic_call ? variadic_index + 1 : user_args_len;
+  if (lowered_user_args > NYIR_CALL_MAX_ARGS)
+    return nyr_fail(b,
+                    "native NYIR lower: formal argument layout exceeds "
+                    "the maximum supported argument count (%d)",
+                    NYIR_CALL_MAX_ARGS),
+           -1;
   if (callee_fn && !callee_fn->as.fn.is_variadic) {
     size_t min_required = 0;
     for (size_t p = 0; p < callee_fn->as.fn.params.len; ++p) {
@@ -10702,11 +11173,14 @@ ordinary_call:
                                                   : NY_SEM_REP_UNRESOLVED);
     const ny_extern_entry_t *c_params =
         b->externs ? ny_extern_table_lookup(b->externs, name) : NULL;
+    const ny_native_runtime_abi_decl_t *runtime_call_abi =
+        runtime_c_call ? ny_native_runtime_abi_decl(runtime_symbol) : NULL;
     bool expected_f64 =
         param_rep == NY_SEM_REP_F64 || param_rep == NY_SEM_REP_F32 ||
         ny_native_type_name_is_f64(param_type) ||
         ny_native_type_name_is_f32(param_type) ||
-        (c_params && i < NY_C_MAX_PARAMS && c_params->param_f64[i]);
+        (c_params && i < NY_C_MAX_PARAMS && c_params->param_f64[i]) ||
+        ny_native_runtime_abi_arg_is_f64(runtime_call_abi, i);
     ny_sem_rep_t formal_rep =
         param_rep != NY_SEM_REP_UNRESOLVED
             ? param_rep
@@ -10744,6 +11218,8 @@ ordinary_call:
     if (c_params && i < NY_C_MAX_PARAMS && c_params->param_f32[i])
       formal_rep = NY_SEM_REP_F32;
     else if (c_params && i < NY_C_MAX_PARAMS && c_params->param_f64[i])
+      formal_rep = NY_SEM_REP_F64;
+    else if (ny_native_runtime_abi_arg_is_f64(runtime_call_abi, i))
       formal_rep = NY_SEM_REP_F64;
     const char *list_elem_type =
         param_type && ny_native_type_name_is_list(param_type)
@@ -10803,9 +11279,9 @@ ordinary_call:
             int shifted =
                 one < 0 ? -1
                         : nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_SHL_I64,
-                                                            .dst = -1,
-                                                            .a = value,
-                                                            .b = one});
+                                                             .dst = -1,
+                                                             .a = value,
+                                                             .b = one});
             value =
                 shifted < 0 ? -1 : nyr_emit_binop(b, NYIR_OR_I64, shifted, one);
             if (value < 0)
@@ -10874,9 +11350,9 @@ ordinary_call:
        * not then feed that native register to rt_any_to_f64 at a typed
        * runtime boundary. */
       nyr_scalar_class_t source_class = arg_local->is_f64 ? NYIR_SCALAR_F64
-                                         : arg_local->is_f32
-                                             ? NYIR_SCALAR_F32
-                                             : NYIR_SCALAR_UNKNOWN;
+                                        : arg_local->is_f32
+                                            ? NYIR_SCALAR_F32
+                                            : NYIR_SCALAR_UNKNOWN;
       if (source_class == NYIR_SCALAR_UNKNOWN && arg_local->type_name &&
           !ny_native_type_name_is_any(arg_local->type_name)) {
         ny_sem_rep_t source_rep = nyr_rep_for_type(b, arg_local->type_name);
@@ -10912,6 +11388,25 @@ ordinary_call:
      * boolean value before integer ABI reconciliation can decode that 1 as
      * tagged integer zero. */
     if (param_type && strcmp(param_type, "bool") == 0 && arg_expr &&
+        !nyr_expr_is_bool(b, arg_expr) &&
+        producer_class == NYIR_SCALAR_I64_TAGGED) {
+      /* A dictionary/list read can carry a dynamic false (2) even though
+       * its source expression has no bool fact. Typed predicates consume
+       * raw 0/1; the integer bridge preserves 2 and makes false true. */
+      int predicate = nyr_emit_truthy(b, arg);
+      arg = predicate < 0
+                ? -1
+                : nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_COPY,
+                                                     .dst = -1,
+                                                     .a = predicate,
+                                                     .b = -1,
+                                                     .scalar_class =
+                                                         NYIR_SCALAR_I64_RAW});
+      if (arg < 0)
+        return -1;
+      producer_class = NYIR_SCALAR_I64_RAW;
+    }
+    if (param_type && strcmp(param_type, "bool") == 0 && arg_expr &&
         nyr_expr_is_bool(b, arg_expr)) {
       int zero = nyr_emit_const(b, 0);
       int false_value = nyr_emit_const(b, NY_IMM_FALSE);
@@ -10921,12 +11416,12 @@ ordinary_call:
                           : nyr_emit_cmp_i64(b, NYIR_CMP_NE, arg, false_value);
       arg = nonzero < 0 || not_false < 0
                 ? -1
-                : nyr_ir_emit(&b->nyir,
-                            (nyr_inst_t){.op = NYIR_AND_I64,
-                                          .dst = -1,
-                                          .a = nonzero,
-                                          .b = not_false,
-                                          .scalar_class = NYIR_SCALAR_I64_RAW});
+                : nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_AND_I64,
+                                                     .dst = -1,
+                                                     .a = nonzero,
+                                                     .b = not_false,
+                                                     .scalar_class =
+                                                         NYIR_SCALAR_I64_RAW});
       if (arg < 0)
         return -1;
       producer_class = NYIR_SCALAR_I64_RAW;
@@ -11641,19 +12136,20 @@ ordinary_call:
        * integer and discard its heap tag. */
       if (arg >= 0 && nyr_value_scalar_class(b, arg) == NYIR_SCALAR_I64_RAW) {
         arg = nyr_ir_emit(&b->nyir,
-                        (nyr_inst_t){.op = NYIR_COPY,
-                                      .dst = -1,
-                                      .a = arg,
-                                      .b = -1,
-                                      .scalar_class = NYIR_SCALAR_I64_TAGGED});
+                          (nyr_inst_t){.op = NYIR_COPY,
+                                       .dst = -1,
+                                       .a = arg,
+                                       .b = -1,
+                                       .scalar_class = NYIR_SCALAR_I64_TAGGED});
         if (arg < 0)
           return -1;
         producer_class = NYIR_SCALAR_I64_TAGGED;
       }
     }
-    /* An explicitly declared `any` formal owns the dynamic ABI even when
-     * body inference also proves scalar arithmetic. */
-    if (ny_native_type_name_is_any(param_type))
+    /* Source `any` formals own the dynamic ABI, but an intrinsic's raw ABI
+     * must not be overwritten by its compatibility source declaration. */
+    if (ny_native_type_name_is_any(param_type) &&
+        !ny_native_runtime_symbol_skips_dynamic_boxing(runtime_symbol))
       box_dynamic_argument = true;
     /* The bigint-to-int bridge returns a raw i64 even when its compatibility
      * declaration makes the expression look like a canonical object. */
@@ -11688,11 +12184,11 @@ ordinary_call:
         !arg_local_is_any && !arg_local->scalar_class_mixed &&
         arg_local->scalar_class == NYIR_SCALAR_I64_RAW && arg >= 0) {
       int raw = nyr_ir_emit(&b->nyir,
-                          (nyr_inst_t){.op = NYIR_COPY,
-                                        .dst = -1,
-                                        .a = arg,
-                                        .b = -1,
-                                        .scalar_class = NYIR_SCALAR_I64_RAW});
+                            (nyr_inst_t){.op = NYIR_COPY,
+                                         .dst = -1,
+                                         .a = arg,
+                                         .b = -1,
+                                         .scalar_class = NYIR_SCALAR_I64_RAW});
       arg = raw < 0 ? -1
                     : nyr_emit_runtime_call(b, "rt_box_i64", raw, -1, -1, 1,
                                             NYIR_SCALAR_I64_TAGGED);
@@ -11767,12 +12263,12 @@ ordinary_call:
               b->current_fn_name ? b->current_fn_name : "<entry>", i + 1,
               (int)arg_expr->kind, (long long)folded_value);
         arg = nyr_ir_emit(&b->nyir,
-                        (nyr_inst_t){.op = NYIR_CONST_I64,
-                                      .dst = -1,
-                                      .a = -1,
-                                      .b = -1,
-                                      .imm = folded_value,
-                                      .scalar_class = NYIR_SCALAR_I64_RAW});
+                          (nyr_inst_t){.op = NYIR_CONST_I64,
+                                       .dst = -1,
+                                       .a = -1,
+                                       .b = -1,
+                                       .imm = folded_value,
+                                       .scalar_class = NYIR_SCALAR_I64_RAW});
         if (arg < 0)
           return -1;
         producer_class = NYIR_SCALAR_I64_RAW;
@@ -11862,7 +12358,8 @@ ordinary_call:
       producer_class = NYIR_SCALAR_F32;
     } else if (param_rep == NY_SEM_REP_F64 ||
                ny_native_type_name_is_f64(param_type) ||
-               (c_params && i < NY_C_MAX_PARAMS && c_params->param_f64[i])) {
+               (c_params && i < NY_C_MAX_PARAMS && c_params->param_f64[i]) ||
+               ny_native_runtime_abi_arg_is_f64(runtime_call_abi, i)) {
       /*
        * Convert only when the operand is not already f64.  Float literals
        * lower as f64 words (whole or fractional), so converting a
@@ -12023,10 +12520,10 @@ ordinary_call:
       nyr_scalar_class_t target_class =
           ny_native_scalar_class_from_sem_rep(param_rep);
       arg = nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_COPY,
-                                              .dst = -1,
-                                              .a = arg,
-                                              .b = -1,
-                                              .scalar_class = target_class});
+                                               .dst = -1,
+                                               .a = arg,
+                                               .b = -1,
+                                               .scalar_class = target_class});
       if (arg < 0)
         return -1;
       producer_class = target_class;
@@ -12060,11 +12557,11 @@ ordinary_call:
          (bigint_word_formal && dynamic_source_class == NYIR_SCALAR_UNKNOWN));
     if (arg >= 0 && legacy_handle_tag_bridge) {
       arg = nyr_ir_emit(&b->nyir,
-                      (nyr_inst_t){.op = NYIR_COPY,
-                                    .dst = -1,
-                                    .a = arg,
-                                    .b = -1,
-                                    .scalar_class = NYIR_SCALAR_I64_TAGGED});
+                        (nyr_inst_t){.op = NYIR_COPY,
+                                     .dst = -1,
+                                     .a = arg,
+                                     .b = -1,
+                                     .scalar_class = NYIR_SCALAR_I64_TAGGED});
       if (arg < 0)
         return -1;
       producer_class = NYIR_SCALAR_I64_TAGGED;
@@ -12168,8 +12665,6 @@ ordinary_call:
     if (runtime_symbol && (strcmp(runtime_symbol, "rt_len") == 0 ||
                            strcmp(runtime_symbol, "rt_len_strict") == 0))
       formal_class = nyr_value_scalar_class(b, arg);
-    const ny_native_runtime_abi_decl_t *runtime_call_abi =
-        runtime_c_call ? ny_native_runtime_abi_decl(runtime_symbol) : NULL;
     /* The BigInt nominal type accepts both tagged small integers and tagged
      * heap handles. Its source representation stays specialized in the
      * callee, while this physical argument slot uses the common tagged
@@ -12197,7 +12692,8 @@ ordinary_call:
      * expansion below already appends its dynamic length/tag lanes; keeping
      * the inferred RAW_INT class here left raw ternary payloads in that
      * tagged value lane (curl's CURLOPT_FOLLOWLOCATION is one example). */
-    else if (ny_native_type_name_is_any(param_type) && !raw_mutex_handle)
+    else if (ny_native_type_name_is_any(param_type) && !raw_mutex_handle &&
+             !ny_native_runtime_symbol_skips_dynamic_boxing(runtime_symbol))
       formal_class = NYIR_SCALAR_I64_TAGGED;
     else if (param_type && ny_native_type_name_is_str(param_type))
       formal_class = NYIR_SCALAR_STRING;
@@ -12279,11 +12775,11 @@ ordinary_call:
         nyr_expr_is_bytes(b, arg_expr) &&
         nyr_value_scalar_class(b, arg) == NYIR_SCALAR_I64_TAGGED) {
       arg = nyr_ir_emit(&b->nyir,
-                      (nyr_inst_t){.op = NYIR_COPY,
-                                    .dst = -1,
-                                    .a = arg,
-                                    .b = -1,
-                                    .scalar_class = NYIR_SCALAR_STRING});
+                        (nyr_inst_t){.op = NYIR_COPY,
+                                     .dst = -1,
+                                     .a = arg,
+                                     .b = -1,
+                                     .scalar_class = NYIR_SCALAR_STRING});
       if (arg < 0)
         return -1;
       producer_class = NYIR_SCALAR_STRING;
@@ -12302,11 +12798,11 @@ ordinary_call:
     if (formal_class == NYIR_SCALAR_STRING && arg_expr &&
         arg_expr->kind == NY_E_IDENT && arg_local && arg_local->is_cstr) {
       arg = nyr_ir_emit(&b->nyir,
-                      (nyr_inst_t){.op = NYIR_COPY,
-                                    .dst = -1,
-                                    .a = arg,
-                                    .b = -1,
-                                    .scalar_class = NYIR_SCALAR_STRING});
+                        (nyr_inst_t){.op = NYIR_COPY,
+                                     .dst = -1,
+                                     .a = arg,
+                                     .b = -1,
+                                     .scalar_class = NYIR_SCALAR_STRING});
       if (arg < 0)
         return -1;
       producer_class = NYIR_SCALAR_STRING;
@@ -12324,11 +12820,11 @@ ordinary_call:
         nyr_expr_is_list(b, arg_expr) &&
         nyr_value_scalar_class(b, arg) == NYIR_SCALAR_OBJECT) {
       arg = nyr_ir_emit(&b->nyir,
-                      (nyr_inst_t){.op = NYIR_COPY,
-                                    .dst = -1,
-                                    .a = arg,
-                                    .b = -1,
-                                    .scalar_class = NYIR_SCALAR_TYPED_BUFFER});
+                        (nyr_inst_t){.op = NYIR_COPY,
+                                     .dst = -1,
+                                     .a = arg,
+                                     .b = -1,
+                                     .scalar_class = NYIR_SCALAR_TYPED_BUFFER});
       if (arg < 0)
         return -1;
       producer_class = NYIR_SCALAR_TYPED_BUFFER;
@@ -12409,10 +12905,10 @@ ordinary_call:
        * example `_str_slice` forwarding `stop` to `core.slice`). */
       int tagged = nyr_ir_emit(
           &b->nyir, (nyr_inst_t){.op = NYIR_COPY,
-                                  .dst = -1,
-                                  .a = arg,
-                                  .b = -1,
-                                  .scalar_class = NYIR_SCALAR_I64_TAGGED});
+                                 .dst = -1,
+                                 .a = arg,
+                                 .b = -1,
+                                 .scalar_class = NYIR_SCALAR_I64_TAGGED});
       if (tagged < 0) {
         return nyr_fail(b, NY_NATIVE_ALLOC_FAIL), -1;
       }
@@ -12433,11 +12929,11 @@ ordinary_call:
       if (final_arg_class == NYIR_SCALAR_I64_TAGGED && raw_integer_argument &&
           arg_expr && b->last_arith_expr == arg_expr && b->last_arith_raw) {
         arg = nyr_ir_emit(&b->nyir,
-                        (nyr_inst_t){.op = NYIR_COPY,
-                                      .dst = -1,
-                                      .a = arg,
-                                      .b = -1,
-                                      .scalar_class = NYIR_SCALAR_I64_RAW});
+                          (nyr_inst_t){.op = NYIR_COPY,
+                                       .dst = -1,
+                                       .a = arg,
+                                       .b = -1,
+                                       .scalar_class = NYIR_SCALAR_I64_RAW});
         if (arg < 0)
           return -1;
       }
@@ -12497,10 +12993,10 @@ ordinary_call:
        * agree that this word is an aggregate handle, carry that class across
        * the call boundary without changing its bits. */
       arg = nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_COPY,
-                                              .dst = -1,
-                                              .a = arg,
-                                              .b = -1,
-                                              .scalar_class = formal_class});
+                                               .dst = -1,
+                                               .a = arg,
+                                               .b = -1,
+                                               .scalar_class = formal_class});
       if (arg < 0)
         return -1;
       producer_class = formal_class;
@@ -12513,10 +13009,10 @@ ordinary_call:
        * Preserve its bits: integer unboxing can corrupt odd pointer values.
        */
       arg = nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_COPY,
-                                              .dst = -1,
-                                              .a = arg,
-                                              .b = -1,
-                                              .scalar_class = formal_class});
+                                               .dst = -1,
+                                               .a = arg,
+                                               .b = -1,
+                                               .scalar_class = formal_class});
       if (arg < 0)
         return -1;
       producer_class = formal_class;
@@ -12535,7 +13031,7 @@ ordinary_call:
             nyr_scalar_class_name(formal_class));
     }
     nyr_call_arg_class_set(c_arg_scalar_classes,
-                            lowered_argc + (has_sret ? 1u : 0u), formal_class);
+                           lowered_argc + (has_sret ? 1u : 0u), formal_class);
     const nyr_inst_t *arg_value_def = nyr_reg_def_inst(b, arg);
     uint8_t arg_value_ownership =
         arg_value_def && arg_value_def->semantic_ownership != NY_SEM_OWN_UNKNOWN
@@ -12545,8 +13041,8 @@ ordinary_call:
             : NY_SEM_OWN_UNKNOWN;
     if (arg_value_ownership <= NY_SEM_OWN_SHARED)
       nyr_call_arg_ownership_set_packed(c_arg_ownership,
-                                         lowered_argc + (has_sret ? 1u : 0u),
-                                         arg_value_ownership);
+                                        lowered_argc + (has_sret ? 1u : 0u),
+                                        arg_value_ownership);
     if (callee_fn && i < callee_fn->as.fn.params.len) {
       const char *formal_name = callee_fn->as.fn.params.data[i].name;
       uint8_t formal_contract = NYIR_ARG_CONTRACT_UNKNOWN;
@@ -12570,8 +13066,8 @@ ordinary_call:
           formal_contract = NYIR_ARG_CONTRACT_BORROWS;
       }
       nyr_call_arg_contract_set_packed(c_arg_contracts,
-                                        lowered_argc + (has_sret ? 1u : 0u),
-                                        formal_contract);
+                                       lowered_argc + (has_sret ? 1u : 0u),
+                                       formal_contract);
     } else if (value_abi && i < value_abi->arity) {
       /* Intrinsic formal ownership comes from its canonical ABI declaration.
        * Keep this independent from the source expression's actual ownership.
@@ -12579,16 +13075,16 @@ ordinary_call:
       uint8_t formal_contract =
           ny_native_runtime_value_formal_contract(value_abi, i);
       nyr_call_arg_contract_set_packed(c_arg_contracts,
-                                        lowered_argc + (has_sret ? 1u : 0u),
-                                        formal_contract);
+                                       lowered_argc + (has_sret ? 1u : 0u),
+                                       formal_contract);
     } else if (runtime_arg_abi) {
       /* General runtime intrinsics carry explicit per-source-argument
        * ownership contracts alongside their representation policies. */
       uint8_t formal_contract =
           ny_native_runtime_arg_formal_contract(runtime_arg_abi, i);
       nyr_call_arg_contract_set_packed(c_arg_contracts,
-                                        lowered_argc + (has_sret ? 1u : 0u),
-                                        formal_contract);
+                                       lowered_argc + (has_sret ? 1u : 0u),
+                                       formal_contract);
     }
     args[lowered_argc++] = arg;
     if (raw_native_dict_set || is_c_call)
@@ -12620,8 +13116,8 @@ ordinary_call:
       callee_is_any = false;
     if (callee_is_any && lowered_argc > 0) {
       nyr_call_arg_class_set(c_arg_scalar_classes,
-                              lowered_argc - 1 + (has_sret ? 1u : 0u),
-                              NYIR_SCALAR_I64_TAGGED);
+                             lowered_argc - 1 + (has_sret ? 1u : 0u),
+                             NYIR_SCALAR_I64_TAGGED);
     }
     bool callee_is_list =
         !callee_is_any && !dynamic_sequence &&
@@ -12648,8 +13144,8 @@ ordinary_call:
                -1;
       }
       nyr_call_arg_class_set(c_arg_scalar_classes,
-                              lowered_argc + (has_sret ? 1u : 0u),
-                              NYIR_SCALAR_I64_RAW);
+                             lowered_argc + (has_sret ? 1u : 0u),
+                             NYIR_SCALAR_I64_RAW);
       args[lowered_argc++] = length;
     } else if ((callee_is_any || param_rep == NY_SEM_REP_STRING ||
                 ny_native_type_name_is_str(param_type)) &&
@@ -12795,12 +13291,12 @@ ordinary_call:
                -1;
       }
       nyr_call_arg_class_set(c_arg_scalar_classes,
-                              lowered_argc + (has_sret ? 1u : 0u),
-                              NYIR_SCALAR_I64_RAW);
+                             lowered_argc + (has_sret ? 1u : 0u),
+                             NYIR_SCALAR_I64_RAW);
       args[lowered_argc++] = length;
       nyr_call_arg_class_set(c_arg_scalar_classes,
-                              lowered_argc + (has_sret ? 1u : 0u),
-                              NYIR_SCALAR_I64_RAW);
+                             lowered_argc + (has_sret ? 1u : 0u),
+                             NYIR_SCALAR_I64_RAW);
       args[lowered_argc++] = tag;
     }
   }
@@ -12844,10 +13340,10 @@ ordinary_call:
     memcpy(callback_symbol, callback_name, (size_t)callback_len + 1);
     int callback =
         nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_ADDR_SYMBOL,
-                                          .dst = -1,
-                                          .a = -1,
-                                          .b = -1,
-                                          .symbol = callback_symbol});
+                                           .dst = -1,
+                                           .a = -1,
+                                           .b = -1,
+                                           .symbol = callback_symbol});
     if (callback < 0) {
       free(callback_symbol);
       return nyr_fail(b, NY_NATIVE_ALLOC_FAIL), -1;
@@ -12865,11 +13361,11 @@ ordinary_call:
     if (lowered_argc > 0) {
       argv =
           nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_ALLOCA,
-                                            .dst = -1,
-                                            .a = -1,
-                                            .b = -1,
-                                            .c = -1,
-                                            .imm = (int64_t)lowered_argc * 8});
+                                             .dst = -1,
+                                             .a = -1,
+                                             .b = -1,
+                                             .c = -1,
+                                             .imm = (int64_t)lowered_argc * 8});
       if (argv >= 0) {
         for (size_t i = 0; i < lowered_argc; ++i) {
           int address = argv;
@@ -13026,6 +13522,19 @@ ordinary_call:
                                           : (callee_fn && callee_fn->as.fn.name
                                                  ? callee_fn->as.fn.name
                                                  : name))));
+  /*
+   * Generated core declarations can retain an interpreter entry's link name
+   * after argument lowering selected its native ABI replacement. Follow the
+   * explicit runtime alias for that owned declaration; otherwise raw 17 can
+   * reach rt_calloc_raw and be decoded as the tagged integer 8. Ordinary
+   * user/foreign declarations keep their explicit C bindings.
+   */
+  if (runtime_symbol && stdlib_runtime_wrapper && symbol &&
+      strncmp(symbol, "rt_", 3) == 0) {
+    const char *decl_runtime_alias = nyr_runtime_symbol(symbol);
+    if (decl_runtime_alias && strcmp(decl_runtime_alias, runtime_symbol) == 0)
+      symbol = runtime_symbol;
+  }
   /* Core declarations are compiled into the shared bitcode with their
    * module path prepended to the source declaration name.  Keep the call
    * reference under that same name so cache linking retains the definition
@@ -13111,7 +13620,7 @@ ordinary_call:
   for (size_t i = 0; i < argc; ++i) {
     nyr_scalar_class_t formal =
         (nyr_scalar_class_t)((c_arg_scalar_classes[i / 16] >> ((i % 16) * 4)) &
-                              0xfu);
+                             0xfu);
     if (args[i] < 0)
       continue;
     nyr_scalar_class_t actual = nyr_value_scalar_class(b, args[i]);
@@ -13135,8 +13644,8 @@ ordinary_call:
       nyr_scalar_class_t actual = nyr_value_scalar_class(b, args[i]);
       nyr_scalar_class_t formal =
           (nyr_scalar_class_t)((c_arg_scalar_classes[i / 16] >>
-                                 ((i % 16) * 4)) &
-                                0xfu);
+                                ((i % 16) * 4)) &
+                               0xfu);
       ny_trace_line(
           "ABI",
           "[abi-expanded] %s call=%s slot=%zu value=v%d actual=%s formal=%s",
@@ -13323,6 +13832,9 @@ ordinary_call:
     else if (result_class == NYIR_SCALAR_UNKNOWN &&
              ny_native_runtime_abi_result_is_pointer(call_result_abi))
       result_class = NYIR_SCALAR_POINTER;
+    else if (result_class == NYIR_SCALAR_I64_TAGGED &&
+             ny_native_runtime_abi_result_is_pointer(call_result_abi))
+      result_class = NYIR_SCALAR_POINTER;
   }
   /* BigInt values use the same one-word tagged ABI for immediate integers
    * and heap handles. Inference can describe the nominal return as an
@@ -13343,6 +13855,14 @@ ordinary_call:
     else if (ext->ret_aggregate_classes[0] == NY_SYSV_AGG_HFA_F32)
       result_class = NYIR_SCALAR_F32;
   }
+  /* Source functions box their declared bool return with nyr_box_bool.
+   * Locals and parameters still use raw 0/1, but a call result must retain
+   * the tagged class so branch lowering recognizes false (NY_IMM_FALSE) as
+   * false. Extern C bools keep the target's raw scalar ABI. */
+  if (callee_fn && callee_fn->as.fn.return_type &&
+      ny_type_name_is_bool(callee_fn->as.fn.return_type) &&
+      !ny_native_runtime_abi_result_is_raw_int(call_result_abi))
+    result_class = NYIR_SCALAR_I64_TAGGED;
   if (ny_dbg_is_enabled(NY_DBG_HEURISTIC))
     ny_dbg_heuristic_event(
         "native-abi", "%s %s ret=%s rep=%d cls=%d self=%d",
@@ -13372,9 +13892,82 @@ ordinary_call:
     args[0] = product;
     argc = 1;
   }
+  /*
+   * Materialize the already-resolved semantic and physical call facts once.
+   * Source effects intentionally remain separate from NYIR runtime effects:
+   * the former describe the language contract, while the latter govern
+   * optimizer legality for the selected machine/runtime entry.
+   */
+  const nyr_resolved_call_contract_t call_contract = {
+      .canonical_callee = (callee_fn && callee_fn->as.fn.name)
+                              ? callee_fn->as.fn.name
+                              : e->semantic.canonical_callee,
+      .runtime_symbol = symbol,
+      .formal_parameters =
+          callee_fn
+              ? &callee_fn->as.fn.params
+              : (callee_ext_decl ? &callee_ext_decl->as.ext.params : NULL),
+      .source_arity = source_arity,
+      .formal_arity = lowered_user_args,
+      .expanded_arity = (size_t)argc,
+      .expanded_args = args,
+      .expanded_arg_sizes = arg_sizes,
+      .formal_arg_classes = c_arg_scalar_classes,
+      .actual_arg_ownership = c_arg_ownership,
+      .formal_arg_contracts = c_arg_contracts,
+      .declared_result_type = return_type,
+      .result_semantic_rep =
+          callee_fn && callee_fn->as.fn.return_semantic.resolved
+              ? callee_fn->as.fn.return_semantic.rep
+          : e->semantic.resolved ? e->semantic.rep
+                                 : nyr_rep_for_type(b, return_type),
+      .result_semantic_resolved =
+          (callee_fn && callee_fn->as.fn.return_semantic.resolved) ||
+          e->semantic.resolved,
+      .result_class = result_class,
+      .has_aggregate_return = has_aggregate_return,
+      .has_sret = has_sret,
+      .aggregate_return_size =
+          has_aggregate_return ? ext->ret_aggregate_size : 0,
+      .aggregate_return_classes = {
+          has_aggregate_return ? ext->ret_aggregate_classes[0]
+                               : NY_SYSV_AGG_NONE,
+          has_aggregate_return ? ext->ret_aggregate_classes[1]
+                               : NY_SYSV_AGG_NONE},
+      .source_effects =
+          e->semantic.call_effect_known ? e->semantic.call_effect_mask : 0,
+      .source_effects_known = e->semantic.call_effect_known,
+      .result_ownership =
+          e->semantic.exclusive_borrow_proven
+              ? NY_SEM_OWN_BORROWED
+              : (e->semantic.resolved ? (uint8_t)e->semantic.ownership
+                                      : NY_SEM_OWN_UNKNOWN),
+  };
+  if (ny_dbg_is_enabled(NY_DBG_HEURISTIC))
+    ny_dbg_heuristic_event(
+        "native-abi",
+        "function=%s resolved-call=%s runtime=%s source-arity=%zu "
+        "formal-arity=%zu declared-formals=%zu expanded-arity=%zu "
+        "declared-result=%s "
+        "semantic-result=%s:%s result=%s effects=%s:0x%x ownership=%u",
+        b->current_fn_name ? b->current_fn_name : "<entry>",
+        call_contract.canonical_callee ? call_contract.canonical_callee
+                                       : "<indirect>",
+        call_contract.runtime_symbol ? call_contract.runtime_symbol : "<none>",
+        call_contract.source_arity, call_contract.formal_arity,
+        call_contract.formal_parameters ? call_contract.formal_parameters->len
+                                        : 0,
+        call_contract.expanded_arity,
+        call_contract.declared_result_type ? call_contract.declared_result_type
+                                           : "<inferred>",
+        call_contract.result_semantic_resolved ? "resolved" : "unresolved",
+        ny_sem_rep_name(call_contract.result_semantic_rep),
+        nyr_scalar_class_name(call_contract.result_class),
+        call_contract.source_effects_known ? "known" : "unknown",
+        call_contract.source_effects, call_contract.result_ownership);
   int *extra = NULL;
-  if (argc > 6) {
-    size_t extra_len = argc - 6;
+  if (call_contract.expanded_arity > 6) {
+    size_t extra_len = call_contract.expanded_arity - 6;
     if (extra_len > SIZE_MAX / sizeof(*extra)) {
       free(arg_sizes);
       return nyr_fail(b, NY_NATIVE_ALLOC_FAIL), -1;
@@ -13384,7 +13977,7 @@ ordinary_call:
       free(arg_sizes);
       return nyr_fail(b, NY_NATIVE_ALLOC_FAIL), -1;
     }
-    memcpy(extra, &args[6], extra_len * sizeof(*extra));
+    memcpy(extra, &call_contract.expanded_args[6], extra_len * sizeof(*extra));
   }
   if (getenv("NYTRIX_DEBUG_CALLSYM") && symbol && strstr(symbol, "strip"))
     fprintf(
@@ -13398,40 +13991,49 @@ ordinary_call:
       (nyr_inst_t){
           .op = NYIR_CALL,
           .dst = -1,
-          .a = argc > 0 ? args[0] : -1,
-          .b = argc > 1 ? args[1] : -1,
-          .c = argc > 2 ? args[2] : -1,
-          .d = argc > 3 ? args[3] : -1,
-          .e = argc > 4 ? args[4] : -1,
-          .f = argc > 5 ? args[5] : -1,
-          .imm = (int64_t)argc,
+          .a = call_contract.expanded_arity > 0 ? call_contract.expanded_args[0]
+                                                : -1,
+          .b = call_contract.expanded_arity > 1 ? call_contract.expanded_args[1]
+                                                : -1,
+          .c = call_contract.expanded_arity > 2 ? call_contract.expanded_args[2]
+                                                : -1,
+          .d = call_contract.expanded_arity > 3 ? call_contract.expanded_args[3]
+                                                : -1,
+          .e = call_contract.expanded_arity > 4 ? call_contract.expanded_args[4]
+                                                : -1,
+          .f = call_contract.expanded_arity > 5 ? call_contract.expanded_args[5]
+                                                : -1,
+          .imm = (int64_t)call_contract.expanded_arity,
           .flags =
               flags |
               (e->semantic.exclusive_borrow_proven ? NYIR_INST_F_NOALIAS : 0),
-          .scalar_class = result_class,
-          .semantic_ownership =
-              e->semantic.exclusive_borrow_proven
-                  ? NY_SEM_OWN_BORROWED
-                  : (e->semantic.resolved ? (uint8_t)e->semantic.ownership
-                                          : NY_SEM_OWN_UNKNOWN),
-          .symbol = symbol,
+          .scalar_class = call_contract.result_class,
+          .semantic_ownership = call_contract.result_ownership,
+          .symbol = call_contract.runtime_symbol,
           .extra_args = extra,
-          .extra_args_len = argc > 6 ? argc - 6 : 0,
-          .arg_sizes = arg_sizes,
+          .extra_args_len = call_contract.expanded_arity > 6
+                                ? call_contract.expanded_arity - 6
+                                : 0,
+          .arg_sizes = call_contract.expanded_arg_sizes,
           .ret_aggregate_size =
-              has_aggregate_return && !has_sret ? ext->ret_aggregate_size : 0,
-          .ret_aggregate_classes = {has_aggregate_return && !has_sret
-                                        ? (uint8_t)ext->ret_aggregate_classes[0]
-                                        : 0,
-                                    has_aggregate_return && !has_sret
-                                        ? (uint8_t)ext->ret_aggregate_classes[1]
-                                        : 0}});
+              call_contract.has_aggregate_return && !call_contract.has_sret
+                  ? call_contract.aggregate_return_size
+                  : 0,
+          .ret_aggregate_classes = {
+              call_contract.has_aggregate_return && !call_contract.has_sret
+                  ? (uint8_t)call_contract.aggregate_return_classes[0]
+                  : 0,
+              call_contract.has_aggregate_return && !call_contract.has_sret
+                  ? (uint8_t)call_contract.aggregate_return_classes[1]
+                  : 0}});
   if (v >= 0 && b->nyir.len > 0) {
     nyr_inst_t *call = &b->nyir.data[b->nyir.len - 1];
-    memcpy(call->arg_scalar_classes, c_arg_scalar_classes,
+    memcpy(call->arg_scalar_classes, call_contract.formal_arg_classes,
            sizeof(call->arg_scalar_classes));
-    memcpy(call->arg_ownership, c_arg_ownership, sizeof(call->arg_ownership));
-    memcpy(call->arg_contracts, c_arg_contracts, sizeof(call->arg_contracts));
+    memcpy(call->arg_ownership, call_contract.actual_arg_ownership,
+           sizeof(call->arg_ownership));
+    memcpy(call->arg_contracts, call_contract.formal_arg_contracts,
+           sizeof(call->arg_contracts));
   }
   if (v < 0) {
     free(extra);
@@ -13458,11 +14060,14 @@ ordinary_call:
   /* Preserve the dynamic tag for the common identity/pass-through shape.
    * Any-return functions expose only their value in the native return
    * register, so without this fact an inlined `identity(0)` loses the
-   * distinction between tagged integer zero (tag 3) and nil (tag 0). */
+   * distinction between tagged integer zero (tag 3) and nil (tag 0).
+   * Only a single-statement body proves identity: a getter can end in its
+   * fallback parameter while returning a different value on an earlier path.
+   * Propagating that fallback's tag would misclassify every successful read. */
   if (callee_fn && callee_fn->as.fn.return_type &&
       strcmp(callee_fn->as.fn.return_type, "any") == 0 &&
       callee_fn->as.fn.body && callee_fn->as.fn.body->kind == NY_S_BLOCK &&
-      callee_fn->as.fn.body->as.block.body.len > 0) {
+      callee_fn->as.fn.body->as.block.body.len == 1) {
     const stmt_t *tail =
         callee_fn->as.fn.body->as.block.body
             .data[callee_fn->as.fn.body->as.block.body.len - 1];
@@ -13512,21 +14117,22 @@ ordinary_call:
              -1;
     }
     for (unsigned i = 0; i < elem_count; ++i) {
-      int captured = nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_CAPTURE_RET,
-                                                       .dst = -1,
-                                                       .a = -1,
-                                                       .b = -1,
-                                                       .c = -1,
-                                                       .imm = 10 + (int64_t)i});
+      int captured =
+          nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_CAPTURE_RET,
+                                             .dst = -1,
+                                             .a = -1,
+                                             .b = -1,
+                                             .c = -1,
+                                             .imm = 10 + (int64_t)i});
       int off = i ? nyr_emit_const(b, (int64_t)i * 16) : -1;
       int addr =
           i ? nyr_emit_add_i64(b, aggregate_ret_ptr, off) : aggregate_ret_ptr;
       if (captured < 0 || addr < 0 ||
           nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_VEC4_STORE_I64,
-                                            .dst = -1,
-                                            .a = addr,
-                                            .b = captured,
-                                            .c = -1}) < 0)
+                                             .dst = -1,
+                                             .a = addr,
+                                             .b = captured,
+                                             .c = -1}) < 0)
         return -1;
     }
     return aggregate_ret_ptr;
@@ -13546,14 +14152,14 @@ ordinary_call:
     static const int f64_selectors[4] = {2, 3, 8, 9};
     int captured[4] = {-1, -1, -1, -1};
     for (unsigned i = 0; i < elem_count; ++i) {
-      captured[i] =
-          nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_CAPTURE_RET,
-                                            .dst = -1,
-                                            .a = -1,
-                                            .b = -1,
-                                            .c = -1,
-                                            .imm = f32_hfa ? 4 + (int64_t)i
-                                                           : f64_selectors[i]});
+      captured[i] = nyr_ir_emit(
+          &b->nyir,
+          (nyr_inst_t){.op = NYIR_CAPTURE_RET,
+                       .dst = -1,
+                       .a = -1,
+                       .b = -1,
+                       .c = -1,
+                       .imm = f32_hfa ? 4 + (int64_t)i : f64_selectors[i]});
       if (captured[i] < 0)
         return -1;
     }
@@ -13575,15 +14181,15 @@ ordinary_call:
         if (lo_idx + 1 < elem_count) {
           int shifted =
               nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_SHL_I64,
-                                                .dst = -1,
-                                                .a = captured[lo_idx + 1],
-                                                .b = shift32});
+                                                 .dst = -1,
+                                                 .a = captured[lo_idx + 1],
+                                                 .b = shift32});
           packed = shifted < 0 ? -1
                                : nyr_ir_emit(&b->nyir,
-                                           (nyr_inst_t){.op = NYIR_OR_I64,
-                                                         .dst = -1,
-                                                         .a = captured[lo_idx],
-                                                         .b = shifted});
+                                             (nyr_inst_t){.op = NYIR_OR_I64,
+                                                          .dst = -1,
+                                                          .a = captured[lo_idx],
+                                                          .b = shifted});
         }
         int off = pair ? nyr_emit_const(b, (int64_t)pair * 8) : -1;
         int addr = pair ? nyr_emit_add_i64(b, aggregate_ret_ptr, off)
@@ -13606,11 +14212,11 @@ ordinary_call:
       ext->ret_aggregate_classes[1] == NY_SYSV_AGG_INTEGER;
   if (capture_second_integer_first) {
     second_ret = nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_CAPTURE_RET,
-                                                   .dst = -1,
-                                                   .a = -1,
-                                                   .b = -1,
-                                                   .c = -1,
-                                                   .imm = 1});
+                                                    .dst = -1,
+                                                    .a = -1,
+                                                    .b = -1,
+                                                    .c = -1,
+                                                    .imm = 1});
     if (second_ret < 0) {
       return nyr_fail(b, "native NYIR lower: secondary return "
                          "register capture failed"),
@@ -13620,11 +14226,11 @@ ordinary_call:
   if (has_aggregate_return && !has_sret &&
       ext->ret_aggregate_classes[0] == NY_SYSV_AGG_SSE) {
     primary_ret = nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_CAPTURE_RET,
-                                                    .dst = -1,
-                                                    .a = -1,
-                                                    .b = -1,
-                                                    .c = -1,
-                                                    .imm = 2});
+                                                     .dst = -1,
+                                                     .a = -1,
+                                                     .b = -1,
+                                                     .c = -1,
+                                                     .imm = 2});
     if (primary_ret < 0) {
       return nyr_fail(
                  b,
@@ -13648,11 +14254,11 @@ ordinary_call:
              -1;
     }
     second_ret = nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_CAPTURE_RET,
-                                                   .dst = -1,
-                                                   .a = -1,
-                                                   .b = -1,
-                                                   .c = -1,
-                                                   .imm = selector});
+                                                    .dst = -1,
+                                                    .a = -1,
+                                                    .b = -1,
+                                                    .c = -1,
+                                                    .imm = selector});
     if (second_ret < 0) {
       return nyr_fail(b, "native NYIR lower: return register capture failed"),
              -1;
@@ -13667,33 +14273,34 @@ ordinary_call:
       int shift = nyr_emit_const(b, 32);
       int lo = mask < 0 ? -1
                         : nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_AND_I64,
-                                                            .dst = -1,
-                                                            .a = primary_ret,
-                                                            .b = mask});
-      int high_raw = packed_integer_pair
-                         ? nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_SAR_I64,
                                                              .dst = -1,
                                                              .a = primary_ret,
-                                                             .b = shift})
-                         : second_ret;
+                                                             .b = mask});
+      int high_raw =
+          packed_integer_pair
+              ? nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_SAR_I64,
+                                                   .dst = -1,
+                                                   .a = primary_ret,
+                                                   .b = shift})
+              : second_ret;
       int hi = (high_raw < 0 || mask < 0)
                    ? -1
                    : nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_AND_I64,
-                                                       .dst = -1,
-                                                       .a = high_raw,
-                                                       .b = mask});
+                                                        .dst = -1,
+                                                        .a = high_raw,
+                                                        .b = mask});
       int shifted = (hi < 0 || shift < 0)
                         ? -1
                         : nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_SHL_I64,
-                                                            .dst = -1,
-                                                            .a = hi,
-                                                            .b = shift});
+                                                             .dst = -1,
+                                                             .a = hi,
+                                                             .b = shift});
       int packed = (lo < 0 || shifted < 0)
                        ? -1
                        : nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_OR_I64,
-                                                           .dst = -1,
-                                                           .a = lo,
-                                                           .b = shifted});
+                                                            .dst = -1,
+                                                            .a = lo,
+                                                            .b = shifted});
       if (packed < 0 || !nyr_emit_store_i64(b, aggregate_ret_ptr, packed))
         return -1;
     } else if (!nyr_emit_store_i64(b, aggregate_ret_ptr, primary_ret))

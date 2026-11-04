@@ -140,10 +140,9 @@ static void find_loop_accesses(const nyr_func_t *f, const int *defs,
 }
 
 static size_t block_for_label(const nyr_cfg_t *cfg, int64_t label) {
-  if (label >= 0)
-    for (size_t b = 0; b < cfg->block_count; ++b)
-      if (cfg->block_label[b] == label)
-        return b;
+  size_t b = 0;
+  if (nyr_cfg_block_for_label(cfg, label, &b))
+    return b;
   return SIZE_MAX;
 }
 
@@ -392,7 +391,7 @@ static bool fuse_adjacent_pair(nyr_func_t *f, const nyr_scev_info_t *info) {
        * must not surface writes or unanalyzable addresses.
        */
       if (!nyr_cfg_natural_loop_blocks(&cfg, k1b, h1b, mask1,
-                                        cfg.block_count) ||
+                                       cfg.block_count) ||
           !nyr_cfg_natural_loop_blocks(&cfg, k2b, h2b, mask2, cfg.block_count))
         continue;
       if (!loops_call_free(f, &cfg, mask1, mask2))
@@ -534,15 +533,15 @@ static bool fuse_adjacent_pair(nyr_func_t *f, const nyr_scev_info_t *info) {
         for (size_t c = cst_count; c > 0; --c)
           if (!insert_inst(f, cst_pos,
                            &(nyr_inst_t){.op = NYIR_CONST_I64,
-                                          .dst = cst_dst[c - 1],
-                                          .imm = cst_imm[c - 1]}))
+                                         .dst = cst_dst[c - 1],
+                                         .imm = cst_imm[c - 1]}))
             goto out;
       } else {
         for (size_t c = cst_count; c > 0; --c)
           if (!insert_inst(f, cst_pos,
                            &(nyr_inst_t){.op = NYIR_CONST_I64,
-                                          .dst = cst_dst[c - 1],
-                                          .imm = cst_imm[c - 1]}))
+                                         .dst = cst_dst[c - 1],
+                                         .imm = cst_imm[c - 1]}))
             goto out;
         for (size_t m = moved_count; m > 0; --m)
           if (!emit_saved_phi(f, phi_ins, &moved[m - 1]))
@@ -724,7 +723,7 @@ static bool affine_address_split_loop_iv(nyr_func_t *f, const nyr_cfg_t *cfg,
           continue;
         int row_bytes = f->next_value++;
         nyr_inst_t row_scale = affine_address_inst(NYIR_SHL_I64, row_bytes,
-                                                    invariant, shift_value);
+                                                   invariant, shift_value);
         if (!insert_inst(f, pc + insert_count, &row_scale)) {
           free(members);
           return false;
@@ -733,6 +732,7 @@ static bool affine_address_split_loop_iv(nyr_func_t *f, const nyr_cfg_t *cfg,
         int row_base = f->next_value++;
         nyr_inst_t make_row_base =
             affine_address_inst(NYIR_ADD_I64, row_base, base, row_bytes);
+        make_row_base.flags |= NYIR_INST_F_AFFINE_ADDR_BASE;
         if (!insert_inst(f, pc + insert_count, &make_row_base)) {
           free(members);
           return false;
@@ -771,8 +771,7 @@ bool nyr_affine_nest(nyr_func_t *f) {
   nyr_cfg_t cfg = {0};
   int *defs = nyr_build_defs(f);
   nyr_scev_info_t address_info = {0};
-  if (!defs || !nyr_cfg_build(f, &cfg) ||
-      !nyr_scev_analyze(f, &address_info)) {
+  if (!defs || !nyr_cfg_build(f, &cfg) || !nyr_scev_analyze(f, &address_info)) {
     free(defs);
     nyr_cfg_free(&cfg);
     nyr_scev_free(&address_info);

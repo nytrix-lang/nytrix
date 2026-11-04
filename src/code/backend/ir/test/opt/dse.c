@@ -5,26 +5,18 @@
 
 static void ny_store_local(nyr_func_t *f, int value, int slot) {
   nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_STORE_LOCAL,
-                             .dst = -1,
-                             .a = value,
-                             .b = -1,
-                             .c = -1,
-                             .d = -1,
-                             .e = -1,
-                             .f = -1,
-                             .imm = slot});
+                              .dst = -1,
+                              .a = value,
+                              .b = -1,
+                              .c = -1,
+                              .d = -1,
+                              .e = -1,
+                              .f = -1,
+                              .imm = slot});
 }
 
 static int ny_load_local(nyr_func_t *f, int slot) {
-  return nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_LOAD_LOCAL,
-                                    .dst = -1,
-                                    .a = -1,
-                                    .b = -1,
-                                    .c = -1,
-                                    .d = -1,
-                                    .e = -1,
-                                    .f = -1,
-                                    .imm = slot});
+  return nyr_opt_emit_imm(f, NYIR_LOAD_LOCAL, slot);
 }
 
 static size_t ny_nops(const nyr_func_t *f) {
@@ -119,28 +111,29 @@ static int ny_check_expanded_call_argument_escape(void) {
   int value = nyr_opt_const(&f, 73);
   ny_store_local(&f, zero,
                  0); /* Keep DSE's function-wide allocation pass on. */
-  int allocation =
-      nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_ALLOCA,
-                                  .dst = -1,
-                                  .a = -1,
-                                  .b = -1,
-                                  .c = -1,
-                                  .d = -1,
-                                  .e = -1,
-                                  .f = -1,
-                                  .imm = 8,
-                                  .scalar_class = NYIR_SCALAR_POINTER});
+  int count = nyr_opt_const(&f, 1);
+  int width = nyr_opt_const(&f, 8);
+  int allocation = nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_CALL,
+                                                .dst = -1,
+                                                .a = count,
+                                                .b = width,
+                                                .c = -1,
+                                                .d = -1,
+                                                .e = -1,
+                                                .f = -1,
+                                                .imm = 2,
+                                                .symbol = "rt_tbuf_new_raw"});
   size_t store_at = f.len;
   nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_STORE_I64,
-                              .dst = -1,
-                              .a = allocation,
-                              .b = -1,
-                              .c = value,
-                              .d = -1,
-                              .e = -1,
-                              .f = -1,
-                              .effects = NYIR_EFFECT_WRITE_MEMORY |
-                                         NYIR_EFFECT_MAY_TRAP});
+                               .dst = -1,
+                               .a = allocation,
+                               .b = -1,
+                               .c = value,
+                               .d = -1,
+                               .e = -1,
+                               .f = -1,
+                               .effects = NYIR_EFFECT_WRITE_MEMORY |
+                                          NYIR_EFFECT_MAY_TRAP});
   int args[7] = {zero, zero, zero, zero, zero, zero, allocation};
   int *extra = malloc(sizeof(*extra));
   if (!extra) {
@@ -149,19 +142,19 @@ static int ny_check_expanded_call_argument_escape(void) {
   }
   extra[0] = args[6];
   nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_CALL,
-                              .dst = -1,
-                              .a = args[0],
-                              .b = args[1],
-                              .c = args[2],
-                              .d = args[3],
-                              .e = args[4],
-                              .f = args[5],
-                              .imm = 7,
-                              .symbol = "unknown_observer",
-                              .extra_args = extra,
-                              .extra_args_len = 1,
-                              .effects = NYIR_EFFECT_CALL |
-                                         NYIR_EFFECT_UNKNOWN_SIDE_EFFECT});
+                               .dst = -1,
+                               .a = args[0],
+                               .b = args[1],
+                               .c = args[2],
+                               .d = args[3],
+                               .e = args[4],
+                               .f = args[5],
+                               .imm = 7,
+                               .symbol = "unknown_observer",
+                               .extra_args = extra,
+                               .extra_args_len = 1,
+                               .effects = NYIR_EFFECT_CALL |
+                                          NYIR_EFFECT_UNKNOWN_SIDE_EFFECT});
   nyr_opt_ret(&f, zero);
   if (!nyr_opt_verify(&f, "dse/expanded-escape-before")) {
     nyr_ir_func_free(&f);
@@ -181,7 +174,50 @@ static int ny_check_expanded_call_argument_escape(void) {
   return 0;
 }
 
+static int ny_check_global_pointer_escape(void) {
+  nyr_func_t f;
+  nyr_opt_begin(&f);
+  int zero = nyr_opt_const(&f, 0);
+  ny_store_local(&f, zero, 0); /* Enable allocation-store analysis. */
+  int count = nyr_opt_const(&f, 1);
+  int width = nyr_opt_const(&f, 8);
+  int allocation = nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_CALL,
+                                                .dst = -1,
+                                                .a = count,
+                                                .b = width,
+                                                .c = -1,
+                                                .d = -1,
+                                                .e = -1,
+                                                .f = -1,
+                                                .imm = 2,
+                                                .symbol = "rt_tbuf_new_raw"});
+  int value = nyr_opt_const(&f, 73);
+  size_t payload_store_at = f.len;
+  nyr_opt_emit_abc(&f, NYIR_STORE_I64, allocation, -1, value);
+  int global =
+      nyr_opt_emit_symbol(&f, NYIR_ADDR_SYMBOL, "published_allocation");
+  nyr_opt_emit_abc(&f, NYIR_STORE_I64, global, -1, allocation);
+  nyr_opt_ret(&f, zero);
+
+  if (!nyr_opt_verify(&f, "dse/global-pointer-escape-before")) {
+    nyr_ir_func_free(&f);
+    return 1;
+  }
+  if (!nyr_dead_store_elim(&f) ||
+      !nyr_opt_verify(&f, "dse/global-pointer-escape-after") ||
+      f.data[payload_store_at].op != NYIR_STORE_I64) {
+    fprintf(stderr, "[dse] removed initialization for an allocation published "
+                    "through a global\n");
+    nyr_dump(stderr, &f, "dse/global-pointer-escape");
+    nyr_ir_func_free(&f);
+    return 1;
+  }
+  nyr_ir_func_free(&f);
+  return 0;
+}
+
 int main(void) {
   return ny_check_overwritten_fork() || ny_check_observed_fork() ||
-         ny_check_expanded_call_argument_escape();
+         ny_check_expanded_call_argument_escape() ||
+         ny_check_global_pointer_escape();
 }

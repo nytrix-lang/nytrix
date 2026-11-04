@@ -49,7 +49,7 @@ def program =
   "divmod(20) + divmod(-19) + rotate_check(1) +\n" +
   "integer_ops_check(-13, 5)"
 def emitted = run_capture(
-    [compiler, "--native-backend=riscv", "--native-only", "-O3", "--nyir-verify",
+    [compiler, "--native-backend=riscv", "--native-only", "-O3", "--nyr-verify",
      "--emit-asm=" + asm_path, "-no-std", "-emit-only", "-e", program],
     [], nil, false)
 def linked = run_capture(
@@ -62,7 +62,7 @@ def execution = run_qemu("qemu-riscv64", exe_path)
 def checked_asm = stem + "-checked.s"
 def checked_exe = stem + "-checked"
 def checked_emit = run_capture(
-    [compiler, "--native-backend=riscv", "--native-only", "--nyir-verify",
+    [compiler, "--native-backend=riscv", "--native-only", "--nyr-verify",
      "--emit-asm=" + checked_asm, "-no-std", "-emit-only", "-e",
      "fn divide(int left, int right) int { left / right }\ndivide(9, 3)"],
     [], nil, false)
@@ -76,7 +76,7 @@ def checked_execution = run_qemu("qemu-riscv64", checked_exe)
 def zero_asm = stem + "-zero.s"
 def zero_exe = stem + "-zero"
 def zero_emit = run_capture(
-    [compiler, "--native-backend=riscv", "--native-only", "--nyir-verify",
+    [compiler, "--native-backend=riscv", "--native-only", "--nyr-verify",
      "--emit-asm=" + zero_asm, "-no-std", "-emit-only", "-e",
      "fn divide(int left, int right) int { left / right }\n" +
      "mut int divisor = 1\nwhile divisor > 0 { divisor -= 1 }\n" +
@@ -92,7 +92,7 @@ def zero_execution = run_qemu("qemu-riscv64", zero_exe)
 def panic_asm = stem + "-panic.s"
 def panic_exe = stem + "-panic"
 def panic_emit = run_capture(
-    [compiler, "--native-backend=riscv", "--native-only", "--nyir-verify",
+    [compiler, "--native-backend=riscv", "--native-only", "--nyr-verify",
      "--emit-asm=" + panic_asm, "-no-std", "-emit-only", "-e",
      "panic(\"portable static panic\")"],
     [], nil, false)

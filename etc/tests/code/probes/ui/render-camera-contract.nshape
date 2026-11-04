@@ -1,0 +1,43 @@
+shape render-camera-contract {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "sys", "render"]
+  template ny-test-case
+  expect compile_and_run
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect_message "RENDER_CAMERA_CONTRACT_OK"
+  source ny <<'NY'
+use core
+use core.os.ui.render as camera
+use core.os.ui.render.matrix as matrix
+
+assert(camera._mat4_data_off([0.0] * 9) == -1, "short matrices are rejected")
+assert(camera._mat4_data_off(matrix.mat4_identity()) == 2, "4x4 matrix data offset")
+def cam = camera.camera_init([8.0, 6.0, 11.0], -144.0, -18.0)
+assert(is_list(cam), "camera is positional list")
+assert(len(cam) >= 7, "camera has projection fields")
+assert(cam.get(0).len == 3, "camera position is vec3")
+assert(cam.get(1).len == 3, "camera target is vec3")
+def view = matrix.mat4_look_at(cam.get(0), cam.get(1), cam.get(2))
+assert(len(view) >= 18 && view.get(17) == 1.0, "camera vectors build look-at matrix")
+assert(view.get(2) != 0.0 || view.get(6) != 0.0 || view.get(10) != 0.0, "camera side basis is not degenerate")
+assert(camera.set_camera(cam), "camera initializes reusable matrices before any window exists")
+assert(camera._scratch_view.get(2) != 0.0 || camera._scratch_view.get(6) != 0.0 || camera._scratch_view.get(10) != 0.0, "typed vec3 camera basis reaches the renderer view matrix")
+def f64 facade_scale = float(camera._scratch_proj.get(7))
+assert(facade_scale > 0.57734 && facade_scale < 0.57736, "facade camera preserves its 120 degree projection")
+def dict named = {"pos": [0.0, 0.0, 5.0], "target": [0.0, 0.0, 0.0], "up": [0.0, 1.0, 0.0], "fovy": 60.0}
+assert(camera.set_camera(named), "named camera reuses initialized matrices")
+def f64 named_scale = float(camera._scratch_proj.get(7))
+assert(named_scale > 1.73204 && named_scale < 1.73206, "named camera preserves its 60 degree projection")
+def dict typed = {"pos": vec3(3.0, 4.0, 8.0), "target": vec3(0.0, 0.0, 0.0), "up": vec3(0.0, 1.0, 0.0), "fovy": 70.0}
+assert(camera.set_camera(typed), "typed named camera accepts vec3 dictionaries")
+assert(camera._scratch_view.get(2) != 0.0 || camera._scratch_view.get(6) != 0.0 || camera._scratch_view.get(10) != 0.0, "typed named camera produces a non-degenerate view matrix")
+def smoothed = camera.simulate_frame_state({
+   "yaw": 0.0, "pitch": 0.0, "dx": 8.0, "dy": 0.0, "dt": 1.0 / 60.0,
+   "rmb_look_active": true, "look_smooth_alpha": 0.5, "sens": 0.08
+})
+assert(abs(float(smoothed.get("yaw", 0.0)) - 0.32) < 0.000001,
+   "camera smoothing uses fractional float power")
+print("RENDER_CAMERA_CONTRACT_OK target=" + to_str(cam.get(1)))
+NY
+}

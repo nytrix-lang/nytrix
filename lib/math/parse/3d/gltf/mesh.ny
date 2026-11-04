@@ -135,8 +135,7 @@ fn _gltf_prim_meta(dict prim, list accs) dict {
    mut c_acc_idx, c_cnt = -1, 0
    mut n_acc_idx, n_cnt = -1, 0
    mut i_acc_idx, i_cnt = -1, 0
-   mut has_idx = false
-   mut local_bounds = 0
+   mut any local_bounds = 0
    def prim_mode = int(prim.get("mode", shr.GLTF_MODE_TRIANGLES))
    if is_dict(attrs) {
       pos_acc_idx = attrs.get("POSITION", -1)
@@ -183,7 +182,6 @@ fn _gltf_prim_meta(dict prim, list accs) dict {
       def acc = accs.get(idx_acc)
       i_acc_idx = idx_acc
       i_cnt = acc.get("count", 0)
-      has_idx = true
    }
    {
       "pos_acc_idx": pos_acc_idx,
@@ -207,7 +205,7 @@ fn _gltf_prim_meta(dict prim, list accs) dict {
       "weights_acc_idx": weights_acc_idx,
       "i_acc_idx": i_acc_idx,
       "i_cnt": i_cnt,
-      "has_idx": has_idx,
+      "has_idx": i_acc_idx >= 0,
       "mat_idx": mat_idx,
       "local_bounds": local_bounds,
       "mode": prim_mode
@@ -768,14 +766,15 @@ fn _gltf_pack_indices(any g, any data, any meta) any {
       if has_idx { ld._gltf_release_accessor_data(idx_res) }
       return 0
    }
-   def out_cnt = case prim_mode {
-      0 -> _gltf_pack_point_indices(out, use_u32, has_idx, idx_ptr, idx_stride, i_comp, src_count)
-      1 -> _gltf_pack_line_indices(out, use_u32, has_idx, idx_ptr, idx_stride, i_comp, src_count, 2, false)
-      2 -> _gltf_pack_line_indices(out, use_u32, has_idx, idx_ptr, idx_stride, i_comp, src_count, 1, true)
-      3 -> _gltf_pack_line_indices(out, use_u32, has_idx, idx_ptr, idx_stride, i_comp, src_count, 1, false)
-      5 -> _gltf_pack_triangle_strip_indices(out, use_u32, has_idx, idx_ptr, idx_stride, i_comp, src_count)
-      6 -> _gltf_pack_triangle_fan_indices(out, use_u32, has_idx, idx_ptr, idx_stride, i_comp, src_count)
-      _ -> _gltf_pack_triangle_indices(out, use_u32, has_idx, idx_ptr, idx_stride, i_comp, src_count)
+   mut int out_cnt = 0
+   case prim_mode {
+      0 -> { out_cnt = _gltf_pack_point_indices(out, use_u32, has_idx, idx_ptr, idx_stride, i_comp, src_count) }
+      1 -> { out_cnt = _gltf_pack_line_indices(out, use_u32, has_idx, idx_ptr, idx_stride, i_comp, src_count, 2, false) }
+      2 -> { out_cnt = _gltf_pack_line_indices(out, use_u32, has_idx, idx_ptr, idx_stride, i_comp, src_count, 1, true) }
+      3 -> { out_cnt = _gltf_pack_line_indices(out, use_u32, has_idx, idx_ptr, idx_stride, i_comp, src_count, 1, false) }
+      5 -> { out_cnt = _gltf_pack_triangle_strip_indices(out, use_u32, has_idx, idx_ptr, idx_stride, i_comp, src_count) }
+      6 -> { out_cnt = _gltf_pack_triangle_fan_indices(out, use_u32, has_idx, idx_ptr, idx_stride, i_comp, src_count) }
+      _ -> { out_cnt = _gltf_pack_triangle_indices(out, use_u32, has_idx, idx_ptr, idx_stride, i_comp, src_count) }
    }
    if has_idx { ld._gltf_release_accessor_data(idx_res) }
    return {"ptr": out, "count": out_cnt, "u32": use_u32, "mode": prim_mode}
@@ -921,8 +920,7 @@ fn _gltf_indexed_append_instance_parts(
       mut smi = 0
       while smi < sub_mats_n {
          def model = gltf_math.safe_model_mat4(sub_mats_list.get(smi))
-         mut part_visible = true
-         if part_node_idx >= 0 { part_visible = node_vis_map.get(part_node_idx, true) ? true : false }
+         def bool part_visible = part_node_idx < 0 || bool(node_vis_map.get(part_node_idx, true))
          mut part_opts = _gltf_copy_part_opts(mesh_opts)
          def flip_winding = scn._gltf_model_has_negative_det(model)
          if flip_winding { part_opts["flip_winding"] = true }
@@ -1059,8 +1057,10 @@ fn gltf_to_mesh_group_indexed(any gltf_data, any color=0, any material_tex_ids=0
             def lbs = meta.get("local_bounds", 0)
             def inst_n = is_list(instance_mats) ? instance_mats.len : 0
             def has_morph_targets = int(meta.get("morph_target_count", 0)) > 0 || is_list(meta.get("targets", 0))
+            mut int instance_runs = 1
+            if has_morph_targets { instance_runs = int(max(inst_n, 1)) }
             mut inst_i = 0
-            while inst_i < (has_morph_targets ? max(inst_n, 1) : 1) {
+            while inst_i < instance_runs {
                def inst_pair = (has_morph_targets && inst_n > 0) ? instance_mats.get(inst_i) : 0
                def inst_node_idx = has_morph_targets ? _gltf_instance_node_idx(inst_pair) : -1
                mut meta_inst = meta
@@ -1075,10 +1075,10 @@ fn gltf_to_mesh_group_indexed(any gltf_data, any color=0, any material_tex_ids=0
                index_pack_cache = packed_buffers.get(3, index_pack_cache)
                if is_dict(verts) && is_dict(inds) {
                   mut vptr = verts.get("ptr", 0)
-                  mut vcnt = verts.get("count", 0)
+                  mut int vcnt = int(verts.get("count", 0))
                   mut iptr = inds.get("ptr", 0)
-                  mut icnt = inds.get("count", 0)
-                  mut idx_u32 = inds.get("u32", false)
+                  mut int icnt = int(inds.get("count", 0))
+                  mut bool idx_u32 = bool(inds.get("u32", false))
                   if shr._gltf_prim_mode_expands_to_vertices(prim_mode) {
                      def expanded_prim = _gltf_expand_primitive_vertices(vptr, vcnt, iptr, icnt, idx_u32)
                      if is_dict(expanded_prim) {

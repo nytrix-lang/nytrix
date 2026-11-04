@@ -1,0 +1,180 @@
+shape png-decode {
+  family "probe-image/png-decode"
+  generator "stress"
+  features ["ny", "image"]
+  template ny-test-case
+  expect compile_and_run
+  ci optional
+  source ny <<'NY'
+use core.os
+use core.math.parse.data.zlib as zlib
+use core.math.parse.img.png as png
+use core.os.path as ospath
+def res = file_read(ospath.resolve_repo_asset("etc/assets/images/test.png"))
+if(is_err(res)){
+   print("READ_ERR")
+} else {
+   def data = unwrap(res)
+   mut idat = ""
+   mut off = 8
+   while(off + 8 <= len(data)){
+      def ln = (load8(data, off) << 24) | (load8(data, off + 1) << 16) | (load8(data, off + 2) << 8) | load8(data, off + 3)
+      def typ = (load8(data, off + 4) << 24) | (load8(data, off + 5) << 16) | (load8(data, off + 6) << 8) | load8(data, off + 7)
+      def ch_off = off + 8
+      if(typ == 1229209940){
+         mut i = 0
+         while(i < ln){
+            idat = idat + chr(load8(data, ch_off + i))
+            i += 1
+         }
+      }
+      off = ch_off + ln + 4
+      if(typ == 1229278788){ break }
+   }
+   def raw = zlib.decompress_zlib_limit(idat, 1040)
+   print("RAW_LEN", len(raw))
+   mut y = 0
+   while(y < 16){
+      print("ROW", y, "FILTER", load8(raw, y * 65))
+      y += 1
+   }
+   ; Keep the structured decoder check in this single family fixture too.
+   def img = png.decode(data)
+   if(img){
+      print("PNG_OK", dict_get(img, "width", 0), dict_get(img, "height", 0), len(dict_get(img, "data", "")))
+   } else {
+      print("PNG_BAD")
+   }
+}
+NY
+}
+
+shape png-decode_one {
+  family "probe-image/png-decode"
+  generator "stress"
+  features ["ny", "image"]
+  template ny-test-case
+  expect compile_and_run
+  ci optional
+  source ny <<'NY'
+#!/bin/ny
+use core
+use core.math.bin as bin
+use core.math.parse.img as image
+use core.math.parse.img.png as png
+use core.str as str
+use core.os as os
+use core.os.fs as fs
+fn main(){
+   def path = str.strip(to_str(os.env("PNG_PATH")))
+   if(len(path) == 0){
+      print("ERR\tmissing_path")
+      return 1
+   }
+   def read_res = os.file_read(path)
+   if(!is_ok(read_res)){
+      print("ERR\tread_failed\t" + path)
+      return 3
+   }
+   def img = png.decode(unwrap(read_res))
+   if(!is_dict(img)){
+      print("ERR\tdecode_failed\t" + path)
+      return 2
+   }
+   def hex = bin.bytes_to_hex(bin.str_to_bytes(dict_get(img, "data", "")))
+   print(
+      path
+      + "\t" + to_str(dict_get(img, "width", 0))
+      + "\t" + to_str(dict_get(img, "height", 0))
+      + "\t" + hex
+      + "\t" + to_str(dict_get(img, "channels", 0))
+   )
+   image.free(img)
+   0
+}
+if(comptime{__main()}){
+   main()
+}
+NY
+}
+
+shape png-idat_extract {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "image"]
+  template ny-test-case
+  expect compile_and_run
+  ci optional
+  source ny <<'NY'
+use core.os
+use core.math.parse.data.zlib as zlib
+use core.os.path as ospath
+def res = file_read(ospath.resolve_repo_asset("etc/assets/images/test.png"))
+if(is_err(res)){
+   print("READ_ERR")
+} else {
+   def data = unwrap(res)
+   mut off = 8
+   mut idat = ""
+   while(off + 8 <= len(data)){
+      def ln = (load8(data, off) << 24) | (load8(data, off + 1) << 16) | (load8(data, off + 2) << 8) | load8(data, off + 3)
+      def typ = (load8(data, off + 4) << 24) | (load8(data, off + 5) << 16) | (load8(data, off + 6) << 8) | load8(data, off + 7)
+      def ch_off = off + 8
+      if(typ == 1229209940){
+         idat = idat + file_read(ospath.resolve_repo_asset("etc/assets/images/test.png"))
+      }
+      off = ch_off + ln + 4
+      if(typ == 1229278788){ break }
+   }
+   print("PNG_LEN", len(data))
+   def raw = zlib.decompress_zlib_limit(str_add("", idat), 1040)
+   print("RAW_LEN", len(raw))
+   mut row = 0
+   while(row < 16){
+      print("ROW", row, "FILTER", load8(raw, row * 65))
+      row += 1
+   }
+}
+NY
+}
+
+shape png-info {
+  family "probe-image/png-info"
+  generator "stress"
+  features ["ny", "image"]
+  template ny-test-case
+  expect compile_and_run
+  ci optional
+  source ny <<'NY'
+use core.os
+use core.os.path as ospath
+def res = file_read(ospath.resolve_repo_asset("etc/assets/images/test.png"))
+if(is_err(res)){ print("READ_ERR") } else { def data = unwrap(res) print("LEN", len(data)) def p = 8 def length = (load8(data,p) << 24) | (load8(data,p+1) << 16) | (load8(data,p+2) << 8) | load8(data,p+3) def typ = (load8(data,p+4) << 24) | (load8(data,p+5) << 16) | (load8(data,p+6) << 8) | load8(data,p+7) print("IHDR_LEN", length, "TYPE", typ) def c = p + 8 print("W", (load8(data,c) << 24) | (load8(data,c+1) << 16) | (load8(data,c+2) << 8) | load8(data,c+3)) print("H", (load8(data,c+4) << 24) | (load8(data,c+5) << 16) | (load8(data,c+6) << 8) | load8(data,c+7)) print("BD", load8(data,c+8), "CT", load8(data,c+9), "CM", load8(data,c+10), "FM", load8(data,c+11), "IM", load8(data,c+12)) }
+NY
+}
+
+shape png-sweep {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "image"]
+  template ny-test-case
+  expect compile_and_run
+  ci optional
+  source ny <<'NY'
+#!/bin/ny
+use core
+use core.math.parse.img as image
+use core.math.parse.img.png as png
+fn main(){
+   def path = "etc/assets/images/prototype/prototype_grid_dark_small.png"
+   def img = image.load(path)
+   assert(is_dict(img), "decode " + path)
+   image.free(img)
+   print("PNG_OK\t" + path)
+   0
+}
+if(comptime{__main()}){
+   __exit(main())
+}
+NY
+}

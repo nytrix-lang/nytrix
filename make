@@ -1,5 +1,6 @@
 #!/usr/bin/env -S python3 -B
 from __future__ import annotations
+import atexit
 import base64
 import json
 import os
@@ -131,13 +132,6 @@ def load_default_config() -> None:
 load_default_config()
 apply_builtin_env_defaults()
 
-def has_shebang(path: Path) -> bool:
-    try:
-        with path.open("rb") as f:
-            return f.read(2) == b"#!"
-    except OSError:
-        return False
-
 def chmod_executable(path: Path) -> None:
     mode = path.stat().st_mode
     wanted = mode | 0o111
@@ -145,18 +139,24 @@ def chmod_executable(path: Path) -> None:
         path.chmod(wanted)
 
 def ensure_project_scripts_executable() -> None:
+    """Bootstrap fallback until the C build tool exists."""
     if host_os() == "windows":
         return
     for path in ROOT.iterdir():
-        if path.is_file() and has_shebang(path):
-            chmod_executable(path)
-    projects = ROOT / "etc" / "projects"
-    if not projects.is_dir():
-        return
-    for path in projects.rglob("*.ny"):
         if not path.is_file():
             continue
-        chmod_executable(path)
+        try:
+            with path.open("rb") as f:
+                has_shebang = f.read(2) == b"#!"
+            if has_shebang:
+                chmod_executable(path)
+        except OSError:
+            continue
+    projects = ROOT / "etc" / "projects"
+    if projects.is_dir():
+        for path in projects.rglob("*.ny"):
+            if path.is_file():
+                chmod_executable(path)
 
 def host_os() -> str:
     s = platform.system()
@@ -186,6 +186,14 @@ def glyph_style_from_env() -> str:
         "1", "true", "yes", "on"
     }:
         raw = "ascii"
+    # Auto-detect Windows cmd.exe / PowerShell which often lack box-drawing glyphs
+    if not raw and sys.platform == "win32":
+        term = (os.environ.get("TERM") or "").lower()
+        wt_session = os.environ.get("WT_SESSION")  # Windows Terminal
+        conemu = os.environ.get("ConEmuANSI")
+        # Default to ASCII for legacy consoles (cmd.exe, old PowerShell)
+        if not wt_session and not conemu and term not in ("xterm", "xterm-256color", "screen", "screen-256color", "tmux", "tmux-256color"):
+            raw = "ascii"
     return "ascii" if raw in {"ascii", "plain", "fallback"} else "unicode"
 
 def parse_glyph_mode(raw: str) -> str:
@@ -405,6 +413,7 @@ class Renderer:
                 token_width = sum(self._cell_width(char) for char in token)
                 if columns + token_width <= width:
                     line += token
+                    columns += token_width
                 else:
                     close_line()
                 continue
@@ -497,6 +506,18 @@ class Renderer:
         )
         self.emit_wrapped(prefix, str(value), code=code)
 
+    def option(self, label: str, description: str, *, code: str = "36") -> None:
+        """Match Ny's adaptive flag columns without truncating option names."""
+        label_width = max(12, min(31, self.width() - 28))
+        length = self.visible_width(label)
+        if length > label_width:
+            self.emit_wrapped("  ", label, code=code)
+            prefix = " " * (label_width + 4)
+        else:
+            prefix = ("  " + self.paint(code, label)
+                      + " " * (label_width - length + 2))
+        self.emit_wrapped(prefix, description)
+
     def header(self, title: str, subtitle: str | None = None) -> None:
         leader = f"{self.paint('1;35', self.mark('bullet'))} {self.paint('1;35', 'nytrix')}"
         if title:
@@ -515,8 +536,9 @@ class Renderer:
         glyph = f"{self.paint('1;36', glyph_text)} " if glyph_text else ""
         prefix = (f"{self.paint('1;35', self.mark('bullet'))} "
                   f"{glyph}{self.paint('1;35', title)} ")
-        remaining = max(3, self.width() - self.visible_width(prefix))
-        print(prefix + self.paint('2', self.rule(remaining)), flush=True)
+        remaining = self.width() - self.visible_width(prefix)
+        rule = self.rule(remaining) if remaining > 0 else ""
+        print(prefix + self.paint('2', rule), flush=True)
 
 COLOR = color_on()
 UI = Renderer(color=COLOR, glyph_style=glyph_style_from_env())
@@ -707,6 +729,45 @@ def copy_stable_tool(source: Path, destination: Path) -> None:
             return
     destination.unlink(missing_ok=True)
     raise SystemExit(f"compiler changed repeatedly while snapshotting {source}; rerun benchmark")
+
+def _remove_suite_files(paths: tuple[Path, ...]) -> None:
+    for path in paths:
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def _trace_snapshot_files(directory: Path) -> tuple[Path, ...]:
+    return tuple(directory / name for name in (
+        "core.ny.shared", "core.bc.shared", "core.bc.signature.shared",
+        "core.bc.inputs.shared", "core.bc.links.shared", "core.bc",
+        "core.bc.links",
+    ))
+
+
+def _prepare_suite_trace(prefix: str) -> Path:
+    root = _nytrix_cache_root("test-trace")
+    root.mkdir(parents=True, exist_ok=True)
+    if os.name != "nt":
+        for directory in root.iterdir():
+            match = re.fullmatch(r"(?:run|bench)-([1-9][0-9]*)", directory.name)
+            if not match or directory.is_symlink() or not directory.is_dir():
+                continue
+            try:
+                os.kill(int(match.group(1)), 0)
+            except ProcessLookupError:
+                # Reclaim only frozen inputs from interrupted suites; retain
+                # their profiles and diagnostics.
+                _remove_suite_files(_trace_snapshot_files(directory))
+            except OSError:
+                pass
+    directory = root / f"{prefix}-{os.getpid()}"
+    shutil.rmtree(directory, ignore_errors=True)
+    directory.mkdir(parents=True, exist_ok=True)
+    atexit.register(_remove_suite_files, _trace_snapshot_files(directory))
+    return directory
+
 
 def _vendor_env(build_root: Path) -> dict[str, str]:
     env = os.environ.copy()
@@ -1065,7 +1126,7 @@ def color_source_dir(path: str) -> str:
         ("src/cmd/ny/repl/", "36"),
         ("src/base/", "32"),
         ("src/code/backend/wire/", "33"),
-        ("src/code/lang/runtime/", "31"),
+        ("src/code/backend/runtime/", "31"),
         ("src/cmd/", "36"),
     )
     for prefix, color in palette:
@@ -1465,6 +1526,13 @@ def _nytrix_cache_root(subdir: str) -> Path:
     override = (os.environ.get("NYTRIX_CACHE_DIR") or "").strip()
     if override:
         return Path(override).expanduser().resolve() / subdir
+    repo_cache = ROOT / "build" / "cache" / "nytrix"
+    try:
+        repo_cache.mkdir(parents=True, exist_ok=True)
+        if os.access(repo_cache, os.W_OK):
+            return repo_cache / subdir
+    except OSError:
+        pass
     if host_os() == "windows":
         base = (os.environ.get("LOCALAPPDATA") or "").strip()
         if base:
@@ -1671,7 +1739,14 @@ def _windows_msys2_target_prefix() -> Path | None:
     subdir, _pkg_prefix = _windows_msys2_layout()
     root = _windows_find_msys2_root()
     if root:
-        return root / subdir
+        # Check standard prefixed directory first
+        std_prefix = root / subdir
+        if (std_prefix / "bin").exists():
+            return std_prefix
+        # Fallback: tools might be directly in /usr/bin (non-standard MSYS2 layout)
+        usr_prefix = root / "usr"
+        if (usr_prefix / "bin").exists() and (usr_prefix / "bin" / "clang").exists():
+            return usr_prefix
     return None
 
 def _windows_configure_msys2_env(prefix: Path) -> None:
@@ -1901,6 +1976,8 @@ def _windows_msys_prefixes() -> list[Path]:
     for root in _windows_msys2_root_candidates():
         raw.append(str(root / subdir))
         raw.extend(str(root / d) for d in ("ucrt64", "clang64", "mingw64", "clangarm64"))
+        # Fallback: non-standard MSYS2 layout with tools in /usr
+        raw.append(str(root / "usr"))
     out: list[Path] = []
     seen: set[str] = set()
     for item in raw:
@@ -2396,7 +2473,7 @@ def resolve_test_jobs(cli_jobs: int) -> int:
     return auto
 
 def resolve_bench_jobs(requested: int = 0) -> int:
-    """Choose bounded fixture concurrency for throughput benchmark runs."""
+    """Use available CPUs by default, bounded by the live memory budget."""
     bench_worker_gib = 1.5
     desired = requested
     if desired <= 0:
@@ -2404,7 +2481,7 @@ def resolve_bench_jobs(requested: int = 0) -> int:
         if env_v.isdigit() and int(env_v) > 0:
             desired = int(env_v)
         else:
-            desired = os.cpu_count() or 1
+            desired = max(1, os.cpu_count() or 1)
     desired = min(96, max(1, desired))
     available = host_available_mem_gib()
     if available > 0.0:
@@ -2412,13 +2489,120 @@ def resolve_bench_jobs(requested: int = 0) -> int:
         desired = min(desired, memory_cap)
     return desired
 
-def acquire_bench_run_lock(build_root: Path, kind: str):
-    """Serialize benchmark suites that share the same generated toolchain.
+@dataclass
+class BenchRunAttachment:
+    returncode: int
 
-    Individual fixtures use isolated temporary paths, but concurrent suites
-    multiply their worker pools and can make compiler subprocesses fail under
-    memory and process pressure. Keep one suite per build tree active at once.
-    """
+
+@dataclass
+class BenchRunLock:
+    handle: object
+    build_dir: Path
+    log_path: Path
+    metadata_path: Path
+    pid: int
+
+    def _write_metadata(self, state: str, returncode: int | None = None) -> None:
+        payload = {
+            "pid": self.pid,
+            "state": state,
+            "log_path": str(self.log_path.resolve()),
+            "returncode": returncode,
+        }
+        tmp = self.metadata_path.with_name(
+            f"{self.metadata_path.name}.{self.pid}.tmp"
+        )
+        tmp.write_text(json.dumps(payload) + "\n", encoding="utf-8")
+        os.replace(tmp, self.metadata_path)
+
+    def finish(self, returncode: int) -> None:
+        try:
+            self._write_metadata("complete", returncode)
+        finally:
+            self.handle.close()
+
+    def append_output(self, text: str) -> None:
+        with self.log_path.open("ab") as output:
+            output.write(text.encode("utf-8", errors="replace"))
+            output.flush()
+
+
+def _bench_lock_try_acquire(handle) -> bool:
+    if os.name == "nt":
+        try:
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+            return True
+        except OSError:
+            return False
+    try:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return True
+    except BlockingIOError:
+        return False
+
+
+def _bench_lock_release(handle) -> None:
+    if os.name == "nt":
+        handle.seek(0)
+        msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+    else:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+def _read_bench_run_metadata(path: Path) -> dict | None:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def _attach_to_bench_run(handle, metadata_path: Path) -> BenchRunAttachment:
+    """Replay and follow the active suite log, then return its exit status."""
+    announced_pid = None
+    log_file = None
+    log_path = None
+    output = getattr(sys.stdout, "buffer", None)
+    print(f"{c(UI.theme.accent, UI.mark('step'))} BENCH · attaching to the active suite output",
+          file=sys.stderr, flush=True)
+    while True:
+        if _bench_lock_try_acquire(handle):
+            metadata = _read_bench_run_metadata(metadata_path) or {}
+            _bench_lock_release(handle)
+            if log_file:
+                log_file.close()
+            handle.close()
+            code = metadata.get("returncode")
+            return BenchRunAttachment(code if isinstance(code, int) else 2)
+
+        metadata = _read_bench_run_metadata(metadata_path)
+        if metadata and metadata.get("state") == "running":
+            candidate = Path(str(metadata.get("log_path", "")))
+            if candidate.is_file() and candidate != log_path:
+                if log_file:
+                    log_file.close()
+                log_path = candidate
+                log_file = log_path.open("rb")
+                announced_pid = metadata.get("pid")
+                print(f"{c(UI.theme.accent, UI.mark('step'))} BENCH · following run {announced_pid} · {log_path}",
+                      file=sys.stderr, flush=True)
+
+        if log_file:
+            chunk = log_file.read(65536)
+            if chunk:
+                if output is not None:
+                    output.write(chunk)
+                    output.flush()
+                else:
+                    sys.stdout.write(chunk.decode("utf-8", errors="replace"))
+                    sys.stdout.flush()
+                continue
+        time.sleep(0.1)
+
+
+def acquire_bench_run_lock(build_root: Path, kind: str):
+    """Serialize suites and attach later invocations to the active suite log."""
     bdir = cmake_build_dir(build_root, kind)
     bdir.mkdir(parents=True, exist_ok=True)
     lock = (bdir / ".nytrix-bench-run.lock").open("a+b")
@@ -2431,16 +2615,58 @@ def acquire_bench_run_lock(build_root: Path, kind: str):
             try:
                 lock.seek(0)
                 msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
-                return lock
             except OSError:
-                time.sleep(0.1)
-    try:
-        fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:
-        print(f"{c(UI.theme.accent, UI.mark('step'))} BENCH · waiting for the active benchmark suite in {bdir}",
-              file=sys.stderr, flush=True)
-        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
-    return lock
+                attached = _attach_to_bench_run(
+                    lock, bdir / ".nytrix-bench-run.json"
+                )
+                if attached is not None:
+                    return attached
+            else:
+                break
+    elif not _bench_lock_try_acquire(lock):
+        attached = _attach_to_bench_run(lock, bdir / ".nytrix-bench-run.json")
+        if attached is not None:
+            return attached
+
+    log_path = bdir / ".nytrix-bench-run.log"
+    metadata_path = bdir / ".nytrix-bench-run.json"
+    log_path.write_bytes(b"")
+    suite_lock = BenchRunLock(lock, bdir, log_path, metadata_path, os.getpid())
+    suite_lock._write_metadata("running")
+    return suite_lock
+
+
+def run_bench_with_live_log(command: list[str], *, cwd: str, env: dict,
+                            suite_lock: BenchRunLock) -> int:
+    """Stream benchmark output to this terminal and the attachable run log."""
+    if (sys.stdout.isatty() or sys.stderr.isatty()) and not env.get("NO_COLOR"):
+        # The test runner normally sees stderr as a tty and enables ANSI
+        # colors for its compiler children. We capture its output in a pipe to
+        # tee the log, so preserve that terminal color choice explicitly.
+        env.setdefault("FORCE_COLOR", "1")
+    with suite_lock.log_path.open("wb") as log_file:
+        process = subprocess.Popen(
+            command, cwd=cwd, env=env, stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT, bufsize=0,
+        )
+        assert process.stdout is not None
+        output = getattr(sys.stdout, "buffer", None)
+        while True:
+            try:
+                chunk = os.read(process.stdout.fileno(), 65536)
+            except InterruptedError:
+                continue
+            if not chunk:
+                break
+            log_file.write(chunk)
+            log_file.flush()
+            if output is not None:
+                output.write(chunk)
+                output.flush()
+            else:
+                sys.stdout.write(chunk.decode("utf-8", errors="replace"))
+                sys.stdout.flush()
+        return process.wait()
 
 def configure_macos_llvm_env() -> None:
     if host_os() != "macos":
@@ -4750,11 +4976,6 @@ def _system_path_excluding_vendor(build_root: Path) -> str:
         if p and p != vendor_bin
     ) or "/usr/bin:/bin"
 
-def run_make_targets() -> int:
-    """Delegate to ny --targets for cross-compilation target presets."""
-    ny_bin = ROOT / "build" / "release" / "ny"
-    return subprocess.run([str(ny_bin), "--targets"]).returncode
-
 PROFILE_TIME_RE = re.compile(r"^\s*([A-Za-z][A-Za-z ]+):\s+([0-9]+(?:\.[0-9]+)?)s\s*$")
 
 def run_make_profile(build_root: Path, kind: str, jobs: int, args: list[str]) -> int:
@@ -5150,6 +5371,12 @@ def _run_test_impl(build_root: Path, kind: str, jobs: int, extra: list[str]) -> 
     # for -h/--help. Just show ny-test help and return.
     if any(a in ("-h", "--help", "help") for a in extra):
         return run_tool(build_root, kind, "ny-test", ["--help"], timeout=30)
+    gate_source_paths = _gate_source_paths()
+    try:
+        gate_sources_before = _gate_source_snapshot(gate_source_paths)
+    except OSError as exc:
+        err(f"cannot fingerprint test inputs: {exc}")
+        return 2
     # --cold flag: force a cold run without result/execution caches so every
     # fixture re-executes. The shared stdlib bitcode is a build artifact, not
     # an execution cache, so reuse it to avoid recompiling core.ny per fixture.
@@ -5267,13 +5494,12 @@ def _run_test_impl(build_root: Path, kind: str, jobs: int, extra: list[str]) -> 
     std_bundle = cmake_build_dir(build_root, kind) / "core.ny"
     std_bundle_path = str(std_bundle.resolve()) if std_bundle.is_file() else None
     std_bc = cmake_build_dir(build_root, kind) / "core.bc"
-    trace_dir = _nytrix_cache_root("test-trace") / f"run-{os.getpid()}"
-    shutil.rmtree(trace_dir, ignore_errors=True)
-    trace_dir.mkdir(parents=True, exist_ok=True)
+    trace_dir = _prepare_suite_trace("run")
     full_bin = resolve_tool_bin(build_root, kind, "ny-full")
     suite_full_bin = full_bin.with_name(
         f"{full_bin.stem}-test-{os.getpid()}{full_bin.suffix}"
     )
+    atexit.register(_remove_suite_files, (suite_full_bin,))
     shared_std_args: list[str] = []
     core_bc_inputs = std_bc.with_name("core.bc.inputs")
     core_bc_signature = std_bc.with_name("core.bc.signature")
@@ -5348,16 +5574,6 @@ def _run_test_impl(build_root: Path, kind: str, jobs: int, extra: list[str]) -> 
         if scaling_run.returncode != 0:
             err("backend scaling driver failed")
             return scaling_run.returncode
-    if with_preflight and not focused_run:
-        step("run semantic artifact and legacy expansion checks")
-        artifact_run = subprocess.run(
-            ["ctest", "--test-dir", str(cmake_build_dir(build_root, kind)),
-             "--output-on-failure", "-C", "Release", "-R",
-             "^(semantic-effect-artifact|legacy-derive-expansion)$"],
-            cwd=str(ROOT),
-        )
-        if artifact_run.returncode != 0:
-            return artifact_run.returncode
     elif not focused_run:
         log("TEST", "skipping auxiliary preflight drivers and CTests by default; use --with-preflight")
     suite_core_ny = trace_dir / "core.ny.shared"
@@ -5450,7 +5666,12 @@ def _run_test_impl(build_root: Path, kind: str, jobs: int, extra: list[str]) -> 
             # Keep this suite on one implementation even if another build
             # publishes a newer shared artifact while fixtures are running.
             suite_std_bc = trace_dir / "core.bc"
-            shutil.copy2(suite_core_bc, suite_std_bc)
+            # Both names refer to our frozen, immutable snapshot, never the
+            # mutable shared build artifact. Avoid a second bitcode copy.
+            try:
+                os.link(suite_core_bc, suite_std_bc)
+            except OSError:
+                shutil.copy2(suite_core_bc, suite_std_bc)
             if suite_core_links.is_file():
                 shutil.copy2(suite_core_links, suite_std_bc.with_name("core.bc.links"))
             shared_std_args = ["--core-bc", str(suite_std_bc.resolve())]
@@ -5468,6 +5689,30 @@ def _run_test_impl(build_root: Path, kind: str, jobs: int, extra: list[str]) -> 
             os.environ.pop("NYTRIX_STD_PREFER_PREBUILT", None)
     if build_shared_std_bc and not shared_std_args:
         log("TEST", "shared core bytecode unavailable; fixtures will compile core from source")
+    if with_preflight and not focused_run:
+        cache_text = (
+            cmake_build_dir(build_root, kind) / "CMakeCache.txt"
+        ).read_text(errors="replace")
+        if "NYTRIX_USE_LLVM:BOOL=ON" in cache_text and not build_shared_std_bc:
+            step("refresh core bytecode for preflight tests")
+            previous_core_bc_compiler = os.environ.get("NYTRIX_CORE_BC_COMPILER")
+            os.environ["NYTRIX_CORE_BC_COMPILER"] = str(suite_full_bin.resolve())
+            try:
+                cmake_build(build_root, kind, ["core_bc"], test_jobs)
+            finally:
+                if previous_core_bc_compiler is None:
+                    os.environ.pop("NYTRIX_CORE_BC_COMPILER", None)
+                else:
+                    os.environ["NYTRIX_CORE_BC_COMPILER"] = previous_core_bc_compiler
+        step("run semantic artifact and legacy expansion checks")
+        artifact_run = subprocess.run(
+            ["ctest", "--test-dir", str(cmake_build_dir(build_root, kind)),
+             "--output-on-failure", "-C", "Release", "-R",
+             "^(semantic-effect-artifact|legacy-derive-expansion)$"],
+            cwd=str(ROOT),
+        )
+        if artifact_run.returncode != 0:
+            return artifact_run.returncode
     os.environ["NYTRIX_TEST_TRACE_DIR"] = str(trace_dir)
     os.environ["NYTRIX_TEST_NY_FULL_BIN"] = str(suite_full_bin)
     suite_ny_bin = ny_bin.with_name(
@@ -5576,6 +5821,13 @@ def _run_test_impl(build_root: Path, kind: str, jobs: int, extra: list[str]) -> 
     # suite intentionally has no outer deadline: healthy cold runs can exceed
     # thirty minutes on large fixture sets.
     os.environ.setdefault("NYTRIX_TEST_TIMEOUT", "60")
+    gate_core_paths = (_gate_core_path(build_root, kind),)
+    try:
+        gate_core_before = _gate_source_snapshot(gate_core_paths)
+        gate_core_error = None
+    except OSError as exc:
+        gate_core_before = None
+        gate_core_error = str(exc)
     suite_timeout = None
     step(f"run tests: bin=ny jobs={test_jobs} suite_timeout=unbounded")
     # `--no-progress` controls this Python bootstrapper.  ny-test deliberately
@@ -5644,8 +5896,30 @@ def _run_test_impl(build_root: Path, kind: str, jobs: int, extra: list[str]) -> 
     else:
         bench_rc = 0
         log("TEST", "skipping timed benchmarks by default; use --with-bench or ./make bench")
+    changed_paths = []
+    try:
+        changed_paths = _gate_source_changes(gate_source_paths, gate_sources_before)
+        if gate_core_before is None:
+            changed_paths.extend(str(path) for path in gate_core_paths)
+        else:
+            changed_paths.extend(
+                _gate_source_changes(gate_core_paths, gate_core_before)
+            )
+        sources_changed = bool(changed_paths)
+        fingerprint_error = gate_core_error
+    except OSError as exc:
+        sources_changed = True
+        fingerprint_error = str(exc)
     elapsed_ms = int((time.perf_counter() - started) * 1000.0)
-    if suite_rc == 0 and bench_rc == 0:
+    if sources_changed:
+        log(
+            "TEST",
+            "INVALIDATED: sources changed during the gate; no pass/fail verdict"
+            + (f" ({', '.join(changed_paths)})" if changed_paths else ""),
+        )
+        if fingerprint_error:
+            log("TEST", f"source recheck failed: {fingerprint_error}")
+    elif suite_rc == 0 and bench_rc == 0:
         ok(f"test suite completed in {elapsed_ms}ms")
     else:
         log("TEST", f"test suite failed after {elapsed_ms}ms (suite={suite_rc}, bench={bench_rc})")
@@ -5653,11 +5927,87 @@ def _run_test_impl(build_root: Path, kind: str, jobs: int, extra: list[str]) -> 
         suite_full_bin.unlink()
     except OSError:
         pass
-    return suite_rc or bench_rc
+    _remove_suite_files(_trace_snapshot_files(trace_dir))
+    return 2 if sources_changed else suite_rc or bench_rc
 
 
 def run_test(build_root: Path, kind: str, jobs: int, extra: list[str]) -> int:
     return _run_test_impl(build_root, kind, jobs, extra)
+
+
+def _gate_source_paths():
+    """Fixture and library source roots whose mutation invalidates a verdict."""
+    return (
+        ROOT / "etc" / "tests",
+        ROOT / "lib",
+    )
+
+
+def _bench_gate_source_paths():
+    """Benchmark inputs whose mutation invalidates a performance verdict."""
+    return (
+        ROOT / "etc" / "tests" / "bench",
+        ROOT / "lib",
+    )
+
+
+def _gate_core_path(build_root: Path, kind: str) -> Path:
+    """Generated stdlib source, fingerprinted after build setup is complete."""
+    return cmake_build_dir(build_root, kind) / "core.ny"
+
+
+def _gate_source_fingerprint(paths):
+    """Content-hash gate inputs so same-size edits and coarse mtimes are visible."""
+    digest = hashlib.sha256()
+    for root in sorted((Path(path) for path in paths), key=lambda path: str(path)):
+        try:
+            root_name = root.relative_to(ROOT).as_posix()
+        except ValueError:
+            root_name = root.as_posix()
+        digest.update(root_name.encode("utf-8", errors="surrogateescape"))
+        digest.update(b"\0")
+        if not root.exists():
+            digest.update(b"missing\0")
+            continue
+        files = [root] if root.is_file() else sorted(
+            (path for path in root.rglob("*") if path.is_file()),
+            key=lambda path: path.as_posix(),
+        )
+        for path in files:
+            relative = (
+                path.name if root.is_file() else path.relative_to(root).as_posix()
+            )
+            encoded_path = relative.encode("utf-8", errors="surrogateescape")
+            digest.update(len(encoded_path).to_bytes(8, "little"))
+            digest.update(encoded_path)
+            try:
+                with path.open("rb") as source:
+                    for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                        digest.update(chunk)
+            except OSError as exc:
+                raise OSError(f"cannot read gate input {path}: {exc}") from exc
+    return digest.digest()
+
+
+def _gate_source_snapshot(paths):
+    """Fingerprint roots separately so invalidation identifies the changed input."""
+    return {
+        Path(path): _gate_source_fingerprint((path,))
+        for path in paths
+    }
+
+
+def _gate_source_changes(paths, before):
+    """Return changed roots from a gate-start snapshot."""
+    changed = []
+    for path in paths:
+        path = Path(path)
+        if before.get(path) != _gate_source_fingerprint((path,)):
+            try:
+                changed.append(path.relative_to(ROOT).as_posix())
+            except ValueError:
+                changed.append(path.as_posix())
+    return changed
 
 
 def check_source_hygiene() -> int:
@@ -6011,7 +6361,7 @@ def run_optcheck(build_root: Path, kind: str, args: list[str]) -> int:
     return 0
 
 def parse(argv: list[str]) -> tuple[list[str], list[str], int, bool, bool, bool, bool, str | None, bool | None, str | None]:
-    known = {"all", "bin", "bin-static", "tar", "vendor", "fmt", "std", "std_bc", "core", "core_bc", "test", "repl", "fuzz", "bench", "docs", "web", "web-demos", "web-check", "web-test", "wasm", "c2ny", "py2ny", "install", "uninstall", "clean", "debug", "tidy", "audit", "perf", "profile", "gprof", "asan", "ubsan", "coverage", "optcheck", "analyze", "check", "hooks", "fb", "ny", "run", "release", "static", "deps", "cross", "cross-run", "env", "targets", "doctor", "bench-compare", "stats"}
+    known = {"all", "bin", "nyc", "bin-static", "tar", "vendor", "fmt", "std", "std_bc", "core", "core_bc", "test", "repl", "fuzz", "bench", "docs", "web", "web-demos", "web-check", "web-test", "wasm", "c2ny", "py2ny", "install", "uninstall", "clean", "debug", "tidy", "audit", "perf", "profile", "gprof", "asan", "ubsan", "coverage", "optcheck", "analyze", "check", "hooks", "fb", "ny", "run", "release", "static", "deps", "cross", "cross-run", "env", "targets", "doctor", "bench-compare", "stats", "prepare", "bare-payload"}
     _PASSTHROUGH = {"fmt", "analyze", "tidy", "audit", "test", "perf", "profile", "docs", "web", "web-demos", "web-check", "web-test", "wasm", "ny", "repl", "gprof", "asan", "ubsan", "fuzz", "bench", "cross", "cross-run", "static", "bin-static", "tar", "vendor", "env", "targets", "doctor", "stats"}
 
     def looks_like_ny_source(arg: str) -> bool:
@@ -6071,6 +6421,8 @@ def parse(argv: list[str]) -> tuple[list[str], list[str], int, bool, bool, bool,
                     help_target = last_cmd
         elif a == "--version":
             version = True
+        elif a == "--debug":
+            cmds.append("debug")
         elif a in ("-v", "--verbose") or (
                 a.startswith("-v") and a != "-v"
                 and set(a[1:]) <= set("v")):
@@ -6156,666 +6508,44 @@ def parse(argv: list[str]) -> tuple[list[str], list[str], int, bool, bool, bool,
         kind_debug = False
     return cmds, extra, jobs, verbose, help_flag, help_target, version, kind_debug, color_mode, bootstrap_logs, glyph_mode
 
-# Per-command help registry. Each entry: (usage, summary, sections) where
-# sections is a list of (heading, rows) and rows are (left, right) text pairs.
-_COMMAND_USAGE: dict[str, tuple[str, str, list[tuple[str, list[tuple[str, str]]]]]] = {
-    "stats": (
-        "Usage: ./make stats [--cloc | --no-cloc] [--json]",
-        "summarize Git history, worktree changes, and repository source size",
-        [
-            ("Report", [
-                ("Git", "branch, HEAD, commit count, staged/unstaged/untracked files, diff size, and recent commits"),
-                ("--cloc", "show per-language and largest-file physical source-line counts (default)"),
-                ("--no-cloc", "skip source counting for a faster Git-only summary"),
-                ("--json", "emit the same repository facts as machine-readable JSON"),
-            ]),
-            ("Examples", [
-                ("./make stats", "show Git, worktree, and source-line summary"),
-                ("./make stats --no-cloc", "show a faster Git-only summary"),
-                ("./make stats --cloc --json", "emit all facts as JSON"),
-            ]),
-        ],
-    ),
-    "all": (
-        "all",
-        "configure and build ny, std, and tools (default target)",
-        [
-            ("What it does", [
-                ("build", "forces the full tool set: ny, std, ny-fmt, ny-perf, ny-test, ny-doc, ny-make, ny-lsp"),
-                ("step x2/runs", "runs a conservative ny-fmt --bugs audit over lib/ (diagnostic only)"),
-            ]),
-            ("Build options", [
-                ("-j, --jobs N", "parallel build jobs"),
-                ("-v, --verbose", "subcommands; stack it: -vv toolchain · -vvv live build stats ·"
-                      " -vvvv compile lines · -vvvvv raw + env"),
-                ("--color MODE", "auto | always | never"),
-                ("--bootstrap-logs", "show bootstrap status"),
-                ("--debug", "build the debug, not release, configuration"),
-                ("--clean", "remove build artifacts first"),
-            ]),
-            ("Env overrides", [
-                ("NYTRIX_HOST_CFLAGS", "extra compiler flags for host build"),
-                ("NYTRIX_BUILD_JOBS", "default job count"),
-                ("CC / LC", "preferred host C compiler"),
-                ("LLVM_CONFIG", "preferred LLVM location"),
-            ]),
-            ("Examples", [
-                ("./make all", "build everything in release"),
-                ("./make --debug all", "build everything in debug"),
-            ]),
-        ],
-    ),
-    "bin": (
-        "Usage: ./make bin [options]",
-        "build the ny executable only",
-        [
-            ("What it does", [
-                ("Targets", "builds ny, std, ny-fmt, ny-perf, ny-test, ny-doc, ny-make, ny-lsp"),
-                ("Result", "writes the compiler to build/<kind>/ny"),
-            ]),
-            ("Options", [
-                ("-j, --jobs N", "parallel build jobs"),
-                ("-v, --verbose", "subcommands; stack it: -vv toolchain · -vvv live build stats ·"
-                      " -vvvv compile lines · -vvvvv raw + env"),
-                ("--debug", "build the debug configuration"),
-            ]),
-            ("Examples", [
-                ("./make bin", "build the compiler"),
-                ("./make --debug bin", "build the debug compiler"),
-            ]),
-        ],
-    ),
-    "static": (
-        "Usage: ./make static <subcommand> [args]",
-        "bundled/portable build operations (static bin, tar, vendor, check)",
-        [
-            ("Subcommands", [
-                ("bin", "build compiler/tools and bundle runtime .so files into build/static"),
-                ("libs [path]", "bundle shared libs beside build/release or a given path"),
-                ("check <binary>", "report whether an ELF is static or dynamic"),
-                ("ny <file.ny> [flags]", "compile a Ny program with static link flags"),
-                ("binstatic", "compile an arbitrary C program with the bundled toolchain"),
-            ]),
-            ("Environment", [
-                ("CC", "the C compiler to use for static builds"),
-                ("NYTRIX_ROOT", "repository root"),
-            ]),
-            ("Examples", [
-                ("./make static bin", "build everything statically"),
-                ("./make static libs build/release", "refresh bundled shared libs"),
-                ("./make static check build/release/ny", "check the ny ELF type"),
-            ]),
-        ],
-    ),
-    "bin-static": (
-        "Usage: ./make bin-static",
-        "alias for ./make static bin",
-        [
-            ("What it does", [
-                ("Result", "builds compiler/tools and bundles runtime .so files into build/static"),
-            ]),
-        ],
-    ),
-    "tar": (
-        "Usage: ./make tar [--with-binaries]",
-        "create a source (or self-contained binary) release tarball",
-        [
-            ("Options", [
-                ("--with-binaries", "also bundle prebuilt portable binaries into nytrix-static tarball"),
-                ("--out PATH", "override the output tarball path"),
-            ]),
-            ("Output", [
-                ("build/dist/nytrix-source.tar.gz", "source tarball by default"),
-                ("build/dist/nytrix-static.tar.gz", "binary tarball when --with-binaries"),
-            ]),
-        ],
-    ),
-    "vendor": (
-        "Usage: ./make vendor",
-        "bundle shared libraries into build/vendor/ for portability",
-        [
-            ("What it does", [
-                ("Bundle", "copies the auto-detected LLVM/runtime shared libraries beside the tools"),
-            ]),
-        ],
-    ),
-    "fmt": (
-        "Usage: ./make fmt [ny-fmt args]",
-        "format Nytrix sources with the ny-fmt formatter",
-        [
-            ("What it does", [
-                ("Formatter", "runs ny-fmt over the current sources"),
-            ]),
-            ("Options", [
-                ("--check", "verify formatting without rewriting"),
-                ("--audit", "run deep source audit/analysis"),
-                ("--bugs", "report suspicious code patterns"),
-                ("--limit N", "cap the number of reported findings"),
-            ]),
-            ("Examples", [
-                ("./make fmt", "format sources"),
-                ("./make fmt --check", "verify formatting in CI"),
-            ]),
-        ],
-    ),
-    "analyze": (
-        "Usage: ./make analyze [path]",
-        "run ny-fmt in an analysis/report mode",
-        [
-            ("Options", [
-                ("--limit N", "cap reported findings"),
-                ("path", "limit analysis to a file or directory"),
-            ]),
-        ],
-    ),
-    "check": (
-        "Usage: ./make check [test options] [--no-test-suite]",
-        "run the fail-closed repository quality gate (hygiene, tidy, format, audit, build, and tests)",
-        [
-            ("What it does", [
-                ("1", "reject NUL bytes and temporary print-debugging probes"),
-                ("2", "run ny-fmt --tidy"),
-                ("3", "verify formatting and parser checks"),
-                ("4", "run the source audit"),
-                ("5", "build the tools required by the selected check mode"),
-                ("6", "run ./make test --with-stdlib --with-replay --with-bench --cold; any failure stops the command"),
-                ("--no-test-suite", "skip the full suite for fast build-and-source checks, such as CI"),
-                ("Report", "prints every fixture result; full phase logs go to build/check-reports/<run>"),
-            ]),
-            ("Environment", [
-                ("NYTRIX_CHECK_COMPACT=1", "show only failing fixture rows in the terminal"),
-                ("NYTRIX_CHECK_REPORT_DIR", "override the full quality-report directory"),
-            ]),
-            ("Examples", [
-                ("./make check", "run the complete cold gate with stdlib tests, failure replay, and benchmarks"),
-                ("./make check --no-test-suite", "run hygiene, format, audit, and build checks only"),
-                ("NYTRIX_CHECK_COMPACT=1 ./make check", "show only failing fixture rows"),
-            ]),
-        ],
-    ),
-    "tidy": (
-        "Usage: ./make tidy [ny-fmt args]",
-        "run ny-fmt --tidy to clean up diagnostics across sources",
-        [
-            ("Examples", [
-                ("./make tidy", "tidy all sources"),
-            ]),
-        ],
-    ),
-    "audit": (
-        "Usage: ./make audit [ny-fmt args]",
-        "run ny-fmt --audit deep source audit over lib/ and triggers",
-        [
-            ("What it does", [
-                ("Bug scan", "looks for unused bindings, missing errors, obvious smell patterns"),
-            ]),
-        ],
-    ),
-    "test": (
-        "Usage: ./make test [ny-test options] [patterns]",
-        "run the Nytrix test suite; auxiliary checks and timed benchmarks are opt-in",
-        [
-            ("What it does", [
-                ("Suite", "runs ny-test over etc/tests/lang, etc/tests/code, etc/tests/bench, and lib"),
-                ("Bench", "timed C/Ny benchmarks require --with-bench (or use ./make bench)"),
-                ("Preflight", "backend scaling, semantic artifact, and legacy expansion checks require --with-preflight"),
-                ("Native", "native-only sweep is opt-in: NYTRIX_TEST_RUNTIME_NATIVE=1 or NYTRIX_TEST_STD_NATIVE=1"),
-                ("Shapes", "unfiltered runs validate-shapes over etc/tests/code/probes; focused --pattern runs skip the full audit"),
-            ]),
-            ("ny-test options", [
-                ("--cold / --no-cold", "rerun fixtures with result/native/JIT/AOT caches off; keep reusable stdlib compile cache (set NYTRIX_TEST_STD_CACHE=0 to disable)"),
-                ("--with-bench", "append the timed C/Ny performance suite to an unfiltered test run"),
-                ("--with-preflight", "run auxiliary backend scaling, semantic artifact, and legacy expansion checks"),
-                ("--no-bench", "compatibility alias: keep the functional suite free of timed benchmarks"),
-                ("-h, --help", "show ny-test help only (never runs the suite, shapes audit, or benchmarks)"),
-                ("--list-bench", "list bench fixture stems (discovery)"),
-                ("--bench", "run the C-vs-Ny benchmark suite instead of the test suite"),
-                ("--bench-run N", "timed samples per benchmark (default 3)"),
-                ("--bench-warmup N", "warm-up runs per benchmark (default 1)"),
-                ("--bench-opt LEVEL", "compiler opt flag, e.g. O2 (default)"),
-                ("--bench-target T", "native backend target (default x86_64)"),
-                ("--bench-out-csv F", "write benchmark results to CSV"),
-                ("--bench-out-json F", "write benchmark results to JSON"),
-                ("--bench-out-md F", "write benchmark results to Markdown"),
-                ("--smoke / --no-smoke", "restrict/allow the full suite"),
-                ("--with-stdlib / --no-stdlib", "include lib/ fixtures"),
-                ("--jobs N", "parallel fixture jobs"),
-                (
-                    "--fail-fast",
-                    "stop queueing fixtures after the first failure; keep the configured parallel jobs",
-                ),
-                ("--timeout SEC", "per-fixture timeout cap (default 60s)"),
-                ("--bench-timeout SEC", "benchmark fixture cap (default 30s)"),
-                ("--pattern PAT", "run only fixtures whose path contains PAT"),
-                ("--phase-times", "report per-phase timing"),
-                ("--trace-ir", "trace NYIR through fixtures"),
-                ("--failures-only", "only print failing fixtures"),
-                ("--debug-failures", "replay failures with trace, IR, assembly, and debugger artifacts"),
-                ("--with-replay", "show failure replays and diagnostic artifacts at the end of the run"),
-                ("--debugger-all", "run GDB/LLDB replay for every failed fixture, not only signal crashes"),
-            ]),
-            ("Env overrides", [
-                ("NYTRIX_TEST_COLD=1", "cold fixture execution (same as --cold)"),
-                ("NYTRIX_TEST_CACHE=0", "disable result caching without disabling standard-source caches"),
-                ("NYTRIX_TEST_EXEC_CACHE=0", "disable execution caches during test (enabled by default; --cold disables them)"),
-                ("NYTRIX_TEST_TIMEOUT=NNN", "default per-fixture timeout (60s)"),
-                ("NYTRIX_TEST_JOBS=N", "automatic fixture workers; default is bounded by CPU and available RAM"),
-                ("NYTRIX_TEST_BENCH_TIMEOUT=NNN", "override benchmark fixture timeout"),
-                ("NYTRIX_TEST_DIAG_DIR", "failure artifact root (default build/diagnostics/tests)"),
-                ("NYTRIX_TEST_DEBUG_FAILURES=0", "disable automatic failure replay artifacts"),
-                ("NYTRIX_TEST_DEBUGGER_ALL=0", "disable debugger replay while keeping trace/asm dumps"),
-                ("NYTRIX_TEST_DEBUG_VERBOSE=1", "opt into full debugger maps/disassembly; compact is the default"),
-            ]),
-            ("Examples", [
-                ("./make test", "run the whole suite"),
-                ("./make test --cold", "rerun all fixtures without result or execution caches"),
-                ("./make test --cold --with-stdlib --no-bench", "cold functional suite including stdlib; skip timed performance benchmarks"),
-                ("./make test --with-preflight", "run auxiliary backend, semantic artifact, and legacy expansion checks"),
-                (
-                    "./make test --with-stdlib --fail-fast",
-                    "run the stdlib suite serially; stop at the first failure and reuse valid cached passes",
-                ),
-                ("./make test --pattern dict", "run only the matching fixtures; skip full-tree audits and benchmarks"),
-                ("./make test etc/tests/code/abi/calls", "run only that folder; skip full-tree audits and benchmarks"),
-                ("./make test --bench", "run the benchmark suite"),
-                ("./make test --bench --bench-out-csv results.csv", "benchmark to CSV"),
-            ]),
-        ],
-    ),
-    "bench": (
-        "Usage: ./make bench [ny-test bench options]",
-        "run the public C-vs-value benchmark shapes via ny-test --bench default path",
-        [
-            ("What it does", [
-                ("Runner", "runs the C-vs-Ny benchmark shapes (etc/tests/bench)"),
-            ]),
-            ("Options", [
-                ("--list-bench", "list bench fixture stems without running"),
-                ("PATTERN ...", "fixture name substring filter (repeatable)"),
-                ("--bench-run N", "timed samples per fixture (default 3)"),
-                ("--bench-warmup N", "warm-up runs before timing (default 1)"),
-                ("--bench-opt LEVEL", "compiler opt level 0..3 (default 2)"),
-                ("--bench-target T", "restrict to a sub-target of fixtures"),
-                ("--bench-compile-profile P", "compiler opt profile (default/speed/balanced/peak); peak enables the proven fast int paths (~100x on int loops)"),
-                ("--bench-show-ir", "dump the optimized NYIR for each fixture"),
-                ("--bench-show-asm", "dump x86-64 asm for each fixture"),
-                ("--bench-show-passes", "show per-pass NYIR transformation stats"),
-                ("--bench-profile", "print per-phase compile timing (JIT profile)"),
-                ("--bench-ny-verbose", "pass -vvvvvv to diagnostic compiler invocations for selected fixtures"),
-                ("--bench-code-metrics", "collect code size and static metrics with a diagnostic compile"),
-                ("--no-build", "run snapshots of the current benchmark tools without rebuilding"),
-                ("--bench-out-csv PATH", "write a CSV results table"),
-                ("--bench-out-json PATH", "write a JSON results table"),
-                ("--bench-out-md PATH", "write a Markdown results table"),
-            ]),
-        ],
-    ),
-    "fuzz": (
-        "Usage: ./make fuzz [subcommand] [args]",
-        "run shape validation and smoke fuzzing",
-        [
-            ("Subcommands", [
-                ("validate-shapes DIR", "validate the deterministic test shapes (default: etc/tests/code/probes)"),
-                ("afl", "launch afl-fuzz with the given arguments"),
-                ("<args>", "pass straight to ny-test fuzz"),
-            ]),
-            ("Examples", [
-                ("./make fuzz", "validate default shapes"),
-                ("./make fuzz validate-shapes etc/tests/code/probes", "validate shapes"),
-                ("./make fuzz afl -- -i in -o out -- bin", "launch afl-fuzz"),
-            ]),
-        ],
-    ),
-    "asan": ("Usage: ./make asan", "build with Address Sanitizer and run the test suite", []),
-    "ubsan": ("Usage: ./make ubsan", "build with Undefined Behavior Sanitizer and run the test suite", []),
-    "coverage": (
-        "Usage: ./make coverage [file.ny ... | --test [ny-test args]]",
-        "build a --coverage instrumented compiler, report peak RSS, and emit lcov HTML into build/coverage/coverage-html. "
-        "Default runs the memory-safety smoke; pass --test to run the ny-test suite against the instrumented binary "
-        "(e.g. ./make coverage --test --pattern runtime --failures-only). Parallel compile jobs are capped at 4 unless --jobs is given.",
-        [],
-    ),
-    "perf": (
-        "Usage: ./make perf [ny-perf args]",
-        "run the performance toolkit",
-        [
-            ("Subcommands", [
-                ("profile", "sample or linuz / flame the running program"),
-                ("report", "summarize a stored profile"),
-            ]),
-        ],
-    ),
-    "gprof": (
-        "Usage: ./make gprof [file.ny]",
-        "compile a source with -pg profiling enabled and run it",
-        [
-            ("What it does", [
-                ("Profile", "enables gprof (--gprof) instrumentation and runs the fixture"),
-            ]),
-        ],
-    ),
-    "profile": (
-        "Usage: ./make profile <mode> [options]",
-        "time, compile, perf, GDB, sanitizer, and fuzz wrappers around ny",
-        [
-            ("Modes", [
-                ("time <file.ny>", "time compile-and-run across N runs"),
-                ("compile <file.ny>", "time only the compile phase"),
-                ("perf <file.ny>", "run under linux perf / callgraph"),
-                ("report", "summarize stored profiles"),
-                ("gdb <file.ny>", "run under GDB"),
-                ("gprof <file.ny>", "profile with gprof"),
-                ("asan", "Address-Sanitizer build + test"),
-                ("ubsan", "UBSan build + test"),
-                ("fuzz [DIR]", "run ny-test fuzz validate-shapes"),
-                ("afl --", "launch afl-fuzz with the given args"),
-            ]),
-        ],
-    ),
-    "optcheck": (
-        "Usage: ./make optcheck",
-        "run optimizer nshape tests from etc/tests/code/intermediate/opt/",
-        [],
-    ),
-    "docs": (
-        "Usage: ./make docs [ny-doc args]",
-        "build the documentation portal",
-        [
-            ("Options", [
-                ("-o DIR", "output directory (default build/docs)"),
-            ]),
-            ("Examples", [
-                ("./make docs", "build the docs"),
-                ("./make docs -o build/docs/out", "build to a custom dir"),
-            ]),
-        ],
-    ),
-    "web": (
-        "Usage: ./make web <file.ny> [--out PATH]",
-        "compile one Ny source into a deployable WebGL2 browser app",
-        [
-            ("Options", [
-                ("--out PATH", "output deployment directory"),
-            ]),
-            ("Examples", [
-                ("./make web etc/projects/ui/pong.ny", "build a WebGL app"),
-            ]),
-        ],
-    ),
-    "wasm": (
-        "Usage: ./make wasm <file.ny> [--out PATH]",
-        "compile one Ny source file to WebAssembly",
-        [
-            ("Options", [
-                ("--out PATH", "output .wasm path"),
-            ]),
-        ],
-    ),
-    "web-check": ("Usage: ./make web-check <file.ny>", "verify a Ny source uses only implemented browser host APIs", []),
-    "web-test": ("Usage: ./make web-test", "build and prove a Pong app reaches the WebGL2 browser runner", []),
-    "web-demos": ("Usage: ./make web-demos", "build the browser WebGL/Wasm demo portal", []),
-    "c2ny": (
-        "Usage: ./make c2ny <file.c> [-o out.ny]",
-        "translate a C file to Nytrix source via ny-fmt --c2ny",
-        [
-            ("Examples", [
-                ("./make c2ny hello.c -o hello.ny", "translate hello.c"),
-            ]),
-        ],
-    ),
-    "py2ny": (
-        "Usage: ./make py2ny <file.py> [-o out.ny]",
-        "translate a Python file to Nytrix source via ny-fmt --py2ny",
-        [],
-    ),
-    "ny": (
-        "Usage: ./make ny [file.ny] [ny flags] [program args]",
-        "launch the compiler/REPL; runs a source directly with a cached start",
-        [
-            ("Arguments", [
-                ("file.ny", "source file to run; omit to open the REPL"),
-                ("ny flags", "compiler flags passed to ny (see ny --help)"),
-                ("-- [args]", "force all following to be program args"),
-            ]),
-            ("Examples", [
-                ("./make ny", "open the REPL"),
-                ("./make ny hello.ny", "compile and run hello.ny"),
-                ("./make ny engine.ny -v -gl", "run with compiler flags after the source"),
-            ]),
-        ],
-    ),
-    "repl": (
-        "Usage: ./make repl",
-        "launch the interactive REPL with a fast cached start",
-        [
-            ("Examples", [
-                ("./make repl", "start the interactive line-editing REPL"),
-            ]),
-        ],
-    ),
-    "run": (
-        "Usage: ./make run <file.ny> [args]",
-        "shorthand for ./make ny",
-        [],
-    ),
-    "install": (
-        "Usage: ./make install",
-        "build and install Nytrix into the configured prefix",
-        [],
-    ),
-    "uninstall": (
-        "Usage: ./make uninstall",
-        "remove the installfiles reported by the install manifest",
-        [],
-    ),
-    "clean": (
-        "Usage: ./make clean",
-        "remove the build/ directory and generated artifacts",
-        [],
-    ),
-    "deps": (
-        "Usage: ./make deps",
-        "ensure required build dependencies are installed",
-        [],
-    ),
-    "env": (
-        "Usage: ./make env",
-        "print effective paths, tools, overrides, and caches",
-        [
-            ("What it prints", [
-                ("Environment", "root, host, build.kind, build.dir, jobs, caches"),
-                ("Tools", "ny, ny-fmt, ny-test, ny-doc, ny-perf and cmake/ninja/clang/llvm"),
-                ("Overrides", "active NYTRIX_* environment overrides"),
-            ]),
-        ],
-    ),
-    "targets": (
-        "Usage: ./make targets",
-        "show cross-compilation target guidance (delegates to ny --doctor)",
-        [],
-    ),
-    "doctor": (
-        "Usage: ./make doctor",
-        "delegate to ny --doctor for system toolchain diagnostics",
-        [
-            ("Examples", [
-                ("./make doctor", "report setup issues"),
-                ("./make doctor --help", "show ny --doctor help"),
-            ]),
-        ],
-    ),
-    "hooks": (
-        "Usage: ./make hooks",
-        "install the repository-managed Git hooks for this checkout",
-        [
-            ("What it does", [
-                ("Git config", "sets local core.hooksPath to .githooks"),
-                ("Portable", "uses Git's POSIX hook runner, including Git Bash on Windows"),
-                ("Pre-commit", "checks staged whitespace, source hygiene, and formatting"),
-                ("Commit message", "checks Conventional Commit type and a 72-character subject limit"),
-                ("Pre-push", "runs the fail-closed ./make check quality gate"),
-            ]),
-        ],
-    ),
-}
-
-def _print_help_rows(rows: list[tuple[str, str]], indent: str = "  ") -> None:
-    # Keep a stable two-column layout, but reserve enough room for the right
-    # column.  A raw max(label) made one long option push every continuation
-    # line far to the right and made narrow terminals especially hard to read.
-    lefts = [l for l, _ in rows if l]
-    terminal = UI.width()
-    content = max(1, terminal - len(indent))
-    longest = max((len(l) for l in lefts), default=1)
-    gap = 2
-    width = min(longest, max(18, min(38, content - 24 - gap)))
-    description_width = max(18, content - width - gap)
-    continuation = indent + " " * (width + gap)
-    for left, right in rows:
-        if not left:
-            print(indent + c("90", right))
-            continue
-        if len(left) <= width:
-            wrapped = textwrap.wrap(
-                right, width=description_width, break_long_words=True,
-                break_on_hyphens=False,
-            ) or [""]
-            prefix = f"{indent}{c('36', left)}{' ' * (width - len(left) + gap)}"
-            print(prefix + c("2", wrapped[0]))
-            for line in wrapped[1:]:
-                print(continuation + c("2", line))
-        else:
-            # Left label itself exceeds the column width: put it on its own line.
-            print(f"{indent}{c('36', left)}")
-            wrapped = textwrap.wrap(
-                right, width=max(18, content - 2), break_long_words=True,
-                break_on_hyphens=False,
-            ) or [""]
-            print(f"{indent}  {c('2', wrapped[0])}")
-            for line in wrapped[1:]:
-                print(f"{indent}  {c('2', line)}")
-
-def print_command_help(cmd: str) -> None:
-    UI.header("help", f"Nytrix build frontend · command {cmd}")
-    if cmd not in _COMMAND_USAGE:
-        UI.hint(f"./make {cmd}")
-        UI.hint("run ./make --help for the full command list")
-        return
-    usage, summary, sections = _COMMAND_USAGE[cmd]
-    if usage.lower().startswith("usage:"):
-        UI.emit_wrapped(f"{c('1', 'Usage:')} ", usage[6:].strip())
-    else:
-        UI.emit_wrapped(f"{c('1', 'Usage:')} ", "./make " + usage)
-    UI.hint(summary)
-    for title, rows in sections:
-        UI.section(title)
-        _print_help_rows(rows)
-    UI.section("Global options")
-    _print_help_rows([
-        ("-j, --jobs N", "parallel build jobs"),
-        ("-v, --verbose", "subcommands; stack it: -vv toolchain · -vvv live build stats ·"
-                      " -vvvv compile lines · -vvvvv raw + env"),
-        ("--color MODE", "auto | always | never"),
-        ("--glyphs MODE", "unicode | ascii"),
-        ("--no-color", "disable colored output"),
-        ("--bootstrap-logs", "show bootstrap status"),
-        ("--debug", "switch to the debug build configuration when supported"),
-        ("-h, --help", "show this command's help"),
-    ])
-    UI.hint("sub-commands share this driver; run ./make <cmd> --help for focused help")
 
 def print_help() -> None:
-    UI.header("build frontend", "One entry point for build, quality, diagnostics, packaging, and portable artifacts.")
-    UI.emit_wrapped(f"{c('1', 'Usage:')} ", "./make <command> [options]")
-    UI.hint("./make help <command>")
-    groups = (
-        ("Build", (
-            ("all", "configure and build ny, std, and tools"),
-            ("bin", "build the ny executable only"),
-            ("static bin", "build/bundle portable compiler tools in build/static"),
-            ("bin-static", "alias for static bin"),
-            ("tar", "create build/dist/nytrix-source.tar.gz, or --with-binaries for nytrix-static"),
-            ("vendor", "bundle shared libs into build/vendor/ for portability"),
-            ("static libs", "refresh bundled shared libs for release/static"),
-            ("static check", "check whether an ELF is static or dynamic"),
-            ("core/core_bc", "bundle core library source or bitcode"),
-            ("install/uninstall", "install or remove ny and ny-lsp"),
-            ("clean", "remove generated artifacts"),
-        )),
-        ("Check", (
-            ("fmt/check/tidy/audit", "format, parse-check, tidy, or deep source audit"),
-            ("test/fuzz", "run tests and smoke fuzzing"),
-            ("bench", "run public C-vs-Ny benchmark shapes"),
-            ("asan/ubsan", "run tests under sanitizer builds"),
-            ("profile", "time, perf, gdb, sanitizer, and fuzz wrappers"),
-            ("perf/gprof", "run performance tooling"),
-        )),
-        ("Run", (
-            ("ny/repl/run", "launch the compiler, REPL, or cached -run flow"),
-            ("docs", "build documentation portal"),
-            ("web", "build one Ny source as a deployable WebGL2 browser app"),
-            ("wasm", "compile a Ny source file to WebAssembly"),
-            ("web-check", "verify a Ny source uses only implemented browser host APIs"),
-            ("web-test", "build and prove Pong reaches the WebGL2 browser runner"),
-            ("web-demos", "build the browser WebGL/Wasm demo portal"),
-        )),
-        ("Inspect", (
-            ("env", "print effective paths, tools, and overrides"),
-            ("targets", "show cross-compilation target guidance"),
-            ("doctor", "delegate to ny --doctor for toolchain diagnostics"),
-        )),
-        ("Cross", (
-            ("cross", "cross-compile (delegates to ny --cross=<triple>)"),
-            ("cross-run", "cross-compile and run via QEMU (delegates to ny)"),
-        )),
-    )
-    for title, rows in groups:
-        UI.section(title)
-        _print_help_rows(rows)
-    UI.section("Global options")
-    _print_help_rows([
-        ("-j, --jobs N", "parallel build jobs"),
-        ("-v, --verbose", "subcommands; stack it: -vv toolchain · -vvv live build stats ·"
-                      " -vvvv compile lines · -vvvvv raw + env"),
-        ("-h, --help", "show this help"),
-        ("--version", "print version"),
-        ("--color MODE", "auto | always | never"),
-        ("--glyphs MODE", "unicode | ascii"),
-        ("--no-color", "disable colored output"),
-        ("--bootstrap-logs", "show bootstrap status"),
-        ("--no-bootstrap-logs", "hide bootstrap status"),
-    ])
-    UI.section("Environment")
-    _print_help_rows([
-        ("NYTRIX_GLYPHS", "unicode (default) or ascii; also accepts MAKE_ASCII=1"),
-        ("NYTRIX_TOOL_COLOR", "auto, always, or never for the shared native/Python UI"),
-        ("NYTRIX_MAKE_BOOTSTRAP_LOGS", "show or hide configure/build bootstrap messages"),
-    ])
-    UI.section("Ny/runtime passthrough")
-    UI.hint("These target the ny command directly:")
-    _print_help_rows([
-        ("./make ny <file.ny> [flags]", "run a Ny source with compiler flags before/after the file"),
-        ("./make <file.ny> [flags]", "shorthand for ./make ny"),
-        ("./make -trace ny <file.ny> ...", "pass compiler flags before the source"),
-        ("./make ny <file.ny> -v -gl", "pass UI/app flags after the source"),
-        ("./make ny <file.ny> -- [args]", "force the rest to be program args"),
-    ])
-    UI.section("Per-command help")
-    UI.hint("run ./make <command> --help for command-specific options and examples")
-    UI.section("Examples")
-    for example in (
-        "./make doctor",
-        "./make targets",
-        "./make cross aarch64-linux-gnu file.ny",
-        "./make ny etc/projects/ui/term.ny -h",
-        "./make etc/projects/ui/term.ny -v -vk btop",
-        "./make -trace ny etc/projects/ui/engine.ny -vk",
-        "./make wasm etc/projects/args.ny --out build/web/wasm/args.wasm",
-        "./make bin-static",
-        "./make static libs build/static",
-        "./make web-demos",
-    ):
-        UI.emit_wrapped("  ", example)
+    UI.header("build frontend")
+    UI.emit_wrapped("Usage: ", "./make <command> [options]")
+    UI.hint("Build: all, bin, nyc, static, tar, vendor, std, std_bc, install, clean")
+    UI.hint("Check: fmt, analyze, audit, check, test, bench, perf")
+    UI.hint("Run: ny, repl, run, docs, web, wasm, cross")
+    UI.hint("Inspect: env, targets, doctor, stats, hooks")
+    UI.hint("Options: -j N, -v, --debug, --color MODE, --glyphs MODE")
+    UI.hint("Use ./make help <command> for command-specific options.")
+
+def print_command_help(cmd: str) -> None:
+    UI.header("help", f"command {cmd}")
+    UI.emit_wrapped("Usage: ", f"./make {cmd} [options]")
+    if cmd == "nyc":
+        UI.hint("Build the standalone C compiler and its backend dependencies.")
+        UI.hint("Output: build/release/nyc; ./make debug nyc uses build/debug/nyc.")
+        UI.hint("Build options: -j N / --jobs N, -v / --verbose, --debug, -h / --help")
+        UI.hint("BUILD_DIR selects the build root; CC selects the host compiler.")
+        print()
+        print(UI.paint("35", "Nytrix") + " " + UI.paint("36", "C compiler (NYC)"))
+        code = "36"
+        for line in (ROOT / "src/code/lang/parse/c/help.txt").read_text(
+                encoding="utf-8").splitlines():
+            if line.startswith("[") and line.endswith("]"):
+                section = line[1:-1]
+                print()
+                UI.section(section)
+                code = "33" if section in {"COMPATIBILITY", "ENVIRONMENT"} else "36"
+            elif "|" in line:
+                label, _, description = line.partition("|")
+                UI.option(label, description, code=code)
+            elif line:
+                UI.emit_wrapped("  ", line)
+        return
+    UI.hint("Detailed command help is available from the built ny-make frontend.")
+    UI.hint("Build the tools with ./make bin, then run ./make help " + cmd)
+
 
 def _set_env_value(name: str, value: str | None) -> None:
     if value is None:
@@ -7189,7 +6919,7 @@ def _write_bundle_env(bundle_dir: Path, lib_dir: Path) -> None:
             "_nytrix_here=$(CDPATH= cd -- \"$(dirname -- \"${BASH_SOURCE:-$0}\")\" && pwd)\n"
             "export NYTRIX_BUNDLE_ROOT=\"$_nytrix_here\"\n"
             "export NYTRIX_ROOT=\"$_nytrix_here\"\n"
-            "if [ -f \"$_nytrix_here/src/code/lang/runtime/init.c\" ]; then export NYTRIX_RT_SRC=\"$_nytrix_here/src/code/lang/runtime/init.c\"; fi\n"
+            "if [ -f \"$_nytrix_here/src/code/backend/runtime/init.c\" ]; then export NYTRIX_RT_SRC=\"$_nytrix_here/src/code/backend/runtime/init.c\"; fi\n"
             "if [ -z \"${CC:-}\" ]; then\n"
             "  if command -v clang >/dev/null 2>&1; then export CC=clang;\n"
             "  elif command -v cc >/dev/null 2>&1; then export CC=cc;\n"
@@ -8524,19 +8254,86 @@ def main() -> int:
     COLOR = apply_cli_color_mode(cli_color_mode)
     UI.color = COLOR
     UI.glyph_style = apply_cli_glyph_mode(cli_glyph_mode)
-    ensure_project_scripts_executable()
+    kind = "debug" if debug_kind else "release"
+    raw_build_root = (os.environ.get("BUILD_DIR") or "").strip()
+    build_root = (
+        Path(raw_build_root).expanduser().resolve()
+        if raw_build_root
+        else (ROOT / "build").resolve()
+    )
+    make_tool = cmake_build_dir(build_root, kind) / (
+        "ny-make.exe" if host_os() == "windows" else "ny-make"
+    )
+
+    def run_c_help(args: list[str]) -> int:
+        c_args = (["debug"] if debug_kind else []) + args
+        if cli_color_mode is not None:
+            c_args.append(f"--color={cli_color_mode}")
+        child_env = os.environ.copy()
+        child_env["BUILD_DIR"] = str(build_root)
+        return subprocess.run(
+            [str(make_tool), *c_args], cwd=str(ROOT), env=child_env
+        ).returncode
+
     if want_help:
-        if help_target and help_target in _COMMAND_USAGE:
+        if help_target == "nyc":
+            print_command_help(help_target)
+            return 0
+        if make_tool.is_file():
+            return run_c_help(["help", help_target] if help_target else ["--help"])
+        if help_target:
             print_command_help(help_target)
             return 0
         print_help()
         return 0
     if want_version:
+        if make_tool.is_file():
+            return run_c_help(["--version"])
         print("Nytrix Build Tool")
         return 0
 
-    kind = "debug" if debug_kind else "release"
     build_root, notice = resolve_build_dir()
+    if (cmds and extra and any(arg in {"-h", "--help"} for arg in extra)
+            and make_tool.is_file()):
+        c_help_commands = {
+            "fmt", "analyze", "check", "tidy", "audit", "test", "bench",
+            "fuzz", "asan", "ubsan", "coverage", "perf", "gprof", "docs",
+            "wasm", "repl", "ny", "run", "c2ny", "py2ny",
+        }
+        if len(cmds) == 1 and cmds[0] not in c_help_commands:
+            return run_c_help(["help", cmds[0]])
+    if (len(cmds) == 1 and cmds[0] in {
+            "static", "web", "web-check", "profile",
+    } and not extra and make_tool.is_file()):
+        return run_c_help(["help", cmds[0]])
+    c_owned_commands = {
+        "clean", "env", "targets", "doctor", "hooks",
+        "fmt", "analyze", "audit", "c2ny", "py2ny",
+        "wasm", "cross", "cross-run", "gprof", "perf",
+        "docs", "std", "std_bc",
+    }
+    if cmds and all(cmd in c_owned_commands for cmd in cmds) and make_tool.is_file():
+        c_args: list[str] = ["debug"] if debug_kind else []
+        c_args.extend(cmds)
+        if requested_jobs > 0:
+            c_args.extend(("-j", str(requested_jobs)))
+        if cli_color_mode is not None:
+            c_args.append(f"--color={cli_color_mode}")
+        c_args.extend(["-v"] * verbose)
+        c_args.extend(extra)
+        child_env = os.environ.copy()
+        child_env["BUILD_DIR"] = str(build_root)
+        return subprocess.run(
+            [str(make_tool), *c_args], cwd=str(ROOT), env=child_env
+        ).returncode
+    if make_tool.is_file():
+        prepared = subprocess.run(
+            [str(make_tool), "prepare"], cwd=str(ROOT), env=os.environ
+        )
+        if prepared.returncode != 0:
+            return prepared.returncode
+    else:
+        ensure_project_scripts_executable()
     first_repl_bootstrap = bootstrap_needed_for_repl(build_root, kind, cmds)
     inspect_cmds = {"env", "targets", "doctor", "hooks", "stats"}
     tool_style_cmds = {"fmt", "analyze", "check", "tidy", "audit", "test", "perf", "profile", "docs", "web", "web-demos", "web-check", "web-test", "wasm", "ny", "repl", "gprof", "asan", "ubsan", "fuzz", "bench", "cross", "cross-run", "static", "bin-static", "tar", "vendor", *inspect_cmds}
@@ -8580,7 +8377,7 @@ def main() -> int:
                       "static", "bin-static", "tar", "vendor"}
 
     # Commands that need LLVM/deps (build, test, bench, etc.)
-    build_cmds = {"bin", "test", "bench", "asan", "ubsan", "debug", "release",
+    build_cmds = {"bin", "nyc", "test", "bench", "asan", "ubsan", "debug", "release",
                   "perf", "profile", "docs", "web", "web-demos", "wasm",
                   "cross", "cross-run", "fuzz", "repl", "profile", "gprof",
                   "ny", "run", "install", "uninstall", "profile"}
@@ -8616,7 +8413,8 @@ def main() -> int:
                 return rc
             continue
         if cmd == "targets":
-            rc = run_make_targets()
+            ny_bin = resolve_tool_bin(build_root, active_kind, "ny")
+            rc = subprocess.run([str(ny_bin), "--targets"], env=os.environ).returncode
             if rc != 0:
                 return rc
             continue
@@ -8655,6 +8453,8 @@ def main() -> int:
         targets = ["ny"]
         if cmd in ("all", "bin"):
             targets = ["ny", "core", "ny-fmt", "ny-perf", "ny-test", "ny-doc", "ny-make", "ny-lsp"]
+        elif cmd == "nyc":
+            targets = ["nyc"]
         elif cmd in ("fmt", "analyze", "tidy", "audit"):
             targets = ["ny-fmt"]
         elif cmd == "check":
@@ -8669,10 +8469,14 @@ def main() -> int:
             targets = ["ny", "ny-test"]
         elif cmd == "bench":
             targets = ["ny", "ny-test"]
-            # `run_test` treats the benchmark suite as a focused run and uses
-            # generated core.ny by default. Building core.bc here would spend
-            # minutes compiling a shared artifact that the runner then ignores.
-            # Keep that optimization available only when explicitly requested.
+            # `run_test` treats the benchmark suite as a focused run. Without a
+            # pinned core.bc every sample re-stocks the stdlib from source, so
+            # concurrent `lib/` or core.ny churn between samples changes the
+            # std the compiler builds against and can degrade codegen
+            # observably mid-suite (call-chain NYR 1.0ms/230ms/2645ms in one
+            # 3-sample row). "auto" therefore pins core.bc when the build tree
+            # already carries one and keeps source stocking only as a
+            # fallback; an explicit "1" additionally builds core.bc first.
             shared_core_setting = os.environ.get(
                 "NYTRIX_TEST_USE_STD_BC", "auto"
             ).strip().lower()
@@ -8690,6 +8494,8 @@ def main() -> int:
             targets = ["core"]
         elif cmd in ("std_bc", "core_bc"):
             targets = ["core_bc"]
+        elif cmd == "bare-payload":
+            targets = ["ny-make"]
         elif cmd == "install":
             targets = ["ny", "ny-lsp", "core", "ny-fmt", "ny-perf", "ny-test", "ny-doc", "ny-make"]
             if host_os() != "windows":
@@ -8700,6 +8506,8 @@ def main() -> int:
             ny_missing = cmd in ("ny", "repl") and cmake_build_has_work(build_root, active_kind, targets)
             if ny_missing:
                 clean_bad_tool_build(build_root, active_kind, "ny")
+            if cmd == "ny" and stdlib_needs_regeneration(build_root, active_kind):
+                targets.append("core")
             repl_build_visible = cmd in ("ny", "repl")
             old_quiet = QUIET_BOOTSTRAP
             if repl_build_visible:
@@ -8712,13 +8520,22 @@ def main() -> int:
                 elif (cmd != "bench" or "core_bc" in targets or
                       not bench_tools_current(build_root, active_kind)):
                     cmake_build(build_root, active_kind, targets, jobs)
-                if cmd == "ny" and stdlib_needs_regeneration(build_root, active_kind):
-                    cmake_build(build_root, active_kind, ["core"], jobs)
                 if repl_build_visible and ny_missing:
                     boot_notice("ny compiled; launching")
             finally:
                 if repl_build_visible:
                     QUIET_BOOTSTRAP = old_quiet
+
+        if cmd == "bare-payload":
+            c_args = (["debug"] if debug_kind else []) + ["bare-payload", *extra]
+            child_env = os.environ.copy()
+            child_env["BUILD_DIR"] = str(build_root)
+            rc = subprocess.run(
+                [str(make_tool), *c_args], cwd=str(ROOT), env=child_env
+            ).returncode
+            if rc != 0:
+                return rc
+            continue
 
         if cmd == "all":
             # Keep the ordinary developer build paired with the formatter's
@@ -8731,7 +8548,7 @@ def main() -> int:
             if rc != 0:
                 return rc
             continue
-        if cmd in ("bin", "std", "std_bc", "core", "core_bc"):
+        if cmd in ("bin", "nyc", "std", "std_bc", "core", "core_bc"):
             continue
         if cmd == "test":
             rc = run_test(build_root, active_kind, requested_jobs, extra)
@@ -8778,6 +8595,8 @@ def main() -> int:
                         check_test_args.append("--with-bench")
                     if "--cold" not in check_test_args:
                         check_test_args.append("--cold")
+                    if "--with-preflight" not in check_test_args:
+                        check_test_args.append("--with-preflight")
                     log(
                         "TEST",
                         "check gate: " + shlex.join(["./make", "test", *check_test_args]),
@@ -8980,16 +8799,20 @@ def main() -> int:
                 rc = run_tool(build_root, active_kind, "ny-test", ["fuzz", "validate-shapes", default_fuzz_shape_dir()])
         elif cmd == "bench":
             bench_run_lock = acquire_bench_run_lock(build_root, active_kind)
+            if isinstance(bench_run_lock, BenchRunAttachment):
+                return bench_run_lock.returncode
             bench_extra = [arg for arg in extra if arg not in ("--no-progress", "--no-build")]
+            # Dispatch-specific value flags go first: `--list-bench` treats the
+            # following token as an optional root dir, so trailing `--jobs N`
+            # used to be consumed as `--jobs/etc/tests/bench`.
             if requested_jobs is not None and requested_jobs > 0:
-                bench_extra.extend(["--jobs", str(requested_jobs)])
+                bench_extra = ["--jobs", str(requested_jobs), *bench_extra]
             elif not any(arg == "--jobs" or arg.startswith("--jobs=") or arg == "-j"
                          for arg in bench_extra):
-                # Maximize suite throughput while respecting current free RAM.
-                # Parallel fixture timing is noisier than a serial run; use
-                # --jobs 1 when collecting publication-quality measurements.
+                # Keep the host busy by default, with resolve_bench_jobs
+                # limiting concurrency to a safe fraction of available RAM.
                 bench_jobs = resolve_bench_jobs()
-                bench_extra.extend(["--jobs", str(bench_jobs)])
+                bench_extra = ["--jobs", str(bench_jobs), *bench_extra]
             if not os.environ.get("OMP_NUM_THREADS"):
                 os.environ["OMP_NUM_THREADS"] = "1"
             if not os.environ.get("OMP_THREAD_LIMIT"):
@@ -8999,11 +8822,40 @@ def main() -> int:
                 or arg.startswith(("--core-bc=", "--std-bc="))
                 for arg in bench_extra
             )
+            # Keep per-fixture rows for every bench run unless the caller named
+            # a report format: gate verdicts must not destroy the evidence
+            # needed to attribute single-fixture stragglers.
+            if "--list-bench" not in bench_extra and not any(
+                arg.startswith("--bench-out-") for arg in bench_extra
+            ):
+                reports_dir = build_root / "bench-reports"
+                try:
+                    reports_dir.mkdir(parents=True, exist_ok=True)
+                except OSError:
+                    reports_dir = None
+                if reports_dir is not None:
+                    bench_extra.extend([
+                        "--bench-out-json",
+                        str((reports_dir / (
+                            f"bench-{time.strftime('%Y%m%d-%H%M%S')}"
+                            f"-{os.getpid()}.json"
+                        )).resolve()),
+                    ])
+            # "auto" pins core.bc when the build tree already carries one: the
+            # run then snapshots that artifact once and every sample compiles
+            # against a frozen stdlib, so per-sample std stocking can not
+            # absorb concurrent toolchain churn. Only a missing core.bc falls
+            # back to per-sample source stocking (the historical default).
+            shared_core_setting = (
+                os.environ.get("NYTRIX_TEST_USE_STD_BC", "auto").strip().lower()
+            )
+            shared_core_always = shared_core_setting in ("1", "true", "yes", "on")
+            shared_bc_candidate = cmake_build_dir(build_root, active_kind) / "core.bc"
             shared_core_enabled = (
                 not explicit_core_bc
                 and "--no-stdlib" not in bench_extra
-                and os.environ.get("NYTRIX_TEST_USE_STD_BC", "auto").strip().lower()
-                in ("1", "true", "yes", "on")
+                and (shared_core_always or shared_core_setting == "auto")
+                and (shared_core_always or shared_bc_candidate.is_file())
             )
             # Pin the compiler and shared core.bc for the whole run. A
             # concurrent `cmake --build` (another make invocation) relinks
@@ -9012,9 +8864,7 @@ def main() -> int:
             # routes fail nondeterministically, producing phantom FAIL rows.
             ny_bin = resolve_tool_bin(build_root, active_kind, "ny")
             full_bin = resolve_tool_bin(build_root, active_kind, "ny-full")
-            trace_dir = _nytrix_cache_root("test-trace") / f"bench-{os.getpid()}"
-            shutil.rmtree(trace_dir, ignore_errors=True)
-            trace_dir.mkdir(parents=True, exist_ok=True)
+            trace_dir = _prepare_suite_trace("bench")
             suite_ny_bin = ny_bin.with_name(
                 f"{ny_bin.stem}-bench-{os.getpid()}{ny_bin.suffix}"
             )
@@ -9025,6 +8875,15 @@ def main() -> int:
             suite_test_bin = test_bin.with_name(
                 f"{test_bin.stem}-bench-{os.getpid()}{test_bin.suffix}"
             )
+            # NYC is a separate route compiler; pin it like ny so a concurrent
+            # rebuild cannot remove it mid-run ("NYC executable not found").
+            nyc_bin = resolve_tool_bin(build_root, active_kind, "nyc")
+            suite_nyc_bin = nyc_bin.with_name(
+                f"{nyc_bin.stem}-bench-{os.getpid()}{nyc_bin.suffix}"
+            )
+            atexit.register(_remove_suite_files,
+                            (suite_ny_bin, suite_full_bin, suite_test_bin,
+                             suite_nyc_bin))
             if shared_core_enabled:
                 shared_bc = cmake_build_dir(build_root, active_kind) / "core.bc"
                 if shared_bc.is_file():
@@ -9042,24 +8901,72 @@ def main() -> int:
                     if links.is_file():
                         shutil.copy2(links, suite_core_bc.with_name("core.bc.links"))
                     bench_extra.extend(["--core-bc", str(suite_core_bc.resolve())])
+            gate_source_paths = _bench_gate_source_paths()
+            try:
+                gate_sources_before = _gate_source_snapshot(gate_source_paths)
+            except OSError as exc:
+                err(f"cannot fingerprint benchmark inputs: {exc}")
+                return 2
+            gate_core_paths = (_gate_core_path(build_root, active_kind),)
+            try:
+                gate_core_before = _gate_source_snapshot(gate_core_paths)
+                gate_core_error = None
+            except OSError as exc:
+                gate_core_before = None
+                gate_core_error = str(exc)
             try:
                 if full_bin.is_file():
                     copy_stable_tool(full_bin, suite_full_bin)
                     os.environ["NYTRIX_TEST_NY_FULL_BIN"] = str(suite_full_bin)
                 copy_stable_tool(ny_bin, suite_ny_bin)
                 copy_stable_tool(test_bin, suite_test_bin)
-                rc = subprocess.run(
+                if nyc_bin.is_file() and not os.environ.get("NYTRIX_NYC"):
+                    copy_stable_tool(nyc_bin, suite_nyc_bin)
+                    os.environ["NYTRIX_NYC"] = str(suite_nyc_bin.resolve())
+                rc = run_bench_with_live_log(
                     [str(suite_test_bin), "--bin", str(suite_ny_bin), "--bench", *bench_extra],
                     cwd=str(ROOT), env=_vendor_env(build_root),
-                ).returncode
+                    suite_lock=bench_run_lock,
+                )
             finally:
+                _remove_suite_files(_trace_snapshot_files(trace_dir))
                 try:
                     suite_ny_bin.unlink(missing_ok=True)
                     suite_full_bin.unlink(missing_ok=True)
                     suite_test_bin.unlink(missing_ok=True)
+                    suite_nyc_bin.unlink(missing_ok=True)
                 except OSError:
                     pass
-                bench_run_lock.close()
+            changed_paths = []
+            try:
+                changed_paths = _gate_source_changes(
+                    gate_source_paths, gate_sources_before
+                )
+                if gate_core_before is None:
+                    changed_paths.extend(str(path) for path in gate_core_paths)
+                else:
+                    changed_paths.extend(
+                        _gate_source_changes(gate_core_paths, gate_core_before)
+                    )
+                sources_changed = bool(changed_paths)
+                fingerprint_error = gate_core_error
+            except OSError as exc:
+                sources_changed = True
+                fingerprint_error = str(exc)
+            if sources_changed:
+                invalidation = (
+                    "INVALIDATED: sources changed during the run; no performance verdict"
+                    + (f" ({', '.join(changed_paths)})" if changed_paths else "")
+                )
+                log("BENCH", invalidation)
+                bench_run_lock.append_output(f"BENCH {invalidation}\n")
+                if fingerprint_error:
+                    log("BENCH", f"source recheck failed: {fingerprint_error}")
+                    bench_run_lock.append_output(
+                        f"BENCH source recheck failed: {fingerprint_error}\n"
+                    )
+                rc = 2
+            bench_run_lock.finish(rc)
         elif cmd == "bench-compare":
             # Multi-run comparative mode: median-of-N native times against a
             # stored baseline with a regression threshold.  A single bench

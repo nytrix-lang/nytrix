@@ -3,7 +3,7 @@ shape nyir_cfg_dump {
   generator "native"
   features [native nyir cfg dump control-flow]
   template ny-test-case
-  flags "--nyir-dump --nyir-dump-cfg"
+  flags "--nyr-dump=cfg"
   expect compile_and_run
   expect_exit 6
   source ny <<'NY'

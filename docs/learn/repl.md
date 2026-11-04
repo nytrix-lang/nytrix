@@ -1,9 +1,25 @@
 <!-- nytrix-doc: {"audience":"user","featured":false,"group":"learn","order":160,"summary":"Use the REPL for interactive experiments and move reproducible checks into files."} -->
 # REPL
 
-The REPL evaluates source interactively and retains imports and definitions
-between prompts. Use a source file when you need a reproducible bug report, test,
-or benchmark.
+The REPL is an interactive scratchpad: it evaluates source and retains imports
+and definitions between prompts. Use a source file when you need a reproducible
+bug report, test, or benchmark.
+
+Prerequisites: a Nytrix compiler on `PATH`.
+
+```text
+> print(1 + 2)
+3
+```
+
+Value expressions are displayed using their readable representation. For
+example, a string result includes quotes:
+
+```text
+ny> id = fn(x) x
+ny> id("ciao")
+"ciao"
+```
 
 ## Start
 
@@ -40,4 +56,8 @@ Use the REPL snapshot command only for saving a session that must be restored
 later. For application source or a regression, prefer a `.ny` file and an
 executable fixture; files keep imports, setup, and assertions visible.
 
-See [Start](start.md), [Programs](programs.md), and [Testing](testing.md).
+Next:
+
+- [Start](start.md) — compile and run a source file.
+- [Programs](programs.md) — organize reusable source.
+- [Testing](testing.md) — make checks reproducible.

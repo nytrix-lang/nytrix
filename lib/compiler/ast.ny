@@ -30,7 +30,9 @@ enum CodeDecl { CodeDecl }
 
 enum CodeIdent { CodeIdent }
 
-enum Code<T> { CodeValue(T category, str json) }
+;; Keep the serialized envelope as the leading payload: consumers need that
+;; value at runtime, while the marker provides the generic category witness.
+enum Code<T> { CodeValue(str json, T category) }
 fn parse_ast(str source) any {
    "Returns the nested AST, or nil if the source has any syntax error."
    def json_str = __parse_ast(source)
@@ -111,8 +113,8 @@ fn _code_quote_stmt_category(any statement) str {
    def kind = str(statement.get("type"))
    if kind == "expr_stmt" {
       def expression = statement.get("expr_t")
-      if is_dict(expression) && expression.get("type") == "binary" &&
-      expression.get("op") == "=" {
+      if is_dict(expression) && str(expression.get("type")) == "binary" &&
+      str(expression.get("op")) == "=" {
          return "stmt"
       }
       return "expr"
@@ -122,11 +124,13 @@ fn _code_quote_stmt_category(any statement) str {
 }
 
 fn _code_quote_category(any quote) str {
-   if !is_dict(quote) || quote.get("type") != "quote" { return "invalid" }
+   if !is_dict(quote) || str(quote.get("type")) != "quote" {
+      return "invalid"
+   }
    def expression = quote.get("expr")
    if !is_nil(expression) { return "expr" }
    def body = quote.get("body")
-   if !is_dict(body) || body.get("type") != "block" {
+   if !is_dict(body) || str(body.get("type")) != "block" {
       return _code_quote_stmt_category(body)
    }
    def statements = body.get("body")
@@ -139,7 +143,7 @@ fn _code_quote_category(any quote) str {
    while i < statements.len {
       def category = _code_quote_stmt_category(statements.get(i))
       if category == "invalid" { return "invalid" }
-      if category != first_category { return "mixed" }
+      if category == first_category { } else { return "mixed" }
       i += 1
    }
    first_category
@@ -157,7 +161,8 @@ fn _code_sequence_category(any code) str {
          return item_category
       }
       if category == "" { category = item_category }
-      else if category != item_category { return "mixed" }
+      else if category == item_category { }
+      else { return "mixed" }
       i += 1
    }
    category
@@ -175,15 +180,10 @@ fn parse_code(str source) any {
    if is_nil(declarations) || !is_list(declarations) || declarations.len == 0 {
       return nil
    }
-   mut index = 0
-   while index < declarations.len {
-      def declaration = declarations.get(index)
-      if _code_record_category(declaration) != "declarations" {
-         return nil
-      }
-      index += 1
+   if _code_sequence_category(declarations) == "declarations" {
+      return declarations
    }
-   declarations
+   nil
 }
 
 fn parse_code_typed(str source) Result<Code<CodeDecl>, str> {
@@ -195,55 +195,12 @@ fn parse_code_typed(str source) Result<Code<CodeDecl>, str> {
    code_decl(declarations)
 }
 
-fn _code_merge_keys(list keys, int start, int stop) list {
-   mut result = []
-   mut i = start
-   while i < stop {
-      result = result.append(keys.get(i))
-      i += 1
-   }
-   mut width = 1
-   while width < result.len {
-      mut merged = []
-      mut base = 0
-      while base < result.len {
-         def middle = min(base + width, result.len)
-         def end = min(base + width * 2, result.len)
-         mut left = base
-         mut right = middle
-         while left < middle || right < end {
-            if left >= middle {
-               merged = merged.append(result.get(right))
-               right += 1
-            } elif right >= end {
-               merged = merged.append(result.get(left))
-               left += 1
-            } else {
-               def str left_key = result.get(left)
-               def str right_key = result.get(right)
-               if left_key <= right_key {
-                  merged = merged.append(left_key)
-                  left += 1
-               } else {
-                  merged = merged.append(right_key)
-                  right += 1
-               }
-            }
-         }
-         base = end
-      }
-      result = merged
-      width *= 2
-   }
-   result
-}
-
 fn _code_sorted_keys(any value) any {
    def keys = dict_keys(value)
    for key in keys {
       if !is_str(key) { return nil }
    }
-   _code_merge_keys(keys, 0, keys.len)
+   sorted(keys)
 }
 
 fn _code_json(any value, int depth) str {
@@ -313,40 +270,46 @@ fn code_str(any code) str {
 fn code_expr(any syntax) Result<Code<CodeExpr>, str> {
    "Builds a typed expression code value after validating scalar, homogeneous, or empty expression syntax."
    def category = code_category(syntax)
-   if category != "expr" && category != "expressions" &&
-   category != "empty" {
+   if category == "expr" || category == "expressions" ||
+   category == "empty" { } else {
       return err("code_expr expects expression syntax, got " + category)
    }
    def sequence = is_list(syntax) || is_tuple(syntax)
    def json = _code_value_json("expr", sequence, syntax)
    if json == "" { return err("code_expr cannot serialize this syntax") }
-   return ok(Code.CodeValue(CodeExpr.CodeExpr, json))
+   return ok(Code.CodeValue(json, CodeExpr.CodeExpr))
 }
 
 fn code_stmt(any syntax) Result<Code<CodeStmt>, str> {
    "Builds a typed statement code value after validating scalar, homogeneous, or empty statement syntax."
    def category = code_category(syntax)
-   if category != "stmt" && category != "statements" &&
-   category != "empty" {
+   if category == "invalid" {
+      return err("code_stmt expects statement syntax, got " + category)
+   }
+   if category == "stmt" || category == "statements" ||
+   category == "empty" { } else {
       return err("code_stmt expects statement syntax, got " + category)
    }
    def sequence = is_list(syntax) || is_tuple(syntax)
    def json = _code_value_json("stmt", sequence, syntax)
    if json == "" { return err("code_stmt cannot serialize this syntax") }
-   return ok(Code.CodeValue(CodeStmt.CodeStmt, json))
+   return ok(Code.CodeValue(json, CodeStmt.CodeStmt))
 }
 
 fn code_decl(any syntax) Result<Code<CodeDecl>, str> {
    "Builds a typed declaration code value after validating scalar, homogeneous, or empty declaration syntax."
    def category = code_category(syntax)
-   if category != "decl" && category != "declarations" &&
-   category != "empty" {
+   if category == "invalid" {
+      return err("code_decl expects declaration syntax, got " + category)
+   }
+   if category == "decl" || category == "declarations" ||
+   category == "empty" { } else {
       return err("code_decl expects declaration syntax, got " + category)
    }
    def sequence = is_list(syntax) || is_tuple(syntax)
    def json = _code_value_json("decl", sequence, syntax)
    if json == "" { return err("code_decl cannot serialize this syntax") }
-   return ok(Code.CodeValue(CodeDecl.CodeDecl, json))
+   return ok(Code.CodeValue(json, CodeDecl.CodeDecl))
 }
 
 fn code_ident(any syntax) Result<Code<CodeIdent>, str> {
@@ -356,14 +319,14 @@ fn code_ident(any syntax) Result<Code<CodeIdent>, str> {
    }
    def json = _code_value_json("ident", false, syntax)
    if json == "" { return err("code_ident cannot serialize this identifier") }
-   return ok(Code.CodeValue(CodeIdent.CodeIdent, json))
+   return ok(Code.CodeValue(json, CodeIdent.CodeIdent))
 }
 
 fn _code_value_json(str category, bool sequence, any syntax) str {
    def syntax_json = code_str(syntax)
    if syntax_json == "" { return "" }
    code_str({"schema": "nytrix.code.value", "version": 1,
-         "category": category, "sequence": sequence,
+         "category": category, "sequence": sequence ? 1 : 0,
          "syntax": syntax})
 }
 
@@ -380,12 +343,13 @@ fn _code_value_valid(str json, str category, bool sequence) bool {
    if !is_dict(value) { return false }
    def version = value.get("version")
    def encoded_sequence = value.get("sequence")
+   def encoded_sequence_text = str(encoded_sequence)
    if value.get("schema", "") != "nytrix.code.value" ||
    !is_int(version) || type(version) == "bool" || str(version) != "1" ||
    value.get("category", "") != category ||
    !is_int(encoded_sequence) || type(encoded_sequence) == "bool" ||
-   (str(encoded_sequence) != "0" && str(encoded_sequence) != "1") ||
-   str(encoded_sequence) != (bool(sequence) ? "1" : "0") ||
+   !(encoded_sequence_text == "0" || encoded_sequence_text == "1") ||
+   encoded_sequence_text != (bool(sequence) ? "1" : "0") ||
    code_str(value) != json {
       return false
    }
@@ -418,9 +382,10 @@ fn _code_value_valid_json(str json, str category) bool {
    def value = _code_decode_bounded(json)
    if !is_dict(value) { return false }
    def sequence = value.get("sequence")
-   if !is_int(sequence) || type(sequence) == "bool" ||
-   (str(sequence) != "0" && str(sequence) != "1") { return false }
-   _code_value_valid(json, category, str(sequence) == "1")
+   if !is_int(sequence) || type(sequence) == "bool" { return false }
+   def sequence_text = str(sequence)
+   if !(sequence_text == "0" || sequence_text == "1") { return false }
+   _code_value_valid(json, category, sequence_text == "1")
 }
 
 fn _code_value_json_checked(str json, str category) str {
@@ -442,25 +407,25 @@ fn _code_value_sequence(str json, str category) bool {
 
 fn code_expr_json(Code<CodeExpr> code) str {
    "Returns the canonical envelope, or an empty string for an invalid code value."
-   match code { Code.CodeValue(_, json) ->
+   match code { Code.CodeValue(json, _) ->
       _code_value_json_checked(json, "expr") }
 }
 
 fn code_stmt_json(Code<CodeStmt> code) str {
    "Returns the canonical envelope, or an empty string for an invalid code value."
-   match code { Code.CodeValue(_, json) ->
+   match code { Code.CodeValue(json, _) ->
       _code_value_json_checked(json, "stmt") }
 }
 
 fn code_decl_json(Code<CodeDecl> code) str {
    "Returns the canonical envelope, or an empty string for an invalid code value."
-   match code { Code.CodeValue(_, json) ->
+   match code { Code.CodeValue(json, _) ->
       _code_value_json_checked(json, "decl") }
 }
 
 fn code_ident_json(Code<CodeIdent> code) str {
    "Returns the canonical envelope, or an empty string for an invalid code value."
-   match code { Code.CodeValue(_, json) ->
+   match code { Code.CodeValue(json, _) ->
       _code_value_json_checked(json, "ident") }
 }
 
@@ -469,7 +434,7 @@ fn code_expr_from_json(str json) Result<Code<CodeExpr>, str> {
    if !_code_value_valid_json(json, "expr") {
       return err("invalid expression code envelope")
    }
-   return ok(Code.CodeValue(CodeExpr.CodeExpr, json))
+   return ok(Code.CodeValue(json, CodeExpr.CodeExpr))
 }
 
 fn code_stmt_from_json(str json) Result<Code<CodeStmt>, str> {
@@ -477,7 +442,7 @@ fn code_stmt_from_json(str json) Result<Code<CodeStmt>, str> {
    if !_code_value_valid_json(json, "stmt") {
       return err("invalid statement code envelope")
    }
-   return ok(Code.CodeValue(CodeStmt.CodeStmt, json))
+   return ok(Code.CodeValue(json, CodeStmt.CodeStmt))
 }
 
 fn code_decl_from_json(str json) Result<Code<CodeDecl>, str> {
@@ -485,7 +450,7 @@ fn code_decl_from_json(str json) Result<Code<CodeDecl>, str> {
    if !_code_value_valid_json(json, "decl") {
       return err("invalid declaration code envelope")
    }
-   return ok(Code.CodeValue(CodeDecl.CodeDecl, json))
+   return ok(Code.CodeValue(json, CodeDecl.CodeDecl))
 }
 
 fn code_ident_from_json(str json) Result<Code<CodeIdent>, str> {
@@ -493,7 +458,7 @@ fn code_ident_from_json(str json) Result<Code<CodeIdent>, str> {
    if !_code_value_valid_json(json, "ident") {
       return err("invalid identifier code envelope")
    }
-   return ok(Code.CodeValue(CodeIdent.CodeIdent, json))
+   return ok(Code.CodeValue(json, CodeIdent.CodeIdent))
 }
 
 fn code_expr_syntax(Code<CodeExpr> code) any {
@@ -586,19 +551,22 @@ fn code_category(any code) str {
       def code_type = code.get("code_type")
       if !is_nil(code_type) {
          def version = code_type.get("version")
-         def category = code_type.get("category", "")
-         if !is_dict(code_type) ||
-         code_type.get("schema", "") != "nytrix.code" ||
-         !is_int(version) || type(version) == "bool" || version != 1 ||
-         !is_str(category) || code.get("type", "") != "quote" ||
-         (category != "expr" && category != "stmt" &&
-            category != "decl" && category != "mixed" &&
-            category != "empty") {
+         def raw_category = code_type.get("category", "")
+         if is_dict(code_type) &&
+         str(code_type.get("schema", "")) == "nytrix.code" &&
+         str(type(version)) == "int" && str(version) == "1" &&
+         str(type(raw_category)) == "str" &&
+         str(code.get("type", "")) == "quote" {
+         } else {
             return "invalid"
          }
+         def category = str(raw_category)
+         if !(category == "expr" || category == "stmt" ||
+            category == "decl" || category == "mixed" ||
+            category == "empty") { return "invalid" }
          def body_category = _code_quote_category(code)
-         if body_category != category { return "invalid" }
-         return str(category)
+         if body_category == category { return category }
+         return "invalid"
       }
       def category = _code_record_category(code)
       if category == "expressions" { return "expr" }
@@ -627,7 +595,8 @@ fn code_name(any code) str {
       }
       return str(names.get(0))
    }
-   def name = code.get("name", "")
+   def raw_name = code.get("name")
+   def name = if is_nil(raw_name) { "" } else { raw_name }
    if !is_str(name) { return "" }
    str(name)
 }
@@ -657,8 +626,12 @@ fn _code_origin_valid(any origin) bool {
    if !is_dict(origin) || !is_str(origin.get("file")) { return false }
    def line = origin.get("line")
    def column = origin.get("column")
-   is_int(line) && type(line) != "bool" && line >= 0 &&
-   is_int(column) && type(column) != "bool" && column >= 0
+   if !is_int(line) || type(line) == "bool" { return false }
+   if !is_int(column) || type(column) == "bool" { return false }
+   def line_number = int(line)
+   def column_number = int(column)
+   if line_number < 0 || column_number < 0 { return false }
+   true
 }
 
 fn code_origin(any node) any {
@@ -682,7 +655,7 @@ fn code_attributes(any code) any {
       code = code.get(0)
    }
    if !is_dict(code) || !_is_declaration_record(code) { return nil }
-   def attributes = code.get("attributes", [])
+   def attributes = code.get("attributes", code.get("_attributes", []))
    if !is_list(attributes) { return nil }
    mut entries = []
    for attribute in attributes {
@@ -712,6 +685,13 @@ fn code_attributes(any code) any {
          "nytrix.code.attributes", 1, core_prim.list_as_tuple_raw(entries)])
 }
 
+fn _code_signature_attributes(any code, str kind) any {
+   if kind == "func" || kind == "extern" {
+      return code_attributes(code)
+   }
+   core_prim.list_as_tuple_raw(["nytrix.code.attributes", 1, ()])
+}
+
 fn code_signature(any code) any {
    "Returns an immutable, versioned function signature snapshot. Parameter defaults and origins use canonical code_str JSON."
    if is_list(code) || is_tuple(code) {
@@ -719,10 +699,13 @@ fn code_signature(any code) any {
       code = code.get(0)
    }
    if !is_dict(code) { return nil }
-   def kind = code.get("type", "")
-   if kind != "func" && kind != "extern" && kind != "lambda" &&
-   kind != "fn" { return nil }
-   def name = code.get("name", "")
+   def raw_kind = code.get("type", "")
+   if !is_str(raw_kind) { return nil }
+   def kind = str(raw_kind)
+   if !(kind == "func" || kind == "extern" || kind == "lambda" ||
+      kind == "fn") { return nil }
+   def raw_name = code.get("name")
+   def name = if is_nil(raw_name) { "" } else { raw_name }
    def return_type = code.get("return", "")
    ;; Tuple retagging stores raw immediates in an untyped list slot.  The Ny
    ;; false immediate (2) is therefore observed as integer 2 by tuple readers;
@@ -754,9 +737,7 @@ fn code_signature(any code) any {
                str(parameter.get("name")), str(parameter_type), default_json,
                source_json, expansion_json]))
    }
-   def attributes = if kind == "lambda" || kind == "fn" {
-      core_prim.list_as_tuple_raw(["nytrix.code.attributes", 1, ()])
-   } else { code_attributes(code) }
+   def attributes = _code_signature_attributes(code, str(kind))
    if is_nil(attributes) { return nil }
    core_prim.list_as_tuple_raw([
          "nytrix.ast.signature", 1, str(kind), str(name), str(return_type),
@@ -770,7 +751,9 @@ fn code_contract(any code) any {
       if code.len != 1 { return nil }
       code = code.get(0)
    }
-   if !is_dict(code) || code.get("type", "") != "func" { return nil }
+   if !is_dict(code) || !_is_declaration_record(code) { return nil }
+   def kind = str(code.get("type", ""))
+   if kind == "func" { } else { return nil }
    def requires = code.get("requires")
    def decreases = code.get("decreases")
    def requires_json = if is_nil(requires) { "" } else { code_str(requires) }

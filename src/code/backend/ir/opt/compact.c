@@ -55,7 +55,17 @@ bool nyr_compact(nyr_func_t *f) {
    */
   for (size_t i = 0; i < f->len; ++i) {
     const nyr_inst_t *in = &f->data[i];
-    const int refs[] = {in->dst, in->a, in->b, in->c, in->d, in->e, in->f};
+    const int refs[] = {
+        in->dst,
+        in->a,
+        in->b,
+        in->op == NYIR_INLINE_ASM &&
+                (in->imm == -14 || in->imm == -82 || in->imm == -83)
+            ? -1
+            : in->c,
+        in->d,
+        in->e,
+        in->f};
     for (size_t k = 0; k < sizeof(refs) / sizeof(refs[0]); ++k) {
       int v = refs[k];
       if (v >= 0 && (v >= f->next_value || map[v] < 0)) {
@@ -84,7 +94,9 @@ bool nyr_compact(nyr_func_t *f) {
     if (!nir_remap_value(map, f->next_value, in->dst, &in->dst) ||
         !nir_remap_value(map, f->next_value, in->a, &in->a) ||
         !nir_remap_value(map, f->next_value, in->b, &in->b) ||
-        !nir_remap_value(map, f->next_value, in->c, &in->c) ||
+        (!(in->op == NYIR_INLINE_ASM &&
+           (in->imm == -14 || in->imm == -82 || in->imm == -83)) &&
+         !nir_remap_value(map, f->next_value, in->c, &in->c)) ||
         !nir_remap_value(map, f->next_value, in->d, &in->d) ||
         !nir_remap_value(map, f->next_value, in->e, &in->e) ||
         !nir_remap_value(map, f->next_value, in->f, &in->f)) {

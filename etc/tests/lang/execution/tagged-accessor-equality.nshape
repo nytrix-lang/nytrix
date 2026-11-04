@@ -1,0 +1,46 @@
+shape tagged_accessor_equality {
+  family "runtime/compiler"
+  generator "regression"
+  features [ny inference abi equality dynamic]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --nyr-run"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+fn copy_values(values) {
+   mut result = list(0)
+   mut i = 0
+   while i < len(values) {
+      result = append(result, get(values, i))
+      i += 1
+   }
+   result
+}
+def expected = [72, 101, 108]
+def actual = copy_values(expected)
+assert(get(actual, 0) == get(expected, 0), "direct get equality")
+assert(get(expected, 0) == get(actual, 0), "reverse direct get equality")
+
+def strings = ["same", "same", "different"]
+def strings_copy = copy_values(strings)
+assert(get(strings_copy, 0) == get(strings, 1), "dynamic string equality")
+assert(get(strings_copy, 0) != get(strings, 2), "dynamic string inequality")
+def zeroes = [0, 1, 2, 3, 72, 101]
+def zeroes_copy = copy_values(zeroes)
+mut i = 0
+while i < len(zeroes) {
+   assert(get(zeroes_copy, i) == get(zeroes, i), "even and odd integers")
+   i += 1
+}
+def flags = [true, false, nil]
+def flags_copy = copy_values(flags)
+assert(get(flags_copy, 0) == get(flags, 0), "dynamic true equality")
+assert(get(flags_copy, 1) == get(flags, 1), "dynamic false equality")
+assert(get(flags_copy, 2) == get(flags, 2), "dynamic nil equality")
+assert(get(flags_copy, 0) != get(flags, 1), "dynamic boolean inequality")
+def floats = [1.5, 2.5]
+def floats_copy = copy_values(floats)
+assert(get(floats_copy, 0) == get(floats, 0), "float element equality")
+assert(get(floats_copy, 0) != get(floats, 1), "float element inequality")
+NY
+}

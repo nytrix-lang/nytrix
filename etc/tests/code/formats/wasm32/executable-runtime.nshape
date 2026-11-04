@@ -13,7 +13,7 @@ assert(is_str(compiler) && compiler.len > 0,
        "test runner provides the compiler path")
 def wasm_path = temp_dir() + "/ny-wasm-runtime-" + to_str(pid()) + ".wasm"
 def compile = run_capture(
-    [compiler, "--native-backend=wasm", "--native-only", "-O3", "--nyir-verify",
+    [compiler, "--native-backend=wasm", "--native-only", "-O3", "--nyr-verify",
      "--emit-wasm=" + wasm_path, "-no-std", "-c",
      "fn add(int left, int right) int {\n" +
      "  if left < right { left + right } else { left - right }\n" +
@@ -125,7 +125,7 @@ def host_source =
     "(host_adjust_f32(40.5f32) == 42.0f32 ? 1 : 0) + " +
     "(host_identity(host_pointer()) == host_pointer() ? 1 : 0)"
 def host_compile = run_capture(
-    [compiler, "--native-backend=wasm", "--native-only", "--nyir-verify",
+    [compiler, "--native-backend=wasm", "--native-only", "--nyr-verify",
      "--emit-asm=" + host_wat_path, "-no-std", "-emit-only", "-e",
      host_source],
     [], nil, false)
@@ -185,7 +185,7 @@ def host_execution = run_capture(
      "env=" + provider_wasm_path, "--invoke", "rt_main", host_wasm_path],
     [], nil, false)
 def compile = run_capture(
-    [compiler, "--native-backend=wasm", "--native-only", "-O3", "--nyir-verify",
+    [compiler, "--native-backend=wasm", "--native-only", "-O3", "--nyr-verify",
      "--emit-asm=" + wat_path, "-no-std", "-emit-only", "-e",
      "fn rotate_check(int value) int {\n" +
      "  mut word = value & 0xff\n" +
@@ -200,7 +200,7 @@ def assemble = run_capture(
 def execution = run_capture(
     ["wasmtime", "run", "--invoke", "rt_main", wasm_path], [], nil, false)
 def checked_compile = run_capture(
-    [compiler, "--native-backend=wasm", "--native-only", "--nyir-verify",
+    [compiler, "--native-backend=wasm", "--native-only", "--nyr-verify",
      "--emit-asm=" + checked_wat_path, "-no-std", "-emit-only", "-e",
      "fn divide(int left, int right) int { left / right }\ndivide(9, 3)"],
     [], nil, false)
@@ -210,7 +210,7 @@ def checked_execution = run_capture(
     ["wasmtime", "run", "--invoke", "rt_main", checked_wasm_path], [], nil,
     false)
 def zero_compile = run_capture(
-    [compiler, "--native-backend=wasm", "--native-only", "--nyir-verify",
+    [compiler, "--native-backend=wasm", "--native-only", "--nyr-verify",
      "--emit-asm=" + zero_wat_path, "-no-std", "-emit-only", "-e",
      "fn divide(int left, int right) int { left / right }\n" +
      "mut divisor = 1\nwhile divisor > 0 { divisor -= 1 }\n" +
@@ -222,7 +222,7 @@ def zero_execution = run_capture(
     ["wasmtime", "run", "--invoke", "rt_main", zero_wasm_path], [], nil,
     false)
 def panic_compile = run_capture(
-    [compiler, "--native-backend=wasm", "--native-only", "--nyir-verify",
+    [compiler, "--native-backend=wasm", "--native-only", "--nyr-verify",
      "--emit-asm=" + panic_wat_path, "-no-std", "-emit-only", "-e",
      "panic(\"portable wasm panic marker\")"],
     [], nil, false)
@@ -232,7 +232,7 @@ def panic_execution = run_capture(
     ["wasmtime", "run", "--invoke", "rt_main", panic_wasm_path], [], nil,
     false)
 def unsupported_import = run_capture(
-    [compiler, "--native-backend=wasm", "--native-only", "--nyir-verify",
+    [compiler, "--native-backend=wasm", "--native-only", "--nyr-verify",
      "--emit-asm=" + unsupported_wat_path, "-no-std", "-emit-only", "-e",
      "extern \"c\" { fn rt_unimplemented(int value) int }\n" +
      "rt_unimplemented(3)"],

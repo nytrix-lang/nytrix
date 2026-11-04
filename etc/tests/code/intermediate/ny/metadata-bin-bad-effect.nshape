@@ -3,7 +3,7 @@ shape nyir_metadata_bin_bad_effect {
   generator "native"
   features ["native", "nyir", "metadata", "binary", "negative"]
   template ny-test-case
-  flags "--nyir-metadata-bin=etc/tests/code/intermediate/fixtures/nyir-bad-effect.nyir"
+  flags "--nyr-metadata-bin=etc/tests/code/intermediate/fixtures/nyr-bad-effect.nyr"
   expect compile_fail
   expect_message "effect mask does not match opcode effects"
   source ny <<'NY'

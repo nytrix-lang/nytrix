@@ -1,0 +1,41 @@
+shape dynamic_container_booleans {
+  family "runtime-native"
+  generator "native"
+  features [native nyir dict list bool dynamic]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect compile_and_run
+  expect_message "DYNAMIC-CONTAINER-BOOL-OK"
+  expect_stdout "true\ntrue\nfalse\ntrue\ntrue\nfalse\nDYNAMIC-CONTAINER-BOOL-OK"
+  source ny <<'NY'
+use core
+
+fn write_flag(any target, bool value) any {
+   target["enabled"] = value
+   target
+}
+fn write_item(any target, int index, bool value) any {
+   target[index] = value
+   target
+}
+mut flags = dict(4)
+flags["literal"] = true
+print(bool(flags.get("literal", false)))
+flags = write_flag(flags, true)
+print(bool(flags.get("enabled", false)))
+if !bool(flags.get("enabled", false)) { panic("dynamic setter lost true") }
+flags = write_flag(flags, false)
+print(bool(flags.get("enabled", true)))
+if bool(flags.get("enabled", true)) { panic("dynamic setter lost false") }
+flags = write_flag(flags, 3 < 4)
+print(bool(flags.get("enabled", false)))
+if !bool(flags.get("enabled", false)) { panic("dynamic setter lost boolean expression") }
+mut values = own([false, true])
+values = write_item(values, 0, true)
+values = write_item(values, 1, false)
+print(bool(values.get(0)))
+print(bool(values.get(1)))
+if !bool(values.get(0)) || bool(values.get(1)) { panic("dynamic sequence setter lost booleans") }
+print("DYNAMIC-CONTAINER-BOOL-OK")
+NY
+}

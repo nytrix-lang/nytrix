@@ -750,6 +750,7 @@ fn len(any x) int {
    - For **list/tuple/dict/set**: number of items.
    - For **bytes**: buffer size.
    Panics for unsupported types."
+   if __is_nil(x) { return 0 }
    ;; Lists/tuples may use either the legacy managed header or the native
    ;; tbuf layout.  __list_len handles both; reading byte offset zero directly
    ;; reads the first element of a native tbuf instead of its count.
@@ -859,10 +860,10 @@ fn type(any x) str {
 fn _type_shape_union_add(list shapes, str shape) list {
    ;; Dynamic list storage may expose an uninitialized slot while a literal is
    ;; being inspected.  Do not widen an otherwise concrete shape to `unknown`.
-   if shape == "unknown" { return shapes }
+   if _str_eq(shape, "unknown") { return shapes }
    mut i = 0
    while i < shapes.len {
-      if __load_item(shapes, i) == shape { return shapes }
+      if _str_eq(__load_item_any(shapes, i), shape) { return shapes }
       i += 1
    }
    return shapes.append(shape)
@@ -890,41 +891,42 @@ fn _join_parts(seq parts, str sep="") str {
 fn _type_shape_union_from_seq(seq xs, int depth) str {
    def int n = xs.len
    if n == 0 { return "empty" }
-   mut out = ""
+   mut shapes = list()
    mut i = 0
    while i < n {
       def shape = _type_shape(__load_item_any(xs, i), depth - 1)
-      if shape != "unknown" {
-         mut duplicate = false
-         mut j = 0
-         while j < i {
-            if _type_shape(__load_item_any(xs, j), depth - 1) == shape {
-               duplicate = true
-               break
-            }
-            j += 1
-         }
-         if !duplicate {
-            if out.len > 0 { out = out + "|" }
-            out = out + shape
-         }
+      if !_str_eq(shape, "unknown") {
+         shapes = _type_shape_union_add(shapes, shape)
       }
       i += 1
    }
-   if out.len == 0 { return "unknown" }
-   out
+   if shapes.len == 0 { return "unknown" }
+   _join_parts(shapes, "|")
 }
 
 fn _type_shape_tuple(any xs, int depth) str {
    def int n = xs.len
-   if n == 0 { return "tuple<>" }
-   mut shapes = list()
+   if n == 0 { return "list<empty>" }
+   mut out = ""
    mut i = 0
    while i < n {
-      shapes = shapes.append(_type_shape(__load_item_any(xs, i), depth - 1))
+      def shape = _type_shape(__load_item_any(xs, i), depth - 1)
+      mut duplicate = false
+      mut j = 0
+      while j < i {
+         if _str_eq(_type_shape(__load_item_any(xs, j), depth - 1), shape) {
+            duplicate = true
+            break
+         }
+         j += 1
+      }
+      if !duplicate {
+         if out.len > 0 { out = out + "|" }
+         out = out + shape
+      }
       i += 1
    }
-   "tuple<" + _join_parts(shapes, ", ") + ">"
+   "list<" + out + ">"
 }
 
 fn _type_shape_dict(dict d, int depth) str {
@@ -1879,7 +1881,7 @@ fn pop(any lst) any {
    if !_is_list(lst) { _type_error("pop", "a list", lst) }
    ; Native typed buffers keep their count in the out-of-line header.  The
    ; legacy load/store sequence below reads and writes slot zero instead.
-   elif __load64_idx(lst, -32) == 0x4e59544255464d47 {
+   elif __tbuf_is_raw(lst) {
       return __tbuf_pop_any(lst)
    }
    else {
@@ -1932,7 +1934,7 @@ fn extend(any lst, any other) any {
    if _is_str(lst) { return _extend_str_owned(lst, other) }
    if !_is_list(lst) { return lst }
    ; Native buffers use the runtime's alias-aware growth path.
-   elif __load64_idx(lst, -32) == 0x4e59544255464d47 {
+   elif __tbuf_is_raw(lst) {
       return __tbuf_extend(lst, other)
    }
    def ln, on = lst.len, other.len

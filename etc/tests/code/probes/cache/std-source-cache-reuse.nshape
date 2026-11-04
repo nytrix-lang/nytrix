@@ -29,7 +29,7 @@ assert(is_ok(file_write(first_source, source)) &&
        is_ok(file_write(second_source, source)),
        "write same source under distinct pathnames")
 
-fn run_from_source(str source_path) dict {
+fn run_from_source(str source_path, str compiler) dict {
    run_capture(
       [cmake, "-E", "env",
        "--unset=NYTRIX_STD_PREBUILT",
@@ -40,7 +40,7 @@ fn run_from_source(str source_path) dict {
        "NYTRIX_STD_BC_CACHE_AUTO=0",
        "NYTRIX_CACHE_DIR=" + cache_dir,
        "XDG_CACHE_HOME=" + xdg_cache,
-       ny, "--no-progress", source_path],
+       compiler, "--no-progress", source_path],
       [], nil, false)
 }
 
@@ -55,20 +55,34 @@ fn cache_entry_count(str dir) int {
    count
 }
 
-def first = run_from_source(first_source)
+def first = run_from_source(first_source, ny)
 assert(first.get("code", 127) == 0 &&
        first.get("stdout", "") == "std-cache-reuse\n",
        "first program compiles and runs against stdlib source")
 def first_count = cache_entry_count(cache_dir + "/std-src")
 assert(first_count > 0, "first compile writes a standard source cache entry")
 
-def second = run_from_source(second_source)
+def second = run_from_source(second_source, ny)
 assert(second.get("code", 127) == 0 &&
        second.get("stdout", "") == "std-cache-reuse\n",
        "second program runs using the reusable standard source cache")
 def second_count = cache_entry_count(cache_dir + "/std-src")
 assert(second_count == first_count,
        "source pathname does not create duplicate standard source entries")
+
+mut separator = -1
+for (mut index = 0 index < ny.len index += 1) {
+   if ny[index] == "/" || ny[index] == "\\" { separator = index }
+}
+def compiler_alias = separator < 0 ? "./" + ny :
+   str.str_slice(ny, 0, separator + 1) + "./" +
+   str.str_slice(ny, separator + 1, ny.len)
+def third = run_from_source(first_source, compiler_alias)
+assert(third.get("code", 127) == 0 &&
+       third.get("stdout", "") == "std-cache-reuse\n",
+       "equivalent compiler pathname preserves execution")
+assert(cache_entry_count(cache_dir + "/std-src") == first_count,
+       "equivalent compiler pathname does not duplicate standard source bundles")
 
 def cleanup = run_capture([cmake, "-E", "rm", "-rf", test_dir], [], nil, false)
 assert(cleanup.get("code", 127) == 0, "remove isolated stdlib cache directory")

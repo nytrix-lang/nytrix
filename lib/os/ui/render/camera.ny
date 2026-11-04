@@ -381,7 +381,7 @@ fn simulate_frame_state(dict state) dict {
          ;; pacing varies.  Treat the configured alpha as the 60Hz response.
          if smooth_alpha > 0.0 && smooth_alpha < 0.999 {
             def frame_scale = clamp(dt * 60.0, 0.25, 4.0)
-            smooth_alpha = 1.0 - pow(1.0 - smooth_alpha, frame_scale)
+            smooth_alpha = 1.0 - float(__flt_pow(1.0 - smooth_alpha, frame_scale))
          }
          if smooth_alpha >= 0.999 {
             rmb_dx_smooth, rmb_dy_smooth = look_dx, look_dy

@@ -11,6 +11,7 @@ use core
 #include "etc/tests/lang/interop/ffi/transitive.h"
 #include <stdlib.h> as "getenv"
 #include <math.h> as "cos"
+#include <math.h> as "c"
 #windows {
    #include <windows.h> as "GetCurrentProcess"
 } #else {
@@ -29,11 +30,16 @@ assert(__layout_size("NytrixFfiColor") == 4, "FFI imports typedef struct layouts
 assert(__layout_size("NytrixFfiImage") >= 20, "FFI imports pointer-bearing structs")
 def path_env = getenv("PATH")
 assert(type(path_env) == "str" && path_env.len > 0, "FFI converts C string returns into Ny strings")
-def c = cos(0.0)
-assert(type(c) == "float" && c == 1.0, "FFI preserves native floating-point return values")
+def cos_value = cos(0.0)
+assert(type(cos_value) == "float" && cos_value == 1.0, "FFI preserves native floating-point return values")
 def variable_cos = cos(1.0)
 assert(variable_cos > 0.5 && variable_cos < 0.6,
        "FFI passes a variable double through the floating-point argument ABI")
+def f64 sqrt_x = 3.0
+def f64 sqrt_y = 4.0
+def f64 variable_sqrt = c.sqrt(sqrt_x * sqrt_x + sqrt_y * sqrt_y)
+assert(variable_sqrt > 4.999 && variable_sqrt < 5.001,
+       "C sqrt receives a computed double through the direct ABI")
 def ffi_color = NytrixFfiColor(1, 2, 3, 4)
 assert(load_layout(ffi_color, "NytrixFfiColor", "g") == 2, "FFI layout fields are loadable")
 free(ffi_color)

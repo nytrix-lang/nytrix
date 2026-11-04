@@ -25,6 +25,21 @@ assert(first_value == 1, "bound nested dynamic index preserves first scalar")
 assert(second_value == 2, "bound nested dynamic index preserves odd scalar")
 assert(first[0] == 1, "direct dynamic index comparison preserves first scalar")
 assert(first[1] == 2, "direct dynamic index comparison preserves odd scalar")
+;; Generic list slots carry raw values after indexing. Applying int(any) to
+;; that already-raw payload must not low-bit-decode odd values a second time.
+mut values = []
+values = append(values, 4198747)
+values = append(values, 4198760)
+values = append(values, 4198767)
+mut converted = []
+mut i = 0
+while i < values.len {
+   converted = append(converted, int(values[i]))
+   i += 1
+}
+assert(converted[0] == 4198747 && converted[1] == 4198760 &&
+   converted[2] == 4198767,
+   "int cast preserves raw odd and even dynamic-list values")
 print("dynamic_index_raw ok")
 NY
 }

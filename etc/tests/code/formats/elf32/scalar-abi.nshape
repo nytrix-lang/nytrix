@@ -6,7 +6,7 @@ defaults {
 
 shape i386_elf32_object_link_run_f32 {
   features [native object elf32 i386 x86 nyir link-run f32]
-  flags "--nyir-verify --native-backend x86 -emit-only -o /tmp/nytrix-elf32-link-run-f32.o"
+  flags "--nyr-verify --native-backend x86 -emit-only -o /tmp/nytrix-elf32-link-run-f32.o"
   expect object_link_run_f64_0.30000001192092896
   source ny <<'NY'
 def f32 a = 0.1
@@ -18,7 +18,7 @@ NY
 
 shape i386_elf32_object_link_run_f32_call {
   features [native object elf32 i386 x86 nyir link-run f32 call]
-  flags "--nyir-verify --native-backend x86 -emit-only -o /tmp/nytrix-elf32-link-run-f32-call.o"
+  flags "--nyr-verify --native-backend x86 -emit-only -o /tmp/nytrix-elf32-link-run-f32-call.o"
   expect object_link_run_f64_0.30000001192092896
   source ny <<'NY'
 fn add(f32 a, f32 b) f32 {
@@ -32,7 +32,7 @@ NY
 
 shape i386_elf32_object_link_run_f32_compare {
   features [native object elf32 i386 x86 nyir link-run f32 compare]
-  flags "--nyir-verify --native-backend x86 -emit-only -o /tmp/nytrix-elf32-link-run-f32-compare.o"
+  flags "--nyr-verify --native-backend x86 -emit-only -o /tmp/nytrix-elf32-link-run-f32-compare.o"
   expect object_link_run_i64_1
   source ny <<'NY'
 def f32 a = 0.1
@@ -45,7 +45,7 @@ NY
 
 shape i386_elf32_object_link_run_f32_direct_return {
   features [native object elf32 i386 x86 nyir link-run f32 abi return]
-  flags "--nyir-verify --native-backend x86 -emit-only -o /tmp/nytrix-elf32-link-run-f32-direct-return.o"
+  flags "--nyr-verify --native-backend x86 -emit-only -o /tmp/nytrix-elf32-link-run-f32-direct-return.o"
   expect object_link_run_f32_3.75
   source ny <<'NY'
 def f32 x = 1.5f32
@@ -56,7 +56,7 @@ NY
 
 shape i386_elf32_object_link_run_f64 {
   features [native object elf32 i386 x86 nyir link-run f64]
-  flags "--nyir-verify --native-backend x86 -emit-only -o /tmp/nytrix-elf32-link-run-f64.o"
+  flags "--nyr-verify --native-backend x86 -emit-only -o /tmp/nytrix-elf32-link-run-f64.o"
   expect object_link_run_f64_3.75
   source ny <<'NY'
 def a = 1.5
@@ -67,7 +67,7 @@ NY
 
 shape i386_elf32_object_link_run_f64_call {
   features [native object elf32 i386 x86 nyir link-run f64 call]
-  flags "--nyir-verify --native-backend x86 -emit-only -o /tmp/nytrix-elf32-link-run-f64-call.o"
+  flags "--nyr-verify --native-backend x86 -emit-only -o /tmp/nytrix-elf32-link-run-f64-call.o"
   expect object_link_run_f64_3.75
   source ny <<'NY'
 fn val() f64 {
@@ -80,7 +80,7 @@ NY
 
 shape i386_elf32_object_link_run_f64_params {
   features [native object elf32 i386 x86 nyir link-run f64 call params]
-  flags "--nyir-verify --native-backend x86 -emit-only -o /tmp/nytrix-elf32-link-run-f64-params.o"
+  flags "--nyr-verify --native-backend x86 -emit-only -o /tmp/nytrix-elf32-link-run-f64-params.o"
   expect object_link_run_f64_3.75
   source ny <<'NY'
 fn add(f64 x, f64 y) f64 {
@@ -93,7 +93,7 @@ NY
 
 shape i386_elf32_object_link_run_f64_cmp {
   features [native object elf32 i386 x86 nyir link-run f64 cmp]
-  flags "--nyir-verify --native-backend x86 -emit-only -o /tmp/nytrix-elf32-f64cmp.o"
+  flags "--nyr-verify --native-backend x86 -emit-only -o /tmp/nytrix-elf32-f64cmp.o"
   expect object_link_run_i64_1
   source ny <<'NY'
 def a = 3.5
@@ -104,7 +104,7 @@ NY
 
 shape i386_elf32_object_link_run_f64_cmp_all {
   features [native object elf32 i386 x86 nyir link-run f64 cmp]
-  flags "--nyir-verify --native-backend x86 -emit-only -o /tmp/nytrix-elf32-f64cmp-all.o"
+  flags "--nyr-verify --native-backend x86 -emit-only -o /tmp/nytrix-elf32-f64cmp-all.o"
   expect object_link_run_i64_1
   source ny <<'NY'
 def a = 3.5
@@ -128,7 +128,7 @@ NY
 
 shape i386_elf32_object_link_run_f64_compare {
   features [native object elf32 i386 x86 nyir link-run f64 compare]
-  flags "--nyir-verify --native-backend x86 -emit-only -o /tmp/nytrix-elf32-link-run-f64-compare.o"
+  flags "--nyr-verify --native-backend x86 -emit-only -o /tmp/nytrix-elf32-link-run-f64-compare.o"
   expect object_link_run_i64_1
   source ny <<'NY'
 fn gt(f64 x, f64 y) bool {
@@ -141,7 +141,7 @@ NY
 
 shape i386_elf32_object_link_run_f64_compare_lt {
   features [native object elf32 i386 x86 nyir link-run f64 compare]
-  flags "--nyir-verify --native-backend x86 -emit-only -o /tmp/nytrix-elf32-link-run-f64-compare-lt.o"
+  flags "--nyr-verify --native-backend x86 -emit-only -o /tmp/nytrix-elf32-link-run-f64-compare-lt.o"
   expect object_link_run_i64_1
   source ny <<'NY'
 fn lt(f64 x, f64 y) bool {
@@ -154,7 +154,7 @@ NY
 
 shape x86_elf32_object_link_run_i16_return {
   features [native object elf32 x86 nyir link-run abi]
-  flags "--nyir-verify --native-backend x86 -emit-only -o /tmp/nytrix-native-elf32-link-run-i16-return.o"
+  flags "--nyr-verify --native-backend x86 -emit-only -o /tmp/nytrix-native-elf32-link-run-i16-return.o"
   expect object_link_run_i16_65535
   source ny <<'NY'
 fn ret_i16() i16 {
@@ -166,7 +166,7 @@ NY
 
 shape x86_elf32_object_link_run_i64 {
   features [native object elf32 x86 nyir link-run]
-  flags "--nyir-verify --native-backend x86 -emit-only -o /tmp/nytrix-native-elf32-link-run-i64.o"
+  flags "--nyr-verify --native-backend x86 -emit-only -o /tmp/nytrix-native-elf32-link-run-i64.o"
   expect object_link_run_i64_45
   source ny <<'NY'
 def a = 40
@@ -177,7 +177,7 @@ NY
 
 shape i386_elf32_object_link_run_int_cmp {
   features [native object elf32 i386 x86 nyir link-run cmp]
-  flags "--nyir-verify --native-backend x86 -emit-only -o /tmp/nytrix-elf32-intcmp.o"
+  flags "--nyr-verify --native-backend x86 -emit-only -o /tmp/nytrix-elf32-intcmp.o"
   expect object_link_run_i64_1
   source ny <<'NY'
 fn check(i64 a, i64 b) i64 {
@@ -199,7 +199,7 @@ NY
 
 shape x86_elf32_object_link_run_u32_return {
   features [native object elf32 x86 nyir link-run abi]
-  flags "--nyir-verify --native-backend x86 -emit-only -o /tmp/nytrix-native-elf32-link-run-u32-return.o"
+  flags "--nyr-verify --native-backend x86 -emit-only -o /tmp/nytrix-native-elf32-link-run-u32-return.o"
   expect object_link_run_u32_4294967295
   source ny <<'NY'
 fn ret_u32() u32 {
@@ -211,7 +211,7 @@ NY
 
 shape x86_elf32_object_link_run_u8_return {
   features [native object elf32 x86 nyir link-run abi]
-  flags "--nyir-verify --native-backend x86 -emit-only -o /tmp/nytrix-native-elf32-link-run-u8-return.o"
+  flags "--nyr-verify --native-backend x86 -emit-only -o /tmp/nytrix-native-elf32-link-run-u8-return.o"
   expect object_link_run_u8_255
   source ny <<'NY'
 fn ret_u8() u8 {
@@ -223,7 +223,7 @@ NY
 
 shape x86_elf32_object_link_run_bool_return {
   features [native object elf32 x86 nyir link-run abi bool]
-  flags "--nyir-verify --native-backend x86 -emit-only -o /tmp/nytrix-native-elf32-link-run-bool-return.o"
+  flags "--nyr-verify --native-backend x86 -emit-only -o /tmp/nytrix-native-elf32-link-run-bool-return.o"
   expect object_link_run_bool_1
   source ny <<'NY'
 fn ret_bool(i64 a, i64 b) bool {
@@ -235,7 +235,7 @@ NY
 
 shape x86_elf32_object_link_run_call7 {
   features [native object elf32 x86 nyir link-run reloc call]
-  flags "--nyir-verify --native-backend x86 -emit-only -o /tmp/nytrix-native-elf32-link-run-call7.o"
+  flags "--nyr-verify --native-backend x86 -emit-only -o /tmp/nytrix-native-elf32-link-run-call7.o"
   expect object_link_run_i64_28
   source ny <<'NY'
 fn add7(i64 a, i64 b, i64 c, i64 d, i64 e, i64 f, i64 g) i64 {

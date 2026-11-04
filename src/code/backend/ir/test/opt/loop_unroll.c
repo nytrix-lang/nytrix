@@ -20,15 +20,7 @@ static void store_local(nyr_func_t *f, int value, int64_t slot) {
 }
 
 static int load_local(nyr_func_t *f, int64_t slot) {
-  return nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_LOAD_LOCAL,
-                                     .dst = -1,
-                                     .a = -1,
-                                     .b = -1,
-                                     .c = -1,
-                                     .d = -1,
-                                     .e = -1,
-                                     .f = -1,
-                                     .imm = slot});
+  return nyr_opt_emit_imm(f, NYIR_LOAD_LOCAL, slot);
 }
 
 static void build_loop_with_unrelated_phi(nyr_func_t *f) {

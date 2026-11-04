@@ -1,0 +1,19 @@
+shape boolean_ternary_local {
+  family "runtime/values"
+  generator "regression"
+  features [bool ternary local imported representation]
+  template ny-test-case
+  timeout 120
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit -O0; --native-backend=llvm --jit --jit-engine=orc -O0; --nyr-run"
+  expect compile_and_run
+  expect_message "BOOLEAN-TERNARY-LOCAL-OK"
+  source ny <<'NY'
+use core
+use "./boolean-choice.ny" as choices
+assert(choices.choose_literal(false), "literal true survives a conditional local")
+assert(!choices.choose_literal(true), "called false survives a conditional local")
+assert(choices.choose_call(true), "called true survives a conditional local")
+assert(!choices.choose_call(false), "literal false survives a conditional local")
+print("BOOLEAN-TERNARY-LOCAL-OK")
+NY
+}

@@ -34,5 +34,21 @@ store8(second, 0, 1)
 def second_string = init_str(second, 1)
 assert(__str_hash(second_string) == __str_hash(cstr_to_str("B")), "reused address does not retain a string hash")
 free(second_string)
+
+; Releasing a long interned string must invalidate its table slot before the
+; allocator can recycle the storage. Recreating the same contents must build a
+; live string rather than return the released object.
+def intern_builder_a = __str_builder_new(0)
+__str_builder_append(intern_builder_a, "intern-table-entry-0123456789")
+def intern_a = __str_builder_to_str(intern_builder_a)
+__str_builder_free(intern_builder_a)
+assert(__str_len(intern_a) == 29, "long string enters the intern table")
+free(intern_a)
+def intern_builder_b = __str_builder_new(0)
+__str_builder_append(intern_builder_b, "intern-table-entry-0123456789")
+def intern_b = __str_builder_to_str(intern_builder_b)
+__str_builder_free(intern_builder_b)
+assert(__str_len(intern_b) == 29 && intern_b == "intern-table-entry-0123456789",
+       "intern lookup skips released entries")
 NY
 }

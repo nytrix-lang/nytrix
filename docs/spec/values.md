@@ -4,6 +4,12 @@
 Values include literals, strings, collections, functions, and native handles.
 Module documentation defines the helpers for each value type.
 
+## Contents
+
+- [Literal and runtime representations](#literal-classes)
+- [Strings, lists, and dictionaries](#strings)
+- [Equality and related contracts](#equality-and-representation)
+
 ## Literal classes
 
 | Class | Examples |
@@ -20,6 +26,26 @@ Module documentation defines the helpers for each value type.
 | Functions | Named functions and `fn(...) { ... }` values. |
 | Native values | Pointers, handles, layouts, extern values. |
 
+```ny
+use core
+
+def count = 123
+def message = f"value={count}"
+def items = [count, 2]
+mut lookup = dict()
+```
+
+## Rules
+
+1. Runtime representation is not a source-level type contract. Use predicates
+   and conversions instead of inspecting tags, pointer shapes, or box bits.
+2. `nil` and integer `0` are distinct even though both are falsy.
+3. Rebind list updates such as `append` and `extend`; they may return a new
+   list handle. A bare `{}` is immutable; use `dict()` for a mutable
+   accumulator.
+4. Strings store bytes, while generic string slicing uses UTF-8 code-point
+   indices. Check the specific API before crossing a byte or native boundary.
+
 ## Typed and dynamic representation
 
 The language distinguishes semantic values from their runtime transport
@@ -32,6 +58,27 @@ Programs must not depend on a tag bit, pointer shape, or other box encoding.
 Use type predicates and conversion APIs instead. `bigint` is the explicit
 arbitrary-precision type for values outside the signed 64-bit range. See
 [Numbers](../learn/numbers.md) for the numeric tower and conversion rules.
+
+Dynamic values ride on an ABI-level helper layer; its names stay visible for
+diagnostics. `__flt_*` functions carry boxed float arithmetic, comparisons,
+NaN/inf predicates, hashing, and the libm transcendentals. `__bigint_*`
+functions carry exact arithmetic, number-theory helpers, and conversions
+behind `bigint` once values promote past the 64-bit range; the user surface
+is `bigint(value)` and the `core.math.big` APIs. `__cstr_cmp`, `__cstr_concat`,
+and `__cstr_eq` compare and join raw C strings, `__i64_to_cstr_raw` and
+`__f64_to_cstr_raw` render raw fixed text, and `__cstr_to_str` copies into a
+managed string. The same pattern holds for the container, OS, and GC
+families: `__str_*`, `__list_*`, `__dict_*`, `__gc_*`, and friends are the
+raw substrates behind the matching `lib/` APIs; `__is_nil` and `__is_int`
+are the library-facing spellings that `lib/mod.ny` and dynamic-value
+fixtures call, while programs keep the `is_nil`/`is_int` predicates. The
+C-string helpers take raw FFI-pointer `cstr` values, not managed `str`s.
+Application code keeps using the operators, predicates, and
+conversion APIs; these helpers exist for the runtime, FFI boundaries, and
+ABI debugging. The fixtures `etc/tests/lang/values/dynamic-float-arithmetic-abi.nshape`,
+`etc/tests/lang/values/bigint.nshape`, `etc/tests/lang/values/bigint-pidigits.nshape`,
+and `etc/tests/lang/values/intrinsic-conversion-render.nshape` pin the
+visible behaviors on both execution routes.
 
 ## Nil
 
@@ -47,9 +94,17 @@ assert(!nil && !0, "falsy values")
 assert(to_str(nil) == "nil", "nil string")
 ```
 
-Dynamic transport must preserve that identity. This contract example currently
-fails at `"any identity"` on the default LLVM route; see
-[known documentation smoke limitations](../learn/status.md#documentation-smoke-limitations).
+Dynamic transport must preserve that identity, and compile-time evaluation
+keeps it too: `nil` literals parse with token `NY_T_NIL`, and the proof
+evaluator in the lowerer refuses to prove a `nil` literal as an `i64`
+constant, so integer fast paths cannot silently fold `nil` into a proven
+`0`. Producers that need `nil` as a value re-derive it from the token kind
+rather than the integer payload.
+
+The dynamic-transport contract example below passes on the current build and
+is the gate fixture
+`etc/tests/lang/values/nil-dynamic-identity.nshape`; it stays a regression
+check for any transport that changes the word conventions of dynamic values.
 
 ```ny
 use core
@@ -116,11 +171,17 @@ standard-library helper that fills the list before reading by index.
 Lists, tuples, strings, bytes, and ranges support integer indexing:
 
 ```ny
-xs[0]
-xs[-1]
-(4, 5, 6)[1]
-"abcd"[2]
-range(2, 8, 2)[-1]
+use core
+
+def xs = [1, 2, 3]
+def tp = (4, 5, 6)
+def text = "abcd"
+def rg = range(2, 8, 2)
+
+assert(xs[0] == 1 && xs[-1] == 3, "list indexes")
+assert(tp[1] == 5, "tuple index")
+assert(text[2] == "c", "string index")
+assert(rg[-1] == 6, "range index")
 ```
 
 Negative indices count from the end. Out-of-range or non-integer indices panic;
@@ -193,7 +254,7 @@ assert_eq(xs, [1, 2], "retained updates")
 | `value ?? fallback` | Nil coalescing - selects fallback when left side is `nil`. |
 | `value?.member` | Optional chaining - returns `nil` when receiver is `nil`. |
 | `dict.get(key, default)` | Safe lookup with fallback for missing keys. |
-| `dict.set(key, value)` | Mutates in place. Retaining the generic setter's return has a [known route-specific failure](../learn/status.md#documentation-smoke-limitations). |
+| `dict.set(key, value)` | Mutates in place. Retaining the setter's return re-reads the mutated object, so chained setter calls stay in sync. |
 | `list.append(item)` | Returns the updated list; retain the result because growth may replace the value. |
 | `list.extend(other)` | Returns the updated list; retain the result because growth may replace the value. |
 | `clone(value)` | Detached mutable copy of a dict or list. |

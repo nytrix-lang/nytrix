@@ -24,15 +24,7 @@ static int emit_tbuf_new(nyr_func_t *f, int count, int width) {
 }
 
 static int emit_alloca(nyr_func_t *f) {
-  return nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_ALLOCA,
-                                    .dst = -1,
-                                    .a = -1,
-                                    .b = -1,
-                                    .c = -1,
-                                    .d = -1,
-                                    .e = -1,
-                                    .f = -1,
-                                    .imm = 1024});
+  return nyr_opt_emit_imm(f, NYIR_ALLOCA, 1024);
 }
 
 static void build_load_loop(nyr_func_t *f, address_root_t root) {
@@ -48,14 +40,7 @@ static void build_load_loop(nyr_func_t *f, address_root_t root) {
     base = emit_alloca(f);
   } else {
     int backing = emit_alloca(f);
-    base = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_LOAD_I64,
-                                      .dst = -1,
-                                      .a = backing,
-                                      .b = -1,
-                                      .c = -1,
-                                      .d = -1,
-                                      .e = -1,
-                                      .f = -1});
+    base = nyr_opt_emit_abc(f, NYIR_LOAD_I64, backing, -1, -1);
   }
 
   nyr_opt_br(f, 10);
@@ -68,26 +53,12 @@ static void build_load_loop(nyr_func_t *f, address_root_t root) {
   nyr_opt_ret(f, zero);
   nyr_opt_label(f, 11);
   if (root == TBUF_PAYLOAD || root == TBUF_DUPLICATE) {
-    base = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_COPY,
-                                      .dst = -1,
-                                      .a = base,
-                                      .b = -1,
-                                      .c = -1,
-                                      .d = -1,
-                                      .e = -1,
-                                      .f = -1});
+    base = nyr_opt_emit_abc(f, NYIR_COPY, base, -1, -1);
   }
   int address = nyr_opt_binop(f, NYIR_ADD_I64, base, iv);
   int load_count = root == TBUF_DUPLICATE ? 3 : 1;
   for (int i = 0; i < load_count; ++i) {
-    nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_LOAD_I64,
-                               .dst = -1,
-                               .a = address,
-                               .b = -1,
-                               .c = -1,
-                               .d = -1,
-                               .e = -1,
-                               .f = -1});
+    nyr_opt_emit_abc(f, NYIR_LOAD_I64, address, -1, -1);
   }
   int iv_next = nyr_opt_binop(f, NYIR_ADD_I64, iv, one);
   nyr_opt_br(f, 10);
@@ -128,23 +99,9 @@ static void build_many_load_loops(nyr_func_t *f, int loop_count) {
     else
       nyr_opt_br(f, header + 3);
     nyr_opt_label(f, body);
-    int loop_base = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_COPY,
-                                               .dst = -1,
-                                               .a = base,
-                                               .b = -1,
-                                               .c = -1,
-                                               .d = -1,
-                                               .e = -1,
-                                               .f = -1});
+    int loop_base = nyr_opt_emit_abc(f, NYIR_COPY, base, -1, -1);
     int address = nyr_opt_binop(f, NYIR_ADD_I64, loop_base, iv);
-    nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_LOAD_I64,
-                               .dst = -1,
-                               .a = address,
-                               .b = -1,
-                               .c = -1,
-                               .d = -1,
-                               .e = -1,
-                               .f = -1});
+    nyr_opt_emit_abc(f, NYIR_LOAD_I64, address, -1, -1);
     iv_next_values[li] = nyr_opt_binop(f, NYIR_ADD_I64, iv, one);
     nyr_opt_br(f, header);
   }

@@ -14,11 +14,21 @@ fn count(int depth) int {
    1 + count(depth - 1) + count(depth - 1)
 }
 def int t0 = ticks()
+;; Keep the recursion depth runtime-dependent so the compiler cannot fold
+;; this fixed range into its checksum. argc is the same for Ny and the C
+;; harness, and keeps the default tree depth at ten.
+def int max_depth = 9 + argc()
+def int repetitions = 16
 mut int d = 4
+mut int repetition = 0
 mut int acc = 0
-while d <= 10 {
-   acc += count(d)
-   d += 1
+while repetition < repetitions {
+   d = 4
+   while d <= max_depth {
+      acc += count(d)
+      d += 1
+   }
+   repetition += 1
 }
 def int t1 = ticks()
 print("checksum=", acc)
@@ -43,10 +53,14 @@ static long count(int depth) {
     return 1 + count(depth - 1) + count(depth - 1);
 }
 
-int main(void) {
+int main(int argc, char **argv) {
+    (void)argv;
+    int max_depth = 9 + argc;
+    enum { REPETITIONS = 16 };
     int64_t start = now_ns();
     long acc = 0;
-    for (int d = 4; d <= 10; d++) acc += count(d);
+    for (int repetition = 0; repetition < REPETITIONS; repetition++)
+        for (int d = 4; d <= max_depth; d++) acc += count(d);
     int64_t end = now_ns();
     printf("checksum=%ld\n", acc);
     if (end <= start) end = start + 1;

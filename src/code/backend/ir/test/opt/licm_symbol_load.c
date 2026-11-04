@@ -19,25 +19,11 @@ static int emit_symbol_address(nyr_func_t *f, const char *symbol) {
 }
 
 static int emit_load(nyr_func_t *f, int address) {
-  return nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_LOAD_I64,
-                                    .dst = -1,
-                                    .a = address,
-                                    .b = -1,
-                                    .c = -1,
-                                    .d = -1,
-                                    .e = -1,
-                                    .f = -1});
+  return nyr_opt_emit_abc(f, NYIR_LOAD_I64, address, -1, -1);
 }
 
 static void emit_store(nyr_func_t *f, int address, int value) {
-  nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_STORE_I64,
-                             .dst = -1,
-                             .a = address,
-                             .b = -1,
-                             .c = value,
-                             .d = -1,
-                             .e = -1,
-                             .f = -1});
+  nyr_opt_emit_abc(f, NYIR_STORE_I64, address, -1, value);
 }
 
 static bool build_loop(nyr_func_t *f, bool write_in_loop) {

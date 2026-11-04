@@ -6,7 +6,7 @@ shape args-invalid-accel-target {
   expect compile_fail
 
   flags "--accel-target=bogus"
-  expect_message "unknown accel target"
+  expect_message "invalid --accel-target"
   source ny <<'NY'
 use core
 print("ok")

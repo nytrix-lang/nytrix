@@ -6,6 +6,8 @@ source-level meaning belongs in shared semantic analysis; target details belong
 in lowering or the backend. A backend must not silently reinterpret a failed
 contract from an earlier layer.
 
+Prerequisites: a source checkout and a concrete behavior or subsystem to locate.
+
 ## Source map
 
 | Concern | Primary location | Responsibility |
@@ -17,10 +19,11 @@ contract from an earlier layer.
 | NYIR | `src/code/backend/ir/` | NYIR verification, optimization, interpretation, and reports |
 | Machine code | `src/code/backend/machine/`, `src/code/backend/object/` | Target lowering, register allocation, object encoding, and linking support |
 | LLVM integration | `src/code/backend/llvm/` | LLVM emission and compatibility code |
-| Source-oriented LLVM compatibility | `src/code/lang/llvm/` | Compatibility emitter and compile-time interpreter |
+| LLVM preparation and compatibility code | `src/code/lang/llvm/` | Module/signature preparation and LLVM support helpers; legacy AST-body emitters are not a live CLI or REPL route |
 | Build pipeline | `src/code/lang/pipeline/`, `src/code/backend/wire/` | Stage orchestration, caches, and compilation artifacts |
-| Runtime | `src/code/lang/runtime/` | Allocation, managed values, platform services, and runtime helpers |
-| C frontend | `src/code/lang/c/` | Clang integration and the in-tree C frontend |
+| Builtin semantic contracts | `src/code/lang/builtin_contracts.inc`, `src/code/lang/types/funcpurity.c` | Language-level purity and effect metadata consumed by semantic analysis |
+| Runtime | `src/code/backend/runtime/` | Allocation, managed values, platform services, and runtime helpers |
+| C frontend | `src/code/lang/parse/c/` | Clang integration and the in-tree C frontend |
 | CLI tools | `src/cmd/` | Compiler, formatter, test, documentation, and platform commands |
 | Standard library | `lib/` | User-facing modules and host APIs |
 
@@ -47,19 +50,96 @@ under `src/include/` when changing a supported C API.
 
 ## Translation-unit boundaries
 
-The runtime entry point `src/code/lang/runtime/init.c` includes `ast.c`,
+The runtime entry point `src/code/backend/runtime/init.c` includes `ast.c`,
 `bigfloat.c`, `bigint.c`, `core.c`, `ffi.c`, `ffigates.c`, `gc.c`, `math.c`,
 `memory.c`, `os.c`, `proof.c`, `simmd.c`, and `string.c` into one translation
 unit. Keep those files compatible when built together, including static names
 and declarations.
 
+Language-level builtin effect contracts stay in
+`src/code/lang/builtin_contracts.inc`; they are compiler semantics, not runtime
+dispatch data.
+
 The compiler pipeline is orchestrated in
 `src/code/lang/pipeline/init.c`. The C frontend is split under
-`src/code/lang/c/`: `c_lex.c` supplies tokens to both header parsing and the
-standalone `nyc` frontend, `c_parse.c` parses declarations, and
-`nyc_frontend.c` lowers supported C function bodies. The shared declarations
-live in `c.h`; keep lexer, parser, and frontend interfaces aligned when
-changing that boundary.
+`src/code/lang/parse/c/`: `lex.c` supplies tokens to both header parsing and the
+standalone `nyc` frontend, `declarations.c` parses included declarations,
+and `parse.c` parses and lowers supported C translation units. The shared
+declarations live in `c.h`; keep lexer, parser, and frontend interfaces
+aligned when changing that boundary.
+
+## Substrate guides
+
+These contributors' substrates sit under the layers above. Each entry names
+the owner file, its contract, and its wiring, grounded in the file headers.
+
+The equality-saturation engine in `src/code/backend/ir/opt/egraph.c`
+canonicalizes pure scalar integer arithmetic per basic block: e-classes over
+block values, a declarative rule pool applied to saturation (48 iterations,
+2048 nodes of fuel), and cost-directed extraction. Only pure ALU/COPY nodes
+participate; memory, calls, traps, control flow, PHIs, floats, and locals are
+leaves. Rewrites rebuild the function on a scratch buffer and commit only if
+`nyr_ir_verify` accepts them, and a value is rewritten only when the extracted
+form is strictly cheaper. It enters the pass pipeline as `egraph_local` and
+`egraph_saturate` (`backend/ir/opt/pipeline.c:897-898`); `nyr_egraph_stats`
+feeds IR reports and the `advanced.c` local driver.
+
+ISLE-style selection in `src/code/backend/ir/isle.c` is a declarative rule
+table (clean-room, ISLE-inspired): rules match a NYIR op plus immediate
+operand shapes and emit cheaper forms, one shared applicator serving NYIR
+text rewrites (`nyr_apply_rules`) and machine-form identity folds
+(`ny_isle_apply_nir`). Extend the table rather than adding ad-hoc peepholes;
+the pipeline passes `apply_rules` (`pipeline.c:899`) at the same site.
+
+The tier planner in `src/code/backend/ir/tier.c` resolves
+baseline/stencil/fast/opt from the requested tier plus target
+frequency/size/cache-pressure facts (`nyr_tier_plan_init`). Explicit tier
+requests are honored as labels and budget selectors only; the executable path
+stays the shared NYIR→Machine IR→encode pipeline, and `llvm` remains a
+top-level backend choice, never a native tier.
+
+Effect and purity analysis in `src/code/lang/types/funcpurity.c` classifies
+functions for effect checking and optimization gating, including the builtin
+effect table (`NY_BUILTIN_EFFECT_*` entries for direct calls, callable
+factories, and query from/step shapes). Diagnostics surface as
+`[effects.*]` hint logs; do not bypass the table with per-call-site guesses.
+
+Null-narrowing in `src/code/lang/types/nullnarrow.c` tracks
+nullable-to-nonnull flow facts per binding through branches and assignments
+(`true_nonnull`/`false_nonnull` plus optional true/false arm types), feeding
+type refinement. Like all shared semantic analysis, it fails closed: absent
+or empty facts refine nothing.
+
+The proof substrate: `src/code/lang/types/proof.c` hosts the solver backends
+(a dependency-free Presburger subset over linear integer arithmetic via
+Fourier–Motzkin, capped at 16 variables with a bounded constraint budget,
+plus the
+optional Z3 path when built with `NYTRIX_ENABLE_Z3`). Both return true only
+when the negated proposition is proven unsatisfiable, so they cannot admit a
+false proof; unknown falls through to constant evaluation.
+`src/code/lang/types/policy.c` is the versioned obligation/certificate
+funnel (`ny-proof-obligation-v1` / `ny-proof-certificate-v1`, percent-encoded
+fields), mirroring the `lib/proof.ny` tactic order fold → range → solver
+with the compiler-only `cc`/interval steps; `policy/check.c`'s bounded
+checker is the sole verdict decider. `lib/proof.ny` owns the language-side
+`core.proof` policy, where `unknown` is first-class and never stands in for
+false.
+
+The fuzz harness under `src/cmd/test/fuzz/` synthesizes random programs from
+shape templates (`generate.c`, covering parser, type-checker, and codegen
+edges), drives workers (`proc.c`, `worker.c`), and compares results through
+`compare/` (its JSON reports carry `native_compare`/`native_replay` fields;
+its audit tools cross-check definition/reference sets, including the SIMMD
+wrapper audit). `usage.c` prints the recommended command lines with
+tuned profiles, thread counts, and duration parameters; the driver is
+`./build/ny-test fuzz`.
+
+The portable SIMD substrate `src/code/backend/runtime/simmd.c` provides
+vectorized f32/f64/i64 wrappers with x86 (SSE/AVX via `immintrin.h` and
+cpuid dispatch) and Arm NEON fast paths over a portable fallback. It is
+included into the single runtime translation unit by `init.c`; guard every
+new wrapper with the platform checks already in the file and keep fallbacks
+semantically identical.
 
 ## Change checklist
 
@@ -74,3 +154,9 @@ changing that boundary.
 For public behavior and backend caveats, see [Implementation status](status.md)
 and the [specification index](../spec/index.md). For contribution commands, see
 [Contributing](../CONTRIBUTE.md).
+
+Next:
+
+- [Pipeline](../spec/pipeline.md) — compiler stages and routes.
+- [Compiler debugging](debugging.md) — inspect a failing stage.
+- [Contributing](../CONTRIBUTE.md) — build and verification procedures.

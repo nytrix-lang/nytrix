@@ -21,7 +21,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "code/lang/c/clang.h"
+#include "code/lang/parse/c/clang.h"
 
 static bool ny_codegen_func_profile_enabled(void) {
   const char *env = getenv("NYTRIX_PROFILE_CODEGEN_FUNCS");
@@ -1599,6 +1599,18 @@ static void collect_assigned_names_expr(expr_t *e,
     break;
   case NY_E_BINARY:
   case NY_E_LOGICAL:
+    /*
+     * An assignment `x = ...` must record `x` as an assigned name so that
+     * closures (especially defer bodies) capture it by reference rather than
+     * by value.  Without this, a deferred `x = x + "d"` captures the old
+     * pointer by copy and the mutation never reaches the enclosing local.
+     */
+    if (e->as.binary.op && strcmp(e->as.binary.op, "=") == 0 &&
+        e->as.binary.left && e->as.binary.left->kind == NY_E_IDENT &&
+        e->as.binary.left->as.ident.name) {
+      assigned_name_add(out_names, out_hashes, out_bloom,
+                        e->as.binary.left->as.ident.name);
+    }
     collect_assigned_names_expr(e->as.binary.left, out_names, out_hashes,
                                 out_bloom);
     collect_assigned_names_expr(e->as.binary.right, out_names, out_hashes,
@@ -1816,6 +1828,12 @@ static void collect_assigned_names_stmt(stmt_t *s,
   default:
     break;
   }
+}
+
+void ny_collect_assigned_names_stmt(stmt_t *s, assigned_name_list *out_names,
+                                    assigned_hash_list *out_hashes,
+                                    uint64_t out_bloom[4]) {
+  collect_assigned_names_stmt(s, out_names, out_hashes, out_bloom);
 }
 
 typedef struct type_scratch_t {
@@ -2828,7 +2846,15 @@ void gen_func(codegen_t *cg, stmt_t *fn, const char *name, scope *scopes,
             (captures->data[i].is_mut &&
              assigned_name_contains(&assigned_names, &assigned_hashes,
                                     assigned_bloom, captures->data[i].name));
-        if (needs_slot) {
+        if (captures->data[i].capture_by_ref && src) {
+          LLVMValueRef captured_ref = LLVMBuildIntToPtr(
+              cg->builder, val, ny_ptr_i64_ty(cg), "defer_capture_ref");
+          scope_bind(cg, scopes, fd, captures->data[i].name, captured_ref,
+                     captures->data[i].stmt_t ? captures->data[i].stmt_t : fn,
+                     true, captures->data[i].type_name, true);
+          scopes[fd].vars.data[scopes[fd].vars.len - 1].is_volatile_capture =
+              true;
+        } else if (needs_slot) {
           if (captures->data[i].is_mut && src) {
             scope_bind(cg, scopes, fd, captures->data[i].name, src,
                        captures->data[i].stmt_t ? captures->data[i].stmt_t : fn,

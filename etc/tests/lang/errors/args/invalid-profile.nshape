@@ -6,7 +6,7 @@ shape args-invalid-profile {
   expect compile_fail
 
   flags "--profile=peaked"
-  expect_message "invalid optimization profile: peaked"
+  expect_message "invalid --opt-profile 'peaked'"
   source ny <<'NY'
 use core
 print("ok")

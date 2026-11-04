@@ -28,8 +28,9 @@ typedef struct ny_llvm_context_t {
   bool emit_entry;
   const char *default_filename;
   const char *(*origin_section)(void *userdata, const char *symbol);
-  LLVMMetadataRef (*debug_scope)(void *userdata, const char *filename,
-                                 unsigned line, unsigned column);
+  LLVMMetadataRef (*debug_scope)(void *userdata, LLVMMetadataRef parent_scope,
+                                 const char *filename, unsigned line,
+                                 unsigned column);
   LLVMMetadataRef (*debug_subprogram)(void *userdata, LLVMValueRef function,
                                       const char *name, const char *filename,
                                       unsigned line, unsigned column);

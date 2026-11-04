@@ -1,0 +1,30 @@
+shape x11_client_close {
+  family "runtime/input"
+  generator "embedded"
+  features ["ny", "window", "x11", "native-events"]
+  template ny-test-case
+  expect compile_and_run
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect_stdout "1\n15\ntrue\nX11-CLIENT-CLOSE-OK"
+  source ny <<'NY'
+use core
+use core.os.ui.window.platform.linux.x11 as x11
+use core.os.ui.window.event as event
+mut dict win = {"handle": 4194307, "wm_protocols": 231, "wm_delete": 233}
+def packet = zalloc(192)
+store32(packet, x11.ClientMessage, 0)
+store64_h(packet, 4194307, 32)
+store64_h(packet, 231, 40)
+store32(packet, 32, 48)
+store64_h(packet, 233, 56)
+def translated = x11.translate_event(win, packet)
+free(packet)
+def events = translated.get(1, [])
+print(events.len)
+print(event.event_type(events.get(0)))
+print(bool(translated.get(0).get("should_close", false)))
+def queued = x11._x11_extend_events_coalesced([], events)
+assert(queued.len == 1 && event.event_type(queued.get(0)) == 15, "close survives event collection")
+print("X11-CLIENT-CLOSE-OK")
+NY
+}

@@ -4,7 +4,6 @@
 #include "base/common.h"
 #include "base/compat.h"
 #include "base/debug.h"
-#include "code/backend/ir/internal.h"
 #include "code/backend/ir/opt/loop.h"
 #include "code/backend/ir/opt/util.h"
 #include <stdio.h>
@@ -56,6 +55,14 @@ static bool licm_find_preheader(const nyr_cfg_t *cfg, const bool *in_loop,
     size_t pred = cfg->pred_blocks[p];
     if (in_loop[pred])
       continue;
+    /*
+     * A second backedge to this header is another loop latch, not a
+     * preheader. Treating it as one can hoist a value into a block reached
+     * only by one arm while sibling latch paths still use the original
+     * definition.
+     */
+    if (nyr_cfg_is_backedge(cfg, pred, header))
+      return false;
     preheader = pred;
     outside++;
   }
@@ -116,8 +123,8 @@ static bool licm_operand_invariant(const nyr_func_t *f, const nyr_cfg_t *cfg,
 static bool licm_division_ranges(const nyr_func_t *f,
                                  const nyr_scev_info_t *scev, const int *defs,
                                  size_t at, const nyr_inst_t *in,
-                                 const nyr_value_fact_t *facts,
-                                 int value_count, bool *out_nonzero,
+                                 const nyr_value_fact_t *facts, int value_count,
+                                 bool *out_nonzero,
                                  bool *out_no_signed_overflow) {
   if (!in || !facts || value_count <= 0 || in->a < 0 || in->b < 0 ||
       in->a >= value_count || in->b >= value_count)
@@ -157,11 +164,9 @@ licm_division_nontrapping(const nyr_func_t *f, const nyr_scev_info_t *scev,
 }
 
 static size_t licm_label_block(const nyr_cfg_t *cfg, int64_t label) {
-  if (!cfg)
-    return SIZE_MAX;
-  for (size_t block = 0; block < cfg->block_count; ++block)
-    if (cfg->block_label[block] == label)
-      return block;
+  size_t block = 0;
+  if (nyr_cfg_block_for_label(cfg, label, &block))
+    return block;
   return SIZE_MAX;
 }
 
@@ -371,17 +376,59 @@ static bool licm_memory_address_component(const nyr_func_t *f, int value,
   return false;
 }
 
-static bool licm_candidate(const nyr_func_t *f, const nyr_scev_info_t *scev,
-                           const int *defs, size_t at, const nyr_inst_t *in,
-                           bool loop_writes_memory, bool stable_managed_read,
-                           bool trap_equivalent_read,
-                           const nyr_value_fact_t *facts,
-                           const bool *stored_local, size_t local_count,
-                           const bool *addr_taken_local, int value_count,
-                           const bool *loop_defined, const bool *scheduled,
-                           const nyr_cfg_t *cfg, const bool *in_loop,
-                           size_t header, size_t preheader, size_t insert_at,
-                           nyr_inst_t *out_guard, size_t *out_guard_index) {
+static bool licm_float_memory_address_component(const nyr_func_t *f, int value,
+                                                unsigned depth) {
+  if (!f || value < 0 || depth > 12)
+    return false;
+  for (size_t i = 0; i < f->len; ++i) {
+    const nyr_inst_t *user = &f->data[i];
+    if (user->op == NYIR_NOP ||
+        (user->a != value && user->b != value && user->c != value &&
+         user->d != value && user->e != value && user->f != value))
+      continue;
+    if (((user->op == NYIR_LOAD_I64 || user->op == NYIR_STORE_I64) &&
+         user->scalar_class == NYIR_SCALAR_F64 && user->a == value) ||
+        ((user->op == NYIR_VEC4_LOAD_F64 ||
+         user->op == NYIR_VEC4_STORE_F64 ||
+         user->op == NYIR_VEC8_LOAD_F32 ||
+         user->op == NYIR_VEC8_STORE_F32) && user->a == value))
+      return true;
+    if (user->dst >= 0 &&
+        (user->op == NYIR_ADD_I64 || user->op == NYIR_SUB_I64 ||
+         user->op == NYIR_SHL_I64 || user->op == NYIR_MUL_I64 ||
+         user->op == NYIR_COPY) &&
+        licm_float_memory_address_component(f, user->dst, depth + 1))
+      return true;
+  }
+  return false;
+}
+
+static bool licm_uses_stay_in_loop(const nyr_use_def_t *uses,
+                                   const nyr_func_t *f, const nyr_cfg_t *cfg,
+                                   const bool *in_loop, int value) {
+  if (!uses || !f || !cfg || !in_loop || value < 0 ||
+      (size_t)value >= uses->value_count)
+    return false;
+  for (size_t use = uses->offsets[value]; use < uses->offsets[value + 1];
+       ++use) {
+    size_t user = uses->users[use];
+    if (user >= f->len || !cfg->inst_block ||
+        cfg->inst_block[user] >= cfg->block_count ||
+        !in_loop[cfg->inst_block[user]])
+      return false;
+  }
+  return true;
+}
+
+static bool licm_candidate(
+    const nyr_func_t *f, const nyr_scev_info_t *scev, const int *defs,
+    size_t at, const nyr_inst_t *in, bool loop_writes_memory,
+    bool stable_managed_read, bool trap_equivalent_read,
+    const nyr_value_fact_t *facts, const bool *stored_local, size_t local_count,
+    const bool *addr_taken_local, int value_count, const bool *loop_defined,
+    const bool *scheduled, const nyr_use_def_t *uses, const nyr_cfg_t *cfg,
+    const bool *in_loop, size_t header, size_t preheader, size_t insert_at,
+    nyr_inst_t *out_guard, size_t *out_guard_index) {
   if (!in)
     return false;
   if (out_guard)
@@ -430,9 +477,18 @@ static bool licm_candidate(const nyr_func_t *f, const nyr_scev_info_t *scev,
   }
   if (in->dst < 0)
     return false;
+  /*
+   * Hoisting a definition into the loop preheader is invalid when any use
+   * remains on a path that reaches that preheader (for example, a dispatch
+   * comparison before a loop selected as the hoist target).
+   */
+  if (!licm_uses_stay_in_loop(uses, f, cfg, in_loop, in->dst))
+    return false;
   unsigned effects = nyr_effective_effects(in);
   bool direct_symbol_slot_read =
-      in->op == NYIR_LOAD_I64 && !(in->flags & NYIR_INST_F_MEM_BYTE) &&
+      in->op == NYIR_LOAD_I64 &&
+      !(in->flags &
+        (NYIR_INST_F_MEM_BYTE | NYIR_INST_F_MEM_U16 | NYIR_INST_F_MEM_I32)) &&
       licm_direct_symbol_slot_address(f, defs, in->a, 0);
   const unsigned forbidden =
       NYIR_EFFECT_WRITE_MEMORY | NYIR_EFFECT_WRITE_LOCAL | NYIR_EFFECT_CONTROL |
@@ -475,8 +531,12 @@ static bool licm_candidate(const nyr_func_t *f, const nyr_scev_info_t *scev,
       ((stored_local && stored_local[in->imm]) ||
        (addr_taken_local && addr_taken_local[in->imm])))
     return false;
-  if (in->op == NYIR_ADD_I64 && in->dst >= 0 &&
-      licm_memory_address_component(f, in->dst, 0))
+  if ((in->op == NYIR_ADD_I64 && in->dst >= 0 &&
+      licm_memory_address_component(f, in->dst, 0) &&
+      !(in->flags & NYIR_INST_F_AFFINE_ADDR_BASE)) ||
+      (in->op == NYIR_SHL_I64 && in->dst >= 0 &&
+       licm_float_memory_address_component(f, in->dst, 0) &&
+       !(in->flags & NYIR_INST_F_AFFINE_ADDR_BASE)))
     return false;
   const int inputs[] = {in->a, in->b, in->c, in->d, in->e, in->f};
   for (size_t k = 0; k < sizeof(inputs) / sizeof(inputs[0]); ++k)
@@ -498,11 +558,10 @@ static bool licm_candidate(const nyr_func_t *f, const nyr_scev_info_t *scev,
  * preheader has no bypass edge. Other in-loop reads require a statically
  * positive trip count and dominance of the latch and every non-header exit.
  */
-static bool licm_trap_equivalent_read(const nyr_cfg_t *cfg,
-                                      const bool *in_loop, size_t header,
-                                      size_t latch, size_t preheader,
-                                      size_t call_block, bool is_call,
-                                      bool positive_trip) {
+static bool licm_trap_equivalent_read(const nyr_cfg_t *cfg, const bool *in_loop,
+                                      size_t header, size_t latch,
+                                      size_t preheader, size_t call_block,
+                                      bool is_call, bool positive_trip) {
   if (!cfg || !in_loop || header >= cfg->block_count ||
       latch >= cfg->block_count || preheader >= cfg->block_count ||
       call_block >= cfg->block_count)
@@ -593,8 +652,7 @@ static bool licm_tbuf_len_header_stable(const nyr_func_t *f,
   return true;
 }
 
-static bool licm_grow_moves(nyr_licm_move_t **moves, size_t *cap,
-                            size_t need) {
+static bool licm_grow_moves(nyr_licm_move_t **moves, size_t *cap, size_t need) {
   if (need <= *cap)
     return true;
   size_t next = *cap ? *cap * 2u : 16u;
@@ -727,7 +785,7 @@ static bool licm_hoist_one(nyr_func_t *f, bool *changed) {
       size_t header = cfg.succ_blocks[e];
       if (!nyr_cfg_is_backedge(&cfg, latch, header) ||
           !nyr_cfg_natural_loop_blocks(&cfg, latch, header, in_loop,
-                                        cfg.block_count))
+                                       cfg.block_count))
         continue;
       size_t preheader = SIZE_MAX;
       if (!licm_find_preheader(&cfg, in_loop, header, &preheader)) {
@@ -804,8 +862,10 @@ static bool licm_hoist_one(nyr_func_t *f, bool *changed) {
       bool *selected_inst = calloc(f->len, sizeof(*selected_inst));
       nyr_value_fact_t *facts = calloc((size_t)f->next_value, sizeof(*facts));
       int *defs = malloc((size_t)f->next_value * sizeof(*defs));
+      nyr_use_def_t uses = {0};
       if ((local_count && (!stored_local || !addr_taken_local)) ||
           !loop_defined || !scheduled || !selected_inst || !facts || !defs ||
+          !nyr_build_use_def(f, &uses) ||
           !nyr_analyze_values(f, facts, (size_t)f->next_value, NULL, 0)) {
         free(stored_local);
         free(addr_taken_local);
@@ -814,6 +874,7 @@ static bool licm_hoist_one(nyr_func_t *f, bool *changed) {
         free(selected_inst);
         free(facts);
         free(defs);
+        nyr_use_def_free(&uses);
         free(in_loop);
         nyr_cfg_free(&cfg);
         nyr_scev_free(&scev);
@@ -885,8 +946,8 @@ static bool licm_hoist_one(nyr_func_t *f, bool *changed) {
             bool candidate = licm_candidate(
                 f, &scev, defs, i, in, loop_writes_memory, stable_managed_read,
                 trap_equivalent_read, facts, stored_local, local_count,
-                addr_taken_local, f->next_value, loop_defined, scheduled, &cfg,
-                in_loop, header, preheader, preheader_insert_at,
+                addr_taken_local, f->next_value, loop_defined, scheduled, &uses,
+                &cfg, in_loop, header, preheader, preheader_insert_at,
                 &zero_division_guard, &zero_division_guard_index);
             if (candidate && !selected_inst[i] && nyr_licm_trace_enabled())
               ny_dbg_heuristic_event(
@@ -941,6 +1002,7 @@ static bool licm_hoist_one(nyr_func_t *f, bool *changed) {
               free(selected_inst);
               free(facts);
               free(defs);
+              nyr_use_def_free(&uses);
               free(in_loop);
               nyr_cfg_free(&cfg);
               nyr_scev_free(&scev);
@@ -956,9 +1018,9 @@ static bool licm_hoist_one(nyr_func_t *f, bool *changed) {
                       (move_count - guard_insert_at) * sizeof(*moves));
               moves[guard_insert_at] =
                   (nyr_licm_move_t){.index = zero_division_guard_index,
-                                     .inst = zero_division_guard,
-                                     .erase_original = true,
-                                     .is_guard = true};
+                                    .inst = zero_division_guard,
+                                    .erase_original = true,
+                                    .is_guard = true};
               ++move_count;
             }
             if (needs_continuation_label) {
@@ -970,20 +1032,22 @@ static bool licm_hoist_one(nyr_func_t *f, bool *changed) {
                       (move_count - label_insert_at) * sizeof(*moves));
               moves[label_insert_at] =
                   (nyr_licm_move_t){.index = SIZE_MAX,
-                                     .inst = {.op = NYIR_LABEL,
-                                              .dst = -1,
-                                              .a = -1,
-                                              .b = -1,
-                                              .c = -1,
-                                              .d = -1,
-                                              .e = -1,
-                                              .f = -1,
-                                              .imm = continuation_label},
-                                     .is_continuation_label = true};
+                                    .inst = {.op = NYIR_LABEL,
+                                             .dst = -1,
+                                             .a = -1,
+                                             .b = -1,
+                                             .c = -1,
+                                             .d = -1,
+                                             .e = -1,
+                                             .f = -1,
+                                             .imm = continuation_label},
+                                    .is_continuation_label = true};
               ++move_count;
             }
+            nyr_inst_t moved = *in;
+            moved.flags &= ~NYIR_INST_F_AFFINE_ADDR_BASE;
             moves[move_count++] = (nyr_licm_move_t){
-                .index = i, .inst = *in, .erase_original = true};
+                .index = i, .inst = moved, .erase_original = true};
             selected_inst[i] = true;
             if (in->dst >= 0)
               scheduled[in->dst] = true;
@@ -1001,6 +1065,7 @@ static bool licm_hoist_one(nyr_func_t *f, bool *changed) {
         free(selected_inst);
         free(facts);
         free(defs);
+        nyr_use_def_free(&uses);
         continue;
       }
 
@@ -1022,8 +1087,7 @@ static bool licm_hoist_one(nyr_func_t *f, bool *changed) {
           size_t before = move_count;
           size_t w = 0;
           for (size_t k = 0; k < move_count; ++k) {
-            if (!(nyr_effective_effects(&moves[k].inst) &
-                  NYIR_EFFECT_MAY_TRAP))
+            if (!(nyr_effective_effects(&moves[k].inst) & NYIR_EFFECT_MAY_TRAP))
               moves[w++] = moves[k];
           }
           move_count = w;
@@ -1057,6 +1121,7 @@ static bool licm_hoist_one(nyr_func_t *f, bool *changed) {
         free(selected_inst);
         free(facts);
         free(defs);
+        nyr_use_def_free(&uses);
         free(in_loop);
         nyr_cfg_free(&cfg);
         nyr_scev_free(&scev);
@@ -1079,6 +1144,7 @@ static bool licm_hoist_one(nyr_func_t *f, bool *changed) {
         free(selected_inst);
         free(facts);
         free(defs);
+        nyr_use_def_free(&uses);
         free(in_loop);
         nyr_cfg_free(&cfg);
         nyr_scev_free(&scev);
@@ -1094,6 +1160,7 @@ static bool licm_hoist_one(nyr_func_t *f, bool *changed) {
         free(selected_inst);
         free(facts);
         free(defs);
+        nyr_use_def_free(&uses);
         free(in_loop);
         nyr_cfg_free(&cfg);
         nyr_scev_free(&scev);
@@ -1124,13 +1191,13 @@ static bool licm_hoist_one(nyr_func_t *f, bool *changed) {
           continue;
         size_t i = moves[k].index;
         f->data[i] = (nyr_inst_t){.op = NYIR_NOP,
-                                   .dst = -1,
-                                   .a = -1,
-                                   .b = -1,
-                                   .c = -1,
-                                   .d = -1,
-                                   .e = -1,
-                                   .f = -1};
+                                  .dst = -1,
+                                  .a = -1,
+                                  .b = -1,
+                                  .c = -1,
+                                  .d = -1,
+                                  .e = -1,
+                                  .f = -1};
       }
       memmove(&f->data[at + move_count], &f->data[at],
               (f->len - at) * sizeof(*f->data));
@@ -1146,6 +1213,7 @@ static bool licm_hoist_one(nyr_func_t *f, bool *changed) {
       free(selected_inst);
       free(facts);
       free(defs);
+      nyr_use_def_free(&uses);
       free(in_loop);
       nyr_cfg_free(&cfg);
       nyr_scev_free(&scev);
@@ -1161,6 +1229,12 @@ static bool licm_hoist_one(nyr_func_t *f, bool *changed) {
   return true;
 }
 
+static void licm_clear_affine_address_markers(nyr_func_t *f) {
+  for (size_t i = 0; i < f->len; ++i)
+    if (f->data[i].op == NYIR_ADD_I64)
+      f->data[i].flags &= ~NYIR_INST_F_AFFINE_ADDR_BASE;
+}
+
 bool nyr_licm(nyr_func_t *f) {
   if (!f || f->len < 4 || f->next_value <= 0)
     return true;
@@ -1171,14 +1245,21 @@ bool nyr_licm(nyr_func_t *f) {
       break;
     }
   }
-  if (!has_loop_branches)
+  if (!has_loop_branches) {
+    licm_clear_affine_address_markers(f);
     return true;
+  }
   for (int iter = 0; iter < 16; ++iter) {
     bool changed = false;
-    if (!licm_hoist_one(f, &changed))
+    if (!licm_hoist_one(f, &changed)) {
+      licm_clear_affine_address_markers(f);
       return false;
-    if (!changed)
+    }
+    if (!changed) {
+      licm_clear_affine_address_markers(f);
       return true;
+    }
   }
+  licm_clear_affine_address_markers(f);
   return true;
 }

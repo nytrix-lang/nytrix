@@ -196,6 +196,18 @@ static bool nyr_ident_local_is_raw_int(nyr_builder_t *b, const expr_t *e) {
   return local && !local->is_any && local->semantic_rep == NY_SEM_REP_RAW_INT;
 }
 
+/* Top-level integer cells keep the raw i64 ABI selected by their literal
+ * initializer, including mutable globals whose value is subsequently stored.
+ * This proof is intentionally limited to literal-initialized globals. */
+static bool nyr_ident_global_is_raw_int(nyr_builder_t *b, const expr_t *e) {
+  if (!e || e->kind != NY_E_IDENT || !e->as.ident.name ||
+      nyr_find_local_nearest(b, e->as.ident.name))
+    return false;
+  const expr_t *init = nyr_find_top_level_value(b, e->as.ident.name);
+  return init && init->kind == NY_E_LITERAL &&
+         init->as.literal.kind == NY_LIT_INT && init->tok.kind != NY_T_NIL;
+}
+
 static bool nyr_expr_is_dynamic_sequence_value(nyr_builder_t *b,
                                                const expr_t *e) {
   if (!e)
@@ -385,7 +397,7 @@ static bool nyr_expr_is_bitwise_tree(const nyr_builder_t *b, const expr_t *e,
     return nyr_is_bitwise_operator(e->as.binary.op);
   if (e->kind != NY_E_IDENT)
     return false;
-  const expr_t *value = nyr_find_top_level_value(b, e->as.ident.name);
+  const expr_t *value = nyr_find_unshadowed_top_level_value(b, e->as.ident.name);
   return value && value != e && nyr_expr_is_bitwise_tree(b, value, depth + 1);
 }
 
@@ -429,7 +441,7 @@ static bool nyr_expr_is_immutable_nil(const nyr_builder_t *b, const expr_t *e,
   }
   if (global_symbol || nyr_globaltab_name_tail(e->as.ident.name))
     return false;
-  const expr_t *value = nyr_find_top_level_value(b, e->as.ident.name);
+  const expr_t *value = nyr_find_unshadowed_top_level_value(b, e->as.ident.name);
   return value && value != e && nyr_expr_is_immutable_nil(b, value, depth + 1);
 }
 
@@ -1571,6 +1583,12 @@ scalar_multiply:
             e->as.binary.left->as.literal.as.i <= -(INT64_C(1) << 62)))
               ? nyr_emit_const(b, e->as.binary.left->as.literal.as.i)
               : nyr_lower_expr(b, e->as.binary.left);
+  /* Preserve the scalar index result before lowering an identifier peer.
+   * In top-level code, an inferred mutable integer can be constant-folded at
+   * its use site. Keeping a checked sequence load in the same expression
+   * otherwise lets the index's dynamic-list provenance bleed into that
+   * scalar comparison; assigning the index to a local first avoids the
+   * mismatch, so make that value boundary explicit here. */
   int rhs = (raw_right && e->as.binary.right &&
              e->as.binary.right->kind == NY_E_LITERAL &&
              e->as.binary.right->as.literal.kind == NY_LIT_INT &&
@@ -1584,6 +1602,26 @@ scalar_multiply:
     b->f64_context_depth--;
   if (a < 0 || rhs < 0)
     return -1;
+  /* Both accessors already obey the canonical value ABI. Contextual element
+   * types must not decode one accessor while leaving its peer tagged. Keep
+   * dynamic equality here so strings and containers retain value semantics. */
+  if (is_cmp && (cmp == NYIR_CMP_EQ || cmp == NYIR_CMP_NE) &&
+      e->as.binary.left && e->as.binary.right &&
+      (nyr_attached_get_receiver(e->as.binary.left) ||
+       (e->as.binary.left->kind == NY_E_CALL &&
+        ny_native_call_leaf(e->as.binary.left) &&
+        strcmp(ny_native_call_leaf(e->as.binary.left), "get") == 0)) &&
+      (nyr_attached_get_receiver(e->as.binary.right) ||
+       (e->as.binary.right->kind == NY_E_CALL &&
+        ny_native_call_leaf(e->as.binary.right) &&
+        strcmp(ny_native_call_leaf(e->as.binary.right), "get") == 0)) &&
+      nyr_value_scalar_class(b, a) == NYIR_SCALAR_I64_TAGGED &&
+      nyr_value_scalar_class(b, rhs) == NYIR_SCALAR_I64_TAGGED) {
+    int equal = nyr_emit_runtime_call(b, "rt_any_eq", a, rhs, -1, 2, 0);
+    int true_imm = nyr_emit_const(b, NY_IMM_TRUE);
+    return equal < 0 || true_imm < 0
+               ? -1 : nyr_emit_cmp_i64(b, cmp, equal, true_imm);
+  }
   /* A nested attached-get result is a container payload even when its
    * producer's conservative scalar class later clears `dynamic_result`.
    * Resolve sequence equality at the semantic boundary, before those
@@ -1969,10 +2007,12 @@ scalar_multiply:
       !right_bigint &&
       ((nyr_index_read_is_proven_scalar(b, e->as.binary.left) &&
         (right_int_literal ||
-         nyr_ident_local_is_raw_int(b, e->as.binary.right))) ||
+         nyr_ident_local_is_raw_int(b, e->as.binary.right) ||
+         nyr_ident_global_is_raw_int(b, e->as.binary.right))) ||
        (nyr_index_read_is_proven_scalar(b, e->as.binary.right) &&
         (left_int_literal ||
-         nyr_ident_local_is_raw_int(b, e->as.binary.left))))) {
+         nyr_ident_local_is_raw_int(b, e->as.binary.left) ||
+         nyr_ident_global_is_raw_int(b, e->as.binary.left))))) {
     return nyr_ir_emit(
         &b->nyir,
         (nyr_inst_t){
@@ -2000,11 +2040,84 @@ scalar_multiply:
                     (local->semantic_rep == NY_SEM_REP_RAW_INT ||
                      local->semantic_rep != NY_SEM_REP_TAGGED_DYNAMIC);
   }
+  /* Two genuinely dynamic operands must stay in the dynamic add helper.
+   * A `get()` from a list of strings can carry a string at runtime even when
+   * inference leaves its result as `any`; decoding it as i64 turns the string
+   * pointer into a numeric digest during chained concatenation. */
+  if (!is_cmp && e->as.binary.op && strcmp(e->as.binary.op, "+") == 0 &&
+      left_any && right_any && !left_f64 && !right_f64 && !left_f32 &&
+      !right_f32) {
+    if (nyr_value_scalar_class(b, a) == NYIR_SCALAR_I64_RAW &&
+        nyr_expr_is_bool(b, e->as.binary.left)) {
+      a = nyr_box_bool(b, a);
+      if (a < 0)
+        return -1;
+    }
+    if (nyr_value_scalar_class(b, rhs) == NYIR_SCALAR_I64_RAW &&
+        nyr_expr_is_bool(b, e->as.binary.right)) {
+      rhs = nyr_box_bool(b, rhs);
+      if (rhs < 0)
+        return -1;
+    }
+    return nyr_emit_runtime_call(b, "rt_any_add", a, rhs, -1, 2,
+                                 NYIR_SCALAR_I64_TAGGED);
+  }
   /* An untyped/any sequence index is returned as a tagged dynamic word by
    * the managed-sequence accessor.  When the surrounding arithmetic is a
    * scalar result, normalize those operands before the raw NYIR operation;
    * otherwise `1 + 3` is compiled as the tagged words `3 + 7`.  Preserve the
    * dynamic ABI when the expression itself is returned as any. */
+  /* A `str + any` chain is dynamic concatenation even when the previous
+   * string link is physically a C-string pointer and the `any` came from a
+   * generic list get.  Keep the tagged operand intact; integer-specialized
+   * list arithmetic must not reinterpret a string element as a raw number. */
+  if (!is_cmp && e->as.binary.op &&
+      strcmp(e->as.binary.op, "+") == 0 &&
+      ((left_cstr &&
+        (right_any || right_dynamic_result || right_raw_i64 ||
+         (e->as.binary.right && e->as.binary.right->kind == NY_E_CALL &&
+          ny_native_call_leaf(e->as.binary.right) &&
+          strcmp(ny_native_call_leaf(e->as.binary.right), "get") == 0))) ||
+       (right_cstr && (left_any || left_dynamic_result || left_raw_i64)))) {
+    if (left_cstr && nyr_value_scalar_class(b, rhs) == NYIR_SCALAR_I64_RAW &&
+        nyr_expr_is_bool(b, e->as.binary.right)) {
+      rhs = nyr_box_bool(b, rhs);
+      if (rhs < 0)
+        return -1;
+    } else if (left_cstr &&
+               nyr_value_scalar_class(b, rhs) == NYIR_SCALAR_I64_RAW) {
+      rhs = nyr_emit_runtime_call(b, "rt_tag", rhs, -1, -1, 1,
+                                  NYIR_SCALAR_I64_TAGGED);
+      if (rhs < 0)
+        return -1;
+    }
+    if (right_cstr && nyr_value_scalar_class(b, a) == NYIR_SCALAR_I64_RAW &&
+        nyr_expr_is_bool(b, e->as.binary.left)) {
+      a = nyr_box_bool(b, a);
+      if (a < 0)
+        return -1;
+    } else if (right_cstr &&
+               nyr_value_scalar_class(b, a) == NYIR_SCALAR_I64_RAW) {
+      a = nyr_emit_runtime_call(b, "rt_tag", a, -1, -1, 1,
+                                NYIR_SCALAR_I64_TAGGED);
+      if (a < 0)
+        return -1;
+    }
+    if (left_cstr) {
+      a = nyr_emit_runtime_call(b, "rt_cstr_to_str", a, -1, -1, 1,
+                                NYIR_SCALAR_I64_TAGGED);
+      if (a < 0)
+        return -1;
+    }
+    if (right_cstr) {
+      rhs = nyr_emit_runtime_call(b, "rt_cstr_to_str", rhs, -1, -1, 1,
+                                  NYIR_SCALAR_I64_TAGGED);
+      if (rhs < 0)
+        return -1;
+    }
+    return nyr_emit_runtime_call(b, "rt_any_add", a, rhs, -1, 2,
+                                 NYIR_SCALAR_I64_TAGGED);
+  }
   bool left_dynamic_index =
       e->as.binary.left && e->as.binary.left->kind == NY_E_INDEX &&
       e->as.binary.left->as.index.target &&
@@ -2417,6 +2530,7 @@ scalar_multiply:
   if (tag_operand && !bitwise_op && !left_any && right_any && !left_f64 &&
       !left_f32 && !left_cstr && e->as.binary.left->kind == NY_E_IDENT &&
       !nyr_expr_is_raw_dynamic_read(b, e->as.binary.right) &&
+      !nyr_expr_is_bool(b, e->as.binary.left) &&
       e->as.binary.left->semantic.rep == NY_SEM_REP_RAW_INT &&
       !(e->as.binary.op && strcmp(e->as.binary.op, "+") == 0)) {
     a = nyr_emit_runtime_call(b, "rt_tag", a, -1, -1, 1, 0);
@@ -2426,6 +2540,7 @@ scalar_multiply:
   if (tag_operand && !bitwise_op && left_any && !right_any && !right_f64 &&
       !right_f32 && !right_cstr && e->as.binary.right->kind == NY_E_IDENT &&
       !nyr_expr_is_raw_dynamic_read(b, e->as.binary.left) &&
+      !nyr_expr_is_bool(b, e->as.binary.right) &&
       e->as.binary.right->semantic.rep == NY_SEM_REP_RAW_INT &&
       !(e->as.binary.op && strcmp(e->as.binary.op, "+") == 0)) {
     rhs = nyr_emit_runtime_call(b, "rt_tag", rhs, -1, -1, 1, 0);
@@ -2766,6 +2881,21 @@ scalar_multiply:
           return -1;
         rhs = conv;
       }
+      /* Raw native booleans are 1/0, but rt_tag interprets those words as
+       * integers. Preserve their language type when comparing against an
+       * any-valued operand (which may hold NY_IMM_TRUE/NY_IMM_FALSE). */
+      if (nyr_value_scalar_class(b, a) == NYIR_SCALAR_I64_RAW &&
+          nyr_expr_is_bool(b, e->as.binary.left)) {
+        a = nyr_box_bool(b, a);
+        if (a < 0)
+          return -1;
+      }
+      if (nyr_value_scalar_class(b, rhs) == NYIR_SCALAR_I64_RAW &&
+          nyr_expr_is_bool(b, e->as.binary.right)) {
+        rhs = nyr_box_bool(b, rhs);
+        if (rhs < 0)
+          return -1;
+      }
       /* Unary negatives and computed integer peers are raw producers too,
        * even though the earlier literal-only normalization misses them. The
        * dynamic comparator requires canonical values on both sides. */
@@ -2853,7 +2983,7 @@ scalar_multiply:
      * two tagged values, so a raw odd operand is decoded a second time. */
     if ((left_dynamic_index || right_dynamic_index) &&
         (left_raw_i64 || right_raw_i64) && !left_f64 && !right_f64 &&
-        !left_f32 && !right_f32) {
+        !left_f32 && !right_f32 && !left_cstr && !right_cstr) {
       if ((left_any || left_dynamic_result) && !left_dynamic_index &&
           !left_raw_i64 &&
           !nyr_expr_is_raw_dynamic_read(b, e->as.binary.left)) {
@@ -2905,8 +3035,8 @@ scalar_multiply:
     if (left_raw_i64 && (right_any || right_dynamic_result) &&
         (right_is_raw_list_get ||
          nyr_expr_is_raw_dynamic_read(b, e->as.binary.right)) &&
-        (!computed_dynamic_right || !right_raw_i64) && !left_f64 &&
-        !right_f64 && !left_f32 && !right_f32) {
+        (!computed_dynamic_right || !right_raw_i64) && !left_cstr &&
+        !right_cstr && !left_f64 && !right_f64 && !left_f32 && !right_f32) {
       bool decoded_here = false;
       if (!right_is_raw_list_get &&
           !nyr_expr_is_raw_dynamic_read(b, e->as.binary.right)) {
@@ -2939,8 +3069,8 @@ scalar_multiply:
     if (right_raw_i64 && (left_any || left_dynamic_result) &&
         (left_is_raw_list_get ||
          nyr_expr_is_raw_dynamic_read(b, e->as.binary.left)) &&
-        (!computed_dynamic_left || !left_raw_i64) && !left_f64 && !right_f64 &&
-        !left_f32 && !right_f32) {
+        (!computed_dynamic_left || !left_raw_i64) && !left_cstr &&
+        !right_cstr && !left_f64 && !right_f64 && !left_f32 && !right_f32) {
       bool decoded_here = false;
       if (!left_is_raw_list_get &&
           !nyr_expr_is_raw_dynamic_read(b, e->as.binary.left)) {
@@ -3522,6 +3652,14 @@ scalar_multiply:
     if (!left_f64) {
       if (left_f32) {
         a = nyr_emit_f32_to_f64(b, a);
+      } else if (e->as.binary.left &&
+                 e->as.binary.left->kind == NY_E_LITERAL &&
+                 e->as.binary.left->as.literal.kind == NY_LIT_BOOL) {
+        /* Bool literals use the tagged immediate in ordinary value contexts,
+         * but arithmetic promotes their numeric value (true=1, false=0). */
+        a = nyr_emit_const(b, e->as.binary.left->as.literal.as.b ? 1 : 0);
+        if (a >= 0)
+          a = nyr_emit_i64_to_f64(b, a);
       } else if (left_any ||
                  nyr_value_scalar_class(b, a) == NYIR_SCALAR_I64_TAGGED) {
         /*
@@ -3548,6 +3686,12 @@ scalar_multiply:
     if (!right_f64) {
       if (right_f32) {
         rhs = nyr_emit_f32_to_f64(b, rhs);
+      } else if (e->as.binary.right &&
+                 e->as.binary.right->kind == NY_E_LITERAL &&
+                 e->as.binary.right->as.literal.kind == NY_LIT_BOOL) {
+        rhs = nyr_emit_const(b, e->as.binary.right->as.literal.as.b ? 1 : 0);
+        if (rhs >= 0)
+          rhs = nyr_emit_i64_to_f64(b, rhs);
       } else if (right_any ||
                  nyr_value_scalar_class(b, rhs) == NYIR_SCALAR_I64_TAGGED) {
         /*
@@ -3673,6 +3817,7 @@ scalar_multiply:
                                   ? NYIR_SCALAR_F32
                               : integer_domain && !is_cmp
                                   ? NYIR_SCALAR_I64_RAW
+                              : is_cmp ? NYIR_SCALAR_I64_RAW
                                   : NYIR_SCALAR_UNKNOWN});
   if (v < 0)
     nyr_fail(b, NY_NATIVE_ALLOC_FAIL);

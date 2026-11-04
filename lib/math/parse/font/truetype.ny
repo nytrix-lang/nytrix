@@ -67,8 +67,8 @@ fn _load_u8_h(any p, int off) int {
 fn _load_u16_h(any p, int off) int { load32_h(p, off) & 65535 }
 
 fn _load_i16_h(any p, int off) int {
-   def v = _load_u16_h(p, off)
-   v > 32767 ? (v - 65536) : v
+   def int v = _load_u16_h(p, off)
+   v - ((v & 32768) * 2)
 }
 
 fn _load_u32_h(any p, int off) int { load32_h(p, off) }
@@ -141,7 +141,7 @@ fn load(any data, int index=0) any {
    def face_ptr = malloc(8)
    if !face_ptr { return 0 }
    store64_h(face_ptr, 0, 0)
-   def rc = _ft_new_memory_face(_raw_ptr(_FT_library), data, data.len, index, face_ptr)
+   def int rc = _ft_new_memory_face(_raw_ptr(_FT_library), data, data.len, index, face_ptr)
    if rc != 0 {
       free(face_ptr)
       return 0
@@ -159,14 +159,8 @@ fn load_path(str path, int index=0) any {
    def face_ptr = malloc(8)
    if !face_ptr { return 0 }
    store64_h(face_ptr, 0, 0)
-   def path_c = malloc(path.len + 1)
-   if !path_c {
-      free(face_ptr)
-      return 0
-   }
-   strcpy(path_c, path)
-   def rc = _ft_new_face(_raw_ptr(_FT_library), path_c, index, face_ptr)
-   free(path_c)
+   def ptr path_c = calls.cstr(path)
+   def int rc = _ft_new_face(_raw_ptr(_FT_library), path_c, index, face_ptr)
    if rc != 0 {
       free(face_ptr)
       return 0
@@ -271,24 +265,26 @@ fn _px_val(dict info) int {
 
 fn scale_for_pixel_height(dict info, any pixels) float {
    "Returns the font-space scale required to reach `pixels` of height."
-   if info.get("is_color", false) { return float(pixels) }
-   if !info.get("is_scalable", true) { return 1.0 }
-   def asc = int(info.get("ascender", 0))
-   def dsc = int(info.get("descender", 0))
-   def span = asc - dsc
-   if span <= 0 { return 1.0 }
-   def upm = int(info.get("units_per_em", 2048))
-   if upm <= 0 { return 1.0 }
-   return scale_for_em(info, pixels) * float(upm) / float(span)
+   def bool is_color = info.get("is_color", false) == true
+   def bool scalable = info.get("is_scalable", true) == true
+   def int asc = int(info.get("ascender", 0))
+   def int dsc = int(info.get("descender", 0))
+   def int metric_span = asc - dsc
+   def int upm = int(info.get("units_per_em", 2048))
+   def int safe_span = max(1, metric_span)
+   mut f64 scale = float(pixels) / float(safe_span)
+   if metric_span <= 0 { scale = 1.0 }
+   if is_color { scale = float(pixels) }
+   scale
 }
 
 fn scale_for_em(dict info, any pixels) float {
    "Returns the scale factor that maps the font EM square to `pixels`."
    def px = float(pixels)
-   if !info.get("is_scalable", true) { return 1.0 }
-   def upm = info.get("units_per_em", 2048)
-   if upm <= 0 { return 1.0 }
-   return px / float(upm)
+   def bool scalable = info.get("is_scalable", true) == true
+   def int upm = int(info.get("units_per_em", 2048))
+   def int safe_upm = max(1, upm)
+   px / float(safe_upm)
 }
 
 fn get_vmetrics(dict info) list {
@@ -397,19 +393,19 @@ fn get_glyph_bitmap(dict info, any _scale_x, any scale_y, int gi) any {
    if is_color_font { load_flags = load_flags | 0x100000 }
    def rc = _ft_load_glyph(_raw_ptr(face), gi, load_flags)
    if rc != 0 { return 0 }
-   def face_p = _raw_ptr(face)
+   def ptr face_p = _raw_ptr(face)
    def gs = load64_h(face_p, 152)
    if !gs { return 0 }
-   def gs_p = _raw_ptr(gs)
-   def rows  = _load_i32_h(gs_p, 152)
-   def width = _load_i32_h(gs_p, 156)
-   def pitch = _load_i32_h(gs_p, 160)
+   def ptr gs_p = _raw_ptr(gs)
+   def int rows  = _load_i32_h(gs_p, 152)
+   def int width = _load_i32_h(gs_p, 156)
+   def int pitch = _load_i32_h(gs_p, 160)
    def src   = load64_h(gs_p, 168)
-   def src_p = _raw_ptr(src)
-   def bl_s = _load_i32_h(gs_p, 192)
-   def bt_s = _load_i32_h(gs_p, 196)
-   def mode  = _load_u8_h(gs_p, 178)
-   def pitch_s = pitch
+   def ptr src_p = _raw_ptr(src)
+   def int bl_s = _load_i32_h(gs_p, 192)
+   def int bt_s = _load_i32_h(gs_p, 196)
+   def int mode  = _load_u8_h(gs_p, 178)
+   def int pitch_s = pitch
    if rows <= 0 || width <= 0 {
       mut res = dict(16)
       res["data"] = 0
@@ -440,61 +436,30 @@ fn get_glyph_bitmap(dict info, any _scale_x, any scale_y, int gi) any {
       return res
    }
    memset(bmp, 0, bsize)
-   mut abs_pitch = pitch_s
+   mut int abs_pitch = pitch_s
    if abs_pitch < 0 { abs_pitch = -abs_pitch }
-   mut y = 0
-   while y < rows {
-      mut row_src = 0
-      if pitch_s > 0 { row_src = y * pitch_s } else { row_src = (rows - 1 - y) * abs_pitch }
-      def row_dst = y * width * 4
-      if mode == 7 {
-         mut x = 0
-         while x + 4 <= width {
-            def sx, dx = x * 4, x * 4
-            def p0 = _load_u8_h(src_p, row_src + sx+2)|(_load_u8_h(src_p, row_src + sx+1)<<8)|(_load_u8_h(src_p, row_src + sx)<<16)|(_load_u8_h(src_p, row_src + sx+3)<<24)
-            def p1 = _load_u8_h(src_p, row_src + sx+6)|(_load_u8_h(src_p, row_src + sx+5)<<8)|(_load_u8_h(src_p, row_src + sx+4)<<16)|(_load_u8_h(src_p, row_src + sx+7)<<24)
-            def p2 = _load_u8_h(src_p, row_src + sx+10)|(_load_u8_h(src_p, row_src + sx+9)<<8)|(_load_u8_h(src_p, row_src + sx+8)<<16)|(_load_u8_h(src_p, row_src + sx+11)<<24)
-            def p3 = _load_u8_h(src_p, row_src + sx+14)|(_load_u8_h(src_p, row_src + sx+13)<<8)|(_load_u8_h(src_p, row_src + sx+12)<<16)|(_load_u8_h(src_p, row_src + sx+15)<<24)
-            store32(bmp, p0, row_dst + dx)
-            store32(bmp, p1, row_dst + dx+4)
-            store32(bmp, p2, row_dst + dx+8)
-            store32(bmp, p3, row_dst + dx+12)
-            x += 4
-         }
-         while x < width {
-            def sx, dx = x * 4, x * 4
-            store32(bmp, _load_u8_h(src_p, row_src + sx+2)|(_load_u8_h(src_p, row_src + sx+1)<<8)|(_load_u8_h(src_p, row_src + sx)<<16)|(_load_u8_h(src_p, row_src + sx+3)<<24), row_dst + dx)
-            x += 1
-         }
-      } elif mode == 1 {
-         mut x = 0
-         while x < width {
-            def byte_idx = x >> 3
-            def bit_mask = 0x80 >> (x & 7)
-            def bit_on = (_load_u8_h(src_p, row_src + byte_idx) & bit_mask) != 0
-            def a = bit_on ? 255 : 0
-            store32(bmp, a | (a << 8) | (a << 16) | (a << 24), row_dst + x * 4)
-            x += 1
-         }
-      } else {
-         mut x = 0
-         while x + 4 <= width {
-            def a0, a1 = _load_u8_h(src_p, row_src + x), _load_u8_h(src_p, row_src + x+1)
-            def a2, a3 = _load_u8_h(src_p, row_src + x+2), _load_u8_h(src_p, row_src + x+3)
-            def dx = x * 4
-            store32(bmp, a0 | (a0 << 8) | (a0 << 16) | (a0 << 24), row_dst + dx)
-            store32(bmp, a1 | (a1 << 8) | (a1 << 16) | (a1 << 24), row_dst + dx+4)
-            store32(bmp, a2 | (a2 << 8) | (a2 << 16) | (a2 << 24), row_dst + dx+8)
-            store32(bmp, a3 | (a3 << 8) | (a3 << 16) | (a3 << 24), row_dst + dx+12)
-            x += 4
-         }
-         while x < width {
-            def a = _load_u8_h(src_p, row_src + x)
-            store32(bmp, a | (a << 8) | (a << 16) | (a << 24), row_dst + x * 4)
-            x += 1
+   for row_idx in 0..(rows - 1) {
+      mut int row_src = 0
+      if pitch_s > 0 { row_src = row_idx * pitch_s } else { row_src = (rows - 1 - row_idx) * abs_pitch }
+      def int row_dst = row_idx * width * 4
+      for col_idx in 0..(width - 1) {
+         def int dst = row_dst + col_idx * 4
+         if mode == 7 {
+            def int sx = row_src + col_idx * 4
+            def int pixel = _load_u8_h(src_p, sx+2)|(_load_u8_h(src_p, sx+1)<<8)|(_load_u8_h(src_p, sx)<<16)|(_load_u8_h(src_p, sx+3)<<24)
+            store32(bmp, pixel, dst)
+         } elif mode == 1 {
+            def int byte_idx = col_idx >> 3
+            def int bit_mask = 0x80 >> (col_idx & 7)
+            def bool bit_on = (_load_u8_h(src_p, row_src + byte_idx) & bit_mask) != 0
+            mut int a = 0
+            if bit_on { a = 255 }
+            store32(bmp, a | (a << 8) | (a << 16) | (a << 24), dst)
+         } else {
+            def int a = _load_u8_h(src_p, row_src + col_idx)
+            store32(bmp, a | (a << 8) | (a << 16) | (a << 24), dst)
          }
       }
-      y += 1
    }
    mut res = dict(16)
    res["data"] = bmp

@@ -2,7 +2,7 @@
 #define NYTRIX_EMBED_H
 
 /*
- * Embedding API for hosts such as Lisp and Lua.
+ * Embedding API for hosts
  *
  * This API runs host-authored NYIR functions in the in-process interpreter.
  * It does not parse Ny source. Hosts can build functions with <nyr/nyr.h>,

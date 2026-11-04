@@ -14,14 +14,14 @@
 #include "cmd/ny/test.h"
 #include "code/backend/ir/test/opt/test.h"
 #include "code/backend/native.h"
+#include "code/backend/runtime/runtime.h"
+#include "code/backend/runtime/shared.h"
 #include "code/backend/wire/incremental/incremental.h"
 #include "code/lang/llvm/jit.h"
 #include "code/lang/parse/parser.h"
 #include "code/lang/pipeline.h"
 #include "code/lang/pipeline/native.h"
 #include "code/lang/priv.h"
-#include "code/lang/runtime/runtime.h"
-#include "code/lang/runtime/shared.h"
 #include "code/lang/types/test.h"
 #include <nytrix/nytrix.h>
 #ifndef _WIN32
@@ -43,6 +43,7 @@
 #else
 #include <sys/select.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <unistd.h>
 #ifdef __linux__
 #include <sys/inotify.h>
@@ -1344,6 +1345,17 @@ static void ny_apply_cli_env_config(ny_env_config_t *env, ny_options *opt,
     ny_env_config_set(env, "NYTRIX_HOST_CFLAGS", opt->host_cflags);
   if (opt->host_ldflags)
     ny_env_config_set(env, "NYTRIX_HOST_LDFLAGS", opt->host_ldflags);
+#if !defined(_WIN32)
+  if (opt->llvm_lto) {
+    /*
+     * The native runtime is a host-compiled archive linked beside Nytrix's
+     * generated object. Enable host LTO on both sides of that archive link;
+     * the source-level LLVM/NYIR optimization remains controlled separately.
+     */
+    ny_env_append_unique("NYTRIX_HOST_CFLAGS", "-flto");
+    ny_env_append_unique("NYTRIX_HOST_LDFLAGS", "-flto");
+  }
+#endif
   if (opt->host_triple)
     ny_env_config_set(env, "NYTRIX_HOST_TRIPLE", opt->host_triple);
   if (opt->arm_float_abi)
@@ -1393,15 +1405,121 @@ static void ny_apply_cli_env_config(ny_env_config_t *env, ny_options *opt,
 static bool ny_argv_has_flag(int argc, char **argv, const char *flag) {
   if (!flag || !*flag)
     return false;
-  for (int i = 1; i < argc; ++i) {
+  static const char *const value_options[] = {"--cross",
+                                              "--cross-runner",
+                                              "--profile",
+                                              "--runs",
+                                              "--mode",
+                                              "--native-backend",
+                                              "--native-abi",
+                                              "--heap",
+                                              "--run",
+                                              "--gpu",
+                                              "--gpu-backend",
+                                              "--gpu-offload",
+                                              "--gpu-target",
+                                              "--gpu-min-work",
+                                              "--host-triple",
+                                              "--host-cflags",
+                                              "--host-ldflags",
+                                              "--timeout",
+                                              "--output",
+                                              "-o",
+                                              "-std",
+                                              "--sanitize",
+                                              "--safe-run",
+                                              "--threads",
+                                              "--parallel-min-work",
+                                              "--opt-level",
+                                              "--opt-profile",
+                                              "--target",
+                                              "--completions"};
+  for (int i = 1; i < argc;) {
     const char *a = argv[i];
     if (!a)
+      break;
+    if (strcmp(a, "--") == 0)
+      break;
+    if (strcmp(a, "-c") == 0) {
+      i += i + 1 < argc ? 2 : 1;
       continue;
-
+    }
+    if (a[0] != '-' && a[0] != '\0')
+      break;
     if (ny_arg_match(a, flag, NULL))
       return true;
+    bool takes_value = false;
+    for (size_t j = 0; j < sizeof(value_options) / sizeof(value_options[0]);
+         ++j) {
+      if (strcmp(a, value_options[j]) == 0) {
+        takes_value = true;
+        break;
+      }
+    }
+    bool has_value = i + 1 < argc &&
+                     (argv[i + 1][0] != '-' || strcmp(argv[i + 1], "-") == 0);
+    i += takes_value && has_value ? 2 : 1;
   }
   return false;
+}
+
+static bool ny_cli_takes_value(const char *arg) {
+  static const char *const options[] = {"--cross",
+                                        "--cross-runner",
+                                        "--profile",
+                                        "--runs",
+                                        "--mode",
+                                        "--native-backend",
+                                        "--native-abi",
+                                        "--heap",
+                                        "--run",
+                                        "--gpu",
+                                        "--gpu-backend",
+                                        "--gpu-offload",
+                                        "--gpu-target",
+                                        "--gpu-min-work",
+                                        "--host-triple",
+                                        "--host-cflags",
+                                        "--host-ldflags",
+                                        "--timeout",
+                                        "--output",
+                                        "-o",
+                                        "-std",
+                                        "--sanitize",
+                                        "--safe-run",
+                                        "--threads",
+                                        "--parallel-min-work",
+                                        "--opt-level",
+                                        "--opt-profile",
+                                        "--target",
+                                        "--completions"};
+  for (size_t i = 0; i < sizeof(options) / sizeof(options[0]); ++i)
+    if (strcmp(arg, options[i]) == 0)
+      return true;
+  return false;
+}
+
+static int ny_cli_program_boundary(int argc, char **argv) {
+  bool command_source = false;
+  for (int i = 1; i < argc;) {
+    const char *arg = argv[i] ? argv[i] : "";
+    if (strcmp(arg, "--") == 0)
+      return i;
+    if (strcmp(arg, "-c") == 0) {
+      command_source = true;
+      i += i + 1 < argc ? 2 : 1;
+      continue;
+    }
+    if ((!command_source && (arg[0] != '-' || strcmp(arg, "-") == 0)) ||
+        (command_source && (arg[0] != '-' || strcmp(arg, "-") == 0)))
+      return i;
+    if (ny_cli_takes_value(arg) && i + 1 < argc &&
+        (argv[i + 1][0] != '-' || strcmp(argv[i + 1], "-") == 0))
+      i += 2;
+    else
+      i++;
+  }
+  return argc;
 }
 
 static int ny_apply_unified_color_options(int argc, char **argv, int scan_end,
@@ -1509,6 +1627,8 @@ static int ny_unified_route(const char *command, bool after_leading_args) {
     return after_leading_args ? 8 : 10;
   if (strcmp(command, "lsp") == 0)
     return 9;
+  if (strcmp(command, "nyc") == 0)
+    return 11;
   return 0;
 }
 
@@ -1657,6 +1777,9 @@ static bool ny_try_unified_tool(int argc, char **argv, int *out_rc) {
     *out_rc = 2;
     return true;
   }
+  if (route == 11) {
+    return ny_exec_standalone_tool(argc, argv, cmd_i, "nyc", out_rc) != 0;
+  }
   if (route == 10) {
     *out_rc = ny_pkg_main(argc, argv);
     return true;
@@ -1748,6 +1871,8 @@ static int ny_incremental_selftest(void) {
   ny_dep_graph_t g = {0};
   SELFCHECK(ny_incremental_build_graph(files, 3, &g));
   SELFCHECK(g.node_count == 3);
+  for (ny_dep_node_t *node = g.nodes; node; node = node->next)
+    SELFCHECK(node->fingerprint_valid);
 
   /*
    * simulate a change to the leaf c.ny, then require root+mid to recompile
@@ -1775,6 +1900,8 @@ static int ny_incremental_selftest(void) {
   ny_dep_graph_t loaded = {0};
   SELFCHECK(ny_incremental_load_graph(graph_path, &loaded));
   SELFCHECK(loaded.node_count == 3);
+  for (ny_dep_node_t *node = loaded.nodes; node; node = node->next)
+    SELFCHECK(node->fingerprint_valid);
 
   puts("incremental selftest: fingerprints, dependency graph, transitive "
        "recompile set, and graph persistence passed");
@@ -2036,15 +2163,15 @@ static void ny_run_targets(void) {
          ny_ui_mark("success"), clr(NY_CLR_RESET));
 }
 
-static void ny_run_wasm_info(const char *path) {
+static int ny_run_wasm_info(const char *path) {
   if (!path || !*path) {
     fprintf(stderr, "ny: --wasm-info requires a .wasm file path\n");
-    return;
+    return 1;
   }
   char *objdump = ny_doctor_which("wasm-objdump");
   if (!objdump) {
     fprintf(stderr, "ny: --wasm-info requires wasm-objdump (install wabt)\n");
-    return;
+    return 1;
   }
   char cmd[1024];
   snprintf(cmd, sizeof(cmd), "%s -x '%s' 2>&1", objdump, path);
@@ -2052,9 +2179,14 @@ static void ny_run_wasm_info(const char *path) {
   FILE *fp = popen(cmd, "r");
   if (!fp) {
     fprintf(stderr, "ny: failed to run wasm-objdump\n");
-    return;
+    return 1;
   }
-  printf("Wasm info: %s\n\n", path);
+  FILE *listing = tmpfile();
+  if (!listing) {
+    pclose(fp);
+    fprintf(stderr, "ny: could not buffer wasm-objdump output\n");
+    return 1;
+  }
   char line[1024];
   int in_import = 0, in_export = 0;
   while (fgets(line, sizeof(line), fp)) {
@@ -2072,11 +2204,27 @@ static void ny_run_wasm_info(const char *path) {
       in_export = 0;
     }
     if (in_import || in_export)
-      printf("  %s", line);
+      fputs(line, listing);
   }
   int rc = pclose(fp);
-  if (rc != 0)
-    fprintf(stderr, "ny: wasm-objdump exited %d\n", rc);
+  int status = rc;
+#ifndef _WIN32
+  if (rc >= 0 && WIFEXITED(rc))
+    status = WEXITSTATUS(rc);
+  else if (rc >= 0 && WIFSIGNALED(rc))
+    status = 128 + WTERMSIG(rc);
+#endif
+  if (status != 0) {
+    fclose(listing);
+    fprintf(stderr, "ny: wasm-objdump failed with status %d\n", status);
+    return 1;
+  }
+  printf("Wasm info: %s\n\n", path);
+  rewind(listing);
+  while (fgets(line, sizeof(line), listing))
+    fputs(line, stdout);
+  fclose(listing);
+  return 0;
 }
 
 static void ny_report_peak_rss(const ny_options *opt) {
@@ -2184,6 +2332,17 @@ int main(int argc, char **argv, char **envp) {
 
   bool trace_requested = ny_argv_has_flag(argc, argv, "-trace") ||
                          ny_argv_has_flag(argc, argv, "--trace");
+  bool execution_trace_requested =
+      ny_argv_has_flag(argc, argv, "-trace") ||
+      ny_options_cli_list_has_item(argc, argv, "--trace", "exec");
+  static const char *const trace_items[] = {
+      "tokens", "parse", "scope",    "hm",   "unify",
+      "trait",  "llvm",  "regalloc", "exec", "meta"};
+  for (size_t i = 0;
+       !trace_requested && i < sizeof(trace_items) / sizeof(trace_items[0]);
+       ++i)
+    trace_requested =
+        ny_options_cli_list_has_item(argc, argv, "--trace", trace_items[i]);
   if (ny_argv_has_flag(argc, argv, "--doctor")) {
     ny_run_doctor();
     return 0;
@@ -2196,26 +2355,39 @@ int main(int argc, char **argv, char **envp) {
     ny_run_targets();
     return 0;
   }
-  for (int i = 1; i < argc; i++) {
+  int info_boundary = ny_cli_program_boundary(argc, argv);
+  for (int i = 1; i < info_boundary; i++) {
     if (strncmp(argv[i], "--wasm-info=", 12) == 0) {
-      ny_run_wasm_info(argv[i] + 12);
-      return 0;
+      return ny_run_wasm_info(argv[i] + 12);
     }
   }
+  ny_options_validate_conflicts(argc, argv);
   /*
    * --wasm is a convenience shorthand for wasm32 target compilation
    */
   if (ny_argv_has_flag(argc, argv, "--wasm")) {
+    static char *filtered_argv[256];
     static char *expanded_argv[256];
     int dst = 1;
-    expanded_argv[0] = argv[0];
+    int program_boundary = ny_cli_program_boundary(argc, argv);
+    int shifted_boundary = program_boundary;
+    filtered_argv[0] = argv[0];
     for (int i = 1; i < argc; i++) {
-      if (strcmp(argv[i], "--wasm") == 0)
+      if (i < program_boundary && strcmp(argv[i], "--wasm") == 0) {
+        shifted_boundary--;
         continue;
-      expanded_argv[dst++] = argv[i];
+      }
+      filtered_argv[dst++] = argv[i];
     }
+    int filtered_argc = dst;
+    dst = 1;
+    expanded_argv[0] = filtered_argv[0];
+    for (int i = 1; i < shifted_boundary; ++i)
+      expanded_argv[dst++] = filtered_argv[i];
     expanded_argv[dst++] = (char *)"--native-backend=wasm";
     expanded_argv[dst++] = (char *)"--host-triple=wasm32-unknown-unknown";
+    for (int i = shifted_boundary; i < filtered_argc; ++i)
+      expanded_argv[dst++] = filtered_argv[i];
     expanded_argv[dst] = NULL;
     argv = expanded_argv;
     argc = dst;
@@ -2230,13 +2402,19 @@ int main(int argc, char **argv, char **envp) {
   const char *dbg_baseline_path = NULL;
   {
     static char *baseline_argv[256];
+    int program_boundary = ny_cli_program_boundary(argc, argv);
     int dst = 1;
     baseline_argv[0] = argv[0];
-    for (int i = 1; i < argc; i++) {
+    for (int i = 1; i < program_boundary; i++) {
       if (strncmp(argv[i], "--dbg-baseline", 14) == 0 &&
           (argv[i][14] == '\0' || argv[i][14] == '=')) {
         dbg_baseline_path =
             argv[i][14] == '=' ? argv[i] + 15 : ".ny-baseline.json";
+      }
+    }
+    for (int i = 1; i < argc; i++) {
+      if (i < program_boundary && strncmp(argv[i], "--dbg-baseline", 14) == 0 &&
+          (argv[i][14] == '\0' || argv[i][14] == '=')) {
         continue;
       }
       if (dst < 255)
@@ -2255,8 +2433,9 @@ int main(int argc, char **argv, char **envp) {
    */
   int profile_runs = 0;
   if (ny_argv_has_flag(argc, argv, "--profile-time")) {
+    int program_boundary = ny_cli_program_boundary(argc, argv);
     profile_runs = 3;
-    for (int i = 1; i < argc; i++) {
+    for (int i = 1; i < program_boundary; i++) {
       if (strncmp(argv[i], "--runs=", 7) == 0) {
         profile_runs = atoi(argv[i] + 7);
         if (profile_runs < 1)
@@ -2269,9 +2448,9 @@ int main(int argc, char **argv, char **envp) {
      */
     int dst = 1;
     for (int i = 1; i < argc; i++) {
-      if (strcmp(argv[i], "--profile-time") == 0)
+      if (i < program_boundary && strcmp(argv[i], "--profile-time") == 0)
         continue;
-      if (strncmp(argv[i], "--runs=", 7) == 0)
+      if (i < program_boundary && strncmp(argv[i], "--runs=", 7) == 0)
         continue;
       argv[dst++] = argv[i];
     }
@@ -2283,7 +2462,8 @@ int main(int argc, char **argv, char **envp) {
   bool cross_run = false;
   const char *cross_triple = NULL;
   const char *cross_qemu = NULL;
-  for (int i = 1; i < argc; i++) {
+  int program_boundary = ny_cli_program_boundary(argc, argv);
+  for (int i = 1; i < program_boundary; i++) {
     if (strncmp(argv[i], "--cross=", 8) == 0) {
       cross_triple = argv[i] + 8;
       break;
@@ -2323,12 +2503,16 @@ int main(int argc, char **argv, char **envp) {
     }
     cross_run = true;
     int dst = 1;
+    int shifted_boundary = program_boundary;
     for (int i = 1; i < argc; i++) {
-      if (strcmp(argv[i], "--cross-run") == 0)
+      if (i < program_boundary && strcmp(argv[i], "--cross-run") == 0) {
+        shifted_boundary--;
         continue;
+      }
       argv[dst++] = argv[i];
     }
     argc = dst;
+    program_boundary = shifted_boundary;
   }
   if (cross_triple) {
     if (!cross_triple || !*cross_triple) {
@@ -2381,16 +2565,28 @@ int main(int argc, char **argv, char **envp) {
     /*
      * Strip --cross=... and insert --host-triple=...
      */
+    static char *filtered_argv[256];
     static char *xargv[256];
     int dst = 1;
-    xargv[0] = argv[0];
+    filtered_argv[0] = argv[0];
+    int shifted_boundary = program_boundary;
     for (int j = 1; j < argc; j++) {
-      if (strncmp(argv[j], "--cross=", 8) == 0)
+      if (j < program_boundary && strncmp(argv[j], "--cross=", 8) == 0) {
+        shifted_boundary--;
         continue;
-      xargv[dst++] = argv[j];
+      }
+      filtered_argv[dst++] = argv[j];
     }
+    argc = dst;
+    program_boundary = shifted_boundary;
+    dst = 1;
+    xargv[0] = filtered_argv[0];
+    for (int j = 1; j < program_boundary; ++j)
+      xargv[dst++] = filtered_argv[j];
     xargv[dst++] = (char *)"--host-triple";
     xargv[dst++] = (char *)cross_triple;
+    for (int j = program_boundary; j < argc; ++j)
+      xargv[dst++] = filtered_argv[j];
     xargv[dst] = NULL;
     argv = xargv;
     argc = dst;
@@ -2406,6 +2602,8 @@ int main(int argc, char **argv, char **envp) {
     g_trace_requested = 1;
     rt_trace_refresh_env();
   }
+  if (execution_trace_requested)
+    ny_setenv_force("NYTRIX_TRACE_CALLS", "1");
   ny_intern_init();
   atexit(ny_global_cleanup);
   if (g_trace_requested) {
@@ -2421,6 +2619,8 @@ int main(int argc, char **argv, char **envp) {
   if (trace_requested) {
     ny_setenv_force("NYTRIX_TRACE", "1");
   }
+  if (execution_trace_requested)
+    ny_setenv_force("NYTRIX_TRACE_CALLS", "1");
   rt_trace_refresh_env();
 
   ny_options opt;
@@ -2492,7 +2692,7 @@ int main(int argc, char **argv, char **envp) {
   if (opt.nyr_fingerprint) {
     ny_setenv_force("NY_TRACE_FINGERPRINT", "1");
     /*
-     * Default on with --nyir-fingerprint: execution profiling validates
+     * Default on with --nyr-fingerprint: execution profiling validates
      * growth candidates before they are called regressions.
      */
     ny_setenv_force("NYTRIX_FINGERPRINT_PROFILE", "1");
@@ -2560,6 +2760,23 @@ int main(int argc, char **argv, char **envp) {
     }
     return 0;
   }
+  if (opt.native_from_nyir_path && (opt.command_string || opt.input_file)) {
+    fprintf(stderr,
+            "Error: --native-from-nyr cannot be combined with source input\n");
+    return 1;
+  }
+  if (opt.native_from_nyir_path) {
+    char nyr_err[512] = {0};
+    const char *output_path =
+        opt.output_file && opt.output_file[0] ? opt.output_file : "a.out";
+    if (!ny_pipeline_emit_ir_binary_file(opt.native_from_nyir_path, output_path,
+                                         &opt, nyr_err, sizeof(nyr_err))) {
+      fprintf(stderr, "Error: native NYIR emission failed: %s\n",
+              nyr_err[0] ? nyr_err : "unknown error");
+      return 1;
+    }
+    return 0;
+  }
 
   if (!opt.command_string && !opt.input_file && opt.mode != NY_MODE_REPL &&
       opt.mode != NY_MODE_HELP && opt.mode != NY_MODE_VERSION &&
@@ -2569,15 +2786,12 @@ int main(int argc, char **argv, char **envp) {
   }
 
   char **runtime_envp = ny_current_envp(envp);
-  if (opt.input_file) {
-    int s_argc = argc - opt.file_arg_idx;
-    char **s_argv = &argv[opt.file_arg_idx];
-    rt_set_args_raw(s_argc, s_argv, runtime_envp);
-  } else if (opt.command_string) {
-    static char *eval_argv[] = {(char *)"nytrix", NULL};
-    rt_set_args_raw(1, eval_argv, runtime_envp);
+  if (opt.input_file || opt.command_string) {
+    rt_set_args_raw(opt.argc, opt.args, runtime_envp);
   } else if (opt.mode == NY_MODE_REPL) {
-    if (opt.file_arg_idx > 0 && opt.file_arg_idx < argc) {
+    if (opt.args) {
+      rt_set_args_raw(opt.argc, opt.args, runtime_envp);
+    } else if (opt.file_arg_idx > 0 && opt.file_arg_idx < argc) {
       int r_argc = argc - opt.file_arg_idx;
       char **r_argv = &argv[opt.file_arg_idx];
       rt_set_args_raw(r_argc, r_argv, runtime_envp);

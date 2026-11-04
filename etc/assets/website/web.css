@@ -1,24 +1,30 @@
 :root {
-    color-scheme: dark;
+    color-scheme: dark light;
     --bg: #000000;
     --canvas: #000000;
     --panel: #020203;
     --panel2: #060607;
     --panel3: #0b0b0d;
+    --panel-deep: #030304;
+    --panel-cyan: #010203;
+    --panel-overlay: rgba(0, 0, 0, 0.995);
     --ink: #f5f5f6;
     --muted: #c6c6ca;
     --dim: #808087;
     --line: #17171b;
     --line2: #292832;
     --accent: #b6a0ff;
+    --accent-rgb: 182, 160, 255;
     --accent2: #d6d3e6;
     --accent-cyan: #8ccfff;
+    --cyan-rgb: 140, 207, 255;
     --accent-soft: rgba(182, 160, 255, 0.035);
     --accent-line: rgba(182, 160, 255, 0.22);
     --danger: #ff9580;
     --code: #010102;
     --chip: #050506;
     --shadow: rgba(0, 0, 0, 0.75);
+    --shadow-rgb: 0, 0, 0;
     --selection: rgba(182, 160, 255, 0.16);
     --sidebar-peek: 9px;
     --syn-module: #aebdff;
@@ -50,6 +56,59 @@
     --sidebar: 270px;
 }
 
+@media (prefers-color-scheme: light) {
+    :root {
+        color-scheme: light;
+        --bg: #f5f4f8;
+        --canvas: #ffffff;
+        --panel: #ffffff;
+        --panel2: #f0eff4;
+        --panel3: #e8e7ee;
+        --panel-deep: #eeedf3;
+        --panel-cyan: #eaf3f8;
+        --panel-overlay: rgba(255, 255, 255, 0.985);
+        --ink: #201e27;
+        --muted: #3f3c47;
+        --dim: #686571;
+        --line: #d8d6df;
+        --line2: #bbb8c7;
+        --accent: #5b3fa0;
+        --accent-rgb: 91, 63, 160;
+        --accent2: #4c357e;
+        --accent-cyan: #155d83;
+        --cyan-rgb: 21, 93, 131;
+        --accent-soft: rgba(91, 63, 160, 0.075);
+        --accent-line: rgba(91, 63, 160, 0.34);
+        --danger: #a13529;
+        --code: #f0eff4;
+        --chip: #eeedf3;
+        --shadow: rgba(32, 30, 39, 0.16);
+        --shadow-rgb: 32, 30, 39;
+        --selection: rgba(91, 63, 160, 0.18);
+        --syn-module: #2f428c;
+        --syn-kw: #663b9d;
+        --syn-str: #285d3c;
+        --syn-num: #7b481f;
+        --syn-call: #3d3f91;
+        --syn-com: #696570;
+        --syn-type: #593b8c;
+        --syn-builtin: #3e326d;
+        --syn-const: #6d2b8c;
+        --syn-attr: #713a77;
+        --syn-op: #45424d;
+        --syn-punc: #5b5864;
+        --syn-ident: #28262e;
+        --ico-doc: #5b3fa0;
+        --ico-net: #155d83;
+        --ico-data: #286b38;
+        --ico-crypto: #695400;
+        --ico-math: #285a87;
+        --ico-system: #4b4852;
+        --ico-media: #1f6a60;
+        --ico-warn: #a13529;
+    }
+}
+
 * {
     margin: 0;
     padding: 0;
@@ -69,8 +128,8 @@ html {
 body {
     min-height: 100vh;
     background:
-        linear-gradient(90deg, rgba(182, 160, 255, 0.010) 1px, transparent 1px),
-        linear-gradient(180deg, rgba(182, 160, 255, 0.007) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(var(--accent-rgb), 0.010) 1px, transparent 1px),
+        linear-gradient(180deg, rgba(var(--accent-rgb), 0.007) 1px, transparent 1px),
         var(--bg);
     background-size: 48px 48px, 48px 48px, auto;
     color: var(--muted);
@@ -88,8 +147,8 @@ body::before {
     inset: 0;
     pointer-events: none;
     background:
-        linear-gradient(180deg, rgba(182, 160, 255, 0.007), transparent 220px),
-        linear-gradient(90deg, rgba(182, 160, 255, 0.005), transparent 360px);
+        linear-gradient(180deg, rgba(var(--accent-rgb), 0.007), transparent 220px),
+        linear-gradient(90deg, rgba(var(--accent-rgb), 0.005), transparent 360px);
     opacity: 0.38;
 }
 
@@ -391,7 +450,7 @@ input {
     width: min(320px, calc(100vw - 82px));
     height: 40px;
     padding: 0;
-    background: #000000;
+    background: var(--canvas);
     isolation: isolate;
 }
 
@@ -404,7 +463,7 @@ input {
     width: 22px;
     z-index: -1;
     clip-path: polygon(0 0, 100% 0, 100% 100%);
-    background: #000000;
+    background: var(--canvas);
     pointer-events: none;
 }
 
@@ -437,9 +496,9 @@ aside {
     z-index: 90;
     display: flex;
     flex-direction: column;
-    background: rgba(0, 0, 0, 0.995);
+    background: var(--panel-overlay);
     border-right: 1px solid var(--line);
-    box-shadow: 14px 0 34px rgba(0, 0, 0, 0.34);
+    box-shadow: 14px 0 34px rgba(var(--shadow-rgb), 0.34);
     transform: translateX(-100%);
     opacity: 0.98;
     transition: transform 0.18s ease, opacity 0.16s ease, box-shadow 0.16s ease;
@@ -452,7 +511,7 @@ aside.active {
 .top {
     padding: 7px 10px 0;
     border-bottom: 1px solid var(--line);
-    background: #000000;
+    background: var(--canvas);
 }
 
 .brand {
@@ -631,7 +690,7 @@ aside.active {
     padding-bottom: 7px;
     color: var(--muted);
     font-weight: 800;
-    background: #020203;
+    background: var(--panel);
     border-color: var(--line2);
 }
 
@@ -645,7 +704,7 @@ aside.active {
 
 .item:hover {
     color: var(--ink);
-    background: #050506;
+    background: var(--chip);
     border-left-color: var(--accent2);
 }
 
@@ -879,7 +938,7 @@ main.aside-active {
     padding: 18px;
     border: 1px solid var(--line);
     border-radius: var(--radius);
-    background: #020203;
+    background: var(--panel);
 }
 
 .docs-hero-aside {
@@ -957,7 +1016,7 @@ main.aside-active {
     padding: 12px;
     border: 1px solid var(--line);
     border-radius: var(--radius);
-    background: #010102;
+    background: var(--code);
     color: var(--ink);
     font: 520 12.5px/1.6 var(--font-mono);
     white-space: pre;
@@ -975,7 +1034,7 @@ main.aside-active {
     padding: 7px 8px;
     border: 1px solid var(--line);
     border-radius: var(--radius);
-    background: #010102;
+    background: var(--code);
 }
 
 .quick-start-list b {
@@ -1026,7 +1085,7 @@ main.aside-active {
     padding: 5px 9px;
     border: 1px solid var(--line2);
     border-radius: var(--radius);
-    background: #010102;
+    background: var(--code);
     color: var(--muted);
     font: 720 11px var(--font-mono);
     transition: border-color 0.14s ease, background 0.14s ease, color 0.14s ease;
@@ -1035,7 +1094,7 @@ main.aside-active {
 .hero-action:hover,
 .hero-action:focus-visible {
     border-color: var(--accent-line);
-    background: #050506;
+    background: var(--chip);
     color: var(--ink);
     outline: none;
 }
@@ -1070,7 +1129,7 @@ main.aside-active {
     padding: 8px;
     border: 1px solid var(--line);
     border-radius: var(--radius);
-    background: #020203;
+    background: var(--panel);
 }
 
 .claim-card .card-icon {
@@ -1102,7 +1161,7 @@ main.aside-active {
     padding: 10px;
     border: 1px solid var(--line);
     border-radius: var(--radius);
-    background: #020203;
+    background: var(--panel);
     color: inherit;
 }
 
@@ -1115,7 +1174,7 @@ main.aside-active {
 .project-card:hover,
 .project-card:focus-visible {
     border-color: var(--accent-line);
-    background: #050506;
+    background: var(--chip);
     outline: none;
 }
 
@@ -1153,7 +1212,7 @@ main.aside-active {
     padding: 7px;
     border: 1px solid var(--line);
     border-radius: var(--radius);
-    background: #020203;
+    background: var(--panel);
     color: var(--ink);
     transition: border-color 0.14s ease, background 0.14s ease;
     contain: content;
@@ -1188,13 +1247,13 @@ main.aside-active {
 .doc-card:hover,
 .doc-card:focus-visible {
     border-color: var(--line2);
-    background: #050506;
+    background: var(--chip);
     outline: none;
 }
 
 .doc-card.primary {
     border-color: var(--accent-line);
-    background: #050506;
+    background: var(--chip);
 }
 
 .doc-card-title {
@@ -1247,7 +1306,7 @@ main.aside-active {
     padding: 9px;
     border: 1px solid var(--line);
     border-radius: var(--radius);
-    background: #020203;
+    background: var(--panel);
     color: var(--ink);
     transition: border-color 0.14s ease, background 0.14s ease;
     contain: content;
@@ -1256,7 +1315,7 @@ main.aside-active {
 .api-card:hover,
 .api-card:focus-visible {
     border-color: var(--line2);
-    background: #050506;
+    background: var(--chip);
     outline: none;
 }
 
@@ -1322,7 +1381,7 @@ main.aside-active {
     padding: 2px 7px;
     border: 1px solid var(--line);
     border-radius: var(--radius);
-    background: #010102;
+    background: var(--code);
     color: var(--accent2);
 }
 
@@ -1355,7 +1414,7 @@ main.aside-active {
     padding: 7px;
     border: 1px solid var(--line);
     border-radius: var(--radius);
-    background: #020203;
+    background: var(--panel);
     color: var(--ink);
     transition: border-color 0.14s ease, background 0.14s ease;
     contain: content;
@@ -1364,22 +1423,22 @@ main.aside-active {
 .card:hover,
 .card:focus-visible {
     border-color: var(--line2);
-    background: #050506;
+    background: var(--chip);
     outline: none;
 }
 
 .internal-symbol {
-    border-color: rgba(140, 207, 255, 0.22);
-    background: #010203;
+    border-color: rgba(var(--cyan-rgb), 0.22);
+    background: var(--panel-cyan);
 }
 
 .internal-symbol .row {
-    background: rgba(140, 207, 255, 0.035);
+    background: rgba(var(--cyan-rgb), 0.035);
 }
 
 .internal-symbol .kind {
     color: var(--accent-cyan);
-    border-color: rgba(140, 207, 255, 0.24);
+    border-color: rgba(var(--cyan-rgb), 0.24);
 }
 
 .row {
@@ -1391,7 +1450,7 @@ main.aside-active {
     padding: 5px 6px;
     margin-bottom: 6px;
     border-radius: var(--radius);
-    background: #010102;
+    background: var(--code);
 }
 
 .name {
@@ -1413,7 +1472,7 @@ main.aside-active {
     border: 1px solid var(--line);
     border-radius: var(--radius);
     color: var(--dim);
-    background: #030304;
+    background: var(--panel-deep);
     font: 700 10px var(--font-mono);
 }
 
@@ -1460,7 +1519,7 @@ main.aside-active {
     padding: 9px;
     border: 1px solid var(--line);
     border-radius: var(--radius);
-    background: #020203;
+    background: var(--panel);
 }
 
 .module-keywords {
@@ -1478,7 +1537,7 @@ main.aside-active {
     padding: 2px 6px;
     border: 1px solid var(--line);
     border-radius: var(--radius);
-    background: #030304;
+    background: var(--panel-deep);
     color: var(--muted);
     font-size: 11px;
 }
@@ -1575,7 +1634,7 @@ main.aside-active {
     padding: 9px;
     border: 1px solid var(--line);
     border-radius: var(--radius);
-    background: #020203;
+    background: var(--panel);
     color: var(--ink);
     transition: border-color 0.14s ease, background 0.14s ease;
     contain: content;
@@ -1584,7 +1643,7 @@ main.aside-active {
 .tag-module-card:hover,
 .tag-module-card:focus-visible {
     border-color: var(--line2);
-    background: #050506;
+    background: var(--chip);
     outline: none;
 }
 
@@ -1621,7 +1680,7 @@ main.aside-active {
     padding: 7px 8px;
     border: 1px solid var(--line);
     border-radius: var(--radius);
-    background: #020203;
+    background: var(--panel);
     color: var(--dim);
     font: 700 11px var(--font-mono);
 }
@@ -1657,7 +1716,7 @@ main.aside-active {
     padding: 8px;
     border: 1px solid var(--line);
     border-radius: var(--radius);
-    background: #020203;
+    background: var(--panel);
     color: var(--ink);
     transition: border-color 0.14s ease, background 0.14s ease;
     contain: content;
@@ -1666,7 +1725,7 @@ main.aside-active {
 .tag-index-card:hover,
 .tag-index-card:focus-visible {
     border-color: var(--line2);
-    background: #050506;
+    background: var(--chip);
     outline: none;
 }
 
@@ -1697,7 +1756,7 @@ main.aside-active {
     overflow: hidden;
     border: 1px solid var(--line);
     border-radius: var(--radius);
-    background: #010102;
+    background: var(--code);
     color: var(--muted);
     font: 450 12px/1.45 var(--font-text);
 }
@@ -1720,7 +1779,7 @@ main.aside-active {
     padding: 6px;
     border: 1px solid var(--line);
     border-radius: var(--radius);
-    background: #020203;
+    background: var(--panel);
     color: var(--dim);
     font: 700 11px var(--font-mono);
 }
@@ -1749,7 +1808,7 @@ main.aside-active {
     padding: 4px 7px;
     border: 1px solid var(--line);
     border-radius: var(--radius);
-    background: #010102;
+    background: var(--code);
     color: var(--muted);
     outline: none;
     font: 750 11px var(--font-mono);
@@ -1779,8 +1838,8 @@ main.aside-active {
 
 .module-actions button[data-internal-toggle][aria-pressed="true"] {
     color: var(--accent-cyan);
-    border-color: rgba(140, 207, 255, 0.24);
-    background: rgba(140, 207, 255, 0.035);
+    border-color: rgba(var(--cyan-rgb), 0.24);
+    background: rgba(var(--cyan-rgb), 0.035);
 }
 
 .module-actions button[data-internal-toggle][aria-pressed="true"] .ico {
@@ -1795,7 +1854,7 @@ main.aside-active {
 .code-toggle:focus-visible {
     color: var(--ink);
     border-color: var(--line2);
-    background: #030304;
+    background: var(--panel-deep);
 }
 
 .module-actions button[data-code-action]:hover .ico,
@@ -1811,13 +1870,13 @@ main.aside-active {
     overflow: hidden;
     border: 1px solid var(--line);
     border-radius: var(--radius);
-    background: #010102;
+    background: var(--code);
     box-shadow: none;
 }
 
 .codebox.expanded {
     border-color: var(--line2);
-    background: #010102;
+    background: var(--code);
 }
 
 .sourcebox {
@@ -1839,7 +1898,7 @@ main.aside-active {
     gap: 8px;
     padding: 6px 8px;
     border-bottom: 1px solid var(--line);
-    background: #050506;
+    background: var(--chip);
     color: var(--dim);
     font: 650 11px var(--font-mono);
 }
@@ -1860,7 +1919,7 @@ pre {
     overflow: auto;
     tab-size: 3;
     white-space: pre;
-    background: #010102;
+    background: var(--code);
 }
 
 code {
@@ -1936,7 +1995,7 @@ pre code {
     padding: 28px;
     border: 1px solid var(--line);
     border-radius: var(--radius);
-    background: #020203;
+    background: var(--panel);
     color: var(--dim);
     text-align: center;
     font: 700 13px var(--font-mono);
@@ -1960,7 +2019,7 @@ pre code {
     padding: 10px;
     border: 1px solid var(--line);
     border-radius: var(--radius);
-    background: #020203;
+    background: var(--panel);
     color: var(--ink);
     text-decoration: none;
     transition: border-color 0.14s ease, background 0.14s ease;
@@ -1979,7 +2038,7 @@ pre code {
 .doc-pager-link:hover,
 .doc-pager-link:focus-visible {
     border-color: var(--line2);
-    background: #050506;
+    background: var(--chip);
     outline: none;
 }
 
@@ -2028,7 +2087,7 @@ pre code {
     padding: 12px;
     border: 1px solid var(--line);
     border-radius: var(--radius);
-    background: #010102;
+    background: var(--code);
     color: var(--muted) !important;
     text-decoration: none;
     transition: border-color .15s ease, background .15s ease, transform .15s ease;
@@ -2041,14 +2100,14 @@ pre code {
 .overview-card:hover,
 .overview-card:focus-visible {
     border-color: var(--line2);
-    background: #050506;
+    background: var(--chip);
     transform: translateY(-1px);
     outline: none;
 }
 
 .overview-card-primary {
-    border-color: rgba(140, 207, 255, .35);
-    background: rgba(140, 207, 255, .055);
+    border-color: rgba(var(--cyan-rgb), .35);
+    background: rgba(var(--cyan-rgb), .055);
 }
 
 .overview-card-kicker {
@@ -2204,7 +2263,7 @@ pre code {
     padding: 1px 4px;
     border: 1px solid var(--line);
     border-radius: var(--radius);
-    background: #030304;
+    background: var(--panel-deep);
     color: var(--syn-builtin);
     font-size: 0.88em;
 }
@@ -2218,7 +2277,7 @@ pre code {
     overflow-x: auto;
     border: 1px solid var(--line);
     border-radius: var(--radius);
-    background: #010102;
+    background: var(--code);
     box-shadow: none;
 }
 
@@ -2244,7 +2303,7 @@ pre code {
     padding: 0px 12px;
     border-left: 2px solid var(--accent);
     border-radius: 0;
-    background: #030304;
+    background: var(--panel-deep);
     color: var(--muted);
 }
 
@@ -2268,7 +2327,7 @@ pre code {
 
 .markdown-content th,
 .html-content th {
-    background: #050506;
+    background: var(--chip);
     color: var(--ink);
     font-weight: 700;
 }
@@ -2367,11 +2426,11 @@ pre code {
         width: 22px;
         height: 48px;
         place-items: center;
-        border: 1px solid #121212;
+        border: 1px solid var(--line);
         border-left: 0;
         border-radius: 0 var(--radius) var(--radius) 0;
-        background: #000000;
-        box-shadow: 5px 0 14px rgba(0, 0, 0, 0.3);
+        background: var(--canvas);
+        box-shadow: 5px 0 14px rgba(var(--shadow-rgb), 0.3);
         color: var(--accent2);
         font: 500 26px/1 var(--font-mono);
         opacity: 0.92;
@@ -2414,7 +2473,7 @@ pre code {
         width: var(--sidebar);
         transform: translate3d(calc(var(--sidebar-peek) - var(--sidebar)), 0, 0);
         opacity: 0.74;
-        box-shadow: 10px 0 28px rgba(0, 0, 0, 0.18);
+        box-shadow: 10px 0 28px rgba(var(--shadow-rgb), 0.18);
     }
 
     body.nav-open aside,
@@ -2422,7 +2481,7 @@ pre code {
     aside:focus-within {
         transform: translate3d(0, 0, 0);
         opacity: 1;
-        box-shadow: 18px 0 42px rgba(0, 0, 0, 0.44);
+        box-shadow: 18px 0 42px rgba(var(--shadow-rgb), 0.44);
     }
 
     .backdrop {

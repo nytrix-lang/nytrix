@@ -3,7 +3,7 @@ shape native_complex_arithmetic_abi {
   generator "native"
   features [native x86_64 oracle types complex arithmetic abi-records]
   template ny-test-case
-  flags "-O2 --native-backend x86_64 --native-result-oracle=6 --nyir-pass-stats"
+  flags "-O2 --native-backend x86_64 --native-result-oracle=6 --nyr-dump=passes"
   expect compile_and_run
   source ny <<'NY'
 use core

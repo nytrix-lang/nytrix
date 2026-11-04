@@ -103,7 +103,7 @@ fn color_u32(any c) int {
 }
 
 @inline
-fn store_mat4_cm_raw(any dst, any mat, bool allow_plain16=false) bool {
+fn store_mat4_cm_raw(ptr dst, any mat, bool allow_plain16=false) bool {
    "Stores tagged column-major mat4, optionally accepting a plain 16-float list."
    if !dst || !is_list(mat) { return false }
    def n = mat.len

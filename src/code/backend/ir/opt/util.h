@@ -7,10 +7,16 @@
 #include "code/backend/ir/internal.h"
 #include <nyr/ir.h>
 
+/* Linear label -> block lookup shared by analysis passes.  Returns false for
+ * unknown labels or a null config and stores the block through out_block
+ * when one is requested. */
+bool nyr_cfg_block_for_label(const nyr_cfg_t *cfg, int64_t label,
+                             size_t *out_block);
+
 /* Float folding helpers used by const_fold and sccp. */
 bool nyr_float_fold_binary(nyr_op_t op, int64_t a_imm, int64_t b_imm,
-                            unsigned char kind, int64_t *out_imm,
-                            unsigned char *out_kind);
+                           unsigned char kind, int64_t *out_imm,
+                           unsigned char *out_kind);
 
 /* Constant collection used by peephole and cfg_simplify. */
 bool nir_collect_consts(const nyr_func_t *f, bool *known, int64_t *value);
@@ -18,7 +24,8 @@ bool nir_collect_consts(const nyr_func_t *f, bool *known, int64_t *value);
 bool nir_collect_consts_kind(const nyr_func_t *f, bool *known, int64_t *value,
                              unsigned char *kind);
 
-/* Instruction shape constructors used by peephole and strength_reduce. */
+/* In-place rewrites release owned operand metadata and preserve semantic/debug
+ * identity. Callers must not free the replaced payload themselves. */
 void nir_make_copy(nyr_inst_t *in, int src);
 void nir_make_const(nyr_inst_t *in, int64_t value);
 void nir_make_f64_const(nyr_inst_t *in, int64_t bitcast);
@@ -38,7 +45,7 @@ bool nir_range_excludes_zero(const nyr_range_t *r);
 bool nir_range_excludes_int64_min(const nyr_range_t *r);
 bool nyr_value_fact_singleton(const nyr_value_fact_t *fact, int64_t *value);
 bool nyr_const_i64(const nyr_func_t *f, const int *defs, int value,
-                    int64_t *out);
+                   int64_t *out);
 
 /* Value range recovery used by peephole and strength_reduce. */
 bool nir_recover_load_local_range(const nyr_func_t *f,
@@ -46,6 +53,23 @@ bool nir_recover_load_local_range(const nyr_func_t *f,
                                   size_t at, nyr_range_t *out);
 bool nir_value_range_at(const nyr_func_t *f, const nyr_value_fact_t *facts,
                         int value, size_t at, nyr_range_t *out);
+/* Zero-initialize and free at the end of a query scope. Reuse across queries;
+ * storage, instruction contents, length, and value-count changes invalidate
+ * the cached CFG and definition map. */
+typedef struct {
+  const nyr_func_t *func;
+  const nyr_inst_t *data;
+  nyr_inst_t *snapshot;
+  size_t len;
+  int next_value;
+  nyr_cfg_t cfg;
+  int *defs;
+} nir_range_query_cache_t;
+void nir_range_query_cache_free(nir_range_query_cache_t *cache);
+bool nir_value_range_at_cached(const nyr_func_t *f,
+                               const nyr_value_fact_t *facts, int value,
+                               size_t at, nyr_range_t *out,
+                               nir_range_query_cache_t *cache);
 bool nir_operands_same_value(const nyr_func_t *f, int a, int b, size_t at);
 
 /* Rewriting helpers used by peephole and strength_reduce. */
@@ -73,8 +97,8 @@ typedef struct {
 /* Shared local-slot escape classification for SROA/alias/reporting passes. */
 size_t nyr_local_slot_count(const nyr_func_t *f);
 bool nyr_analyze_local_escapes(const nyr_func_t *f,
-                                nyr_local_escape_info_t *info,
-                                size_t slot_count);
+                               nyr_local_escape_info_t *info,
+                               size_t slot_count);
 
 /* Function-level queries used by the optimization pipeline. */
 bool nyr_has_control_flow(const nyr_func_t *f);
@@ -87,7 +111,7 @@ bool nyr_compact_if_sparse(nyr_func_t *f);
 size_t nyr_block_count(const nyr_func_t *f);
 /* One-past-the-last non-NOP instruction index in a CFG block. */
 size_t nyr_block_last_non_nop(const nyr_func_t *f, const nyr_cfg_t *cfg,
-                               size_t block);
+                              size_t block);
 int64_t nyr_fresh_label(const nyr_func_t *f);
 uint64_t nyr_debug_fingerprint(const nyr_func_t *f);
 void nyr_pass_tag(char *buf, size_t n, const char *pass_name);

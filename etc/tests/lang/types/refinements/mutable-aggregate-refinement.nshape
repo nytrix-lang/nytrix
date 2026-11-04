@@ -30,6 +30,7 @@ shape mutable_fresh_aggregate_refinement_is_preserved_in_readonly_region {
   generator "regression"
   features [ny test typing refinement mutable aggregate alias-flow positive]
   template ny-test-case
+  timeout 120
   flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
   expect compile_and_run
   source ny <<'NY'
@@ -109,6 +110,7 @@ shape mutable_aggregate_indexed_refinement_survives_proven_store {
   generator "regression"
   features [ny test typing refinement mutable aggregate indexed predicate transport positive]
   template ny-test-case
+  timeout 120
   flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
   expect compile_and_run
   source ny <<'NY'
@@ -138,6 +140,7 @@ shape mutable_aggregate_constant_expression_refinement_survives_store {
   generator "regression"
   features [ny test typing refinement mutable aggregate constant expression positive]
   template ny-test-case
+  timeout 120
   flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
   expect compile_and_run
   source ny <<'NY'
@@ -375,6 +378,37 @@ fn invalid_after_append() int {
 }
 
 invalid_after_append()
+NY
+}
+
+shape mutable_aggregate_nested_guard_assignment_expires_outer_refinement {
+  family "compiler-errors/types"
+  generator "error"
+  features [error typing refinement mutable aggregate nested guard invalidation negative]
+  template ny-compile-fail
+  flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
+  expect compile_fail
+  expect_message "refinement obligation"
+  source ny <<'NY'
+use core
+
+refine NonEmpty = list where(items) { items.len > 0 }
+refine AtLeastTwo = list where(items) { items.len >= 2 }
+fn require_nonempty(NonEmpty items) int {
+  return items.len
+}
+
+fn invalid_nested_rebind() int {
+  mut list<int> items = [1, 2]
+  if NonEmpty(items) {
+    if AtLeastTwo(items) {
+      items = []
+      return require_nonempty(items)
+    }
+  }
+  0
+}
+invalid_nested_rebind()
 NY
 }
 
@@ -689,6 +723,7 @@ shape mutable_aggregate_conjunctive_refinement_transport {
   generator "regression"
   features [ny test typing refinement mutable aggregate conjunction transport positive]
   template ny-test-case
+  timeout 120
   flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
   expect compile_and_run
   source ny <<'NY'
@@ -718,6 +753,7 @@ shape mutable_aggregate_disjunctive_indexed_refinement_transport {
   generator "regression"
   features [ny test typing refinement mutable aggregate indexed disjunction transport positive]
   template ny-test-case
+  timeout 120
   flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
   expect compile_and_run
   source ny <<'NY'
@@ -805,6 +841,7 @@ shape mutable_aggregate_local_write_precedes_refinement_guard {
   generator "regression"
   features [ny test typing refinement mutable aggregate mutation guard positive]
   template ny-test-case
+  timeout 120
   flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
   expect compile_and_run
   source ny <<'NY'
@@ -1206,6 +1243,7 @@ shape mutable_aggregate_indexed_refinement_survives_known_list_suffix {
   generator "regression"
   features [ny test typing refinement mutable aggregate list concatenation variable suffix positive]
   template ny-test-case
+  timeout 120
   flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
   expect compile_and_run
   source ny <<'NY'

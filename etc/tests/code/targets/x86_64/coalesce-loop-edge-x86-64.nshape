@@ -3,7 +3,7 @@ shape oracle_coalesce_loop_edge_x86_64 {
   generator "native"
   features [native x86_64 oracle machine-ir regalloc coalesce loop-edge]
   template ny-test-case
-  flags "-O3 --native-backend x86_64 --native-result-oracle=1820 --nyir-verify --no-progress"
+  flags "-O3 --native-backend x86_64 --native-result-oracle=1820 --nyr-verify --no-progress"
   expect compile_and_run
   source ny <<'NY'
 fn carried(i64 n) i64 {

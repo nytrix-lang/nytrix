@@ -23,11 +23,9 @@ typedef struct {
 } nyr_jump_phi_edit_t;
 
 static int block_for_label(const nyr_cfg_t *cfg, int64_t label) {
-  if (!cfg)
-    return -1;
-  for (size_t b = 0; b < cfg->block_count; ++b)
-    if (cfg->block_label[b] == label)
-      return b <= (size_t)INT_MAX ? (int)b : -1;
+  size_t b = 0;
+  if (nyr_cfg_block_for_label(cfg, label, &b) && b <= (size_t)INT_MAX)
+    return (int)b;
   return -1;
 }
 

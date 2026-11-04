@@ -1,0 +1,99 @@
+shape nyr_vm_disassembly_artifact_diff {
+  family "runtime-native"
+  generator "native"
+  features ["native", "nyir", "vm", "artifact-diff"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core.os (file_remove, file_write, pid, run_capture, temp_dir)
+
+def compiler = env("NYTRIX_NY_FULL_BIN")
+assert(is_str(compiler) && compiler.len > 0,
+       "test runner provides the compiler path")
+
+def stem = temp_dir() + "/ny-vm-disasm-diff-" + to_str(pid())
+def source = stem + ".ny"
+def bundle = stem + ".nyr"
+def wrote = file_write(source,
+    "fn vm_disasm_diff_target(int value) int { value + 7 }\n" +
+    "vm_disasm_diff_target(35)\n")
+assert(is_ok(wrote), "write the VM listing comparison source")
+
+; The listing is asserted as exact text below, so pin the output format:
+; the runner may export FORCE_COLOR when it drives fixtures from a tty.
+def source_run = run_capture(
+    [compiler, "--color=never", "--native", "--run", "--nyr-run",
+     "--vm-disasm=vm_disasm_diff_target", "-O0", source],
+    [], nil, false)
+def bundle_run = run_capture(
+    [compiler, "--color=never", "--native", "--run", "--nyr-run",
+     "--vm-disasm=vm_disasm_diff_target", "-O0",
+     "--dump-nyr=" + bundle, "--nyr-run-bin=" + bundle, source],
+    [], nil, false)
+def bundle_o3 = stem + "-o3.nyr"
+def source_run_o3 = run_capture(
+    [compiler, "--color=never", "--native", "--run", "--nyr-run",
+     "--vm-disasm=vm_disasm_diff_target", "-O3", source],
+    [], nil, false)
+def bundle_run_o3 = run_capture(
+    [compiler, "--color=never", "--native", "--run", "--nyr-run",
+     "--vm-disasm=vm_disasm_diff_target", "-O3",
+     "--dump-nyr=" + bundle_o3, "--nyr-run-bin=" + bundle_o3, source],
+    [], nil, false)
+
+file_remove(source)
+file_remove(bundle)
+file_remove(bundle_o3)
+assert(source_run.get("code", 127) == 0,
+       "source NYR execution returned " + to_str(source_run.get("code", 127)))
+assert(bundle_run.get("code", 127) == 42,
+       "serialized NYIR execution returned " + to_str(bundle_run.get("code", 127)))
+assert(source_run_o3.get("code", 127) == 0,
+       "optimized source NYR execution returned " +
+       to_str(source_run_o3.get("code", 127)))
+assert(bundle_run_o3.get("code", 127) == 42,
+       "optimized serialized NYIR execution returned " +
+       to_str(bundle_run_o3.get("code", 127)))
+def source_output = source_run.get("stdout", "") + source_run.get("stderr", "")
+def bundle_output = bundle_run.get("stdout", "") + bundle_run.get("stderr", "")
+def source_output_o3 = source_run_o3.get("stdout", "") + source_run_o3.get("stderr", "")
+def bundle_output_o3 = bundle_run_o3.get("stdout", "") + bundle_run_o3.get("stderr", "")
+fn first_vm_listing_divergence(str left, str right) str {
+  def left_lines = str.split(left, "\n")
+  def right_lines = str.split(right, "\n")
+  def count = if left_lines.len > right_lines.len {
+    left_lines.len
+  } else {
+    right_lines.len
+  }
+  for i in range(count) {
+    def a = if i < left_lines.len { left_lines.get(i, "<eof>") } else { "<eof>" }
+    def b = if i < right_lines.len { right_lines.get(i, "<eof>") } else { "<eof>" }
+    if a != b && (a.contains("v") || b.contains("v")) {
+      return "line " + to_str(i + 1) + ": source `" + a + "`; bundle `" + b + "`"
+    }
+  }
+  return "no differing opcode line (non-opcode output differs)"
+}
+def synthetic_divergence = first_vm_listing_divergence(
+    "function f\n  0000  v0=add v1 v2\n",
+    "function f\n  0000  v0=sub v1 v2\n")
+assert(synthetic_divergence.contains("line 2") &&
+       synthetic_divergence.contains("v0=add") &&
+       synthetic_divergence.contains("v0=sub"),
+       "divergence diagnostics identify the first differing opcode line")
+assert(source_output == bundle_output,
+       "first divergent VM opcode region: " +
+       first_vm_listing_divergence(source_output, bundle_output))
+assert(source_output_o3 == bundle_output_o3,
+       "first divergent optimized VM opcode region: " +
+       first_vm_listing_divergence(source_output_o3, bundle_output_o3))
+assert(source_output.contains("0002  v2=add v0 v1 [abi=i64-raw]"),
+       "source O0 VM listing contains the executed addition; output: " +
+       str.str_slice(source_output, 0, min(source_output.len, 2048)))
+assert(source_output.contains("result=42"),
+       "source O0 VM listing reports result=42")
+assert(source_output_o3.contains("result=42"),
+       "source O3 VM listing reports result=42")
+NY
+}

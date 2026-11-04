@@ -6,6 +6,12 @@ not a general lifetime or resource theorem prover. Runtime heap policy and
 reclamation are separate from static borrow and move analysis; see
 [Runtime](runtime.md#heap-policy).
 
+## Contents
+
+- [Borrow and resource rules](#borrows)
+- [Usage intervals](#usage-intervals)
+- [Enforcement and verification](#enforcement)
+
 ## Borrows
 
 `&value` and `&mut value` create shared and exclusive borrows. For supported
@@ -30,6 +36,9 @@ a borrow-safety certificate.
 `affine` resources permit zero or one. Reading a field is not consumption.
 Moving a value, passing it to a consuming function, or explicitly releasing it
 can discharge its obligation. Reusing a moved value is rejected.
+
+> **Note:** The attributes below are contract forms; their parameters must
+> refer to declarations in the surrounding function.
 
 ```ny
 linear layout File { int fd }
@@ -63,9 +72,9 @@ allowance within its analysis limit, compilation fails closed.
 | Option | Effect |
 | --- | --- |
 | `--borrow-check` | Enables advisory borrow and ownership diagnostics without selecting RAII cleanup. |
-| `--ownership-strict` | Treats supported ownership diagnostics as errors. |
-| `--ownership` | Selects ownership-aware cleanup and heap behavior. |
-| `--safe-mode` | Enables the stricter safety profile described in [Runtime](runtime.md#safety-profile). |
+| `--ownership-check=strict` | Treats supported ownership diagnostics as errors. |
+| `--heap=raii` | Selects ownership-aware cleanup and heap behavior. |
+| `--mode=safe` | Enables the stricter safety profile described in [Runtime](runtime.md#safety-profile). |
 
 The checker runs in shared semantic analysis so supported diagnostics do not
 depend on optimization level or code-generation backend. This does not imply
@@ -77,3 +86,10 @@ Focused positive and negative fixtures live under `etc/tests/lang/ownership/`.
 For a safety-sensitive API, run the fixture with the same ownership options and
 execution route used by the application. See [Ownership guide](../learn/ownership.md)
 for practical API design.
+
+## Related
+
+- [Runtime](runtime.md#heap-policy) for allocation and reclamation.
+- [Functions](functions.md#attributes) for ownership contract attributes.
+- [Types](types.md) for value and resource type forms.
+- [Ownership guide](../learn/ownership.md) for API design examples.

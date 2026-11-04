@@ -1,0 +1,13 @@
+shape nyir_exit_builtin_status {
+  family "runtime-native"
+  generator "native"
+  features ["native", "nyir", "runtime", "exit-status"]
+  template ny-test-case
+  flags "--native --run"
+  expect compile_and_run
+  expect_exit 7
+  source ny <<'NY'
+use core.os (exit)
+exit(7)
+NY
+}

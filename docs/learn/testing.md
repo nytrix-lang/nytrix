@@ -5,6 +5,13 @@ A Nytrix test is a program that checks an observable result and exits nonzero
 when the result is wrong. Keep the smallest useful assertion close to the
 behavior under test.
 
+Prerequisites: a Nytrix compiler; repository fixture commands require the
+project checkout and build tools.
+
+Skip this guide if you only need to run one program; begin with
+[Start](start.md). Use this page for reproducible assertions and repository
+fixtures.
+
 ## A focused program check
 
 ```ny
@@ -54,3 +61,9 @@ tests.
 A fixture pass proves only its declared source, flags, executor, and assertions.
 See [Implementation status](status.md) for current coverage limits and
 [Contributing](../CONTRIBUTE.md) for compiler change workflow.
+
+Next:
+
+- [Tooling](tooling.md) — compiler and formatter commands.
+- [Troubleshooting](troubleshooting.md) — classify failures.
+- [Implementation status](status.md) — check route-specific coverage.

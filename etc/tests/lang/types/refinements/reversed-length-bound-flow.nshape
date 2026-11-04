@@ -3,6 +3,7 @@ shape mutable_aggregate_reversed_length_bound_survives_store_and_append {
   generator "regression"
   features [ny test typing refinement mutable aggregate reversed length lower bound positive]
   template ny-test-case
+  timeout 120
   flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
   expect compile_and_run
   source ny <<'NY'

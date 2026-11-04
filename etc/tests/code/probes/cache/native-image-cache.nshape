@@ -80,6 +80,28 @@ run_image("[12, 15]", true, [], [])
 run_image("[12, 15]", false, [], ["NYTRIX_COMPILER_ASSERTS=1"])
 run_image("[12, 15]", false, [], ["NYTRIX_JIT_CACHE=0"])
 
+program = "use core\nprint(73)\n"
+assert(is_ok(file_write(source, program)), "write small cache-budget program")
+def padding = "x"
+for iteration in 0..18 { padding += padding }
+for index in 0..2 {
+   assert(is_ok(file_write(cache + "/jit/budget-old-" + to_str(index) + ".bc",
+                          padding)),
+          "seed old published artifacts above the one-MiB budget")
+}
+def note = cache + "/jit/retain-note.txt"
+assert(is_ok(file_write(note, "retain")), "write non-cache sentinel")
+run_image("73", false, [], ["NYTRIX_CACHE_MAX_MB=1"])
+run_image("73", true, [], ["NYTRIX_CACHE_MAX_MB=1"])
+def retained_old = 0
+for entry in fs.list_dir(cache + "/jit") {
+   if str.find(entry, "budget-old-") == 0 { retained_old += 1 }
+}
+assert(retained_old <= 1,
+       "publication evicts old artifacts rather than growing beyond its budget")
+assert(unwrap(file_read(note)) == "retain",
+       "cache eviction leaves non-cache files unchanged")
+
 def inline_command = [cmake, "-E", "env",
    "NYTRIX_CACHE_DIR=" + cache,
    "NYTRIX_JIT_CACHE=1",

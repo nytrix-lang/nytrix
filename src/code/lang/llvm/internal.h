@@ -4,8 +4,8 @@
 #ifndef PRIV_LLVM_H
 #define PRIV_LLVM_H
 
+#include "code/backend/runtime/shared.h"
 #include "code/lang/code.h"
-#include "code/lang/runtime/shared.h"
 #include <llvm-c/Core.h>
 #include <llvm-c/DebugInfo.h>
 

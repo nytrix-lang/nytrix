@@ -13,7 +13,8 @@ fn _available(str name, list args) bool {
 fn tool_status() dict {
    "Return availability for optional reverse-engineering helpers."
    {
-      "capstone": dasm.capstone_available(),
+      "internal_decoder": dasm.internal_decoder_available(),
+      "optional_capstone_fallback": dasm.capstone_fallback_available(),
       "assembler": dasm.assembler_available(),
       "objdump": _available("objdump", ["--version"]),
       "readelf": _available("readelf", ["--version"]),

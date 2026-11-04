@@ -3,6 +3,12 @@
 
 Compile-time forms run during compilation and produce tables, matches, templates, emitted declarations, and generated modules.
 
+## Contents
+
+- [Compile-time forms and code generation](#compile-time-blocks)
+- [Generated modules and diagnostics](#generated-modules)
+- [Boundaries and debugging](#boundaries)
+
 ## Compile-time blocks
 
 ```ny
@@ -11,13 +17,11 @@ comptime { body }
 
 Rules:
 
-- Runs during compilation
-- Returns a value embedded in the program
-- Uses the same resolved imports and aliases as the surrounding source unit
-- Emits only the standard-library helpers reached by the block
-- Can reuse earlier immutable compile-time constants
-- Does not run unrelated top-level user code
-- Does not capture runtime globals
+1. The block runs during compilation and returns a value embedded in the program.
+2. It uses the surrounding source unit's resolved imports and aliases.
+3. It emits only the standard-library helpers reached by the block.
+4. It can reuse earlier immutable compile-time constants.
+5. It does not run unrelated top-level user code or capture runtime globals.
 
 ```ny
 use core
@@ -363,6 +367,9 @@ instead of choosing a record arbitrarily.
 
 ## Emit
 
+> **Note:** These insertion forms refer to templates declared elsewhere; this
+> block is not a standalone program.
+
 ```ny
 comptime emit name(args)
 for axis in comptime ["x", "y", "z"] {
@@ -376,6 +383,9 @@ statement position, including module scope; generated nodes are checked in
 that position by the ordinary compiler pipeline. There is no separate
 emit-context mode. Compile-time `for` iterates a compile-time list and lets
 the body emit declarations for each value.
+
+> **Note:** The `make_axis_family` template is declared by the surrounding
+> program.
 
 ```ny
 for axis in comptime ["x", "y"] {
@@ -401,6 +411,9 @@ comptime template store_for(Layout) {
 Field-sequence parameters preserve field types, declaration order, source
 origins, and the splice's syntax context. The generated function then passes
 through ordinary type checking and backend lowering.
+
+> **Note:** These queries require the named layout, module, and enum
+> declarations in the surrounding program.
 
 ```ny
 comptime fields(LayoutName) as f {
@@ -498,11 +511,14 @@ The current kernel normalizes equality symmetry (`a == b` and `b == a`) and reve
 
 Use these checks at safety boundaries: parser tables, byte decoders, crypto code, native buffers, and loops where an out-of-range value would break memory or correctness.
 
-`--safe-mode` uses the same proof engine for compiler-tracked raw memory accesses. If an allocation size is known, `load8`/`store8` and wider raw loads/stores require a byte offset proven to stay inside the allocation.
+`--mode=safe` uses the same proof engine for compiler-tracked raw memory accesses. If an allocation size is known, `load8`/`store8` and wider raw loads/stores require a byte offset proven to stay inside the allocation.
 
 See [Types](types.md) for `proof` type, dependent params, and refinement.
 
 ## Generated modules
+
+> **Note:** `Spec` and `make_backend` must be declared by the surrounding
+> program; this is the generated-module form.
 
 ```ny
 module pkg.generated generated from Spec {
@@ -568,6 +584,10 @@ seconds, 15 wall-clock seconds, 1 GiB of address space, and one MiB of combined
 output. Failed desugaring returns no rewritten source; the parent compiles only
 the complete rewritten text after the child exits successfully.
 
+> **Warning:** Exceeding either AST limit rejects the pass with
+> `raw syntax tree exceeds the 65,536-node or 64-container budget`. No partial
+> rewrite is compiled.
+
 Compiler-driver APIs callable from `#run` are not available.
 
 ## Platform selection
@@ -580,11 +600,14 @@ Platform guards select source at compile time:
 #elif windows { os_tag = "windows" }
 #else { os_tag = "other" }
 #endif
-
-#if(arch() == "x86_64"){ return 64 }
 ```
 
-Guard names include OS families and CPU families. `comptime{ ... }` can call compile-time facts such as `arch()`, `os()`, `__os_name()`, and `__main()`.
+Platform guards select supported OS and CPU families without an expression
+query:
+
+> **Warning:** Compile-time expression queries using `arch()` currently fail
+> effect validation; that query is not yet implemented. Use the platform
+> guards above.
 
 ## Embedded files
 

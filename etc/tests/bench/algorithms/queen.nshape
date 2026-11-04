@@ -4,8 +4,8 @@ shape queen {
   features ["c-vs-ny", "checksum"]
   template ny-test-case
   expect compile_and_run
-  ;; Translated from the QBE minic test: minic/test/queen.c.
   source ny <<'NY'
+;; inspired from QBE: minic/test/queen.c.
 fn queens(int row, int cols, int diag_l, int diag_r) int {
    if row == 8 { return 1 }
    mut total = 0

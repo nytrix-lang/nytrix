@@ -5,7 +5,7 @@ shape ownership_resource_aggregate_partial_extraction_positive {
   template ny-test-case
   expect compile_and_run
   expect_exit 0
-  flags "--ownership-strict --nyir-verify"
+  flags "--ownership-strict --nyr-verify"
   source ny <<'NY'
 use core
 linear layout File { int fd }

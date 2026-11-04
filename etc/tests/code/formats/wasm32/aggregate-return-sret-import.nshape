@@ -27,7 +27,7 @@ def host_source =
     "scalar_i32 != nil && inspect_single_integer32(scalar_i32) == 8 ? 0 : 1"
 def compile = run_capture(
     [compiler, "--no-effect-require-known", "--native-backend=wasm",
-     "--native-only", "--nyir-verify", "--emit-asm=" + host_wat,
+     "--native-only", "--nyr-verify", "--emit-asm=" + host_wat,
      "-no-std", "-emit-only", "-e", host_source],
     [], nil, false)
 def assemble = run_capture(["wat2wasm", host_wat, "-o", host_wasm],

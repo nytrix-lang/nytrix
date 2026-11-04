@@ -2031,9 +2031,10 @@ static const char *infer_expr_type_uncached(codegen_t *cg, scope *scopes,
       if (!builtin_shadowed &&
           (call_name_tail_is(n, "malloc") ||
            call_name_tail_is(n, "malloc_raw") ||
+           call_name_tail_is(n, "calloc_raw") ||
            call_name_tail_is(n, "zalloc") || call_name_tail_is(n, "realloc") ||
            strcmp(n, "__malloc") == 0 || strcmp(n, "__malloc_raw") == 0 ||
-           strcmp(n, "__realloc") == 0))
+           strcmp(n, "__calloc_raw") == 0 || strcmp(n, "__realloc") == 0))
         return "ptr";
       if (!builtin_shadowed &&
           (call_name_tail_is(n, "type") || call_name_tail_is(n, "type_name")))
@@ -2831,7 +2832,14 @@ static void ny_refine_memo_put(codegen_t *cg, const char *name,
   ny_refine_memo_slot_t *slot =
       ny_refine_memo_slot_for(cg, name, ny_hash64_cstr(name));
   if (!slot->name) {
-    slot->name = name;
+    /*
+     * Callers may pass short-lived HM-rendered type strings. The memo table
+     * outlives those temporaries, so keep its key in the compilation arena.
+     */
+    char *key = types_arena_strdup(cg->arena, name);
+    if (!key)
+      return;
+    slot->name = key;
     slot->def = def;
     cg->refine_memo_len++;
     return;

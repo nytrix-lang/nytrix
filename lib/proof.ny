@@ -32,9 +32,9 @@ def CERTIFICATE_FORMAT = "ny-proof-certificate-v1"
 def POLICY_VERSION = "core.proof@1"
 
 ;; Checker-visible budgets: mirrored from the compiler's policy defaults.
-def MAX_VARS = 8
-def MAX_CONS = 32
-def MAX_DEPTH = 64
+def int MAX_VARS = 8
+def int MAX_CONS = 32
+def int MAX_DEPTH = 64
 
 ;; Bounded canonical-proposition parser (own parser, own node shape).
 ;; A node is a dict:
@@ -48,12 +48,18 @@ fn _char_at(str s, int i) str {
 }
 
 fn _is_digit(str c) bool {
-   c == "0" || c == "1" || c == "2" || c == "3" || c == "4" || c == "5" ||
-   c == "6" || c == "7" || c == "8" || c == "9"
+   def byte = load8(c, 0)
+   byte >= 48 && byte <= 57
 }
 
 fn _is_name_char(str c) bool {
-   (_is_digit(c)) || (c >= "a" && c <= "z") || (c >= "A" && c <= "Z") || c == "_"
+   if c == "_" {
+      return true
+   }
+   if ascii_is_alpha(load8(c, 0)) {
+      return true
+   }
+   _is_digit(c)
 }
 
 ;; Normalizes a bool into 1/0 for dict-literal returns: ternaries inside
@@ -80,7 +86,9 @@ fn _parse_decimal(str s) dict {
    while i < len(s) {
       def c = _char_at(s, i)
       if !_is_digit(c) { return {"ok": false, "reason": "bad digit"} }
-      v = v * 10 + (to_int(c) - to_int("0"))
+      ;; `to_int` is the generic tagged-value conversion and does not decode
+      ;; a one-byte digit string.  Read the ASCII digit directly instead.
+      v = v * 10 + (load8(c, 0) - 48)
       i += 1
    }
    ;; Keep the sign fixup off the dict-literal line: a ternary inside a
@@ -246,7 +254,7 @@ fn _closed_eval(dict node, int depth) dict {
    if depth > 40 {
       return {"ok": false, "reason": "depth budget exhausted"}
    }
-   def kind = node.get("kind")
+   def str kind = node.get("kind")
    if kind == "int" || kind == "bool" {
       if kind == "bool" {
          return {"ok": true, "value": _bit(node.get("value"))}
@@ -272,7 +280,7 @@ fn _closed_eval(dict node, int depth) dict {
    if !left.get("ok") { return left }
    def right = _closed_eval(node.get("right"), depth + 1)
    if !right.get("ok") { return right }
-   def op = node.get("op")
+   def str op = node.get("op")
    if op == "&&" {
       def both = left.get("value") != 0 && right.get("value") != 0
       return {"ok": true, "value": _bit(both)}
@@ -305,15 +313,15 @@ fn parse_ranges(str ranges) dict {
    if len(ranges) == 0 {
       return out
    }
-   def entries = _split_char(ranges, ";")
+   def entries = split(ranges, ";")
    mut i = 0
    while i < len(entries) {
-      def entry = get(entries, i)
+      def str entry = entries.get(i, "")
       def eq = _find_char(entry, "=")
       if eq < 0 {
          return {}
       }
-      def name = slice(entry, 0, eq)
+      def str name = slice(entry, 0, eq)
       def dots = _find_from_char(entry, "..", eq + 1)
       if dots < 0 {
          return {}
@@ -326,7 +334,7 @@ fn parse_ranges(str ranges) dict {
       if lo_p.get("value") > hi_p.get("value") {
          return {}
       }
-      out = out.set(name, [lo_p.get("value"), hi_p.get("value")])
+      out[name] = [lo_p.get("value"), hi_p.get("value")]
       i += 1
    }
    out
@@ -361,7 +369,7 @@ fn _sub_range(dict node, dict ranges, int depth) dict {
    if depth > 40 {
       return {"ok": false, "lo": 0, "hi": 0}
    }
-   def kind = node.get("kind")
+   def str kind = node.get("kind")
    if kind == "int" {
       def v = node.get("value")
       return {"ok": true, "lo": v, "hi": v}
@@ -384,7 +392,7 @@ fn _sub_range(dict node, dict ranges, int depth) dict {
       if !l.get("ok") || !r.get("ok") {
          return {"ok": false, "lo": 0, "hi": 0}
       }
-      def op = node.get("op")
+      def str op = node.get("op")
       ;; Plain operators and direct literals here: the add/sub/mul wrapper
       ;; functions and set-chained result dicts do not survive the
       ;; precompiled-stdlib path for dynamic operands.
@@ -437,7 +445,7 @@ fn _range_decide(dict node, dict ranges, int depth) dict {
    if depth > 40 {
       return {"decided": false, "reason": "depth budget exhausted"}
    }
-   def kind = node.get("kind")
+   def str kind = node.get("kind")
    if kind == "bool" {
       return {"decided": true, "value": node.get("value")}
    }
@@ -452,7 +460,7 @@ fn _range_decide(dict node, dict ranges, int depth) dict {
       if !inner.get("decided") { return inner }
       return {"decided": true, "value": !inner.get("value")}
    }
-   def op = node.get("op")
+   def str op = node.get("op")
    if op == "&&" {
       def l = _range_decide(node.get("left"), ranges, depth + 1)
       def r = _range_decide(node.get("right"), ranges, depth + 1)
@@ -531,7 +539,7 @@ fn _range_decide(dict node, dict ranges, int depth) dict {
 fn tactic_solver(dict proposition, str mode) dict {
    def answer = __proof_policy_solve(proposition.get("canonical", ""),
       proposition.get("ranges", ""), mode, MAX_VARS, MAX_CONS, MAX_DEPTH)
-   if answer == "proved" {
+   if _str_eq(answer, "proved") {
       return {"verdict": "proved", "backend": mode, "cex": "", "reason": ""}
    }
    if startswith(answer, "refuted:") {
@@ -577,10 +585,11 @@ fn _well_formed_obligation(dict ob) dict {
    if !is_dict(ob) {
       return {"ok": false, "reason": "obligation is not a record"}
    }
-   if ob.get("format", "") != OBLIGATION_FORMAT {
+   if !_str_eq(ob.get("format", ""), OBLIGATION_FORMAT) {
       return {"ok": false, "reason": "obligation format mismatch"}
    }
-   if !is_str(ob.get("canonical", nil)) || ob.get("canonical") == "" {
+   if !is_str(ob.get("canonical", nil)) ||
+   _str_eq(ob.get("canonical", ""), "") {
       return {"ok": false, "reason": "obligation proposition missing"}
    }
    if !is_str(ob.get("ranges", nil)) || !is_str(ob.get("policy", nil)) ||
@@ -630,16 +639,20 @@ fn solve(dict ob) dict {
    }
    ;; Policy: tactic order is fold, range, solver.  Tokens default to the
    ;; full order; "solver" means both bounded kernels in auto mode.
-   def policy = ob.get("policy", "")
-   def wants_fold = policy == "" || _policy_has(policy, "fold")
-   def wants_range = policy == "" || _policy_has(policy, "range")
-   wants_presburger = policy == "" || _policy_has(policy, "solver") ||
+   def str policy = ob.get("policy", "")
+   mut int wants_fold = 0
+   mut int wants_range = 0
+   mut int wants_presburger = 0
+   mut int wants_z3 = 0
+   if len(policy) == 0 || _policy_has(policy, "fold") { wants_fold = 1 }
+   if len(policy) == 0 || _policy_has(policy, "range") { wants_range = 1 }
+   if len(policy) == 0 || _policy_has(policy, "solver") ||
    _policy_has(policy, "kernels") || _policy_has(policy, "auto") ||
-   _policy_has(policy, "presburger")
-   wants_z3 = policy == "" || _policy_has(policy, "solver") ||
+   _policy_has(policy, "presburger") { wants_presburger = 1 }
+   if len(policy) == 0 || _policy_has(policy, "solver") ||
    _policy_has(policy, "kernels") || _policy_has(policy, "auto") ||
-   _policy_has(policy, "z3")
-   if wants_fold {
+   _policy_has(policy, "z3") { wants_z3 = 1 }
+   if wants_fold != 0 {
       def fold = tactic_fold(ob)
       if fold.get("decided") {
          if fold.get("value") {
@@ -650,7 +663,7 @@ fn solve(dict ob) dict {
             "proposition is constant-false under exact evaluation")
       }
    }
-   if wants_range {
+   if wants_range != 0 {
       def range_decision = tactic_range(ob)
       if range_decision.get("decided") {
          if range_decision.get("value") {
@@ -666,20 +679,20 @@ fn solve(dict ob) dict {
    mut backend = ""
    mut cex = ""
    mut reason = "no backend could decide"
-   if wants_presburger {
+   if wants_presburger != 0 {
       def pres = tactic_solver(ob, "presburger")
       verdict = pres.get("verdict")
       backend = pres.get("backend")
       cex = pres.get("cex")
       reason = pres.get("reason")
    }
-   if wants_z3 && verdict == "unknown" {
+   if wants_z3 != 0 && _str_eq(verdict, "unknown") {
       def z3 = tactic_solver(ob, "z3")
-      if z3.get("verdict") == "proved" {
+      if _str_eq(z3.get("verdict", ""), "proved") {
          verdict = "proved"
          backend = z3.get("backend")
-      } elif z3.get("verdict") == "refuted" {
-         if verdict == "refuted" {
+      } elif _str_eq(z3.get("verdict", ""), "refuted") {
+         if _str_eq(verdict, "refuted") {
             ;; Presburger refuted and Z3 refuted: coherent.
             verdict = "refuted"
             backend = z3.get("backend")
@@ -693,22 +706,22 @@ fn solve(dict ob) dict {
          }
       }
    }
-   if verdict == "refuted" && len(cex) == 0 {
+   if _str_eq(verdict, "refuted") && len(cex) == 0 {
       ;; A refutation without bindings cannot be verified by the checker;
       ;; downgrade to unknown rather than claim evidence we lack.
       verdict = "unknown"
       reason = "refutation lacked a verifiable counterexample"
    }
-   if verdict == "proved" {
+   if _str_eq(verdict, "proved") {
       return _certificate(ob, "proved", tactic,
-         backend == "" ? "kernels" : backend, "",
+         _str_eq(backend, "") ? "kernels" : backend, "",
          "proved by the bounded kernels: negation unsatisfiable")
    }
-   if verdict == "refuted" {
+   if _str_eq(verdict, "refuted") {
       return _certificate(ob, "refuted", tactic, backend, cex,
          "refuted: counterexample verified by exact evaluation")
    }
-   if verdict == "unknown" && wants_range &&
+   if _str_eq(verdict, "unknown") && wants_range &&
    ob.get("canonical", "").contains("binary:*(") {
       ;; The independent checker has bounded interval rules beyond the Ny
       ;; range propagator. Ask it to validate a candidate proof; only return
@@ -723,10 +736,11 @@ fn solve(dict ob) dict {
 }
 
 fn _policy_has(str policy, str token) bool {
-   def parts = _split_char(policy, ",")
+   def parts = split(policy, ",")
    mut i = 0
    while i < len(parts) {
-      if get(parts, i) == token {
+      def str part = parts.get(i, "")
+      if part == token {
          return true
       }
       i += 1

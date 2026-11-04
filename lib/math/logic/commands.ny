@@ -3,6 +3,7 @@
 module core.math.logic.commands(
    new_registry, register, standard_registry, run, metadata, names)
 use core
+use core.str as str
 use core.compiler.syntax as syntax
 use core.math.logic.solve as solve
 
@@ -20,18 +21,19 @@ fn new_registry() dict {
 ;; Returns the result of the `register` operation.
 fn register(dict registry, str name, fnptr handler, str summary,
    str module_name, str result_kind="certificate-report") dict {
-   if name == "" || type(handler) == "nil" {
+   def key = str.cstr_to_str(name)
+   if str._str_eq(key, "") || type(handler) == "nil" {
       panic("reasoning command requires name and handler")
    }
-   def existed = registry.get("metadata").contains(name)
+   def existed = registry.get("metadata").contains(key)
    ;; Dispatch through `expand_macro` lowers to an indirect call, whose
    ;; boundary marks tagged-args callbacks automatically; no manual mark.
    registry["syntax"] = syntax.register_macro_in(registry.get("syntax"),
-      name, handler)
-   registry.get("metadata")[name] = {"name":name, "summary":summary,
+      key, handler)
+   registry.get("metadata")[key] = {"name":key, "summary":summary,
       "module":module_name, "result_kind":result_kind,
       "kind":"reasoning-command"}
-   if !existed { registry["order"] = registry.get("order").append(name) }
+   if !existed { registry["order"] = registry.get("order").append(key) }
    registry
 }
 
@@ -96,7 +98,10 @@ fn run(dict registry, str name, list args) any {
 
 ;; Returns the result of the `metadata` operation.
 fn metadata(dict registry, str name="") any {
-   if name != "" { return registry.get("metadata").get(name, nil) }
+   def key = str.cstr_to_str(name)
+   if !str._str_eq(key, "") {
+      return registry.get("metadata").get(key, nil)
+   }
    mut out = []
    mut i = 0
    while i < registry.get("order").len {

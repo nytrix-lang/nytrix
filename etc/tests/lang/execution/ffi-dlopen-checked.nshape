@@ -1,0 +1,27 @@
+shape test_ffi_dlopen_checked {
+  family "runtime/execution"
+  generator "embedded"
+  features ["ny", "test", "ffi"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.ffi as ffi
+
+#linux {
+   def font = ffi.dlopen_checked(
+      "libfreetype.so.6", "FT_Init_FreeType",
+      ffi.RTLD_NOW() | ffi.RTLD_GLOBAL())
+   assert(font, "checked dlopen accepts a valid library and symbol")
+   assert(ffi.dlsym(font, "FT_Init_FreeType"),
+      "checked dlopen returns a usable library handle")
+   ffi.dlclose(font)
+   def missing = ffi.dlopen_checked(
+      "__nytrix_missing_library_for_test__", "missing_symbol", ffi.RTLD_NOW())
+   assert(!missing, "checked dlopen rejects a missing library")
+}
+
+print("FFI-DLOPEN-CHECKED-OK")
+NY
+}

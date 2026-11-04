@@ -11,6 +11,7 @@
 #include "base/util.h"
 #include "cmd/fmt/ui.h"
 #include "cmd/tools/repo.h"
+#include "code/backend/bare/generate.h"
 
 #include <dirent.h>
 #include <errno.h>
@@ -45,6 +46,7 @@ typedef struct {
   int jobs;
   int verbose;
   int help;
+  const char *help_target;
   int version;
   int profile;
   int is_debug;
@@ -100,6 +102,108 @@ static int make_lstat(const char *path, struct stat *st) {
 #endif
 }
 
+#ifndef _WIN32
+static void make_enable_executable(const char *path) {
+  struct stat st;
+  if (stat(path, &st) != 0 || !S_ISREG(st.st_mode) ||
+      (st.st_mode & 0111) == 0111)
+    return;
+  (void)chmod(path, st.st_mode | 0111);
+}
+
+static void make_enable_project_ny_scripts(const char *dir) {
+  DIR *d = opendir(dir);
+  if (!d)
+    return;
+  struct dirent *ent;
+  while ((ent = readdir(d)) != NULL) {
+    if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0)
+      continue;
+    char path[PATH_MAX];
+    if (snprintf(path, sizeof(path), "%s/%s", dir, ent->d_name) >=
+        (int)sizeof(path))
+      continue;
+    struct stat st;
+    if (lstat(path, &st) != 0)
+      continue;
+    if (S_ISDIR(st.st_mode)) {
+      make_enable_project_ny_scripts(path);
+    } else if (S_ISREG(st.st_mode) && strrchr(ent->d_name, '.') &&
+               strcmp(strrchr(ent->d_name, '.'), ".ny") == 0) {
+      make_enable_executable(path);
+    }
+  }
+  closedir(d);
+}
+
+static void make_prepare_project_scripts(const char *root) {
+  DIR *d = opendir(root);
+  if (d) {
+    struct dirent *ent;
+    while ((ent = readdir(d)) != NULL) {
+      if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0)
+        continue;
+      char path[PATH_MAX];
+      if (snprintf(path, sizeof(path), "%s/%s", root, ent->d_name) >=
+          (int)sizeof(path))
+        continue;
+      struct stat st;
+      if (stat(path, &st) != 0 || !S_ISREG(st.st_mode))
+        continue;
+      FILE *f = fopen(path, "rb");
+      if (!f)
+        continue;
+      int has_shebang = fgetc(f) == '#' && fgetc(f) == '!';
+      fclose(f);
+      if (has_shebang)
+        make_enable_executable(path);
+    }
+    closedir(d);
+  }
+  char projects[PATH_MAX];
+  if (snprintf(projects, sizeof(projects), "%s/etc/projects", root) <
+      (int)sizeof(projects))
+    make_enable_project_ny_scripts(projects);
+}
+#else
+static void make_prepare_project_scripts(const char *root) { (void)root; }
+#endif
+
+static int make_install_hooks(const char *root) {
+  static const char *names[] = {"pre-commit", "commit-msg", "pre-merge-commit",
+                                "pre-applypatch", "pre-push"};
+  char missing[512] = "";
+  size_t used = 0;
+  for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+    char path[PATH_MAX];
+    struct stat st;
+    if (snprintf(path, sizeof(path), "%s/.githooks/%s", root, names[i]) >=
+            (int)sizeof(path) ||
+        stat(path, &st) != 0 || !S_ISREG(st.st_mode)) {
+      int n = snprintf(missing + used, sizeof(missing) - used, "%s%s",
+                       used ? ", " : "", names[i]);
+      if (n > 0 && (size_t)n < sizeof(missing) - used)
+        used += (size_t)n;
+    }
+#ifndef _WIN32
+    else {
+      make_enable_executable(path);
+    }
+#endif
+  }
+  if (missing[0]) {
+    nyt_err("make hooks", "missing %s", missing);
+    return 1;
+  }
+  char *argv[] = {"git",       "config", "--local", "core.hooksPath",
+                  ".githooks", NULL};
+  int rc = run_cmd(argv);
+  if (rc != 0)
+    return rc;
+  nyt_msg("OK", NYT_GREEN, "Git hooks installed: core.hooksPath=.githooks");
+  return 0;
+}
+
 static const char *default_fuzz_shape_dir(void) {
   struct stat st;
   if (stat("build/cache/tests/shapes", &st) == 0)
@@ -143,7 +247,7 @@ static const char *build_line_color(const char *rest) {
   return NYT_RESET;
 }
 
-static void print_build_output_line(const char *line) {
+static void __attribute__((unused)) print_build_output_line(const char *line) {
   if (!line) {
     return;
   }
@@ -223,12 +327,76 @@ static int run_cmd_build_output(char *const argv[]) {
 #endif
 }
 
+static void build_root_dir(char *out, size_t out_sz, const char *root) {
+  const char *configured = getenv("BUILD_DIR");
+  if (configured && *configured) {
+    if (configured[0] == '/' || (configured[0] && configured[1] == ':')) {
+      snprintf(out, out_sz, "%s", configured);
+    } else {
+      nyt_path_join(out, out_sz, root, configured);
+    }
+    return;
+  }
+  nyt_path_join(out, out_sz, root, "build");
+}
+
 static void build_kind_dir(char *out, size_t out_sz, const char *root,
                            const char *kind) {
-  char rel[64];
-  snprintf(rel, sizeof(rel), "build/%s", kind);
-  nyt_path_join(out, out_sz, root, rel);
+  char build_root[PATH_MAX];
+  build_root_dir(build_root, sizeof(build_root), root);
+  nyt_path_join(out, out_sz, build_root, kind);
 }
+
+static int path_has_entry(const char *path, const char *entry, char separator) {
+  if (!path || !entry || !*entry)
+    return 0;
+  size_t entry_len = strlen(entry);
+  for (const char *p = path; *p;) {
+    const char *end = strchr(p, separator);
+    size_t len = end ? (size_t)(end - p) : strlen(p);
+    if (len == entry_len && memcmp(p, entry, len) == 0)
+      return 1;
+    if (!end)
+      break;
+    p = end + 1;
+  }
+  return 0;
+}
+
+static void prepend_env_path(const char *name, const char *entry,
+                             char separator) {
+  const char *current = getenv(name);
+  if (path_has_entry(current, entry, separator))
+    return;
+  char value[PATH_MAX * 2];
+  int n = snprintf(value, sizeof(value), "%s%c%s", entry, separator,
+                   current ? current : "");
+  if (n >= 0 && (size_t)n < sizeof(value))
+    ny_setenv(name, value, 1);
+}
+
+#ifndef _WIN32
+static int directory_has_shared_library(const char *path) {
+  DIR *dir = opendir(path);
+  if (!dir)
+    return 0;
+  int found = 0;
+  struct dirent *ent;
+  while ((ent = readdir(dir)) != NULL) {
+    const char *dot = strrchr(ent->d_name, '.');
+    if (dot && strcmp(dot, ".so") == 0) {
+      found = 1;
+      break;
+    }
+    if (dot && strncmp(dot, ".so.", 4) == 0) {
+      found = 1;
+      break;
+    }
+  }
+  closedir(dir);
+  return found;
+}
+#endif
 
 static int rm_rf(const char *path) {
   struct stat st;
@@ -340,7 +508,20 @@ static int is_known_command(const char *s) {
       "ubsan",   "optcheck", "analyze", "check",   "ny",      "run",
       "release", "audit",    "c2ny",    "py2ny",   "wasm",    "env",
       "targets", "doctor",   "deps",    "profile", "cross",   "cross-run",
+      "prepare", "hooks",    "nyc",     "bare-payload",
   };
+  for (size_t i = 0; i < sizeof(cmds) / sizeof(cmds[0]); i++) {
+    if (strcmp(s, cmds[i]) == 0)
+      return 1;
+  }
+  return 0;
+}
+
+static int command_uses_tool_help(const char *s) {
+  static const char *cmds[] = {"fmt",      "analyze", "check", "tidy", "audit",
+                               "test",     "bench",   "fuzz",  "asan", "ubsan",
+                               "coverage", "perf",    "gprof", "docs", "wasm",
+                               "ny",       "repl",    "run",   "c2ny", "py2ny"};
   for (size_t i = 0; i < sizeof(cmds) / sizeof(cmds[0]); i++) {
     if (strcmp(s, cmds[i]) == 0)
       return 1;
@@ -367,12 +548,32 @@ static int parse_args(int argc, char **argv, MakeArgs *o) {
       i = color_idx;
       continue;
     }
-    if (ny_arg_match(a, "--help", "-h")) {
+    if (strcmp(a, "help") == 0) {
       o->help = 1;
+      if (i + 1 < argc && argv[i + 1][0] != '-')
+        o->help_target = argv[++i];
+      continue;
+    }
+    if (ny_arg_match(a, "--help", "-h")) {
+      if (o->cmd_count > 0 &&
+          command_uses_tool_help(o->cmds[o->cmd_count - 1])) {
+        o->unknown[o->unknown_count++] = a;
+      } else {
+        o->help = 1;
+        if (o->cmd_count > 0)
+          o->help_target = o->cmds[o->cmd_count - 1];
+        else if (o->unknown_count > 0 &&
+                 o->unknown[o->unknown_count - 1][0] != '-')
+          o->help_target = o->unknown[o->unknown_count - 1];
+      }
       continue;
     }
     if (strcmp(a, "--version") == 0) {
       o->version = 1;
+      continue;
+    }
+    if (strcmp(a, "--debug") == 0) {
+      o->is_debug = 1;
       continue;
     }
     if (strcmp(a, "--profile") == 0) {
@@ -387,9 +588,22 @@ static int parse_args(int argc, char **argv, MakeArgs *o) {
       }
       continue;
     }
-    if (ny_arg_match(a, "--verbose", "-v")) {
-      o->verbose = 1;
+    if (strcmp(a, "--verbose") == 0 || strcmp(a, "-v") == 0) {
+      o->verbose++;
       continue;
+    }
+    if (a[0] == '-' && a[1] == 'v' && a[2] == 'v') {
+      int stacked = 1;
+      for (int j = 2; a[j]; j++) {
+        if (a[j] != 'v') {
+          stacked = 0;
+          break;
+        }
+      }
+      if (stacked) {
+        o->verbose += (int)strlen(a) - 1;
+        continue;
+      }
     }
     if (strcmp(a, "ny") == 0) {
       o->cmds[o->cmd_count++] = "ny";
@@ -423,33 +637,6 @@ static int parse_args(int argc, char **argv, MakeArgs *o) {
   return 1;
 }
 
-static void print_help(void) {
-  nyt_heading("Build Tool");
-  nyt_kv("Usage", "ny make [commands...] [options]");
-
-  nyt_subheading("Commands");
-  nyt_kv("all", "configure, build ny/std/tools");
-  nyt_kv("bin", "build the ny executable");
-  nyt_kv("fmt/check", "run ny fmt / parse checks");
-  nyt_kv("test", "run native test matrix");
-  nyt_kv("bench", "run public C-vs-Ny benchmark shapes");
-  nyt_kv("docs", "build documentation portal");
-  nyt_kv("perf", "run performance gates");
-  nyt_kv("install", "install ny and ny-lsp; tools are available as ny <tool>");
-  nyt_kv("clean", "remove build outputs");
-  nyt_kv("more", "std, std_bc, repl, run, fuzz, tidy, gprof, asan, ubsan, "
-                 "optcheck, analyze, ny");
-
-  nyt_subheading("Options");
-  nyt_kv("-j, --jobs N", "parallel build jobs");
-  nyt_kv("-v, --verbose", "print subcommands");
-  nyt_kv("-h, --help", "show this help");
-  nyt_kv("--version", "print version");
-  nyt_kv("--profile", "enable profile-oriented build flags");
-  nyt_kv("--color MODE", "control colored output: auto, always, never");
-  nyt_kv("--no-color", "disable colored output");
-}
-
 static int ensure_cmake_configure(const char *root, const char *kind) {
   char bdir[PATH_MAX];
   build_kind_dir(bdir, sizeof(bdir), root, kind);
@@ -476,7 +663,7 @@ static int ensure_cmake_configure(const char *root, const char *kind) {
 }
 
 static int cmake_build(const char *root, const char *kind, const char **targets,
-                       int target_count, int jobs) {
+                       int target_count, int jobs, int verbose) {
   char bdir[PATH_MAX];
   build_kind_dir(bdir, sizeof(bdir), root, kind);
   if (ensure_cmake_configure(root, kind) != 0)
@@ -498,6 +685,8 @@ static int cmake_build(const char *root, const char *kind, const char **targets,
     argv[k++] = (char *)targets[i];
   argv[k++] = "-j";
   argv[k++] = jobs_s;
+  if (verbose > 0)
+    argv[k++] = "--verbose";
   argv[k] = NULL;
   int rc = run_cmd_build_output(argv);
   if (rc == 0) {
@@ -579,9 +768,12 @@ static int resolve_tool_bin(const char *root, const char *kind,
                             const char *name, char *out, size_t out_sz) {
   if (out && out_sz)
     out[0] = '\0';
+  char bdir[PATH_MAX], release_dir[PATH_MAX];
   char p1[PATH_MAX], p2[PATH_MAX];
-  snprintf(p1, sizeof(p1), "%s/build/%s/%s", root, kind, name);
-  snprintf(p2, sizeof(p2), "%s/build/release/%s", root, name);
+  build_kind_dir(bdir, sizeof(bdir), root, kind);
+  build_kind_dir(release_dir, sizeof(release_dir), root, "release");
+  nyt_path_join(p1, sizeof(p1), bdir, name);
+  nyt_path_join(p2, sizeof(p2), release_dir, name);
   if (ny_access(p1, X_OK) == 0) {
     snprintf(out, out_sz, "%s", p1);
     return 1;
@@ -975,7 +1167,8 @@ static int run_uninstall_manifest(const char *root, const char *kind) {
 
 static int cmd_needs_build(const char *cmd) {
   static const char *no_build[] = {
-      "clean", "uninstall", "deps", "env", "targets", "doctor",
+      "clean",   "uninstall", "deps",    "env",
+      "targets", "doctor",    "prepare", "hooks", "bare-payload",
   };
   for (size_t i = 0; i < sizeof(no_build) / sizeof(no_build[0]); i++) {
     if (strcmp(cmd, no_build[i]) == 0)
@@ -1022,9 +1215,12 @@ static void build_targets_for_cmd(const char *cmd, const char **unknown,
   static const char *fuzz[] = {"ny", "ny-test"};
   static const char *fmt[] = {"ny-fmt"};
   static const char *docs[] = {"ny", "std", "ny-doc"};
+  static const char *wasm[] = {"ny", "std"};
   static const char *std[] = {"std"};
+  static const char *std_bc[] = {"std_bc"};
   static const char *perf[] = {"ny", "ny-perf"};
   static const char *ny[] = {"ny"};
+  static const char *nyc[] = {"nyc"};
   static const char *profgprof[] = {"ny", "ny-perf", "ny-test"};
 #ifdef _WIN32
   static const char *install[] = {"ny",      "ny-lsp",  "std",    "ny-fmt",
@@ -1038,6 +1234,9 @@ static void build_targets_for_cmd(const char *cmd, const char **unknown,
   if (strcmp(cmd, "all") == 0 || strcmp(cmd, "bin") == 0) {
     *targets = all;
     *target_count = (int)(sizeof(all) / sizeof(all[0]));
+  } else if (strcmp(cmd, "nyc") == 0) {
+    *targets = nyc;
+    *target_count = (int)(sizeof(nyc) / sizeof(nyc[0]));
   } else if (strcmp(cmd, "test") == 0 || strcmp(cmd, "optcheck") == 0 ||
              strcmp(cmd, "asan") == 0 || strcmp(cmd, "ubsan") == 0) {
     const char *shared_std_env = getenv("NYTRIX_TEST_USE_STD_BC");
@@ -1085,9 +1284,15 @@ static void build_targets_for_cmd(const char *cmd, const char **unknown,
   } else if (strcmp(cmd, "docs") == 0) {
     *targets = docs;
     *target_count = (int)(sizeof(docs) / sizeof(docs[0]));
-  } else if (strcmp(cmd, "std") == 0 || strcmp(cmd, "std_bc") == 0) {
+  } else if (strcmp(cmd, "wasm") == 0) {
+    *targets = wasm;
+    *target_count = (int)(sizeof(wasm) / sizeof(wasm[0]));
+  } else if (strcmp(cmd, "std") == 0) {
     *targets = std;
     *target_count = (int)(sizeof(std) / sizeof(std[0]));
+  } else if (strcmp(cmd, "std_bc") == 0) {
+    *targets = std_bc;
+    *target_count = (int)(sizeof(std_bc) / sizeof(std_bc[0]));
   } else if (strcmp(cmd, "install") == 0) {
     *targets = install;
     *target_count = (int)(sizeof(install) / sizeof(install[0]));
@@ -1162,22 +1367,78 @@ static void ny_make_load_default_configs(const char *root) {
   }
 }
 
+#ifndef _WIN32
+static int make_find_executable(const char *name, char *out, size_t out_sz) {
+  const char *path = getenv("PATH");
+  if (!path)
+    return 0;
+  for (const char *entry = path;;) {
+    const char *end = strchr(entry, ':');
+    size_t dir_len = end ? (size_t)(end - entry) : strlen(entry);
+    char candidate[PATH_MAX];
+    if (dir_len + strlen(name) + 2 < sizeof(candidate)) {
+      if (dir_len == 0)
+        snprintf(candidate, sizeof(candidate), "./%s", name);
+      else
+        snprintf(candidate, sizeof(candidate), "%.*s/%s", (int)dir_len, entry,
+                 name);
+      if (access(candidate, X_OK) == 0) {
+        snprintf(out, out_sz, "%s", candidate);
+        return 1;
+      }
+    }
+    if (!end)
+      break;
+    entry = end + 1;
+  }
+  return 0;
+}
+#endif
+
 static void ny_make_init_env_defaults(const char *root) {
   if (!getenv("NYTRIX_ROOT"))
     ny_setenv("NYTRIX_ROOT", root, 0);
   char rt_path[PATH_MAX];
-  snprintf(rt_path, sizeof(rt_path), "%s/src/code/lang/runtime/init.c", root);
+  snprintf(rt_path, sizeof(rt_path), "%s/src/code/backend/runtime/init.c",
+           root);
   struct stat st;
   if (stat(rt_path, &st) == 0)
     ny_setenv("NYTRIX_RT_SRC", rt_path, 0);
+
+  char build_root[PATH_MAX], vendor_bin[PATH_MAX], llvm_config[PATH_MAX];
+  char vendor_include[PATH_MAX], vendor_lib[PATH_MAX];
+  build_root_dir(build_root, sizeof(build_root), root);
+  nyt_path_join(vendor_bin, sizeof(vendor_bin), build_root, "vendor/bin");
+  nyt_path_join(llvm_config, sizeof(llvm_config), vendor_bin, "llvm-config");
+  nyt_path_join(vendor_include, sizeof(vendor_include), build_root,
+                "vendor/include");
+  nyt_path_join(vendor_lib, sizeof(vendor_lib), build_root, "vendor/lib/host");
+  if (stat(llvm_config, &st) == 0) {
+#ifdef _WIN32
+    prepend_env_path("PATH", vendor_bin, ';');
+#else
+    prepend_env_path("PATH", vendor_bin, ':');
+#endif
+    ny_setenv("LLVM_CONFIG", llvm_config, 0);
+    if (stat(vendor_include, &st) == 0)
+      ny_setenv("NYTRIX_LLVM_INCLUDE", vendor_include, 0);
+  }
+#ifndef _WIN32
+  if (directory_has_shared_library(vendor_lib)) {
+    prepend_env_path("LD_LIBRARY_PATH", vendor_lib, ':');
+  }
+#endif
 #ifndef _WIN32
   if (!getenv("CC")) {
-    if (system("which clang > /dev/null 2>&1") == 0)
-      ny_setenv("CC", "clang", 0);
-    else if (system("which cc > /dev/null 2>&1") == 0)
-      ny_setenv("CC", "cc", 0);
-    else if (system("which gcc > /dev/null 2>&1") == 0)
-      ny_setenv("CC", "gcc", 0);
+    static const char *candidates[] = {"clang-20", "clang-19", "clang-18",
+                                       "clang",    "cc",       "gcc"};
+    char compiler[PATH_MAX];
+    for (size_t i = 0; i < sizeof(candidates) / sizeof(candidates[0]); i++) {
+      if (make_find_executable(candidates[i], compiler, sizeof(compiler))) {
+        ny_setenv("CC", compiler, 0);
+        break;
+      }
+    }
   }
 #endif
 }
@@ -1186,6 +1447,8 @@ int ny_make_main(int argc, char **argv) {
   MakeArgs a;
   if (!parse_args(argc, argv, &a))
     return 2;
+  if (a.help)
+    return ny_make_print_help(a.help_target);
   if (a.cmd_count == 0 && a.had_unknown_nonflag) {
     nyt_err("ny-make", "unknown command or target");
     for (int i = 0; i < a.unknown_count; i++)
@@ -1193,17 +1456,12 @@ int ny_make_main(int argc, char **argv) {
     nyt_warn("ny-make", "run `ny make --help` for supported commands");
     return 2;
   }
-  if (a.help) {
-    print_help();
+  if (a.version) {
+    puts("Nytrix Build Tool");
     return 0;
   }
   if (a.cmd_count == 0) {
-    print_help();
-    return 0;
-  }
-  if (a.version) {
-    puts("Nytrix Build Tool 0.1");
-    return 0;
+    return ny_make_print_help(NULL);
   }
 
   char root[PATH_MAX];
@@ -1216,8 +1474,11 @@ int ny_make_main(int argc, char **argv) {
     return 1;
   }
 
+  make_prepare_project_scripts(root);
   ny_make_load_default_configs(root);
   ny_make_init_env_defaults(root);
+  if (a.cmd_count == 1 && strcmp(a.cmds[0], "prepare") == 0)
+    return 0;
 
   int jobs = 0;
   char jobs_note[256];
@@ -1232,9 +1493,25 @@ int ny_make_main(int argc, char **argv) {
 
     if (strcmp(cmd, "clean") == 0) {
       char bdir[PATH_MAX];
-      nyt_path_join(bdir, sizeof(bdir), root, "build");
+      build_root_dir(bdir, sizeof(bdir), root);
       (void)rm_rf(bdir);
       nyt_msg("CLEAN", NYT_MAGENTA, "removed %s", bdir);
+      continue;
+    }
+
+    if (strcmp(cmd, "prepare") == 0)
+      continue;
+    if (strcmp(cmd, "bare-payload") == 0) {
+      int rc = ny_bare_generate_main(root, a.unknown_count,
+                                     (char **)a.unknown);
+      if (rc != 0)
+        return rc;
+      continue;
+    }
+    if (strcmp(cmd, "hooks") == 0) {
+      int rc = make_install_hooks(root);
+      if (rc != 0)
+        return rc;
       continue;
     }
 
@@ -1243,12 +1520,13 @@ int ny_make_main(int argc, char **argv) {
       int target_count = 0;
       build_targets_for_cmd(cmd, a.unknown, a.unknown_count, &targets,
                             &target_count);
-      int rc = cmake_build(root, kind, targets, target_count, jobs);
+      int rc = cmake_build(root, kind, targets, target_count, jobs, a.verbose);
       if (rc != 0)
         return rc;
     }
 
-    if (strcmp(cmd, "all") == 0 || strcmp(cmd, "bin") == 0) {
+    if (strcmp(cmd, "all") == 0 || strcmp(cmd, "bin") == 0 ||
+        strcmp(cmd, "nyc") == 0) {
       continue;
     } else if (strcmp(cmd, "test") == 0) {
       int test_jobs = resolve_test_jobs(a.jobs);
@@ -1271,8 +1549,10 @@ int ny_make_main(int argc, char **argv) {
       char bdir[PATH_MAX];
       build_kind_dir(bdir, sizeof(bdir), root, kind);
       nyt_path_join(std_path, sizeof(std_path), bdir, "core.ny");
+      char build_root[PATH_MAX];
       char out_dir[PATH_MAX];
-      nyt_path_join(out_dir, sizeof(out_dir), root, "build/docs");
+      build_root_dir(build_root, sizeof(build_root), root);
+      nyt_path_join(out_dir, sizeof(out_dir), build_root, "docs");
       const char *docs_args[640];
       int docs_argc = 0;
       docs_args[docs_argc++] = std_path;

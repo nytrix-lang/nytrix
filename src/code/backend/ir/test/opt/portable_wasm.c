@@ -62,14 +62,7 @@ static bool check_import_signatures(void) {
   nyr_func_t ir;
   nyr_opt_begin(&ir);
   int scalar = nyr_opt_const_f64(&ir, 1.0);
-  int vector = nyr_ir_emit(&ir, (nyr_inst_t){.op = NYIR_VEC4_SET1_F64,
-                                            .dst = -1,
-                                            .a = scalar,
-                                            .b = -1,
-                                            .c = -1,
-                                            .d = -1,
-                                            .e = -1,
-                                            .f = -1});
+  int vector = nyr_opt_emit_abc(&ir, NYIR_VEC4_SET1_F64, scalar, -1, -1);
   int pointer =
       nyr_ir_emit(&ir, (nyr_inst_t){.op = NYIR_ADDR_SYMBOL,
                                    .dst = -1,
@@ -81,14 +74,7 @@ static bool check_import_signatures(void) {
                                    .f = -1,
                                    .symbol = "wasm_import_pointer",
                                    .scalar_class = NYIR_SCALAR_POINTER});
-  int pointer_copy = nyr_ir_emit(&ir, (nyr_inst_t){.op = NYIR_COPY,
-                                                  .dst = -1,
-                                                  .a = pointer,
-                                                  .b = -1,
-                                                  .c = -1,
-                                                  .d = -1,
-                                                  .e = -1,
-                                                  .f = -1});
+  int pointer_copy = nyr_opt_emit_abc(&ir, NYIR_COPY, pointer, -1, -1);
   nyr_opt_ret(&ir, scalar);
 
   nyr_inst_t call = {.op = NYIR_CALL,
@@ -246,14 +232,7 @@ static bool check_wasm_bounds_check(void) {
   int base = nyr_opt_const(&ir, 4096);
   int offset = nyr_opt_const(&ir, 8);
   int length = nyr_opt_const(&ir, 64);
-  nyr_ir_emit(&ir, (nyr_inst_t){.op = NYIR_BOUNDS_CHECK,
-                               .dst = -1,
-                               .a = base,
-                               .b = offset,
-                               .c = length,
-                               .d = -1,
-                               .e = -1,
-                               .f = -1});
+  nyr_opt_emit_abc(&ir, NYIR_BOUNDS_CHECK, base, offset, length);
   nyr_opt_ret(&ir, base);
 
   nyr_writer_t wat = {0};
@@ -286,14 +265,7 @@ static bool check_bounds_rejected(nyr_backend_t backend,
   int base = nyr_opt_const(&ir, 0);
   int offset = nyr_opt_const(&ir, 0);
   int bytes = nyr_opt_const(&ir, 8);
-  nyr_ir_emit(&ir, (nyr_inst_t){.op = NYIR_BOUNDS_CHECK,
-                               .dst = -1,
-                               .a = base,
-                               .b = offset,
-                               .c = bytes,
-                               .d = -1,
-                               .e = -1,
-                               .f = -1});
+  nyr_opt_emit_abc(&ir, NYIR_BOUNDS_CHECK, base, offset, bytes);
   nyr_opt_ret(&ir, base);
 
   nyr_writer_t output = {0};
@@ -326,14 +298,7 @@ static bool check_bounds_supported(nyr_backend_t backend,
   int base = nyr_opt_const(&ir, 0);
   int offset = nyr_opt_const(&ir, 0);
   int bytes = nyr_opt_const(&ir, 8);
-  nyr_ir_emit(&ir, (nyr_inst_t){.op = NYIR_BOUNDS_CHECK,
-                               .dst = -1,
-                               .a = base,
-                               .b = offset,
-                               .c = bytes,
-                               .d = -1,
-                               .e = -1,
-                               .f = -1});
+  nyr_opt_emit_abc(&ir, NYIR_BOUNDS_CHECK, base, offset, bytes);
   nyr_opt_ret(&ir, base);
 
   nyr_writer_t output = {0};
@@ -379,44 +344,16 @@ static bool check_executable_wat(void) {
   nyr_opt_ret(&ir, untaken);
   nyr_opt_label(&ir, 10);
   int source = nyr_opt_const(&ir, INT64_C(0x01234567));
-  int swapped = nyr_ir_emit(&ir, (nyr_inst_t){.op = NYIR_BSWAP32_I64,
-                                             .dst = -1,
-                                             .a = source,
-                                             .b = -1,
-                                             .c = -1,
-                                             .d = -1,
-                                             .e = -1,
-                                             .f = -1});
+  int swapped = nyr_opt_emit_abc(&ir, NYIR_BSWAP32_I64, source, -1, -1);
   int source64 = nyr_opt_const(&ir, (int64_t)UINT64_C(0x0123456789abcdef));
-  int swapped64 = nyr_ir_emit(&ir, (nyr_inst_t){.op = NYIR_BSWAP_I64,
-                                               .dst = -1,
-                                               .a = source64,
-                                               .b = -1,
-                                               .c = -1,
-                                               .d = -1,
-                                               .e = -1,
-                                               .f = -1});
+  int swapped64 = nyr_opt_emit_abc(&ir, NYIR_BSWAP_I64, source64, -1, -1);
   int mixed = nyr_opt_binop(&ir, NYIR_XOR_I64, swapped, swapped64);
   int mask = nyr_opt_const(&ir, (int64_t)(UINT64_C(0xefcdab8967452301) ^
                                           UINT64_C(0x67452301) ^ UINT64_C(42)));
   int answer = nyr_opt_binop(&ir, NYIR_XOR_I64, mixed, mask);
   int address64 = nyr_opt_const(&ir, 16);
-  nyr_ir_emit(&ir, (nyr_inst_t){.op = NYIR_STORE_I64,
-                               .dst = -1,
-                               .a = address64,
-                               .b = -1,
-                               .c = answer,
-                               .d = -1,
-                               .e = -1,
-                               .f = -1});
-  int loaded64 = nyr_ir_emit(&ir, (nyr_inst_t){.op = NYIR_LOAD_I64,
-                                              .dst = -1,
-                                              .a = address64,
-                                              .b = -1,
-                                              .c = -1,
-                                              .d = -1,
-                                              .e = -1,
-                                              .f = -1});
+  nyr_opt_emit_abc(&ir, NYIR_STORE_I64, address64, -1, answer);
+  int loaded64 = nyr_opt_emit_abc(&ir, NYIR_LOAD_I64, address64, -1, -1);
   int address8 = nyr_opt_const(&ir, 24);
   int byte_value = nyr_opt_const(&ir, 90);
   nyr_ir_emit(&ir, (nyr_inst_t){.op = NYIR_STORE_I64,
@@ -472,6 +409,9 @@ static bool check_executable_wat(void) {
              "wasmtime run --invoke rt_main %s >%s 2>/dev/null", wasm_path,
              result_path);
     ok = system(command) == 0;
+    if (!ok)
+      fprintf(stderr, "[portable-wasm] struct-copy run failed: %s\n%.*s\n",
+              command, (int)wat.len, wat.data);
   }
   if (ok) {
     file = fopen(result_path, "r");
@@ -654,6 +594,9 @@ static bool check_wasm_float_ops(void) {
              "wasmtime run --invoke rt_main %s >%s 2>/dev/null", wasm_path,
              result_path);
     ok = system(command) == 0;
+    if (!ok)
+      fprintf(stderr, "[portable-wasm] struct-copy run failed: %s\n%.*s\n",
+              command, (int)wat.len, wat.data);
   }
   if (ok) {
     file = fopen(result_path, "r");
@@ -824,14 +767,20 @@ static bool check_wasm_copy_struct(void) {
   nyr_opt_begin(&ir);
   int source = nyr_opt_const(&ir, 1024);
   int destination = nyr_opt_const(&ir, 1032);
-  int copied = -1;
-  if (source >= 0 && destination >= 0)
-    copied = nyr_ir_emit(&ir, (nyr_inst_t){.op = NYIR_COPY_STRUCT,
-                                          .dst = -1,
-                                          .a = destination,
-                                          .b = source,
-                                          .imm = 8});
-  int result = copied >= 0 ? nyr_ir_emit(&ir, (nyr_inst_t){.op = NYIR_LOAD_I64,
+  /*
+   * COPY_STRUCT produces no value; confirm emission by instruction count.
+   */
+  bool copied = false;
+  if (source >= 0 && destination >= 0) {
+    size_t before = ir.len;
+    nyr_ir_emit(&ir, (nyr_inst_t){.op = NYIR_COPY_STRUCT,
+                                  .dst = -1,
+                                  .a = destination,
+                                  .b = source,
+                                  .imm = 8});
+    copied = ir.len == before + 1;
+  }
+  int result = copied ? nyr_ir_emit(&ir, (nyr_inst_t){.op = NYIR_LOAD_I64,
                                                           .dst = -1,
                                                           .a = destination})
                            : -1;
@@ -846,6 +795,9 @@ static bool check_wasm_copy_struct(void) {
             nyr_wasm_emit_ir(&wat, &target, &ir, "rt_main", false, err,
                              sizeof(err)) &&
             nyr_put(&wat, ")\n");
+  if (!ok)
+    fprintf(stderr, "[portable-wasm] struct-copy emit: result=%d err=%s\n",
+            result, err);
 
   /*
    * The backend must reject sizes that cannot be represented by memory.copy's
@@ -864,6 +816,9 @@ static bool check_wasm_copy_struct(void) {
                          reject_err, sizeof(reject_err));
     ok = !oversized_accepted &&
          strstr(reject_err, "struct copy size exceeds i32") != NULL;
+    if (!ok)
+      fprintf(stderr, "[portable-wasm] oversized struct copy: accepted=%d err=%s\n",
+              (int)oversized_accepted, reject_err);
     free(rejected.data);
   }
 
@@ -893,6 +848,9 @@ static bool check_wasm_copy_struct(void) {
              "wasmtime run --invoke rt_main %s >%s 2>/dev/null", wasm_path,
              result_path);
     ok = system(command) == 0;
+    if (!ok)
+      fprintf(stderr, "[portable-wasm] struct-copy run failed: %s\n%.*s\n",
+              command, (int)wat.len, wat.data);
   }
   if (ok) {
     file = fopen(result_path, "r");
@@ -900,6 +858,9 @@ static bool check_wasm_copy_struct(void) {
     char extra = '\0';
     ok = file && fscanf(file, "%ld%c", &runtime_result, &extra) == 2 &&
          runtime_result == 42 && extra == '\n';
+    if (!ok)
+      fprintf(stderr, "[portable-wasm] struct-copy result %ld (expected 42)\n",
+              runtime_result);
     if (file)
       fclose(file);
   }
@@ -1574,15 +1535,7 @@ static bool check_avr_bswap(bool is32, uint64_t value, uint64_t expected) {
   nyr_func_t ir;
   nyr_opt_begin(&ir);
   int source = nyr_opt_const(&ir, (int64_t)value);
-  int result = nyr_ir_emit(
-      &ir, (nyr_inst_t){.op = is32 ? NYIR_BSWAP32_I64 : NYIR_BSWAP_I64,
-                         .dst = -1,
-                         .a = source,
-                         .b = -1,
-                         .c = -1,
-                         .d = -1,
-                         .e = -1,
-                         .f = -1});
+  int result = nyr_opt_emit_abc(&ir, is32 ? NYIR_BSWAP32_I64 : NYIR_BSWAP_I64, source, -1, -1);
   nyr_opt_ret(&ir, result);
 
   nyr_writer_t output = {0};

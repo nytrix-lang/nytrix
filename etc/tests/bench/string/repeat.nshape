@@ -24,7 +24,8 @@ fn repeat_case(int repetitions) int {
 def int t0 = ticks()
 def int checksum = repeat_case(32768) + repeat_case(524288) + repeat_case(4194304)
 def int t1 = ticks()
-assert(checksum == 1781760, "string repeat checksum")
+assert(checksum == 1781760,
+       "string repeat checksum: " + to_str(checksum))
 print("checksum=", checksum)
 print("elapsed_ns=", t1 - t0)
 NY

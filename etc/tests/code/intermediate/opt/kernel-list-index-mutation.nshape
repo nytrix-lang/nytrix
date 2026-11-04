@@ -14,8 +14,8 @@ use core
 ;; covers the mid-loop growth (an append at j == 15 keeps every later index
 ;; in range), and may not cache element values across the indexed stores.
 ;; Aliased-binding observation of indexed stores and post-append growth is
-;; deliberately out of scope here; the open differential investigation is
-;; tracked in the Nytrix agent TODO queue.
+;; deliberately out of scope for this fixture and remains a separate
+;; optimizer investigation.
 
 fn run() int {
    mut xs = []

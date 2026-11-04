@@ -10,12 +10,12 @@ use core.os.ui.render.matrix as rmat
 mut int APP_MSAA = 4
 mut bool APP_VSYNC = false
 mut bool APP_FILTER_LINEAR = false
-mut list APP_BG = own([0.000, 0.000, 0.000, 1.0])
+mut list APP_BG = own([0.055, 0.070, 0.095, 1.0])
 mut bool APP_WIRE = false
 mut bool APP_STATS = true
 mut bool print_to_stdout = false
-mut any cam = 0
-mut any camthreed = 0
+mut list cam = []
+mut list camthreed = []
 mut f64 _cam_px = 0.0
 mut f64 _cam_py = 0.0
 mut f64 _cam_pz = 0.0
@@ -413,3 +413,23 @@ mut list _gui_demo_context_items = [
 
 mut f64 _render_phase = 0.0
 mut f64 _render_dt = 0.0
+
+fn ensure_matrices() bool {
+   "Initializes reusable engine matrices before the first scene or camera update."
+   if !is_list(M_ID) || M_ID.len < 18 { M_ID = rmat.mat4_identity() }
+   if !is_list(M_UI_OVERLAY) || M_UI_OVERLAY.len < 18 { M_UI_OVERLAY = rmat.mat4_identity() }
+   if !is_list(M_W) || M_W.len < 18 { M_W = rmat.mat4_identity() }
+   if !is_list(M_PT) || M_PT.len < 18 { M_PT = rmat.mat4_identity() }
+   if !is_list(M_PR) || M_PR.len < 18 { M_PR = rmat.mat4_identity() }
+   if !is_list(M_PS) || M_PS.len < 18 { M_PS = rmat.mat4_identity() }
+   if !is_list(M_PW) || M_PW.len < 18 { M_PW = rmat.mat4_identity() }
+   if !is_list(M_Ptmp) || M_Ptmp.len < 18 { M_Ptmp = rmat.mat4_identity() }
+   if !is_list(M_V) || M_V.len < 18 { M_V = rmat.mat4_identity() }
+   if !is_list(M_P) || M_P.len < 18 { M_P = rmat.mat4_identity() }
+   if !is_list(M_VP) || M_VP.len < 18 { M_VP = rmat.mat4_identity() }
+   if !is_list(M_V_SKY) || M_V_SKY.len < 18 { M_V_SKY = rmat.mat4_identity() }
+   if !is_list(M_VP_SKY) || M_VP_SKY.len < 18 { M_VP_SKY = rmat.mat4_identity() }
+   if !is_list(M_SP) || M_SP.len < 18 { M_SP = rmat.mat4_identity() }
+   if !is_list(M_cross_t) || M_cross_t.len < 18 { M_cross_t = rmat.mat4_identity() }
+   true
+}

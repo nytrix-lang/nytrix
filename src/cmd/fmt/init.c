@@ -19,6 +19,7 @@
 #include <errno.h>
 #include <limits.h>
 #include <stdatomic.h>
+#include <stdarg.h>
 #include <sys/stat.h>
 #ifdef _WIN32
 #include "base/dirent.h"
@@ -183,25 +184,26 @@ static void usage(void) {
          "%s[paths ...]%s\n",
          nyt_clr(NYT_CYAN), nyt_clr(NYT_RESET), nyt_clr(NYT_GREEN),
          nyt_clr(NYT_RESET));
-  nyt_subheading("Modes");
-  printf("  %s--check --fix --analyze --audit --selftest --trim --syntax "
-         "--types --dead%s\n",
+  nyt_subheading("Formatting");
+  printf("  %s--check --fix --trim --syntax --types --dead%s\n",
          nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
   printf(
       "  Formatting is read-only by default; pass --fix to rewrite files.\n");
-  printf("  %s--smart --overhaul --bugs --checks --bloat --modules --profiles "
-         "--layouts --loops%s\n",
+  nyt_subheading("Audits");
+  printf("  %s--analyze --audit --smart --overhaul --bugs --checks --bloat%s\n",
          nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
-  printf("  %s--contracts --ffi --constants --specialize --metaprog "
-         "--constfold%s\n\n",
+  printf("  %s--modules --profiles --layouts --loops --contracts --ffi%s\n",
+         nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
+  printf("  %s--constants --specialize --metaprog --constfold%s\n",
          nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
   nyt_subheading("Options");
-  printf("  %s--json --tidy --optimize --apply --diff%s\n", nyt_clr(NYT_GREEN),
-         nyt_clr(NYT_RESET));
-  printf("  %s--color MODE --limit N --threshold N --root DIR --dirs DIR%s\n",
+  printf("  %s--json --tidy --optimize --apply --diff --color MODE%s\n",
+         nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
+  printf("  %s--limit N --threshold N --root DIR --dirs DIR%s\n",
          nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
   printf("  %s--min-sev CRIT|HIGH|MED|LOW --types-strict -v%s\n",
          nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
+  nyt_subheading("Guidance");
   printf("  audit modes compose; use %s--audit=loops,trim%s to find "
          "continue/guard-loop flattening wins\n",
          nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
@@ -1943,114 +1945,157 @@ static int fmt_collect_type_findings_embedded(const StrVec *files,
   return 1;
 }
 
+/*
+ * Audit issue-code matcher: true when code equals one of the NULL-terminated
+ * NYAUD id list.  A NULL code never matches.
+ */
+static int fmt_audit_issue_codes(const char *code, ...) {
+  if (!code)
+    return 0;
+  va_list ap;
+  va_start(ap, code);
+  const char *want;
+  while ((want = va_arg(ap, const char *))) {
+    if (strcmp(code, want) == 0) {
+      va_end(ap);
+      return 1;
+    }
+  }
+  va_end(ap);
+  return 0;
+}
+
 static int fmt_audit_issue_is_battery(const char *code) {
-  return code &&
-         (strcmp(code, "NYAUD2001") == 0 || strcmp(code, "NYAUD2002") == 0 ||
-          strcmp(code, "NYAUD2003") == 0 || strcmp(code, "NYAUD2004") == 0 ||
-          strcmp(code, "NYAUD2005") == 0 || strcmp(code, "NYAUD2006") == 0);
+  return fmt_audit_issue_codes(code,
+                     "NYAUD2001",
+                     "NYAUD2002",
+                     "NYAUD2003",
+                     "NYAUD2004",
+                     "NYAUD2005",
+                     "NYAUD2006",
+                     NULL);
 }
 
 static int fmt_audit_issue_is_specialize(const char *code) {
-  return code &&
-         (strcmp(code, "NYAUD3101") == 0 || strcmp(code, "NYAUD3102") == 0 ||
-          strcmp(code, "NYAUD3103") == 0 || strcmp(code, "NYAUD3104") == 0 ||
-          strcmp(code, "NYAUD3105") == 0);
+  return fmt_audit_issue_codes(code,
+                     "NYAUD3101",
+                     "NYAUD3102",
+                     "NYAUD3103",
+                     "NYAUD3104",
+                     "NYAUD3105",
+                     NULL);
 }
 
 static int fmt_audit_issue_is_contract(const char *code) {
-  return code && strcmp(code, "NYAUD6101") == 0;
+  return fmt_audit_issue_codes(code, "NYAUD6101", NULL);
 }
 
 static int fmt_audit_issue_is_literal(const char *code) {
-  return code && strcmp(code, "NYAUD3006") == 0;
+  return fmt_audit_issue_codes(code, "NYAUD3006", NULL);
 }
 
 static int fmt_audit_issue_is_repeated_get(const char *code) {
-  return code && strcmp(code, "NYAUD3005") == 0;
+  return fmt_audit_issue_codes(code, "NYAUD3005", NULL);
 }
 
 static int fmt_audit_issue_is_case_dispatch(const char *code) {
-  return code && strcmp(code, "NYAUD3002") == 0;
+  return fmt_audit_issue_codes(code, "NYAUD3002", NULL);
 }
 
 static int fmt_audit_issue_is_trim_pressure(const char *code) {
-  return code && strcmp(code, "NYAUD3001") == 0;
+  return fmt_audit_issue_codes(code, "NYAUD3001", NULL);
 }
 
 static int fmt_audit_issue_is_trivial_main(const char *code) {
-  return code && strcmp(code, "NYAUD4902") == 0;
+  return fmt_audit_issue_codes(code, "NYAUD4902", NULL);
 }
 
 static int fmt_audit_issue_is_hot_file(const char *code) {
-  return code && strcmp(code, "NYAUD1001") == 0;
+  return fmt_audit_issue_codes(code, "NYAUD1001", NULL);
 }
 
 static int fmt_audit_issue_is_hot_function(const char *code) {
-  return code && strcmp(code, "NYAUD1002") == 0;
+  return fmt_audit_issue_codes(code, "NYAUD1002", NULL);
 }
 
 static int fmt_audit_issue_is_append_builder(const char *code) {
-  return code &&
-         (strcmp(code, "NYAUD3004") == 0 || strcmp(code, "NYAUD3009") == 0);
+  return fmt_audit_issue_codes(code,
+                     "NYAUD3004",
+                     "NYAUD3009",
+                     NULL);
 }
 
 static int fmt_audit_issue_is_loop_guard(const char *code) {
-  return code &&
-         (strcmp(code, "NYAUD3007") == 0 || strcmp(code, "NYAUD3008") == 0);
+  return fmt_audit_issue_codes(code,
+                     "NYAUD3007",
+                     "NYAUD3008",
+                     NULL);
 }
 
 static int fmt_audit_issue_is_dead_helper(const char *code) {
-  return code && strcmp(code, "NYAUD7001") == 0;
+  return fmt_audit_issue_codes(code, "NYAUD7001", NULL);
 }
 
 static int fmt_audit_issue_is_extern_group(const char *code) {
-  return code && strcmp(code, "NYAUD5001") == 0;
+  return fmt_audit_issue_codes(code, "NYAUD5001", NULL);
 }
 
 static int fmt_audit_issue_is_profile_helper(const char *code) {
-  return code && strcmp(code, "NYAUD7201") == 0;
+  return fmt_audit_issue_codes(code, "NYAUD7201", NULL);
 }
 
 static int fmt_audit_issue_is_layout(const char *code) {
-  return code && strcmp(code, "NYAUD6001") == 0;
+  return fmt_audit_issue_codes(code, "NYAUD6001", NULL);
 }
 
 static int fmt_audit_issue_is_metaprog_trim(const char *code) {
-  return code &&
-         (strcmp(code, "NYAUD4101") == 0 || strcmp(code, "NYAUD4102") == 0 ||
-          strcmp(code, "NYAUD4103") == 0 || strcmp(code, "NYAUD4104") == 0 ||
-          strcmp(code, "NYAUD4105") == 0 || strcmp(code, "NYAUD4201") == 0 ||
-          strcmp(code, "NYAUD4202") == 0 || strcmp(code, "NYAUD4203") == 0 ||
-          strcmp(code, "NYAUD4301") == 0 || strcmp(code, "NYAUD4302") == 0 ||
-          strcmp(code, "NYAUD4401") == 0 || strcmp(code, "NYAUD4501") == 0 ||
-          strcmp(code, "NYAUD4502") == 0 || strcmp(code, "NYAUD4503") == 0 ||
-          strcmp(code, "NYAUD4601") == 0 || strcmp(code, "NYAUD4801") == 0 ||
-          strcmp(code, "NYAUD4901") == 0 || strcmp(code, "NYAUD4701") == 0);
+  return fmt_audit_issue_codes(code,
+                     "NYAUD4101",
+                     "NYAUD4102",
+                     "NYAUD4103",
+                     "NYAUD4104",
+                     "NYAUD4105",
+                     "NYAUD4201",
+                     "NYAUD4202",
+                     "NYAUD4203",
+                     "NYAUD4301",
+                     "NYAUD4302",
+                     "NYAUD4401",
+                     "NYAUD4501",
+                     "NYAUD4502",
+                     "NYAUD4503",
+                     "NYAUD4601",
+                     "NYAUD4801",
+                     "NYAUD4901",
+                     "NYAUD4701",
+                     NULL);
 }
 
 static int fmt_audit_issue_is_constant(const char *code) {
-  return code &&
-         (strcmp(code, "NYAUD7301") == 0 || strcmp(code, "NYAUD7302") == 0);
+  return fmt_audit_issue_codes(code,
+                     "NYAUD7301",
+                     "NYAUD7302",
+                     NULL);
 }
 
 static int fmt_audit_issue_is_method_syntax(const char *code) {
-  return code && strcmp(code, "NYAUD8101") == 0;
+  return fmt_audit_issue_codes(code, "NYAUD8101", NULL);
 }
 
 static int fmt_audit_issue_is_receiver_rewrite(const char *code) {
-  return code && strcmp(code, "NYAUD8102") == 0;
+  return fmt_audit_issue_codes(code, "NYAUD8102", NULL);
 }
 
 static int fmt_audit_issue_is_legacy_call(const char *code) {
-  return code && strcmp(code, "NYAUD8001") == 0;
+  return fmt_audit_issue_codes(code, "NYAUD8001", NULL);
 }
 
 static int fmt_audit_issue_is_indexed_write(const char *code) {
-  return code && strcmp(code, "NYAUD3003") == 0;
+  return fmt_audit_issue_codes(code, "NYAUD3003", NULL);
 }
 
 static int fmt_audit_issue_is_variadic_free(const char *code) {
-  return code && strcmp(code, "NYAUD4204") == 0;
+  return fmt_audit_issue_codes(code, "NYAUD4204", NULL);
 }
 
 static int fmt_audit_issue_has_metric(const char *code) {

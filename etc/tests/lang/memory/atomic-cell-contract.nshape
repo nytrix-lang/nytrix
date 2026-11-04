@@ -1,0 +1,20 @@
+shape atomic_cell_contract {
+  family "runtime/values"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+;; Spec contract: docs/spec/runtime.md "Atomic operations".
+;; atomic_i64 creates a cell that holds a tagged language word: every
+;; operation preserves the tag, so loads read back the stored value.
+use core
+use core.os.atomic as atomic
+
+def counter = atomic.atomic_i64(0)
+assert(atomic.atomic_add(counter, 1) == 0, "atomic add returns previous value")
+assert(atomic.atomic_load(counter) == 1, "atomic increment stored")
+atomic.atomic_free(counter)
+print("✓ atomic cell contract tests passed")
+NY
+}

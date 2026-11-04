@@ -436,7 +436,8 @@ static bool hm_name_compatible(ny_hm_state_t *hm, const char *want,
    * distinct and do not take this erasure path.
    */
   char indexed_base[512];
-  if (hm && hm->ctx && hm->ctx->cg && !strchr(got, '<') &&
+  if (hm && hm->ctx && hm->ctx->cg &&
+      (!strchr(got, '<') || strncmp(got, "Fin<", 4) == 0) &&
       ny_indexed_declared_type_base(hm->ctx->cg, want, indexed_base,
                                     sizeof(indexed_base))) {
     const char *root = hm_resolve_refine_root_base(hm, indexed_base);
@@ -906,6 +907,8 @@ static void hm_unify_diag(ny_hm_state_t *hm, token_t tok, const char *code,
 
 static bool hm_unify(ny_hm_state_t *hm, ny_hm_type_t *want, ny_hm_type_t *got,
                      token_t tok, const char *context);
+static ny_hm_type_t *hm_parse_type_name(ny_hm_state_t *hm, const char *raw,
+                                        const char *self_name);
 
 static bool hm_unify_silent(ny_hm_state_t *hm, ny_hm_type_t *want,
                             ny_hm_type_t *got, token_t tok,
@@ -1118,6 +1121,20 @@ static bool hm_unify(ny_hm_state_t *hm, ny_hm_type_t *want, ny_hm_type_t *got,
     return false;
   }
   /*
+   * A refinement over a structural type keeps a named HM representation,
+   * while its base annotation (for example `list`) is structural. Accept the
+   * refinement as a value of that base shape at input boundaries; the
+   * reverse direction still requires a refinement proof.
+   */
+  if (got->kind == NY_HM_NAME && got->name) {
+    const char *base = hm_resolve_refine_root_base(hm, got->name);
+    if (base && strcmp(base, got->name) != 0) {
+      ny_hm_type_t *base_type = hm_parse_type_name(hm, base, NULL);
+      if (base_type && base_type->kind != NY_HM_NAME)
+        return hm_unify(hm, want, base_type, tok, context);
+    }
+  }
+  /*
    * Nominal impl types are runtime views over tagged dict literals
    * ({"__type": "name", ...}); unify a declared impl name with a dict
    * literal's dict<str, any> unless the name is a builtin kind with its own
@@ -1246,6 +1263,14 @@ static void hm_env_set_ctx(ny_hm_env_list *env, const char *name,
       return;
     }
   }
+  ny_hm_env_entry_t e = {.name = name, .syntax_ctx = syntax_ctx, .type = type};
+  vec_push(env, e);
+}
+
+static void hm_env_push_ctx(ny_hm_env_list *env, const char *name,
+                            uint32_t syntax_ctx, ny_hm_type_t *type) {
+  if (!env || !name || !*name)
+    return;
   ny_hm_env_entry_t e = {.name = name, .syntax_ctx = syntax_ctx, .type = type};
   vec_push(env, e);
 }
@@ -1651,7 +1676,7 @@ static bool hm_refinement_region_readonly_call(ny_hm_state_t *hm,
  * A source operator spelling is not necessarily a primitive operation: an
  * active `impl` may route it through an arbitrary function.  Use inferred
  * operand types to detect the selected overload; unknown operand types fail
- * closed because the primitive implementation cannot be established.
+ * because the primitive implementation cannot be established.
  */
 static bool hm_refinement_operator_may_be_overloaded(ny_hm_state_t *hm,
                                                      ny_hm_env_list *env,
@@ -6542,7 +6567,12 @@ static ny_hm_type_t *hm_infer_expr_impl(ny_hm_state_t *hm, ny_hm_env_list *env,
           pruned && (pruned->kind == NY_HM_FN ||
                      (pruned->kind == NY_HM_NAME && pruned->name &&
                       hm_is_callable_name(pruned->name)));
-      if (local && callable_local)
+      /*
+       * An `any` local is still the lexically selected callee.  Do not let an
+       * unrelated module's same-leaf function scheme replace it; bundled
+       * stdlib modules and the user entry share the scheme index.
+       */
+      if (local && (callable_local || hm_is_any(pruned)))
         return hm_call_function_type(hm, env, local, &e->as.call.args, e->tok,
                                      self_name, "local call");
       if (local) {
@@ -7858,8 +7888,14 @@ static void hm_infer_stmt_mode(ny_hm_state_t *hm, ny_hm_env_list *env,
       ny_hm_type_t *final_t =
           decl && *decl ? hm_parse_type_name(hm, decl, self_name) : it;
       if (!s->as.var.is_decl && init && !preserved_append_fact) {
-        ny_hm_type_t *previous = hm_env_get_ctx(hm, env, name, s->syntax_ctx);
+        ny_hm_env_entry_t *entry = hm_env_entry_ctx(env, name, s->syntax_ctx);
+        ny_hm_type_t *previous =
+            entry && entry->guard_base_type
+                ? entry->guard_base_type
+                : hm_env_get_ctx(hm, env, name, s->syntax_ctx);
         hm_check_refinement_return(hm, previous, it, init, init->tok);
+        if (entry && entry->guard_base_type)
+          entry->guard_base_type = NULL;
       }
       if (init && decl && strcmp(decl, "i64") == 0 &&
           hm_is_name(it, "bigint")) {
@@ -7895,7 +7931,10 @@ static void hm_infer_stmt_mode(ny_hm_state_t *hm, ny_hm_env_list *env,
       if (decl && strcmp(decl, "proof") == 0 && it && it->kind == NY_HM_NAME &&
           it->name && strncmp(it->name, "proof<", 6) == 0)
         final_t = it;
-      hm_env_set_ctx(env, name, s->syntax_ctx, final_t);
+      if (s->as.var.is_decl && hm && hm->comptime_depth > 0)
+        hm_env_push_ctx(env, name, s->syntax_ctx, final_t);
+      else
+        hm_env_set_ctx(env, name, s->syntax_ctx, final_t);
       ny_sem_ownership_t ownership =
           !s->as.var.is_destructure && init &&
                   (init->kind == NY_E_LIST || init->kind == NY_E_DICT ||
@@ -7957,6 +7996,7 @@ static void hm_infer_stmt_mode(ny_hm_state_t *hm, ny_hm_env_list *env,
     hm_strict_condition_check(
         hm, s->as.iff.test, hm_infer_expr(hm, env, s->as.iff.test, self_name));
     ny_hm_type_t *saved_guard_type = NULL;
+    ny_hm_type_t *saved_guard_base_type = NULL;
     ny_hm_type_t *guard_type = NULL;
     ny_hm_env_entry_t *guard_entry = hm_refinement_guard_entry(
         hm, env, s->as.iff.test, &guard_type, false, s->as.iff.conseq);
@@ -7964,25 +8004,44 @@ static void hm_infer_stmt_mode(ny_hm_state_t *hm, ny_hm_env_list *env,
     if (guard_entry) {
       guard_entry_idx = guard_entry - env->data;
       saved_guard_type = guard_entry->type;
+      saved_guard_base_type = guard_entry->guard_base_type;
+      guard_entry->guard_base_type = saved_guard_type;
       guard_entry->type = guard_type;
     }
     hm_infer_stmt_mode(hm, env, s->as.iff.conseq, self_name, ret,
                        allow_tail_expr);
-    if (guard_entry_idx >= 0 && (size_t)guard_entry_idx < env->len)
-      env->data[guard_entry_idx].type = saved_guard_type;
+    if (guard_entry_idx >= 0 && (size_t)guard_entry_idx < env->len) {
+      ny_hm_env_entry_t *restored = &env->data[guard_entry_idx];
+      bool invalidated_outer_guard =
+          saved_guard_base_type && !restored->guard_base_type;
+      restored->type =
+          invalidated_outer_guard ? saved_guard_base_type : saved_guard_type;
+      restored->guard_base_type =
+          invalidated_outer_guard ? NULL : saved_guard_base_type;
+    }
     ny_hm_type_t *else_guard_type = NULL;
     ny_hm_env_entry_t *else_guard_entry = hm_refinement_guard_entry(
         hm, env, s->as.iff.test, &else_guard_type, true, s->as.iff.alt);
     ssize_t else_guard_entry_idx = -1;
     ny_hm_type_t *else_saved_guard_type = NULL;
+    ny_hm_type_t *else_saved_guard_base_type = NULL;
     if (else_guard_entry) {
       else_guard_entry_idx = else_guard_entry - env->data;
       else_saved_guard_type = else_guard_entry->type;
+      else_saved_guard_base_type = else_guard_entry->guard_base_type;
+      else_guard_entry->guard_base_type = else_saved_guard_type;
       else_guard_entry->type = else_guard_type;
     }
     hm_infer_stmt_mode(hm, env, s->as.iff.alt, self_name, ret, allow_tail_expr);
-    if (else_guard_entry_idx >= 0 && (size_t)else_guard_entry_idx < env->len)
-      env->data[else_guard_entry_idx].type = else_saved_guard_type;
+    if (else_guard_entry_idx >= 0 && (size_t)else_guard_entry_idx < env->len) {
+      ny_hm_env_entry_t *restored = &env->data[else_guard_entry_idx];
+      bool invalidated_outer_guard =
+          else_saved_guard_base_type && !restored->guard_base_type;
+      restored->type = invalidated_outer_guard ? else_saved_guard_base_type
+                                               : else_saved_guard_type;
+      restored->guard_base_type =
+          invalidated_outer_guard ? NULL : else_saved_guard_base_type;
+    }
     break;
   case NY_S_BLOCK:
     hm_infer_stmt_list_mode(hm, env, &s->as.block.body, self_name, ret,
@@ -7998,14 +8057,24 @@ static void hm_infer_stmt_mode(ny_hm_state_t *hm, ny_hm_env_list *env,
           hm, env, s->as.whl.test, &while_guard_type, false, s->as.whl.body);
       ssize_t while_guard_idx = -1;
       ny_hm_type_t *while_saved_type = NULL;
+      ny_hm_type_t *while_saved_guard_base_type = NULL;
       if (while_guard_entry) {
         while_guard_idx = while_guard_entry - env->data;
         while_saved_type = while_guard_entry->type;
+        while_saved_guard_base_type = while_guard_entry->guard_base_type;
+        while_guard_entry->guard_base_type = while_saved_type;
         while_guard_entry->type = while_guard_type;
       }
       hm_infer_stmt_mode(hm, env, s->as.whl.body, self_name, ret, false);
-      if (while_guard_idx >= 0 && (size_t)while_guard_idx < env->len)
-        env->data[while_guard_idx].type = while_saved_type;
+      if (while_guard_idx >= 0 && (size_t)while_guard_idx < env->len) {
+        ny_hm_env_entry_t *restored = &env->data[while_guard_idx];
+        bool invalidated_outer_guard =
+            while_saved_guard_base_type && !restored->guard_base_type;
+        restored->type = invalidated_outer_guard ? while_saved_guard_base_type
+                                                 : while_saved_type;
+        restored->guard_base_type =
+            invalidated_outer_guard ? NULL : while_saved_guard_base_type;
+      }
     }
     hm_infer_stmt_mode(hm, env, s->as.whl.update, self_name, ret, false);
     break;
@@ -8035,14 +8104,24 @@ static void hm_infer_stmt_mode(ny_hm_state_t *hm, ny_hm_env_list *env,
         hm, env, s->as.fr.cond, &for_guard_type, false, s->as.fr.body);
     ssize_t for_guard_idx = -1;
     ny_hm_type_t *for_saved_type = NULL;
+    ny_hm_type_t *for_saved_guard_base_type = NULL;
     if (for_guard_entry) {
       for_guard_idx = for_guard_entry - env->data;
       for_saved_type = for_guard_entry->type;
+      for_saved_guard_base_type = for_guard_entry->guard_base_type;
+      for_guard_entry->guard_base_type = for_saved_type;
       for_guard_entry->type = for_guard_type;
     }
     hm_infer_stmt_mode(hm, env, s->as.fr.body, self_name, ret, false);
-    if (for_guard_idx >= 0 && (size_t)for_guard_idx < env->len)
-      env->data[for_guard_idx].type = for_saved_type;
+    if (for_guard_idx >= 0 && (size_t)for_guard_idx < env->len) {
+      ny_hm_env_entry_t *restored = &env->data[for_guard_idx];
+      bool invalidated_outer_guard =
+          for_saved_guard_base_type && !restored->guard_base_type;
+      restored->type =
+          invalidated_outer_guard ? for_saved_guard_base_type : for_saved_type;
+      restored->guard_base_type =
+          invalidated_outer_guard ? NULL : for_saved_guard_base_type;
+    }
     hm_infer_stmt_mode(hm, env, s->as.fr.update, self_name, ret, false);
     break;
   }
@@ -8054,8 +8133,23 @@ static void hm_infer_stmt_mode(ny_hm_state_t *hm, ny_hm_env_list *env,
      * list results cross the dynamic ABI and appear as zero/scalars.
      */
     hm_infer_stmt_mode(hm, env, s->as.tr.body, self_name, ret, allow_tail_expr);
-    hm_infer_stmt_mode(hm, env, s->as.tr.handler, self_name, ret,
-                       allow_tail_expr);
+    if (s->as.tr.err) {
+      /*
+       * A caught panic payload is a tagged runtime value. Give the binding
+       * that dynamic type in a handler-local environment so an assignment
+       * such as `caught = e` cannot infer a scalar predicate from the try
+       * branch's control-flow result.
+       */
+      ny_hm_env_list handler_env;
+      hm_env_clone(&handler_env, env);
+      hm_env_set_ctx(&handler_env, s->as.tr.err, s->syntax_ctx, hm_any(hm));
+      hm_infer_stmt_mode(hm, &handler_env, s->as.tr.handler, self_name, ret,
+                         allow_tail_expr);
+      vec_free(&handler_env);
+    } else {
+      hm_infer_stmt_mode(hm, env, s->as.tr.handler, self_name, ret,
+                         allow_tail_expr);
+    }
     break;
   case NY_S_DEFER:
     hm_infer_stmt_mode(hm, env, s->as.de.body, self_name, ret, false);
@@ -8188,6 +8282,47 @@ static void hm_collect_function_schemes(ny_hm_state_t *hm) {
   }
 }
 
+typedef struct {
+  unsigned carriers;
+} hm_return_carriers_t;
+
+static void hm_record_return_carrier(hm_return_carriers_t *scan,
+                                      const expr_t *value) {
+  if (value && !value->semantic.resolved)
+    return;
+  ny_sem_rep_t rep = value ? value->semantic.rep : NY_SEM_REP_TAGGED_DYNAMIC;
+  scan->carriers |= rep == NY_SEM_REP_F32 ? 2u
+                    : rep == NY_SEM_REP_F64 ? 4u : 1u;
+}
+
+static bool hm_return_carrier_stmt(ny_visitor_t *v, stmt_t *s) {
+  if (s->kind == NY_S_FUNC)
+    return false;
+  if (s->kind == NY_S_RETURN)
+    hm_record_return_carrier(v->ctx, s->as.ret.value);
+  return true;
+}
+
+static bool hm_return_carrier_expr(ny_visitor_t *v, expr_t *e) {
+  (void)v;
+  return e->kind != NY_E_FN && e->kind != NY_E_LAMBDA &&
+         e->kind != NY_E_COMPTIME;
+}
+
+static bool hm_function_has_mixed_return_carriers(stmt_t *fn) {
+  hm_return_carriers_t scan = {0};
+  ny_visitor_t visitor = {.ctx = &scan,
+                         .visit_stmt_pre = hm_return_carrier_stmt,
+                         .visit_expr_pre = hm_return_carrier_expr};
+  stmt_t *body = fn->as.fn.body;
+  ny_visit_stmt(&visitor, body);
+  if (body && body->kind == NY_S_BLOCK && body->as.block.body.len)
+    body = body->as.block.body.data[body->as.block.body.len - 1];
+  if (body && body->kind == NY_S_EXPR)
+    hm_record_return_carrier(&scan, body->as.expr.expr);
+  return scan.carriers && (scan.carriers & (scan.carriers - 1u));
+}
+
 static void hm_infer_function_scheme(ny_hm_state_t *hm, ny_hm_scheme_t *scheme,
                                      ny_hm_env_list *globals) {
   if (!hm || !scheme || !scheme->stmt || scheme->stmt->kind != NY_S_FUNC)
@@ -8307,6 +8442,13 @@ static void hm_infer_function_scheme(ny_hm_state_t *hm, ny_hm_scheme_t *scheme,
     }
     free(name);
   }
+  /*
+   * Numeric compatibility does not mean equal calling conventions. Preserve
+   * all inferred return values through one tagged ABI when source exits use
+   * different carriers, instead of retaining whichever return unified first.
+   */
+  if (!fn->as.fn.return_type && hm_function_has_mixed_return_carriers(fn))
+    ft->a = hm_any(hm);
   char *return_name = hm_type_string(ft->a);
   ny_sem_rep_t ret_r = hm_semantic_rep_in_context(hm, return_name);
   NY_INVARIANT_ASSERT(ny_sem_rep_is_valid(ret_r), "valid semantic rep",

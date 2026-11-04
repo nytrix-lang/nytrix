@@ -774,15 +774,8 @@ static int split_comment_index(const char *line) {
   int quote = 0, esc = 0;
   for (int i = 0; line[i]; i++) {
     char ch = line[i];
-    if (quote) {
-      if (esc)
-        esc = 0;
-      else if (ch == '\\')
-        esc = 1;
-      else if (ch == quote)
-        quote = 0;
+    if (ny_scan_ctx_step(&quote, &esc, ch))
       continue;
-    }
     if (ch == '\'' || ch == '"') {
       quote = ch;
       continue;
@@ -912,15 +905,8 @@ static void normalize_return_paren_space(char *s, size_t cap) {
   int quote = 0, esc = 0;
   for (size_t i = 0; s[i]; i++) {
     char ch = s[i];
-    if (quote) {
-      if (esc)
-        esc = 0;
-      else if (ch == '\\')
-        esc = 1;
-      else if (ch == quote)
-        quote = 0;
+    if (ny_scan_ctx_step(&quote, &esc, ch))
       continue;
-    }
     if (ch == '"' || ch == '\'') {
       quote = ch;
       continue;
@@ -940,15 +926,8 @@ static size_t fmt_find_matching_paren(const char *s, size_t open) {
   int quote = 0, esc = 0, depth = 0;
   for (size_t i = open; s && s[i]; i++) {
     char ch = s[i];
-    if (quote) {
-      if (esc)
-        esc = 0;
-      else if (ch == '\\')
-        esc = 1;
-      else if (ch == quote)
-        quote = 0;
+    if (ny_scan_ctx_step(&quote, &esc, ch))
       continue;
-    }
     if (ch == '"' || ch == '\'') {
       quote = ch;
       continue;
@@ -967,15 +946,8 @@ static size_t fmt_skip_angle(const char *s, size_t i) {
   int quote = 0, esc = 0, depth = 0;
   for (; s[i]; i++) {
     char ch = s[i];
-    if (quote) {
-      if (esc)
-        esc = 0;
-      else if (ch == '\\')
-        esc = 1;
-      else if (ch == quote)
-        quote = 0;
+    if (ny_scan_ctx_step(&quote, &esc, ch))
       continue;
-    }
     if (ch == '"' || ch == '\'') {
       quote = ch;
       continue;
@@ -995,15 +967,8 @@ static size_t fmt_skip_template_hole(const char *s, size_t i) {
   i += 2;
   for (; s[i]; i++) {
     char ch = s[i];
-    if (quote) {
-      if (esc)
-        esc = 0;
-      else if (ch == '\\')
-        esc = 1;
-      else if (ch == quote)
-        quote = 0;
+    if (ny_scan_ctx_step(&quote, &esc, ch))
       continue;
-    }
     if (ch == '"' || ch == '\'') {
       quote = ch;
       continue;
@@ -1065,15 +1030,8 @@ static size_t fmt_fn_body_brace(const char *s, size_t close) {
   int quote = 0, esc = 0, paren = 0, bracket = 0, angle = 0;
   for (; s[i]; i++) {
     char ch = s[i];
-    if (quote) {
-      if (esc)
-        esc = 0;
-      else if (ch == '\\')
-        esc = 1;
-      else if (ch == quote)
-        quote = 0;
+    if (ny_scan_ctx_step(&quote, &esc, ch))
       continue;
-    }
     if (ch == '"' || ch == '\'') {
       quote = ch;
       continue;
@@ -1128,15 +1086,8 @@ static void normalize_fn_scope_space(char *s, size_t cap) {
   int quote = 0, esc = 0;
   for (size_t i = 0; s && s[i]; i++) {
     char ch = s[i];
-    if (quote) {
-      if (esc)
-        esc = 0;
-      else if (ch == '\\')
-        esc = 1;
-      else if (ch == quote)
-        quote = 0;
+    if (ny_scan_ctx_step(&quote, &esc, ch))
       continue;
-    }
     if (ch == '"' || ch == '\'') {
       quote = ch;
       continue;
@@ -1176,15 +1127,8 @@ static size_t fmt_control_body_brace(const char *s, size_t start) {
   int quote = 0, esc = 0, paren = 0, bracket = 0;
   for (size_t i = start; s && s[i]; i++) {
     char ch = s[i];
-    if (quote) {
-      if (esc)
-        esc = 0;
-      else if (ch == '\\')
-        esc = 1;
-      else if (ch == quote)
-        quote = 0;
+    if (ny_scan_ctx_step(&quote, &esc, ch))
       continue;
-    }
     if (ch == '"' || ch == '\'') {
       quote = ch;
       continue;
@@ -1215,15 +1159,8 @@ static void normalize_control_scope_space(char *s, size_t cap) {
   int quote = 0, esc = 0;
   for (size_t i = 0; s && s[i]; i++) {
     char ch = s[i];
-    if (quote) {
-      if (esc)
-        esc = 0;
-      else if (ch == '\\')
-        esc = 1;
-      else if (ch == quote)
-        quote = 0;
+    if (ny_scan_ctx_step(&quote, &esc, ch))
       continue;
-    }
     if (ch == '"' || ch == '\'') {
       quote = ch;
       continue;
@@ -1256,15 +1193,8 @@ static int compact_control_scope_col(const char *s) {
   int quote = 0, esc = 0;
   for (size_t i = 0; s && s[i]; i++) {
     char ch = s[i];
-    if (quote) {
-      if (esc)
-        esc = 0;
-      else if (ch == '\\')
-        esc = 1;
-      else if (ch == quote)
-        quote = 0;
+    if (ny_scan_ctx_step(&quote, &esc, ch))
       continue;
-    }
     if (ch == '"' || ch == '\'') {
       quote = ch;
       continue;
@@ -1297,15 +1227,8 @@ static int compact_return_paren_col(const char *s) {
   int quote = 0, esc = 0;
   for (size_t i = 0; s && s[i]; i++) {
     char ch = s[i];
-    if (quote) {
-      if (esc)
-        esc = 0;
-      else if (ch == '\\')
-        esc = 1;
-      else if (ch == quote)
-        quote = 0;
+    if (ny_scan_ctx_step(&quote, &esc, ch))
       continue;
-    }
     if (ch == '"' || ch == '\'') {
       quote = ch;
       continue;
@@ -1321,15 +1244,8 @@ static int repeated_append_chain_col(const char *s) {
   char first_receiver[96] = {0};
   for (size_t i = 0; s && s[i]; i++) {
     char ch = s[i];
-    if (quote) {
-      if (esc)
-        esc = 0;
-      else if (ch == '\\')
-        esc = 1;
-      else if (ch == quote)
-        quote = 0;
+    if (ny_scan_ctx_step(&quote, &esc, ch))
       continue;
-    }
     if (ch == '"' || ch == '\'') {
       quote = ch;
       continue;
@@ -1492,15 +1408,8 @@ static int count_brace_delta(const char *line, int *starts_with_close) {
   *starts_with_close = is_close_delim(*p);
   for (int i = 0; line[i]; i++) {
     char ch = line[i];
-    if (quote) {
-      if (esc)
-        esc = 0;
-      else if (ch == '\\')
-        esc = 1;
-      else if (ch == quote)
-        quote = 0;
+    if (ny_scan_ctx_step(&quote, &esc, ch))
       continue;
-    }
     if (ch == '"' || ch == '\'') {
       quote = ch;
       continue;
@@ -1526,15 +1435,8 @@ static int count_brace_delta_state(const char *line, int *starts_with_close,
   *starts_with_close = quote ? 0 : is_close_delim(*p);
   for (int i = 0; line[i]; i++) {
     char ch = line[i];
-    if (quote) {
-      if (esc)
-        esc = 0;
-      else if (ch == '\\')
-        esc = 1;
-      else if (ch == quote)
-        quote = 0;
+    if (ny_scan_ctx_step(&quote, &esc, ch))
       continue;
-    }
     if (ch == '"' || ch == '\'') {
       quote = ch;
       continue;
@@ -3165,15 +3067,8 @@ static int brace_check_file(const char *path, int fix, int verbose,
           int q = 0, e = 0;
           for (size_t j = i; fixed[j] && fixed[j] != '\n'; j++) {
             char ch = fixed[j];
-            if (q) {
-              if (e)
-                e = 0;
-              else if (ch == '\\')
-                e = 1;
-              else if (ch == q)
-                q = 0;
+            if (ny_scan_ctx_step(&q, &e, ch))
               continue;
-            }
             if (ch == '"' || ch == '\'') {
               q = ch;
               continue;
@@ -3505,15 +3400,8 @@ static int ny_param_piece_typed(const char *a, const char *b) {
     a++;
   for (const char *p = a; p < b; p++) {
     char ch = *p;
-    if (quote) {
-      if (esc)
-        esc = 0;
-      else if (ch == '\\')
-        esc = 1;
-      else if (ch == quote)
-        quote = 0;
+    if (ny_scan_ctx_step(&quote, &esc, ch))
       continue;
-    }
     if (ch == '"' || ch == '\'') {
       quote = ch;
       continue;
@@ -4455,15 +4343,8 @@ static int audit_count_named_call(const char *line, const char *name,
     char ch = line[i];
     if (!quote && ch == ';')
       break;
-    if (quote) {
-      if (esc)
-        esc = 0;
-      else if (ch == '\\')
-        esc = 1;
-      else if (ch == quote)
-        quote = 0;
+    if (ny_scan_ctx_step(&quote, &esc, ch))
       continue;
-    }
     if (ch == '"' || ch == '\'') {
       quote = ch;
       continue;
@@ -4526,15 +4407,8 @@ static int audit_line_legacy_calls(const char *line) {
     char ch = line[i];
     if (!quote && ch == ';')
       break;
-    if (quote) {
-      if (esc)
-        esc = 0;
-      else if (ch == '\\')
-        esc = 1;
-      else if (ch == quote)
-        quote = 0;
+    if (ny_scan_ctx_step(&quote, &esc, ch))
       continue;
-    }
     if (ch == '"' || ch == '\'') {
       quote = ch;
       continue;
@@ -4657,15 +4531,8 @@ static int audit_line_zero_arg_method_properties(const char *line) {
     char ch = line[i];
     if (!quote && ch == ';')
       break;
-    if (quote) {
-      if (esc)
-        esc = 0;
-      else if (ch == '\\')
-        esc = 1;
-      else if (ch == quote)
-        quote = 0;
+    if (ny_scan_ctx_step(&quote, &esc, ch))
       continue;
-    }
     if (ch == '"' || ch == '\'') {
       quote = ch;
       continue;
@@ -4868,15 +4735,8 @@ static int audit_line_has_plain_call(const char *line, const char *name) {
     char ch = line[i];
     if (!quote && ch == ';')
       break;
-    if (quote) {
-      if (esc)
-        esc = 0;
-      else if (ch == '\\')
-        esc = 1;
-      else if (ch == quote)
-        quote = 0;
+    if (ny_scan_ctx_step(&quote, &esc, ch))
       continue;
-    }
     if (ch == '"' || ch == '\'') {
       quote = ch;
       continue;
@@ -4928,15 +4788,8 @@ static int audit_line_brace_delta(const char *line) {
     char ch = line[i];
     if (!quote && ch == ';')
       break;
-    if (quote) {
-      if (esc)
-        esc = 0;
-      else if (ch == '\\')
-        esc = 1;
-      else if (ch == quote)
-        quote = 0;
+    if (ny_scan_ctx_step(&quote, &esc, ch))
       continue;
-    }
     if (ch == '"' || ch == '\'') {
       quote = ch;
       continue;
@@ -5708,15 +5561,8 @@ static const char *audit_find_matching_paren(const char *open) {
   int quote = 0, esc = 0, depth = 0;
   for (const char *p = open; *p; p++) {
     char ch = *p;
-    if (quote) {
-      if (esc)
-        esc = 0;
-      else if (ch == '\\')
-        esc = 1;
-      else if (ch == quote)
-        quote = 0;
+    if (ny_scan_ctx_step(&quote, &esc, ch))
       continue;
-    }
     if (ch == '"' || ch == '\'') {
       quote = ch;
       continue;
@@ -5740,15 +5586,8 @@ static int audit_span_has_top_level_comma(const char *start, const char *end) {
   int quote = 0, esc = 0, depth = 0;
   for (const char *p = start; p < end; p++) {
     char ch = *p;
-    if (quote) {
-      if (esc)
-        esc = 0;
-      else if (ch == '\\')
-        esc = 1;
-      else if (ch == quote)
-        quote = 0;
+    if (ny_scan_ctx_step(&quote, &esc, ch))
       continue;
-    }
     if (ch == '"' || ch == '\'') {
       quote = ch;
       continue;
@@ -5913,15 +5752,8 @@ static int audit_condition_has_assignment(const char *cond) {
   int quote = 0, esc = 0;
   for (const char *p = cond ? cond : ""; *p; p++) {
     char ch = *p;
-    if (quote) {
-      if (esc)
-        esc = 0;
-      else if (ch == '\\')
-        esc = 1;
-      else if (ch == quote)
-        quote = 0;
+    if (ny_scan_ctx_step(&quote, &esc, ch))
       continue;
-    }
     if (ch == '"' || ch == '\'') {
       quote = ch;
       continue;
@@ -6133,15 +5965,8 @@ static int audit_extract_simple_comparison(const char *expr, char *lhs,
   int quote = 0, esc = 0, depth = 0;
   for (const char *p = expr; *p; p++) {
     char ch = *p;
-    if (quote) {
-      if (esc)
-        esc = 0;
-      else if (ch == '\\')
-        esc = 1;
-      else if (ch == quote)
-        quote = 0;
+    if (ny_scan_ctx_step(&quote, &esc, ch))
       continue;
-    }
     if (ch == '"' || ch == '\'') {
       quote = ch;
       continue;
@@ -6196,15 +6021,8 @@ static int audit_expr_has_call(const char *expr) {
   int quote = 0, esc = 0;
   for (const char *p = expr ? expr : ""; *p; p++) {
     char ch = *p;
-    if (quote) {
-      if (esc)
-        esc = 0;
-      else if (ch == '\\')
-        esc = 1;
-      else if (ch == quote)
-        quote = 0;
+    if (ny_scan_ctx_step(&quote, &esc, ch))
       continue;
-    }
     if (ch == '"' || ch == '\'') {
       quote = ch;
       continue;
@@ -6630,15 +6448,8 @@ static void audit_line_curly_counts(const char *line, int *opens, int *closes) {
   int quote = 0, esc = 0;
   for (const char *p = line ? line : ""; *p; p++) {
     char ch = *p;
-    if (quote) {
-      if (esc)
-        esc = 0;
-      else if (ch == '\\')
-        esc = 1;
-      else if (ch == quote)
-        quote = 0;
+    if (ny_scan_ctx_step(&quote, &esc, ch))
       continue;
-    }
     if (ch == '"' || ch == '\'') {
       quote = ch;
       continue;
@@ -6913,15 +6724,8 @@ static int audit_line_literal_zero_divisor(const char *line, char *op_out,
   int quote = 0, esc = 0;
   for (const char *p = line ? line : ""; *p; p++) {
     char ch = *p;
-    if (quote) {
-      if (esc)
-        esc = 0;
-      else if (ch == '\\')
-        esc = 1;
-      else if (ch == quote)
-        quote = 0;
+    if (ny_scan_ctx_step(&quote, &esc, ch))
       continue;
-    }
     if (ch == '"' || ch == '\'') {
       quote = ch;
       continue;
@@ -6945,15 +6749,8 @@ static int audit_line_negative_index(const char *line, char *idx_out,
   int quote = 0, esc = 0;
   for (const char *p = line ? line : ""; *p; p++) {
     char ch = *p;
-    if (quote) {
-      if (esc)
-        esc = 0;
-      else if (ch == '\\')
-        esc = 1;
-      else if (ch == quote)
-        quote = 0;
+    if (ny_scan_ctx_step(&quote, &esc, ch))
       continue;
-    }
     if (ch == '"' || ch == '\'') {
       quote = ch;
       continue;
@@ -7000,15 +6797,8 @@ static const char *audit_find_plain_call_open(const char *line,
   int quote = 0, esc = 0;
   for (size_t i = 0; line[i]; i++) {
     char ch = line[i];
-    if (quote) {
-      if (esc)
-        esc = 0;
-      else if (ch == '\\')
-        esc = 1;
-      else if (ch == quote)
-        quote = 0;
+    if (ny_scan_ctx_step(&quote, &esc, ch))
       continue;
-    }
     if (ch == '"' || ch == '\'') {
       quote = ch;
       continue;
@@ -7048,15 +6838,8 @@ static int audit_call_first_arg(const char *open, char *out, size_t out_sz) {
   int quote = 0, esc = 0, depth = 0;
   for (const char *p = start; p < close; p++) {
     char ch = *p;
-    if (quote) {
-      if (esc)
-        esc = 0;
-      else if (ch == '\\')
-        esc = 1;
-      else if (ch == quote)
-        quote = 0;
+    if (ny_scan_ctx_step(&quote, &esc, ch))
       continue;
-    }
     if (ch == '"' || ch == '\'') {
       quote = ch;
       continue;
@@ -7118,15 +6901,8 @@ static int audit_expr_has_unclosed_delim(const char *expr) {
   int quote = 0, esc = 0, depth = 0;
   for (const char *p = expr ? expr : ""; *p; p++) {
     char ch = *p;
-    if (quote) {
-      if (esc)
-        esc = 0;
-      else if (ch == '\\')
-        esc = 1;
-      else if (ch == quote)
-        quote = 0;
+    if (ny_scan_ctx_step(&quote, &esc, ch))
       continue;
-    }
     if (ch == '"' || ch == '\'') {
       quote = ch;
       continue;
@@ -9250,15 +9026,8 @@ static void audit_collect_calls_line(StrVec *out, const char *line) {
       break;
     if (!quote && ch == ';')
       break;
-    if (quote) {
-      if (esc)
-        esc = 0;
-      else if (ch == '\\')
-        esc = 1;
-      else if (ch == quote)
-        quote = 0;
+    if (ny_scan_ctx_step(&quote, &esc, ch))
       continue;
-    }
     if (ch == '"' || ch == '\'') {
       quote = ch;
       continue;

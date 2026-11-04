@@ -217,13 +217,13 @@ comptime template store_dict_for(Layout) {
 
 comptime template json_for(Layout) {
    fn ${Layout}_json_value(ptr value) dict {
-      mut dict out = dict()
-      if !value { return out }
+      mut dict result = dict()
+      if !value { return result }
       comptime fields(Layout) as field {
-         emit out = out.set(field.name,
+         emit result = result.set(field.name,
             load_layout(value, "${Layout}", field.name))
       }
-      out
+      result
    }
 }
 

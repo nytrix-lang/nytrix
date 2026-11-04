@@ -4,8 +4,8 @@ shape euler9 {
   features ["c-vs-ny", "checksum"]
   template ny-test-case
   expect compile_and_run
-  ;; Translated from the QBE minic test: minic/test/euler9.c.
   source ny <<'NY'
+;; inspired from QBE: minic/test/euler9.c.
 fn gcd(int a, int b) int {
    while b != 0 {
       def r = a % b

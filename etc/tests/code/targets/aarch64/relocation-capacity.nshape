@@ -3,7 +3,7 @@ shape aarch64_elf64_relocation_capacity {
   generator "native"
   features [native object elf64 aarch64 relocation capacity]
   template ny-test-case
-  flags "--native-backend aarch64 --nyir-verify -emit-only -o /tmp/nytrix-aarch64-relocation-capacity.o"
+  flags "--native-backend aarch64 --nyr-verify -emit-only -o /tmp/nytrix-aarch64-relocation-capacity.o"
   expect compile_and_run
   source ny <<'NY'
 extern {

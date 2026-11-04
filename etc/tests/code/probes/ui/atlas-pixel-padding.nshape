@@ -1,0 +1,34 @@
+shape atlas-pixel-padding {
+  family "probe-suite"
+  generator "regression"
+  features ["ny", "render", "atlas"]
+  template ny-test-case
+  expect compile_and_run
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect_stdout "ATLAS-PIXEL-PADDING-OK"
+  source ny <<'SOURCE'
+use core
+use core.os.ui.render.atlas as atlas
+def state = zalloc(32)
+store32(state, 2, 0)
+store32(state, 2, 4)
+def pixels = malloc(16)
+store32(pixels, 0xFF112233, 0)
+store32(pixels, 0xFF445566, 4)
+store32(pixels, 0xFF778899, 8)
+store32(pixels, 0xFFAABBCC, 12)
+def sheet = {"width": 16, "height": 16, "state_ptr": state, "items": dict(4), "cpu_buf": 0, "filter": 0}
+def uv = atlas.atlas_add(sheet, "test", 2, 2, pixels)
+assert(is_list(uv) && uv.len == 4, "image packed")
+def image = sheet.get("cpu_buf")
+assert(load32(image, (2 * 16 + 2) * 4) == 0xFF112233, "first source pixel")
+assert(load32(image, (3 * 16 + 3) * 4) == 0xFFAABBCC, "last source pixel")
+assert(load32(image, (1 * 16 + 1) * 4) == 0xFF112233, "top left padding")
+assert(load32(image, (4 * 16 + 4) * 4) == 0xFFAABBCC, "bottom right padding")
+assert(atlas.atlas_add(sheet, "test", 2, 2, pixels) == uv, "cached glyph placement")
+free(image)
+free(pixels)
+free(state)
+print("ATLAS-PIXEL-PADDING-OK")
+SOURCE
+}

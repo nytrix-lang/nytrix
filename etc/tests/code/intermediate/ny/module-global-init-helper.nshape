@@ -3,7 +3,7 @@ shape native_module_global_initializer_reachability {
   generator "native"
   features [native nyir reachability module-global initializer]
   template ny-test-case
-  flags_matrix "--native-only --native-backend=x86_64 --native-tier=baseline -O0 --parallel=threads --nyir-verify; --native-backend=llvm --jit --jit-engine=mcjit --parallel=threads; --native-backend=llvm --jit --jit-engine=orc --parallel=threads"
+  flags_matrix "--native-only --native-backend=x86_64 --native-tier=baseline -O0 --parallel=threads --nyr-verify; --native-backend=llvm --jit --jit-engine=mcjit --parallel=threads; --native-backend=llvm --jit --jit-engine=orc --parallel=threads"
   expect compile_and_run
   source ny <<'NY'
 use core

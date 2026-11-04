@@ -1,0 +1,68 @@
+shape ui_native_event_queue {
+  family "runtime/input"
+  generator "embedded"
+  features ["ny", "ui", "window", "native-events"]
+  template ny-test-case
+  expect compile_and_run
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect_message "UI-NATIVE-EVENT-QUEUE-OK"
+  expect_stdout "true\ntrue\ntrue\ntrue\ntrue\nUI-NATIVE-EVENT-QUEUE-OK"
+  source ny <<'NY'
+use core
+use core.os.ui.window.event as event
+use core.os.ui.window.platform as platform
+use core.os.ui.window.platform.state as state
+use core.os.ui.window.platform.linux.wayland as wayland
+use core.os.ui.window.consts as key
+use core.os.ui.window as window
+
+state._set_platform_dict("pending_native_events", dict(8))
+state._set_platform_dict("should_close_flags", dict(8))
+def close = event.make_event(key.EVENT_QUIT, 1, 1)
+def press = event.make_event(key.EVENT_KEY_PRESSED, 3, 3, {"key": key.KEY_A})
+assert(platform._queue_native_events([close, press]) == 2, "both native events admitted")
+def first = platform.pump_window_events(1)
+assert(first.len == 1 && event.event_type(first.get(0)) == key.EVENT_QUIT,
+   "odd window ID retains close event")
+assert(platform.should_close(1), "close flag reaches platform state")
+assert(platform.pump_window_events(1).len == 0, "drained queue is empty")
+def second = platform.pump_window_events(3)
+assert(second.len == 1 && event.event_type(second.get(0)) == key.EVENT_KEY_PRESSED,
+   "draining one window preserves the other window")
+assert(int(event.event_data(second.get(0)).get("key", 0)) == key.KEY_A, "key payload preserved")
+def unaddressed = event.make_event(key.EVENT_WINDOW_REFRESH, 0, 0)
+assert(platform._queue_native_events([unaddressed], 5) == 1, "fallback event admitted")
+def fallback = platform.pump_window_events(5)
+assert(fallback.len == 1 && event.event_type(fallback.get(0)) == key.EVENT_WINDOW_REFRESH,
+   "fallback window ID receives unaddressed event")
+def wide_handle = 0x123456789
+def wide_event = event.make_event(key.EVENT_KEY_PRESSED, wide_handle, wide_handle, {"key": key.KEY_A})
+assert(event.event_window_id(wide_event) == wide_handle, "native window handles retain all bits")
+assert(platform._queue_native_events([wide_event]) == 1, "wide native handle admitted")
+assert(platform.pump_window_events(wide_handle).len == 1, "wide native handle receives event")
+def wayland_win = {"handle": wide_handle}
+def other_win = {"handle": wide_handle + 1}
+wayland._push_event(wayland_win, key.EVENT_KEY_PRESSED, {"key": key.KEY_A})
+wayland._push_event(other_win, key.EVENT_KEY_RELEASED, {"key": key.KEY_A})
+def wayland_result = wayland.poll_window_events(wayland_win)
+def wayland_events = wayland_result.get(1, [])
+assert(wayland_events.len == 1 && event.event_type(wayland_events.get(0)) == key.EVENT_KEY_PRESSED,
+   "Wayland delivers events addressed by native handle")
+def other_result = wayland.poll_window_events(other_win)
+assert(other_result.get(1, []).len == 1,
+   "Wayland retains events for other windows")
+mut dict mock = {"handle": 4194306, "_mock": true, "should_close": false, "events": []}
+window._set_window_registry(4194306, mock)
+print(is_dict(window._get_win(4194306)))
+print(window.push_event(4194306, key.EVENT_QUIT))
+print(window.should_close(mock))
+assert(window.should_close(mock), "handle lookup delivers close to the registered window")
+mut dict native = {"handle": 4194307, "display": 0}
+mut natives = dict(4)
+natives[4194307] = native
+state._set_platform_dict("native_windows", natives)
+print(is_dict(platform._native_window(4194307)))
+print(is_dict(platform._native_window(native)))
+print("UI-NATIVE-EVENT-QUEUE-OK")
+NY
+}

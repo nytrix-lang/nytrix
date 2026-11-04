@@ -46,7 +46,7 @@ fn run_operator_case(str label, str mode) {
    if mode == "aot" {
       argv = argv.append("-run")
    } else if mode == "nyir" {
-      argv = argv.append("--nyir-run")
+      argv = argv.append("--nyr-run")
    } else if mode == "native" {
       argv = argv.append("--native-only")
    } else if mode == "mcjit" {

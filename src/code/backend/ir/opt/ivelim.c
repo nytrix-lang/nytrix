@@ -261,6 +261,50 @@ static bool iv_const_fold(const nyr_func_t *f, const int *defs, int v,
   return iv_const_fold_depth(f, defs, v, 0, out);
 }
 
+/*
+ * Front ends commonly materialize a boolean comparison as an i64 and then
+ * compare that value with zero before branching.  Recover the source
+ * comparison so counted-loop analysis sees the induction variable and bound.
+ * `inverted` records whether the wrapper's truth value is the inverse of the
+ * wrapped comparison; the caller folds that into the selected branch edge.
+ */
+static const nyr_inst_t *iv_unwrap_boolean_compare(const nyr_func_t *f,
+                                                   const int *defs,
+                                                   const nyr_inst_t *cmp,
+                                                   bool *inverted) {
+  if (!f || !defs || !cmp || !inverted)
+    return cmp;
+  for (unsigned depth = 0; depth < 4; ++depth) {
+    if (cmp->op != NYIR_CMP_I64 ||
+        (cmp->cmp != NYIR_CMP_EQ && cmp->cmp != NYIR_CMP_NE))
+      break;
+    int64_t constant = 0;
+    const nyr_inst_t *inner = NULL;
+    int left = iv_root_copy(f, defs, cmp->a);
+    int right = iv_root_copy(f, defs, cmp->b);
+    if (left >= 0 && left < f->next_value && defs[left] >= 0 &&
+        f->data[(size_t)defs[left]].op == NYIR_CMP_I64 &&
+        iv_const_fold(f, defs, cmp->b, &constant)) {
+      inner = &f->data[(size_t)defs[left]];
+    } else if (right >= 0 && right < f->next_value && defs[right] >= 0 &&
+               f->data[(size_t)defs[right]].op == NYIR_CMP_I64 &&
+               iv_const_fold(f, defs, cmp->a, &constant)) {
+      inner = &f->data[(size_t)defs[right]];
+    }
+    /*
+     * A comparison result is exactly 0 or 1. Other constants do not express
+     * a transparent boolean conversion and must remain unsupported.
+     */
+    if (!inner || (constant != 0 && constant != 1))
+      break;
+    bool same_truth = (cmp->cmp == NYIR_CMP_EQ) == (constant == 1);
+    if (!same_truth)
+      *inverted = !*inverted;
+    cmp = inner;
+  }
+  return cmp;
+}
+
 static bool insert_inst(nyr_func_t *f, size_t at, nyr_inst_t in) {
   if (!f || at > f->len || !nir_ensure_inst_space(f, 1))
     return false;
@@ -305,7 +349,7 @@ static bool iv_loop_members(const nyr_cfg_t *cfg, const iv_loop_t *lp,
                             bool *member) {
   return cfg && lp && member &&
          nyr_cfg_natural_loop_blocks(cfg, lp->latch_block, lp->header_block,
-                                      member, cfg->block_count);
+                                     member, cfg->block_count);
 }
 
 /*
@@ -525,7 +569,7 @@ static bool closed_form_constant_sum(nyr_func_t *f, const nyr_cfg_t *cfg,
   bool *loop_member = calloc(cfg->block_count, sizeof(*loop_member));
   if (!loop_member ||
       !nyr_cfg_natural_loop_blocks(cfg, lp->latch_block, lp->header_block,
-                                    loop_member, cfg->block_count))
+                                   loop_member, cfg->block_count))
     IV_CF_REJECT("natural-loop-analysis-failed");
   const nyr_inst_t *cmp = NULL;
   bool exit_taken_edge = false; /* exit is the BR_IF's TAKEN target */
@@ -599,8 +643,10 @@ static bool closed_form_constant_sum(nyr_func_t *f, const nyr_cfg_t *cfg,
     exit_idx = exit_label >= 0 ? find_label_idx(f, exit_label) : SIZE_MAX;
     if (exit_idx == SIZE_MAX || exit_idx <= lp->header_idx)
       continue;
-    cmp = candidate;
-    exit_taken_edge = taken_is_exit;
+    bool comparison_inverted = false;
+    cmp = iv_unwrap_boolean_compare(f, defs, candidate,
+                                    &comparison_inverted);
+    exit_taken_edge = taken_is_exit ^ comparison_inverted;
     exit_cond_block = cond_block;
     exit_edge_block = outside_block;
     break;
@@ -944,7 +990,8 @@ static bool closed_form_constant_sum(nyr_func_t *f, const nyr_cfg_t *cfg,
       } else if (term->op == NYIR_SHL_I64 &&
                  iv_root_copy(f, defs, term->a) == index->iv && term->b >= 0) {
         int64_t shift = 0;
-        if (nyr_const_i64(f, defs, term->b, &shift) && shift >= 0 && shift < 62) {
+        if (nyr_const_i64(f, defs, term->b, &shift) && shift >= 0 &&
+            shift < 62) {
           /*
            * s = s + (i << shift)
            */
@@ -1065,14 +1112,14 @@ static bool closed_form_constant_sum(nyr_func_t *f, const nyr_cfg_t *cfg,
     }
     result_value = f->next_value++;
     formula[formula_count++] = (nyr_inst_t){.op = NYIR_CONST_I64,
-                                             .dst = result_value,
-                                             .a = -1,
-                                             .b = -1,
-                                             .c = -1,
-                                             .d = -1,
-                                             .e = -1,
-                                             .f = -1,
-                                             .imm = total};
+                                            .dst = result_value,
+                                            .a = -1,
+                                            .b = -1,
+                                            .c = -1,
+                                            .d = -1,
+                                            .e = -1,
+                                            .f = -1,
+                                            .imm = total};
   } else {
     int zero = f->next_value++;
     int one = f->next_value++;
@@ -1105,69 +1152,69 @@ static bool closed_form_constant_sum(nyr_func_t *f, const nyr_cfg_t *cfg,
     int base_sum = f->next_value++;
     result_value = f->next_value++;
     formula[formula_count++] = (nyr_inst_t){.op = NYIR_CONST_I64,
-                                             .dst = zero,
-                                             .a = -1,
-                                             .b = -1,
-                                             .c = -1,
-                                             .d = -1,
-                                             .e = -1,
-                                             .f = -1,
-                                             .imm = 0};
+                                            .dst = zero,
+                                            .a = -1,
+                                            .b = -1,
+                                            .c = -1,
+                                            .d = -1,
+                                            .e = -1,
+                                            .f = -1,
+                                            .imm = 0};
     formula[formula_count++] = (nyr_inst_t){.op = NYIR_CONST_I64,
-                                             .dst = one,
-                                             .a = -1,
-                                             .b = -1,
-                                             .c = -1,
-                                             .d = -1,
-                                             .e = -1,
-                                             .f = -1,
-                                             .imm = 1};
+                                            .dst = one,
+                                            .a = -1,
+                                            .b = -1,
+                                            .c = -1,
+                                            .d = -1,
+                                            .e = -1,
+                                            .f = -1,
+                                            .imm = 1};
     formula[formula_count++] = (nyr_inst_t){.op = NYIR_CONST_I64,
-                                             .dst = two,
-                                             .a = -1,
-                                             .b = -1,
-                                             .c = -1,
-                                             .d = -1,
-                                             .e = -1,
-                                             .f = -1,
-                                             .imm = 2};
+                                            .dst = two,
+                                            .a = -1,
+                                            .b = -1,
+                                            .c = -1,
+                                            .d = -1,
+                                            .e = -1,
+                                            .f = -1,
+                                            .imm = 2};
     formula[formula_count++] = (nyr_inst_t){.op = NYIR_CONST_I64,
-                                             .dst = trip_step_value,
-                                             .a = -1,
-                                             .b = -1,
-                                             .c = -1,
-                                             .d = -1,
-                                             .e = -1,
-                                             .f = -1,
-                                             .imm = index->step};
+                                            .dst = trip_step_value,
+                                            .a = -1,
+                                            .b = -1,
+                                            .c = -1,
+                                            .d = -1,
+                                            .e = -1,
+                                            .f = -1,
+                                            .imm = index->step};
     formula[formula_count++] =
         (nyr_inst_t){.op = NYIR_CONST_I64,
-                      .dst = step_value,
-                      .a = -1,
-                      .b = -1,
-                      .c = -1,
-                      .d = -1,
-                      .e = -1,
-                      .f = -1,
-                      .imm = (step % 2 == 0) ? step / 2 : step};
+                     .dst = step_value,
+                     .a = -1,
+                     .b = -1,
+                     .c = -1,
+                     .d = -1,
+                     .e = -1,
+                     .f = -1,
+                     .imm = (step % 2 == 0) ? step / 2 : step};
     formula[formula_count++] = (nyr_inst_t){.op = NYIR_CONST_I64,
-                                             .dst = init_value_for_trips,
-                                             .a = -1,
-                                             .b = -1,
-                                             .c = -1,
-                                             .d = -1,
-                                             .e = -1,
-                                             .f = -1,
-                                             .imm = i0_for_trips};
+                                            .dst = init_value_for_trips,
+                                            .a = -1,
+                                            .b = -1,
+                                            .c = -1,
+                                            .d = -1,
+                                            .e = -1,
+                                            .f = -1,
+                                            .imm = i0_for_trips};
     formula[formula_count++] = (nyr_inst_t){.op = NYIR_CONST_I64,
-                                             .dst = init_value,
-                                             .a = -1,
-                                             .b = -1,
-                                             .c = -1,
-                                             .d = -1,
-                                             .e = -1,
-                                             .f = -1,
-                                             .imm = i0};
+                                            .dst = init_value,
+                                            .a = -1,
+                                            .b = -1,
+                                            .c = -1,
+                                            .d = -1,
+                                            .e = -1,
+                                            .f = -1,
+                                            .imm = i0};
     /*
      * The trip count uses the *original* loop counter initial value
      * (i0_for_trips), not the accumulator-adjusted i0.  When acc_offset
@@ -1176,13 +1223,13 @@ static bool closed_form_constant_sum(nyr_func_t *f, const nyr_cfg_t *cfg,
      * N and zeroing the result for small bounds.
      */
     formula[formula_count++] = (nyr_inst_t){.op = NYIR_SUB_I64,
-                                             .dst = diff,
-                                             .a = cmp_value,
-                                             .b = init_value_for_trips,
-                                             .c = -1,
-                                             .d = -1,
-                                             .e = -1,
-                                             .f = -1};
+                                            .dst = diff,
+                                            .a = cmp_value,
+                                            .b = init_value_for_trips,
+                                            .c = -1,
+                                            .d = -1,
+                                            .e = -1,
+                                            .f = -1};
     /*
      * `diff = N - i0` wraps when N is far below i0 (e.g. i0 = 2^62 and
      * N = INT64_MIN), which would make a `diff > 0` test report a positive
@@ -1201,92 +1248,92 @@ static bool closed_form_constant_sum(nyr_func_t *f, const nyr_cfg_t *cfg,
         .f = -1,
         .cmp = cont_cmp == NYIR_CMP_LT ? NYIR_CMP_GT : NYIR_CMP_GE};
     formula[formula_count++] = (nyr_inst_t){.op = NYIR_SUB_I64,
-                                             .dst = mask,
-                                             .a = zero,
-                                             .b = in_range,
-                                             .c = -1,
-                                             .d = -1,
-                                             .e = -1,
-                                             .f = -1};
+                                            .dst = mask,
+                                            .a = zero,
+                                            .b = in_range,
+                                            .c = -1,
+                                            .d = -1,
+                                            .e = -1,
+                                            .f = -1};
     formula[formula_count++] = (nyr_inst_t){.op = NYIR_AND_I64,
-                                             .dst = clamped,
-                                             .a = diff,
-                                             .b = mask,
-                                             .c = -1,
-                                             .d = -1,
-                                             .e = -1,
-                                             .f = -1};
+                                            .dst = clamped,
+                                            .a = diff,
+                                            .b = mask,
+                                            .c = -1,
+                                            .d = -1,
+                                            .e = -1,
+                                            .f = -1};
     if (cont_cmp == NYIR_CMP_LT) {
       formula[formula_count++] = (nyr_inst_t){.op = NYIR_DIV_I64,
-                                               .dst = raw_trips,
-                                               .a = clamped,
-                                               .b = trip_step_value,
-                                               .c = -1,
-                                               .d = -1,
-                                               .e = -1,
-                                               .f = -1,
-                                               .effects = NYIR_EFFECT_MAY_TRAP};
+                                              .dst = raw_trips,
+                                              .a = clamped,
+                                              .b = trip_step_value,
+                                              .c = -1,
+                                              .d = -1,
+                                              .e = -1,
+                                              .f = -1,
+                                              .effects = NYIR_EFFECT_MAY_TRAP};
       formula[formula_count++] = (nyr_inst_t){.op = NYIR_MOD_I64,
-                                               .dst = remainder,
-                                               .a = clamped,
-                                               .b = trip_step_value,
-                                               .c = -1,
-                                               .d = -1,
-                                               .e = -1,
-                                               .f = -1,
-                                               .effects = NYIR_EFFECT_MAY_TRAP};
+                                              .dst = remainder,
+                                              .a = clamped,
+                                              .b = trip_step_value,
+                                              .c = -1,
+                                              .d = -1,
+                                              .e = -1,
+                                              .f = -1,
+                                              .effects = NYIR_EFFECT_MAY_TRAP};
       formula[formula_count++] = (nyr_inst_t){.op = NYIR_CMP_I64,
-                                               .dst = has_remainder,
-                                               .a = remainder,
-                                               .b = zero,
-                                               .c = -1,
-                                               .d = -1,
-                                               .e = -1,
-                                               .f = -1,
-                                               .cmp = NYIR_CMP_NE};
+                                              .dst = has_remainder,
+                                              .a = remainder,
+                                              .b = zero,
+                                              .c = -1,
+                                              .d = -1,
+                                              .e = -1,
+                                              .f = -1,
+                                              .cmp = NYIR_CMP_NE};
       formula[formula_count++] = (nyr_inst_t){.op = NYIR_ADD_I64,
-                                               .dst = normalized_trips,
-                                               .a = raw_trips,
-                                               .b = has_remainder,
-                                               .c = -1,
-                                               .d = -1,
-                                               .e = -1,
-                                               .f = -1};
+                                              .dst = normalized_trips,
+                                              .a = raw_trips,
+                                              .b = has_remainder,
+                                              .c = -1,
+                                              .d = -1,
+                                              .e = -1,
+                                              .f = -1};
     } else {
       formula[formula_count++] = (nyr_inst_t){.op = NYIR_DIV_I64,
-                                               .dst = raw_trips,
-                                               .a = clamped,
-                                               .b = trip_step_value,
-                                               .c = -1,
-                                               .d = -1,
-                                               .e = -1,
-                                               .f = -1,
-                                               .effects = NYIR_EFFECT_MAY_TRAP};
+                                              .dst = raw_trips,
+                                              .a = clamped,
+                                              .b = trip_step_value,
+                                              .c = -1,
+                                              .d = -1,
+                                              .e = -1,
+                                              .f = -1,
+                                              .effects = NYIR_EFFECT_MAY_TRAP};
       formula[formula_count++] = (nyr_inst_t){.op = NYIR_ADD_I64,
-                                               .dst = normalized_trips,
-                                               .a = raw_trips,
-                                               .b = one,
-                                               .c = -1,
-                                               .d = -1,
-                                               .e = -1,
-                                               .f = -1};
+                                              .dst = normalized_trips,
+                                              .a = raw_trips,
+                                              .b = one,
+                                              .c = -1,
+                                              .d = -1,
+                                              .e = -1,
+                                              .f = -1};
     }
     formula[formula_count++] = (nyr_inst_t){.op = NYIR_AND_I64,
-                                             .dst = trips,
-                                             .a = normalized_trips,
-                                             .b = mask,
-                                             .c = -1,
-                                             .d = -1,
-                                             .e = -1,
-                                             .f = -1};
+                                            .dst = trips,
+                                            .a = normalized_trips,
+                                            .b = mask,
+                                            .c = -1,
+                                            .d = -1,
+                                            .e = -1,
+                                            .f = -1};
     formula[formula_count++] = (nyr_inst_t){.op = NYIR_SUB_I64,
-                                             .dst = trips_minus_one,
-                                             .a = trips,
-                                             .b = one,
-                                             .c = -1,
-                                             .d = -1,
-                                             .e = -1,
-                                             .f = -1};
+                                            .dst = trips_minus_one,
+                                            .a = trips,
+                                            .b = one,
+                                            .c = -1,
+                                            .d = -1,
+                                            .e = -1,
+                                            .f = -1};
     if (step % 2 == 0) {
       /*
        * An even accumulator step absorbs the exact division by two:
@@ -1296,141 +1343,141 @@ static bool closed_form_constant_sum(nyr_func_t *f, const nyr_cfg_t *cfg,
        * Trip-count computation still uses the original induction step.
        */
       formula[formula_count++] = (nyr_inst_t){.op = NYIR_MUL_I64,
-                                               .dst = sum_j,
-                                               .a = trips,
-                                               .b = trips_minus_one,
-                                               .c = -1,
-                                               .d = -1,
-                                               .e = -1,
-                                               .f = -1};
+                                              .dst = sum_j,
+                                              .a = trips,
+                                              .b = trips_minus_one,
+                                              .c = -1,
+                                              .d = -1,
+                                              .e = -1,
+                                              .f = -1};
     } else {
       formula[formula_count++] = (nyr_inst_t){.op = NYIR_DIV_I64,
-                                               .dst = half,
-                                               .a = trips,
-                                               .b = two,
-                                               .c = -1,
-                                               .d = -1,
-                                               .e = -1,
-                                               .f = -1,
-                                               .effects = NYIR_EFFECT_MAY_TRAP};
+                                              .dst = half,
+                                              .a = trips,
+                                              .b = two,
+                                              .c = -1,
+                                              .d = -1,
+                                              .e = -1,
+                                              .f = -1,
+                                              .effects = NYIR_EFFECT_MAY_TRAP};
       formula[formula_count++] = (nyr_inst_t){.op = NYIR_MUL_I64,
-                                               .dst = even_prod,
-                                               .a = half,
-                                               .b = trips_minus_one,
-                                               .c = -1,
-                                               .d = -1,
-                                               .e = -1,
-                                               .f = -1};
+                                              .dst = even_prod,
+                                              .a = half,
+                                              .b = trips_minus_one,
+                                              .c = -1,
+                                              .d = -1,
+                                              .e = -1,
+                                              .f = -1};
       formula[formula_count++] = (nyr_inst_t){.op = NYIR_DIV_I64,
-                                               .dst = odd_half,
-                                               .a = trips_minus_one,
-                                               .b = two,
-                                               .c = -1,
-                                               .d = -1,
-                                               .e = -1,
-                                               .f = -1,
-                                               .effects = NYIR_EFFECT_MAY_TRAP};
+                                              .dst = odd_half,
+                                              .a = trips_minus_one,
+                                              .b = two,
+                                              .c = -1,
+                                              .d = -1,
+                                              .e = -1,
+                                              .f = -1,
+                                              .effects = NYIR_EFFECT_MAY_TRAP};
       formula[formula_count++] = (nyr_inst_t){.op = NYIR_MUL_I64,
-                                               .dst = odd_prod,
-                                               .a = trips,
-                                               .b = odd_half,
-                                               .c = -1,
-                                               .d = -1,
-                                               .e = -1,
-                                               .f = -1};
+                                              .dst = odd_prod,
+                                              .a = trips,
+                                              .b = odd_half,
+                                              .c = -1,
+                                              .d = -1,
+                                              .e = -1,
+                                              .f = -1};
       formula[formula_count++] = (nyr_inst_t){.op = NYIR_AND_I64,
-                                               .dst = bit,
-                                               .a = trips,
-                                               .b = one,
-                                               .c = -1,
-                                               .d = -1,
-                                               .e = -1,
-                                               .f = -1};
+                                              .dst = bit,
+                                              .a = trips,
+                                              .b = one,
+                                              .c = -1,
+                                              .d = -1,
+                                              .e = -1,
+                                              .f = -1};
       formula[formula_count++] = (nyr_inst_t){.op = NYIR_SUB_I64,
-                                               .dst = delta,
-                                               .a = odd_prod,
-                                               .b = even_prod,
-                                               .c = -1,
-                                               .d = -1,
-                                               .e = -1,
-                                               .f = -1};
+                                              .dst = delta,
+                                              .a = odd_prod,
+                                              .b = even_prod,
+                                              .c = -1,
+                                              .d = -1,
+                                              .e = -1,
+                                              .f = -1};
       formula[formula_count++] = (nyr_inst_t){.op = NYIR_MUL_I64,
-                                               .dst = weighted,
-                                               .a = bit,
-                                               .b = delta,
-                                               .c = -1,
-                                               .d = -1,
-                                               .e = -1,
-                                               .f = -1};
+                                              .dst = weighted,
+                                              .a = bit,
+                                              .b = delta,
+                                              .c = -1,
+                                              .d = -1,
+                                              .e = -1,
+                                              .f = -1};
       formula[formula_count++] = (nyr_inst_t){.op = NYIR_ADD_I64,
-                                               .dst = sum_j,
-                                               .a = even_prod,
-                                               .b = weighted,
-                                               .c = -1,
-                                               .d = -1,
-                                               .e = -1,
-                                               .f = -1};
+                                              .dst = sum_j,
+                                              .a = even_prod,
+                                              .b = weighted,
+                                              .c = -1,
+                                              .d = -1,
+                                              .e = -1,
+                                              .f = -1};
     }
     formula[formula_count++] = (nyr_inst_t){.op = NYIR_MUL_I64,
-                                             .dst = step_term,
-                                             .a = step_value,
-                                             .b = sum_j,
-                                             .c = -1,
-                                             .d = -1,
-                                             .e = -1,
-                                             .f = -1};
+                                            .dst = step_term,
+                                            .a = step_value,
+                                            .b = sum_j,
+                                            .c = -1,
+                                            .d = -1,
+                                            .e = -1,
+                                            .f = -1};
     formula[formula_count++] = (nyr_inst_t){.op = NYIR_MUL_I64,
-                                             .dst = init_term,
-                                             .a = trips,
-                                             .b = init_value,
-                                             .c = -1,
-                                             .d = -1,
-                                             .e = -1,
-                                             .f = -1};
+                                            .dst = init_term,
+                                            .a = trips,
+                                            .b = init_value,
+                                            .c = -1,
+                                            .d = -1,
+                                            .e = -1,
+                                            .f = -1};
     formula[formula_count++] = (nyr_inst_t){.op = NYIR_CONST_I64,
-                                             .dst = acc_value_const,
-                                             .a = -1,
-                                             .b = -1,
-                                             .c = -1,
-                                             .d = -1,
-                                             .e = -1,
-                                             .f = -1,
-                                             .imm = acc_init};
+                                            .dst = acc_value_const,
+                                            .a = -1,
+                                            .b = -1,
+                                            .c = -1,
+                                            .d = -1,
+                                            .e = -1,
+                                            .f = -1,
+                                            .imm = acc_init};
     formula[formula_count++] = (nyr_inst_t){.op = NYIR_ADD_I64,
-                                             .dst = base_sum,
-                                             .a = acc_value_const,
-                                             .b = init_term,
-                                             .c = -1,
-                                             .d = -1,
-                                             .e = -1,
-                                             .f = -1};
+                                            .dst = base_sum,
+                                            .a = acc_value_const,
+                                            .b = init_term,
+                                            .c = -1,
+                                            .d = -1,
+                                            .e = -1,
+                                            .f = -1};
     formula[formula_count++] = (nyr_inst_t){.op = NYIR_ADD_I64,
-                                             .dst = result_value,
-                                             .a = base_sum,
-                                             .b = step_term,
-                                             .c = -1,
-                                             .d = -1,
-                                             .e = -1,
-                                             .f = -1};
+                                            .dst = result_value,
+                                            .a = base_sum,
+                                            .b = step_term,
+                                            .c = -1,
+                                            .d = -1,
+                                            .e = -1,
+                                            .f = -1};
     if (acc_offset_value >= 0) {
       int offset_term = f->next_value++;
       int with_offset = f->next_value++;
       formula[formula_count++] = (nyr_inst_t){.op = NYIR_MUL_I64,
-                                               .dst = offset_term,
-                                               .a = trips,
-                                               .b = acc_offset_value,
-                                               .c = -1,
-                                               .d = -1,
-                                               .e = -1,
-                                               .f = -1};
+                                              .dst = offset_term,
+                                              .a = trips,
+                                              .b = acc_offset_value,
+                                              .c = -1,
+                                              .d = -1,
+                                              .e = -1,
+                                              .f = -1};
       formula[formula_count++] = (nyr_inst_t){.op = NYIR_ADD_I64,
-                                               .dst = with_offset,
-                                               .a = result_value,
-                                               .b = offset_term,
-                                               .c = -1,
-                                               .d = -1,
-                                               .e = -1,
-                                               .f = -1};
+                                              .dst = with_offset,
+                                              .a = result_value,
+                                              .b = offset_term,
+                                              .c = -1,
+                                              .d = -1,
+                                              .e = -1,
+                                              .f = -1};
       result_value = with_offset;
     }
   }
@@ -1482,15 +1529,15 @@ static bool closed_form_constant_sum(nyr_func_t *f, const nyr_cfg_t *cfg,
          formula_count * sizeof(*formula));
   f->data[lp->header_idx + formula_count + 1] =
       (nyr_inst_t){.op = NYIR_BR,
-                    .dst = -1,
-                    .a = -1,
-                    .b = -1,
-                    .c = -1,
-                    .d = -1,
-                    .e = -1,
-                    .f = -1,
-                    .imm = exit_label,
-                    .effects = NYIR_EFFECT_CONTROL};
+                   .dst = -1,
+                   .a = -1,
+                   .b = -1,
+                   .c = -1,
+                   .d = -1,
+                   .e = -1,
+                   .f = -1,
+                   .imm = exit_label,
+                   .effects = NYIR_EFFECT_CONTROL};
   f->len = f->len - body_removed + formula_count + 1;
 
   /*
@@ -1524,9 +1571,6 @@ static bool closed_form_constant_sum(nyr_func_t *f, const nyr_cfg_t *cfg,
        * PHI to the closed-form constant so downstream code stays valid.
        */
       nyr_inst_t *phi = in;
-      free(phi->phi_incoming);
-      phi->phi_incoming = NULL;
-      phi->phi_incoming_len = 0;
       /*
        * Preserve the PHI's semantic/debug identity while invalidating facts
        * derived from its former incoming edges.
@@ -1567,9 +1611,9 @@ static bool value_only_used_by(const nyr_use_def_t *uses, int value,
 }
 
 static bool iv_uses_local_to_loop(const nyr_func_t *f, const nyr_cfg_t *cfg,
-                                  const bool *member,
-                                  const nyr_use_def_t *uses, int value,
-                                  const iv_loop_t *lp, size_t update_idx) {
+                                  const bool *member, const nyr_use_def_t *uses,
+                                  int value, const iv_loop_t *lp,
+                                  size_t update_idx) {
   if (!f || !cfg || !member || !uses || !lp || value < 0 ||
       (size_t)value >= uses->value_count)
     return false;
@@ -1632,23 +1676,23 @@ static int eliminate_redundant_once(nyr_func_t *f, const nyr_cfg_t *cfg,
         return -1;
       }
       nyr_inst_t c = {.op = NYIR_CONST_I64,
-                       .dst = delta_v,
-                       .a = -1,
-                       .b = -1,
-                       .c = -1,
-                       .d = -1,
-                       .e = -1,
-                       .f = -1,
-                       .imm = delta};
+                      .dst = delta_v,
+                      .a = -1,
+                      .b = -1,
+                      .c = -1,
+                      .d = -1,
+                      .e = -1,
+                      .f = -1,
+                      .imm = delta};
       nyr_inst_t add = {.op = NYIR_ADD_I64,
-                         .dst = adjusted,
-                         .a = a->iv,
-                         .b = delta_v,
-                         .c = -1,
-                         .d = -1,
-                         .e = -1,
-                         .f = -1,
-                         .effects = NYIR_EFFECT_NONE};
+                        .dst = adjusted,
+                        .a = a->iv,
+                        .b = delta_v,
+                        .c = -1,
+                        .d = -1,
+                        .e = -1,
+                        .f = -1,
+                        .effects = NYIR_EFFECT_NONE};
       memmove(&f->data[at + 2], &f->data[at], (f->len - at) * sizeof(*f->data));
       f->data[at] = c;
       f->data[at + 1] = add;
@@ -1719,8 +1763,8 @@ static int strength_reduce_once(nyr_func_t *f, const nyr_cfg_t *cfg,
         continue;
       int64_t factor = 0;
       int old_dst = in->dst;
-      if (!nyr_const_i64(f, defs, factor_v, &factor) || factor == 0 || factor == 1 ||
-          factor == -1)
+      if (!nyr_const_i64(f, defs, factor_v, &factor) || factor == 0 ||
+          factor == 1 || factor == -1)
         continue;
       /*
        * The old scalar result may be used outside the loop only where the
@@ -1761,23 +1805,23 @@ static int strength_reduce_once(nyr_func_t *f, const nyr_cfg_t *cfg,
         return -1;
       }
       nyr_inst_t c0 = {.op = NYIR_CONST_I64,
-                        .dst = init_c,
-                        .a = -1,
-                        .b = -1,
-                        .c = -1,
-                        .d = -1,
-                        .e = -1,
-                        .f = -1,
-                        .imm = d0};
+                       .dst = init_c,
+                       .a = -1,
+                       .b = -1,
+                       .c = -1,
+                       .d = -1,
+                       .e = -1,
+                       .f = -1,
+                       .imm = d0};
       nyr_inst_t cs = {.op = NYIR_CONST_I64,
-                        .dst = step_c,
-                        .a = -1,
-                        .b = -1,
-                        .c = -1,
-                        .d = -1,
-                        .e = -1,
-                        .f = -1,
-                        .imm = ds};
+                       .dst = step_c,
+                       .a = -1,
+                       .b = -1,
+                       .c = -1,
+                       .d = -1,
+                       .e = -1,
+                       .f = -1,
+                       .imm = ds};
       if (!insert_inst(f, pre_at, c0) || !insert_inst(f, pre_at + 1, cs)) {
         nyr_use_def_free(&uses);
         free(member);
@@ -1796,19 +1840,19 @@ static int strength_reduce_once(nyr_func_t *f, const nyr_cfg_t *cfg,
         return -1;
       }
       incoming[0] = (nyr_phi_incoming_t){.predecessor_label = iv->pre_label,
-                                          .value = init_c};
+                                         .value = init_c};
       incoming[1] = (nyr_phi_incoming_t){.predecessor_label = iv->latch_label,
-                                          .value = dnext};
+                                         .value = dnext};
       nyr_inst_t phi = {.op = NYIR_PHI,
-                         .dst = dphi,
-                         .a = -1,
-                         .b = -1,
-                         .c = -1,
-                         .d = -1,
-                         .e = -1,
-                         .f = -1,
-                         .phi_incoming = incoming,
-                         .phi_incoming_len = 2};
+                        .dst = dphi,
+                        .a = -1,
+                        .b = -1,
+                        .c = -1,
+                        .d = -1,
+                        .e = -1,
+                        .f = -1,
+                        .phi_incoming = incoming,
+                        .phi_incoming_len = 2};
       if (!insert_inst(f, phi_at, phi)) {
         free(incoming);
         nyr_use_def_free(&uses);
@@ -1839,14 +1883,14 @@ static int strength_reduce_once(nyr_func_t *f, const nyr_cfg_t *cfg,
         return -1;
       }
       nyr_inst_t next = {.op = NYIR_ADD_I64,
-                          .dst = dnext,
-                          .a = dphi,
-                          .b = step_c,
-                          .c = -1,
-                          .d = -1,
-                          .e = -1,
-                          .f = -1,
-                          .effects = NYIR_EFFECT_NONE};
+                         .dst = dnext,
+                         .a = dphi,
+                         .b = step_c,
+                         .c = -1,
+                         .d = -1,
+                         .e = -1,
+                         .f = -1,
+                         .effects = NYIR_EFFECT_NONE};
       if (!insert_inst(f, back, next)) {
         nyr_use_def_free(&uses);
         free(member);

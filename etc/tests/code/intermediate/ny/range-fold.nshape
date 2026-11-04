@@ -3,7 +3,7 @@ shape nyir_range_fold {
   generator "native"
   features ["native", "nyir", "optimizer", "range"]
   template ny-test-case
-  flags "--native --run --nyir-dump-stats"
+  flags "--native --run --nyr-dump=stats"
   expect compile_and_run
   expect_exit 1
   source ny <<'NY'

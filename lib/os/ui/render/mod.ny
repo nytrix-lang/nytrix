@@ -17,6 +17,7 @@ module core.os.ui.render(
    renderer_capture_scene_color_resume_pass, renderer_clear_scene_color_capture,
    reset_overlay_state,
    set_next_frame_load_color, set_frame_time_sec, set_skybox_view, draw_skybox, read_framebuffer,
+   mock_framebuffer_hash_line,
    scene_prefers_studio_env, scene_prefers_neutral_env,
    scene_prefers_compare_reflect_env, scene_prefers_compare_visible_env,
    scene_prefers_optical_spec_env, scene_prefers_black_visible_env,
@@ -78,6 +79,7 @@ module core.os.ui.render(
 )
 
 use core
+use core.os.args as process_args
 use core.mem
 use core.error
 use core.os.ui.window.consts as ui_consts
@@ -199,10 +201,10 @@ fn color_alpha(any c, f64 a) vec4 {
 }
 
 mut _active_win = nil
-mut _active_scene_group = 0
-mut _active_scene_gpu_slab = 0
-mut _active_scene_render_parts = 0
-mut _active_scene_gpu_parts = 0
+mut any _active_scene_group = nil
+mut ptr _active_scene_gpu_slab = 0
+mut any _active_scene_render_parts = nil
+mut any _active_scene_gpu_parts = nil
 mut _active_scene_count = 0
 mut _active_scene_optical_start = 0
 mut _active_scene_blend_start = 0
@@ -210,7 +212,7 @@ mut _active_scene_has_optical = false
 mut _active_scene_has_blend = true
 mut _active_scene_model_baked = false
 mut _active_scene_parts_baked = false
-mut _active_scene_light_slab = 0
+mut ptr _active_scene_light_slab = 0
 mut _active_scene_light_count = 0
 mut _active_scene_have_lights = false
 mut _active_scene_gpu_ready = false
@@ -224,7 +226,8 @@ mut _vk_cam_pos_z = 0.0
 mut _start_time = 0
 mut _start_time_sec = 0.0
 mut _last_frame_time = 0
-mut _current_frame_time = 0
+mut f64 _current_frame_time = 0.0
+mut int _replay_rendered_frames = 0
 mut _frame_time_accum = 0.0
 mut _skybox_yaw_deg = 0.0
 mut _skybox_pitch_deg = 0.0
@@ -247,9 +250,9 @@ mut _retired_meshes = []
 mut _shape_scratch = 0
 mut _shape_scratch_cap = 0
 mut _shape_scratch_used = 0
-mut _proj_matrix = 0
-mut _view_matrix = 0
-mut _mvp_matrix = 0
+mut any _proj_matrix = nil
+mut any _view_matrix = nil
+mut any _mvp_matrix = nil
 mut _raw_mvp = 0
 mut _3d_proj = 0
 mut _3d_view = 0
@@ -257,13 +260,13 @@ mut _3d_mvp = 0
 mut _3d_last_aspect = 0.0
 mut _3d_last_fovy = 0.0
 mut _scene_proj_mode = 0
-mut _proj_fov  = 120.0
+mut f64 _proj_fov = 120.0
 mut _proj_zoom = 40.0
 mut _font_cache_by_key = dict(32)
 mut _font_info_cache = dict(32)
 mut _font_priming = false
-mut _font_dirty = dict(8)
-mut _font_gpu_ready = dict(8)
+mut dict _font_dirty = dict(8)
+mut dict _font_gpu_ready = dict(8)
 mut _font_defer_flush_enabled = -1
 mut _builtin_font_cache = dict(8)
 mut _auto_show_pending = false
@@ -996,6 +999,23 @@ mut _scratch_model_mul = mat4_identity()
 mut _scratch_model_conv = mat4_identity()
 mut _scratch_model_saved_b = mat4_identity()
 mut _scratch_marker_model = mat4_identity()
+
+fn _ensure_matrix_scratch() any {
+   if !is_dict(_grid_cache) { _grid_cache = dict(16) }
+   if !is_dict(_axes_cache) { _axes_cache = dict(8) }
+   if !_mat4_valid(_scratch_ident) { _scratch_ident = mat4_identity() }
+   if !_mat4_valid(_scratch_view) { _scratch_view = mat4_identity() }
+   if !_mat4_valid(_scratch_proj) { _scratch_proj = mat4_identity() }
+   if !_mat4_valid(_scratch_mvp) { _scratch_mvp = mat4_identity() }
+   if !_mat4_valid(_cull_mvp) { _cull_mvp = mat4_identity() }
+   if !_mat4_valid(_scratch_model_set) { _scratch_model_set = mat4_identity() }
+   if !_mat4_valid(_scratch_model_mul) { _scratch_model_mul = mat4_identity() }
+   if !_mat4_valid(_scratch_model_conv) { _scratch_model_conv = mat4_identity() }
+   if !_mat4_valid(_scratch_model_saved_b) { _scratch_model_saved_b = mat4_identity() }
+   if !_mat4_valid(_scratch_marker_model) { _scratch_marker_model = mat4_identity() }
+   0
+}
+
 mut _model_debug = -1
 mut _model_debug_seen = dict(256)
 mut _last_win_w = 1280.0
@@ -1334,6 +1354,8 @@ fn get_swapchain_image_count() int {
 
 fn _ensure_fonts() dict {
    if !is_dict(_fonts) { _fonts = dict(32) }
+   if !is_dict(_font_dirty) { _font_dirty = dict(8) }
+   if !is_dict(_font_gpu_ready) { _font_gpu_ready = dict(8) }
    _fonts
 }
 
@@ -1385,7 +1407,7 @@ fn _font_destroy_glyph_bitmaps(int font_id, any font_obj) bool {
       if is_dict(glyph) && int(glyph.get("_font_id", font_id)) == font_id {
          def bm = glyph.get("bitmap", 0)
          if is_dict(bm) {
-            def bdata = bm.get("data", 0)
+            def ptr bdata = __ffi_untag_ptr(bm.get("data", 0))
             if bdata {
                free(bdata)
                bm["data"] = 0
@@ -1767,6 +1789,7 @@ fn _font_build_fallback_chain(int font_id) bool {
 fn _font_load_impl(str path, int size, int filter=FONT_FILTER_DEFAULT) int {
    if !is_str(path) || path.len == 0 { return 0 }
    if size < 4 { size = 4 }
+   if !is_dict(_font_cache_by_key) { _font_cache_by_key = dict(32) }
    def cache_key = path + ":" + to_str(size) + ":" + to_str(filter)
    def cached_id = _font_cache_by_key.get(cache_key, 0)
    if cached_id && _font_get(cached_id) { return cached_id }
@@ -2318,7 +2341,7 @@ fn _font_prepare_bitmap_for_atlas(
    Returns [bitmap, font_obj]."
    if !bm { return [bm, font_obj] }
    mut out_bm = bm
-   def bdata = out_bm.get("data", 0)
+   def ptr bdata = __ffi_untag_ptr(out_bm.get("data", 0))
    def bw = _dict_int(out_bm, "width", 0)
    def bh = _dict_int(out_bm, "height", 0)
    def is_color = _font_bitmap_is_color_like(font_obj, bm)
@@ -2344,8 +2367,8 @@ fn _font_prepare_bitmap_for_atlas(
    mut page_idx = chain.len - 1
    mut a = chain.get(page_idx)
    if !is_dict(a) { return [out_bm, font_obj] }
-   mut atlas_pixels = bdata
-   mut atlas_pixels_tmp = 0
+   mut ptr atlas_pixels = bdata
+   mut ptr atlas_pixels_tmp = 0
    if !is_color {
       def total_px = bw * bh
       atlas_pixels_tmp = malloc(total_px * 4)
@@ -2714,7 +2737,8 @@ fn _ttf_draw_bitmap_glyph(
    def xoff = float(bm.get("draw_xoff", bm.get("xoff", 0)))
    def yoff = float(bm.get("draw_yoff", bm.get("yoff", 0)))
    def bpp = int(bm.get("bpp", 4))
-   def bdata = bm.get("data", 0)
+   def ptr bdata = __ffi_untag_ptr(bm.get("data", 0))
+   if _backend == BACKEND_MOCK && !bdata { return [g_adv, false] }
    def gl_soft_text = _backend == BACKEND_GL && bdata && (
       lib_glr.capabilities().get("software_upload", false) ||
       !ui_profile.env_truthy_cached("NY_GL_TEXTURE_TEXT")
@@ -2833,8 +2857,8 @@ fn _draw_text_ttf(int font_id, str text, f64 x, f64 y, any color) bool {
    mut space_adv = -1.0
    while i < n {
       def nxt = _utf8_next_cp(text, i, n)
-      mut cp = nxt.get(0, 63)
-      i = nxt.get(1, i + 1)
+      mut int cp = int(nxt.get(0, 63))
+      i = int(nxt.get(1, i + 1))
       if cp < 0 { cp = 63 }
       def ctrl = _ttf_apply_control_cp(font_id, cp, line_h, x, pen_x, pen_y, prev_gi, space_adv)
       if _list_any_safe(ctrl, 0, false) {
@@ -2986,8 +3010,9 @@ fn _draw_text_mock_flat_color_bars(list runs) bool {
       if is_str(text) && text.len > 0 {
          def x = float(runs[i + 1])
          def y = float(runs[i + 2])
+         def color = int(runs[i + 3])
          def w = min(max(3.0, float(text.len) * 6.5), 4096.0)
-         draw_rect_fast(x, y + 8.0, w, 2.0, int(runs[i + 3]))
+         draw_rect_fast(x, y + 8.0, w, 2.0, color)
       }
       i += 4
    }
@@ -3643,6 +3668,10 @@ fn _init_with_window(any win, bool prefer_vulkan=true) bool {
 
 fn init_mock_surface(int width=1280, int height=720) any {
    "Initializes the CPU/mock backend with an offscreen framebuffer and no real window."
+   if ui_profile.env_truthy_cached("NYTRIX_UI_REPLAY") {
+      width = ui_profile.env_int_cached("NYTRIX_FIXTURE_WIDTH", width, 1, 8192)
+      height = ui_profile.env_int_cached("NYTRIX_FIXTURE_HEIGHT", height, 1, 8192)
+   }
    if _backend == BACKEND_VK { lib_vkr.shutdown() }
    if _backend == BACKEND_GL { lib_glr.shutdown() }
    _vk_cam_pos_valid = false
@@ -3727,6 +3756,7 @@ fn _show_pending_after_first_frame() any {
 
 fn init_window(int width, int height, str title, int flags=0, any vsync=false, bool filter=false, int msaa=4) any {
    "Initializes a window with renderer config and graphics context. Returns window dict or false."
+   _ensure_matrix_scratch()
    if _backend_pref == BACKEND_MOCK { return init_mock_surface(width, height) }
    if _backend_auto_requested || _backend_pref == BACKEND_VK { renderer_config(vsync, filter, "", "", msaa) }
    mut f = flags
@@ -3856,9 +3886,16 @@ fn set_window_pos(any win, int x, int y) bool {
 
 fn close_window() bool {
    "Shuts down graphics services and closes the active window."
+   if _backend == BACKEND_VK { renderer_wait_idle() }
    _font_release_all()
    if _backend == BACKEND_VK { lib_vkr.shutdown() }
    if _backend == BACKEND_GL { lib_glr.shutdown() }
+   _grid_cache = dict(16)
+   _axes_cache = dict(8)
+   _grid_axes_cache_keys = []
+   _grid_axes_cache_vals = []
+   _grid_axes_last_cache = 0
+   _last_ortho2d_valid = false
    _vk_cam_pos_valid = false
    if _active_win && !_active_win.get("_mock", false) { lib_uiw.close(_active_win) }
    _active_win = nil
@@ -3921,6 +3958,9 @@ fn _sync_vk_framebuffer_to_window(bool headless) bool {
 fn begin_drawing() bool {
    "Begins a new drawing frame, clearing states."
    if !_active_win { return false }
+   if ui_profile.env_truthy_cached("NYTRIX_UI_REPLAY") {
+      lib_uiw.replay_window_frame(_active_win)
+   }
    _sync_win32_native_cursor()
    _shape_scratch_used = 0
    _ensure_scissor_stack()
@@ -3929,7 +3969,11 @@ fn begin_drawing() bool {
    elif _backend == BACKEND_VK { lib_vkr.reset_scissor_rect() }
    if _backend != BACKEND_MOCK && ui_profile.env_present_cached("NY_GFX_ESC_CLOSE") { if lib_uiw.key_down(_active_win, ui_consts.KEY_ESCAPE) || lib_uiw.key_down(_active_win, 0xFF1B) { lib_uiw.set_should_close(_active_win, true) } }
    def now = ticks()
-   _current_frame_time = (now - _last_frame_time) / 1000000000.0
+   if ui_profile.env_truthy_cached("NYTRIX_UI_REPLAY") {
+      _current_frame_time = float(ui_profile.env_int_cached("NYTRIX_FIXTURE_FRAME_MS", 16, 1, 1000)) / 1000.0
+   } else {
+      _current_frame_time = (now - _last_frame_time) / 1000000000.0
+   }
    _last_frame_time = now
    _frame_time_accum += _current_frame_time
    if _backend == BACKEND_VK {
@@ -4000,6 +4044,14 @@ fn begin_drawing() bool {
       }
       return lib_glr.begin_frame(_active_win, w, h)
    }
+   if _backend == BACKEND_MOCK {
+      def fresh = lib_uiw.get_win(_active_win)
+      if is_dict(fresh) && fresh.contains("handle") { _active_win = fresh }
+      def size = lib_uiw.size(_active_win)
+      def w, h = int(size.get(0, 0)), int(size.get(1, 0))
+      if w > 0 && h > 0 { set_win_size(w, h) }
+      if !_cpu_ensure_surface() { return false }
+   }
    true
 }
 
@@ -4020,7 +4072,22 @@ fn begin_frame_clear(any color=BLACK) bool {
 
 fn end_frame() bool {
    "Finalizes and presents the current frame."
-   return end_drawing()
+   def ok = end_drawing()
+   if ok && ui_profile.env_truthy_cached("NYTRIX_UI_REPLAY") {
+      _replay_rendered_frames += 1
+      def replay_win = lib_uiw.get_win(_active_win)
+      def replay_size = lib_uiw.size(replay_win)
+      def replay_mouse = lib_uiw.mouse_pos(replay_win)
+      print("NYTRIX_UI_STATE frame=" + to_str(_replay_rendered_frames) +
+         " size=" + to_str(replay_size.get(0, 0)) + "x" + to_str(replay_size.get(1, 0)) +
+         " mouse=" + to_str(replay_mouse.get(0, 0)) + "," + to_str(replay_mouse.get(1, 0)))
+      def hash_line = ui_profile.framebuffer_hash_line()
+      if hash_line.len > 0 {
+         print("NYTRIX_UI_FRAMEHASH frame=" + to_str(_replay_rendered_frames) + " " + hash_line)
+      }
+      lib_uiw.replay_advance_frame()
+   }
+   return ok
 }
 
 fn _draw_win32_software_cursor() bool {
@@ -4121,16 +4188,28 @@ fn _send_vk_cam_pos(f64 x, f64 y, f64 z) bool {
 }
 
 fn _camera_vec3_component(any v, int component) f64 {
-   "Reads either a plain [x,y,z] list or the tagged vec3 representation."
+   "Reads a plain list, tagged vec3, or x/y/z dictionary component."
    if (is_list(v) || is_tuple(v)) && v.len == 5 && is_int(v[0]) && is_int(v[1]) && v[0] == 1 && v[1] == 3 {
       return float(v[2 + component])
    }
+   if is_dict(v) {
+      if component == 0 { return float(v.get("x", 0.0)) }
+      if component == 1 { return float(v.get("y", 0.0)) }
+      if component == 2 { return float(v.get("z", 0.0)) }
+      return 0.0
+   }
    float(v.get(component, 0.0))
+}
+
+fn _camera_fov(any cam) f64 {
+   if is_dict(cam) { return float(cam.get("fovy", _proj_fov)) }
+   float(cam.get(3, _proj_fov))
 }
 
 fn set_camera(any cam) bool {
    "Sets both view and projection from a camera object."
    if !cam { return false }
+   _ensure_matrix_scratch()
    _ortho2d_active = false
    if _active_win {
       mut live_w, live_h = 0, 0
@@ -4148,9 +4227,6 @@ fn set_camera(any cam) bool {
    _send_vk_cam_pos(_camera_vec3_component(pos, 0), _camera_vec3_component(pos, 1), _camera_vec3_component(pos, 2))
    def target = is_dict(cam) ? cam.get("target", [0.0, 0.0, -1.0]) : cam.get(1, [0.0, 0.0, -1.0])
    def up = is_dict(cam) ? cam.get("up", [0.0, 1.0, 0.0]) : cam.get(2, [0.0, 1.0, 0.0])
-   def fovy = is_dict(cam) ? cam.get("fovy", _proj_fov) : cam.get(3, _proj_fov)
-   mut aspect = 1.0
-   if _last_win_h > 0.0 { aspect = _last_win_w / _last_win_h }
    ;; Decode vector wrappers once at the API boundary.  Passing mixed tagged
    ;; and plain vectors into the generic adapter made explicit targets diverge
    ;; from yaw/pitch cameras despite representing the same pose.
@@ -4160,6 +4236,9 @@ fn set_camera(any cam) bool {
       _camera_vec3_component(up, 0), _camera_vec3_component(up, 1), _camera_vec3_component(up, 2),
       _scratch_view)
    _view_matrix = _scratch_view
+   def f64 fovy = _camera_fov(cam)
+   mut f64 aspect = 1.0
+   if _last_win_h > 0.0 { aspect = _last_win_w / _last_win_h }
    if _scene_proj_mode == 1 {
       def z = _proj_zoom
       mat4_ortho_into(-z * aspect, z * aspect, -z, z, -1000.0, 1000.0, _scratch_proj)
@@ -4245,16 +4324,25 @@ fn clear_background(any color=BLACK) bool {
 
 fn get_frame_time() f64 {
    "Returns the duration of the last frame in seconds."
+   if ui_profile.env_truthy_cached("NYTRIX_UI_REPLAY") {
+      return float(ui_profile.env_int_cached("NYTRIX_FIXTURE_FRAME_MS", 16, 1, 1000)) / 1000.0
+   }
    _current_frame_time
 }
 
 fn get_delta_time() f64 {
    "Returns the duration of the last frame in seconds."
+   if ui_profile.env_truthy_cached("NYTRIX_UI_REPLAY") {
+      return float(ui_profile.env_int_cached("NYTRIX_FIXTURE_FRAME_MS", 16, 1, 1000)) / 1000.0
+   }
    _current_frame_time
 }
 
 fn get_time() f64 {
    "Returns the total elapsed time in seconds since library initialization."
+   if ui_profile.env_truthy_cached("NYTRIX_UI_REPLAY") {
+      return float(_replay_rendered_frames) * float(ui_profile.env_int_cached("NYTRIX_FIXTURE_FRAME_MS", 16, 1, 1000)) / 1000.0
+   }
    if _start_time_sec == 0.0 { _start_time_sec = ostime.time() }
    ostime.time() - _start_time_sec
 }
@@ -4635,7 +4723,17 @@ fn _shape_scratch_alloc(int bytes) ptr {
    if _shape_scratch == 0 || (_shape_scratch_used + bytes) > _shape_scratch_cap {
       mut new_cap = max(65536, _shape_scratch_cap)
       while new_cap < (_shape_scratch_used + bytes) { new_cap *= 2 }
-      def next = _shape_scratch ? realloc(_shape_scratch, new_cap) : malloc(new_cap)
+      mut next = _shape_scratch ? realloc(_shape_scratch, new_cap) : malloc(new_cap)
+      if !next && _shape_scratch {
+         ;; Keep rendering available if the managed allocator cannot resize this
+         ;; long-lived per-frame block in place. Copy the live prefix to a fresh
+         ;; block before releasing the old one.
+         next = malloc(new_cap)
+         if next {
+            if _shape_scratch_used > 0 { memcpy(next, _shape_scratch, _shape_scratch_used) }
+            free(_shape_scratch)
+         }
+      }
       if !next { return 0 }
       _shape_scratch = next
       _shape_scratch_cap = new_cap
@@ -4664,9 +4762,9 @@ fn _draw_triangles_impl(ptr verts, int tri_count, bool owns=true) bool {
          def x1, y1 = load32_f32(verts, off1 + OFF_X), load32_f32(verts, off1 + OFF_Y)
          def x2, y2 = load32_f32(verts, off2 + OFF_X), load32_f32(verts, off2 + OFF_Y)
          def c0 = load32(verts, off0 + OFF_C)
-         mut sx0, sy0 = x0, y0
-         mut sx1, sy1 = x1, y1
-         mut sx2, sy2 = x2, y2
+         mut f64 sx0, sy0 = x0, y0
+         mut f64 sx1, sy1 = x1, y1
+         mut f64 sx2, sy2 = x2, y2
          if _mvp_matrix {
             def z0 = load32_f32(verts, off0 + OFF_Z)
             def z1 = load32_f32(verts, off1 + OFF_Z)
@@ -5143,7 +5241,7 @@ fn _draw_filled_fan_fallback(
    f64 b,
    f64 alpha
 )  bool {
-   segments = max(3, int(segments))
+   if segments < 3 { segments = 3 }
    def verts = _shape_scratch_alloc(segments * 3 * VERTEX_STRIDE)
    if !verts { return false }
    mut vi, i = 0, 0
@@ -5187,7 +5285,7 @@ fn _draw_ring_sector_fallback(
    f64 b,
    f64 a
 ) bool {
-   steps = max(1, int(steps))
+   if steps < 1 { steps = 1 }
    def tri_count = steps * 2
    def verts = _shape_scratch_alloc(tri_count * 3 * VERTEX_STRIDE)
    if !verts { return false }
@@ -5258,7 +5356,7 @@ fn draw_circle_sector_lines(any center, f64 radius, f64 start_deg, f64 end_deg, 
 
 fn _draw_filled_fan_2d(f64 cx, f64 cy, f64 rx, f64 ry, int segments, any color, f64 rot=0.0) bool {
    if rx <= 0 || ry <= 0 { return false }
-   segments = max(3, int(segments))
+   if segments < 3 { segments = 3 }
    def r, g = _color_at(color, 0, 1.0), _color_at(color, 1, 1.0)
    def b, alpha = _color_at(color, 2, 1.0), _color_at(color, 3, 1.0)
    if _backend == BACKEND_VK {
@@ -5270,7 +5368,8 @@ fn _draw_filled_fan_2d(f64 cx, f64 cy, f64 rx, f64 ry, int segments, any color, 
 
 fn draw_polygon(f64 cx, f64 cy, int sides, f64 radius, any color, f64 rotation_deg=0.0) bool {
    "Draws a regular filled polygon."
-   _draw_filled_fan_2d(cx, cy, radius, radius, max(3, int(sides)), color, rotation_deg * PI / 180.0)
+   if sides < 3 { sides = 3 }
+   _draw_filled_fan_2d(cx, cy, radius, radius, sides, color, rotation_deg * PI / 180.0)
 }
 
 fn draw_ellipse(f64 cx, f64 cy, f64 rx, f64 ry, any color, int segments=256) bool {
@@ -5295,7 +5394,7 @@ fn _draw_radial_polyline_fallback(
    f64 thickness,
    bool closed=false
 ) bool {
-   steps = max(1, int(steps))
+   if steps < 1 { steps = 1 }
    def limit = closed ? steps : steps + 1
    mut points, i = list(limit), 0
    while i < limit {
@@ -5324,7 +5423,7 @@ fn draw_rect_lines_ex(any rec, f64 thickness, any color) bool {
 fn draw_ellipse_lines(f64 cx, f64 cy, f64 rx, f64 ry, any color, f64 thickness=0.02, int segments=72) bool {
    "Draws the outline of an ellipse."
    if rx <= 0 || ry <= 0 { return false }
-   segments = max(8, int(segments))
+   if segments < 8 { segments = 8 }
    if _backend == BACKEND_VK {
       def r, g = _color_at(color, 0, 1.0), _color_at(color, 1, 1.0)
       def b, a = _color_at(color, 2, 1.0), _color_at(color, 3, 1.0)
@@ -5581,7 +5680,8 @@ fn draw_rect_rounded_lines_ex(any rec, f64 radius, int segments, f64 thickness, 
    draw_line_2d(x + radius, y + h, x + w - radius, y + h, color, thickness)
    draw_line_2d(x, y + radius, x, y + h - radius, color, thickness)
    draw_line_2d(x + w, y + radius, x + w, y + h - radius, color, thickness)
-   def seg = max(4, int(segments))
+   mut int seg = segments
+   if seg < 4 { seg = 4 }
    draw_arc(x + radius, y + radius, radius, 180.0, 270.0, color, thickness, seg)
    draw_arc(x + w - radius, y + radius, radius, 270.0, 360.0, color, thickness, seg)
    draw_arc(x + w - radius, y + h - radius, radius, 0.0, 90.0, color, thickness, seg)
@@ -5723,19 +5823,19 @@ fn draw_grid(
    f64 thickness=0.01
 ) bool {
    "Draws a grid on the ground plane(XZ)."
-   slices = max(1, int(slices))
-   def extent = float(slices) * spacing
+   slices = int(max(1, int(slices)))
+   def f64 extent = float(slices) * spacing
    if _backend == BACKEND_VK || (_backend == BACKEND_GL && !lib_glr.capabilities().get("software_upload", false)) {
       def key = _static_cache_prefix() + _grid_cache_key(slices, spacing, thickness, minor_col, major_col)
-      mut cached = _grid_cache.get(key, 0)
+      mut any cached = _grid_cache.get(key, 0)
       if !cached {
-         def minor = _pack_color_from(minor_col, 0.3, 0.3, 0.3, 0.55)
-         def major = _pack_color_from(major_col, 0.58, 0.62, 0.7, 0.95)
-         def line_count = (slices * 2 + 1) * 2
-         def vert_count = line_count * 6
+         def int minor = _pack_color_from(minor_col, 0.3, 0.3, 0.3, 0.55)
+         def int major = _pack_color_from(major_col, 0.58, 0.62, 0.7, 0.95)
+         def int line_count = (slices * 2 + 1) * 2
+         def int vert_count = line_count * 6
          def buf = malloc(vert_count * VERTEX_STRIDE)
          if !buf { return false }
-         def idx = _grid_write_xz_static_lines(buf, 0, slices, spacing, extent, 0.0, 0.0, thickness, minor, major)
+         def int idx = _grid_write_xz_static_lines(buf, 0, slices, spacing, extent, 0.0, 0.0, thickness, minor, major)
          cached = _create_static_buffer_backend(buf, idx)
          free(buf)
          _grid_cache[key] = cached
@@ -5752,15 +5852,15 @@ fn draw_grid_pair(
    f64 coarse_dx=0.0, f64 coarse_dz=0.0
 ) bool {
    "Draws fine+coarse XZ grids as one cached static buffer."
-   fine_slices = max(1, int(fine_slices))
-   coarse_slices = max(1, int(coarse_slices))
+   fine_slices = int(max(1, int(fine_slices)))
+   coarse_slices = int(max(1, int(coarse_slices)))
    if _backend == BACKEND_VK || (_backend == BACKEND_GL && !lib_glr.capabilities().get("software_upload", false)) {
-      def fine_minor = _pack_color_from(fine_minor_col, 0.3, 0.3, 0.3, 0.55)
-      def fine_major = _pack_color_from(fine_major_col, 0.58, 0.62, 0.7, 0.95)
-      def coarse_minor = _pack_color_from(coarse_minor_col, 0.3, 0.3, 0.3, 0.55)
-      def coarse_major = _pack_color_from(coarse_major_col, 0.58, 0.62, 0.7, 0.95)
-      def rdx = float(int(float(coarse_dx) * 1000.0)) / 1000.0
-      def rdz = float(int(float(coarse_dz) * 1000.0)) / 1000.0
+      def int fine_minor = _pack_color_from(fine_minor_col, 0.3, 0.3, 0.3, 0.55)
+      def int fine_major = _pack_color_from(fine_major_col, 0.58, 0.62, 0.7, 0.95)
+      def int coarse_minor = _pack_color_from(coarse_minor_col, 0.3, 0.3, 0.3, 0.55)
+      def int coarse_major = _pack_color_from(coarse_major_col, 0.58, 0.62, 0.7, 0.95)
+      def f64 rdx = float(int(float(coarse_dx) * 1000.0)) / 1000.0
+      def f64 rdz = float(int(float(coarse_dz) * 1000.0)) / 1000.0
       mut key = "pair:" + to_str(fine_slices)
       + ":" + to_str(fine_spacing)
       + ":" + to_str(fine_thickness)
@@ -5774,16 +5874,16 @@ fn draw_grid_pair(
       + ":" + to_str(rdx)
       + ":" + to_str(rdz)
       key = _static_cache_prefix() + key
-      mut cached = _grid_cache.get(key, 0)
+      mut any cached = _grid_cache.get(key, 0)
       if !cached {
-         def fine_extent = float(fine_slices) * float(fine_spacing)
-         def coarse_extent = float(coarse_slices) * float(coarse_spacing)
-         def fine_lines = (fine_slices * 2 + 1) * 2
-         def coarse_lines = (coarse_slices * 2 + 1) * 2
-         def vert_count = (fine_lines + coarse_lines) * 6
+         def f64 fine_extent = float(fine_slices) * float(fine_spacing)
+         def f64 coarse_extent = float(coarse_slices) * float(coarse_spacing)
+         def int fine_lines = (fine_slices * 2 + 1) * 2
+         def int coarse_lines = (coarse_slices * 2 + 1) * 2
+         def int vert_count = (fine_lines + coarse_lines) * 6
          def buf = malloc(vert_count * VERTEX_STRIDE)
          if !buf { return false }
-         mut idx = _grid_write_xz_static_lines(buf, 0, fine_slices, fine_spacing, fine_extent, 0.0, 0.0, fine_thickness, fine_minor, fine_major, 0.0)
+         mut int idx = _grid_write_xz_static_lines(buf, 0, fine_slices, fine_spacing, fine_extent, 0.0, 0.0, fine_thickness, fine_minor, fine_major, 0.0)
          idx = _grid_write_xz_static_lines(buf, idx, coarse_slices, coarse_spacing, coarse_extent, rdx, rdz, coarse_thickness, coarse_minor, coarse_major, 0.001)
          cached = _create_static_buffer_backend(buf, idx)
          free(buf)
@@ -6052,27 +6152,36 @@ fn _snapshot_fill_alpha(ptr data, int w, int h) bool {
    true
 }
 
-fn _snapshot_own_rgba(any fb, ptr data, int w, int h) bool {
-   if !fb || !is_dict(fb) || !data || w <= 0 || h <= 0 { return false }
-   def n = w * h * 4
-   if n <= 0 { return false }
-   def owned = bytes(n)
-   if !owned { return false }
-   memcpy(owned, data, n)
-   fb["data"] = owned
-   fb["channels"] = 4
-   fb["bpp"] = 4
-   true
+fn _snapshot_data_ptr(any value) ptr {
+   mut ptr data = __ffi_untag_ptr(value)
+   if (int(data) & 1) != 0 { data = __ffi_untag_ptr(data) }
+   data
 }
 
 fn _snapshot_hash_line(ptr data, int w, int h) str {
    if !data || w <= 0 || h <= 0 { return "" }
    def n = w * h * 4
    if n <= 0 { return "" }
-   def fb_bytes = bytes(n)
-   if !fb_bytes { return "" }
-   memcpy(fb_bytes, data, n)
-   "FB_HASH: " + lib_str.to_hex(lib_hash.xxh32(fb_bytes, 0, 0, n))
+   ;; Hash visible RGB bytes directly. Alpha is forced opaque in snapshots and
+   ;; is not part of the displayed mock surface; hashing through a boxed bytes
+   ;; value also made the result depend on the execution route.
+   mut hash32 = 2166136261
+   mut off = 0
+   while off < n {
+      if (off & 3) != 3 {
+         hash32 = ((hash32 ^ (load8(data, off) & 255)) * 16777619) & 4294967295
+      }
+      off += 1
+   }
+   "FB_HASH: " + lib_str.to_hex(hash32)
+}
+
+fn mock_framebuffer_hash_line() str {
+   "Hashes the active mock surface directly, avoiding dynamic pointer boxing."
+   if _backend != BACKEND_MOCK || !_cpu_buf || _cpu_w <= 0 || _cpu_h <= 0 {
+      return ""
+   }
+   _snapshot_hash_line(_cpu_buf, _cpu_w, _cpu_h)
 }
 
 fn _snapshot_cache_hash(ptr data, int w, int h) bool {
@@ -6143,7 +6252,7 @@ fn read_framebuffer() any {
       return fb
    }
    if _backend == BACKEND_VK {
-      def fb = lib_vkr.read_framebuffer()
+      mut fb = lib_vkr.read_framebuffer()
       if is_dict(fb) && !fb.contains("bpp") { fb["bpp"] = 4 }
       return fb
    }
@@ -6152,7 +6261,8 @@ fn read_framebuffer() any {
       def out = malloc(bytes_n)
       if !out { return 0 }
       memcpy(out, _cpu_buf, bytes_n)
-      return {"width": _cpu_w, "height": _cpu_h, "data": out, "bpp": 4, "channels": 4}
+      return {"width": _cpu_w, "height": _cpu_h, "data": out, "bpp": 4,
+         "channels": 4, "mock_opaque": true}
    }
    0
 }
@@ -6161,13 +6271,15 @@ fn snapshot(str filename) bool {
    "Saves the current framebuffer to an image file. Supports TGA, PNG, BMP formats based on extension."
    if _backend == BACKEND_MOCK && _cpu_buf != 0 && _cpu_w > 0 && _cpu_h > 0 {
       _snapshot_fill_alpha(_cpu_buf, _cpu_w, _cpu_h)
-      def fb = {"width": _cpu_w, "height": _cpu_h, "data": _cpu_buf, "channels": 4}
+      def owned = bytes(_cpu_w * _cpu_h * 4)
+      memcpy(owned, _cpu_buf, _cpu_w * _cpu_h * 4)
+      def fb = {"width": _cpu_w, "height": _cpu_h, "data": owned, "channels": 4, "bpp": 4}
       match lib_img.save(fb, filename) { ok(ignoredok) -> { ignoredok  _snapshot_cache_hash(_cpu_buf, _cpu_w, _cpu_h)  return true } err(ignorederr) -> { ignorederr  return false } }
    }
    if _backend == BACKEND_GL {
       _snapshot_trace("gl begin")
-      mut fb = 0
-      mut data = 0
+      mut any fb = 0
+      mut ptr data = 0
       mut w = 0
       mut h = 0
       if _gl_capture_ready && _gl_capture_pixels && _gl_capture_w > 0 && _gl_capture_h > 0 {
@@ -6190,14 +6302,19 @@ fn snapshot(str filename) bool {
          }
       }
       if !fb || !is_dict(fb) { return false }
+      if !data || w <= 0 || h <= 0 { if data { free(data) } return false }
       _snapshot_trace("gl dims " + to_str(w) + "x" + to_str(h))
       _snapshot_fill_alpha(data, w, h)
       _snapshot_trace("gl alpha")
-      _snapshot_own_rgba(fb, data, w, h)
+      def owned = bytes(w * h * 4)
+      memcpy(owned, data, w * h * 4)
+      fb = {"width": w, "height": h, "data": owned, "channels": 4, "bpp": 4}
       _snapshot_trace("gl copy")
+      if !fb { if data { free(data) } return false }
       mut saved_ok = false
       _snapshot_trace("gl save " + filename)
-      match lib_img.save(fb, filename) { ok(ignoredok) -> { ignoredok  saved_ok = true } err(ignorederr) -> { ignorederr  saved_ok = false } }
+      def save_result = lib_img.save(fb, filename)
+      match save_result { ok(ignoredok) -> { ignoredok  saved_ok = true } err(save_error) -> { _snapshot_trace("gl save error " + to_str(save_error))  saved_ok = false } }
       _snapshot_trace("gl saved " + to_str(saved_ok))
       if saved_ok { _snapshot_cache_hash(data, w, h) }
       if data { free(data) }
@@ -6205,17 +6322,26 @@ fn snapshot(str filename) bool {
    }
    if _backend == BACKEND_VK {
       _snapshot_trace("vk begin")
-      def fb = lib_vkr.read_framebuffer()
+      mut any fb = lib_vkr.read_framebuffer()
       _snapshot_trace("vk read")
       if !fb || !is_dict(fb) { return false }
-      def data = fb.get("data", 0)
+      def ptr data = _snapshot_data_ptr(fb.get("data", 0))
       def w = int(fb.get("width", 0))
       def h = int(fb.get("height", 0))
+      if !data || w <= 0 || h <= 0 { if data { free(data) } return false }
       _snapshot_trace("vk dims " + to_str(w) + "x" + to_str(h))
       _snapshot_fill_alpha(data, w, h)
       _snapshot_trace("vk alpha")
-      _snapshot_own_rgba(fb, data, w, h)
+      if ui_profile.env_truthy_cached("NY_UI_SNAPSHOT_TRACE") {
+         def center = ((h / 2) * w + (w / 2)) * 4
+         _snapshot_trace("vk pixels corner=" + to_str(load8(data, 0)) + "," + to_str(load8(data, 1)) + "," + to_str(load8(data, 2)) +
+            " center=" + to_str(load8(data, center)) + "," + to_str(load8(data, center + 1)) + "," + to_str(load8(data, center + 2)))
+      }
+      def owned = bytes(w * h * 4)
+      memcpy(owned, data, w * h * 4)
+      fb = {"width": w, "height": h, "data": owned, "channels": 4, "bpp": 4}
       _snapshot_trace("vk copy")
+      if !fb { if data { free(data) } return false }
       mut saved_ok = false
       _snapshot_trace("vk save " + filename)
       match lib_img.save(fb, filename) { ok(ignoredok) -> { ignoredok  saved_ok = true } err(ignorederr) -> { ignorederr  saved_ok = false } }
@@ -6273,6 +6399,13 @@ fn set_backend_type(int type) bool {
 
 fn apply_backend_name(any requested_backend) bool {
    "Applies the preferred renderer backend from a name such as auto, gl, vk, or mock."
+   if ui_profile.env_truthy_cached("NYTRIX_UI_REPLAY") {
+      def replay_backend = ui_profile.env_lower_cached("NYTRIX_UI_REPLAY_BACKEND")
+      if replay_backend.len == 0 {
+         return set_backend_type(BACKEND_MOCK)
+      }
+      requested_backend = replay_backend
+   }
    def backend = lib_str.lower(lib_str.strip(to_str(requested_backend)))
    if backend == "" || backend == "auto" {
       return set_backend_type(BACKEND_AUTO)
@@ -6294,6 +6427,9 @@ fn apply_backend_name(any requested_backend) bool {
 
 fn apply_backend_env(str name="NY_UI_RENDER_BACKEND") bool {
    "Applies the preferred renderer backend from an environment variable."
+   if ui_profile.env_truthy_cached("NYTRIX_UI_REPLAY") {
+      return apply_backend_name("mock")
+   }
    apply_backend_name(ui_profile.env_lower_cached(name))
 }
 
@@ -6305,10 +6441,15 @@ fn apply_verbose_argv(int start_index=1) bool {
 fn apply_backend_argv(int start_index=1) bool {
    "Applies renderer backend flags from process argv, e.g. --gl, --vk, or --mock."
    mut i = int(max(0, start_index))
+   def cli_argv = process_args.args()
    mut found = false
+   if ui_profile.env_truthy_cached("NYTRIX_UI_REPLAY") {
+      apply_backend_name("mock")
+      found = true
+   }
    if apply_verbose_argv(start_index) { found = true }
-   while i < argc() {
-      def token = lib_str.lower(lib_str.strip(to_str(argv(i))))
+   while i < cli_argv.len {
+      def token = lib_str.lower(lib_str.strip(to_str(cli_argv.get(i, ""))))
       if token == "-gl" || token == "--gl" || token == "-opengl" || token == "--opengl" {
          apply_backend_name("gl")
          found = true
@@ -7451,6 +7592,7 @@ fn font_allow_color_fallback(int font, bool enabled=true) bool {
 fn font_destroy(int font) bool {
    "Unloads a font and releases its memory and glyph caches."
    if !is_int(font) || font <= 0 { return false }
+   if _backend == BACKEND_VK { renderer_wait_idle() }
    def font_obj = _font_get(font)
    if font_obj {
       _font_destroy_glyph_bitmaps(font, font_obj)
@@ -7494,8 +7636,8 @@ fn measure_text(int font, any text) list {
    mut i = 0
    while i < n {
       def nxt = _utf8_next_cp(text, i, n)
-      def cp = nxt.get(0, 0)
-      i = nxt.get(1, i + 1)
+      def int cp = int(nxt.get(0, 0))
+      i = int(nxt.get(1, i + 1))
       if cp == 10 {
          if pen_x > max_x { max_x = pen_x }
          pen_x = 0.0
@@ -7909,10 +8051,9 @@ fn _font_can_use_fast_vk_text() bool {
 
 @jit
 fn _font_can_use_fast_gl_text() bool {
-   ;; The GL atlas text path is kept as an opt-in debug path.  On the current
-   ;; fixed-function/VBO backend it samples a single atlas strip for some drivers,
-   ;; producing vertical barcode glyphs.  Prefer the real TTF path by default.
-   _backend == BACKEND_GL && ui_profile.env_truthy_cached("NY_GL_FAST_TEXT")
+   ;; Atlas text retains glyph coverage through ordinary alpha blending.
+   ;; Keep the bitmap path available for diagnostics and visual comparisons.
+   _backend == BACKEND_GL && ui_profile.env_toggle_cached("NY_GL_FAST_TEXT", true)
 }
 
 @jit
@@ -7954,7 +8095,7 @@ fn _gl_store_text_quad(ptr p, f64 x, f64 y, f64 w, f64 h, f64 u1, f64 v1, f64 u2
    true
 }
 
-fn _gl_fast_text_flush(any verts, int glyphs, int tex_id) bool {
+fn _gl_fast_text_flush(ptr verts, int glyphs, int tex_id) bool {
    if !verts || glyphs <= 0 || tex_id < 0 { return false }
    if ui_profile.env_truthy_cached("NY_GL_TEXT_TRACE") {
       ui_profile.print_text("[gl:text] glyphs=" + to_str(glyphs) +
@@ -8372,7 +8513,8 @@ fn _font_prime_string(int font_id, any text) bool {
          if page_ptr { present = load32(ptr_add(page_ptr, cp * 48), 40) }
       } else {
          def nxt = _utf8_next_cp(text, i, n)
-         cp, i = nxt.get(0, 0), nxt.get(1, i + 1)
+         cp = int(nxt.get(0, 0))
+         i = int(nxt.get(1, i + 1))
          if cp > 0 {
             page_ptr = load64(root_ptr, (cp >> 8) * 8)
             if page_ptr { present = load32(ptr_add(page_ptr, (cp & 255) * 48), 40) }
@@ -8395,6 +8537,16 @@ fn _resolve_text_font(int font) int {
 @jit
 fn _draw_text_impl(int font, any text, f64 x, f64 y, any color=WHITE) bool {
    if !is_str(text) { text = to_str(text) }
+   if _backend == BACKEND_MOCK && ui_profile.env_truthy_cached("NYTRIX_UI_REPLAY") {
+      def replay_text_mode = ui_profile.env_lower_cached("NY_UI_MOCK_TEXT_FAST")
+      if (replay_text_mode == "bar" || replay_text_mode == "bars") && text.len > 0 {
+         def packed = _pack_color_from(color, 1.0, 1.0, 1.0, 1.0, true)
+         def width = min(max(3.0, float(text.len) * 6.5), 4096.0)
+         draw_rect_fast(x, y + 8.0, width, 2.0, packed)
+         return true
+      }
+      return _draw_text_builtin(text, x, y, color)
+   }
    def font_id = _resolve_text_font(font)
    if _backend == BACKEND_VK && font_id > 0 {
       def packed = _pack_color_from(color, 1.0, 1.0, 1.0, 1.0, true)
@@ -9177,7 +9329,12 @@ fn mesh_collect_retired(int limit=0) int {
    n
 }
 
-fn _cpu_project_vertex_at(?ptr p, int off, any mvp) any { _cpu_project_vertex(load32_f32(p, off + 0), load32_f32(p, off + 4), load32_f32(p, off + 8), mvp) }
+fn _cpu_project_vertex_at(?ptr p, int off, any mvp) any {
+   def f64 x = float(load32_f32(p, off))
+   def f64 y = float(load32_f32(p, off + 4))
+   def f64 z = float(load32_f32(p, off + 8))
+   _cpu_project_vertex(x, y, z, mvp)
+}
 
 fn _cpu_draw_projected_thick_line(any p0, any p1, f64 width, int color) bool {
    if !p0 || !p1 { return false }
@@ -9228,12 +9385,49 @@ fn _cpu_draw_mesh_mock_tris(?ptr p, int count, any mvp) bool {
    true
 }
 
+fn _cpu_draw_mesh_mock_indexed(?ptr p, int count, ?ptr indices, int index_count, bool index_u32, bool lines, f64 width, any mvp) bool {
+   def int step = lines ? 2 : 3
+   def int index_size = index_u32 ? 4 : 2
+   mut int i = 0
+   while i + step <= index_count {
+      def int a = index_u32 ? load32(indices, i * index_size) : load16(indices, i * index_size)
+      def int b = index_u32 ? load32(indices, (i + 1) * index_size) : load16(indices, (i + 1) * index_size)
+      mut int c = 0
+      if !lines { c = index_u32 ? load32(indices, (i + 2) * index_size) : load16(indices, (i + 2) * index_size) }
+      if a >= 0 && a < count && b >= 0 && b < count && (lines || (c >= 0 && c < count)) {
+         def p0 = _cpu_project_vertex_at(p, a * VERTEX_STRIDE, mvp)
+         def p1 = _cpu_project_vertex_at(p, b * VERTEX_STRIDE, mvp)
+         if p0 && p1 {
+            def int color = _cpu_color_from_vk_packed(load32(p, a * VERTEX_STRIDE + 20))
+            if lines {
+               _cpu_draw_projected_thick_line(p0, p1, width, color)
+            } else {
+               def p2 = _cpu_project_vertex_at(p, c * VERTEX_STRIDE, mvp)
+               if p2 {
+                  _cpu_draw_triangle(p0.get(0, 0.0), p0.get(1, 0.0),
+                     p1.get(0, 0.0), p1.get(1, 0.0),
+                     p2.get(0, 0.0), p2.get(1, 0.0), color)
+               }
+            }
+         }
+      }
+      i += step
+   }
+   true
+}
+
 fn _draw_mesh_mock(dict m, bool is_lines=false, f64 width=1.0) bool {
    def ptr = m.get("ptr", 0)
    def count = m.get("count", 0)
    if !ptr || count <= 0 { return false }
    def lines = is_lines || m.get("is_lines", false)
    _cpu_mul_active_mvp_into(_cull_mvp)
+   def index_ptr = m.get("idx_ptr", 0)
+   def int index_count = int(m.get("index_count", 0))
+   if index_ptr && index_count > 0 {
+      return _cpu_draw_mesh_mock_indexed(ptr, count, index_ptr, index_count,
+         bool(m.get("index_type_u32", false)), lines, width, _cull_mvp)
+   }
    if lines {
       _cpu_draw_mesh_mock_lines(ptr, count, width, _cull_mvp)
       return true
@@ -9903,7 +10097,7 @@ fn _active_scene_refresh_cpu_anim(dict group) bool {
    _active_scene_group = group
    _active_scene_render_parts = group.get("parts", _active_scene_render_parts)
    def rigid_gpu_ready = _group_rigid_gpu_anim_draw_ready(group)
-   _active_scene_gpu_slab = rigid_gpu_ready ? group.get("gpu_parts_slab", 0) : 0
+   _active_scene_gpu_slab = _scene_gpu_slab_ptr(rigid_gpu_ready ? group.get("gpu_parts_slab", 0) : 0)
    _active_scene_gpu_parts = rigid_gpu_ready ? group.get("gpu_parts", _active_scene_gpu_parts) : group.get("gpu_parts", 0)
    _active_scene_gpu_ready = rigid_gpu_ready
    _active_scene_model_baked = false
@@ -10024,6 +10218,12 @@ fn _scene_draw_cpu_part(
    last_unlit
 }
 
+fn _scene_gpu_slab_ptr(any value) ptr {
+   mut ptr slab = __ffi_untag_ptr(value)
+   if (int(slab) & 1) != 0 { slab = __ffi_untag_ptr(slab) }
+   slab
+}
+
 fn _scene_cache_group(dict group) bool {
    _active_scene_group = group
    _active_scene_gpu_slab = 0
@@ -10045,14 +10245,14 @@ fn _scene_cache_group(dict group) bool {
    mut have_gpu_state = false
    if is_list(gpu_state) { if gpu_state.len >= 7 { have_gpu_state = true } }
    if have_gpu_state {
-      _active_scene_gpu_slab = gpu_state.get(0, 0)
+      _active_scene_gpu_slab = _scene_gpu_slab_ptr(gpu_state.get(0, 0))
       _active_scene_count = int(gpu_state.get(1, 0))
       if gpu_state.len >= 9 {
          _active_scene_optical_start = int(gpu_state.get(2, 0))
          _active_scene_blend_start = int(gpu_state.get(3, 0))
          _active_scene_has_blend = int(gpu_state.get(4, 1)) != 0
          _active_scene_model_baked = int(gpu_state.get(5, 0)) != 0
-         _active_scene_light_slab = gpu_state.get(6, 0)
+         _active_scene_light_slab = _scene_gpu_slab_ptr(gpu_state.get(6, 0))
          _active_scene_light_count = int(gpu_state.get(7, 0))
          _active_scene_has_optical = int(gpu_state.get(8, 0)) != 0
          if !_active_scene_has_optical && !_active_scene_gpu_slab && (group.get("has_optical", false)? true : false) { _active_scene_has_optical = true }
@@ -10061,19 +10261,19 @@ fn _scene_cache_group(dict group) bool {
          _active_scene_blend_start = int(gpu_state.get(2, 0))
          _active_scene_has_blend = int(gpu_state.get(3, 1)) != 0
          _active_scene_model_baked = int(gpu_state.get(4, 0)) != 0
-         _active_scene_light_slab = gpu_state.get(5, 0)
+         _active_scene_light_slab = _scene_gpu_slab_ptr(gpu_state.get(5, 0))
          _active_scene_light_count = int(gpu_state.get(6, 0))
          _active_scene_has_optical = group.get("has_optical", false) ? true : false
       }
    } else {
       def group_scene_lights_init = group.get("scene_lights", [])
       def gpu_parts = group.get("gpu_parts", 0)
-      _active_scene_light_slab = group.get("scene_lights_slab", 0)
+      _active_scene_light_slab = _scene_gpu_slab_ptr(group.get("scene_lights_slab", 0))
       if _active_scene_light_slab { _active_scene_light_count = int(group.get("scene_lights_count", 0)) } elif is_list(group_scene_lights_init) { _active_scene_light_count = group_scene_lights_init.len } else { _active_scene_light_count = 0 }
       _active_scene_has_blend, _active_scene_has_optical = group.get("has_blend", true), group.get("has_optical", false) ? true : false
       _active_scene_model_baked = group.get("gpu_model_baked", false) ? true : false
       _active_scene_parts_baked = group.get("parts_model_baked", _active_scene_model_baked) ? true : false
-      _active_scene_gpu_slab = group.get("gpu_parts_slab", 0)
+      _active_scene_gpu_slab = _scene_gpu_slab_ptr(group.get("gpu_parts_slab", 0))
       if _active_scene_gpu_slab { _active_scene_count = int(group.get("gpu_parts_count", 0)) } elif is_list(gpu_parts) { _active_scene_count = gpu_parts.len } else { _active_scene_count = 0 }
       _active_scene_optical_start = int(group.get("gpu_optical_start", 0))
       _active_scene_blend_start = int(group.get("gpu_blend_start", 0))
@@ -10143,7 +10343,7 @@ fn _scene_draw_group_gpu(
    true
 }
 
-fn _scene_gpu_part_model_from_slab(any base, any out) any {
+fn _scene_gpu_part_model_from_slab(ptr base, any out) any {
    mut dst = out
    if !_mat4_valid(dst) { dst = mat4_identity() }
    mut i = 0
@@ -10164,7 +10364,7 @@ fn _scene_draw_group_gpu_gl(
    mut saved_model2 = _scratch_model_saved_b
    if !_mat4_valid(saved_model2) { saved_model2 = mat4_identity() }
    mut have_saved_model = false
-   if is_list(_model_matrix) && _model_matrix.len == 18 {
+   if is_list(_model_matrix) && len(_model_matrix) == 18 {
       mut si = 0
       while si < 18 {
          saved_model2[si] = _model_matrix[si]
@@ -10183,9 +10383,10 @@ fn _scene_draw_group_gpu_gl(
          def ibuf = load64(base, 32)
          def ibuf_off = load64(base, 40)
          def idx_count = load32(base, 48)
+         def vertex_count = load32(base, 52)
          def index_type = load32(base, 56)
          def prim = load32(base, 60)
-         if sbuf && ibuf && idx_count > 0 {
+         if sbuf && ((ibuf && idx_count > 0) || vertex_count > 0) {
             def part_vc_mode = load32(base, 248)
             def part_unlit = load32(base, 132) != 0 || (tex_id <= 0 && part_vc_mode == 0)
             lib_glr.set_unlit(part_unlit)
@@ -10210,8 +10411,13 @@ fn _scene_draw_group_gpu_gl(
             } else {
                set_model_matrix(part_model)
             }
-            lib_glr.draw_static_buffer_indexed_raw(sbuf, sbuf_off, ibuf, ibuf_off, idx_count, prim == 1, 1.0, 0, index_type, prim == 2, true)
-            drawn += 1
+            mut bool submitted = false
+            if ibuf && idx_count > 0 {
+               submitted = lib_glr.draw_static_buffer_indexed_raw(sbuf, sbuf_off, ibuf, ibuf_off, idx_count, prim == 1, 1.0, 0, index_type, prim == 2, true)
+            } else {
+               submitted = lib_glr.draw_static_buffer_raw(sbuf, sbuf_off, vertex_count, prim == 1, 1.0, 0, prim == 2, true)
+            }
+            if submitted { drawn += 1 }
          }
       }
       i += 1
@@ -10249,7 +10455,7 @@ fn _scene_draw_group_cpu(
    }
    mut saved_model2 = _scratch_model_saved_b
    mut have_saved_model = false
-   if is_list(_model_matrix) && _model_matrix.len == 18 {
+   if is_list(_model_matrix) && len(_model_matrix) == 18 {
       mut si = 0
       while si < 18 {
          saved_model2[si] = _model_matrix[si]
@@ -10378,7 +10584,9 @@ fn draw_mesh_group(any group) bool {
          " baked=" + to_str(group_parts_baked))
    }
    if !is_list(render_parts) { return false }
-   def render_count = (_active_scene_count > 0) ? _active_scene_count : render_parts.len
+   ;; The GPU part count can exceed the available CPU fallback parts.  A
+   ;; GPU-only scene has no CPU records to index when GPU submission fails.
+   def int render_count = min((_active_scene_count > 0) ? _active_scene_count : len(render_parts), len(render_parts))
    if render_count <= 0 { return false }
    _scene_draw_group_cpu(
       render_parts,
@@ -10397,7 +10605,7 @@ fn draw_mesh_group(any group) bool {
 
 fn _mat4_data_off(any m) int {
    if !is_list(m) { return -1 }
-   def n = m.len
+   def int n = len(m)
    if n >= 18 && int(m.get(0, 0)) == 4 && int(m.get(1, 0)) == 4 { return 2 }
    if n >= 16 { return 0 }
    -1
@@ -10522,7 +10730,7 @@ fn _scene_gpu_part_frame_visible_from_rec(any rec, any scene_model, bool group_m
    _is_aabb_visible_model(bmin, bmax, model, _mvp_matrix)
 }
 
-fn _scene_update_gpu_visibility_slab(any slab_ptr, int count, any render_parts, any gpu_parts, bool group_model_baked) int {
+fn _scene_update_gpu_visibility_slab(ptr slab_ptr, int count, any render_parts, any gpu_parts, bool group_model_baked) int {
    if !slab_ptr || count <= 0 { return 0 }
    def rec_stride = lib_vkr.CULL_PART_STRIDE
    def vis_off = lib_vkr.CULL_PART_VIS_OFF

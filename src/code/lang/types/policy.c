@@ -636,7 +636,7 @@ bool ny_proof_policy_decide(codegen_t *cg, scope *scopes, size_t depth,
      */
   }
 
-  if ((policy.tactics & NY_POL_TACTIC_RANGE) &&
+  if ((policy.tactics & (NY_POL_TACTIC_RANGE | NY_POL_TACTIC_SOLVER)) &&
       (strstr(out->obligation, "binary:*(") != NULL ||
        strstr(out->obligation, "binary:/(") != NULL)) {
     char candidate[NY_PROOF_CERTIFICATE_MAX];

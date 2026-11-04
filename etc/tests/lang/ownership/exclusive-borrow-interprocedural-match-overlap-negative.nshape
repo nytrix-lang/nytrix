@@ -5,7 +5,7 @@ shape ownership_exclusive_borrow_interprocedural_match_overlap_negative {
   template ny-test-case
   expect compile_failure
   expect_message "borrow is live"
-  flags "--ownership-strict --native-only --nyir-verify"
+  flags "--ownership-strict --native-only --nyr-verify"
   source ny <<'NY'
 use core
 

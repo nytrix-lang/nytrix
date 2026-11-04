@@ -2901,6 +2901,7 @@ typedef struct ny_hm_env_entry_t {
   const char *name;
   uint32_t syntax_ctx;
   ny_hm_type_t *type;
+  ny_hm_type_t *guard_base_type;
   ny_sem_ownership_t ownership;
   uint32_t alias_class;
   bool mutable_value;

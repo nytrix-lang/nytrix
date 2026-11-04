@@ -566,7 +566,9 @@ static bool interchange_affine_store_candidate(
       const nyr_inst_t *in = &f->data[i];
       if (in->op != NYIR_STORE_I64)
         continue;
-      if (in->imm != 0 || (in->flags & NYIR_INST_F_MEM_BYTE) ||
+      if (in->imm != 0 ||
+          (in->flags & (NYIR_INST_F_MEM_BYTE | NYIR_INST_F_MEM_U16 |
+                        NYIR_INST_F_MEM_I32)) ||
           in->scalar_class != NYIR_SCALAR_I64_RAW ||
           nyr_effective_effects(in) !=
               (NYIR_EFFECT_WRITE_MEMORY | NYIR_EFFECT_MAY_TRAP))
@@ -720,7 +722,8 @@ static bool interchange_stack_read_proven(const nyr_func_t *f,
       continue;
     if (in->op == NYIR_LOAD_I64 &&
         interchange_inst_uses_only_address(in, address) &&
-        !(in->flags & NYIR_INST_F_MEM_BYTE) &&
+        !(in->flags &
+          (NYIR_INST_F_MEM_BYTE | NYIR_INST_F_MEM_U16 | NYIR_INST_F_MEM_I32)) &&
         !(in->effects & NYIR_EFFECT_VOLATILE) &&
         !(nyr_effective_effects(in) & NYIR_EFFECT_VOLATILE) &&
         nyr_effective_effects(in) ==
@@ -735,7 +738,9 @@ static bool interchange_stack_read_proven(const nyr_func_t *f,
     }
     if (in->op == NYIR_STORE_I64 &&
         interchange_inst_uses_only_address(in, address) &&
-        !(in->flags & NYIR_INST_F_MEM_BYTE) && in->imm == 0 &&
+        !(in->flags &
+          (NYIR_INST_F_MEM_BYTE | NYIR_INST_F_MEM_U16 | NYIR_INST_F_MEM_I32)) &&
+        in->imm == 0 &&
         nyr_effective_effects(in) ==
             (NYIR_EFFECT_WRITE_MEMORY | NYIR_EFFECT_MAY_TRAP)) {
       size_t block = cfg->inst_block[i];
@@ -2710,9 +2715,9 @@ fail:
 }
 
 static size_t unswitch_block_for_label(const nyr_cfg_t *cfg, int64_t label) {
-  for (size_t b = 0; b < cfg->block_count; ++b)
-    if (cfg->block_label[b] == label)
-      return b;
+  size_t b = 0;
+  if (nyr_cfg_block_for_label(cfg, label, &b))
+    return b;
   return SIZE_MAX;
 }
 
@@ -2833,21 +2838,30 @@ static bool unswitch_try_one(nyr_func_t *f, const nyr_cfg_t *cfg,
   bool *fallthrough_exits =
       calloc(cfg->block_count, sizeof(*fallthrough_exits));
   bool *exit_blocks = calloc(cfg->block_count, sizeof(*exit_blocks));
+  bool *escape_phis_inserted = calloc(cfg->block_count,
+                                      sizeof(*escape_phis_inserted));
   size_t *fallthrough_target =
       calloc(cfg->block_count, sizeof(*fallthrough_target));
   int *defs = nyr_build_defs(f);
   int *value_map = NULL;
+  size_t *escape_block_by_value = NULL;
+  size_t *escape_pred_by_value = NULL;
+  int64_t *escape_pred_label_by_block = NULL;
+  int *escape_phi_by_value = NULL;
+  nyr_inst_t *escape_phis = NULL;
   int64_t *label_map = NULL;
   int64_t *exit_label_map = NULL;
   size_t *cloned_at = NULL;
   nyr_inst_t *clones = NULL;
   nyr_inst_t *rebuilt = NULL;
   size_t clone_count = 0, clone_built = 0;
+  size_t value_count = 0, direct_escape_count = 0, extra_escape_labels = 0;
   size_t extra_exit_inst_count = 0;
   size_t branch_index = SIZE_MAX, false_branch_index = SIZE_MAX;
   size_t preheader_term = SIZE_MAX;
+  bool preheader_fallthrough = false;
   if (!members || !latches || !latch_members || !fallthrough_exits ||
-      !exit_blocks || !fallthrough_target || !defs)
+      !exit_blocks || !escape_phis_inserted || !fallthrough_target || !defs)
     goto done;
 
   stage = "header-shape";
@@ -2944,14 +2958,25 @@ static bool unswitch_try_one(nyr_func_t *f, const nyr_cfg_t *cfg,
     if (f->data[i].op == NYIR_BR && f->data[i].imm == header_label)
       preheader_term = i;
   }
-  if (preheader_term == SIZE_MAX)
-    goto done;
-  size_t last_preheader_inst = cfg->block_end[preheader];
-  while (last_preheader_inst > cfg->block_start[preheader] &&
-         f->data[last_preheader_inst - 1].op == NYIR_NOP)
-    --last_preheader_inst;
-  if (last_preheader_inst == 0 || last_preheader_inst - 1 != preheader_term)
-    goto done;
+  if (preheader_term == SIZE_MAX) {
+    size_t last_preheader_inst = cfg->block_end[preheader];
+    while (last_preheader_inst > cfg->block_start[preheader] &&
+           f->data[last_preheader_inst - 1].op == NYIR_NOP)
+      --last_preheader_inst;
+    if (preheader + 1 != header ||
+        cfg->block_end[preheader] != cfg->block_start[header] ||
+        last_preheader_inst != cfg->block_end[preheader])
+      goto done;
+    preheader_term = cfg->block_end[preheader];
+    preheader_fallthrough = true;
+  } else {
+    size_t last_preheader_inst = cfg->block_end[preheader];
+    while (last_preheader_inst > cfg->block_start[preheader] &&
+           f->data[last_preheader_inst - 1].op == NYIR_NOP)
+      --last_preheader_inst;
+    if (last_preheader_inst == 0 || last_preheader_inst - 1 != preheader_term)
+      goto done;
+  }
 
   stage = "loop-exits";
   size_t loop_inst_count = 0;
@@ -3028,8 +3053,19 @@ static bool unswitch_try_one(nyr_func_t *f, const nyr_cfg_t *cfg,
     nyr_op_t terminal = f->data[end - 1].op;
     if (terminal == NYIR_RET)
       goto done;
-    if (terminal == NYIR_BR)
+    if (terminal == NYIR_BR) {
+      const nyr_inst_t *branch = &f->data[end - 1];
+      size_t target = unswitch_block_for_label(cfg, branch->imm);
+      size_t resolved = target < cfg->block_count
+                            ? unswitch_resolve_exit(f, cfg, target)
+                            : SIZE_MAX;
+      if (target < cfg->block_count && !members[target] &&
+          resolved < cfg->block_count && exit_blocks[resolved]) {
+        fallthrough_exits[b] = true;
+        fallthrough_target[b] = resolved;
+      }
       continue;
+    }
     if (b + 1 < cfg->block_count && members[b + 1])
       continue;
     if (b + 1 >= cfg->block_count)
@@ -3057,19 +3093,32 @@ static bool unswitch_try_one(nyr_func_t *f, const nyr_cfg_t *cfg,
   if (cfg->block_count > SIZE_MAX / sizeof(*label_map) ||
       f->len > SIZE_MAX / sizeof(*cloned_at))
     goto done;
-  size_t value_count = (size_t)f->next_value;
+  value_count = (size_t)f->next_value;
   value_map = malloc(value_count * sizeof(*value_map));
+  escape_block_by_value = malloc(value_count * sizeof(*escape_block_by_value));
+  escape_pred_by_value = malloc(value_count * sizeof(*escape_pred_by_value));
+  escape_phi_by_value = malloc(value_count * sizeof(*escape_phi_by_value));
+  escape_pred_label_by_block =
+      malloc(cfg->block_count * sizeof(*escape_pred_label_by_block));
   label_map = malloc(cfg->block_count * sizeof(*label_map));
   exit_label_map = malloc(cfg->block_count * sizeof(*exit_label_map));
   cloned_at = malloc(f->len * sizeof(*cloned_at));
-  if (!value_map || !label_map || !exit_label_map || !cloned_at)
+  if (!value_map || !escape_block_by_value || !escape_pred_by_value ||
+      !escape_phi_by_value || !escape_pred_label_by_block || !label_map ||
+      !exit_label_map || !cloned_at)
     goto done;
-  for (size_t v = 0; v < value_count; ++v)
+  for (size_t v = 0; v < value_count; ++v) {
     value_map[v] = -1;
+    escape_block_by_value[v] = SIZE_MAX;
+    escape_pred_by_value[v] = SIZE_MAX;
+    escape_phi_by_value[v] = -1;
+  }
   for (size_t b = 0; b < cfg->block_count; ++b)
     label_map[b] = -1;
   for (size_t b = 0; b < cfg->block_count; ++b)
     exit_label_map[b] = -1;
+  for (size_t b = 0; b < cfg->block_count; ++b)
+    escape_pred_label_by_block[b] = -1;
   for (size_t i = 0; i < f->len; ++i)
     cloned_at[i] = SIZE_MAX;
 
@@ -3104,7 +3153,11 @@ static bool unswitch_try_one(nyr_func_t *f, const nyr_cfg_t *cfg,
       goto done;
     exit_label_map[b] = ++max_label;
   }
-  if (value_defs > (size_t)(INT_MAX - f->next_value))
+  if (max_label >= INT64_MAX - 1)
+    goto done;
+  int64_t clone_preheader_label = ++max_label;
+  size_t available_values = (size_t)(INT_MAX - f->next_value);
+  if (value_defs > available_values)
     goto done;
   int next_value = f->next_value;
   for (size_t b = 0; b < cfg->block_count; ++b) {
@@ -3116,24 +3169,105 @@ static bool unswitch_try_one(nyr_func_t *f, const nyr_cfg_t *cfg,
   }
 
   /*
-   * Loop-defined values may escape only through incoming values on an exit
-   * PHI; those edges are duplicated below with cloned SSA values.
+   * Loop-defined values normally escape through an exit PHI. Also allow a
+   * direct use in a single exit block when every predecessor is a loop edge
+   * and the value dominates each edge; a synthetic exit PHI will merge the
+   * original and cloned loop values.
    */
   stage = "escaping-values";
   for (size_t b = 0; b < cfg->block_count; ++b) {
     if (members[b])
       continue;
+    rejected_block = b;
     for (size_t i = cfg->block_start[b]; i < cfg->block_end[b]; ++i) {
       const nyr_inst_t *in = &f->data[i];
       int uses[] = {in->a, in->b, in->c, in->d, in->e, in->f};
-      for (size_t k = 0; k < sizeof(uses) / sizeof(uses[0]); ++k)
-        if (uses[k] >= 0 && (size_t)uses[k] < value_count &&
-            value_map[uses[k]] >= 0)
+      size_t operand_count =
+          (in->op == NYIR_PHI ? 0 : sizeof(uses) / sizeof(uses[0])) +
+          (in->op == NYIR_PHI ? 0 : in->extra_args_len);
+      for (size_t k = 0; k < operand_count; ++k) {
+        int used = k < sizeof(uses) / sizeof(uses[0])
+                       ? uses[k]
+                       : in->extra_args[k - sizeof(uses) / sizeof(uses[0])];
+        if (used < 0 || (size_t)used >= value_count || value_map[used] < 0)
+          continue;
+        if (!exit_blocks[b] || in->op == NYIR_PHI) {
+          stage = "escaping-direct-shape";
           goto done;
-      for (size_t k = 0; k < in->extra_args_len; ++k)
-        if (in->extra_args[k] >= 0 && (size_t)in->extra_args[k] < value_count &&
-            value_map[in->extra_args[k]] >= 0)
+        }
+        if (escape_block_by_value[used] != SIZE_MAX) {
+          if (escape_block_by_value[used] != b) {
+            stage = "escaping-multiple-exits";
+            goto done;
+          }
+          continue;
+        }
+        size_t def = defs[used] >= 0 ? (size_t)defs[used] : SIZE_MAX;
+        if (def >= f->len) {
+          stage = "escaping-no-definition";
           goto done;
+        }
+        size_t def_block = cfg->inst_block[def];
+        size_t pred_count =
+            cfg->pred_offsets[b + 1] - cfg->pred_offsets[b];
+        if (pred_count == 0) {
+          stage = "escaping-no-predecessor";
+          goto done;
+        }
+        bool direct_preds = true;
+        for (size_t e = cfg->pred_offsets[b]; e < cfg->pred_offsets[b + 1];
+             ++e) {
+          size_t pred = cfg->pred_blocks[e];
+          if (!members[pred] || cfg->block_label[pred] < 0 ||
+              (def_block != pred && !nyr_cfg_dominates(cfg, def_block, pred))) {
+            direct_preds = false;
+            break;
+          }
+        }
+        if (!direct_preds) {
+          /*
+           * Frontends often put a one-branch trampoline between a loop
+           * fallthrough and its labeled return block. Preserve that original
+           * edge by giving the trampoline a label for the exit PHI.
+           */
+          if (pred_count != 1) {
+            stage = "escaping-undominated-edge";
+            goto done;
+          }
+          size_t pred = cfg->pred_blocks[cfg->pred_offsets[b]];
+          size_t source = SIZE_MAX;
+          for (size_t q = 0; q < cfg->block_count; ++q) {
+            if (!members[q] || !fallthrough_exits[q] ||
+                fallthrough_target[q] != b)
+              continue;
+            bool reaches_pred = false;
+            for (size_t se = cfg->succ_offsets[q];
+                 se < cfg->succ_offsets[q + 1]; ++se)
+              reaches_pred |= cfg->succ_blocks[se] == pred;
+            if (!reaches_pred)
+              continue;
+            source = q;
+            break;
+          }
+          if (members[pred] || source == SIZE_MAX ||
+              cfg->pred_offsets[pred + 1] - cfg->pred_offsets[pred] != 1 ||
+              cfg->pred_blocks[cfg->pred_offsets[pred]] != source) {
+            stage = "escaping-undominated-edge";
+            goto done;
+          }
+          if (escape_pred_label_by_block[pred] < 0) {
+            if (max_label >= INT64_MAX - 1 || extra_escape_labels == SIZE_MAX)
+              goto done;
+            escape_pred_label_by_block[pred] = ++max_label;
+            ++extra_escape_labels;
+          }
+          escape_pred_by_value[used] = pred;
+        }
+        escape_block_by_value[used] = b;
+        if (direct_escape_count == SIZE_MAX)
+          goto done;
+        ++direct_escape_count;
+      }
       for (size_t k = 0; k < in->phi_incoming_len; ++k)
         if (in->phi_incoming[k].value >= 0 &&
             (size_t)in->phi_incoming[k].value < value_count &&
@@ -3141,11 +3275,18 @@ static bool unswitch_try_one(nyr_func_t *f, const nyr_cfg_t *cfg,
           size_t pred = unswitch_block_for_label(
               cfg, in->phi_incoming[k].predecessor_label);
           if (!exit_blocks[b] || in->op != NYIR_PHI ||
-              pred >= cfg->block_count || !members[pred])
+              pred >= cfg->block_count || !members[pred]) {
+            stage = "escaping-phi-edge";
             goto done;
+          }
         }
     }
   }
+  if (direct_escape_count > available_values - value_defs)
+    goto done;
+  for (size_t v = 0; v < value_count; ++v)
+    if (escape_block_by_value[v] != SIZE_MAX)
+      escape_phi_by_value[v] = next_value++;
 
   /*
    * Prefer invariant conditionals whose two edges stay in the loop. The
@@ -3229,6 +3370,8 @@ static bool unswitch_try_one(nyr_func_t *f, const nyr_cfg_t *cfg,
     goto done;
 
   if (one_sided_exit < cfg->block_count) {
+    if (preheader_fallthrough || direct_escape_count)
+      goto done;
     /*
      * Moving an early exit to the preheader skips the loop header. Require
      * SCEV to prove at least one iteration and the header to be pure control;
@@ -3300,11 +3443,36 @@ static bool unswitch_try_one(nyr_func_t *f, const nyr_cfg_t *cfg,
     f->len = new_len;
     f->cap = new_len;
     rebuilt = NULL;
+    if (ny_dbg_is_enabled(NY_DBG_HEURISTIC))
+      ny_dbg_heuristic_event(
+          "LOOP_UNSWITCH",
+          "decision=accept kind=one-sided header=L%lld branch=%zu block=L%lld "
+          "condition=v%d exit=L%lld internal=L%lld trip=%llu",
+          (long long)header_label, branch_index,
+          (long long)cfg->block_label[branch_block], condition,
+          (long long)exit_label,
+          (long long)cfg->block_label[one_sided_internal],
+          (unsigned long long)loop->trip_count);
     changed = true;
     goto done;
   }
   if (false_block < cfg->block_count && exit_blocks[false_block])
     goto done;
+
+  /*
+   * Duplicating a larger body needs profile evidence of a hot invariant
+   * branch. This pass has no profile counts, so bound code growth instead of
+   * cloning medium and large loops on a static guess.
+   */
+  if (loop_inst_count > 32) {
+    if (ny_dbg_is_enabled(NY_DBG_HEURISTIC))
+      ny_dbg_heuristic_event(
+          "LOOP_UNSWITCH",
+          "decision=reject stage=profitability reason=clone-budget "
+          "body-insts=%zu limit=32",
+          loop_inst_count);
+    goto done;
+  }
 
   stage = "clone-instructions";
   clones = calloc(loop_inst_count + extra_exit_inst_count, sizeof(*clones));
@@ -3343,6 +3511,10 @@ static bool unswitch_try_one(nyr_func_t *f, const nyr_cfg_t *cfg,
         if (label_map[target] < 0)
           goto done;
         copy->imm = label_map[target];
+      } else if (fallthrough_exits[b]) {
+        copy->imm = exit_label_map[b];
+        if (copy->imm < 0)
+          goto done;
       }
     }
     for (size_t k = 0; k < copy->phi_incoming_len; ++k) {
@@ -3354,6 +3526,8 @@ static bool unswitch_try_one(nyr_func_t *f, const nyr_cfg_t *cfg,
         if (label_map[pred] < 0)
           goto done;
         inc->predecessor_label = label_map[pred];
+      } else if (pred == preheader && b == header) {
+        inc->predecessor_label = clone_preheader_label;
       }
       inc->value = unswitch_value(value_map, value_count, inc->value);
     }
@@ -3445,26 +3619,160 @@ static bool unswitch_try_one(nyr_func_t *f, const nyr_cfg_t *cfg,
     }
   }
 
+  if (direct_escape_count) {
+    escape_phis = calloc(value_count, sizeof(*escape_phis));
+    if (!escape_phis)
+      goto done;
+    for (size_t v = 0; v < value_count; ++v) {
+      size_t b = escape_block_by_value[v];
+      if (b == SIZE_MAX)
+        continue;
+      size_t pred_count =
+          cfg->pred_offsets[b + 1] - cfg->pred_offsets[b];
+      if (pred_count == 0 || pred_count > SIZE_MAX / 2 ||
+          pred_count * 2 > SIZE_MAX / sizeof(nyr_phi_incoming_t) ||
+          escape_phi_by_value[v] < 0 || value_map[v] < 0)
+        goto done;
+      nyr_phi_incoming_t *incoming =
+          malloc(pred_count * 2 * sizeof(*incoming));
+      if (!incoming)
+        goto done;
+      size_t out = 0;
+      size_t trampoline = escape_pred_by_value[v];
+      if (trampoline != SIZE_MAX) {
+        size_t source = SIZE_MAX;
+        for (size_t q = 0; q < cfg->block_count; ++q)
+          if (members[q] && fallthrough_exits[q] &&
+              fallthrough_target[q] == b) {
+            bool reaches_trampoline = false;
+            for (size_t se = cfg->succ_offsets[q];
+                 se < cfg->succ_offsets[q + 1]; ++se)
+              reaches_trampoline |= cfg->succ_blocks[se] == trampoline;
+            if (!reaches_trampoline)
+              continue;
+            source = q;
+            break;
+          }
+        int64_t clone_pred =
+            source < cfg->block_count ? exit_label_map[source] : -1;
+        if (source == SIZE_MAX || clone_pred < 0 ||
+            escape_pred_label_by_block[trampoline] < 0) {
+          free(incoming);
+          goto done;
+        }
+        incoming[out++] = (nyr_phi_incoming_t){
+            .value = (int)v,
+            .predecessor_label = escape_pred_label_by_block[trampoline]};
+        incoming[out++] = (nyr_phi_incoming_t){
+            .value = value_map[v], .predecessor_label = clone_pred};
+      } else {
+        for (size_t e = cfg->pred_offsets[b]; e < cfg->pred_offsets[b + 1];
+             ++e) {
+          size_t pred = cfg->pred_blocks[e];
+          int64_t clone_pred = fallthrough_exits[pred]
+                                   ? exit_label_map[pred]
+                                   : label_map[pred];
+          if (!members[pred] || cfg->block_label[pred] < 0 || clone_pred < 0) {
+            free(incoming);
+            goto done;
+          }
+          incoming[out++] = (nyr_phi_incoming_t){
+              .value = (int)v, .predecessor_label = cfg->block_label[pred]};
+          incoming[out++] = (nyr_phi_incoming_t){
+              .value = value_map[v], .predecessor_label = clone_pred};
+        }
+      }
+      escape_phis[v] = (nyr_inst_t){.op = NYIR_PHI,
+                                    .dst = escape_phi_by_value[v],
+                                    .a = -1,
+                                    .b = -1,
+                                    .c = -1,
+                                    .d = -1,
+                                    .e = -1,
+                                    .f = -1,
+                                    .phi_incoming = incoming,
+                                    .phi_incoming_len = out};
+    }
+  }
+
   stage = "rebuild";
   if (clone_count == SIZE_MAX)
     goto done;
   size_t insert_count = clone_count + 1;
   if (insert_count > SIZE_MAX - f->len)
     goto done;
-  size_t new_len = f->len + insert_count;
+  size_t extra_preheader = preheader_fallthrough ? 1 : 0;
+  if (extra_preheader > SIZE_MAX - f->len - insert_count)
+    goto done;
+  size_t new_len = f->len + insert_count + extra_preheader;
+  if (direct_escape_count > SIZE_MAX - new_len ||
+      extra_escape_labels > SIZE_MAX - new_len - direct_escape_count ||
+      new_len + direct_escape_count + extra_escape_labels == SIZE_MAX ||
+      new_len + direct_escape_count + extra_escape_labels + 1 >
+          SIZE_MAX / sizeof(*rebuilt))
+    goto done;
+  new_len += direct_escape_count + extra_escape_labels + 1;
   rebuilt = calloc(new_len, sizeof(*rebuilt));
   if (!rebuilt)
     goto done;
   size_t out = 0;
   for (size_t i = 0; i < f->len; ++i) {
+    size_t b = cfg->inst_block[i];
     nyr_inst_t moved = f->data[i];
-    if (i == preheader_term) {
+    if (i == cfg->block_start[b] && escape_pred_label_by_block[b] >= 0)
+      rebuilt[out++] = (nyr_inst_t){.op = NYIR_LABEL,
+                                    .dst = -1,
+                                    .a = -1,
+                                    .b = -1,
+                                    .c = -1,
+                                    .d = -1,
+                                    .e = -1,
+                                    .f = -1,
+                                    .imm = escape_pred_label_by_block[b]};
+    if (preheader_fallthrough && i == preheader_term) {
+      nyr_inst_t dispatch = f->data[branch_index];
+      dispatch.op = NYIR_BR_IF;
+      dispatch.dst = dispatch.b = dispatch.c = dispatch.d = dispatch.e =
+          dispatch.f = -1;
+      dispatch.a = condition;
+      dispatch.imm = header_label;
+      dispatch.effects = NYIR_EFFECT_CONTROL;
+      rebuilt[out++] = dispatch;
+      rebuilt[out++] = (nyr_inst_t){.op = NYIR_LABEL,
+                                    .dst = -1,
+                                    .a = -1,
+                                    .b = -1,
+                                    .c = -1,
+                                    .d = -1,
+                                    .e = -1,
+                                    .f = -1,
+                                    .imm = clone_preheader_label};
+      rebuilt[out++] = (nyr_inst_t){.op = NYIR_BR,
+                                    .dst = -1,
+                                    .a = -1,
+                                    .b = -1,
+                                    .c = -1,
+                                    .d = -1,
+                                    .e = -1,
+                                    .f = -1,
+                                    .effects = NYIR_EFFECT_CONTROL,
+                                    .imm = label_map[header]};
+    } else if (!preheader_fallthrough && i == preheader_term) {
       nyr_inst_t dispatch = f->data[preheader_term];
       dispatch.op = NYIR_BR_IF;
       dispatch.dst = dispatch.b = dispatch.c = dispatch.d = dispatch.e =
           dispatch.f = -1;
       dispatch.a = condition;
       rebuilt[out++] = dispatch;
+      rebuilt[out++] = (nyr_inst_t){.op = NYIR_LABEL,
+                                    .dst = -1,
+                                    .a = -1,
+                                    .b = -1,
+                                    .c = -1,
+                                    .d = -1,
+                                    .e = -1,
+                                    .f = -1,
+                                    .imm = clone_preheader_label};
       rebuilt[out++] = (nyr_inst_t){.op = NYIR_BR,
                                     .dst = -1,
                                     .a = -1,
@@ -3476,6 +3784,30 @@ static bool unswitch_try_one(nyr_func_t *f, const nyr_cfg_t *cfg,
                                     .effects = NYIR_EFFECT_CONTROL,
                                     .imm = label_map[header]};
       continue;
+    }
+    if (!members[b] && !escape_phis_inserted[b] && moved.op != NYIR_LABEL &&
+        moved.op != NYIR_PHI) {
+      for (size_t v = 0; v < value_count; ++v) {
+        if (escape_block_by_value[v] != b)
+          continue;
+        rebuilt[out++] = escape_phis[v];
+        escape_phis[v].phi_incoming = NULL;
+      }
+      escape_phis_inserted[b] = true;
+    }
+    if (!members[b] && moved.op != NYIR_PHI) {
+      for (size_t v = 0; v < value_count; ++v) {
+        if (escape_block_by_value[v] != b)
+          continue;
+        int *ops[] = {&moved.a, &moved.b, &moved.c, &moved.d, &moved.e,
+                      &moved.f};
+        for (size_t k = 0; k < sizeof(ops) / sizeof(ops[0]); ++k)
+          if (*ops[k] == (int)v)
+            *ops[k] = escape_phi_by_value[v];
+        for (size_t k = 0; k < moved.extra_args_len; ++k)
+          if (moved.extra_args[k] == (int)v)
+            moved.extra_args[k] = escape_phi_by_value[v];
+      }
     }
     if (i == branch_index) {
       moved.op = NYIR_BR;
@@ -3497,6 +3829,14 @@ static bool unswitch_try_one(nyr_func_t *f, const nyr_cfg_t *cfg,
   f->cap = new_len;
   f->next_value = next_value;
   rebuilt = NULL;
+  if (ny_dbg_is_enabled(NY_DBG_HEURISTIC))
+    ny_dbg_heuristic_event(
+        "LOOP_UNSWITCH",
+        "decision=accept kind=clone header=L%lld branch=%zu block=L%lld "
+        "condition=v%d body-insts=%zu escaping-values=%zu",
+        (long long)header_label, branch_index,
+        (long long)cfg->block_label[branch_block], condition, loop_inst_count,
+        direct_escape_count);
   free(clones);
   clones = NULL;
   clone_count = 0;
@@ -3516,13 +3856,22 @@ done:
       nyr_inst_discard(&clones[i]);
   }
   free(clones);
+  if (escape_phis) {
+    for (size_t v = 0; v < value_count; ++v)
+      if (escape_phis[v].phi_incoming)
+        nyr_inst_discard(&escape_phis[v]);
+  }
+  free(escape_phis);
   free(rebuilt);
   free(cloned_at);
   free(exit_label_map);
   free(label_map);
   free(value_map);
+  free(escape_phi_by_value);
+  free(escape_block_by_value);
   free(fallthrough_target);
   free(exit_blocks);
+  free(escape_phis_inserted);
   free(fallthrough_exits);
   free(latch_members);
   free(latches);

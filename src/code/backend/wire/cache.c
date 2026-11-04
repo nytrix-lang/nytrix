@@ -143,7 +143,8 @@ static bool ny_write_text_file_atomic(const char *path, const char *content,
     return false;
 #ifndef _WIN32
   char tmp_path[PATH_MAX];
-  snprintf(tmp_path, sizeof(tmp_path), "%s.%ld.XXXXXX", path, (long)getpid());
+  snprintf(tmp_path, sizeof(tmp_path), "%s.tmp.%ld.XXXXXX", path,
+           (long)getpid());
   int fd = mkstemp(tmp_path);
   if (fd < 0)
     return false;
@@ -155,7 +156,7 @@ static bool ny_write_text_file_atomic(const char *path, const char *content,
   }
 #else
   char tmp_path[1024];
-  snprintf(tmp_path, sizeof(tmp_path), "%s.%lu.tmp", path,
+  snprintf(tmp_path, sizeof(tmp_path), "%s.tmp.%lu.0", path,
            (unsigned long)GetCurrentProcessId());
   FILE *f = fopen(tmp_path, "wb");
   if (!f)
@@ -167,7 +168,7 @@ static bool ny_write_text_file_atomic(const char *path, const char *content,
     remove(tmp_path);
     return false;
   }
-  if (rename(tmp_path, path) != 0) {
+  if (!ny_cache_publish_file(tmp_path, path)) {
     remove(tmp_path);
     return false;
   }
@@ -226,7 +227,11 @@ const char *ny_cache_root_dir(void) { return ny_default_cache_root_dir(); }
 
 static int ny_cache_remove_tree(const char *path) {
   struct stat st;
+#ifdef _WIN32
   if (!path || !*path || stat(path, &st) != 0)
+#else
+  if (!path || !*path || lstat(path, &st) != 0)
+#endif
     return 0;
   if (S_ISDIR(st.st_mode)) {
     DIR *d = opendir(path);
@@ -790,45 +795,11 @@ bool ny_jit_cache_save(const char *cache_path, LLVMModuleRef module) {
 
   char tmp_path[1024];
   pid_t pid = getpid();
-  snprintf(tmp_path, sizeof(tmp_path), "%s.%d.tmp", cache_path, (int)pid);
-  if (LLVMWriteBitcodeToFile(module, tmp_path) == 0) {
-    if (rename(tmp_path, cache_path) == 0) {
-      return true;
-    }
+  snprintf(tmp_path, sizeof(tmp_path), "%s.tmp.%d.0", cache_path, (int)pid);
+  bool ok = LLVMWriteBitcodeToFile(module, tmp_path) == 0 &&
+            ny_cache_publish_file(tmp_path, cache_path);
+  if (!ok)
     remove(tmp_path);
-  }
-
-  char *ir = LLVMPrintModuleToString(module);
-  if (!ir)
-    return false;
-  LLVMContextRef tmp_ctx = LLVMContextCreate();
-  if (!tmp_ctx) {
-    LLVMDisposeMessage(ir);
-    return false;
-  }
-  LLVMModuleRef tmp_mod = NULL;
-  char *err_msg = NULL;
-  LLVMMemoryBufferRef ir_buf =
-      LLVMCreateMemoryBufferWithMemoryRangeCopy(ir, strlen(ir), "ny_cache_tmp");
-  LLVMDisposeMessage(ir);
-  bool ok = false;
-  if (ir_buf) {
-    if (LLVMParseIRInContext(tmp_ctx, ir_buf, &tmp_mod, &err_msg) == 0) {
-      snprintf(tmp_path, sizeof(tmp_path), "%s.%d.tmp", cache_path, (int)pid);
-      if (LLVMWriteBitcodeToFile(tmp_mod, tmp_path) == 0) {
-        if (rename(tmp_path, cache_path) == 0)
-          ok = true;
-        else
-          remove(tmp_path);
-      }
-      LLVMDisposeModule(tmp_mod);
-    } else {
-      if (err_msg)
-        LLVMDisposeMessage(err_msg);
-      LLVMDisposeMemoryBuffer(ir_buf);
-    }
-  }
-  LLVMContextDispose(tmp_ctx);
   return ok;
 }
 
@@ -920,7 +891,8 @@ bool ny_jit_native_cache_save(const char *so_path, LLVMModuleRef module,
   if (!so_path || !module)
     return false;
   char obj_path[4096], tmp_so[4096];
-  int n = snprintf(tmp_so, sizeof(tmp_so), "%s.XXXXXX", so_path);
+  int n = snprintf(tmp_so, sizeof(tmp_so), "%s.tmp.%ld.XXXXXX", so_path,
+                   (long)getpid());
   if (n <= 0 || (size_t)n >= sizeof(tmp_so))
     return false;
   int fd = mkstemp(tmp_so);
@@ -955,20 +927,27 @@ bool ny_jit_native_cache_save(const char *so_path, LLVMModuleRef module,
     remove(tmp_so);
     return false;
   }
-  if (rename(tmp_so, so_path) != 0) {
+  if (!ny_cache_publish_file(tmp_so, so_path)) {
     remove(tmp_so);
     return false;
   }
   if (link_libs && link_count > 0) {
     char libs_path[1024];
     snprintf(libs_path, sizeof(libs_path), "%s.libs", so_path);
-    FILE *f = fopen(libs_path, "w");
+    char temporary[1080];
+    snprintf(temporary, sizeof(temporary), "%s.tmp.%ld.0", libs_path,
+             (long)getpid());
+    FILE *f = fopen(temporary, "w");
     if (f) {
       for (size_t i = 0; i < link_count; i++) {
         if (link_libs[i])
           fprintf(f, "%s\n", link_libs[i]);
       }
-      fclose(f);
+      bool wrote = !ferror(f);
+      if (fclose(f) != 0)
+        wrote = false;
+      if (!wrote || !ny_cache_publish_file(temporary, libs_path))
+        remove(temporary);
     }
   }
   return true;
@@ -1299,9 +1278,16 @@ bool ny_jit_stencil_cache_save(const char *so_path, const unsigned char *code,
    * Write atomically
    */
   char tmp[1080];
-  snprintf(tmp, sizeof(tmp), "%s.tmp", so_path);
-  FILE *f = fopen(tmp, "wb");
+  snprintf(tmp, sizeof(tmp), "%s.tmp.%ld.XXXXXX", so_path, (long)getpid());
+  int fd = mkstemp(tmp);
+  if (fd < 0) {
+    free(buf);
+    return false;
+  }
+  FILE *f = fdopen(fd, "wb");
   if (!f) {
+    close(fd);
+    remove(tmp);
     free(buf);
     return false;
   }
@@ -1313,7 +1299,7 @@ bool ny_jit_stencil_cache_save(const char *so_path, const unsigned char *code,
     remove(tmp);
     return false;
   }
-  if (rename(tmp, so_path) != 0) {
+  if (!ny_cache_publish_file(tmp, so_path)) {
     remove(tmp);
     return false;
   }

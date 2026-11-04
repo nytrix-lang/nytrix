@@ -27,6 +27,17 @@ assert(a[1] == 1, "slot 1")
 assert(a[2] == 2, "slot 2")
 assert(a[3] == 3, "slot 3")
 assert(a[6] == 100, "slot 6")
+;; `int(any)` on an indexed typed-list value must preserve the raw payload.
+;; The low bit cannot distinguish raw odd integers from tagged values here.
+mut list<int> converted = []
+mut cast_i = 0
+while cast_i < 7 {
+   converted = append(converted, int(a[cast_i]))
+   cast_i += 1
+}
+assert(converted[0] == 0 && converted[1] == 1 && converted[2] == 2 &&
+   converted[3] == 3 && converted[6] == 100,
+   "int cast preserves raw indexed typed-list values")
 mut int s = 0
 mut i = 0
 while i < 7 {

@@ -29,7 +29,6 @@ typedef struct {
   const bool *known;
   const int64_t *value;
   const unsigned char *kind;
-  const nyr_value_fact_t *facts;
 } nir_peephole_parallel_ctx_t;
 
 /*
@@ -40,7 +39,7 @@ typedef struct {
  * corruption).  Re-derive validity at each use instead.
  */
 static const nyr_inst_t *nir_def_inst(const nyr_func_t *f, const int *defs,
-                                       int value) {
+                                      int value) {
   if (!defs || value < 0 || value >= f->next_value)
     return NULL;
   int idx = defs[value];
@@ -57,8 +56,8 @@ static bool nir_is_const_value(const nyr_func_t *f, const int *defs, int value,
 }
 
 static const nyr_inst_t *nir_boolean_compare_root(const nyr_func_t *f,
-                                                   const int *defs, int value,
-                                                   unsigned depth) {
+                                                  const int *defs, int value,
+                                                  unsigned depth) {
   if (!f || !defs || depth > 16)
     return NULL;
   const nyr_inst_t *def = nir_def_inst(f, defs, value);
@@ -167,25 +166,6 @@ static bool nir_boolean_value(const nyr_func_t *f, const int *defs, int value,
   return nir_boolean_compare_root(f, defs, value, depth) != NULL;
 }
 
-static nyr_cmp_t nir_invert_i64_cmp(nyr_cmp_t cmp) {
-  switch (cmp) {
-  case NYIR_CMP_EQ:
-    return NYIR_CMP_NE;
-  case NYIR_CMP_NE:
-    return NYIR_CMP_EQ;
-  case NYIR_CMP_LT:
-    return NYIR_CMP_GE;
-  case NYIR_CMP_LE:
-    return NYIR_CMP_GT;
-  case NYIR_CMP_GT:
-    return NYIR_CMP_LE;
-  case NYIR_CMP_GE:
-    return NYIR_CMP_LT;
-  default:
-    return cmp;
-  }
-}
-
 static bool nir_simplify_boolean_compare(nyr_func_t *f, const int *defs,
                                          nyr_inst_t *in) {
   if (!f || !defs || !in || in->op != NYIR_CMP_I64 ||
@@ -208,17 +188,21 @@ static bool nir_simplify_boolean_compare(nyr_func_t *f, const int *defs,
     nir_make_const(in, in->cmp == NYIR_CMP_NE ? 1 : 0);
     return true;
   }
-  const nyr_inst_t *root = nir_boolean_compare_root(f, defs, boolean, 0);
-  if (!root || root->op != NYIR_CMP_I64)
-    return false; /* Keep PHIs and ordered float predicates explicit. */
-  in->a = root->a;
-  in->b = root->b;
-  if ((in->cmp == NYIR_CMP_EQ && constant == 0) ||
-      (in->cmp == NYIR_CMP_NE && constant == 1))
-    in->cmp = nir_invert_i64_cmp(root->cmp);
-  else
-    in->cmp = root->cmp;
-  return true;
+  /*
+   * A zero test of an already canonical boolean is just the boolean itself.
+   * Keep the inverse form explicit: in particular, inverting an unordered
+   * floating comparison is not equivalent to swapping its ordered predicate.
+   */
+  if (constant == 0 && in->cmp == NYIR_CMP_NE &&
+      nir_boolean_compare_root(f, defs, boolean, 0)) {
+    nir_make_copy(in, boolean);
+    return true;
+  }
+  /*
+   * Keep inverse and nonzero-constant forms explicit: broader rewrites have
+   * caused a wrong checksum in the optimized native PBKDF2 fixture.
+   */
+  return false;
 }
 
 static bool nir_value_single_user(const nyr_func_t *f, int value,
@@ -331,32 +315,32 @@ static bool nir_factor_select_common_add(nyr_func_t *f, const int *defs,
     nyr_clear_derived_facts(&folded_select);
     f->data[i] = folded_select;
     f->data[i + 1] = (nyr_inst_t){.op = NYIR_ADD_I64,
-                                   .dst = sum,
-                                   .a = selected,
-                                   .b = common,
-                                   .c = -1,
-                                   .d = -1,
-                                   .e = -1,
-                                   .f = -1,
-                                   .effects = NYIR_EFFECT_NONE,
-                                   .scalar_class = NYIR_SCALAR_I64_RAW,
-                                   .debug = select_debug};
+                                  .dst = sum,
+                                  .a = selected,
+                                  .b = common,
+                                  .c = -1,
+                                  .d = -1,
+                                  .e = -1,
+                                  .f = -1,
+                                  .effects = NYIR_EFFECT_NONE,
+                                  .scalar_class = NYIR_SCALAR_I64_RAW,
+                                  .debug = select_debug};
     nyr_inst_t *copy = &f->data[i + 2];
     const nyr_debug_loc_t debug = copy->debug;
     const int dst = copy->dst;
     *copy = (nyr_inst_t){.op = NYIR_COPY,
-                          .dst = dst,
-                          .a = sum,
-                          .b = -1,
-                          .c = -1,
-                          .d = -1,
-                          .e = -1,
-                          .f = -1,
-                          .effects = NYIR_EFFECT_NONE,
-                          .scalar_class = NYIR_SCALAR_I64_RAW,
-                          .semantic_ownership = semantic_ownership,
-                          .semantic_mutable = semantic_mutable,
-                          .debug = debug};
+                         .dst = dst,
+                         .a = sum,
+                         .b = -1,
+                         .c = -1,
+                         .d = -1,
+                         .e = -1,
+                         .f = -1,
+                         .effects = NYIR_EFFECT_NONE,
+                         .scalar_class = NYIR_SCALAR_I64_RAW,
+                         .semantic_ownership = semantic_ownership,
+                         .semantic_mutable = semantic_mutable,
+                         .debug = debug};
     nyr_clear_derived_facts(copy);
     nyr_refresh_metadata(f);
     *changed = true;
@@ -392,6 +376,14 @@ static bool nir_simplify_mod_parity_compare(nyr_func_t *f, const int *defs,
     const nyr_inst_t *def = nir_def_inst(f, defs, value);
     if (!def)
       return false;
+    /*
+     * Reject unrelated definitions before the whole-function use scan.
+     */
+    if (def->op != NYIR_COPY &&
+        (def->op != NYIR_MOD_I64 || def->a < 0 || def->b < 0 ||
+         !(nir_is_const_value(f, defs, def->b, 2) ||
+           nir_is_const_value(f, defs, def->b, -2))))
+      return false;
     size_t user_idx = SIZE_MAX;
     if (!nir_value_single_user(f, value, &user_idx) ||
         user_idx != expected_user)
@@ -403,10 +395,6 @@ static bool nir_simplify_mod_parity_compare(nyr_func_t *f, const int *defs,
       value = def->a;
       continue;
     }
-    if (def->op != NYIR_MOD_I64 || def->a < 0 || def->b < 0 ||
-        !(nir_is_const_value(f, defs, def->b, 2) ||
-          nir_is_const_value(f, defs, def->b, -2)))
-      return false;
     mod_idx = (size_t)(def - f->data);
     break;
   }
@@ -423,14 +411,14 @@ static bool nir_simplify_mod_parity_compare(nyr_func_t *f, const int *defs,
           (f->len - mod_idx) * sizeof(*f->data));
   ++f->len;
   f->data[mod_idx] = (nyr_inst_t){.op = NYIR_CONST_I64,
-                                   .dst = mask,
-                                   .a = -1,
-                                   .b = -1,
-                                   .c = -1,
-                                   .d = -1,
-                                   .e = -1,
-                                   .f = -1,
-                                   .imm = 1};
+                                  .dst = mask,
+                                  .a = -1,
+                                  .b = -1,
+                                  .c = -1,
+                                  .d = -1,
+                                  .e = -1,
+                                  .f = -1,
+                                  .imm = 1};
   nyr_inst_t *mod = &f->data[mod_idx + 1];
   mod->op = NYIR_AND_I64;
   mod->a = dividend;
@@ -514,11 +502,12 @@ static bool nir_peephole_parallel_task(size_t i, void *opaque) {
     } else if (ak && av == 0 && bk && bv != 0) {
       nir_make_const(in, 0);
     } else if (in->a == in->b) {
-      nyr_range_t range = {0};
-      if ((ak && av != 0) ||
-          (ctx->facts &&
-           nir_value_range_at(ctx->f, ctx->facts, in->a, i, &range) &&
-           nir_range_excludes_zero(&range)))
+      /*
+       * This worker rewrites f->data in parallel with its peers. Range
+       * queries rebuild CFG/definition data from that same mutable array,
+       * so defer nonconstant proofs to the serial pass below.
+       */
+      if (ak && av != 0)
         nir_make_const(in, 1);
     }
     break;
@@ -527,21 +516,13 @@ static bool nir_peephole_parallel_task(size_t i, void *opaque) {
     if (bk && bv == 1) {
       nir_make_const(in, 0);
     } else if (bk && bv == -1) {
-      nyr_range_t range = {0};
       bool safe = ak && av != INT64_MIN;
-      if (!safe && ctx->facts &&
-          nir_value_range_at(ctx->f, ctx->facts, in->a, i, &range))
-        safe = nir_range_excludes_int64_min(&range);
       if (safe)
         nir_make_const(in, 0);
     } else if (ak && av == 0 && bk && bv != 0) {
       nir_make_const(in, 0);
     } else if (in->a == in->b) {
-      nyr_range_t range = {0};
-      if ((ak && av != 0) ||
-          (ctx->facts &&
-           nir_value_range_at(ctx->f, ctx->facts, in->a, i, &range) &&
-           nir_range_excludes_zero(&range)))
+      if (ak && av != 0)
         nir_make_const(in, 0);
     }
     break;
@@ -667,7 +648,7 @@ bool nyr_peephole(nyr_func_t *f) {
     free(facts);
     return false;
   }
-  nir_peephole_parallel_ctx_t parallel_ctx = {f, known, value, kind, facts};
+  nir_peephole_parallel_ctx_t parallel_ctx = {f, known, value, kind};
   if (!ny_parallel_for(f->len, f->len, nir_peephole_parallel_task,
                        &parallel_ctx)) {
     free(known);
@@ -676,6 +657,11 @@ bool nyr_peephole(nyr_func_t *f) {
     return false;
   }
   int *defs = nyr_build_defs(f);
+  nir_range_query_cache_t range_cache = {0};
+  /*
+   * This loop preserves branch/label topology and existing destinations.
+   * Inserting rewrites change length/value count and invalidate the cache.
+   */
   for (size_t i = 0; i < f->len; ++i) {
     nyr_inst_t *in = &f->data[i];
     if (in->dst < 0 || in->a < 0 || in->b < 0)
@@ -692,6 +678,10 @@ bool nyr_peephole(nyr_func_t *f) {
     int64_t bvf64 = bkf64 ? value[in->b] : 0;
     int64_t avf32 = akf32 ? value[in->a] : 0;
     int64_t bvf32 = bkf32 ? value[in->b] : 0;
+    const char *skip_integer = getenv("NYTRIX_PEEPHOLE_SKIP_SERIAL_INTEGER");
+    if (skip_integer && *skip_integer && strcmp(skip_integer, "0") != 0 &&
+        in->op >= NYIR_ADD_I64 && in->op <= NYIR_CMP_I64)
+      continue;
     switch (in->op) {
     case NYIR_ADD_I64:
       if (bk && bv == 0)
@@ -752,6 +742,7 @@ bool nyr_peephole(nyr_func_t *f) {
           free(known);
           free(value);
           free(facts);
+          nir_range_query_cache_free(&range_cache);
           return false;
         }
         continue;
@@ -760,6 +751,7 @@ bool nyr_peephole(nyr_func_t *f) {
           free(known);
           free(value);
           free(facts);
+          nir_range_query_cache_free(&range_cache);
           return false;
         }
         continue;
@@ -780,6 +772,7 @@ bool nyr_peephole(nyr_func_t *f) {
             free(known);
             free(value);
             free(facts);
+            nir_range_query_cache_free(&range_cache);
             return false;
           }
           continue;
@@ -796,6 +789,7 @@ bool nyr_peephole(nyr_func_t *f) {
             free(known);
             free(value);
             free(facts);
+            nir_range_query_cache_free(&range_cache);
             return false;
           }
           continue;
@@ -809,9 +803,9 @@ bool nyr_peephole(nyr_func_t *f) {
         nir_make_const(in, 0);
       else if (nir_operands_same_value(f, in->a, in->b, i)) {
         nyr_range_t range = {0};
-        if ((ak && av != 0) ||
-            (nir_value_range_at(f, facts, in->a, i, &range) &&
-             nir_range_excludes_zero(&range)))
+        if ((ak && av != 0) || (nir_value_range_at_cached(
+                                    f, facts, in->a, i, &range, &range_cache) &&
+                                nir_range_excludes_zero(&range)))
           nir_make_const(in, 1);
       } else if (bk && bv == -1) {
         /*
@@ -819,13 +813,15 @@ bool nyr_peephole(nyr_func_t *f) {
          */
         nyr_range_t range = {0};
         bool safe = ak && av != INT64_MIN;
-        if (!safe && nir_value_range_at(f, facts, in->a, i, &range))
+        if (!safe &&
+            nir_value_range_at_cached(f, facts, in->a, i, &range, &range_cache))
           safe = nir_range_excludes_int64_min(&range);
         if (safe) {
           if (!nir_rewrite_neg(f, &i, in->a)) {
             free(known);
             free(value);
             free(facts);
+            nir_range_query_cache_free(&range_cache);
             return false;
           }
           continue;
@@ -839,7 +835,8 @@ bool nyr_peephole(nyr_func_t *f) {
       else if (bk && bv == -1) {
         nyr_range_t range = {0};
         bool safe = ak && av != INT64_MIN;
-        if (!safe && nir_value_range_at(f, facts, in->a, i, &range))
+        if (!safe &&
+            nir_value_range_at_cached(f, facts, in->a, i, &range, &range_cache))
           safe = nir_range_excludes_int64_min(&range);
         if (safe)
           nir_make_const(in, 0);
@@ -847,9 +844,9 @@ bool nyr_peephole(nyr_func_t *f) {
         nir_make_const(in, 0);
       else if (nir_operands_same_value(f, in->a, in->b, i)) {
         nyr_range_t range = {0};
-        if ((ak && av != 0) ||
-            (nir_value_range_at(f, facts, in->a, i, &range) &&
-             nir_range_excludes_zero(&range)))
+        if ((ak && av != 0) || (nir_value_range_at_cached(
+                                    f, facts, in->a, i, &range, &range_cache) &&
+                                nir_range_excludes_zero(&range)))
           nir_make_const(in, 0);
       }
       break;
@@ -880,11 +877,11 @@ bool nyr_peephole(nyr_func_t *f) {
           const nyr_inst_t *left = nir_def_inst(f, defs, or_inst->a);
           const nyr_inst_t *right = nir_def_inst(f, defs, or_inst->b);
           const nyr_inst_t *shr = left && left->op == NYIR_SAR_I64     ? left
-                                   : right && right->op == NYIR_SAR_I64 ? right
-                                                                        : NULL;
+                                  : right && right->op == NYIR_SAR_I64 ? right
+                                                                       : NULL;
           const nyr_inst_t *shl = left && left->op == NYIR_SHL_I64     ? left
-                                   : right && right->op == NYIR_SHL_I64 ? right
-                                                                        : NULL;
+                                  : right && right->op == NYIR_SHL_I64 ? right
+                                                                       : NULL;
           const nyr_inst_t *complement =
               shl ? nir_def_inst(f, defs, shl->b) : NULL;
           bool constant_complement =
@@ -975,8 +972,8 @@ bool nyr_peephole(nyr_func_t *f) {
         const nyr_inst_t *da = nir_def_inst(f, defs, in->a);
         const nyr_inst_t *db = nir_def_inst(f, defs, in->b);
         if (da && db) {
-          if ((da->op == NYIR_SAR_I64 && db->op == NYIR_SHL_I64) ||
-              (da->op == NYIR_SHL_I64 && db->op == NYIR_SAR_I64)) {
+          if (((da->op == NYIR_SAR_I64 && db->op == NYIR_SHL_I64) ||
+               (da->op == NYIR_SHL_I64 && db->op == NYIR_SAR_I64))) {
             const nyr_inst_t *shr = da->op == NYIR_SAR_I64 ? da : db;
             const nyr_inst_t *shl = da->op == NYIR_SHL_I64 ? da : db;
             int shr_src = shr->a;
@@ -999,7 +996,8 @@ bool nyr_peephole(nyr_func_t *f) {
             if (shr_src >= 0 && shr_src < f->next_value) {
               nyr_range_t rr = facts[shr_src].range;
               if (!rr.has_min || !rr.has_max)
-                (void)nir_value_range_at(f, facts, shr_src, i, &rr);
+                (void)nir_value_range_at_cached(f, facts, shr_src, i, &rr,
+                                                &range_cache);
               src_nonneg = rr.has_min && rr.min >= 0;
             }
             if (src_nonneg && nir_operands_same_value(f, shr_src, shl_src, i) &&
@@ -1026,6 +1024,26 @@ bool nyr_peephole(nyr_func_t *f) {
         nir_make_copy(in, in->a);
       else if (ak && av == 0)
         nir_make_const(in, 0);
+      else if (in->op == NYIR_SAR_I64 && bk && bv > 0 && bv < 64) {
+        const nyr_inst_t *left = nir_def_inst(f, defs, in->a);
+        if (!left || left->op != NYIR_SHL_I64 ||
+            !nir_is_const_value(f, defs, left->b, bv))
+          break;
+        const nyr_inst_t *inner = nir_def_inst(f, defs, left->a);
+        if (!inner || inner->op != NYIR_SAR_I64)
+          break;
+        const nyr_inst_t *count = nir_def_inst(f, defs, inner->b);
+        const nyr_inst_t *inner_left = nir_def_inst(f, defs, inner->a);
+        /*
+         * Sign extending an already sign-extended value to the same or a
+         * wider width is an identity. A narrower outer width must still
+         * truncate, including when the input's high bits are nonzero.
+         */
+        if (count && count->op == NYIR_CONST_I64 && count->imm >= bv &&
+            count->imm < 64 && inner_left && inner_left->op == NYIR_SHL_I64 &&
+            nir_is_const_value(f, defs, inner_left->b, count->imm))
+          nir_make_copy(in, left->a);
+      }
       break;
     case NYIR_CMP_I64: {
       if (nir_simplify_mod_parity_compare(f, defs, in, i))
@@ -1046,9 +1064,9 @@ bool nyr_peephole(nyr_func_t *f) {
          * path. Always ask for the instruction-local range so branch guards
          * can narrow known (but imprecise) values as well as unknown ones.
          */
-        if (nir_value_range_at(f, facts, in->a, i, &ra))
+        if (nir_value_range_at_cached(f, facts, in->a, i, &ra, &range_cache))
           pa = &ra;
-        if (nir_value_range_at(f, facts, in->b, i, &rb))
+        if (nir_value_range_at_cached(f, facts, in->b, i, &rb, &range_cache))
           pb = &rb;
         if (nir_cmp_range_fold(in->cmp, pa, pb, &folded))
           nir_make_const(in, folded);
@@ -1151,6 +1169,7 @@ bool nyr_peephole(nyr_func_t *f) {
       break;
     }
   }
+  nir_range_query_cache_free(&range_cache);
   free(defs);
   free(known);
   free(value);
@@ -1233,19 +1252,19 @@ bool nyr_peephole(nyr_func_t *f) {
           bb_end += 2;
 
           f->data[j] = (nyr_inst_t){.op = NYIR_CONST_F64,
-                                     .dst = v_one,
-                                     .a = -1,
-                                     .b = -1,
-                                     .imm = INT64_C(4607182418800017408),
-                                     .scalar_class = NYIR_SCALAR_F64,
-                                     .debug = origin_debug};
+                                    .dst = v_one,
+                                    .a = -1,
+                                    .b = -1,
+                                    .imm = INT64_C(4607182418800017408),
+                                    .scalar_class = NYIR_SCALAR_F64,
+                                    .debug = origin_debug};
           f->data[j + 1] = (nyr_inst_t){.op = NYIR_DIV_F64,
-                                         .dst = v_inv,
-                                         .a = v_one,
-                                         .b = divisor,
-                                         .effects = NYIR_EFFECT_NONE,
-                                         .scalar_class = NYIR_SCALAR_F64,
-                                         .debug = origin_debug};
+                                        .dst = v_inv,
+                                        .a = v_one,
+                                        .b = divisor,
+                                        .effects = NYIR_EFFECT_NONE,
+                                        .scalar_class = NYIR_SCALAR_F64,
+                                        .debug = origin_debug};
 
           for (size_t k = j + 2; k < bb_end; ++k) {
             if (f->data[k].op == NYIR_DIV_F64 && f->data[k].b == divisor) {

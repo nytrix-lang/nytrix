@@ -6,7 +6,7 @@ shape args-invalid-run-mode {
   expect compile_fail
 
   flags "--run=bogus"
-  expect_message "invalid run mode"
+  expect_message "invalid --run 'bogus'"
   source ny <<'NY'
 use core
 print("ok")

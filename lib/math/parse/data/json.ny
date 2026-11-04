@@ -11,6 +11,7 @@ module core.math.parse.data.json(json_decode, json_try_decode,
 use core
 use core.dict_mod
 use core.str as str
+use core.common as common
 use core.math.float as f
 
 mut _json_error = ""
@@ -54,10 +55,7 @@ fn _json_peek(list st) int {
 
 @inline
 fn _json_is_ws(int c) bool {
-   return case c {
-      9, 10, 13, 32 -> true
-      _ -> false
-   }
+   c == 9 || c == 10 || c == 13 || c == 32
 }
 
 fn _json_skip_ws(list st) any {
@@ -74,7 +72,9 @@ fn _json_skip_ws(list st) any {
 fn _json_expect(list st, int want, str msg) any {
    def int pos = _json_pos(st)
    def int n = _json_size(st)
-   def c = (pos >= 0 && pos < n) ? load8(st.get(0), pos) : -1
+   def s = st.get(0)
+   mut int c = -1
+   if pos >= 0 && pos < n { c = load8(s, pos) }
    if c != want { return _json_set_error(st, msg) }
    _json_set_pos(st, pos + 1)
    true
@@ -115,7 +115,9 @@ fn _json_parse_val(list st, int depth) any {
    _json_skip_ws(st)
    def int pos = _json_pos(st)
    def int n = _json_size(st)
-   def c = (pos >= 0 && pos < n) ? load8(st.get(0), pos) : -1
+   def s = st.get(0)
+   mut int c = -1
+   if pos >= 0 && pos < n { c = load8(s, pos) }
    if c < 0 { return _json_set_error(st, "unexpected end of input") }
    if c == 123 || c == 91 {
       def max_depth = int(st.get(6, 0))
@@ -175,7 +177,8 @@ fn _json_parse_arr(list st, int depth) any {
       return l
    }
    while 1 {
-      l = l.append(_json_parse_val(st, depth))
+      def any val = _json_parse_val(st, depth)
+      l = l.append(val)
       if len(st.get(5, "")) > 0 { return 0 }
       _json_skip_ws(st)
       def c = _json_peek(st)
@@ -202,7 +205,7 @@ fn _json_parse_str(list st) str {
    }
    pos += 1
    mut int scan_pos = pos
-   mut has_esc = false
+   mut int has_esc = 0
    while scan_pos < n {
       def c = load8(s, scan_pos)
       if c >= 0 && c < 32 {
@@ -211,7 +214,7 @@ fn _json_parse_str(list st) str {
       }
       if c == 34 { break }
       if c == 92 {
-         has_esc = true
+         has_esc = 1
          ;; Skip the escaped byte so an escaped quote does not terminate the
          ;; string. Unicode escape digits are scanned normally after `u`.
          scan_pos += 2
@@ -223,7 +226,7 @@ fn _json_parse_str(list st) str {
       _json_set_error(st, "unterminated string")
       return ""
    }
-   if has_esc == false {
+   if has_esc == 0 {
       def out_len = scan_pos - pos
       mut out = Builder(out_len + 1)
       mut i = pos
@@ -337,9 +340,9 @@ fn _json_parse_num(list st) any {
    def s = st.get(0)
    def int n = _json_size(st)
    mut start = pos
-   mut neg = false
+   mut int neg = 0
    if pos < n && load8(s, pos) == 45 {
-      neg = true
+      neg = 1
       pos += 1
    }
    if pos >= n { return _json_set_error(st, "invalid number") }
@@ -355,26 +358,33 @@ fn _json_parse_num(list st) any {
    } else {
       return _json_set_error(st, "invalid number")
    }
-   mut has_frac = false
-   mut has_exp = false
+   mut int has_frac = 0
+   mut int has_exp = 0
    if pos < n && load8(s, pos) == 46 {
-      has_frac = true
+      has_frac = 1
       pos += 1
       if pos >= n || !_json_is_digit(load8(s, pos)) { return _json_set_error(st, "invalid fraction in number") }
       while pos < n && _json_is_digit(load8(s, pos)) { pos += 1 }
    }
    if pos < n && (load8(s, pos) == 101 || load8(s, pos) == 69) {
-      has_exp = true
+      has_exp = 1
       pos += 1
       if pos < n && (load8(s, pos) == 43 || load8(s, pos) == 45) { pos += 1 }
       if pos >= n || !_json_is_digit(load8(s, pos)) { return _json_set_error(st, "invalid exponent in number") }
       while pos < n && _json_is_digit(load8(s, pos)) { pos += 1 }
    }
-   if !has_frac && !has_exp {
+   if has_frac == 0 && has_exp == 0 {
       _json_set_pos(st, pos)
-      return neg ? (0 - int_val) : int_val
+      return neg == 1 ? (0 - int_val) : int_val
    }
-   def str text = str.str_slice(s, start, pos)
+   mut ptr number_text = str.Builder(pos - start + 1)
+   mut int number_pos = start
+   while number_pos < pos {
+      number_text = str.builder_append_byte(number_text, load8(s, number_pos))
+      number_pos += 1
+   }
+   def str text = str.builder_to_str(number_text)
+   str.builder_free(number_text)
    def f64 res = _json_parse_float_text(text)
    _json_set_pos(st, pos)
    return res

@@ -43,7 +43,7 @@ fn run_case(str name, str path, str mode, bool should_pass,
    mut argv = [ny, "-no-std",
                "--use-refinement-interface=" + interface_path]
    if mode == "nyir" {
-      argv = argv.append("--nyir-run")
+      argv = argv.append("--nyr-run")
    } else if mode == "mcjit" {
       argv = argv.append("--native-backend=llvm")
       argv = argv.append("--jit")
@@ -71,6 +71,13 @@ fn run_case(str name, str path, str mode, bool should_pass,
 }
 
 run_case("NYIR", consumer, "nyir", true, "")
+def canonical_use = run_capture(
+   [ny, "-no-std", "--nyr-run",
+    "--use=refinement-interface=" + interface, consumer],
+   [], nil, false)
+assert(canonical_use.get("code", 127) == 0,
+       "canonical --use loads the refinement interface: " +
+          canonical_use.get("stdout", ""))
 run_case("LLVM MCJIT", consumer, "mcjit", true, "")
 run_case("LLVM ORC", consumer, "orc", true, "")
 run_case("native-only", consumer, "native", true, "")

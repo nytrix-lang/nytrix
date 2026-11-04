@@ -99,7 +99,7 @@ use core.os.ui.window.consts (EVENT_KEY_PRESSED, EVENT_KEY_RELEASED, EVENT_KEY_C
    EVENT_WINDOW_MAXIMIZED, EVENT_WINDOW_MINIMIZED, EVENT_WINDOW_RESTORED,
    EVENT_FOCUS_IN, EVENT_FOCUS_OUT, EVENT_SCALE_UPDATED,
    EVENT_MONITOR_CONNECTED, EVENT_MONITOR_DISCONNECTED,
-   EVENT_DATA_DROP, EVENT_QUIT)
+   EVENT_DATA_DROP, EVENT_QUIT, WINDOW_MAXIMIZE)
 use core.os.ui.window.platform.api
 use core.os.ui.window.platform.api as api
 use core.os.ui.window.platform.state as platform_state
@@ -142,9 +142,9 @@ fn _get_platform_val(any key, any default=0) any {
 
 fn _set_platform_val(any key, any val) any { platform_state._set_platform_val(key, val) }
 
-fn _native_handle(any win) any {
-   if is_dict(win) { return get(win, "handle", 0) }
-   win
+fn _native_handle(any win) u64 {
+   if is_dict(win) { return int(get(win, "handle", 0)) }
+   int(win)
 }
 
 fn _native_value_eq(any a, any b) bool {
@@ -316,6 +316,9 @@ fn _select_backend_name() str {
          if requested == "x11" && x11_backend.available() {
             name = "x11"
          } elif requested == "wayland" && wayland_backend.available() {
+            name = "wayland"
+         } elif (requested == "" || requested == "auto") &&
+         common.env_present("WAYLAND_DISPLAY") && wayland_backend.available() {
             name = "wayland"
          } elif x11_backend.available() {
             name = "x11"
@@ -520,11 +523,11 @@ fn init() bool {
    }
    if b == "none" {
       def requested = common.env_lower("NY_UI_BACKEND")
-      if requested != "none" && !_null_backend_requested {
-         return false
+      if requested == "none" || _null_backend_requested {
+         _set_platform_val("initialized", true)
+         return true
       }
-      _set_platform_val("initialized", true)
-      return true
+      return false
    }
    _set_platform_val("initialized", true)
    true
@@ -595,6 +598,9 @@ fn create_window(str name, int x, int y, int w, int h, int flags, any hint_overr
       def wayland_state = platform_state._get_platform_dict("platform", dict(8))
       def wayland_globals = get(wayland_state, "wayland_globals", 0)
       native = wayland_backend.create_basic_window(wayland_globals, name, w, h, wl_app_id)
+      if native && band(flags, WINDOW_MAXIMIZE) {
+         wayland_backend.maximize_window(native)
+      }
    } elif b == "win32" {
       native = win32_impl.create_basic_window(name, w, h, x, y, flags)
    } elif b == "cocoa" {
@@ -631,7 +637,8 @@ fn create_window(str name, int x, int y, int w, int h, int flags, any hint_overr
       mut should_close_flags = platform_state._get_platform_dict("should_close_flags", dict(8))
       should_close_flags[handle] = false
       platform_state._set_platform_dict("should_close_flags", should_close_flags)
-      if (b == "x11" || b == "wayland") && client_api != api.NO_API {
+      if ui_profile.env_truthy_cached("NY_UI_STARTUP_TRACE") { ui_profile.print_text("[window:platform] context request=" + to_str(int(client_api))) }
+      if int(client_api) != int(api.NO_API) {
          def ctx = create_context(native, hints)
          if ctx {
             _dbg("create_window: OpenGL context created")
@@ -924,7 +931,7 @@ fn _native_queue_push(any q, any ne) list {
          return q
       }
    }
-   return q.append(ne)
+   return __append(q, ne)
 }
 
 fn _queue_native_events(any evs, any fallback_handle=0, bool dispatch_callbacks=false) int {
@@ -935,8 +942,8 @@ fn _queue_native_events(any evs, any fallback_handle=0, bool dispatch_callbacks=
    def evs_n = evs.len
    while ei < evs_n {
       def ne = _normalize_native_event(evs.get(ei))
-      mut wid = event_window_id(ne)
-      if !wid { wid = fallback_handle }
+      mut int wid = event_window_id(ne)
+      if wid == 0 { wid = int(fallback_handle) }
       if wid {
          def q = pending_events.get(wid, [])
          pending_events[wid] = _native_queue_push(q, ne)
@@ -1144,7 +1151,7 @@ fn poll_events_for_window(any win) list {
 
 fn pump_window_events(any win) list {
    "Returns and clears queued events for one window."
-   def handle = _native_handle(win)
+   def int handle = int(_native_handle(win))
    def pending_native_events = platform_state._get_platform_dict("pending_native_events", dict(8))
    def evs = pending_native_events.get(handle, [])
    if !is_list(evs) || evs.len == 0 { return evs }
@@ -1159,7 +1166,13 @@ fn swap_buffers(any win) any {
    _dbg_v("swap_buffers: backend=" + b + " win=0x" + str.to_hex(handle))
    def window_contexts = platform_state._get_platform_dict("window_contexts", dict(8))
    def ctx = window_contexts.get(handle, 0)
-   if ctx && (b == "x11" || b == "wayland") { opengl_backend.swap_buffers(ctx) }
+   if ctx {
+      if b == "wayland" {
+         def size = get_framebuffer_size(win)
+         opengl_backend.resize_wayland_window(ctx, int(size.get(0, 0)), int(size.get(1, 0)))
+      }
+      opengl_backend.swap_buffers(ctx)
+   }
    if b == "x11" {
       def native = _native_window(win)
       if native { x11_backend.flush(native.get("display", 0)) }
@@ -1205,7 +1218,7 @@ fn make_context_current(any win) bool {
    def ctx = window_contexts.get(handle, 0)
    _dbg("make_context_current: found=" + to_str(!!ctx) + " contexts=" + to_str(window_contexts.len))
    if !ctx { return false }
-   def made_current = (b == "x11" || b == "wayland") && opengl_backend.make_context_current(ctx)
+   def made_current = opengl_backend.make_context_current(ctx)
    _dbg("make_context_current: made=" + to_str(made_current))
    if made_current {
       _set_platform_val("current_win_context", handle)

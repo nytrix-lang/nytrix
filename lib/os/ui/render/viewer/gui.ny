@@ -34,8 +34,8 @@ mut _key_events = []
 mut _key_mask_0, _key_mask_1, _key_mask_2, _key_mask_3 = 0, 0, 0, 0
 mut _key_mask_4, _key_mask_5, _key_mask_6, _key_mask_7 = 0, 0, 0, 0
 mut _text_events = ""
-mut _windows = dict(32)
-mut _widget_state = dict(64)
+mut dict _windows = dict(32)
+mut dict _widget_state = dict(64)
 mut _current_window, _current_window_id_cache, _widget_id_prefix = 0, "", ""
 mut _current_body_x_cache, _current_body_y_cache = 0.0, 0.0
 mut _current_body_w_cache, _current_body_h_cache = 0.0, 0.0
@@ -47,7 +47,7 @@ mut _active_window_move, _active_window_resize = "", ""
 mut _nav_focus_target, _nav_focus_window = "", ""
 mut _debug_force_combo_open = "\x00"
 mut _window_order = []
-mut _window_closed_events = dict(32)
+mut dict _window_closed_events = dict(32)
 mut _popup_hit_active, _popup_next_hit_active = false, false
 mut _popup_hit_window, _popup_next_hit_window = "", ""
 mut _popup_hit_x, _popup_hit_y, _popup_hit_w, _popup_hit_h = 0.0, 0.0, 0.0, 0.0
@@ -76,7 +76,7 @@ mut _scroll_area_capture_rect = [0.0, 0.0, 0.0, 0.0]
 mut _text_fit_cache = dict(512)
 mut _text_measure_cache = dict(1024)
 mut _font_h_cache = dict(16)
-mut _text_caches_ready = true
+mut _text_caches_ready = false
 mut _gui_frame_id = 0
 mut _font_metric_frame = -1
 mut _cached_body_h, _cached_title_h, _cached_small_h = 0.0, 0.0, 0.0
@@ -102,6 +102,13 @@ fn _ensure_text_caches() any {
    if !is_dict(_text_measure_cache) { _text_measure_cache = dict(1024) }
    if !is_dict(_font_h_cache) { _font_h_cache = dict(16) }
    _text_caches_ready = true
+}
+
+fn _ensure_gui_state() any {
+   if !is_dict(_windows) { _windows = dict(32) }
+   if !is_dict(_widget_state) { _widget_state = dict(64) }
+   if !is_dict(_window_closed_events) { _window_closed_events = dict(32) }
+   if !is_list(_window_order) { _window_order = [] }
 }
 
 fn _ui_text(any txt) str {
@@ -286,7 +293,7 @@ fn _apply_cursor() any {
    }
 }
 
-fn _theme_pack(any c) int { color_pack(float(c.get(0, 1.0)), float(c.get(1, 1.0)), float(c.get(2, 1.0)), float(c.get(3, 1.0))) }
+fn _theme_pack(list c) int { color_pack(float(c.get(0, 1.0)), float(c.get(1, 1.0)), float(c.get(2, 1.0)), float(c.get(3, 1.0))) }
 
 fn rect(f64 x, f64 y, f64 w, f64 h) list {
    "Builds a normalized [x, y, w, h] rectangle."
@@ -501,8 +508,28 @@ fn tile_editor_shell_preset(str name, f64 ww, f64 wh, f64 gap=10.0) dict {
    }
 }
 
+fn _ensure_theme_colors() any {
+   if !is_list(_accent_rgba) { _accent_rgba = [0.760, 0.760, 0.760, 0.96] }
+   if !is_list(_press_rgba) { _press_rgba = [0.180, 0.180, 0.185, 0.96] }
+   if !is_list(_window_bg_rgba) { _window_bg_rgba = [0.000, 0.000, 0.000, 0.96] }
+   if !is_list(_window_body_rgba) { _window_body_rgba = [0.018, 0.018, 0.020, 0.94] }
+   if !is_list(_window_hdr_rgba) { _window_hdr_rgba = [0.030, 0.030, 0.034, 0.98] }
+   if !is_list(_panel_rgba) { _panel_rgba = [0.016, 0.016, 0.018, 0.88] }
+   if !is_list(_panel_hover_rgba) { _panel_hover_rgba = [0.074, 0.074, 0.078, 0.92] }
+   if !is_list(_panel_active_rgba) { _panel_active_rgba = [0.125, 0.125, 0.132, 0.96] }
+   if !is_list(_popup_rgba) { _popup_rgba = [0.000, 0.000, 0.000, 1.00] }
+   if !is_list(_border_rgba) { _border_rgba = [0.220, 0.220, 0.230, 0.58] }
+   if !is_list(_text_rgba) { _text_rgba = [0.925, 0.925, 0.930, 0.98] }
+   if !is_list(_text_dim_rgba) { _text_dim_rgba = [0.650, 0.650, 0.665, 0.90] }
+   if !is_list(_ok_rgba) { _ok_rgba = [0.780, 0.780, 0.790, 0.96] }
+   if !is_list(_warn_rgba) { _warn_rgba = [0.720, 0.720, 0.730, 0.96] }
+   if !is_list(_danger_rgba) { _danger_rgba = [0.360, 0.360, 0.370, 0.96] }
+   0
+}
+
 fn _theme_refresh() any {
    if !_theme_dirty && _theme_ready { return 0 }
+   _ensure_theme_colors()
    _accent_u32 = _theme_pack(_accent_rgba)
    _press_u32 = _theme_pack(_press_rgba)
    _press_soft_u32 = color_pack(float(_press_rgba.get(0, 0.0)), float(_press_rgba.get(1, 0.0)), float(_press_rgba.get(2, 0.0)), 0.58)
@@ -594,21 +621,15 @@ fn set_scale(f64 v) any {
 
 fn scale() f64 { "Returns the current UI scale." _scale }
 
-fn set_accent(any c) any {
+fn set_accent(list c) any {
    "Sets the accent color from an RGBA list."
-   def r, g = clamp(float(c.get(0, 0.76)), 0.0, 1.0), clamp(float(c.get(1, 0.76)), 0.0, 1.0)
-   def b, a = clamp(float(c.get(2, 0.76)), 0.0, 1.0), clamp(float(c.get(3, 0.96)), 0.0, 1.0)
-   if abs(r - float(_accent_rgba.get(0, 0.76))) <= 0.000001 &&
-   abs(g - float(_accent_rgba.get(1, 0.76))) <= 0.000001 &&
-   abs(b - float(_accent_rgba.get(2, 0.76))) <= 0.000001 &&
-   abs(a - float(_accent_rgba.get(3, 0.96))) <= 0.000001{
-      return 0
-   }
-   _accent_rgba = [r, g, b, a]
+   _ensure_theme_colors()
+   if !is_list(c) { return 0 }
+   _accent_rgba = clone(c)
    _theme_dirty = true
 }
 
-fn accent() list { "Returns the current accent RGBA color." _accent_rgba }
+fn accent() list { "Returns the current accent RGBA color." if !is_list(_accent_rgba) { _ensure_theme_colors() } _accent_rgba }
 
 fn set_debug_overlay(bool v) any { "Enables or disables the GUI debug overlay." _debug_overlay = !!v }
 
@@ -955,9 +976,9 @@ fn _clamp_window_pos(dict st) dict {
    st
 }
 
-fn _window_store(dict st) any { _windows[to_str(st.get("id", ""))] = st }
+fn _window_store(dict st) any { _ensure_gui_state() _windows[to_str(st.get("id", ""))] = st }
 
-fn _window_lookup(any id) any { _windows.get(to_str(id), 0) }
+fn _window_lookup(any id) any { _ensure_gui_state() _windows.get(to_str(id), 0) }
 
 fn _current_window_state() any {
    if is_dict(_current_window) { return _current_window }
@@ -1419,6 +1440,7 @@ fn _text_state_set_cursor(any full_id, int cursor_idx) any {
 
 fn begin_frame(any win=0, int font=0, f64 ww=0.0, f64 wh=0.0) any {
    "Starts a GUI frame and resets per-frame hover/layout state."
+   _ensure_gui_state()
    _gui_frame_id += 1
    if !_text_caches_ready { _ensure_text_caches() }
    if win { prepare_input(win, ww, wh) }
@@ -1636,6 +1658,7 @@ fn window_rect(any id) list {
 }
 
 fn _ensure_window(any id, any title, f64 x, f64 y, f64 w, f64 h, any opts=0) dict {
+   _ensure_gui_state()
    def key = to_str(id)
    mut st = _windows.get(key, 0)
    if !is_dict(st) {

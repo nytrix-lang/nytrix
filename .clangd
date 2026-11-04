@@ -8,13 +8,13 @@ CompileFlags:
     - -Isrc/code
     - -Isrc/code/backend/llvm
     - -Isrc/code/lang
-    - -Isrc/code/lang/c
+    - -Isrc/code/lang/parse/c
     - -Isrc/code/backend/ir
     - -Isrc/code/lang/parse
     - -Isrc/code/lang/parse/frontend
     - -Isrc/code/lang/types
     - -Isrc/cmd/ny/repl
-    - -Isrc/code/lang/runtime
+    - -Isrc/code/backend/runtime
     - -Isrc/code/backend/wire
     - -D_GNU_SOURCE
 

@@ -3,7 +3,7 @@ shape ownership_allowance_fixed_range_match_positive {
   generator "regression"
   features [ownership allowance fixed-range match positive]
   template ny-test-case
-  flags_matrix "--ownership-strict --native --run --nyir-verify; --ownership-strict --native-backend=llvm --jit --jit-engine=mcjit --nyir-verify; --ownership-strict --native-backend=llvm --jit --jit-engine=orc --nyir-verify; --ownership-strict --native-only --nyir-verify"
+  flags_matrix "--ownership-strict --native --run --nyr-verify; --ownership-strict --native-backend=llvm --jit --jit-engine=mcjit --nyr-verify; --ownership-strict --native-backend=llvm --jit --jit-engine=orc --nyr-verify; --ownership-strict --native-only --nyr-verify"
   expect compile_and_run
   source ny <<'NY'
 use core

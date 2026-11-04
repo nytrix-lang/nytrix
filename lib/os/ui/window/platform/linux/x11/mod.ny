@@ -313,6 +313,8 @@ fn _next_cursor_id() int {
       fn _c_xmap_window(ptr display, u64 win) i32 as "XMapWindow"
       fn _c_xmap_raised(ptr display, u64 win) i32 as "XMapRaised"
       fn _c_xunmap_window(ptr display, u64 win) i32 as "XUnmapWindow"
+      fn _c_xmove_window(ptr display, u64 win, i32 x, i32 y) i32 as "XMoveWindow"
+      fn _c_xresize_window(ptr display, u64 win, u32 width, u32 height) i32 as "XResizeWindow"
       fn _c_xiconify_window(ptr display, u64 win, i32 screen) i32 as "XIconifyWindow"
       fn _c_xset_wm_hints(ptr display, u64 win, ptr hints) i32 as "XSetWMHints"
       fn _c_xset_wm_normal_hints(ptr display, u64 win, ptr hints) i32 as "XSetWMNormalHints"
@@ -324,6 +326,7 @@ fn _next_cursor_id() int {
       fn _c_xquery_pointer(ptr display, u64 window, ptr root, ptr child, ptr root_x, ptr root_y, ptr window_x, ptr window_y, ptr mask) i32 as "XQueryPointer"
       fn _c_xflush(ptr display) i32 as "XFlush"
       fn _c_xpending(ptr display) i32 as "XPending"
+      fn _c_xintern_atom(ptr display, ptr name, i32 only_if_exists) u64 as "XInternAtom"
       fn _c_xnext_event(ptr display, ptr event) i32 as "XNextEvent"
       fn _c_xevents_queued(ptr display, i32 mode) i32 as "XEventsQueued"
       fn _c_xpeek_event(ptr display, ptr event) i32 as "XPeekEvent"
@@ -416,6 +419,8 @@ fn _next_cursor_id() int {
    fn _c_xmap_window(..._args) any { 0 }
    fn _c_xmap_raised(..._args) any { 0 }
    fn _c_xunmap_window(..._args) any { 0 }
+   fn _c_xmove_window(..._args) i32 { 0 }
+   fn _c_xresize_window(..._args) i32 { 0 }
    fn _c_xiconify_window(..._args) any { 0 }
    fn _c_xset_wm_hints(..._args) any { 0 }
    fn _c_xset_wm_normal_hints(..._args) any { 0 }
@@ -427,6 +432,7 @@ fn _next_cursor_id() int {
    fn _c_xquery_pointer(..._args) any { 0 }
    fn _c_xflush(..._args) any { 0 }
    fn _c_xpending(..._args) any { 0 }
+   fn _c_xintern_atom(..._args) u64 { 0 }
    fn _c_xnext_event(..._args) any { 0 }
    fn _c_xevents_queued(..._args) any { 0 }
    fn _c_xpeek_event(..._args) any { 0 }
@@ -1066,9 +1072,9 @@ fn default_depth(ptr display, int screen_number) int {
    _c_xdefault_depth(display, screen_number)
 }
 
-fn intern_atom(any display, str atom_name, bool only_if_exists=false) any {
+fn intern_atom(any display, str atom_name, bool only_if_exists=false) u64 {
    "Interns an X11 atom and returns its id."
-   XInternAtom(display, cstr(atom_name), only_if_exists ? 1 : 0)
+   _c_xintern_atom(_x11_raw(display), cstr(atom_name), only_if_exists ? 1 : 0)
 }
 
 fn create_colormap(ptr display, u64 win, ptr visual, int alloc=AllocNone) u64 {
@@ -4410,7 +4416,7 @@ fn _translate_configure_event(any win, any event_ptr, list events, any display, 
 
 fn _translate_client_message_event(
    any win, any event_ptr, list events, any display, any window_handle, any root,
-   any wm_protocols, any wm_delete, any net_wm_ping, any xdnd_enter_at, any xdnd_position_at, any xdnd_drop_at,
+   u64 wm_protocols, u64 wm_delete, u64 net_wm_ping, u64 xdnd_enter_at, u64 xdnd_position_at, u64 xdnd_drop_at,
 ) list {
    def message_type = load64_h(event_ptr, 40)
    def protocol = load64_h(event_ptr, 56)
@@ -4842,8 +4848,10 @@ fn _translated_event_result(any win, any events) list {
    [win, stable]
 }
 
-fn translate_event(dict win, any event_ptr) list {
+fn translate_event(dict win, any event_ptr) any {
    "Translates one raw `XEvent` into zero or more core.os.ui events."
+   ;; The returned pair mixes a window dict and an event list. Keep the pair
+   ;; dynamic because HM's homogeneous list type cannot express that shape.
    if !win || !is_dict(win) || !event_ptr { return [win, []] }
    def display        = win.get("display", 0)
    def handle         = win.get("handle", 0)
@@ -4953,7 +4961,7 @@ fn _x11_append_event_coalesced(any out, any ev) list {
          return out
       }
    }
-   out = out.append(ev)
+   return out.append(ev)
 }
 
 fn _x11_extend_events_coalesced(any out, any events) list {
@@ -5251,9 +5259,9 @@ fn get_pos(any win) list {
    [rx, ry]
 }
 
-fn move_window(any display, any win, int x, int y) any {
+fn move_window(any display, any win, int x, int y) int {
    "Moves a raw X11 window."
-   XMoveWindow(display, win, x, y)
+   _c_xmove_window(_x11_raw(display), _x11_raw(win), x, y)
 }
 
 fn _get_visual_depth_fallback(ptr display, int screen, ptr visual) int {
@@ -5317,9 +5325,9 @@ fn _choose_window_visual(ptr display, int screen, bool want_argb32, ptr provided
    fallback_visual
 }
 
-fn resize_window(any display, any win, int width, int height) any {
+fn resize_window(any display, any win, int width, int height) int {
    "Resizes a raw X11 window."
-   XResizeWindow(display, win, width, height)
+   _c_xresize_window(_x11_raw(display), _x11_raw(win), width, height)
 }
 
 fn _canonical_window_event_mask() int {

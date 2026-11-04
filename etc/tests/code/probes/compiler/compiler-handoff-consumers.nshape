@@ -1,0 +1,43 @@
+shape compiler_handoff_consumers {
+  family "runtime/compiler"
+  generator "regression"
+  features [strings parse file substring compound-assignment loop]
+  template ny-test-case
+  timeout 120
+  flags_matrix "--native-only -O0; --native-only -O3; --native --run -O0; --native-backend=llvm --jit --jit-engine=mcjit -O0; --native-backend=llvm --jit --jit-engine=orc -O0; --nyr-run"
+  expect compile_and_run
+  expect_message "COMPILER-HANDOFF-CONSUMERS-OK"
+  source ny <<'NY'
+use core
+use core.os
+use core.str as text
+
+fn returned(str value) str { value }
+fn nested(str value) str { returned(returned(value)) }
+assert(to_int(nested("12345")) == 12345, "integer conversion after nested string returns")
+assert(to_int(nested("-317")) == -317, "negative conversion after nested string returns")
+assert(to_int(nested("0")) == 0, "zero conversion after nested string returns")
+
+def path = temp_dir() + "/nytrix-handoff-consumers-" + to_str(ticks()) + ".txt"
+assert(is_ok(file_write(path, "name,count,delta\nwidget,12345,-317\n")), "write CSV input")
+defer { file_remove(path) }
+def contents = file_read(path)
+assert(is_ok(contents), "read CSV input")
+def rows = text.split(unwrap(contents), "\n")
+def fields = text.split(rows.get(1, ""), ",")
+assert(to_int(fields.get(1, "")) == 12345, "integer conversion of split file substring")
+assert(to_int(fields.get(2, "")) == -317, "negative conversion of split file substring")
+
+fn index(int step) int { (step * 3 + 1) % 5 }
+mut values = [10, 20, 30, 40, 50]
+mut int step = 0
+while step < 10 {
+   values[index(step)] += step + 1
+   step += 1
+}
+assert(values[0] == 23 && values[1] == 27 && values[2] == 41 &&
+       values[3] == 55 && values[4] == 59,
+       "compound assignment stores through the index returned by a loop call")
+print("COMPILER-HANDOFF-CONSUMERS-OK")
+NY
+}

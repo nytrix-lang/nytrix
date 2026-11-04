@@ -995,8 +995,7 @@ static const char *nyr_port_cmp_name(nyr_cmp_t cmp) {
   return "eq";
 }
 
-static bool nyr_port_bswap(nyr_port_ctx_t *c, const nyr_inst_t *in,
-                           bool is32) {
+static bool nyr_port_bswap(nyr_port_ctx_t *c, const nyr_inst_t *in, bool is32) {
   if (c->kind != NY_PORT_WASM && !nyr_port_load_value(c, c->tmp0, in->a))
     return false;
   if (c->kind == NY_PORT_WASM) {
@@ -1663,7 +1662,7 @@ static bool nyr_wasm_panic_runtime_pair(const nyr_port_ctx_t *c,
     return next->op == NYIR_CALL && next->symbol &&
            strcmp(next->symbol, "rt_panic") == 0 &&
            nyr_call_args(next, c->nyir->next_value, panic_args,
-                          NYIR_CALL_MAX_ARGS, &panic_argc, NULL, 0) &&
+                         NYIR_CALL_MAX_ARGS, &panic_argc, NULL, 0) &&
            panic_argc == 1 && panic_args[0] == in->dst;
   }
   if (c->current_index == 0)
@@ -1709,7 +1708,7 @@ static bool nyr_port_static_string_value_depth(const nyr_port_ctx_t *c,
       int args[NYIR_CALL_MAX_ARGS];
       int argc = 0;
       return nyr_call_args(in, c->nyir->next_value, args, NYIR_CALL_MAX_ARGS,
-                            &argc, NULL, 0) &&
+                           &argc, NULL, 0) &&
              argc == 1 &&
              nyr_port_static_string_value_depth(c, args[0], i - 1, depth + 1);
     }
@@ -1723,22 +1722,213 @@ static bool nyr_port_static_string_value(const nyr_port_ctx_t *c, int value,
   return nyr_port_static_string_value_depth(c, value, before, 0);
 }
 
-static bool nyr_port_value_unused_after(const nyr_port_ctx_t *c, int value,
-                                        size_t start) {
-  for (size_t i = start; i < c->nyir->len; ++i) {
-    const nyr_inst_t *in = &c->nyir->data[i];
-    const int operands[] = {in->a, in->b, in->c, in->d, in->e, in->f};
-    for (size_t op = 0; op < sizeof(operands) / sizeof(operands[0]); ++op)
-      if (operands[op] == value)
-        return false;
-    for (size_t arg = 0; arg < in->extra_args_len; ++arg)
-      if (in->extra_args[arg] == value)
-        return false;
-    for (size_t phi = 0; phi < in->phi_incoming_len; ++phi)
-      if (in->phi_incoming[phi].value == value)
-        return false;
+static bool nyr_port_instruction_uses_value(const nyr_inst_t *in, int value) {
+  if (!in)
+    return false;
+  switch (in->op) {
+  case NYIR_COPY:
+  case NYIR_STORE_LOCAL:
+  case NYIR_RET:
+  case NYIR_BR_IF:
+  case NYIR_I64_TO_F64:
+  case NYIR_F64_TO_I64:
+  case NYIR_F32_TO_I64:
+  case NYIR_SQRT_F64:
+  case NYIR_I64_TO_F32:
+  case NYIR_F64_TO_F32:
+  case NYIR_F32_TO_F64:
+  case NYIR_LOAD_I64:
+  case NYIR_VEC4_LOAD_F64:
+  case NYIR_VEC4_SET1_F64:
+  case NYIR_VEC4_SHUFFLE_F64:
+  case NYIR_VEC8_LOAD_F32:
+  case NYIR_VEC8_SET1_F32:
+  case NYIR_VEC8_SHUFFLE_F32:
+  case NYIR_VEC4_LOAD_I64:
+  case NYIR_VEC4_SET1_I64:
+  case NYIR_VEC8_SAR_I64:
+  case NYIR_VEC8_SET1_I64:
+  case NYIR_VEC8_LOAD_I64:
+  case NYIR_SIN_F64:
+  case NYIR_COS_F64:
+  case NYIR_BSWAP_I64:
+  case NYIR_BSWAP32_I64:
+  case NYIR_VA_SAVE:
+  case NYIR_VA_START:
+  case NYIR_VA_ARG:
+    return in->a == value;
+  case NYIR_ADD_I64:
+  case NYIR_SUB_I64:
+  case NYIR_MUL_I64:
+  case NYIR_DIV_I64:
+  case NYIR_MOD_I64:
+  case NYIR_AND_I64:
+  case NYIR_OR_I64:
+  case NYIR_XOR_I64:
+  case NYIR_SHL_I64:
+  case NYIR_SAR_I64:
+  case NYIR_ROR_I64:
+  case NYIR_ROR32_I64:
+  case NYIR_CMP_I64:
+  case NYIR_ADD_F64:
+  case NYIR_SUB_F64:
+  case NYIR_MUL_F64:
+  case NYIR_DIV_F64:
+  case NYIR_CMP_F64:
+  case NYIR_ADD_F32:
+  case NYIR_SUB_F32:
+  case NYIR_MUL_F32:
+  case NYIR_DIV_F32:
+  case NYIR_CMP_F32:
+  case NYIR_STORE_I64:
+  case NYIR_COPY_STRUCT:
+  case NYIR_VEC4_STORE_F64:
+  case NYIR_VEC4_ADD_F64:
+  case NYIR_VEC4_SUB_F64:
+  case NYIR_VEC4_MUL_F64:
+  case NYIR_VEC4_DIV_F64:
+  case NYIR_VEC8_STORE_F32:
+  case NYIR_VEC8_ADD_F32:
+  case NYIR_VEC8_SUB_F32:
+  case NYIR_VEC8_MUL_F32:
+  case NYIR_VEC8_DIV_F32:
+  case NYIR_VEC4_STORE_I64:
+  case NYIR_VEC4_ADD_I64:
+  case NYIR_VEC4_SUB_I64:
+  case NYIR_VEC4_AND_I64:
+  case NYIR_VEC4_OR_I64:
+  case NYIR_VEC4_XOR_I64:
+  case NYIR_VEC4_SHL_I64:
+  case NYIR_VEC4_SAR_I64:
+  case NYIR_VEC8_STORE_I64:
+  case NYIR_VEC8_ADD_I64:
+  case NYIR_VEC8_SUB_I64:
+  case NYIR_VEC8_AND_I64:
+  case NYIR_VEC8_OR_I64:
+  case NYIR_VEC8_XOR_I64:
+  case NYIR_VEC4_REDUCE_ADD_I64:
+  case NYIR_VEC8_REDUCE_ADD_I64:
+  case NYIR_VEC4_REDUCE_ADD_F64:
+  case NYIR_BOUNDS_CHECK:
+    return in->a == value || in->b == value;
+  case NYIR_VEC4_FMA_F64:
+  case NYIR_VEC8_FMA_F32:
+  case NYIR_SELECT_I64:
+    return in->a == value || in->b == value || in->c == value;
+  case NYIR_PHI:
+    for (size_t i = 0; i < in->phi_incoming_len; ++i)
+      if (in->phi_incoming[i].value == value)
+        return true;
+    return false;
+  case NYIR_CALL: {
+    int args[NYIR_CALL_MAX_ARGS];
+    int argc = 0;
+    if (!nyr_call_args(in, INT_MAX, args, NYIR_CALL_MAX_ARGS, &argc, NULL, 0))
+      return true;
+    for (int i = 0; i < argc; ++i)
+      if (args[i] == value)
+        return true;
+    return false;
+  }
+  case NYIR_INLINE_ASM:
+  case NYIR_READ_X86_RSP:
+    return false;
+  case NYIR_NOP:
+  case NYIR_CONST_I64:
+  case NYIR_LABEL:
+  case NYIR_BR:
+  case NYIR_CONST_F64:
+  case NYIR_CONST_F32:
+  case NYIR_ADDR_LOCAL:
+  case NYIR_ADDR_SYMBOL:
+  case NYIR_ALLOCA:
+  case NYIR_CAPTURE_RET:
+  case NYIR_LOAD_LOCAL:
+  case NYIR_OP_COUNT:
+    return false;
   }
   return true;
+}
+
+static bool nyr_port_value_unused_after(const nyr_port_ctx_t *c, int value,
+                                        size_t start) {
+  for (size_t i = start; i < c->nyir->len; ++i)
+    if (nyr_port_instruction_uses_value(&c->nyir->data[i], value))
+      return false;
+  return true;
+}
+
+static bool nyr_port_avr_float_constant_call(const nyr_inst_t *in,
+                                             uint64_t *bits) {
+  if (!in || in->op != NYIR_CALL || !in->symbol || in->dst < 0 ||
+      in->scalar_class != NYIR_SCALAR_I64_TAGGED)
+    return false;
+  if (strcmp(in->symbol, "rt_flt_nan") == 0)
+    *bits = UINT64_C(0x7ff8000000000000);
+  else if (strcmp(in->symbol, "rt_flt_inf") == 0)
+    *bits = UINT64_C(0x7ff0000000000000);
+  else
+    return false;
+  int args[NYIR_CALL_MAX_ARGS];
+  int argc = 0;
+  return nyr_call_args(in, INT_MAX, args, NYIR_CALL_MAX_ARGS, &argc, NULL, 0) &&
+         argc == 0;
+}
+
+/*
+ * AVR cannot represent the boxed any result of the runtime NaN/infinity
+ * constructors. Fold only when every use decodes that same value through the
+ * f64 conversion ABI; both emitted calls then become the literal.
+ */
+static bool nyr_port_avr_float_constant_users(const nyr_port_ctx_t *c,
+                                              size_t producer_index,
+                                              size_t expected_consumer,
+                                              int value, uint64_t *bits) {
+  if (!c || !c->nyir || producer_index >= c->nyir->len)
+    return false;
+  uint64_t constant_bits = 0;
+  if (c->nyir->data[producer_index].dst != value ||
+      !nyr_port_avr_float_constant_call(&c->nyir->data[producer_index],
+                                        &constant_bits))
+    return false;
+  bool found_consumer = false;
+  bool found_expected = false;
+  for (size_t i = producer_index + 1; i < c->nyir->len; ++i) {
+    const nyr_inst_t *in = &c->nyir->data[i];
+    if (!nyr_port_instruction_uses_value(in, value))
+      continue;
+    int args[NYIR_CALL_MAX_ARGS];
+    int argc = 0;
+    if (in->op != NYIR_CALL || !in->symbol ||
+        strcmp(in->symbol, "rt_any_to_f64") != 0 || in->dst < 0 ||
+        in->scalar_class != NYIR_SCALAR_F64 ||
+        !nyr_call_args(in, c->nyir->next_value, args, NYIR_CALL_MAX_ARGS, &argc,
+                       NULL, 0) ||
+        argc != 1 || args[0] != value)
+      return false;
+    found_consumer = true;
+    found_expected = found_expected || i == expected_consumer;
+  }
+  if (!found_consumer || (expected_consumer != SIZE_MAX && !found_expected))
+    return false;
+  if (bits)
+    *bits = constant_bits;
+  return true;
+}
+
+static bool nyr_port_avr_float_constant_definition(const nyr_port_ctx_t *c,
+                                                   size_t consumer_index,
+                                                   int value, uint64_t *bits) {
+  if (!c || !c->nyir || value < 0)
+    return false;
+  for (size_t i = consumer_index; i > 0; --i) {
+    const nyr_inst_t *in = &c->nyir->data[i - 1];
+    if (in->dst != value)
+      continue;
+    return nyr_port_avr_float_constant_users(c, i - 1, consumer_index, value,
+                                             bits);
+  }
+  return false;
 }
 
 static bool nyr_port_alloc_panic_pair_at(const nyr_port_ctx_t *c,
@@ -1756,7 +1946,7 @@ static bool nyr_port_alloc_panic_pair_at(const nyr_port_ctx_t *c,
   int panic_args[NYIR_CALL_MAX_ARGS];
   int panic_argc = 0;
   return nyr_call_args(alloc, c->nyir->next_value, alloc_args,
-                        NYIR_CALL_MAX_ARGS, &alloc_argc, NULL, 0) &&
+                       NYIR_CALL_MAX_ARGS, &alloc_argc, NULL, 0) &&
          alloc_argc == 1 &&
          nyr_port_static_string_value(c, alloc_args[0], index) &&
          panic->op == NYIR_CALL && panic->symbol &&
@@ -1764,7 +1954,7 @@ static bool nyr_port_alloc_panic_pair_at(const nyr_port_ctx_t *c,
          ((panic->flags & NYIR_INST_F_EXTERN) ||
           ny_native_runtime_abi_decl(panic->symbol) != NULL) &&
          nyr_call_args(panic, c->nyir->next_value, panic_args,
-                        NYIR_CALL_MAX_ARGS, &panic_argc, NULL, 0) &&
+                       NYIR_CALL_MAX_ARGS, &panic_argc, NULL, 0) &&
          panic_argc == 1 && panic_args[0] == alloc->dst &&
          nyr_port_value_unused_after(c, alloc->dst, index + 2);
 }
@@ -1780,8 +1970,8 @@ static bool nyr_port_panic_runtime_pair(const nyr_port_ctx_t *c,
   const nyr_inst_t *previous = &c->nyir->data[c->current_index - 1];
   int args[NYIR_CALL_MAX_ARGS];
   int argc = 0;
-  return nyr_call_args(in, c->nyir->next_value, args, NYIR_CALL_MAX_ARGS,
-                        &argc, NULL, 0) &&
+  return nyr_call_args(in, c->nyir->next_value, args, NYIR_CALL_MAX_ARGS, &argc,
+                       NULL, 0) &&
          argc == 1 && args[0] == previous->dst &&
          nyr_port_alloc_panic_pair_at(c, previous, c->current_index - 1);
 }
@@ -1844,7 +2034,7 @@ static bool nyr_wasm_host_symbol(const char *symbol) {
 }
 
 static nyr_scalar_class_t nyr_wasm_value_class(const nyr_func_t *func,
-                                                int value, unsigned depth) {
+                                               int value, unsigned depth) {
   if (!func || value < 0 || value >= func->next_value || depth > 32)
     return NYIR_SCALAR_UNKNOWN;
   const nyr_inst_t *def = NULL;
@@ -1996,7 +2186,7 @@ static bool nyr_port_call(nyr_port_ctx_t *c, const nyr_inst_t *in) {
   int args[NYIR_CALL_MAX_ARGS];
   int argc = 0;
   if (!nyr_call_args(in, c->nyir->next_value, args, NYIR_CALL_MAX_ARGS, &argc,
-                      c->err, c->err_len))
+                     c->err, c->err_len))
     return false;
   bool avr_f64_to_i64 = c->kind == NY_PORT_AVR && in->symbol &&
                         strcmp(in->symbol, "rt_f64_to_i64") == 0;
@@ -2024,6 +2214,14 @@ static bool nyr_port_call(nyr_port_ctx_t *c, const nyr_inst_t *in) {
     /*
      * These zero-argument runtime constructors have fixed IEEE-754 payloads.
      */
+    if (c->kind == NY_PORT_AVR && strcmp(sym, "rt_any_to_f64") == 0 &&
+        argc == 1 && in->dst >= 0 && in->scalar_class == NYIR_SCALAR_F64) {
+      uint64_t float_constant = 0;
+      if (nyr_port_avr_float_constant_definition(c, c->current_index, args[0],
+                                                 &float_constant))
+        return nyr_port_mov_imm(c, c->tmp0, float_constant) &&
+               nyr_port_store_value(c, in->dst, c->tmp0);
+    }
     if (c->kind == NY_PORT_AVR &&
         (strcmp(sym, "rt_flt_nan") == 0 || strcmp(sym, "rt_flt_inf") == 0) &&
         argc == 0 && in->dst >= 0 && in->scalar_class == NYIR_SCALAR_F64) {
@@ -2032,6 +2230,13 @@ static bool nyr_port_call(nyr_port_ctx_t *c, const nyr_inst_t *in) {
                                     : UINT64_C(0x7ff0000000000000);
       return nyr_port_mov_imm(c, c->tmp0, float_constant) &&
              nyr_port_store_value(c, in->dst, c->tmp0);
+    }
+    if (c->kind == NY_PORT_AVR && argc == 0 && in->dst >= 0 &&
+        in->scalar_class == NYIR_SCALAR_I64_TAGGED) {
+      uint64_t float_constant = 0;
+      if (nyr_port_avr_float_constant_users(c, c->current_index, SIZE_MAX,
+                                            in->dst, &float_constant))
+        return true;
     }
     bool is_alloc = strcmp(sym, "rt_alloc_string") == 0;
     bool is_panic = strcmp(sym, "rt_panic") == 0;
@@ -2227,8 +2432,7 @@ static bool nyr_port_call(nyr_port_ctx_t *c, const nyr_inst_t *in) {
   return false;
 }
 
-static bool nyr_port_avr_softfloat_call(nyr_port_ctx_t *c,
-                                        const nyr_inst_t *in,
+static bool nyr_port_avr_softfloat_call(nyr_port_ctx_t *c, const nyr_inst_t *in,
                                         const char *symbol, size_t argc,
                                         nyr_scalar_class_t result_class) {
   if (!c || c->kind != NY_PORT_AVR || !in || !symbol || argc == 0 || argc > 2)
@@ -2266,6 +2470,14 @@ static bool nyr_port_avr_softfloat_call(nyr_port_ctx_t *c,
 }
 
 static bool nyr_port_emit_inst(nyr_port_ctx_t *c, const nyr_inst_t *in) {
+  if ((in->op == NYIR_LOAD_I64 || in->op == NYIR_STORE_I64) &&
+      (in->flags & (NYIR_INST_F_MEM_U16 | NYIR_INST_F_MEM_I32))) {
+    nyr_set_error(c->err, c->err_len,
+                  "%s NYIR emit: 16-bit unsigned and signed 32-bit memory "
+                  "accesses are unsupported",
+                  c->pretty);
+    return false;
+  }
   switch (in->op) {
   case NYIR_NOP:
     return true;
@@ -2730,7 +2942,7 @@ static bool nyr_port_emit_inst(nyr_port_ctx_t *c, const nyr_inst_t *in) {
       return false;
     return nyr_printf(c->w, "\t%s\t%s\n",
                       c->kind == NY_PORT_BPF    ? "goto"
-                      : c->kind == NY_PORT_AVR  ? "rjmp"
+                      : c->kind == NY_PORT_AVR  ? "jmp"
                       : c->kind == NY_PORT_WASM ? "br"
                                                 : "b",
                       c->epilogue_label);
@@ -3029,6 +3241,9 @@ static bool nyr_port_emit_inst(nyr_port_ctx_t *c, const nyr_inst_t *in) {
   case NYIR_COS_F64:
   case NYIR_ALLOCA:
   case NYIR_PHI:
+  case NYIR_VA_SAVE:
+  case NYIR_VA_START:
+  case NYIR_VA_ARG:
   case NYIR_VEC4_LOAD_F64:
   case NYIR_VEC4_STORE_F64:
   case NYIR_VEC4_ADD_F64:
@@ -3050,6 +3265,8 @@ static bool nyr_port_emit_inst(nyr_port_ctx_t *c, const nyr_inst_t *in) {
   case NYIR_VEC8_SHUFFLE_F32:
   case NYIR_VEC4_LOAD_I64:
   case NYIR_VEC4_SET1_I64:
+  case NYIR_VEC8_SAR_I64:
+  case NYIR_VEC8_SET1_I64:
   case NYIR_VEC4_STORE_I64:
   case NYIR_VEC4_ADD_I64:
   case NYIR_VEC4_SUB_I64:
@@ -3080,6 +3297,9 @@ static bool nyr_port_emit_inst(nyr_port_ctx_t *c, const nyr_inst_t *in) {
         return nyr_port_load_value(c, "$t0", call->dst) &&
                nyr_port_store_value(c, in->dst, "$t0");
     }
+    break;
+  case NYIR_INLINE_ASM:
+  case NYIR_READ_X86_RSP:
     break;
   case NYIR_OP_COUNT:
     break;
@@ -3569,12 +3789,22 @@ bool nyr_avr_emit_ir(nyr_writer_t *w, const ny_native_target_info_t *target,
       bool supported_panic_pair = false;
       bool supported_raw_pointer_call = false;
       bool supported_float_constant = false;
+      bool supported_float_conversion = false;
       if (call_args_ok && in->symbol) {
         validation.current_index = i;
-        supported_float_constant = (strcmp(in->symbol, "rt_flt_nan") == 0 ||
-                                    strcmp(in->symbol, "rt_flt_inf") == 0) &&
-                                   argc == 0 && in->dst >= 0 &&
-                                   in->scalar_class == NYIR_SCALAR_F64;
+        bool is_float_constant = strcmp(in->symbol, "rt_flt_nan") == 0 ||
+                                 strcmp(in->symbol, "rt_flt_inf") == 0;
+        supported_float_constant =
+            is_float_constant && argc == 0 && in->dst >= 0 &&
+            (in->scalar_class == NYIR_SCALAR_F64 ||
+             (in->scalar_class == NYIR_SCALAR_I64_TAGGED &&
+              nyr_port_avr_float_constant_users(&validation, i, SIZE_MAX,
+                                                in->dst, NULL)));
+        supported_float_conversion =
+            strcmp(in->symbol, "rt_any_to_f64") == 0 && argc == 1 &&
+            in->dst >= 0 && in->scalar_class == NYIR_SCALAR_F64 &&
+            nyr_port_avr_float_constant_definition(&validation, i, args[0],
+                                                   NULL);
         bool is_alloc = strcmp(in->symbol, "rt_alloc_"
                                            "string") == 0;
         bool is_panic = strcmp(in->symbol, "rt_panic") == 0;
@@ -3600,7 +3830,7 @@ bool nyr_avr_emit_ir(nyr_writer_t *w, const ny_native_target_info_t *target,
       if (!in->symbol || !call_args_ok || !argument_count_supported ||
           (uses_register_abi && !external_stack_args_supported &&
            !supported_panic_pair && !supported_raw_pointer_call &&
-           !supported_float_constant)) {
+           !supported_float_constant && !supported_float_conversion)) {
         nyr_set_error(err, err_len,
                       "AVR portable "
                       "emitter rejects "

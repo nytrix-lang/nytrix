@@ -765,7 +765,7 @@ fn check_generated_modes(int first_mode) str {
       }
       args = args.append("--effect-require-known")
       args = args.append("--native-only")
-      args = args.append("--nyir-verify")
+      args = args.append("--nyr-verify")
       if mode >= 45 {
          args = args.append("-emit-only")
          args = args.append("-o")

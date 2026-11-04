@@ -4,6 +4,12 @@
 Use the repository's `./make` driver for normal builds. It owns build
 configuration, generated artifacts, and tool dependencies.
 
+Prerequisites: the C compiler, build system, and dependencies reported by
+`./make doctor`.
+
+Skip this page if an installed compiler already meets your needs; begin with
+[Start](start.md).
+
 ## Common commands
 
 ```bash
@@ -60,3 +66,9 @@ a different build configuration.
 
 See [Tooling](tooling.md) for format/test commands and
 [Troubleshooting](troubleshooting.md) for source and runtime diagnostics.
+
+Next:
+
+- [Testing](testing.md) — run focused compiler and runtime checks.
+- [Tooling](tooling.md) — use compiler and formatter commands.
+- [Troubleshooting](troubleshooting.md) — diagnose a failing command.

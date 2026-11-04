@@ -5,6 +5,13 @@ Language contracts define syntax and behavior; backend support varies by source
 shape. Check [implementation status](../learn/status.md) for route limits and the
 linked fixtures for tested cases.
 
+## How to read these docs
+
+The specification states language rules and implementation boundaries. The
+[learn guides](../learn/index.md) teach workflows; the
+[cookbook](../learn/cookbook.md) collects copy-paste patterns with links to
+their full contracts.
+
 ## Language
 
 | Topic | Contract |
@@ -13,6 +20,7 @@ linked fixtures for tested cases.
 | [Syntax](syntax.md) | Source forms and grammar |
 | [Values](values.md) | Literals, containers, equality, and value operations |
 | [Types](types.md) | Type forms, inference, refinements, and proofs |
+| [Dependent types and indexed data](dependent.md) | Current refinement support and the planned Pi, Sigma, GADT, and type-level extensions |
 | [Functions](functions.md) | Calls, parameters, closures, and function contracts |
 | [Control flow](control-flow.md) | Branches, loops, exits, cleanup, and error handling |
 | [Operators](operators.md) | Precedence, built-ins, and overloads |

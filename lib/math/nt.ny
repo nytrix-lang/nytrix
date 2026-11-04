@@ -1000,13 +1000,7 @@ fn tonelli_shanks(any n, any p) bigint {
    mut c = power_mod(z, Q, p_big)
    mut t = power_mod(n_big, Q, p_big)
    mut R = power_mod(n_big, bigint_div(bigint_add(Q, one), Z(2)), p_big)
-   while true {
-      if bigint_eq(t, one) {
-         ; Re-materialize the root at the public bigint boundary. In the JIT
-         ; path the loop-carried R slot can retain a transient dynamic handle;
-         ; bigint_add gives callers an owned, canonical bigint object.
-         return bigint_add(R, zero)
-      }
+   while !bigint_eq(t, one) {
       mut i = 1
       mut tmp = bigint_mul(t, t)
       tmp = bigint_mod(tmp, p_big)
@@ -1020,10 +1014,15 @@ fn tonelli_shanks(any n, any p) bigint {
          b = bigint_mod(bigint_mul(b, b), p_big)
          j += 1
       }
-      M, c = i, bigint_mod(bigint_mul(b, b), p_big)
-      t, R = bigint_mod(bigint_mul(t, c), p_big), bigint_mod(bigint_mul(R, b), p_big)
+      M = i
+      c = bigint_mod(bigint_mul(b, b), p_big)
+      t = bigint_mod(bigint_mul(t, c), p_big)
+      R = bigint_mod(bigint_mul(R, b), p_big)
    }
-   bigint_from_int(-1)
+   ; Re-materialize the root at the public bigint boundary. In the JIT path
+   ; the loop-carried R slot can retain a transient dynamic handle;
+   ; bigint_add gives callers an owned, canonical bigint object.
+   bigint_add(R, zero)
 }
 
 fn mod_quadratic_roots_prime(any a, any b, any c, any p) list {
@@ -1148,8 +1147,8 @@ fn rational_reconstruction(any t, any m) any {
    if bigint_gt(denom, bound) { return nil }
    def p_val = (bigint_lt(s1, zero)) ? bigint_neg(r1) : r1
    if bigint_gt(bigint_abs(p_val), bound) { return nil }
-   if gcd(p_val, denom) != one { return nil }
-   if gcd(denom, m_big) != one { return nil }
+   if bigint_neq(__bigint_gcd(p_val, denom), one) { return nil }
+   if bigint_neq(__bigint_gcd(denom, m_big), one) { return nil }
    def den_inv = inverse_mod(denom, m_big)
    if den_inv == zero { return nil }
    if mod(p_val * den_inv - t_big, m_big) != zero { return nil }

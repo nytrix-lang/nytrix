@@ -9,11 +9,11 @@ shape doc_meta_collect {
   source ny <<'NY'
 use core
 use core.compiler.tools.doc.meta as doc_meta
-use core.os (file_write, file_remove, temp_dir, pid)
+use core.os (file_write, file_remove, temp_dir, pid, ticks)
 use core.os.fs as fs
 use core.os.path as path
 
-def root = path.join(temp_dir(), "doc-meta-collect-" + to_str(pid()))
+def root = path.join(temp_dir(), "doc-meta-collect-" + to_str(pid()) + "-" + to_str(ticks()))
 def learn = path.join(root, "learn")
 def hidden = path.join(root, ".git")
 def empty_root = path.join(root, "empty-root")

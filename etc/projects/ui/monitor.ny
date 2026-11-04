@@ -3,6 +3,7 @@
 ;; Keywords: ui window monitor display desktop example
 ;; Live monitor detector with scaled desktop layout and window placement.
 use core
+use core.common as common
 use core.os (exit)
 use core.os.fixture (ready, start_ui, tick_ui, quit_key, next_ui_key, exit_status)
 use core.os (ticks)
@@ -26,7 +27,7 @@ gfx.apply_backend_argv()
 mut win = gfx.init_window(960, 540, "Nytrix Monitor Detector", WINDOW_SCALE_TO_MONITOR | WINDOW_CENTER)
 
 if !win { panic("window init failed") }
-if is_dict(win) && !!win.get("_mock", false) {
+if is_dict(win) && !!win.get("_mock", false) && !common.env_truthy("NYTRIX_UI_REPLAY") {
    if gfx.begin_frame_clear(gfx.color_rgb(0.015, 0.015, 0.015)) {
       gfx.end_frame()
    }
@@ -197,7 +198,7 @@ fn update_window_flag_timers(f64 dt) bool {
 while !gfx.window_should_close(win) && tick_ui(fx) {
    if frame_count < 4 { print("[monitor:trace] frame.begin " + to_str(frame_count)) }
    if quit_key(next_ui_key(fx)) { break }
-   if mock_backend {
+   if mock_backend && !common.env_truthy("NYTRIX_UI_REPLAY") {
       if gfx.begin_frame_clear(bg) {
          gfx.draw_text(font_title, "Nytrix Monitor Detector", 24.0, 24.0, C_TEXT)
          gfx.end_frame()
@@ -259,6 +260,13 @@ while !gfx.window_should_close(win) && tick_ui(fx) {
       def map = view_window.desktop_map(bounds, area_x, area_y, area_w, area_h)
       if frame_count < 4 { print("[monitor:trace] map=" + to_str(map)) }
       def scale = float(map.get("scale", 1.0))
+      def wr = view_window.map_desktop_rect(map, [
+            int(wp.get(0, 0)), int(wp.get(1, 0)),
+            max_int(1, int(ws.get(0, 1))), max_int(1, int(ws.get(1, 1)))
+      ], 3.0, 3.0)
+      ;; The window marker sits over the monitor map. Draw it first so it does
+      ;; not wash out the monitor name and display details beneath it.
+      view_window.draw_window_marker(font_small, wr)
       mut i = 0
       while i < monitor_count {
          def row = monitor_rows.get(i, {})
@@ -270,11 +278,6 @@ while !gfx.window_should_close(win) && tick_ui(fx) {
          i += 1
       }
       if frame_count < 4 { print("[monitor:trace] monitors.drawn") }
-      def wr = view_window.map_desktop_rect(map, [
-            int(wp.get(0, 0)), int(wp.get(1, 0)),
-            max_int(1, int(ws.get(0, 1))), max_int(1, int(ws.get(1, 1)))
-      ], 3.0, 3.0)
-      view_window.draw_window_marker(font_small, wr)
       if frame_count < 4 { print("[monitor:trace] window.marker.drawn") }
    }
    def f64 info_w = min_f64(430.0, max_f64(240.0, area_w - 24.0))
@@ -282,10 +285,12 @@ while !gfx.window_should_close(win) && tick_ui(fx) {
    view_window.draw_dpi_info_text(font_small, area_x + 12.0, area_y + area_h - info_h - 12.0, info_w, info_h, hud_dpi_line1, hud_dpi_line2, state)
    if frame_count < 4 { print("[monitor:trace] dpi.drawn") }
    def f64 flags_w = min_f64(360.0, max_f64(250.0, area_w - 24.0))
-   if area_w >= 680.0 {
-      view_window.draw_window_flags(font_small, area_x + area_w - flags_w - 22.0, area_y + area_h - 166.0, flags_w, state)
-   } elif area_h >= 340.0 {
-      view_window.draw_window_flags(font_small, area_x + 22.0, area_y + area_h - 258.0, flags_w, state)
+   if sw >= 1120.0 && sh >= 680.0 {
+      ;; Reserve the flags panel for roomy windows; on compact windows it
+      ;; obscures the monitor tile, whose size cannot shrink without losing
+      ;; the display details. The header keeps the keyboard shortcuts visible.
+      def flags_y = area_y + area_h - 166.0
+      view_window.draw_window_flags(font_small, area_x + area_w - flags_w - 22.0, flags_y, flags_w, state)
    }
    if frame_count < 4 { print("[monitor:trace] flags.drawn") }
    gfx.draw_circle(mx, my, 8.0, C_ACCENT_HI)

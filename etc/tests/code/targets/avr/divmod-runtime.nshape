@@ -54,7 +54,7 @@ def arithmetic_source =
   "valid"
 def arithmetic_emitted = run_capture(
     [compiler, "--native-backend=avr", "--native-only", "-O0",
-     "--nyir-verify", "--emit-asm=" + arithmetic_asm, "-no-std",
+     "--nyr-verify", "--emit-asm=" + arithmetic_asm, "-no-std",
      "-emit-only", "-e", arithmetic_source],
     [], nil, false)
 def arithmetic_assembled = run_capture(
@@ -85,7 +85,7 @@ def zero_source =
   "@noinline\nfn divide(int left, int right) int { left / right }\n" +
   "mut divisor = 1\nwhile divisor > 0 { divisor -= 1 }\ndivide(9, divisor)"
 def zero_emitted = run_capture(
-    [compiler, "--native-backend=avr", "--native-only", "--nyir-verify",
+    [compiler, "--native-backend=avr", "--native-only", "--nyr-verify",
      "--emit-asm=" + zero_asm, "-no-std", "-emit-only", "-e", zero_source],
     [], nil, false)
 def zero_assembled = run_capture(

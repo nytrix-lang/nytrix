@@ -98,10 +98,12 @@ fn _hash_input_bytes(any data, int start=0, int span_len=0) list {
    span_len = _hash_norm_span_len(data, start, span_len)
    mut out = []
    if is_str(data) || is_bytes(data) {
+      out = list(span_len)
+      __list_set_len(out, span_len)
       mut int src_i = start
       mut int i = 0
       while i < span_len {
-         out = out.append(load8(data, src_i))
+         out[i] = load8(data, src_i)
          src_i += 1
          i += 1
       }

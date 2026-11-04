@@ -262,6 +262,16 @@ bool nyr_isle_apply_mach(nyr_mach_func_t *mach) {
     return true;
   for (size_t i = 0; i < mach->inst_len; ++i) {
     nyr_mach_inst_t *in = &mach->insts[i];
+    /*
+     * The rule table describes scalar integer identities. Vector and float
+     * values share the generic machine opcodes (vector x + x is a packed
+     * add, not a scalar shift), so leave every non-integer result alone.
+     */
+    if (in->dst.kind != NYR_MACH_OPERAND_VREG ||
+        (size_t)in->dst.as.reg >= mach->vreg_len ||
+        (mach->vreg_types[in->dst.as.reg] != NYR_MACH_TYPE_I64 &&
+         mach->vreg_types[in->dst.as.reg] != NYR_MACH_TYPE_PTR))
+      continue;
     for (size_t r = 0; r < ny_isle_rule_count(); ++r) {
       const nyr_isle_rule_t *rule = &nyr_isle_table[r];
       nyr_mach_opcode_t mop = nyr_isle_nir_to_mir_op(rule->match_op);

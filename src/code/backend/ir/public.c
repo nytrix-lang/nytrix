@@ -4,6 +4,7 @@
 #include "code/backend/ir/api_internal.h"
 #include "code/backend/ir/internal.h"
 #include <errno.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -85,8 +86,13 @@ bool nyr_emit_assembly(const nyr_func_t *func, const char *path,
             nyr_x86_64_emit_ir(&assembly, &target, &copy, symbol, false, err,
                                err_len);
   if (ok) {
-    ok = ny_write_file(path, assembly.data ? assembly.data : "",
-                       assembly.len) == 0;
+    const char *text = assembly.data ? assembly.data : "";
+    if (strcmp(path, "-") == 0)
+      ok = (!assembly.len ||
+            fwrite(text, 1, assembly.len, stdout) == assembly.len) &&
+           fflush(stdout) == 0;
+    else
+      ok = ny_write_file(path, text, assembly.len) == 0;
     if (!ok)
       nyr_api_error(err, err_len, "failed to write Nyr assembly output");
   }
@@ -177,8 +183,7 @@ bool nyr_func_set_signature(nyr_func_t *func, const nyr_param_desc_t *params,
     if (!types)
       goto signature_allocation_failed;
     for (size_t i = 0; i < param_count; ++i) {
-      if (params[i].type < NYIR_PARAM_I64 ||
-          params[i].type > NYIR_PARAM_AGGREGATE ||
+      if (params[i].type < NYIR_PARAM_I64 || params[i].type > NYIR_PARAM_I8 ||
           (params[i].type != NYIR_PARAM_AGGREGATE && params[i].aggregate_abi)) {
         free(types);
         nyr_api_error(err, err_len, "function parameter descriptor is invalid");
@@ -393,10 +398,11 @@ bool nyr_emit_store_i64(nyr_func_t *func, int address, int value,
   return nyr_emit(func, inst, NULL, err, err_len);
 }
 
-static bool nyr_emit_call_with_flags(
-  nyr_func_t *func, const char *symbol, const int *args, size_t arg_count,
-  nyr_scalar_class_t result_class, unsigned flags, int *value_id, char *err,
-  size_t err_len) {
+static bool nyr_emit_call_with_flags(nyr_func_t *func, const char *symbol,
+                                     const int *args, size_t arg_count,
+                                     nyr_scalar_class_t result_class,
+                                     unsigned flags, int *value_id, char *err,
+                                     size_t err_len) {
   if (!symbol || !*symbol || arg_count > NYIR_CALL_MAX_ARGS ||
       (arg_count && !args)) {
     nyr_api_error(err, err_len, "call requires a symbol and valid arguments");
@@ -424,10 +430,9 @@ bool nyr_emit_call(nyr_func_t *func, const char *symbol, const int *args,
                                   0, value_id, err, err_len);
 }
 
-bool nyr_emit_extern_call(nyr_func_t *func, const char *symbol,
-                          const int *args, size_t arg_count,
-                          nyr_scalar_class_t result_class, int *value_id,
-                          char *err, size_t err_len) {
+bool nyr_emit_extern_call(nyr_func_t *func, const char *symbol, const int *args,
+                          size_t arg_count, nyr_scalar_class_t result_class,
+                          int *value_id, char *err, size_t err_len) {
   return nyr_emit_call_with_flags(func, symbol, args, arg_count, result_class,
                                   NYIR_INST_F_EXTERN, value_id, err, err_len);
 }
@@ -494,6 +499,11 @@ bool nyr_verify(const nyr_func_t *func, char *err, size_t err_len) {
 
 bool nyr_optimize(nyr_func_t *func, nyr_opt_level_t opt_level, char *err,
                   size_t err_len) {
+  return nyr_optimize_with_options(func, opt_level, 0, err, err_len);
+}
+
+bool nyr_optimize_with_options(nyr_func_t *func, nyr_opt_level_t opt_level,
+                               unsigned options, char *err, size_t err_len) {
   if (!func) {
     nyr_api_error(err, err_len, "function must not be null");
     return false;
@@ -502,13 +512,24 @@ bool nyr_optimize(nyr_func_t *func, nyr_opt_level_t opt_level, char *err,
     nyr_api_error(err, err_len, "optimization level must be between O0 and O3");
     return false;
   }
+  if (options & ~NYR_OPT_DISABLE_VECTORIZATION) {
+    nyr_api_error(err, err_len, "unknown optimization option");
+    return false;
+  }
   nyr_func_t candidate;
   nyr_func_init(&candidate);
   if (!nyr_func_clone(func, &candidate, err, err_len))
     return false;
-  if (!nyr_ir_optimize(&candidate, (int)opt_level)) {
+  if (!nyr_ir_optimize_with_options(&candidate, (int)opt_level, options)) {
+    char verification_error[512] = {0};
+    bool valid = nyr_ir_verify(&candidate, verification_error,
+                               sizeof(verification_error));
     nyr_func_destroy(&candidate);
-    nyr_api_error(err, err_len, "NYIR optimization pipeline failed");
+    if (!valid && verification_error[0] && err && err_len)
+      snprintf(err, err_len, "NYIR optimization pipeline failed: %s",
+               verification_error);
+    else
+      nyr_api_error(err, err_len, "NYIR optimization pipeline failed");
     return false;
   }
   nyr_func_destroy(func);

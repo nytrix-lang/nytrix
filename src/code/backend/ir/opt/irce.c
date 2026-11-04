@@ -440,11 +440,9 @@ static bool irce_value_nonnegative(const nyr_func_t *f, const int *defs,
 }
 
 static int irce_block_for_label(const nyr_cfg_t *cfg, int64_t label) {
-  if (!cfg)
-    return -1;
-  for (size_t b = 0; b < cfg->block_count; ++b)
-    if (cfg->block_label[b] == label)
-      return (int)b;
+  size_t b = 0;
+  if (nyr_cfg_block_for_label(cfg, label, &b))
+    return (int)b;
   return -1;
 }
 

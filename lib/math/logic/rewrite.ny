@@ -12,8 +12,11 @@ fn rule(any pattern, any replacement) dict {
 
 ;; Returns true when is rule.
 fn is_rule(any value) bool {
-   is_dict(value) && value.get("kind", "") == "rewrite-rule" &&
-   value.contains("pattern") && value.contains("replacement")
+   if !is_dict(value) { return false }
+   def kind = str(value.get("kind", ""))
+   if kind != "rewrite-rule" { return false }
+   if !value.contains("pattern") { return false }
+   value.contains("replacement")
 }
 
 fn _consume(dict state, int depth) bool {

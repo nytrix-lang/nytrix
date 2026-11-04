@@ -3,7 +3,7 @@ shape optcheck_relational_bounds {
   generator "native"
   features [native x86_64 oracle optcheck relational-bounds]
   template ny-test-case
-  flags "-O3 --native-backend x86_64 --native-oracle-per-pass --native-result-oracle=10000 --nyir-pass-stats"
+  flags "-O3 --native-backend x86_64 --native-oracle-per-pass --native-result-oracle=10000 --nyr-dump=passes"
   expect compile_and_run
   source ny <<'NY'
 use core.tbuf

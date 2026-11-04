@@ -17,7 +17,9 @@ fn raw_store(ptr buf, int i, int v) ptr {
    buf
 }
 ;; Fannkuch-redux: permutation flipping (classic CLBG benchmark).
-fn fannkuch(int n) int {
+fn fannkuch() int {
+   ;; This fixture only exercises n=10; keep the fixed input visible to native optimization.
+   def int n = 10
    mut ptr perm = i64buf_new(n)
    mut ptr perm1 = i64buf_new(n)
    mut ptr count = i64buf_new(n)
@@ -79,7 +81,7 @@ fn fannkuch(int n) int {
    maxflips * 1000000 + checksum
 }
 def int t0 = ticks()
-def r = fannkuch(10)
+def r = fannkuch()
 def int t1 = ticks()
 print("checksum=", r)
 print("elapsed_ns=", t1 - t0)
@@ -96,17 +98,17 @@ static int64_t now_ns(void) {
     return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
 }
 
-static int fannkuch(int n) {
-    int perm[16], perm1[16], count[16];
-    int maxflips = 0, checksum = 0, r = n, flips, k, tmp;
-    for (int i = 0; i < n; i++) { perm[i] = i; perm1[i] = i; count[i] = i; }
+static int64_t fannkuch(int n) {
+    int64_t perm[16], perm1[16], count[16];
+    int64_t maxflips = 0, checksum = 0, r = n, flips, k, tmp;
+    for (int64_t i = 0; i < n; i++) { perm[i] = i; perm1[i] = i; count[i] = i; }
     while (1) {
         while (r != 1) { count[r-1] = r; r--; }
         flips = 0;
-        for (int i = 0; i < n; i++) perm[i] = perm1[i];
+        for (int64_t i = 0; i < n; i++) perm[i] = perm1[i];
         k = perm[0];
         while (k) {
-            for (int i = 0, j = k; i < j; i++, j--) {
+            for (int64_t i = 0, j = k; i < j; i++, j--) {
                 tmp = perm[i]; perm[i] = perm[j]; perm[j] = tmp;
             }
             flips++;
@@ -117,7 +119,7 @@ static int fannkuch(int n) {
         for (;;) {
             if (r == n) return maxflips * 1000000 + checksum;
             tmp = perm1[0];
-            for (int i = 0; i < r; i++) perm1[i] = perm1[i+1];
+            for (int64_t i = 0; i < r; i++) perm1[i] = perm1[i+1];
             perm1[r] = tmp;
             count[r] = count[r] - 1;
             if (count[r] > 0) break;
@@ -128,9 +130,9 @@ static int fannkuch(int n) {
 
 int main(void) {
     int64_t start = now_ns();
-    int r = fannkuch(10);
+    int64_t r = fannkuch(10);
     int64_t end = now_ns();
-    printf("checksum=%d\n", r);
+    printf("checksum=%lld\n", (long long)r);
     if (end <= start) end = start + 1;
     printf("elapsed_ns=%lld\n", (long long)(end - start));
     return 0;

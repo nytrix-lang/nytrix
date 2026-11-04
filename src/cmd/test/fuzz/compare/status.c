@@ -7204,10 +7204,10 @@ static int cmd_public_fuzz_all_run(int argc, char **argv) {
   double run_start_ms = now_ms();
 
 #define FUZZ_ALL_RUN(name_value, phase_value, timeout_value, required_value, argv_builder) do { \
-    if (continue_running) {                                                                    \
-      free(lane_json);                                                                         \
-      lane_json = fuzz_all_report_path(report_dir, (name_value));                              \
-      char *lane_markdown = path_with_suffix_ext(lane_json, "", ".md");                        \
+    if (continue_running) {                                                                     \
+      free(lane_json);                                                                          \
+      lane_json = fuzz_all_report_path(report_dir, (name_value));                               \
+      char *lane_markdown = path_with_suffix_ext(lane_json, "", ".md");                         \
       char *lane_argv[48];                                                                      \
       int la = 0;                                                                               \
       argv_builder;                                                                             \

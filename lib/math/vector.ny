@@ -53,8 +53,8 @@ fn Vector2(...args) vec2 {
    if n == 0 { return _typed_vec("vec2", 0.0, 0.0) }
    def x = args.get(0, 0.0)
    mut y = args.get(1, nil)
-   if is_vector(x) { if y == nil { return _typed_vec("vec2", at(x, 0, 0.0), at(x, 1, 0.0)) } }
-   if y == nil { y = 0.0 }
+   if is_vector(x) { if __is_nil(y) { return _typed_vec("vec2", at(x, 0, 0.0), at(x, 1, 0.0)) } }
+   if __is_nil(y) { y = 0.0 }
    _typed_vec("vec2", x, y)
 }
 
@@ -71,9 +71,9 @@ fn Vector3(...args) vec3 {
    }
    mut y = args.get(1, nil)
    mut z = args.get(2, nil)
-   if is_vector(x) { if y == nil { if z == nil { return _typed_vec("vec3", at(x, 0, 0.0), at(x, 1, 0.0), at(x, 2, 0.0)) } } }
-   if y == nil { y = 0.0 }
-   if z == nil { z = 0.0 }
+   if is_vector(x) { if __is_nil(y) { if __is_nil(z) { return _typed_vec("vec3", at(x, 0, 0.0), at(x, 1, 0.0), at(x, 2, 0.0)) } } }
+   if __is_nil(y) { y = 0.0 }
+   if __is_nil(z) { z = 0.0 }
    _typed_vec("vec3", x, y, z)
 }
 
@@ -85,11 +85,11 @@ fn Vector4(...args) vec4 {
    mut y, z = args.get(1, nil), args.get(2, nil)
    mut w = args.get(3, nil)
    if is_vector(x) {
-      if y == nil { if z == nil { if w == nil { return _typed_vec("vec4", at(x, 0, 0.0), at(x, 1, 0.0), at(x, 2, 0.0), at(x, 3, 0.0)) } } }
+      if __is_nil(y) { if __is_nil(z) { if __is_nil(w) { return _typed_vec("vec4", at(x, 0, 0.0), at(x, 1, 0.0), at(x, 2, 0.0), at(x, 3, 0.0)) } } }
    }
-   if y == nil { y = 0.0 }
-   if z == nil { z = 0.0 }
-   if w == nil { w = 0.0 }
+   if __is_nil(y) { y = 0.0 }
+   if __is_nil(z) { z = 0.0 }
+   if __is_nil(w) { w = 0.0 }
    _typed_vec("vec4", x, y, z, w)
 }
 
@@ -386,7 +386,7 @@ fn hadamard_div(any a, any b) any {
 fn v_mul(any a, any b) any {
    "Returns the product of vector `a` and `b`. If `b` is a scalar, performs scaling. If `b` is a vector, performs a dot product."
    def out = _mul_vector(a, b)
-   if out != nil { return out }
+   if !__is_nil(out) { return out }
    _scale_vector(a, b)
 }
 
@@ -419,7 +419,7 @@ fn sub(any a, any b) any {
 fn mul(any a, any b) any {
    "Generic multiplication: supports numbers, scalar-vector, and vector-vector products."
    def out = _mul_vector(a, b)
-   if out != nil { return out }
+   if !__is_nil(out) { return out }
    core.mul(a, b)
 }
 
@@ -757,14 +757,14 @@ fn _sub_vector(any a, any b) any {
 fn op(str name, any a, any b=0) any {
    "Runtime vector operator dispatcher for examples and dynamic code."
    match name {
-      "+" -> { def out = _add_vector(a, b) return out != nil ? out : core.add(a, b) }
-      "add" -> { def out = _add_vector(a, b) return out != nil ? out : core.add(a, b) }
-      "-" -> { def out = _sub_vector(a, b) return out != nil ? out : core.sub(a, b) }
-      "sub" -> { def out = _sub_vector(a, b) return out != nil ? out : core.sub(a, b) }
-      "*" -> { def out = _mul_vector(a, b) return out != nil ? out : core.mul(a, b) }
-      "mul" -> { def out = _mul_vector(a, b) return out != nil ? out : core.mul(a, b) }
-      "/" -> { def out = _div_vector(a, b) return out != nil ? out : core.div(a, b) }
-      "div" -> { def out = _div_vector(a, b) return out != nil ? out : core.div(a, b) }
+      "+" -> { def out = _add_vector(a, b) return !__is_nil(out) ? out : core.add(a, b) }
+      "add" -> { def out = _add_vector(a, b) return !__is_nil(out) ? out : core.add(a, b) }
+      "-" -> { def out = _sub_vector(a, b) return !__is_nil(out) ? out : core.sub(a, b) }
+      "sub" -> { def out = _sub_vector(a, b) return !__is_nil(out) ? out : core.sub(a, b) }
+      "*" -> { def out = _mul_vector(a, b) return !__is_nil(out) ? out : core.mul(a, b) }
+      "mul" -> { def out = _mul_vector(a, b) return !__is_nil(out) ? out : core.mul(a, b) }
+      "/" -> { def out = _div_vector(a, b) return !__is_nil(out) ? out : core.div(a, b) }
+      "div" -> { def out = _div_vector(a, b) return !__is_nil(out) ? out : core.div(a, b) }
       "dot" -> { return dot(a, b) }
       "dot3" -> { return dot3(a, b) }
       "cross" -> { return cross3(a, b) }

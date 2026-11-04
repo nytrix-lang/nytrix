@@ -1,0 +1,30 @@
+shape comma_assignment_float_carriers {
+  family "runtime-native"
+  generator "embedded"
+  features [ny f64 assignment any list abi]
+  template ny-test-case
+  flags_matrix "--native-only --native-tier=baseline -O0; --native-backend=llvm --jit --jit-engine=mcjit -O0; --native-backend=llvm --jit --jit-engine=orc -O0; --nyr-run"
+  expect compile_and_run
+  expect_message "FLOAT-CARRIERS-OK"
+  source ny <<'NY'
+use core
+fn projected(f64 x, f64 y) any { [x, y, 0.5] }
+fn triangle(f64 x0, f64 y0, f64 x1, f64 y1, f64 x2, f64 y2) {
+   print("TRI " + to_str(x0) + "," + to_str(y0) + "," + to_str(x1) + "," + to_str(y1) + "," + to_str(x2) + "," + to_str(y2))
+   assert(x0 == 4.0 && y0 == 4.0 && x1 == 20.0 && y1 == 4.0 && x2 == 20.0 && y2 == 16.0, "float coordinates survive erased list reads and reassignments")
+}
+fn render() {
+   def p0, p1 = projected(4.0, 4.0), projected(20.0, 4.0)
+   def p2 = projected(20.0, 16.0)
+   mut f64 sx0, sy0 = 0.0, 0.0
+   mut f64 sx1, sy1 = 0.0, 0.0
+   mut f64 sx2, sy2 = 0.0, 0.0
+   sx0, sy0 = p0.get(0, 0.0), p0.get(1, 0.0)
+   sx1, sy1 = p1.get(0, 0.0), p1.get(1, 0.0)
+   sx2, sy2 = p2.get(0, 0.0), p2.get(1, 0.0)
+   triangle(sx0, sy0, sx1, sy1, sx2, sy2)
+}
+render()
+print("FLOAT-CARRIERS-OK")
+NY
+}

@@ -5,14 +5,7 @@
 #include "support.h"
 
 static void emit_call(nyr_func_t *f, unsigned flags, bool returns_borrow) {
-  int arg = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_CONST_I64,
-                                       .dst = -1,
-                                       .a = -1,
-                                       .b = -1,
-                                       .c = -1,
-                                       .d = -1,
-                                       .e = -1,
-                                       .f = -1});
+  int arg = nyr_opt_emit_abc(f, NYIR_CONST_I64, -1, -1, -1);
   int result =
       nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_CALL,
                                  .dst = -1,

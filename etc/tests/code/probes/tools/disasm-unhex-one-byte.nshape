@@ -1,0 +1,19 @@
+shape rev-disasm-unhex-one-byte {
+  suite "native"
+  family "reverse-engineering"
+  generator "deterministic"
+  features [disassembly byte-conversion]
+  timeout 60
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O2"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.disasm as dasm
+
+def bytes = dasm.unhex("90")
+assert(bytes.len == 1, "a one-byte hex string decodes to exactly one byte")
+assert(bytes.get(0) == 0x90, "the decoded byte retains its value")
+print("✓ one-byte disassembly input regression passed")
+NY
+}

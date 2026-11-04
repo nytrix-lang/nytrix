@@ -19,28 +19,9 @@ fn ppid() int {
 fn env(str key) any {
    "Returns the value of environment variable `key`."
    if !is_str(key) { return nil }
-   def int key_len = key.len
-   if key_len == 0 { return nil }
-   def int n = envc()
-   mut i = 0
-   while i < n {
-      def ptr entry = envp(i)
-      if entry {
-         mut j = 0
-         while j < key_len && load8(entry, j) == load8(key, j) { j += 1 }
-         if j == key_len && load8(entry, key_len) == 61 {
-            ;; Convert from the raw C pointer directly. The generic
-            ;; cstr_to_str wrapper accepts a dynamic `any` value, while envp
-            ;; supplies a native pointer word; crossing that boundary through
-            ;; the wrapper loses the pointer class in NYIR.
-            def ptr value_ptr = ptr_add(entry, key_len + 1)
-            def str value = __cstr_to_str(value_ptr)
-            return value
-         }
-      }
-      i += 1
-   }
-   nil
+   def value = __env_get(key)
+   if value == 0 { return nil }
+   value
 }
 
 fn environ() list {

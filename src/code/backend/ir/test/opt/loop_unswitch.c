@@ -9,18 +9,19 @@ extern bool nyr_loop_unswitch(nyr_func_t *f);
 static bool build_invariant_branch(nyr_func_t *f, int64_t flag_value,
                                    bool condition_uses_iv, bool trap_false,
                                    bool return_iv, bool exit_phi,
-                                   bool overflow_sum) {
+                                   bool overflow_sum,
+                                   bool fallthrough_preheader) {
   nyr_opt_begin(f);
   int base = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_ALLOCA,
-                                        .dst = -1,
-                                        .a = -1,
-                                        .b = -1,
-                                        .c = -1,
-                                        .d = -1,
-                                        .e = -1,
-                                        .f = -1,
-                                        .imm = 8,
-                                        .scalar_class = NYIR_SCALAR_POINTER});
+                                         .dst = -1,
+                                         .a = -1,
+                                         .b = -1,
+                                         .c = -1,
+                                         .d = -1,
+                                         .e = -1,
+                                         .f = -1,
+                                         .imm = 8,
+                                         .scalar_class = NYIR_SCALAR_POINTER});
   int flag = nyr_opt_const(f, flag_value);
   int zero = nyr_opt_const(f, 0);
   int one = nyr_opt_const(f, 1);
@@ -29,7 +30,8 @@ static bool build_invariant_branch(nyr_func_t *f, int64_t flag_value,
   int one_value = nyr_opt_const(f, 11);
   int other_value = nyr_opt_const(f, 22);
   int exit_fallback = nyr_opt_const(f, -1);
-  nyr_opt_br(f, 10);
+  if (!fallthrough_preheader)
+    nyr_opt_br(f, 10);
 
   nyr_opt_label(f, 10);
   size_t phi_at = f->len;
@@ -64,46 +66,32 @@ static bool build_invariant_branch(nyr_func_t *f, int64_t flag_value,
   if (trap_false)
     false_value =
         nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_CALL,
-                                   .dst = -1,
-                                   .a = -1,
-                                   .b = -1,
-                                   .c = -1,
-                                   .d = -1,
-                                   .e = -1,
-                                   .f = -1,
-                                   .imm = 0,
-                                   .symbol = "unswitch_trap",
-                                   .effects = NYIR_EFFECT_CALL |
-                                              NYIR_EFFECT_UNKNOWN_SIDE_EFFECT |
-                                              NYIR_EFFECT_MAY_TRAP});
+                                    .dst = -1,
+                                    .a = -1,
+                                    .b = -1,
+                                    .c = -1,
+                                    .d = -1,
+                                    .e = -1,
+                                    .f = -1,
+                                    .imm = 0,
+                                    .symbol = "unswitch_trap",
+                                    .effects = NYIR_EFFECT_CALL |
+                                               NYIR_EFFECT_UNKNOWN_SIDE_EFFECT |
+                                               NYIR_EFFECT_MAY_TRAP});
   nyr_opt_br(f, 40);
 
   nyr_opt_label(f, 40);
   int selected_value = f->next_value;
   nyr_opt_phi(f, 20, one_value, 30, false_value);
-  nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_STORE_I64,
-                             .dst = -1,
-                             .a = base,
-                             .b = -1,
-                             .c = selected_value,
-                             .d = -1,
-                             .e = -1,
-                             .f = -1});
+  nyr_opt_emit_abc(f, NYIR_STORE_I64, base, -1, selected_value);
   int next_iv = nyr_opt_binop(f, NYIR_ADD_I64, iv, one);
   int next_sum = nyr_opt_binop(f, NYIR_ADD_I64, sum, one);
   nyr_opt_br(f, 10);
 
   if (!exit_phi) {
     nyr_opt_label(f, 50);
-    int result = return_iv ? iv
-                           : nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_LOAD_I64,
-                                                        .dst = -1,
-                                                        .a = base,
-                                                        .b = -1,
-                                                        .c = -1,
-                                                        .d = -1,
-                                                        .e = -1,
-                                                        .f = -1});
+    int result =
+        return_iv ? iv : nyr_opt_emit_abc(f, NYIR_LOAD_I64, base, -1, -1);
     nyr_opt_ret(f, result);
   }
 
@@ -118,30 +106,96 @@ static bool build_invariant_branch(nyr_func_t *f, int64_t flag_value,
 
 static bool check_unswitch(int64_t flag, bool dependent, long long want,
                            bool trap_false, bool return_iv, bool exit_phi,
-                           bool overflow_sum) {
+                           bool overflow_sum, bool fallthrough_preheader) {
   nyr_func_t f;
   if (!build_invariant_branch(&f, flag, dependent, trap_false, return_iv,
-                              exit_phi, overflow_sum))
+                              exit_phi, overflow_sum, fallthrough_preheader))
     return false;
   if (nyr_opt_want_dump())
     nyr_dump_cfg(stderr, &f, "loop-unswitch-before");
   long long before = nyr_opt_eval(&f, "loop-unswitch-before");
+  size_t before_len = f.len;
   if (!nyr_loop_unswitch(&f) || !nyr_opt_verify(&f, "loop-unswitch-after")) {
     nyr_ir_func_free(&f);
     return false;
   }
   long long after = nyr_opt_eval(&f, "loop-unswitch-after");
+  bool transformed = f.len > before_len;
   nyr_ir_func_free(&f);
-  if (before != want || after != want) {
+  if (before != want || after != want ||
+      (fallthrough_preheader && !transformed)) {
     fprintf(stderr,
             "[loop-unswitch] flag=%lld dependent=%d before=%lld after=%lld "
-            "want=%lld\n",
-            (long long)flag, (int)dependent, before, after, want);
+            "want=%lld transformed=%d\n",
+            (long long)flag, (int)dependent, before, after, want,
+            (int)transformed);
     return false;
   }
   printf("[loop-unswitch] flag=%lld dependent=%d result=%lld\n",
          (long long)flag, (int)dependent, after);
   return true;
+}
+
+static bool check_direct_liveout(int64_t flag_value, long long expected) {
+  nyr_func_t f;
+  nyr_opt_begin(&f);
+  int zero = nyr_opt_const(&f, 0);
+  int one = nyr_opt_const(&f, 1);
+  int two = nyr_opt_const(&f, 2);
+  int limit = nyr_opt_const(&f, 3);
+  int flag = nyr_opt_const(&f, flag_value);
+  nyr_opt_br(&f, 10);
+  nyr_opt_label(&f, 10);
+  size_t iv_phi_at = f.len;
+  int iv = f.next_value;
+  nyr_opt_phi(&f, -1, zero, 40, zero);
+  size_t sum_phi_at = f.len;
+  int sum = f.next_value;
+  nyr_opt_phi(&f, -1, zero, 40, zero);
+  int keep_going = nyr_opt_cmp(&f, iv, limit, NYIR_CMP_LT);
+  nyr_opt_br_if(&f, keep_going, 11);
+  nyr_opt_br(&f, 50);
+  nyr_opt_label(&f, 11);
+  nyr_opt_br_if(&f, flag, 20);
+  nyr_opt_br(&f, 30);
+  nyr_opt_label(&f, 20);
+  int true_sum = nyr_opt_binop(&f, NYIR_ADD_I64, sum, one);
+  nyr_opt_br(&f, 40);
+  nyr_opt_label(&f, 30);
+  int false_sum = nyr_opt_binop(&f, NYIR_ADD_I64, sum, two);
+  nyr_opt_br(&f, 40);
+  nyr_opt_label(&f, 40);
+  int next_sum = f.next_value;
+  nyr_opt_phi(&f, 20, true_sum, 30, false_sum);
+  int next_iv = nyr_opt_binop(&f, NYIR_ADD_I64, iv, one);
+  nyr_opt_br(&f, 10);
+  nyr_opt_label(&f, 50);
+  nyr_opt_ret(&f, sum);
+  f.data[iv_phi_at].phi_incoming[1].value = next_iv;
+  f.data[sum_phi_at].phi_incoming[1].value = next_sum;
+
+  bool ok = nyr_opt_verify(&f, "loop-unswitch-direct-liveout-before");
+  if (ok && nyr_opt_want_dump())
+    nyr_dump_cfg(stderr, &f, "loop-unswitch-direct-liveout-before");
+  long long before =
+      ok ? nyr_opt_eval(&f, "loop-unswitch-direct-liveout-before") : 0;
+  size_t before_len = f.len;
+  ok = ok && nyr_loop_unswitch(&f) &&
+       nyr_opt_verify(&f, "loop-unswitch-direct-liveout-after");
+  long long after =
+      ok ? nyr_opt_eval(&f, "loop-unswitch-direct-liveout-after") : 0;
+  ok = ok && before == expected && after == before && f.len > before_len;
+  nyr_ir_func_free(&f);
+  if (!ok)
+    fprintf(stderr,
+            "[loop-unswitch] direct loop live-out changed or was not cloned "
+            "(flag=%lld before=%lld after=%lld expected=%lld)\n",
+            (long long)flag_value, before, after, expected);
+  else
+    printf("[loop-unswitch] direct loop live-out preserved "
+           "(flag=%lld result=%lld)\n",
+           (long long)flag_value, after);
+  return ok;
 }
 
 static bool check_multiple_exits(int64_t flag_value, long long expected) {
@@ -180,9 +234,9 @@ static bool check_multiple_exits(int64_t flag_value, long long expected) {
   *exit_60_in = (nyr_phi_incoming_t){.predecessor_label = 20, .value = iv};
   int exit_60_iv = f.next_value;
   nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_PHI,
-                              .dst = -1,
-                              .phi_incoming = exit_60_in,
-                              .phi_incoming_len = 1});
+                               .dst = -1,
+                               .phi_incoming = exit_60_in,
+                               .phi_incoming_len = 1});
   nyr_opt_ret(
       &f, nyr_opt_binop(&f, NYIR_ADD_I64, exit_60_iv, nyr_opt_const(&f, 22)));
   f.data[phi_at].phi_incoming[1].value = next;
@@ -212,28 +266,21 @@ static bool check_effectful_store(int64_t flag_value, long long expected) {
   nyr_func_t f;
   nyr_opt_begin(&f);
   int slot = nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_ALLOCA,
-                                         .dst = -1,
-                                         .a = -1,
-                                         .b = -1,
-                                         .c = -1,
-                                         .d = -1,
-                                         .e = -1,
-                                         .f = -1,
-                                         .imm = 8,
-                                         .scalar_class = NYIR_SCALAR_POINTER});
+                                          .dst = -1,
+                                          .a = -1,
+                                          .b = -1,
+                                          .c = -1,
+                                          .d = -1,
+                                          .e = -1,
+                                          .f = -1,
+                                          .imm = 8,
+                                          .scalar_class = NYIR_SCALAR_POINTER});
   int zero = nyr_opt_const(&f, 0);
   int one = nyr_opt_const(&f, 1);
   int hundred = nyr_opt_const(&f, 100);
   int limit = nyr_opt_const(&f, 3);
   int flag = nyr_opt_const(&f, flag_value);
-  nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_STORE_I64,
-                              .dst = -1,
-                              .a = slot,
-                              .b = -1,
-                              .c = zero,
-                              .d = -1,
-                              .e = -1,
-                              .f = -1});
+  nyr_opt_emit_abc(&f, NYIR_STORE_I64, slot, -1, zero);
   nyr_opt_br(&f, 10);
   nyr_opt_label(&f, 10);
   size_t phi_at = f.len;
@@ -246,37 +293,16 @@ static bool check_effectful_store(int64_t flag_value, long long expected) {
   nyr_opt_br_if(&f, flag, 20);
   nyr_opt_br(&f, 30);
   nyr_opt_label(&f, 20);
-  nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_STORE_I64,
-                              .dst = -1,
-                              .a = slot,
-                              .b = -1,
-                              .c = iv,
-                              .d = -1,
-                              .e = -1,
-                              .f = -1});
+  nyr_opt_emit_abc(&f, NYIR_STORE_I64, slot, -1, iv);
   nyr_opt_br(&f, 40);
   nyr_opt_label(&f, 30);
   int false_value = nyr_opt_binop(&f, NYIR_ADD_I64, iv, hundred);
-  nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_STORE_I64,
-                              .dst = -1,
-                              .a = slot,
-                              .b = -1,
-                              .c = false_value,
-                              .d = -1,
-                              .e = -1,
-                              .f = -1});
+  nyr_opt_emit_abc(&f, NYIR_STORE_I64, slot, -1, false_value);
   nyr_opt_label(&f, 40);
   int next = nyr_opt_binop(&f, NYIR_ADD_I64, iv, one);
   nyr_opt_br(&f, 10);
   nyr_opt_label(&f, 50);
-  int result = nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_LOAD_I64,
-                                           .dst = -1,
-                                           .a = slot,
-                                           .b = -1,
-                                           .c = -1,
-                                           .d = -1,
-                                           .e = -1,
-                                           .f = -1});
+  int result = nyr_opt_emit_abc(&f, NYIR_LOAD_I64, slot, -1, -1);
   nyr_opt_ret(&f, result);
   f.data[phi_at].phi_incoming[1].value = next;
 
@@ -303,28 +329,21 @@ static bool check_multiple_latches(int64_t flag_value, long long expected) {
   nyr_func_t f;
   nyr_opt_begin(&f);
   int slot = nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_ALLOCA,
-                                         .dst = -1,
-                                         .a = -1,
-                                         .b = -1,
-                                         .c = -1,
-                                         .d = -1,
-                                         .e = -1,
-                                         .f = -1,
-                                         .imm = 8,
-                                         .scalar_class = NYIR_SCALAR_POINTER});
+                                          .dst = -1,
+                                          .a = -1,
+                                          .b = -1,
+                                          .c = -1,
+                                          .d = -1,
+                                          .e = -1,
+                                          .f = -1,
+                                          .imm = 8,
+                                          .scalar_class = NYIR_SCALAR_POINTER});
   int zero = nyr_opt_const(&f, 0);
   int one = nyr_opt_const(&f, 1);
   int hundred = nyr_opt_const(&f, 100);
   int limit = nyr_opt_const(&f, 3);
   int flag = nyr_opt_const(&f, flag_value);
-  nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_STORE_I64,
-                              .dst = -1,
-                              .a = slot,
-                              .b = -1,
-                              .c = zero,
-                              .d = -1,
-                              .e = -1,
-                              .f = -1});
+  nyr_opt_emit_abc(&f, NYIR_STORE_I64, slot, -1, zero);
   nyr_opt_br(&f, 10);
   nyr_opt_label(&f, 10);
   size_t phi_at = f.len;
@@ -350,25 +369,11 @@ static bool check_multiple_latches(int64_t flag_value, long long expected) {
   nyr_opt_br_if(&f, flag, 20);
   nyr_opt_br(&f, 21);
   nyr_opt_label(&f, 20);
-  nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_STORE_I64,
-                              .dst = -1,
-                              .a = slot,
-                              .b = -1,
-                              .c = iv,
-                              .d = -1,
-                              .e = -1,
-                              .f = -1});
+  nyr_opt_emit_abc(&f, NYIR_STORE_I64, slot, -1, iv);
   nyr_opt_br(&f, 40);
   nyr_opt_label(&f, 21);
   int other = nyr_opt_binop(&f, NYIR_ADD_I64, iv, hundred);
-  nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_STORE_I64,
-                              .dst = -1,
-                              .a = slot,
-                              .b = -1,
-                              .c = other,
-                              .d = -1,
-                              .e = -1,
-                              .f = -1});
+  nyr_opt_emit_abc(&f, NYIR_STORE_I64, slot, -1, other);
   nyr_opt_br(&f, 41);
   nyr_opt_label(&f, 40);
   int next_a = nyr_opt_binop(&f, NYIR_ADD_I64, iv, one);
@@ -377,14 +382,7 @@ static bool check_multiple_latches(int64_t flag_value, long long expected) {
   int next_b = nyr_opt_binop(&f, NYIR_ADD_I64, iv, one);
   nyr_opt_br(&f, 10);
   nyr_opt_label(&f, 50);
-  int result = nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_LOAD_I64,
-                                           .dst = -1,
-                                           .a = slot,
-                                           .b = -1,
-                                           .c = -1,
-                                           .d = -1,
-                                           .e = -1,
-                                           .f = -1});
+  int result = nyr_opt_emit_abc(&f, NYIR_LOAD_I64, slot, -1, -1);
   nyr_opt_ret(&f, result);
   f.data[phi_at].phi_incoming[1].value = next_a;
   f.data[phi_at].phi_incoming[2].value = next_b;
@@ -429,7 +427,7 @@ static bool resolve_unswitch_trap(void *opaque, const char *symbol,
 
 static bool check_selected_call_trap(void) {
   nyr_func_t f;
-  if (!build_invariant_branch(&f, 0, false, true, false, false, false))
+  if (!build_invariant_branch(&f, 0, false, true, false, false, false, false))
     return false;
   int64_t locals[8] = {0};
   nyr_eval_result_t before = {0}, after = {0};
@@ -437,14 +435,14 @@ static bool check_selected_call_trap(void) {
   unswitch_call_context_t before_ctx = {0}, after_ctx = {0};
   bool before_ok =
       nyr_ir_eval_with_calls(&f, locals, 8, 500, &before, resolve_unswitch_trap,
-                           &before_ctx, before_err, sizeof(before_err));
+                             &before_ctx, before_err, sizeof(before_err));
   bool transformed =
       nyr_loop_unswitch(&f) &&
       nyr_opt_verify(&f, "loop-unswitch-selected-call-trap-after");
   bool after_ok =
       transformed &&
       nyr_ir_eval_with_calls(&f, locals, 8, 500, &after, resolve_unswitch_trap,
-                           &after_ctx, after_err, sizeof(after_err));
+                             &after_ctx, after_err, sizeof(after_err));
   bool ok = !before_ok && !after_ok && transformed && before_ctx.calls == 1 &&
             after_ctx.calls == before_ctx.calls &&
             strcmp(before_err, after_err) == 0;
@@ -567,13 +565,16 @@ static bool check_unlabelled_trampoline_semantics(int64_t flag_value,
 int main(void) {
   if (getenv("OPTCHECK_UNSWITCH_TRACE"))
     ny_dbg_set_flag(NY_DBG_HEURISTIC, true);
-  if (!check_unswitch(1, false, 11, false, false, false, false) ||
-      !check_unswitch(0, false, 22, false, false, false, false) ||
-      !check_unswitch(0, true, 22, false, false, false, false) ||
-      !check_unswitch(1, false, 11, true, false, false, false) ||
-      !check_unswitch(1, false, 3, false, true, false, false) ||
-      !check_unswitch(1, false, 3, false, false, true, false) ||
-      !check_unswitch(1, false, INT64_MIN + 2, false, false, true, true) ||
+  if (!check_unswitch(1, false, 11, false, false, false, false, false) ||
+      !check_unswitch(0, false, 22, false, false, false, false, false) ||
+      !check_unswitch(0, true, 22, false, false, false, false, false) ||
+      !check_unswitch(1, false, 11, true, false, false, false, false) ||
+      !check_unswitch(1, false, 3, false, true, false, false, false) ||
+      !check_unswitch(1, false, 3, false, false, true, false, false) ||
+      !check_unswitch(1, false, INT64_MIN + 2, false, false, true, true,
+                      false) ||
+      !check_unswitch(1, false, 11, false, false, false, false, true) ||
+      !check_direct_liveout(1, 3) || !check_direct_liveout(0, 6) ||
       !check_multiple_exits(1, 22) || !check_multiple_exits(0, 17) ||
       !check_effectful_store(1, 2) || !check_effectful_store(0, 102) ||
       !check_multiple_latches(1, 2) || !check_multiple_latches(0, 102) ||

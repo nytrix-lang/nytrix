@@ -364,7 +364,7 @@ static bool sp_try_one(nyr_func_t *work, const nyr_scev_loop_t *loop) {
   do {                                                                         \
     if (olen == out_cap) {                                                     \
       size_t nc = out_cap * 2;                                                 \
-      nyr_inst_t *no = realloc(out, nc * sizeof(*no));                        \
+      nyr_inst_t *no = realloc(out, nc * sizeof(*no));                         \
       if (!no)                                                                 \
         goto out;                                                              \
       out = no;                                                                \

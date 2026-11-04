@@ -340,8 +340,7 @@ static bool ny_binding_is_untyped_empty_sequence(binding *b) {
     return false;
   if (ny_expr_is_list_ctor(init))
     return true;
-  return ny_expr_is_list_or_tuple_lit(init) &&
-         init->as.list_like.len == 0;
+  return ny_expr_is_list_or_tuple_lit(init) && init->as.list_like.len == 0;
 }
 
 static bool ny_expr_is_direct_list_storage(codegen_t *cg, scope *scopes,
@@ -375,9 +374,9 @@ static bool ny_expr_has_known_list_like_type(codegen_t *cg, scope *scopes,
     size_t name_len = (size_t)target->tok.len;
     if (name_len == 0)
       name_len = strlen(target->as.ident.name);
-    binding *b = ny_gencall_lookup_binding(cg, scopes, depth,
-                                           target->as.ident.name, name_len,
-                                           target->as.ident.hash);
+    binding *b =
+        ny_gencall_lookup_binding(cg, scopes, depth, target->as.ident.name,
+                                  name_len, target->as.ident.hash);
     if (ny_binding_is_untyped_empty_sequence(b))
       return false;
   }
@@ -392,9 +391,9 @@ static bool ny_expr_has_known_list_type(codegen_t *cg, scope *scopes,
     size_t name_len = (size_t)target->tok.len;
     if (name_len == 0)
       name_len = strlen(target->as.ident.name);
-    binding *b = ny_gencall_lookup_binding(cg, scopes, depth,
-                                           target->as.ident.name, name_len,
-                                           target->as.ident.hash);
+    binding *b =
+        ny_gencall_lookup_binding(cg, scopes, depth, target->as.ident.name,
+                                  name_len, target->as.ident.hash);
     if (ny_binding_is_untyped_empty_sequence(b))
       return false;
   }
@@ -807,21 +806,20 @@ static bool ny_expr_is_f64_store_value(codegen_t *cg, scope *scopes,
                                        size_t depth, expr_t *value) {
   if (!value)
     return false;
-  if (value->kind == NY_E_LITERAL &&
-      value->as.literal.kind == NY_LIT_FLOAT)
+  if (value->kind == NY_E_LITERAL && value->as.literal.kind == NY_LIT_FLOAT)
     return true;
-  if (value->semantic.resolved &&
-      (value->semantic.rep == NY_SEM_REP_F64 ||
-       value->semantic.rep == NY_SEM_REP_F32))
+  if (value->semantic.resolved && (value->semantic.rep == NY_SEM_REP_F64 ||
+                                   value->semantic.rep == NY_SEM_REP_F32))
     return true;
   const char *type = infer_expr_type(cg, scopes, depth, value);
   return ny_gencall_type_is(type, "f64") || ny_gencall_type_is(type, "f32") ||
          ny_gencall_type_is(type, "float");
 }
 
-static LLVMValueRef ny_emit_dynamic_f64_list_store(
-    codegen_t *cg, scope *scopes, size_t depth, expr_t *target, expr_t *key,
-    expr_t *value, token_t tok) {
+static LLVMValueRef ny_emit_dynamic_f64_list_store(codegen_t *cg, scope *scopes,
+                                                   size_t depth, expr_t *target,
+                                                   expr_t *key, expr_t *value,
+                                                   token_t tok) {
   LLVMValueRef target_v = gen_expr(cg, scopes, depth, target);
   LLVMValueRef key_v = gen_expr(cg, scopes, depth, key);
   LLVMValueRef value_v = gen_expr(cg, scopes, depth, value);
@@ -851,8 +849,8 @@ static LLVMValueRef ny_emit_dynamic_f64_list_store(
   }
   target_v = ny_cast_to_i64(cg, target_v, "list_set_dynamic_target");
   key_v = ny_cast_to_i64(cg, key_v, "list_set_dynamic_key");
-  LLVMValueRef key_raw = ny_gencall_index_raw_i64(
-      cg, scopes, depth, key, key_v, "list_set_dynamic_index_raw");
+  LLVMValueRef key_raw = ny_gencall_index_raw_i64(cg, scopes, depth, key, key_v,
+                                                  "list_set_dynamic_index_raw");
   LLVMValueRef key_tagged = key_raw ? ny_tag_int(cg, key_raw) : NULL;
   fun_sig *runtime = lookup_fun(cg, "__store_item_fast", 0);
   if (!target_v || !key_tagged || !runtime) {
@@ -1581,13 +1579,11 @@ static LLVMValueRef ny_try_emit_fast_receiver_get(codegen_t *cg, scope *scopes,
   bool target_is_known_list_like =
       ny_expr_has_known_list_like_type(cg, scopes, depth, target);
   const char *target_type = infer_expr_type(cg, scopes, depth, target);
-  bool target_is_dynamic = !target_is_direct_list &&
-                           !target_is_raw_int_list &&
-                           !target_is_raw_f64_list &&
-                           !target_is_known_list_like &&
-                           (ny_gencall_type_is(target_type, "any") ||
-                            ny_gencall_type_is(target_type, "unknown") ||
-                            !target_type);
+  bool target_is_dynamic =
+      !target_is_direct_list && !target_is_raw_int_list &&
+      !target_is_raw_f64_list && !target_is_known_list_like &&
+      (ny_gencall_type_is(target_type, "any") ||
+       ny_gencall_type_is(target_type, "unknown") || !target_type);
   /*
    * Inferred list values produced by a dynamic call (for example
    * `node.get("args")`) may use raw elem-8 slots even though the receiver is
@@ -1645,12 +1641,13 @@ static LLVMValueRef ny_try_emit_fast_receiver_get(codegen_t *cg, scope *scopes,
       assume_in_bounds);
   if (static_int_list_get)
     return static_int_list_get;
-  if ((target_is_known_list_like || target_is_dynamic || target_is_direct_list) &&
+  if ((target_is_known_list_like || target_is_dynamic ||
+       target_is_direct_list) &&
       !target_is_raw_int_list && !target_is_raw_f64_list) {
     LLVMValueRef target_v = ny_cast_to_i64(
         cg, gen_expr(cg, scopes, depth, target), "dynamic_get_target");
-    LLVMValueRef key_v = ny_cast_to_i64(
-        cg, gen_expr(cg, scopes, depth, key), "dynamic_get_key");
+    LLVMValueRef key_v =
+        ny_cast_to_i64(cg, gen_expr(cg, scopes, depth, key), "dynamic_get_key");
     LLVMValueRef default_v =
         default_expr
             ? ny_cast_to_i64(cg, gen_expr(cg, scopes, depth, default_expr),
@@ -1668,8 +1665,8 @@ static LLVMValueRef ny_try_emit_fast_receiver_get(codegen_t *cg, scope *scopes,
      * how to handle managed sequences, dictionaries, strings, nil, and
      * opaque pointers while preserving the fallback value.
      */
-    const char *runtime_name = target_is_dynamic ? "rt_value_get_index_raw"
-                                                 : "rt_tbuf_get_any";
+    const char *runtime_name =
+        target_is_dynamic ? "rt_value_get_index_raw" : "rt_tbuf_get_any";
     LLVMValueRef fn = ny_get_named_fn(cg, runtime_name);
     if (!fn)
       fn = LLVMAddFunction(cg->module, runtime_name, fn_ty);
@@ -1741,9 +1738,9 @@ static LLVMValueRef ny_try_emit_fast_receiver_set(codegen_t *cg, scope *scopes,
   const char *canonical = e->semantic.canonical_callee;
   const stmt_t *canonical_decl = e->semantic.canonical_callee_stmt;
   int std_list_index = ny_std_find_module_by_name("core.list");
-  ny_module_id_t std_list_id =
-      std_list_index >= 0 ? ny_std_module_id((size_t)std_list_index)
-                          : NY_MODULE_ID_UNKNOWN;
+  ny_module_id_t std_list_id = std_list_index >= 0
+                                   ? ny_std_module_id((size_t)std_list_index)
+                                   : NY_MODULE_ID_UNKNOWN;
   bool semantic_list_receiver =
       canonical && strncmp(canonical, "core.list.", 14) == 0 &&
       canonical_decl && canonical_decl->kind == NY_S_FUNC &&
@@ -1782,8 +1779,8 @@ static LLVMValueRef ny_try_emit_fast_receiver_set(codegen_t *cg, scope *scopes,
   }
 
   if (ny_expr_is_f64_store_value(cg, scopes, depth, value))
-    return ny_emit_dynamic_f64_list_store(cg, scopes, depth, target, key,
-                                          value, e->tok);
+    return ny_emit_dynamic_f64_list_store(cg, scopes, depth, target, key, value,
+                                          e->tok);
 
   LLVMValueRef raw_int_list_set = ny_try_emit_raw_int_list_set(
       cg, scopes, depth, target, key, value, e->tok, key_is_safe_fast_index,
@@ -1898,8 +1895,8 @@ ny_emit_fast_indexable_get(codegen_t *cg, scope *scopes, size_t depth,
    * the expression-aware helper handles literals and typed values without
    * guessing from parity.
    */
-  LLVMValueRef key_raw = ny_gencall_index_raw_i64(
-      cg, scopes, depth, key, key_v, "fast_get_key_raw");
+  LLVMValueRef key_raw = ny_gencall_index_raw_i64(cg, scopes, depth, key, key_v,
+                                                  "fast_get_key_raw");
 
   LLVMValueRef adj_idx = key_raw;
   if (assume_in_bounds) {
@@ -2278,8 +2275,8 @@ static LLVMValueRef ny_try_fast_len_builtin(codegen_t *cg, scope *scopes,
     fun_sig *list_len_sig = lookup_fun(cg, "__list_len", 0);
     if (list_len_sig)
       return LLVMBuildCall2(cg->builder, list_len_sig->type,
-                            list_len_sig->value, &obj_v,
-                            1, NY_LLVM_NAME(cg, "fast_list_len"));
+                            list_len_sig->value, &obj_v, 1,
+                            NY_LLVM_NAME(cg, "fast_list_len"));
     return 0;
   }
 
@@ -2312,16 +2309,14 @@ static LLVMValueRef ny_try_fast_len_builtin(codegen_t *cg, scope *scopes,
 }
 
 static fun_sig *ny_gencall_lookup_len_func(codegen_t *cg) {
-  static const char *const names[] = {"core.len", "len",
-                                      "core.reflect.len"};
+  static const char *const names[] = {"core.len", "len", "core.reflect.len"};
   for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); ++i) {
     fun_sig *sig = lookup_fun(cg, names[i], 0);
     if (sig && ny_sig_in_current_sigs(cg, sig) && sig->arity == 1 &&
         sig->stmt_t && sig->stmt_t->kind == NY_S_FUNC &&
         ny_is_stdlib_tok(sig->stmt_t->tok) &&
         (ny_codegen_module_matches_std(cg, sig->module_name, "core") ||
-         ny_codegen_module_matches_std(cg, sig->module_name,
-                                       "core.reflect")))
+         ny_codegen_module_matches_std(cg, sig->module_name, "core.reflect")))
       return sig;
   }
   return NULL;
@@ -2511,8 +2506,8 @@ LLVMValueRef ny_try_member_property_expr(codegen_t *cg, scope *scopes,
       !e->as.member.name)
     return 0;
 
-  const char *declared_owner = infer_expr_type(cg, scopes, depth,
-                                               e->as.member.target);
+  const char *declared_owner =
+      infer_expr_type(cg, scopes, depth, e->as.member.target);
   if (e->as.member.target->kind == NY_E_IDENT) {
     expr_t *receiver = e->as.member.target;
     binding *b = ny_gencall_lookup_binding(
@@ -2521,8 +2516,10 @@ LLVMValueRef ny_try_member_property_expr(codegen_t *cg, scope *scopes,
     if (b && b->type_name)
       declared_owner = b->type_name;
   }
-  fun_sig *property = declared_owner ? ny_gencall_lookup_attached_method(
-      cg, declared_owner, e->as.member.name) : NULL;
+  fun_sig *property =
+      declared_owner ? ny_gencall_lookup_attached_method(cg, declared_owner,
+                                                         e->as.member.name)
+                     : NULL;
   if (property && property->stmt_t &&
       !ny_is_stdlib_tok(property->stmt_t->tok) &&
       ny_sig_allows_zero_arg_property(property)) {
@@ -2606,10 +2603,9 @@ LLVMValueRef ny_try_member_property_expr(codegen_t *cg, scope *scopes,
       }
       target_v = ny_cast_to_i64(cg, target_v, "property_len_arg");
       ny_dbg_loc(cg, e->tok);
-      LLVMValueRef result =
-          LLVMBuildCall2(cg->builder, len_sig->type, len_sig->value,
-                         (LLVMValueRef[]){target_v}, 1,
-                         NY_LLVM_NAME(cg, "property_len"));
+      LLVMValueRef result = LLVMBuildCall2(
+          cg->builder, len_sig->type, len_sig->value,
+          (LLVMValueRef[]){target_v}, 1, NY_LLVM_NAME(cg, "property_len"));
       /*
        * The dynamic length bridge is a raw runtime helper, while a member
        * property is a normal Ny language value.  Re-enter the tagged integer
@@ -3421,8 +3417,8 @@ static LLVMValueRef emit_store_layout_field(codegen_t *cg, scope *scopes,
     dst_raw = ny_ptr2i64(cg, dst_raw, NY_LLVM_NAME(cg, "layout_field_dst"));
   else {
     dst_raw = ny_cast_to_i64(cg, dst_raw, "layout_field_dst");
-    dst_raw = ny_build_rt_untag_i64(
-        cg, dst_raw, NY_LLVM_NAME(cg, "layout_field_dst_raw"));
+    dst_raw = ny_build_rt_untag_i64(cg, dst_raw,
+                                    NY_LLVM_NAME(cg, "layout_field_dst_raw"));
   }
   type_layout_t tl = resolve_raw_layout(cg, field->type_name, e->tok);
   if (!tl.is_valid || !tl.llvm_type)
@@ -3432,11 +3428,11 @@ static LLVMValueRef emit_store_layout_field(codegen_t *cg, scope *scopes,
     raw = LLVMBuildBitCast(cg->builder, raw, tl.llvm_type,
                            NY_LLVM_NAME(cg, "layout_field_cast"));
   LLVMValueRef off = LLVMConstInt(cg->type_i64, (uint64_t)field->offset, false);
-  LLVMValueRef addr = ny_add(cg, dst_raw, off,
-                             NY_LLVM_NAME(cg, "layout_field_addr"));
-  LLVMValueRef ptr = LLVMBuildIntToPtr(cg->builder, addr,
-                                       LLVMPointerType(tl.llvm_type, 0),
-                                       NY_LLVM_NAME(cg, "layout_field_ptr"));
+  LLVMValueRef addr =
+      ny_add(cg, dst_raw, off, NY_LLVM_NAME(cg, "layout_field_addr"));
+  LLVMValueRef ptr =
+      LLVMBuildIntToPtr(cg->builder, addr, LLVMPointerType(tl.llvm_type, 0),
+                        NY_LLVM_NAME(cg, "layout_field_ptr"));
   LLVMValueRef st = LLVMBuildStore(cg->builder, raw, ptr);
   LLVMSetAlignment(st, field->align ? (unsigned)field->align : 1);
   return dst_v;

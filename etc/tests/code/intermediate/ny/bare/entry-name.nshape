@@ -1,0 +1,61 @@
+shape bare_entry_name_controls_the_elf_entry {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["bare", "aot", "entry-name", "regression"]
+  template ny-test-case
+  expect compile_and_run
+  ci windows-skip
+  source ny <<'NY'
+use core.os (file_exists, file_remove, pid, run_capture, temp_dir)
+
+def compiler = env("NYTRIX_NY_FULL_BIN")
+assert(is_str(compiler) && compiler.len > 0,
+       "test runner provides the compiler path")
+def binary = temp_dir() + "/ny-bare-entry-name-" + to_str(pid())
+def syscall_binary = temp_dir() + "/ny-bare-syscall-" + to_str(pid())
+def compile = run_capture(
+    [compiler, "--mode=bare", "--native-only", "--release", "-no-std",
+     "--entry-name=ny_bare_custom_entry", "-o", binary, "-e",
+     "print(\"entry-ok\")"],
+    [], nil, false)
+def execute = if int(compile.get("code", 127)) == 0 {
+  run_capture([binary], [], nil, false)
+} else {
+  nil
+}
+def dynamic = if int(compile.get("code", 127)) == 0 {
+  run_capture(["readelf", "-d", binary], [], nil, false)
+} else {
+  nil
+}
+def compile_syscall = run_capture(
+    [compiler, "--mode=bare", "--native-only", "--release", "-no-std",
+     "--entry-name", "ny_bare_custom_entry", "-o", syscall_binary, "-e",
+     "fn process() int { __syscall_raw(60,42,0,0,0,0,0) }\nprocess()"],
+    [], nil, false)
+def execute_syscall = if int(compile_syscall.get("code", 127)) == 0 {
+  run_capture([syscall_binary], [], nil, false)
+} else {
+  nil
+}
+def syscall_dynamic = if int(compile_syscall.get("code", 127)) == 0 {
+  run_capture(["readelf", "-d", syscall_binary], [], nil, false)
+} else {
+  nil
+}
+def removed =
+    (if file_exists(binary) { is_ok(file_remove(binary)) } else { true }) &&
+    (if file_exists(syscall_binary) { is_ok(file_remove(syscall_binary)) } else { true })
+assert(int(compile.get("code", 127)) == 0 &&
+       int(execute.get("code", 127)) == 0 &&
+       str(execute.get("stdout", "")) == "entry-ok\n" &&
+       int(dynamic.get("code", 127)) == 0 &&
+       (str(dynamic.get("stdout", ""))).contains("There is no dynamic section") &&
+       int(compile_syscall.get("code", 127)) == 0 &&
+       int(execute_syscall.get("code", 127)) == 42 &&
+       int(syscall_dynamic.get("code", 127)) == 0 &&
+       (str(syscall_dynamic.get("stdout", ""))).contains("There is no dynamic section") &&
+       removed,
+       "bare --entry-name controls the sectionless ELF entry and raw syscalls stay libc-free")
+NY
+}

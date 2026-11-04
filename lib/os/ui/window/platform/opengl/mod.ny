@@ -4,10 +4,11 @@
 ;; - core.os.ui.window.platform
 ;; - core.os.ui.window
 ;; - core.os.ui.window.consts
-module core.os.ui.window.platform.opengl(get_proc_address, create_context, create_offscreen_context, destroy_offscreen_context, make_context_current, release_context_current, get_current_context, create_osmesa_context, destroy_osmesa_context, swap_buffers, swap_interval)
+module core.os.ui.window.platform.opengl(get_proc_address, create_context, create_offscreen_context, destroy_offscreen_context, make_context_current, release_context_current, get_current_context, create_osmesa_context, destroy_osmesa_context, swap_buffers, swap_interval, resize_wayland_window)
 use core
 use core.common as common
 use core.os.ui.window.platform.api as api
+use core.os.ui.window.platform.state as platform_state
 use core.os.ui.window.platform.opengl.glx as glx
 use core.os.ui.window.platform.opengl.egl as egl
 use core.os.ui.window.platform.opengl.nsgl as nsgl
@@ -26,7 +27,7 @@ use core.os.ui.window.platform.opengl.nsgl as nsgl
       0
    }
 } #endif
-mut _current_context = 0
+mut any _current_context = nil
 
 fn _dbg(any msg) bool {
    if !(common.env_truthy("NY_DEBUG") || common.env_truthy("NY_UI_DEBUG_WINDOW")) { return false }
@@ -35,9 +36,11 @@ fn _dbg(any msg) bool {
 }
 
 fn _get_backend_name() str {
+   def selected = to_str(platform_state._get_platform_val("backend_name", ""))
+   if selected.len > 0 { return selected }
    def requested = common.env_lower("NY_UI_BACKEND")
-   if requested.len > 0 { return requested }
-   #linux { return "x11" }
+   if requested.len > 0 && requested != "auto" { return requested }
+   #linux { return common.env_present("WAYLAND_DISPLAY") ? "wayland" : "x11" }
    #elif windows { return "win32" }
    #elif macos { return "cocoa" }
    #endif
@@ -100,13 +103,15 @@ fn create_offscreen_context(int width=1, int height=1, any share_context=0) any 
 fn destroy_offscreen_context(any ctx) bool {
    "Destroys an offscreen OpenGL context."
    if !ctx || !is_dict(ctx) { return false }
-   def typ = ctx.get("type", "")
+   def str typ = to_str(ctx.get("type", ""))
    if typ == "egl" {
       def dpy = ctx.get("display", 0)
       def surf = ctx.get("surface", 0)
       def gl_ctx = ctx.get("context", 0)
       if dpy && surf { egl.destroy_surface(dpy, surf) }
       if dpy && gl_ctx { egl.destroy_context(dpy, gl_ctx) }
+      def wl_window = ctx.get("wayland_window", 0)
+      if wl_window { egl.wayland_window_destroy(wl_window) }
       return true
    }
    if typ == "egl_offscreen" {
@@ -146,7 +151,8 @@ fn destroy_offscreen_context(any ctx) bool {
 fn make_context_current(any ctx) bool {
    "Makes the given context current on the calling thread."
    if !ctx || !is_dict(ctx) { return false }
-   def typ = ctx.get("type", "")
+   def str typ = to_str(ctx.get("type", ""))
+   _dbg("make current type=" + to_str(typ))
    if typ == "egl_offscreen" {
       def dpy = ctx.get("display", 0)
       def gl_ctx = ctx.get("context", 0)
@@ -159,7 +165,13 @@ fn make_context_current(any ctx) bool {
       def dpy = ctx.get("display", 0)
       def surf = ctx.get("surface", 0)
       def gl_ctx = ctx.get("context", 0)
-      if dpy && surf && gl_ctx && egl.make_current(dpy, surf, surf, gl_ctx) {
+      _dbg("EGL handles display=" + to_str(bool(dpy)) + " surface=" + to_str(bool(surf)) + " context=" + to_str(bool(gl_ctx)))
+      if !dpy { return false }
+      if !surf { return false }
+      if !gl_ctx { return false }
+      def bound = egl.make_current(dpy, surf, surf, gl_ctx)
+      _dbg("wayland EGL make current=" + to_str(bound))
+      if bound {
          _current_context = ctx
          return true
       }
@@ -210,7 +222,7 @@ fn release_context_current() bool {
    def ctx = _current_context
    _current_context = 0
    if !ctx || !is_dict(ctx) { return true }
-   def typ = ctx.get("type", "")
+   def str typ = to_str(ctx.get("type", ""))
    if typ == "egl" || typ == "egl_offscreen" {
       def dpy = ctx.get("display", 0)
       if dpy { return egl.make_current(dpy, 0, 0, 0) }
@@ -254,7 +266,7 @@ fn destroy_osmesa_context(any ctx) bool {
 fn swap_buffers(any ctx) bool {
    "Runs the swap buffers operation."
    if !ctx || !is_dict(ctx) { return false }
-   def typ = ctx.get("type", "")
+   def str typ = to_str(ctx.get("type", ""))
    if typ == "egl" {
       def dpy = ctx.get("display", 0)
       def surf = ctx.get("surface", 0)
@@ -341,9 +353,11 @@ fn create_context(any native, any hints) any {
    def b = _get_backend_name()
    #linux {
       if b == "wayland" {
-         def g, d = native.get("globals", 0), g.get("display", 0)
+         def g = native.get("globals", 0)
+         def d = g.get("display", g.get("handle", 0))
          def w = native.get("handle", 0)
          def dpy = egl.init_display(d)
+         _dbg("wayland EGL display=" + to_str(bool(dpy)))
          if !dpy { return 0 }
          def base_attrs = [
             0x3024, hints.get(api.RED_BITS, 8),
@@ -351,6 +365,8 @@ fn create_context(any native, any hints) any {
             0x3022, hints.get(api.BLUE_BITS, 8),
             0x3021, hints.get(api.ALPHA_BITS, 8),
             0x3025, hints.get(api.DEPTH_BITS, 24),
+            0x3040, 0x0008,
+            0x3033, 0x0004,
          ]
          mut attrs = base_attrs
          def samples = int(hints.get(api.SAMPLES, 0))
@@ -369,19 +385,27 @@ fn create_context(any native, any hints) any {
                0x3022, hints.get(api.BLUE_BITS, 8),
                0x3021, hints.get(api.ALPHA_BITS, 8),
                0x3025, hints.get(api.DEPTH_BITS, 24),
+               0x3040, 0x0008,
+               0x3033, 0x0004,
                0x3038
             ]
             config = egl.choose_config(dpy, base_config_attrs)
          }
          if !config { return 0 }
-         def surface = egl.create_surface(dpy, config, w)
-         if !surface { return 0 }
+         _dbg("wayland EGL config selected")
+         def wl_window = egl.wayland_window_create(w, int(native.get("w", 1)), int(native.get("h", 1)))
+         if !wl_window { return 0 }
+         def surface = egl.create_surface(dpy, config, wl_window)
+         _dbg("wayland EGL surface=" + to_str(bool(surface)))
+         if !surface { egl.wayland_window_destroy(wl_window) return 0 }
          def ctx = egl.create_context(dpy, config, 0)
+         _dbg("wayland EGL context=" + to_str(bool(ctx)))
          if !ctx {
             egl.destroy_surface(dpy, surface)
+            egl.wayland_window_destroy(wl_window)
             return 0
          }
-         return {"type": "egl", "display": dpy, "surface": surface, "context": ctx}
+         return {"type": "egl", "display": dpy, "surface": surface, "context": ctx, "wayland_window": wl_window}
       }
       if b == "x11" {
          def d, w = native.get("display", 0), native.get("handle", 0)
@@ -432,6 +456,11 @@ fn create_context(any native, any hints) any {
          return {"type": "glx", "display": d, "window": w, "context": ctx}
       }
    } #endif
+   0
+}
+
+fn resize_wayland_window(any ctx, int width, int height) any {
+   if is_dict(ctx) { egl.wayland_window_resize(ctx.get("wayland_window", 0), width, height) }
    0
 }
 

@@ -1,0 +1,98 @@
+shape core_os_cli_parser {
+  family "runtime-native"
+  generator "native"
+  features ["native", "nyir", "runtime", "cli"]
+  template ny-test-case
+  flags "--native --run"
+  expect compile_and_run
+  expect_exit 0
+  source ny <<'NY'
+use core.os.cli as cli
+use core.os (file_write, file_remove, temp_dir, pid)
+
+mut spec = cli.app("probe", "CLI parser regression")
+spec = cli.add(spec, cli.flag("verbose", "v", "Verbose"))
+spec = cli.add(spec, cli.flag("safe", "s", "Safe"))
+spec = cli.add(spec, cli.option("count", "c", "Count", "int", 3, false))
+spec = cli.add(spec, cli.option("input", "i", "Input path", "path", "", false))
+spec = cli.add(spec, cli.option("tag", "t", "Repeated tags", "str", nil, false, true))
+spec = cli.add(spec, cli.option("checks", "", "Comma-separated checks", "list", nil))
+spec = cli.add(spec, cli.option("code", "C", "Inline code", "str", nil))
+spec = cli.add(spec, cli.optional_option("asm", "a", "Emit assembly", "path", "", "stderr"))
+spec = cli.add(spec, cli.positional("file", "Source file", "path", false))
+spec = cli.add(spec, cli.rest("args"))
+spec = cli.add(spec, cli.family("dump", "D", {"n":"nyr", "v":"vm"}))
+
+def parsed = cli.parse(spec, ["probe", "-vs", "--count=12", "-i", "-", "-Dnv", "source.ny", "--", "-x", "", "a b"])
+assert(bool(parsed.get("provided", {}).contains("verbose")) &&
+       !bool(parsed.get("provided", {}).contains("code")),
+       "track explicitly supplied options separately from defaults")
+assert(bool(parsed.get("ok", false)), "accept clusters, equals/separated values, family, and boundary")
+def values = parsed.get("values", {})
+assert(bool(values.get("verbose", false)) && bool(values.get("safe", false)), "clustered short booleans")
+assert(values.get("count", 0) == 12 && values.get("input", "") == "-", "typed and dash-safe values")
+assert(values.get("file", "") == "source.ny", "positional mapping")
+assert(values.get("dump", []) == ["nyr", "vm"], "family item mapping")
+assert(values.get("args", []) == ["-x", "", "a b"], "rest preserves post-boundary args")
+def check_list = cli.parse(spec, ["probe", "--checks=types, effects"])
+assert(bool(check_list.get("ok", false)) && check_list.get("values", {}).get("checks", []) == ["types", "effects"], "comma-separated option list")
+
+def negated = cli.parse(spec, ["probe", "--no-safe"])
+assert(bool(negated.get("ok", false)) && !bool(negated.get("values", {}).get("safe", true)), "long negation")
+def empty_code = cli.parse(spec, ["probe", "--code", ""])
+assert(bool(empty_code.get("ok", false)) &&
+       bool(empty_code.get("provided", {}).contains("code")) &&
+       empty_code.get("values", {}).get("code", "not empty") == "",
+       "preserve an explicitly empty value")
+
+def bad_int = cli.parse(spec, ["probe", "--count=12x"])
+assert(!bool(bad_int.get("ok", true)) && cli.format_error(bad_int).contains("expected int"), "reject malformed integers")
+
+def missing = cli.parse(spec, ["probe", "--input", "--safe"])
+assert(!bool(missing.get("ok", true)) && cli.format_error(missing).contains("requires a value"), "do not consume another option as a value")
+
+def unknown = cli.parse(spec, ["probe", "--cout=3"])
+assert(!bool(unknown.get("ok", true)) && cli.format_error(unknown).contains("did you mean"), "suggest nearby long options")
+
+def help = cli.parse(spec, ["probe", "--help"])
+assert(bool(help.get("ok", false)) && bool(help.get("help", false)) && help.get("text", "").contains("--count"), "generated help")
+def repeated = cli.parse(spec, ["probe", "--tag=one", "--tag", "two"])
+assert(bool(repeated.get("ok", false)) && repeated.get("values", {}).get("tag", []) == ["one", "two"], "repeatable options")
+def asm_default = cli.parse(spec, ["probe", "-a"])
+def asm_path = cli.parse(spec, ["probe", "--asm=out.s"])
+assert(bool(asm_default.get("ok", false)) && asm_default.get("values", {}).get("asm", "") == "stderr", "optional short value")
+assert(bool(asm_path.get("ok", false)) && asm_path.get("values", {}).get("asm", "") == "out.s", "optional assigned value")
+
+def versioned = cli.app("versioned", "version test", "1.2.3")
+def version_help = cli.parse(versioned, ["versioned", "--version"])
+assert(bool(version_help.get("ok", false)) && version_help.get("text", "") == "1.2.3", "generated version")
+def completion = cli.parse(spec, ["probe", "--completions", "fish"])
+assert(bool(completion.get("ok", false)) && completion.get("text", "").contains("--count"), "generated shell completions")
+
+mut child = cli.app("run", "run subcommand")
+child = cli.add(child, cli.flag("quiet", "q", "Quiet"))
+mut parent = cli.app("parent", "subcommand test")
+parent = cli.add(parent, cli.subcommand("run", child))
+def nested = cli.parse(parent, ["parent", "run", "-q"])
+assert(bool(nested.get("ok", false)) && nested.get("command", "") == "run" && bool(nested.get("values", {}).get("quiet", false)), "subcommand parsing")
+
+mut checked = cli.app("checked", "validation test")
+checked = cli.add(checked, cli.option("source", "s", "Required source", "path", nil, true))
+checked = cli.add(checked, cli.flag("fast", "f", "Fast mode", false, false, "", ["safe"]))
+checked = cli.add(checked, cli.flag("safe", "", "Safe mode"))
+assert(!bool(cli.parse(checked, ["checked"]).get("ok", true)), "required options")
+def conflict = cli.parse(checked, ["checked", "--source=x", "--fast", "--safe"])
+assert(!bool(conflict.get("ok", true)) && cli.format_error(conflict).contains("conflicts"), "option conflicts")
+
+mut response_path = temp_dir() + "/nytrix-cli-args-" + to_str(pid())
+unwrap(file_write(response_path, "--count=19 source.ny -- @not-expanded"))
+def response = cli.parse(spec, ["probe", "@" + response_path])
+assert(bool(response.get("ok", false)) &&
+       response.get("values", {}).get("count", 0) == 19 &&
+       response.get("values", {}).get("file", "") == "source.ny" &&
+       response.get("values", {}).get("args", []) == ["@not-expanded"],
+       "response files preserve option, positional, and separator arguments")
+unwrap(file_remove(response_path))
+0
+NY
+}

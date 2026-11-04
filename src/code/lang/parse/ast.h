@@ -561,6 +561,15 @@ typedef struct stmt_try_t {
 typedef struct stmt_func_t {
   const char *name;
   const char *return_type;
+  /* Value parameter referenced by a dependent return annotation. The type
+   * graph is constructed after parsing; keep the binder here rather than
+   * overloading the legacy return_type spelling. */
+  const char *dependent_return_param;
+  /* Parallel metadata: the resolved NY_TYPE_DEPENDENT_ARROW type graph,
+   * built in sema/typeinfer (not at parse time, since parse has no type
+   * arena).  Kept alongside the legacy `return_type` const char * so the
+   * ~100+ existing call sites of `return_type` do not need to change. */
+  ny_type_t *return_type_ty;
   ny_expr_semantic_t return_semantic;
   ny_param_list params;
   stmt_t *body;

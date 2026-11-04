@@ -1,0 +1,53 @@
+shape ui_wayland_repeat_focus {
+  family "runtime/input"
+  generator "regression"
+  features [ui wayland focus keyboard repeat]
+  template ny-test-case
+  timeout 120
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit -O0; --native-backend=llvm --jit --jit-engine=orc -O0"
+  expect compile_and_run
+  expect_message "UI-WAYLAND-REPEAT-FOCUS-OK"
+  source ny <<'NY'
+use core
+use core.os.ui.window.platform.linux.wayland as wl
+use core.os.ui.window.event as event
+use core.os.ui.window.consts as keys
+
+def state = zalloc(512)
+def owner = {"handle": 0x123456789, "focused": true, "key_states": {87: true}}
+def other = {"handle": 0x12345678b, "focused": true}
+store64_h(state, 0x123456789, 200)
+store64_h(state, 30, 376)
+store64_h(state, 1, 384)
+store64_h(state, 87, 392)
+;; A repeat whose deadline has elapsed must not leak to another window.
+wl._synthesize_key_repeat(other, state)
+def other_result = wl.poll_window_events(other)
+def other_events = other_result.get(1, [])
+assert(other_events.len == 0,
+       "shared seat repeat never reaches an unfocused window")
+def int now_ns = __monotonic_ns_raw()
+store64_h(state, 40, 376)
+store64_h(state, 400, 384)
+store64_h(state, now_ns, 408)
+store64_h(state, now_ns, 416)
+wl._synthesize_key_repeat(owner, state)
+def before_delay = wl.poll_window_events(owner)
+def before_delay_events = before_delay.get(1, [])
+assert(before_delay_events.len == 0, "repeat respects the compositor delay")
+store64_h(state, now_ns - 2000000000, 408)
+store64_h(state, now_ns - 2000000000, 416)
+wl._synthesize_key_repeat(owner, state)
+def stalled = wl.poll_window_events(owner)
+def stalled_events = stalled.get(1, [])
+assert(stalled_events.len > 0 && stalled_events.len <= 4,
+       "a stalled event loop emits a bounded repeat batch")
+wl._keyboard_handle_leave(state, 0, 1, 0x123456789)
+wl._synthesize_key_repeat(owner, state)
+def result = wl.poll_window_events(owner)
+def events = result.get(1, [])
+assert(events.len == 0, "focus leave cancels repeat even without a release event")
+free(state)
+print("UI-WAYLAND-REPEAT-FOCUS-OK")
+NY
+}

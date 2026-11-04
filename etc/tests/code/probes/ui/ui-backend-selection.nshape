@@ -1,0 +1,29 @@
+shape ui_backend_selection {
+  family "runtime/ui"
+  generator "regression"
+  features [ny ui renderer imports comparison branch]
+  template ny-test-case
+  timeout 120
+  flags_matrix "--native-only -O0; --native-only -O3; --native --run -O0; --native-backend=llvm --jit --jit-engine=mcjit -O0; --native-backend=llvm --jit --jit-engine=orc -O0; --nyr-run"
+  expect compile_and_run
+  expect_message "UI-BACKEND-SELECTION-OK"
+  source ny <<'NY'
+use core
+use core.os.ui.render as gfx
+
+fn select(str name, int expected) {
+   assert(gfx.apply_backend_name(name), "apply renderer name")
+   assert(gfx.get_backend_type() == expected, "renderer selection: " + name)
+}
+select("gl", 1)
+select("VULKAN", 2)
+select("cpu", 3)
+select("opengl", 1)
+select("mock", 3)
+select("auto", 5)
+select("webgl", 1)
+select("unrecognized", 1)
+select("", 5)
+print("UI-BACKEND-SELECTION-OK")
+NY
+}

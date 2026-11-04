@@ -1,0 +1,313 @@
+shape rev-decompiler-generated-c-elf {
+  suite "native"
+  family "reverse-engineering"
+  generator "deterministic"
+  features [elf symbols relocations decompilation optimization-levels]
+  timeout 300
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os as os
+use core.os.subprocess as sub
+use core.os.rev.decomp as decomp
+
+def dir = os.temp_dir() + "/ny-generated-c-decomp-" + to_str(os.pid())
+assert(int(sub.run_capture(["cmake", "-E", "make_directory", dir], [], nil, false).get("code", 127)) == 0,
+   "create generated C ELF directory")
+def source = dir + "/generated.c"
+assert(is_ok(os.file_write(source,
+   "int generated_global = 0;\n" +
+   "__attribute__((noinline)) int generated_helper(int x) { return x; }\n" +
+   "extern int generated_helper_alias(int) __attribute__((alias(\"generated_helper\")));\n" +
+   "__attribute__((used, noinline)) static int generated_local(int x) { return x + 1; }\n" +
+   "__attribute__((noinline)) int generated_target(int x) { return x + 1; }\n" +
+   "__attribute__((used, noinline)) int generated_rev_transform(int x) { if (x < 0) return 3; return x + 1; }\n" +
+   "__attribute__((used, noinline)) int generated_target_sub(int x) { return x - 5; }\n" +
+   "__attribute__((used, noinline)) int generated_target_xor(int x) { return x ^ 7; }\n" +
+   "__attribute__((used, noinline)) int generated_relocation_target(int x) { return generated_helper(x) + generated_global + 1; }\n" +
+   "__attribute__((used, noinline)) int unsupported_target(void) { __asm__ volatile(\".byte 0xc4,0x00,0x00\"); return 0; }\n" +
+   "int main(void) { if (generated_target_sub(41) != 36 || generated_target_xor(41) != 46 || generated_rev_transform(-1) != 3 || generated_rev_transform(41) != 42) return 2; return generated_target(41); }\n")),
+   "write generated C source")
+
+def object = dir + "/generated.o"
+def object_built = sub.run_capture(["cc", "-O2", "-fno-pic", "-c", source, "-o", object], [], nil, false)
+assert(int(object_built.get("code", 127)) == 0,
+   "compile generated C ELF object: " + str(object_built.get("stdout", "")))
+def object_elf = decomp.load(object, {"recover_functions": false})
+assert(object_elf.get("ok", false), "load generated relocatable ELF object")
+mut found_relocation = false
+mut found_global_relocation = false
+def relocs = object_elf.get("relocations", [])
+mut ri = 0
+while ri < relocs.len {
+   if str(relocs[ri].get("symbol", "")) == "generated_helper" &&
+      str(relocs[ri].get("type_name", "")) == "x86_64_plt32" {
+      found_relocation = true
+   }
+   if str(relocs[ri].get("symbol", "")) == "generated_global" &&
+      str(relocs[ri].get("type_name", "")) == "x86_64_pc32" {
+      found_global_relocation = true
+   }
+   ri += 1
+}
+assert(found_relocation && found_global_relocation,
+   "retain function/data relocation symbols and types")
+
+for opt in ["-O0", "-O2"] {
+   def binary = dir + "/generated" + opt
+   def built = sub.run_capture(["cc", opt, "-g", "-no-pie", source, "-o", binary], [], nil, false)
+   assert(int(built.get("code", 127)) == 0,
+      "compile generated C ELF " + opt + ": " + str(built.get("stdout", "")))
+   def original = sub.run_capture([binary], [], nil, false)
+   assert(int(original.get("code", 127)) == 42,
+      "original generated C behavior at " + opt)
+
+   def loaded = decomp.load(binary, {"recover_functions": false})
+   assert(loaded.get("ok", false), "load generated ELF at " + opt)
+   mut found = false
+   mut helper_value = 0
+   mut alias_value = 0
+   mut local_symbol = false
+   def functions = decomp.functions(loaded)
+   mut i = 0
+   while i < functions.len {
+      if str(functions[i].get("name", "")) == "generated_target" &&
+         int(functions[i].get("value", 0)) > 0 {
+         found = true
+      }
+      if str(functions[i].get("name", "")) == "generated_helper" {
+         helper_value = int(functions[i].get("value", 0))
+      }
+      if str(functions[i].get("name", "")) == "generated_helper_alias" {
+         alias_value = int(functions[i].get("value", 0))
+      }
+      if str(functions[i].get("name", "")) == "generated_local" &&
+         str(functions[i].get("bind", "")) == "local" {
+         local_symbol = true
+      }
+      i += 1
+   }
+   assert(found, "retain generated function symbol at " + opt)
+   assert(helper_value > 0 && helper_value == alias_value,
+      "retain aliased function labels at " + opt)
+   assert(local_symbol, "retain local function symbol label at " + opt)
+   def behavior = decomp.decompile(binary, "generated_target", {"max_bytes": 128})
+   assert(behavior.get("ok", false),
+      "decompile generated_target behavior at " + opt + ": " +
+      str(behavior.get("diagnostic", "")))
+   def behavior_rows = behavior.get("structured", dict()).get("rows", [])
+   mut saw_increment = false
+   mut saw_behavior_return = false
+   mut behavior_debug = ""
+   mut decompiled_values = {"edi": 41, "rdi": 41}
+   mut bi = 0
+   while bi < behavior_rows.len {
+      def row = behavior_rows[bi]
+      def effect = str(row.get("effect", ""))
+      if (row.get("op", "") == "arith" && row.get("operator", "") == "+" &&
+          str.find(effect, "+ 0x1") >= 0) {
+         saw_increment = true
+      }
+      if row.get("op", "") == "assign" &&
+         row.get("kind", "") == "lea" {
+         assert(effect == "eax = rdi+1",
+            "lift LEA effective address at " + opt + ": " + effect)
+         saw_increment = true
+         decompiled_values = decompiled_values.set(
+            str(row.get("dst", "")), decompiled_values.get("rdi", 0) + 1)
+      } elif row.get("op", "") == "assign" &&
+         (row.get("src_kind", "") == "reg" ||
+          row.get("src_kind", "") == "expr" ||
+          row.get("src_kind", "") == "mem") {
+         decompiled_values = decompiled_values.set(
+            str(row.get("dst", "")),
+            decompiled_values.get(str(row.get("src", "")), 0))
+      } elif row.get("op", "") == "arith" &&
+         row.get("operator", "") == "+" &&
+         str(row.get("src", "")) == "0x1" {
+         decompiled_values = decompiled_values.set(
+            str(row.get("dst", "")),
+            decompiled_values.get(str(row.get("dst", "")), 0) + 1)
+      }
+      if row.get("op", "") == "return" { saw_behavior_return = true }
+      behavior_debug = behavior_debug + str(row.get("op", "")) + ":" +
+         str(row.get("kind", "")) + ":" + str(row.get("operator", "")) +
+         ":" + str(row.get("mnemonic", "")) + ":" +
+         str(row.get("family", "")) + ":" +
+         str(row.get("dst", "")) + "<-" + str(row.get("src", "")) +
+         ":" + str(row.get("dst_kind", "")) + "/" +
+         str(row.get("src_kind", "")) + ":" +
+         str(row.get("operands", "")) + ":" + effect + ";"
+      bi += 1
+   }
+   def decompiled_result = decompiled_values.get("eax",
+      decompiled_values.get("rax", -1))
+   assert(saw_increment && saw_behavior_return,
+      "decompiler retains increment/return at " + opt +
+      ": " + behavior_debug)
+   assert(decompiled_result == int(original.get("code", -1)),
+      "decompiled instruction semantics produce original exit result at " +
+      opt + ": got " + to_str(decompiled_result) +
+      ", edi=" + to_str(decompiled_values.get("edi", -1)) +
+      ", eax=" + to_str(decompiled_values.get("eax", -1)) +
+      ", rows=" + behavior_debug)
+   def rev_behavior = decomp.decompile(binary, "generated_rev_transform", {"max_bytes": 128})
+   assert(rev_behavior.get("ok", false),
+      "decompile branchy rev_transform at " + opt + ": " +
+      str(rev_behavior.get("diagnostic", "")))
+   def rev_rows = rev_behavior.get("structured", dict()).get("rows", [])
+   mut saw_rev_condition = false
+   mut saw_rev_branch = false
+   mut saw_rev_increment = false
+   mut saw_rev_return = false
+   mut rev_i = 0
+   while rev_i < rev_rows.len {
+      def row = rev_rows[rev_i]
+      if row.get("op", "") == "branch" && row.get("condition", "") != "always" {
+         saw_rev_condition = true
+         saw_rev_branch = true
+      } elif row.get("kind", "") == "cmovcc" {
+         saw_rev_condition = true
+      }
+      if row.get("op", "") == "compare" {
+         def compare_effect = row.get("effect", "")
+         assert(is_str(compare_effect) &&
+            str.startswith(str(compare_effect), "last_cmp = ["),
+            "retain typed comparison effect at " + opt)
+      }
+      if (row.get("operator", "") == "+" && row.get("op", "") == "arith" ||
+         row.get("kind", "") == "lea") {
+         saw_rev_increment = true
+      }
+      if row.get("op", "") == "return" {
+         saw_rev_return = true
+      }
+      rev_i += 1
+   }
+   assert(saw_rev_condition && saw_rev_increment && saw_rev_return,
+      "lift branch, increment, and return behavior for rev_transform at " + opt)
+   def rev_edges = rev_behavior.get("structured", dict()).get("cfg", dict()).get("edges", [])
+   assert(!saw_rev_branch || rev_edges.len > 0,
+      "retain rev_transform CFG edges when a conditional branch exists at " + opt)
+   if saw_rev_branch {
+      def rev_text = str(rev_behavior.get("text", ""))
+      assert(str.find(rev_text, "last_cmp.") < 0 &&
+         str.find(rev_text, ">= 0") >= 0,
+         "render the signed comparison as an operand predicate at " + opt)
+   }
+   def sub_behavior = decomp.decompile(binary, "generated_target_sub", {"max_bytes": 128})
+   assert(sub_behavior.get("ok", false),
+      "decompile generated_target_sub at " + opt + ": " +
+      str(sub_behavior.get("diagnostic", "")))
+   def sub_rows = sub_behavior.get("structured", dict()).get("rows", [])
+   mut sub_values = {"edi": 41, "rdi": 41}
+   mut saw_subtract = false
+   mut saw_sub_return = false
+   mut si = 0
+   while si < sub_rows.len {
+      def row = sub_rows[si]
+      def effect = str(row.get("effect", ""))
+      if row.get("op", "") == "assign" && row.get("kind", "") == "lea" {
+         assert(effect == "eax = rdi-5",
+            "lift subtract LEA effective address at " + opt + ": " + effect)
+         sub_values = sub_values.set(str(row.get("dst", "")), 36)
+         saw_subtract = true
+      } elif row.get("op", "") == "assign" &&
+         (row.get("src_kind", "") == "reg" ||
+          row.get("src_kind", "") == "expr" ||
+          row.get("src_kind", "") == "mem") {
+         sub_values = sub_values.set(
+            str(row.get("dst", "")),
+            sub_values.get(str(row.get("src", "")), 0))
+      } elif row.get("op", "") == "arith" &&
+         row.get("operator", "") == "-" &&
+         str(row.get("src", "")) == "0x5" {
+         sub_values = sub_values.set(
+            str(row.get("dst", "")),
+            sub_values.get(str(row.get("dst", "")), 0) - 5)
+         saw_subtract = true
+      }
+      if row.get("op", "") == "return" { saw_sub_return = true }
+      si += 1
+   }
+   def sub_result = sub_values.get("eax", sub_values.get("rax", -1))
+   assert(saw_subtract && saw_sub_return && sub_result == 36,
+      "decompiled subtraction matches original result 36 at " + opt +
+      ": got " + to_str(sub_result))
+   def xor_behavior = decomp.decompile(binary, "generated_target_xor", {"max_bytes": 128})
+   assert(xor_behavior.get("ok", false),
+      "decompile generated_target_xor at " + opt + ": " +
+      str(xor_behavior.get("diagnostic", "")))
+   def xor_rows = xor_behavior.get("structured", dict()).get("rows", [])
+   mut xor_values = {"edi": 41, "rdi": 41}
+   mut saw_xor = false
+   mut saw_xor_return = false
+   mut xi = 0
+   while xi < xor_rows.len {
+      def row = xor_rows[xi]
+      if row.get("op", "") == "assign" &&
+         (row.get("src_kind", "") == "reg" ||
+          row.get("src_kind", "") == "expr" ||
+          row.get("src_kind", "") == "mem") {
+         xor_values = xor_values.set(
+            str(row.get("dst", "")),
+            xor_values.get(str(row.get("src", "")), 0))
+      } elif row.get("op", "") == "arith" &&
+         row.get("operator", "") == "^" &&
+         str(row.get("src", "")) == "0x7" {
+         xor_values = xor_values.set(
+            str(row.get("dst", "")),
+            xor_values.get(str(row.get("dst", "")), 0) ^ 7)
+         saw_xor = true
+      }
+      if row.get("op", "") == "return" { saw_xor_return = true }
+      xi += 1
+   }
+   def xor_result = xor_values.get("eax", xor_values.get("rax", -1))
+   assert(saw_xor && saw_xor_return && xor_result == 46,
+      "decompiled XOR matches original result 46 at " + opt +
+      ": got " + to_str(xor_result))
+   def result = decomp.decompile(binary, "generated_relocation_target", {"max_bytes": 128})
+   assert(result.get("ok", false),
+      "decompile generated_relocation_target at " + opt + ": " + str(result.get("diagnostic", "")))
+   assert(result.get("structured", dict()).get("rows", []).len > 0,
+      "lift generated_target instruction rows at " + opt)
+   assert(str.find(str(result.get("text", "")), "return") >= 0,
+      "render generated_target return behavior at " + opt)
+   mut lifted = result.get("structured", dict()).get("rows", [])
+   mut saw_call = false
+   mut saw_helper_call = false
+   mut saw_add = false
+   mut saw_add_effect = false
+   mut saw_return = false
+   mut li = 0
+   while li < lifted.len {
+      if lifted[li].get("op", "") == "call" {
+         saw_call = true
+         if (str(lifted[li].get("target_name", "")) == "generated_helper" ||
+             str(lifted[li].get("target_name", "")) == "generated_helper_alias" ||
+             int(lifted[li].get("target", 0)) == helper_value) {
+            saw_helper_call = true
+         }
+      }
+      if lifted[li].get("op", "") == "arith" && lifted[li].get("operator", "") == "+" {
+         saw_add = true
+         if str.find(str(lifted[li].get("effect", "")), "+") >= 0 { saw_add_effect = true }
+      }
+      if lifted[li].get("op", "") == "return" { saw_return = true }
+      li += 1
+   }
+   assert(saw_call && saw_helper_call && saw_add && saw_add_effect && saw_return,
+      "resolve relocated helper call and lift add/return effects at " + opt)
+   def unsupported = decomp.decompile(binary, "unsupported_target", {"max_bytes": 128})
+   def diagnostic = str(unsupported.get("diagnostic", ""))
+   assert(!unsupported.get("ok", true) && str.find(diagnostic, "unsupported_target") >= 0,
+      "name unsupported function in decoder diagnostic at " + opt + ": " + diagnostic)
+}
+
+assert(int(sub.run_capture(["cmake", "-E", "rm", "-rf", dir], [], nil, false).get("code", 127)) == 0,
+   "remove generated C ELF directory")
+print("✓ generated C ELF symbols and decompilation pass at -O0/-O2")
+NY
+}

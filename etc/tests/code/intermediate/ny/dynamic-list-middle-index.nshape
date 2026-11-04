@@ -1,0 +1,23 @@
+shape dynamic_list_middle_index {
+  family "native-nyir"
+  generator "regression"
+  features ["ny", "native", "dynamic", "list", "append", "index"]
+  template ny-test-case
+  flags_matrix "-O0; -O1; -O2; -O3; --native-only -O0; --native-only -O1; --native-only -O2; --native-only -O3"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+def n = 1000
+mut xs = []
+mut i = 0
+while i < n {
+  xs = append(xs, i)
+  i += 1
+}
+def int checksum = xs[0] + xs[n / 2] + xs[n - 1]
+assert(checksum == 1499,
+  "optimized append-built dynamic lists preserve the middle element")
+print("dynamic_list_middle_index ok")
+NY
+}

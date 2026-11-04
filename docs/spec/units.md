@@ -3,6 +3,12 @@
 
 Use [Programs](../learn/programs.md) for project setup and import workflows.
 
+## Contents
+
+- [Files and modules](#file-forms)
+- [Imports and exports](#imports)
+- [Entry points and generated source](#entry-points)
+
 ## File forms
 
 | Form | Meaning |
@@ -37,6 +43,9 @@ direct execution runs the startup block.
 The `export group(...)` form names a profile. A `use module:profile` selects
 the `core` surface plus that profile.
 
+> **Note:** This module/profile example is a syntax form; `sample.groups` is
+> not defined in this standalone block.
+
 ```ny
 module sample.groups {
    export core(run)
@@ -68,6 +77,9 @@ assert(core.len([1, 2, 3]) == 3, "module alias")
 ```
 
 Import forms apply to relative files as well as module paths:
+
+> **Note:** These paths are examples only; create `parser.ny` with the shown
+> exports before compiling the imports.
 
 ```ny
 use "./parser.ny" as parser

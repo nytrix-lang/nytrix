@@ -1,0 +1,48 @@
+shape x86_typed_list_length {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["bare", "aot", "typed-buffer", "regression"]
+  template ny-test-case
+  expect compile_and_run
+  ci windows-skip
+  source ny <<'NY'
+use core.os (file_exists, file_remove, pid, run_capture, temp_dir)
+
+def compiler = env("NYTRIX_NY_FULL_BIN")
+assert(is_str(compiler) && compiler.len > 0,
+       "test runner provides the compiler path")
+def binary = temp_dir() + "/ny-bare-x86-list-" + to_str(pid())
+def compile = run_capture(
+    ["env", "CC=/nonexistent", compiler, "--native-backend=x86_64",
+     "--host-triple=x86_64-unknown-linux-gnu", "--mode=bare", "--native-only",
+     "--release", "-no-std", "-o", binary, "-e",
+     "@effects(all)\nfn run() int { mut list<int> values = [10,20,30] " +
+     "print(values[0]) print(values[-1]) " +
+     "mut list<int> large = [1,2,3,4,5,6,7,8,9] " +
+     "print(large[-1]) print(values.pop()) values.len }\nprint(run())"],
+    [], nil, false)
+def execute = if compile.get("code", 127) == 0 {
+  run_capture([binary], [], nil, false)
+} else {
+  nil
+}
+def dynamic = if compile.get("code", 127) == 0 {
+  run_capture(["readelf", "-d", binary], [], nil, false)
+} else {
+  nil
+}
+def removed = if file_exists(binary) { is_ok(file_remove(binary)) } else { true }
+assert(compile.get("code", 127) == 0 &&
+       execute.get("code", 127) == 0 &&
+       execute.get("stdout", "") == "10\n30\n9\n30\n2\n" &&
+       dynamic.get("code", 127) == 0 &&
+       str(dynamic.get("stdout", "")).contains("There is no dynamic section") &&
+       removed,
+       "bare x86-64 typed-list indexing and length work without libc or assembler; " +
+       "compile=" + to_str(compile.get("code", 127)) +
+       " execute=" + to_str(execute.get("code", 127)) +
+       " stdout=`" + execute.get("stdout", "") + "` stderr=`" +
+       execute.get("stderr", "") + "` dynamic=`" +
+       dynamic.get("stdout", "") + "`")
+NY
+}

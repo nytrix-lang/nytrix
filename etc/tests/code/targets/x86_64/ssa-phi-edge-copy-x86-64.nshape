@@ -3,7 +3,7 @@ shape oracle_ssa_phi_edge_copy_x86_64 {
   generator "native"
   features [native x86_64 oracle ssa phi edge-copy parallel-copy loop regression]
   template ny-test-case
-  flags_matrix "-O2 --nyir-verify --native-result-oracle=21; -O3 --nyir-verify --native-result-oracle=21"
+  flags_matrix "-O2 --nyr-verify --native-result-oracle=21; -O3 --nyr-verify --native-result-oracle=21"
   expect compile_and_run
   source ny <<'NY'
 mut a = 1

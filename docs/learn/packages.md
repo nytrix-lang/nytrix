@@ -5,6 +5,9 @@ Nytrix packages are source dependencies resolved to an import root. The package
 manager records direct dependencies in `ny.pkg.json` and writes resolved state
 to `ny.pkg.json.lock`.
 
+Prerequisites: `ny` on `PATH`; dependency resolution may require an explicitly
+configured repository or reachable source.
+
 ## Repository trust
 
 Nytrix ships no default package repository or public-registry fallback. Add
@@ -40,6 +43,9 @@ ny pkg path
 `ny pkg add` accepts a package name and source. `ny get <name> [source]` is an
 alias; omitting the source requires a registry or repository entry. See
 `ny pkg --help` for install roots and options.
+When a lockfile exists, adding a new dependency extends it while retaining the
+revisions already recorded. `ny pkg update` explicitly resolves the complete
+dependency graph again.
 
 ## Manifest
 
@@ -58,6 +64,9 @@ A manifest contains package metadata and direct dependencies:
 
 The package name is the import name:
 
+> **Note:** This import line is shown with a dependency named `helper`; create
+> or install that package before compiling it.
+
 ```ny
 use helper
 ```
@@ -71,8 +80,12 @@ accepted source forms and install modes in `ny pkg --help`.
 Commit the lockfile for an application when repeatable dependency resolution
 matters. `ny pkg sync` installs manifest dependencies; `ny pkg sync --offline`
 uses the lockfile and local package cache without contacting registries. A
-missing cached package is an error in offline mode. Local path dependencies
-must remain available on disk.
+normal `ny pkg sync` also uses recorded commits and archive hashes when a
+lockfile exists. Run `ny pkg update` to resolve new revisions. Archived
+packages are stored as original archive bytes and checked against the lockfile
+SHA-256 before extraction, including offline installs. A missing cached package
+is an error in offline mode. Local path dependencies must remain available on
+disk.
 
 ## Repositories and search
 
@@ -100,3 +113,9 @@ name is not looked up in an implicit public repository. Use
 
 See [Programs](programs.md) for module structure and
 [Troubleshooting](troubleshooting.md) for import errors.
+
+Next:
+
+- [Programs](programs.md) — local module imports.
+- [Library](library.md) — inspect module APIs.
+- [Troubleshooting](troubleshooting.md) — diagnose import errors.

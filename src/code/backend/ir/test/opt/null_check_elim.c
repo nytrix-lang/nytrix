@@ -37,29 +37,13 @@ static void build_local_sum(nyr_func_t *f, int64_t n) {
    * exit
    */
   nyr_opt_label(f, 30);
-  int ld = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_LOAD_LOCAL,
-                                      .dst = -1,
-                                      .a = -1,
-                                      .b = -1,
-                                      .c = -1,
-                                      .d = -1,
-                                      .e = -1,
-                                      .f = -1,
-                                      .imm = 0});
+  int ld = nyr_opt_emit_imm(f, NYIR_LOAD_LOCAL, 0);
   nyr_opt_ret(f, ld);
   /*
    * body: local0 += iv ; iv += 1
    */
   nyr_opt_label(f, 11);
-  int prev = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_LOAD_LOCAL,
-                                        .dst = -1,
-                                        .a = -1,
-                                        .b = -1,
-                                        .c = -1,
-                                        .d = -1,
-                                        .e = -1,
-                                        .f = -1,
-                                        .imm = 0});
+  int prev = nyr_opt_emit_imm(f, NYIR_LOAD_LOCAL, 0);
   int add = nyr_opt_binop(f, NYIR_ADD_I64, prev, iv);
   nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_STORE_LOCAL,
                              .dst = -1,

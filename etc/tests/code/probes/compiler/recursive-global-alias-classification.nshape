@@ -1,0 +1,20 @@
+shape recursive_global_alias_classification {
+  family "compiler/lowering"
+  generator "regression"
+  features [ny globals aliases lowering]
+  template ny-test-case
+  expect compile_and_run
+  expect_message "GLOBAL-ALIAS-OK"
+  source ny <<'NY'
+use core
+mut cyclic_alias_a = cyclic_alias_b
+mut cyclic_alias_b = cyclic_alias_a
+fn probe_alias() bool {
+   cyclic_alias_a.contains("unused")
+}
+fn probe_dynamic_alias() any {
+   cyclic_alias_a.get(0)
+}
+print("GLOBAL-ALIAS-OK")
+NY
+}

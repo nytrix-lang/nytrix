@@ -44,7 +44,7 @@ const char *nyr_scalar_class_name(nyr_scalar_class_t scalar_class) {
 }
 
 bool nyr_call_args(const nyr_inst_t *in, int value_count, int *args,
-                    size_t args_cap, int *argc_out, char *err, size_t err_len) {
+                   size_t args_cap, int *argc_out, char *err, size_t err_len) {
   if (!in || in->op != NYIR_CALL || !args || !argc_out) {
     if (err && err_len)
       snprintf(err, err_len, "native NYIR call: invalid input");
@@ -89,9 +89,10 @@ static bool nyr_op_v128_i64(nyr_op_t op) {
  * distinct 256-bit register classes.
  */
 static bool nyr_op_v256_i64(nyr_op_t op) {
-  return op == NYIR_VEC8_LOAD_I64 || op == NYIR_VEC8_ADD_I64 ||
-         op == NYIR_VEC8_SUB_I64 || op == NYIR_VEC8_AND_I64 ||
-         op == NYIR_VEC8_OR_I64 || op == NYIR_VEC8_XOR_I64;
+  return op == NYIR_VEC8_LOAD_I64 || op == NYIR_VEC8_SET1_I64 ||
+         op == NYIR_VEC8_ADD_I64 || op == NYIR_VEC8_SUB_I64 ||
+         op == NYIR_VEC8_AND_I64 || op == NYIR_VEC8_OR_I64 ||
+         op == NYIR_VEC8_XOR_I64 || op == NYIR_VEC8_SAR_I64;
 }
 
 /*
@@ -140,13 +141,13 @@ void nyr_type_map_free(nyr_type_map_t *map) {
 }
 
 bool nyr_type_map_init(nyr_type_map_t *map, const nyr_func_t *nyir,
-                        size_t local_count) {
+                       size_t local_count) {
   if (!map || !nyir)
     return false;
   if (nyir->param_count && !nyir->param_types)
     return false;
   *map = (nyr_type_map_t){.value_count = (size_t)nyir->next_value,
-                           .local_count = local_count};
+                          .local_count = local_count};
   size_t flag_count = map->value_count + local_count;
   if (flag_count < map->value_count ||
       flag_count > SIZE_MAX / (14 * sizeof(bool))) {
@@ -247,12 +248,12 @@ bool nyr_type_map_init(nyr_type_map_t *map, const nyr_func_t *nyir,
         in->dst >= 0 && in->imm >= 0 && (size_t)in->dst < map->value_count &&
         (size_t)in->imm < local_count)
       nyr_type_union(parents, (size_t)in->dst,
-                      map->value_count + (size_t)in->imm);
+                     map->value_count + (size_t)in->imm);
     if (in->op == NYIR_STORE_LOCAL && in->scalar_class == NYIR_SCALAR_UNKNOWN &&
         in->a >= 0 && in->imm >= 0 && (size_t)in->a < map->value_count &&
         (size_t)in->imm < local_count)
       nyr_type_union(parents, (size_t)in->a,
-                      map->value_count + (size_t)in->imm);
+                     map->value_count + (size_t)in->imm);
   }
 
   for (size_t i = 0; i < param_count; ++i) {
@@ -326,7 +327,7 @@ bool nyr_type_map_init(nyr_type_map_t *map, const nyr_func_t *nyir,
     bool v256_i64_ops =
         in->op == NYIR_VEC8_ADD_I64 || in->op == NYIR_VEC8_SUB_I64 ||
         in->op == NYIR_VEC8_AND_I64 || in->op == NYIR_VEC8_OR_I64 ||
-        in->op == NYIR_VEC8_XOR_I64;
+        in->op == NYIR_VEC8_XOR_I64 || in->op == NYIR_VEC8_SAR_I64;
     bool v256_f64_ops =
         in->op == NYIR_VEC4_ADD_F64 || in->op == NYIR_VEC4_SUB_F64 ||
         in->op == NYIR_VEC4_MUL_F64 || in->op == NYIR_VEC4_DIV_F64 ||
@@ -464,7 +465,7 @@ float nyr_bits_to_f32(int64_t bits) {
 }
 
 static bool nyr_next_capacity(size_t current, size_t initial,
-                               size_t element_size, size_t *next) {
+                              size_t element_size, size_t *next) {
   if (!next || !element_size)
     return false;
   size_t max_capacity = SIZE_MAX / element_size;
@@ -495,7 +496,7 @@ const char *nyr_func_own_symbol_copy(nyr_func_t *f, const char *symbol) {
   if (f->owned_symbols_len >= f->owned_symbols_cap) {
     size_t cap = 0;
     if (!nyr_next_capacity(f->owned_symbols_cap, 16, sizeof(*f->owned_symbols),
-                            &cap)) {
+                           &cap)) {
       free(copy);
       return NULL;
     }
@@ -539,6 +540,7 @@ bool nyr_ir_func_clone(const nyr_func_t *src, nyr_func_t *dst) {
       dst->source_param_widths || dst->source_param_count ||
       dst->has_symbol_calls || dst->return_aggregate_size ||
       dst->return_aggregate_classes[0] || dst->return_aggregate_classes[1] ||
+      dst->i386_regparm || dst->i386_wide_params ||
       dst->vectorize_attempted_loops || dst->vectorize_rejected_loops ||
       dst->vectorized_loops)
     return false;
@@ -595,6 +597,8 @@ bool nyr_ir_func_clone(const nyr_func_t *src, nyr_func_t *dst) {
   dst->return_aggregate_size = src->return_aggregate_size;
   dst->return_aggregate_classes[0] = src->return_aggregate_classes[0];
   dst->return_aggregate_classes[1] = src->return_aggregate_classes[1];
+  dst->i386_regparm = src->i386_regparm;
+  dst->i386_wide_params = src->i386_wide_params;
   if (src->source_param_count) {
     if (!src->source_param_widths) {
       nyr_ir_func_free(dst);
@@ -682,7 +686,7 @@ bool nyr_ir_func_clone(const nyr_func_t *src, nyr_func_t *dst) {
         return false;
       }
       d.phi_incoming = (nyr_phi_incoming_t *)malloc(s->phi_incoming_len *
-                                                     sizeof(*d.phi_incoming));
+                                                    sizeof(*d.phi_incoming));
       if (!d.phi_incoming) {
         free(d.extra_args);
         free(d.arg_sizes);
@@ -704,6 +708,8 @@ void nyr_func_replace(nyr_func_t *dst, nyr_func_t *src) {
   nyr_param_type_t *param_types = dst->param_types;
   uint32_t *param_abi = dst->param_abi;
   uint32_t return_size = dst->return_aggregate_size;
+  uint8_t i386_regparm = dst->i386_regparm;
+  uint64_t i386_wide_params = dst->i386_wide_params;
   uint8_t return_classes[2] = {dst->return_aggregate_classes[0],
                                dst->return_aggregate_classes[1]};
   size_t param_count = dst->param_count;
@@ -739,6 +745,8 @@ void nyr_func_replace(nyr_func_t *dst, nyr_func_t *src) {
   }
   nyr_ir_func_free(dst);
   *dst = *src;
+  dst->i386_regparm = i386_regparm;
+  dst->i386_wide_params = i386_wide_params;
   if (keep_param_types) {
     dst->param_types = param_types;
     dst->param_count = param_count;
@@ -764,13 +772,13 @@ void nyr_inst_discard(nyr_inst_t *in) {
   free(in->arg_sizes);
   free(in->phi_incoming);
   *in = (nyr_inst_t){.op = NYIR_NOP,
-                      .dst = -1,
-                      .a = -1,
-                      .b = -1,
-                      .c = -1,
-                      .d = -1,
-                      .e = -1,
-                      .f = -1};
+                     .dst = -1,
+                     .a = -1,
+                     .b = -1,
+                     .c = -1,
+                     .d = -1,
+                     .e = -1,
+                     .f = -1};
 }
 
 bool nyr_replace_all_uses(nyr_func_t *f, int old_value, int new_value) {
@@ -926,6 +934,12 @@ const char *nyr_op_name(nyr_op_t op) {
     return "bswap.i64";
   case NYIR_BSWAP32_I64:
     return "bswap32.i64";
+  case NYIR_VA_SAVE:
+    return "va.save";
+  case NYIR_VA_START:
+    return "va.start";
+  case NYIR_VA_ARG:
+    return "va.arg";
   case NYIR_CMP_I64:
     return "cmp.i64";
   case NYIR_LABEL:
@@ -936,6 +950,10 @@ const char *nyr_op_name(nyr_op_t op) {
     return "store.local";
   case NYIR_CALL:
     return "call";
+  case NYIR_INLINE_ASM:
+    return "inline.asm";
+  case NYIR_READ_X86_RSP:
+    return "read.x86.rsp";
   case NYIR_RET:
     return "ret";
   case NYIR_BR:
@@ -1040,6 +1058,10 @@ const char *nyr_op_name(nyr_op_t op) {
     return "vec4.load.i64";
   case NYIR_VEC4_SET1_I64:
     return "vec4.set1.i64";
+  case NYIR_VEC8_SAR_I64:
+    return "vec8.sar.i64";
+  case NYIR_VEC8_SET1_I64:
+    return "vec8.set1.i64";
   case NYIR_VEC4_STORE_I64:
     return "vec4.store.i64";
   case NYIR_VEC4_ADD_I64:
@@ -1155,11 +1177,19 @@ unsigned nyr_inst_effects(const nyr_inst_t *inst) {
   case NYIR_COS_F64:
   case NYIR_VEC4_REDUCE_ADD_F64:
   case NYIR_VEC4_SET1_I64:
+  case NYIR_VEC8_SAR_I64:
+  case NYIR_VEC8_SET1_I64:
   case NYIR_SELECT_I64:
   case NYIR_ROR32_I64:
   case NYIR_BSWAP_I64:
   case NYIR_BSWAP32_I64:
     return NYIR_EFFECT_NONE;
+  case NYIR_VA_SAVE:
+    return NYIR_EFFECT_ALLOCATION | NYIR_EFFECT_WRITE_MEMORY;
+  case NYIR_VA_START:
+  case NYIR_VA_ARG:
+    return NYIR_EFFECT_READ_MEMORY | NYIR_EFFECT_WRITE_MEMORY |
+           NYIR_EFFECT_MAY_TRAP;
   case NYIR_LOAD_LOCAL:
     return NYIR_EFFECT_READ_LOCAL;
   case NYIR_STORE_LOCAL:
@@ -1188,6 +1218,12 @@ unsigned nyr_inst_effects(const nyr_inst_t *inst) {
     return NYIR_EFFECT_ALLOCATION;
   case NYIR_CALL:
     return NYIR_EFFECT_CALL | NYIR_EFFECT_UNKNOWN_SIDE_EFFECT;
+  case NYIR_INLINE_ASM:
+    return NYIR_EFFECT_CALL | NYIR_EFFECT_UNKNOWN_SIDE_EFFECT |
+           NYIR_EFFECT_VOLATILE |
+           (inst->imm > 0 ? NYIR_EFFECT_WRITE_LOCAL : NYIR_EFFECT_NONE);
+  case NYIR_READ_X86_RSP:
+    return NYIR_EFFECT_VOLATILE;
   case NYIR_RET:
   case NYIR_BR:
   case NYIR_BR_IF:
@@ -1237,7 +1273,16 @@ static void nyr_normalize_operands(nyr_inst_t *inst) {
   case NYIR_VEC4_REDUCE_ADD_F64:
   case NYIR_VEC4_REDUCE_ADD_I64:
   case NYIR_VEC8_REDUCE_ADD_I64:
+  case NYIR_VA_START:
+    break;
   case NYIR_RET:
+    /*
+     * Only .a and .b carry scalar/aggregate return values.
+     */
+    inst->c = -1;
+    inst->d = -1;
+    inst->e = -1;
+    inst->f = -1;
     break;
   case NYIR_VEC4_LOAD_F64:
   case NYIR_VEC8_LOAD_F32:
@@ -1246,6 +1291,8 @@ static void nyr_normalize_operands(nyr_inst_t *inst) {
   case NYIR_VEC4_SET1_F64:
   case NYIR_VEC8_SET1_F32:
   case NYIR_VEC4_SET1_I64:
+  case NYIR_VEC8_SAR_I64:
+  case NYIR_VEC8_SET1_I64:
   case NYIR_VEC4_SHUFFLE_F64:
   case NYIR_VEC8_SHUFFLE_F32:
     inst->b = -1;
@@ -1307,14 +1354,9 @@ static void nyr_normalize_operands(nyr_inst_t *inst) {
   case NYIR_COS_F64:
   case NYIR_BSWAP_I64:
   case NYIR_BSWAP32_I64:
+  case NYIR_VA_ARG:
   case NYIR_LOAD_I64:
   case NYIR_BR_IF:
-    /*
-     * NYIR_RET keeps .b: a register-class aggregate return carries its
-     * second eightbyte piece there (see nyr_func_t.
-     * return_aggregate_classes).  Every scalar-return constructor sets
-     * .b = -1 explicitly.
-     */
     inst->b = -1;
     inst->c = -1;
     inst->d = -1;
@@ -1325,6 +1367,7 @@ static void nyr_normalize_operands(nyr_inst_t *inst) {
   case NYIR_ADDR_SYMBOL:
   case NYIR_ALLOCA:
   case NYIR_CAPTURE_RET:
+  case NYIR_VA_SAVE:
     inst->a = -1;
     inst->b = -1;
     inst->c = -1;
@@ -1356,7 +1399,7 @@ static void nyr_normalize_operands(nyr_inst_t *inst) {
     inst->f = -1;
     if (inst->op == NYIR_STORE_I64)
       inst->b = -1;
-    else
+    else if (inst->imm >= 0)
       inst->c = -1;
     break;
   case NYIR_CALL:
@@ -1414,6 +1457,7 @@ static void nyr_normalize_operands(nyr_inst_t *inst) {
     inst->f = -1;
     break;
   case NYIR_NOP:
+  case NYIR_READ_X86_RSP:
   case NYIR_CONST_I64:
   case NYIR_CONST_F64:
   case NYIR_CONST_F32:
@@ -1426,6 +1470,59 @@ static void nyr_normalize_operands(nyr_inst_t *inst) {
     inst->d = -1;
     inst->e = -1;
     inst->f = -1;
+    break;
+  case NYIR_INLINE_ASM:
+    if (inst->imm == -140 || inst->imm == -141 || inst->imm == -142)
+      break;
+    if (inst->imm != -3 && inst->imm != -5 && inst->imm != -6 &&
+        inst->imm != -154 && inst->imm != -7 && inst->imm != -8 &&
+        inst->imm != -10 && inst->imm != -11 && inst->imm != -12 &&
+        inst->imm != -155 && inst->imm != -146 && inst->imm != -147 &&
+        inst->imm != -14 && inst->imm != -145 && inst->imm != -16 &&
+        inst->imm != -20 && inst->imm != -21 && inst->imm != -22 &&
+        inst->imm != -23 && inst->imm != -25 && inst->imm != -106 &&
+        inst->imm != -111 && inst->imm != -153 && inst->imm != -116 &&
+        inst->imm != -118 && inst->imm != -119 && inst->imm != -125 &&
+        inst->imm != -126 && inst->imm != -127 && inst->imm != -130 &&
+        inst->imm != -131 && inst->imm != -135 && inst->imm != -136 &&
+        inst->imm != -138 && inst->imm != -27 && inst->imm != -28 &&
+        inst->imm != -29 && inst->imm != -100 && inst->imm != -30 &&
+        inst->imm != -31 && inst->imm != -33 && inst->imm != -34 &&
+        inst->imm != -47 && inst->imm != -50 && inst->imm != -77 &&
+        inst->imm != -156 && inst->imm != -160 && inst->imm != -162 &&
+        inst->imm != -164 && inst->imm != -165 && inst->imm != -166 &&
+        inst->imm != -168 && inst->imm != -81 && inst->imm != -82 &&
+        inst->imm != -84 && inst->imm != -176 &&
+        (inst->imm < -46 || inst->imm > -40))
+      inst->b = -1;
+    if (inst->imm != -5 && inst->imm != -11 && inst->imm != -12 &&
+        inst->imm != -145 && inst->imm != -155 && inst->imm != -160 &&
+        inst->imm != -162 && inst->imm != -164 && inst->imm != -165 &&
+        inst->imm != -166 && inst->imm != -14 && inst->imm != -16 &&
+        inst->imm != -20 && inst->imm != -29 && inst->imm != -31 &&
+        inst->imm != -82 && inst->imm != -83 && inst->imm != -84 &&
+        inst->imm != -106 && inst->imm != -111 && inst->imm != -153 &&
+        inst->imm != -116 && inst->imm != -119 && inst->imm != -125 &&
+        inst->imm != -126 && inst->imm != -127 && inst->imm != -130 &&
+        inst->imm != -131 && inst->imm != -135 && inst->imm != -136 &&
+        inst->imm != -138 && inst->imm != -100 &&
+        (inst->imm < -54 || inst->imm > -52))
+      inst->c = -1;
+    if (inst->imm != -11 && inst->imm != -12 && inst->imm != -20 &&
+        inst->imm != -24 && inst->imm != -27 && inst->imm != -28 &&
+        inst->imm != -29 && inst->imm != -30 && inst->imm != -31 &&
+        inst->imm != -100 && inst->imm != -34 && inst->imm != -116 &&
+        inst->imm != -126 && inst->imm != -153 && inst->imm != -130 &&
+        inst->imm != -131 && inst->imm != -135 && inst->imm != -136 &&
+        inst->imm != -138 && inst->imm != -162 && inst->imm != -164 &&
+        inst->imm != -165 && inst->imm != -166)
+      inst->d = -1;
+    if (inst->imm != -24 && inst->imm != -27 && inst->imm != -28 &&
+        inst->imm != -30 && inst->imm != -31 && inst->imm != -135 &&
+        inst->imm != -136 && inst->imm != -138 && inst->imm != -162)
+      inst->e = -1;
+    if (inst->imm != -31 && inst->imm != -135 && inst->imm != -138)
+      inst->f = -1;
     break;
   case NYIR_OP_COUNT:
     break;
@@ -1487,7 +1584,33 @@ int nyr_ir_emit(nyr_func_t *f, nyr_inst_t inst) {
   }
   if (inst.dst < 0 && inst.op != NYIR_STORE_LOCAL &&
       inst.op != NYIR_STORE_I64 && inst.op != NYIR_RET && inst.op != NYIR_BR &&
-      inst.op != NYIR_BR_IF && inst.op != NYIR_LABEL && inst.op != NYIR_NOP)
+      inst.op != NYIR_BR_IF && inst.op != NYIR_LABEL && inst.op != NYIR_NOP &&
+      inst.op != NYIR_VA_START && inst.op != NYIR_COPY_STRUCT &&
+      (inst.op != NYIR_INLINE_ASM || inst.imm == -156 ||
+       (inst.symbol &&
+        (strcmp(inst.symbol, "__nyc_builtin_return_address_0") == 0 ||
+         strcmp(inst.symbol, "__nyc_builtin_frame_address_0") == 0 ||
+         strcmp(inst.symbol, "__nyc_builtin_alloca_dynamic") == 0 ||
+         inst.imm == -1 || inst.imm == -4 || inst.imm == -7 || inst.imm == -9 ||
+         inst.imm == -10 || inst.imm == -11 || inst.imm == -12 ||
+         inst.imm == -8 || inst.imm == -13 || inst.imm == -155 ||
+         inst.imm == -145 || inst.imm == -147 || inst.imm == -16 ||
+         inst.imm == -17 || inst.imm == -18 || inst.imm == -19 ||
+         inst.imm == -20 || inst.imm == -21 || inst.imm == -22 ||
+         inst.imm == -23 || inst.imm == -25 || inst.imm == -47 ||
+         inst.imm == -107 || inst.imm == -110 || inst.imm == -123 ||
+         inst.imm == -124 || inst.imm == -129 || inst.imm == -130 ||
+         inst.imm == -131 || inst.imm == -132 || inst.imm == -101 ||
+         inst.imm == -108 || inst.imm == -50 || inst.imm == -80 ||
+         inst.imm == -81 || inst.imm == -83 || inst.imm == -105 ||
+         inst.imm == -106 || inst.imm == -84 || inst.imm == -150 ||
+         inst.imm == -149 || inst.imm == -151 || inst.imm == -156 ||
+         inst.imm == -160 || inst.imm == -162 || inst.imm == -163 ||
+         inst.imm == -164 || inst.imm == -165 || inst.imm == -166 ||
+         inst.imm == -167 || inst.imm == -176 ||
+         (inst.imm >= -69 && inst.imm <= -65) ||
+         (inst.imm >= -58 && inst.imm <= -55) ||
+         (inst.imm >= -46 && inst.imm <= -40)))))
     inst.dst = f->next_value++;
   nyr_init_inst_metadata(&inst);
   f->data[f->len++] = inst;
@@ -1506,32 +1629,32 @@ bool nyr_err(char *err, size_t err_len, const char *fmt, ...) {
   return false;
 }
 
-bool nyr_inst_err(char *err, size_t err_len, const nyr_inst_t *in,
-                   size_t index, const char *reason) {
+bool nyr_inst_err(char *err, size_t err_len, const nyr_inst_t *in, size_t index,
+                  const char *reason) {
   if (in && in->debug.line) {
     if (in->debug.file && in->debug.file[0]) {
       return nyr_err(
           err, err_len,
           "native NYIR verify: inst %zu opcode=%s dst=v%d a=v%d b=v%d "
-          "imm=%" PRId64 " at %s:%u:%u: %s",
-          index, nyr_op_name(in->op), in->dst, in->a, in->b, in->imm,
-          in->debug.file, in->debug.line, in->debug.column,
-          reason ? reason : "invalid instruction");
+          "c=v%d d=v%d e=v%d f=v%d imm=%" PRId64 " at %s:%u:%u: %s",
+          index, nyr_op_name(in->op), in->dst, in->a, in->b, in->c, in->d,
+          in->e, in->f, in->imm, in->debug.file, in->debug.line,
+          in->debug.column, reason ? reason : "invalid instruction");
     }
-    return nyr_err(
-        err, err_len,
-        "native NYIR verify: inst %zu opcode=%s dst=v%d a=v%d b=v%d "
-        "imm=%" PRId64 " at line %u:%u: %s",
-        index, nyr_op_name(in->op), in->dst, in->a, in->b, in->imm,
-        in->debug.line, in->debug.column,
-        reason ? reason : "invalid instruction");
+    return nyr_err(err, err_len,
+                   "native NYIR verify: inst %zu opcode=%s dst=v%d a=v%d b=v%d "
+                   "c=v%d d=v%d e=v%d f=v%d imm=%" PRId64 " at line %u:%u: %s",
+                   index, nyr_op_name(in->op), in->dst, in->a, in->b, in->c,
+                   in->d, in->e, in->f, in->imm, in->debug.line,
+                   in->debug.column, reason ? reason : "invalid instruction");
   }
   return nyr_err(err, err_len,
-                  "native NYIR verify: inst %zu opcode=%s dst=v%d a=v%d b=v%d "
-                  "imm=%" PRId64 ": %s",
-                  index, in ? nyr_op_name(in->op) : "<null>",
-                  in ? in->dst : -1, in ? in->a : -1, in ? in->b : -1,
-                  in ? in->imm : 0, reason ? reason : "invalid instruction");
+                 "native NYIR verify: inst %zu opcode=%s dst=v%d a=v%d b=v%d "
+                 "c=v%d d=v%d e=v%d f=v%d imm=%" PRId64 ": %s",
+                 index, in ? nyr_op_name(in->op) : "<null>", in ? in->dst : -1,
+                 in ? in->a : -1, in ? in->b : -1, in ? in->c : -1,
+                 in ? in->d : -1, in ? in->e : -1, in ? in->f : -1,
+                 in ? in->imm : 0, reason ? reason : "invalid instruction");
 }
 
 static const char *nyr_dump_color(FILE *out, const char *code) {
@@ -1605,6 +1728,12 @@ static const char *nyr_op_short(const nyr_inst_t *in) {
     return "bswap";
   case NYIR_BSWAP32_I64:
     return "bswap32";
+  case NYIR_VA_SAVE:
+    return "vasave";
+  case NYIR_VA_START:
+    return "vastart";
+  case NYIR_VA_ARG:
+    return "vaarg";
   case NYIR_SELECT_I64:
     return "select";
   case NYIR_CMP_I64:
@@ -1700,6 +1829,13 @@ static bool nyr_fmt_inst(const nyr_inst_t *in, char *buf, size_t n) {
   if ((in->op == NYIR_LOAD_I64 || in->op == NYIR_STORE_I64) &&
       (in->flags & NYIR_INST_F_MEM_BYTE))
     APP(".byte");
+  if ((in->op == NYIR_LOAD_I64 || in->op == NYIR_STORE_I64) &&
+      (in->flags & NYIR_INST_F_MEM_U16))
+    APP(".u16");
+
+  if ((in->op == NYIR_LOAD_I64 || in->op == NYIR_STORE_I64) &&
+      (in->flags & NYIR_INST_F_MEM_I32))
+    APP(".i32");
   if (in->op == NYIR_LOAD_LOCAL || in->op == NYIR_STORE_LOCAL ||
       in->op == NYIR_ADDR_LOCAL) {
     APP(" #%" PRId64, in->imm);
@@ -1834,7 +1970,7 @@ void nyr_dump(FILE *out, const nyr_func_t *f, const char *name) {
         ++nops;
     }
   }
-  fprintf(out, "%snyir%s %s%s%s  %s%dv %zui%s", heading, reset, value,
+  fprintf(out, "%snyr%s %s%s%s  %s%dv %zui%s", heading, reset, value,
           name && name[0] ? name : "<anon>", reset, muted,
           f ? f->next_value : 0, f ? f->len : 0, reset);
   if (nops)
@@ -1897,8 +2033,8 @@ void nyr_dump(FILE *out, const nyr_func_t *f, const char *name) {
       bool opened = false;
       for (size_t arg = 0; arg < argc; ++arg) {
         nyr_scalar_class_t cls = nyr_call_arg_class_get(&f->data[i], arg);
-        const char *contract = nyr_dump_arg_contract(
-            nyr_call_arg_contract_get(&f->data[i], arg));
+        const char *contract =
+            nyr_dump_arg_contract(nyr_call_arg_contract_get(&f->data[i], arg));
         const char *cls_name =
             cls == NYIR_SCALAR_UNKNOWN ? NULL : nyr_dump_scalar_class(cls);
         if (cls == NYIR_SCALAR_UNKNOWN && !contract)
@@ -1946,6 +2082,141 @@ void nyr_dump(FILE *out, const nyr_func_t *f, const char *name) {
     fputc('\n', out);
 }
 
+typedef struct {
+  const char *name;
+  const nyr_func_t *func;
+  bool entry;
+} nyr_instruction_dump_item_t;
+
+static int nyr_instruction_dump_item_compare(const void *left,
+                                             const void *right) {
+  const nyr_instruction_dump_item_t *a = left;
+  const nyr_instruction_dump_item_t *b = right;
+  return strcmp(a->name, b->name);
+}
+
+static void nyr_dump_instruction_line(FILE *out, const nyr_inst_t *inst,
+                                      size_t index) {
+  const char *reset = nyr_dump_color(out, NY_CLR_RESET);
+  const char *opcode = nyr_dump_color(out, NY_CLR_BRIGHT_GREEN);
+  char buffer[1024];
+  if (inst->op == NYIR_NOP)
+    snprintf(buffer, sizeof(buffer), "nop");
+  else if (!nyr_fmt_inst(inst, buffer, sizeof(buffer)))
+    return;
+  size_t used = strlen(buffer);
+  if (inst->scalar_class != NYIR_SCALAR_UNKNOWN) {
+    const char *cls = nyr_dump_scalar_class(inst->scalar_class);
+    if (used + strlen(cls) + 8 < sizeof(buffer)) {
+      snprintf(buffer + used, sizeof(buffer) - used, " [abi=%s]", cls);
+      used = strlen(buffer);
+    }
+  }
+  if (inst->flags & NYIR_INST_F_NOALIAS) {
+    if (used + sizeof(" [noalias]") < sizeof(buffer)) {
+      memcpy(buffer + used, " [noalias]", sizeof(" [noalias]"));
+      used = strlen(buffer);
+    }
+    if (used + sizeof(" [ownership=255]") < sizeof(buffer)) {
+      snprintf(buffer + used, sizeof(buffer) - used, " [ownership=%u]",
+               (unsigned)inst->semantic_ownership);
+      used = strlen(buffer);
+    }
+  }
+  if (inst->op == NYIR_CALL && inst->imm > 0) {
+    size_t argc = (size_t)inst->imm;
+    if (argc > NYIR_CALL_MAX_ARGS)
+      argc = NYIR_CALL_MAX_ARGS;
+    bool opened = false;
+    for (size_t arg = 0; arg < argc; ++arg) {
+      nyr_scalar_class_t cls = nyr_call_arg_class_get(inst, arg);
+      const char *contract =
+          nyr_dump_arg_contract(nyr_call_arg_contract_get(inst, arg));
+      const char *cls_name =
+          cls == NYIR_SCALAR_UNKNOWN ? NULL : nyr_dump_scalar_class(cls);
+      if (cls == NYIR_SCALAR_UNKNOWN && !contract)
+        continue;
+      int wrote =
+          snprintf(buffer + used, sizeof(buffer) - used, "%s%zu:%s%s%s",
+                   opened ? " " : " [arg-abi ", arg, cls_name ? cls_name : "",
+                   cls_name && contract ? "/" : "", contract ? contract : "");
+      if (wrote < 0 || (size_t)wrote >= sizeof(buffer) - used) {
+        used = sizeof(buffer) - 1;
+        break;
+      }
+      used += (size_t)wrote;
+      opened = true;
+    }
+    if (opened && used + 2 < sizeof(buffer)) {
+      buffer[used++] = ']';
+      buffer[used] = '\0';
+    }
+  }
+  if (inst->debug.line && used + 16 < sizeof(buffer))
+    snprintf(buffer + used, sizeof(buffer) - used, " @%s:%u:%u",
+             inst->debug.file && inst->debug.file[0] ? inst->debug.file
+                                                     : "<source>",
+             inst->debug.line, inst->debug.column ? inst->debug.column : 1);
+  fprintf(out, "  %04zu  %s%s%s\n", index, opcode, buffer, reset);
+}
+
+static void nyr_dump_instructions(FILE *out, const nyr_func_t *func,
+                                  const char *name) {
+  const char *reset = nyr_dump_color(out, NY_CLR_RESET);
+  const char *heading = nyr_dump_color(out, NY_CLR_BRIGHT_CYAN NY_CLR_BOLD);
+  const char *bold = nyr_dump_color(out, NY_CLR_BOLD);
+  const char *muted = nyr_dump_color(out, NY_CLR_BRIGHT_BLACK);
+  fprintf(out, "%snyr-vm%s %s%s%s %s%zui%s\n", heading, reset, bold,
+          name && name[0] ? name : "<anon>", reset, muted, func ? func->len : 0,
+          reset);
+  if (!func)
+    return;
+  for (size_t i = 0; i < func->len; ++i)
+    nyr_dump_instruction_line(out, &func->data[i], i);
+}
+
+bool nyr_dump_program_instructions(FILE *out, const nyr_func_t *entry,
+                                   const char *entry_name,
+                                   const nyr_func_t *functions,
+                                   const char *const *function_names,
+                                   size_t function_count,
+                                   const char *name_filter) {
+  if (!out)
+    out = stderr;
+  if (!entry || (function_count && (!functions || !function_names)) ||
+      function_count == SIZE_MAX)
+    return false;
+  size_t item_count = function_count + 1;
+  if (item_count > SIZE_MAX / sizeof(nyr_instruction_dump_item_t))
+    return false;
+  nyr_instruction_dump_item_t *items = malloc(item_count * sizeof(*items));
+  if (!items)
+    return false;
+  const char *main_name = entry_name && entry_name[0] ? entry_name : "rt_main";
+  items[0] = (nyr_instruction_dump_item_t){main_name, entry, true};
+  for (size_t i = 0; i < function_count; ++i) {
+    if (!function_names[i] || !function_names[i][0]) {
+      free(items);
+      return false;
+    }
+    items[i + 1] =
+        (nyr_instruction_dump_item_t){function_names[i], &functions[i], false};
+  }
+  qsort(items, item_count, sizeof(*items), nyr_instruction_dump_item_compare);
+  fprintf(out, "NYR VM instruction listing%s%s\n",
+          name_filter && *name_filter ? " filter=" : "",
+          name_filter && *name_filter ? name_filter : "");
+  for (size_t i = 0; i < item_count; ++i) {
+    if (name_filter && *name_filter && !strstr(items[i].name, name_filter))
+      continue;
+    fprintf(out, "function %s%s\n", items[i].name,
+            items[i].entry ? " [entry]" : "");
+    nyr_dump_instructions(out, items[i].func, items[i].name);
+  }
+  free(items);
+  return !ferror(out);
+}
+
 void nyr_dump_compact(FILE *out, const nyr_func_t *f, const char *name) {
   if (!out)
     out = stderr;
@@ -1989,8 +2260,8 @@ void nyr_dump_compact(FILE *out, const nyr_func_t *f, const char *name) {
   fputc('\n', out);
 }
 
-void nyr_dump_diff(FILE *out, const nyr_func_t *before,
-                    const nyr_func_t *after, const char *pass_tag) {
+void nyr_dump_diff(FILE *out, const nyr_func_t *before, const nyr_func_t *after,
+                   const char *pass_tag) {
   if (!out)
     out = stderr;
   if (!after)
@@ -2120,7 +2391,7 @@ void nyr_dump_cfg(FILE *out, const nyr_func_t *f, const char *name) {
 }
 
 void nyr_eval_result_dump(FILE *out, const char *name,
-                           const nyr_eval_result_t *result) {
+                          const nyr_eval_result_t *result) {
   if (!out)
     out = stderr;
   const char *reset = nyr_dump_color(out, NY_CLR_RESET);
@@ -2128,7 +2399,7 @@ void nyr_eval_result_dump(FILE *out, const char *name,
   const char *value = nyr_dump_color(out, NY_CLR_BRIGHT_MAGENTA);
   fprintf(
       out,
-      "%snyir vm profile%s function=%s%s%s returned=%s result=%" PRId64
+      "%snyr vm profile%s function=%s%s%s returned=%s result=%" PRId64
       " steps=%zu branches_taken=%zu branches_not_taken=%zu calls=%zu "
       "max_pc=%zu max_value=%zu max_local=%zu\n",
       heading, reset, value, name && name[0] ? name : "rt_main", reset,
@@ -2151,13 +2422,13 @@ void nyr_eval_result_dump(FILE *out, const char *name,
     if (result->op_counts[i] == 0)
       continue;
     fprintf(out, "  op %s%-14s%s %zu\n",
-            nyr_dump_color(out, NY_CLR_BRIGHT_GREEN),
-            nyr_op_name((nyr_op_t)i), reset, result->op_counts[i]);
+            nyr_dump_color(out, NY_CLR_BRIGHT_GREEN), nyr_op_name((nyr_op_t)i),
+            reset, result->op_counts[i]);
   }
 }
 
 void nyr_collect_stats(const nyr_func_t *f, size_t *insts, int *values,
-                        size_t *ops, size_t op_count) {
+                       size_t *ops, size_t op_count) {
   if (insts)
     *insts = f ? f->len : 0;
   if (values)
@@ -2197,7 +2468,7 @@ void nyr_dump_stats(FILE *out, const nyr_opt_stats_t *stats) {
    * One compact summary line: instruction and value deltas plus the
    * safety-sensitive key metrics, instead of two or three separate lines.
    */
-  fprintf(out, "%snyir optimize%s %zu→%zu inst (-%zu) v%d→%d",
+  fprintf(out, "%snyr optimize%s %zu→%zu inst (-%zu) v%d→%d",
           nyr_dump_color(out, NY_CLR_BRIGHT_CYAN NY_CLR_BOLD),
           nyr_dump_color(out, NY_CLR_RESET), stats->before_insts,
           stats->after_insts, removed, stats->before_values,
@@ -2232,7 +2503,7 @@ void nyr_dump_stats(FILE *out, const nyr_opt_stats_t *stats) {
     }
   }
   if (op_counts_changed)
-    fprintf(out, "%snyir optimize ops%s",
+    fprintf(out, "%snyr optimize ops%s",
             nyr_dump_color(out, NY_CLR_BRIGHT_CYAN NY_CLR_BOLD),
             nyr_dump_color(out, NY_CLR_RESET));
   for (size_t op = 0; op < (size_t)NYIR_OP_COUNT; ++op) {
@@ -2314,7 +2585,7 @@ void nyr_dump_stats(FILE *out, const nyr_opt_stats_t *stats) {
     for (size_t i = 0; i < agg_count; ++i)
       if (agg[i].max_delta > max_delta)
         max_delta = agg[i].max_delta;
-    fprintf(out, "nyir passes  time_ms  inst Δ  change\n");
+    fprintf(out, "nyr passes  time_ms  inst Δ  change\n");
     for (size_t i = 0; i < agg_count; ++i) {
       size_t delta = agg[i].max_delta;
       char spark[9] = "--------";

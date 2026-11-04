@@ -21,7 +21,7 @@
 ;; Use aliases when a flat export surface would hide its owner, for example
 ;; `use core.str as str`. Recoverable failures are explicit values;
 ;; compiler diagnostics handle invalid Nytrix programs.
-module core(bool, init_str, load8, load16, load32, load64, load32_h, load64_h, load64_i, load32_f32, load64_f64, store8, store16, store32, store64, store32_h, store64_h, store64_i, store32_f32, store64_f64, memcpy, memset, memcmp, memchr, ptr_add, ptr_sub, addr_of, malloc, free, malloc_raw, free_raw, realloc, zalloc, borrow, borrow_mut, own, release, forget, list, vec2, vec3, vec4, bytes, bytes_get, bytes_set, Vector2, Vector3, Vector4, is_ptr, is_nil, is_none, is_int, is_nytrix_obj, is_list, is_dict, is_set, is_tuple, is_range, is_str, is_bytes, is_float, to_int, from_int, is_kwargs, __kwarg, kwarg, get_kwarg_key, get_kwarg_val, len, clone, load_item, store_item, swap, swapped, get, set_idx, index_read, slice, put, delete, clear, append, pop, extend, sort, sorted, replace, join, to_str, str, dict, dict_has, dict_del, dict_get, dict_set, dict_pop, dict_popitem, dict_setdefault, dict_clone, dict_merge, dict_items, dict_keys, dict_values, dict_clear, items, keys, values, set, contains, startswith, endswith, type, type_shape, is_shape, require_shape, assert_shape, hash, repr, debug_print_val, debug_print, breakpoint, print_history_drain, print_history_clear, print_to_stdout, add, sub, mul, div, mod, pow, band, bor, bxor, bshl, bshr, bnot, eq, ne, lt, le, gt, ge, argc, argv, __argv, envc, envp, errno, atoi, globals, set_globals, OS, ARCH, IS_LINUX, IS_MACOS, IS_WINDOWS, IS_X86_64, IS_AARCH64, IS_ARM, is_truthy, is_falsy, not_none, min, max, sqrt, abs, round, divmod, ok, err, is_ok, is_err, unwrap, unwrap_or, panic, panic_if, assert, assert_eq, print, eprint, _eprint_raw, chr, retain, rc_count, _pow2, _core_bigint_to_bytes, _clone_list, mapcat, flatten, map, filter, take, drop, reverse, range, range2, reduce, sum, each, count, count_if, first, last, compact, chunk, windowed, Counter, counter, counter_add, counter_inc, counter_update, count_by, most_common, group_by, default_get, Queue, queue, queue_push, queue_pop, queue_try_pop, queue_peek, queue_len, queue_empty, queue_clear, Channel, channel, chan, chan_send, chan_try_send, chan_recv, chan_try_recv, chan_close, chan_closed, chan_len)
+module core(bool, init_str, load8, load16, load32, load64, load32_h, load64_h, load64_i, load32_f32, load64_f64, store8, store16, store32, store64, store32_h, store64_h, store64_i, store32_f32, store64_f64, memcpy, memset, memcmp, memchr, ptr_add, ptr_sub, addr_of, malloc, free, malloc_raw, calloc_raw, free_raw, realloc, zalloc, borrow, borrow_mut, own, release, forget, list, vec2, vec3, vec4, bytes, bytes_get, bytes_set, Vector2, Vector3, Vector4, is_ptr, is_nil, is_none, is_int, is_nytrix_obj, is_list, is_dict, is_set, is_tuple, is_range, is_str, is_bytes, is_float, to_int, from_int, is_kwargs, __kwarg, kwarg, get_kwarg_key, get_kwarg_val, len, clone, load_item, store_item, swap, swapped, get, set_idx, index_read, slice, put, delete, clear, append, pop, extend, sort, sorted, replace, join, to_str, str, dict, dict_has, dict_del, dict_get, dict_set, dict_pop, dict_popitem, dict_setdefault, dict_clone, dict_merge, dict_items, dict_keys, dict_values, dict_clear, items, keys, values, set, contains, startswith, endswith, type, type_shape, is_shape, require_shape, assert_shape, hash, repr, debug_print_val, debug_print, breakpoint, print_history_drain, print_history_clear, print_to_stdout, add, sub, mul, div, mod, pow, band, bor, bxor, bshl, bshr, bnot, eq, ne, lt, le, gt, ge, argc, argv, __argv, envc, envp, errno, atoi, globals, set_globals, OS, ARCH, IS_LINUX, IS_MACOS, IS_WINDOWS, IS_X86_64, IS_AARCH64, IS_ARM, is_truthy, is_falsy, not_none, min, max, sqrt, abs, round, divmod, ok, err, is_ok, is_err, unwrap, unwrap_or, panic, panic_if, assert, assert_eq, print, eprint, _eprint_raw, chr, retain, rc_count, _pow2, _core_bigint_to_bytes, _clone_list, mapcat, flatten, map, filter, take, drop, reverse, range, range2, reduce, sum, each, count, count_if, first, last, compact, chunk, windowed, Counter, counter, counter_add, counter_inc, counter_update, count_by, most_common, group_by, default_get, Queue, queue, queue_push, queue_pop, queue_try_pop, queue_peek, queue_len, queue_empty, queue_clear, Channel, channel, chan, chan_send, chan_try_send, chan_recv, chan_try_recv, chan_close, chan_closed, chan_len)
 use core.primitives
 use core.reflect as core_ref
 use core.dict_mod
@@ -80,16 +80,18 @@ fn assert_eq(any a, any b, str msg="assert eq failed") any {
 }
 
 fn _core_pow_float_arg(any x) any {
-   if type(x) == "bigint" { return from_int(__bigint_to_int(x)) }
+   if __is_bigint(x) { return from_int(__bigint_to_int(x)) }
    x
 }
 
 fn pow(any a, any b) any {
    "Raises `a` to exponent `b`. Integer powers are exact; float operands and negative exponents use floating-point power."
-   def ta, tb = type(a), type(b)
-   def a_num, b_num = ta == "int" || ta == "float" || ta == "bigint", tb == "int" || tb == "float" || tb == "bigint"
-   if !a_num || !b_num { panic("pow expects numeric operands") }
-   if ta == "float" || tb == "float" || b < 0 {
+   mut int a_num = 0
+   mut int b_num = 0
+   if __is_int(a) || __is_float_obj(a) || __is_bigint(a) { a_num = 1 }
+   if __is_int(b) || __is_float_obj(b) || __is_bigint(b) { b_num = 1 }
+   if a_num == 0 || b_num == 0 { panic("pow expects numeric operands") }
+   if __is_float_obj(a) || __is_float_obj(b) || b < 0 {
       return __flt_pow(_core_pow_float_arg(a), _core_pow_float_arg(b))
    }
    __bigint_pow(a, b)
@@ -476,7 +478,7 @@ fn round(any x, int n=0) any {
    if __is_int(x) { return x }
    def f = float(x)
    if n == 0 { return __flt_round(f) }
-   def factor = pow(10.0, float(n))
+   def factor = __flt_pow(10.0, float(n))
    __flt_round(f * factor) / factor
 }
 
@@ -792,6 +794,12 @@ fn malloc_raw(int n) ptr {
    __malloc_raw(n)
 }
 
+@returns_owned
+fn calloc_raw(int n) ptr {
+   "Allocates unmanaged zero-initialized raw bytes. Free with free_raw."
+   __calloc_raw(n)
+}
+
 fn free_raw(ptr p) any {
    "Frees memory allocated by malloc_raw."
    __free_raw(p)
@@ -914,14 +922,22 @@ fn _core_vector(int n, any x, any y=0, any z=0, any w=0) any {
    out
 }
 
-fn Vector2(any x=0, any y=nil) any { _core_vector(2, x, y == nil ? 0 : y) }
+fn _core_vector_component(any value) any {
+   if value == nil { return 0 }
+   value
+}
+
+fn Vector2(any x=0, any y=nil) any {
+   _core_vector(2, x, _core_vector_component(y))
+}
 
 fn Vector3(any x=0, any y=nil, any z=nil) any {
-   _core_vector(3, x, y == nil ? 0 : y, z == nil ? 0 : z)
+   _core_vector(3, x, _core_vector_component(y), _core_vector_component(z))
 }
 
 fn Vector4(any x=0, any y=nil, any z=nil, any w=nil) any {
-   _core_vector(4, x, y == nil ? 0 : y, z == nil ? 0 : z, w == nil ? 0 : w)
+   _core_vector(4, x, _core_vector_component(y), _core_vector_component(z),
+      _core_vector_component(w))
 }
 
 fn vec2(any x=0, any y=nil) any { Vector2(x, y) }
@@ -1187,6 +1203,7 @@ fn extend(any lst, any other) any {
 @jit
 fn len(any x) int {
    "Returns the number of elements in a collection or the length of a string."
+   if __is_nil(x) { return 0 }
    ;; Lists/tuples can be legacy managed objects or native tbufs.  Read the
    ;; count through the representation-aware helper instead of treating byte
    ;; offset zero as the length (which is the first native-tbuf element).
@@ -1361,9 +1378,9 @@ impl str {
    @inline
    fn last(str self, any default=0) any { return core_iter.last(self, default) }
    @inline
-   fn take(str self, int n) any { return core_iter.take(self, n) }
+   fn take(str self, int n) str { return core_iter.take(self, n) }
    @inline
-   fn drop(str self, int n) any { return core_iter.drop(self, n) }
+   fn drop(str self, int n) str { return core_iter.drop(self, n) }
    @inline
    fn reverse(str self) any { return core_iter.reverse(self) }
    @inline

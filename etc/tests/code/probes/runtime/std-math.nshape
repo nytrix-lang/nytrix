@@ -1,0 +1,70 @@
+shape std_math_bigint_valid {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "compiler"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.math.nt
+def a = Z(8)
+def b = Z(13)
+def c = a + b
+assert(c.str == "21", "bigint operator sum")
+assert(bigint_mul(Z(3), Z(7)).str == "21", "bigint helper product")
+print("std math bigint valid")
+NY
+}
+
+shape std_math_pi_import {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "compiler"]
+  template ny-test-case
+  expect compile_and_run
+  ci optional
+  source ny <<'NY'
+use core
+use core.math as math
+
+assert(math.PI > 3.14 && math.PI < 3.15, "core.math PI export")
+assert(math.TAU > 6.28 && math.TAU < 6.29, "core.math TAU export")
+print("core.math aliased constants ok")
+NY
+}
+
+shape std_math_typed_valid {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "compiler"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.math
+fn hyp2(int: a, int: b) int {
+   a * a + b * b
+}
+assert(hyp2(3, 4) == 25, "typed int math")
+assert(gcd(84, 30) == 6, "gcd")
+assert(lcm(6, 14) == 42, "lcm")
+assert(sqrt(81) == 9.0, "sqrt")
+print("std math typed valid")
+NY
+}
+
+shape std_math_type_errors {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "compiler"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core.math
+fn bad_math_return(int: x) f64 {
+   sqrt(x)
+}
+assert(bad_math_return(9) == 3.0, "sqrt accepts an integer and returns f64")
+0
+NY
+}

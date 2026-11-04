@@ -77,17 +77,20 @@ def list GLTF_ASSET_DEFAULT_ROOTS = [
 
 fn mono_font(int size, candidates=0, int font_filter=-1) int {
    "Runs the mono font operation."
-   ui_runtime.mono_font(size, common.value_or(candidates, MONO_FONT_CANDIDATES), font_filter)
+   if !candidates { candidates = MONO_FONT_CANDIDATES }
+   ui_runtime.font_from_candidates(size, candidates, font_filter, "monocraft")
 }
 
 fn editor_font(int size, candidates=0, int font_filter=-1) int {
    "Runs the editor font operation."
-   mono_font(size, common.value_or(candidates, EDITOR_FONT_CANDIDATES), font_filter)
+   if !candidates { candidates = EDITOR_FONT_CANDIDATES }
+   ui_runtime.font_from_candidates(size, candidates, font_filter, "monocraft")
 }
 
 fn ui_font(int size, candidates=0, int font_filter=-1) int {
    "Runs the font operation."
-   ui_runtime.ui_font_from_candidates(size, common.value_or(candidates, UI_FONT_CANDIDATES), EDITOR_FONT_CANDIDATES, font_filter)
+   if !candidates { candidates = UI_FONT_CANDIDATES }
+   ui_runtime.ui_font_from_candidates(size, candidates, EDITOR_FONT_CANDIDATES, font_filter)
 }
 
 mut _gltf_asset_catalog_cache = 0

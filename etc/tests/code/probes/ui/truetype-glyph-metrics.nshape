@@ -1,0 +1,32 @@
+shape truetype-glyph-metrics {
+  family "probe-suite"
+  generator "regression"
+  features ["ny", "font", "memory", "ffi"]
+  template ny-test-case
+  expect compile_and_run
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect_stdout "TRUETYPE-GLYPH-METRICS-OK"
+  source ny <<'SOURCE'
+use core
+use core.os.ui.font.truetype as font
+def info = font.load_path("etc/assets/fonts/monocraft.ttf")
+assert(is_dict(info), "bundled font loads")
+assert(int(info.get("units_per_em")) > 0, "face metrics read through handle")
+assert(info.get("is_scalable"), "TrueType face remains scalable")
+def gi = font.get_glyph_index(info, 65)
+assert(gi > 0, "A exists")
+def scale = font.scale_for_pixel_height(info, 18.0)
+def bitmap = font.get_glyph_bitmap(info, scale, scale, gi)
+def int w = int(bitmap.get("width"))
+def int h = int(bitmap.get("height"))
+assert(w > 0 && w < 64 && h > 0 && h < 64, "glyph has pixel dimensions")
+def pixels = bitmap.get("data")
+mut coverage = 0
+mut i = 0
+while i < w * h { coverage += load8(pixels, i * 4 + 3) i += 1 }
+assert(coverage > 0, "glyph contains visible coverage")
+free(pixels)
+font.unload(info)
+print("TRUETYPE-GLYPH-METRICS-OK")
+SOURCE
+}

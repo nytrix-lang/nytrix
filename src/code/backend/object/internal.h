@@ -15,6 +15,9 @@ typedef struct {
 #define NY_RELOC_AARCH64_CALL26 3
 #define NY_RELOC_AARCH64_ADR_PREL_PG_HI21 4
 #define NY_RELOC_AARCH64_ADD_ABS_LO12_NC 5
+#define NY_RELOC_X86_64_64 6
+#define NY_RELOC_GOTPCREL 7
+#define NY_RELOC_X86_64_32S 8
 
 /* A single straight-line Nytrix function can legitimately contain hundreds
  * of calls. Keep the program-level relocation transport larger than the
@@ -24,35 +27,35 @@ typedef struct {
 #define NY_NATIVE_MAX_DEFS NY_NATIVE_MAX_SYMBOLS
 
 void nyr_native_mach_encode_stats(unsigned long long *mach_ok,
-                                 unsigned long long *nir_fallback);
+                                  unsigned long long *nir_fallback);
 void nyr_native_mach_encode_fallback_detail(char *out, size_t out_len);
 /* Scalar DIV/MOD encodings selected by the x64 machine object encoder. */
 void nyr_native_mach_div_record(bool magic);
 void nyr_native_mach_div_stats(unsigned long long *magic,
-                              unsigned long long *idiv);
+                               unsigned long long *idiv);
 void nyr_native_mach_regalloc_record(size_t segments, size_t colored,
-                                    size_t spilled, size_t reloads,
-                                    size_t peak_live);
+                                     size_t spilled, size_t reloads,
+                                     size_t peak_live);
 void nyr_native_mach_regalloc_stats(unsigned long long *segments,
-                                   unsigned long long *colored,
-                                   unsigned long long *spilled,
-                                   unsigned long long *reloads,
-                                   unsigned long long *peak_live);
+                                    unsigned long long *colored,
+                                    unsigned long long *spilled,
+                                    unsigned long long *reloads,
+                                    unsigned long long *peak_live);
 void nyr_native_mach_fpr_record(size_t segments, size_t colored, size_t spilled,
-                               size_t reloads, size_t peak_live);
+                                size_t reloads, size_t peak_live);
 void nyr_native_mach_fpr_stats(unsigned long long *segments,
-                              unsigned long long *colored,
-                              unsigned long long *spilled,
-                              unsigned long long *reloads,
-                              unsigned long long *peak_live);
+                               unsigned long long *colored,
+                               unsigned long long *spilled,
+                               unsigned long long *reloads,
+                               unsigned long long *peak_live);
 void nyr_native_mach_vector_record(size_t segments, size_t colored,
-                                  size_t spilled, size_t reloads,
-                                  size_t peak_live);
+                                   size_t spilled, size_t reloads,
+                                   size_t peak_live);
 void nyr_native_mach_vector_stats(unsigned long long *segments,
-                                 unsigned long long *colored,
-                                 unsigned long long *spilled,
-                                 unsigned long long *reloads,
-                                 unsigned long long *peak_live);
+                                  unsigned long long *colored,
+                                  unsigned long long *spilled,
+                                  unsigned long long *reloads,
+                                  unsigned long long *peak_live);
 typedef struct {
   size_t segments;
   size_t colored;
@@ -67,17 +70,18 @@ typedef struct {
 } nyr_native_regalloc_metrics_t;
 
 bool nyr_native_x64_regalloc_metrics(const nyr_mach_func_t *mach,
-                                    const ny_native_target_info_t *target,
-                                    nyr_native_regalloc_metrics_t *gpr,
-                                    nyr_native_regalloc_metrics_t *fpr,
-                                    nyr_native_regalloc_metrics_t *vector);
+                                     const ny_native_target_info_t *target,
+                                     nyr_native_regalloc_metrics_t *gpr,
+                                     nyr_native_regalloc_metrics_t *fpr,
+                                     nyr_native_regalloc_metrics_t *vector);
 bool nyr_native_a64_regalloc_metrics(const nyr_mach_func_t *mach,
-                                    nyr_native_regalloc_metrics_t *gpr,
-                                    nyr_native_regalloc_metrics_t *fpr,
-                                    nyr_native_regalloc_metrics_t *vector);
+                                     nyr_native_regalloc_metrics_t *gpr,
+                                     nyr_native_regalloc_metrics_t *fpr,
+                                     nyr_native_regalloc_metrics_t *vector);
 bool nyr_mach_regalloc_build_class(const nyr_mach_func_t *mach,
-                                  nyr_mach_reg_class_t reg_class,
-                                  size_t color_count, nyr_mach_regalloc_t *out);
+                                   nyr_mach_reg_class_t reg_class,
+                                   size_t color_count,
+                                   nyr_mach_regalloc_t *out);
 
 typedef struct {
   int64_t label;
@@ -91,12 +95,22 @@ typedef struct {
   char symbol[256];
   size_t disp_off;
   int type;
+  bool is_data;
+  int64_t addend;
 } nyr_x64_obj_reloc_t;
 typedef struct {
   char name[256];
   size_t off;
   size_t size;
   bool is_data;
+  /* NULL when the symbol lives in the default .text/.data section;
+   * non-NULL means the caller asked for a named data section. */
+  const char *section;
+  uint64_t section_flags;
+  size_t alignment;
+  size_t section_entsize;
+  bool function_symbol;
+  bool is_local;
 } nyr_x64_obj_symbol_def_t;
 
 typedef struct {
@@ -108,49 +122,53 @@ typedef struct {
 } nyr_native_debug_line_t;
 
 /* Append one source-map record, growing the caller-owned vector safely. */
-bool nyr_native_debug_line_append(nyr_native_debug_line_t **lines, size_t *count,
-                                 size_t *cap, nyr_native_debug_line_t line);
+bool nyr_native_debug_line_append(nyr_native_debug_line_t **lines,
+                                  size_t *count, size_t *cap,
+                                  nyr_native_debug_line_t line);
 
 bool nyr_native_build_debug_line(const nyr_native_debug_line_t *lines,
-                                size_t line_count, size_t text_len,
-                                nyr_obj_buf_t *out, size_t *base_reloc_offset,
-                                size_t *base_def_index, char *err,
-                                size_t err_len);
+                                 size_t line_count, size_t text_len,
+                                 nyr_obj_buf_t *out, size_t *base_reloc_offset,
+                                 size_t *base_def_index, char *err,
+                                 size_t err_len);
 bool nyr_globaltab_append_defs(nyr_obj_buf_t *code,
-                                     nyr_x64_obj_symbol_def_t *defs,
-                                     size_t *def_count, char *err,
-                                     size_t err_len);
+                               nyr_x64_obj_symbol_def_t *defs,
+                               size_t *def_count, char *err, size_t err_len);
 typedef struct {
   const nyr_inst_t **defs;
   int count;
 } nyr_x64_obj_valmap_t;
 
 /* Append interned pure-native C strings into the code blob as local defs. */
-bool nyr_strtab_append_defs(nyr_obj_buf_t *code,
-                                  nyr_x64_obj_symbol_def_t *defs,
-                                  size_t *def_count, char *err, size_t err_len);
+bool nyr_strtab_append_defs(nyr_obj_buf_t *code, nyr_x64_obj_symbol_def_t *defs,
+                            size_t *def_count, char *err, size_t err_len);
 
 /* Append foldable top-level def constants into the code blob as 8-byte
  * .data definitions (conway's HALF_W, CELL_ALIVE, ...). */
 bool nyr_consttab_append_defs(nyr_obj_buf_t *code,
-                                    nyr_x64_obj_symbol_def_t *defs,
-                                    size_t *def_count, char *err,
-                                    size_t err_len);
+                              nyr_x64_obj_symbol_def_t *defs, size_t *def_count,
+                              char *err, size_t err_len);
 
 /* Append interned constant arrays (list literals) into the code blob as
  * count * 8 bytes of .data definitions. */
 bool nyr_arraytab_append_defs(nyr_obj_buf_t *code,
-                                    nyr_x64_obj_symbol_def_t *defs,
-                                    size_t *def_count, char *err,
-                                    size_t err_len);
+                              nyr_x64_obj_symbol_def_t *defs, size_t *def_count,
+                              char *err, size_t err_len);
 
 typedef struct {
   nyr_obj_buf_t code;
   const ny_native_target_info_t *target;
   const nyr_func_t *nyir;
   nyr_x64_obj_valmap_t valmap;
+  bool bare_syscalls;
+  bool omit_frame_pointer;
+  bool position_independent;
+  bool retpoline_indirect_calls;
+  bool retpoline_inline_calls;
+  size_t temporary_stack_bytes;
   int value_slots, spill_slots, callee_save_slots, local_slots, frame_bytes;
   bool *value_f64, *value_f32, *local_f64, *local_f32;
+  uint8_t *value_i64_vector_lanes;
   bool *value_immediate;
   int8_t *value_reg, *value_xmm;
   int *value_spill;
@@ -224,51 +242,59 @@ void nyr_obj_patch_u16(nyr_obj_buf_t *b, size_t off, uint16_t v);
 void nyr_obj_patch_u32(nyr_obj_buf_t *b, size_t off, uint32_t v);
 void nyr_obj_patch_u64(nyr_obj_buf_t *b, size_t off, uint64_t v);
 bool nyr_elf32_write_sym(nyr_obj_buf_t *b, uint32_t name, uint32_t value,
-                        uint32_t size, unsigned char info, uint16_t shndx);
+                         uint32_t size, unsigned char info, uint16_t shndx);
 bool nyr_elf32_write_sh(nyr_obj_buf_t *b, uint32_t name, uint32_t type,
-                       uint32_t flags, uint32_t off, uint32_t size,
-                       uint32_t link, uint32_t info, uint32_t addralign,
-                       uint32_t entsize);
+                        uint32_t flags, uint32_t off, uint32_t size,
+                        uint32_t link, uint32_t info, uint32_t addralign,
+                        uint32_t entsize);
 
 void nyr_x64_obj_ctx_free(nyr_x64_obj_ctx_t *c);
 bool nyr_x64_obj_emit_code(nyr_x64_obj_ctx_t *c, const nyr_func_t *nyir,
-                          bool tag_return);
+                           bool tag_return);
 int nyr_x64_obj_symbol_index(char symbols[][256], size_t count,
-                            const char *name);
+                             const char *name);
 int nyr_x64_obj_def_index(const nyr_x64_obj_symbol_def_t *defs, size_t count,
-                         const char *name);
+                          const char *name);
 bool nyr_x64_mach_is_f64_operand(const nyr_mach_func_t *mach,
-                                const nyr_mach_operand_t *op);
+                                 const nyr_mach_operand_t *op);
 bool nyr_x64_obj_collect_external_reloc_symbols(
     const nyr_x64_obj_reloc_t *relocs, size_t reloc_count,
     const nyr_x64_obj_symbol_def_t *defs, size_t def_count, char symbols[][256],
     size_t *symbol_count, char *err, size_t err_len);
 bool nyr_x64_obj_collect_reloc_symbols(const nyr_x64_obj_reloc_t *relocs,
-                                      size_t reloc_count, char symbols[][256],
-                                      size_t *symbol_count, char *err,
-                                      size_t err_len);
+                                       size_t reloc_count, char symbols[][256],
+                                       size_t *symbol_count, char *err,
+                                       size_t err_len);
 bool nyr_x64_obj_append_function(nyr_obj_buf_t *code,
-                                nyr_x64_obj_symbol_def_t *defs,
-                                size_t *def_count, nyr_x64_obj_reloc_t *relocs,
-                                size_t *reloc_count, const nyr_func_t *nyir,
-                                const ny_native_target_info_t *target,
-                                const char *symbol, bool tag_return, char *err,
-                                size_t err_len);
+                                 nyr_x64_obj_symbol_def_t *defs,
+                                 size_t *def_count, nyr_x64_obj_reloc_t *relocs,
+                                 size_t *reloc_count, const nyr_func_t *nyir,
+                                 const ny_native_target_info_t *target,
+                                 const char *symbol, bool tag_return, char *err,
+                                 size_t err_len);
+bool nyr_x64_obj_append_function_with_frame(
+    nyr_obj_buf_t *code, nyr_x64_obj_symbol_def_t *defs, size_t *def_count,
+    nyr_x64_obj_reloc_t *relocs, size_t *reloc_count, const nyr_func_t *nyir,
+    const ny_native_target_info_t *target, const char *symbol,
+    bool omit_frame_pointer, bool position_independent,
+    bool retpoline_indirect_calls, bool retpoline_inline_calls, char *err,
+    size_t err_len);
 bool nyr_x64_obj_append_function_debug(
     nyr_obj_buf_t *code, nyr_x64_obj_symbol_def_t *defs, size_t *def_count,
     nyr_x64_obj_reloc_t *relocs, size_t *reloc_count, const nyr_func_t *nyir,
     const ny_native_target_info_t *target, const char *symbol, bool tag_return,
-    const nyr_func_t *source, nyr_native_debug_line_t **debug_lines,
-    size_t *debug_line_count, size_t *debug_line_cap, char *err,
-    size_t err_len);
+    bool bare_syscalls, const nyr_func_t *source,
+    nyr_native_debug_line_t **debug_lines, size_t *debug_line_count,
+    size_t *debug_line_cap, char *err, size_t err_len);
 bool nyr_x64_obj_build_bundle(const nyr_func_t *rt_main,
-                             const nyr_func_t *funcs,
-                             const char *const *func_names, size_t func_count,
-                             const ny_native_target_info_t *target,
-                             const char *entry_symbol, bool tag_return,
-                             nyr_obj_buf_t *code, nyr_x64_obj_symbol_def_t *defs,
-                             size_t *def_count, nyr_x64_obj_reloc_t *relocs,
-                             size_t *reloc_count, char *err, size_t err_len);
+                              const nyr_func_t *funcs,
+                              const char *const *func_names, size_t func_count,
+                              const ny_native_target_info_t *target,
+                              const char *entry_symbol, bool tag_return,
+                              nyr_obj_buf_t *code,
+                              nyr_x64_obj_symbol_def_t *defs, size_t *def_count,
+                              nyr_x64_obj_reloc_t *relocs, size_t *reloc_count,
+                              char *err, size_t err_len);
 
 /* Independence path: encode finalized machine form to bytes (no NYIR encoder).
  */
@@ -282,31 +308,33 @@ bool nyr_native_x64_build_mixed_bundle(
     size_t *def_count, nyr_x64_obj_reloc_t *relocs, size_t *reloc_count,
     char *err, size_t err_len);
 bool nyr_x64_mach_build_bundle(const nyr_mach_func_t *rt_main_mir,
-                              const nyr_mach_func_t *func_mirs,
-                              const char *const *func_names, size_t func_count,
-                              const ny_native_target_info_t *target,
-                              const char *entry_symbol, bool tag_return,
-                              nyr_obj_buf_t *code, nyr_x64_obj_symbol_def_t *defs,
-                              size_t *def_count, nyr_x64_obj_reloc_t *relocs,
-                              size_t *reloc_count, char *err, size_t err_len);
+                               const nyr_mach_func_t *func_mirs,
+                               const char *const *func_names, size_t func_count,
+                               const ny_native_target_info_t *target,
+                               const char *entry_symbol, bool tag_return,
+                               nyr_obj_buf_t *code,
+                               nyr_x64_obj_symbol_def_t *defs,
+                               size_t *def_count, nyr_x64_obj_reloc_t *relocs,
+                               size_t *reloc_count, char *err, size_t err_len);
 bool nyr_x64_mach_append_function(
     nyr_obj_buf_t *code, nyr_x64_obj_symbol_def_t *defs, size_t *def_count,
-    nyr_x64_obj_reloc_t *relocs, size_t *reloc_count, const nyr_mach_func_t *mach,
-    const ny_native_target_info_t *target, const char *symbol, bool tag_return,
-    char *err, size_t err_len);
+    nyr_x64_obj_reloc_t *relocs, size_t *reloc_count,
+    const nyr_mach_func_t *mach, const ny_native_target_info_t *target,
+    const char *symbol, bool tag_return, char *err, size_t err_len);
 bool nyr_x64_mach_append_function_debug(
     nyr_obj_buf_t *code, nyr_x64_obj_symbol_def_t *defs, size_t *def_count,
-    nyr_x64_obj_reloc_t *relocs, size_t *reloc_count, const nyr_mach_func_t *mach,
-    const ny_native_target_info_t *target, const char *symbol, bool tag_return,
+    nyr_x64_obj_reloc_t *relocs, size_t *reloc_count,
+    const nyr_mach_func_t *mach, const ny_native_target_info_t *target,
+    const char *symbol, bool tag_return, bool bare_syscalls,
     const nyr_func_t *source, nyr_native_debug_line_t **debug_lines,
     size_t *debug_line_count, size_t *debug_line_cap, char *err,
     size_t err_len);
 bool nyr_x64_try_stencil_bundle(const nyr_func_t *rt_main,
-                               const ny_native_target_info_t *target,
-                               nyr_obj_buf_t *code,
-                               nyr_x64_obj_symbol_def_t *defs, size_t *def_count,
-                               nyr_x64_obj_reloc_t *relocs, size_t *reloc_count,
-                               char *err, size_t err_len);
+                                const ny_native_target_info_t *target,
+                                nyr_obj_buf_t *code,
+                                nyr_x64_obj_symbol_def_t *defs,
+                                size_t *def_count, nyr_x64_obj_reloc_t *relocs,
+                                size_t *reloc_count, char *err, size_t err_len);
 /* Same as above but folds pure direct calls into helper NYIR bodies (call
  * stencil): when every CALL target is a pure foldable helper, emit const/local
  * shell without emitting the call. */
@@ -315,34 +343,37 @@ bool nyr_x64_try_stencil_bundle_calls(
     const char *const *func_names, size_t func_count,
     const ny_native_target_info_t *target, nyr_obj_buf_t *code,
     nyr_x64_obj_symbol_def_t *defs, size_t *def_count,
-    nyr_x64_obj_reloc_t *relocs, size_t *reloc_count, char *err, size_t err_len);
+    nyr_x64_obj_reloc_t *relocs, size_t *reloc_count, char *err,
+    size_t err_len);
 bool nyr_a64_mach_build_bundle(const nyr_mach_func_t *rt_main_mir,
-                              const nyr_mach_func_t *func_mirs,
+                               const nyr_mach_func_t *func_mirs,
+                               const char *const *func_names, size_t func_count,
+                               const ny_native_target_info_t *target,
+                               const char *entry_symbol, bool tag_return,
+                               nyr_obj_buf_t *code,
+                               nyr_x64_obj_symbol_def_t *defs,
+                               size_t *def_count, nyr_x64_obj_reloc_t *relocs,
+                               size_t *reloc_count, char *err, size_t err_len);
+bool nyr_a64_obj_build_bundle(const nyr_func_t *rt_main,
+                              const nyr_func_t *funcs,
                               const char *const *func_names, size_t func_count,
                               const ny_native_target_info_t *target,
                               const char *entry_symbol, bool tag_return,
-                              nyr_obj_buf_t *code, nyr_x64_obj_symbol_def_t *defs,
-                              size_t *def_count, nyr_x64_obj_reloc_t *relocs,
-                              size_t *reloc_count, char *err, size_t err_len);
-bool nyr_a64_obj_build_bundle(const nyr_func_t *rt_main,
-                             const nyr_func_t *funcs,
-                             const char *const *func_names, size_t func_count,
-                             const ny_native_target_info_t *target,
-                             const char *entry_symbol, bool tag_return,
-                             nyr_obj_buf_t *code, nyr_x64_obj_symbol_def_t *defs,
-                             size_t *def_count, nyr_x64_obj_reloc_t *relocs,
-                             size_t *reloc_count, char *err, size_t err_len);
+                              nyr_obj_buf_t *code,
+                              nyr_x64_obj_symbol_def_t *defs, size_t *def_count,
+                              nyr_x64_obj_reloc_t *relocs, size_t *reloc_count,
+                              char *err, size_t err_len);
 
 void nyr_i386_obj_ctx_free(nyr_i386_obj_ctx_t *c);
 bool nyr_i386_obj_emit_code(nyr_i386_obj_ctx_t *c, const nyr_func_t *nyir,
-                           bool tag_return);
+                            bool tag_return);
 int nyr_i386_obj_symbol_index(char symbols[][256], size_t count,
-                             const char *name);
+                              const char *name);
 int nyr_i386_obj_def_index(const nyr_i386_obj_symbol_def_t *defs, size_t count,
-                          const char *name);
+                           const char *name);
 bool nyr_i386_obj_collect_external_reloc_symbols(
     const nyr_i386_obj_reloc_t *relocs, size_t reloc_count,
-    const nyr_i386_obj_symbol_def_t *defs, size_t def_count, char symbols[][256],
-    size_t *symbol_count, char *err, size_t err_len);
+    const nyr_i386_obj_symbol_def_t *defs, size_t def_count,
+    char symbols[][256], size_t *symbol_count, char *err, size_t err_len);
 
 #endif

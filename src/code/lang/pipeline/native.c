@@ -1,19 +1,19 @@
 #include "code/lang/pipeline/native.h"
-#include "code/lang/pipeline/legacy_backend.h"
-#include "code/lang/pipeline/native_vm.h"
+#include "code/backend/ast.h"
+#include "code/lang/pipeline/vm.h"
 
 #include "code/backend/internal.h"
 #include "code/backend/ir/internal.h"
 #include "code/backend/ir/module.h"
 #include "code/backend/llvm/bridge.h"
 #include "code/backend/native.h"
+#include "code/backend/runtime/runtime.h"
+#include "code/backend/runtime/shared.h"
 #include "code/backend/wire/cache.h"
 #include "code/lang/code.h"
 #include "code/lang/llvm/jit.h"
 #include "code/lang/lower.h"
 #include "code/lang/priv.h"
-#include "code/lang/runtime/runtime.h"
-#include "code/lang/runtime/shared.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -41,7 +41,7 @@ static void *ny_pipeline_resolve_runtime_symbol(void *userdata,
 #define RT_GV(public_name, implementation, type, doc)                          \
   if (strcmp(name, public_name) == 0 || strcmp(name, #implementation) == 0)    \
     return (void *)&implementation;
-#include "code/lang/runtime/defs.h"
+#include "code/backend/runtime/defs.h"
 #undef RT_GV
 #undef RT_DEF_F64
 #undef RT_DEF
@@ -50,6 +50,7 @@ static void *ny_pipeline_resolve_runtime_symbol(void *userdata,
     return (void *)(uintptr_t)(implementation);
   NY_RUNTIME_HELPER("rt_malloc_i64", rt_malloc_i64)
   NY_RUNTIME_HELPER("rt_malloc_raw_i64", rt_malloc_raw_i64)
+  NY_RUNTIME_HELPER("rt_calloc_raw_i64", rt_calloc_raw_i64)
   NY_RUNTIME_HELPER("rt_ptr_add_i64", rt_ptr_add_i64)
   NY_RUNTIME_HELPER("rt_ptr_sub_i64", rt_ptr_sub_i64)
   NY_RUNTIME_HELPER("rt_simmd_bswap32_i64", rt_simmd_bswap32_i64)
@@ -366,17 +367,23 @@ static const char *ny_pipeline_llvm_origin_section(void *userdata_ptr,
   return NULL;
 }
 
-static LLVMMetadataRef ny_pipeline_llvm_debug_scope(void *userdata,
-                                                    const char *filename,
-                                                    unsigned line,
-                                                    unsigned column) {
+static LLVMMetadataRef
+ny_pipeline_llvm_debug_scope(void *userdata, LLVMMetadataRef parent_scope,
+                             const char *filename, unsigned line,
+                             unsigned column) {
   ny_pipeline_llvm_userdata_t *pipeline = userdata;
   codegen_t *cg = pipeline ? pipeline->cg : NULL;
   token_t tok = {0};
   tok.filename = filename;
   tok.line = (int)line;
   tok.col = (int)column;
-  return codegen_debug_loc_scope(cg, tok);
+  if (!cg)
+    return NULL;
+  LLVMMetadataRef previous_scope = cg->di_scope;
+  cg->di_scope = parent_scope;
+  LLVMMetadataRef scope = codegen_debug_loc_scope(cg, tok);
+  cg->di_scope = previous_scope;
+  return scope;
 }
 
 static LLVMMetadataRef
@@ -395,8 +402,19 @@ ny_pipeline_llvm_debug_subprogram(void *userdata, LLVMValueRef function,
 static LLVMValueRef ny_pipeline_llvm_global_symbol(void *userdata,
                                                    const char *name) {
   ny_pipeline_llvm_userdata_t *pipeline = userdata;
-  return codegen_emit_string_or_array_global(pipeline ? pipeline->cg : NULL,
-                                             name);
+  codegen_t *cg = pipeline ? pipeline->cg : NULL;
+  LLVMValueRef symbol = codegen_emit_string_or_array_global(cg, name);
+  if (!symbol && cg) {
+    int64_t initial = 0;
+    if (nyr_consttab_get(name, &initial)) {
+      symbol = LLVMAddGlobal(cg->module, cg->type_i64, name);
+      LLVMSetInitializer(symbol,
+                         LLVMConstInt(cg->type_i64, (uint64_t)initial, false));
+      LLVMSetLinkage(symbol, LLVMPrivateLinkage);
+      LLVMSetAlignment(symbol, 8);
+    }
+  }
+  return symbol;
 }
 
 bool ny_pipeline_emit_llvm_program(codegen_t *cg, const program_t *program,
@@ -531,6 +549,31 @@ bool ny_pipeline_emit_llvm_program(codegen_t *cg, const program_t *program,
         .userdata = &pipeline_userdata,
     };
     ok = ny_llvm_emit_nyir_module(&context, &module, err, err_len);
+    if (ok) {
+      /*
+       * Signature collection may have installed zero-filled storage before
+       * NYIR emission resolves its address. Match native object data for
+       * foldable scalar initializers, including mutable imported globals.
+       */
+      for (LLVMValueRef global = LLVMGetFirstGlobal(cg->module); global;
+           global = LLVMGetNextGlobal(global)) {
+        int64_t initial = 0;
+        const char *name = LLVMGetValueName(global);
+        if (!LLVMGetInitializer(global) || !nyr_consttab_get(name, &initial))
+          continue;
+        LLVMTypeRef type = LLVMGlobalGetValueType(global);
+        LLVMValueRef value =
+            LLVMConstInt(cg->type_i64, (uint64_t)initial, false);
+        if (type == cg->type_f64)
+          value = LLVMConstBitCast(value, type);
+        else if (type == cg->type_f32)
+          value = LLVMConstBitCast(
+              LLVMConstTrunc(value, LLVMInt32TypeInContext(cg->ctx)), type);
+        else if (type != cg->type_i64)
+          continue;
+        LLVMSetInitializer(global, value);
+      }
+    }
     ny_pipeline_origin_index_dispose(&pipeline_userdata);
   }
   if (trace_emit_timing) {
@@ -623,6 +666,17 @@ bool ny_pipeline_eval_ir_for_program(const program_t *prog,
     free(names);
     return false;
   }
+  if (opt && opt->vm_disasm &&
+      !nyr_dump_program_instructions(stderr, &rt_main, "rt_main", funcs, names,
+                                     count, opt->vm_disasm_filter)) {
+    nyr_set_error(err, err_len, "VM disassembler output failed");
+    nyr_ir_func_free(&rt_main);
+    for (size_t i = 0; i < count; ++i)
+      nyr_ir_func_free(&funcs[i]);
+    free(funcs);
+    free(names);
+    return false;
+  }
   nyr_eval_globals_clear();
   bool ok = ny_lang_run_ir(&rt_main, funcs, names, count, opt, "rt_main", err,
                            err_len);
@@ -638,6 +692,14 @@ bool ny_pipeline_eval_ir_binary_file(const char *path,
                                      const ny_options *options, char *err,
                                      size_t err_len) {
   return ny_lang_eval_ir_binary_file(path, options, err, err_len);
+}
+
+bool ny_pipeline_emit_ir_binary_file(const char *input_path,
+                                     const char *output_path,
+                                     const ny_options *options, char *err,
+                                     size_t err_len) {
+  return ny_lang_emit_ir_binary_file(input_path, output_path, options, err,
+                                     err_len);
 }
 
 static bool ny_native_stmt_in_dump_scope(const ny_options *opt,
@@ -673,6 +735,42 @@ static bool ny_native_program_dump_view(const program_t *prog,
   return true;
 }
 
+bool ny_pipeline_dump_vm_ir_for_program(const program_t *prog,
+                                        const ny_options *opt, char *err,
+                                        size_t err_len) {
+  if (!opt || !opt->vm_disasm || opt->nyr_run || opt->nyr_run_bin_path)
+    return true;
+  nyr_func_t entry = {0};
+  size_t function_cap = NYR_BUNDLE_MAX_FUNCS;
+  nyr_func_t *functions = calloc(function_cap, sizeof(*functions));
+  const char **names = calloc(function_cap, sizeof(*names));
+  size_t function_count = 0;
+  if (!functions || !names) {
+    free(functions);
+    free(names);
+    nyr_set_error(err, err_len,
+                  "VM disassembler function pool allocation failed");
+    return false;
+  }
+  bool previous_preserve_phis = nyr_get_preserve_phis();
+  if (opt->nyr_run)
+    nyr_set_preserve_phis(true);
+  bool built = nyr_build_ir(prog, opt, &entry, functions, &function_count,
+                            names, function_cap, err, err_len);
+  nyr_set_preserve_phis(previous_preserve_phis);
+  bool dumped = built && nyr_dump_program_instructions(
+                             stderr, &entry, "rt_main", functions, names,
+                             function_count, opt->vm_disasm_filter);
+  if (built && !dumped)
+    nyr_set_error(err, err_len, "VM disassembler output failed");
+  nyr_ir_func_free(&entry);
+  for (size_t i = 0; i < function_count; ++i)
+    nyr_ir_func_free(&functions[i]);
+  free(functions);
+  free(names);
+  return built && dumped;
+}
+
 bool ny_pipeline_dump_ir_for_program(const program_t *prog,
                                      const ny_options *opt, char *err,
                                      size_t err_len) {
@@ -688,6 +786,7 @@ bool ny_pipeline_dump_ir_for_program(const program_t *prog,
     return false;
   bool run_binary_after_dump = opt->nyr_run && opt->nyr_run_bin_path &&
                                opt->nyr_run_bin_path[0] && opt->nyr_dump_bin;
+
   /*
    * Emit-only is used by callers that request an artifact/preflight while
    * selecting NYIR as the execution backend. It must build and verify the
@@ -720,7 +819,7 @@ bool ny_pipeline_dump_ir_for_program(const program_t *prog,
     if (!bok) {
       /*
        * A named dump is an interchange artifact, not a best-effort log. Do
-       * not leave an empty or partial file that a later --nyir-run-bin call
+       * not leave an empty or partial file that a later --nyr-run-bin call
        * could treat as the requested program.
        */
       if (opt->nyr_dump_bin_path && opt->nyr_dump_bin_path[0])
@@ -732,8 +831,8 @@ bool ny_pipeline_dump_ir_for_program(const program_t *prog,
     if (run_binary_after_dump) {
       if (!opt->nyr_dump_bin_path || !opt->nyr_dump_bin_path[0]) {
         nyr_set_error(err, err_len,
-                      "native NYIR VM: --nyir-run-bin with same-process "
-                      "dump requires --nyir-dump-bin=PATH");
+                      "native NYR VM: --nyr-run-bin with same-process "
+                      "dump requires --dump-nyr=PATH");
         return false;
       }
       if (!ny_pipeline_eval_ir_binary_file(opt->nyr_run_bin_path, opt, err,
@@ -744,7 +843,7 @@ bool ny_pipeline_dump_ir_for_program(const program_t *prog,
       /*
        * The just-written NYIP bundle contains multiple NYIR members. Its
        * metadata is the same freshly-built program view, while the legacy
-       * --nyir-metadata-bin reader accepts one NYIR member. Avoid reopening
+       * --nyr-metadata-bin reader accepts one NYR member. Avoid reopening
        * a multi-function bundle through that single-function compatibility
        * reader.
        */
